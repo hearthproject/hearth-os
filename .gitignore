@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build and test output
+dist/
+coverage/
+*.tsbuildinfo
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Hearth runtime data
+.hearth/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# OS files
+.DS_Store
+Thumbs.db
