@@ -1,0 +1,432 @@
+:root {
+  --vp-font-family-base: 'Inter', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', sans-serif;
+  --vp-font-family-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono',
+    monospace;
+
+  --vp-c-brand-1: #c9562e;
+  --vp-c-brand-2: #df7042;
+  --vp-c-brand-3: #a94321;
+  --vp-c-brand-soft: rgba(201, 86, 46, 0.13);
+  --vp-c-brand-softer: rgba(201, 86, 46, 0.07);
+
+  --vp-c-bg: #fbf8f2;
+  --vp-c-bg-alt: #f3ede3;
+  --vp-c-bg-soft: #efe7db;
+  --vp-c-bg-elv: #fffdf9;
+
+  --vp-c-text-1: #211e1a;
+  --vp-c-text-2: #5f5850;
+  --vp-c-text-3: #8c8377;
+  --vp-c-divider: #e5dccf;
+  --vp-c-gutter: #eee6da;
+
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(
+    118deg,
+    #b74822 0%,
+    #d96a3d 38%,
+    #e3a14f 72%,
+    #687d58 100%
+  );
+
+  --vp-layout-max-width: 1440px;
+  --vp-sidebar-width: 292px;
+}
+
+.dark {
+  --vp-c-brand-1: #ee8a5a;
+  --vp-c-brand-2: #f2a174;
+  --vp-c-brand-3: #d66f40;
+  --vp-c-brand-soft: rgba(238, 138, 90, 0.14);
+  --vp-c-brand-softer: rgba(238, 138, 90, 0.08);
+
+  --vp-c-bg: #12110f;
+  --vp-c-bg-alt: #181613;
+  --vp-c-bg-soft: #201c18;
+  --vp-c-bg-elv: #181613;
+
+  --vp-c-text-1: #f0e9de;
+  --vp-c-text-2: #b9b0a4;
+  --vp-c-text-3: #82786c;
+  --vp-c-divider: #302b25;
+  --vp-c-gutter: #23201b;
+}
+
+* {
+  scrollbar-color: var(--vp-c-divider) transparent;
+}
+
+::selection {
+  background: rgba(223, 112, 66, 0.24);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background:
+    radial-gradient(circle at 8% -10%, rgba(223, 112, 66, 0.07), transparent 28%),
+    var(--vp-c-bg);
+}
+
+.dark body {
+  background:
+    radial-gradient(circle at 8% -10%, rgba(238, 138, 90, 0.07), transparent 26%),
+    var(--vp-c-bg);
+}
+
+.VPNavBarTranslations {
+  display: none !important;
+}
+
+.VPNavBar {
+  background: color-mix(in srgb, var(--vp-c-bg) 86%, transparent) !important;
+  backdrop-filter: blur(18px);
+}
+
+.VPNavBar .container {
+  max-width: 1240px;
+}
+
+.VPNavBarTitle .title {
+  font-weight: 720;
+  letter-spacing: -0.03em;
+}
+
+.VPNavBarMenuLink {
+  font-size: 13px;
+  font-weight: 560;
+}
+
+.VPNavBarMenuLink.active,
+.VPNavBarMenuLink:hover {
+  color: var(--vp-c-brand-1);
+}
+
+.VPSidebar {
+  background: color-mix(in srgb, var(--vp-c-bg-alt) 70%, transparent) !important;
+}
+
+.VPSidebarItem.level-0 > .item > .text {
+  color: var(--vp-c-text-3);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.VPSidebarItem.level-1 .link {
+  border-radius: 7px;
+  padding: 5px 8px;
+  transition: color 0.18s ease, background 0.18s ease;
+}
+
+.VPSidebarItem.level-1 .link:hover {
+  background: var(--vp-c-brand-softer);
+}
+
+.VPSidebarItem.level-1.is-active > .item .link {
+  background: var(--vp-c-brand-soft);
+  color: var(--vp-c-brand-1);
+  font-weight: 620;
+}
+
+.VPDoc .container {
+  max-width: 1320px;
+}
+
+.VPDoc .content-container {
+  max-width: 860px;
+}
+
+.VPDocAsideOutline {
+  border-left-color: var(--vp-c-divider);
+}
+
+.VPDocAsideOutline .outline-marker {
+  background: var(--vp-c-brand-1);
+}
+
+.VPDocAsideOutline .outline-link.active,
+.VPDocAsideOutline .outline-link:hover {
+  color: var(--vp-c-brand-1);
+}
+
+.vp-doc h1 {
+  margin-bottom: 18px;
+  font-size: clamp(34px, 4vw, 48px);
+  font-weight: 540;
+  letter-spacing: -0.04em;
+  line-height: 1.16;
+}
+
+.vp-doc h2 {
+  margin-top: 54px;
+  padding-top: 26px;
+  border-top: 1px solid var(--vp-c-divider);
+  font-size: 27px;
+  font-weight: 560;
+  letter-spacing: -0.025em;
+}
+
+.vp-doc h3 {
+  margin-top: 32px;
+  font-size: 19px;
+  font-weight: 620;
+}
+
+.vp-doc p,
+.vp-doc li {
+  line-height: 1.88;
+}
+
+.vp-doc p {
+  color: var(--vp-c-text-2);
+}
+
+.vp-doc strong {
+  color: var(--vp-c-text-1);
+}
+
+.vp-doc a {
+  text-decoration-color: color-mix(in srgb, var(--vp-c-brand-1) 36%, transparent);
+  text-underline-offset: 3px;
+}
+
+.vp-doc a:hover {
+  text-decoration-color: var(--vp-c-brand-1);
+}
+
+.vp-doc :not(pre) > code {
+  border: 1px solid var(--vp-c-divider);
+  background: var(--vp-c-bg-soft);
+  color: var(--vp-c-brand-3);
+}
+
+.dark .vp-doc :not(pre) > code {
+  color: var(--vp-c-brand-1);
+}
+
+.vp-doc div[class*='language-'] {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 12px;
+  background: var(--vp-c-bg-alt);
+}
+
+.vp-doc blockquote {
+  margin: 22px 0;
+  padding: 16px 20px;
+  border-left: 2px solid var(--vp-c-brand-1);
+  background: var(--vp-c-brand-softer);
+  color: var(--vp-c-text-2);
+}
+
+.vp-doc blockquote > p {
+  margin: 0;
+}
+
+.vp-doc table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 10px;
+  font-size: 13px;
+}
+
+.vp-doc tr {
+  background: transparent;
+}
+
+.vp-doc tr:nth-child(2n) {
+  background: color-mix(in srgb, var(--vp-c-bg-soft) 56%, transparent);
+}
+
+.vp-doc th,
+.vp-doc td {
+  padding: 10px 13px;
+  border: 0;
+  border-bottom: 1px solid var(--vp-c-divider);
+  text-align: left;
+  vertical-align: top;
+}
+
+.vp-doc th {
+  background: var(--vp-c-bg-soft);
+  color: var(--vp-c-text-1);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.vp-doc tr:last-child td {
+  border-bottom: 0;
+}
+
+.vp-doc .custom-block {
+  border-radius: 12px;
+}
+
+.vp-doc .lead {
+  max-width: 760px;
+  margin: 0 0 36px;
+  color: var(--vp-c-text-2);
+  font-size: 17px;
+  line-height: 1.85;
+}
+
+.vp-doc .eyebrow {
+  margin: 0 0 14px;
+  color: var(--vp-c-brand-1);
+  font-family: var(--vp-font-family-mono);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.vp-doc .page-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: -8px 0 26px;
+  color: var(--vp-c-text-3);
+  font-family: var(--vp-font-family-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.vp-doc .section-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 22px 0 30px;
+}
+
+.vp-doc .section-grid > * {
+  padding: 16px 18px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 11px;
+  background: var(--vp-c-bg-alt);
+}
+
+.vp-doc .section-grid strong {
+  display: block;
+  margin-bottom: 5px;
+}
+
+.VPHome {
+  background:
+    radial-gradient(circle at 78% 8%, rgba(223, 112, 66, 0.1), transparent 26%),
+    radial-gradient(circle at 12% 14%, rgba(104, 125, 88, 0.06), transparent 24%);
+}
+
+.VPHero {
+  padding-top: 56px !important;
+}
+
+.VPHero .container {
+  max-width: 1152px;
+}
+
+.VPHero .main {
+  max-width: 760px;
+}
+
+.VPHero .name {
+  font-size: clamp(56px, 8vw, 96px);
+  font-weight: 720;
+  letter-spacing: -0.07em;
+  line-height: 0.98;
+}
+
+.VPHero .text {
+  max-width: 760px;
+  margin-top: 18px;
+  font-size: clamp(30px, 4.5vw, 54px);
+  font-weight: 540;
+  letter-spacing: -0.045em;
+  line-height: 1.13;
+  text-wrap: balance;
+}
+
+.VPHero .tagline {
+  max-width: 620px;
+  margin-top: 22px;
+  color: var(--vp-c-text-2);
+  font-size: 16px;
+  line-height: 1.85;
+  text-wrap: pretty;
+}
+
+.VPHero .actions {
+  margin-top: 30px;
+}
+
+.VPHero .action .VPButton {
+  border-radius: 999px;
+  padding: 0 22px;
+}
+
+.VPHero .image {
+  max-width: 480px;
+}
+
+.VPHero .image-bg {
+  background: radial-gradient(circle, rgba(223, 112, 66, 0.2), transparent 64%);
+  filter: blur(20px);
+}
+
+.VPHome .VPFeature {
+  border-color: var(--vp-c-divider);
+  background: var(--vp-c-bg-alt);
+}
+
+.VPFooter {
+  border-top: 1px solid var(--vp-c-divider);
+  background: transparent;
+}
+
+@media (max-width: 960px) {
+  .VPHero {
+    padding-top: 32px !important;
+  }
+
+  .VPHero .image {
+    max-width: 380px;
+  }
+
+  .vp-doc .section-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .VPHero .name {
+    font-size: 58px;
+  }
+
+  .VPHero .text {
+    font-size: 34px;
+  }
+
+  .VPHero .tagline {
+    font-size: 14px;
+  }
+
+  .vp-doc h1 {
+    font-size: 34px;
+  }
+
+  .vp-doc h2 {
+    font-size: 24px;
+  }
+
+  .vp-doc table {
+    font-size: 12px;
+  }
+}
