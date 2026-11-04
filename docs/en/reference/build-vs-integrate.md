@@ -133,7 +133,7 @@ It does not want to reinvent models, containers, browsers, or document parsers; 
 
 ## Sources in the original text
 
-- Build vs Integrate: `Hearth_个人Agent_OS_总体路线图_v3.md:280`
+- Build vs Integrate: complete master document, line 280
 - Sandbox boundary: `:2019`
 - Recommended tech stack: `:3848`
 - Final judgment: `:4256`
@@ -331,9 +331,9 @@ This is also the dividing line between Hearth and a “Codex wrapper”: a wrapp
 
 ## Additional references
 
-- Hearth's Codex positioning and Build vs Integrate: `Hearth_个人Agent_OS_总体路线图_v3.md`, sections 2.3–2.4
-- Hearth's final integration boundary: `Hearth_个人Agent_OS_总体路线图_v3.md`, section 29.5
-- MVP and the 0-to-100 development sequence: `Hearth_个人Agent_OS_总体路线图_v3.md`, chapter 25
+- Hearth's Codex positioning and Build vs Integrate: complete master document, sections 2.3–2.4
+- Hearth's final integration boundary: complete master document, section 29.5
+- MVP and the 0-to-100 development sequence: complete master document, chapter 25
 - OpenClaw Gateway, channels, and device nodes: local OpenClaw documentation `docs/concepts/architecture.md`
 - OpenClaw audit ledger and execution identity: local OpenClaw documentation `docs/gateway/audit.md`
 - OpenClaw sandbox backends: local OpenClaw documentation `docs/gateway/sandboxing.md`

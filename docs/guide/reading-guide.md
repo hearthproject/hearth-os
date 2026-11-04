@@ -1,6 +1,6 @@
 ---
 title: '阅读指南'
-description: 'Hearth 文档的三条阅读路径、文档约定、站点地图与版本来源。'
+description: 'Hearth 文档的三条阅读路径、文档约定、站点地图与来源维护。'
 outline: [2, 3]
 ---
 
@@ -45,8 +45,8 @@ outline: [2, 3]
 
 适合已经准备建仓库、需要找到第一个纵向切片时阅读：
 
-1. [MVP 定义](/delivery/development-plan)
-2. [Stage 1 增量](/delivery/development-plan)
+1. [Stage 0 · 定义与原型](/delivery/stage-0)
+2. [Stage 1 · 持久内核与 MVP](/delivery/stage-1)
 3. [持久执行与恢复](/architecture/durable-execution)
 4. [Codex Executor](/architecture/executor-catalog)
 5. [工程交付与仓库结构](/delivery/engineering)
@@ -69,6 +69,6 @@ outline: [2, 3]
 | [交付路线](/delivery/) | Stage 0–6、0–100 计划、工程、风险、ADR |
 | [参考](/reference/) | 自研边界、术语、清单、FAQ、贡献、完整归档 |
 
-## 版本与来源
+## 来源与维护
 
-当前文档整理自 **Hearth 个人 Agent OS 总体路线图 v3.2**（2026-11-03）。如果页面与归档主文档出现差异，以归档主文档和仓库提交历史为准；发现结构问题请提交 PR 或在仓库 Issue 中说明。
+本站内容整理自 Hearth 个人 Agent OS 总体路线图，原始资料归档在仓库的 `sources/roadmap/`。如果页面与归档主文档出现差异，以归档主文档和仓库提交历史为准；发现结构问题请提交 PR 或在仓库 Issue 中说明。

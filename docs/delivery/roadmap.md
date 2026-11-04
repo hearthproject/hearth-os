@@ -52,6 +52,8 @@ outline: [2, 3]
 
 ### Stage 0：定义、原型与基线
 
+开发模块：[Stage 0 · 定义与原型](/delivery/stage-0)
+
 **目标：** 在进入真实实现前，把产品、交互、协议和验收钉住。Stage 0 不是纯文档阶段，必须产出一个可点击的端到端产品原型。
 
 交付：
@@ -79,6 +81,8 @@ outline: [2, 3]
 - 已决定 Stage 1 不自研 Sandbox 内核。
 
 ### Stage 1：Durable Personal Kernel 与 MVP
+
+开发模块：[Stage 1 · 持久内核与 MVP](/delivery/stage-1)
 
 **目标：** 证明一个个人 Agent 可以本地常驻、可中断、可恢复、可审批、可审计地完成真实任务，并尽早形成一个每天可用的最小产品。
 
@@ -128,6 +132,8 @@ outline: [2, 3]
 
 ### Stage 2：Personal Operator
 
+开发模块：[Stage 2 · Personal Operator](/delivery/stage-2)
+
 **目标：** 从“会做文件任务”扩展到“能做大多数日常数字内容工作”。
 
 范围：
@@ -154,6 +160,8 @@ outline: [2, 3]
 
 ### Stage 3：Computer Operator
 
+开发模块：[Stage 3 · Computer Operator](/delivery/stage-3)
+
 **目标：** 覆盖没有 API 的桌面软件和跨应用流程。
 
 范围：
@@ -175,6 +183,8 @@ outline: [2, 3]
 - Token 和人工分钟在可接受范围。
 
 ### Stage 4：Proactive Personal Agent
+
+开发模块：[Stage 4 · 主动个人 Agent](/delivery/stage-4)
 
 **目标：** 让 Hearth 在有限授权内主动工作，同时保持低打扰。
 
@@ -200,6 +210,8 @@ outline: [2, 3]
 
 ### Stage 5：Memory OS 与 Evolution OS
 
+开发模块：[Stage 5 · 记忆与进化](/delivery/stage-5)
+
 **目标：** 让系统真正积累个人上下文，并能安全地改进方法。
 
 范围：
@@ -223,6 +235,8 @@ outline: [2, 3]
 - 用户能理解系统为什么这样做。
 
 ### Stage 6：Personal Agent OS
+
+开发模块：[Stage 6 · 多设备与长期运行](/delivery/stage-6)
 
 **目标：** 多设备、长期驻留、可迁移、可自托管。
 

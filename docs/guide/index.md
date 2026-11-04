@@ -7,7 +7,7 @@ outline: [2, 3]
 <script setup>
 const cards = [
   { no: '01', title: '认识 Hearth', text: '一句话定位、目标用户、产品边界，以及它为什么不是另一个 Codex。', link: '/guide/what-is-hearth' },
-  { no: '02', title: '阅读指南', text: '三条阅读路径、站点地图和 v3.2 文档约定。', link: '/guide/reading-guide' },
+  { no: '02', title: '阅读指南', text: '三条阅读路径、站点地图和文档约定。', link: '/guide/reading-guide' },
   { no: '03', title: '项目状态', text: '当前处于规格阶段，了解已完成内容、未开始部分和下一步。', link: '/guide/project-status' }
 ]
 </script>
@@ -24,7 +24,7 @@ const cards = [
 
 Hearth 的核心不是“再做一个模型”，而是任务控制、持久执行、记忆、验证、审批、回执和安静的任务卡体验。它把个人数字劳动变成一条可审计、可恢复、可验证的执行链。
 
-本版路线图有三条最重要的变化：
+当前路线图有三条最重要的原则：
 
 1. **先做最小产品，再做完整 OS。** Stage 1 内部就要出现每天可用的 MVP。
 2. **前端从第一天存在。** 每个增量都必须有用户可见路径、验证和恢复。
@@ -36,7 +36,7 @@ Hearth 的核心不是“再做一个模型”，而是任务控制、持久执�
 |---|---|---|
 | 产品与决策 | 判断是否继续投入、需要理解范围与风险 | [产品定义](/product/definition) → [路线图](/delivery/roadmap) → [开发计划](/delivery/development-plan) → [风险](/delivery/risks) |
 | 架构与技术 | 准备开始实现、需要检查系统边界 | [架构总览](/architecture/) → [领域协议](/architecture/domain-model) → [控制面](/architecture/control-plane) → [执行器](/architecture/executor-model) → [评估](/architecture/evaluation) |
-| 直接开工 | 已经准备建仓库、需要找到第一个纵向切片 | [MVP 定义](/delivery/development-plan) → [持久执行](/architecture/durable-execution) → [Codex Executor](/architecture/executor-catalog) |
+| 直接开工 | 已经准备建仓库、需要找到第一个纵向切片 | [Stage 0](/delivery/stage-0) → [Stage 1](/delivery/stage-1) → [持久执行](/architecture/durable-execution) → [Codex Executor](/architecture/executor-catalog) |
 
 ## 文档结构
 

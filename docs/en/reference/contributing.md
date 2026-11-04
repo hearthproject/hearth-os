@@ -61,7 +61,7 @@ npm run docs:preview
 
 ## Documentation Source of Truth
 
-This folder is the readable version of v3.2; the [full roadmap archive](/en/reference/full-roadmap) retains the original long-form document. If discrepancies arise between the two, the full master document and the repository commit history take precedence, and the reason for restructuring should be explained in the PR.
+This site is the readable edition of the original roadmap; the [full roadmap archive](/en/reference/full-roadmap) retains the original long-form document. If discrepancies arise between the two, the full master document and the repository commit history take precedence, and the reason for restructuring should be explained in the PR.
 
 ## License
 

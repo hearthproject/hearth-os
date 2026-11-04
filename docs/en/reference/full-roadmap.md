@@ -1,13 +1,13 @@
 ---
 title: 'Complete Roadmap (Archived)'
-description: 'Complete archive of the Hearth Personal Agent OS master roadmap v3.2.'
+description: 'Complete archive of the Hearth Personal Agent OS master roadmap.'
 outline: false
 pageClass: archive-page
 ---
 
 <p class="eyebrow">ARCHIVE</p>
 
-# Complete Roadmap (v3.2 Archive)
+# Complete Roadmap (Archive)
 
 <p class="lead">This is the archived version of the complete main document, retaining all original details. For everyday reading, use the topic-reorganized chapter pages.</p>
 

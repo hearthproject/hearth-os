@@ -133,7 +133,7 @@ Hearth 自己做“指挥系统、账本、门禁和验收”，集成“模型�
 
 ## 原文依据
 
-- Build vs Integrate：`Hearth_个人Agent_OS_总体路线图_v3.md:280`
+- Build vs Integrate：完整主文档第 280 行
 - Sandbox 边界：`:2019`
 - 推荐技术栈：`:3848`
 - 最终判断：`:4256`
@@ -331,9 +331,9 @@ Codex 可以作为 Hearth 的“高能力工作区执行器”，而且现在就
 
 ## 补充依据
 
-- Hearth 的 Codex 定位与 Build vs Integrate：`Hearth_个人Agent_OS_总体路线图_v3.md` 第 2.3–2.4 节
-- Hearth 最终集成边界：`Hearth_个人Agent_OS_总体路线图_v3.md` 第 29.5 节
-- MVP 与从 0 到 100 的开发顺序：`Hearth_个人Agent_OS_总体路线图_v3.md` 第 25 章
+- Hearth 的 Codex 定位与 Build vs Integrate：完整主文档第 2.3–2.4 节
+- Hearth 最终集成边界：完整主文档第 29.5 节
+- MVP 与从 0 到 100 的开发顺序：完整主文档第 25 章
 - OpenClaw Gateway、渠道和设备节点：本机 OpenClaw 文档 `docs/concepts/architecture.md`
 - OpenClaw 审计账本与执行身份：本机 OpenClaw 文档 `docs/gateway/audit.md`
 - OpenClaw 沙箱后端：本机 OpenClaw 文档 `docs/gateway/sandboxing.md`

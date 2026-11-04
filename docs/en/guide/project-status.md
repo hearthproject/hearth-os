@@ -10,11 +10,11 @@ outline: [2, 3]
 
 <p class="lead">Hearth is currently in the specification and roadmap stage. The repository already contains a complete product, architecture, security, evaluation, and delivery plan, but implementation has not yet begun.</p>
 
-## Current Version
+## Documentation and Project Status
 
 | Item | Status |
 |---|---|
-| Documentation version | v3.2 |
+| Documentation source | Curated product, architecture, security, and delivery roadmap |
 | Repository | `hearthproject/hearth-os` |
 | Phase | Specification & planning |
 | Implementation | Not yet started |

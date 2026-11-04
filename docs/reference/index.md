@@ -1,6 +1,6 @@
 ---
 title: '参考总览'
-description: 'Hearth 参考与附录入口：自研边界、术语、清单、FAQ、贡献与完整路线图归档。'
+description: 'Hearth 参考与附录入口：自研边界、术语、清单、FAQ、贡献、来源覆盖与完整路线图归档。'
 outline: [2, 3]
 ---
 
@@ -11,7 +11,8 @@ const cards = [
   { no: '03', title: '默认清单', text: '默认审批清单、默认完成清单与任务覆盖的最终定义。', link: '/reference/checklists' },
   { no: '04', title: '常见问题', text: 'Hearth 与 Coding Agent、Codex 套壳、Stage 1、副作用、进化和多用户的关系。', link: '/reference/faq' },
   { no: '05', title: '参与贡献与文档维护', text: '仓库结构、本地开发、写作约定、PR 检查清单与事实源。', link: '/reference/contributing' },
-  { no: '06', title: '完整路线图（归档）', text: 'v3.2 完整主文档，保留全部原始细节，适合检索和引用。', link: '/reference/full-roadmap' }
+  { no: '06', title: '文档来源与覆盖', text: '原始主文档、十个分册、自研边界和分册 README 到站点页面的逐项映射。', link: '/reference/source-map' },
+  { no: '07', title: '完整路线图（归档）', text: '完整主文档，保留全部原始细节，适合检索和引用。', link: '/reference/full-roadmap' }
 ]
 </script>
 
@@ -30,6 +31,6 @@ const cards = [
 - 讨论术语时，使用[术语表](/reference/glossary)中的定义，避免同名异义；
 - 讨论阶段推进时，使用[路线图](/delivery/roadmap)和[风险](/delivery/risks)中的退出条件。
 
-## 版本
+## 来源与维护
 
-当前文档对应 **v3.2**。完整归档与主题页面之间如有差异，以完整主文档和仓库提交历史为准，并在 PR 中说明重组理由。
+本站由原始路线图整理而来。完整归档与主题页面之间如有差异，以完整主文档和仓库提交历史为准；[文档来源与覆盖](/reference/source-map)列出全部映射关系。

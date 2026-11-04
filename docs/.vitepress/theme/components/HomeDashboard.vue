@@ -7,14 +7,41 @@ const isEnglish = computed(() => lang.value.startsWith('en'))
 
 const copy = {
   zh: {
-    statusLabel: '当前阶段',
-    statusValue: '规格与路线图',
-    statusDetail: '实现尚未开始 · Stage 0 即将启动',
-    stats: [
-      { value: '7', label: '架构平面' },
-      { value: '7', label: '能力阶段' },
-      { value: '8', label: '任务族' },
-      { value: '1', label: '逻辑 Agent' }
+    startKicker: 'START HERE',
+    startTitle: '第一次来？按这三步开始',
+    startLead:
+      '先理解 Hearth，再看懂系统，最后进入对应 Stage 的开发模块。不用从头读完所有材料，每一步都有明确的下一步。',
+    startSteps: [
+      {
+        no: '01',
+        meta: '10 分钟',
+        title: '先理解项目',
+        text: '一句话定位、目标用户，以及 Hearth 明确不做什么。',
+        action: '认识 Hearth',
+        link: '/guide/what-is-hearth'
+      },
+      {
+        no: '02',
+        meta: '30 分钟',
+        title: '再看懂系统',
+        text: '七个平面、事件流、持久执行和执行器边界。',
+        action: '阅读系统设计',
+        link: '/architecture/overview'
+      },
+      {
+        no: '03',
+        meta: '准备开发',
+        title: '最后按阶段动手',
+        text: '路线图给总纲；从 Stage 0 开始，每个模块都有步骤与验收。',
+        action: '打开开发计划',
+        link: '/delivery/development-plan'
+      }
+    ],
+    startNote: '推荐顺序：01 → 02 → 03。已经明确分工时，可直接跳到对应模块或完整开发计划。',
+    startLinks: [
+      { text: '产品与决策', link: '/product/definition' },
+      { text: '架构与实现', link: '/architecture/' },
+      { text: '直接写代码', link: '/delivery/stage-0' }
     ],
     manifestoKicker: 'WHY HEARTH',
     manifestoTitle: 'Agent 的难点不是“会回答”，而是“能负责”。',
@@ -83,49 +110,53 @@ const copy = {
     stagesTitle: '从 Stage 0 到 Personal Agent OS v1.0',
     stagesLead: '阶段是能力门槛，不是工期承诺。可以停留、试用和回退，但不能跳步。',
     stages: [
-      { no: '0', name: '定义与原型', text: '产品楔子、协议、交互与评测基线' },
-      { no: '1', name: '本地 MVP', text: '持久内核、Codex 切片、任务卡、审批与恢复' },
-      { no: '2', name: 'Personal Operator', text: '邮件、日历、文档、网页与数据任务' },
-      { no: '3', name: 'Computer Operator', text: '桌面 agentd、GUI 执行与人工接管' },
-      { no: '4', name: '主动个人 Agent', text: 'Trigger、注意力预算、手机 PWA' },
-      { no: '5', name: 'Memory / Evolution', text: '长期记忆、技能候选、评估与回滚' },
-      { no: '6', name: 'Personal Agent OS', text: '多设备、离线、迁移与长期运维' }
-    ],
-    pathsKicker: 'READING PATHS',
-    pathsTitle: '选择你的阅读路径',
-    pathsLead: '按角色和时间预算进入，而不是从头读完 4,700 行。',
-    paths: [
-      {
-        tag: '产品与决策',
-        title: '先判断值不值得做',
-        text: '产品定义 → 阶段路线图 → 开发计划 → 风险与决策',
-        link: '/guide/reading-guide'
-      },
-      {
-        tag: '架构与技术',
-        title: '准备开始实现',
-        text: '总体架构 → 领域协议 → 控制面 → 执行器 → 安全与评估',
-        link: '/architecture/'
-      },
-      {
-        tag: '直接开工',
-        title: '从 MVP 纵向切片开始',
-        text: 'Stage 1 → Event Log → Codex Executor → 任务卡 → 恢复',
-        link: '/delivery/development-plan'
-      }
+      { no: '0', name: '定义与原型', text: '产品楔子、协议、交互与评测基线', meta: '4 个增量', link: '/delivery/stage-0' },
+      { no: '1', name: '本地 MVP', text: '持久内核、Codex 切片、任务卡、审批与恢复', meta: '6 个增量', link: '/delivery/stage-1' },
+      { no: '2', name: 'Personal Operator', text: '邮件、日历、文档、网页与数据任务', meta: '6 个增量', link: '/delivery/stage-2' },
+      { no: '3', name: 'Computer Operator', text: '桌面 agentd、GUI 执行与人工接管', meta: '4 个增量', link: '/delivery/stage-3' },
+      { no: '4', name: '主动个人 Agent', text: 'Trigger、注意力预算、手机 PWA', meta: '5 个增量', link: '/delivery/stage-4' },
+      { no: '5', name: 'Memory / Evolution', text: '长期记忆、技能候选、评估与回滚', meta: '4 个增量', link: '/delivery/stage-5' },
+      { no: '6', name: 'Personal Agent OS', text: '多设备、离线、迁移与长期运维', meta: '6 个增量', link: '/delivery/stage-6' }
     ],
     notice:
-      '当前仓库处于规格阶段。路线图是范围与顺序的事实源；实现尚未开始。所有内容按 v3.2 整理。'
+      '项目处于规划与文档阶段。路线图是范围与顺序的事实源；实现尚未开始，开发从 Stage 0 开始。'
   },
   en: {
-    statusLabel: 'Current stage',
-    statusValue: 'Specification & roadmap',
-    statusDetail: 'Implementation has not started · Stage 0 is next',
-    stats: [
-      { value: '7', label: 'architecture planes' },
-      { value: '7', label: 'capability stages' },
-      { value: '8', label: 'task families' },
-      { value: '1', label: 'logical agent' }
+    startKicker: 'START HERE',
+    startTitle: 'New here? Start with these three steps',
+    startLead:
+      'Understand Hearth, then the system, then the Stage module you will build. You do not need to read everything first, and every step gives you a clear next action.',
+    startSteps: [
+      {
+        no: '01',
+        meta: '10 minutes',
+        title: 'Understand the project',
+        text: 'Positioning, target user, and what Hearth explicitly does not do.',
+        action: 'Meet Hearth',
+        link: '/en/guide/what-is-hearth'
+      },
+      {
+        no: '02',
+        meta: '30 minutes',
+        title: 'Understand the system',
+        text: 'Seven planes, event flow, durable execution, and executor boundaries.',
+        action: 'Read system design',
+        link: '/en/architecture/overview'
+      },
+      {
+        no: '03',
+        meta: 'Ready to build',
+        title: 'Start with a stage module',
+        text: 'Use the roadmap for the big picture, then start at Stage 0 with explicit steps and acceptance gates.',
+        action: 'Open the plan',
+        link: '/en/delivery/development-plan'
+      }
+    ],
+    startNote: 'Recommended: 01 → 02 → 03. If your role is already clear, jump directly to a module or the full development plan.',
+    startLinks: [
+      { text: 'Product & decisions', link: '/en/product/definition' },
+      { text: 'Architecture & delivery', link: '/en/architecture/' },
+      { text: 'Start coding', link: '/en/delivery/stage-0' }
     ],
     manifestoKicker: 'WHY HEARTH',
     manifestoTitle: 'The hard part of an agent is not answering. It is taking responsibility.',
@@ -195,39 +226,16 @@ const copy = {
     stagesLead:
       'Stages are capability gates, not calendar promises. You can pause, trial, and roll back, but you cannot skip a gate.',
     stages: [
-      { no: '0', name: 'Definition & prototype', text: 'Product wedge, contracts, interaction, and evaluation baseline' },
-      { no: '1', name: 'Local MVP', text: 'Durable kernel, Codex slice, task cards, approvals, and recovery' },
-      { no: '2', name: 'Personal Operator', text: 'Email, calendar, documents, web, and data tasks' },
-      { no: '3', name: 'Computer Operator', text: 'Desktop agentd, GUI execution, and human takeover' },
-      { no: '4', name: 'Proactive personal agent', text: 'Triggers, attention budget, and mobile PWA' },
-      { no: '5', name: 'Memory / Evolution', text: 'Long-term memory, skill candidates, evaluation, and rollback' },
-      { no: '6', name: 'Personal Agent OS', text: 'Multi-device, offline, migration, and long-term operations' }
-    ],
-    pathsKicker: 'READING PATHS',
-    pathsTitle: 'Choose your reading path',
-    pathsLead: 'Start by role and time budget, not by reading all 4,700 lines.',
-    paths: [
-      {
-        tag: 'Product & strategy',
-        title: 'Decide whether this is worth building',
-        text: 'Definition → roadmap → plan → risks and decisions',
-        link: '/en/guide/reading-guide'
-      },
-      {
-        tag: 'Architecture & engineering',
-        title: 'Prepare to implement',
-        text: 'Architecture → domain contracts → control plane → executors → safety and evaluation',
-        link: '/en/architecture/'
-      },
-      {
-        tag: 'Start building',
-        title: 'Begin with an MVP vertical slice',
-        text: 'Stage 1 → Event Log → Codex Executor → task card → recovery',
-        link: '/en/delivery/development-plan'
-      }
+      { no: '0', name: 'Definition & prototype', text: 'Product wedge, contracts, interaction, and evaluation baseline', meta: '4 increments', link: '/en/delivery/stage-0' },
+      { no: '1', name: 'Local MVP', text: 'Durable kernel, Codex slice, task cards, approvals, and recovery', meta: '6 increments', link: '/en/delivery/stage-1' },
+      { no: '2', name: 'Personal Operator', text: 'Email, calendar, documents, web, and data tasks', meta: '6 increments', link: '/en/delivery/stage-2' },
+      { no: '3', name: 'Computer Operator', text: 'Desktop agentd, GUI execution, and human takeover', meta: '4 increments', link: '/en/delivery/stage-3' },
+      { no: '4', name: 'Proactive personal agent', text: 'Triggers, attention budget, and mobile PWA', meta: '5 increments', link: '/en/delivery/stage-4' },
+      { no: '5', name: 'Memory / Evolution', text: 'Long-term memory, skill candidates, evaluation, and rollback', meta: '4 increments', link: '/en/delivery/stage-5' },
+      { no: '6', name: 'Personal Agent OS', text: 'Multi-device, offline, migration, and long-term operations', meta: '6 increments', link: '/en/delivery/stage-6' }
     ],
     notice:
-      'The repository is at the specification stage. The roadmap is the source of truth for scope and sequencing; implementation has not started. All content is organized around v3.2.'
+      'The project is in the planning and documentation phase. The roadmap is the source of truth for scope and sequencing; implementation has not started and begins at Stage 0.'
   }
 }
 
@@ -237,19 +245,39 @@ const homeLink = (link: string) => withBase(link)
 
 <template>
   <div class="home-dashboard">
-    <section class="status-strip" aria-label="Project status">
-      <div class="status-strip__main">
-        <span class="status-strip__dot" aria-hidden="true"></span>
-        <span class="status-strip__label">{{ text.statusLabel }}</span>
-        <strong>{{ text.statusValue }}</strong>
+    <section class="start-section" aria-labelledby="start-title">
+      <div class="section-heading start-heading">
+        <div>
+          <div class="section-kicker">{{ text.startKicker }}</div>
+          <h2 id="start-title">{{ text.startTitle }}</h2>
+        </div>
+        <p>{{ text.startLead }}</p>
       </div>
-      <span class="status-strip__detail">{{ text.statusDetail }}</span>
-    </section>
 
-    <section class="stat-grid" aria-label="Project at a glance">
-      <div v-for="stat in text.stats" :key="stat.label" class="stat">
-        <strong>{{ stat.value }}</strong>
-        <span>{{ stat.label }}</span>
+      <div class="start-grid">
+        <a
+          v-for="step in text.startSteps"
+          :key="step.no"
+          class="start-card"
+          :href="homeLink(step.link)"
+        >
+          <span class="start-card__no">{{ step.no }}</span>
+          <div class="start-card__body">
+            <span class="start-card__meta">{{ step.meta }}</span>
+            <strong>{{ step.title }}</strong>
+            <span>{{ step.text }}</span>
+            <span class="start-card__action">{{ step.action }} <span aria-hidden="true">→</span></span>
+          </div>
+        </a>
+      </div>
+
+      <div class="start-footer">
+        <p>{{ text.startNote }}</p>
+        <div class="start-links">
+          <a v-for="link in text.startLinks" :key="link.link" :href="homeLink(link.link)">
+            {{ link.text }}
+          </a>
+        </div>
       </div>
     </section>
 
@@ -304,29 +332,16 @@ const homeLink = (link: string) => withBase(link)
       <h2>{{ text.stagesTitle }}</h2>
       <p class="stage-section__lead">{{ text.stagesLead }}</p>
       <div class="stage-list">
-        <div v-for="stage in text.stages" :key="stage.no" class="stage-row">
+        <a
+          v-for="stage in text.stages"
+          :key="stage.no"
+          class="stage-row"
+          :href="homeLink(stage.link)"
+        >
           <span class="stage-row__no">S{{ stage.no }}</span>
           <strong>{{ stage.name }}</strong>
           <span class="stage-row__text">{{ stage.text }}</span>
-        </div>
-      </div>
-    </section>
-
-    <section class="path-section">
-      <div class="section-kicker">{{ text.pathsKicker }}</div>
-      <h2>{{ text.pathsTitle }}</h2>
-      <p class="path-section__lead">{{ text.pathsLead }}</p>
-      <div class="path-grid">
-        <a
-          v-for="path in text.paths"
-          :key="path.title"
-          class="path-card"
-          :href="homeLink(path.link)"
-        >
-          <span class="path-card__tag">{{ path.tag }}</span>
-          <strong>{{ path.title }}</strong>
-          <span>{{ path.text }}</span>
-          <span class="path-card__arrow" aria-hidden="true">→</span>
+          <span class="stage-row__meta">{{ stage.meta }} <span aria-hidden="true">↗</span></span>
         </a>
       </div>
     </section>
@@ -340,217 +355,302 @@ const homeLink = (link: string) => withBase(link)
 
 <style scoped>
 .home-dashboard {
-  width: min(1152px, calc(100% - 48px));
+  width: min(1168px, calc(100vw - 48px));
   margin: 0 auto;
-  padding: 8px 0 96px;
+  padding: 18px 0 104px;
 }
 
-.status-strip {
+.start-section {
+  margin-bottom: 88px;
+}
+
+.start-heading {
+  margin-bottom: 26px;
+}
+
+.start-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 18px;
+}
+
+.start-card {
+  position: relative;
+  display: flex;
+  min-height: 224px;
+  flex-direction: column;
+  gap: 18px;
+  padding: 24px 24px 22px;
+  overflow: hidden;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 16px;
+  background:
+    linear-gradient(155deg, var(--vp-c-bg-elv), color-mix(in srgb, var(--vp-c-bg-soft) 44%, var(--vp-c-bg-elv))),
+    var(--vp-c-bg-elv);
+  color: var(--vp-c-text-1);
+  text-decoration: none;
+  transition: transform 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease;
+}
+
+.start-card::before {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--vp-c-brand-1), var(--vp-c-brand-2), transparent 82%);
+  content: '';
+  opacity: 0.72;
+}
+
+.start-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--vp-c-brand-2);
+  box-shadow: 0 18px 44px rgba(31, 98, 133, 0.12);
+}
+
+.start-card__no {
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: var(--vp-c-brand-soft);
+  color: var(--vp-c-brand-1);
+  font-family: var(--vp-font-family-mono);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+}
+
+.start-card__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.start-card__meta {
+  color: var(--vp-c-text-3);
+  font-family: var(--vp-font-family-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.start-card strong {
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.start-card__body > span:not(.start-card__meta):not(.start-card__action) {
+  color: var(--vp-c-text-2);
+  font-size: 13px;
+  line-height: 1.75;
+}
+
+.start-card__action {
+  margin-top: auto;
+  color: var(--vp-c-brand-1);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.start-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-  margin: 12px auto 28px;
-  padding: 14px 18px;
-  border: 1px solid var(--vp-c-divider);
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--vp-c-bg-soft) 76%, transparent);
+  margin-top: 18px;
+  padding: 15px 18px;
+  border: 1px dashed color-mix(in srgb, var(--vp-c-divider) 78%, var(--vp-c-brand-2));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--vp-c-bg-alt) 68%, transparent);
+}
+
+.start-footer p {
+  margin: 0;
   color: var(--vp-c-text-2);
-  font-size: 13px;
+  font-size: 12px;
 }
 
-.status-strip__main {
+.start-links {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
-.status-strip__dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #e8874d;
-  box-shadow: 0 0 0 5px rgba(232, 135, 77, 0.14);
-}
-
-.status-strip__label {
-  color: var(--vp-c-text-3);
-  font-family: var(--vp-font-family-mono);
-  font-size: 10px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.status-strip strong {
-  color: var(--vp-c-text-1);
-  font-weight: 650;
-}
-
-.status-strip__detail {
-  color: var(--vp-c-text-3);
-}
-
-.stat-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  margin-bottom: 88px;
-  border-top: 1px solid var(--vp-c-divider);
-  border-bottom: 1px solid var(--vp-c-divider);
-}
-
-.stat {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 22px 8px 22px 0;
-  border-right: 1px solid var(--vp-c-divider);
-}
-
-.stat:last-child {
-  border-right: 0;
-  padding-left: 24px;
-}
-
-.stat:not(:first-child) {
-  padding-left: 24px;
-}
-
-.stat strong {
-  color: var(--vp-c-brand-1);
-  font-family: var(--vp-font-family-mono);
-  font-size: 30px;
-  font-weight: 500;
-  line-height: 1;
-}
-
-.stat span {
-  color: var(--vp-c-text-3);
+.start-links a {
+  padding: 6px 10px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 999px;
+  color: var(--vp-c-text-2);
   font-size: 11px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  text-decoration: none;
+  transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.start-links a:hover {
+  color: var(--vp-c-brand-1);
+  border-color: var(--vp-c-brand-2);
+  background: var(--vp-c-brand-soft);
 }
 
 .section-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   margin-bottom: 16px;
   color: var(--vp-c-brand-1);
   font-family: var(--vp-font-family-mono);
   font-size: 10px;
-  font-weight: 600;
+  font-weight: 650;
   letter-spacing: 0.16em;
 }
 
+.section-kicker::before {
+  width: 18px;
+  height: 1px;
+  background: var(--vp-c-brand-2);
+  content: '';
+}
+
 .manifesto {
-  max-width: 900px;
-  margin-bottom: 104px;
+  margin-bottom: 88px;
+  padding: 34px 36px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 100% 0%, var(--vp-c-brand-soft), transparent 38%),
+    color-mix(in srgb, var(--vp-c-bg-elv) 76%, var(--vp-c-bg-alt));
 }
 
 .manifesto h2,
+.start-section h2,
 .feature-section h2,
 .flow-section h2,
-.stage-section h2,
-.path-section h2 {
+.stage-section h2 {
   margin: 0;
   color: var(--vp-c-text-1);
-  font-size: clamp(30px, 4vw, 50px);
-  font-weight: 500;
+  font-size: clamp(28px, 3.4vw, 42px);
+  font-weight: 560;
   letter-spacing: -0.035em;
-  line-height: 1.18;
+  line-height: 1.22;
 }
 
 .manifesto__lead {
-  max-width: 760px;
-  margin-top: 24px;
+  max-width: 820px;
+  margin-top: 20px;
   color: var(--vp-c-text-2);
-  font-size: 18px;
-  line-height: 1.9;
+  font-size: 16px;
+  line-height: 1.85;
 }
 
 .manifesto ul {
   display: grid;
-  gap: 12px;
-  margin: 32px 0 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 28px 0 0;
   padding: 0;
   list-style: none;
 }
 
 .manifesto li {
   position: relative;
-  padding-left: 22px;
+  padding: 12px 14px 12px 26px;
+  border: 1px solid color-mix(in srgb, var(--vp-c-divider) 78%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--vp-c-bg-elv) 72%, transparent);
   color: var(--vp-c-text-1);
-  font-size: 15px;
+  font-size: 13px;
+  line-height: 1.65;
 }
 
 .manifesto li::before {
   position: absolute;
-  top: 0.6em;
-  left: 0;
-  width: 8px;
-  height: 1px;
-  background: var(--vp-c-brand-1);
+  top: 1.22em;
+  left: 13px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--vp-c-brand-2);
   content: '';
 }
 
 .feature-section,
 .flow-section,
-.stage-section,
-.path-section {
-  margin-bottom: 104px;
+.stage-section {
+  margin-bottom: 88px;
 }
 
 .section-heading {
   display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(260px, 0.75fr);
-  gap: 48px;
+  grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr);
+  gap: 44px;
   align-items: end;
-  margin-bottom: 34px;
+  margin-bottom: 30px;
 }
 
 .section-heading p,
 .flow-section__lead,
-.stage-section__lead,
-.path-section__lead {
+.stage-section__lead {
   margin: 0;
   color: var(--vp-c-text-2);
   font-size: 14px;
-  line-height: 1.8;
+  line-height: 1.82;
 }
 
 .feature-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  border-top: 1px solid var(--vp-c-divider);
-  border-left: 1px solid var(--vp-c-divider);
+  align-items: stretch;
+  gap: 14px;
 }
 
 .feature-card {
   position: relative;
   display: flex;
-  min-height: 212px;
+  min-height: 196px;
   flex-direction: column;
   gap: 12px;
-  padding: 26px 24px 22px;
-  border-right: 1px solid var(--vp-c-divider);
-  border-bottom: 1px solid var(--vp-c-divider);
-  background: transparent;
+  padding: 24px 22px 20px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--vp-c-bg-elv) 88%, var(--vp-c-bg-alt));
   color: var(--vp-c-text-1);
   text-decoration: none;
-  transition: background 0.22s ease;
+  transition: border-color 0.22s ease, background 0.22s ease, transform 0.22s ease;
 }
 
 .feature-card:hover {
-  background: color-mix(in srgb, var(--vp-c-brand-soft) 62%, transparent);
+  transform: translateY(-2px);
+  border-color: var(--vp-c-brand-2);
+  background: color-mix(in srgb, var(--vp-c-bg-elv) 70%, var(--vp-c-brand-soft));
 }
 
 .feature-card__no {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--vp-c-brand-softer);
   color: var(--vp-c-brand-1);
   font-family: var(--vp-font-family-mono);
-  font-size: 11px;
-  letter-spacing: 0.1em;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
 }
 
 .feature-card strong {
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 600;
+  line-height: 1.4;
 }
 
 .feature-card > span:not(.feature-card__no):not(.feature-card__arrow) {
@@ -572,19 +672,18 @@ const homeLink = (link: string) => withBase(link)
 }
 
 .flow-section {
-  padding: 36px 36px 32px;
+  padding: 34px 36px 32px;
   border: 1px solid var(--vp-c-divider);
-  border-radius: 24px;
+  border-radius: 20px;
   background:
     radial-gradient(circle at 100% 0%, var(--vp-c-brand-soft), transparent 36%),
-    color-mix(in srgb, var(--vp-c-bg-soft) 70%, transparent);
+    color-mix(in srgb, var(--vp-c-bg-alt) 82%, var(--vp-c-bg-elv));
 }
 
 .flow-section__lead,
-.stage-section__lead,
-.path-section__lead {
+.stage-section__lead {
   max-width: 720px;
-  margin-top: 18px;
+  margin-top: 16px;
 }
 
 .flow {
@@ -602,7 +701,7 @@ const homeLink = (link: string) => withBase(link)
   padding: 8px 13px;
   border: 1px solid var(--vp-c-divider);
   border-radius: 10px;
-  background: var(--vp-c-bg);
+  background: var(--vp-c-bg-elv);
   font-size: 12px;
 }
 
@@ -623,16 +722,30 @@ const homeLink = (link: string) => withBase(link)
 
 .stage-list {
   margin-top: 28px;
-  border-top: 1px solid var(--vp-c-divider);
+  overflow: hidden;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--vp-c-bg-elv) 86%, var(--vp-c-bg-alt));
 }
 
 .stage-row {
   display: grid;
-  grid-template-columns: 48px minmax(170px, 0.55fr) minmax(0, 1fr);
+  grid-template-columns: 48px minmax(170px, 0.55fr) minmax(0, 1fr) auto;
   gap: 20px;
-  align-items: baseline;
-  padding: 18px 0;
-  border-bottom: 1px solid var(--vp-c-divider);
+  align-items: center;
+  padding: 16px 18px;
+  border-bottom: 1px solid color-mix(in srgb, var(--vp-c-divider) 82%, transparent);
+  color: var(--vp-c-text-1);
+  text-decoration: none;
+  transition: background 0.2s ease;
+}
+
+.stage-row:hover {
+  background: var(--vp-c-brand-softer);
+}
+
+.stage-row:last-child {
+  border-bottom: 0;
 }
 
 .stage-row__no {
@@ -649,58 +762,14 @@ const homeLink = (link: string) => withBase(link)
 .stage-row__text {
   color: var(--vp-c-text-2);
   font-size: 13px;
+  line-height: 1.6;
 }
 
-.path-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-  margin-top: 28px;
-}
-
-.path-card {
-  display: flex;
-  min-height: 210px;
-  flex-direction: column;
-  gap: 14px;
-  padding: 24px;
-  border: 1px solid var(--vp-c-divider);
-  border-radius: 18px;
-  background: var(--vp-c-bg);
-  color: var(--vp-c-text-1);
-  text-decoration: none;
-  transition: transform 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease;
-}
-
-.path-card:hover {
-  transform: translateY(-3px);
-  border-color: var(--vp-c-brand-2);
-  box-shadow: 0 18px 46px rgba(31, 22, 14, 0.1);
-}
-
-.path-card__tag {
-  color: var(--vp-c-brand-1);
+.stage-row__meta {
+  color: var(--vp-c-text-3);
   font-family: var(--vp-font-family-mono);
   font-size: 10px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.path-card strong {
-  font-size: 18px;
-  line-height: 1.35;
-}
-
-.path-card > span:not(.path-card__tag):not(.path-card__arrow) {
-  color: var(--vp-c-text-2);
-  font-size: 13px;
-  line-height: 1.7;
-}
-
-.path-card__arrow {
-  margin-top: auto;
-  color: var(--vp-c-brand-1);
-  font-size: 18px;
+  white-space: nowrap;
 }
 
 .notice {
@@ -708,8 +777,10 @@ const homeLink = (link: string) => withBase(link)
   gap: 14px;
   align-items: flex-start;
   padding: 22px 24px;
-  border-left: 2px solid var(--vp-c-brand-1);
-  background: color-mix(in srgb, var(--vp-c-brand-soft) 48%, transparent);
+  border: 1px solid var(--vp-c-divider);
+  border-left: 3px solid var(--vp-c-brand-1);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--vp-c-brand-softer) 82%, transparent);
 }
 
 .notice__mark {
@@ -727,20 +798,7 @@ const homeLink = (link: string) => withBase(link)
 
 @media (max-width: 960px) {
   .home-dashboard {
-    width: min(100% - 40px, 760px);
-  }
-
-  .stat-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .stat:nth-child(2) {
-    border-right: 0;
-  }
-
-  .stat:nth-child(3),
-  .stat:nth-child(4) {
-    border-top: 1px solid var(--vp-c-divider);
+    width: calc(100vw - 40px);
   }
 
   .section-heading {
@@ -748,56 +806,35 @@ const homeLink = (link: string) => withBase(link)
     gap: 18px;
   }
 
-  .feature-grid,
-  .path-grid {
+  .feature-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .feature-card:last-child,
-  .path-card:last-child {
-    grid-column: span 2;
+  .manifesto ul {
+    grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 640px) {
   .home-dashboard {
-    width: calc(100% - 32px);
-  }
-
-  .status-strip {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .status-strip__detail {
-    padding-left: 18px;
-  }
-
-  .stat-grid {
-    margin-bottom: 64px;
-  }
-
-  .stat strong {
-    font-size: 24px;
+    width: calc(100vw - 32px);
   }
 
   .manifesto,
+  .start-section,
   .feature-section,
   .flow-section,
-  .stage-section,
-  .path-section {
+  .stage-section {
     margin-bottom: 72px;
   }
 
   .feature-grid,
-  .path-grid {
+  .start-grid {
     grid-template-columns: 1fr;
   }
 
-  .feature-card:last-child,
-  .path-card:last-child {
-    grid-column: auto;
+  .manifesto {
+    padding: 26px 22px;
   }
 
   .flow-section {
@@ -810,11 +847,25 @@ const homeLink = (link: string) => withBase(link)
 
   .stage-row {
     grid-template-columns: 42px 1fr;
-    gap: 6px 12px;
+    gap: 5px 12px;
+    padding: 15px 14px;
   }
 
   .stage-row__text {
     grid-column: 2;
+  }
+
+  .stage-row__meta {
+    grid-column: 2;
+  }
+
+  .start-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .start-links {
+    justify-content: flex-start;
   }
 }
 </style>

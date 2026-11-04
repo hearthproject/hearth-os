@@ -1,6 +1,6 @@
 ---
 title: 'Reading Guide'
-description: 'The three reading paths through the Hearth documentation, documentation conventions, site map, and version sources.'
+description: 'The three reading paths through the Hearth documentation, documentation conventions, site map, and source material.'
 outline: [2, 3]
 ---
 
@@ -45,8 +45,8 @@ Suitable for reading when preparing to start implementation, or when you need to
 
 Suitable for reading when you are ready to create a repository and need to find the first vertical slice:
 
-1. [MVP Definition](/en/delivery/development-plan)
-2. [Stage 1 Increment](/en/delivery/development-plan)
+1. [Stage 0 · Definition and Prototype](/en/delivery/stage-0)
+2. [Stage 1 · Durable Kernel and MVP](/en/delivery/stage-1)
 3. [Durable Execution and Recovery](/en/architecture/durable-execution)
 4. [Codex Executor](/en/architecture/executor-catalog)
 5. [Engineering Delivery and Repository Structure](/en/delivery/engineering)
@@ -69,6 +69,6 @@ Suitable for reading when you are ready to create a repository and need to find 
 | [Delivery Roadmap](/en/delivery/) | Stage 0–6, 0–100 plan, engineering, risks, ADR |
 | [Reference](/en/reference/) | Self-development boundaries, terminology, checklist, FAQ, contribution, full archive |
 
-## Version and Source
+## Sources and Maintenance
 
-The current documentation is compiled from **Hearth Personal Agent OS Overall Roadmap v3.2** (2026-11-03). If there is any discrepancy between a page and the archived master document, the archived master document and the repository commit history take precedence; if you find structural issues, please submit a PR or explain in a repository Issue.
+This site is compiled from the Hearth Personal Agent OS overall roadmap, with the original material archived under `sources/roadmap/` in the repository. If there is any discrepancy between a page and the archived master document, the archived master document and the repository commit history take precedence; if you find structural issues, please submit a PR or explain in a repository Issue.

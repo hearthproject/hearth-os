@@ -1,13 +1,13 @@
 ---
 title: '完整路线图（归档）'
-description: 'Hearth 个人 Agent OS 总体路线图 v3.2 完整归档。'
+description: 'Hearth 个人 Agent OS 总体路线图完整归档。'
 outline: false
 pageClass: archive-page
 ---
 
 <p class="eyebrow">ARCHIVE</p>
 
-# 完整路线图（v3.2 归档）
+# 完整路线图（归档）
 
 <p class="lead">这是完整主文档的归档版本，保留全部原始细节。日常阅读建议使用按主题重组后的章节页面。</p>
 

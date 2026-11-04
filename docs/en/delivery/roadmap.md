@@ -52,6 +52,8 @@ Stages are not a date-driven waterfall but a set of capability dependencies. You
 
 ### Stage 0: Definition, Prototype, and Baseline
 
+Development module: [Stage 0 · Definition & Prototype](/en/delivery/stage-0)
+
 **Goal:** Before entering real implementation, pin down the product, interactions, protocols, and acceptance criteria. Stage 0 is not a pure documentation phase; it must produce a clickable end-to-end product prototype.
 
 Deliverables:
@@ -79,6 +81,8 @@ Exit criteria:
 - It has been decided that Stage 1 will not build a Sandbox kernel in-house.
 
 ### Stage 1: Durable Personal Kernel and MVP
+
+Development module: [Stage 1 · Durable Kernel & MVP](/en/delivery/stage-1)
 
 **Goal:** Prove that a personal Agent can complete real tasks while running locally as a persistent service and remaining interruptible, recoverable, approvable, and auditable, and that a minimum daily-usable product can take shape as early as possible.
 
@@ -128,6 +132,8 @@ Learning gates:
 
 ### Stage 2: Personal Operator
 
+Development module: [Stage 2 · Personal Operator](/en/delivery/stage-2)
+
 **Goal:** Expand from “can do file tasks” to “can do most everyday digital content work.”
 
 Scope:
@@ -154,6 +160,8 @@ Exit criteria:
 
 ### Stage 3: Computer Operator
 
+Development module: [Stage 3 · Computer Operator](/en/delivery/stage-3)
+
 **Goal:** Cover desktop software without APIs and cross-application workflows.
 
 Scope:
@@ -175,6 +183,8 @@ Exit criteria:
 - Tokens and manual minutes are within acceptable ranges.
 
 ### Stage 4: Proactive Personal Agent
+
+Development module: [Stage 4 · Proactive Personal Agent](/en/delivery/stage-4)
 
 **Goal:** Enable Hearth to work proactively within limited authorization while keeping interruptions low.
 
@@ -200,6 +210,8 @@ Exit criteria:
 
 ### Stage 5: Memory OS and Evolution OS
 
+Development module: [Stage 5 · Memory & Evolution](/en/delivery/stage-5)
+
 **Goal:** Enable the system to truly accumulate personal context and safely improve its methods.
 
 Scope:
@@ -223,6 +235,8 @@ Exit criteria:
 - Users can understand why the system did what it did.
 
 ### Stage 6: Personal Agent OS
+
+Development module: [Stage 6 · Multi-device & Operations](/en/delivery/stage-6)
 
 **Goal:** Multi-device, long-running, migratable, and self-hostable.
 

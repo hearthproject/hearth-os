@@ -65,7 +65,7 @@ Devices provide only execution capabilities and entry points; they do not replic
 
 ## Current Status
 
-The repository currently contains the **v3.2 product, architecture, security, and delivery roadmap**. Implementation has not yet begun; Stage 0 and Stage 1 will proceed according to the vertical slice plan in the roadmap.
+The repository currently contains the complete product, architecture, security, and delivery roadmap. Implementation has not yet begun; Stage 0 and Stage 1 will proceed according to the vertical slice plan in the roadmap.
 
 Continue reading:
 

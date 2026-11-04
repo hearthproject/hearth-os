@@ -1,0 +1,115 @@
+---
+title: '文档来源与覆盖'
+description: 'Hearth 原始路线图、十个分册、自研边界与分册 README 到本站页面的逐项映射。'
+outline: [2, 3]
+---
+
+<p class="eyebrow">SOURCES & COVERAGE</p>
+
+# 文档来源与覆盖
+
+<p class="lead">本站不是几篇独立文章，而是对原始路线图材料的主题化重组。这个页面说明每份来源文档被放到了哪里，以及哪些原始结论被完整保留。</p>
+
+## 覆盖结论
+
+| 审计项 | 结果 |
+|---|---|
+| 原始材料 | 1 份完整主文档、10 个分册、1 份自研与集成边界说明、1 份分册 README |
+| 十个分册 | 全部正文块可在中文站点中逐字找到，覆盖率 100% |
+| 完整主文档 | 595/595 个正文块保留，覆盖率 100% |
+| 自研与集成边界 | 67/67 个正文块保留，覆盖率 100% |
+| 双语结构 | 每个中文页面都有路径与标题层级对应的英文页面 |
+
+审计以正文块为单位，不按字符数抽样。原始长文同时保留在[完整路线图归档](/reference/full-roadmap)中；主题页面负责降低阅读成本，归档负责保留完整细节。
+
+## 原始分册 README：结论与阅读路径
+
+Hearth 是一个单用户、自托管、长期驻留、低打扰、低 Token 的通用个人 Agent OS。它的核心不是“再做一个模型”，而是任务控制、持久执行、记忆、验证、审批、回执和安静的任务卡体验。
+
+当前路线图有三条最重要的原则：
+
+1. **先做最小产品，再做完整 OS。** Stage 1 内部就要出现每天可用的 MVP，不等到 Stage 6 才形成产品。
+2. **前端从第一天存在。** Stage 0 有可点击原型，Stage 1 有真实 Web 任务卡；每个增量都必须有用户可见路径、验证和恢复。
+3. **不再按周/月排期。** 第 25 章是完整的 Stage 0–6 渐进开发序列，只按能力门槛推进，不设开发时间限制。
+
+### 产品与决策路径
+
+适合第一次了解项目，或需要判断是否继续投入时阅读：
+
+1. [产品定义与设计判断](/product/definition)
+2. [分阶段产品路线图](/delivery/roadmap)
+3. [从 0 到 100 开发计划](/delivery/development-plan)
+4. [工程交付、风险与决策](/delivery/engineering)
+
+### 架构与技术路径
+
+适合准备开始实现，或需要检查系统边界时阅读：
+
+1. [总体架构与领域协议](/architecture/overview)
+2. [入口、控制面与持久执行](/architecture/control-plane)
+3. [执行器体系与人工接管](/architecture/executor-model)
+4. [执行安全、记忆与进化](/architecture/execution-safety)
+5. [Token 经济与前端体验](/architecture/token-economics)
+6. [安全隐私与评估](/architecture/security-privacy)
+
+### 直接开工路径
+
+适合已经准备建仓库时阅读：
+
+1. [从 0 到 100 开发计划](/delivery/development-plan) 的 MVP 与 Stage 1 部分
+2. [总体架构与领域协议](/architecture/domain-model)
+3. [入口、控制面与持久执行](/architecture/durable-execution)
+4. [工程交付、风险与决策](/delivery/engineering)
+
+## 原始材料到站点页面
+
+| 分册 | 对应主文档 | 读完后能回答 |
+|---|---|---|
+| [01 产品定义与设计判断](/product/definition) | 第 0–3 章 | Hearth 为谁做、做什么、不做什么、为什么不是 Codex 套壳 |
+| [02 总体架构与领域协议](/architecture/overview) | 第 4–5 章 | 七个平面如何协作、核心实体和协议是什么 |
+| [03 入口、控制面与持久执行](/architecture/gateway) | 第 6–8 章 | 事件如何进入、如何被授权、如何可靠执行和恢复 |
+| [04 执行器体系与人工接管](/architecture/executor-model) | 第 9–16 章 | Codex、Native、Connector、Browser、GUI、Document/Data、Human 如何分工 |
+| [05 执行安全、记忆与进化](/architecture/execution-safety) | 第 17–19 章 | Sandbox、凭据、副作用、记忆和技能进化如何受控 |
+| [06 Token 经济与前端体验](/architecture/token-economics) | 第 20–21 章 | 如何控制 Token，以及用户为什么只看到任务 |
+| [07 安全隐私与评估](/architecture/security-privacy) | 第 22–23 章 | 信任边界、威胁模型、评测和阶段门槛是什么 |
+| [08 分阶段产品路线图](/delivery/roadmap) | 第 24 章 | Stage 0–6 各自交付什么、何时算完成 |
+| [09 从 0 到 100 开发计划](/delivery/development-plan) | 第 25 章 | 按什么顺序开发、MVP 包含什么、每个增量如何验收 |
+| [10 工程交付、风险与决策](/delivery/engineering) | 第 26–29 章 | 仓库怎么建、风险如何停、ADR 和最终判断是什么 |
+
+### 附加来源
+
+| 来源 | 站点入口 | 处理方式 |
+|---|---|---|
+| 完整主文档 | [完整路线图归档](/reference/full-roadmap) | 逐段保留全部细节，供检索、引用和差异核对 |
+| 自研与集成边界说明 | [自研与集成边界](/reference/build-vs-integrate) | 保留边界结论、OpenClaw 对比和 Codex 接入规则 |
+| 分册 README | [开始阅读](/guide/)、[阅读指南](/guide/reading-guide)、本页 | 保留结论、三条阅读路径、十册目录与一页地图 |
+
+## 从 0 到 100 的一页地图
+
+```text
+Stage 0  产品楔子 + 可点击原型 + 协议/评测基线
+   ↓
+Stage 1  走路骨架 → 第一个真实 Codex 切片 → MVP → 副作用安全 → 第二任务族
+   ↓
+Stage 2  只读连接器 → 文档/数据 → 浏览器 → 草稿/审批/回执 → 日常操作员
+   ↓
+Stage 3  设备 agentd → 观察/接管 → 低风险 GUI → 高风险 GUI
+   ↓
+Stage 4  Trigger/主动收件箱 → 手机 PWA → 安全配对 → 注意力预算
+   ↓
+Stage 5  Memory Core → 遗忘/导出 → 技能候选/评估 → 晋升/回滚
+   ↓
+Stage 6  多设备同步 → 离线队列 → 撤销/密钥 → 备份迁移 → v1.0
+```
+
+“100%”不是永远不再迭代，而是 Stage 6 的 v1.0 出口：完整产品、可恢复、可审批、可迁移、可撤销、可长期使用。
+
+## 覆盖与维护约定
+
+- **主文档**保留全部细节；分册用于按主题逐步阅读，不替代主文档。
+- 每个分册开头都标明对应主文档章节和前置阅读。
+- 文中“Stage”是能力层级，不是日期；“增量”是开发单位，不是工期承诺。
+- 任何阶段验收都必须包含用户可见界面、持久状态、验证证据和恢复路径。
+- 只存在于 CLI、日志或数据库中的能力，不计入阶段完成。
+
+更新来源文档时，请同步检查主题页面、完整归档和英文镜像。覆盖审计脚本位于仓库的 `scripts/check-coverage.py`，不接受用删减正文换取通过。

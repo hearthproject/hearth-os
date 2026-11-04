@@ -2,21 +2,19 @@ import { defineConfig } from 'vitepress'
 import { withMermaid } from 'vitepress-plugin-mermaid'
 
 const zhNav = [
-  { text: '开始', link: '/guide/' },
-  { text: '产品', link: '/product/' },
-  { text: '系统设计', link: '/architecture/' },
-  { text: '交付路线', link: '/delivery/' },
-  { text: '参考', link: '/reference/' },
-  { text: 'v3.2', link: '/guide/project-status' }
+  { text: '开始阅读', link: '/guide/', activeMatch: '^/guide/' },
+  { text: '产品', link: '/product/', activeMatch: '^/product/' },
+  { text: '系统设计', link: '/architecture/', activeMatch: '^/architecture/' },
+  { text: '交付路线', link: '/delivery/', activeMatch: '^/delivery/' },
+  { text: '参考', link: '/reference/', activeMatch: '^/reference/' }
 ]
 
 const enNav = [
-  { text: 'Start', link: '/en/guide/' },
-  { text: 'Product', link: '/en/product/' },
-  { text: 'System Design', link: '/en/architecture/' },
-  { text: 'Delivery', link: '/en/delivery/' },
-  { text: 'Reference', link: '/en/reference/' },
-  { text: 'v3.2', link: '/en/guide/project-status' }
+  { text: 'Start', link: '/en/guide/', activeMatch: '^/en/guide/' },
+  { text: 'Product', link: '/en/product/', activeMatch: '^/en/product/' },
+  { text: 'System Design', link: '/en/architecture/', activeMatch: '^/en/architecture/' },
+  { text: 'Delivery', link: '/en/delivery/', activeMatch: '^/en/delivery/' },
+  { text: 'Reference', link: '/en/reference/', activeMatch: '^/en/reference/' }
 ]
 
 const zhSidebar = {
@@ -90,8 +88,25 @@ const zhSidebar = {
       text: '交付路线',
       items: [
         { text: '交付总览', link: '/delivery/' },
-        { text: '分阶段产品路线图', link: '/delivery/roadmap' },
-        { text: '从 0 到 100 开发计划', link: '/delivery/development-plan' },
+        { text: '产品路线图（总纲）', link: '/delivery/roadmap' }
+      ]
+    },
+    {
+      text: '从 0 到 100 开发计划',
+      items: [
+        { text: '计划总览', link: '/delivery/development-plan' },
+        { text: 'S0 · 定义与原型', link: '/delivery/stage-0' },
+        { text: 'S1 · 持久内核与 MVP', link: '/delivery/stage-1' },
+        { text: 'S2 · Personal Operator', link: '/delivery/stage-2' },
+        { text: 'S3 · Computer Operator', link: '/delivery/stage-3' },
+        { text: 'S4 · 主动个人 Agent', link: '/delivery/stage-4' },
+        { text: 'S5 · 记忆与进化', link: '/delivery/stage-5' },
+        { text: 'S6 · 多设备与长期运行', link: '/delivery/stage-6' }
+      ]
+    },
+    {
+      text: '工程保障',
+      items: [
         { text: '工程交付与仓库结构', link: '/delivery/engineering' },
         { text: '风险与 Kill Criteria', link: '/delivery/risks' },
         { text: 'ADR 与关键决策', link: '/delivery/decisions' }
@@ -108,6 +123,7 @@ const zhSidebar = {
         { text: '默认清单', link: '/reference/checklists' },
         { text: '常见问题', link: '/reference/faq' },
         { text: '参与贡献与文档维护', link: '/reference/contributing' },
+        { text: '文档来源与覆盖', link: '/reference/source-map' },
         { text: '完整路线图（归档）', link: '/reference/full-roadmap' }
       ]
     }
@@ -185,8 +201,25 @@ const enSidebar = {
       text: 'Delivery',
       items: [
         { text: 'Delivery Overview', link: '/en/delivery/' },
-        { text: 'Staged Product Roadmap', link: '/en/delivery/roadmap' },
-        { text: '0–100 Development Plan', link: '/en/delivery/development-plan' },
+        { text: 'Product Roadmap (Master)', link: '/en/delivery/roadmap' }
+      ]
+    },
+    {
+      text: 'From 0 to 100',
+      items: [
+        { text: 'Plan Overview', link: '/en/delivery/development-plan' },
+        { text: 'S0 · Definition & Prototype', link: '/en/delivery/stage-0' },
+        { text: 'S1 · Durable Kernel & MVP', link: '/en/delivery/stage-1' },
+        { text: 'S2 · Personal Operator', link: '/en/delivery/stage-2' },
+        { text: 'S3 · Computer Operator', link: '/en/delivery/stage-3' },
+        { text: 'S4 · Proactive Personal Agent', link: '/en/delivery/stage-4' },
+        { text: 'S5 · Memory & Evolution', link: '/en/delivery/stage-5' },
+        { text: 'S6 · Multi-device & Operations', link: '/en/delivery/stage-6' }
+      ]
+    },
+    {
+      text: 'Engineering Safeguards',
+      items: [
         { text: 'Engineering & Repository', link: '/en/delivery/engineering' },
         { text: 'Risks & Kill Criteria', link: '/en/delivery/risks' },
         { text: 'ADRs & Decisions', link: '/en/delivery/decisions' }
@@ -203,6 +236,7 @@ const enSidebar = {
         { text: 'Default Checklists', link: '/en/reference/checklists' },
         { text: 'FAQ', link: '/en/reference/faq' },
         { text: 'Contributing & Docs', link: '/en/reference/contributing' },
+        { text: 'Sources & Coverage', link: '/en/reference/source-map' },
         { text: 'Full Roadmap (Archive)', link: '/en/reference/full-roadmap' }
       ]
     }
@@ -272,7 +306,7 @@ export default withMermaid(
     lastUpdated: true,
     head: [
       ['link', { rel: 'icon', type: 'image/svg+xml', href: '/hearth-os/logo.svg' }],
-      ['meta', { name: 'theme-color', content: '#cf5c32' }],
+      ['meta', { name: 'theme-color', content: '#2f7fa8' }],
       ['meta', { property: 'og:type', content: 'website' }],
       ['meta', { property: 'og:title', content: 'Hearth — Personal Agent OS' }],
       [

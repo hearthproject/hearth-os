@@ -9,11 +9,11 @@ hero:
     alt: Hearth 架构示意
   actions:
     - theme: brand
-      text: 认识 Hearth
+      text: 10 分钟了解 Hearth
       link: /guide/what-is-hearth
     - theme: alt
-      text: 阅读交付路线
-      link: /delivery/roadmap
+      text: 从 Stage 0 开始开发
+      link: /delivery/stage-0
 ---
 
 <HomeDashboard />

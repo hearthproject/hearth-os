@@ -1,6 +1,6 @@
 ---
 title: 'Reference Overview'
-description: 'Hearth reference and appendix entry points: proprietary boundaries, terminology, checklists, FAQ, contributing, and the complete roadmap archive.'
+description: 'Hearth reference and appendix entry points: build boundaries, terminology, checklists, FAQ, contributing, source coverage, and the complete roadmap archive.'
 outline: [2, 3]
 ---
 
@@ -11,7 +11,8 @@ const cards = [
   { no: '03', title: 'Default Checklists', text: 'The definitive definitions of the default approval checklist, the default completion checklist, and task coverage.', link: '/en/reference/checklists' },
   { no: '04', title: 'FAQ', text: 'How Hearth relates to Coding Agents, Codex wrappers, Stage 1, side effects, evolution, and multi-user support.', link: '/en/reference/faq' },
   { no: '05', title: 'Contributing and Documentation Maintenance', text: 'Repository structure, local development, writing conventions, PR checklist, and source of truth.', link: '/en/reference/contributing' },
-  { no: '06', title: 'Full Roadmap (Archived)', text: 'The complete v3.2 master document, retaining all original details, suitable for search and citation.', link: '/en/reference/full-roadmap' }
+  { no: '06', title: 'Sources & Coverage', text: 'A page-by-page mapping from the master document, ten volumes, boundary note, and volume README to this site.', link: '/en/reference/source-map' },
+  { no: '07', title: 'Full Roadmap (Archived)', text: 'The complete master document, retaining all original details, suitable for search and citation.', link: '/en/reference/full-roadmap' }
 ]
 </script>
 
@@ -30,6 +31,6 @@ const cards = [
 - When discussing terminology, use the definitions in the [glossary](/en/reference/glossary) to avoid ambiguity from identical names;
 - When discussing phase progression, use the exit criteria in the [roadmap](/en/delivery/roadmap) and [risks](/en/delivery/risks).
 
-## Version
+## Sources and Maintenance
 
-The current documentation corresponds to **v3.2**. If there are discrepancies between the complete archive and topic pages, the complete master document and repository commit history take precedence, and the reason for restructuring should be explained in the PR.
+This site is curated from the original roadmap. If there are discrepancies between the complete archive and topic pages, the complete master document and repository commit history take precedence; [Sources & Coverage](/en/reference/source-map) lists the full mapping.

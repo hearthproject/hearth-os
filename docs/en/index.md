@@ -9,11 +9,11 @@ hero:
     alt: Hearth architecture diagram
   actions:
     - theme: brand
-      text: Get to know Hearth
+      text: Understand Hearth in 10 minutes
       link: /en/guide/what-is-hearth
     - theme: alt
-      text: Read the delivery roadmap
-      link: /en/delivery/roadmap
+      text: Start building at Stage 0
+      link: /en/delivery/stage-0
 ---
 
 <HomeDashboard />

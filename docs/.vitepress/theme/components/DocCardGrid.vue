@@ -35,6 +35,7 @@ defineProps<{
 <style scoped>
 .doc-card-grid {
   display: grid;
+  align-items: stretch;
   gap: 16px;
   margin: 28px 0 40px;
 }
@@ -56,10 +57,10 @@ defineProps<{
   padding: 22px;
   overflow: hidden;
   border: 1px solid var(--vp-c-divider);
-  border-radius: 18px;
+  border-radius: 16px;
   background:
-    linear-gradient(145deg, color-mix(in srgb, var(--vp-c-bg-soft) 88%, transparent), transparent),
-    var(--vp-c-bg);
+    linear-gradient(145deg, color-mix(in srgb, var(--vp-c-bg-elv) 92%, var(--vp-c-bg-soft)), transparent),
+    var(--vp-c-bg-elv);
   color: var(--vp-c-text-1);
   text-decoration: none;
   transition: transform 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease;
@@ -80,7 +81,7 @@ defineProps<{
 .doc-card:hover {
   transform: translateY(-3px);
   border-color: var(--vp-c-brand-2);
-  box-shadow: 0 18px 46px rgba(31, 22, 14, 0.1);
+  box-shadow: 0 18px 44px rgba(31, 98, 133, 0.12);
 }
 
 .doc-card__no {
