@@ -19,7 +19,7 @@ outline: [2, 3]
 
 ## Verification evidence
 
-- Bilingual build, internal-link, source-coverage, and translation-structure checks pass.
+- Bilingual build, internal-link, documentation-structure, and translation-structure checks pass.
 - No horizontal overflow at desktop or phone widths; language switching and search work.
 - The new Stage details, development log, and template are live on GitHub Pages.
 

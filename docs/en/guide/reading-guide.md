@@ -1,6 +1,6 @@
 ---
 title: 'Reading Guide'
-description: 'The three reading paths through the Hearth documentation, documentation conventions, site map, and source material.'
+description: 'The three reading paths through the Hearth documentation, documentation conventions, site map, and single-source maintenance.'
 outline: [2, 3]
 ---
 
@@ -69,6 +69,6 @@ Suitable for reading when you are ready to create a repository and need to find 
 | [Delivery Roadmap](/en/delivery/) | Stage 0–6, 0–100 plan, engineering, risks, ADR |
 | [Reference](/en/reference/) | Self-development boundaries, terminology, checklist, FAQ, contribution, full archive |
 
-## Sources and Maintenance
+## Documentation Source and Maintenance
 
-This site is compiled from the Hearth Personal Agent OS overall roadmap, with the original material archived under `sources/roadmap/` in the repository. If there is any discrepancy between a page and the archived master document, the archived master document and the repository commit history take precedence; if you find structural issues, please submit a PR or explain in a repository Issue.
+The site and the repository share one documentation source: all formal content lives only in `docs/`, and the site is built directly from that folder. Chinese pages live under `docs/`, English mirrors under `docs/en/`, and the README files are repository entry points rather than a second copy of the documentation. The [Documentation Map](/en/reference/source-map) records the directory structure, reading hierarchy, and update workflow.

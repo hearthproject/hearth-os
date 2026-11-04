@@ -14,7 +14,7 @@ outline: [2, 3]
 
 | 项目 | 状态 |
 |---|---|
-| 文档来源 | 产品、架构、安全与交付路线图整理 |
+| 文档位置 | `docs/` 单一文档源，直接构建文档站 |
 | 仓库 | `hearthproject/hearth-os` |
 | 阶段 | Specification & planning |
 | 实现 | 尚未开始 |

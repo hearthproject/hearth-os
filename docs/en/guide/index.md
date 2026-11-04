@@ -47,4 +47,4 @@ The roadmap rests on three core principles:
 - **Development Log**: Day01 and Day02 records of real progress, verification evidence, problems, and next steps, plus a copyable daily template.
 - **Reference**: Build-vs-integrate boundaries, glossary, default checklist, FAQ, contribution guide, and the complete roadmap archive.
 
-The complete main document is preserved on the [archive page](/en/reference/full-roadmap). For daily reading, we recommend using the topic pages reorganized in this folder.
+The complete main document is preserved on the [archive page](/en/reference/full-roadmap). For daily reading, we recommend the topic-based pages. The documentation site and every formal page come from the same `docs/` folder; see the [Documentation Map](/en/reference/source-map) for the full structure.

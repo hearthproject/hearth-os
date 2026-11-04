@@ -1,6 +1,6 @@
 ---
 title: 'Project Status'
-description: 'The current version of Hearth, what has been completed, what has not yet started, and the next-phase plan.'
+description: 'The current status of Hearth, what has been completed, what has not yet started, and the next-phase plan.'
 outline: [2, 3]
 ---
 
@@ -14,7 +14,7 @@ outline: [2, 3]
 
 | Item | Status |
 |---|---|
-| Documentation source | Curated product, architecture, security, and delivery roadmap |
+| Documentation location | One canonical source under `docs/`, built directly into the site |
 | Repository | `hearthproject/hearth-os` |
 | Phase | Specification & planning |
 | Implementation | Not yet started |

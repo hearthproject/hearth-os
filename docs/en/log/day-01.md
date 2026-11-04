@@ -1,6 +1,6 @@
 ---
 title: 'Day01 · Bilingual documentation launch'
-description: 'Hearth development log Day01: bilingual information architecture, light-blue visual design, homepage reading paths, and source coverage.'
+description: 'Hearth development log Day01: bilingual information architecture, light-blue visual design, homepage reading paths, and documentation structure.'
 outline: [2, 3]
 ---
 
@@ -15,17 +15,17 @@ outline: [2, 3]
 - Built Chinese and English pages with corresponding paths, heading levels, and primary structure.
 - Reorganized the roadmap into Start, Product, System Design, Delivery, and Reference entry points.
 - Delivered a light-blue visual system, homepage reading paths, and responsive desktop/mobile layout.
-- Kept the complete roadmap, volumes, build boundary, and source map traceable.
+- Kept the complete roadmap, volume content, and build boundary traceable.
 
 ## Verification evidence
 
 - Both Chinese and English sites build independently and are reachable on GitHub Pages.
 - Internal links, search, Mermaid diagrams, and language switching pass checks.
-- The source-coverage script confirms that 100% of source prose blocks appear in the Chinese site.
+- The in-site archive confirms that the complete roadmap and volume material remain traceable.
 
 ## Problems encountered
 
-- The source material is long; copying it directly leaves readers unsure where to begin.
+- The roadmap material is long; copying it directly leaves readers unsure where to begin.
 - If Chinese and English structures diverge, maintenance and search accuracy degrade.
 - An old documentation version can make readers mistake the docs for a product release.
 

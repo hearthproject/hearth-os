@@ -28,7 +28,7 @@ const safeguards = [
 
 <p class="lead">The product roadmap defines scope, order, and stage gates. "From 0 to 100" turns that outline into seven independently buildable and verifiable modules. Engineering safeguards cover the repository, risk, and critical decisions.</p>
 
-> **There is one reading order:** read the [product roadmap](/en/delivery/roadmap) first to confirm what the current stage does and does not include; then enter the matching Stage module; finally review [engineering safeguards](#engineering-safeguards) and [source coverage](/en/reference/source-map).
+> **There is one reading order:** read the [product roadmap](/en/delivery/roadmap) first to confirm what the current stage does and does not include; then enter the matching Stage module; finally review [engineering safeguards](#engineering-safeguards) and the [documentation map](/en/reference/source-map).
 
 ## Layer 1: The Product Roadmap Is the Master Outline
 
@@ -80,4 +80,4 @@ The seven modules contain 35 D increments, and every increment splits into four 
 3. Ready to build: open [Stage 0](/en/delivery/stage-0) and complete its steps and increments in order.
 4. Ready to merge: check [Risks & Kill Criteria](/en/delivery/risks) and the [default checklists](/en/reference/checklists).
 
-To confirm that every source document has a corresponding page, open [Sources & Coverage](/en/reference/source-map).
+To review the complete directory, reading hierarchy, and maintenance rules, open the [Documentation Map](/en/reference/source-map).

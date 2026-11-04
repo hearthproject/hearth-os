@@ -23,8 +23,10 @@ hearth-os/
 │  ├─ delivery/                # Roadmap, planning, engineering, and risks
 │  ├─ reference/               # Boundaries, terminology, FAQ, archive
 │  └─ .vitepress/              # Site configuration and theme
+├─ scripts/                    # Delivery-page generation
 ├─ package.json
-└─ README.md
+├─ README.md                   # English repository entry
+└─ README.zh-CN.md             # Chinese repository entry
 ```
 
 ## Local Development
@@ -50,6 +52,7 @@ npm run docs:preview
 - External side effects must clearly document approval, idempotency, receipts, and reconciliation.
 - Prefer text or Mermaid for diagrams to ensure they are diffable and translatable.
 - Keep Chinese and English isomorphic: paths, heading levels, and navigation positions must match.
+- Write formal documentation only under `docs/`; README is an entry point, not a second copy of the body text.
 
 ## Before Submitting a PR
 
@@ -61,7 +64,7 @@ npm run docs:preview
 
 ## Documentation Source of Truth
 
-This site is the readable edition of the original roadmap; the [full roadmap archive](/en/reference/full-roadmap) retains the original long-form document. If discrepancies arise between the two, the full master document and the repository commit history take precedence, and the reason for restructuring should be explained in the PR.
+`docs/` is the only formal documentation source shared by the repository and the site; there is no second copy of the body text. Chinese pages are the default reading path, and English pages mirror them under `docs/en/`. The [full roadmap archive](/en/reference/full-roadmap) is also a page inside `docs/` and preserves long-form detail. When facts, protocols, or stage gates change, update the Chinese page, English mirror, and related indexes together.
 
 ## License
 

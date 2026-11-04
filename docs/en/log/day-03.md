@@ -1,6 +1,6 @@
 ---
 title: 'Day03 · Delivery increments expanded into developer playbooks'
-description: 'Hearth development log Day03: 35 increments expanded into 140 work packages with engineering maps, interfaces, acceptance rehearsals, and sources.'
+description: 'Hearth development log Day03: 35 increments expanded into 140 work packages with engineering maps, interfaces, acceptance rehearsals, and reference entry points.'
 outline: [2, 3]
 ---
 
@@ -22,7 +22,7 @@ outline: [2, 3]
 
 - Increment IDs were checked against detail data stage by stage; all 35 increments have exactly four Chinese and English work packages.
 - Pages were regenerated, and the delivery sidebar still maps all 35 increments without changing existing URLs.
-- Bilingual build, internal-link, source-coverage, and translation-structure checks pass.
+- Bilingual build, internal-link, documentation-structure, and translation-structure checks pass.
 - Long paragraphs, tables, and command blocks were checked at desktop and phone widths with no horizontal overflow.
 
 ## Problems encountered

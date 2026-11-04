@@ -28,7 +28,7 @@ const safeguards = [
 
 <p class="lead">产品路线图定义范围、顺序和阶段门槛；“从 0 到 100”把总纲拆成七个可以独立施工和验收的模块；工程保障负责仓库、风险与关键决策。</p>
 
-> **阅读顺序只有一条：** 先读[产品路线图](/delivery/roadmap)，确认当前阶段做什么、不做什么；再进入对应的 Stage 模块；最后查阅[工程保障](#工程保障)与[来源覆盖](/reference/source-map)。
+> **阅读顺序只有一条：** 先读[产品路线图](/delivery/roadmap)，确认当前阶段做什么、不做什么；再进入对应的 Stage 模块；最后查阅[工程保障](#工程保障)与[文档地图](/reference/source-map)。
 
 ## 第一层：产品路线图是总纲
 
@@ -80,4 +80,4 @@ const safeguards = [
 3. 开始动手：打开[Stage 0](/delivery/stage-0)，按步骤和增量逐项完成。
 4. 准备合并：检查[风险与 Kill Criteria](/delivery/risks)与[默认清单](/reference/checklists)。
 
-需要确认原始材料是否都有对应页面，请直接查看[文档来源与覆盖](/reference/source-map)。
+需要查看完整目录、阅读层级和文档维护规则，请打开[文档地图与维护](/reference/source-map)。

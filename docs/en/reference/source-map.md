@@ -1,121 +1,103 @@
 ---
-title: 'Sources & Coverage'
-description: 'A page-by-page mapping of the Hearth roadmap, ten volumes, build-vs-integrate note, and volume README to this site.'
+title: 'Documentation Map'
+description: 'The single documentation source, directory structure, reading hierarchy, bilingual rules, and update workflow for Hearth.'
 outline: [2, 3]
 ---
 
-<p class="eyebrow">SOURCES & COVERAGE</p>
+<p class="eyebrow">DOCUMENTATION MAP</p>
 
-# Sources & Coverage
+# Documentation Map
 
-<p class="lead">This site is not a set of disconnected articles; it is a topic-based reorganization of the original roadmap material. This page shows where every source document lives and which original conclusions are preserved.</p>
+<p class="lead">All formal documentation lives only in `docs/`. The documentation site is built directly from this folder, and the README files are repository entry points, so the repository and the published site always contain the same documentation.</p>
 
-## Coverage Result
+## Single Documentation Source
 
-| Audit item | Result |
-|---|---|
-| Source material | One complete master document, ten volumes, one build-vs-integrate note, and one volume README |
-| Ten volumes | Every substantive block is present verbatim in the Chinese site; coverage is 100% |
-| Complete master document | 595/595 substantive blocks preserved; coverage is 100% |
-| Build-vs-integrate note | 67/67 substantive blocks preserved; coverage is 100% |
-| Delivery detail | Seven Stages expand into 35 independent D increment pages with steps, contracts, deliverables, acceptance, and failure recovery |
-| Development log | A log home, Day01, Day02, and a copyable daily template with matching Chinese and English structure |
-| Bilingual structure | Every Chinese page has an English page with a matching path and heading hierarchy |
-
-The audit works at the level of substantive blocks, not sampled character counts. The original long-form document also remains in the [full roadmap archive](/en/reference/full-roadmap). Topic pages reduce reading cost; the archive preserves complete detail.
-
-## Original Volume README: Conclusions and Reading Paths
-
-Hearth is a single-user, self-hosted, long-running, low-interruption, low-Token general-purpose personal Agent OS. Its core is not "another model"; it is task control, durable execution, memory, verification, approvals, receipts, and a quiet task-card experience.
-
-The roadmap rests on three core principles:
-
-1. **Build the smallest product first, then the complete OS.** A daily-usable MVP must appear inside Stage 1, not wait until Stage 6.
-2. **The frontend exists from day one.** Stage 0 has a clickable prototype, and Stage 1 has real Web task cards; every increment needs a user-visible path, verification, and recovery.
-3. **Stop planning by week or month.** Chapter 25 is the complete Stage 0–6 progressive development sequence, driven only by capability gates and with no development time limit.
-
-### Product and Decision Path
-
-For a first introduction to the project, or when deciding whether to continue investing:
-
-1. [Product Definition and Design Judgment](/en/product/definition)
-2. [Phased Product Roadmap](/en/delivery/roadmap)
-3. [From 0 to 100 Development Plan](/en/delivery/development-plan)
-4. [Engineering Delivery, Risk, and Decisions](/en/delivery/engineering)
-
-### Architecture and Technology Path
-
-For preparing implementation or checking system boundaries:
-
-1. [Overall Architecture and Domain Protocols](/en/architecture/overview)
-2. [Entry, Control Plane, and Durable Execution](/en/architecture/control-plane)
-3. [Executor System and Human Takeover](/en/architecture/executor-model)
-4. [Execution Safety, Memory, and Evolution](/en/architecture/execution-safety)
-5. [Token Economics and Frontend Experience](/en/architecture/token-economics)
-6. [Security, Privacy, and Evaluation](/en/architecture/security-privacy)
-
-### Direct Build Path
-
-For readers ready to create the repository:
-
-1. The MVP and Stage 1 sections of the [From 0 to 100 Development Plan](/en/delivery/development-plan)
-2. [Overall Architecture and Domain Protocols](/en/architecture/domain-model)
-3. [Entry, Control Plane, and Durable Execution](/en/architecture/durable-execution)
-4. [Engineering Delivery, Risk, and Decisions](/en/delivery/engineering)
-
-## Source Material to Site Pages
-
-| Volume | Corresponding master chapters | What you can answer after reading |
+| Content | Only location | Purpose |
 |---|---|---|
-| [01 Product Definition and Design Judgment](/en/product/definition) | Chapters 0–3 | Who Hearth is for, what it does, what it does not do, and why it is not a Codex wrapper |
-| [02 Overall Architecture and Domain Protocols](/en/architecture/overview) | Chapters 4–5 | How the seven planes cooperate and what the core entities and protocols are |
-| [03 Entry, Control Plane, and Durable Execution](/en/architecture/gateway) | Chapters 6–8 | How events enter, how they are authorized, and how execution and recovery stay reliable |
-| [04 Executor System and Human Takeover](/en/architecture/executor-model) | Chapters 9–16 | How Codex, Native, Connector, Browser, GUI, Document/Data, and Human divide work |
-| [05 Execution Safety, Memory, and Evolution](/en/architecture/execution-safety) | Chapters 17–19 | How Sandbox, credentials, side effects, memory, and skill evolution stay controlled |
-| [06 Token Economics and Frontend Experience](/en/architecture/token-economics) | Chapters 20–21 | How Tokens are controlled and why users only see tasks |
-| [07 Security, Privacy, and Evaluation](/en/architecture/security-privacy) | Chapters 22–23 | The trust boundaries, threat model, evaluation, and stage gates |
-| [08 Phased Product Roadmap](/en/delivery/roadmap) | Chapter 24 | What Stages 0–6 deliver and when each is complete |
-| [09 From 0 to 100 Development Plan](/en/delivery/development-plan) | Chapter 25 | The build order, MVP contents, and acceptance method for each increment |
-| [10 Engineering Delivery, Risk, and Decisions](/en/delivery/engineering) | Chapters 26–29 | How to lay out the repository, when to stop, and the ADRs and final judgment |
+| Chinese documentation | `docs/` | Default reading path and source of truth for maintenance |
+| English mirror | `docs/en/` | Mirrors Chinese paths, heading levels, and structure |
+| Site configuration | `docs/.vitepress/` | Navigation, sidebar, theme, and build configuration |
+| Full roadmap | `docs/reference/full-roadmap.md` | The only long-form archive page in the site |
+| Repository entry | `README.md`, `README.zh-CN.md` | Project introduction and navigation only; no duplicated body text |
 
-### Additional Sources
+> There is no second `sources/` documentation tree. For complete detail, use the in-site [Full Roadmap Archive](/en/reference/full-roadmap) instead of looking for another copy of the original manuscript.
 
-| Source | Site entry | Treatment |
+## Documentation Directory
+
+| Area | Content | Entry |
 |---|---|---|
-| Complete master document | [Full Roadmap Archive](/en/reference/full-roadmap) | Preserves every detail for search, citation, and difference checks |
-| Build-vs-integrate note | [Build vs. Integrate Boundary](/en/reference/build-vs-integrate) | Preserves the boundary conclusions, OpenClaw comparison, and Codex integration rules |
-| Volume README | [Start Reading](/en/guide/), [Reading Guide](/en/guide/reading-guide), and this page | Preserves conclusions, three reading paths, the ten-volume catalog, and the one-page map |
-| Development-plan increments | Start at [D0.1](/en/delivery/stage-0/d0-1) | Expands seven Stages into 35 independently buildable and verifiable development pages |
-| Development log | [Development Log](/en/log/) | Records real progress, evidence, problems, decisions, and next steps; never imitates release notes |
+| Start | Positioning, reading paths, and current status | [Start Reading](/en/guide/) |
+| Product | Definition, design principles, and task coverage | [Product](/en/product/) |
+| System Design | Architecture, protocols, control plane, executors, safety, memory, and evaluation | [System Design](/en/architecture/) |
+| Delivery | Product roadmap, development plan, Stages and D increments, engineering safeguards | [Delivery](/en/delivery/) |
+| Development Log | Daily progress, verification evidence, problems, and decisions | [Development Log](/en/log/) |
+| Reference | Boundaries, glossary, checklists, FAQ, contributing, and full archive | [Reference](/en/reference/) |
 
-## One-Page Map from 0 to 100
+## Reading Hierarchy
 
-```text
-Stage 0  Product wedge + clickable prototype + protocol/evaluation baseline
-   ↓
-Stage 1  Walking skeleton → first real Codex slice → MVP → side-effect safety → second task family
-   ↓
-Stage 2  Read-only connectors → docs/data → browser → drafts/approvals/receipts → daily operator
-   ↓
-Stage 3  Device agentd → observe/takeover → low-risk GUI → high-risk GUI
-   ↓
-Stage 4  Trigger/proactive inbox → mobile PWA → secure pairing → attention budget
-   ↓
-Stage 5  Memory Core → forgetting/export → skill candidates/evaluation → promotion/rollback
-   ↓
-Stage 6  Multi-device sync → offline queue → revocation/keys → backup migration → v1.0
-```
+The product roadmap is the master outline, the development plan decomposes it, and the Stage and D increment pages drive construction and acceptance:
 
-"100%" does not mean never iterating again; it is the v1.0 exit of Stage 6: a complete product that is recoverable, approvable, portable, revocable, and usable long term.
+1. **The product roadmap** explains why the work matters, what the current stage includes, and when it is complete.
+2. **The From 0 to 100 Development Plan** splits the outline into seven sequential modules.
+3. **Stage module pages** define prerequisites, stage exits, and what the stage excludes.
+4. **D increment pages** provide independently buildable and verifiable vertical slices.
+5. **Four work packages** explain implementation steps, engineering locations, interfaces, and failure recovery.
 
-## Coverage and Maintenance Rules
+Confirm the current stage's scope and exit before opening a concrete development page; never infer the whole product scope from a single work package.
 
-- **The master document** preserves every detail; volumes support topic-by-topic reading and do not replace it.
-- Every volume states its corresponding master chapters and prerequisite reading at the top.
-- "Stage" is a capability level, not a date; an "increment" is a development unit, not a schedule commitment.
-- Every stage gate must include user-visible UI, durable state, verification evidence, and recovery paths.
-- Capabilities that exist only in a CLI, log, or database do not count as stage completion.
-- Every Stage overview handles navigation and exits only; concrete construction follows its D increment pages.
-- The development log records real process; product versions and release notes are maintained only at formal release.
+## Three Reading Paths
 
-When source documents change, update the topic pages, complete archive, and English mirror together. The coverage audit script lives at `scripts/check-coverage.py`; it must never be weakened by deleting source prose.
+### Product and Decisions
+
+1. [Understanding Hearth](/en/guide/what-is-hearth)
+2. [Product Definition and Boundaries](/en/product/definition)
+3. [Phased Product Roadmap](/en/delivery/roadmap)
+4. [From 0 to 100 Development Plan](/en/delivery/development-plan)
+5. [Risks and Kill Criteria](/en/delivery/risks)
+
+### Architecture and Technology
+
+1. [System Design Overview](/en/architecture/)
+2. [Domain Model and Protocols](/en/architecture/domain-model)
+3. [Durable Execution and Recovery](/en/architecture/durable-execution)
+4. [Executor Model](/en/architecture/executor-model)
+5. [Security and Privacy](/en/architecture/security-privacy)
+6. [Evaluation System](/en/architecture/evaluation)
+
+### Start Building
+
+1. [Stage 0 · Definition and Prototype](/en/delivery/stage-0)
+2. [Engineering Delivery and Repository Structure](/en/delivery/engineering)
+3. [D0.1 · Product Wedge and Real-Task Baseline](/en/delivery/stage-0/d0-1)
+4. [Full Roadmap Archive](/en/reference/full-roadmap)
+
+## Topic Pages and the Complete Archive
+
+- Topic pages are the normal path for daily reading and maintenance, organized into product, architecture, delivery, and reference.
+- The [Full Roadmap Archive](/en/reference/full-roadmap) preserves long-form detail for search, citation, and comparison.
+- The archive and topic pages both live under `docs/`; they are not separate documentation sources.
+- When facts, protocols, or stage gates change, update the topic pages, archive, and English mirror together.
+
+## Maintenance Workflow
+
+1. Edit the Chinese page first, confirming that conclusions, boundaries, and links remain accurate.
+2. Create or update the English mirror at the same relative path under `docs/en/`.
+3. Update related entry points, sidebars, and cross-links so no stale path remains.
+4. Run `npm run docs:build` and eliminate build errors and internal dead links.
+5. Check long tables, code blocks, mobile widths, and language switching in local preview.
+
+## Pre-Commit Checklist
+
+- Modify formal documentation only under `docs/`; do not add a second documentation root.
+- Keep Chinese and English paths aligned with matching heading levels and list counts.
+- Preserve the delivery hierarchy: master outline → development plan → Stage → D increment → work package.
+- Keep README limited to the project pitch, quick start, and documentation navigation; do not duplicate long-form body text.
+- Show no version number, release badge, or formal-release tone in the documentation UI.
+- Do not commit `docs/.vitepress/dist`, caches, local secrets, or completion claims without evidence.
+
+## Documentation and Release Boundary
+
+- The current documentation describes specifications, design judgments, and development plans; it does not mean the product has shipped.
+- Development logs record real process and verification evidence; they never impersonate product release notes.
+- Maintain a formal version number and release notes only after implementation begins and an installable release exists.
+- Documentation changes ship through normal pull requests or commits, without a separate “documentation release” process.
