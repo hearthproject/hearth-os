@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 256" role="img" aria-labelledby="hearth-logo-title hearth-logo-desc">
+  <title id="hearth-logo-title">Hearth logo</title>
+  <desc id="hearth-logo-desc">Hearth organization lockup with the arch and ember symbol.</desc>
+  <g>
+    <path d="M62 206V126a66 66 0 0 1 132 0v80" fill="none" stroke="#1B1815" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M128 92c15 21 30 40 30 60 0 19-13 32-30 32s-30-13-30-32c0-16 10-31 23-48 1 13 6 22 15 27 2-13-1-26-8-39Z" fill="#F26B38"/>
+  </g>
+  <text x="326" y="151" fill="#1B1815" font-family="'Aptos Display','Segoe UI',Arial,sans-serif" font-size="104" font-weight="700" letter-spacing="18">HEARTH</text>
+  <text x="330" y="202" fill="#8C8378" font-family="'Aptos','Segoe UI',Arial,sans-serif" font-size="17" font-weight="500" letter-spacing="6.5">A HOME FOR DURABLE WORK</text>
+</svg>

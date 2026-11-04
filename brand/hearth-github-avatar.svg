@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="hearth-avatar-title hearth-avatar-desc">
+  <title id="hearth-avatar-title">Hearth organization avatar</title>
+  <desc id="hearth-avatar-desc">A cream hearth arch holding an ember on a full charcoal square.</desc>
+  <rect width="512" height="512" fill="#1B1815"/>
+  <g transform="translate(90 90) scale(1.3)">
+    <path d="M62 206V126a66 66 0 0 1 132 0v80" fill="none" stroke="#FFF9F2" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M128 92c15 21 30 40 30 60 0 19-13 32-30 32s-30-13-30-32c0-16 10-31 23-48 1 13 6 22 15 27 2-13-1-26-8-39Z" fill="#F26B38"/>
+  </g>
+</svg>
