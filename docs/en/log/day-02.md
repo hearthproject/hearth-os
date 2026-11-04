@@ -17,3 +17,6 @@ On 2026-11-04, the Hearth documentation site took its second complete shape: Sta
 | `1bd9a4c` | JasonBuildAI | Fixed both READMEs to use the theme-aware Hearth OS logo; 3 files. |
 | `e18c929` | JasonBuildAI | Simplified the development logs to one daily overview plus commit records, removed the log index, template, Day03, and long-form sections, and updated navigation and links; 17 files. |
 | `42128e4` | JasonBuildAI | Rewrote the documentation information architecture: reduced the homepage to a single-page entry, merged design and delivery paths, renamed reference to appendix, removed old routes and legacy stage naming, and simplified the development log to one summary plus a commit table; 68 files changed and 29 old files removed (+1,016/−3,751). |
+| `b5d3aa` | JasonBuildAI | Added the documentation IA commit 42128e4 to the Day02 log; 2 files. |
+| `c1903da` | JasonBuildAI | Removed the retired positioning phrase from the Day02 log and normalized it to legacy stage naming; 2 files. |
+| `0f89bea` | JasonBuildAI | Tightened the homepage hero and vertical spacing, added four compact entry links, and expanded the Architecture and Reference sidebar groups; 4 files. |
