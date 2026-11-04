@@ -1,12 +1,14 @@
-# Hearth
+<p align="center">
+  <img src="docs/public/brand/hearth-os-logo.png" alt="Hearth OS" width="420">
+</p>
 
 **A self-hosted personal Agent OS for durable, auditable, and recoverable digital work.**
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-[![Documentation](https://img.shields.io/badge/documentation-%E4%B8%AD%E6%96%87%20%7C%20English-2f7fa8)](https://hearthproject.github.io/hearth-os/)
-[![Status](https://img.shields.io/badge/status-specification%20%26%20planning-8a6f2e)](#project-status)
-[![License](https://img.shields.io/badge/license-Apache--2.0-4c7a5a)](LICENSE)
+[![Documentation](https://img.shields.io/badge/documentation-%E4%B8%AD%E6%96%87%20%7C%20English-b8471d)](https://hearthproject.github.io/hearth-os/)
+[![Status](https://img.shields.io/badge/status-specification%20%26%20planning-8c8378)](#project-status)
+[![License](https://img.shields.io/badge/license-Apache--2.0-1b1815)](LICENSE)
 
 Hearth turns user intent into durable, auditable, and recoverable tasks. It coordinates specialized executors such as Codex, connectors, browsers, and desktop agents, while keeping every external effect behind explicit approvals, idempotency, receipts, and recovery paths.
 

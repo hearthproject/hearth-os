@@ -1,12 +1,14 @@
-# Hearth
+<p align="center">
+  <img src="docs/public/brand/hearth-os-logo.png" alt="Hearth OS" width="420">
+</p>
 
 **一个单用户、自托管的个人 Agent OS，让数字工作可持久、可审计、可恢复。**
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-[![文档](https://img.shields.io/badge/文档-中文%20%7C%20English-2f7fa8)](https://hearthproject.github.io/hearth-os/)
-[![状态](https://img.shields.io/badge/状态-规格与规划阶段-8a6f2e)](#项目状态)
-[![许可证](https://img.shields.io/badge/license-Apache--2.0-4c7a5a)](LICENSE)
+[![文档](https://img.shields.io/badge/文档-中文%20%7C%20English-b8471d)](https://hearthproject.github.io/hearth-os/)
+[![状态](https://img.shields.io/badge/状态-规格与规划阶段-8c8378)](#项目状态)
+[![许可证](https://img.shields.io/badge/license-Apache--2.0-1b1815)](LICENSE)
 
 Hearth 把用户意图变成可持久、可审计、可恢复的任务。它协调 Codex、连接器、浏览器、桌面 Agent 等专用执行器，并把所有外部副作用放在明确审批、幂等、回执和恢复机制之后。
 

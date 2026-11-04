@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="hearth-app-icon-title hearth-app-icon-desc">
+  <title id="hearth-app-icon-title">Hearth app icon</title>
+  <desc id="hearth-app-icon-desc">The Hearth arch and ember mark on a warm charcoal app tile.</desc>
+  <rect width="512" height="512" rx="116" fill="#1B1815"/>
+  <g transform="translate(64 64) scale(1.5)">
+    <path d="M62 206V126a66 66 0 0 1 132 0v80" fill="none" stroke="#FFF9F2" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M128 92c15 21 30 40 30 60 0 19-13 32-30 32s-30-13-30-32c0-16 10-31 23-48 1 13 6 22 15 27 2-13-1-26-8-39Z" fill="#F26B38"/>
+  </g>
+</svg>

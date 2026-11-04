@@ -4,30 +4,30 @@
   --vp-font-family-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono',
     monospace;
 
-  --vp-c-brand-1: #2f7fa8;
-  --vp-c-brand-2: #4b9cc4;
-  --vp-c-brand-3: #1f6285;
-  --vp-c-brand-soft: rgba(47, 127, 168, 0.12);
-  --vp-c-brand-softer: rgba(47, 127, 168, 0.065);
+  --vp-c-brand-1: #b8471d;
+  --vp-c-brand-2: #d85b2c;
+  --vp-c-brand-3: #8d3412;
+  --vp-c-brand-soft: rgba(242, 107, 56, 0.13);
+  --vp-c-brand-softer: rgba(242, 107, 56, 0.07);
 
-  --vp-c-bg: #f6fbff;
-  --vp-c-bg-alt: #edf6fc;
-  --vp-c-bg-soft: #e2f0f9;
-  --vp-c-bg-elv: #fbfdff;
+  --vp-c-bg: #fbf7f1;
+  --vp-c-bg-alt: #f5ede2;
+  --vp-c-bg-soft: #ede2d3;
+  --vp-c-bg-elv: #fff9f2;
 
-  --vp-c-text-1: #173042;
-  --vp-c-text-2: #506b7d;
-  --vp-c-text-3: #7790a0;
-  --vp-c-divider: #d5e6f1;
-  --vp-c-gutter: #e1eef7;
+  --vp-c-text-1: #1b1815;
+  --vp-c-text-2: #5f564d;
+  --vp-c-text-3: #8c8378;
+  --vp-c-divider: #ded1be;
+  --vp-c-gutter: #e8dccb;
 
   --vp-home-hero-name-color: transparent;
   --vp-home-hero-name-background: linear-gradient(
     118deg,
-    #1f6285 0%,
-    #2f7fa8 38%,
-    #58abc9 72%,
-    #8cc9dc 100%
+    #8d3412 0%,
+    #b8471d 38%,
+    #f26b38 72%,
+    #ff9a6b 100%
   );
 
   --vp-nav-height: 84px;
@@ -36,29 +36,29 @@
 }
 
 .dark {
-  --vp-c-brand-1: #6fc3e4;
-  --vp-c-brand-2: #91d3ed;
-  --vp-c-brand-3: #a8def1;
-  --vp-c-brand-soft: rgba(111, 195, 228, 0.14);
-  --vp-c-brand-softer: rgba(111, 195, 228, 0.075);
+  --vp-c-brand-1: #ff8a5c;
+  --vp-c-brand-2: #ffa27a;
+  --vp-c-brand-3: #f26b38;
+  --vp-c-brand-soft: rgba(242, 107, 56, 0.16);
+  --vp-c-brand-softer: rgba(242, 107, 56, 0.08);
 
-  --vp-c-bg: #0b1720;
-  --vp-c-bg-alt: #10232e;
-  --vp-c-bg-soft: #162e3b;
-  --vp-c-bg-elv: #10232e;
+  --vp-c-bg: #12100e;
+  --vp-c-bg-alt: #1b1815;
+  --vp-c-bg-soft: #25201b;
+  --vp-c-bg-elv: #1b1815;
 
-  --vp-c-text-1: #e7f3f9;
-  --vp-c-text-2: #b7cdda;
-  --vp-c-text-3: #7f9baa;
-  --vp-c-divider: #233e4c;
-  --vp-c-gutter: #182f3b;
+  --vp-c-text-1: #fff9f2;
+  --vp-c-text-2: #c7b8a6;
+  --vp-c-text-3: #8c8378;
+  --vp-c-divider: #3a332d;
+  --vp-c-gutter: #2a241f;
 
   --vp-home-hero-name-background: linear-gradient(
     118deg,
-    #a8e6f5 0%,
-    #7fcee8 38%,
-    #59abc9 72%,
-    #3b8aaf 100%
+    #fff9f2 0%,
+    #ffc2a6 38%,
+    #f26b38 72%,
+    #c74e20 100%
   );
 }
 
@@ -67,7 +67,7 @@
 }
 
 ::selection {
-  background: rgba(75, 156, 196, 0.24);
+  background: rgba(242, 107, 56, 0.24);
 }
 
 html {
@@ -76,13 +76,13 @@ html {
 
 body {
   background:
-    radial-gradient(ellipse at 8% -10%, rgba(86, 174, 211, 0.16), transparent 34%),
-    linear-gradient(180deg, #f9fdff 0%, var(--vp-c-bg) 42%, #f2faff 100%);
+    radial-gradient(ellipse at 8% -10%, rgba(242, 107, 56, 0.14), transparent 34%),
+    linear-gradient(180deg, #fff9f2 0%, var(--vp-c-bg) 42%, #f5ede2 100%);
 }
 
 .dark body {
   background:
-    radial-gradient(ellipse at 8% -10%, rgba(81, 164, 201, 0.12), transparent 32%),
+    radial-gradient(ellipse at 8% -10%, rgba(242, 107, 56, 0.1), transparent 32%),
     var(--vp-c-bg);
 }
 
@@ -411,8 +411,8 @@ body {
 
 .VPHome {
   background:
-    radial-gradient(ellipse at 80% 4%, rgba(86, 174, 211, 0.14), transparent 30%),
-    radial-gradient(ellipse at 10% 18%, rgba(145, 211, 237, 0.1), transparent 28%);
+    radial-gradient(ellipse at 80% 4%, rgba(242, 107, 56, 0.12), transparent 30%),
+    radial-gradient(ellipse at 10% 18%, rgba(255, 186, 148, 0.1), transparent 28%);
 }
 
 .VPHero {
@@ -472,7 +472,7 @@ body {
 }
 
 .VPHero .image-bg {
-  background: radial-gradient(circle, rgba(86, 174, 211, 0.22), transparent 64%);
+  background: radial-gradient(circle, rgba(242, 107, 56, 0.18), transparent 64%);
   filter: blur(20px);
 }
 

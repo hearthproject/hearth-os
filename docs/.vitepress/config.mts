@@ -312,8 +312,8 @@ const searchOptions = (translations: typeof zhSearchTranslations) => ({
 export default withMermaid(
   defineConfig({
     lang: 'zh-CN',
-    title: 'Hearth',
-    titleTemplate: ':title · Hearth',
+    title: 'Hearth OS',
+    titleTemplate: ':title · Hearth Project',
     description:
       'Hearth 是一个单用户、自托管、长期驻留的个人 Agent OS。用持久执行、明确审批和可验证回执，把意图变成可靠的任务。',
     base: '/hearth-os/',
@@ -321,9 +321,9 @@ export default withMermaid(
     lastUpdated: true,
     head: [
       ['link', { rel: 'icon', type: 'image/svg+xml', href: '/hearth-os/logo.svg' }],
-      ['meta', { name: 'theme-color', content: '#2f7fa8' }],
+      ['meta', { name: 'theme-color', content: '#1b1815' }],
       ['meta', { property: 'og:type', content: 'website' }],
-      ['meta', { property: 'og:title', content: 'Hearth — Personal Agent OS' }],
+      ['meta', { property: 'og:title', content: 'Hearth OS — Personal Agent OS' }],
       [
         'meta',
         {
@@ -338,8 +338,8 @@ export default withMermaid(
       hostname: 'https://hearthproject.github.io/hearth-os/'
     },
     themeConfig: {
-      logo: { src: '/logo.svg', width: 28, height: 28 },
-      siteTitle: 'Hearth',
+      logo: { src: '/logo.svg', alt: 'Hearth OS', width: 32, height: 32 },
+      siteTitle: 'Hearth OS',
       nav: zhNav,
       sidebar: zhSidebar,
       socialLinks: [
@@ -365,7 +365,7 @@ export default withMermaid(
       root: {
         label: '简体中文',
         lang: 'zh-CN',
-        title: 'Hearth',
+        title: 'Hearth OS',
         description:
           'Hearth 是一个单用户、自托管、长期驻留的个人 Agent OS。用持久执行、明确审批和可验证回执，把意图变成可靠的任务。'
       },
@@ -373,7 +373,7 @@ export default withMermaid(
         label: 'English',
         lang: 'en-US',
         link: '/en/',
-        title: 'Hearth',
+        title: 'Hearth OS',
         description:
           'Hearth is a single-user, self-hosted personal Agent OS for durable, auditable, and recoverable digital work.',
         themeConfig: {
