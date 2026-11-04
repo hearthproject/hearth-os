@@ -22,3 +22,4 @@ outline: false
 | `afae9b9` | Jason Cat | 应用 Hearth OS 品牌识别：更新主题色、logo、GitHub 头像、首页和 README；20 个文件（+264/−179）。 |
 | `8e51f09` | JasonBuildAI | 在工程交付页补充九层测试体系、测试与评估的边界、回归测试和发布证据要求；4 个文件（+218/−38）。 |
 | `1bd9a4c` | JasonBuildAI | 修正中英文 README，改用随主题切换的 Hearth OS logo；3 个文件。 |
+| `e18c929` | JasonBuildAI | 精简开发日志：每天仅保留概述与提交记录，移除日志首页、模板、Day03 及长篇阶段内容，并同步更新导航与相关链接；17 个文件。 |

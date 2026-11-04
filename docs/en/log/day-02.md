@@ -22,3 +22,4 @@ outline: false
 | `afae9b9` | Jason Cat | Applied Hearth OS identity across theme colors, logos, the GitHub avatar, the homepage, and the READMEs; 20 files (+264/−179). |
 | `8e51f09` | JasonBuildAI | Added the nine testing layers, the boundary between tests and evaluations, regression requirements, and release evidence to the engineering page; 4 files (+218/−38). |
 | `1bd9a4c` | JasonBuildAI | Fixed both READMEs to use the theme-aware Hearth OS logo; 3 files. |
+| `e18c929` | JasonBuildAI | Simplified the development logs to one daily overview plus commit records, removed the log index, template, Day03, and long-form sections, and updated navigation and links; 17 files. |
