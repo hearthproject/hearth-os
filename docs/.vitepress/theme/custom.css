@@ -416,8 +416,7 @@ body {
 }
 
 .VPHero {
-  padding: 168px 32px 108px !important;
-  min-height: calc(100vh - var(--vp-nav-height));
+  padding: 96px 32px 72px !important;
   display: flex;
   align-items: center;
 }
@@ -433,7 +432,7 @@ body {
 }
 
 .VPHero .name {
-  font-size: clamp(54px, 7vw, 82px);
+  font-size: clamp(48px, 6.2vw, 72px);
   font-weight: 720;
   letter-spacing: -0.07em;
   line-height: 0.98;
@@ -441,8 +440,8 @@ body {
 
 .VPHero .text {
   max-width: 760px;
-  margin-top: 18px;
-  font-size: clamp(30px, 4.2vw, 50px);
+  margin-top: 16px;
+  font-size: clamp(28px, 3.8vw, 44px);
   font-weight: 540;
   letter-spacing: -0.045em;
   line-height: 1.13;
@@ -451,15 +450,15 @@ body {
 
 .VPHero .tagline {
   max-width: 620px;
-  margin-top: 22px;
+  margin-top: 18px;
   color: var(--vp-c-text-2);
-  font-size: 16px;
-  line-height: 1.85;
+  font-size: 15.5px;
+  line-height: 1.75;
   text-wrap: pretty;
 }
 
 .VPHero .actions {
-  margin-top: 30px;
+  margin-top: 26px;
 }
 
 .VPHero .action .VPButton {
@@ -488,8 +487,7 @@ body {
 
 @media (max-width: 960px) {
   .VPHero {
-    padding: 112px 24px 80px !important;
-    min-height: auto;
+    padding: 88px 24px 64px !important;
   }
 
   .VPHero .image {
@@ -503,11 +501,11 @@ body {
 
 @media (max-width: 640px) {
   .VPHero {
-    padding: 92px 20px 68px !important;
+    padding: 78px 20px 58px !important;
   }
 
   .VPHero .name {
-    font-size: 58px;
+    font-size: 52px;
   }
 
   .VPHero .text {

@@ -26,7 +26,7 @@ Hearth 自己做“指挥系统、账本、门禁和验收”，集成“模型�
 - **每个增量都是纵向切片**：用户结果、界面、后端、执行器、验证和恢复一起出现；只有 CLI 或日志的能力不算阶段完成。
 - **自研/集成边界不因 MVP 改变**：MVP 仍然不自研模型、容器内核或完整 Agent 框架，但必须自研任务控制、验证、审批、恢复和用户界面。
 
-具体增量顺序见主路线图第 25 章或分册 `Hearth_路线图分册/09_从0到100开发计划.md`。
+具体增量顺序见[交付路线与实施计划](/delivery/)。
 
 ## 一、Hearth 自己做的核心部分
 
@@ -333,7 +333,7 @@ Codex 可以作为 Hearth 的“高能力工作区执行器”，而且现在就
 
 - Hearth 的 Codex 定位与 Build vs Integrate：完整主文档第 2.3–2.4 节
 - Hearth 最终集成边界：完整主文档第 29.5 节
-- MVP 与从 0 到 100 的开发顺序：完整主文档第 25 章
+- MVP 与增量顺序：[交付路线与实施计划](/delivery/)
 - OpenClaw Gateway、渠道和设备节点：本机 OpenClaw 文档 `docs/concepts/architecture.md`
 - OpenClaw 审计账本与执行身份：本机 OpenClaw 文档 `docs/gateway/audit.md`
 - OpenClaw 沙箱后端：本机 OpenClaw 文档 `docs/gateway/sandboxing.md`

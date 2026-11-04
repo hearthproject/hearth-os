@@ -1,36 +1,38 @@
 ---
-title: 'Reference Overview'
-description: 'Hearth reference and appendix entry points: build boundaries, terminology, checklists, FAQ, contributing, the documentation map, and the complete roadmap archive.'
+title: 'Appendix'
+description: 'Hearth appendix: engineering implementation, risks and decisions, build boundaries, terminology, checklists, FAQ, contribution, and archive.'
 outline: [2, 3]
 ---
 
-<script setup>
-const cards = [
-  { no: '01', title: 'Build vs. Integrate Boundaries', text: 'Hearth builds its own core control and memory, and directly integrates models, Codex, browsers, document parsing, and the Sandbox kernel.', link: '/en/reference/build-vs-integrate' },
-  { no: '02', title: 'Glossary', text: 'Unified definitions for core terms such as Task, Ticket, Mandate, Run, Receipt, Memory, and Skill.', link: '/en/reference/glossary' },
-  { no: '03', title: 'Default Checklists', text: 'The definitive definitions of the default approval checklist, the default completion checklist, and task coverage.', link: '/en/reference/checklists' },
-  { no: '04', title: 'FAQ', text: 'How Hearth relates to Coding Agents, Codex wrappers, Stage 1, side effects, evolution, and multi-user support.', link: '/en/reference/faq' },
-  { no: '05', title: 'Contributing and Documentation Maintenance', text: 'Repository structure, local development, writing conventions, PR checklist, and source of truth.', link: '/en/reference/contributing' },
-  { no: '06', title: 'Documentation Map', text: 'The single documentation source, directory structure, reading hierarchy, bilingual rules, and update workflow.', link: '/en/reference/source-map' },
-  { no: '07', title: 'Full Roadmap (Archived)', text: 'The complete master document, retaining all original details, suitable for search and citation.', link: '/en/reference/full-roadmap' }
-]
-</script>
+<p class="eyebrow">APPENDIX</p>
 
-<p class="eyebrow">REFERENCE</p>
+# Appendix
 
-# Reference and Appendix
+<p class="lead">The main documentation explains what Hearth does, why it is designed this way, and how it is delivered. The appendix keeps the engineering boundaries, risks, decisions, terminology, and checklists that implementers and maintainers return to.</p>
 
-<p class="lead">This section contains materials that implementers and maintainers will consult repeatedly: boundaries, terminology, checklists, FAQ, contribution guidelines, and the complete roadmap archive.</p>
+## Engineering and Decisions
 
-<DocCardGrid :items="cards" :columns="2" />
+<DocCardGrid :columns="3" :items="[
+  { no: '01', title: 'Engineering and Repository Structure', text: 'Technology stack, repository layout, process model, testing, releases, and migrations.', link: '/en/reference/engineering' },
+  { no: '02', title: 'Risks and Kill Criteria', text: 'Global pause conditions, stage kill criteria, and foundations that must never be cut.', link: '/en/reference/risks' },
+  { no: '03', title: 'ADRs and Key Decisions', text: 'Architecture, permission, delivery, and product decisions that are hard to reverse.', link: '/en/reference/decisions' }
+]" />
 
-## How to Cite
+## Reference Material
 
-- When discussing product scope, prioritize citing the [full roadmap](/en/reference/full-roadmap) and [product definition](/en/product/definition);
-- When discussing engineering boundaries, prioritize citing [build vs. integrate boundaries](/en/reference/build-vs-integrate) and [engineering delivery](/en/delivery/engineering);
-- When discussing terminology, use the definitions in the [glossary](/en/reference/glossary) to avoid ambiguity from identical names;
-- When discussing phase progression, use the exit criteria in the [roadmap](/en/delivery/roadmap) and [risks](/en/delivery/risks).
+<DocCardGrid :columns="2" :items="[
+  { no: '04', title: 'Build vs. Integrate Boundaries', text: 'Which capabilities Hearth must own and which lower layers should be integrated.', link: '/en/reference/build-vs-integrate' },
+  { no: '05', title: 'Glossary', text: 'Unified definitions for Task, Run, Mandate, Receipt, Memory, Skill, and related terms.', link: '/en/reference/glossary' },
+  { no: '06', title: 'Default Checklists', text: 'The definitive approval, completion, and task coverage checklists.', link: '/en/reference/checklists' },
+  { no: '07', title: 'FAQ', text: 'How Hearth relates to coding agents, Codex, Stage 1, multi-user use, and evolution.', link: '/en/reference/faq' },
+  { no: '08', title: 'Contributing and Documentation', text: 'Local development, writing conventions, PR checks, and the source of truth.', link: '/en/reference/contributing' },
+  { no: '09', title: 'Documentation Map', text: 'Current information architecture, directory structure, bilingual rules, and maintenance workflow.', link: '/en/reference/source-map' },
+  { no: '10', title: 'Full Original Roadmap (Archive)', text: 'The old long-form content, retained for search, citation, and historical comparison.', link: '/en/reference/full-roadmap' }
+]" />
 
-## Documentation and Maintenance
+## How to Use This Appendix
 
-All formal documentation lives in `docs/`, and the site is built directly from that folder. README files are only repository entry points; the [Documentation Map](/en/reference/source-map) explains the directory structure, reading hierarchy, and change workflow.
+- For product scope and design tradeoffs, start with [Design & Tradeoffs](/en/design/);
+- For the current stage and increment order, start with [Delivery Route](/en/delivery/);
+- For engineering implementation, risks, and irreversible decisions, this appendix is authoritative;
+- When discussing terms or checklists, use the unified definitions in the appendix.

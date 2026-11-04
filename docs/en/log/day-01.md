@@ -1,16 +1,9 @@
 ---
 title: 'Day01 · Bilingual documentation launch'
-description: 'Hearth development log Day01: product roadmap, volume material, and the bilingual documentation site.'
 outline: false
 ---
 
-<p class="eyebrow">DAY 01 · DOCUMENTATION SITE</p>
-
-# Day01 · Bilingual documentation launch
-
-<p class="lead">On 2026-11-03, Hearth moved from an initialized repository to a public bilingual documentation site: first the roadmap, volume material, and delivery plan were added, then came the VitePress information architecture, light-blue visual design, bilingual navigation, topic pages, and GitHub Pages deployment.</p>
-
-## Commit history
+On 2026-11-03, Hearth went from an initialized repository to a public documentation site: the Apache-2.0 license and the product, architecture, safety, evaluation, and delivery baselines were established, followed by the bilingual VitePress site, theme navigation, topic pages, and GitHub Pages deployment.
 
 | Commit | Author | Changes |
 |---|---|---|

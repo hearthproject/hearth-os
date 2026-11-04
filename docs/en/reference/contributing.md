@@ -1,6 +1,6 @@
 ---
 title: 'Contributing and Documentation Maintenance'
-description: "Hearth's repository structure, local development, documentation writing conventions, PR checklist, sources of truth, and license."
+description: "Hearth's repository structure, local development, documentation conventions, PR checklist, sources of truth, and license."
 outline: [2, 3]
 ---
 
@@ -17,11 +17,11 @@ hearth-os/
 ├─ docs/
 │  ├─ index.md                 # Chinese homepage
 │  ├─ en/                      # English mirror
-│  ├─ guide/                   # Getting started
-│  ├─ product/                 # Product definition and principles
-│  ├─ architecture/            # System design
-│  ├─ delivery/                # Roadmap, planning, engineering, and risks
-│  ├─ reference/               # Boundaries, terminology, FAQ, archive
+│  ├─ design/                  # Positioning, principles, tradeoffs, and status
+│  ├─ architecture/            # Detailed architecture pages
+│  ├─ delivery/                # Delivery route and Stages 0–6
+│  ├─ log/                     # Daily development logs
+│  ├─ reference/               # Appendix, engineering, risks, and decisions
 │  └─ .vitepress/              # Site configuration and theme
 ├─ scripts/                    # Delivery-page generation
 ├─ package.json
@@ -32,7 +32,7 @@ hearth-os/
 ## Local Development
 
 ```bash
-npm install
+npm ci
 npm run docs:dev
 ```
 
@@ -43,23 +43,30 @@ npm run docs:build
 npm run docs:preview
 ```
 
-## Documentation Writing Conventions
+## Documentation Conventions
 
 - State the conclusion first, then explain the reasoning; avoid burying implementation details in long paragraphs.
 - Use explicit entity names: Task, Ticket, Run, Mandate, Receipt, Artifact, Memory, Skill.
-- Distinguish between "facts," "judgments," and "hypotheses pending verification"; do not write aspirations as completed capabilities.
-- Every phase must have a user-visible interface, persistent state, verification evidence, and a recovery path.
+- Distinguish between facts, judgments, and hypotheses pending verification; do not write aspirations as completed capabilities.
+- Every stage must have a user-visible interface, persistent state, verification evidence, and a recovery path.
 - External side effects must clearly document approval, idempotency, receipts, and reconciliation.
-- Prefer text or Mermaid for diagrams to ensure they are diffable and translatable.
+- Prefer text or Mermaid for diagrams so they remain diffable and translatable.
 - Keep Chinese and English isomorphic: paths, heading levels, and navigation positions must match.
 - Write formal documentation only under `docs/`; README is an entry point, not a second copy of the body text.
 
+## Development Log Rules
+
+- Keep one page per day; do not restore a log index or log template.
+- Start with a single daily summary that explains what was completed and which parts were merged or adjusted.
+- Follow the summary with only a commit table: Commit, Author, Changes.
+- When new commits land on the same day, append rows to the existing table; do not add stage reports, retrospectives, or todo sections.
+
 ## Before Submitting a PR
 
-1. Run `npm run docs:build` to confirm there are no dead links or build errors;
-2. Check whether the paths of Chinese pages and English pages correspond;
-3. If you have modified facts, protocols, or phase gates, also check the [full roadmap](/en/reference/full-roadmap) and related ADRs;
-4. Explain which phase, which readers, and which risks the change affects;
+1. Run `npm run docs:build` to confirm there are no dead links or build errors.
+2. Check whether Chinese and English paths correspond.
+3. If facts, protocols, or stage gates changed, also check the [full roadmap](/en/reference/full-roadmap) and related ADRs.
+4. Explain which stage, readers, and risks the change affects.
 5. Do not commit `.vitepress/dist`, caches, or local secrets.
 
 ## Documentation Source of Truth

@@ -1,83 +1,88 @@
 ---
-title: 'Delivery Overview'
-description: 'Hearth delivery entry point: the product roadmap is the master outline, seven stage modules contain the work, and engineering safeguards cover verification, risk, and decisions.'
+title: 'Delivery Route and Implementation Plan'
+description: 'Hearth delivery master plan: seven capability stages, 35 vertical increments, 140 work packages, and exit evidence for each stage.'
 outline: [2, 3]
 ---
 
 <script setup>
 const modules = [
-  { no: 'S0', meta: '4 increments', title: 'Definition & Prototype', text: 'Lock the user, task wedge, end-to-end prototype, contracts, and evaluation baseline.', link: '/en/delivery/stage-0' },
-  { no: 'S1', meta: '6 increments', title: 'Durable Kernel & MVP', text: 'Walking skeleton, first Codex slice, MVP-1, side-effect safety, and recovery.', link: '/en/delivery/stage-1' },
-  { no: 'S2', meta: '6 increments', title: 'Personal Operator', text: 'Connectors, documents and data, web research, and approval-gated writes.', link: '/en/delivery/stage-2' },
-  { no: 'S3', meta: '4 increments', title: 'Computer Operator', text: 'Desktop agentd, GUI observation, human takeover, and tiered desktop actions.', link: '/en/delivery/stage-3' },
+  { no: 'S0', meta: '4 increments', title: 'Definition and Prototype', text: 'Product wedge, real tasks, clickable prototype, protocol contracts, and evaluation baseline.', link: '/en/delivery/stage-0' },
+  { no: 'S1', meta: '6 increments', title: 'Durable Kernel and MVP', text: 'Walking skeleton, first Codex slice, MVP-1, side-effect safety, and recovery.', link: '/en/delivery/stage-1' },
+  { no: 'S2', meta: '6 increments', title: 'Personal Operator', text: 'Connectors, documents and data, web research, and writes that require approval.', link: '/en/delivery/stage-2' },
+  { no: 'S3', meta: '4 increments', title: 'Computer Operator', text: 'Desktop agentd, GUI observation, human takeover, and risk-tiered desktop actions.', link: '/en/delivery/stage-3' },
   { no: 'S4', meta: '5 increments', title: 'Proactive Personal Agent', text: 'Triggers, proactive inbox, mobile PWA, and attention budgets.', link: '/en/delivery/stage-4' },
-  { no: 'S5', meta: '4 increments', title: 'Memory & Evolution', text: 'Memory Core, forgetting and export, skill candidates, evaluation, and rollback.', link: '/en/delivery/stage-5' },
-  { no: 'S6', meta: '6 increments', title: 'Multi-device & Operations', text: 'Event sync, offline queues, device revocation, backup migration, and long-running operations.', link: '/en/delivery/stage-6' }
-]
-
-const safeguards = [
-  { no: '01', title: 'Engineering & Repository', text: 'Tech stack, repository layout, process model, CLI, testing and evaluation, and release migration.', link: '/en/delivery/engineering' },
-  { no: '02', title: 'Risks & Kill Criteria', text: 'Pause conditions, stage Kill Criteria, and the foundations that must never be cut.', link: '/en/delivery/risks' },
-  { no: '03', title: 'ADRs & Key Decisions', text: 'Judgments that are hard to reverse and the acceptance criteria for the final product exit.', link: '/en/delivery/decisions' }
+  { no: 'S5', meta: '4 increments', title: 'Memory and Evolution', text: 'Memory Core, forgetting and export, skill candidates, evaluation, and rollback.', link: '/en/delivery/stage-5' },
+  { no: 'S6', meta: '6 increments', title: 'Multi-device and Long-running', text: 'Event sync, offline queues, device revocation, backup, migration, and operations.', link: '/en/delivery/stage-6' }
 ]
 </script>
 
-<p class="eyebrow">DELIVERY MAP</p>
+<p class="eyebrow">DELIVERY</p>
 
-# Delivery Overview
+# Delivery Route and Implementation Plan
 
-<p class="lead">The product roadmap defines scope, order, and stage gates. "From 0 to 100" turns that outline into seven independently buildable and verifiable modules. Engineering safeguards cover the repository, risk, and critical decisions.</p>
+<p class="lead">There is one master plan: Stages 0–6 define capability gates, 35 D increments define the construction order, and each increment contains four work packages. The route promises no dates, only visible product outcomes, verification evidence, and recovery paths at every stage.</p>
 
-> **There is one reading order:** read the [product roadmap](/en/delivery/roadmap) first to confirm what the current stage does and does not include; then enter the matching Stage module; finally review [engineering safeguards](#engineering-safeguards) and the [documentation map](/en/reference/source-map).
+## Guiding Principles
 
-## Layer 1: The Product Roadmap Is the Master Outline
+- **Stage is a capability gate, not a schedule.** You can stay, trial, and roll back, but cannot skip recovery, interface, verification, or safety boundaries.
+- **Every increment is a vertical slice.** User outcome, interface, persistent state, real execution, verification, and recovery arrive together.
+- **Ship an MVP early.** MVP-1 is an early exit from Stage 1, not a demo produced at the end of the project.
+- **Narrow before broad.** Make one task family dependable before expanding connectors, desktop, proactivity, and multi-device support.
+- **Safety before side effects.** Sending, writing, sharing, deleting, and desktop actions require authorization, idempotency, and receipts first.
+- **Evidence before announcements.** A stage is complete only when real tasks, failure recovery, and evaluations prove it.
 
-The [product roadmap](/en/delivery/roadmap) answers four questions:
-
-1. **Why this stage now?** Sequence is driven by capability dependencies, not calendar estimates.
-2. **What ships in this stage?** The user-visible product form, core capabilities, and main risks are explicit.
-3. **When is it complete?** Every Stage has exit conditions and a learning gate.
-4. **What are we deliberately not doing?** High-risk, low-value, or foundation-damaging scope is deferred explicitly.
-
-Stages are capability gates, not date commitments. You may pause, trial, and roll back at any stage, but you cannot skip recovery, UI, verification, or security boundaries.
-
-## Layer 2: Seven Development Modules
-
-The From 0 to 100 Development Plan is not one broad checklist. It is seven sequential modules. Every module follows the same structure: prerequisites → development steps → increment breakdown → exit gates → out of scope. A developer can begin from the current module and build directly.
-
-The seven modules contain 35 D increments, and every increment splits into four implementation work packages, 140 packages total. Each increment page fixes the user outcome, completion gate, work packages, engineering map, interfaces, acceptance rehearsal, and failure recovery.
+## Seven Stages
 
 <DocCardGrid :items="modules" :columns="2" />
 
-[Read the full development plan and delivery template](/en/delivery/development-plan)
+## Stage Overview
 
-## Layer 3: Engineering Safeguards
+| Stage | What the User Gets | What Must Be Proven Before Moving On |
+|---|---|---|
+| Stage 0 | A clickable end-to-end prototype | Product wedge, 12 real tasks, stable contracts, evaluation and approval baselines |
+| Stage 1 | A locally usable personal task workbench | Persistent state, real Codex execution, approvals, artifacts, recovery, and MVP-1 |
+| Stage 2 | A Personal Operator for daily content work | Connector loops, source citations, document/data verification, approved writes, and receipts |
+| Stage 3 | A Computer Operator for desktop work | GUI observation, human takeover, isolation, desktop verification, and high-risk approvals |
+| Stage 4 | A low-interruption proactive personal agent | Triggers, attention budgets, mobile approvals, pause, and device revocation |
+| Stage 5 | An agent that accumulates context and improves safely | Correctable/forgettable/exportable memory and evaluated, promoted, rollback-capable skills |
+| Stage 6 | A multi-device, portable, long-running Personal Agent OS | Sync consistency, offline recovery, device revocation, migration, and operations evidence |
 
-- Chapter 26 defines engineering implementation, and Chapter 27 defines risks and Kill Criteria.
-- Chapter 28 summarizes ADR-001–020, and Chapter 29 provides terminology, default checklists, and the final judgment.
-- The engineering foundation, recovery, security, and UI must not be cut to meet deadlines.
+Each stage page defines its scope and exit conditions in detail. Stages advance by capability dependency, not by calendar boundaries.
 
-<DocCardGrid :items="safeguards" :columns="3" />
+## 35 Increments, 140 Work Packages
 
-## Stage Sequence
+Every D increment follows the same delivery template so progress cannot hide behind backend-only work:
 
-| Stage | Development module | Stage exit | Evidence that cannot be skipped |
-|---|---|---|---|
-| Stage 0 | [Definition & Prototype](/en/delivery/stage-0) | Clickable prototype and stable contracts | 12 real tasks, complete state flow, evaluation and approval baseline |
-| Stage 1 | [Durable Kernel & MVP](/en/delivery/stage-1) | A locally usable daily MVP | Durable state, real Codex execution, approvals, artifacts, and recovery |
-| Stage 2 | [Personal Operator](/en/delivery/stage-2) | Daily content work can be delegated | Connector loops, source citations, approval-gated writes, and receipts |
-| Stage 3 | [Computer Operator](/en/delivery/stage-3) | Desktop work can run with takeover | GUI observation, takeover, isolation, desktop verification, high-risk approval |
-| Stage 4 | [Proactive Personal Agent](/en/delivery/stage-4) | Proactive work within bounded authority | Triggers, attention budget, mobile approval, and instant pause |
-| Stage 5 | [Memory & Evolution](/en/delivery/stage-5) | Explainable and rollbackable accumulation | Memory correction/forgetting/export, skill evaluation, promotion, and rollback |
-| Stage 6 | [Multi-device & Operations](/en/delivery/stage-6) | A portable Personal Agent OS | Sync, offline recovery, device revocation, backup migration, and long-term audit |
+| Deliverable | Required Answer |
+|---|---|
+| User-visible outcome | What concrete thing can the user now do in the browser? |
+| Implementation landing | Which modules, interfaces, events, and tests must be completed? |
+| Acceptance rehearsal | What repeatable steps prove that it really works? |
+| Failure and recovery | What does the user see on failure, and how can they cancel, retry, take over, or undo? |
 
-**Where MVP Fits:** MVP-1 is the early Stage 1 exit at D1.3, not a Stage 6 product. It must include real execution, durable tasks, Web task cards, artifacts, approval drills, and failure recovery.
+Each increment contains four implementation work packages. Work can be split, but completing one package never substitutes for accepting the whole increment.
 
-## How Developers Should Start
+## Where the MVP Sits
 
-1. New to the project: read [What is Hearth?](/en/guide/what-is-hearth) and the [product definition](/en/product/definition).
-2. Ready to implement: read the [system design overview](/en/architecture/) and [durable execution](/en/architecture/durable-execution).
-3. Ready to build: open [Stage 0](/en/delivery/stage-0) and complete its steps and increments in order.
-4. Ready to merge: check [Risks & Kill Criteria](/en/delivery/risks) and the [default checklists](/en/reference/checklists).
+MVP-1 is D1.3 in Stage 1: a truly usable local personal task workbench. It must include Web task cards, persistent task state, real Codex execution, artifacts, an approval rehearsal, and failure recovery, but not email, calendar, GUI, proactive loops, or multi-device support.
 
-To review the complete directory, reading hierarchy, and maintenance rules, open the [Documentation Map](/en/reference/source-map).
+## Six Execution Rules
+
+1. **Vertical slices first.** Do not deliver a “partial stage” made only of CLI, logs, database, or APIs.
+2. **The frontend grows at the same time.** Stage 0 has a prototype, Stage 1 has real Web task cards, and every later increment has a user path.
+3. **Durability before autonomy.** Tasks cannot disappear, side effects cannot duplicate, and failures must be visible.
+4. **Safety before real side effects.** High-risk actions require preview, authorization, idempotency, and receipts.
+5. **Evaluation before expansion.** Every new executor, connector, model, and skill needs representative tasks, baselines, and failure samples.
+6. **Cut scope, never foundations.** Reduce coverage and autonomy before reducing interface, state, recovery, audit, and revocation.
+
+## Engineering Constraints
+
+Every stage must also meet engineering baselines for contract and integration tests, fault injection, security tests, performance and long-running stability, observability, backup/export, and rollback-capable releases. Detailed repository layout, testing, risks, and decisions live in the appendix:
+
+- [Engineering and Repository Structure](/en/reference/engineering)
+- [Risks and Kill Criteria](/en/reference/risks)
+- [ADRs and Key Decisions](/en/reference/decisions)
+
+## Start Here
+
+Read [Design & Tradeoffs](/en/design/) to understand why Hearth is designed this way, then begin at [Stage 0](/en/delivery/stage-0). If the current stage is already clear, use the sidebar to open the relevant stage and D increment.

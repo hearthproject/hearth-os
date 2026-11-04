@@ -9,11 +9,9 @@ hero:
     alt: Hearth OS 任务系统
   actions:
     - theme: brand
-      text: 10 分钟了解 Hearth
-      link: /guide/what-is-hearth
+      text: 阅读设计说明
+      link: /design/
     - theme: alt
-      text: 从 Stage 0 开始开发
-      link: /delivery/stage-0
+      text: 查看交付路线
+      link: /delivery/
 ---
-
-<HomeDashboard />

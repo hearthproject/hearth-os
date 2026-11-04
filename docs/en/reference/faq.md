@@ -8,7 +8,7 @@ outline: [2, 3]
 
 # Frequently Asked Questions
 
-<p class="lead">This page answers the questions most likely to come up when first encountering Hearth. For more complete definitions and boundaries, see [Product Definition](/en/product/definition) and [Architecture Overview](/en/architecture/).</p>
+<p class="lead">This page answers the questions most likely to come up when first encountering Hearth. For more complete definitions and boundaries, see [Design and Tradeoffs](/en/design/) and [Architecture Overview](/en/architecture/overview).</p>
 
 ## Is Hearth another Coding Agent?
 

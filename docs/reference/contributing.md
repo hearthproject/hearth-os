@@ -17,11 +17,11 @@ hearth-os/
 ├─ docs/
 │  ├─ index.md                 # 中文首页
 │  ├─ en/                      # 英文镜像
-│  ├─ guide/                   # 开始阅读
-│  ├─ product/                 # 产品定义与原则
-│  ├─ architecture/            # 系统设计
-│  ├─ delivery/                # 路线图、计划、工程与风险
-│  ├─ reference/               # 边界、术语、FAQ、归档
+│  ├─ design/                  # 定位、原则、取舍与状态
+│  ├─ architecture/            # 详细架构页面
+│  ├─ delivery/                # 交付路线与 Stage 0–6
+│  ├─ log/                     # 按日开发日志
+│  ├─ reference/               # 附录、工程、风险与决策
 │  └─ .vitepress/              # 站点配置与主题
 ├─ scripts/                    # 交付页生成脚本
 ├─ package.json
@@ -32,7 +32,7 @@ hearth-os/
 ## 本地开发
 
 ```bash
-npm install
+npm ci
 npm run docs:dev
 ```
 
@@ -54,12 +54,19 @@ npm run docs:preview
 - 中文与英文保持同构：路径、标题层级和导航位置一致。
 - 正式文档只写在 `docs/`；README 只做入口，不复制或另建一份正文。
 
+## 开发日志规则
+
+- 每天只有一个页面，不再维护日志首页或日志模板。
+- 开头只写一段当天概述，分层说明完成了什么、合并或调整了什么。
+- 概述后只保留提交表：Commit、作者、具体修改。
+- 同一天有新的提交时，在原表格追加一行，不新增阶段汇报、总结或待办章节。
+
 ## 提交 PR 前
 
-1. 运行 `npm run docs:build`，确认没有死链或构建错误；
-2. 检查中文页面和英文页面的路径是否对应；
-3. 如果修改了事实、协议或阶段门槛，同步检查[完整路线图](/reference/full-roadmap)和相关 ADR；
-4. 说明改动影响哪个阶段、哪个读者和哪个风险；
+1. 运行 `npm run docs:build`，确认没有死链或构建错误。
+2. 检查中文页面和英文页面的路径是否对应。
+3. 如果修改了事实、协议或阶段门槛，同步检查[完整路线图](/reference/full-roadmap)和相关 ADR。
+4. 说明改动影响哪个阶段、哪个读者和哪个风险。
 5. 不要提交 `.vitepress/dist`、缓存或本地密钥。
 
 ## 文档事实源

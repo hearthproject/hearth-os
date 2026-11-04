@@ -1,16 +1,9 @@
 ---
-title: 'Day02 · Delivery, brand, and documentation cleanup'
-description: 'Hearth development log Day02: delivery increments, developer playbooks, documentation cleanup, Hearth OS branding, and the testing/evaluation strategy.'
+title: 'Day02 · Documentation structure cleanup'
 outline: false
 ---
 
-<p class="eyebrow">DAY 02 · DELIVERY, BRAND & DOCS</p>
-
-# Day02 · Delivery, brand, and documentation cleanup
-
-<p class="lead">On 2026-11-04, the bilingual site received its second round of refinement: the information architecture and hero spacing were reorganized, 35 D increments were created for Stages 0–6 and expanded into 140 work packages, the documentation source and bilingual READMEs were consolidated, Hearth OS branding was applied, and the testing and evaluation strategy was completed. The development log also changed from long stage reports to a short overview plus commit history.</p>
-
-## Commit history
+On 2026-11-04, the Hearth documentation site took its second complete shape: Stages 0–6 received 35 D increments and 140 work packages, the documentation source and bilingual READMEs were consolidated, Hearth OS branding and the testing/evaluation strategy were applied; the information architecture was then reworked so the homepage became a single-page entry, design and delivery became two focused paths, reference became the appendix, and the development log was reduced to essentials.
 
 | Commit | Author | Changes |
 |---|---|---|

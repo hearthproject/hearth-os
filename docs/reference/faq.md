@@ -8,7 +8,7 @@ outline: [2, 3]
 
 # 常见问题
 
-<p class="lead">这里回答第一次接触 Hearth 时最容易出现的疑问。更完整的定义与边界见[产品定义](/product/definition)与[架构总览](/architecture/)。</p>
+<p class="lead">这里回答第一次接触 Hearth 时最容易出现的疑问。更完整的定义与边界见[项目设计与取舍](/design/)，架构细节见[总体架构](/architecture/overview)。</p>
 
 ## Hearth 是另一个 Coding Agent 吗？
 

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 256" role="img" aria-labelledby="hearth-os-logo-reverse-title hearth-os-logo-reverse-desc">
+  <title id="hearth-os-logo-reverse-title">Hearth OS logo reverse</title>
+  <desc id="hearth-os-logo-reverse-desc">Hearth OS product lockup for dark backgrounds.</desc>
+  <g>
+    <path d="M62 206V126a66 66 0 0 1 132 0v80" fill="none" stroke="#FFF9F2" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M128 92c15 21 30 40 30 60 0 19-13 32-30 32s-30-13-30-32c0-16 10-31 23-48 1 13 6 22 15 27 2-13-1-26-8-39Z" fill="#F26B38"/>
+  </g>
+  <text x="326" y="151" fill="#FFF9F2" font-family="'Aptos Display','Segoe UI',Arial,sans-serif" font-size="104" font-weight="700" letter-spacing="18">HEARTH</text>
+  <text x="886" y="151" fill="#F26B38" font-family="'Aptos Display','Segoe UI',Arial,sans-serif" font-size="104" font-weight="700" letter-spacing="18">OS</text>
+  <text x="330" y="202" fill="#C7B8A6" font-family="'Aptos','Segoe UI',Arial,sans-serif" font-size="17" font-weight="500" letter-spacing="6.5">PERSONAL AGENT OS</text>
+</svg>

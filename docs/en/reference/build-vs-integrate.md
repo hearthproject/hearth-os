@@ -26,7 +26,7 @@ Here, “build” mainly means building the product and core logic in-house, not
 - **Every increment is a vertical slice**: user outcomes, interface, backend, Executor, validation, and recovery appear together; a capability that exists only as a CLI or log does not count as completing a stage.
 - **The build/integrate boundary does not change because of the MVP**: the MVP still does not build models, container kernels, or a complete Agent framework in-house, but it must build task control, validation, approval, recovery, and the user interface in-house.
 
-For the specific increment order, see Chapter 25 of the main roadmap or the volume `Hearth_路线图分册/09_从0到100开发计划.md`.
+For the specific increment order, see the [Delivery Route and Implementation Plan](/en/delivery/).
 
 ## 1. Core Parts Hearth Builds Itself
 
@@ -333,7 +333,7 @@ This is also the dividing line between Hearth and a “Codex wrapper”: a wrapp
 
 - Hearth's Codex positioning and Build vs Integrate: complete master document, sections 2.3–2.4
 - Hearth's final integration boundary: complete master document, section 29.5
-- MVP and the 0-to-100 development sequence: complete master document, chapter 25
+- MVP and increment sequence: [Delivery Route and Implementation Plan](/en/delivery/)
 - OpenClaw Gateway, channels, and device nodes: local OpenClaw documentation `docs/concepts/architecture.md`
 - OpenClaw audit ledger and execution identity: local OpenClaw documentation `docs/gateway/audit.md`
 - OpenClaw sandbox backends: local OpenClaw documentation `docs/gateway/sandboxing.md`

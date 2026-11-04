@@ -3759,7 +3759,7 @@ The Stage 0–1 MVP does not include:
 
 ---
 
-## Progressive Development Plan from 0 to 100
+## Phased Delivery Route and Increment Sequence
 
 ### Plan Definition and Boundaries
 

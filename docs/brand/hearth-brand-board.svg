@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" role="img" aria-labelledby="hearth-brand-board-title hearth-brand-board-desc">
+  <title id="hearth-brand-board-title">Hearth brand board</title>
+  <desc id="hearth-brand-board-desc">Brand mark concept for Hearth and Hearth OS, with app icon variants, palette, and symbol rationale.</desc>
+  <rect width="1600" height="1000" fill="#F1E8DA"/>
+
+  <text x="80" y="86" fill="#1B1815" font-family="'Aptos Display','Segoe UI',Arial,sans-serif" font-size="28" font-weight="700" letter-spacing="9">HEARTH</text>
+  <text x="80" y="122" fill="#8C8378" font-family="'Aptos','Segoe UI',Arial,sans-serif" font-size="13" font-weight="600" letter-spacing="4">BRAND MARK / CONCEPT 01</text>
+  <text x="1520" y="86" text-anchor="end" fill="#8C8378" font-family="'Aptos','Segoe UI',Arial,sans-serif" font-size="13" font-weight="600" letter-spacing="4">DURABLE WORK. HUMAN CONTROL.</text>
+
+  <rect x="80" y="170" width="880" height="520" rx="48" fill="#1B1815"/>
+  <g transform="translate(150 270) scale(0.9)">
+    <path d="M62 206V126a66 66 0 0 1 132 0v80" fill="none" stroke="#FFF9F2" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M128 92c15 21 30 40 30 60 0 19-13 32-30 32s-30-13-30-32c0-16 10-31 23-48 1 13 6 22 15 27 2-13-1-26-8-39Z" fill="#F26B38"/>
+  </g>
+  <text x="430" y="405" fill="#FFF9F2" font-family="'Aptos Display','Segoe UI',Arial,sans-serif" font-size="96" font-weight="700" letter-spacing="16">HEARTH</text>
+  <text x="430" y="473" fill="#F26B38" font-family="'Aptos Display','Segoe UI',Arial,sans-serif" font-size="40" font-weight="700" letter-spacing="11">OS</text>
+  <text x="520" y="473" fill="#B9AC9C" font-family="'Aptos','Segoe UI',Arial,sans-serif" font-size="15" font-weight="600" letter-spacing="4">PERSONAL AGENT OS</text>
+  <path d="M150 590h740" stroke="#403A34" stroke-width="1" opacity="0.75"/>
+  <text x="150" y="638" fill="#C7B8A6" font-family="'Aptos','Segoe UI',Arial,sans-serif" font-size="24" font-weight="400">Durable work. Human control.</text>
+
+  <text x="1000" y="210" fill="#8C8378" font-family="'Aptos','Segoe UI',Arial,sans-serif" font-size="13" font-weight="700" letter-spacing="4">THE MARK</text>
+  <rect x="1000" y="238" width="160" height="160" rx="36" fill="#1B1815"/>
+  <g transform="translate(1009.5 247.5) scale(0.55)">
+    <path d="M62 206V126a66 66 0 0 1 132 0v80" fill="none" stroke="#FFF9F2" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M128 92c15 21 30 40 30 60 0 19-13 32-30 32s-30-13-30-32c0-16 10-31 23-48 1 13 6 22 15 27 2-13-1-26-8-39Z" fill="#F26B38"/>
+  </g>
+  <rect x="1180" y="238" width="160" height="160" rx="36" fill="#FFF9F2" stroke="#D8C8B4" stroke-width="1"/>
+  <g transform="translate(1189.5 247.5) scale(0.55)">
+    <path d="M62 206V126a66 66 0 0 1 132 0v80" fill="none" stroke="#1B1815" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M128 92c15 21 30 40 30 60 0 19-13 32-30 32s-30-13-30-32c0-16 10-31 23-48 1 13 6 22 15 27 2-13-1-26-8-39Z" fill="#F26B38"/>
+  </g>
+  <rect x="1360" y="238" width="160" height="160" rx="36" fill="#F26B38"/>
+  <g transform="translate(1369.5 247.5) scale(0.55)">
+    <path d="M62 206V126a66 66 0 0 1 132 0v80" fill="none" stroke="#FFF9F2" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M128 92c15 21 30 40 30 60 0 19-13 32-30 32s-30-13-30-32c0-16 10-31 23-48 1 13 6 22 15 27 2-13-1-26-8-39Z" fill="#1B1815"/>
+  </g>
+  <text x="1000" y="430" fill="#8C8378" font-family="'Aptos','Segoe UI',Arial,sans-serif" font-size="11" font-weight="700" letter-spacing="3">DARK</text>
+  <text x="1180" y="430" fill="#8C8378" font-family="'Aptos','Segoe UI',Arial,sans-serif" font-size="11" font-weight="700" letter-spacing="3">LIGHT</text>
+  <text x="1360" y="430" fill="#8C8378" font-family="'Aptos','Segoe UI',Arial,sans-serif" font-size="11" font-weight="700" letter-spacing="3">EMBER</text>
+
+  <text x="1000" y="500" fill="#8C8378" font-family="'Aptos','Segoe UI',Arial,sans-serif" font-size="13" font-weight="700" letter-spacing="4">PALETTE</text>
+  <rect x="1000" y="524" width="92" height="92" rx="20" fill="#1B1815"/>
+  <rect x="1112" y="524" width="92" height="92" rx="20" fill="#F26B38"/>
+  <rect x="1224" y="524" width="92" height="92" rx="20" fill="#F1E8DA" stroke="#D8C8B4" stroke-width="1"/>
+  <rect x="1336" y="524" width="92" height="92" rx="20" fill="#FFF9F2" stroke="#D8C8B4" stroke-width="1"/>
+  <text x="1000" y="640" fill="#8C8378" font-family="'Aptos','Segoe UI',Arial,sans-serif" font-size="10" font-weight="700" letter-spacing="2">CHARCOAL</text>
+  <text x="1112" y="640" fill="#8C8378" font-family="'Aptos','Segoe UI',Arial,sans-serif" font-size="10" font-weight="700" letter-spacing="2">EMBER</text>
+  <text x="1224" y="640" fill="#8C8378" font-family="'Aptos','Segoe UI',Arial,sans-serif" font-size="10" font-weight="700" letter-spacing="2">SAND</text>
+  <text x="1336" y="640" fill="#8C8378" font-family="'Aptos','Segoe UI',Arial,sans-serif" font-size="10" font-weight="700" letter-spacing="2">CREAM</text>
+
+  <text x="1000" y="720" fill="#1B1815" font-family="'Aptos','Segoe UI',Arial,sans-serif" font-size="13" font-weight="700" letter-spacing="3.5">ARCH / TRUST BOUNDARY</text>
+  <text x="1000" y="752" fill="#1B1815" font-family="'Aptos','Segoe UI',Arial,sans-serif" font-size="13" font-weight="700" letter-spacing="3.5">EMBER / AGENT CORE</text>
+  <text x="1000" y="784" fill="#1B1815" font-family="'Aptos','Segoe UI',Arial,sans-serif" font-size="13" font-weight="700" letter-spacing="3.5">OPENING / HUMAN TAKEOVER</text>
+
+  <text x="80" y="790" fill="#1B1815" font-family="'Aptos Display','Segoe UI',Arial,sans-serif" font-size="28" font-weight="700" letter-spacing="1">THE ARCH IS A BOUNDARY.</text>
+  <text x="80" y="830" fill="#1B1815" font-family="'Aptos Display','Segoe UI',Arial,sans-serif" font-size="28" font-weight="700" letter-spacing="1">THE EMBER IS THE WORK THAT STAYS WARM.</text>
+  <text x="80" y="870" fill="#F26B38" font-family="'Aptos Display','Segoe UI',Arial,sans-serif" font-size="28" font-weight="700" letter-spacing="1">THE OPENING IS YOUR WAY BACK IN.</text>
+
+  <path d="M80 930h1440" stroke="#D8C8B4" stroke-width="1"/>
+  <text x="80" y="960" fill="#8C8378" font-family="'Aptos','Segoe UI',Arial,sans-serif" font-size="11" font-weight="700" letter-spacing="3">HEARTH / BRAND SYSTEM</text>
+  <text x="1520" y="960" text-anchor="end" fill="#8C8378" font-family="'Aptos','Segoe UI',Arial,sans-serif" font-size="11" font-weight="700" letter-spacing="3">2026</text>
+</svg>

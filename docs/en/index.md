@@ -9,11 +9,9 @@ hero:
     alt: Hearth OS task system
   actions:
     - theme: brand
-      text: Understand Hearth in 10 minutes
-      link: /en/guide/what-is-hearth
+      text: Read the design
+      link: /en/design/
     - theme: alt
-      text: Start building at Stage 0
-      link: /en/delivery/stage-0
+      text: View the delivery route
+      link: /en/delivery/
 ---
-
-<HomeDashboard />

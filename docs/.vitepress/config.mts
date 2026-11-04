@@ -1,135 +1,123 @@
 import { defineConfig } from 'vitepress'
 import { withMermaid } from 'vitepress-plugin-mermaid'
-import { zhDeliveryStages, enDeliveryStages } from './delivery-sidebar.mjs'
+import { enDeliveryStages, zhDeliveryStages } from './delivery-sidebar.mjs'
 
 const zhNav = [
-  { text: '开始阅读', link: '/guide/', activeMatch: '^/guide/' },
-  { text: '产品', link: '/product/', activeMatch: '^/product/' },
-  { text: '系统设计', link: '/architecture/', activeMatch: '^/architecture/' },
+  { text: '设计说明', link: '/design/', activeMatch: '^/(design|architecture)/' },
   { text: '交付路线', link: '/delivery/', activeMatch: '^/delivery/' },
   { text: '开发日志', link: '/log/day-02', activeMatch: '^/log/' },
-  { text: '参考', link: '/reference/', activeMatch: '^/reference/' }
+  { text: '附录', link: '/reference/', activeMatch: '^/reference/' }
 ]
 
 const enNav = [
-  { text: 'Start', link: '/en/guide/', activeMatch: '^/en/guide/' },
-  { text: 'Product', link: '/en/product/', activeMatch: '^/en/product/' },
-  { text: 'System Design', link: '/en/architecture/', activeMatch: '^/en/architecture/' },
+  { text: 'Design', link: '/en/design/', activeMatch: '^/en/(design|architecture)/' },
   { text: 'Delivery', link: '/en/delivery/', activeMatch: '^/en/delivery/' },
   { text: 'Dev Log', link: '/en/log/day-02', activeMatch: '^/en/log/' },
-  { text: 'Reference', link: '/en/reference/', activeMatch: '^/en/reference/' }
+  { text: 'Appendix', link: '/en/reference/', activeMatch: '^/en/reference/' }
+]
+
+const zhArchitectureItems = [
+  { text: '总体架构与数据流', link: '/architecture/overview' },
+  { text: '领域模型与协议', link: '/architecture/domain-model' },
+  { text: '个人网关与多入口', link: '/architecture/gateway' },
+  { text: '控制面与自主性', link: '/architecture/control-plane' },
+  { text: '持久执行与恢复', link: '/architecture/durable-execution' },
+  { text: '执行器模型与路由', link: '/architecture/executor-model' },
+  { text: '执行器目录', link: '/architecture/executor-catalog' },
+  { text: '人工接管与审批', link: '/architecture/human-takeover' },
+  { text: '执行安全与副作用', link: '/architecture/execution-safety' },
+  { text: '记忆系统', link: '/architecture/memory' },
+  { text: '技能进化', link: '/architecture/evolution' },
+  { text: '安全与隐私', link: '/architecture/security-privacy' },
+  { text: '评估体系', link: '/architecture/evaluation' },
+  { text: 'Token 经济', link: '/architecture/token-economics' },
+  { text: '前端与移动体验', link: '/architecture/frontend-experience' }
+]
+
+const enArchitectureItems = [
+  { text: 'Architecture & Data Flow', link: '/en/architecture/overview' },
+  { text: 'Domain Model & Protocols', link: '/en/architecture/domain-model' },
+  { text: 'Personal Gateway', link: '/en/architecture/gateway' },
+  { text: 'Control Plane & Autonomy', link: '/en/architecture/control-plane' },
+  { text: 'Durable Execution', link: '/en/architecture/durable-execution' },
+  { text: 'Executor Model & Routing', link: '/en/architecture/executor-model' },
+  { text: 'Executor Catalog', link: '/en/architecture/executor-catalog' },
+  { text: 'Human Takeover', link: '/en/architecture/human-takeover' },
+  { text: 'Execution Safety', link: '/en/architecture/execution-safety' },
+  { text: 'Memory OS', link: '/en/architecture/memory' },
+  { text: 'Evolution OS', link: '/en/architecture/evolution' },
+  { text: 'Security & Privacy', link: '/en/architecture/security-privacy' },
+  { text: 'Evaluation', link: '/en/architecture/evaluation' },
+  { text: 'Token Economics', link: '/en/architecture/token-economics' },
+  { text: 'Frontend & Mobile', link: '/en/architecture/frontend-experience' }
+]
+
+const zhDesignSidebar = [
+  {
+    text: '设计说明',
+    items: [{ text: '项目设计与取舍', link: '/design/' }]
+  },
+  {
+    text: '架构细节',
+    collapsed: true,
+    items: zhArchitectureItems
+  }
+]
+
+const enDesignSidebar = [
+  {
+    text: 'Design',
+    items: [{ text: 'Design & Tradeoffs', link: '/en/design/' }]
+  },
+  {
+    text: 'Architecture Details',
+    collapsed: true,
+    items: enArchitectureItems
+  }
 ]
 
 const zhSidebar = {
-  '/guide/': [
-    {
-      text: '开始阅读',
-      items: [
-        { text: '文档首页', link: '/guide/' },
-        { text: '认识 Hearth', link: '/guide/what-is-hearth' },
-        { text: '阅读指南', link: '/guide/reading-guide' },
-        { text: '项目状态', link: '/guide/project-status' }
-      ]
-    }
-  ],
-  '/product/': [
-    {
-      text: '产品',
-      items: [
-        { text: '产品总览', link: '/product/' },
-        { text: '产品定义与边界', link: '/product/definition' },
-        { text: '设计原则与架构不变量', link: '/product/design-principles' },
-        { text: '任务覆盖与完成定义', link: '/product/task-coverage' }
-      ]
-    }
-  ],
-  '/architecture/': [
-    {
-      text: '架构基础',
-      items: [
-        { text: '系统设计总览', link: '/architecture/' },
-        { text: '总体架构与数据流', link: '/architecture/overview' },
-        { text: '领域模型与协议', link: '/architecture/domain-model' }
-      ]
-    },
-    {
-      text: '入口与控制',
-      items: [
-        { text: '个人网关与多入口', link: '/architecture/gateway' },
-        { text: '控制面与自主性', link: '/architecture/control-plane' },
-        { text: '持久执行与恢复', link: '/architecture/durable-execution' }
-      ]
-    },
-    {
-      text: '执行器体系',
-      items: [
-        { text: '执行器模型与路由', link: '/architecture/executor-model' },
-        { text: '执行器目录', link: '/architecture/executor-catalog' },
-        { text: '人工接管与审批', link: '/architecture/human-takeover' }
-      ]
-    },
-    {
-      text: '安全与智能',
-      items: [
-        { text: '执行安全与副作用', link: '/architecture/execution-safety' },
-        { text: '记忆系统', link: '/architecture/memory' },
-        { text: '技能进化', link: '/architecture/evolution' },
-        { text: '安全与隐私', link: '/architecture/security-privacy' },
-        { text: '评估体系', link: '/architecture/evaluation' }
-      ]
-    },
-    {
-      text: '经济与体验',
-      items: [
-        { text: 'Token 经济', link: '/architecture/token-economics' },
-        { text: '前端与移动体验', link: '/architecture/frontend-experience' }
-      ]
-    }
-  ],
+  '/design/': zhDesignSidebar,
+  '/architecture/': zhDesignSidebar,
   '/delivery/': [
     {
       text: '交付路线',
-      items: [
-        { text: '交付总览', link: '/delivery/' },
-        { text: '产品路线图（总纲）', link: '/delivery/roadmap' }
-      ]
+      items: [{ text: '交付路线与实施计划', link: '/delivery/' }]
     },
-    {
-      text: '从 0 到 100 开发计划',
-      items: [
-        { text: '计划总览', link: '/delivery/development-plan' },
-        ...zhDeliveryStages
-      ]
-    },
-    {
-      text: '工程保障',
-      items: [
-        { text: '工程交付与仓库结构', link: '/delivery/engineering' },
-        { text: '风险与 Kill Criteria', link: '/delivery/risks' },
-        { text: 'ADR 与关键决策', link: '/delivery/decisions' }
-      ]
-    }
+    ...zhDeliveryStages
   ],
   '/log/': [
     {
       text: '开发日志',
       items: [
         { text: 'Day01 · 双语文档站上线', link: '/log/day-01' },
-        { text: 'Day02 · 交付路线、品牌与文档整理', link: '/log/day-02' }
+        { text: 'Day02 · 站点结构精简', link: '/log/day-02' }
       ]
     }
   ],
   '/reference/': [
     {
-      text: '参考与附录',
+      text: '附录',
+      items: [{ text: '附录总览', link: '/reference/' }]
+    },
+    {
+      text: '工程与决策',
       items: [
-        { text: '参考总览', link: '/reference/' },
+        { text: '工程实施与仓库结构', link: '/reference/engineering' },
+        { text: '风险与 Kill Criteria', link: '/reference/risks' },
+        { text: 'ADR 与关键决策', link: '/reference/decisions' }
+      ]
+    },
+    {
+      text: '参考资料',
+      collapsed: true,
+      items: [
         { text: '自研与集成边界', link: '/reference/build-vs-integrate' },
         { text: '术语表', link: '/reference/glossary' },
         { text: '默认清单', link: '/reference/checklists' },
         { text: '常见问题', link: '/reference/faq' },
         { text: '参与贡献与文档维护', link: '/reference/contributing' },
-        { text: '文档地图与维护', link: '/reference/source-map' },
+        { text: '文档来源与覆盖', link: '/reference/source-map' },
         { text: '完整路线图（归档）', link: '/reference/full-roadmap' }
       ]
     }
@@ -137,115 +125,49 @@ const zhSidebar = {
 }
 
 const enSidebar = {
-  '/en/guide/': [
-    {
-      text: 'Start Here',
-      items: [
-        { text: 'Documentation Home', link: '/en/guide/' },
-        { text: 'What is Hearth?', link: '/en/guide/what-is-hearth' },
-        { text: 'Reading Guide', link: '/en/guide/reading-guide' },
-        { text: 'Project Status', link: '/en/guide/project-status' }
-      ]
-    }
-  ],
-  '/en/product/': [
-    {
-      text: 'Product',
-      items: [
-        { text: 'Product Overview', link: '/en/product/' },
-        { text: 'Definition & Boundaries', link: '/en/product/definition' },
-        { text: 'Design Principles', link: '/en/product/design-principles' },
-        { text: 'Task Coverage & Done', link: '/en/product/task-coverage' }
-      ]
-    }
-  ],
-  '/en/architecture/': [
-    {
-      text: 'Foundations',
-      items: [
-        { text: 'System Design Overview', link: '/en/architecture/' },
-        { text: 'Architecture & Data Flow', link: '/en/architecture/overview' },
-        { text: 'Domain Model & Protocols', link: '/en/architecture/domain-model' }
-      ]
-    },
-    {
-      text: 'Entry & Control',
-      items: [
-        { text: 'Personal Gateway', link: '/en/architecture/gateway' },
-        { text: 'Control Plane & Autonomy', link: '/en/architecture/control-plane' },
-        { text: 'Durable Execution', link: '/en/architecture/durable-execution' }
-      ]
-    },
-    {
-      text: 'Executors',
-      items: [
-        { text: 'Executor Model & Routing', link: '/en/architecture/executor-model' },
-        { text: 'Executor Catalog', link: '/en/architecture/executor-catalog' },
-        { text: 'Human Takeover', link: '/en/architecture/human-takeover' }
-      ]
-    },
-    {
-      text: 'Safety & Intelligence',
-      items: [
-        { text: 'Execution Safety', link: '/en/architecture/execution-safety' },
-        { text: 'Memory OS', link: '/en/architecture/memory' },
-        { text: 'Evolution OS', link: '/en/architecture/evolution' },
-        { text: 'Security & Privacy', link: '/en/architecture/security-privacy' },
-        { text: 'Evaluation', link: '/en/architecture/evaluation' }
-      ]
-    },
-    {
-      text: 'Economics & Experience',
-      items: [
-        { text: 'Token Economics', link: '/en/architecture/token-economics' },
-        { text: 'Frontend & Mobile', link: '/en/architecture/frontend-experience' }
-      ]
-    }
-  ],
+  '/en/design/': enDesignSidebar,
+  '/en/architecture/': enDesignSidebar,
   '/en/delivery/': [
     {
       text: 'Delivery',
       items: [
-        { text: 'Delivery Overview', link: '/en/delivery/' },
-        { text: 'Product Roadmap (Master)', link: '/en/delivery/roadmap' }
+        { text: 'Delivery Route & Implementation Plan', link: '/en/delivery/' }
       ]
     },
-    {
-      text: 'From 0 to 100',
-      items: [
-        { text: 'Plan Overview', link: '/en/delivery/development-plan' },
-        ...enDeliveryStages
-      ]
-    },
-    {
-      text: 'Engineering Safeguards',
-      items: [
-        { text: 'Engineering & Repository', link: '/en/delivery/engineering' },
-        { text: 'Risks & Kill Criteria', link: '/en/delivery/risks' },
-        { text: 'ADRs & Decisions', link: '/en/delivery/decisions' }
-      ]
-    }
+    ...enDeliveryStages
   ],
   '/en/log/': [
     {
       text: 'Development Log',
       items: [
         { text: 'Day01 · Bilingual documentation launch', link: '/en/log/day-01' },
-        { text: 'Day02 · Delivery, brand, and documentation cleanup', link: '/en/log/day-02' }
+        { text: 'Day02 · Documentation structure cleanup', link: '/en/log/day-02' }
       ]
     }
   ],
   '/en/reference/': [
     {
-      text: 'Reference',
+      text: 'Appendix',
+      items: [{ text: 'Appendix Overview', link: '/en/reference/' }]
+    },
+    {
+      text: 'Engineering & Decisions',
       items: [
-        { text: 'Reference Overview', link: '/en/reference/' },
+        { text: 'Engineering & Repository', link: '/en/reference/engineering' },
+        { text: 'Risks & Kill Criteria', link: '/en/reference/risks' },
+        { text: 'ADRs & Decisions', link: '/en/reference/decisions' }
+      ]
+    },
+    {
+      text: 'Reference Material',
+      collapsed: true,
+      items: [
         { text: 'Build vs. Integrate', link: '/en/reference/build-vs-integrate' },
         { text: 'Glossary', link: '/en/reference/glossary' },
         { text: 'Default Checklists', link: '/en/reference/checklists' },
         { text: 'FAQ', link: '/en/reference/faq' },
         { text: 'Contributing & Docs', link: '/en/reference/contributing' },
-        { text: 'Documentation Map', link: '/en/reference/source-map' },
+        { text: 'Sources & Coverage', link: '/en/reference/source-map' },
         { text: 'Full Roadmap (Archive)', link: '/en/reference/full-roadmap' }
       ]
     }
@@ -306,8 +228,8 @@ const searchOptions = (translations: typeof zhSearchTranslations) => ({
 export default withMermaid(
   defineConfig({
     lang: 'zh-CN',
-    title: 'Hearth OS',
-    titleTemplate: ':title · Hearth Project',
+    title: 'Hearth',
+    titleTemplate: ':title · Hearth',
     description:
       'Hearth 是一个单用户、自托管、长期驻留的个人 Agent OS。用持久执行、明确审批和可验证回执，把意图变成可靠的任务。',
     base: '/hearth-os/',
@@ -315,9 +237,9 @@ export default withMermaid(
     lastUpdated: true,
     head: [
       ['link', { rel: 'icon', type: 'image/svg+xml', href: '/hearth-os/logo.svg' }],
-      ['meta', { name: 'theme-color', content: '#1b1815' }],
+      ['meta', { name: 'theme-color', content: '#2f7fa8' }],
       ['meta', { property: 'og:type', content: 'website' }],
-      ['meta', { property: 'og:title', content: 'Hearth OS — Personal Agent OS' }],
+      ['meta', { property: 'og:title', content: 'Hearth — Personal Agent OS' }],
       [
         'meta',
         {
@@ -332,8 +254,8 @@ export default withMermaid(
       hostname: 'https://hearthproject.github.io/hearth-os/'
     },
     themeConfig: {
-      logo: { src: '/logo.svg', alt: 'Hearth OS', width: 32, height: 32 },
-      siteTitle: 'Hearth OS',
+      logo: { src: '/logo.svg', width: 28, height: 28 },
+      siteTitle: 'Hearth',
       nav: zhNav,
       sidebar: zhSidebar,
       socialLinks: [
@@ -359,7 +281,7 @@ export default withMermaid(
       root: {
         label: '简体中文',
         lang: 'zh-CN',
-        title: 'Hearth OS',
+        title: 'Hearth',
         description:
           'Hearth 是一个单用户、自托管、长期驻留的个人 Agent OS。用持久执行、明确审批和可验证回执，把意图变成可靠的任务。'
       },
@@ -367,7 +289,7 @@ export default withMermaid(
         label: 'English',
         lang: 'en-US',
         link: '/en/',
-        title: 'Hearth OS',
+        title: 'Hearth',
         description:
           'Hearth is a single-user, self-hosted personal Agent OS for durable, auditable, and recoverable digital work.',
         themeConfig: {
