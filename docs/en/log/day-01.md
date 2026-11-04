@@ -1,46 +1,19 @@
 ---
 title: 'Day01 · Bilingual documentation launch'
-description: 'Hearth development log Day01: bilingual information architecture, light-blue visual design, homepage reading paths, and documentation structure.'
-outline: [2, 3]
+description: 'Hearth development log Day01: product roadmap, volume material, and the bilingual documentation site.'
+outline: false
 ---
 
 <p class="eyebrow">DAY 01 · DOCUMENTATION SITE</p>
 
 # Day01 · Bilingual documentation launch
 
-<p class="lead">Turn the roadmap, volumes, and architecture material into a searchable, language-switchable, maintainable documentation site.</p>
+<p class="lead">On 2026-11-03, Hearth moved from an initialized repository to a public bilingual documentation site: first the roadmap, volume material, and delivery plan were added, then came the VitePress information architecture, light-blue visual design, bilingual navigation, topic pages, and GitHub Pages deployment.</p>
 
-## Completed
+## Commit history
 
-- Built Chinese and English pages with corresponding paths, heading levels, and primary structure.
-- Reorganized the roadmap into Start, Product, System Design, Delivery, and Reference entry points.
-- Delivered a light-blue visual system, homepage reading paths, and responsive desktop/mobile layout.
-- Kept the complete roadmap, volume content, and build boundary traceable.
-
-## Verification evidence
-
-- Both Chinese and English sites build independently and are reachable on GitHub Pages.
-- Internal links, search, Mermaid diagrams, and language switching pass checks.
-- The in-site archive confirms that the complete roadmap and volume material remain traceable.
-
-## Problems encountered
-
-- The roadmap material is long; copying it directly leaves readers unsure where to begin.
-- If Chinese and English structures diverge, maintenance and search accuracy degrade.
-- An old documentation version can make readers mistake the docs for a product release.
-
-## Decisions and tradeoffs
-
-- Used a three-layer structure: product roadmap, topic pages, and the complete archive.
-- Removed the old documentation version from the interface; product milestones such as MVP-1 and v1.0 remain only as build goals.
-- Prioritized reading and scanning efficiency over decorative density.
-
-## Next
-
-- Decompose Stages 0–6 into independently buildable and verifiable increment pages.
-- Add a development-log entry and a maintainable daily template.
-- Verify deployment, mobile layout, and sidebar expansion online.
-
-## Related commits
-
-- `2ea8909` created the bilingual Hearth documentation site; `69330ab` refined its architecture and visual design.
+| Commit | Author | Changes |
+|---|---|---|
+| `b3bdec6` | Jason Cat | Initialized the repository and added the Apache-2.0 `LICENSE`. |
+| `632c028` | JasonBuildAI | Added roadmap v3, eight roadmap volumes, the build-versus-integrate boundary, the development plan, and ADRs; 15 files and 8,315 lines. |
+| `2ea8909` | JasonBuildAI | Built the VitePress bilingual documentation site: configuration, theme and homepage components, navigation sidebar, Chinese and English topic pages, and GitHub Pages deployment; 101 files. |

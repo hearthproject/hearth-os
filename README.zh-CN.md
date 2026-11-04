@@ -84,7 +84,7 @@ Hearth 当前处于**规格与规划阶段**。仓库已经包含完整的产品
 | 产品 | 定义、原则、任务覆盖与完成标准 | [打开](https://hearthproject.github.io/hearth-os/product/) |
 | 系统设计 | 架构、协议、控制面、执行器、安全、记忆、进化与评估 | [打开](https://hearthproject.github.io/hearth-os/architecture/) |
 | 交付路线 | 路线图、开发计划、Stage 模块、工程、风险与 ADR | [打开](https://hearthproject.github.io/hearth-os/delivery/) |
-| 开发日志 | 每日进展、验证证据、问题与决定 | [打开](https://hearthproject.github.io/hearth-os/log/) |
+| 开发日志 | 每日概述、提交、具体修改与作者 | [打开](https://hearthproject.github.io/hearth-os/log/day-02.html) |
 | 参考 | 边界、术语、清单、FAQ、贡献与完整归档 | [打开](https://hearthproject.github.io/hearth-os/reference/) |
 
 ## 交付全貌
@@ -131,7 +131,7 @@ docs/                  正式文档的唯一来源，也是文档站的构建目
   product/             产品定义、原则与任务覆盖
   architecture/        控制面、协议、执行器、安全与记忆
   delivery/            路线图、开发计划、Stage 模块、工程、风险与 ADR
-  log/                 开发日志与每日模板
+  log/                 按日开发日志
   reference/           边界、术语、清单、FAQ、贡献与完整归档
   en/                  所有文档页面的英文镜像
   .vitepress/          站点配置与主题

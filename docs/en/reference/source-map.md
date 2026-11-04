@@ -30,7 +30,7 @@ outline: [2, 3]
 | Product | Definition, design principles, and task coverage | [Product](/en/product/) |
 | System Design | Architecture, protocols, control plane, executors, safety, memory, and evaluation | [System Design](/en/architecture/) |
 | Delivery | Product roadmap, development plan, Stages and D increments, engineering safeguards | [Delivery](/en/delivery/) |
-| Development Log | Daily progress, verification evidence, problems, and decisions | [Development Log](/en/log/) |
+| Development Log | Daily overview, commits, specific changes, and authors | [Development Log](/en/log/day-02) |
 | Reference | Boundaries, glossary, checklists, FAQ, contributing, and full archive | [Reference](/en/reference/) |
 
 ## Reading Hierarchy
@@ -98,6 +98,6 @@ Confirm the current stage's scope and exit before opening a concrete development
 ## Documentation and Release Boundary
 
 - The current documentation describes specifications, design judgments, and development plans; it does not mean the product has shipped.
-- Development logs record real process and verification evidence; they never impersonate product release notes.
+- Development logs record a daily overview, commits, specific changes, and authors; they never impersonate product release notes.
 - Maintain a formal version number and release notes only after implementation begins and an installable release exists.
 - Documentation changes ship through normal pull requests or commits, without a separate “documentation release” process.

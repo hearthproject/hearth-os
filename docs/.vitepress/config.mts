@@ -7,7 +7,7 @@ const zhNav = [
   { text: '产品', link: '/product/', activeMatch: '^/product/' },
   { text: '系统设计', link: '/architecture/', activeMatch: '^/architecture/' },
   { text: '交付路线', link: '/delivery/', activeMatch: '^/delivery/' },
-  { text: '开发日志', link: '/log/', activeMatch: '^/log/' },
+  { text: '开发日志', link: '/log/day-02', activeMatch: '^/log/' },
   { text: '参考', link: '/reference/', activeMatch: '^/reference/' }
 ]
 
@@ -16,7 +16,7 @@ const enNav = [
   { text: 'Product', link: '/en/product/', activeMatch: '^/en/product/' },
   { text: 'System Design', link: '/en/architecture/', activeMatch: '^/en/architecture/' },
   { text: 'Delivery', link: '/en/delivery/', activeMatch: '^/en/delivery/' },
-  { text: 'Dev Log', link: '/en/log/', activeMatch: '^/en/log/' },
+  { text: 'Dev Log', link: '/en/log/day-02', activeMatch: '^/en/log/' },
   { text: 'Reference', link: '/en/reference/', activeMatch: '^/en/reference/' }
 ]
 
@@ -114,11 +114,8 @@ const zhSidebar = {
     {
       text: '开发日志',
       items: [
-        { text: '日志首页', link: '/log/' },
         { text: 'Day01 · 双语文档站上线', link: '/log/day-01' },
-        { text: 'Day02 · 交付路线拆解与开发日志', link: '/log/day-02' },
-        { text: 'Day03 · 开发增量扩写为可施工手册', link: '/log/day-03' },
-        { text: '日志模板', link: '/log/template' }
+        { text: 'Day02 · 交付路线、品牌与文档整理', link: '/log/day-02' }
       ]
     }
   ],
@@ -233,11 +230,8 @@ const enSidebar = {
     {
       text: 'Development Log',
       items: [
-        { text: 'Log Home', link: '/en/log/' },
         { text: 'Day01 · Bilingual documentation launch', link: '/en/log/day-01' },
-        { text: 'Day02 · Delivery decomposition and development log', link: '/en/log/day-02' },
-        { text: 'Day03 · Delivery increments expanded into developer playbooks', link: '/en/log/day-03' },
-        { text: 'Log template', link: '/en/log/template' }
+        { text: 'Day02 · Delivery, brand, and documentation cleanup', link: '/en/log/day-02' }
       ]
     }
   ],

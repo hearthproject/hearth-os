@@ -44,7 +44,7 @@ The roadmap rests on three core principles:
 - **Product**: Definition, design principles, task coverage, and completion criteria.
 - **System Design**: Overall architecture, domain model, control plane, executor, security, memory, evolution, Token economy, frontend, and evaluation.
 - **Delivery Roadmap**: The product roadmap master, seven Stages, 35 D increments, engineering structure, and risks.
-- **Development Log**: Day01 and Day02 records of real progress, verification evidence, problems, and next steps, plus a copyable daily template.
+- **Development Log**: Day01 and Day02 entries with a short daily overview, commits, specific changes, and authors.
 - **Reference**: Build-vs-integrate boundaries, glossary, default checklist, FAQ, contribution guide, and the complete roadmap archive.
 
 The complete main document is preserved on the [archive page](/en/reference/full-roadmap). For daily reading, we recommend the topic-based pages. The documentation site and every formal page come from the same `docs/` folder; see the [Documentation Map](/en/reference/source-map) for the full structure.

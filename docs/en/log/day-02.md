@@ -1,46 +1,24 @@
 ---
-title: 'Day02 · Delivery decomposition and development log'
-description: 'Hearth development log Day02: 35 D increment pages, nested sidebar, development log, hero spacing, and online verification.'
-outline: [2, 3]
+title: 'Day02 · Delivery, brand, and documentation cleanup'
+description: 'Hearth development log Day02: delivery increments, developer playbooks, documentation cleanup, Hearth OS branding, and the testing/evaluation strategy.'
+outline: false
 ---
 
-<p class="eyebrow">DAY 02 · DELIVERY DETAILS</p>
+<p class="eyebrow">DAY 02 · DELIVERY, BRAND & DOCS</p>
 
-# Day02 · Delivery decomposition and development log
+# Day02 · Delivery, brand, and documentation cleanup
 
-<p class="lead">Expand the From 0 to 100 plan from one stage table into 35 independently readable and verifiable D increments, then add a continuous record of the development process.</p>
+<p class="lead">On 2026-11-04, the bilingual site received its second round of refinement: the information architecture and hero spacing were reorganized, 35 D increments were created for Stages 0–6 and expanded into 140 work packages, the documentation source and bilingual READMEs were consolidated, Hearth OS branding was applied, and the testing and evaluation strategy was completed. The development log also changed from long stage reports to a short overview plus commit history.</p>
 
-## Completed
+## Commit history
 
-- Created 35 independent increment pages for Stages 0–6, each with user outcome, prerequisites, steps, contracts, deliverables, verification, failure recovery, and boundaries.
-- Expanded each Stage sidebar into Module overview and D increments, with the active item expanded and highlighted.
-- Added the development log, Day01, Day02, and a copyable daily template in Chinese and English.
-- Moved the hero lower and vertically centered it, adding breathing room between navigation and content.
-
-## Verification evidence
-
-- Bilingual build, internal-link, documentation-structure, and translation-structure checks pass.
-- No horizontal overflow at desktop or phone widths; language switching and search work.
-- The new Stage details, development log, and template are live on GitHub Pages.
-
-## Problems encountered
-
-- A single stage table compresses too many increments; developers cannot tell what to do next.
-- One broad From 0 to 100 plan mixes the product roadmap, stages, and concrete increments.
-- Appending logs as body text quickly blurs development history and release notes.
-
-## Decisions and tradeoffs
-
-- The product roadmap remains the master; the development plan is the second layer; Stage and D increments form the third.
-- Every D page explains failure paths and exclusions so later work cannot hide a current gap.
-- Logs record real completion, evidence, and problems instead of imitating a product release note.
-
-## Next
-
-- Keep recording real progress with the Day03 and Day04 template.
-- Add more interface examples, task samples, and evaluation evidence based on developer feedback.
-- Keep each increment demonstrable in the browser; never let later stages cover its acceptance.
-
-## Related commits
-
-- This commit: delivery detail decomposition, development log, hero spacing, and deployment verification.
+| Commit | Author | Changes |
+|---|---|---|
+| `69330ab` | JasonBuildAI | Reworked the Chinese and English information architecture, homepage components, and visual system; simplified the development-plan page and adjusted language switching; 63 files (+2,157/−1,433). |
+| `bd38c41` | JasonBuildAI | Adjusted `custom.css` to increase the header and hero spacing. |
+| `4927d52` | JasonBuildAI | Added 35 D increment pages for Stages 0–6 and a nested sidebar; 107 files (+8,430/−90). |
+| `f01d637` | JasonBuildAI | Expanded all 35 increments into four work packages each (140 total), adding engineering maps, interfaces, acceptance rehearsals, and failure recovery; 103 files (+6,018/−1,157). |
+| `3c7df1e` | JasonBuildAI | Consolidated the documentation source, removed the old `docs/roadmap` material, rewrote both READMEs, and fixed links; 39 files (+490/−8,667). |
+| `afae9b9` | Jason Cat | Applied Hearth OS identity across theme colors, logos, the GitHub avatar, the homepage, and the READMEs; 20 files (+264/−179). |
+| `8e51f09` | JasonBuildAI | Added the nine testing layers, the boundary between tests and evaluations, regression requirements, and release evidence to the engineering page; 4 files (+218/−38). |
+| `1bd9a4c` | JasonBuildAI | Fixed both READMEs to use the theme-aware Hearth OS logo; 3 files. |

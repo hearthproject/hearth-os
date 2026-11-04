@@ -84,7 +84,7 @@ All formal documentation lives in one place: [`docs/`](docs/). The site is built
 | Product | Definition, principles, task coverage, and completion criteria | [Open](https://hearthproject.github.io/hearth-os/product/) |
 | System Design | Architecture, protocols, control plane, executors, safety, memory, evolution, and evaluation | [Open](https://hearthproject.github.io/hearth-os/architecture/) |
 | Delivery | Roadmap, development plan, Stage modules, engineering, risks, and ADRs | [Open](https://hearthproject.github.io/hearth-os/delivery/) |
-| Development Log | Day-by-day progress, verification evidence, problems, and decisions | [Open](https://hearthproject.github.io/hearth-os/log/) |
+| Development Log | Daily overviews with commits, specific changes, and authors | [Open](https://hearthproject.github.io/hearth-os/log/day-02.html) |
 | Reference | Boundaries, glossary, checklists, FAQ, contributing, and the full archive | [Open](https://hearthproject.github.io/hearth-os/reference/) |
 
 ## Delivery at a Glance
@@ -131,7 +131,7 @@ docs/                  Single source for the published documentation
   product/             Product definition, principles, and task coverage
   architecture/        Control plane, protocols, executors, safety, and memory
   delivery/            Roadmap, development plan, Stage modules, engineering, risks, ADRs
-  log/                 Development log and daily template
+  log/                 Daily development log entries
   reference/           Boundaries, glossary, checklists, FAQ, contributing, full archive
   en/                  English mirror of every documentation page
   .vitepress/          Site configuration and theme
