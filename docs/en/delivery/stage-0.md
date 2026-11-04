@@ -38,10 +38,10 @@ outline: [2, 3]
 
 | Increment | User-visible outcome | Completion evidence |
 |---|---|---|
-| D0.1 Product wedge and task baseline | A clear explanation of why the first user needs Hearth | 12+ real tasks, two baselines, non-goals, and success metrics |
-| D0.2 End-to-end prototype | A new user can create, approve, retrieve artifacts, and recover without instructions | Desktop/mobile prototype, all states, usability review |
-| D0.3 Protocol and data contracts | Every prototype state maps to stable fields and events | Entity definitions, state machine, projection contracts, contract tests |
-| D0.4 Evaluation, security, and engineering baseline | Every later increment can be verified from day one | Evaluation runner, threat model, approval matrix, CI, fake executor |
+| [D0.1](/en/delivery/stage-0/d0-1) Product wedge and task baseline | A clear explanation of why the first user needs Hearth | 12+ real tasks, two baselines, non-goals, and success metrics |
+| [D0.2](/en/delivery/stage-0/d0-2) End-to-end prototype | A new user can create, approve, retrieve artifacts, and recover without instructions | Desktop/mobile prototype, all states, usability review |
+| [D0.3](/en/delivery/stage-0/d0-3) Protocol and data contracts | Every prototype state maps to stable fields and events | Entity definitions, state machine, projection contracts, contract tests |
+| [D0.4](/en/delivery/stage-0/d0-4) Evaluation, security, and engineering baseline | Every later increment can be verified from day one | Evaluation runner, threat model, approval matrix, CI, fake executor |
 
 ## Exit Checklist
 

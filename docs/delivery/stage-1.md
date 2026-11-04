@@ -29,12 +29,12 @@ outline: [2, 3]
 
 | 增量 | 用户可见结果 | 完成证据 |
 |---|---|---|
-| D1.1 可运行走路骨架 | Web 创建任务，刷新或重启后状态仍在 | `hearthd` + SQLite + Event Log + fake executor + SSE |
-| D1.2 首个 Codex 切片 | 获得带来源、验证结果和成本的报告 | Task Pack、结构化 Result、Artifact、验证器 |
-| D1.3 MVP 收口 | 创建、取消、重试、审批、产物和恢复都在浏览器完成 | MVP-1 用户故事端到端通过 |
-| D1.4 副作用安全骨架 | 外部动作有预览、审批、幂等与回执 | outbox、idempotency、Receipt、撤销/补偿演练 |
-| D1.5 第二任务族与内核加固 | 第二类真实任务可依赖，故障后能恢复 | 路由、故障注入、重复投递、恢复测试 |
-| D1.6 Stage 1 发布 | 用户可独立安装、使用、备份和导出 | 10 个真实任务、基线对比、安全与评测报告 |
+| [D1.1](/delivery/stage-1/d1-1) 可运行走路骨架 | Web 创建任务，刷新或重启后状态仍在 | `hearthd` + SQLite + Event Log + fake executor + SSE |
+| [D1.2](/delivery/stage-1/d1-2) 首个 Codex 切片 | 获得带来源、验证结果和成本的报告 | Task Pack、结构化 Result、Artifact、验证器 |
+| [D1.3](/delivery/stage-1/d1-3) MVP 收口 | 创建、取消、重试、审批、产物和恢复都在浏览器完成 | MVP-1 用户故事端到端通过 |
+| [D1.4](/delivery/stage-1/d1-4) 副作用安全骨架 | 外部动作有预览、审批、幂等与回执 | outbox、idempotency、Receipt、撤销/补偿演练 |
+| [D1.5](/delivery/stage-1/d1-5) 第二任务族与内核加固 | 第二类真实任务可依赖，故障后能恢复 | 路由、故障注入、重复投递、恢复测试 |
+| [D1.6](/delivery/stage-1/d1-6) Stage 1 发布 | 用户可独立安装、使用、备份和导出 | 10 个真实任务、基线对比、安全与评测报告 |
 
 ## MVP 的位置
 

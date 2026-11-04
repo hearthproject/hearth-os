@@ -30,7 +30,7 @@
     #8cc9dc 100%
   );
 
-  --vp-nav-height: 78px;
+  --vp-nav-height: 84px;
   --vp-layout-max-width: 1440px;
   --vp-sidebar-width: 292px;
 }
@@ -173,6 +173,38 @@ body {
 }
 
 .VPSidebarItem.level-1.is-active > .item .link {
+  background: var(--vp-c-brand-soft);
+  color: var(--vp-c-brand-1);
+  font-weight: 650;
+}
+
+.VPSidebarItem.level-1 > .item {
+  padding: 7px 0 4px;
+}
+
+.VPSidebarItem.level-1 > .item > .text {
+  color: var(--vp-c-text-1);
+  font-size: 12px;
+  font-weight: 660;
+  line-height: 1.45;
+}
+
+.VPSidebarItem.level-2 .link {
+  margin: 1px 0;
+  border-radius: 8px;
+  padding: 7px 11px;
+  color: var(--vp-c-text-2);
+  font-size: 12.5px;
+  line-height: 1.5;
+  transition: color 0.18s ease, background 0.18s ease;
+}
+
+.VPSidebarItem.level-2 .link:hover {
+  background: var(--vp-c-brand-softer);
+  color: var(--vp-c-text-1);
+}
+
+.VPSidebarItem.level-2.is-active > .item .link {
   background: var(--vp-c-brand-soft);
   color: var(--vp-c-brand-1);
   font-weight: 650;
@@ -373,11 +405,16 @@ body {
 }
 
 .VPHero {
-  padding-top: 122px !important;
+  padding: 168px 32px 108px !important;
+  min-height: calc(100vh - var(--vp-nav-height));
+  display: flex;
+  align-items: center;
 }
 
 .VPHero .container {
   max-width: 1152px;
+  width: 100%;
+  margin-inline: auto;
 }
 
 .VPHero .main {
@@ -440,7 +477,8 @@ body {
 
 @media (max-width: 960px) {
   .VPHero {
-    padding-top: 88px !important;
+    padding: 112px 24px 80px !important;
+    min-height: auto;
   }
 
   .VPHero .image {
@@ -454,7 +492,7 @@ body {
 
 @media (max-width: 640px) {
   .VPHero {
-    padding-top: 64px !important;
+    padding: 92px 20px 68px !important;
   }
 
   .VPHero .name {
@@ -500,5 +538,26 @@ body {
     height: 36px;
     padding: 0 13px;
     line-height: 36px;
+  }
+}
+
+@media (max-width: 900px) {
+  .VPNavBarMenu,
+  .VPNavBarAppearance,
+  .VPNavBarSocialLinks,
+  .VPNavBarExtra {
+    display: none !important;
+  }
+
+  .VPNavBarHamburger {
+    display: flex !important;
+  }
+
+  .VPNavScreen {
+    display: block !important;
+  }
+
+  .VPNavBarSearch {
+    margin-left: auto;
   }
 }

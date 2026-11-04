@@ -1,0 +1,190 @@
+{
+  "stage": 0,
+  "slug": "stage-0",
+  "zh_title": "定义与原型",
+  "en_title": "Definition & Prototype",
+  "zh": {
+    "prereq": [
+      "一个空仓库、可记录的真实工作样本，以及一位愿意持续反馈的首位用户。",
+      "允许观察全人工流程与直接使用 Codex 的基线，不要求系统已经存在。",
+      "本阶段不接入真实发送、支付、删除或系统设置修改。"
+    ],
+    "contracts": [
+      ["任务卡投影", "界面只消费稳定的 TaskCard projection，不读取数据库字段或内部任务对象。"],
+      ["事件事实源", "状态变化必须进入 append-only Event Log；同一事件流可以重建页面。"],
+      ["未知状态", "未识别的状态只能进入“需要处理”，不能默认显示为完成或成功。"],
+      ["契约测试", "mock server 与前端契约测试随 schema 一起提交，CI 拦截回归。"]
+    ],
+    "failures": [
+      ["原型状态无法映射", "页面显示“需要处理”，并记录未识别的 projection 字段和任务 ID。", "补齐状态映射、更新契约测试，再重新演示原路径。"],
+      ["真实任务无法验收", "任务保留在候选池，标注原因，不进入开发承诺。", "补清输入、产物或验收方式，或换一个真实任务。"],
+      ["基线不可比较", "该任务不进入评测集，避免用失真的数据证明价值。", "重新记录人工分钟、成功率、Token 与失败类型。"]
+    ],
+    "exclusions": [
+      "不先做完整内核再补界面。",
+      "不用文档完成度替代可点击原型与可重复评测。",
+      "不接入真实高风险外部副作用。"
+    ]
+  },
+  "en": {
+    "prereq": [
+      "An empty repository, a recordable set of real work samples, and one first user willing to keep giving feedback.",
+      "Baselines for fully manual work and direct Codex use are observable before the system exists.",
+      "This stage does not connect real sending, payment, deletion, or system-setting changes."
+    ],
+    "contracts": [
+      ["Task card projection", "The UI consumes only a stable TaskCard projection; it never reads database columns or internal task objects."],
+      ["Event source of truth", "Every state change enters an append-only Event Log; the same event stream can rebuild the page."],
+      ["Unknown states", "An unrecognized state can only become Needs attention, never Completed or Successful."],
+      ["Contract tests", "A mock server and frontend contract tests ship with the schema, and CI blocks regressions."]
+    ],
+    "failures": [
+      ["A prototype state cannot be mapped", "The page shows Needs attention and records the unknown projection field and task ID.", "Add the mapping, update contract tests, and replay the original path."],
+      ["A real task cannot be accepted", "The task stays in the candidate pool with a reason; it never becomes a build commitment.", "Clarify inputs, artifacts, or acceptance, or replace the task."],
+      ["Baselines are not comparable", "The task stays out of the evaluation set so distorted data cannot prove value.", "Recapture manual minutes, success rate, Token usage, and failure type."]
+    ],
+    "exclusions": [
+      "Do not build a complete kernel before the interface.",
+      "Do not substitute document completion for a clickable prototype and repeatable evaluation.",
+      "Do not connect real high-risk external side effects."
+    ]
+  },
+  "increments": [
+    {
+      "id": "D0.1",
+      "slug": "d0-1",
+      "zh": {
+        "title": "产品楔子与真实任务基线",
+        "lead": "先把“谁在什么场景下为什么使用 Hearth”与可验收的真实任务集固定下来；后续原型、契约和评测都以它为准。",
+        "outcome": "一份清晰的产品说明、至少 12 个可验收任务，以及全人工与直接使用 Codex 的两条基线。",
+        "steps": [
+          "选定首位真实用户、最高频场景和第一个任务楔子，写清不用 Hearth 时人们会怎么做。",
+          "从真实工作记录收集 20–30 个候选任务，删除演示型、无法验证或没有真实需求的任务。",
+          "筛出至少 12 个任务，为每个任务写明输入、产物、验收方式和至少一个失败样本。",
+          "让任务集覆盖成功、失败、等待审批、需要信息和人工接管，不隐藏异常路径。",
+          "分别测量全人工与直接使用 Codex 的人工分钟、成功率、Token、失败类型和用户不满点。",
+          "写非目标、风险、成功指标和继续/停止判断，作为后续阶段可比较的基线。"
+        ],
+        "gate": "至少 12 个任务有明确输入、产物和验收方式；能说明 Hearth 的独立价值；任务集包含成功、失败、等待审批和需要接管的情况。",
+        "evidence": ["产品说明与任务楔子", "12+ 真实任务卡样本", "全人工/Codex 双基线表", "非目标、风险与成功指标"]
+      },
+      "en": {
+        "title": "Product wedge and real-task baseline",
+        "lead": "Fix who uses Hearth, in which scenario, and why, together with a verifiable set of real tasks; the prototype, contracts, and evaluation all depend on it.",
+        "outcome": "A clear product statement, at least 12 verifiable tasks, and baselines for both fully manual work and direct Codex use.",
+        "steps": [
+          "Choose the first real user, the highest-frequency scenario, and the first task wedge; write down how the work is done without Hearth.",
+          "Collect 20–30 candidate tasks from real work records; remove demo-only, unverifiable, or invented requests.",
+          "Select at least 12 tasks and specify inputs, artifacts, acceptance, and at least one failure sample for each.",
+          "Cover success, failure, waiting for approval, missing information, and human takeover instead of hiding exception paths.",
+          "Measure manual minutes, success rate, Token usage, failure type, and dissatisfaction for fully manual and direct Codex baselines.",
+          "Write non-goals, risks, success metrics, and continue/stop criteria as a comparable baseline for later stages."
+        ],
+        "gate": "At least 12 tasks have explicit inputs, artifacts, and acceptance; Hearth's independent value is clear; the set includes success, failure, approval waits, and takeover.",
+        "evidence": ["Product statement and task wedge", "12+ real task-card samples", "Manual/Codex baseline table", "Non-goals, risks, and success metrics"]
+      }
+    },
+    {
+      "id": "D0.2",
+      "slug": "d0-2",
+      "zh": {
+        "title": "可点击的端到端产品原型",
+        "lead": "在写真实执行内核之前，先用可点击原型证明用户能完成一条完整任务路径，并且异常状态也有明确的下一步。",
+        "outcome": "一个覆盖四个入口与七种任务状态、在桌面和手机宽度都能走通的端到端原型。",
+        "steps": [
+          "设计今日、需要你、产物、设置四个入口，让用户从当前任务和待处理事项开始。",
+          "覆盖排队、执行、等待审批、需要信息、完成、失败和可恢复七种状态。",
+          "为每种状态只保留一个主行动作，并把次要动作收进详情或更多菜单。",
+          "隐藏 Worker、Harness、Mandate 等内部术语，用用户能理解的原因和下一步替代。",
+          "用接近真实的模拟数据演示创建、审批、失败恢复和取回产物的完整路径。",
+          "检查桌面与手机布局，并让每个原型字段都能映射到真实 projection。"
+        ],
+        "gate": "新用户不看说明也能完成主要路径；每个状态只有一个主动作；没有内部术语；失败状态给出下一步；原型状态可映射到真实投影字段。",
+        "evidence": ["可点击原型与走查脚本", "状态-主动作-投影字段映射表", "桌面与手机截图", "可用性观察记录"]
+      },
+      "en": {
+        "title": "Clickable end-to-end product prototype",
+        "lead": "Before building the real execution kernel, prove with a clickable prototype that a user can finish one complete task path and that failures have a clear next step.",
+        "outcome": "An end-to-end prototype with four entry points and seven task states that works at both desktop and phone widths.",
+        "steps": [
+          "Design Today, Needs You, Artifacts, and Settings entry points so work begins with the current task and what needs attention.",
+          "Cover queued, running, waiting for approval, needs information, completed, failed, and recoverable states.",
+          "Keep exactly one primary action per state and move secondary actions into details or a More menu.",
+          "Hide internal terms such as Worker, Harness, and Mandate; explain the reason and next step in user language.",
+          "Use realistic mock data to demonstrate creation, approval, failure recovery, and artifact retrieval end to end.",
+          "Check desktop and phone layouts, and map every prototype field to a real projection."
+        ],
+        "gate": "A new user can finish the main path without instructions; each state has one primary action; no internal jargon appears; failures give a next step; states map to real projections.",
+        "evidence": ["Clickable prototype and walkthrough script", "State-action-projection map", "Desktop and phone captures", "Usability observation notes"]
+      }
+    },
+    {
+      "id": "D0.3",
+      "slug": "d0-3",
+      "zh": {
+        "title": "协议、状态机与 UI 数据契约",
+        "lead": "把原型中的状态、主动作、证据和产物变成稳定契约，让真实后端可以逐步替换 mock，而不重写用户路径。",
+        "outcome": "核心实体、状态迁移、UI 投影、事件接口和契约测试共同组成一份可实施的协议。",
+        "steps": [
+          "定义 Event、Task、Ticket、Run、Executor、Approval、Artifact、Receipt、Budget 的字段和关系。",
+          "定义 Task Pack、Result、失败分类，以及每种失败面向用户的解释和可恢复动作。",
+          "定义任务卡、审批和产物三类 projection，确保界面不依赖内部数据库结构。",
+          "确定 Event Log、outbox、lease、schema migration 与 SSE 的接口边界。",
+          "建立 mock server，用同一事件流驱动原型，并为主路径和异常路径编写契约测试。",
+          "用 schema 版本化和未知状态降级规则保证演进不会让页面假装成功。"
+        ],
+        "gate": "前端不依赖内部数据库字段；核心状态迁移有唯一解释；schema 可版本化；事件流能重建投影；未知状态安全显示为“需要处理”。",
+        "evidence": ["领域实体与状态机图", "TaskCard/Approval/Artifact 契约", "mock server 与契约测试", "schema 版本与迁移说明"]
+      },
+      "en": {
+        "title": "Protocols, state machine, and UI data contracts",
+        "lead": "Turn prototype states, primary actions, evidence, and artifacts into stable contracts so a real backend can replace mocks without rewriting user paths.",
+        "outcome": "Core entities, state transitions, UI projections, event interfaces, and contract tests form an implementable protocol.",
+        "steps": [
+          "Define the fields and relationships for Event, Task, Ticket, Run, Executor, Approval, Artifact, Receipt, and Budget.",
+          "Define Task Pack, Result, the failure taxonomy, and the user explanation and recovery action for each failure.",
+          "Define task-card, approval, and artifact projections so the UI never depends on internal database structure.",
+          "Set interface boundaries for the Event Log, outbox, lease, schema migration, and SSE.",
+          "Build a mock server that drives the prototype from one event stream, with contract tests for success and failure paths.",
+          "Version schemas and degrade unknown states safely so evolution never makes the page pretend to succeed."
+        ],
+        "gate": "The frontend does not depend on database columns; every core transition has one explanation; schemas are versioned; projections rebuild from events; unknown states become Needs attention.",
+        "evidence": ["Domain entities and state machine", "TaskCard/Approval/Artifact contracts", "Mock server and contract tests", "Schema versions and migration notes"]
+      }
+    },
+    {
+      "id": "D0.4",
+      "slug": "d0-4",
+      "zh": {
+        "title": "评测、安全与工程基线",
+        "lead": "让后续每一个增量从第一天起都能被重复验证、被安全约束，并在 CI 中阻止契约与数据回归。",
+        "outcome": "可重复的 12 任务评测、明确的安全边界，以及可运行的类型检查、测试、CI 和 fake executor。",
+        "steps": [
+          "为 12 个任务建立评测 runner、评分规则、失败分类和人工复核记录。",
+          "完成威胁模型、风险分级、审批矩阵、秘密处理规则与高风险动作禁用清单。",
+          "初始化 monorepo、lint、类型检查、单元/契约测试、ADR 模板和文档目录。",
+          "实现 fake executor，使完整 UI 流程可以无真实副作用地运行和回放。",
+          "定义 Token、成本、延迟、人工分钟、打断次数与失败类型的采集字段。",
+          "把评测、schema 校验、迁移检查和危险动作拦截接入 CI，作为合并门槛。"
+        ],
+        "gate": "评测可在本地重复运行；高风险动作必须有审批路径；CI 能阻止 schema 和契约回归；fake executor 能驱动完整 UI；没有真实外部副作用。",
+        "evidence": ["12 任务评测 runner", "威胁模型与审批矩阵", "Monorepo/CI/测试基线", "fake executor 演示记录"]
+      },
+      "en": {
+        "title": "Evaluation, security, and engineering baseline",
+        "lead": "Make every later increment repeatably verifiable and safely bounded from day one, with CI preventing contract and data regressions.",
+        "outcome": "A repeatable 12-task evaluation, explicit safety boundaries, and working type checks, tests, CI, and a fake executor.",
+        "steps": [
+          "Build an evaluation runner, scoring rules, failure taxonomy, and manual review records for the 12 tasks.",
+          "Complete the threat model, risk levels, approval matrix, secret-handling rules, and a deny list for high-risk actions.",
+          "Initialize the monorepo, linting, type checking, unit and contract tests, ADR template, and documentation structure.",
+          "Implement a fake executor so the full UI can run and replay without real side effects.",
+          "Define capture fields for Token, cost, latency, manual minutes, interruptions, and failure classes.",
+          "Connect evaluation, schema validation, migration checks, and dangerous-action blocking to CI as merge gates."
+        ],
+        "gate": "Evaluation repeats locally; high-risk actions have an approval path; CI blocks schema and contract regressions; the fake executor drives the full UI; no real external side effect exists.",
+        "evidence": ["12-task evaluation runner", "Threat model and approval matrix", "Monorepo/CI/test baseline", "Fake executor demonstration"]
+      }
+    }
+  ]
+}

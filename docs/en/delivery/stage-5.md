@@ -29,10 +29,10 @@ outline: [2, 3]
 
 | Increment | User-visible outcome | Completion evidence |
 |---|---|---|
-| D5.1 Memory Core and browser | Users can inspect, understand, and correct memory in use | Five memory types, provenance, budgets, recall explanation |
-| D5.2 Conflict, forgetting, and export | Wrong memory is correctable, forgetting propagates, data is exportable | Tombstones, propagation, export, migration tests |
-| D5.3 Trajectories, skill candidates, evaluation sets | The system proposes reusable methods from work | Trajectory mining, candidates, versions, evaluation samples |
-| D5.4 Evolution gate and release | New methods have comparative evidence and rollback | Shadow, Canary, Promote, Rollback case |
+| [D5.1](/en/delivery/stage-5/d5-1) Memory Core and browser | Users can inspect, understand, and correct memory in use | Five memory types, provenance, budgets, recall explanation |
+| [D5.2](/en/delivery/stage-5/d5-2) Conflict, forgetting, and export | Wrong memory is correctable, forgetting propagates, data is exportable | Tombstones, propagation, export, migration tests |
+| [D5.3](/en/delivery/stage-5/d5-3) Trajectories, skill candidates, evaluation sets | The system proposes reusable methods from work | Trajectory mining, candidates, versions, evaluation samples |
+| [D5.4](/en/delivery/stage-5/d5-4) Evolution gate and release | New methods have comparative evidence and rollback | Shadow, Canary, Promote, Rollback case |
 
 ## Exit Checklist
 

@@ -29,10 +29,10 @@ outline: [2, 3]
 
 | Increment | User-visible outcome | Completion evidence |
 |---|---|---|
-| D3.1 Device agentd and visibility | Users see trusted devices, capabilities, and online state | Pairing, capability catalog, health check, revocation |
-| D3.2 GUI observation and takeover | Users can view, pause, operate, and hand back | Takeover UI, window scope, state record, screenshot redaction |
-| D3.3 Low-risk GUI actions and verification | Allowlisted low-risk actions show evidence | App allowlist, action preview, result verification, retry |
-| D3.4 High-risk GUI and Stage 3 release | High-risk actions show impact, confirmation, and compensation | Isolated desktop, approval, snapshot, recovery, 5 real tasks |
+| [D3.1](/en/delivery/stage-3/d3-1) Device agentd and visibility | Users see trusted devices, capabilities, and online state | Pairing, capability catalog, health check, revocation |
+| [D3.2](/en/delivery/stage-3/d3-2) GUI observation and takeover | Users can view, pause, operate, and hand back | Takeover UI, window scope, state record, screenshot redaction |
+| [D3.3](/en/delivery/stage-3/d3-3) Low-risk GUI actions and verification | Allowlisted low-risk actions show evidence | App allowlist, action preview, result verification, retry |
+| [D3.4](/en/delivery/stage-3/d3-4) High-risk GUI and Stage 3 release | High-risk actions show impact, confirmation, and compensation | Isolated desktop, approval, snapshot, recovery, 5 real tasks |
 
 ## Exit Checklist
 

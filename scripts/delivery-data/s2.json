@@ -1,0 +1,260 @@
+{
+  "stage": 2,
+  "slug": "stage-2",
+  "zh_title": "Personal Operator",
+  "en_title": "Personal Operator",
+  "zh": {
+    "prereq": [
+      "Stage 1 的本地 MVP、两个任务族、审批、幂等、回执和恢复路径稳定。",
+      "已限定首位用户的真实邮箱、日历、文档或数据账户，并准备测试账户。",
+      "连接器只能申请最小范围；任何写入都必须有预览、审批和回执。"
+    ],
+    "contracts": [
+      ["来源与权限", "每个 Source 记录账户、对象 ID、时间、范围、引用和撤销状态，任务不得越过授权范围。"],
+      ["连接器", "OAuth 使用最小 scope 和短期凭据；同步具备游标、去重、限流和健康检查。"],
+      ["写入动作", "邮件、日历、分享等写入必须经过 Connector Effect、Effect Preview、outbox 与 Receipt。"],
+      ["上下文边界", "不同账户、项目和任务之间不串扰；最小必要内容进入 Context Pack。"],
+      ["不确定结果", "超时、网络中断和外部状态未知时先对账，不能直接重复发送或写入。"]
+    ],
+    "failures": [
+      ["连接器过期或被撤销", "任务显示重连要求，保留草稿和已完成步骤。", "重新授权后继续，不重放已成功的外部动作。"],
+      ["网页内容试图扩大权限", "任务暂停并提示内容不可信，要求用户确认。", "丢弃注入指令，保留来源证据并重新生成安全计划。"],
+      ["写入结果未知", "显示“等待对账”，不显示成功或允许盲目重试。", "查询测试账户或外部系统，确认后补写回执或执行补偿。"]
+    ],
+    "exclusions": [
+      "不在一个连接器上证明权限、幂等和回执之前扩展多个渠道。",
+      "不自动执行高风险提交、公开发布或不可逆分享。",
+      "不让网页内容、附件或模型输出直接改变权限。"
+    ]
+  },
+  "en": {
+    "prereq": [
+      "Stage 1's local MVP, two task families, approval, idempotency, receipts, and recovery are stable.",
+      "A real email, calendar, document, or data account is scoped for the first user, with a test account available.",
+      "Connectors request least privilege only; every write has preview, approval, and a receipt."
+    ],
+    "contracts": [
+      ["Sources and authority", "Every Source records account, object ID, time, scope, citation, and revocation state; tasks never exceed authorized scope."],
+      ["Connectors", "OAuth uses least-privilege scopes and short-lived credentials; sync has cursors, deduplication, rate limits, and health checks."],
+      ["Write actions", "Email, calendar, and sharing writes pass through Connector Effect, Effect Preview, outbox, and Receipt."],
+      ["Context boundary", "Accounts, projects, and tasks never leak into each other; only the minimum necessary content enters a Context Pack."],
+      ["Uncertain results", "Timeout, network loss, or unknown external state requires reconciliation before retry."]
+    ],
+    "failures": [
+      ["A connector expires or is revoked", "The task asks for reconnection and preserves drafts and completed steps.", "Reauthorize and continue without replaying successful external actions."],
+      ["Page content tries to expand authority", "The task pauses, marks the content as untrusted, and asks the user to confirm.", "Drop the injected instruction, preserve source evidence, and regenerate a safe plan."],
+      ["A write result is unknown", "The UI shows Reconciling, neither success nor blind retry.", "Query the test account or external system, then write a receipt or compensate."]
+    ],
+    "exclusions": [
+      "Do not expand channels before one connector proves permission, idempotency, and receipt behavior.",
+      "Do not automatically perform high-risk submissions, public publishing, or irreversible sharing.",
+      "Do not let page content, attachments, or model output change authority."
+    ]
+  },
+  "increments": [
+    {
+      "id": "D2.1",
+      "slug": "d2-1",
+      "zh": {
+        "title": "只读连接器与来源视图",
+        "lead": "先用一个真实连接器证明权限、来源和撤销边界，再讨论写入与多渠道。",
+        "outcome": "用户可以连接一个真实邮箱、日历或文档账户，让 Hearth 读取指定范围，并在任务卡上看到来源、时间和原始引用。",
+        "steps": [
+          "先接一个 Connector，使用 OAuth 最小授权范围与短期凭据。",
+          "实现 Source 归一化、去重、游标、限流和过期处理。",
+          "建立来源投影与来源详情 UI，显示账户、对象、时间和引用范围。",
+          "加入连接器健康页、断开与撤销入口，并让撤销立即影响后续读取。",
+          "用真实但脱敏的对象演示一次只读研究任务，不暴露原始凭据。",
+          "确认任务只引用被授权范围，且每个来源都能追溯到原始对象。"
+        ],
+        "gate": "只读同步可用；用户能撤销连接；任务只引用被授权范围；来源可追溯到原始对象；UI 不暴露原始凭据。",
+        "evidence": ["一个真实只读连接器", "来源投影与来源详情页", "OAuth scope 清单", "撤销与过期路径演示"]
+      },
+      "en": {
+        "title": "Read-only connector and source view",
+        "lead": "Prove permission, provenance, and revocation with one real connector before discussing writes or multiple channels.",
+        "outcome": "A user connects one real email, calendar, or document account, lets Hearth read a scoped range, and sees source, time, and original citation on the task card.",
+        "steps": [
+          "Connect one Connector with least-privilege OAuth scopes and short-lived credentials.",
+          "Implement Source normalization, deduplication, cursors, rate limits, and expiry handling.",
+          "Build source projection and detail UI showing account, object, time, and citation scope.",
+          "Add connector health, disconnect, and revoke actions; revocation immediately affects later reads.",
+          "Demonstrate one read-only research task with real, redacted objects without exposing raw credentials.",
+          "Confirm tasks cite only authorized scope and every source traces back to the original object."
+        ],
+        "gate": "Read-only sync works; users can revoke the connection; tasks reference only authorized scope; sources trace to originals; the UI exposes no raw credentials.",
+        "evidence": ["One real read-only connector", "Source projection and detail page", "OAuth scope list", "Revocation and expiry demo"]
+      }
+    },
+    {
+      "id": "D2.2",
+      "slug": "d2-2",
+      "zh": {
+        "title": "Document/Data Executor",
+        "lead": "把确定性文档处理从模型中拿出来，用可验证的数据管道处理 PDF、Office 文档和表格。",
+        "outcome": "用户可以把 PDF、Office 文档和表格变成结构化报告、对比表或可复现转换结果，并查看文件差异。",
+        "steps": [
+          "建立 Python sidecar，隔离解析、OCR、格式转换、表格清洗与导入导出。",
+          "实现确定性管道，能不用模型完成的步骤不交给模型。",
+          "使用内容寻址产物，保存原文件、转换参数、哈希和来源。",
+          "加入表格结构、数值、公式和链接验证，避免只检查文件是否存在。",
+          "实现 artifact diff、预览和大文件分块处理，避免把全文塞入上下文。",
+          "失败时保留原文件与中间状态，允许单独重跑解析或转换步骤。"
+        ],
+        "gate": "至少三种常见文档格式可处理；确定性步骤不经过模型；结果可验证；大文件不把全文塞入上下文；失败时保留原文件。",
+        "evidence": ["Document/Data sidecar", "至少三种格式样例", "artifact diff 与预览", "解析/验证失败记录"]
+      },
+      "en": {
+        "title": "Document/Data Executor",
+        "lead": "Move deterministic document work out of the model and into a verifiable data pipeline for PDFs, Office files, and spreadsheets.",
+        "outcome": "Users turn PDFs, Office files, and spreadsheets into structured reports, comparisons, or reproducible conversions and inspect file diffs.",
+        "steps": [
+          "Build a Python sidecar that isolates parsing, OCR, format conversion, table cleaning, import, and export.",
+          "Implement a deterministic pipeline; steps that do not need a model never call one.",
+          "Use content-addressed artifacts that preserve originals, conversion parameters, hashes, and provenance.",
+          "Validate table structure, numbers, formulas, and links instead of checking only that a file exists.",
+          "Add artifact diff, preview, and chunked handling for large files so the entire document never enters context.",
+          "On failure, preserve original files and intermediate state so a parse or conversion step can rerun alone."
+        ],
+        "gate": "Three common document formats work; deterministic steps avoid the model; results validate; large files avoid full-context dumps; originals survive failures.",
+        "evidence": ["Document/Data sidecar", "Samples for three formats", "Artifact diff and preview", "Parse/validation failure record"]
+      }
+    },
+    {
+      "id": "D2.3",
+      "slug": "d2-3",
+      "zh": {
+        "title": "Browser Executor 与网页研究",
+        "lead": "让浏览器成为可观察、可接管的研究工具，同时把网页内容视为不可信输入。",
+        "outcome": "用户可以让 Hearth 打开网页、收集来源、下载授权文件、填写非高风险表单草稿，并在需要验证码时接管。",
+        "steps": [
+          "建立 Playwright worker，隔离浏览器 profile 与登录态边界。",
+          "把页面内容视为不可信，加入提示词注入防护和域名/网络出口策略。",
+          "实现截图、来源清单、下载验证和页面不可用时的降级。",
+          "提供实时接管入口，用户处理验证码、登录或复杂交互后可以交还。",
+          "对表单提交分级：草稿可自动填写，高风险提交必须审批。",
+          "验收代表性研究任务，确认内容不能直接扩大权限或触发外部写入。"
+        ],
+        "gate": "代表性研究任务有可追溯来源；网页内容不能直接扩大权限；下载文件经过验证；高风险提交不自动执行；接管后状态可继续。",
+        "evidence": ["Playwright worker", "来源清单与截图", "注入防护测试", "接管与下载验证演示"]
+      },
+      "en": {
+        "title": "Browser Executor and web research",
+        "lead": "Make the browser an observable, takeover-ready research tool while treating web content as untrusted input.",
+        "outcome": "Users can open pages, collect sources, download authorized files, fill low-risk form drafts, and take over when a CAPTCHA appears.",
+        "steps": [
+          "Build a Playwright worker and isolate browser profiles and login state boundaries.",
+          "Treat page content as untrusted; add prompt-injection defenses and domain/network egress policy.",
+          "Implement screenshots, source lists, download verification, and degradation when a page is unavailable.",
+          "Provide live takeover so users handle CAPTCHA, login, or complex interaction and then hand back.",
+          "Tier form submission: drafts may autofill, but high-risk submission requires approval.",
+          "Accept representative research tasks and confirm content cannot directly expand authority or trigger writes."
+        ],
+        "gate": "Research tasks have traceable sources; page content cannot expand authority; downloads verify; high-risk submissions never auto-run; takeover resumes safely.",
+        "evidence": ["Playwright worker", "Source list and screenshots", "Injection-defense tests", "Takeover and download verification"]
+      }
+    },
+    {
+      "id": "D2.4",
+      "slug": "d2-4",
+      "zh": {
+        "title": "草稿、审批与测试账户副作用闭环",
+        "lead": "第一次让真实连接器产生外部写入，但只使用测试账户，并证明预览、审批、回执和对账能够闭合。",
+        "outcome": "用户看到邮件草稿、日历变更或文档分享的完整预览，可以批准或拒绝，并在之后查看回执。",
+        "steps": [
+          "实现邮件草稿、日历冲突检查和待审批写入、文档导出/分享。",
+          "接入真实 Connector Effect，但全部在测试账户和受限收件人上运行。",
+          "用 Effect Preview 展示收件人、时间、内容、范围和撤销/补偿说明。",
+          "把审批、outbox 重投、Receipt 对账和失败死信串成完整链路。",
+          "验证审批与真实参数绑定，旧审批不能用于新动作。",
+          "至少演练一次重复投递、超时和不确定结果，确认不会重复发送或写入。"
+        ],
+        "gate": "“读取 → 理解 → 起草 → 审批 → 执行 → 回执”闭环可用；测试账户无重复发送/写入；不确定结果先对账；审批绑定真实收件人、时间、内容和范围。",
+        "evidence": ["邮件/日历/文档测试账户闭环", "Effect Preview 示例", "Receipt 对账记录", "重复投递与不确定结果演练"]
+      },
+      "en": {
+        "title": "Drafts, approvals, and test-account effects",
+        "lead": "Let a real connector produce its first external writes, using test accounts only, and prove preview, approval, receipt, and reconciliation close.",
+        "outcome": "Users see a complete email draft, calendar change, or document-share preview, can approve or reject it, and later inspect the receipt.",
+        "steps": [
+          "Implement email drafts, calendar conflict checks and pending writes, and document export/share.",
+          "Connect real Connector Effects but run only on test accounts and restricted recipients.",
+          "Use Effect Preview to show recipient, time, content, scope, and undo or compensation.",
+          "Connect approval, outbox redelivery, Receipt reconciliation, and dead letters end to end.",
+          "Verify approval binds to real parameters and an old approval cannot authorize a new action.",
+          "Rehearse duplicate delivery, timeout, and uncertain results and confirm no duplicate send or write."
+        ],
+        "gate": "Read → understand → draft → approve → execute → receipt works; no duplicate test-account effects; uncertainty reconciles first; approval binds recipient, time, content, and scope.",
+        "evidence": ["Email/calendar/document test-account loop", "Effect Preview examples", "Receipt reconciliation record", "Duplicate and uncertainty drills"]
+      }
+    },
+    {
+      "id": "D2.5",
+      "slug": "d2-5",
+      "zh": {
+        "title": "Context Compiler、Token Governor v1 与 Memory v0",
+        "lead": "在任务变多之后，用上下文编译、预算控制和最小记忆维持质量与成本，而不是把所有材料都塞给模型。",
+        "outcome": "常见任务有模板，任务卡更简洁；系统能记住用户明确认可的偏好和事实，并说明为什么召回。",
+        "steps": [
+          "实现 Context Compiler，按任务裁剪来源、证据和工具结果。",
+          "加入 Token Governor 预算、阶梯路由、缓存、异常停止和成本解释。",
+          "实现 Episodic + Semantic Memory v0，记录 provenance、敏感度和基础遗忘。",
+          "建立任务模板和产物中心，减少重复输入但不跳过验收。",
+          "提供记忆查看、纠正和删除入口，显示召回原因。",
+          "验证跨账户、跨项目不串扰，并对比人工分钟与 Token。"
+        ],
+        "gate": "常见任务人工分钟下降且 Token 可解释；跨账户/跨项目不串扰；用户能查看、纠正和遗忘记忆；模板不会跳过验收。",
+        "evidence": ["Context Compiler", "Token 预算与路由报告", "Memory v0 与记忆查看", "模板前后成本对比"]
+      },
+      "en": {
+        "title": "Context Compiler, Token Governor v1, and Memory v0",
+        "lead": "As tasks grow, preserve quality and cost through context compilation, budget control, and minimal memory instead of sending everything to the model.",
+        "outcome": "Common tasks have templates and cleaner cards; the system remembers explicitly accepted preferences and facts and explains why it recalled them.",
+        "steps": [
+          "Implement Context Compiler to trim sources, evidence, and tool results per task.",
+          "Add Token Governor budgets, tiered routing, caching, abnormal stops, and cost explanations.",
+          "Implement Episodic + Semantic Memory v0 with provenance, sensitivity, and basic forgetting.",
+          "Create task templates and an artifact center that reduce repeated input without skipping acceptance.",
+          "Provide memory view, correction, deletion, and recall explanations.",
+          "Verify account and project isolation, then compare manual minutes and Token usage."
+        ],
+        "gate": "Common-task minutes fall and Token is explainable; accounts and projects stay isolated; users can view, correct, and forget memory; templates never skip acceptance.",
+        "evidence": ["Context Compiler", "Token budget and routing report", "Memory v0 and browser", "Before/after template cost comparison"]
+      }
+    },
+    {
+      "id": "D2.6",
+      "slug": "d2-6",
+      "zh": {
+        "title": "Stage 2 发布",
+        "lead": "把研究、邮件、日历、文档和网页任务放进日常使用，并确认来源、审批、回执和隐私边界同时成立。",
+        "outcome": "Hearth 成为可处理研究、邮件、日历、文档和网页任务的日常操作员。",
+        "steps": [
+          "用代表性真实任务跑完整阶段，覆盖只读、文档、浏览器和测试账户写入。",
+          "补齐失败分类、连接器降级、数据导出和隐私说明。",
+          "对比 Stage 1 基线，记录人工分钟、成功率、Token 与失败类型。",
+          "检查跨账户数据串扰、来源可追溯性和审批参数绑定。",
+          "完成 Stage 2 安全与评测报告，列出仍不能自动执行的高风险动作。",
+          "确认用户能理解每个外部动作的来源和回执，并愿意继续日常使用。"
+        ],
+        "gate": "Stage 2 退出条件全部满足；至少一个真实测试账户闭环稳定；不出现跨账户数据串扰；用户能理解每个外部动作的来源和回执。",
+        "evidence": ["代表性真实任务报告", "Stage 2 安全与评测报告", "隐私与导出说明", "与 Stage 1 基线的对比"]
+      },
+      "en": {
+        "title": "Stage 2 release",
+        "lead": "Put research, email, calendar, document, and web tasks into daily use while proving provenance, approval, receipts, and privacy boundaries together.",
+        "outcome": "Hearth becomes a daily operator for research, email, calendar, document, and web tasks.",
+        "steps": [
+          "Run representative real tasks across read-only, documents, browser, and test-account writes.",
+          "Complete failure classes, connector degradation, data export, and privacy guidance.",
+          "Compare with the Stage 1 baseline for minutes, success, Token, and failure types.",
+          "Check cross-account leakage, source traceability, and approval parameter binding.",
+          "Publish the Stage 2 safety and evaluation report with remaining high-risk exclusions.",
+          "Confirm users understand the source and receipt of every external action and want to keep using it."
+        ],
+        "gate": "All Stage 2 exits hold; one real test-account loop is stable; no cross-account leakage occurs; users understand every external action's source and receipt.",
+        "evidence": ["Representative real-task report", "Stage 2 safety and evaluation report", "Privacy and export guidance", "Comparison with Stage 1 baseline"]
+      }
+    }
+  ]
+}

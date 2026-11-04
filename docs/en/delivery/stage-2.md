@@ -29,12 +29,12 @@ outline: [2, 3]
 
 | Increment | User-visible outcome | Completion evidence |
 |---|---|---|
-| D2.1 Read-only connectors and source views | Users can inspect email, calendar, file, and knowledge sources | Sync, dedupe, incremental updates, permissions, source audit |
-| D2.2 Document/Data Executor | Documents and tables convert, extract, and verify | Artifacts, citations, structure, and failure samples |
-| D2.3 Browser Executor and web research | Research has sources, citations, and page-change evidence | Isolated sessions, page diffs, injection defenses |
-| D2.4 Draft, approval, and test-account effects | Users approve sends/writes and inspect receipts | Test-account loop, idempotency, reconciliation, undo |
-| D2.5 Context Compiler and Memory v0 | Tasks use less context and explain recall | Token baseline, recall sources, budgets, degradation |
-| D2.6 Stage 2 release | Manual minutes fall materially on daily content tasks | Real-task evaluation, cross-account isolation, security report |
+| [D2.1](/en/delivery/stage-2/d2-1) Read-only connectors and source views | Users can inspect email, calendar, file, and knowledge sources | Sync, dedupe, incremental updates, permissions, source audit |
+| [D2.2](/en/delivery/stage-2/d2-2) Document/Data Executor | Documents and tables convert, extract, and verify | Artifacts, citations, structure, and failure samples |
+| [D2.3](/en/delivery/stage-2/d2-3) Browser Executor and web research | Research has sources, citations, and page-change evidence | Isolated sessions, page diffs, injection defenses |
+| [D2.4](/en/delivery/stage-2/d2-4) Draft, approval, and test-account effects | Users approve sends/writes and inspect receipts | Test-account loop, idempotency, reconciliation, undo |
+| [D2.5](/en/delivery/stage-2/d2-5) Context Compiler and Memory v0 | Tasks use less context and explain recall | Token baseline, recall sources, budgets, degradation |
+| [D2.6](/en/delivery/stage-2/d2-6) Stage 2 release | Manual minutes fall materially on daily content tasks | Real-task evaluation, cross-account isolation, security report |
 
 ## Exit Checklist
 

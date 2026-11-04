@@ -29,12 +29,12 @@ outline: [2, 3]
 
 | Increment | User-visible outcome | Completion evidence |
 |---|---|---|
-| D1.1 Runnable walking skeleton | Create a Web task; state survives refresh and restart | `hearthd` + SQLite + Event Log + fake executor + SSE |
-| D1.2 First Codex slice | A report with sources, verification, and cost | Task Pack, structured Result, Artifact, verifier |
-| D1.3 MVP closeout | Create, cancel, retry, approve, retrieve, and recover in the browser | The MVP-1 user story passes end to end |
-| D1.4 Side-effect safety skeleton | External actions have preview, approval, idempotency, and receipt | outbox, idempotency, Receipt, undo/compensation drill |
-| D1.5 Second task family and hardening | A second real task family is dependable and recoverable | Routing, fault injection, duplicate delivery, recovery tests |
-| D1.6 Stage 1 release | Users can install, use, back up, and export independently | 10 real tasks, baseline comparison, security and evaluation report |
+| [D1.1](/en/delivery/stage-1/d1-1) Runnable walking skeleton | Create a Web task; state survives refresh and restart | `hearthd` + SQLite + Event Log + fake executor + SSE |
+| [D1.2](/en/delivery/stage-1/d1-2) First Codex slice | A report with sources, verification, and cost | Task Pack, structured Result, Artifact, verifier |
+| [D1.3](/en/delivery/stage-1/d1-3) MVP closeout | Create, cancel, retry, approve, retrieve, and recover in the browser | The MVP-1 user story passes end to end |
+| [D1.4](/en/delivery/stage-1/d1-4) Side-effect safety skeleton | External actions have preview, approval, idempotency, and receipt | outbox, idempotency, Receipt, undo/compensation drill |
+| [D1.5](/en/delivery/stage-1/d1-5) Second task family and hardening | A second real task family is dependable and recoverable | Routing, fault injection, duplicate delivery, recovery tests |
+| [D1.6](/en/delivery/stage-1/d1-6) Stage 1 release | Users can install, use, back up, and export independently | 10 real tasks, baseline comparison, security and evaluation report |
 
 ## Where the MVP Fits
 

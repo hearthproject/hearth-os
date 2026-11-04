@@ -18,6 +18,8 @@ outline: [2, 3]
 | Ten volumes | Every substantive block is present verbatim in the Chinese site; coverage is 100% |
 | Complete master document | 595/595 substantive blocks preserved; coverage is 100% |
 | Build-vs-integrate note | 67/67 substantive blocks preserved; coverage is 100% |
+| Delivery detail | Seven Stages expand into 35 independent D increment pages with steps, contracts, deliverables, acceptance, and failure recovery |
+| Development log | A log home, Day01, Day02, and a copyable daily template with matching Chinese and English structure |
 | Bilingual structure | Every Chinese page has an English page with a matching path and heading hierarchy |
 
 The audit works at the level of substantive blocks, not sampled character counts. The original long-form document also remains in the [full roadmap archive](/en/reference/full-roadmap). Topic pages reduce reading cost; the archive preserves complete detail.
@@ -83,6 +85,8 @@ For readers ready to create the repository:
 | Complete master document | [Full Roadmap Archive](/en/reference/full-roadmap) | Preserves every detail for search, citation, and difference checks |
 | Build-vs-integrate note | [Build vs. Integrate Boundary](/en/reference/build-vs-integrate) | Preserves the boundary conclusions, OpenClaw comparison, and Codex integration rules |
 | Volume README | [Start Reading](/en/guide/), [Reading Guide](/en/guide/reading-guide), and this page | Preserves conclusions, three reading paths, the ten-volume catalog, and the one-page map |
+| Development-plan increments | Start at [D0.1](/en/delivery/stage-0/d0-1) | Expands seven Stages into 35 independently buildable and verifiable development pages |
+| Development log | [Development Log](/en/log/) | Records real progress, evidence, problems, decisions, and next steps; never imitates release notes |
 
 ## One-Page Map from 0 to 100
 
@@ -111,5 +115,7 @@ Stage 6  Multi-device sync → offline queue → revocation/keys → backup migr
 - "Stage" is a capability level, not a date; an "increment" is a development unit, not a schedule commitment.
 - Every stage gate must include user-visible UI, durable state, verification evidence, and recovery paths.
 - Capabilities that exist only in a CLI, log, or database do not count as stage completion.
+- Every Stage overview handles navigation and exits only; concrete construction follows its D increment pages.
+- The development log records real process; product versions and release notes are maintained only at formal release.
 
 When source documents change, update the topic pages, complete archive, and English mirror together. The coverage audit script lives at `scripts/check-coverage.py`; it must never be weakened by deleting source prose.

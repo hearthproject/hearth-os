@@ -29,12 +29,12 @@ outline: [2, 3]
 
 | Increment | User-visible outcome | Completion evidence |
 |---|---|---|
-| D6.1 Multi-device read and event sync | Consistent tasks and artifacts across devices | Device identity, cursors, incremental sync, replay |
-| D6.2 Capability routing and offline queues | Tasks go to the right device and survive disconnection | Capability routing, offline queue, idempotent replay |
-| D6.3 Revocation, key rotation, and secure migration | Lost devices are revocable and data can move safely | Revocation, rotation, session invalidation, migration drill |
-| D6.4 Backup, restore, migration, and upgrade | Users can fully back up, restore, and upgrade | Encrypted backup, schema migration, rollback |
-| D6.5 Long-running operations and resources | The system runs long-term without daily maintenance | Health checks, quotas, monitoring, resource reclamation |
-| D6.6 Full audit and release | An installable, portable, revocable personal Agent OS | Eight-family coverage, red team, fault injection, final evaluation |
+| [D6.1](/en/delivery/stage-6/d6-1) Multi-device read and event sync | Consistent tasks and artifacts across devices | Device identity, cursors, incremental sync, replay |
+| [D6.2](/en/delivery/stage-6/d6-2) Capability routing and offline queues | Tasks go to the right device and survive disconnection | Capability routing, offline queue, idempotent replay |
+| [D6.3](/en/delivery/stage-6/d6-3) Revocation, key rotation, and secure migration | Lost devices are revocable and data can move safely | Revocation, rotation, session invalidation, migration drill |
+| [D6.4](/en/delivery/stage-6/d6-4) Backup, restore, migration, and upgrade | Users can fully back up, restore, and upgrade | Encrypted backup, schema migration, rollback |
+| [D6.5](/en/delivery/stage-6/d6-5) Long-running operations and resources | The system runs long-term without daily maintenance | Health checks, quotas, monitoring, resource reclamation |
+| [D6.6](/en/delivery/stage-6/d6-6) Full audit and release | An installable, portable, revocable personal Agent OS | Eight-family coverage, red team, fault injection, final evaluation |
 
 ## Exit Checklist
 

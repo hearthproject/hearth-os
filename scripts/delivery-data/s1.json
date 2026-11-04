@@ -1,0 +1,258 @@
+{
+  "stage": 1,
+  "slug": "stage-1",
+  "zh_title": "持久内核与 MVP",
+  "en_title": "Durable Kernel & MVP",
+  "zh": {
+    "prereq": [
+      "Stage 0 的 12 个任务、原型、协议、评测与安全基线已经评审通过。",
+      "默认任务楔子是研究/文档整理；如果首位用户更依赖代码任务，可以替换楔子，但纵向结构不能改变。",
+      "本地开发环境、SQLite、可隔离 workspace 和 Web 构建链路可用。"
+    ],
+    "contracts": [
+      ["事件与恢复", "Event Log 是事实源；SQLite WAL 保存事件与投影，SSE 支持断线续传。"],
+      ["状态机", "Task/Run 只能通过受控迁移变化；刷新、重启和崩溃后都能从事实源重建。"],
+      ["副作用", "外部动作必须经过 Effect Preview、outbox、幂等键和 Receipt，结果不确定时先对账。"],
+      ["秘密边界", "秘密不进入任务卡、日志、模型上下文或执行器工作区；凭据只能由 Broker 注入。"]
+    ],
+    "failures": [
+      ["进程崩溃或重启", "任务详情显示最后已知状态、未完成步骤和“继续/取消/重试”。", "从 Event Log 重放并重新领取 lease，禁止静默丢弃任务。"],
+      ["外部动作重复", "系统显示“正在对账”，不生成第二个成功回执。", "按幂等键查询 sink，确认已完成后补写 Receipt 或走补偿。"],
+      ["副作用结果不确定", "任务进入“等待确认”，隐藏自动重试按钮。", "先查询外部系统或人工核对，再决定重试、补偿或关闭。"]
+    ],
+    "exclusions": [
+      "不允许只靠 CLI、日志或数据库证明 MVP 可用。",
+      "不在恢复与审批未稳定前扩大任务族。",
+      "不把永久 mock 结果当成真实执行。"
+    ]
+  },
+  "en": {
+    "prereq": [
+      "Stage 0's 12 tasks, prototype, protocols, evaluation, and safety baseline have passed review.",
+      "The default wedge is research/document work; if the first user mainly needs coding, replace the wedge without changing the vertical structure.",
+      "A local development environment, SQLite, isolated workspaces, and the Web build are available."
+    ],
+    "contracts": [
+      ["Events and recovery", "The Event Log is the source of truth; SQLite WAL stores events and projections; SSE resumes after disconnects."],
+      ["State machine", "Task/Run changes only through controlled transitions and can be rebuilt after refresh, restart, or crash."],
+      ["Side effects", "External actions pass through Effect Preview, outbox, idempotency key, and Receipt; reconcile uncertain results first."],
+      ["Secrets boundary", "Secrets never enter task cards, logs, model context, or executor workspaces; only the Broker injects credentials."]
+    ],
+    "failures": [
+      ["Process crash or restart", "The detail page shows the last known state, unfinished step, and Continue/Cancel/Retry.", "Replay the Event Log and reacquire the lease; never silently drop the task."],
+      ["A duplicate external action", "The system shows Reconciling and does not create a second success receipt.", "Query the sink by idempotency key, then write the Receipt or start compensation."],
+      ["An uncertain side effect", "The task enters Waiting for confirmation and hides automatic retry.", "Query the external system or check manually before retry, compensation, or closure."]
+    ],
+    "exclusions": [
+      "Do not prove MVP readiness through CLI, logs, or database rows alone.",
+      "Do not expand task families before recovery and approval are stable.",
+      "Do not treat permanent mock output as real execution."
+    ]
+  },
+  "increments": [
+    {
+      "id": "D1.1",
+      "slug": "d1-1",
+      "zh": {
+        "title": "可运行走路骨架",
+        "lead": "先让最小的真实路径站起来：Web 创建任务，持久状态推进，刷新或重启后仍然存在。",
+        "outcome": "用户可以在真实 Web 页面创建任务，看到排队、执行、完成，并在刷新或重启后继续找到它。",
+        "steps": [
+          "启动 hearthd 单进程，明确本地端口、数据目录、健康检查与日志位置。",
+          "接入 SQLite WAL、最小 Event Log 和可重建的读取投影。",
+          "实现 Task/Run 最小状态机，所有迁移写入事件而不是直接改状态列。",
+          "用 fake executor 产生真实执行事件，覆盖成功和至少一个失败路径。",
+          "Web 接入任务列表、详情、创建和 SSE，刷新页面后从持久状态恢复。",
+          "提供最小 CLI，只用于诊断、重放和健康检查，不作为产品主入口。"
+        ],
+        "gate": "主路径不依赖手工改数据库；服务重启后任务与状态可恢复；任务卡显示真实状态而不是静态 mock；UI 契约测试通过。",
+        "evidence": ["可启动的 hearthd", "最小 Event Log 与投影", "Web 创建/列表/详情/SSE", "重启恢复演示与契约测试"]
+      },
+      "en": {
+        "title": "Runnable walking skeleton",
+        "lead": "Stand up the smallest real path first: create a task in the Web app, advance durable state, and keep it after refresh or restart.",
+        "outcome": "A user can create a task in the real Web app, watch it queue, run, and complete, and find it again after refresh or restart.",
+        "steps": [
+          "Start a single hearthd process with explicit local port, data directory, health check, and log location.",
+          "Add SQLite WAL, a minimal Event Log, and rebuildable read projections.",
+          "Implement the minimum Task/Run state machine; every transition writes an event instead of mutating a status column directly.",
+          "Use a fake executor to produce real execution events, covering success and at least one failure path.",
+          "Connect Web task list, detail, creation, and SSE, restoring from durable state after refresh.",
+          "Provide a minimal CLI for diagnostics, replay, and health checks only, never as the product entry."
+        ],
+        "gate": "The main path needs no manual database edits; tasks and states survive restart; cards show real rather than static mock state; UI contract tests pass.",
+        "evidence": ["Startable hearthd", "Minimal Event Log and projections", "Web create/list/detail/SSE", "Restart-recovery demo and contract tests"]
+      }
+    },
+    {
+      "id": "D1.2",
+      "slug": "d1-2",
+      "zh": {
+        "title": "第一个真实 Codex 纵向切片",
+        "lead": "把 fake executor 换成真实 Codex，在一个受控 workspace 中完成第一个可验证的窄任务。",
+        "outcome": "用户提交一组本地资料，得到带引用的结构化报告；任务卡显示阶段、产物、验证结果和成本。",
+        "steps": [
+          "实现 Codex adapter，加入版本检查、健康检查、超时、取消和失败分类。",
+          "为每次运行创建一次性 workspace，限制可读范围，保留输入与产物的来源关系。",
+          "生成 Task Pack，约束结构化输出、引用格式、文件清单和完成条件。",
+          "记录 Artifact、来源、哈希和验证结果，拒绝无依据的引用或缺失文件。",
+          "把执行事件投影到任务时间线，采集 Token、延迟、模型与执行器信息。",
+          "对失败结果给出用户可理解的类别和下一步，不用永久 mock 掩盖真实问题。"
+        ],
+        "gate": "一个默认任务族端到端可用；产物可打开和验证；引用或文件证据可追溯；失败时 UI 显示类别和下一步；不使用永久 mock 结果。",
+        "evidence": ["Codex adapter", "Task Pack 与结构化结果", "引用/文件验证器", "真实任务演示与成本记录"]
+      },
+      "en": {
+        "title": "First real Codex vertical slice",
+        "lead": "Replace the fake executor with real Codex and complete the first verifiable narrow task inside a controlled workspace.",
+        "outcome": "A user submits local materials and receives a structured report with citations; the task card shows stages, artifact, verification, and cost.",
+        "steps": [
+          "Implement the Codex adapter with version checks, health checks, timeout, cancellation, and failure classification.",
+          "Create a disposable workspace per run, limit readable scope, and preserve input-to-artifact provenance.",
+          "Generate a Task Pack that constrains structured output, citations, file manifest, and completion conditions.",
+          "Record Artifact, source, hash, and verification results; reject unsupported citations or missing files.",
+          "Project execution events into the task timeline and capture Token, latency, model, and executor data.",
+          "Explain failures with user-facing classes and next actions; never hide real problems behind permanent mocks."
+        ],
+        "gate": "One default task family works end to end; artifacts open and verify; citations or file evidence are traceable; failures show class and next step; no permanent mock result remains.",
+        "evidence": ["Codex adapter", "Task Pack and structured result", "Citation/file verifier", "Real-task demo and cost record"]
+      }
+    },
+    {
+      "id": "D1.3",
+      "slug": "d1-3",
+      "zh": {
+        "title": "MVP 收口",
+        "lead": "把已经跑通的任务路径收口成一个可以每天使用的最小产品，而不是一个只能演示的后端切片。",
+        "outcome": "Hearth MVP-1 可用：创建、查看、取消、重试、审批演练、取回产物和恢复都在浏览器中完成。",
+        "steps": [
+          "补齐持久 Run、取消、重试、任务详情、时间线和产物中心。",
+          "实现失败恢复页、预算上限与异常停止，确保用户知道任务为何停下。",
+          "加入练习 Effect 的预览、批准、拒绝和回执，不产生真实外部影响。",
+          "完善基础失败分类、空状态、加载状态和用户可见的原因说明。",
+          "用至少 5 个代表性真实任务验收，其中 3 个重复运行稳定，四个关键中断点均可恢复。",
+          "确认用户明确愿意继续使用，且没有未受控的真实副作用。"
+        ],
+        "gate": "至少 5 个代表性真实任务通过；其中 3 个重复运行稳定；四个关键中断点均可恢复；用户明确愿意继续使用；没有未受控真实副作用。",
+        "evidence": ["MVP-1 验收记录", "取消/重试/恢复演示", "练习审批与回执", "5 个真实任务结果"]
+      },
+      "en": {
+        "title": "MVP closeout",
+        "lead": "Close the working path into a minimum daily product, not a backend slice that only works in a demo.",
+        "outcome": "Hearth MVP-1 works: create, inspect, cancel, retry, rehearse approval, retrieve artifacts, and recover entirely in the browser.",
+        "steps": [
+          "Complete durable Run, cancel, retry, task detail, timeline, and artifact center.",
+          "Add failure recovery, budget limits, and abnormal stops so users know why work stopped.",
+          "Add preview, approve, reject, and receipt for a practice Effect with no real external impact.",
+          "Complete basic failure classes, empty states, loading states, and user-visible explanations.",
+          "Validate with at least five representative real tasks; three repeat reliably; all four critical interruption points recover.",
+          "Confirm that the user explicitly wants to keep using it and that no uncontrolled real side effect exists."
+        ],
+        "gate": "Five representative real tasks pass; three repeat reliably; four critical interruptions recover; the user wants to continue; no uncontrolled real side effect exists.",
+        "evidence": ["MVP-1 acceptance record", "Cancel/retry/recovery demo", "Practice approval and receipt", "Five real-task results"]
+      }
+    },
+    {
+      "id": "D1.4",
+      "slug": "d1-4",
+      "zh": {
+        "title": "副作用安全骨架",
+        "lead": "在第一次真实外部写入之前，先证明系统能预览影响、绑定审批、避免重复动作，并对不确定结果进行对账。",
+        "outcome": "用户可以预览“将发生什么”，批准或拒绝，并在之后看到回执；重试不会造成第二次外部动作。",
+        "steps": [
+          "实现 Policy 与 Mandate v0，明确谁可以批准什么范围、强度和有效期的动作。",
+          "实现 Effect Preview，展示目标、参数、影响、不可逆性和补偿方式。",
+          "建立类型化 Effect、outbox、幂等键、Receipt 和测试 Effect sink。",
+          "加入 Credential Broker 接口，秘密只按最小权限注入，不进入模型与日志。",
+          "把审批绑定到真实参数、nonce 和过期时间，禁止复用旧批准。",
+          "对崩溃后重投、死信和结果不确定状态提供查询、对账与人工处理入口。"
+        ],
+        "gate": "审批与真实参数绑定；重复投递不产生重复副作用；崩溃后能安全重投；死信可查看和人工处理；秘密不出现在任务卡、日志或执行器上下文中。",
+        "evidence": ["Policy/Mandate v0", "Effect Preview 与参数绑定", "outbox/幂等/Receipt", "崩溃重投和死信演练"]
+      },
+      "en": {
+        "title": "Side-effect safety skeleton",
+        "lead": "Before the first real external write, prove the system can preview impact, bind approval, prevent duplicate actions, and reconcile uncertainty.",
+        "outcome": "A user can preview what will happen, approve or reject it, then see a receipt; retry never causes a second external action.",
+        "steps": [
+          "Implement Policy and Mandate v0 with explicit scope, strength, expiry, and who can approve.",
+          "Implement Effect Preview showing target, parameters, impact, reversibility, and compensation.",
+          "Create typed Effects, outbox, idempotency keys, Receipts, and a test Effect sink.",
+          "Add a Credential Broker interface that injects secrets with least privilege only, outside model and logs.",
+          "Bind approval to real parameters, nonce, and expiry; reject reuse of an old approval.",
+          "Provide query, reconciliation, and manual handling for redelivery, dead letters, and uncertain results after a crash."
+        ],
+        "gate": "Approval binds to real parameters; redelivery creates no duplicate effect; crash recovery can safely retry; dead letters are inspectable; secrets stay out of cards, logs, and executor context.",
+        "evidence": ["Policy/Mandate v0", "Effect Preview and parameter binding", "outbox/idempotency/Receipt", "Crash-redelivery and dead-letter drills"]
+      }
+    },
+    {
+      "id": "D1.5",
+      "slug": "d1-5",
+      "zh": {
+        "title": "第二任务族与内核加固",
+        "lead": "证明内核不是为一个演示任务量身定制的：再加入一个真实任务族，并用故障注入检验恢复能力。",
+        "outcome": "除研究/文档外，第二个任务族也能通过同一任务卡模型完成；失败任务更容易恢复。",
+        "steps": [
+          "选择代码/Issue 或用户第二高频任务族，复用 Task Pack、审批、产物和验证模型。",
+          "加入 diff、测试结果和结构化结果验证，确保第二任务族不是低标准拼接。",
+          "实现 lease 与 fencing token，防止旧 worker 在接管后继续写入。",
+          "执行 kill -9、断网、超时、磁盘满和重复投递等故障注入。",
+          "补齐备份恢复、更完整的失败分类、降级路径和用户可理解的修复建议。",
+          "回归两个任务族，确认状态与事实源一致，失败不需要人工重建。"
+        ],
+        "gate": "两个任务族都能端到端完成；恢复率达到阶段门槛；重复外部副作用为 0；任务状态与事实源一致；失败不需要人工重建状态。",
+        "evidence": ["第二任务族端到端演示", "lease/fencing 测试", "故障注入矩阵", "备份恢复与失败分类"]
+      },
+      "en": {
+        "title": "Second task family and kernel hardening",
+        "lead": "Prove the kernel is not tailored to one demo task by adding a real second task family and testing recovery through fault injection.",
+        "outcome": "A second task family completes through the same task-card model, and failed tasks are easier to recover.",
+        "steps": [
+          "Choose Codex/Issue work or the user's second most frequent task family, reusing Task Pack, approval, artifact, and verification models.",
+          "Add diff, test results, and structured-result verification so the second family is not held to a lower standard.",
+          "Implement leases and fencing tokens so an old worker cannot keep writing after takeover.",
+          "Inject faults such as kill -9, network loss, timeout, disk full, and duplicate delivery.",
+          "Complete backup recovery, richer failure classes, degradation paths, and actionable repair suggestions.",
+          "Regress both task families and confirm state matches the source of truth without manual rebuild."
+        ],
+        "gate": "Both task families work end to end; recovery meets the stage target; duplicate external effects are zero; state matches events; failures need no manual rebuild.",
+        "evidence": ["Second-family end-to-end demo", "Lease/fencing tests", "Fault-injection matrix", "Backup recovery and failure taxonomy"]
+      }
+    },
+    {
+      "id": "D1.6",
+      "slug": "d1-6",
+      "zh": {
+        "title": "Stage 1 发布",
+        "lead": "把 MVP 放进可长期试用的本地环境，完成范围、限制、安装、备份、升级与指标基线。",
+        "outcome": "一个可以持续试用的本地产品，具备明确的范围、已知限制、恢复方式和指标基线。",
+        "steps": [
+          "跑 10 个真实任务，覆盖两个任务族、失败、审批和恢复路径。",
+          "对比全人工和直接使用 Codex 的基线，记录人工分钟、成功率、Token 和失败类型。",
+          "修复高频失败与最影响信任的恢复问题，不扩大新的能力范围。",
+          "补全安装、备份、升级、数据导出和已知限制说明。",
+          "完成 Stage 1 安全与评测报告，明确下一阶段进入条件。",
+          "确认用户可独立使用，不依赖开发者手工运维或数据库操作。"
+        ],
+        "gate": "Stage 1 退出条件全部满足；MVP 没有被后续内核工作破坏；用户能独立使用，不依赖开发者手工运维。",
+        "evidence": ["10 个真实任务报告", "与两条基线的对比", "安装/备份/升级/导出说明", "Stage 1 安全与评测报告"]
+      },
+      "en": {
+        "title": "Stage 1 release",
+        "lead": "Put the MVP into a local environment that can be used repeatedly, with explicit scope, limits, install, backup, upgrade, and metric baselines.",
+        "outcome": "A locally usable product with clear scope, known limits, recovery, and a metric baseline.",
+        "steps": [
+          "Run 10 real tasks across both task families, failure, approval, and recovery paths.",
+          "Compare against manual and direct Codex baselines, recording minutes, success, Token, and failure types.",
+          "Fix high-frequency failures and trust-breaking recovery issues without expanding scope.",
+          "Complete install, backup, upgrade, data export, and known-limitations documentation.",
+          "Publish the Stage 1 safety and evaluation report with entry conditions for the next stage.",
+          "Confirm the user can operate it independently without developer maintenance or database edits."
+        ],
+        "gate": "All Stage 1 exit conditions hold; later kernel work has not broken the MVP; the user can use it independently without developer operations.",
+        "evidence": ["10 real-task report", "Comparison with both baselines", "Install/backup/upgrade/export guide", "Stage 1 safety and evaluation report"]
+      }
+    }
+  ]
+}

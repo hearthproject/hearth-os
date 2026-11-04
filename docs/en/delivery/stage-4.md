@@ -29,11 +29,11 @@ outline: [2, 3]
 
 | Increment | User-visible outcome | Completion evidence |
 |---|---|---|
-| D4.1 Triggers and proactive inbox | Hearth can explain what can be done now | Event dedupe, candidate generation, A1/A2 boundaries, pause and ignore |
-| D4.2 Mobile PWA | View, approve, take over, and create from a phone | Responsive PWA, key actions, offline read-only, push redaction |
-| D4.3 Secure pairing, push, and revocation | Pairing is simple and a lost phone can be revoked | Public-key pairing, nonce, expiry, revocation, audit |
-| D4.4 Attention budgets and proactive trial | Proactive work is quiet and useful | Interruption metrics, quiet hours, shadow mode, kill switch |
-| D4.5 Stage 4 release | Proactive tasks are useful and key mobile actions work | Satisfaction, success, budget, and security evaluation |
+| [D4.1](/en/delivery/stage-4/d4-1) Triggers and proactive inbox | Hearth can explain what can be done now | Event dedupe, candidate generation, A1/A2 boundaries, pause and ignore |
+| [D4.2](/en/delivery/stage-4/d4-2) Mobile PWA | View, approve, take over, and create from a phone | Responsive PWA, key actions, offline read-only, push redaction |
+| [D4.3](/en/delivery/stage-4/d4-3) Secure pairing, push, and revocation | Pairing is simple and a lost phone can be revoked | Public-key pairing, nonce, expiry, revocation, audit |
+| [D4.4](/en/delivery/stage-4/d4-4) Attention budgets and proactive trial | Proactive work is quiet and useful | Interruption metrics, quiet hours, shadow mode, kill switch |
+| [D4.5](/en/delivery/stage-4/d4-5) Stage 4 release | Proactive tasks are useful and key mobile actions work | Satisfaction, success, budget, and security evaluation |
 
 ## Exit Checklist
 

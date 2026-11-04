@@ -1,11 +1,13 @@
 import { defineConfig } from 'vitepress'
 import { withMermaid } from 'vitepress-plugin-mermaid'
+import { zhDeliveryStages, enDeliveryStages } from './delivery-sidebar.mjs'
 
 const zhNav = [
   { text: '开始阅读', link: '/guide/', activeMatch: '^/guide/' },
   { text: '产品', link: '/product/', activeMatch: '^/product/' },
   { text: '系统设计', link: '/architecture/', activeMatch: '^/architecture/' },
   { text: '交付路线', link: '/delivery/', activeMatch: '^/delivery/' },
+  { text: '开发日志', link: '/log/', activeMatch: '^/log/' },
   { text: '参考', link: '/reference/', activeMatch: '^/reference/' }
 ]
 
@@ -14,6 +16,7 @@ const enNav = [
   { text: 'Product', link: '/en/product/', activeMatch: '^/en/product/' },
   { text: 'System Design', link: '/en/architecture/', activeMatch: '^/en/architecture/' },
   { text: 'Delivery', link: '/en/delivery/', activeMatch: '^/en/delivery/' },
+  { text: 'Dev Log', link: '/en/log/', activeMatch: '^/en/log/' },
   { text: 'Reference', link: '/en/reference/', activeMatch: '^/en/reference/' }
 ]
 
@@ -95,13 +98,7 @@ const zhSidebar = {
       text: '从 0 到 100 开发计划',
       items: [
         { text: '计划总览', link: '/delivery/development-plan' },
-        { text: 'S0 · 定义与原型', link: '/delivery/stage-0' },
-        { text: 'S1 · 持久内核与 MVP', link: '/delivery/stage-1' },
-        { text: 'S2 · Personal Operator', link: '/delivery/stage-2' },
-        { text: 'S3 · Computer Operator', link: '/delivery/stage-3' },
-        { text: 'S4 · 主动个人 Agent', link: '/delivery/stage-4' },
-        { text: 'S5 · 记忆与进化', link: '/delivery/stage-5' },
-        { text: 'S6 · 多设备与长期运行', link: '/delivery/stage-6' }
+        ...zhDeliveryStages
       ]
     },
     {
@@ -110,6 +107,17 @@ const zhSidebar = {
         { text: '工程交付与仓库结构', link: '/delivery/engineering' },
         { text: '风险与 Kill Criteria', link: '/delivery/risks' },
         { text: 'ADR 与关键决策', link: '/delivery/decisions' }
+      ]
+    }
+  ],
+  '/log/': [
+    {
+      text: '开发日志',
+      items: [
+        { text: '日志首页', link: '/log/' },
+        { text: 'Day01 · 双语文档站上线', link: '/log/day-01' },
+        { text: 'Day02 · 交付路线拆解与开发日志', link: '/log/day-02' },
+        { text: '日志模板', link: '/log/template' }
       ]
     }
   ],
@@ -208,13 +216,7 @@ const enSidebar = {
       text: 'From 0 to 100',
       items: [
         { text: 'Plan Overview', link: '/en/delivery/development-plan' },
-        { text: 'S0 · Definition & Prototype', link: '/en/delivery/stage-0' },
-        { text: 'S1 · Durable Kernel & MVP', link: '/en/delivery/stage-1' },
-        { text: 'S2 · Personal Operator', link: '/en/delivery/stage-2' },
-        { text: 'S3 · Computer Operator', link: '/en/delivery/stage-3' },
-        { text: 'S4 · Proactive Personal Agent', link: '/en/delivery/stage-4' },
-        { text: 'S5 · Memory & Evolution', link: '/en/delivery/stage-5' },
-        { text: 'S6 · Multi-device & Operations', link: '/en/delivery/stage-6' }
+        ...enDeliveryStages
       ]
     },
     {
@@ -223,6 +225,17 @@ const enSidebar = {
         { text: 'Engineering & Repository', link: '/en/delivery/engineering' },
         { text: 'Risks & Kill Criteria', link: '/en/delivery/risks' },
         { text: 'ADRs & Decisions', link: '/en/delivery/decisions' }
+      ]
+    }
+  ],
+  '/en/log/': [
+    {
+      text: 'Development Log',
+      items: [
+        { text: 'Log Home', link: '/en/log/' },
+        { text: 'Day01 · Bilingual documentation launch', link: '/en/log/day-01' },
+        { text: 'Day02 · Delivery decomposition and development log', link: '/en/log/day-02' },
+        { text: 'Log template', link: '/en/log/template' }
       ]
     }
   ],
