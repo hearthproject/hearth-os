@@ -30,7 +30,7 @@
     #8cc9dc 100%
   );
 
-  --vp-nav-height: 68px;
+  --vp-nav-height: 78px;
   --vp-layout-max-width: 1440px;
   --vp-sidebar-width: 292px;
 }
@@ -96,38 +96,39 @@ body {
 }
 
 .VPNavBar .container {
-  max-width: 1200px;
+  max-width: 1240px;
+  align-items: center;
 }
 
 .VPNavBarSearch {
-  max-width: 238px;
+  max-width: 246px;
   margin-left: 0;
-  padding-left: 22px;
+  padding-left: 30px;
 }
 
 .VPNavBarTitle .title {
   font-weight: 720;
   letter-spacing: -0.03em;
-  padding-right: 26px;
+  padding-right: 36px;
 }
 
 .VPNavBarTitle .logo {
-  margin-right: 10px;
+  margin-right: 12px;
 }
 
 .VPNavBarMenu {
-  gap: 3px;
-  margin-left: 14px;
+  gap: 6px;
+  margin-left: 24px;
 }
 
 .VPNavBarMenuLink {
   position: relative;
-  height: 36px;
-  padding: 0 13px;
-  border-radius: 9px;
+  height: 40px;
+  padding: 0 15px;
+  border-radius: 10px;
   font-size: 13px;
   font-weight: 560;
-  line-height: 36px;
+  line-height: 40px;
   transition: color 0.18s ease, background 0.18s ease;
 }
 
@@ -372,7 +373,7 @@ body {
 }
 
 .VPHero {
-  padding-top: 84px !important;
+  padding-top: 122px !important;
 }
 
 .VPHero .container {
@@ -439,7 +440,7 @@ body {
 
 @media (max-width: 960px) {
   .VPHero {
-    padding-top: 72px !important;
+    padding-top: 88px !important;
   }
 
   .VPHero .image {
@@ -453,7 +454,7 @@ body {
 
 @media (max-width: 640px) {
   .VPHero {
-    padding-top: 52px !important;
+    padding-top: 64px !important;
   }
 
   .VPHero .name {
@@ -478,5 +479,26 @@ body {
 
   .vp-doc table {
     font-size: 12px;
+  }
+}
+
+@media (max-width: 1180px) {
+  .VPNavBarSearch {
+    padding-left: 22px;
+  }
+
+  .VPNavBarTitle .title {
+    padding-right: 26px;
+  }
+
+  .VPNavBarMenu {
+    gap: 3px;
+    margin-left: 14px;
+  }
+
+  .VPNavBarMenuLink {
+    height: 36px;
+    padding: 0 13px;
+    line-height: 36px;
   }
 }
