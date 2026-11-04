@@ -16,7 +16,7 @@ const modules = [
 ]
 
 const safeguards = [
-  { no: '01', title: '工程交付与仓库结构', text: '技术栈、仓库布局、进程模型、CLI、测试与发布迁移。', link: '/delivery/engineering' },
+  { no: '01', title: '工程交付与仓库结构', text: '技术栈、仓库布局、进程模型、CLI、测试与评测、发布迁移。', link: '/delivery/engineering' },
   { no: '02', title: '风险与 Kill Criteria', text: '暂停条件、阶段 Kill Criteria，以及哪些基础能力不能被裁掉。', link: '/delivery/risks' },
   { no: '03', title: 'ADR 与关键决策', text: '不可轻易反转的判断，以及最终产品出口的验收口径。', link: '/delivery/decisions' }
 ]
