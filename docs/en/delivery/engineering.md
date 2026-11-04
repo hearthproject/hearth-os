@@ -1,6 +1,6 @@
 ---
 title: 'Engineering Delivery and Repository Structure'
-description: 'Hearth''s engineering principles, tech stack, repository layout, process model, data directories, CLI, testing, observability, and release migration.'
+description: 'Hearth''s engineering principles, tech stack, repository layout, process model, testing and evaluation, observability, and release migration.'
 outline: [2, 3]
 ---
 
@@ -8,7 +8,7 @@ outline: [2, 3]
 
 # Engineering Delivery and Repository Structure
 
-<p class="lead">Engineering principles, recommended tech stack, repository layout, process model, data directory, CLI, Event Log, testing, observability, and release migration.</p>
+<p class="lead">Engineering principles, recommended tech stack, repository layout, process model, data directory, CLI, Event Log, testing and evaluation, observability, and release migration.</p>
 
 ## Engineering Architecture and Repository Structure
 
@@ -43,7 +43,7 @@ The following are default recommendations, not an unchangeable religion:
 | Documents/data | Python sidecar + mature parsing libraries |
 | Sandbox | Start with Docker, microVMs for untrusted tasks |
 | Observability | OpenTelemetry + local logs/metrics |
-| Testing | Vitest/Playwright/contract testing/fault injection |
+| Testing and evaluation | Vitest/Playwright/contract testing/fault injection/task sets and benchmarks |
 | Packaging | npm CLI + Docker Compose |
 
 The reason for choosing TypeScript is that the frontend and backend share types, event protocols, and schemas, making it suitable for rapidly building a local Web and CLI; document/data-intensive processing is supplemented by a Python sidecar to fill in the ecosystem, without splitting the entire system into multilingual microservices.
@@ -77,11 +77,24 @@ hearth-os/
     gateway/              # Channels, devices, notifications, identity
     execution/            # Sandbox Provider, egress, Broker
     artifacts/            # Artifacts, hashes, versions, verification
-    evals/                # Task sets, runner, scorer
     shared/               # schema, types, utilities
   sidecars/
-    docdata/              # Python document/data pipeline
-  fixtures/
+    docdata/              # Python document/data pipeline and pytest
+  tests/
+    contract/
+    integration/
+    e2e/
+    slices/
+    fault/
+    replay/
+    security/
+    performance/
+    fixtures/
+    helpers/
+  evals/
+    suites/
+    scorers/
+    baselines/
   docs/
     adr/
     architecture/
@@ -170,19 +183,96 @@ CLI output supports both human-readable and JSON modes, making it convenient for
 - Task state transitions have explicit Events and conditions;
 - Subtasks inherit the parent Task's budget and permission intersection.
 
-### Testing Strategy
+### Testing and Evaluation System
 
-| Layer | Content |
-|---|---|
-| Unit | schema, policies, validators, cost calculation |
-| Contract | Executor, Connector, Sandbox, Broker |
-| Integration | Event Log, outbox, lease, recovery |
-| E2E | Task cards, approvals, Artifacts, email drafts |
-| Slice E2E | browser path from Task creation to Artifacts/recovery for each increment |
-| Fault Injection | crashes, network disconnection, timeouts, duplication, full disk |
-| Replay | historical trace replay, route switching |
-| Security | injection, privilege escalation, secrets, sandbox, egress |
-| Performance | startup, queries, long-running Tasks, concurrency limits |
+Testing is not an appendix to feature work; it is part of every increment's deliverable. Every `Dx.y` increment must ship implementation, slice E2E, failure paths, and regression tests together. "Feature first, tests later" is not acceptable.
+
+#### Two Principles
+
+- **Tests are not evaluations.** A test is a deterministic pass/fail gate; an evaluation (eval) is a statistical measure of quality, such as verified task success, citation accuracy, token cost, or human minutes. Both are required, but they must not be mixed into one CI gate. See [Evaluation System](/en/architecture/evaluation) for task sets, metrics, and statistical discipline.
+- **Test code ships in the same PR as the feature.** Every increment must deliver implementation, slice E2E, failure paths, and regression tests together. Do not defer testing to a later phase.
+
+#### The Nine Testing Layers
+
+1. **Unit tests**: pure logic, including state machines, Task/Ticket transitions, budget calculations, permission decisions, verifiers, error classification, and Context Compiler trimming rules. Use Vitest for TypeScript and pytest for the Python sidecar.
+2. **Contract tests**: test boundaries, not internal implementation. Focus on Executors, Connectors, Sandbox Providers, the Credential Broker, and the Effect Dispatcher. The Codex adapter must honor the unified `TaskPack → Result` contract; email connectors must honor the `Source/Effect`, idempotency, and Receipt contracts. Contract tests are the main defense against "one behavior in mocks, another in production."
+3. **Integration tests**: use a real temporary SQLite database to test the Event Log, projection rebuilds, migrations, outbox, leases, fencing tokens, duplicate delivery, and crash recovery. Do not mock the database here, because persistent behavior is exactly what must be verified.
+4. **Vertical slice E2E**: every `Dx.y` has a browser acceptance path covering task creation, status, approval, artifact retrieval, and failure recovery. Stage 0 uses a fake executor to exercise the prototype; Stage 1 starts using a real Codex slice. This is the most important test category for the project.
+5. **Fault injection**: inject `kill -9` at the queueing, execution, artifact-write, and approval-wait points, then cover network loss, timeouts, full disk, duplicate delivery, device offline, and clock skew. Acceptance should map directly to stage gates: zero duplicate external side effects and the target recovery rate.
+6. **Replay and determinism tests**: replay recorded event streams to verify that projections rebuild, old events can be upgraded, and replay does not produce external side effects. UI state must also be recoverable from the event stream rather than depending on in-memory objects.
+7. **Security tests**: cover privilege escalation, approval replay, nonce/expiry handling, secret leakage, prompt injection, untrusted web content, SSRF/egress, cross-account isolation, and device revocation. Every new permission must ship both "allow" and "deny" tests.
+8. **Performance and long-run tests**: cover startup time, task-creation latency, query latency, long-running tasks, concurrency limits, memory leaks, and disk growth. Benchmark scripts and baseline results can be committed, but do not hard-gate every PR on early thresholds.
+9. **Evaluation sets (evals)**: build representative tasks, success/failure samples, scoring rules, and human review per task family. Evals focus on task success, citation traceability, human minutes, token/cost, and interruption counts. Memory and evolution stages also require dedicated evaluations for "forgetting propagation," "no permission expansion," and "Shadow/Canary rollback."
+
+#### Repository Layout
+
+```text
+apps/
+  hearthd/src/**/*.test.ts
+  web/src/**/*.test.tsx
+  cli/test/*.test.ts
+packages/
+  core/test/
+  eventlog/test/
+  harness/test/
+  policy/test/
+  executors/*/test/
+tests/
+  contract/
+  integration/
+  e2e/
+  slices/D1.1/
+  fault/
+  replay/
+  security/
+  performance/
+  fixtures/
+  helpers/
+evals/
+  suites/
+  scorers/
+  baselines/
+sidecars/docdata/tests/
+```
+
+Keep unit tests close to the source. Put cross-module, cross-process, and stage-acceptance tests under the root `tests/` directory. Keep `evals/` separate from ordinary tests.
+
+#### Test Code That Must Be Committed
+
+- All `.test.ts`, `.test.tsx`, `*.spec.ts`, and `test_*.py` files.
+- Contract tests, fixtures, fake servers, fake executors, fake Codex JSONL cassettes, and fake effect sinks.
+- Synthetic or desensitized test documents, emails, calendar data, and web samples.
+- Database migration tests and old-version fixtures.
+- Eval task definitions, scorers, and baseline metrics.
+- CI configuration, test runner scripts, and test-data generation scripts.
+- Security test cases and fault-injection scenarios.
+- Small, meaningful golden files such as structured results, diffs, and JSON schemas.
+
+#### Do Not Commit
+
+- Real email, calendar, or document data, cookies, tokens, refresh tokens, or API keys.
+- Real user data, real Codex session records, or real email bodies.
+- Large test videos, screenshots, databases, coverage reports, or test logs.
+- Temporary generated artifacts and caches.
+- Absolute paths or developer-machine configuration that only works locally.
+
+For external dependencies such as Codex, commit a **fake Codex CLI** that emits the agreed JSONL protocol. Run real Codex only in nightly or manual smoke tests. This keeps PR tests stable and inexpensive without drifting from the real protocol.
+
+#### Three CI Tiers
+
+- **Required on PRs**: unit + contract + integration + slice E2E with the fake executor, targeting under 10 minutes.
+- **Nightly**: fault injection, security tests, performance, and real Codex/connector smoke tests.
+- **Release**: full suite + migration + install/backup/restore + stage-exit acceptance.
+
+#### Five Hard Rules
+
+- Every bug fix ships with a regression test.
+- Every new event schema ships with migration and old-event compatibility tests.
+- Every new external side effect ships with idempotency and duplicate-delivery tests.
+- Every new permission ships with denial-path tests.
+- Every new executor or connector ships with contract, timeout/cancellation, and failure-classification tests.
+
+The goal is not test count. It is to guarantee that **when Hearth says "the task is complete," tests can prove it; when Hearth says "it can recover," fault injection can prove it.**
 
 ### Observability
 

@@ -16,7 +16,7 @@ const modules = [
 ]
 
 const safeguards = [
-  { no: '01', title: 'Engineering & Repository', text: 'Tech stack, repository layout, process model, CLI, testing, and release migration.', link: '/en/delivery/engineering' },
+  { no: '01', title: 'Engineering & Repository', text: 'Tech stack, repository layout, process model, CLI, testing and evaluation, and release migration.', link: '/en/delivery/engineering' },
   { no: '02', title: 'Risks & Kill Criteria', text: 'Pause conditions, stage Kill Criteria, and the foundations that must never be cut.', link: '/en/delivery/risks' },
   { no: '03', title: 'ADRs & Key Decisions', text: 'Judgments that are hard to reverse and the acceptance criteria for the final product exit.', link: '/en/delivery/decisions' }
 ]
