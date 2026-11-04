@@ -63,6 +63,118 @@ EN_VERIFY_EXTRA = [
 ]
 
 
+SOURCES = {
+    0: [
+        ("产品定义与边界", "/product/definition"),
+        ("任务覆盖", "/product/task-coverage"),
+        ("领域模型与协议", "/architecture/domain-model"),
+        ("评估体系", "/architecture/evaluation"),
+    ],
+    1: [
+        ("持久执行与恢复", "/architecture/durable-execution"),
+        ("执行器模型", "/architecture/executor-model"),
+        ("执行安全与副作用", "/architecture/execution-safety"),
+        ("前端与移动体验", "/architecture/frontend-experience"),
+    ],
+    2: [
+        ("个人网关", "/architecture/gateway"),
+        ("执行器目录", "/architecture/executor-catalog"),
+        ("安全与隐私", "/architecture/security-privacy"),
+        ("Token 经济", "/architecture/token-economics"),
+    ],
+    3: [
+        ("人工接管与审批", "/architecture/human-takeover"),
+        ("执行安全与副作用", "/architecture/execution-safety"),
+        ("执行器目录", "/architecture/executor-catalog"),
+        ("前端与移动体验", "/architecture/frontend-experience"),
+    ],
+    4: [
+        ("控制面与自主性", "/architecture/control-plane"),
+        ("个人网关", "/architecture/gateway"),
+        ("安全与隐私", "/architecture/security-privacy"),
+        ("前端与移动体验", "/architecture/frontend-experience"),
+    ],
+    5: [
+        ("记忆系统", "/architecture/memory"),
+        ("技能进化", "/architecture/evolution"),
+        ("评估体系", "/architecture/evaluation"),
+        ("安全与隐私", "/architecture/security-privacy"),
+    ],
+    6: [
+        ("总体架构与数据流", "/architecture/overview"),
+        ("持久执行与恢复", "/architecture/durable-execution"),
+        ("安全与隐私", "/architecture/security-privacy"),
+        ("工程交付与仓库结构", "/delivery/engineering"),
+    ],
+}
+
+EN_SOURCE_LABELS = {
+    "/product/definition": "Product definition and boundaries",
+    "/product/task-coverage": "Task coverage",
+    "/architecture/domain-model": "Domain model and protocol",
+    "/architecture/evaluation": "Evaluation",
+    "/architecture/durable-execution": "Durable execution and recovery",
+    "/architecture/executor-model": "Executor model",
+    "/architecture/execution-safety": "Execution safety and effects",
+    "/architecture/frontend-experience": "Frontend and mobile experience",
+    "/architecture/gateway": "Personal gateway",
+    "/architecture/executor-catalog": "Executor catalog",
+    "/architecture/security-privacy": "Security and privacy",
+    "/architecture/token-economics": "Token economics",
+    "/architecture/human-takeover": "Human takeover and approval",
+    "/architecture/control-plane": "Control plane and autonomy",
+    "/architecture/memory": "Memory system",
+    "/architecture/evolution": "Skill evolution",
+    "/architecture/overview": "Architecture and data flow",
+    "/delivery/engineering": "Engineering delivery and repository layout",
+}
+
+
+def module_headings(modules: list[list[str]]) -> list[str]:
+    lines: list[str] = []
+    for number, (title, detail) in enumerate(modules, 1):
+        lines.extend([f"### {number:02d} · {title}", "", detail, ""])
+    return lines
+
+
+def source_lines(stage_no: int, lang: str) -> list[str]:
+    prefix = "/en" if lang == "en" else ""
+    heading = "延伸阅读" if lang == "zh" else "Source material"
+    lines = [f"### {heading}", ""]
+    for label, path in SOURCES[stage_no]:
+        if lang == "en":
+            label = EN_SOURCE_LABELS[path]
+        lines.append(f"- [{label}]({prefix}{path})")
+    lines.append("")
+    return lines
+
+
+def acceptance_steps(data: dict, index: int, lang: str) -> list[str]:
+    item = data["increments"][index]
+    text = item[lang]
+    stage_no = data["stage"]
+    modules = data["details"]["increments"][item["id"]][lang]["modules"]
+    case, seen, recovery = data[lang]["failures"][0]
+    package_names = ("、".join(module[0] for module in modules) if lang == "zh" else "; ".join(module[0] for module in modules))
+    page = f"/delivery/stage-{stage_no}/{item['slug']}"
+    prefix = "/en" if lang == "en" else ""
+    if lang == "zh":
+        return [
+            f"从干净的数据目录启动 hearthd，打开 [{item['id']} 页面]({prefix}{page})，确认当前页面没有依赖浏览器缓存或手工种子数据。",
+            f"按顺序完成四个工作包：{package_names}。每完成一个工作包，保存对应测试输出、截图或产物版本。",
+            f"复现失败案例“{case}”。页面必须显示“{seen}”，然后按“{recovery}”恢复；不得出现重复副作用或未登记状态。",
+            "重启服务并重新打开任务，确认运行状态、审批、产物和恢复入口都来自持久投影，而不是只存在于当前页面。",
+            f"运行上方的共享验证命令并导出证据。完成门槛是：{text['gate']}",
+        ]
+    return [
+        f"Start hearthd from a clean data directory, open the [{item['id']} page]({prefix}{page}), and confirm it relies on no browser cache or hand-seeded data.",
+        f"Complete the four work packages in order: {package_names}. Preserve the matching test output, screenshot, or artifact version after each package.",
+        f"Reproduce the failure case \"{case}\". The page must show \"{seen}\", then recover with \"{recovery}\"; no duplicate effect or unregistered state is allowed.",
+        "Restart the service and reopen the task. Runtime state, approvals, artifacts, and recovery entry points must all come from durable projections rather than the current page.",
+        f"Run the shared verification commands above and export the evidence. The completion gate is: {text['gate']}",
+    ]
+
+
 def render(data: dict, index: int, lang: str) -> str:
     item = data["increments"][index]
     text = item[lang]
@@ -71,7 +183,6 @@ def render(data: dict, index: int, lang: str) -> str:
     following = data["increments"][index + 1] if index + 1 < len(data["increments"]) else None
     total = len(data["increments"])
     stage_no = data["stage"]
-    detail_path = f"/delivery/stage-{stage_no}/{item['slug']}"
     en_prefix = "/en" if lang == "en" else ""
 
     if lang == "zh":
@@ -79,25 +190,32 @@ def render(data: dict, index: int, lang: str) -> str:
         eyebrow = f"STAGE {stage_no} · {item['id']} · {index + 1} / {total}"
         description = f"Hearth {item['id']} 开发增量：{text['outcome']}"
         headings = {
-            "solve": "这一增量解决什么",
+            "solve": "这一步要交付什么",
             "before": "开始前",
-            "steps": "实施步骤",
-            "contracts": "数据与接口契约",
+            "packages": "四个实施工作包",
+            "engineering": "工程落点",
+            "paths": "主要目录与模块",
+            "interfaces": "关键接口",
+            "commands": "共享验证命令",
+            "acceptance": "验收演练",
             "deliverables": "交付物",
-            "verify": "验证清单",
+            "verify": "完成判定",
             "failure": "失败与恢复",
             "scope": "本增量不包含",
+            "sources": "来源与下一步",
             "next": "完成后的下一步",
         }
         labels = {
             "outcome": "用户可见结果",
             "gate": "完成门槛",
-            "checkpoint": "检查点",
-            "requirement": "必须满足",
+            "interface": "接口",
+            "requirement": "必须保持的契约",
             "case": "情况",
             "seen": "用户看到",
             "recovery": "恢复动作",
+            "size": "1 个纵向切片 · 4 个工作包",
             "prev": f"{previous['id']} 的交付物已经验收；未通过时不进入本增量。" if previous else "",
+            "package_intro": "每个工作包都要产生可运行的代码、可复现的验证或明确的界面结果；只写接口或只做页面都不算完成。",
         }
         verify_extra = ZH_VERIFY_EXTRA
         if following:
@@ -116,23 +234,30 @@ def render(data: dict, index: int, lang: str) -> str:
         headings = {
             "solve": "What this increment solves",
             "before": "Before you start",
-            "steps": "Implementation steps",
-            "contracts": "Data and interface contracts",
+            "packages": "Four implementation work packages",
+            "engineering": "Engineering map",
+            "paths": "Primary directories and modules",
+            "interfaces": "Key interfaces",
+            "commands": "Shared verification commands",
+            "acceptance": "Acceptance rehearsal",
             "deliverables": "Deliverables",
-            "verify": "Verification checklist",
+            "verify": "Completion decision",
             "failure": "Failure and recovery",
             "scope": "Out of scope",
+            "sources": "Source material and next step",
             "next": "Next step",
         }
         labels = {
             "outcome": "User-visible outcome",
             "gate": "Completion gate",
-            "checkpoint": "Checkpoint",
-            "requirement": "Must hold",
+            "interface": "Interface",
+            "requirement": "Contract that must hold",
             "case": "Case",
             "seen": "User sees",
             "recovery": "Recovery",
+            "size": "1 vertical increment · 4 work packages",
             "prev": f"{previous['id']} deliverables have passed review; do not enter this increment otherwise." if previous else "",
+            "package_intro": "Every work package must produce runnable code, a reproducible check, or a concrete UI result; interfaces alone or pages alone do not count as complete.",
         }
         verify_extra = EN_VERIFY_EXTRA
         if following:
@@ -149,6 +274,10 @@ def render(data: dict, index: int, lang: str) -> str:
     if labels["prev"]:
         prerequisites.append(labels["prev"])
 
+    engineering = data["details"]["engineering"][lang]
+    modules = data["details"]["increments"][item["id"]][lang]["modules"]
+    acceptance = acceptance_steps(data, index, lang)
+
     lines = [
         "---",
         f"title: {json.dumps(title, ensure_ascii=False)}",
@@ -161,6 +290,8 @@ def render(data: dict, index: int, lang: str) -> str:
         f"# {title}",
         "",
         f'<p class="lead">{text["lead"]}</p>',
+        "",
+        f'<p class="page-meta">STAGE {stage_no} · {item["id"]} · {labels["size"]}</p>',
         "",
         '<div class="section-grid">',
         f'<div><strong>{labels["outcome"]}</strong>{text["outcome"]}</div>',
@@ -177,15 +308,39 @@ def render(data: dict, index: int, lang: str) -> str:
         "",
         *[f"- {item}" for item in prerequisites],
         "",
-        f"## {headings['steps']}",
+        f"## {headings['packages']}",
         "",
-        *[f"{n}. {step}" for n, step in enumerate(text["steps"], 1)],
+        f"> {labels['package_intro']}",
         "",
-        f"## {headings['contracts']}",
+        *module_headings(modules),
+        f"## {headings['engineering']}",
         "",
-        f"| {labels['checkpoint']} | {labels['requirement']} |",
+        f"### {headings['paths']}",
+        "",
+        *[
+            f"- `{entry.split('：', 1)[0].strip()}` — {entry.split('：', 1)[1].strip()}"
+            if lang == "zh" and "：" in entry
+            else f"- `{entry.split(':', 1)[0].strip()}` — {entry.split(':', 1)[1].strip()}"
+            if lang == "en" and ":" in entry
+            else f"- {entry}"
+            for entry in engineering["paths"]
+        ],
+        "",
+        f"### {headings['interfaces']}",
+        "",
+        f"| {labels['interface']} | {labels['requirement']} |",
         "| --- | --- |",
-        *[f"| {name} | {requirement} |" for name, requirement in stage_info["contracts"]],
+        *[f"| `{name}` | {requirement} |" for name, requirement in engineering["interfaces"]],
+        "",
+        f"### {headings['commands']}",
+        "",
+        "```bash",
+        *engineering["checks"],
+        "```",
+        "",
+        f"## {headings['acceptance']}",
+        "",
+        *[f"{number}. {step}" for number, step in enumerate(acceptance, 1)],
         "",
         f"## {headings['deliverables']}",
         "",
@@ -206,7 +361,10 @@ def render(data: dict, index: int, lang: str) -> str:
         "",
         *[f"- {entry}" for entry in stage_info["exclusions"]],
         "",
-        f"## {headings['next']}",
+        f"## {headings['sources']}",
+        "",
+        *source_lines(stage_no, lang),
+        f"### {headings['next']}",
         "",
         next_text,
         "",
@@ -219,6 +377,16 @@ def main() -> None:
     en_groups = []
     for stage in range(7):
         data = json.loads((DATA / f"s{stage}.json").read_text(encoding="utf-8"))
+        data["details"] = json.loads((DATA / f"details-s{stage}.json").read_text(encoding="utf-8"))
+        expected = {item["id"] for item in data["increments"]}
+        details = data["details"]["increments"]
+        if set(details) != expected:
+            raise SystemExit(f"details-s{stage}.json does not match increment ids")
+        for increment_id, value in details.items():
+            for lang in ("zh", "en"):
+                modules = value[lang]["modules"]
+                if len(modules) != 4 or any(len(module) != 2 for module in modules):
+                    raise SystemExit(f"{increment_id} must contain exactly four two-part modules in {lang}")
         zh_groups.append(
             {
                 "text": f"S{stage} · {data['zh_title']}",

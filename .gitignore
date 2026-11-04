@@ -6,6 +6,8 @@ node_modules/
 dist/
 coverage/
 *.tsbuildinfo
+__pycache__/
+work/screenshots/
 
 # Local configuration and secrets
 .env

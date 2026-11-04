@@ -27,6 +27,8 @@ outline: [2, 3]
 
 ## Increment Breakdown
 
+Each increment now has four layers: outcome and gate → four work packages → engineering map and interfaces → acceptance rehearsal. Packages can be split across developers, but merge in dependency order; completing one package does not complete the increment.
+
 | Increment | User-visible outcome | Completion evidence |
 |---|---|---|
 | [D1.1](/en/delivery/stage-1/d1-1) Runnable walking skeleton | Create a Web task; state survives refresh and restart | `hearthd` + SQLite + Event Log + fake executor + SSE |

@@ -27,6 +27,8 @@ outline: [2, 3]
 
 ## Increment Breakdown
 
+Each increment now has four layers: outcome and gate → four work packages → engineering map and interfaces → acceptance rehearsal. Packages can be split across developers, but merge in dependency order; completing one package does not complete the increment.
+
 | Increment | User-visible outcome | Completion evidence |
 |---|---|---|
 | [D5.1](/en/delivery/stage-5/d5-1) Memory Core and browser | Users can inspect, understand, and correct memory in use | Five memory types, provenance, budgets, recall explanation |

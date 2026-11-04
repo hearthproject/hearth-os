@@ -27,6 +27,8 @@ outline: [2, 3]
 
 ## Increment Breakdown
 
+Each increment now has four layers: outcome and gate → four work packages → engineering map and interfaces → acceptance rehearsal. Packages can be split across developers, but merge in dependency order; completing one package does not complete the increment.
+
 | Increment | User-visible outcome | Completion evidence |
 |---|---|---|
 | [D6.1](/en/delivery/stage-6/d6-1) Multi-device read and event sync | Consistent tasks and artifacts across devices | Device identity, cursors, incremental sync, replay |

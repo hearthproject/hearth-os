@@ -27,6 +27,8 @@ outline: [2, 3]
 
 ## Increment Breakdown
 
+Each increment now has four layers: outcome and gate → four work packages → engineering map and interfaces → acceptance rehearsal. Packages can be split across developers, but merge in dependency order; completing one package does not complete the increment.
+
 | Increment | User-visible outcome | Completion evidence |
 |---|---|---|
 | [D3.1](/en/delivery/stage-3/d3-1) Device agentd and visibility | Users see trusted devices, capabilities, and online state | Pairing, capability catalog, health check, revocation |

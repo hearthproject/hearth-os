@@ -27,6 +27,8 @@ outline: [2, 3]
 
 ## Increment Breakdown
 
+Each increment now has four layers: outcome and gate → four work packages → engineering map and interfaces → acceptance rehearsal. Packages can be split across developers, but merge in dependency order; completing one package does not complete the increment.
+
 | Increment | User-visible outcome | Completion evidence |
 |---|---|---|
 | [D4.1](/en/delivery/stage-4/d4-1) Triggers and proactive inbox | Hearth can explain what can be done now | Event dedupe, candidate generation, A1/A2 boundaries, pause and ignore |

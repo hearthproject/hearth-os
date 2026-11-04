@@ -1,0 +1,142 @@
+{
+  "engineering": {
+    "zh": {
+      "paths": [
+        "apps/hearthd/triggers：Trigger 适配器、去重键、候选生成与降级",
+        "packages/control：自主级别、候选策略、风险门槛与 kill switch",
+        "packages/attention：注意力预算、静默时段、通知聚合与价值评分",
+        "apps/pwa：移动任务卡、审批、接管、离线只读与推送入口",
+        "packages/devices/pairing：公钥配对、短期会话与远程撤销",
+        "packages/relay：端到端加密推送、最小元数据与重放防护",
+        "apps/web：为什么现在、主动收件箱、强度设置与中断历史"
+      ],
+      "interfaces": [
+        ["TriggerEvent", "triggerId、source、dedupeKey、observedAt、payloadRef、scope、sensitivity；重复事件不能生成重复任务。"],
+        ["ProactiveCandidate", "candidateId、whyNow、proposedAction、autonomyLevel、risk、budget、expiresAt；候选不是授权。"],
+        ["AttentionBudget", "window、maxInterruptions、quietHours、valueThreshold、spent；预算耗尽必须停止主动打扰。"],
+        ["MobileApproval", "approvalId、nonce、parameterHash、expiresAt、deviceId、signature；离线状态不得确认外部副作用。"]
+      ],
+      "checks": [
+        "pnpm test:triggers：重复事件、乱序、失效来源和预算耗尽",
+        "pnpm test:attention：静默时段、聚合、疲劳阈值和 kill switch",
+        "pnpm test:pwa：离线、断网、生物识别、重放和远程撤销",
+        "pnpm eval:proactive：主动与手动对照的成功率、打断和满意度"
+      ]
+    },
+    "en": {
+      "paths": [
+        "apps/hearthd/triggers: trigger adapters, dedupe keys, candidate generation, and degradation",
+        "packages/control: autonomy levels, candidate policy, risk gates, and kill switch",
+        "packages/attention: attention budget, quiet hours, notification aggregation, and value scoring",
+        "apps/pwa: mobile task cards, approval, takeover, offline read-only, and push entry",
+        "packages/devices/pairing: public-key pairing, short sessions, and remote revocation",
+        "packages/relay: end-to-end encrypted push, minimal metadata, and replay defense",
+        "apps/web: Why now, proactive inbox, intensity settings, and interruption history"
+      ],
+      "interfaces": [
+        ["TriggerEvent", "triggerId, source, dedupeKey, observedAt, payloadRef, scope, sensitivity; duplicate events cannot create duplicate tasks."],
+        ["ProactiveCandidate", "candidateId, whyNow, proposedAction, autonomyLevel, risk, budget, expiresAt; a candidate is not authority."],
+        ["AttentionBudget", "window, maxInterruptions, quietHours, valueThreshold, spent; exhaustion must stop proactive interruption."],
+        ["MobileApproval", "approvalId, nonce, parameterHash, expiresAt, deviceId, signature; offline state cannot confirm external effects."]
+      ],
+      "checks": [
+        "pnpm test:triggers: duplicate, out-of-order, expired sources, and budget exhaustion",
+        "pnpm test:attention: quiet hours, aggregation, fatigue thresholds, and kill switch",
+        "pnpm test:pwa: offline, disconnect, biometrics, replay, and remote revocation",
+        "pnpm eval:proactive: proactive versus manual success, interruption, and satisfaction"
+      ]
+    }
+  },
+  "increments": {
+    "D4.1": {
+      "zh": {
+        "modules": [
+          ["Trigger 接入与去重", "先接邮件、日历、文件变化或任务依赖中的一种真实 Trigger，保存来源事件、观察时间、作用域和去重键。乱序、重复和延迟事件按业务键合并；来源失效、权限撤销或时间过旧时不生成候选，并记录忽略原因。"],
+          ["候选生成与自主级别", "候选生成必须引用一条真实触发事件和明确用户目标，输出为什么现在、建议动作、风险、预算和过期时间。A1 只建议、A2 可执行低风险可逆动作，A3 及以上仍逐次审批；候选本身不携带任何新增权限。"],
+          ["主动任务卡与为什么现在", "主动收件箱展示来源、触发时间、与用户目标的关系、建议动作和忽略后的结果。用户可以一键查看证据、暂停、忽略、降低自主级别或转为手动任务；没有来源的“智能建议”不得进入收件箱。"],
+          ["预算、降级与循环保护", "为每个 Trigger 设置频率、并发、Token、外部动作和打断预算，达到上限立即停止。相同来源在冷却窗口内只产生一个候选，连续低价值候选自动降级；验收要覆盖重复事件、预算耗尽、撤销权限和 runaway loop。"]
+        ]
+      },
+      "en": {
+        "modules": [
+          ["Trigger ingestion and deduplication", "Connect one real trigger from email, calendar, file changes, or task dependency, storing source event, observation time, scope, and dedupe key. Merge out-of-order, duplicate, and delayed events by business key. Do not create candidates from expired sources, revoked authority, or stale time, and log the ignore reason."],
+          ["Candidate generation and autonomy levels", "A candidate cites one real trigger event and a clear user objective, then states why now, proposed action, risk, budget, and expiry. A1 suggests only, A2 may execute low-risk reversible actions, and A3+ still requires per-action approval. A candidate carries no new authority."],
+          ["Proactive card and Why now", "The proactive inbox shows source, trigger time, relation to the user objective, proposed action, and consequence of ignoring. Users can inspect evidence, pause, ignore, lower autonomy, or convert to manual. A smart suggestion without provenance never reaches the inbox."],
+          ["Budget, degradation, and loop protection", "Set frequency, concurrency, Token, external-effect, and interruption budgets per trigger and stop at the limit. One source yields at most one candidate per cooldown, and repeated low-value candidates degrade automatically. Acceptance covers duplicates, exhaustion, revoked authority, and runaway loops."]
+        ]
+      }
+    },
+    "D4.2": {
+      "zh": {
+        "modules": [
+          ["PWA 壳与离线只读缓存", "移动端提供任务列表、详情、审批、接管和产物预览，离线时只允许读取最近缓存并明确标记数据时间。离线状态禁止确认外部副作用、修改预算或解除审批；恢复网络后从服务端重新校验权限和参数，不能直接补发离线动作。"],
+          ["移动审批与接管", "审批页展示真实参数、影响和来源，使用短期会话或生物识别保护高价值动作。接管界面适配触屏和单手操作，明确暂停自动输入；手机不持有长期主凭据，撤销设备后立即退出所有敏感页面。"],
+          ["脱敏推送与深链", "推送只包含任务类型、是否需要用户和最小上下文，不发送正文、收件人或秘密。深链打开后仍需重新鉴权并从服务端取真实状态；通知权限可分级关闭，过期或被撤销的审批不能通过旧推送重放。"],
+          ["移动可访问性与验收", "检查 390px 宽度、键盘可达、屏幕阅读器标签、对比度、触控目标和横竖屏布局。关键路径在主设备、手机和断网恢复下都能完成或安全拒绝；验收必须证明手机上不能越权审批、离线不能产生副作用、旧深链不能重放。"]
+        ]
+      },
+      "en": {
+        "modules": [
+          ["PWA shell and offline read-only cache", "The mobile app provides task lists, details, approvals, takeover, and artifact preview. Offline allows only recent cached reads with an explicit timestamp. Offline disables external-effect confirmation, budget changes, and approval release. After reconnect, revalidate authority and parameters on the server; never replay offline actions directly."],
+          ["Mobile approval and takeover", "Approval pages show real parameters, impact, and source, protecting high-value actions with short sessions or biometrics. Takeover supports touch and one-handed use and explicitly pauses automatic input. The phone holds no long-term primary credential, and revocation immediately exits sensitive pages."],
+          ["Redacted push and deep links", "Push contains only task type, whether the user is needed, and minimal context, never body text, recipients, or secrets. A deep link still requires fresh authentication and server state. Notification permissions are tiered, and expired or revoked approvals cannot replay through an old push."],
+          ["Mobile accessibility and acceptance", "Check 390px width, keyboard reachability, screen-reader labels, contrast, touch targets, and orientation. Key paths complete or safely refuse on desktop, phone, and reconnect. Acceptance proves the phone cannot escalate approval, offline cannot create effects, and old deep links cannot replay."]
+        ]
+      }
+    },
+    "D4.3": {
+      "zh": {
+        "modules": [
+          ["公钥配对与用户确认", "手机生成密钥对，通过一次性二维码或短码与主设备绑定；用户必须在主设备确认配对、设备名称和权限范围。配对记录包含公钥、创建时间、最后使用和信任来源，短期会话到期后重新确认。"],
+          ["加密中继与最小元数据", "推送中继只看到路由所需的设备标识、消息类型和密文，不能读取任务正文、审批参数或产物。消息使用端到端加密和防重放 nonce；中继不可用时降级为主动查询，不把敏感内容退回普通短信或邮件。"],
+          ["审批 nonce、参数绑定与过期", "审批请求绑定 approvalId、任务、参数哈希、nonce、设备、过期时间和一次性签名。参数修改、设备变化或过期都会使审批失效；重复 nonce 被拒绝，旧审批不能用于新动作，拒绝记录同步回主设备。"],
+          ["设备撤销与丢失演练", "设备页支持远程撤销、清除会话和查看最近访问。撤销后旧设备不能审批、接管或读取新事件；丢失演练覆盖撤销延迟、离线设备重新上线、密钥轮换和重新配对，所有安全事件都有可读审计。"]
+        ]
+      },
+      "en": {
+        "modules": [
+          ["Public-key pairing and user confirmation", "The phone generates a key pair and binds through a one-time QR or short code; the user confirms pairing, device name, and permission scope on the primary device. The record includes public key, creation time, last use, and trust source. Short sessions require fresh confirmation after expiry."],
+          ["Encrypted relay and minimal metadata", "The push relay sees only routing device ID, message type, and ciphertext, never task body, approval parameters, or artifacts. Messages use end-to-end encryption and replay-prevention nonces. If the relay is unavailable, degrade to active polling instead of sending sensitive content by SMS or email."],
+          ["Approval nonce, parameter binding, and expiry", "Requests bind approvalId, task, parameter hash, nonce, device, expiry, and one-time signature. Changed parameters, a different device, or expiry invalidate approval. Duplicate nonces are rejected, old approvals cannot authorize new actions, and rejection syncs to the primary device."],
+          ["Device revocation and loss drills", "The device page supports remote revocation, session clearing, and recent-access review. After revocation, the old device cannot approve, take over, or read new events. Loss drills cover revocation delay, an offline device returning, key rotation, and re-pairing, with readable audit for every security event."]
+        ]
+      }
+    },
+    "D4.4": {
+      "zh": {
+        "modules": [
+          ["注意力预算与静默时段", "按小时、任务类型和用户状态设置最大打断次数、静默时段和最低价值阈值；会议、专注和夜间默认不打扰。预算按真实通知计数，而不是按轮询次数；耗尽后候选进入摘要或等待，不允许用高优先级标签绕过。"],
+          ["打断度量与价值记录", "记录每次主动任务的触发来源、打断次数、用户响应时间、接受/忽略、完成率、人工分钟和满意度。把“用户快速忽略”与“用户获得价值”分开统计，识别通知疲劳、误触发和真正需要人工的情况。"],
+          ["Shadow 与对照试跑", "在 Shadow 模式只生成候选和评估结果，不打扰用户、不执行外部动作。选取同类任务做主动与手动对照，比较完成率、人工分钟、Token、打断成本和遗漏率；样本、评分器和时间窗口必须事先固定。"],
+          ["强度设置、回退与 kill switch", "提供关闭、仅建议、低强度、标准强度四档，并允许按 Trigger 单独调整。kill switch 立即停止所有主动循环、撤销待执行候选和推送；根据试跑结果扩大、保持或回退范围，不能用短期满意度掩盖长期疲劳。"]
+        ]
+      },
+      "en": {
+        "modules": [
+          ["Attention budget and quiet hours", "Set maximum interruptions, quiet hours, and a minimum value threshold by hour, task type, and user state; meetings, focus time, and night are quiet by default. Count real notifications rather than polling cycles. Exhaustion moves candidates to a digest or waiting state; a high-priority label cannot bypass the budget."],
+          ["Interruption measurement and value capture", "Record trigger source, interruption count, response time, acceptance or dismissal, completion, manual minutes, and satisfaction for every proactive task. Separate rapid dismissal from actual value, identifying notification fatigue, false triggers, and genuine human-need cases."],
+          ["Shadow and control trials", "Shadow mode generates candidates and evaluations without interrupting users or executing external effects. Compare proactive and manual handling of similar tasks on completion, manual minutes, Token, interruption cost, and miss rate with a pre-fixed sample, scorer, and time window."],
+          ["Intensity settings, fallback, and kill switch", "Offer off, suggest-only, low, and standard levels, adjustable per trigger. The kill switch immediately stops all proactive loops, withdraws pending candidates, and disables push. Expand, hold, or revert scope from trial evidence rather than short-term satisfaction that hides long-term fatigue."]
+        ]
+      }
+    },
+    "D4.5": {
+      "zh": {
+        "modules": [
+          ["代表性主动场景试跑", "覆盖邮件到期、日程冲突、文件变化和任务依赖等真实场景，记录触发、候选、用户决策、执行与恢复。每个场景有明确成功标准和失败样本；主动任务不能在后台绕过审批、预算或设备撤销。"],
+          ["安全、隐私与网络波动", "复核推送脱敏、审批重放、旧设备撤销、跨账户数据和中继最小元数据。模拟断网、延迟、推送丢失、重复推送和主设备离线，确认手机审批不会误确认、任务不会重复执行，恢复后状态一致。"],
+          ["限制说明与紧急停止", "发布主动模式说明，解释哪些场景会主动、何时静默、用户如何关闭、如何处理误触发和通知疲劳。紧急停止入口在主设备和手机上都可立即使用，并显示已停止的循环和待处理候选。"],
+          ["Stage 4 评测报告与发布", "比较主动与手动的成功率、人工分钟、打断次数、满意度、Token 和失败类型，列出仍不适合主动化的场景。只有预算、审批、撤销和回退都稳定时才发布；发现疲劳或安全回归就缩小范围，而不是继续扩量。"]
+        ]
+      },
+      "en": {
+        "modules": [
+          ["Representative proactive trials", "Cover email deadlines, calendar conflicts, file changes, and task dependencies with real scenarios recording trigger, candidate, user decision, execution, and recovery. Each scenario has a success standard and failure sample. Proactive work can never bypass approval, budget, or device revocation in the background."],
+          ["Safety, privacy, and network fluctuation", "Review push redaction, approval replay, old-device revocation, cross-account data, and minimal relay metadata. Simulate disconnect, latency, lost push, duplicate push, and an offline primary device; mobile approval must not confirm incorrectly, tasks must not duplicate, and state must converge after recovery."],
+          ["Limitations and emergency stop", "Publish proactive-mode guidance explaining which scenarios trigger, when the system is quiet, how to disable it, and how false triggers and fatigue are handled. Emergency stop works immediately on both primary device and phone and shows halted loops and pending candidates."],
+          ["Stage 4 evaluation report and release", "Compare proactive and manual success, manual minutes, interruptions, satisfaction, Token, and failure classes, listing scenarios still unsuitable for proactive work. Release only when budget, approval, revocation, and rollback are stable; shrink scope on fatigue or security regression instead of expanding volume."]
+        ]
+      }
+    }
+  }
+}

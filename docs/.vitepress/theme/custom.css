@@ -252,8 +252,11 @@ body {
 
 .vp-doc h3 {
   margin-top: 32px;
+  padding-left: 14px;
+  border-left: 2px solid color-mix(in srgb, var(--vp-c-brand-1) 56%, transparent);
   font-size: 19px;
   font-weight: 620;
+  line-height: 1.45;
 }
 
 .vp-doc p,
@@ -396,6 +399,14 @@ body {
 .vp-doc .section-grid strong {
   display: block;
   margin-bottom: 5px;
+}
+
+.vp-doc .section-grid > * {
+  line-height: 1.75;
+}
+
+.vp-doc table td {
+  line-height: 1.72;
 }
 
 .VPHome {

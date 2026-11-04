@@ -1,0 +1,124 @@
+{
+  "engineering": {
+    "zh": {
+      "paths": [
+        "apps/agentd：设备配对、能力声明、健康检查与撤销",
+        "packages/devices：设备身份、会话、能力目录与在线状态",
+        "packages/desktop-observation：窗口边界、截图、可访问性树与脱敏",
+        "packages/desktop-control：白名单、定位器、输入动作与前后条件",
+        "packages/desktop-verification：截图比较、焦点检查、半完成检测",
+        "packages/approval：桌面 Effect Preview、二次确认与补偿说明",
+        "apps/web：设备页、观察视图、实时接管和恢复界面"
+      ],
+      "interfaces": [
+        ["DeviceManifest", "deviceId、publicKey、agentdVersion、capabilities、allowedRoots、expiresAt、revocationState；未声明的能力不可调用。"],
+        ["ObservationFrame", "captureId、windowBounds、screenshotRef、accessibilityTree、capturedAt、redactions；只采集完成任务所需的最小范围。"],
+        ["DesktopAction", "actionType、targetWindow、locator、preconditions、expectedPostconditions、riskLevel、timeout；执行前必须通过策略检查。"],
+        ["DesktopReceipt", "actionId、beforeRef、afterRef、verification、partialState、compensation、approvalId；失败时保留可恢复证据。"]
+      ],
+      "checks": [
+        "pnpm test:device：配对、能力越权、离线、撤销和会话失效",
+        "pnpm test:desktop：观察、接管、焦点变化、半完成和补偿",
+        "pnpm test:desktop-fault：窗口漂移、元素消失、输入争抢和崩溃",
+        "pnpm eval:computer：至少 8 个真实桌面任务及失败样本"
+      ]
+    },
+    "en": {
+      "paths": [
+        "apps/agentd: pairing, capability declaration, health checks, and revocation",
+        "packages/devices: device identity, sessions, capability catalog, and online state",
+        "packages/desktop-observation: window bounds, screenshots, accessibility tree, and redaction",
+        "packages/desktop-control: allowlists, locators, input actions, and pre/postconditions",
+        "packages/desktop-verification: screenshot comparison, focus checks, and half-complete detection",
+        "packages/approval: desktop Effect Preview, second confirmation, and compensation guidance",
+        "apps/web: device page, observation view, live takeover, and recovery"
+      ],
+      "interfaces": [
+        ["DeviceManifest", "deviceId, publicKey, agentdVersion, capabilities, allowedRoots, expiresAt, revocationState; undeclared capabilities cannot be called."],
+        ["ObservationFrame", "captureId, windowBounds, screenshotRef, accessibilityTree, capturedAt, redactions; capture only the minimum scope required."],
+        ["DesktopAction", "actionType, targetWindow, locator, preconditions, expectedPostconditions, riskLevel, timeout; policy checks precede execution."],
+        ["DesktopReceipt", "actionId, beforeRef, afterRef, verification, partialState, compensation, approvalId; failure preserves recoverable evidence."]
+      ],
+      "checks": [
+        "pnpm test:device: pairing, capability escalation, offline, revocation, and session expiry",
+        "pnpm test:desktop: observation, takeover, focus changes, half-complete, and compensation",
+        "pnpm test:desktop-fault: window drift, vanished elements, input contention, and crashes",
+        "pnpm eval:computer: at least eight real desktop tasks and failure samples"
+      ]
+    }
+  },
+  "increments": {
+    "D3.1": {
+      "zh": {
+        "modules": [
+          ["设备配对与持久身份", "用户通过一次性短码或二维码确认配对，设备生成并保存密钥对，服务端只保存公钥、设备 ID 和信任状态。配对会话必须过期、只能使用一次，并在设备详情中显示上次确认时间、agentd 版本和信任来源。"],
+          ["能力声明与最小权限", "agentd 注册时声明可观察的窗口、可操作应用、允许的文件根目录、键鼠能力和敏感能力禁用项。声明经过签名与版本校验，任务请求必须逐项匹配；能力不匹配时拒绝分配并告诉用户缺什么，而不是悄悄降级。"],
+          ["上线状态与设备详情", "建立在线、忙碌、暂停、离线和撤销状态，记录最后心跳、最后同步和当前执行任务。设备页展示能力、最近动作和健康检查；心跳过期自动转为离线，离线设备不接收新的桌面任务。"],
+          ["撤销、任务归属与审计", "撤销设备立即让会话失效、撤回待执行分配，并把正在执行的任务转为需要人工处理。所有配对、能力调用、任务关联和撤销写入审计；验收要证明未声明窗口不可访问、旧会话不可复用、离线状态清晰可见。"]
+        ]
+      },
+      "en": {
+        "modules": [
+          ["Device pairing and durable identity", "The user confirms pairing with a one-time short code or QR; the device generates and stores a key pair while the server stores only public key, device ID, and trust state. Pairing sessions expire and are single-use, and the device page shows last confirmation, agentd version, and trust source."],
+          ["Capability declaration and least privilege", "At registration, agentd declares observable windows, operable applications, allowed file roots, input capabilities, and disabled sensitive capabilities. Validate signatures and versions; every task request must match item by item. Reject assignment and name the missing capability instead of silently degrading."],
+          ["Online state and device details", "Track online, busy, paused, offline, and revoked states with last heartbeat, last sync, and current task. The device page shows capabilities, recent actions, and health checks. Expired heartbeats become offline, and offline devices receive no new desktop task."],
+          ["Revocation, task ownership, and audit", "Revocation invalidates sessions immediately, withdraws pending assignments, and moves running tasks to Needs attention. Audit pairing, capability calls, task association, and revocation. Acceptance proves undeclared windows are inaccessible, old sessions cannot be reused, and offline state is explicit."]
+        ]
+      }
+    },
+    "D3.2": {
+      "zh": {
+        "modules": [
+          ["最小观察采集", "采集目标窗口边界、可见截图、可访问性树和必要的焦点信息，不抓取全屏隐私区域。截图按任务范围裁剪，密码框、通知和敏感标题自动脱敏；观察帧带时间、窗口 ID 和范围，避免把旧画面当成当前状态。"],
+          ["只观察模式与输入锁定", "提供只观察模式，明确保证不发送任何键鼠输入。执行器处于观察状态时，控制通道只允许读取观察帧和取消；任何输入请求都因策略拒绝并记录，防止“看一下”演变成未授权操作。"],
+          ["实时接管与争抢处理", "用户点击接管后立即暂停自动输入、撤销待发送动作并把焦点交给用户。接管界面显示窗口、任务目标、当前步骤和已完成动作；用户操作期间系统只观察和记录，不得后台继续点击或抢占焦点。"],
+          ["交还、脱敏与超时", "交还前记录当前焦点、窗口、URL、已完成步骤和下一步；交还后重新采集状态并确认前置条件。接管超时、连接中断或窗口关闭时转入等待人工处理，保留截图和审计；验收要覆盖争抢、断线、敏感区域脱敏和任务终止。"]
+        ]
+      },
+      "en": {
+        "modules": [
+          ["Minimal observation capture", "Capture target-window bounds, visible screenshot, accessibility tree, and necessary focus information without recording the full private desktop. Crop by task scope and automatically redact password fields, notifications, and sensitive titles. Observation frames carry time, window ID, and bounds so stale pixels never pose as current state."],
+          ["Observe-only mode and input lock", "Provide observe-only mode with an explicit guarantee of zero keyboard or mouse input. While observing, the control channel permits only frame reads and cancellation; policy rejects and logs any input request so looking around cannot become unauthorized operation."],
+          ["Live takeover and contention handling", "When the user takes over, pause automatic input immediately, withdraw pending actions, and give focus to the user. The takeover view shows window, objective, current step, and completed actions. While the user operates, the system only observes and records, never clicks in the background or steals focus."],
+          ["Hand-back, redaction, and timeout", "Before hand-back, record focus, window, URL, completed steps, and next step; afterward recapture state and recheck preconditions. Hand-back timeout, disconnection, or window closure enters Needs attention with screenshots and audit. Acceptance covers contention, disconnects, sensitive-region redaction, and termination."]
+        ]
+      }
+    },
+    "D3.3": {
+      "zh": {
+        "modules": [
+          ["应用、窗口与动作白名单", "按应用、窗口标题、可访问性角色和动作类型建立允许列表，默认拒绝所有未登记对象。文件操作限制在授权根目录，键鼠动作限制在目标窗口内；白名单更新需要审计，不能由网页内容或模型输出自行修改。"],
+          ["定位器与执行前检查", "优先使用可访问性角色、名称和控件关系定位元素，坐标只作为最后备选。执行前检查目标窗口仍在前台、元素可见、焦点正确、前置条件成立；窗口漂移、元素消失或权限变化时停止并请求重新定位。"],
+          ["受限输入与动作执行", "实现窗口聚焦、键盘输入、鼠标点击、文件选择和滚动等最小动作，禁止读取密码库、修改系统安全设置和操作非白名单应用。每个动作记录目标、参数、执行时间和策略判定，输入内容不得写入无关日志。"],
+          ["前后条件验证与半完成", "动作后验证预期窗口、控件值、文件存在或页面状态，并保存截图和可访问性证据。若出现部分输入、窗口切换或文件部分保存，标记“需要检查”并阻止继续；提供重试、人工接管和补偿入口，不能把一次成功点击当成通用能力。"]
+        ]
+      },
+      "en": {
+        "modules": [
+          ["Application, window, and action allowlists", "Allow by application, window title, accessibility role, and action type; deny every unregistered object by default. Restrict file operations to authorized roots and input to the target window. Allowlist changes require audit and cannot be modified by page content or model output."],
+          ["Locators and preflight checks", "Prefer accessibility role, name, and control relationships; coordinates are the last fallback. Before execution, verify the target window is foreground, the element visible, focus correct, and preconditions true. Stop and relocate on window drift, vanished elements, or authority change."],
+          ["Bounded input and action execution", "Implement minimal focus, keyboard, click, file-selection, and scroll actions while prohibiting password vaults, system security changes, and non-allowlisted apps. Record target, parameters, time, and policy decision per action; never write input content into unrelated logs."],
+          ["Postcondition verification and half-complete state", "Verify expected window, control value, file existence, or page state after each action, preserving screenshots and accessibility evidence. Partial input, window switches, or partially saved files become Needs inspection and block continuation. Offer retry, takeover, and compensation; one successful click is not general capability."]
+        ]
+      }
+    },
+    "D3.4": {
+      "zh": {
+        "modules": [
+          ["隔离桌面与快照", "在隔离虚拟桌面中执行不可逆或高影响任务，限制网络、共享目录和外设，开始前创建可恢复快照。任务结束或失败后保留快照和动作日志，用户确认影响后再销毁；隔离边界不能成为绕过审批的理由。"],
+          ["不可逆动作清单与风险矩阵", "列出删除、覆盖、发送、支付、权限修改和公开发布等不可逆动作，按影响范围、可补偿性和可观察性分级。每级规定审批、二次确认、快照、人工在场或禁止执行；高风险动作不得在无人值守的主动循环中运行。"],
+          ["影响预览与二次确认", "Effect Preview 展示目标、真实参数、预期结果、不可逆部分、补偿脚本和失败后的停留状态。执行前要求与参数绑定的二次确认，过期、参数变化或设备变化都使确认失效；用户必须能读懂影响，而不是只看到“继续”。"],
+          ["失败演练与 Stage 3 发布", "注入窗口崩溃、网络断开、快照失败、半完成和接管中断，验证失败后不留未知高风险状态。至少完成 5 个代表性桌面任务并覆盖接管、高风险审批和恢复；发布说明列明禁止应用、不可逆边界和人工兜底方式。"]
+        ]
+      },
+      "en": {
+        "modules": [
+          ["Isolated desktop and snapshots", "Run irreversible or high-impact tasks in an isolated virtual desktop with restricted network, shared folders, and peripherals, and take a recoverable snapshot first. Preserve snapshot and action log after completion or failure until the user confirms impact. Isolation never bypasses approval."],
+          ["Irreversible-action catalog and risk matrix", "List deletion, overwrite, send, payment, permission change, and public publishing as irreversible actions, graded by impact, compensability, and observability. Each level defines approval, second confirmation, snapshot, human presence, or prohibition. No high-risk action runs unattended in a proactive loop."],
+          ["Impact preview and second confirmation", "Effect Preview shows target, real parameters, expected result, irreversible portion, compensation script, and failure resting state. Require parameter-bound second confirmation; expiry, changed parameters, or a different device invalidates it. Users must understand impact, not merely click Continue."],
+          ["Failure drills and Stage 3 release", "Inject window crashes, network loss, snapshot failure, half-complete actions, and interrupted takeover; failure must leave no unknown high-risk state. Complete at least five representative desktop tasks covering takeover, high-risk approval, and recovery. Release notes list prohibited apps, irreversible boundaries, and human fallback."]
+        ]
+      }
+    }
+  }
+}

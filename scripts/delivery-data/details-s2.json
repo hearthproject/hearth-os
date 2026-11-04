@@ -1,0 +1,160 @@
+{
+  "engineering": {
+    "zh": {
+      "paths": [
+        "apps/hearthd/connectors：OAuth、游标同步、来源归一化与撤销",
+        "packages/connectors：邮件、日历、文档和数据的最小权限适配器",
+        "packages/executors/python-sidecar：解析、OCR、表格清洗与格式转换",
+        "packages/executors/browser：Playwright worker、下载验证与人工接管",
+        "packages/context：Context Compiler、来源裁剪与敏感字段过滤",
+        "packages/memory：Memory v0、召回原因与基础遗忘",
+        "packages/governor：Token 预算、阶梯路由、缓存与异常停止"
+      ],
+      "interfaces": [
+        ["SourceRef", "sourceId、connectorId、accountId、objectId、retrievedAt、scope、contentHash、revocationState；引用必须能回到原始对象。"],
+        ["ConnectorEffect", "effectType、target、parameters、dryRun、approvalId、idempotencyKey；连接器只执行已登记动作。"],
+        ["ContextPack", "taskId、selectedSources、tokenBudget、redactions、recallReasons；不得包含未授权账户内容。"],
+        ["MemoryRecord", "kind、value、provenance、confidence、sensitivity、observedAt、expiresAt；纠正与删除必须可追踪。"]
+      ],
+      "checks": [
+        "pnpm test:connectors：授权、过期、撤销、限流和跨账户隔离",
+        "pnpm test:effects：预览、参数绑定、幂等、outbox 重投与对账",
+        "pnpm test:browser：注入、下载、超时、接管和网络出口策略",
+        "pnpm eval:operator：研究与日常任务对比人工分钟、Token 和成功率"
+      ]
+    },
+    "en": {
+      "paths": [
+        "apps/hearthd/connectors: OAuth, cursor sync, source normalization, and revocation",
+        "packages/connectors: least-privilege adapters for email, calendar, documents, and data",
+        "packages/executors/python-sidecar: parsing, OCR, table cleaning, and format conversion",
+        "packages/executors/browser: Playwright worker, download verification, and takeover",
+        "packages/context: Context Compiler, source trimming, and sensitive-field filtering",
+        "packages/memory: Memory v0, recall reasons, and basic forgetting",
+        "packages/governor: Token budgets, tiered routing, caching, and abnormal stops"
+      ],
+      "interfaces": [
+        ["SourceRef", "sourceId, connectorId, accountId, objectId, retrievedAt, scope, contentHash, revocationState; every citation resolves to the original object."],
+        ["ConnectorEffect", "effectType, target, parameters, dryRun, approvalId, idempotencyKey; connectors execute only registered actions."],
+        ["ContextPack", "taskId, selectedSources, tokenBudget, redactions, recallReasons; never include content from an unauthorized account."],
+        ["MemoryRecord", "kind, value, provenance, confidence, sensitivity, observedAt, expiresAt; correction and deletion remain traceable."]
+      ],
+      "checks": [
+        "pnpm test:connectors: authority, expiry, revocation, rate limits, and account isolation",
+        "pnpm test:effects: preview, parameter binding, idempotency, outbox redelivery, and reconciliation",
+        "pnpm test:browser: injection, downloads, timeouts, takeover, and egress policy",
+        "pnpm eval:operator: compare research and daily tasks on manual minutes, Token, and success"
+      ]
+    }
+  },
+  "increments": {
+    "D2.1": {
+      "zh": {
+        "modules": [
+          ["连接器授权与凭据托管", "只接入一个真实来源，使用 OAuth PKCE、最小 scope 和短期访问凭据；刷新令牌进入本机秘密存储，不进入日志、任务上下文或模型提示。把客户端、账户、授权范围、过期时间和撤销状态记录成可审计配置。"],
+          ["来源归一化与增量同步", "把邮件、日历或文档对象转换为统一的 SourceRef，保存外部对象 ID、账户、获取时间、范围、内容哈希和原始链接。同步使用游标、去重键、限流和退避；首次全量之后只拉取增量，断线后从最后一个成功游标继续。"],
+          ["来源视图与引用证据", "任务卡只显示本次实际使用的最小来源摘要；来源页展示账户、标题、时间、引用段落、原始对象入口和敏感字段脱敏结果。产物中的每条引用必须能回到 SourceRef，不能用模型生成的伪链接冒充来源。"],
+          ["撤销、隔离与只读验收", "断开连接时立即吊销凭据、停止同步，并使后续任务无法再读取该来源；缓存和索引按策略清理。验收必须覆盖跨账户隔离、过期重连、范围外对象拒绝和真实脱敏任务，全程不暴露原始令牌。"]
+        ]
+      },
+      "en": {
+        "modules": [
+          ["Connector authority and credential custody", "Connect one real source using OAuth PKCE, least-privilege scopes, and short-lived access credentials. Keep refresh tokens in local secret storage, never logs, task context, or model prompts. Record client, account, scope, expiry, and revocation state as auditable configuration."],
+          ["Source normalization and incremental sync", "Normalize email, calendar, or document objects into SourceRef with external ID, account, retrieval time, scope, content hash, and original link. Sync with cursors, deduplication keys, rate limits, and backoff; after the first full pass, pull only increments and resume from the last successful cursor."],
+          ["Source view and citation evidence", "Task cards show the minimum source summary actually used. The source page shows account, title, time, cited passage, original-object entry, and redacted sensitive fields. Every artifact citation resolves to a SourceRef; model-generated links never masquerade as provenance."],
+          ["Revocation, isolation, and read-only acceptance", "Disconnect immediately revokes credentials, stops sync, and prevents later tasks from reading the source; clean caches and indexes by policy. Accept with cross-account isolation, expired-reconnect, out-of-scope rejection, and a real redacted task, never exposing a raw token."]
+        ]
+      }
+    },
+    "D2.2": {
+      "zh": {
+        "modules": [
+          ["Python sidecar 与文件边界", "把解析、OCR、格式转换和表格处理放进独立 sidecar，以临时目录和受限文件句柄工作。限制文件类型、大小、CPU、内存和网络访问；原始文件进入只读输入区，sidecar 失败不能破坏原件或阻塞主服务。"],
+          ["确定性转换管道", "按解析、清洗、转换、验证、导出拆分阶段，能用库完成的步骤不调用模型。每一步记录工具版本、参数、输入哈希、输出哈希和耗时，形成可重放的 lineage；模型只负责需要判断的字段映射与内容整理。"],
+          ["产物版本、预览与差异", "原文件、中间文件和最终产物都内容寻址保存，版本之间可比较文本、表格结构、数值和公式。大文件分块读取，前端只取预览与差异摘要；重新转换生成新版本，不覆盖旧产物。"],
+          ["验证器与局部重跑", "校验表格行列、数值范围、公式、链接、页数和格式，而不是只判断文件存在。解析、转换、验证各自有 checkpoint；失败时保留中间状态，允许只重跑解析或导出，并在 UI 显示哪一步失败、下一步做什么。"]
+        ]
+      },
+      "en": {
+        "modules": [
+          ["Python sidecar and file boundary", "Put parsing, OCR, format conversion, and table processing in an isolated sidecar using temporary directories and bounded file handles. Limit file types, size, CPU, memory, and network; original files are read-only inputs, and a sidecar failure must not damage them or block the main service."],
+          ["Deterministic conversion pipeline", "Split parsing, cleaning, conversion, validation, and export into stages; never call a model for work a library can do. Record tool version, parameters, input hash, output hash, and duration for replayable lineage. The model handles only judgment-heavy field mapping and content organization."],
+          ["Artifact versions, preview, and diff", "Content-address originals, intermediates, and final artifacts. Compare versions across text, table structure, values, and formulas. Stream large files and send only previews and diff summaries to the UI. Reconversion creates a new version instead of overwriting the old one."],
+          ["Validators and partial rerun", "Validate table shape, numeric ranges, formulas, links, page count, and format rather than mere file existence. Parsing, conversion, and validation have separate checkpoints. Preserve intermediates on failure, allow rerunning only parsing or export, and show which stage failed plus the next action."]
+        ]
+      }
+    },
+    "D2.3": {
+      "zh": {
+        "modules": [
+          ["浏览器隔离与网络出口", "Playwright worker 每个任务使用独立 profile、下载目录和临时会话；登录态只在明确授权的 profile 内复用。域名白名单、网络出口限制、文件下载类型检查和超时共同构成边界，网页不能直接调用本地命令或连接器凭据。"],
+          ["不可信页面与提示注入边界", "把页面正文、附件和搜索结果标记为不可信数据，只以结构化 observation 进入任务上下文。系统提示明确禁止执行页面中的指令；检测“忽略规则、泄露秘密、立即提交”等模式时暂停并保留证据，权限不因页面文字而改变。"],
+          ["研究证据、下载与降级", "保存访问时间、URL、标题、可见正文摘要、截图和下载文件哈希，形成来源清单。页面不可用、登录失效或需要验证码时给出明确降级，不把空结果当成研究完成；下载文件先隔离校验再进入产物区。"],
+          ["人工接管与动作分级", "提供实时接管视图，用户处理登录、验证码和复杂交互后可以交还，并记录焦点、URL 和下一步。表单自动填充只生成草稿；提交、发布、购买和分享必须进入 Effect Preview 与审批，成功后写回执，结果未知时先对账。"]
+        ]
+      },
+      "en": {
+        "modules": [
+          ["Browser isolation and network egress", "Each Playwright task uses a separate profile, download directory, and temporary session; reuse login state only in an explicitly authorized profile. Domain allowlists, egress limits, download-type checks, and timeouts form the boundary. Pages cannot invoke local commands or reach connector credentials."],
+          ["Untrusted pages and prompt-injection boundary", "Mark page text, attachments, and search results as untrusted data and admit them only as structured observations. System policy forbids following page instructions. Pause on patterns such as ignore rules, reveal secrets, or submit now, preserve evidence, and never let page text expand authority."],
+          ["Research evidence, downloads, and degradation", "Record visit time, URL, title, visible-text excerpt, screenshot, and downloaded-file hash to form a source list. When a page is unavailable, login expires, or a CAPTCHA appears, degrade explicitly; never treat an empty result as completed research. Quarantine and validate downloads before adding artifacts."],
+          ["Human takeover and action tiers", "Provide live takeover for login, CAPTCHA, and complex interaction, then hand back with focus, URL, and next step recorded. Form autofill creates drafts only. Submission, publishing, purchase, and sharing require Effect Preview and approval, write a receipt on success, and reconcile unknown outcomes first."]
+        ]
+      }
+    },
+    "D2.4": {
+      "zh": {
+        "modules": [
+          ["测试账户与外部动作适配", "邮件、日历和文档写入先只连接测试账户与受限收件人，使用 dry-run 生成动作而不真正发送。为每种动作声明目标、参数、权限、可撤销性和补偿方式；生产账户不在 Stage 2 的自动发送范围内。"],
+          ["Effect Preview 与审批绑定", "审批卡必须展示真实收件人、时间、正文差异、附件、日历冲突、共享范围和不可逆后果。审批与参数哈希、任务 ID、账户、过期时间绑定；修改任一参数就作废旧审批，拒绝、过期或降权都不能继续执行。"],
+          ["outbox、幂等与回执对账", "所有写入先落 Effect Intent 和 outbox，再经 Dispatcher 执行。一个逻辑动作复用同一幂等键，保存外部响应、时间、结果和撤销信息；超时或网络中断进入 Reconciling，先查询外部状态，确认未执行后才允许重试。"],
+          ["负面测试与死信修复", "覆盖旧审批重放、参数篡改、重复投递、部分成功和外部系统限流。死信必须可查看、修复和人工重放，并保留原始意图；验收要求测试账户中没有重复邮件、重复日历事件或错误共享，所有不确定结果都有对账记录。"]
+        ]
+      },
+      "en": {
+        "modules": [
+          ["Test accounts and external-effect adapters", "Connect email, calendar, and document writes only to test accounts and restricted recipients; dry-run generates actions without sending. Declare target, parameters, authority, reversibility, and compensation per action. Stage 2 never auto-sends from a production account."],
+          ["Effect Preview and approval binding", "Approval cards show the real recipient, time, body diff, attachments, calendar conflicts, sharing scope, and irreversible impact. Bind approval to parameter hash, task ID, account, and expiry. Changing any parameter invalidates approval; rejection, expiry, or reduced authority blocks execution."],
+          ["Outbox, idempotency, and receipt reconciliation", "Persist Effect Intent and an outbox item before Dispatcher execution. Reuse one idempotency key per logical action and store external response, time, result, and cancellation details. Timeout or network loss enters Reconciling; query external state first, and retry only after confirming no execution."],
+          ["Negative tests and dead-letter repair", "Cover stale approval replay, parameter tampering, duplicate delivery, partial success, and provider throttling. Dead letters remain inspectable, repairable, and manually replayable with the original intent. Acceptance requires no duplicate email, calendar event, or wrong share in the test account, and a reconciliation record for every unknown result."]
+        ]
+      }
+    },
+    "D2.5": {
+      "zh": {
+        "modules": [
+          ["Context Compiler 的选择与裁剪", "按任务目标、来源权威性、时间和敏感度挑选最小上下文，区分指令、事实、引用与工具输出。超出预算时先压缩重复内容、摘要长文档、移除无关账户材料；不允许为了省钱删掉验收标准、安全规则或关键证据。"],
+          ["Token Governor 预算与路由", "为任务设置硬预算、软预警和异常停止，记录每次模型调用的输入输出 Token、缓存命中、延迟和成本。简单分类优先使用小模型或确定性规则，高风险判断使用更强模型；预算耗尽显示可解释的停止原因，不静默降质。"],
+          ["Memory v0 与召回解释", "先实现 Episodic 与 Semantic 两类最小记忆，保存来源、置信度、敏感度、时效和预算。偏好或事实只在用户明确认可后写入；每次召回显示“为什么想起这条”，允许查看、纠正和删除，不把模型推测写成用户事实。"],
+          ["模板、产物中心与账户隔离", "把重复任务做成模板，但每次仍执行输入校验、验收器和权限检查。产物中心按任务、账户和来源分组，支持预览、版本和导出。验收要证明模板减少人工分钟而没有跳过验收，且跨账户、跨项目上下文不会串扰。"]
+        ]
+      },
+      "en": {
+        "modules": [
+          ["Context Compiler selection and trimming", "Select the smallest context by task objective, source authority, time, and sensitivity; separate instructions, facts, citations, and tool output. Under budget pressure, compress duplicates, summarize long documents, and remove unrelated account material first. Never delete acceptance criteria, safety rules, or key evidence to save cost."],
+          ["Token Governor budgets and routing", "Set hard budgets, soft warnings, and abnormal stops; record input/output Token, cache hits, latency, and cost per model call. Use small models or deterministic rules for simple classification and stronger models for high-risk judgment. Exhaustion shows an explainable reason instead of silently degrading quality."],
+          ["Memory v0 and recall explanations", "Implement minimal Episodic and Semantic memory with provenance, confidence, sensitivity, freshness, and budget. Write preferences or facts only after explicit user acceptance. Every recall explains why it surfaced, and users can inspect, correct, or delete it; never turn model guesses into user facts."],
+          ["Templates, artifact center, and account isolation", "Turn repeated work into templates while still running input validation, acceptance, and authority checks every time. Group artifacts by task, account, and source with preview, versions, and export. Prove templates reduce manual minutes without skipping acceptance, and contexts never leak across accounts or projects."]
+        ]
+      }
+    },
+    "D2.6": {
+      "zh": {
+        "modules": [
+          ["代表性任务验收矩阵", "覆盖只读研究、文档转换、网页研究、邮件草稿、日历冲突和测试账户写入，每个任务固定输入、验收器、失败样本和风险级别。同一任务同时比较人工、直接 Codex 和 Hearth，记录人工分钟、成功率、Token、返工与失败类型。"],
+          ["失败分类与连接器降级", "统一过期授权、限流、来源缺失、网页不可用、审批拒绝、结果未知和部分成功等失败类别。每类都有用户可见说明和下一步，连接器不可用时保留已完成步骤与草稿，恢复授权后不重放成功的外部动作。"],
+          ["隐私、导出与跨账户审计", "生成数据导出与隐私说明，列明保存哪些来源、凭据、摘要和日志，如何撤销与删除。自动扫描跨账户引用、未授权来源和敏感字段进入上下文的情况；发现串扰必须阻断发布并清理缓存与索引。"],
+          ["Stage 2 发布与剩余边界", "完成安全与评测报告，列出仍不能自动执行的高风险动作、需要人工确认的场景和已知限制。确认用户理解每个外部动作的来源、审批参数和回执，然后才进入 Stage 3 的桌面执行。"]
+        ]
+      },
+      "en": {
+        "modules": [
+          ["Representative acceptance matrix", "Cover read-only research, document conversion, web research, email drafts, calendar conflicts, and test-account writes, with fixed inputs, validators, failure samples, and risk levels. Compare manual work, direct Codex, and Hearth on the same task using manual minutes, success, Token, rework, and failure classes."],
+          ["Failure taxonomy and connector degradation", "Unify failure classes for expired authority, throttling, missing source, unavailable page, rejected approval, unknown outcome, and partial success. Each has a user-visible explanation and next step. Preserve completed steps and drafts when a connector is unavailable, and never replay a successful external action after reauthorization."],
+          ["Privacy, export, and cross-account audit", "Produce data export and privacy guidance covering stored sources, credentials, summaries, logs, revocation, and deletion. Automatically scan for cross-account references, unauthorized sources, and sensitive fields in context. Any leakage blocks release and requires cache and index cleanup."],
+          ["Stage 2 release and remaining boundaries", "Publish the safety and evaluation report with remaining high-risk exclusions, human-confirmation cases, and known limits. Enter desktop execution only after users understand every external action's source, approval parameters, and receipt."]
+        ]
+      }
+    }
+  }
+}

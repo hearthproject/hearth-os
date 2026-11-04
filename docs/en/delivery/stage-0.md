@@ -36,6 +36,8 @@ outline: [2, 3]
 
 ## Increment Breakdown
 
+Each increment now has four layers: outcome and gate → four work packages → engineering map and interfaces → acceptance rehearsal. Packages can be split across developers, but merge in dependency order; completing one package does not complete the increment.
+
 | Increment | User-visible outcome | Completion evidence |
 |---|---|---|
 | [D0.1](/en/delivery/stage-0/d0-1) Product wedge and task baseline | A clear explanation of why the first user needs Hearth | 12+ real tasks, two baselines, non-goals, and success metrics |

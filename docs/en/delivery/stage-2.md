@@ -27,6 +27,8 @@ outline: [2, 3]
 
 ## Increment Breakdown
 
+Each increment now has four layers: outcome and gate → four work packages → engineering map and interfaces → acceptance rehearsal. Packages can be split across developers, but merge in dependency order; completing one package does not complete the increment.
+
 | Increment | User-visible outcome | Completion evidence |
 |---|---|---|
 | [D2.1](/en/delivery/stage-2/d2-1) Read-only connectors and source views | Users can inspect email, calendar, file, and knowledge sources | Sync, dedupe, incremental updates, permissions, source audit |

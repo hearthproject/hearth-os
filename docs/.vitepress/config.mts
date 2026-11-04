@@ -117,6 +117,7 @@ const zhSidebar = {
         { text: '日志首页', link: '/log/' },
         { text: 'Day01 · 双语文档站上线', link: '/log/day-01' },
         { text: 'Day02 · 交付路线拆解与开发日志', link: '/log/day-02' },
+        { text: 'Day03 · 开发增量扩写为可施工手册', link: '/log/day-03' },
         { text: '日志模板', link: '/log/template' }
       ]
     }
@@ -235,6 +236,7 @@ const enSidebar = {
         { text: 'Log Home', link: '/en/log/' },
         { text: 'Day01 · Bilingual documentation launch', link: '/en/log/day-01' },
         { text: 'Day02 · Delivery decomposition and development log', link: '/en/log/day-02' },
+        { text: 'Day03 · Delivery increments expanded into developer playbooks', link: '/en/log/day-03' },
         { text: 'Log template', link: '/en/log/template' }
       ]
     }

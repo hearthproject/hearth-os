@@ -45,6 +45,8 @@ Stages are capability gates, not date commitments. You may pause, trial, and rol
 
 The From 0 to 100 Development Plan is not one broad checklist. It is seven sequential modules. Every module follows the same structure: prerequisites → development steps → increment breakdown → exit gates → out of scope. A developer can begin from the current module and build directly.
 
+The seven modules contain 35 D increments, and every increment splits into four implementation work packages, 140 packages total. Each increment page fixes the user outcome, completion gate, work packages, engineering map, interfaces, acceptance rehearsal, and failure recovery.
+
 <DocCardGrid :items="modules" :columns="2" />
 
 [Read the full development plan and delivery template](/en/delivery/development-plan)

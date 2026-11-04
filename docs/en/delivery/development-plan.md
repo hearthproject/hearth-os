@@ -44,6 +44,8 @@ Use every module in the same order:
 3. **Increment breakdown:** confirm the user-visible result and completion evidence for each increment.
 4. **Exit gates:** pass every check before entering the next module; otherwise fix the current one.
 
+Every D increment further splits into four implementation work packages. Merge them in dependency order; together they cover the main implementation path, engineering map, acceptance rehearsal, and failure recovery. Developers can divide the packages, but no single package replaces increment acceptance.
+
 ## Plan Boundaries
 
 - **Start:** product definition, a first user, and an empty repository, with no runnable system.
