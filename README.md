@@ -1,5 +1,9 @@
 <p align="center">
-  <img src="docs/public/brand/hearth-os-logo.png" alt="Hearth OS" width="420">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/public/brand/hearth-os-logo-reverse.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/public/brand/hearth-os-logo.png">
+    <img src="docs/public/brand/hearth-os-logo.png" alt="Hearth OS" width="420">
+  </picture>
 </p>
 
 **A self-hosted personal Agent OS for durable, auditable, and recoverable digital work.**
