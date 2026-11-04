@@ -15,3 +15,21 @@ hero:
       text: View the delivery route
       link: /en/delivery/
 ---
+<nav class="home-quicklinks" aria-label="Documentation">
+  <a href="/hearth-os/en/design/">
+    <span class="home-quicklinks__label">Design</span>
+    <span class="home-quicklinks__meta">Positioning, principles, tradeoffs, and architecture</span>
+  </a>
+  <a href="/hearth-os/en/delivery/">
+    <span class="home-quicklinks__label">Delivery</span>
+    <span class="home-quicklinks__meta">Phased plan from MVP to v1.0</span>
+  </a>
+  <a href="/hearth-os/en/log/day-02.html">
+    <span class="home-quicklinks__label">Dev Log</span>
+    <span class="home-quicklinks__meta">Daily summary, commits, and concrete changes</span>
+  </a>
+  <a href="/hearth-os/en/reference/">
+    <span class="home-quicklinks__label">Appendix</span>
+    <span class="home-quicklinks__meta">Engineering, risks, decisions, and references</span>
+  </a>
+</nav>

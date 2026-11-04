@@ -15,3 +15,21 @@ hero:
       text: 查看交付路线
       link: /delivery/
 ---
+<nav class="home-quicklinks" aria-label="文档入口">
+  <a href="/hearth-os/design/">
+    <span class="home-quicklinks__label">设计说明</span>
+    <span class="home-quicklinks__meta">定位、原则、取舍与架构入口</span>
+  </a>
+  <a href="/hearth-os/delivery/">
+    <span class="home-quicklinks__label">交付路线</span>
+    <span class="home-quicklinks__meta">从 MVP 到 v1.0 的分阶段计划</span>
+  </a>
+  <a href="/hearth-os/log/day-02.html">
+    <span class="home-quicklinks__label">开发日志</span>
+    <span class="home-quicklinks__meta">每日概述、提交与具体修改</span>
+  </a>
+  <a href="/hearth-os/reference/">
+    <span class="home-quicklinks__label">附录</span>
+    <span class="home-quicklinks__meta">工程、风险、决策与参考资料</span>
+  </a>
+</nav>

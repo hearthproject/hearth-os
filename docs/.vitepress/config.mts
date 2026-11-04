@@ -59,7 +59,7 @@ const zhDesignSidebar = [
   },
   {
     text: '架构细节',
-    collapsed: true,
+    collapsed: false,
     items: zhArchitectureItems
   }
 ]
@@ -71,7 +71,7 @@ const enDesignSidebar = [
   },
   {
     text: 'Architecture Details',
-    collapsed: true,
+    collapsed: false,
     items: enArchitectureItems
   }
 ]
@@ -110,7 +110,7 @@ const zhSidebar = {
     },
     {
       text: '参考资料',
-      collapsed: true,
+      collapsed: false,
       items: [
         { text: '自研与集成边界', link: '/reference/build-vs-integrate' },
         { text: '术语表', link: '/reference/glossary' },
@@ -160,7 +160,7 @@ const enSidebar = {
     },
     {
       text: 'Reference Material',
-      collapsed: true,
+      collapsed: false,
       items: [
         { text: 'Build vs. Integrate', link: '/en/reference/build-vs-integrate' },
         { text: 'Glossary', link: '/en/reference/glossary' },
