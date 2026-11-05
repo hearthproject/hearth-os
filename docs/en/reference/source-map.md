@@ -14,7 +14,7 @@ outline: [2]
 |---|---|---|
 | Design | One overall design and nine parallel module notes, including technology choices | [Overall Design](/en/design/) |
 | Delivery | Six phases, 24 small stages, and the MVP position | [Delivery Route](/en/delivery/) |
-| Development Log | One daily summary and commit details | [Day02](/en/log/day-02) |
+| Development Log | One daily summary and commit details | [Day03](/en/log/day-03) |
 | Appendix | Engineering, risk, decisions, build boundaries, terminology, checklists, and maintenance | [Appendix](/en/reference/) |
 | Site entry | Home page and language switch | [Home](/en/) |
 

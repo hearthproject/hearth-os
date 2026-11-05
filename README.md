@@ -24,7 +24,7 @@ The complete documentation is published at **<https://hearthproject.github.io/he
 
 - [Design](https://hearthproject.github.io/hearth-os/design/) — positioning, overall design, technology choices, and nine module notes.
 - [Delivery route & implementation plan](https://hearthproject.github.io/hearth-os/delivery/) — six phases, 24 small stages, and MVP placement.
-- [Development log](https://hearthproject.github.io/hearth-os/log/day-02.html) — one daily summary plus commits, concrete changes, and authors.
+- [Development log](https://hearthproject.github.io/hearth-os/log/day-03.html) — one daily summary plus commits, concrete changes, and authors.
 - [Appendix](https://hearthproject.github.io/hearth-os/reference/) — engineering, risks, decisions, build boundaries, glossary, checklists, and maintenance notes.
 
 ## Project Status

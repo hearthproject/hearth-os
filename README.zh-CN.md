@@ -24,7 +24,7 @@ Hearth 把用户意图变成持久、可审计、可恢复的任务。它协调 
 
 - [设计说明](https://hearthproject.github.io/hearth-os/design/)——项目定位、总体设计、技术选型与九个模块的设计取舍。
 - [交付路线与实施计划](https://hearthproject.github.io/hearth-os/delivery/)——六个阶段、24 个小阶段与 MVP 位置。
-- [开发日志](https://hearthproject.github.io/hearth-os/log/day-02.html)——每天一段概述，加上提交、具体修改和作者。
+- [开发日志](https://hearthproject.github.io/hearth-os/log/day-03.html)——每天一段概述，加上提交、具体修改和作者。
 - [附录](https://hearthproject.github.io/hearth-os/reference/)——工程、风险、决策、自研边界、术语、清单与维护资料。
 
 ## 项目状态

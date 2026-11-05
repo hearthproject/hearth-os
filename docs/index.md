@@ -24,7 +24,7 @@ hero:
     <span class="home-quicklinks__label">交付路线</span>
     <span class="home-quicklinks__meta">从 MVP 到 v1.0 的分阶段计划</span>
   </a>
-  <a href="/hearth-os/log/day-02.html">
+  <a href="/hearth-os/log/day-03.html">
     <span class="home-quicklinks__label">开发日志</span>
     <span class="home-quicklinks__meta">每日概述、提交与具体修改</span>
   </a>
