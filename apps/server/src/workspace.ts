@@ -317,8 +317,10 @@ export function buildDeliveryRepairPrompt(options: {
   prepared: PreparedWorkspace;
   expectedOutputs: string[];
   missing: string[];
+  issues?: string[];
   attempt?: number;
 }): string {
+  const issues = options.issues ?? options.missing.map((missing) => `缺少期望产物：${missing}`);
   return [
     `上一轮执行已经结束，但任务要求的产物仍没有全部落盘（补交第 ${options.attempt ?? 1} 次）。`,
     "请接着当前工作区继续，不要重做已经完成且已验证的工作。",
@@ -328,8 +330,8 @@ export function buildDeliveryRepairPrompt(options: {
     `工作区：${options.prepared.root}`,
     `输出目录：${options.prepared.outDir}`,
     "",
-    "当前缺失或无效的产物：",
-    ...options.missing.map((item) => `- ${item}`),
+    "当前未完成的交付检查：",
+    ...issues.map((item) => `- ${item}`),
     "",
     "必须补齐的产物：",
     ...options.expectedOutputs.map((item) => `- ${item}`),

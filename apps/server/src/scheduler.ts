@@ -238,8 +238,9 @@ export class HearthScheduler {
       });
 
       for (let repairAttempt = 1; repairAttempt <= 2; repairAttempt += 1) {
+        const issues = await this.deliveryIssues(task, prepared, expectedOutputs);
+        if (issues.length === 0) break;
         const missing = missingExpectedOutputs(prepared.outDir, expectedOutputs);
-        if (missing.length === 0) break;
         result = await this.codexRunner({
           workingDirectory: prepared.root,
           prompt: buildDeliveryRepairPrompt({
@@ -247,14 +248,15 @@ export class HearthScheduler {
             prepared,
             expectedOutputs,
             missing,
+            issues,
             attempt: repairAttempt
           }),
           signal: controller.signal,
           onEvent: (event) => this.publishProgress(taskId, runId, event.type, event.message)
         });
       }
-      const stillMissing = missingExpectedOutputs(prepared.outDir, expectedOutputs);
-      if (stillMissing.length > 0) throw new Error(`缺少期望产物：${stillMissing.join("、")}`);
+      const remainingIssues = await this.deliveryIssues(task, prepared, expectedOutputs);
+      if (remainingIssues.length > 0) throw new Error(remainingIssues.join("\n"));
 
       const artifacts = publishArtifacts({
         task,
@@ -375,6 +377,25 @@ export class HearthScheduler {
     }
 
     throw new Error(`未实现的审批类型：${template.approvalKind}`);
+  }
+
+  private async deliveryIssues(
+    task: TaskRecord,
+    prepared: Awaited<ReturnType<typeof prepareWorkspace>>,
+    expectedOutputs: string[]
+  ): Promise<string[]> {
+    const issues = missingExpectedOutputs(prepared.outDir, expectedOutputs)
+      .map((missing) => `缺少期望产物：${missing}`);
+    const template = task.templateId ? getTemplate(task.templateId) : undefined;
+    if (template?.github?.issue && prepared.repository) {
+      const inspection = await inspectRepository(prepared.repository);
+      if (!inspection.clean) issues.push(`仓库仍有未提交改动：\n${inspection.status}`);
+      if (inspection.branch !== prepared.repository.branch) {
+        issues.push(`提交所在分支不是 ${prepared.repository.branch}`);
+      }
+      if (inspection.commits < 1) issues.push("没有检测到本地提交，实现任务必须先创建本地 commit");
+    }
+    return issues;
   }
 
   private async failRun(taskId: string, runId: string, error: unknown, aborted: boolean): Promise<void> {
