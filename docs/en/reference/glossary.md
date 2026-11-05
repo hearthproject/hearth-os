@@ -1,41 +1,33 @@
 ---
 title: 'Glossary'
-description: 'Hearth core glossary: Task, Ticket, Mandate, Policy, Run, Artifact, Receipt, Memory, Skill, and more.'
-outline: [2, 3]
+description: 'Shared explanations of Hearth product and engineering concepts.'
+outline: false
 ---
-
-<p class="eyebrow">GLOSSARY</p>
 
 # Glossary
 
-<p class="lead">Defines the meanings of core terms consistently, including Task, Ticket, Mandate, Execution Gateway, Receipt, and Memory.</p>
-
-## Glossary
+<p class="lead">A word should mean the same thing in the documentation, the interface, and the implementation. These are the concepts Hearth uses most often, explained in user-facing language first.</p>
 
 | Term | Meaning |
 |---|---|
-| Hearth | The project name; personal Agent OS |
-| Executor | A controlled capability for completing a certain class of tasks |
-| Native Runtime | Built-in lightweight inference and tool execution layer |
-| Codex Executor | External high-capability workspace executor |
-| Connector | External system Source/Effect adapter |
-| Browser Executor | Web operation executor |
-| GUI Executor | Desktop operation executor |
-| Document/Data Executor | Deterministic document and data processor |
-| Human Executor | The human who approves, judges, and takes over |
-| Task | User-visible work item |
-| Ticket | The smallest authorized unit of work |
-| Run | A single execution attempt |
-| Event Log | Immutable log of facts |
-| Artifact | Output, content-addressed |
-| Receipt | Receipt for external side effects |
-| Mandate | Authorization with scope, duration, and budget |
-| Approval | Human confirmation for a specific action |
-| Capability | Short-term permission for resources/actions/scope |
-| Context Pack | Minimal context assembled for a single task |
-| Memory | Long-term/medium-term knowledge with provenance and constraints |
-| Skill | Versioned, evaluable, rollback-capable procedural capability |
-| Shadow | Evaluation run that produces no real side effects |
-| Canary | Small-scale real run |
-| Kill switch | Global stop switch |
-| Verified Success | Success supported by artifacts, verification, and receipts |
+| Hearth | A single-user, self-hosted, long-running personal Agent OS |
+| Task | A unit of work the user wants completed, verified, and recoverable |
+| Work unit | A small authorized piece of a task that can run and be verified on its own |
+| Execution record | The input, result, artifacts, and failure reason from one real attempt |
+| Fact record | An append-only system record from which interfaces, reports, and notifications are rebuilt |
+| Checkpoint | A recoverable state saved during long-running work |
+| Snapshot | A copy of a workspace or data state used for recovery or comparison |
+| Executor | A controlled capability that completes a kind of work, such as general reasoning, Codex, a browser, or desktop operation |
+| Connector | An official interface to an external system such as email, calendar, or cloud storage |
+| Authorization scope | The objects, time, and risk level within which an action is allowed |
+| Approval | The user's confirmation of one specific external action |
+| External effect | A real-world impact such as sending, writing, deleting, publishing, paying, or operating a device |
+| Receipt | A verifiable result left after an external action happens |
+| Reconciliation | Querying external state when a result is uncertain to determine whether an action happened |
+| Artifact | A file, report, spreadsheet, link, or other deliverable produced by a task |
+| Memory | Long-term or medium-term context with provenance, scope, and sensitivity |
+| Method | A verified, reusable procedure or tool recipe |
+| Evaluation | Judging capability with real tasks, baselines, verifiers, and cost metrics |
+| Canary | Limited real use of a new method before wider adoption |
+| Stop switch | An entry point for pausing tasks, devices, or all external actions during an incident |
+| Verified completion | Real completion supported by artifacts, evidence, and necessary receipts |

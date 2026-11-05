@@ -18,7 +18,7 @@ hero:
 <nav class="home-quicklinks" aria-label="文档入口">
   <a href="/hearth-os/design/">
     <span class="home-quicklinks__label">设计说明</span>
-    <span class="home-quicklinks__meta">定位、原则、取舍与架构入口</span>
+    <span class="home-quicklinks__meta">项目定位、总体设计与九个模块</span>
   </a>
   <a href="/hearth-os/delivery/">
     <span class="home-quicklinks__label">交付路线</span>
@@ -30,6 +30,6 @@ hero:
   </a>
   <a href="/hearth-os/reference/">
     <span class="home-quicklinks__label">附录</span>
-    <span class="home-quicklinks__meta">工程、风险、决策与参考资料</span>
+    <span class="home-quicklinks__meta">工程、风险、决策与维护资料</span>
   </a>
 </nav>

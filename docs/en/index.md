@@ -18,7 +18,7 @@ hero:
 <nav class="home-quicklinks" aria-label="Documentation">
   <a href="/hearth-os/en/design/">
     <span class="home-quicklinks__label">Design</span>
-    <span class="home-quicklinks__meta">Positioning, principles, tradeoffs, and architecture</span>
+    <span class="home-quicklinks__meta">Positioning, overall design, and nine modules</span>
   </a>
   <a href="/hearth-os/en/delivery/">
     <span class="home-quicklinks__label">Delivery</span>
@@ -30,6 +30,6 @@ hero:
   </a>
   <a href="/hearth-os/en/reference/">
     <span class="home-quicklinks__label">Appendix</span>
-    <span class="home-quicklinks__meta">Engineering, risks, decisions, and references</span>
+    <span class="home-quicklinks__meta">Engineering, risks, decisions, and maintenance</span>
   </a>
 </nav>

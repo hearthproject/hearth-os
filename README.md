@@ -22,24 +22,23 @@ It is not another coding agent or chat wrapper. It is a task-centric control pla
 
 The complete documentation is published at **<https://hearthproject.github.io/hearth-os/>**. Chinese is the default language and every page has a parallel English version.
 
-- [Design & tradeoffs](https://hearthproject.github.io/hearth-os/design/) — positioning, principles, architecture, execution chain, and current status.
+- [Design](https://hearthproject.github.io/hearth-os/design/) — positioning, overall design, technology choices, and nine module notes.
 - [Delivery route & implementation plan](https://hearthproject.github.io/hearth-os/delivery/) — six phases, 24 small stages, and MVP placement.
 - [Development log](https://hearthproject.github.io/hearth-os/log/day-02.html) — one daily summary plus commits, concrete changes, and authors.
-- [Appendix](https://hearthproject.github.io/hearth-os/reference/) — engineering safeguards, risks, decisions, glossary, checklists, and archives.
+- [Appendix](https://hearthproject.github.io/hearth-os/reference/) — engineering, risks, decisions, build boundaries, glossary, checklists, and maintenance notes.
 
 ## Project Status
 
-Hearth is in the **specification and planning stage**. The repository contains the complete product, architecture, safety, evaluation, and delivery plan; implementation has not started.
+Hearth is in the **specification and planning stage**. The repository contains the complete product, overall design, safety, evaluation, and delivery plan; implementation has not started.
 
 ## Repository Layout
 
 ```text
 docs/                  the single source of truth and the VitePress build target
-  design/              product thinking, tradeoffs, architecture, and status
-  architecture/        detailed architecture pages linked from the design section
+  design/              overall product design, technology choices, and nine module notes
   delivery/            delivery route and six-phase implementation plans
   log/                 daily development logs
-  reference/           appendix: engineering, risks, decisions, and reference material
+  reference/           appendix: engineering, risks, decisions, and maintenance material
   en/                  English mirror of every documentation page
   .vitepress/          site configuration and theme
 scripts/               delivery-page generation helpers
@@ -69,7 +68,7 @@ Hearth is still a specification-stage project. The most useful contributions cla
 
 - Read [Contributing & documentation maintenance](https://hearthproject.github.io/hearth-os/reference/contributing.html).
 - Read the [delivery route](https://hearthproject.github.io/hearth-os/delivery/) before changing scope or phase goals.
-- Open an issue before changing product boundaries, architecture invariants, or delivery exits.
+- Open an issue before changing product boundaries, design invariants, or delivery exits.
 
 ## License
 

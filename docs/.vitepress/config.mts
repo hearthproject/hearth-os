@@ -3,67 +3,34 @@ import { withMermaid } from 'vitepress-plugin-mermaid'
 import { enDeliveryStages, zhDeliveryStages } from './delivery-sidebar.mjs'
 
 const zhNav = [
-  { text: '设计说明', link: '/design/', activeMatch: '^/(design|architecture)/' },
+  { text: '设计说明', link: '/design/', activeMatch: '^/design/' },
   { text: '交付路线', link: '/delivery/', activeMatch: '^/delivery/' },
   { text: '开发日志', link: '/log/day-02', activeMatch: '^/log/' },
   { text: '附录', link: '/reference/', activeMatch: '^/reference/' }
 ]
 
 const enNav = [
-  { text: 'Design', link: '/en/design/', activeMatch: '^/en/(design|architecture)/' },
+  { text: 'Design', link: '/en/design/', activeMatch: '^/en/design/' },
   { text: 'Delivery', link: '/en/delivery/', activeMatch: '^/en/delivery/' },
   { text: 'Dev Log', link: '/en/log/day-02', activeMatch: '^/en/log/' },
   { text: 'Appendix', link: '/en/reference/', activeMatch: '^/en/reference/' }
-]
-
-const zhArchitectureItems = [
-  { text: '总体架构与数据流', link: '/architecture/overview' },
-  { text: '领域模型与协议', link: '/architecture/domain-model' },
-  { text: '个人网关与多入口', link: '/architecture/gateway' },
-  { text: '控制面与自主性', link: '/architecture/control-plane' },
-  { text: '持久执行与恢复', link: '/architecture/durable-execution' },
-  { text: '执行器模型与路由', link: '/architecture/executor-model' },
-  { text: '执行器目录', link: '/architecture/executor-catalog' },
-  { text: '人工接管与审批', link: '/architecture/human-takeover' },
-  { text: '执行安全与副作用', link: '/architecture/execution-safety' },
-  { text: '记忆系统', link: '/architecture/memory' },
-  { text: '技能进化', link: '/architecture/evolution' },
-  { text: '安全与隐私', link: '/architecture/security-privacy' },
-  { text: '评估体系', link: '/architecture/evaluation' },
-  { text: 'Token 经济', link: '/architecture/token-economics' },
-  { text: '前端与移动体验', link: '/architecture/frontend-experience' }
-]
-
-const enArchitectureItems = [
-  { text: 'Architecture & Data Flow', link: '/en/architecture/overview' },
-  { text: 'Domain Model & Protocols', link: '/en/architecture/domain-model' },
-  { text: 'Personal Gateway', link: '/en/architecture/gateway' },
-  { text: 'Control Plane & Autonomy', link: '/en/architecture/control-plane' },
-  { text: 'Durable Execution', link: '/en/architecture/durable-execution' },
-  { text: 'Executor Model & Routing', link: '/en/architecture/executor-model' },
-  { text: 'Executor Catalog', link: '/en/architecture/executor-catalog' },
-  { text: 'Human Takeover', link: '/en/architecture/human-takeover' },
-  { text: 'Execution Safety', link: '/en/architecture/execution-safety' },
-  { text: 'Memory OS', link: '/en/architecture/memory' },
-  { text: 'Evolution OS', link: '/en/architecture/evolution' },
-  { text: 'Security & Privacy', link: '/en/architecture/security-privacy' },
-  { text: 'Evaluation', link: '/en/architecture/evaluation' },
-  { text: 'Token Economics', link: '/en/architecture/token-economics' },
-  { text: 'Frontend & Mobile', link: '/en/architecture/frontend-experience' }
 ]
 
 const zhDesignSidebar = [
   {
     text: '设计说明',
     items: [
-      { text: '项目设计与取舍', link: '/design/' },
-      { text: '技术选型与最终决策', link: '/design/technology-selection' }
+      { text: '总体设计', link: '/design/' },
+      { text: '入口与交互', link: '/design/experience' },
+      { text: '任务与持久执行', link: '/design/tasks' },
+      { text: '控制面与授权', link: '/design/control' },
+      { text: '执行器与路由', link: '/design/executors' },
+      { text: '审批、接管与外部副作用', link: '/design/effects' },
+      { text: '运行环境与安全', link: '/design/safety' },
+      { text: '记忆与能力进化', link: '/design/memory' },
+      { text: '评估与成本', link: '/design/evaluation' },
+      { text: '多设备与长期运行', link: '/design/operations' }
     ]
-  },
-  {
-    text: '架构细节',
-    collapsed: false,
-    items: zhArchitectureItems
   }
 ]
 
@@ -71,20 +38,22 @@ const enDesignSidebar = [
   {
     text: 'Design',
     items: [
-      { text: 'Design & Tradeoffs', link: '/en/design/' },
-      { text: 'Technology Choices & Decisions', link: '/en/design/technology-selection' }
+      { text: 'Overall Design', link: '/en/design/' },
+      { text: 'Entrances and Experience', link: '/en/design/experience' },
+      { text: 'Tasks and Durable Execution', link: '/en/design/tasks' },
+      { text: 'Control and Authority', link: '/en/design/control' },
+      { text: 'Executors and Routing', link: '/en/design/executors' },
+      { text: 'Approvals, Takeover, and External Effects', link: '/en/design/effects' },
+      { text: 'Runtime and Safety', link: '/en/design/safety' },
+      { text: 'Memory and Capability Evolution', link: '/en/design/memory' },
+      { text: 'Evaluation and Cost', link: '/en/design/evaluation' },
+      { text: 'Multi-device and Long-running Operation', link: '/en/design/operations' }
     ]
-  },
-  {
-    text: 'Architecture Details',
-    collapsed: false,
-    items: enArchitectureItems
   }
 ]
 
 const zhSidebar = {
   '/design/': zhDesignSidebar,
-  '/architecture/': zhDesignSidebar,
   '/delivery/': [
     {
       text: '交付路线',
@@ -104,26 +73,17 @@ const zhSidebar = {
   '/reference/': [
     {
       text: '附录',
-      items: [{ text: '附录总览', link: '/reference/' }]
-    },
-    {
-      text: '工程与决策',
       items: [
-        { text: '工程实施与仓库结构', link: '/reference/engineering' },
-        { text: '风险与 Kill Criteria', link: '/reference/risks' },
-        { text: 'ADR 与关键决策', link: '/reference/decisions' }
-      ]
-    },
-    {
-      text: '参考资料',
-      collapsed: false,
-      items: [
-        { text: '自研与集成边界', link: '/reference/build-vs-integrate' },
+        { text: '附录总览', link: '/reference/' },
+        { text: '工程实施', link: '/reference/engineering' },
+        { text: '风险与停止条件', link: '/reference/risks' },
+        { text: '关键决策', link: '/reference/decisions' },
+        { text: '自研与集成', link: '/reference/build-vs-integrate' },
         { text: '术语表', link: '/reference/glossary' },
         { text: '默认清单', link: '/reference/checklists' },
         { text: '常见问题', link: '/reference/faq' },
-        { text: '参与贡献与文档维护', link: '/reference/contributing' },
-        { text: '文档来源与覆盖', link: '/reference/source-map' }
+        { text: '参与贡献', link: '/reference/contributing' },
+        { text: '文档地图', link: '/reference/source-map' }
       ]
     }
   ]
@@ -131,7 +91,6 @@ const zhSidebar = {
 
 const enSidebar = {
   '/en/design/': enDesignSidebar,
-  '/en/architecture/': enDesignSidebar,
   '/en/delivery/': [
     {
       text: 'Delivery',
@@ -153,26 +112,17 @@ const enSidebar = {
   '/en/reference/': [
     {
       text: 'Appendix',
-      items: [{ text: 'Appendix Overview', link: '/en/reference/' }]
-    },
-    {
-      text: 'Engineering & Decisions',
       items: [
-        { text: 'Engineering & Repository', link: '/en/reference/engineering' },
-        { text: 'Risks & Kill Criteria', link: '/en/reference/risks' },
-        { text: 'ADRs & Decisions', link: '/en/reference/decisions' }
-      ]
-    },
-    {
-      text: 'Reference Material',
-      collapsed: false,
-      items: [
+        { text: 'Appendix Overview', link: '/en/reference/' },
+        { text: 'Engineering', link: '/en/reference/engineering' },
+        { text: 'Risks and Stop Conditions', link: '/en/reference/risks' },
+        { text: 'Key Decisions', link: '/en/reference/decisions' },
         { text: 'Build vs. Integrate', link: '/en/reference/build-vs-integrate' },
         { text: 'Glossary', link: '/en/reference/glossary' },
         { text: 'Default Checklists', link: '/en/reference/checklists' },
         { text: 'FAQ', link: '/en/reference/faq' },
-        { text: 'Contributing & Docs', link: '/en/reference/contributing' },
-        { text: 'Sources & Coverage', link: '/en/reference/source-map' }
+        { text: 'Contributing', link: '/en/reference/contributing' },
+        { text: 'Documentation Map', link: '/en/reference/source-map' }
       ]
     }
   ]

@@ -1,127 +1,63 @@
 ---
-title: 'Risks and Kill Criteria'
-description: "Hearth's main risks, global pause conditions, phase Kill Criteria, project-level Kill Criteria, and the things that should not be Killed."
-outline: [2, 3]
+title: 'Risks and Stop Conditions'
+description: 'Hearth core risks, global and phase stop conditions, and product foundations that must not be removed.'
+outline: [2]
 ---
 
-<p class="eyebrow">RISKS</p>
+# Risks and Stop Conditions
 
-# Risks and Kill Criteria
+<p class="lead">Knowing when to pause, roll back, or narrow the product is harder and more important than continuing to add features. These are signals that take priority when they appear. A phase may move more slowly, but it must not keep advancing while a risk remains unresolved.</p>
 
-<p class="lead">When to pause, roll back, or stop a project is a harder and more important decision than “keep going.”</p>
+## Core Risks and Stop Conditions
 
-## Risks and Kill Criteria
-
-### Key Risks
-
-| Risk | Early Signal | Mitigation |
+| Risk | Early signal | Response |
 |---|---|---|
-| Scope creep | New Executors added at every stage while the core loop is not stable | Control scope with Task sets and stage gates |
-| Insufficient reliability | Tasks lost after crashes, duplicate sends | Single writer, outbox, lease, fault injection |
-| Security incident | Privilege escalation, secret leakage, successful prompt injection | Sandbox, Broker, approvals, red teaming |
-| Runaway Token cost | Per-Task cost is high and human minutes are not decreasing | Context Compiler, routing, caching, hard budgets |
-| External Agent dependency | Version changes cause many Task failures | Adapters, version pinning, fallback to Native/manual |
-| Maintenance burden | Large amounts of time each week fixing dependencies and channels | Do not build low-level components in-house, reduce connectors, automated upgrade tests |
-| Notification fatigue | Users disable notifications or ignore approvals | Attention budget, aggregation, silence, default actions |
-| Memory errors | Repeatedly citing outdated or incorrect facts | Provenance, confidence, conflicts, forgetting, user correction |
-| Self-evolution drift | Skills become more complex with use, permissions increase | Evaluation, shadow, canary, permission intersection, rollback |
-| Multi-device complexity | Sync conflicts, duplicate execution | Single writer, lease, fencing, offline queue |
-| Product feels like a wrapper | No independent value after removing Codex | Control Plane, memory, approvals, recovery, evaluation |
-| Platform limits | Browser login, CAPTCHA, API changes | Manual takeover, official API first, fallback |
-| Declining user trust | Users do not understand why it did this or cannot undo it | Explainable state, Artifact, Receipt, kill switch |
-| Unsustainable time investment | Maintenance exceeds available time | Narrow scope, delay non-core capabilities, automated testing |
+| Scope growth | Every phase adds executors while the core loop is unstable | Control scope with real task sets and phase exits |
+| Unreliable recovery | Restarts lose tasks, sends repeat, or state disagrees | Single writer, checkpoints, idempotency, fault injection |
+| Safety failure | Privilege escalation, credential leak, or successful prompt injection | Isolation, short-lived credentials, approval, denial tests |
+| Cost blowout | High cost per task while human time does not fall | Hard budgets, context filtering, rules first, stop first |
+| External executor dependency | An upgrade breaks many tasks | Version lock, adapters, degradation, human takeover |
+| Maintenance overload | Most time goes to dependencies, channels, and environments | Do not rewrite the lower layers; reduce connectors; automate upgrade tests |
+| Notification fatigue | Users disable notifications or ignore approvals | Attention budget, aggregation, quiet hours, reduced frequency |
+| Wrong memory | Outdated, incorrect, or out-of-scope facts keep returning | Provenance, confidence, conflict handling, forgetting, user correction |
+| Method drift | Procedures grow more complex and permissions expand | Evaluation, canary, permission intersection, rollback |
+| Device divergence | Duplicate execution or a deleted item returns from an old device | One authoritative state, versions, deletion markers, device revocation |
+| Product looks like a wrapper | No independent value remains without Codex | Task control, approval, recovery, memory, and evaluation must be owned |
+| Trust erosion | Users cannot understand what happened or undo it | Explainable state, artifacts, receipts, stop switch |
 
-### Global Pause Conditions
+Pause new feature work and fix the problem when any of these happens:
 
-When the following occur, pause new features and prioritize fixes:
+- A high-risk action exceeds its authority;
+- Credentials or sensitive data leak;
+- Fault injection produces a duplicate external effect;
+- Crash recovery falls below 95%;
+- Users cannot revoke a device, connection, or temporary authority;
+- Important memory cannot truly be forgotten;
+- Interface state disagrees with the fact record;
+- An external action cannot be reconciled;
+- Users do not know why they were interrupted or cannot stop proactive service.
 
-- High-risk actions overstep permissions;
-- Secrets or sensitive data leak;
-- Fault injection produces duplicate external side effects;
-- Crash recovery rate is below 95%;
-- Users cannot revoke devices, connections, or skills;
-- Critical memory cannot be forgotten;
-- Task status is inconsistent with the source of truth;
-- External side effects cannot be reconciled.
+Each phase also has its own stop conditions. They are not "did the code get written", but whether the user result promised by the phase is genuinely reliable.
 
-### Phase Kill Criteria
+| Phase | Do not advance if these remain |
+|---|---|
+| Phase 1 · Minimum Complete MVP | Real tasks cannot be defined or completed; the browser cannot cover create, approve, recover, and retrieve; duplicate external actions cannot be removed |
+| Phase 2 · Everyday Content Work | Users still repeat context; source authority cannot be narrowed; documents, tables, or web results cannot be verified; writes repeat or cannot be reconciled |
+| Phase 3 · Desktop Operation | Success is low and takeover is unavailable; operation cannot prove it stayed in scope; failures leave half-finished high-risk state |
+| Phase 4 · Proactive Service and Mobile Entry | Proactive reminders cause fatigue; users cannot predict interruption; phone approvals can be replayed; background work cannot stop |
+| Phase 5 · Memory and Capability Evolution | Wrong memory keeps causing rework; forgetting does not propagate; evaluation can be gamed by sample selection; new methods expand authority |
+| Phase 6 · Multi-device and Long-running Operation | Devices duplicate work or diverge; a lost device cannot be revoked; migration loses data; users cannot leave independently |
 
-**Phase 1:**
+If Phase 2 ends without stable real everyday tasks, human time has not fallen, or maintenance keeps exceeding available time, narrow the product instead of adding features. A safety boundary below an acceptable level, refusal to trust Hearth with real data, or multi-device complexity that ruins single-device use are also signals to reduce scope.
 
-- Cannot define 10 real tasks with acceptance criteria;
-- Cannot explain the difference between Hearth and using existing tools directly;
-- No threat model or basic security boundary;
-- The prototype cannot let users complete the main path without instructions;
-- After meeting the MVP threshold, still cannot complete 8 real tasks;
-- Duplicate external actions cannot be eliminated;
-- Recovery depends on manual state reconstruction;
-- Task status can only be inferred from chat history;
-- The backend is available, but the browser cannot complete creation, viewing, approval, recovery, and artifact retrieval.
+## Foundations That Must Stay
 
-**Phase 2:**
+- Rebuildable fact records and failure recovery;
+- Preview, approval, idempotency, and receipts for external actions;
+- Real tasks, failure samples, and independent verification;
+- Memory provenance, correction, and forgetting;
+- Low-interruption task cards and attention entries;
+- Pause and human takeover available at all times;
+- Permission boundaries, credential isolation, and a stop switch.
 
-- The email or calendar loop requires users to frequently rebuild background information;
-- Source permissions cannot be minimized;
-- Document, table, or web results cannot be verified;
-- Manual time for common tasks has not decreased;
-- Data cross-talk between accounts or projects;
-- External writes may run twice or cannot be checked.
-
-**Phase 3:**
-
-- Desktop task success rate is low and cannot be taken over;
-- Cannot prove operations did not overstep permissions;
-- The desktop state cannot be recovered;
-- Every desktop task requires heavy manual intervention;
-- Failure tends to leave a half-finished high-risk state.
-
-**Phase 4:**
-
-- Proactive tasks create notification fatigue;
-- Users cannot predict when they will be interrupted;
-- Mobile approvals can be reused or overstep permissions;
-- Background tasks cannot be stopped or budgets run out of control;
-- High-risk actions bypass approval because they are proactive.
-
-**Phase 5:**
-
-- Memory errors cause continuous rework;
-- Forgetting cannot propagate to summaries, indexes, and related content;
-- Method evaluation can be manipulated by cherry-picked samples;
-- New methods expand permissions or cause security regressions;
-- The old version cannot be restored.
-
-**Phase 6:**
-
-- Multi-device duplicate execution or state split;
-- A lost device cannot be revoked promptly;
-- After migration, tasks, memory, or artifacts are inconsistent;
-- Long-term operation maintenance cost exceeds product value;
-- Users cannot back up, restore, or leave independently.
-
-### Project-Level Kill Criteria
-
-In the following cases, consider narrowing the product rather than continuing to add features:
-
-- After Phase 2, there are still no stable 10 real daily tasks;
-- Human minutes have not substantially decreased; users are just “watching the Agent work”;
-- Maintenance cost continues to exceed available time with no downward trend;
-- Simply switching models can replace most of Hearth's value;
-- Security boundaries cannot reach an acceptable level;
-- Users are unwilling to hand over real email, files, or calendars to it;
-- Self-evolution continuously produces unexplainable drift;
-- Multi-device complexity swallows the single-device experience.
-
-### What Should Not Be Killed
-
-- Event Log and recoverability;
-- Approvals, idempotency, and Receipt;
-- Evaluation and failure samples;
-- Memory forgetting and user correction;
-- Task cards and low-interruption experience;
-- Manual takeover;
-- Security boundaries and kill switch.
-
-These are the product's foundation, not features that can be deleted when “rushing progress.”
-
----
+These are not "later" features to cut when progress feels slow. They are preconditions for the product to exist, and no phase may trade them away.

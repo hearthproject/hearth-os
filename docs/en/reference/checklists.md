@@ -1,63 +1,50 @@
 ---
-title: 'Default Approval and Completion Checklist'
-description: 'The final definition of the Hearth default approval checklist, default completion checklist, and task overrides.'
-outline: [2, 3]
+title: 'Default Checklists'
+description: 'Hearth pre-approval checks, pre-completion checks, and task coverage boundaries.'
+outline: [2]
 ---
 
-<p class="eyebrow">CHECKLISTS</p>
+# Default Checklists
 
-# Default Approval and Completion Checklists
+<p class="lead">Checklists belong in task templates, approval screens, and acceptance flows, not only in documentation. They help the user confirm that the system has not mistaken "looks finished" for "really finished".</p>
 
-<p class="lead">Put these checklists into Task templates, approval interfaces, and acceptance workflows, rather than leaving them in documentation.</p>
+## Before Approval and Completion
 
-## Default Approval Checklist
+Before an external action happens, confirm:
 
-Before any high-risk action, confirm each item:
-
-- [ ] The action type is correct;
-- [ ] The target recipient/file/repository/calendar/resource is correct;
-- [ ] The account used is correct;
+- [ ] The action type matches the real intent;
+- [ ] The recipient, file, account, device, or resource is correct;
 - [ ] The content and attachments are correct;
-- [ ] The scope does not exceed the Mandate;
-- [ ] Whether it is reversible has been stated;
-- [ ] The failure and reconciliation approach has been stated;
-- [ ] The approval has a nonce and expiry time;
-- [ ] A Receipt and rollback/compensation are prepared;
-- [ ] No security controls are bypassed.
+- [ ] The action does not exceed the current authorization scope;
+- [ ] Reversibility and likely impact are explained;
+- [ ] Approval is still valid and has not been replayed;
+- [ ] Failure, retry, and reconciliation paths are ready;
+- [ ] No network, credential, or safety boundary is bypassed.
 
-## Default Completion Checklist
+Reading and organizing may be authorized within the task scope. Sending, publishing, deleting, paying, and operating devices need explicit confirmation. Irreversible actions stay bounded by target, amount, or time even when pre-authorized.
 
-Before marking a Task complete, confirm each item:
+Before a task is marked complete, confirm:
 
-- [ ] The target Artifact exists and is locatable;
-- [ ] The validator passes;
-- [ ] Key assertions have sources;
-- [ ] Changes have a diff or version;
-- [ ] There are no unauthorized side effects;
-- [ ] External actions have a Receipt;
-- [ ] Failures and incomplete items have been stated;
-- [ ] Token, time, and cost are recorded;
-- [ ] The workspace, credentials, and lease have been reclaimed;
-- [ ] The user can view, revoke, or continue.
+- [ ] The target artifact exists and the user can find it;
+- [ ] A verifier passed; the executor saying so is not enough;
+- [ ] Key facts have sources, and changes have diffs or versions;
+- [ ] No unauthorized external effect occurred;
+- [ ] External actions have receipts, and uncertain results were reconciled;
+- [ ] Failures, skipped work, and open items are explained;
+- [ ] Tokens, time, human minutes, and cost are recorded;
+- [ ] Workspaces, temporary authority, and execution rights are released;
+- [ ] The user can inspect, undo, retry, or continue.
 
-## Final Definition of Task Coverage
+## Coverage Boundaries
 
-Hearth's goal is not to promise "any software, any scenario, 100% unattended." Its goals are:
+Hearth does not promise "every application, every scenario, 100% unattended". It promises end-to-end coverage for selected personal digital work, safe handoff when work cannot be completed reliably, and evidence, permission records, and receipts for every completion.
 
-- To provide end-to-end coverage for eight categories of digital content work;
-- To gradually improve reliability and autonomy for each Task category;
-- To safely stop and hand to a human for Tasks that cannot be completed reliably;
-- To let users avoid understanding the internal architecture or repeatedly providing context;
-- To ensure every completion has evidence, permissions, and a Receipt.
-
-Coverage maturity should be expressed in layers:
-
-| Level | Meaning |
+| Maturity | Meaning |
 |---|---|
-| Attemptable | The system can enter the Task family and produce a draft |
-| Completable | It passes verification on representative Tasks |
-| Reliable | It is stable across repeated real-world use, and failures are recoverable |
-| Proactive | It requires no manual trigger within a Mandate |
-| Unattended | It runs for extended periods with controllable risk |
+| Can attempt | The system can enter the task family and produce a draft |
+| Can complete | Representative tasks pass verification |
+| Can rely on | Repeated real use is stable and failures are recoverable |
+| Can act proactively | Work starts without human triggering inside the authorized scope |
+| Can run unattended | It runs for a long time with controlled risk |
 
-Do not pass off "Attemptable" as "Unattended".
+"Can attempt" is not "can rely on", and "can complete" is not "can run unattended". Phase acceptance follows real tasks and evidence, not feature names.

@@ -1,51 +1,27 @@
 ---
 title: 'Frequently Asked Questions'
-description: 'Common questions about Hearth and Coding Agents, Codex wrappers, internet access, Phase 1 capabilities, side effects, evolution, multi-user support, mobile, and bilingual documentation.'
-outline: [2, 3]
+description: 'How Hearth relates to coding agents, Codex, connectivity, Phase 1, external effects, self-evolution, and multi-user use.'
+outline: false
 ---
-
-<p class="eyebrow">FAQ</p>
 
 # Frequently Asked Questions
 
-<p class="lead">This page answers the questions most likely to come up when first encountering Hearth. For more complete definitions and boundaries, see [Design and Tradeoffs](/en/design/) and [Architecture Overview](/en/architecture/overview).</p>
+<p class="lead">These are the questions most likely to come up on first contact with Hearth. See the [overall design](/en/design/) for product boundaries and the [delivery route](/en/delivery/) for phase order.</p>
 
-## Is Hearth another Coding Agent?
+**Is Hearth another coding agent?** No. Codex is an important executor, but Hearth's product center is task control, durable execution, approval, receipts, memory, and verification. It is meant for broader personal digital work including email, calendars, documents, the web, desktops, and data.
 
-No. Codex is an important peer Executor for Hearth, but Hearth's product center is Task control, durable execution, memory, verification, approval, and Receipts. It is meant to handle a broader range of personal digital labor, including email, documents, schedules, the web, desktops, and data.
+**Is it a Codex wrapper?** No. Hearth does not let Codex hold long-lived credentials, become the memory center, or expand its own authority. Codex receives minimal context, works in an isolated workspace, and returns artifacts and structured results. External actions still go through Hearth's approval, execution, and reconciliation.
 
-## Is it a Codex wrapper?
+**Does it require an internet connection?** Local-first by default. Tasks, artifacts, memory, and credentials stay in an environment the user controls. Models, remote execution, and sync services are optional. When cloud capability is used, Hearth explains which data leaves the device, how long it is retained, and how it can be deleted.
 
-No. Hearth does not treat Codex as its sole execution brain, nor does it let Codex hold long-lived credentials, become the memory hub, or expand its own permissions. Codex receives minimal context through a Task Pack and returns Artifacts, verification, and failure classification via structured output.
+**What can Phase 1 do?** Phase 1 delivers the smallest complete MVP. It serves one narrow task family but covers the full path in a real browser: create, execute, approve, inspect artifacts, and recover from failure. It does not include email, calendars, desktop operation, proactive loops, full memory, or multiple devices.
 
-## Does it require an internet connection?
+**Why not build one universal agent?** Because "universal" usually means permission, context, and failure boundaries are all uncontrolled. Hearth uses multiple specialized executors and chooses a path by capability, risk, reversibility, and cost. Each executor has explicit boundaries, verification, and human takeover.
 
-Local-first by default. State, events, memory, and credentials are stored locally first; model APIs, remote Sandbox, and cloud sync are all optional capabilities. For specific deployment forms, see [Overall Architecture](/en/architecture/overview).
+**How are external actions prevented from repeating?** Every external action records pending intent, receives preview and authorization, executes under the same identity, and saves a receipt. A retry does not create a second email or record. When an external system returns an uncertain result, Hearth reconciles first and stops for the user if it cannot confirm what happened.
 
-## What can Phase 1 do?
+**Will Hearth modify itself automatically?** Not without bounds. Hearth can propose new methods from real traces, but a candidate must pass permission checks, replay, side-effect-free trials, limited real use, and rollback verification. The model cannot change authorization rules, approval thresholds, or core safety boundaries.
 
-Phase 1 delivers the Hearth MVP: recoverable task state, real execution, Web task cards, approval drills, artifacts, and failure recovery. It does not include email, calendar, desktop operation, proactive loops, full memory, or multi-device.
+**Does it support multiple users, enterprises, and mobile?** Hearth is a single-user, self-hosted product. Enterprise multi-tenancy, organizational audit, and billing are not first-version goals. Mobile is a controlled entry focused on review, approval, takeover, simple starts, and notifications; it does not duplicate every desktop management feature. Phase 1 only guarantees the minimal complete path on local web.
 
-## Why not just build an all-purpose Agent?
-
-Because “all-purpose” usually means permissions, context, and failure boundaries are all uncontrollable. Hearth chooses multiple peer Executors, routed by capability, risk, and Token cost; each Executor has clear boundaries, a verifier, and a takeover path.
-
-## How are external side effects prevented from being duplicated?
-
-All external actions go through an outbox, idempotency keys, approval/authorization checks, and a Receipt. Persist first, then execute; retries reuse the same idempotency key; non-idempotent external actions must be approved and handed off to a human; reconcile uncertain results first.
-
-## Will Hearth modify itself automatically?
-
-There is no unbounded self-modification. Evolution OS can only produce candidate skills or candidate Policies, which must go through evaluation, canary, promotion, and rollback. Changes to the core Runtime still require a manual PR.
-
-## Does it support multiple users or enterprises?
-
-Not a first-version goal. Hearth is a single-user, self-hosted product; enterprise IAM, multi-tenancy, organizational audit, and billing are explicitly not promised.
-
-## Can it be used on mobile?
-
-Mobile is a Phase 4 focus: viewing, approval, takeover, initiation, and notifications. Mobile is not a full Agent replica but a controlled entry point.
-
-## Why are there two versions of the documentation, in Chinese and English?
-
-Chinese is the source language of the current roadmap, and English is for broader developer readership. Both sets of pages keep the same paths and structure, with one-click switching in the upper right. If you find translation or structure issues, see [Contribution and Documentation Maintenance](/en/reference/contributing).
+To continue, read the [overall design](/en/design/) and the [delivery route](/en/delivery/). For implementation or maintenance details, use the other appendix pages.
