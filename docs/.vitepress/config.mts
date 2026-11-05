@@ -55,7 +55,10 @@ const enArchitectureItems = [
 const zhDesignSidebar = [
   {
     text: '设计说明',
-    items: [{ text: '项目设计与取舍', link: '/design/' }]
+    items: [
+      { text: '项目设计与取舍', link: '/design/' },
+      { text: '技术选型与最终决策', link: '/design/technology-selection' }
+    ]
   },
   {
     text: '架构细节',
@@ -67,7 +70,10 @@ const zhDesignSidebar = [
 const enDesignSidebar = [
   {
     text: 'Design',
-    items: [{ text: 'Design & Tradeoffs', link: '/en/design/' }]
+    items: [
+      { text: 'Design & Tradeoffs', link: '/en/design/' },
+      { text: 'Technology Choices & Decisions', link: '/en/design/technology-selection' }
+    ]
   },
   {
     text: 'Architecture Details',
