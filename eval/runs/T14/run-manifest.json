@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "taskId": "T14-mw3ea5cf-4370d9",
+  "templateId": "T14",
+  "title": "课程转教案与测验",
+  "runId": "011007b9-ff03-4d42-82f7-17ecc862b3a7",
+  "attempt": 1,
+  "generatedAt": "2026-11-05T10:55:05.088Z",
+  "inputs": [
+    {
+      "label": "课程资料",
+      "kind": "file",
+      "source": "eval/inputs/T14-curriculum-source.md",
+      "sha256": "6e6b2e629053620fd26d6e50048a62ebb2db8e8ab4033c14967b4ad6ece62bc2"
+    }
+  ],
+  "expectedOutputs": [
+    "lesson-plan.md",
+    "quiz.md",
+    "answer-key.md"
+  ],
+  "codex": {
+    "threadId": "01a1ab4e-b7e7-7b23-acec-56ed041333b6",
+    "profileLabel": "OpenDesign / deepseek-v4.1-flash",
+    "usage": {
+      "inputTokens": 2956071,
+      "cachedInputTokens": 2853248,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 68547,
+      "reasoningOutputTokens": 25534
+    }
+  },
+  "artifacts": [
+    {
+      "path": "answer-key.md",
+      "sha256": "90a72a9c552d5d6c6f6edc1b1885e20c6180f526ef5e1bdabaecdf1dc967eaab",
+      "bytes": 13083
+    },
+    {
+      "path": "lesson-plan.md",
+      "sha256": "d8b9d5089687415d73e7f90ba979c4be7e21bfb68cd58d5995832ccbc8911dec",
+      "bytes": 11780
+    },
+    {
+      "path": "quiz.md",
+      "sha256": "06bb20d3dc02e7f7119bb9ddfc88947f32118aa0e0e1e9c8afadace63c818148",
+      "bytes": 5218
+    }
+  ]
+}
