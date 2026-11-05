@@ -8,7 +8,7 @@ import {
   type CommandRunner,
   type RepositoryContext
 } from "./github.ts";
-import { fetchWebSnapshot, type WebSnapshot } from "./web-fetch.ts";
+import { fetchWebSnapshot, WebInputError, type WebSnapshot } from "./web-fetch.ts";
 
 export interface PreparedInput {
   label: string;
@@ -68,40 +68,83 @@ export async function prepareWorkspace(options: {
     if (input.kind === "url") {
       const inputDir = join(inputsDir, prefix);
       mkdirSync(inputDir, { recursive: true });
-      let snapshot: WebSnapshot;
+      let snapshot: WebSnapshot | null = null;
+      let fetchFailure: { code: string; message: string; fetchedAt: string } | null = null;
       try {
         snapshot = await (options.webFetch ?? fetchWebSnapshot)(input.value, {
           allowedHosts: options.task.networkHosts
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        throw new UnsupportedInputError(`网页输入不可用：${message}`);
+        const code = error instanceof WebInputError ? error.code : "unknown";
+        if (isFatalWebInputError(code)) throw new UnsupportedInputError(`网页输入不可用：${message}`);
+        fetchFailure = { code, message, fetchedAt: new Date().toISOString() };
       }
-      options.onWebFetch?.(snapshot);
       const localPath = join(inputDir, "page.md");
-      writeFileSync(localPath, snapshot.markdown, "utf8");
-      writeFileSync(join(inputDir, "source.json"), `${JSON.stringify({
-        requestedUrl: snapshot.requestedUrl,
-        finalUrl: snapshot.finalUrl,
-        fetchedAt: snapshot.fetchedAt,
-        status: snapshot.status,
-        contentType: snapshot.contentType,
-        title: snapshot.title,
-        bytes: snapshot.bytes,
-        sha256: snapshot.sha256
-      }, null, 2)}\n`, "utf8");
+      if (snapshot) {
+        options.onWebFetch?.(snapshot);
+        writeFileSync(localPath, snapshot.markdown, "utf8");
+        writeFileSync(join(inputDir, "source.json"), `${JSON.stringify({
+          requestedUrl: snapshot.requestedUrl,
+          finalUrl: snapshot.finalUrl,
+          fetchedAt: snapshot.fetchedAt,
+          status: snapshot.status,
+          contentType: snapshot.contentType,
+          title: snapshot.title,
+          bytes: snapshot.bytes,
+          sha256: snapshot.sha256,
+          ok: true
+        }, null, 2)}\n`, "utf8");
+      } else if (fetchFailure) {
+        const failureMarkdown = [
+          "# 网页抓取失败",
+          "",
+          `- 原始 URL：${input.value}`,
+          `- 抓取时间：${fetchFailure.fetchedAt}`,
+          `- 错误代码：${fetchFailure.code}`,
+          `- 失败原因：${fetchFailure.message}`,
+          "",
+          "未获取到该网页正文。禁止根据标题、摘要或常识补写页面内容。"
+        ].join("\n");
+        writeFileSync(localPath, failureMarkdown, "utf8");
+        writeFileSync(join(inputDir, "source.json"), `${JSON.stringify({
+          requestedUrl: input.value,
+          finalUrl: null,
+          fetchedAt: fetchFailure.fetchedAt,
+          status: null,
+          contentType: null,
+          title: null,
+          bytes: 0,
+          sha256: null,
+          ok: false,
+          errorCode: fetchFailure.code,
+          errorMessage: fetchFailure.message
+        }, null, 2)}\n`, "utf8");
+      }
       prepared.push({
         label: input.label,
         kind: input.kind,
         source: input.value,
         localPath,
-        sha256: sha256Text(snapshot.markdown),
+        sha256: sha256File(localPath),
         metadata: {
-          finalUrl: snapshot.finalUrl,
-          fetchedAt: snapshot.fetchedAt,
-          httpStatus: snapshot.status,
-          title: snapshot.title,
-          sourceSha256: snapshot.sha256
+          ...(snapshot ? {
+            ok: true,
+            finalUrl: snapshot.finalUrl,
+            fetchedAt: snapshot.fetchedAt,
+            httpStatus: snapshot.status,
+            title: snapshot.title,
+            sourceSha256: snapshot.sha256
+          } : {
+            ok: false,
+            finalUrl: null,
+            fetchedAt: fetchFailure?.fetchedAt ?? null,
+            httpStatus: null,
+            title: null,
+            sourceSha256: null,
+            errorCode: fetchFailure?.code ?? "unknown",
+            errorMessage: fetchFailure?.message ?? "网页抓取失败"
+          })
         }
       });
       continue;
@@ -217,12 +260,24 @@ export function buildTaskPrompt(
     "2. 不得联网、不得使用网页搜索、不得访问输入中未提供的链接。",
     "3. 不得编造输入中没有的事实；信息不足时，在产物中明确标注“未知”或“待确认”。",
     "4. 保留可核查的来源索引、日期、数字和异常说明。",
-    "5. 完成前逐条对照专项验收标准自查，并在产物中保留可核查依据。",
-    "6. 最后用中文简短说明完成了什么、哪些内容仍需人工确认。",
+    "5. 如果网页输入带有 source.json 且 ok 为 false，必须在产物中保留失败状态和原因，不得伪造正文。",
+    "6. 完成前逐条对照专项验收标准自查，并在产物中保留可核查依据。",
+    "7. 最后用中文简短说明完成了什么、哪些内容仍需人工确认。",
     "",
     "专项验收标准（全部必须满足）：",
     ...(acceptanceLines.length > 0 ? acceptanceLines : ["- 按任务目标完整交付，不省略关键内容。"])
   ].join("\n");
+}
+
+function isFatalWebInputError(code: string): boolean {
+  return new Set([
+    "invalid_url",
+    "unsupported_protocol",
+    "credentials_in_url",
+    "host_not_allowed",
+    "private_host",
+    "private_address"
+  ]).has(code);
 }
 
 function renderGitHubContext(context: Awaited<ReturnType<typeof prepareGitHubWorkspace>>["context"]): string {
