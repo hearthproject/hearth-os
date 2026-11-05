@@ -1,0 +1,276 @@
+{
+  "schemaVersion": "1.0",
+  "generatedAt": "2026-11-05T10:01:47Z",
+  "archiveTitle": "指定网页正文 Markdown 归档",
+  "outputRoot": ".",
+  "networkUsed": false,
+  "sourcePolicy": "仅使用 inputs 下的只读快照；未联网、未使用网页搜索、未访问输入之外的链接。",
+  "pageCount": 3,
+  "successfulPageCount": 2,
+  "failedPageCount": 1,
+  "pages": [
+    {
+      "id": "01-mdn-http-overview",
+      "requestedUrl": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview",
+      "finalUrl": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview",
+      "fetchedAt": "2026-11-05T09:55:12.990Z",
+      "httpStatus": 200,
+      "accessStatus": "success",
+      "ok": true,
+      "title": "Overview of HTTP - HTTP | MDN",
+      "documentTitle": "Overview of HTTP",
+      "contentType": "text/html",
+      "sourceBytes": 228528,
+      "filePath": "pages/01-mdn-http-overview.md",
+      "absoluteFilePath": "D:\\App\\hearth-os\\.hearth\\workspaces\\02a0b7c4-b4a0-4533-a98f-f6f703a2ba26\\out\\pages\\01-mdn-http-overview.md",
+      "sha256": "8a60519a35f4725e6d58f380b7c510e8a2a30965d052f9bdb8232ad4828c69b3",
+      "sha256Algorithm": "SHA-256",
+      "sha256Scope": "archived Markdown file bytes",
+      "contentSummary": "介绍 HTTP 的客户端—服务器模型、代理、可扩展与无状态特性、连接、HTTP 消息、基于 HTTP 的 API 与延伸阅读；正文包含 2 个 HTTP 报文示例代码块。",
+      "sourceSnapshot": {
+        "pagePath": "inputs/01-MDN-HTTP-指南/page.md",
+        "pageSha256": "8fd966d10cf3b7e3d80a2ca97787b81cb83996d5d508f1345917f2e6829a5774",
+        "pageBytes": 19504,
+        "sourceJsonPath": "inputs/01-MDN-HTTP-指南/source.json",
+        "sourceJsonSha256": "1d917a3a2b02e8a1c223101c44beb8a6fedb3c16f40a4956529b9e34d4526c62",
+        "originalHtmlSha256": "7d755b86288f764c17fd0e58005b1c2ce73609439c817a2f5095e03ef415e0db",
+        "originalHtmlBytes": 228528
+      },
+      "sourceStructure": {
+        "lineCount": 183,
+        "characterCount": 19501,
+        "headingCount": 19,
+        "codeFenceLineCount": 4,
+        "codeBlockCount": 2,
+        "markdownTableCount": 0,
+        "markdownTableRowCount": 0,
+        "markdownLinkCount": 63,
+        "imageCount": 5,
+        "backtickCount": 48
+      },
+      "archiveStructure": {
+        "lineCount": 227,
+        "characterCount": 21013,
+        "headingCount": 20,
+        "codeFenceLineCount": 6,
+        "codeBlockCount": 3,
+        "markdownTableCount": 1,
+        "markdownTableRowCount": 16,
+        "markdownLinkCount": 65,
+        "imageCount": 5,
+        "backtickCount": 66
+      },
+      "error": null,
+      "normalizations": [
+        "正文从只读快照 page.md 逐字收录，未删改页面正文、页脚或扩展阅读文本。",
+        "为便于核验，归档首部新增抓取证据表，文末新增原始 source.json 快照。"
+      ]
+    },
+    {
+      "id": "02-github-about-issues",
+      "requestedUrl": "https://docs.github.com/en/issues/tracking-your-work-with-issues/learning-about-issues/about-issues",
+      "finalUrl": "https://docs.github.com/en/issues/tracking-your-work-with-issues/learning-about-issues/about-issues",
+      "fetchedAt": "2026-11-05T09:55:13.775Z",
+      "httpStatus": 200,
+      "accessStatus": "success",
+      "ok": true,
+      "title": "About issues - GitHub Docs",
+      "documentTitle": "About issues",
+      "contentType": "text/html; charset=utf-8",
+      "sourceBytes": 174840,
+      "filePath": "pages/02-github-about-issues.md",
+      "absoluteFilePath": "D:\\App\\hearth-os\\.hearth\\workspaces\\02a0b7c4-b4a0-4533-a98f-f6f703a2ba26\\out\\pages\\02-github-about-issues.md",
+      "sha256": "bd7b3fb890b2ab1bef267d1ae6993ff9d91eeffdf20c5295e39486c357dcf1fa",
+      "sha256Algorithm": "SHA-256",
+      "sha256Scope": "archived Markdown file bytes",
+      "contentSummary": "说明 GitHub Issues 用于跟踪想法、反馈、任务和缺陷，并概述子议题、议题工件、依赖、元数据、GitHub 集成、Projects、通知、社区管理、沟通及后续步骤。",
+      "sourceSnapshot": {
+        "pagePath": "inputs/02-GitHub-Issues-文档/page.md",
+        "pageSha256": "89b9bbb1d98f7e9922ffb3be99ea7afa25bfa0841caf717eea9f06f60c90b3da",
+        "pageBytes": 8141,
+        "sourceJsonPath": "inputs/02-GitHub-Issues-文档/source.json",
+        "sourceJsonSha256": "b7622d58405cadccbd4382a0d23ca29c8088634ee31e3a8199db3d0806522e5f",
+        "originalHtmlSha256": "399e41d207f1b5fd15d36c6090612b8b81d2afa7d35fecc45a6ed0d8d9b602a8",
+        "originalHtmlBytes": 174840
+      },
+      "sourceStructure": {
+        "lineCount": 69,
+        "characterCount": 8142,
+        "headingCount": 13,
+        "codeFenceLineCount": 0,
+        "codeBlockCount": 0,
+        "markdownTableCount": 0,
+        "markdownTableRowCount": 0,
+        "markdownLinkCount": 35,
+        "imageCount": 0,
+        "backtickCount": 4
+      },
+      "archiveStructure": {
+        "lineCount": 113,
+        "characterCount": 9826,
+        "headingCount": 14,
+        "codeFenceLineCount": 2,
+        "codeBlockCount": 1,
+        "markdownTableCount": 1,
+        "markdownTableRowCount": 16,
+        "markdownLinkCount": 37,
+        "imageCount": 0,
+        "backtickCount": 22
+      },
+      "error": null,
+      "normalizations": [
+        "正文从只读快照 page.md 逐字收录，未删改页面正文。",
+        "快照中出现的“In this article”和“Copy markdown”保留为原始抓取文本。",
+        "为便于核验，归档首部新增抓取证据表，文末新增原始 source.json 快照。"
+      ]
+    },
+    {
+      "id": "03-wcag22-quickref",
+      "requestedUrl": "https://www.w3.org/WAI/WCAG22/quickref/",
+      "finalUrl": "https://www.w3.org/WAI/WCAG22/quickref/",
+      "fetchedAt": "2026-11-05T09:55:14.486Z",
+      "httpStatus": 200,
+      "accessStatus": "failed",
+      "ok": false,
+      "title": "未知（source.json 的 title 为 null）",
+      "documentTitle": "网页抓取失败",
+      "contentType": null,
+      "sourceBytes": 0,
+      "filePath": "pages/03-wcag22-quickref.md",
+      "absoluteFilePath": "D:\\App\\hearth-os\\.hearth\\workspaces\\02a0b7c4-b4a0-4533-a98f-f6f703a2ba26\\out\\pages\\03-wcag22-quickref.md",
+      "sha256": "82e41c9b15317f395da32ea66355cb7633efba54cfaa0f222616e810c81900b8",
+      "sha256Algorithm": "SHA-256",
+      "sha256Scope": "archived Markdown file bytes",
+      "contentSummary": "未获取到该网页正文：抓取遇到 access_challenge（网页要求登录、验证码或浏览器验证），因此仅保留失败证据，不生成或补写正文。",
+      "sourceSnapshot": {
+        "pagePath": "inputs/03-WCAG-2.2-快速参考/page.md",
+        "pageSha256": "c7f0bf98d9c437988724f2905b72c092683a6b3b49ba8c51eee05aad05e6a84f",
+        "pageBytes": 424,
+        "sourceJsonPath": "inputs/03-WCAG-2.2-快速参考/source.json",
+        "sourceJsonSha256": "44bd940d5f5e1554da0c06cf20879cba470eff64988f15cc5975f254dda5a014",
+        "originalHtmlSha256": null,
+        "originalHtmlBytes": 0
+      },
+      "sourceStructure": {
+        "lineCount": 10,
+        "characterCount": 273,
+        "headingCount": 1,
+        "codeFenceLineCount": 0,
+        "codeBlockCount": 0,
+        "markdownTableCount": 0,
+        "markdownTableRowCount": 0,
+        "markdownLinkCount": 0,
+        "imageCount": 0,
+        "backtickCount": 0
+      },
+      "archiveStructure": {
+        "lineCount": 58,
+        "characterCount": 1787,
+        "headingCount": 2,
+        "codeFenceLineCount": 2,
+        "codeBlockCount": 1,
+        "markdownTableCount": 1,
+        "markdownTableRowCount": 18,
+        "markdownLinkCount": 2,
+        "imageCount": 0,
+        "backtickCount": 22
+      },
+      "error": {
+        "code": "access_challenge",
+        "message": "网页要求登录、验证码或浏览器验证：https://www.w3.org/WAI/WCAG22/quickref/"
+      },
+      "normalizations": [
+        "source.json 的 ok 为 false，errorCode 为 access_challenge。",
+        "仅收录输入快照中的失败说明；没有根据标题、URL 或常识补写 WCAG 正文。",
+        "为便于核验，归档首部新增抓取证据表，文末新增原始 source.json 快照。"
+      ]
+    }
+  ],
+  "verification": {
+    "performedAt": "2026-11-05T10:01:47Z",
+    "method": "写入 pages 后重新读取文件，重算 SHA-256，统计 Markdown 结构，并核对 manifest 必需字段与失败说明。",
+    "allPassed": true,
+    "criteria": [
+      {
+        "id": 1,
+        "name": "三个 URL 的访问状态、最终 URL、抓取时间、HTTP 状态和内容摘要",
+        "status": "pass",
+        "evidence": "manifest.json 的 pages 数组逐项记录上述字段；对应归档页的抓取证据表亦重复展示。"
+      },
+      {
+        "id": 2,
+        "name": "每个页面为可阅读 Markdown，并保留标题、表格、代码块和链接",
+        "status": "pass",
+        "evidence": "每页均有 H1、抓取证据表、source.json fenced code block 和可点击 URL；MDN 正文另保留 2 个 HTTP 报文代码块与 5 张图片。"
+      },
+      {
+        "id": 3,
+        "name": "manifest.json 记录原始 URL、最终 URL、抓取时间、状态、标题、文件路径和 SHA-256",
+        "status": "pass",
+        "evidence": "manifest.json 每个页面对象均含 requestedUrl、finalUrl、fetchedAt、httpStatus、accessStatus、title、filePath、sha256；构建后已重算文件 SHA-256 并核对。"
+      },
+      {
+        "id": 4,
+        "name": "访问失败记录失败原因，不伪造正文",
+        "status": "pass",
+        "evidence": "WCAG 页面记录 access_challenge 与原始 errorMessage，正文仅保留输入中的失败说明；source.json 的 title、contentType、sha256 保持 null，bytes 保持 0。"
+      }
+    ],
+    "pageChecks": [
+      {
+        "id": "01-mdn-http-overview",
+        "filePath": "pages/01-mdn-http-overview.md",
+        "fileExists": true,
+        "sha256Matches": true,
+        "actualSha256": "8a60519a35f4725e6d58f380b7c510e8a2a30965d052f9bdb8232ad4828c69b3",
+        "h1": "Overview of HTTP",
+        "hasTitle": true,
+        "markdownTableCount": 1,
+        "codeBlockCount": 3,
+        "markdownLinkCount": 65,
+        "hasAccessStatus": true,
+        "hasFinalUrl": true,
+        "hasFetchedAt": true,
+        "hasHttpStatus": true,
+        "hasSummary": true,
+        "failurePreserved": true
+      },
+      {
+        "id": "02-github-about-issues",
+        "filePath": "pages/02-github-about-issues.md",
+        "fileExists": true,
+        "sha256Matches": true,
+        "actualSha256": "bd7b3fb890b2ab1bef267d1ae6993ff9d91eeffdf20c5295e39486c357dcf1fa",
+        "h1": "About issues",
+        "hasTitle": true,
+        "markdownTableCount": 1,
+        "codeBlockCount": 1,
+        "markdownLinkCount": 37,
+        "hasAccessStatus": true,
+        "hasFinalUrl": true,
+        "hasFetchedAt": true,
+        "hasHttpStatus": true,
+        "hasSummary": true,
+        "failurePreserved": true
+      },
+      {
+        "id": "03-wcag22-quickref",
+        "filePath": "pages/03-wcag22-quickref.md",
+        "fileExists": true,
+        "sha256Matches": true,
+        "actualSha256": "82e41c9b15317f395da32ea66355cb7633efba54cfaa0f222616e810c81900b8",
+        "h1": "网页抓取失败",
+        "hasTitle": true,
+        "markdownTableCount": 1,
+        "codeBlockCount": 1,
+        "markdownLinkCount": 2,
+        "hasAccessStatus": true,
+        "hasFinalUrl": true,
+        "hasFetchedAt": true,
+        "hasHttpStatus": true,
+        "hasSummary": true,
+        "failurePreserved": true
+      }
+    ]
+  }
+}

@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "taskId": "T04-mw3ddl6x-445b83",
+  "templateId": "T04",
+  "title": "指定网页归档为 Markdown",
+  "runId": "02a0b7c4-b4a0-4533-a98f-f6f703a2ba26",
+  "attempt": 1,
+  "generatedAt": "2026-11-05T10:04:34.663Z",
+  "inputs": [
+    {
+      "label": "MDN HTTP 指南",
+      "kind": "url",
+      "source": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview",
+      "sha256": "8fd966d10cf3b7e3d80a2ca97787b81cb83996d5d508f1345917f2e6829a5774",
+      "metadata": {
+        "ok": true,
+        "finalUrl": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview",
+        "fetchedAt": "2026-11-05T09:55:12.990Z",
+        "httpStatus": 200,
+        "title": "Overview of HTTP - HTTP | MDN",
+        "sourceSha256": "7d755b86288f764c17fd0e58005b1c2ce73609439c817a2f5095e03ef415e0db"
+      }
+    },
+    {
+      "label": "GitHub Issues 文档",
+      "kind": "url",
+      "source": "https://docs.github.com/en/issues/tracking-your-work-with-issues/learning-about-issues/about-issues",
+      "sha256": "89b9bbb1d98f7e9922ffb3be99ea7afa25bfa0841caf717eea9f06f60c90b3da",
+      "metadata": {
+        "ok": true,
+        "finalUrl": "https://docs.github.com/en/issues/tracking-your-work-with-issues/learning-about-issues/about-issues",
+        "fetchedAt": "2026-11-05T09:55:13.775Z",
+        "httpStatus": 200,
+        "title": "About issues - GitHub Docs",
+        "sourceSha256": "399e41d207f1b5fd15d36c6090612b8b81d2afa7d35fecc45a6ed0d8d9b602a8"
+      }
+    },
+    {
+      "label": "WCAG 2.2 快速参考",
+      "kind": "url",
+      "source": "https://www.w3.org/WAI/WCAG22/quickref/",
+      "sha256": "c7f0bf98d9c437988724f2905b72c092683a6b3b49ba8c51eee05aad05e6a84f",
+      "metadata": {
+        "ok": false,
+        "finalUrl": "https://www.w3.org/WAI/WCAG22/quickref/",
+        "fetchedAt": "2026-11-05T09:55:14.486Z",
+        "httpStatus": 200,
+        "title": null,
+        "sourceSha256": null,
+        "errorCode": "access_challenge",
+        "errorMessage": "网页要求登录、验证码或浏览器验证：https://www.w3.org/WAI/WCAG22/quickref/"
+      }
+    }
+  ],
+  "expectedOutputs": [
+    "pages/",
+    "manifest.json"
+  ],
+  "codex": {
+    "threadId": "01a1ab22-4eea-79d2-b273-069867648c4b",
+    "profileLabel": "OpenDesign / deepseek-v4.1-flash",
+    "usage": {
+      "inputTokens": 3214848,
+      "cachedInputTokens": 3115520,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 44232,
+      "reasoningOutputTokens": 23289
+    }
+  },
+  "artifacts": [
+    {
+      "path": "manifest.json",
+      "sha256": "ab9316c285649add0da72b254a71de665cef6799c33744ebe65c7123fe0185fb",
+      "bytes": 11991
+    },
+    {
+      "path": "pages/01-mdn-http-overview.md",
+      "sha256": "8a60519a35f4725e6d58f380b7c510e8a2a30965d052f9bdb8232ad4828c69b3",
+      "bytes": 21393
+    },
+    {
+      "path": "pages/02-github-about-issues.md",
+      "sha256": "bd7b3fb890b2ab1bef267d1ae6993ff9d91eeffdf20c5295e39486c357dcf1fa",
+      "bytes": 10208
+    },
+    {
+      "path": "pages/03-wcag22-quickref.md",
+      "sha256": "82e41c9b15317f395da32ea66355cb7633efba54cfaa0f222616e810c81900b8",
+      "bytes": 2455
+    },
+    {
+      "path": "verification.md",
+      "sha256": "4ff40e90d41e13fb32d5118afbb424691d9bb8eced2845b6bb71c29aa3415db1",
+      "bytes": 2926
+    }
+  ]
+}
