@@ -192,6 +192,7 @@ describe("Hearth scheduler", () => {
       if (command === "gh" && args[0] === "repo" && args[1] === "view") {
         return { stdout: JSON.stringify({ defaultBranchRef: { name: "main" } }), stderr: "" };
       }
+      if (command === "git" && args[0] === "rev-parse" && args[1] === "--verify") return { stdout: `${headSha}\n`, stderr: "" };
       if (command === "git" && args[0] === "rev-parse" && args[1] === "HEAD") return { stdout: `${headSha}\n`, stderr: "" };
       if (command === "git" && args[0] === "rev-parse") return { stdout: `${"a".repeat(40)}\n`, stderr: "" };
       if (command === "gh" && args[0] === "pr" && args[1] === "view") {
@@ -244,6 +245,7 @@ describe("Hearth scheduler", () => {
       service,
       codexRunner,
       workspaceRoot: join(requireTemp(), "workspaces"),
+      githubCacheRoot: join(requireTemp(), "git-cache"),
       artifactBase: requireTemp(),
       runtimePreparer: async (options) => ({
         ok: true,

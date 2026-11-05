@@ -100,6 +100,89 @@ describe("GitHub execution boundaries", () => {
     }
   });
 
+  it("clones from the local cache without contacting GitHub", async () => {
+    const root = mkdtempSync(join(tmpdir(), "hearth-github-cache-"));
+    const cacheRoot = join(root, "git-cache");
+    const cachePath = join(cacheRoot, "JasonBuildAI__GoldMind.git");
+    mkdirSync(cachePath, { recursive: true });
+    const calls: string[] = [];
+    try {
+      const run: CommandRunner = async (command, args) => {
+        calls.push([command, ...args].join(" "));
+        if (command === "git" && args[0] === "clone") {
+          mkdirSync(args[3] ?? "", { recursive: true });
+          return { stdout: "", stderr: "" };
+        }
+        if (command === "git" && args[0] === "remote") return { stdout: "", stderr: "" };
+        if (command === "git" && args[0] === "config") return { stdout: "", stderr: "" };
+        if (command === "gh" && args[0] === "repo" && args[1] === "view") {
+          return { stdout: JSON.stringify({ defaultBranchRef: { name: "main" } }), stderr: "" };
+        }
+        if (command === "git" && args[0] === "rev-parse" && args[1] === "--verify") {
+          return { stdout: `${"a".repeat(40)}\n`, stderr: "" };
+        }
+        if (command === "git" && args[0] === "rev-parse") return { stdout: `${"a".repeat(40)}\n`, stderr: "" };
+        if (command === "gh" && args[0] === "issue" && args[1] === "view") {
+          return {
+            stdout: JSON.stringify({ number: 16, title: "Issue", body: "Body", state: "OPEN", url: "https://github.com/JasonBuildAI/GoldMind/issues/16", labels: [], comments: [] }),
+            stderr: ""
+          };
+        }
+        return { stdout: "", stderr: "" };
+      };
+
+      await prepareGitHubWorkspace({
+        spec: { repo: "JasonBuildAI/GoldMind", issue: 16, branch: "test/health-secret-guard" },
+        taskId: "T07-test",
+        workspaceRoot: join(root, "workspace"),
+        cacheRoot,
+        run
+      });
+
+      expect(calls.some((call) => call.includes("credential.helper=!gh auth git-credential"))).toBe(false);
+      expect(calls.some((call) => call.startsWith("git clone --no-tags"))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a stale cached PR head instead of silently using it", async () => {
+    const root = mkdtempSync(join(tmpdir(), "hearth-github-stale-cache-"));
+    const cacheRoot = join(root, "git-cache");
+    const cachePath = join(cacheRoot, "JasonBuildAI__GoldMind.git");
+    mkdirSync(cachePath, { recursive: true });
+    const staleSha = "b".repeat(40);
+    const expectedSha = "c".repeat(40);
+    try {
+      const run: CommandRunner = async (command, args) => {
+        if (command === "git" && args[0] === "clone") {
+          mkdirSync(args[3] ?? "", { recursive: true });
+          return { stdout: "", stderr: "" };
+        }
+        if (command === "git" && args[0] === "remote") return { stdout: "", stderr: "" };
+        if (command === "git" && args[0] === "config") return { stdout: "", stderr: "" };
+        if (command === "gh" && args[0] === "repo" && args[1] === "view") {
+          return { stdout: JSON.stringify({ defaultBranchRef: { name: "main" } }), stderr: "" };
+        }
+        if (command === "git" && args[0] === "rev-parse" && args[1] === "--verify") {
+          return { stdout: `${staleSha}\n`, stderr: "" };
+        }
+        if (command === "git" && args[0] === "fetch") throw new Error("network unavailable");
+        return { stdout: "", stderr: "" };
+      };
+
+      await expect(prepareGitHubWorkspace({
+        spec: { repo: "JasonBuildAI/GoldMind", pull: 15, headSha: expectedSha },
+        taskId: "T08-test",
+        workspaceRoot: join(root, "workspace"),
+        cacheRoot,
+        run
+      })).rejects.toThrow(/缓存.*已过期/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("validates a PR preview that is bound to the prepared branch and issue", () => {
     const preview = validatePullRequestPreview({
       title: "test: add health secret regression",

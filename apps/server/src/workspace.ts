@@ -41,6 +41,7 @@ export async function prepareWorkspace(options: {
   webFetch?: typeof fetchWebSnapshot;
   onWebFetch?: (snapshot: WebSnapshot) => void;
   githubRun?: CommandRunner | undefined;
+  githubCacheRoot?: string | undefined;
 }): Promise<PreparedWorkspace> {
   const root = resolve(options.workspaceDir);
   const inputsDir = join(root, "inputs");
@@ -169,7 +170,8 @@ export async function prepareWorkspace(options: {
           spec: template.github,
           taskId: options.task.id,
           workspaceRoot: root,
-          run: options.githubRun
+          run: options.githubRun,
+          cacheRoot: options.githubCacheRoot
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

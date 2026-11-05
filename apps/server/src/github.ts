@@ -96,21 +96,37 @@ export async function prepareGitHubWorkspace(options: {
   taskId: string;
   workspaceRoot: string;
   run?: CommandRunner | undefined;
+  cacheRoot?: string | undefined;
 }): Promise<PreparedGitHubWorkspace> {
   const run = options.run ?? runCommand;
   const repoPath = join(options.workspaceRoot, "repo");
   if (existsSync(repoPath)) throw new Error(`GitHub 工作区已存在：${repoPath}`);
   mkdirSync(options.workspaceRoot, { recursive: true });
 
-  await retryNetworkCommand(() => run("git", [
-    "-c",
-    "credential.helper=!gh auth git-credential",
-    "clone",
-    "--depth",
-    "50",
-    `https://github.com/${options.spec.repo}.git`,
-    repoPath
-  ], { timeoutMs: 10 * 60 * 1000 }), () => rmSync(repoPath, { recursive: true, force: true }));
+  const cachePath = options.cacheRoot
+    ? join(options.cacheRoot, `${options.spec.repo.replace(/[\\/]+/g, "__")}.git`)
+    : null;
+  let clonedFromCache = false;
+  if (cachePath && existsSync(cachePath)) {
+    try {
+      await run("git", ["clone", "--no-tags", cachePath, repoPath], { timeoutMs: 10 * 60 * 1000 });
+      await run("git", ["remote", "set-url", "origin", `https://github.com/${options.spec.repo}.git`], { cwd: repoPath });
+      clonedFromCache = true;
+    } catch {
+      rmSync(repoPath, { recursive: true, force: true });
+    }
+  }
+  if (!clonedFromCache) {
+    await retryNetworkCommand(() => run("git", [
+      "-c",
+      "credential.helper=!gh auth git-credential",
+      "clone",
+      "--depth",
+      "50",
+      `https://github.com/${options.spec.repo}.git`,
+      repoPath
+    ], { timeoutMs: 10 * 60 * 1000 }), () => rmSync(repoPath, { recursive: true, force: true }));
+  }
   await ensureGitIdentity(run, repoPath, options.spec.repo);
   const base = await defaultBranch(run, options.spec.repo);
 
@@ -120,7 +136,9 @@ export async function prepareGitHubWorkspace(options: {
     if (!isSafeBranchName(branch) || branch === base || branch === "main" || branch === "master") {
       throw new Error(`不安全的实现分支名：${branch}`);
     }
-    await retryNetworkCommand(() => run("git", ["fetch", "origin", base, "--depth", "50"], { cwd: repoPath }));
+    if (!await refExists(run, repoPath, `refs/remotes/origin/${base}`)) {
+      await retryNetworkCommand(() => run("git", ["fetch", "origin", base, "--depth", "50"], { cwd: repoPath }));
+    }
     await run("git", ["checkout", "-B", branch, `origin/${base}`], { cwd: repoPath });
     const context = await loadGitHubContext(run, options.spec.repo, "issue", options.spec.issue);
     const baseSha = (await run("git", ["rev-parse", "HEAD"], { cwd: repoPath })).stdout.trim();
@@ -142,7 +160,21 @@ export async function prepareGitHubWorkspace(options: {
   }
 
   if (!options.spec.pull) throw new Error("GitHub 任务必须指定 issue 或 pull 编号");
-  await retryNetworkCommand(() => run("git", ["fetch", "origin", `refs/pull/${options.spec.pull}/head:refs/remotes/origin/pr-${options.spec.pull}`, "--depth", "200"], { cwd: repoPath }));
+  const pullRef = `refs/remotes/origin/pr-${options.spec.pull}`;
+  const cachedHeadSha = await refSha(run, repoPath, pullRef);
+  if (!cachedHeadSha) {
+    await retryNetworkCommand(() => run("git", ["fetch", "origin", `refs/pull/${options.spec.pull}/head:${pullRef}`, "--depth", "200"], { cwd: repoPath }));
+  } else if (options.spec.headSha && cachedHeadSha !== options.spec.headSha) {
+    try {
+      await retryNetworkCommand(() => run("git", ["fetch", "origin", `refs/pull/${options.spec.pull}/head:${pullRef}`, "--depth", "200"], { cwd: repoPath }));
+    } catch {
+      throw new Error(`缓存的 PR #${options.spec.pull} head 已过期：期望 ${options.spec.headSha}，实际 ${cachedHeadSha}`);
+    }
+    const refreshedHeadSha = await refSha(run, repoPath, pullRef);
+    if (refreshedHeadSha !== options.spec.headSha) {
+      throw new Error(`PR #${options.spec.pull} 缓存 head 不匹配：期望 ${options.spec.headSha}，实际 ${refreshedHeadSha}`);
+    }
+  }
   await run("git", ["checkout", "--detach", `refs/remotes/origin/pr-${options.spec.pull}`], { cwd: repoPath });
   const headSha = (await run("git", ["rev-parse", "HEAD"], { cwd: repoPath })).stdout.trim();
   if (options.spec.headSha && headSha !== options.spec.headSha) {
@@ -164,6 +196,20 @@ export async function prepareGitHubWorkspace(options: {
       detached: true
     }
   };
+}
+
+async function refExists(run: CommandRunner, repoPath: string, ref: string): Promise<boolean> {
+  return (await refSha(run, repoPath, ref)) !== null;
+}
+
+async function refSha(run: CommandRunner, repoPath: string, ref: string): Promise<string | null> {
+  try {
+    const result = await run("git", ["rev-parse", "--verify", "--quiet", ref], { cwd: repoPath });
+    const sha = result.stdout.trim();
+    return sha || null;
+  } catch {
+    return null;
+  }
 }
 
 async function retryNetworkCommand<T>(operation: () => Promise<T>, cleanup?: () => void): Promise<T> {

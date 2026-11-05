@@ -6,7 +6,7 @@ import { runCodex, type CodexRunOptions, type CodexRunResult } from "@hearth/cod
 import { getTemplate } from "@hearth/templates";
 import type { ApprovalRequest, ApprovalManager } from "./approvals.ts";
 import { missingExpectedOutputs, publishArtifacts } from "./artifacts.ts";
-import { REPO_ROOT, WORKSPACE_DIR } from "./config.ts";
+import { GIT_CACHE_DIR, REPO_ROOT, WORKSPACE_DIR } from "./config.ts";
 import { inspectRepository, readPrPreview, validatePullRequestPreview } from "./github.ts";
 import type { CommandRunner } from "./github.ts";
 import { prepareTaskRuntime, type RuntimePreparation } from "./runtime.ts";
@@ -23,6 +23,7 @@ export interface SchedulerOptions {
   codexRunner?: CodexRunner;
   approvals?: ApprovalManager;
   githubRun?: CommandRunner | undefined;
+  githubCacheRoot?: string | undefined;
   runtimePreparer?: typeof prepareTaskRuntime | undefined;
 }
 
@@ -34,6 +35,7 @@ export class HearthScheduler {
   private readonly codexRunner: CodexRunner;
   private readonly approvals: ApprovalManager | undefined;
   private readonly githubRun: CommandRunner | undefined;
+  private readonly githubCacheRoot: string;
   private readonly runtimePreparer: typeof prepareTaskRuntime;
   private readonly controllers = new Map<string, AbortController>();
   private readonly cancelled = new Set<string>();
@@ -51,6 +53,7 @@ export class HearthScheduler {
     this.codexRunner = options.codexRunner ?? runCodex;
     this.approvals = options.approvals;
     this.githubRun = options.githubRun;
+    this.githubCacheRoot = options.githubCacheRoot ?? GIT_CACHE_DIR;
     this.runtimePreparer = options.runtimePreparer ?? prepareTaskRuntime;
   }
 
@@ -207,6 +210,7 @@ export class HearthScheduler {
         repoRoot: this.repoRoot,
         workspaceDir: workspace,
         task,
+        githubCacheRoot: this.githubCacheRoot,
         ...(this.githubRun ? { githubRun: this.githubRun } : {})
       });
       let runtime: RuntimePreparation | null = null;
