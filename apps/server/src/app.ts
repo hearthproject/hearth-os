@@ -39,9 +39,9 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const ownsStore = !options.store;
   const store = options.store ?? new HearthStore(DB_PATH);
   const service = new HearthService(store);
-  const scheduler = options.startScheduler ? new HearthScheduler({ service }) : null;
   const approvals = new ApprovalManager(service, options.effectExecutor ?? executeEffect);
   approvals.recoverInterruptedEffects();
+  const scheduler = options.startScheduler ? new HearthScheduler({ service, approvals }) : null;
   const app = Fastify({
     logger: options.logger ?? false,
     bodyLimit: 2_000_000

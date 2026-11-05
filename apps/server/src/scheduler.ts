@@ -1,10 +1,14 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { RunRecord, TaskRecord } from "@hearth/core";
 import { runCodex, type CodexRunOptions, type CodexRunResult } from "@hearth/codex-executor";
 import { getTemplate } from "@hearth/templates";
+import type { ApprovalRequest, ApprovalManager } from "./approvals.ts";
 import { publishArtifacts } from "./artifacts.ts";
 import { REPO_ROOT, WORKSPACE_DIR } from "./config.ts";
+import { inspectRepository, readPrPreview, validatePullRequestPreview } from "./github.ts";
+import type { CommandRunner } from "./github.ts";
 import type { HearthService } from "./service.ts";
 import { buildTaskPrompt, prepareWorkspace, UnsupportedInputError } from "./workspace.ts";
 
@@ -16,6 +20,8 @@ export interface SchedulerOptions {
   workspaceRoot?: string;
   artifactBase?: string;
   codexRunner?: CodexRunner;
+  approvals?: ApprovalManager;
+  githubRun?: CommandRunner | undefined;
 }
 
 export class HearthScheduler {
@@ -24,6 +30,8 @@ export class HearthScheduler {
   private readonly workspaceRoot: string;
   private readonly artifactBase: string;
   private readonly codexRunner: CodexRunner;
+  private readonly approvals: ApprovalManager | undefined;
+  private readonly githubRun: CommandRunner | undefined;
   private readonly controllers = new Map<string, AbortController>();
   private readonly cancelled = new Set<string>();
   private unsubscribe: (() => void) | null = null;
@@ -38,6 +46,8 @@ export class HearthScheduler {
     this.workspaceRoot = options.workspaceRoot ?? WORKSPACE_DIR;
     this.artifactBase = options.artifactBase ?? REPO_ROOT;
     this.codexRunner = options.codexRunner ?? runCodex;
+    this.approvals = options.approvals;
+    this.githubRun = options.githubRun;
   }
 
   start(): void {
@@ -189,7 +199,12 @@ export class HearthScheduler {
       const task = this.service.requireTask(taskId);
       const template = task.templateId ? getTemplate(task.templateId) : undefined;
       const expectedOutputs = template?.expectedOutputs ?? ["report.md"];
-      const prepared = await prepareWorkspace({ repoRoot: this.repoRoot, workspaceDir: workspace, task });
+      const prepared = await prepareWorkspace({
+        repoRoot: this.repoRoot,
+        workspaceDir: workspace,
+        task,
+        ...(this.githubRun ? { githubRun: this.githubRun } : {})
+      });
       const prompt = buildTaskPrompt(task, prepared, expectedOutputs, template?.acceptance ?? []);
       const result = await this.codexRunner({
         workingDirectory: prepared.root,
@@ -221,6 +236,20 @@ export class HearthScheduler {
         usage: result.usage,
         failure: null
       });
+
+      if (template && template.approvalKind !== "none") {
+        if (!this.approvals) throw new Error("审批管理器未启动，无法安全执行外部动作");
+        const request = await this.buildApproval(task, template, prepared);
+        this.service.updateTask(taskId, {
+          status: "waiting_approval",
+          currentRunId: runId,
+          nextAction: "等待你确认外部动作",
+          error: null
+        }, runId);
+        this.approvals.request({ ...request, taskId, runId });
+        return;
+      }
+
       this.service.updateTask(taskId, {
         status: "completed",
         currentRunId: runId,
@@ -233,6 +262,74 @@ export class HearthScheduler {
       this.controllers.delete(taskId);
       this.cancelled.delete(taskId);
     }
+  }
+
+  private async buildApproval(
+    task: TaskRecord,
+    template: NonNullable<ReturnType<typeof getTemplate>>,
+    prepared: Awaited<ReturnType<typeof prepareWorkspace>>
+  ): Promise<Omit<ApprovalRequest, "taskId" | "runId">> {
+    if (template.approvalKind === "github.publish-pr") {
+      const repository = prepared.repository;
+      if (!repository || !repository.issue) throw new Error("创建 PR 前缺少 GitHub 仓库或 Issue 上下文");
+      const inspection = await inspectRepository(repository);
+      if (!inspection.clean) throw new Error(`仓库仍有未提交改动：\n${inspection.status}`);
+      if (inspection.branch !== repository.branch) throw new Error(`提交所在分支不是 ${repository.branch}`);
+      if (inspection.commits < 1) throw new Error("没有检测到本地提交，不能创建 PR");
+      const preview = validatePullRequestPreview(
+        readPrPreview(join(prepared.outDir, "pr-preview.json")),
+        repository
+      );
+      return {
+        kind: "github.publish-pr",
+        summary: `推送 ${repository.repo} 的分支 ${repository.branch} 并创建 PR`,
+        target: {
+          repo: repository.repo,
+          workspace: repository.path,
+          branch: repository.branch,
+          base: repository.base,
+          expectedCommit: inspection.headSha,
+          title: preview.title,
+          body: preview.body
+        },
+        preview: {
+          repo: repository.repo,
+          branch: repository.branch,
+          base: repository.base,
+          title: preview.title,
+          body: preview.body,
+          commit: inspection.headSha,
+          commits: inspection.commits,
+          diffStat: inspection.diffStat
+        }
+      };
+    }
+
+    if (template.approvalKind === "github.comment") {
+      const repository = prepared.repository;
+      if (!repository || !repository.pull) throw new Error("发布评论前缺少 GitHub PR 上下文");
+      const review = readFileSync(join(prepared.outDir, "pr-review.md"), "utf8").trim();
+      if (!review) throw new Error("评审产物为空，不能发布评论");
+      return {
+        kind: "github.comment",
+        summary: `在 ${repository.repo} PR #${repository.pull} 发布评审评论`,
+        target: {
+          repo: repository.repo,
+          pull: repository.pull,
+          headSha: repository.headSha,
+          body: review
+        },
+        preview: {
+          repo: repository.repo,
+          pull: repository.pull,
+          headSha: repository.headSha,
+          title: `评审 PR #${repository.pull}`,
+          body: review
+        }
+      };
+    }
+
+    throw new Error(`未实现的审批类型：${template.approvalKind}`);
   }
 
   private async failRun(taskId: string, runId: string, error: unknown, aborted: boolean): Promise<void> {

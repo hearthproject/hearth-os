@@ -65,7 +65,7 @@ const TEMPLATE_DEFINITIONS: Omit<TaskTemplate, "acceptance">[] = [
     id: "T07", title: "按 Issue 实现并提交 PR", category: "code", description: "在 GoldMind 中完成 Issue #16，并准备可评审 PR。",
     goal: "按 Issue #16 的验收条件完成最小改动和回归测试，先在本地提交，等待用户审批后再推送并创建 PR。",
     inputs: [{ kind: "github", label: "Issue #16", value: "https://github.com/JasonBuildAI/GoldMind/issues/16" }], networkHosts: [],
-    outputDir: "eval/runs/T07", expectedOutputs: ["report.md"], approvalKind: "github.publish-pr",
+    outputDir: "eval/runs/T07", expectedOutputs: ["report.md", "pr-preview.json"], approvalKind: "github.publish-pr",
     github: { repo: "JasonBuildAI/GoldMind", issue: 16 }
   },
   {

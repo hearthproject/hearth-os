@@ -2,6 +2,12 @@ import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import type { TaskRecord } from "@hearth/core";
+import { getTemplate } from "@hearth/templates";
+import {
+  prepareGitHubWorkspace,
+  type CommandRunner,
+  type RepositoryContext
+} from "./github.ts";
 import { fetchWebSnapshot, type WebSnapshot } from "./web-fetch.ts";
 
 export interface PreparedInput {
@@ -17,6 +23,7 @@ export interface PreparedWorkspace {
   root: string;
   outDir: string;
   inputs: PreparedInput[];
+  repository?: RepositoryContext;
 }
 
 export class UnsupportedInputError extends Error {
@@ -32,6 +39,7 @@ export async function prepareWorkspace(options: {
   task: TaskRecord;
   webFetch?: typeof fetchWebSnapshot;
   onWebFetch?: (snapshot: WebSnapshot) => void;
+  githubRun?: CommandRunner | undefined;
 }): Promise<PreparedWorkspace> {
   const root = resolve(options.workspaceDir);
   const inputsDir = join(root, "inputs");
@@ -40,6 +48,7 @@ export async function prepareWorkspace(options: {
   mkdirSync(outDir, { recursive: true });
 
   const prepared: PreparedInput[] = [];
+  let repository: RepositoryContext | undefined;
   for (const [index, input] of options.task.inputs.entries()) {
     const prefix = `${String(index + 1).padStart(2, "0")}-${slug(input.label)}`;
 
@@ -99,7 +108,42 @@ export async function prepareWorkspace(options: {
     }
 
     if (input.kind === "github") {
-      throw new UnsupportedInputError(`GitHub 输入尚未接入隔离工作区：${input.value}`);
+      if (repository) throw new UnsupportedInputError("一个任务只能包含一个 GitHub 仓库输入");
+      const template = options.task.templateId ? getTemplate(options.task.templateId) : undefined;
+      if (!template?.github) throw new UnsupportedInputError(`模板 ${options.task.templateId ?? "自定义"} 缺少 GitHub 仓库配置`);
+      let preparedGitHub;
+      try {
+        preparedGitHub = await prepareGitHubWorkspace({
+          spec: template.github,
+          taskId: options.task.id,
+          workspaceRoot: root,
+          run: options.githubRun
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new UnsupportedInputError(`GitHub 输入不可用：${message}`);
+      }
+      repository = preparedGitHub.repository;
+      const inputDir = join(inputsDir, prefix);
+      mkdirSync(inputDir, { recursive: true });
+      const localPath = join(inputDir, "context.md");
+      writeFileSync(localPath, renderGitHubContext(preparedGitHub.context), "utf8");
+      writeFileSync(join(inputDir, "context.json"), `${JSON.stringify(preparedGitHub.context, null, 2)}\n`, "utf8");
+      prepared.push({
+        label: input.label,
+        kind: input.kind,
+        source: input.value,
+        localPath,
+        sha256: sha256Text(JSON.stringify(preparedGitHub.context)),
+        metadata: {
+          repo: preparedGitHub.repository.repo,
+          base: preparedGitHub.repository.base,
+          branch: preparedGitHub.repository.branch,
+          baseSha: preparedGitHub.repository.baseSha,
+          headSha: preparedGitHub.repository.headSha
+        }
+      });
+      continue;
     }
 
     const sourcePath = resolveInside(options.repoRoot, input.value);
@@ -120,7 +164,7 @@ export async function prepareWorkspace(options: {
     });
   }
 
-  return { root, outDir, inputs: prepared };
+  return { root, outDir, inputs: prepared, ...(repository ? { repository } : {}) };
 }
 
 export function buildTaskPrompt(
@@ -135,6 +179,22 @@ export function buildTaskPrompt(
   });
   const outputLines = expectedOutputs.map((output) => `- ${output}`);
   const acceptanceLines = acceptance.map((criterion, index) => `${index + 1}. ${criterion}`);
+  const repositoryLines = workspace.repository ? [
+    "",
+    "GitHub 隔离仓库：",
+    `- 本地路径：${workspace.repository.path}`,
+    `- 仓库：${workspace.repository.repo}`,
+    `- 当前分支：${workspace.repository.branch}`,
+    `- 基础分支：${workspace.repository.base}`,
+    `- 检出提交：${workspace.repository.headSha}`,
+    `- 这是隔离工作区。不得 push、不得创建 PR、不得评论、不得联网。`,
+    workspace.repository.issue
+      ? "- 这是实现任务：请在本地完成最小改动、运行相关测试，并创建本地 git commit。最终报告必须写明改动文件、测试命令和真实结果。"
+      : "- 这是只读分析任务：不得修改仓库中的任何文件，只读取指定提交并生成报告。",
+    workspace.repository.issue
+      ? `- pr-preview.json 必须是 JSON 对象，字段 title、body、branch、base 必填；branch 必须为 ${workspace.repository.branch}，base 必须为 ${workspace.repository.base}，body 必须明确链接 Issue #${workspace.repository.issue}。`
+      : ""
+  ].filter((line) => line !== "") : [];
 
   return [
     "你是 Hearth 的任务执行器。现在独立完成一个真实工作交付，不要只给建议。",
@@ -144,6 +204,7 @@ export function buildTaskPrompt(
     "",
     "已准备的输入文件（只读快照）：",
     ...(inputLines.length > 0 ? inputLines : ["- 无文件输入"]),
+    ...repositoryLines,
     "",
     "输出目录：",
     workspace.outDir,
@@ -161,6 +222,26 @@ export function buildTaskPrompt(
     "",
     "专项验收标准（全部必须满足）：",
     ...(acceptanceLines.length > 0 ? acceptanceLines : ["- 按任务目标完整交付，不省略关键内容。"])
+  ].join("\n");
+}
+
+function renderGitHubContext(context: Awaited<ReturnType<typeof prepareGitHubWorkspace>>["context"]): string {
+  return [
+    `# ${context.kind === "issue" ? "Issue" : "Pull Request"} #${context.number}: ${context.title}`,
+    "",
+    `- 状态：${context.state}`,
+    `- 地址：${context.url}`,
+    ...(context.labels.length > 0 ? [`- 标签：${context.labels.join("、")}`] : []),
+    "",
+    "## 正文",
+    "",
+    context.body || "（无正文）",
+    ...(context.comments.length > 0 ? [
+      "",
+      "## 评论",
+      "",
+      ...context.comments.flatMap((comment, index) => [`### 评论 ${index + 1}`, "", comment.body || "（空）", ""])
+    ] : [])
   ].join("\n");
 }
 

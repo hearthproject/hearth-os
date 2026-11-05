@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { TaskRecord, TaskStatus } from "@hearth/core";
 import type { CodexRunner } from "./scheduler.ts";
+import { ApprovalManager } from "./approvals.ts";
 import { HearthStore } from "@hearth/eventlog";
 import { HearthScheduler } from "./scheduler.ts";
 import { HearthService } from "./service.ts";
@@ -62,7 +63,11 @@ describe("Hearth scheduler", () => {
 
   it("marks unsupported inputs recoverable instead of inventing output", async () => {
     const service = setup();
-    scheduler = makeScheduler(service, async () => FAKE_RESULT);
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, {
+      githubRun: async () => {
+        throw new Error("GitHub 不可用（测试）");
+      }
+    });
     scheduler.start();
 
     const task = service.createTask({ templateId: "T07" });
@@ -122,18 +127,78 @@ describe("Hearth scheduler", () => {
     expect(store?.getRun(runId)?.failure?.recoverable).toBe(true);
   });
 
+  it("stops at a pending approval before any GitHub write", async () => {
+    const service = setup();
+    const headSha = "c007c4ed55345682689ac50bbafb090c5934c31a";
+    let effectCalls = 0;
+    const approvals = new ApprovalManager(service, async () => {
+      effectCalls += 1;
+      return {};
+    });
+    const githubRun = async (command: string, args: string[]) => {
+      if (command === "gh" && args[0] === "repo" && args[1] === "clone") {
+        mkdirSync(args[3] ?? "", { recursive: true });
+        return { stdout: "", stderr: "" };
+      }
+      if (command === "git" && args[0] === "config") return { stdout: "", stderr: "" };
+      if (command === "git" && args[0] === "remote") return { stdout: "git@github.com:JasonBuildAI/GoldMind.git", stderr: "" };
+      if (command === "gh" && args[0] === "repo" && args[1] === "view") {
+        return { stdout: JSON.stringify({ defaultBranchRef: { name: "main" } }), stderr: "" };
+      }
+      if (command === "git" && args[0] === "rev-parse" && args[1] === "HEAD") return { stdout: `${headSha}\n`, stderr: "" };
+      if (command === "git" && args[0] === "rev-parse") return { stdout: `${"a".repeat(40)}\n`, stderr: "" };
+      if (command === "gh" && args[0] === "pr" && args[1] === "view") {
+        return {
+          stdout: JSON.stringify({
+            number: 15,
+            title: "chore(deps): bump npm",
+            body: "dependency update",
+            state: "OPEN",
+            url: "https://github.com/JasonBuildAI/GoldMind/pull/15",
+            labels: [],
+            comments: [],
+            headRefOid: headSha
+          }),
+          stderr: ""
+        };
+      }
+      return { stdout: "", stderr: "" };
+    };
+    scheduler = makeScheduler(service, async (options) => {
+      writeFileSync(join(options.workingDirectory, "out", "pr-review.md"), "# Review\n\nNo blocking issues.\n");
+      return FAKE_RESULT;
+    }, { githubRun, approvals });
+    scheduler.start();
+
+    const task = service.createTask({ templateId: "T08" });
+    const waiting = await waitForStatus(service, task.id, "waiting_approval");
+    expect(waiting.error).toBeNull();
+    expect(store?.listApprovals(task.id)).toHaveLength(1);
+    expect(store?.listApprovals(task.id)[0]?.status).toBe("pending");
+    expect(store?.listEffects(task.id)).toHaveLength(0);
+    expect(effectCalls).toBe(0);
+  });
+
   function setup(): HearthService {
     store = new HearthStore(":memory:");
     tempDir = mkdtempSync(join(tmpdir(), "hearth-scheduler-"));
     return new HearthService(store);
   }
 
-  function makeScheduler(service: HearthService, codexRunner: CodexRunner): HearthScheduler {
+  function makeScheduler(
+    service: HearthService,
+    codexRunner: CodexRunner,
+    extra: {
+      githubRun?: (command: string, args: string[]) => Promise<{ stdout: string; stderr: string }>;
+      approvals?: ApprovalManager;
+    } = {}
+  ): HearthScheduler {
     return new HearthScheduler({
       service,
       codexRunner,
       workspaceRoot: join(requireTemp(), "workspaces"),
-      artifactBase: requireTemp()
+      artifactBase: requireTemp(),
+      ...extra
     });
   }
 
