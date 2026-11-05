@@ -53,3 +53,9 @@ export interface CreateTaskRequest {
   goal?: string;
   textInput?: string;
 }
+
+export interface ApprovalDecisionResult {
+  approval: ApprovalRecord;
+  task: TaskRecord;
+  effect: EffectRecord | null;
+}

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import type { ArtifactRecord, RunRecord, TaskRecord, TaskStatus } from "@hearth/core";
+import type { ApprovalRecord, ArtifactRecord, EffectRecord, RunRecord, TaskRecord, TaskStatus } from "@hearth/core";
 import { assertTransition, TASK_STATUS_LABELS } from "@hearth/core";
 import { HearthStore } from "@hearth/eventlog";
 import { getTemplate, TEMPLATES } from "@hearth/templates";
@@ -117,6 +117,62 @@ export class HearthService {
     });
     this.bus.publish(event);
     return artifact;
+  }
+
+  createApproval(approval: ApprovalRecord): ApprovalRecord {
+    const event = this.store.appendEvent({
+      type: "approval.created",
+      taskId: approval.taskId,
+      runId: approval.runId,
+      payload: approval
+    });
+    this.bus.publish(event);
+    return approval;
+  }
+
+  updateApproval(
+    approvalId: string,
+    patch: Partial<Pick<ApprovalRecord, "status" | "decidedAt" | "effectId">>
+  ): ApprovalRecord {
+    const current = this.store.getApproval(approvalId);
+    if (!current) throw new Error(`Approval not found: ${approvalId}`);
+    const event = this.store.appendEvent({
+      type: "approval.updated",
+      taskId: current.taskId,
+      runId: current.runId,
+      payload: { id: approvalId, ...patch }
+    });
+    this.bus.publish(event);
+    const updated = this.store.getApproval(approvalId);
+    if (!updated) throw new Error(`Approval projection missing: ${approvalId}`);
+    return updated;
+  }
+
+  createEffect(effect: EffectRecord): EffectRecord {
+    const event = this.store.appendEvent({
+      type: "effect.created",
+      taskId: effect.taskId,
+      payload: effect
+    });
+    this.bus.publish(event);
+    return effect;
+  }
+
+  updateEffect(
+    effectId: string,
+    patch: Partial<Pick<EffectRecord, "status" | "receipt" | "error" | "updatedAt">>
+  ): EffectRecord {
+    const current = this.store.getEffect(effectId);
+    if (!current) throw new Error(`Effect not found: ${effectId}`);
+    const event = this.store.appendEvent({
+      type: "effect.updated",
+      taskId: current.taskId,
+      payload: { id: effectId, ...patch }
+    });
+    this.bus.publish(event);
+    const updated = this.store.getEffect(effectId);
+    if (!updated) throw new Error(`Effect projection missing: ${effectId}`);
+    return updated;
   }
 
   requireTask(taskId: string): TaskRecord {

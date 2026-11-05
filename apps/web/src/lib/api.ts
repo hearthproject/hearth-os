@@ -1,4 +1,12 @@
-import type { ArtifactListItem, CreateTaskRequest, HealthResponse, TaskRecord, TaskTemplate, TaskView } from "./types.ts";
+import type {
+  ApprovalDecisionResult,
+  ArtifactListItem,
+  CreateTaskRequest,
+  HealthResponse,
+  TaskRecord,
+  TaskTemplate,
+  TaskView
+} from "./types.ts";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -29,6 +37,11 @@ export const api = {
   }),
   retry: (id: string) => request<TaskRecord>(`/api/tasks/${encodeURIComponent(id)}/retry`, { method: "POST" }),
   cancel: (id: string) => request<TaskRecord>(`/api/tasks/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
+  decideApproval: (id: string, decision: "approve" | "reject", parameterHash: string) =>
+    request<ApprovalDecisionResult>(`/api/approvals/${encodeURIComponent(id)}/decide`, {
+      method: "POST",
+      body: JSON.stringify({ decision, parameterHash })
+    }),
   artifactUrl: (taskId: string, artifactId: string) =>
     `/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}`
 };

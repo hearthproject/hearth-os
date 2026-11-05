@@ -145,6 +145,10 @@ export class HearthStore {
     return (this.db.prepare("SELECT * FROM effects WHERE task_id = ? ORDER BY created_at ASC").all(taskId) as DbRow[]).map(rowToEffect);
   }
 
+  listAllEffects(): EffectRecord[] {
+    return (this.db.prepare("SELECT * FROM effects ORDER BY created_at ASC").all() as DbRow[]).map(rowToEffect);
+  }
+
   getArtifact(id: string): ArtifactRecord | null {
     const row = this.db.prepare("SELECT * FROM artifacts WHERE id = ?").get(id) as DbRow | undefined;
     return row ? rowToArtifact(row) : null;

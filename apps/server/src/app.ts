@@ -8,6 +8,8 @@ import { HearthStore } from "@hearth/eventlog";
 import { getTemplate } from "@hearth/templates";
 import { z } from "zod";
 import { DB_PATH, REPO_ROOT, WEB_DIST } from "./config.ts";
+import { ApprovalError, ApprovalManager, type EffectExecutor } from "./approvals.ts";
+import { executeEffect } from "./effects.ts";
 import { HearthScheduler } from "./scheduler.ts";
 import { HearthService, type CreateTaskInput } from "./service.ts";
 
@@ -20,11 +22,17 @@ const createTaskSchema = z.object({
   textInput: z.string().max(100_000).optional()
 }).strict();
 
+const decideApprovalSchema = z.object({
+  decision: z.enum(["approve", "reject"]),
+  parameterHash: z.string().regex(/^[a-f0-9]{64}$/)
+}).strict();
+
 export interface BuildServerOptions {
   store?: HearthStore;
   logger?: boolean;
   serveWeb?: boolean;
   startScheduler?: boolean;
+  effectExecutor?: EffectExecutor;
 }
 
 export async function buildServer(options: BuildServerOptions = {}) {
@@ -32,6 +40,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const store = options.store ?? new HearthStore(DB_PATH);
   const service = new HearthService(store);
   const scheduler = options.startScheduler ? new HearthScheduler({ service }) : null;
+  const approvals = new ApprovalManager(service, options.effectExecutor ?? executeEffect);
+  approvals.recoverInterruptedEffects();
   const app = Fastify({
     logger: options.logger ?? false,
     bodyLimit: 2_000_000
@@ -134,6 +144,22 @@ export async function buildServer(options: BuildServerOptions = {}) {
       return scheduler.cancel(request.params.id);
     } catch (error) {
       return reply.code(404).send({ error: "TASK_NOT_FOUND", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/approvals/:id/decide", async (request, reply) => {
+    const parsed = decideApprovalSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "INVALID_DECISION", message: "需要明确批准或拒绝，并提交当前审批参数哈希" });
+    }
+    try {
+      return await approvals.decide(request.params.id, parsed.data.decision, parsed.data.parameterHash);
+    } catch (error) {
+      if (error instanceof ApprovalError) {
+        const status = error.code === "APPROVAL_NOT_FOUND" ? 404 : error.code === "APPROVAL_EXPIRED" ? 410 : 409;
+        return reply.code(status).send({ error: error.code, message: error.message });
+      }
+      return reply.code(500).send({ error: "APPROVAL_FAILED", message: error instanceof Error ? error.message : String(error) });
     }
   });
 

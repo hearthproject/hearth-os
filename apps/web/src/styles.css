@@ -737,6 +737,31 @@ a.metric-card:hover { transform: translateY(-2px); background: rgba(255, 252, 24
 .approval-mini strong { display: block; font-size: 10px; }
 .approval-mini small { color: var(--faint); font-size: 9px; }
 
+.approval-card { margin-bottom: 16px; padding: 20px; border: 1px solid rgba(188, 100, 39, 0.3); border-radius: 18px; background: linear-gradient(135deg, rgba(253, 242, 228, 0.95), rgba(255, 251, 244, 0.88)); box-shadow: 0 16px 40px rgba(72, 58, 39, 0.07); }
+.approval-card.approved { border-color: rgba(85, 117, 94, 0.25); background: linear-gradient(135deg, rgba(229, 238, 228, 0.9), rgba(255, 251, 244, 0.88)); }
+.approval-card.rejected, .approval-card.expired { border-color: var(--line); background: rgba(255, 251, 244, 0.7); }
+.approval-card-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 13px; margin-bottom: 15px; }
+.approval-card-icon { display: grid; place-items: center; width: 41px; height: 41px; border-radius: 12px; color: var(--amber); background: var(--amber-soft); }
+.approval-card-head .eyebrow { margin-bottom: 5px; }
+.approval-card-head h2 { font-family: var(--font-display); font-size: 22px; font-weight: 500; letter-spacing: -0.025em; }
+.approval-card-head p { margin-top: 4px; color: var(--muted); font-size: 10px; }
+.approval-status { padding: 5px 8px; border: 1px solid rgba(188, 100, 39, 0.2); border-radius: 100px; color: var(--amber); background: rgba(255, 255, 255, 0.45); font-size: 9px; white-space: nowrap; }
+.approval-target { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
+.approval-target > div { min-width: 0; padding: 9px 10px; border: 1px solid rgba(72, 58, 39, 0.08); border-radius: 9px; background: rgba(255, 255, 255, 0.35); }
+.approval-target span { display: block; margin-bottom: 3px; color: var(--faint); font-size: 8px; }
+.approval-target strong { display: flex; align-items: center; gap: 4px; overflow: hidden; color: var(--ink-soft); font-family: "SFMono-Regular", Consolas, monospace; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.approval-preview { margin-bottom: 13px; padding: 13px 14px; border: 1px solid var(--line); border-radius: 11px; background: rgba(255, 255, 255, 0.5); }
+.approval-preview strong { display: block; margin-bottom: 7px; font-size: 11px; }
+.approval-preview pre { max-height: 220px; overflow: auto; color: var(--ink-soft); font-family: "SFMono-Regular", Consolas, monospace; font-size: 9px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.approval-actions, .approval-confirm { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.approval-confirm { padding: 11px 12px; border: 1px solid rgba(188, 100, 39, 0.18); border-radius: 10px; background: rgba(255, 255, 255, 0.5); }
+.approval-confirm > span { display: flex; align-items: center; gap: 7px; color: var(--amber); font-size: 10px; }
+.approval-confirm > div { display: flex; flex: 0 0 auto; gap: 7px; }
+.approval-result { display: flex; align-items: center; gap: 7px; padding: 9px 11px; border-radius: 9px; color: var(--green); background: rgba(229, 238, 228, 0.55); font-size: 10px; }
+.approval-result.rejected, .approval-result.expired, .approval-result.failed, .approval-result.uncertain { color: var(--red); background: var(--red-soft); }
+.approval-result a { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; color: var(--ink); font-size: 9px; text-decoration: underline; text-underline-offset: 3px; }
+.approval-binding { display: block; margin-top: 10px; color: var(--faint); font-family: "SFMono-Regular", Consolas, monospace; font-size: 8px; }
+
 .info-list, .settings-card dl { display: flex; flex-direction: column; gap: 8px; margin: 0; }
 .info-list > div, .settings-card dl > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
 .info-list > div:last-child, .settings-card dl > div:last-child { padding-bottom: 0; border-bottom: 0; }
@@ -853,6 +878,9 @@ a.metric-card:hover { transform: translateY(-2px); background: rgba(255, 252, 24
   .task-grid, .artifact-grid, .settings-grid { grid-template-columns: 1fr; }
   .detail-header { align-items: flex-start; flex-direction: column; gap: 16px; }
   .detail-layout { grid-template-columns: 1fr; }
+  .approval-target { grid-template-columns: 1fr; }
+  .approval-card-head { grid-template-columns: auto minmax(0, 1fr); }
+  .approval-status { grid-column: 2; justify-self: start; }
   .detail-side { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
   .timeline-panel { min-height: 300px; }
 }

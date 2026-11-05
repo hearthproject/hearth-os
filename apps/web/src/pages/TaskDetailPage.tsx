@@ -11,7 +11,6 @@ import {
   FolderOpen,
   Hash,
   Loader2,
-  MessageSquare,
   RotateCcw,
   ShieldAlert,
   Sparkles,
@@ -19,6 +18,7 @@ import {
 } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
 import { ArtifactPreview } from "../components/ArtifactPreview.tsx";
+import { ApprovalCard } from "../components/ApprovalCard.tsx";
 import { StatusPill } from "../components/StatusPill.tsx";
 import { api } from "../lib/api.ts";
 import { CATEGORY_LABELS, EVENT_LABELS, formatBytes, formatDate, needsAttention, STATUS_LABELS } from "../lib/format.ts";
@@ -112,6 +112,14 @@ export function TaskDetailPage() {
         </section>
       )}
 
+      {view.approvals.filter((approval) => approval.status === "pending").map((approval) => (
+        <ApprovalCard
+          key={approval.id}
+          approval={approval}
+          effect={view.effects.find((effect) => effect.approvalId === approval.id)}
+        />
+      ))}
+
       <div className="detail-layout">
         <section className="panel timeline-panel">
           <div className="panel-head"><h2>执行记录</h2><span>{view.events.length} 条事件</span></div>
@@ -146,18 +154,6 @@ export function TaskDetailPage() {
               </div>
             )}
           </section>
-
-          {view.approvals.length > 0 && (
-            <section className="panel side-panel">
-              <div className="panel-head"><h2>需要你确认</h2><span>{view.approvals.filter((approval) => approval.status === "pending").length}</span></div>
-              {view.approvals.map((approval) => (
-                <div key={approval.id} className="approval-mini">
-                  <span><MessageSquare size={16} /></span>
-                  <div><strong>{approval.summary}</strong><small>{approval.status === "pending" ? "等待你的决定" : approval.status}</small></div>
-                </div>
-              ))}
-            </section>
-          )}
 
           <section className="panel side-panel">
             <div className="panel-head"><h2>任务信息</h2></div>
