@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "taskId": "T09-mw3h4d46-e3d1a0",
+  "templateId": "T09",
+  "title": "复现 CI Bug",
+  "runId": "5bf7eb1b-bde2-4c31-9d71-572c571b68e5",
+  "attempt": 4,
+  "generatedAt": "2026-11-05T12:55:41.729Z",
+  "inputs": [
+    {
+      "label": "任务要求",
+      "kind": "file",
+      "source": "eval/inputs/T09-goldmind-bug-repro.md",
+      "sha256": "ebb3cff7ac42812bcdb6e7b462a281d312ddf726ecb03b64d942677e26d0466c"
+    },
+    {
+      "label": "PR #14",
+      "kind": "github",
+      "source": "https://github.com/JasonBuildAI/GoldMind/pull/14",
+      "sha256": "72d285605fbb994e14bd8e9a3fc4cc6e8b83089c01ce97479f999e6da59939d9",
+      "metadata": {
+        "repo": "JasonBuildAI/GoldMind",
+        "base": "main",
+        "branch": "detached-1c5efe94dfa7",
+        "baseSha": "bde948b11575720c96acadcf225d3c169f36d12b",
+        "headSha": "1c5efe94dfa784c3b6c0b5c221286f489d7f11f2"
+      }
+    }
+  ],
+  "expectedOutputs": [
+    "bug-reproduction.md"
+  ],
+  "codex": {
+    "threadId": "01a1abbc-05c6-7cd1-9286-69750516c963",
+    "profileLabel": "OpenDesign / deepseek-v4.1-flash",
+    "usage": {
+      "inputTokens": 3233255,
+      "cachedInputTokens": 3106304,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 48754,
+      "reasoningOutputTokens": 13387
+    }
+  },
+  "artifacts": [
+    {
+      "path": "bug-reproduction.md",
+      "sha256": "f07190b9147eb2d043f5ba039e51f97fdeac7b21678e4ab63e5ed4a42889a5ad",
+      "bytes": 9749
+    },
+    {
+      "path": "pytest-exit-code.txt",
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "bytes": 1
+    },
+    {
+      "path": "pytest-focused-exit-code.txt",
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "bytes": 1
+    },
+    {
+      "path": "pytest-focused.txt",
+      "sha256": "3a7f8d12b14912599482652195f792abfc5bba0929766d1d5982a6e909f9dfca",
+      "bytes": 10718
+    },
+    {
+      "path": "pytest-output-initial-temp-error.txt",
+      "sha256": "cbd57693cf7be315a422847424ce94491be5039bd2fed1df92fb2fd52e7bac22",
+      "bytes": 1705970
+    },
+    {
+      "path": "pytest-output.txt",
+      "sha256": "c6abfb6f172d7b963bf15337ecfe1a2b6e251c3e70c309aceff45edfd9061b36",
+      "bytes": 13070
+    },
+    {
+      "path": "route-introspection.txt",
+      "sha256": "68fe68e76cf170c4653ef02101d499816f7f90fb933f323d02fa012f1c9d78e1",
+      "bytes": 1020
+    }
+  ]
+}
