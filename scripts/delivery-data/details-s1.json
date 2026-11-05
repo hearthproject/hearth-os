@@ -20,7 +20,7 @@
         "pnpm dev：hearthd 与 Web 同时启动",
         "pnpm test:fault：kill -9、断网、超时、重复投递",
         "pnpm test:e2e：创建→取消→重试→审批→产物→恢复",
-        "pnpm eval:mvp：10 个真实任务与基线对比"
+        "pnpm eval:mvp：15 个真实任务、至少 10 个通过，并与基线对比"
       ]
     },
     "en": {
@@ -90,7 +90,7 @@
           ["MVP 任务全生命周期", "补齐持久 Run、详情时间线、取消、重试、失败页、产物中心和预算上限。所有动作在 Web 中完成，用户不需要打开终端。"],
           ["失败解释与恢复入口", "每个失败显示发生了什么、影响范围、是否可重试、是否会重复副作用和下一步。无法自动恢复时明确转人工，而不是继续转圈。"],
           ["练习 Effect 的审批闭环", "用本地测试服务或测试账户演示 Effect Preview、批准、拒绝和 Receipt。审批必须绑定动作、参数、范围和过期时间。"],
-          ["10 个真实任务与体验收口", "让首位用户完成至少 10 个真实任务，记录成功率、人工分钟、Token、失败与恢复；修复阻塞主路径的文案、布局和状态歧义。"]
+          ["15 个真实任务与体验收口", "让首位用户完成 15 个真实任务中的至少 10 个，记录成功率、人工分钟、Token、失败与恢复；修复阻塞主路径的文案、布局和状态歧义。"]
         ]
       },
       "en": {
@@ -98,7 +98,7 @@
           ["MVP task lifecycle", "Complete durable Runs, detail timeline, cancel, retry, failure page, artifact center, and budget limits. All actions work in the browser without opening a terminal."],
           ["Failure explanation and recovery", "Every failure shows what happened, impact, retryability, duplicate-effect risk, and next step. If automatic recovery is unsafe, hand over explicitly instead of spinning."],
           ["Practice-effect approval loop", "Use a local test service or test account to demonstrate Effect Preview, approve, reject, and Receipt. Approval binds action, parameters, scope, and expiry."],
-          ["Ten real tasks and UX closeout", "Let the first user complete at least 10 real tasks and record success, manual minutes, Token, failure, and recovery. Fix copy, layout, and state ambiguity that blocks the main path."]
+          ["Fifteen real tasks and UX closeout", "Let the first user complete at least 10 of the 15 real tasks and record success, manual minutes, Token, failure, and recovery. Fix copy, layout, and state ambiguity that blocks the main path."]
         ]
       }
     },
@@ -123,7 +123,7 @@
     "D1.5": {
       "zh": {
         "modules": [
-          ["第二任务族选择", "选择一个与首个任务族不同、但仍可本地验证的窄任务，例如文档转换或 Issue 到 PR 草稿。复用同一 Ticket、Run、Artifact 和审批路径，不复制一套旁路系统。"],
+          ["跨行业任务族覆盖", "从 eval/ 的 15 个任务中再选择至少两个与首批不同的任务族，例如网页归档或 Issue 到 PR。复用同一 Ticket、Run、Artifact 和审批路径，不复制一套旁路系统。"],
           ["能力路由与模板", "为执行器声明 capability，按任务需求路由；任务模板固定输入、输出和验收。路由失败显示缺失能力，不默默降级到不适用的执行器。"],
           ["恢复、预算与故障注入", "补齐 checkpoint、暂停、恢复、预算耗尽和人工接管；运行故障注入和重放，验证不同任务族共享同一恢复语义。"],
           ["内核加固与审计导出", "补 schema migration、事件完整性、产物校验、诊断导出和用户可见审计。移除只在开发机可用的隐藏配置和永久 mock。"]
@@ -131,7 +131,7 @@
       },
       "en": {
         "modules": [
-          ["Second task-family selection", "Pick a narrow task that differs from the first but remains locally verifiable, such as document conversion or Issue-to-PR draft. Reuse the same Ticket, Run, Artifact, and approval paths; do not build a bypass system."],
+          ["Cross-industry task-family coverage", "Pick at least two task families from the 15 eval tasks that differ from the first batch, such as web archiving or Issue-to-PR. Reuse the same Ticket, Run, Artifact, and approval paths; do not build a bypass system."],
           ["Capability routing and templates", "Executors declare capabilities and tasks route by requirement. Templates fix inputs, outputs, and acceptance. Missing capability fails visibly instead of silently falling back to an unsuitable executor."],
           ["Recovery, budget, and fault injection", "Add checkpoints, pause, resume, budget exhaustion, and human takeover. Run fault injection and replay to prove both task families share the same recovery semantics."],
           ["Kernel hardening and audit export", "Add schema migration, event integrity, artifact validation, diagnostics export, and a user-visible audit view. Remove hidden development-machine configuration and permanent mocks."]

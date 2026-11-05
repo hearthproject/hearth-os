@@ -18,8 +18,8 @@ Each phase has four steps. Open a phase name for the detailed plan.
 
 | Phase | Goal | What the user gets |
 |---|---|---|
-| [Phase 1 · Minimum Complete MVP](/en/delivery/stage-1) | Deliver the smallest complete product that a user can use every day. | A local task workbench that can be used every day |
-| [Phase 2 · Everyday Content Work](/en/delivery/stage-2) | Expand from one narrow task family to email, calendar, documents, tables, and the web. | A personal operator that handles everyday content and writes safely after approval |
+| [Phase 1 · Minimum Complete MVP](/en/delivery/stage-1) | Deliver the smallest complete product that passes at least 10 of 15 cross-industry real tasks. | A local task workbench that can be used every day across multiple task families |
+| [Phase 2 · Everyday Content Work](/en/delivery/stage-2) | Expand from the initial cross-industry tasks to email, calendar, documents, tables, and the web. | A personal operator that handles everyday content and writes safely after approval |
 | [Phase 3 · Desktop Operation](/en/delivery/stage-3) | Let Hearth operate desktop software and cross-application workflows without open interfaces. | An assistant that can operate desktop software, pause, take over, and recover from failure |
 | [Phase 4 · Proactive Service and Mobile Entry](/en/delivery/stage-4) | Work proactively within limited authority and use the phone for approval and takeover. | An assistant that speaks at the right time and can be approved or taken over from a phone |
 | [Phase 5 · Memory and Capability Evolution](/en/delivery/stage-5) | Let the system accumulate context and improve methods, with every change visible, correctable, and reversible. | An assistant that accumulates context and improves methods while staying correctable and reversible |
@@ -27,7 +27,7 @@ Each phase has four steps. Open a phase name for the detailed plan.
 
 ## How to proceed
 
-1. **Narrow before broad.** Complete one task family before adding sources, operation modes, and devices.
+1. **Complete before expanding.** Complete at least 10 of the initial 15 tasks before adding sources, operation modes, and devices.
 2. **Read-only before writes, low risk before high risk.** Observe first, draft second, and approve execution last.
 3. **Accept every phase with real tasks.** Finished code or finished pages do not count as completion.
 4. **Safety and recovery start in Phase 1.** Approval, artifacts, failure recovery, and permission boundaries are not postponed.

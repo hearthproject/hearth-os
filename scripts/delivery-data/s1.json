@@ -89,8 +89,8 @@
       "slug": "d1-2",
       "zh": {
         "title": "第一个真实 Codex 纵向切片",
-        "lead": "把 fake executor 换成真实 Codex，在一个受控 workspace 中完成第一个可验证的窄任务。",
-        "outcome": "用户提交一组本地资料，得到带引用的结构化报告；任务卡显示阶段、产物、验证结果和成本。",
+        "lead": "把 fake executor 换成真实 Codex，在受控 workspace 中完成首批可验证的真实任务。",
+        "outcome": "用户提交本地资料，得到带引用的结构化产物；任务卡显示阶段、产物、验证结果和成本。",
         "steps": [
           "实现 Codex adapter，加入版本检查、健康检查、超时、取消和失败分类。",
           "为每次运行创建一次性 workspace，限制可读范围，保留输入与产物的来源关系。",
@@ -99,13 +99,13 @@
           "把执行事件投影到任务时间线，采集 Token、延迟、模型与执行器信息。",
           "对失败结果给出用户可理解的类别和下一步，不用永久 mock 掩盖真实问题。"
         ],
-        "gate": "一个默认任务族端到端可用；产物可打开和验证；引用或文件证据可追溯；失败时 UI 显示类别和下一步；不使用永久 mock 结果。",
-        "evidence": ["Codex adapter", "Task Pack 与结构化结果", "引用/文件验证器", "真实任务演示与成本记录"]
+        "gate": "首批真实任务端到端可用；产物可打开和验证；引用或文件证据可追溯；失败时 UI 显示类别和下一步；不使用永久 mock 结果。",
+        "evidence": ["Codex adapter", "Task Pack 与结构化结果", "引用/文件验证器", "首批真实任务演示与成本记录"]
       },
       "en": {
         "title": "First real Codex vertical slice",
-        "lead": "Replace the fake executor with real Codex and complete the first verifiable narrow task inside a controlled workspace.",
-        "outcome": "A user submits local materials and receives a structured report with citations; the task card shows stages, artifact, verification, and cost.",
+        "lead": "Replace the fake executor with real Codex and complete the first verifiable real tasks inside a controlled workspace.",
+        "outcome": "A user submits local materials and receives structured artifacts with citations; the task card shows stages, artifacts, verification, and cost.",
         "steps": [
           "Implement the Codex adapter with version checks, health checks, timeout, cancellation, and failure classification.",
           "Create a disposable workspace per run, limit readable scope, and preserve input-to-artifact provenance.",
@@ -114,8 +114,8 @@
           "Project execution events into the task timeline and capture Token, latency, model, and executor data.",
           "Explain failures with user-facing classes and next actions; never hide real problems behind permanent mocks."
         ],
-        "gate": "One default task family works end to end; artifacts open and verify; citations or file evidence are traceable; failures show class and next step; no permanent mock result remains.",
-        "evidence": ["Codex adapter", "Task Pack and structured result", "Citation/file verifier", "Real-task demo and cost record"]
+        "gate": "The first real-task set works end to end; artifacts open and verify; citations or file evidence are traceable; failures show class and next step; no permanent mock result remains.",
+        "evidence": ["Codex adapter", "Task Pack and structured result", "Citation/file verifier", "First real-task demo and cost record"]
       }
     },
     {
@@ -190,34 +190,34 @@
       "id": "D1.5",
       "slug": "d1-5",
       "zh": {
-        "title": "第二任务族与内核加固",
-        "lead": "证明内核不是为一个演示任务量身定制的：再加入一个真实任务族，并用故障注入检验恢复能力。",
-        "outcome": "除研究/文档外，第二个任务族也能通过同一任务卡模型完成；失败任务更容易恢复。",
+        "title": "跨行业任务覆盖与内核加固",
+        "lead": "证明内核不是为一个演示任务量身定制的：覆盖多个真实任务族，并用故障注入检验恢复能力。",
+        "outcome": "文档、网页、研发协作、数据/财务等任务族通过同一任务卡模型完成；失败任务更容易恢复。",
         "steps": [
-          "选择代码/Issue 或用户第二高频任务族，复用 Task Pack、审批、产物和验证模型。",
-          "加入 diff、测试结果和结构化结果验证，确保第二任务族不是低标准拼接。",
+          "从 eval/ 的 15 个任务中选择至少两个与首批不同的任务族，复用 Task Pack、审批、产物和验证模型。",
+          "加入 diff、测试结果和结构化结果验证，确保新增任务族不是低标准拼接。",
           "实现 lease 与 fencing token，防止旧 worker 在接管后继续写入。",
           "执行 kill -9、断网、超时、磁盘满和重复投递等故障注入。",
           "补齐备份恢复、更完整的失败分类、降级路径和用户可理解的修复建议。",
-          "回归两个任务族，确认状态与事实源一致，失败不需要人工重建。"
+          "回归所有已覆盖任务族，确认状态与事实源一致，失败不需要人工重建。"
         ],
-        "gate": "两个任务族都能端到端完成；恢复率达到阶段门槛；重复外部副作用为 0；任务状态与事实源一致；失败不需要人工重建状态。",
-        "evidence": ["第二任务族端到端演示", "lease/fencing 测试", "故障注入矩阵", "备份恢复与失败分类"]
+        "gate": "已覆盖的多个任务族都能端到端完成；恢复率达到阶段门槛；重复外部副作用为 0；任务状态与事实源一致；失败不需要人工重建状态。",
+        "evidence": ["跨行业任务族端到端演示", "lease/fencing 测试", "故障注入矩阵", "备份恢复与失败分类"]
       },
       "en": {
-        "title": "Second task family and kernel hardening",
-        "lead": "Prove the kernel is not tailored to one demo task by adding a real second task family and testing recovery through fault injection.",
-        "outcome": "A second task family completes through the same task-card model, and failed tasks are easier to recover.",
+        "title": "Cross-industry task coverage and kernel hardening",
+        "lead": "Prove the kernel is not tailored to one demo task by covering multiple real task families and testing recovery through fault injection.",
+        "outcome": "Document, web, engineering, and data/finance task families complete through the same task-card model, and failed tasks are easier to recover.",
         "steps": [
-          "Choose Codex/Issue work or the user's second most frequent task family, reusing Task Pack, approval, artifact, and verification models.",
-          "Add diff, test results, and structured-result verification so the second family is not held to a lower standard.",
+          "Choose at least two task families from the 15 eval tasks that differ from the first batch, reusing Task Pack, approval, artifact, and verification models.",
+          "Add diff, test results, and structured-result verification so new families are not held to a lower standard.",
           "Implement leases and fencing tokens so an old worker cannot keep writing after takeover.",
           "Inject faults such as kill -9, network loss, timeout, disk full, and duplicate delivery.",
           "Complete backup recovery, richer failure classes, degradation paths, and actionable repair suggestions.",
-          "Regress both task families and confirm state matches the source of truth without manual rebuild."
+          "Regress all covered task families and confirm state matches the source of truth without manual rebuild."
         ],
-        "gate": "Both task families work end to end; recovery meets the stage target; duplicate external effects are zero; state matches events; failures need no manual rebuild.",
-        "evidence": ["Second-family end-to-end demo", "Lease/fencing tests", "Fault-injection matrix", "Backup recovery and failure taxonomy"]
+        "gate": "All covered task families work end to end; recovery meets the stage target; duplicate external effects are zero; state matches events; failures need no manual rebuild.",
+        "evidence": ["Cross-industry family end-to-end demo", "Lease/fencing tests", "Fault-injection matrix", "Backup recovery and failure taxonomy"]
       }
     },
     {
@@ -228,7 +228,7 @@
         "lead": "把 MVP 放进可长期试用的本地环境，完成范围、限制、安装、备份、升级与指标基线。",
         "outcome": "一个可以持续试用的本地产品，具备明确的范围、已知限制、恢复方式和指标基线。",
         "steps": [
-          "跑 10 个真实任务，覆盖两个任务族、失败、审批和恢复路径。",
+          "跑 15 个真实任务，至少 10 个通过，覆盖多个任务族、失败、审批和恢复路径。",
           "对比全人工和直接使用 Codex 的基线，记录人工分钟、成功率、Token 和失败类型。",
           "修复高频失败与最影响信任的恢复问题，不扩大新的能力范围。",
           "补全安装、备份、升级、数据导出和已知限制说明。",
@@ -236,14 +236,14 @@
           "确认用户可独立使用，不依赖开发者手工运维或数据库操作。"
         ],
         "gate": "Stage 1 退出条件全部满足；MVP 没有被后续内核工作破坏；用户能独立使用，不依赖开发者手工运维。",
-        "evidence": ["10 个真实任务报告", "与两条基线的对比", "安装/备份/升级/导出说明", "Stage 1 安全与评测报告"]
+        "evidence": ["15 个真实任务报告（至少 10 个通过）", "与两条基线的对比", "安装/备份/升级/导出说明", "Stage 1 安全与评测报告"]
       },
       "en": {
         "title": "Stage 1 release",
         "lead": "Put the MVP into a local environment that can be used repeatedly, with explicit scope, limits, install, backup, upgrade, and metric baselines.",
         "outcome": "A locally usable product with clear scope, known limits, recovery, and a metric baseline.",
         "steps": [
-          "Run 10 real tasks across both task families, failure, approval, and recovery paths.",
+          "Run 15 real tasks with at least 10 passing, covering multiple task families, failure, approval, and recovery paths.",
           "Compare against manual and direct Codex baselines, recording minutes, success, Token, and failure types.",
           "Fix high-frequency failures and trust-breaking recovery issues without expanding scope.",
           "Complete install, backup, upgrade, data export, and known-limitations documentation.",
@@ -251,7 +251,7 @@
           "Confirm the user can operate it independently without developer maintenance or database edits."
         ],
         "gate": "All Stage 1 exit conditions hold; later kernel work has not broken the MVP; the user can use it independently without developer operations.",
-        "evidence": ["10 real-task report", "Comparison with both baselines", "Install/backup/upgrade/export guide", "Stage 1 safety and evaluation report"]
+        "evidence": ["15 real-task report with at least 10 passes", "Comparison with both baselines", "Install/backup/upgrade/export guide", "Stage 1 safety and evaluation report"]
       }
     }
   ]

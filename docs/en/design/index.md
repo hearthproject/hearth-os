@@ -14,7 +14,7 @@ Hearth serves one primary user, with a small number of trusted collaborators who
 
 The product is organized around tasks, not chat history. The user needs to know what the system is doing, why it needs attention, what was delivered, and where to recover after a failure. Models, tools, and execution environments can change; task state, authority, evidence, and external receipts must remain.
 
-The first product scope is not all personal work. It starts with one frequent task family that has low external risk and clear acceptance, and completes the full path from input to delivery. Once that path is reliable, Hearth expands sources, external writes, desktop operation, proactive service, memory, and multi-device use.
+The first product scope is not all personal work. It starts with 15 cross-industry tasks with verifiable results and passes at least 10 of them, establishing the first complete path from input to delivery. It does not try to cover all personal work, but it requires document processing, web research, engineering collaboration, data/finance, customer support, recruiting, education, and marketing to share one task, approval, artifact, and recovery system. Once that foundation is reliable, Hearth expands sources, external writes, desktop operation, proactive service, memory, and multi-device use.
 
 **Explicit non-goals:** enterprise multi-tenancy, a public agent marketplace, unapproved high-risk automation, a foundation-model race, and a tool that requires daily maintenance of prompts, plugins, and workflows.
 

@@ -1,6 +1,6 @@
 ---
 title: "Phase 2 · Everyday Content Work"
-description: "Expand from one narrow task family to email, calendar, documents, tables, and the web."
+description: "Expand from the initial cross-industry tasks to email, calendar, documents, tables, and the web."
 outline: [2, 3]
 ---
 
@@ -8,7 +8,7 @@ outline: [2, 3]
 
 ## Goal
 
-Phase 2 expands Hearth from one narrow task family to most everyday content work: reading email, calendars, files, and knowledge bases; handling documents, tables, and web material; drafting content; and sending or writing after approval. The order must be read-only first, drafting second, and external writes last.
+Phase 2 expands Hearth from the initial cross-industry task set to most everyday content work: reading email, calendars, files, and knowledge bases; handling documents, tables, and web material; drafting content; and sending or writing after approval. The order must be read-only first, drafting second, and external writes last.
 
 This phase has four steps:
 

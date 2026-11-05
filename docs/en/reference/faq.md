@@ -14,7 +14,7 @@ outline: false
 
 **Does it require an internet connection?** Local-first by default. Tasks, artifacts, memory, and credentials stay in an environment the user controls. Models, remote execution, and sync services are optional. When cloud capability is used, Hearth explains which data leaves the device, how long it is retained, and how it can be deleted.
 
-**What can Phase 1 do?** Phase 1 delivers the smallest complete MVP. It serves one narrow task family but covers the full path in a real browser: create, execute, approve, inspect artifacts, and recover from failure. It does not include email, calendars, desktop operation, proactive loops, full memory, or multiple devices.
+**What can Phase 1 do?** Phase 1 delivers the smallest complete MVP. It starts from 15 cross-industry real tasks and passes at least 10 of them while covering the full path in a real browser: create, execute, approve, inspect artifacts, and recover from failure. It still does not include sending email, writing calendars, desktop operation, proactive loops, full memory, or multiple devices.
 
 **Why not build one universal agent?** Because "universal" usually means permission, context, and failure boundaries are all uncontrolled. Hearth uses multiple specialized executors and chooses a path by capability, risk, reversibility, and cost. Each executor has explicit boundaries, verification, and human takeover.
 
