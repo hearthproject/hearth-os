@@ -1,0 +1,6 @@
+{
+  "title": "test: add regression guard for /health secret leakage",
+  "body": "待补：链接 Issue #16 并填写改动摘要、测试结果与回归说明",
+  "branch": "test/health-secret-guard",
+  "base": "main"
+}

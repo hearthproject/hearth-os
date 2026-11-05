@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "taskId": "T07-mw3gav04-3e3d51",
+  "templateId": "T07",
+  "title": "按 Issue 实现并提交 PR",
+  "runId": "07697f49-d274-416e-a328-49ace93d1433",
+  "attempt": 6,
+  "generatedAt": "2026-11-05T13:03:54.132Z",
+  "inputs": [
+    {
+      "label": "任务要求",
+      "kind": "file",
+      "source": "eval/inputs/T07-goldmind-issue.md",
+      "sha256": "e4a889281b7aa9e329a88839672a00ad82f6ae2fc6200a107a95f86b578d78fa"
+    },
+    {
+      "label": "Issue #16",
+      "kind": "github",
+      "source": "https://github.com/JasonBuildAI/GoldMind/issues/16",
+      "sha256": "230dc03da506e586159522a6f6cf8c51791233c88f7dfc5303d809b40e382acf",
+      "metadata": {
+        "repo": "JasonBuildAI/GoldMind",
+        "base": "main",
+        "branch": "test/health-secret-guard",
+        "baseSha": "bde948b11575720c96acadcf225d3c169f36d12b",
+        "headSha": "bde948b11575720c96acadcf225d3c169f36d12b"
+      }
+    }
+  ],
+  "expectedOutputs": [
+    "report.md",
+    "pr-preview.json"
+  ],
+  "codex": {
+    "threadId": "01a1abc9-3baa-7d40-827d-a85344d494a6",
+    "profileLabel": "OpenDesign / deepseek-v4.1-flash",
+    "usage": {
+      "inputTokens": 1645005,
+      "cachedInputTokens": 1566080,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 28898,
+      "reasoningOutputTokens": 8685
+    }
+  },
+  "artifacts": [
+    {
+      "path": "pr-preview.json",
+      "sha256": "cc838d268a9100deb6e78512bd27db0ac9835e33efab285a9ad73b10ae229e7e",
+      "bytes": 226
+    },
+    {
+      "path": "report.md",
+      "sha256": "3f78c578296eb096e52f8dcfeabe86de8be3bfd77abce864f0d7649b2db501bd",
+      "bytes": 263
+    }
+  ]
+}

@@ -29,7 +29,7 @@ The complete documentation is published at **<https://hearthproject.github.io/he
 
 ## Project Status
 
-Hearth has entered **Phase 1 (MVP) implementation**. The repository now contains a runnable local control plane built with TypeScript and React, a native Codex executor adapter, an append-only SQLite event log, approval-gated external effects, and a 15-task real-world evaluation suite. The Phase 1 exit requires at least 10 tasks to pass acceptance; current evidence lives in `eval/README.md`.
+Hearth has entered **Phase 1 (MVP) implementation**. The repository now contains a runnable local control plane built with TypeScript and React, a native Codex executor adapter, an append-only SQLite event log, approval-gated external effects, and a 15-task real-world evaluation suite. The Phase 1 exit requires at least 10 tasks to pass acceptance; current evidence and the per-task acceptance report live in `eval/phase-1-acceptance.md`.
 
 ## Repository Layout
 
