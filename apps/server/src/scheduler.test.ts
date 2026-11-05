@@ -76,6 +76,28 @@ describe("Hearth scheduler", () => {
     expect(store?.listArtifacts(task.id)).toHaveLength(0);
   });
 
+  it("replaces stale files in a managed output directory on a later run", async () => {
+    const service = setup();
+    let runCount = 0;
+    const runner: CodexRunner = async (options) => {
+      runCount += 1;
+      writeFileSync(join(options.workingDirectory, "out", "meeting-notes.md"), `# 纪要 ${runCount}\n`);
+      if (runCount === 1) writeFileSync(join(options.workingDirectory, "out", "stale.md"), "old output\n");
+      return FAKE_RESULT;
+    };
+    scheduler = makeScheduler(service, runner);
+    scheduler.start();
+
+    const first = service.createTask({ templateId: "T01" });
+    await waitForStatus(service, first.id, "completed");
+    expect(existsSync(join(requireTemp(), "eval", "runs", "T01", "stale.md"))).toBe(true);
+
+    const second = service.createTask({ templateId: "T01" });
+    await waitForStatus(service, second.id, "completed");
+    expect(existsSync(join(requireTemp(), "eval", "runs", "T01", "stale.md"))).toBe(false);
+    expect(readFileSync(join(requireTemp(), "eval", "runs", "T01", "meeting-notes.md"), "utf8")).toContain("纪要 2");
+  });
+
   it("runs one task at a time", async () => {
     const service = setup();
     let active = 0;

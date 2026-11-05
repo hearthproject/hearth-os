@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
 import type { ArtifactRecord, RunRecord, RunUsage, TaskRecord } from "@hearth/core";
 import { sha256File, type PreparedInput, resolveInside } from "./workspace.ts";
@@ -37,6 +37,10 @@ export function publishArtifacts(options: PublishArtifactsOptions): ArtifactReco
   if (totalBytes > MAX_TOTAL_BYTES) throw new Error(`产物总大小超限：${totalBytes} bytes`);
 
   const publishedRoot = resolveInside(options.artifactBase, options.task.outputDir);
+  if (isManagedOutputDir(options.task.outputDir)) {
+    rmSync(publishedRoot, { recursive: true, force: true });
+  }
+  mkdirSync(publishedRoot, { recursive: true });
   const records: ArtifactRecord[] = [];
   for (const file of files) {
     const target = resolveInside(publishedRoot, file.relativePath);
@@ -73,6 +77,11 @@ export function publishArtifacts(options: PublishArtifactsOptions): ArtifactReco
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
   records.push(artifactRecord(options, "run-manifest.json", manifestPath, now));
   return records;
+}
+
+function isManagedOutputDir(outputDir: string): boolean {
+  const normalized = outputDir.replace(/\\/g, "/").replace(/^\.\//, "");
+  return normalized.startsWith("eval/runs/") || normalized.startsWith(".hearth/artifacts/");
 }
 
 export function validateExpectedOutputs(outDir: string, expectedOutputs: string[]): void {
