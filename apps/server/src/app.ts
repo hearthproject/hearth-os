@@ -1,4 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
@@ -113,6 +115,27 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
 
   app.get("/api/templates", async () => ({ templates: service.listTemplates() }));
+
+  app.get("/api/export", async (_request, reply) => {
+    const stamp = new Date().toISOString().slice(0, 10);
+    reply.header("content-type", "application/json; charset=utf-8");
+    reply.header("content-disposition", `attachment; filename="hearth-export-${stamp}.json"`);
+    return service.exportSnapshot();
+  });
+
+  app.get("/api/backup", async (_request, reply) => {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const backupPath = join(tmpdir(), `hearth-${stamp}-${randomUUID().slice(0, 8)}.sqlite`);
+    try {
+      store.db.exec(`VACUUM INTO '${backupPath.replace(/'/g, "''")}'`);
+      const bytes = readFileSync(backupPath);
+      reply.header("content-type", "application/vnd.sqlite3");
+      reply.header("content-disposition", `attachment; filename="hearth-${new Date().toISOString().slice(0, 10)}.sqlite"`);
+      return reply.send(bytes);
+    } finally {
+      rmSync(backupPath, { force: true });
+    }
+  });
 
   app.post("/api/tasks", async (request, reply) => {
     const parsed = createTaskSchema.safeParse(request.body ?? {});

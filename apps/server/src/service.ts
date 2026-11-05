@@ -23,6 +23,18 @@ export interface TaskView {
   events: ReturnType<HearthStore["listEvents"]>;
 }
 
+export interface ExportSnapshot {
+  format: "hearth-export";
+  version: 1;
+  exportedAt: string;
+  tasks: TaskRecord[];
+  runs: RunRecord[];
+  approvals: ApprovalRecord[];
+  artifacts: ArtifactRecord[];
+  effects: EffectRecord[];
+  events: ReturnType<HearthStore["listEvents"]>;
+}
+
 export class HearthService {
   readonly store: HearthStore;
   readonly bus = new EventBus();
@@ -65,6 +77,21 @@ export class HearthService {
 
   listTasks(): TaskRecord[] {
     return this.store.listTasks();
+  }
+
+  exportSnapshot(): ExportSnapshot {
+    const tasks = this.store.listTasks();
+    return {
+      format: "hearth-export",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      tasks,
+      runs: tasks.flatMap((task) => this.store.listRuns(task.id)),
+      approvals: tasks.flatMap((task) => this.store.listApprovals(task.id)),
+      artifacts: this.store.listAllArtifacts(),
+      effects: this.store.listAllEffects(),
+      events: this.store.listEvents(0)
+    };
   }
 
   view(taskId: string): TaskView | null {

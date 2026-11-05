@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2, Cpu, HardDrive, KeyRound, Loader2, RefreshCw, ShieldCheck, WifiOff } from "lucide-react";
+import { CheckCircle2, Cpu, Download, FileJson, HardDrive, KeyRound, Loader2, RefreshCw, ShieldCheck, WifiOff } from "lucide-react";
 import { api } from "../lib/api.ts";
 
 export function SettingsPage() {
@@ -67,6 +67,10 @@ export function SettingsPage() {
           </dl>
           <p className="settings-note">任务状态写入本地 SQLite 事件日志，刷新或重启后可重建。</p>
           <p className="settings-note">备份：停止任务后复制 <code>.hearth/hearth.sqlite</code>；任务产物位于 <code>eval/runs/</code> 和 <code>.hearth/artifacts/</code>，一并复制即可完整导出。</p>
+          <div className="settings-actions">
+            <button className="ghost-button" onClick={api.downloadBackup}><Download size={15} /> 下载数据库备份</button>
+            <button className="ghost-button" onClick={api.downloadExport}><FileJson size={15} /> 导出任务记录</button>
+          </div>
         </section>
 
         <section className="settings-card">

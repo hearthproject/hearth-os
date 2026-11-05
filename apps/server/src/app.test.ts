@@ -49,6 +49,23 @@ describe("Hearth server", () => {
     await app.close();
   });
 
+  it("exports task records and produces a consistent SQLite backup", async () => {
+    const app = await buildServer({ store, serveWeb: false });
+    const created = await app.inject({ method: "POST", url: "/api/tasks", payload: { templateId: "T04" } });
+    expect(created.statusCode).toBe(201);
+
+    const exported = await app.inject({ method: "GET", url: "/api/export" });
+    expect(exported.statusCode).toBe(200);
+    expect(exported.json()).toMatchObject({ format: "hearth-export", version: 1 });
+    expect(exported.json().tasks).toHaveLength(1);
+
+    const backup = await app.inject({ method: "GET", url: "/api/backup" });
+    expect(backup.statusCode).toBe(200);
+    expect(backup.headers["content-type"]).toContain("sqlite");
+    expect(backup.rawPayload.subarray(0, 16).toString("utf8")).toBe("SQLite format 3\u0000");
+    await app.close();
+  });
+
   it("creates a task and projects its event", async () => {
     const app = await buildServer({ store, serveWeb: false });
     const response = await app.inject({

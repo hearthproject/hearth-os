@@ -47,7 +47,13 @@ export const api = {
       body: JSON.stringify({ decision, parameterHash })
     }),
   artifactUrl: (taskId: string, artifactId: string) =>
-    `/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}`
+    `/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}`,
+  downloadBackup: () => {
+    window.location.assign("/api/backup");
+  },
+  downloadExport: () => {
+    window.location.assign("/api/export");
+  }
 };
 
 export function subscribeToEvents(onEvent: () => void): () => void {

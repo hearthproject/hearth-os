@@ -712,7 +712,7 @@ a.metric-card:hover { transform: translateY(-2px); background: rgba(255, 252, 24
   background: rgba(245, 225, 218, 0.66);
 }
 .error-card > span { padding-top: 1px; }
-.error-card strong { display: block; color: var(--ink); font-size: 12px; }
+.error-card strong { display: block; max-height: 190px; overflow: auto; color: var(--ink); font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; white-space: pre-wrap; }
 .error-card p { margin-top: 3px; color: var(--ink-soft); font-size: 10px; }
 .error-card small { display: block; margin-top: 6px; color: var(--muted); font-size: 9px; }
 
@@ -866,6 +866,8 @@ a.metric-card:hover { transform: translateY(-2px); background: rgba(255, 252, 24
 .settings-card .plain-list { margin-top: 3px; }
 .settings-note { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); color: var(--faint) !important; }
 .inline-status { display: flex; align-items: center; gap: 8px; margin-top: 13px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); font-size: 9px; }
+.settings-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 13px; }
+.settings-actions .ghost-button { font-size: 11px; }
 .inline-status.ok { border-color: rgba(85, 117, 94, 0.18); background: rgba(229, 238, 228, 0.42); color: var(--green); }
 
 .loading-page { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; min-height: 70vh; color: var(--muted); font-size: 12px; }
