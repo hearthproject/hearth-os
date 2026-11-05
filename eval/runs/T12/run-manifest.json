@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "taskId": "T12-mw3ea5c3-d768a3",
+  "templateId": "T12",
+  "title": "客服工单分类与回复草稿",
+  "runId": "120eea78-87b8-48d2-b2f3-0478331b3ea3",
+  "attempt": 1,
+  "generatedAt": "2026-11-05T10:40:03.566Z",
+  "inputs": [
+    {
+      "label": "工单导出",
+      "kind": "file",
+      "source": "eval/inputs/T12-tickets.csv",
+      "sha256": "188b325cf0009a340642876a563c9b153760d4b7070c37b0b5996d3a642fae18"
+    },
+    {
+      "label": "客服知识库",
+      "kind": "file",
+      "source": "eval/inputs/T12-policy-kb.md",
+      "sha256": "115bf2b5bbefd5cd97d2381613324a4bbaec992eca62888932679bbda0b28ed0"
+    }
+  ],
+  "expectedOutputs": [
+    "triage.csv",
+    "reply-drafts.md",
+    "escalations.md",
+    "kb-draft.md"
+  ],
+  "codex": {
+    "threadId": "01a1ab45-fa10-7141-8522-2d86a1eec1f7",
+    "profileLabel": "OpenDesign / deepseek-v4.1-flash",
+    "usage": {
+      "inputTokens": 924843,
+      "cachedInputTokens": 875520,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 40374,
+      "reasoningOutputTokens": 19973
+    }
+  },
+  "artifacts": [
+    {
+      "path": "escalations.md",
+      "sha256": "25ebc0d3280d59f7465bc344a17f979ca7ef78b677ce467af970b82d6cd11ced",
+      "bytes": 5391
+    },
+    {
+      "path": "kb-draft.md",
+      "sha256": "b8030641bef7c843249225378d05bb9f81b610ba9e28bcfca474f2abba4ec251",
+      "bytes": 8718
+    },
+    {
+      "path": "reply-drafts.md",
+      "sha256": "b03a474dd1b93a5c81479e70bed637e33aca034156eb2e933ea78c1cb4d240a3",
+      "bytes": 5470
+    },
+    {
+      "path": "triage.csv",
+      "sha256": "2ab6836ff1fe23bb2d0c5f6e303f02b61184e036fccd9eff9ee34e00a4178ee3",
+      "bytes": 3625
+    }
+  ]
+}
