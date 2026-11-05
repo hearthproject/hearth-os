@@ -477,3 +477,21 @@ function errorMessage(error: unknown): string {
 export function readPrPreview(path: string): unknown {
   return JSON.parse(readFileSync(path, "utf8"));
 }
+
+const REVIEW_COMMENT_MARKERS = [
+  ["<!-- HEARTH_COMMENT_START -->", "<!-- HEARTH_COMMENT_END -->"],
+  ["PROPOSED_COMMENT_START", "PROPOSED_COMMENT_END"]
+] as const;
+
+export function extractProposedComment(markdown: string): string {
+  for (const [startMarker, endMarker] of REVIEW_COMMENT_MARKERS) {
+    const start = markdown.indexOf(startMarker);
+    if (start < 0) continue;
+    const end = markdown.indexOf(endMarker, start + startMarker.length);
+    if (end < 0) throw new Error(`评审稿缺少结束标记 ${endMarker}`);
+    const body = markdown.slice(start + startMarker.length, end).trim();
+    if (!body) throw new Error("评审评论正文为空");
+    return body;
+  }
+  throw new Error("评审稿缺少评论正文标记；请用 <!-- HEARTH_COMMENT_START --> 与 <!-- HEARTH_COMMENT_END --> 包住要发布的评论");
+}

@@ -5,6 +5,7 @@ import type { EffectRecord } from "@hearth/core";
 import { describe, expect, it } from "vitest";
 import {
   executeGitHubEffect,
+  extractProposedComment,
   prepareGitHubWorkspace,
   validatePullRequestPreview,
   type CommandRunner,
@@ -191,6 +192,31 @@ describe("GitHub execution boundaries", () => {
       base: REPOSITORY.base
     }, REPOSITORY);
     expect(preview.title).toContain("health");
+  });
+
+  it("extracts only the proposed review comment from marked output", () => {
+    const markdown = [
+      "# Internal report",
+      "",
+      "<!-- HEARTH_COMMENT_START -->",
+      "## Review",
+      "",
+      "Blocking issue.",
+      "<!-- HEARTH_COMMENT_END -->",
+      "",
+      "Internal verification notes."
+    ].join("\n");
+
+    expect(extractProposedComment(markdown)).toBe("## Review\n\nBlocking issue.");
+  });
+
+  it("accepts the legacy proposed-comment markers", () => {
+    const markdown = "Internal notes\nPROPOSED_COMMENT_START\nReview body\nPROPOSED_COMMENT_END\nMore notes";
+    expect(extractProposedComment(markdown)).toBe("Review body");
+  });
+
+  it("rejects review output without explicit comment boundaries", () => {
+    expect(() => extractProposedComment("# Review\n\nLooks fine.")).toThrow(/缺少评论正文标记/);
   });
 
   it("rejects a PR preview that changes the prepared branch", () => {

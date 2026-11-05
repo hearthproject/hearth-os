@@ -7,7 +7,7 @@ import { getTemplate } from "@hearth/templates";
 import type { ApprovalRequest, ApprovalManager } from "./approvals.ts";
 import { missingExpectedOutputs, publishArtifacts } from "./artifacts.ts";
 import { GIT_CACHE_DIR, REPO_ROOT, WORKSPACE_DIR } from "./config.ts";
-import { inspectRepository, readPrPreview, validatePullRequestPreview } from "./github.ts";
+import { extractProposedComment, inspectRepository, readPrPreview, validatePullRequestPreview } from "./github.ts";
 import type { CommandRunner } from "./github.ts";
 import { prepareTaskRuntime, type RuntimePreparation } from "./runtime.ts";
 import type { HearthService } from "./service.ts";
@@ -88,6 +88,7 @@ export class HearthScheduler {
     if (task.status === "completed" || task.status === "cancelled") return task;
     this.cancelled.add(taskId);
     this.controllers.get(taskId)?.abort();
+    this.approvals?.expireForTask(taskId);
     this.service.updateTask(taskId, {
       status: "cancelled",
       currentRunId: task.currentRunId,
@@ -224,7 +225,7 @@ export class HearthScheduler {
           throw new UnsupportedInputError(`依赖环境准备失败：${runtime.errors.join("；")}。日志：${runtime.logPath}`);
         }
       }
-      const prompt = buildTaskPrompt(task, prepared, expectedOutputs, template?.acceptance ?? [], runtime);
+      const prompt = buildTaskPrompt(task, prepared, expectedOutputs, template?.acceptance ?? [], runtime, template?.approvalKind);
       let result = await this.codexRunner({
         workingDirectory: prepared.root,
         prompt,
@@ -343,8 +344,10 @@ export class HearthScheduler {
     if (template.approvalKind === "github.comment") {
       const repository = prepared.repository;
       if (!repository || !repository.pull) throw new Error("发布评论前缺少 GitHub PR 上下文");
-      const review = readFileSync(join(prepared.outDir, "pr-review.md"), "utf8").trim();
-      if (!review) throw new Error("评审产物为空，不能发布评论");
+      const reviewFile = readFileSync(join(prepared.outDir, "pr-review.md"), "utf8").trim();
+      if (!reviewFile) throw new Error("评审产物为空，不能发布评论");
+      const review = extractProposedComment(reviewFile);
+      if (review.length > 60_000) throw new Error("评审评论过长，不能发布");
       return {
         kind: "github.comment",
         summary: `在 ${repository.repo} PR #${repository.pull} 发布评审评论`,

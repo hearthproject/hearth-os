@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import type { TaskRecord } from "@hearth/core";
-import { getTemplate } from "@hearth/templates";
+import { getTemplate, type TaskTemplate } from "@hearth/templates";
 import {
   prepareGitHubWorkspace,
   type CommandRunner,
@@ -226,7 +226,8 @@ export function buildTaskPrompt(
   workspace: PreparedWorkspace,
   expectedOutputs: string[],
   acceptance: string[] = [],
-  runtime?: RuntimePreparation | null
+  runtime?: RuntimePreparation | null,
+  approvalKind?: TaskTemplate["approvalKind"]
 ): string {
   const inputLines = workspace.inputs.map((input) => {
     const source = input.source ? `（原始位置：${input.source}）` : "";
@@ -270,6 +271,13 @@ export function buildTaskPrompt(
     `- 环境记录：${runtime.recordPath}`,
     `- 安装日志：${runtime.logPath}`
   ] : [];
+  const approvalLines = approvalKind === "github.comment" ? [
+    "",
+    "审批发布要求：",
+    "- 这是需要用户审批的 GitHub 评论任务。",
+    "- `pr-review.md` 中必须把准备发布的评论正文完整放在 `<!-- HEARTH_COMMENT_START -->` 与 `<!-- HEARTH_COMMENT_END -->` 之间。",
+    "- 标记之外只放内部说明、证据核验和自查；Hearth 只会在审批卡片和发布动作中使用两个标记之间的正文。"
+  ] : [];
 
   return [
     "你是 Hearth 的任务执行器。现在独立完成一个真实工作交付，不要只给建议。",
@@ -281,6 +289,7 @@ export function buildTaskPrompt(
     ...(inputLines.length > 0 ? inputLines : ["- 无文件输入"]),
     ...repositoryLines,
     ...runtimeLines,
+    ...approvalLines,
     "",
     "输出目录：",
     workspace.outDir,

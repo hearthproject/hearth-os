@@ -89,6 +89,15 @@ export class ApprovalManager {
     return created;
   }
 
+  expireForTask(taskId: string): number {
+    const now = new Date().toISOString();
+    const pending = this.service.store.listApprovals(taskId).filter((approval) => approval.status === "pending");
+    for (const approval of pending) {
+      this.service.updateApproval(approval.id, { status: "expired", decidedAt: now });
+    }
+    return pending.length;
+  }
+
   async decide(approvalId: string, decision: ApprovalDecision, parameterHash: string): Promise<ApprovalResult> {
     const approval = this.service.store.getApproval(approvalId);
     if (!approval) throw new ApprovalError("APPROVAL_NOT_FOUND", "审批不存在");

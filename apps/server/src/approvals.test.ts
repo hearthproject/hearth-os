@@ -66,6 +66,14 @@ describe("approval manager", () => {
     expect(service.requireTask(task.id).status).toBe("recoverable");
   });
 
+  it("expires pending approvals when their task is cancelled", () => {
+    const manager = new ApprovalManager(service, async () => ({}));
+    const { task, approval } = waitingTask(service);
+
+    expect(manager.expireForTask(task.id)).toBe(1);
+    expect(store.getApproval(approval.id)?.status).toBe("expired");
+  });
+
   it("marks an uncertain effect and asks the user to verify before retrying", async () => {
     const manager = new ApprovalManager(service, async () => {
       throw new EffectUncertainError("request timed out after upload");

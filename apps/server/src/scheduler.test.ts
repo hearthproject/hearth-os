@@ -213,7 +213,10 @@ describe("Hearth scheduler", () => {
       return { stdout: "", stderr: "" };
     };
     scheduler = makeScheduler(service, async (options) => {
-      writeFileSync(join(options.workingDirectory, "out", "pr-review.md"), "# Review\n\nNo blocking issues.\n");
+      writeFileSync(
+        join(options.workingDirectory, "out", "pr-review.md"),
+        "<!-- HEARTH_COMMENT_START -->\n# Review\n\nNo blocking issues.\n<!-- HEARTH_COMMENT_END -->\n\nInternal notes.\n"
+      );
       return FAKE_RESULT;
     }, { githubRun, approvals });
     scheduler.start();
