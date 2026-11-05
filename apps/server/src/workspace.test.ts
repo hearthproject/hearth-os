@@ -94,14 +94,22 @@ describe("task workspace prompt", () => {
       workspaceDir: join(tempDir, "workspace"),
       task,
       webFetch: async () => {
-        throw new WebInputError("access_challenge", "网页要求登录、验证码或浏览器验证：https://example.com/page");
+        throw new WebInputError("access_challenge", "网页要求登录、验证码或浏览器验证：https://example.com/page", {
+          status: 403,
+          finalUrl: "https://example.com/page"
+        });
       }
     });
 
     expect(prepared.inputs[0]?.metadata?.ok).toBe(false);
     expect(readFileSync(prepared.inputs[0]?.localPath ?? "", "utf8")).toContain("网页抓取失败");
     const source = JSON.parse(readFileSync(join(tempDir, "workspace", "inputs", "01-示例页面", "source.json"), "utf8"));
-    expect(source).toMatchObject({ ok: false, errorCode: "access_challenge", status: null });
+    expect(source).toMatchObject({
+      ok: false,
+      errorCode: "access_challenge",
+      status: 403,
+      finalUrl: "https://example.com/page"
+    });
   });
 
   it("still fails hard when a URL violates the task allowlist", async () => {

@@ -32,11 +32,15 @@ export interface FetchWebOptions {
 
 export class WebInputError extends Error {
   readonly code: string;
+  readonly status: number | null;
+  readonly finalUrl: string | null;
 
-  constructor(code: string, message: string) {
+  constructor(code: string, message: string, details: { status?: number; finalUrl?: string } = {}) {
     super(message);
     this.name = "WebInputError";
     this.code = code;
+    this.status = details.status ?? null;
+    this.finalUrl = details.finalUrl ?? null;
   }
 }
 
@@ -65,7 +69,10 @@ export async function fetchWebSnapshot(rawUrl: string, options: FetchWebOptions)
 
     if (!response.ok) {
       await response.body?.cancel();
-      throw new WebInputError("http_error", `网页返回 HTTP ${response.status}：${current.href}`);
+      throw new WebInputError("http_error", `网页返回 HTTP ${response.status}：${current.href}`, {
+        status: response.status,
+        finalUrl: current.href
+      });
     }
 
     const contentType = response.headers.get("content-type") ?? "";
@@ -77,7 +84,10 @@ export async function fetchWebSnapshot(rawUrl: string, options: FetchWebOptions)
     const bytes = await readLimited(response, options.maxBytes ?? DEFAULT_MAX_BYTES);
     const html = decodeBody(bytes, contentType);
     if (isChallengePage(html)) {
-      throw new WebInputError("access_challenge", `网页要求登录、验证码或浏览器验证：${current.href}`);
+      throw new WebInputError("access_challenge", `网页要求登录、验证码或浏览器验证：${current.href}`, {
+        status: response.status,
+        finalUrl: current.href
+      });
     }
     const extracted = extractMarkdown(html, current.href);
     if (!extracted.markdown) throw new WebInputError("empty_content", `网页没有可提取的正文：${current.href}`);

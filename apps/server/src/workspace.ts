@@ -69,7 +69,7 @@ export async function prepareWorkspace(options: {
       const inputDir = join(inputsDir, prefix);
       mkdirSync(inputDir, { recursive: true });
       let snapshot: WebSnapshot | null = null;
-      let fetchFailure: { code: string; message: string; fetchedAt: string } | null = null;
+      let fetchFailure: { code: string; message: string; fetchedAt: string; status: number | null; finalUrl: string | null } | null = null;
       try {
         snapshot = await (options.webFetch ?? fetchWebSnapshot)(input.value, {
           allowedHosts: options.task.networkHosts
@@ -78,7 +78,13 @@ export async function prepareWorkspace(options: {
         const message = error instanceof Error ? error.message : String(error);
         const code = error instanceof WebInputError ? error.code : "unknown";
         if (isFatalWebInputError(code)) throw new UnsupportedInputError(`网页输入不可用：${message}`);
-        fetchFailure = { code, message, fetchedAt: new Date().toISOString() };
+        fetchFailure = {
+          code,
+          message,
+          fetchedAt: new Date().toISOString(),
+          status: error instanceof WebInputError ? error.status : null,
+          finalUrl: error instanceof WebInputError ? error.finalUrl : null
+        };
       }
       const localPath = join(inputDir, "page.md");
       if (snapshot) {
@@ -101,6 +107,8 @@ export async function prepareWorkspace(options: {
           "",
           `- 原始 URL：${input.value}`,
           `- 抓取时间：${fetchFailure.fetchedAt}`,
+          `- 最终 URL：${fetchFailure.finalUrl ?? "未知（未到达最终页面）"}`,
+          `- HTTP 状态：${fetchFailure.status ?? "未知"}`,
           `- 错误代码：${fetchFailure.code}`,
           `- 失败原因：${fetchFailure.message}`,
           "",
@@ -109,9 +117,9 @@ export async function prepareWorkspace(options: {
         writeFileSync(localPath, failureMarkdown, "utf8");
         writeFileSync(join(inputDir, "source.json"), `${JSON.stringify({
           requestedUrl: input.value,
-          finalUrl: null,
+          finalUrl: fetchFailure.finalUrl,
           fetchedAt: fetchFailure.fetchedAt,
-          status: null,
+          status: fetchFailure.status,
           contentType: null,
           title: null,
           bytes: 0,
@@ -137,9 +145,9 @@ export async function prepareWorkspace(options: {
             sourceSha256: snapshot.sha256
           } : {
             ok: false,
-            finalUrl: null,
+            finalUrl: fetchFailure?.finalUrl ?? null,
             fetchedAt: fetchFailure?.fetchedAt ?? null,
-            httpStatus: null,
+            httpStatus: fetchFailure?.status ?? null,
             title: null,
             sourceSha256: null,
             errorCode: fetchFailure?.code ?? "unknown",
