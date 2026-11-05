@@ -154,6 +154,10 @@ export class HearthStore {
     return (this.db.prepare("SELECT * FROM artifacts WHERE task_id = ? ORDER BY created_at ASC").all(taskId) as DbRow[]).map(rowToArtifact);
   }
 
+  listAllArtifacts(): ArtifactRecord[] {
+    return (this.db.prepare("SELECT * FROM artifacts ORDER BY created_at DESC").all() as DbRow[]).map(rowToArtifact);
+  }
+
   rebuildProjections(): void {
     this.db.exec("BEGIN IMMEDIATE");
     try {

@@ -103,6 +103,16 @@ export async function buildServer(options: BuildServerOptions = {}) {
 
   app.get("/api/tasks", async () => ({ tasks: service.listTasks() }));
 
+  app.get("/api/artifacts", async () => {
+    const titles = new Map(service.listTasks().map((task) => [task.id, task.title]));
+    return {
+      artifacts: store.listAllArtifacts().map((artifact) => ({
+        ...artifact,
+        taskTitle: titles.get(artifact.taskId) ?? "未命名任务"
+      }))
+    };
+  });
+
   app.get<{ Params: { id: string } }>("/api/tasks/:id", async (request, reply) => {
     const view = service.view(request.params.id);
     if (!view) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
