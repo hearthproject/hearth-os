@@ -9,6 +9,7 @@ import { publishArtifacts } from "./artifacts.ts";
 import { REPO_ROOT, WORKSPACE_DIR } from "./config.ts";
 import { inspectRepository, readPrPreview, validatePullRequestPreview } from "./github.ts";
 import type { CommandRunner } from "./github.ts";
+import { prepareTaskRuntime, type RuntimePreparation } from "./runtime.ts";
 import type { HearthService } from "./service.ts";
 import { buildTaskPrompt, prepareWorkspace, UnsupportedInputError } from "./workspace.ts";
 
@@ -22,6 +23,7 @@ export interface SchedulerOptions {
   codexRunner?: CodexRunner;
   approvals?: ApprovalManager;
   githubRun?: CommandRunner | undefined;
+  runtimePreparer?: typeof prepareTaskRuntime | undefined;
 }
 
 export class HearthScheduler {
@@ -32,6 +34,7 @@ export class HearthScheduler {
   private readonly codexRunner: CodexRunner;
   private readonly approvals: ApprovalManager | undefined;
   private readonly githubRun: CommandRunner | undefined;
+  private readonly runtimePreparer: typeof prepareTaskRuntime;
   private readonly controllers = new Map<string, AbortController>();
   private readonly cancelled = new Set<string>();
   private unsubscribe: (() => void) | null = null;
@@ -48,6 +51,7 @@ export class HearthScheduler {
     this.codexRunner = options.codexRunner ?? runCodex;
     this.approvals = options.approvals;
     this.githubRun = options.githubRun;
+    this.runtimePreparer = options.runtimePreparer ?? prepareTaskRuntime;
   }
 
   start(): void {
@@ -205,7 +209,18 @@ export class HearthScheduler {
         task,
         ...(this.githubRun ? { githubRun: this.githubRun } : {})
       });
-      const prompt = buildTaskPrompt(task, prepared, expectedOutputs, template?.acceptance ?? []);
+      let runtime: RuntimePreparation | null = null;
+      if (prepared.repository && template?.github?.runtime) {
+        runtime = await this.runtimePreparer({
+          spec: template.github.runtime,
+          repoPath: prepared.repository.path,
+          workspaceRoot: prepared.root
+        });
+        if (!runtime.ok && !template.github.runtime.optional) {
+          throw new UnsupportedInputError(`依赖环境准备失败：${runtime.errors.join("；")}。日志：${runtime.logPath}`);
+        }
+      }
+      const prompt = buildTaskPrompt(task, prepared, expectedOutputs, template?.acceptance ?? [], runtime);
       const result = await this.codexRunner({
         workingDirectory: prepared.root,
         prompt,

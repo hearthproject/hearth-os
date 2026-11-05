@@ -9,6 +9,7 @@ import {
   type RepositoryContext
 } from "./github.ts";
 import { fetchWebSnapshot, WebInputError, type WebSnapshot } from "./web-fetch.ts";
+import type { RuntimePreparation } from "./runtime.ts";
 
 export interface PreparedInput {
   label: string;
@@ -222,7 +223,8 @@ export function buildTaskPrompt(
   task: TaskRecord,
   workspace: PreparedWorkspace,
   expectedOutputs: string[],
-  acceptance: string[] = []
+  acceptance: string[] = [],
+  runtime?: RuntimePreparation | null
 ): string {
   const inputLines = workspace.inputs.map((input) => {
     const source = input.source ? `（原始位置：${input.source}）` : "";
@@ -246,6 +248,26 @@ export function buildTaskPrompt(
       ? `- pr-preview.json 必须是 JSON 对象，字段 title、body、branch、base 必填；branch 必须为 ${workspace.repository.branch}，base 必须为 ${workspace.repository.base}，body 必须明确链接 Issue #${workspace.repository.issue}。`
       : ""
   ].filter((line) => line !== "") : [];
+  const runtimeLines = runtime ? [
+    "",
+    "预装依赖环境（由 Hearth 宿主完成安装，Codex 不联网）：",
+    ...(runtime.python ? [
+      `- Python：${runtime.python.version}`,
+      `- Python 解释器：${runtime.python.interpreter}`,
+      `- Python 工作目录：${runtime.python.workingDirectory}`,
+      `- 依赖文件：${runtime.python.requirements.join("、")}`
+    ] : []),
+    ...(runtime.node ? [
+      `- Node 工作目录：${runtime.node.workingDirectory}`,
+      `- Node 依赖安装命令：npm ${runtime.node.install}（已由宿主执行）`
+    ] : []),
+    runtime.ok
+      ? "- 依赖已准备完成。直接使用上面的解释器或 node_modules 运行验证，不得再次联网安装。"
+      : "- 依赖准备失败。不要尝试联网修复；按验收要求记录环境阻塞、未验证项和需要补充的信息。",
+    ...runtime.errors.map((error) => `- 准备错误：${error}`),
+    `- 环境记录：${runtime.recordPath}`,
+    `- 安装日志：${runtime.logPath}`
+  ] : [];
 
   return [
     "你是 Hearth 的任务执行器。现在独立完成一个真实工作交付，不要只给建议。",
@@ -256,6 +278,7 @@ export function buildTaskPrompt(
     "已准备的输入文件（只读快照）：",
     ...(inputLines.length > 0 ? inputLines : ["- 无文件输入"]),
     ...repositoryLines,
+    ...runtimeLines,
     "",
     "输出目录：",
     workspace.outDir,
@@ -264,7 +287,7 @@ export function buildTaskPrompt(
     ...outputLines,
     "",
     "硬性要求：",
-    "1. 只把交付文件写入上面的输出目录；不要修改输入快照或仓库中的其他文件。",
+    "1. 交付文件只能写入上面的输出目录；输入快照只读。实现任务只允许修改隔离仓库内完成 Issue 所必需的文件并在本地提交；不得修改依赖目录、环境文件或无关文件。",
     "2. 不得联网、不得使用网页搜索、不得访问输入中未提供的链接。",
     "3. 不得编造输入中没有的事实；信息不足时，在产物中明确标注“未知”或“待确认”。",
     "4. 保留可核查的来源索引、日期、数字和异常说明。",
@@ -299,6 +322,12 @@ function renderGitHubContext(context: Awaited<ReturnType<typeof prepareGitHubWor
     "## 正文",
     "",
     context.body || "（无正文）",
+    ...(context.checks.length > 0 ? [
+      "",
+      "## CI 检查",
+      "",
+      ...context.checks.map((check) => `- ${check.name}：${check.conclusion ?? check.status}${check.url ? `（${check.url}）` : ""}`)
+    ] : []),
     ...(context.comments.length > 0 ? [
       "",
       "## 评论",

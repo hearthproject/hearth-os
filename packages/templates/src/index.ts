@@ -3,6 +3,19 @@ import { TEMPLATE_ACCEPTANCE } from "./acceptance.ts";
 
 export type TemplateCategory = "document" | "web" | "code" | "data" | "people" | "marketing";
 
+export interface TaskRuntimeSpec {
+  python?: {
+    version: string;
+    workingDirectory: string;
+    requirements: string[];
+  };
+  node?: {
+    workingDirectory: string;
+    install: "ci" | "install";
+  };
+  optional?: boolean;
+}
+
 export interface TaskTemplate {
   id: string;
   title: string;
@@ -15,7 +28,7 @@ export interface TaskTemplate {
   expectedOutputs: string[];
   acceptance: string[];
   approvalKind: "none" | "github.publish-pr" | "github.comment";
-  github: null | { repo: string; issue?: number; pull?: number; headSha?: string };
+  github: null | { repo: string; issue?: number; pull?: number; headSha?: string; branch?: string; runtime?: TaskRuntimeSpec };
 }
 
 const file = (label: string, value: string): TaskInput => ({ kind: "file", label, value });
@@ -64,23 +77,54 @@ const TEMPLATE_DEFINITIONS: Omit<TaskTemplate, "acceptance">[] = [
   {
     id: "T07", title: "按 Issue 实现并提交 PR", category: "code", description: "在 GoldMind 中完成 Issue #16，并准备可评审 PR。",
     goal: "按 Issue #16 的验收条件完成最小改动和回归测试，先在本地提交，等待用户审批后再推送并创建 PR。",
-    inputs: [{ kind: "github", label: "Issue #16", value: "https://github.com/JasonBuildAI/GoldMind/issues/16" }], networkHosts: [],
+    inputs: [file("任务要求", "eval/inputs/T07-goldmind-issue.md"), { kind: "github", label: "Issue #16", value: "https://github.com/JasonBuildAI/GoldMind/issues/16" }], networkHosts: [],
     outputDir: "eval/runs/T07", expectedOutputs: ["report.md", "pr-preview.json"], approvalKind: "github.publish-pr",
-    github: { repo: "JasonBuildAI/GoldMind", issue: 16 }
+    github: {
+      repo: "JasonBuildAI/GoldMind",
+      issue: 16,
+      branch: "test/health-secret-guard",
+      runtime: {
+        python: {
+          version: "3.11",
+          workingDirectory: "backend",
+          requirements: ["backend/requirements.txt", "backend/requirements-dev.txt"]
+        }
+      }
+    }
   },
   {
     id: "T08", title: "评审 PR 并回复", category: "code", description: "对 GoldMind PR #15 做证据化评审。",
     goal: "评审 PR #15 当前 head，生成分级发现和结论；展示完整评论后等待用户批准才发布。",
-    inputs: [{ kind: "github", label: "PR #15", value: "https://github.com/JasonBuildAI/GoldMind/pull/15" }], networkHosts: [],
+    inputs: [file("任务要求", "eval/inputs/T08-goldmind-pr-review.md"), { kind: "github", label: "PR #15", value: "https://github.com/JasonBuildAI/GoldMind/pull/15" }], networkHosts: [],
     outputDir: "eval/runs/T08", expectedOutputs: ["pr-review.md"], approvalKind: "github.comment",
-    github: { repo: "JasonBuildAI/GoldMind", pull: 15, headSha: "c007c4ed55345682689ac50bbafb090c5934c31a" }
+    github: {
+      repo: "JasonBuildAI/GoldMind",
+      pull: 15,
+      headSha: "c007c4ed55345682689ac50bbafb090c5934c31a",
+      runtime: {
+        node: { workingDirectory: "app", install: "ci" },
+        optional: true
+      }
+    }
   },
   {
     id: "T09", title: "复现 CI Bug", category: "code", description: "复现 GoldMind PR #14 的 Backend pytest 失败。",
     goal: "在隔离工作区复现 PR #14 的后端测试失败，记录环境、命令和证据，不修改代码。",
-    inputs: [{ kind: "github", label: "PR #14", value: "https://github.com/JasonBuildAI/GoldMind/pull/14" }], networkHosts: [],
+    inputs: [file("任务要求", "eval/inputs/T09-goldmind-bug-repro.md"), { kind: "github", label: "PR #14", value: "https://github.com/JasonBuildAI/GoldMind/pull/14" }], networkHosts: [],
     outputDir: "eval/runs/T09", expectedOutputs: ["bug-reproduction.md"], approvalKind: "none",
-    github: { repo: "JasonBuildAI/GoldMind", pull: 14, headSha: "1c5efe94dfa784c3b6c0b5c221286f489d7f11f2" }
+    github: {
+      repo: "JasonBuildAI/GoldMind",
+      pull: 14,
+      headSha: "1c5efe94dfa784c3b6c0b5c221286f489d7f11f2",
+      runtime: {
+        python: {
+          version: "3.11",
+          workingDirectory: "backend",
+          requirements: ["backend/requirements.txt", "backend/requirements-dev.txt"]
+        },
+        optional: true
+      }
+    }
   },
   {
     id: "T10", title: "清洗销售 CSV", category: "data", description: "清洗 20 行销售导出并列出异常。",

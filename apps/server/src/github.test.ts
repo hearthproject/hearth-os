@@ -1,7 +1,11 @@
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { EffectRecord } from "@hearth/core";
 import { describe, expect, it } from "vitest";
 import {
   executeGitHubEffect,
+  prepareGitHubWorkspace,
   validatePullRequestPreview,
   type CommandRunner,
   type RepositoryContext
@@ -20,6 +24,43 @@ const REPOSITORY: RepositoryContext = {
 };
 
 describe("GitHub execution boundaries", () => {
+  it("uses the explicit implementation branch from the task template", async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "hearth-github-branch-"));
+    try {
+      const headSha = "a".repeat(40);
+      const run: CommandRunner = async (command, args) => {
+        if (command === "gh" && args[0] === "repo" && args[1] === "clone") {
+          mkdirSync(args[3] ?? "", { recursive: true });
+          return { stdout: "", stderr: "" };
+        }
+        if (command === "git" && args[0] === "config") return { stdout: "", stderr: "" };
+        if (command === "git" && args[0] === "remote") return { stdout: "git@github.com:JasonBuildAI/GoldMind.git", stderr: "" };
+        if (command === "gh" && args[0] === "repo" && args[1] === "view") {
+          return { stdout: JSON.stringify({ defaultBranchRef: { name: "main" } }), stderr: "" };
+        }
+        if (command === "git" && args[0] === "rev-parse") return { stdout: `${headSha}\n`, stderr: "" };
+        if (command === "gh" && args[0] === "issue" && args[1] === "view") {
+          return {
+            stdout: JSON.stringify({ number: 16, title: "Issue", body: "Body", state: "OPEN", url: "https://github.com/JasonBuildAI/GoldMind/issues/16", labels: [], comments: [] }),
+            stderr: ""
+          };
+        }
+        return { stdout: "", stderr: "" };
+      };
+
+      const prepared = await prepareGitHubWorkspace({
+        spec: { repo: "JasonBuildAI/GoldMind", issue: 16, branch: "test/health-secret-guard" },
+        taskId: "T07-test",
+        workspaceRoot,
+        run
+      });
+      expect(prepared.repository.branch).toBe("test/health-secret-guard");
+      expect(prepared.context.checks).toEqual([]);
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
   it("validates a PR preview that is bound to the prepared branch and issue", () => {
     const preview = validatePullRequestPreview({
       title: "test: add health secret regression",

@@ -43,6 +43,45 @@ describe("task workspace prompt", () => {
     expect(prompt).toContain("2026-11-11");
   });
 
+  it("permits minimal implementation changes without inviting unrelated repository edits", () => {
+    const task: TaskRecord = {
+      id: "T07-test",
+      templateId: "T07",
+      title: "按 Issue 实现并提交 PR",
+      goal: "完成 Issue",
+      status: "queued",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      deadline: null,
+      inputs: [],
+      networkHosts: [],
+      outputDir: "eval/runs/T07",
+      currentRunId: null,
+      nextAction: null,
+      error: null
+    };
+    const prompt = buildTaskPrompt(task, {
+      root: "C:/workspace",
+      outDir: "C:/workspace/out",
+      inputs: [],
+      repository: {
+        path: "C:/workspace/repo",
+        repo: "JasonBuildAI/GoldMind",
+        branch: "test/health-secret-guard",
+        base: "main",
+        baseSha: "a".repeat(40),
+        headSha: "a".repeat(40),
+        pull: null,
+        issue: 16,
+        detached: false
+      }
+    }, ["report.md"], []);
+
+    expect(prompt).toContain("实现任务");
+    expect(prompt).toContain("只允许修改隔离仓库内完成 Issue 所必需的文件");
+    expect(prompt).not.toContain("不要修改输入快照或仓库中的其他文件");
+  });
+
   it("fetches URL inputs into a local Markdown snapshot before Codex runs", async () => {
     tempDir = mkdtempSync(join(tmpdir(), "hearth-web-input-"));
     const task: TaskRecord = {

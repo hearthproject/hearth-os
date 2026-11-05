@@ -220,6 +220,16 @@ describe("Hearth scheduler", () => {
       codexRunner,
       workspaceRoot: join(requireTemp(), "workspaces"),
       artifactBase: requireTemp(),
+      runtimePreparer: async (options) => ({
+        ok: true,
+        workspaceRoot: options.workspaceRoot,
+        recordPath: join(options.workspaceRoot, ".runtime", "runtime.json"),
+        logPath: join(options.workspaceRoot, ".runtime", "prepare.log"),
+        python: null,
+        node: null,
+        errors: [],
+        log: ""
+      }),
       ...extra
     });
   }

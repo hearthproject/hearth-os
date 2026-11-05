@@ -25,6 +25,7 @@ export interface GitHubTaskSpec {
   issue?: number;
   pull?: number;
   headSha?: string;
+  branch?: string;
 }
 
 export interface RepositoryContext {
@@ -48,6 +49,7 @@ export interface GitHubContext {
   number: number;
   labels: string[];
   comments: Array<{ body: string; url?: string | undefined }>;
+  checks: Array<{ name: string; status: string; conclusion: string | null; url: string | null }>;
 }
 
 export interface PreparedGitHubWorkspace {
@@ -104,7 +106,11 @@ export async function prepareGitHubWorkspace(options: {
   const base = await defaultBranch(run, options.spec.repo);
 
   if (options.spec.issue) {
-    const branch = `hearth/${options.taskId.toLowerCase().replace(/[^a-z0-9._-]+/g, "-")}`;
+    const branch = options.spec.branch?.trim()
+      || `hearth/${options.taskId.toLowerCase().replace(/[^a-z0-9._-]+/g, "-")}`;
+    if (!isSafeBranchName(branch) || branch === base || branch === "main" || branch === "master") {
+      throw new Error(`不安全的实现分支名：${branch}`);
+    }
     await run("git", ["fetch", "origin", base, "--depth", "50"], { cwd: repoPath });
     await run("git", ["checkout", "-B", branch, `origin/${base}`], { cwd: repoPath });
     const context = await loadGitHubContext(run, options.spec.repo, "issue", options.spec.issue);
@@ -293,10 +299,11 @@ async function loadGitHubContext(
       state: raw.state,
       url: raw.url,
       labels: (raw.labels ?? []).map((label) => label.name ?? "").filter(Boolean),
-      comments: (raw.comments ?? []).map((comment) => ({ body: comment.body ?? "", url: comment.url }))
+      comments: (raw.comments ?? []).map((comment) => ({ body: comment.body ?? "", url: comment.url })),
+      checks: []
     };
   }
-  const result = await run("gh", ["pr", "view", String(number), "--repo", repo, "--json", "number,title,body,state,url,labels,comments,headRefOid"]);
+  const result = await run("gh", ["pr", "view", String(number), "--repo", repo, "--json", "number,title,body,state,url,labels,comments,headRefOid,statusCheckRollup"]);
   const raw = JSON.parse(result.stdout) as {
     number: number;
     title: string;
@@ -305,6 +312,7 @@ async function loadGitHubContext(
     url: string;
     labels?: Array<{ name?: string }>;
     comments?: Array<{ body?: string; url?: string }>;
+    statusCheckRollup?: Array<{ name?: string; status?: string; conclusion?: string | null; detailsUrl?: string }>;
   };
   return {
     kind,
@@ -314,8 +322,24 @@ async function loadGitHubContext(
     state: raw.state,
     url: raw.url,
     labels: (raw.labels ?? []).map((label) => label.name ?? "").filter(Boolean),
-    comments: (raw.comments ?? []).map((comment) => ({ body: comment.body ?? "", url: comment.url }))
+    comments: (raw.comments ?? []).map((comment) => ({ body: comment.body ?? "", url: comment.url })),
+    checks: Array.isArray(raw.statusCheckRollup)
+      ? raw.statusCheckRollup.map((check) => ({
+          name: typeof check.name === "string" ? check.name : "未命名检查",
+          status: typeof check.status === "string" ? check.status : "UNKNOWN",
+          conclusion: typeof check.conclusion === "string" ? check.conclusion : null,
+          url: typeof check.detailsUrl === "string" ? check.detailsUrl : null
+        }))
+      : []
   };
+}
+
+function isSafeBranchName(branch: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(branch)
+    && !branch.includes("..")
+    && !branch.includes("//")
+    && !branch.endsWith("/")
+    && !branch.endsWith(".lock");
 }
 
 async function defaultBranch(run: CommandRunner, repo: string): Promise<string> {
