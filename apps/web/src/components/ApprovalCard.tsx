@@ -15,6 +15,8 @@ export function ApprovalCard({ approval, effect }: { approval: ApprovalRecord; e
   const repo = stringValue(preview.repo) ?? stringValue(approval.target.repo);
   const branch = stringValue(preview.branch) ?? stringValue(approval.target.branch);
   const base = stringValue(preview.base) ?? stringValue(approval.target.base);
+  const pull = typeof approval.target.pull === "number" ? approval.target.pull : null;
+  const headSha = stringValue(approval.target.headSha);
   const isPending = approval.status === "pending";
 
   const decide = useMutation({
@@ -42,7 +44,11 @@ export function ApprovalCard({ approval, effect }: { approval: ApprovalRecord; e
 
       <div className="approval-target">
         <div><span>位置</span><strong>{repo ?? "未提供"}</strong></div>
-        <div><span>分支</span><strong>{branch ?? "未提供"} → {base ?? "未提供"}</strong></div>
+        {branch && base
+          ? <div><span>分支</span><strong>{branch} → {base}</strong></div>
+          : pull
+            ? <div><span>目标 PR</span><strong>#{pull}{headSha ? ` · ${headSha.slice(0, 8)}` : ""}</strong></div>
+            : <div><span>目标</span><strong>{headSha?.slice(0, 12) ?? "未提供"}</strong></div>}
         <div><span>确认有效期</span><strong><Clock3 size={13} /> {formatDate(approval.expiresAt)}</strong></div>
       </div>
 

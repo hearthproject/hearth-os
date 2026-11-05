@@ -727,6 +727,8 @@ a.metric-card:hover { transform: translateY(-2px); background: rgba(255, 252, 24
 
 .timeline { position: relative; margin: 0; padding: 0; list-style: none; }
 .timeline::before { content: ""; position: absolute; left: 13px; top: 10px; bottom: 12px; width: 1px; background: var(--line); }
+.timeline-more { width: 100%; margin-top: 10px; padding: 8px 10px; border: 1px dashed var(--line-strong); border-radius: 8px; color: var(--muted); background: transparent; font: inherit; font-size: 10px; cursor: pointer; }
+.timeline-more:hover { color: var(--ink); background: rgba(255, 252, 247, 0.7); }
 
 .timeline-item { position: relative; display: flex; gap: 11px; padding: 8px 0 11px; }
 .timeline-dot { position: relative; z-index: 1; display: grid; place-items: center; flex: 0 0 auto; width: 27px; height: 27px; border: 1px solid var(--line); border-radius: 50%; color: var(--muted); background: #fbf7ee; }

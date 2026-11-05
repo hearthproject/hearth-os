@@ -28,6 +28,7 @@ export function TaskDetailPage() {
   const { id } = useParams();
   const queryClient = useQueryClient();
   const [selectedArtifact, setSelectedArtifact] = useState<ArtifactRecord | null>(null);
+  const [showAllEvents, setShowAllEvents] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const taskQuery = useQuery({ queryKey: ["task", id], queryFn: () => api.task(id!), enabled: Boolean(id), refetchInterval: 4_000 });
   const templatesQuery = useQuery({ queryKey: ["templates"], queryFn: api.templates });
@@ -35,6 +36,8 @@ export function TaskDetailPage() {
   const task = view?.task;
   const template = templatesQuery.data?.templates.find((item) => item.id === task?.templateId);
   const latestRun = view?.runs.at(-1);
+  const events = view ? [...view.events].reverse() : [];
+  const visibleEvents = showAllEvents ? events : events.slice(0, 12);
 
   const retry = useMutation({
     mutationFn: () => api.retry(id!),
@@ -124,7 +127,7 @@ export function TaskDetailPage() {
         <section className="panel timeline-panel">
           <div className="panel-head"><h2>执行记录</h2><span>{view.events.length} 条事件</span></div>
           <ol className="timeline">
-            {[...view.events].reverse().slice(0, 60).map((event) => (
+            {visibleEvents.map((event) => (
               <li key={event.id} className={`timeline-item timeline-${event.type.replace(".", "-")}`}>
                 <span className="timeline-dot">{eventIcon(event)}</span>
                 <div>
@@ -134,6 +137,14 @@ export function TaskDetailPage() {
               </li>
             ))}
           </ol>
+          {events.length > visibleEvents.length && (
+            <button className="timeline-more" onClick={() => setShowAllEvents(true)}>
+              显示更早的 {events.length - visibleEvents.length} 条记录
+            </button>
+          )}
+          {showAllEvents && events.length > 12 && (
+            <button className="timeline-more" onClick={() => setShowAllEvents(false)}>收起执行记录</button>
+          )}
           {view.events.length === 0 && <p className="section-empty">还没有执行记录。</p>}
         </section>
 
