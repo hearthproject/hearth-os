@@ -1,0 +1,13 @@
+exception_id,source_row,order_id,field,original_value,issue_code,issue_description,severity,action,cleaned_value,evidence
+EX-001,2,A-1001,order_date,2026/10/01,non_iso_date,日期使用 YYYY/MM/DD，非 ISO 8601 格式,low,normalized_to_iso,2026-10-01,YYYY/MM/DD 无歧义，可直接转换
+EX-002,3,A-1002,status,Paid,status_case,状态大小写不一致,low,normalized_lowercase,paid,统一为小写状态值
+EX-003,4,A-1003,order_date,10/03/2026,ambiguous_non_iso_date,日期使用 MM/DD/YYYY，非 ISO 格式且日期顺序需确认,medium,normalized_to_iso_assumption,2026-10-03,按 MM/DD/YYYY 解析；源行 3 与 5 的日期分别为 2026-10-02、2026-10-04，前后连续
+EX-004,4,A-1003,email,,missing_email,邮箱为空，无法补全,high,retained_blank_pending_confirmation,,原始字段为空；输入中没有其他可推导联系信息
+EX-005,5,A-1004,order_date,2026/10/01,non_iso_date,日期使用 YYYY/MM/DD，非 ISO 8601 格式,low,normalized_to_iso,2026-10-01,YYYY/MM/DD 无歧义，可直接转换
+EX-006,5,A-1004,record,A-1004,duplicate_record,规范化后除 order_id/notes 外与 A-1001 完全相同,high,excluded_as_duplicate,A-1001（源行 2）,原文备注为 duplicate；规范化后业务字段指纹一致
+EX-007,6,A-1005,amount,0,zero_amount,金额为 0，状态为 refunded,info,retained_unchanged,0.00,零值可能是退款业务事实；未推断非零金额
+EX-008,10,A-1009,record,A-1009,duplicate_record,规范化后除 order_id/notes 外与 A-1002 完全相同,high,excluded_as_duplicate,A-1002（源行 3）,原文备注为 duplicate；规范化后业务字段指纹一致
+EX-009,13,A-1012,amount,,missing_amount,金额为空，无法计算,high,retained_blank_excluded_from_total,,原始字段为空；未从其他记录或外部数据推算
+EX-010,14,A-1013,order_date,10/11/2026,ambiguous_non_iso_date,日期使用 MM/DD/YYYY，非 ISO 格式且日期顺序需确认,medium,normalized_to_iso_assumption,2026-10-11,按 MM/DD/YYYY 解析；源行 13 与 15 的日期分别为 2026-10-10、2026-10-12，前后连续
+EX-011,14,A-1013,status,PAID,status_case,状态大小写不一致,low,normalized_lowercase,paid,统一为小写状态值
+EX-012,18,A-1017,amount,1200000,amount_outlier,金额显著高于同币种非零金额的常规水平,medium,retained_unchanged,1200000.00,"原文备注为 outlier；CNY 非零金额中位数为 8,100.00，阈值为 10 倍中位数 81,000.00"
