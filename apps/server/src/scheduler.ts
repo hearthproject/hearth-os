@@ -5,13 +5,13 @@ import type { RunRecord, TaskRecord } from "@hearth/core";
 import { runCodex, type CodexRunOptions, type CodexRunResult } from "@hearth/codex-executor";
 import { getTemplate } from "@hearth/templates";
 import type { ApprovalRequest, ApprovalManager } from "./approvals.ts";
-import { publishArtifacts } from "./artifacts.ts";
+import { missingExpectedOutputs, publishArtifacts } from "./artifacts.ts";
 import { REPO_ROOT, WORKSPACE_DIR } from "./config.ts";
 import { inspectRepository, readPrPreview, validatePullRequestPreview } from "./github.ts";
 import type { CommandRunner } from "./github.ts";
 import { prepareTaskRuntime, type RuntimePreparation } from "./runtime.ts";
 import type { HearthService } from "./service.ts";
-import { buildTaskPrompt, prepareWorkspace, UnsupportedInputError } from "./workspace.ts";
+import { buildDeliveryRepairPrompt, buildTaskPrompt, prepareWorkspace, UnsupportedInputError } from "./workspace.ts";
 
 export type CodexRunner = (options: CodexRunOptions) => Promise<CodexRunResult>;
 
@@ -221,12 +221,28 @@ export class HearthScheduler {
         }
       }
       const prompt = buildTaskPrompt(task, prepared, expectedOutputs, template?.acceptance ?? [], runtime);
-      const result = await this.codexRunner({
+      let result = await this.codexRunner({
         workingDirectory: prepared.root,
         prompt,
         signal: controller.signal,
         onEvent: (event) => this.publishProgress(taskId, runId, event.type, event.message)
       });
+
+      const missing = missingExpectedOutputs(prepared.outDir, expectedOutputs);
+      if (missing.length > 0) {
+        const repairResult = await this.codexRunner({
+          workingDirectory: prepared.root,
+          prompt: buildDeliveryRepairPrompt({
+            task,
+            prepared,
+            expectedOutputs,
+            missing
+          }),
+          signal: controller.signal,
+          onEvent: (event) => this.publishProgress(taskId, runId, event.type, event.message)
+        });
+        result = repairResult;
+      }
 
       const artifacts = publishArtifacts({
         task,

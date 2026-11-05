@@ -98,6 +98,31 @@ describe("Hearth scheduler", () => {
     expect(readFileSync(join(requireTemp(), "eval", "runs", "T01", "meeting-notes.md"), "utf8")).toContain("纪要 2");
   });
 
+  it("asks the executor once to repair missing required artifacts", async () => {
+    const service = setup();
+    let calls = 0;
+    const prompts: string[] = [];
+    const runner: CodexRunner = async (options) => {
+      calls += 1;
+      prompts.push(options.prompt);
+      if (calls === 2) {
+        writeFileSync(join(options.workingDirectory, "out", "meeting-notes.md"), "# 会议纪要\n\n补齐产物。\n");
+      }
+      return FAKE_RESULT;
+    };
+    scheduler = makeScheduler(service, runner);
+    scheduler.start();
+
+    const task = service.createTask({ templateId: "T01" });
+    const completed = await waitForStatus(service, task.id, "completed");
+
+    expect(completed.nextAction).toBe("产物已保存");
+    expect(calls).toBe(2);
+    expect(prompts[1]).toContain("缺少期望产物：meeting-notes.md");
+    expect(existsSync(join(requireTemp(), "eval", "runs", "T01", "meeting-notes.md"))).toBe(true);
+    expect(store?.listRuns(task.id)[0]?.status).toBe("completed");
+  });
+
   it("runs one task at a time", async () => {
     const service = setup();
     let active = 0;

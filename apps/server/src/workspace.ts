@@ -300,6 +300,36 @@ export function buildTaskPrompt(
   ].join("\n");
 }
 
+export function buildDeliveryRepairPrompt(options: {
+  task: TaskRecord;
+  prepared: PreparedWorkspace;
+  expectedOutputs: string[];
+  missing: string[];
+}): string {
+  return [
+    "上一轮执行已经结束，但任务要求的产物没有全部落盘。",
+    "请接着当前工作区继续，不要重做已经完成且已验证的工作。",
+    "",
+    `任务：${options.task.title}`,
+    `目标：${options.task.goal}`,
+    `工作区：${options.prepared.root}`,
+    `输出目录：${options.prepared.outDir}`,
+    "",
+    "当前缺失或无效的产物：",
+    ...options.missing.map((item) => `- ${item}`),
+    "",
+    "必须补齐的产物：",
+    ...options.expectedOutputs.map((item) => `- ${item}`),
+    "",
+    "补齐规则：",
+    "1. 先检查工作区中的 repo、inputs 和 out，确认上一轮已完成哪些工作。",
+    "2. 只补缺失产物和完成它们所需的验证；不要撤销正确的代码改动或测试。",
+    "3. 产物必须写入上面的输出目录，内容必须来自当前输入和实际执行结果，不能编造。",
+    "4. 仍不得联网、推送分支、创建 PR、发布评论或调用其他外部写操作。",
+    "5. 完成前逐个确认缺失项已经存在且非空；最后用中文简短说明补了什么、还有哪些未知。"
+  ].join("\n");
+}
+
 function isFatalWebInputError(code: string): boolean {
   return new Set([
     "invalid_url",

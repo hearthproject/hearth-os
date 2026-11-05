@@ -102,6 +102,18 @@ export function validateExpectedOutputs(outDir: string, expectedOutputs: string[
   }
 }
 
+export function missingExpectedOutputs(outDir: string, expectedOutputs: string[]): string[] {
+  const missing: string[] = [];
+  for (const expected of expectedOutputs) {
+    try {
+      validateExpectedOutputs(outDir, [expected]);
+    } catch (error) {
+      missing.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+  return missing;
+}
+
 function walkFiles(root: string): WalkedFile[] {
   const result: WalkedFile[] = [];
   walkDirectory(root, root, result);
