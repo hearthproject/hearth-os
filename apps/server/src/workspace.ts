@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import type { TaskRecord } from "@hearth/core";
+import { fetchWebSnapshot, type WebSnapshot } from "./web-fetch.ts";
 
 export interface PreparedInput {
   label: string;
@@ -9,6 +10,7 @@ export interface PreparedInput {
   source: string | null;
   localPath: string;
   sha256: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface PreparedWorkspace {
@@ -24,11 +26,13 @@ export class UnsupportedInputError extends Error {
   }
 }
 
-export function prepareWorkspace(options: {
+export async function prepareWorkspace(options: {
   repoRoot: string;
   workspaceDir: string;
   task: TaskRecord;
-}): PreparedWorkspace {
+  webFetch?: typeof fetchWebSnapshot;
+  onWebFetch?: (snapshot: WebSnapshot) => void;
+}): Promise<PreparedWorkspace> {
   const root = resolve(options.workspaceDir);
   const inputsDir = join(root, "inputs");
   const outDir = join(root, "out");
@@ -52,8 +56,50 @@ export function prepareWorkspace(options: {
       continue;
     }
 
-    if (input.kind === "url" || input.kind === "github") {
-      throw new UnsupportedInputError(`任务输入 ${input.kind} 尚未接入抓取器：${input.value}`);
+    if (input.kind === "url") {
+      const inputDir = join(inputsDir, prefix);
+      mkdirSync(inputDir, { recursive: true });
+      let snapshot: WebSnapshot;
+      try {
+        snapshot = await (options.webFetch ?? fetchWebSnapshot)(input.value, {
+          allowedHosts: options.task.networkHosts
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new UnsupportedInputError(`网页输入不可用：${message}`);
+      }
+      options.onWebFetch?.(snapshot);
+      const localPath = join(inputDir, "page.md");
+      writeFileSync(localPath, snapshot.markdown, "utf8");
+      writeFileSync(join(inputDir, "source.json"), `${JSON.stringify({
+        requestedUrl: snapshot.requestedUrl,
+        finalUrl: snapshot.finalUrl,
+        fetchedAt: snapshot.fetchedAt,
+        status: snapshot.status,
+        contentType: snapshot.contentType,
+        title: snapshot.title,
+        bytes: snapshot.bytes,
+        sha256: snapshot.sha256
+      }, null, 2)}\n`, "utf8");
+      prepared.push({
+        label: input.label,
+        kind: input.kind,
+        source: input.value,
+        localPath,
+        sha256: sha256Text(snapshot.markdown),
+        metadata: {
+          finalUrl: snapshot.finalUrl,
+          fetchedAt: snapshot.fetchedAt,
+          httpStatus: snapshot.status,
+          title: snapshot.title,
+          sourceSha256: snapshot.sha256
+        }
+      });
+      continue;
+    }
+
+    if (input.kind === "github") {
+      throw new UnsupportedInputError(`GitHub 输入尚未接入隔离工作区：${input.value}`);
     }
 
     const sourcePath = resolveInside(options.repoRoot, input.value);

@@ -65,7 +65,7 @@ describe("Hearth scheduler", () => {
     scheduler = makeScheduler(service, async () => FAKE_RESULT);
     scheduler.start();
 
-    const task = service.createTask({ templateId: "T04" });
+    const task = service.createTask({ templateId: "T07" });
     const failed = await waitForStatus(service, task.id, "recoverable");
     expect(failed.error?.kind).toBe("input_unavailable");
     expect(store?.listArtifacts(task.id)).toHaveLength(0);

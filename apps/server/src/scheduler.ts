@@ -189,7 +189,7 @@ export class HearthScheduler {
       const task = this.service.requireTask(taskId);
       const template = task.templateId ? getTemplate(task.templateId) : undefined;
       const expectedOutputs = template?.expectedOutputs ?? ["report.md"];
-      const prepared = prepareWorkspace({ repoRoot: this.repoRoot, workspaceDir: workspace, task });
+      const prepared = await prepareWorkspace({ repoRoot: this.repoRoot, workspaceDir: workspace, task });
       const prompt = buildTaskPrompt(task, prepared, expectedOutputs, template?.acceptance ?? []);
       const result = await this.codexRunner({
         workingDirectory: prepared.root,

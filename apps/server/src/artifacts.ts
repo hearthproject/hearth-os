@@ -57,7 +57,8 @@ export function publishArtifacts(options: PublishArtifactsOptions): ArtifactReco
       label: input.label,
       kind: input.kind,
       source: input.source,
-      sha256: input.sha256
+      sha256: input.sha256,
+      ...(input.metadata ? { metadata: input.metadata } : {})
     })),
     expectedOutputs: options.expectedOutputs,
     codex: options.codex,
