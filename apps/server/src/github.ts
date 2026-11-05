@@ -8,6 +8,7 @@ import { EffectUncertainError } from "./approvals.ts";
 
 const execFileAsync = promisify(execFile);
 const COMMAND_TIMEOUT_MS = 5 * 60 * 1000;
+const NETWORK_RETRY_DELAYS_MS = [500, 1_500];
 
 export interface CommandResult {
   stdout: string;
@@ -101,7 +102,7 @@ export async function prepareGitHubWorkspace(options: {
   if (existsSync(repoPath)) throw new Error(`GitHub 工作区已存在：${repoPath}`);
   mkdirSync(options.workspaceRoot, { recursive: true });
 
-  await run("git", [
+  await retryNetworkCommand(() => run("git", [
     "-c",
     "credential.helper=!gh auth git-credential",
     "clone",
@@ -109,7 +110,7 @@ export async function prepareGitHubWorkspace(options: {
     "50",
     `https://github.com/${options.spec.repo}.git`,
     repoPath
-  ], { timeoutMs: 10 * 60 * 1000 });
+  ], { timeoutMs: 10 * 60 * 1000 }), () => rmSync(repoPath, { recursive: true, force: true }));
   await ensureGitIdentity(run, repoPath, options.spec.repo);
   const base = await defaultBranch(run, options.spec.repo);
 
@@ -119,7 +120,7 @@ export async function prepareGitHubWorkspace(options: {
     if (!isSafeBranchName(branch) || branch === base || branch === "main" || branch === "master") {
       throw new Error(`不安全的实现分支名：${branch}`);
     }
-    await run("git", ["fetch", "origin", base, "--depth", "50"], { cwd: repoPath });
+    await retryNetworkCommand(() => run("git", ["fetch", "origin", base, "--depth", "50"], { cwd: repoPath }));
     await run("git", ["checkout", "-B", branch, `origin/${base}`], { cwd: repoPath });
     const context = await loadGitHubContext(run, options.spec.repo, "issue", options.spec.issue);
     const baseSha = (await run("git", ["rev-parse", "HEAD"], { cwd: repoPath })).stdout.trim();
@@ -141,7 +142,7 @@ export async function prepareGitHubWorkspace(options: {
   }
 
   if (!options.spec.pull) throw new Error("GitHub 任务必须指定 issue 或 pull 编号");
-  await run("git", ["fetch", "origin", `refs/pull/${options.spec.pull}/head:refs/remotes/origin/pr-${options.spec.pull}`, "--depth", "200"], { cwd: repoPath });
+  await retryNetworkCommand(() => run("git", ["fetch", "origin", `refs/pull/${options.spec.pull}/head:refs/remotes/origin/pr-${options.spec.pull}`, "--depth", "200"], { cwd: repoPath }));
   await run("git", ["checkout", "--detach", `refs/remotes/origin/pr-${options.spec.pull}`], { cwd: repoPath });
   const headSha = (await run("git", ["rev-parse", "HEAD"], { cwd: repoPath })).stdout.trim();
   if (options.spec.headSha && headSha !== options.spec.headSha) {
@@ -163,6 +164,18 @@ export async function prepareGitHubWorkspace(options: {
       detached: true
     }
   };
+}
+
+async function retryNetworkCommand<T>(operation: () => Promise<T>, cleanup?: () => void): Promise<T> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (attempt >= NETWORK_RETRY_DELAYS_MS.length) throw error;
+      cleanup?.();
+      await new Promise((resolve) => setTimeout(resolve, NETWORK_RETRY_DELAYS_MS[attempt]));
+    }
+  }
 }
 
 export async function inspectRepository(repository: RepositoryContext, run: CommandRunner = runCommand) {

@@ -24,6 +24,45 @@ const REPOSITORY: RepositoryContext = {
 };
 
 describe("GitHub execution boundaries", () => {
+  it("retries a transient clone failure before preparing the task", async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "hearth-github-retry-"));
+    try {
+      let cloneCalls = 0;
+      const run: CommandRunner = async (command, args) => {
+        if (command === "git" && args[2] === "clone") {
+          cloneCalls += 1;
+          if (cloneCalls === 1) throw new Error("Connection was reset");
+          mkdirSync(args[6] ?? "", { recursive: true });
+          return { stdout: "", stderr: "" };
+        }
+        if (command === "git" && args[0] === "config") return { stdout: "", stderr: "" };
+        if (command === "git" && args[0] === "remote") return { stdout: "https://github.com/JasonBuildAI/GoldMind.git", stderr: "" };
+        if (command === "gh" && args[0] === "repo" && args[1] === "view") {
+          return { stdout: JSON.stringify({ defaultBranchRef: { name: "main" } }), stderr: "" };
+        }
+        if (command === "git" && args[0] === "rev-parse") return { stdout: `${"a".repeat(40)}\n`, stderr: "" };
+        if (command === "gh" && args[0] === "issue" && args[1] === "view") {
+          return {
+            stdout: JSON.stringify({ number: 16, title: "Issue", body: "Body", state: "OPEN", url: "https://github.com/JasonBuildAI/GoldMind/issues/16", labels: [], comments: [] }),
+            stderr: ""
+          };
+        }
+        return { stdout: "", stderr: "" };
+      };
+
+      await prepareGitHubWorkspace({
+        spec: { repo: "JasonBuildAI/GoldMind", issue: 16, branch: "test/health-secret-guard" },
+        taskId: "T07-test",
+        workspaceRoot,
+        run
+      });
+
+      expect(cloneCalls).toBe(2);
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
   it("uses the explicit implementation branch from the task template", async () => {
     const workspaceRoot = mkdtempSync(join(tmpdir(), "hearth-github-branch-"));
     try {
