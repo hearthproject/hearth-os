@@ -18,7 +18,7 @@ export function TaskCard({ task, template, featured = false }: { task: TaskRecor
             {template && <span>{CATEGORY_LABELS[template.category] ?? template.category}</span>}
           </div>
           <h3>{task.title}</h3>
-          <p>{task.error?.message ?? task.nextAction ?? task.goal}</p>
+          <p>{task.error ? friendlyError(task.error.message) : task.nextAction ?? task.goal}</p>
         </div>
         <ArrowUpRight className="task-card-arrow" size={20} />
       </div>
@@ -29,4 +29,12 @@ export function TaskCard({ task, template, featured = false }: { task: TaskRecor
       {task.status === "running" && <span className="task-running-line" />}
     </Link>
   );
+}
+
+function friendlyError(message: string): string {
+  if (/git|github|clone|fetch|repository|repo/i.test(message)) {
+    return "连接 GitHub 时中断。打开任务查看原因，修复后可以重试。";
+  }
+  if (message.length > 120) return `${message.slice(0, 116).trimEnd()}…`;
+  return message;
 }
