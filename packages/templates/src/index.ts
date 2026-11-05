@@ -1,4 +1,5 @@
 import type { TaskInput } from "@hearth/core";
+import { TEMPLATE_ACCEPTANCE } from "./acceptance.ts";
 
 export type TemplateCategory = "document" | "web" | "code" | "data" | "people" | "marketing";
 
@@ -12,6 +13,7 @@ export interface TaskTemplate {
   networkHosts: string[];
   outputDir: string;
   expectedOutputs: string[];
+  acceptance: string[];
   approvalKind: "none" | "github.publish-pr" | "github.comment";
   github: null | { repo: string; issue?: number; pull?: number; headSha?: string };
 }
@@ -19,7 +21,7 @@ export interface TaskTemplate {
 const file = (label: string, value: string): TaskInput => ({ kind: "file", label, value });
 const url = (label: string, value: string): TaskInput => ({ kind: "url", label, value });
 
-export const TEMPLATES: TaskTemplate[] = [
+const TEMPLATE_DEFINITIONS: Omit<TaskTemplate, "acceptance">[] = [
   {
     id: "T01", title: "会议转写转行动纪要", category: "document", description: "把原始会议记录整理成结论、行动项和待确认问题。",
     goal: "根据会议原始记录生成可直接发送的行动纪要，保留来源索引，不编造未讨论的信息。",
@@ -117,6 +119,11 @@ export const TEMPLATES: TaskTemplate[] = [
     outputDir: "eval/runs/T15", expectedOutputs: ["campaign-brief.md", "asset-checklist.md"], approvalKind: "none", github: null
   }
 ];
+
+export const TEMPLATES: TaskTemplate[] = TEMPLATE_DEFINITIONS.map((template) => ({
+  ...template,
+  acceptance: TEMPLATE_ACCEPTANCE[template.id] ?? []
+}));
 
 export function getTemplate(id: string): TaskTemplate | undefined {
   return TEMPLATES.find((template) => template.id === id);

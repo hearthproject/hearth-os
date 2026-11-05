@@ -77,12 +77,18 @@ export function prepareWorkspace(options: {
   return { root, outDir, inputs: prepared };
 }
 
-export function buildTaskPrompt(task: TaskRecord, workspace: PreparedWorkspace, expectedOutputs: string[]): string {
+export function buildTaskPrompt(
+  task: TaskRecord,
+  workspace: PreparedWorkspace,
+  expectedOutputs: string[],
+  acceptance: string[] = []
+): string {
   const inputLines = workspace.inputs.map((input) => {
     const source = input.source ? `（原始位置：${input.source}）` : "";
     return `- ${input.label}：${input.localPath}${source}`;
   });
   const outputLines = expectedOutputs.map((output) => `- ${output}`);
+  const acceptanceLines = acceptance.map((criterion, index) => `${index + 1}. ${criterion}`);
 
   return [
     "你是 Hearth 的任务执行器。现在独立完成一个真实工作交付，不要只给建议。",
@@ -104,8 +110,11 @@ export function buildTaskPrompt(task: TaskRecord, workspace: PreparedWorkspace, 
     "2. 不得联网、不得使用网页搜索、不得访问输入中未提供的链接。",
     "3. 不得编造输入中没有的事实；信息不足时，在产物中明确标注“未知”或“待确认”。",
     "4. 保留可核查的来源索引、日期、数字和异常说明。",
-    "5. 完成前自行检查每个指定文件都存在且内容完整。",
-    "6. 最后用中文简短说明完成了什么、哪些内容仍需人工确认。"
+    "5. 完成前逐条对照专项验收标准自查，并在产物中保留可核查依据。",
+    "6. 最后用中文简短说明完成了什么、哪些内容仍需人工确认。",
+    "",
+    "专项验收标准（全部必须满足）：",
+    ...(acceptanceLines.length > 0 ? acceptanceLines : ["- 按任务目标完整交付，不省略关键内容。"])
   ].join("\n");
 }
 
