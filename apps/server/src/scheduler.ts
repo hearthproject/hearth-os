@@ -237,21 +237,24 @@ export class HearthScheduler {
         onEvent: (event) => this.publishProgress(taskId, runId, event.type, event.message)
       });
 
-      const missing = missingExpectedOutputs(prepared.outDir, expectedOutputs);
-      if (missing.length > 0) {
-        const repairResult = await this.codexRunner({
+      for (let repairAttempt = 1; repairAttempt <= 2; repairAttempt += 1) {
+        const missing = missingExpectedOutputs(prepared.outDir, expectedOutputs);
+        if (missing.length === 0) break;
+        result = await this.codexRunner({
           workingDirectory: prepared.root,
           prompt: buildDeliveryRepairPrompt({
             task,
             prepared,
             expectedOutputs,
-            missing
+            missing,
+            attempt: repairAttempt
           }),
           signal: controller.signal,
           onEvent: (event) => this.publishProgress(taskId, runId, event.type, event.message)
         });
-        result = repairResult;
       }
+      const stillMissing = missingExpectedOutputs(prepared.outDir, expectedOutputs);
+      if (stillMissing.length > 0) throw new Error(`缺少期望产物：${stillMissing.join("、")}`);
 
       const artifacts = publishArtifacts({
         task,

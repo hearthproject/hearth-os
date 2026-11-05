@@ -123,6 +123,24 @@ describe("Hearth scheduler", () => {
     expect(store?.listRuns(task.id)[0]?.status).toBe("completed");
   });
 
+  it("tries a second delivery repair, then fails honestly when artifacts are still missing", async () => {
+    const service = setup();
+    let calls = 0;
+    const runner: CodexRunner = async () => {
+      calls += 1;
+      return FAKE_RESULT;
+    };
+    scheduler = makeScheduler(service, runner);
+    scheduler.start();
+
+    const task = service.createTask({ templateId: "T01" });
+    const failed = await waitForStatus(service, task.id, "recoverable");
+
+    expect(calls).toBe(3);
+    expect(failed.error?.message).toContain("缺少期望产物：meeting-notes.md");
+    expect(store?.listArtifacts(task.id)).toHaveLength(0);
+  });
+
   it("runs one task at a time", async () => {
     const service = setup();
     let active = 0;
