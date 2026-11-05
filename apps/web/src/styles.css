@@ -191,6 +191,23 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 
 .sidebar-spacer { flex: 1; }
 
+.system-control {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 9px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 251, 244, 0.5);
+}
+
+.system-control.paused { border-color: rgba(165, 106, 82, 0.34); background: rgba(165, 106, 82, 0.06); }
+.system-button { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; padding: 8px 9px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: transparent; font: inherit; font-size: 11px; font-weight: 650; cursor: pointer; transition: 140ms ease; }
+.system-button:hover { color: var(--ink); border-color: var(--line-strong); background: rgba(255, 255, 255, 0.62); }
+.system-button:disabled { opacity: 0.55; cursor: wait; }
+.system-control.paused .system-button { color: #6d7f5b; border-color: rgba(109, 127, 91, 0.35); }
+.system-control small { padding: 0 3px; color: var(--faint); font-size: 9px; line-height: 1.45; text-align: center; }
+
 .codex-status {
   display: flex;
   align-items: center;

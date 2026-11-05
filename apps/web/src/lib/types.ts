@@ -29,6 +29,14 @@ export interface TaskView {
   events: EventEnvelope[];
 }
 
+export interface SystemStatus {
+  running: boolean;
+  schedulerEnabled: boolean;
+  queued: number;
+  runningTasks: number;
+  waitingApproval: number;
+}
+
 export interface HealthResponse {
   status: "ok";
   name: string;

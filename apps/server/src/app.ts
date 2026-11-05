@@ -83,6 +83,35 @@ export async function buildServer(options: BuildServerOptions = {}) {
     };
   });
 
+  const systemStatus = () => {
+    const tasks = service.listTasks();
+    return {
+      running: scheduler?.running ?? false,
+      schedulerEnabled: Boolean(scheduler),
+      queued: tasks.filter((task) => task.status === "queued").length,
+      runningTasks: tasks.filter((task) => task.status === "running").length,
+      waitingApproval: tasks.filter((task) => task.status === "waiting_approval").length
+    };
+  };
+
+  app.get("/api/system", async () => systemStatus());
+
+  app.post("/api/system/stop", async (_request, reply) => {
+    if (!scheduler) {
+      return reply.code(409).send({ error: "SCHEDULER_DISABLED", message: "执行器未启用，无需停止" });
+    }
+    await scheduler.stop();
+    return systemStatus();
+  });
+
+  app.post("/api/system/start", async (_request, reply) => {
+    if (!scheduler) {
+      return reply.code(409).send({ error: "SCHEDULER_DISABLED", message: "执行器未启用" });
+    }
+    scheduler.start();
+    return systemStatus();
+  });
+
   app.get("/api/templates", async () => ({ templates: service.listTemplates() }));
 
   app.post("/api/tasks", async (request, reply) => {

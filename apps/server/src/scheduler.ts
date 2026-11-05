@@ -57,6 +57,10 @@ export class HearthScheduler {
     this.runtimePreparer = options.runtimePreparer ?? prepareTaskRuntime;
   }
 
+  get running(): boolean {
+    return !this.stopped;
+  }
+
   start(): void {
     if (!this.stopped) return;
     this.stopped = false;

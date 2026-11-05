@@ -33,6 +33,22 @@ describe("Hearth server", () => {
     await app.close();
   });
 
+  it("stops and resumes the scheduler from the local control plane", async () => {
+    const app = await buildServer({ store, serveWeb: false, startScheduler: true });
+    const initial = await app.inject({ method: "GET", url: "/api/system" });
+    expect(initial.statusCode).toBe(200);
+    expect(initial.json()).toMatchObject({ running: true, schedulerEnabled: true });
+
+    const stopped = await app.inject({ method: "POST", url: "/api/system/stop" });
+    expect(stopped.statusCode).toBe(200);
+    expect(stopped.json().running).toBe(false);
+
+    const resumed = await app.inject({ method: "POST", url: "/api/system/start" });
+    expect(resumed.statusCode).toBe(200);
+    expect(resumed.json().running).toBe(true);
+    await app.close();
+  });
+
   it("creates a task and projects its event", async () => {
     const app = await buildServer({ store, serveWeb: false });
     const response = await app.inject({

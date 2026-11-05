@@ -1,7 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
-import { Flame, Inbox, Package, Plus, Settings2, Sun } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Flame, Inbox, Package, Play, Plus, Power, Settings2, Sun } from "lucide-react";
 import { NavLink, Outlet, useNavigate, useOutletContext } from "react-router-dom";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api.ts";
 import { needsAttention } from "../lib/format.ts";
 import type { TaskRecord, TaskTemplate } from "../lib/types.ts";
@@ -18,11 +18,43 @@ export function useShell(): ShellContext {
 export function AppShell() {
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const tasksQuery = useQuery({ queryKey: ["tasks"], queryFn: api.tasks, refetchInterval: 10_000 });
   const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 30_000 });
+  const systemQuery = useQuery({ queryKey: ["system"], queryFn: api.system, refetchInterval: 5_000 });
   const templatesQuery = useQuery({ queryKey: ["templates"], queryFn: api.templates, enabled: newTaskOpen });
   const tasks = tasksQuery.data?.tasks ?? [];
   const attentionCount = tasks.filter((task) => needsAttention(task.status)).length;
+  const [confirmStop, setConfirmStop] = useState(false);
+  const [systemBusy, setSystemBusy] = useState(false);
+  const [systemError, setSystemError] = useState<string | null>(null);
+  const confirmTimer = useRef<number | undefined>(undefined);
+  const system = systemQuery.data;
+  const systemRunning = system?.running ?? true;
+
+  useEffect(() => () => window.clearTimeout(confirmTimer.current), []);
+
+  async function toggleSystem() {
+    if (systemBusy) return;
+    setSystemError(null);
+    if (systemRunning && !confirmStop) {
+      setConfirmStop(true);
+      window.clearTimeout(confirmTimer.current);
+      confirmTimer.current = window.setTimeout(() => setConfirmStop(false), 5_000);
+      return;
+    }
+    setSystemBusy(true);
+    try {
+      if (systemRunning) await api.stopSystem();
+      else await api.startSystem();
+      setConfirmStop(false);
+      await queryClient.invalidateQueries();
+    } catch (error) {
+      setSystemError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSystemBusy(false);
+    }
+  }
 
   function handleCreated(task: TaskRecord) {
     setNewTaskOpen(false);
@@ -59,6 +91,19 @@ export function AppShell() {
         </nav>
 
         <div className="sidebar-spacer" />
+        {system?.schedulerEnabled !== false && (
+          <div className={`system-control ${systemRunning ? "" : "paused"}`}>
+            <button className="system-button" onClick={() => void toggleSystem()} disabled={systemBusy}>
+              {systemRunning ? <Power size={14} /> : <Play size={14} />}
+              {systemBusy ? "正在处理…" : systemRunning ? (confirmStop ? "再次点击确认停止" : "停止所有任务") : "恢复执行"}
+            </button>
+            <small>
+              {systemError ?? (systemRunning
+                ? `${(system?.runningTasks ?? 0) + (system?.queued ?? 0)} 个待处理任务`
+                : "已全部停止，队列和审批会保留")}
+            </small>
+          </div>
+        )}
         <NavLink to="/settings" className="codex-status">
           <span className={`status-dot ${healthQuery.data?.codex.canRun ? "online" : "offline"}`} />
           <span>

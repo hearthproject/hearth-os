@@ -3,6 +3,7 @@ import type {
   ArtifactListItem,
   CreateTaskRequest,
   HealthResponse,
+  SystemStatus,
   TaskRecord,
   TaskTemplate,
   TaskView
@@ -27,6 +28,9 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   health: () => request<HealthResponse>("/api/health"),
+  system: () => request<SystemStatus>("/api/system"),
+  stopSystem: () => request<SystemStatus>("/api/system/stop", { method: "POST" }),
+  startSystem: () => request<SystemStatus>("/api/system/start", { method: "POST" }),
   templates: () => request<{ templates: TaskTemplate[] }>("/api/templates"),
   tasks: () => request<{ tasks: TaskRecord[] }>("/api/tasks"),
   artifacts: () => request<{ artifacts: ArtifactListItem[] }>("/api/artifacts"),

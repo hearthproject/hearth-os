@@ -17,7 +17,7 @@ export function SettingsPage() {
         <div>
           <span className="eyebrow">设置</span>
           <h1>本机、可控、<em>不依赖云端账号。</em></h1>
-          <p className="page-lead">Hearth 只监听本机地址。Codex 使用你现有的 `~/.codex/config.toml`，可以直接走自定义模型 Provider。</p>
+          <p className="page-lead">Hearth 只监听本机地址。Codex 使用你现有的 <code>~/.codex/config.toml</code>，可以直接走自定义模型 Provider。</p>
         </div>
         <button className="ghost-button" onClick={() => void healthQuery.refetch()} disabled={healthQuery.isFetching}>
           <RefreshCw size={16} className={healthQuery.isFetching ? "spin" : ""} /> 重新检查
@@ -51,7 +51,7 @@ export function SettingsPage() {
         <section className="settings-card">
           <span className="settings-icon"><KeyRound size={20} /></span>
           <h3>无需 Codex 登录</h3>
-          <p>只要 `config.toml` 中配置了 `model_provider` 和对应的 `env_key`，即使 `codex login status` 显示未登录，执行器也能正常工作。</p>
+          <p>只要 <code>config.toml</code> 中配置了 <code>model_provider</code> 和对应的 <code>env_key</code>，即使 <code>codex login status</code> 显示未登录，执行器也能正常工作。</p>
           <div className={`inline-status ${health?.codex.authSource === "provider-env" ? "ok" : ""}`}>
             <span className="status-dot online" /> {authLabel}
           </div>
@@ -66,6 +66,7 @@ export function SettingsPage() {
             <div><dt>验收产物</dt><dd>eval/runs/</dd></div>
           </dl>
           <p className="settings-note">任务状态写入本地 SQLite 事件日志，刷新或重启后可重建。</p>
+          <p className="settings-note">备份：停止任务后复制 <code>.hearth/hearth.sqlite</code>；任务产物位于 <code>eval/runs/</code> 和 <code>.hearth/artifacts/</code>，一并复制即可完整导出。</p>
         </section>
 
         <section className="settings-card">
