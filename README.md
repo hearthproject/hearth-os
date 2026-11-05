@@ -11,7 +11,7 @@
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 [![Documentation](https://img.shields.io/badge/documentation-%E4%B8%AD%E6%96%87%20%7C%20English-b8471d)](https://hearthproject.github.io/hearth-os/)
-[![Status](https://img.shields.io/badge/status-specification%20%26%20planning-8c8378)](#project-status)
+[![Status](https://img.shields.io/badge/status-phase%201%20MVP-b8471d)](#project-status)
 [![License](https://img.shields.io/badge/license-Apache--2.0-1b1815)](LICENSE)
 
 Hearth turns user intent into durable, auditable, and recoverable tasks. It coordinates specialized executors such as Codex, connectors, browsers, and desktop agents, while keeping every external effect behind explicit approvals, idempotency, receipts, and recovery paths.
@@ -29,11 +29,16 @@ The complete documentation is published at **<https://hearthproject.github.io/he
 
 ## Project Status
 
-Hearth is in the **specification and planning stage**. The repository contains the complete product, overall design, safety, evaluation, and delivery plan; implementation has not started.
+Hearth has entered **Phase 1 (MVP) implementation**. The repository now contains a runnable local control plane built with TypeScript and React, a native Codex executor adapter, an append-only SQLite event log, approval-gated external effects, and a 15-task real-world evaluation suite. The Phase 1 exit requires at least 10 tasks to pass acceptance; current evidence lives in `eval/README.md`.
 
 ## Repository Layout
 
 ```text
+apps/                  runnable local control plane
+  server/              Fastify API, scheduler, approvals, workspaces, artifacts
+  web/                 React UI for tasks, approvals, artifacts, and settings
+packages/              shared core, event log, templates, and Codex executor
+eval/                  15 real-world tasks, inputs, acceptance criteria, and recorded runs
 docs/                  the single source of truth and the VitePress build target
   design/              overall product design, technology choices, and nine module notes
   delivery/            delivery route and six-phase implementation plans
@@ -46,10 +51,41 @@ scripts/               delivery-page generation helpers
 
 ## Local Development
 
-Requires Node.js 20 or newer and npm.
+Requires Node.js 22.13 or newer (the server uses the built-in `node:sqlite` module) and npm.
+
+### Run Hearth
 
 ```bash
 npm ci
+npm run dev
+```
+
+Open <http://127.0.0.1:5173>. The Vite development server proxies `/api` to the local service on `127.0.0.1:4317`.
+
+For a production-style local run:
+
+```bash
+npm run build
+npm start
+```
+
+Open <http://127.0.0.1:4317>.
+
+### Use Codex without a Codex login
+
+Hearth runs Codex through the Codex SDK, which reads your existing `~/.codex/config.toml`. A `codex login` session is not required when a `model_provider` and its `env_key` are configured: the key only needs to be present in the environment of the terminal that starts Hearth. The Settings page reports the active provider, model, and authentication source, and never sends the key to the browser.
+
+### Data, backup, and stopping
+
+- `.hearth/hearth.sqlite` stores tasks, runs, approvals, effects, and events.
+- `.hearth/workspaces/` holds isolated task workspaces.
+- `eval/runs/` holds accepted task artifacts.
+- The sidebar exposes a global stop/resume switch. Stop aborts active runs into a recoverable state while keeping the queue and approvals.
+- Settings can download a consistent SQLite backup and export all task records as JSON. Copy `eval/runs/` and `.hearth/artifacts/` alongside the backup for a complete archive.
+
+### Build the documentation site
+
+```bash
 npm run docs:dev
 ```
 

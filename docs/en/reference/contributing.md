@@ -6,7 +6,7 @@ outline: [2]
 
 # Contributing
 
-<p class="lead">Hearth is still at the specification and planning stage. The most valuable contributions clarify boundaries, challenge risk assumptions, add real tasks, and make the documentation easier for implementers to use. A change does not need to be long, but it must make the conclusion more accurate or the evidence clearer.</p>
+<p class="lead">Hearth has entered Phase 1 MVP implementation. The most valuable contributions still clarify boundaries, challenge risk assumptions, add real tasks, and make the documentation easier for implementers to use; implementation changes backed by acceptance evidence are now welcome too. A change does not need to be long, but it must make the conclusion more accurate or the evidence clearer.</p>
 
 ## Local Setup and Writing Conventions
 

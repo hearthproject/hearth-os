@@ -41,7 +41,7 @@ This is also the line between Hearth and a "Codex wrapper": the wrapper treats C
 
 ## Relationship to Other Personal Assistant Projects
 
-OpenClaw is already a working personal assistant product and is clearly ahead of Hearth today in channels, sessions, long-running service, device nodes, and ecosystem. Hearth is still at the specification and planning stage. It cannot claim to be stronger, and the two are not naturally a parent and child product.
+OpenClaw is already a working personal assistant product and is clearly ahead of Hearth today in channels, sessions, long-running service, device nodes, and ecosystem. Hearth has just entered Phase 1 MVP implementation. It cannot claim to be stronger, and the two are not naturally a parent and child product.
 
 The clearer distinction is what each owns. OpenClaw is mainly responsible for sessions, channels, personal-assistant experience, and long-running operation. Hearth aims to own task contracts, authorization scopes, external effects, completion evidence, and failure recovery. If OpenClaw were integrated later as a channel or runtime entry, Hearth would still need to own tasks, authority, budgets, acceptance, and receipts to qualify as a task-control layer.
 

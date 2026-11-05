@@ -11,7 +11,7 @@
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 [![文档](https://img.shields.io/badge/%E6%96%87%E6%A1%A3-%E4%B8%AD%E6%96%87%20%7C%20English-b8471d)](https://hearthproject.github.io/hearth-os/)
-[![状态](https://img.shields.io/badge/%E7%8A%B6%E6%80%81-%E8%A7%84%E6%A0%BC%20%E4%B8%8E%20%E8%AE%A1%E5%88%92-8c8378)](#项目状态)
+[![状态](https://img.shields.io/badge/%E7%8A%B6%E6%80%81-%E7%AC%AC%E4%B8%80%E9%98%B6%E6%AE%B5%20MVP-b8471d)](#项目状态)
 [![许可](https://img.shields.io/badge/license-Apache--2.0-1b1815)](LICENSE)
 
 Hearth 把用户意图变成持久、可审计、可恢复的任务。它协调 Codex、连接器、浏览器和桌面代理等专用执行器，并让所有外部副作用都经过明确审批、幂等检查和可验证回执。
@@ -29,11 +29,16 @@ Hearth 把用户意图变成持久、可审计、可恢复的任务。它协调 
 
 ## 项目状态
 
-Hearth 当前处于**规格与计划阶段**。仓库包含完整的产品、总体设计、安全、评估和交付计划，但实现尚未开始。
+Hearth 已进入**第一阶段（MVP）实现**。仓库现在包含可运行的本机控制面（TypeScript + React）、原生 Codex 执行器适配、只追加的 SQLite 事件日志、审批门控的外部动作，以及 15 个真实任务评测集。第一阶段的出口是至少 10 个任务通过验收；最新证据见 `eval/README.md`。
 
 ## 仓库结构
 
 ```text
+apps/                  可运行的本机控制面
+  server/              Fastify API、调度器、审批、工作区与产物
+  web/                 任务、审批、产物与设置界面
+packages/              共享核心、事件日志、任务模板与 Codex 执行器
+eval/                  15 个真实任务、输入、验收标准和运行记录
 docs/                  正式文档的唯一来源，也是 VitePress 构建目录
   design/              项目总体设计、技术选型与九个模块的设计取舍
   delivery/            交付路线与六个阶段实施计划
@@ -46,10 +51,41 @@ scripts/               交付页生成辅助脚本
 
 ## 本地运行
 
-要求 Node.js 20 或更高版本，以及 npm。
+要求 Node.js 22.13 或更高版本（服务端使用内置的 `node:sqlite` 模块），以及 npm。
+
+### 启动 Hearth
 
 ```bash
 npm ci
+npm run dev
+```
+
+打开 <http://127.0.0.1:5173>。Vite 开发服务器会把 `/api` 代理到本机 `127.0.0.1:4317` 服务。
+
+以生产模式在本机运行：
+
+```bash
+npm run build
+npm start
+```
+
+打开 <http://127.0.0.1:4317>。
+
+### 不登录 Codex，使用自己的模型
+
+Hearth 通过 Codex SDK 调用执行器，会读取你现有的 `~/.codex/config.toml`。只要配置了 `model_provider` 和对应的 `env_key`，就不需要 `codex login`；密钥只需要存在于启动 Hearth 的终端环境中。设置页会显示当前 Provider、模型和认证来源，密钥不会进入浏览器。
+
+### 数据、备份与停止
+
+- `.hearth/hearth.sqlite` 保存任务、运行、审批、外部动作和事件。
+- `.hearth/workspaces/` 保存隔离的任务工作区。
+- `eval/runs/` 保存已验收的任务产物。
+- 侧栏提供全局停止/恢复开关；停止会把正在执行的运行转入可恢复状态，同时保留队列和审批。
+- 设置页可以下载一致的 SQLite 备份，并把全部任务记录导出为 JSON。完整归档还需一并复制 `eval/runs/` 与 `.hearth/artifacts/`。
+
+### 构建文档站
+
+```bash
 npm run docs:dev
 ```
 
