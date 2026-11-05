@@ -84,7 +84,7 @@ export const TEMPLATES: TaskTemplate[] = [
     id: "T10", title: "清洗销售 CSV", category: "data", description: "清洗 20 行销售导出并列出异常。",
     goal: "保持原始文件不变，生成干净 CSV、异常清单和清洗说明。",
     inputs: [file("销售导出", "eval/inputs/T10-sales-export.csv")], networkHosts: [],
-    outputDir: "eval/runs/T10", expectedOutputs: ["sales-clean.csv", "exceptions.csv", "cleaning-notes.md"], approvalKind: "none", github: null
+    outputDir: "eval/runs/T10", expectedOutputs: ["cleaned-sales.csv", "exceptions.csv", "change-log.md", "summary.md"], approvalKind: "none", github: null
   },
   {
     id: "T11", title: "报销票据核对", category: "data", description: "按报销政策逐笔核对 7 张票据。",
@@ -96,7 +96,7 @@ export const TEMPLATES: TaskTemplate[] = [
     id: "T12", title: "客服工单分类与回复草稿", category: "people", description: "分类 8 个工单并起草回复。",
     goal: "生成分类表、回复草稿、升级清单和知识库草案；脱敏且不自动发送。",
     inputs: [file("工单导出", "eval/inputs/T12-tickets.csv"), file("客服知识库", "eval/inputs/T12-policy-kb.md")], networkHosts: [],
-    outputDir: "eval/runs/T12", expectedOutputs: ["ticket-classification.csv", "reply-drafts.md", "escalations.md", "kb-draft.md"], approvalKind: "none", github: null
+    outputDir: "eval/runs/T12", expectedOutputs: ["triage.csv", "reply-drafts.md", "escalations.md", "kb-draft.md"], approvalKind: "none", github: null
   },
   {
     id: "T13", title: "招聘需求转 JD 与面试题", category: "people", description: "把岗位需求转成合规 JD 和面试工具包。",

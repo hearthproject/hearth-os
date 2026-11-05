@@ -1,5 +1,5 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
 import type { EventEnvelope } from "@hearth/core";
@@ -7,7 +7,8 @@ import { loadCodexProfile } from "@hearth/codex-executor";
 import { HearthStore } from "@hearth/eventlog";
 import { getTemplate } from "@hearth/templates";
 import { z } from "zod";
-import { DB_PATH, WEB_DIST } from "./config.ts";
+import { DB_PATH, REPO_ROOT, WEB_DIST } from "./config.ts";
+import { HearthScheduler } from "./scheduler.ts";
 import { HearthService, type CreateTaskInput } from "./service.ts";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
@@ -23,18 +24,21 @@ export interface BuildServerOptions {
   store?: HearthStore;
   logger?: boolean;
   serveWeb?: boolean;
+  startScheduler?: boolean;
 }
 
 export async function buildServer(options: BuildServerOptions = {}) {
   const ownsStore = !options.store;
   const store = options.store ?? new HearthStore(DB_PATH);
   const service = new HearthService(store);
+  const scheduler = options.startScheduler ? new HearthScheduler({ service }) : null;
   const app = Fastify({
     logger: options.logger ?? false,
     bodyLimit: 2_000_000
   });
 
   app.addHook("onClose", async () => {
+    await scheduler?.stop();
     if (ownsStore) store.close();
   });
 
@@ -105,6 +109,37 @@ export async function buildServer(options: BuildServerOptions = {}) {
     return view;
   });
 
+  app.post<{ Params: { id: string } }>("/api/tasks/:id/retry", async (request, reply) => {
+    if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFF", message: "执行器未启动" });
+    try {
+      return scheduler.retry(request.params.id);
+    } catch (error) {
+      return reply.code(409).send({ error: "RETRY_NOT_ALLOWED", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/tasks/:id/cancel", async (request, reply) => {
+    if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFF", message: "执行器未启动" });
+    try {
+      return scheduler.cancel(request.params.id);
+    } catch (error) {
+      return reply.code(404).send({ error: "TASK_NOT_FOUND", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.get<{ Params: { id: string; artifactId: string } }>("/api/tasks/:id/artifacts/:artifactId", async (request, reply) => {
+    const artifact = store.getArtifact(request.params.artifactId);
+    if (!artifact || artifact.taskId !== request.params.id) {
+      return reply.code(404).send({ error: "ARTIFACT_NOT_FOUND", message: "产物不存在" });
+    }
+    if (!isPathInside(REPO_ROOT, artifact.absolutePath) || !existsSync(artifact.absolutePath)) {
+      return reply.code(410).send({ error: "ARTIFACT_UNAVAILABLE", message: "产物文件已不可用" });
+    }
+    reply.header("content-type", artifact.mimeType);
+    reply.header("content-disposition", `inline; filename*=UTF-8''${encodeURIComponent(basename(artifact.absolutePath))}`);
+    return reply.send(readFileSync(artifact.absolutePath));
+  });
+
   app.get<{ Querystring: { after?: string; taskId?: string } }>("/api/events", async (request, reply) => {
     const afterSeq = parseAfterSeq(request.query.after);
     if (afterSeq === null) {
@@ -161,6 +196,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const hasWeb = options.serveWeb !== false && existsSync(join(WEB_DIST, "index.html"));
   if (hasWeb) await app.register(fastifyStatic, { root: WEB_DIST });
 
+  scheduler?.start();
+
   app.setNotFoundHandler((request, reply) => {
     if (hasWeb && request.method === "GET" && !request.url.startsWith("/api/")) {
       return reply.sendFile("index.html");
@@ -190,4 +227,9 @@ function isLoopbackOrigin(origin: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isPathInside(root: string, candidate: string): boolean {
+  const normalizedRoot = root.replace(/[\\/]+$/, "");
+  return candidate === normalizedRoot || candidate.startsWith(`${normalizedRoot}\\`) || candidate.startsWith(`${normalizedRoot}/`);
 }

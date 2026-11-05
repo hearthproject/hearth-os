@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import type { TaskRecord, TaskStatus } from "@hearth/core";
+import type { ArtifactRecord, RunRecord, TaskRecord, TaskStatus } from "@hearth/core";
 import { assertTransition, TASK_STATUS_LABELS } from "@hearth/core";
 import { HearthStore } from "@hearth/eventlog";
 import { getTemplate, TEMPLATES } from "@hearth/templates";
@@ -91,6 +91,32 @@ export class HearthService {
     });
     this.bus.publish(event);
     return this.requireTask(taskId);
+  }
+
+  createRun(run: RunRecord): RunRecord {
+    this.store.appendEvent({ type: "run.created", taskId: run.taskId, runId: run.id, payload: run });
+    return run;
+  }
+
+  updateRun(runId: string, taskId: string, patch: Partial<Pick<RunRecord, "status" | "threadId" | "startedAt" | "endedAt" | "failure" | "usage">>): void {
+    const event = this.store.appendEvent({
+      type: "run.updated",
+      taskId,
+      runId,
+      payload: patch
+    });
+    this.bus.publish(event);
+  }
+
+  publishArtifact(artifact: ArtifactRecord): ArtifactRecord {
+    const event = this.store.appendEvent({
+      type: "artifact.published",
+      taskId: artifact.taskId,
+      runId: artifact.runId,
+      payload: artifact
+    });
+    this.bus.publish(event);
+    return artifact;
   }
 
   requireTask(taskId: string): TaskRecord {
