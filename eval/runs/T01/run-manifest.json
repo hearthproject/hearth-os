@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "taskId": "T01-mw3bpmsv-5ea985",
+  "templateId": "T01",
+  "title": "会议转写转行动纪要",
+  "runId": "d4edf45b-eec7-4c19-8ebf-a85b6578cff5",
+  "attempt": 1,
+  "generatedAt": "2026-11-05T09:12:14.223Z",
+  "inputs": [
+    {
+      "label": "会议原始记录",
+      "kind": "file",
+      "source": "eval/inputs/T01-meeting-transcript.md",
+      "sha256": "92f19db80e89a5428f9355e09cbbb94ab723128dc461fc64953004219873be91"
+    }
+  ],
+  "expectedOutputs": [
+    "meeting-notes.md"
+  ],
+  "codex": {
+    "threadId": "01a1aaf7-97e7-71a0-b350-de52e1c9e080",
+    "profileLabel": "OpenDesign / deepseek-v4.1-flash",
+    "usage": {
+      "inputTokens": 458762,
+      "cachedInputTokens": 424832,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 23419,
+      "reasoningOutputTokens": 13130
+    }
+  },
+  "artifacts": [
+    {
+      "path": "meeting-notes.md",
+      "sha256": "abdcdfdbb49ff5b8bc03cbf2e5abc4f1fd705c3b6524f118e5636543050aafee",
+      "bytes": 6370
+    }
+  ]
+}
