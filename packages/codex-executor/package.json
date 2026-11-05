@@ -1,0 +1,14 @@
+{
+  "name": "@hearth/codex-executor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@hearth/core": "0.1.0",
+    "@openai/codex-sdk": "0.166.0",
+    "smol-toml": "^1.4.2"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}
