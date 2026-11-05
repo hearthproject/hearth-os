@@ -158,8 +158,8 @@ describe("Hearth scheduler", () => {
       return {};
     });
     const githubRun = async (command: string, args: string[]) => {
-      if (command === "gh" && args[0] === "repo" && args[1] === "clone") {
-        mkdirSync(args[3] ?? "", { recursive: true });
+      if (command === "git" && args[2] === "clone") {
+        mkdirSync(args[6] ?? "", { recursive: true });
         return { stdout: "", stderr: "" };
       }
       if (command === "git" && args[0] === "config") return { stdout: "", stderr: "" };

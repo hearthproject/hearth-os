@@ -101,7 +101,15 @@ export async function prepareGitHubWorkspace(options: {
   if (existsSync(repoPath)) throw new Error(`GitHub 工作区已存在：${repoPath}`);
   mkdirSync(options.workspaceRoot, { recursive: true });
 
-  await run("gh", ["repo", "clone", options.spec.repo, repoPath, "--", "--depth", "50"], { timeoutMs: 10 * 60 * 1000 });
+  await run("git", [
+    "-c",
+    "credential.helper=!gh auth git-credential",
+    "clone",
+    "--depth",
+    "50",
+    `https://github.com/${options.spec.repo}.git`,
+    repoPath
+  ], { timeoutMs: 10 * 60 * 1000 });
   await ensureGitIdentity(run, repoPath, options.spec.repo);
   const base = await defaultBranch(run, options.spec.repo);
 
@@ -353,6 +361,7 @@ async function ensureGitIdentity(run: CommandRunner, repoPath: string, repo: str
   if (!name) await run("git", ["config", "user.name", "Hearth"], { cwd: repoPath });
   const email = await run("git", ["config", "user.email"], { cwd: repoPath }).then((result) => result.stdout.trim()).catch(() => "");
   if (!email) await run("git", ["config", "user.email", "hearth@users.noreply.github.com"], { cwd: repoPath });
+  await run("git", ["config", "credential.helper", "!gh auth git-credential"], { cwd: repoPath });
   await run("git", ["remote", "get-url", "origin"], { cwd: repoPath }).catch(() => {
     throw new Error(`克隆仓库后缺少 origin：${repo}`);
   });
