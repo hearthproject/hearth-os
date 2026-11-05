@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "taskId": "T06-mw3ddlbm-42e8fa",
+  "templateId": "T06",
+  "title": "AI 治理官方政策更新摘要",
+  "runId": "e50a3524-a51d-4500-b175-2d7a4c255210",
+  "attempt": 1,
+  "generatedAt": "2026-11-05T10:20:05.346Z",
+  "inputs": [
+    {
+      "label": "EU AI Act",
+      "kind": "url",
+      "source": "https://digital-strategy.ec.europa.eu/en/policies/regulatory-framework-ai",
+      "sha256": "0b749a152bbd8d53377a68618fadfdb2a44058805984d4a03520c3b4048fe271",
+      "metadata": {
+        "ok": true,
+        "finalUrl": "https://digital-strategy.ec.europa.eu/en/policies/regulatory-framework-ai",
+        "fetchedAt": "2026-11-05T10:13:58.695Z",
+        "httpStatus": 200,
+        "title": "AI Act",
+        "sourceSha256": "901ac46b0d5f2649d6e5af2609ed11515d879c7fa3acfb323ed8a4e8e6b8af74"
+      }
+    },
+    {
+      "label": "NIST AI RMF",
+      "kind": "url",
+      "source": "https://www.nist.gov/itl/ai-risk-management-framework",
+      "sha256": "d507d4fa66ff8bff314c2854054a8a3cb20f944ac7b982e636f88f7b4dd6af1d",
+      "metadata": {
+        "ok": true,
+        "finalUrl": "https://www.nist.gov/itl/ai-risk-management-framework",
+        "fetchedAt": "2026-11-05T10:13:59.367Z",
+        "httpStatus": 200,
+        "title": "AI Risk Management Framework",
+        "sourceSha256": "6daaf57d6c625d077ec85e1eac255a24a09df8523cd564e0e3fe8c66775d2be5"
+      }
+    },
+    {
+      "label": "UK ICO AI guidance",
+      "kind": "url",
+      "source": "https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/artificial-intelligence/",
+      "sha256": "c90bef2e5aa7db71a4354ada975660dee43276041536425b03dcce804234e403",
+      "metadata": {
+        "ok": false,
+        "finalUrl": "https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/artificial-intelligence/",
+        "fetchedAt": "2026-11-05T10:14:00.497Z",
+        "httpStatus": 403,
+        "title": null,
+        "sourceSha256": null,
+        "errorCode": "http_error",
+        "errorMessage": "网页返回 HTTP 403：https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/artificial-intelligence/"
+      }
+    }
+  ],
+  "expectedOutputs": [
+    "policy-update-digest.md"
+  ],
+  "codex": {
+    "threadId": "01a1ab33-7d40-7f43-a774-918cd1547e53",
+    "profileLabel": "OpenDesign / deepseek-v4.1-flash",
+    "usage": {
+      "inputTokens": 1136266,
+      "cachedInputTokens": 1075712,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 38540,
+      "reasoningOutputTokens": 12671
+    }
+  },
+  "artifacts": [
+    {
+      "path": "policy-update-digest.md",
+      "sha256": "4b9953d1a05615afd8380bac2c0d272b47a65d7d4ccc5b489a2f1107423e63c9",
+      "bytes": 12902
+    }
+  ]
+}
