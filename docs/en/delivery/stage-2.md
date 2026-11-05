@@ -1,57 +1,27 @@
 ---
-title: 'Stage 2 · Personal Operator'
-description: 'Hearth Stage 2 development module: read-only connectors, document and data execution, web research, draft approvals, Context Compiler, Token Governor, and Memory v0.'
+title: "Phase 2 · Everyday Content Work"
+description: "Expand from one narrow task family to email, calendar, documents, tables, and the web."
 outline: [2, 3]
 ---
 
-<p class="eyebrow">MODULE 2 / 7</p>
+# Phase 2 · Everyday Content Work
 
-# Stage 2 · Personal Operator
+## Goal
 
-<p class="lead">Expand from file tasks to most everyday content work. The order is read-only first, deterministic processing second, the browser third, and real writes on test accounts last.</p>
+Phase 2 expands Hearth from one narrow task family to most everyday content work: reading email, calendars, files, and knowledge bases; handling documents, tables, and web material; drafting content; and sending or writing after approval. The order must be read-only first, drafting second, and external writes last.
 
-## Prerequisites
+This phase has four steps:
 
-- Stage 1's durable tasks, approvals, idempotency, receipts, and recovery are stable.
-- The first connectors and document/data tasks are chosen, with test accounts available.
-- Every external source enters a unified Source model with permissions, provenance, and audit data.
+| Step | Goal |
+|---|---|
+| [2.1 Connect read-only information sources](/en/delivery/stage-2/2-1) | Show what the system read and where it came from. |
+| [2.2 Process documents, tables, and web material](/en/delivery/stage-2/2-2) | Produce results with sources that can be checked and reused. |
+| [2.3 Draft, approve, and write externally](/en/delivery/stage-2/2-3) | Draft first, approve second, and execute an external write only once. |
+| [2.4 Accept everyday content work](/en/delivery/stage-2/2-4) | Prove less time, better accuracy, and recoverability with real daily tasks. |
 
-## Development Steps
+## How to do it
 
-1. **Connect read-only sources.** Sync email, calendar, files, and knowledge bases read-only; add source views, deduplication, incremental sync, and permission checks.
-2. **Add the Document/Data Executor.** Support document conversion, tables, structured extraction, citation location, and verifiable artifacts.
-3. **Add the Browser Executor.** Start with public web research, citations, and page diffs; isolate sessions and defend against untrusted pages and prompt injection.
-4. **Close test-account side effects.** Use a test account to complete "read → understand → draft → approve → send/write → receipt," verifying idempotency, reconciliation, and undo.
-5. **Compile context and control cost.** Add Context Compiler, Token Governor v1, and Memory v0; record recalled sources, Token use, and manual minutes.
-6. **Complete the Stage 2 release.** Evaluate representative daily tasks for success, manual minutes, cross-account isolation, failure recovery, and user trust.
-
-## Increment Breakdown
-
-Each increment now has four layers: outcome and gate → four work packages → engineering map and interfaces → acceptance rehearsal. Packages can be split across developers, but merge in dependency order; completing one package does not complete the increment.
-
-| Increment | User-visible outcome | Completion evidence |
-|---|---|---|
-| [D2.1](/en/delivery/stage-2/d2-1) Read-only connectors and source views | Users can inspect email, calendar, file, and knowledge sources | Sync, dedupe, incremental updates, permissions, source audit |
-| [D2.2](/en/delivery/stage-2/d2-2) Document/Data Executor | Documents and tables convert, extract, and verify | Artifacts, citations, structure, and failure samples |
-| [D2.3](/en/delivery/stage-2/d2-3) Browser Executor and web research | Research has sources, citations, and page-change evidence | Isolated sessions, page diffs, injection defenses |
-| [D2.4](/en/delivery/stage-2/d2-4) Draft, approval, and test-account effects | Users approve sends/writes and inspect receipts | Test-account loop, idempotency, reconciliation, undo |
-| [D2.5](/en/delivery/stage-2/d2-5) Context Compiler and Memory v0 | Tasks use less context and explain recall | Token baseline, recall sources, budgets, degradation |
-| [D2.6](/en/delivery/stage-2/d2-6) Stage 2 release | Manual minutes fall materially on daily content tasks | Real-task evaluation, cross-account isolation, security report |
-
-## Exit Checklist
-
-- [ ] The email loop "read → understand → draft → approve → send → receipt" works.
-- [ ] Calendar conflict checks and approval-gated writes work.
-- [ ] Document conversion, data extraction, and web research are verifiable and traceable.
-- [ ] Manual minutes fall materially on common tasks, with a Token baseline.
-- [ ] No cross-account or cross-project data leakage; failures recover or explicitly move to human handling.
-
-## Out of Scope
-
-- Taking over an unisolated primary account.
-- Sacrificing permissions, idempotency, and receipts for connector count.
-- Letting untrusted web content alter system permissions or approval policy.
-
-## Next
-
-Continue to [Stage 3 · Computer Operator](/en/delivery/stage-3) for desktop software without APIs.
+1. Connect read-only sources first so the user can see what was read.
+2. Add document, table, and web material processing with citations.
+3. Then complete drafting, approval, and sending or writing under a test account.
+4. Finally accept with real daily tasks for time saved, accuracy, and failure recovery.

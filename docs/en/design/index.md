@@ -115,12 +115,12 @@ See the [Appendix](/en/reference/) and [Default Checklists](/en/reference/checkl
 
 ## Current Status
 
-Hearth is in the specification and planning stage. Product, architecture, security, evaluation, and delivery plans are defined; runnable implementation has not started. The next step is Stage 0: choose the first task wedge and complete a clickable prototype, protocol contracts, evaluation baseline, and real task fixtures.
+Hearth is in the specification and planning stage. Product, architecture, security, evaluation, and delivery plans are defined; runnable implementation has not started. The next step is Phase 1: define the first scenario and real tasks, build the complete experience prototype, and complete the smallest task loop.
 
 ## Continue Reading
 
 <DocCardGrid :columns="3" :items="[
   { no: '01', title: 'Architecture Details', text: 'Start with the overall data flow, domain model, and durable execution.', link: '/en/architecture/overview' },
-  { no: '02', title: 'Delivery Route', text: 'See how seven stages, 35 increments, and 140 work packages fit together.', link: '/en/delivery/' },
+  { no: '02', title: 'Delivery Route', text: 'See how six phases and 24 small stages move from the MVP to long-running operation.', link: '/en/delivery/' },
   { no: '03', title: 'Appendix', text: 'Consult engineering boundaries, risks, ADRs, terminology, checklists, and the archive.', link: '/en/reference/' }
 ]" />

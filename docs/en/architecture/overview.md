@@ -104,16 +104,15 @@ Hearth does not implement all modules in the final architecture diagram on day o
 
 | Product Form | Architectural Increment | Remains Unchanged |
 |---|---|---|
-| Stage 0 clickable prototype | Web prototype, UI data contract, simulated projection | Task-card-first, honest state, one primary action |
-| Stage 1 local MVP | single-process `hearthd`, SQLite WAL, Event Log, Codex, basic approvals and Artifacts | source of truth, recovery, verification, side-effect Receipt |
-| Stage 2 daily operator | Connector, Browser, Document/Data, Context Compiler, Memory v0 | least privilege, provenance, idempotency, Token budget |
-| Stage 3 desktop operator | device agentd, GUI Executor, takeover and desktop isolation | single-writer, audit, approvals, failure recovery |
-| Stage 4 proactive personal Agent | Trigger, attention budget, mobile PWA, push and pairing | low-interruption, revocable, proactive mode can be paused |
-| Stage 5 Memory and Evolution OS | Memory OS, Evolution OS, skill evaluation and rollback | provenance, forgetting, permission intersection, rollback-capable |
-| Stage 6 Personal Agent OS v1.0 | multi-device sync, offline queue, migration, long-running operation and quotas | one logical Agent, event consistency, revocable devices |
+| Phase 1 minimum complete MVP | single-process service, task records, real execution, basic approvals and artifacts | task-card-first, honest state, recovery, and receipts for external actions |
+| Phase 2 everyday content work | read-only sources, document and table processing, web research, approved writes | least privilege, traceable sources, no duplicate execution, bounded cost |
+| Phase 3 desktop operation | desktop device, observation and takeover, graded desktop actions | pausable, takeover-capable, verifiable, recoverable failure |
+| Phase 4 proactive service and mobile entry | triggers, proactive inbox, mobile entry, attention control | low-interruption, revocable, proactive mode can be paused |
+| Phase 5 memory and capability evolution | memory, correction and forgetting, method candidates, evaluation and rollback | clear sources, no permission expansion, reversible |
+| Phase 6 multi-device and long-running operation | multi-device sync, offline handling, device revocation, backup, migration, and long-term operations | one logical agent, consistent state, revocable devices |
 
 **Architecture can expand in stages, but the product form cannot be retrofitted in stages.** Every stage must have a complete user path matching its architectural complexity.
 
 ## Chapter Conclusion
 
-The value of architecture is not the number of modules, but letting “Task, Mandate, execution, evidence, and recovery” flow along the same auditable chain. Stage 0 defines the contract first, Stage 1 implements it with the smallest real chain, and afterward the planes expand gradually without changing the source of truth and permission boundaries.
+The value of architecture is not the number of modules, but letting “Task, Mandate, execution, evidence, and recovery” flow along the same auditable chain. Phase 1 defines the basic conventions for tasks, approval, artifacts, and recovery, then implements them with the smallest real chain; afterward the planes expand gradually without changing the source of truth and permission boundaries.

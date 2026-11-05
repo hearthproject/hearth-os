@@ -23,7 +23,7 @@ It is not another coding agent or chat wrapper. It is a task-centric control pla
 The complete documentation is published at **<https://hearthproject.github.io/hearth-os/>**. Chinese is the default language and every page has a parallel English version.
 
 - [Design & tradeoffs](https://hearthproject.github.io/hearth-os/design/) — positioning, principles, architecture, execution chain, and current status.
-- [Delivery route & implementation plan](https://hearthproject.github.io/hearth-os/delivery/) — Stage 0–6 gates, 35 increments, 140 work packages, and MVP placement.
+- [Delivery route & implementation plan](https://hearthproject.github.io/hearth-os/delivery/) — six phases, 24 small stages, and MVP placement.
 - [Development log](https://hearthproject.github.io/hearth-os/log/day-02.html) — one daily summary plus commits, concrete changes, and authors.
 - [Appendix](https://hearthproject.github.io/hearth-os/reference/) — engineering safeguards, risks, decisions, glossary, checklists, and archives.
 
@@ -37,7 +37,7 @@ Hearth is in the **specification and planning stage**. The repository contains t
 docs/                  the single source of truth and the VitePress build target
   design/              product thinking, tradeoffs, architecture, and status
   architecture/        detailed architecture pages linked from the design section
-  delivery/            delivery route and Stage 0–6 implementation pages
+  delivery/            delivery route and six-phase implementation plans
   log/                 daily development logs
   reference/           appendix: engineering, risks, decisions, and reference material
   en/                  English mirror of every documentation page
@@ -68,7 +68,7 @@ The build output is written to `docs/.vitepress/dist` and is not committed.
 Hearth is still a specification-stage project. The most useful contributions clarify product boundaries, strengthen protocols, challenge risk assumptions, add real task samples, and make the documentation easier to implement from.
 
 - Read [Contributing & documentation maintenance](https://hearthproject.github.io/hearth-os/reference/contributing.html).
-- Check the [full roadmap archive](https://hearthproject.github.io/hearth-os/reference/full-roadmap.html) before changing scope or stage gates.
+- Read the [delivery route](https://hearthproject.github.io/hearth-os/delivery/) before changing scope or phase goals.
 - Open an issue before changing product boundaries, architecture invariants, or delivery exits.
 
 ## License

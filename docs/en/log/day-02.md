@@ -3,6 +3,8 @@ title: 'Day02 · Documentation structure cleanup'
 outline: false
 ---
 
+> Note: this entry records the old seven-stage structure from 2026-11-04. The delivery route was rewritten on 2026-11-05 into six phases and 24 small stages; use the [Delivery Route](/en/delivery/) as the current source.
+
 On 2026-11-04, the Hearth documentation site took its second complete shape: Stages 0–6 received 35 D increments and 140 work packages, the documentation source and bilingual READMEs were consolidated, Hearth OS branding and the testing/evaluation strategy were applied; the information architecture was then reworked so the homepage became a single-page entry, design and delivery became two focused paths, reference became the appendix, and the development log was reduced to essentials.
 
 | Commit | Author | Changes |

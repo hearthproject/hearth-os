@@ -23,7 +23,7 @@ Hearth 把用户意图变成持久、可审计、可恢复的任务。它协调 
 完整文档发布在 **<https://hearthproject.github.io/hearth-os/>**。中文是默认语言，每个页面都有对应的英文版本。
 
 - [设计说明](https://hearthproject.github.io/hearth-os/design/)——项目定位、原则、架构、执行链和当前状态。
-- [交付路线与实施计划](https://hearthproject.github.io/hearth-os/delivery/)——Stage 0–6 门槛、35 个增量、140 个工作包与 MVP 位置。
+- [交付路线与实施计划](https://hearthproject.github.io/hearth-os/delivery/)——六个阶段、24 个小阶段与 MVP 位置。
 - [开发日志](https://hearthproject.github.io/hearth-os/log/day-02.html)——每天一段概述，加上提交、具体修改和作者。
 - [附录](https://hearthproject.github.io/hearth-os/reference/)——工程保障、风险、决策、术语、清单与归档。
 
@@ -37,7 +37,7 @@ Hearth 当前处于**规格与计划阶段**。仓库包含完整的产品、架
 docs/                  正式文档的唯一来源，也是 VitePress 构建目录
   design/              产品思考、取舍、架构与当前状态
   architecture/        从设计说明进入的详细架构页面
-  delivery/            交付路线与 Stage 0–6 实施页面
+  delivery/            交付路线与六个阶段实施计划
   log/                 按日开发日志
   reference/           附录：工程、风险、决策与参考资料
   en/                  所有中文页面的英文镜像
@@ -68,7 +68,7 @@ npm run docs:preview
 Hearth 仍处于规格阶段。当前最有价值的贡献是澄清产品边界、补强协议、挑战风险假设、完善真实任务样本，以及让文档更容易被实现者使用。
 
 - 先读[参与贡献与文档维护](https://hearthproject.github.io/hearth-os/reference/contributing.html)。
-- 修改范围或阶段门槛前，先查阅[完整路线图归档](https://hearthproject.github.io/hearth-os/reference/full-roadmap.html)。
+- 修改范围或阶段目标前，先阅读[交付路线](https://hearthproject.github.io/hearth-os/delivery/)。
 - 影响产品边界、架构不变量或交付出口的改动，请先通过 Issue 讨论。
 
 ## 许可证

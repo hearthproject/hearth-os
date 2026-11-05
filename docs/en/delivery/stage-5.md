@@ -1,55 +1,27 @@
 ---
-title: 'Stage 5 · Memory & Evolution'
-description: 'Hearth Stage 5 development module: Memory Core, memory browser, conflict and forgetting, trajectory mining, skill candidates, evaluation, promotion, and rollback.'
+title: "Phase 5 · Memory and Capability Evolution"
+description: "Let the system accumulate context and improve methods, with every change visible, correctable, and reversible."
 outline: [2, 3]
 ---
 
-<p class="eyebrow">MODULE 5 / 7</p>
+# Phase 5 · Memory and Capability Evolution
 
-# Stage 5 · Memory & Evolution
+## Goal
 
-<p class="lead">Accumulate personal context and improve methods without turning memory contamination or skill drift into an unexplainable black box. Make memory correctable, then forgettable, then skills evaluable, and only then promotable.</p>
+Phase 5 lets Hearth accumulate personal context and improve how it works, but every memory must be visible, correctable, forgettable, and exportable, and every new method must be evaluated, trialed, and reversible.
 
-## Prerequisites
+This phase has four steps:
 
-- Task provenance, permissions, and approval boundaries are stable; sensitive data is classified.
-- Memory writes, retrieval, and injection cannot bypass a Mandate or expand permissions.
-- Representative tasks, success/failure samples, and a repeatable evaluation set exist.
+| Step | Goal |
+|---|---|
+| [5.1 Create visible memory](/en/delivery/stage-5/5-1) | Remember useful information and explain its source and use. |
+| [5.2 Correct, forget, and export memory](/en/delivery/stage-5/5-2) | Wrong memories can be fixed, sensitive information can be forgotten, and all data can be taken away. |
+| [5.3 Summarize and evaluate reusable methods](/en/delivery/stage-5/5-3) | New methods start as candidates and are adopted only after evaluation and a small trial. |
+| [5.4 Accept memory and evolution](/en/delivery/stage-5/5-4) | Prove memory and new methods are useful without becoming uncontrolled or irreversible. |
 
-## Development Steps
+## How to do it
 
-1. **Deliver Memory Core.** Implement the five memory types with source, sensitivity, time, confidence, scope, and retrieval budget; add a memory browser and "why was this recalled" view.
-2. **Handle conflict and forgetting.** Implement write conflicts, correction, deletion, tombstones, forgetting propagation, export, and data migration.
-3. **Mine trajectories and skill candidates.** Extract reusable methods from real trajectories into candidates with versions, permissions, and evaluation sets; never expand permissions automatically.
-4. **Build evaluation and promotion gates.** Run Shadow, Canary, Promote, and Rollback with controlled evaluation, security regression, and human review.
-5. **Complete the first promotion case.** Take at least one skill through candidate, evaluation, trial, promotion, and rollback, and explain it to the user.
-6. **Complete the Stage 5 release.** Evaluate memory accuracy, injection quality, forgetting, export, skill benefit, permissions, and security regressions.
-
-## Increment Breakdown
-
-Each increment now has four layers: outcome and gate → four work packages → engineering map and interfaces → acceptance rehearsal. Packages can be split across developers, but merge in dependency order; completing one package does not complete the increment.
-
-| Increment | User-visible outcome | Completion evidence |
-|---|---|---|
-| [D5.1](/en/delivery/stage-5/d5-1) Memory Core and browser | Users can inspect, understand, and correct memory in use | Five memory types, provenance, budgets, recall explanation |
-| [D5.2](/en/delivery/stage-5/d5-2) Conflict, forgetting, and export | Wrong memory is correctable, forgetting propagates, data is exportable | Tombstones, propagation, export, migration tests |
-| [D5.3](/en/delivery/stage-5/d5-3) Trajectories, skill candidates, evaluation sets | The system proposes reusable methods from work | Trajectory mining, candidates, versions, evaluation samples |
-| [D5.4](/en/delivery/stage-5/d5-4) Evolution gate and release | New methods have comparative evidence and rollback | Shadow, Canary, Promote, Rollback case |
-
-## Exit Checklist
-
-- [ ] Memory is explainable, correctable, forgettable, exportable, and forgetting propagates.
-- [ ] Memory injection accuracy meets the target; sensitive data stays out of disallowed contexts.
-- [ ] Skill promotion has controlled evaluation; evolution never expands permissions.
-- [ ] At least one skill completes promotion and rollback.
-- [ ] Users understand why a memory was recalled or a new method was adopted.
-
-## Out of Scope
-
-- Self-evolution without provenance, evaluation, or rollback.
-- Memory poisoning that changes permissions, approval policy, or system facts.
-- Replacing repeatable evaluation with "the model thinks it is useful."
-
-## Next
-
-Continue to [Stage 6 · Multi-device & Operations](/en/delivery/stage-6) to turn the local product into a long-running, portable Personal Agent OS.
+1. First create memory that can be viewed and corrected.
+2. Then handle forgetting, export, and sensitive-information boundaries.
+3. Then summarize reusable methods from real tasks.
+4. Finally accept with evaluation, small-scale trials, and rollback.

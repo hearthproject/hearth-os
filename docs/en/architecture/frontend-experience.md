@@ -25,7 +25,7 @@ Hearth's frontend is not a console that displays the Agent's internal architectu
 7. **No internal jargon**: Worker, Harness, Token, and Mandate do not appear in the main interface;
 8. **Interface first**: For each increment, first clarify what users see, what they can click, and how to recover after failure, then connect the backend implementation.
 
-The frontend is not a presentation layer added after the backend is complete, but part of the product's vertical slice. Stage 0 validates the information architecture with prototypes; Stage 1 connects real pages to real states; after that, every stage projects newly added capabilities into an actionable interface. A feature is considered ready for stage acceptance only when it has a complete user path, evidence, and recovery entry points in the browser.
+The frontend is not a presentation layer added after the backend is complete, but part of the product's vertical slice. Phase 1 validates the information architecture with a prototype and connects real pages to real states in the MVP; after that, every phase projects newly added capabilities into an actionable interface. A feature is considered ready for phase acceptance only when it has a complete user path, evidence, and recovery entry points in the browser.
 
 ### Information Architecture
 
@@ -109,7 +109,7 @@ Rules: aggregate by task, quiet hours, summary before details, redact push conte
 
 ### Mobile
 
-Mobile prioritizes PWA; Stage 4 handles only five things:
+Mobile prioritizes a web entry; Phase 4 handles only five things:
 
 1. View tasks and artifacts;
 2. Approve high-risk actions;
@@ -137,6 +137,6 @@ Complete main flows with a keyboard; do not rely on color alone; screen readers 
 
 ## Relationship to MVP
 
-The MVP must let users complete creation, viewing, approval drills, cancellation, retry, recovery, and artifact retrieval through the browser. Stage 0 starts with a clickable prototype, Stage 1 D1.1 connects real task status, and D1.3 reaches the full MVP.
+The MVP must let users complete creation, viewing, approval drills, cancellation, retry, recovery, and artifact retrieval through the browser. Phase 1 starts with a clickable prototype, then connects real task status, and finally reaches the full MVP.
 
 An "MVP" without a real Web path does not hold; an interface without failure states and recovery entry points is not complete either.

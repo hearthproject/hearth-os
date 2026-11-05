@@ -185,19 +185,19 @@ CLI output supports both human-readable and JSON modes, making it convenient for
 
 ### Testing and Evaluation System
 
-Testing is not an appendix to feature work; it is part of every increment's deliverable. Every `Dx.y` increment must ship implementation, slice E2E, failure paths, and regression tests together. "Feature first, tests later" is not acceptable.
+Testing is not an appendix to feature work; it is part of every small stage's deliverable. Every small stage must ship implementation, slice E2E, failure paths, and regression tests together. "Feature first, tests later" is not acceptable.
 
 #### Two Principles
 
 - **Tests are not evaluations.** A test is a deterministic pass/fail gate; an evaluation (eval) is a statistical measure of quality, such as verified task success, citation accuracy, token cost, or human minutes. Both are required, but they must not be mixed into one CI gate. See [Evaluation System](/en/architecture/evaluation) for task sets, metrics, and statistical discipline.
-- **Test code ships in the same PR as the feature.** Every increment must deliver implementation, slice E2E, failure paths, and regression tests together. Do not defer testing to a later phase.
+- **Test code ships in the same PR as the feature.** Every small stage must deliver implementation, slice E2E, failure paths, and regression tests together. Do not defer testing to a later phase.
 
 #### The Nine Testing Layers
 
 1. **Unit tests**: pure logic, including state machines, Task/Ticket transitions, budget calculations, permission decisions, verifiers, error classification, and Context Compiler trimming rules. Use Vitest for TypeScript and pytest for the Python sidecar.
 2. **Contract tests**: test boundaries, not internal implementation. Focus on Executors, Connectors, Sandbox Providers, the Credential Broker, and the Effect Dispatcher. The Codex adapter must honor the unified `TaskPack → Result` contract; email connectors must honor the `Source/Effect`, idempotency, and Receipt contracts. Contract tests are the main defense against "one behavior in mocks, another in production."
 3. **Integration tests**: use a real temporary SQLite database to test the Event Log, projection rebuilds, migrations, outbox, leases, fencing tokens, duplicate delivery, and crash recovery. Do not mock the database here, because persistent behavior is exactly what must be verified.
-4. **Vertical slice E2E**: every `Dx.y` has a browser acceptance path covering task creation, status, approval, artifact retrieval, and failure recovery. Stage 0 uses a fake executor to exercise the prototype; Stage 1 starts using a real Codex slice. This is the most important test category for the project.
+4. **Vertical slice E2E**: every small stage has a browser acceptance path covering task creation, status, approval, artifact retrieval, and failure recovery. Phase 1 first uses simulated execution to exercise the prototype, then runs real tasks in the MVP. This is the most important test category for the project.
 5. **Fault injection**: inject `kill -9` at the queueing, execution, artifact-write, and approval-wait points, then cover network loss, timeouts, full disk, duplicate delivery, device offline, and clock skew. Acceptance should map directly to stage gates: zero duplicate external side effects and the target recovery rate.
 6. **Replay and determinism tests**: replay recorded event streams to verify that projections rebuild, old events can be upgraded, and replay does not produce external side effects. UI state must also be recoverable from the event stream rather than depending on in-memory objects.
 7. **Security tests**: cover privilege escalation, approval replay, nonce/expiry handling, secret leakage, prompt injection, untrusted web content, SSRF/egress, cross-account isolation, and device revocation. Every new permission must ship both "allow" and "deny" tests.
@@ -295,6 +295,6 @@ The goal is not test count. It is to guarantee that **when Hearth says "the task
 - Support rollback to the previous stable version;
 - Upgrades do not break historical Events and Artifacts;
 - Users can export and migrate.
-- Each increment retains a rollback-capable version; recovery must not rely solely on rebuilding the environment.
+- Each small stage retains a rollback-capable version; recovery must not rely solely on rebuilding the environment.
 
 ---

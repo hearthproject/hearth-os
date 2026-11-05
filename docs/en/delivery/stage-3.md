@@ -1,55 +1,27 @@
 ---
-title: 'Stage 3 · Computer Operator'
-description: 'Hearth Stage 3 development module: device agentd, GUI observation, human takeover, low-risk desktop actions, high-risk approvals, and desktop security boundaries.'
+title: "Phase 3 · Desktop Operation"
+description: "Let Hearth operate desktop software and cross-application workflows without open interfaces."
 outline: [2, 3]
 ---
 
-<p class="eyebrow">MODULE 3 / 7</p>
+# Phase 3 · Desktop Operation
 
-# Stage 3 · Computer Operator
+## Goal
 
-<p class="lead">Cover desktop software without APIs and cross-application workflows. Observe first, add takeover second, allow low-risk actions third, and only then open high-risk actions. Automation is blocked when outcomes cannot be verified or controlled.</p>
+Phase 3 lets Hearth operate desktop software and cross-application workflows that have no open interface. The order is observe first, take over second, low-risk actions third, and high-risk actions last. If the system cannot observe, pause, or hand over, it must not act automatically.
 
-## Prerequisites
+This phase has four steps:
 
-- Recovery, approval, idempotency, receipts, and browser isolation from Stages 1–2 are stable.
-- Device capabilities, window scopes, application allowlists, and irreversible-action lists are defined.
-- Takeover and revocation paths exist before automation.
+| Step | Goal |
+|---|---|
+| [3.1 Connect and inspect a desktop device](/en/delivery/stage-3/3-1) | Make the device, scope, and stop control clear to the user. |
+| [3.2 Observe the desktop and take over](/en/delivery/stage-3/3-2) | Let the user see the work, pause, take over, and hand back. |
+| [3.3 Complete desktop actions by risk level](/en/delivery/stage-3/3-3) | Start with low-risk actions; high-risk actions need preview, confirmation, and recovery. |
+| [3.4 Accept desktop operation](/en/delivery/stage-3/3-4) | Prove with real desktop tasks that it is understandable, interruptible, and stoppable. |
 
-## Development Steps
+## How to do it
 
-1. **Register desktop devices.** Implement pairing, `agentd` registration, capability catalog, health checks, permission declarations, device details, disconnect, and revocation.
-2. **Build observation and takeover.** Connect the accessibility tree, screenshots, window scopes, live takeover, mouse/keyboard pause and handback, screenshot redaction, and audit events.
-3. **Complete low-risk GUI actions.** Within allowlisted applications, open files, navigate menus, fill drafts, and export results, then verify with screenshots or the accessibility tree.
-4. **Handle partial completion and failure.** Detect partial success, lost windows, input contention, permission changes, and unrecoverable states; offer pause, takeover, or rollback.
-5. **Open high-risk actions.** Add isolated virtual desktops, impact preview, explicit confirmation, irreversible-action lists, snapshots, compensation scripts, and recovery drills.
-6. **Complete the Stage 3 release.** Evaluate at least 5 real desktop tasks for completion, takeover experience, security boundaries, Tokens, and manual minutes.
-
-## Increment Breakdown
-
-Each increment now has four layers: outcome and gate → four work packages → engineering map and interfaces → acceptance rehearsal. Packages can be split across developers, but merge in dependency order; completing one package does not complete the increment.
-
-| Increment | User-visible outcome | Completion evidence |
-|---|---|---|
-| [D3.1](/en/delivery/stage-3/d3-1) Device agentd and visibility | Users see trusted devices, capabilities, and online state | Pairing, capability catalog, health check, revocation |
-| [D3.2](/en/delivery/stage-3/d3-2) GUI observation and takeover | Users can view, pause, operate, and hand back | Takeover UI, window scope, state record, screenshot redaction |
-| [D3.3](/en/delivery/stage-3/d3-3) Low-risk GUI actions and verification | Allowlisted low-risk actions show evidence | App allowlist, action preview, result verification, retry |
-| [D3.4](/en/delivery/stage-3/d3-4) High-risk GUI and Stage 3 release | High-risk actions show impact, confirmation, and compensation | Isolated desktop, approval, snapshot, recovery, 5 real tasks |
-
-## Exit Checklist
-
-- [ ] At least 5 real desktop tasks can be completed and verified.
-- [ ] Users can pause, operate, hand back, or terminate a takeover.
-- [ ] GUI failures do not leave half-completed high-risk states.
-- [ ] Password vaults are not read and security settings are not changed beyond scope.
-- [ ] Tokens and manual minutes are acceptable; users understand undo or compensation.
-
-## Out of Scope
-
-- Automating desktop actions without verification or takeover.
-- Unbounded system-level control.
-- Treating OCR or screenshot recognition as the sole source of truth.
-
-## Next
-
-Continue to [Stage 4 · Proactive Personal Agent](/en/delivery/stage-4) and add bounded proactivity on top of recovery and approval.
+1. First let the user see and trust the desktop device.
+2. Then let the user observe, pause, and take over.
+3. Then complete low-risk actions in allowlisted applications.
+4. Only then open high-risk actions, with snapshots, compensation, and recovery drills.

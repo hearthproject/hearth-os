@@ -39,16 +39,16 @@ Approvals must let the user decide within ten seconds:
 
 User rejections, modifications, revocations, and takeovers are not noise, but important samples for evaluation and skill improvement; however, user corrections must not automatically become higher privileges.
 
-## Stage Mapping
+## Phase Mapping
 
 | Executor | First Appearance |
 |---|---|
-| Codex | Stage 1 / D1.2 |
-| Native (thin layer) | Stage 1–2 |
-| Connector | Stage 2 |
-| Browser | Stage 2 |
-| Document/Data | Stage 2 |
-| GUI + Human real-time takeover | Stage 3 |
-| Mobile takeover entry point | Stage 4 |
+| Codex | Phase 1, step 1.3 |
+| Native (thin layer) | Phases 1–2 |
+| Connector | Phase 2 |
+| Browser | Phase 2 |
+| Document/Data | Phase 2 |
+| GUI + Human real-time takeover | Phase 3 |
+| Mobile takeover entry point | Phase 4 |
 
-Stage 0 only defines the capability matrix and UI contract; Stage 1 uses only Codex to prove one real vertical slice, rather than integrating all executors at once.
+Phase 1 first defines the capability matrix and interface conventions, then uses one execution capability to prove the smallest task loop; later phases add the other executors gradually.

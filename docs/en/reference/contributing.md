@@ -19,7 +19,7 @@ hearth-os/
 │  ├─ en/                      # English mirror
 │  ├─ design/                  # Positioning, principles, tradeoffs, and status
 │  ├─ architecture/            # Detailed architecture pages
-│  ├─ delivery/                # Delivery route and Stages 0–6
+│  ├─ delivery/                # Delivery route and six phases
 │  ├─ log/                     # Daily development logs
 │  ├─ reference/               # Appendix, engineering, risks, and decisions
 │  └─ .vitepress/              # Site configuration and theme
@@ -48,7 +48,7 @@ npm run docs:preview
 - State the conclusion first, then explain the reasoning; avoid burying implementation details in long paragraphs.
 - Use explicit entity names: Task, Ticket, Run, Mandate, Receipt, Artifact, Memory, Skill.
 - Distinguish between facts, judgments, and hypotheses pending verification; do not write aspirations as completed capabilities.
-- Every stage must have a user-visible interface, persistent state, verification evidence, and a recovery path.
+- Every phase must have a user-visible interface, persistent state, verification evidence, and a recovery path.
 - External side effects must clearly document approval, idempotency, receipts, and reconciliation.
 - Prefer text or Mermaid for diagrams so they remain diffable and translatable.
 - Keep Chinese and English isomorphic: paths, heading levels, and navigation positions must match.
@@ -65,13 +65,13 @@ npm run docs:preview
 
 1. Run `npm run docs:build` to confirm there are no dead links or build errors.
 2. Check whether Chinese and English paths correspond.
-3. If facts, protocols, or stage gates changed, also check the [full roadmap](/en/reference/full-roadmap) and related ADRs.
-4. Explain which stage, readers, and risks the change affects.
+3. If facts, protocols, or phase goals changed, also check related ADRs.
+4. Explain which phase, readers, and risks the change affects.
 5. Do not commit `.vitepress/dist`, caches, or local secrets.
 
 ## Documentation Source of Truth
 
-`docs/` is the only formal documentation source shared by the repository and the site; there is no second copy of the body text. Chinese pages are the default reading path, and English pages mirror them under `docs/en/`. The [full roadmap archive](/en/reference/full-roadmap) is also a page inside `docs/` and preserves long-form detail. When facts, protocols, or stage gates change, update the Chinese page, English mirror, and related indexes together.
+`docs/` is the only formal documentation source shared by the repository and the site; there is no second copy of the body text. Chinese pages are the default reading path, and English pages mirror them under `docs/en/`. When facts, protocols, or phase goals change, update the Chinese page, English mirror, and related indexes together.
 
 ## License
 

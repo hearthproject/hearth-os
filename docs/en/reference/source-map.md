@@ -16,19 +16,18 @@ outline: [2, 3]
 |---|---|---|
 | Design | Positioning, principles, tradeoffs, architecture, and current status | [Design](/en/design/) |
 | Architecture | Protocols, control plane, executors, safety, memory, and evaluation | [Architecture Overview](/en/architecture/overview) |
-| Delivery | Stages 0–6, D increments, work packages, and MVP | [Delivery Route](/en/delivery/) |
+| Delivery | Six phases, 24 small stages, and the MVP | [Delivery Route](/en/delivery/) |
 | Development Log | One daily summary plus commits, concrete changes, and authors | [Day02](/en/log/day-02) |
 | Appendix | Engineering, risks, decisions, glossary, checklists, and archives | [Appendix](/en/reference/) |
 
 ## Reading Hierarchy
 
 1. **Design** explains why the project exists, where its boundaries are, and which tradeoffs matter.
-2. **Delivery Route** turns the design into Stage 0–6 capability gates and a construction order.
-3. **Stage pages** define prerequisites, stage exits, and exclusions.
-4. **D increment pages** provide independently buildable and verifiable vertical slices.
-5. **Four work packages** explain implementation steps, engineering locations, interfaces, and failure recovery.
+2. **Delivery Route overview** explains the order, goals, and relationships of the six phases.
+3. **Phase plans** explain what a large phase must complete and why these things come first.
+4. **Small-stage plans** explain the concrete goal, implementation steps, and how completion is judged.
 
-Confirm the current stage's scope and exit before opening a concrete development page; never infer the whole product scope from a single work package.
+Confirm the current phase's scope and goal before opening a concrete small-stage page; never infer the whole product scope from a single small stage.
 
 ## Three Reading Paths
 
@@ -43,23 +42,21 @@ Confirm the current stage's scope and exit before opening a concrete development
 ### Review the Delivery Plan
 
 1. [Delivery Route and Implementation Plan](/en/delivery/)
-2. [Stage 0 · Definition and Prototype](/en/delivery/stage-0)
-3. [Stage 1 · Durable Kernel and MVP](/en/delivery/stage-1)
-4. [Full Roadmap Archive](/en/reference/full-roadmap)
+2. [Phase 1 · Minimum Complete MVP](/en/delivery/stage-1)
+3. [1.1 Define the first scenario and real tasks](/en/delivery/stage-1/1-1)
 
 ### Start Building
 
-1. [Stage 0 · Definition and Prototype](/en/delivery/stage-0)
-2. [D0.1 · Product Wedge and Real-Task Baseline](/en/delivery/stage-0/d0-1)
+1. [Phase 1 · Minimum Complete MVP](/en/delivery/stage-1)
+2. [1.1 Define the first scenario and real tasks](/en/delivery/stage-1/1-1)
 3. [Engineering and Repository Layout](/en/reference/engineering)
 4. [Risks and Kill Criteria](/en/reference/risks)
 
-## Topic Pages and the Complete Archive
+## Documentation Hierarchy
 
 - Topic pages are the normal path for reading and maintenance, organized into design, delivery, log, and appendix.
-- The [Full Roadmap Archive](/en/reference/full-roadmap) preserves long-form detail for search, citation, and comparison.
-- The archive and topic pages both live under `docs/`; they are not separate documentation sources.
-- When facts, protocols, or stage gates change, update the topic pages, archive, and English mirror together.
+- Delivery has one structure only: overview, large phase plans, and small-stage plans; there is no parallel long-form archive.
+- When facts, protocols, or phase goals change, update the Chinese page, the English mirror, and related entry points together.
 
 ## Maintenance Workflow
 
@@ -73,7 +70,7 @@ Confirm the current stage's scope and exit before opening a concrete development
 
 - Modify formal documentation only under `docs/`; do not add a second documentation root.
 - Keep Chinese and English paths aligned with matching heading levels and list counts.
-- Preserve the hierarchy: design → delivery → Stage → D increment → work package.
+- Preserve the hierarchy: overview → large phase → small stage.
 - Keep README limited to the project pitch, quick start, and documentation navigation; do not duplicate long-form body text.
 - Keep one daily overview and a commit table in development logs; do not restore a log index or template.
 - Do not commit `docs/.vitepress/dist`, caches, local secrets, or completion claims without evidence.

@@ -123,8 +123,7 @@ const zhSidebar = {
         { text: '默认清单', link: '/reference/checklists' },
         { text: '常见问题', link: '/reference/faq' },
         { text: '参与贡献与文档维护', link: '/reference/contributing' },
-        { text: '文档来源与覆盖', link: '/reference/source-map' },
-        { text: '完整路线图（归档）', link: '/reference/full-roadmap' }
+        { text: '文档来源与覆盖', link: '/reference/source-map' }
       ]
     }
   ]
@@ -173,8 +172,7 @@ const enSidebar = {
         { text: 'Default Checklists', link: '/en/reference/checklists' },
         { text: 'FAQ', link: '/en/reference/faq' },
         { text: 'Contributing & Docs', link: '/en/reference/contributing' },
-        { text: 'Sources & Coverage', link: '/en/reference/source-map' },
-        { text: 'Full Roadmap (Archive)', link: '/en/reference/full-roadmap' }
+        { text: 'Sources & Coverage', link: '/en/reference/source-map' }
       ]
     }
   ]

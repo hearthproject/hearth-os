@@ -107,4 +107,4 @@ Source Event
   → Notification / Receipt
 ```
 
-Active mode and suggestion mode must be independently toggleable and backed by comparative data. The real proactive loop is not enabled before Stage 4.
+Active mode and suggestion mode must be independently toggleable and backed by comparative data. The real proactive loop is not enabled before Phase 4.

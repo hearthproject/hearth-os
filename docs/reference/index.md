@@ -1,6 +1,6 @@
 ---
 title: '附录'
-description: 'Hearth 附录：工程实施、风险与决策、自研边界、术语、清单、FAQ、贡献和完整归档。'
+description: 'Hearth 附录：工程实施、风险与决策、自研边界、术语、清单、FAQ、贡献和文档地图。'
 outline: [2, 3]
 ---
 
@@ -24,15 +24,14 @@ outline: [2, 3]
   { no: '04', title: '自研与集成边界', text: '哪些能力必须自研，哪些底层能力应该直接集成。', link: '/reference/build-vs-integrate' },
   { no: '05', title: '术语表', text: '统一 Task、Run、Mandate、Receipt、Memory、Skill 等术语。', link: '/reference/glossary' },
   { no: '06', title: '默认清单', text: '默认审批、默认完成和任务覆盖的最终定义。', link: '/reference/checklists' },
-  { no: '07', title: '常见问题', text: '解释 Hearth 与 Coding Agent、Codex、Stage 1、多用户和进化的关系。', link: '/reference/faq' },
+  { no: '07', title: '常见问题', text: '解释 Hearth 与 Coding Agent、Codex、第一阶段、多用户和进化的关系。', link: '/reference/faq' },
   { no: '08', title: '参与贡献与文档维护', text: '本地开发、写作约定、PR 检查和事实源规则。', link: '/reference/contributing' },
-  { no: '09', title: '文档地图', text: '当前信息架构、目录结构、双语规则和更新流程。', link: '/reference/source-map' },
-  { no: '10', title: '完整原始路线图（归档）', text: '保留旧版长篇内容，供检索、引用和历史对照。', link: '/reference/full-roadmap' }
+  { no: '09', title: '文档地图', text: '当前信息架构、目录结构、双语规则和更新流程。', link: '/reference/source-map' }
 ]" />
 
 ## 使用方式
 
 - 产品范围和设计取舍，从[项目设计与取舍](/design/)开始；
-- 当前阶段和增量顺序，从[交付路线](/delivery/)开始；
+- 当前阶段和小阶段顺序，从[交付路线](/delivery/)开始；
 - 工程实现、风险和不可逆决策，以本附录为准；
 - 讨论术语或清单时，优先使用附录中的统一定义。

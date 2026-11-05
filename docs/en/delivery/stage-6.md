@@ -1,58 +1,27 @@
 ---
-title: 'Stage 6 · Multi-device & Operations'
-description: 'Hearth Stage 6 development module: event sync, device routing, offline queues, revocation and key rotation, backup and restore, long-running operations, and full audit.'
+title: "Phase 6 · Multi-device and Long-running Operation"
+description: "Let the same tasks, memory, and authority run safely across devices over the long term."
 outline: [2, 3]
 ---
 
-<p class="eyebrow">MODULE 6 / 7</p>
+# Phase 6 · Multi-device and Long-running Operation
 
-# Stage 6 · Multi-device & Operations
+## Goal
 
-<p class="lead">Turn the local product into a long-running, multi-device, portable, and revocable personal Agent OS. Multi-device is not multiple agents: it is one logical identity, event history, memory, and authorization across devices.</p>
+Phase 6 expands the single-device product into a Personal Agent OS that runs for the long term, stays consistent across devices, can be backed up, migrated, and revoked. Multi-device does not mean copying multiple agents; it means the same tasks, memory, and authority continue on different devices.
 
-## Prerequisites
+This phase has four steps:
 
-- Single-device install, recovery, backup, security, and upgrade paths work.
-- Events, leases, fencing tokens, memory versions, and device identity have stable contracts.
-- Multi-device operation cannot bypass approval, idempotency, or revocation boundaries.
+| Step | Goal |
+|---|---|
+| [6.1 Sync and switch across devices](/en/delivery/stage-6/6-1) | Keep the same tasks and artifacts consistent across devices. |
+| [6.2 Revoke devices and migrate safely](/en/delivery/stage-6/6-2) | A lost device can be disabled immediately, and data moves fully when replacing it. |
+| [6.3 Back up, restore, and upgrade](/en/delivery/stage-6/6-3) | Changing machines, versions, or making a mistake does not lose tasks, artifacts, or memory. |
+| [6.4 Long-running operation and v1.0 acceptance](/en/delivery/stage-6/6-4) | Run stably for the long term, then release v1.0 after full acceptance. |
 
-## Development Steps
+## How to do it
 
-1. **Implement read and event sync.** Add device identity, cursors, incremental sync, conflict handling, event replay, and projection consistency.
-2. **Add capability routing and offline queues.** Route GUI, file, and execution tasks by device capability; queue while offline, then replay idempotently without duplicate effects.
-3. **Complete revocation and key rotation.** Handle lost devices, remote revocation, key rotation, session invalidation, and secure migration.
-4. **Complete backup, restore, and upgrade.** Support encrypted backup, full restore, export/import, schema migration, executor version pinning, pre-upgrade checks, and rollback.
-5. **Build long-running operations.** Add health checks, quotas, logs, monitoring, resource reclamation, failure recovery, and long-term migration drills.
-6. **Complete the system audit.** Pass every stage exit, audit all eight task families, run red-team and fault injection, rehearse migration, and publish privacy, installer, upgrade, and final evaluation evidence.
-
-## Increment Breakdown
-
-Each increment now has four layers: outcome and gate → four work packages → engineering map and interfaces → acceptance rehearsal. Packages can be split across developers, but merge in dependency order; completing one package does not complete the increment.
-
-| Increment | User-visible outcome | Completion evidence |
-|---|---|---|
-| [D6.1](/en/delivery/stage-6/d6-1) Multi-device read and event sync | Consistent tasks and artifacts across devices | Device identity, cursors, incremental sync, replay |
-| [D6.2](/en/delivery/stage-6/d6-2) Capability routing and offline queues | Tasks go to the right device and survive disconnection | Capability routing, offline queue, idempotent replay |
-| [D6.3](/en/delivery/stage-6/d6-3) Revocation, key rotation, and secure migration | Lost devices are revocable and data can move safely | Revocation, rotation, session invalidation, migration drill |
-| [D6.4](/en/delivery/stage-6/d6-4) Backup, restore, migration, and upgrade | Users can fully back up, restore, and upgrade | Encrypted backup, schema migration, rollback |
-| [D6.5](/en/delivery/stage-6/d6-5) Long-running operations and resources | The system runs long-term without daily maintenance | Health checks, quotas, monitoring, resource reclamation |
-| [D6.6](/en/delivery/stage-6/d6-6) Full audit and release | An installable, portable, revocable personal Agent OS | Eight-family coverage, red team, fault injection, final evaluation |
-
-## Exit Checklist
-
-- [ ] One logical agent stays consistent across devices; switching devices loses no tasks.
-- [ ] Offline recovery meets target; device switching and retries do not duplicate external effects.
-- [ ] Device revocation is immediate and blocks further approval or takeover.
-- [ ] Events, artifacts, memory, and skills verify after migration.
-- [ ] Long-running operation has no leaks, state drift, or unexplained permission expansion.
-- [ ] Install, upgrade, backup, restore, privacy, and export paths are complete.
-
-## Out of Scope
-
-- Multiple inconsistent agents presented as multi-device support.
-- Using sync conflicts or offline queues to excuse duplicate effects.
-- Declaring completion without migration drills and revocation.
-
-## After Completion
-
-After this module, the project enters long-term maintenance and expansion. More task families, connectors, and optimizations will follow, but foundational product, recovery, security, approval, and migration are no longer deferred work.
+1. First make tasks and artifacts consistent across devices.
+2. Then handle offline use, device switching, and capability routing.
+3. Then complete device revocation, backup, restore, and upgrade.
+4. Finally run the long-term test and full acceptance for v1.0.

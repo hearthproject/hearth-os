@@ -44,69 +44,66 @@ When the following occur, pause new features and prioritize fixes:
 - Task status is inconsistent with the source of truth;
 - External side effects cannot be reconciled.
 
-### Stage Kill Criteria
+### Phase Kill Criteria
 
-**Stage 0:**
+**Phase 1:**
 
-- Cannot define 12 tasks with acceptance criteria;
-- Cannot explain the difference between Hearth and a single Codex;
-- No threat model;
+- Cannot define 10 real tasks with acceptance criteria;
+- Cannot explain the difference between Hearth and using existing tools directly;
+- No threat model or basic security boundary;
 - The prototype cannot let users complete the main path without instructions;
-- Prototype state cannot map to a real projection or data contract;
-- Trying to build all Executors at once in the first stage.
-
-**Stage 1:**
-
-- After meeting the MVP threshold, still cannot complete 10 real tasks;
-- Duplicate side effects cannot be eliminated;
+- After meeting the MVP threshold, still cannot complete 8 real tasks;
+- Duplicate external actions cannot be eliminated;
 - Recovery depends on manual state reconstruction;
 - Task status can only be inferred from chat history;
-- Token cost is completely invisible;
-- The backend is available, but the Web Task card cannot complete creation, viewing, approval, recovery, and Artifact retrieval;
-- Demoing only via CLI or logs does not count as an established MVP.
+- The backend is available, but the browser cannot complete creation, viewing, approval, recovery, and artifact retrieval.
 
-**Stage 2:**
+**Phase 2:**
 
-- The email/calendar loop requires users to frequently rebuild context;
-- Connector permissions cannot be minimized;
-- Document processing results cannot be verified;
-- Human minutes for common tasks have not decreased;
-- Data cross-talk between different accounts/projects.
+- The email or calendar loop requires users to frequently rebuild background information;
+- Source permissions cannot be minimized;
+- Document, table, or web results cannot be verified;
+- Manual time for common tasks has not decreased;
+- Data cross-talk between accounts or projects;
+- External writes may run twice or cannot be checked.
 
-**Stage 3:**
+**Phase 3:**
 
-- GUI Task success rate is low and cannot be taken over;
+- Desktop task success rate is low and cannot be taken over;
 - Cannot prove operations did not overstep permissions;
-- The desktop environment cannot be recovered;
-- Every GUI Task requires heavy manual intervention.
+- The desktop state cannot be recovered;
+- Every desktop task requires heavy manual intervention;
+- Failure tends to leave a half-finished high-risk state.
 
-**Stage 4:**
+**Phase 4:**
 
-- Proactive Tasks create notification fatigue;
+- Proactive tasks create notification fatigue;
 - Users cannot predict when they will be interrupted;
-- Mobile approvals can be replayed or overstep permissions;
-- Background Tasks cannot be stopped or budgets run out of control.
+- Mobile approvals can be reused or overstep permissions;
+- Background tasks cannot be stopped or budgets run out of control;
+- High-risk actions bypass approval because they are proactive.
 
-**Stage 5:**
+**Phase 5:**
 
 - Memory errors cause continuous rework;
-- Forgetting cannot propagate to devices and indexes;
-- Skill evaluation can be manipulated by cherry-picked samples;
-- Skills expand permissions or cause security regressions;
-- Rollback is unavailable.
+- Forgetting cannot propagate to summaries, indexes, and related content;
+- Method evaluation can be manipulated by cherry-picked samples;
+- New methods expand permissions or cause security regressions;
+- The old version cannot be restored.
 
-**Stage 6:**
+**Phase 6:**
 
 - Multi-device duplicate execution or state split;
 - A lost device cannot be revoked promptly;
-- After migration, facts, memory, or Artifact are inconsistent;
-- Long-term operation maintenance cost exceeds product value.
+- After migration, tasks, memory, or artifacts are inconsistent;
+- Long-term operation maintenance cost exceeds product value;
+- Users cannot back up, restore, or leave independently.
 
 ### Project-Level Kill Criteria
 
 In the following cases, consider narrowing the product rather than continuing to add features:
 
-- After Stage 2, there are still no stable 10 real daily tasks;
+- After Phase 2, there are still no stable 10 real daily tasks;
 - Human minutes have not substantially decreased; users are just “watching the Agent work”;
 - Maintenance cost continues to exceed available time with no downward trend;
 - Simply switching models can replace most of Hearth's value;

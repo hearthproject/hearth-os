@@ -97,11 +97,11 @@ Trajectory collection
 - No rollback;
 - Letting the Agent modify its own security checks.
 
-## Relationship with Stages
+## Relationship with Phases
 
-- **Stage 1**: Only execution isolation, basic credential boundaries, outbox/Receipt, and drill approvals; no full Memory/Evolution.
-- **Stage 2**: Memory v0 (provenance, basic forgetting) and Context Compiler.
-- **Stage 5**: Full Memory OS five types of memory, forgetting propagation, skill candidates, and Evolution promotion gates.
-- **Stage 6**: Multi-device memory sync, tombstone, device revocation, and migration verification.
+- **Phase 1**: Only execution isolation, basic credential boundaries, receipts for external actions, and approval drills; no full memory or capability evolution.
+- **Phase 2**: Basic memory (provenance and basic forgetting) and task background preparation.
+- **Phase 5**: Full memory, forgetting propagation, method candidates, and promotion gates.
+- **Phase 6**: Multi-device memory sync, device revocation, and migration verification.
 
-Security, memory, and evolution cannot wait until the end to be added; they exist in minimal form from Stage 1 and are gradually completed in subsequent stages.
+Security, memory, and evolution cannot wait until the end to be added; they exist in minimal form from Phase 1 and are gradually completed in subsequent phases.

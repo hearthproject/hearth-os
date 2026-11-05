@@ -1,425 +1,137 @@
 export const zhDeliveryStages = [
   {
-    "text": "S0 · 定义与原型",
-    "collapsed": true,
-    "items": [
-      {
-        "text": "模块总览",
-        "link": "/delivery/stage-0"
-      },
-      {
-        "text": "D0.1 产品楔子与真实任务基线",
-        "link": "/delivery/stage-0/d0-1"
-      },
-      {
-        "text": "D0.2 可点击的端到端产品原型",
-        "link": "/delivery/stage-0/d0-2"
-      },
-      {
-        "text": "D0.3 协议、状态机与 UI 数据契约",
-        "link": "/delivery/stage-0/d0-3"
-      },
-      {
-        "text": "D0.4 评测、安全与工程基线",
-        "link": "/delivery/stage-0/d0-4"
-      }
+    text: "第一阶段 · 最小完整 MVP",
+    collapsed: true,
+    items: [
+      { text: "阶段总览", link: "/delivery/stage-1" },
+      { text: "1.1 明确首个场景与真实任务", link: "/delivery/stage-1/1-1" },
+      { text: "1.2 做出完整体验原型", link: "/delivery/stage-1/1-2" },
+      { text: "1.3 打通最小任务闭环", link: "/delivery/stage-1/1-3" },
+      { text: "1.4 用真实任务验收 MVP", link: "/delivery/stage-1/1-4" }
     ]
   },
   {
-    "text": "S1 · 持久内核与 MVP",
-    "collapsed": true,
-    "items": [
-      {
-        "text": "模块总览",
-        "link": "/delivery/stage-1"
-      },
-      {
-        "text": "D1.1 可运行走路骨架",
-        "link": "/delivery/stage-1/d1-1"
-      },
-      {
-        "text": "D1.2 第一个真实 Codex 纵向切片",
-        "link": "/delivery/stage-1/d1-2"
-      },
-      {
-        "text": "D1.3 MVP 收口",
-        "link": "/delivery/stage-1/d1-3"
-      },
-      {
-        "text": "D1.4 副作用安全骨架",
-        "link": "/delivery/stage-1/d1-4"
-      },
-      {
-        "text": "D1.5 第二任务族与内核加固",
-        "link": "/delivery/stage-1/d1-5"
-      },
-      {
-        "text": "D1.6 Stage 1 发布",
-        "link": "/delivery/stage-1/d1-6"
-      }
+    text: "第二阶段 · 日常内容工作",
+    collapsed: true,
+    items: [
+      { text: "阶段总览", link: "/delivery/stage-2" },
+      { text: "2.1 接入只读信息源", link: "/delivery/stage-2/2-1" },
+      { text: "2.2 处理文档、表格与网页资料", link: "/delivery/stage-2/2-2" },
+      { text: "2.3 起草、审批与外部写入", link: "/delivery/stage-2/2-3" },
+      { text: "2.4 验收日常内容工作", link: "/delivery/stage-2/2-4" }
     ]
   },
   {
-    "text": "S2 · Personal Operator",
-    "collapsed": true,
-    "items": [
-      {
-        "text": "模块总览",
-        "link": "/delivery/stage-2"
-      },
-      {
-        "text": "D2.1 只读连接器与来源视图",
-        "link": "/delivery/stage-2/d2-1"
-      },
-      {
-        "text": "D2.2 Document/Data Executor",
-        "link": "/delivery/stage-2/d2-2"
-      },
-      {
-        "text": "D2.3 Browser Executor 与网页研究",
-        "link": "/delivery/stage-2/d2-3"
-      },
-      {
-        "text": "D2.4 草稿、审批与测试账户副作用闭环",
-        "link": "/delivery/stage-2/d2-4"
-      },
-      {
-        "text": "D2.5 Context Compiler、Token Governor v1 与 Memory v0",
-        "link": "/delivery/stage-2/d2-5"
-      },
-      {
-        "text": "D2.6 Stage 2 发布",
-        "link": "/delivery/stage-2/d2-6"
-      }
+    text: "第三阶段 · 桌面操作",
+    collapsed: true,
+    items: [
+      { text: "阶段总览", link: "/delivery/stage-3" },
+      { text: "3.1 连接并查看桌面设备", link: "/delivery/stage-3/3-1" },
+      { text: "3.2 观察桌面与人工接管", link: "/delivery/stage-3/3-2" },
+      { text: "3.3 分级完成桌面操作", link: "/delivery/stage-3/3-3" },
+      { text: "3.4 验收桌面操作", link: "/delivery/stage-3/3-4" }
     ]
   },
   {
-    "text": "S3 · Computer Operator",
-    "collapsed": true,
-    "items": [
-      {
-        "text": "模块总览",
-        "link": "/delivery/stage-3"
-      },
-      {
-        "text": "D3.1 设备 agentd 与设备可见性",
-        "link": "/delivery/stage-3/d3-1"
-      },
-      {
-        "text": "D3.2 GUI 观察与人工接管",
-        "link": "/delivery/stage-3/d3-2"
-      },
-      {
-        "text": "D3.3 低风险 GUI 动作与验证",
-        "link": "/delivery/stage-3/d3-3"
-      },
-      {
-        "text": "D3.4 高风险 GUI 与 Stage 3 发布",
-        "link": "/delivery/stage-3/d3-4"
-      }
+    text: "第四阶段 · 主动服务与手机入口",
+    collapsed: true,
+    items: [
+      { text: "阶段总览", link: "/delivery/stage-4" },
+      { text: "4.1 设置触发条件与主动建议", link: "/delivery/stage-4/4-1" },
+      { text: "4.2 建立主动收件箱", link: "/delivery/stage-4/4-2" },
+      { text: "4.3 手机查看、审批与接管", link: "/delivery/stage-4/4-3" },
+      { text: "4.4 控制打扰与验收主动服务", link: "/delivery/stage-4/4-4" }
     ]
   },
   {
-    "text": "S4 · 主动个人 Agent",
-    "collapsed": true,
-    "items": [
-      {
-        "text": "模块总览",
-        "link": "/delivery/stage-4"
-      },
-      {
-        "text": "D4.1 Trigger 与主动收件箱",
-        "link": "/delivery/stage-4/d4-1"
-      },
-      {
-        "text": "D4.2 手机 PWA：查看、审批、接管和发起",
-        "link": "/delivery/stage-4/d4-2"
-      },
-      {
-        "text": "D4.3 安全配对、推送与设备撤销",
-        "link": "/delivery/stage-4/d4-3"
-      },
-      {
-        "text": "D4.4 注意力预算与主动试跑",
-        "link": "/delivery/stage-4/d4-4"
-      },
-      {
-        "text": "D4.5 Stage 4 发布",
-        "link": "/delivery/stage-4/d4-5"
-      }
+    text: "第五阶段 · 记忆与能力进化",
+    collapsed: true,
+    items: [
+      { text: "阶段总览", link: "/delivery/stage-5" },
+      { text: "5.1 建立可查看的记忆", link: "/delivery/stage-5/5-1" },
+      { text: "5.2 纠正、遗忘与导出记忆", link: "/delivery/stage-5/5-2" },
+      { text: "5.3 总结并评估可复用方法", link: "/delivery/stage-5/5-3" },
+      { text: "5.4 验收记忆与进化", link: "/delivery/stage-5/5-4" }
     ]
   },
   {
-    "text": "S5 · 记忆与进化",
-    "collapsed": true,
-    "items": [
-      {
-        "text": "模块总览",
-        "link": "/delivery/stage-5"
-      },
-      {
-        "text": "D5.1 Memory Core 与记忆浏览器",
-        "link": "/delivery/stage-5/d5-1"
-      },
-      {
-        "text": "D5.2 记忆冲突、遗忘与导出",
-        "link": "/delivery/stage-5/d5-2"
-      },
-      {
-        "text": "D5.3 轨迹、技能候选与评估集",
-        "link": "/delivery/stage-5/d5-3"
-      },
-      {
-        "text": "D5.4 Evolution 晋升门与 Stage 5 发布",
-        "link": "/delivery/stage-5/d5-4"
-      }
+    text: "第六阶段 · 多设备与长期运行",
+    collapsed: true,
+    items: [
+      { text: "阶段总览", link: "/delivery/stage-6" },
+      { text: "6.1 多设备同步与切换", link: "/delivery/stage-6/6-1" },
+      { text: "6.2 设备撤销与安全迁移", link: "/delivery/stage-6/6-2" },
+      { text: "6.3 备份、恢复与升级", link: "/delivery/stage-6/6-3" },
+      { text: "6.4 长期运行与 v1.0 验收", link: "/delivery/stage-6/6-4" }
     ]
   },
-  {
-    "text": "S6 · 多设备与长期运行",
-    "collapsed": true,
-    "items": [
-      {
-        "text": "模块总览",
-        "link": "/delivery/stage-6"
-      },
-      {
-        "text": "D6.1 多设备读取与事件同步",
-        "link": "/delivery/stage-6/d6-1"
-      },
-      {
-        "text": "D6.2 设备能力路由与离线队列",
-        "link": "/delivery/stage-6/d6-2"
-      },
-      {
-        "text": "D6.3 设备撤销、密钥轮换与安全迁移",
-        "link": "/delivery/stage-6/d6-3"
-      },
-      {
-        "text": "D6.4 备份、恢复、迁移与升级",
-        "link": "/delivery/stage-6/d6-4"
-      },
-      {
-        "text": "D6.5 长期运行、资源调度与运维",
-        "link": "/delivery/stage-6/d6-5"
-      },
-      {
-        "text": "D6.6 v1.0 审计与发布",
-        "link": "/delivery/stage-6/d6-6"
-      }
-    ]
-  }
 ]
 
 export const enDeliveryStages = [
   {
-    "text": "S0 · Definition & Prototype",
-    "collapsed": true,
-    "items": [
-      {
-        "text": "Module overview",
-        "link": "/en/delivery/stage-0"
-      },
-      {
-        "text": "D0.1 Product wedge and real-task baseline",
-        "link": "/en/delivery/stage-0/d0-1"
-      },
-      {
-        "text": "D0.2 Clickable end-to-end product prototype",
-        "link": "/en/delivery/stage-0/d0-2"
-      },
-      {
-        "text": "D0.3 Protocols, state machine, and UI data contracts",
-        "link": "/en/delivery/stage-0/d0-3"
-      },
-      {
-        "text": "D0.4 Evaluation, security, and engineering baseline",
-        "link": "/en/delivery/stage-0/d0-4"
-      }
+    text: "Phase 1 \u00b7 Minimum Complete MVP",
+    collapsed: true,
+    items: [
+      { text: "Phase overview", link: "/en/delivery/stage-1" },
+      { text: "1.1 Define the first scenario and real tasks", link: "/en/delivery/stage-1/1-1" },
+      { text: "1.2 Build the complete experience prototype", link: "/en/delivery/stage-1/1-2" },
+      { text: "1.3 Complete the smallest real task loop", link: "/en/delivery/stage-1/1-3" },
+      { text: "1.4 Accept the MVP with real tasks", link: "/en/delivery/stage-1/1-4" }
     ]
   },
   {
-    "text": "S1 · Durable Kernel & MVP",
-    "collapsed": true,
-    "items": [
-      {
-        "text": "Module overview",
-        "link": "/en/delivery/stage-1"
-      },
-      {
-        "text": "D1.1 Runnable walking skeleton",
-        "link": "/en/delivery/stage-1/d1-1"
-      },
-      {
-        "text": "D1.2 First real Codex vertical slice",
-        "link": "/en/delivery/stage-1/d1-2"
-      },
-      {
-        "text": "D1.3 MVP closeout",
-        "link": "/en/delivery/stage-1/d1-3"
-      },
-      {
-        "text": "D1.4 Side-effect safety skeleton",
-        "link": "/en/delivery/stage-1/d1-4"
-      },
-      {
-        "text": "D1.5 Second task family and kernel hardening",
-        "link": "/en/delivery/stage-1/d1-5"
-      },
-      {
-        "text": "D1.6 Stage 1 release",
-        "link": "/en/delivery/stage-1/d1-6"
-      }
+    text: "Phase 2 \u00b7 Everyday Content Work",
+    collapsed: true,
+    items: [
+      { text: "Phase overview", link: "/en/delivery/stage-2" },
+      { text: "2.1 Connect read-only information sources", link: "/en/delivery/stage-2/2-1" },
+      { text: "2.2 Process documents, tables, and web material", link: "/en/delivery/stage-2/2-2" },
+      { text: "2.3 Draft, approve, and write externally", link: "/en/delivery/stage-2/2-3" },
+      { text: "2.4 Accept everyday content work", link: "/en/delivery/stage-2/2-4" }
     ]
   },
   {
-    "text": "S2 · Personal Operator",
-    "collapsed": true,
-    "items": [
-      {
-        "text": "Module overview",
-        "link": "/en/delivery/stage-2"
-      },
-      {
-        "text": "D2.1 Read-only connector and source view",
-        "link": "/en/delivery/stage-2/d2-1"
-      },
-      {
-        "text": "D2.2 Document/Data Executor",
-        "link": "/en/delivery/stage-2/d2-2"
-      },
-      {
-        "text": "D2.3 Browser Executor and web research",
-        "link": "/en/delivery/stage-2/d2-3"
-      },
-      {
-        "text": "D2.4 Drafts, approvals, and test-account effects",
-        "link": "/en/delivery/stage-2/d2-4"
-      },
-      {
-        "text": "D2.5 Context Compiler, Token Governor v1, and Memory v0",
-        "link": "/en/delivery/stage-2/d2-5"
-      },
-      {
-        "text": "D2.6 Stage 2 release",
-        "link": "/en/delivery/stage-2/d2-6"
-      }
+    text: "Phase 3 \u00b7 Desktop Operation",
+    collapsed: true,
+    items: [
+      { text: "Phase overview", link: "/en/delivery/stage-3" },
+      { text: "3.1 Connect and inspect a desktop device", link: "/en/delivery/stage-3/3-1" },
+      { text: "3.2 Observe the desktop and take over", link: "/en/delivery/stage-3/3-2" },
+      { text: "3.3 Complete desktop actions by risk level", link: "/en/delivery/stage-3/3-3" },
+      { text: "3.4 Accept desktop operation", link: "/en/delivery/stage-3/3-4" }
     ]
   },
   {
-    "text": "S3 · Computer Operator",
-    "collapsed": true,
-    "items": [
-      {
-        "text": "Module overview",
-        "link": "/en/delivery/stage-3"
-      },
-      {
-        "text": "D3.1 Device agentd and visibility",
-        "link": "/en/delivery/stage-3/d3-1"
-      },
-      {
-        "text": "D3.2 GUI observation and human takeover",
-        "link": "/en/delivery/stage-3/d3-2"
-      },
-      {
-        "text": "D3.3 Low-risk GUI actions and verification",
-        "link": "/en/delivery/stage-3/d3-3"
-      },
-      {
-        "text": "D3.4 High-risk GUI and Stage 3 release",
-        "link": "/en/delivery/stage-3/d3-4"
-      }
+    text: "Phase 4 \u00b7 Proactive Service and Mobile Entry",
+    collapsed: true,
+    items: [
+      { text: "Phase overview", link: "/en/delivery/stage-4" },
+      { text: "4.1 Set triggers and proactive suggestions", link: "/en/delivery/stage-4/4-1" },
+      { text: "4.2 Build the proactive inbox", link: "/en/delivery/stage-4/4-2" },
+      { text: "4.3 View, approve, and take over on the phone", link: "/en/delivery/stage-4/4-3" },
+      { text: "4.4 Control interruption and accept proactive service", link: "/en/delivery/stage-4/4-4" }
     ]
   },
   {
-    "text": "S4 · Proactive Personal Agent",
-    "collapsed": true,
-    "items": [
-      {
-        "text": "Module overview",
-        "link": "/en/delivery/stage-4"
-      },
-      {
-        "text": "D4.1 Triggers and the proactive inbox",
-        "link": "/en/delivery/stage-4/d4-1"
-      },
-      {
-        "text": "D4.2 Mobile PWA: view, approve, take over, and initiate",
-        "link": "/en/delivery/stage-4/d4-2"
-      },
-      {
-        "text": "D4.3 Secure pairing, push, and device revocation",
-        "link": "/en/delivery/stage-4/d4-3"
-      },
-      {
-        "text": "D4.4 Attention budget and proactive trial",
-        "link": "/en/delivery/stage-4/d4-4"
-      },
-      {
-        "text": "D4.5 Stage 4 release",
-        "link": "/en/delivery/stage-4/d4-5"
-      }
+    text: "Phase 5 \u00b7 Memory and Capability Evolution",
+    collapsed: true,
+    items: [
+      { text: "Phase overview", link: "/en/delivery/stage-5" },
+      { text: "5.1 Create visible memory", link: "/en/delivery/stage-5/5-1" },
+      { text: "5.2 Correct, forget, and export memory", link: "/en/delivery/stage-5/5-2" },
+      { text: "5.3 Summarize and evaluate reusable methods", link: "/en/delivery/stage-5/5-3" },
+      { text: "5.4 Accept memory and evolution", link: "/en/delivery/stage-5/5-4" }
     ]
   },
   {
-    "text": "S5 · Memory & Evolution",
-    "collapsed": true,
-    "items": [
-      {
-        "text": "Module overview",
-        "link": "/en/delivery/stage-5"
-      },
-      {
-        "text": "D5.1 Memory Core and memory browser",
-        "link": "/en/delivery/stage-5/d5-1"
-      },
-      {
-        "text": "D5.2 Memory conflict, forgetting, and export",
-        "link": "/en/delivery/stage-5/d5-2"
-      },
-      {
-        "text": "D5.3 Trajectories, skill candidates, and evaluation sets",
-        "link": "/en/delivery/stage-5/d5-3"
-      },
-      {
-        "text": "D5.4 Evolution promotion gate and Stage 5 release",
-        "link": "/en/delivery/stage-5/d5-4"
-      }
+    text: "Phase 6 \u00b7 Multi-device and Long-running Operation",
+    collapsed: true,
+    items: [
+      { text: "Phase overview", link: "/en/delivery/stage-6" },
+      { text: "6.1 Sync and switch across devices", link: "/en/delivery/stage-6/6-1" },
+      { text: "6.2 Revoke devices and migrate safely", link: "/en/delivery/stage-6/6-2" },
+      { text: "6.3 Back up, restore, and upgrade", link: "/en/delivery/stage-6/6-3" },
+      { text: "6.4 Long-running operation and v1.0 acceptance", link: "/en/delivery/stage-6/6-4" }
     ]
   },
-  {
-    "text": "S6 · Multi-device & Operations",
-    "collapsed": true,
-    "items": [
-      {
-        "text": "Module overview",
-        "link": "/en/delivery/stage-6"
-      },
-      {
-        "text": "D6.1 Multi-device reads and event sync",
-        "link": "/en/delivery/stage-6/d6-1"
-      },
-      {
-        "text": "D6.2 Device capability routing and offline queues",
-        "link": "/en/delivery/stage-6/d6-2"
-      },
-      {
-        "text": "D6.3 Device revocation, key rotation, and secure migration",
-        "link": "/en/delivery/stage-6/d6-3"
-      },
-      {
-        "text": "D6.4 Backup, restore, migration, and upgrade",
-        "link": "/en/delivery/stage-6/d6-4"
-      },
-      {
-        "text": "D6.5 Long-running operations, resources, and maintenance",
-        "link": "/en/delivery/stage-6/d6-5"
-      },
-      {
-        "text": "D6.6 v1.0 audit and release",
-        "link": "/en/delivery/stage-6/d6-6"
-      }
-    ]
-  }
 ]

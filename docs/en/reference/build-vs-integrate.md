@@ -21,12 +21,11 @@ Here, “build” mainly means building the product and core logic in-house, not
 “Build” describes ownership of responsibility, not development order. Hearth will not first finish the Control Plane, Harness, Memory, and all Executors, and only then add the frontend.
 
 - **The frontend is part of the core build**: task cards, approvals, artifacts, recovery, and mobile entry points are the visible parts of product differentiation, not a wrapper layer added after the backend is complete.
-- **A prototype exists at Stage 0**: use a clickable Web prototype to validate the product narrative, states, and primary actions, even if the data is simulated.
-- **Deliver an MVP early at Stage 1**: on a narrow task family, simultaneously deliver a real Web app, durable state, Codex execution, artifacts, approval drills, and failure recovery.
-- **Every increment is a vertical slice**: user outcomes, interface, backend, Executor, validation, and recovery appear together; a capability that exists only as a CLI or log does not count as completing a stage.
+- **Phase 1 prototypes first, then delivers the MVP early**: use a clickable Web prototype to validate the product narrative, states, and primary actions, then deliver a real Web app, durable state, real execution, artifacts, approval drills, and failure recovery for one narrow task family.
+- **Every small stage is a vertical slice**: user outcomes, interface, backend, execution capability, validation, and recovery appear together; a capability that exists only as a CLI or log does not count as completing a phase.
 - **The build/integrate boundary does not change because of the MVP**: the MVP still does not build models, container kernels, or a complete Agent framework in-house, but it must build task control, validation, approval, recovery, and the user interface in-house.
 
-For the specific increment order, see the [Delivery Route and Implementation Plan](/en/delivery/).
+For the specific small-stage order, see the [Delivery Route and Implementation Plan](/en/delivery/).
 
 ## 1. Core Parts Hearth Builds Itself
 
@@ -333,7 +332,7 @@ This is also the dividing line between Hearth and a “Codex wrapper”: a wrapp
 
 - Hearth's Codex positioning and Build vs Integrate: complete master document, sections 2.3–2.4
 - Hearth's final integration boundary: complete master document, section 29.5
-- MVP and increment sequence: [Delivery Route and Implementation Plan](/en/delivery/)
+- MVP and small-stage sequence: [Delivery Route and Implementation Plan](/en/delivery/)
 - OpenClaw Gateway, channels, and device nodes: local OpenClaw documentation `docs/concepts/architecture.md`
 - OpenClaw audit ledger and execution identity: local OpenClaw documentation `docs/gateway/audit.md`
 - OpenClaw sandbox backends: local OpenClaw documentation `docs/gateway/sandboxing.md`

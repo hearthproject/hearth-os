@@ -34,8 +34,8 @@ The following are the recommended first batch of architecture decisions. Those w
 | ADR-016 | Do not build enterprise multi-tenancy, a public Agent marketplace, or billing | `Accepted` | Focus on personal experience and self-hosting |
 | ADR-017 | Currently integrate only Codex; other external Agents are out of product scope for now | `Accepted` (provisional) | Retain the Executor interface to avoid lock-in |
 | ADR-018 | Models are replaceable, local models are optional, and no foundation models are trained | `Accepted` | Requires a model catalog, routing, and evaluation |
-| ADR-019 | Adopt MVP-first vertical-slice delivery; the frontend enters every increment starting from Stage 0 | `Accepted` | Backend-first development with the UI added at the end is not allowed; stage acceptance must include browser paths |
-| ADR-020 | The roadmap advances only by capability gates and increment order, not weekly/monthly schedules | `Accepted` | No completion dates are promised; progress is measured by real Tasks, recovery, and evaluation evidence |
+| ADR-019 | Adopt MVP-first vertical-slice delivery; the frontend enters every small stage starting from Phase 1 | `Accepted` | Backend-first development with the UI added at the end is not allowed; phase acceptance must include browser paths |
+| ADR-020 | The roadmap advances only by capability gates and small-stage order, not weekly/monthly schedules | `Accepted` | No completion dates are promised; progress is measured by real tasks, recovery, and evaluation evidence |
 
 ---
 
@@ -98,4 +98,4 @@ Finally, the delivery judgment:
 
 > **First build a minimal product that can be used every day in a real browser, then grow it step by step into a Personal Agent OS.**
 
-Stage 0 uses a prototype to validate the product narrative; Stage 1 delivers the MVP as early as possible; thereafter, every increment delivers UI, backend, validation, and recovery together. The roadmap sets no development time limits and does not use “which week” to prove progress; it proves the direction is right only through real Tasks, recoverability, and whether users are willing to keep using it.
+Phase 1 uses a prototype to validate the product narrative and delivers the MVP as early as possible; thereafter, every small stage delivers UI, backend, validation, and recovery together. The roadmap sets no development time limits and does not use “which week” to prove progress; it proves the direction is right only through real tasks, recoverability, and whether users are willing to keep using it.

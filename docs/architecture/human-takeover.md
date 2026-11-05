@@ -43,12 +43,12 @@ outline: [2, 3]
 
 | 执行器 | 首次出现 |
 |---|---|
-| Codex | Stage 1 / D1.2 |
-| Native（薄层） | Stage 1–2 |
-| Connector | Stage 2 |
-| Browser | Stage 2 |
-| Document/Data | Stage 2 |
-| GUI + Human 实时接管 | Stage 3 |
-| 手机接管入口 | Stage 4 |
+| Codex | 第一阶段 1.3 |
+| Native（薄层） | 第一阶段至第二阶段 |
+| Connector | 第二阶段 |
+| Browser | 第二阶段 |
+| Document/Data | 第二阶段 |
+| GUI + Human 实时接管 | 第三阶段 |
+| 手机接管入口 | 第四阶段 |
 
-Stage 0 只定义能力矩阵和 UI 契约；Stage 1 只用 Codex 证明一条真实纵向切片，不一次性接入所有执行器。
+第一阶段先定义能力矩阵和界面约定，并在最小任务闭环中只接入一种执行能力；后续阶段再逐步接入其他执行器。

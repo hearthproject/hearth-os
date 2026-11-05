@@ -38,7 +38,7 @@ Gateway 不做长任务推理，也不直接执行业务动作。
 | Cron/Watch | 定时器、文件变化、网页变化 | Trigger 评估 |
 | API/MCP | 外部服务事件 | Connector 归一化 |
 
-Stage 0 只设计渠道模型和 UI 状态；Stage 1 只接 Web 与 CLI；Stage 2 再接第一个真实 Connector。不能一开始就铺所有渠道。
+第一阶段先设计渠道模型和界面状态，并在 MVP 中接 Web 与命令行；第二阶段再接第一个真实外部来源。不能一开始就铺所有渠道。
 
 ### 事件归一化与去重
 
@@ -99,7 +99,7 @@ priority = risk × blockedness × deadline × userImpact × reversibilityPenalty
 
 ### 手机接入
 
-手机是 Hearth 的远程入口，不是默认执行权威。Stage 4 的第一版只支持：
+手机是 Hearth 的远程入口，不是默认执行权威。第四阶段的第一版只支持：
 
 1. 查看任务、状态和产物；
 2. 审批高风险动作；

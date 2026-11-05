@@ -38,7 +38,7 @@ The Gateway does not perform long-running task reasoning or directly execute bus
 | Cron/Watch | Timers, file changes, web page changes | Trigger evaluation |
 | API/MCP | External service events | Normalized by Connector |
 
-Stage 0 only designs the channel model and UI states; Stage 1 only connects Web and CLI; Stage 2 then connects the first real Connector. Do not roll out all channels from the start.
+Phase 1 first designs the channel model and UI states, then connects Web and CLI in the MVP; Phase 2 then connects the first real external source. Do not roll out all channels from the start.
 
 ### Event Normalization and Deduplication
 
@@ -99,7 +99,7 @@ Device capabilities are not permanent authorizations. After a Task ends, tempora
 
 ### Mobile Access
 
-Phones are Hearth's remote entry point, not the default execution authority. The first version of Stage 4 supports only:
+Phones are Hearth's remote entry point, not the default execution authority. The first version of Phase 4 supports only:
 
 1. Viewing Tasks, status, and Artifacts;
 2. Approving high-risk actions;

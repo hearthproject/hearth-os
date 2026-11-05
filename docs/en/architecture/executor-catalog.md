@@ -108,7 +108,7 @@ Connectors turn external systems into auditable `Source` and `Effect`, not "hand
 - Documents/cloud drive: read, version, export, sharing pending approval;
 - IM/Issue/code hosting: messages, Issues, PRs, comments as Source/Effect, with approval for high-risk actions.
 
-In Stage 2, connect one real read-only Connector first, then gradually add writes. Do not enable all high-risk actions on the first Connector at once.
+In Phase 2, connect one real read-only source first, then gradually add writes. Do not enable all high-risk actions on the first source at once.
 
 ### Rate Limiting, Retries, and Reconciliation
 

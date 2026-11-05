@@ -23,7 +23,7 @@ A demo is not capability. Hearth only trusts evidence that is repeatable, verifi
 | Trajectory Replay | Historical trajectory replay, route switching, and failure recovery | Continuous |
 | Shadow | Real inputs, no external side effects | Continuous |
 | Live Pilot | Real users, real side effects, controlled scope | Before stage advancement |
-| Long-run | Multi-device residency, device switching, memory evolution | Stage acceptance |
+| Long-run | Multi-device residency, device switching, memory evolution | Phase acceptance |
 
 ### Task Set
 
@@ -43,7 +43,7 @@ Requirements:
 
 | Metric | Definition | Initial Target |
 |---|---|---|
-| Verified Task Success | Proportion of tasks that pass the verifier | Stage 1 ≥ 70% |
+| Verified Task Success | Proportion of tasks that pass the verifier | Phase 1 ≥ 70% |
 | Human Minutes / Verified Task | Human minutes per effectively completed task | ≥ 30% decrease relative to baseline |
 | Interruptions / Verified Task | Number of interruptions per task | ≤ 1.0 |
 | Recovery Rate | Proportion recovered after crash/network loss/restart | ≥ 95% |
@@ -96,17 +96,16 @@ The red team must attempt to make the system exceed authority, leak secrets, dup
 - Record models, executors, prompts, tools, and versions;
 - Re-run baselines after changes to avoid "comparing only against old versions."
 
-### Stage Release Gates
+### Phase Release Gates
 
-| Stage | Must Prove |
+| Phase | Must Prove |
 |---|---|
-| Stage 0 | Clickable end-to-end prototype, 12 acceptable tasks, core protocols and threat model |
-| Stage 1 | MVP usable daily in the browser; recoverable, approvable, no duplicate side effects, Codex tasks acceptable |
-| Stage 2 | Real email/calendar/document/web tasks can be completed, tokens controllable |
-| Stage 3 | GUI can be taken over, failures recoverable, no exceeding authority |
-| Stage 4 | Proactive tasks do not cause notification fatigue, approvals and security auditable |
-| Stage 5 | Memory can be corrected/forgotten, skills can be evaluated/rolled back |
-| Stage 6 | Multi-device consistency, offline recovery, migration and revocation reliable |
+| Phase 1 | MVP usable daily in the browser; recoverable, approvable, no duplicate side effects, real tasks acceptable |
+| Phase 2 | Real email, calendar, document, and web tasks can be completed with bounded cost |
+| Phase 3 | Desktop actions can be taken over, failures recoverable, no exceeding authority |
+| Phase 4 | Proactive tasks do not cause notification fatigue, approvals and security auditable |
+| Phase 5 | Memory can be corrected and forgotten, methods can be evaluated and rolled back |
+| Phase 6 | Multi-device consistency, offline recovery, migration and revocation reliable |
 
 ### Evaluation Anti-Patterns
 
@@ -124,4 +123,4 @@ The red team must attempt to make the system exceed authority, leak secrets, dup
 
 ## Conclusion
 
-Security and evaluation are not cleanup work for Stage 6. Stage 0 must already have a threat model and task set, and Stage 1 must already have real task acceptance, recovery, and side-effect drills for the MVP; each subsequent executor expansion must expand the security and evaluation surface in sync.
+Security and evaluation are not cleanup work for Phase 6. Phase 1 must already have a threat model, real task set, MVP acceptance, recovery, and side-effect drills; each subsequent capability expansion must expand the security and evaluation surface in sync.

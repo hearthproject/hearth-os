@@ -1,56 +1,27 @@
 ---
-title: 'Stage 4 · Proactive Personal Agent'
-description: 'Hearth Stage 4 development module: triggers, proactive inbox, mobile PWA, device pairing, push redaction, revocation, attention budgets, and shadow trials.'
+title: "Phase 4 · Proactive Service and Mobile Entry"
+description: "Work proactively within limited authority and use the phone for approval and takeover."
 outline: [2, 3]
 ---
 
-<p class="eyebrow">MODULE 4 / 7</p>
+# Phase 4 · Proactive Service and Mobile Entry
 
-# Stage 4 · Proactive Personal Agent
+## Goal
 
-<p class="lead">Let Hearth work proactively within limited authorization while staying quiet. The hard question is not whether it can run automatically, but whether it acts at the right time with the right level of interruption.</p>
+Phase 4 lets Hearth work proactively within limited authority and turns the phone into an entry for viewing, approval, and takeover. The point is not automatic running; it is doing the right thing at the right time without creating noise.
 
-## Prerequisites
+This phase has four steps:
 
-- Recovery, approval, verification, takeover, and revocation from Stages 1–3 are stable.
-- Users have explicit attention budgets, quiet hours, and high-risk action boundaries.
-- Proactive mode is controllable, pausable, downgradable, and evaluated against a baseline.
+| Step | Goal |
+|---|---|
+| [4.1 Set triggers and proactive suggestions](/en/delivery/stage-4/4-1) | Find work worth doing and explain why it matters now. |
+| [4.2 Build the proactive inbox](/en/delivery/stage-4/4-2) | Gather suggestions where they are easy to judge and handle. |
+| [4.3 View, approve, and take over on the phone](/en/delivery/stage-4/4-3) | Keep only key actions and short-lived authority on the phone, revocable if lost. |
+| [4.4 Control interruption and accept proactive service](/en/delivery/stage-4/4-4) | Proactive mode must be quiet, useful, controllable, and easy to turn off. |
 
-## Development Steps
+## How to do it
 
-1. **Connect triggers.** Generate events from email, calendar, files, and task dependencies with deduplication, cooldowns, priority, and a "why now" explanation.
-2. **Build the proactive inbox.** Show proactive candidates, suggested actions, budgets, impact, and interruption level; support accept, ignore, pause, and convert to a normal task.
-3. **Deliver the mobile PWA.** Support Today, Needs You, artifacts, approvals, takeover, task creation, and high-signal notifications.
-4. **Complete secure pairing and revocation.** Use short-lived QR pairing, public keys, nonces, parameter binding, expiry, and a secure tunnel or push relay; a lost phone must be revocable immediately.
-5. **Enforce attention budgets.** Limit interruptions, quiet hours, aggregated notifications, background budgets, and runaway loops; start in shadow or control mode.
-6. **Complete the Stage 4 release.** Evaluate proactive success, interruptions per task, satisfaction, budget overruns, and security regressions.
-
-## Increment Breakdown
-
-Each increment now has four layers: outcome and gate → four work packages → engineering map and interfaces → acceptance rehearsal. Packages can be split across developers, but merge in dependency order; completing one package does not complete the increment.
-
-| Increment | User-visible outcome | Completion evidence |
-|---|---|---|
-| [D4.1](/en/delivery/stage-4/d4-1) Triggers and proactive inbox | Hearth can explain what can be done now | Event dedupe, candidate generation, A1/A2 boundaries, pause and ignore |
-| [D4.2](/en/delivery/stage-4/d4-2) Mobile PWA | View, approve, take over, and create from a phone | Responsive PWA, key actions, offline read-only, push redaction |
-| [D4.3](/en/delivery/stage-4/d4-3) Secure pairing, push, and revocation | Pairing is simple and a lost phone can be revoked | Public-key pairing, nonce, expiry, revocation, audit |
-| [D4.4](/en/delivery/stage-4/d4-4) Attention budgets and proactive trial | Proactive work is quiet and useful | Interruption metrics, quiet hours, shadow mode, kill switch |
-| [D4.5](/en/delivery/stage-4/d4-5) Stage 4 release | Proactive tasks are useful and key mobile actions work | Satisfaction, success, budget, and security evaluation |
-
-## Exit Checklist
-
-- [ ] Proactive tasks are genuinely useful and do not create notification fatigue.
-- [ ] Average interruptions per task are at most one.
-- [ ] High-risk actions still require approval; mobile approvals cannot be replayed.
-- [ ] A lost device can be revoked and then cannot approve or take over.
-- [ ] Users can pause, revoke, and downgrade proactive mode; no runaway loops or budget overruns exist.
-
-## Out of Scope
-
-- Proactive loops without budgets, quiet periods, and revocation.
-- Long-lived primary credentials on mobile.
-- Notification bodies that leak sensitive information.
-
-## Next
-
-Continue to [Stage 5 · Memory & Evolution](/en/delivery/stage-5) to accumulate personal context and improve methods safely.
+1. First create triggers and proactive suggestions without automatic execution.
+2. Then gather suggestions in a proactive inbox where the user can accept, ignore, or turn them into tasks.
+3. Then deliver the phone entry for viewing, approval, and takeover.
+4. Finally accept with an attention budget and real tasks so proactive mode stays quiet, controllable, and revocable.
