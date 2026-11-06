@@ -70,7 +70,7 @@ export interface RunAggregate {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 5;
+export const CURRENT_SCHEMA_VERSION = 6;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -109,7 +109,7 @@ CREATE TABLE IF NOT EXISTS runs (
 CREATE TABLE IF NOT EXISTS task_proposals (
   id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, title TEXT NOT NULL, goal TEXT NOT NULL,
   executor_id TEXT NOT NULL, task_kind TEXT NOT NULL, expected_outputs_json TEXT NOT NULL,
-  permissions_json TEXT NOT NULL, reason TEXT NOT NULL, status TEXT NOT NULL,
+  permissions_json TEXT NOT NULL, inputs_json TEXT, reason TEXT NOT NULL, status TEXT NOT NULL,
   expires_at TEXT NOT NULL, created_at TEXT NOT NULL, decided_at TEXT
 );
 CREATE TABLE IF NOT EXISTS run_checkpoints (
@@ -342,6 +342,7 @@ export class HearthStore {
     ensureColumn(this.db, "tasks", "expected_outputs_json", "TEXT");
     ensureColumn(this.db, "tasks", "permissions_json", "TEXT");
     ensureColumn(this.db, "tasks", "pending_input", "TEXT");
+    ensureColumn(this.db, "task_proposals", "inputs_json", "TEXT");
     ensureColumn(this.db, "runs", "executor_id", "TEXT");
     ensureColumn(this.db, "runs", "checkpoint_seq", "INTEGER");
     ensureColumn(this.db, "runs", "budget_json", "TEXT");
@@ -1315,12 +1316,13 @@ function updateRun(db: DatabaseSync, runId: string | null, patch: Record<string,
 
 function upsertTaskProposal(db: DatabaseSync, proposal: TaskProposalRecord): void {
   db.prepare(
-    `INSERT INTO task_proposals (id, conversation_id, title, goal, executor_id, task_kind, expected_outputs_json, permissions_json, reason, status, expires_at, created_at, decided_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO task_proposals (id, conversation_id, title, goal, executor_id, task_kind, expected_outputs_json, permissions_json, inputs_json, reason, status, expires_at, created_at, decided_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET status=excluded.status, decided_at=excluded.decided_at`
   ).run(
     proposal.id, proposal.conversationId, proposal.title, proposal.goal, proposal.executorId,
     proposal.taskKind, JSON.stringify(proposal.expectedOutputs), JSON.stringify(proposal.permissions),
+    JSON.stringify(proposal.inputs),
     proposal.reason, proposal.status, proposal.expiresAt, proposal.createdAt, proposal.decidedAt
   );
 }
@@ -1627,6 +1629,7 @@ function rowToTaskProposal(row: DbRow): TaskProposalRecord {
     taskKind: String(row.task_kind) as TaskProposalRecord["taskKind"],
     expectedOutputs: JSON.parse(String(row.expected_outputs_json)),
     permissions: JSON.parse(String(row.permissions_json)),
+    inputs: row.inputs_json == null ? [] : JSON.parse(String(row.inputs_json)),
     reason: String(row.reason), status: String(row.status) as TaskProposalRecord["status"],
     expiresAt: String(row.expires_at), createdAt: String(row.created_at),
     decidedAt: row.decided_at == null ? null : String(row.decided_at)

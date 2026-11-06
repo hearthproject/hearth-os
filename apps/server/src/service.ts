@@ -20,6 +20,7 @@ import type {
   RunRecord,
   StatsSnapshot,
   TaskDeliverable,
+  TaskInput,
   TaskKind,
   TaskListItem,
   TaskPermissions,
@@ -40,7 +41,9 @@ export interface CreateTaskInput {
   textInput?: string;
   sourceItemIds?: string[];
   fileInputs?: { label: string; path: string }[];
+  inputs?: TaskInput[];
   url?: string;
+  networkHosts?: string[];
   conversationId?: string;
   executorId?: ExecutorId;
   taskKind?: TaskKind;
@@ -108,6 +111,7 @@ export class HearthService {
     if (input.templateId && !template) throw new Error(`Unknown template: ${input.templateId}`);
     const id = `${template?.id ?? "CUSTOM"}-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
     const inputs = template ? [...template.inputs] : [];
+    if (input.inputs) inputs.push(...input.inputs);
     const sourceItemIds = [...new Set(input.sourceItemIds ?? [])];
     if (sourceItemIds.length > 20) {
       throw new TaskInputSelectionError("TOO_MANY_SOURCE_ITEMS", "一次最多附加 20 个来源条目", 400);
@@ -145,7 +149,7 @@ export class HearthService {
     for (const file of input.fileInputs ?? []) {
       inputs.push({ kind: "file", label: file.label, value: file.path });
     }
-    let networkHosts = template?.networkHosts ?? [];
+    let networkHosts = template?.networkHosts ?? input.networkHosts ?? [];
     if (input.url) {
       inputs.push({ kind: "url", label: "网页", value: input.url });
       try {
@@ -381,6 +385,7 @@ export class HearthService {
     taskKind: TaskKind;
     expectedOutputs: string[];
     permissions: TaskPermissions;
+    inputs?: TaskInput[];
     reason: string;
     ttlMs?: number;
   }): TaskProposalRecord {
@@ -394,6 +399,7 @@ export class HearthService {
       taskKind: input.taskKind,
       expectedOutputs: input.expectedOutputs,
       permissions: input.permissions,
+      inputs: input.inputs ?? [],
       reason: input.reason,
       status: "pending",
       expiresAt: new Date(now.getTime() + (input.ttlMs ?? 15 * 60_000)).toISOString(),
@@ -427,7 +433,9 @@ export class HearthService {
       executorId: proposal.executorId,
       taskKind: proposal.taskKind,
       expectedOutputs: proposal.expectedOutputs,
-      permissions: proposal.permissions
+      permissions: proposal.permissions,
+      inputs: proposal.inputs,
+      networkHosts: proposal.permissions.networkHosts
     });
     const updated = this.updateTaskProposal(id, { status: "confirmed", decidedAt: new Date().toISOString() });
     return { proposal: updated, task };

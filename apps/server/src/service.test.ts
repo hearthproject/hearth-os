@@ -33,6 +33,7 @@ describe("Hearth service agent metadata", () => {
       taskKind: "general",
       expectedOutputs: ["result.md"],
       permissions: { readRoots: ["workspace"], writeRoots: ["out"], networkHosts: [], tools: ["finish_task"] },
+      inputs: [{ kind: "text", label: "用户请求", value: "根据输入生成周报" }],
       reason: "需要生成交付物"
     });
     expect(proposal.status).toBe("pending");
@@ -41,6 +42,7 @@ describe("Hearth service agent metadata", () => {
     expect(confirmed.status).toBe("confirmed");
     expect(task.executorId).toBe("native");
     expect(task.conversationId).toBe("conv-1");
+    expect(task.inputs).toEqual([{ kind: "text", label: "用户请求", value: "根据输入生成周报" }]);
     store.close();
   });
 

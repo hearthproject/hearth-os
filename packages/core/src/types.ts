@@ -166,6 +166,7 @@ export interface TaskProposalRecord {
   taskKind: TaskKind;
   expectedOutputs: string[];
   permissions: TaskPermissions;
+  inputs: TaskInput[];
   reason: string;
   status: TaskProposalStatus;
   expiresAt: string;
