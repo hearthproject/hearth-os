@@ -27,10 +27,14 @@ export function TaskDetailPage() {
   const queryClient = useQueryClient();
   const taskQuery = useQuery({ queryKey: ["task", id], queryFn: () => api.task(id), enabled: Boolean(id), refetchInterval: 4_000 });
   const [preview, setPreview] = useState<{ artifact: TaskDeliverable; content: string | null; loading: boolean; error: string | null } | null>(null);
+  const [resumeInput, setResumeInput] = useState("");
 
   const retry = useMutation({
-    mutationFn: () => api.retry(id),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["task", id] })
+    mutationFn: (message?: string) => api.retry(id, message),
+    onSuccess: () => {
+      setResumeInput("");
+      void queryClient.invalidateQueries({ queryKey: ["task", id] });
+    }
   });
   const cancel = useMutation({
     mutationFn: () => api.cancel(id),
@@ -55,7 +59,7 @@ export function TaskDetailPage() {
   const progress = progressEvents(view);
   const { visible: visibleProgress, technical: technicalProgress } = splitProgress(progress);
   const pendingApprovals = view.approvals.filter((approval) => approval.status === "pending");
-  const canRetry = task.status === "recoverable" || task.status === "failed" || task.status === "waiting_input";
+  const canRetry = task.status === "recoverable" || task.status === "failed";
   const canCancel = !["completed", "cancelled"].includes(task.status);
 
   async function openPreview(artifact: TaskDeliverable) {
@@ -91,7 +95,7 @@ export function TaskDetailPage() {
           <button className="ghost-button" onClick={() => void taskQuery.refetch()} disabled={taskQuery.isFetching}>
             <RefreshCw size={14} className={taskQuery.isFetching ? "spin" : ""} /> 刷新
           </button>
-          {canRetry && <button className="primary-button" onClick={() => retry.mutate()} disabled={retry.isPending}><RotateCcw size={14} /> {task.status === "waiting_input" ? "继续" : "重试"}</button>}
+          {canRetry && <button className="primary-button" onClick={() => retry.mutate(undefined)} disabled={retry.isPending}><RotateCcw size={14} /> 重试</button>}
           {canCancel && <button className="ghost-button danger" onClick={() => cancel.mutate()} disabled={cancel.isPending}><Square size={13} /> 取消</button>}
         </div>
       </div>
@@ -120,6 +124,34 @@ export function TaskDetailPage() {
       {pendingApprovals.map((approval) => (
         <ApprovalCard key={approval.id} approval={approval} effect={view.effects.find((effect) => effect.id === approval.effectId)} />
       ))}
+
+      {task.status === "waiting_input" && (
+        <section className="panel resume-panel">
+          <div className="panel-head">
+            <h2>需要你补充信息</h2>
+            <span className="panel-meta">{executorLabel(task.executorId)} 暂停在这一步</span>
+          </div>
+          <div className="resume-body">
+            {task.resultSummary && (
+              <div className="chat-markdown result-markdown resume-question">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{task.resultSummary}</ReactMarkdown>
+              </div>
+            )}
+            <textarea
+              value={resumeInput}
+              onChange={(event) => setResumeInput(event.target.value)}
+              placeholder="补充后，任务会带着你的回答继续，不会从头重跑。"
+              rows={3}
+            />
+            {retry.isError && <p className="form-error">{retry.error instanceof Error ? retry.error.message : "继续失败，请重试"}</p>}
+            <div className="resume-actions">
+              <button className="primary-button" onClick={() => retry.mutate(resumeInput.trim())} disabled={retry.isPending || !resumeInput.trim()}>
+                {retry.isPending ? <Loader2 className="spin" size={14} /> : <RotateCcw size={14} />} 继续执行
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
 
       <section className="panel result-panel">
         <div className="panel-head">

@@ -4397,6 +4397,23 @@ body.modal-open {
   white-space: nowrap;
 }
 
+.resume-panel { border-color: rgba(151, 101, 13, 0.28); }
+.resume-body { display: grid; gap: var(--gap-3); padding: var(--gap-3); }
+.resume-question { padding: 10px 12px; border-radius: var(--radius); background: rgba(151, 101, 13, 0.08); }
+.resume-question p:last-child { margin-bottom: 0; }
+.resume-body textarea {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--fs-13);
+  resize: vertical;
+}
+.resume-actions { display: flex; justify-content: flex-end; }
+
 .result-cell p {
   display: -webkit-box;
   overflow: hidden;
