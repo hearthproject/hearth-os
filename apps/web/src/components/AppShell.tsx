@@ -1,35 +1,19 @@
 import { useQuery } from "@tanstack/react-query";
-import { Cable, CalendarDays, FileText, Inbox, Mail, Monitor, Plus, Settings2 } from "lucide-react";
-import { NavLink, Outlet, useNavigate, useOutletContext } from "react-router-dom";
-import { useState } from "react";
+import { ListChecks, MessageCircle, Monitor, Settings2 } from "lucide-react";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { api } from "../lib/api.ts";
-import { needsAttention } from "../lib/format.ts";
-import type { TaskRecord } from "../lib/types.ts";
+import { isActive, needsAttention } from "../lib/format.ts";
 import { HearthMark } from "./HearthMark.tsx";
-import { NewTaskModal } from "./NewTaskModal.tsx";
-import { Topbar } from "./Topbar.tsx";
-
-export interface ShellContext {
-  openNewTask: () => void;
-}
-
-export function useShell(): ShellContext {
-  return useOutletContext<ShellContext>();
-}
 
 export function AppShell() {
-  const [newTaskOpen, setNewTaskOpen] = useState(false);
-  const navigate = useNavigate();
+  const { pathname } = useLocation();
   const tasksQuery = useQuery({ queryKey: ["tasks"], queryFn: api.tasks, refetchInterval: 10_000 });
   const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 30_000 });
-  const templatesQuery = useQuery({ queryKey: ["templates"], queryFn: api.templates, enabled: newTaskOpen });
-  const attentionCount = (tasksQuery.data?.tasks ?? []).filter((task) => needsAttention(task.status)).length;
+  const tasks = tasksQuery.data?.tasks ?? [];
+  const activeCount = tasks.filter((task) => isActive(task.status) || needsAttention(task.status)).length;
   const codex = healthQuery.data?.codex;
-
-  function handleCreated(task: TaskRecord) {
-    setNewTaskOpen(false);
-    navigate(`/tasks/${task.id}`);
-  }
+  const chatModel = healthQuery.data?.chatModel;
+  const chatMode = pathname === "/";
 
   return (
     <div className="shell">
@@ -39,36 +23,31 @@ export function AppShell() {
           <span className="brand-name">Hearth</span>
         </div>
 
-        <button className="sidebar-create" onClick={() => setNewTaskOpen(true)}>
-          <Plus size={16} /> <span className="nav-label">新建任务</span>
-        </button>
-
         <nav className="nav">
-          <NavLink to="/" end className={({ isActive }) => (isActive ? "nav-item active" : "nav-item")}>
-            <CalendarDays size={16} /> <span className="nav-label">今天</span>
+          <NavLink to="/" end className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
+            <MessageCircle size={16} /> <span className="nav-label">聊天</span>
           </NavLink>
-          <NavLink to="/attention" className={({ isActive }) => (isActive ? "nav-item active" : "nav-item")}>
-            <Inbox size={16} /> <span className="nav-label">需要你</span>
-            {attentionCount > 0 && <span className="nav-badge">{attentionCount}</span>}
+          <NavLink to="/tasks" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
+            <ListChecks size={16} /> <span className="nav-label">任务</span>
+            {activeCount > 0 && <span className="nav-badge">{activeCount}</span>}
           </NavLink>
-          <NavLink to="/artifacts" className={({ isActive }) => (isActive ? "nav-item active" : "nav-item")}>
-            <FileText size={16} /> <span className="nav-label">产物</span>
-          </NavLink>
-          <NavLink to="/outbox" className={({ isActive }) => (isActive ? "nav-item active" : "nav-item")}>
-            <Mail size={16} /> <span className="nav-label">发件箱</span>
-          </NavLink>
-          <NavLink to="/sources" className={({ isActive }) => (isActive ? "nav-item active" : "nav-item")}>
-            <Cable size={16} /> <span className="nav-label">来源</span>
-          </NavLink>
-          <NavLink to="/devices" className={({ isActive }) => (isActive ? "nav-item active" : "nav-item")}>
+          <NavLink to="/devices" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
             <Monitor size={16} /> <span className="nav-label">设备</span>
           </NavLink>
-          <NavLink to="/settings" className={({ isActive }) => (isActive ? "nav-item active" : "nav-item")}>
+          <NavLink to="/settings" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
             <Settings2 size={16} /> <span className="nav-label">设置</span>
           </NavLink>
         </nav>
 
         <div className="sidebar-spacer" />
+
+        <NavLink to="/settings" className="codex-status">
+          <span className={`status-dot ${chatModel?.configured ? "online" : "offline"}`} />
+          <span>
+            <strong>{chatModel?.configured ? "聊天模型已接入" : "聊天模型未配置"}</strong>
+            <small>{chatModel?.configured ? `${chatModel.settings.providerName} · ${chatModel.settings.model}` : "到设置里接入"}</small>
+          </span>
+        </NavLink>
 
         <NavLink to="/settings" className="codex-status">
           <span className={`status-dot ${codex?.canRun ? "online" : "offline"}`} />
@@ -81,18 +60,10 @@ export function AppShell() {
       </aside>
 
       <main className="main">
-        <Topbar />
-        <div className="main-body">
-          <Outlet context={{ openNewTask: () => setNewTaskOpen(true) } satisfies ShellContext} />
+        <div className={`main-body ${chatMode ? "chat-body" : ""}`}>
+          <Outlet />
         </div>
       </main>
-
-      <NewTaskModal
-        open={newTaskOpen}
-        templates={templatesQuery.data?.templates ?? []}
-        onClose={() => setNewTaskOpen(false)}
-        onCreated={handleCreated}
-      />
     </div>
   );
 }

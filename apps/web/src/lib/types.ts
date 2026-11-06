@@ -3,6 +3,9 @@ import type {
   ApprovalRecord,
   ApprovalStatus,
   ArtifactListItem,
+  ChatAttachment,
+  ChatMessageRecord,
+  ConversationRecord,
   ArtifactRecord,
   DesktopCommandKind,
   DesktopCommandRecord,
@@ -20,6 +23,8 @@ import type {
   EffectStatus,
   EventEnvelope,
   EventWindow,
+  ModelProviderPreset,
+  ModelSettingsView,
   OutboxAttachment,
   OutboxDraft,
   OutboxDraftStatus,
@@ -33,6 +38,7 @@ import type {
   SourceKind,
   SourceStatus,
   StatsSnapshot,
+  TaskDeliverable,
   TaskListItem,
   TaskRecord,
   TaskStatus
@@ -45,6 +51,9 @@ export type {
   ApprovalStatus,
   ArtifactListItem,
   ArtifactRecord,
+  ChatAttachment,
+  ChatMessageRecord,
+  ConversationRecord,
   DesktopCommandKind,
   DesktopCommandRecord,
   DesktopCommandStatus,
@@ -61,6 +70,8 @@ export type {
   EffectStatus,
   EventEnvelope,
   EventWindow,
+  ModelProviderPreset,
+  ModelSettingsView,
   OutboxAttachment,
   OutboxDraft,
   OutboxDraftStatus,
@@ -74,6 +85,7 @@ export type {
   SourceKind,
   SourceStatus,
   StatsSnapshot,
+  TaskDeliverable,
   TaskListItem,
   TaskRecord,
   TaskStatus,
@@ -102,6 +114,10 @@ export interface HealthResponse {
   status: "ok";
   name: string;
   now: string;
+  chatModel: {
+    configured: boolean;
+    settings: ModelSettingsView;
+  };
   codex: {
     canRun: boolean;
     providerId: string;
@@ -109,7 +125,66 @@ export interface HealthResponse {
     model: string | null;
     authSource: "provider-env" | "openai-login" | "missing" | "unknown";
     issues: string[];
+    configPath: string;
+    codexHome: string;
+    baseUrl: string | null;
+    wireApi: string | null;
+    envKey: string | null;
+    envKeyPresent: boolean;
   };
+}
+
+export interface ConversationListItem extends ConversationRecord {
+  messageCount: number;
+  preview: string;
+}
+
+export interface ConversationDetail {
+  conversation: ConversationRecord;
+  messages: ChatMessageRecord[];
+}
+
+export interface AttachmentUploadResult {
+  attachments: ChatAttachment[];
+}
+
+export interface ModelSettingsResponse {
+  settings: ModelSettingsView;
+  presets?: ModelProviderPreset[];
+  configured?: boolean;
+}
+
+export interface ModelListResponse {
+  models: string[];
+  error?: string;
+  code?: string;
+}
+
+export interface ModelTestResponse {
+  ok: boolean;
+  reply?: string;
+  error?: string;
+  code?: string;
+  elapsedMs?: number;
+}
+
+export interface CodexProbeResponse {
+  ok: boolean;
+  text?: string;
+  error?: string;
+  canRun: boolean;
+  configPath: string;
+  codexHome: string;
+  providerId: string;
+  providerName: string;
+  model: string | null;
+  baseUrl: string | null;
+  wireApi: string | null;
+  envKey: string | null;
+  envKeyPresent: boolean;
+  authSource: HealthResponse["codex"]["authSource"];
+  issues: string[];
+  elapsedMs: number;
 }
 
 export type PreviewableArtifact = Pick<ArtifactRecord, "id" | "taskId" | "relativePath" | "mimeType" | "bytes">;
