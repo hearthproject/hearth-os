@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { HearthStore } from "@hearth/eventlog";
+import { CURRENT_SCHEMA_VERSION, HearthStore } from "@hearth/eventlog";
 import { buildServer } from "./app.ts";
 
 describe("operations API", () => {
@@ -35,7 +35,7 @@ describe("operations API", () => {
       expect(health.statusCode).toBe(200);
       expect(health.json()).toMatchObject({
         status: "ok",
-        schemaVersion: 3,
+        schemaVersion: CURRENT_SCHEMA_VERSION,
         tasks: { total: 1 },
         scheduler: { enabled: false, running: false }
       });

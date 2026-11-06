@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HearthStore } from "@hearth/eventlog";
+import { CURRENT_SCHEMA_VERSION, HearthStore } from "@hearth/eventlog";
 import { HealthService } from "./health.ts";
 import { HearthService } from "./service.ts";
 
@@ -36,7 +36,7 @@ describe("health snapshot", () => {
     expect(health).toMatchObject({
       status: "ok",
       name: "Hearth",
-      schemaVersion: 3,
+      schemaVersion: CURRENT_SCHEMA_VERSION,
       instanceId: store.instanceId,
       tasks: { total: 1, queued: 1, running: 0, recoverable: 0, waitingApproval: 0 },
       scheduler: { enabled: true, running: true },
