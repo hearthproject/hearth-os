@@ -6,6 +6,8 @@ outline: [2, 3]
 
 # Phase 5 · Memory and Capability Evolution
 
+See [Phase 2–6 Delivery Status](/en/delivery/status) for implemented scope, verified paths, and deliberate gaps.
+
 ## Goal
 
 Phase 5 lets Hearth accumulate personal context and improve how it works, but every memory must be visible, correctable, forgettable, and exportable, and every new method must be evaluated, trialed, and reversible.

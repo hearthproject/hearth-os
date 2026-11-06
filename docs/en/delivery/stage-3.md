@@ -6,7 +6,7 @@ outline: [2, 3]
 
 # Phase 3 · Desktop Operation
 
-See [Phase 2 and 3 Delivery Status](/en/delivery/status) for implemented scope, verified paths, and deliberate gaps.
+See [Phase 2–6 Delivery Status](/en/delivery/status) for implemented scope, verified paths, and deliberate gaps.
 
 ## Goal
 

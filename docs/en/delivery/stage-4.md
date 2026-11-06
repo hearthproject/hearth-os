@@ -6,6 +6,8 @@ outline: [2, 3]
 
 # Phase 4 · Proactive Service and Mobile Entry
 
+See [Phase 2–6 Delivery Status](/en/delivery/status) for implemented scope, verified paths, and deliberate gaps.
+
 ## Goal
 
 Phase 4 lets Hearth work proactively within limited authority and turns the phone into an entry for viewing, approval, and takeover. The point is not automatic running; it is doing the right thing at the right time without creating noise.

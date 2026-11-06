@@ -59,7 +59,10 @@ const zhSidebar = {
   '/delivery/': [
     {
       text: '交付路线',
-      items: [{ text: '交付路线与实施计划', link: '/delivery/' }]
+      items: [
+        { text: '交付路线与实施计划', link: '/delivery/' },
+        { text: '阶段二至六交付状态', link: '/delivery/status' }
+      ]
     },
     ...zhDeliveryStages
   ],
@@ -98,7 +101,8 @@ const enSidebar = {
     {
       text: 'Delivery',
       items: [
-        { text: 'Delivery Route & Implementation Plan', link: '/en/delivery/' }
+        { text: 'Delivery Route & Implementation Plan', link: '/en/delivery/' },
+        { text: 'Phase 2–6 Delivery Status', link: '/en/delivery/status' }
       ]
     },
     ...enDeliveryStages

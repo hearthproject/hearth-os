@@ -6,6 +6,8 @@ outline: [2, 3]
 
 # Phase 6 · Multi-device and Long-running Operation
 
+See [Phase 2–6 Delivery Status](/en/delivery/status) for implemented scope, verified paths, and deliberate gaps.
+
 ## Goal
 
 Phase 6 expands the single-device product into a Personal Agent OS that runs for the long term, stays consistent across devices, can be backed up, migrated, and revoked. Multi-device does not mean copying multiple agents; it means the same tasks, memory, and authority continue on different devices.
