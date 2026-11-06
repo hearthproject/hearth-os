@@ -5,18 +5,19 @@ import { basename, join } from "node:path";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyReply } from "fastify";
 import type { EventEnvelope } from "@hearth/core";
-import { APPROVAL_STATUSES, EFFECT_STATUSES, RUN_STATUSES, SOURCE_KINDS } from "@hearth/core";
+import { APPROVAL_STATUSES, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, RUN_STATUSES, SOURCE_KINDS } from "@hearth/core";
 import { loadCodexProfile } from "@hearth/codex-executor";
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate } from "@hearth/templates";
 import { z } from "zod";
-import { DB_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST } from "./config.ts";
+import { DB_PATH, DEVICE_FRAME_DIR, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST } from "./config.ts";
 import { ApprovalError, ApprovalManager, type EffectExecutor } from "./approvals.ts";
 import { executeEffect } from "./effects.ts";
 import { HearthScheduler } from "./scheduler.ts";
 import { HearthService, TaskInputSelectionError, type CreateTaskInput } from "./service.ts";
 import { SourceRegistry, SourceRegistryError } from "./sources.ts";
 import { OutboxError, OutboxService } from "./outbox.ts";
+import { DesktopError, DesktopService } from "./desktop.ts";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 
@@ -53,6 +54,47 @@ const outboxDraftSchema = z.object({
   subject: z.string().max(500).optional(),
   body: z.string().max(200_000).optional(),
   attachmentIds: z.array(z.string().trim().min(1).max(80)).max(20).optional()
+}).strict();
+
+const pairingStartSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  version: z.string().trim().min(1).max(40),
+  deviceToken: z.string().min(32).max(256),
+  apps: z.array(z.string().trim().min(1).max(120)).min(1).max(30),
+  capabilities: z.array(z.enum(DEVICE_CAPABILITY_KINDS)).min(1).max(DEVICE_CAPABILITY_KINDS.length)
+}).strict();
+
+const capabilityApprovalSchema = z.object({
+  apps: z.array(z.string().trim().min(1).max(120)).min(1).max(30)
+}).strict();
+
+const createDesktopSessionSchema = z.object({
+  deviceId: z.string().trim().min(1).max(80)
+}).strict();
+
+const desktopActionSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("click"), frameId: z.string().trim().min(1).max(80), x: z.number(), y: z.number() }).strict(),
+  z.object({ kind: z.literal("type"), frameId: z.string().trim().min(1).max(80), text: z.string().min(1).max(1000) }).strict(),
+  z.object({ kind: z.literal("press"), frameId: z.string().trim().min(1).max(80), keys: z.string().min(1).max(40) }).strict(),
+  z.object({ kind: z.literal("focus"), frameId: z.string().trim().min(1).max(80), app: z.string().trim().min(1).max(120), windowTitle: z.string().trim().max(200).optional() }).strict(),
+  z.object({ kind: z.literal("uia.invoke"), frameId: z.string().trim().min(1).max(80), elementName: z.string().trim().min(1).max(200), controlType: z.string().trim().max(40).optional() }).strict(),
+  z.object({ kind: z.literal("uia.setvalue"), frameId: z.string().trim().min(1).max(80), elementName: z.string().trim().min(1).max(200), value: z.string().max(500), controlType: z.string().trim().max(40).optional() }).strict()
+]);
+
+const commandResultSchema = z.object({
+  status: z.enum(["succeeded", "failed"]),
+  result: z.record(z.string(), z.unknown()).optional(),
+  error: z.string().max(1000).optional()
+}).strict();
+
+const observationSchema = z.object({
+  sessionId: z.string().trim().min(1).max(80),
+  commandId: z.string().trim().min(1).max(80).optional(),
+  jpegBase64: z.string().min(1).max(5_500_000),
+  width: z.number().int().min(1).max(10_000),
+  height: z.number().int().min(1).max(10_000),
+  activeApp: z.string().trim().min(1).max(120),
+  windowTitle: z.string().trim().max(300)
 }).strict();
 
 const sourceItemQuerySchema = z.object({
@@ -93,6 +135,7 @@ export interface BuildServerOptions {
   effectExecutor?: EffectExecutor;
   sourceContentRoot?: string;
   outboxRoot?: string;
+  deviceFrameRoot?: string;
 }
 
 export async function buildServer(options: BuildServerOptions = {}) {
@@ -109,6 +152,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const approvals = new ApprovalManager(service, effectExecutor);
   approvals.recoverInterruptedEffects();
   const outbox = new OutboxService(service, approvals);
+  const desktop = new DesktopService(service, options.deviceFrameRoot ?? DEVICE_FRAME_DIR);
   const scheduler = options.startScheduler
     ? new HearthScheduler({
         service,
@@ -118,7 +162,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     : null;
   const app = Fastify({
     logger: options.logger ?? false,
-    bodyLimit: 2_000_000
+    bodyLimit: 8_000_000
   });
 
   app.addHook("onClose", async () => {
@@ -319,6 +363,196 @@ export async function buildServer(options: BuildServerOptions = {}) {
       return outbox.submit(request.params.id);
     } catch (error) {
       return sendOutboxError(reply, error);
+    }
+  });
+
+  app.get("/api/desktop", async (_request, reply) => {
+    reply.header("cache-control", "no-store");
+    return desktop.dashboard();
+  });
+
+  app.get<{ Params: { id: string } }>("/api/desktop/sessions/:id", async (request, reply) => {
+    try {
+      reply.header("cache-control", "no-store");
+      return desktop.sessionView(request.params.id);
+    } catch (error) {
+      return sendDesktopError(reply, error);
+    }
+  });
+
+  app.post("/api/desktop/sessions", async (request, reply) => {
+    const parsed = createDesktopSessionSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SESSION", message: "创建设备会话的参数不正确" });
+    try {
+      return reply.code(201).send(desktop.createSession(parsed.data.deviceId));
+    } catch (error) {
+      return sendDesktopError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/desktop/sessions/:id/observe", async (request, reply) => {
+    try {
+      return reply.code(202).send(desktop.requestObservation(request.params.id));
+    } catch (error) {
+      return sendDesktopError(reply, error);
+    }
+  });
+
+  for (const action of ["pause", "resume", "takeover", "release", "terminate"] as const) {
+    app.post<{ Params: { id: string } }>(`/api/desktop/sessions/:id/${action}`, async (request, reply) => {
+      try {
+        if (action === "pause") return desktop.pauseSession(request.params.id);
+        if (action === "resume") return desktop.resumeSession(request.params.id);
+        if (action === "takeover") return desktop.takeOverSession(request.params.id);
+        if (action === "release") return desktop.releaseSession(request.params.id);
+        return desktop.terminateSession(request.params.id);
+      } catch (error) {
+        return sendDesktopError(reply, error);
+      }
+    });
+  }
+
+  app.post<{ Params: { id: string } }>("/api/desktop/sessions/:id/actions", async (request, reply) => {
+    const parsed = desktopActionSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "INVALID_DESKTOP_ACTION", message: "桌面动作不在低风险白名单内" });
+    }
+    try {
+      return reply.code(202).send(desktop.enqueueAction(request.params.id, parsed.data));
+    } catch (error) {
+      return sendDesktopError(reply, error);
+    }
+  });
+
+  app.post("/api/device-pairings", async (request, reply) => {
+    const parsed = pairingStartSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "INVALID_PAIRING", message: "配对请求参数不正确" });
+    }
+    try {
+      return reply.code(201).send(desktop.createPairingRequest(parsed.data));
+    } catch (error) {
+      return sendDesktopError(reply, error);
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/api/device-pairings/:id", async (request, reply) => {
+    const secret = headerValue(request.headers["x-pairing-secret"]);
+    try {
+      reply.header("cache-control", "no-store");
+      return desktop.getPairingStatus(request.params.id, secret);
+    } catch (error) {
+      return sendDesktopError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/devices/pairing-requests/:id/approve", async (request, reply) => {
+    try {
+      return desktop.approvePairing(request.params.id);
+    } catch (error) {
+      return sendDesktopError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/devices/pairing-requests/:id/reject", async (request, reply) => {
+    try {
+      return desktop.rejectPairing(request.params.id);
+    } catch (error) {
+      return sendDesktopError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string; kind: string } }>("/api/devices/:id/capabilities/:kind/approve", async (request, reply) => {
+    const kind = z.enum(DEVICE_CAPABILITY_KINDS).safeParse(request.params.kind);
+    const parsed = capabilityApprovalSchema.safeParse(request.body ?? {});
+    if (!kind.success || !parsed.success) {
+      return reply.code(400).send({ error: "INVALID_CAPABILITY_APPROVAL", message: "能力审批参数不正确" });
+    }
+    try {
+      return desktop.approveCapability(request.params.id, kind.data, parsed.data.apps);
+    } catch (error) {
+      return sendDesktopError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string; kind: string } }>("/api/devices/:id/capabilities/:kind/revoke", async (request, reply) => {
+    const kind = z.enum(DEVICE_CAPABILITY_KINDS).safeParse(request.params.kind);
+    if (!kind.success) return reply.code(400).send({ error: "INVALID_CAPABILITY", message: "设备能力类型不正确" });
+    try {
+      return desktop.revokeCapability(request.params.id, kind.data);
+    } catch (error) {
+      return sendDesktopError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/devices/:id/revoke", async (request, reply) => {
+    try {
+      return desktop.revokeDevice(request.params.id);
+    } catch (error) {
+      return sendDesktopError(reply, error);
+    }
+  });
+
+  app.get<{ Params: { deviceId: string; frameId: string } }>("/api/devices/:deviceId/frames/:frameId", async (request, reply) => {
+    try {
+      const stored = desktop.readFrame(request.params.deviceId, request.params.frameId);
+      reply.header("cache-control", "no-store, max-age=0");
+      reply.header("content-type", stored.frame.mimeType);
+      return reply.send(readFileSync(stored.absolutePath));
+    } catch (error) {
+      return sendDesktopError(reply, error);
+    }
+  });
+
+  app.post("/api/device/heartbeat", async (request, reply) => {
+    try {
+      const device = desktop.authenticateDevice(bearerToken(request.headers.authorization));
+      reply.header("cache-control", "no-store");
+      return desktop.deviceState(device.id);
+    } catch (error) {
+      return sendDesktopError(reply, error);
+    }
+  });
+
+  app.get("/api/device/state", async (request, reply) => {
+    try {
+      const device = desktop.authenticateDevice(bearerToken(request.headers.authorization));
+      reply.header("cache-control", "no-store");
+      return desktop.deviceState(device.id);
+    } catch (error) {
+      return sendDesktopError(reply, error);
+    }
+  });
+
+  app.get("/api/device/commands/next", async (request, reply) => {
+    try {
+      const device = desktop.authenticateDevice(bearerToken(request.headers.authorization));
+      reply.header("cache-control", "no-store");
+      return { command: desktop.nextCommand(device) };
+    } catch (error) {
+      return sendDesktopError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/device/commands/:id/result", async (request, reply) => {
+    const parsed = commandResultSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_COMMAND_RESULT", message: "桌面命令结果格式不正确" });
+    try {
+      const device = desktop.authenticateDevice(bearerToken(request.headers.authorization));
+      return desktop.completeCommand(device, request.params.id, parsed.data);
+    } catch (error) {
+      return sendDesktopError(reply, error);
+    }
+  });
+
+  app.post("/api/device/observations", async (request, reply) => {
+    const parsed = observationSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_OBSERVATION", message: "桌面观察参数格式不正确" });
+    try {
+      const device = desktop.authenticateDevice(bearerToken(request.headers.authorization));
+      return desktop.uploadObservation(device, parsed.data);
+    } catch (error) {
+      return sendDesktopError(reply, error);
     }
   });
 
@@ -617,6 +851,23 @@ function sendOutboxError(reply: FastifyReply, error: unknown) {
     return reply.code(error.statusCode).send({ error: error.code, message: error.message });
   }
   throw error;
+}
+
+function sendDesktopError(reply: FastifyReply, error: unknown) {
+  if (error instanceof DesktopError) {
+    return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+  }
+  throw error;
+}
+
+function bearerToken(value: string | string[] | undefined): string {
+  const header = headerValue(value);
+  if (!header.startsWith("Bearer ")) throw new DesktopError("DEVICE_UNAUTHORIZED", "缺少设备令牌", 401);
+  return header.slice(7).trim();
+}
+
+function headerValue(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
 }
 
 function isLoopbackOrigin(origin: string): boolean {

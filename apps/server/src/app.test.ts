@@ -228,6 +228,145 @@ describe("Hearth server", () => {
     }
   });
 
+  it("pairs a desktop helper, separates capabilities, and serves short-lived observations", async () => {
+    const frameRoot = mkdtempSync(join(tmpdir(), "hearth-app-frames-"));
+    const deviceToken = "p".repeat(43);
+    const app = await buildServer({ store, serveWeb: false, deviceFrameRoot: frameRoot });
+    try {
+      const started = await app.inject({
+        method: "POST",
+        url: "/api/device-pairings",
+        payload: {
+          name: "Test Workstation",
+          version: "1.0.0",
+          deviceToken,
+          apps: ["notepad"],
+          capabilities: ["observe", "desktop.control"]
+        }
+      });
+      expect(started.statusCode).toBe(201);
+      const pairing = started.json();
+      expect(pairing.request.status).toBe("pending");
+      expect(pairing.request).not.toHaveProperty("secretHash");
+      expect(pairing.request).not.toHaveProperty("deviceTokenHash");
+      expect(pairing.request.code).toMatch(/^\d{6}$/);
+
+      const pending = await app.inject({
+        method: "GET",
+        url: `/api/device-pairings/${pairing.request.id}`,
+        headers: { "x-pairing-secret": pairing.secret }
+      });
+      expect(pending.statusCode).toBe(200);
+      expect(pending.json().request.status).toBe("pending");
+
+      const approvedPairing = await app.inject({
+        method: "POST",
+        url: `/api/devices/pairing-requests/${pairing.request.id}/approve`
+      });
+      expect(approvedPairing.statusCode).toBe(200);
+      const device = approvedPairing.json();
+      const deviceId = device.id as string;
+      expect(device.capabilities.map((capability: { status: string }) => capability.status)).toEqual(["pending", "pending"]);
+
+      const blockedSession = await app.inject({
+        method: "POST",
+        url: "/api/desktop/sessions",
+        payload: { deviceId }
+      });
+      expect(blockedSession.statusCode).toBe(409);
+
+      for (const capability of ["observe", "desktop.control"]) {
+        const granted = await app.inject({
+          method: "POST",
+          url: `/api/devices/${deviceId}/capabilities/${capability}/approve`,
+          payload: { apps: ["notepad"] }
+        });
+        expect(granted.statusCode).toBe(200);
+      }
+
+      const heartbeat = await app.inject({
+        method: "POST",
+        url: "/api/device/heartbeat",
+        headers: { authorization: `Bearer ${deviceToken}` }
+      });
+      expect(heartbeat.statusCode).toBe(200);
+      expect(heartbeat.json().device.online).toBe(true);
+
+      const sessionResponse = await app.inject({
+        method: "POST",
+        url: "/api/desktop/sessions",
+        payload: { deviceId }
+      });
+      expect(sessionResponse.statusCode).toBe(201);
+      const session = sessionResponse.json().session;
+
+      const next = await app.inject({
+        method: "GET",
+        url: "/api/device/commands/next",
+        headers: { authorization: `Bearer ${deviceToken}` }
+      });
+      expect(next.statusCode).toBe(200);
+      const observationCommand = next.json().command;
+      expect(observationCommand).toMatchObject({ kind: "observe", status: "claimed" });
+
+      const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+      const observation = await app.inject({
+        method: "POST",
+        url: "/api/device/observations",
+        headers: { authorization: `Bearer ${deviceToken}` },
+        payload: {
+          sessionId: session.id,
+          commandId: observationCommand.id,
+          jpegBase64: jpeg.toString("base64"),
+          width: 100,
+          height: 80,
+          activeApp: "notepad",
+          windowTitle: "Draft - Notepad"
+        }
+      });
+      expect(observation.statusCode).toBe(200);
+      const frame = observation.json();
+      const image = await app.inject({ method: "GET", url: frame.url });
+      expect(image.statusCode).toBe(200);
+      expect(image.headers["content-type"]).toBe("image/jpeg");
+      expect(image.rawPayload.equals(jpeg)).toBe(true);
+
+      const action = await app.inject({
+        method: "POST",
+        url: `/api/desktop/sessions/${session.id}/actions`,
+        payload: { kind: "click", frameId: frame.id, x: 0.5, y: 0.5 }
+      });
+      expect(action.statusCode).toBe(202);
+      const claimed = await app.inject({
+        method: "GET",
+        url: "/api/device/commands/next",
+        headers: { authorization: `Bearer ${deviceToken}` }
+      });
+      expect(claimed.json().command).toMatchObject({ kind: "click", status: "claimed" });
+
+      const paused = await app.inject({ method: "POST", url: `/api/desktop/sessions/${session.id}/pause` });
+      expect(paused.statusCode).toBe(200);
+      expect(paused.json().session.status).toBe("paused");
+
+      const dashboard = await app.inject({ method: "GET", url: "/api/desktop" });
+      expect(dashboard.statusCode).toBe(200);
+      expect(JSON.stringify(dashboard.json())).not.toContain(deviceToken);
+      expect(JSON.stringify(dashboard.json())).not.toContain("tokenHash");
+
+      const revoked = await app.inject({ method: "POST", url: `/api/devices/${deviceId}/revoke` });
+      expect(revoked.statusCode).toBe(200);
+      const rejectedHeartbeat = await app.inject({
+        method: "POST",
+        url: "/api/device/heartbeat",
+        headers: { authorization: `Bearer ${deviceToken}` }
+      });
+      expect(rejectedHeartbeat.statusCode).toBe(401);
+    } finally {
+      await app.close();
+      rmSync(frameRoot, { recursive: true, force: true });
+    }
+  });
+
   it("lists the fifteen evaluation templates", async () => {
     const app = await buildServer({ store, serveWeb: false });
     const response = await app.inject({ method: "GET", url: "/api/templates" });

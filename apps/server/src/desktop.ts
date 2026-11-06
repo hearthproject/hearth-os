@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type {
   DesktopCommandKind,
   DesktopCommandRecord,
@@ -56,19 +56,19 @@ export type DesktopActionInput =
   | { kind: "click"; frameId: string; x: number; y: number }
   | { kind: "type"; frameId: string; text: string }
   | { kind: "press"; frameId: string; keys: string }
-  | { kind: "focus"; frameId: string; app: string; windowTitle?: string }
-  | { kind: "uia.invoke"; frameId: string; elementName: string; controlType?: string }
-  | { kind: "uia.setvalue"; frameId: string; elementName: string; value: string; controlType?: string };
+  | { kind: "focus"; frameId: string; app: string; windowTitle?: string | undefined }
+  | { kind: "uia.invoke"; frameId: string; elementName: string; controlType?: string | undefined }
+  | { kind: "uia.setvalue"; frameId: string; elementName: string; value: string; controlType?: string | undefined };
 
 export interface CommandResultInput {
   status: "succeeded" | "failed";
-  result?: Record<string, unknown>;
-  error?: string;
+  result?: Record<string, unknown> | undefined;
+  error?: string | undefined;
 }
 
 export interface ObservationInput {
   sessionId: string;
-  commandId?: string;
+  commandId?: string | undefined;
   jpegBase64: string;
   width: number;
   height: number;
@@ -451,7 +451,9 @@ export class DesktopService {
     const frame = this.service.store.getDesktopFrame(frameId);
     if (!frame || frame.deviceId !== deviceId) throw new DesktopError("FRAME_NOT_FOUND", "桌面截图不存在", 404);
     if (Date.parse(frame.expiresAt) <= Date.now()) throw new DesktopError("FRAME_EXPIRED", "桌面截图已经过期", 410);
-    if (!existsSync(frame.storagePath)) throw new DesktopError("FRAME_UNAVAILABLE", "桌面截图已清理", 410);
+    if (!isPathInside(resolve(this.frameRoot), resolve(frame.storagePath)) || !existsSync(frame.storagePath)) {
+      throw new DesktopError("FRAME_UNAVAILABLE", "桌面截图已清理", 410);
+    }
     return { frame: publicFrame(frame), absolutePath: frame.storagePath };
   }
 
@@ -752,6 +754,11 @@ function decodeBase64(value: string): Buffer {
 
 function rowDateExpired(value: string): boolean {
   return Date.parse(value) <= Date.now();
+}
+
+function isPathInside(root: string, candidate: string): boolean {
+  const normalizedRoot = root.replace(/[\\/]+$/, "");
+  return candidate === normalizedRoot || candidate.startsWith(`${normalizedRoot}\\`) || candidate.startsWith(`${normalizedRoot}/`);
 }
 
 function capabilityLabel(kind: DeviceCapabilityKind): string {
