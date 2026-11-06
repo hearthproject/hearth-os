@@ -12,12 +12,18 @@ import type {
   EffectListItem,
   EffectRecord,
   EventWindow,
+  ExecutorId,
   OutboxDraft,
   RunListItem,
+  RunBudget,
+  RunCheckpointRecord,
   RunRecord,
   StatsSnapshot,
   TaskDeliverable,
+  TaskKind,
   TaskListItem,
+  TaskPermissions,
+  TaskProposalRecord,
   TaskRecord,
   TaskStatus
 } from "@hearth/core";
@@ -36,6 +42,10 @@ export interface CreateTaskInput {
   fileInputs?: { label: string; path: string }[];
   url?: string;
   conversationId?: string;
+  executorId?: ExecutorId;
+  taskKind?: TaskKind;
+  expectedOutputs?: string[];
+  permissions?: TaskPermissions;
 }
 
 export class TaskInputSelectionError extends Error {
@@ -56,6 +66,7 @@ export interface TaskView {
   approvals: ReturnType<HearthStore["listApprovals"]>;
   artifacts: ReturnType<HearthStore["listArtifacts"]>;
   effects: ReturnType<HearthStore["listEffects"]>;
+  checkpoints: RunCheckpointRecord[];
   events: ReturnType<HearthStore["listEvents"]>;
   eventTotal: number;
 }
@@ -145,6 +156,9 @@ export class HearthService {
       }
     }
     if (input.textInput) inputs.push({ kind: "text", label: "用户请求", value: input.textInput });
+    const executorId = input.executorId ?? (template ? "codex" : "native");
+    const taskKind = input.taskKind ?? (template?.github ? "workspace" : "general");
+    const expectedOutputs = input.expectedOutputs ?? template?.expectedOutputs ?? ["result.md"];
     const task: TaskRecord = {
       id,
       templateId: template?.id ?? null,
@@ -161,7 +175,11 @@ export class HearthService {
       nextAction: "等待执行",
       error: null,
       resultSummary: null,
-      conversationId: input.conversationId ?? null
+      conversationId: input.conversationId ?? null,
+      executorId,
+      taskKind,
+      expectedOutputs,
+      ...(input.permissions ? { permissions: input.permissions } : {})
     };
     const event = this.store.appendEvent({ type: "task.created", taskId: id, payload: task });
     this.bus.publish(event);
@@ -196,12 +214,14 @@ export class HearthService {
     const task = this.store.getTask(taskId);
     if (!task) return null;
     const events = this.store.listEvents(0, taskId);
+    const runs = this.store.listRuns(taskId);
     return {
       task,
-      runs: this.store.listRuns(taskId),
+      runs,
       approvals: this.store.listApprovals(taskId),
       artifacts: this.store.listArtifacts(taskId),
       effects: this.store.listEffects(taskId),
+      checkpoints: runs.flatMap((run) => this.store.listRunCheckpoints(run.id)),
       events: events.slice(-VIEW_EVENT_TAIL),
       eventTotal: events.length
     };
@@ -306,7 +326,7 @@ export class HearthService {
     return new Map(this.store.listTasks().map((task) => [task.id, task.title]));
   }
 
-  updateTask(taskId: string, patch: Partial<Pick<TaskRecord, "status" | "title" | "goal" | "currentRunId" | "nextAction" | "error" | "resultSummary" | "conversationId">>, runId?: string): TaskRecord {
+  updateTask(taskId: string, patch: Partial<Pick<TaskRecord, "status" | "title" | "goal" | "currentRunId" | "nextAction" | "error" | "resultSummary" | "conversationId" | "executorId" | "taskKind" | "expectedOutputs" | "permissions">>, runId?: string): TaskRecord {
     const task = this.requireTask(taskId);
     if (patch.status && patch.status !== task.status) assertTransition(task.status, patch.status);
     const event = this.store.appendEvent({
@@ -324,7 +344,7 @@ export class HearthService {
     return run;
   }
 
-  updateRun(runId: string, taskId: string, patch: Partial<Pick<RunRecord, "status" | "threadId" | "startedAt" | "endedAt" | "failure" | "usage">>): void {
+  updateRun(runId: string, taskId: string, patch: Partial<Pick<RunRecord, "status" | "threadId" | "startedAt" | "endedAt" | "failure" | "usage" | "executorId" | "checkpointSeq" | "budget">>): void {
     const event = this.store.appendEvent({
       type: "run.updated",
       taskId,
@@ -332,6 +352,97 @@ export class HearthService {
       payload: patch
     });
     this.bus.publish(event);
+  }
+
+  createRunCheckpoint(checkpoint: RunCheckpointRecord): RunCheckpointRecord {
+    const event = this.store.appendEvent({
+      type: "run.checkpoint.created",
+      taskId: checkpoint.taskId,
+      runId: checkpoint.runId,
+      payload: checkpoint
+    });
+    this.bus.publish(event);
+    return checkpoint;
+  }
+
+  listRunCheckpoints(runId: string): RunCheckpointRecord[] {
+    return this.store.listRunCheckpoints(runId);
+  }
+
+  latestRunCheckpoint(runId: string): RunCheckpointRecord | null {
+    return this.store.latestRunCheckpoint(runId);
+  }
+
+  createTaskProposal(input: {
+    conversationId: string;
+    title: string;
+    goal: string;
+    executorId: ExecutorId;
+    taskKind: TaskKind;
+    expectedOutputs: string[];
+    permissions: TaskPermissions;
+    reason: string;
+    ttlMs?: number;
+  }): TaskProposalRecord {
+    const now = new Date();
+    const proposal: TaskProposalRecord = {
+      id: `PROP-${randomUUID()}`,
+      conversationId: input.conversationId,
+      title: input.title,
+      goal: input.goal,
+      executorId: input.executorId,
+      taskKind: input.taskKind,
+      expectedOutputs: input.expectedOutputs,
+      permissions: input.permissions,
+      reason: input.reason,
+      status: "pending",
+      expiresAt: new Date(now.getTime() + (input.ttlMs ?? 15 * 60_000)).toISOString(),
+      createdAt: now.toISOString(),
+      decidedAt: null
+    };
+    const event = this.store.appendEvent({ type: "task.proposal.created", payload: proposal });
+    this.bus.publish(event);
+    return proposal;
+  }
+
+  updateTaskProposal(id: string, patch: Partial<Pick<TaskProposalRecord, "status" | "decidedAt">>): TaskProposalRecord {
+    const updated = this.store.updateTaskProposal(id, patch);
+    if (!updated) throw new Error(`Task proposal not found: ${id}`);
+    const event = this.store.appendEvent({ type: "task.proposal.updated", payload: updated });
+    this.bus.publish(event);
+    return updated;
+  }
+
+  confirmTaskProposal(id: string): { proposal: TaskProposalRecord; task: TaskRecord } {
+    const proposal = this.requireProposal(id);
+    if (proposal.status !== "pending") throw new Error(`提案状态不能确认：${proposal.status}`);
+    if (Date.parse(proposal.expiresAt) <= Date.now()) {
+      this.updateTaskProposal(id, { status: "expired", decidedAt: new Date().toISOString() });
+      throw new Error("提案已过期，请重新发起");
+    }
+    const task = this.createTask({
+      title: proposal.title,
+      goal: proposal.goal,
+      conversationId: proposal.conversationId,
+      executorId: proposal.executorId,
+      taskKind: proposal.taskKind,
+      expectedOutputs: proposal.expectedOutputs,
+      permissions: proposal.permissions
+    });
+    const updated = this.updateTaskProposal(id, { status: "confirmed", decidedAt: new Date().toISOString() });
+    return { proposal: updated, task };
+  }
+
+  rejectTaskProposal(id: string): TaskProposalRecord {
+    const proposal = this.requireProposal(id);
+    if (proposal.status !== "pending") throw new Error(`提案状态不能拒绝：${proposal.status}`);
+    return this.updateTaskProposal(id, { status: "rejected", decidedAt: new Date().toISOString() });
+  }
+
+  requireProposal(id: string): TaskProposalRecord {
+    const proposal = this.store.getTaskProposal(id);
+    if (!proposal) throw new Error(`Task proposal not found: ${id}`);
+    return proposal;
   }
 
   publishArtifact(artifact: ArtifactRecord): ArtifactRecord {
