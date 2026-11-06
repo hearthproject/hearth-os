@@ -2529,3 +2529,228 @@ body.modal-open {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* ── proactive inbox ────────────────────────────────────────────────── */
+.proactive-control-panel {
+  margin-bottom: var(--gap-3);
+}
+
+.proactive-budget-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-bottom: 1px solid var(--line);
+}
+
+.proactive-budget-grid > div {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border-right: 1px solid var(--line);
+}
+
+.proactive-budget-grid > div:last-child {
+  border-right: 0;
+}
+
+.proactive-budget-grid span,
+.suggestion-facts span {
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+}
+
+.proactive-budget-grid strong {
+  font-size: var(--fs-14);
+  font-weight: 600;
+}
+
+.proactive-actions,
+.proactive-form-foot,
+.suggestion-actions,
+.inbox-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  flex-wrap: wrap;
+}
+
+.proactive-actions {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.proactive-settings-form {
+  display: grid;
+  gap: var(--gap-3);
+  padding: 12px;
+}
+
+.proactive-number-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--gap-3);
+}
+
+.proactive-number-grid label,
+.proactive-trigger-row {
+  display: grid;
+  gap: 4px;
+  color: var(--ink-secondary);
+  font-size: var(--fs-12);
+}
+
+.proactive-number-grid input,
+.proactive-number-grid select,
+.proactive-trigger-row select {
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+
+.proactive-trigger-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--gap-2) var(--gap-3);
+  padding-top: var(--gap-2);
+  border-top: 1px solid var(--line);
+}
+
+.proactive-trigger-row {
+  grid-template-columns: minmax(0, 1fr) 160px;
+  align-items: center;
+  gap: var(--gap-2);
+}
+
+.proactive-trigger-row label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.proactive-trigger-row input[type="checkbox"] {
+  accent-color: var(--ember);
+}
+
+.inbox-toolbar {
+  justify-content: space-between;
+  margin: var(--gap-3) 0;
+}
+
+.suggestion-list {
+  display: grid;
+  gap: var(--gap-3);
+}
+
+.suggestion-card {
+  overflow: hidden;
+}
+
+.suggestion-card.risk-high {
+  border-color: var(--risk);
+}
+
+.suggestion-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--gap-3);
+  padding: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.suggestion-head p {
+  margin-top: 6px;
+  color: var(--ink-secondary);
+}
+
+.suggestion-kicker {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.risk-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border-color: var(--risk);
+  color: var(--risk);
+}
+
+.suggestion-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-bottom: 1px solid var(--line);
+}
+
+.suggestion-facts > div {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  padding: 10px 12px;
+  border-right: 1px solid var(--line);
+}
+
+.suggestion-facts > div:last-child {
+  border-right: 0;
+}
+
+.suggestion-facts strong {
+  font-weight: 500;
+  color: var(--ink-secondary);
+}
+
+.suggestion-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-3);
+  padding: 10px 12px;
+}
+
+.form-error {
+  color: var(--risk);
+  font-size: var(--fs-12);
+}
+
+@media (max-width: 900px) {
+  .proactive-budget-grid,
+  .suggestion-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .proactive-budget-grid > div:nth-child(2),
+  .suggestion-facts > div:nth-child(2) {
+    border-right: 0;
+  }
+
+  .proactive-number-grid,
+  .proactive-trigger-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .proactive-trigger-row,
+  .suggestion-head,
+  .suggestion-foot {
+    grid-template-columns: minmax(0, 1fr);
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .proactive-budget-grid,
+  .suggestion-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .proactive-budget-grid > div,
+  .suggestion-facts > div {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+}

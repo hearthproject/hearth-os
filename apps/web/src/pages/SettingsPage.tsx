@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { ProactiveSettingsPanel } from "../components/ProactiveSettingsPanel.tsx";
 import { Download, FileJson, RefreshCw } from "lucide-react";
 import { api } from "../lib/api.ts";
 import { countTotal, formatBytes, formatDuration, formatNumber, formatTokens } from "../lib/format.ts";
@@ -9,6 +10,7 @@ export function SettingsPage() {
   const { mode } = useViewMode();
   const pro = mode === "pro";
   const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 20_000 });
+  const proactiveQuery = useQuery({ queryKey: ["proactive"], queryFn: api.proactive, refetchInterval: 20_000 });
   const statsQuery = useQuery({ queryKey: ["stats"], queryFn: api.stats, refetchInterval: 30_000, enabled: pro });
   const health = healthQuery.data;
   const stats = statsQuery.data;
@@ -39,6 +41,8 @@ export function SettingsPage() {
         </dl>
         <p className="page-meta">密钥只由本机服务进程读取，不进入浏览器。</p>
       </section>
+
+      {proactiveQuery.data && <ProactiveSettingsPanel snapshot={proactiveQuery.data} />}
 
       <section className="panel">
         <div className="panel-head"><h2>本机数据</h2></div>

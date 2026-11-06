@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Cable, CalendarDays, FileText, Inbox, Mail, Monitor, Plus, Settings2 } from "lucide-react";
+import { Cable, CalendarDays, FileText, Inbox, Lightbulb, Mail, Monitor, Plus, Settings2 } from "lucide-react";
 import { NavLink, Outlet, useNavigate, useOutletContext } from "react-router-dom";
 import { useState } from "react";
 import { api } from "../lib/api.ts";
@@ -22,8 +22,12 @@ export function AppShell() {
   const navigate = useNavigate();
   const tasksQuery = useQuery({ queryKey: ["tasks"], queryFn: api.tasks, refetchInterval: 10_000 });
   const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 30_000 });
+  const proactiveQuery = useQuery({ queryKey: ["proactive"], queryFn: api.proactive, refetchInterval: 15_000 });
   const templatesQuery = useQuery({ queryKey: ["templates"], queryFn: api.templates, enabled: newTaskOpen });
   const attentionCount = (tasksQuery.data?.tasks ?? []).filter((task) => needsAttention(task.status)).length;
+  const proactiveCount = (proactiveQuery.data?.suggestions ?? []).filter((suggestion) =>
+    ["new", "snoozed", "accepted"].includes(suggestion.status)
+  ).length;
   const codex = healthQuery.data?.codex;
 
   function handleCreated(task: TaskRecord) {
@@ -46,6 +50,10 @@ export function AppShell() {
         <nav className="nav">
           <NavLink to="/" end className={({ isActive }) => (isActive ? "nav-item active" : "nav-item")}>
             <CalendarDays size={16} /> <span className="nav-label">今天</span>
+          </NavLink>
+          <NavLink to="/inbox" className={({ isActive }) => (isActive ? "nav-item active" : "nav-item")}>
+            <Lightbulb size={16} /> <span className="nav-label">主动收件箱</span>
+            {proactiveCount > 0 && <span className="nav-badge">{proactiveCount}</span>}
           </NavLink>
           <NavLink to="/attention" className={({ isActive }) => (isActive ? "nav-item active" : "nav-item")}>
             <Inbox size={16} /> <span className="nav-label">需要你</span>

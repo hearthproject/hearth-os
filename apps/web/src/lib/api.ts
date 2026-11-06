@@ -16,6 +16,9 @@ import type {
   OutboxDraftRequest,
   OutboxSubmitResult,
   PairingRequestView,
+  ProactiveSettings,
+  ProactiveSnapshot,
+  ProactiveSuggestion,
   RunListItem,
   RunManifest,
   SourceConnection,
@@ -63,6 +66,28 @@ export const api = {
   system: () => request<SystemStatus>("/api/system"),
   stopSystem: () => request<SystemStatus>("/api/system/stop", { method: "POST" }),
   startSystem: () => request<SystemStatus>("/api/system/start", { method: "POST" }),
+  proactive: () => request<ProactiveSnapshot>("/api/proactive"),
+  scanProactive: () => request<{ created: number; updated: number; delivered: number; suggestions: ProactiveSuggestion[] }>("/api/proactive/scan", { method: "POST" }),
+  updateProactiveSettings: (input: Partial<Omit<ProactiveSettings, "triggers" | "updatedAt">> & {
+    triggers?: Partial<ProactiveSettings["triggers"]>;
+  }) => request<ProactiveSettings>("/api/proactive/settings", {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  }),
+  pauseProactive: (input: { minutes?: number; off?: boolean; resume?: boolean }) => request<ProactiveSettings>("/api/proactive/pause", {
+    method: "POST",
+    body: JSON.stringify(input)
+  }),
+  acceptSuggestion: (id: string) => request<ProactiveSuggestion>("/api/suggestions/" + encodeURIComponent(id) + "/accept", { method: "POST" }),
+  convertSuggestion: (id: string, input: { title?: string; goal?: string; textInput?: string } = {}) => request<{ suggestion: ProactiveSuggestion; taskId: string }>("/api/suggestions/" + encodeURIComponent(id) + "/convert", {
+    method: "POST",
+    body: JSON.stringify(input)
+  }),
+  ignoreSuggestion: (id: string) => request<ProactiveSuggestion>("/api/suggestions/" + encodeURIComponent(id) + "/ignore", { method: "POST" }),
+  snoozeSuggestion: (id: string, minutes = 60) => request<ProactiveSuggestion>("/api/suggestions/" + encodeURIComponent(id) + "/snooze", {
+    method: "POST",
+    body: JSON.stringify({ minutes })
+  }),
   templates: () => request<{ templates: TaskTemplate[] }>("/api/templates"),
   sources: () => request<{ sources: SourceConnection[] }>("/api/sources"),
   readySourceItems: (limit = 100) => request<{ items: SourceItem[] }>(`/api/source-items${query({ limit })}`),
@@ -169,6 +194,7 @@ export function subscribeToEvents(onEvent: () => void): () => void {
     "task.created", "task.updated", "task.progress", "run.created", "run.updated",
     "approval.created", "approval.updated", "artifact.published", "effect.created", "effect.updated",
     "source.created", "source.updated", "source.item.updated", "source.cleared",
+    "proactive.settings.updated", "suggestion.created", "suggestion.updated", "suggestion.event",
     "outbox.created", "outbox.updated",
     "device.paired", "device.updated", "device.pairing-requested", "device.pairing-updated",
     "desktop.session.created", "desktop.session.updated", "desktop.frame.updated",
