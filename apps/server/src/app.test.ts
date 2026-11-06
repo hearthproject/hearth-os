@@ -574,6 +574,8 @@ describe("Hearth server", () => {
       lastDurationMs: 100_000,
       lastUsage: { inputTokens: 1000, cachedInputTokens: 500, cacheWriteInputTokens: 0, outputTokens: 200, reasoningOutputTokens: 20 },
       artifacts: 1,
+      phase: "排队中",
+      deliverables: [],
       effects: { total: 1, uncertain: 1 },
       approvalId: "approval-1"
     });

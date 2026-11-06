@@ -1,6 +1,12 @@
 import type {
   ApprovalDecisionResult,
   ApprovalListItem,
+  AttachmentUploadResult,
+  ChatAttachment,
+  CodexProbeResponse,
+  ConversationDetail,
+  ConversationListItem,
+  ConversationRecord,
   ArtifactListItem,
   BackupRestoreResult,
   BackupSnapshot,
@@ -20,6 +26,9 @@ import type {
   CorrectMemoryRequest,
   MethodSnapshot,
   MemorySnapshot,
+  ModelListResponse,
+  ModelSettingsResponse,
+  ModelTestResponse,
   OutboxDraft,
   OutboxDraftListItem,
   OutboxDraftRequest,
@@ -47,6 +56,18 @@ import type {
   TaskTemplate,
   TaskView
 } from "./types.ts";
+
+export interface ChatStreamBody {
+  conversationId?: string;
+  message?: string;
+  attachments?: ChatAttachment[];
+  url?: string;
+}
+
+export interface ChatStreamHandlers {
+  onEvent: (event: string, data: unknown) => void;
+  signal?: AbortSignal;
+}
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -76,6 +97,45 @@ function query(params: Record<string, string | number | boolean | undefined>): s
 }
 
 export const api = {
+  conversations: () => request<{ conversations: ConversationListItem[] }>("/api/conversations"),
+  conversation: (id: string) => request<ConversationDetail>(`/api/conversations/${encodeURIComponent(id)}`),
+  createConversation: (title?: string) => request<ConversationRecord>("/api/conversations", {
+    method: "POST",
+    body: JSON.stringify(title ? { title } : {})
+  }),
+  renameConversation: (id: string, title: string) => request<ConversationRecord>(`/api/conversations/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ title })
+  }),
+  deleteConversation: (id: string) => request<void>(`/api/conversations/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  modelSettings: () => request<ModelSettingsResponse>("/api/model-settings"),
+  saveModelSettings: (input: {
+    providerId?: string;
+    providerName?: string;
+    baseUrl?: string;
+    model?: string;
+    apiKey?: string;
+  }) => request<ModelSettingsResponse>("/api/model-settings", {
+    method: "PUT",
+    body: JSON.stringify(input)
+  }),
+  fetchModels: (input: { providerId?: string; providerName?: string; baseUrl?: string; model?: string; apiKey?: string }) =>
+    request<ModelListResponse>("/api/model-settings/models", { method: "POST", body: JSON.stringify(input) }),
+  testModel: (input: { providerId?: string; providerName?: string; baseUrl?: string; model?: string; apiKey?: string }) =>
+    request<ModelTestResponse>("/api/model-settings/test", { method: "POST", body: JSON.stringify(input) }),
+  probeCodex: () => request<CodexProbeResponse>("/api/codex/probe", { method: "POST" }),
+  uploadAttachments: async (files: File[]): Promise<ChatAttachment[]> => {
+    const form = new FormData();
+    for (const file of files) form.append("file", file, file.name);
+    const response = await fetch("/api/attachments", { method: "POST", body: form });
+    const contentType = response.headers.get("content-type") ?? "";
+    const body = contentType.includes("application/json") ? await response.json() : await response.text();
+    if (!response.ok) {
+      const message = typeof body === "object" && body && "message" in body ? String(body.message) : `上传失败（${response.status}）`;
+      throw new Error(message);
+    }
+    return (body as AttachmentUploadResult).attachments;
+  },
   health: () => request<HealthResponse>("/api/health"),
   system: () => request<SystemStatus>("/api/system"),
   stopSystem: () => request<SystemStatus>("/api/system/stop", { method: "POST" }),
@@ -310,4 +370,51 @@ export function subscribeToEvents(onEvent: () => void): () => void {
   ];
   for (const name of eventNames) source.addEventListener(name, onEvent);
   return () => source.close();
+}
+
+export async function chatStream(body: ChatStreamBody, handlers: ChatStreamHandlers): Promise<void> {
+  const response = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+    ...(handlers.signal ? { signal: handlers.signal } : {})
+  });
+  if (!response.ok) {
+    const contentType = response.headers.get("content-type") ?? "";
+    const payload = contentType.includes("application/json") ? await response.json() : await response.text();
+    const message = typeof payload === "object" && payload && "message" in payload ? String(payload.message) : `发送失败（${response.status}）`;
+    throw new Error(message);
+  }
+  if (!response.body) throw new Error("服务没有返回聊天内容");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let boundary = buffer.indexOf("\n\n");
+    while (boundary >= 0) {
+      const block = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      dispatchSseBlock(block, handlers.onEvent);
+      boundary = buffer.indexOf("\n\n");
+    }
+  }
+}
+
+function dispatchSseBlock(block: string, onEvent: (event: string, data: unknown) => void): void {
+  let event = "message";
+  const data: string[] = [];
+  for (const line of block.split(/\r?\n/)) {
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) data.push(line.slice(5).trim());
+  }
+  if (data.length === 0) return;
+  const raw = data.join("\n");
+  try {
+    onEvent(event, JSON.parse(raw));
+  } catch {
+    onEvent(event, raw);
+  }
 }

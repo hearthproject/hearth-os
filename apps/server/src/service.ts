@@ -16,6 +16,7 @@ import type {
   RunListItem,
   RunRecord,
   StatsSnapshot,
+  TaskDeliverable,
   TaskListItem,
   TaskRecord,
   TaskStatus
@@ -32,6 +33,9 @@ export interface CreateTaskInput {
   goal?: string;
   textInput?: string;
   sourceItemIds?: string[];
+  fileInputs?: { label: string; path: string }[];
+  url?: string;
+  conversationId?: string;
 }
 
 export class TaskInputSelectionError extends Error {
@@ -127,7 +131,20 @@ export class HearthService {
         }
       });
     }
-    if (input.textInput) inputs.push({ kind: "text", label: "用户说明", value: input.textInput });
+    for (const file of input.fileInputs ?? []) {
+      inputs.push({ kind: "file", label: file.label, value: file.path });
+    }
+    let networkHosts = template?.networkHosts ?? [];
+    if (input.url) {
+      inputs.push({ kind: "url", label: "网页", value: input.url });
+      try {
+        const host = new URL(input.url).hostname;
+        if (host) networkHosts = [...new Set([...networkHosts, host])];
+      } catch {
+        throw new TaskInputSelectionError("INVALID_URL", "网址格式不正确", 400);
+      }
+    }
+    if (input.textInput) inputs.push({ kind: "text", label: "用户请求", value: input.textInput });
     const task: TaskRecord = {
       id,
       templateId: template?.id ?? null,
@@ -138,11 +155,13 @@ export class HearthService {
       updatedAt: now,
       deadline: null,
       inputs,
-      networkHosts: template?.networkHosts ?? [],
+      networkHosts,
       outputDir: template?.outputDir ?? `.hearth/artifacts/${id}`,
       currentRunId: null,
       nextAction: "等待执行",
-      error: null
+      error: null,
+      resultSummary: null,
+      conversationId: input.conversationId ?? null
     };
     const event = this.store.appendEvent({ type: "task.created", taskId: id, payload: task });
     this.bus.publish(event);
@@ -202,6 +221,8 @@ export class HearthService {
           lastDurationMs: runs?.lastDurationMs ?? null,
           lastUsage: runs?.lastUsage ?? null,
           artifacts: artifactCounts.get(task.id) ?? 0,
+          phase: taskPhase(task),
+          deliverables: visibleDeliverables(this.store.listArtifacts(task.id)),
           effects: effectAggregates.get(task.id) ?? { total: 0, uncertain: 0 },
           approvalId: pendingApprovals.get(task.id) ?? null
         }
@@ -285,7 +306,7 @@ export class HearthService {
     return new Map(this.store.listTasks().map((task) => [task.id, task.title]));
   }
 
-  updateTask(taskId: string, patch: Partial<Pick<TaskRecord, "status" | "title" | "goal" | "currentRunId" | "nextAction" | "error">>, runId?: string): TaskRecord {
+  updateTask(taskId: string, patch: Partial<Pick<TaskRecord, "status" | "title" | "goal" | "currentRunId" | "nextAction" | "error" | "resultSummary" | "conversationId">>, runId?: string): TaskRecord {
     const task = this.requireTask(taskId);
     if (patch.status && patch.status !== task.status) assertTransition(task.status, patch.status);
     const event = this.store.appendEvent({
@@ -482,6 +503,28 @@ export class HearthService {
   statusLabel(status: TaskStatus): string {
     return TASK_STATUS_LABELS[status];
   }
+}
+
+function taskPhase(task: TaskRecord): string {
+  if (task.status === "running") return task.nextAction || "正在执行";
+  return TASK_STATUS_LABELS[task.status];
+}
+
+export function visibleDeliverables(artifacts: ArtifactRecord[]): TaskDeliverable[] {
+  return artifacts
+    .filter((artifact) => {
+      const path = artifact.relativePath.replace(/\\/g, "/");
+      if (path === "run-manifest.json" || path === "pr-preview.json") return false;
+      if (path.startsWith("inputs/") || path.startsWith("runtime/") || path.startsWith(".hearth/")) return false;
+      return true;
+    })
+    .map((artifact) => ({
+      id: artifact.id,
+      name: artifact.relativePath.split("/").pop() ?? artifact.relativePath,
+      relativePath: artifact.relativePath,
+      mimeType: artifact.mimeType,
+      bytes: artifact.bytes
+    }));
 }
 
 function omitKey(record: Record<string, unknown>, key: string): Record<string, unknown> {

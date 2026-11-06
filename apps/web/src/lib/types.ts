@@ -3,6 +3,9 @@ import type {
   ApprovalRecord,
   ApprovalStatus,
   ArtifactListItem,
+  ChatAttachment,
+  ChatMessageRecord,
+  ConversationRecord,
   ArtifactRecord,
   DesktopCommandKind,
   DesktopCommandRecord,
@@ -37,6 +40,8 @@ import type {
   MethodStatus,
   MethodTrial,
   MethodVerdict,
+  ModelProviderPreset,
+  ModelSettingsView,
   OutboxAttachment,
   OutboxDraft,
   OutboxDraftStatus,
@@ -57,6 +62,7 @@ import type {
   StatsSnapshot,
   SyncConflict,
   SyncPeer,
+  TaskDeliverable,
   TaskListItem,
   TaskRecord,
   TaskStatus
@@ -69,6 +75,9 @@ export type {
   ApprovalStatus,
   ArtifactListItem,
   ArtifactRecord,
+  ChatAttachment,
+  ChatMessageRecord,
+  ConversationRecord,
   DesktopCommandKind,
   DesktopCommandRecord,
   DesktopCommandStatus,
@@ -102,6 +111,8 @@ export type {
   MethodStatus,
   MethodTrial,
   MethodVerdict,
+  ModelProviderPreset,
+  ModelSettingsView,
   OutboxAttachment,
   OutboxDraft,
   OutboxDraftStatus,
@@ -122,6 +133,7 @@ export type {
   StatsSnapshot,
   SyncConflict,
   SyncPeer,
+  TaskDeliverable,
   TaskListItem,
   TaskRecord,
   TaskStatus,
@@ -147,7 +159,20 @@ export interface SystemStatus {
   killSwitch: boolean;
 }
 
-export type HealthResponse = HealthSnapshot;
+export type HealthResponse = Omit<HealthSnapshot, "codex"> & {
+  codex: HealthSnapshot["codex"] & {
+    configPath: string;
+    codexHome: string;
+    baseUrl: string | null;
+    wireApi: string | null;
+    envKey: string | null;
+    envKeyPresent: boolean;
+  };
+  chatModel: {
+    configured: boolean;
+    settings: ModelSettingsView;
+  };
+};
 
 export interface MaintenanceSnapshot {
   latest: MaintenanceRun | null;
@@ -237,6 +262,59 @@ export interface SecurityAudit {
 export interface SecuritySnapshot {
   state: SecurityState;
   audits: SecurityAudit[];
+}
+
+export interface ConversationListItem extends ConversationRecord {
+  messageCount: number;
+  preview: string;
+}
+
+export interface ConversationDetail {
+  conversation: ConversationRecord;
+  messages: ChatMessageRecord[];
+}
+
+export interface AttachmentUploadResult {
+  attachments: ChatAttachment[];
+}
+
+export interface ModelSettingsResponse {
+  settings: ModelSettingsView;
+  presets?: ModelProviderPreset[];
+  configured?: boolean;
+}
+
+export interface ModelListResponse {
+  models: string[];
+  error?: string;
+  code?: string;
+}
+
+export interface ModelTestResponse {
+  ok: boolean;
+  reply?: string;
+  error?: string;
+  code?: string;
+  elapsedMs?: number;
+}
+
+export interface CodexProbeResponse {
+  ok: boolean;
+  text?: string;
+  error?: string;
+  canRun: boolean;
+  configPath: string;
+  codexHome: string;
+  providerId: string;
+  providerName: string;
+  model: string | null;
+  baseUrl: string | null;
+  wireApi: string | null;
+  envKey: string | null;
+  envKeyPresent: boolean;
+  authSource: HealthResponse["codex"]["authSource"];
+  issues: string[];
+  elapsedMs: number;
 }
 
 export type PreviewableArtifact = Pick<ArtifactRecord, "id" | "taskId" | "relativePath" | "mimeType" | "bytes">;

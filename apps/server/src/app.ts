@@ -8,8 +8,11 @@ import type { EventEnvelope } from "@hearth/core";
 import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_SENSITIVITIES, PROACTIVE_MODES, RUN_STATUSES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate } from "@hearth/templates";
+import { loadCodexProfile } from "@hearth/codex-executor";
 import { z } from "zod";
-import { BACKUP_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, MASTER_KEY_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST } from "./config.ts";
+import { ATTACHMENT_DIR, BACKUP_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST } from "./config.ts";
+import { registerChatRoutes } from "./chat-routes.ts";
+import { chatModelConfigured, loadModelSettings, viewModelSettings } from "./model-settings.ts";
 import { ApprovalError, ApprovalManager, type EffectExecutor } from "./approvals.ts";
 import { BackupError, BackupService } from "./backups.ts";
 import { executeEffect } from "./effects.ts";
@@ -309,6 +312,8 @@ export interface BuildServerOptions {
   dbPath?: string;
   syncFetch?: typeof fetch;
   syncSecretBox?: SecretBox;
+  modelSettingsPath?: string;
+  attachmentRoot?: string;
 }
 
 export async function buildServer(options: BuildServerOptions = {}) {
@@ -346,11 +351,14 @@ export async function buildServer(options: BuildServerOptions = {}) {
   approvals.recoverInterruptedEffects();
   const outbox = new OutboxService(service, approvals);
   const desktop = new DesktopService(service, options.deviceFrameRoot ?? DEVICE_FRAME_DIR, security);
+  const modelSettingsPath = options.modelSettingsPath ?? MODEL_SETTINGS_PATH;
+  const attachmentRoot = options.attachmentRoot ?? ATTACHMENT_DIR;
   const scheduler = options.startScheduler
     ? new HearthScheduler({
         service,
         approvals,
         leases,
+        attachmentRoot,
         ...(options.sourceContentRoot ? { sourceContentRoot: options.sourceContentRoot } : {})
       })
     : null;
@@ -375,6 +383,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
     bodyLimit: 8_000_000
   });
 
+  await registerChatRoutes(app, { service, modelSettingsPath, attachmentRoot });
+
   app.addHook("onClose", async () => {
     maintenance.stop();
     await scheduler?.stop();
@@ -396,7 +406,27 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
   });
 
-  app.get("/api/health", async () => health.snapshot());
+  app.get("/api/health", async () => {
+    const snapshot = health.snapshot();
+    const profile = loadCodexProfile();
+    const modelSettings = loadModelSettings(modelSettingsPath);
+    return {
+      ...snapshot,
+      chatModel: {
+        configured: chatModelConfigured(modelSettings),
+        settings: viewModelSettings(modelSettings)
+      },
+      codex: {
+        ...snapshot.codex,
+        configPath: profile.configPath,
+        codexHome: profile.codexHome,
+        baseUrl: profile.baseUrl,
+        wireApi: profile.wireApi,
+        envKey: profile.envKey,
+        envKeyPresent: profile.envKeyPresent
+      }
+    };
+  });
 
   app.get("/api/maintenance", async (_request, reply) => {
     reply.header("cache-control", "no-store");

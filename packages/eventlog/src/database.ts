@@ -895,6 +895,7 @@ export class HearthStore {
     ).all(deviceId) as DbRow[]).map(rowToDesktopCommand);
   }
 
+
   listRunsPage(opts: PageOptions): { runs: RunRecord[]; total: number } {
     const { items, total } = this.page("runs", rowToRun, opts);
     return { runs: items, total };
@@ -1658,7 +1659,6 @@ function zeroCounts<K extends string>(keys: readonly K[]): Record<K, number> {
 function bump<K extends string>(counts: Record<K, number>, key: string, by: number): void {
   if (Object.hasOwn(counts, key)) counts[key as K] += by;
 }
-
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, type: string): void {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all() as DbRow[];

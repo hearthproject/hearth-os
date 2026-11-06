@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { SourceItem, TaskRecord } from "@hearth/core";
 import { getTemplate, type TaskTemplate } from "@hearth/templates";
 import {
@@ -43,6 +43,7 @@ export async function prepareWorkspace(options: {
   githubRun?: CommandRunner | undefined;
   githubCacheRoot?: string | undefined;
   sourceContentRoot?: string | undefined;
+  attachmentRoot?: string | undefined;
   getSourceItem?: (id: string) => SourceItem | null;
 }): Promise<PreparedWorkspace> {
   const root = resolve(options.workspaceDir);
@@ -255,7 +256,7 @@ export async function prepareWorkspace(options: {
       continue;
     }
 
-    const sourcePath = resolveInside(options.repoRoot, input.value);
+    const sourcePath = resolveTaskInputPath(options, input.value);
     if (!existsSync(sourcePath)) throw new Error(`输入文件不存在：${input.value}`);
     const stat = lstatSync(sourcePath);
     if (!stat.isFile()) throw new Error(`输入必须是普通文件：${input.value}`);
@@ -274,6 +275,16 @@ export async function prepareWorkspace(options: {
   }
 
   return { root, outDir, inputs: prepared, ...(repository ? { repository } : {}) };
+}
+
+function resolveTaskInputPath(options: { repoRoot: string; attachmentRoot?: string | undefined }, value: string): string {
+  if (!isAbsolute(value)) return resolveInside(options.repoRoot, value);
+  const absolute = resolve(value);
+  const allowedRoot = options.attachmentRoot ? resolve(options.attachmentRoot) : null;
+  if (!allowedRoot || (absolute !== allowedRoot && !absolute.startsWith(allowedRoot + sep))) {
+    throw new UnsupportedInputError(`输入文件不在允许的附件目录中：${value}`);
+  }
+  return absolute;
 }
 
 export function buildTaskPrompt(

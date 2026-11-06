@@ -3,20 +3,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AppShell } from "./components/AppShell.tsx";
 import { subscribeToEvents } from "./lib/api.ts";
-import { ArtifactsPage } from "./pages/ArtifactsPage.tsx";
-import { AttentionPage } from "./pages/AttentionPage.tsx";
+import { ChatPage } from "./pages/ChatPage.tsx";
 import { DevicesPage } from "./pages/DevicesPage.tsx";
-import { InboxPage } from "./pages/InboxPage.tsx";
-import { MemoryPage } from "./pages/MemoryPage.tsx";
-import { MethodsPage } from "./pages/MethodsPage.tsx";
-import { OperationsPage } from "./pages/OperationsPage.tsx";
 import { SettingsPage } from "./pages/SettingsPage.tsx";
-import { SecurityPage } from "./pages/SecurityPage.tsx";
-import { SyncPage } from "./pages/SyncPage.tsx";
-import { SourcesPage } from "./pages/SourcesPage.tsx";
-import { OutboxPage } from "./pages/OutboxPage.tsx";
 import { TaskDetailPage } from "./pages/TaskDetailPage.tsx";
-import { TodayPage } from "./pages/TodayPage.tsx";
+import { TasksPage } from "./pages/TasksPage.tsx";
 
 export default function App() {
   return (
@@ -24,20 +15,11 @@ export default function App() {
       <EventBridge />
       <Routes>
         <Route element={<AppShell />}>
-          <Route index element={<TodayPage />} />
-          <Route path="inbox" element={<InboxPage />} />
-          <Route path="attention" element={<AttentionPage />} />
-          <Route path="memory" element={<MemoryPage />} />
-          <Route path="methods" element={<MethodsPage />} />
-          <Route path="artifacts" element={<ArtifactsPage />} />
-          <Route path="outbox" element={<OutboxPage />} />
-          <Route path="sources" element={<SourcesPage />} />
+          <Route index element={<ChatPage />} />
+          <Route path="tasks" element={<TasksPage />} />
+          <Route path="tasks/:id" element={<TaskDetailPage />} />
           <Route path="devices" element={<DevicesPage />} />
           <Route path="settings" element={<SettingsPage />} />
-          <Route path="sync" element={<SyncPage />} />
-          <Route path="security" element={<SecurityPage />} />
-          <Route path="operations" element={<OperationsPage />} />
-          <Route path="tasks/:id" element={<TaskDetailPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
@@ -56,20 +38,8 @@ function EventBridge() {
       window.clearTimeout(refreshTimer);
       refreshTimer = window.setTimeout(() => {
         void queryClient.invalidateQueries({ queryKey: ["tasks"] });
-        void queryClient.invalidateQueries({ queryKey: ["artifacts"] });
-        void queryClient.invalidateQueries({ queryKey: ["stats"] });
+        void queryClient.invalidateQueries({ queryKey: ["health"] });
         void queryClient.invalidateQueries({ queryKey: ["system"] });
-        void queryClient.invalidateQueries({ queryKey: ["sources"] });
-        void queryClient.invalidateQueries({ queryKey: ["sourceItems"] });
-        void queryClient.invalidateQueries({ queryKey: ["outbox"] });
-        void queryClient.invalidateQueries({ queryKey: ["approvals"] });
-        void queryClient.invalidateQueries({ queryKey: ["proactive"] });
-        void queryClient.invalidateQueries({ queryKey: ["memory"] });
-        void queryClient.invalidateQueries({ queryKey: ["methods"] });
-        void queryClient.invalidateQueries({ queryKey: ["sync"] });
-        void queryClient.invalidateQueries({ queryKey: ["security"] });
-        void queryClient.invalidateQueries({ queryKey: ["backups"] });
-        void queryClient.invalidateQueries({ queryKey: ["maintenance"] });
         void queryClient.invalidateQueries({ queryKey: ["desktop"] });
         if (taskId) {
           void queryClient.invalidateQueries({ queryKey: ["task", taskId] });

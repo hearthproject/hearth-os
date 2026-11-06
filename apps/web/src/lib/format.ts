@@ -54,7 +54,7 @@ export function formatDuration(ms: number | null): string {
 
 export function formatTokens(usage: RunUsage | null): string {
   if (!usage) return "未记录";
-  return `${compactNumber(usage.inputTokens)} 入 / ${compactNumber(usage.outputTokens)} 出`;
+  return `${compactNumber(usage.inputTokens)} / ${compactNumber(usage.outputTokens)}`;
 }
 
 export function abbreviateHash(value: string, head = 8, tail = 4): string {

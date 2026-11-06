@@ -1,4 +1,4 @@
-import { Codex } from "@openai/codex-sdk";
+import { Codex, type ThreadItem } from "@openai/codex-sdk";
 import type { RunUsage } from "@hearth/core";
 import { describeCodexProfile, loadCodexProfile, type CodexProfile } from "./profile.ts";
 
@@ -53,7 +53,7 @@ export async function runCodex(options: CodexRunOptions): Promise<CodexRunResult
       options.onEvent?.({ type: "thread.started", message: "Codex 已开始工作" });
     } else if (event.type === "item.completed") {
       if (event.item.type === "agent_message") finalResponse = event.item.text;
-      options.onEvent?.({ type: "item.completed", message: describeItem(event.item.type) });
+      options.onEvent?.({ type: "item.completed", message: describeItem(event.item) });
     } else if (event.type === "turn.completed") {
       usage = {
         inputTokens: event.usage.input_tokens,
@@ -80,24 +80,43 @@ export async function probeCodex(profile = loadCodexProfile()): Promise<{ ok: tr
     const result = await runCodex({
       profile,
       workingDirectory: process.cwd(),
-      prompt: "Reply with exactly HEARTH_OK and nothing else.",
-      outputSchema: {
-        type: "object",
-        properties: { status: { type: "string", enum: ["ok"] }, answer: { type: "string" } },
-        required: ["status", "answer"],
-        additionalProperties: false
-      }
+      prompt: "Reply with exactly HEARTH_OK and nothing else. Do not use tools."
     });
-    return { ok: true, text: result.finalResponse };
+    const text = result.finalResponse.trim();
+    const reachable = text.includes("HEARTH_OK");
+    return reachable ? { ok: true, text } : { ok: false, error: `执行器返回了意外内容：${text.slice(0, 500)}` };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
 
-function describeItem(type: string): string {
-  if (type === "command_execution") return "执行了一条命令";
-  if (type === "file_change") return "修改了工作文件";
-  if (type === "reasoning") return "正在分析";
-  if (type === "web_search") return "进行了网页搜索";
+export function describeItem(item: ThreadItem): string {
+  if (item.type === "command_execution") return `执行命令：${clip(humanizeCommand(item.command), 160)}`;
+  if (item.type === "file_change") {
+    const paths = item.changes.map((change) => change.path).join("、");
+    return `${item.status === "failed" ? "文件修改失败" : "修改文件"}：${clip(paths || "未记录路径", 160)}`;
+  }
+  if (item.type === "mcp_tool_call") return `调用工具：${item.server}/${item.tool}`;
+  if (item.type === "web_search") return `网页搜索：${clip(item.query, 120)}`;
+  if (item.type === "reasoning") return item.text.trim() ? `分析：${clip(item.text, 160)}` : "正在分析";
+  if (item.type === "todo_list") return "更新了执行计划";
+  if (item.type === "error") return `执行提示：${clip(item.message, 160)}`;
   return "处理了一步工作";
+}
+
+function humanizeCommand(command: string): string {
+  const trimmed = command.trim();
+  const wrapper = /^(?:"[^"]*(?:pwsh|powershell)\.exe"|(?:pwsh|powershell)\.exe)\s+-Command\s+([\s\S]*)$/i.exec(trimmed)
+    ?? /^(?:"[^"]*cmd\.exe"|cmd\.exe)\s+(?:\/d\s+\/s\s+\/c|\/c)\s+([\s\S]*)$/i.exec(trimmed);
+  if (!wrapper?.[1]) return trimmed;
+  let inner = wrapper[1].trim();
+  if (!inner) return trimmed;
+  const quote = inner.charAt(0);
+  if ((quote.charCodeAt(0) === 34 || quote.charCodeAt(0) === 39) && inner.endsWith(quote)) inner = inner.slice(1, -1);
+  return inner.replace(/\\"/g, String.fromCharCode(34)).trim() || trimmed;
+}
+
+function clip(value: string, max: number): string {
+  const text = value.replace(/\s+/g, " ").trim();
+  return text.length > max ? `${text.slice(0, max)}…` : text;
 }
