@@ -6,6 +6,7 @@
   "dependencies": {
     "@fastify/multipart": "^9.0.4",
     "@fastify/static": "^8.2.0",
+    "@hearth/agent-runtime": "0.1.0",
     "@hearth/codex-executor": "0.1.0",
     "@hearth/core": "0.1.0",
     "@hearth/eventlog": "0.1.0",
