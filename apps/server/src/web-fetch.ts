@@ -247,7 +247,7 @@ function isChallengePage(html: string): boolean {
     || /cf-chl-|captcha|verify you are human/i.test(sample);
 }
 
-function extractMarkdown(html: string, baseUrl: string): { title: string; markdown: string } {
+export function extractMarkdown(html: string, baseUrl: string): { title: string; markdown: string } {
   const $ = cheerio.load(html);
   const title = (
     $("meta[property='og:title']").attr("content")

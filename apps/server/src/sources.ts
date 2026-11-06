@@ -20,12 +20,15 @@ import type {
 } from "@hearth/core";
 import { SOURCE_KINDS } from "@hearth/core";
 import { fetchWebSnapshot, WebInputError, type WebSnapshot } from "./web-fetch.ts";
+import { extractSourceBytes, UnsupportedSourceFormatError } from "./extractors.ts";
 import type { HearthService } from "./service.ts";
 
 const MAX_FILES = 2_000;
 const MAX_DEPTH = 12;
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
-const SUPPORTED_EXTENSIONS = new Set([".md", ".markdown", ".txt", ".csv", ".json", ".html", ".htm"]);
+const SUPPORTED_EXTENSIONS = new Set([
+  ".md", ".markdown", ".txt", ".csv", ".json", ".html", ".htm", ".pdf", ".docx", ".xlsx"
+]);
 
 export interface SourceRegistryOptions {
   contentRoot: string;
@@ -165,7 +168,7 @@ export class SourceRegistry {
     try {
       const result = source.kind === "web"
         ? await this.readWeb(source, input.url)
-        : this.readLocal(source);
+        : await this.readLocal(source);
       const current = this.updateSource(id, {
         status: "connected",
         lastError: null,
@@ -213,7 +216,7 @@ export class SourceRegistry {
     return readFileSync(item.contentPath, "utf8");
   }
 
-  private readLocal(source: SourceConnection): { changed: number } {
+  private async readLocal(source: SourceConnection): Promise<{ changed: number }> {
     if (!source.rootPath) throw new SourceRegistryError("ROOT_PATH_REQUIRED", "本地来源缺少根路径");
     const root = canonicalLocalRoot(source.rootPath);
     const entries = collectLocalEntries(root.path);
@@ -226,17 +229,17 @@ export class SourceRegistry {
         changed += item.status === "failed" ? 1 : 0;
         continue;
       }
-      const result = this.readLocalFile(source, root.path, entry);
+      const result = await this.readLocalFile(source, root.path, entry);
       if (result.changed) changed += 1;
     }
     return { changed };
   }
 
-  private readLocalFile(
+  private async readLocalFile(
     source: SourceConnection,
     root: string,
     entry: { relativePath: string; absolutePath: string }
-  ): { changed: boolean } {
+  ): Promise<{ changed: boolean }> {
     const now = this.timestamp();
     try {
       const actual = realpathSync(entry.absolutePath);
@@ -255,8 +258,9 @@ export class SourceRegistry {
       const existing = this.service.store.findSourceItem(source.id, entry.relativePath);
       if (existing?.contentHash === contentHash && existing.status === "ready") return { changed: false };
 
+      const extracted = await extractSourceBytes(bytes, actual);
       const duplicate = this.service.store.findSourceItemByHash(contentHash);
-      const contentPath = duplicate?.contentPath ?? this.storeContent(source.id, contentHash, extname(actual), bytes);
+      const contentPath = duplicate?.contentPath ?? this.storeContent(source.id, contentHash, ".md", Buffer.from(extracted.markdown, "utf8"));
       const item: SourceItem = {
         id: existing?.id ?? randomUUID(),
         sourceId: source.id,
@@ -266,9 +270,9 @@ export class SourceRegistry {
         contentPath,
         contentHash,
         bytes: bytes.byteLength,
-        title: basename(actual, extname(actual)),
+        title: extracted.title ?? basename(actual, extname(actual)),
         status: "ready",
-        coverage: textCoverage(bytes.toString("utf8")),
+        coverage: extracted.coverage,
         duplicateOf: duplicate && duplicate.id !== existing?.id ? duplicate.id : null,
         error: null,
         fetchedAt: now
@@ -446,6 +450,7 @@ function emptyCoverage(gaps: string[]): SourceCoverage {
 function toSourceError(error: unknown, at: string): SourceError {
   if (error instanceof WebInputError) return { code: error.code, message: error.message, at };
   if (error instanceof SourceRegistryError) return { code: error.code, message: error.message, at };
+  if (error instanceof UnsupportedSourceFormatError) return { code: error.code, message: error.message, at };
   return { code: "source_read_failed", message: error instanceof Error ? error.message : String(error), at };
 }
 
