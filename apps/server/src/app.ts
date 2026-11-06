@@ -15,6 +15,7 @@ import { ApprovalError, ApprovalManager, type EffectExecutor } from "./approvals
 import { executeEffect } from "./effects.ts";
 import { HearthScheduler } from "./scheduler.ts";
 import { TaskLeaseService } from "./leases.ts";
+import { SecurityError, SecurityService } from "./security.ts";
 import { HearthService, TaskInputSelectionError, type CreateTaskInput } from "./service.ts";
 import { SourceRegistry, SourceRegistryError } from "./sources.ts";
 import { OutboxError, OutboxService } from "./outbox.ts";
@@ -135,6 +136,11 @@ const syncExportSchema = z.object({
 });
 
 const syncConflictResolveSchema = z.object({ resolution: z.enum(["local", "remote"]) }).strict();
+
+const killSwitchSchema = z.object({
+  enabled: z.boolean(),
+  reason: z.string().trim().max(500).optional()
+}).strict();
 
 const proactiveSettingsSchema = z.object({
   enabled: z.boolean().optional(),
@@ -302,13 +308,17 @@ export async function buildServer(options: BuildServerOptions = {}) {
     ...(options.syncFetch ? { fetchImpl: options.syncFetch } : {}),
     ...(options.syncSecretBox ? { secretBox: options.syncSecretBox } : {})
   });
+  const security = new SecurityService(service);
   const leases = new TaskLeaseService(service);
   const approvals = new ApprovalManager(service, effectExecutor, {
-    guard: (taskId) => { leases.assertOwnedIfLeased(taskId); }
+    guard: (taskId) => {
+      security.assertActionsAllowed();
+      leases.assertOwnedIfLeased(taskId);
+    }
   });
   approvals.recoverInterruptedEffects();
   const outbox = new OutboxService(service, approvals);
-  const desktop = new DesktopService(service, options.deviceFrameRoot ?? DEVICE_FRAME_DIR);
+  const desktop = new DesktopService(service, options.deviceFrameRoot ?? DEVICE_FRAME_DIR, security);
   const scheduler = options.startScheduler
     ? new HearthScheduler({
         service,
@@ -366,9 +376,41 @@ export async function buildServer(options: BuildServerOptions = {}) {
       schedulerEnabled: Boolean(scheduler),
       queued: tasks.filter((task) => task.status === "queued").length,
       runningTasks: tasks.filter((task) => task.status === "running").length,
-      waitingApproval: tasks.filter((task) => task.status === "waiting_approval").length
+      waitingApproval: tasks.filter((task) => task.status === "waiting_approval").length,
+      killSwitch: security.state().killSwitch
     };
   };
+
+  app.get("/api/security", async (_request, reply) => {
+    reply.header("cache-control", "no-store");
+    return security.snapshot();
+  });
+
+  app.post("/api/security/kill-switch", async (request, reply) => {
+    const parsed = killSwitchSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_KILL_SWITCH", message: "全局停止参数不正确" });
+    const state = security.setKillSwitch(parsed.data.enabled, parsed.data.reason);
+    if (state.killSwitch) {
+      await scheduler?.stop();
+      desktop.freezeAll("全局停止已启用");
+      for (const task of service.store.listTasks()) {
+        if (task.status !== "waiting_approval") continue;
+        approvals.expireForTask(task.id);
+        service.updateTask(task.id, {
+          status: "recoverable",
+          currentRunId: task.currentRunId,
+          nextAction: "全局停止已启用，审批已取消",
+          error: {
+            kind: "kill_switch",
+            message: "全局停止已启用，外部动作被拒绝",
+            recoverable: true,
+            guidance: "确认安全后关闭全局停止，再重新执行任务"
+          }
+        }, task.currentRunId ?? undefined);
+      }
+    }
+    return security.snapshot();
+  });
 
   app.get("/api/system", async () => systemStatus());
 
@@ -383,6 +425,9 @@ export async function buildServer(options: BuildServerOptions = {}) {
   app.post("/api/system/start", async (_request, reply) => {
     if (!scheduler) {
       return reply.code(409).send({ error: "SCHEDULER_DISABLED", message: "执行器未启用" });
+    }
+    if (security.state().killSwitch) {
+      return reply.code(423).send({ error: "KILL_SWITCH_ACTIVE", message: "全局停止启用期间不能恢复执行器" });
     }
     scheduler.start();
     return systemStatus();
@@ -949,6 +994,14 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
   });
 
+  app.post<{ Params: { id: string } }>("/api/devices/:id/rotate-token", async (request, reply) => {
+    try {
+      return desktop.rotateDeviceToken(request.params.id);
+    } catch (error) {
+      return sendDesktopError(reply, error);
+    }
+  });
+
   app.get<{ Params: { deviceId: string; frameId: string } }>("/api/devices/:deviceId/frames/:frameId", async (request, reply) => {
     try {
       const stored = desktop.readFrame(request.params.deviceId, request.params.frameId);
@@ -1182,6 +1235,9 @@ export async function buildServer(options: BuildServerOptions = {}) {
         const status = error.code === "APPROVAL_NOT_FOUND" ? 404 : error.code === "APPROVAL_EXPIRED" ? 410 : 409;
         return reply.code(status).send({ error: error.code, message: error.message });
       }
+      if (error instanceof SecurityError) {
+        return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+      }
       return reply.code(500).send({ error: "APPROVAL_FAILED", message: error instanceof Error ? error.message : String(error) });
     }
   });
@@ -1255,7 +1311,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const hasWeb = options.serveWeb !== false && existsSync(join(WEB_DIST, "index.html"));
   if (hasWeb) await app.register(fastifyStatic, { root: WEB_DIST });
 
-  scheduler?.start();
+  if (!security.state().killSwitch) scheduler?.start();
 
   app.setNotFoundHandler((request, reply) => {
     if (hasWeb && request.method === "GET" && !request.url.startsWith("/api/")) {

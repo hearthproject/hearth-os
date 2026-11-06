@@ -12,6 +12,7 @@ import type {
 } from "@hearth/core";
 import { DEVICE_CAPABILITY_KINDS } from "@hearth/core";
 import type { HearthService } from "./service.ts";
+import { SecurityError, type SecurityService } from "./security.ts";
 
 const PAIRING_TTL_MS = 5 * 60 * 1000;
 const DEVICE_ONLINE_MS = 30_000;
@@ -97,10 +98,12 @@ export class DesktopError extends Error {
 export class DesktopService {
   private readonly service: HearthService;
   private readonly frameRoot: string;
+  private readonly security: SecurityService | undefined;
 
-  constructor(service: HearthService, frameRoot: string) {
+  constructor(service: HearthService, frameRoot: string, security?: SecurityService) {
     this.service = service;
     this.frameRoot = frameRoot;
+    this.security = security;
   }
 
   createPairingRequest(input: PairingStartInput): { request: PairingRequestView; secret: string } {
@@ -186,6 +189,7 @@ export class DesktopService {
     };
     this.service.createDevice(device);
     this.updatePairing({ ...current, status: "approved", deviceId: device.id, updatedAt: now });
+    this.security?.record("device.paired", device.id, device.name, "设备配对已批准，能力仍需逐项授权");
     return this.deviceView(device);
   }
 
@@ -230,6 +234,7 @@ export class DesktopService {
       if (kind === "observe") this.terminateSessionForPolicy(session, "观察能力已撤销");
       else if (kind === "desktop.control") this.pauseSessionForPolicy(session, "桌面控制能力已撤销");
     }
+    this.security?.record("device.capability.revoked", device.id, device.name, `${capabilityLabel(kind)} 已撤销`);
     return this.deviceView(updated);
   }
 
@@ -247,7 +252,31 @@ export class DesktopService {
       capabilities: device.capabilities.map((capability) => ({ ...capability, status: "revoked", revokedAt: now })),
       updatedAt: now
     });
+    this.security?.record("device.revoked", device.id, device.name, "设备令牌与全部能力立即失效，活动会话已终止");
     return this.deviceView(updated);
+  }
+
+  rotateDeviceToken(deviceId: string): { device: DeviceView; token: string } {
+    const device = this.requireActiveDevice(deviceId);
+    const token = randomBytes(32).toString("base64url");
+    const now = new Date().toISOString();
+    for (const session of this.service.store.listDesktopSessions(deviceId)) {
+      if (session.status !== "terminated") this.terminateSessionForPolicy(session, "设备令牌已轮换");
+    }
+    const updated = this.service.updateDevice({ ...device, tokenHash: hashToken(token), status: "offline", lastSeenAt: null, updatedAt: now });
+    this.security?.record("device.token.rotated", device.id, device.name, "旧设备令牌立即失效，活动会话已终止，需要助手使用新令牌重新连接");
+    return { device: this.deviceView(updated), token };
+  }
+
+  freezeAll(reason: string): number {
+    let count = 0;
+    for (const session of this.service.store.listDesktopSessions()) {
+      if (session.status === "terminated") continue;
+      this.terminateSessionForPolicy(session, reason);
+      count += 1;
+    }
+    this.security?.record("desktop.frozen", null, null, `终止 ${count} 个活动桌面会话：${reason}`);
+    return count;
   }
 
   authenticateDevice(token: string): DeviceRecord {
@@ -267,6 +296,7 @@ export class DesktopService {
   }
 
   createSession(deviceId: string, targetApp?: string): DesktopSessionView {
+    this.assertActionsAllowed();
     const device = this.requireActiveDevice(deviceId);
     this.assertOnline(device);
     this.assertCapability(device, "observe");
@@ -284,6 +314,7 @@ export class DesktopService {
   }
 
   requestObservation(sessionId: string, targetApp?: string): DesktopSessionView {
+    this.assertActionsAllowed();
     const session = this.requireSession(sessionId);
     if (session.status === "terminated") throw new DesktopError("SESSION_TERMINATED", "桌面会话已经终止", 409);
     const device = this.requireActiveDevice(session.deviceId);
@@ -350,6 +381,7 @@ export class DesktopService {
   }
 
   enqueueAction(sessionId: string, input: DesktopActionInput): DesktopCommandView {
+    this.assertActionsAllowed();
     const session = this.requireSession(sessionId);
     if (session.status !== "active") throw new DesktopError("SESSION_NOT_ACTIVE", "桌面会话不在自动控制状态", 409);
     const device = this.requireActiveDevice(session.deviceId);
@@ -571,6 +603,15 @@ export class DesktopService {
 
   private terminateSessionForPolicy(session: DesktopSessionRecord, reason: string): void {
     this.terminateSessionRecord(session, reason);
+  }
+
+  private assertActionsAllowed(): void {
+    try {
+      this.security?.assertActionsAllowed();
+    } catch (error) {
+      if (error instanceof SecurityError) throw new DesktopError(error.code, error.message, error.statusCode);
+      throw error;
+    }
   }
 
   private pauseSessionForPolicy(session: DesktopSessionRecord, reason: string): void {

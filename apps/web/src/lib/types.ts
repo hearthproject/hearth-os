@@ -140,6 +140,7 @@ export interface SystemStatus {
   queued: number;
   runningTasks: number;
   waitingApproval: number;
+  killSwitch: boolean;
 }
 
 export interface HealthResponse {
@@ -182,6 +183,26 @@ export interface SyncPullResult {
   skipped: number;
   conflicts: number;
   peer: SyncPeerView;
+}
+
+export interface SecurityState {
+  killSwitch: boolean;
+  reason: string | null;
+  updatedAt: string | null;
+}
+
+export interface SecurityAudit {
+  id: string;
+  action: string;
+  subjectId: string | null;
+  subjectLabel: string | null;
+  detail: string;
+  at: string;
+}
+
+export interface SecuritySnapshot {
+  state: SecurityState;
+  audits: SecurityAudit[];
 }
 
 export type PreviewableArtifact = Pick<ArtifactRecord, "id" | "taskId" | "relativePath" | "mimeType" | "bytes">;

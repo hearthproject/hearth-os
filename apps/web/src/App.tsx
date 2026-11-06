@@ -10,6 +10,7 @@ import { InboxPage } from "./pages/InboxPage.tsx";
 import { MemoryPage } from "./pages/MemoryPage.tsx";
 import { MethodsPage } from "./pages/MethodsPage.tsx";
 import { SettingsPage } from "./pages/SettingsPage.tsx";
+import { SecurityPage } from "./pages/SecurityPage.tsx";
 import { SyncPage } from "./pages/SyncPage.tsx";
 import { SourcesPage } from "./pages/SourcesPage.tsx";
 import { OutboxPage } from "./pages/OutboxPage.tsx";
@@ -33,6 +34,7 @@ export default function App() {
           <Route path="devices" element={<DevicesPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="sync" element={<SyncPage />} />
+          <Route path="security" element={<SecurityPage />} />
           <Route path="tasks/:id" element={<TaskDetailPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
@@ -63,6 +65,7 @@ function EventBridge() {
         void queryClient.invalidateQueries({ queryKey: ["memory"] });
         void queryClient.invalidateQueries({ queryKey: ["methods"] });
         void queryClient.invalidateQueries({ queryKey: ["sync"] });
+        void queryClient.invalidateQueries({ queryKey: ["security"] });
         void queryClient.invalidateQueries({ queryKey: ["desktop"] });
         if (taskId) {
           void queryClient.invalidateQueries({ queryKey: ["task", taskId] });

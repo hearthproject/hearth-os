@@ -27,6 +27,7 @@ import type {
   ProactiveSuggestion,
   RunListItem,
   RunManifest,
+  SecuritySnapshot,
   SourceConnection,
   SourceItem,
   SourceKind,
@@ -76,6 +77,11 @@ export const api = {
   system: () => request<SystemStatus>("/api/system"),
   stopSystem: () => request<SystemStatus>("/api/system/stop", { method: "POST" }),
   startSystem: () => request<SystemStatus>("/api/system/start", { method: "POST" }),
+  security: () => request<SecuritySnapshot>("/api/security"),
+  setKillSwitch: (enabled: boolean, reason?: string) => request<SecuritySnapshot>("/api/security/kill-switch", {
+    method: "POST",
+    body: JSON.stringify(reason ? { enabled, reason } : { enabled })
+  }),
   memory: () => request<MemorySnapshot>("/api/memory"),
   createMemory: (input: CreateMemoryRequest) => request<MemorySnapshot["memories"][number]>("/api/memory", {
     method: "POST",
@@ -241,6 +247,7 @@ export const api = {
   revokeDeviceCapability: (deviceId: string, kind: DeviceCapabilityKind) =>
     request<DeviceView>(`/api/devices/${encodeURIComponent(deviceId)}/capabilities/${encodeURIComponent(kind)}/revoke`, { method: "POST" }),
   revokeDevice: (deviceId: string) => request<DeviceView>(`/api/devices/${encodeURIComponent(deviceId)}/revoke`, { method: "POST" }),
+  rotateDeviceToken: (deviceId: string) => request<{ device: DeviceView; token: string }>(`/api/devices/${encodeURIComponent(deviceId)}/rotate-token`, { method: "POST" }),
   taskEvents: (id: string, params: { after?: number; before?: number; limit?: number; type?: string } = {}) =>
     request<EventWindow>(`/api/tasks/${encodeURIComponent(id)}/events${query(params)}`),
   manifest: (taskId: string, artifactId: string) =>
@@ -278,6 +285,7 @@ export function subscribeToEvents(onEvent: () => void): () => void {
     "memory.recalled", "memory.conflict.created", "memory.conflict.updated", "memory.forgotten",
     "method.candidate.created", "method.candidate.updated", "method.evaluation.recorded", "method.trial.recorded",
     "sync.peer.created", "sync.peer.updated", "sync.conflict.created", "sync.conflict.updated",
+    "security.kill-switch.updated", "security.audit",
     "outbox.created", "outbox.updated",
     "device.paired", "device.updated", "device.pairing-requested", "device.pairing-updated",
     "desktop.session.created", "desktop.session.updated", "desktop.frame.updated",

@@ -24,6 +24,7 @@
   --ember-on-ink: #1b1815;
   --risk: #8a3417;
   --risk-tint: rgba(138, 52, 23, 0.1);
+  --ok: #2f6f46;
   --focus: 0 0 0 2px var(--cream), 0 0 0 4px var(--ember);
 
   --font-ui: "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
@@ -1673,6 +1674,101 @@ button.list-row:hover {
   gap: var(--gap-3);
 }
 
+.security-page {
+  gap: var(--gap-3);
+}
+
+.security-kill-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-3);
+  flex-wrap: wrap;
+  padding: var(--gap-5);
+  border-left: 3px solid var(--ok);
+}
+
+.security-kill-panel.is-active {
+  border-left-color: var(--risk);
+  background: color-mix(in srgb, var(--risk-tint) 45%, var(--surface));
+}
+
+.security-kill-copy {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gap-3);
+  min-width: 0;
+}
+
+.security-kill-copy > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.security-kill-copy p {
+  color: var(--ink-secondary);
+  font-size: var(--fs-12);
+}
+
+.security-kill-title {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  flex-wrap: wrap;
+}
+
+.security-state-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  border-radius: 50%;
+  background: var(--surface-sunk);
+  color: var(--ok);
+}
+
+.security-state-icon.danger {
+  color: var(--risk);
+}
+
+.security-active-tag {
+  color: var(--risk);
+  border-color: var(--risk);
+}
+
+.security-kill-warning {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: var(--gap-2) 0 0;
+  border-top: 1px solid var(--line);
+  color: var(--risk);
+  font-size: var(--fs-12);
+}
+
+.security-boundaries {
+  padding: var(--gap-3) 10px;
+}
+
+.security-subject-id {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}
+
+.security-footnote {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+}
+
 .sync-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2080,6 +2176,35 @@ button.list-row:hover {
   background: var(--surface);
   color: var(--ink-secondary);
   font-size: var(--fs-12);
+}
+
+.device-token-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-2);
+  padding: 10px;
+  border-left: 3px solid var(--ember);
+}
+
+.device-token-panel .panel-head,
+.device-token-panel .page-meta {
+  padding: 0;
+}
+
+.device-token-panel code {
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface-sunk);
+  overflow-wrap: anywhere;
+  font-size: var(--fs-12);
+}
+
+.device-head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  flex-wrap: wrap;
 }
 
 .pairing-list {

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Brain, Cable, CalendarDays, FileText, Inbox, Lightbulb, Mail, Monitor, Plus, RefreshCw, Settings2, Sparkles } from "lucide-react";
+import { Brain, Cable, CalendarDays, FileText, Inbox, Lightbulb, Mail, Monitor, Plus, RefreshCw, Settings2, ShieldCheck, Sparkles } from "lucide-react";
 import { NavLink, Outlet, useNavigate, useOutletContext } from "react-router-dom";
 import { useState } from "react";
 import { api } from "../lib/api.ts";
@@ -79,6 +79,9 @@ export function AppShell() {
           </NavLink>
           <NavLink to="/sync" className={({ isActive }) => (isActive ? "nav-item active" : "nav-item")}>
             <RefreshCw size={16} /> <span className="nav-label">同步</span>
+          </NavLink>
+          <NavLink to="/security" className={({ isActive }) => (isActive ? "nav-item active" : "nav-item")}>
+            <ShieldCheck size={16} /> <span className="nav-label">安全</span>
           </NavLink>
           <NavLink to="/settings" className={({ isActive }) => (isActive ? "nav-item active" : "nav-item")}>
             <Settings2 size={16} /> <span className="nav-label">设置</span>

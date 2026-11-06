@@ -40,7 +40,7 @@ export class SyncError extends Error {
   }
 }
 
-const BLOCKED_SYNC_PREFIXES = ["approval.", "source.", "outbox.", "device.", "desktop.", "sync."];
+const BLOCKED_SYNC_PREFIXES = ["approval.", "source.", "outbox.", "device.", "desktop.", "security.", "sync."];
 
 export class SyncService {
   private readonly service: HearthService;

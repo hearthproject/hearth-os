@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HearthStore } from "@hearth/eventlog";
 import { DesktopService } from "./desktop.ts";
+import { SecurityService } from "./security.ts";
 import { HearthService } from "./service.ts";
 
 const DEVICE_TOKEN = "d".repeat(43);
@@ -13,13 +14,15 @@ describe("desktop device service", () => {
   let store: HearthStore;
   let service: HearthService;
   let desktop: DesktopService;
+  let security: SecurityService;
   let frameRoot: string;
 
   beforeEach(() => {
     store = new HearthStore(":memory:");
     service = new HearthService(store);
+    security = new SecurityService(service);
     frameRoot = mkdtempSync(join(tmpdir(), "hearth-frames-"));
-    desktop = new DesktopService(service, frameRoot);
+    desktop = new DesktopService(service, frameRoot, security);
   });
 
   afterEach(() => {
@@ -174,5 +177,51 @@ describe("desktop device service", () => {
     desktop.revokeDevice(device.id);
     expect(() => desktop.authenticateDevice(DEVICE_TOKEN)).toThrowError(expect.objectContaining({ code: "DEVICE_UNAUTHORIZED" }));
     expect(desktop.sessionView(created.session.id).session.status).toBe("terminated");
+    expect(security.snapshot().audits[0]).toMatchObject({ action: "device.revoked", subjectId: device.id });
+  });
+
+  it("requires a fresh token and a new pairing after revocation", () => {
+    const { device } = pairDevice();
+    desktop.revokeDevice(device.id);
+    expect(() => desktop.authenticateDevice(DEVICE_TOKEN)).toThrowError(expect.objectContaining({ code: "DEVICE_UNAUTHORIZED" }));
+
+    const replacementToken = "e".repeat(43);
+    const started = desktop.createPairingRequest({
+      name: "Replacement",
+      version: "1.0.1",
+      deviceToken: replacementToken,
+      apps: ["notepad"],
+      capabilities: ["observe"]
+    });
+    const replacement = desktop.approvePairing(started.request.id);
+    expect(replacement.id).not.toBe(device.id);
+    expect(() => desktop.authenticateDevice(DEVICE_TOKEN)).toThrowError(expect.objectContaining({ code: "DEVICE_UNAUTHORIZED" }));
+    expect(desktop.authenticateDevice(replacementToken).id).toBe(replacement.id);
+  });
+
+  it("rotates a device token and terminates sessions using the old token", () => {
+    const { device } = pairDevice();
+    desktop.approveCapability(device.id, "observe", ["notepad"]);
+    desktop.authenticateDevice(DEVICE_TOKEN);
+    const created = desktop.createSession(device.id);
+    const rotated = desktop.rotateDeviceToken(device.id);
+
+    expect(rotated.token).not.toBe(DEVICE_TOKEN);
+    expect(() => desktop.authenticateDevice(DEVICE_TOKEN)).toThrowError(expect.objectContaining({ code: "DEVICE_UNAUTHORIZED" }));
+    expect(desktop.authenticateDevice(rotated.token).id).toBe(device.id);
+    expect(desktop.sessionView(created.session.id).session.status).toBe("terminated");
+    expect(security.snapshot().audits[0]).toMatchObject({ action: "device.token.rotated" });
+  });
+
+  it("blocks new desktop actions and freezes active sessions during a kill switch", () => {
+    const { device } = pairDevice();
+    desktop.approveCapability(device.id, "observe", ["notepad"]);
+    desktop.authenticateDevice(DEVICE_TOKEN);
+    const created = desktop.createSession(device.id);
+    security.setKillSwitch(true, "丢失设备演练");
+
+    expect(desktop.freezeAll("全局停止已启用")).toBe(1);
+    expect(desktop.sessionView(created.session.id).session.status).toBe("terminated");
+    expect(() => desktop.createSession(device.id)).toThrowError(expect.objectContaining({ code: "KILL_SWITCH_ACTIVE" }));
   });
 });

@@ -4,6 +4,7 @@ import {
   CircleOff,
   Eye,
   Hand,
+  KeyRound,
   Keyboard,
   LockKeyhole,
   Monitor,
@@ -62,6 +63,7 @@ export function DevicesPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [issuedToken, setIssuedToken] = useState<{ name: string; token: string } | null>(null);
   const desktopQuery = useQuery({ queryKey: ["desktop"], queryFn: api.desktop, refetchInterval: 3_000 });
   const devices = desktopQuery.data?.devices ?? [];
   const pairings = desktopQuery.data?.pairings ?? [];
@@ -85,6 +87,22 @@ export function DevicesPage() {
     }
   }
 
+  async function rotateDevice(device: DeviceView): Promise<void> {
+    setBusy(`rotate-${device.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await api.rotateDeviceToken(device.id);
+      setIssuedToken({ name: result.device.name, token: result.token });
+      await queryClient.invalidateQueries({ queryKey: ["desktop"] });
+      setNotice("设备令牌已轮换，旧令牌已失效。新令牌只显示这一次。");
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
     <div className="page devices-page">
       <div className="page-head">
@@ -99,6 +117,13 @@ export function DevicesPage() {
 
       {error && <p className="form-error" role="alert"><X size={14} /> {error}</p>}
       {notice && <p className="device-notice"><Check size={14} /> {notice}</p>}
+      {issuedToken && (
+        <section className="panel device-token-panel">
+          <div className="panel-head"><h2>设备新令牌</h2><span className="panel-meta">{issuedToken.name}</span></div>
+          <code className="select-all">{issuedToken.token}</code>
+          <p className="page-meta">关闭后不能再次查看。请把新令牌交给桌面助手并重新连接；旧令牌和旧会话已经失效。</p>
+        </section>
+      )}
 
       {desktopQuery.isLoading ? (
         <p className="section-empty">正在读取桌面设备…</p>
@@ -145,6 +170,7 @@ export function DevicesPage() {
                 pro={pro}
                 busy={busy}
                 perform={perform}
+                onRotate={() => void rotateDevice(device)}
               />
             );
           })}
@@ -195,13 +221,15 @@ function DevicePanel({
   session,
   pro,
   busy,
-  perform
+  perform,
+  onRotate
 }: {
   device: DeviceView;
   session: DesktopSessionView | null;
   pro: boolean;
   busy: string | null;
   perform: (key: string, work: () => Promise<unknown>, message: string) => Promise<boolean>;
+  onRotate: () => void;
 }) {
   const observeCapability = device.capabilities.find((capability) => capability.kind === "observe" && capability.status === "approved");
   const observeApps = observeCapability?.apps ?? [];
@@ -223,17 +251,28 @@ function DevicePanel({
           <DeviceOnlineTag online={device.online} revoked={device.status === "revoked"} />
         </div>
         {device.status !== "revoked" && (
-          <button
-            className="ghost-button danger"
-            disabled={busy === `revoke-${device.id}`}
-            onClick={() => {
-              if (window.confirm(`撤销 ${device.name}？设备令牌会立即失效，正在进行的桌面会话会终止。`)) {
-                void perform(`revoke-${device.id}`, () => api.revokeDevice(device.id), "设备已撤销，令牌立即失效。");
-              }
-            }}
-          >
-            <CircleOff size={14} /> 撤销设备
-          </button>
+          <div className="device-head-actions">
+            <button
+              className="ghost-button"
+              disabled={busy === `rotate-${device.id}`}
+              onClick={() => {
+                if (window.confirm(`轮换 ${device.name} 的令牌？旧令牌会立即失效，当前桌面会话会终止。`)) onRotate();
+              }}
+            >
+              <KeyRound size={14} /> 轮换令牌
+            </button>
+            <button
+              className="ghost-button danger"
+              disabled={busy === `revoke-${device.id}`}
+              onClick={() => {
+                if (window.confirm(`撤销 ${device.name}？设备令牌会立即失效，正在进行的桌面会话会终止。`)) {
+                  void perform(`revoke-${device.id}`, () => api.revokeDevice(device.id), "设备已撤销，令牌立即失效。");
+                }
+              }}
+            >
+              <CircleOff size={14} /> 撤销设备
+            </button>
+          </div>
         )}
       </div>
 

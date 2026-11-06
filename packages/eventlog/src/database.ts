@@ -1099,7 +1099,9 @@ export class HearthStore {
       case "desktop.command.created":
       case "desktop.command.updated": return upsertDesktopCommand(this.db, event.payload as DesktopCommandRecord);
       case "task.progress":
-      case "approval.expired": return;
+      case "approval.expired":
+      case "security.kill-switch.updated":
+      case "security.audit": return;
       default: throw new Error(`Unknown event type: ${event.type}`);
     }
   }
@@ -1315,7 +1317,7 @@ function upsertDevice(db: DatabaseSync, device: DeviceRecord): void {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        name=excluded.name, platform=excluded.platform, version=excluded.version,
-       status=excluded.status, capabilities_json=excluded.capabilities_json,
+       status=excluded.status, token_hash=excluded.token_hash, capabilities_json=excluded.capabilities_json,
        last_seen_at=excluded.last_seen_at, updated_at=excluded.updated_at`
   ).run(
     device.id, device.pairingRequestId, device.name, device.platform, device.version,
