@@ -7,6 +7,10 @@ import type {
   HealthResponse,
   RunListItem,
   RunManifest,
+  SourceConnection,
+  SourceItem,
+  SourceKind,
+  SourceReadResult,
   EffectListItem,
   StatsSnapshot,
   SystemStatus,
@@ -49,6 +53,27 @@ export const api = {
   stopSystem: () => request<SystemStatus>("/api/system/stop", { method: "POST" }),
   startSystem: () => request<SystemStatus>("/api/system/start", { method: "POST" }),
   templates: () => request<{ templates: TaskTemplate[] }>("/api/templates"),
+  sources: () => request<{ sources: SourceConnection[] }>("/api/sources"),
+  sourceItems: (id: string) => request<{ items: SourceItem[] }>(`/api/sources/${encodeURIComponent(id)}/items`),
+  createSource: (input: {
+    kind: SourceKind;
+    displayName?: string;
+    rootPath?: string;
+    allowedHosts?: string[];
+    account?: string;
+  }) => request<SourceConnection>("/api/sources", {
+    method: "POST",
+    body: JSON.stringify(input)
+  }),
+  readSource: (id: string, url?: string) => request<SourceReadResult>(`/api/sources/${encodeURIComponent(id)}/read`, {
+    method: "POST",
+    body: JSON.stringify(url ? { url } : {})
+  }),
+  disconnectSource: (id: string) => request<SourceConnection>(`/api/sources/${encodeURIComponent(id)}/disconnect`, { method: "POST" }),
+  reconnectSource: (id: string) => request<SourceConnection>(`/api/sources/${encodeURIComponent(id)}/reconnect`, { method: "POST" }),
+  clearSource: (id: string) => request<SourceConnection>(`/api/sources/${encodeURIComponent(id)}/clear`, { method: "POST" }),
+  sourceContentUrl: (sourceId: string, itemId: string) =>
+    `/api/sources/${encodeURIComponent(sourceId)}/items/${encodeURIComponent(itemId)}/content`,
   tasks: () => request<{ tasks: TaskListItem[] }>("/api/tasks"),
   artifacts: () => request<{ artifacts: ArtifactListItem[] }>("/api/artifacts"),
   task: (id: string) => request<TaskView>(`/api/tasks/${encodeURIComponent(id)}`),
@@ -89,7 +114,8 @@ export function subscribeToEvents(onEvent: () => void): () => void {
   source.onmessage = onEvent;
   const eventNames = [
     "task.created", "task.updated", "task.progress", "run.created", "run.updated",
-    "approval.created", "approval.updated", "artifact.published", "effect.created", "effect.updated"
+    "approval.created", "approval.updated", "artifact.published", "effect.created", "effect.updated",
+    "source.created", "source.updated", "source.item.updated", "source.cleared"
   ];
   for (const name of eventNames) source.addEventListener(name, onEvent);
   return () => source.close();

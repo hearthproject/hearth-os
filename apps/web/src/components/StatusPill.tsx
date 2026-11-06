@@ -4,12 +4,19 @@ import {
   CircleSlash,
   Diamond,
   Loader,
+  Plug,
   RotateCcw,
   SquareDashed,
   TriangleAlert
 } from "lucide-react";
-import type { EffectRecord, RunRecord, TaskStatus } from "../lib/types.ts";
-import { EFFECT_STATUS_LABELS, RUN_STATUS_LABELS, TASK_STATUS_LABELS } from "../lib/labels.ts";
+import type { EffectRecord, RunRecord, SourceConnection, SourceItem, TaskStatus } from "../lib/types.ts";
+import {
+  EFFECT_STATUS_LABELS,
+  RUN_STATUS_LABELS,
+  SOURCE_ITEM_STATUS_LABELS,
+  SOURCE_STATUS_LABELS,
+  TASK_STATUS_LABELS
+} from "../lib/labels.ts";
 
 type Tone = "neutral" | "active" | "risk" | "done";
 
@@ -64,6 +71,17 @@ export function RunStatusTag({ status }: { status: RunRecord["status"] }) {
 export function EffectStatusTag({ status }: { status: EffectRecord["status"] }) {
   const icon = status === "uncertain" ? TriangleAlert : status === "succeeded" ? Check : status === "failed" ? CircleSlash : CircleDashed;
   return <StateLabel tone={EFFECT_TONE[status]} icon={icon} double={status === "uncertain"} label={EFFECT_STATUS_LABELS[status]} />;
+}
+
+export function SourceStatusTag({ status }: { status: SourceConnection["status"] }) {
+  const tone: Tone = status === "connected" ? "done" : status === "reading" || status === "needs_user" ? "active" : status === "error" ? "risk" : "neutral";
+  const icon = status === "reading" ? Loader : status === "needs_user" ? Diamond : status === "error" ? TriangleAlert : status === "disconnected" ? CircleSlash : Plug;
+  return <StateLabel tone={tone} icon={icon} spin={status === "reading"} label={SOURCE_STATUS_LABELS[status]} />;
+}
+
+export function SourceItemStatusTag({ status }: { status: SourceItem["status"] }) {
+  const tone: Tone = status === "ready" ? "done" : status === "failed" ? "risk" : "neutral";
+  return <StateLabel tone={tone} icon={status === "failed" ? CircleSlash : Check} label={SOURCE_ITEM_STATUS_LABELS[status]} />;
 }
 
 function StateLabel({

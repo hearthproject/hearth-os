@@ -1515,8 +1515,110 @@ button.list-row:hover {
 
 .settings-page,
 .today-page,
-.detail-page {
+.detail-page,
+.sources-page {
   gap: var(--gap-3);
+}
+
+.source-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--gap-2) var(--gap-3);
+}
+
+.source-field-wide {
+  grid-column: 1 / -1;
+}
+
+.source-form select,
+.source-read-row input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--fs-13);
+}
+
+.source-form-note,
+.source-item-error {
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+}
+
+.source-item-error {
+  display: block;
+  color: var(--risk);
+}
+
+.source-form-actions,
+.source-actions,
+.source-read-row {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  flex-wrap: wrap;
+}
+
+.source-form-actions {
+  justify-content: space-between;
+}
+
+.source-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+}
+
+.source-name:hover {
+  text-decoration: underline;
+}
+
+.source-scope {
+  max-width: 300px;
+}
+
+.source-detail-row > td {
+  padding: 0;
+  background: var(--surface-sunk);
+}
+
+.source-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-2);
+  padding: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.source-detail .kv-grid {
+  padding: 0;
+}
+
+.source-read-row {
+  align-items: flex-end;
+}
+
+.source-read-row label {
+  display: flex;
+  flex: 1 1 320px;
+  flex-direction: column;
+  gap: var(--gap-1);
+  color: var(--ink-secondary);
+  font-size: var(--fs-12);
+}
+
+.source-item-table {
+  border: 1px solid var(--line);
+  background: var(--surface);
 }
 
 body.modal-open {
@@ -1580,6 +1682,14 @@ body.modal-open {
 
   .page-head {
     align-items: flex-start;
+  }
+
+  .source-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .source-scope {
+    max-width: 160px;
   }
 
   .task-table .col-next {

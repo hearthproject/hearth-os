@@ -13,6 +13,10 @@ import type {
   RunRecord,
   RunStatus,
   RunUsage,
+  SourceConnection,
+  SourceItem,
+  SourceKind,
+  SourceStatus,
   StatsSnapshot,
   TaskListItem,
   TaskRecord,
@@ -35,6 +39,10 @@ export type {
   RunRecord,
   RunStatus,
   RunUsage,
+  SourceConnection,
+  SourceItem,
+  SourceKind,
+  SourceStatus,
   StatsSnapshot,
   TaskListItem,
   TaskRecord,
@@ -87,6 +95,12 @@ export interface ApprovalDecisionResult {
   approval: ApprovalRecord;
   task: TaskRecord;
   effect: EffectRecord | null;
+}
+
+export interface SourceReadResult {
+  source: SourceConnection;
+  items: SourceItem[];
+  changed: number;
 }
 
 export interface RunManifest {

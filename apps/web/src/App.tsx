@@ -6,6 +6,7 @@ import { subscribeToEvents } from "./lib/api.ts";
 import { ArtifactsPage } from "./pages/ArtifactsPage.tsx";
 import { AttentionPage } from "./pages/AttentionPage.tsx";
 import { SettingsPage } from "./pages/SettingsPage.tsx";
+import { SourcesPage } from "./pages/SourcesPage.tsx";
 import { TaskDetailPage } from "./pages/TaskDetailPage.tsx";
 import { TodayPage } from "./pages/TodayPage.tsx";
 
@@ -18,6 +19,7 @@ export default function App() {
           <Route index element={<TodayPage />} />
           <Route path="attention" element={<AttentionPage />} />
           <Route path="artifacts" element={<ArtifactsPage />} />
+          <Route path="sources" element={<SourcesPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="tasks/:id" element={<TaskDetailPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
@@ -41,6 +43,8 @@ function EventBridge() {
         void queryClient.invalidateQueries({ queryKey: ["artifacts"] });
         void queryClient.invalidateQueries({ queryKey: ["stats"] });
         void queryClient.invalidateQueries({ queryKey: ["system"] });
+        void queryClient.invalidateQueries({ queryKey: ["sources"] });
+        void queryClient.invalidateQueries({ queryKey: ["sourceItems"] });
         if (taskId) {
           void queryClient.invalidateQueries({ queryKey: ["task", taskId] });
           void queryClient.invalidateQueries({ queryKey: ["taskEvents", taskId] });

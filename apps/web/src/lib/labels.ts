@@ -3,6 +3,9 @@ import type {
   EffectRecord,
   EventEnvelope,
   RunStatus,
+  SourceConnection,
+  SourceItem,
+  SourceKind,
   TaskRecord,
   TaskStatus
 } from "./types.ts";
@@ -55,6 +58,28 @@ export const AUTH_SOURCE_LABELS: Record<string, string> = {
   unknown: "未知"
 };
 
+export const SOURCE_KIND_LABELS: Record<SourceKind, string> = {
+  file: "本地文件",
+  knowledge: "知识库",
+  web: "公开网页",
+  email: "邮件",
+  calendar: "日历"
+};
+
+export const SOURCE_STATUS_LABELS: Record<SourceConnection["status"], string> = {
+  connected: "已连接",
+  reading: "正在读取",
+  needs_user: "需要你处理",
+  error: "读取失败",
+  disconnected: "已断开"
+};
+
+export const SOURCE_ITEM_STATUS_LABELS: Record<SourceItem["status"], string> = {
+  ready: "已读取",
+  failed: "读取失败",
+  cleared: "已清除"
+};
+
 export const CATEGORY_LABELS: Record<string, string> = {
   document: "文档",
   web: "网页",
@@ -74,7 +99,11 @@ export const EVENT_LABELS: Record<string, string> = {
   "approval.updated": "确认结果已记录",
   "artifact.published": "产物已保存",
   "effect.created": "外部动作已开始",
-  "effect.updated": "外部动作已更新"
+  "effect.updated": "外部动作已更新",
+  "source.created": "来源已连接",
+  "source.updated": "来源状态更新",
+  "source.item.updated": "来源内容已读取",
+  "source.cleared": "来源内容已清除"
 };
 
 const STATUS_EXPLANATIONS: Record<TaskStatus, string> = {
