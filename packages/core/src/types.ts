@@ -11,6 +11,12 @@ export const TASK_STATUSES = [
 
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
+export const EXECUTOR_IDS = ["native", "codex"] as const;
+export type ExecutorId = (typeof EXECUTOR_IDS)[number];
+
+export const TASK_KINDS = ["delivery", "workspace", "general"] as const;
+export type TaskKind = (typeof TASK_KINDS)[number];
+
 export const RUN_STATUSES = [
   "queued",
   "running",
@@ -38,6 +44,20 @@ export interface TaskError {
   guidance: string;
 }
 
+export interface TaskPermissions {
+  readRoots: string[];
+  writeRoots: string[];
+  networkHosts: string[];
+  tools: string[];
+}
+
+export interface RunBudget {
+  maxTurns: number;
+  maxToolCalls: number;
+  maxTokens: number;
+  maxDurationMs: number;
+}
+
 export interface TaskRecord {
   id: string;
   templateId: string | null;
@@ -55,6 +75,10 @@ export interface TaskRecord {
   error: TaskError | null;
   resultSummary?: string | null;
   conversationId?: string | null;
+  executorId?: ExecutorId;
+  taskKind?: TaskKind;
+  expectedOutputs?: string[];
+  permissions?: TaskPermissions;
 }
 
 export interface ChatAttachment {
@@ -123,6 +147,40 @@ export interface RunRecord {
   failure: TaskError | null;
   usage: RunUsage | null;
   leaseEpoch: number | null;
+  createdAt: string;
+  executorId?: ExecutorId;
+  checkpointSeq?: number;
+  budget?: RunBudget;
+}
+
+export const TASK_PROPOSAL_STATUSES = ["pending", "confirmed", "rejected", "expired"] as const;
+export type TaskProposalStatus = (typeof TASK_PROPOSAL_STATUSES)[number];
+
+export interface TaskProposalRecord {
+  id: string;
+  conversationId: string;
+  title: string;
+  goal: string;
+  executorId: ExecutorId;
+  taskKind: TaskKind;
+  expectedOutputs: string[];
+  permissions: TaskPermissions;
+  reason: string;
+  status: TaskProposalStatus;
+  expiresAt: string;
+  createdAt: string;
+  decidedAt: string | null;
+}
+
+export interface RunCheckpointRecord {
+  id: string;
+  runId: string;
+  taskId: string;
+  seq: number;
+  kind: string;
+  path: string;
+  sha256: string;
+  usage: RunUsage | null;
   createdAt: string;
 }
 
