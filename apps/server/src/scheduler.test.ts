@@ -10,6 +10,7 @@ import { HearthStore } from "@hearth/eventlog";
 import { HearthScheduler } from "./scheduler.ts";
 import { HearthService } from "./service.ts";
 import { MemoryService } from "./memory.ts";
+import { TaskLeaseService } from "./leases.ts";
 
 const FAKE_RESULT = {
   threadId: "fake-thread",
@@ -75,6 +76,37 @@ describe("Hearth scheduler", () => {
     const failed = await waitForStatus(service, task.id, "recoverable");
     expect(failed.error?.kind).toBe("input_unavailable");
     expect(store?.listArtifacts(task.id)).toHaveLength(0);
+  });
+
+  it("discards a runner result after another instance takes over the lease", async () => {
+    const service = setup();
+    let releaseRunner = (): void => {};
+    let markEntered = (): void => {};
+    const runnerStarted = new Promise<void>((resolve) => { markEntered = resolve; });
+    const runner: CodexRunner = async (options) => {
+      writeFileSync(join(options.workingDirectory, "out", "meeting-notes.md"), "# 不应被接受的旧结果\n");
+      markEntered();
+      await new Promise<void>((resolve) => { releaseRunner = resolve; });
+      return FAKE_RESULT;
+    };
+    let now = new Date("2026-01-01T00:00:00.000Z");
+    const ownerA = new TaskLeaseService(service, { ownerInstanceId: "instance-a", ttlMs: 200, clock: () => now });
+    const ownerB = new TaskLeaseService(service, { ownerInstanceId: "instance-b", ttlMs: 1_000, clock: () => now });
+    scheduler = makeScheduler(service, runner, { leases: ownerA, leaseHeartbeatMs: 60_000 });
+    scheduler.start();
+
+    const task = service.createTask({ templateId: "T01" });
+    await runnerStarted;
+    now = new Date("2026-01-01T00:00:01.000Z");
+    expect(ownerB.acquire(task.id).epoch).toBe(2);
+    releaseRunner();
+    await delay(250);
+
+    const run = store?.listRuns(task.id)[0];
+    expect(run?.status).toBe("failed");
+    expect(run?.failure?.kind).toBe("lease_fenced");
+    expect(store?.listArtifacts(task.id)).toHaveLength(0);
+    expect(service.requireTask(task.id).status).toBe("running");
   });
 
   it("replaces stale files in a managed output directory on a later run", async () => {
@@ -282,6 +314,8 @@ describe("Hearth scheduler", () => {
     extra: {
       githubRun?: (command: string, args: string[]) => Promise<{ stdout: string; stderr: string }>;
       approvals?: ApprovalManager;
+      leases?: TaskLeaseService;
+      leaseHeartbeatMs?: number;
     } = {}
   ): HearthScheduler {
     return new HearthScheduler({

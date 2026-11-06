@@ -14,6 +14,7 @@ import { DB_PATH, DEVICE_FRAME_DIR, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, W
 import { ApprovalError, ApprovalManager, type EffectExecutor } from "./approvals.ts";
 import { executeEffect } from "./effects.ts";
 import { HearthScheduler } from "./scheduler.ts";
+import { TaskLeaseService } from "./leases.ts";
 import { HearthService, TaskInputSelectionError, type CreateTaskInput } from "./service.ts";
 import { SourceRegistry, SourceRegistryError } from "./sources.ts";
 import { OutboxError, OutboxService } from "./outbox.ts";
@@ -301,7 +302,10 @@ export async function buildServer(options: BuildServerOptions = {}) {
     ...(options.syncFetch ? { fetchImpl: options.syncFetch } : {}),
     ...(options.syncSecretBox ? { secretBox: options.syncSecretBox } : {})
   });
-  const approvals = new ApprovalManager(service, effectExecutor);
+  const leases = new TaskLeaseService(service);
+  const approvals = new ApprovalManager(service, effectExecutor, {
+    guard: (taskId) => { leases.assertOwnedIfLeased(taskId); }
+  });
   approvals.recoverInterruptedEffects();
   const outbox = new OutboxService(service, approvals);
   const desktop = new DesktopService(service, options.deviceFrameRoot ?? DEVICE_FRAME_DIR);
@@ -309,6 +313,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     ? new HearthScheduler({
         service,
         approvals,
+        leases,
         ...(options.sourceContentRoot ? { sourceContentRoot: options.sourceContentRoot } : {})
       })
     : null;

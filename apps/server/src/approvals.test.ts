@@ -50,6 +50,22 @@ describe("approval manager", () => {
     expect(store.listEffects(approval.taskId)).toHaveLength(0);
   });
 
+  it("refuses to execute an approved effect after the task lease is lost", async () => {
+    let calls = 0;
+    const { approval } = waitingTask(service);
+    const manager = new ApprovalManager(service, async () => {
+      calls += 1;
+      return {};
+    }, {
+      guard: () => { throw new Error("lease fenced"); }
+    });
+
+    await expect(manager.decide(approval.id, "approve", approval.parameterHash)).rejects.toThrow("lease fenced");
+    expect(calls).toBe(0);
+    expect(store.listEffects(approval.taskId)).toHaveLength(0);
+    expect(store.getApproval(approval.id)?.status).toBe("pending");
+  });
+
   it("records a rejection without executing the effect", async () => {
     let calls = 0;
     const manager = new ApprovalManager(service, async () => {

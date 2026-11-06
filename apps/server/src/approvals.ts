@@ -22,6 +22,10 @@ export interface ApprovalResult {
 
 export type EffectExecutor = (effect: EffectRecord) => Promise<Record<string, unknown>>;
 
+export interface ApprovalManagerOptions {
+  guard?: (taskId: string) => void;
+}
+
 export class ApprovalError extends Error {
   readonly code: string;
 
@@ -44,11 +48,13 @@ export const DEFAULT_APPROVAL_TTL_MS = 24 * 60 * 60 * 1000;
 export class ApprovalManager {
   private readonly service: HearthService;
   private readonly executor: EffectExecutor;
+  private readonly guard: ((taskId: string) => void) | undefined;
   private readonly inFlight = new Set<string>();
 
-  constructor(service: HearthService, executor: EffectExecutor) {
+  constructor(service: HearthService, executor: EffectExecutor, options: ApprovalManagerOptions = {}) {
     this.service = service;
     this.executor = executor;
+    this.guard = options.guard;
   }
 
   request(input: ApprovalRequest): ApprovalRecord {
@@ -146,6 +152,7 @@ export class ApprovalManager {
 
     const existing = this.service.store.listEffects(task.id).find((effect) => effect.approvalId === approval.id);
     if (existing) return { approval, task, effect: existing };
+    this.guard?.(task.id);
     if (this.inFlight.has(approval.id)) throw new ApprovalError("EFFECT_IN_PROGRESS", "这个外部动作正在执行，请稍后刷新");
     this.inFlight.add(approval.id);
 

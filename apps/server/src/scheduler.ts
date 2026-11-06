@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { RunRecord, TaskRecord } from "@hearth/core";
+import type { RunRecord, TaskLease, TaskRecord } from "@hearth/core";
 import { runCodex, type CodexRunOptions, type CodexRunResult } from "@hearth/codex-executor";
 import { getTemplate } from "@hearth/templates";
 import type { ApprovalRequest, ApprovalManager } from "./approvals.ts";
@@ -10,6 +10,7 @@ import { GIT_CACHE_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WORKSPACE_DIR } from "./c
 import { extractProposedComment, inspectRepository, readPrPreview, validatePullRequestPreview } from "./github.ts";
 import type { CommandRunner } from "./github.ts";
 import { MemoryService } from "./memory.ts";
+import { DEFAULT_LEASE_HEARTBEAT_MS, LeaseError, TaskLeaseService } from "./leases.ts";
 import { prepareTaskRuntime, type RuntimePreparation } from "./runtime.ts";
 import type { HearthService } from "./service.ts";
 import { buildDeliveryRepairPrompt, buildTaskPrompt, prepareWorkspace, UnsupportedInputError } from "./workspace.ts";
@@ -23,6 +24,8 @@ export interface SchedulerOptions {
   artifactBase?: string;
   codexRunner?: CodexRunner;
   approvals?: ApprovalManager;
+  leases?: TaskLeaseService;
+  leaseHeartbeatMs?: number;
   githubRun?: CommandRunner | undefined;
   githubCacheRoot?: string | undefined;
   sourceContentRoot?: string | undefined;
@@ -41,6 +44,9 @@ export class HearthScheduler {
   private readonly sourceContentRoot: string;
   private readonly runtimePreparer: typeof prepareTaskRuntime;
   private readonly memory: MemoryService;
+  private readonly leases: TaskLeaseService;
+  private readonly leaseHeartbeatMs: number;
+  private readonly leaseHeartbeats = new Map<string, { epoch: number; timer: ReturnType<typeof setInterval> }>();
   private readonly controllers = new Map<string, AbortController>();
   private readonly cancelled = new Set<string>();
   private unsubscribe: (() => void) | null = null;
@@ -61,6 +67,8 @@ export class HearthScheduler {
     this.sourceContentRoot = options.sourceContentRoot ?? SOURCE_CONTENT_DIR;
     this.runtimePreparer = options.runtimePreparer ?? prepareTaskRuntime;
     this.memory = new MemoryService(this.service);
+    this.leases = options.leases ?? new TaskLeaseService(this.service);
+    this.leaseHeartbeatMs = Math.max(50, options.leaseHeartbeatMs ?? DEFAULT_LEASE_HEARTBEAT_MS);
   }
 
   get running(): boolean {
@@ -72,8 +80,12 @@ export class HearthScheduler {
     this.stopped = false;
     this.stopping = false;
     this.recoverInterruptedTasks();
+    this.resumeWaitingApprovalLeases();
     this.unsubscribe = this.service.bus.subscribe((event) => {
       if (event.type === "task.created" || event.type === "task.updated") this.wake();
+      if (event.type === "task.updated" && event.taskId && isTerminalStatus(this.service.store.getTask(event.taskId)?.status)) {
+        this.releaseLease(event.taskId);
+      }
     });
     this.loopPromise = this.loop();
   }
@@ -83,6 +95,11 @@ export class HearthScheduler {
     this.stopped = true;
     this.stopping = true;
     for (const controller of this.controllers.values()) controller.abort();
+    for (const [taskId, heartbeat] of this.leaseHeartbeats) {
+      clearInterval(heartbeat.timer);
+      this.leases.release(taskId, heartbeat.epoch);
+    }
+    this.leaseHeartbeats.clear();
     this.wake();
     await this.loopPromise;
     this.unsubscribe?.();
@@ -105,6 +122,7 @@ export class HearthScheduler {
       nextAction: null,
       error: null
     }, task.currentRunId ?? undefined);
+    this.releaseLease(taskId);
     return this.service.requireTask(taskId);
   }
 
@@ -153,6 +171,19 @@ export class HearthScheduler {
     }
   }
 
+  private resumeWaitingApprovalLeases(): void {
+    for (const task of this.service.store.listTasks()) {
+      if (task.status !== "waiting_approval") continue;
+      if (!this.service.store.listApprovals(task.id).some((approval) => approval.status === "pending")) continue;
+      try {
+        const lease = this.leases.acquire(task.id);
+        this.startLeaseHeartbeat(task.id, lease.epoch, () => this.wake());
+      } catch {
+        // Another active owner keeps the fence; approval will be refused by the guard.
+      }
+    }
+  }
+
   private async loop(): Promise<void> {
     while (!this.stopped) {
       const task = this.nextQueuedTask();
@@ -165,7 +196,7 @@ export class HearthScheduler {
   }
 
   private nextQueuedTask(): TaskRecord | null {
-    const queued = this.service.store.listTasks().filter((task) => task.status === "queued");
+    const queued = this.service.store.listTasks().filter((task) => task.status === "queued" && !this.leases.isHeldByOther(task.id));
     queued.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
     return queued[0] ?? null;
   }
@@ -185,6 +216,14 @@ export class HearthScheduler {
 
   private async runTask(startingTask: TaskRecord): Promise<void> {
     const taskId = startingTask.id;
+    let lease: TaskLease;
+    try {
+      lease = this.leases.acquire(taskId);
+    } catch (error) {
+      if (error instanceof LeaseError && error.code === "LEASE_HELD") return;
+      throw error;
+    }
+    const leaseEpoch = lease.epoch;
     const now = new Date().toISOString();
     const attempt = this.service.store.listRuns(taskId).length + 1;
     const runId = randomUUID();
@@ -200,10 +239,16 @@ export class HearthScheduler {
       endedAt: null,
       failure: null,
       usage: null,
-      leaseEpoch: null,
+      leaseEpoch,
       createdAt: now
     };
     const controller = new AbortController();
+    let leaseLost = false;
+
+    this.startLeaseHeartbeat(taskId, leaseEpoch, () => {
+      leaseLost = true;
+      controller.abort();
+    });
 
     this.service.createRun(run);
     this.service.updateTask(taskId, {
@@ -215,6 +260,7 @@ export class HearthScheduler {
     this.controllers.set(taskId, controller);
 
     try {
+
       const task = this.service.requireTask(taskId);
       const template = task.templateId ? getTemplate(task.templateId) : undefined;
       const expectedOutputs = template?.expectedOutputs ?? ["report.md"];
@@ -227,6 +273,7 @@ export class HearthScheduler {
         getSourceItem: (itemId) => this.service.store.getSourceItem(itemId),
         ...(this.githubRun ? { githubRun: this.githubRun } : {})
       });
+      this.assertLease(taskId, leaseEpoch, leaseLost);
       let runtime: RuntimePreparation | null = null;
       if (prepared.repository && template?.github?.runtime) {
         runtime = await this.runtimePreparer({
@@ -251,6 +298,7 @@ export class HearthScheduler {
         signal: controller.signal,
         onEvent: (event) => this.publishProgress(taskId, runId, event.type, event.message)
       });
+      this.assertLease(taskId, leaseEpoch, leaseLost);
 
       for (let repairAttempt = 1; repairAttempt <= 2; repairAttempt += 1) {
         const issues = await this.deliveryIssues(task, prepared, expectedOutputs);
@@ -269,9 +317,12 @@ export class HearthScheduler {
           signal: controller.signal,
           onEvent: (event) => this.publishProgress(taskId, runId, event.type, event.message)
         });
+        this.assertLease(taskId, leaseEpoch, leaseLost);
       }
       const remainingIssues = await this.deliveryIssues(task, prepared, expectedOutputs);
       if (remainingIssues.length > 0) throw new Error(remainingIssues.join("\n"));
+
+      this.assertLease(taskId, leaseEpoch, leaseLost);
 
       const artifacts = publishArtifacts({
         task,
@@ -300,6 +351,7 @@ export class HearthScheduler {
       if (template && template.approvalKind !== "none") {
         if (!this.approvals) throw new Error("审批管理器未启动，无法安全执行外部动作");
         const request = await this.buildApproval(task, template, prepared);
+        this.assertLease(taskId, leaseEpoch, leaseLost);
         this.service.updateTask(taskId, {
           status: "waiting_approval",
           currentRunId: runId,
@@ -322,11 +374,41 @@ export class HearthScheduler {
         // Experience capture is best effort and never changes task success.
       }
     } catch (error) {
-      await this.failRun(taskId, runId, error, controller.signal.aborted);
+      await this.failRun(taskId, runId, error, controller.signal.aborted, leaseEpoch);
     } finally {
       this.controllers.delete(taskId);
       this.cancelled.delete(taskId);
+      if (this.service.store.getTask(taskId)?.status !== "waiting_approval") this.releaseLease(taskId);
     }
+  }
+
+  private startLeaseHeartbeat(taskId: string, epoch: number, onLost: () => void): void {
+    const existing = this.leaseHeartbeats.get(taskId);
+    if (existing) clearInterval(existing.timer);
+    const timer = setInterval(() => {
+      try {
+        this.leases.heartbeat(taskId, epoch);
+      } catch {
+        onLost();
+        this.releaseLease(taskId);
+        this.wake();
+      }
+    }, this.leaseHeartbeatMs);
+    timer.unref?.();
+    this.leaseHeartbeats.set(taskId, { epoch, timer });
+  }
+
+  private assertLease(taskId: string, epoch: number, leaseLost: boolean): void {
+    if (leaseLost) throw new LeaseError("LEASE_FENCED", "任务租约已失去，执行结果已拒绝", 409);
+    this.leases.assertHeld(taskId, epoch);
+  }
+
+  private releaseLease(taskId: string): void {
+    const heartbeat = this.leaseHeartbeats.get(taskId);
+    if (!heartbeat) return;
+    clearInterval(heartbeat.timer);
+    this.leaseHeartbeats.delete(taskId);
+    this.leases.release(taskId, heartbeat.epoch);
   }
 
   private async buildApproval(
@@ -418,10 +500,25 @@ export class HearthScheduler {
     return issues;
   }
 
-  private async failRun(taskId: string, runId: string, error: unknown, aborted: boolean): Promise<void> {
+  private async failRun(taskId: string, runId: string, error: unknown, aborted: boolean, leaseEpoch: number): Promise<void> {
     const endedAt = new Date().toISOString();
     const task = this.service.store.getTask(taskId);
     if (!task) return;
+    try {
+      this.leases.assertHeld(taskId, leaseEpoch);
+    } catch {
+      this.service.updateRun(runId, taskId, {
+        status: "failed",
+        endedAt,
+        failure: {
+          kind: "lease_fenced",
+          message: "任务已被其他实例接管，这次执行的结果已丢弃",
+          recoverable: false,
+          guidance: "以当前任务所有者记录的状态为准"
+        }
+      });
+      return;
+    }
     const userCancelled = this.cancelled.has(taskId) || task.status === "cancelled";
     const message = error instanceof Error ? error.message : String(error);
 
@@ -464,4 +561,8 @@ export class HearthScheduler {
     });
     this.service.bus.publish(event);
   }
+}
+
+function isTerminalStatus(status: TaskRecord["status"] | undefined): boolean {
+  return status === "completed" || status === "failed" || status === "cancelled" || status === "recoverable";
 }
