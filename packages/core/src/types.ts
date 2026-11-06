@@ -11,14 +11,17 @@ export const TASK_STATUSES = [
 
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
-export type RunStatus =
-  | "queued"
-  | "running"
-  | "waiting_input"
-  | "waiting_approval"
-  | "completed"
-  | "failed"
-  | "cancelled";
+export const RUN_STATUSES = [
+  "queued",
+  "running",
+  "waiting_input",
+  "waiting_approval",
+  "completed",
+  "failed",
+  "cancelled"
+] as const;
+
+export type RunStatus = (typeof RUN_STATUSES)[number];
 
 export interface TaskInput {
   kind: "file" | "url" | "github" | "text";
@@ -73,7 +76,9 @@ export interface RunRecord {
   createdAt: string;
 }
 
-export type ApprovalStatus = "pending" | "approved" | "rejected" | "expired";
+export const APPROVAL_STATUSES = ["pending", "approved", "rejected", "expired"] as const;
+
+export type ApprovalStatus = (typeof APPROVAL_STATUSES)[number];
 
 export interface ApprovalRecord {
   id: string;
@@ -91,7 +96,9 @@ export interface ApprovalRecord {
   createdAt: string;
 }
 
-export type EffectStatus = "pending" | "executing" | "succeeded" | "failed" | "uncertain";
+export const EFFECT_STATUSES = ["pending", "executing", "succeeded", "failed", "uncertain"] as const;
+
+export type EffectStatus = (typeof EFFECT_STATUSES)[number];
 
 export interface EffectRecord {
   id: string;

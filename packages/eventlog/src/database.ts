@@ -4,12 +4,18 @@ import { dirname } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import type {
   ApprovalRecord,
+  ApprovalStatus,
   ArtifactRecord,
   EffectRecord,
+  EffectStatus,
   EventEnvelope,
   RunRecord,
-  TaskRecord
+  RunStatus,
+  RunUsage,
+  TaskRecord,
+  TaskStatus
 } from "@hearth/core";
+import { APPROVAL_STATUSES, EFFECT_STATUSES, RUN_STATUSES, TASK_STATUSES } from "@hearth/core";
 
 export type NewEvent = {
   type: string;
@@ -18,6 +24,19 @@ export type NewEvent = {
   payload: unknown;
   createdAt?: string;
 };
+
+export interface PageOptions {
+  limit: number;
+  offset: number;
+  taskId?: string;
+  status?: string;
+}
+
+export interface RunAggregate {
+  runs: number;
+  lastDurationMs: number | null;
+  lastUsage: RunUsage | null;
+}
 
 type DbRow = Record<string, SQLInputValue>;
 
@@ -62,6 +81,10 @@ CREATE INDEX IF NOT EXISTS events_task_idx ON events(task_id, seq);
 CREATE INDEX IF NOT EXISTS runs_task_idx ON runs(task_id, created_at);
 CREATE INDEX IF NOT EXISTS approvals_task_idx ON approvals(task_id, status);
 CREATE INDEX IF NOT EXISTS artifacts_task_idx ON artifacts(task_id, created_at);
+CREATE INDEX IF NOT EXISTS runs_created_idx ON runs(created_at);
+CREATE INDEX IF NOT EXISTS runs_status_idx ON runs(status);
+CREATE INDEX IF NOT EXISTS approvals_status_idx ON approvals(status, created_at);
+CREATE INDEX IF NOT EXISTS effects_status_idx ON effects(status, created_at);
 `;
 
 export class HearthStore {
@@ -162,6 +185,166 @@ export class HearthStore {
     return (this.db.prepare("SELECT * FROM artifacts ORDER BY created_at DESC").all() as DbRow[]).map(rowToArtifact);
   }
 
+  listRunsPage(opts: PageOptions): { runs: RunRecord[]; total: number } {
+    const { items, total } = this.page("runs", rowToRun, opts);
+    return { runs: items, total };
+  }
+
+  listApprovalsPage(opts: PageOptions): { approvals: ApprovalRecord[]; total: number } {
+    const { items, total } = this.page("approvals", rowToApproval, opts);
+    return { approvals: items, total };
+  }
+
+  listEffectsPage(opts: PageOptions): { effects: EffectRecord[]; total: number } {
+    const { items, total } = this.page("effects", rowToEffect, opts);
+    return { effects: items, total };
+  }
+
+  listEventsWindow(opts: {
+    limit: number;
+    afterSeq?: number | undefined;
+    beforeSeq?: number | undefined;
+    taskId?: string | undefined;
+    type?: string | undefined;
+  }): EventEnvelope[] {
+    const where: string[] = [];
+    const params: SQLInputValue[] = [];
+    if (opts.afterSeq !== undefined) {
+      where.push("seq > ?");
+      params.push(opts.afterSeq);
+    }
+    if (opts.beforeSeq !== undefined) {
+      where.push("seq < ?");
+      params.push(opts.beforeSeq);
+    }
+    if (opts.taskId !== undefined) {
+      where.push("task_id = ?");
+      params.push(opts.taskId);
+    }
+    if (opts.type !== undefined) {
+      where.push("type = ?");
+      params.push(opts.type);
+    }
+    const clause = where.length > 0 ? ` WHERE ${where.join(" AND ")}` : "";
+    // An `after` cursor tails the log forward; every other window is the newest
+    // matching slice, read backwards and flipped so callers always render ascending seq.
+    const forward = opts.afterSeq !== undefined && opts.beforeSeq === undefined;
+    const rows = this.db
+      .prepare(`SELECT * FROM events${clause} ORDER BY seq ${forward ? "ASC" : "DESC"} LIMIT ?`)
+      .all(...params, opts.limit) as DbRow[];
+    const events = rows.map(rowToEvent);
+    return forward ? events : events.reverse();
+  }
+
+  countEvents(taskId?: string, type?: string): number {
+    const where: string[] = [];
+    const params: SQLInputValue[] = [];
+    if (taskId !== undefined) {
+      where.push("task_id = ?");
+      params.push(taskId);
+    }
+    if (type !== undefined) {
+      where.push("type = ?");
+      params.push(type);
+    }
+    const clause = where.length > 0 ? ` WHERE ${where.join(" AND ")}` : "";
+    const row = this.db.prepare(`SELECT COUNT(*) AS total FROM events${clause}`).get(...params) as DbRow;
+    return Number(row.total);
+  }
+
+  latestEventSeq(): number {
+    const row = this.db.prepare("SELECT MAX(seq) AS latest FROM events").get() as DbRow;
+    return Number(row.latest ?? 0);
+  }
+
+  countTasksByStatus(): Record<TaskStatus, number> {
+    return this.countByStatus("tasks", TASK_STATUSES);
+  }
+
+  countRunsByStatus(): Record<RunStatus, number> {
+    return this.countByStatus("runs", RUN_STATUSES);
+  }
+
+  countApprovalsByStatus(): Record<ApprovalStatus, number> {
+    return this.countByStatus("approvals", APPROVAL_STATUSES);
+  }
+
+  countEffectsByStatus(): Record<EffectStatus, number> {
+    return this.countByStatus("effects", EFFECT_STATUSES);
+  }
+
+  usageTotals(): RunUsage | null {
+    const rows = this.db.prepare("SELECT usage_json FROM runs WHERE usage_json IS NOT NULL").all() as DbRow[];
+    if (rows.length === 0) return null;
+    const totals: RunUsage = {
+      inputTokens: 0,
+      cachedInputTokens: 0,
+      cacheWriteInputTokens: 0,
+      outputTokens: 0,
+      reasoningOutputTokens: 0
+    };
+    for (const row of rows) {
+      const usage = JSON.parse(String(row.usage_json)) as Partial<RunUsage>;
+      for (const key of Object.keys(totals) as (keyof RunUsage)[]) {
+        totals[key] += Number(usage[key] ?? 0);
+      }
+    }
+    return totals;
+  }
+
+  runDurationTotals(): { ms: number; counted: number; uncounted: number } {
+    const rows = this.db.prepare("SELECT started_at, ended_at FROM runs").all() as DbRow[];
+    let ms = 0;
+    let counted = 0;
+    let uncounted = 0;
+    for (const row of rows) {
+      const duration = durationMs(row.started_at, row.ended_at);
+      if (duration === null) uncounted += 1;
+      else {
+        ms += duration;
+        counted += 1;
+      }
+    }
+    return { ms, counted, uncounted };
+  }
+
+  artifactTotals(): { count: number; bytes: number } {
+    const row = this.db.prepare("SELECT COUNT(*) AS total, COALESCE(SUM(bytes), 0) AS bytes FROM artifacts").get() as DbRow;
+    return { count: Number(row.total), bytes: Number(row.bytes) };
+  }
+
+  runAggregatesByTask(): Map<string, RunAggregate> {
+    const rows = this.db.prepare("SELECT * FROM runs ORDER BY created_at ASC").all() as DbRow[];
+    const aggregates = new Map<string, RunAggregate>();
+    for (const row of rows) {
+      const run = rowToRun(row);
+      const current = aggregates.get(run.taskId) ?? { runs: 0, lastDurationMs: null, lastUsage: null };
+      aggregates.set(run.taskId, {
+        runs: current.runs + 1,
+        lastDurationMs: durationMs(run.startedAt, run.endedAt),
+        lastUsage: run.usage
+      });
+    }
+    return aggregates;
+  }
+
+  artifactCountsByTask(): Map<string, number> {
+    const rows = this.db.prepare("SELECT task_id, COUNT(*) AS total FROM artifacts GROUP BY task_id").all() as DbRow[];
+    return new Map(rows.map((row) => [String(row.task_id), Number(row.total)]));
+  }
+
+  effectAggregatesByTask(): Map<string, { total: number; uncertain: number }> {
+    const rows = this.db
+      .prepare("SELECT task_id, COUNT(*) AS total, SUM(CASE WHEN status = 'uncertain' THEN 1 ELSE 0 END) AS uncertain FROM effects GROUP BY task_id")
+      .all() as DbRow[];
+    return new Map(rows.map((row) => [String(row.task_id), { total: Number(row.total), uncertain: Number(row.uncertain ?? 0) }]));
+  }
+
+  pendingApprovalByTask(): Map<string, string> {
+    const rows = this.db.prepare("SELECT task_id, id FROM approvals WHERE status = 'pending' ORDER BY created_at ASC").all() as DbRow[];
+    return new Map(rows.map((row) => [String(row.task_id), String(row.id)]));
+  }
+
   rebuildProjections(): void {
     this.db.exec("BEGIN IMMEDIATE");
     try {
@@ -172,6 +355,38 @@ export class HearthStore {
       this.db.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  private page<T>(
+    table: "runs" | "approvals" | "effects",
+    map: (row: DbRow) => T,
+    opts: PageOptions
+  ): { items: T[]; total: number } {
+    const where: string[] = [];
+    const filters: SQLInputValue[] = [];
+    if (opts.taskId !== undefined) {
+      where.push("task_id = ?");
+      filters.push(opts.taskId);
+    }
+    if (opts.status !== undefined) {
+      where.push("status = ?");
+      filters.push(opts.status);
+    }
+    const clause = where.length > 0 ? ` WHERE ${where.join(" AND ")}` : "";
+    const total = Number(
+      (this.db.prepare(`SELECT COUNT(*) AS total FROM ${table}${clause}`).get(...filters) as DbRow).total
+    );
+    const rows = this.db
+      .prepare(`SELECT * FROM ${table}${clause} ORDER BY created_at DESC LIMIT ? OFFSET ?`)
+      .all(...filters, opts.limit, opts.offset) as DbRow[];
+    return { items: rows.map(map), total };
+  }
+
+  private countByStatus<K extends string>(table: "tasks" | "runs" | "approvals" | "effects", keys: readonly K[]): Record<K, number> {
+    const counts = zeroCounts(keys);
+    const rows = this.db.prepare(`SELECT status, COUNT(*) AS total FROM ${table} GROUP BY status`).all() as DbRow[];
+    for (const row of rows) bump(counts, String(row.status), Number(row.total));
+    return counts;
   }
 
   private applyEvent(event: EventEnvelope): void {
@@ -371,4 +586,20 @@ function rowToArtifact(row: DbRow): ArtifactRecord {
     mimeType: String(row.mime_type), sha256: String(row.sha256), bytes: Number(row.bytes),
     createdAt: String(row.created_at)
   };
+}
+
+function durationMs(startedAt: unknown, endedAt: unknown): number | null {
+  if (typeof startedAt !== "string" || typeof endedAt !== "string") return null;
+  const ms = Date.parse(endedAt) - Date.parse(startedAt);
+  return Number.isFinite(ms) && ms >= 0 ? ms : null;
+}
+
+function zeroCounts<K extends string>(keys: readonly K[]): Record<K, number> {
+  const counts = {} as Record<K, number>;
+  for (const key of keys) counts[key] = 0;
+  return counts;
+}
+
+function bump<K extends string>(counts: Record<K, number>, key: string, by: number): void {
+  if (Object.hasOwn(counts, key)) counts[key as K] += by;
 }

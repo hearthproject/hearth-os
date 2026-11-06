@@ -1,8 +1,21 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import type { ApprovalRecord, ArtifactRecord, EffectRecord, RunRecord, TaskRecord, TaskStatus } from "@hearth/core";
-import { assertTransition, TASK_STATUS_LABELS } from "@hearth/core";
-import { HearthStore } from "@hearth/eventlog";
+import type {
+  ApprovalListItem,
+  ApprovalRecord,
+  ArtifactRecord,
+  EffectListItem,
+  EffectRecord,
+  EventWindow,
+  RunListItem,
+  RunRecord,
+  StatsSnapshot,
+  TaskListItem,
+  TaskRecord,
+  TaskStatus
+} from "@hearth/core";
+import { assertTransition, TASK_STATUS_LABELS, TASK_STATUSES } from "@hearth/core";
+import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate, TEMPLATES } from "@hearth/templates";
 import { resolveRepoPath } from "./config.ts";
 import { EventBus } from "./events.ts";
@@ -21,6 +34,15 @@ export interface TaskView {
   artifacts: ReturnType<HearthStore["listArtifacts"]>;
   effects: ReturnType<HearthStore["listEffects"]>;
   events: ReturnType<HearthStore["listEvents"]>;
+  eventTotal: number;
+}
+
+export interface EventWindowQuery {
+  limit: number;
+  afterSeq?: number | undefined;
+  beforeSeq?: number | undefined;
+  taskId?: string | undefined;
+  type?: string | undefined;
 }
 
 export interface ExportSnapshot {
@@ -34,6 +56,8 @@ export interface ExportSnapshot {
   effects: EffectRecord[];
   events: ReturnType<HearthStore["listEvents"]>;
 }
+
+const VIEW_EVENT_TAIL = 200;
 
 export class HearthService {
   readonly store: HearthStore;
@@ -97,14 +121,113 @@ export class HearthService {
   view(taskId: string): TaskView | null {
     const task = this.store.getTask(taskId);
     if (!task) return null;
+    const events = this.store.listEvents(0, taskId);
     return {
       task,
       runs: this.store.listRuns(taskId),
       approvals: this.store.listApprovals(taskId),
       artifacts: this.store.listArtifacts(taskId),
       effects: this.store.listEffects(taskId),
-      events: this.store.listEvents(0, taskId).slice(-200)
+      events: events.slice(-VIEW_EVENT_TAIL),
+      eventTotal: events.length
     };
+  }
+
+  listTaskItems(): TaskListItem[] {
+    const runAggregates = this.store.runAggregatesByTask();
+    const artifactCounts = this.store.artifactCountsByTask();
+    const effectAggregates = this.store.effectAggregatesByTask();
+    const pendingApprovals = this.store.pendingApprovalByTask();
+    return this.store.listTasks().map((task) => {
+      const runs = runAggregates.get(task.id);
+      return {
+        ...task,
+        summary: {
+          runs: runs?.runs ?? 0,
+          lastDurationMs: runs?.lastDurationMs ?? null,
+          lastUsage: runs?.lastUsage ?? null,
+          artifacts: artifactCounts.get(task.id) ?? 0,
+          effects: effectAggregates.get(task.id) ?? { total: 0, uncertain: 0 },
+          approvalId: pendingApprovals.get(task.id) ?? null
+        }
+      };
+    });
+  }
+
+  listRunItems(opts: PageOptions): { runs: RunListItem[]; total: number } {
+    const titles = this.taskTitles();
+    const page = this.store.listRunsPage(opts);
+    return {
+      runs: page.runs.map((run) => ({ ...run, taskTitle: titles.get(run.taskId) ?? "未命名任务" })),
+      total: page.total
+    };
+  }
+
+  listApprovalItems(opts: PageOptions & { brief?: boolean }): { approvals: ApprovalListItem[]; total: number } {
+    const titles = this.taskTitles();
+    const page = this.store.listApprovalsPage(opts);
+    return {
+      approvals: page.approvals.map((approval) => {
+        const item = { ...approval, taskTitle: titles.get(approval.taskId) ?? "未命名任务" };
+        if (opts.brief) {
+          item.target = omitKey(approval.target, "body");
+          item.preview = omitKey(approval.preview, "body");
+        }
+        return item;
+      }),
+      total: page.total
+    };
+  }
+
+  listEffectItems(opts: PageOptions): { effects: EffectListItem[]; total: number } {
+    const titles = this.taskTitles();
+    const page = this.store.listEffectsPage(opts);
+    return {
+      effects: page.effects.map((effect) => ({ ...effect, taskTitle: titles.get(effect.taskId) ?? "未命名任务" })),
+      total: page.total
+    };
+  }
+
+  eventWindow(query: EventWindowQuery): EventWindow {
+    const events = this.store.listEventsWindow(query);
+    const first = events.at(0);
+    const last = events.at(-1);
+    const full = events.length === query.limit;
+    const forward = query.afterSeq !== undefined && query.beforeSeq === undefined;
+    return {
+      events,
+      total: this.store.countEvents(query.taskId, query.type),
+      nextAfter: forward && full && last ? last.seq : null,
+      nextBefore: !forward && full && first ? first.seq : null
+    };
+  }
+
+  stats(): StatsSnapshot {
+    const taskCounts = this.store.countTasksByStatus();
+    const runCounts = this.store.countRunsByStatus();
+    const durations = this.store.runDurationTotals();
+    return {
+      tasks: {
+        total: TASK_STATUSES.reduce((sum, status) => sum + taskCounts[status], 0),
+        byStatus: taskCounts
+      },
+      runs: {
+        total: Object.values(runCounts).reduce((sum, count) => sum + count, 0),
+        byStatus: runCounts,
+        durationMs: durations.ms,
+        durationCounted: durations.counted,
+        durationUncounted: durations.uncounted,
+        usage: this.store.usageTotals()
+      },
+      approvals: { byStatus: this.store.countApprovalsByStatus() },
+      effects: { byStatus: this.store.countEffectsByStatus() },
+      artifacts: this.store.artifactTotals(),
+      events: { total: this.store.countEvents(), latestSeq: this.store.latestEventSeq() }
+    };
+  }
+
+  taskTitles(): Map<string, string> {
+    return new Map(this.store.listTasks().map((task) => [task.id, task.title]));
   }
 
   updateTask(taskId: string, patch: Partial<Pick<TaskRecord, "status" | "title" | "goal" | "currentRunId" | "nextAction" | "error">>, runId?: string): TaskRecord {
@@ -223,4 +346,8 @@ export class HearthService {
   statusLabel(status: TaskStatus): string {
     return TASK_STATUS_LABELS[status];
   }
+}
+
+function omitKey(record: Record<string, unknown>, key: string): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(record).filter(([entryKey]) => entryKey !== key));
 }

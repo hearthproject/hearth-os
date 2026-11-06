@@ -1,6 +1,49 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { ApprovalRecord, ArtifactRecord, EffectRecord, RunRecord } from "@hearth/core";
 import { HearthStore } from "@hearth/eventlog";
 import { buildServer } from "./app.ts";
+
+const HASH = "a".repeat(64);
+
+function seedAuditFixtures(store: HearthStore, taskId: string): void {
+  const base = { taskId, createdAt: "2026-11-05T01:00:00.000Z" };
+  const runs: RunRecord[] = [
+    {
+      id: "run-1", taskId, attempt: 1, status: "failed", threadId: null,
+      workspace: ".hearth/workspaces/x", startedAt: "2026-11-05T01:00:00.000Z",
+      endedAt: "2026-11-05T01:00:30.000Z", failure: { kind: "execution_failed", message: "boom", recoverable: true, guidance: "重试" },
+      usage: null, createdAt: "2026-11-05T01:00:00.000Z"
+    },
+    {
+      id: "run-2", taskId, attempt: 2, status: "completed", threadId: "thread-2",
+      workspace: ".hearth/workspaces/x", startedAt: "2026-11-05T02:00:00.000Z",
+      endedAt: "2026-11-05T02:01:40.000Z", failure: null,
+      usage: { inputTokens: 1000, cachedInputTokens: 500, cacheWriteInputTokens: 0, outputTokens: 200, reasoningOutputTokens: 20 },
+      createdAt: "2026-11-05T02:00:00.000Z"
+    }
+  ];
+  const approvals: ApprovalRecord[] = [{
+    ...base, runId: "run-2", id: "approval-1", kind: "github.comment", summary: "发布评论",
+    target: { repo: "o/r", body: "private body" }, preview: { pull: 15, body: "private body" },
+    parameterHash: HASH, status: "pending", expiresAt: "2026-11-07T02:00:00.000Z", decidedAt: null, effectId: null
+  }];
+  const effects: EffectRecord[] = [{
+    ...base, id: "effect-1", approvalId: "approval-1", kind: "github.comment",
+    idempotencyKey: `approval:approval-1:${HASH}`, status: "uncertain",
+    target: { repo: "o/r", pull: 15 }, receipt: { pull: 15 }, error: "结果不确定",
+    createdAt: "2026-11-05T02:02:00.000Z", updatedAt: "2026-11-05T02:02:05.000Z"
+  }];
+  const artifacts: ArtifactRecord[] = [{
+    ...base, id: "artifact-1", runId: "run-2", relativePath: "run-manifest.json",
+    absolutePath: "D:/secret/path/run-manifest.json", mimeType: "application/json; charset=utf-8",
+    sha256: HASH, bytes: 1024, createdAt: "2026-11-05T02:03:00.000Z"
+  }];
+
+  for (const run of runs) store.appendEvent({ type: "run.created", taskId, runId: run.id, payload: run });
+  for (const approval of approvals) store.appendEvent({ type: "approval.created", taskId, runId: approval.runId, payload: approval });
+  for (const effect of effects) store.appendEvent({ type: "effect.created", taskId, payload: effect });
+  for (const artifact of artifacts) store.appendEvent({ type: "artifact.published", taskId, runId: artifact.runId, payload: artifact });
+}
 
 describe("Hearth server", () => {
   let store: HearthStore;
@@ -107,6 +150,98 @@ describe("Hearth server", () => {
       payload: { templateId: "T01" }
     });
     expect(crossSite.statusCode).toBe(403);
+    await app.close();
+  });
+
+  it("pages the audit lists and reports honest totals", async () => {
+    const app = await buildServer({ store, serveWeb: false });
+    const created = await app.inject({ method: "POST", url: "/api/tasks", payload: { templateId: "T01" } });
+    const taskId = created.json().id as string;
+    seedAuditFixtures(store, taskId);
+
+    const runs = await app.inject({ method: "GET", url: "/api/runs?limit=1" });
+    expect(runs.statusCode).toBe(200);
+    expect(runs.json().total).toBe(2);
+    expect(runs.json().runs).toHaveLength(1);
+    expect(runs.json().runs[0].taskTitle).toBe(created.json().title);
+    expect(runs.headers["cache-control"]).toBe("no-store");
+
+    const unknownStatus = await app.inject({ method: "GET", url: "/api/runs?status=uncertain" });
+    expect(unknownStatus.statusCode).toBe(400);
+    expect(unknownStatus.json().error).toBe("INVALID_QUERY");
+
+    const oversized = await app.inject({ method: "GET", url: "/api/runs?limit=500" });
+    expect(oversized.statusCode).toBe(400);
+
+    const detail = await app.inject({ method: "GET", url: `/api/tasks/${taskId}` });
+    const eventTotal = detail.json().eventTotal as number;
+    const seen: number[] = [];
+    let before: number | null = null;
+    for (let page = 0; page < 20; page += 1) {
+      const cursor: string = before === null ? "" : `&before=${before}`;
+      const response = await app.inject({ method: "GET", url: `/api/tasks/${taskId}/events?limit=2${cursor}` });
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as { total: number; nextBefore: number | null; events: { seq: number }[] };
+      expect(body.total).toBe(eventTotal);
+      if (body.events.length === 0) break;
+      seen.unshift(...body.events.map((event) => event.seq));
+      before = body.nextBefore;
+      if (before === null) break;
+    }
+    expect(seen).toHaveLength(eventTotal);
+    expect(new Set(seen).size).toBe(seen.length);
+    expect(seen).toEqual([...seen].sort((a, b) => a - b));
+
+    const missingTask = await app.inject({ method: "GET", url: "/api/tasks/nope/events" });
+    expect(missingTask.statusCode).toBe(404);
+
+    const globalHistory = await app.inject({ method: "GET", url: "/api/events/history?type=run.created" });
+    expect(globalHistory.json().total).toBe(2);
+    await app.close();
+  });
+
+  it("aggregates stats and summaries without inventing numbers", async () => {
+    const app = await buildServer({ store, serveWeb: false });
+    const created = await app.inject({ method: "POST", url: "/api/tasks", payload: { templateId: "T08" } });
+    const taskId = created.json().id as string;
+    seedAuditFixtures(store, taskId);
+
+    const list = await app.inject({ method: "GET", url: "/api/tasks" });
+    expect(list.json().tasks[0].summary).toEqual({
+      runs: 2,
+      lastDurationMs: 100_000,
+      lastUsage: { inputTokens: 1000, cachedInputTokens: 500, cacheWriteInputTokens: 0, outputTokens: 200, reasoningOutputTokens: 20 },
+      artifacts: 1,
+      effects: { total: 1, uncertain: 1 },
+      approvalId: "approval-1"
+    });
+
+    const stats = await app.inject({ method: "GET", url: "/api/stats" });
+    expect(stats.json()).toMatchObject({
+      tasks: { total: 1, byStatus: { queued: 1, completed: 0 } },
+      runs: {
+        total: 2, byStatus: { failed: 1, completed: 1 },
+        durationMs: 130_000, durationCounted: 2, durationUncounted: 0,
+        usage: { inputTokens: 1000, outputTokens: 200 }
+      },
+      approvals: { byStatus: { pending: 1, approved: 0 } },
+      effects: { byStatus: { uncertain: 1, succeeded: 0 } },
+      artifacts: { count: 1, bytes: 1024 },
+      events: { total: 6, latestSeq: 6 }
+    });
+
+    const brief = await app.inject({ method: "GET", url: "/api/approvals?brief=1" });
+    expect(brief.json().approvals[0].target.body).toBeUndefined();
+    expect(brief.json().approvals[0].preview.body).toBeUndefined();
+    const full = await app.inject({ method: "GET", url: "/api/approvals" });
+    expect(full.json().approvals[0].target.body).toBe("private body");
+
+    const uncertain = await app.inject({ method: "GET", url: "/api/effects?status=uncertain" });
+    expect(uncertain.json().total).toBe(1);
+
+    const artifacts = await app.inject({ method: "GET", url: "/api/artifacts" });
+    expect(JSON.stringify(artifacts.json())).not.toContain("D:/secret/path");
+    expect(artifacts.json().artifacts[0].sha256).toBe(HASH);
     await app.close();
   });
 

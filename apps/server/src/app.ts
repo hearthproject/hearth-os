@@ -3,10 +3,11 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import fastifyStatic from "@fastify/static";
-import Fastify from "fastify";
+import Fastify, { type FastifyReply } from "fastify";
 import type { EventEnvelope } from "@hearth/core";
+import { APPROVAL_STATUSES, EFFECT_STATUSES, RUN_STATUSES } from "@hearth/core";
 import { loadCodexProfile } from "@hearth/codex-executor";
-import { HearthStore } from "@hearth/eventlog";
+import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate } from "@hearth/templates";
 import { z } from "zod";
 import { DB_PATH, REPO_ROOT, WEB_DIST } from "./config.ts";
@@ -28,6 +29,32 @@ const decideApprovalSchema = z.object({
   decision: z.enum(["approve", "reject"]),
   parameterHash: z.string().regex(/^[a-f0-9]{64}$/)
 }).strict();
+
+const listQuerySchema = z.object({
+  taskId: z.string().trim().min(1).max(80).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  offset: z.coerce.number().int().min(0).optional(),
+  brief: z.enum(["0", "1"]).optional()
+}).strict();
+
+const runQuerySchema = listQuerySchema.extend({ status: z.enum(RUN_STATUSES).optional() }).strict();
+const approvalQuerySchema = listQuerySchema.extend({ status: z.enum(APPROVAL_STATUSES).optional() }).strict();
+const effectQuerySchema = listQuerySchema.extend({ status: z.enum(EFFECT_STATUSES).optional() }).strict();
+
+const seqParam = z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+
+const eventQuerySchema = z.object({
+  after: seqParam.optional(),
+  before: seqParam.optional(),
+  taskId: z.string().trim().min(1).max(80).optional(),
+  type: z.string().trim().min(1).max(60).optional(),
+  limit: z.coerce.number().int().min(1).max(500).optional()
+}).strict();
+
+const taskEventQuerySchema = eventQuerySchema.omit({ taskId: true });
+
+const DEFAULT_LIST_LIMIT = 50;
+const DEFAULT_EVENT_LIMIT = 100;
 
 export interface BuildServerOptions {
   store?: HearthStore;
@@ -163,16 +190,78 @@ export async function buildServer(options: BuildServerOptions = {}) {
     return reply.code(201).send(task);
   });
 
-  app.get("/api/tasks", async () => ({ tasks: service.listTasks() }));
+  app.get("/api/tasks", async () => ({ tasks: service.listTaskItems() }));
 
   app.get("/api/artifacts", async () => {
-    const titles = new Map(service.listTasks().map((task) => [task.id, task.title]));
+    const titles = service.taskTitles();
     return {
       artifacts: store.listAllArtifacts().map((artifact) => ({
-        ...artifact,
+        id: artifact.id,
+        taskId: artifact.taskId,
+        runId: artifact.runId,
+        relativePath: artifact.relativePath,
+        mimeType: artifact.mimeType,
+        sha256: artifact.sha256,
+        bytes: artifact.bytes,
+        createdAt: artifact.createdAt,
         taskTitle: titles.get(artifact.taskId) ?? "未命名任务"
       }))
     };
+  });
+
+  app.get<{ Querystring: Record<string, string> }>("/api/runs", async (request, reply) => {
+    const parsed = runQuerySchema.safeParse(request.query ?? {});
+    if (!parsed.success) return invalidQuery(reply);
+    reply.header("cache-control", "no-store");
+    return service.listRunItems(pageOptions(parsed.data));
+  });
+
+  app.get<{ Querystring: Record<string, string> }>("/api/approvals", async (request, reply) => {
+    const parsed = approvalQuerySchema.safeParse(request.query ?? {});
+    if (!parsed.success) return invalidQuery(reply);
+    reply.header("cache-control", "no-store");
+    return service.listApprovalItems({ ...pageOptions(parsed.data), brief: parsed.data.brief === "1" });
+  });
+
+  app.get<{ Querystring: Record<string, string> }>("/api/effects", async (request, reply) => {
+    const parsed = effectQuerySchema.safeParse(request.query ?? {});
+    if (!parsed.success) return invalidQuery(reply);
+    reply.header("cache-control", "no-store");
+    return service.listEffectItems(pageOptions(parsed.data));
+  });
+
+  app.get("/api/stats", async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    return service.stats();
+  });
+
+  app.get<{ Params: { id: string }; Querystring: Record<string, string> }>("/api/tasks/:id/events", async (request, reply) => {
+    const parsed = taskEventQuerySchema.safeParse(request.query ?? {});
+    if (!parsed.success) return invalidQuery(reply);
+    if (!store.getTask(request.params.id)) {
+      return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    }
+    reply.header("cache-control", "no-store");
+    return service.eventWindow({
+      limit: parsed.data.limit ?? DEFAULT_EVENT_LIMIT,
+      afterSeq: parsed.data.after,
+      beforeSeq: parsed.data.before,
+      taskId: request.params.id,
+      type: parsed.data.type
+    });
+  });
+
+  app.get<{ Querystring: Record<string, string> }>("/api/events/history", async (request, reply) => {
+    const parsed = eventQuerySchema.safeParse(request.query ?? {});
+    if (!parsed.success) return invalidQuery(reply);
+    reply.header("cache-control", "no-store");
+    return service.eventWindow({
+      limit: parsed.data.limit ?? DEFAULT_EVENT_LIMIT,
+      afterSeq: parsed.data.after,
+      beforeSeq: parsed.data.before,
+      taskId: parsed.data.taskId,
+      type: parsed.data.type
+    });
   });
 
   app.get<{ Params: { id: string } }>("/api/tasks/:id", async (request, reply) => {
@@ -306,6 +395,22 @@ function parseAfterSeq(value: string | undefined): number | null {
   if (!/^\d+$/.test(value)) return null;
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+function pageOptions(query: {
+  taskId?: string | undefined;
+  status?: string | undefined;
+  limit?: number | undefined;
+  offset?: number | undefined;
+}): PageOptions {
+  const options: PageOptions = { limit: query.limit ?? DEFAULT_LIST_LIMIT, offset: query.offset ?? 0 };
+  if (query.taskId !== undefined) options.taskId = query.taskId;
+  if (query.status !== undefined) options.status = query.status;
+  return options;
+}
+
+function invalidQuery(reply: FastifyReply) {
+  return reply.code(400).send({ error: "INVALID_QUERY", message: "分页参数不正确" });
 }
 
 function isLoopbackOrigin(origin: string): boolean {
