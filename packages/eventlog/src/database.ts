@@ -70,7 +70,7 @@ export interface RunAggregate {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   deadline TEXT, inputs_json TEXT NOT NULL, network_hosts_json TEXT NOT NULL,
   output_dir TEXT NOT NULL, current_run_id TEXT, next_action TEXT, error_json TEXT,
   result_summary TEXT, conversation_id TEXT, executor_id TEXT, task_kind TEXT,
-  expected_outputs_json TEXT, permissions_json TEXT
+  expected_outputs_json TEXT, permissions_json TEXT, pending_input TEXT
 );
 CREATE TABLE IF NOT EXISTS conversations (
   id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
@@ -341,6 +341,7 @@ export class HearthStore {
     ensureColumn(this.db, "tasks", "task_kind", "TEXT");
     ensureColumn(this.db, "tasks", "expected_outputs_json", "TEXT");
     ensureColumn(this.db, "tasks", "permissions_json", "TEXT");
+    ensureColumn(this.db, "tasks", "pending_input", "TEXT");
     ensureColumn(this.db, "runs", "executor_id", "TEXT");
     ensureColumn(this.db, "runs", "checkpoint_seq", "INTEGER");
     ensureColumn(this.db, "runs", "budget_json", "TEXT");
@@ -1228,8 +1229,8 @@ export class HearthStore {
 
 function upsertTask(db: DatabaseSync, task: TaskRecord): void {
   db.prepare(
-    `INSERT INTO tasks (id, template_id, title, goal, status, created_at, updated_at, deadline, inputs_json, network_hosts_json, output_dir, current_run_id, next_action, error_json, result_summary, conversation_id, executor_id, task_kind, expected_outputs_json, permissions_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO tasks (id, template_id, title, goal, status, created_at, updated_at, deadline, inputs_json, network_hosts_json, output_dir, current_run_id, next_action, error_json, result_summary, conversation_id, executor_id, task_kind, expected_outputs_json, permissions_json, pending_input)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        template_id=excluded.template_id, title=excluded.title, goal=excluded.goal, status=excluded.status,
        updated_at=excluded.updated_at, deadline=excluded.deadline, inputs_json=excluded.inputs_json,
@@ -1237,7 +1238,8 @@ function upsertTask(db: DatabaseSync, task: TaskRecord): void {
        current_run_id=excluded.current_run_id, next_action=excluded.next_action, error_json=excluded.error_json,
        result_summary=excluded.result_summary, conversation_id=excluded.conversation_id,
        executor_id=excluded.executor_id, task_kind=excluded.task_kind,
-       expected_outputs_json=excluded.expected_outputs_json, permissions_json=excluded.permissions_json`
+       expected_outputs_json=excluded.expected_outputs_json, permissions_json=excluded.permissions_json,
+       pending_input=excluded.pending_input`
   ).run(
     task.id, task.templateId, task.title, task.goal, task.status, task.createdAt, task.updatedAt,
     task.deadline, JSON.stringify(task.inputs), JSON.stringify(task.networkHosts), task.outputDir,
@@ -1245,7 +1247,8 @@ function upsertTask(db: DatabaseSync, task: TaskRecord): void {
     task.resultSummary ?? null, task.conversationId ?? null,
     task.executorId ?? "codex", task.taskKind ?? "general",
     JSON.stringify(task.expectedOutputs ?? ["result.md"]),
-    JSON.stringify(task.permissions ?? defaultTaskPermissions(task))
+    JSON.stringify(task.permissions ?? defaultTaskPermissions(task)),
+    task.pendingInput ?? null
   );
 }
 
@@ -1254,7 +1257,8 @@ function updateTask(db: DatabaseSync, taskId: string | null, patch: Record<strin
   const columns: Record<string, string> = {
     title: "title", goal: "goal", status: "status", updatedAt: "updated_at",
     deadline: "deadline", currentRunId: "current_run_id", nextAction: "next_action",
-    resultSummary: "result_summary", conversationId: "conversation_id"
+    resultSummary: "result_summary", conversationId: "conversation_id",
+    pendingInput: "pending_input"
   };
   for (const [key, column] of Object.entries(columns)) {
     if (key in patch) db.prepare(`UPDATE tasks SET ${column} = ? WHERE id = ?`).run((patch[key] as SQLInputValue) ?? null, taskId);
@@ -1576,7 +1580,8 @@ function rowToTask(row: DbRow): TaskRecord {
     expectedOutputs: row.expected_outputs_json == null ? ["result.md"] : JSON.parse(String(row.expected_outputs_json)),
     permissions: row.permissions_json == null
       ? { readRoots: [], writeRoots: [], networkHosts, tools: [] }
-      : JSON.parse(String(row.permissions_json))
+      : JSON.parse(String(row.permissions_json)),
+    pendingInput: row.pending_input == null ? null : String(row.pending_input)
   };
 }
 

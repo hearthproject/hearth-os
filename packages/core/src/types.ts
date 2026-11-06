@@ -79,6 +79,7 @@ export interface TaskRecord {
   taskKind?: TaskKind;
   expectedOutputs?: string[];
   permissions?: TaskPermissions;
+  pendingInput?: string | null;
 }
 
 export interface ChatAttachment {
