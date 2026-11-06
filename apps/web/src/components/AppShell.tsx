@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Brain, Cable, CalendarDays, FileText, Inbox, Lightbulb, Mail, Monitor, Plus, Settings2 } from "lucide-react";
+import { Brain, Cable, CalendarDays, FileText, Inbox, Lightbulb, Mail, Monitor, Plus, Settings2, Sparkles } from "lucide-react";
 import { NavLink, Outlet, useNavigate, useOutletContext } from "react-router-dom";
 import { useState } from "react";
 import { api } from "../lib/api.ts";
@@ -61,6 +61,9 @@ export function AppShell() {
           </NavLink>
           <NavLink to="/memory" className={({ isActive }) => (isActive ? "nav-item active" : "nav-item")}>
             <Brain size={16} /> <span className="nav-label">记忆</span>
+          </NavLink>
+          <NavLink to="/methods" className={({ isActive }) => (isActive ? "nav-item active" : "nav-item")}>
+            <Sparkles size={16} /> <span className="nav-label">方法进化</span>
           </NavLink>
           <NavLink to="/artifacts" className={({ isActive }) => (isActive ? "nav-item active" : "nav-item")}>
             <FileText size={16} /> <span className="nav-label">产物</span>

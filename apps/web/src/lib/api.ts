@@ -12,7 +12,9 @@ import type {
   EventWindow,
   HealthResponse,
   CreateMemoryRequest,
+  CreateMethodRequest,
   CorrectMemoryRequest,
+  MethodSnapshot,
   MemorySnapshot,
   OutboxDraft,
   OutboxDraftListItem,
@@ -100,6 +102,32 @@ export const api = {
       body: JSON.stringify(input)
     }),
   exportMemories: () => { window.location.assign("/api/memory/export"); },
+  methods: () => request<MethodSnapshot>("/api/methods"),
+  generateMethod: (input: { taskId: string; name?: string; summary?: string }) => request<MethodSnapshot["methods"][number]>("/api/methods/generate", {
+    method: "POST",
+    body: JSON.stringify(input)
+  }),
+  createMethod: (input: CreateMethodRequest) => request<MethodSnapshot["methods"][number]>("/api/methods", {
+    method: "POST",
+    body: JSON.stringify(input)
+  }),
+  recordMethodTrial: (id: string, taskId: string) => request<MethodSnapshot["methods"][number]>("/api/methods/" + encodeURIComponent(id) + "/trials", {
+    method: "POST",
+    body: JSON.stringify({ taskId })
+  }),
+  evaluateMethod: (id: string, input: { baselineTaskIds: string[]; trialTaskIds: string[]; notes?: string }) => request<MethodSnapshot["evaluations"][number]>("/api/methods/" + encodeURIComponent(id) + "/evaluate", {
+    method: "POST",
+    body: JSON.stringify(input)
+  }),
+  promoteMethod: (id: string) => request<MethodSnapshot["methods"][number]>("/api/methods/" + encodeURIComponent(id) + "/promote", { method: "POST" }),
+  rollbackMethod: (id: string, reason: string) => request<MethodSnapshot["methods"][number]>("/api/methods/" + encodeURIComponent(id) + "/rollback", {
+    method: "POST",
+    body: JSON.stringify({ reason })
+  }),
+  rejectMethod: (id: string, reason?: string) => request<MethodSnapshot["methods"][number]>("/api/methods/" + encodeURIComponent(id) + "/reject", {
+    method: "POST",
+    body: JSON.stringify(reason === undefined ? {} : { reason })
+  }),
   proactive: () => request<ProactiveSnapshot>("/api/proactive"),
   scanProactive: () => request<{ created: number; updated: number; delivered: number; suggestions: ProactiveSuggestion[] }>("/api/proactive/scan", { method: "POST" }),
   updateProactiveSettings: (input: Partial<Omit<ProactiveSettings, "triggers" | "updatedAt">> & {
@@ -231,6 +259,7 @@ export function subscribeToEvents(onEvent: () => void): () => void {
     "proactive.settings.updated", "suggestion.created", "suggestion.updated", "suggestion.event",
     "memory.settings.updated", "memory.created", "memory.updated", "memory.version.recorded",
     "memory.recalled", "memory.conflict.created", "memory.conflict.updated", "memory.forgotten",
+    "method.candidate.created", "method.candidate.updated", "method.evaluation.recorded", "method.trial.recorded",
     "outbox.created", "outbox.updated",
     "device.paired", "device.updated", "device.pairing-requested", "device.pairing-updated",
     "desktop.session.created", "desktop.session.updated", "desktop.frame.updated",

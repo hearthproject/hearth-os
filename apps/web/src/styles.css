@@ -2755,6 +2755,203 @@ body.modal-open {
   }
 }
 
+/* ── 10. methods ─────────────────────────────────────────────────────── */
+.method-generate-row,
+.method-actions,
+.method-trial-picker,
+.method-sources {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  flex-wrap: wrap;
+}
+
+.method-generate-row {
+  padding: 12px;
+}
+
+.method-generate-row select,
+.method-trial-picker select,
+.method-trial-picker input {
+  min-width: 240px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+
+.method-list {
+  display: grid;
+  gap: var(--gap-3);
+}
+
+.method-card.status-adopted {
+  border-color: var(--ink-tertiary);
+}
+
+.method-card.status-reverted,
+.method-card.status-rejected {
+  opacity: 0.78;
+}
+
+.method-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--gap-3);
+  padding: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.method-head h2 {
+  margin-bottom: 4px;
+}
+
+.method-head p {
+  color: var(--ink-secondary);
+}
+
+.verdict-improved {
+  border-color: var(--ink-secondary);
+  font-weight: 600;
+}
+
+.verdict-regressed {
+  border-color: var(--risk);
+  color: var(--risk);
+}
+
+.method-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: var(--gap-5);
+  padding: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.method-section {
+  display: grid;
+  align-content: start;
+  gap: var(--gap-2);
+  min-width: 0;
+}
+
+.method-section h3 {
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.method-section > p {
+  color: var(--ink-secondary);
+}
+
+.method-steps {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--ink-secondary);
+}
+
+.method-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.method-guardrails {
+  display: grid;
+  gap: 4px;
+  color: var(--ink-secondary);
+  font-size: var(--fs-12);
+}
+
+.method-guardrails li::before {
+  content: "—";
+  margin-right: 6px;
+  color: var(--ink-tertiary);
+}
+
+.method-metrics {
+  display: grid;
+  grid-template-columns: 180px 180px minmax(0, 1fr);
+  border-bottom: 1px solid var(--line);
+}
+
+.method-metric-column,
+.method-metric-notes {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  padding: 10px 12px;
+  border-right: 1px solid var(--line);
+}
+
+.method-metric-column strong {
+  font-size: var(--fs-12);
+}
+
+.method-metric-column span,
+.method-metric-notes span {
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+}
+
+.method-metric-notes {
+  border-right: 0;
+}
+
+.method-sources {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+}
+
+.method-actions {
+  justify-content: flex-end;
+  padding: 10px 12px;
+}
+
+.method-actions > .page-meta {
+  margin-right: auto;
+}
+
+@media (max-width: 900px) {
+  .method-body,
+  .method-metrics {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .method-metric-column,
+  .method-metric-notes {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+}
+
+@media (max-width: 640px) {
+  .method-head,
+  .method-actions,
+  .method-generate-row,
+  .method-trial-picker {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .method-generate-row select,
+  .method-trial-picker select {
+    min-width: 0;
+    width: 100%;
+  }
+}
+
 /* ── 9. memory ──────────────────────────────────────────────────────── */
 .memory-list {
   display: grid;

@@ -29,6 +29,12 @@ import type {
   MemorySensitivity,
   MemorySettings,
   MemoryVersion,
+  MethodCandidate,
+  MethodEvaluation,
+  MethodMetrics,
+  MethodStatus,
+  MethodTrial,
+  MethodVerdict,
   OutboxAttachment,
   OutboxDraft,
   OutboxDraftStatus,
@@ -84,6 +90,12 @@ export type {
   MemorySensitivity,
   MemorySettings,
   MemoryVersion,
+  MethodCandidate,
+  MethodEvaluation,
+  MethodMetrics,
+  MethodStatus,
+  MethodTrial,
+  MethodVerdict,
   OutboxAttachment,
   OutboxDraft,
   OutboxDraftStatus,
@@ -261,4 +273,21 @@ export interface CorrectMemoryRequest {
   allowRecall?: boolean;
   validUntil?: string | null;
   reason: string;
+}
+
+export interface MethodSnapshot {
+  methods: MethodCandidate[];
+  evaluations: MethodEvaluation[];
+  trials: MethodTrial[];
+}
+
+export interface CreateMethodRequest {
+  name: string;
+  summary: string;
+  applicability: string;
+  steps: string[];
+  sourceTaskIds: string[];
+  templateId?: string | null;
+  allowedCapabilities?: string[];
+  guardrails?: string[];
 }
