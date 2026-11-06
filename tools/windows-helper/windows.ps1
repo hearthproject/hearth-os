@@ -6,6 +6,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+$OutputEncoding = [Console]::OutputEncoding
 $script:FailCode = "HELPER_ERROR"
 
 function Fail([string]$code, [string]$message) {
@@ -290,6 +292,9 @@ try {
 
   $kind = [string]$input.kind
   if ($kind -eq "focus") {
+    Assert-UserIdle
+    $currentForeground = Get-ForegroundInfo
+    Assert-ExpectedApp $currentForeground ([string]$input.expectedApp)
     $targetApp = ([string]$input.app).ToLowerInvariant()
     $candidates = Get-Process | Where-Object {
       $_.ProcessName.ToLowerInvariant() -eq $targetApp -and $_.MainWindowHandle -ne [IntPtr]::Zero
@@ -303,6 +308,7 @@ try {
     if (-not [HearthNative]::SetForegroundWindow($target.MainWindowHandle)) { Fail "FOCUS_DENIED" "Windows denied focus to $targetApp" }
     Start-Sleep -Milliseconds 180
     $foreground = Get-ForegroundInfo
+    if ($foreground.app -ne $targetApp) { Fail "FOCUS_DENIED" "Windows kept focus on $($foreground.app) instead of $targetApp" }
     Write-Result ([pscustomobject]@{ ok = $true; result = [pscustomobject]@{ app = $foreground.app; windowTitle = $foreground.windowTitle } })
   }
 
