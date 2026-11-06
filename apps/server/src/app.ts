@@ -264,13 +264,19 @@ export async function buildServer(options: BuildServerOptions = {}) {
 
   app.get("/api/outbox", async (_request, reply) => {
     reply.header("cache-control", "no-store");
-    return { drafts: outbox.list() };
+    return {
+      drafts: outbox.list().map((draft) => ({
+        ...draft,
+        effect: draft.effectId ? store.getEffect(draft.effectId) : null
+      }))
+    };
   });
 
   app.get<{ Params: { id: string } }>("/api/outbox/:id", async (request, reply) => {
     try {
       reply.header("cache-control", "no-store");
-      return outbox.get(request.params.id);
+      const draft = outbox.get(request.params.id);
+      return { ...draft, effect: draft.effectId ? store.getEffect(draft.effectId) : null };
     } catch (error) {
       return sendOutboxError(reply, error);
     }

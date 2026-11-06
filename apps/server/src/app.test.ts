@@ -179,7 +179,12 @@ describe("Hearth server", () => {
       const effectId = approved.json().effect.id as string;
       expect(existsSync(join(outboxRoot, effectId, "message.eml"))).toBe(true);
       const drafts = await app.inject({ method: "GET", url: "/api/outbox" });
-      expect(drafts.json().drafts[0]).toMatchObject({ id: draft.id, status: "stored", effectId });
+      expect(drafts.json().drafts[0]).toMatchObject({
+        id: draft.id,
+        status: "stored",
+        effectId,
+        effect: { status: "succeeded", receipt: { transport: "local-outbox", delivery: "not_sent" } }
+      });
     } finally {
       await app.close();
       rmSync(outboxRoot, { recursive: true, force: true });
