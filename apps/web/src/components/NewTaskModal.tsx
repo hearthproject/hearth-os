@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, X } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { BookOpen, Loader2, X } from "lucide-react";
 import { api } from "../lib/api.ts";
+import { abbreviateHash, relativeTime } from "../lib/format.ts";
 import { CATEGORY_LABELS, approvalKindLabel } from "../lib/labels.ts";
-import type { TaskRecord, TaskTemplate } from "../lib/types.ts";
+import type { SourceConnection, SourceItem, TaskRecord, TaskTemplate } from "../lib/types.ts";
 import { useViewMode } from "../lib/view-mode.tsx";
 
 const CATEGORIES = ["all", "document", "web", "code", "data", "people", "marketing"] as const;
@@ -26,7 +27,10 @@ export function NewTaskModal({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [selectedSourceItemIds, setSelectedSourceItemIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const sourcesQuery = useQuery({ queryKey: ["sources"], queryFn: api.sources, enabled: open });
+  const readyItemsQuery = useQuery({ queryKey: ["readySourceItems"], queryFn: () => api.readySourceItems(), enabled: open });
 
   const selected = templates.find((template) => template.id === selectedId) ?? null;
   const visibleTemplates = useMemo(
@@ -41,6 +45,7 @@ export function NewTaskModal({
       setSelectedId(null);
       setTitle("");
       setDescription("");
+      setSelectedSourceItemIds([]);
       setError(null);
       onCreated(task);
     },
@@ -65,7 +70,10 @@ export function NewTaskModal({
   function submitTemplate() {
     if (!selected) return;
     setError(null);
-    createTask.mutate({ templateId: selected.id });
+    createTask.mutate({
+      templateId: selected.id,
+      ...(selectedSourceItemIds.length > 0 ? { sourceItemIds: selectedSourceItemIds } : {})
+    });
   }
 
   function submitCustom() {
@@ -77,8 +85,15 @@ export function NewTaskModal({
     createTask.mutate({
       title: title.trim() || "我的任务",
       goal: description.trim(),
-      textInput: description.trim()
+      textInput: description.trim(),
+      ...(selectedSourceItemIds.length > 0 ? { sourceItemIds: selectedSourceItemIds } : {})
     });
+  }
+
+  function toggleSourceItem(id: string) {
+    setSelectedSourceItemIds((current) => current.includes(id)
+      ? current.filter((itemId) => itemId !== id)
+      : current.length >= 20 ? current : [...current, id]);
   }
 
   return (
@@ -136,11 +151,23 @@ export function NewTaskModal({
           </div>
         )}
 
+        <SourcePicker
+          sources={sourcesQuery.data?.sources ?? []}
+          items={readyItemsQuery.data?.items ?? []}
+          selectedIds={selectedSourceItemIds}
+          loading={sourcesQuery.isLoading || readyItemsQuery.isLoading}
+          pro={viewMode === "pro"}
+          onToggle={toggleSourceItem}
+        />
+
         {error && <p className="form-error">{error}</p>}
 
         <footer className="modal-footer">
           <div className="selection-summary">
-            {tab === "templates" && selected ? <strong>{selected.title}</strong> : <span>选择模板，或填写目标。</span>}
+            <span>
+              {tab === "templates" && selected ? <strong>{selected.title}</strong> : "选择模板，或填写目标。"}
+              {selectedSourceItemIds.length > 0 && <> · 已附加 {selectedSourceItemIds.length} 项资料</>}
+            </span>
           </div>
           <button
             className="primary-button"
@@ -152,6 +179,60 @@ export function NewTaskModal({
         </footer>
       </section>
     </div>
+  );
+}
+
+function SourcePicker({
+  sources,
+  items,
+  selectedIds,
+  loading,
+  pro,
+  onToggle
+}: {
+  sources: SourceConnection[];
+  items: SourceItem[];
+  selectedIds: string[];
+  loading: boolean;
+  pro: boolean;
+  onToggle: (id: string) => void;
+}) {
+  const sourceById = useMemo(() => new Map(sources.map((source) => [source.id, source])), [sources]);
+  const available = items.filter((item) => sourceById.has(item.sourceId));
+
+  return (
+    <details className="task-source-picker" open={selectedIds.length > 0 || undefined}>
+      <summary>
+        <span><BookOpen size={15} /> 附加已读取资料</span>
+        <span>{selectedIds.length > 0 ? `已选 ${selectedIds.length} 项` : "只读 · 可选"}</span>
+      </summary>
+      {loading ? (
+        <p className="task-source-empty">正在读取可用资料…</p>
+      ) : available.length === 0 ? (
+        <p className="task-source-empty">还没有已读取资料。先到“来源”读取本地文件、知识库或公开网页。</p>
+      ) : (
+        <ul className="task-source-list">
+          {available.map((item) => {
+            const source = sourceById.get(item.sourceId);
+            const checked = selectedIds.includes(item.id);
+            const disabled = !checked && selectedIds.length >= 20;
+            return (
+              <li key={item.id}>
+                <label className={`task-source-option ${checked ? "selected" : ""} ${disabled ? "disabled" : ""}`}>
+                  <input type="checkbox" checked={checked} disabled={disabled} onChange={() => onToggle(item.id)} />
+                  <span className="task-source-copy">
+                    <strong>{item.title || item.label}</strong>
+                    <small>{source?.displayName} · {relativeTime(item.fetchedAt)}</small>
+                    {pro && <small className="mono">{item.locator} · {item.contentHash ? abbreviateHash(item.contentHash, 10, 6) : "无正文哈希"}</small>}
+                  </span>
+                  <span className="tag">只读</span>
+                </label>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </details>
   );
 }
 

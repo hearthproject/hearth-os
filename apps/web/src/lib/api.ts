@@ -54,6 +54,7 @@ export const api = {
   startSystem: () => request<SystemStatus>("/api/system/start", { method: "POST" }),
   templates: () => request<{ templates: TaskTemplate[] }>("/api/templates"),
   sources: () => request<{ sources: SourceConnection[] }>("/api/sources"),
+  readySourceItems: (limit = 100) => request<{ items: SourceItem[] }>(`/api/source-items${query({ limit })}`),
   sourceItems: (id: string) => request<{ items: SourceItem[] }>(`/api/sources/${encodeURIComponent(id)}/items`),
   createSource: (input: {
     kind: SourceKind;

@@ -89,6 +89,7 @@ export interface CreateTaskRequest {
   title?: string;
   goal?: string;
   textInput?: string;
+  sourceItemIds?: string[];
 }
 
 export interface ApprovalDecisionResult {
