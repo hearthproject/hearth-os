@@ -1,14 +1,14 @@
 ---
-title: 'Agent Reference Patterns: OpenClaw, Hermes, DeerFlow, and LoopX'
+title: 'Agent Reference Patterns: Pi, OpenClaw, Hermes, DeerFlow, and LoopX'
 description: 'Patterns Hearth adopts or rejects for proactive service, desktop operation, memory, method evolution, multi-device use, and long-running operation.'
 outline: [2, 3]
 ---
 
-# Agent Reference Patterns: OpenClaw, Hermes, DeerFlow, and LoopX
+# Agent Reference Patterns: Pi, OpenClaw, Hermes, DeerFlow, and LoopX
 
 Across Phases 3–6, Hearth does not invent device control, proactive service, memory, method evaluation, or long-running operation from scratch. We studied working open agents and adopted only the parts that reduce accidental input, unauthorized expansion, wrong memory, and irreversible change. These notes reflect a review of public OpenClaw, Hermes, DeerFlow, and LoopX implementation or design documentation on 2026-11-06.
 
-This page records design references, not integration claims. Hearth does not import these projects' runtimes, codebases, or protocol implementations. DeerFlow and LoopX influence task decomposition, evaluation layering, and delivery method only.
+This page records design references, not integration claims. Hearth does not import these projects' runtimes, codebases, or protocol implementations. Pi influences the message loop and tool shape of the native agent kernel; DeerFlow and LoopX influence task decomposition, evaluation layering, and delivery method only.
 
 ## Shared conclusions
 
@@ -33,6 +33,16 @@ OpenClaw and Hermes separate connection, capability grants, action execution, an
 - **Credentials remain in the main process.** Device connection credentials are not exposed to the renderer or ordinary plugins.
 - **Cancellation and no silent downgrade.** Cancellation is explicit, and the capability manifest cannot change silently during a run.
 - **Diagnosable runtime state.** Health checks should run independently of tasks and expose the runtime environment, permissions, and latest maintenance state early. Hearth extends this into health snapshots, maintenance records, and redacted diagnostics exports.
+
+## Pi patterns worth adopting
+
+- **A small, explicit single-agent loop.** Model turn, tool call, tool result, next turn. Hearth does not start with complex multi-agent orchestration.
+- **Messages are state.** System prompts, user input, assistant tool calls, and tool results are stored in order. Recovery continues the same sequence instead of rebuilding a prompt.
+- **Tools are capability boundaries.** Reading, writing, shell, network, and user questions have separate task permissions. The model cannot expand them mid-run.
+- **Recoverable execution.** Checkpoints are written after turns and tool steps. Waiting input, budget exhaustion, and service restart resume from an explicit position.
+- **A compact completion signal.** A completion tool declares the result, and the system verifies artifacts. The model saying “done” is not completion.
+
+Hearth implements these principles in its own `@hearth/agent-runtime` without importing the Pi npm package. The native executor handles general tasks; Codex remains responsible for repository and engineering work. Both share task state, permissions, budgets, and the artifact contract.
 
 ## DeerFlow patterns worth adopting
 
@@ -79,6 +89,7 @@ Hearth uses LoopX only as a delivery-method reference. It is not a runtime depen
 - Treating candidate memory as fact or a candidate method as an adopted capability.
 - Claiming a live shadow executor, phone PWA/push/remote takeover, or a complete migratable backup.
 - Describing DeerFlow or LoopX as integrated components. They provide design and delivery-method references only.
+- Describing Pi as an integrated dependency. Hearth uses its single-agent kernel shape as a reference and provides its own TypeScript implementation.
 
 ## Impact by phase
 
