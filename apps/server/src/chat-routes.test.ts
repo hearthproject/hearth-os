@@ -41,6 +41,8 @@ describe("chat-first API", () => {
     });
     expect(saved.statusCode).toBe(200);
     expect(saved.json().settings.baseUrl).toBe("https://api.deepseek.com/v1");
+    expect(saved.json().settings.protocol).toBe("openai-chat");
+    expect(saved.json().settings.protocol).toBe("openai-chat");
     expect(saved.json().settings.hasApiKey).toBe(true);
     expect(saved.json().settings.apiKeyMasked).toContain("sk-t");
     expect(saved.body).not.toContain("sk-test-secret-123456");
@@ -50,7 +52,12 @@ describe("chat-first API", () => {
     expect(health.body).not.toContain("sk-test-secret-123456");
 
     const list = await app.inject({ method: "GET", url: "/api/model-settings" });
-    expect(list.json().presets.map((preset: { id: string }) => preset.id)).toContain("dashscope");
+    const presetIds = list.json().presets.map((preset: { id: string }) => preset.id) as string[];
+    expect(presetIds).toContain("dashscope");
+    expect(presetIds).not.toContain("siliconflow");
+    expect(list.json().presets.map((preset: { protocol: string }) => preset.protocol)).toEqual(
+      expect.arrayContaining(["openai-chat", "anthropic-messages", "gemini"])
+    );
     expect(list.body).not.toContain("sk-test-secret-123456");
     await app.close();
   });
@@ -133,6 +140,19 @@ describe("chat-first API", () => {
     const task = parseSse(response.body).find((event) => event.event === "task")?.data.task;
     expect(task.networkHosts).toContain("example.com");
     expect(task.inputs.some((input: { kind: string; value: string }) => input.kind === "url" && input.value === "https://example.com/article")).toBe(true);
+    await app.close();
+  });
+
+  it("answers a question about a pasted URL instead of dispatching a task", async () => {
+    const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/chat",
+      payload: { message: "介绍一下这个 GitHub 项目，根据实际代码告诉我 https://github.com/openai/codex" }
+    });
+    const events = parseSse(response.body);
+    expect(events.find((event) => event.event === "routing")?.data.action).toBe("chat");
+    expect(events.some((event) => event.event === "task")).toBe(false);
     await app.close();
   });
 

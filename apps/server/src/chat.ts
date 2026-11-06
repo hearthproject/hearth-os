@@ -23,40 +23,54 @@ export async function decideRoute(
   url: string | null,
   settings: ModelSettings
 ): Promise<ChatRoute> {
-  if (hasAttachments || url) {
-    return {
-      action: "task",
-      title: conversationTitle(message) || "处理上传内容",
-      goal: message,
-      reason: hasAttachments ? "这条消息带有文件，交给任务执行器处理" : "这条消息带有网址，交给任务执行器抓取并处理"
-    };
-  }
+  const material = [
+    hasAttachments ? "消息带有附件" : "",
+    url ? "消息带有网址：" + url : ""
+  ].filter(Boolean).join("；");
 
-  if (!settings.apiKey || !settings.baseUrl || !settings.model) return heuristicRoute(message);
+  if (!settings.apiKey || !settings.baseUrl || !settings.model) {
+    return heuristicRoute(message);
+  }
 
   const messages: ChatMessage[] = [
     {
       role: "system",
       content: [
-        "你是 Hearth 的任务路由器，只做判断，不回答问题。",
-        "判断用户这句话应当由谁处理：",
-        "- chat：闲聊、概念解释、简短问答、写作建议、不需要读取文件或执行操作的请求。",
-        "- task：需要实际执行、检索资料、生成文件、处理附件、访问网址、修改代码、运行命令或产出交付物的请求。",
+        "你是 Hearth 的意图路由器，只做判断，不回答问题。",
+        "判断用户这句话要的是“回答”还是“执行”：",
+        "- chat：介绍、解释、总结性提问、评价、比较、咨询、闲聊，以及任何只需要用文字回答的请求。即使用户贴了网址或附件，只要他是在问“这是什么/怎么样/为什么/介绍一下”，也选 chat。",
+        "- task：只有当用户明确要求读取材料后产出交付物、生成或修改文件、运行命令、抓取网页并整理成结果时，才选 task。",
+        "网址或附件只是上下文，不等于任务。判断标准是用户要的是解释，还是一个新的产物。",
+        "示例：",
+        "- “介绍一下这个 GitHub 项目，根据实际代码告诉我 https://…” → chat",
+        "- “帮我总结这个网页并保存成 summary.md https://…” → task",
         "只输出一个 JSON 对象，不要 Markdown，不要代码块：",
-        '{"action":"chat"|"task","title":"任务标题，最多20字","reason":"一句话原因"}',
+        "{\"action\":\"chat\"|\"task\",\"title\":\"任务标题，最多20字\",\"reason\":\"一句话原因\"}",
         "如果选择 chat，title 填空字符串。"
       ].join("\n")
     },
-    { role: "user", content: message }
+    {
+      role: "user",
+      content: material ? message + "\n\n[上下文] " + material : message
+    }
   ];
   try {
     const result = await completeChat(settings, messages, { maxTokens: 160, temperature: 0, timeoutMs: 20_000 });
     const parsed = parseRouteJson(result.content);
-    if (parsed) return { ...parsed, goal: message };
-    return heuristicRoute(message, "路由器没有返回可用结果，已按关键词判断");
+    if (!parsed) return heuristicRoute(message, "路由器没有返回可用结果，已按关键词判断");
+    if (parsed.action === "task" && (hasAttachments || url) && shouldAnswerInChat(message)) {
+      return { action: "chat", title: "", goal: message, reason: "用户在询问材料内容，直接由聊天模型回答" };
+    }
+    return { ...parsed, goal: message };
   } catch {
     return heuristicRoute(message, "聊天模型暂时不可用，已按关键词判断");
   }
+}
+
+function shouldAnswerInChat(message: string): boolean {
+  const asksForExplanation = /(介绍|是什么|做什么|干什么|怎么样|怎么用|如何|为什么|讲讲|说说|了解一下|看一下|看看|评价|对比|区别|架构|原理|特点|告诉我)/.test(message);
+  const asksForAction = /(保存|生成|写入|修改|创建|删除|导出|下载|抓取|爬取|整理成|汇总成|写成|做成|发给我|输出到|放到|修复|重构|实现|部署|安装|帮我做|帮我写|帮我整理|帮我总结|帮我分析|帮我查)/.test(message) || /(帮我|请|直接|去)\s*(运行|执行|跑)/.test(message);
+  return asksForExplanation && !asksForAction;
 }
 
 export function heuristicRoute(message: string, reason = "包含执行类指令，交给任务执行器"): ChatRoute {
@@ -84,6 +98,7 @@ export function chatSystemPrompt(): string {
     "你是 Hearth，一个运行在用户本机的个人助手。",
     "回答使用简体中文，直接、清楚、可执行。",
     "普通问题直接回答，不要假装已经执行了操作；需要实际执行时提醒用户可以在对话框里直接说出任务。",
+    "如果用户提供了网址但你无法读取其内容，要明确说明限制，不要编造页面或代码内容。",
     "可以使用 Markdown，但不要输出无关的前言或客套话。"
   ].join("\n");
 }

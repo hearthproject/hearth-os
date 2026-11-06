@@ -14,6 +14,7 @@ import {
   chatModelConfigured,
   loadModelSettings,
   normalizeBaseUrl,
+  normalizeProtocol,
   saveModelSettings,
   viewModelSettings,
   type ModelSettings
@@ -41,9 +42,12 @@ const conversationPatchSchema = z.object({
   title: z.string().trim().min(1).max(80)
 }).strict();
 
+const modelProtocolSchema = z.enum(["openai-chat", "openai-responses", "anthropic-messages", "gemini"]);
+
 const modelSettingsSchema = z.object({
   providerId: z.string().trim().min(1).max(60).optional(),
   providerName: z.string().trim().min(1).max(80).optional(),
+  protocol: modelProtocolSchema.optional(),
   baseUrl: z.string().trim().max(500).optional(),
   model: z.string().trim().max(200).optional(),
   apiKey: z.string().max(500).optional()
@@ -52,6 +56,7 @@ const modelSettingsSchema = z.object({
 const modelProbeSchema = z.object({
   providerId: z.string().trim().max(60).optional(),
   providerName: z.string().trim().max(80).optional(),
+  protocol: modelProtocolSchema.optional(),
   baseUrl: z.string().trim().max(500).optional(),
   model: z.string().trim().max(200).optional(),
   apiKey: z.string().max(500).optional()
@@ -293,7 +298,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
           id: randomUUID(),
           conversationId: conversation.id,
           role: "assistant",
-          content: `已交给执行器：${task.title}\n\n可以到“任务”里查看进度和结果。`,
+          content: `已派出任务：${task.title}\n\n任务已出现在左侧对话目录，也可以到“任务”页查看进度和结果。`,
           taskId: task.id,
           attachments: [],
           createdAt: new Date().toISOString()
@@ -387,6 +392,7 @@ function safeExtension(name: string): string {
 function mergeModelSettings(current: ModelSettings, patch: {
   providerId?: string | undefined;
   providerName?: string | undefined;
+  protocol?: string | undefined;
   baseUrl?: string | undefined;
   model?: string | undefined;
   apiKey?: string | undefined;
@@ -395,6 +401,7 @@ function mergeModelSettings(current: ModelSettings, patch: {
     ...current,
     ...(patch.providerId !== undefined ? { providerId: patch.providerId } : {}),
     ...(patch.providerName !== undefined ? { providerName: patch.providerName } : {}),
+    ...(patch.protocol !== undefined ? { protocol: normalizeProtocol(patch.protocol) } : {}),
     ...(patch.baseUrl !== undefined ? { baseUrl: normalizeBaseUrl(patch.baseUrl) } : {}),
     ...(patch.model !== undefined ? { model: patch.model } : {}),
     ...(patch.apiKey !== undefined ? { apiKey: patch.apiKey } : {})
