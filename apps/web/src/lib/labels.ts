@@ -142,6 +142,25 @@ export const CATEGORY_LABELS: Record<string, string> = {
   marketing: "营销"
 };
 
+export const EXECUTOR_LABELS: Record<string, string> = {
+  native: "Hearth 原生",
+  codex: "Codex"
+};
+
+export const TASK_KIND_LABELS: Record<string, string> = {
+  delivery: "交付文件",
+  workspace: "工作区任务",
+  general: "通用任务"
+};
+
+export function executorLabel(id: string | null | undefined): string {
+  return id ? EXECUTOR_LABELS[id] ?? id : "自动选择";
+}
+
+export function taskKindLabel(kind: string | null | undefined): string {
+  return kind ? TASK_KIND_LABELS[kind] ?? kind : "通用任务";
+}
+
 export const EVENT_LABELS: Record<string, string> = {
   "task.created": "任务已创建",
   "task.updated": "状态更新",

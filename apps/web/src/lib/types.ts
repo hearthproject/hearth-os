@@ -53,6 +53,7 @@ import type {
   ProactiveSnapshot,
   ProactiveSuggestion,
   RunListItem,
+  RunCheckpointRecord,
   RunRecord,
   RunStatus,
   RunUsage,
@@ -65,6 +66,7 @@ import type {
   SyncPeer,
   TaskDeliverable,
   TaskListItem,
+  TaskProposalRecord,
   TaskRecord,
   TaskStatus
 } from "@hearth/core";
@@ -125,6 +127,7 @@ export type {
   ProactiveSnapshot,
   ProactiveSuggestion,
   RunListItem,
+  RunCheckpointRecord,
   RunRecord,
   RunStatus,
   RunUsage,
@@ -137,6 +140,7 @@ export type {
   SyncPeer,
   TaskDeliverable,
   TaskListItem,
+  TaskProposalRecord,
   TaskRecord,
   TaskStatus,
   TaskTemplate
@@ -148,6 +152,7 @@ export interface TaskView {
   approvals: ApprovalRecord[];
   artifacts: ArtifactRecord[];
   effects: EffectRecord[];
+  checkpoints: RunCheckpointRecord[];
   events: EventEnvelope[];
   eventTotal: number;
 }
@@ -274,6 +279,8 @@ export interface ConversationListItem extends ConversationRecord {
 export interface ConversationDetail {
   conversation: ConversationRecord;
   messages: ChatMessageRecord[];
+  tasks: TaskRecord[];
+  proposals: TaskProposalRecord[];
 }
 
 export interface AttachmentUploadResult {
@@ -371,7 +378,8 @@ export interface RunManifest {
   generatedAt: string;
   inputs: { label: string; kind: string; source: string; sha256: string; metadata?: unknown }[];
   expectedOutputs: string[];
-  codex: { threadId: string | null; profileLabel: string; usage: RunUsage | null };
+  executor?: { id: string; threadId: string | null; label: string; usage: RunUsage | null };
+  codex?: { threadId: string | null; profileLabel: string; usage: RunUsage | null };
   artifacts: { path: string; sha256: string; bytes: number }[];
 }
 

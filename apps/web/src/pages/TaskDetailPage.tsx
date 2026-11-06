@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { api } from "../lib/api.ts";
 import { formatBytes, formatDuration, formatTime, formatTokens, relativeTime } from "../lib/format.ts";
+import { executorLabel, taskKindLabel } from "../lib/labels.ts";
 import { ApprovalCard } from "../components/ApprovalCard.tsx";
 import { StatusPill } from "../components/StatusPill.tsx";
 import type { ArtifactRecord, RunRecord, TaskDeliverable, TaskView } from "../lib/types.ts";
@@ -50,11 +51,11 @@ export function TaskDetailPage() {
 
   const view = taskQuery.data;
   const task = view.task;
-  const deliverables = visibleDeliverables(view.artifacts);
+  const deliverables = visibleDeliverables(view.artifacts, task.expectedOutputs);
   const progress = progressEvents(view);
   const { visible: visibleProgress, technical: technicalProgress } = splitProgress(progress);
   const pendingApprovals = view.approvals.filter((approval) => approval.status === "pending");
-  const canRetry = task.status === "recoverable" || task.status === "failed";
+  const canRetry = task.status === "recoverable" || task.status === "failed" || task.status === "waiting_input";
   const canCancel = !["completed", "cancelled"].includes(task.status);
 
   async function openPreview(artifact: TaskDeliverable) {
@@ -90,15 +91,18 @@ export function TaskDetailPage() {
           <button className="ghost-button" onClick={() => void taskQuery.refetch()} disabled={taskQuery.isFetching}>
             <RefreshCw size={14} className={taskQuery.isFetching ? "spin" : ""} /> 刷新
           </button>
-          {canRetry && <button className="primary-button" onClick={() => retry.mutate()} disabled={retry.isPending}><RotateCcw size={14} /> 重试</button>}
+          {canRetry && <button className="primary-button" onClick={() => retry.mutate()} disabled={retry.isPending}><RotateCcw size={14} /> {task.status === "waiting_input" ? "继续" : "重试"}</button>}
           {canCancel && <button className="ghost-button danger" onClick={() => cancel.mutate()} disabled={cancel.isPending}><Square size={13} /> 取消</button>}
         </div>
       </div>
 
       <div className="task-meta-row">
         <span className={`phase-tag ${phaseTone(task.status)}`}>{phaseLabel(task.status, task.nextAction)}</span>
+        <span className="executor-tag">{executorLabel(task.executorId)}</span>
+        <span>{taskKindLabel(task.taskKind)}</span>
         <span><Clock3 size={13} /> {formatDuration(lastDuration(view.runs))}</span>
         <span>Token {formatTokens(lastUsage(view.runs))}</span>
+        {view.checkpoints.length > 0 && <span>{view.checkpoints.length} 个检查点</span>}
         <span>更新于 {relativeTime(task.updatedAt)}</span>
       </div>
 
@@ -180,13 +184,14 @@ export function TaskDetailPage() {
         <details open={false}>
           <summary>
             <span>执行过程</span>
-            <small>{view.runs.length} 次运行 · {visibleProgress.length} 条进度 · 点击展开</small>
+            <small>{executorLabel(task.executorId)} · {view.runs.length} 次运行 · {visibleProgress.length} 条进度 · 点击展开</small>
           </summary>
           <div className="process-body">
             {view.runs.map((run) => (
               <div key={run.id} className="run-card">
                 <div className="run-head">
                   <strong>第 {run.attempt} 次执行</strong>
+                  <span>{executorLabel(run.executorId)}</span>
                   <span className={`run-status ${run.status}`}>{runStatusLabel(run.status)}</span>
                   <span>{formatDuration(runDuration(run))}</span>
                   <span>Token {formatTokens(run.usage)}</span>
@@ -223,6 +228,22 @@ export function TaskDetailPage() {
                 </ol>
               </details>
             )}
+            {view.checkpoints.length > 0 && (
+              <details className="technical-details">
+                <summary>查看检查点 · {view.checkpoints.length} 个</summary>
+                <ol className="progress-timeline technical">
+                  {view.checkpoints.slice(-20).map((checkpoint) => (
+                    <li key={checkpoint.id}>
+                      <span className="dot" />
+                      <div>
+                        <p>第 {checkpoint.seq} 步 · {checkpoint.kind}</p>
+                        <small>{formatTime(checkpoint.createdAt)}</small>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              </details>
+            )}
             {task.conversationId && (
               <Link className="back-link" to="/">来自对话 {task.conversationId.slice(0, 8)} <ChevronRight size={13} /></Link>
             )}
@@ -233,12 +254,13 @@ export function TaskDetailPage() {
   );
 }
 
-function visibleDeliverables(artifacts: ArtifactRecord[]): TaskDeliverable[] {
+function visibleDeliverables(artifacts: ArtifactRecord[], expectedOutputs?: string[]): TaskDeliverable[] {
   return artifacts
     .filter((artifact) => {
       const path = artifact.relativePath.replace(/\\/g, "/");
       if (path === "run-manifest.json" || path === "pr-preview.json") return false;
       if (path.startsWith("inputs/") || path.startsWith("runtime/") || path.startsWith(".hearth/")) return false;
+      if (path.toLowerCase().endsWith(".json") && !isExpectedPath(path, expectedOutputs)) return false;
       return true;
     })
     .map((artifact) => ({
@@ -248,6 +270,14 @@ function visibleDeliverables(artifacts: ArtifactRecord[]): TaskDeliverable[] {
       mimeType: artifact.mimeType,
       bytes: artifact.bytes
     }));
+}
+
+function isExpectedPath(path: string, expectedOutputs: string[] | undefined): boolean {
+  if (!expectedOutputs) return true;
+  return expectedOutputs.some((expected) => {
+    const normalized = expected.replace(/\\/g, "/").replace(/\/+$/, "");
+    return path === normalized || path.startsWith(`${normalized}/`);
+  });
 }
 
 function progressEvents(view: TaskView) {

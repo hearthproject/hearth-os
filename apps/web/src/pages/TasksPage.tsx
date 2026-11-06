@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { ArrowRight, FileText, ListChecks, RefreshCw } from "lucide-react";
 import { api } from "../lib/api.ts";
 import { formatDuration, formatTokens, isActive, needsAttention, relativeTime } from "../lib/format.ts";
+import { executorLabel } from "../lib/labels.ts";
 import { StatusPill } from "../components/StatusPill.tsx";
 import type { TaskListItem } from "../lib/types.ts";
 
@@ -66,6 +67,7 @@ export function TasksPage() {
             <thead>
               <tr>
                 <th>任务</th>
+                <th>执行器</th>
                 <th>当前阶段</th>
                 <th>Token</th>
                 <th>耗时</th>
@@ -84,6 +86,7 @@ export function TasksPage() {
                     <p className="task-goal">{task.goal}</p>
                     <span className="task-time">{relativeTime(task.updatedAt)}</span>
                   </td>
+                  <td><span className="executor-tag">{executorLabel(task.executorId)}</span></td>
                   <td><span className={`phase-tag ${phaseTone(task.status)}`}>{task.summary.phase}</span></td>
                   <td className="mono">{formatTokens(task.summary.lastUsage)}</td>
                   <td className="mono">{formatDuration(task.summary.lastDurationMs)}</td>
