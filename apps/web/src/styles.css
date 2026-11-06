@@ -2142,6 +2142,11 @@ button.list-row:hover {
   font-size: var(--fs-12);
 }
 
+.device-start-target {
+  max-width: 220px;
+  margin-top: var(--gap-2);
+}
+
 .device-session {
   border-top: 1px solid var(--line);
 }
@@ -2243,6 +2248,10 @@ button.list-row:hover {
 
 .device-frame-area > .ghost-button {
   align-self: flex-start;
+}
+
+.device-observe-row {
+  align-items: flex-end;
 }
 
 .device-actions {

@@ -110,11 +110,14 @@ export const api = {
   submitOutboxDraft: (id: string) => request<OutboxSubmitResult>(`/api/outbox/${encodeURIComponent(id)}/submit`, { method: "POST" }),
   desktop: () => request<DesktopDashboard>("/api/desktop"),
   desktopSession: (id: string) => request<DesktopSessionView>(`/api/desktop/sessions/${encodeURIComponent(id)}`),
-  createDesktopSession: (deviceId: string) => request<DesktopSessionView>("/api/desktop/sessions", {
+  createDesktopSession: (deviceId: string, targetApp?: string) => request<DesktopSessionView>("/api/desktop/sessions", {
     method: "POST",
-    body: JSON.stringify({ deviceId })
+    body: JSON.stringify({ deviceId, ...(targetApp ? { targetApp } : {}) })
   }),
-  observeDesktop: (sessionId: string) => request<DesktopSessionView>(`/api/desktop/sessions/${encodeURIComponent(sessionId)}/observe`, { method: "POST" }),
+  observeDesktop: (sessionId: string, targetApp?: string) => request<DesktopSessionView>(`/api/desktop/sessions/${encodeURIComponent(sessionId)}/observe`, {
+    method: "POST",
+    body: JSON.stringify(targetApp ? { targetApp } : {})
+  }),
   pauseDesktop: (sessionId: string) => request<DesktopSessionView>(`/api/desktop/sessions/${encodeURIComponent(sessionId)}/pause`, { method: "POST" }),
   resumeDesktop: (sessionId: string) => request<DesktopSessionView>(`/api/desktop/sessions/${encodeURIComponent(sessionId)}/resume`, { method: "POST" }),
   takeOverDesktop: (sessionId: string) => request<DesktopSessionView>(`/api/desktop/sessions/${encodeURIComponent(sessionId)}/takeover`, { method: "POST" }),

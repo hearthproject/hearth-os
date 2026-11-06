@@ -203,8 +203,13 @@ function DevicePanel({
   busy: string | null;
   perform: (key: string, work: () => Promise<unknown>, message: string) => Promise<boolean>;
 }) {
-  const observeApproved = device.capabilities.some((capability) => capability.kind === "observe" && capability.status === "approved");
+  const observeCapability = device.capabilities.find((capability) => capability.kind === "observe" && capability.status === "approved");
+  const observeApps = observeCapability?.apps ?? [];
+  const observeApproved = observeCapability !== undefined;
   const canStart = device.online && observeApproved;
+  const [startTargetApp, setStartTargetApp] = useState(observeApps.length === 1 ? observeApps[0] ?? "" : "");
+  const needsTarget = observeApps.length > 1;
+  const canCreateSession = canStart && (!needsTarget || Boolean(startTargetApp));
 
   return (
     <section className={`panel device-panel ${device.status === "revoked" ? "is-revoked" : ""}`}>
@@ -254,17 +259,30 @@ function DevicePanel({
 
       {device.status !== "revoked" && (
         session ? (
-          <SessionPanel sessionView={session} pro={pro} busy={busy} perform={perform} />
+          <SessionPanel sessionView={session} observeApps={observeApps} pro={pro} busy={busy} perform={perform} />
         ) : (
           <div className="device-session-start">
             <div>
               <h3>还没有桌面会话</h3>
               <p>开始后，助手会先观察当前白名单应用，不会直接输入。</p>
+              {needsTarget && (
+                <label className="device-action-field device-start-target">
+                  <span><Monitor size={13} /> 观察目标</span>
+                  <select value={startTargetApp} onChange={(event) => setStartTargetApp(event.target.value)}>
+                    <option value="" disabled>选择应用</option>
+                    {observeApps.map((app) => <option key={app} value={app}>{app}</option>)}
+                  </select>
+                </label>
+              )}
             </div>
             <button
               className="primary-button"
-              disabled={!canStart || busy === `session-${device.id}`}
-              onClick={() => void perform(`session-${device.id}`, () => api.createDesktopSession(device.id), "桌面会话已开始，等待助手回传第一张截图。")}
+              disabled={!canCreateSession || busy === `session-${device.id}`}
+              onClick={() => void perform(
+                `session-${device.id}`,
+                () => api.createDesktopSession(device.id, startTargetApp || undefined),
+                "桌面会话已开始，等待助手回传第一张截图。"
+              )}
             >
               <Eye size={14} /> 开始观察
             </button>
@@ -334,11 +352,13 @@ function CapabilityRow({
 
 function SessionPanel({
   sessionView,
+  observeApps,
   pro,
   busy,
   perform
 }: {
   sessionView: DesktopSessionView;
+  observeApps: string[];
   pro: boolean;
   busy: string | null;
   perform: (key: string, work: () => Promise<unknown>, message: string) => Promise<boolean>;
@@ -349,9 +369,18 @@ function SessionPanel({
   const [uiaType, setUiaType] = useState("Button");
   const [uiaValue, setUiaValue] = useState("");
   const [focusApp, setFocusApp] = useState(frame?.activeApp ?? "");
+  const [targetApp, setTargetApp] = useState(frame?.activeApp ?? (observeApps.length === 1 ? observeApps[0] ?? "" : ""));
   const actionKey = `desktop-action-${session.id}`;
   const active = session.status === "active";
-  const canAct = active && frame !== null && Date.parse(frame.expiresAt) > Date.now();
+  const effectiveTarget = targetApp && observeApps.includes(targetApp)
+    ? targetApp
+    : frame && observeApps.includes(frame.activeApp)
+      ? frame.activeApp
+      : observeApps.length === 1
+        ? observeApps[0] ?? ""
+        : "";
+  const targetMismatch = frame !== null && (effectiveTarget === "" || frame.activeApp !== effectiveTarget);
+  const canAct = active && frame !== null && Date.parse(frame.expiresAt) > Date.now() && !targetMismatch;
   const lastCommand = commands[commands.length - 1];
 
   async function sendAction(input: DesktopActionRequest, message: string): Promise<void> {
@@ -408,7 +437,7 @@ function SessionPanel({
               <img src={frame.url} alt={`${frame.windowTitle || frame.activeApp} 的桌面截图`} />
             </button>
             <p className="device-frame-meta">
-              <MousePointerClick size={13} /> {canAct ? "点击截图会在当前白名单应用中点按一次。" : "会话不在自动控制状态，截图仅供查看。"}
+              <MousePointerClick size={13} /> {targetMismatch ? "观察目标已切换，等待新截图后再操作。" : canAct ? "点击截图会在当前白名单应用中点按一次。" : "会话不在自动控制状态，截图仅供查看。"}
               <span>{frame.activeApp} · {frame.windowTitle || "未命名窗口"} · {formatDate(frame.capturedAt)}</span>
             </p>
             {pro && (
@@ -421,9 +450,20 @@ function SessionPanel({
             <span>{active || session.status === "paused" ? "等待助手回传新的观察。" : "你接管期间不会自动观察。"}</span>
           </div>
         )}
-        <button className="ghost-button" disabled={busy !== null} onClick={() => void perform(
-          `session-${session.id}-observe`, () => api.observeDesktop(session.id), "已请求观察；新截图到达后会自动显示。"
-        )}><RefreshCw size={14} /> 重新观察</button>
+        <div className="device-action-row device-observe-row">
+          <label className="device-action-field compact">
+            <span><Eye size={13} /> 观察目标</span>
+            <select value={effectiveTarget} onChange={(event) => setTargetApp(event.target.value)}>
+              {effectiveTarget === "" && <option value="" disabled>选择应用</option>}
+              {observeApps.map((app) => <option key={app} value={app}>{app}</option>)}
+            </select>
+          </label>
+          <button className="ghost-button" disabled={busy !== null || !effectiveTarget} onClick={() => void perform(
+            `session-${session.id}-observe`,
+            () => api.observeDesktop(session.id, effectiveTarget),
+            "已请求观察；新截图到达后会自动显示。"
+          )}><RefreshCw size={14} /> 重新观察</button>
+        </div>
       </div>
 
       {frame && active && (
