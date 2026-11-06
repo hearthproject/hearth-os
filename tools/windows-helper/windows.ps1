@@ -185,6 +185,7 @@ function Get-AppWindowCandidates([string]$targetApp, [string]$windowTitle) {
       app = Normalize-AppName $process.ProcessName
     }
   }
+  if ($candidates.Count -gt 0) { return @($candidates) }
   foreach ($hostProcess in @(Get-Process | Where-Object {
     $_.ProcessName.ToLowerInvariant() -eq "applicationframehost" -and $_.MainWindowHandle -ne [IntPtr]::Zero
   })) {
