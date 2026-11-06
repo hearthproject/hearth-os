@@ -8,6 +8,8 @@ import type {
   RunRecord,
   RunStatus,
   RunUsage,
+  SourceConnection,
+  SourceItem,
   TaskRecord,
   TaskStatus
 } from "./types.ts";
@@ -55,3 +57,11 @@ export type RunListItem = WithTaskTitle<RunRecord>;
 export type ApprovalListItem = WithTaskTitle<ApprovalRecord>;
 
 export type EffectListItem = WithTaskTitle<EffectRecord>;
+
+export interface SourceListResponse {
+  sources: SourceConnection[];
+}
+
+export interface SourceItemsResponse {
+  items: SourceItem[];
+}

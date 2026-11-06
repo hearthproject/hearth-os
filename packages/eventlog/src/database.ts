@@ -12,6 +12,8 @@ import type {
   RunRecord,
   RunStatus,
   RunUsage,
+  SourceConnection,
+  SourceItem,
   TaskRecord,
   TaskStatus
 } from "@hearth/core";
@@ -77,6 +79,18 @@ CREATE TABLE IF NOT EXISTS artifacts (
   absolute_path TEXT NOT NULL, mime_type TEXT NOT NULL, sha256 TEXT NOT NULL,
   bytes INTEGER NOT NULL, created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS sources (
+  id TEXT PRIMARY KEY, kind TEXT NOT NULL, provider TEXT NOT NULL, display_name TEXT NOT NULL,
+  account TEXT, root_path TEXT, allowed_hosts_json TEXT NOT NULL, status TEXT NOT NULL,
+  read_only INTEGER NOT NULL, item_count INTEGER NOT NULL, last_read_at TEXT,
+  last_error_json TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS source_items (
+  id TEXT PRIMARY KEY, source_id TEXT NOT NULL, item_key TEXT NOT NULL, label TEXT NOT NULL,
+  locator TEXT NOT NULL, content_path TEXT, content_hash TEXT, bytes INTEGER NOT NULL,
+  title TEXT, status TEXT NOT NULL, coverage_json TEXT NOT NULL, duplicate_of TEXT,
+  error_json TEXT, fetched_at TEXT NOT NULL, UNIQUE(source_id, item_key)
+);
 CREATE INDEX IF NOT EXISTS events_task_idx ON events(task_id, seq);
 CREATE INDEX IF NOT EXISTS runs_task_idx ON runs(task_id, created_at);
 CREATE INDEX IF NOT EXISTS approvals_task_idx ON approvals(task_id, status);
@@ -85,6 +99,7 @@ CREATE INDEX IF NOT EXISTS runs_created_idx ON runs(created_at);
 CREATE INDEX IF NOT EXISTS runs_status_idx ON runs(status);
 CREATE INDEX IF NOT EXISTS approvals_status_idx ON approvals(status, created_at);
 CREATE INDEX IF NOT EXISTS effects_status_idx ON effects(status, created_at);
+CREATE INDEX IF NOT EXISTS source_items_source_idx ON source_items(source_id, fetched_at);
 `;
 
 export class HearthStore {
@@ -183,6 +198,29 @@ export class HearthStore {
 
   listAllArtifacts(): ArtifactRecord[] {
     return (this.db.prepare("SELECT * FROM artifacts ORDER BY created_at DESC").all() as DbRow[]).map(rowToArtifact);
+  }
+
+  getSource(id: string): SourceConnection | null {
+    const row = this.db.prepare("SELECT * FROM sources WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToSource(row) : null;
+  }
+
+  listSources(): SourceConnection[] {
+    return (this.db.prepare("SELECT * FROM sources ORDER BY created_at ASC").all() as DbRow[]).map(rowToSource);
+  }
+
+  getSourceItem(id: string): SourceItem | null {
+    const row = this.db.prepare("SELECT * FROM source_items WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToSourceItem(row) : null;
+  }
+
+  listSourceItems(sourceId: string): SourceItem[] {
+    return (this.db.prepare("SELECT * FROM source_items WHERE source_id = ? ORDER BY label ASC").all(sourceId) as DbRow[]).map(rowToSourceItem);
+  }
+
+  findSourceItem(sourceId: string, itemKey: string): SourceItem | null {
+    const row = this.db.prepare("SELECT * FROM source_items WHERE source_id = ? AND item_key = ?").get(sourceId, itemKey) as DbRow | undefined;
+    return row ? rowToSourceItem(row) : null;
   }
 
   listRunsPage(opts: PageOptions): { runs: RunRecord[]; total: number } {
@@ -348,7 +386,7 @@ export class HearthStore {
   rebuildProjections(): void {
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      this.db.exec("DELETE FROM artifacts; DELETE FROM effects; DELETE FROM approvals; DELETE FROM runs; DELETE FROM tasks;");
+      this.db.exec("DELETE FROM source_items; DELETE FROM sources; DELETE FROM artifacts; DELETE FROM effects; DELETE FROM approvals; DELETE FROM runs; DELETE FROM tasks;");
       for (const event of this.listEvents()) this.applyEvent(event);
       this.db.exec("COMMIT");
     } catch (error) {
@@ -400,6 +438,10 @@ export class HearthStore {
       case "effect.created": return insertEffect(this.db, event.payload as EffectRecord);
       case "effect.updated": return updateEffect(this.db, event.payload as Record<string, unknown>);
       case "artifact.published": return insertArtifact(this.db, event.payload as ArtifactRecord);
+      case "source.created": return upsertSource(this.db, event.payload as SourceConnection);
+      case "source.updated": return updateSource(this.db, event.payload as Record<string, unknown>);
+      case "source.item.updated": return upsertSourceItem(this.db, event.payload as SourceItem);
+      case "source.cleared": return clearSource(this.db, String((event.payload as Record<string, unknown>).sourceId));
       case "task.progress":
       case "approval.expired": return;
       default: throw new Error(`Unknown event type: ${event.type}`);
@@ -518,6 +560,61 @@ function insertArtifact(db: DatabaseSync, artifact: ArtifactRecord): void {
   );
 }
 
+function upsertSource(db: DatabaseSync, source: SourceConnection): void {
+  db.prepare(
+    `INSERT INTO sources (id, kind, provider, display_name, account, root_path, allowed_hosts_json, status, read_only, item_count, last_read_at, last_error_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       kind=excluded.kind, provider=excluded.provider, display_name=excluded.display_name,
+       account=excluded.account, root_path=excluded.root_path, allowed_hosts_json=excluded.allowed_hosts_json,
+       status=excluded.status, read_only=excluded.read_only, item_count=excluded.item_count,
+       last_read_at=excluded.last_read_at, last_error_json=excluded.last_error_json, updated_at=excluded.updated_at`
+  ).run(
+    source.id, source.kind, source.provider, source.displayName, source.account, source.rootPath,
+    JSON.stringify(source.allowedHosts), source.status, source.readOnly ? 1 : 0, source.itemCount,
+    source.lastReadAt, source.lastError ? JSON.stringify(source.lastError) : null,
+    source.createdAt, source.updatedAt
+  );
+}
+
+function updateSource(db: DatabaseSync, patch: Record<string, unknown>): void {
+  const id = String(patch.id);
+  const columns: Record<string, string> = {
+    displayName: "display_name", account: "account", rootPath: "root_path", status: "status",
+    itemCount: "item_count", lastReadAt: "last_read_at", updatedAt: "updated_at"
+  };
+  for (const [key, column] of Object.entries(columns)) {
+    if (key in patch) db.prepare(`UPDATE sources SET ${column} = ? WHERE id = ?`).run((patch[key] as SQLInputValue) ?? null, id);
+  }
+  if ("allowedHosts" in patch) {
+    db.prepare("UPDATE sources SET allowed_hosts_json = ? WHERE id = ?").run(JSON.stringify(patch.allowedHosts ?? []), id);
+  }
+  if ("lastError" in patch) {
+    const error = patch.lastError as SourceConnection["lastError"];
+    db.prepare("UPDATE sources SET last_error_json = ? WHERE id = ?").run(error ? JSON.stringify(error) : null, id);
+  }
+}
+
+function upsertSourceItem(db: DatabaseSync, item: SourceItem): void {
+  db.prepare(
+    `INSERT INTO source_items (id, source_id, item_key, label, locator, content_path, content_hash, bytes, title, status, coverage_json, duplicate_of, error_json, fetched_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(source_id, item_key) DO UPDATE SET
+       label=excluded.label, locator=excluded.locator, content_path=excluded.content_path,
+       content_hash=excluded.content_hash, bytes=excluded.bytes, title=excluded.title,
+       status=excluded.status, coverage_json=excluded.coverage_json,
+       duplicate_of=excluded.duplicate_of, error_json=excluded.error_json, fetched_at=excluded.fetched_at`
+  ).run(
+    item.id, item.sourceId, item.itemKey, item.label, item.locator, item.contentPath,
+    item.contentHash, item.bytes, item.title, item.status, JSON.stringify(item.coverage),
+    item.duplicateOf, item.error ? JSON.stringify(item.error) : null, item.fetchedAt
+  );
+}
+
+function clearSource(db: DatabaseSync, sourceId: string): void {
+  db.prepare("DELETE FROM source_items WHERE source_id = ?").run(sourceId);
+}
+
 function rowToEvent(row: DbRow): EventEnvelope {
   return {
     seq: Number(row.seq), id: String(row.id), type: String(row.type),
@@ -585,6 +682,36 @@ function rowToArtifact(row: DbRow): ArtifactRecord {
     relativePath: String(row.relative_path), absolutePath: String(row.absolute_path),
     mimeType: String(row.mime_type), sha256: String(row.sha256), bytes: Number(row.bytes),
     createdAt: String(row.created_at)
+  };
+}
+
+function rowToSource(row: DbRow): SourceConnection {
+  return {
+    id: String(row.id), kind: String(row.kind) as SourceConnection["kind"],
+    provider: String(row.provider), displayName: String(row.display_name),
+    account: row.account == null ? null : String(row.account),
+    rootPath: row.root_path == null ? null : String(row.root_path),
+    allowedHosts: JSON.parse(String(row.allowed_hosts_json)),
+    status: String(row.status) as SourceConnection["status"], readOnly: true,
+    itemCount: Number(row.item_count),
+    lastReadAt: row.last_read_at == null ? null : String(row.last_read_at),
+    lastError: row.last_error_json == null ? null : JSON.parse(String(row.last_error_json)),
+    createdAt: String(row.created_at), updatedAt: String(row.updated_at)
+  };
+}
+
+function rowToSourceItem(row: DbRow): SourceItem {
+  return {
+    id: String(row.id), sourceId: String(row.source_id), itemKey: String(row.item_key),
+    label: String(row.label), locator: String(row.locator),
+    contentPath: row.content_path == null ? null : String(row.content_path),
+    contentHash: row.content_hash == null ? null : String(row.content_hash),
+    bytes: Number(row.bytes), title: row.title == null ? null : String(row.title),
+    status: String(row.status) as SourceItem["status"],
+    coverage: JSON.parse(String(row.coverage_json)),
+    duplicateOf: row.duplicate_of == null ? null : String(row.duplicate_of),
+    error: row.error_json == null ? null : JSON.parse(String(row.error_json)),
+    fetchedAt: String(row.fetched_at)
   };
 }
 
