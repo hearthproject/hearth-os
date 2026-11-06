@@ -356,14 +356,14 @@ function Capture-Foreground([string]$expectedApp) {
   }
 }
 
-function Invoke-UiaAction($input, $foreground) {
+function Invoke-UiaAction($action, $foreground) {
   if (-not $supportsUia) { Fail "UIA_UNAVAILABLE" "UI Automation is unavailable: $uiaError" }
   $root = [Windows.Automation.AutomationElement]::FromHandle([IntPtr]$foreground.handle)
   if ($null -eq $root) { Fail "UIA_WINDOW_UNAVAILABLE" "Could not read UI elements in the current window" }
   $conditions = @()
-  $conditions += [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty, [string]$input.elementName)
-  if (-not [string]::IsNullOrWhiteSpace([string]$input.controlType)) {
-    switch ([string]$input.controlType) {
+  $conditions += [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty, [string]$action.elementName)
+  if (-not [string]::IsNullOrWhiteSpace([string]$action.controlType)) {
+    switch ([string]$action.controlType) {
       "Button" { $type = [Windows.Automation.ControlType]::Button }
       "MenuItem" { $type = [Windows.Automation.ControlType]::MenuItem }
       "Edit" { $type = [Windows.Automation.ControlType]::Edit }
@@ -373,17 +373,17 @@ function Invoke-UiaAction($input, $foreground) {
       "CheckBox" { $type = [Windows.Automation.ControlType]::CheckBox }
       "ComboBox" { $type = [Windows.Automation.ControlType]::ComboBox }
       "TreeItem" { $type = [Windows.Automation.ControlType]::TreeItem }
-      default { Fail "UIA_CONTROL_TYPE" "Unsupported control type: $($input.controlType)" }
+      default { Fail "UIA_CONTROL_TYPE" "Unsupported control type: $($action.controlType)" }
     }
     $conditions += [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty, $type)
   }
   $condition = if ($conditions.Count -eq 1) { $conditions[0] } else { [Windows.Automation.AndCondition]::new([Windows.Automation.Condition[]]$conditions) }
   $element = $root.FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
-  if ($null -eq $element) { Fail "UIA_ELEMENT_NOT_FOUND" "No UI element named $($input.elementName) was found" }
-  if ($input.kind -eq "uia.setvalue") {
+  if ($null -eq $element) { Fail "UIA_ELEMENT_NOT_FOUND" "No UI element named $($action.elementName) was found" }
+  if ($action.kind -eq "uia.setvalue") {
     try {
       $pattern = [Windows.Automation.ValuePattern]$element.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern)
-      $pattern.SetValue([string]$input.value)
+      $pattern.SetValue([string]$action.value)
       return "ValuePattern"
     } catch {
       Fail "UIA_VALUE_UNSUPPORTED" "This UI element does not support value writes"
