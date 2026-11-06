@@ -1,20 +1,42 @@
 import type {
+  ApprovalListItem,
   ApprovalRecord,
+  ApprovalStatus,
+  ArtifactListItem,
   ArtifactRecord,
+  EffectListItem,
   EffectRecord,
+  EffectStatus,
   EventEnvelope,
+  EventWindow,
+  RunListItem,
   RunRecord,
+  RunStatus,
+  RunUsage,
+  StatsSnapshot,
+  TaskListItem,
   TaskRecord,
   TaskStatus
 } from "@hearth/core";
 import type { TaskTemplate } from "@hearth/templates";
 
 export type {
+  ApprovalListItem,
   ApprovalRecord,
+  ApprovalStatus,
+  ArtifactListItem,
   ArtifactRecord,
+  EffectListItem,
   EffectRecord,
+  EffectStatus,
   EventEnvelope,
+  EventWindow,
+  RunListItem,
   RunRecord,
+  RunStatus,
+  RunUsage,
+  StatsSnapshot,
+  TaskListItem,
   TaskRecord,
   TaskStatus,
   TaskTemplate
@@ -27,6 +49,7 @@ export interface TaskView {
   artifacts: ArtifactRecord[];
   effects: EffectRecord[];
   events: EventEnvelope[];
+  eventTotal: number;
 }
 
 export interface SystemStatus {
@@ -51,9 +74,7 @@ export interface HealthResponse {
   };
 }
 
-export interface ArtifactListItem extends ArtifactRecord {
-  taskTitle: string;
-}
+export type PreviewableArtifact = Pick<ArtifactRecord, "id" | "taskId" | "relativePath" | "mimeType" | "bytes">;
 
 export interface CreateTaskRequest {
   templateId?: string;
@@ -66,4 +87,18 @@ export interface ApprovalDecisionResult {
   approval: ApprovalRecord;
   task: TaskRecord;
   effect: EffectRecord | null;
+}
+
+export interface RunManifest {
+  schemaVersion: number;
+  taskId: string;
+  templateId: string | null;
+  title: string;
+  runId: string;
+  attempt: number;
+  generatedAt: string;
+  inputs: { label: string; kind: string; source: string; sha256: string; metadata?: unknown }[];
+  expectedOutputs: string[];
+  codex: { threadId: string | null; profileLabel: string; usage: RunUsage | null };
+  artifacts: { path: string; sha256: string; bytes: number }[];
 }

@@ -1,11 +1,13 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Flame, Inbox, Package, Play, Plus, Power, Settings2, Sun } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { CalendarDays, FileText, Inbox, Plus, Settings2 } from "lucide-react";
 import { NavLink, Outlet, useNavigate, useOutletContext } from "react-router-dom";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { api } from "../lib/api.ts";
 import { needsAttention } from "../lib/format.ts";
-import type { TaskRecord, TaskTemplate } from "../lib/types.ts";
+import type { TaskRecord } from "../lib/types.ts";
+import { HearthMark } from "./HearthMark.tsx";
 import { NewTaskModal } from "./NewTaskModal.tsx";
+import { Topbar } from "./Topbar.tsx";
 
 export interface ShellContext {
   openNewTask: () => void;
@@ -18,43 +20,11 @@ export function useShell(): ShellContext {
 export function AppShell() {
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const tasksQuery = useQuery({ queryKey: ["tasks"], queryFn: api.tasks, refetchInterval: 10_000 });
   const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 30_000 });
-  const systemQuery = useQuery({ queryKey: ["system"], queryFn: api.system, refetchInterval: 5_000 });
   const templatesQuery = useQuery({ queryKey: ["templates"], queryFn: api.templates, enabled: newTaskOpen });
-  const tasks = tasksQuery.data?.tasks ?? [];
-  const attentionCount = tasks.filter((task) => needsAttention(task.status)).length;
-  const [confirmStop, setConfirmStop] = useState(false);
-  const [systemBusy, setSystemBusy] = useState(false);
-  const [systemError, setSystemError] = useState<string | null>(null);
-  const confirmTimer = useRef<number | undefined>(undefined);
-  const system = systemQuery.data;
-  const systemRunning = system?.running ?? true;
-
-  useEffect(() => () => window.clearTimeout(confirmTimer.current), []);
-
-  async function toggleSystem() {
-    if (systemBusy) return;
-    setSystemError(null);
-    if (systemRunning && !confirmStop) {
-      setConfirmStop(true);
-      window.clearTimeout(confirmTimer.current);
-      confirmTimer.current = window.setTimeout(() => setConfirmStop(false), 5_000);
-      return;
-    }
-    setSystemBusy(true);
-    try {
-      if (systemRunning) await api.stopSystem();
-      else await api.startSystem();
-      setConfirmStop(false);
-      await queryClient.invalidateQueries();
-    } catch (error) {
-      setSystemError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setSystemBusy(false);
-    }
-  }
+  const attentionCount = (tasksQuery.data?.tasks ?? []).filter((task) => needsAttention(task.status)).length;
+  const codex = healthQuery.data?.codex;
 
   function handleCreated(task: TaskRecord) {
     setNewTaskOpen(false);
@@ -65,57 +35,47 @@ export function AppShell() {
     <div className="shell">
       <aside className="sidebar">
         <div className="brand">
-          <span className="brand-mark"><Flame size={21} strokeWidth={1.8} /></span>
+          <HearthMark size={22} />
           <span className="brand-name">Hearth</span>
-          <span className="brand-tag">LOCAL</span>
         </div>
 
         <button className="sidebar-create" onClick={() => setNewTaskOpen(true)}>
-          <Plus size={17} /> 新建任务
+          <Plus size={16} /> <span className="nav-label">新建任务</span>
         </button>
 
         <nav className="nav">
-          <NavLink to="/" end className={({ isActive }) => isActive ? "nav-item active" : "nav-item"}>
-            <Sun size={18} /> 今天
+          <NavLink to="/" end className={({ isActive }) => (isActive ? "nav-item active" : "nav-item")}>
+            <CalendarDays size={16} /> <span className="nav-label">今天</span>
           </NavLink>
-          <NavLink to="/attention" className={({ isActive }) => isActive ? "nav-item active" : "nav-item"}>
-            <Inbox size={18} /> 需要你
+          <NavLink to="/attention" className={({ isActive }) => (isActive ? "nav-item active" : "nav-item")}>
+            <Inbox size={16} /> <span className="nav-label">需要你</span>
             {attentionCount > 0 && <span className="nav-badge">{attentionCount}</span>}
           </NavLink>
-          <NavLink to="/artifacts" className={({ isActive }) => isActive ? "nav-item active" : "nav-item"}>
-            <Package size={18} /> 产物
+          <NavLink to="/artifacts" className={({ isActive }) => (isActive ? "nav-item active" : "nav-item")}>
+            <FileText size={16} /> <span className="nav-label">产物</span>
           </NavLink>
-          <NavLink to="/settings" className={({ isActive }) => isActive ? "nav-item active" : "nav-item"}>
-            <Settings2 size={18} /> 设置
+          <NavLink to="/settings" className={({ isActive }) => (isActive ? "nav-item active" : "nav-item")}>
+            <Settings2 size={16} /> <span className="nav-label">设置</span>
           </NavLink>
         </nav>
 
         <div className="sidebar-spacer" />
-        {system?.schedulerEnabled !== false && (
-          <div className={`system-control ${systemRunning ? "" : "paused"}`}>
-            <button className="system-button" onClick={() => void toggleSystem()} disabled={systemBusy}>
-              {systemRunning ? <Power size={14} /> : <Play size={14} />}
-              {systemBusy ? "正在处理…" : systemRunning ? (confirmStop ? "再次点击确认停止" : "停止所有任务") : "恢复执行"}
-            </button>
-            <small>
-              {systemError ?? (systemRunning
-                ? `${(system?.runningTasks ?? 0) + (system?.queued ?? 0)} 个待处理任务`
-                : "已全部停止，队列和审批会保留")}
-            </small>
-          </div>
-        )}
+
         <NavLink to="/settings" className="codex-status">
-          <span className={`status-dot ${healthQuery.data?.codex.canRun ? "online" : "offline"}`} />
+          <span className={`status-dot ${codex?.canRun ? "online" : "offline"}`} />
           <span>
-            <strong>{healthQuery.data?.codex.canRun ? "Codex 已连接" : "Codex 待连接"}</strong>
-            <small>{healthQuery.data?.codex.providerName ?? "检查本地配置"}</small>
+            <strong>{codex?.canRun ? "执行器可用" : "执行器不可用"}</strong>
+            <small>{codex ? `${codex.providerName} · ${codex.model ?? "默认模型"}` : "读取本机配置中"}</small>
           </span>
         </NavLink>
-        <p className="sidebar-note">所有任务在本机执行<br />数据不会离开这台电脑</p>
+        <p className="sidebar-note">仅监听 127.0.0.1</p>
       </aside>
 
       <main className="main">
-        <Outlet context={{ openNewTask: () => setNewTaskOpen(true) } satisfies ShellContext} />
+        <Topbar />
+        <div className="main-body">
+          <Outlet context={{ openNewTask: () => setNewTaskOpen(true) } satisfies ShellContext} />
+        </div>
       </main>
 
       <NewTaskModal

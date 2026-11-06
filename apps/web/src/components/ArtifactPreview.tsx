@@ -4,9 +4,9 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api } from "../lib/api.ts";
 import { formatBytes } from "../lib/format.ts";
-import type { ArtifactRecord } from "../lib/types.ts";
+import type { PreviewableArtifact } from "../lib/types.ts";
 
-export function ArtifactPreview({ artifact, onClose }: { artifact: ArtifactRecord; onClose: () => void }) {
+export function ArtifactPreview({ artifact, onClose }: { artifact: PreviewableArtifact; onClose: () => void }) {
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const url = api.artifactUrl(artifact.taskId, artifact.id);

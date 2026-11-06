@@ -1,51 +1,58 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { FileJson, FileText, Image as ImageIcon, Package } from "lucide-react";
 import { ArtifactPreview } from "../components/ArtifactPreview.tsx";
-import { EmptyState } from "../components/EmptyState.tsx";
 import { api } from "../lib/api.ts";
-import { formatBytes, relativeTime } from "../lib/format.ts";
+import { abbreviateHash, formatBytes, relativeTime } from "../lib/format.ts";
 import type { ArtifactListItem } from "../lib/types.ts";
+import { useViewMode } from "../lib/view-mode.tsx";
 
 export function ArtifactsPage() {
   const [selected, setSelected] = useState<ArtifactListItem | null>(null);
+  const { mode } = useViewMode();
+  const pro = mode === "pro";
   const artifactsQuery = useQuery({ queryKey: ["artifacts"], queryFn: api.artifacts, refetchInterval: 8_000 });
   const artifacts = artifactsQuery.data?.artifacts ?? [];
 
   return (
     <div className="page">
-      <header className="page-top compact">
-        <div>
-          <span className="eyebrow">产物</span>
-          <h1>结果都放在这里，<em>随时可以查阅。</em></h1>
-          <p className="page-lead">每个产物都有来源、大小和校验记录。点击即可预览，原件保存在本仓库的 `eval/runs` 中。</p>
-        </div>
-      </header>
+      <div className="page-head">
+        <h1>产物</h1>
+        <span className="page-meta">每个产物都有来源和校验值。</span>
+      </div>
 
-      {artifacts.length === 0 ? (
-        <section className="panel comfortable">
-          <EmptyState icon={Package} title="还没有产物" body="任务完成后，生成的文档、表格和运行清单会按任务归档到这里。" />
+      {artifactsQuery.isLoading ? (
+        <p className="section-empty">正在读取产物…</p>
+      ) : artifacts.length === 0 ? (
+        <section className="panel">
+          <p className="section-empty">还没有产物。任务完成后，文件会按任务归档到这里。</p>
         </section>
       ) : (
-        <div className="artifact-grid">
-          {artifacts.map((artifact) => {
-            const Icon = artifact.mimeType.startsWith("image/") ? ImageIcon : artifact.mimeType.includes("json") ? FileJson : FileText;
-            return (
-              <button key={artifact.id} className="artifact-card" onClick={() => setSelected(artifact)}>
-                <span className="artifact-card-icon"><Icon size={21} /></span>
-                <span className="artifact-card-copy">
-                  <strong>{artifact.relativePath.split("/").pop()}</strong>
-                  <small>{artifact.taskTitle}</small>
-                  <span>{artifact.relativePath}</span>
-                </span>
-                <span className="artifact-card-meta">
-                  {formatBytes(artifact.bytes)}
-                  <small>{relativeTime(artifact.createdAt)}</small>
-                </span>
-              </button>
-            );
-          })}
-        </div>
+        <section className="panel table-panel">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th scope="col">文件</th>
+                <th scope="col">任务</th>
+                <th scope="col" className="align-num">大小</th>
+                <th scope="col">保存时间</th>
+                {pro && <th scope="col">SHA-256</th>}
+                {pro && <th scope="col">路径</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {artifacts.map((artifact) => (
+                <tr key={artifact.id}>
+                  <td><button className="link-button" onClick={() => setSelected(artifact)}>{artifact.relativePath.split("/").pop()}</button></td>
+                  <td className="truncate">{artifact.taskTitle}</td>
+                  <td className="align-num">{formatBytes(artifact.bytes)}</td>
+                  <td>{relativeTime(artifact.createdAt)}</td>
+                  {pro && <td className="mono select-all tiny" title={artifact.sha256}>{abbreviateHash(artifact.sha256, 16, 8)}</td>}
+                  {pro && <td className="mono truncate" title={artifact.relativePath}>{artifact.relativePath}</td>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
       )}
 
       {selected && <ArtifactPreview artifact={selected} onClose={() => setSelected(null)} />}

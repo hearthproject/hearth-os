@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AppShell } from "./components/AppShell.tsx";
 import { subscribeToEvents } from "./lib/api.ts";
 import { ArtifactsPage } from "./pages/ArtifactsPage.tsx";
@@ -29,6 +29,8 @@ export default function App() {
 
 function EventBridge() {
   const queryClient = useQueryClient();
+  const { pathname } = useLocation();
+  const taskId = pathname.startsWith("/tasks/") ? decodeURIComponent(pathname.slice("/tasks/".length)) : null;
 
   useEffect(() => {
     let refreshTimer: number | undefined;
@@ -36,16 +38,20 @@ function EventBridge() {
       window.clearTimeout(refreshTimer);
       refreshTimer = window.setTimeout(() => {
         void queryClient.invalidateQueries({ queryKey: ["tasks"] });
-        void queryClient.invalidateQueries({ queryKey: ["task"] });
         void queryClient.invalidateQueries({ queryKey: ["artifacts"] });
-        void queryClient.invalidateQueries({ queryKey: ["health"] });
+        void queryClient.invalidateQueries({ queryKey: ["stats"] });
+        void queryClient.invalidateQueries({ queryKey: ["system"] });
+        if (taskId) {
+          void queryClient.invalidateQueries({ queryKey: ["task", taskId] });
+          void queryClient.invalidateQueries({ queryKey: ["taskEvents", taskId] });
+        }
       }, 250);
     });
     return () => {
       window.clearTimeout(refreshTimer);
       unsubscribe();
     };
-  }, [queryClient]);
+  }, [queryClient, taskId]);
 
   return null;
 }

@@ -3,12 +3,13 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App.tsx";
+import { ViewModeProvider } from "./lib/view-mode.tsx";
 import "./styles.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 1_500,
+      staleTime: 5_000,
       retry: 1,
       refetchOnWindowFocus: true
     }
@@ -18,9 +19,11 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
+      <ViewModeProvider>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </ViewModeProvider>
     </QueryClientProvider>
   </StrictMode>
 );

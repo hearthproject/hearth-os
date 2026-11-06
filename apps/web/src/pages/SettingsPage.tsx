@@ -1,89 +1,96 @@
 import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2, Cpu, Download, FileJson, HardDrive, KeyRound, Loader2, RefreshCw, ShieldCheck, WifiOff } from "lucide-react";
+import { Download, FileJson, RefreshCw } from "lucide-react";
 import { api } from "../lib/api.ts";
+import { countTotal, formatBytes, formatDuration, formatNumber, formatTokens } from "../lib/format.ts";
+import { AUTH_SOURCE_LABELS } from "../lib/labels.ts";
+import { useViewMode } from "../lib/view-mode.tsx";
 
 export function SettingsPage() {
+  const { mode } = useViewMode();
+  const pro = mode === "pro";
   const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 20_000 });
+  const statsQuery = useQuery({ queryKey: ["stats"], queryFn: api.stats, refetchInterval: 30_000, enabled: pro });
   const health = healthQuery.data;
-  const authLabel = health?.codex.authSource === "provider-env"
-    ? "自定义 Provider 的环境变量"
-    : health?.codex.authSource === "openai-login"
-      ? "OpenAI 登录"
-      : "未检测到可用认证";
+  const stats = statsQuery.data;
 
   return (
     <div className="page settings-page">
-      <header className="page-top compact">
-        <div>
-          <span className="eyebrow">设置</span>
-          <h1>本机、可控、<em>不依赖云端账号。</em></h1>
-          <p className="page-lead">Hearth 只监听本机地址。Codex 使用你现有的 <code>~/.codex/config.toml</code>，可以直接走自定义模型 Provider。</p>
-        </div>
+      <div className="page-head">
+        <h1>设置</h1>
         <button className="ghost-button" onClick={() => void healthQuery.refetch()} disabled={healthQuery.isFetching}>
-          <RefreshCw size={16} className={healthQuery.isFetching ? "spin" : ""} /> 重新检查
+          <RefreshCw size={15} className={healthQuery.isFetching ? "spin" : ""} /> 重新检查
         </button>
-      </header>
+      </div>
 
-      <section className={`connection-card ${health?.codex.canRun ? "connected" : "disconnected"}`}>
-        <div className="connection-icon">
-          {healthQuery.isLoading ? <Loader2 className="spin" size={26} /> : health?.codex.canRun ? <CheckCircle2 size={26} /> : <WifiOff size={26} />}
+      <section className="panel">
+        <div className="panel-head">
+          <h2>执行器</h2>
+          <span className="panel-meta">{health ? (health.codex.canRun ? "可用" : "不可用") : "读取中"}</span>
         </div>
-        <div>
-          <span className="eyebrow">Codex 执行器</span>
-          <h2>{health?.codex.canRun ? "已连接，可以开始工作" : "尚未检测到可用连接"}</h2>
-          <p>{health?.codex.canRun ? "当前使用自定义 Provider 认证，不要求 OpenAI 登录。" : health?.codex.issues.join("；") || "正在读取本地配置。"}</p>
-        </div>
-        <span className={`connection-badge ${health?.codex.canRun ? "online" : "offline"}`}>{health?.codex.canRun ? "可用" : "不可用"}</span>
+        <dl className="kv-grid">
+          <div><dt>状态</dt><dd>{health?.codex.canRun ? "可以开始工作" : health ? (health.codex.issues.join("；") || "本机配置不完整") : "正在读取本机配置"}</dd></div>
+          <div><dt>Provider</dt><dd>{health?.codex.providerName ?? "—"}</dd></div>
+          <div><dt>模型</dt><dd>{health?.codex.model ?? "默认模型"}</dd></div>
+          <div><dt>认证来源</dt><dd>{health ? AUTH_SOURCE_LABELS[health.codex.authSource] ?? health.codex.authSource : "—"}</dd></div>
+          {pro && <div><dt>Provider ID</dt><dd className="mono select-all">{health?.codex.providerId ?? "—"}</dd></div>}
+          {pro && health && health.codex.issues.length > 0 && (
+            <div><dt>问题</dt><dd className="mono">{health.codex.issues.join("；")}</dd></div>
+          )}
+        </dl>
+        <p className="page-meta">密钥只由本机服务进程读取，不进入浏览器。</p>
       </section>
 
-      <div className="settings-grid">
-        <section className="settings-card">
-          <span className="settings-icon"><Cpu size={20} /></span>
-          <h3>执行模型</h3>
-          <dl>
-            <div><dt>Provider</dt><dd>{health?.codex.providerName ?? "—"}</dd></div>
-            <div><dt>模型</dt><dd>{health?.codex.model ?? "默认模型"}</dd></div>
-            <div><dt>认证来源</dt><dd>{authLabel}</dd></div>
-          </dl>
-          <p className="settings-note">认证密钥只由本机服务进程读取，不会进入浏览器。</p>
-        </section>
+      <section className="panel">
+        <div className="panel-head"><h2>本机数据</h2></div>
+        <dl className="kv-grid">
+          <div><dt>服务地址</dt><dd className="mono">127.0.0.1:4317</dd></div>
+          <div><dt>运行数据</dt><dd className="mono">.hearth/</dd></div>
+          <div><dt>产物目录</dt><dd className="mono">eval/runs/</dd></div>
+        </dl>
+        <div className="settings-actions">
+          <button className="ghost-button" onClick={api.downloadBackup}><Download size={15} /> 下载数据库备份</button>
+          <button className="ghost-button" onClick={api.downloadExport}><FileJson size={15} /> 导出任务记录</button>
+        </div>
+      </section>
 
-        <section className="settings-card">
-          <span className="settings-icon"><KeyRound size={20} /></span>
-          <h3>无需 Codex 登录</h3>
-          <p>只要 <code>config.toml</code> 中配置了 <code>model_provider</code> 和对应的 <code>env_key</code>，即使 <code>codex login status</code> 显示未登录，执行器也能正常工作。</p>
-          <div className={`inline-status ${health?.codex.authSource === "provider-env" ? "ok" : ""}`}>
-            <span className="status-dot online" /> {authLabel}
+      {pro && (
+        <section className="panel">
+          <div className="panel-head">
+            <h2>用量</h2>
+            <span className="panel-meta">{stats ? `事实记录 ${formatNumber(stats.events.total)} 条` : "读取中"}</span>
           </div>
+          {stats && (
+            <dl className="kv-grid">
+              <div><dt>任务</dt><dd>{formatNumber(stats.tasks.total)} · 已完成 {formatNumber(stats.tasks.byStatus.completed)}</dd></div>
+              <div><dt>执行</dt><dd>{formatNumber(stats.runs.total)} 次 · 失败 {formatNumber(stats.runs.byStatus.failed)}</dd></div>
+              <div><dt>累计时长</dt><dd>{formatDuration(stats.runs.durationMs)}</dd></div>
+              <div><dt>Token</dt><dd className="mono">{formatTokens(stats.runs.usage)}</dd></div>
+              <div>
+                <dt>输入明细</dt>
+                <dd className="mono">
+                  {stats.runs.usage
+                    ? `输入 ${formatNumber(stats.runs.usage.inputTokens)} · 缓存 ${formatNumber(stats.runs.usage.cachedInputTokens)} · 输出 ${formatNumber(stats.runs.usage.outputTokens)} · 推理 ${formatNumber(stats.runs.usage.reasoningOutputTokens)}`
+                    : "未记录"}
+                </dd>
+              </div>
+              <div><dt>外部动作</dt><dd>{formatNumber(countTotal(stats.effects.byStatus))}</dd></div>
+              <div><dt>审批</dt><dd>待决定 {stats.approvals.byStatus.pending} · 已拒绝 {stats.approvals.byStatus.rejected} · 已过期 {stats.approvals.byStatus.expired}</dd></div>
+              <div><dt>产物</dt><dd>{stats.artifacts.count} 个 · {formatBytes(stats.artifacts.bytes)}</dd></div>
+              <div><dt>事实记录水位</dt><dd className="mono">seq {formatNumber(stats.events.latestSeq)}</dd></div>
+            </dl>
+          )}
         </section>
+      )}
 
-        <section className="settings-card">
-          <span className="settings-icon"><HardDrive size={20} /></span>
-          <h3>本地数据</h3>
-          <dl>
-            <div><dt>服务地址</dt><dd>127.0.0.1:4317</dd></div>
-            <div><dt>运行数据</dt><dd>.hearth/</dd></div>
-            <div><dt>验收产物</dt><dd>eval/runs/</dd></div>
-          </dl>
-          <p className="settings-note">任务状态写入本地 SQLite 事件日志，刷新或重启后可重建。</p>
-          <p className="settings-note">备份：停止任务后复制 <code>.hearth/hearth.sqlite</code>；任务产物位于 <code>eval/runs/</code> 和 <code>.hearth/artifacts/</code>，一并复制即可完整导出。</p>
-          <div className="settings-actions">
-            <button className="ghost-button" onClick={api.downloadBackup}><Download size={15} /> 下载数据库备份</button>
-            <button className="ghost-button" onClick={api.downloadExport}><FileJson size={15} /> 导出任务记录</button>
-          </div>
-        </section>
-
-        <section className="settings-card">
-          <span className="settings-icon"><ShieldCheck size={20} /></span>
-          <h3>安全边界</h3>
-          <ul className="plain-list">
-            <li>Codex 在隔离任务工作区中执行</li>
-            <li>默认禁用联网、网页搜索和 GitHub 凭据</li>
-            <li>推送、评论、发布前必须单独审批</li>
-            <li>失败不会悄悄重复外部副作用</li>
-          </ul>
-        </section>
-      </div>
+      <section className="panel">
+        <div className="panel-head"><h2>边界</h2></div>
+        <ul className="plain-list">
+          <li>执行器在隔离任务工作区中运行</li>
+          <li>默认禁用联网、网页搜索和 GitHub 凭据</li>
+          <li>推送、评论、发布前必须单独审批</li>
+          <li>失败不会重复已经执行的外部动作</li>
+        </ul>
+      </section>
     </div>
   );
 }
