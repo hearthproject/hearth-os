@@ -109,16 +109,30 @@ describe("chat-first API", () => {
     await app.close();
   });
 
-  it("routes engineering requests to the codex executor", async () => {
+  it("asks for confirmation before routing engineering work to codex", async () => {
     const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
     const response = await app.inject({
       method: "POST",
       url: "/api/chat",
       payload: { message: "帮我修复项目里的 TypeScript 错误" }
     });
-    const task = parseSse(response.body).find((event) => event.event === "task")?.data.task;
+    const events = parseSse(response.body);
+    const proposal = events.find((event) => event.event === "proposal")?.data.proposal;
+    expect(events.some((event) => event.event === "task")).toBe(false);
+    expect(proposal.executorId).toBe("codex");
+    expect(proposal.taskKind).toBe("workspace");
+    expect(proposal.reason).toContain("工作区");
+
+    const confirmed = await app.inject({ method: "POST", url: `/api/task-proposals/${proposal.id}/confirm` });
+    expect(confirmed.statusCode).toBe(200);
+    const task = confirmed.json().task;
     expect(task.executorId).toBe("codex");
     expect(task.taskKind).toBe("workspace");
+    expect(task.inputs.some((input: { kind: string }) => input.kind === "text")).toBe(true);
+
+    const detail = await app.inject({ method: "GET", url: `/api/conversations/${proposal.conversationId}` });
+    expect(detail.json().tasks).toHaveLength(1);
+    expect(detail.json().proposals[0].status).toBe("confirmed");
     await app.close();
   });
 
@@ -148,14 +162,17 @@ describe("chat-first API", () => {
     await app.close();
   });
 
-  it("turns a pasted URL into a task with a fetched web input", async () => {
+  it("keeps a pasted URL in the task after confirming network access", async () => {
     const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
     const response = await app.inject({
       method: "POST",
       url: "/api/chat",
       payload: { message: "帮我总结这个网页 https://example.com/article" }
     });
-    const task = parseSse(response.body).find((event) => event.event === "task")?.data.task;
+    const proposal = parseSse(response.body).find((event) => event.event === "proposal")?.data.proposal;
+    expect(proposal.permissions.networkHosts).toContain("example.com");
+    const confirmed = await app.inject({ method: "POST", url: `/api/task-proposals/${proposal.id}/confirm` });
+    const task = confirmed.json().task;
     expect(task.networkHosts).toContain("example.com");
     expect(task.inputs.some((input: { kind: string; value: string }) => input.kind === "url" && input.value === "https://example.com/article")).toBe(true);
     await app.close();

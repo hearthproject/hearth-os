@@ -4,7 +4,7 @@ import { extname, join } from "node:path";
 import multipart from "@fastify/multipart";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
-import type { ChatAttachment, ChatMessageRecord } from "@hearth/core";
+import type { ChatAttachment, ChatMessageRecord, TaskInput } from "@hearth/core";
 import { loadCodexProfile, probeCodex } from "@hearth/codex-executor";
 import type { HearthService } from "./service.ts";
 import { chatSystemPrompt, conversationTitle, decideRoute, planExecution } from "./chat.ts";
@@ -292,6 +292,38 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
 
     if (route.action === "task") {
       try {
+        const networkHosts = detectedUrl ? [new URL(detectedUrl).hostname] : [];
+        const taskInputs: TaskInput[] = [
+          ...storedFiles.map((file): TaskInput => ({ kind: "file", label: file.name, value: file.path })),
+          ...(detectedUrl ? [{ kind: "url" as const, label: "网页", value: detectedUrl }] : []),
+          ...(message ? [{ kind: "text" as const, label: "用户请求", value: message }] : [])
+        ];
+        if (needsConfirmation(plan, networkHosts)) {
+          const proposal = service.createTaskProposal({
+            conversationId: conversation.id,
+            title: route.title || conversationTitle(userContent),
+            goal: [message, detectedUrl ? `参考网址：${detectedUrl}` : ""].filter(Boolean).join("\n") || `处理附件：${storedFiles.map((file) => file.name).join("、")}`,
+            executorId: plan.executorId,
+            taskKind: plan.taskKind,
+            expectedOutputs: plan.expectedOutputs,
+            permissions: planPermissions(plan, networkHosts),
+            inputs: taskInputs,
+            reason: proposalReason(plan, networkHosts)
+          });
+          const assistant = store.createChatMessage({
+            id: randomUUID(),
+            conversationId: conversation.id,
+            role: "assistant",
+            content: `准备执行：${proposal.title}\n\n${proposal.reason}。确认后才会开始执行。`,
+            taskId: null,
+            attachments: [],
+            createdAt: new Date().toISOString()
+          });
+          send("proposal", { proposal, conversationId: conversation.id, message: assistant });
+          send("done", assistant);
+          finish(reply, send);
+          return reply;
+        }
         const task = service.createTask({
           title: route.title || conversationTitle(userContent),
           goal: [message, detectedUrl ? `参考网址：${detectedUrl}` : ""].filter(Boolean).join("\n") || `处理附件：${storedFiles.map((file) => file.name).join("、")}`,
@@ -374,6 +406,31 @@ function extractUrl(message: string): string | null {
 function daemonUserContent(url: string | null, files: (ChatAttachment & { path: string })[]): string {
   if (url) return `请处理这个网址：${url}`;
   return `请处理附件：${files.map((file) => file.name).join("、")}`;
+}
+
+function needsConfirmation(plan: ReturnType<typeof planExecution>, networkHosts: string[]): boolean {
+  return plan.taskKind === "workspace" || networkHosts.length > 0;
+}
+
+function planPermissions(plan: ReturnType<typeof planExecution>, networkHosts: string[]) {
+  return {
+    readRoots: [],
+    writeRoots: [],
+    networkHosts,
+    tools: [
+      "read_file", "list_files", "search_text", "write_file", "edit_file", "apply_patch",
+      "ask_user", "finish_task",
+      ...(networkHosts.length > 0 ? ["fetch_url"] : []),
+      ...(plan.taskKind === "workspace" ? ["shell"] : [])
+    ]
+  };
+}
+
+function proposalReason(plan: ReturnType<typeof planExecution>, networkHosts: string[]): string {
+  const reasons: string[] = [];
+  if (plan.taskKind === "workspace") reasons.push("需要读写隔离工作区并运行检查命令");
+  if (networkHosts.length > 0) reasons.push(`需要访问网页 ${networkHosts.join("、")}`);
+  return reasons.join("；") || "需要你的确认";
 }
 
 function finish(reply: FastifyReply, send: (event: string, data: unknown) => void): void {
