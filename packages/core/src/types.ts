@@ -24,10 +24,11 @@ export const RUN_STATUSES = [
 export type RunStatus = (typeof RUN_STATUSES)[number];
 
 export interface TaskInput {
-  kind: "file" | "url" | "github" | "text";
+  kind: "file" | "url" | "github" | "text" | "source";
   label: string;
   value: string;
   sha256?: string;
+  source?: TaskSourceRef;
 }
 
 export interface TaskError {
@@ -184,6 +185,19 @@ export interface SourceItem {
   duplicateOf: string | null;
   error: SourceError | null;
   fetchedAt: string;
+}
+
+export interface TaskSourceRef {
+  sourceId: string;
+  sourceKind: SourceKind;
+  sourceName: string;
+  itemId: string;
+  itemKey: string;
+  title: string | null;
+  locator: string;
+  fetchedAt: string;
+  contentHash: string | null;
+  coverage: SourceCoverage;
 }
 
 export interface EventEnvelope<T = unknown> {

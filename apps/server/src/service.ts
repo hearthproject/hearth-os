@@ -25,6 +25,19 @@ export interface CreateTaskInput {
   title?: string;
   goal?: string;
   textInput?: string;
+  sourceItemIds?: string[];
+}
+
+export class TaskInputSelectionError extends Error {
+  readonly code: string;
+  readonly statusCode: number;
+
+  constructor(code: string, message: string, statusCode: number) {
+    super(message);
+    this.name = "TaskInputSelectionError";
+    this.code = code;
+    this.statusCode = statusCode;
+  }
 }
 
 export interface TaskView {
@@ -73,6 +86,40 @@ export class HearthService {
     if (input.templateId && !template) throw new Error(`Unknown template: ${input.templateId}`);
     const id = `${template?.id ?? "CUSTOM"}-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
     const inputs = template ? [...template.inputs] : [];
+    const sourceItemIds = [...new Set(input.sourceItemIds ?? [])];
+    if (sourceItemIds.length > 20) {
+      throw new TaskInputSelectionError("TOO_MANY_SOURCE_ITEMS", "一次最多附加 20 个来源条目", 400);
+    }
+    for (const itemId of sourceItemIds) {
+      const item = this.store.getSourceItem(itemId);
+      if (!item) throw new TaskInputSelectionError("SOURCE_ITEM_NOT_FOUND", "选择的来源条目不存在", 404);
+      const source = this.store.getSource(item.sourceId);
+      if (!source) throw new TaskInputSelectionError("SOURCE_NOT_FOUND", "来源条目所属来源不存在", 404);
+      if (source.status === "disconnected") {
+        throw new TaskInputSelectionError("SOURCE_DISCONNECTED", `来源“${source.displayName}”已断开，不能新建任务`, 409);
+      }
+      if (item.status !== "ready" || !item.contentPath || !item.contentHash) {
+        throw new TaskInputSelectionError("SOURCE_ITEM_NOT_READY", `来源条目“${item.label}”不可用，请重新读取来源`, 409);
+      }
+      inputs.push({
+        kind: "source",
+        label: `${source.displayName} · ${item.title || item.label}`,
+        value: item.id,
+        sha256: item.contentHash,
+        source: {
+          sourceId: source.id,
+          sourceKind: source.kind,
+          sourceName: source.displayName,
+          itemId: item.id,
+          itemKey: item.itemKey,
+          title: item.title,
+          locator: item.locator,
+          fetchedAt: item.fetchedAt,
+          contentHash: item.contentHash,
+          coverage: item.coverage
+        }
+      });
+    }
     if (input.textInput) inputs.push({ kind: "text", label: "用户说明", value: input.textInput });
     const task: TaskRecord = {
       id,

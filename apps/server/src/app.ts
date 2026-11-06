@@ -14,7 +14,7 @@ import { DB_PATH, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST } from "./config.ts";
 import { ApprovalError, ApprovalManager, type EffectExecutor } from "./approvals.ts";
 import { executeEffect } from "./effects.ts";
 import { HearthScheduler } from "./scheduler.ts";
-import { HearthService, type CreateTaskInput } from "./service.ts";
+import { HearthService, TaskInputSelectionError, type CreateTaskInput } from "./service.ts";
 import { SourceRegistry, SourceRegistryError } from "./sources.ts";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
@@ -23,7 +23,8 @@ const createTaskSchema = z.object({
   templateId: z.string().trim().min(1).max(20).optional(),
   title: z.string().trim().min(1).max(120).optional(),
   goal: z.string().trim().min(1).max(4000).optional(),
-  textInput: z.string().max(100_000).optional()
+  textInput: z.string().max(100_000).optional(),
+  sourceItemIds: z.array(z.string().trim().min(1).max(80)).max(20).optional()
 }).strict();
 
 const decideApprovalSchema = z.object({
@@ -41,6 +42,10 @@ const createSourceSchema = z.object({
 
 const readSourceSchema = z.object({
   url: z.string().trim().min(1).max(2_048).optional()
+}).strict();
+
+const sourceItemQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).optional()
 }).strict();
 
 const listQuerySchema = z.object({
@@ -87,7 +92,13 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
   const approvals = new ApprovalManager(service, options.effectExecutor ?? executeEffect);
   approvals.recoverInterruptedEffects();
-  const scheduler = options.startScheduler ? new HearthScheduler({ service, approvals }) : null;
+  const scheduler = options.startScheduler
+    ? new HearthScheduler({
+        service,
+        approvals,
+        ...(options.sourceContentRoot ? { sourceContentRoot: options.sourceContentRoot } : {})
+      })
+    : null;
   const app = Fastify({
     logger: options.logger ?? false,
     bodyLimit: 2_000_000
@@ -227,6 +238,13 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
   });
 
+  app.get<{ Querystring: Record<string, string> }>("/api/source-items", async (request, reply) => {
+    const parsed = sourceItemQuerySchema.safeParse(request.query ?? {});
+    if (!parsed.success) return invalidQuery(reply);
+    reply.header("cache-control", "no-store");
+    return { items: store.listReadySourceItems(parsed.data.limit ?? 100) };
+  });
+
   app.get("/api/export", async (_request, reply) => {
     const stamp = new Date().toISOString().slice(0, 10);
     reply.header("content-type", "application/json; charset=utf-8");
@@ -266,12 +284,20 @@ export async function buildServer(options: BuildServerOptions = {}) {
     if (parsed.data.title !== undefined) input.title = parsed.data.title;
     if (parsed.data.goal !== undefined) input.goal = parsed.data.goal;
     if (parsed.data.textInput !== undefined) input.textInput = parsed.data.textInput;
+    if (parsed.data.sourceItemIds !== undefined) input.sourceItemIds = parsed.data.sourceItemIds;
     if (input.templateId && !getTemplate(input.templateId)) {
       return reply.code(400).send({ error: "UNKNOWN_TEMPLATE", message: `没有找到任务模板 ${input.templateId}` });
     }
 
-    const task = service.createTask(input);
-    return reply.code(201).send(task);
+    try {
+      const task = service.createTask(input);
+      return reply.code(201).send(task);
+    } catch (error) {
+      if (error instanceof TaskInputSelectionError) {
+        return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+      }
+      throw error;
+    }
   });
 
   app.get("/api/tasks", async () => ({ tasks: service.listTaskItems() }));

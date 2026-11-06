@@ -218,6 +218,16 @@ export class HearthStore {
     return (this.db.prepare("SELECT * FROM source_items WHERE source_id = ? ORDER BY label ASC").all(sourceId) as DbRow[]).map(rowToSourceItem);
   }
 
+  listReadySourceItems(limit = 100): SourceItem[] {
+    return (this.db.prepare(
+      `SELECT item.* FROM source_items item
+       JOIN sources source ON source.id = item.source_id
+       WHERE item.status = 'ready' AND item.content_path IS NOT NULL AND source.status <> 'disconnected'
+       ORDER BY item.fetched_at DESC, item.label ASC
+       LIMIT ?`
+    ).all(limit) as DbRow[]).map(rowToSourceItem);
+  }
+
   findSourceItem(sourceId: string, itemKey: string): SourceItem | null {
     const row = this.db.prepare("SELECT * FROM source_items WHERE source_id = ? AND item_key = ?").get(sourceId, itemKey) as DbRow | undefined;
     return row ? rowToSourceItem(row) : null;

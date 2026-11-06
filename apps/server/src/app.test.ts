@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { ApprovalRecord, ArtifactRecord, EffectRecord, RunRecord } from "@hearth/core";
+import type { ApprovalRecord, ArtifactRecord, EffectRecord, RunRecord, SourceConnection, SourceItem } from "@hearth/core";
 import { HearthStore } from "@hearth/eventlog";
 import { buildServer } from "./app.ts";
 
@@ -45,6 +45,46 @@ function seedAuditFixtures(store: HearthStore, taskId: string): void {
   for (const artifact of artifacts) store.appendEvent({ type: "artifact.published", taskId, runId: artifact.runId, payload: artifact });
 }
 
+function seedSourceItem(store: HearthStore, overrides: Partial<SourceItem> = {}): SourceItem {
+  const now = "2026-11-05T01:00:00.000Z";
+  const source: SourceConnection = {
+    id: "source-1",
+    kind: "knowledge",
+    provider: "local-knowledge",
+    displayName: "项目知识库",
+    account: null,
+    rootPath: "C:/knowledge",
+    allowedHosts: [],
+    status: "connected",
+    readOnly: true,
+    itemCount: 1,
+    lastReadAt: now,
+    lastError: null,
+    createdAt: now,
+    updatedAt: now
+  };
+  const item: SourceItem = {
+    id: "source-item-1",
+    sourceId: source.id,
+    itemKey: "docs/brief.md",
+    label: "brief.md",
+    locator: "docs/brief.md",
+    contentPath: `C:/hearth/sources/${source.id}/${HASH}.md`,
+    contentHash: HASH,
+    bytes: 42,
+    title: "项目简报",
+    status: "ready",
+    coverage: { complete: true, pages: null, paragraphs: 3, sheets: [], gaps: [] },
+    duplicateOf: null,
+    error: null,
+    fetchedAt: now,
+    ...overrides
+  };
+  store.appendEvent({ type: "source.created", payload: source });
+  store.appendEvent({ type: "source.item.updated", payload: item });
+  return item;
+}
+
 describe("Hearth server", () => {
   let store: HearthStore;
 
@@ -73,6 +113,70 @@ describe("Hearth server", () => {
     const response = await app.inject({ method: "GET", url: "/api/templates" });
     expect(response.statusCode).toBe(200);
     expect(response.json().templates).toHaveLength(15);
+    await app.close();
+  });
+
+  it("attaches ready source items to a task and rejects stale selections", async () => {
+    const item = seedSourceItem(store);
+    const app = await buildServer({ store, serveWeb: false });
+
+    const ready = await app.inject({ method: "GET", url: "/api/source-items" });
+    expect(ready.statusCode).toBe(200);
+    expect(ready.json().items).toHaveLength(1);
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: {
+        title: "整理来源",
+        goal: "根据已读取资料整理简报",
+        sourceItemIds: [item.id, item.id]
+      }
+    });
+    expect(created.statusCode).toBe(201);
+    const task = created.json();
+    expect(task.inputs).toHaveLength(1);
+    expect(task.inputs[0]).toMatchObject({
+      kind: "source",
+      label: "项目知识库 · 项目简报",
+      value: item.id,
+      sha256: HASH,
+      source: {
+        sourceId: "source-1",
+        itemId: item.id,
+        locator: "docs/brief.md",
+        contentHash: HASH
+      }
+    });
+
+    store.appendEvent({
+      type: "source.item.updated",
+      payload: { ...item, status: "cleared", contentPath: null, contentHash: null }
+    });
+    const stale = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: { title: "过期资料", goal: "不应创建", sourceItemIds: [item.id] }
+    });
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json().error).toBe("SOURCE_ITEM_NOT_READY");
+    await app.close();
+  });
+
+  it("rejects source items from a disconnected source", async () => {
+    const item = seedSourceItem(store);
+    const source = store.getSource(item.sourceId);
+    store.appendEvent({ type: "source.updated", payload: { id: item.sourceId, status: "disconnected", updatedAt: new Date().toISOString() } });
+    expect(source).not.toBeNull();
+
+    const app = await buildServer({ store, serveWeb: false });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: { title: "断开来源", goal: "不应创建", sourceItemIds: [item.id] }
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error).toBe("SOURCE_DISCONNECTED");
     await app.close();
   });
 

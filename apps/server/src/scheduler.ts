@@ -6,7 +6,7 @@ import { runCodex, type CodexRunOptions, type CodexRunResult } from "@hearth/cod
 import { getTemplate } from "@hearth/templates";
 import type { ApprovalRequest, ApprovalManager } from "./approvals.ts";
 import { missingExpectedOutputs, publishArtifacts } from "./artifacts.ts";
-import { GIT_CACHE_DIR, REPO_ROOT, WORKSPACE_DIR } from "./config.ts";
+import { GIT_CACHE_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WORKSPACE_DIR } from "./config.ts";
 import { extractProposedComment, inspectRepository, readPrPreview, validatePullRequestPreview } from "./github.ts";
 import type { CommandRunner } from "./github.ts";
 import { prepareTaskRuntime, type RuntimePreparation } from "./runtime.ts";
@@ -24,6 +24,7 @@ export interface SchedulerOptions {
   approvals?: ApprovalManager;
   githubRun?: CommandRunner | undefined;
   githubCacheRoot?: string | undefined;
+  sourceContentRoot?: string | undefined;
   runtimePreparer?: typeof prepareTaskRuntime | undefined;
 }
 
@@ -36,6 +37,7 @@ export class HearthScheduler {
   private readonly approvals: ApprovalManager | undefined;
   private readonly githubRun: CommandRunner | undefined;
   private readonly githubCacheRoot: string;
+  private readonly sourceContentRoot: string;
   private readonly runtimePreparer: typeof prepareTaskRuntime;
   private readonly controllers = new Map<string, AbortController>();
   private readonly cancelled = new Set<string>();
@@ -54,6 +56,7 @@ export class HearthScheduler {
     this.approvals = options.approvals;
     this.githubRun = options.githubRun;
     this.githubCacheRoot = options.githubCacheRoot ?? GIT_CACHE_DIR;
+    this.sourceContentRoot = options.sourceContentRoot ?? SOURCE_CONTENT_DIR;
     this.runtimePreparer = options.runtimePreparer ?? prepareTaskRuntime;
   }
 
@@ -216,6 +219,8 @@ export class HearthScheduler {
         workspaceDir: workspace,
         task,
         githubCacheRoot: this.githubCacheRoot,
+        sourceContentRoot: this.sourceContentRoot,
+        getSourceItem: (itemId) => this.service.store.getSourceItem(itemId),
         ...(this.githubRun ? { githubRun: this.githubRun } : {})
       });
       let runtime: RuntimePreparation | null = null;
