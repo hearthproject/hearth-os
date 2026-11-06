@@ -1,8 +1,13 @@
 import type {
   ApprovalRecord,
+  DesktopCommandStatus,
+  DesktopSessionStatus,
+  DeviceCapabilityKind,
+  DeviceCapabilityStatus,
   EffectRecord,
   EventEnvelope,
   OutboxDraftStatus,
+  PairingRequestStatus,
   RunStatus,
   SourceConnection,
   SourceItem,
@@ -92,6 +97,42 @@ export const SOURCE_ITEM_STATUS_LABELS: Record<SourceItem["status"], string> = {
   cleared: "已清除"
 };
 
+export const DEVICE_CAPABILITY_LABELS: Record<DeviceCapabilityKind, string> = {
+  observe: "观察桌面",
+  "desktop.control": "控制桌面",
+  "ui.automation": "界面自动化"
+};
+
+export const DEVICE_CAPABILITY_STATUS_LABELS: Record<DeviceCapabilityStatus, string> = {
+  pending: "待你批准",
+  approved: "已批准",
+  revoked: "已撤销"
+};
+
+export const PAIRING_STATUS_LABELS: Record<PairingRequestStatus, string> = {
+  pending: "等待配对",
+  approved: "已配对",
+  rejected: "已拒绝",
+  expired: "已过期",
+  redeemed: "助手已连接"
+};
+
+export const DESKTOP_SESSION_STATUS_LABELS: Record<DesktopSessionStatus, string> = {
+  active: "自动操作中",
+  paused: "已暂停",
+  taken_over: "你已接管",
+  terminated: "已终止"
+};
+
+export const DESKTOP_COMMAND_STATUS_LABELS: Record<DesktopCommandStatus, string> = {
+  queued: "等待助手",
+  claimed: "正在执行",
+  succeeded: "已完成",
+  failed: "失败",
+  cancelled: "已取消",
+  expired: "已过期"
+};
+
 export const CATEGORY_LABELS: Record<string, string> = {
   document: "文档",
   web: "网页",
@@ -115,7 +156,16 @@ export const EVENT_LABELS: Record<string, string> = {
   "source.created": "来源已连接",
   "source.updated": "来源状态更新",
   "source.item.updated": "来源内容已读取",
-  "source.cleared": "来源内容已清除"
+  "source.cleared": "来源内容已清除",
+  "device.pairing-requested": "桌面助手请求配对",
+  "device.pairing-updated": "配对状态已更新",
+  "device.paired": "桌面设备已配对",
+  "device.updated": "桌面设备状态已更新",
+  "desktop.session.created": "桌面会话已开始",
+  "desktop.session.updated": "桌面会话状态已更新",
+  "desktop.frame.updated": "收到新的桌面观察",
+  "desktop.command.created": "桌面动作已排队",
+  "desktop.command.updated": "桌面动作状态已更新"
 };
 
 const STATUS_EXPLANATIONS: Record<TaskStatus, string> = {

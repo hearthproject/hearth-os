@@ -3,14 +3,32 @@ import {
   CircleDashed,
   CircleSlash,
   Diamond,
+  Hand,
+  Laptop,
   Loader,
+  Pause,
   Plug,
   RotateCcw,
   SquareDashed,
-  TriangleAlert
+  TriangleAlert,
+  Wifi,
+  WifiOff
 } from "lucide-react";
-import type { EffectRecord, OutboxDraftStatus, RunRecord, SourceConnection, SourceItem, TaskStatus } from "../lib/types.ts";
+import type {
+  DesktopCommandStatus,
+  DesktopSessionStatus,
+  DeviceCapabilityStatus,
+  EffectRecord,
+  OutboxDraftStatus,
+  RunRecord,
+  SourceConnection,
+  SourceItem,
+  TaskStatus
+} from "../lib/types.ts";
 import {
+  DESKTOP_COMMAND_STATUS_LABELS,
+  DESKTOP_SESSION_STATUS_LABELS,
+  DEVICE_CAPABILITY_STATUS_LABELS,
   EFFECT_STATUS_LABELS,
   OUTBOX_STATUS_LABELS,
   RUN_STATUS_LABELS,
@@ -97,6 +115,27 @@ export function OutboxStatusTag({ status }: { status: OutboxDraftStatus }) {
           : status === "discarded" ? CircleSlash
             : SquareDashed;
   return <StateLabel tone={tone} icon={icon} double={status === "uncertain"} label={OUTBOX_STATUS_LABELS[status]} />;
+}
+
+export function DeviceOnlineTag({ online, revoked }: { online: boolean; revoked: boolean }) {
+  return <StateLabel tone={revoked || !online ? "neutral" : "done"} icon={revoked ? CircleSlash : online ? Wifi : WifiOff} label={revoked ? "已撤销" : online ? "在线" : "离线"} />;
+}
+
+export function DeviceCapabilityStatusTag({ status }: { status: DeviceCapabilityStatus }) {
+  const tone: Tone = status === "approved" ? "done" : status === "pending" ? "active" : "neutral";
+  return <StateLabel tone={tone} icon={status === "approved" ? Check : status === "pending" ? Diamond : CircleSlash} label={DEVICE_CAPABILITY_STATUS_LABELS[status]} />;
+}
+
+export function DesktopSessionStatusTag({ status }: { status: DesktopSessionStatus }) {
+  const tone: Tone = status === "active" ? "active" : status === "paused" ? "active" : status === "taken_over" ? "done" : "neutral";
+  const icon = status === "active" ? Laptop : status === "paused" ? Pause : status === "taken_over" ? Hand : CircleSlash;
+  return <StateLabel tone={tone} icon={icon} label={DESKTOP_SESSION_STATUS_LABELS[status]} />;
+}
+
+export function DesktopCommandStatusTag({ status }: { status: DesktopCommandStatus }) {
+  const tone: Tone = status === "succeeded" ? "done" : status === "failed" ? "risk" : status === "queued" || status === "claimed" ? "active" : "neutral";
+  const icon = status === "succeeded" ? Check : status === "failed" ? TriangleAlert : status === "queued" || status === "claimed" ? Loader : CircleSlash;
+  return <StateLabel tone={tone} icon={icon} spin={status === "claimed"} label={DESKTOP_COMMAND_STATUS_LABELS[status]} />;
 }
 
 function StateLabel({
