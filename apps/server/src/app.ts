@@ -5,7 +5,7 @@ import { basename, join } from "node:path";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyReply } from "fastify";
 import type { EventEnvelope } from "@hearth/core";
-import { APPROVAL_STATUSES, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, RUN_STATUSES, SOURCE_KINDS } from "@hearth/core";
+import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, PROACTIVE_MODES, RUN_STATUSES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
 import { loadCodexProfile } from "@hearth/codex-executor";
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate } from "@hearth/templates";
@@ -18,6 +18,7 @@ import { HearthService, TaskInputSelectionError, type CreateTaskInput } from "./
 import { SourceRegistry, SourceRegistryError } from "./sources.ts";
 import { OutboxError, OutboxService } from "./outbox.ts";
 import { DesktopError, DesktopService } from "./desktop.ts";
+import { ProactiveError, ProactiveService } from "./proactive.ts";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 
@@ -27,6 +28,37 @@ const createTaskSchema = z.object({
   goal: z.string().trim().min(1).max(4000).optional(),
   textInput: z.string().max(100_000).optional(),
   sourceItemIds: z.array(z.string().trim().min(1).max(80)).max(20).optional()
+}).strict();
+
+const proactiveSettingsSchema = z.object({
+  enabled: z.boolean().optional(),
+  mode: z.enum(PROACTIVE_MODES).optional(),
+  dailyLimit: z.number().int().min(0).max(50).optional(),
+  quietStart: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+  quietEnd: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+  cooldownMinutes: z.number().int().min(0).max(10080).optional(),
+  aggregateWindowMinutes: z.number().int().min(0).max(1440).optional(),
+  pausedUntil: z.string().datetime().nullable().optional(),
+  triggers: z.record(
+    z.enum(TRIGGER_KINDS),
+    z.object({ enabled: z.boolean().optional(), autonomy: z.enum(AUTONOMY_LEVELS).optional() }).strict()
+  ).optional()
+}).strict().refine((value) => Object.keys(value).length > 0, { message: "至少需要修改一个设置" });
+
+const proactivePauseSchema = z.object({
+  minutes: z.number().int().min(1).max(10080).optional(),
+  off: z.boolean().optional(),
+  resume: z.boolean().optional()
+}).strict().refine((value) => value.minutes !== undefined || value.off === true || value.resume === true, { message: "暂停参数不完整" });
+
+const suggestionActionSchema = z.object({
+  title: z.string().trim().min(1).max(120).optional(),
+  goal: z.string().trim().min(1).max(4000).optional(),
+  textInput: z.string().max(100_000).optional()
+}).strict();
+
+const suggestionSnoozeSchema = z.object({
+  minutes: z.number().int().min(5).max(10080).optional()
 }).strict();
 
 const decideApprovalSchema = z.object({
@@ -155,6 +187,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     outboxRoot: options.outboxRoot ?? OUTBOX_DIR,
     getArtifact: (id) => store.getArtifact(id)
   }));
+  const proactive = new ProactiveService(service);
   const approvals = new ApprovalManager(service, effectExecutor);
   approvals.recoverInterruptedEffects();
   const outbox = new OutboxService(service, approvals);
@@ -234,6 +267,70 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
     scheduler.start();
     return systemStatus();
+  });
+
+  app.get("/api/proactive", async (_request, reply) => {
+    reply.header("cache-control", "no-store");
+    return proactive.snapshot();
+  });
+
+  app.post("/api/proactive/scan", async (_request, reply) => {
+    reply.header("cache-control", "no-store");
+    return proactive.scan();
+  });
+
+  app.patch("/api/proactive/settings", async (request, reply) => {
+    const parsed = proactiveSettingsSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_PROACTIVE_SETTINGS", message: "主动设置参数不正确" });
+    try {
+      return proactive.updateSettings(definedObject(parsed.data) as Parameters<ProactiveService["updateSettings"]>[0]);
+    } catch (error) {
+      return sendProactiveError(reply, error);
+    }
+  });
+
+  app.post("/api/proactive/pause", async (request, reply) => {
+    const parsed = proactivePauseSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_PAUSE", message: "暂停参数不正确" });
+    try {
+      return proactive.pause(definedObject(parsed.data) as Parameters<ProactiveService["pause"]>[0]);
+    } catch (error) {
+      return sendProactiveError(reply, error);
+    }
+  });
+
+  for (const action of ["accept", "convert"] as const) {
+    app.post<{ Params: { id: string } }>("/api/suggestions/:id/" + action, async (request, reply) => {
+      const parsed = suggestionActionSchema.safeParse(request.body ?? {});
+      if (!parsed.success) return reply.code(400).send({ error: "INVALID_SUGGESTION_ACTION", message: "建议动作参数不正确" });
+      try {
+        const input: { title?: string; goal?: string; textInput?: string } = {};
+        if (parsed.data.title !== undefined) input.title = parsed.data.title;
+        if (parsed.data.goal !== undefined) input.goal = parsed.data.goal;
+        if (parsed.data.textInput !== undefined) input.textInput = parsed.data.textInput;
+        return action === "accept" ? proactive.accept(request.params.id, input) : proactive.convert(request.params.id, input);
+      } catch (error) {
+        return sendProactiveError(reply, error);
+      }
+    });
+  }
+
+  app.post<{ Params: { id: string } }>("/api/suggestions/:id/ignore", async (request, reply) => {
+    try {
+      return proactive.ignore(request.params.id);
+    } catch (error) {
+      return sendProactiveError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/suggestions/:id/snooze", async (request, reply) => {
+    const parsed = suggestionSnoozeSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SNOOZE", message: "稍后提醒参数不正确" });
+    try {
+      return proactive.snooze(request.params.id, parsed.data.minutes);
+    } catch (error) {
+      return sendProactiveError(reply, error);
+    }
   });
 
   app.get("/api/templates", async () => ({ templates: service.listTemplates() }));
@@ -856,6 +953,17 @@ function sendSourceError(reply: FastifyReply, error: unknown) {
 
 function sendOutboxError(reply: FastifyReply, error: unknown) {
   if (error instanceof OutboxError) {
+    return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+  }
+  throw error;
+}
+
+function definedObject(value: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined));
+}
+
+function sendProactiveError(reply: FastifyReply, error: unknown) {
+  if (error instanceof ProactiveError) {
     return reply.code(error.statusCode).send({ error: error.code, message: error.message });
   }
   throw error;

@@ -18,6 +18,8 @@ import type {
   EffectStatus,
   EventEnvelope,
   OutboxDraft,
+  ProactiveSettings,
+  ProactiveSuggestion,
   RunRecord,
   RunStatus,
   RunUsage,
@@ -523,6 +525,62 @@ export class HearthStore {
     return row ? rowToSourceItem(row) : null;
   }
 
+  getProactiveSettings(): ProactiveSettings | null {
+    const row = this.db.prepare("SELECT * FROM proactive_settings WHERE id = 1").get() as DbRow | undefined;
+    return row ? rowToProactiveSettings(row) : null;
+  }
+
+  getSuggestion(id: string): ProactiveSuggestion | null {
+    const row = this.db.prepare("SELECT * FROM suggestions WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToSuggestion(row) : null;
+  }
+
+  findSuggestionByDedupeKey(dedupeKey: string): ProactiveSuggestion | null {
+    const row = this.db.prepare("SELECT * FROM suggestions WHERE dedupe_key = ?").get(dedupeKey) as DbRow | undefined;
+    return row ? rowToSuggestion(row) : null;
+  }
+
+  listSuggestions(opts: { status?: string; limit?: number } = {}): ProactiveSuggestion[] {
+    const where = opts.status ? " WHERE status = ?" : "";
+    const params: SQLInputValue[] = opts.status ? [opts.status] : [];
+    const limit = opts.limit ?? 100;
+    const rows = this.db.prepare(
+      `SELECT * FROM suggestions${where} ORDER BY priority DESC, last_seen_at DESC LIMIT ?`
+    ).all(...params, limit) as DbRow[];
+    return rows.map(rowToSuggestion);
+  }
+
+  listSuggestionsNotifiedSince(iso: string): ProactiveSuggestion[] {
+    const rows = this.db.prepare(
+      "SELECT * FROM suggestions WHERE notified_at IS NOT NULL AND notified_at >= ? ORDER BY notified_at DESC"
+    ).all(iso) as DbRow[];
+    return rows.map(rowToSuggestion);
+  }
+
+  insertSuggestionEvent(event: {
+    id: string;
+    suggestionId: string;
+    action: string;
+    payload: unknown;
+    createdAt: string;
+  }): void {
+    this.db.prepare(
+      "INSERT INTO suggestion_events (id, suggestion_id, action, payload_json, created_at) VALUES (?, ?, ?, ?, ?)"
+    ).run(event.id, event.suggestionId, event.action, JSON.stringify(event.payload), event.createdAt);
+  }
+
+  countSuggestionActionsSince(iso: string): { delivered: number; accepted: number; ignored: number; converted: number } {
+    const rows = this.db.prepare(
+      "SELECT action, COUNT(*) AS total FROM suggestion_events WHERE created_at >= ? GROUP BY action"
+    ).all(iso) as DbRow[];
+    const counts = { delivered: 0, accepted: 0, ignored: 0, converted: 0 };
+    for (const row of rows) {
+      const action = String(row.action);
+      if (action in counts) counts[action as keyof typeof counts] = Number(row.total);
+    }
+    return counts;
+  }
+
   getOutboxDraft(id: string): OutboxDraft | null {
     const row = this.db.prepare("SELECT * FROM outbox_drafts WHERE id = ?").get(id) as DbRow | undefined;
     return row ? rowToOutboxDraft(row) : null;
@@ -819,6 +877,13 @@ export class HearthStore {
       case "source.updated": return updateSource(this.db, event.payload as Record<string, unknown>);
       case "source.item.updated": return upsertSourceItem(this.db, event.payload as SourceItem);
       case "source.cleared": return clearSource(this.db, String((event.payload as Record<string, unknown>).sourceId));
+      case "proactive.settings.updated": return upsertProactiveSettings(this.db, event.payload as ProactiveSettings);
+      case "suggestion.created":
+      case "suggestion.updated": return upsertSuggestion(this.db, event.payload as ProactiveSuggestion);
+      case "suggestion.event": {
+        const payload = event.payload as Record<string, unknown>;
+        return insertSuggestionEventRow(this.db, payload);
+      }
       case "outbox.created": return upsertOutboxDraft(this.db, event.payload as OutboxDraft);
       case "outbox.updated": return updateOutboxDraft(this.db, event.payload as Record<string, unknown>);
       case "device.paired":
@@ -1343,4 +1408,97 @@ function ensureColumn(db: DatabaseSync, table: string, column: string, type: str
   const columns = db.prepare(`PRAGMA table_info(${table})`).all() as DbRow[];
   if (columns.some((row) => String(row.name) === column)) return;
   db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+}
+
+
+function rowToProactiveSettings(row: DbRow): ProactiveSettings {
+  return {
+    enabled: Number(row.enabled) === 1,
+    mode: String(row.mode) as ProactiveSettings["mode"],
+    dailyLimit: Number(row.daily_limit),
+    quietStart: String(row.quiet_start),
+    quietEnd: String(row.quiet_end),
+    cooldownMinutes: Number(row.cooldown_minutes),
+    aggregateWindowMinutes: Number(row.aggregate_window_minutes),
+    pausedUntil: row.paused_until == null ? null : String(row.paused_until),
+    triggers: JSON.parse(String(row.triggers_json)),
+    updatedAt: String(row.updated_at)
+  };
+}
+
+function upsertProactiveSettings(db: DatabaseSync, settings: ProactiveSettings): void {
+  db.prepare(
+    `INSERT INTO proactive_settings (id, enabled, mode, daily_limit, quiet_start, quiet_end, cooldown_minutes, aggregate_window_minutes, paused_until, triggers_json, updated_at)
+     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET enabled=excluded.enabled, mode=excluded.mode, daily_limit=excluded.daily_limit,
+       quiet_start=excluded.quiet_start, quiet_end=excluded.quiet_end, cooldown_minutes=excluded.cooldown_minutes,
+       aggregate_window_minutes=excluded.aggregate_window_minutes, paused_until=excluded.paused_until,
+       triggers_json=excluded.triggers_json, updated_at=excluded.updated_at`
+  ).run(
+    settings.enabled ? 1 : 0, settings.mode, settings.dailyLimit, settings.quietStart, settings.quietEnd,
+    settings.cooldownMinutes, settings.aggregateWindowMinutes, settings.pausedUntil,
+    JSON.stringify(settings.triggers), settings.updatedAt
+  );
+}
+
+function rowToSuggestion(row: DbRow): ProactiveSuggestion {
+  return {
+    id: String(row.id),
+    triggerKind: String(row.trigger_kind) as ProactiveSuggestion["triggerKind"],
+    dedupeKey: String(row.dedupe_key),
+    title: String(row.title),
+    whyNow: String(row.why_now),
+    suggestedAction: String(row.suggested_action),
+    expectedImpact: String(row.expected_impact),
+    estimatedCost: String(row.estimated_cost),
+    riskLevel: String(row.risk_level) as ProactiveSuggestion["riskLevel"],
+    requiresApproval: Number(row.requires_approval) === 1,
+    autonomy: String(row.autonomy) as ProactiveSuggestion["autonomy"],
+    status: String(row.status) as ProactiveSuggestion["status"],
+    priority: Number(row.priority),
+    source: JSON.parse(String(row.source_json)),
+    evidence: JSON.parse(String(row.evidence_json)),
+    occurrenceCount: Number(row.occurrence_count),
+    firstSeenAt: String(row.first_seen_at),
+    lastSeenAt: String(row.last_seen_at),
+    notifiedAt: row.notified_at == null ? null : String(row.notified_at),
+    snoozeUntil: row.snooze_until == null ? null : String(row.snooze_until),
+    expiresAt: row.expires_at == null ? null : String(row.expires_at),
+    taskId: row.task_id == null ? null : String(row.task_id),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
+  };
+}
+
+function upsertSuggestion(db: DatabaseSync, suggestion: ProactiveSuggestion): void {
+  db.prepare(
+    `INSERT INTO suggestions (id, trigger_kind, dedupe_key, title, why_now, suggested_action, expected_impact,
+       estimated_cost, risk_level, requires_approval, autonomy, status, priority, source_json, evidence_json,
+       occurrence_count, first_seen_at, last_seen_at, notified_at, snooze_until, expires_at, task_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET trigger_kind=excluded.trigger_kind, dedupe_key=excluded.dedupe_key,
+       title=excluded.title, why_now=excluded.why_now, suggested_action=excluded.suggested_action,
+       expected_impact=excluded.expected_impact, estimated_cost=excluded.estimated_cost, risk_level=excluded.risk_level,
+       requires_approval=excluded.requires_approval, autonomy=excluded.autonomy, status=excluded.status,
+       priority=excluded.priority, source_json=excluded.source_json, evidence_json=excluded.evidence_json,
+       occurrence_count=excluded.occurrence_count, first_seen_at=excluded.first_seen_at, last_seen_at=excluded.last_seen_at,
+       notified_at=excluded.notified_at, snooze_until=excluded.snooze_until, expires_at=excluded.expires_at,
+       task_id=excluded.task_id, updated_at=excluded.updated_at`
+  ).run(
+    suggestion.id, suggestion.triggerKind, suggestion.dedupeKey, suggestion.title, suggestion.whyNow,
+    suggestion.suggestedAction, suggestion.expectedImpact, suggestion.estimatedCost, suggestion.riskLevel,
+    suggestion.requiresApproval ? 1 : 0, suggestion.autonomy, suggestion.status, suggestion.priority,
+    JSON.stringify(suggestion.source), JSON.stringify(suggestion.evidence), suggestion.occurrenceCount,
+    suggestion.firstSeenAt, suggestion.lastSeenAt, suggestion.notifiedAt, suggestion.snoozeUntil,
+    suggestion.expiresAt, suggestion.taskId, suggestion.createdAt, suggestion.updatedAt
+  );
+}
+
+function insertSuggestionEventRow(db: DatabaseSync, payload: Record<string, unknown>): void {
+  db.prepare(
+    "INSERT INTO suggestion_events (id, suggestion_id, action, payload_json, created_at) VALUES (?, ?, ?, ?, ?)"
+  ).run(
+    String(payload.id), String(payload.suggestionId), String(payload.action),
+    JSON.stringify(payload), String(payload.createdAt)
+  );
 }
