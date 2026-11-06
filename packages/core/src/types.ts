@@ -606,6 +606,26 @@ export interface MemorySettings {
   updatedAt: string;
 }
 
+export const MEMORY_FORGET_TARGETS = ["projection", "versions", "event-log", "recall-audit", "devices"] as const;
+export type MemoryForgetTarget = (typeof MEMORY_FORGET_TARGETS)[number];
+
+export interface MemoryForgetPropagation {
+  target: MemoryForgetTarget;
+  status: "complete" | "pending";
+  detail: string;
+}
+
+export interface MemoryForgetReceipt {
+  id: string;
+  memoryId: string;
+  affectedMemoryIds: string[];
+  reason: string;
+  redactedVersions: number;
+  redactedEvents: number;
+  targets: MemoryForgetPropagation[];
+  createdAt: string;
+}
+
 export const METHOD_STATUSES = ["candidate", "evaluating", "trial", "adopted", "rejected", "reverted"] as const;
 export type MethodStatus = (typeof METHOD_STATUSES)[number];
 

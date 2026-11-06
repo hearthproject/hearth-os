@@ -117,14 +117,39 @@ describe("MemoryService", () => {
   it("forgets content, blocks recall, and audit records the tombstone", () => {
     const created = createMemory();
     memory.confirm(created.id);
+    const task = createTask("准备 Ember 项目周报", "整理 Ember 项目代号和发布时间");
+    memory.recall({ taskId: task.id });
+    memory.correct(created.id, { content: "项目代号是 Ember，发布窗口推迟到十二月。", reason: "用户更新发布时间" });
     const forgotten = memory.forget(created.id, "用户要求删除项目代号");
     expect(forgotten.status).toBe("forgotten");
     expect(forgotten.content).toBe("[已遗忘]");
+    expect(forgotten.subjectKey).toBe("forgotten:" + created.id);
+    expect(forgotten.source.label).toBe("[已遗忘]");
     expect(forgotten.allowRecall).toBe(false);
 
-    const task = createTask();
     expect(memory.recall({ taskId: task.id }).memories).toHaveLength(0);
-    expect(store.listMemoryVersions(created.id)[0]?.reason).toBe("用户要求删除项目代号");
+    const versions = store.listMemoryVersions(created.id);
+    expect(versions[0]?.reason).toBe("用户要求删除项目代号");
+    expect(versions.every((version) => version.content === "[已遗忘]")).toBe(true);
+    expect(versions.every((version) => version.source.label === "[已遗忘]" && version.tags.length === 0)).toBe(true);
+
+    const exported = memory.exportData();
+    const exportedText = JSON.stringify(exported);
+    expect(exportedText).not.toContain("Ember");
+    expect(exportedText).not.toContain("十一月");
+    expect(exportedText).not.toContain("project.ember");
+    expect(exported.recalls[0]?.reason).toBe("[记忆已遗忘]");
+
+    const eventText = JSON.stringify(store.listEvents().filter((event) => event.type.startsWith("memory.")));
+    expect(eventText).not.toContain("Ember");
+    expect(eventText).not.toContain("十一月");
+    expect(eventText).not.toContain("project.ember");
+
+    const receipt = exported.forgets[0];
+    expect(receipt?.memoryId).toBe(created.id);
+    expect(receipt?.redactedVersions).toBeGreaterThanOrEqual(3);
+    expect(receipt?.redactedEvents).toBeGreaterThan(0);
+    expect(receipt?.targets.every((target) => target.status === "complete")).toBe(true);
   });
 
   it("captures experience only when enabled and never duplicates the same task", () => {

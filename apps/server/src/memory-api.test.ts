@@ -57,6 +57,13 @@ describe("memory API", () => {
     const forgotten = await app.inject({ method: "POST", url: "/api/memory/" + memoryId + "/forget" });
     expect(forgotten.statusCode).toBe(200);
     expect(forgotten.json().status).toBe("forgotten");
+    const snapshot = await app.inject({ method: "GET", url: "/api/memory" });
+    expect(snapshot.json().forgets[0].memoryId).toBe(memoryId);
+    expect(snapshot.json().forgets[0].targets.every((target: { status: string }) => target.status === "complete")).toBe(true);
+    const forgottenExport = await app.inject({ method: "GET", url: "/api/memory/export" });
+    const forgottenExportText = forgottenExport.body;
+    expect(forgottenExportText).not.toContain("Ember");
+    expect(forgottenExportText).not.toContain("project.ember");
     await app.close();
   });
 

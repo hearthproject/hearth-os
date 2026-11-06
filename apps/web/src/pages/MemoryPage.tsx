@@ -32,6 +32,13 @@ const STATUS_LABELS: Record<MemoryRecord["status"], string> = {
 };
 
 const SENSITIVITY_LABELS = { normal: "普通", sensitive: "敏感", secret: "机密" };
+const FORGET_TARGET_LABELS = {
+  projection: "当前记录",
+  versions: "历史版本",
+  "event-log": "事件日志",
+  "recall-audit": "召回审计",
+  devices: "设备副本"
+} as const;
 
 export function MemoryPage() {
   const queryClient = useQueryClient();
@@ -126,6 +133,26 @@ export function MemoryPage() {
               );
             })}
             {(snapshot.recalls ?? []).length === 0 && <p className="section-empty">还没有召回记录。</p>}
+          </section>
+
+          <section className="panel memory-forget-log">
+            <div className="panel-head"><h2>遗忘回执</h2><span className="panel-meta">逐项确认正文已从本地副本移除</span></div>
+            {(snapshot.forgets ?? []).slice(0, 10).map((receipt) => (
+              <div className="memory-forget-row" key={receipt.id}>
+                <div>
+                  <strong>{receipt.reason}</strong>
+                  <span>{truncate(receipt.memoryId, 18)} · 脱敏 {receipt.redactedVersions} 个版本 / {receipt.redactedEvents} 个事件 · {formatDate(receipt.createdAt)}</span>
+                </div>
+                <div className="memory-forget-targets">
+                  {receipt.targets.map((target) => (
+                    <span className={"tag forget-" + target.status} key={target.target} title={target.detail}>
+                      {FORGET_TARGET_LABELS[target.target]} · {target.status === "complete" ? "完成" : "待完成"}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+            {(snapshot.forgets ?? []).length === 0 && <p className="section-empty">还没有遗忘回执。</p>}
           </section>
         </>
       )}
@@ -298,7 +325,7 @@ function ConflictCard({
 
 function actionNotice(action: string): string {
   if (action === "confirm") return "记忆已启用。";
-  if (action === "forget") return "记忆已遗忘并从召回中移除。";
+  if (action === "forget") return "记忆已遗忘；正文已从当前记录、历史版本、事件和导出中脱敏。";
   if (action === "correct") return "已创建记忆新版本。";
   if (action === "sensitive") return "已标记为敏感并停止自动召回。";
   if (action === "unsensitive") return "已恢复普通敏感度。";

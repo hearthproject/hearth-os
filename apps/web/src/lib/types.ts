@@ -22,6 +22,7 @@ import type {
   EventWindow,
   MemoryConflict,
   MemoryConfidence,
+  MemoryForgetReceipt,
   MemoryKind,
   MemoryRecall,
   MemoryRecord,
@@ -76,6 +77,7 @@ export type {
   EventWindow,
   MemoryConflict,
   MemoryConfidence,
+  MemoryForgetReceipt,
   MemoryKind,
   MemoryRecall,
   MemoryRecord,
@@ -233,6 +235,7 @@ export interface MemorySnapshot {
   memories: MemoryRecord[];
   conflicts: MemoryConflict[];
   recalls: MemoryRecall[];
+  forgets: MemoryForgetReceipt[];
 }
 
 export interface CreateMemoryRequest {

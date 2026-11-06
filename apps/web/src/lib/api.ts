@@ -230,7 +230,7 @@ export function subscribeToEvents(onEvent: () => void): () => void {
     "source.created", "source.updated", "source.item.updated", "source.cleared",
     "proactive.settings.updated", "suggestion.created", "suggestion.updated", "suggestion.event",
     "memory.settings.updated", "memory.created", "memory.updated", "memory.version.recorded",
-    "memory.recalled", "memory.conflict.created", "memory.conflict.updated",
+    "memory.recalled", "memory.conflict.created", "memory.conflict.updated", "memory.forgotten",
     "outbox.created", "outbox.updated",
     "device.paired", "device.updated", "device.pairing-requested", "device.pairing-updated",
     "desktop.session.created", "desktop.session.updated", "desktop.frame.updated",

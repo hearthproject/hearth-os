@@ -2912,6 +2912,10 @@ body.modal-open {
   margin-top: var(--gap-3);
 }
 
+.memory-forget-log {
+  margin-top: var(--gap-3);
+}
+
 .memory-recall-row {
   display: flex;
   align-items: flex-start;
@@ -2942,13 +2946,63 @@ body.modal-open {
   font-size: var(--fs-11);
 }
 
+.memory-forget-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--gap-3);
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.memory-forget-row:last-child {
+  border-bottom: 0;
+}
+
+.memory-forget-row > div:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.memory-forget-row strong {
+  font-size: var(--fs-12);
+  font-weight: 500;
+}
+
+.memory-forget-row span {
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+}
+
+.memory-forget-targets {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.forget-complete {
+  border-color: var(--ink-tertiary);
+}
+
+.forget-pending {
+  border-color: var(--risk);
+  color: var(--risk);
+}
+
 @media (max-width: 640px) {
   .memory-card-head,
   .memory-conflict-head,
   .memory-conflict-side,
   .memory-merge-row,
-  .memory-recall-row {
+  .memory-recall-row,
+  .memory-forget-row {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .memory-forget-targets {
+    justify-content: flex-start;
   }
 }

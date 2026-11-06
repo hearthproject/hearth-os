@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type {
   MemoryConflict,
   MemoryConfidence,
+  MemoryForgetReceipt,
   MemoryKind,
   MemoryRecall,
   MemoryRecord,
@@ -76,6 +77,7 @@ export interface MemorySnapshot {
   memories: MemoryRecord[];
   conflicts: MemoryConflict[];
   recalls: MemoryRecall[];
+  forgets: MemoryForgetReceipt[];
 }
 
 export class MemoryError extends Error {
@@ -134,7 +136,8 @@ export class MemoryService {
       settings: this.settings(),
       memories: this.service.store.listMemories({ limit: 500 }),
       conflicts: this.service.store.listMemoryConflicts(),
-      recalls: this.service.store.listMemoryRecalls().slice(0, 100)
+      recalls: this.service.store.listMemoryRecalls().slice(0, 100),
+      forgets: this.service.store.listMemoryForgetReceipts().slice(0, 100)
     };
   }
 
@@ -224,12 +227,18 @@ export class MemoryService {
 
   forget(id: string, reason = "用户要求遗忘"): MemoryRecord {
     const memory = this.requireMemory(id);
+    if (memory.status === "forgotten") return memory;
+    const subjectKey = "forgotten:" + memory.id;
     const next: MemoryRecord = {
       ...memory,
       status: "forgotten",
       content: "[已遗忘]",
+      subjectKey,
+      scope: "forgotten",
       tags: [],
+      source: { type: memory.source.type, id: null, label: "[已遗忘]", excerpt: null },
       allowRecall: false,
+      validUntil: null,
       version: memory.version + 1,
       updatedAt: this.nowIso()
     };
@@ -244,6 +253,24 @@ export class MemoryService {
         resolvedAt: this.nowIso()
       } satisfies MemoryConflict);
     }
+    const scrubbed = this.service.store.scrubForgottenMemory(id, { content: next.content, subjectKey, scope: next.scope });
+    const receipt: MemoryForgetReceipt = {
+      id: randomUUID(),
+      memoryId: id,
+      affectedMemoryIds: [id],
+      reason: reason.trim() || "用户要求遗忘",
+      redactedVersions: scrubbed.redactedVersions,
+      redactedEvents: scrubbed.redactedEvents,
+      targets: [
+        { target: "projection", status: "complete", detail: "当前记录已替换为墓碑" },
+        { target: "versions", status: "complete", detail: "历史版本正文与来源摘要已脱敏" },
+        { target: "event-log", status: "complete", detail: "相关记忆事件正文已脱敏" },
+        { target: "recall-audit", status: "complete", detail: "召回原因已移除匹配词" },
+        { target: "devices", status: "complete", detail: "本地没有持久化记忆副本" }
+      ],
+      createdAt: this.nowIso()
+    };
+    this.emit("memory.forgotten", receipt);
     return next;
   }
 
@@ -384,7 +411,8 @@ export class MemoryService {
       memories,
       versions: memories.flatMap((memory) => this.service.store.listMemoryVersions(memory.id)),
       conflicts: this.service.store.listMemoryConflicts(),
-      recalls: this.service.store.listMemoryRecalls()
+      recalls: this.service.store.listMemoryRecalls(),
+      forgets: this.service.store.listMemoryForgetReceipts()
     };
   }
 

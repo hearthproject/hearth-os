@@ -18,6 +18,7 @@ import type {
   EffectStatus,
   EventEnvelope,
   MemoryConflict,
+  MemoryForgetReceipt,
   MemoryRecall,
   MemoryRecord,
   MemorySettings,
@@ -208,6 +209,11 @@ CREATE TABLE IF NOT EXISTS memory_recalls (
   id TEXT PRIMARY KEY, memory_id TEXT NOT NULL, task_id TEXT NOT NULL, run_id TEXT,
   reason TEXT NOT NULL, score REAL NOT NULL, created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS memory_forget_receipts (
+  id TEXT PRIMARY KEY, memory_id TEXT NOT NULL, affected_memory_ids_json TEXT NOT NULL,
+  reason TEXT NOT NULL, redacted_versions INTEGER NOT NULL, redacted_events INTEGER NOT NULL,
+  targets_json TEXT NOT NULL, created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS method_candidates (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, summary TEXT NOT NULL, applicability TEXT NOT NULL,
   steps_json TEXT NOT NULL, source_task_ids_json TEXT NOT NULL, template_id TEXT,
@@ -271,6 +277,7 @@ CREATE INDEX IF NOT EXISTS suggestions_kind_idx ON suggestions(trigger_kind, las
 CREATE INDEX IF NOT EXISTS memories_status_idx ON memories(status, kind, updated_at);
 CREATE INDEX IF NOT EXISTS memories_subject_idx ON memories(subject_key, status);
 CREATE INDEX IF NOT EXISTS memory_recalls_task_idx ON memory_recalls(task_id, created_at);
+CREATE INDEX IF NOT EXISTS memory_forget_receipts_memory_idx ON memory_forget_receipts(memory_id, created_at);
 CREATE INDEX IF NOT EXISTS method_candidates_status_idx ON method_candidates(status, updated_at);
 CREATE INDEX IF NOT EXISTS sync_conflicts_status_idx ON sync_conflicts(status, created_at);
 CREATE INDEX IF NOT EXISTS task_leases_expiry_idx ON task_leases(expires_at);
@@ -641,6 +648,42 @@ export class HearthStore {
     return rows.map(rowToMemoryRecall);
   }
 
+  listMemoryForgetReceipts(memoryId?: string): MemoryForgetReceipt[] {
+    const rows = memoryId
+      ? this.db.prepare("SELECT * FROM memory_forget_receipts WHERE memory_id = ? ORDER BY created_at DESC").all(memoryId) as DbRow[]
+      : this.db.prepare("SELECT * FROM memory_forget_receipts ORDER BY created_at DESC").all() as DbRow[];
+    return rows.map(rowToMemoryForgetReceipt);
+  }
+
+  scrubForgottenMemory(memoryId: string, tombstone: { content: string; subjectKey: string; scope: string }): { redactedVersions: number; redactedEvents: number } {
+    const versionCount = Number(
+      (this.db.prepare("SELECT COUNT(*) AS total FROM memory_versions WHERE memory_id = ?").get(memoryId) as DbRow).total
+    );
+    this.db.prepare(
+      "UPDATE memory_versions SET content = ?, source_json = ?, tags_json = '[]', allow_recall = 0 WHERE memory_id = ?"
+    ).run(tombstone.content, JSON.stringify({ type: "system", id: null, label: "[已遗忘]", excerpt: null }), memoryId);
+    this.db.prepare(
+      "UPDATE memory_conflicts SET subject_key = ? WHERE memory_ids_json LIKE ?"
+    ).run(tombstone.subjectKey, "%" + memoryId + "%");
+    this.db.prepare("UPDATE memory_recalls SET reason = '[记忆已遗忘]' WHERE memory_id = ?").run(memoryId);
+
+    const rows = this.db.prepare("SELECT seq, type, payload_json FROM events WHERE type LIKE 'memory.%'").all() as DbRow[];
+    let redactedEvents = 0;
+    for (const row of rows) {
+      let payload: unknown;
+      try {
+        payload = JSON.parse(String(row.payload_json));
+      } catch {
+        continue;
+      }
+      if (!payloadReferencesMemory(payload, memoryId)) continue;
+      const scrubbed = scrubMemoryEventPayload(String(row.type), payload, memoryId, tombstone);
+      this.db.prepare("UPDATE events SET payload_json = ? WHERE seq = ?").run(JSON.stringify(scrubbed), Number(row.seq));
+      redactedEvents += 1;
+    }
+    return { redactedVersions: versionCount, redactedEvents };
+  }
+
   getOutboxDraft(id: string): OutboxDraft | null {
     const row = this.db.prepare("SELECT * FROM outbox_drafts WHERE id = ?").get(id) as DbRow | undefined;
     return row ? rowToOutboxDraft(row) : null;
@@ -881,7 +924,7 @@ export class HearthStore {
   rebuildProjections(): void {
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      this.db.exec("DELETE FROM backup_records; DELETE FROM maintenance_runs; DELETE FROM task_leases; DELETE FROM sync_conflicts; DELETE FROM sync_peers; DELETE FROM method_trials; DELETE FROM method_evaluations; DELETE FROM method_candidates; DELETE FROM memory_recalls; DELETE FROM memory_conflicts; DELETE FROM memory_versions; DELETE FROM memories; DELETE FROM memory_settings; DELETE FROM suggestion_events; DELETE FROM suggestions; DELETE FROM proactive_settings; DELETE FROM desktop_commands; DELETE FROM desktop_frames; DELETE FROM desktop_sessions; DELETE FROM pairing_requests; DELETE FROM devices; DELETE FROM outbox_drafts; DELETE FROM source_items; DELETE FROM sources; DELETE FROM artifacts; DELETE FROM effects; DELETE FROM approvals; DELETE FROM runs; DELETE FROM tasks;");
+      this.db.exec("DELETE FROM backup_records; DELETE FROM maintenance_runs; DELETE FROM task_leases; DELETE FROM sync_conflicts; DELETE FROM sync_peers; DELETE FROM method_trials; DELETE FROM method_evaluations; DELETE FROM method_candidates; DELETE FROM memory_forget_receipts; DELETE FROM memory_recalls; DELETE FROM memory_conflicts; DELETE FROM memory_versions; DELETE FROM memories; DELETE FROM memory_settings; DELETE FROM suggestion_events; DELETE FROM suggestions; DELETE FROM proactive_settings; DELETE FROM desktop_commands; DELETE FROM desktop_frames; DELETE FROM desktop_sessions; DELETE FROM pairing_requests; DELETE FROM devices; DELETE FROM outbox_drafts; DELETE FROM source_items; DELETE FROM sources; DELETE FROM artifacts; DELETE FROM effects; DELETE FROM approvals; DELETE FROM runs; DELETE FROM tasks;");
       for (const event of this.listEvents()) this.applyEvent(event);
       this.db.exec("COMMIT");
     } catch (error) {
@@ -949,6 +992,7 @@ export class HearthStore {
       case "memory.updated": return upsertMemory(this.db, event.payload as MemoryRecord);
       case "memory.version.recorded": return insertMemoryVersionRow(this.db, event.payload as MemoryVersion);
       case "memory.recalled": return insertMemoryRecallRow(this.db, event.payload as MemoryRecall);
+      case "memory.forgotten": return insertMemoryForgetReceiptRow(this.db, event.payload as MemoryForgetReceipt);
       case "memory.conflict.created":
       case "memory.conflict.updated": return upsertMemoryConflict(this.db, event.payload as MemoryConflict);
       case "outbox.created": return upsertOutboxDraft(this.db, event.payload as OutboxDraft);
@@ -1691,4 +1735,67 @@ function insertMemoryRecallRow(db: DatabaseSync, recall: MemoryRecall): void {
   db.prepare(
     "INSERT INTO memory_recalls (id, memory_id, task_id, run_id, reason, score, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
   ).run(recall.id, recall.memoryId, recall.taskId, recall.runId, recall.reason, recall.score, recall.createdAt);
+}
+
+function rowToMemoryForgetReceipt(row: DbRow): MemoryForgetReceipt {
+  return {
+    id: String(row.id),
+    memoryId: String(row.memory_id),
+    affectedMemoryIds: JSON.parse(String(row.affected_memory_ids_json)),
+    reason: String(row.reason),
+    redactedVersions: Number(row.redacted_versions),
+    redactedEvents: Number(row.redacted_events),
+    targets: JSON.parse(String(row.targets_json)),
+    createdAt: String(row.created_at)
+  };
+}
+
+function insertMemoryForgetReceiptRow(db: DatabaseSync, receipt: MemoryForgetReceipt): void {
+  db.prepare(
+    "INSERT INTO memory_forget_receipts (id, memory_id, affected_memory_ids_json, reason, redacted_versions, redacted_events, targets_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(
+    receipt.id, receipt.memoryId, JSON.stringify(receipt.affectedMemoryIds), receipt.reason,
+    receipt.redactedVersions, receipt.redactedEvents, JSON.stringify(receipt.targets), receipt.createdAt
+  );
+}
+
+function payloadReferencesMemory(value: unknown, memoryId: string): boolean {
+  if (Array.isArray(value)) return value.some((item) => payloadReferencesMemory(item, memoryId));
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  if (record.id === memoryId || record.memoryId === memoryId) return true;
+  if (Array.isArray(record.memoryIds) && record.memoryIds.includes(memoryId)) return true;
+  return Object.values(record).some((item) => payloadReferencesMemory(item, memoryId));
+}
+
+function scrubMemoryEventPayload(
+  type: string,
+  value: unknown,
+  memoryId: string,
+  tombstone: { content: string; subjectKey: string; scope: string }
+): unknown {
+  if (Array.isArray(value)) return value.map((item) => scrubMemoryEventPayload(type, item, memoryId, tombstone));
+  if (!value || typeof value !== "object") return value;
+  const next = { ...(value as Record<string, unknown>) };
+  if (next.id === memoryId || next.memoryId === memoryId) {
+    if ("content" in next) next.content = tombstone.content;
+    if ("subjectKey" in next) next.subjectKey = tombstone.subjectKey;
+    if ("scope" in next) next.scope = tombstone.scope;
+    if ("tags" in next) next.tags = [];
+    if ("allowRecall" in next) next.allowRecall = false;
+    if ("validUntil" in next) next.validUntil = null;
+    if ("source" in next) {
+      const source = next.source && typeof next.source === "object" ? next.source as Record<string, unknown> : {};
+      next.source = { type: typeof source.type === "string" ? source.type : "system", id: null, label: "[已遗忘]", excerpt: null };
+    }
+    if (type === "memory.recalled" && "reason" in next) next.reason = "[记忆已遗忘]";
+  }
+  if (Array.isArray(next.memoryIds) && next.memoryIds.includes(memoryId)) {
+    if ("subjectKey" in next) next.subjectKey = tombstone.subjectKey;
+    if ("note" in next) next.note = "包含已遗忘记忆，正文已脱敏。";
+  }
+  for (const [key, item] of Object.entries(next)) {
+    next[key] = scrubMemoryEventPayload(type, item, memoryId, tombstone);
+  }
+  return next;
 }
