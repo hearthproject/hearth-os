@@ -24,7 +24,7 @@ Hearth keeps several specialized executors side by side rather than building one
 
 | Executor | Better suited for | Not suited for |
 |---|---|---|
-| General reasoning | Short understanding, classification, summaries, simple plans | Long high-frequency tool use or high-risk external writes |
+| Hearth native | Complete tool loops for general work: reading inputs, web access, file outputs, pausing for input, and recovery | Work that needs full repository semantics and multi-file engineering checks |
 | Codex | Multi-file code, long documents, complex research, and deep writing | Continuous online listening or low-cost high-frequency responses |
 | Connectors | Email, calendars, cloud drives, messaging, and ticketing with interfaces | Software without an interface that needs graphical operation |
 | Browser | Web research, signed-in sessions, forms, and software as a service | Direct exposure of highly sensitive credentials or unauditable bulk actions |
@@ -33,6 +33,8 @@ Hearth keeps several specialized executors side by side rather than building one
 | Human | Value judgments, accountability, exception takeover, and approval | Frequent, low-value work that can already be verified automatically |
 
 The routing order is not a fixed hierarchy. Work that can be done with a rule, script, or official interface does not call a model. External data starts with a connector; browser or desktop is considered only when no connector exists. Deterministic document processing is not given to a generative model. Long chains and complex artifacts may use a stronger executor. A task can change executors midway, but the input, budget, authority, and current evidence must carry over.
+
+The current default split is `native` for general tasks and `codex` for explicit code and engineering work. The native executor is a Hearth-owned single-agent tool loop with budgets, checkpoints, input pauses, and recovery; it is not a forwarded prompt. A failed task does not silently switch executors, and the executor identity is recorded in runs and artifact manifests. Tasks that need network access or engineering workspace writes create a proposal in chat and enter the queue only after user confirmation.
 
 Executor output contracts are unified even though execution methods are not. The system cares about result type, evidence, artifacts, failure classification, and recoverability, not which model or interface an executor used internally. This lets Hearth replace models, add tools, or fall back to a person without changing the task layer.
 
