@@ -157,6 +157,37 @@ export interface HealthResponse {
   };
 }
 
+export interface BackupView {
+  id: string;
+  kind: string;
+  bytes: number;
+  sha256: string;
+  createdAt: string;
+}
+
+export interface BackupSnapshot {
+  records: BackupView[];
+  scope: {
+    includes: string[];
+    excludes: string[];
+  };
+  encryption: {
+    cipher: string;
+    kdf: string;
+    minimumPassphraseLength: number;
+  };
+}
+
+export interface BackupRestoreResult {
+  restoredAt: string;
+  sourceInstanceId: string;
+  schemaVersion: number;
+  counts: Record<string, number>;
+  masterKeyRestored: boolean;
+  warnings: string[];
+  schedulerStopped: boolean;
+}
+
 export type SyncPeerView = Omit<SyncPeer, "tokenHash">;
 
 export interface SyncSnapshot {

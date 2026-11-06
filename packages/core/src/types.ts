@@ -729,6 +729,15 @@ export interface TaskLease {
   updatedAt: string;
 }
 
+export interface BackupRecord {
+  id: string;
+  kind: string;
+  path: string;
+  bytes: number;
+  sha256: string;
+  createdAt: string;
+}
+
 export const MAINTENANCE_STATUSES = ["running", "completed", "failed"] as const;
 export type MaintenanceStatus = (typeof MAINTENANCE_STATUSES)[number];
 

@@ -7,6 +7,7 @@ import type {
   ApprovalRecord,
   ApprovalStatus,
   ArtifactRecord,
+  BackupRecord,
   ChatMessageRecord,
   ConversationRecord,
   DesktopCommandRecord,
@@ -65,6 +66,8 @@ export interface RunAggregate {
 }
 
 type DbRow = Record<string, SQLInputValue>;
+
+export const CURRENT_SCHEMA_VERSION = 3;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -317,8 +320,8 @@ export class HearthStore {
     ensureColumn(this.db, "tasks", "conversation_id", "TEXT");
     ensureColumn(this.db, "sync_peers", "token_cipher", "TEXT");
     ensureColumn(this.db, "sync_peers", "remote_instance_id", "TEXT");
-    this.db.exec("PRAGMA user_version = 3");
-    this.setMeta("schemaVersion", "3");
+    this.db.exec(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION}`);
+    this.setMeta("schemaVersion", String(CURRENT_SCHEMA_VERSION));
   }
 
   private ensureInstanceId(): string {
@@ -432,6 +435,23 @@ export class HearthStore {
 
   listTaskLeases(): TaskLease[] {
     return (this.db.prepare("SELECT * FROM task_leases ORDER BY expires_at ASC").all() as DbRow[]).map(rowToTaskLease);
+  }
+
+  getBackupRecord(id: string): BackupRecord | null {
+    const row = this.db.prepare("SELECT * FROM backup_records WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToBackupRecord(row) : null;
+  }
+
+  listBackupRecords(): BackupRecord[] {
+    return (this.db.prepare("SELECT * FROM backup_records ORDER BY created_at DESC").all() as DbRow[])
+      .map(rowToBackupRecord);
+  }
+
+  addBackupRecord(record: BackupRecord): BackupRecord {
+    this.db.prepare(
+      "INSERT INTO backup_records (id, kind, path, bytes, sha256, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(record.id, record.kind, record.path, record.bytes, record.sha256, record.createdAt);
+    return record;
   }
 
   getTask(id: string): TaskRecord | null {
@@ -2028,6 +2048,17 @@ function rowToTaskLease(row: DbRow): TaskLease {
     heartbeatAt: String(row.heartbeat_at),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at)
+  };
+}
+
+function rowToBackupRecord(row: DbRow): BackupRecord {
+  return {
+    id: String(row.id),
+    kind: String(row.kind),
+    path: String(row.path),
+    bytes: Number(row.bytes),
+    sha256: String(row.sha256),
+    createdAt: String(row.created_at)
   };
 }
 

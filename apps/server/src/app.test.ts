@@ -455,7 +455,7 @@ describe("Hearth server", () => {
     await app.close();
   });
 
-  it("exports task records and produces a consistent SQLite backup", async () => {
+  it("exports task records and refuses the legacy plaintext backup", async () => {
     const app = await buildServer({ store, serveWeb: false });
     const created = await app.inject({ method: "POST", url: "/api/tasks", payload: { templateId: "T04" } });
     expect(created.statusCode).toBe(201);
@@ -466,9 +466,8 @@ describe("Hearth server", () => {
     expect(exported.json().tasks).toHaveLength(1);
 
     const backup = await app.inject({ method: "GET", url: "/api/backup" });
-    expect(backup.statusCode).toBe(200);
-    expect(backup.headers["content-type"]).toContain("sqlite");
-    expect(backup.rawPayload.subarray(0, 16).toString("utf8")).toBe("SQLite format 3\u0000");
+    expect(backup.statusCode).toBe(410);
+    expect(backup.json().error).toBe("ENCRYPTED_BACKUP_REQUIRED");
     await app.close();
   });
 

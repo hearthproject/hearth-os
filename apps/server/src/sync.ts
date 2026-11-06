@@ -60,6 +60,10 @@ export class SyncService {
     return this.secretBox;
   }
 
+  reloadSecrets(): void {
+    this.secretBox = null;
+  }
+
   snapshot(): SyncSnapshot {
     return {
       instanceId: this.service.store.instanceId,

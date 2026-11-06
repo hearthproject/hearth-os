@@ -3038,6 +3038,82 @@ body.modal-open {
   }
 }
 
+.backup-form,
+.backup-restore-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  align-items: end;
+  gap: var(--gap-2) var(--gap-3);
+  padding: var(--gap-2) 10px 0;
+}
+
+.backup-form label,
+.backup-restore-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--ink-secondary);
+  font-size: var(--fs-12);
+}
+
+.backup-form input,
+.backup-restore-grid input[type="password"] {
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--fs-13);
+}
+
+.backup-file-picker {
+  cursor: pointer;
+}
+
+.backup-file-picker input[type="file"] {
+  font-size: var(--fs-11);
+}
+
+.backup-hash {
+  color: var(--ink-tertiary);
+}
+
+.backup-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 6px 10px;
+  color: var(--risk);
+  font-size: var(--fs-12);
+}
+
+.backup-scope-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--gap-3);
+  padding: 8px 10px;
+}
+
+.backup-scope-grid h3 {
+  margin: 0 0 4px;
+  font-size: var(--fs-12);
+  font-weight: 600;
+}
+
+.backup-restore-result .primary-button {
+  margin: 8px 10px 10px;
+}
+
+@media (max-width: 760px) {
+  .backup-form,
+  .backup-restore-grid,
+  .backup-scope-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ── 10. methods ─────────────────────────────────────────────────────── */
 .method-generate-row,
 .method-actions,

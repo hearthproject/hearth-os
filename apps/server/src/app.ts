@@ -10,8 +10,9 @@ import { loadCodexProfile } from "@hearth/codex-executor";
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate } from "@hearth/templates";
 import { z } from "zod";
-import { DB_PATH, DEVICE_FRAME_DIR, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST } from "./config.ts";
+import { BACKUP_DIR, DB_PATH, DEVICE_FRAME_DIR, MASTER_KEY_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST } from "./config.ts";
 import { ApprovalError, ApprovalManager, type EffectExecutor } from "./approvals.ts";
+import { BackupError, BackupService } from "./backups.ts";
 import { executeEffect } from "./effects.ts";
 import { HearthScheduler } from "./scheduler.ts";
 import { TaskLeaseService } from "./leases.ts";
@@ -140,6 +141,19 @@ const syncConflictResolveSchema = z.object({ resolution: z.enum(["local", "remot
 const killSwitchSchema = z.object({
   enabled: z.boolean(),
   reason: z.string().trim().max(500).optional()
+}).strict();
+
+const createBackupSchema = z.object({
+  passphrase: z.string().min(12).max(500)
+}).strict();
+
+const restoreBackupSchema = z.object({
+  passphrase: z.string().min(12).max(500),
+  envelope: z.string().min(1)
+}).strict();
+
+const restoreStoredBackupSchema = z.object({
+  passphrase: z.string().min(12).max(500)
 }).strict();
 
 const proactiveSettingsSchema = z.object({
@@ -286,6 +300,8 @@ export interface BuildServerOptions {
   sourceContentRoot?: string;
   outboxRoot?: string;
   deviceFrameRoot?: string;
+  backupRoot?: string;
+  masterKeyPath?: string;
   syncFetch?: typeof fetch;
   syncSecretBox?: SecretBox;
 }
@@ -310,6 +326,11 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
   const security = new SecurityService(service);
   const leases = new TaskLeaseService(service);
+  const backups = new BackupService({
+    service,
+    backupRoot: options.backupRoot ?? BACKUP_DIR,
+    masterKeyPath: options.masterKeyPath ?? MASTER_KEY_PATH
+  });
   const approvals = new ApprovalManager(service, effectExecutor, {
     guard: (taskId) => {
       security.assertActionsAllowed();
@@ -1072,19 +1093,92 @@ export async function buildServer(options: BuildServerOptions = {}) {
     return service.exportSnapshot();
   });
 
-  app.get("/api/backup", async (_request, reply) => {
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const backupPath = join(tmpdir(), `hearth-${stamp}-${randomUUID().slice(0, 8)}.sqlite`);
+  app.get("/api/backups", async (_request, reply) => {
+    reply.header("cache-control", "no-store");
+    return backups.snapshot();
+  });
+
+  app.post("/api/backups", async (request, reply) => {
+    const parsed = createBackupSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "INVALID_BACKUP", message: "备份口令至少需要 12 个字符" });
+    }
     try {
-      store.db.exec(`VACUUM INTO '${backupPath.replace(/'/g, "''")}'`);
-      const bytes = readFileSync(backupPath);
-      reply.header("content-type", "application/vnd.sqlite3");
-      reply.header("content-disposition", `attachment; filename="hearth-${new Date().toISOString().slice(0, 10)}.sqlite"`);
-      return reply.send(bytes);
-    } finally {
-      rmSync(backupPath, { force: true });
+      return reply.code(201).send(backups.create(parsed.data.passphrase));
+    } catch (error) {
+      return sendBackupFailure(reply, error);
     }
   });
+
+  app.get<{ Params: { id: string } }>("/api/backups/:id/download", async (request, reply) => {
+    try {
+      const { record, text } = backups.readEnvelope(request.params.id);
+      reply.header("cache-control", "no-store");
+      reply.header("content-type", "application/vnd.hearth.backup+json; charset=utf-8");
+      reply.header("content-disposition", `attachment; filename="hearth-backup-${record.createdAt.slice(0, 10)}.hearth-backup"`);
+      return reply.send(Buffer.from(text, "utf8"));
+    } catch (error) {
+      return sendBackupFailure(reply, error);
+    }
+  });
+
+  const restore = async (operation: () => ReturnType<BackupService["restoreRecord"]>) => {
+    const schedulerWasRunning = scheduler?.running ?? false;
+    if (schedulerWasRunning) await scheduler?.stop();
+    try {
+      const result = operation();
+      sync.reloadSecrets();
+      security.record(
+        "backup.restored",
+        null,
+        null,
+        `已从 schema ${result.schemaVersion} 加密归档恢复；来源实例 ${result.sourceInstanceId}`
+      );
+      return { ...result, schedulerStopped: schedulerWasRunning };
+    } catch (error) {
+      if (schedulerWasRunning && !security.state().killSwitch) scheduler?.start();
+      throw error;
+    }
+  };
+
+  app.post<{ Params: { id: string } }>("/api/backups/:id/restore", async (request, reply) => {
+    const parsed = restoreStoredBackupSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "INVALID_BACKUP_RESTORE", message: "恢复口令至少需要 12 个字符" });
+    }
+    try {
+      return await restore(() => backups.restoreRecord(request.params.id, parsed.data.passphrase));
+    } catch (error) {
+      return sendBackupFailure(reply, error);
+    }
+  });
+
+  app.post("/api/backups/restore", { bodyLimit: 512 * 1024 * 1024 }, async (request, reply) => {
+    const parsed = restoreBackupSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "INVALID_BACKUP_RESTORE", message: "需要备份文件和至少 12 个字符的恢复口令" });
+    }
+    try {
+      return await restore(() => backups.restoreUploadedEnvelope(parsed.data.envelope, parsed.data.passphrase));
+    } catch (error) {
+      return sendBackupFailure(reply, error);
+    }
+  });
+
+  app.get("/api/backup", async (_request, reply) => {
+    reply.header("cache-control", "no-store");
+    return reply.code(410).send({
+      error: "ENCRYPTED_BACKUP_REQUIRED",
+      message: "明文数据库下载已停用。请使用设置中的加密备份功能。"
+    });
+  });
+
+  const sendBackupFailure = (reply: FastifyReply, error: unknown) => {
+    if (error instanceof BackupError) {
+      return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+    }
+    return reply.code(500).send({ error: "BACKUP_FAILED", message: "备份操作失败，请检查服务端日志" });
+  };
 
   app.post("/api/tasks", async (request, reply) => {
     const parsed = createTaskSchema.safeParse(request.body ?? {});

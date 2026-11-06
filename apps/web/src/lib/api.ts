@@ -2,6 +2,8 @@ import type {
   ApprovalDecisionResult,
   ApprovalListItem,
   ArtifactListItem,
+  BackupRestoreResult,
+  BackupSnapshot,
   CreateTaskRequest,
   DesktopActionRequest,
   DesktopCommandView,
@@ -82,6 +84,20 @@ export const api = {
     method: "POST",
     body: JSON.stringify(reason ? { enabled, reason } : { enabled })
   }),
+  backups: () => request<BackupSnapshot>("/api/backups"),
+  createBackup: (passphrase: string) => request<BackupSnapshot["records"][number]>("/api/backups", {
+    method: "POST",
+    body: JSON.stringify({ passphrase })
+  }),
+  restoreBackup: (id: string, passphrase: string) => request<BackupRestoreResult>(`/api/backups/${encodeURIComponent(id)}/restore`, {
+    method: "POST",
+    body: JSON.stringify({ passphrase })
+  }),
+  restoreBackupFile: (envelope: string, passphrase: string) => request<BackupRestoreResult>("/api/backups/restore", {
+    method: "POST",
+    body: JSON.stringify({ envelope, passphrase })
+  }),
+  backupDownloadUrl: (id: string) => `/api/backups/${encodeURIComponent(id)}/download`,
   memory: () => request<MemorySnapshot>("/api/memory"),
   createMemory: (input: CreateMemoryRequest) => request<MemorySnapshot["memories"][number]>("/api/memory", {
     method: "POST",
@@ -265,9 +281,6 @@ export const api = {
     }),
   artifactUrl: (taskId: string, artifactId: string) =>
     `/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}`,
-  downloadBackup: () => {
-    window.location.assign("/api/backup");
-  },
   downloadExport: () => {
     window.location.assign("/api/export");
   }

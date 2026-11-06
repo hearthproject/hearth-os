@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { ProactiveSettingsPanel } from "../components/ProactiveSettingsPanel.tsx";
 import { Download, FileJson, RefreshCw } from "lucide-react";
+import { Link } from "react-router-dom";
 import { api } from "../lib/api.ts";
 import { countTotal, formatBytes, formatDuration, formatNumber, formatTokens } from "../lib/format.ts";
 import { AUTH_SOURCE_LABELS } from "../lib/labels.ts";
@@ -52,7 +53,7 @@ export function SettingsPage() {
           <div><dt>产物目录</dt><dd className="mono">eval/runs/</dd></div>
         </dl>
         <div className="settings-actions">
-          <button className="ghost-button" onClick={api.downloadBackup}><Download size={15} /> 下载数据库备份</button>
+          <Link className="ghost-button" to="/operations"><Download size={15} /> 加密备份与恢复</Link>
           <button className="ghost-button" onClick={api.downloadExport}><FileJson size={15} /> 导出任务记录</button>
         </div>
       </section>
