@@ -53,6 +53,7 @@ import type {
   SyncSnapshot,
   SystemStatus,
   TaskListItem,
+  TaskProposalRecord,
   TaskRecord,
   TaskTemplate,
   TaskView
@@ -342,6 +343,14 @@ export const api = {
     method: "POST",
     ...(message ? { body: JSON.stringify({ message }) } : {})
   }),
+  confirmTaskProposal: (id: string) => request<{ proposal: TaskProposalRecord; task: TaskRecord }>(
+    `/api/task-proposals/${encodeURIComponent(id)}/confirm`,
+    { method: "POST" }
+  ),
+  rejectTaskProposal: (id: string) => request<TaskProposalRecord>(
+    `/api/task-proposals/${encodeURIComponent(id)}/reject`,
+    { method: "POST" }
+  ),
   cancel: (id: string) => request<TaskRecord>(`/api/tasks/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
   decideApproval: (id: string, decision: "approve" | "reject", parameterHash: string) =>
     request<ApprovalDecisionResult>(`/api/approvals/${encodeURIComponent(id)}/decide`, {
