@@ -39,7 +39,16 @@ const createTaskSchema = z.object({
   title: z.string().trim().min(1).max(120).optional(),
   goal: z.string().trim().min(1).max(4000).optional(),
   textInput: z.string().max(100_000).optional(),
-  sourceItemIds: z.array(z.string().trim().min(1).max(80)).max(20).optional()
+  sourceItemIds: z.array(z.string().trim().min(1).max(80)).max(20).optional(),
+  executorId: z.enum(["native", "codex"]).optional(),
+  taskKind: z.enum(["delivery", "workspace", "general"]).optional(),
+  expectedOutputs: z.array(z.string().trim().min(1).max(200)).max(20).optional(),
+  permissions: z.object({
+    readRoots: z.array(z.string().trim().min(1).max(1000)).max(20),
+    writeRoots: z.array(z.string().trim().min(1).max(1000)).max(20),
+    networkHosts: z.array(z.string().trim().min(1).max(255)).max(20),
+    tools: z.array(z.string().trim().min(1).max(80)).max(40)
+  }).optional()
 }).strict();
 
 const memorySourceSchema = z.object({
@@ -1261,6 +1270,10 @@ export async function buildServer(options: BuildServerOptions = {}) {
     if (parsed.data.goal !== undefined) input.goal = parsed.data.goal;
     if (parsed.data.textInput !== undefined) input.textInput = parsed.data.textInput;
     if (parsed.data.sourceItemIds !== undefined) input.sourceItemIds = parsed.data.sourceItemIds;
+    if (parsed.data.executorId !== undefined) input.executorId = parsed.data.executorId;
+    if (parsed.data.taskKind !== undefined) input.taskKind = parsed.data.taskKind;
+    if (parsed.data.expectedOutputs !== undefined) input.expectedOutputs = parsed.data.expectedOutputs;
+    if (parsed.data.permissions !== undefined) input.permissions = parsed.data.permissions;
     if (input.templateId && !getTemplate(input.templateId)) {
       return reply.code(400).send({ error: "UNKNOWN_TEMPLATE", message: `没有找到任务模板 ${input.templateId}` });
     }
@@ -1373,6 +1386,28 @@ export async function buildServer(options: BuildServerOptions = {}) {
       return task;
     } catch (error) {
       return reply.code(404).send({ error: "TASK_NOT_FOUND", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.get<{ Querystring: { conversationId?: string } }>("/api/task-proposals", async (request) => ({
+    proposals: service.store.listTaskProposals(request.query.conversationId)
+  }));
+
+  app.post<{ Params: { id: string } }>("/api/task-proposals/:id/confirm", async (request, reply) => {
+    try {
+      const result = service.confirmTaskProposal(request.params.id);
+      scheduler?.kick();
+      return result;
+    } catch (error) {
+      return reply.code(409).send({ error: "PROPOSAL_NOT_CONFIRMABLE", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/task-proposals/:id/reject", async (request, reply) => {
+    try {
+      return service.rejectTaskProposal(request.params.id);
+    } catch (error) {
+      return reply.code(409).send({ error: "PROPOSAL_NOT_REJECTABLE", message: error instanceof Error ? error.message : String(error) });
     }
   });
 
