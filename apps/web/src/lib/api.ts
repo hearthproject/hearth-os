@@ -27,6 +27,7 @@ import type {
   MethodSnapshot,
   MemorySnapshot,
   ModelListResponse,
+  ModelProtocol,
   ModelSettingsResponse,
   ModelTestResponse,
   OutboxDraft,
@@ -112,6 +113,7 @@ export const api = {
   saveModelSettings: (input: {
     providerId?: string;
     providerName?: string;
+    protocol?: ModelProtocol;
     baseUrl?: string;
     model?: string;
     apiKey?: string;
@@ -119,9 +121,9 @@ export const api = {
     method: "PUT",
     body: JSON.stringify(input)
   }),
-  fetchModels: (input: { providerId?: string; providerName?: string; baseUrl?: string; model?: string; apiKey?: string }) =>
+  fetchModels: (input: { providerId?: string; providerName?: string; protocol?: ModelProtocol; baseUrl?: string; model?: string; apiKey?: string }) =>
     request<ModelListResponse>("/api/model-settings/models", { method: "POST", body: JSON.stringify(input) }),
-  testModel: (input: { providerId?: string; providerName?: string; baseUrl?: string; model?: string; apiKey?: string }) =>
+  testModel: (input: { providerId?: string; providerName?: string; protocol?: ModelProtocol; baseUrl?: string; model?: string; apiKey?: string }) =>
     request<ModelTestResponse>("/api/model-settings/test", { method: "POST", body: JSON.stringify(input) }),
   probeCodex: () => request<CodexProbeResponse>("/api/codex/probe", { method: "POST" }),
   uploadAttachments: async (files: File[]): Promise<ChatAttachment[]> => {

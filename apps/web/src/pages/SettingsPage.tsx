@@ -3,7 +3,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   CheckCircle2,
-  Download,
   KeyRound,
   Loader2,
   PlugZap,
@@ -13,24 +12,39 @@ import {
   Trash2
 } from "lucide-react";
 import { api } from "../lib/api.ts";
-import type { CodexProbeResponse, ModelProviderPreset } from "../lib/types.ts";
+import type { CodexProbeResponse, ModelProtocol, ModelProviderPreset } from "../lib/types.ts";
 
 interface ModelForm {
   providerId: string;
   providerName: string;
+  protocol: ModelProtocol;
   baseUrl: string;
   model: string;
   apiKey: string;
 }
 
-const EMPTY_FORM: ModelForm = { providerId: "custom", providerName: "自定义 OpenAI 兼容服务", baseUrl: "", model: "", apiKey: "" };
+const PROTOCOLS: { id: ModelProtocol; label: string }[] = [
+  { id: "openai-chat", label: "OpenAI Chat" },
+  { id: "openai-responses", label: "OpenAI Responses" },
+  { id: "anthropic-messages", label: "Anthropic Messages" },
+  { id: "gemini", label: "Gemini" }
+];
+
+const EMPTY_FORM: ModelForm = {
+  providerId: "custom",
+  providerName: "自定义服务",
+  protocol: "openai-chat",
+  baseUrl: "",
+  model: "",
+  apiKey: ""
+};
 
 export function SettingsPage() {
   const queryClient = useQueryClient();
   const settingsQuery = useQuery({ queryKey: ["modelSettings"], queryFn: api.modelSettings });
   const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 20_000 });
   const [form, setForm] = useState<ModelForm>(EMPTY_FORM);
-  const [busy, setBusy] = useState<"save" | "test" | "models" | "probe" | null>(null);
+  const [busy, setBusy] = useState<"save" | "test" | "models" | "probe" | "refresh" | null>(null);
   const [notice, setNotice] = useState<{ tone: "ok" | "error" | "info"; text: string } | null>(null);
   const [probe, setProbe] = useState<CodexProbeResponse | null>(null);
   const [models, setModels] = useState<string[]>([]);
@@ -40,6 +54,7 @@ export function SettingsPage() {
   const presets = settingsQuery.data?.presets ?? [];
   const configured = settingsQuery.data?.configured ?? false;
   const codex = healthQuery.data?.codex;
+  const chatModel = healthQuery.data?.chatModel;
 
   useEffect(() => {
     if (!settings || initialized.current) return;
@@ -47,6 +62,7 @@ export function SettingsPage() {
     setForm({
       providerId: settings.providerId,
       providerName: settings.providerName,
+      protocol: settings.protocol ?? "openai-chat",
       baseUrl: settings.baseUrl,
       model: settings.model,
       apiKey: ""
@@ -59,9 +75,9 @@ export function SettingsPage() {
       ...prev,
       providerId: preset.id,
       providerName: preset.name,
+      protocol: preset.protocol,
       baseUrl: preset.baseUrl,
-      model: preset.models[0] ?? "",
-      apiKey: ""
+      model: preset.models[0] ?? ""
     }));
     setModels(preset.models);
     setNotice(null);
@@ -82,6 +98,7 @@ export function SettingsPage() {
       const result = await api.saveModelSettings({
         providerId: form.providerId,
         providerName: form.providerName.trim(),
+        protocol: form.protocol,
         baseUrl: form.baseUrl.trim(),
         model: form.model.trim(),
         ...(form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {})
@@ -104,6 +121,7 @@ export function SettingsPage() {
       const result = await api.testModel({
         providerId: form.providerId,
         providerName: form.providerName,
+        protocol: form.protocol,
         baseUrl: form.baseUrl,
         model: form.model,
         ...(form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {})
@@ -125,6 +143,7 @@ export function SettingsPage() {
       const result = await api.fetchModels({
         providerId: form.providerId,
         providerName: form.providerName,
+        protocol: form.protocol,
         baseUrl: form.baseUrl,
         model: form.model,
         ...(form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {})
@@ -132,7 +151,7 @@ export function SettingsPage() {
       setModels(result.models);
       if (result.error) setNotice({ tone: "error", text: result.error });
       else if (result.models.length === 0) setNotice({ tone: "info", text: "服务没有返回模型列表，可以手工填写模型名。" });
-      else setNotice({ tone: "ok", text: `获取到 ${result.models.length} 个模型。` });
+      else setNotice({ tone: "ok", text: `获取到 ${result.models.length} 个模型，点模型输入框选择。` });
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "获取失败" });
     } finally {
@@ -168,12 +187,21 @@ export function SettingsPage() {
     }
   }
 
+  async function refreshHealth() {
+    setBusy("refresh");
+    try {
+      await healthQuery.refetch();
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
     <div className="page settings-page">
       <div className="page-head">
         <div>
           <h1>设置</h1>
-          <p className="page-meta">聊天模型和执行器分开配置。Key 只保存在本机，不会发到浏览器之外。</p>
+          <p className="page-meta">聊天模型和 Codex 执行器分开配置，Key 只保存在本机。</p>
         </div>
       </div>
 
@@ -186,33 +214,45 @@ export function SettingsPage() {
           </span>
         </div>
         <div className="settings-body">
-          <p className="settings-lead">选择一家服务商，填入 API Key 即可。所有服务都走 OpenAI 兼容协议。</p>
+          <p className="settings-lead">选择服务商并填入 Key。模型名可以直接从服务商拉取。</p>
 
-          <div className="provider-grid">
+          <div className="provider-grid compact">
             {presets.map((preset) => (
               <button
                 key={preset.id}
+                title={preset.note}
                 className={`provider-card ${form.providerId === preset.id ? "active" : ""}`}
                 onClick={() => pickPreset(preset)}
               >
                 <strong>{preset.name}</strong>
-                <small>{preset.note}</small>
+                <small>{protocolLabel(preset.protocol)}</small>
               </button>
             ))}
           </div>
 
           <div className="form-grid">
             <label>
+              <span>接口协议</span>
+              <select value={form.protocol} onChange={(event) => update("protocol", event.target.value as ModelProtocol)}>
+                {PROTOCOLS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+              </select>
+            </label>
+            <label>
               <span>服务名称</span>
               <input value={form.providerName} onChange={(event) => update("providerName", event.target.value)} placeholder="例如：DeepSeek" />
             </label>
-            <label>
+            <label className="span-2">
               <span>服务地址（Base URL）</span>
               <input value={form.baseUrl} onChange={(event) => update("baseUrl", event.target.value)} placeholder="https://api.deepseek.com/v1" spellCheck={false} />
             </label>
             <label>
               <span>模型</span>
-              <input value={form.model} onChange={(event) => update("model", event.target.value)} placeholder="deepseek-chat" list="model-options" spellCheck={false} />
+              <div className="input-with-action">
+                <input value={form.model} onChange={(event) => update("model", event.target.value)} placeholder="点右侧拉取，或手工填写" list="model-options" spellCheck={false} />
+                <button type="button" className="ghost-button compact" onClick={() => void fetchModels()} disabled={busy !== null}>
+                  {busy === "models" ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />} 获取
+                </button>
+              </div>
               <datalist id="model-options">
                 {models.map((model) => <option key={model} value={model} />)}
               </datalist>
@@ -236,9 +276,6 @@ export function SettingsPage() {
             <button className="ghost-button" onClick={() => void testConnection()} disabled={busy !== null}>
               {busy === "test" ? <Loader2 size={15} className="spin" /> : <PlugZap size={15} />} 测试连接
             </button>
-            <button className="ghost-button" onClick={() => void fetchModels()} disabled={busy !== null}>
-              {busy === "models" ? <Loader2 size={15} className="spin" /> : <Sparkles size={15} />} 获取模型列表
-            </button>
             {settings?.hasApiKey && (
               <button className="ghost-button danger" onClick={() => void clearKey()} disabled={busy !== null}>
                 <Trash2 size={15} /> 清除 Key
@@ -255,35 +292,23 @@ export function SettingsPage() {
           <h2>Codex 执行器</h2>
           <span className={`status-chip ${codex?.canRun ? "ok" : "warn"}`}>
             <span className={`status-dot ${codex?.canRun ? "online" : "offline"}`} />
-            {codex?.canRun ? "可以执行任务" : "连接有问题"}
+            {codex?.canRun ? "可以执行任务" : "未连接"}
           </span>
         </div>
         <div className="settings-body">
-          <p className="settings-lead">
-            Hearth 通过本机的 <code>~/.codex/config.toml</code> 调用 Codex，不在这里保存执行器密钥。
-          </p>
-          <dl className="settings-kv">
-            <div><dt>Provider</dt><dd>{codex?.providerName ?? "—"} <small>{codex?.providerId}</small></dd></div>
-            <div><dt>模型</dt><dd>{codex?.model ?? "默认模型"}</dd></div>
-            <div><dt>地址</dt><dd className="mono">{codex?.baseUrl ?? "—"}</dd></div>
-            <div><dt>协议</dt><dd className="mono">{codex?.wireApi ?? "—"}</dd></div>
-            <div><dt>环境变量</dt><dd className="mono">{codex?.envKey ?? "未声明"} {codex?.envKey ? (codex.envKeyPresent ? "已读取" : "未读取") : ""}</dd></div>
-            <div><dt>配置文件</dt><dd className="mono">{codex?.configPath ?? "—"}</dd></div>
-          </dl>
-
-          {codex && codex.issues.length > 0 && (
-            <div className="issue-list">
-              {codex.issues.map((issue) => <p key={issue}><AlertTriangle size={14} /> {issue}</p>)}
+          <div className="codex-summary">
+            <span className={`status-dot ${codex?.canRun ? "online" : "offline"}`} />
+            <div>
+              <strong>{codex?.canRun ? "已连接" : "未连接"}</strong>
+              <small>{codex ? `${codex.providerName} · ${codex.model ?? "默认模型"}` : "读取本机配置中"}</small>
             </div>
-          )}
+            <span className="codex-key-state">{keyStateText(codex)}</span>
+          </div>
 
-          {codex && !codex.canRun && codex.envKey && (
-            <div className="help-card">
-              <strong>最常见的连接问题</strong>
-              <p>Codex 已切到 Provider 环境变量模式，但 Hearth 服务进程没有读到 <code>{codex.envKey}</code>。在同一个终端里设置变量后重启 Hearth：</p>
-              <pre>{`set ${codex.envKey}=你的Key\nnpm.cmd start`}</pre>
-              <p>如果显示 “Not logged in”，这是 Provider 环境变量模式的正常现象，不代表配置损坏。</p>
-            </div>
+          {codex && !codex.canRun && (
+            <p className="codex-hint">
+              需要环境变量 <code>{codex.envKey ?? "API Key"}</code>。可写入 Windows 用户环境变量，然后点重新检测。
+            </p>
           )}
 
           {probe && (
@@ -301,12 +326,44 @@ export function SettingsPage() {
             <button className="primary-button" onClick={() => void probeExecutor()} disabled={busy !== null}>
               {busy === "probe" ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />} 测试执行器
             </button>
+            <button className="ghost-button" onClick={() => void refreshHealth()} disabled={busy !== null}>
+              {busy === "refresh" ? <Loader2 size={15} className="spin" /> : <PlugZap size={15} />} 重新检测
+            </button>
           </div>
-          <p className="settings-hint"><Download size={13} /> 修改 <code>config.toml</code> 或环境变量后，需要重启 Hearth 服务才会生效。</p>
+
+          <details className="settings-details">
+            <summary>连接详情</summary>
+            <dl className="settings-kv">
+              <div><dt>Provider</dt><dd>{codex?.providerName ?? "—"} <small>{codex?.providerId}</small></dd></div>
+              <div><dt>模型</dt><dd>{codex?.model ?? "默认模型"}</dd></div>
+              <div><dt>地址</dt><dd className="mono">{codex?.baseUrl ?? "—"}</dd></div>
+              <div><dt>协议</dt><dd className="mono">{codex?.wireApi ?? "—"}</dd></div>
+              <div><dt>环境变量</dt><dd className="mono">{codex?.envKey ?? "未声明"} {codex?.envKeyPresent ? "已读取" : ""}</dd></div>
+              <div><dt>配置文件</dt><dd className="mono">{codex?.configPath ?? "—"}</dd></div>
+            </dl>
+            {codex && codex.issues.length > 0 && (
+              <div className="issue-list">
+                {codex.issues.map((issue) => <p key={issue}><AlertTriangle size={14} /> {issue}</p>)}
+              </div>
+            )}
+          </details>
+          <p className="settings-hint">修改 <code>config.toml</code> 或环境变量后，点重新检测即可。</p>
         </div>
       </section>
     </div>
   );
+}
+
+function protocolLabel(protocol: ModelProtocol): string {
+  return PROTOCOLS.find((item) => item.id === protocol)?.label ?? protocol;
+}
+
+function keyStateText(codex: { envKeySource?: string; authSource?: string } | undefined): string {
+  if (!codex) return "";
+  if (codex.envKeySource === "windows-user") return "密钥来自 Windows 用户环境变量";
+  if (codex.envKeySource === "process") return "密钥来自当前进程";
+  if (codex.authSource === "openai-login") return "已登录 OpenAI";
+  return "";
 }
 
 function Notice({ tone, text }: { tone: "ok" | "error" | "info"; text: string }) {
