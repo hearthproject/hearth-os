@@ -379,8 +379,9 @@ function SessionPanel({
       : observeApps.length === 1
         ? observeApps[0] ?? ""
         : "";
+  const frameExpired = frame !== null && Date.parse(frame.expiresAt) <= Date.now();
   const targetMismatch = frame !== null && (effectiveTarget === "" || frame.activeApp !== effectiveTarget);
-  const canAct = active && frame !== null && Date.parse(frame.expiresAt) > Date.now() && !targetMismatch;
+  const canAct = active && frame !== null && !frameExpired && !targetMismatch;
   const lastCommand = commands[commands.length - 1];
 
   async function sendAction(input: DesktopActionRequest, message: string): Promise<void> {
@@ -425,7 +426,7 @@ function SessionPanel({
       </div>
 
       <div className="device-frame-area">
-        {frame ? (
+        {frame && !frameExpired ? (
           <>
             <button
               type="button"
@@ -447,7 +448,7 @@ function SessionPanel({
         ) : (
           <div className="device-frame-empty">
             <Eye size={16} />
-            <span>{active || session.status === "paused" ? "等待助手回传新的观察。" : "你接管期间不会自动观察。"}</span>
+            <span>{frameExpired ? "截图已过期。重新观察后再查看或操作。" : active || session.status === "paused" ? "等待助手回传新的观察。" : "你接管期间不会自动观察。"}</span>
           </div>
         )}
         <div className="device-action-row device-observe-row">
