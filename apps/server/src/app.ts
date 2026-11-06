@@ -469,7 +469,9 @@ export async function buildServer(options: BuildServerOptions = {}) {
   app.post<{ Params: { id: string } }>("/api/tasks/:id/cancel", async (request, reply) => {
     if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFF", message: "执行器未启动" });
     try {
-      return scheduler.cancel(request.params.id);
+      const task = scheduler.cancel(request.params.id);
+      outbox.reconcileTask(request.params.id);
+      return task;
     } catch (error) {
       return reply.code(404).send({ error: "TASK_NOT_FOUND", message: error instanceof Error ? error.message : String(error) });
     }

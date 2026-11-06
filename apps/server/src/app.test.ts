@@ -191,6 +191,43 @@ describe("Hearth server", () => {
     }
   });
 
+  it("returns an outbox draft to editable state when its task is cancelled", async () => {
+    const outboxRoot = mkdtempSync(join(tmpdir(), "hearth-app-outbox-"));
+    const app = await buildServer({ store, serveWeb: false, startScheduler: true, outboxRoot });
+    try {
+      const created = await app.inject({
+        method: "POST",
+        url: "/api/outbox",
+        payload: {
+          account: "local-test",
+          to: ["reviewer@example.test"],
+          subject: "Cancel me",
+          body: "No write should happen."
+        }
+      });
+      const draft = created.json();
+      const submitted = await app.inject({ method: "POST", url: `/api/outbox/${draft.id}/submit` });
+      const taskId = submitted.json().task.id as string;
+
+      const cancelled = await app.inject({ method: "POST", url: `/api/tasks/${taskId}/cancel` });
+      expect(cancelled.statusCode).toBe(200);
+      expect(cancelled.json().status).toBe("cancelled");
+
+      const drafts = await app.inject({ method: "GET", url: "/api/outbox" });
+      expect(drafts.json().drafts[0]).toMatchObject({
+        id: draft.id,
+        status: "draft",
+        taskId: null,
+        approvalId: null,
+        effectId: null,
+        submittedAt: null
+      });
+    } finally {
+      await app.close();
+      rmSync(outboxRoot, { recursive: true, force: true });
+    }
+  });
+
   it("lists the fifteen evaluation templates", async () => {
     const app = await buildServer({ store, serveWeb: false });
     const response = await app.inject({ method: "GET", url: "/api/templates" });

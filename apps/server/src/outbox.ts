@@ -254,6 +254,14 @@ export class OutboxService {
     });
   }
 
+  reconcileTask(taskId: string): OutboxDraft[] {
+    return this.service.store
+      .listApprovals(taskId)
+      .filter((approval) => approval.kind === "outbox.local-write")
+      .map((approval) => this.reconcileApproval(approval.id))
+      .filter((draft): draft is OutboxDraft => draft !== null);
+  }
+
   private assertComplete(draft: OutboxDraft): void {
     if (draft.to.length === 0) throw new OutboxError("OUTBOX_RECIPIENT_REQUIRED", "提交审批前至少需要一个收件人", 400);
     if (!draft.subject.trim()) throw new OutboxError("OUTBOX_SUBJECT_REQUIRED", "提交审批前需要填写主题", 400);
