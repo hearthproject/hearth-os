@@ -23,6 +23,9 @@ import type {
   MemoryRecord,
   MemorySettings,
   MemoryVersion,
+  MethodCandidate,
+  MethodEvaluation,
+  MethodTrial,
   OutboxDraft,
   ProactiveSettings,
   ProactiveSuggestion,
@@ -279,6 +282,8 @@ CREATE INDEX IF NOT EXISTS memories_subject_idx ON memories(subject_key, status)
 CREATE INDEX IF NOT EXISTS memory_recalls_task_idx ON memory_recalls(task_id, created_at);
 CREATE INDEX IF NOT EXISTS memory_forget_receipts_memory_idx ON memory_forget_receipts(memory_id, created_at);
 CREATE INDEX IF NOT EXISTS method_candidates_status_idx ON method_candidates(status, updated_at);
+CREATE INDEX IF NOT EXISTS method_evaluations_method_idx ON method_evaluations(method_id, created_at);
+CREATE INDEX IF NOT EXISTS method_trials_method_idx ON method_trials(method_id, created_at);
 CREATE INDEX IF NOT EXISTS sync_conflicts_status_idx ON sync_conflicts(status, created_at);
 CREATE INDEX IF NOT EXISTS task_leases_expiry_idx ON task_leases(expires_at);
 CREATE INDEX IF NOT EXISTS chat_messages_conversation_idx ON chat_messages(conversation_id, created_at);
@@ -655,6 +660,32 @@ export class HearthStore {
     return rows.map(rowToMemoryForgetReceipt);
   }
 
+  getMethodCandidate(id: string): MethodCandidate | null {
+    const row = this.db.prepare("SELECT * FROM method_candidates WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToMethodCandidate(row) : null;
+  }
+
+  listMethodCandidates(status?: string): MethodCandidate[] {
+    const rows = status
+      ? this.db.prepare("SELECT * FROM method_candidates WHERE status = ? ORDER BY updated_at DESC").all(status) as DbRow[]
+      : this.db.prepare("SELECT * FROM method_candidates ORDER BY updated_at DESC").all() as DbRow[];
+    return rows.map(rowToMethodCandidate);
+  }
+
+  listMethodEvaluations(methodId?: string): MethodEvaluation[] {
+    const rows = methodId
+      ? this.db.prepare("SELECT * FROM method_evaluations WHERE method_id = ? ORDER BY created_at DESC").all(methodId) as DbRow[]
+      : this.db.prepare("SELECT * FROM method_evaluations ORDER BY created_at DESC").all() as DbRow[];
+    return rows.map(rowToMethodEvaluation);
+  }
+
+  listMethodTrials(methodId?: string): MethodTrial[] {
+    const rows = methodId
+      ? this.db.prepare("SELECT * FROM method_trials WHERE method_id = ? ORDER BY created_at DESC").all(methodId) as DbRow[]
+      : this.db.prepare("SELECT * FROM method_trials ORDER BY created_at DESC").all() as DbRow[];
+    return rows.map(rowToMethodTrial);
+  }
+
   scrubForgottenMemory(memoryId: string, tombstone: { content: string; subjectKey: string; scope: string }): { redactedVersions: number; redactedEvents: number } {
     const versionCount = Number(
       (this.db.prepare("SELECT COUNT(*) AS total FROM memory_versions WHERE memory_id = ?").get(memoryId) as DbRow).total
@@ -995,6 +1026,10 @@ export class HearthStore {
       case "memory.forgotten": return insertMemoryForgetReceiptRow(this.db, event.payload as MemoryForgetReceipt);
       case "memory.conflict.created":
       case "memory.conflict.updated": return upsertMemoryConflict(this.db, event.payload as MemoryConflict);
+      case "method.candidate.created":
+      case "method.candidate.updated": return upsertMethodCandidate(this.db, event.payload as MethodCandidate);
+      case "method.evaluation.recorded": return insertMethodEvaluationRow(this.db, event.payload as MethodEvaluation);
+      case "method.trial.recorded": return insertMethodTrialRow(this.db, event.payload as MethodTrial);
       case "outbox.created": return upsertOutboxDraft(this.db, event.payload as OutboxDraft);
       case "outbox.updated": return updateOutboxDraft(this.db, event.payload as Record<string, unknown>);
       case "device.paired":
@@ -1798,4 +1833,80 @@ function scrubMemoryEventPayload(
     next[key] = scrubMemoryEventPayload(type, item, memoryId, tombstone);
   }
   return next;
+}
+
+function rowToMethodCandidate(row: DbRow): MethodCandidate {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    summary: String(row.summary),
+    applicability: String(row.applicability),
+    steps: JSON.parse(String(row.steps_json)),
+    sourceTaskIds: JSON.parse(String(row.source_task_ids_json)),
+    templateId: row.template_id == null ? null : String(row.template_id),
+    status: String(row.status) as MethodCandidate["status"],
+    version: Number(row.version),
+    previousVersionId: row.previous_version_id == null ? null : String(row.previous_version_id),
+    allowedCapabilities: JSON.parse(String(row.allowed_capabilities_json)),
+    guardrails: JSON.parse(String(row.guardrails_json)),
+    baseline: JSON.parse(String(row.baseline_json)),
+    trial: JSON.parse(String(row.trial_json)),
+    evaluationVerdict: row.evaluation_verdict == null ? null : String(row.evaluation_verdict) as MethodCandidate["evaluationVerdict"],
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+    adoptedAt: row.adopted_at == null ? null : String(row.adopted_at),
+    retiredAt: row.retired_at == null ? null : String(row.retired_at)
+  };
+}
+
+function upsertMethodCandidate(db: DatabaseSync, method: MethodCandidate): void {
+  db.prepare(
+    "INSERT INTO method_candidates (id, name, summary, applicability, steps_json, source_task_ids_json, template_id, status, version, previous_version_id, allowed_capabilities_json, guardrails_json, baseline_json, trial_json, evaluation_verdict, created_at, updated_at, adopted_at, retired_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, summary=excluded.summary, applicability=excluded.applicability, steps_json=excluded.steps_json, source_task_ids_json=excluded.source_task_ids_json, template_id=excluded.template_id, status=excluded.status, version=excluded.version, previous_version_id=excluded.previous_version_id, allowed_capabilities_json=excluded.allowed_capabilities_json, guardrails_json=excluded.guardrails_json, baseline_json=excluded.baseline_json, trial_json=excluded.trial_json, evaluation_verdict=excluded.evaluation_verdict, updated_at=excluded.updated_at, adopted_at=excluded.adopted_at, retired_at=excluded.retired_at"
+  ).run(
+    method.id, method.name, method.summary, method.applicability, JSON.stringify(method.steps), JSON.stringify(method.sourceTaskIds),
+    method.templateId, method.status, method.version, method.previousVersionId, JSON.stringify(method.allowedCapabilities),
+    JSON.stringify(method.guardrails), JSON.stringify(method.baseline), JSON.stringify(method.trial), method.evaluationVerdict,
+    method.createdAt, method.updatedAt, method.adoptedAt, method.retiredAt
+  );
+}
+
+function rowToMethodEvaluation(row: DbRow): MethodEvaluation {
+  return {
+    id: String(row.id),
+    methodId: String(row.method_id),
+    methodVersion: Number(row.method_version),
+    baselineTaskIds: JSON.parse(String(row.baseline_task_ids_json)),
+    trialTaskIds: JSON.parse(String(row.trial_task_ids_json)),
+    baseline: JSON.parse(String(row.baseline_json)),
+    trial: JSON.parse(String(row.trial_json)),
+    verdict: String(row.verdict) as MethodEvaluation["verdict"],
+    notes: String(row.notes),
+    createdAt: String(row.created_at)
+  };
+}
+
+function insertMethodEvaluationRow(db: DatabaseSync, evaluation: MethodEvaluation): void {
+  db.prepare(
+    "INSERT INTO method_evaluations (id, method_id, method_version, baseline_task_ids_json, trial_task_ids_json, baseline_json, trial_json, verdict, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(
+    evaluation.id, evaluation.methodId, evaluation.methodVersion, JSON.stringify(evaluation.baselineTaskIds),
+    JSON.stringify(evaluation.trialTaskIds), JSON.stringify(evaluation.baseline), JSON.stringify(evaluation.trial),
+    evaluation.verdict, evaluation.notes, evaluation.createdAt
+  );
+}
+
+function rowToMethodTrial(row: DbRow): MethodTrial {
+  return {
+    id: String(row.id),
+    methodId: String(row.method_id),
+    methodVersion: Number(row.method_version),
+    taskId: String(row.task_id),
+    createdAt: String(row.created_at)
+  };
+}
+
+function insertMethodTrialRow(db: DatabaseSync, trial: MethodTrial): void {
+  db.prepare(
+    "INSERT INTO method_trials (id, method_id, method_version, task_id, created_at) VALUES (?, ?, ?, ?, ?)"
+  ).run(trial.id, trial.methodId, trial.methodVersion, trial.taskId, trial.createdAt);
 }

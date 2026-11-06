@@ -19,6 +19,7 @@ import { SourceRegistry, SourceRegistryError } from "./sources.ts";
 import { OutboxError, OutboxService } from "./outbox.ts";
 import { DesktopError, DesktopService } from "./desktop.ts";
 import { MemoryError, MemoryService } from "./memory.ts";
+import { MethodError, MethodService } from "./methods.ts";
 import { ProactiveError, ProactiveService } from "./proactive.ts";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
@@ -90,6 +91,33 @@ const memoryConflictResolveSchema = z.object({
   note: z.string().max(1000).optional(),
   content: z.string().trim().min(1).max(8000).optional()
 }).strict();
+
+const createMethodSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  summary: z.string().trim().min(1).max(2000),
+  applicability: z.string().trim().min(1).max(1000),
+  steps: z.array(z.string().trim().min(1).max(1000)).min(1).max(30),
+  sourceTaskIds: z.array(z.string().trim().min(1).max(100)).min(1).max(50),
+  templateId: z.string().trim().min(1).max(20).nullable().optional(),
+  allowedCapabilities: z.array(z.string().trim().min(1).max(200)).max(100).optional(),
+  guardrails: z.array(z.string().trim().min(1).max(500)).max(50).optional()
+}).strict();
+
+const generateMethodSchema = z.object({
+  taskId: z.string().trim().min(1).max(100),
+  name: z.string().trim().min(1).max(200).optional(),
+  summary: z.string().trim().min(1).max(2000).optional()
+}).strict();
+
+const evaluateMethodSchema = z.object({
+  baselineTaskIds: z.array(z.string().trim().min(1).max(100)).min(1).max(50),
+  trialTaskIds: z.array(z.string().trim().min(1).max(100)).min(1).max(50),
+  notes: z.string().max(2000).optional()
+}).strict();
+
+const methodTrialSchema = z.object({ taskId: z.string().trim().min(1).max(100) }).strict();
+const methodRollbackSchema = z.object({ reason: z.string().trim().min(1).max(1000) }).strict();
+const methodRejectSchema = z.object({ reason: z.string().trim().max(1000).optional() }).strict();
 
 const proactiveSettingsSchema = z.object({
   enabled: z.boolean().optional(),
@@ -250,6 +278,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   }));
   const proactive = new ProactiveService(service);
   const memory = new MemoryService(service);
+  const methods = new MethodService(service);
   const approvals = new ApprovalManager(service, effectExecutor);
   approvals.recoverInterruptedEffects();
   const outbox = new OutboxService(service, approvals);
@@ -490,6 +519,79 @@ export async function buildServer(options: BuildServerOptions = {}) {
       return memory.resolveConflict(request.params.id, parsed.data.resolution, parsed.data.note, parsed.data.content);
     } catch (error) {
       return sendMemoryError(reply, error);
+    }
+  });
+
+  app.get("/api/methods", async (_request, reply) => {
+    reply.header("cache-control", "no-store");
+    return methods.snapshot();
+  });
+
+  app.post("/api/methods/generate", async (request, reply) => {
+    const parsed = generateMethodSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_METHOD_GENERATE", message: "生成候选方法的参数不正确" });
+    try {
+      return reply.code(201).send(methods.generateFromTask(parsed.data.taskId, definedObject({ name: parsed.data.name, summary: parsed.data.summary })));
+    } catch (error) {
+      return sendMethodError(reply, error);
+    }
+  });
+
+  app.post("/api/methods", async (request, reply) => {
+    const parsed = createMethodSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_METHOD", message: "候选方法参数不正确" });
+    try {
+      return reply.code(201).send(methods.create(definedObject(parsed.data) as unknown as Parameters<MethodService["create"]>[0]));
+    } catch (error) {
+      return sendMethodError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/methods/:id/evaluate", async (request, reply) => {
+    const parsed = evaluateMethodSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_METHOD_EVALUATION", message: "方法评估参数不正确" });
+    try {
+      return methods.evaluate(request.params.id, definedObject(parsed.data) as unknown as Parameters<MethodService["evaluate"]>[1]);
+    } catch (error) {
+      return sendMethodError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/methods/:id/trials", async (request, reply) => {
+    const parsed = methodTrialSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_METHOD_TRIAL", message: "试跑样本参数不正确" });
+    try {
+      return methods.recordTrial(request.params.id, parsed.data.taskId);
+    } catch (error) {
+      return sendMethodError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/methods/:id/promote", async (request, reply) => {
+    try {
+      return methods.promote(request.params.id);
+    } catch (error) {
+      return sendMethodError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/methods/:id/rollback", async (request, reply) => {
+    const parsed = methodRollbackSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_METHOD_ROLLBACK", message: "回退参数不正确" });
+    try {
+      return methods.rollback(request.params.id, parsed.data.reason);
+    } catch (error) {
+      return sendMethodError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/methods/:id/reject", async (request, reply) => {
+    const parsed = methodRejectSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_METHOD_REJECT", message: "拒绝参数不正确" });
+    try {
+      return methods.reject(request.params.id, parsed.data.reason);
+    } catch (error) {
+      return sendMethodError(reply, error);
     }
   });
 
@@ -1124,6 +1226,13 @@ function definedObject(value: Record<string, unknown>): Record<string, unknown> 
 
 function sendMemoryError(reply: FastifyReply, error: unknown) {
   if (error instanceof MemoryError) {
+    return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+  }
+  throw error;
+}
+
+function sendMethodError(reply: FastifyReply, error: unknown) {
+  if (error instanceof MethodError) {
     return reply.code(error.statusCode).send({ error: error.code, message: error.message });
   }
   throw error;
