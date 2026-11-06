@@ -104,6 +104,37 @@ export class ApprovalManager {
     return pending.length;
   }
 
+  expirePastDue(): { approvals: number; tasks: number } {
+    const now = new Date().toISOString();
+    let approvals = 0;
+    let tasks = 0;
+    for (const task of this.service.store.listTasks()) {
+      const pending = this.service.store.listApprovals(task.id)
+        .filter((approval) => approval.status === "pending" && Date.parse(approval.expiresAt) <= Date.now());
+      if (pending.length === 0) continue;
+      for (const approval of pending) {
+        this.service.updateApproval(approval.id, { status: "expired", decidedAt: now });
+        approvals += 1;
+      }
+      if (task.status === "waiting_approval") {
+        const runId = pending[0]?.runId ?? task.currentRunId ?? undefined;
+        this.service.updateTask(task.id, {
+          status: "recoverable",
+          currentRunId: task.currentRunId,
+          nextAction: "审批已过期，可以重试任务",
+          error: {
+            kind: "approval_expired",
+            message: "外部动作的确认已经过期",
+            recoverable: true,
+            guidance: "重新执行任务以生成新的审批"
+          }
+        }, runId);
+        tasks += 1;
+      }
+    }
+    return { approvals, tasks };
+  }
+
   async decide(approvalId: string, decision: ApprovalDecision, parameterHash: string): Promise<ApprovalResult> {
     const approval = this.service.store.getApproval(approvalId);
     if (!approval) throw new ApprovalError("APPROVAL_NOT_FOUND", "审批不存在");

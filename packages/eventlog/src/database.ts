@@ -27,6 +27,7 @@ import type {
   MethodCandidate,
   MethodEvaluation,
   MethodTrial,
+  MaintenanceRun,
   OutboxDraft,
   ProactiveSettings,
   ProactiveSuggestion,
@@ -452,6 +453,36 @@ export class HearthStore {
       "INSERT INTO backup_records (id, kind, path, bytes, sha256, created_at) VALUES (?, ?, ?, ?, ?, ?)"
     ).run(record.id, record.kind, record.path, record.bytes, record.sha256, record.createdAt);
     return record;
+  }
+
+  createMaintenanceRun(run: MaintenanceRun): MaintenanceRun {
+    this.db.prepare(
+      "INSERT INTO maintenance_runs (id, started_at, ended_at, status, actions_json, error) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(run.id, run.startedAt, run.endedAt, run.status, JSON.stringify(run.actions), run.error);
+    return run;
+  }
+
+  finishMaintenanceRun(run: MaintenanceRun): MaintenanceRun {
+    this.db.prepare(
+      "UPDATE maintenance_runs SET ended_at = ?, status = ?, actions_json = ?, error = ? WHERE id = ?"
+    ).run(run.endedAt, run.status, JSON.stringify(run.actions), run.error, run.id);
+    return run;
+  }
+
+  getMaintenanceRun(id: string): MaintenanceRun | null {
+    const row = this.db.prepare("SELECT * FROM maintenance_runs WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToMaintenanceRun(row) : null;
+  }
+
+  listMaintenanceRuns(limit = 20): MaintenanceRun[] {
+    const bounded = Math.max(1, Math.min(200, Math.floor(limit)));
+    return (this.db.prepare("SELECT * FROM maintenance_runs ORDER BY started_at DESC LIMIT ?").all(bounded) as DbRow[])
+      .map(rowToMaintenanceRun);
+  }
+
+  latestMaintenanceRun(): MaintenanceRun | null {
+    const row = this.db.prepare("SELECT * FROM maintenance_runs ORDER BY started_at DESC LIMIT 1").get() as DbRow | undefined;
+    return row ? rowToMaintenanceRun(row) : null;
   }
 
   getTask(id: string): TaskRecord | null {
@@ -2059,6 +2090,17 @@ function rowToBackupRecord(row: DbRow): BackupRecord {
     bytes: Number(row.bytes),
     sha256: String(row.sha256),
     createdAt: String(row.created_at)
+  };
+}
+
+function rowToMaintenanceRun(row: DbRow): MaintenanceRun {
+  return {
+    id: String(row.id),
+    startedAt: String(row.started_at),
+    endedAt: row.ended_at == null ? null : String(row.ended_at),
+    status: String(row.status) as MaintenanceRun["status"],
+    actions: JSON.parse(String(row.actions_json)) as Record<string, number>,
+    error: row.error == null ? null : String(row.error)
   };
 }
 

@@ -762,6 +762,9 @@ export interface HealthSnapshot {
   disk: { freeBytes: number | null; dataBytes: number; walBytes: number };
   tasks: { total: number; queued: number; running: number; recoverable: number; waitingApproval: number };
   maintenance: { lastRunAt: string | null; lastStatus: MaintenanceStatus | null; lastError: string | null };
+  scheduler: { enabled: boolean; running: boolean };
+  security: { killSwitch: boolean };
+  issues: string[];
   codex: {
     canRun: boolean;
     providerId: string;

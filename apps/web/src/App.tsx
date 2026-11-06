@@ -69,6 +69,7 @@ function EventBridge() {
         void queryClient.invalidateQueries({ queryKey: ["sync"] });
         void queryClient.invalidateQueries({ queryKey: ["security"] });
         void queryClient.invalidateQueries({ queryKey: ["backups"] });
+        void queryClient.invalidateQueries({ queryKey: ["maintenance"] });
         void queryClient.invalidateQueries({ queryKey: ["desktop"] });
         if (taskId) {
           void queryClient.invalidateQueries({ queryKey: ["task", taskId] });

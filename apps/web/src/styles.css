@@ -3106,6 +3106,31 @@ body.modal-open {
   margin: 8px 10px 10px;
 }
 
+.maintenance-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-2);
+  padding: 8px 10px;
+}
+
+.maintenance-action-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 2px 10px 10px;
+}
+
+.maintenance-history {
+  margin: 0 10px 12px;
+}
+
+.maintenance-history summary {
+  cursor: pointer;
+  color: var(--ink-secondary);
+  font-size: var(--fs-12);
+  padding: 4px 0;
+}
+
 @media (max-width: 760px) {
   .backup-form,
   .backup-restore-grid,

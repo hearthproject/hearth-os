@@ -13,6 +13,7 @@ import type {
   DeviceView,
   EventWindow,
   HealthResponse,
+  MaintenanceSnapshot,
   CreateMemoryRequest,
   CreateMethodRequest,
   CreateSyncPeerRequest,
@@ -98,6 +99,9 @@ export const api = {
     body: JSON.stringify({ envelope, passphrase })
   }),
   backupDownloadUrl: (id: string) => `/api/backups/${encodeURIComponent(id)}/download`,
+  maintenance: () => request<MaintenanceSnapshot>("/api/maintenance"),
+  runMaintenance: () => request<MaintenanceSnapshot["latest"]>("/api/maintenance/run", { method: "POST" }),
+  diagnosticsUrl: "/api/diagnostics",
   memory: () => request<MemorySnapshot>("/api/memory"),
   createMemory: (input: CreateMemoryRequest) => request<MemorySnapshot["memories"][number]>("/api/memory", {
     method: "POST",

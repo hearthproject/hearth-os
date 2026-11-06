@@ -20,6 +20,8 @@ import type {
   EffectStatus,
   EventEnvelope,
   EventWindow,
+  HealthSnapshot,
+  MaintenanceRun,
   MemoryConflict,
   MemoryConfidence,
   MemoryForgetReceipt,
@@ -83,6 +85,8 @@ export type {
   EffectStatus,
   EventEnvelope,
   EventWindow,
+  HealthSnapshot,
+  MaintenanceRun,
   MemoryConflict,
   MemoryConfidence,
   MemoryForgetReceipt,
@@ -143,17 +147,16 @@ export interface SystemStatus {
   killSwitch: boolean;
 }
 
-export interface HealthResponse {
-  status: "ok";
-  name: string;
-  now: string;
-  codex: {
-    canRun: boolean;
-    providerId: string;
-    providerName: string;
-    model: string | null;
-    authSource: "provider-env" | "openai-login" | "missing" | "unknown";
-    issues: string[];
+export type HealthResponse = HealthSnapshot;
+
+export interface MaintenanceSnapshot {
+  latest: MaintenanceRun | null;
+  runs: MaintenanceRun[];
+  running: boolean;
+  policy: {
+    claimedCommandTtlMinutes: number;
+    temporaryFileTtlHours: number;
+    keptRuns: number;
   };
 }
 

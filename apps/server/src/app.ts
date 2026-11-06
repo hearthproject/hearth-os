@@ -6,11 +6,10 @@ import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyReply } from "fastify";
 import type { EventEnvelope } from "@hearth/core";
 import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_SENSITIVITIES, PROACTIVE_MODES, RUN_STATUSES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
-import { loadCodexProfile } from "@hearth/codex-executor";
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate } from "@hearth/templates";
 import { z } from "zod";
-import { BACKUP_DIR, DB_PATH, DEVICE_FRAME_DIR, MASTER_KEY_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST } from "./config.ts";
+import { BACKUP_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, MASTER_KEY_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST } from "./config.ts";
 import { ApprovalError, ApprovalManager, type EffectExecutor } from "./approvals.ts";
 import { BackupError, BackupService } from "./backups.ts";
 import { executeEffect } from "./effects.ts";
@@ -18,6 +17,9 @@ import { HearthScheduler } from "./scheduler.ts";
 import { TaskLeaseService } from "./leases.ts";
 import { SecurityError, SecurityService } from "./security.ts";
 import { HearthService, TaskInputSelectionError, type CreateTaskInput } from "./service.ts";
+import { HealthService } from "./health.ts";
+import { MaintenanceError, MaintenanceService } from "./maintenance.ts";
+import { DiagnosticsService } from "./diagnostics.ts";
 import { SourceRegistry, SourceRegistryError } from "./sources.ts";
 import { OutboxError, OutboxService } from "./outbox.ts";
 import { DesktopError, DesktopService } from "./desktop.ts";
@@ -296,12 +298,15 @@ export interface BuildServerOptions {
   logger?: boolean;
   serveWeb?: boolean;
   startScheduler?: boolean;
+  startMaintenance?: boolean;
   effectExecutor?: EffectExecutor;
   sourceContentRoot?: string;
   outboxRoot?: string;
   deviceFrameRoot?: string;
   backupRoot?: string;
   masterKeyPath?: string;
+  dataDir?: string;
+  dbPath?: string;
   syncFetch?: typeof fetch;
   syncSecretBox?: SecretBox;
 }
@@ -309,6 +314,7 @@ export interface BuildServerOptions {
 export async function buildServer(options: BuildServerOptions = {}) {
   const ownsStore = !options.store;
   const store = options.store ?? new HearthStore(DB_PATH);
+  const serverStartedAt = new Date().toISOString();
   const service = new HearthService(store);
   const sources = new SourceRegistry(service, {
     contentRoot: options.sourceContentRoot ?? SOURCE_CONTENT_DIR
@@ -348,12 +354,29 @@ export async function buildServer(options: BuildServerOptions = {}) {
         ...(options.sourceContentRoot ? { sourceContentRoot: options.sourceContentRoot } : {})
       })
     : null;
+  const maintenance = new MaintenanceService({
+    service,
+    approvals,
+    backupRoot: options.backupRoot ?? BACKUP_DIR,
+    deviceFrameRoot: options.deviceFrameRoot ?? DEVICE_FRAME_DIR
+  });
+  const health = new HealthService({
+    service,
+    startedAt: serverStartedAt,
+    dataDir: options.dataDir ?? DATA_DIR,
+    dbPath: options.dbPath ?? DB_PATH,
+    schedulerEnabled: Boolean(scheduler),
+    schedulerRunning: () => scheduler?.running ?? false
+  });
+  const diagnostics = new DiagnosticsService({ service, health, maintenance, webDist: WEB_DIST });
+  if (options.startMaintenance ?? options.startScheduler) maintenance.start();
   const app = Fastify({
     logger: options.logger ?? false,
     bodyLimit: 8_000_000
   });
 
   app.addHook("onClose", async () => {
+    maintenance.stop();
     await scheduler?.stop();
     if (ownsStore) store.close();
   });
@@ -373,21 +396,30 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
   });
 
-  app.get("/api/health", async () => {
-    const profile = loadCodexProfile();
-    return {
-      status: "ok",
-      name: "Hearth",
-      now: new Date().toISOString(),
-      codex: {
-        canRun: profile.canRun,
-        providerId: profile.providerId,
-        providerName: profile.providerName,
-        model: profile.model,
-        authSource: profile.authSource,
-        issues: profile.issues
+  app.get("/api/health", async () => health.snapshot());
+
+  app.get("/api/maintenance", async (_request, reply) => {
+    reply.header("cache-control", "no-store");
+    return maintenance.snapshot();
+  });
+
+  app.post("/api/maintenance/run", async (_request, reply) => {
+    try {
+      return maintenance.run();
+    } catch (error) {
+      if (error instanceof MaintenanceError) {
+        return reply.code(error.statusCode).send({ error: error.code, message: error.message, run: error.run });
       }
-    };
+      return reply.code(500).send({ error: "MAINTENANCE_FAILED", message: "维护任务失败" });
+    }
+  });
+
+  app.get("/api/diagnostics", async (_request, reply) => {
+    const stamp = new Date().toISOString().slice(0, 10);
+    reply.header("cache-control", "no-store");
+    reply.header("content-type", "application/json; charset=utf-8");
+    reply.header("content-disposition", `attachment; filename="hearth-diagnostics-${stamp}.json"`);
+    return diagnostics.snapshot();
   });
 
   const systemStatus = () => {

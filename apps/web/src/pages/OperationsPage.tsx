@@ -1,9 +1,22 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, Download, FileUp, RefreshCw, ShieldAlert } from "lucide-react";
+import { Activity, Archive, Download, FileDown, FileUp, Play, RefreshCw, ShieldAlert } from "lucide-react";
 import { useState } from "react";
 import { api } from "../lib/api.ts";
-import { formatBytes, formatDate } from "../lib/format.ts";
+import { formatBytes, formatDate, formatDuration, formatNumber, relativeTime } from "../lib/format.ts";
 import type { BackupRestoreResult } from "../lib/types.ts";
+
+const ACTION_LABELS: Record<string, string> = {
+  approvalsExpired: "过期审批",
+  tasksRecovered: "恢复任务",
+  leasesExpired: "过期租约",
+  commandsExpired: "过期桌面命令",
+  framesExpired: "过期截图",
+  frameFilesRemoved: "删除截图文件",
+  frameFileErrors: "截图文件失败",
+  pairingsExpired: "过期配对",
+  temporaryFilesRemoved: "临时文件",
+  maintenanceRunsPruned: "修剪维护记录"
+};
 
 export function OperationsPage() {
   const queryClient = useQueryClient();
@@ -15,8 +28,28 @@ export function OperationsPage() {
   const [uploadedEnvelope, setUploadedEnvelope] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [restoreResult, setRestoreResult] = useState<BackupRestoreResult | null>(null);
+  const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 20_000 });
+  const maintenanceQuery = useQuery({ queryKey: ["maintenance"], queryFn: api.maintenance, refetchInterval: 20_000 });
   const backupsQuery = useQuery({ queryKey: ["backups"], queryFn: api.backups, refetchInterval: 30_000 });
   const snapshot = backupsQuery.data;
+  const health = healthQuery.data;
+  const maintenance = maintenanceQuery.data;
+
+  const maintenanceMutation = useMutation({
+    mutationFn: api.runMaintenance,
+    onSuccess: (run) => {
+      if (!run) return;
+      const changed = Object.entries(run.actions).filter(([, count]) => count > 0).length;
+      setNotice(`维护完成：${changed} 类临时状态被处理，任务与记忆没有被删除。`);
+      void queryClient.invalidateQueries({ queryKey: ["maintenance"] });
+      void queryClient.invalidateQueries({ queryKey: ["health"] });
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      void queryClient.invalidateQueries({ queryKey: ["approvals"] });
+      void queryClient.invalidateQueries({ queryKey: ["system"] });
+      void queryClient.invalidateQueries({ queryKey: ["desktop"] });
+    },
+    onError: (error: Error) => setNotice(error.message)
+  });
 
   const createMutation = useMutation({
     mutationFn: () => api.createBackup(backupPassphrase),
@@ -87,6 +120,83 @@ export function OperationsPage() {
 
       {backupsQuery.isError && <p className="form-error">{backupsQuery.error.message}</p>}
       {notice && <p className="page-meta">{notice}</p>}
+
+      <section className="panel">
+        <div className="panel-head">
+          <h2>运行健康</h2>
+          <span className="panel-meta"><Activity size={12} /> {health ? (health.status === "ok" ? "正常" : "需要关注") : "读取中"}</span>
+        </div>
+        {healthQuery.isError && <p className="form-error">{healthQuery.error.message}</p>}
+        {health && (
+          <>
+            <dl className="kv-grid">
+              <div><dt>运行时长</dt><dd>{formatDuration(health.uptimeSeconds * 1000)}</dd></div>
+              <div><dt>内存</dt><dd>{formatBytes(health.memory.rssBytes)} · 堆 {formatBytes(health.memory.heapUsedBytes)} / {formatBytes(health.memory.heapTotalBytes)}</dd></div>
+              <div><dt>可用磁盘</dt><dd>{health.disk.freeBytes === null ? "无法读取" : formatBytes(health.disk.freeBytes)}</dd></div>
+              <div><dt>数据库 / WAL</dt><dd>{formatBytes(health.disk.dataBytes)} / {formatBytes(health.disk.walBytes)}</dd></div>
+              <div><dt>任务</dt><dd>共 {formatNumber(health.tasks.total)} · 排队 {health.tasks.queued} · 运行 {health.tasks.running} · 待审批 {health.tasks.waitingApproval} · 可恢复 {health.tasks.recoverable}</dd></div>
+              <div><dt>执行器</dt><dd>{health.scheduler.enabled ? (health.scheduler.running ? "已启用并运行" : "已启用但停止") : "未启用"}</dd></div>
+              <div><dt>全局停止</dt><dd>{health.security.killSwitch ? "已启用" : "未启用"}</dd></div>
+              <div><dt>Schema / 实例</dt><dd className="mono">{health.schemaVersion} · {health.instanceId.slice(0, 8)}</dd></div>
+              <div><dt>Codex</dt><dd>{health.codex.canRun ? `${health.codex.providerName} · ${health.codex.model ?? "默认模型"}` : (health.codex.issues.join("；") || "不可用")}</dd></div>
+            </dl>
+            {health.issues.length > 0 && (
+              <div className="backup-warning-list">
+                {health.issues.map((issue) => <p className="backup-warning" key={issue}><ShieldAlert size={14} /> {issue}</p>)}
+              </div>
+            )}
+          </>
+        )}
+      </section>
+
+      <section className="panel">
+        <div className="panel-head">
+          <h2>维护</h2>
+          <span className="panel-meta">只清理过期临时状态，不删除任务、记忆或产物</span>
+        </div>
+        <div className="maintenance-actions">
+          <button className="primary-button" disabled={maintenanceMutation.isPending || maintenance?.running} onClick={() => maintenanceMutation.mutate()}>
+            <Play size={14} /> {maintenanceMutation.isPending ? "正在维护…" : "立即维护"}
+          </button>
+          <a className="ghost-button" href={api.diagnosticsUrl}><FileDown size={14} /> 下载脱敏诊断</a>
+        </div>
+        {maintenance && (
+          <>
+            <dl className="kv-grid">
+              <div><dt>最近状态</dt><dd>{maintenance.latest ? `${maintenance.latest.status} · ${relativeTime(maintenance.latest.startedAt)}` : "尚未运行"}</dd></div>
+              <div><dt>自动维护</dt><dd>服务启动后每 6 小时运行；维护记录保留最近 {maintenance.policy.keptRuns} 条</dd></div>
+              <div><dt>命令超时</dt><dd>{maintenance.policy.claimedCommandTtlMinutes} 分钟</dd></div>
+              <div><dt>临时文件</dt><dd>超过 {maintenance.policy.temporaryFileTtlHours} 小时清理</dd></div>
+            </dl>
+            {maintenance.latest?.error && <p className="backup-warning"><ShieldAlert size={14} /> {maintenance.latest.error}</p>}
+            {maintenance.latest && (
+              <div className="maintenance-action-grid">
+                {Object.entries(maintenance.latest.actions).map(([key, count]) => (
+                  <span className="tag" key={key}>{ACTION_LABELS[key] ?? key} {count}</span>
+                ))}
+              </div>
+            )}
+            {maintenance.runs.length > 1 && (
+              <details className="maintenance-history">
+                <summary>查看最近 {maintenance.runs.length} 次维护</summary>
+                <table className="data-table">
+                  <thead><tr><th>开始</th><th>状态</th><th>处理项</th><th>错误</th></tr></thead>
+                  <tbody>
+                    {maintenance.runs.slice(1).map((run) => (
+                      <tr key={run.id}>
+                        <td title={formatDate(run.startedAt)}>{relativeTime(run.startedAt)}</td>
+                        <td><span className="tag">{run.status}</span></td>
+                        <td>{Object.values(run.actions).reduce((sum, value) => sum + value, 0)}</td>
+                        <td>{run.error ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </details>
+            )}
+          </>
+        )}
+      </section>
 
       {restoreResult && (
         <section className="panel backup-restore-result">
