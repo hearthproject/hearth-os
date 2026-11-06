@@ -35,7 +35,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...init,
     headers: {
-      "content-type": "application/json",
+      ...(init?.body !== undefined ? { "content-type": "application/json" } : {}),
       ...init?.headers
     }
   });
