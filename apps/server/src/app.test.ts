@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ApprovalRecord, ArtifactRecord, EffectRecord, RunRecord, SourceConnection, SourceItem } from "@hearth/core";
 import { HearthStore } from "@hearth/eventlog";
 import { buildServer } from "./app.ts";
@@ -143,6 +146,44 @@ describe("Hearth server", () => {
     const drafts = await app.inject({ method: "GET", url: "/api/outbox" });
     expect(drafts.json().drafts[0]).toMatchObject({ id: draft.id, status: "rejected" });
     await app.close();
+  });
+
+  it("writes an approved outbox draft locally without claiming delivery", async () => {
+    const outboxRoot = mkdtempSync(join(tmpdir(), "hearth-app-outbox-"));
+    const app = await buildServer({ store, serveWeb: false, outboxRoot });
+    try {
+      const created = await app.inject({
+        method: "POST",
+        url: "/api/outbox",
+        payload: {
+          account: "local-test",
+          to: ["reviewer@example.test"],
+          subject: "Local only",
+          body: "This message must not be sent."
+        }
+      });
+      const draft = created.json();
+      const submitted = await app.inject({ method: "POST", url: `/api/outbox/${draft.id}/submit` });
+      const approval = submitted.json().approval;
+      const approved = await app.inject({
+        method: "POST",
+        url: `/api/approvals/${approval.id}/decide`,
+        payload: { decision: "approve", parameterHash: approval.parameterHash }
+      });
+      expect(approved.statusCode).toBe(200);
+      expect(approved.json().effect).toMatchObject({
+        status: "succeeded",
+        receipt: { transport: "local-outbox", delivery: "not_sent" }
+      });
+
+      const effectId = approved.json().effect.id as string;
+      expect(existsSync(join(outboxRoot, effectId, "message.eml"))).toBe(true);
+      const drafts = await app.inject({ method: "GET", url: "/api/outbox" });
+      expect(drafts.json().drafts[0]).toMatchObject({ id: draft.id, status: "stored", effectId });
+    } finally {
+      await app.close();
+      rmSync(outboxRoot, { recursive: true, force: true });
+    }
   });
 
   it("lists the fifteen evaluation templates", async () => {

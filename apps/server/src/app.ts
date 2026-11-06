@@ -10,7 +10,7 @@ import { loadCodexProfile } from "@hearth/codex-executor";
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate } from "@hearth/templates";
 import { z } from "zod";
-import { DB_PATH, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST } from "./config.ts";
+import { DB_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST } from "./config.ts";
 import { ApprovalError, ApprovalManager, type EffectExecutor } from "./approvals.ts";
 import { executeEffect } from "./effects.ts";
 import { HearthScheduler } from "./scheduler.ts";
@@ -92,6 +92,7 @@ export interface BuildServerOptions {
   startScheduler?: boolean;
   effectExecutor?: EffectExecutor;
   sourceContentRoot?: string;
+  outboxRoot?: string;
 }
 
 export async function buildServer(options: BuildServerOptions = {}) {
@@ -101,7 +102,11 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const sources = new SourceRegistry(service, {
     contentRoot: options.sourceContentRoot ?? SOURCE_CONTENT_DIR
   });
-  const approvals = new ApprovalManager(service, options.effectExecutor ?? executeEffect);
+  const effectExecutor = options.effectExecutor ?? ((effect) => executeEffect(effect, {
+    outboxRoot: options.outboxRoot ?? OUTBOX_DIR,
+    getArtifact: (id) => store.getArtifact(id)
+  }));
+  const approvals = new ApprovalManager(service, effectExecutor);
   approvals.recoverInterruptedEffects();
   const outbox = new OutboxService(service, approvals);
   const scheduler = options.startScheduler
