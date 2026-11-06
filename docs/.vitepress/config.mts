@@ -29,7 +29,8 @@ const zhDesignSidebar = [
       { text: '运行环境与安全', link: '/design/safety' },
       { text: '记忆与能力进化', link: '/design/memory' },
       { text: '评估与成本', link: '/design/evaluation' },
-      { text: '多设备与长期运行', link: '/design/operations' }
+      { text: '多设备与长期运行', link: '/design/operations' },
+      { text: 'Agent 参考模式', link: '/design/agent-reference-patterns' }
     ]
   }
 ]
@@ -47,7 +48,8 @@ const enDesignSidebar = [
       { text: 'Runtime and Safety', link: '/en/design/safety' },
       { text: 'Memory and Capability Evolution', link: '/en/design/memory' },
       { text: 'Evaluation and Cost', link: '/en/design/evaluation' },
-      { text: 'Multi-device and Long-running Operation', link: '/en/design/operations' }
+      { text: 'Multi-device and Long-running Operation', link: '/en/design/operations' },
+      { text: 'Agent Reference Patterns', link: '/en/design/agent-reference-patterns' }
     ]
   }
 ]
