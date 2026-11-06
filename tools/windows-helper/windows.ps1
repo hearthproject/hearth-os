@@ -332,6 +332,9 @@ try {
   if ($kind -eq "type") {
     $text = [string]$input.text
     foreach ($character in $text.ToCharArray()) {
+      Assert-UserIdle
+      $currentForeground = Get-ForegroundInfo
+      Assert-ExpectedApp $currentForeground ([string]$input.expectedApp)
       [HearthNative]::SendUnicodeChar($character, $false)
       [HearthNative]::SendUnicodeChar($character, $true)
       Start-Sleep -Milliseconds 8
