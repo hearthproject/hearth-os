@@ -1015,6 +1015,18 @@ button.list-row:hover {
   padding: 0 0 10px;
 }
 
+.attention-approvals {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-2);
+}
+
+.attention-approvals > .panel-head {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
 .approval-card.rejected,
 .approval-card.expired {
   border-color: var(--line-strong);
