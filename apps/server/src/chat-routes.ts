@@ -7,7 +7,7 @@ import { z } from "zod";
 import type { ChatAttachment, ChatMessageRecord } from "@hearth/core";
 import { loadCodexProfile, probeCodex } from "@hearth/codex-executor";
 import type { HearthService } from "./service.ts";
-import { chatSystemPrompt, conversationTitle, decideRoute } from "./chat.ts";
+import { chatSystemPrompt, conversationTitle, decideRoute, planExecution } from "./chat.ts";
 import { listModels, ModelClientError, completeChat, streamChat, type ChatMessage } from "./model-client.ts";
 import {
   MODEL_PRESETS,
@@ -178,7 +178,12 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
   app.get<{ Params: { id: string } }>("/api/conversations/:id", async (request, reply) => {
     const conversation = store.getConversation(request.params.id);
     if (!conversation) return reply.code(404).send({ error: "CONVERSATION_NOT_FOUND", message: "对话不存在" });
-    return { conversation, messages: store.listChatMessages(conversation.id) };
+    return {
+      conversation,
+      messages: store.listChatMessages(conversation.id),
+      tasks: store.listTasks().filter((task) => task.conversationId === conversation.id),
+      proposals: store.listTaskProposals(conversation.id)
+    };
   });
 
   app.patch<{ Params: { id: string } }>("/api/conversations/:id", async (request, reply) => {
@@ -282,7 +287,8 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
 
     const settings = loadModelSettings(modelSettingsPath);
     const route = await decideRoute(userContent, storedFiles.length > 0, detectedUrl, settings);
-    send("routing", route);
+    const plan = planExecution(userContent);
+    send("routing", { ...route, plan });
 
     if (route.action === "task") {
       try {
@@ -292,13 +298,16 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
           ...(message ? { textInput: message } : {}),
           fileInputs: storedFiles.map((file) => ({ label: file.name, path: file.path })),
           ...(detectedUrl ? { url: detectedUrl } : {}),
-          conversationId: conversation.id
+          conversationId: conversation.id,
+          executorId: plan.executorId,
+          taskKind: plan.taskKind,
+          expectedOutputs: plan.expectedOutputs
         });
         const assistant = store.createChatMessage({
           id: randomUUID(),
           conversationId: conversation.id,
           role: "assistant",
-          content: `已派出任务：${task.title}\n\n任务已出现在左侧对话目录，也可以到“任务”页查看进度和结果。`,
+          content: `已派出任务：${task.title}\n\n执行器：${plan.executorId === "codex" ? "Codex（工程任务）" : "Hearth 原生执行器"}。任务已出现在左侧对话目录，也可以到“任务”页查看进度和结果。`,
           taskId: task.id,
           attachments: [],
           createdAt: new Date().toISOString()

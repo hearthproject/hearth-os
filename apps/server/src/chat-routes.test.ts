@@ -96,11 +96,29 @@ describe("chat-first API", () => {
     const taskEvent = events.find((event) => event.event === "task");
     expect(taskEvent?.data.task.id).toContain("CUSTOM-");
     expect(taskEvent?.data.task.conversationId).toBeTruthy();
+    expect(taskEvent?.data.task.executorId).toBe("native");
     expect(events.some((event) => event.event === "done")).toBe(true);
 
     const tasks = await app.inject({ method: "GET", url: "/api/tasks" });
     expect(tasks.json().tasks).toHaveLength(1);
     expect(tasks.json().tasks[0].summary.phase).toBe("排队中");
+
+    const detail = await app.inject({ method: "GET", url: `/api/conversations/${taskEvent?.data.conversationId}` });
+    expect(detail.json().tasks).toHaveLength(1);
+    expect(detail.json().tasks[0].executorId).toBe("native");
+    await app.close();
+  });
+
+  it("routes engineering requests to the codex executor", async () => {
+    const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/chat",
+      payload: { message: "帮我修复项目里的 TypeScript 错误" }
+    });
+    const task = parseSse(response.body).find((event) => event.event === "task")?.data.task;
+    expect(task.executorId).toBe("codex");
+    expect(task.taskKind).toBe("workspace");
     await app.close();
   });
 

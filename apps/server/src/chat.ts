@@ -10,6 +10,21 @@ export interface ChatRoute {
   reason: string;
 }
 
+export interface ExecutionPlan {
+  executorId: "native" | "codex";
+  taskKind: "general" | "workspace";
+  expectedOutputs: string[];
+}
+
+const CODE_HINTS = /(代码|仓库|项目里|这个项目|工程|git|commit|分支|测试|编译|构建|部署|重构|修复|bug|issue|pull request|typescript|javascript|python|npm|pnpm|依赖|数据库迁移|脚本)/i;
+
+export function planExecution(message: string): ExecutionPlan {
+  if (CODE_HINTS.test(message)) {
+    return { executorId: "codex", taskKind: "workspace", expectedOutputs: ["result.md"] };
+  }
+  return { executorId: "native", taskKind: "general", expectedOutputs: ["result.md"] };
+}
+
 const TASK_KEYWORDS = [
   "帮我", "替我", "给我做", "生成", "制作", "写一份", "写个", "写一个", "整理", "汇总", "调研", "分析",
   "修复", "实现", "开发", "部署", "安装", "配置", "改造", "重构", "测试", "检查一下", "审查", "优化",
