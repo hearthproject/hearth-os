@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadCodexProfile } from "./profile.ts";
+import { buildCodexEnv, loadCodexProfile } from "./profile.ts";
 
 const dirs: string[] = [];
 
@@ -26,6 +26,19 @@ describe("Codex profile", () => {
     expect(profile.providerId).toBe("custom");
     expect(profile.authSource).toBe("provider-env");
     expect(profile.canRun).toBe(true);
+  });
+
+  it("injects the provider key into the Codex child process environment", () => {
+    const previous = process.env.CUSTOM_API_KEY;
+    process.env.CUSTOM_API_KEY = "from-process";
+    try {
+      const profile = loadCodexProfile({ codexHome: homeWithConfig(), env: {} });
+      const env = buildCodexEnv(profile);
+      expect(env.CUSTOM_API_KEY).toBe("from-process");
+    } finally {
+      if (previous === undefined) delete process.env.CUSTOM_API_KEY;
+      else process.env.CUSTOM_API_KEY = previous;
+    }
   });
 
   it("reports a missing provider key without falling back to OpenAI login", () => {

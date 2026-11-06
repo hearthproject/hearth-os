@@ -97,6 +97,7 @@ export class HealthService {
         providerName: profile.providerName,
         model: profile.model,
         authSource: profile.authSource,
+        envKeySource: profile.envKeySource,
         issues: profile.issues
       }
     };
