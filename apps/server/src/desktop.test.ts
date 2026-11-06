@@ -87,7 +87,7 @@ describe("desktop device service", () => {
     const action = desktop.enqueueAction(created.session.id, {
       kind: "click", frameId: frame.id, x: 0.5, y: 0.5
     });
-    expect(action).toMatchObject({ kind: "click", status: "queued", frameId: frame.id });
+    expect(action).toMatchObject({ kind: "click", status: "queued", frameId: frame.id, payload: { expectedApp: "notepad" } });
     const claimed = desktop.nextCommand(desktop.authenticateDevice(DEVICE_TOKEN));
     expect(claimed?.kind).toBe("click");
     desktop.completeCommand(desktop.authenticateDevice(DEVICE_TOKEN), action.id, { status: "succeeded" });

@@ -360,7 +360,7 @@ export class DesktopService {
     const frame = this.requireCurrentFrame(session, input.frameId);
     const controlCapability = capability(device, "desktop.control");
     this.assertAppAllowed(controlCapability, frame.activeApp);
-    const payload = actionPayload(input);
+    const payload = { ...actionPayload(input), expectedApp: frame.activeApp };
     if (input.kind === "focus") this.assertAppAllowed(controlCapability, normalizeApp(input.app));
     const command = this.createCommand(session, input.kind, payload, frame.id);
     this.updateSession(session, { currentFrameId: null });
