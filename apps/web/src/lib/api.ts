@@ -5,6 +5,9 @@ import type {
   CreateTaskRequest,
   EventWindow,
   HealthResponse,
+  OutboxDraft,
+  OutboxDraftRequest,
+  OutboxSubmitResult,
   RunListItem,
   RunManifest,
   SourceConnection,
@@ -85,6 +88,18 @@ export const api = {
     request<{ approvals: ApprovalListItem[]; total: number }>(`/api/approvals${query(params)}`),
   effects: (params: { taskId?: string; status?: string; limit?: number; offset?: number } = {}) =>
     request<{ effects: EffectListItem[]; total: number }>(`/api/effects${query(params)}`),
+  outbox: () => request<{ drafts: OutboxDraft[] }>("/api/outbox"),
+  outboxDraft: (id: string) => request<OutboxDraft>(`/api/outbox/${encodeURIComponent(id)}`),
+  createOutboxDraft: (input: OutboxDraftRequest) => request<OutboxDraft>("/api/outbox", {
+    method: "POST",
+    body: JSON.stringify(input)
+  }),
+  updateOutboxDraft: (id: string, input: OutboxDraftRequest) => request<OutboxDraft>(`/api/outbox/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  }),
+  discardOutboxDraft: (id: string) => request<OutboxDraft>(`/api/outbox/${encodeURIComponent(id)}/discard`, { method: "POST" }),
+  submitOutboxDraft: (id: string) => request<OutboxSubmitResult>(`/api/outbox/${encodeURIComponent(id)}/submit`, { method: "POST" }),
   taskEvents: (id: string, params: { after?: number; before?: number; limit?: number; type?: string } = {}) =>
     request<EventWindow>(`/api/tasks/${encodeURIComponent(id)}/events${query(params)}`),
   manifest: (taskId: string, artifactId: string) =>
@@ -116,7 +131,8 @@ export function subscribeToEvents(onEvent: () => void): () => void {
   const eventNames = [
     "task.created", "task.updated", "task.progress", "run.created", "run.updated",
     "approval.created", "approval.updated", "artifact.published", "effect.created", "effect.updated",
-    "source.created", "source.updated", "source.item.updated", "source.cleared"
+    "source.created", "source.updated", "source.item.updated", "source.cleared",
+    "outbox.created", "outbox.updated"
   ];
   for (const name of eventNames) source.addEventListener(name, onEvent);
   return () => source.close();

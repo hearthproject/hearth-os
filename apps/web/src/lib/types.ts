@@ -9,6 +9,9 @@ import type {
   EffectStatus,
   EventEnvelope,
   EventWindow,
+  OutboxAttachment,
+  OutboxDraft,
+  OutboxDraftStatus,
   RunListItem,
   RunRecord,
   RunStatus,
@@ -35,6 +38,9 @@ export type {
   EffectStatus,
   EventEnvelope,
   EventWindow,
+  OutboxAttachment,
+  OutboxDraft,
+  OutboxDraftStatus,
   RunListItem,
   RunRecord,
   RunStatus,
@@ -102,6 +108,22 @@ export interface SourceReadResult {
   source: SourceConnection;
   items: SourceItem[];
   changed: number;
+}
+
+export interface OutboxDraftRequest {
+  account?: string;
+  to?: string[];
+  cc?: string[];
+  bcc?: string[];
+  subject?: string;
+  body?: string;
+  attachmentIds?: string[];
+}
+
+export interface OutboxSubmitResult {
+  draft: OutboxDraft;
+  approval: ApprovalRecord;
+  task: TaskRecord;
 }
 
 export interface RunManifest {
