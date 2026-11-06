@@ -13,12 +13,14 @@ import {
   Paperclip,
   Plus,
   Settings2,
+  ShieldAlert,
   Trash2,
   X
 } from "lucide-react";
 import { api, chatStream } from "../lib/api.ts";
 import { formatBytes, formatTime } from "../lib/format.ts";
-import type { ChatAttachment, ChatMessageRecord, ConversationListItem, TaskListItem } from "../lib/types.ts";
+import { executorLabel, taskKindLabel } from "../lib/labels.ts";
+import type { ChatAttachment, ChatMessageRecord, ConversationListItem, TaskListItem, TaskProposalRecord } from "../lib/types.ts";
 
 const SUGGESTIONS = [
   "整理一份本周工作周报",
@@ -43,6 +45,7 @@ export function ChatPage() {
   const [sending, setSending] = useState(false);
   const [streaming, setStreaming] = useState("");
   const [routing, setRouting] = useState<RoutingState | null>(null);
+  const [proposals, setProposals] = useState<TaskProposalRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -70,6 +73,7 @@ export function ChatPage() {
   useEffect(() => {
     if (!conversationQuery.data || sending) return;
     setMessages(conversationQuery.data.messages);
+    setProposals(conversationQuery.data.proposals.filter((proposal) => proposal.status === "pending"));
   }, [conversationQuery.data, sending]);
 
   useEffect(() => {
@@ -84,6 +88,7 @@ export function ChatPage() {
     setMessages([]);
     setStreaming("");
     setRouting(null);
+    setProposals([]);
     setError(null);
     if (id) localStorage.setItem("hearth.conversation", id);
     else localStorage.removeItem("hearth.conversation");
@@ -161,6 +166,10 @@ export function ChatPage() {
               const payload = data as { message: ChatMessageRecord };
               setMessages((prev) => (prev.some((message) => message.id === payload.message.id) ? prev : [...prev, payload.message]));
               void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+            } else if (event === "proposal") {
+              const payload = data as { proposal: TaskProposalRecord; message: ChatMessageRecord };
+              setProposals((prev) => (prev.some((proposal) => proposal.id === payload.proposal.id) ? prev : [...prev, payload.proposal]));
+              setMessages((prev) => (prev.some((message) => message.id === payload.message.id) ? prev : [...prev, payload.message]));
             } else if (event === "done") {
               const message = data as ChatMessageRecord;
               setStreaming("");
@@ -258,6 +267,18 @@ export function ChatPage() {
                 </ChatNotice>
               )}
               {messages.map((message) => <ChatBubble key={message.id} message={message} />)}
+              {proposals.map((proposal) => (
+                <ProposalCard
+                  key={proposal.id}
+                  proposal={proposal}
+                  onResolved={(id) => {
+                    setProposals((prev) => prev.filter((item) => item.id !== id));
+                    void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+                    void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+                    if (conversationId) void queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
+                  }}
+                />
+              ))}
               {streaming && <AssistantBubble content={streaming} streaming />}
               {sending && !streaming && (
                 <div className="typing-row">
@@ -430,4 +451,65 @@ function AssistantBubble({
 
 function ChatNotice({ icon, tone, children }: { icon: React.ReactNode; tone: "warn" | "info"; children: React.ReactNode }) {
   return <div className={`chat-notice ${tone}`}>{icon}<span>{children}</span></div>;
+}
+
+function ProposalCard({ proposal, onResolved }: { proposal: TaskProposalRecord; onResolved: (id: string) => void }) {
+  const [busy, setBusy] = useState<"confirm" | "reject" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [taskId, setTaskId] = useState<string | null>(null);
+
+  async function confirm() {
+    setBusy("confirm");
+    setError(null);
+    try {
+      const result = await api.confirmTaskProposal(proposal.id);
+      setTaskId(result.task.id);
+      onResolved(proposal.id);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "确认失败");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function reject() {
+    setBusy("reject");
+    setError(null);
+    try {
+      await api.rejectTaskProposal(proposal.id);
+      onResolved(proposal.id);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "取消失败");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="proposal-card">
+      <div className="proposal-kicker"><ShieldAlert size={13} /> 待确认任务</div>
+      <h3>{proposal.title}</h3>
+      <p className="proposal-goal">{proposal.goal}</p>
+      <div className="proposal-meta">
+        <span>{executorLabel(proposal.executorId)}</span>
+        <span>{taskKindLabel(proposal.taskKind)}</span>
+        <span>产物 {proposal.expectedOutputs.join("、")}</span>
+      </div>
+      <p className="proposal-reason">{proposal.reason}</p>
+      {proposal.permissions.networkHosts.length > 0 && (
+        <p className="proposal-permission">联网：{proposal.permissions.networkHosts.join("、")}</p>
+      )}
+      {error && <p className="form-error">{error}</p>}
+      {taskId ? (
+        <Link className="task-link-card" to={`/tasks/${taskId}`}><CheckCircle2 size={15} /> 已确认，查看任务进度</Link>
+      ) : (
+        <div className="proposal-actions">
+          <button className="primary-button" onClick={() => void confirm()} disabled={busy !== null}>
+            {busy === "confirm" ? <Loader2 size={14} className="spin" /> : null} 确认并执行
+          </button>
+          <button className="ghost-button" onClick={() => void reject()} disabled={busy !== null}>取消</button>
+        </div>
+      )}
+    </div>
+  );
 }
