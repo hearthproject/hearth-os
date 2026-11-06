@@ -4,6 +4,17 @@ import type {
   ApprovalStatus,
   ArtifactListItem,
   ArtifactRecord,
+  DesktopCommandKind,
+  DesktopCommandRecord,
+  DesktopCommandStatus,
+  DesktopFrameRecord,
+  DesktopSessionRecord,
+  DesktopSessionStatus,
+  DeviceCapability,
+  DeviceCapabilityKind,
+  DeviceCapabilityStatus,
+  DevicePairingRequest,
+  DeviceRecord,
   EffectListItem,
   EffectRecord,
   EffectStatus,
@@ -12,6 +23,7 @@ import type {
   OutboxAttachment,
   OutboxDraft,
   OutboxDraftStatus,
+  PairingRequestStatus,
   RunListItem,
   RunRecord,
   RunStatus,
@@ -33,6 +45,17 @@ export type {
   ApprovalStatus,
   ArtifactListItem,
   ArtifactRecord,
+  DesktopCommandKind,
+  DesktopCommandRecord,
+  DesktopCommandStatus,
+  DesktopFrameRecord,
+  DesktopSessionRecord,
+  DesktopSessionStatus,
+  DeviceCapability,
+  DeviceCapabilityKind,
+  DeviceCapabilityStatus,
+  DevicePairingRequest,
+  DeviceRecord,
   EffectListItem,
   EffectRecord,
   EffectStatus,
@@ -41,6 +64,7 @@ export type {
   OutboxAttachment,
   OutboxDraft,
   OutboxDraftStatus,
+  PairingRequestStatus,
   RunListItem,
   RunRecord,
   RunStatus,
@@ -143,3 +167,37 @@ export interface RunManifest {
   codex: { threadId: string | null; profileLabel: string; usage: RunUsage | null };
   artifacts: { path: string; sha256: string; bytes: number }[];
 }
+
+export interface DeviceView extends Omit<DeviceRecord, "tokenHash"> {
+  online: boolean;
+}
+
+export interface PairingRequestView extends Omit<DevicePairingRequest, "secretHash" | "deviceTokenHash"> {}
+
+export interface DesktopFrameView extends Omit<DesktopFrameRecord, "storagePath"> {
+  url: string;
+}
+
+export interface DesktopCommandView extends DesktopCommandRecord {}
+
+export interface DesktopSessionView {
+  session: DesktopSessionRecord;
+  device: DeviceView;
+  frame: DesktopFrameView | null;
+  frames: DesktopFrameView[];
+  commands: DesktopCommandView[];
+}
+
+export interface DesktopDashboard {
+  devices: DeviceView[];
+  pairings: PairingRequestView[];
+  sessions: DesktopSessionView[];
+}
+
+export type DesktopActionRequest =
+  | { kind: "click"; frameId: string; x: number; y: number }
+  | { kind: "type"; frameId: string; text: string }
+  | { kind: "press"; frameId: string; keys: string }
+  | { kind: "focus"; frameId: string; app: string; windowTitle?: string }
+  | { kind: "uia.invoke"; frameId: string; elementName: string; controlType?: string }
+  | { kind: "uia.setvalue"; frameId: string; elementName: string; value: string; controlType?: string };

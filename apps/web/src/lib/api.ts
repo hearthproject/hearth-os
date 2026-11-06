@@ -3,12 +3,19 @@ import type {
   ApprovalListItem,
   ArtifactListItem,
   CreateTaskRequest,
+  DesktopActionRequest,
+  DesktopCommandView,
+  DesktopDashboard,
+  DesktopSessionView,
+  DeviceCapabilityKind,
+  DeviceView,
   EventWindow,
   HealthResponse,
   OutboxDraft,
   OutboxDraftListItem,
   OutboxDraftRequest,
   OutboxSubmitResult,
+  PairingRequestView,
   RunListItem,
   RunManifest,
   SourceConnection,
@@ -101,6 +108,32 @@ export const api = {
   }),
   discardOutboxDraft: (id: string) => request<OutboxDraft>(`/api/outbox/${encodeURIComponent(id)}/discard`, { method: "POST" }),
   submitOutboxDraft: (id: string) => request<OutboxSubmitResult>(`/api/outbox/${encodeURIComponent(id)}/submit`, { method: "POST" }),
+  desktop: () => request<DesktopDashboard>("/api/desktop"),
+  desktopSession: (id: string) => request<DesktopSessionView>(`/api/desktop/sessions/${encodeURIComponent(id)}`),
+  createDesktopSession: (deviceId: string) => request<DesktopSessionView>("/api/desktop/sessions", {
+    method: "POST",
+    body: JSON.stringify({ deviceId })
+  }),
+  observeDesktop: (sessionId: string) => request<DesktopSessionView>(`/api/desktop/sessions/${encodeURIComponent(sessionId)}/observe`, { method: "POST" }),
+  pauseDesktop: (sessionId: string) => request<DesktopSessionView>(`/api/desktop/sessions/${encodeURIComponent(sessionId)}/pause`, { method: "POST" }),
+  resumeDesktop: (sessionId: string) => request<DesktopSessionView>(`/api/desktop/sessions/${encodeURIComponent(sessionId)}/resume`, { method: "POST" }),
+  takeOverDesktop: (sessionId: string) => request<DesktopSessionView>(`/api/desktop/sessions/${encodeURIComponent(sessionId)}/takeover`, { method: "POST" }),
+  releaseDesktop: (sessionId: string) => request<DesktopSessionView>(`/api/desktop/sessions/${encodeURIComponent(sessionId)}/release`, { method: "POST" }),
+  terminateDesktop: (sessionId: string) => request<DesktopSessionView>(`/api/desktop/sessions/${encodeURIComponent(sessionId)}/terminate`, { method: "POST" }),
+  desktopAction: (sessionId: string, input: DesktopActionRequest) => request<DesktopCommandView>(`/api/desktop/sessions/${encodeURIComponent(sessionId)}/actions`, {
+    method: "POST",
+    body: JSON.stringify(input)
+  }),
+  approvePairing: (id: string) => request<DeviceView>(`/api/devices/pairing-requests/${encodeURIComponent(id)}/approve`, { method: "POST" }),
+  rejectPairing: (id: string) => request<PairingRequestView>(`/api/devices/pairing-requests/${encodeURIComponent(id)}/reject`, { method: "POST" }),
+  approveDeviceCapability: (deviceId: string, kind: DeviceCapabilityKind, apps: string[]) =>
+    request<DeviceView>(`/api/devices/${encodeURIComponent(deviceId)}/capabilities/${encodeURIComponent(kind)}/approve`, {
+      method: "POST",
+      body: JSON.stringify({ apps })
+    }),
+  revokeDeviceCapability: (deviceId: string, kind: DeviceCapabilityKind) =>
+    request<DeviceView>(`/api/devices/${encodeURIComponent(deviceId)}/capabilities/${encodeURIComponent(kind)}/revoke`, { method: "POST" }),
+  revokeDevice: (deviceId: string) => request<DeviceView>(`/api/devices/${encodeURIComponent(deviceId)}/revoke`, { method: "POST" }),
   taskEvents: (id: string, params: { after?: number; before?: number; limit?: number; type?: string } = {}) =>
     request<EventWindow>(`/api/tasks/${encodeURIComponent(id)}/events${query(params)}`),
   manifest: (taskId: string, artifactId: string) =>
@@ -133,7 +166,10 @@ export function subscribeToEvents(onEvent: () => void): () => void {
     "task.created", "task.updated", "task.progress", "run.created", "run.updated",
     "approval.created", "approval.updated", "artifact.published", "effect.created", "effect.updated",
     "source.created", "source.updated", "source.item.updated", "source.cleared",
-    "outbox.created", "outbox.updated"
+    "outbox.created", "outbox.updated",
+    "device.paired", "device.updated", "device.pairing-requested", "device.pairing-updated",
+    "desktop.session.created", "desktop.session.updated", "desktop.frame.updated",
+    "desktop.command.created", "desktop.command.updated"
   ];
   for (const name of eventNames) source.addEventListener(name, onEvent);
   return () => source.close();
