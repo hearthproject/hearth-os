@@ -43,6 +43,7 @@ export interface NativeRunResult {
   toolCalls: number;
   question: string | null;
   outputs: string[];
+  messages?: AgentMessage[];
 }
 
 export async function runNativeTask(options: NativeRunOptions): Promise<NativeRunResult> {
@@ -87,7 +88,8 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     turns: result.turns,
     toolCalls: result.toolCalls,
     question: result.question,
-    outputs: result.outputs
+    outputs: result.outputs,
+    messages: result.messages
   };
 }
 

@@ -29,6 +29,7 @@ interface ExecutionOutcome {
   threadId: string | null;
   label: string;
   question: string | null;
+  resume?: AgentResumeState;
 }
 
 export interface SchedulerOptions {
@@ -304,9 +305,6 @@ export class HearthScheduler {
         throw new Error("还没有配置聊天模型。请到“设置”里选择服务商并填入 API Key，然后重试。");
       }
       const resumeState = executorId === "native" ? this.restoreResumeState(taskId, workspace, Boolean(pendingInput)) : undefined;
-      if (pendingInput && resumeState) {
-        resumeState.messages.push({ role: "user", content: `用户补充信息：\n${pendingInput}` });
-      }
       const prepared = await prepareWorkspace({
         repoRoot: this.repoRoot,
         workspaceDir: workspace,
@@ -337,9 +335,17 @@ export class HearthScheduler {
       }
       const basePrompt = buildTaskPrompt(task, prepared, expectedOutputs, template?.acceptance ?? [], runtime, template?.approvalKind, memoryContext);
       const prompt = pendingInput && !resumeState ? `${basePrompt}\n\n用户补充信息：\n${pendingInput}` : basePrompt;
-      const execute = async (executionPrompt: string, resume?: AgentResumeState): Promise<ExecutionOutcome> => {
+      const execute = async (executionPrompt: string, resume?: AgentResumeState, resumePrompt?: string): Promise<ExecutionOutcome> => {
         if (executorId === "native") {
           if (!nativeSettings) throw new Error("原生执行器缺少模型设置");
+          const resumable = resume
+            ? {
+                ...resume,
+                messages: resumePrompt
+                  ? [...resume.messages, { role: "user" as const, content: resumePrompt }]
+                  : resume.messages
+              }
+            : undefined;
           const outcome = await this.nativeRunner({
             task,
             prepared,
@@ -348,7 +354,7 @@ export class HearthScheduler {
             permissions: nativePermissionsFor(task, prepared),
             budget: this.runBudget,
             signal: controller.signal,
-            ...(resume ? { resume } : {}),
+            ...(resumable ? { resume: resumable } : {}),
             expectedOutputs,
             onProgress: (event) => this.publishProgress(taskId, runId, event.kind, event.message),
             onCheckpoint: (checkpoint) => this.persistNativeCheckpoint(taskId, runId, prepared.root, checkpoint)
@@ -359,7 +365,10 @@ export class HearthScheduler {
             usage: outcome.usage,
             threadId: null,
             label: `native / ${nativeSettings.model}`,
-            question: outcome.question
+            question: outcome.question,
+            ...(outcome.messages
+              ? { resume: { messages: outcome.messages, usage: outcome.usage, turns: outcome.turns, toolCalls: outcome.toolCalls } }
+              : {})
           };
         }
         const codexResult = await this.codexRunner({
@@ -378,7 +387,7 @@ export class HearthScheduler {
         };
       };
 
-      let result = await execute(prompt, resumeState);
+      let result = await execute(prompt, resumeState, pendingInput ? `用户补充信息：\n${pendingInput}` : undefined);
       this.assertLease(taskId, leaseEpoch, leaseLost);
       if (result.status === "waiting_input") {
         this.service.updateRun(runId, taskId, {
@@ -402,14 +411,15 @@ export class HearthScheduler {
         const issues = await this.deliveryIssues(task, prepared, expectedOutputs);
         if (issues.length === 0) break;
         const missing = missingExpectedOutputs(prepared.outDir, expectedOutputs);
-        result = await execute(buildDeliveryRepairPrompt({
-            task,
-            prepared,
-            expectedOutputs,
-            missing,
-            issues,
-            attempt: repairAttempt
-          }));
+        const repairPrompt = buildDeliveryRepairPrompt({
+          task,
+          prepared,
+          expectedOutputs,
+          missing,
+          issues,
+          attempt: repairAttempt
+        });
+        result = await execute(repairPrompt, result.resume, repairPrompt);
         this.assertLease(taskId, leaseEpoch, leaseLost);
         if (result.status === "waiting_input") {
           this.service.updateRun(runId, taskId, {

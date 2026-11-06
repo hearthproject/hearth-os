@@ -310,6 +310,51 @@ describe("Hearth scheduler", () => {
     expect(completed.resultSummary).toBe("已按补充预算完成");
   });
 
+  it("repairs missing native deliverables with the previous agent context", async () => {
+    const service = setup();
+    const settingsPath = join(requireTemp(), "model-settings.json");
+    writeFileSync(settingsPath, JSON.stringify({
+      providerId: "custom",
+      providerName: "测试模型",
+      protocol: "openai-chat",
+      baseUrl: "https://example.invalid/v1",
+      model: "test-model",
+      apiKey: "sk-test"
+    }));
+    let calls = 0;
+    let repairPrompt = "";
+    const messages = [
+      { role: "system" as const, content: "system" },
+      { role: "user" as const, content: "goal" },
+      { role: "assistant" as const, content: "", toolCalls: [] }
+    ];
+    const nativeRunner: NativeRunner = async (options) => {
+      calls += 1;
+      if (calls === 2) {
+        repairPrompt = JSON.stringify(options.resume?.messages ?? []);
+        writeFileSync(join(options.prepared.outDir, "result.md"), "# 补交结果\n");
+      }
+      return {
+        status: "completed",
+        finalResponse: calls === 1 ? "本轮没有写完产物" : "已补交结果",
+        usage: { inputTokens: 10, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 5, reasoningOutputTokens: 0 },
+        turns: 1,
+        toolCalls: 1,
+        question: null,
+        outputs: calls === 1 ? [] : ["result.md"],
+        messages
+      };
+    };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath: settingsPath });
+    scheduler.start();
+
+    const task = service.createTask({ title: "写结果", goal: "生成一份结果" });
+    const completed = await waitForStatus(service, task.id, "completed");
+    expect(calls).toBe(2);
+    expect(repairPrompt).toContain("缺少期望产物");
+    expect(completed.resultSummary).toBe("已补交结果");
+  });
+
   it("recovers a run interrupted by a service restart", async () => {
     const service = setup();
     const task = service.createTask({ templateId: "T01" });
