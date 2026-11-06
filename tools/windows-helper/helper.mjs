@@ -272,8 +272,11 @@ function assertActionStillAllowed(state, command) {
   if (session.controlEpoch !== command.controlEpoch) throw new NativeActionError("CONTROL_EPOCH_CHANGED", "桌面控制代次已经变化");
 }
 
-async function uploadObservation(client, sessionId, commandId = null) {
-  const observation = runWindowsHelper("observe");
+async function uploadObservation(client, sessionId, options = {}) {
+  const targetApp = typeof options.targetApp === "string" && options.targetApp ? options.targetApp : null;
+  const observation = runWindowsHelper("observe", targetApp
+    ? { expectedApp: targetApp, focusTarget: true }
+    : {});
   const body = {
     sessionId,
     jpegBase64: observation.jpegBase64,
@@ -282,7 +285,8 @@ async function uploadObservation(client, sessionId, commandId = null) {
     activeApp: observation.activeApp,
     windowTitle: observation.windowTitle || ""
   };
-  if (commandId) body.commandId = commandId;
+  if (options.commandId) body.commandId = options.commandId;
+  if (targetApp) body.targetApp = targetApp;
   return await client.request("/api/device/observations", { method: "POST", body });
 }
 
@@ -301,8 +305,9 @@ async function failCommand(client, command, error) {
 
 async function processCommand(client, command) {
   if (command.kind === "observe") {
+    const targetApp = typeof command.payload?.targetApp === "string" ? command.payload.targetApp : null;
     try {
-      const frame = await uploadObservation(client, command.sessionId, command.id);
+      const frame = await uploadObservation(client, command.sessionId, { commandId: command.id, targetApp });
       console.log(`已观察 ${frame.activeApp} ${frame.width}×${frame.height}（${frame.windowTitle || "未命名窗口"}）`);
     } catch (error) {
       await failCommand(client, command, error);
@@ -314,7 +319,12 @@ async function processCommand(client, command) {
     const state = await client.request("/api/device/state");
     assertActionStillAllowed(state, command);
     console.log(`执行 ${command.kind}：${command.sessionId}`);
-    const result = runWindowsHelper("action", { ...command.payload, kind: command.kind });
+    const expectedApp = typeof command.payload?.expectedApp === "string" ? command.payload.expectedApp : null;
+    const result = runWindowsHelper("action", {
+      ...command.payload,
+      kind: command.kind,
+      ...(expectedApp ? { focusTarget: true } : {})
+    });
     await client.request(`/api/device/commands/${encodeURIComponent(command.id)}/result`, {
       method: "POST",
       body: { status: "succeeded", result: result.result || {} }
@@ -328,7 +338,10 @@ async function processCommand(client, command) {
   try {
     const state = await client.request("/api/device/state");
     assertActionStillAllowed(state, command);
-    const frame = await uploadObservation(client, command.sessionId);
+    const targetApp = command.kind === "focus" && typeof command.payload?.app === "string"
+      ? command.payload.app
+      : expectedApp;
+    const frame = await uploadObservation(client, command.sessionId, { targetApp });
     console.log(`动作后观察 ${frame.activeApp} ${frame.width}×${frame.height}`);
   } catch (error) {
     console.warn(`动作已完成，但后续观察失败：${error instanceof Error ? error.message : String(error)}`);

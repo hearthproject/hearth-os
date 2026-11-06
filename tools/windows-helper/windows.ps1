@@ -67,6 +67,10 @@ public static class HearthNative
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int command);
+    [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool attach);
+    [DllImport("user32.dll")] public static extern void SwitchToThisWindow(IntPtr hWnd, bool altTab);
+    [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extraInfo);
     [DllImport("user32.dll")] public static extern bool GetLastInputInfo(ref LASTINPUTINFO info);
@@ -152,15 +156,63 @@ function Assert-ExpectedApp($foreground, [string]$expectedApp) {
   }
 }
 
-function Assert-UserIdle {
+function Get-IdleMilliseconds {
   $info = New-Object HearthNative+LASTINPUTINFO
   $info.cbSize = [Runtime.InteropServices.Marshal]::SizeOf([type][HearthNative+LASTINPUTINFO])
-  if (-not [HearthNative]::GetLastInputInfo([ref]$info)) { return }
+  if (-not [HearthNative]::GetLastInputInfo([ref]$info)) { return [int64]10000 }
   [int64]$now = [Environment]::TickCount
   [int64]$last = [uint32]$info.dwTime
   [int64]$elapsed = $now - $last
   while ($elapsed -lt 0) { $elapsed += 4294967296 }
-  if ($elapsed -lt 500) { Fail "USER_INPUT_RECENT" "Recent user input detected; automatic input was stopped" }
+  return $elapsed
+}
+
+function Assert-UserIdle {
+  if ((Get-IdleMilliseconds) -lt 500) { Fail "USER_INPUT_RECENT" "Recent user input detected; automatic input was stopped" }
+}
+
+function Wait-UserIdle([int]$timeoutMilliseconds = 3000) {
+  $watch = [Diagnostics.Stopwatch]::StartNew()
+  while ($watch.ElapsedMilliseconds -lt $timeoutMilliseconds) {
+    if ((Get-IdleMilliseconds) -ge 500) { return }
+    Start-Sleep -Milliseconds 120
+  }
+  Fail "USER_INPUT_RECENT" "Recent user input detected; the target app was not focused"
+}
+
+function Focus-AppWindow([string]$targetApp, [string]$windowTitle) {
+  $targetApp = $targetApp.ToLowerInvariant()
+  $candidates = Get-Process | Where-Object {
+    $_.ProcessName.ToLowerInvariant() -eq $targetApp -and $_.MainWindowHandle -ne [IntPtr]::Zero
+  }
+  if (-not [string]::IsNullOrWhiteSpace($windowTitle)) {
+    $candidates = $candidates | Where-Object { $_.MainWindowTitle -like "*$windowTitle*" }
+  }
+  $target = $candidates | Select-Object -First 1
+  if ($null -eq $target) { Fail "APP_WINDOW_NOT_FOUND" "No visible window was found for $targetApp" }
+
+  Wait-UserIdle
+  $handle = [IntPtr]$target.MainWindowHandle
+  [HearthNative]::ShowWindow($handle, 9) | Out-Null
+  $foregroundHandle = [HearthNative]::GetForegroundWindow()
+  if ($foregroundHandle -ne $handle) {
+    [uint32]$foregroundProcessId = 0
+    $foregroundThread = [HearthNative]::GetWindowThreadProcessId($foregroundHandle, [ref]$foregroundProcessId)
+    $attached = [HearthNative]::AttachThreadInput([HearthNative]::GetCurrentThreadId(), $foregroundThread, $true)
+    try {
+      [HearthNative]::BringWindowToTop($handle) | Out-Null
+      [HearthNative]::SetForegroundWindow($handle) | Out-Null
+    } finally {
+      if ($attached) { [HearthNative]::AttachThreadInput([HearthNative]::GetCurrentThreadId(), $foregroundThread, $false) | Out-Null }
+    }
+    if ([HearthNative]::GetForegroundWindow() -ne $handle) {
+      [HearthNative]::SwitchToThisWindow($handle, $false)
+    }
+  }
+  Start-Sleep -Milliseconds 180
+  $foreground = Get-ForegroundInfo
+  if ($foreground.app -ne $targetApp) { Fail "FOCUS_DENIED" "Windows kept focus on $($foreground.app) instead of $targetApp" }
+  return $foreground
 }
 
 function Capture-Foreground([string]$expectedApp) {
@@ -287,34 +339,29 @@ try {
 
   $input = Get-InputObject
   if ($Mode -eq "observe") {
-    Write-Result (Capture-Foreground $null)
+    $expectedApp = [string]$input.expectedApp
+    if ([bool]$input.focusTarget -and -not [string]::IsNullOrWhiteSpace($expectedApp)) {
+      Focus-AppWindow $expectedApp ([string]$input.windowTitle) | Out-Null
+    } else {
+      Assert-UserIdle
+    }
+    Write-Result (Capture-Foreground $expectedApp)
   }
 
   $kind = [string]$input.kind
   if ($kind -eq "focus") {
-    Assert-UserIdle
-    $currentForeground = Get-ForegroundInfo
-    Assert-ExpectedApp $currentForeground ([string]$input.expectedApp)
-    $targetApp = ([string]$input.app).ToLowerInvariant()
-    $candidates = Get-Process | Where-Object {
-      $_.ProcessName.ToLowerInvariant() -eq $targetApp -and $_.MainWindowHandle -ne [IntPtr]::Zero
-    }
-    if (-not [string]::IsNullOrWhiteSpace([string]$input.windowTitle)) {
-      $candidates = $candidates | Where-Object { $_.MainWindowTitle -like "*$($input.windowTitle)*" }
-    }
-    $target = $candidates | Select-Object -First 1
-    if ($null -eq $target) { Fail "APP_WINDOW_NOT_FOUND" "No visible window was found for $targetApp" }
-    [HearthNative]::ShowWindow($target.MainWindowHandle, 9) | Out-Null
-    if (-not [HearthNative]::SetForegroundWindow($target.MainWindowHandle)) { Fail "FOCUS_DENIED" "Windows denied focus to $targetApp" }
-    Start-Sleep -Milliseconds 180
-    $foreground = Get-ForegroundInfo
-    if ($foreground.app -ne $targetApp) { Fail "FOCUS_DENIED" "Windows kept focus on $($foreground.app) instead of $targetApp" }
+    $foreground = Focus-AppWindow ([string]$input.app) ([string]$input.windowTitle)
     Write-Result ([pscustomobject]@{ ok = $true; result = [pscustomobject]@{ app = $foreground.app; windowTitle = $foreground.windowTitle } })
   }
 
-  Assert-UserIdle
+  $expectedApp = [string]$input.expectedApp
+  if ([bool]$input.focusTarget -and -not [string]::IsNullOrWhiteSpace($expectedApp)) {
+    Focus-AppWindow $expectedApp "" | Out-Null
+  } else {
+    Assert-UserIdle
+  }
   $foreground = Get-ForegroundInfo
-  Assert-ExpectedApp $foreground ([string]$input.expectedApp)
+  Assert-ExpectedApp $foreground $expectedApp
 
   if ($kind -eq "click") {
     $x = [double]$input.x
