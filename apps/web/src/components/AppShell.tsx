@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Cable, CalendarDays, FileText, Inbox, Mail, Plus, Settings2 } from "lucide-react";
+import { Cable, CalendarDays, FileText, Inbox, Mail, Monitor, Plus, Settings2 } from "lucide-react";
 import { NavLink, Outlet, useNavigate, useOutletContext } from "react-router-dom";
 import { useState } from "react";
 import { api } from "../lib/api.ts";
@@ -59,6 +59,9 @@ export function AppShell() {
           </NavLink>
           <NavLink to="/sources" className={({ isActive }) => (isActive ? "nav-item active" : "nav-item")}>
             <Cable size={16} /> <span className="nav-label">来源</span>
+          </NavLink>
+          <NavLink to="/devices" className={({ isActive }) => (isActive ? "nav-item active" : "nav-item")}>
+            <Monitor size={16} /> <span className="nav-label">设备</span>
           </NavLink>
           <NavLink to="/settings" className={({ isActive }) => (isActive ? "nav-item active" : "nav-item")}>
             <Settings2 size={16} /> <span className="nav-label">设置</span>

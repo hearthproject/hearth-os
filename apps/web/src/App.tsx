@@ -5,6 +5,7 @@ import { AppShell } from "./components/AppShell.tsx";
 import { subscribeToEvents } from "./lib/api.ts";
 import { ArtifactsPage } from "./pages/ArtifactsPage.tsx";
 import { AttentionPage } from "./pages/AttentionPage.tsx";
+import { DevicesPage } from "./pages/DevicesPage.tsx";
 import { SettingsPage } from "./pages/SettingsPage.tsx";
 import { SourcesPage } from "./pages/SourcesPage.tsx";
 import { OutboxPage } from "./pages/OutboxPage.tsx";
@@ -22,6 +23,7 @@ export default function App() {
           <Route path="artifacts" element={<ArtifactsPage />} />
           <Route path="outbox" element={<OutboxPage />} />
           <Route path="sources" element={<SourcesPage />} />
+          <Route path="devices" element={<DevicesPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="tasks/:id" element={<TaskDetailPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
@@ -49,6 +51,7 @@ function EventBridge() {
         void queryClient.invalidateQueries({ queryKey: ["sourceItems"] });
         void queryClient.invalidateQueries({ queryKey: ["outbox"] });
         void queryClient.invalidateQueries({ queryKey: ["approvals"] });
+        void queryClient.invalidateQueries({ queryKey: ["desktop"] });
         if (taskId) {
           void queryClient.invalidateQueries({ queryKey: ["task", taskId] });
           void queryClient.invalidateQueries({ queryKey: ["taskEvents", taskId] });
