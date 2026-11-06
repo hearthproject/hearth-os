@@ -196,6 +196,23 @@ describe("chat-first API", () => {
       { ...base, id: "5", relativePath: "manifest.json", mimeType: "application/json" }
     ]);
     expect(deliverables.map((item) => item.name)).toEqual(["result.md", "manifest.json"]);
+
+    const filtered = visibleDeliverables(
+      [
+        { ...base, id: "1", relativePath: "result.md", mimeType: "text/markdown" },
+        { ...base, id: "2", relativePath: "manifest.json", mimeType: "application/json" },
+        { ...base, id: "3", relativePath: "reports/summary.json", mimeType: "application/json" },
+        { ...base, id: "4", relativePath: "reports/summary.md", mimeType: "text/markdown" }
+      ],
+      ["reports"]
+    );
+    expect(filtered.map((item) => item.name)).toEqual(["result.md", "summary.json", "summary.md"]);
+
+    const jsonDeliverable = visibleDeliverables(
+      [{ ...base, id: "1", relativePath: "manifest.json", mimeType: "application/json" }],
+      ["manifest.json"]
+    );
+    expect(jsonDeliverable.map((item) => item.name)).toEqual(["manifest.json"]);
   });
 });
 

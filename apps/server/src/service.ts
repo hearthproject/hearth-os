@@ -242,7 +242,7 @@ export class HearthService {
           lastUsage: runs?.lastUsage ?? null,
           artifacts: artifactCounts.get(task.id) ?? 0,
           phase: taskPhase(task),
-          deliverables: visibleDeliverables(this.store.listArtifacts(task.id)),
+          deliverables: visibleDeliverables(this.store.listArtifacts(task.id), task.expectedOutputs),
           effects: effectAggregates.get(task.id) ?? { total: 0, uncertain: 0 },
           approvalId: pendingApprovals.get(task.id) ?? null
         }
@@ -621,12 +621,13 @@ function taskPhase(task: TaskRecord): string {
   return TASK_STATUS_LABELS[task.status];
 }
 
-export function visibleDeliverables(artifacts: ArtifactRecord[]): TaskDeliverable[] {
+export function visibleDeliverables(artifacts: ArtifactRecord[], expectedOutputs?: string[]): TaskDeliverable[] {
   return artifacts
     .filter((artifact) => {
       const path = artifact.relativePath.replace(/\\/g, "/");
       if (path === "run-manifest.json" || path === "pr-preview.json") return false;
       if (path.startsWith("inputs/") || path.startsWith("runtime/") || path.startsWith(".hearth/")) return false;
+      if (path.toLowerCase().endsWith(".json") && !isExpectedPath(path, expectedOutputs)) return false;
       return true;
     })
     .map((artifact) => ({
@@ -636,6 +637,14 @@ export function visibleDeliverables(artifacts: ArtifactRecord[]): TaskDeliverabl
       mimeType: artifact.mimeType,
       bytes: artifact.bytes
     }));
+}
+
+function isExpectedPath(path: string, expectedOutputs: string[] | undefined): boolean {
+  if (!expectedOutputs) return true;
+  return expectedOutputs.some((expected) => {
+    const normalized = expected.replace(/\\/g, "/").replace(/\/+$/, "");
+    return path === normalized || path.startsWith(`${normalized}/`);
+  });
 }
 
 function omitKey(record: Record<string, unknown>, key: string): Record<string, unknown> {
