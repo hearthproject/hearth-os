@@ -89,7 +89,7 @@ function assertConnection(settings: ModelSettings): void {
   if (!settings.apiKey) throw new ModelClientError("MODEL_NOT_CONFIGURED", "还没有填写 API Key");
 }
 
-function protocolOf(settings: ModelSettings): ModelProtocol {
+export function protocolOf(settings: ModelSettings): ModelProtocol {
   return settings.protocol ?? "openai-chat";
 }
 
@@ -410,31 +410,31 @@ function geminiBody(messages: ChatMessage[], options: CompleteOptions): Record<s
   };
 }
 
-function openAiChatUrl(baseUrl: string): string {
+export function openAiChatUrl(baseUrl: string): string {
   const base = baseUrl.replace(/\/+$/, "");
   return base.endsWith("/chat/completions") ? base : `${base}/chat/completions`;
 }
 
-function openAiResponsesUrl(baseUrl: string): string {
+export function openAiResponsesUrl(baseUrl: string): string {
   const base = baseUrl.replace(/\/+$/, "");
   return base.endsWith("/responses") ? base : `${base}/responses`;
 }
 
-function anthropicUrl(baseUrl: string): string {
+export function anthropicUrl(baseUrl: string): string {
   const base = baseUrl.replace(/\/+$/, "");
   return base.endsWith("/messages") ? base : `${base}/messages`;
 }
 
-function geminiBase(baseUrl: string): string {
+export function geminiBase(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, "").replace(/\/models$/, "");
 }
 
-function geminiUrl(settings: ModelSettings, stream: boolean): string {
+export function geminiUrl(settings: ModelSettings, stream: boolean): string {
   const suffix = stream ? "streamGenerateContent?alt=sse" : "generateContent";
   return `${geminiBase(settings.baseUrl)}/models/${encodeURIComponent(settings.model)}:${suffix}`;
 }
 
-function bearerHeaders(settings: ModelSettings): Record<string, string> {
+export function bearerHeaders(settings: ModelSettings): Record<string, string> {
   return {
     "content-type": "application/json",
     authorization: `Bearer ${settings.apiKey}`,
@@ -442,7 +442,7 @@ function bearerHeaders(settings: ModelSettings): Record<string, string> {
   };
 }
 
-function anthropicHeaders(settings: ModelSettings): Record<string, string> {
+export function anthropicHeaders(settings: ModelSettings): Record<string, string> {
   return {
     "content-type": "application/json",
     "x-api-key": settings.apiKey,
@@ -451,7 +451,7 @@ function anthropicHeaders(settings: ModelSettings): Record<string, string> {
   };
 }
 
-function geminiHeaders(settings: ModelSettings): Record<string, string> {
+export function geminiHeaders(settings: ModelSettings): Record<string, string> {
   return {
     "content-type": "application/json",
     "x-goog-api-key": settings.apiKey,
@@ -459,12 +459,12 @@ function geminiHeaders(settings: ModelSettings): Record<string, string> {
   };
 }
 
-function withTimeout(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
+export function withTimeout(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
   const timeout = AbortSignal.timeout(timeoutMs);
   return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
 
-async function readSse(response: Response, onEvent: (event: string, payload: any) => void): Promise<void> {
+export async function readSse(response: Response, onEvent: (event: string, payload: any) => void): Promise<void> {
   if (!response.body) throw new ModelClientError("EMPTY_RESPONSE", "模型服务没有返回内容");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -530,7 +530,7 @@ function normalizeModelIds(list: any[]): string[] {
     .sort((a: string, b: string) => a.localeCompare(b));
 }
 
-async function readJson(response: Response): Promise<Record<string, any> | null> {
+export async function readJson(response: Response): Promise<Record<string, any> | null> {
   try {
     return await readJsonFromText(await response.text());
   } catch {
@@ -547,7 +547,7 @@ function readJsonFromText(text: string): Record<string, any> | null {
   }
 }
 
-function safeJson(text: string): Record<string, any> | null {
+export function safeJson(text: string): Record<string, any> | null {
   try {
     return JSON.parse(text) as Record<string, any>;
   } catch {
@@ -555,7 +555,7 @@ function safeJson(text: string): Record<string, any> | null {
   }
 }
 
-function apiError(status: number, payload: Record<string, any> | null): ModelClientError {
+export function apiError(status: number, payload: Record<string, any> | null): ModelClientError {
   const detail = payload?.error?.message ?? payload?.error?.error?.message ?? payload?.message ?? payload?.error;
   const message = typeof detail === "string" && detail.trim()
     ? detail
@@ -563,7 +563,7 @@ function apiError(status: number, payload: Record<string, any> | null): ModelCli
   return new ModelClientError("MODEL_REQUEST_FAILED", message, status);
 }
 
-function readUsage(usage: any): CompleteResult["usage"] {
+export function readUsage(usage: any): CompleteResult["usage"] {
   if (!usage || typeof usage !== "object") return null;
   const inputTokens = Number(usage.prompt_tokens ?? usage.input_tokens ?? 0);
   const outputTokens = Number(usage.completion_tokens ?? usage.output_tokens ?? 0);
@@ -571,7 +571,7 @@ function readUsage(usage: any): CompleteResult["usage"] {
   return { inputTokens: inputTokens || 0, outputTokens: outputTokens || 0 };
 }
 
-function readAnthropicUsage(usage: any): CompleteResult["usage"] {
+export function readAnthropicUsage(usage: any): CompleteResult["usage"] {
   if (!usage || typeof usage !== "object") return null;
   const inputTokens = Number(usage.input_tokens ?? 0);
   const outputTokens = Number(usage.output_tokens ?? 0);
@@ -579,7 +579,7 @@ function readAnthropicUsage(usage: any): CompleteResult["usage"] {
   return { inputTokens: inputTokens || 0, outputTokens: outputTokens || 0 };
 }
 
-function readGeminiUsage(usage: any): CompleteResult["usage"] {
+export function readGeminiUsage(usage: any): CompleteResult["usage"] {
   if (!usage || typeof usage !== "object") return null;
   const inputTokens = Number(usage.promptTokenCount ?? 0);
   const outputTokens = Number(usage.candidatesTokenCount ?? 0);
