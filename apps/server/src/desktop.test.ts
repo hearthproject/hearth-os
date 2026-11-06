@@ -61,7 +61,7 @@ describe("desktop device service", () => {
     desktop.authenticateDevice(DEVICE_TOKEN);
     const created = desktop.createSession(device.id);
     const observation = desktop.nextCommand(desktop.authenticateDevice(DEVICE_TOKEN));
-    expect(observation).toMatchObject({ kind: "observe", status: "claimed" });
+    expect(observation).toMatchObject({ kind: "observe", status: "claimed", payload: { targetApp: "notepad" } });
     expect(() => desktop.uploadObservation(desktop.authenticateDevice(DEVICE_TOKEN), {
       sessionId: created.session.id,
       commandId: observation!.id,
@@ -130,6 +130,40 @@ describe("desktop device service", () => {
     expect(released.session.status).toBe("active");
     expect(released.session.currentFrameId).toBeNull();
     expect(released.commands.some((command) => command.kind === "observe" && command.status === "queued")).toBe(true);
+  });
+
+  it("binds observations to an explicitly approved target app", () => {
+    const { device } = pairDevice();
+    desktop.approveCapability(device.id, "observe", ["notepad", "calculator"]);
+    const online = desktop.authenticateDevice(DEVICE_TOKEN);
+    expect(() => desktop.createSession(device.id)).toThrowError(expect.objectContaining({ code: "TARGET_APP_REQUIRED" }));
+    expect(() => desktop.createSession(device.id, "chrome")).toThrowError(expect.objectContaining({ code: "APP_NOT_ALLOWED" }));
+
+    const created = desktop.createSession(device.id, "calculator");
+    const command = desktop.nextCommand(online);
+    expect(command).toMatchObject({ kind: "observe", payload: { targetApp: "calculator" } });
+    expect(() => desktop.uploadObservation(desktop.authenticateDevice(DEVICE_TOKEN), {
+      sessionId: created.session.id,
+      commandId: command!.id,
+      jpegBase64: JPEG,
+      width: 100,
+      height: 100,
+      activeApp: "notepad",
+      windowTitle: "Wrong target"
+    })).toThrowError(expect.objectContaining({ code: "OBSERVATION_TARGET_MISMATCH" }));
+
+    const frame = desktop.uploadObservation(desktop.authenticateDevice(DEVICE_TOKEN), {
+      sessionId: created.session.id,
+      commandId: command!.id,
+      jpegBase64: JPEG,
+      width: 100,
+      height: 100,
+      activeApp: "calculator",
+      windowTitle: "Calculator"
+    });
+    expect(frame.activeApp).toBe("calculator");
+    const observation = desktop.requestObservation(created.session.id, "notepad");
+    expect(observation.commands.some((item) => item.kind === "observe" && item.status === "queued" && item.payload.targetApp === "notepad")).toBe(true);
   });
 
   it("revoking a device invalidates its token and terminates active sessions", () => {

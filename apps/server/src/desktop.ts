@@ -74,6 +74,7 @@ export interface ObservationInput {
   height: number;
   activeApp: string;
   windowTitle: string;
+  targetApp?: string | undefined;
 }
 
 export interface StoredFrame {
@@ -265,29 +266,30 @@ export class DesktopService {
     return { device: this.deviceView(device), sessions: this.service.store.listDesktopSessions(deviceId).slice(0, 5).map((session) => this.sessionView(session.id)) };
   }
 
-  createSession(deviceId: string): DesktopSessionView {
+  createSession(deviceId: string, targetApp?: string): DesktopSessionView {
     const device = this.requireActiveDevice(deviceId);
     this.assertOnline(device);
     this.assertCapability(device, "observe");
     const existing = this.service.store.listDesktopSessions(deviceId).find((session) => session.status !== "terminated");
     if (existing) return this.sessionView(existing.id);
+    const observationTarget = this.observationTarget(null, device, targetApp);
     const now = new Date().toISOString();
     const session: DesktopSessionRecord = {
       id: randomUUID(), deviceId, status: "active", controlEpoch: 1, currentFrameId: null,
       lastError: null, createdAt: now, updatedAt: now, terminatedAt: null
     };
     this.service.createDesktopSession(session);
-    this.enqueueObservation(session, device);
+    this.enqueueObservation(session, device, observationTarget);
     return this.sessionView(session.id);
   }
 
-  requestObservation(sessionId: string): DesktopSessionView {
+  requestObservation(sessionId: string, targetApp?: string): DesktopSessionView {
     const session = this.requireSession(sessionId);
     if (session.status === "terminated") throw new DesktopError("SESSION_TERMINATED", "桌面会话已经终止", 409);
     const device = this.requireActiveDevice(session.deviceId);
     this.assertOnline(device);
     this.assertCapability(device, "observe");
-    this.enqueueObservation(session, device);
+    this.enqueueObservation(session, device, this.observationTarget(session, device, targetApp));
     return this.sessionView(session.id);
   }
 
@@ -305,8 +307,9 @@ export class DesktopService {
     const device = this.requireActiveDevice(session.deviceId);
     this.assertOnline(device);
     this.assertCapability(device, "observe");
+    const observationTarget = this.observationTarget(session, device);
     const updated = this.updateSession(session, { status: "active", controlEpoch: session.controlEpoch + 1 });
-    this.enqueueObservation(updated, device);
+    this.enqueueObservation(updated, device, observationTarget);
     return this.sessionView(updated.id);
   }
 
@@ -330,12 +333,13 @@ export class DesktopService {
     const device = this.requireActiveDevice(session.deviceId);
     this.assertOnline(device);
     this.assertCapability(device, "observe");
+    const observationTarget = this.observationTarget(session, device);
     const updated = this.updateSession(session, {
       status: "active",
       controlEpoch: session.controlEpoch + 1,
       currentFrameId: null
     });
-    this.enqueueObservation(updated, device);
+    this.enqueueObservation(updated, device, observationTarget);
     return this.sessionView(updated.id);
   }
 
@@ -410,6 +414,15 @@ export class DesktopService {
     const observeCapability = capability(device, "observe");
     const activeApp = normalizeApp(input.activeApp);
     this.assertAppAllowed(observeCapability, activeApp);
+    const command = input.commandId ? this.service.store.getDesktopCommand(input.commandId) : null;
+    const commandTarget = typeof command?.payload.targetApp === "string" ? normalizeApp(command.payload.targetApp) : null;
+    const requestedTarget = input.targetApp ? normalizeApp(input.targetApp) : commandTarget;
+    if (requestedTarget) {
+      this.assertAppAllowed(observeCapability, requestedTarget);
+      if (activeApp !== requestedTarget) {
+        throw new DesktopError("OBSERVATION_TARGET_MISMATCH", `截图来自 ${activeApp}，不是观察目标 ${requestedTarget}`, 409);
+      }
+    }
     if (!Number.isInteger(input.width) || input.width < 1 || input.width > 10_000 || !Number.isInteger(input.height) || input.height < 1 || input.height > 10_000) {
       throw new DesktopError("INVALID_FRAME_SIZE", "截图尺寸不正确", 400);
     }
@@ -436,7 +449,6 @@ export class DesktopService {
     this.service.updateDesktopFrame(frame);
     this.updateSession(session, { currentFrameId: frame.id, lastError: null });
     if (input.commandId) {
-      const command = this.service.store.getDesktopCommand(input.commandId);
       if (command && command.deviceId === device.id && command.sessionId === session.id && command.kind === "observe" && command.status === "claimed") {
         this.updateCommand(command, {
           status: "succeeded", result: { frameId: frame.id }, updatedAt: now, completedAt: now
@@ -471,10 +483,33 @@ export class DesktopService {
     };
   }
 
-  private enqueueObservation(session: DesktopSessionRecord, device: DeviceRecord): DesktopCommandRecord {
+  private enqueueObservation(session: DesktopSessionRecord, device: DeviceRecord, targetApp: string): DesktopCommandRecord {
     const existing = this.service.store.listQueuedDesktopCommands(device.id).find((command) => command.sessionId === session.id && command.kind === "observe");
-    if (existing) return existing;
-    return this.createCommand(session, "observe", {}, null);
+    if (existing && existing.payload.targetApp === targetApp) return existing;
+    if (existing) {
+      this.updateCommand(existing, {
+        status: "cancelled",
+        error: "用户重新选择了观察目标",
+        updatedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString()
+      });
+    }
+    return this.createCommand(session, "observe", { targetApp }, null);
+  }
+
+  private observationTarget(session: DesktopSessionRecord | null, device: DeviceRecord, requestedApp?: string): string {
+    const observeCapability = capability(device, "observe");
+    if (requestedApp) {
+      const normalized = normalizeApp(requestedApp);
+      this.assertAppAllowed(observeCapability, normalized);
+      return normalized;
+    }
+    const current = session?.currentFrameId ? this.service.store.getDesktopFrame(session.currentFrameId) : null;
+    if (current && observeCapability.apps.includes(normalizeApp(current.activeApp))) {
+      return normalizeApp(current.activeApp);
+    }
+    if (observeCapability.apps.length === 1 && observeCapability.apps[0]) return observeCapability.apps[0];
+    throw new DesktopError("TARGET_APP_REQUIRED", "请选择要观察的应用", 400);
   }
 
   private createCommand(

@@ -69,7 +69,12 @@ const capabilityApprovalSchema = z.object({
 }).strict();
 
 const createDesktopSessionSchema = z.object({
-  deviceId: z.string().trim().min(1).max(80)
+  deviceId: z.string().trim().min(1).max(80),
+  targetApp: z.string().trim().min(1).max(120).optional()
+}).strict();
+
+const desktopObservationRequestSchema = z.object({
+  targetApp: z.string().trim().min(1).max(120).optional()
 }).strict();
 
 const desktopActionSchema = z.discriminatedUnion("kind", [
@@ -94,7 +99,8 @@ const observationSchema = z.object({
   width: z.number().int().min(1).max(10_000),
   height: z.number().int().min(1).max(10_000),
   activeApp: z.string().trim().min(1).max(120),
-  windowTitle: z.string().trim().max(300)
+  windowTitle: z.string().trim().max(300),
+  targetApp: z.string().trim().min(1).max(120).optional()
 }).strict();
 
 const sourceItemQuerySchema = z.object({
@@ -384,15 +390,17 @@ export async function buildServer(options: BuildServerOptions = {}) {
     const parsed = createDesktopSessionSchema.safeParse(request.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: "INVALID_SESSION", message: "创建设备会话的参数不正确" });
     try {
-      return reply.code(201).send(desktop.createSession(parsed.data.deviceId));
+      return reply.code(201).send(desktop.createSession(parsed.data.deviceId, parsed.data.targetApp));
     } catch (error) {
       return sendDesktopError(reply, error);
     }
   });
 
   app.post<{ Params: { id: string } }>("/api/desktop/sessions/:id/observe", async (request, reply) => {
+    const parsed = desktopObservationRequestSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_OBSERVATION_REQUEST", message: "观察请求的参数不正确" });
     try {
-      return reply.code(202).send(desktop.requestObservation(request.params.id));
+      return reply.code(202).send(desktop.requestObservation(request.params.id, parsed.data.targetApp));
     } catch (error) {
       return sendDesktopError(reply, error);
     }
