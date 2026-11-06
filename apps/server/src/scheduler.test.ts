@@ -265,7 +265,7 @@ describe("Hearth scheduler", () => {
           messages: [
             { role: "system", content: "system" },
             { role: "user", content: "goal" },
-            { role: "assistant", content: "", toolCalls: [{ id: "call-1", name: "ask_user", arguments: { question: "预算上限是多少？" } }] },
+            { role: "assistant", content: "", toolCalls: [{ id: "call-1", name: "ask_user", arguments: { question: "预算上限是多少？" }, rawArguments: "{\"question\":\"预算上限是多少？\"}" }] },
             { role: "tool", toolCallId: "call-1", name: "ask_user", content: "需要用户补充：预算上限是多少？" }
           ],
           usage: { inputTokens: 10, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 5, reasoningOutputTokens: 0 },
