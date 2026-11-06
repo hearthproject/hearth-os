@@ -9,9 +9,10 @@ import {
   SquareDashed,
   TriangleAlert
 } from "lucide-react";
-import type { EffectRecord, RunRecord, SourceConnection, SourceItem, TaskStatus } from "../lib/types.ts";
+import type { EffectRecord, OutboxDraftStatus, RunRecord, SourceConnection, SourceItem, TaskStatus } from "../lib/types.ts";
 import {
   EFFECT_STATUS_LABELS,
+  OUTBOX_STATUS_LABELS,
   RUN_STATUS_LABELS,
   SOURCE_ITEM_STATUS_LABELS,
   SOURCE_STATUS_LABELS,
@@ -82,6 +83,20 @@ export function SourceStatusTag({ status }: { status: SourceConnection["status"]
 export function SourceItemStatusTag({ status }: { status: SourceItem["status"] }) {
   const tone: Tone = status === "ready" ? "done" : status === "failed" ? "risk" : "neutral";
   return <StateLabel tone={tone} icon={status === "failed" ? CircleSlash : Check} label={SOURCE_ITEM_STATUS_LABELS[status]} />;
+}
+
+export function OutboxStatusTag({ status }: { status: OutboxDraftStatus }) {
+  const tone: Tone = status === "stored" ? "done"
+    : status === "pending_approval" ? "active"
+      : status === "failed" || status === "uncertain" ? "risk"
+        : "neutral";
+  const icon = status === "pending_approval" ? Diamond
+    : status === "stored" ? Check
+      : status === "failed" ? CircleSlash
+        : status === "uncertain" ? TriangleAlert
+          : status === "discarded" ? CircleSlash
+            : SquareDashed;
+  return <StateLabel tone={tone} icon={icon} double={status === "uncertain"} label={OUTBOX_STATUS_LABELS[status]} />;
 }
 
 function StateLabel({

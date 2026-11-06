@@ -6,6 +6,7 @@ import type {
   EventWindow,
   HealthResponse,
   OutboxDraft,
+  OutboxDraftListItem,
   OutboxDraftRequest,
   OutboxSubmitResult,
   RunListItem,
@@ -88,8 +89,8 @@ export const api = {
     request<{ approvals: ApprovalListItem[]; total: number }>(`/api/approvals${query(params)}`),
   effects: (params: { taskId?: string; status?: string; limit?: number; offset?: number } = {}) =>
     request<{ effects: EffectListItem[]; total: number }>(`/api/effects${query(params)}`),
-  outbox: () => request<{ drafts: OutboxDraft[] }>("/api/outbox"),
-  outboxDraft: (id: string) => request<OutboxDraft>(`/api/outbox/${encodeURIComponent(id)}`),
+  outbox: () => request<{ drafts: OutboxDraftListItem[] }>("/api/outbox"),
+  outboxDraft: (id: string) => request<OutboxDraftListItem>(`/api/outbox/${encodeURIComponent(id)}`),
   createOutboxDraft: (input: OutboxDraftRequest) => request<OutboxDraft>("/api/outbox", {
     method: "POST",
     body: JSON.stringify(input)

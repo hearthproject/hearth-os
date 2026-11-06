@@ -2,6 +2,7 @@ import type {
   ApprovalRecord,
   EffectRecord,
   EventEnvelope,
+  OutboxDraftStatus,
   RunStatus,
   SourceConnection,
   SourceItem,
@@ -48,7 +49,18 @@ export const APPROVAL_STATUS_LABELS: Record<ApprovalRecord["status"], string> = 
 
 export const APPROVAL_KIND_LABELS: Record<string, string> = {
   "github.publish-pr": "创建 GitHub PR",
-  "github.comment": "发布 GitHub 评论"
+  "github.comment": "发布 GitHub 评论",
+  "outbox.local-write": "写入本地发件箱"
+};
+
+export const OUTBOX_STATUS_LABELS: Record<OutboxDraftStatus, string> = {
+  draft: "草稿",
+  pending_approval: "等你确认",
+  stored: "已写入本机",
+  rejected: "已拒绝",
+  failed: "写入失败",
+  uncertain: "结果不确定",
+  discarded: "已丢弃"
 };
 
 export const AUTH_SOURCE_LABELS: Record<string, string> = {

@@ -126,6 +126,10 @@ export interface OutboxSubmitResult {
   task: TaskRecord;
 }
 
+export interface OutboxDraftListItem extends OutboxDraft {
+  effect: EffectRecord | null;
+}
+
 export interface RunManifest {
   schemaVersion: number;
   taskId: string;
