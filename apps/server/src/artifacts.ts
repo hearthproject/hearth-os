@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
-import type { ArtifactRecord, RunRecord, RunUsage, TaskRecord } from "@hearth/core";
+import type { ArtifactRecord, ExecutorId, RunRecord, RunUsage, TaskRecord } from "@hearth/core";
 import { sha256File, type PreparedInput, resolveInside } from "./workspace.ts";
 
 const MAX_FILES = 1_000;
@@ -14,7 +14,13 @@ export interface PublishArtifactsOptions {
   artifactBase: string;
   expectedOutputs: string[];
   inputs: PreparedInput[];
-  codex: {
+  executor?: {
+    id: ExecutorId;
+    threadId: string | null;
+    label: string;
+    usage: RunUsage | null;
+  };
+  codex?: {
     threadId: string | null;
     profileLabel: string;
     usage: RunUsage | null;
@@ -65,7 +71,13 @@ export function publishArtifacts(options: PublishArtifactsOptions): ArtifactReco
       ...(input.metadata ? { metadata: input.metadata } : {})
     })),
     expectedOutputs: options.expectedOutputs,
-    codex: options.codex,
+    executor: options.executor ?? {
+      id: "codex",
+      threadId: options.codex?.threadId ?? null,
+      label: options.codex?.profileLabel ?? "Codex",
+      usage: options.codex?.usage ?? null
+    },
+    ...(options.codex ? { codex: options.codex } : {}),
     artifacts: records.map((record) => ({
       path: record.relativePath,
       sha256: record.sha256,
