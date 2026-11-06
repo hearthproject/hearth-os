@@ -243,6 +243,73 @@ describe("Hearth scheduler", () => {
     expect(manifest.executor.id).toBe("native");
   });
 
+  it("resumes a waiting native task with the user's answer", async () => {
+    const service = setup();
+    const settingsPath = join(requireTemp(), "model-settings.json");
+    writeFileSync(settingsPath, JSON.stringify({
+      providerId: "custom",
+      providerName: "测试模型",
+      protocol: "openai-chat",
+      baseUrl: "https://example.invalid/v1",
+      model: "test-model",
+      apiKey: "sk-test"
+    }));
+    let calls = 0;
+    let resumed = "";
+    const nativeRunner: NativeRunner = async (options) => {
+      calls += 1;
+      if (calls === 1) {
+        await options.onCheckpoint?.({
+          seq: 1,
+          kind: "waiting_input",
+          messages: [
+            { role: "system", content: "system" },
+            { role: "user", content: "goal" },
+            { role: "assistant", content: "", toolCalls: [{ id: "call-1", name: "ask_user", arguments: { question: "预算上限是多少？" } }] },
+            { role: "tool", toolCallId: "call-1", name: "ask_user", content: "需要用户补充：预算上限是多少？" }
+          ],
+          usage: { inputTokens: 10, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 5, reasoningOutputTokens: 0 },
+          turns: 1,
+          toolCalls: 1,
+          summary: "预算上限是多少？"
+        });
+        return {
+          status: "waiting_input",
+          finalResponse: "预算上限是多少？",
+          usage: { inputTokens: 10, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 5, reasoningOutputTokens: 0 },
+          turns: 1,
+          toolCalls: 1,
+          question: "预算上限是多少？",
+          outputs: []
+        };
+      }
+      resumed = JSON.stringify(options.resume?.messages ?? []);
+      writeFileSync(join(options.prepared.outDir, "result.md"), "# 结果\n\n按 1000 元预算完成。\n");
+      return {
+        status: "completed",
+        finalResponse: "已按补充预算完成",
+        usage: { inputTokens: 20, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 8, reasoningOutputTokens: 0 },
+        turns: 2,
+        toolCalls: 2,
+        question: null,
+        outputs: ["result.md"]
+      };
+    };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath: settingsPath });
+    scheduler.start();
+
+    const task = service.createTask({ title: "写方案", goal: "生成一份方案" });
+    const waiting = await waitForStatus(service, task.id, "waiting_input");
+    expect(waiting.resultSummary).toBe("预算上限是多少？");
+
+    scheduler.retry(task.id, "预算 1000 元");
+    const completed = await waitForStatus(service, task.id, "completed");
+    expect(calls).toBe(2);
+    expect(resumed).toContain("预算 1000 元");
+    expect(completed.pendingInput).toBeNull();
+    expect(completed.resultSummary).toBe("已按补充预算完成");
+  });
+
   it("recovers a run interrupted by a service restart", async () => {
     const service = setup();
     const task = service.createTask({ templateId: "T01" });

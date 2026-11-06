@@ -3,7 +3,7 @@ import type { TaskStatus } from "./types.ts";
 const TRANSITIONS: Record<TaskStatus, readonly TaskStatus[]> = {
   queued: ["running", "cancelled"],
   running: ["waiting_input", "waiting_approval", "completed", "failed", "recoverable", "cancelled"],
-  waiting_input: ["running", "recoverable", "cancelled"],
+  waiting_input: ["queued", "running", "recoverable", "cancelled"],
   waiting_approval: ["running", "recoverable", "cancelled"],
   completed: [],
   failed: ["queued", "cancelled"],

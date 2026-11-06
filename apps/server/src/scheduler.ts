@@ -152,15 +152,17 @@ export class HearthScheduler {
     return this.service.requireTask(taskId);
   }
 
-  retry(taskId: string): TaskRecord {
+  retry(taskId: string, input?: string): TaskRecord {
     const task = this.service.requireTask(taskId);
     if (task.status !== "recoverable" && task.status !== "failed" && task.status !== "waiting_input") {
       throw new Error(`当前状态不能重试：${task.status}`);
     }
+    const pendingInput = input?.trim() ?? "";
     const updated = this.service.updateTask(taskId, {
       status: "queued",
       nextAction: "等待执行",
-      error: null
+      error: null,
+      ...(pendingInput ? { pendingInput } : {})
     }, task.currentRunId ?? undefined);
     this.wake();
     return updated;
@@ -255,6 +257,7 @@ export class HearthScheduler {
     const runId = randomUUID();
     const workspace = join(this.workspaceRoot, runId);
     const task = this.service.requireTask(taskId);
+    const pendingInput = task.pendingInput?.trim() ?? "";
     const executorId = resolveExecutorId(task);
     const run: RunRecord = {
       id: runId,
@@ -286,7 +289,8 @@ export class HearthScheduler {
       status: "running",
       currentRunId: runId,
       nextAction: "正在执行",
-      error: null
+      error: null,
+      pendingInput: null
     }, runId);
     this.controllers.set(taskId, controller);
 
@@ -299,7 +303,10 @@ export class HearthScheduler {
       if (executorId === "native" && (!nativeSettings || !chatModelConfigured(nativeSettings))) {
         throw new Error("还没有配置聊天模型。请到“设置”里选择服务商并填入 API Key，然后重试。");
       }
-      const resumeState = executorId === "native" ? this.restoreResumeState(taskId, workspace) : undefined;
+      const resumeState = executorId === "native" ? this.restoreResumeState(taskId, workspace, Boolean(pendingInput)) : undefined;
+      if (pendingInput && resumeState) {
+        resumeState.messages.push({ role: "user", content: `用户补充信息：\n${pendingInput}` });
+      }
       const prepared = await prepareWorkspace({
         repoRoot: this.repoRoot,
         workspaceDir: workspace,
@@ -328,7 +335,8 @@ export class HearthScheduler {
       } catch {
         memoryContext = "";
       }
-      const prompt = buildTaskPrompt(task, prepared, expectedOutputs, template?.acceptance ?? [], runtime, template?.approvalKind, memoryContext);
+      const basePrompt = buildTaskPrompt(task, prepared, expectedOutputs, template?.acceptance ?? [], runtime, template?.approvalKind, memoryContext);
+      const prompt = pendingInput && !resumeState ? `${basePrompt}\n\n用户补充信息：\n${pendingInput}` : basePrompt;
       const execute = async (executionPrompt: string, resume?: AgentResumeState): Promise<ExecutionOutcome> => {
         if (executorId === "native") {
           if (!nativeSettings) throw new Error("原生执行器缺少模型设置");
@@ -500,13 +508,14 @@ export class HearthScheduler {
     throw new Error(result.finalResponse.trim() || "执行器没有完成当前任务");
   }
 
-  private restoreResumeState(taskId: string, workspace: string): AgentResumeState | undefined {
+  private restoreResumeState(taskId: string, workspace: string, includeWaitingInput = false): AgentResumeState | undefined {
     const runs = this.service.store.listRuns(taskId).filter((run) => run.status !== "running");
     for (let index = runs.length - 1; index >= 0; index -= 1) {
       const run = runs[index];
       if (!run) continue;
       const checkpoint = this.service.store.latestRunCheckpoint(run.id);
-      if (!checkpoint || checkpoint.kind === "final" || checkpoint.kind === "waiting_input") continue;
+      if (!checkpoint || checkpoint.kind === "final") continue;
+      if (checkpoint.kind === "waiting_input" && !includeWaitingInput) continue;
       try {
         if (run.workspace !== workspace && existsSync(run.workspace)) {
           cpSync(run.workspace, workspace, { recursive: true, force: false });
