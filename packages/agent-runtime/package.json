@@ -1,0 +1,12 @@
+{
+  "name": "@hearth/agent-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@hearth/core": "0.1.0"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}
