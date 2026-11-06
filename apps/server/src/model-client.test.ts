@@ -49,6 +49,7 @@ function settings(): ModelSettings {
   return {
     providerId: "custom",
     providerName: "Test",
+    protocol: "openai-chat",
     baseUrl,
     model: "test-model",
     apiKey: "test-key",

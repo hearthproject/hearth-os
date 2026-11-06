@@ -81,9 +81,12 @@ export interface ChatMessageRecord {
   createdAt: string;
 }
 
+export type ModelProtocol = "openai-chat" | "openai-responses" | "anthropic-messages" | "gemini";
+
 export interface ModelProviderPreset {
   id: string;
   name: string;
+  protocol: ModelProtocol;
   baseUrl: string;
   models: string[];
   note: string;
@@ -92,6 +95,7 @@ export interface ModelProviderPreset {
 export interface ModelSettingsView {
   providerId: string;
   providerName: string;
+  protocol: ModelProtocol;
   baseUrl: string;
   model: string;
   hasApiKey: boolean;
@@ -771,6 +775,7 @@ export interface HealthSnapshot {
     providerName: string;
     model: string | null;
     authSource: "provider-env" | "openai-login" | "missing" | "unknown";
+    envKeySource: "process" | "windows-user" | "missing" | "none";
     issues: string[];
   };
 }
