@@ -5,16 +5,17 @@ import { basename, join } from "node:path";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyReply } from "fastify";
 import type { EventEnvelope } from "@hearth/core";
-import { APPROVAL_STATUSES, EFFECT_STATUSES, RUN_STATUSES } from "@hearth/core";
+import { APPROVAL_STATUSES, EFFECT_STATUSES, RUN_STATUSES, SOURCE_KINDS } from "@hearth/core";
 import { loadCodexProfile } from "@hearth/codex-executor";
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate } from "@hearth/templates";
 import { z } from "zod";
-import { DB_PATH, REPO_ROOT, WEB_DIST } from "./config.ts";
+import { DB_PATH, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST } from "./config.ts";
 import { ApprovalError, ApprovalManager, type EffectExecutor } from "./approvals.ts";
 import { executeEffect } from "./effects.ts";
 import { HearthScheduler } from "./scheduler.ts";
 import { HearthService, type CreateTaskInput } from "./service.ts";
+import { SourceRegistry, SourceRegistryError } from "./sources.ts";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 
@@ -28,6 +29,18 @@ const createTaskSchema = z.object({
 const decideApprovalSchema = z.object({
   decision: z.enum(["approve", "reject"]),
   parameterHash: z.string().regex(/^[a-f0-9]{64}$/)
+}).strict();
+
+const createSourceSchema = z.object({
+  kind: z.enum(SOURCE_KINDS),
+  displayName: z.string().trim().min(1).max(120).optional(),
+  rootPath: z.string().trim().min(1).max(4096).optional(),
+  allowedHosts: z.array(z.string().trim().min(1).max(253)).max(50).optional(),
+  account: z.string().trim().min(1).max(200).optional()
+}).strict();
+
+const readSourceSchema = z.object({
+  url: z.string().trim().min(1).max(2_048).optional()
 }).strict();
 
 const listQuerySchema = z.object({
@@ -62,12 +75,16 @@ export interface BuildServerOptions {
   serveWeb?: boolean;
   startScheduler?: boolean;
   effectExecutor?: EffectExecutor;
+  sourceContentRoot?: string;
 }
 
 export async function buildServer(options: BuildServerOptions = {}) {
   const ownsStore = !options.store;
   const store = options.store ?? new HearthStore(DB_PATH);
   const service = new HearthService(store);
+  const sources = new SourceRegistry(service, {
+    contentRoot: options.sourceContentRoot ?? SOURCE_CONTENT_DIR
+  });
   const approvals = new ApprovalManager(service, options.effectExecutor ?? executeEffect);
   approvals.recoverInterruptedEffects();
   const scheduler = options.startScheduler ? new HearthScheduler({ service, approvals }) : null;
@@ -142,6 +159,73 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
 
   app.get("/api/templates", async () => ({ templates: service.listTemplates() }));
+
+  app.get("/api/sources", async () => ({ sources: sources.list() }));
+
+  app.post("/api/sources", async (request, reply) => {
+    const parsed = createSourceSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SOURCE", message: "来源参数不正确" });
+    try {
+      return reply.code(201).send(sources.create(parsed.data));
+    } catch (error) {
+      return sendSourceError(reply, error);
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/api/sources/:id/items", async (request, reply) => {
+    try {
+      return { items: sources.items(request.params.id) };
+    } catch (error) {
+      return sendSourceError(reply, error);
+    }
+  });
+
+  app.get<{ Params: { id: string; itemId: string } }>("/api/sources/:id/items/:itemId/content", async (request, reply) => {
+    try {
+      const item = sources.getItem(request.params.itemId);
+      if (item.sourceId !== request.params.id) {
+        return reply.code(404).send({ error: "SOURCE_ITEM_NOT_FOUND", message: "来源条目不存在" });
+      }
+      reply.header("content-type", "text/plain; charset=utf-8");
+      return sources.readItemContent(item.id);
+    } catch (error) {
+      return sendSourceError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/sources/:id/read", async (request, reply) => {
+    const parsed = readSourceSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_READ_REQUEST", message: "读取参数不正确" });
+    try {
+      return await sources.read(request.params.id, parsed.data);
+    } catch (error) {
+      return sendSourceError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/sources/:id/disconnect", async (request, reply) => {
+    try {
+      return sources.disconnect(request.params.id);
+    } catch (error) {
+      return sendSourceError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/sources/:id/reconnect", async (request, reply) => {
+    try {
+      return sources.reconnect(request.params.id);
+    } catch (error) {
+      return sendSourceError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/sources/:id/clear", async (request, reply) => {
+    try {
+      return sources.clear(request.params.id);
+    } catch (error) {
+      return sendSourceError(reply, error);
+    }
+  });
 
   app.get("/api/export", async (_request, reply) => {
     const stamp = new Date().toISOString().slice(0, 10);
@@ -411,6 +495,13 @@ function pageOptions(query: {
 
 function invalidQuery(reply: FastifyReply) {
   return reply.code(400).send({ error: "INVALID_QUERY", message: "分页参数不正确" });
+}
+
+function sendSourceError(reply: FastifyReply, error: unknown) {
+  if (error instanceof SourceRegistryError) {
+    return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+  }
+  throw error;
 }
 
 function isLoopbackOrigin(origin: string): boolean {

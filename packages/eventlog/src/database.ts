@@ -223,6 +223,13 @@ export class HearthStore {
     return row ? rowToSourceItem(row) : null;
   }
 
+  findSourceItemByHash(contentHash: string, sourceId?: string): SourceItem | null {
+    const row = sourceId
+      ? this.db.prepare("SELECT * FROM source_items WHERE content_hash = ? AND source_id = ? ORDER BY fetched_at ASC LIMIT 1").get(contentHash, sourceId) as DbRow | undefined
+      : this.db.prepare("SELECT * FROM source_items WHERE content_hash = ? ORDER BY fetched_at ASC LIMIT 1").get(contentHash) as DbRow | undefined;
+    return row ? rowToSourceItem(row) : null;
+  }
+
   listRunsPage(opts: PageOptions): { runs: RunRecord[]; total: number } {
     const { items, total } = this.page("runs", rowToRun, opts);
     return { runs: items, total };

@@ -9,6 +9,7 @@ export const DB_PATH = join(DATA_DIR, "hearth.sqlite");
 export const WORKSPACE_DIR = join(DATA_DIR, "workspaces");
 export const GIT_CACHE_DIR = join(DATA_DIR, "git-cache");
 export const ARTIFACT_DIR = join(DATA_DIR, "artifacts");
+export const SOURCE_CONTENT_DIR = join(DATA_DIR, "sources");
 export const WEB_DIST = join(REPO_ROOT, "apps", "web", "dist");
 
 export function resolveRepoPath(path: string): string {
