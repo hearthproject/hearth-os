@@ -6,6 +6,8 @@ import type {
   ApprovalRecord,
   ApprovalStatus,
   ArtifactRecord,
+  ChatMessageRecord,
+  ConversationRecord,
   DesktopCommandRecord,
   DesktopFrameRecord,
   DesktopSessionRecord,
@@ -62,7 +64,16 @@ CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY, template_id TEXT, title TEXT NOT NULL, goal TEXT NOT NULL,
   status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
   deadline TEXT, inputs_json TEXT NOT NULL, network_hosts_json TEXT NOT NULL,
-  output_dir TEXT NOT NULL, current_run_id TEXT, next_action TEXT, error_json TEXT
+  output_dir TEXT NOT NULL, current_run_id TEXT, next_action TEXT, error_json TEXT,
+  result_summary TEXT, conversation_id TEXT
+);
+CREATE TABLE IF NOT EXISTS conversations (
+  id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, role TEXT NOT NULL,
+  content TEXT NOT NULL, task_id TEXT, attachments_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS runs (
   id TEXT PRIMARY KEY, task_id TEXT NOT NULL, attempt INTEGER NOT NULL, status TEXT NOT NULL,
@@ -151,6 +162,7 @@ CREATE INDEX IF NOT EXISTS desktop_sessions_device_idx ON desktop_sessions(devic
 CREATE INDEX IF NOT EXISTS desktop_frames_session_idx ON desktop_frames(session_id, captured_at);
 CREATE INDEX IF NOT EXISTS desktop_commands_device_idx ON desktop_commands(device_id, status, created_at);
 CREATE INDEX IF NOT EXISTS desktop_commands_session_idx ON desktop_commands(session_id, created_at);
+CREATE INDEX IF NOT EXISTS chat_messages_conversation_idx ON chat_messages(conversation_id, created_at);
 `;
 
 export class HearthStore {
@@ -163,6 +175,12 @@ export class HearthStore {
     this.db.exec("PRAGMA foreign_keys = ON;");
     this.db.exec("PRAGMA busy_timeout = 5000;");
     this.db.exec(SCHEMA);
+    this.migrate();
+  }
+
+  private migrate(): void {
+    ensureColumn(this.db, "tasks", "result_summary", "TEXT");
+    ensureColumn(this.db, "tasks", "conversation_id", "TEXT");
   }
 
   close(): void {
@@ -366,6 +384,56 @@ export class HearthStore {
     return (this.db.prepare(
       "SELECT * FROM desktop_commands WHERE device_id = ? AND status IN ('queued', 'claimed') ORDER BY created_at ASC"
     ).all(deviceId) as DbRow[]).map(rowToDesktopCommand);
+  }
+
+  createConversation(title: string): ConversationRecord {
+    const now = new Date().toISOString();
+    const conversation: ConversationRecord = { id: randomUUID(), title, createdAt: now, updatedAt: now };
+    this.db.prepare("INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)")
+      .run(conversation.id, conversation.title, conversation.createdAt, conversation.updatedAt);
+    return conversation;
+  }
+
+  listConversations(): ConversationRecord[] {
+    return (this.db.prepare("SELECT * FROM conversations ORDER BY updated_at DESC").all() as DbRow[])
+      .map(rowToConversation);
+  }
+
+  getConversation(id: string): ConversationRecord | null {
+    const row = this.db.prepare("SELECT * FROM conversations WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToConversation(row) : null;
+  }
+
+  renameConversation(id: string, title: string): ConversationRecord | null {
+    const clean = title.trim();
+    if (!clean) return this.getConversation(id);
+    this.db.prepare("UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?")
+      .run(clean, new Date().toISOString(), id);
+    return this.getConversation(id);
+  }
+
+  deleteConversation(id: string): void {
+    this.db.prepare("DELETE FROM conversations WHERE id = ?").run(id);
+    this.db.prepare("DELETE FROM chat_messages WHERE conversation_id = ?").run(id);
+  }
+
+  listChatMessages(conversationId: string): ChatMessageRecord[] {
+    return (this.db.prepare(
+      "SELECT * FROM chat_messages WHERE conversation_id = ? ORDER BY rowid ASC"
+    ).all(conversationId) as DbRow[]).map(rowToChatMessage);
+  }
+
+  createChatMessage(message: ChatMessageRecord): ChatMessageRecord {
+    this.db.prepare(
+      `INSERT INTO chat_messages (id, conversation_id, role, content, task_id, attachments_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      message.id, message.conversationId, message.role, message.content, message.taskId,
+      JSON.stringify(message.attachments), message.createdAt
+    );
+    this.db.prepare("UPDATE conversations SET updated_at = ? WHERE id = ?")
+      .run(message.createdAt, message.conversationId);
+    return message;
   }
 
   listRunsPage(opts: PageOptions): { runs: RunRecord[]; total: number } {
@@ -607,17 +675,19 @@ export class HearthStore {
 
 function upsertTask(db: DatabaseSync, task: TaskRecord): void {
   db.prepare(
-    `INSERT INTO tasks (id, template_id, title, goal, status, created_at, updated_at, deadline, inputs_json, network_hosts_json, output_dir, current_run_id, next_action, error_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO tasks (id, template_id, title, goal, status, created_at, updated_at, deadline, inputs_json, network_hosts_json, output_dir, current_run_id, next_action, error_json, result_summary, conversation_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        template_id=excluded.template_id, title=excluded.title, goal=excluded.goal, status=excluded.status,
        updated_at=excluded.updated_at, deadline=excluded.deadline, inputs_json=excluded.inputs_json,
        network_hosts_json=excluded.network_hosts_json, output_dir=excluded.output_dir,
-       current_run_id=excluded.current_run_id, next_action=excluded.next_action, error_json=excluded.error_json`
+       current_run_id=excluded.current_run_id, next_action=excluded.next_action, error_json=excluded.error_json,
+       result_summary=excluded.result_summary, conversation_id=excluded.conversation_id`
   ).run(
     task.id, task.templateId, task.title, task.goal, task.status, task.createdAt, task.updatedAt,
     task.deadline, JSON.stringify(task.inputs), JSON.stringify(task.networkHosts), task.outputDir,
-    task.currentRunId, task.nextAction, task.error ? JSON.stringify(task.error) : null
+    task.currentRunId, task.nextAction, task.error ? JSON.stringify(task.error) : null,
+    task.resultSummary ?? null, task.conversationId ?? null
   );
 }
 
@@ -625,7 +695,8 @@ function updateTask(db: DatabaseSync, taskId: string | null, patch: Record<strin
   if (!taskId) throw new Error("task.updated requires taskId");
   const columns: Record<string, string> = {
     title: "title", goal: "goal", status: "status", updatedAt: "updated_at",
-    deadline: "deadline", currentRunId: "current_run_id", nextAction: "next_action"
+    deadline: "deadline", currentRunId: "current_run_id", nextAction: "next_action",
+    resultSummary: "result_summary", conversationId: "conversation_id"
   };
   for (const [key, column] of Object.entries(columns)) {
     if (key in patch) db.prepare(`UPDATE tasks SET ${column} = ? WHERE id = ?`).run((patch[key] as SQLInputValue) ?? null, taskId);
@@ -896,7 +967,25 @@ function rowToTask(row: DbRow): TaskRecord {
     networkHosts: JSON.parse(String(row.network_hosts_json)), outputDir: String(row.output_dir),
     currentRunId: row.current_run_id == null ? null : String(row.current_run_id),
     nextAction: row.next_action == null ? null : String(row.next_action),
-    error: row.error_json == null ? null : JSON.parse(String(row.error_json))
+    error: row.error_json == null ? null : JSON.parse(String(row.error_json)),
+    resultSummary: row.result_summary == null ? null : String(row.result_summary),
+    conversationId: row.conversation_id == null ? null : String(row.conversation_id)
+  };
+}
+
+function rowToConversation(row: DbRow): ConversationRecord {
+  return {
+    id: String(row.id), title: String(row.title),
+    createdAt: String(row.created_at), updatedAt: String(row.updated_at)
+  };
+}
+
+function rowToChatMessage(row: DbRow): ChatMessageRecord {
+  return {
+    id: String(row.id), conversationId: String(row.conversation_id),
+    role: String(row.role) as ChatMessageRecord["role"], content: String(row.content),
+    taskId: row.task_id == null ? null : String(row.task_id),
+    attachments: JSON.parse(String(row.attachments_json)), createdAt: String(row.created_at)
   };
 }
 
@@ -1079,4 +1168,10 @@ function zeroCounts<K extends string>(keys: readonly K[]): Record<K, number> {
 
 function bump<K extends string>(counts: Record<K, number>, key: string, by: number): void {
   if (Object.hasOwn(counts, key)) counts[key as K] += by;
+}
+
+function ensureColumn(db: DatabaseSync, table: string, column: string, type: string): void {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as DbRow[];
+  if (columns.some((row) => String(row.name) === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
 }

@@ -20,6 +20,7 @@ export interface SchedulerOptions {
   repoRoot?: string;
   workspaceRoot?: string;
   artifactBase?: string;
+  attachmentRoot?: string;
   codexRunner?: CodexRunner;
   approvals?: ApprovalManager;
   githubRun?: CommandRunner | undefined;
@@ -33,6 +34,7 @@ export class HearthScheduler {
   private readonly repoRoot: string;
   private readonly workspaceRoot: string;
   private readonly artifactBase: string;
+  private readonly attachmentRoot: string | undefined;
   private readonly codexRunner: CodexRunner;
   private readonly approvals: ApprovalManager | undefined;
   private readonly githubRun: CommandRunner | undefined;
@@ -52,6 +54,7 @@ export class HearthScheduler {
     this.repoRoot = options.repoRoot ?? REPO_ROOT;
     this.workspaceRoot = options.workspaceRoot ?? WORKSPACE_DIR;
     this.artifactBase = options.artifactBase ?? REPO_ROOT;
+    this.attachmentRoot = options.attachmentRoot;
     this.codexRunner = options.codexRunner ?? runCodex;
     this.approvals = options.approvals;
     this.githubRun = options.githubRun;
@@ -213,7 +216,7 @@ export class HearthScheduler {
     try {
       const task = this.service.requireTask(taskId);
       const template = task.templateId ? getTemplate(task.templateId) : undefined;
-      const expectedOutputs = template?.expectedOutputs ?? ["report.md"];
+      const expectedOutputs = template?.expectedOutputs ?? ["result.md"];
       const prepared = await prepareWorkspace({
         repoRoot: this.repoRoot,
         workspaceDir: workspace,
@@ -221,6 +224,7 @@ export class HearthScheduler {
         githubCacheRoot: this.githubCacheRoot,
         sourceContentRoot: this.sourceContentRoot,
         getSourceItem: (itemId) => this.service.store.getSourceItem(itemId),
+        ...(this.attachmentRoot ? { attachmentRoot: this.attachmentRoot } : {}),
         ...(this.githubRun ? { githubRun: this.githubRun } : {})
       });
       let runtime: RuntimePreparation | null = null;
@@ -294,7 +298,8 @@ export class HearthScheduler {
           status: "waiting_approval",
           currentRunId: runId,
           nextAction: "等待你确认外部动作",
-          error: null
+          error: null,
+          resultSummary: result.finalResponse
         }, runId);
         this.approvals.request({ ...request, taskId, runId });
         return;
@@ -304,7 +309,8 @@ export class HearthScheduler {
         status: "completed",
         currentRunId: runId,
         nextAction: "产物已保存",
-        error: null
+        error: null,
+        resultSummary: result.finalResponse
       }, runId);
     } catch (error) {
       await this.failRun(taskId, runId, error, controller.signal.aborted);

@@ -53,6 +53,50 @@ export interface TaskRecord {
   currentRunId: string | null;
   nextAction: string | null;
   error: TaskError | null;
+  resultSummary?: string | null;
+  conversationId?: string | null;
+}
+
+export interface ChatAttachment {
+  id: string;
+  name: string;
+  mimeType: string;
+  bytes: number;
+}
+
+export interface ConversationRecord {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChatMessageRecord {
+  id: string;
+  conversationId: string;
+  role: "user" | "assistant";
+  content: string;
+  taskId: string | null;
+  attachments: ChatAttachment[];
+  createdAt: string;
+}
+
+export interface ModelProviderPreset {
+  id: string;
+  name: string;
+  baseUrl: string;
+  models: string[];
+  note: string;
+}
+
+export interface ModelSettingsView {
+  providerId: string;
+  providerName: string;
+  baseUrl: string;
+  model: string;
+  hasApiKey: boolean;
+  apiKeyMasked: string | null;
+  updatedAt: string | null;
 }
 
 export interface RunUsage {

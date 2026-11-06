@@ -149,7 +149,7 @@ describe("Hearth scheduler", () => {
       active += 1;
       maxActive = Math.max(maxActive, active);
       await delay(40);
-      writeFileSync(join(options.workingDirectory, "out", "report.md"), "# report\n");
+      writeFileSync(join(options.workingDirectory, "out", "result.md"), "# result\n");
       active -= 1;
       return FAKE_RESULT;
     };
