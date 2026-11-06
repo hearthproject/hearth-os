@@ -52,6 +52,7 @@ export function TaskDetailPage() {
   const task = view.task;
   const deliverables = visibleDeliverables(view.artifacts);
   const progress = progressEvents(view);
+  const { visible: visibleProgress, technical: technicalProgress } = splitProgress(progress);
   const pendingApprovals = view.approvals.filter((approval) => approval.status === "pending");
   const canRetry = task.status === "recoverable" || task.status === "failed";
   const canCancel = !["completed", "cancelled"].includes(task.status);
@@ -179,7 +180,7 @@ export function TaskDetailPage() {
         <details open={false}>
           <summary>
             <span>执行过程</span>
-            <small>{view.runs.length} 次运行 · {progress.length} 条进度 · 点击展开</small>
+            <small>{view.runs.length} 次运行 · {visibleProgress.length} 条进度 · 点击展开</small>
           </summary>
           <div className="process-body">
             {view.runs.map((run) => (
@@ -193,19 +194,35 @@ export function TaskDetailPage() {
                 {run.failure && <p className="run-error">{run.failure.message}</p>}
               </div>
             ))}
-            {progress.length > 0 ? (
+            {visibleProgress.length > 0 ? (
               <ol className="progress-timeline">
-                {progress.map((event) => (
-                  <li key={event.seq}>
+                {visibleProgress.map((item) => (
+                  <li key={item.seq}>
                     <span className="dot" />
                     <div>
-                      <p>{String((event.payload as { message?: string }).message ?? "")}</p>
-                      <small>{formatTime(event.createdAt)}</small>
+                      <p>{item.message}</p>
+                      <small>{formatTime(item.createdAt)}</small>
                     </div>
                   </li>
                 ))}
               </ol>
-            ) : <p className="muted">还没有执行进度记录。</p>}
+            ) : <p className="muted">{technicalProgress.length > 0 ? "这个任务来自旧版本，执行命令已收进技术细节。" : "还没有执行进度记录。"}</p>}
+            {technicalProgress.length > 0 && (
+              <details className="technical-details">
+                <summary>查看技术细节 · {technicalProgress.length} 条</summary>
+                <ol className="progress-timeline technical">
+                  {technicalProgress.map((event) => (
+                    <li key={event.seq}>
+                      <span className="dot" />
+                      <div>
+                        <p>{progressMessage(event)}</p>
+                        <small>{formatTime(event.createdAt)}</small>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              </details>
+            )}
             {task.conversationId && (
               <Link className="back-link" to="/">来自对话 {task.conversationId.slice(0, 8)} <ChevronRight size={13} /></Link>
             )}
@@ -236,7 +253,59 @@ function visibleDeliverables(artifacts: ArtifactRecord[]): TaskDeliverable[] {
 function progressEvents(view: TaskView) {
   return view.events
     .filter((event) => event.type === "task.progress")
-    .slice(-80);
+    .slice(-120);
+}
+
+function progressMessage(event: TaskView["events"][number]): string {
+  return String((event.payload as { message?: string }).message ?? "").trim();
+}
+
+function splitProgress(events: TaskView["events"]) {
+  const visible: { seq: number; message: string; createdAt: string }[] = [];
+  const technical: TaskView["events"] = [];
+  const files = new Set<string>();
+  let fileEntry: { seq: number; message: string; createdAt: string } | null = null;
+  let lastMessage = "";
+
+  for (const event of events) {
+    const message = progressMessage(event);
+    if (!message || isIgnorableProgress(message)) continue;
+    if (message.startsWith("执行命令：") || message === "处理了一步工作") {
+      technical.push(event);
+      continue;
+    }
+    if (message.startsWith("修改文件：") || message.startsWith("文件修改失败：")) {
+      const label = message.startsWith("文件修改失败") ? "文件修改失败" : "修改文件";
+      const names = message.slice(message.indexOf("：") + 1).split("、").map(baseName).filter(Boolean);
+      for (const name of names) files.add(name);
+      if (!fileEntry) {
+        fileEntry = { seq: event.seq, message: "", createdAt: event.createdAt };
+        visible.push(fileEntry);
+      }
+      fileEntry.message = label + "：" + Array.from(files).slice(0, 5).join("、") + (files.size > 5 ? " 等" : "");
+      continue;
+    }
+    if (message.startsWith("分析：") || message === "正在分析") {
+      if (lastMessage !== "正在分析") {
+        visible.push({ seq: event.seq, message: "正在分析", createdAt: event.createdAt });
+        lastMessage = "正在分析";
+      }
+      continue;
+    }
+    if (message === lastMessage) continue;
+    visible.push({ seq: event.seq, message, createdAt: event.createdAt });
+    lastMessage = message;
+  }
+  return { visible, technical };
+}
+
+function baseName(path: string): string {
+  const clean = path.trim().replace(/[\\/]+$/, "");
+  return clean.split(/[\\/]/).pop() || clean;
+}
+
+function isIgnorableProgress(message: string): boolean {
+  return /model metadata|defaulting to fallback|fallback metadata|unknown model/i.test(message);
 }
 
 function runDuration(run: RunRecord): number | null {

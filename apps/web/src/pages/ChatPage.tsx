@@ -7,6 +7,7 @@ import {
   ArrowUp,
   CheckCircle2,
   FileText,
+  ListChecks,
   Loader2,
   MessageCircle,
   Paperclip,
@@ -17,7 +18,7 @@ import {
 } from "lucide-react";
 import { api, chatStream } from "../lib/api.ts";
 import { formatBytes, formatTime } from "../lib/format.ts";
-import type { ChatAttachment, ChatMessageRecord, ConversationListItem } from "../lib/types.ts";
+import type { ChatAttachment, ChatMessageRecord, ConversationListItem, TaskListItem } from "../lib/types.ts";
 
 const SUGGESTIONS = [
   "整理一份本周工作周报",
@@ -48,6 +49,7 @@ export function ChatPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const conversationsQuery = useQuery({ queryKey: ["conversations"], queryFn: api.conversations, refetchInterval: 15_000 });
+  const tasksQuery = useQuery({ queryKey: ["tasks"], queryFn: api.tasks, refetchInterval: 8_000 });
   const conversationQuery = useQuery({
     queryKey: ["conversation", conversationId],
     queryFn: () => api.conversation(conversationId as string),
@@ -55,6 +57,14 @@ export function ChatPage() {
   });
   const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health });
   const conversations = conversationsQuery.data?.conversations ?? [];
+  const tasks = tasksQuery.data?.tasks ?? [];
+  const tasksByConversation = new Map<string, TaskListItem[]>();
+  for (const task of tasks) {
+    if (!task.conversationId) continue;
+    const list = tasksByConversation.get(task.conversationId) ?? [];
+    list.push(task);
+    tasksByConversation.set(task.conversationId, list);
+  }
   const current = conversations.find((item) => item.id === conversationId) ?? null;
 
   useEffect(() => {
@@ -197,6 +207,7 @@ export function ChatPage() {
             <ConversationItem
               key={conversation.id}
               conversation={conversation}
+              tasks={tasksByConversation.get(conversation.id) ?? []}
               active={conversation.id === conversationId}
               disabled={sending}
               onSelect={() => selectConversation(conversation.id)}
@@ -315,12 +326,14 @@ export function ChatPage() {
 
 function ConversationItem({
   conversation,
+  tasks,
   active,
   disabled,
   onSelect,
   onDelete
 }: {
   conversation: ConversationListItem;
+  tasks: TaskListItem[];
   active: boolean;
   disabled: boolean;
   onSelect: () => void;
@@ -328,13 +341,30 @@ function ConversationItem({
 }) {
   return (
     <div className={`conversation-item ${active ? "active" : ""}`}>
-      <button className="conversation-select" onClick={onSelect} disabled={disabled}>
-        <span className="conversation-title">{conversation.title}</span>
-        <span className="conversation-preview">{conversation.preview || "新对话"}</span>
-      </button>
-      <button className="conversation-delete" onClick={onDelete} disabled={disabled} aria-label="删除对话">
-        <Trash2 size={13} />
-      </button>
+      <div className="conversation-row">
+        <button className="conversation-select" onClick={onSelect} disabled={disabled}>
+          <span className="conversation-title">{conversation.title}</span>
+          <span className="conversation-preview">{conversation.preview || "新对话"}</span>
+        </button>
+        <button className="conversation-delete" onClick={onDelete} disabled={disabled} aria-label="删除对话">
+          <Trash2 size={13} />
+        </button>
+      </div>
+      {tasks.length > 0 && (
+        <div className="conversation-tasks">
+          {tasks.map((task) => (
+            <Link
+              key={task.id}
+              className="conversation-task"
+              to={`/tasks/${task.id}`}
+              title={`${task.title} · ${task.summary.phase}`}
+            >
+              <span className={`rail-task-icon ${task.status}`}><ListChecks size={11} /></span>
+              <span className="rail-task-title">{task.title}</span>
+            </Link>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
