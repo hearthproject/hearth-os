@@ -5,7 +5,7 @@ import { basename, join } from "node:path";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyReply } from "fastify";
 import type { EventEnvelope } from "@hearth/core";
-import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, PROACTIVE_MODES, RUN_STATUSES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
+import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_SENSITIVITIES, PROACTIVE_MODES, RUN_STATUSES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
 import { loadCodexProfile } from "@hearth/codex-executor";
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate } from "@hearth/templates";
@@ -18,6 +18,7 @@ import { HearthService, TaskInputSelectionError, type CreateTaskInput } from "./
 import { SourceRegistry, SourceRegistryError } from "./sources.ts";
 import { OutboxError, OutboxService } from "./outbox.ts";
 import { DesktopError, DesktopService } from "./desktop.ts";
+import { MemoryError, MemoryService } from "./memory.ts";
 import { ProactiveError, ProactiveService } from "./proactive.ts";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
@@ -28,6 +29,66 @@ const createTaskSchema = z.object({
   goal: z.string().trim().min(1).max(4000).optional(),
   textInput: z.string().max(100_000).optional(),
   sourceItemIds: z.array(z.string().trim().min(1).max(80)).max(20).optional()
+}).strict();
+
+const memorySourceSchema = z.object({
+  type: z.enum(["user", "task", "source", "method", "system"]),
+  id: z.string().trim().max(100).nullable(),
+  label: z.string().trim().min(1).max(200),
+  excerpt: z.string().max(2000).nullable()
+}).strict();
+
+const createMemorySchema = z.object({
+  kind: z.enum(MEMORY_KINDS),
+  content: z.string().trim().min(1).max(8000),
+  subjectKey: z.string().trim().min(1).max(200),
+  scope: z.string().trim().min(1).max(120).optional(),
+  tags: z.array(z.string().trim().min(1).max(60)).max(30).optional(),
+  source: memorySourceSchema,
+  confidence: z.enum(MEMORY_CONFIDENCES).optional(),
+  sensitivity: z.enum(MEMORY_SENSITIVITIES).optional(),
+  allowRecall: z.boolean().optional(),
+  validUntil: z.string().datetime().nullable().optional(),
+  derivedFromId: z.string().trim().max(100).nullable().optional()
+}).strict();
+
+const correctMemorySchema = z.object({
+  content: z.string().trim().min(1).max(8000).optional(),
+  scope: z.string().trim().min(1).max(120).optional(),
+  tags: z.array(z.string().trim().min(1).max(60)).max(30).optional(),
+  confidence: z.enum(MEMORY_CONFIDENCES).optional(),
+  sensitivity: z.enum(MEMORY_SENSITIVITIES).optional(),
+  allowRecall: z.boolean().optional(),
+  validUntil: z.string().datetime().nullable().optional(),
+  reason: z.string().trim().min(1).max(500)
+}).strict();
+
+const memorySettingsSchema = z.object({
+  autoCapture: z.enum(["off", "experience"]).optional(),
+  maxItems: z.number().int().min(1).max(50).optional(),
+  maxChars: z.number().int().min(200).max(100000).optional(),
+  allowSensitive: z.boolean().optional()
+}).strict().refine((value) => Object.keys(value).length > 0, { message: "至少需要修改一个设置" });
+
+const memorySensitiveSchema = z.object({
+  sensitivity: z.enum(MEMORY_SENSITIVITIES),
+  allowRecall: z.boolean().optional()
+}).strict();
+
+const memoryRecallSchema = z.object({
+  taskId: z.string().trim().min(1).max(100),
+  runId: z.string().trim().max(100).optional(),
+  text: z.string().max(20000).optional(),
+  maxItems: z.number().int().min(1).max(50).optional(),
+  maxChars: z.number().int().min(200).max(100000).optional()
+}).strict();
+
+const memoryCaptureSchema = z.object({ taskId: z.string().trim().min(1).max(100) }).strict();
+
+const memoryConflictResolveSchema = z.object({
+  resolution: z.enum(["keep_left", "keep_right", "merged"]),
+  note: z.string().max(1000).optional(),
+  content: z.string().trim().min(1).max(8000).optional()
 }).strict();
 
 const proactiveSettingsSchema = z.object({
@@ -188,6 +249,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     getArtifact: (id) => store.getArtifact(id)
   }));
   const proactive = new ProactiveService(service);
+  const memory = new MemoryService(service);
   const approvals = new ApprovalManager(service, effectExecutor);
   approvals.recoverInterruptedEffects();
   const outbox = new OutboxService(service, approvals);
@@ -330,6 +392,104 @@ export async function buildServer(options: BuildServerOptions = {}) {
       return proactive.snooze(request.params.id, parsed.data.minutes);
     } catch (error) {
       return sendProactiveError(reply, error);
+    }
+  });
+
+  app.get("/api/memory", async (_request, reply) => {
+    reply.header("cache-control", "no-store");
+    return memory.snapshot();
+  });
+
+  app.patch("/api/memory/settings", async (request, reply) => {
+    const parsed = memorySettingsSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_MEMORY_SETTINGS", message: "记忆设置参数不正确" });
+    try {
+      return memory.updateSettings(definedObject(parsed.data) as Parameters<MemoryService["updateSettings"]>[0]);
+    } catch (error) {
+      return sendMemoryError(reply, error);
+    }
+  });
+
+  app.post("/api/memory", async (request, reply) => {
+    const parsed = createMemorySchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_MEMORY", message: "记忆参数不正确" });
+    try {
+      return reply.code(201).send(memory.create(definedObject(parsed.data) as unknown as Parameters<MemoryService["create"]>[0]));
+    } catch (error) {
+      return sendMemoryError(reply, error);
+    }
+  });
+
+  app.post("/api/memory/recall", async (request, reply) => {
+    const parsed = memoryRecallSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_MEMORY_RECALL", message: "记忆召回参数不正确" });
+    try {
+      return memory.recall(definedObject(parsed.data) as unknown as Parameters<MemoryService["recall"]>[0]);
+    } catch (error) {
+      return sendMemoryError(reply, error);
+    }
+  });
+
+  app.post("/api/memory/capture", async (request, reply) => {
+    const parsed = memoryCaptureSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_MEMORY_CAPTURE", message: "经历捕获参数不正确" });
+    try {
+      return { memory: memory.captureExperience(parsed.data.taskId) };
+    } catch (error) {
+      return sendMemoryError(reply, error);
+    }
+  });
+
+  app.get("/api/memory/export", async (_request, reply) => {
+    const stamp = new Date().toISOString().slice(0, 10);
+    reply.header("content-type", "application/json; charset=utf-8");
+    reply.header("content-disposition", "attachment; filename=\"hearth-memories-" + stamp + ".json\"");
+    return memory.exportData();
+  });
+
+  app.patch<{ Params: { id: string } }>("/api/memory/:id", async (request, reply) => {
+    const parsed = correctMemorySchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_MEMORY_CORRECTION", message: "记忆纠正参数不正确" });
+    try {
+      return memory.correct(request.params.id, definedObject(parsed.data) as unknown as Parameters<MemoryService["correct"]>[1]);
+    } catch (error) {
+      return sendMemoryError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/memory/:id/confirm", async (request, reply) => {
+    try {
+      return memory.confirm(request.params.id);
+    } catch (error) {
+      return sendMemoryError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/memory/:id/forget", async (request, reply) => {
+    try {
+      return memory.forget(request.params.id);
+    } catch (error) {
+      return sendMemoryError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/memory/:id/sensitive", async (request, reply) => {
+    const parsed = memorySensitiveSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_MEMORY_SENSITIVITY", message: "敏感度参数不正确" });
+    try {
+      return memory.markSensitive(request.params.id, parsed.data.sensitivity, parsed.data.allowRecall);
+    } catch (error) {
+      return sendMemoryError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/memory/conflicts/:id/resolve", async (request, reply) => {
+    const parsed = memoryConflictResolveSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_MEMORY_CONFLICT", message: "冲突解决参数不正确" });
+    try {
+      return memory.resolveConflict(request.params.id, parsed.data.resolution, parsed.data.note, parsed.data.content);
+    } catch (error) {
+      return sendMemoryError(reply, error);
     }
   });
 
@@ -960,6 +1120,13 @@ function sendOutboxError(reply: FastifyReply, error: unknown) {
 
 function definedObject(value: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined));
+}
+
+function sendMemoryError(reply: FastifyReply, error: unknown) {
+  if (error instanceof MemoryError) {
+    return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+  }
+  throw error;
 }
 
 function sendProactiveError(reply: FastifyReply, error: unknown) {

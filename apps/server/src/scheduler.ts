@@ -9,6 +9,7 @@ import { missingExpectedOutputs, publishArtifacts } from "./artifacts.ts";
 import { GIT_CACHE_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WORKSPACE_DIR } from "./config.ts";
 import { extractProposedComment, inspectRepository, readPrPreview, validatePullRequestPreview } from "./github.ts";
 import type { CommandRunner } from "./github.ts";
+import { MemoryService } from "./memory.ts";
 import { prepareTaskRuntime, type RuntimePreparation } from "./runtime.ts";
 import type { HearthService } from "./service.ts";
 import { buildDeliveryRepairPrompt, buildTaskPrompt, prepareWorkspace, UnsupportedInputError } from "./workspace.ts";
@@ -39,6 +40,7 @@ export class HearthScheduler {
   private readonly githubCacheRoot: string;
   private readonly sourceContentRoot: string;
   private readonly runtimePreparer: typeof prepareTaskRuntime;
+  private readonly memory: MemoryService;
   private readonly controllers = new Map<string, AbortController>();
   private readonly cancelled = new Set<string>();
   private unsubscribe: (() => void) | null = null;
@@ -58,6 +60,7 @@ export class HearthScheduler {
     this.githubCacheRoot = options.githubCacheRoot ?? GIT_CACHE_DIR;
     this.sourceContentRoot = options.sourceContentRoot ?? SOURCE_CONTENT_DIR;
     this.runtimePreparer = options.runtimePreparer ?? prepareTaskRuntime;
+    this.memory = new MemoryService(this.service);
   }
 
   get running(): boolean {
@@ -235,7 +238,13 @@ export class HearthScheduler {
           throw new UnsupportedInputError(`依赖环境准备失败：${runtime.errors.join("；")}。日志：${runtime.logPath}`);
         }
       }
-      const prompt = buildTaskPrompt(task, prepared, expectedOutputs, template?.acceptance ?? [], runtime, template?.approvalKind);
+      let memoryContext = "";
+      try {
+        memoryContext = this.memory.recall({ taskId, runId, text: template?.goal ?? "" }).contextPack;
+      } catch {
+        memoryContext = "";
+      }
+      const prompt = buildTaskPrompt(task, prepared, expectedOutputs, template?.acceptance ?? [], runtime, template?.approvalKind, memoryContext);
       let result = await this.codexRunner({
         workingDirectory: prepared.root,
         prompt,
@@ -307,6 +316,11 @@ export class HearthScheduler {
         nextAction: "产物已保存",
         error: null
       }, runId);
+      try {
+        this.memory.captureExperience(taskId);
+      } catch {
+        // Experience capture is best effort and never changes task success.
+      }
     } catch (error) {
       await this.failRun(taskId, runId, error, controller.signal.aborted);
     } finally {

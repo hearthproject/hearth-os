@@ -17,6 +17,11 @@ import type {
   EffectRecord,
   EffectStatus,
   EventEnvelope,
+  MemoryConflict,
+  MemoryRecall,
+  MemoryRecord,
+  MemorySettings,
+  MemoryVersion,
   OutboxDraft,
   ProactiveSettings,
   ProactiveSuggestion,
@@ -581,6 +586,61 @@ export class HearthStore {
     return counts;
   }
 
+  getMemorySettings(): MemorySettings | null {
+    const row = this.db.prepare("SELECT * FROM memory_settings WHERE id = 1").get() as DbRow | undefined;
+    return row ? rowToMemorySettings(row) : null;
+  }
+
+  getMemory(id: string): MemoryRecord | null {
+    const row = this.db.prepare("SELECT * FROM memories WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToMemory(row) : null;
+  }
+
+  listMemories(opts: { status?: string; kind?: string; limit?: number } = {}): MemoryRecord[] {
+    const clauses: string[] = [];
+    const params: SQLInputValue[] = [];
+    if (opts.status) { clauses.push("status = ?"); params.push(opts.status); }
+    if (opts.kind) { clauses.push("kind = ?"); params.push(opts.kind); }
+    const where = clauses.length > 0 ? " WHERE " + clauses.join(" AND ") : "";
+    const rows = this.db.prepare(
+      "SELECT * FROM memories" + where + " ORDER BY updated_at DESC LIMIT ?"
+    ).all(...params, opts.limit ?? 500) as DbRow[];
+    return rows.map(rowToMemory);
+  }
+
+  findActiveMemoriesBySubject(subjectKey: string): MemoryRecord[] {
+    const rows = this.db.prepare(
+      "SELECT * FROM memories WHERE subject_key = ? AND status IN (\"active\", \"conflict\") ORDER BY updated_at DESC"
+    ).all(subjectKey) as DbRow[];
+    return rows.map(rowToMemory);
+  }
+
+  listMemoryVersions(memoryId: string): MemoryVersion[] {
+    const rows = this.db.prepare(
+      "SELECT * FROM memory_versions WHERE memory_id = ? ORDER BY version DESC"
+    ).all(memoryId) as DbRow[];
+    return rows.map(rowToMemoryVersion);
+  }
+
+  getMemoryConflict(id: string): MemoryConflict | null {
+    const row = this.db.prepare("SELECT * FROM memory_conflicts WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToMemoryConflict(row) : null;
+  }
+
+  listMemoryConflicts(status?: string): MemoryConflict[] {
+    const rows = status
+      ? this.db.prepare("SELECT * FROM memory_conflicts WHERE status = ? ORDER BY created_at DESC").all(status) as DbRow[]
+      : this.db.prepare("SELECT * FROM memory_conflicts ORDER BY created_at DESC").all() as DbRow[];
+    return rows.map(rowToMemoryConflict);
+  }
+
+  listMemoryRecalls(memoryId?: string): MemoryRecall[] {
+    const rows = memoryId
+      ? this.db.prepare("SELECT * FROM memory_recalls WHERE memory_id = ? ORDER BY created_at DESC").all(memoryId) as DbRow[]
+      : this.db.prepare("SELECT * FROM memory_recalls ORDER BY created_at DESC").all() as DbRow[];
+    return rows.map(rowToMemoryRecall);
+  }
+
   getOutboxDraft(id: string): OutboxDraft | null {
     const row = this.db.prepare("SELECT * FROM outbox_drafts WHERE id = ?").get(id) as DbRow | undefined;
     return row ? rowToOutboxDraft(row) : null;
@@ -884,6 +944,13 @@ export class HearthStore {
         const payload = event.payload as Record<string, unknown>;
         return insertSuggestionEventRow(this.db, payload);
       }
+      case "memory.settings.updated": return upsertMemorySettings(this.db, event.payload as MemorySettings);
+      case "memory.created":
+      case "memory.updated": return upsertMemory(this.db, event.payload as MemoryRecord);
+      case "memory.version.recorded": return insertMemoryVersionRow(this.db, event.payload as MemoryVersion);
+      case "memory.recalled": return insertMemoryRecallRow(this.db, event.payload as MemoryRecall);
+      case "memory.conflict.created":
+      case "memory.conflict.updated": return upsertMemoryConflict(this.db, event.payload as MemoryConflict);
       case "outbox.created": return upsertOutboxDraft(this.db, event.payload as OutboxDraft);
       case "outbox.updated": return updateOutboxDraft(this.db, event.payload as Record<string, unknown>);
       case "device.paired":
@@ -1501,4 +1568,127 @@ function insertSuggestionEventRow(db: DatabaseSync, payload: Record<string, unkn
     String(payload.id), String(payload.suggestionId), String(payload.action),
     JSON.stringify(payload), String(payload.createdAt)
   );
+}
+
+function rowToMemorySettings(row: DbRow): MemorySettings {
+  return {
+    autoCapture: String(row.auto_capture) as MemorySettings["autoCapture"],
+    maxItems: Number(row.max_items),
+    maxChars: Number(row.max_chars),
+    allowSensitive: Number(row.allow_sensitive) === 1,
+    updatedAt: String(row.updated_at)
+  };
+}
+
+function upsertMemorySettings(db: DatabaseSync, settings: MemorySettings): void {
+  db.prepare(
+    "INSERT INTO memory_settings (id, auto_capture, max_items, max_chars, allow_sensitive, updated_at) VALUES (1, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET auto_capture=excluded.auto_capture, max_items=excluded.max_items, max_chars=excluded.max_chars, allow_sensitive=excluded.allow_sensitive, updated_at=excluded.updated_at"
+  ).run(settings.autoCapture, settings.maxItems, settings.maxChars, settings.allowSensitive ? 1 : 0, settings.updatedAt);
+}
+
+function rowToMemory(row: DbRow): MemoryRecord {
+  return {
+    id: String(row.id),
+    kind: String(row.kind) as MemoryRecord["kind"],
+    status: String(row.status) as MemoryRecord["status"],
+    content: String(row.content),
+    subjectKey: String(row.subject_key),
+    scope: String(row.scope),
+    tags: JSON.parse(String(row.tags_json)),
+    source: JSON.parse(String(row.source_json)),
+    confidence: String(row.confidence) as MemoryRecord["confidence"],
+    sensitivity: String(row.sensitivity) as MemoryRecord["sensitivity"],
+    allowRecall: Number(row.allow_recall) === 1,
+    version: Number(row.version),
+    supersedesId: row.supersedes_id == null ? null : String(row.supersedes_id),
+    derivedFromId: row.derived_from_id == null ? null : String(row.derived_from_id),
+    validUntil: row.valid_until == null ? null : String(row.valid_until),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+    lastRecalledAt: row.last_recalled_at == null ? null : String(row.last_recalled_at),
+    recallCount: Number(row.recall_count)
+  };
+}
+
+function upsertMemory(db: DatabaseSync, memory: MemoryRecord): void {
+  db.prepare(
+    `INSERT INTO memories (id, kind, status, content, subject_key, scope, tags_json, source_json, confidence, sensitivity, allow_recall, version, supersedes_id, derived_from_id, valid_until, created_at, updated_at, last_recalled_at, recall_count)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, status=excluded.status, content=excluded.content,
+       subject_key=excluded.subject_key, scope=excluded.scope, tags_json=excluded.tags_json, source_json=excluded.source_json,
+       confidence=excluded.confidence, sensitivity=excluded.sensitivity, allow_recall=excluded.allow_recall,
+       version=excluded.version, supersedes_id=excluded.supersedes_id, derived_from_id=excluded.derived_from_id,
+       valid_until=excluded.valid_until, updated_at=excluded.updated_at, last_recalled_at=excluded.last_recalled_at,
+       recall_count=excluded.recall_count`
+  ).run(
+    memory.id, memory.kind, memory.status, memory.content, memory.subjectKey, memory.scope,
+    JSON.stringify(memory.tags), JSON.stringify(memory.source), memory.confidence, memory.sensitivity,
+    memory.allowRecall ? 1 : 0, memory.version, memory.supersedesId, memory.derivedFromId,
+    memory.validUntil, memory.createdAt, memory.updatedAt, memory.lastRecalledAt, memory.recallCount
+  );
+}
+
+function rowToMemoryVersion(row: DbRow): MemoryVersion {
+  return {
+    id: String(row.id),
+    memoryId: String(row.memory_id),
+    version: Number(row.version),
+    content: String(row.content),
+    status: String(row.status) as MemoryVersion["status"],
+    source: JSON.parse(String(row.source_json)),
+    confidence: String(row.confidence) as MemoryVersion["confidence"],
+    sensitivity: String(row.sensitivity) as MemoryVersion["sensitivity"],
+    allowRecall: Number(row.allow_recall) === 1,
+    scope: String(row.scope),
+    tags: JSON.parse(String(row.tags_json)),
+    reason: String(row.reason),
+    createdAt: String(row.created_at)
+  };
+}
+
+function insertMemoryVersionRow(db: DatabaseSync, version: MemoryVersion): void {
+  db.prepare(
+    "INSERT INTO memory_versions (id, memory_id, version, content, status, source_json, confidence, sensitivity, allow_recall, scope, tags_json, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(
+    version.id, version.memoryId, version.version, version.content, version.status,
+    JSON.stringify(version.source), version.confidence, version.sensitivity, version.allowRecall ? 1 : 0,
+    version.scope, JSON.stringify(version.tags), version.reason, version.createdAt
+  );
+}
+
+function rowToMemoryConflict(row: DbRow): MemoryConflict {
+  return {
+    id: String(row.id),
+    subjectKey: String(row.subject_key),
+    memoryIds: JSON.parse(String(row.memory_ids_json)),
+    status: String(row.status) as MemoryConflict["status"],
+    resolution: row.resolution == null ? null : String(row.resolution) as MemoryConflict["resolution"],
+    note: String(row.note),
+    createdAt: String(row.created_at),
+    resolvedAt: row.resolved_at == null ? null : String(row.resolved_at)
+  };
+}
+
+function upsertMemoryConflict(db: DatabaseSync, conflict: MemoryConflict): void {
+  db.prepare(
+    "INSERT INTO memory_conflicts (id, subject_key, memory_ids_json, status, resolution, note, created_at, resolved_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET subject_key=excluded.subject_key, memory_ids_json=excluded.memory_ids_json, status=excluded.status, resolution=excluded.resolution, note=excluded.note, resolved_at=excluded.resolved_at"
+  ).run(conflict.id, conflict.subjectKey, JSON.stringify(conflict.memoryIds), conflict.status, conflict.resolution, conflict.note, conflict.createdAt, conflict.resolvedAt);
+}
+
+function rowToMemoryRecall(row: DbRow): MemoryRecall {
+  return {
+    id: String(row.id),
+    memoryId: String(row.memory_id),
+    taskId: String(row.task_id),
+    runId: row.run_id == null ? null : String(row.run_id),
+    reason: String(row.reason),
+    score: Number(row.score),
+    createdAt: String(row.created_at)
+  };
+}
+
+function insertMemoryRecallRow(db: DatabaseSync, recall: MemoryRecall): void {
+  db.prepare(
+    "INSERT INTO memory_recalls (id, memory_id, task_id, run_id, reason, score, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  ).run(recall.id, recall.memoryId, recall.taskId, recall.runId, recall.reason, recall.score, recall.createdAt);
 }
