@@ -10,7 +10,9 @@ import { loadCodexProfile } from "@hearth/codex-executor";
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate } from "@hearth/templates";
 import { z } from "zod";
-import { DB_PATH, DEVICE_FRAME_DIR, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST } from "./config.ts";
+import { ATTACHMENT_DIR, DB_PATH, DEVICE_FRAME_DIR, MODEL_SETTINGS_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST } from "./config.ts";
+import { registerChatRoutes } from "./chat-routes.ts";
+import { chatModelConfigured, loadModelSettings, viewModelSettings } from "./model-settings.ts";
 import { ApprovalError, ApprovalManager, type EffectExecutor } from "./approvals.ts";
 import { executeEffect } from "./effects.ts";
 import { HearthScheduler } from "./scheduler.ts";
@@ -142,6 +144,8 @@ export interface BuildServerOptions {
   sourceContentRoot?: string;
   outboxRoot?: string;
   deviceFrameRoot?: string;
+  modelSettingsPath?: string;
+  attachmentRoot?: string;
 }
 
 export async function buildServer(options: BuildServerOptions = {}) {
@@ -159,10 +163,13 @@ export async function buildServer(options: BuildServerOptions = {}) {
   approvals.recoverInterruptedEffects();
   const outbox = new OutboxService(service, approvals);
   const desktop = new DesktopService(service, options.deviceFrameRoot ?? DEVICE_FRAME_DIR);
+  const modelSettingsPath = options.modelSettingsPath ?? MODEL_SETTINGS_PATH;
+  const attachmentRoot = options.attachmentRoot ?? ATTACHMENT_DIR;
   const scheduler = options.startScheduler
     ? new HearthScheduler({
         service,
         approvals,
+        attachmentRoot,
         ...(options.sourceContentRoot ? { sourceContentRoot: options.sourceContentRoot } : {})
       })
     : null;
@@ -170,6 +177,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
     logger: options.logger ?? false,
     bodyLimit: 8_000_000
   });
+
+  await registerChatRoutes(app, { service, modelSettingsPath, attachmentRoot });
 
   app.addHook("onClose", async () => {
     await scheduler?.stop();
@@ -192,17 +201,28 @@ export async function buildServer(options: BuildServerOptions = {}) {
 
   app.get("/api/health", async () => {
     const profile = loadCodexProfile();
+    const modelSettings = loadModelSettings(modelSettingsPath);
     return {
       status: "ok",
       name: "Hearth",
       now: new Date().toISOString(),
+      chatModel: {
+        configured: chatModelConfigured(modelSettings),
+        settings: viewModelSettings(modelSettings)
+      },
       codex: {
         canRun: profile.canRun,
         providerId: profile.providerId,
         providerName: profile.providerName,
         model: profile.model,
         authSource: profile.authSource,
-        issues: profile.issues
+        issues: profile.issues,
+        configPath: profile.configPath,
+        codexHome: profile.codexHome,
+        baseUrl: profile.baseUrl,
+        wireApi: profile.wireApi,
+        envKey: profile.envKey,
+        envKeyPresent: profile.envKeyPresent
       }
     };
   });

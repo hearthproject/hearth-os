@@ -12,6 +12,8 @@ export const ARTIFACT_DIR = join(DATA_DIR, "artifacts");
 export const SOURCE_CONTENT_DIR = join(DATA_DIR, "sources");
 export const OUTBOX_DIR = join(DATA_DIR, "outbox");
 export const DEVICE_FRAME_DIR = join(DATA_DIR, "device-frames");
+export const MODEL_SETTINGS_PATH = join(DATA_DIR, "model-settings.json");
+export const ATTACHMENT_DIR = join(DATA_DIR, "attachments");
 export const WEB_DIST = join(REPO_ROOT, "apps", "web", "dist");
 
 export function resolveRepoPath(path: string): string {
