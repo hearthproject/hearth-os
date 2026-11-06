@@ -92,7 +92,14 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
 }
 
 export function nativePermissionsFor(task: TaskRecord, prepared: PreparedWorkspace): TaskPermissions {
-  if (task.permissions) return task.permissions;
+  if (task.permissions) {
+    return {
+      ...task.permissions,
+      readRoots: [prepared.root],
+      writeRoots: task.taskKind === "workspace" ? [prepared.outDir, prepared.root] : [prepared.outDir],
+      networkHosts: [...task.networkHosts]
+    };
+  }
   return defaultTaskPermissions({
     workspaceRoot: prepared.root,
     outDir: prepared.outDir,
