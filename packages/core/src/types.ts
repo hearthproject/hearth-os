@@ -53,6 +53,50 @@ export interface TaskRecord {
   currentRunId: string | null;
   nextAction: string | null;
   error: TaskError | null;
+  resultSummary?: string | null;
+  conversationId?: string | null;
+}
+
+export interface ChatAttachment {
+  id: string;
+  name: string;
+  mimeType: string;
+  bytes: number;
+}
+
+export interface ConversationRecord {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChatMessageRecord {
+  id: string;
+  conversationId: string;
+  role: "user" | "assistant";
+  content: string;
+  taskId: string | null;
+  attachments: ChatAttachment[];
+  createdAt: string;
+}
+
+export interface ModelProviderPreset {
+  id: string;
+  name: string;
+  baseUrl: string;
+  models: string[];
+  note: string;
+}
+
+export interface ModelSettingsView {
+  providerId: string;
+  providerName: string;
+  baseUrl: string;
+  model: string;
+  hasApiKey: boolean;
+  apiKeyMasked: string | null;
+  updatedAt: string | null;
 }
 
 export interface RunUsage {
@@ -74,6 +118,7 @@ export interface RunRecord {
   endedAt: string | null;
   failure: TaskError | null;
   usage: RunUsage | null;
+  leaseEpoch: number | null;
   createdAt: string;
 }
 
@@ -358,5 +403,342 @@ export interface EventEnvelope<T = unknown> {
   taskId: string | null;
   runId: string | null;
   payload: T;
+  originInstanceId: string | null;
+  originSeq: number | null;
   createdAt: string;
+}
+
+
+export interface AppMeta {
+  instanceId: string;
+  schemaVersion: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const TRIGGER_KINDS = [
+  "task.deadline",
+  "task.failed",
+  "effect.uncertain",
+  "approval.pending",
+  "source.new_items",
+  "system.health",
+  "email.new_message",
+  "calendar.upcoming"
+] as const;
+
+export type TriggerKind = (typeof TRIGGER_KINDS)[number];
+
+export const AUTONOMY_LEVELS = ["A0", "A1", "A2"] as const;
+export type AutonomyLevel = (typeof AUTONOMY_LEVELS)[number];
+
+export const SUGGESTION_STATUSES = ["new", "accepted", "ignored", "snoozed", "converted", "expired"] as const;
+export type SuggestionStatus = (typeof SUGGESTION_STATUSES)[number];
+
+export const SUGGESTION_RISK_LEVELS = ["low", "medium", "high"] as const;
+export type SuggestionRisk = (typeof SUGGESTION_RISK_LEVELS)[number];
+
+export const PROACTIVE_MODES = ["off", "suggest", "prepare", "auto"] as const;
+export type ProactiveMode = (typeof PROACTIVE_MODES)[number];
+
+export interface SuggestionSourceRef {
+  kind: "task" | "source" | "effect" | "approval" | "system" | "email" | "calendar";
+  id: string | null;
+  label: string;
+  detail: string | null;
+}
+
+export interface ProactiveSuggestion {
+  id: string;
+  triggerKind: TriggerKind;
+  dedupeKey: string;
+  title: string;
+  whyNow: string;
+  suggestedAction: string;
+  expectedImpact: string;
+  estimatedCost: string;
+  riskLevel: SuggestionRisk;
+  requiresApproval: boolean;
+  autonomy: AutonomyLevel;
+  status: SuggestionStatus;
+  priority: number;
+  source: SuggestionSourceRef;
+  evidence: Record<string, unknown>;
+  occurrenceCount: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  notifiedAt: string | null;
+  snoozeUntil: string | null;
+  expiresAt: string | null;
+  taskId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TriggerPolicy {
+  enabled: boolean;
+  autonomy: AutonomyLevel;
+}
+
+export interface ProactiveSettings {
+  enabled: boolean;
+  mode: ProactiveMode;
+  dailyLimit: number;
+  quietStart: string;
+  quietEnd: string;
+  cooldownMinutes: number;
+  aggregateWindowMinutes: number;
+  pausedUntil: string | null;
+  triggers: Record<TriggerKind, TriggerPolicy>;
+  updatedAt: string;
+}
+
+export interface ProactiveBudget {
+  usedToday: number;
+  limit: number;
+  quiet: boolean;
+  paused: boolean;
+  nextAllowedAt: string | null;
+}
+
+export interface ProactiveMetrics {
+  delivered: number;
+  accepted: number;
+  ignored: number;
+  converted: number;
+  acceptanceRate: number | null;
+  interruptionsPerTask: number | null;
+}
+
+export interface ProactiveSnapshot {
+  settings: ProactiveSettings;
+  suggestions: ProactiveSuggestion[];
+  budget: ProactiveBudget;
+  metrics: ProactiveMetrics;
+}
+
+export const MEMORY_KINDS = ["fact", "preference", "project", "commitment", "experience", "method"] as const;
+export type MemoryKind = (typeof MEMORY_KINDS)[number];
+
+export const MEMORY_STATUSES = ["candidate", "active", "conflict", "forgotten", "superseded"] as const;
+export type MemoryStatus = (typeof MEMORY_STATUSES)[number];
+
+export const MEMORY_SENSITIVITIES = ["normal", "sensitive", "secret"] as const;
+export type MemorySensitivity = (typeof MEMORY_SENSITIVITIES)[number];
+
+export const MEMORY_CONFIDENCES = ["low", "medium", "high"] as const;
+export type MemoryConfidence = (typeof MEMORY_CONFIDENCES)[number];
+
+export interface MemorySourceRef {
+  type: "user" | "task" | "source" | "method" | "system";
+  id: string | null;
+  label: string;
+  excerpt: string | null;
+}
+
+export interface MemoryRecord {
+  id: string;
+  kind: MemoryKind;
+  status: MemoryStatus;
+  content: string;
+  subjectKey: string;
+  scope: string;
+  tags: string[];
+  source: MemorySourceRef;
+  confidence: MemoryConfidence;
+  sensitivity: MemorySensitivity;
+  allowRecall: boolean;
+  version: number;
+  supersedesId: string | null;
+  derivedFromId: string | null;
+  validUntil: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lastRecalledAt: string | null;
+  recallCount: number;
+}
+
+export interface MemoryVersion {
+  id: string;
+  memoryId: string;
+  version: number;
+  content: string;
+  status: MemoryStatus;
+  source: MemorySourceRef;
+  confidence: MemoryConfidence;
+  sensitivity: MemorySensitivity;
+  allowRecall: boolean;
+  scope: string;
+  tags: string[];
+  reason: string;
+  createdAt: string;
+}
+
+export const MEMORY_CONFLICT_STATUSES = ["pending", "resolved"] as const;
+export type MemoryConflictStatus = (typeof MEMORY_CONFLICT_STATUSES)[number];
+
+export interface MemoryConflict {
+  id: string;
+  subjectKey: string;
+  memoryIds: string[];
+  status: MemoryConflictStatus;
+  resolution: "keep_left" | "keep_right" | "merged" | null;
+  note: string;
+  createdAt: string;
+  resolvedAt: string | null;
+}
+
+export interface MemoryRecall {
+  id: string;
+  memoryId: string;
+  taskId: string;
+  runId: string | null;
+  reason: string;
+  score: number;
+  createdAt: string;
+}
+
+export interface MemorySettings {
+  autoCapture: "off" | "experience";
+  maxItems: number;
+  maxChars: number;
+  allowSensitive: boolean;
+  updatedAt: string;
+}
+
+export const METHOD_STATUSES = ["candidate", "evaluating", "trial", "adopted", "rejected", "reverted"] as const;
+export type MethodStatus = (typeof METHOD_STATUSES)[number];
+
+export const METHOD_VERDICTS = ["insufficient", "improved", "flat", "regressed"] as const;
+export type MethodVerdict = (typeof METHOD_VERDICTS)[number];
+
+export interface MethodMetrics {
+  tasks: number;
+  completed: number;
+  failed: number;
+  successRate: number | null;
+  avgDurationMs: number | null;
+  inputTokens: number;
+  outputTokens: number;
+  approvals: number;
+}
+
+export interface MethodCandidate {
+  id: string;
+  name: string;
+  summary: string;
+  applicability: string;
+  steps: string[];
+  sourceTaskIds: string[];
+  templateId: string | null;
+  status: MethodStatus;
+  version: number;
+  previousVersionId: string | null;
+  allowedCapabilities: string[];
+  guardrails: string[];
+  baseline: MethodMetrics;
+  trial: MethodMetrics;
+  evaluationVerdict: MethodVerdict | null;
+  createdAt: string;
+  updatedAt: string;
+  adoptedAt: string | null;
+  retiredAt: string | null;
+}
+
+export interface MethodEvaluation {
+  id: string;
+  methodId: string;
+  methodVersion: number;
+  baselineTaskIds: string[];
+  trialTaskIds: string[];
+  baseline: MethodMetrics;
+  trial: MethodMetrics;
+  verdict: MethodVerdict;
+  notes: string;
+  createdAt: string;
+}
+
+export interface MethodTrial {
+  id: string;
+  methodId: string;
+  methodVersion: number;
+  taskId: string;
+  createdAt: string;
+}
+
+export const SYNC_PEER_STATUSES = ["active", "revoked", "error"] as const;
+export type SyncPeerStatus = (typeof SYNC_PEER_STATUSES)[number];
+
+export interface SyncPeer {
+  id: string;
+  name: string;
+  baseUrl: string;
+  status: SyncPeerStatus;
+  tokenHash: string;
+  lastPullSeq: number;
+  lastPullAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const SYNC_CONFLICT_STATUSES = ["pending", "local", "remote"] as const;
+export type SyncConflictStatus = (typeof SYNC_CONFLICT_STATUSES)[number];
+
+export interface SyncConflict {
+  id: string;
+  entityType: string;
+  entityId: string;
+  localUpdatedAt: string | null;
+  remoteUpdatedAt: string | null;
+  localPayload: Record<string, unknown>;
+  remotePayload: Record<string, unknown>;
+  status: SyncConflictStatus;
+  createdAt: string;
+  resolvedAt: string | null;
+}
+
+export interface TaskLease {
+  taskId: string;
+  ownerInstanceId: string;
+  ownerDeviceId: string | null;
+  epoch: number;
+  expiresAt: string;
+  heartbeatAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const MAINTENANCE_STATUSES = ["running", "completed", "failed"] as const;
+export type MaintenanceStatus = (typeof MAINTENANCE_STATUSES)[number];
+
+export interface MaintenanceRun {
+  id: string;
+  startedAt: string;
+  endedAt: string | null;
+  status: MaintenanceStatus;
+  actions: Record<string, number>;
+  error: string | null;
+}
+
+export interface HealthSnapshot {
+  status: "ok" | "degraded";
+  name: string;
+  now: string;
+  startedAt: string;
+  uptimeSeconds: number;
+  schemaVersion: number;
+  instanceId: string;
+  memory: { rssBytes: number; heapUsedBytes: number; heapTotalBytes: number };
+  disk: { freeBytes: number | null; dataBytes: number; walBytes: number };
+  tasks: { total: number; queued: number; running: number; recoverable: number; waitingApproval: number };
+  maintenance: { lastRunAt: string | null; lastStatus: MaintenanceStatus | null; lastError: string | null };
+  codex: {
+    canRun: boolean;
+    providerId: string;
+    providerName: string;
+    model: string | null;
+    authSource: "provider-env" | "openai-login" | "missing" | "unknown";
+    issues: string[];
+  };
 }

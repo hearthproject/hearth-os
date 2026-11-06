@@ -85,7 +85,7 @@ describe("event description", () => {
   it("translates a status change into the task label", () => {
     const description = eventDescription({
       seq: 1, id: "e1", type: "task.updated", taskId: "task-1", runId: null,
-      payload: { status: "waiting_approval" }, createdAt: "2026-11-05T00:00:00.000Z"
+      payload: { status: "waiting_approval" }, originInstanceId: null, originSeq: 1, createdAt: "2026-11-05T00:00:00.000Z"
     });
     expect(description).toBe("状态变为：等你确认");
   });
@@ -94,7 +94,7 @@ describe("event description", () => {
     const description = eventDescription({
       seq: 1, id: "e1", type: "task.progress", taskId: "task-1", runId: "run-1",
       payload: { kind: "item.completed", message: "执行了一条命令", at: "2026-11-05T00:00:00.000Z" },
-      createdAt: "2026-11-05T00:00:00.000Z"
+      originInstanceId: null, originSeq: 1, createdAt: "2026-11-05T00:00:00.000Z"
     });
     expect(description).toBe("执行了一条命令");
   });

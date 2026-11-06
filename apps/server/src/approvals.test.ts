@@ -102,6 +102,7 @@ describe("approval manager", () => {
       endedAt: null,
       failure: null,
       usage: null,
+      leaseEpoch: null,
       createdAt: now
     };
     service.createRun(run);

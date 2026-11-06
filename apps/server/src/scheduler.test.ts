@@ -179,6 +179,7 @@ describe("Hearth scheduler", () => {
       endedAt: null,
       failure: null,
       usage: null,
+      leaseEpoch: null,
       createdAt: now
     });
     service.updateTask(task.id, { status: "running", currentRunId: runId, nextAction: "正在执行" }, runId);

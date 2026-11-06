@@ -3,9 +3,12 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import type {
+  AppMeta,
   ApprovalRecord,
   ApprovalStatus,
   ArtifactRecord,
+  ChatMessageRecord,
+  ConversationRecord,
   DesktopCommandRecord,
   DesktopFrameRecord,
   DesktopSessionRecord,
@@ -56,18 +59,29 @@ CREATE TABLE IF NOT EXISTS events (
   task_id TEXT,
   run_id TEXT,
   payload_json TEXT NOT NULL,
+  origin_instance_id TEXT,
+  origin_seq INTEGER,
   created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY, template_id TEXT, title TEXT NOT NULL, goal TEXT NOT NULL,
   status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
   deadline TEXT, inputs_json TEXT NOT NULL, network_hosts_json TEXT NOT NULL,
-  output_dir TEXT NOT NULL, current_run_id TEXT, next_action TEXT, error_json TEXT
+  output_dir TEXT NOT NULL, current_run_id TEXT, next_action TEXT, error_json TEXT,
+  result_summary TEXT, conversation_id TEXT
+);
+CREATE TABLE IF NOT EXISTS conversations (
+  id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, role TEXT NOT NULL,
+  content TEXT NOT NULL, task_id TEXT, attachments_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS runs (
   id TEXT PRIMARY KEY, task_id TEXT NOT NULL, attempt INTEGER NOT NULL, status TEXT NOT NULL,
   thread_id TEXT, workspace TEXT NOT NULL, started_at TEXT, ended_at TEXT,
-  failure_json TEXT, usage_json TEXT, created_at TEXT NOT NULL
+  failure_json TEXT, usage_json TEXT, lease_epoch INTEGER, created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS approvals (
   id TEXT PRIMARY KEY, task_id TEXT NOT NULL, run_id TEXT NOT NULL, kind TEXT NOT NULL,
@@ -135,6 +149,100 @@ CREATE TABLE IF NOT EXISTS desktop_commands (
   payload_json TEXT NOT NULL, result_json TEXT, error TEXT, created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL, completed_at TEXT
 );
+CREATE TABLE IF NOT EXISTS app_meta (
+  key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS proactive_settings (
+  id INTEGER PRIMARY KEY CHECK (id = 1), enabled INTEGER NOT NULL, mode TEXT NOT NULL,
+  daily_limit INTEGER NOT NULL, quiet_start TEXT NOT NULL, quiet_end TEXT NOT NULL,
+  cooldown_minutes INTEGER NOT NULL, aggregate_window_minutes INTEGER NOT NULL,
+  paused_until TEXT, triggers_json TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS suggestions (
+  id TEXT PRIMARY KEY, trigger_kind TEXT NOT NULL, dedupe_key TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL, why_now TEXT NOT NULL, suggested_action TEXT NOT NULL,
+  expected_impact TEXT NOT NULL, estimated_cost TEXT NOT NULL, risk_level TEXT NOT NULL,
+  requires_approval INTEGER NOT NULL, autonomy TEXT NOT NULL, status TEXT NOT NULL,
+  priority INTEGER NOT NULL, source_json TEXT NOT NULL, evidence_json TEXT NOT NULL,
+  occurrence_count INTEGER NOT NULL, first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL,
+  notified_at TEXT, snooze_until TEXT, expires_at TEXT, task_id TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS suggestion_events (
+  id TEXT PRIMARY KEY, suggestion_id TEXT NOT NULL, action TEXT NOT NULL,
+  payload_json TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS memory_settings (
+  id INTEGER PRIMARY KEY CHECK (id = 1), auto_capture TEXT NOT NULL,
+  max_items INTEGER NOT NULL, max_chars INTEGER NOT NULL, allow_sensitive INTEGER NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS memories (
+  id TEXT PRIMARY KEY, kind TEXT NOT NULL, status TEXT NOT NULL, content TEXT NOT NULL,
+  subject_key TEXT NOT NULL, scope TEXT NOT NULL, tags_json TEXT NOT NULL,
+  source_json TEXT NOT NULL, confidence TEXT NOT NULL, sensitivity TEXT NOT NULL,
+  allow_recall INTEGER NOT NULL, version INTEGER NOT NULL, supersedes_id TEXT,
+  derived_from_id TEXT, valid_until TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  last_recalled_at TEXT, recall_count INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS memory_versions (
+  id TEXT PRIMARY KEY, memory_id TEXT NOT NULL, version INTEGER NOT NULL,
+  content TEXT NOT NULL, status TEXT NOT NULL, source_json TEXT NOT NULL,
+  confidence TEXT NOT NULL, sensitivity TEXT NOT NULL, allow_recall INTEGER NOT NULL,
+  scope TEXT NOT NULL, tags_json TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL,
+  UNIQUE(memory_id, version)
+);
+CREATE TABLE IF NOT EXISTS memory_conflicts (
+  id TEXT PRIMARY KEY, subject_key TEXT NOT NULL, memory_ids_json TEXT NOT NULL,
+  status TEXT NOT NULL, resolution TEXT, note TEXT NOT NULL,
+  created_at TEXT NOT NULL, resolved_at TEXT
+);
+CREATE TABLE IF NOT EXISTS memory_recalls (
+  id TEXT PRIMARY KEY, memory_id TEXT NOT NULL, task_id TEXT NOT NULL, run_id TEXT,
+  reason TEXT NOT NULL, score REAL NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS method_candidates (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, summary TEXT NOT NULL, applicability TEXT NOT NULL,
+  steps_json TEXT NOT NULL, source_task_ids_json TEXT NOT NULL, template_id TEXT,
+  status TEXT NOT NULL, version INTEGER NOT NULL, previous_version_id TEXT,
+  allowed_capabilities_json TEXT NOT NULL, guardrails_json TEXT NOT NULL,
+  baseline_json TEXT NOT NULL, trial_json TEXT NOT NULL, evaluation_verdict TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, adopted_at TEXT, retired_at TEXT
+);
+CREATE TABLE IF NOT EXISTS method_evaluations (
+  id TEXT PRIMARY KEY, method_id TEXT NOT NULL, method_version INTEGER NOT NULL,
+  baseline_task_ids_json TEXT NOT NULL, trial_task_ids_json TEXT NOT NULL,
+  baseline_json TEXT NOT NULL, trial_json TEXT NOT NULL, verdict TEXT NOT NULL,
+  notes TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS method_trials (
+  id TEXT PRIMARY KEY, method_id TEXT NOT NULL, method_version INTEGER NOT NULL,
+  task_id TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sync_peers (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL, status TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE, last_pull_seq INTEGER NOT NULL, last_pull_at TEXT,
+  last_error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sync_conflicts (
+  id TEXT PRIMARY KEY, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL,
+  local_updated_at TEXT, remote_updated_at TEXT, local_payload_json TEXT NOT NULL,
+  remote_payload_json TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL,
+  resolved_at TEXT
+);
+CREATE TABLE IF NOT EXISTS task_leases (
+  task_id TEXT PRIMARY KEY, owner_instance_id TEXT NOT NULL, owner_device_id TEXT,
+  epoch INTEGER NOT NULL, expires_at TEXT NOT NULL, heartbeat_at TEXT NOT NULL,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS maintenance_runs (
+  id TEXT PRIMARY KEY, started_at TEXT NOT NULL, ended_at TEXT, status TEXT NOT NULL,
+  actions_json TEXT NOT NULL, error TEXT
+);
+CREATE TABLE IF NOT EXISTS backup_records (
+  id TEXT PRIMARY KEY, kind TEXT NOT NULL, path TEXT NOT NULL, bytes INTEGER NOT NULL,
+  sha256 TEXT NOT NULL, created_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS events_task_idx ON events(task_id, seq);
 CREATE INDEX IF NOT EXISTS runs_task_idx ON runs(task_id, created_at);
 CREATE INDEX IF NOT EXISTS approvals_task_idx ON approvals(task_id, status);
@@ -151,10 +259,20 @@ CREATE INDEX IF NOT EXISTS desktop_sessions_device_idx ON desktop_sessions(devic
 CREATE INDEX IF NOT EXISTS desktop_frames_session_idx ON desktop_frames(session_id, captured_at);
 CREATE INDEX IF NOT EXISTS desktop_commands_device_idx ON desktop_commands(device_id, status, created_at);
 CREATE INDEX IF NOT EXISTS desktop_commands_session_idx ON desktop_commands(session_id, created_at);
+CREATE INDEX IF NOT EXISTS suggestions_status_idx ON suggestions(status, priority, last_seen_at);
+CREATE INDEX IF NOT EXISTS suggestions_kind_idx ON suggestions(trigger_kind, last_seen_at);
+CREATE INDEX IF NOT EXISTS memories_status_idx ON memories(status, kind, updated_at);
+CREATE INDEX IF NOT EXISTS memories_subject_idx ON memories(subject_key, status);
+CREATE INDEX IF NOT EXISTS memory_recalls_task_idx ON memory_recalls(task_id, created_at);
+CREATE INDEX IF NOT EXISTS method_candidates_status_idx ON method_candidates(status, updated_at);
+CREATE INDEX IF NOT EXISTS sync_conflicts_status_idx ON sync_conflicts(status, created_at);
+CREATE INDEX IF NOT EXISTS task_leases_expiry_idx ON task_leases(expires_at);
+CREATE INDEX IF NOT EXISTS chat_messages_conversation_idx ON chat_messages(conversation_id, created_at);
 `;
 
 export class HearthStore {
   readonly db: DatabaseSync;
+  readonly instanceId: string;
 
   constructor(path: string) {
     if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
@@ -163,23 +281,70 @@ export class HearthStore {
     this.db.exec("PRAGMA foreign_keys = ON;");
     this.db.exec("PRAGMA busy_timeout = 5000;");
     this.db.exec(SCHEMA);
+    this.migrate();
+    this.instanceId = this.ensureInstanceId();
+  }
+
+  private migrate(): void {
+    ensureColumn(this.db, "events", "origin_instance_id", "TEXT");
+    ensureColumn(this.db, "events", "origin_seq", "INTEGER");
+    ensureColumn(this.db, "runs", "lease_epoch", "INTEGER");
+    ensureColumn(this.db, "tasks", "result_summary", "TEXT");
+    ensureColumn(this.db, "tasks", "conversation_id", "TEXT");
+    this.db.exec("PRAGMA user_version = 2");
+    this.setMeta("schemaVersion", "2");
+  }
+
+  private ensureInstanceId(): string {
+    const existing = this.getMeta("instanceId");
+    if (existing) return existing;
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.setMeta("instanceId", id, now);
+    this.setMeta("createdAt", now, now);
+    return id;
+  }
+
+  getMeta(key: string): string | null {
+    const row = this.db.prepare("SELECT value FROM app_meta WHERE key = ?").get(key) as DbRow | undefined;
+    return row ? String(row.value) : null;
+  }
+
+  setMeta(key: string, value: string, updatedAt = new Date().toISOString()): void {
+    this.db.prepare(
+      "INSERT INTO app_meta (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at"
+    ).run(key, value, updatedAt);
+  }
+
+  getAppMeta(): AppMeta {
+    const schemaVersion = Number(this.getMeta("schemaVersion") ?? 2);
+    const createdAt = this.getMeta("createdAt") ?? new Date().toISOString();
+    const updatedAt = this.getMeta("metaUpdatedAt") ?? createdAt;
+    return { instanceId: this.instanceId, schemaVersion, createdAt, updatedAt };
   }
 
   close(): void {
     this.db.close();
   }
 
-  appendEvent(event: NewEvent): EventEnvelope {
+  appendEvent(event: NewEvent, origin?: { instanceId: string; seq: number | null }): EventEnvelope {
     const createdAt = event.createdAt ?? new Date().toISOString();
     const id = randomUUID();
+    const originInstanceId = origin?.instanceId ?? this.instanceId;
+    const originSeq = origin?.seq ?? null;
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const result = this.db.prepare(
-        "INSERT INTO events (id, type, task_id, run_id, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?)"
-      ).run(id, event.type, event.taskId ?? null, event.runId ?? null, JSON.stringify(event.payload), createdAt);
+        "INSERT INTO events (id, type, task_id, run_id, payload_json, origin_instance_id, origin_seq, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+      ).run(id, event.type, event.taskId ?? null, event.runId ?? null, JSON.stringify(event.payload), originInstanceId, originSeq, createdAt);
+      const seq = Number(result.lastInsertRowid);
+      if (originSeq === null) {
+        this.db.prepare("UPDATE events SET origin_seq = ? WHERE seq = ?").run(seq, seq);
+      }
       const envelope: EventEnvelope = {
-        seq: Number(result.lastInsertRowid), id, type: event.type,
-        taskId: event.taskId ?? null, runId: event.runId ?? null, payload: event.payload, createdAt
+        seq, id, type: event.type,
+        taskId: event.taskId ?? null, runId: event.runId ?? null, payload: event.payload,
+        originInstanceId, originSeq: originSeq ?? seq, createdAt
       };
       this.applyEvent(envelope);
       this.db.exec("COMMIT");
@@ -205,6 +370,73 @@ export class HearthStore {
 
   listTasks(): TaskRecord[] {
     return (this.db.prepare("SELECT * FROM tasks ORDER BY created_at DESC").all() as DbRow[]).map(rowToTask);
+  }
+
+  createConversation(title: string): ConversationRecord {
+    const now = new Date().toISOString();
+    const conversation: ConversationRecord = {
+      id: randomUUID(), title: title.trim() || "新对话", createdAt: now, updatedAt: now
+    };
+    this.db.prepare(
+      "INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)"
+    ).run(conversation.id, conversation.title, conversation.createdAt, conversation.updatedAt);
+    return conversation;
+  }
+
+  listConversations(): ConversationRecord[] {
+    return (this.db.prepare("SELECT * FROM conversations ORDER BY updated_at DESC").all() as DbRow[])
+      .map(rowToConversation);
+  }
+
+  getConversation(id: string): ConversationRecord | null {
+    const row = this.db.prepare("SELECT * FROM conversations WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToConversation(row) : null;
+  }
+
+  renameConversation(id: string, title: string): ConversationRecord | null {
+    const clean = title.trim().slice(0, 120);
+    if (!clean) return this.getConversation(id);
+    this.db.prepare("UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?")
+      .run(clean, new Date().toISOString(), id);
+    return this.getConversation(id);
+  }
+
+  deleteConversation(id: string): void {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare("DELETE FROM chat_messages WHERE conversation_id = ?").run(id);
+      this.db.prepare("DELETE FROM conversations WHERE id = ?").run(id);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  listChatMessages(conversationId: string): ChatMessageRecord[] {
+    return (this.db.prepare(
+      "SELECT * FROM chat_messages WHERE conversation_id = ? ORDER BY rowid ASC"
+    ).all(conversationId) as DbRow[]).map(rowToChatMessage);
+  }
+
+  createChatMessage(message: ChatMessageRecord): ChatMessageRecord {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare(
+        `INSERT INTO chat_messages (id, conversation_id, role, content, task_id, attachments_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        message.id, message.conversationId, message.role, message.content,
+        message.taskId, JSON.stringify(message.attachments), message.createdAt
+      );
+      this.db.prepare("UPDATE conversations SET updated_at = ? WHERE id = ?")
+        .run(message.createdAt, message.conversationId);
+      this.db.exec("COMMIT");
+      return message;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   getRun(id: string): RunRecord | null {
@@ -531,7 +763,7 @@ export class HearthStore {
   rebuildProjections(): void {
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      this.db.exec("DELETE FROM desktop_commands; DELETE FROM desktop_frames; DELETE FROM desktop_sessions; DELETE FROM pairing_requests; DELETE FROM devices; DELETE FROM outbox_drafts; DELETE FROM source_items; DELETE FROM sources; DELETE FROM artifacts; DELETE FROM effects; DELETE FROM approvals; DELETE FROM runs; DELETE FROM tasks;");
+      this.db.exec("DELETE FROM backup_records; DELETE FROM maintenance_runs; DELETE FROM task_leases; DELETE FROM sync_conflicts; DELETE FROM sync_peers; DELETE FROM method_trials; DELETE FROM method_evaluations; DELETE FROM method_candidates; DELETE FROM memory_recalls; DELETE FROM memory_conflicts; DELETE FROM memory_versions; DELETE FROM memories; DELETE FROM memory_settings; DELETE FROM suggestion_events; DELETE FROM suggestions; DELETE FROM proactive_settings; DELETE FROM desktop_commands; DELETE FROM desktop_frames; DELETE FROM desktop_sessions; DELETE FROM pairing_requests; DELETE FROM devices; DELETE FROM outbox_drafts; DELETE FROM source_items; DELETE FROM sources; DELETE FROM artifacts; DELETE FROM effects; DELETE FROM approvals; DELETE FROM runs; DELETE FROM tasks;");
       for (const event of this.listEvents()) this.applyEvent(event);
       this.db.exec("COMMIT");
     } catch (error) {
@@ -607,17 +839,19 @@ export class HearthStore {
 
 function upsertTask(db: DatabaseSync, task: TaskRecord): void {
   db.prepare(
-    `INSERT INTO tasks (id, template_id, title, goal, status, created_at, updated_at, deadline, inputs_json, network_hosts_json, output_dir, current_run_id, next_action, error_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO tasks (id, template_id, title, goal, status, created_at, updated_at, deadline, inputs_json, network_hosts_json, output_dir, current_run_id, next_action, error_json, result_summary, conversation_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        template_id=excluded.template_id, title=excluded.title, goal=excluded.goal, status=excluded.status,
        updated_at=excluded.updated_at, deadline=excluded.deadline, inputs_json=excluded.inputs_json,
        network_hosts_json=excluded.network_hosts_json, output_dir=excluded.output_dir,
-       current_run_id=excluded.current_run_id, next_action=excluded.next_action, error_json=excluded.error_json`
+       current_run_id=excluded.current_run_id, next_action=excluded.next_action, error_json=excluded.error_json,
+       result_summary=excluded.result_summary, conversation_id=excluded.conversation_id`
   ).run(
     task.id, task.templateId, task.title, task.goal, task.status, task.createdAt, task.updatedAt,
     task.deadline, JSON.stringify(task.inputs), JSON.stringify(task.networkHosts), task.outputDir,
-    task.currentRunId, task.nextAction, task.error ? JSON.stringify(task.error) : null
+    task.currentRunId, task.nextAction, task.error ? JSON.stringify(task.error) : null,
+    task.resultSummary ?? null, task.conversationId ?? null
   );
 }
 
@@ -625,7 +859,8 @@ function updateTask(db: DatabaseSync, taskId: string | null, patch: Record<strin
   if (!taskId) throw new Error("task.updated requires taskId");
   const columns: Record<string, string> = {
     title: "title", goal: "goal", status: "status", updatedAt: "updated_at",
-    deadline: "deadline", currentRunId: "current_run_id", nextAction: "next_action"
+    deadline: "deadline", currentRunId: "current_run_id", nextAction: "next_action",
+    resultSummary: "result_summary", conversationId: "conversation_id"
   };
   for (const [key, column] of Object.entries(columns)) {
     if (key in patch) db.prepare(`UPDATE tasks SET ${column} = ? WHERE id = ?`).run((patch[key] as SQLInputValue) ?? null, taskId);
@@ -638,12 +873,12 @@ function updateTask(db: DatabaseSync, taskId: string | null, patch: Record<strin
 
 function insertRun(db: DatabaseSync, run: RunRecord): void {
   db.prepare(
-    `INSERT INTO runs (id, task_id, attempt, status, thread_id, workspace, started_at, ended_at, failure_json, usage_json, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO runs (id, task_id, attempt, status, thread_id, workspace, started_at, ended_at, failure_json, usage_json, lease_epoch, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     run.id, run.taskId, run.attempt, run.status, run.threadId, run.workspace,
     run.startedAt, run.endedAt, run.failure ? JSON.stringify(run.failure) : null,
-    run.usage ? JSON.stringify(run.usage) : null, run.createdAt
+    run.usage ? JSON.stringify(run.usage) : null, run.leaseEpoch, run.createdAt
   );
 }
 
@@ -882,7 +1117,10 @@ function rowToEvent(row: DbRow): EventEnvelope {
     seq: Number(row.seq), id: String(row.id), type: String(row.type),
     taskId: row.task_id == null ? null : String(row.task_id),
     runId: row.run_id == null ? null : String(row.run_id),
-    payload: JSON.parse(String(row.payload_json)), createdAt: String(row.created_at)
+    payload: JSON.parse(String(row.payload_json)),
+    originInstanceId: row.origin_instance_id == null ? null : String(row.origin_instance_id),
+    originSeq: row.origin_seq == null ? null : Number(row.origin_seq),
+    createdAt: String(row.created_at)
   };
 }
 
@@ -896,7 +1134,25 @@ function rowToTask(row: DbRow): TaskRecord {
     networkHosts: JSON.parse(String(row.network_hosts_json)), outputDir: String(row.output_dir),
     currentRunId: row.current_run_id == null ? null : String(row.current_run_id),
     nextAction: row.next_action == null ? null : String(row.next_action),
-    error: row.error_json == null ? null : JSON.parse(String(row.error_json))
+    error: row.error_json == null ? null : JSON.parse(String(row.error_json)),
+    resultSummary: row.result_summary == null ? null : String(row.result_summary),
+    conversationId: row.conversation_id == null ? null : String(row.conversation_id)
+  };
+}
+
+function rowToConversation(row: DbRow): ConversationRecord {
+  return {
+    id: String(row.id), title: String(row.title),
+    createdAt: String(row.created_at), updatedAt: String(row.updated_at)
+  };
+}
+
+function rowToChatMessage(row: DbRow): ChatMessageRecord {
+  return {
+    id: String(row.id), conversationId: String(row.conversation_id),
+    role: String(row.role) as ChatMessageRecord["role"], content: String(row.content),
+    taskId: row.task_id == null ? null : String(row.task_id),
+    attachments: JSON.parse(String(row.attachments_json)), createdAt: String(row.created_at)
   };
 }
 
@@ -910,6 +1166,7 @@ function rowToRun(row: DbRow): RunRecord {
     endedAt: row.ended_at == null ? null : String(row.ended_at),
     failure: row.failure_json == null ? null : JSON.parse(String(row.failure_json)),
     usage: row.usage_json == null ? null : JSON.parse(String(row.usage_json)),
+    leaseEpoch: row.lease_epoch == null ? null : Number(row.lease_epoch),
     createdAt: String(row.created_at)
   };
 }
@@ -1079,4 +1336,11 @@ function zeroCounts<K extends string>(keys: readonly K[]): Record<K, number> {
 
 function bump<K extends string>(counts: Record<K, number>, key: string, by: number): void {
   if (Object.hasOwn(counts, key)) counts[key as K] += by;
+}
+
+
+function ensureColumn(db: DatabaseSync, table: string, column: string, type: string): void {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as DbRow[];
+  if (columns.some((row) => String(row.name) === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
 }

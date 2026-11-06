@@ -64,7 +64,7 @@ describe("HearthStore", () => {
     const usage = { inputTokens: 900, cachedInputTokens: 100, cacheWriteInputTokens: 0, outputTokens: 90, reasoningOutputTokens: 9 };
     const first: RunRecord = {
       id: "run-1", taskId: "task-1", attempt: 1, status: "failed", threadId: null, workspace: "w",
-      startedAt: "2026-11-05T00:00:00.000Z", endedAt: null, failure: null, usage: null, createdAt: "2026-11-05T00:00:00.000Z"
+      startedAt: "2026-11-05T00:00:00.000Z", endedAt: null, failure: null, usage: null, leaseEpoch: null, createdAt: "2026-11-05T00:00:00.000Z"
     };
     const second: RunRecord = {
       ...first, id: "run-2", attempt: 2, status: "completed", threadId: "thread-2",

@@ -197,6 +197,7 @@ export class HearthScheduler {
       endedAt: null,
       failure: null,
       usage: null,
+      leaseEpoch: null,
       createdAt: now
     };
     const controller = new AbortController();

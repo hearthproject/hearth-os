@@ -141,6 +141,7 @@ export class OutboxService {
       endedAt: now,
       failure: null,
       usage: null,
+      leaseEpoch: null,
       createdAt: now
     };
 

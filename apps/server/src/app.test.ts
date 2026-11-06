@@ -15,14 +15,14 @@ function seedAuditFixtures(store: HearthStore, taskId: string): void {
       id: "run-1", taskId, attempt: 1, status: "failed", threadId: null,
       workspace: ".hearth/workspaces/x", startedAt: "2026-11-05T01:00:00.000Z",
       endedAt: "2026-11-05T01:00:30.000Z", failure: { kind: "execution_failed", message: "boom", recoverable: true, guidance: "重试" },
-      usage: null, createdAt: "2026-11-05T01:00:00.000Z"
+      usage: null, leaseEpoch: null, createdAt: "2026-11-05T01:00:00.000Z"
     },
     {
       id: "run-2", taskId, attempt: 2, status: "completed", threadId: "thread-2",
       workspace: ".hearth/workspaces/x", startedAt: "2026-11-05T02:00:00.000Z",
       endedAt: "2026-11-05T02:01:40.000Z", failure: null,
       usage: { inputTokens: 1000, cachedInputTokens: 500, cacheWriteInputTokens: 0, outputTokens: 200, reasoningOutputTokens: 20 },
-      createdAt: "2026-11-05T02:00:00.000Z"
+      leaseEpoch: null, createdAt: "2026-11-05T02:00:00.000Z"
     }
   ];
   const approvals: ApprovalRecord[] = [{
