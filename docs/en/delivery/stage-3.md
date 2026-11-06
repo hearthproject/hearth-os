@@ -6,6 +6,8 @@ outline: [2, 3]
 
 # Phase 3 · Desktop Operation
 
+See [Phase 2 and 3 Delivery Status](/en/delivery/status) for implemented scope, verified paths, and deliberate gaps.
+
 ## Goal
 
 Phase 3 lets Hearth operate desktop software and cross-application workflows that have no open interface. The order is observe first, take over second, low-risk actions third, and high-risk actions last. If the system cannot observe, pause, or hand over, it must not act automatically.

@@ -6,6 +6,8 @@ outline: [2, 3]
 
 # Phase 2 · Everyday Content Work
 
+See [Phase 2 and 3 Delivery Status](/en/delivery/status) for implemented scope, verified paths, and deliberate gaps.
+
 ## Goal
 
 Phase 2 expands Hearth from the initial cross-industry task set to most everyday content work: reading email, calendars, files, and knowledge bases; handling documents, tables, and web material; drafting content; and sending or writing after approval. The order must be read-only first, drafting second, and external writes last.
