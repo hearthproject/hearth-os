@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { ArtifactRecord, RunRecord, TaskRecord } from "@hearth/core";
+import type { ArtifactRecord, OutboxDraft, RunRecord, TaskRecord } from "@hearth/core";
 import { HearthStore } from "./database.ts";
 
 const tempDirs: string[] = [];
@@ -91,6 +91,46 @@ describe("HearthStore", () => {
     });
     expect(store.countApprovalsByStatus()).toEqual({ pending: 0, approved: 0, rejected: 0, expired: 0 });
     expect(store.countEffectsByStatus().uncertain).toBe(0);
+    store.close();
+  });
+
+  it("projects local outbox drafts through the event log", () => {
+    const store = new HearthStore(":memory:");
+    const createdAt = "2026-11-06T01:00:00.000Z";
+    const draft: OutboxDraft = {
+      id: "draft-1",
+      account: "local-test",
+      to: ["reviewer@example.test"],
+      cc: [],
+      bcc: [],
+      subject: "Weekly update",
+      body: "Draft body",
+      attachments: [],
+      status: "draft",
+      taskId: null,
+      approvalId: null,
+      effectId: null,
+      createdAt,
+      updatedAt: createdAt,
+      submittedAt: null,
+      discardedAt: null
+    };
+    store.appendEvent({ type: "outbox.created", payload: draft });
+    store.appendEvent({
+      type: "outbox.updated",
+      payload: { id: draft.id, status: "pending_approval", approvalId: "approval-1", updatedAt: "2026-11-06T01:01:00.000Z" }
+    });
+
+    expect(store.getOutboxDraft(draft.id)).toMatchObject({
+      subject: "Weekly update",
+      to: ["reviewer@example.test"],
+      status: "pending_approval",
+      approvalId: "approval-1"
+    });
+
+    store.rebuildProjections();
+    expect(store.listOutboxDrafts()).toHaveLength(1);
+    expect(store.getOutboxDraft(draft.id)?.status).toBe("pending_approval");
     store.close();
   });
 });

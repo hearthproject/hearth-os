@@ -200,6 +200,45 @@ export interface TaskSourceRef {
   coverage: SourceCoverage;
 }
 
+export const OUTBOX_DRAFT_STATUSES = [
+  "draft",
+  "pending_approval",
+  "stored",
+  "rejected",
+  "failed",
+  "uncertain",
+  "discarded"
+] as const;
+
+export type OutboxDraftStatus = (typeof OUTBOX_DRAFT_STATUSES)[number];
+
+export interface OutboxAttachment {
+  artifactId: string;
+  name: string;
+  mimeType: string;
+  sha256: string;
+  bytes: number;
+}
+
+export interface OutboxDraft {
+  id: string;
+  account: string;
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  subject: string;
+  body: string;
+  attachments: OutboxAttachment[];
+  status: OutboxDraftStatus;
+  taskId: string | null;
+  approvalId: string | null;
+  effectId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  submittedAt: string | null;
+  discardedAt: string | null;
+}
+
 export interface EventEnvelope<T = unknown> {
   seq: number;
   id: string;
