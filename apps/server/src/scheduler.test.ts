@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { TaskRecord, TaskStatus } from "@hearth/core";
-import type { CodexRunner } from "./scheduler.ts";
+import type { CodexRunner, NativeRunner } from "./scheduler.ts";
 import { ApprovalManager } from "./approvals.ts";
 import { HearthStore } from "@hearth/eventlog";
 import { HearthScheduler } from "./scheduler.ts";
@@ -186,14 +186,61 @@ describe("Hearth scheduler", () => {
       active -= 1;
       return FAKE_RESULT;
     };
-    const first = service.createTask({ title: "任务一", goal: "写报告", textInput: "一" });
-    const second = service.createTask({ title: "任务二", goal: "写报告", textInput: "二" });
+    const first = service.createTask({ title: "任务一", goal: "写报告", textInput: "一", executorId: "codex" });
+    const second = service.createTask({ title: "任务二", goal: "写报告", textInput: "二", executorId: "codex" });
     scheduler = makeScheduler(service, runner);
     scheduler.start();
 
     await waitForStatus(service, first.id, "completed");
     await waitForStatus(service, second.id, "completed");
     expect(maxActive).toBe(1);
+  });
+
+  it("runs custom tasks through the native executor and records its metadata", async () => {
+    const service = setup();
+    const settingsPath = join(requireTemp(), "model-settings.json");
+    writeFileSync(settingsPath, JSON.stringify({
+      providerId: "custom",
+      providerName: "测试模型",
+      protocol: "openai-chat",
+      baseUrl: "https://example.invalid/v1",
+      model: "test-model",
+      apiKey: "sk-test"
+    }));
+    const nativeRunner: NativeRunner = async (options) => {
+      writeFileSync(join(options.prepared.outDir, "result.md"), "# 原生结果\n\n完成。\n");
+      await options.onCheckpoint?.({
+        seq: 1,
+        kind: "tool",
+        messages: [],
+        usage: { inputTokens: 10, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 5, reasoningOutputTokens: 0 },
+        turns: 1,
+        toolCalls: 1,
+        summary: null
+      });
+      return {
+        status: "completed",
+        finalResponse: "原生执行器完成了任务",
+        usage: { inputTokens: 10, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 5, reasoningOutputTokens: 0 },
+        turns: 1,
+        toolCalls: 1,
+        question: null,
+        outputs: ["result.md"]
+      };
+    };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath: settingsPath });
+    scheduler.start();
+
+    const task = service.createTask({ title: "写结果", goal: "生成一份结果" });
+    const completed = await waitForStatus(service, task.id, "completed");
+    expect(completed.executorId).toBe("native");
+    expect(completed.resultSummary).toBe("原生执行器完成了任务");
+    const run = store?.listRuns(task.id)[0];
+    expect(run?.executorId).toBe("native");
+    expect(run?.checkpointSeq).toBe(1);
+    expect(store?.listRunCheckpoints(run?.id ?? "")).toHaveLength(1);
+    const manifest = JSON.parse(readFileSync(join(requireTemp(), ".hearth", "artifacts", task.id, "run-manifest.json"), "utf8"));
+    expect(manifest.executor.id).toBe("native");
   });
 
   it("recovers a run interrupted by a service restart", async () => {
@@ -316,11 +363,15 @@ describe("Hearth scheduler", () => {
       approvals?: ApprovalManager;
       leases?: TaskLeaseService;
       leaseHeartbeatMs?: number;
+      nativeRunner?: NativeRunner;
+      modelSettingsPath?: string;
     } = {}
   ): HearthScheduler {
     return new HearthScheduler({
       service,
       codexRunner,
+      ...(extra.nativeRunner ? { nativeRunner: extra.nativeRunner } : {}),
+      ...(extra.modelSettingsPath ? { modelSettingsPath: extra.modelSettingsPath } : {}),
       workspaceRoot: join(requireTemp(), "workspaces"),
       githubCacheRoot: join(requireTemp(), "git-cache"),
       artifactBase: requireTemp(),

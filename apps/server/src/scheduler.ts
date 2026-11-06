@@ -1,21 +1,35 @@
-import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import type { RunRecord, TaskLease, TaskRecord } from "@hearth/core";
+import { createHash, randomUUID } from "node:crypto";
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { isAbsolute, join, relative } from "node:path";
+import type { AgentCheckpoint, AgentResumeState } from "@hearth/agent-runtime";
+import type { ExecutorId, RunBudget, RunCheckpointRecord, RunRecord, RunUsage, TaskLease, TaskRecord } from "@hearth/core";
 import { runCodex, type CodexRunOptions, type CodexRunResult } from "@hearth/codex-executor";
 import { getTemplate } from "@hearth/templates";
 import type { ApprovalRequest, ApprovalManager } from "./approvals.ts";
 import { missingExpectedOutputs, publishArtifacts } from "./artifacts.ts";
-import { GIT_CACHE_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WORKSPACE_DIR } from "./config.ts";
+import { GIT_CACHE_DIR, MODEL_SETTINGS_PATH, REPO_ROOT, SOURCE_CONTENT_DIR, WORKSPACE_DIR } from "./config.ts";
+import { resolveExecutorId } from "./executors.ts";
 import { extractProposedComment, inspectRepository, readPrPreview, validatePullRequestPreview } from "./github.ts";
 import type { CommandRunner } from "./github.ts";
 import { MemoryService } from "./memory.ts";
 import { DEFAULT_LEASE_HEARTBEAT_MS, LeaseError, TaskLeaseService } from "./leases.ts";
+import { DEFAULT_RUN_BUDGET, nativePermissionsFor, runNativeTask, type NativeRunOptions, type NativeRunResult } from "./native-executor.ts";
+import { chatModelConfigured, loadModelSettings } from "./model-settings.ts";
 import { prepareTaskRuntime, type RuntimePreparation } from "./runtime.ts";
 import type { HearthService } from "./service.ts";
 import { buildDeliveryRepairPrompt, buildTaskPrompt, prepareWorkspace, UnsupportedInputError } from "./workspace.ts";
 
 export type CodexRunner = (options: CodexRunOptions) => Promise<CodexRunResult>;
+export type NativeRunner = (options: NativeRunOptions) => Promise<NativeRunResult>;
+
+interface ExecutionOutcome {
+  status: "completed" | "waiting_input" | "failed" | "cancelled" | "budget_exceeded";
+  finalResponse: string;
+  usage: RunUsage | null;
+  threadId: string | null;
+  label: string;
+  question: string | null;
+}
 
 export interface SchedulerOptions {
   service: HearthService;
@@ -24,6 +38,9 @@ export interface SchedulerOptions {
   artifactBase?: string;
   attachmentRoot?: string;
   codexRunner?: CodexRunner;
+  nativeRunner?: NativeRunner;
+  modelSettingsPath?: string;
+  runBudget?: RunBudget;
   approvals?: ApprovalManager;
   leases?: TaskLeaseService;
   leaseHeartbeatMs?: number;
@@ -40,6 +57,9 @@ export class HearthScheduler {
   private readonly artifactBase: string;
   private readonly attachmentRoot: string | undefined;
   private readonly codexRunner: CodexRunner;
+  private readonly nativeRunner: NativeRunner;
+  private readonly modelSettingsPath: string;
+  private readonly runBudget: RunBudget;
   private readonly approvals: ApprovalManager | undefined;
   private readonly githubRun: CommandRunner | undefined;
   private readonly githubCacheRoot: string;
@@ -64,6 +84,9 @@ export class HearthScheduler {
     this.artifactBase = options.artifactBase ?? REPO_ROOT;
     this.attachmentRoot = options.attachmentRoot;
     this.codexRunner = options.codexRunner ?? runCodex;
+    this.nativeRunner = options.nativeRunner ?? runNativeTask;
+    this.modelSettingsPath = options.modelSettingsPath ?? MODEL_SETTINGS_PATH;
+    this.runBudget = options.runBudget ?? DEFAULT_RUN_BUDGET;
     this.approvals = options.approvals;
     this.githubRun = options.githubRun;
     this.githubCacheRoot = options.githubCacheRoot ?? GIT_CACHE_DIR;
@@ -131,7 +154,7 @@ export class HearthScheduler {
 
   retry(taskId: string): TaskRecord {
     const task = this.service.requireTask(taskId);
-    if (task.status !== "recoverable" && task.status !== "failed") {
+    if (task.status !== "recoverable" && task.status !== "failed" && task.status !== "waiting_input") {
       throw new Error(`当前状态不能重试：${task.status}`);
     }
     const updated = this.service.updateTask(taskId, {
@@ -231,6 +254,8 @@ export class HearthScheduler {
     const attempt = this.service.store.listRuns(taskId).length + 1;
     const runId = randomUUID();
     const workspace = join(this.workspaceRoot, runId);
+    const task = this.service.requireTask(taskId);
+    const executorId = resolveExecutorId(task);
     const run: RunRecord = {
       id: runId,
       taskId,
@@ -243,7 +268,10 @@ export class HearthScheduler {
       failure: null,
       usage: null,
       leaseEpoch,
-      createdAt: now
+      createdAt: now,
+      executorId,
+      checkpointSeq: 0,
+      budget: this.runBudget
     };
     const controller = new AbortController();
     let leaseLost = false;
@@ -266,7 +294,12 @@ export class HearthScheduler {
 
       const task = this.service.requireTask(taskId);
       const template = task.templateId ? getTemplate(task.templateId) : undefined;
-      const expectedOutputs = template?.expectedOutputs ?? ["result.md"];
+      const expectedOutputs = template?.expectedOutputs ?? task.expectedOutputs ?? ["result.md"];
+      const nativeSettings = executorId === "native" ? loadModelSettings(this.modelSettingsPath) : null;
+      if (executorId === "native" && (!nativeSettings || !chatModelConfigured(nativeSettings))) {
+        throw new Error("还没有配置聊天模型。请到“设置”里选择服务商并填入 API Key，然后重试。");
+      }
+      const resumeState = executorId === "native" ? this.restoreResumeState(taskId, workspace) : undefined;
       const prepared = await prepareWorkspace({
         repoRoot: this.repoRoot,
         workspaceDir: workspace,
@@ -296,35 +329,101 @@ export class HearthScheduler {
         memoryContext = "";
       }
       const prompt = buildTaskPrompt(task, prepared, expectedOutputs, template?.acceptance ?? [], runtime, template?.approvalKind, memoryContext);
-      let result = await this.codexRunner({
-        workingDirectory: prepared.root,
-        prompt,
-        signal: controller.signal,
-        onEvent: (event) => this.publishProgress(taskId, runId, event.type, event.message)
-      });
+      const execute = async (executionPrompt: string, resume?: AgentResumeState): Promise<ExecutionOutcome> => {
+        if (executorId === "native") {
+          if (!nativeSettings) throw new Error("原生执行器缺少模型设置");
+          const outcome = await this.nativeRunner({
+            task,
+            prepared,
+            settings: nativeSettings,
+            prompt: executionPrompt,
+            permissions: nativePermissionsFor(task, prepared),
+            budget: this.runBudget,
+            signal: controller.signal,
+            ...(resume ? { resume } : {}),
+            expectedOutputs,
+            onProgress: (event) => this.publishProgress(taskId, runId, event.kind, event.message),
+            onCheckpoint: (checkpoint) => this.persistNativeCheckpoint(taskId, runId, prepared.root, checkpoint)
+          });
+          return {
+            status: outcome.status,
+            finalResponse: outcome.finalResponse,
+            usage: outcome.usage,
+            threadId: null,
+            label: `native / ${nativeSettings.model}`,
+            question: outcome.question
+          };
+        }
+        const codexResult = await this.codexRunner({
+          workingDirectory: prepared.root,
+          prompt: executionPrompt,
+          signal: controller.signal,
+          onEvent: (event) => this.publishProgress(taskId, runId, event.type, event.message)
+        });
+        return {
+          status: "completed",
+          finalResponse: codexResult.finalResponse,
+          usage: codexResult.usage,
+          threadId: codexResult.threadId,
+          label: codexResult.profileLabel,
+          question: null
+        };
+      };
+
+      let result = await execute(prompt, resumeState);
       this.assertLease(taskId, leaseEpoch, leaseLost);
+      if (result.status === "waiting_input") {
+        this.service.updateRun(runId, taskId, {
+          status: "waiting_input",
+          endedAt: new Date().toISOString(),
+          usage: result.usage,
+          failure: null
+        });
+        this.service.updateTask(taskId, {
+          status: "waiting_input",
+          currentRunId: runId,
+          nextAction: "等待你补充信息",
+          error: null,
+          resultSummary: result.question ?? result.finalResponse
+        }, runId);
+        return;
+      }
+      this.assertCompleted(result);
 
       for (let repairAttempt = 1; repairAttempt <= 2; repairAttempt += 1) {
         const issues = await this.deliveryIssues(task, prepared, expectedOutputs);
         if (issues.length === 0) break;
         const missing = missingExpectedOutputs(prepared.outDir, expectedOutputs);
-        result = await this.codexRunner({
-          workingDirectory: prepared.root,
-          prompt: buildDeliveryRepairPrompt({
+        result = await execute(buildDeliveryRepairPrompt({
             task,
             prepared,
             expectedOutputs,
             missing,
             issues,
             attempt: repairAttempt
-          }),
-          signal: controller.signal,
-          onEvent: (event) => this.publishProgress(taskId, runId, event.type, event.message)
-        });
+          }));
         this.assertLease(taskId, leaseEpoch, leaseLost);
+        if (result.status === "waiting_input") {
+          this.service.updateRun(runId, taskId, {
+            status: "waiting_input",
+            endedAt: new Date().toISOString(),
+            usage: result.usage,
+            failure: null
+          });
+          this.service.updateTask(taskId, {
+            status: "waiting_input",
+            currentRunId: runId,
+            nextAction: "等待你补充信息",
+            error: null,
+            resultSummary: result.question ?? result.finalResponse
+          }, runId);
+          return;
+        }
+        this.assertCompleted(result);
       }
       const remainingIssues = await this.deliveryIssues(task, prepared, expectedOutputs);
       if (remainingIssues.length > 0) throw new Error(remainingIssues.join("\n"));
+      if (!result.finalResponse.trim()) throw new Error("执行器没有返回最终总结");
 
       this.assertLease(taskId, leaseEpoch, leaseLost);
 
@@ -335,11 +434,13 @@ export class HearthScheduler {
         artifactBase: this.artifactBase,
         expectedOutputs,
         inputs: prepared.inputs,
-        codex: {
+        executor: {
+          id: executorId,
           threadId: result.threadId,
-          profileLabel: result.profileLabel,
+          label: result.label,
           usage: result.usage
-        }
+        },
+        ...(executorId === "codex" ? { codex: { threadId: result.threadId, profileLabel: result.label, usage: result.usage } } : {})
       });
       for (const artifact of artifacts) this.service.publishArtifact(artifact);
 
@@ -349,6 +450,7 @@ export class HearthScheduler {
         threadId: result.threadId,
         endedAt,
         usage: result.usage,
+        executorId,
         failure: null
       });
 
@@ -386,6 +488,65 @@ export class HearthScheduler {
       this.cancelled.delete(taskId);
       if (this.service.store.getTask(taskId)?.status !== "waiting_approval") this.releaseLease(taskId);
     }
+  }
+
+  private assertCompleted(result: ExecutionOutcome): void {
+    if (result.status === "completed") return;
+    if (result.status === "waiting_input") return;
+    if (result.status === "cancelled") throw new Error("任务已取消");
+    if (result.status === "budget_exceeded") {
+      throw new Error(result.finalResponse.trim() || "达到执行预算，任务未完成。可以调整或重试。");
+    }
+    throw new Error(result.finalResponse.trim() || "执行器没有完成当前任务");
+  }
+
+  private restoreResumeState(taskId: string, workspace: string): AgentResumeState | undefined {
+    const runs = this.service.store.listRuns(taskId).filter((run) => run.status !== "running");
+    for (let index = runs.length - 1; index >= 0; index -= 1) {
+      const run = runs[index];
+      if (!run) continue;
+      const checkpoint = this.service.store.latestRunCheckpoint(run.id);
+      if (!checkpoint || checkpoint.kind === "final" || checkpoint.kind === "waiting_input") continue;
+      try {
+        if (run.workspace !== workspace && existsSync(run.workspace)) {
+          cpSync(run.workspace, workspace, { recursive: true, force: false });
+        }
+        const path = isAbsolute(checkpoint.path) ? checkpoint.path : join(this.workspaceRoot, checkpoint.path);
+        if (!existsSync(path)) continue;
+        const state = JSON.parse(readFileSync(path, "utf8")) as AgentCheckpoint;
+        if (!Array.isArray(state.messages) || !state.usage) continue;
+        return {
+          messages: state.messages,
+          usage: state.usage,
+          turns: state.turns,
+          toolCalls: state.toolCalls
+        };
+      } catch {
+        // A missing or unreadable checkpoint falls back to a fresh run.
+      }
+    }
+    return undefined;
+  }
+
+  private persistNativeCheckpoint(taskId: string, runId: string, workspace: string, checkpoint: AgentCheckpoint): void {
+    const directory = join(workspace, ".hearth", "checkpoints");
+    mkdirSync(directory, { recursive: true });
+    const absolutePath = join(directory, `${String(checkpoint.seq).padStart(4, "0")}-${checkpoint.kind}.json`);
+    const body = `${JSON.stringify(checkpoint, null, 2)}\n`;
+    writeFileSync(absolutePath, body, "utf8");
+    const record: RunCheckpointRecord = {
+      id: randomUUID(),
+      runId,
+      taskId,
+      seq: checkpoint.seq,
+      kind: checkpoint.kind,
+      path: relative(this.workspaceRoot, absolutePath).replace(/\\/g, "/"),
+      sha256: createHash("sha256").update(body).digest("hex"),
+      usage: checkpoint.usage,
+      createdAt: new Date().toISOString()
+    };
+    this.service.createRunCheckpoint(record);
+    this.service.updateRun(runId, taskId, { checkpointSeq: checkpoint.seq, usage: checkpoint.usage });
   }
 
   private startLeaseHeartbeat(taskId: string, epoch: number, onLost: () => void): void {
