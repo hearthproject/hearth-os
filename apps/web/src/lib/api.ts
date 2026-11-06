@@ -13,6 +13,7 @@ import type {
   HealthResponse,
   CreateMemoryRequest,
   CreateMethodRequest,
+  CreateSyncPeerRequest,
   CorrectMemoryRequest,
   MethodSnapshot,
   MemorySnapshot,
@@ -32,6 +33,10 @@ import type {
   SourceReadResult,
   EffectListItem,
   StatsSnapshot,
+  SyncConflict,
+  SyncPeerResult,
+  SyncPullResult,
+  SyncSnapshot,
   SystemStatus,
   TaskListItem,
   TaskRecord,
@@ -127,6 +132,18 @@ export const api = {
   rejectMethod: (id: string, reason?: string) => request<MethodSnapshot["methods"][number]>("/api/methods/" + encodeURIComponent(id) + "/reject", {
     method: "POST",
     body: JSON.stringify(reason === undefined ? {} : { reason })
+  }),
+  sync: () => request<SyncSnapshot>("/api/sync"),
+  createSyncPeer: (input: CreateSyncPeerRequest) => request<SyncPeerResult>("/api/sync/peers", {
+    method: "POST",
+    body: JSON.stringify(input)
+  }),
+  pullSyncPeer: (id: string) => request<SyncPullResult>("/api/sync/peers/" + encodeURIComponent(id) + "/pull", { method: "POST" }),
+  rotateSyncPeer: (id: string) => request<SyncPeerResult>("/api/sync/peers/" + encodeURIComponent(id) + "/rotate", { method: "POST" }),
+  revokeSyncPeer: (id: string) => request<SyncSnapshot["peers"][number]>("/api/sync/peers/" + encodeURIComponent(id) + "/revoke", { method: "POST" }),
+  resolveSyncConflict: (id: string, resolution: "local" | "remote") => request<SyncConflict>("/api/sync/conflicts/" + encodeURIComponent(id) + "/resolve", {
+    method: "POST",
+    body: JSON.stringify({ resolution })
   }),
   proactive: () => request<ProactiveSnapshot>("/api/proactive"),
   scanProactive: () => request<{ created: number; updated: number; delivered: number; suggestions: ProactiveSuggestion[] }>("/api/proactive/scan", { method: "POST" }),
@@ -260,6 +277,7 @@ export function subscribeToEvents(onEvent: () => void): () => void {
     "memory.settings.updated", "memory.created", "memory.updated", "memory.version.recorded",
     "memory.recalled", "memory.conflict.created", "memory.conflict.updated", "memory.forgotten",
     "method.candidate.created", "method.candidate.updated", "method.evaluation.recorded", "method.trial.recorded",
+    "sync.peer.created", "sync.peer.updated", "sync.conflict.created", "sync.conflict.updated",
     "outbox.created", "outbox.updated",
     "device.paired", "device.updated", "device.pairing-requested", "device.pairing-updated",
     "desktop.session.created", "desktop.session.updated", "desktop.frame.updated",

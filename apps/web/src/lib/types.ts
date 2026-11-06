@@ -53,6 +53,8 @@ import type {
   SourceKind,
   SourceStatus,
   StatsSnapshot,
+  SyncConflict,
+  SyncPeer,
   TaskListItem,
   TaskRecord,
   TaskStatus
@@ -114,6 +116,8 @@ export type {
   SourceKind,
   SourceStatus,
   StatsSnapshot,
+  SyncConflict,
+  SyncPeer,
   TaskListItem,
   TaskRecord,
   TaskStatus,
@@ -150,6 +154,34 @@ export interface HealthResponse {
     authSource: "provider-env" | "openai-login" | "missing" | "unknown";
     issues: string[];
   };
+}
+
+export type SyncPeerView = Omit<SyncPeer, "tokenHash">;
+
+export interface SyncSnapshot {
+  instanceId: string;
+  latestSeq: number;
+  peers: SyncPeerView[];
+  conflicts: SyncConflict[];
+}
+
+export interface CreateSyncPeerRequest {
+  name: string;
+  baseUrl: string;
+  token?: string;
+  lastPullSeq?: number;
+}
+
+export interface SyncPeerResult {
+  peer: SyncPeerView;
+  token: string;
+}
+
+export interface SyncPullResult {
+  imported: number;
+  skipped: number;
+  conflicts: number;
+  peer: SyncPeerView;
 }
 
 export type PreviewableArtifact = Pick<ArtifactRecord, "id" | "taskId" | "relativePath" | "mimeType" | "bytes">;
