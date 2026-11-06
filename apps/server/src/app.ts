@@ -21,6 +21,8 @@ import { DesktopError, DesktopService } from "./desktop.ts";
 import { MemoryError, MemoryService } from "./memory.ts";
 import { MethodError, MethodService } from "./methods.ts";
 import { ProactiveError, ProactiveService } from "./proactive.ts";
+import { SyncError, SyncService } from "./sync.ts";
+import type { SecretBox } from "./secrets.ts";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 
@@ -118,6 +120,20 @@ const evaluateMethodSchema = z.object({
 const methodTrialSchema = z.object({ taskId: z.string().trim().min(1).max(100) }).strict();
 const methodRollbackSchema = z.object({ reason: z.string().trim().min(1).max(1000) }).strict();
 const methodRejectSchema = z.object({ reason: z.string().trim().max(1000).optional() }).strict();
+
+const createSyncPeerSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  baseUrl: z.string().trim().url().max(2000),
+  token: z.string().trim().min(32).max(256).optional(),
+  lastPullSeq: z.number().int().min(0).optional()
+}).strict();
+
+const syncExportSchema = z.object({
+  after: z.coerce.number().int().min(0).default(0),
+  limit: z.coerce.number().int().min(1).max(500).default(200)
+});
+
+const syncConflictResolveSchema = z.object({ resolution: z.enum(["local", "remote"]) }).strict();
 
 const proactiveSettingsSchema = z.object({
   enabled: z.boolean().optional(),
@@ -263,6 +279,8 @@ export interface BuildServerOptions {
   sourceContentRoot?: string;
   outboxRoot?: string;
   deviceFrameRoot?: string;
+  syncFetch?: typeof fetch;
+  syncSecretBox?: SecretBox;
 }
 
 export async function buildServer(options: BuildServerOptions = {}) {
@@ -279,6 +297,10 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const proactive = new ProactiveService(service);
   const memory = new MemoryService(service);
   const methods = new MethodService(service);
+  const sync = new SyncService(service, {
+    ...(options.syncFetch ? { fetchImpl: options.syncFetch } : {}),
+    ...(options.syncSecretBox ? { secretBox: options.syncSecretBox } : {})
+  });
   const approvals = new ApprovalManager(service, effectExecutor);
   approvals.recoverInterruptedEffects();
   const outbox = new OutboxService(service, approvals);
@@ -301,7 +323,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
 
   app.addHook("onRequest", async (request, reply) => {
-    if (!LOOPBACK_HOSTS.has(request.hostname)) {
+    const inboundSync = request.url.startsWith("/api/sync/events");
+    if (!LOOPBACK_HOSTS.has(request.hostname) && !inboundSync) {
       return reply.code(403).send({ error: "LOCAL_ONLY", message: "Hearth 仅接受本机访问" });
     }
     if (request.headers["sec-fetch-site"] === "cross-site") {
@@ -592,6 +615,67 @@ export async function buildServer(options: BuildServerOptions = {}) {
       return methods.reject(request.params.id, parsed.data.reason);
     } catch (error) {
       return sendMethodError(reply, error);
+    }
+  });
+
+  app.get("/api/sync", async (_request, reply) => {
+    reply.header("cache-control", "no-store");
+    return sync.snapshot();
+  });
+
+  app.post("/api/sync/peers", async (request, reply) => {
+    const parsed = createSyncPeerSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SYNC_PEER", message: "同步对端参数不正确" });
+    try {
+      return reply.code(201).send(sync.createPeer(definedObject(parsed.data) as unknown as Parameters<SyncService["createPeer"]>[0]));
+    } catch (error) {
+      return sendSyncError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/sync/peers/:id/pull", async (request, reply) => {
+    try {
+      return await sync.pull(request.params.id);
+    } catch (error) {
+      return sendSyncError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/sync/peers/:id/rotate", async (request, reply) => {
+    try {
+      return sync.rotatePeerToken(request.params.id);
+    } catch (error) {
+      return sendSyncError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/sync/peers/:id/revoke", async (request, reply) => {
+    try {
+      return sync.revokePeer(request.params.id);
+    } catch (error) {
+      return sendSyncError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/sync/conflicts/:id/resolve", async (request, reply) => {
+    const parsed = syncConflictResolveSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SYNC_CONFLICT", message: "同步冲突处理参数不正确" });
+    try {
+      return sync.resolveConflict(request.params.id, parsed.data.resolution);
+    } catch (error) {
+      return sendSyncError(reply, error);
+    }
+  });
+
+  app.get<{ Querystring: Record<string, string> }>("/api/sync/events", async (request, reply) => {
+    const parsed = syncExportSchema.safeParse(request.query);
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SYNC_CURSOR", message: "同步 cursor 参数不正确" });
+    try {
+      sync.authenticateInbound(syncBearerToken(request.headers.authorization));
+      reply.header("cache-control", "no-store");
+      return sync.exportEvents(parsed.data.after, parsed.data.limit);
+    } catch (error) {
+      return sendSyncError(reply, error);
     }
   });
 
@@ -1236,6 +1320,19 @@ function sendMethodError(reply: FastifyReply, error: unknown) {
     return reply.code(error.statusCode).send({ error: error.code, message: error.message });
   }
   throw error;
+}
+
+function sendSyncError(reply: FastifyReply, error: unknown) {
+  if (error instanceof SyncError) {
+    return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+  }
+  throw error;
+}
+
+function syncBearerToken(value: string | string[] | undefined): string {
+  const header = headerValue(value);
+  if (!header.startsWith("Bearer ")) throw new SyncError("SYNC_UNAUTHORIZED", "缺少同步令牌", 401);
+  return header.slice(7).trim();
 }
 
 function sendProactiveError(reply: FastifyReply, error: unknown) {

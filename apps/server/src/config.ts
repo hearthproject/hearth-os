@@ -13,6 +13,7 @@ export const SOURCE_CONTENT_DIR = join(DATA_DIR, "sources");
 export const OUTBOX_DIR = join(DATA_DIR, "outbox");
 export const DEVICE_FRAME_DIR = join(DATA_DIR, "device-frames");
 export const WEB_DIST = join(REPO_ROOT, "apps", "web", "dist");
+export const MASTER_KEY_PATH = join(DATA_DIR, "master.key");
 
 export function resolveRepoPath(path: string): string {
   const absolute = resolve(REPO_ROOT, path);

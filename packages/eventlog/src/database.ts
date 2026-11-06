@@ -34,12 +34,16 @@ import type {
   RunUsage,
   SourceConnection,
   SourceItem,
+  SyncConflict,
+  SyncPeer,
+  TaskLease,
   TaskRecord,
   TaskStatus
 } from "@hearth/core";
 import { APPROVAL_STATUSES, EFFECT_STATUSES, RUN_STATUSES, TASK_STATUSES } from "@hearth/core";
 
 export type NewEvent = {
+  id?: string;
   type: string;
   taskId?: string | null;
   runId?: string | null;
@@ -238,7 +242,8 @@ CREATE TABLE IF NOT EXISTS method_trials (
 CREATE TABLE IF NOT EXISTS sync_peers (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL, status TEXT NOT NULL,
   token_hash TEXT NOT NULL UNIQUE, last_pull_seq INTEGER NOT NULL, last_pull_at TEXT,
-  last_error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+  last_error TEXT, token_cipher TEXT, remote_instance_id TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS sync_conflicts (
   id TEXT PRIMARY KEY, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL,
@@ -310,8 +315,10 @@ export class HearthStore {
     ensureColumn(this.db, "runs", "lease_epoch", "INTEGER");
     ensureColumn(this.db, "tasks", "result_summary", "TEXT");
     ensureColumn(this.db, "tasks", "conversation_id", "TEXT");
-    this.db.exec("PRAGMA user_version = 2");
-    this.setMeta("schemaVersion", "2");
+    ensureColumn(this.db, "sync_peers", "token_cipher", "TEXT");
+    ensureColumn(this.db, "sync_peers", "remote_instance_id", "TEXT");
+    this.db.exec("PRAGMA user_version = 3");
+    this.setMeta("schemaVersion", "3");
   }
 
   private ensureInstanceId(): string {
@@ -348,7 +355,7 @@ export class HearthStore {
 
   appendEvent(event: NewEvent, origin?: { instanceId: string; seq: number | null }): EventEnvelope {
     const createdAt = event.createdAt ?? new Date().toISOString();
-    const id = randomUUID();
+    const id = event.id ?? randomUUID();
     const originInstanceId = origin?.instanceId ?? this.instanceId;
     const originSeq = origin?.seq ?? null;
     this.db.exec("BEGIN IMMEDIATE");
@@ -380,6 +387,51 @@ export class HearthStore {
       : this.db.prepare("SELECT * FROM events WHERE seq > ? ORDER BY seq ASC");
     const rows = (taskId ? statement.all(afterSeq, taskId) : statement.all(afterSeq)) as DbRow[];
     return rows.map(rowToEvent);
+  }
+
+  getEventById(id: string): EventEnvelope | null {
+    const row = this.db.prepare("SELECT * FROM events WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToEvent(row) : null;
+  }
+
+  getSyncPeer(id: string): SyncPeer | null {
+    const row = this.db.prepare("SELECT * FROM sync_peers WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToSyncPeer(row) : null;
+  }
+
+  getSyncPeerByTokenHash(tokenHash: string): SyncPeer | null {
+    const row = this.db.prepare("SELECT * FROM sync_peers WHERE token_hash = ?").get(tokenHash) as DbRow | undefined;
+    return row ? rowToSyncPeer(row) : null;
+  }
+
+  getSyncPeerTokenCipher(id: string): string | null {
+    const row = this.db.prepare("SELECT token_cipher FROM sync_peers WHERE id = ?").get(id) as DbRow | undefined;
+    return row?.token_cipher == null ? null : String(row.token_cipher);
+  }
+
+  listSyncPeers(): SyncPeer[] {
+    return (this.db.prepare("SELECT * FROM sync_peers ORDER BY created_at DESC").all() as DbRow[]).map(rowToSyncPeer);
+  }
+
+  getSyncConflict(id: string): SyncConflict | null {
+    const row = this.db.prepare("SELECT * FROM sync_conflicts WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToSyncConflict(row) : null;
+  }
+
+  listSyncConflicts(status?: string): SyncConflict[] {
+    const rows = status
+      ? this.db.prepare("SELECT * FROM sync_conflicts WHERE status = ? ORDER BY created_at DESC").all(status) as DbRow[]
+      : this.db.prepare("SELECT * FROM sync_conflicts ORDER BY created_at DESC").all() as DbRow[];
+    return rows.map(rowToSyncConflict);
+  }
+
+  getTaskLease(taskId: string): TaskLease | null {
+    const row = this.db.prepare("SELECT * FROM task_leases WHERE task_id = ?").get(taskId) as DbRow | undefined;
+    return row ? rowToTaskLease(row) : null;
+  }
+
+  listTaskLeases(): TaskLease[] {
+    return (this.db.prepare("SELECT * FROM task_leases ORDER BY expires_at ASC").all() as DbRow[]).map(rowToTaskLease);
   }
 
   getTask(id: string): TaskRecord | null {
@@ -1030,6 +1082,11 @@ export class HearthStore {
       case "method.candidate.updated": return upsertMethodCandidate(this.db, event.payload as MethodCandidate);
       case "method.evaluation.recorded": return insertMethodEvaluationRow(this.db, event.payload as MethodEvaluation);
       case "method.trial.recorded": return insertMethodTrialRow(this.db, event.payload as MethodTrial);
+      case "sync.peer.created":
+      case "sync.peer.updated": return upsertSyncPeer(this.db, event.payload as SyncPeer & { tokenCipher?: string | null });
+      case "sync.conflict.created":
+      case "sync.conflict.updated": return upsertSyncConflict(this.db, event.payload as SyncConflict);
+      case "task.lease.updated": return upsertTaskLease(this.db, event.payload as TaskLease);
       case "outbox.created": return upsertOutboxDraft(this.db, event.payload as OutboxDraft);
       case "outbox.updated": return updateOutboxDraft(this.db, event.payload as Record<string, unknown>);
       case "device.paired":
@@ -1909,4 +1966,74 @@ function insertMethodTrialRow(db: DatabaseSync, trial: MethodTrial): void {
   db.prepare(
     "INSERT INTO method_trials (id, method_id, method_version, task_id, created_at) VALUES (?, ?, ?, ?, ?)"
   ).run(trial.id, trial.methodId, trial.methodVersion, trial.taskId, trial.createdAt);
+}
+
+function rowToSyncPeer(row: DbRow): SyncPeer {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    baseUrl: String(row.base_url),
+    status: String(row.status) as SyncPeer["status"],
+    tokenHash: String(row.token_hash),
+    lastPullSeq: Number(row.last_pull_seq),
+    lastPullAt: row.last_pull_at == null ? null : String(row.last_pull_at),
+    lastError: row.last_error == null ? null : String(row.last_error),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
+  };
+}
+
+function upsertSyncPeer(db: DatabaseSync, peer: SyncPeer & { tokenCipher?: string | null; remoteInstanceId?: string | null }): void {
+  db.prepare(
+    "INSERT INTO sync_peers (id, name, base_url, status, token_hash, last_pull_seq, last_pull_at, last_error, token_cipher, remote_instance_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, base_url=excluded.base_url, status=excluded.status, token_hash=excluded.token_hash, last_pull_seq=excluded.last_pull_seq, last_pull_at=excluded.last_pull_at, last_error=excluded.last_error, token_cipher=COALESCE(excluded.token_cipher, sync_peers.token_cipher), remote_instance_id=COALESCE(excluded.remote_instance_id, sync_peers.remote_instance_id), updated_at=excluded.updated_at"
+  ).run(
+    peer.id, peer.name, peer.baseUrl, peer.status, peer.tokenHash, peer.lastPullSeq, peer.lastPullAt, peer.lastError,
+    peer.tokenCipher ?? null, peer.remoteInstanceId ?? null, peer.createdAt, peer.updatedAt
+  );
+}
+
+function rowToSyncConflict(row: DbRow): SyncConflict {
+  return {
+    id: String(row.id),
+    entityType: String(row.entity_type),
+    entityId: String(row.entity_id),
+    localUpdatedAt: row.local_updated_at == null ? null : String(row.local_updated_at),
+    remoteUpdatedAt: row.remote_updated_at == null ? null : String(row.remote_updated_at),
+    localPayload: JSON.parse(String(row.local_payload_json)),
+    remotePayload: JSON.parse(String(row.remote_payload_json)),
+    status: String(row.status) as SyncConflict["status"],
+    createdAt: String(row.created_at),
+    resolvedAt: row.resolved_at == null ? null : String(row.resolved_at)
+  };
+}
+
+function upsertSyncConflict(db: DatabaseSync, conflict: SyncConflict): void {
+  db.prepare(
+    "INSERT INTO sync_conflicts (id, entity_type, entity_id, local_updated_at, remote_updated_at, local_payload_json, remote_payload_json, status, created_at, resolved_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET status=excluded.status, resolved_at=excluded.resolved_at"
+  ).run(
+    conflict.id, conflict.entityType, conflict.entityId, conflict.localUpdatedAt, conflict.remoteUpdatedAt,
+    JSON.stringify(conflict.localPayload), JSON.stringify(conflict.remotePayload), conflict.status, conflict.createdAt, conflict.resolvedAt
+  );
+}
+
+function rowToTaskLease(row: DbRow): TaskLease {
+  return {
+    taskId: String(row.task_id),
+    ownerInstanceId: String(row.owner_instance_id),
+    ownerDeviceId: row.owner_device_id == null ? null : String(row.owner_device_id),
+    epoch: Number(row.epoch),
+    expiresAt: String(row.expires_at),
+    heartbeatAt: String(row.heartbeat_at),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
+  };
+}
+
+function upsertTaskLease(db: DatabaseSync, lease: TaskLease): void {
+  db.prepare(
+    "INSERT INTO task_leases (task_id, owner_instance_id, owner_device_id, epoch, expires_at, heartbeat_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(task_id) DO UPDATE SET owner_instance_id=excluded.owner_instance_id, owner_device_id=excluded.owner_device_id, epoch=excluded.epoch, expires_at=excluded.expires_at, heartbeat_at=excluded.heartbeat_at, updated_at=excluded.updated_at"
+  ).run(
+    lease.taskId, lease.ownerInstanceId, lease.ownerDeviceId, lease.epoch, lease.expiresAt,
+    lease.heartbeatAt, lease.createdAt, lease.updatedAt
+  );
 }
