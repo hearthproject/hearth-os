@@ -51,6 +51,10 @@ const createTaskSchema = z.object({
   }).optional()
 }).strict();
 
+const retryTaskSchema = z.object({
+  message: z.string().trim().max(20_000).optional()
+}).strict();
+
 const memorySourceSchema = z.object({
   type: z.enum(["user", "task", "source", "method", "system"]),
   id: z.string().trim().max(100).nullable(),
@@ -1369,10 +1373,12 @@ export async function buildServer(options: BuildServerOptions = {}) {
     return view;
   });
 
-  app.post<{ Params: { id: string } }>("/api/tasks/:id/retry", async (request, reply) => {
+  app.post<{ Params: { id: string }; Body: { message?: string } | undefined }>("/api/tasks/:id/retry", async (request, reply) => {
     if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFF", message: "执行器未启动" });
+    const parsed = retryTaskSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_INPUT", message: "补充说明格式不正确" });
     try {
-      return scheduler.retry(request.params.id);
+      return scheduler.retry(request.params.id, parsed.data.message);
     } catch (error) {
       return reply.code(409).send({ error: "RETRY_NOT_ALLOWED", message: error instanceof Error ? error.message : String(error) });
     }

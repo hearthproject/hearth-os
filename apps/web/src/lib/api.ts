@@ -338,7 +338,10 @@ export const api = {
     method: "POST",
     body: JSON.stringify(input)
   }),
-  retry: (id: string) => request<TaskRecord>(`/api/tasks/${encodeURIComponent(id)}/retry`, { method: "POST" }),
+  retry: (id: string, message?: string) => request<TaskRecord>(`/api/tasks/${encodeURIComponent(id)}/retry`, {
+    method: "POST",
+    ...(message ? { body: JSON.stringify({ message }) } : {})
+  }),
   cancel: (id: string) => request<TaskRecord>(`/api/tasks/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
   decideApproval: (id: string, decision: "approve" | "reject", parameterHash: string) =>
     request<ApprovalDecisionResult>(`/api/approvals/${encodeURIComponent(id)}/decide`, {
