@@ -4,6 +4,11 @@ import type {
   ApprovalListItem,
   ApprovalRecord,
   ArtifactRecord,
+  DesktopCommandRecord,
+  DesktopFrameRecord,
+  DesktopSessionRecord,
+  DevicePairingRequest,
+  DeviceRecord,
   EffectListItem,
   EffectRecord,
   EventWindow,
@@ -400,6 +405,60 @@ export class HearthService {
     const draft = this.store.getOutboxDraft(draftId);
     if (!draft) throw new Error(`Outbox draft not found: ${draftId}`);
     return draft;
+  }
+
+  createPairingRequest(request: DevicePairingRequest): DevicePairingRequest {
+    const event = this.store.appendEvent({ type: "device.pairing-requested", payload: request });
+    this.bus.publish(event);
+    return request;
+  }
+
+  updatePairingRequest(request: DevicePairingRequest): DevicePairingRequest {
+    const event = this.store.appendEvent({ type: "device.pairing-updated", payload: request });
+    this.bus.publish(event);
+    return request;
+  }
+
+  createDevice(device: DeviceRecord): DeviceRecord {
+    const event = this.store.appendEvent({ type: "device.paired", payload: device });
+    this.bus.publish(event);
+    return device;
+  }
+
+  updateDevice(device: DeviceRecord): DeviceRecord {
+    const event = this.store.appendEvent({ type: "device.updated", payload: device });
+    this.bus.publish(event);
+    return device;
+  }
+
+  createDesktopSession(session: DesktopSessionRecord): DesktopSessionRecord {
+    const event = this.store.appendEvent({ type: "desktop.session.created", payload: session });
+    this.bus.publish(event);
+    return session;
+  }
+
+  updateDesktopSession(session: DesktopSessionRecord): DesktopSessionRecord {
+    const event = this.store.appendEvent({ type: "desktop.session.updated", payload: session });
+    this.bus.publish(event);
+    return session;
+  }
+
+  updateDesktopFrame(frame: DesktopFrameRecord): DesktopFrameRecord {
+    const event = this.store.appendEvent({ type: "desktop.frame.updated", payload: frame });
+    this.bus.publish(event);
+    return frame;
+  }
+
+  createDesktopCommand(command: DesktopCommandRecord): DesktopCommandRecord {
+    const event = this.store.appendEvent({ type: "desktop.command.created", payload: command });
+    this.bus.publish(event);
+    return command;
+  }
+
+  updateDesktopCommand(command: DesktopCommandRecord): DesktopCommandRecord {
+    const event = this.store.appendEvent({ type: "desktop.command.updated", payload: command });
+    this.bus.publish(event);
+    return command;
   }
 
   requireTask(taskId: string): TaskRecord {
