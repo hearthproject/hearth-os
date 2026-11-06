@@ -48,6 +48,7 @@ function EventBridge() {
         void queryClient.invalidateQueries({ queryKey: ["sources"] });
         void queryClient.invalidateQueries({ queryKey: ["sourceItems"] });
         void queryClient.invalidateQueries({ queryKey: ["outbox"] });
+        void queryClient.invalidateQueries({ queryKey: ["approvals"] });
         if (taskId) {
           void queryClient.invalidateQueries({ queryKey: ["task", taskId] });
           void queryClient.invalidateQueries({ queryKey: ["taskEvents", taskId] });

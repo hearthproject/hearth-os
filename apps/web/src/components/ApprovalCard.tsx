@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, ExternalLink, Loader2, X } from "lucide-react";
 import { api } from "../lib/api.ts";
-import { abbreviateHash, formatDate, formatTime } from "../lib/format.ts";
+import { abbreviateHash, formatBytes, formatDate, formatTime } from "../lib/format.ts";
 import { APPROVAL_STATUS_LABELS, approvalKindLabel } from "../lib/labels.ts";
 import type { ApprovalRecord, EffectRecord } from "../lib/types.ts";
 import { EffectStatusTag } from "./StatusPill.tsx";
@@ -22,6 +22,14 @@ export function ApprovalCard({ approval, effect }: { approval: ApprovalRecord; e
   const base = text(preview.base) ?? text(target.base);
   const commit = text(preview.commit) ?? text(target.expectedCommit) ?? text(target.headSha);
   const pull = typeof target.pull === "number" ? target.pull : typeof preview.pull === "number" ? preview.pull : null;
+  const isOutbox = approval.kind === "outbox.local-write";
+  const account = text(target.account) ?? text(preview.account);
+  const recipients = stringArray(target.to ?? preview.to);
+  const cc = stringArray(target.cc ?? preview.cc);
+  const bcc = stringArray(target.bcc ?? preview.bcc);
+  const attachments = attachmentList(target.attachments ?? preview.attachments);
+  const impact = text(preview.impact);
+  const undo = text(preview.undo);
   const isPending = approval.status === "pending";
   const pro = mode === "pro";
 
@@ -32,6 +40,8 @@ export function ApprovalCard({ approval, effect }: { approval: ApprovalRecord; e
       setConfirming(false);
       void queryClient.invalidateQueries({ queryKey: ["task", approval.taskId] });
       void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      void queryClient.invalidateQueries({ queryKey: ["approvals"] });
+      void queryClient.invalidateQueries({ queryKey: ["outbox"] });
     },
     onError: (mutationError) => setError(mutationError instanceof Error ? mutationError.message : "确认失败")
   });
@@ -44,20 +54,44 @@ export function ApprovalCard({ approval, effect }: { approval: ApprovalRecord; e
       </div>
 
       <p className="approval-summary">{approval.summary}</p>
-      {isPending && <p className="approval-scope">外部副作用。确认后执行一次。</p>}
+      {isPending && (
+        <p className="approval-scope">
+          {isOutbox
+            ? "本地写入。确认后只把邮件包写入本机发件箱，不会发送给收件人。"
+            : "外部副作用。确认后执行一次。"}
+        </p>
+      )}
 
-      <dl className="kv-grid">
-        <div><dt>对谁</dt><dd className="mono select-all">{repo ?? "未提供"}</dd></div>
-        <div>
-          <dt>做什么</dt>
-          <dd>{approvalKindLabel(approval.kind)}{pull !== null ? ` #${pull}` : ""}{branch && base ? ` ${branch} → ${base}` : ""}</dd>
-        </div>
-        <div>
-          <dt>做到什么程度</dt>
-          <dd className="mono select-all">{commit ? `固定到 ${abbreviateHash(commit, 12, 6)}` : "未指定提交"}</dd>
-        </div>
-        <div><dt>确认截止到</dt><dd className="mono">{formatTime(approval.expiresAt)}</dd></div>
-      </dl>
+      {isOutbox ? (
+        <dl className="kv-grid">
+          <div><dt>发往</dt><dd className="mono select-all">{recipients.length > 0 ? recipients.join(", ") : "未提供"}</dd></div>
+          <div><dt>账户</dt><dd className="mono select-all">{account ?? "未提供"}</dd></div>
+          <div>
+            <dt>抄送 / 密送</dt>
+            <dd className="mono select-all">{[...cc, ...bcc].length > 0 ? [...cc, ...bcc].join(", ") : "无"}</dd>
+          </div>
+          <div>
+            <dt>附件</dt>
+            <dd>{attachments.length === 0 ? "无" : attachments.map((attachment) => `${attachment.name}（${formatBytes(attachment.bytes)}）`).join("、")}</dd>
+          </div>
+          <div><dt>影响</dt><dd>{impact ?? "只写入本机，不发送。"}</dd></div>
+          <div><dt>可撤销</dt><dd>{undo ?? "删除本地发件箱文件即可撤销。"}</dd></div>
+          <div><dt>确认截止到</dt><dd className="mono">{formatTime(approval.expiresAt)}</dd></div>
+        </dl>
+      ) : (
+        <dl className="kv-grid">
+          <div><dt>对谁</dt><dd className="mono select-all">{repo ?? "未提供"}</dd></div>
+          <div>
+            <dt>做什么</dt>
+            <dd>{approvalKindLabel(approval.kind)}{pull !== null ? ` #${pull}` : ""}{branch && base ? ` ${branch} → ${base}` : ""}</dd>
+          </div>
+          <div>
+            <dt>做到什么程度</dt>
+            <dd className="mono select-all">{commit ? `固定到 ${abbreviateHash(commit, 12, 6)}` : "未指定提交"}</dd>
+          </div>
+          <div><dt>确认截止到</dt><dd className="mono">{formatTime(approval.expiresAt)}</dd></div>
+        </dl>
+      )}
 
       {(title || body) && (
         <div className="approval-preview">
@@ -71,26 +105,35 @@ export function ApprovalCard({ approval, effect }: { approval: ApprovalRecord; e
       {isPending ? (
         confirming ? (
           <div className="approval-confirm">
-            <span><AlertTriangle size={15} /> 立即执行，不能撤销。</span>
+            <span>
+              <AlertTriangle size={15} /> {isOutbox ? "只写入本机发件箱，不会发送；可删除文件撤销。" : "立即执行，不能撤销。"}
+            </span>
             <div>
               <button className="ghost-button" onClick={() => setConfirming(false)} disabled={decide.isPending}>返回检查</button>
               <button className="primary-button" onClick={() => decide.mutate("approve")} disabled={decide.isPending}>
-                {decide.isPending ? <><Loader2 className="spin" size={15} /> 正在执行</> : <><CheckCircle2 size={15} /> 确认执行</>}
+                {decide.isPending
+                  ? <><Loader2 className="spin" size={15} /> 正在执行</>
+                  : <><CheckCircle2 size={15} /> {isOutbox ? "确认写入本地" : "确认执行"}</>}
               </button>
             </div>
           </div>
         ) : (
           <footer className="approval-actions">
             <button className="ghost-button" onClick={() => decide.mutate("reject")} disabled={decide.isPending}>拒绝</button>
-            <button className="primary-button" onClick={() => setConfirming(true)} disabled={decide.isPending}>检查并确认执行</button>
+            <button className="primary-button" onClick={() => setConfirming(true)} disabled={decide.isPending}>
+              {isOutbox ? "检查并确认写入" : "检查并确认执行"}
+            </button>
           </footer>
         )
       ) : (
         <div className={`approval-result ${approval.status}`}>
-          <span>{approvalResultLabel(approval.status, effect)}</span>
+          <span>{approvalResultLabel(approval.status, effect, isOutbox)}</span>
           {effect && <EffectStatusTag status={effect.status} />}
           {typeof effect?.receipt?.url === "string" && (
             <a href={effect.receipt.url} target="_blank" rel="noreferrer">打开结果 <ExternalLink size={13} /></a>
+          )}
+          {typeof effect?.receipt?.messagePath === "string" && (
+            <code className="select-all">{effect.receipt.messagePath}</code>
           )}
         </div>
       )}
@@ -126,10 +169,25 @@ function text(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
 }
 
-function approvalResultLabel(status: ApprovalRecord["status"], effect?: EffectRecord): string {
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function attachmentList(value: unknown): { name: string; bytes: number }[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const record = item as Record<string, unknown>;
+    return typeof record.name === "string" && typeof record.bytes === "number"
+      ? [{ name: record.name, bytes: record.bytes }]
+      : [];
+  });
+}
+
+function approvalResultLabel(status: ApprovalRecord["status"], effect?: EffectRecord, isOutbox = false): string {
   if (status === "rejected") return "你拒绝了这次外部动作，没有产生外部影响。";
   if (status === "expired") return "确认已过期，没有执行外部动作。";
-  if (effect?.status === "succeeded") return "外部动作已经完成，回执已记录。";
+  if (effect?.status === "succeeded") return isOutbox ? "已写入本机发件箱，没有发送邮件。" : "外部动作已经完成，回执已记录。";
   if (effect?.status === "uncertain") return "结果不确定：可能已部分生效。先到目标核对，再决定是否重试。";
   if (effect?.status === "failed") return `执行失败：${effect.error ?? "未知原因"}`;
   return "审批已记录。";
