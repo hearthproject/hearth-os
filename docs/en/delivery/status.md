@@ -16,6 +16,17 @@ Checked on 2026-11-06. This page records only what the current code and real run
 - **Phase 5: partially complete.** Memory candidates, recall, correction, conflicts, forget propagation, and export, plus method generation, trial evidence, evaluation, promotion, rejection, and rollback, form a code loop. Real long-term memory use, production before/after method comparisons, and full 5.4 acceptance are still missing.
 - **Phase 6: partially complete.** Incremental event sync, peer authentication, conflict handling, task leases with epoch fencing, device revocation and token rotation, the kill switch, encrypted database backup and restore, health checks, maintenance, and redacted diagnostics form a code loop. Real two-device switching, a lost-device drill, complete migration, weeks of continuous operation, and v1.0 release acceptance are still missing.
 
+## Agent runtime loop
+
+- **Implemented:** `native` and `codex` executors are peers; executor identity is recorded in runs and artifact manifests. General tasks default to native, explicit code/engineering tasks use Codex, and failures do not silently switch executors.
+- **Implemented:** Four model protocols (OpenAI Chat, OpenAI Responses, Anthropic Messages, Gemini) with normalized streaming text and tool calls; providers can be selected or customized in settings.
+- **Implemented:** A `@hearth/agent-runtime` single-agent tool loop covering read, search, write, edit, patch, shell, web fetch, ask-user, and finish tools, with task-scoped roots, hosts, and tool allowlists.
+- **Implemented:** Turn, tool-call, token, and duration budgets; checkpoints after model turns and tool steps; recovery with user follow-up; and up to two repair rounds with prior agent context when declared deliverables are missing.
+- **Implemented:** Tasks requiring network access or engineering workspace writes create a chat proposal and enter the queue only after confirmation. Ordinary general tasks dispatch directly.
+- **UI contract:** The task list shows executor, phase, tokens, duration, and result. Details show the final summary and declared artifacts first; intermediate JSON, command logs, and checkpoints remain folded technical details.
+
+This is a code-and-test loop, not evidence of long-running acceptance with real users.
+
 ## Phase 2 capabilities
 
 | Step | Status | Implemented | Deliberately unfinished |
@@ -82,7 +93,7 @@ The backup boundary must remain visible in the UI: a recoverable database is not
 
 ## Verification evidence
 
-On 2026-11-06, `npm test` on the current branch passed all 32 test files and 151 tests; `npm run typecheck` and `npm run build --workspace @hearth/web` also pass. These checks cover service and API code loops but do not replace real-user, real-device, or long-running acceptance.
+On 2026-11-06, `npm test` on the current branch passed all 40 test files and 198 tests; `npm run typecheck` and `npm run build` also pass. These checks cover service, API, model-protocol, native tool-loop, budget, permission, checkpoint, and proposal-confirmation code loops but do not replace real-user, real-device, or long-running acceptance.
 
 ## Remaining real acceptance
 
