@@ -20,6 +20,14 @@ import type {
   EffectStatus,
   EventEnvelope,
   EventWindow,
+  MemoryConflict,
+  MemoryConfidence,
+  MemoryKind,
+  MemoryRecall,
+  MemoryRecord,
+  MemorySensitivity,
+  MemorySettings,
+  MemoryVersion,
   OutboxAttachment,
   OutboxDraft,
   OutboxDraftStatus,
@@ -66,6 +74,14 @@ export type {
   EffectStatus,
   EventEnvelope,
   EventWindow,
+  MemoryConflict,
+  MemoryConfidence,
+  MemoryKind,
+  MemoryRecall,
+  MemoryRecord,
+  MemorySensitivity,
+  MemorySettings,
+  MemoryVersion,
   OutboxAttachment,
   OutboxDraft,
   OutboxDraftStatus,
@@ -211,3 +227,35 @@ export type DesktopActionRequest =
   | { kind: "focus"; frameId: string; app: string; windowTitle?: string }
   | { kind: "uia.invoke"; frameId: string; elementName: string; controlType?: string }
   | { kind: "uia.setvalue"; frameId: string; elementName: string; value: string; controlType?: string };
+
+export interface MemorySnapshot {
+  settings: MemorySettings;
+  memories: MemoryRecord[];
+  conflicts: MemoryConflict[];
+  recalls: MemoryRecall[];
+}
+
+export interface CreateMemoryRequest {
+  kind: MemoryKind;
+  content: string;
+  subjectKey: string;
+  scope?: string;
+  tags?: string[];
+  source: MemoryRecord["source"];
+  confidence?: MemoryConfidence;
+  sensitivity?: MemorySensitivity;
+  allowRecall?: boolean;
+  validUntil?: string | null;
+  derivedFromId?: string | null;
+}
+
+export interface CorrectMemoryRequest {
+  content?: string;
+  scope?: string;
+  tags?: string[];
+  confidence?: MemoryConfidence;
+  sensitivity?: MemorySensitivity;
+  allowRecall?: boolean;
+  validUntil?: string | null;
+  reason: string;
+}

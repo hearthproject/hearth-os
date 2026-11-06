@@ -11,6 +11,9 @@ import type {
   DeviceView,
   EventWindow,
   HealthResponse,
+  CreateMemoryRequest,
+  CorrectMemoryRequest,
+  MemorySnapshot,
   OutboxDraft,
   OutboxDraftListItem,
   OutboxDraftRequest,
@@ -66,6 +69,37 @@ export const api = {
   system: () => request<SystemStatus>("/api/system"),
   stopSystem: () => request<SystemStatus>("/api/system/stop", { method: "POST" }),
   startSystem: () => request<SystemStatus>("/api/system/start", { method: "POST" }),
+  memory: () => request<MemorySnapshot>("/api/memory"),
+  createMemory: (input: CreateMemoryRequest) => request<MemorySnapshot["memories"][number]>("/api/memory", {
+    method: "POST",
+    body: JSON.stringify(input)
+  }),
+  updateMemorySettings: (input: Partial<MemorySnapshot["settings"]>) => request<MemorySnapshot["settings"]>("/api/memory/settings", {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  }),
+  confirmMemory: (id: string) => request<MemorySnapshot["memories"][number]>("/api/memory/" + encodeURIComponent(id) + "/confirm", { method: "POST" }),
+  correctMemory: (id: string, input: CorrectMemoryRequest) => request<MemorySnapshot["memories"][number]>("/api/memory/" + encodeURIComponent(id), {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  }),
+  forgetMemory: (id: string) => request<MemorySnapshot["memories"][number]>("/api/memory/" + encodeURIComponent(id) + "/forget", { method: "POST" }),
+  markMemorySensitive: (id: string, sensitivity: MemorySnapshot["memories"][number]["sensitivity"], allowRecall?: boolean) =>
+    request<MemorySnapshot["memories"][number]>("/api/memory/" + encodeURIComponent(id) + "/sensitive", {
+      method: "POST",
+      body: JSON.stringify({ sensitivity, ...(allowRecall === undefined ? {} : { allowRecall }) })
+    }),
+  resolveMemoryConflict: (id: string, input: { resolution: "keep_left" | "keep_right" | "merged"; note?: string; content?: string }) =>
+    request<MemorySnapshot["conflicts"][number]>("/api/memory/conflicts/" + encodeURIComponent(id) + "/resolve", {
+      method: "POST",
+      body: JSON.stringify(input)
+    }),
+  recallMemory: (input: { taskId: string; runId?: string; text?: string; maxItems?: number; maxChars?: number }) =>
+    request<{ memories: MemorySnapshot["memories"]; recalls: MemorySnapshot["recalls"]; contextPack: string; usedChars: number; budget: { maxItems: number; maxChars: number } }>("/api/memory/recall", {
+      method: "POST",
+      body: JSON.stringify(input)
+    }),
+  exportMemories: () => { window.location.assign("/api/memory/export"); },
   proactive: () => request<ProactiveSnapshot>("/api/proactive"),
   scanProactive: () => request<{ created: number; updated: number; delivered: number; suggestions: ProactiveSuggestion[] }>("/api/proactive/scan", { method: "POST" }),
   updateProactiveSettings: (input: Partial<Omit<ProactiveSettings, "triggers" | "updatedAt">> & {
@@ -195,6 +229,8 @@ export function subscribeToEvents(onEvent: () => void): () => void {
     "approval.created", "approval.updated", "artifact.published", "effect.created", "effect.updated",
     "source.created", "source.updated", "source.item.updated", "source.cleared",
     "proactive.settings.updated", "suggestion.created", "suggestion.updated", "suggestion.event",
+    "memory.settings.updated", "memory.created", "memory.updated", "memory.version.recorded",
+    "memory.recalled", "memory.conflict.created", "memory.conflict.updated",
     "outbox.created", "outbox.updated",
     "device.paired", "device.updated", "device.pairing-requested", "device.pairing-updated",
     "desktop.session.created", "desktop.session.updated", "desktop.frame.updated",

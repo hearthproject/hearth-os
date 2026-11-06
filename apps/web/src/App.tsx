@@ -7,6 +7,7 @@ import { ArtifactsPage } from "./pages/ArtifactsPage.tsx";
 import { AttentionPage } from "./pages/AttentionPage.tsx";
 import { DevicesPage } from "./pages/DevicesPage.tsx";
 import { InboxPage } from "./pages/InboxPage.tsx";
+import { MemoryPage } from "./pages/MemoryPage.tsx";
 import { SettingsPage } from "./pages/SettingsPage.tsx";
 import { SourcesPage } from "./pages/SourcesPage.tsx";
 import { OutboxPage } from "./pages/OutboxPage.tsx";
@@ -22,6 +23,7 @@ export default function App() {
           <Route index element={<TodayPage />} />
           <Route path="inbox" element={<InboxPage />} />
           <Route path="attention" element={<AttentionPage />} />
+          <Route path="memory" element={<MemoryPage />} />
           <Route path="artifacts" element={<ArtifactsPage />} />
           <Route path="outbox" element={<OutboxPage />} />
           <Route path="sources" element={<SourcesPage />} />
@@ -54,6 +56,7 @@ function EventBridge() {
         void queryClient.invalidateQueries({ queryKey: ["outbox"] });
         void queryClient.invalidateQueries({ queryKey: ["approvals"] });
         void queryClient.invalidateQueries({ queryKey: ["proactive"] });
+        void queryClient.invalidateQueries({ queryKey: ["memory"] });
         void queryClient.invalidateQueries({ queryKey: ["desktop"] });
         if (taskId) {
           void queryClient.invalidateQueries({ queryKey: ["task", taskId] });
