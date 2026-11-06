@@ -315,11 +315,11 @@ async function processCommand(client, command) {
     return;
   }
 
+  const expectedApp = typeof command.payload?.expectedApp === "string" ? command.payload.expectedApp : null;
   try {
     const state = await client.request("/api/device/state");
     assertActionStillAllowed(state, command);
     console.log(`执行 ${command.kind}：${command.sessionId}`);
-    const expectedApp = typeof command.payload?.expectedApp === "string" ? command.payload.expectedApp : null;
     const result = runWindowsHelper("action", {
       ...command.payload,
       kind: command.kind,
