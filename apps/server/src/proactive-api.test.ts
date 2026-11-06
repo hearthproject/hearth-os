@@ -50,11 +50,18 @@ describe("proactive API", () => {
 
     const accepted = await app.inject({
       method: "POST",
-      url: "/api/suggestions/" + suggestion.id + "/accept",
-      payload: { title: "跟进发布" }
+      url: "/api/suggestions/" + suggestion.id + "/accept"
     });
     expect(accepted.statusCode).toBe(200);
-    expect(accepted.json().taskId).toBeTypeOf("string");
+    expect(accepted.json().status).toBe("accepted");
+
+    const converted = await app.inject({
+      method: "POST",
+      url: "/api/suggestions/" + suggestion.id + "/convert",
+      payload: { title: "跟进发布" }
+    });
+    expect(converted.statusCode).toBe(200);
+    expect(converted.json().taskId).toBeTypeOf("string");
 
     const paused = await app.inject({ method: "POST", url: "/api/proactive/pause", payload: { minutes: 30 } });
     expect(paused.statusCode).toBe(200);

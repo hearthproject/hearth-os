@@ -153,10 +153,16 @@ describe("ProactiveService", () => {
     const suggestion = proactive.scan().suggestions.find((item) => item.triggerKind === "effect.uncertain");
     expect(suggestion?.requiresApproval).toBe(true);
 
-    const accepted = proactive.accept(suggestion!.id, { title: "核对评论结果" });
-    const task = store.getTask(accepted.taskId);
+    const accepted = proactive.accept(suggestion!.id);
+    expect(accepted.status).toBe("accepted");
+    expect(accepted.taskId).toBeNull();
+    expect(store.listAllEffects()).toHaveLength(1);
+    expect(store.getEffect(effect.id)?.status).toBe("uncertain");
+
+    const converted = proactive.convert(suggestion!.id, { title: "核对评论结果" });
+    const task = store.getTask(converted.taskId);
     expect(task?.status).toBe("queued");
-    expect(accepted.suggestion.status).toBe("accepted");
+    expect(converted.suggestion.status).toBe("converted");
     expect(store.listAllEffects()).toHaveLength(1);
     expect(store.getEffect(effect.id)?.status).toBe("uncertain");
   });

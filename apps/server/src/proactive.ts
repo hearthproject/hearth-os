@@ -228,12 +228,21 @@ export class ProactiveService {
     return { created, updated, delivered, suggestions: touched };
   }
 
-  accept(id: string, input: SuggestionActionInput = {}): { suggestion: ProactiveSuggestion; taskId: string } {
-    return this.resolveToTask(id, input, "accepted");
+  accept(id: string): ProactiveSuggestion {
+    const suggestion = this.requireSuggestion(id);
+    const next: ProactiveSuggestion = {
+      ...suggestion,
+      status: "accepted",
+      snoozeUntil: null,
+      updatedAt: this.nowIso()
+    };
+    this.emitSuggestion("suggestion.updated", next);
+    this.emitSuggestionEvent(id, "accepted", {});
+    return next;
   }
 
   convert(id: string, input: SuggestionActionInput = {}): { suggestion: ProactiveSuggestion; taskId: string } {
-    return this.resolveToTask(id, input, "converted");
+    return this.resolveToTask(id, input);
   }
 
   ignore(id: string): ProactiveSuggestion {
@@ -268,8 +277,7 @@ export class ProactiveService {
 
   private resolveToTask(
     id: string,
-    input: SuggestionActionInput,
-    status: "accepted" | "converted"
+    input: SuggestionActionInput
   ): { suggestion: ProactiveSuggestion; taskId: string } {
     const suggestion = this.requireSuggestion(id);
     if (suggestion.taskId) {
@@ -284,13 +292,13 @@ export class ProactiveService {
     });
     const next: ProactiveSuggestion = {
       ...suggestion,
-      status,
+      status: "converted",
       taskId: task.id,
       snoozeUntil: null,
       updatedAt: this.nowIso()
     };
     this.emitSuggestion("suggestion.updated", next);
-    this.emitSuggestionEvent(id, status, { taskId: task.id });
+    this.emitSuggestionEvent(id, "converted", { taskId: task.id });
     return { suggestion: next, taskId: task.id };
   }
 

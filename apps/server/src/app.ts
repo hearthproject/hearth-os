@@ -308,7 +308,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
         if (parsed.data.title !== undefined) input.title = parsed.data.title;
         if (parsed.data.goal !== undefined) input.goal = parsed.data.goal;
         if (parsed.data.textInput !== undefined) input.textInput = parsed.data.textInput;
-        return action === "accept" ? proactive.accept(request.params.id, input) : proactive.convert(request.params.id, input);
+        return action === "accept" ? proactive.accept(request.params.id) : proactive.convert(request.params.id, input);
       } catch (error) {
         return sendProactiveError(reply, error);
       }
