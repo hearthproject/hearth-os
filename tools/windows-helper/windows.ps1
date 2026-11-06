@@ -125,7 +125,88 @@ function Get-InputObject {
   return $json | ConvertFrom-Json
 }
 
-function Get-ForegroundInfo {
+function Normalize-AppName([string]$value) {
+  $normalized = $value.Trim().ToLowerInvariant()
+  if ($normalized.EndsWith(".exe")) { $normalized = $normalized.Substring(0, $normalized.Length - 4) }
+  return $normalized
+}
+
+function Test-AppNameMatch([string]$actual, [string]$expected) {
+  $actual = Normalize-AppName $actual
+  $expected = Normalize-AppName $expected
+  if ([string]::IsNullOrWhiteSpace($actual) -or [string]::IsNullOrWhiteSpace($expected)) { return $false }
+  if ($actual -eq $expected) { return $true }
+  if ($actual.EndsWith("app") -and $actual.Substring(0, $actual.Length - 3) -eq $expected) { return $true }
+  return $false
+}
+
+function Get-HostedAppNames([IntPtr]$handle) {
+  if (-not $supportsUia) { Fail "UIA_UNAVAILABLE" "UI Automation is unavailable: $uiaError" }
+  $root = [Windows.Automation.AutomationElement]::FromHandle($handle)
+  if ($null -eq $root) { Fail "UIA_WINDOW_UNAVAILABLE" "Could not read UI elements in the UWP host window" }
+  $hostProcessId = [int]$root.Current.ProcessId
+  try {
+    $elements = $root.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition)
+  } catch {
+    Fail "UIA_WINDOW_UNAVAILABLE" "Could not enumerate the UWP app window: $($_.Exception.Message)"
+  }
+  $processCache = @{}
+  $appNames = @()
+  $limit = [Math]::Min($elements.Count, 600)
+  for ($index = 0; $index -lt $limit; $index++) {
+    $childProcessId = [int]$elements.Item($index).Current.ProcessId
+    if ($childProcessId -le 0 -or $childProcessId -eq $hostProcessId) { continue }
+    if ($processCache.ContainsKey($childProcessId)) {
+      $appName = $processCache[$childProcessId]
+    } else {
+      try { $appName = Normalize-AppName (Get-Process -Id $childProcessId -ErrorAction Stop).ProcessName } catch { $appName = "" }
+      $processCache[$childProcessId] = $appName
+    }
+    if (-not [string]::IsNullOrWhiteSpace($appName) -and -not ($appNames -contains $appName)) {
+      $appNames += $appName
+    }
+  }
+  return @($appNames)
+}
+
+function Get-AppWindowCandidates([string]$targetApp, [string]$windowTitle) {
+  $targetApp = Normalize-AppName $targetApp
+  if ($targetApp -eq "applicationframehost") {
+    Fail "APP_NOT_ALLOWED" "The ApplicationFrameHost process cannot be approved as a desktop target"
+  }
+  $candidates = @()
+  foreach ($process in @(Get-Process | Where-Object {
+    $_.MainWindowHandle -ne [IntPtr]::Zero -and (Test-AppNameMatch $_.ProcessName $targetApp)
+  })) {
+    if (-not [string]::IsNullOrWhiteSpace($windowTitle) -and $process.MainWindowTitle -notlike "*$windowTitle*") { continue }
+    $candidates += [pscustomobject]@{
+      handle = [IntPtr]$process.MainWindowHandle
+      title = $process.MainWindowTitle
+      app = Normalize-AppName $process.ProcessName
+    }
+  }
+  foreach ($hostProcess in @(Get-Process | Where-Object {
+    $_.ProcessName.ToLowerInvariant() -eq "applicationframehost" -and $_.MainWindowHandle -ne [IntPtr]::Zero
+  })) {
+    if (-not [string]::IsNullOrWhiteSpace($windowTitle) -and $hostProcess.MainWindowTitle -notlike "*$windowTitle*") { continue }
+    try {
+      $hostedApps = @(Get-HostedAppNames ([IntPtr]$hostProcess.MainWindowHandle))
+    } catch {
+      continue
+    }
+    $matchedApp = $hostedApps | Where-Object { Test-AppNameMatch $_ $targetApp } | Select-Object -First 1
+    if ($null -ne $matchedApp) {
+      $candidates += [pscustomobject]@{
+        handle = [IntPtr]$hostProcess.MainWindowHandle
+        title = $hostProcess.MainWindowTitle
+        app = Normalize-AppName $matchedApp
+      }
+    }
+  }
+  return @($candidates)
+}
+
+function Get-ForegroundInfo([string]$expectedApp = "") {
   $handle = [HearthNative]::GetForegroundWindow()
   if ($handle -eq [IntPtr]::Zero) { Fail "NO_FOREGROUND_WINDOW" "No foreground window was found" }
   $rect = New-Object HearthNative+RECT
@@ -138,10 +219,25 @@ function Get-ForegroundInfo {
   $width = $rect.Right - $rect.Left
   $height = $rect.Bottom - $rect.Top
   if ($width -le 0 -or $height -le 0) { Fail "WINDOW_NOT_VISIBLE" "The foreground window is not visible" }
+  $physicalApp = Normalize-AppName $process.ProcessName
+  $app = $physicalApp
+  if ($physicalApp -eq "applicationframehost") {
+    $hostedApps = @(Get-HostedAppNames $handle)
+    if ($hostedApps.Count -eq 0) { Fail "UWP_APP_NOT_FOUND" "The foreground UWP host does not expose an app process" }
+    $app = if (-not [string]::IsNullOrWhiteSpace($expectedApp)) {
+      $hostedApps | Where-Object { Test-AppNameMatch $_ $expectedApp } | Select-Object -First 1
+    } else {
+      $hostedApps | Select-Object -First 1
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$app)) {
+      Fail "UWP_APP_NOT_FOUND" "The foreground UWP window does not belong to the approved app"
+    }
+  }
   return [pscustomobject]@{
     handle = $handle.ToInt64()
     processId = [int]$processId
-    app = $process.ProcessName.ToLowerInvariant()
+    app = $app
+    physicalApp = $physicalApp
     windowTitle = $titleBuffer.ToString()
     left = $rect.Left
     top = $rect.Top
@@ -151,7 +247,7 @@ function Get-ForegroundInfo {
 }
 
 function Assert-ExpectedApp($foreground, [string]$expectedApp) {
-  if (-not [string]::IsNullOrWhiteSpace($expectedApp) -and $foreground.app -ne $expectedApp.ToLowerInvariant()) {
+  if (-not [string]::IsNullOrWhiteSpace($expectedApp) -and -not (Test-AppNameMatch $foreground.app $expectedApp)) {
     Fail "FOREGROUND_MISMATCH" "Foreground app is $($foreground.app), not the approved $expectedApp"
   }
 }
@@ -181,18 +277,13 @@ function Wait-UserIdle([int]$timeoutMilliseconds = 3000) {
 }
 
 function Focus-AppWindow([string]$targetApp, [string]$windowTitle) {
-  $targetApp = $targetApp.ToLowerInvariant()
-  $candidates = Get-Process | Where-Object {
-    $_.ProcessName.ToLowerInvariant() -eq $targetApp -and $_.MainWindowHandle -ne [IntPtr]::Zero
-  }
-  if (-not [string]::IsNullOrWhiteSpace($windowTitle)) {
-    $candidates = $candidates | Where-Object { $_.MainWindowTitle -like "*$windowTitle*" }
-  }
+  $targetApp = Normalize-AppName $targetApp
+  $candidates = @(Get-AppWindowCandidates $targetApp $windowTitle)
   $target = $candidates | Select-Object -First 1
   if ($null -eq $target) { Fail "APP_WINDOW_NOT_FOUND" "No visible window was found for $targetApp" }
 
   Wait-UserIdle
-  $handle = [IntPtr]$target.MainWindowHandle
+  $handle = [IntPtr]$target.handle
   [HearthNative]::ShowWindow($handle, 9) | Out-Null
   $foregroundHandle = [HearthNative]::GetForegroundWindow()
   if ($foregroundHandle -ne $handle) {
@@ -210,14 +301,15 @@ function Focus-AppWindow([string]$targetApp, [string]$windowTitle) {
     }
   }
   Start-Sleep -Milliseconds 180
-  $foreground = Get-ForegroundInfo
-  if ($foreground.app -ne $targetApp) { Fail "FOCUS_DENIED" "Windows kept focus on $($foreground.app) instead of $targetApp" }
+  $foreground = Get-ForegroundInfo $targetApp
+  if (-not (Test-AppNameMatch $foreground.app $targetApp)) { Fail "FOCUS_DENIED" "Windows kept focus on $($foreground.app) instead of $targetApp" }
+  $foreground.app = $targetApp
   return $foreground
 }
 
 function Capture-Foreground([string]$expectedApp) {
   if (-not $supportsCapture) { Fail "CAPTURE_UNAVAILABLE" "Screen capture is unavailable: $captureError" }
-  $foreground = Get-ForegroundInfo
+  $foreground = Get-ForegroundInfo $expectedApp
   Assert-ExpectedApp $foreground $expectedApp
   $bitmap = New-Object Drawing.Bitmap $foreground.width, $foreground.height
   $graphics = [Drawing.Graphics]::FromImage($bitmap)
@@ -259,7 +351,7 @@ function Capture-Foreground([string]$expectedApp) {
     jpegBase64 = $base64
     width = $outputWidth
     height = $outputHeight
-    activeApp = $foreground.app
+    activeApp = if ([string]::IsNullOrWhiteSpace($expectedApp)) { $foreground.app } else { Normalize-AppName $expectedApp }
     windowTitle = $foreground.windowTitle
   }
 }
@@ -360,7 +452,7 @@ try {
   } else {
     Assert-UserIdle
   }
-  $foreground = Get-ForegroundInfo
+  $foreground = Get-ForegroundInfo $expectedApp
   Assert-ExpectedApp $foreground $expectedApp
 
   if ($kind -eq "click") {
@@ -380,7 +472,7 @@ try {
     $text = [string]$input.text
     foreach ($character in $text.ToCharArray()) {
       Assert-UserIdle
-      $currentForeground = Get-ForegroundInfo
+      $currentForeground = Get-ForegroundInfo ([string]$input.expectedApp)
       Assert-ExpectedApp $currentForeground ([string]$input.expectedApp)
       [HearthNative]::SendUnicodeChar($character, $false)
       [HearthNative]::SendUnicodeChar($character, $true)
