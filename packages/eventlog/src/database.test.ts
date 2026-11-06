@@ -2,7 +2,17 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { ArtifactRecord, OutboxDraft, RunRecord, TaskRecord } from "@hearth/core";
+import type {
+  ArtifactRecord,
+  DesktopCommandRecord,
+  DesktopFrameRecord,
+  DesktopSessionRecord,
+  DevicePairingRequest,
+  DeviceRecord,
+  OutboxDraft,
+  RunRecord,
+  TaskRecord
+} from "@hearth/core";
 import { HearthStore } from "./database.ts";
 
 const tempDirs: string[] = [];
@@ -131,6 +141,60 @@ describe("HearthStore", () => {
     store.rebuildProjections();
     expect(store.listOutboxDrafts()).toHaveLength(1);
     expect(store.getOutboxDraft(draft.id)?.status).toBe("pending_approval");
+    store.close();
+  });
+
+  it("projects device pairing, capability, frame, and command state", () => {
+    const store = new HearthStore(":memory:");
+    const at = "2026-11-06T02:00:00.000Z";
+    const pairing: DevicePairingRequest = {
+      id: "pair-1", code: "123456", secretHash: "a".repeat(64), deviceTokenHash: "b".repeat(64),
+      name: "Test Desktop", platform: "windows", version: "1.0.0",
+      requestedApps: ["notepad"], requestedCapabilities: ["observe", "desktop.control"],
+      status: "approved", deviceId: "device-1", expiresAt: "2026-11-06T02:10:00.000Z",
+      createdAt: at, updatedAt: at
+    };
+    const device: DeviceRecord = {
+      id: "device-1", pairingRequestId: pairing.id, name: pairing.name, platform: "windows",
+      version: pairing.version, status: "offline", tokenHash: pairing.deviceTokenHash,
+      capabilities: [{
+        kind: "observe", status: "approved", apps: ["notepad"], requestedAt: at,
+        approvedAt: at, revokedAt: null
+      }],
+      lastSeenAt: null, createdAt: at, updatedAt: at
+    };
+    const session: DesktopSessionRecord = {
+      id: "session-1", deviceId: device.id, status: "active", controlEpoch: 1,
+      currentFrameId: "frame-1", lastError: null, createdAt: at, updatedAt: at, terminatedAt: null
+    };
+    const frame: DesktopFrameRecord = {
+      id: "frame-1", deviceId: device.id, sessionId: session.id, mimeType: "image/jpeg",
+      width: 800, height: 600, sha256: "c".repeat(64), bytes: 1000,
+      storagePath: ".hearth/device-frames/device-1/frame-1.jpg", activeApp: "notepad",
+      windowTitle: "Untitled - Notepad", capturedAt: at, expiresAt: "2026-11-06T02:02:00.000Z"
+    };
+    const command: DesktopCommandRecord = {
+      id: "command-1", deviceId: device.id, sessionId: session.id, kind: "observe",
+      status: "queued", frameId: null, controlEpoch: 1, payload: {}, result: null, error: null,
+      createdAt: at, updatedAt: at, completedAt: null
+    };
+
+    store.appendEvent({ type: "device.pairing-requested", payload: pairing });
+    store.appendEvent({ type: "device.paired", payload: device });
+    store.appendEvent({ type: "desktop.session.created", payload: session });
+    store.appendEvent({ type: "desktop.frame.updated", payload: frame });
+    store.appendEvent({ type: "desktop.command.created", payload: command });
+
+    expect(store.getPairingRequest(pairing.id)?.deviceId).toBe(device.id);
+    expect(store.getDeviceByTokenHash(device.tokenHash)?.capabilities[0]).toMatchObject({ kind: "observe", apps: ["notepad"] });
+    expect(store.getDesktopSession(session.id)?.currentFrameId).toBe(frame.id);
+    expect(store.listDesktopFrames(session.id)[0]?.activeApp).toBe("notepad");
+    expect(store.nextQueuedDesktopCommand(device.id)?.kind).toBe("observe");
+
+    store.rebuildProjections();
+    expect(store.listDevices()).toHaveLength(1);
+    expect(store.listDesktopSessions()).toHaveLength(1);
+    expect(store.listDesktopCommands(session.id)).toHaveLength(1);
     store.close();
   });
 });

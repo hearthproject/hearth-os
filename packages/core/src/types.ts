@@ -239,6 +239,118 @@ export interface OutboxDraft {
   discardedAt: string | null;
 }
 
+export const DEVICE_CAPABILITY_KINDS = ["observe", "desktop.control", "ui.automation"] as const;
+
+export type DeviceCapabilityKind = (typeof DEVICE_CAPABILITY_KINDS)[number];
+
+export const DEVICE_CAPABILITY_STATUSES = ["pending", "approved", "revoked"] as const;
+
+export type DeviceCapabilityStatus = (typeof DEVICE_CAPABILITY_STATUSES)[number];
+
+export interface DeviceCapability {
+  kind: DeviceCapabilityKind;
+  status: DeviceCapabilityStatus;
+  apps: string[];
+  requestedAt: string;
+  approvedAt: string | null;
+  revokedAt: string | null;
+}
+
+export const DEVICE_STATUSES = ["offline", "online", "revoked"] as const;
+
+export type DeviceStatus = (typeof DEVICE_STATUSES)[number];
+
+export interface DeviceRecord {
+  id: string;
+  pairingRequestId: string;
+  name: string;
+  platform: "windows";
+  version: string;
+  status: DeviceStatus;
+  tokenHash: string;
+  capabilities: DeviceCapability[];
+  lastSeenAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const PAIRING_REQUEST_STATUSES = ["pending", "approved", "rejected", "expired", "redeemed"] as const;
+
+export type PairingRequestStatus = (typeof PAIRING_REQUEST_STATUSES)[number];
+
+export interface DevicePairingRequest {
+  id: string;
+  code: string;
+  secretHash: string;
+  deviceTokenHash: string;
+  name: string;
+  platform: "windows";
+  version: string;
+  requestedApps: string[];
+  requestedCapabilities: DeviceCapabilityKind[];
+  status: PairingRequestStatus;
+  deviceId: string | null;
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const DESKTOP_SESSION_STATUSES = ["active", "paused", "taken_over", "terminated"] as const;
+
+export type DesktopSessionStatus = (typeof DESKTOP_SESSION_STATUSES)[number];
+
+export interface DesktopSessionRecord {
+  id: string;
+  deviceId: string;
+  status: DesktopSessionStatus;
+  controlEpoch: number;
+  currentFrameId: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+  terminatedAt: string | null;
+}
+
+export interface DesktopFrameRecord {
+  id: string;
+  deviceId: string;
+  sessionId: string;
+  mimeType: "image/jpeg";
+  width: number;
+  height: number;
+  sha256: string;
+  bytes: number;
+  storagePath: string;
+  activeApp: string;
+  windowTitle: string;
+  capturedAt: string;
+  expiresAt: string;
+}
+
+export const DESKTOP_COMMAND_STATUSES = ["queued", "claimed", "succeeded", "failed", "cancelled", "expired"] as const;
+
+export type DesktopCommandStatus = (typeof DESKTOP_COMMAND_STATUSES)[number];
+
+export const DESKTOP_COMMAND_KINDS = ["observe", "click", "type", "press", "focus", "uia.invoke", "uia.setvalue"] as const;
+
+export type DesktopCommandKind = (typeof DESKTOP_COMMAND_KINDS)[number];
+
+export interface DesktopCommandRecord {
+  id: string;
+  deviceId: string;
+  sessionId: string;
+  kind: DesktopCommandKind;
+  status: DesktopCommandStatus;
+  frameId: string | null;
+  controlEpoch: number;
+  payload: Record<string, unknown>;
+  result: Record<string, unknown> | null;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+}
+
 export interface EventEnvelope<T = unknown> {
   seq: number;
   id: string;

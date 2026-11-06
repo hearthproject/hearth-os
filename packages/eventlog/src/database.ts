@@ -6,6 +6,11 @@ import type {
   ApprovalRecord,
   ApprovalStatus,
   ArtifactRecord,
+  DesktopCommandRecord,
+  DesktopFrameRecord,
+  DesktopSessionRecord,
+  DevicePairingRequest,
+  DeviceRecord,
   EffectRecord,
   EffectStatus,
   EventEnvelope,
@@ -99,6 +104,37 @@ CREATE TABLE IF NOT EXISTS outbox_drafts (
   effect_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
   submitted_at TEXT, discarded_at TEXT
 );
+CREATE TABLE IF NOT EXISTS devices (
+  id TEXT PRIMARY KEY, pairing_request_id TEXT NOT NULL, name TEXT NOT NULL,
+  platform TEXT NOT NULL, version TEXT NOT NULL, status TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE, capabilities_json TEXT NOT NULL,
+  last_seen_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS pairing_requests (
+  id TEXT PRIMARY KEY, code TEXT NOT NULL, secret_hash TEXT NOT NULL,
+  device_token_hash TEXT NOT NULL, name TEXT NOT NULL, platform TEXT NOT NULL,
+  version TEXT NOT NULL, requested_apps_json TEXT NOT NULL,
+  requested_capabilities_json TEXT NOT NULL, status TEXT NOT NULL, device_id TEXT,
+  expires_at TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS desktop_sessions (
+  id TEXT PRIMARY KEY, device_id TEXT NOT NULL, status TEXT NOT NULL,
+  control_epoch INTEGER NOT NULL, current_frame_id TEXT, last_error TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, terminated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS desktop_frames (
+  id TEXT PRIMARY KEY, device_id TEXT NOT NULL, session_id TEXT NOT NULL,
+  mime_type TEXT NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL,
+  sha256 TEXT NOT NULL, bytes INTEGER NOT NULL, storage_path TEXT NOT NULL,
+  active_app TEXT NOT NULL, window_title TEXT NOT NULL, captured_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS desktop_commands (
+  id TEXT PRIMARY KEY, device_id TEXT NOT NULL, session_id TEXT NOT NULL,
+  kind TEXT NOT NULL, status TEXT NOT NULL, frame_id TEXT, control_epoch INTEGER NOT NULL,
+  payload_json TEXT NOT NULL, result_json TEXT, error TEXT, created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL, completed_at TEXT
+);
 CREATE INDEX IF NOT EXISTS events_task_idx ON events(task_id, seq);
 CREATE INDEX IF NOT EXISTS runs_task_idx ON runs(task_id, created_at);
 CREATE INDEX IF NOT EXISTS approvals_task_idx ON approvals(task_id, status);
@@ -109,6 +145,12 @@ CREATE INDEX IF NOT EXISTS approvals_status_idx ON approvals(status, created_at)
 CREATE INDEX IF NOT EXISTS effects_status_idx ON effects(status, created_at);
 CREATE INDEX IF NOT EXISTS source_items_source_idx ON source_items(source_id, fetched_at);
 CREATE INDEX IF NOT EXISTS outbox_drafts_status_idx ON outbox_drafts(status, created_at);
+CREATE INDEX IF NOT EXISTS devices_status_idx ON devices(status, updated_at);
+CREATE INDEX IF NOT EXISTS pairing_requests_status_idx ON pairing_requests(status, created_at);
+CREATE INDEX IF NOT EXISTS desktop_sessions_device_idx ON desktop_sessions(device_id, created_at);
+CREATE INDEX IF NOT EXISTS desktop_frames_session_idx ON desktop_frames(session_id, captured_at);
+CREATE INDEX IF NOT EXISTS desktop_commands_device_idx ON desktop_commands(device_id, status, created_at);
+CREATE INDEX IF NOT EXISTS desktop_commands_session_idx ON desktop_commands(session_id, created_at);
 `;
 
 export class HearthStore {
@@ -256,6 +298,74 @@ export class HearthStore {
 
   listOutboxDrafts(): OutboxDraft[] {
     return (this.db.prepare("SELECT * FROM outbox_drafts ORDER BY created_at DESC").all() as DbRow[]).map(rowToOutboxDraft);
+  }
+
+  getDevice(id: string): DeviceRecord | null {
+    const row = this.db.prepare("SELECT * FROM devices WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToDevice(row) : null;
+  }
+
+  getDeviceByTokenHash(tokenHash: string): DeviceRecord | null {
+    const row = this.db.prepare("SELECT * FROM devices WHERE token_hash = ?").get(tokenHash) as DbRow | undefined;
+    return row ? rowToDevice(row) : null;
+  }
+
+  listDevices(): DeviceRecord[] {
+    return (this.db.prepare("SELECT * FROM devices ORDER BY created_at DESC").all() as DbRow[]).map(rowToDevice);
+  }
+
+  getPairingRequest(id: string): DevicePairingRequest | null {
+    const row = this.db.prepare("SELECT * FROM pairing_requests WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToPairingRequest(row) : null;
+  }
+
+  listPairingRequests(): DevicePairingRequest[] {
+    return (this.db.prepare("SELECT * FROM pairing_requests ORDER BY created_at DESC").all() as DbRow[]).map(rowToPairingRequest);
+  }
+
+  getDesktopSession(id: string): DesktopSessionRecord | null {
+    const row = this.db.prepare("SELECT * FROM desktop_sessions WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToDesktopSession(row) : null;
+  }
+
+  listDesktopSessions(deviceId?: string): DesktopSessionRecord[] {
+    const rows = deviceId
+      ? this.db.prepare("SELECT * FROM desktop_sessions WHERE device_id = ? ORDER BY created_at DESC").all(deviceId)
+      : this.db.prepare("SELECT * FROM desktop_sessions ORDER BY created_at DESC").all();
+    return (rows as DbRow[]).map(rowToDesktopSession);
+  }
+
+  getDesktopFrame(id: string): DesktopFrameRecord | null {
+    const row = this.db.prepare("SELECT * FROM desktop_frames WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToDesktopFrame(row) : null;
+  }
+
+  listDesktopFrames(sessionId: string, limit = 20): DesktopFrameRecord[] {
+    return (this.db.prepare("SELECT * FROM desktop_frames WHERE session_id = ? ORDER BY captured_at DESC LIMIT ?")
+      .all(sessionId, limit) as DbRow[]).map(rowToDesktopFrame);
+  }
+
+  getDesktopCommand(id: string): DesktopCommandRecord | null {
+    const row = this.db.prepare("SELECT * FROM desktop_commands WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToDesktopCommand(row) : null;
+  }
+
+  listDesktopCommands(sessionId: string, limit = 50): DesktopCommandRecord[] {
+    return (this.db.prepare("SELECT * FROM desktop_commands WHERE session_id = ? ORDER BY created_at ASC LIMIT ?")
+      .all(sessionId, limit) as DbRow[]).map(rowToDesktopCommand);
+  }
+
+  nextQueuedDesktopCommand(deviceId: string): DesktopCommandRecord | null {
+    const row = this.db.prepare(
+      "SELECT * FROM desktop_commands WHERE device_id = ? AND status = 'queued' ORDER BY created_at ASC LIMIT 1"
+    ).get(deviceId) as DbRow | undefined;
+    return row ? rowToDesktopCommand(row) : null;
+  }
+
+  listQueuedDesktopCommands(deviceId: string): DesktopCommandRecord[] {
+    return (this.db.prepare(
+      "SELECT * FROM desktop_commands WHERE device_id = ? AND status IN ('queued', 'claimed') ORDER BY created_at ASC"
+    ).all(deviceId) as DbRow[]).map(rowToDesktopCommand);
   }
 
   listRunsPage(opts: PageOptions): { runs: RunRecord[]; total: number } {
@@ -421,7 +531,7 @@ export class HearthStore {
   rebuildProjections(): void {
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      this.db.exec("DELETE FROM outbox_drafts; DELETE FROM source_items; DELETE FROM sources; DELETE FROM artifacts; DELETE FROM effects; DELETE FROM approvals; DELETE FROM runs; DELETE FROM tasks;");
+      this.db.exec("DELETE FROM desktop_commands; DELETE FROM desktop_frames; DELETE FROM desktop_sessions; DELETE FROM pairing_requests; DELETE FROM devices; DELETE FROM outbox_drafts; DELETE FROM source_items; DELETE FROM sources; DELETE FROM artifacts; DELETE FROM effects; DELETE FROM approvals; DELETE FROM runs; DELETE FROM tasks;");
       for (const event of this.listEvents()) this.applyEvent(event);
       this.db.exec("COMMIT");
     } catch (error) {
@@ -479,6 +589,15 @@ export class HearthStore {
       case "source.cleared": return clearSource(this.db, String((event.payload as Record<string, unknown>).sourceId));
       case "outbox.created": return upsertOutboxDraft(this.db, event.payload as OutboxDraft);
       case "outbox.updated": return updateOutboxDraft(this.db, event.payload as Record<string, unknown>);
+      case "device.paired":
+      case "device.updated": return upsertDevice(this.db, event.payload as DeviceRecord);
+      case "device.pairing-requested":
+      case "device.pairing-updated": return upsertPairingRequest(this.db, event.payload as DevicePairingRequest);
+      case "desktop.session.created":
+      case "desktop.session.updated": return upsertDesktopSession(this.db, event.payload as DesktopSessionRecord);
+      case "desktop.frame.updated": return upsertDesktopFrame(this.db, event.payload as DesktopFrameRecord);
+      case "desktop.command.created":
+      case "desktop.command.updated": return upsertDesktopCommand(this.db, event.payload as DesktopCommandRecord);
       case "task.progress":
       case "approval.expired": return;
       default: throw new Error(`Unknown event type: ${event.type}`);
@@ -687,6 +806,77 @@ function updateOutboxDraft(db: DatabaseSync, patch: Record<string, unknown>): vo
   }
 }
 
+function upsertDevice(db: DatabaseSync, device: DeviceRecord): void {
+  db.prepare(
+    `INSERT INTO devices (id, pairing_request_id, name, platform, version, status, token_hash, capabilities_json, last_seen_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       name=excluded.name, platform=excluded.platform, version=excluded.version,
+       status=excluded.status, capabilities_json=excluded.capabilities_json,
+       last_seen_at=excluded.last_seen_at, updated_at=excluded.updated_at`
+  ).run(
+    device.id, device.pairingRequestId, device.name, device.platform, device.version,
+    device.status, device.tokenHash, JSON.stringify(device.capabilities), device.lastSeenAt,
+    device.createdAt, device.updatedAt
+  );
+}
+
+function upsertPairingRequest(db: DatabaseSync, request: DevicePairingRequest): void {
+  db.prepare(
+    `INSERT INTO pairing_requests (id, code, secret_hash, device_token_hash, name, platform, version, requested_apps_json, requested_capabilities_json, status, device_id, expires_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       status=excluded.status, device_id=excluded.device_id, updated_at=excluded.updated_at`
+  ).run(
+    request.id, request.code, request.secretHash, request.deviceTokenHash, request.name,
+    request.platform, request.version, JSON.stringify(request.requestedApps),
+    JSON.stringify(request.requestedCapabilities), request.status, request.deviceId,
+    request.expiresAt, request.createdAt, request.updatedAt
+  );
+}
+
+function upsertDesktopSession(db: DatabaseSync, session: DesktopSessionRecord): void {
+  db.prepare(
+    `INSERT INTO desktop_sessions (id, device_id, status, control_epoch, current_frame_id, last_error, created_at, updated_at, terminated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       status=excluded.status, control_epoch=excluded.control_epoch,
+       current_frame_id=excluded.current_frame_id, last_error=excluded.last_error,
+       updated_at=excluded.updated_at, terminated_at=excluded.terminated_at`
+  ).run(
+    session.id, session.deviceId, session.status, session.controlEpoch,
+    session.currentFrameId, session.lastError, session.createdAt, session.updatedAt,
+    session.terminatedAt
+  );
+}
+
+function upsertDesktopFrame(db: DatabaseSync, frame: DesktopFrameRecord): void {
+  db.prepare(
+    `INSERT INTO desktop_frames (id, device_id, session_id, mime_type, width, height, sha256, bytes, storage_path, active_app, window_title, captured_at, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET expires_at=excluded.expires_at`
+  ).run(
+    frame.id, frame.deviceId, frame.sessionId, frame.mimeType, frame.width, frame.height,
+    frame.sha256, frame.bytes, frame.storagePath, frame.activeApp, frame.windowTitle,
+    frame.capturedAt, frame.expiresAt
+  );
+}
+
+function upsertDesktopCommand(db: DatabaseSync, command: DesktopCommandRecord): void {
+  db.prepare(
+    `INSERT INTO desktop_commands (id, device_id, session_id, kind, status, frame_id, control_epoch, payload_json, result_json, error, created_at, updated_at, completed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       status=excluded.status, result_json=excluded.result_json, error=excluded.error,
+       updated_at=excluded.updated_at, completed_at=excluded.completed_at`
+  ).run(
+    command.id, command.deviceId, command.sessionId, command.kind, command.status,
+    command.frameId, command.controlEpoch, JSON.stringify(command.payload),
+    command.result ? JSON.stringify(command.result) : null, command.error,
+    command.createdAt, command.updatedAt, command.completedAt
+  );
+}
+
 function rowToEvent(row: DbRow): EventEnvelope {
   return {
     seq: Number(row.seq), id: String(row.id), type: String(row.type),
@@ -800,6 +990,78 @@ function rowToOutboxDraft(row: DbRow): OutboxDraft {
     createdAt: String(row.created_at), updatedAt: String(row.updated_at),
     submittedAt: row.submitted_at == null ? null : String(row.submitted_at),
     discardedAt: row.discarded_at == null ? null : String(row.discarded_at)
+  };
+}
+
+function rowToDevice(row: DbRow): DeviceRecord {
+  return {
+    id: String(row.id),
+    pairingRequestId: String(row.pairing_request_id),
+    name: String(row.name),
+    platform: String(row.platform) as DeviceRecord["platform"],
+    version: String(row.version),
+    status: String(row.status) as DeviceRecord["status"],
+    tokenHash: String(row.token_hash),
+    capabilities: JSON.parse(String(row.capabilities_json)),
+    lastSeenAt: row.last_seen_at == null ? null : String(row.last_seen_at),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
+  };
+}
+
+function rowToPairingRequest(row: DbRow): DevicePairingRequest {
+  return {
+    id: String(row.id),
+    code: String(row.code),
+    secretHash: String(row.secret_hash),
+    deviceTokenHash: String(row.device_token_hash),
+    name: String(row.name),
+    platform: String(row.platform) as DevicePairingRequest["platform"],
+    version: String(row.version),
+    requestedApps: JSON.parse(String(row.requested_apps_json)),
+    requestedCapabilities: JSON.parse(String(row.requested_capabilities_json)),
+    status: String(row.status) as DevicePairingRequest["status"],
+    deviceId: row.device_id == null ? null : String(row.device_id),
+    expiresAt: String(row.expires_at),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
+  };
+}
+
+function rowToDesktopSession(row: DbRow): DesktopSessionRecord {
+  return {
+    id: String(row.id), deviceId: String(row.device_id),
+    status: String(row.status) as DesktopSessionRecord["status"],
+    controlEpoch: Number(row.control_epoch),
+    currentFrameId: row.current_frame_id == null ? null : String(row.current_frame_id),
+    lastError: row.last_error == null ? null : String(row.last_error),
+    createdAt: String(row.created_at), updatedAt: String(row.updated_at),
+    terminatedAt: row.terminated_at == null ? null : String(row.terminated_at)
+  };
+}
+
+function rowToDesktopFrame(row: DbRow): DesktopFrameRecord {
+  return {
+    id: String(row.id), deviceId: String(row.device_id), sessionId: String(row.session_id),
+    mimeType: String(row.mime_type) as DesktopFrameRecord["mimeType"],
+    width: Number(row.width), height: Number(row.height), sha256: String(row.sha256),
+    bytes: Number(row.bytes), storagePath: String(row.storage_path),
+    activeApp: String(row.active_app), windowTitle: String(row.window_title),
+    capturedAt: String(row.captured_at), expiresAt: String(row.expires_at)
+  };
+}
+
+function rowToDesktopCommand(row: DbRow): DesktopCommandRecord {
+  return {
+    id: String(row.id), deviceId: String(row.device_id), sessionId: String(row.session_id),
+    kind: String(row.kind) as DesktopCommandRecord["kind"],
+    status: String(row.status) as DesktopCommandRecord["status"],
+    frameId: row.frame_id == null ? null : String(row.frame_id),
+    controlEpoch: Number(row.control_epoch), payload: JSON.parse(String(row.payload_json)),
+    result: row.result_json == null ? null : JSON.parse(String(row.result_json)),
+    error: row.error == null ? null : String(row.error),
+    createdAt: String(row.created_at), updatedAt: String(row.updated_at),
+    completedAt: row.completed_at == null ? null : String(row.completed_at)
   };
 }
 
