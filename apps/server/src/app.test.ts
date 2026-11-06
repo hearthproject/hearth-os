@@ -108,6 +108,43 @@ describe("Hearth server", () => {
     await app.close();
   });
 
+  it("keeps outbox drafts separate from approval until the user submits them", async () => {
+    const app = await buildServer({ store, serveWeb: false });
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/outbox",
+      payload: {
+        account: "local-test",
+        to: ["reviewer@example.test"],
+        subject: "Weekly update",
+        body: "This stays local."
+      }
+    });
+    expect(created.statusCode).toBe(201);
+    const draft = created.json();
+    expect(draft.status).toBe("draft");
+    expect(draft.taskId).toBeNull();
+
+    const submitted = await app.inject({ method: "POST", url: `/api/outbox/${draft.id}/submit` });
+    expect(submitted.statusCode).toBe(200);
+    const approval = submitted.json().approval;
+    expect(approval.kind).toBe("outbox.local-write");
+    expect(approval.target).toMatchObject({ draftId: draft.id, account: "local-test" });
+    expect(approval.preview.impact).toContain("不会发送");
+
+    const rejected = await app.inject({
+      method: "POST",
+      url: `/api/approvals/${approval.id}/decide`,
+      payload: { decision: "reject", parameterHash: approval.parameterHash }
+    });
+    expect(rejected.statusCode).toBe(200);
+    expect(rejected.json().effect).toBeNull();
+
+    const drafts = await app.inject({ method: "GET", url: "/api/outbox" });
+    expect(drafts.json().drafts[0]).toMatchObject({ id: draft.id, status: "rejected" });
+    await app.close();
+  });
+
   it("lists the fifteen evaluation templates", async () => {
     const app = await buildServer({ store, serveWeb: false });
     const response = await app.inject({ method: "GET", url: "/api/templates" });

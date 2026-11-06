@@ -16,6 +16,7 @@ import { executeEffect } from "./effects.ts";
 import { HearthScheduler } from "./scheduler.ts";
 import { HearthService, TaskInputSelectionError, type CreateTaskInput } from "./service.ts";
 import { SourceRegistry, SourceRegistryError } from "./sources.ts";
+import { OutboxError, OutboxService } from "./outbox.ts";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 
@@ -42,6 +43,16 @@ const createSourceSchema = z.object({
 
 const readSourceSchema = z.object({
   url: z.string().trim().min(1).max(2_048).optional()
+}).strict();
+
+const outboxDraftSchema = z.object({
+  account: z.string().max(200).optional(),
+  to: z.array(z.string().max(320)).max(50).optional(),
+  cc: z.array(z.string().max(320)).max(50).optional(),
+  bcc: z.array(z.string().max(320)).max(50).optional(),
+  subject: z.string().max(500).optional(),
+  body: z.string().max(200_000).optional(),
+  attachmentIds: z.array(z.string().trim().min(1).max(80)).max(20).optional()
 }).strict();
 
 const sourceItemQuerySchema = z.object({
@@ -92,6 +103,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
   const approvals = new ApprovalManager(service, options.effectExecutor ?? executeEffect);
   approvals.recoverInterruptedEffects();
+  const outbox = new OutboxService(service, approvals);
   const scheduler = options.startScheduler
     ? new HearthScheduler({
         service,
@@ -243,6 +255,60 @@ export async function buildServer(options: BuildServerOptions = {}) {
     if (!parsed.success) return invalidQuery(reply);
     reply.header("cache-control", "no-store");
     return { items: store.listReadySourceItems(parsed.data.limit ?? 100) };
+  });
+
+  app.get("/api/outbox", async (_request, reply) => {
+    reply.header("cache-control", "no-store");
+    return { drafts: outbox.list() };
+  });
+
+  app.get<{ Params: { id: string } }>("/api/outbox/:id", async (request, reply) => {
+    try {
+      reply.header("cache-control", "no-store");
+      return outbox.get(request.params.id);
+    } catch (error) {
+      return sendOutboxError(reply, error);
+    }
+  });
+
+  app.post("/api/outbox", async (request, reply) => {
+    const parsed = outboxDraftSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "INVALID_OUTBOX_DRAFT", message: "发件箱草稿参数格式不正确" });
+    }
+    try {
+      return reply.code(201).send(outbox.create(parsed.data));
+    } catch (error) {
+      return sendOutboxError(reply, error);
+    }
+  });
+
+  app.patch<{ Params: { id: string } }>("/api/outbox/:id", async (request, reply) => {
+    const parsed = outboxDraftSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "INVALID_OUTBOX_DRAFT", message: "发件箱草稿参数格式不正确" });
+    }
+    try {
+      return outbox.update(request.params.id, parsed.data);
+    } catch (error) {
+      return sendOutboxError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/outbox/:id/discard", async (request, reply) => {
+    try {
+      return outbox.discard(request.params.id);
+    } catch (error) {
+      return sendOutboxError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/outbox/:id/submit", async (request, reply) => {
+    try {
+      return outbox.submit(request.params.id);
+    } catch (error) {
+      return sendOutboxError(reply, error);
+    }
   });
 
   app.get("/api/export", async (_request, reply) => {
@@ -404,9 +470,12 @@ export async function buildServer(options: BuildServerOptions = {}) {
       return reply.code(400).send({ error: "INVALID_DECISION", message: "需要明确批准或拒绝，并提交当前审批参数哈希" });
     }
     try {
-      return await approvals.decide(request.params.id, parsed.data.decision, parsed.data.parameterHash);
+      const result = await approvals.decide(request.params.id, parsed.data.decision, parsed.data.parameterHash);
+      outbox.reconcileApproval(result.approval.id);
+      return result;
     } catch (error) {
       if (error instanceof ApprovalError) {
+        outbox.reconcileApproval(request.params.id);
         const status = error.code === "APPROVAL_NOT_FOUND" ? 404 : error.code === "APPROVAL_EXPIRED" ? 410 : 409;
         return reply.code(status).send({ error: error.code, message: error.message });
       }
@@ -525,6 +594,13 @@ function invalidQuery(reply: FastifyReply) {
 
 function sendSourceError(reply: FastifyReply, error: unknown) {
   if (error instanceof SourceRegistryError) {
+    return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+  }
+  throw error;
+}
+
+function sendOutboxError(reply: FastifyReply, error: unknown) {
+  if (error instanceof OutboxError) {
     return reply.code(error.statusCode).send({ error: error.code, message: error.message });
   }
   throw error;

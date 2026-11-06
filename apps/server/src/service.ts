@@ -7,6 +7,7 @@ import type {
   EffectListItem,
   EffectRecord,
   EventWindow,
+  OutboxDraft,
   RunListItem,
   RunRecord,
   StatsSnapshot,
@@ -67,6 +68,7 @@ export interface ExportSnapshot {
   approvals: ApprovalRecord[];
   artifacts: ArtifactRecord[];
   effects: EffectRecord[];
+  outboxDrafts: OutboxDraft[];
   events: ReturnType<HearthStore["listEvents"]>;
 }
 
@@ -161,6 +163,7 @@ export class HearthService {
       approvals: tasks.flatMap((task) => this.store.listApprovals(task.id)),
       artifacts: this.store.listAllArtifacts(),
       effects: this.store.listAllEffects(),
+      outboxDrafts: this.store.listOutboxDrafts(),
       events: this.store.listEvents(0)
     };
   }
@@ -370,6 +373,33 @@ export class HearthService {
     const updated = this.store.getEffect(effectId);
     if (!updated) throw new Error(`Effect projection missing: ${effectId}`);
     return updated;
+  }
+
+  createOutboxDraft(draft: OutboxDraft): OutboxDraft {
+    const event = this.store.appendEvent({ type: "outbox.created", payload: draft });
+    this.bus.publish(event);
+    return draft;
+  }
+
+  updateOutboxDraft(
+    draftId: string,
+    patch: Partial<Pick<OutboxDraft,
+      "account" | "to" | "cc" | "bcc" | "subject" | "body" | "attachments" | "status" |
+      "taskId" | "approvalId" | "effectId" | "updatedAt" | "submittedAt" | "discardedAt">>
+  ): OutboxDraft {
+    const current = this.store.getOutboxDraft(draftId);
+    if (!current) throw new Error(`Outbox draft not found: ${draftId}`);
+    const event = this.store.appendEvent({ type: "outbox.updated", payload: { id: draftId, ...patch } });
+    this.bus.publish(event);
+    const updated = this.store.getOutboxDraft(draftId);
+    if (!updated) throw new Error(`Outbox projection missing: ${draftId}`);
+    return updated;
+  }
+
+  requireOutboxDraft(draftId: string): OutboxDraft {
+    const draft = this.store.getOutboxDraft(draftId);
+    if (!draft) throw new Error(`Outbox draft not found: ${draftId}`);
+    return draft;
   }
 
   requireTask(taskId: string): TaskRecord {
