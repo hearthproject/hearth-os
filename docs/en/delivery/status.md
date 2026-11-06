@@ -30,10 +30,10 @@ The local outbox is not presented as a fake success: the UI states that it only 
 |---|---|---|---|
 | 3.1 Connect and inspect a device | Partial | Six-digit pairing code, device token, pairing approval separate from capability approval, per-capability grants, app allowlist, online state, and device revocation | No tray or always-visible global “auto control” indicator; Windows same-machine helper only |
 | 3.2 Observe and take over | Partial | Session-bound screenshots; pause, resume, takeover, hand back, and terminate; takeover cancels queued input and advances the control epoch; user-idle check; two-minute screenshot expiry | Sensitive-area masking, long recordings, and complete desktop snapshots are absent |
-| 3.3 Tiered desktop actions | Partial | Target-app binding and focus revalidation; click, short text, Enter/Tab/Escape/Ctrl+S; allowlisted UIA invoke/setvalue; command status and result records; structured rejection | High-risk preview and confirmation, isolated desktop, snapshots, compensation, and real UIA action acceptance are not complete |
+| 3.3 Tiered desktop actions | Partial | Target-app binding and focus revalidation; click, short text, Enter/Tab/Escape/Ctrl+S; allowlisted UIA invoke/setvalue; UWP host windows mapped to an approved app through their UIA child process; command status and result records; structured rejection | High-risk preview and confirmation, isolated desktop, snapshots, compensation, and real UIA setvalue acceptance are not complete |
 | 3.4 Desktop acceptance | Not complete | Isolated-port checks cover pairing, capability approval, observation, pause, resume, takeover, hand back, and the pro view | No five real desktop tasks, success-rate, takeover-count, and failure-drill acceptance |
 
-The Windows helper currently focuses the server-approved target app before capture or input; it does not claim reliable background input. UWP apps whose windows are hosted by `ApplicationFrameHost` (for example Calculator) cannot yet be mapped reliably to the approved app name. This remains an explicit limitation and must not silently fall back to another app.
+The Windows helper currently focuses the server-approved target app before capture or input; it does not claim reliable background input. For UWP apps hosted by `ApplicationFrameHost`, the helper reads the window's UIA subtree and permits focus or capture only when a child process can be resolved to the approved app. For example, `CalculatorApp` maps to the approved name `calculator`. If ownership is ambiguous or the child process cannot be read, the helper fails closed instead of treating the host window as the target. Real UIA invocation was verified in Calculator: invoking “2” returned `InvokePattern` and changed the display from `7` to `72`.
 
 ## Borrowed patterns and tradeoffs
 
@@ -45,6 +45,6 @@ The Windows helper currently focuses the server-approved target app before captu
 1. Read-only email and calendar accounts, real test accounts, and real send receipts.
 2. Acceptance records for 10–15 everyday content tasks and at least five desktop tasks.
 3. Sensitive-area masking, isolated desktops, snapshots, compensation, and high-risk actions.
-4. UWP window mapping, real UIA invoke/setvalue acceptance, and failure drills for lost windows, permission changes, and user takeover.
+4. Real UIA setvalue acceptance and failure drills for lost windows, permission changes, and user takeover.
 
 These gaps are intentionally left open rather than replaced with simulated data or UI that only looks complete.
