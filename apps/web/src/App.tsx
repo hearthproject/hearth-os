@@ -7,6 +7,7 @@ import { ArtifactsPage } from "./pages/ArtifactsPage.tsx";
 import { AttentionPage } from "./pages/AttentionPage.tsx";
 import { SettingsPage } from "./pages/SettingsPage.tsx";
 import { SourcesPage } from "./pages/SourcesPage.tsx";
+import { OutboxPage } from "./pages/OutboxPage.tsx";
 import { TaskDetailPage } from "./pages/TaskDetailPage.tsx";
 import { TodayPage } from "./pages/TodayPage.tsx";
 
@@ -19,6 +20,7 @@ export default function App() {
           <Route index element={<TodayPage />} />
           <Route path="attention" element={<AttentionPage />} />
           <Route path="artifacts" element={<ArtifactsPage />} />
+          <Route path="outbox" element={<OutboxPage />} />
           <Route path="sources" element={<SourcesPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="tasks/:id" element={<TaskDetailPage />} />
