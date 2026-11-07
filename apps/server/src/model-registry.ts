@@ -94,7 +94,10 @@ export class ModelRegistry {
     if (profileId && !this.store.getModelProfile(profileId)) {
       throw new ModelRegistryError("MODEL_PROFILE_NOT_FOUND", "找不到这个模型档案");
     }
-    if (profileId) this.store.setAppSetting(CHAT_PROFILE_KEY, profileId);
+    if (profileId) {
+      this.store.setAppSetting(CHAT_PROFILE_KEY, profileId);
+      this.ensureDefaultBindings(profileId);
+    }
     else this.store.deleteAppSetting(CHAT_PROFILE_KEY);
     this.touch();
   }
@@ -256,6 +259,16 @@ export class ModelRegistry {
     };
   }
 
+  settingsForExecutorOrChat(executorId: ExecutorId): ModelSettings | null {
+    const bound = this.settingsForExecutor(executorId);
+    if (bound) return bound;
+    if (executorId !== "native" && executorId !== "deepseek-harness") return null;
+    const chat = this.chatSettings();
+    if (!chat) return null;
+    if (executorId === "deepseek-harness" && chat.protocol === "gemini") return null;
+    return chat;
+  }
+
   codexProfile(): CodexProfile | null {
     const settings = this.settingsForExecutor("codex");
     if (!settings || settings.protocol !== "openai-responses") return null;
@@ -292,7 +305,7 @@ export class ModelRegistry {
 
   codexEnv(): Record<string, string> {
     const settings = this.settingsForExecutor("codex");
-    return settings?.apiKey ? { HEARTH_CODEX_API_KEY: settings.apiKey, CODEX_HOME: this.codexHome } : { CODEX_HOME: this.codexHome };
+    return settings?.apiKey ? { HEARTH_CODEX_API_KEY: settings.apiKey, CODEX_HOME: this.codexHome } : {};
   }
 
   importLegacy(settings: ModelSettings): ModelProfileView | null {
@@ -318,6 +331,30 @@ export class ModelRegistry {
     });
     this.setChatProfile(created.id);
     return created;
+  }
+
+  private ensureDefaultBindings(profileId: string): void {
+    if (!this.store.getExecutorModelBinding("native")) {
+      this.store.setExecutorModelBinding({
+        executorId: "native",
+        profileId,
+        protocolOverride: null,
+        modelOverride: null,
+        updatedAt: new Date().toISOString()
+      });
+    }
+    if (!this.store.getExecutorModelBinding("codex")) {
+      const profile = this.store.getModelProfile(profileId);
+      if (profile?.protocol === "openai-responses") {
+        this.store.setExecutorModelBinding({
+          executorId: "codex",
+          profileId,
+          protocolOverride: "openai-responses",
+          modelOverride: null,
+          updatedAt: new Date().toISOString()
+        });
+      }
+    }
   }
 
   private normalizeProfile(record: ModelProfileRecord): ModelProfileRecord {

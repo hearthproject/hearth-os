@@ -6,11 +6,12 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
 import type { ChatAttachment, ChatMessageRecord, ExecutorId } from "@hearth/core";
 import { defaultConversationSettings, EXECUTOR_IDS, mergeConversationSettings } from "@hearth/core";
-import { loadCodexProfile, probeCodex } from "@hearth/codex-executor";
+import { loadCodexProfile, probeCodex, type CodexProfile } from "@hearth/codex-executor";
 import { loadExecutorSettings } from "./executor-settings.ts";
-import { executorName, resolveExecutorFromEnabled } from "./executors.ts";
+import { EXECUTOR_FALLBACK_ORDER, executorName, resolveExecutorFromEnabled } from "./executors.ts";
 import { executorHealth, isExecutorManagedInstalled } from "./executor-runtime.ts";
 import type { HearthService } from "./service.ts";
+import type { ModelRegistry } from "./model-registry.ts";
 import { chatSystemPrompt, conversationTitle, decideRoute, planExecution } from "./chat.ts";
 import { listModels, ModelClientError, completeChat, streamChat, type ChatMessage } from "./model-client.ts";
 import {
@@ -80,11 +81,17 @@ export interface ChatRouteOptions {
   modelSettingsPath: string;
   attachmentRoot: string;
   executorSettingsPath: string;
+  registry?: ModelRegistry | undefined;
+  codexProfile?: (() => CodexProfile) | undefined;
+  codexEnv?: (() => Record<string, string>) | undefined;
+  modelSettingsForExecutor?: ((executorId: ExecutorId) => ModelSettings | null) | undefined;
 }
 
 export async function registerChatRoutes(app: FastifyInstance, options: ChatRouteOptions): Promise<void> {
   const { service, modelSettingsPath, attachmentRoot, executorSettingsPath } = options;
   const store = service.store;
+  const chatSettings = (): ModelSettings => options.registry?.chatSettings() ?? loadModelSettings(modelSettingsPath);
+  const chatConfigured = (): boolean => chatModelConfigured(chatSettings());
   const executorAvailability = (): Record<ExecutorId, boolean> => {
     const executorSettings = loadExecutorSettings(executorSettingsPath);
     const availability = {} as Record<ExecutorId, boolean>;
@@ -96,6 +103,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
   const defaultSettings = () => {
     const executorSettings = loadExecutorSettings(executorSettingsPath);
     const enabled: Partial<Record<ExecutorId, boolean>> = { native: true, codex: true, hermes: true };
+    if (options.registry?.settingsForExecutorOrChat("deepseek-harness")) enabled["deepseek-harness"] = true;
     for (const id of ["qoder", "workbuddy", "kimi"] as const) {
       const runtime = executorSettings.executors[id];
       enabled[id] = isExecutorManagedInstalled(id, executorSettingsPath)
@@ -112,10 +120,10 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
   });
 
   app.get("/api/model-settings", async () => {
-    const settings = loadModelSettings(modelSettingsPath);
+    const settings = chatSettings();
     return {
       settings: viewModelSettings(settings),
-      presets: MODEL_PRESETS,
+      presets: options.registry?.presets() ?? MODEL_PRESETS,
       configured: chatModelConfigured(settings)
     };
   });
@@ -128,14 +136,15 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     }
     const patch = { ...parsed.data };
     if (patch.baseUrl !== undefined) patch.baseUrl = normalizeBaseUrl(patch.baseUrl);
-    const settings = saveModelSettings(modelSettingsPath, patch);
+    const settings = options.registry ? saveRegistryChatSettings(options.registry, patch) : saveModelSettings(modelSettingsPath, patch);
+    if (!settings) return reply.code(400).send({ error: "INVALID_MODEL_SETTINGS", message: "新建模型档案需要填写服务名称、地址和模型名" });
     return { settings: viewModelSettings(settings), configured: chatModelConfigured(settings) };
   });
 
   app.post("/api/model-settings/models", async (request, reply) => {
     const parsed = modelProbeSchema.safeParse(request.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: "INVALID_MODEL_REQUEST", message: "模型参数格式不正确" });
-    const settings = mergeModelSettings(loadModelSettings(modelSettingsPath), parsed.data);
+    const settings = mergeModelSettings(chatSettings(), parsed.data);
     if (!isHttpUrl(settings.baseUrl)) return reply.code(400).send({ error: "INVALID_BASE_URL", message: "请先填写正确的服务地址" });
     try {
       const models = await listModels(settings, 25_000);
@@ -148,7 +157,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
   app.post("/api/model-settings/test", async (request, reply) => {
     const parsed = modelProbeSchema.safeParse(request.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: "INVALID_MODEL_REQUEST", message: "模型参数格式不正确" });
-    const settings = mergeModelSettings(loadModelSettings(modelSettingsPath), parsed.data);
+    const settings = mergeModelSettings(chatSettings(), parsed.data);
     if (!isHttpUrl(settings.baseUrl)) return reply.code(200).send({ ok: false, error: "请先填写正确的服务地址" });
     const started = Date.now();
     try {
@@ -163,10 +172,10 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
   });
 
   app.post("/api/codex/probe", async () => {
-    const profile = loadCodexProfile();
+    const profile = options.codexProfile?.() ?? loadCodexProfile();
     const started = Date.now();
     const result = await Promise.race([
-      probeCodex(profile),
+      probeCodex(profile, options.codexEnv?.()),
       new Promise<{ ok: false; error: string }>((resolve) => {
         setTimeout(() => resolve({ ok: false, error: "执行器测试超时（60 秒）。请检查模型地址和 API Key。" }), 60_000);
       })
@@ -332,13 +341,13 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     send("conversation", conversation);
     send("user", userRecord);
 
-    const settings = loadModelSettings(modelSettingsPath);
+    const settings = chatSettings();
     const route = await decideRoute(userContent, storedFiles.length > 0, detectedUrl, settings);
     const plan = planExecution(userContent);
     const preferredExecutorId = conversation.settings.preferredExecutorId ?? plan.executorId;
     const fallbackOrder = preferredExecutorId === plan.executorId
-      ? undefined
-      : [plan.executorId, ...EXECUTOR_IDS.filter((id) => id !== plan.executorId)];
+      ? [...EXECUTOR_FALLBACK_ORDER]
+      : [plan.executorId, ...EXECUTOR_FALLBACK_ORDER.filter((id) => id !== plan.executorId)];
     const resolution = resolveExecutorFromEnabled(
       preferredExecutorId,
       conversation.settings.executorEnabled,
@@ -406,7 +415,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       return reply;
     }
 
-    if (!chatModelConfigured(settings)) {
+    if (!chatConfigured()) {
       send("error", {
         message: "还没有配置聊天模型。请到“设置”里选择服务商并填入 API Key，然后重新发送。",
         code: "MODEL_NOT_CONFIGURED"
@@ -508,6 +517,44 @@ function mergeModelSettings(current: ModelSettings, patch: {
     ...(patch.model !== undefined ? { model: patch.model } : {}),
     ...(patch.apiKey !== undefined ? { apiKey: patch.apiKey } : {})
   };
+}
+
+function saveRegistryChatSettings(
+  registry: ModelRegistry,
+  patch: {
+    providerId?: string | undefined;
+    providerName?: string | undefined;
+    protocol?: string | undefined;
+    baseUrl?: string | undefined;
+    model?: string | undefined;
+    apiKey?: string | undefined;
+  }
+): ModelSettings | null {
+  const existing = registry.chatProfileId();
+  if (existing) {
+    registry.updateProfile(existing, {
+      ...(patch.providerId !== undefined ? { providerId: patch.providerId } : {}),
+      ...(patch.providerName !== undefined ? { providerName: patch.providerName } : {}),
+      ...(patch.protocol !== undefined ? { protocol: normalizeProtocol(patch.protocol) } : {}),
+      ...(patch.baseUrl !== undefined ? { baseUrl: normalizeBaseUrl(patch.baseUrl) } : {}),
+      ...(patch.model !== undefined ? { model: patch.model } : {}),
+      ...(patch.apiKey !== undefined ? { apiKey: patch.apiKey } : {})
+    });
+    return registry.chatSettings();
+  }
+  if (!patch.baseUrl?.trim() || !patch.model?.trim()) return null;
+  const providerName = patch.providerName?.trim() || "自定义服务";
+  const created = registry.createProfile({
+    name: `${providerName} / ${patch.model.trim()}`,
+    providerId: patch.providerId ?? "custom",
+    providerName,
+    protocol: patch.protocol ? normalizeProtocol(patch.protocol) : "openai-chat",
+    baseUrl: normalizeBaseUrl(patch.baseUrl),
+    model: patch.model,
+    ...(patch.apiKey ? { apiKey: patch.apiKey } : {})
+  });
+  registry.setChatProfile(created.id);
+  return registry.chatSettings();
 }
 
 function isHttpUrl(value: string): boolean {

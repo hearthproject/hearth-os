@@ -213,7 +213,13 @@ export class HearthScheduler {
     const health = this.executorHealth(executorId, settings);
     if (!health.canRun) throw new Error(`目标执行器当前不可用：${health.issues.join("；") || "未检测到可用配置"}`);
     if (!this.executorEnabledForTask(task, executorId)) throw new Error("当前对话已关闭该执行器");
-    const adapterCheck = this.adapters[executorId].canRun({ task, prepared: null, settings: this.context.settings(), executorSettings: settings });
+    const adapterCheck = this.adapters[executorId].canRun({
+      task,
+      prepared: null,
+      settings: this.context.settings(),
+      executorSettings: settings,
+      modelSettings: this.modelSettingsForExecutor(executorId)
+    });
     if (!adapterCheck.ok) throw new Error(adapterCheck.reason ?? "目标执行器不能执行这个任务");
     this.context.updateHandoff(handoff.id, { status: "prepared" });
     const updated = this.service.updateTask(taskId, {
@@ -1112,7 +1118,8 @@ export class HearthScheduler {
       task: input.task,
       prepared: null,
       settings: input.settings,
-      executorSettings: settings
+      executorSettings: settings,
+      modelSettings: this.modelSettingsForExecutor(input.targetExecutor)
     });
     const evaluation = evaluateHandoff({
       service: this.service, task: input.task, targetExecutor: input.targetExecutor,

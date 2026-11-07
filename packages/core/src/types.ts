@@ -122,6 +122,7 @@ export interface ExecutorView {
   concurrency: number;
   health: ExecutorHealth;
   install: ExecutorInstallInfo;
+  modelBinding?: ExecutorModelBindingView | undefined;
 }
 
 export interface ExecutorSettings {

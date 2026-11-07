@@ -8,9 +8,9 @@ import type { EventEnvelope, ExecutorId, ExecutorView } from "@hearth/core";
 import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, EXECUTOR_IDS, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_SENSITIVITIES, PROACTIVE_MODES, RUN_STATUSES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate } from "@hearth/templates";
-import { loadCodexProfile } from "@hearth/codex-executor";
+import { loadCodexProfile, runCodex } from "@hearth/codex-executor";
 import { z } from "zod";
-import { ATTACHMENT_DIR, BACKUP_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, EXECUTOR_SETTINGS_PATH, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST } from "./config.ts";
+import { ATTACHMENT_DIR, BACKUP_DIR, CODEX_HOME_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, EXECUTOR_SETTINGS_PATH, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST } from "./config.ts";
 import { registerChatRoutes } from "./chat-routes.ts";
 import { loadExecutorSettings, saveExecutorSettings, viewExecutorSettings } from "./executor-settings.ts";
 import { probeHermes } from "./hermes-executor.ts";
@@ -20,6 +20,7 @@ import { ExecutorInstallError, ExecutorInstaller } from "./executor-install.ts";
 import { EXECUTORS } from "./executors.ts";
 import { ScheduleError, ScheduleService } from "./schedules.ts";
 import { chatModelConfigured, loadModelSettings, viewModelSettings } from "./model-settings.ts";
+import { ModelRegistry, ModelRegistryError } from "./model-registry.ts";
 import { ApprovalError, ApprovalManager, type EffectExecutor } from "./approvals.ts";
 import { BackupError, BackupService } from "./backups.ts";
 import { executeEffect } from "./effects.ts";
@@ -40,7 +41,7 @@ import { MemoryError, MemoryService } from "./memory.ts";
 import { MethodError, MethodService } from "./methods.ts";
 import { ProactiveError, ProactiveService } from "./proactive.ts";
 import { SyncError, SyncService } from "./sync.ts";
-import type { SecretBox } from "./secrets.ts";
+import { SecretBox } from "./secrets.ts";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 
@@ -84,6 +85,38 @@ const contextSettingsPatchSchema = z.object({
   summarizeAfterTokens: z.number().int().min(1000).max(500_000).optional(),
   autoHandoffRisk: z.enum(["low", "none"]).optional(),
   allowCodexNetwork: z.boolean().optional()
+}).strict();
+
+const modelProtocolEnum = z.enum(["openai-chat", "openai-responses", "anthropic-messages", "gemini"]);
+
+const createModelProfileSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  providerId: z.string().trim().max(60).optional(),
+  providerName: z.string().trim().max(80).optional(),
+  protocol: modelProtocolEnum.optional(),
+  baseUrl: z.string().trim().min(1).max(500),
+  model: z.string().trim().min(1).max(200),
+  apiKey: z.string().max(500).optional()
+}).strict();
+
+const updateModelProfileSchema = z.object({
+  name: z.string().trim().min(1).max(120).optional(),
+  providerId: z.string().trim().max(60).optional(),
+  providerName: z.string().trim().max(80).optional(),
+  protocol: modelProtocolEnum.optional(),
+  baseUrl: z.string().trim().max(500).optional(),
+  model: z.string().trim().max(200).optional(),
+  apiKey: z.string().max(500).optional()
+}).strict();
+
+const chatProfileSchema = z.object({
+  profileId: z.string().trim().min(1).max(100).nullable()
+}).strict();
+
+const executorModelBindingSchema = z.object({
+  profileId: z.string().trim().min(1).max(100).nullable().optional(),
+  protocolOverride: modelProtocolEnum.nullable().optional(),
+  modelOverride: z.string().trim().max(200).nullable().optional()
 }).strict();
 
 const memorySourceSchema = z.object({
@@ -432,6 +465,19 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const outbox = new OutboxService(service, approvals);
   const desktop = new DesktopService(service, options.deviceFrameRoot ?? DEVICE_FRAME_DIR, security);
   const modelSettingsPath = options.modelSettingsPath ?? MODEL_SETTINGS_PATH;
+  const secretBox = options.syncSecretBox ?? SecretBox.fromKeyFile(options.masterKeyPath ?? MASTER_KEY_PATH);
+  const modelRegistry = new ModelRegistry({
+    store,
+    secretBox,
+    codexHome: CODEX_HOME_DIR
+  });
+  if (!modelRegistry.chatProfileId()) {
+    const legacyModelSettings = loadModelSettings(modelSettingsPath);
+    if (legacyModelSettings.baseUrl && legacyModelSettings.model) modelRegistry.importLegacy(legacyModelSettings);
+  }
+  const modelSettingsForExecutor = (executorId: ExecutorId) => modelRegistry.settingsForExecutorOrChat(executorId);
+  const codexProfile = () => modelRegistry.codexProfile() ?? loadCodexProfile();
+  const codexEnv = () => modelRegistry.codexEnv();
   const attachmentRoot = options.attachmentRoot ?? ATTACHMENT_DIR;
   const executorSettingsPath = options.executorSettingsPath ?? EXECUTOR_SETTINGS_PATH;
   const executorInstaller = options.executorInstaller ?? new ExecutorInstaller();
@@ -449,6 +495,9 @@ export async function buildServer(options: BuildServerOptions = {}) {
         attachmentRoot,
         executorSettingsPath,
         executorHealth,
+        modelSettingsPath,
+        modelSettingsForExecutor,
+        codexRunner: (runOptions) => runCodex({ ...runOptions, profile: codexProfile(), env: codexEnv() }),
         ...(options.sourceContentRoot ? { sourceContentRoot: options.sourceContentRoot } : {})
       })
     : null;
@@ -477,7 +526,16 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
 
   schedules.start();
-  await registerChatRoutes(app, { service, modelSettingsPath, attachmentRoot, executorSettingsPath });
+  await registerChatRoutes(app, {
+    service,
+    modelSettingsPath,
+    attachmentRoot,
+    executorSettingsPath,
+    registry: modelRegistry,
+    codexProfile,
+    codexEnv,
+    modelSettingsForExecutor
+  });
 
   app.addHook("onClose", async () => {
     maintenance.stop();
@@ -503,12 +561,12 @@ export async function buildServer(options: BuildServerOptions = {}) {
 
   app.get("/api/health", async () => {
     const snapshot = health.snapshot();
-    const profile = loadCodexProfile();
-    const modelSettings = loadModelSettings(modelSettingsPath);
+    const profile = codexProfile();
+    const modelSettings = modelRegistry.chatSettings() ?? loadModelSettings(modelSettingsPath);
     return {
       ...snapshot,
       chatModel: {
-        configured: chatModelConfigured(modelSettings),
+        configured: Boolean(modelSettings && chatModelConfigured(modelSettings)),
         settings: viewModelSettings(modelSettings)
       },
       codex: {
@@ -521,6 +579,70 @@ export async function buildServer(options: BuildServerOptions = {}) {
         envKeyPresent: profile.envKeyPresent
       }
     };
+  });
+
+  app.get("/api/model-registry", async () => {
+    const chat = modelRegistry.chatSettings();
+    return {
+      ...modelRegistry.view(),
+      presets: modelRegistry.presets(),
+      chatConfigured: Boolean(chat && chatModelConfigured(chat))
+    };
+  });
+
+  app.post("/api/model-profiles", async (request, reply) => {
+    const parsed = createModelProfileSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_MODEL_PROFILE", message: "模型档案格式不正确" });
+    try {
+      return reply.code(201).send({ profile: modelRegistry.createProfile(parsed.data) });
+    } catch (error) {
+      return sendModelRegistryError(reply, error);
+    }
+  });
+
+  app.patch<{ Params: { id: string } }>("/api/model-profiles/:id", async (request, reply) => {
+    const parsed = updateModelProfileSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_MODEL_PROFILE", message: "模型档案格式不正确" });
+    try {
+      return { profile: modelRegistry.updateProfile(request.params.id, parsed.data) };
+    } catch (error) {
+      return sendModelRegistryError(reply, error);
+    }
+  });
+
+  app.delete<{ Params: { id: string } }>("/api/model-profiles/:id", async (request, reply) => {
+    try {
+      modelRegistry.deleteProfile(request.params.id);
+      return reply.code(204).send();
+    } catch (error) {
+      return sendModelRegistryError(reply, error);
+    }
+  });
+
+  app.put("/api/model-registry/chat-profile", async (request, reply) => {
+    const parsed = chatProfileSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_CHAT_PROFILE", message: "聊天模型选择格式不正确" });
+    try {
+      modelRegistry.setChatProfile(parsed.data.profileId);
+      const chat = modelRegistry.chatSettings();
+      return { registry: modelRegistry.view(), chatConfigured: Boolean(chat && chatModelConfigured(chat)) };
+    } catch (error) {
+      return sendModelRegistryError(reply, error);
+    }
+  });
+
+  app.put<{ Params: { id: string } }>("/api/executors/:id/model-binding", async (request, reply) => {
+    const id = request.params.id;
+    if (!(EXECUTOR_IDS as readonly string[]).includes(id)) {
+      return reply.code(404).send({ error: "EXECUTOR_NOT_FOUND", message: "执行器不存在" });
+    }
+    const parsed = executorModelBindingSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_MODEL_BINDING", message: "执行器模型绑定格式不正确" });
+    try {
+      return { binding: modelRegistry.saveBinding(id as ExecutorId, parsed.data) };
+    } catch (error) {
+      return sendModelRegistryError(reply, error);
+    }
   });
 
   app.get("/api/executor-settings", async () => {
@@ -552,12 +674,14 @@ export async function buildServer(options: BuildServerOptions = {}) {
 
   app.get("/api/executors", async () => {
     const settings = loadExecutorSettings(executorSettingsPath);
+    const modelBindings = modelRegistry.bindingViews();
     const executors: ExecutorView[] = EXECUTORS.map((descriptor) => ({
       ...descriptor,
       runtime: executorRuntimeSettings(settings, descriptor.id),
       concurrency: settings.concurrency[descriptor.id],
       health: executorHealth(descriptor.id),
-      install: executorInstaller.info(descriptor.id, executorSettingsPath)
+      install: executorInstaller.info(descriptor.id, executorSettingsPath),
+      modelBinding: modelBindings.find((binding) => binding.executorId === descriptor.id)
     }));
     return {
       executors,
@@ -1901,6 +2025,13 @@ function sendProactiveError(reply: FastifyReply, error: unknown) {
 function sendDesktopError(reply: FastifyReply, error: unknown) {
   if (error instanceof DesktopError) {
     return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+  }
+  throw error;
+}
+
+function sendModelRegistryError(reply: FastifyReply, error: unknown) {
+  if (error instanceof ModelRegistryError) {
+    return reply.code(error.code === "MODEL_PROFILE_NOT_FOUND" ? 404 : 400).send({ error: error.code, message: error.message });
   }
   throw error;
 }
