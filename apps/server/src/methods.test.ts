@@ -38,6 +38,23 @@ describe("MethodService", () => {
     expect(store.getMethodCandidate(candidate.id)?.name).toBe(candidate.name);
   });
 
+  it("assigns and clears a method on a queued task", () => {
+    const source = terminalTask("completed");
+    const candidate = methods.generateFromTask(source.id);
+    const queued = service.createTask({ templateId: "T01" });
+
+    const assigned = methods.assignToTask(queued.id, candidate.id);
+    expect(assigned.methodId).toBe(candidate.id);
+    expect(assigned.methodVersion).toBe(candidate.version);
+
+    const cleared = methods.assignToTask(queued.id, null);
+    expect(cleared.methodId).toBeNull();
+    expect(cleared.methodVersion).toBeNull();
+
+    const otherTemplate = service.createTask({ templateId: "T02" });
+    expect(() => methods.assignToTask(otherTemplate.id, candidate.id)).toThrowError(MethodError);
+  });
+
   it("rejects capability expansion at candidate creation", () => {
     const task = terminalTask();
     expect(() => methods.create({

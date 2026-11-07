@@ -56,6 +56,7 @@ const createTaskSchema = z.object({
   executorId: z.enum(EXECUTOR_IDS).optional(),
   taskKind: z.enum(["delivery", "workspace", "general"]).optional(),
   expectedOutputs: z.array(z.string().trim().min(1).max(200)).max(20).optional(),
+  methodId: z.string().trim().min(1).max(100).optional(),
   permissions: z.object({
     readRoots: z.array(z.string().trim().min(1).max(1000)).max(20),
     writeRoots: z.array(z.string().trim().min(1).max(1000)).max(20),
@@ -207,6 +208,7 @@ const evaluateMethodSchema = z.object({
 const methodTrialSchema = z.object({ taskId: z.string().trim().min(1).max(100) }).strict();
 const methodRollbackSchema = z.object({ reason: z.string().trim().min(1).max(1000) }).strict();
 const methodRejectSchema = z.object({ reason: z.string().trim().max(1000).optional() }).strict();
+const assignTaskMethodSchema = z.object({ methodId: z.string().trim().min(1).max(100).nullable() }).strict();
 
 const createSyncPeerSchema = z.object({
   name: z.string().trim().min(1).max(120),
@@ -1660,6 +1662,18 @@ export async function buildServer(options: BuildServerOptions = {}) {
     if (input.templateId && !getTemplate(input.templateId)) {
       return reply.code(400).send({ error: "UNKNOWN_TEMPLATE", message: `没有找到任务模板 ${input.templateId}` });
     }
+    if (parsed.data.methodId !== undefined) {
+      try {
+        const assignment = methods.validateAssignment({
+          methodId: parsed.data.methodId,
+          templateId: parsed.data.templateId ?? null
+        });
+        input.methodId = assignment.methodId;
+        input.methodVersion = assignment.methodVersion;
+      } catch (error) {
+        return sendMethodError(reply, error);
+      }
+    }
 
     try {
       const task = service.createTask(input);
@@ -1669,6 +1683,21 @@ export async function buildServer(options: BuildServerOptions = {}) {
         return reply.code(error.statusCode).send({ error: error.code, message: error.message });
       }
       throw error;
+    }
+  });
+
+  app.patch<{ Params: { id: string } }>("/api/tasks/:id/method", async (request, reply) => {
+    const parsed = assignTaskMethodSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "INVALID_METHOD_ASSIGNMENT", message: "方法绑定参数不正确" });
+    }
+    if (!store.getTask(request.params.id)) {
+      return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    }
+    try {
+      return methods.assignToTask(request.params.id, parsed.data.methodId);
+    } catch (error) {
+      return sendMethodError(reply, error);
     }
   });
 

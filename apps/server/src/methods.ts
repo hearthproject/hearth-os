@@ -56,6 +56,8 @@ const DEFAULT_GUARDRAILS = [
 ];
 
 const TERMINAL_TASK_STATUSES = new Set(["completed", "failed", "recoverable"]);
+const ASSIGNABLE_TASK_STATUSES = new Set(["queued", "failed", "recoverable", "waiting_input"]);
+const UNASSIGNABLE_METHOD_STATUSES = new Set(["rejected", "reverted", "superseded"]);
 
 export class MethodService {
   private readonly service: HearthService;
@@ -100,6 +102,29 @@ export class MethodService {
       templateId: task.templateId,
       allowedCapabilities: capabilities
     });
+  }
+
+  validateAssignment(input: { methodId: string; templateId?: string | null }): { methodId: string; methodVersion: number } {
+    const method = this.requireMethod(input.methodId);
+    if (UNASSIGNABLE_METHOD_STATUSES.has(method.status)) {
+      throw new MethodError("METHOD_NOT_ASSIGNABLE", "当前方法状态不能绑定到任务", 409);
+    }
+    if (method.templateId && method.templateId !== input.templateId) {
+      throw new MethodError("METHOD_TEMPLATE_MISMATCH", "方法只适用于模板 " + method.templateId, 409);
+    }
+    return { methodId: method.id, methodVersion: method.version };
+  }
+
+  assignToTask(taskId: string, methodId: string | null): TaskRecord {
+    const task = this.requireTask(taskId);
+    if (!ASSIGNABLE_TASK_STATUSES.has(task.status)) {
+      throw new MethodError("METHOD_TASK_NOT_ASSIGNABLE", "当前任务状态不能绑定方法", 409);
+    }
+    if (methodId === null) {
+      return this.service.updateTask(taskId, { methodId: null, methodVersion: null });
+    }
+    const assignment = this.validateAssignment({ methodId, templateId: task.templateId });
+    return this.service.updateTask(taskId, assignment);
   }
 
   create(input: CreateMethodInput): MethodCandidate {

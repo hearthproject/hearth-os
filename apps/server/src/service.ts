@@ -54,6 +54,8 @@ export interface CreateTaskInput {
   taskKind?: TaskKind;
   expectedOutputs?: string[];
   permissions?: TaskPermissions;
+  methodId?: string;
+  methodVersion?: number;
 }
 
 export class TaskInputSelectionError extends Error {
@@ -193,7 +195,9 @@ export class HearthService {
       executorId,
       taskKind,
       expectedOutputs,
-      ...(input.permissions ? { permissions: input.permissions } : {})
+      ...(input.permissions ? { permissions: input.permissions } : {}),
+      methodId: input.methodId ?? null,
+      methodVersion: input.methodVersion ?? null
     };
     const event = this.store.appendEvent({ type: "task.created", taskId: id, payload: task });
     this.bus.publish(event);
@@ -340,7 +344,7 @@ export class HearthService {
     return new Map(this.store.listTasks().map((task) => [task.id, task.title]));
   }
 
-  updateTask(taskId: string, patch: Partial<Pick<TaskRecord, "status" | "title" | "goal" | "currentRunId" | "nextAction" | "error" | "resultSummary" | "conversationId" | "executorId" | "taskKind" | "expectedOutputs" | "permissions" | "pendingInput">>, runId?: string): TaskRecord {
+  updateTask(taskId: string, patch: Partial<Pick<TaskRecord, "status" | "title" | "goal" | "currentRunId" | "nextAction" | "error" | "resultSummary" | "conversationId" | "executorId" | "taskKind" | "expectedOutputs" | "permissions" | "pendingInput" | "methodId" | "methodVersion">>, runId?: string): TaskRecord {
     const task = this.requireTask(taskId);
     if (patch.status && patch.status !== task.status) assertTransition(task.status, patch.status);
     const previousStatus = task.status;

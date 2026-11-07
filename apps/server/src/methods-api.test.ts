@@ -63,6 +63,41 @@ describe("methods API", () => {
     await app.close();
   });
 
+  it("creates and patches tasks with explicit method assignments", async () => {
+    const source = terminalTask("completed");
+    const app = await buildServer({ store, serveWeb: false });
+
+    const generated = await app.inject({ method: "POST", url: "/api/methods/generate", payload: { taskId: source.id } });
+    const methodId = generated.json().id as string;
+    const methodVersion = generated.json().version as number;
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: { templateId: "T01", methodId }
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().methodId).toBe(methodId);
+    expect(created.json().methodVersion).toBe(methodVersion);
+
+    const patched = await app.inject({
+      method: "PATCH",
+      url: `/api/tasks/${created.json().id}/method`,
+      payload: { methodId: null }
+    });
+    expect(patched.statusCode).toBe(200);
+    expect(patched.json().methodId).toBeNull();
+
+    const mismatch = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: { templateId: "T02", methodId }
+    });
+    expect(mismatch.statusCode).toBe(409);
+    expect(mismatch.json().error).toBe("METHOD_TEMPLATE_MISMATCH");
+    await app.close();
+  });
+
   it("validates method input and exposes permission errors", async () => {
     const source = terminalTask("completed");
     const app = await buildServer({ store, serveWeb: false });
