@@ -35,6 +35,8 @@ import type {
   ExecutorId,
   ExecutorInstallInfo,
   ExecutorInstallJob,
+  ExecutorModelBindingPatch,
+  ExecutorModelBindingView,
   ExecutorProbeResult,
   ExecutorRuntimeSettings,
   ExecutorSettings,
@@ -60,7 +62,10 @@ import type {
   MethodTrial,
   MethodVerdict,
   ModelProviderPreset,
+  ModelProfilePatch,
+  ModelProfileView,
   ModelProtocol,
+  ModelRegistryView,
   ModelSettingsView,
   OutboxAttachment,
   OutboxDraft,
@@ -79,6 +84,7 @@ import type {
   ScheduleRecord,
   ScheduleRunRecord,
   ScheduleRunStatus,
+  SettingsMigrationRecord,
   SourceConnection,
   SourceItem,
   SourceKind,
@@ -133,6 +139,8 @@ export type {
   ExecutorId,
   ExecutorInstallInfo,
   ExecutorInstallJob,
+  ExecutorModelBindingPatch,
+  ExecutorModelBindingView,
   ExecutorProbeResult,
   ExecutorRuntimeSettings,
   ExecutorSettings,
@@ -158,7 +166,10 @@ export type {
   MethodTrial,
   MethodVerdict,
   ModelProviderPreset,
+  ModelProfilePatch,
+  ModelProfileView,
   ModelProtocol,
+  ModelRegistryView,
   ModelSettingsView,
   OutboxAttachment,
   OutboxDraft,
@@ -177,6 +188,7 @@ export type {
   ScheduleRecord,
   ScheduleRunRecord,
   ScheduleRunStatus,
+  SettingsMigrationRecord,
   SourceConnection,
   SourceItem,
   SourceKind,
@@ -193,6 +205,31 @@ export type {
   TaskStatus,
   TaskTemplate
 };
+
+export interface ModelRegistryResponse extends ModelRegistryView {
+  presets: ModelProviderPreset[];
+  chatConfigured: boolean;
+}
+
+export interface SettingsStorageResponse {
+  dataDir: string;
+  schemaVersion: number;
+  paths: {
+    database: string;
+    executors: string;
+    codexHome: string;
+    deepseekHarnessHome: string;
+    contextBlobs: string;
+    backups: string;
+    attachments: string;
+  };
+  legacy: {
+    modelSettings: string;
+    executorSettings: string;
+  };
+  migrations: SettingsMigrationRecord[];
+  startupMigrations: SettingsMigrationRecord[];
+}
 
 export interface TaskView {
   task: TaskRecord;

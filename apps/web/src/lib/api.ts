@@ -23,7 +23,9 @@ import type {
   DeviceCapabilityKind,
   DeviceView,
   ExecutorId,
+  ExecutorModelBindingPatch,
   ExecutorInstallResponse,
+  ExecutorModelBindingView,
   ExecutorListResponse,
   ExecutorProbeResult,
   ExecutorSettingsPatch,
@@ -39,9 +41,14 @@ import type {
   MethodSnapshot,
   MemorySnapshot,
   ModelListResponse,
+  ModelProfilePatch,
+  ModelProfileView,
   ModelProtocol,
+  ModelRegistryResponse,
+  ModelRegistryView,
   ModelSettingsResponse,
   ModelTestResponse,
+  SettingsStorageResponse,
   OutboxDraft,
   OutboxDraftListItem,
   OutboxDraftRequest,
@@ -136,6 +143,25 @@ export const api = {
     }),
   deleteConversation: (id: string) => request<void>(`/api/conversations/${encodeURIComponent(id)}`, { method: "DELETE" }),
   modelSettings: () => request<ModelSettingsResponse>("/api/model-settings"),
+  modelRegistry: () => request<ModelRegistryResponse>("/api/model-registry"),
+  createModelProfile: (input: ModelProfilePatch) => request<{ profile: ModelProfileView }>("/api/model-profiles", {
+    method: "POST",
+    body: JSON.stringify(input)
+  }),
+  updateModelProfile: (id: string, input: ModelProfilePatch) => request<{ profile: ModelProfileView }>(`/api/model-profiles/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  }),
+  deleteModelProfile: (id: string) => request<void>(`/api/model-profiles/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  setChatProfile: (profileId: string | null) => request<{ registry: ModelRegistryView; chatConfigured: boolean }>("/api/model-registry/chat-profile", {
+    method: "PUT",
+    body: JSON.stringify({ profileId })
+  }),
+  saveExecutorModelBinding: (id: ExecutorId, input: ExecutorModelBindingPatch) => request<{ binding: ExecutorModelBindingView }>(`/api/executors/${encodeURIComponent(id)}/model-binding`, {
+    method: "PUT",
+    body: JSON.stringify(input)
+  }),
+  settingsStorage: () => request<SettingsStorageResponse>("/api/settings/storage"),
   saveModelSettings: (input: {
     providerId?: string;
     providerName?: string;
