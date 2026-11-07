@@ -309,6 +309,70 @@ describe("chat-first API", () => {
     await app.close();
   });
 
+  it("uses the global preferred executor for new conversations", async () => {
+    const executorSettingsPath = join(root, "executor-settings.json");
+    const app = await buildServer({
+      store,
+      serveWeb: false,
+      modelSettingsPath: join(root, "settings.json"),
+      attachmentRoot: join(root, "files"),
+      executorSettingsPath
+    });
+    const saved = await app.inject({
+      method: "PUT",
+      url: "/api/executor-settings",
+      payload: { preferredExecutorId: "codex" }
+    });
+    expect(saved.statusCode).toBe(200);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/chat",
+      payload: { message: "帮我写一份本周工作周报" }
+    });
+    const events = parseSse(response.body);
+    const routing = events.find((event) => event.event === "routing")?.data;
+    expect(routing.preferredExecutorId).toBe("codex");
+    expect(routing.plan.executorId).toBe("codex");
+    expect(events.find((event) => event.event === "task")?.data.task.executorId).toBe("codex");
+    await app.close();
+  });
+
+  it("lets a conversation override the global preference and falls back on capability gaps", async () => {
+    const executorSettingsPath = join(root, "executor-settings.json");
+    const app = await buildServer({
+      store,
+      serveWeb: false,
+      modelSettingsPath: join(root, "settings.json"),
+      attachmentRoot: join(root, "files"),
+      executorSettingsPath
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/executor-settings",
+      payload: { preferredExecutorId: "codex" }
+    });
+    const conversation = await app.inject({
+      method: "POST",
+      url: "/api/conversations",
+      payload: { title: "Native 优先", settings: { preferredExecutorId: "native" } }
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/chat",
+      payload: {
+        conversationId: conversation.json().id,
+        message: "帮我审查这个 PR https://github.com/acme/repo/pull/12 并生成 result.md"
+      }
+    });
+    const events = parseSse(response.body);
+    const routing = events.find((event) => event.event === "routing")?.data;
+    expect(routing.preferredExecutorId).toBe("native");
+    expect(routing.reroutedFrom).toBe("native");
+    expect(events.find((event) => event.event === "task")?.data.task.executorId).toBe("codex");
+    await app.close();
+  });
+
   it("does not create tasks when both executors are disabled but leaves chat available", async () => {
     const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
     const conversation = await app.inject({

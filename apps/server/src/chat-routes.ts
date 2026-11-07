@@ -332,10 +332,15 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     const settings = loadModelSettings(modelSettingsPath);
     const route = await decideRoute(userContent, storedFiles.length > 0, detectedUrl, settings);
     const plan = planExecution(userContent);
-    const resolution = resolveExecutorFromEnabled(plan.executorId, conversation.settings.executorEnabled, executorAvailability(), plan.capability);
+    const executorSettings = loadExecutorSettings(executorSettingsPath);
+    const preferredExecutorId = conversation.settings.preferredExecutorId
+      ?? executorSettings.preferredExecutorId
+      ?? plan.executorId;
+    const resolution = resolveExecutorFromEnabled(preferredExecutorId, conversation.settings.executorEnabled, executorAvailability(), plan.capability);
     send("routing", {
       ...route,
       plan: { ...plan, executorId: resolution.executorId ?? plan.executorId },
+      preferredExecutorId,
       ...(resolution.reroutedFrom ? { reroutedFrom: resolution.reroutedFrom } : {})
     });
 

@@ -76,7 +76,7 @@ export function executorName(id: ExecutorId): string {
 }
 
 const CAPABILITY_SUPPORT: Record<ExecutionCapability, ExecutorId[]> = {
-  github: ["codex", "hermes"],
+  github: ["codex", "hermes", "qoder", "workbuddy", "zcode", "kimi"],
   "desktop-capture": ["native"]
 };
 
