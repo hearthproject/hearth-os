@@ -20,7 +20,7 @@
 
 <p align="center">
   <img alt="Phase 1 MVP accepted" src="https://img.shields.io/badge/phase%201-MVP%20accepted-b8471d">
-  <img alt="296 tests passing" src="https://img.shields.io/badge/tests-296%20passing-2f7d4f">
+  <img alt="325 tests passing" src="https://img.shields.io/badge/tests-325%20passing-2f7d4f">
   <img alt="Node.js 22.13+" src="https://img.shields.io/badge/node-22.13%2B-3c873a">
   <img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-1b1815">
 </p>
@@ -187,11 +187,14 @@ scripts/               文档与交付数据辅助脚本
 ## 验证
 
 ```bash
-npm test           # 54 个测试文件、296 个测试
+npm test           # 56 个测试文件、325 个测试
 npm run typecheck
 npm run build
 npm run docs:build
+npm run test:e2e   # 浏览器 E2E；使用隔离数据目录，存在 .hearth/model-settings.json 时走真实模型
 ```
+
+E2E 会在随机本地端口启动服务，并使用临时 `HEARTH_DATA_DIR`，不会触碰真实 `.hearth` 数据。可用 `HEARTH_E2E_MODEL_SETTINGS` 指定其他模型配置，`HEARTH_E2E_OFFLINE=1` 跳过在线聊天，`HEARTH_E2E_KEEP=1` 保留临时数据用于排查。
 
 测试覆盖服务层、API、模型协议、原生工具循环、预算、权限、检查点、提案确认、桌面边界、记忆、方法、同步、安全、备份与运维。测试通过不等于真实验收完成；阶段一逐项证据见 [`eval/phase-1-acceptance.md`](eval/phase-1-acceptance.md)。
 
