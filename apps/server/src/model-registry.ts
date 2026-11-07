@@ -262,11 +262,9 @@ export class ModelRegistry {
   settingsForExecutorOrChat(executorId: ExecutorId): ModelSettings | null {
     const bound = this.settingsForExecutor(executorId);
     if (bound) return bound;
-    if (executorId !== "native" && executorId !== "deepseek-harness") return null;
+    if (executorId !== "native") return null;
     const chat = this.chatSettings();
-    if (!chat) return null;
-    if (executorId === "deepseek-harness" && chat.protocol === "gemini") return null;
-    return chat;
+    return chat ?? null;
   }
 
   codexProfile(): CodexProfile | null {
