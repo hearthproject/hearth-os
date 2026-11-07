@@ -63,7 +63,7 @@ The frontend uses React and Vite without a second server-rendered runtime. Task 
 
 ## Module Map and Key Boundaries
 
-The eleven modules below are parallel design notes. Together they cover the product from the first entrance to long-running operation, without following a code directory layout.
+The twelve modules below are parallel design notes. Together they cover the product from the first entrance to long-running operation, without following a code directory layout.
 
 | Module | What it solves first |
 |---|---|
@@ -71,6 +71,7 @@ The eleven modules below are parallel design notes. Together they cover the prod
 | [Tasks and Durable Execution](/en/design/tasks) | Keep work alive across restarts, sleep, and failure, with evidence and recovery |
 | [Control and Authority](/en/design/control) | Decide when to observe, suggest, execute, or stop, within explicit authority |
 | [Executors and Routing](/en/design/executors) | Use specialized capabilities instead of one universal model |
+| [Storage and Context Architecture](/en/design/storage) | Unify facts, model bindings, and handoff watermarks with SQLite, content blobs, and task context |
 | [Native Agent Runtime](/en/design/native-agent-runtime) | A self-built single-agent loop that unifies model protocols, tool permissions, budgets, and checkpoints |
 | [Approvals, Takeover, and External Effects](/en/design/effects) | Make sends, writes, deletes, and publishes previewable, authorized, and reconcilable |
 | [Runtime and Safety](/en/design/safety) | Limit real-world impact with isolation, least privilege, and credential boundaries |
