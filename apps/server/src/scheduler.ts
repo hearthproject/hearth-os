@@ -76,6 +76,7 @@ export interface SchedulerOptions {
   context?: ContextService | undefined;
   contextBlobRoot?: string | undefined;
   methods?: MethodService | undefined;
+  autoLearn?: boolean | undefined;
 }
 
 export class HearthScheduler {
@@ -102,6 +103,7 @@ export class HearthScheduler {
   private readonly runtimePreparer: typeof prepareTaskRuntime;
   private readonly memory: MemoryService;
   private readonly methods: MethodService;
+  private readonly autoLearn: boolean;
   private readonly context: ContextService;
   private readonly projector: ContextProjector;
   private readonly summaryTasks = new Set<Promise<void>>();
@@ -153,6 +155,7 @@ export class HearthScheduler {
     this.runtimePreparer = options.runtimePreparer ?? prepareTaskRuntime;
     this.memory = new MemoryService(this.service);
     this.methods = options.methods ?? new MethodService(this.service);
+    this.autoLearn = options.autoLearn ?? false;
     this.context = options.context ?? new ContextService(this.service, options.contextBlobRoot ?? CONTEXT_BLOB_DIR);
     this.projector = new ContextProjector(this.service, this.context);
     this.service.setContextSink((message) => {
@@ -860,6 +863,27 @@ export class HearthScheduler {
       this.controllers.delete(taskId);
       this.cancelled.delete(taskId);
       if (this.service.store.getTask(taskId)?.status !== "waiting_approval") this.releaseLease(taskId);
+      this.learnFromTask(taskId);
+    }
+  }
+
+  private learnFromTask(taskId: string): void {
+    try {
+      const task = this.service.store.getTask(taskId);
+      if (!task || !["completed", "failed", "recoverable"].includes(task.status)) return;
+      if (task.methodId) {
+        try {
+          this.methods.recordTrial(task.methodId, taskId);
+        } catch {
+          // Trial evidence is best effort; explicit recording remains available.
+        }
+        return;
+      }
+      if (!this.autoLearn || !this.methods.settings().autoLearn) return;
+      if (this.service.store.listContextItems(taskId, { limit: 3 }).items.length < 3) return;
+      this.methods.generateFromTask(taskId);
+    } catch {
+      // Learning must never change the task outcome.
     }
   }
 

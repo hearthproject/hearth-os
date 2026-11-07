@@ -511,6 +511,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
         approvals,
         context,
         methods,
+        autoLearn: true,
         leases,
         attachmentRoot,
         executorSettingsPath,

@@ -512,11 +512,37 @@ describe("Hearth scheduler", () => {
       expectedOutputs: ["meeting-notes.md"]
     });
     await waitForStatus(service, task.id, "completed");
+    await delay(50);
 
     expect(prompt).toContain("可复用方法（不可信流程建议）");
     expect(prompt).toContain(candidate.name);
     expect(store?.listMethodApplications({ taskId: task.id })).toHaveLength(1);
     expect(store?.listContextItems(task.id, { limit: 50 }).items.some((item) => item.kind === "method")).toBe(true);
+    expect(store?.listMethodTrials(candidate.id)).toHaveLength(1);
+  });
+
+  it("learns a new candidate from a completed task when auto-learn is enabled", async () => {
+    const service = setup();
+    const modelSettingsPath = configureModel();
+    const nativeRunner: NativeRunner = async (options) => {
+      writeFileSync(join(options.prepared.outDir, "result.md"), "# 学习结果\n");
+      return nativeResult("学习执行完成");
+    };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath, autoLearn: true });
+    scheduler.start();
+
+    const task = service.createTask({
+      title: "自动学习任务",
+      goal: "完成并沉淀经验",
+      executorId: "native",
+      expectedOutputs: ["result.md"]
+    });
+    await waitForStatus(service, task.id, "completed");
+
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline && (store?.listMethodCandidates().length ?? 0) === 0) await delay(20);
+    expect(store?.listMethodCandidates().length).toBeGreaterThan(0);
+    expect(store?.listMethodCandidates()[0]?.sourceTaskIds).toEqual([task.id]);
   });
 
   it("stops at a pending approval before any GitHub write", async () => {
@@ -1000,6 +1026,7 @@ describe("Hearth scheduler", () => {
       executorHealth?: ExecutorHealthProvider;
       deepseekRunner?: (options: { workingDirectory: string }) => Promise<DeepSeekHarnessRunResult>;
       modelSettingsForExecutor?: (executorId: ExecutorId) => ModelSettings | null;
+      autoLearn?: boolean;
     } = {}
   ): HearthScheduler {
     return new HearthScheduler({
