@@ -25,6 +25,18 @@ describe("MethodService", () => {
     return service.requireTask(task.id);
   }
 
+  function injectMethod(taskId: string, methodId: string, methodVersion: number) {
+    const runId = "run-" + taskId;
+    service.createRun({
+      id: runId, taskId, attempt: 1, status: "completed", threadId: null, workspace: "workspace",
+      startedAt: now.toISOString(), endedAt: now.toISOString(), failure: null, usage: null,
+      leaseEpoch: null, createdAt: now.toISOString(), executorId: "native"
+    });
+    return methods.recordApplication({
+      taskId, runId, methodId, methodVersion, selection: "pinned", promptSha256: "a".repeat(64)
+    });
+  }
+
   it("generates a candidate from terminal task trajectories", () => {
     const task = terminalTask("completed");
     const candidate = methods.generateFromTask(task.id);
@@ -103,6 +115,7 @@ describe("MethodService", () => {
     const baseline = terminalTask("failed");
     const trial = terminalTask("completed");
     const candidate = methods.generateFromTask(source.id);
+    injectMethod(trial.id, candidate.id, candidate.version);
 
     const trialled = methods.recordTrial(candidate.id, trial.id);
     expect(trialled.status).toBe("trial");
@@ -126,10 +139,23 @@ describe("MethodService", () => {
     expect(reverted.guardrails.some((guardrail) => guardrail.includes("试跑后出现回归"))).toBe(true);
   });
 
+  it("requires injection evidence for a trial", () => {
+    const source = terminalTask("completed");
+    const candidate = methods.generateFromTask(source.id);
+    const uninjected = terminalTask("completed");
+    expect(() => methods.recordTrial(candidate.id, uninjected.id))
+      .toThrowError(expect.objectContaining({ code: "METHOD_TRIAL_NOT_INJECTED" }));
+
+    injectMethod(uninjected.id, candidate.id, candidate.version + 1);
+    expect(() => methods.recordTrial(candidate.id, uninjected.id))
+      .toThrowError(expect.objectContaining({ code: "METHOD_TRIAL_VERSION_MISMATCH" }));
+  });
+
   it("does not promote flat or permission-expanded candidates", () => {
     const source = terminalTask("completed");
     const trial = terminalTask("completed");
     const candidate = methods.generateFromTask(source.id);
+    injectMethod(trial.id, candidate.id, candidate.version);
     methods.recordTrial(candidate.id, trial.id);
     const evaluation = methods.evaluate(candidate.id, {
       baselineTaskIds: [source.id],

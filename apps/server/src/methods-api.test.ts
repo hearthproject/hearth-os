@@ -21,6 +21,20 @@ describe("methods API", () => {
     return task;
   }
 
+  function injectMethod(taskId: string, methodId: string, methodVersion: number) {
+    const now = new Date().toISOString();
+    const runId = "run-" + taskId;
+    service.createRun({
+      id: runId, taskId, attempt: 1, status: "completed", threadId: null, workspace: "workspace",
+      startedAt: now, endedAt: now, failure: null, usage: null, leaseEpoch: null, createdAt: now,
+      executorId: "native"
+    });
+    return store.insertMethodApplication({
+      id: "application-" + taskId, taskId, runId, methodId, methodVersion,
+      selection: "pinned", promptSha256: "a".repeat(64), createdAt: now
+    });
+  }
+
   it("generates, evaluates, promotes, and rolls back a candidate", async () => {
     const source = terminalTask("completed");
     const baseline = terminalTask("failed");
@@ -30,7 +44,14 @@ describe("methods API", () => {
     const generated = await app.inject({ method: "POST", url: "/api/methods/generate", payload: { taskId: source.id } });
     expect(generated.statusCode).toBe(201);
     const methodId = generated.json().id as string;
+    const methodVersion = generated.json().version as number;
     expect(generated.json().status).toBe("candidate");
+    injectMethod(trial.id, methodId, methodVersion);
+
+    const uninjected = terminalTask("completed");
+    const missingEvidence = await app.inject({ method: "POST", url: "/api/methods/" + methodId + "/trials", payload: { taskId: uninjected.id } });
+    expect(missingEvidence.statusCode).toBe(409);
+    expect(missingEvidence.json().error).toBe("METHOD_TRIAL_NOT_INJECTED");
 
     const recorded = await app.inject({ method: "POST", url: "/api/methods/" + methodId + "/trials", payload: { taskId: trial.id } });
     expect(recorded.statusCode).toBe(200);

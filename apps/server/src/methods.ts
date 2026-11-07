@@ -223,8 +223,21 @@ export class MethodService {
     if (this.service.store.listEffects(task.id).length > 0) {
       throw new MethodError("METHOD_TRIAL_SIDE_EFFECT", "试跑样本包含外部副作用，不能作为 Shadow 证据", 409);
     }
-    if (this.service.store.listMethodTrials(id).some((trial) => trial.taskId === taskId)) {
-      return method;
+    const existingTrial = this.service.store.listMethodTrials().find((trial) => trial.taskId === taskId);
+    if (existingTrial?.methodId === id) return method;
+    if (existingTrial) {
+      throw new MethodError("METHOD_TRIAL_TASK_TAKEN", "该任务已经是其他方法的试跑样本", 409);
+    }
+    const applications = this.service.store.listMethodApplications({ taskId, methodId: id, limit: 20 });
+    if (applications.length === 0) {
+      throw new MethodError("METHOD_TRIAL_NOT_INJECTED", "该任务没有注入过这个方法，不能作为试跑证据", 409);
+    }
+    const application = applications.find((item) => item.methodVersion === method.version);
+    if (!application) {
+      throw new MethodError("METHOD_TRIAL_VERSION_MISMATCH", "试跑任务使用的版本与当前方法版本不一致", 409);
+    }
+    if (!this.service.store.getRun(application.runId)) {
+      throw new MethodError("METHOD_TRIAL_RUN_MISSING", "试跑任务对应的运行记录不存在", 409);
     }
     const trial: MethodTrial = {
       id: randomUUID(),
