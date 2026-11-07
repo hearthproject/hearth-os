@@ -397,6 +397,45 @@ describe("chat-first API", () => {
     await app.close();
   });
 
+  it("does not reroute a selected Codex executor that has a bound model", async () => {
+    const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/model-profiles",
+      payload: {
+        name: "Codex test",
+        providerId: "custom",
+        providerName: "Responses",
+        protocol: "openai-responses",
+        baseUrl: "https://responses.example.com/v1",
+        model: "responses-model",
+        apiKey: "test-key"
+      }
+    });
+    expect(created.statusCode, created.body).toBe(201);
+    await bindProfile(app, "codex", created.json().profile.id);
+
+    const conversation = await app.inject({
+      method: "POST",
+      url: "/api/conversations",
+      payload: {
+        title: "Codex 绑定",
+        settings: { preferredExecutorId: "codex", executorEnabled: { codex: true } }
+      }
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/chat",
+      payload: { conversationId: conversation.json().id, message: "帮我修复项目里的 TypeScript 错误" }
+    });
+    const events = parseSse(response.body);
+    const routing = events.find((event) => event.event === "routing")?.data;
+    expect(routing.preferredExecutorId).toBe("codex");
+    expect(routing.reroutedFrom).toBeUndefined();
+    expect(events.find((event) => event.event === "task")?.data.task.executorId).toBe("codex");
+    await app.close();
+  });
+
   it("keeps a method question in chat when no router model is configured", async () => {
     const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
     const response = await app.inject({
