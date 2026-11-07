@@ -11,7 +11,7 @@ import { missingExpectedOutputs, publishArtifacts } from "./artifacts.ts";
 import { CONTEXT_BLOB_DIR, EXECUTOR_SETTINGS_PATH, GIT_CACHE_DIR, MODEL_SETTINGS_PATH, REPO_ROOT, SOURCE_CONTENT_DIR, WORKSPACE_DIR } from "./config.ts";
 import { ContextService, estimateTokens } from "./context.ts";
 import { diagnoseFailure } from "./context-diagnosis.ts";
-import { applyDiagnosisAdvice, classifyFailure, decideFailure, evaluateHandoff, type FailureDecision } from "./context-policy.ts";
+import { classifyFailure, decideFailure, evaluateHandoff, isExecutorFailureCause, type FailureDecision } from "./context-policy.ts";
 import { ContextProjector } from "./context-projector.ts";
 import { maybeModelSummary } from "./context-summary.ts";
 import { loadExecutorSettings } from "./executor-settings.ts";
@@ -19,7 +19,7 @@ import { HermesApprovalRequiredError, HermesStartupError } from "./hermes-execut
 import type { ExternalContextItem } from "./external-executor.ts";
 import { executorHealth as readExecutorHealth } from "./executor-runtime.ts";
 import { sanitizeProgressDetail } from "./progress-detail.ts";
-import { resolveExecutorId } from "./executors.ts";
+import { EXECUTOR_FALLBACK_ORDER, executorName, resolveExecutorId } from "./executors.ts";
 import { extractProposedComment, inspectRepository, readPrPreview, validatePullRequestPreview } from "./github.ts";
 import type { CommandRunner } from "./github.ts";
 import { MemoryService } from "./memory.ts";
@@ -138,7 +138,7 @@ export class HearthScheduler {
       ?? ((executorId, settings) => readExecutorHealth(executorId, settings, this.executorSettingsPath));
     this.modelSettingsPath = options.modelSettingsPath ?? MODEL_SETTINGS_PATH;
     this.modelSettingsForExecutor = options.modelSettingsForExecutor
-      ?? ((executorId) => executorId === "native" || executorId === "deepseek-harness"
+      ?? ((executorId) => executorId === "native"
         ? loadModelSettings(this.modelSettingsPath)
         : null);
     this.runBudget = options.runBudget ?? DEFAULT_RUN_BUDGET;
@@ -739,10 +739,22 @@ export class HearthScheduler {
         }
         const failureTask = this.service.requireTask(taskId);
         const cause = classifyFailure({ service: this.service, task: failureTask, run: result.run, error: result.error, aborted: result.aborted, stopping: this.stopping });
-        const targetExecutor = this.handoffTargetFor(executorId);
         const settings = this.context.settings();
-        const diagnosis = await this.diagnoseFailure(taskId, failureTask, result.run, result.error, cause, targetExecutor);
-        const decision = this.decideNextAction({ task: failureTask, cause, targetExecutor, diagnosis, settings, retriesUsed: retriesByExecutor.get(executorId) ?? 0, handoffsUsed, attemptedExecutors, taskRoot });
+        const target = this.selectHandoffTarget({ task: failureTask, cause, settings, attemptedExecutors, handoffsUsed, taskRoot });
+        const diagnosis = await this.diagnoseFailure(taskId, failureTask, result.run, result.error, cause, target.targetExecutor);
+        const decision = this.decideNextAction({
+          task: failureTask,
+          cause,
+          effectiveCause: diagnosis.cause,
+          target,
+          diagnosis,
+          settings,
+          approvalMode: this.service.approvalModeForTask(failureTask),
+          retriesUsed: retriesByExecutor.get(executorId) ?? 0,
+          handoffsUsed,
+          attemptedExecutors,
+          taskRoot
+        });
         this.capture({
           taskId, conversationId: failureTask.conversationId ?? null, runId: result.run.id, executorId,
           kind: "decision", role: "system", content: `${decision.action}：${decision.reason}`,
@@ -793,13 +805,13 @@ export class HearthScheduler {
           }
           this.appendHandoffNotice(taskId, currentHandoff, false);
           const taskError: TaskError = {
-            ...(result.failure ?? { kind: "execution_failed", message: decision.reason, recoverable: true, guidance: "确认后可以用 Codex 继续" }),
+            ...(result.failure ?? { kind: "execution_failed", message: decision.reason, recoverable: true, guidance: "确认后可以切换执行器继续" }),
             cause, diagnosisId: diagnosis.id
           };
           this.service.updateTask(taskId, {
             status: "waiting_input", currentRunId: result.run.id,
-            nextAction: `等待确认用 ${decision.targetExecutor} 继续`, error: taskError,
-            resultSummary: `执行器建议接管：${diagnosis.summary}\n\n${decision.reason}`
+            nextAction: `是否切换到 ${executorName(decision.targetExecutor)} 继续？`, error: taskError,
+            resultSummary: decision.reason
           }, result.run.id);
           this.refreshTaskSummary(taskId, { lastFailure: taskError });
           return;
@@ -808,21 +820,23 @@ export class HearthScheduler {
           ...(result.failure ?? { kind: "execution_failed", message: decision.reason, recoverable: true, guidance: "查看运行记录后重试" }),
           cause, diagnosisId: diagnosis.id
         };
+        const diagnosisSummary = diagnosis.source === "model" ? diagnosis.summary : decision.reason;
         if (result.failure?.kind === "input_unavailable") {
           this.service.updateTask(taskId, {
             status: "recoverable", currentRunId: result.run.id,
-            nextAction: this.nextActionForCause(cause), error: taskError
+            nextAction: this.nextActionForCause(cause), error: taskError, resultSummary: diagnosisSummary
           }, result.run.id);
         } else if (cause === "permission" || cause === "budget" || cause === "input_missing" || cause === "effect_uncertain") {
           this.service.updateTask(taskId, {
             status: "waiting_input", currentRunId: result.run.id,
             nextAction: this.nextActionForCause(cause),
-            error: taskError, resultSummary: decision.reason
+            error: taskError, resultSummary: diagnosisSummary
           }, result.run.id);
         } else {
           this.service.updateTask(taskId, {
             status: "recoverable", currentRunId: result.run.id,
-            nextAction: this.nextActionForCause(cause), error: taskError
+            nextAction: decision.reason || this.nextActionForCause(cause), error: taskError,
+            resultSummary: diagnosisSummary
           }, result.run.id);
         }
         this.refreshTaskSummary(taskId, { lastFailure: taskError });
@@ -1102,9 +1116,11 @@ export class HearthScheduler {
   private decideNextAction(input: {
     task: TaskRecord;
     cause: FailureCause;
-    targetExecutor: ExecutorId | null;
+    effectiveCause: FailureCause;
+    target: { targetExecutor: ExecutorId | null; highRisk: boolean; reason: string };
     diagnosis: FailureDiagnosis;
     settings: ContextSettings;
+    approvalMode: "necessary" | "full";
     retriesUsed: number;
     handoffsUsed: number;
     attemptedExecutors: Set<ExecutorId>;
@@ -1112,33 +1128,58 @@ export class HearthScheduler {
   }): FailureDecision {
     const canRetry = input.retriesUsed < input.settings.maxSameExecutorRetries;
     if (input.cause === "transient" && canRetry) {
-      return { cause: input.cause, action: "retry_same", targetExecutor: input.targetExecutor, autoAllowed: true, highRisk: false, reason: "临时故障，先重试同一执行器" };
+      return { cause: input.cause, action: "retry_same", targetExecutor: null, autoAllowed: true, highRisk: false, reason: "临时故障，先重试同一执行器" };
     }
-    if (input.cause === "permission" || input.cause === "input_missing" || input.cause === "budget" || input.cause === "effect_uncertain" || input.cause === "interrupted") {
-      return { cause: input.cause, action: "ask_user", targetExecutor: input.targetExecutor, autoAllowed: false, highRisk: false, reason: this.nextActionForCause(input.cause) };
+    if (!isExecutorFailureCause(input.effectiveCause)) {
+      return {
+        cause: input.effectiveCause,
+        action: input.effectiveCause === "permission" || input.effectiveCause === "input_missing" || input.effectiveCause === "budget" || input.effectiveCause === "effect_uncertain" || input.effectiveCause === "interrupted" ? "ask_user" : "fail",
+        targetExecutor: null,
+        autoAllowed: false,
+        highRisk: false,
+        reason: input.diagnosis.summary || this.nextActionForCause(input.effectiveCause)
+      };
     }
-    if (!input.targetExecutor) {
-      return { cause: input.cause, action: "fail", targetExecutor: null, autoAllowed: false, highRisk: false, reason: "v1 只支持从 native 接管到 Codex，当前执行器没有可用的接管目标" };
+    const targetExecutor = input.target.targetExecutor;
+    if (!targetExecutor) {
+      const exhausted = input.handoffsUsed >= input.settings.maxHandoffs;
+      return {
+        cause: input.effectiveCause,
+        action: "fail",
+        targetExecutor: null,
+        autoAllowed: false,
+        highRisk: false,
+        reason: exhausted ? "已达到最大接管次数，所有已尝试执行器均未完成任务" : input.target.reason
+      };
     }
     const settings = this.executorSettings();
-    const health = this.executorHealth(input.targetExecutor, settings);
-    const targetEnabled = this.executorEnabledForTask(input.task, input.targetExecutor);
-    const adapterCheck = this.adapters[input.targetExecutor].canRun({
+    const health = this.executorHealth(targetExecutor, settings);
+    const targetEnabled = this.executorEnabledForTask(input.task, targetExecutor);
+    const adapterCheck = this.adapters[targetExecutor].canRun({
       task: input.task,
       prepared: null,
       settings: input.settings,
       executorSettings: settings,
-      modelSettings: this.modelSettingsForExecutor(input.targetExecutor)
+      modelSettings: this.modelSettingsForExecutor(targetExecutor)
     });
     const evaluation = evaluateHandoff({
-      service: this.service, task: input.task, targetExecutor: input.targetExecutor,
+      service: this.service, task: input.task, targetExecutor,
       targetAvailable: health.canRun && adapterCheck.ok, targetEnabled, settings: input.settings, taskWorkspace: input.taskRoot
     });
     const decision = decideFailure({
-      cause: input.cause, settings: input.settings, evaluation, targetExecutor: input.targetExecutor,
+      cause: input.effectiveCause, settings: input.settings, evaluation, targetExecutor,
       retriesUsed: input.retriesUsed, handoffsUsed: input.handoffsUsed, attemptedExecutors: [...input.attemptedExecutors]
     });
-    return applyDiagnosisAdvice(decision, input.diagnosis);
+    if (decision.action !== "handoff") return decision;
+    const autoAllowed = input.approvalMode === "full" && input.settings.mode === "on" && input.settings.autoHandoffRisk === "low";
+    return {
+      ...decision,
+      autoAllowed,
+      highRisk: input.target.highRisk,
+      reason: autoAllowed
+        ? `执行器故障：${input.diagnosis.summary}，自动切换到 ${executorName(targetExecutor)} 继续`
+        : `执行器故障：${input.diagnosis.summary}。是否切换到 ${executorName(targetExecutor)} 继续？`
+    };
   }
 
   private async diagnoseFailure(taskId: string, task: TaskRecord, run: RunRecord, error: unknown, cause: FailureCause, targetExecutor: ExecutorId | null): Promise<FailureDiagnosis> {
@@ -1150,12 +1191,15 @@ export class HearthScheduler {
       recommendedAction: cause === "transient" ? "retry_same" : ["permission", "input_missing", "budget", "effect_uncertain", "interrupted"].includes(cause) ? "ask_user" : targetExecutor ? "handoff" : "fail",
       targetExecutor, doNotRepeat: [], source: "rules", createdAt: new Date().toISOString()
     };
-    const modelAttempted = ["unknown", "capability_gap", "contract_failure"].includes(cause);
+    const modelAttempted = isExecutorFailureCause(cause);
     let contextTokens = 0;
     if (modelAttempted) {
       const items = [...this.context.listItems(taskId, { limit: 50 }).items].reverse();
       contextTokens = estimateTokens(items.map((item) => item.content).join("\n"));
-      const modelDiagnosis = await diagnoseFailure({ settings: loadModelSettings(this.modelSettingsPath), task, run, error, cause, items });
+      const chatSettings = this.modelSettingsForExecutor("native") ?? loadModelSettings(this.modelSettingsPath);
+      const modelDiagnosis = chatSettings
+        ? await diagnoseFailure({ settings: chatSettings, task, run, error, cause, items })
+        : null;
       if (modelDiagnosis) diagnosis = modelDiagnosis;
     }
     try {
@@ -1353,8 +1397,47 @@ export class HearthScheduler {
     };
   }
 
-  private handoffTargetFor(executorId: ExecutorId): ExecutorId | null {
-    return executorId === "native" ? "codex" : null;
+  private selectHandoffTarget(input: {
+    task: TaskRecord;
+    cause: FailureCause;
+    settings: ContextSettings;
+    attemptedExecutors: Set<ExecutorId>;
+    handoffsUsed: number;
+    taskRoot: string;
+  }): { targetExecutor: ExecutorId | null; highRisk: boolean; reason: string } {
+    if (!isExecutorFailureCause(input.cause)) {
+      return { targetExecutor: null, highRisk: false, reason: "这不是执行器故障，不需要切换执行器" };
+    }
+    if (input.handoffsUsed >= input.settings.maxHandoffs) {
+      return { targetExecutor: null, highRisk: false, reason: "已达到最大接管次数，所有已尝试执行器均未完成任务" };
+    }
+    const executorSettings = this.executorSettings();
+    for (const candidate of EXECUTOR_FALLBACK_ORDER) {
+      if (input.attemptedExecutors.has(candidate)) continue;
+      if (!this.executorEnabledForTask(input.task, candidate)) continue;
+      const health = this.executorHealth(candidate, executorSettings);
+      if (!health.canRun) continue;
+      const adapterCheck = this.adapters[candidate].canRun({
+        task: input.task,
+        prepared: null,
+        settings: input.settings,
+        executorSettings,
+        modelSettings: this.modelSettingsForExecutor(candidate)
+      });
+      if (!adapterCheck.ok) continue;
+      const evaluation = evaluateHandoff({
+        service: this.service,
+        task: input.task,
+        targetExecutor: candidate,
+        targetAvailable: true,
+        targetEnabled: true,
+        settings: input.settings,
+        taskWorkspace: input.taskRoot
+      });
+      if (!evaluation.eligible || !evaluation.targetAvailable) continue;
+      return { targetExecutor: candidate, highRisk: evaluation.highRisk, reason: evaluation.reason };
+    }
+    return { targetExecutor: null, highRisk: false, reason: "没有其他已启用且可用的执行器可以接管" };
   }
 
   private executorEnabledForTask(task: TaskRecord, executorId: ExecutorId): boolean {
@@ -1413,7 +1496,7 @@ export class HearthScheduler {
     const artifacts = handoff.packet?.artifacts.map((artifact) => artifact.path).slice(0, 5).join("、") || "无";
     const content = started
       ? `执行器已从 ${handoff.fromExecutor} 切换到 ${handoff.toExecutor} 继续。\n\n原因：${summary}\n已交接产物：${artifacts}`
-      : `任务建议切换到 ${handoff.toExecutor}：${summary}\n\n确认后会用已有工作区、产物和摘要继续执行。`;
+      : `是否切换到 ${executorName(handoff.toExecutor)} 继续？`;
     try {
       this.service.appendChatMessage({
         id: randomUUID(), conversationId: task.conversationId, role: "assistant", content, taskId,
@@ -1436,7 +1519,7 @@ export class HearthScheduler {
       context: this.context,
       task,
       state,
-      settings: loadModelSettings(this.modelSettingsPath),
+      settings: this.modelSettingsForExecutor("native") ?? loadModelSettings(this.modelSettingsPath),
       signal: controller.signal
     }).then(() => undefined).catch(() => undefined).finally(() => {
       this.summaryTasks.delete(promise);

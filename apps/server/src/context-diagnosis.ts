@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { ContextItem, FailureAction, FailureCause, FailureDiagnosis, RunRecord, TaskRecord } from "@hearth/core";
-import { FAILURE_ACTIONS, FAILURE_CAUSES } from "@hearth/core";
+import { EXECUTOR_IDS, FAILURE_ACTIONS, FAILURE_CAUSES } from "@hearth/core";
 import type { AgentMessage } from "./model-agent.ts";
 import { streamAgentTurn } from "./model-agent.ts";
 import { chatModelConfigured, type ModelSettings } from "./model-settings.ts";
@@ -30,7 +30,7 @@ export async function diagnoseFailure(input: DiagnosisInput): Promise<FailureDia
     "summary: 一句话中文诊断",
     "evidenceItemIds: 字符串数组，只能引用下面给出的上下文 item id",
     "recommendedAction: retry_same|handoff|ask_user|fail",
-    "targetExecutor: native|codex|hermes|null",
+    `targetExecutor: ${EXECUTOR_IDS.join("|")}|null`,
     "doNotRepeat: 字符串数组，列出已经发生、不能重复的动作",
     "",
     `任务：${input.task.title}`,
@@ -56,8 +56,8 @@ export async function diagnoseFailure(input: DiagnosisInput): Promise<FailureDia
     const recommendedAction = FAILURE_ACTIONS.includes(parsed.recommendedAction as FailureAction)
       ? parsed.recommendedAction as FailureAction
       : "ask_user";
-    const targetExecutor = parsed.targetExecutor === "native" || parsed.targetExecutor === "codex" || parsed.targetExecutor === "hermes"
-      ? parsed.targetExecutor
+    const targetExecutor = typeof parsed.targetExecutor === "string" && (EXECUTOR_IDS as readonly string[]).includes(parsed.targetExecutor)
+      ? parsed.targetExecutor as (typeof EXECUTOR_IDS)[number]
       : null;
     const allowedIds = new Set(input.items.map((item) => item.id));
     const evidenceItemIds = Array.isArray(parsed.evidenceItemIds)

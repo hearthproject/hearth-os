@@ -3,7 +3,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { HandoffRecord, HandoffStatus, TaskRecord, TaskStatus } from "@hearth/core";
+import type { ExecutorId, HandoffRecord, HandoffStatus, TaskRecord, TaskStatus } from "@hearth/core";
+import { defaultConversationSettings } from "@hearth/core";
 import type { CodexRunner, ExecutorHealthProvider, NativeRunner } from "./scheduler.ts";
 import { ApprovalManager } from "./approvals.ts";
 import { HearthStore } from "@hearth/eventlog";
@@ -11,6 +12,8 @@ import { HearthScheduler } from "./scheduler.ts";
 import { HearthService } from "./service.ts";
 import { MemoryService } from "./memory.ts";
 import { TaskLeaseService } from "./leases.ts";
+import type { ModelSettings } from "./model-settings.ts";
+import type { DeepSeekHarnessRunResult } from "@hearth/deepseek-executor";
 
 const FAKE_RESULT = {
   threadId: "fake-thread",
@@ -178,15 +181,19 @@ describe("Hearth scheduler", () => {
 
   it("tries a second delivery repair, then fails honestly when artifacts are still missing", async () => {
     const service = setup();
+    const conversation = fullConversation();
     let calls = 0;
     const runner: CodexRunner = async () => {
       calls += 1;
       return FAKE_RESULT;
     };
-    scheduler = makeScheduler(service, runner);
+    const executorHealth: ExecutorHealthProvider = (executorId) => executorId === "codex"
+      ? { canRun: true, issues: [] }
+      : { canRun: false, issues: ["未安装"] };
+    scheduler = makeScheduler(service, runner, { executorHealth });
     scheduler.start();
 
-    const task = service.createTask({ templateId: "T01" });
+    const task = service.createTask({ templateId: "T01", executorId: "codex", conversationId: conversation.id });
     const failed = await waitForStatus(service, task.id, "recoverable");
 
     expect(calls).toBe(3);
@@ -534,6 +541,7 @@ describe("Hearth scheduler", () => {
   it("hands a native capability failure to Codex with the previous outputs", async () => {
     const service = setup();
     const modelSettingsPath = configureModel();
+    const conversation = fullConversation();
     let codexPrompt = "";
     const nativeRunner: NativeRunner = async (options) => {
       writeFileSync(join(options.prepared.outDir, "partial.md"), "# partial\n\nnative progress\n");
@@ -550,7 +558,7 @@ describe("Hearth scheduler", () => {
 
     const task = service.createTask({
       title: "native gap", goal: "生成结果", textInput: "从 native 开始",
-      executorId: "native", expectedOutputs: ["result.md"]
+      executorId: "native", expectedOutputs: ["result.md"], conversationId: conversation.id
     });
     await waitForStatus(service, task.id, "completed");
     const handoffs = await waitForHandoff(store as HearthStore, task.id, "completed");
@@ -577,6 +585,7 @@ describe("Hearth scheduler", () => {
   it("hands off a native runtime crash without spending a same-executor retry", async () => {
     const service = setup();
     const modelSettingsPath = configureModel();
+    const conversation = fullConversation();
     let nativeCalls = 0;
     const nativeRunner: NativeRunner = async () => {
       nativeCalls += 1;
@@ -589,7 +598,7 @@ describe("Hearth scheduler", () => {
     scheduler = makeScheduler(service, codexRunner, { nativeRunner, modelSettingsPath });
     scheduler.start();
 
-    const task = service.createTask({ title: "runtime crash", goal: "生成结果", executorId: "native", expectedOutputs: ["result.md"] });
+    const task = service.createTask({ title: "runtime crash", goal: "生成结果", executorId: "native", expectedOutputs: ["result.md"], conversationId: conversation.id });
     const completed = await waitForStatus(service, task.id, "completed");
     expect(completed.executorId).toBe("codex");
     expect(nativeCalls).toBe(1);
@@ -634,7 +643,106 @@ describe("Hearth scheduler", () => {
     const task = service.createTask({ title: "permission", goal: "修改外部系统", executorId: "native", expectedOutputs: ["result.md"] });
     const waiting = await waitForStatus(service, task.id, "waiting_input");
     expect(waiting.error?.cause).toBe("permission");
+    expect(waiting.resultSummary).toContain("权限不足");
     expect(store?.listHandoffs(task.id)).toHaveLength(0);
+  });
+
+  it("only asks whether to switch executors in necessary approval mode", async () => {
+    const service = setup();
+    const modelSettingsPath = configureModel();
+    let codexCalls = 0;
+    const nativeRunner: NativeRunner = async () => {
+      throw new Error("执行器不可用：进程崩溃");
+    };
+    const codexRunner: CodexRunner = async (options) => {
+      codexCalls += 1;
+      writeFileSync(join(testOutDir(options), "result.md"), "# should not run\n");
+      return FAKE_RESULT;
+    };
+    const executorHealth: ExecutorHealthProvider = (executorId) => executorId === "native" || executorId === "codex"
+      ? { canRun: true, issues: [] }
+      : { canRun: false, issues: ["未安装"] };
+    scheduler = makeScheduler(service, codexRunner, { nativeRunner, modelSettingsPath, executorHealth });
+    scheduler.start();
+
+    const task = service.createTask({ title: "necessary", goal: "生成结果", executorId: "native", expectedOutputs: ["result.md"] });
+    const waiting = await waitForStatus(service, task.id, "waiting_input");
+    expect(waiting.nextAction).toBe("是否切换到 Codex 执行器 继续？");
+    expect(waiting.resultSummary).toBe("执行器故障：执行器不可用：进程崩溃。是否切换到 Codex 执行器 继续？");
+    expect(codexCalls).toBe(0);
+    expect(store?.listHandoffs(task.id)).toHaveLength(1);
+    expect(store?.listHandoffs(task.id)[0]?.status).toBe("pending_user");
+    expect(store?.listRuns(task.id)).toHaveLength(1);
+  });
+
+  it("uses the first-class fallback order and lets the chat model diagnose each failure", async () => {
+    const service = setup();
+    const modelSettingsPath = configureModel();
+    const conversation = fullConversation();
+    const dshCalls: string[] = [];
+    const nativeRunner: NativeRunner = async () => {
+      throw new Error("执行器不可用：native 崩溃");
+    };
+    const deepseekRunner = async (options: { workingDirectory: string }): Promise<DeepSeekHarnessRunResult> => {
+      dshCalls.push(options.workingDirectory);
+      throw new Error("执行器不可用：DeepSeek Harness 崩溃");
+    };
+    let codexPrompt = "";
+    const codexRunner: CodexRunner = async (options) => {
+      codexPrompt = options.prompt;
+      writeFileSync(join(testOutDir(options), "result.md"), "# recovered by codex\n");
+      return FAKE_RESULT;
+    };
+    const executorHealth: ExecutorHealthProvider = (executorId) => ["deepseek-harness", "codex", "native"].includes(executorId)
+      ? { canRun: true, issues: [] }
+      : { canRun: false, issues: ["未安装"] };
+    scheduler = makeScheduler(service, codexRunner, {
+      nativeRunner,
+      modelSettingsPath,
+      executorHealth,
+      deepseekRunner: deepseekRunner as never,
+      modelSettingsForExecutor: (executorId) => executorId === "deepseek-harness" ? dshSettings() : executorId === "native" ? chatSettings() : null
+    });
+    scheduler.start();
+
+    const task = service.createTask({ title: "ordered fallback", goal: "生成结果", executorId: "native", expectedOutputs: ["result.md"], conversationId: conversation.id });
+    const completed = await waitForStatus(service, task.id, "completed");
+    expect(completed.executorId).toBe("codex");
+    expect(dshCalls).toHaveLength(1);
+    expect(codexPrompt).toContain("DeepSeek Harness");
+    expect(store?.listRuns(task.id).map((run) => run.executorId)).toEqual(["native", "deepseek-harness", "codex"]);
+    expect(store?.listHandoffs(task.id).map((handoff) => handoff.toExecutor)).toEqual(["deepseek-harness", "codex"]);
+    expect(store?.listContextItems(task.id, { limit: 200 }).items.filter((item) => item.kind === "diagnosis").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("stops after the configured maximum handoffs and reports the exhausted executors", async () => {
+    const service = setup();
+    const conversation = fullConversation();
+    const nativeRunner: NativeRunner = async () => {
+      throw new Error("执行器不可用：native 崩溃");
+    };
+    const deepseekRunner = async (): Promise<DeepSeekHarnessRunResult> => {
+      throw new Error("执行器不可用：DeepSeek Harness 崩溃");
+    };
+    const codexRunner: CodexRunner = async () => {
+      throw new Error("执行器不可用：Codex 崩溃");
+    };
+    const executorHealth: ExecutorHealthProvider = (executorId) => ["deepseek-harness", "codex", "native"].includes(executorId)
+      ? { canRun: true, issues: [] }
+      : { canRun: false, issues: ["未安装"] };
+    scheduler = makeScheduler(service, codexRunner, {
+      nativeRunner,
+      executorHealth,
+      deepseekRunner: deepseekRunner as never,
+      modelSettingsForExecutor: (executorId) => executorId === "deepseek-harness" ? dshSettings() : executorId === "native" ? chatSettings() : null
+    });
+    scheduler.start();
+
+    const task = service.createTask({ title: "bounded fallback", goal: "生成结果", executorId: "deepseek-harness", expectedOutputs: ["result.md"], conversationId: conversation.id });
+    const recoverable = await waitForStatus(service, task.id, "recoverable");
+    expect(recoverable.nextAction).toContain("最大接管次数");
+    expect(store?.listRuns(task.id)).toHaveLength(3);
+    expect(store?.listHandoffs(task.id)).toHaveLength(2);
   });
 
   it("creates a pending handoff for high-risk tasks and continues after confirmation", async () => {
@@ -655,7 +763,8 @@ describe("Hearth scheduler", () => {
       expectedOutputs: ["result.md"], networkHosts: ["api.example.com"]
     });
     const waiting = await waitForStatus(service, task.id, "waiting_input");
-    expect(waiting.nextAction).toContain("等待确认用 codex 继续");
+    expect(waiting.nextAction).toContain("是否切换到 Codex 执行器 继续？");
+    expect(waiting.resultSummary).toContain("是否切换到 Codex 执行器 继续？");
     const pending = store?.listHandoffs(task.id) ?? [];
     expect(pending).toHaveLength(1);
     expect(pending[0]?.status).toBe("pending_user");
@@ -671,18 +780,19 @@ describe("Hearth scheduler", () => {
   it("does not hand off when Codex is unavailable", async () => {
     const service = setup();
     const modelSettingsPath = configureModel();
+    const conversation = fullConversation();
     const nativeRunner: NativeRunner = async () => {
       throw new Error("工具持续失败，无法完成任务");
     };
-    const executorHealth: ExecutorHealthProvider = (executorId) => executorId === "codex"
-      ? { canRun: false, issues: ["Codex 未安装"] }
-      : { canRun: true, issues: [] };
+    const executorHealth: ExecutorHealthProvider = (executorId) => executorId === "native"
+      ? { canRun: true, issues: [] }
+      : { canRun: false, issues: ["未安装"] };
     scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath, executorHealth });
     scheduler.start();
 
-    const task = service.createTask({ title: "no codex", goal: "生成结果", executorId: "native", expectedOutputs: ["result.md"] });
+    const task = service.createTask({ title: "no codex", goal: "生成结果", executorId: "native", expectedOutputs: ["result.md"], conversationId: conversation.id });
     const recoverable = await waitForStatus(service, task.id, "recoverable");
-    expect(recoverable.nextAction).toContain("重试");
+    expect(recoverable.nextAction).toContain("没有其他已启用且可用的执行器");
     expect(store?.listHandoffs(task.id)).toHaveLength(0);
   });
 
@@ -697,7 +807,7 @@ describe("Hearth scheduler", () => {
 
     const task = service.createTask({
       title: "chat completion", goal: "生成结果", conversationId: conversation.id,
-      expectedOutputs: ["result.md"]
+      executorId: "codex", expectedOutputs: ["result.md"]
     });
     await waitForStatus(service, task.id, "completed");
     const messages = (store as HearthStore).listChatMessages(conversation.id);
@@ -729,16 +839,20 @@ describe("Hearth scheduler", () => {
   it("does not chain a second handoff after Codex also fails", async () => {
     const service = setup();
     const modelSettingsPath = configureModel();
+    const conversation = fullConversation();
     const nativeRunner: NativeRunner = async () => {
       throw new Error("工具持续失败，无法完成任务");
     };
     const codexRunner: CodexRunner = async () => {
       throw new Error("工具持续失败，无法完成任务");
     };
-    scheduler = makeScheduler(service, codexRunner, { nativeRunner, modelSettingsPath });
+    const executorHealth: ExecutorHealthProvider = (executorId) => executorId === "native" || executorId === "codex"
+      ? { canRun: true, issues: [] }
+      : { canRun: false, issues: ["未安装"] };
+    scheduler = makeScheduler(service, codexRunner, { nativeRunner, modelSettingsPath, executorHealth });
     scheduler.start();
 
-    const task = service.createTask({ title: "bounded", goal: "生成结果", executorId: "native", expectedOutputs: ["result.md"] });
+    const task = service.createTask({ title: "bounded", goal: "生成结果", executorId: "native", expectedOutputs: ["result.md"], conversationId: conversation.id });
     const recoverable = await waitForStatus(service, task.id, "recoverable");
     expect(recoverable.status).toBe("recoverable");
     expect(store?.listHandoffs(task.id)).toHaveLength(1);
@@ -808,6 +922,14 @@ describe("Hearth scheduler", () => {
     return new HearthService(store);
   }
 
+  function fullConversation() {
+    return (store as HearthStore).createConversation("完全权限", defaultConversationSettings("full", {
+      native: true,
+      codex: true,
+      "deepseek-harness": true
+    }));
+  }
+
   function makeScheduler(
     service: HearthService,
     codexRunner: CodexRunner,
@@ -819,6 +941,8 @@ describe("Hearth scheduler", () => {
       nativeRunner?: NativeRunner;
       modelSettingsPath?: string;
       executorHealth?: ExecutorHealthProvider;
+      deepseekRunner?: (options: { workingDirectory: string }) => Promise<DeepSeekHarnessRunResult>;
+      modelSettingsForExecutor?: (executorId: ExecutorId) => ModelSettings | null;
     } = {}
   ): HearthScheduler {
     return new HearthScheduler({
@@ -852,9 +976,26 @@ describe("Hearth scheduler", () => {
       protocol: "openai-chat",
       baseUrl: "https://example.invalid/v1",
       model: "test-model",
-      apiKey: "sk-test"
+      apiKey: "sk-test",
+      updatedAt: null
     }));
     return path;
+  }
+
+  function chatSettings(): ModelSettings {
+    return {
+      providerId: "custom",
+      providerName: "测试模型",
+      protocol: "openai-chat",
+      baseUrl: "https://example.invalid/v1",
+      model: "test-model",
+      apiKey: "sk-test",
+      updatedAt: null
+    };
+  }
+
+  function dshSettings(): ModelSettings {
+    return { ...chatSettings(), providerId: "deepseek", providerName: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat" };
   }
 
   function requireTemp(): string {

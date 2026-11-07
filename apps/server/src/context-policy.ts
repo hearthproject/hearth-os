@@ -159,3 +159,11 @@ export function applyDiagnosisAdvice(decision: FailureDecision, diagnosis: { sou
 export function effectNeedsReconciliation(effects: EffectRecord[]): boolean {
   return effects.some((effect) => effect.status === "uncertain" || effect.status === "executing");
 }
+
+export function isExecutorFailureCause(cause: FailureCause): boolean {
+  return cause === "runtime_fault"
+    || cause === "transient"
+    || cause === "capability_gap"
+    || cause === "contract_failure"
+    || cause === "unknown";
+}
