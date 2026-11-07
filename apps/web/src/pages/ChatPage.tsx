@@ -21,7 +21,7 @@ import {
   Trash2,
   X
 } from "lucide-react";
-import { api, chatStream } from "../lib/api.ts";
+import { ApiError, api, chatStream } from "../lib/api.ts";
 import { TaskStatusIcon } from "../components/TaskStatusIcon.tsx";
 import { formatBytes, formatTime } from "../lib/format.ts";
 import { executorLabel, taskKindLabel, TASK_STATUS_LABELS } from "../lib/labels.ts";
@@ -44,8 +44,8 @@ const SUGGESTIONS = [
   "帮我检查项目里的 TypeScript 错误"
 ];
 
-const DEFAULT_SETTINGS: ConversationSettings = {
-  executorEnabled: { native: true, codex: true, "deepseek-harness": false, hermes: true, qoder: false, workbuddy: false, kimi: false },
+const PENDING_SETTINGS: ConversationSettings = {
+  executorEnabled: { native: false, codex: false, "deepseek-harness": false, hermes: false, qoder: false, workbuddy: false, kimi: false },
   approvalMode: "necessary",
   preferredExecutorId: null
 };
@@ -75,7 +75,7 @@ export function ChatPage() {
   const [routing, setRouting] = useState<RoutingState | null>(null);
   const [proposals, setProposals] = useState<TaskProposalRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [draftSettings, setDraftSettings] = useState<ConversationSettings>(DEFAULT_SETTINGS);
+  const [draftSettings, setDraftSettings] = useState<ConversationSettings | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -87,11 +87,12 @@ export function ChatPage() {
   const conversationQuery = useQuery({
     queryKey: ["conversation", conversationId],
     queryFn: () => api.conversation(conversationId as string),
-    enabled: Boolean(conversationId)
+    enabled: Boolean(conversationId),
+    retry: false
   });
   const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health });
   const executorsQuery = useQuery({ queryKey: ["executors"], queryFn: api.executors, refetchInterval: 20_000 });
-  const executorSettingsQuery = useQuery({ queryKey: ["executorSettings"], queryFn: api.executorSettings });
+  const conversationDefaultsQuery = useQuery({ queryKey: ["conversationDefaults"], queryFn: api.conversationDefaults, staleTime: Infinity });
   const conversations = conversationsQuery.data?.conversations ?? [];
   const tasks = tasksQuery.data?.tasks ?? [];
   const tasksByConversation = new Map<string, TaskListItem[]>();
@@ -102,16 +103,15 @@ export function ChatPage() {
     tasksByConversation.set(task.conversationId, list);
   }
   const current = conversations.find((item) => item.id === conversationId) ?? null;
-  const conversationSettings = current?.settings ?? conversationQuery.data?.conversation.settings ?? draftSettings;
-  const settingsReady = !conversationId || Boolean(current || conversationQuery.data);
-  const defaultApprovalMode = executorSettingsQuery.data?.settings.defaultApprovalMode ?? "necessary";
-  const globalDefaultsApplied = useRef(false);
-
-  useEffect(() => {
-    if (globalDefaultsApplied.current || conversationId) return;
-    globalDefaultsApplied.current = true;
-    setDraftSettings((prev) => ({ ...prev, approvalMode: defaultApprovalMode }));
-  }, [defaultApprovalMode, conversationId]);
+  const serverDefaults = conversationDefaultsQuery.data?.settings ?? null;
+  const conversationSettings = current?.settings
+    ?? conversationQuery.data?.conversation.settings
+    ?? draftSettings
+    ?? serverDefaults
+    ?? PENDING_SETTINGS;
+  const settingsReady = conversationId
+    ? Boolean(current || conversationQuery.data)
+    : Boolean(serverDefaults);
 
   useEffect(() => {
     if (!conversationQuery.data || sending) return;
@@ -119,6 +119,14 @@ export function ChatPage() {
     setMessages((prev) => (nextMessages.length >= prev.length ? nextMessages : prev));
     setProposals(conversationQuery.data.proposals.filter((proposal) => proposal.status === "pending"));
   }, [conversationQuery.data, sending]);
+
+  useEffect(() => {
+    if (!conversationQuery.isError) return;
+    if (conversationQuery.error instanceof ApiError && conversationQuery.error.status === 404) {
+      resetConversationView(null);
+      setError("原对话已失效，已为你开始新对话。");
+    }
+  }, [conversationQuery.isError, conversationQuery.error]);
 
   useEffect(() => {
     conversationIdRef.current = conversationId;
@@ -137,8 +145,7 @@ export function ChatPage() {
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  function selectConversation(id: string | null) {
-    if (sending) return;
+  function resetConversationView(id: string | null) {
     setConversationId(id);
     conversationIdRef.current = id;
     setMessages([]);
@@ -146,10 +153,15 @@ export function ChatPage() {
     setReasoning("");
     setRouting(null);
     setProposals([]);
-    setError(null);
-    if (!id) setDraftSettings({ ...DEFAULT_SETTINGS, approvalMode: defaultApprovalMode });
+    setDraftSettings(null);
     if (id) localStorage.setItem("hearth.conversation", id);
     else localStorage.removeItem("hearth.conversation");
+  }
+
+  function selectConversation(id: string | null) {
+    if (sending) return;
+    resetConversationView(id);
+    setError(null);
   }
 
   function patchSettings(patch: ConversationSettingsPatch) {
@@ -243,7 +255,7 @@ export function ChatPage() {
 
   async function send() {
     const text = input.trim();
-    if (sending || uploading || (!text && attachments.length === 0)) return;
+    if (sending || uploading || !settingsReady || (!text && attachments.length === 0)) return;
     const sentAttachments = attachments;
     setInput("");
     setAttachments([]);
@@ -263,7 +275,7 @@ export function ChatPage() {
           ...(conversationId ? { conversationId } : {}),
           ...(text ? { message: text } : {}),
           ...(sentAttachments.length > 0 ? { attachments: sentAttachments } : {}),
-          ...(!conversationId ? { settings: draftSettings } : {})
+          ...(!conversationId ? { settings: conversationSettings } : {})
         },
         {
           signal: controller.signal,
@@ -304,7 +316,11 @@ export function ChatPage() {
         }
       );
     } catch (sendError) {
-      if (!controller.signal.aborted) {
+      if (sendError instanceof ApiError && sendError.status === 404) {
+        resetConversationView(null);
+        setInput(text);
+        setError("原对话已失效，已为你开始新对话，请重新发送。");
+      } else if (!controller.signal.aborted) {
         setError(sendError instanceof Error ? sendError.message : "发送失败");
       }
     } finally {
@@ -320,6 +336,7 @@ export function ChatPage() {
 
   function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
+      if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
       event.preventDefault();
       void send();
     }
@@ -329,8 +346,7 @@ export function ChatPage() {
   const executorViews = executorsQuery.data?.executors ?? [];
   const executorAvailability = {} as Record<ExecutorId, boolean>;
   for (const id of EXECUTOR_ORDER) {
-    executorAvailability[id] = executorViews.find((executor) => executor.id === id)?.health.canRun
-      ?? (id === "native" ? true : id === "codex" ? healthQuery.data?.codex.canRun ?? true : id === "hermes" ? healthQuery.data?.hermes.canRun ?? false : false);
+    executorAvailability[id] = executorViews.find((executor) => executor.id === id)?.health.canRun ?? false;
   }
   const executorReady = EXECUTOR_ORDER.some((id) => executorAvailability[id] && conversationSettings.executorEnabled[id]);
   const allExecutorsOff = !EXECUTOR_ORDER.some((id) => conversationSettings.executorEnabled[id]);
@@ -399,7 +415,7 @@ export function ChatPage() {
               )}
               {!executorReady && (
                 <ChatNotice icon={<Settings2 size={15} />} tone="warn">
-                  Codex 执行器当前不可用，任务会排队。到<Link to="/settings">设置</Link>查看连接诊断。
+                  当前没有可用的执行器，任务无法派出。到<Link to="/settings">设置</Link>查看连接诊断。
                 </ChatNotice>
               )}
               {messages.map((message) => <ChatBubble key={message.id} message={message} conversationId={conversationId} />)}
@@ -467,7 +483,7 @@ export function ChatPage() {
               <span className="composer-toolbar-note">{selectedExecutorName} 当前不可用，任务会按能力自动回退</span>
             )}
             {allExecutorsOff && (
-              <span className="composer-toolbar-note">所有执行器都已关闭，任务请求会改为普通回答</span>
+              <span className="composer-toolbar-note">所有执行器都已关闭，请先选择一个可用执行器</span>
             )}
           </div>
           {error && (
@@ -513,7 +529,7 @@ export function ChatPage() {
               rows={1}
               disabled={sending}
             />
-            <button className="composer-send" onClick={() => void send()} disabled={sending || uploading || (!input.trim() && attachments.length === 0)} title="发送">
+            <button className="composer-send" onClick={() => void send()} disabled={sending || uploading || !settingsReady || (!input.trim() && attachments.length === 0)} title="发送">
               {sending ? <Loader2 size={17} className="spin" /> : <ArrowUp size={18} />}
             </button>
           </div>

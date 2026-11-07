@@ -11,6 +11,7 @@ import type {
   ConversationDetail,
   ConversationListItem,
   ConversationRecord,
+  ConversationSettings,
   ConversationSettingsPatch,
   ArtifactListItem,
   BackupRestoreResult,
@@ -98,6 +99,18 @@ export interface ChatStreamHandlers {
   signal?: AbortSignal;
 }
 
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code: string | null;
+
+  constructor(message: string, status: number, code: string | null) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...init,
@@ -110,7 +123,8 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const body = contentType.includes("application/json") ? await response.json() : await response.text();
   if (!response.ok) {
     const message = typeof body === "object" && body && "message" in body ? String(body.message) : `请求失败（${response.status}）`;
-    throw new Error(message);
+    const code = typeof body === "object" && body && "error" in body ? String(body.error) : null;
+    throw new ApiError(message, response.status, code);
   }
   return body as T;
 }
@@ -126,6 +140,7 @@ function query(params: Record<string, string | number | boolean | undefined>): s
 }
 
 export const api = {
+  conversationDefaults: () => request<{ settings: ConversationSettings }>("/api/conversation-defaults"),
   conversations: () => request<{ conversations: ConversationListItem[] }>("/api/conversations"),
   conversation: (id: string) => request<ConversationDetail>(`/api/conversations/${encodeURIComponent(id)}`),
   createConversation: (title?: string, settings?: ConversationSettingsPatch) => request<ConversationRecord>("/api/conversations", {
