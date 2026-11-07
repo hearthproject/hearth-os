@@ -1,11 +1,18 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  Bot,
   CheckCircle2,
+  Cpu,
+  Database,
+  FolderTree,
   KeyRound,
+  Layers,
   Loader2,
+  Pencil,
   PlugZap,
+  Plus,
   RefreshCw,
   Save,
   ShieldAlert,
@@ -14,10 +21,19 @@ import {
 } from "lucide-react";
 import { api } from "../lib/api.ts";
 import { formatDuration, formatNumber } from "../lib/format.ts";
-import type { CodexProbeResponse, ContextSettings, ModelProtocol, ModelProviderPreset } from "../lib/types.ts";
+import type {
+  ContextSettings,
+  ExecutorId,
+  ModelProfileView,
+  ModelProtocol,
+  ModelProviderPreset
+} from "../lib/types.ts";
 import { ExecutorSettingsPanel } from "../components/ExecutorSettingsPanel.tsx";
 
-interface ModelForm {
+type SettingsTab = "executors" | "models" | "context" | "data";
+
+interface ProfileDraft {
+  name: string;
   providerId: string;
   providerName: string;
   protocol: ModelProtocol;
@@ -26,103 +42,252 @@ interface ModelForm {
   apiKey: string;
 }
 
-const PROTOCOLS: { id: ModelProtocol; label: string }[] = [
+const TABS: Array<{ id: SettingsTab; label: string; hint: string; icon: typeof Cpu }> = [
+  { id: "executors", label: "执行器", hint: "默认执行器、安装状态与模型绑定", icon: Cpu },
+  { id: "models", label: "模型", hint: "模型档案、聊天模型与连接测试", icon: Layers },
+  { id: "context", label: "上下文", hint: "接管策略、指标与清理", icon: Bot },
+  { id: "data", label: "数据", hint: "SQLite、目录结构与迁移记录", icon: Database }
+];
+
+const PROTOCOLS: Array<{ id: ModelProtocol; label: string }> = [
   { id: "openai-chat", label: "OpenAI Chat" },
   { id: "openai-responses", label: "OpenAI Responses" },
   { id: "anthropic-messages", label: "Anthropic Messages" },
   { id: "gemini", label: "Gemini" }
 ];
 
-const EMPTY_FORM: ModelForm = {
+const EMPTY_DRAFT: ProfileDraft = {
+  name: "",
   providerId: "custom",
-  providerName: "自定义服务",
+  providerName: "",
   protocol: "openai-chat",
   baseUrl: "",
   model: "",
   apiKey: ""
 };
 
+const EXECUTOR_LABELS: Record<ExecutorId, string> = {
+  native: "Hearth 原生",
+  codex: "Codex",
+  "deepseek-harness": "DeepSeek Harness",
+  hermes: "Hermes",
+  qoder: "Qoder",
+  workbuddy: "WorkBuddy",
+  kimi: "Kimi Code"
+};
+
 export function SettingsPage() {
+  const [tab, setTab] = useState<SettingsTab>("executors");
+  return (
+    <div className="page settings-page">
+      <div className="page-head settings-hero">
+        <div>
+          <span className="eyebrow">本机控制台</span>
+          <h1>设置</h1>
+          <p className="page-meta">按“执行器 → 模型 → 上下文 → 数据”完成配置。密钥只保存在本机 SQLite，浏览器只能看到掩码。</p>
+        </div>
+        <div className="settings-defaults">
+          <strong>一等执行器</strong>
+          <span>DeepSeek Harness · Codex · Hearth 原生</span>
+          <small>失败后由 Hearth 当前聊天模型诊断，并按权限模式决定是否切换。</small>
+        </div>
+      </div>
+
+      <nav className="settings-tabs" aria-label="设置分区">
+        {TABS.map((item) => {
+          const Icon = item.icon;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              className={`settings-tab ${tab === item.id ? "active" : ""}`}
+              onClick={() => setTab(item.id)}
+            >
+              <Icon size={18} />
+              <span><strong>{item.label}</strong><small>{item.hint}</small></span>
+            </button>
+          );
+        })}
+      </nav>
+
+      {tab === "executors" && <ExecutorsTab />}
+      {tab === "models" && <ModelsTab />}
+      {tab === "context" && <ContextTab />}
+      {tab === "data" && <DataTab />}
+    </div>
+  );
+}
+
+function ExecutorsTab() {
   const queryClient = useQueryClient();
-  const settingsQuery = useQuery({ queryKey: ["modelSettings"], queryFn: api.modelSettings });
-  const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 20_000 });
-  const contextQuery = useQuery({ queryKey: ["contextSettings"], queryFn: api.contextSettings });
-  const contextMetricsQuery = useQuery({ queryKey: ["contextMetrics"], queryFn: api.contextMetrics, refetchInterval: 30_000 });
-  const [form, setForm] = useState<ModelForm>(EMPTY_FORM);
-  const [busy, setBusy] = useState<"save" | "test" | "models" | "probe" | "refresh" | null>(null);
-  const [notice, setNotice] = useState<{ tone: "ok" | "error" | "info"; text: string } | null>(null);
-  const [probe, setProbe] = useState<CodexProbeResponse | null>(null);
+  const registryQuery = useQuery({ queryKey: ["modelRegistry"], queryFn: api.modelRegistry });
+  const [busy, setBusy] = useState<ExecutorId | null>(null);
+  const [notice, setNotice] = useState<NoticeState>(null);
+  const registry = registryQuery.data;
+
+  async function bind(executorId: ExecutorId, profileId: string) {
+    setBusy(executorId);
+    setNotice(null);
+    try {
+      await api.saveExecutorModelBinding(executorId, { profileId: profileId || null, protocolOverride: null, modelOverride: null });
+      setNotice({ tone: "ok", text: `${EXECUTOR_LABELS[executorId]} 的模型绑定已更新。` });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["modelRegistry"] }),
+        queryClient.invalidateQueries({ queryKey: ["executors"] }),
+        queryClient.invalidateQueries({ queryKey: ["health"] })
+      ]);
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "模型绑定保存失败" });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <section className="settings-tab-panel">
+      <div className="settings-section-intro">
+        <div><h2>执行器</h2><p>先安装并检测执行器，再指定它使用哪个模型。外部执行器仍使用各自 CLI 的登录与沙箱。</p></div>
+        <span className="status-chip ok"><span className="status-dot online" />7 个执行器</span>
+      </div>
+
+      <ExecutorSettingsPanel />
+
+      <section className="panel settings-section">
+        <div className="settings-body">
+          <div className="section-heading">
+            <div><h3>模型绑定</h3><p>每个执行器独立选择模型档案。Codex 只显示 Responses 协议；本地模型不会出现在这里。</p></div>
+            <span className="muted-count">{registry?.bindings.filter((binding) => binding.available).length ?? 0} 个已就绪</span>
+          </div>
+          {registryQuery.isLoading && <InlineLoading text="正在读取模型绑定" />}
+          {registry && (
+            <div className="binding-list">
+              {registry.bindings.map((binding) => {
+                const compatible = registry.profiles.filter((profile) => binding.allowedProtocols.includes(profile.protocol));
+                return (
+                  <article key={binding.executorId} className="binding-row">
+                    <div className="binding-name">
+                      <strong>{EXECUTOR_LABELS[binding.executorId]}</strong>
+                      <small>{binding.allowedProtocols.map(protocolLabel).join(" · ")}</small>
+                    </div>
+                    <label>
+                      <span>使用的模型</span>
+                      <select
+                        value={binding.profileId ?? ""}
+                        onChange={(event) => void bind(binding.executorId, event.target.value)}
+                        disabled={busy === binding.executorId}
+                      >
+                        <option value="">未绑定</option>
+                        {compatible.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {profile.model}</option>)}
+                      </select>
+                    </label>
+                    <div className="binding-effective">
+                      <span className={`status-dot ${binding.available ? "online" : "offline"}`} />
+                      <div>
+                        <strong>{binding.effectiveModel ?? "未选择模型"}</strong>
+                        <small>{binding.effectiveProtocol ? protocolLabel(binding.effectiveProtocol) : "先创建兼容协议的模型档案"}</small>
+                      </div>
+                    </div>
+                    <span className={`status-chip ${binding.available ? "ok" : "warn"}`}>{binding.available ? "可执行" : binding.issue ?? "未绑定"}</span>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+          {notice && <Notice tone={notice.tone} text={notice.text} />}
+          <p className="settings-hint"><ShieldAlert size={13} /> 完全权限只影响执行过程中的审批；切换执行器仍受上下文开关、风险策略和最大接管次数约束。</p>
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function ModelsTab() {
+  const queryClient = useQueryClient();
+  const registryQuery = useQuery({ queryKey: ["modelRegistry"], queryFn: api.modelRegistry });
+  const [draft, setDraft] = useState<ProfileDraft>(EMPTY_DRAFT);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [busy, setBusy] = useState<"save" | "test" | "models" | "chat" | "delete" | null>(null);
+  const [notice, setNotice] = useState<NoticeState>(null);
   const [models, setModels] = useState<string[]>([]);
-  const [contextForm, setContextForm] = useState<ContextSettings | null>(null);
-  const [contextNotice, setContextNotice] = useState<{ tone: "ok" | "error" | "info"; text: string } | null>(null);
-  const [contextBusy, setContextBusy] = useState(false);
-  const [cleanupTaskId, setCleanupTaskId] = useState("");
-  const initialized = useRef(false);
-
-  const settings = settingsQuery.data?.settings;
-  const presets = settingsQuery.data?.presets ?? [];
-  const configured = settingsQuery.data?.configured ?? false;
-  const codex = healthQuery.data?.codex;
-  const chatModel = healthQuery.data?.chatModel;
-  const contextInitialized = useRef(false);
+  const [chatProfileId, setChatProfileId] = useState("");
+  const registry = registryQuery.data;
 
   useEffect(() => {
-    if (!contextQuery.data?.settings || contextInitialized.current) return;
-    contextInitialized.current = true;
-    setContextForm(contextQuery.data.settings);
-  }, [contextQuery.data]);
+    if (registry) setChatProfileId(registry.chatProfileId ?? "");
+  }, [registry]);
 
-  useEffect(() => {
-    if (!settings || initialized.current) return;
-    initialized.current = true;
-    setForm({
-      providerId: settings.providerId,
-      providerName: settings.providerName,
-      protocol: settings.protocol ?? "openai-chat",
-      baseUrl: settings.baseUrl,
-      model: settings.model,
-      apiKey: ""
-    });
-    setModels([]);
-  }, [settings]);
+  async function refreshRegistry() {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["modelRegistry"] }),
+      queryClient.invalidateQueries({ queryKey: ["modelSettings"] }),
+      queryClient.invalidateQueries({ queryKey: ["health"] }),
+      queryClient.invalidateQueries({ queryKey: ["executors"] })
+    ]);
+  }
+
+  function update<K extends keyof ProfileDraft>(key: K, value: ProfileDraft[K]) {
+    setDraft((prev) => ({ ...prev, [key]: value }));
+  }
 
   function pickPreset(preset: ModelProviderPreset) {
-    setForm((prev) => ({
+    setDraft((prev) => ({
       ...prev,
       providerId: preset.id,
       providerName: preset.name,
       protocol: preset.protocol,
       baseUrl: preset.baseUrl,
-      model: preset.models[0] ?? ""
+      model: preset.models[0] ?? "",
+      name: prev.name || `${preset.name} · ${preset.models[0] ?? "模型"}`
     }));
     setModels(preset.models);
     setNotice(null);
   }
 
-  function update<K extends keyof ModelForm>(key: K, value: ModelForm[K]) {
-    setForm((prev) => ({ ...prev, [key]: value }));
+  function edit(profile: ModelProfileView) {
+    setEditingId(profile.id);
+    setDraft({
+      name: profile.name,
+      providerId: profile.providerId,
+      providerName: profile.providerName,
+      protocol: profile.protocol,
+      baseUrl: profile.baseUrl,
+      model: profile.model,
+      apiKey: ""
+    });
+    setModels([]);
+    setNotice({ tone: "info", text: "正在编辑模型档案；API Key 留空表示保留当前密钥。" });
+  }
+
+  function resetForm() {
+    setEditingId(null);
+    setDraft(EMPTY_DRAFT);
+    setModels([]);
+    setNotice(null);
   }
 
   async function save() {
-    if (!form.providerName.trim() || !form.baseUrl.trim() || !form.model.trim()) {
-      setNotice({ tone: "error", text: "请填写服务名称、服务地址和模型。" });
+    if (!draft.name.trim() || !draft.baseUrl.trim() || !draft.model.trim()) {
+      setNotice({ tone: "error", text: "请填写档案名称、服务地址和模型名。" });
       return;
     }
     setBusy("save");
     setNotice(null);
     try {
-      const result = await api.saveModelSettings({
-        providerId: form.providerId,
-        providerName: form.providerName.trim(),
-        protocol: form.protocol,
-        baseUrl: form.baseUrl.trim(),
-        model: form.model.trim(),
-        ...(form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {})
-      });
-      setForm((prev) => ({ ...prev, apiKey: "" }));
-      setNotice({ tone: "ok", text: result.configured ? "已保存，聊天模型可以使用了。" : "已保存，但还缺少 API Key。" });
-      await queryClient.invalidateQueries({ queryKey: ["modelSettings"] });
-      await queryClient.invalidateQueries({ queryKey: ["health"] });
+      const input = {
+        name: draft.name.trim(),
+        providerId: draft.providerId.trim() || "custom",
+        providerName: draft.providerName.trim() || draft.name.trim(),
+        protocol: draft.protocol,
+        baseUrl: draft.baseUrl.trim(),
+        model: draft.model.trim(),
+        ...(draft.apiKey.trim() ? { apiKey: draft.apiKey.trim() } : {})
+      };
+      if (editingId) await api.updateModelProfile(editingId, input);
+      else await api.createModelProfile(input);
+      setNotice({ tone: "ok", text: editingId ? "模型档案已更新。" : "模型档案已创建，可以绑定给执行器。" });
+      setEditingId(null);
+      setDraft((prev) => ({ ...prev, apiKey: "" }));
+      await refreshRegistry();
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "保存失败" });
     } finally {
@@ -130,23 +295,31 @@ export function SettingsPage() {
     }
   }
 
-  async function testConnection() {
-    setBusy("test");
+  async function remove(profile: ModelProfileView) {
+    if (!window.confirm(`删除模型档案「${profile.name}」？使用它的执行器会变成未绑定。`)) return;
+    setBusy("delete");
     setNotice(null);
     try {
-      const result = await api.testModel({
-        providerId: form.providerId,
-        providerName: form.providerName,
-        protocol: form.protocol,
-        baseUrl: form.baseUrl,
-        model: form.model,
-        ...(form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {})
-      });
-      setNotice(result.ok
-        ? { tone: "ok", text: `连接成功：${result.reply || "OK"}（${result.elapsedMs ?? 0} ms）` }
-        : { tone: "error", text: result.error ?? "连接失败" });
+      await api.deleteModelProfile(profile.id);
+      if (editingId === profile.id) resetForm();
+      setNotice({ tone: "ok", text: "模型档案已删除。" });
+      await refreshRegistry();
     } catch (error) {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "连接失败" });
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "删除失败" });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function saveChatProfile() {
+    setBusy("chat");
+    setNotice(null);
+    try {
+      await api.setChatProfile(chatProfileId || null);
+      setNotice({ tone: "ok", text: "Hearth 聊天与故障诊断模型已更新。" });
+      await refreshRegistry();
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "聊天模型保存失败" });
     } finally {
       setBusy(null);
     }
@@ -157,17 +330,17 @@ export function SettingsPage() {
     setNotice(null);
     try {
       const result = await api.fetchModels({
-        providerId: form.providerId,
-        providerName: form.providerName,
-        protocol: form.protocol,
-        baseUrl: form.baseUrl,
-        model: form.model,
-        ...(form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {})
+        providerId: draft.providerId,
+        providerName: draft.providerName,
+        protocol: draft.protocol,
+        baseUrl: draft.baseUrl,
+        model: draft.model,
+        ...(draft.apiKey.trim() ? { apiKey: draft.apiKey.trim() } : {})
       });
       setModels(result.models);
       if (result.error) setNotice({ tone: "error", text: result.error });
-      else if (result.models.length === 0) setNotice({ tone: "info", text: "服务没有返回模型列表，可以手工填写模型名。" });
-      else setNotice({ tone: "ok", text: `获取到 ${result.models.length} 个模型，点模型输入框选择。` });
+      else if (result.models.length === 0) setNotice({ tone: "info", text: "服务没有返回模型列表，可以手工填写。" });
+      else setNotice({ tone: "ok", text: `获取到 ${result.models.length} 个模型。` });
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "获取失败" });
     } finally {
@@ -175,27 +348,21 @@ export function SettingsPage() {
     }
   }
 
-  async function clearKey() {
-    if (!window.confirm("确定清除已保存的 API Key？")) return;
-    setBusy("save");
+  async function testConnection() {
+    setBusy("test");
+    setNotice(null);
     try {
-      await api.saveModelSettings({ apiKey: "" });
-      setNotice({ tone: "info", text: "API Key 已清除。" });
-      await queryClient.invalidateQueries({ queryKey: ["modelSettings"] });
-      await queryClient.invalidateQueries({ queryKey: ["health"] });
-    } catch (error) {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "清除失败" });
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function probeExecutor() {
-    setBusy("probe");
-    setProbe(null);
-    try {
-      const result = await api.probeCodex();
-      setProbe(result);
+      const result = await api.testModel({
+        providerId: draft.providerId,
+        providerName: draft.providerName,
+        protocol: draft.protocol,
+        baseUrl: draft.baseUrl,
+        model: draft.model,
+        ...(draft.apiKey.trim() ? { apiKey: draft.apiKey.trim() } : {})
+      });
+      setNotice(result.ok
+        ? { tone: "ok", text: `连接成功${result.elapsedMs === undefined ? "" : `，${result.elapsedMs} ms`}。` }
+        : { tone: "error", text: result.error ?? "连接失败" });
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "测试失败" });
     } finally {
@@ -203,328 +370,320 @@ export function SettingsPage() {
     }
   }
 
-  async function refreshHealth() {
-    setBusy("refresh");
-    try {
-      await healthQuery.refetch();
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function saveContextSettings() {
-    if (!contextForm) return;
-    setContextBusy(true);
-    setContextNotice(null);
-    try {
-      const result = await api.saveContextSettings({
-        mode: contextForm.mode,
-        maxHandoffs: contextForm.maxHandoffs,
-        maxSameExecutorRetries: contextForm.maxSameExecutorRetries,
-        retentionDays: contextForm.retentionDays,
-        maxInlineBytes: contextForm.maxInlineBytes,
-        projectionTokenBudget: contextForm.projectionTokenBudget,
-        summarizeAfterTokens: contextForm.summarizeAfterTokens,
-        autoHandoffRisk: contextForm.autoHandoffRisk,
-        allowCodexNetwork: contextForm.allowCodexNetwork
-      });
-      setContextForm(result.settings);
-      setContextNotice({ tone: "ok", text: "上下文与接管设置已保存，对之后的运行生效。" });
-      await queryClient.invalidateQueries({ queryKey: ["contextSettings"] });
-    } catch (error) {
-      setContextNotice({ tone: "error", text: error instanceof Error ? error.message : "保存失败" });
-    } finally {
-      setContextBusy(false);
-    }
-  }
-
-  async function cleanupTaskContext() {
-    const taskId = cleanupTaskId.trim();
-    if (!taskId) {
-      setContextNotice({ tone: "info", text: "请填写要清理的任务 ID。" });
-      return;
-    }
-    if (!window.confirm("确定删除这个任务的上下文、摘要、接管记录和 blob？此操作不可撤销。")) return;
-    setContextBusy(true);
-    setContextNotice(null);
-    try {
-      const receipt = await api.deleteTaskContext(taskId);
-      setContextNotice({ tone: "ok", text: `已删除 ${receipt.deletedItems} 条上下文、${receipt.deletedHandoffs} 条接管记录、${receipt.deletedBlobs} 个 blob。` });
-      setCleanupTaskId("");
-    } catch (error) {
-      setContextNotice({ tone: "error", text: error instanceof Error ? error.message : "清理失败" });
-    } finally {
-      setContextBusy(false);
-    }
-  }
-
   return (
-    <div className="page settings-page">
-      <div className="page-head">
-        <div>
-          <h1>设置</h1>
-          <p className="page-meta">执行器开关与权限在对话输入框上方调整；这里只配置模型连接，Key 只保存在本机。</p>
-        </div>
+    <section className="settings-tab-panel">
+      <div className="settings-section-intro">
+        <div><h2>模型</h2><p>一个模型档案只描述一个接口地址和模型。先建档案，再给聊天或其他执行器绑定。</p></div>
+        <span className={`status-chip ${registry?.chatConfigured ? "ok" : "warn"}`}>{registry?.chatConfigured ? "聊天模型已就绪" : "尚未配置聊天模型"}</span>
       </div>
 
       <section className="panel settings-section">
-        <details className="settings-fold">
-          <summary className="settings-fold-summary">
-            <div className="settings-fold-copy">
-              <strong>对话模型</strong>
-              <span>{settings ? `${settings.providerName} · ${settings.model || "未选择模型"}` : "读取本机配置中"}</span>
-            </div>
-            <span className={`status-chip ${configured ? "ok" : "warn"}`}>
-              <span className={`status-dot ${configured ? "online" : "offline"}`} />
-              {configured ? "已接入" : "未完成"}
-            </span>
-          </summary>
-          <div className="settings-body">
-          <p className="settings-lead">选择服务商并填入 Key。模型名可以直接从服务商拉取。</p>
-
-          <div className="provider-grid compact">
-            {presets.map((preset) => (
-              <button
-                key={preset.id}
-                title={preset.note}
-                className={`provider-card ${form.providerId === preset.id ? "active" : ""}`}
-                onClick={() => pickPreset(preset)}
-              >
-                <strong>{preset.name}</strong>
-                <small>{protocolLabel(preset.protocol)}</small>
-              </button>
-            ))}
+        <div className="settings-body">
+          <div className="section-heading">
+            <div><h3>Hearth 聊天模型</h3><p>用于聊天、任务路由、失败诊断和上下文摘要。它不等同于某个执行器的模型。</p></div>
           </div>
-
-          <div className="form-grid">
+          <div className="chat-profile-row">
             <label>
-              <span>接口协议</span>
-              <select value={form.protocol} onChange={(event) => update("protocol", event.target.value as ModelProtocol)}>
-                {PROTOCOLS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+              <span>当前聊天模型</span>
+              <select value={chatProfileId} onChange={(event) => setChatProfileId(event.target.value)}>
+                <option value="">未选择</option>
+                {(registry?.profiles ?? []).map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {profile.model}</option>)}
               </select>
             </label>
-            <label>
-              <span>服务名称</span>
-              <input value={form.providerName} onChange={(event) => update("providerName", event.target.value)} placeholder="例如：DeepSeek" />
-            </label>
-            <label className="span-2">
-              <span>服务地址（Base URL）</span>
-              <input value={form.baseUrl} onChange={(event) => update("baseUrl", event.target.value)} placeholder="https://api.deepseek.com/v1" spellCheck={false} />
-            </label>
-            <label>
-              <span>模型</span>
-              <div className="input-with-action">
-                <input value={form.model} onChange={(event) => update("model", event.target.value)} placeholder="点右侧拉取，或手工填写" list="model-options" spellCheck={false} />
-                <button type="button" className="ghost-button compact" onClick={() => void fetchModels()} disabled={busy !== null}>
-                  {busy === "models" ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />} 获取
+            <button className="primary-button" onClick={() => void saveChatProfile()} disabled={busy !== null}>
+              {busy === "chat" ? <Loader2 size={15} className="spin" /> : <Save size={15} />} 保存聊天模型
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <div className="settings-split">
+        <section className="panel settings-section model-catalog">
+          <div className="settings-body">
+            <div className="section-heading">
+              <div><h3>模型档案</h3><p>API Key 使用 AES-256-GCM 加密保存在 SQLite，接口只返回掩码。</p></div>
+              <button className="ghost-button compact" onClick={resetForm}><Plus size={14} /> 新建档案</button>
+            </div>
+            <div className="model-list">
+              {(registry?.profiles ?? []).map((profile) => (
+                <article key={profile.id} className={`model-card ${registry?.chatProfileId === profile.id ? "active" : ""}`}>
+                  <div className="model-card-head">
+                    <div><strong>{profile.name}</strong><small>{profile.providerName} · {protocolLabel(profile.protocol)}</small></div>
+                    {registry?.chatProfileId === profile.id && <span className="status-chip ok">聊天模型</span>}
+                  </div>
+                  <dl className="model-meta">
+                    <div><dt>模型</dt><dd>{profile.model}</dd></div>
+                    <div><dt>地址</dt><dd title={profile.baseUrl}>{profile.baseUrl}</dd></div>
+                    <div><dt>密钥</dt><dd>{profile.hasApiKey ? profile.apiKeyMasked ?? "已保存" : "未设置"}</dd></div>
+                  </dl>
+                  <div className="model-card-actions">
+                    <button className="ghost-button compact" onClick={() => edit(profile)}><Pencil size={13} /> 编辑</button>
+                    <button className="ghost-button compact danger" onClick={() => void remove(profile)} disabled={busy !== null}><Trash2 size={13} /> 删除</button>
+                  </div>
+                </article>
+              ))}
+              {registry && registry.profiles.length === 0 && <EmptyState text="还没有模型档案。使用右侧表单创建第一个。" />}
+            </div>
+          </div>
+        </section>
+
+        <section className="panel settings-section model-editor">
+          <div className="settings-body">
+            <div className="section-heading">
+              <div><h3>{editingId ? "编辑模型档案" : "新建模型档案"}</h3><p>协议必须和执行器能力匹配，例如 Codex 只接受 Responses。</p></div>
+              {editingId && <button className="ghost-button compact" onClick={resetForm}>取消编辑</button>}
+            </div>
+            <div className="provider-grid compact">
+              {(registry?.presets ?? []).map((preset) => (
+                <button key={preset.id} type="button" title={preset.note} className={`provider-card ${draft.providerId === preset.id ? "active" : ""}`} onClick={() => pickPreset(preset)}>
+                  <strong>{preset.name}</strong><small>{protocolLabel(preset.protocol)}</small>
                 </button>
-              </div>
-              <datalist id="model-options">
-                {models.map((model) => <option key={model} value={model} />)}
-              </datalist>
-            </label>
-            <label>
-              <span>API Key</span>
-              <input
-                type="password"
-                value={form.apiKey}
-                onChange={(event) => update("apiKey", event.target.value)}
-                placeholder={settings?.hasApiKey ? `已保存 ${settings.apiKeyMasked ?? ""}，留空不修改` : "sk-..."}
-                autoComplete="off"
-              />
-            </label>
-          </div>
-
-          <div className="settings-actions">
-            <button className="primary-button" onClick={() => void save()} disabled={busy !== null}>
-              {busy === "save" ? <Loader2 size={15} className="spin" /> : <Save size={15} />} 保存
-            </button>
-            <button className="ghost-button" onClick={() => void testConnection()} disabled={busy !== null}>
-              {busy === "test" ? <Loader2 size={15} className="spin" /> : <PlugZap size={15} />} 测试连接
-            </button>
-            {settings?.hasApiKey && (
-              <button className="ghost-button danger" onClick={() => void clearKey()} disabled={busy !== null}>
-                <Trash2 size={15} /> 清除 Key
-              </button>
-            )}
-          </div>
-          {notice && <Notice tone={notice.tone} text={notice.text} />}
-          <p className="settings-hint"><KeyRound size={13} /> Key 保存在本机 <code>.hearth/model-settings.json</code>，接口只返回掩码。</p>
-          </div>
-        </details>
-      </section>
-
-      <section className="panel settings-section">
-        <details className="settings-fold">
-          <summary className="settings-fold-summary">
-            <div className="settings-fold-copy">
-              <strong>Codex 执行器</strong>
-              <span>{codex ? `${codex.providerName} · ${codex.model ?? "默认模型"}` : "读取本机配置中"}</span>
+              ))}
             </div>
-            <span className={`status-chip ${codex?.canRun ? "ok" : "warn"}`}>
-              <span className={`status-dot ${codex?.canRun ? "online" : "offline"}`} />
-              {codex?.canRun ? "可以执行任务" : "未连接"}
-            </span>
-          </summary>
-          <div className="settings-body">
-          <div className="codex-summary">
-            <span className={`status-dot ${codex?.canRun ? "online" : "offline"}`} />
-            <div>
-              <strong>{codex?.canRun ? "已连接" : "未连接"}</strong>
-              <small>{codex ? `${codex.providerName} · ${codex.model ?? "默认模型"}` : "读取本机配置中"}</small>
-            </div>
-            <span className="codex-key-state">{keyStateText(codex)}</span>
-          </div>
-
-          {codex && !codex.canRun && (
-            <p className="codex-hint">
-              需要环境变量 <code>{codex.envKey ?? "API Key"}</code>。可写入 Windows 用户环境变量，然后点重新检测。
-            </p>
-          )}
-
-          {probe && (
-            <div className={`result-banner ${probe.ok ? "ok" : "error"}`}>
-              {probe.ok ? <CheckCircle2 size={17} /> : <AlertTriangle size={17} />}
-              <div>
-                <strong>{probe.ok ? "执行器测试通过" : "执行器测试失败"}</strong>
-                <p>{probe.ok ? probe.text : probe.error}</p>
-                <small>{probe.elapsedMs} ms</small>
-              </div>
-            </div>
-          )}
-
-          <div className="settings-actions">
-            <button className="primary-button" onClick={() => void probeExecutor()} disabled={busy !== null}>
-              {busy === "probe" ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />} 测试执行器
-            </button>
-            <button className="ghost-button" onClick={() => void refreshHealth()} disabled={busy !== null}>
-              {busy === "refresh" ? <Loader2 size={15} className="spin" /> : <PlugZap size={15} />} 重新检测
-            </button>
-          </div>
-
-          <details className="settings-details">
-            <summary>连接详情</summary>
-            <dl className="settings-kv">
-              <div><dt>Provider</dt><dd>{codex?.providerName ?? "—"} <small>{codex?.providerId}</small></dd></div>
-              <div><dt>模型</dt><dd>{codex?.model ?? "默认模型"}</dd></div>
-              <div><dt>地址</dt><dd className="mono">{codex?.baseUrl ?? "—"}</dd></div>
-              <div><dt>协议</dt><dd className="mono">{codex?.wireApi ?? "—"}</dd></div>
-              <div><dt>环境变量</dt><dd className="mono">{codex?.envKey ?? "未声明"} {codex?.envKeyPresent ? "已读取" : ""}</dd></div>
-              <div><dt>配置文件</dt><dd className="mono">{codex?.configPath ?? "—"}</dd></div>
-            </dl>
-            {codex && codex.issues.length > 0 && (
-              <div className="issue-list">
-                {codex.issues.map((issue) => <p key={issue}><AlertTriangle size={14} /> {issue}</p>)}
-              </div>
-            )}
-          </details>
-          <p className="settings-hint">修改 <code>config.toml</code> 或环境变量后，点重新检测即可。</p>
-          </div>
-        </details>
-      </section>
-
-      <ExecutorSettingsPanel />
-
-      <section className="panel settings-section">
-        <details className="settings-fold">
-          <summary className="settings-fold-summary">
-            <div className="settings-fold-copy">
-              <strong>上下文与接管</strong>
-              <span>统一上下文账本 · Native 失败后可交给 Codex</span>
-            </div>
-            <span className={`status-chip ${contextForm?.mode === "on" ? "ok" : "warn"}`}>
-              <span className={`status-dot ${contextForm?.mode === "on" ? "online" : "offline"}`} />
-              {contextForm?.mode === "on" ? "自动接管已开启" : contextForm?.mode === "shadow" ? "仅记录诊断" : "已关闭"}
-            </span>
-          </summary>
-          <div className="settings-body">
-            <p className="settings-lead">所有执行器的会话、工具调用、失败证据和接管记录都会写入 Hearth 自己的上下文账本。shadow 模式只记录诊断，不会自动切换执行器。</p>
-            {contextMetricsQuery.data && (
-              <div className="context-metrics">
-                <span>接管 {contextMetricsQuery.data.handoffs.total} 次 · 成功 {contextMetricsQuery.data.handoffs.successRate === null ? "未记录" : `${Math.round(contextMetricsQuery.data.handoffs.successRate * 100)}%`}</span>
-                <span>平均上下文 {contextMetricsQuery.data.handoffs.averageContextTokens === null ? "未记录" : `${formatNumber(Math.round(contextMetricsQuery.data.handoffs.averageContextTokens))} tokens`}</span>
-                <span>诊断耗时 {formatDuration(contextMetricsQuery.data.diagnosis.averageDurationMs)}</span>
-                <span>平均恢复 {formatDuration(contextMetricsQuery.data.handoffs.averageRecoveryMs)}</span>
-                <span>账本 {formatNumber(contextMetricsQuery.data.ledger.tasks)} 个任务 · {formatNumber(contextMetricsQuery.data.ledger.items)} 条记录</span>
-              </div>
-            )}
             <div className="form-grid">
-              <label>
-                <span>模式</span>
-                <select value={contextForm?.mode ?? "on"} onChange={(event) => setContextForm((prev) => (prev ? { ...prev, mode: event.target.value as ContextSettings["mode"] } : prev))}>
-                  <option value="on">开启：低风险自动接管</option>
-                  <option value="shadow">仅记录：不自动接管</option>
-                  <option value="off">关闭</option>
-                </select>
-              </label>
-              <label>
-                <span>自动接管风险</span>
-                <select value={contextForm?.autoHandoffRisk ?? "low"} onChange={(event) => setContextForm((prev) => (prev ? { ...prev, autoHandoffRisk: event.target.value as ContextSettings["autoHandoffRisk"] } : prev))}>
-                  <option value="low">低风险自动，高风险确认</option>
-                  <option value="none">全部需要用户确认</option>
-                </select>
-              </label>
-              <label>
-                <span>最大接管次数</span>
-                <input type="number" min={0} max={5} value={contextForm?.maxHandoffs ?? 1} onChange={(event) => setContextForm((prev) => (prev ? { ...prev, maxHandoffs: Number(event.target.value) } : prev))} />
-              </label>
-              <label>
-                <span>同执行器重试</span>
-                <input type="number" min={0} max={3} value={contextForm?.maxSameExecutorRetries ?? 1} onChange={(event) => setContextForm((prev) => (prev ? { ...prev, maxSameExecutorRetries: Number(event.target.value) } : prev))} />
-              </label>
-              <label>
-                <span>保留天数</span>
-                <input type="number" min={1} max={3650} value={contextForm?.retentionDays ?? 30} onChange={(event) => setContextForm((prev) => (prev ? { ...prev, retentionDays: Number(event.target.value) } : prev))} />
-              </label>
-              <label>
-                <span>投影预算（tokens）</span>
-                <input type="number" min={1000} max={200000} step={1000} value={contextForm?.projectionTokenBudget ?? 12000} onChange={(event) => setContextForm((prev) => (prev ? { ...prev, projectionTokenBudget: Number(event.target.value) } : prev))} />
-              </label>
-              <label>
-                <span>摘要阈值（tokens）</span>
-                <input type="number" min={1000} max={500000} step={1000} value={contextForm?.summarizeAfterTokens ?? 8000} onChange={(event) => setContextForm((prev) => (prev ? { ...prev, summarizeAfterTokens: Number(event.target.value) } : prev))} />
-              </label>
-              <label className="checkbox-field">
-                <input type="checkbox" checked={contextForm?.allowCodexNetwork ?? false} onChange={(event) => setContextForm((prev) => (prev ? { ...prev, allowCodexNetwork: event.target.checked } : prev))} />
-                <span>允许 Codex 网络访问（不开启时，需要网络的任务不会自动接管）</span>
-              </label>
+              <label className="span-2"><span>档案名称</span><input value={draft.name} onChange={(event) => update("name", event.target.value)} placeholder="例如：DeepSeek 主模型" /></label>
+              <label><span>接口协议</span><select value={draft.protocol} onChange={(event) => update("protocol", event.target.value as ModelProtocol)}>{PROTOCOLS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
+              <label><span>服务名称</span><input value={draft.providerName} onChange={(event) => update("providerName", event.target.value)} placeholder="例如：DeepSeek" /></label>
+              <label className="span-2"><span>服务地址</span><input value={draft.baseUrl} onChange={(event) => update("baseUrl", event.target.value)} placeholder="https://api.deepseek.com/v1" spellCheck={false} /></label>
+              <label><span>模型</span><div className="input-with-action"><input value={draft.model} onChange={(event) => update("model", event.target.value)} placeholder="手工填写或拉取" list="settings-model-options" spellCheck={false} /><button type="button" className="ghost-button compact" onClick={() => void fetchModels()} disabled={busy !== null}>{busy === "models" ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />} 拉取</button></div><datalist id="settings-model-options">{models.map((model) => <option key={model} value={model} />)}</datalist></label>
+              <label><span>API Key</span><input type="password" value={draft.apiKey} onChange={(event) => update("apiKey", event.target.value)} placeholder={editingId ? "留空保留原密钥" : "sk-..."} autoComplete="off" /></label>
             </div>
             <div className="settings-actions">
-              <button className="primary-button" onClick={() => void saveContextSettings()} disabled={contextBusy || !contextForm}>
-                {contextBusy ? <Loader2 size={15} className="spin" /> : <Save size={15} />} 保存上下文设置
-              </button>
+              <button className="primary-button" onClick={() => void save()} disabled={busy !== null}>{busy === "save" ? <Loader2 size={15} className="spin" /> : <Save size={15} />} {editingId ? "保存修改" : "创建档案"}</button>
+              <button className="ghost-button" onClick={() => void testConnection()} disabled={busy !== null}>{busy === "test" ? <Loader2 size={15} className="spin" /> : <PlugZap size={15} />} 测试连接</button>
             </div>
-            {contextNotice && <Notice tone={contextNotice.tone} text={contextNotice.text} />}
-            <div className="context-cleanup">
-              <strong>手动清理任务上下文</strong>
-              <p>删除后，该任务的上下文条目、摘要、接管记录和 blob 都会移除，任务本身保留。</p>
-              <div className="input-with-action">
-                <input value={cleanupTaskId} onChange={(event) => setCleanupTaskId(event.target.value)} placeholder="任务 ID（任务详情 URL 最后一段）" spellCheck={false} />
-                <button className="ghost-button danger" onClick={() => void cleanupTaskContext()} disabled={contextBusy}>
-                  <Trash2 size={14} /> 删除上下文
-                </button>
+            {notice && <Notice tone={notice.tone} text={notice.text} />}
+            <p className="settings-hint"><KeyRound size={13} /> 本地模型（localhost / 127.0.0.1 / 内网地址）不进入统一模型管理，请在本地工具中直接使用。</p>
+          </div>
+        </section>
+      </div>
+    </section>
+  );
+}
+
+function ContextTab() {
+  const queryClient = useQueryClient();
+  const contextQuery = useQuery({ queryKey: ["contextSettings"], queryFn: api.contextSettings });
+  const metricsQuery = useQuery({ queryKey: ["contextMetrics"], queryFn: api.contextMetrics, refetchInterval: 30_000 });
+  const [form, setForm] = useState<ContextSettings | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<NoticeState>(null);
+  const [cleanupTaskId, setCleanupTaskId] = useState("");
+
+  useEffect(() => {
+    if (contextQuery.data?.settings && !form) setForm(contextQuery.data.settings);
+  }, [contextQuery.data, form]);
+
+  async function save() {
+    if (!form) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const result = await api.saveContextSettings({
+        mode: form.mode,
+        maxHandoffs: form.maxHandoffs,
+        maxSameExecutorRetries: form.maxSameExecutorRetries,
+        retentionDays: form.retentionDays,
+        maxInlineBytes: form.maxInlineBytes,
+        projectionTokenBudget: form.projectionTokenBudget,
+        summarizeAfterTokens: form.summarizeAfterTokens,
+        autoHandoffRisk: form.autoHandoffRisk,
+        allowCodexNetwork: form.allowCodexNetwork
+      });
+      setForm(result.settings);
+      setNotice({ tone: "ok", text: "上下文设置已保存，对之后的运行生效。" });
+      await queryClient.invalidateQueries({ queryKey: ["contextSettings"] });
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "保存失败" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cleanup() {
+    const taskId = cleanupTaskId.trim();
+    if (!taskId) return setNotice({ tone: "info", text: "请填写要清理的任务 ID。" });
+    if (!window.confirm("确定删除这个任务的上下文、摘要、接管记录和 blob？此操作不可撤销。")) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const receipt = await api.deleteTaskContext(taskId);
+      setNotice({ tone: "ok", text: `已删除 ${receipt.deletedItems} 条上下文、${receipt.deletedHandoffs} 条接管记录和 ${receipt.deletedBlobs} 个 blob。` });
+      setCleanupTaskId("");
+      await queryClient.invalidateQueries({ queryKey: ["contextMetrics"] });
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "清理失败" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const metrics = metricsQuery.data;
+
+  return (
+    <section className="settings-tab-panel">
+      <div className="settings-section-intro">
+        <div><h2>上下文</h2><p>所有执行器共享同一份上下文账本。切换执行器时传递摘要、产物、失败证据和未决问题，而不是各存一份历史。</p></div>
+        <span className={`status-chip ${form?.mode === "on" ? "ok" : "warn"}`}>{contextModeLabel(form?.mode)}</span>
+      </div>
+
+      <div className="context-metrics settings-metric-grid">
+        <Metric label="上下文条目" value={metrics ? formatNumber(metrics.ledger.items) : "—"} />
+        <Metric label="自动接管" value={metrics ? formatNumber(metrics.handoffs.automatic) : "—"} />
+        <Metric label="接管成功率" value={metrics?.handoffs.successRate == null ? "—" : `${Math.round(metrics.handoffs.successRate * 100)}%`} />
+        <Metric label="模型诊断" value={metrics ? formatNumber(metrics.diagnosis.model) : "—"} />
+      </div>
+
+      <section className="panel settings-section">
+        <div className="settings-body">
+          <div className="section-heading"><div><h3>接管规则</h3><p>完全权限下执行器故障会自动切换；必要审批下只询问“是否切换执行器”。非执行器错误直接说明原因。</p></div></div>
+          {!form && <InlineLoading text="正在读取上下文设置" />}
+          {form && (
+            <div className="form-grid context-form">
+              <label><span>上下文模式</span><select value={form.mode} onChange={(event) => setForm({ ...form, mode: event.target.value as ContextSettings["mode"] })}><option value="on">开启</option><option value="shadow">只诊断，不接管</option><option value="off">关闭</option></select></label>
+              <label><span>自动接管风险</span><select value={form.autoHandoffRisk} onChange={(event) => setForm({ ...form, autoHandoffRisk: event.target.value as ContextSettings["autoHandoffRisk"] })}><option value="low">低风险自动</option><option value="none">全部需要确认</option></select></label>
+              <label><span>最大接管次数</span><input type="number" min={0} max={5} value={form.maxHandoffs} onChange={(event) => setForm({ ...form, maxHandoffs: Number(event.target.value) })} /></label>
+              <label><span>同执行器重试</span><input type="number" min={0} max={3} value={form.maxSameExecutorRetries} onChange={(event) => setForm({ ...form, maxSameExecutorRetries: Number(event.target.value) })} /></label>
+              <label><span>保留天数</span><input type="number" min={1} max={3650} value={form.retentionDays} onChange={(event) => setForm({ ...form, retentionDays: Number(event.target.value) })} /></label>
+              <label><span>单条内联上限（字节）</span><input type="number" min={1024} max={1000000} step={1024} value={form.maxInlineBytes} onChange={(event) => setForm({ ...form, maxInlineBytes: Number(event.target.value) })} /></label>
+              <label><span>投影预算（tokens）</span><input type="number" min={1000} max={200000} step={1000} value={form.projectionTokenBudget} onChange={(event) => setForm({ ...form, projectionTokenBudget: Number(event.target.value) })} /></label>
+              <label><span>摘要阈值（tokens）</span><input type="number" min={1000} max={500000} step={1000} value={form.summarizeAfterTokens} onChange={(event) => setForm({ ...form, summarizeAfterTokens: Number(event.target.value) })} /></label>
+              <label className="checkbox-field span-2"><input type="checkbox" checked={form.allowCodexNetwork} onChange={(event) => setForm({ ...form, allowCodexNetwork: event.target.checked })} /><span>允许 Codex 网络访问（不开启时，需要网络的任务不会自动切换到 Codex）</span></label>
+            </div>
+          )}
+          <div className="settings-actions"><button className="primary-button" onClick={() => void save()} disabled={busy || !form}>{busy ? <Loader2 size={15} className="spin" /> : <Save size={15} />} 保存上下文设置</button></div>
+          {notice && <Notice tone={notice.tone} text={notice.text} />}
+        </div>
+      </section>
+
+      <section className="panel settings-section">
+        <div className="settings-body">
+          <div className="section-heading"><div><h3>清理任务上下文</h3><p>只删除上下文条目、摘要、接管记录和 blob，不删除任务本身。</p></div></div>
+          <div className="input-with-action"><input value={cleanupTaskId} onChange={(event) => setCleanupTaskId(event.target.value)} placeholder="任务 ID（任务详情 URL 最后一段）" spellCheck={false} /><button className="ghost-button danger" onClick={() => void cleanup()} disabled={busy}><Trash2 size={14} /> 删除上下文</button></div>
+        </div>
+      </section>
+
+      {metrics && (
+        <section className="panel settings-section">
+          <div className="settings-body">
+            <div className="section-heading"><div><h3>运行指标</h3><p>最近刷新：{new Date(metrics.generatedAt).toLocaleString()}</p></div><button className="ghost-button compact" onClick={() => void metricsQuery.refetch()}><RefreshCw size={14} /> 刷新</button></div>
+            <dl className="settings-kv">
+              <div><dt>接管</dt><dd>{metrics.handoffs.total} 次 · 待确认 {metrics.handoffs.pendingUser} · 完成 {metrics.handoffs.completed} · 失败 {metrics.handoffs.failed}</dd></div>
+              <div><dt>平均恢复</dt><dd>{metrics.handoffs.averageRecoveryMs == null ? "—" : formatDuration(metrics.handoffs.averageRecoveryMs)}</dd></div>
+              <div><dt>平均接管上下文</dt><dd>{metrics.handoffs.averageContextTokens == null ? "—" : `${formatNumber(metrics.handoffs.averageContextTokens)} tokens`}</dd></div>
+              <div><dt>诊断</dt><dd>{metrics.diagnosis.total} 次 · 模型 {metrics.diagnosis.model} · 规则 {metrics.diagnosis.rules}</dd></div>
+            </dl>
+          </div>
+        </section>
+      )}
+    </section>
+  );
+}
+
+function DataTab() {
+  const storageQuery = useQuery({ queryKey: ["settingsStorage"], queryFn: api.settingsStorage });
+  const storage = storageQuery.data;
+  return (
+    <section className="settings-tab-panel">
+      <div className="settings-section-intro">
+        <div><h2>数据</h2><p>设置、模型档案、执行器绑定、任务、事件和上下文元数据统一写入 SQLite；大块正文放在受控 blob 目录。</p></div>
+        {storage && <span className="status-chip ok">SQLite schema v{storage.schemaVersion}</span>}
+      </div>
+
+      {storageQuery.isLoading && <InlineLoading text="正在读取存储信息" />}
+      {storage && (
+        <>
+          <section className="panel settings-section">
+            <div className="settings-body">
+              <div className="section-heading"><div><h3>目录结构</h3><p>所有运行时数据都在 <code>{storage.dataDir}</code> 下。</p></div><FolderTree size={20} /></div>
+              <dl className="settings-kv path-list">
+                <div><dt>SQLite 数据库</dt><dd><code>{storage.paths.database}</code></dd></div>
+                <div><dt>执行器运行时</dt><dd><code>{storage.paths.executors}</code><small>Codex 与 DeepSeek Harness 使用各自独立目录，避免污染全局登录。</small></dd></div>
+                <div><dt>上下文 blob</dt><dd><code>{storage.paths.contextBlobs}</code></dd></div>
+                <div><dt>加密备份</dt><dd><code>{storage.paths.backups}</code></dd></div>
+                <div><dt>附件</dt><dd><code>{storage.paths.attachments}</code></dd></div>
+              </dl>
+              <pre className="storage-tree">{`.hearth/
+├─ hearth.sqlite              # 设置、任务、事件、上下文索引
+├─ executors/
+│  ├─ codex/                  # 独立 CODEX_HOME
+│  └─ deepseek-harness/       # DSH 运行时 home
+├─ context/blobs/             # 大段上下文正文（内容寻址）
+├─ backups/legacy-dev/        # 旧 JSON 设置迁移备份
+├─ workspaces/                # 隔离任务工作区
+├─ artifacts/                 # 受管产物
+└─ outbox/                    # 本地发件箱`}</pre>
+            </div>
+          </section>
+
+          <section className="panel settings-section">
+            <div className="settings-body">
+              <div className="section-heading"><div><h3>SQLite 设置表</h3><p>运行时以 SQLite 为唯一事实来源；旧 JSON 只在迁移时读取。</p></div></div>
+              <div className="data-table-list">
+                <DataRow name="app_settings" text="聊天模型、界面级键值和注册表更新时间" />
+                <DataRow name="model_profiles" text="模型供应商、协议、地址、模型名和加密 API Key" />
+                <DataRow name="executor_model_bindings" text="执行器与模型档案的绑定、协议覆盖和模型覆盖" />
+                <DataRow name="settings_migrations" text="旧 JSON 迁移状态、源路径和备份路径" />
+                <DataRow name="context_items / context_summaries" text="统一上下文账本与任务摘要" />
+                <DataRow name="handoffs / diagnoses" text="执行器接管记录与模型诊断证据" />
               </div>
             </div>
-            <p className="settings-hint"><ShieldAlert size={13} /> 接管只共享工作区、产物、摘要和证据，不承诺模型内部状态的位级连续。</p>
-          </div>
-        </details>
-      </section>
-    </div>
+          </section>
+
+          <section className="panel settings-section">
+            <div className="settings-body">
+              <div className="section-heading"><div><h3>旧设置迁移</h3><p>启动时幂等迁移，失败回滚并保留原 JSON。</p></div></div>
+              <dl className="settings-kv">
+                <div><dt>旧模型设置</dt><dd><code>{storage.legacy.modelSettings}</code></dd></div>
+                <div><dt>旧执行器设置</dt><dd><code>{storage.legacy.executorSettings}</code></dd></div>
+              </dl>
+              <div className="migration-list">
+                {storage.migrations.length === 0 && <EmptyState text="没有迁移记录；这是干净的 SQLite 配置。" />}
+                {storage.migrations.map((migration) => (
+                  <article key={migration.id} className="migration-row">
+                    <span className={`status-dot ${migration.status === "completed" ? "online" : migration.status === "failed" ? "offline" : "idle"}`} />
+                    <div><strong>{migration.sourcePath}</strong><small>{migration.backupPath ?? "无备份路径"} · {new Date(migration.updatedAt).toLocaleString()}</small>{migration.error && <p>{migration.error}</p>}</div>
+                    <span className={`status-chip ${migration.status === "completed" ? "ok" : "warn"}`}>{migration.status}</span>
+                  </article>
+                ))}
+              </div>
+            </div>
+          </section>
+        </>
+      )}
+    </section>
   );
+}
+
+type NoticeState = { tone: "ok" | "error" | "info"; text: string } | null;
+
+function Notice({ tone, text }: { tone: "ok" | "error" | "info"; text: string }) {
+  return <div className={`settings-notice ${tone}`}>{tone === "ok" ? <CheckCircle2 size={15} /> : tone === "error" ? <AlertTriangle size={15} /> : <KeyRound size={15} />}<span>{text}</span></div>;
+}
+
+function InlineLoading({ text }: { text: string }) {
+  return <p className="inline-loading"><Loader2 size={15} className="spin" /> {text}</p>;
+}
+
+function EmptyState({ text }: { text: string }) {
+  return <p className="empty-state">{text}</p>;
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return <div><span>{label}</span><strong>{value}</strong></div>;
+}
+
+function DataRow({ name, text }: { name: string; text: string }) {
+  return <div className="data-row"><code>{name}</code><span>{text}</span></div>;
 }
 
 function protocolLabel(protocol: ModelProtocol): string {
   return PROTOCOLS.find((item) => item.id === protocol)?.label ?? protocol;
 }
 
-function keyStateText(codex: { envKeySource?: string; authSource?: string } | undefined): string {
-  if (!codex) return "";
-  if (codex.envKeySource === "windows-user") return "密钥来自 Windows 用户环境变量";
-  if (codex.envKeySource === "process") return "密钥来自当前进程";
-  if (codex.authSource === "openai-login") return "已登录 OpenAI";
-  return "";
-}
-
-function Notice({ tone, text }: { tone: "ok" | "error" | "info"; text: string }) {
-  return <div className={`settings-notice ${tone}`}>{tone === "ok" ? <CheckCircle2 size={15} /> : tone === "error" ? <AlertTriangle size={15} /> : <KeyRound size={15} />}<span>{text}</span></div>;
+function contextModeLabel(mode: ContextSettings["mode"] | undefined): string {
+  if (mode === "on") return "上下文已开启";
+  if (mode === "shadow") return "只诊断，不接管";
+  if (mode === "off") return "上下文已关闭";
+  return "读取中";
 }
