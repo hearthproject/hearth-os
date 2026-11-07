@@ -55,9 +55,11 @@ import type {
   MemorySensitivity,
   MemorySettings,
   MemoryVersion,
+  MethodApplication,
   MethodCandidate,
   MethodEvaluation,
   MethodMetrics,
+  MethodSettings,
   MethodStatus,
   MethodTrial,
   MethodVerdict,
@@ -159,9 +161,11 @@ export type {
   MemorySensitivity,
   MemorySettings,
   MemoryVersion,
+  MethodApplication,
   MethodCandidate,
   MethodEvaluation,
   MethodMetrics,
+  MethodSettings,
   MethodStatus,
   MethodTrial,
   MethodVerdict,
@@ -506,6 +510,7 @@ export interface CreateTaskRequest {
   goal?: string;
   textInput?: string;
   sourceItemIds?: string[];
+  methodId?: string;
 }
 
 export interface ApprovalDecisionResult {
@@ -626,6 +631,8 @@ export interface MethodSnapshot {
   methods: MethodCandidate[];
   evaluations: MethodEvaluation[];
   trials: MethodTrial[];
+  applications: MethodApplication[];
+  settings: MethodSettings;
 }
 
 export interface CreateMethodRequest {

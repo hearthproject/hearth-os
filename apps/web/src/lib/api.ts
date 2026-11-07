@@ -310,6 +310,18 @@ export const api = {
     method: "POST",
     body: JSON.stringify(reason === undefined ? {} : { reason })
   }),
+  methodSettings: () => request<{ settings: MethodSnapshot["settings"] }>("/api/methods/settings"),
+  saveMethodSettings: (patch: { autoLearn?: boolean }) => request<{ settings: MethodSnapshot["settings"] }>("/api/methods/settings", {
+    method: "PATCH",
+    body: JSON.stringify(patch)
+  }),
+  methodPairing: (id: string) => request<{ baselineTaskIds: string[]; trialTaskIds: string[]; notes: string[] }>(
+    "/api/methods/" + encodeURIComponent(id) + "/pairing"
+  ),
+  assignTaskMethod: (taskId: string, methodId: string | null) => request<TaskRecord>(
+    `/api/tasks/${encodeURIComponent(taskId)}/method`,
+    { method: "PATCH", body: JSON.stringify({ methodId }) }
+  ),
   sync: () => request<SyncSnapshot>("/api/sync"),
   createSyncPeer: (input: CreateSyncPeerRequest) => request<SyncPeerResult>("/api/sync/peers", {
     method: "POST",

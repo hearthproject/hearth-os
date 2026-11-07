@@ -5,6 +5,7 @@ import { AppShell } from "./components/AppShell.tsx";
 import { subscribeToEvents } from "./lib/api.ts";
 import { ChatPage } from "./pages/ChatPage.tsx";
 import { DevicesPage } from "./pages/DevicesPage.tsx";
+import { MethodsPage } from "./pages/MethodsPage.tsx";
 import { SettingsPage } from "./pages/SettingsPage.tsx";
 import { SchedulesPage } from "./pages/SchedulesPage.tsx";
 import { TaskDetailPage } from "./pages/TaskDetailPage.tsx";
@@ -19,6 +20,7 @@ export default function App() {
           <Route index element={<ChatPage />} />
           <Route path="tasks" element={<TasksPage />} />
           <Route path="tasks/:id" element={<TaskDetailPage />} />
+          <Route path="methods" element={<MethodsPage />} />
           <Route path="schedules" element={<SchedulesPage />} />
           <Route path="devices" element={<DevicesPage />} />
           <Route path="settings" element={<SettingsPage />} />
@@ -43,6 +45,7 @@ function EventBridge() {
         void queryClient.invalidateQueries({ queryKey: ["health"] });
         void queryClient.invalidateQueries({ queryKey: ["system"] });
         void queryClient.invalidateQueries({ queryKey: ["desktop"] });
+        void queryClient.invalidateQueries({ queryKey: ["methods"] });
         if (["task.created", "task.updated", "chat.message.created", "chat.message.updated", "message"].includes(event)) {
           void queryClient.invalidateQueries({ queryKey: ["conversations"] });
           void queryClient.invalidateQueries({ queryKey: ["conversation"] });

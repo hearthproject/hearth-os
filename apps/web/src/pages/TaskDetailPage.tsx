@@ -37,6 +37,7 @@ export function TaskDetailPage() {
   const [preview, setPreview] = useState<{ artifact: TaskDeliverable; content: string | null; loading: boolean; error: string | null } | null>(null);
   const [resumeInput, setResumeInput] = useState("");
   const contextQuery = useQuery({ queryKey: ["task-context", id], queryFn: () => api.taskContext(id, { limit: 80 }), enabled: Boolean(id), refetchInterval: 4_000 });
+  const methodsQuery = useQuery({ queryKey: ["methods"], queryFn: api.methods, refetchInterval: 30_000 });
   const pendingHandoff = contextQuery.data?.handoffs.find((item) => item.status === "pending_user") ?? null;
 
   const retry = useMutation({
@@ -72,6 +73,9 @@ export function TaskDetailPage() {
 
   const view = taskQuery.data;
   const task = view.task;
+  const boundMethod = task.methodId
+    ? methodsQuery.data?.methods.find((method) => method.id === task.methodId) ?? null
+    : null;
   const deliverables = visibleDeliverables(view.artifacts, task.expectedOutputs);
   const progress = progressEvents(view);
   const { visible: visibleProgress, technical: technicalProgress } = splitProgress(progress);
@@ -123,6 +127,7 @@ export function TaskDetailPage() {
         <span className={`phase-tag ${phaseTone(task.status)}`}>{phaseLabel(task.status, task.nextAction)}</span>
         <span className="executor-tag">{executorLabel(task.executorId)}</span>
         <span>{taskKindLabel(task.taskKind)}</span>
+        {boundMethod && <span>方法 {boundMethod.name} · v{boundMethod.version}</span>}
         <span><Clock3 size={13} /> {formatDuration(lastDuration(view.runs))}</span>
         <span>Token {formatTokens(lastUsage(view.runs))}</span>
         {view.checkpoints.length > 0 && <span>{view.checkpoints.length} 个检查点</span>}
