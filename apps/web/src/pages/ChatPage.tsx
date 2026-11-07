@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -37,19 +37,26 @@ interface RoutingState {
 
 export function ChatPage() {
   const queryClient = useQueryClient();
-  const [conversationId, setConversationId] = useState<string | null>(() => localStorage.getItem("hearth.conversation"));
+  const location = useLocation();
+  const [conversationId, setConversationId] = useState<string | null>(() => {
+    const returned = (location.state as { conversationId?: string } | null)?.conversationId;
+    return returned ?? localStorage.getItem("hearth.conversation");
+  });
   const [messages, setMessages] = useState<ChatMessageRecord[]>([]);
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [sending, setSending] = useState(false);
   const [streaming, setStreaming] = useState("");
+  const [reasoning, setReasoning] = useState("");
   const [routing, setRouting] = useState<RoutingState | null>(null);
   const [proposals, setProposals] = useState<TaskProposalRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const conversationIdRef = useRef<string | null>(conversationId);
 
   const conversationsQuery = useQuery({ queryKey: ["conversations"], queryFn: api.conversations, refetchInterval: 15_000 });
   const tasksQuery = useQuery({ queryKey: ["tasks"], queryFn: api.tasks, refetchInterval: 8_000 });
@@ -72,9 +79,21 @@ export function ChatPage() {
 
   useEffect(() => {
     if (!conversationQuery.data || sending) return;
-    setMessages(conversationQuery.data.messages);
+    const nextMessages = conversationQuery.data.messages;
+    setMessages((prev) => (nextMessages.length >= prev.length ? nextMessages : prev));
     setProposals(conversationQuery.data.proposals.filter((proposal) => proposal.status === "pending"));
   }, [conversationQuery.data, sending]);
+
+  useEffect(() => {
+    conversationIdRef.current = conversationId;
+  }, [conversationId]);
+
+  useEffect(() => {
+    const element = composerRef.current;
+    if (!element) return;
+    element.style.height = "auto";
+    element.style.height = `${Math.min(element.scrollHeight, 160)}px`;
+  }, [input]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: sending ? "auto" : "smooth" });
@@ -85,8 +104,10 @@ export function ChatPage() {
   function selectConversation(id: string | null) {
     if (sending) return;
     setConversationId(id);
+    conversationIdRef.current = id;
     setMessages([]);
     setStreaming("");
+    setReasoning("");
     setRouting(null);
     setProposals([]);
     setError(null);
@@ -134,12 +155,14 @@ export function ChatPage() {
     setInput("");
     setAttachments([]);
     setStreaming("");
+    setReasoning("");
     setRouting(null);
     setError(null);
     setSending(true);
     const controller = new AbortController();
     abortRef.current = controller;
     let answer = "";
+    let reasoningText = "";
 
     try {
       await chatStream(
@@ -154,6 +177,7 @@ export function ChatPage() {
             if (event === "conversation") {
               const conversation = data as { id: string };
               setConversationId(conversation.id);
+              conversationIdRef.current = conversation.id;
               localStorage.setItem("hearth.conversation", conversation.id);
             } else if (event === "user") {
               setMessages((prev) => [...prev, data as ChatMessageRecord]);
@@ -162,6 +186,9 @@ export function ChatPage() {
             } else if (event === "delta") {
               answer += (data as { text: string }).text;
               setStreaming(answer);
+            } else if (event === "reasoning") {
+              reasoningText += (data as { text: string }).text;
+              setReasoning(reasoningText);
             } else if (event === "task") {
               const payload = data as { message: ChatMessageRecord };
               setMessages((prev) => (prev.some((message) => message.id === payload.message.id) ? prev : [...prev, payload.message]));
@@ -173,6 +200,7 @@ export function ChatPage() {
             } else if (event === "done") {
               const message = data as ChatMessageRecord;
               setStreaming("");
+              setReasoning("");
               setMessages((prev) => (prev.some((item) => item.id === message.id) ? prev : [...prev, message]));
             } else if (event === "error") {
               setError((data as { message: string }).message);
@@ -188,8 +216,10 @@ export function ChatPage() {
       abortRef.current = null;
       setSending(false);
       setStreaming("");
+      setReasoning("");
       void queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      if (conversationId) void queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
+      const activeId = conversationIdRef.current;
+      if (activeId) void queryClient.invalidateQueries({ queryKey: ["conversation", activeId] });
     }
   }
 
@@ -266,11 +296,12 @@ export function ChatPage() {
                   Codex 执行器当前不可用，任务会排队。到<Link to="/settings">设置</Link>查看连接诊断。
                 </ChatNotice>
               )}
-              {messages.map((message) => <ChatBubble key={message.id} message={message} />)}
+              {messages.map((message) => <ChatBubble key={message.id} message={message} conversationId={conversationId} />)}
               {proposals.map((proposal) => (
                 <ProposalCard
                   key={proposal.id}
                   proposal={proposal}
+                  conversationId={conversationId}
                   onResolved={(id) => {
                     setProposals((prev) => prev.filter((item) => item.id !== id));
                     void queryClient.invalidateQueries({ queryKey: ["tasks"] });
@@ -279,8 +310,8 @@ export function ChatPage() {
                   }}
                 />
               ))}
-              {streaming && <AssistantBubble content={streaming} streaming />}
-              {sending && !streaming && (
+              {(streaming || reasoning) && <AssistantBubble content={streaming} reasoning={reasoning} streaming />}
+              {sending && !streaming && !reasoning && (
                 <div className="typing-row">
                   <Loader2 size={14} className="spin" />
                   <span>{routing?.action === "task" ? "正在派出任务…" : routing ? "正在回答…" : "正在判断该由谁处理…"}</span>
@@ -327,6 +358,7 @@ export function ChatPage() {
             </button>
             <input ref={fileInputRef} type="file" multiple hidden onChange={(event) => void pickFiles(event)} />
             <textarea
+              ref={composerRef}
               value={input}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={onComposerKeyDown}
@@ -378,6 +410,7 @@ function ConversationItem({
               key={task.id}
               className="conversation-task"
               to={`/tasks/${task.id}`}
+              state={{ fromChat: true, conversationId: conversation.id }}
               title={`${task.title} · ${task.summary.phase}`}
             >
               <span className={`rail-task-icon ${task.status}`}><ListChecks size={11} /></span>
@@ -390,7 +423,7 @@ function ConversationItem({
   );
 }
 
-function ChatBubble({ message }: { message: ChatMessageRecord }) {
+function ChatBubble({ message, conversationId }: { message: ChatMessageRecord; conversationId: string | null }) {
   if (message.role === "user") {
     return (
       <div className="message-row user">
@@ -412,34 +445,57 @@ function ChatBubble({ message }: { message: ChatMessageRecord }) {
   }
   return (
     <div className="message-row assistant">
-      <AssistantBubble content={message.content} taskId={message.taskId} createdAt={message.createdAt} />
+      <AssistantBubble content={message.content} taskId={message.taskId} createdAt={message.createdAt} conversationId={conversationId} />
     </div>
   );
 }
 
 function AssistantBubble({
   content,
+  reasoning = "",
   taskId,
   createdAt,
-  streaming = false
+  streaming = false,
+  conversationId
 }: {
   content: string;
+  reasoning?: string;
   taskId?: string | null;
   createdAt?: string;
   streaming?: boolean;
+  conversationId?: string | null;
 }) {
+  const reasoningRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const element = reasoningRef.current;
+    if (element) element.scrollTop = element.scrollHeight;
+  }, [reasoning]);
+
   return (
     <div className={`message-bubble assistant-bubble ${streaming ? "streaming" : ""}`}>
-      <div className="chat-markdown">
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          components={{ a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" /> }}
-        >
-          {content}
-        </ReactMarkdown>
-      </div>
+      {reasoning && (
+        <div className="reasoning-block">
+          <div className="reasoning-label"><Loader2 size={12} className="spin" /> 思考过程</div>
+          <div className="reasoning-text" ref={reasoningRef}>{reasoning}</div>
+        </div>
+      )}
+      {content && (
+        <div className="chat-markdown">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{ a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" /> }}
+          >
+            {content}
+          </ReactMarkdown>
+        </div>
+      )}
       {taskId && (
-        <Link className="task-link-card" to={`/tasks/${taskId}`}>
+        <Link
+          className="task-link-card"
+          to={`/tasks/${taskId}`}
+          state={{ fromChat: true, ...(conversationId ? { conversationId } : {}) }}
+        >
           <CheckCircle2 size={15} />
           <span>任务已派出，查看进度和结果</span>
         </Link>
@@ -453,7 +509,15 @@ function ChatNotice({ icon, tone, children }: { icon: React.ReactNode; tone: "wa
   return <div className={`chat-notice ${tone}`}>{icon}<span>{children}</span></div>;
 }
 
-function ProposalCard({ proposal, onResolved }: { proposal: TaskProposalRecord; onResolved: (id: string) => void }) {
+function ProposalCard({
+  proposal,
+  conversationId,
+  onResolved
+}: {
+  proposal: TaskProposalRecord;
+  conversationId: string | null;
+  onResolved: (id: string) => void;
+}) {
   const [busy, setBusy] = useState<"confirm" | "reject" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
@@ -501,7 +565,13 @@ function ProposalCard({ proposal, onResolved }: { proposal: TaskProposalRecord; 
       )}
       {error && <p className="form-error">{error}</p>}
       {taskId ? (
-        <Link className="task-link-card" to={`/tasks/${taskId}`}><CheckCircle2 size={15} /> 已确认，查看任务进度</Link>
+        <Link
+          className="task-link-card"
+          to={`/tasks/${taskId}`}
+          state={{ fromChat: true, ...(conversationId ? { conversationId } : {}) }}
+        >
+          <CheckCircle2 size={15} /> 已确认，查看任务进度
+        </Link>
       ) : (
         <div className="proposal-actions">
           <button className="primary-button" onClick={() => void confirm()} disabled={busy !== null}>

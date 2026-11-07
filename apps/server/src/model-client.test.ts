@@ -65,6 +65,37 @@ describe("OpenAI-compatible model client", () => {
     expect(result.content).toBe("你好");
   });
 
+  it("streams reasoning separately from answer content", async () => {
+    const reasoningServer = createServer(async (request, response) => {
+      for await (const _chunk of request) {
+        // Drain the request body before replying.
+      }
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write(`data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "先想" } }] })}\n\n`);
+      response.write(`data: ${JSON.stringify({ choices: [{ delta: { content: "答案" } }] })}\n\n`);
+      response.write("data: [DONE]\n\n");
+      response.end();
+    });
+    await new Promise<void>((resolve) => reasoningServer.listen(0, "127.0.0.1", resolve));
+    const address = reasoningServer.address();
+    if (!address || typeof address === "string") throw new Error("no server address");
+    const deltas: Array<{ text: string; kind: string | undefined }> = [];
+    try {
+      const result = await streamChat(
+        { ...settings(), baseUrl: `http://127.0.0.1:${address.port}/v1` },
+        [{ role: "user", content: "hi" }],
+        (text, kind) => deltas.push({ text, kind })
+      );
+      expect(deltas).toEqual([
+        { text: "先想", kind: "reasoning" },
+        { text: "答案", kind: "content" }
+      ]);
+      expect(result.content).toBe("答案");
+    } finally {
+      await new Promise<void>((resolve, reject) => reasoningServer.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
   it("parses non-stream replies and usage", async () => {
     mode = "chat";
     const result = await completeChat(settings(), [{ role: "user", content: "hi" }]);

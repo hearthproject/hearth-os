@@ -3957,6 +3957,32 @@ body.modal-open {
   border-color: var(--line-strong);
 }
 
+.reasoning-block {
+  margin-bottom: 9px;
+  padding: 7px 9px;
+  border-radius: 9px;
+  background: var(--surface-sunk);
+}
+
+.reasoning-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 4px;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-12);
+}
+
+.reasoning-text {
+  max-height: 190px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--ink-secondary);
+  font-size: var(--fs-12);
+  line-height: 1.55;
+}
+
 .plain-message {
   margin: 0;
   white-space: pre-wrap;
@@ -4194,6 +4220,7 @@ body.modal-open {
   flex: 1 1 auto;
   min-height: 36px;
   max-height: 160px;
+  overflow-y: auto;
   padding: 8px 4px;
   border: 0;
   outline: none;

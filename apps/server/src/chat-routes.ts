@@ -371,7 +371,11 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
 
     try {
       let answer = "";
-      await streamChat(settings, messages, (delta) => {
+      await streamChat(settings, messages, (delta, kind) => {
+        if (kind === "reasoning") {
+          send("reasoning", { text: delta });
+          return;
+        }
         answer += delta;
         send("delta", { text: delta });
       }, { signal: controller.signal, temperature: 0.5, timeoutMs: 180_000 });

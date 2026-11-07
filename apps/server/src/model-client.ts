@@ -30,6 +30,9 @@ export interface CompleteResult {
   usage: { inputTokens: number; outputTokens: number } | null;
 }
 
+export type StreamDeltaKind = "content" | "reasoning";
+export type StreamDeltaHandler = (text: string, kind: StreamDeltaKind) => void;
+
 export async function completeChat(
   settings: ModelSettings,
   messages: ChatMessage[],
@@ -51,7 +54,7 @@ export async function completeChat(
 export async function streamChat(
   settings: ModelSettings,
   messages: ChatMessage[],
-  onDelta: (text: string) => void,
+  onDelta: StreamDeltaHandler,
   options: CompleteOptions = {}
 ): Promise<CompleteResult> {
   assertConfigured(settings);
@@ -119,7 +122,7 @@ async function completeOpenAiChat(
 async function streamOpenAiChat(
   settings: ModelSettings,
   messages: ChatMessage[],
-  onDelta: (text: string) => void,
+  onDelta: StreamDeltaHandler,
   options: CompleteOptions
 ): Promise<CompleteResult> {
   const response = await fetch(openAiChatUrl(settings.baseUrl), {
@@ -140,7 +143,7 @@ async function streamOpenAiChat(
     const payload = await readJsonFromText(await response.text());
     const content = String(payload?.choices?.[0]?.message?.content ?? "");
     if (!content) throw apiError(response.status, payload);
-    onDelta(content);
+    onDelta(content, "content");
     return { content, usage: readUsage(payload?.usage) };
   }
 
@@ -148,6 +151,12 @@ async function streamOpenAiChat(
   let usage: CompleteResult["usage"] = null;
   await readSse(response, (_event, payload) => {
     const choice = payload?.choices?.[0];
+    const reasoning = typeof choice?.delta?.reasoning_content === "string"
+      ? choice.delta.reasoning_content
+      : typeof choice?.delta?.reasoning === "string"
+        ? choice.delta.reasoning
+        : "";
+    if (reasoning) onDelta(reasoning, "reasoning");
     const delta = typeof choice?.delta?.content === "string"
       ? choice.delta.content
       : typeof choice?.message?.content === "string"
@@ -155,7 +164,7 @@ async function streamOpenAiChat(
         : "";
     if (delta) {
       content += delta;
-      onDelta(delta);
+      onDelta(delta, "content");
     }
     const chunkUsage = readUsage(payload?.usage);
     if (chunkUsage) usage = chunkUsage;
@@ -189,7 +198,7 @@ async function completeOpenAiResponses(
 async function streamOpenAiResponses(
   settings: ModelSettings,
   messages: ChatMessage[],
-  onDelta: (text: string) => void,
+  onDelta: StreamDeltaHandler,
   options: CompleteOptions
 ): Promise<CompleteResult> {
   const response = await fetch(openAiResponsesUrl(settings.baseUrl), {
@@ -204,11 +213,14 @@ async function streamOpenAiResponses(
   let usage: CompleteResult["usage"] = null;
   await readSse(response, (event, payload) => {
     const type = typeof payload?.type === "string" ? payload.type : event;
-    if (type === "response.output_text.delta" || type === "response.refusal.delta") {
+    if (type === "response.reasoning_summary_text.delta" || type === "response.reasoning_text.delta") {
+      const delta = typeof payload?.delta === "string" ? payload.delta : "";
+      if (delta) onDelta(delta, "reasoning");
+    } else if (type === "response.output_text.delta" || type === "response.refusal.delta") {
       const delta = typeof payload?.delta === "string" ? payload.delta : "";
       if (delta) {
         content += delta;
-        onDelta(delta);
+        onDelta(delta, "content");
       }
     } else if (type === "response.completed" || type === "response.done") {
       usage = readUsage(payload?.response?.usage ?? payload?.usage) ?? usage;
@@ -245,7 +257,7 @@ async function completeAnthropic(
 async function streamAnthropic(
   settings: ModelSettings,
   messages: ChatMessage[],
-  onDelta: (text: string) => void,
+  onDelta: StreamDeltaHandler,
   options: CompleteOptions
 ): Promise<CompleteResult> {
   const response = await fetch(anthropicUrl(settings.baseUrl), {
@@ -261,10 +273,15 @@ async function streamAnthropic(
   await readSse(response, (event, payload) => {
     const type = typeof payload?.type === "string" ? payload.type : event;
     if (type === "content_block_delta") {
+      const thinking = typeof payload?.delta?.thinking === "string" ? payload.delta.thinking : "";
+      if (thinking) {
+        onDelta(thinking, "reasoning");
+        return;
+      }
       const delta = typeof payload?.delta?.text === "string" ? payload.delta.text : "";
       if (delta) {
         content += delta;
-        onDelta(delta);
+        onDelta(delta, "content");
       }
     } else if (type === "message_start") {
       const inputTokens = Number(payload?.message?.usage?.input_tokens ?? 0);
@@ -299,7 +316,7 @@ async function completeGemini(
 async function streamGemini(
   settings: ModelSettings,
   messages: ChatMessage[],
-  onDelta: (text: string) => void,
+  onDelta: StreamDeltaHandler,
   options: CompleteOptions
 ): Promise<CompleteResult> {
   const response = await fetch(geminiUrl(settings, true), {
@@ -313,10 +330,11 @@ async function streamGemini(
   let content = "";
   let usage: CompleteResult["usage"] = null;
   await readSse(response, (_event, payload) => {
-    const delta = geminiText(payload);
-    if (delta) {
-      content += delta;
-      onDelta(delta);
+    const { text, reasoning } = geminiStreamParts(payload);
+    if (reasoning) onDelta(reasoning, "reasoning");
+    if (text) {
+      content += text;
+      onDelta(text, "content");
     }
     const chunkUsage = readGeminiUsage(payload?.usageMetadata);
     if (chunkUsage) usage = chunkUsage;
@@ -517,6 +535,19 @@ function geminiText(payload: Record<string, any> | null): string {
   const parts = payload?.candidates?.[0]?.content?.parts;
   if (!Array.isArray(parts)) return "";
   return parts.map((part: any) => typeof part?.text === "string" ? part.text : "").join("");
+}
+
+function geminiStreamParts(payload: Record<string, any> | null): { text: string; reasoning: string } {
+  const parts = payload?.candidates?.[0]?.content?.parts;
+  if (!Array.isArray(parts)) return { text: "", reasoning: "" };
+  const text: string[] = [];
+  const reasoning: string[] = [];
+  for (const part of parts) {
+    if (typeof part?.text !== "string") continue;
+    if (part.thought === true) reasoning.push(part.text);
+    else text.push(part.text);
+  }
+  return { text: text.join(""), reasoning: reasoning.join("") };
 }
 
 function normalizeModelIds(list: any[]): string[] {

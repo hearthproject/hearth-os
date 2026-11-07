@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -24,6 +24,12 @@ import type { ArtifactRecord, RunRecord, TaskDeliverable, TaskView } from "../li
 
 export function TaskDetailPage() {
   const { id = "" } = useParams();
+  const location = useLocation();
+  const navState = location.state as { fromChat?: boolean; conversationId?: string } | null;
+  const fromChat = Boolean(navState?.fromChat);
+  const backTo = fromChat ? "/" : "/tasks";
+  const backLabel = fromChat ? "返回对话" : "返回任务";
+  const backState = fromChat && navState?.conversationId ? { conversationId: navState.conversationId } : undefined;
   const queryClient = useQueryClient();
   const taskQuery = useQuery({ queryKey: ["task", id], queryFn: () => api.task(id), enabled: Boolean(id), refetchInterval: 4_000 });
   const [preview, setPreview] = useState<{ artifact: TaskDeliverable; content: string | null; loading: boolean; error: string | null } | null>(null);
@@ -47,7 +53,7 @@ export function TaskDetailPage() {
   if (taskQuery.isError || !taskQuery.data) {
     return (
       <div className="page">
-        <Link className="back-link" to="/tasks"><ArrowLeft size={14} /> 返回任务</Link>
+        <Link className="back-link" to={backTo} state={backState}><ArrowLeft size={14} /> {backLabel}</Link>
         <div className="empty-panel"><h2>没有找到这个任务</h2></div>
       </div>
     );
@@ -83,7 +89,7 @@ export function TaskDetailPage() {
 
   return (
     <div className="page task-detail-page">
-      <Link className="back-link" to="/tasks"><ArrowLeft size={14} /> 返回任务</Link>
+      <Link className="back-link" to={backTo} state={backState}><ArrowLeft size={14} /> {backLabel}</Link>
 
       <div className="page-head">
         <div className="task-detail-title">
