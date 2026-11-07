@@ -15,7 +15,7 @@ import { ContextProjector } from "./context-projector.ts";
 import { maybeModelSummary } from "./context-summary.ts";
 import { loadExecutorSettings } from "./executor-settings.ts";
 import { HermesApprovalRequiredError, HermesStartupError, runHermes, type HermesStreamEvent } from "./hermes-executor.ts";
-import { hermesHealth } from "./hermes-health.ts";
+import { executorHealth as readExecutorHealth } from "./executor-runtime.ts";
 import { sanitizeProgressDetail } from "./progress-detail.ts";
 import { resolveExecutorId } from "./executors.ts";
 import { extractProposedComment, inspectRepository, readPrPreview, validatePullRequestPreview } from "./github.ts";
@@ -29,7 +29,7 @@ import type { HearthService } from "./service.ts";
 import { buildDeliveryRepairPrompt, buildTaskPrompt, prepareWorkspace, UnsupportedInputError, type PreparedWorkspace } from "./workspace.ts";
 import { CapabilityUnavailableError, needsGithubRepository, wantsScreenshot } from "./task-intent.ts";
 
-import { createExecutorAdapters, type CodexContextItem, type CodexRunner, type ExecutionOutcome, type ExecutorAdapter, type ExecutorAttemptContext, type HermesRunner, type NativeRunner } from "./executor-adapter.ts";
+import { createExecutorAdapters, type CodexContextItem, type CodexRunner, type ExecutionOutcome, type ExecutorAdapter, type ExecutorAttemptContext, type ExternalRunner, type HermesRunner, type NativeRunner } from "./executor-adapter.ts";
 export type { CodexRunner, HermesRunner, NativeRunner } from "./executor-adapter.ts";
 export type ExecutorHealthProvider = (executorId: ExecutorId, settings: ExecutorSettings) => { canRun: boolean; issues: string[] };
 
@@ -54,6 +54,7 @@ export interface SchedulerOptions {
   codexRunner?: CodexRunner;
   nativeRunner?: NativeRunner;
   hermesRunner?: HermesRunner;
+  externalRunner?: ExternalRunner;
   executorHealth?: ExecutorHealthProvider;
   executorSettingsPath?: string;
   executorSettings?: ExecutorSettings;
@@ -117,13 +118,17 @@ export class HearthScheduler {
     this.codexRunner = options.codexRunner ?? runCodex;
     this.nativeRunner = options.nativeRunner ?? runNativeTask;
     this.hermesRunner = options.hermesRunner ?? runHermes;
-    this.adapters = createExecutorAdapters({ codex: this.codexRunner, native: this.nativeRunner, hermes: this.hermesRunner });
-    this.executorHealth = options.executorHealth ?? ((executorId, settings) => {
-      if (executorId !== "hermes") return { canRun: true, issues: [] };
-      return hermesHealth(settings.hermesCommand);
-    });
     this.executorSettingsPath = options.executorSettingsPath ?? EXECUTOR_SETTINGS_PATH;
     this.staticExecutorSettings = options.executorSettings ?? null;
+    this.adapters = createExecutorAdapters({
+      codex: this.codexRunner,
+      native: this.nativeRunner,
+      hermes: this.hermesRunner,
+      settingsPath: this.executorSettingsPath,
+      ...(options.externalRunner ? { external: options.externalRunner } : {})
+    });
+    this.executorHealth = options.executorHealth
+      ?? ((executorId, settings) => readExecutorHealth(executorId, settings, this.executorSettingsPath));
     this.modelSettingsPath = options.modelSettingsPath ?? MODEL_SETTINGS_PATH;
     this.runBudget = options.runBudget ?? DEFAULT_RUN_BUDGET;
     this.approvals = options.approvals;
@@ -193,10 +198,11 @@ export class HearthScheduler {
     const handoff = [...this.service.store.listHandoffs(taskId)].reverse().find((item) => item.status === "pending_user");
     if (!handoff) throw new Error("没有等待确认的接管");
     if (handoff.toExecutor !== executorId) throw new Error(`当前等待确认的目标执行器是 ${handoff.toExecutor}`);
-    const health = this.executorHealth(executorId, this.executorSettings());
+    const settings = this.executorSettings();
+    const health = this.executorHealth(executorId, settings);
     if (!health.canRun) throw new Error(`目标执行器当前不可用：${health.issues.join("；") || "未检测到可用配置"}`);
     if (!this.executorEnabledForTask(task, executorId)) throw new Error("当前对话已关闭该执行器");
-    const adapterCheck = this.adapters[executorId].canRun({ task, prepared: null, settings: this.context.settings() });
+    const adapterCheck = this.adapters[executorId].canRun({ task, prepared: null, settings: this.context.settings(), executorSettings: settings });
     if (!adapterCheck.ok) throw new Error(adapterCheck.reason ?? "目标执行器不能执行这个任务");
     this.context.updateHandoff(handoff.id, { status: "prepared" });
     const updated = this.service.updateTask(taskId, {
@@ -873,10 +879,10 @@ export class HearthScheduler {
         ? this.buildHandoffPrompt(task, prepared, expectedOutputs, handoff.packet, permissionNote, memoryContext)
         : basePrompt;
       if (pendingInput && !resumeState && executorId !== "codex") prompt = `${basePrompt}\n\n用户补充信息：\n${pendingInput}`;
-      let activeCodexThreadId = executorId === "codex" && !handoff && input.previousRun?.executorId === "codex"
+      let activeThreadId = !handoff && input.previousRun?.executorId === executorId
         ? input.previousRun.threadId ?? undefined
         : undefined;
-      if (executorId === "codex" && activeCodexThreadId && input.resumePrompt) prompt = input.resumePrompt;
+      if (executorId === "codex" && activeThreadId && input.resumePrompt) prompt = input.resumePrompt;
       const adapter = this.adapters[executorId];
       const attemptContext: ExecutorAttemptContext = {
         task,
@@ -889,14 +895,15 @@ export class HearthScheduler {
         nativeSettings,
         executorSettings: this.executorSettings(),
         expectedOutputs,
-        ...(activeCodexThreadId ? { activeThreadId: activeCodexThreadId } : {}),
+        ...(activeThreadId ? { activeThreadId } : {}),
         onProgress: (event) => this.publishProgress(taskId, runId, event.kind, event.message, event.detail),
         onNativeContextEvent: (event) => this.captureNativeEvent(task, run, event),
         onNativeCheckpoint: (checkpoint) => this.persistNativeCheckpoint(taskId, runId, prepared.root, checkpoint),
         onHermesContextItem: (event) => this.captureHermesEvent(task, run, event, hermesIndex++),
         onCodexContextItem: (item) => this.captureCodexItem(task, run, item),
         onCodexThreadStarted: (threadId) => {
-          activeCodexThreadId = threadId;
+          activeThreadId = threadId;
+          attemptContext.activeThreadId = threadId;
           run.threadId = threadId;
           this.service.updateRun(runId, taskId, { threadId });
         }
@@ -911,7 +918,17 @@ export class HearthScheduler {
         return adapter.execute(invocation);
       };
 
+      const rememberSession = (outcome: ExecutionOutcome) => {
+        if (!outcome.threadId) return;
+        activeThreadId = outcome.threadId;
+        attemptContext.activeThreadId = outcome.threadId;
+        if (run.threadId !== outcome.threadId) {
+          run.threadId = outcome.threadId;
+          this.service.updateRun(runId, taskId, { threadId: outcome.threadId });
+        }
+      };
       let result = await execute(prompt, resumeState, input.resumePrompt ?? undefined);
+      rememberSession(result);
       this.assertLease(taskId, run.leaseEpoch ?? 0, controller.signal.aborted && this.stopping);
       if (result.status === "waiting_input") return this.finishWaitingInput(taskId, run, result);
       this.assertCompleted(result);
@@ -921,6 +938,7 @@ export class HearthScheduler {
         const missing = missingExpectedOutputs(prepared.outDir, expectedOutputs);
         const repairPrompt = buildDeliveryRepairPrompt({ task, prepared, expectedOutputs, missing, issues, attempt: repairAttempt }) + permissionNote;
         result = await execute(repairPrompt, result.resume, repairPrompt);
+        rememberSession(result);
         this.assertLease(taskId, run.leaseEpoch ?? 0, controller.signal.aborted && this.stopping);
         if (result.status === "waiting_input") return this.finishWaitingInput(taskId, run, result);
         this.assertCompleted(result);
@@ -1072,12 +1090,14 @@ export class HearthScheduler {
     if (!input.targetExecutor) {
       return { cause: input.cause, action: "fail", targetExecutor: null, autoAllowed: false, highRisk: false, reason: "v1 只支持从 native 接管到 Codex，当前执行器没有可用的接管目标" };
     }
-    const health = this.executorHealth(input.targetExecutor, this.executorSettings());
+    const settings = this.executorSettings();
+    const health = this.executorHealth(input.targetExecutor, settings);
     const targetEnabled = this.executorEnabledForTask(input.task, input.targetExecutor);
     const adapterCheck = this.adapters[input.targetExecutor].canRun({
       task: input.task,
       prepared: null,
-      settings: input.settings
+      settings: input.settings,
+      executorSettings: settings
     });
     const evaluation = evaluateHandoff({
       service: this.service, task: input.task, targetExecutor: input.targetExecutor,

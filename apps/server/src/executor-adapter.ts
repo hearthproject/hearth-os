@@ -11,6 +11,8 @@ import type {
 } from "@hearth/core";
 import type { CodexRunOptions, CodexRunResult } from "@hearth/codex-executor";
 import type { HermesRunOptions, HermesRunResult, HermesStreamEvent } from "./hermes-executor.ts";
+import { runExternalExecutor, type ExternalRunOptions, type ExternalRunResult } from "./external-executor.ts";
+import { resolveExecutorLaunch } from "./executor-runtime.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import { nativePermissionsFor, type NativeRunOptions, type NativeRunResult } from "./native-executor.ts";
 import type { PreparedWorkspace } from "./workspace.ts";
@@ -19,6 +21,7 @@ import { needsGithubRepository, wantsScreenshot } from "./task-intent.ts";
 export type CodexRunner = (options: CodexRunOptions) => Promise<CodexRunResult>;
 export type NativeRunner = (options: NativeRunOptions) => Promise<NativeRunResult>;
 export type HermesRunner = (options: HermesRunOptions) => Promise<HermesRunResult>;
+export type ExternalRunner = (options: ExternalRunOptions) => Promise<ExternalRunResult>;
 export type CodexContextItem = Parameters<NonNullable<CodexRunOptions["onContextItem"]>>[0];
 
 export interface ExecutionOutcome {
@@ -61,6 +64,7 @@ export interface ExecutorAvailabilityInput {
   task: TaskRecord;
   prepared: PreparedWorkspace | null;
   settings: ContextSettings;
+  executorSettings: ExecutorSettings;
 }
 
 export interface ExecutorAvailability {
@@ -219,25 +223,85 @@ export class HermesExecutorAdapter implements ExecutorAdapter {
   }
 }
 
-export function createExecutorAdapters(input: { native: NativeRunner; codex: CodexRunner; hermes: HermesRunner }): Record<ExecutorId, ExecutorAdapter> {
+const EXTERNAL_EXECUTOR_NAMES: Record<"qoder" | "workbuddy" | "zcode" | "kimi", string> = {
+  qoder: "Qoder",
+  workbuddy: "WorkBuddy",
+  zcode: "ZCode",
+  kimi: "Kimi Code"
+};
+
+export class ExternalExecutorAdapter implements ExecutorAdapter {
+  readonly supportsResume = true;
+
+  constructor(
+    readonly id: "qoder" | "workbuddy" | "zcode" | "kimi",
+    private readonly settingsPath: string,
+    private readonly runner: ExternalRunner
+  ) {}
+
+  canRun(input: ExecutorAvailabilityInput): ExecutorAvailability {
+    if (wantsScreenshot(`${input.task.title}\n${input.task.goal}`) || input.task.permissions?.tools.includes("capture_screen")) {
+      return { ok: false, reason: `${EXTERNAL_EXECUTOR_NAMES[this.id]} 不支持桌面截图任务` };
+    }
+    const launch = resolveExecutorLaunch(this.id, input.executorSettings, this.settingsPath);
+    if (!launch) {
+      return { ok: false, reason: `未检测到 ${EXTERNAL_EXECUTOR_NAMES[this.id]}，请在设置中安装或配置命令路径` };
+    }
+    return { ok: true };
+  }
+
+  async execute(input: ExecutorInvocation): Promise<ExecutionOutcome> {
+    const launch = resolveExecutorLaunch(this.id, input.executorSettings, this.settingsPath);
+    if (!launch) {
+      throw new Error(`未检测到 ${EXTERNAL_EXECUTOR_NAMES[this.id]}，请在设置中安装或配置命令路径`);
+    }
+    const result = await this.runner({
+      id: this.id,
+      launch,
+      workingDirectory: input.prepared.root,
+      prompt: input.prompt,
+      mode: input.fullPermission ? "full" : "necessary",
+      maxTurns: input.budget.maxTurns,
+      runBudgetSeconds: Math.max(1, Math.round(input.budget.maxDurationMs / 1000)),
+      ...(input.activeThreadId ? { resumeSessionId: input.activeThreadId } : {}),
+      signal: input.signal,
+      onProgress: (event) => input.onProgress({
+        kind: event.type,
+        message: event.message,
+        ...(event.detail ? { detail: event.detail } : {})
+      })
+    });
+    const name = EXTERNAL_EXECUTOR_NAMES[this.id];
+    return {
+      status: "completed",
+      finalResponse: result.finalResponse,
+      usage: result.usage,
+      threadId: result.sessionId,
+      label: `${name} / ${result.sessionId ?? "session"}`,
+      question: null
+    };
+  }
+
+  resume(input: ExecutorInvocation & { resume: AgentResumeState }): Promise<ExecutionOutcome> {
+    return this.execute(input);
+  }
+}
+
+export function createExecutorAdapters(input: {
+  native: NativeRunner;
+  codex: CodexRunner;
+  hermes: HermesRunner;
+  settingsPath: string;
+  external?: ExternalRunner;
+}): Record<ExecutorId, ExecutorAdapter> {
+  const external = input.external ?? runExternalExecutor;
   return {
     native: new NativeExecutorAdapter(input.native),
     codex: new CodexExecutorAdapter(input.codex),
     hermes: new HermesExecutorAdapter(input.hermes),
-    qoder: unavailableAdapter("qoder"),
-    workbuddy: unavailableAdapter("workbuddy"),
-    zcode: unavailableAdapter("zcode"),
-    kimi: unavailableAdapter("kimi")
-  };
-}
-
-function unavailableAdapter(id: ExecutorId): ExecutorAdapter {
-  return {
-    id,
-    supportsResume: false,
-    canRun: () => ({ ok: false, reason: `${id} adapter is not installed yet` }),
-    execute: async () => {
-      throw new Error(`${id} adapter is not installed yet`);
-    }
+    qoder: new ExternalExecutorAdapter("qoder", input.settingsPath, external),
+    workbuddy: new ExternalExecutorAdapter("workbuddy", input.settingsPath, external),
+    zcode: new ExternalExecutorAdapter("zcode", input.settingsPath, external),
+    kimi: new ExternalExecutorAdapter("kimi", input.settingsPath, external)
   };
 }
