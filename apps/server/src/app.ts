@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyReply } from "fastify";
-import type { EventEnvelope, ExecutorId, ExecutorView } from "@hearth/core";
+import type { EventEnvelope, ExecutorHealth, ExecutorId, ExecutorView } from "@hearth/core";
 import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, EXECUTOR_IDS, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_SENSITIVITIES, PROACTIVE_MODES, RUN_STATUSES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate } from "@hearth/templates";
@@ -487,16 +487,17 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const codexEnv = () => modelRegistry.codexEnv();
   const attachmentRoot = options.attachmentRoot ?? ATTACHMENT_DIR;
   const executorInstaller = options.executorInstaller ?? new ExecutorInstaller();
-  const executorHealth = (executorId: ExecutorId) => {
+  const executorHealth = (executorId: ExecutorId): ExecutorHealth => {
     const health = readExecutorHealth(executorId, executorSettingsStore.load(), executorSettingsPath);
     if (executorId !== "codex") return health;
-    const managedProfile = modelRegistry.codexProfile();
-    if (!managedProfile) return health;
+    const bound = modelRegistry.settingsForExecutor("codex");
+    if (!bound) return health;
+    const canRun = Boolean(bound.apiKey);
     return {
       ...health,
-      canRun: managedProfile.canRun,
-      issues: managedProfile.issues,
-      installState: managedProfile.canRun ? "available" as const : "needs_repair" as const
+      canRun,
+      issues: canRun ? [] : ["Codex 模型档案缺少 API Key"],
+      installState: canRun ? "available" : "needs_repair"
     };
   };
   const scheduler = options.startScheduler
