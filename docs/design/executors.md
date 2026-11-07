@@ -34,32 +34,77 @@ Hearth 选择多个专长执行器并列，而不是一个无限扩展能力的�
 
 路由顺序不是固定等级。能规则、脚本或官方接口完成的工作不调用模型；需要外部数据时先找连接器，没有连接器再考虑浏览器或桌面；确定性文档处理不交给生成模型；长链路和复杂产物再选择高能力执行器。同一任务可以在中途换执行器，但换执行器必须保留输入、预算、权限和当前证据。
 
-当前注册表包含六个执行器，并由同一套启动解析、健康检测、托管安装和设置界面管理：
+当前注册表包含七个执行器，按接入深度分成一等执行器和外部执行器。它们共用启动解析、健康检测、托管安装、模型绑定、上下文采集和设置界面，但适配器实现与能力上限不同。
 
-| 执行器 | 接入方式 | 适用边界 |
-|---|---|---|
-| `native` | Hearth 内置单 Agent 工具循环 | 通用任务、资料读取、文件交付、暂停补问和恢复 |
-| `codex` | 读取本机 Codex Profile 和认证 | 多文件代码、仓库、测试、构建和 GitHub 工作区 |
-| `hermes` | `PATH` 中的 `hermes` 命令或自定义命令 | 通用代理、多步工具调用和自动化流程 |
-| `qoder` | `@qoder-ai/qoder-agent-sdk`，复用本机 qodercli 登录或 PAT | 编码、工作区和会话续跑 |
-| `workbuddy` | `@tencent-ai/codebuddy-code`，复用本机登录 | 编码、工作区和会话续跑 |
-| `kimi` | `@moonshot-ai/kimi-code` 的 stream-json 模式 | 编码、工作区和非交互批量执行 |
+| 执行器 | 层级 | 接入方式 | 能力上限与边界 |
+|---|---|---|---|
+| `deepseek-harness` | 一等 | 官方 `@deepseek-ai/dsh-sdk-client` SDK/JSON-RPC | 完整 DeepSeek Harness 运行时：原生工具、代码、仓库、测试、会话恢复和完整事件流；需要有效模型绑定 |
+| `codex` | 一等 | 本机 Codex Profile 或统一模型绑定生成的 `config.toml` | 多文件代码、仓库、测试、构建和 GitHub 工作区；模型协议固定为 OpenAI Responses |
+| `native` | 一等 | Hearth 内置单 Agent 工具循环 | 通用任务、资料读取、网页、文件交付、暂停补问、恢复和桌面截图；支持四种模型协议 |
+| `hermes` | 外部 | `PATH` 中的 `hermes` 命令或自定义命令 | 通用代理、多步工具调用和自动化流程；支持 CLI 会话恢复 |
+| `qoder` | 外部 | `@qoder-ai/qoder-agent-sdk`，复用本机 qodercli 登录或 PAT | 编码、工作区和会话续跑 |
+| `workbuddy` | 外部 | `@tencent-ai/codebuddy-code`，复用本机登录 | 编码、工作区和会话续跑 |
+| `kimi` | 外部 | `@moonshot-ai/kimi-code` 的 stream-json 模式 | 编码、工作区和非交互批量执行 |
 
-原生执行器由 Hearth 自己实现单 Agent 工具循环，包含预算、检查点、等待用户补充和恢复；它不是一段转发提示词。执行器不会因为一次失败而静默替换身份，实际执行器会写入运行记录和产物清单。需要联网或工程工作区权限的任务先在聊天中生成提案，用户确认后才进入队列。
+一等执行器不是“永远更强”，而是接入更深、可控面更完整。复杂代码和仓库任务优先 `codex` 或 `deepseek-harness`；通用任务、网页、文档和桌面能力优先 `native`；外部执行器适合已经拥有对应 CLI、登录或团队习惯的场景。项目不再集成 ZCode。
 
-设置页的“执行器管理”从注册表生成六个纵向卡片，每张卡片统一提供安装、检测、命令或脚本路径、并发数和诊断信息。全局“优先执行器”只作为新对话的初始值；对话输入框的选择器可以覆盖它。选择不可用或缺少任务所需能力时，路由先回到任务原始匹配的执行器，再按注册表顺序寻找可用项。
+原生执行器由 Hearth 自己实现单 Agent 工具循环，包含预算、检查点、等待用户补充和恢复，不是一段转发提示词。DeepSeek Harness 使用官方 SDK，不是解析命令行文本。Codex 使用专用适配器并遵守 Responses 协议。执行器不会因为一次失败而静默替换身份，实际执行器会写入运行记录和产物清单。
+
+## 统一模型绑定
+
+每个执行器在设置中绑定一个模型档案，而不是各写一份私有配置。模型档案保存 Provider、协议、服务地址、模型名和加密后的 API Key；执行器绑定可以选择协议或模型覆盖，但服务端会强制校验兼容性：
+
+| 执行器 | 允许协议 |
+|---|---|
+| `native` | OpenAI Chat、OpenAI Responses、Anthropic Messages、Gemini |
+| `codex` | 仅 OpenAI Responses |
+| `deepseek-harness` | OpenAI Chat、OpenAI Responses、Anthropic Messages |
+| `hermes`、`qoder`、`workbuddy`、`kimi` | OpenAI Chat、OpenAI Responses、Anthropic Messages |
+
+Hearth 当前聊天模型是 `app_settings.model.chatProfileId`，用于聊天、原生执行器和失败原因诊断。外部执行器只有绑定有效时才使用自己的档案。Codex 的绑定会生成 `.hearth/executors/codex/config.toml` 并通过环境变量注入密钥；DeepSeek Harness 会把协议映射写进自己的 Provider 配置。本地模型不进入统一模型管理，避免把本机端口误当成云端服务。完整存储边界见[存储与上下文架构](/design/storage)。
+
+## 失败诊断与接管
+
+失败处理先分类，再决定是否换执行器。权限、缺少输入、预算耗尽、外部动作状态不确定和中断属于非执行器故障；运行环境故障、能力不足、交付契约不满足和临时故障才进入接管判断。
+
+1. 先用确定性规则分类。临时故障允许同一执行器重试一次。
+2. 涉及执行器故障时，用 **Hearth 当前聊天模型** 读取任务、失败信息、运行记录和最近上下文，给出原因、置信度、建议动作和不要重复的尝试。诊断不使用失败执行器的模型，避免同一个故障模型替自己辩护。
+3. 处于完全权限、上下文模式开启且风险为低时，自动切换到下一个合格执行器并继续原任务。
+4. 处于必要审批模式时，只询问“是否切换到 `目标执行器` 继续？”，确认后才复用原任务、剩余预算和上下文水位启动新运行。
+5. 不是执行器问题时直接向用户说明错误原因，不切换执行器。
+
+回退顺序为 `deepseek-harness → codex → native → hermes → qoder → workbuddy → kimi`。已尝试的执行器不会重复选择；默认最多接管两次。接管包包含诊断摘要、已完成事项、失败事项、产物、未解决问题、剩余预算和 `context_watermark_seq`，目标执行器从同一上下文水位继续。每次交接都写入 `handoffs` 并生成 `HANDOFF.md`，运行记录保留来源执行器和目标执行器。
+
+## 统一上下文
+
+所有执行器都适配 Hearth 的任务级上下文，而不是各用一份聊天历史。原生运行时、Codex、DeepSeek Harness 和外部 CLI 的助手消息、工具调用、工具结果、检查点和通知，都会通过统一回调写入 `context_items`。`executor_event_id` 保证一次运行内重复事件不会重复入库；超长正文落到 `.hearth/context/blobs/`；任务摘要写入 `task_context_state`；启动和接管时按预算生成上下文投影。
+
+CLI 自己的 `sessionId` 只用于优化续跑，不是事实源。即使会话恢复失败，Hearth 仍可从共享上下文重建任务投影。上下文删除、保留期和接管次数由设置中的“上下文”分区统一管理。完整生命周期见[存储与上下文架构](/design/storage)。
+
+## 设置页边界
+
+设置页按四个分区组织：
+
+| 分区 | 负责什么 |
+|---|---|
+| 执行器 | 默认执行器、安装与健康、命令或脚本路径、并发数、每个执行器的模型绑定 |
+| 模型 | 模型档案增删改、当前聊天模型、拉取模型、连接测试和掩码 Key |
+| 上下文 | 模式、预算、保留期、接管次数、指标和清理 |
+| 数据 | SQLite 路径、执行器目录、上下文 blob、迁移记录和备份 |
+
+全局“默认执行器”只作为新对话的初始值；对话输入框的选择器可以覆盖它。选择不可用、缺少任务所需能力或没有有效模型绑定时，路由先回到任务原始匹配的执行器，再按注册表顺序寻找可用项。
 
 ## 接入一个新执行器
 
 新增执行器不使用分叉的特殊路径，而是沿同一条注册表链路完成：
 
-1. 在 `packages/core/src/types.ts` 的 `EXECUTOR_IDS` 中增加稳定 ID，让会话设置、并发、运行记录和 API 校验自动获得该字段。
-2. 在 `apps/server/src/executors.ts` 增加名称、说明、能力、Provider 和是否支持续跑的描述；如果它能读取本地 GitHub 工作区，把它加入对应能力列表。
+1. 在 `packages/core/src/types.ts` 的 `EXECUTOR_IDS` 中增加稳定 ID；只有确实具备完整适配、诊断和验证能力时才加入 `FIRST_CLASS_EXECUTOR_IDS`。
+2. 在 `apps/server/src/executors.ts` 增加名称、说明、能力、层级、Provider 和续跑支持；如果它能读取本地 GitHub 工作区，把它加入对应能力列表。
 3. 在 `apps/server/src/executor-runtime.ts` 增加启动解析：优先使用用户配置路径，其次托管安装，再检测全局安装和 `PATH`；同时提供版本探测和健康状态。
 4. 在 `apps/server/src/executor-install.ts` 增加固定版本的包规格。无法托管安装的桌面应用应明确返回不支持，并给出检测或手工路径提示。
-5. 在 `apps/server/src/external-executor.ts` 增加参数构造和流式输出解析，把最终文本、用量、会话 ID、退出码和错误统一成 `ExternalRunResult`。
-6. 在 `apps/server/src/executor-adapter.ts` 注册适配器。外部 CLI 默认复用 `ExternalExecutorAdapter`，把任务提示词、工作区、权限模式、预算和上一次会话 ID 传给执行器。
-7. 补充测试：launch 解析、健康探测、安装任务、参数与事件解析、偏好路由和回退。前端设置页和执行器选择器从 `/api/executors` 自动渲染，不需要再写一套开关。
+5. 在 `apps/server/src/model-registry.ts` 的 `EXECUTOR_MODEL_PROTOCOLS` 声明协议边界，并验证绑定能生成对应 CLI 或 SDK 的配置。
+6. 在 `apps/server/src/external-executor.ts` 或专用包中增加参数构造和流式解析；在 `apps/server/src/executor-adapter.ts` 注册适配器，并实现上下文回调。
+7. 补充测试：launch 解析、健康探测、安装任务、参数与事件解析、模型绑定协议校验、偏好路由、失败分类、接管和上下文采集。前端设置页和执行器选择器从 `/api/executors` 与 `/api/model-registry` 自动渲染。
 
 这条流程的约束是：执行器只能返回结果和证据，不能直接改任务状态；外部副作用仍由 Hearth 的审批和效果账本处理；凭据留在本机 CLI 或环境变量中，不写入任务上下文。
 
