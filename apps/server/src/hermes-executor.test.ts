@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hermesProgress, parseHermesEvent, probeHermes } from "./hermes-executor.ts";
+import { hermesArgs, hermesProgress, parseHermesEvent, probeHermes } from "./hermes-executor.ts";
 
 describe("Hermes stream-json adapter", () => {
   it("parses init, text, tool and result events", () => {
@@ -66,5 +66,18 @@ describe("Hermes stream-json adapter", () => {
     expect(result.ok).toBe(false);
     expect(result.version).toBeNull();
     expect(result.error).toContain("--version");
+  });
+
+  it("passes an existing session back to Hermes when resuming", () => {
+    const args = hermesArgs({
+      promptPath: "prompt.md",
+      mode: "full",
+      maxTurns: 4,
+      runBudgetSeconds: 90,
+      resumeSessionId: "session-42"
+    });
+    expect(args).toContain("--resume");
+    expect(args.slice(args.indexOf("--resume"))).toEqual(["--resume", "session-42"]);
+    expect(args).toContain("--yolo");
   });
 });

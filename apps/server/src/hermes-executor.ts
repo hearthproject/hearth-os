@@ -18,6 +18,7 @@ export interface HermesRunOptions {
   mode: ApprovalMode;
   maxTurns: number;
   runBudgetSeconds: number;
+  resumeSessionId?: string;
   signal?: AbortSignal;
   onEvent?: (event: HermesProgress) => void;
   onContextItem?: (event: HermesStreamEvent) => void;
@@ -198,15 +199,13 @@ export async function runHermes(options: HermesRunOptions): Promise<HermesRunRes
   const promptDir = mkdtempSync(join(tmpdir(), "hearth-hermes-"));
   const promptPath = join(promptDir, "prompt.md");
   writeFileSync(promptPath, options.prompt, "utf8");
-  const args = [
-    "chat",
-    "--query-file", promptPath,
-    "--format", "stream-json",
-    "--oneshot",
-    "--max-turns", String(Math.max(1, options.maxTurns)),
-    "--run-budget", String(Math.max(1, Math.round(options.runBudgetSeconds)))
-  ];
-  if (options.mode === "full") args.push("--yolo");
+  const args = hermesArgs({
+    promptPath,
+    mode: options.mode,
+    maxTurns: options.maxTurns,
+    runBudgetSeconds: options.runBudgetSeconds,
+    ...(options.resumeSessionId ? { resumeSessionId: options.resumeSessionId } : {})
+  });
 
   try {
     return await new Promise<HermesRunResult>((resolve, reject) => {
@@ -310,6 +309,26 @@ export async function runHermes(options: HermesRunOptions): Promise<HermesRunRes
       // Temp cleanup is best effort.
     }
   }
+}
+
+export function hermesArgs(options: {
+  promptPath: string;
+  mode: ApprovalMode;
+  maxTurns: number;
+  runBudgetSeconds: number;
+  resumeSessionId?: string;
+}): string[] {
+  const args = [
+    "chat",
+    "--query-file", options.promptPath,
+    "--format", "stream-json",
+    "--oneshot",
+    "--max-turns", String(Math.max(1, options.maxTurns)),
+    "--run-budget", String(Math.max(1, Math.round(options.runBudgetSeconds)))
+  ];
+  if (options.mode === "full") args.push("--yolo");
+  if (options.resumeSessionId) args.push("--resume", options.resumeSessionId);
+  return args;
 }
 
 export function probeHermes(command: string, timeoutMs = 8_000): Promise<HermesProbeResult> {

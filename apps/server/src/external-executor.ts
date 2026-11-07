@@ -87,6 +87,7 @@ export function runExternalExecutor(options: ExternalRunOptions): Promise<Extern
       mode: options.mode,
       maxTurns: options.maxTurns,
       runBudgetSeconds: options.runBudgetSeconds,
+      ...(options.resumeSessionId ? { resumeSessionId: options.resumeSessionId } : {}),
       ...(options.signal ? { signal: options.signal } : {}),
       onEvent: (event) => options.onProgress?.(event),
       onContextItem: (event) => {
