@@ -69,6 +69,17 @@ export function executorRuntimeSettings(settings: ExecutorSettings, id: Executor
   return settings.executors[id] ?? {};
 }
 
+export function isExecutorManagedInstalled(id: ExecutorId, settingsPath: string): boolean {
+  const home = executorHome(settingsPath, id);
+  const spec = NODE_CLI_SPECS[id];
+  if (spec) return existsSync(join(home, "node_modules", spec.packageName, spec.entry));
+  if (id === "qoder") {
+    return existsSync(join(home, "node_modules", "@qoder-ai", "qoder-agent-sdk", "dist", "index.js"));
+  }
+  if (id === "zcode") return existsSync(join(home, "zcode.cjs"));
+  return false;
+}
+
 export function resolveExecutorLaunch(
   id: ExecutorId,
   settings: ExecutorSettings,

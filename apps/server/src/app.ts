@@ -16,6 +16,7 @@ import { loadExecutorSettings, saveExecutorSettings, viewExecutorSettings } from
 import { probeHermes } from "./hermes-executor.ts";
 import { clearHermesHealthCache } from "./hermes-health.ts";
 import { clearExecutorHealthCache, executorHealth as readExecutorHealth, executorRuntimeSettings, probeExecutor } from "./executor-runtime.ts";
+import { ExecutorInstallError, ExecutorInstaller } from "./executor-install.ts";
 import { EXECUTORS } from "./executors.ts";
 import { ScheduleError, ScheduleService } from "./schedules.ts";
 import { chatModelConfigured, loadModelSettings, viewModelSettings } from "./model-settings.ts";
@@ -385,6 +386,7 @@ export interface BuildServerOptions {
   modelSettingsPath?: string;
   attachmentRoot?: string;
   executorSettingsPath?: string;
+  executorInstaller?: ExecutorInstaller;
   contextBlobRoot?: string;
   contextIndex?: ContextIndex;
 }
@@ -432,6 +434,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const modelSettingsPath = options.modelSettingsPath ?? MODEL_SETTINGS_PATH;
   const attachmentRoot = options.attachmentRoot ?? ATTACHMENT_DIR;
   const executorSettingsPath = options.executorSettingsPath ?? EXECUTOR_SETTINGS_PATH;
+  const executorInstaller = options.executorInstaller ?? new ExecutorInstaller();
   const executorHealth = (executorId: ExecutorId) => readExecutorHealth(
     executorId,
     loadExecutorSettings(executorSettingsPath),
@@ -553,7 +556,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
       ...descriptor,
       runtime: executorRuntimeSettings(settings, descriptor.id),
       concurrency: settings.concurrency[descriptor.id],
-      health: executorHealth(descriptor.id)
+      health: executorHealth(descriptor.id),
+      install: executorInstaller.info(descriptor.id, executorSettingsPath)
     }));
     return {
       executors,
@@ -570,6 +574,38 @@ export async function buildServer(options: BuildServerOptions = {}) {
     const settings = loadExecutorSettings(executorSettingsPath);
     if (id === "hermes") clearHermesHealthCache(settings.hermesCommand);
     return probeExecutor(id as ExecutorId, settings, executorSettingsPath);
+  });
+
+  app.post<{ Params: { id: string } }>("/api/executors/:id/install", async (request, reply) => {
+    const id = request.params.id;
+    if (!(EXECUTOR_IDS as readonly string[]).includes(id)) {
+      return reply.code(404).send({ error: "EXECUTOR_NOT_FOUND", message: "执行器不存在" });
+    }
+    try {
+      const job = executorInstaller.start(id as ExecutorId, executorSettingsPath);
+      return reply.code(202).send({
+        job,
+        install: executorInstaller.info(id as ExecutorId, executorSettingsPath),
+        health: executorHealth(id as ExecutorId)
+      });
+    } catch (error) {
+      if (error instanceof ExecutorInstallError) {
+        return reply.code(400).send({ error: error.code, message: error.message });
+      }
+      throw error;
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/api/executors/:id/install", async (request, reply) => {
+    const id = request.params.id;
+    if (!(EXECUTOR_IDS as readonly string[]).includes(id)) {
+      return reply.code(404).send({ error: "EXECUTOR_NOT_FOUND", message: "执行器不存在" });
+    }
+    return {
+      job: executorInstaller.status(id as ExecutorId, executorSettingsPath),
+      install: executorInstaller.info(id as ExecutorId, executorSettingsPath),
+      health: executorHealth(id as ExecutorId)
+    };
   });
 
   app.get("/api/schedules", async () => ({ schedules: schedules.list() }));

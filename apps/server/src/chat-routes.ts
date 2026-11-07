@@ -9,7 +9,7 @@ import { defaultConversationSettings, EXECUTOR_IDS, mergeConversationSettings } 
 import { loadCodexProfile, probeCodex } from "@hearth/codex-executor";
 import { loadExecutorSettings } from "./executor-settings.ts";
 import { executorName, resolveExecutorFromEnabled } from "./executors.ts";
-import { executorHealth } from "./executor-runtime.ts";
+import { executorHealth, isExecutorManagedInstalled } from "./executor-runtime.ts";
 import type { HearthService } from "./service.ts";
 import { chatSystemPrompt, conversationTitle, decideRoute, planExecution } from "./chat.ts";
 import { listModels, ModelClientError, completeChat, streamChat, type ChatMessage } from "./model-client.ts";
@@ -93,7 +93,16 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     }
     return availability;
   };
-  const defaultSettings = () => defaultConversationSettings(loadExecutorSettings(executorSettingsPath).defaultApprovalMode);
+  const defaultSettings = () => {
+    const executorSettings = loadExecutorSettings(executorSettingsPath);
+    const enabled: Partial<Record<ExecutorId, boolean>> = { native: true, codex: true, hermes: true };
+    for (const id of ["qoder", "workbuddy", "zcode", "kimi"] as const) {
+      const runtime = executorSettings.executors[id];
+      enabled[id] = isExecutorManagedInstalled(id, executorSettingsPath)
+        || Boolean(runtime?.executablePath || runtime?.command || runtime?.installMode);
+    }
+    return defaultConversationSettings(executorSettings.defaultApprovalMode, enabled);
+  };
   mkdirSync(attachmentRoot, { recursive: true });
   await app.register(multipart, {
     limits: { fileSize: 25 * 1024 * 1024, files: 5, fields: 10, parts: 20 }

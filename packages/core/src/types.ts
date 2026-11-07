@@ -84,6 +84,25 @@ export interface ExecutorProbeResult {
   health: ExecutorHealth;
 }
 
+export type ExecutorInstallStatus = "running" | "succeeded" | "failed";
+
+export interface ExecutorInstallJob {
+  id: ExecutorId;
+  status: ExecutorInstallStatus;
+  packageSpec: string;
+  startedAt: string;
+  finishedAt: string | null;
+  log: string;
+  error: string | null;
+}
+
+export interface ExecutorInstallInfo {
+  supported: boolean;
+  packageSpec: string | null;
+  hint: string | null;
+  job: ExecutorInstallJob | null;
+}
+
 export interface ExecutorView {
   id: ExecutorId;
   name: string;
@@ -95,6 +114,7 @@ export interface ExecutorView {
   runtime: ExecutorRuntimeSettings;
   concurrency: number;
   health: ExecutorHealth;
+  install: ExecutorInstallInfo;
 }
 
 export interface ExecutorSettings {
