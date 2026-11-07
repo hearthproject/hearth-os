@@ -20,7 +20,7 @@
 
 <p align="center">
   <img alt="Phase 1 MVP accepted" src="https://img.shields.io/badge/phase%201-MVP%20accepted-b8471d">
-  <img alt="199 tests passing" src="https://img.shields.io/badge/tests-199%20passing-2f7d4f">
+  <img alt="292 tests passing" src="https://img.shields.io/badge/tests-292%20passing-2f7d4f">
   <img alt="Node.js 22.13+" src="https://img.shields.io/badge/node-22.13%2B-3c873a">
   <img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-1b1815">
 </p>
@@ -186,7 +186,7 @@ The full documentation is published at **<https://hearthproject.github.io/hearth
 ## Verification
 
 ```bash
-npm test           # 40 test files, 199 tests
+npm test           # 54 test files, 292 tests
 npm run typecheck
 npm run build
 npm run docs:build
