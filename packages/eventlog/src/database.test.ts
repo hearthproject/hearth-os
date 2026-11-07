@@ -300,6 +300,27 @@ describe("HearthStore", () => {
     store.close();
   });
 
+  it("overwrites a model profile API key with null instead of keeping the old cipher", () => {
+    const store = new HearthStore(":memory:");
+    const record = {
+      id: "profile-1",
+      name: "Chat model",
+      providerId: "custom",
+      providerName: "Custom",
+      protocol: "openai-chat" as const,
+      baseUrl: "https://example.com/v1",
+      model: "chat-model",
+      apiKeyCipher: "cipher-old",
+      isLocal: false,
+      createdAt: "2026-11-07T00:00:00.000Z",
+      updatedAt: "2026-11-07T00:00:00.000Z"
+    };
+    store.upsertModelProfile(record);
+    store.upsertModelProfile({ ...record, apiKeyCipher: null, updatedAt: "2026-11-07T00:01:00.000Z" });
+    expect(store.getModelProfile("profile-1")?.apiKeyCipher).toBeNull();
+    store.close();
+  });
+
   it("does not persist empty task permissions as an explicit tool deny-list", () => {
     const store = new HearthStore(":memory:");
     store.appendEvent({ type: "task.created", taskId: "task-plain", payload: task("task-plain") });

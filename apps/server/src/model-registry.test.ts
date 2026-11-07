@@ -62,3 +62,39 @@ describe("model registry protocol constraints", () => {
     }
   });
 });
+
+describe("model registry persistence", () => {
+  it("clears a stored API key when the profile is updated with an empty key", () => {
+    const registry = setup();
+    const profile = registry.createProfile({
+      name: "Chat model",
+      protocol: "openai-chat",
+      baseUrl: "https://example.com/v1",
+      model: "chat-model",
+      apiKey: "sk-secret"
+    });
+    expect(registry.settingsForProfile(profile.id)?.apiKey).toBe("sk-secret");
+
+    const updated = registry.updateProfile(profile.id, { apiKey: "" });
+    expect(updated.hasApiKey).toBe(false);
+    expect(registry.settingsForProfile(profile.id)?.apiKey).toBe("");
+    expect(registry.listProfiles().find((item) => item.id === profile.id)?.apiKeyMasked).toBeNull();
+  });
+
+  it("clears the chat profile pointer when the selected profile is deleted", () => {
+    const registry = setup();
+    const profile = registry.createProfile({
+      name: "Chat model",
+      protocol: "openai-chat",
+      baseUrl: "https://example.com/v1",
+      model: "chat-model",
+      apiKey: "sk-secret"
+    });
+    registry.setChatProfile(profile.id);
+    expect(registry.chatProfileId()).toBe(profile.id);
+
+    registry.deleteProfile(profile.id);
+    expect(registry.chatProfileId()).toBeNull();
+    expect(registry.chatSettings()).toBeNull();
+  });
+});

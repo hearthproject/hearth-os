@@ -155,8 +155,9 @@ export class ModelRegistry {
     if (!this.store.getModelProfile(id)) {
       throw new ModelRegistryError("MODEL_PROFILE_NOT_FOUND", "找不到这个模型档案");
     }
+    const wasChatProfile = this.chatProfileId() === id;
     this.store.deleteModelProfile(id);
-    if (this.chatProfileId() === id) this.store.deleteAppSetting(CHAT_PROFILE_KEY);
+    if (wasChatProfile) this.store.deleteAppSetting(CHAT_PROFILE_KEY);
     this.touch();
   }
 

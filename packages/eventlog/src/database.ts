@@ -550,7 +550,7 @@ export class HearthStore {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET name=excluded.name, provider_id=excluded.provider_id, provider_name=excluded.provider_name,
          protocol=excluded.protocol, base_url=excluded.base_url, model=excluded.model,
-         api_key_cipher=COALESCE(excluded.api_key_cipher, model_profiles.api_key_cipher), is_local=excluded.is_local, updated_at=excluded.updated_at`
+         api_key_cipher=excluded.api_key_cipher, is_local=excluded.is_local, updated_at=excluded.updated_at`
     ).run(
       profile.id, profile.name, profile.providerId, profile.providerName, profile.protocol,
       profile.baseUrl, profile.model, profile.apiKeyCipher, profile.isLocal ? 1 : 0,
