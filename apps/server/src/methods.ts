@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { MethodCandidate, MethodEvaluation, MethodMetrics, MethodTrial, MethodVerdict, TaskRecord } from "@hearth/core";
+import type { MethodApplication, MethodCandidate, MethodEvaluation, MethodMetrics, MethodSelection, MethodTrial, MethodVerdict, TaskRecord } from "@hearth/core";
 import { getTemplate } from "@hearth/templates";
 import type { HearthService } from "./service.ts";
 
@@ -7,6 +7,7 @@ export interface MethodSnapshot {
   methods: MethodCandidate[];
   evaluations: MethodEvaluation[];
   trials: MethodTrial[];
+  applications: MethodApplication[];
 }
 
 export interface CreateMethodInput {
@@ -72,8 +73,51 @@ export class MethodService {
     return {
       methods: this.service.store.listMethodCandidates(),
       evaluations: this.service.store.listMethodEvaluations(),
-      trials: this.service.store.listMethodTrials()
+      trials: this.service.store.listMethodTrials(),
+      applications: this.service.store.listMethodApplications({ limit: 500 })
     };
+  }
+
+  resolveForTask(task: TaskRecord): { method: MethodCandidate; selection: MethodSelection } | null {
+    if (task.methodId) {
+      const method = this.service.store.getMethodCandidate(task.methodId);
+      if (!method || UNASSIGNABLE_METHOD_STATUSES.has(method.status)) return null;
+      return { method, selection: "pinned" };
+    }
+    if (!task.templateId) return null;
+    const adopted = this.service.store.listMethodCandidates("adopted")
+      .filter((method) => method.templateId === task.templateId && !method.sourceTaskIds.includes(task.id))
+      .sort((left, right) =>
+        (right.adoptedAt ?? right.updatedAt).localeCompare(left.adoptedAt ?? left.updatedAt)
+        || left.id.localeCompare(right.id)
+      );
+    const method = adopted[0];
+    return method ? { method, selection: "auto_template" } : null;
+  }
+
+  recordApplication(input: {
+    taskId: string;
+    runId: string;
+    methodId: string;
+    methodVersion: number;
+    selection: MethodSelection;
+    promptSha256: string;
+  }): MethodApplication {
+    const application: MethodApplication = {
+      id: randomUUID(),
+      taskId: input.taskId,
+      runId: input.runId,
+      methodId: input.methodId,
+      methodVersion: input.methodVersion,
+      selection: input.selection,
+      promptSha256: input.promptSha256,
+      createdAt: this.nowIso()
+    };
+    return this.service.store.insertMethodApplication(application);
+  }
+
+  listApplications(filter: { taskId?: string; methodId?: string; methodVersion?: number; limit?: number } = {}): MethodApplication[] {
+    return this.service.store.listMethodApplications(filter);
   }
 
   generateFromTask(taskId: string, input: { name?: string; summary?: string } = {}): MethodCandidate {

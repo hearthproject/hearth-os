@@ -38,6 +38,36 @@ describe("MethodService", () => {
     expect(store.getMethodCandidate(candidate.id)?.name).toBe(candidate.name);
   });
 
+  it("resolves pinned and adopted methods and records applications", () => {
+    const source = terminalTask("completed");
+    const candidate = methods.generateFromTask(source.id);
+    const queued = service.createTask({ templateId: "T01" });
+    methods.assignToTask(queued.id, candidate.id);
+    expect(methods.resolveForTask(service.requireTask(queued.id))).toMatchObject({
+      method: { id: candidate.id },
+      selection: "pinned"
+    });
+
+    store.appendEvent({
+      type: "method.candidate.updated",
+      payload: { ...candidate, status: "adopted", generation: 1, adoptedAt: now.toISOString(), updatedAt: now.toISOString() }
+    });
+    const automatic = service.createTask({ templateId: "T01" });
+    expect(methods.resolveForTask(automatic)?.selection).toBe("auto_template");
+    expect(methods.resolveForTask(service.createTask({ templateId: "T02" }))).toBeNull();
+
+    const application = methods.recordApplication({
+      taskId: automatic.id,
+      runId: "run-1",
+      methodId: candidate.id,
+      methodVersion: candidate.version,
+      selection: "auto_template",
+      promptSha256: "a".repeat(64)
+    });
+    expect(methods.listApplications({ taskId: automatic.id })).toEqual([application]);
+    expect(methods.snapshot().applications).toContainEqual(application);
+  });
+
   it("assigns and clears a method on a queued task", () => {
     const source = terminalTask("completed");
     const candidate = methods.generateFromTask(source.id);
