@@ -7109,6 +7109,96 @@ body.modal-open {
   background: var(--ink-tertiary);
 }
 
+/* ── Settings readability ─────────────────────────────────────────────── */
+.settings-page .page-meta,
+.settings-page .settings-section-intro p,
+.settings-page .settings-lead,
+.settings-page .settings-notice {
+  font-size: var(--fs-13);
+}
+
+.settings-page .settings-tab strong,
+.settings-page .binding-name strong,
+.settings-page .binding-effective strong {
+  font-size: var(--fs-13);
+}
+
+.settings-page .settings-tab small,
+.settings-page .binding-name small,
+.settings-page .binding-effective small,
+.settings-page .binding-row label > span,
+.settings-page .chat-profile-row label > span,
+.settings-page .form-grid label > span,
+.settings-page .model-meta dt,
+.settings-page .model-meta dd,
+.settings-page .settings-metric-grid span,
+.settings-page .settings-kv dt,
+.settings-page .executor-card-meta small,
+.settings-page .executor-card-grid label > span,
+.settings-page .provider-card small,
+.settings-page .migration-row strong,
+.settings-page .migration-row small {
+  font-size: var(--fs-11);
+}
+
+.settings-page .section-heading h3,
+.settings-page .settings-fold-copy strong {
+  font-size: var(--fs-15);
+}
+
+.settings-page .section-heading p,
+.settings-page .muted-count,
+.settings-page .executor-card-title span:not(.executor-card-icon),
+.settings-page .executor-card-meta,
+.settings-page .executor-card-issues p,
+.settings-page .executor-card-hint,
+.settings-page .executor-card-grid input,
+.settings-page .executor-card-grid select,
+.settings-page .checkbox-field,
+.settings-page .context-kv,
+.settings-page .context-cleanup p,
+.settings-page .settings-hint,
+.settings-page .data-row code,
+.settings-page .data-row span,
+.settings-page .storage-tree,
+.settings-page .path-list dd code,
+.settings-page .inline-loading,
+.settings-page .empty-state {
+  font-size: var(--fs-12);
+}
+
+.settings-page .model-card-head strong,
+.settings-page .executor-card-title strong {
+  font-size: var(--fs-14);
+}
+
+.settings-page .settings-fold-copy span {
+  font-size: var(--fs-13);
+}
+
+.settings-page .binding-row select,
+.settings-page .chat-profile-row select,
+.settings-page .form-grid input,
+.settings-page .form-grid select,
+.settings-page .settings-kv dd,
+.settings-page .primary-button,
+.settings-page .ghost-button {
+  font-size: var(--fs-13);
+}
+
+.settings-page .model-card-head small,
+.settings-page .executor-package {
+  font-size: var(--fs-11);
+}
+
+.settings-page .settings-metric-grid strong {
+  font-size: var(--fs-20);
+}
+
+.settings-page .status-chip {
+  font-size: var(--fs-12);
+}
+
 @media (max-width: 900px) {
   .settings-hero,
   .settings-section-intro {
