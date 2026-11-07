@@ -9,7 +9,7 @@ import { defaultConversationSettings, EXECUTOR_IDS, mergeConversationSettings } 
 import { loadCodexProfile, probeCodex } from "@hearth/codex-executor";
 import { loadExecutorSettings } from "./executor-settings.ts";
 import { executorName, resolveExecutorFromEnabled } from "./executors.ts";
-import { hermesHealth } from "./hermes-health.ts";
+import { executorHealth } from "./executor-runtime.ts";
 import type { HearthService } from "./service.ts";
 import { chatSystemPrompt, conversationTitle, decideRoute, planExecution } from "./chat.ts";
 import { listModels, ModelClientError, completeChat, streamChat, type ChatMessage } from "./model-client.ts";
@@ -88,10 +88,9 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
   const executorAvailability = (): Record<ExecutorId, boolean> => {
     const executorSettings = loadExecutorSettings(executorSettingsPath);
     const availability = {} as Record<ExecutorId, boolean>;
-    for (const id of EXECUTOR_IDS) availability[id] = false;
-    availability.native = true;
-    availability.codex = loadCodexProfile().canRun;
-    availability.hermes = hermesHealth(executorSettings.hermesCommand).canRun;
+    for (const id of EXECUTOR_IDS) {
+      availability[id] = executorHealth(id, executorSettings, executorSettingsPath).canRun;
+    }
     return availability;
   };
   const defaultSettings = () => defaultConversationSettings(loadExecutorSettings(executorSettingsPath).defaultApprovalMode);

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyReply } from "fastify";
-import type { EventEnvelope, ExecutorId } from "@hearth/core";
+import type { EventEnvelope, ExecutorId, ExecutorView } from "@hearth/core";
 import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, EXECUTOR_IDS, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_SENSITIVITIES, PROACTIVE_MODES, RUN_STATUSES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate } from "@hearth/templates";
@@ -14,7 +14,9 @@ import { ATTACHMENT_DIR, BACKUP_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE
 import { registerChatRoutes } from "./chat-routes.ts";
 import { loadExecutorSettings, saveExecutorSettings, viewExecutorSettings } from "./executor-settings.ts";
 import { probeHermes } from "./hermes-executor.ts";
-import { hermesHealth, clearHermesHealthCache } from "./hermes-health.ts";
+import { clearHermesHealthCache } from "./hermes-health.ts";
+import { clearExecutorHealthCache, executorHealth as readExecutorHealth, executorRuntimeSettings, probeExecutor } from "./executor-runtime.ts";
+import { EXECUTORS } from "./executors.ts";
 import { ScheduleError, ScheduleService } from "./schedules.ts";
 import { chatModelConfigured, loadModelSettings, viewModelSettings } from "./model-settings.ts";
 import { ApprovalError, ApprovalManager, type EffectExecutor } from "./approvals.ts";
@@ -430,17 +432,11 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const modelSettingsPath = options.modelSettingsPath ?? MODEL_SETTINGS_PATH;
   const attachmentRoot = options.attachmentRoot ?? ATTACHMENT_DIR;
   const executorSettingsPath = options.executorSettingsPath ?? EXECUTOR_SETTINGS_PATH;
-  const executorHealth = (executorId: ExecutorId) => {
-    if (executorId === "native") return { canRun: true, issues: [] };
-    if (executorId === "codex") {
-      const profile = loadCodexProfile();
-      return { canRun: profile.canRun, issues: profile.issues };
-    }
-    if (executorId !== "hermes") return { canRun: false, issues: ["executor health is not wired yet"] };
-    const settings = loadExecutorSettings(executorSettingsPath);
-    const health = hermesHealth(settings.hermesCommand);
-    return { canRun: health.canRun, issues: health.issues };
-  };
+  const executorHealth = (executorId: ExecutorId) => readExecutorHealth(
+    executorId,
+    loadExecutorSettings(executorSettingsPath),
+    executorSettingsPath
+  );
   const scheduler = options.startScheduler
     ? new HearthScheduler({
         service,
@@ -533,7 +529,13 @@ export async function buildServer(options: BuildServerOptions = {}) {
     const parsed = executorSettingsSchema.safeParse(request.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: "INVALID_EXECUTOR_SETTINGS", message: "执行器设置格式不正确" });
     const settings = saveExecutorSettings(executorSettingsPath, parsed.data);
-    clearHermesHealthCache();
+    if (parsed.data.hermesCommand !== undefined || parsed.data.executors?.hermes !== undefined) {
+      clearHermesHealthCache();
+      clearExecutorHealthCache("hermes");
+    }
+    for (const id of Object.keys(parsed.data.executors ?? {}) as ExecutorId[]) {
+      if (id !== "hermes") clearExecutorHealthCache(id);
+    }
     return { settings, hermes: executorHealth("hermes") };
   });
 
@@ -541,7 +543,33 @@ export async function buildServer(options: BuildServerOptions = {}) {
     const settings = loadExecutorSettings(executorSettingsPath);
     const result = await probeHermes(settings.hermesCommand);
     clearHermesHealthCache(settings.hermesCommand);
+    clearExecutorHealthCache("hermes");
     return { ...result, health: executorHealth("hermes") };
+  });
+
+  app.get("/api/executors", async () => {
+    const settings = loadExecutorSettings(executorSettingsPath);
+    const executors: ExecutorView[] = EXECUTORS.map((descriptor) => ({
+      ...descriptor,
+      runtime: executorRuntimeSettings(settings, descriptor.id),
+      concurrency: settings.concurrency[descriptor.id],
+      health: executorHealth(descriptor.id)
+    }));
+    return {
+      executors,
+      preferredExecutorId: settings.preferredExecutorId,
+      updatedAt: viewExecutorSettings(executorSettingsPath).updatedAt
+    };
+  });
+
+  app.post<{ Params: { id: string } }>("/api/executors/:id/probe", async (request, reply) => {
+    const id = request.params.id;
+    if (!(EXECUTOR_IDS as readonly string[]).includes(id)) {
+      return reply.code(404).send({ error: "EXECUTOR_NOT_FOUND", message: "执行器不存在" });
+    }
+    const settings = loadExecutorSettings(executorSettingsPath);
+    if (id === "hermes") clearHermesHealthCache(settings.hermesCommand);
+    return probeExecutor(id as ExecutorId, settings, executorSettingsPath);
   });
 
   app.get("/api/schedules", async () => ({ schedules: schedules.list() }));

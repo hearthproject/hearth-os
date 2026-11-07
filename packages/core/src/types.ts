@@ -74,6 +74,29 @@ export interface ExecutorHealth {
   installState?: "available" | "missing" | "needs_repair" | "update_available" | "unsupported" | undefined;
 }
 
+export interface ExecutorProbeResult {
+  id: ExecutorId;
+  ok: boolean;
+  command: string;
+  version: string | null;
+  error: string | null;
+  elapsedMs: number;
+  health: ExecutorHealth;
+}
+
+export interface ExecutorView {
+  id: ExecutorId;
+  name: string;
+  description: string;
+  capabilities: string[];
+  provider?: string | undefined;
+  experimental?: boolean | undefined;
+  supportsResume?: boolean | undefined;
+  runtime: ExecutorRuntimeSettings;
+  concurrency: number;
+  health: ExecutorHealth;
+}
+
 export interface ExecutorSettings {
   defaultApprovalMode: ApprovalMode;
   preferredExecutorId: ExecutorId | null;

@@ -168,6 +168,38 @@ describe("chat-first API", () => {
     await app.close();
   }, 30_000);
 
+  it("lists every executor with runtime health", async () => {
+    const previous = process.env.HEARTH_EXECUTOR_DETECT;
+    process.env.HEARTH_EXECUTOR_DETECT = "off";
+    try {
+      const app = await buildServer({
+        store,
+        serveWeb: false,
+        modelSettingsPath: join(root, "settings.json"),
+        attachmentRoot: join(root, "files"),
+        executorSettingsPath: join(root, "executor-settings.json")
+      });
+      const listed = await app.inject({ method: "GET", url: "/api/executors" });
+      expect(listed.statusCode).toBe(200);
+      expect(listed.json().executors.map((executor: { id: string }) => executor.id)).toEqual([
+        "native", "codex", "hermes", "qoder", "workbuddy", "zcode", "kimi"
+      ]);
+      expect(listed.json().executors.every((executor: { health: unknown }) => Boolean(executor.health))).toBe(true);
+      expect(listed.json().preferredExecutorId).toBeNull();
+
+      const probed = await app.inject({ method: "POST", url: "/api/executors/native/probe" });
+      expect(probed.statusCode).toBe(200);
+      expect(probed.json().ok).toBe(true);
+
+      const unknown = await app.inject({ method: "POST", url: "/api/executors/unknown/probe" });
+      expect(unknown.statusCode).toBe(404);
+      await app.close();
+    } finally {
+      if (previous === undefined) delete process.env.HEARTH_EXECUTOR_DETECT;
+      else process.env.HEARTH_EXECUTOR_DETECT = previous;
+    }
+  });
+
   it("routes an execution request to a task and keeps the conversation link", async () => {
     const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
     const response = await app.inject({
