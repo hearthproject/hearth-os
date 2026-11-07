@@ -18,7 +18,7 @@ outline: [2]
 | 每次执行可追溯 | 上下文条目带 `task_id`、`run_id`、`executor_id`、`provenance_json` 和稳定的 `executor_event_id` |
 | 执行器不持有长期凭据 | 模型密钥经 AES-256-GCM 加密后存入数据库；执行器只在单次运行中获得解密后的配置 |
 
-当前数据库 schema 版本为 **10**。启动时由 `packages/eventlog/src/database.ts` 顺序执行建表与增量迁移，并写入 `PRAGMA user_version` 和 `app_meta.schemaVersion`。
+当前数据库 schema 版本为 **11**。启动时由 `packages/eventlog/src/database.ts` 顺序执行建表与增量迁移，并写入 `PRAGMA user_version` 和 `app_meta.schemaVersion`。
 
 ## `.hearth` 目录
 
@@ -56,9 +56,11 @@ outline: [2]
 | 上下文 | `context_items`、`task_context_state`、`context_settings`、`handoffs` | 执行轨迹、任务摘要、上下文策略和交接记录 |
 | 模型管理 | `model_profiles`、`executor_model_bindings`、`app_settings` | 统一模型档案、执行器绑定和聊天模型选择 |
 | 设置迁移 | `settings_migrations` | 旧 JSON 导入的来源、备份路径、状态和错误 |
-| 记忆与方法 | `memories`、`memory_*`、`method_*` | 可纠正记忆、召回审计和方法演进 |
+| 记忆与方法 | `memories`、`memory_*`、`method_*`、`method_applications` | 可纠正记忆、召回审计、方法演进和逐次注入证据 |
 | 多设备与安全 | `devices`、`pairing_requests`、`sync_*`、`task_leases`、`security_*` | 配对、同步、租约、撤销与设备围栏 |
 | 运维 | `maintenance_runs`、`backup_records`、`scheduled_jobs` | 维护任务、备份记录和周期作业 |
+
+方法应用记录是 append-only 的本地审计，不参与事件重放和跨设备同步。`tasks.method_id/method_version` 钉住显式绑定，`method_applications` 记录每次运行实际注入的方法版本、选择方式和提示词哈希；`method_candidates.generation` 表示采用代数，`fingerprint` 用于确定性候选去重。
 
 ## 统一模型注册表
 

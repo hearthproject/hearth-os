@@ -18,7 +18,7 @@ outline: [2]
 | Every run is traceable | A context item carries `task_id`, `run_id`, `executor_id`, `provenance_json`, and a stable `executor_event_id` |
 | Executors do not hold long-lived credentials | Model keys are encrypted with AES-256-GCM in the database; an executor gets decrypted configuration only for its run |
 
-The current database schema version is **10**. At startup, `packages/eventlog/src/database.ts` runs table creation and incremental migrations in order, then writes `PRAGMA user_version` and `app_meta.schemaVersion`.
+The current database schema version is **11**. At startup, `packages/eventlog/src/database.ts` runs table creation and incremental migrations in order, then writes `PRAGMA user_version` and `app_meta.schemaVersion`.
 
 ## The `.hearth` Directory
 
@@ -56,9 +56,11 @@ The default data directory is `.hearth/` under the repository root and can be ov
 | Context | `context_items`, `task_context_state`, `context_settings`, `handoffs` | Execution trail, task summary, context policy, and handoff records |
 | Model management | `model_profiles`, `executor_model_bindings`, `app_settings` | Unified model profiles, executor bindings, and chat model selection |
 | Settings migration | `settings_migrations` | Legacy JSON source, backup path, status, and error |
-| Memory and methods | `memories`, `memory_*`, `method_*` | Correctable memory, recall audit, and method evolution |
+| Memory and methods | `memories`, `memory_*`, `method_*`, `method_applications` | Correctable memory, recall audit, method evolution, and per-run injection evidence |
 | Multi-device and security | `devices`, `pairing_requests`, `sync_*`, `task_leases`, `security_*` | Pairing, sync, leases, revocation, and fencing |
 | Operations | `maintenance_runs`, `backup_records`, `scheduled_jobs` | Maintenance, backups, and periodic jobs |
+
+Method applications are append-only local audit records; they are not replayed as events or synchronized across devices. `tasks.method_id/method_version` pins an explicit binding, while `method_applications` records the method version, selection mode, and prompt hash actually injected in each run. `method_candidates.generation` identifies the adoption generation and `fingerprint` deduplicates deterministic candidate creation.
 
 ## Unified Model Registry
 
