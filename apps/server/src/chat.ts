@@ -60,6 +60,15 @@ export async function decideRoute(
     url ? "消息带有网址：" + url : ""
   ].filter(Boolean).join("；");
 
+  if (hasAttachments) {
+    return {
+      action: "task",
+      title: "",
+      goal: message,
+      reason: "消息带有附件，已交给执行器读取处理"
+    };
+  }
+
   if (!settings.apiKey || !settings.baseUrl || !settings.model) {
     return forcedTaskRoute(message, options.preferredExecutorId ?? null) ?? heuristicRoute(message);
   }
@@ -110,7 +119,7 @@ export async function decideRoute(
 }
 
 function forcedTaskRoute(message: string, preferredExecutorId: ExecutorId | null): ChatRoute | null {
-  if (shouldAnswerInChat(message)) return null;
+  if (isExplanationRequest(message)) return null;
   if (wantsScreenshot(message)) {
     return {
       action: "task",
@@ -143,8 +152,18 @@ function shouldAnswerInChat(message: string): boolean {
   return asksForExplanation && !asksForAction;
 }
 
+function isExplanationRequest(message: string): boolean {
+  const trimmed = message.trim();
+  const leadingQuestion = /^(怎么|怎样|如何|为什么|为啥|什么是|请问|能不能|可以怎么|该怎么)/.test(trimmed);
+  const imperative = /^(帮我|请帮我|替我|给我|直接|去)/.test(trimmed);
+  return (leadingQuestion && !imperative) || shouldAnswerInChat(trimmed);
+}
+
 export function heuristicRoute(message: string, reason = "包含执行类指令，交给任务执行器"): ChatRoute {
   const normalized = message.trim().toLowerCase();
+  if (isExplanationRequest(message)) {
+    return { action: "chat", title: "", goal: message, reason: "询问方法或解释，直接由聊天模型回答" };
+  }
   const looksLikeTask = TASK_KEYWORDS.some((keyword) => normalized.includes(keyword.toLowerCase()));
   if (!looksLikeTask) {
     return { action: "chat", title: "", goal: message, reason: "普通对话，直接由聊天模型回答" };

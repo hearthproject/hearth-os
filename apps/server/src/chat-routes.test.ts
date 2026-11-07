@@ -297,6 +297,71 @@ describe("chat-first API", () => {
     await app.close();
   });
 
+  it("routes an attachment-only message into a task instead of asking for a chat model", async () => {
+    const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
+    const form = new FormData();
+    form.append("file", new Blob(["附件正文"], { type: "text/plain" }), "notes.txt");
+    const request = new Request("http://localhost/api/attachments", { method: "POST", body: form });
+    const uploaded = await app.inject({
+      method: "POST",
+      url: "/api/attachments",
+      headers: { "content-type": request.headers.get("content-type") ?? "" },
+      payload: Buffer.from(await request.arrayBuffer())
+    });
+    const attachment = uploaded.json().attachments[0];
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/chat",
+      payload: { attachments: [attachment] }
+    });
+    const events = parseSse(response.body);
+    expect(events.some((event) => event.event === "error" && event.data.code === "MODEL_NOT_CONFIGURED")).toBe(false);
+    const task = events.find((event) => event.event === "task")?.data.task;
+    expect(task).toBeTruthy();
+    expect(task.inputs.some((input: { kind: string; value: string }) => input.kind === "file" && input.value.endsWith(".txt"))).toBe(true);
+    await app.close();
+  });
+
+  it("keeps a method question in chat when no router model is configured", async () => {
+    const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/chat",
+      payload: { message: "怎么测试这个函数" }
+    });
+    const events = parseSse(response.body);
+    expect(events.find((event) => event.event === "routing")?.data.action).toBe("chat");
+    expect(events.some((event) => event.event === "task")).toBe(false);
+    expect(events.find((event) => event.event === "error")?.data.code).toBe("MODEL_NOT_CONFIGURED");
+    await app.close();
+  });
+
+  it("applies per-message settings to an existing conversation without persisting them", async () => {
+    const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
+    const created = await app.inject({ method: "POST", url: "/api/conversations", payload: { title: "设置覆盖" } });
+    const conversation = created.json();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/chat",
+      payload: {
+        conversationId: conversation.id,
+        message: "帮我修复项目里的 TypeScript 错误",
+        settings: { preferredExecutorId: "native", executorEnabled: { codex: false } }
+      }
+    });
+    const events = parseSse(response.body);
+    const routing = events.find((event) => event.event === "routing")?.data;
+    expect(routing.preferredExecutorId).toBe("native");
+    const task = events.find((event) => event.event === "task")?.data.task;
+    expect(task.executorId).toBe("native");
+
+    const stored = await app.inject({ method: "GET", url: `/api/conversations/${conversation.id}` });
+    expect(stored.json().conversation.settings.preferredExecutorId).toBeNull();
+    await app.close();
+  });
+
   it("keeps a pasted URL in the directly dispatched task", async () => {
     const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
     const response = await app.inject({
