@@ -14,7 +14,7 @@ Hearth serves one primary user, with a small number of trusted collaborators who
 
 The product is organized around tasks, not chat history. The user needs to know what the system is doing, why it needs attention, what was delivered, and where to recover after a failure. Models, tools, and execution environments can change; task state, authority, evidence, and external receipts must remain.
 
-The first product scope is not all personal work. It starts with 15 cross-industry tasks with verifiable results and passes at least 10 of them, establishing the first complete path from input to delivery. It does not try to cover all personal work, but it requires document processing, web research, engineering collaboration, data/finance, customer support, recruiting, education, and marketing to share one task, approval, artifact, and recovery system. Once that foundation is reliable, Hearth expands sources, external writes, desktop operation, proactive service, memory, and multi-device use.
+Phase one did not start with all personal work. It used 15 cross-industry tasks with verifiable results to establish the first complete path from input to delivery, and 13 passed, meeting the 10/15 hard gate. It does not try to cover all personal work, but it requires document processing, web research, engineering collaboration, data/finance, customer support, recruiting, education, and marketing to share one task, approval, artifact, and recovery system. Once that foundation is reliable, Hearth expands sources, external writes, desktop operation, proactive service, memory, and multi-device use; those extensions currently have code closures only, and real acceptance lives in [Delivery](/en/delivery/).
 
 **Explicit non-goals:** enterprise multi-tenancy, a public agent marketplace, unapproved high-risk automation, a foundation-model race, and a tool that requires daily maintenance of prompts, plugins, and workflows.
 
@@ -46,24 +46,24 @@ Technology follows system constraints, not language preference. Hearth must run 
 | Layer | Choice | Why |
 |---|---|---|
 | Primary language | TypeScript | Control, tasks, command line, web, and adapters share concepts and validation, reducing protocol drift |
-| Service runtime | Node.js 22+ | Fits high-I/O orchestration and event delivery; one process in the first phase |
+| Service runtime | Node.js 22.13+ | Fits high-I/O orchestration and event delivery; one process, one writer; document work uses built-in `node:sqlite` |
 | Local storage | SQLite WAL | Enough for a single-user, local-first, single-writer system, with simple backup and migration |
-| Web interface | React, Vite, and PWA | Fits task cards, approvals, artifacts, and live state; PWA lowers the cost of a phone entrance |
+| Web interface | React and Vite | Fits task cards, approvals, artifacts, and live state; the mobile PWA stays in phase four and is not claimed early |
 | Live updates | Server-Sent Events | Simpler than a two-way persistent connection for server-side state changes |
-| Documents and data | Python sidecar | Mature libraries for parsing, spreadsheets, batch jobs, and evaluation, run separately |
-| Native boundary | Rust when needed | Only for isolation supervision, device agents, cryptography, and places that genuinely need a single binary or stronger memory boundary |
+| Documents and data | Server-side TypeScript | `cheerio`, `pdfjs-dist`, `mammoth`, and `exceljs` extract HTML, PDF, DOCX, and XLSX in-process, without a second business protocol |
+| Native boundary | PowerShell + Node bridge | The Windows helper owns window observation, UIA, and input; Rust appears only when a single binary or stronger isolation becomes a hard constraint |
 
 TypeScript is the language; Node.js is the runtime. They are not alternatives. TypeScript provides development-time types, while Node.js provides files, network, processes, and timers. External input and stored data still need runtime validation.
 
 TypeScript wins mainly because of shared protocols and integration speed. Tasks, approvals, artifacts, receipts, and execution events appear in the service, command line, web interface, and tests. One set of types and validation reduces drift. Hearth is mostly orchestration and waiting, not sustained large-scale computing, so Node.js is sufficient at personal scale.
 
-Rust is not the primary language because the bottleneck is product boundaries, protocol consistency, recovery, and authority judgment, not raw speed. Rust is a good fit for isolation supervision, device agents, and cryptographic boundaries. It expands only if a single binary, stronger isolation, or device resources become hard constraints. Go is not the main stack today. Python is limited to documents, data, and evaluation to avoid a second business protocol.
+Rust is not the primary language because the bottleneck is product boundaries, protocol consistency, recovery, and authority judgment, not raw speed. Desktop work first validates real interaction with PowerShell plus a Node bridge; Rust expands only if a single binary, stronger isolation, or device resources become hard constraints. Go and Python are not part of the business stack today; document parsing already runs in the TypeScript server, avoiding a second runtime in the first phase.
 
-The frontend uses React, Vite, and PWA without a second server-rendered runtime. Task state comes from the local service projection; the browser renders and sends commands. The first phase does not introduce microservices or network boundaries just to look complete.
+The frontend uses React and Vite without a second server-rendered runtime. Task state comes from the local service projection; the browser renders and sends commands. The first phase does not introduce microservices or network boundaries just to look complete. The PWA and phone entrance remain in the [remaining roadmap](/en/delivery/roadmap).
 
 ## Module Map and Key Boundaries
 
-The nine modules below are parallel design notes. Together they cover the product from the first entrance to long-running operation, without following a code directory layout.
+The eleven modules below are parallel design notes. Together they cover the product from the first entrance to long-running operation, without following a code directory layout.
 
 | Module | What it solves first |
 |---|---|
@@ -71,10 +71,12 @@ The nine modules below are parallel design notes. Together they cover the produc
 | [Tasks and Durable Execution](/en/design/tasks) | Keep work alive across restarts, sleep, and failure, with evidence and recovery |
 | [Control and Authority](/en/design/control) | Decide when to observe, suggest, execute, or stop, within explicit authority |
 | [Executors and Routing](/en/design/executors) | Use specialized capabilities instead of one universal model |
+| [Native Agent Runtime](/en/design/native-agent-runtime) | A self-built single-agent loop that unifies model protocols, tool permissions, budgets, and checkpoints |
 | [Approvals, Takeover, and External Effects](/en/design/effects) | Make sends, writes, deletes, and publishes previewable, authorized, and reconcilable |
 | [Runtime and Safety](/en/design/safety) | Limit real-world impact with isolation, least privilege, and credential boundaries |
 | [Memory and Capability Evolution](/en/design/memory) | Accumulate context and methods while staying correctable, forgettable, and reversible |
 | [Evaluation and Cost](/en/design/evaluation) | Prove reliability and cost with real tasks instead of demos |
 | [Multi-device and Long-running Operation](/en/design/operations) | Keep one set of tasks, authority, and data consistent across devices over time |
+| [Agent Reference Patterns](/en/design/agent-reference-patterns) | Record borrowed patterns and trade-offs instead of treating an external framework as the product architecture |
 
 The non-negotiable boundaries are: every interface is rebuilt from a record; each state has one write authority; external actions have approval or an explicit exemption plus a reconcilable receipt; executors never see long-lived raw credentials; every task has a budget, deadline, and cancellation path; memory has provenance, sensitivity, and forgetting rules; method changes require evaluation, canary, promotion, and rollback.

@@ -1,5 +1,6 @@
 ---
 layout: home
+
 hero:
   name: Hearth OS
   text: 把数字劳动变成可靠的任务
@@ -9,27 +10,118 @@ hero:
     alt: Hearth OS 任务系统
   actions:
     - theme: brand
-      text: 阅读设计说明
-      link: /design/
+      text: 5 分钟本地运行
+      link: /guide/
     - theme: alt
-      text: 查看交付路线
+      text: 查看当前进度
       link: /delivery/
 ---
-<nav class="home-quicklinks" aria-label="文档入口">
-  <a href="/hearth-os/design/">
-    <span class="home-quicklinks__label">设计说明</span>
-    <span class="home-quicklinks__meta">项目定位、总体设计与九个模块</span>
-  </a>
-  <a href="/hearth-os/delivery/">
-    <span class="home-quicklinks__label">交付路线</span>
-    <span class="home-quicklinks__meta">从 MVP 到 v1.0 的分阶段计划</span>
-  </a>
-  <a href="/hearth-os/log/day-03.html">
-    <span class="home-quicklinks__label">开发日志</span>
-    <span class="home-quicklinks__meta">每日概述、提交与具体修改</span>
-  </a>
-  <a href="/hearth-os/reference/">
-    <span class="home-quicklinks__label">附录</span>
-    <span class="home-quicklinks__meta">工程、风险、决策与维护资料</span>
-  </a>
-</nav>
+
+<div class="home-metrics" role="list" aria-label="项目指标">
+  <div class="home-metric" role="listitem">
+    <strong>13/15</strong>
+    <span>阶段一真实任务通过</span>
+  </div>
+  <div class="home-metric" role="listitem">
+    <strong>199</strong>
+    <span>自动测试全部通过</span>
+  </div>
+  <div class="home-metric" role="listitem">
+    <strong>4</strong>
+    <span>统一模型协议</span>
+  </div>
+  <div class="home-metric" role="listitem">
+    <strong>6</strong>
+    <span>交付阶段，2–6 部分完成</span>
+  </div>
+</div>
+
+<section class="home-section">
+  <p class="home-eyebrow">系统能力</p>
+  <h2>不是一个聊天框，而是一条完整的任务链路</h2>
+  <p class="home-lead">从意图、提案、执行、审批到回执与恢复，每一步都留下可核对的记录。模型和执行器可以更换，任务状态和证据不会丢。</p>
+  <DocCardGrid :columns="3" :items="[
+    { no: '01', title: '聊天优先的控制面', text: '在对话中提出任务，在提案中确认权限，在任务详情里看执行器、预算、检查点和最终产物。', link: '/design/experience' },
+    { no: '02', title: '原生 Agent Runtime', text: '自研单 Agent 工具循环，统一四种模型协议，内置读写、搜索、命令、联网、提问与完成工具。', link: '/design/native-agent-runtime' },
+    { no: '03', title: '任务与持久执行', text: '状态机、预算、检查点、等待输入、恢复与重试，让工作跨重启和失败继续。', link: '/design/tasks' },
+    { no: '04', title: '审批与外部副作用', text: '外部动作先预览，一次性审批绑定参数指纹，效果账本只执行一次并保存回执。', link: '/design/effects' },
+    { no: '05', title: '来源、文档与发件箱', text: '本地文件、知识库、网页和多种文档格式，提取后带来源进入任务；写入先落在本地发件箱。', link: '/delivery/capabilities' },
+    { no: '06', title: '桌面、记忆与多设备', text: 'Windows 配对与接管、主动收件箱、可纠正记忆、方法评估，以及带租约和撤销的增量同步。', link: '/delivery/capabilities' }
+  ]" />
+</section>
+
+<section class="home-section">
+  <p class="home-eyebrow">架构</p>
+  <h2>所有事实先落盘，界面只是投影</h2>
+  <p class="home-lead">单进程、单写者、本地数据库。没有为了“看起来完整”提前拆成微服务，也没有第二个事实源。</p>
+  <div class="home-arch">
+    <div class="home-arch__layer">
+      <span class="home-arch__label">入口</span>
+      <div class="home-arch__items"><span>聊天</span><span>任务</span><span>审批</span><span>设备</span><span>设置</span></div>
+    </div>
+    <div class="home-arch__arrow">↓</div>
+    <div class="home-arch__layer home-arch__layer--strong">
+      <span class="home-arch__label">控制面</span>
+      <div class="home-arch__items"><span>Fastify API</span><span>串行调度</span><span>任务状态机</span><span>提案确认</span><span>SSE 事件流</span></div>
+    </div>
+    <div class="home-arch__arrow">↓</div>
+    <div class="home-arch__layer">
+      <span class="home-arch__label">执行层</span>
+      <div class="home-arch__items"><span>原生 Runtime</span><span>Codex 执行器</span><span>Windows 助手</span><span>来源与提取</span><span>本地发件箱</span></div>
+    </div>
+    <div class="home-arch__arrow">↓</div>
+    <div class="home-arch__layer home-arch__layer--fact">
+      <span class="home-arch__label">事实层</span>
+      <div class="home-arch__items"><span>只追加事件日志</span><span>SQLite WAL</span><span>投影</span><span>产物与回执</span><span>加密备份</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="home-section home-section--split">
+  <div>
+    <p class="home-eyebrow">快速开始</p>
+    <h2>三分钟跑起来</h2>
+    <p class="home-lead">要求 Node.js 22.13+。Vite 会把 <code>/api</code> 代理到本机 <code>127.0.0.1:4317</code>。</p>
+  </div>
+  <div class="home-code">
+
+```bash
+git clone https://github.com/hearthproject/hearth-os.git
+cd hearth-os
+npm ci
+npm run dev
+```
+
+  </div>
+</section>
+
+<section class="home-section">
+  <p class="home-eyebrow">交付状态</p>
+  <h2>已经交付什么，还缺什么</h2>
+  <p class="home-lead">阶段一已经通过硬门槛。阶段二至六有可运行的代码闭环和自动测试，但没有用真实用户、真实设备和长期运行来冒充完成。</p>
+  <table class="home-status-table">
+    <thead>
+      <tr><th>阶段</th><th>状态</th><th>已经跑通</th><th>仍然留空</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>一 · 最小完整 MVP</td><td><span class="status-tag status-tag--done">已验收</span></td><td data-label="已经跑通">15 项任务、13 项通过；审批、产物、恢复与备份闭环</td><td data-label="仍然留空">T07 未交付 PR；T08 外部评论等待批准</td></tr>
+      <tr><td>二 · 日常内容工作</td><td><span class="status-tag status-tag--partial">部分完成</span></td><td data-label="已经跑通">来源、提取、草稿、审批、本地发件箱与回执</td><td data-label="仍然留空">邮件/日历账户与真实发送</td></tr>
+      <tr><td>三 · 桌面操作</td><td><span class="status-tag status-tag--partial">部分完成</span></td><td data-label="已经跑通">Windows 配对、观察、接管、低风险输入与 UIA</td><td data-label="仍然留空">敏感区域遮挡、隔离桌面、高风险补偿</td></tr>
+      <tr><td>四 · 主动服务与手机</td><td><span class="status-tag status-tag--partial">部分完成</span></td><td data-label="已经跑通">触发器、收件箱、注意力预算、接受/忽略/转任务</td><td data-label="仍然留空">手机 PWA、推送与远程审批</td></tr>
+      <tr><td>五 · 记忆与进化</td><td><span class="status-tag status-tag--partial">部分完成</span></td><td data-label="已经跑通">记忆候选/召回/纠正/遗忘/导出；方法评估/晋升/回退</td><td data-label="仍然留空">真实长期使用与生产对照</td></tr>
+      <tr><td>六 · 多设备与长期运行</td><td><span class="status-tag status-tag--partial">部分完成</span></td><td data-label="已经跑通">增量同步、租约、撤销、加密备份、健康维护</td><td data-label="仍然留空">真实双设备切换、设备丢失演练、数周运行</td></tr>
+    </tbody>
+  </table>
+  <p class="home-section__cta"><a href="/hearth-os/delivery/">查看完整交付与剩余路线 →</a></p>
+</section>
+
+<section class="home-section">
+  <p class="home-eyebrow">开发日志</p>
+  <h2>每天一段可核对的进展</h2>
+  <DocCardGrid :columns="3" :items="[
+    { no: 'D04', title: 'Day04 · 运行时就位', text: '来源、桌面、主动、记忆、方法、同步、安全、备份与原生 Agent Runtime 在同一天落地。', link: '/log/day-04', meta: '2026-11-06' },
+    { no: 'D03', title: 'Day03 · 阶段一 MVP 跑通', text: '15 个真实任务、13 项通过，控制面、审批、产物、恢复和备份形成闭环。', link: '/log/day-03', meta: '2026-11-05' },
+    { no: 'D02', title: 'Day02 · 文档站结构精简', text: '收拢文档结构，删除重复路线材料，让设计、路线与附录各自承担明确职责。', link: '/log/day-02', meta: '2026-11-04' }
+  ]" />
+  <p class="home-section__cta"><a href="/hearth-os/log/">查看全部开发日志 →</a></p>
+</section>

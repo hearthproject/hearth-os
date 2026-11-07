@@ -24,19 +24,19 @@ outline: [2]
 | Layer | Default | Reason |
 |---|---|---|
 | Primary language | TypeScript | Service, command line, web, and adapters share concepts and validation |
-| Service runtime | Node.js 22+ | Fits high-I/O orchestration and event delivery |
+| Service runtime | Node.js 22.13+ | Fits high-I/O orchestration and event delivery; document work uses built-in `node:sqlite` |
 | Resident service | One modular-monolith process | Reduces early operational cost and protocol drift |
 | Local storage | SQLite in WAL mode | Enough for single-user, local-first, single-writer use with simple backup |
 | Data validation | Versioned data structures | External input, records, and actions still need runtime validation |
-| Web | React, Vite, installable web app | Fits task cards, approvals, artifacts, and live state; lowers mobile entry cost |
+| Web | React and Vite | Fits task cards, approvals, artifacts, and live state; the mobile PWA is not implemented |
 | Live updates | Server-sent event push | Simpler than a two-way persistent connection for state changes |
-| Browser automation | Playwright | Covers research, signed-in sessions, forms, and sites without an open interface |
-| Documents and data | Python helper process | Mature parsing, OCR, spreadsheet, and batch-processing ecosystem |
-| Isolation | Containers first, stronger isolation for high-risk work | General tasks do not pay the cost of a virtual machine |
+| Browser automation | Not built in | Web sources use `fetch` + `cheerio`; sites that need a signed-in session or interaction stay inside the executor workspace |
+| Documents and data | Server-side TypeScript | `pdfjs-dist`, `mammoth`, and `exceljs` extract PDF, DOCX, and XLSX in-process |
+| Isolation | One workspace per task | Today isolation is the task workspace plus restricted tool permissions; containers and high-risk isolation rooms stay in the [remaining roadmap](/en/delivery/roadmap) |
 
 TypeScript is the language; Node.js is the runtime. The former constrains development-time types, while the latter provides files, networking, processes, and timers. External input and persisted data still need runtime validation. The primary language does not change the real safety boundaries of isolation, approval, recovery, and authority.
 
-The early system has one resident service writing the main database. Command line, web, mobile, and executors connect through task queues or controlled interfaces and do not write the database directly. Executors can be replaced while tasks, authority, and receipts remain in the main system. Document and data helpers, browser workers, and device agents are external capabilities, not a second business protocol.
+The early system has one resident service writing the main database. Command line, web, mobile, and executors connect through task queues or controlled interfaces and do not write the database directly. Executors can be replaced while tasks, authority, and receipts remain in the main system. Document extraction runs inside the server process; browser workers and device agents join as controlled capabilities when needed, not as a second business protocol.
 
 Local data should be understandable, backupable, and portable. The main record stores tasks and events. Artifacts are stored separately and verified by content. Workspaces are created and cleaned by task. Configuration stores rules and connections. Credentials contain only encrypted material or short-lived references. Logs and backups are kept separately. Sensitive directories use minimal permissions, backups are encrypted, and device sync sends only necessary state and artifact references.
 
