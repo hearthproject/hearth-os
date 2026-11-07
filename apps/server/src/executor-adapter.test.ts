@@ -8,14 +8,13 @@ import {
   createExecutorAdapters,
   type CodexRunner,
   type ExternalRunner,
-  type HermesRunner,
   type NativeRunner
 } from "./executor-adapter.ts";
 import type { ExecutorInvocation } from "./executor-adapter.ts";
 import type { PreparedWorkspace } from "./workspace.ts";
 import { defaultExecutorSettings } from "./executor-settings.ts";
 
-const EXTERNAL_IDS = ["qoder", "workbuddy", "kimi"] as const;
+const EXTERNAL_IDS = ["hermes", "qoder", "workbuddy", "kimi"] as const;
 const roots: string[] = [];
 const previousDetect = process.env.HEARTH_EXECUTOR_DETECT;
 
@@ -61,7 +60,7 @@ function invocation(settings: ExecutorSettings, root: string, progress: string[]
     onProgress: (event) => progress.push(event.kind),
     onNativeContextEvent: () => undefined,
     onNativeCheckpoint: () => undefined,
-    onHermesContextItem: () => undefined,
+    onExternalContextItem: () => undefined,
     onDshContextItem: () => undefined,
     onCodexContextItem: () => undefined,
     onCodexThreadStarted: () => undefined
@@ -152,7 +151,6 @@ describe("external executor adapters", () => {
     const adapters = createExecutorAdapters({
       native: (async () => { throw new Error("unused"); }) as NativeRunner,
       codex: (async () => { throw new Error("unused"); }) as CodexRunner,
-      hermes: (async () => { throw new Error("unused"); }) as HermesRunner,
       settingsPath
     });
     for (const id of EXTERNAL_IDS) expect(adapters[id]).toBeInstanceOf(ExternalExecutorAdapter);

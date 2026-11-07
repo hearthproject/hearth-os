@@ -99,14 +99,14 @@ export function resolveExecutorLaunch(
 
   const runtime = executorRuntimeSettings(settings, id);
   if (id === "hermes") {
-    const command = runtime.command?.trim() || settings.hermesCommand || "hermes";
+    const command = runtime.executablePath?.trim() || runtime.command?.trim() || settings.hermesCommand || "hermes";
     return {
       id,
       kind: "command",
       command,
       args: [],
       env: {},
-      source: runtime.command ? "configured" : "path",
+      source: runtime.command || runtime.executablePath ? "configured" : "path",
       script: null,
       display: command
     };

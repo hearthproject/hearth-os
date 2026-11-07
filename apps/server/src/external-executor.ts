@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import type { ApprovalMode, ExecutorId, RunUsage, TaskProgressDetail } from "@hearth/core";
 import type { ExecutorLaunch } from "./executor-runtime.ts";
+import { runHermes, type HermesStreamEvent } from "./hermes-executor.ts";
 
 export interface ExternalProgress {
   type: string;
@@ -20,6 +21,14 @@ export interface ExternalRunOptions {
   resumeSessionId?: string;
   signal?: AbortSignal;
   onProgress?: (progress: ExternalProgress) => void;
+  onContextItem?: (item: ExternalContextItem) => void;
+}
+
+export interface ExternalContextItem {
+  type: string;
+  role: "system" | "user" | "assistant" | "tool";
+  content: string;
+  executorEventId: string;
 }
 
 export interface ExternalRunResult {
@@ -70,6 +79,22 @@ export function runExternalExecutor(options: ExternalRunOptions): Promise<Extern
       handle: handleKimiLine
     });
   }
+  if (options.id === "hermes") {
+    return runHermes({
+      command: options.launch.command,
+      workingDirectory: options.workingDirectory,
+      prompt: options.prompt,
+      mode: options.mode,
+      maxTurns: options.maxTurns,
+      runBudgetSeconds: options.runBudgetSeconds,
+      ...(options.signal ? { signal: options.signal } : {}),
+      onEvent: (event) => options.onProgress?.(event),
+      onContextItem: (event) => {
+        const item = externalHermesContext(event);
+        if (item) options.onContextItem?.(item);
+      }
+    });
+  }
   throw new Error(`${options.id} 不是外部 CLI 执行器`);
 }
 
@@ -110,6 +135,12 @@ function runLineJson(options: ExternalRunOptions, spec: LineRunnerSpec): Promise
         type,
         message,
         ...(detail ? { detail: { ...detail, executorId: options.id } } : {})
+      });
+      options.onContextItem?.({
+        type,
+        role: roleForEvent(type),
+        content: detail?.text ?? detail?.output ?? message,
+        executorEventId: `${options.id}:${Date.now()}:${Math.random().toString(16).slice(2)}`
       });
     };
     let buffer = "";
@@ -316,6 +347,12 @@ async function runQoderSdk(options: ExternalRunOptions): Promise<ExternalRunResu
       message,
       ...(detail ? { detail: { ...detail, executorId: "qoder" } } : {})
     });
+    options.onContextItem?.({
+      type,
+      role: roleForEvent(type),
+      content: detail?.text ?? detail?.output ?? message,
+      executorEventId: `qoder:${Date.now()}:${Math.random().toString(16).slice(2)}`
+    });
   };
 
   let finalText = "";
@@ -448,4 +485,59 @@ function numberValue(value: unknown): number | null {
 function clip(value: string, max: number): string {
   const text = value.replace(/\s+/g, " ").trim();
   return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+function roleForEvent(type: string): ExternalContextItem["role"] {
+  if (type.includes("tool")) return "tool";
+  if (type === "system" || type === "result") return type === "system" ? "system" : "assistant";
+  if (type === "error") return "system";
+  return "assistant";
+}
+
+function externalHermesContext(event: HermesStreamEvent): ExternalContextItem | null {
+  if (event.type === "system") {
+    return event.text ? {
+      type: "system",
+      role: "system",
+      content: event.text,
+      executorEventId: `hermes:system:${event.sessionId ?? Date.now()}`
+    } : null;
+  }
+  if (event.type === "text") {
+    return { type: "text", role: "assistant", content: event.text, executorEventId: `hermes:text:${Date.now()}` };
+  }
+  if (event.type === "tool_use") {
+    return {
+      type: "tool_use",
+      role: "tool",
+      content: `${event.name} ${safeString(event.input)}`.trim(),
+      executorEventId: `hermes:tool-use:${event.toolCallId ?? Date.now()}`
+    };
+  }
+  if (event.type === "tool_result") {
+    return {
+      type: "tool_result",
+      role: "tool",
+      content: `${event.name}: ${event.output}`.trim(),
+      executorEventId: `hermes:tool-result:${event.toolCallId ?? Date.now()}`
+    };
+  }
+  if (event.type === "result") {
+    return event.text ? {
+      type: "result",
+      role: "assistant",
+      content: event.text,
+      executorEventId: `hermes:result:${event.sessionId ?? Date.now()}`
+    } : null;
+  }
+  return null;
+}
+
+function safeString(value: unknown): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }

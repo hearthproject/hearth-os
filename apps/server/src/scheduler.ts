@@ -15,7 +15,8 @@ import { applyDiagnosisAdvice, classifyFailure, decideFailure, evaluateHandoff, 
 import { ContextProjector } from "./context-projector.ts";
 import { maybeModelSummary } from "./context-summary.ts";
 import { loadExecutorSettings } from "./executor-settings.ts";
-import { HermesApprovalRequiredError, HermesStartupError, runHermes, type HermesStreamEvent } from "./hermes-executor.ts";
+import { HermesApprovalRequiredError, HermesStartupError } from "./hermes-executor.ts";
+import type { ExternalContextItem } from "./external-executor.ts";
 import { executorHealth as readExecutorHealth } from "./executor-runtime.ts";
 import { sanitizeProgressDetail } from "./progress-detail.ts";
 import { resolveExecutorId } from "./executors.ts";
@@ -30,8 +31,8 @@ import type { HearthService } from "./service.ts";
 import { buildDeliveryRepairPrompt, buildTaskPrompt, prepareWorkspace, UnsupportedInputError, type PreparedWorkspace } from "./workspace.ts";
 import { CapabilityUnavailableError, needsGithubRepository, wantsScreenshot } from "./task-intent.ts";
 
-import { createExecutorAdapters, type CodexContextItem, type CodexRunner, type DshRunner, type ExecutionOutcome, type ExecutorAdapter, type ExecutorAttemptContext, type ExternalRunner, type HermesRunner, type NativeRunner } from "./executor-adapter.ts";
-export type { CodexRunner, HermesRunner, NativeRunner } from "./executor-adapter.ts";
+import { createExecutorAdapters, type CodexContextItem, type CodexRunner, type DshRunner, type ExecutionOutcome, type ExecutorAdapter, type ExecutorAttemptContext, type ExternalRunner, type NativeRunner } from "./executor-adapter.ts";
+export type { CodexRunner, NativeRunner } from "./executor-adapter.ts";
 export type ExecutorHealthProvider = (executorId: ExecutorId, settings: ExecutorSettings) => { canRun: boolean; issues: string[] };
 
 interface AttemptResult {
@@ -54,7 +55,6 @@ export interface SchedulerOptions {
   attachmentRoot?: string;
   codexRunner?: CodexRunner;
   nativeRunner?: NativeRunner;
-  hermesRunner?: HermesRunner;
   deepseekRunner?: DshRunner;
   externalRunner?: ExternalRunner;
   executorHealth?: ExecutorHealthProvider;
@@ -83,7 +83,6 @@ export class HearthScheduler {
   private readonly attachmentRoot: string | undefined;
   private readonly codexRunner: CodexRunner;
   private readonly nativeRunner: NativeRunner;
-  private readonly hermesRunner: HermesRunner;
   private readonly deepseekRunner: DshRunner | undefined;
   private readonly adapters: Record<ExecutorId, ExecutorAdapter>;
   private readonly executorHealth: ExecutorHealthProvider;
@@ -124,7 +123,6 @@ export class HearthScheduler {
     this.attachmentRoot = options.attachmentRoot;
     this.codexRunner = options.codexRunner ?? runCodex;
     this.nativeRunner = options.nativeRunner ?? runNativeTask;
-    this.hermesRunner = options.hermesRunner ?? runHermes;
     this.deepseekRunner = options.deepseekRunner;
     this.executorSettingsPath = options.executorSettingsPath ?? EXECUTOR_SETTINGS_PATH;
     this.staticExecutorSettings = options.executorSettings ?? null;
@@ -132,7 +130,6 @@ export class HearthScheduler {
     this.adapters = createExecutorAdapters({
       codex: this.codexRunner,
       native: this.nativeRunner,
-      hermes: this.hermesRunner,
       ...(this.deepseekRunner ? { deepseek: this.deepseekRunner } : {}),
       settingsPath: this.executorSettingsPath,
       ...(options.externalRunner ? { external: options.externalRunner } : {})
@@ -844,7 +841,6 @@ export class HearthScheduler {
     const { task, run, executorId, taskRoot, outDir, handoff, pendingInput, controller, budget } = input;
     const taskId = task.id;
     const runId = run.id;
-    let hermesIndex = 0;
     try {
       this.recordRunInput(task, run, pendingInput);
       const template = task.templateId ? getTemplate(task.templateId) : undefined;
@@ -922,7 +918,7 @@ export class HearthScheduler {
         onProgress: (event) => this.publishProgress(taskId, runId, event.kind, event.message, event.detail),
         onNativeContextEvent: (event) => this.captureNativeEvent(task, run, event),
         onNativeCheckpoint: (checkpoint) => this.persistNativeCheckpoint(taskId, runId, prepared.root, checkpoint),
-        onHermesContextItem: (event) => this.captureHermesEvent(task, run, event, hermesIndex++),
+        onExternalContextItem: (event) => this.captureExternalContextEvent(task, run, event),
         onDshContextItem: (event) => this.captureDshContextEvent(task, run, event),
         onCodexContextItem: (item) => this.captureCodexItem(task, run, item),
         onCodexThreadStarted: (threadId) => {
@@ -1295,36 +1291,23 @@ export class HearthScheduler {
     }
   }
 
-  private captureHermesEvent(task: TaskRecord, run: RunRecord, event: HermesStreamEvent, index: number): void {
-    const base = { taskId: task.id, conversationId: task.conversationId ?? null, runId: run.id, executorId: "hermes" as const };
-    if (event.type === "system") {
-      this.capture({ ...base, kind: "notice", role: "system", content: event.text || `session ${event.sessionId ?? "unknown"}`, provenance: { source: "hermes", subtype: event.subtype, sessionId: event.sessionId }, executorEventId: `hermes:system:${index}` });
-      return;
-    }
-    if (event.type === "text") {
-      this.capture({ ...base, kind: "assistant_message", role: "assistant", content: event.text, provenance: { source: "hermes" }, executorEventId: `hermes:text:${index}` });
-      return;
-    }
-    if (event.type === "tool_use") {
-      this.capture({ ...base, kind: "tool_call", role: "assistant", content: `${event.name}\n${safeStringify(event.input)}`, provenance: { source: "hermes", tool: event.name, toolCallId: event.toolCallId }, executorEventId: event.toolCallId ? `hermes:tool:${event.toolCallId}:started` : `hermes:tool:${index}:started` });
-      return;
-    }
-    if (event.type === "tool_result") {
-      this.capture({ ...base, kind: "tool_result", role: "tool", content: event.output, provenance: { source: "hermes", tool: event.name, toolCallId: event.toolCallId, isError: event.isError, durationMs: event.durationMs }, executorEventId: event.toolCallId ? `hermes:tool:${event.toolCallId}:finished` : `hermes:tool:${index}:finished` });
-      return;
-    }
-    if (event.type === "result") {
-      if (event.text.trim()) {
-        this.capture({ ...base, kind: "assistant_message", role: "assistant", content: event.text, provenance: { source: "hermes", sessionId: event.sessionId, usage: event.usage }, executorEventId: `hermes:result:${index}` });
-      }
-      if (event.error) {
-        this.capture({ ...base, kind: "notice", role: "system", content: event.error, provenance: { source: "hermes", requiresApproval: event.requiresApproval }, executorEventId: `hermes:result-error:${index}` });
-      }
-      return;
-    }
-    if (event.type === "error") {
-      this.capture({ ...base, kind: "notice", role: "system", content: event.message, provenance: { source: "hermes", requiresApproval: event.requiresApproval }, executorEventId: `hermes:error:${index}` });
-    }
+  private captureExternalContextEvent(task: TaskRecord, run: RunRecord, event: ExternalContextItem): void {
+    const kind = event.type.includes("tool")
+      ? event.type.includes("result") ? "tool_result" as const : "tool_call" as const
+      : event.type === "system" ? "notice" as const
+        : event.type === "error" ? "notice" as const
+          : "assistant_message" as const;
+    this.capture({
+      taskId: task.id,
+      conversationId: task.conversationId ?? null,
+      runId: run.id,
+      executorId: run.executorId ?? task.executorId ?? "native",
+      kind,
+      role: event.role,
+      content: event.content,
+      provenance: { source: "external-executor", eventType: event.type },
+      executorEventId: event.executorEventId
+    });
   }
 
   private latestRun(taskId: string, preferredId: string | null): RunRecord | null {
