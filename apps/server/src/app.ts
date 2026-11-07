@@ -487,11 +487,18 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const codexEnv = () => modelRegistry.codexEnv();
   const attachmentRoot = options.attachmentRoot ?? ATTACHMENT_DIR;
   const executorInstaller = options.executorInstaller ?? new ExecutorInstaller();
-  const executorHealth = (executorId: ExecutorId) => readExecutorHealth(
-    executorId,
-    executorSettingsStore.load(),
-    executorSettingsPath
-  );
+  const executorHealth = (executorId: ExecutorId) => {
+    const health = readExecutorHealth(executorId, executorSettingsStore.load(), executorSettingsPath);
+    if (executorId !== "codex") return health;
+    const managedProfile = modelRegistry.codexProfile();
+    if (!managedProfile) return health;
+    return {
+      ...health,
+      canRun: managedProfile.canRun,
+      issues: managedProfile.issues,
+      installState: managedProfile.canRun ? "available" as const : "needs_repair" as const
+    };
+  };
   const scheduler = options.startScheduler
     ? new HearthScheduler({
         service,

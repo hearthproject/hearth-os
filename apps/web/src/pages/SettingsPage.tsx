@@ -24,6 +24,8 @@ import { formatDuration, formatNumber } from "../lib/format.ts";
 import type {
   ContextSettings,
   ExecutorId,
+  ExecutorModelBindingView,
+  ExecutorView,
   ModelProfileView,
   ModelProtocol,
   ModelProviderPreset
@@ -121,9 +123,16 @@ export function SettingsPage() {
 function ExecutorsTab() {
   const queryClient = useQueryClient();
   const registryQuery = useQuery({ queryKey: ["modelRegistry"], queryFn: api.modelRegistry });
+  const executorsQuery = useQuery({ queryKey: ["executors"], queryFn: api.executors });
   const [busy, setBusy] = useState<ExecutorId | null>(null);
   const [notice, setNotice] = useState<NoticeState>(null);
   const registry = registryQuery.data;
+  const executors = executorsQuery.data?.executors ?? [];
+  const executorById = new Map(executors.map((executor) => [executor.id, executor]));
+  const onlineExecutorCount = executors.filter((executor) => executor.health.canRun).length;
+  const readyBindingCount = registry?.bindings.filter(
+    (binding) => binding.available && executorById.get(binding.executorId)?.health.canRun
+  ).length ?? 0;
 
   async function bind(executorId: ExecutorId, profileId: string) {
     setBusy(executorId);
@@ -147,7 +156,10 @@ function ExecutorsTab() {
     <section className="settings-tab-panel">
       <div className="settings-section-intro">
         <div><h2>执行器</h2><p>先安装并检测执行器，再指定它使用哪个模型。外部执行器仍使用各自 CLI 的登录与沙箱。</p></div>
-        <span className="status-chip ok"><span className="status-dot online" />7 个执行器</span>
+        <span className={`status-chip ${onlineExecutorCount > 0 ? "ok" : "warn"}`}>
+          <span className={`status-dot ${onlineExecutorCount > 0 ? "online" : "offline"}`} />
+          {executorsQuery.isLoading ? "检测执行器中" : `${onlineExecutorCount} / ${executors.length} 个执行器可用`}
+        </span>
       </div>
 
       <ExecutorSettingsPanel />
@@ -156,13 +168,15 @@ function ExecutorsTab() {
         <div className="settings-body">
           <div className="section-heading">
             <div><h3>模型绑定</h3><p>每个执行器独立选择模型档案。Codex 只显示 Responses 协议；本地模型不会出现在这里。</p></div>
-            <span className="muted-count">{registry?.bindings.filter((binding) => binding.available).length ?? 0} 个已就绪</span>
+            <span className="muted-count">{registryQuery.isLoading ? "正在检测" : `${readyBindingCount} / ${registry?.bindings.length ?? 7} 个模型与执行器均就绪`}</span>
           </div>
-          {registryQuery.isLoading && <InlineLoading text="正在读取模型绑定" />}
+          {(registryQuery.isLoading || executorsQuery.isLoading) && <InlineLoading text="正在读取模型绑定与执行器状态" />}
           {registry && (
             <div className="binding-list">
               {registry.bindings.map((binding) => {
                 const compatible = registry.profiles.filter((profile) => binding.allowedProtocols.includes(profile.protocol));
+                const health = executorById.get(binding.executorId)?.health ?? null;
+                const status = bindingStatus(binding, health);
                 return (
                   <article key={binding.executorId} className="binding-row">
                     <div className="binding-name">
@@ -181,13 +195,16 @@ function ExecutorsTab() {
                       </select>
                     </label>
                     <div className="binding-effective">
-                      <span className={`status-dot ${binding.available ? "online" : "offline"}`} />
+                      <span className={`status-dot ${status.dot}`} />
                       <div>
                         <strong>{binding.effectiveModel ?? "未选择模型"}</strong>
-                        <small>{binding.effectiveProtocol ? protocolLabel(binding.effectiveProtocol) : "先创建兼容协议的模型档案"}</small>
+                        <small>
+                          {binding.effectiveProtocol ? protocolLabel(binding.effectiveProtocol) : "先创建兼容协议的模型档案"}
+                          {binding.available && health && !health.canRun ? " · 执行器不可用" : ""}
+                        </small>
                       </div>
                     </div>
-                    <span className={`status-chip ${binding.available ? "ok" : "warn"}`}>{binding.available ? "可执行" : binding.issue ?? "未绑定"}</span>
+                    <span className={`status-chip ${status.tone}`} title={status.title}>{status.label}</span>
                   </article>
                 );
               })}
@@ -679,6 +696,35 @@ function DataRow({ name, text }: { name: string; text: string }) {
 
 function protocolLabel(protocol: ModelProtocol): string {
   return PROTOCOLS.find((item) => item.id === protocol)?.label ?? protocol;
+}
+
+type BindingStatus = {
+  tone: "ok" | "warn";
+  dot: "online" | "offline" | "idle";
+  label: string;
+  title: string;
+};
+
+function bindingStatus(binding: ExecutorModelBindingView, health: ExecutorView["health"] | null): BindingStatus {
+  if (!binding.profileId) {
+    return { tone: "warn", dot: "idle", label: "未绑定", title: "还没有为这个执行器选择模型档案" };
+  }
+  if (binding.issue) {
+    return { tone: "warn", dot: "offline", label: binding.issue, title: binding.issue };
+  }
+  if (!health) {
+    return { tone: "warn", dot: "offline", label: "执行器未检测", title: "没有读取到执行器健康状态" };
+  }
+  if (!health.canRun) {
+    const label = health.installState === "missing" ? "执行器未安装" : "执行器不可用";
+    return {
+      tone: "warn",
+      dot: "offline",
+      label,
+      title: health.issues.join("；") || "执行器健康检查未通过"
+    };
+  }
+  return { tone: "ok", dot: "online", label: "可执行", title: "模型档案与执行器都可用" };
 }
 
 function contextModeLabel(mode: ContextSettings["mode"] | undefined): string {
