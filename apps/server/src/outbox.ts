@@ -117,7 +117,7 @@ export class OutboxService {
     });
   }
 
-  submit(id: string): OutboxSubmitResult {
+  async submit(id: string): Promise<OutboxSubmitResult> {
     const draft = this.get(id);
     if (draft.status !== "draft" && draft.status !== "rejected") {
       throw new OutboxError("OUTBOX_DRAFT_LOCKED", "只有草稿或已拒绝的草稿可以提交审批", 409);
@@ -160,7 +160,7 @@ export class OutboxService {
         error: null
       }, runId);
 
-      const approval = this.approvals.request({
+      const approval = await this.approvals.request({
         taskId: task.id,
         runId,
         kind: "outbox.local-write",

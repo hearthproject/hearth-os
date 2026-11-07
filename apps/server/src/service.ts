@@ -2,8 +2,11 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import type {
   ApprovalListItem,
+  ApprovalMode,
   ApprovalRecord,
   ArtifactRecord,
+  ChatMessageRecord,
+  ConversationSettings,
   DesktopCommandRecord,
   DesktopFrameRecord,
   DesktopSessionRecord,
@@ -28,11 +31,13 @@ import type {
   TaskRecord,
   TaskStatus
 } from "@hearth/core";
-import { assertTransition, TASK_STATUS_LABELS, TASK_STATUSES } from "@hearth/core";
+import { assertTransition, defaultConversationSettings, TASK_STATUS_LABELS, TASK_STATUSES } from "@hearth/core";
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate, TEMPLATES } from "@hearth/templates";
 import { resolveRepoPath } from "./config.ts";
 import { EventBus } from "./events.ts";
+import { executorName, resolveExecutorFromEnabled } from "./executors.ts";
+import { buildTaskStatusMessage } from "./task-status-messages.ts";
 
 export interface CreateTaskInput {
   templateId?: string;
@@ -100,9 +105,14 @@ const VIEW_EVENT_TAIL = 200;
 export class HearthService {
   readonly store: HearthStore;
   readonly bus = new EventBus();
+  private contextSink: ((message: ChatMessageRecord) => void) | null = null;
 
   constructor(store: HearthStore) {
     this.store = store;
+  }
+
+  setContextSink(sink: ((message: ChatMessageRecord) => void) | null): void {
+    this.contextSink = sink;
   }
 
   createTask(input: CreateTaskInput): TaskRecord {
@@ -333,6 +343,8 @@ export class HearthService {
   updateTask(taskId: string, patch: Partial<Pick<TaskRecord, "status" | "title" | "goal" | "currentRunId" | "nextAction" | "error" | "resultSummary" | "conversationId" | "executorId" | "taskKind" | "expectedOutputs" | "permissions" | "pendingInput">>, runId?: string): TaskRecord {
     const task = this.requireTask(taskId);
     if (patch.status && patch.status !== task.status) assertTransition(task.status, patch.status);
+    const previousStatus = task.status;
+    const statusChanged = Boolean(patch.status && patch.status !== previousStatus);
     const event = this.store.appendEvent({
       type: "task.updated",
       taskId,
@@ -340,7 +352,63 @@ export class HearthService {
       payload: { ...patch, updatedAt: new Date().toISOString() }
     });
     this.bus.publish(event);
-    return this.requireTask(taskId);
+    const updated = this.requireTask(taskId);
+    if (statusChanged) this.appendTaskStatusMessage(updated, previousStatus);
+    return updated;
+  }
+
+  conversationSettings(conversationId: string | null | undefined): ConversationSettings | null {
+    if (!conversationId) return null;
+    return this.store.getConversation(conversationId)?.settings ?? null;
+  }
+
+  approvalModeForTask(task: TaskRecord): ApprovalMode {
+    return this.conversationSettings(task.conversationId)?.approvalMode ?? "necessary";
+  }
+
+  appendChatMessage(message: ChatMessageRecord): ChatMessageRecord {
+    const stored = this.store.createChatMessage(message);
+    const event = this.store.appendEvent({
+      type: "chat.message.created",
+      taskId: message.taskId,
+      payload: { message: stored, conversationId: message.conversationId }
+    });
+    this.bus.publish(event);
+    try {
+      this.contextSink?.(stored);
+    } catch {
+      // Context capture is best effort and never blocks chat delivery.
+    }
+    return stored;
+  }
+
+  private appendTaskStatusMessage(task: TaskRecord, previousStatus: TaskStatus): void {
+    if (!task.conversationId) return;
+    const conversation = this.store.getConversation(task.conversationId);
+    if (!conversation) return;
+    const approval = task.status === "waiting_approval"
+      ? this.store.listApprovals(task.id).find((item) => item.status === "pending")
+      : null;
+    const runs = this.store.listRuns(task.id);
+    const attempt = task.status === "queued" ? runs.length + 1 : Math.max(runs.length, 1);
+    const content = buildTaskStatusMessage({
+      task,
+      previousStatus,
+      approvalMode: conversation.settings.approvalMode,
+      approvalSummary: approval?.summary ?? task.nextAction,
+      attempt
+    });
+    this.appendChatMessage({
+      id: randomUUID(),
+      conversationId: task.conversationId,
+      role: "assistant",
+      content,
+      taskId: task.id,
+      attachments: [],
+      createdAt: new Date().toISOString(),
+      kind: "task_status",
+      taskStatus: task.status
+    });
   }
 
   createRun(run: RunRecord): RunRecord {
@@ -419,18 +487,28 @@ export class HearthService {
     return updated;
   }
 
-  confirmTaskProposal(id: string): { proposal: TaskProposalRecord; task: TaskRecord } {
+  confirmTaskProposal(
+    id: string,
+    available: Record<ExecutorId, boolean> = { native: true, codex: true, hermes: true }
+  ): { proposal: TaskProposalRecord; task: TaskRecord } {
     const proposal = this.requireProposal(id);
     if (proposal.status !== "pending") throw new Error(`提案状态不能确认：${proposal.status}`);
     if (Date.parse(proposal.expiresAt) <= Date.now()) {
       this.updateTaskProposal(id, { status: "expired", decidedAt: new Date().toISOString() });
       throw new Error("提案已过期，请重新发起");
     }
+    const enabled = this.conversationSettings(proposal.conversationId)?.executorEnabled ?? defaultConversationSettings().executorEnabled;
+    const resolution = resolveExecutorFromEnabled(proposal.executorId, enabled, available);
+    if (!resolution.executorId) {
+      throw new Error("所有执行器都已关闭，请先在对话输入框上方启用一个执行器，再确认任务");
+    }
+    const executorId: ExecutorId = resolution.executorId;
+    const reroutedFrom = resolution.reroutedFrom;
     const task = this.createTask({
       title: proposal.title,
       goal: proposal.goal,
       conversationId: proposal.conversationId,
-      executorId: proposal.executorId,
+      executorId,
       taskKind: proposal.taskKind,
       expectedOutputs: proposal.expectedOutputs,
       permissions: proposal.permissions,
@@ -438,6 +516,19 @@ export class HearthService {
       networkHosts: proposal.permissions.networkHosts
     });
     const updated = this.updateTaskProposal(id, { status: "confirmed", decidedAt: new Date().toISOString() });
+    this.appendChatMessage({
+      id: randomUUID(),
+      conversationId: proposal.conversationId,
+      role: "assistant",
+      content: `任务「${task.title}」已确认并排队。\n\n执行器：${executorName(executorId)}${reroutedFrom
+        ? `\n\n${resolution.reason ?? "原执行器不可用"}，已自动改由 ${executorName(executorId)} 接管。`
+        : ""}`,
+      taskId: task.id,
+      attachments: [],
+      createdAt: new Date().toISOString(),
+      kind: "task_status",
+      taskStatus: "queued"
+    });
     return { proposal: updated, task };
   }
 

@@ -10,6 +10,11 @@ import type {
   BackupRecord,
   ChatMessageRecord,
   ConversationRecord,
+  ConversationSettings,
+  ConversationSettingsPatch,
+  ContextItem,
+  ContextItemPage,
+  ContextSettings,
   DesktopCommandRecord,
   DesktopFrameRecord,
   DesktopSessionRecord,
@@ -18,6 +23,7 @@ import type {
   EffectRecord,
   EffectStatus,
   EventEnvelope,
+  HandoffRecord,
   MemoryConflict,
   MemoryForgetReceipt,
   MemoryRecall,
@@ -35,16 +41,28 @@ import type {
   RunRecord,
   RunStatus,
   RunUsage,
+  ScheduleRecord,
+  ScheduleRunRecord,
+  ScheduleRunStatus,
   SourceConnection,
   SourceItem,
   SyncConflict,
   SyncPeer,
   TaskLease,
+  TaskContextState,
   TaskProposalRecord,
   TaskRecord,
   TaskStatus
 } from "@hearth/core";
-import { APPROVAL_STATUSES, EFFECT_STATUSES, RUN_STATUSES, TASK_STATUSES } from "@hearth/core";
+import {
+  APPROVAL_STATUSES,
+  DEFAULT_CONTEXT_SETTINGS,
+  EFFECT_STATUSES,
+  RUN_STATUSES,
+  TASK_STATUSES,
+  defaultConversationSettings,
+  mergeConversationSettings
+} from "@hearth/core";
 
 export type NewEvent = {
   id?: string;
@@ -70,7 +88,7 @@ export interface RunAggregate {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 6;
+export const CURRENT_SCHEMA_VERSION = 9;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -93,12 +111,13 @@ CREATE TABLE IF NOT EXISTS tasks (
   expected_outputs_json TEXT, permissions_json TEXT, pending_input TEXT
 );
 CREATE TABLE IF NOT EXISTS conversations (
-  id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+  id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  settings_json TEXT
 );
 CREATE TABLE IF NOT EXISTS chat_messages (
   id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, role TEXT NOT NULL,
   content TEXT NOT NULL, task_id TEXT, attachments_json TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL, kind TEXT, task_status TEXT
 );
 CREATE TABLE IF NOT EXISTS runs (
   id TEXT PRIMARY KEY, task_id TEXT NOT NULL, attempt INTEGER NOT NULL, status TEXT NOT NULL,
@@ -240,6 +259,59 @@ CREATE TABLE IF NOT EXISTS memory_forget_receipts (
   reason TEXT NOT NULL, redacted_versions INTEGER NOT NULL, redacted_events INTEGER NOT NULL,
   targets_json TEXT NOT NULL, created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS context_items (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT NOT NULL UNIQUE,
+  conversation_id TEXT,
+  task_id TEXT NOT NULL,
+  run_id TEXT,
+  executor_id TEXT,
+  kind TEXT NOT NULL,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL,
+  content_ref TEXT,
+  sha256 TEXT,
+  tokens INTEGER NOT NULL,
+  sensitivity TEXT NOT NULL,
+  provenance_json TEXT NOT NULL,
+  parent_id TEXT,
+  executor_event_id TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS task_context_state (
+  task_id TEXT PRIMARY KEY,
+  summary TEXT NOT NULL,
+  plan_json TEXT NOT NULL,
+  completed_json TEXT NOT NULL,
+  failed_json TEXT NOT NULL,
+  artifacts_json TEXT NOT NULL,
+  open_questions_json TEXT NOT NULL,
+  last_failure_json TEXT,
+  handoff_count INTEGER NOT NULL,
+  summary_seq INTEGER NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS handoffs (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL,
+  from_run_id TEXT NOT NULL,
+  to_run_id TEXT,
+  from_executor TEXT NOT NULL,
+  to_executor TEXT NOT NULL,
+  status TEXT NOT NULL,
+  reason_code TEXT NOT NULL,
+  diagnosis_json TEXT,
+  packet_json TEXT,
+  context_watermark_seq INTEGER NOT NULL,
+  initiated_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS context_settings (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  settings_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS method_candidates (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, summary TEXT NOT NULL, applicability TEXT NOT NULL,
   steps_json TEXT NOT NULL, source_task_ids_json TEXT NOT NULL, template_id TEXT,
@@ -283,6 +355,18 @@ CREATE TABLE IF NOT EXISTS backup_records (
   id TEXT PRIMARY KEY, kind TEXT NOT NULL, path TEXT NOT NULL, bytes INTEGER NOT NULL,
   sha256 TEXT NOT NULL, created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS scheduled_jobs (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, prompt TEXT NOT NULL, cron TEXT NOT NULL,
+  timezone TEXT NOT NULL, enabled INTEGER NOT NULL, conversation_id TEXT NOT NULL,
+  executor_id TEXT NOT NULL, approval_mode TEXT NOT NULL, task_kind TEXT NOT NULL,
+  next_run_at TEXT, last_run_at TEXT, last_task_id TEXT, last_status TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS scheduled_job_runs (
+  id TEXT PRIMARY KEY, schedule_id TEXT NOT NULL, scheduled_for TEXT NOT NULL,
+  task_id TEXT, status TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  UNIQUE(schedule_id, scheduled_for)
+);
 CREATE INDEX IF NOT EXISTS events_task_idx ON events(task_id, seq);
 CREATE INDEX IF NOT EXISTS runs_task_idx ON runs(task_id, created_at);
 CREATE INDEX IF NOT EXISTS approvals_task_idx ON approvals(task_id, status);
@@ -304,6 +388,11 @@ CREATE INDEX IF NOT EXISTS suggestions_kind_idx ON suggestions(trigger_kind, las
 CREATE INDEX IF NOT EXISTS memories_status_idx ON memories(status, kind, updated_at);
 CREATE INDEX IF NOT EXISTS memories_subject_idx ON memories(subject_key, status);
 CREATE INDEX IF NOT EXISTS memory_recalls_task_idx ON memory_recalls(task_id, created_at);
+CREATE INDEX IF NOT EXISTS context_items_task_idx ON context_items(task_id, seq);
+CREATE INDEX IF NOT EXISTS context_items_conversation_idx ON context_items(conversation_id, seq);
+CREATE INDEX IF NOT EXISTS context_items_run_idx ON context_items(run_id, seq);
+CREATE UNIQUE INDEX IF NOT EXISTS context_items_executor_event_idx ON context_items(run_id, executor_event_id) WHERE executor_event_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS handoffs_task_idx ON handoffs(task_id, created_at);
 CREATE INDEX IF NOT EXISTS memory_forget_receipts_memory_idx ON memory_forget_receipts(memory_id, created_at);
 CREATE INDEX IF NOT EXISTS method_candidates_status_idx ON method_candidates(status, updated_at);
 CREATE INDEX IF NOT EXISTS method_evaluations_method_idx ON method_evaluations(method_id, created_at);
@@ -314,6 +403,8 @@ CREATE INDEX IF NOT EXISTS chat_messages_conversation_idx ON chat_messages(conve
 CREATE INDEX IF NOT EXISTS task_proposals_conversation_idx ON task_proposals(conversation_id, created_at);
 CREATE INDEX IF NOT EXISTS task_proposals_status_idx ON task_proposals(status, expires_at);
 CREATE INDEX IF NOT EXISTS run_checkpoints_run_idx ON run_checkpoints(run_id, seq);
+CREATE INDEX IF NOT EXISTS scheduled_jobs_due_idx ON scheduled_jobs(enabled, next_run_at);
+CREATE INDEX IF NOT EXISTS scheduled_job_runs_schedule_idx ON scheduled_job_runs(schedule_id, scheduled_for);
 `;
 
 export class HearthStore {
@@ -346,8 +437,13 @@ export class HearthStore {
     ensureColumn(this.db, "runs", "executor_id", "TEXT");
     ensureColumn(this.db, "runs", "checkpoint_seq", "INTEGER");
     ensureColumn(this.db, "runs", "budget_json", "TEXT");
+    ensureColumn(this.db, "runs", "parent_run_id", "TEXT");
+    ensureColumn(this.db, "runs", "handoff_id", "TEXT");
     ensureColumn(this.db, "sync_peers", "token_cipher", "TEXT");
     ensureColumn(this.db, "sync_peers", "remote_instance_id", "TEXT");
+    ensureColumn(this.db, "conversations", "settings_json", "TEXT");
+    ensureColumn(this.db, "chat_messages", "kind", "TEXT");
+    ensureColumn(this.db, "chat_messages", "task_status", "TEXT");
     this.db.exec(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION}`);
     this.setMeta("schemaVersion", String(CURRENT_SCHEMA_VERSION));
   }
@@ -521,14 +617,18 @@ export class HearthStore {
     return (this.db.prepare("SELECT * FROM tasks ORDER BY created_at DESC").all() as DbRow[]).map(rowToTask);
   }
 
-  createConversation(title: string): ConversationRecord {
+  createConversation(title: string, settings: ConversationSettings = defaultConversationSettings()): ConversationRecord {
     const now = new Date().toISOString();
     const conversation: ConversationRecord = {
-      id: randomUUID(), title: title.trim() || "新对话", createdAt: now, updatedAt: now
+      id: randomUUID(), title: title.trim() || "新对话", createdAt: now, updatedAt: now,
+      settings: mergeConversationSettings(defaultConversationSettings(), settings)
     };
     this.db.prepare(
-      "INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)"
-    ).run(conversation.id, conversation.title, conversation.createdAt, conversation.updatedAt);
+      "INSERT INTO conversations (id, title, created_at, updated_at, settings_json) VALUES (?, ?, ?, ?, ?)"
+    ).run(
+      conversation.id, conversation.title, conversation.createdAt, conversation.updatedAt,
+      JSON.stringify(conversation.settings)
+    );
     return conversation;
   }
 
@@ -547,6 +647,15 @@ export class HearthStore {
     if (!clean) return this.getConversation(id);
     this.db.prepare("UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?")
       .run(clean, new Date().toISOString(), id);
+    return this.getConversation(id);
+  }
+
+  updateConversationSettings(id: string, patch: ConversationSettingsPatch): ConversationRecord | null {
+    const current = this.getConversation(id);
+    if (!current) return null;
+    const settings = mergeConversationSettings(current.settings, patch);
+    this.db.prepare("UPDATE conversations SET settings_json = ?, updated_at = ? WHERE id = ?")
+      .run(JSON.stringify(settings), new Date().toISOString(), id);
     return this.getConversation(id);
   }
 
@@ -572,11 +681,12 @@ export class HearthStore {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       this.db.prepare(
-        `INSERT INTO chat_messages (id, conversation_id, role, content, task_id, attachments_json, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO chat_messages (id, conversation_id, role, content, task_id, attachments_json, created_at, kind, task_status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         message.id, message.conversationId, message.role, message.content,
-        message.taskId, JSON.stringify(message.attachments), message.createdAt
+        message.taskId, JSON.stringify(message.attachments), message.createdAt,
+        message.kind ?? "text", message.taskStatus ?? null
       );
       this.db.prepare("UPDATE conversations SET updated_at = ? WHERE id = ?")
         .run(message.createdAt, message.conversationId);
@@ -586,6 +696,96 @@ export class HearthStore {
       this.db.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  createSchedule(schedule: ScheduleRecord): ScheduleRecord {
+    this.db.prepare(
+      `INSERT INTO scheduled_jobs (id, name, prompt, cron, timezone, enabled, conversation_id, executor_id,
+         approval_mode, task_kind, next_run_at, last_run_at, last_task_id, last_status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      schedule.id, schedule.name, schedule.prompt, schedule.cron, schedule.timezone,
+      schedule.enabled ? 1 : 0, schedule.conversationId, schedule.executorId, schedule.approvalMode,
+      schedule.taskKind, schedule.nextRunAt, schedule.lastRunAt, schedule.lastTaskId, schedule.lastStatus,
+      schedule.createdAt, schedule.updatedAt
+    );
+    return schedule;
+  }
+
+  listSchedules(): ScheduleRecord[] {
+    return (this.db.prepare("SELECT * FROM scheduled_jobs ORDER BY created_at DESC").all() as DbRow[]).map(rowToSchedule);
+  }
+
+  getSchedule(id: string): ScheduleRecord | null {
+    const row = this.db.prepare("SELECT * FROM scheduled_jobs WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToSchedule(row) : null;
+  }
+
+  updateSchedule(id: string, patch: Partial<Omit<ScheduleRecord, "id" | "createdAt">>): ScheduleRecord | null {
+    const current = this.getSchedule(id);
+    if (!current) return null;
+    const next: ScheduleRecord = { ...current, ...patch, updatedAt: patch.updatedAt ?? new Date().toISOString() };
+    this.db.prepare(
+      `UPDATE scheduled_jobs SET name = ?, prompt = ?, cron = ?, timezone = ?, enabled = ?, conversation_id = ?,
+         executor_id = ?, approval_mode = ?, task_kind = ?, next_run_at = ?, last_run_at = ?, last_task_id = ?,
+         last_status = ?, updated_at = ? WHERE id = ?`
+    ).run(
+      next.name, next.prompt, next.cron, next.timezone, next.enabled ? 1 : 0, next.conversationId,
+      next.executorId, next.approvalMode, next.taskKind, next.nextRunAt, next.lastRunAt, next.lastTaskId,
+      next.lastStatus, next.updatedAt, id
+    );
+    return this.getSchedule(id);
+  }
+
+  deleteSchedule(id: string): boolean {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare("DELETE FROM scheduled_job_runs WHERE schedule_id = ?").run(id);
+      const result = this.db.prepare("DELETE FROM scheduled_jobs WHERE id = ?").run(id);
+      this.db.exec("COMMIT");
+      return Number(result.changes) > 0;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  createScheduleRun(run: ScheduleRunRecord): ScheduleRunRecord | null {
+    const existing = this.db.prepare(
+      "SELECT * FROM scheduled_job_runs WHERE schedule_id = ? AND scheduled_for = ?"
+    ).get(run.scheduleId, run.scheduledFor) as DbRow | undefined;
+    if (existing) return null;
+    this.db.prepare(
+      `INSERT INTO scheduled_job_runs (id, schedule_id, scheduled_for, task_id, status, error, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(run.id, run.scheduleId, run.scheduledFor, run.taskId, run.status, run.error, run.createdAt, run.updatedAt);
+    return run;
+  }
+
+  updateScheduleRun(id: string, patch: Partial<Pick<ScheduleRunRecord, "taskId" | "status" | "error">>): ScheduleRunRecord | null {
+    const current = this.getScheduleRun(id);
+    if (!current) return null;
+    const next = { ...current, ...patch, updatedAt: new Date().toISOString() };
+    this.db.prepare(
+      "UPDATE scheduled_job_runs SET task_id = ?, status = ?, error = ?, updated_at = ? WHERE id = ?"
+    ).run(next.taskId, next.status, next.error, next.updatedAt, id);
+    return next;
+  }
+
+  getScheduleRun(id: string): ScheduleRunRecord | null {
+    const row = this.db.prepare("SELECT * FROM scheduled_job_runs WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToScheduleRun(row) : null;
+  }
+
+  listScheduleRuns(scheduleId: string, limit = 50): ScheduleRunRecord[] {
+    return (this.db.prepare(
+      "SELECT * FROM scheduled_job_runs WHERE schedule_id = ? ORDER BY scheduled_for DESC LIMIT ?"
+    ).all(scheduleId, limit) as DbRow[]).map(rowToScheduleRun);
+  }
+
+  listScheduleRunByTask(taskId: string): ScheduleRunRecord | null {
+    const row = this.db.prepare("SELECT * FROM scheduled_job_runs WHERE task_id = ? LIMIT 1").get(taskId) as DbRow | undefined;
+    return row ? rowToScheduleRun(row) : null;
   }
 
   getRun(id: string): RunRecord | null {
@@ -634,6 +834,194 @@ export class HearthStore {
   latestRunCheckpoint(runId: string): RunCheckpointRecord | null {
     const row = this.db.prepare("SELECT * FROM run_checkpoints WHERE run_id = ? ORDER BY seq DESC LIMIT 1").get(runId) as DbRow | undefined;
     return row ? rowToRunCheckpoint(row) : null;
+  }
+
+  appendContextItem(item: ContextItem): ContextItem {
+    if (item.executorEventId != null && item.runId != null) {
+      const existing = this.db.prepare(
+        "SELECT * FROM context_items WHERE run_id = ? AND executor_event_id = ?"
+      ).get(item.runId, item.executorEventId) as DbRow | undefined;
+      if (existing) return rowToContextItem(existing);
+    }
+    const result = this.db.prepare(
+      `INSERT INTO context_items
+       (id, conversation_id, task_id, run_id, executor_id, kind, role, content,
+        content_ref, sha256, tokens, sensitivity, provenance_json, parent_id,
+        executor_event_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      item.id,
+      item.conversationId,
+      item.taskId,
+      item.runId,
+      item.executorId,
+      item.kind,
+      item.role,
+      item.content,
+      item.contentRef,
+      item.sha256,
+      item.tokens,
+      item.sensitivity,
+      JSON.stringify(item.provenance),
+      item.parentId,
+      item.executorEventId,
+      item.createdAt
+    );
+    const row = this.db.prepare("SELECT * FROM context_items WHERE seq = ?").get(Number(result.lastInsertRowid)) as DbRow | undefined;
+    if (!row) throw new Error("context item insert failed");
+    return rowToContextItem(row);
+  }
+
+  listContextItems(taskId: string, opts: { limit?: number; beforeSeq?: number | null } = {}): ContextItemPage {
+    const limit = Math.max(1, Math.min(opts.limit ?? 100, 1000));
+    const beforeSeq = opts.beforeSeq ?? null;
+    const rows = (beforeSeq == null
+      ? this.db.prepare("SELECT * FROM context_items WHERE task_id = ? ORDER BY seq DESC LIMIT ?").all(taskId, limit)
+      : this.db.prepare("SELECT * FROM context_items WHERE task_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?").all(taskId, beforeSeq, limit)) as DbRow[];
+    const items = rows.map(rowToContextItem);
+    return {
+      items,
+      total: this.countContextItems(taskId),
+      nextBefore: items.length === limit ? items[items.length - 1]?.seq ?? null : null
+    };
+  }
+
+  countContextItems(taskId: string): number {
+    const row = this.db.prepare("SELECT COUNT(*) AS total FROM context_items WHERE task_id = ?").get(taskId) as DbRow | undefined;
+    return row ? Number(row.total) : 0;
+  }
+
+  listContextTaskActivity(): Array<{ taskId: string; latestCreatedAt: string }> {
+    const rows = this.db.prepare(
+      "SELECT task_id, MAX(created_at) AS latest_created_at FROM context_items GROUP BY task_id"
+    ).all() as DbRow[];
+    return rows.map((row) => ({ taskId: String(row.task_id), latestCreatedAt: String(row.latest_created_at) }));
+  }
+
+  getTaskContextState(taskId: string): TaskContextState | null {
+    const row = this.db.prepare("SELECT * FROM task_context_state WHERE task_id = ?").get(taskId) as DbRow | undefined;
+    return row ? rowToTaskContextState(row) : null;
+  }
+
+  upsertTaskContextState(state: TaskContextState): TaskContextState {
+    this.db.prepare(
+      `INSERT INTO task_context_state
+       (task_id, summary, plan_json, completed_json, failed_json, artifacts_json,
+        open_questions_json, last_failure_json, handoff_count, summary_seq, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(task_id) DO UPDATE SET
+         summary=excluded.summary,
+         plan_json=excluded.plan_json,
+         completed_json=excluded.completed_json,
+         failed_json=excluded.failed_json,
+         artifacts_json=excluded.artifacts_json,
+         open_questions_json=excluded.open_questions_json,
+         last_failure_json=excluded.last_failure_json,
+         handoff_count=excluded.handoff_count,
+         summary_seq=excluded.summary_seq,
+         updated_at=excluded.updated_at`
+    ).run(
+      state.taskId,
+      state.summary,
+      JSON.stringify(state.plan),
+      JSON.stringify(state.completed),
+      JSON.stringify(state.failed),
+      JSON.stringify(state.artifacts),
+      JSON.stringify(state.openQuestions),
+      state.lastFailure ? JSON.stringify(state.lastFailure) : null,
+      state.handoffCount,
+      state.summarySeq,
+      state.updatedAt
+    );
+    return state;
+  }
+
+  createHandoff(handoff: HandoffRecord): HandoffRecord {
+    this.db.prepare(
+      `INSERT INTO handoffs
+       (id, task_id, from_run_id, to_run_id, from_executor, to_executor, status,
+        reason_code, diagnosis_json, packet_json, context_watermark_seq, initiated_by,
+        created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      handoff.id,
+      handoff.taskId,
+      handoff.fromRunId,
+      handoff.toRunId,
+      handoff.fromExecutor,
+      handoff.toExecutor,
+      handoff.status,
+      handoff.reasonCode,
+      handoff.diagnosis ? JSON.stringify(handoff.diagnosis) : null,
+      handoff.packet ? JSON.stringify(handoff.packet) : null,
+      handoff.contextWatermarkSeq,
+      handoff.initiatedBy,
+      handoff.createdAt,
+      handoff.updatedAt
+    );
+    return handoff;
+  }
+
+  updateHandoff(id: string, patch: Partial<Pick<HandoffRecord, "toRunId" | "status" | "diagnosis" | "packet" | "updatedAt">>): HandoffRecord | null {
+    const current = this.getHandoff(id);
+    if (!current) return null;
+    const next: HandoffRecord = { ...current, ...patch };
+    this.db.prepare(
+      `UPDATE handoffs SET to_run_id = ?, status = ?, diagnosis_json = ?, packet_json = ?, updated_at = ? WHERE id = ?`
+    ).run(
+      next.toRunId,
+      next.status,
+      next.diagnosis ? JSON.stringify(next.diagnosis) : null,
+      next.packet ? JSON.stringify(next.packet) : null,
+      next.updatedAt,
+      id
+    );
+    return next;
+  }
+
+  getHandoff(id: string): HandoffRecord | null {
+    const row = this.db.prepare("SELECT * FROM handoffs WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToHandoff(row) : null;
+  }
+
+  listHandoffs(taskId: string): HandoffRecord[] {
+    return (this.db.prepare("SELECT * FROM handoffs WHERE task_id = ? ORDER BY created_at ASC").all(taskId) as DbRow[]).map(rowToHandoff);
+  }
+
+  getContextSettings(): ContextSettings {
+    const row = this.db.prepare("SELECT * FROM context_settings WHERE id = 1").get() as DbRow | undefined;
+    if (!row) return { ...DEFAULT_CONTEXT_SETTINGS };
+    try {
+      return { ...DEFAULT_CONTEXT_SETTINGS, ...JSON.parse(String(row.settings_json)), updatedAt: String(row.updated_at) };
+    } catch {
+      return { ...DEFAULT_CONTEXT_SETTINGS };
+    }
+  }
+
+  setContextSettings(settings: ContextSettings): ContextSettings {
+    const updatedAt = settings.updatedAt ?? new Date().toISOString();
+    const next = { ...settings, updatedAt };
+    this.db.prepare(
+      "INSERT INTO context_settings (id, settings_json, updated_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET settings_json=excluded.settings_json, updated_at=excluded.updated_at"
+    ).run(JSON.stringify(next), updatedAt);
+    return next;
+  }
+
+  deleteTaskContext(taskId: string): { deletedItems: number; deletedHandoffs: number } {
+    const result = this.db.prepare("DELETE FROM context_items WHERE task_id = ?").run(taskId);
+    const handoffs = this.db.prepare("DELETE FROM handoffs WHERE task_id = ?").run(taskId);
+    this.db.prepare("DELETE FROM task_context_state WHERE task_id = ?").run(taskId);
+    return { deletedItems: Number(result.changes), deletedHandoffs: Number(handoffs.changes) };
+  }
+
+  listContextContentRefs(taskId: string): string[] {
+    const rows = this.db.prepare("SELECT DISTINCT content_ref FROM context_items WHERE task_id = ? AND content_ref IS NOT NULL").all(taskId) as DbRow[];
+    return rows.map((row) => String(row.content_ref));
+  }
+
+  countContextContentRef(contentRef: string): number {
+    const row = this.db.prepare("SELECT COUNT(*) AS total FROM context_items WHERE content_ref = ?").get(contentRef) as DbRow | undefined;
+    return row ? Number(row.total) : 0;
   }
 
   getApproval(id: string): ApprovalRecord | null {
@@ -1219,8 +1607,23 @@ export class HearthStore {
       case "desktop.frame.updated": return upsertDesktopFrame(this.db, event.payload as DesktopFrameRecord);
       case "desktop.command.created":
       case "desktop.command.updated": return upsertDesktopCommand(this.db, event.payload as DesktopCommandRecord);
+      case "schedule.created":
+      case "schedule.updated":
+      case "schedule.run.created":
+      case "schedule.run.updated":
       case "task.progress":
       case "approval.expired":
+      case "approval.auto_approved":
+      case "chat.message.created":
+      case "context.item.appended":
+      case "context.summary.updated":
+      case "context.settings.updated":
+      case "context.task.deleted":
+      case "execution.diagnosed":
+      case "execution.handoff.prepared":
+      case "execution.handoff.started":
+      case "execution.handoff.completed":
+      case "execution.handoff.failed":
       case "security.kill-switch.updated":
       case "security.audit": return;
       default: throw new Error(`Unknown event type: ${event.type}`);
@@ -1248,7 +1651,7 @@ function upsertTask(db: DatabaseSync, task: TaskRecord): void {
     task.resultSummary ?? null, task.conversationId ?? null,
     task.executorId ?? "codex", task.taskKind ?? "general",
     JSON.stringify(task.expectedOutputs ?? ["result.md"]),
-    JSON.stringify(task.permissions ?? defaultTaskPermissions(task)),
+    task.permissions ? JSON.stringify(task.permissions) : null,
     task.pendingInput ?? null
   );
 }
@@ -1259,7 +1662,7 @@ function updateTask(db: DatabaseSync, taskId: string | null, patch: Record<strin
     title: "title", goal: "goal", status: "status", updatedAt: "updated_at",
     deadline: "deadline", currentRunId: "current_run_id", nextAction: "next_action",
     resultSummary: "result_summary", conversationId: "conversation_id",
-    pendingInput: "pending_input"
+    pendingInput: "pending_input", executorId: "executor_id", taskKind: "task_kind"
   };
   for (const [key, column] of Object.entries(columns)) {
     if (key in patch) db.prepare(`UPDATE tasks SET ${column} = ? WHERE id = ?`).run((patch[key] as SQLInputValue) ?? null, taskId);
@@ -1280,14 +1683,16 @@ function updateTask(db: DatabaseSync, taskId: string | null, patch: Record<strin
 
 function insertRun(db: DatabaseSync, run: RunRecord): void {
   db.prepare(
-    `INSERT INTO runs (id, task_id, attempt, status, thread_id, workspace, started_at, ended_at, failure_json, usage_json, lease_epoch, created_at, executor_id, checkpoint_seq, budget_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO runs (id, task_id, attempt, status, thread_id, workspace, started_at, ended_at, failure_json, usage_json, lease_epoch, created_at, executor_id, checkpoint_seq, budget_json, parent_run_id, handoff_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     run.id, run.taskId, run.attempt, run.status, run.threadId, run.workspace,
     run.startedAt, run.endedAt, run.failure ? JSON.stringify(run.failure) : null,
     run.usage ? JSON.stringify(run.usage) : null, run.leaseEpoch, run.createdAt,
     run.executorId ?? "codex", run.checkpointSeq ?? 0,
-    run.budget ? JSON.stringify(run.budget) : null
+    run.budget ? JSON.stringify(run.budget) : null,
+    run.parentRunId ?? null,
+    run.handoffId ?? null
   );
 }
 
@@ -1295,7 +1700,8 @@ function updateRun(db: DatabaseSync, runId: string | null, patch: Record<string,
   if (!runId) throw new Error("run.updated requires runId");
   const columns: Record<string, string> = {
     status: "status", threadId: "thread_id", startedAt: "started_at", endedAt: "ended_at",
-    executorId: "executor_id", checkpointSeq: "checkpoint_seq"
+    executorId: "executor_id", checkpointSeq: "checkpoint_seq",
+    parentRunId: "parent_run_id", handoffId: "handoff_id"
   };
   for (const [key, column] of Object.entries(columns)) {
     if (key in patch) db.prepare(`UPDATE runs SET ${column} = ? WHERE id = ?`).run((patch[key] as SQLInputValue) ?? null, runId);
@@ -1565,6 +1971,7 @@ function rowToEvent(row: DbRow): EventEnvelope {
 
 function rowToTask(row: DbRow): TaskRecord {
   const networkHosts: string[] = JSON.parse(String(row.network_hosts_json));
+  const permissions = normalizeTaskPermissions(row.permissions_json);
   return {
     id: String(row.id), templateId: row.template_id == null ? null : String(row.template_id),
     title: String(row.title), goal: String(row.goal), status: String(row.status) as TaskRecord["status"],
@@ -1580,9 +1987,7 @@ function rowToTask(row: DbRow): TaskRecord {
     executorId: (row.executor_id == null ? "codex" : String(row.executor_id)) as NonNullable<TaskRecord["executorId"]>,
     taskKind: (row.task_kind == null ? "general" : String(row.task_kind)) as NonNullable<TaskRecord["taskKind"]>,
     expectedOutputs: row.expected_outputs_json == null ? ["result.md"] : JSON.parse(String(row.expected_outputs_json)),
-    permissions: row.permissions_json == null
-      ? { readRoots: [], writeRoots: [], networkHosts, tools: [] }
-      : JSON.parse(String(row.permissions_json)),
+    ...(permissions ? { permissions } : {}),
     pendingInput: row.pending_input == null ? null : String(row.pending_input)
   };
 }
@@ -1590,7 +1995,44 @@ function rowToTask(row: DbRow): TaskRecord {
 function rowToConversation(row: DbRow): ConversationRecord {
   return {
     id: String(row.id), title: String(row.title),
-    createdAt: String(row.created_at), updatedAt: String(row.updated_at)
+    createdAt: String(row.created_at), updatedAt: String(row.updated_at),
+    settings: row.settings_json == null
+      ? defaultConversationSettings()
+      : mergeConversationSettings(defaultConversationSettings(), JSON.parse(String(row.settings_json)))
+  };
+}
+
+function rowToSchedule(row: DbRow): ScheduleRecord {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    prompt: String(row.prompt),
+    cron: String(row.cron),
+    timezone: String(row.timezone),
+    enabled: Number(row.enabled) === 1,
+    conversationId: String(row.conversation_id),
+    executorId: String(row.executor_id) as ScheduleRecord["executorId"],
+    approvalMode: String(row.approval_mode) as ScheduleRecord["approvalMode"],
+    taskKind: String(row.task_kind) as ScheduleRecord["taskKind"],
+    nextRunAt: row.next_run_at == null ? null : String(row.next_run_at),
+    lastRunAt: row.last_run_at == null ? null : String(row.last_run_at),
+    lastTaskId: row.last_task_id == null ? null : String(row.last_task_id),
+    lastStatus: row.last_status == null ? null : String(row.last_status) as ScheduleRunStatus,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
+  };
+}
+
+function rowToScheduleRun(row: DbRow): ScheduleRunRecord {
+  return {
+    id: String(row.id),
+    scheduleId: String(row.schedule_id),
+    scheduledFor: String(row.scheduled_for),
+    taskId: row.task_id == null ? null : String(row.task_id),
+    status: String(row.status) as ScheduleRunStatus,
+    error: row.error == null ? null : String(row.error),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
   };
 }
 
@@ -1599,7 +2041,9 @@ function rowToChatMessage(row: DbRow): ChatMessageRecord {
     id: String(row.id), conversationId: String(row.conversation_id),
     role: String(row.role) as ChatMessageRecord["role"], content: String(row.content),
     taskId: row.task_id == null ? null : String(row.task_id),
-    attachments: JSON.parse(String(row.attachments_json)), createdAt: String(row.created_at)
+    attachments: JSON.parse(String(row.attachments_json)), createdAt: String(row.created_at),
+    kind: row.kind === "task_status" ? "task_status" : "text",
+    taskStatus: row.task_status == null ? null : String(row.task_status) as Exclude<ChatMessageRecord["taskStatus"], undefined>
   };
 }
 
@@ -1617,7 +2061,9 @@ function rowToRun(row: DbRow): RunRecord {
     createdAt: String(row.created_at),
     executorId: (row.executor_id == null ? "codex" : String(row.executor_id)) as NonNullable<RunRecord["executorId"]>,
     checkpointSeq: row.checkpoint_seq == null ? 0 : Number(row.checkpoint_seq),
-    ...(row.budget_json == null ? {} : { budget: JSON.parse(String(row.budget_json)) as NonNullable<RunRecord["budget"]> })
+    ...(row.budget_json == null ? {} : { budget: JSON.parse(String(row.budget_json)) as NonNullable<RunRecord["budget"]> }),
+    parentRunId: row.parent_run_id == null ? null : String(row.parent_run_id),
+    handoffId: row.handoff_id == null ? null : String(row.handoff_id)
   };
 }
 
@@ -1646,8 +2092,69 @@ function rowToRunCheckpoint(row: DbRow): RunCheckpointRecord {
   };
 }
 
-function defaultTaskPermissions(task: TaskRecord): NonNullable<TaskRecord["permissions"]> {
-  return { readRoots: [], writeRoots: [], networkHosts: task.networkHosts, tools: [] };
+function rowToContextItem(row: DbRow): ContextItem {
+  return {
+    seq: Number(row.seq),
+    id: String(row.id),
+    conversationId: row.conversation_id == null ? null : String(row.conversation_id),
+    taskId: String(row.task_id),
+    runId: row.run_id == null ? null : String(row.run_id),
+    executorId: row.executor_id == null ? null : String(row.executor_id) as ContextItem["executorId"],
+    kind: String(row.kind) as ContextItem["kind"],
+    role: String(row.role) as ContextItem["role"],
+    content: String(row.content),
+    contentRef: row.content_ref == null ? null : String(row.content_ref),
+    sha256: row.sha256 == null ? null : String(row.sha256),
+    tokens: Number(row.tokens),
+    sensitivity: String(row.sensitivity) as ContextItem["sensitivity"],
+    provenance: JSON.parse(String(row.provenance_json)),
+    parentId: row.parent_id == null ? null : String(row.parent_id),
+    executorEventId: row.executor_event_id == null ? null : String(row.executor_event_id),
+    createdAt: String(row.created_at)
+  };
+}
+
+function rowToTaskContextState(row: DbRow): TaskContextState {
+  return {
+    taskId: String(row.task_id),
+    summary: String(row.summary),
+    plan: JSON.parse(String(row.plan_json)),
+    completed: JSON.parse(String(row.completed_json)),
+    failed: JSON.parse(String(row.failed_json)),
+    artifacts: JSON.parse(String(row.artifacts_json)),
+    openQuestions: JSON.parse(String(row.open_questions_json)),
+    lastFailure: row.last_failure_json == null ? null : JSON.parse(String(row.last_failure_json)),
+    handoffCount: Number(row.handoff_count),
+    summarySeq: Number(row.summary_seq),
+    updatedAt: String(row.updated_at)
+  };
+}
+
+function rowToHandoff(row: DbRow): HandoffRecord {
+  return {
+    id: String(row.id),
+    taskId: String(row.task_id),
+    fromRunId: String(row.from_run_id),
+    toRunId: row.to_run_id == null ? null : String(row.to_run_id),
+    fromExecutor: String(row.from_executor) as HandoffRecord["fromExecutor"],
+    toExecutor: String(row.to_executor) as HandoffRecord["toExecutor"],
+    status: String(row.status) as HandoffRecord["status"],
+    reasonCode: String(row.reason_code) as HandoffRecord["reasonCode"],
+    diagnosis: row.diagnosis_json == null ? null : JSON.parse(String(row.diagnosis_json)),
+    packet: row.packet_json == null ? null : JSON.parse(String(row.packet_json)),
+    contextWatermarkSeq: Number(row.context_watermark_seq),
+    initiatedBy: String(row.initiated_by) as HandoffRecord["initiatedBy"],
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
+  };
+}
+
+function normalizeTaskPermissions(raw: unknown): TaskRecord["permissions"] {
+  if (raw == null) return undefined;
+  const parsed = JSON.parse(String(raw)) as NonNullable<TaskRecord["permissions"]>;
+  const hasRoots = parsed.readRoots.length > 0 || parsed.writeRoots.length > 0;
+  if (!hasRoots && parsed.tools.length === 0) return undefined;
+  return parsed;
 }
 
 function rowToApproval(row: DbRow): ApprovalRecord {

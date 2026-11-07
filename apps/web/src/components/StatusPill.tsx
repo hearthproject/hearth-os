@@ -36,6 +36,7 @@ import {
   SOURCE_STATUS_LABELS,
   TASK_STATUS_LABELS
 } from "../lib/labels.ts";
+import { TaskStatusIcon } from "./TaskStatusIcon.tsx";
 
 type Tone = "neutral" | "active" | "risk" | "done";
 
@@ -80,7 +81,12 @@ const RUN_TONE: Record<RunRecord["status"], Tone> = {
 };
 
 export function StatusPill({ status }: { status: TaskStatus }) {
-  return <StateLabel tone={TASK_TONE[status]} icon={TASK_SHAPE[status]} spin={status === "running"} label={TASK_STATUS_LABELS[status]} />;
+  return (
+    <span className={`status-pill tone-${TASK_TONE[status]}`}>
+      <TaskStatusIcon status={status} />
+      {TASK_STATUS_LABELS[status]}
+    </span>
+  );
 }
 
 export function RunStatusTag({ status }: { status: RunRecord["status"] }) {

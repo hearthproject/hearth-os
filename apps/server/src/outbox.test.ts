@@ -43,7 +43,7 @@ describe("outbox service", () => {
       body: "The local outbox does not send mail."
     });
 
-    const submitted = outbox.submit(draft.id);
+    const submitted = await outbox.submit(draft.id);
     expect(submitted.draft.status).toBe("pending_approval");
     expect(submitted.approval.kind).toBe("outbox.local-write");
     expect(submitted.approval.target.draftId).toBe(draft.id);
@@ -64,12 +64,12 @@ describe("outbox service", () => {
     expect(editable.approvalId).toBeNull();
   });
 
-  it("requires a recipient, subject, and body before approval", () => {
+  it("requires a recipient, subject, and body before approval", async () => {
     const draft = outbox.create({ subject: "Incomplete" });
-    expect(() => outbox.submit(draft.id)).toThrowError(expect.objectContaining({ code: "OUTBOX_RECIPIENT_REQUIRED" }));
+    await expect(outbox.submit(draft.id)).rejects.toMatchObject({ code: "OUTBOX_RECIPIENT_REQUIRED" });
 
     const withRecipient = outbox.update(draft.id, { to: ["reviewer@example.test"] });
     expect(withRecipient.status).toBe("draft");
-    expect(() => outbox.submit(draft.id)).toThrowError(expect.objectContaining({ code: "OUTBOX_BODY_REQUIRED" }));
+    await expect(outbox.submit(draft.id)).rejects.toMatchObject({ code: "OUTBOX_BODY_REQUIRED" });
   });
 });

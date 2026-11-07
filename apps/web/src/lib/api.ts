@@ -4,9 +4,14 @@ import type {
   AttachmentUploadResult,
   ChatAttachment,
   CodexProbeResponse,
+  ConfirmHandoffResponse,
+  ContextMetricsResponse,
+  ContextSettingsPatch,
+  ContextSettingsResponse,
   ConversationDetail,
   ConversationListItem,
   ConversationRecord,
+  ConversationSettingsPatch,
   ArtifactListItem,
   BackupRestoreResult,
   BackupSnapshot,
@@ -17,8 +22,11 @@ import type {
   DesktopSessionView,
   DeviceCapabilityKind,
   DeviceView,
+  ExecutorSettingsPatch,
+  ExecutorSettingsResponse,
   EventWindow,
   HealthResponse,
+  HermesProbeResponse,
   MaintenanceSnapshot,
   CreateMemoryRequest,
   CreateMethodRequest,
@@ -40,6 +48,11 @@ import type {
   ProactiveSuggestion,
   RunListItem,
   RunManifest,
+  ScheduleInput,
+  ScheduleRecord,
+  ScheduleRunRecord,
+  ScheduleRunSnapshot,
+  ScheduleSnapshot,
   SecuritySnapshot,
   SourceConnection,
   SourceItem,
@@ -52,6 +65,8 @@ import type {
   SyncPullResult,
   SyncSnapshot,
   SystemStatus,
+  TaskContextResponse,
+  TaskHandoffsResponse,
   TaskListItem,
   TaskProposalRecord,
   TaskRecord,
@@ -64,6 +79,7 @@ export interface ChatStreamBody {
   message?: string;
   attachments?: ChatAttachment[];
   url?: string;
+  settings?: ConversationSettingsPatch;
 }
 
 export interface ChatStreamHandlers {
@@ -101,14 +117,19 @@ function query(params: Record<string, string | number | boolean | undefined>): s
 export const api = {
   conversations: () => request<{ conversations: ConversationListItem[] }>("/api/conversations"),
   conversation: (id: string) => request<ConversationDetail>(`/api/conversations/${encodeURIComponent(id)}`),
-  createConversation: (title?: string) => request<ConversationRecord>("/api/conversations", {
+  createConversation: (title?: string, settings?: ConversationSettingsPatch) => request<ConversationRecord>("/api/conversations", {
     method: "POST",
-    body: JSON.stringify(title ? { title } : {})
+    body: JSON.stringify({ ...(title ? { title } : {}), ...(settings ? { settings } : {}) })
   }),
   renameConversation: (id: string, title: string) => request<ConversationRecord>(`/api/conversations/${encodeURIComponent(id)}`, {
     method: "PATCH",
     body: JSON.stringify({ title })
   }),
+  updateConversationSettings: (id: string, settings: ConversationSettingsPatch) =>
+    request<ConversationRecord>(`/api/conversations/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ settings })
+    }),
   deleteConversation: (id: string) => request<void>(`/api/conversations/${encodeURIComponent(id)}`, { method: "DELETE" }),
   modelSettings: () => request<ModelSettingsResponse>("/api/model-settings"),
   saveModelSettings: (input: {
@@ -127,6 +148,24 @@ export const api = {
   testModel: (input: { providerId?: string; providerName?: string; protocol?: ModelProtocol; baseUrl?: string; model?: string; apiKey?: string }) =>
     request<ModelTestResponse>("/api/model-settings/test", { method: "POST", body: JSON.stringify(input) }),
   probeCodex: () => request<CodexProbeResponse>("/api/codex/probe", { method: "POST" }),
+  executorSettings: () => request<ExecutorSettingsResponse>("/api/executor-settings"),
+  saveExecutorSettings: (input: ExecutorSettingsPatch) => request<ExecutorSettingsResponse>("/api/executor-settings", {
+    method: "PUT",
+    body: JSON.stringify(input)
+  }),
+  probeHermes: () => request<HermesProbeResponse>("/api/hermes/probe", { method: "POST" }),
+  schedules: () => request<ScheduleSnapshot>("/api/schedules"),
+  createSchedule: (input: ScheduleInput) => request<ScheduleRecord>("/api/schedules", {
+    method: "POST",
+    body: JSON.stringify(input)
+  }),
+  updateSchedule: (id: string, input: Partial<ScheduleInput>) => request<ScheduleRecord>(`/api/schedules/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  }),
+  deleteSchedule: (id: string) => request<void>(`/api/schedules/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  runSchedule: (id: string) => request<ScheduleRunRecord>(`/api/schedules/${encodeURIComponent(id)}/run`, { method: "POST" }),
+  scheduleRuns: (id: string) => request<ScheduleRunSnapshot>(`/api/schedules/${encodeURIComponent(id)}/runs`),
   uploadAttachments: async (files: File[]): Promise<ChatAttachment[]> => {
     const form = new FormData();
     for (const file of files) form.append("file", file, file.name);
@@ -282,6 +321,21 @@ export const api = {
   tasks: () => request<{ tasks: TaskListItem[] }>("/api/tasks"),
   artifacts: () => request<{ artifacts: ArtifactListItem[] }>("/api/artifacts"),
   task: (id: string) => request<TaskView>(`/api/tasks/${encodeURIComponent(id)}`),
+  taskContext: (id: string, params: { limit?: number; before?: number } = {}) =>
+    request<TaskContextResponse>(`/api/tasks/${encodeURIComponent(id)}/context${query(params)}`),
+  taskHandoffs: (id: string) => request<TaskHandoffsResponse>(`/api/tasks/${encodeURIComponent(id)}/handoffs`),
+  confirmHandoff: (id: string, executorId: "native" | "codex" | "hermes") =>
+    request<ConfirmHandoffResponse>(`/api/tasks/${encodeURIComponent(id)}/handoff`, {
+      method: "POST",
+      body: JSON.stringify({ executorId })
+    }),
+  deleteTaskContext: (id: string) => request<{ taskId: string; deletedItems: number; deletedBlobs: number; deletedHandoffs: number; createdAt: string }>(`/api/tasks/${encodeURIComponent(id)}/context`, { method: "DELETE" }),
+  contextSettings: () => request<ContextSettingsResponse>("/api/context/settings"),
+  contextMetrics: () => request<ContextMetricsResponse>("/api/context/metrics"),
+  saveContextSettings: (patch: ContextSettingsPatch) => request<ContextSettingsResponse>("/api/context/settings", {
+    method: "PATCH",
+    body: JSON.stringify(patch)
+  }),
   stats: () => request<StatsSnapshot>("/api/stats"),
   runs: (params: { taskId?: string; status?: string; limit?: number; offset?: number } = {}) =>
     request<{ runs: RunListItem[]; total: number }>(`/api/runs${query(params)}`),
@@ -364,11 +418,11 @@ export const api = {
   }
 };
 
-export function subscribeToEvents(onEvent: () => void): () => void {
+export function subscribeToEvents(onEvent: (event: string) => void): () => void {
   const source = new EventSource("/api/events");
-  source.onmessage = onEvent;
+  source.onmessage = () => onEvent("message");
   const eventNames = [
-    "task.created", "task.updated", "task.progress", "run.created", "run.updated",
+    "task.created", "task.updated", "task.progress", "chat.message.created", "run.created", "run.updated",
     "approval.created", "approval.updated", "artifact.published", "effect.created", "effect.updated",
     "source.created", "source.updated", "source.item.updated", "source.cleared",
     "proactive.settings.updated", "suggestion.created", "suggestion.updated", "suggestion.event",
@@ -377,12 +431,15 @@ export function subscribeToEvents(onEvent: () => void): () => void {
     "method.candidate.created", "method.candidate.updated", "method.evaluation.recorded", "method.trial.recorded",
     "sync.peer.created", "sync.peer.updated", "sync.conflict.created", "sync.conflict.updated",
     "security.kill-switch.updated", "security.audit",
+    "context.item.appended", "context.summary.updated", "context.settings.updated", "context.task.deleted",
+    "execution.diagnosed", "execution.handoff.prepared", "execution.handoff.started", "execution.handoff.completed", "execution.handoff.failed",
     "outbox.created", "outbox.updated",
+    "schedule.created", "schedule.updated", "schedule.run.created", "schedule.run.updated",
     "device.paired", "device.updated", "device.pairing-requested", "device.pairing-updated",
     "desktop.session.created", "desktop.session.updated", "desktop.frame.updated",
     "desktop.command.created", "desktop.command.updated"
   ];
-  for (const name of eventNames) source.addEventListener(name, onEvent);
+  for (const name of eventNames) source.addEventListener(name, () => onEvent(name));
   return () => source.close();
 }
 

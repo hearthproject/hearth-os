@@ -2,17 +2,23 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  Bot,
   CheckCircle2,
+  Cpu,
   KeyRound,
   Loader2,
   PlugZap,
   RefreshCw,
   Save,
+  ShieldAlert,
+  ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
   Trash2
 } from "lucide-react";
 import { api } from "../lib/api.ts";
-import type { CodexProbeResponse, ModelProtocol, ModelProviderPreset } from "../lib/types.ts";
+import { formatDuration, formatNumber } from "../lib/format.ts";
+import type { CodexProbeResponse, ContextSettings, ExecutorSettingsView, HermesProbeResponse, ModelProtocol, ModelProviderPreset } from "../lib/types.ts";
 
 interface ModelForm {
   providerId: string;
@@ -43,11 +49,21 @@ export function SettingsPage() {
   const queryClient = useQueryClient();
   const settingsQuery = useQuery({ queryKey: ["modelSettings"], queryFn: api.modelSettings });
   const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 20_000 });
+  const executorQuery = useQuery({ queryKey: ["executorSettings"], queryFn: api.executorSettings });
+  const contextQuery = useQuery({ queryKey: ["contextSettings"], queryFn: api.contextSettings });
+  const contextMetricsQuery = useQuery({ queryKey: ["contextMetrics"], queryFn: api.contextMetrics, refetchInterval: 30_000 });
   const [form, setForm] = useState<ModelForm>(EMPTY_FORM);
   const [busy, setBusy] = useState<"save" | "test" | "models" | "probe" | "refresh" | null>(null);
   const [notice, setNotice] = useState<{ tone: "ok" | "error" | "info"; text: string } | null>(null);
   const [probe, setProbe] = useState<CodexProbeResponse | null>(null);
+  const [hermesProbe, setHermesProbe] = useState<HermesProbeResponse | null>(null);
+  const [executorForm, setExecutorForm] = useState<ExecutorSettingsView | null>(null);
+  const [executorNotice, setExecutorNotice] = useState<{ tone: "ok" | "error" | "info"; text: string } | null>(null);
   const [models, setModels] = useState<string[]>([]);
+  const [contextForm, setContextForm] = useState<ContextSettings | null>(null);
+  const [contextNotice, setContextNotice] = useState<{ tone: "ok" | "error" | "info"; text: string } | null>(null);
+  const [contextBusy, setContextBusy] = useState(false);
+  const [cleanupTaskId, setCleanupTaskId] = useState("");
   const initialized = useRef(false);
 
   const settings = settingsQuery.data?.settings;
@@ -55,6 +71,22 @@ export function SettingsPage() {
   const configured = settingsQuery.data?.configured ?? false;
   const codex = healthQuery.data?.codex;
   const chatModel = healthQuery.data?.chatModel;
+  const executorSettings = executorQuery.data?.settings;
+  const hermes = executorQuery.data?.hermes;
+  const executorInitialized = useRef(false);
+  const contextInitialized = useRef(false);
+
+  useEffect(() => {
+    if (!contextQuery.data?.settings || contextInitialized.current) return;
+    contextInitialized.current = true;
+    setContextForm(contextQuery.data.settings);
+  }, [contextQuery.data]);
+
+  useEffect(() => {
+    if (!executorSettings || executorInitialized.current) return;
+    executorInitialized.current = true;
+    setExecutorForm(executorSettings);
+  }, [executorSettings]);
 
   useEffect(() => {
     if (!settings || initialized.current) return;
@@ -187,6 +219,42 @@ export function SettingsPage() {
     }
   }
 
+  async function saveExecutorSettings() {
+    if (!executorForm) return;
+    setBusy("save");
+    setExecutorNotice(null);
+    try {
+      const result = await api.saveExecutorSettings({
+        defaultApprovalMode: executorForm.defaultApprovalMode,
+        concurrency: executorForm.concurrency,
+        hermesCommand: executorForm.hermesCommand
+      });
+      setExecutorForm(result.settings);
+      setExecutorNotice({ tone: "ok", text: "执行器与权限设置已保存，只影响之后新建的对话。" });
+      await queryClient.invalidateQueries({ queryKey: ["executorSettings"] });
+      await queryClient.invalidateQueries({ queryKey: ["health"] });
+    } catch (error) {
+      setExecutorNotice({ tone: "error", text: error instanceof Error ? error.message : "保存失败" });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function probeHermes() {
+    setBusy("probe");
+    setHermesProbe(null);
+    try {
+      const result = await api.probeHermes();
+      setHermesProbe(result);
+      await queryClient.invalidateQueries({ queryKey: ["executorSettings"] });
+      await queryClient.invalidateQueries({ queryKey: ["health"] });
+    } catch (error) {
+      setExecutorNotice({ tone: "error", text: error instanceof Error ? error.message : "Hermes 检测失败" });
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function refreshHealth() {
     setBusy("refresh");
     try {
@@ -196,24 +264,81 @@ export function SettingsPage() {
     }
   }
 
+  function updateConcurrency(id: "native" | "codex" | "hermes", value: string) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    const clamped = Math.max(1, Math.min(4, Math.round(parsed)));
+    setExecutorForm((prev) => (prev ? { ...prev, concurrency: { ...prev.concurrency, [id]: clamped } } : prev));
+  }
+
+  async function saveContextSettings() {
+    if (!contextForm) return;
+    setContextBusy(true);
+    setContextNotice(null);
+    try {
+      const result = await api.saveContextSettings({
+        mode: contextForm.mode,
+        maxHandoffs: contextForm.maxHandoffs,
+        maxSameExecutorRetries: contextForm.maxSameExecutorRetries,
+        retentionDays: contextForm.retentionDays,
+        maxInlineBytes: contextForm.maxInlineBytes,
+        projectionTokenBudget: contextForm.projectionTokenBudget,
+        summarizeAfterTokens: contextForm.summarizeAfterTokens,
+        autoHandoffRisk: contextForm.autoHandoffRisk,
+        allowCodexNetwork: contextForm.allowCodexNetwork
+      });
+      setContextForm(result.settings);
+      setContextNotice({ tone: "ok", text: "上下文与接管设置已保存，对之后的运行生效。" });
+      await queryClient.invalidateQueries({ queryKey: ["contextSettings"] });
+    } catch (error) {
+      setContextNotice({ tone: "error", text: error instanceof Error ? error.message : "保存失败" });
+    } finally {
+      setContextBusy(false);
+    }
+  }
+
+  async function cleanupTaskContext() {
+    const taskId = cleanupTaskId.trim();
+    if (!taskId) {
+      setContextNotice({ tone: "info", text: "请填写要清理的任务 ID。" });
+      return;
+    }
+    if (!window.confirm("确定删除这个任务的上下文、摘要、接管记录和 blob？此操作不可撤销。")) return;
+    setContextBusy(true);
+    setContextNotice(null);
+    try {
+      const receipt = await api.deleteTaskContext(taskId);
+      setContextNotice({ tone: "ok", text: `已删除 ${receipt.deletedItems} 条上下文、${receipt.deletedHandoffs} 条接管记录、${receipt.deletedBlobs} 个 blob。` });
+      setCleanupTaskId("");
+    } catch (error) {
+      setContextNotice({ tone: "error", text: error instanceof Error ? error.message : "清理失败" });
+    } finally {
+      setContextBusy(false);
+    }
+  }
+
   return (
     <div className="page settings-page">
       <div className="page-head">
         <div>
           <h1>设置</h1>
-          <p className="page-meta">聊天模型和 Codex 执行器分开配置，Key 只保存在本机。</p>
+          <p className="page-meta">执行器开关与权限在对话输入框上方调整；这里只配置模型连接，Key 只保存在本机。</p>
         </div>
       </div>
 
       <section className="panel settings-section">
-        <div className="panel-head">
-          <h2>对话模型</h2>
-          <span className={`status-chip ${configured ? "ok" : "warn"}`}>
-            <span className={`status-dot ${configured ? "online" : "offline"}`} />
-            {configured ? "已接入" : "未完成"}
-          </span>
-        </div>
-        <div className="settings-body">
+        <details className="settings-fold">
+          <summary className="settings-fold-summary">
+            <div className="settings-fold-copy">
+              <strong>对话模型</strong>
+              <span>{settings ? `${settings.providerName} · ${settings.model || "未选择模型"}` : "读取本机配置中"}</span>
+            </div>
+            <span className={`status-chip ${configured ? "ok" : "warn"}`}>
+              <span className={`status-dot ${configured ? "online" : "offline"}`} />
+              {configured ? "已接入" : "未完成"}
+            </span>
+          </summary>
+          <div className="settings-body">
           <p className="settings-lead">选择服务商并填入 Key。模型名可以直接从服务商拉取。</p>
 
           <div className="provider-grid compact">
@@ -284,18 +409,23 @@ export function SettingsPage() {
           </div>
           {notice && <Notice tone={notice.tone} text={notice.text} />}
           <p className="settings-hint"><KeyRound size={13} /> Key 保存在本机 <code>.hearth/model-settings.json</code>，接口只返回掩码。</p>
-        </div>
+          </div>
+        </details>
       </section>
 
       <section className="panel settings-section">
-        <div className="panel-head">
-          <h2>Codex 执行器</h2>
-          <span className={`status-chip ${codex?.canRun ? "ok" : "warn"}`}>
-            <span className={`status-dot ${codex?.canRun ? "online" : "offline"}`} />
-            {codex?.canRun ? "可以执行任务" : "未连接"}
-          </span>
-        </div>
-        <div className="settings-body">
+        <details className="settings-fold">
+          <summary className="settings-fold-summary">
+            <div className="settings-fold-copy">
+              <strong>Codex 执行器</strong>
+              <span>{codex ? `${codex.providerName} · ${codex.model ?? "默认模型"}` : "读取本机配置中"}</span>
+            </div>
+            <span className={`status-chip ${codex?.canRun ? "ok" : "warn"}`}>
+              <span className={`status-dot ${codex?.canRun ? "online" : "offline"}`} />
+              {codex?.canRun ? "可以执行任务" : "未连接"}
+            </span>
+          </summary>
+          <div className="settings-body">
           <div className="codex-summary">
             <span className={`status-dot ${codex?.canRun ? "online" : "offline"}`} />
             <div>
@@ -348,7 +478,173 @@ export function SettingsPage() {
             )}
           </details>
           <p className="settings-hint">修改 <code>config.toml</code> 或环境变量后，点重新检测即可。</p>
-        </div>
+          </div>
+        </details>
+      </section>
+
+      <section className="panel settings-section">
+        <details className="settings-fold">
+          <summary className="settings-fold-summary">
+            <div className="settings-fold-copy">
+              <strong>执行器与权限</strong>
+              <span>默认权限与并行数 · Hermes 命令路径</span>
+            </div>
+            <span className={`status-chip ${executorForm?.defaultApprovalMode === "full" ? "warn" : "ok"}`}>
+              {executorForm?.defaultApprovalMode === "full" ? <ShieldAlert size={13} /> : <ShieldCheck size={13} />}
+              {executorForm?.defaultApprovalMode === "full" ? "完全权限" : "必要审批"}
+            </span>
+          </summary>
+          <div className="settings-body">
+            <p className="settings-lead">这里的默认值只影响之后新建的对话；已有对话保持自己的设置。</p>
+            <div className="form-grid">
+              <label>
+                <span>新对话默认权限</span>
+                <select
+                  value={executorForm?.defaultApprovalMode ?? "necessary"}
+                  onChange={(event) => setExecutorForm((prev) => (prev ? { ...prev, defaultApprovalMode: event.target.value as "necessary" | "full" } : prev))}
+                >
+                  <option value="necessary">必要审批</option>
+                  <option value="full">完全权限（警示）</option>
+                </select>
+              </label>
+              <label>
+                <span>Hermes 命令</span>
+                <div className="input-with-action">
+                  <input
+                    value={executorForm?.hermesCommand ?? "hermes"}
+                    onChange={(event) => setExecutorForm((prev) => (prev ? { ...prev, hermesCommand: event.target.value } : prev))}
+                    placeholder="hermes"
+                    spellCheck={false}
+                  />
+                  <button type="button" className="ghost-button compact" onClick={() => void probeHermes()} disabled={busy !== null}>
+                    {busy === "probe" ? <Loader2 size={14} className="spin" /> : <Bot size={14} />} 检测
+                  </button>
+                </div>
+              </label>
+            </div>
+            <div className="concurrency-grid">
+              {(["native", "codex", "hermes"] as const).map((id) => (
+                <label key={id} className="concurrency-field">
+                  <span>{id === "native" ? <Cpu size={13} /> : id === "codex" ? <SlidersHorizontal size={13} /> : <Bot size={13} />} {id === "native" ? "Native" : id === "codex" ? "Codex" : "Hermes"} 并行数</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={4}
+                    value={executorForm?.concurrency[id] ?? 3}
+                    onChange={(event) => updateConcurrency(id, event.target.value)}
+                  />
+                </label>
+              ))}
+            </div>
+            <div className="settings-actions">
+              <button className="primary-button" onClick={() => void saveExecutorSettings()} disabled={busy !== null || !executorForm}>
+                {busy === "save" ? <Loader2 size={15} className="spin" /> : <Save size={15} />} 保存执行器设置
+              </button>
+            </div>
+            {executorNotice && <Notice tone={executorNotice.tone} text={executorNotice.text} />}
+            {hermesProbe && (
+              <div className={`result-banner ${hermesProbe.ok ? "ok" : "error"}`}>
+                {hermesProbe.ok ? <CheckCircle2 size={17} /> : <AlertTriangle size={17} />}
+                <div>
+                  <strong>{hermesProbe.ok ? "Hermes 可用" : "Hermes 不可用"}</strong>
+                  <p>{hermesProbe.ok ? hermesProbe.version : hermesProbe.error}</p>
+                  <small>{hermesProbe.command} · {hermesProbe.elapsedMs} ms</small>
+                </div>
+              </div>
+            )}
+            {hermes && !hermes.canRun && (
+              <p className="codex-hint">
+                Hermes 当前不可用：{hermes.issues.join("；") || "未检测到可执行文件"}。未配置时不影响 Native 和 Codex 执行器。
+              </p>
+            )}
+            <p className="settings-hint"><ShieldAlert size={13} /> 完全权限会让执行器自行决定并执行所有步骤；切换时不再弹窗提示。</p>
+          </div>
+        </details>
+      </section>
+
+      <section className="panel settings-section">
+        <details className="settings-fold">
+          <summary className="settings-fold-summary">
+            <div className="settings-fold-copy">
+              <strong>上下文与接管</strong>
+              <span>统一上下文账本 · Native 失败后可交给 Codex</span>
+            </div>
+            <span className={`status-chip ${contextForm?.mode === "on" ? "ok" : "warn"}`}>
+              <span className={`status-dot ${contextForm?.mode === "on" ? "online" : "offline"}`} />
+              {contextForm?.mode === "on" ? "自动接管已开启" : contextForm?.mode === "shadow" ? "仅记录诊断" : "已关闭"}
+            </span>
+          </summary>
+          <div className="settings-body">
+            <p className="settings-lead">所有执行器的会话、工具调用、失败证据和接管记录都会写入 Hearth 自己的上下文账本。shadow 模式只记录诊断，不会自动切换执行器。</p>
+            {contextMetricsQuery.data && (
+              <div className="context-metrics">
+                <span>接管 {contextMetricsQuery.data.handoffs.total} 次 · 成功 {contextMetricsQuery.data.handoffs.successRate === null ? "未记录" : `${Math.round(contextMetricsQuery.data.handoffs.successRate * 100)}%`}</span>
+                <span>平均上下文 {contextMetricsQuery.data.handoffs.averageContextTokens === null ? "未记录" : `${formatNumber(Math.round(contextMetricsQuery.data.handoffs.averageContextTokens))} tokens`}</span>
+                <span>诊断耗时 {formatDuration(contextMetricsQuery.data.diagnosis.averageDurationMs)}</span>
+                <span>平均恢复 {formatDuration(contextMetricsQuery.data.handoffs.averageRecoveryMs)}</span>
+                <span>账本 {formatNumber(contextMetricsQuery.data.ledger.tasks)} 个任务 · {formatNumber(contextMetricsQuery.data.ledger.items)} 条记录</span>
+              </div>
+            )}
+            <div className="form-grid">
+              <label>
+                <span>模式</span>
+                <select value={contextForm?.mode ?? "on"} onChange={(event) => setContextForm((prev) => (prev ? { ...prev, mode: event.target.value as ContextSettings["mode"] } : prev))}>
+                  <option value="on">开启：低风险自动接管</option>
+                  <option value="shadow">仅记录：不自动接管</option>
+                  <option value="off">关闭</option>
+                </select>
+              </label>
+              <label>
+                <span>自动接管风险</span>
+                <select value={contextForm?.autoHandoffRisk ?? "low"} onChange={(event) => setContextForm((prev) => (prev ? { ...prev, autoHandoffRisk: event.target.value as ContextSettings["autoHandoffRisk"] } : prev))}>
+                  <option value="low">低风险自动，高风险确认</option>
+                  <option value="none">全部需要用户确认</option>
+                </select>
+              </label>
+              <label>
+                <span>最大接管次数</span>
+                <input type="number" min={0} max={5} value={contextForm?.maxHandoffs ?? 1} onChange={(event) => setContextForm((prev) => (prev ? { ...prev, maxHandoffs: Number(event.target.value) } : prev))} />
+              </label>
+              <label>
+                <span>同执行器重试</span>
+                <input type="number" min={0} max={3} value={contextForm?.maxSameExecutorRetries ?? 1} onChange={(event) => setContextForm((prev) => (prev ? { ...prev, maxSameExecutorRetries: Number(event.target.value) } : prev))} />
+              </label>
+              <label>
+                <span>保留天数</span>
+                <input type="number" min={1} max={3650} value={contextForm?.retentionDays ?? 30} onChange={(event) => setContextForm((prev) => (prev ? { ...prev, retentionDays: Number(event.target.value) } : prev))} />
+              </label>
+              <label>
+                <span>投影预算（tokens）</span>
+                <input type="number" min={1000} max={200000} step={1000} value={contextForm?.projectionTokenBudget ?? 12000} onChange={(event) => setContextForm((prev) => (prev ? { ...prev, projectionTokenBudget: Number(event.target.value) } : prev))} />
+              </label>
+              <label>
+                <span>摘要阈值（tokens）</span>
+                <input type="number" min={1000} max={500000} step={1000} value={contextForm?.summarizeAfterTokens ?? 8000} onChange={(event) => setContextForm((prev) => (prev ? { ...prev, summarizeAfterTokens: Number(event.target.value) } : prev))} />
+              </label>
+              <label className="checkbox-field">
+                <input type="checkbox" checked={contextForm?.allowCodexNetwork ?? false} onChange={(event) => setContextForm((prev) => (prev ? { ...prev, allowCodexNetwork: event.target.checked } : prev))} />
+                <span>允许 Codex 网络访问（不开启时，需要网络的任务不会自动接管）</span>
+              </label>
+            </div>
+            <div className="settings-actions">
+              <button className="primary-button" onClick={() => void saveContextSettings()} disabled={contextBusy || !contextForm}>
+                {contextBusy ? <Loader2 size={15} className="spin" /> : <Save size={15} />} 保存上下文设置
+              </button>
+            </div>
+            {contextNotice && <Notice tone={contextNotice.tone} text={contextNotice.text} />}
+            <div className="context-cleanup">
+              <strong>手动清理任务上下文</strong>
+              <p>删除后，该任务的上下文条目、摘要、接管记录和 blob 都会移除，任务本身保留。</p>
+              <div className="input-with-action">
+                <input value={cleanupTaskId} onChange={(event) => setCleanupTaskId(event.target.value)} placeholder="任务 ID（任务详情 URL 最后一段）" spellCheck={false} />
+                <button className="ghost-button danger" onClick={() => void cleanupTaskContext()} disabled={contextBusy}>
+                  <Trash2 size={14} /> 删除上下文
+                </button>
+              </div>
+            </div>
+            <p className="settings-hint"><ShieldAlert size={13} /> 接管只共享工作区、产物、摘要和证据，不承诺模型内部状态的位级连续。</p>
+          </div>
+        </details>
       </section>
     </div>
   );

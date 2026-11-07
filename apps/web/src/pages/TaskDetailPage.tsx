@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   ArrowLeft,
+  ArrowRight,
   ChevronRight,
   Clock3,
   Download,
@@ -12,6 +13,7 @@ import {
   Loader2,
   RefreshCw,
   RotateCcw,
+  ShieldAlert,
   Square,
   XCircle
 } from "lucide-react";
@@ -20,7 +22,7 @@ import { formatBytes, formatDuration, formatTime, formatTokens, relativeTime } f
 import { executorLabel, taskKindLabel } from "../lib/labels.ts";
 import { ApprovalCard } from "../components/ApprovalCard.tsx";
 import { StatusPill } from "../components/StatusPill.tsx";
-import type { ArtifactRecord, RunRecord, TaskDeliverable, TaskView } from "../lib/types.ts";
+import type { ArtifactRecord, ContextItem, HandoffRecord, RunRecord, TaskContextResponse, TaskDeliverable, TaskProgressDetail, TaskView } from "../lib/types.ts";
 
 export function TaskDetailPage() {
   const { id = "" } = useParams();
@@ -34,12 +36,21 @@ export function TaskDetailPage() {
   const taskQuery = useQuery({ queryKey: ["task", id], queryFn: () => api.task(id), enabled: Boolean(id), refetchInterval: 4_000 });
   const [preview, setPreview] = useState<{ artifact: TaskDeliverable; content: string | null; loading: boolean; error: string | null } | null>(null);
   const [resumeInput, setResumeInput] = useState("");
+  const contextQuery = useQuery({ queryKey: ["task-context", id], queryFn: () => api.taskContext(id, { limit: 80 }), enabled: Boolean(id), refetchInterval: 4_000 });
+  const pendingHandoff = contextQuery.data?.handoffs.find((item) => item.status === "pending_user") ?? null;
 
   const retry = useMutation({
     mutationFn: (message?: string) => api.retry(id, message),
     onSuccess: () => {
       setResumeInput("");
       void queryClient.invalidateQueries({ queryKey: ["task", id] });
+    }
+  });
+  const confirmHandoff = useMutation({
+    mutationFn: (executorId: "native" | "codex" | "hermes") => api.confirmHandoff(id, executorId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["task", id] });
+      void queryClient.invalidateQueries({ queryKey: ["task-context", id] });
     }
   });
   const cancel = useMutation({
@@ -67,6 +78,8 @@ export function TaskDetailPage() {
   const pendingApprovals = view.approvals.filter((approval) => approval.status === "pending");
   const canRetry = task.status === "recoverable" || task.status === "failed";
   const canCancel = !["completed", "cancelled"].includes(task.status);
+  const active = ["queued", "running", "waiting_input", "waiting_approval"].includes(task.status);
+  const recentProgress = visibleProgress.slice(-3);
 
   async function openPreview(artifact: TaskDeliverable) {
     const isText = isTextArtifact(artifact);
@@ -131,6 +144,32 @@ export function TaskDetailPage() {
         <ApprovalCard key={approval.id} approval={approval} effect={view.effects.find((effect) => effect.id === approval.effectId)} />
       ))}
 
+      {pendingHandoff && (
+        <section className="panel handoff-panel">
+          <div className="panel-head">
+            <h2>等待确认接管</h2>
+            <span className="panel-meta">{executorLabel(pendingHandoff.fromExecutor)} → {executorLabel(pendingHandoff.toExecutor)}</span>
+          </div>
+          <div className="handoff-body">
+            <div className="handoff-route">
+              <span>{executorLabel(pendingHandoff.fromExecutor)}</span>
+              <ArrowRight size={16} />
+              <strong>{executorLabel(pendingHandoff.toExecutor)}</strong>
+            </div>
+            <p>{pendingHandoff.packet?.summary ?? pendingHandoff.diagnosis?.summary ?? pendingHandoff.reasonCode}</p>
+            {pendingHandoff.diagnosis && (
+              <small>诊断：{pendingHandoff.diagnosis.summary}（置信度 {Math.round(pendingHandoff.diagnosis.confidence * 100)}%）</small>
+            )}
+            {pendingHandoff.packet && pendingHandoff.packet.doNotRepeat.length > 0 && (
+              <div className="handoff-caution"><ShieldAlert size={14} /> 不会重复：{pendingHandoff.packet.doNotRepeat.slice(0, 3).join("；")}</div>
+            )}
+            {confirmHandoff.isError && <p className="form-error">{confirmHandoff.error instanceof Error ? confirmHandoff.error.message : "确认接管失败"}</p>}
+            <button className="primary-button" onClick={() => confirmHandoff.mutate(pendingHandoff.toExecutor)} disabled={confirmHandoff.isPending}>
+              {confirmHandoff.isPending ? <Loader2 className="spin" size={14} /> : <ArrowRight size={14} />} 用 {executorLabel(pendingHandoff.toExecutor)} 继续
+            </button>
+          </div>
+        </section>
+      )}
       {task.status === "waiting_input" && (
         <section className="panel resume-panel">
           <div className="panel-head">
@@ -165,6 +204,27 @@ export function TaskDetailPage() {
           <span className="panel-meta">{deliverables.length > 0 ? `${deliverables.length} 个交付文件` : "文字结果"}</span>
         </div>
         <div className="result-body">
+          {active && (
+            <div className={`result-progress ${phaseTone(task.status)}`}>
+              <div className="result-progress-head">
+                <span className="result-progress-spinner" />
+                <strong>{phaseLabel(task.status, task.nextAction)}</strong>
+                <small>实时进度</small>
+              </div>
+              {recentProgress.length > 0 ? (
+                <ol className="result-progress-list">
+                  {recentProgress.map((item) => (
+                    <li key={item.seq}>
+                      <span>{item.message}</span>
+                      <time>{formatTime(item.createdAt)}</time>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <p className="result-progress-empty">正在准备第一步，进度会实时显示在这里。</p>
+              )}
+            </div>
+          )}
           {task.resultSummary ? (
             <div className="chat-markdown result-markdown">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{task.resultSummary}</ReactMarkdown>
@@ -175,6 +235,14 @@ export function TaskDetailPage() {
             <p className="muted">本次执行失败，修正原因后可以重试。</p>
           ) : (
             <p className="muted">任务还在执行。当前阶段：{phaseLabel(task.status, task.nextAction)}。完成后结果会自动出现在这里。</p>
+          )}
+
+          {(task.status === "failed" || task.status === "recoverable") && task.error && (
+            <div className="result-error-detail">
+              <strong>{task.status === "recoverable" ? "执行中断，可以重试" : "执行失败"}</strong>
+              <p>{task.error.message}</p>
+              {task.error.guidance && <small>{task.error.guidance}</small>}
+            </div>
           )}
 
           {deliverables.length > 0 && (
@@ -218,6 +286,12 @@ export function TaskDetailPage() {
         </div>
       </section>
 
+      <ContextPanel
+        view={view}
+        context={contextQuery.data}
+        loading={contextQuery.isLoading}
+        error={contextQuery.isError ? (contextQuery.error instanceof Error ? contextQuery.error.message : "上下文读取失败") : null}
+      />
       <section className="panel process-panel">
         <details open={false}>
           <summary>
@@ -245,6 +319,7 @@ export function TaskDetailPage() {
                     <div>
                       <p>{item.message}</p>
                       <small>{formatTime(item.createdAt)}</small>
+                      <ProgressDetails details={item.details} />
                     </div>
                   </li>
                 ))}
@@ -260,6 +335,7 @@ export function TaskDetailPage() {
                       <div>
                         <p>{progressMessage(event)}</p>
                         <small>{formatTime(event.createdAt)}</small>
+                        <ProgressDetails details={[progressDetail(event)]} />
                       </div>
                     </li>
                   ))}
@@ -290,6 +366,131 @@ export function TaskDetailPage() {
       </section>
     </div>
   );
+}
+
+function ContextPanel({ view, context, loading, error }: {
+  view: TaskView;
+  context: TaskContextResponse | undefined;
+  loading: boolean;
+  error: string | null;
+}) {
+  const handoffs = context?.handoffs ?? [];
+  const latestHandoff = [...handoffs].reverse()[0] ?? null;
+  const state = context?.state ?? null;
+  const timeline = context ? [...context.items.items].reverse().slice(-20) : [];
+  return (
+    <section className="panel context-panel">
+      <div className="panel-head">
+        <h2>执行链路 / 上下文</h2>
+        <span className="panel-meta">{view.runs.length} 次运行 · {handoffs.length} 次接管 · {context?.items.total ?? 0} 条上下文</span>
+      </div>
+      <div className="context-body">
+        {loading && <p className="muted"><Loader2 className="spin" size={14} /> 正在读取上下文账本</p>}
+        {error && <p className="form-error">{error}</p>}
+        <div className="context-section">
+          <h3>执行链路</h3>
+          <div className="context-chain">
+            {view.runs.map((run) => {
+              const handoff = handoffs.find((item) => item.toRunId === run.id);
+              return (
+                <div key={run.id} className="chain-entry">
+                  {handoff && (
+                    <div className="chain-handoff">
+                      <span>{executorLabel(handoff.fromExecutor)}</span>
+                      <ArrowRight size={14} />
+                      <strong>{executorLabel(handoff.toExecutor)}</strong>
+                      <small>{handoff.packet?.summary ?? handoff.reasonCode}</small>
+                    </div>
+                  )}
+                  <div className="chain-run">
+                    <strong>第 {run.attempt} 次</strong>
+                    <span>{executorLabel(run.executorId)}</span>
+                    <span className={`run-status ${run.status}`}>{runStatusLabel(run.status)}</span>
+                    <span>{formatDuration(runDuration(run))}</span>
+                    <span>Token {formatTokens(run.usage)}</span>
+                  </div>
+                  {run.failure && <p className="run-error">{run.failure.message}</p>}
+                </div>
+              );
+            })}
+            {view.runs.length === 0 && <p className="muted">还没有运行记录。</p>}
+          </div>
+        </div>
+        <div className="context-section">
+          <h3>任务摘要</h3>
+          {state?.summary ? <pre className="context-summary">{state.summary}</pre> : <p className="muted">本轮结束后会生成任务级摘要。</p>}
+          {state?.lastFailure && (
+            <div className="context-failure"><ShieldAlert size={14} /><span>{state.lastFailure.message}</span></div>
+          )}
+        </div>
+        <div className="context-section">
+          <h3>产物清单</h3>
+          {state && state.artifacts.length > 0 ? (
+            <ul className="context-artifacts">
+              {state.artifacts.map((artifact) => (
+                <li key={artifact.artifactId}>
+                  <span>{artifact.path}</span>
+                  <code>{artifact.sha256.slice(0, 12)}</code>
+                  <small>{formatBytes(artifact.bytes)}</small>
+                </li>
+              ))}
+            </ul>
+          ) : <p className="muted">还没有已登记产物。</p>}
+        </div>
+        <div className="context-section">
+          <h3>上下文时间线</h3>
+          {timeline.length > 0 ? (
+            <ol className="context-timeline">
+              {timeline.map((item) => (
+                <li key={item.id}>
+                  <span className="context-kind">{contextKindLabel(item.kind)}</span>
+                  <p>{previewText(item.content)}</p>
+                  <small>{formatTime(item.createdAt)} · {item.executorId ? executorLabel(item.executorId) : "Hearth"}</small>
+                </li>
+              ))}
+            </ol>
+          ) : <p className="muted">执行器事件会依次记录到这里。</p>}
+        </div>
+        {latestHandoff?.packet && (
+          <div className="context-section">
+            <h3>最近一次接管包</h3>
+            <p>{latestHandoff.packet.summary}</p>
+            <dl className="context-kv">
+              <div><dt>下一步</dt><dd>{latestHandoff.packet.nextAction}</dd></div>
+              <div><dt>剩余预算</dt><dd>{latestHandoff.packet.remainingBudget.maxTurns} turns · {latestHandoff.packet.remainingBudget.maxTokens} tokens</dd></div>
+              <div><dt>产物</dt><dd>{latestHandoff.packet.artifacts.map((item) => item.path).join("、") || "无"}</dd></div>
+              <div><dt>不要重复</dt><dd>{latestHandoff.packet.doNotRepeat.join("；") || "无"}</dd></div>
+            </dl>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function contextKindLabel(kind: ContextItem["kind"]): string {
+  const labels: Record<ContextItem["kind"], string> = {
+    user_message: "用户消息",
+    task_input: "任务输入",
+    assistant_message: "执行器回复",
+    tool_call: "工具调用",
+    tool_result: "工具结果",
+    artifact: "产物",
+    checkpoint: "检查点",
+    failure: "失败",
+    diagnosis: "诊断",
+    handoff: "接管",
+    decision: "决策",
+    summary: "摘要",
+    memory_recall: "记忆召回",
+    notice: "通知"
+  };
+  return labels[kind];
+}
+
+function previewText(text: string, max = 260): string {
+  const clean = text.replace(/\s+/g, " ").trim();
+  return clean.length > max ? `${clean.slice(0, max)}…` : clean;
 }
 
 function visibleDeliverables(artifacts: ArtifactRecord[], expectedOutputs?: string[]): TaskDeliverable[] {
@@ -329,10 +530,10 @@ function progressMessage(event: TaskView["events"][number]): string {
 }
 
 function splitProgress(events: TaskView["events"]) {
-  const visible: { seq: number; message: string; createdAt: string }[] = [];
+  const visible: { seq: number; message: string; createdAt: string; details: TaskProgressDetail[] }[] = [];
   const technical: TaskView["events"] = [];
   const files = new Set<string>();
-  let fileEntry: { seq: number; message: string; createdAt: string } | null = null;
+  let fileEntry: { seq: number; message: string; createdAt: string; details: TaskProgressDetail[] } | null = null;
   let lastMessage = "";
 
   for (const event of events) {
@@ -347,24 +548,52 @@ function splitProgress(events: TaskView["events"]) {
       const names = message.slice(message.indexOf("：") + 1).split("、").map(baseName).filter(Boolean);
       for (const name of names) files.add(name);
       if (!fileEntry) {
-        fileEntry = { seq: event.seq, message: "", createdAt: event.createdAt };
+        fileEntry = { seq: event.seq, message: "", createdAt: event.createdAt, details: [] };
         visible.push(fileEntry);
       }
+      const detail = progressDetail(event);
+      if (detail) fileEntry.details.push(detail);
       fileEntry.message = label + "：" + Array.from(files).slice(0, 5).join("、") + (files.size > 5 ? " 等" : "");
       continue;
     }
     if (message.startsWith("分析：") || message === "正在分析") {
       if (lastMessage !== "正在分析") {
-        visible.push({ seq: event.seq, message: "正在分析", createdAt: event.createdAt });
+        const detail = progressDetail(event);
+        visible.push({ seq: event.seq, message: "正在分析", createdAt: event.createdAt, details: detail ? [detail] : [] });
         lastMessage = "正在分析";
       }
       continue;
     }
     if (message === lastMessage) continue;
-    visible.push({ seq: event.seq, message, createdAt: event.createdAt });
+    const detail = progressDetail(event);
+    visible.push({ seq: event.seq, message, createdAt: event.createdAt, details: detail ? [detail] : [] });
     lastMessage = message;
   }
   return { visible, technical };
+}
+
+function progressDetail(event: TaskView["events"][number]): TaskProgressDetail | null {
+  const detail = (event.payload as { detail?: unknown }).detail;
+  return detail && typeof detail === "object" ? detail as TaskProgressDetail : null;
+}
+
+function ProgressDetails({ details }: { details: Array<TaskProgressDetail | null> }) {
+  const present = details.filter((detail): detail is TaskProgressDetail => Boolean(detail));
+  if (present.length === 0) return null;
+  return (
+    <div className="progress-raw-group">
+      {present.map((detail, index) => (
+        <details className="progress-raw" key={index}>
+          <summary>查看原始输出{detail.title ? ` · ${detail.title}` : ""}</summary>
+          <pre>{formatProgressDetail(detail)}</pre>
+        </details>
+      ))}
+    </div>
+  );
+}
+
+function formatProgressDetail(detail: TaskProgressDetail): string {
+  return JSON.stringify(detail, null, 2);
 }
 
 function baseName(path: string): string {

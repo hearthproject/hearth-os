@@ -30,7 +30,8 @@ describe("health snapshot", () => {
       dataDir: root,
       dbPath: join(root, "hearth.sqlite"),
       schedulerEnabled: true,
-      schedulerRunning: () => true
+      schedulerRunning: () => true,
+      executorSettingsPath: join(root, "executor-settings.json")
     }).snapshot();
 
     expect(health).toMatchObject({
@@ -63,7 +64,8 @@ describe("health snapshot", () => {
       dataDir: root,
       dbPath: join(root, "hearth.sqlite"),
       schedulerEnabled: false,
-      schedulerRunning: () => false
+      schedulerRunning: () => false,
+      executorSettingsPath: join(root, "executor-settings.json")
     }).snapshot();
     expect(health.status).toBe("degraded");
     expect(health.issues).toContain("cleanup failed");

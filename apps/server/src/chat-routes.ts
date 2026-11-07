@@ -4,8 +4,12 @@ import { extname, join } from "node:path";
 import multipart from "@fastify/multipart";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
-import type { ChatAttachment, ChatMessageRecord, TaskInput } from "@hearth/core";
+import type { ChatAttachment, ChatMessageRecord, ExecutorId } from "@hearth/core";
+import { defaultConversationSettings, mergeConversationSettings } from "@hearth/core";
 import { loadCodexProfile, probeCodex } from "@hearth/codex-executor";
+import { loadExecutorSettings } from "./executor-settings.ts";
+import { executorName, resolveExecutorFromEnabled } from "./executors.ts";
+import { hermesHealth } from "./hermes-health.ts";
 import type { HearthService } from "./service.ts";
 import { chatSystemPrompt, conversationTitle, decideRoute, planExecution } from "./chat.ts";
 import { listModels, ModelClientError, completeChat, streamChat, type ChatMessage } from "./model-client.ts";
@@ -27,19 +31,31 @@ const attachmentSchema = z.object({
   bytes: z.number().int().min(0)
 }).strict();
 
+const conversationSettingsSchema = z.object({
+  executorEnabled: z.object({
+    native: z.boolean().optional(),
+    codex: z.boolean().optional(),
+    hermes: z.boolean().optional()
+  }).strict().optional(),
+  approvalMode: z.enum(["necessary", "full"]).optional()
+}).strict();
+
 const chatSchema = z.object({
   conversationId: z.string().trim().min(1).max(80).optional(),
   message: z.string().max(100_000).optional(),
   attachments: z.array(attachmentSchema).max(5).optional(),
-  url: z.string().trim().max(2_048).optional()
+  url: z.string().trim().max(2_048).optional(),
+  settings: conversationSettingsSchema.optional()
 }).strict();
 
 const conversationSchema = z.object({
-  title: z.string().trim().min(1).max(80).optional()
+  title: z.string().trim().min(1).max(80).optional(),
+  settings: conversationSettingsSchema.optional()
 }).strict();
 
 const conversationPatchSchema = z.object({
-  title: z.string().trim().min(1).max(80)
+  title: z.string().trim().min(1).max(80).optional(),
+  settings: conversationSettingsSchema.optional()
 }).strict();
 
 const modelProtocolSchema = z.enum(["openai-chat", "openai-responses", "anthropic-messages", "gemini"]);
@@ -66,11 +82,21 @@ export interface ChatRouteOptions {
   service: HearthService;
   modelSettingsPath: string;
   attachmentRoot: string;
+  executorSettingsPath: string;
 }
 
 export async function registerChatRoutes(app: FastifyInstance, options: ChatRouteOptions): Promise<void> {
-  const { service, modelSettingsPath, attachmentRoot } = options;
+  const { service, modelSettingsPath, attachmentRoot, executorSettingsPath } = options;
   const store = service.store;
+  const defaultSettings = () => defaultConversationSettings(loadExecutorSettings(executorSettingsPath).defaultApprovalMode);
+  const executorAvailability = (): Record<ExecutorId, boolean> => {
+    const executorSettings = loadExecutorSettings(executorSettingsPath);
+    return {
+      native: true,
+      codex: loadCodexProfile().canRun,
+      hermes: hermesHealth(executorSettings.hermesCommand).canRun
+    };
+  };
   mkdirSync(attachmentRoot, { recursive: true });
   await app.register(multipart, {
     limits: { fileSize: 25 * 1024 * 1024, files: 5, fields: 10, parts: 20 }
@@ -171,7 +197,10 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
   app.post("/api/conversations", async (request, reply) => {
     const parsed = conversationSchema.safeParse(request.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: "INVALID_CONVERSATION", message: "对话参数不正确" });
-    const conversation = store.createConversation(parsed.data.title ?? "新对话");
+    const settings = parsed.data.settings
+      ? mergeConversationSettings(defaultSettings(), parsed.data.settings)
+      : defaultSettings();
+    const conversation = store.createConversation(parsed.data.title ?? "新对话", settings);
     return reply.code(201).send(conversation);
   });
 
@@ -188,9 +217,15 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
 
   app.patch<{ Params: { id: string } }>("/api/conversations/:id", async (request, reply) => {
     const parsed = conversationPatchSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_CONVERSATION", message: "标题不能为空" });
-    const conversation = store.renameConversation(request.params.id, parsed.data.title);
-    if (!conversation) return reply.code(404).send({ error: "CONVERSATION_NOT_FOUND", message: "对话不存在" });
+    if (!parsed.success || (!parsed.data.title && !parsed.data.settings)) {
+      return reply.code(400).send({ error: "INVALID_CONVERSATION", message: "对话参数不正确" });
+    }
+    if (!store.getConversation(request.params.id)) {
+      return reply.code(404).send({ error: "CONVERSATION_NOT_FOUND", message: "对话不存在" });
+    }
+    let conversation = store.getConversation(request.params.id);
+    if (parsed.data.title) conversation = store.renameConversation(request.params.id, parsed.data.title);
+    if (parsed.data.settings) conversation = store.updateConversationSettings(request.params.id, parsed.data.settings);
     return conversation;
   });
 
@@ -248,7 +283,10 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       return reply.code(404).send({ error: "CONVERSATION_NOT_FOUND", message: "对话不存在" });
     }
     if (!conversation) {
-      conversation = store.createConversation(conversationTitle(message || detectedUrl || "处理上传文件"));
+      const settings = parsed.data.settings
+        ? mergeConversationSettings(defaultSettings(), parsed.data.settings)
+        : defaultSettings();
+      conversation = store.createConversation(conversationTitle(message || detectedUrl || "处理上传文件"), settings);
     }
 
     const userContent = message || (detectedUrl ? `请处理这个网址：${detectedUrl}` : `请处理附件：${storedFiles.map((file) => file.name).join("、")}`);
@@ -288,38 +326,27 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     const settings = loadModelSettings(modelSettingsPath);
     const route = await decideRoute(userContent, storedFiles.length > 0, detectedUrl, settings);
     const plan = planExecution(userContent);
-    send("routing", { ...route, plan });
+    const resolution = resolveExecutorFromEnabled(plan.executorId, conversation.settings.executorEnabled, executorAvailability(), plan.capability);
+    send("routing", {
+      ...route,
+      plan: { ...plan, executorId: resolution.executorId ?? plan.executorId },
+      ...(resolution.reroutedFrom ? { reroutedFrom: resolution.reroutedFrom } : {})
+    });
 
     if (route.action === "task") {
       try {
-        const networkHosts = detectedUrl ? [new URL(detectedUrl).hostname] : [];
-        const taskInputs: TaskInput[] = [
-          ...storedFiles.map((file): TaskInput => ({ kind: "file", label: file.name, value: file.path })),
-          ...(detectedUrl ? [{ kind: "url" as const, label: "网页", value: detectedUrl }] : []),
-          ...(message ? [{ kind: "text" as const, label: "用户请求", value: message }] : [])
-        ];
-        if (needsConfirmation(plan, networkHosts)) {
-          const proposal = service.createTaskProposal({
-            conversationId: conversation.id,
-            title: route.title || conversationTitle(userContent),
-            goal: [message, detectedUrl ? `参考网址：${detectedUrl}` : ""].filter(Boolean).join("\n") || `处理附件：${storedFiles.map((file) => file.name).join("、")}`,
-            executorId: plan.executorId,
-            taskKind: plan.taskKind,
-            expectedOutputs: plan.expectedOutputs,
-            permissions: planPermissions(plan, networkHosts),
-            inputs: taskInputs,
-            reason: proposalReason(plan, networkHosts)
-          });
-          const assistant = store.createChatMessage({
+        if (!resolution.executorId) {
+          const assistant = service.appendChatMessage({
             id: randomUUID(),
             conversationId: conversation.id,
             role: "assistant",
-            content: `准备执行：${proposal.title}\n\n${proposal.reason}。确认后才会开始执行。`,
+            content: plan.capability
+              ? `${resolution.reason ?? "没有可用的执行器"}，暂时不能派出任务。请在输入框上方启用${plan.capability === "github" ? " Codex 或 Hermes" : " Native"}后重试。`
+              : "所有执行器都已关闭或不可用，暂时不能派出任务。请点击输入框上方的 Native、Codex 或 Hermes 图标启用一个可用执行器，然后再发送。",
             taskId: null,
             attachments: [],
             createdAt: new Date().toISOString()
           });
-          send("proposal", { proposal, conversationId: conversation.id, message: assistant });
           send("done", assistant);
           finish(reply, send);
           return reply;
@@ -331,15 +358,19 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
           fileInputs: storedFiles.map((file) => ({ label: file.name, path: file.path })),
           ...(detectedUrl ? { url: detectedUrl } : {}),
           conversationId: conversation.id,
-          executorId: plan.executorId,
+          executorId: resolution.executorId,
           taskKind: plan.taskKind,
           expectedOutputs: plan.expectedOutputs
         });
-        const assistant = store.createChatMessage({
+        const executorText = friendlyExecutorName(resolution.executorId);
+        const rerouteText = resolution.reroutedFrom
+          ? `\n\n${resolution.reason ?? "原执行器不可用"}，已自动改由 ${executorText} 接管。`
+          : "";
+        const assistant = service.appendChatMessage({
           id: randomUUID(),
           conversationId: conversation.id,
           role: "assistant",
-          content: `已派出任务：${task.title}\n\n执行器：${plan.executorId === "codex" ? "Codex（工程任务）" : "Hearth 原生执行器"}。任务已出现在左侧对话目录，也可以到“任务”页查看进度和结果。`,
+          content: `已派出任务：${task.title}\n\n执行器：${executorText}。任务已出现在左侧对话目录，也可以到“任务”页查看进度和结果。${rerouteText}`,
           taskId: task.id,
           attachments: [],
           createdAt: new Date().toISOString()
@@ -412,29 +443,10 @@ function daemonUserContent(url: string | null, files: (ChatAttachment & { path: 
   return `请处理附件：${files.map((file) => file.name).join("、")}`;
 }
 
-function needsConfirmation(plan: ReturnType<typeof planExecution>, networkHosts: string[]): boolean {
-  return plan.taskKind === "workspace" || networkHosts.length > 0;
-}
-
-function planPermissions(plan: ReturnType<typeof planExecution>, networkHosts: string[]) {
-  return {
-    readRoots: [],
-    writeRoots: [],
-    networkHosts,
-    tools: [
-      "read_file", "list_files", "search_text", "write_file", "edit_file", "apply_patch",
-      "ask_user", "finish_task",
-      ...(networkHosts.length > 0 ? ["fetch_url"] : []),
-      ...(plan.taskKind === "workspace" ? ["shell"] : [])
-    ]
-  };
-}
-
-function proposalReason(plan: ReturnType<typeof planExecution>, networkHosts: string[]): string {
-  const reasons: string[] = [];
-  if (plan.taskKind === "workspace") reasons.push("需要读写隔离工作区并运行检查命令");
-  if (networkHosts.length > 0) reasons.push(`需要访问网页 ${networkHosts.join("、")}`);
-  return reasons.join("；") || "需要你的确认";
+function friendlyExecutorName(id: ExecutorId): string {
+  if (id === "native") return "Hearth 原生执行器";
+  if (id === "codex") return "Codex（工程任务）";
+  return executorName(id);
 }
 
 function finish(reply: FastifyReply, send: (event: string, data: unknown) => void): void {

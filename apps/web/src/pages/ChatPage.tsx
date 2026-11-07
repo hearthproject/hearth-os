@@ -5,7 +5,11 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   ArrowUp,
+  Bot,
+  Check,
   CheckCircle2,
+  Copy,
+  Cpu,
   FileText,
   ListChecks,
   Loader2,
@@ -14,13 +18,26 @@ import {
   Plus,
   Settings2,
   ShieldAlert,
+  ShieldCheck,
+  Terminal,
   Trash2,
   X
 } from "lucide-react";
 import { api, chatStream } from "../lib/api.ts";
+import { TaskStatusIcon } from "../components/TaskStatusIcon.tsx";
 import { formatBytes, formatTime } from "../lib/format.ts";
-import { executorLabel, taskKindLabel } from "../lib/labels.ts";
-import type { ChatAttachment, ChatMessageRecord, ConversationListItem, TaskListItem, TaskProposalRecord } from "../lib/types.ts";
+import { executorLabel, taskKindLabel, TASK_STATUS_LABELS } from "../lib/labels.ts";
+import type {
+  ChatAttachment,
+  ChatMessageRecord,
+  ConversationDetail,
+  ConversationListItem,
+  ConversationSettings,
+  ConversationSettingsPatch,
+  ExecutorId,
+  TaskListItem,
+  TaskProposalRecord
+} from "../lib/types.ts";
 
 const SUGGESTIONS = [
   "整理一份本周工作周报",
@@ -28,6 +45,11 @@ const SUGGESTIONS = [
   "写一个批量重命名文件的脚本",
   "帮我检查项目里的 TypeScript 错误"
 ];
+
+const DEFAULT_SETTINGS: ConversationSettings = {
+  executorEnabled: { native: true, codex: true, hermes: true },
+  approvalMode: "necessary"
+};
 
 interface RoutingState {
   action: "chat" | "task";
@@ -52,6 +74,7 @@ export function ChatPage() {
   const [routing, setRouting] = useState<RoutingState | null>(null);
   const [proposals, setProposals] = useState<TaskProposalRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [draftSettings, setDraftSettings] = useState<ConversationSettings>(DEFAULT_SETTINGS);
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -66,6 +89,7 @@ export function ChatPage() {
     enabled: Boolean(conversationId)
   });
   const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health });
+  const executorSettingsQuery = useQuery({ queryKey: ["executorSettings"], queryFn: api.executorSettings });
   const conversations = conversationsQuery.data?.conversations ?? [];
   const tasks = tasksQuery.data?.tasks ?? [];
   const tasksByConversation = new Map<string, TaskListItem[]>();
@@ -76,6 +100,16 @@ export function ChatPage() {
     tasksByConversation.set(task.conversationId, list);
   }
   const current = conversations.find((item) => item.id === conversationId) ?? null;
+  const conversationSettings = current?.settings ?? conversationQuery.data?.conversation.settings ?? draftSettings;
+  const settingsReady = !conversationId || Boolean(current || conversationQuery.data);
+  const defaultApprovalMode = executorSettingsQuery.data?.settings.defaultApprovalMode ?? "necessary";
+  const globalDefaultsApplied = useRef(false);
+
+  useEffect(() => {
+    if (globalDefaultsApplied.current || conversationId) return;
+    globalDefaultsApplied.current = true;
+    setDraftSettings((prev) => ({ ...prev, approvalMode: defaultApprovalMode }));
+  }, [defaultApprovalMode, conversationId]);
 
   useEffect(() => {
     if (!conversationQuery.data || sending) return;
@@ -111,8 +145,56 @@ export function ChatPage() {
     setRouting(null);
     setProposals([]);
     setError(null);
+    if (!id) setDraftSettings({ ...DEFAULT_SETTINGS, approvalMode: defaultApprovalMode });
     if (id) localStorage.setItem("hearth.conversation", id);
     else localStorage.removeItem("hearth.conversation");
+  }
+
+  function patchSettings(patch: ConversationSettingsPatch) {
+    const next: ConversationSettings = {
+      executorEnabled: {
+        native: patch.executorEnabled?.native ?? conversationSettings.executorEnabled.native,
+        codex: patch.executorEnabled?.codex ?? conversationSettings.executorEnabled.codex,
+        hermes: patch.executorEnabled?.hermes ?? conversationSettings.executorEnabled.hermes
+      },
+      approvalMode: patch.approvalMode ?? conversationSettings.approvalMode
+    };
+    if (!conversationId) {
+      setDraftSettings(next);
+      return;
+    }
+    const id = conversationId;
+    queryClient.setQueryData<ConversationDetail>(["conversation", id], (old) =>
+      old ? { ...old, conversation: { ...old.conversation, settings: next } } : old
+    );
+    queryClient.setQueryData<{ conversations: ConversationListItem[] }>(["conversations"], (old) =>
+      old ? {
+        conversations: old.conversations.map((item) => item.id === id ? { ...item, settings: next } : item)
+      } : old
+    );
+    void api.updateConversationSettings(id, patch)
+      .then(async () => {
+        await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        await queryClient.invalidateQueries({ queryKey: ["conversation", id] });
+      })
+      .catch((caught) => {
+        setError(caught instanceof Error ? caught.message : "保存对话设置失败");
+        void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        void queryClient.invalidateQueries({ queryKey: ["conversation", id] });
+      });
+  }
+
+  function toggleExecutor(executorId: ExecutorId) {
+    patchSettings({
+      executorEnabled: {
+        ...conversationSettings.executorEnabled,
+        [executorId]: !conversationSettings.executorEnabled[executorId]
+      }
+    });
+  }
+
+  function toggleApprovalMode() {
+    patchSettings({ approvalMode: conversationSettings.approvalMode === "full" ? "necessary" : "full" });
   }
 
   async function removeConversation(event: MouseEvent, id: string) {
@@ -169,15 +251,17 @@ export function ChatPage() {
         {
           ...(conversationId ? { conversationId } : {}),
           ...(text ? { message: text } : {}),
-          ...(sentAttachments.length > 0 ? { attachments: sentAttachments } : {})
+          ...(sentAttachments.length > 0 ? { attachments: sentAttachments } : {}),
+          ...(!conversationId ? { settings: draftSettings } : {})
         },
         {
           signal: controller.signal,
           onEvent: (event, data) => {
             if (event === "conversation") {
-              const conversation = data as { id: string };
+              const conversation = data as { id: string; settings?: ConversationSettings };
               setConversationId(conversation.id);
               conversationIdRef.current = conversation.id;
+              if (conversation.settings) setDraftSettings(conversation.settings);
               localStorage.setItem("hearth.conversation", conversation.id);
             } else if (event === "user") {
               setMessages((prev) => [...prev, data as ChatMessageRecord]);
@@ -231,7 +315,15 @@ export function ChatPage() {
   }
 
   const configured = healthQuery.data?.chatModel.configured ?? true;
-  const executorReady = healthQuery.data?.codex.canRun ?? true;
+  const executorAvailability: Record<ExecutorId, boolean> = {
+    native: true,
+    codex: healthQuery.data?.codex.canRun ?? true,
+    hermes: healthQuery.data?.hermes.canRun ?? false
+  };
+  const executorReady = executorAvailability.native || executorAvailability.codex || executorAvailability.hermes;
+  const allExecutorsOff = !conversationSettings.executorEnabled.native
+    && !conversationSettings.executorEnabled.codex
+    && !conversationSettings.executorEnabled.hermes;
   const isEmpty = messages.length === 0 && !streaming && !sending;
 
   return (
@@ -323,6 +415,59 @@ export function ChatPage() {
         </div>
 
         <div className="composer-wrap">
+          <div className="composer-toolbar">
+            <div className="executor-toggles" role="group" aria-label="执行器开关">
+              <button
+                type="button"
+                className={`executor-toggle ${conversationSettings.executorEnabled.native ? "on" : "off"}`}
+                onClick={() => toggleExecutor("native")}
+                disabled={!settingsReady}
+                aria-pressed={conversationSettings.executorEnabled.native}
+                title={`Native 执行器 · 始终可用 · 点击${conversationSettings.executorEnabled.native ? "停用" : "启用"}`}
+              >
+                <Cpu size={15} />
+                <span>Native</span>
+              </button>
+              <button
+                type="button"
+                className={`executor-toggle ${conversationSettings.executorEnabled.codex ? "on" : "off"}`}
+                onClick={() => toggleExecutor("codex")}
+                disabled={!settingsReady}
+                aria-pressed={conversationSettings.executorEnabled.codex}
+                title={`Codex 执行器 · ${executorAvailability.codex ? "当前可用" : "当前未连接"} · 点击${conversationSettings.executorEnabled.codex ? "停用" : "启用"}`}
+              >
+                <Terminal size={15} />
+                <span>Codex</span>
+              </button>
+              <button
+                type="button"
+                className={`executor-toggle ${conversationSettings.executorEnabled.hermes ? "on" : "off"}`}
+                onClick={() => toggleExecutor("hermes")}
+                disabled={!settingsReady}
+                aria-pressed={conversationSettings.executorEnabled.hermes}
+                title={`Hermes 执行器 · ${executorAvailability.hermes ? "当前可用" : "未配置或不可用"} · 点击${conversationSettings.executorEnabled.hermes ? "停用" : "启用"}`}
+              >
+                <Bot size={15} />
+                <span>Hermes</span>
+              </button>
+            </div>
+            <span className="composer-toolbar-sep" aria-hidden="true" />
+            <button
+              type="button"
+              className={`permission-toggle ${conversationSettings.approvalMode}`}
+              onClick={toggleApprovalMode}
+              disabled={!settingsReady}
+              title={conversationSettings.approvalMode === "full"
+                ? "完全权限：所有动作自动决策并执行，点击切回必要审批"
+                : "必要审批：只有不可逆的外部动作才询问你，点击切换为完全权限"}
+            >
+              {conversationSettings.approvalMode === "full" ? <ShieldAlert size={15} /> : <ShieldCheck size={15} />}
+              <span>{conversationSettings.approvalMode === "full" ? "完全权限" : "必要审批"}</span>
+            </button>
+            {allExecutorsOff && (
+              <span className="composer-toolbar-note">三个执行器都已关闭，任务请求会改为普通回答</span>
+            )}
+          </div>
           {error && (
             <div className="composer-error">
               <span>{error}</span>
@@ -413,7 +558,7 @@ function ConversationItem({
               state={{ fromChat: true, conversationId: conversation.id }}
               title={`${task.title} · ${task.summary.phase}`}
             >
-              <span className={`rail-task-icon ${task.status}`}><ListChecks size={11} /></span>
+              <span className={`rail-task-icon ${task.status}`}><TaskStatusIcon status={task.status} size={12} /></span>
               <span className="rail-task-title">{task.title}</span>
             </Link>
           ))}
@@ -424,10 +569,14 @@ function ConversationItem({
 }
 
 function ChatBubble({ message, conversationId }: { message: ChatMessageRecord; conversationId: string | null }) {
+  if (message.kind === "task_status") {
+    return <TaskStatusBubble message={message} conversationId={conversationId} />;
+  }
   if (message.role === "user") {
     return (
       <div className="message-row user">
         <div className="message-bubble user-bubble">
+          {message.content && <CopyButton text={message.content} className="message-copy" />}
           {message.content && <p className="plain-message">{message.content}</p>}
           {message.attachments.length > 0 && (
             <div className="message-attachments">
@@ -445,13 +594,46 @@ function ChatBubble({ message, conversationId }: { message: ChatMessageRecord; c
   }
   return (
     <div className="message-row assistant">
-      <AssistantBubble content={message.content} taskId={message.taskId} createdAt={message.createdAt} conversationId={conversationId} />
+      <AssistantBubble
+        content={message.content}
+        copyText={message.content}
+        taskId={message.taskId}
+        createdAt={message.createdAt}
+        conversationId={conversationId}
+      />
+    </div>
+  );
+}
+
+function TaskStatusBubble({ message, conversationId }: { message: ChatMessageRecord; conversationId: string | null }) {
+  const label = message.taskStatus ? TASK_STATUS_LABELS[message.taskStatus] : "任务状态";
+  return (
+    <div className="message-row assistant">
+      <div className={`message-bubble task-status-bubble ${message.taskStatus ?? "queued"}`}>
+        <CopyButton text={message.content} className="message-copy" />
+        <div className="task-status-head">
+          {message.taskStatus ? <TaskStatusIcon status={message.taskStatus} size={14} /> : <span className="task-status-dot" />}
+          <strong>{label}</strong>
+          <time>{formatTime(message.createdAt)}</time>
+        </div>
+        <p className="task-status-text">{message.content}</p>
+        {message.taskId && (
+          <Link
+            className="task-status-link"
+            to={`/tasks/${message.taskId}`}
+            state={{ fromChat: true, ...(conversationId ? { conversationId } : {}) }}
+          >
+            查看任务
+          </Link>
+        )}
+      </div>
     </div>
   );
 }
 
 function AssistantBubble({
   content,
+  copyText,
   reasoning = "",
   taskId,
   createdAt,
@@ -459,6 +641,7 @@ function AssistantBubble({
   conversationId
 }: {
   content: string;
+  copyText?: string;
   reasoning?: string;
   taskId?: string | null;
   createdAt?: string;
@@ -474,6 +657,7 @@ function AssistantBubble({
 
   return (
     <div className={`message-bubble assistant-bubble ${streaming ? "streaming" : ""}`}>
+      {copyText && !streaming && <CopyButton text={copyText} className="message-copy" />}
       {reasoning && (
         <div className="reasoning-block">
           <div className="reasoning-label"><Loader2 size={12} className="spin" /> 思考过程</div>
@@ -503,6 +687,67 @@ function AssistantBubble({
       {createdAt && <time>{formatTime(createdAt)}</time>}
     </div>
   );
+}
+
+function CopyButton({ text, className = "" }: { text: string; className?: string }) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  const timer = useRef<number | undefined>();
+
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+
+  async function copy() {
+    window.clearTimeout(timer.current);
+    try {
+      await copyToClipboard(text);
+      setState("copied");
+    } catch {
+      setState("failed");
+    }
+    timer.current = window.setTimeout(() => setState("idle"), 1_600);
+  }
+
+  const title = state === "copied" ? "已复制" : state === "failed" ? "复制失败" : "复制";
+  return (
+    <button
+      type="button"
+      className={`copy-button ${state} ${className}`.trim()}
+      onClick={(event) => {
+        event.stopPropagation();
+        void copy();
+      }}
+      title={title}
+      aria-label={title}
+    >
+      {state === "copied" ? <Check size={13} /> : state === "failed" ? <X size={13} /> : <Copy size={13} />}
+    </button>
+  );
+}
+
+async function copyToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Fall through to the legacy path for browsers that block the async API.
+    }
+  }
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.position = "fixed";
+  area.style.opacity = "0";
+  area.style.pointerEvents = "none";
+  document.body.appendChild(area);
+  area.focus();
+  area.select();
+  let copied = false;
+  try {
+    copied = document.execCommand("copy");
+  } finally {
+    document.body.removeChild(area);
+  }
+  if (!copied) throw new Error("copy failed");
 }
 
 function ChatNotice({ icon, tone, children }: { icon: React.ReactNode; tone: "warn" | "info"; children: React.ReactNode }) {

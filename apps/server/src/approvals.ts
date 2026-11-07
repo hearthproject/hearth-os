@@ -57,7 +57,7 @@ export class ApprovalManager {
     this.guard = options.guard;
   }
 
-  request(input: ApprovalRequest): ApprovalRecord {
+  async request(input: ApprovalRequest): Promise<ApprovalRecord> {
     const task = this.service.requireTask(input.taskId);
     const run = this.service.store.getRun(input.runId);
     if (!run || run.taskId !== task.id) throw new ApprovalError("RUN_NOT_FOUND", "审批关联的运行不存在");
@@ -92,6 +92,23 @@ export class ApprovalManager {
       nextAction: "等待你确认外部动作",
       error: null
     }, input.runId);
+    if (this.service.approvalModeForTask(task) === "full") {
+      const result = await this.decide(created.id, "approve", created.parameterHash);
+      const event = this.service.store.appendEvent({
+        type: "approval.auto_approved",
+        taskId: task.id,
+        runId: input.runId,
+        payload: {
+          approvalId: created.id,
+          kind: created.kind,
+          conversationId: task.conversationId ?? null,
+          policy: "conversation.full",
+          effectId: result.effect?.id ?? null
+        }
+      });
+      this.service.bus.publish(event);
+      return this.requireApproval(created.id);
+    }
     return created;
   }
 

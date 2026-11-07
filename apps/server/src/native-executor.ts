@@ -1,4 +1,4 @@
-import type { RunBudget, RunUsage, TaskPermissions, TaskRecord } from "@hearth/core";
+import type { RunBudget, RunUsage, TaskPermissions, TaskProgressDetail, TaskRecord } from "@hearth/core";
 import {
   createBuiltinTools,
   defaultTaskPermissions,
@@ -8,8 +8,10 @@ import {
   type AgentMessage,
   type AgentModel,
   type AgentResumeState,
-  type AgentRunResult
+  type AgentRunResult,
+  type RuntimeEvent
 } from "@hearth/agent-runtime";
+import { wantsScreenshot } from "./task-intent.ts";
 import { supportsToolCalling, streamAgentTurn } from "./model-agent.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import type { PreparedWorkspace } from "./workspace.ts";
@@ -31,7 +33,8 @@ export interface NativeRunOptions {
   signal: AbortSignal;
   resume?: AgentResumeState;
   expectedOutputs: string[];
-  onProgress?: (event: { kind: string; message: string }) => void;
+  onProgress?: (event: { kind: string; message: string; detail?: TaskProgressDetail }) => void;
+  onContextEvent?: (event: RuntimeEvent) => void;
   onCheckpoint?: (checkpoint: AgentCheckpoint) => void | Promise<void>;
 }
 
@@ -50,11 +53,16 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
   if (!supportsToolCalling(options.settings.protocol)) {
     throw new Error(`当前模型协议不支持工具调用：${options.settings.protocol}`);
   }
+  const screenshotTask = wantsScreenshot(`${options.task.title}\n${options.task.goal}`);
   const permissions = options.permissions ?? defaultTaskPermissions({
     workspaceRoot: options.prepared.root,
     outDir: options.prepared.outDir,
     networkHosts: options.task.networkHosts,
-    ...(options.task.taskKind === "workspace" ? { writeRoots: [options.prepared.outDir, options.prepared.root], extraTools: ["shell"] } : {})
+    ...(options.task.taskKind === "workspace" ? { writeRoots: [options.prepared.outDir, options.prepared.root] } : {}),
+    extraTools: [
+      ...(options.task.taskKind === "workspace" ? ["shell"] : []),
+      ...(screenshotTask ? ["capture_screen"] : [])
+    ]
   });
   const result = await runAgent({
     model: modelAdapter(options.settings),
@@ -68,10 +76,19 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     signal: options.signal,
     ...(options.resume ? { resume: options.resume } : {}),
     onEvent: (event) => {
+      options.onContextEvent?.(event);
       if (event.type === "tool.started") {
-        options.onProgress?.({ kind: "tool", message: describeToolStart(event.call.name, event.call.arguments) });
+        options.onProgress?.({
+          kind: "tool",
+          message: describeToolStart(event.call.name, event.call.arguments),
+          detail: { executorId: "native", eventType: "tool.started", title: event.call.name, input: event.call.arguments }
+        });
       } else if (event.type === "tool.finished" && event.result.isError) {
-        options.onProgress?.({ kind: "tool", message: `有一项操作没有完成，正在调整` });
+        options.onProgress?.({
+          kind: "tool",
+          message: `有一项操作没有完成，正在调整`,
+          detail: { executorId: "native", eventType: "tool.finished", title: event.call.name, output: event.result.content, status: "failed" }
+        });
       } else if (event.type === "compacted") {
         options.onProgress?.({ kind: "context", message: "整理执行上下文，继续推进" });
       } else if (event.type === "budget.exceeded") {
@@ -94,19 +111,28 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
 }
 
 export function nativePermissionsFor(task: TaskRecord, prepared: PreparedWorkspace): TaskPermissions {
+  const screenshotTask = wantsScreenshot(`${task.title}\n${task.goal}`);
   if (task.permissions) {
+    const tools = screenshotTask && !task.permissions.tools.includes("capture_screen")
+      ? [...task.permissions.tools, "capture_screen"]
+      : task.permissions.tools;
     return {
       ...task.permissions,
       readRoots: [prepared.root],
       writeRoots: task.taskKind === "workspace" ? [prepared.outDir, prepared.root] : [prepared.outDir],
-      networkHosts: [...task.networkHosts]
+      networkHosts: [...task.networkHosts],
+      tools
     };
   }
   return defaultTaskPermissions({
     workspaceRoot: prepared.root,
     outDir: prepared.outDir,
     networkHosts: task.networkHosts,
-    ...(task.taskKind === "workspace" ? { writeRoots: [prepared.outDir, prepared.root], extraTools: ["shell"] } : {})
+    ...(task.taskKind === "workspace" ? { writeRoots: [prepared.outDir, prepared.root] } : {}),
+    extraTools: [
+      ...(task.taskKind === "workspace" ? ["shell"] : []),
+      ...(screenshotTask ? ["capture_screen"] : [])
+    ]
   });
 }
 
@@ -137,7 +163,10 @@ function nativeSystemPrompt(task: TaskRecord, expectedOutputs: string[]): string
     "任务完成后必须调用 finish_task，用中文简洁总结完成结果；如果确实缺少关键输入，才调用 ask_user。",
     "回答使用简体中文，不要编造没有依据的事实。",
     `当前任务：${task.title}`,
-    `期望产物：${expectedOutputs.join("、")}`
+    `期望产物：${expectedOutputs.join("、")}`,
+    ...(expectedOutputs.some((output) => /\.(png|jpe?g|webp)$/i.test(output))
+      ? ["这是截图类任务：必须调用 capture_screen 生成真实图片产物，不要用文本或占位文件代替。"]
+      : [])
   ].join("\n");
 }
 
@@ -153,6 +182,7 @@ function describeToolStart(name: string, args: unknown): string {
   if (name === "write_file" || name === "edit_file" || name === "apply_patch") return path ? `写入产物：${shortPath(path)}` : "写入产物";
   if (name === "fetch_url") return "读取网页资料";
   if (name === "shell") return "运行检查命令";
+  if (name === "capture_screen") return "截取桌面画面";
   if (name === "ask_user") return "需要你补充信息";
   if (name === "finish_task") return "整理最终结果";
   return "执行一步工作";

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ListChecks, MessageCircle, Monitor, Settings2 } from "lucide-react";
+import { CalendarClock, ListChecks, MessageCircle, Monitor, Settings2 } from "lucide-react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { api } from "../lib/api.ts";
 import { isActive, needsAttention } from "../lib/format.ts";
@@ -33,6 +33,9 @@ export function AppShell() {
           </NavLink>
           <NavLink to="/devices" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
             <Monitor size={16} /> <span className="nav-label">设备</span>
+          </NavLink>
+          <NavLink to="/schedules" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
+            <CalendarClock size={16} /> <span className="nav-label">定时任务</span>
           </NavLink>
           <NavLink to="/settings" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
             <Settings2 size={16} /> <span className="nav-label">设置</span>

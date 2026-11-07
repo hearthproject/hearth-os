@@ -1,20 +1,26 @@
 import { Codex, type ThreadItem } from "@openai/codex-sdk";
-import type { RunUsage } from "@hearth/core";
+import type { RunUsage, TaskProgressDetail } from "@hearth/core";
 import { buildCodexEnv, describeCodexProfile, loadCodexProfile, type CodexProfile } from "./profile.ts";
 
 export interface CodexRunOptions {
   workingDirectory: string;
+  outDir?: string;
   prompt: string;
   signal?: AbortSignal;
   outputSchema?: unknown;
   onEvent?: (event: CodexProgress) => void;
+  onContextItem?: (item: ThreadItem) => void;
+  onThreadStarted?: (threadId: string) => void;
   profile?: CodexProfile;
   codex?: Codex;
+  threadId?: string;
+  networkAccessEnabled?: boolean;
 }
 
 export interface CodexProgress {
   type: "thread.started" | "item.completed" | "turn.completed" | "error";
   message: string;
+  detail?: TaskProgressDetail;
 }
 
 export interface CodexRunResult {
@@ -29,15 +35,18 @@ export async function runCodex(options: CodexRunOptions): Promise<CodexRunResult
   if (!profile.canRun) throw new Error(`Codex 不可用：${profile.issues.join("；")}`);
 
   const codex = options.codex ?? new Codex({ env: buildCodexEnv(profile) });
-  const thread = codex.startThread({
+  const threadOptions = {
     ...(profile.model ? { model: profile.model } : {}),
     workingDirectory: options.workingDirectory,
     skipGitRepoCheck: true,
     sandboxMode: "workspace-write",
     approvalPolicy: "never",
-    networkAccessEnabled: false,
+    networkAccessEnabled: options.networkAccessEnabled ?? false,
     webSearchMode: "disabled"
-  });
+  } as const;
+  const thread = options.threadId
+    ? codex.resumeThread(options.threadId, threadOptions)
+    : codex.startThread(threadOptions);
 
   const turnOptions = options.signal
     ? { signal: options.signal, ...(options.outputSchema ? { outputSchema: options.outputSchema } : {}) }
@@ -48,18 +57,21 @@ export async function runCodex(options: CodexRunOptions): Promise<CodexRunResult
   let finalResponse = "";
   let usage: RunUsage | null = null;
   let lastProgress = "";
-  const emit = (type: CodexProgress["type"], message: string) => {
+  const emit = (type: CodexProgress["type"], message: string, detail?: TaskProgressDetail) => {
     if (!message || message === lastProgress) return;
     lastProgress = message;
-    options.onEvent?.({ type, message });
+    options.onEvent?.({ type, message, ...(detail ? { detail } : {}) });
   };
 
   for await (const event of events) {
     if (event.type === "thread.started") {
+      options.onThreadStarted?.(event.thread_id);
       emit("thread.started", "开始执行");
     } else if (event.type === "item.completed") {
+      options.onContextItem?.(event.item);
       if (event.item.type === "agent_message") finalResponse = event.item.text;
-      emit("item.completed", describeItem(event.item));
+      const described = describeItem(event.item);
+      emit("item.completed", described.message, described.detail);
     } else if (event.type === "turn.completed") {
       usage = {
         inputTokens: event.usage.input_tokens,
@@ -96,19 +108,84 @@ export async function probeCodex(profile = loadCodexProfile()): Promise<{ ok: tr
   }
 }
 
-export function describeItem(item: ThreadItem): string {
-  if (item.type === "command_execution") return classifyCommand(item.command);
+export function describeItem(item: ThreadItem): { message: string; detail: TaskProgressDetail } {
+  if (item.type === "command_execution") {
+    return {
+      message: classifyCommand(item.command),
+      detail: {
+        executorId: "codex",
+        eventType: "item.completed",
+        itemType: item.type,
+        command: humanizeCommand(item.command),
+        output: clip(item.aggregated_output ?? "", 8_000),
+        status: item.status,
+        ...(item.exit_code === undefined ? {} : { exitCode: item.exit_code })
+      }
+    };
+  }
   if (item.type === "file_change") {
     const paths = item.changes.map((change) => change.path).join("、");
-    return (item.status === "failed" ? "文件修改失败" : "修改文件") + "：" + clip(paths || "未记录路径", 160);
+    return {
+      message: (item.status === "failed" ? "文件修改失败" : "修改文件") + "：" + clip(paths || "未记录路径", 160),
+      detail: {
+        executorId: "codex",
+        eventType: "item.completed",
+        itemType: item.type,
+        status: item.status,
+        paths: item.changes.map((change) => `${change.kind}:${change.path}`)
+      }
+    };
   }
-  if (item.type === "mcp_tool_call") return "调用工具：" + item.server + "/" + item.tool;
-  if (item.type === "web_search") return "网页搜索：" + clip(item.query, 120);
-  if (item.type === "reasoning") return "正在分析";
-  if (item.type === "agent_message") return "整理最终结果";
-  if (item.type === "todo_list") return "更新了执行计划";
-  if (item.type === "error") return isIgnorableNotice(item.message) ? "" : "执行提示：" + clip(item.message, 160);
-  return "处理了一步工作";
+  if (item.type === "mcp_tool_call") {
+    return {
+      message: "调用工具：" + item.server + "/" + item.tool,
+      detail: {
+        executorId: "codex",
+        eventType: "item.completed",
+        itemType: item.type,
+        title: `${item.server}/${item.tool}`,
+        input: item.arguments,
+        status: item.status,
+        ...(item.error ? { output: item.error.message } : item.result ? { output: clip(safeStringify(item.result.structured_content ?? item.result), 8_000) } : {})
+      }
+    };
+  }
+  if (item.type === "web_search") {
+    return {
+      message: "网页搜索：" + clip(item.query, 120),
+      detail: { executorId: "codex", eventType: "item.completed", itemType: item.type, query: item.query }
+    };
+  }
+  if (item.type === "reasoning") {
+    return {
+      message: "正在分析",
+      detail: { executorId: "codex", eventType: "item.completed", itemType: item.type, text: clip(item.text, 8_000) }
+    };
+  }
+  if (item.type === "agent_message") {
+    return {
+      message: "整理最终结果",
+      detail: { executorId: "codex", eventType: "item.completed", itemType: item.type, text: clip(item.text, 8_000) }
+    };
+  }
+  if (item.type === "todo_list") {
+    return {
+      message: "更新了执行计划",
+      detail: {
+        executorId: "codex",
+        eventType: "item.completed",
+        itemType: item.type,
+        text: item.items.map((todo) => `${todo.completed ? "[x]" : "[ ]"} ${todo.text}`).join("\n")
+      }
+    };
+  }
+  if (item.type === "error") {
+    return {
+      message: isIgnorableNotice(item.message) ? "" : "执行提示：" + clip(item.message, 160),
+      detail: { executorId: "codex", eventType: "error", itemType: item.type, text: item.message }
+    };
+  }
+  return { message: "处理了一步工作", detail: { executorId: "codex", eventType: "item.completed" } };
 }
 
 function classifyCommand(command: string): string {
@@ -142,4 +219,13 @@ function humanizeCommand(command: string): string {
 function clip(value: string, max: number): string {
   const text = value.replace(/\s+/g, " ").trim();
   return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+function safeStringify(value: unknown): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }

@@ -3,8 +3,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { TaskRecord, TaskStatus } from "@hearth/core";
-import type { CodexRunner, NativeRunner } from "./scheduler.ts";
+import type { HandoffRecord, HandoffStatus, TaskRecord, TaskStatus } from "@hearth/core";
+import type { CodexRunner, ExecutorHealthProvider, NativeRunner } from "./scheduler.ts";
 import { ApprovalManager } from "./approvals.ts";
 import { HearthStore } from "@hearth/eventlog";
 import { HearthScheduler } from "./scheduler.ts";
@@ -18,6 +18,26 @@ const FAKE_RESULT = {
   usage: null,
   profileLabel: "fake / model"
 };
+
+const TEST_USAGE = {
+  inputTokens: 10,
+  cachedInputTokens: 0,
+  cacheWriteInputTokens: 0,
+  outputTokens: 5,
+  reasoningOutputTokens: 0
+};
+
+function nativeResult(text: string) {
+  return {
+    status: "completed" as const,
+    finalResponse: text,
+    usage: TEST_USAGE,
+    turns: 1,
+    toolCalls: 0,
+    question: null,
+    outputs: ["result.md"]
+  };
+}
 
 describe("Hearth scheduler", () => {
   let store: HearthStore | null = null;
@@ -36,7 +56,7 @@ describe("Hearth scheduler", () => {
   it("runs a local task and publishes validated artifacts with a manifest", async () => {
     const service = setup();
     const runner: CodexRunner = async (options) => {
-      writeFileSync(join(options.workingDirectory, "out", "meeting-notes.md"), "# 会议纪要\n\n已完成。\n");
+      writeFileSync(join(testOutDir(options), "meeting-notes.md"), "# 会议纪要\n\n已完成。\n");
       return FAKE_RESULT;
     };
     scheduler = makeScheduler(service, runner);
@@ -84,7 +104,7 @@ describe("Hearth scheduler", () => {
     let markEntered = (): void => {};
     const runnerStarted = new Promise<void>((resolve) => { markEntered = resolve; });
     const runner: CodexRunner = async (options) => {
-      writeFileSync(join(options.workingDirectory, "out", "meeting-notes.md"), "# 不应被接受的旧结果\n");
+      writeFileSync(join(testOutDir(options), "meeting-notes.md"), "# 不应被接受的旧结果\n");
       markEntered();
       await new Promise<void>((resolve) => { releaseRunner = resolve; });
       return FAKE_RESULT;
@@ -114,8 +134,8 @@ describe("Hearth scheduler", () => {
     let runCount = 0;
     const runner: CodexRunner = async (options) => {
       runCount += 1;
-      writeFileSync(join(options.workingDirectory, "out", "meeting-notes.md"), `# 纪要 ${runCount}\n`);
-      if (runCount === 1) writeFileSync(join(options.workingDirectory, "out", "stale.md"), "old output\n");
+      writeFileSync(join(testOutDir(options), "meeting-notes.md"), `# 纪要 ${runCount}\n`);
+      if (runCount === 1) writeFileSync(join(testOutDir(options), "stale.md"), "old output\n");
       return FAKE_RESULT;
     };
     scheduler = makeScheduler(service, runner);
@@ -139,7 +159,7 @@ describe("Hearth scheduler", () => {
       calls += 1;
       prompts.push(options.prompt);
       if (calls === 2) {
-        writeFileSync(join(options.workingDirectory, "out", "meeting-notes.md"), "# 会议纪要\n\n补齐产物。\n");
+        writeFileSync(join(testOutDir(options), "meeting-notes.md"), "# 会议纪要\n\n补齐产物。\n");
       }
       return FAKE_RESULT;
     };
@@ -174,7 +194,7 @@ describe("Hearth scheduler", () => {
     expect(store?.listArtifacts(task.id)).toHaveLength(0);
   });
 
-  it("runs one task at a time", async () => {
+  it("runs up to three tasks in parallel for the same executor", async () => {
     const service = setup();
     let active = 0;
     let maxActive = 0;
@@ -182,18 +202,68 @@ describe("Hearth scheduler", () => {
       active += 1;
       maxActive = Math.max(maxActive, active);
       await delay(40);
-      writeFileSync(join(options.workingDirectory, "out", "result.md"), "# result\n");
+      writeFileSync(join(testOutDir(options), "result.md"), "# result\n");
       active -= 1;
       return FAKE_RESULT;
     };
-    const first = service.createTask({ title: "任务一", goal: "写报告", textInput: "一", executorId: "codex" });
-    const second = service.createTask({ title: "任务二", goal: "写报告", textInput: "二", executorId: "codex" });
+    const tasks = [1, 2, 3, 4].map((index) => service.createTask({
+      title: `任务${index}`,
+      goal: "写报告",
+      textInput: String(index),
+      executorId: "codex"
+    }));
     scheduler = makeScheduler(service, runner);
     scheduler.start();
 
-    await waitForStatus(service, first.id, "completed");
-    await waitForStatus(service, second.id, "completed");
-    expect(maxActive).toBe(1);
+    await Promise.all(tasks.map((task) => waitForStatus(service, task.id, "completed")));
+    expect(maxActive).toBe(3);
+  });
+
+  it("does not block native work while a codex task is still running", async () => {
+    const service = setup();
+    const settingsPath = join(requireTemp(), "model-settings.json");
+    writeFileSync(settingsPath, JSON.stringify({
+      providerId: "custom",
+      providerName: "测试模型",
+      protocol: "openai-chat",
+      baseUrl: "https://example.invalid/v1",
+      model: "test-model",
+      apiKey: "sk-test"
+    }));
+    let releaseCodex = (): void => {};
+    let markCodexStarted = (): void => {};
+    const codexStarted = new Promise<void>((resolve) => { markCodexStarted = resolve; });
+    const codexRunner: CodexRunner = async (options) => {
+      markCodexStarted();
+      await new Promise<void>((resolve) => { releaseCodex = resolve; });
+      writeFileSync(join(testOutDir(options), "result.md"), "# codex result\n");
+      return FAKE_RESULT;
+    };
+    const nativeRunner: NativeRunner = async (options) => {
+      writeFileSync(join(options.prepared.outDir, "result.md"), "# native result\n");
+      return {
+        status: "completed",
+        finalResponse: "native completed",
+        usage: { inputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0 },
+        turns: 1,
+        toolCalls: 0,
+        question: null,
+        outputs: ["result.md"]
+      };
+    };
+    scheduler = makeScheduler(service, codexRunner, { nativeRunner, modelSettingsPath: settingsPath });
+    scheduler.start();
+
+    const codexTask = service.createTask({ title: "Codex 长任务", goal: "写报告", textInput: "codex", executorId: "codex" });
+    await codexStarted;
+    const nativeTask = service.createTask({ title: "Native 短任务", goal: "写报告", textInput: "native", executorId: "native" });
+
+    const completedNative = await waitForStatus(service, nativeTask.id, "completed");
+    expect(completedNative.resultSummary).toBe("native completed");
+    expect(service.requireTask(codexTask.id).status).toBe("running");
+
+    releaseCodex();
+    await waitForStatus(service, codexTask.id, "completed");
   });
 
   it("runs custom tasks through the native executor and records its metadata", async () => {
@@ -440,7 +510,7 @@ describe("Hearth scheduler", () => {
     scheduler = makeScheduler(service, async (options) => {
       prompts.push(options.prompt);
       writeFileSync(
-        join(options.workingDirectory, "out", "pr-review.md"),
+        join(testOutDir(options), "pr-review.md"),
         "<!-- HEARTH_COMMENT_START -->\n# Review\n\nNo blocking issues.\n<!-- HEARTH_COMMENT_END -->\n\nInternal notes.\n"
       );
       return FAKE_RESULT;
@@ -461,6 +531,277 @@ describe("Hearth scheduler", () => {
     expect(effectCalls).toBe(0);
   });
 
+  it("hands a native capability failure to Codex with the previous outputs", async () => {
+    const service = setup();
+    const modelSettingsPath = configureModel();
+    let codexPrompt = "";
+    const nativeRunner: NativeRunner = async (options) => {
+      writeFileSync(join(options.prepared.outDir, "partial.md"), "# partial\n\nnative progress\n");
+      throw new Error("工具连续失败，模型无法完成任务");
+    };
+    const codexRunner: CodexRunner = async (options) => {
+      codexPrompt = options.prompt;
+      expect(existsSync(join(testOutDir(options), "partial.md"))).toBe(true);
+      writeFileSync(join(testOutDir(options), "result.md"), "# result\n\ncontinued by Codex\n");
+      return FAKE_RESULT;
+    };
+    scheduler = makeScheduler(service, codexRunner, { nativeRunner, modelSettingsPath });
+    scheduler.start();
+
+    const task = service.createTask({
+      title: "native gap", goal: "生成结果", textInput: "从 native 开始",
+      executorId: "native", expectedOutputs: ["result.md"]
+    });
+    await waitForStatus(service, task.id, "completed");
+    const handoffs = await waitForHandoff(store as HearthStore, task.id, "completed");
+
+    const runs = store?.listRuns(task.id) ?? [];
+    expect(runs).toHaveLength(2);
+    expect(runs[0]?.executorId).toBe("native");
+    expect(runs[0]?.status).toBe("failed");
+    expect(runs[1]?.executorId).toBe("codex");
+    expect(runs[1]?.status).toBe("completed");
+    expect(runs[1]?.parentRunId).toBe(runs[0]?.id);
+
+    expect(handoffs).toHaveLength(1);
+    expect(handoffs[0]?.status).toBe("completed");
+    expect(handoffs[0]?.fromExecutor).toBe("native");
+    expect(handoffs[0]?.toExecutor).toBe("codex");
+    expect(handoffs[0]?.packet?.artifacts.map((artifact) => artifact.path)).toContain("partial.md");
+    expect(codexPrompt).toContain("Hearth 任务交接");
+    expect(codexPrompt).toContain("partial.md");
+    expect(store?.listArtifacts(task.id).map((artifact) => artifact.relativePath)).not.toContain("HANDOFF.md");
+    expect(store?.listContextItems(task.id, { limit: 200 }).items.some((item) => item.kind === "diagnosis")).toBe(true);
+  });
+
+  it("hands off a native runtime crash without spending a same-executor retry", async () => {
+    const service = setup();
+    const modelSettingsPath = configureModel();
+    let nativeCalls = 0;
+    const nativeRunner: NativeRunner = async () => {
+      nativeCalls += 1;
+      throw new Error("spawn native-runtime ENOENT: process crashed");
+    };
+    const codexRunner: CodexRunner = async (options) => {
+      writeFileSync(join(testOutDir(options), "result.md"), "# recovered by codex\n");
+      return FAKE_RESULT;
+    };
+    scheduler = makeScheduler(service, codexRunner, { nativeRunner, modelSettingsPath });
+    scheduler.start();
+
+    const task = service.createTask({ title: "runtime crash", goal: "生成结果", executorId: "native", expectedOutputs: ["result.md"] });
+    const completed = await waitForStatus(service, task.id, "completed");
+    expect(completed.executorId).toBe("codex");
+    expect(nativeCalls).toBe(1);
+    const runs = store?.listRuns(task.id) ?? [];
+    expect(runs).toHaveLength(2);
+    expect(runs[0]?.executorId).toBe("native");
+    expect(runs[1]?.executorId).toBe("codex");
+    const handoffs = await waitForHandoff(store as HearthStore, task.id, "completed");
+    expect(handoffs[0]?.reasonCode).toBe("runtime_fault");
+  });
+
+  it("retries a transient native failure on the same executor without handoff", async () => {
+    const service = setup();
+    const modelSettingsPath = configureModel();
+    let calls = 0;
+    const nativeRunner: NativeRunner = async (options) => {
+      calls += 1;
+      if (calls === 1) throw new Error("ECONNRESET");
+      writeFileSync(join(options.prepared.outDir, "result.md"), "# retry result\n");
+      return nativeResult("retried");
+    };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath });
+    scheduler.start();
+
+    const task = service.createTask({ title: "transient", goal: "生成结果", executorId: "native", expectedOutputs: ["result.md"] });
+    await waitForStatus(service, task.id, "completed");
+    const runs = store?.listRuns(task.id) ?? [];
+    expect(runs).toHaveLength(2);
+    expect(runs.every((run) => run.executorId === "native")).toBe(true);
+    expect(store?.listHandoffs(task.id)).toHaveLength(0);
+  });
+
+  it("waits for user authorization instead of handing off permission failures", async () => {
+    const service = setup();
+    const modelSettingsPath = configureModel();
+    const nativeRunner: NativeRunner = async () => {
+      throw new Error("权限不足，需要审批");
+    };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath });
+    scheduler.start();
+
+    const task = service.createTask({ title: "permission", goal: "修改外部系统", executorId: "native", expectedOutputs: ["result.md"] });
+    const waiting = await waitForStatus(service, task.id, "waiting_input");
+    expect(waiting.error?.cause).toBe("permission");
+    expect(store?.listHandoffs(task.id)).toHaveLength(0);
+  });
+
+  it("creates a pending handoff for high-risk tasks and continues after confirmation", async () => {
+    const service = setup();
+    const modelSettingsPath = configureModel();
+    const nativeRunner: NativeRunner = async () => {
+      throw new Error("工具持续失败，无法完成任务");
+    };
+    const codexRunner: CodexRunner = async (options) => {
+      writeFileSync(join(testOutDir(options), "result.md"), "# codex result\n");
+      return FAKE_RESULT;
+    };
+    scheduler = makeScheduler(service, codexRunner, { nativeRunner, modelSettingsPath });
+    scheduler.start();
+
+    const task = service.createTask({
+      title: "network handoff", goal: "读取远端数据", executorId: "native",
+      expectedOutputs: ["result.md"], networkHosts: ["api.example.com"]
+    });
+    const waiting = await waitForStatus(service, task.id, "waiting_input");
+    expect(waiting.nextAction).toContain("等待确认用 codex 继续");
+    const pending = store?.listHandoffs(task.id) ?? [];
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.status).toBe("pending_user");
+    expect(pending[0]?.initiatedBy).toBe("auto");
+
+    scheduler.confirmHandoff(task.id, "codex");
+    await waitForStatus(service, task.id, "completed");
+    const completed = await waitForHandoff(store as HearthStore, task.id, "completed");
+    expect(completed[0]?.status).toBe("completed");
+    expect(store?.listRuns(task.id)).toHaveLength(2);
+  });
+
+  it("does not hand off when Codex is unavailable", async () => {
+    const service = setup();
+    const modelSettingsPath = configureModel();
+    const nativeRunner: NativeRunner = async () => {
+      throw new Error("工具持续失败，无法完成任务");
+    };
+    const executorHealth: ExecutorHealthProvider = (executorId) => executorId === "codex"
+      ? { canRun: false, issues: ["Codex 未安装"] }
+      : { canRun: true, issues: [] };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath, executorHealth });
+    scheduler.start();
+
+    const task = service.createTask({ title: "no codex", goal: "生成结果", executorId: "native", expectedOutputs: ["result.md"] });
+    const recoverable = await waitForStatus(service, task.id, "recoverable");
+    expect(recoverable.nextAction).toContain("重试");
+    expect(store?.listHandoffs(task.id)).toHaveLength(0);
+  });
+
+  it("publishes the final result as a visible completion message in chat", async () => {
+    const service = setup();
+    const conversation = (store as HearthStore).createConversation("执行会话");
+    scheduler = makeScheduler(service, async (options) => {
+      writeFileSync(join(testOutDir(options), "result.md"), "# result\n");
+      return { ...FAKE_RESULT, finalResponse: "最终结果已生成" };
+    });
+    scheduler.start();
+
+    const task = service.createTask({
+      title: "chat completion", goal: "生成结果", conversationId: conversation.id,
+      expectedOutputs: ["result.md"]
+    });
+    await waitForStatus(service, task.id, "completed");
+    const messages = (store as HearthStore).listChatMessages(conversation.id);
+    expect(messages.some((message) =>
+      message.kind === "task_status" && message.taskStatus === "completed" && message.content.includes("最终结果已生成")
+    )).toBe(true);
+  });
+
+  it("blocks handoff while an external effect needs reconciliation", async () => {
+    const service = setup();
+    const modelSettingsPath = configureModel();
+    const task = service.createTask({ title: "uncertain effect", goal: "发布", executorId: "native", expectedOutputs: ["result.md"] });
+    service.createEffect({
+      id: "effect-1", taskId: task.id, approvalId: "approval-1", kind: "github.comment",
+      idempotencyKey: "comment:1", status: "uncertain", target: {}, receipt: null, error: null,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+    });
+    const nativeRunner: NativeRunner = async () => {
+      throw new Error("执行失败");
+    };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath });
+    scheduler.start();
+
+    const waiting = await waitForStatus(service, task.id, "waiting_input");
+    expect(waiting.nextAction).toContain("对账");
+    expect(store?.listHandoffs(task.id)).toHaveLength(0);
+  });
+
+  it("does not chain a second handoff after Codex also fails", async () => {
+    const service = setup();
+    const modelSettingsPath = configureModel();
+    const nativeRunner: NativeRunner = async () => {
+      throw new Error("工具持续失败，无法完成任务");
+    };
+    const codexRunner: CodexRunner = async () => {
+      throw new Error("工具持续失败，无法完成任务");
+    };
+    scheduler = makeScheduler(service, codexRunner, { nativeRunner, modelSettingsPath });
+    scheduler.start();
+
+    const task = service.createTask({ title: "bounded", goal: "生成结果", executorId: "native", expectedOutputs: ["result.md"] });
+    const recoverable = await waitForStatus(service, task.id, "recoverable");
+    expect(recoverable.status).toBe("recoverable");
+    expect(store?.listHandoffs(task.id)).toHaveLength(1);
+    expect(store?.listRuns(task.id)).toHaveLength(2);
+  });
+
+  it("resumes a Codex thread after a transient failure", async () => {
+    const service = setup();
+    const threadIds: Array<string | undefined> = [];
+    const codexRunner: CodexRunner = async (options) => {
+      threadIds.push(options.threadId);
+      if (threadIds.length === 1) {
+        options.onThreadStarted?.("thread-abc");
+        throw new Error("ECONNRESET");
+      }
+      writeFileSync(join(testOutDir(options), "result.md"), "# resumed\n");
+      return FAKE_RESULT;
+    };
+    scheduler = makeScheduler(service, codexRunner);
+    scheduler.start();
+
+    const task = service.createTask({ title: "codex resume", goal: "生成结果", executorId: "codex", expectedOutputs: ["result.md"] });
+    await waitForStatus(service, task.id, "completed");
+    expect(threadIds).toEqual([undefined, "thread-abc"]);
+    expect(store?.listHandoffs(task.id)).toHaveLength(0);
+  });
+
+  it("resumes a native checkpoint after a transient failure", async () => {
+    const service = setup();
+    const modelSettingsPath = configureModel();
+    let calls = 0;
+    let resumedMessages = 0;
+    const nativeRunner: NativeRunner = async (options) => {
+      calls += 1;
+      if (calls === 1) {
+        await options.onCheckpoint?.({
+          seq: 1,
+          kind: "tool",
+          messages: [
+            { role: "system", content: "system" },
+            { role: "user", content: "goal" },
+            { role: "tool", toolCallId: "call-1", name: "write_file", content: "ok" }
+          ],
+          usage: TEST_USAGE,
+          turns: 1,
+          toolCalls: 1,
+          summary: null
+        });
+        throw new Error("ECONNRESET");
+      }
+      resumedMessages = options.resume?.messages.length ?? 0;
+      writeFileSync(join(options.prepared.outDir, "result.md"), "# resumed\n");
+      return nativeResult("native resumed");
+    };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath });
+    scheduler.start();
+
+    const task = service.createTask({ title: "native resume", goal: "生成结果", executorId: "native", expectedOutputs: ["result.md"] });
+    await waitForStatus(service, task.id, "completed");
+    expect(resumedMessages).toBe(4);
+    expect(store?.listHandoffs(task.id)).toHaveLength(0);
+  });
+
   function setup(): HearthService {
     store = new HearthStore(":memory:");
     tempDir = mkdtempSync(join(tmpdir(), "hearth-scheduler-"));
@@ -477,13 +818,14 @@ describe("Hearth scheduler", () => {
       leaseHeartbeatMs?: number;
       nativeRunner?: NativeRunner;
       modelSettingsPath?: string;
+      executorHealth?: ExecutorHealthProvider;
     } = {}
   ): HearthScheduler {
     return new HearthScheduler({
       service,
       codexRunner,
       ...(extra.nativeRunner ? { nativeRunner: extra.nativeRunner } : {}),
-      ...(extra.modelSettingsPath ? { modelSettingsPath: extra.modelSettingsPath } : {}),
+      modelSettingsPath: extra.modelSettingsPath ?? join(requireTemp(), "model-settings.json"),
       workspaceRoot: join(requireTemp(), "workspaces"),
       githubCacheRoot: join(requireTemp(), "git-cache"),
       artifactBase: requireTemp(),
@@ -497,8 +839,22 @@ describe("Hearth scheduler", () => {
         errors: [],
         log: ""
       }),
+      contextBlobRoot: join(requireTemp(), "context", "blobs"),
       ...extra
     });
+  }
+
+  function configureModel(): string {
+    const path = join(requireTemp(), "model-settings.json");
+    writeFileSync(path, JSON.stringify({
+      providerId: "custom",
+      providerName: "测试模型",
+      protocol: "openai-chat",
+      baseUrl: "https://example.invalid/v1",
+      model: "test-model",
+      apiKey: "sk-test"
+    }));
+    return path;
   }
 
   function requireTemp(): string {
@@ -506,6 +862,10 @@ describe("Hearth scheduler", () => {
     return tempDir;
   }
 });
+
+function testOutDir(options: { workingDirectory: string; outDir?: string }): string {
+  return options.outDir ?? join(options.workingDirectory, "out");
+}
 
 async function waitForStatus(service: HearthService, taskId: string, expected: TaskStatus): Promise<TaskRecord> {
   const deadline = Date.now() + 4_000;
@@ -516,6 +876,17 @@ async function waitForStatus(service: HearthService, taskId: string, expected: T
   }
   const current = service.store.getTask(taskId);
   throw new Error(`Timed out waiting for ${expected}; current=${current?.status}; error=${current?.error?.message ?? "none"}`);
+}
+
+async function waitForHandoff(store: HearthStore, taskId: string, expected: HandoffStatus): Promise<HandoffRecord[]> {
+  const deadline = Date.now() + 4_000;
+  while (Date.now() < deadline) {
+    const handoffs = store.listHandoffs(taskId);
+    if (handoffs.length > 0 && handoffs.every((handoff) => handoff.status === expected)) return handoffs;
+    await delay(20);
+  }
+  const current = store.listHandoffs(taskId);
+  throw new Error(`Timed out waiting for handoff ${expected}; current=${current.map((handoff) => handoff.status).join(",")}`);
 }
 
 function delay(ms: number): Promise<void> {

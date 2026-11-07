@@ -10,8 +10,12 @@ import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate } from "@hearth/templates";
 import { loadCodexProfile } from "@hearth/codex-executor";
 import { z } from "zod";
-import { ATTACHMENT_DIR, BACKUP_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST } from "./config.ts";
+import { ATTACHMENT_DIR, BACKUP_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, EXECUTOR_SETTINGS_PATH, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST } from "./config.ts";
 import { registerChatRoutes } from "./chat-routes.ts";
+import { loadExecutorSettings, saveExecutorSettings, viewExecutorSettings } from "./executor-settings.ts";
+import { probeHermes } from "./hermes-executor.ts";
+import { hermesHealth, clearHermesHealthCache } from "./hermes-health.ts";
+import { ScheduleError, ScheduleService } from "./schedules.ts";
 import { chatModelConfigured, loadModelSettings, viewModelSettings } from "./model-settings.ts";
 import { ApprovalError, ApprovalManager, type EffectExecutor } from "./approvals.ts";
 import { BackupError, BackupService } from "./backups.ts";
@@ -19,6 +23,9 @@ import { executeEffect } from "./effects.ts";
 import { HearthScheduler } from "./scheduler.ts";
 import { TaskLeaseService } from "./leases.ts";
 import { SecurityError, SecurityService } from "./security.ts";
+import { ContextService } from "./context.ts";
+import type { ContextIndex } from "./context-index.ts";
+import { contextMetrics } from "./context-metrics.ts";
 import { HearthService, TaskInputSelectionError, type CreateTaskInput } from "./service.ts";
 import { HealthService } from "./health.ts";
 import { MaintenanceError, MaintenanceService } from "./maintenance.ts";
@@ -40,7 +47,7 @@ const createTaskSchema = z.object({
   goal: z.string().trim().min(1).max(4000).optional(),
   textInput: z.string().max(100_000).optional(),
   sourceItemIds: z.array(z.string().trim().min(1).max(80)).max(20).optional(),
-  executorId: z.enum(["native", "codex"]).optional(),
+  executorId: z.enum(["native", "codex", "hermes"]).optional(),
   taskKind: z.enum(["delivery", "workspace", "general"]).optional(),
   expectedOutputs: z.array(z.string().trim().min(1).max(200)).max(20).optional(),
   permissions: z.object({
@@ -53,6 +60,27 @@ const createTaskSchema = z.object({
 
 const retryTaskSchema = z.object({
   message: z.string().trim().max(20_000).optional()
+}).strict();
+
+const contextQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  before: z.coerce.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional()
+}).strict();
+
+const confirmHandoffSchema = z.object({
+  executorId: z.enum(["native", "codex", "hermes"])
+}).strict();
+
+const contextSettingsPatchSchema = z.object({
+  mode: z.enum(["off", "shadow", "on"]).optional(),
+  maxHandoffs: z.number().int().min(0).max(5).optional(),
+  maxSameExecutorRetries: z.number().int().min(0).max(3).optional(),
+  retentionDays: z.number().int().min(1).max(3650).optional(),
+  maxInlineBytes: z.number().int().min(1024).max(1_000_000).optional(),
+  projectionTokenBudget: z.number().int().min(1000).max(200_000).optional(),
+  summarizeAfterTokens: z.number().int().min(1000).max(500_000).optional(),
+  autoHandoffRisk: z.enum(["low", "none"]).optional(),
+  allowCodexNetwork: z.boolean().optional()
 }).strict();
 
 const memorySourceSchema = z.object({
@@ -160,6 +188,29 @@ const killSwitchSchema = z.object({
   enabled: z.boolean(),
   reason: z.string().trim().max(500).optional()
 }).strict();
+
+const executorSettingsSchema = z.object({
+  defaultApprovalMode: z.enum(["necessary", "full"]).optional(),
+  concurrency: z.object({
+    native: z.number().int().min(1).max(4).optional(),
+    codex: z.number().int().min(1).max(4).optional(),
+    hermes: z.number().int().min(1).max(4).optional()
+  }).strict().optional(),
+  hermesCommand: z.string().trim().min(1).max(500).optional()
+}).strict().refine((value) => Object.keys(value).length > 0, { message: "至少需要修改一个设置" });
+
+const scheduleSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  prompt: z.string().trim().min(1).max(20_000),
+  cron: z.string().trim().min(1).max(200),
+  timezone: z.string().trim().min(1).max(80).optional(),
+  executorId: z.enum(["native", "codex", "hermes"]).optional(),
+  approvalMode: z.enum(["necessary", "full"]).optional(),
+  taskKind: z.enum(["delivery", "workspace", "general"]).optional(),
+  enabled: z.boolean().optional()
+}).strict();
+
+const schedulePatchSchema = scheduleSchema.partial().strict().refine((value) => Object.keys(value).length > 0, { message: "至少需要修改一个设置" });
 
 const createBackupSchema = z.object({
   passphrase: z.string().min(12).max(500)
@@ -327,6 +378,9 @@ export interface BuildServerOptions {
   syncSecretBox?: SecretBox;
   modelSettingsPath?: string;
   attachmentRoot?: string;
+  executorSettingsPath?: string;
+  contextBlobRoot?: string;
+  contextIndex?: ContextIndex;
 }
 
 export async function buildServer(options: BuildServerOptions = {}) {
@@ -334,6 +388,11 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const store = options.store ?? new HearthStore(DB_PATH);
   const serverStartedAt = new Date().toISOString();
   const service = new HearthService(store);
+  const context = new ContextService(service, options.contextBlobRoot ?? CONTEXT_BLOB_DIR);
+  if (options.contextIndex) context.setIndex(options.contextIndex);
+  service.setContextSink((message) => {
+    if (context.settings().mode !== "off") context.recordChatMessage(message);
+  });
   const sources = new SourceRegistry(service, {
     contentRoot: options.sourceContentRoot ?? SOURCE_CONTENT_DIR
   });
@@ -366,18 +425,34 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const desktop = new DesktopService(service, options.deviceFrameRoot ?? DEVICE_FRAME_DIR, security);
   const modelSettingsPath = options.modelSettingsPath ?? MODEL_SETTINGS_PATH;
   const attachmentRoot = options.attachmentRoot ?? ATTACHMENT_DIR;
+  const executorSettingsPath = options.executorSettingsPath ?? EXECUTOR_SETTINGS_PATH;
+  const executorHealth = (executorId: "native" | "codex" | "hermes") => {
+    if (executorId === "native") return { canRun: true, issues: [] };
+    if (executorId === "codex") {
+      const profile = loadCodexProfile();
+      return { canRun: profile.canRun, issues: profile.issues };
+    }
+    const settings = loadExecutorSettings(executorSettingsPath);
+    const health = hermesHealth(settings.hermesCommand);
+    return { canRun: health.canRun, issues: health.issues };
+  };
   const scheduler = options.startScheduler
     ? new HearthScheduler({
         service,
         approvals,
+        context,
         leases,
         attachmentRoot,
+        executorSettingsPath,
+        executorHealth,
         ...(options.sourceContentRoot ? { sourceContentRoot: options.sourceContentRoot } : {})
       })
     : null;
+  const schedules = new ScheduleService({ service, executorAvailable: executorHealth });
   const maintenance = new MaintenanceService({
     service,
     approvals,
+    context,
     backupRoot: options.backupRoot ?? BACKUP_DIR,
     deviceFrameRoot: options.deviceFrameRoot ?? DEVICE_FRAME_DIR
   });
@@ -387,7 +462,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
     dataDir: options.dataDir ?? DATA_DIR,
     dbPath: options.dbPath ?? DB_PATH,
     schedulerEnabled: Boolean(scheduler),
-    schedulerRunning: () => scheduler?.running ?? false
+    schedulerRunning: () => scheduler?.running ?? false,
+    executorSettingsPath
   });
   const diagnostics = new DiagnosticsService({ service, health, maintenance, webDist: WEB_DIST });
   if (options.startMaintenance ?? options.startScheduler) maintenance.start();
@@ -396,10 +472,12 @@ export async function buildServer(options: BuildServerOptions = {}) {
     bodyLimit: 8_000_000
   });
 
-  await registerChatRoutes(app, { service, modelSettingsPath, attachmentRoot });
+  schedules.start();
+  await registerChatRoutes(app, { service, modelSettingsPath, attachmentRoot, executorSettingsPath });
 
   app.addHook("onClose", async () => {
     maintenance.stop();
+    schedules.stop();
     await scheduler?.stop();
     if (ownsStore) store.close();
   });
@@ -439,6 +517,73 @@ export async function buildServer(options: BuildServerOptions = {}) {
         envKeyPresent: profile.envKeyPresent
       }
     };
+  });
+
+  app.get("/api/executor-settings", async () => {
+    const settings = viewExecutorSettings(executorSettingsPath);
+    return { settings, hermes: executorHealth("hermes") };
+  });
+
+  app.put("/api/executor-settings", async (request, reply) => {
+    const parsed = executorSettingsSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_EXECUTOR_SETTINGS", message: "执行器设置格式不正确" });
+    const settings = saveExecutorSettings(executorSettingsPath, parsed.data);
+    clearHermesHealthCache();
+    return { settings, hermes: executorHealth("hermes") };
+  });
+
+  app.post("/api/hermes/probe", async () => {
+    const settings = loadExecutorSettings(executorSettingsPath);
+    const result = await probeHermes(settings.hermesCommand);
+    clearHermesHealthCache(settings.hermesCommand);
+    return { ...result, health: executorHealth("hermes") };
+  });
+
+  app.get("/api/schedules", async () => ({ schedules: schedules.list() }));
+
+  app.post("/api/schedules", async (request, reply) => {
+    const parsed = scheduleSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SCHEDULE", message: "定时任务参数不正确" });
+    try {
+      return reply.code(201).send(schedules.create(parsed.data));
+    } catch (error) {
+      return sendScheduleError(reply, error);
+    }
+  });
+
+  app.patch<{ Params: { id: string } }>("/api/schedules/:id", async (request, reply) => {
+    const parsed = schedulePatchSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SCHEDULE", message: "定时任务参数不正确" });
+    try {
+      return schedules.update(request.params.id, parsed.data);
+    } catch (error) {
+      return sendScheduleError(reply, error);
+    }
+  });
+
+  app.delete<{ Params: { id: string } }>("/api/schedules/:id", async (request, reply) => {
+    try {
+      schedules.remove(request.params.id);
+      return reply.code(204).send();
+    } catch (error) {
+      return sendScheduleError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/schedules/:id/run", async (request, reply) => {
+    try {
+      return schedules.runNow(request.params.id);
+    } catch (error) {
+      return sendScheduleError(reply, error);
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/api/schedules/:id/runs", async (request, reply) => {
+    try {
+      return { runs: schedules.listRuns(request.params.id) };
+    } catch (error) {
+      return sendScheduleError(reply, error);
+    }
   });
 
   app.get("/api/maintenance", async (_request, reply) => {
@@ -1367,6 +1512,81 @@ export async function buildServer(options: BuildServerOptions = {}) {
     });
   });
 
+  app.get<{ Params: { id: string }; Querystring: Record<string, string> }>("/api/tasks/:id/context", async (request, reply) => {
+    const parsed = contextQuerySchema.safeParse(request.query ?? {});
+    if (!parsed.success) return invalidQuery(reply);
+    if (!store.getTask(request.params.id)) {
+      return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    }
+    reply.header("cache-control", "no-store");
+    return context.snapshot(request.params.id, {
+      limit: parsed.data.limit ?? 50,
+      beforeSeq: parsed.data.before ?? null
+    });
+  });
+
+  app.get<{ Params: { id: string } }>("/api/tasks/:id/handoffs", async (request, reply) => {
+    if (!store.getTask(request.params.id)) {
+      return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    }
+    reply.header("cache-control", "no-store");
+    return {
+      state: context.getState(request.params.id),
+      handoffs: context.listHandoffs(request.params.id)
+    };
+  });
+
+  app.post<{ Params: { id: string } }>("/api/tasks/:id/handoff", async (request, reply) => {
+    if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFF", message: "执行器未启动" });
+    if (!store.getTask(request.params.id)) {
+      return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    }
+    const parsed = confirmHandoffSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "INVALID_INPUT", message: "请指定要接管的目标执行器" });
+    }
+    try {
+      const task = scheduler.confirmHandoff(request.params.id, parsed.data.executorId);
+      const handoff = [...context.listHandoffs(request.params.id)].reverse().find((item) => item.status === "prepared") ?? null;
+      return { task, handoff };
+    } catch (error) {
+      return reply.code(409).send({ error: "HANDOFF_NOT_ALLOWED", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.get("/api/context/settings", async (_request, reply) => {
+    reply.header("cache-control", "no-store");
+    return { settings: context.settings() };
+  });
+
+  app.get("/api/context/metrics", async (_request, reply) => {
+    reply.header("cache-control", "no-store");
+    return contextMetrics(service);
+  });
+
+  app.patch("/api/context/settings", async (request, reply) => {
+    const parsed = contextSettingsPatchSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "INVALID_INPUT", message: "上下文设置格式不正确" });
+    }
+    try {
+      return { settings: context.updateSettings(parsed.data) };
+    } catch (error) {
+      return reply.code(400).send({ error: "INVALID_CONTEXT_SETTINGS", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.delete<{ Params: { id: string } }>("/api/tasks/:id/context", async (request, reply) => {
+    if (!store.getTask(request.params.id)) {
+      return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    }
+    try {
+      return context.deleteTaskContext(request.params.id);
+    } catch (error) {
+      return reply.code(409).send({ error: "CONTEXT_DELETE_FAILED", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
   app.get<{ Params: { id: string } }>("/api/tasks/:id", async (request, reply) => {
     const view = service.view(request.params.id);
     if (!view) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
@@ -1401,7 +1621,11 @@ export async function buildServer(options: BuildServerOptions = {}) {
 
   app.post<{ Params: { id: string } }>("/api/task-proposals/:id/confirm", async (request, reply) => {
     try {
-      const result = service.confirmTaskProposal(request.params.id);
+      const result = service.confirmTaskProposal(request.params.id, {
+        native: executorHealth("native").canRun,
+        codex: executorHealth("codex").canRun,
+        hermes: executorHealth("hermes").canRun
+      });
       scheduler?.kick();
       return result;
     } catch (error) {
@@ -1557,6 +1781,13 @@ function sendSourceError(reply: FastifyReply, error: unknown) {
 
 function sendOutboxError(reply: FastifyReply, error: unknown) {
   if (error instanceof OutboxError) {
+    return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+  }
+  throw error;
+}
+
+function sendScheduleError(reply: FastifyReply, error: unknown) {
+  if (error instanceof ScheduleError) {
     return reply.code(error.statusCode).send({ error: error.code, message: error.message });
   }
   throw error;

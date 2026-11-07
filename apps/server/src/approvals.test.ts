@@ -22,7 +22,7 @@ describe("approval manager", () => {
       calls += 1;
       return { url: "https://github.com/JasonBuildAI/GoldMind/pull/17", idempotencyKey: effect.idempotencyKey };
     });
-    const { task, approval } = waitingTask(service);
+    const { task, approval } = await waitingTask(service);
 
     const result = await manager.decide(approval.id, "approve", approval.parameterHash);
     expect(result.effect?.status).toBe("succeeded");
@@ -42,7 +42,7 @@ describe("approval manager", () => {
       calls += 1;
       return {};
     });
-    const { approval } = waitingTask(service);
+    const { approval } = await waitingTask(service);
 
     await expect(manager.decide(approval.id, "approve", "0".repeat(64)))
       .rejects.toMatchObject({ code: "PARAMETERS_CHANGED" });
@@ -52,7 +52,7 @@ describe("approval manager", () => {
 
   it("refuses to execute an approved effect after the task lease is lost", async () => {
     let calls = 0;
-    const { approval } = waitingTask(service);
+    const { approval } = await waitingTask(service);
     const manager = new ApprovalManager(service, async () => {
       calls += 1;
       return {};
@@ -72,7 +72,7 @@ describe("approval manager", () => {
       calls += 1;
       return {};
     });
-    const { task, approval } = waitingTask(service);
+    const { task, approval } = await waitingTask(service);
 
     const result = await manager.decide(approval.id, "reject", approval.parameterHash);
     expect(result.task.status).toBe("recoverable");
@@ -82,9 +82,9 @@ describe("approval manager", () => {
     expect(service.requireTask(task.id).status).toBe("recoverable");
   });
 
-  it("expires pending approvals when their task is cancelled", () => {
+  it("expires pending approvals when their task is cancelled", async () => {
     const manager = new ApprovalManager(service, async () => ({}));
-    const { task, approval } = waitingTask(service);
+    const { task, approval } = await waitingTask(service);
 
     expect(manager.expireForTask(task.id)).toBe(1);
     expect(store.getApproval(approval.id)?.status).toBe("expired");
@@ -94,7 +94,7 @@ describe("approval manager", () => {
     const manager = new ApprovalManager(service, async () => {
       throw new EffectUncertainError("request timed out after upload");
     });
-    const { task, approval } = waitingTask(service);
+    const { task, approval } = await waitingTask(service);
 
     const result = await manager.decide(approval.id, "approve", approval.parameterHash);
     expect(result.effect?.status).toBe("uncertain");
@@ -103,7 +103,59 @@ describe("approval manager", () => {
     expect(service.requireTask(task.id).status).toBe("recoverable");
   });
 
-  function waitingTask(service: HearthService) {
+  it("auto-approves full-permission conversation effects and writes an audit event", async () => {
+    const conversation = store.createConversation("完全权限对话", {
+      executorEnabled: { native: true, codex: true, hermes: true },
+      approvalMode: "full"
+    });
+    const task = service.createTask({ templateId: "T07", conversationId: conversation.id });
+    const now = new Date().toISOString();
+    const runId = randomUUID();
+    service.createRun({
+      id: runId,
+      taskId: task.id,
+      attempt: 1,
+      status: "running",
+      threadId: "thread-full",
+      workspace: "C:/tmp/full",
+      startedAt: now,
+      endedAt: null,
+      failure: null,
+      usage: null,
+      leaseEpoch: null,
+      createdAt: now
+    });
+    service.updateTask(task.id, { status: "running", currentRunId: runId }, runId);
+    service.updateTask(task.id, { status: "waiting_approval", currentRunId: runId }, runId);
+
+    let calls = 0;
+    const manager = new ApprovalManager(service, async () => {
+      calls += 1;
+      return { url: "https://example.test/pull/1" };
+    });
+    const approval = await manager.request({
+      taskId: task.id,
+      runId,
+      kind: "github.publish-pr",
+      summary: "推送分支并创建 PR",
+      target: { repo: "example/repo", branch: "hearth/full", base: "main" },
+      preview: { title: "Full permission", body: "Auto-approved effect" }
+    });
+
+    expect(approval.status).toBe("approved");
+    expect(calls).toBe(1);
+    expect(service.requireTask(task.id).status).toBe("completed");
+    const audit = store.listEvents().find((event) => event.type === "approval.auto_approved");
+    expect(audit?.payload).toMatchObject({
+      approvalId: approval.id,
+      conversationId: conversation.id,
+      kind: "github.publish-pr",
+      policy: "conversation.full"
+    });
+    expect((audit?.payload as { effectId?: string }).effectId).toBeTruthy();
+  });
+
+  async function waitingTask(service: HearthService) {
     const task = service.createTask({ templateId: "T07" });
     const now = new Date().toISOString();
     const runId = randomUUID();
@@ -125,7 +177,7 @@ describe("approval manager", () => {
     service.updateTask(task.id, { status: "running", currentRunId: runId, nextAction: "正在执行" }, runId);
     service.updateTask(task.id, { status: "waiting_approval", currentRunId: runId, nextAction: "等待确认" }, runId);
     const manager = new ApprovalManager(service, async () => ({}));
-    const approval = manager.request({
+    const approval = await manager.request({
       taskId: task.id,
       runId,
       kind: "github.publish-pr",

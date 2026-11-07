@@ -14,6 +14,7 @@ export interface PublishArtifactsOptions {
   artifactBase: string;
   expectedOutputs: string[];
   inputs: PreparedInput[];
+  excludeRelativePaths?: string[];
   executor?: {
     id: ExecutorId;
     threadId: string | null;
@@ -37,7 +38,8 @@ interface WalkedFile {
 export function publishArtifacts(options: PublishArtifactsOptions): ArtifactRecord[] {
   const now = options.generatedAt ?? new Date().toISOString();
   validateExpectedOutputs(options.outDir, options.expectedOutputs);
-  const files = walkFiles(options.outDir);
+  const excluded = new Set((options.excludeRelativePaths ?? []).map((path) => path.replace(/\\/g, "/")));
+  const files = walkFiles(options.outDir).filter((file) => !excluded.has(file.relativePath));
   const totalBytes = files.reduce((sum, file) => sum + file.bytes, 0);
   if (files.length > MAX_FILES) throw new Error(`产物文件过多：${files.length} > ${MAX_FILES}`);
   if (totalBytes > MAX_TOTAL_BYTES) throw new Error(`产物总大小超限：${totalBytes} bytes`);

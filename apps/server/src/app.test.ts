@@ -648,4 +648,43 @@ describe("Hearth server", () => {
       await app.close();
     }
   });
+
+  it("replays context events after a reconnect cursor", async () => {
+    const app = await buildServer({ store, serveWeb: false });
+    const created = await app.inject({ method: "POST", url: "/api/tasks", payload: { templateId: "T04" } });
+    expect(created.statusCode).toBe(201);
+    const taskId = created.json().id as string;
+    const cursor = store.latestEventSeq();
+    store.appendEvent({
+      type: "context.item.appended",
+      taskId,
+      payload: { id: "context-1", kind: "assistant_message", content: "replayed context" }
+    });
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const address = app.server.address();
+    if (!address || typeof address === "string") throw new Error("Missing test server address");
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4_000);
+    try {
+      const response = await fetch(`http://127.0.0.1:${address.port}/api/events?after=${cursor}&taskId=${taskId}`, { signal: controller.signal });
+      expect(response.status).toBe(200);
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("Missing response stream");
+      const decoder = new TextDecoder();
+      let received = "";
+      while (!received.includes("context.item.appended")) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        received += decoder.decode(chunk.value, { stream: true });
+      }
+      expect(received).toContain("event: context.item.appended");
+      expect(received).toContain("replayed context");
+      expect(received).not.toContain("event: task.created");
+      await reader.cancel();
+    } finally {
+      clearTimeout(timeout);
+      controller.abort();
+      await app.close();
+    }
+  });
 });

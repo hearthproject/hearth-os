@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import type {
   ArtifactRecord,
@@ -10,6 +11,7 @@ import type {
   DevicePairingRequest,
   DeviceRecord,
   OutboxDraft,
+  RunCheckpointRecord,
   RunRecord,
   TaskRecord
 } from "@hearth/core";
@@ -57,6 +59,60 @@ describe("HearthStore", () => {
     const reopened = new HearthStore(path);
     expect(reopened.getTask("task-1")?.status).toBe("running");
     reopened.close();
+  });
+
+  it("migrates a schema v8 database without losing tasks, runs, or checkpoints", () => {
+    const path = tempDb();
+    const createdAt = "2026-11-05T00:00:00.000Z";
+    const run: RunRecord = {
+      id: "run-1", taskId: "task-1", attempt: 1, status: "completed", threadId: "thread-1", workspace: "workspace/tasks/task-1",
+      startedAt: createdAt, endedAt: createdAt, failure: null, usage: null, leaseEpoch: 1, createdAt,
+      executorId: "native", checkpointSeq: 1
+    };
+    const checkpoint: RunCheckpointRecord = {
+      id: "checkpoint-1", runId: "run-1", taskId: "task-1", seq: 1, kind: "tool",
+      path: ".hearth/checkpoints/run-1/1.json", sha256: "c".repeat(64), usage: null, createdAt
+    };
+    const store = new HearthStore(path);
+    store.appendEvent({ type: "task.created", taskId: "task-1", payload: task() });
+    store.appendEvent({ type: "run.created", taskId: "task-1", runId: "run-1", payload: run });
+    store.createRunCheckpoint(checkpoint);
+    store.close();
+
+    const legacy = new DatabaseSync(path);
+    legacy.exec(`
+      DROP TABLE IF EXISTS context_items;
+      DROP TABLE IF EXISTS task_context_state;
+      DROP TABLE IF EXISTS handoffs;
+      DROP TABLE IF EXISTS context_settings;
+      ALTER TABLE runs DROP COLUMN parent_run_id;
+      ALTER TABLE runs DROP COLUMN handoff_id;
+      PRAGMA user_version = 8;
+    `);
+    legacy.close();
+
+    const migrated = new HearthStore(path);
+    expect(migrated.getTask("task-1")?.title).toBe("Meeting notes");
+    expect(migrated.listRuns("task-1")[0]?.id).toBe("run-1");
+    expect(migrated.listRunCheckpoints("run-1")[0]?.sha256).toBe("c".repeat(64));
+    expect(migrated.getContextSettings().mode).toBe("on");
+
+    const handoffRun: RunRecord = {
+      ...run, id: "run-2", attempt: 2, parentRunId: "run-1", handoffId: "handoff-1"
+    };
+    migrated.appendEvent({ type: "run.created", taskId: "task-1", runId: "run-2", payload: handoffRun });
+    const loaded = migrated.listRuns("task-1").find((item) => item.id === "run-2");
+    expect(loaded?.parentRunId).toBe("run-1");
+    expect(loaded?.handoffId).toBe("handoff-1");
+
+    const item = migrated.appendContextItem({
+      seq: 0, id: "context-1", conversationId: null, taskId: "task-1", runId: "run-2",
+      executorId: "codex", kind: "assistant_message", role: "assistant", content: "continued",
+      contentRef: null, sha256: null, tokens: 1, sensitivity: "normal", provenance: {},
+      parentId: null, executorEventId: null, createdAt
+    });
+    expect(item.seq).toBe(1);
+    migrated.close();
   });
 
   it("pages audit reads without truncation and skips unrecorded usage", () => {
@@ -195,6 +251,80 @@ describe("HearthStore", () => {
     expect(store.listDevices()).toHaveLength(1);
     expect(store.listDesktopSessions()).toHaveLength(1);
     expect(store.listDesktopCommands(session.id)).toHaveLength(1);
+    store.close();
+  });
+
+  it("persists conversation settings and fills defaults for legacy rows", () => {
+    const path = tempDb();
+    const raw = new DatabaseSync(path);
+    raw.exec(`
+      CREATE TABLE conversations (
+        id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      INSERT INTO conversations (id, title, created_at, updated_at)
+      VALUES ('legacy-conv', '旧对话', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
+    `);
+    raw.close();
+
+    const store = new HearthStore(path);
+    expect(store.getConversation("legacy-conv")?.settings).toEqual({
+      executorEnabled: { native: true, codex: true, hermes: true },
+      approvalMode: "necessary"
+    });
+
+    const conversation = store.createConversation("新对话");
+    expect(conversation.settings).toEqual({
+      executorEnabled: { native: true, codex: true, hermes: true },
+      approvalMode: "necessary"
+    });
+    const partial = store.updateConversationSettings(conversation.id, { executorEnabled: { codex: false } });
+    expect(partial?.settings).toEqual({
+      executorEnabled: { native: true, codex: false, hermes: true },
+      approvalMode: "necessary"
+    });
+    const full = store.updateConversationSettings(conversation.id, { approvalMode: "full" });
+    expect(full?.settings).toEqual({
+      executorEnabled: { native: true, codex: false, hermes: true },
+      approvalMode: "full"
+    });
+
+    store.createChatMessage({
+      id: "status-1",
+      conversationId: conversation.id,
+      role: "assistant",
+      content: "任务开始执行。",
+      taskId: "task-1",
+      attachments: [],
+      createdAt: "2026-11-07T00:00:00.000Z",
+      kind: "task_status",
+      taskStatus: "running"
+    });
+    expect(store.listChatMessages(conversation.id)[0]).toMatchObject({
+      kind: "task_status",
+      taskStatus: "running",
+      taskId: "task-1"
+    });
+    store.close();
+  });
+
+  it("does not persist empty task permissions as an explicit tool deny-list", () => {
+    const store = new HearthStore(":memory:");
+    store.appendEvent({ type: "task.created", taskId: "task-plain", payload: task("task-plain") });
+    expect(store.getTask("task-plain")?.permissions).toBeUndefined();
+
+    const explicit = {
+      ...task("task-explicit"),
+      permissions: { readRoots: ["/tmp"], writeRoots: [], networkHosts: [], tools: ["read_file"] }
+    };
+    store.appendEvent({ type: "task.created", taskId: "task-explicit", payload: explicit });
+    expect(store.getTask("task-explicit")?.permissions?.tools).toEqual(["read_file"]);
+
+    const legacyEmpty = {
+      ...task("task-legacy"),
+      permissions: { readRoots: [], writeRoots: [], networkHosts: [], tools: [] }
+    };
+    store.appendEvent({ type: "task.created", taskId: "task-legacy", payload: legacyEmpty });
+    expect(store.getTask("task-legacy")?.permissions).toBeUndefined();
     store.close();
   });
 });

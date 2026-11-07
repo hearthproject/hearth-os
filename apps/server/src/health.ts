@@ -2,6 +2,8 @@ import { statfsSync, statSync } from "node:fs";
 import type { HealthSnapshot } from "@hearth/core";
 import { CURRENT_SCHEMA_VERSION } from "@hearth/eventlog";
 import { loadCodexProfile } from "@hearth/codex-executor";
+import { loadExecutorSettings } from "./executor-settings.ts";
+import { hermesHealth } from "./hermes-health.ts";
 import type { HearthService } from "./service.ts";
 
 const LOW_DISK_BYTES = 256 * 1024 * 1024;
@@ -13,6 +15,7 @@ export interface HealthServiceOptions {
   dbPath: string;
   schedulerEnabled: boolean;
   schedulerRunning: () => boolean;
+  executorSettingsPath: string;
   clock?: () => Date;
 }
 
@@ -23,6 +26,7 @@ export class HealthService {
   private readonly dbPath: string;
   private readonly schedulerEnabled: boolean;
   private readonly schedulerRunning: () => boolean;
+  private readonly executorSettingsPath: string;
   private readonly clock: () => Date;
 
   constructor(options: HealthServiceOptions) {
@@ -32,12 +36,14 @@ export class HealthService {
     this.dbPath = options.dbPath;
     this.schedulerEnabled = options.schedulerEnabled;
     this.schedulerRunning = options.schedulerRunning;
+    this.executorSettingsPath = options.executorSettingsPath;
     this.clock = options.clock ?? (() => new Date());
   }
 
   snapshot(): HealthSnapshot {
     const now = this.clock();
     const profile = loadCodexProfile();
+    const hermes = hermesHealth(loadExecutorSettings(this.executorSettingsPath).hermesCommand);
     const memory = process.memoryUsage();
     const taskCounts = this.service.store.countTasksByStatus();
     const latestMaintenance = this.service.store.latestMaintenanceRun();
@@ -99,7 +105,8 @@ export class HealthService {
         authSource: profile.authSource,
         envKeySource: profile.envKeySource,
         issues: profile.issues
-      }
+      },
+      hermes
     };
   }
 }

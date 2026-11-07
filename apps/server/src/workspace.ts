@@ -37,6 +37,7 @@ export class UnsupportedInputError extends Error {
 export async function prepareWorkspace(options: {
   repoRoot: string;
   workspaceDir: string;
+  outDir?: string;
   task: TaskRecord;
   webFetch?: typeof fetchWebSnapshot;
   onWebFetch?: (snapshot: WebSnapshot) => void;
@@ -48,7 +49,7 @@ export async function prepareWorkspace(options: {
 }): Promise<PreparedWorkspace> {
   const root = resolve(options.workspaceDir);
   const inputsDir = join(root, "inputs");
-  const outDir = join(root, "out");
+  const outDir = options.outDir ? resolve(options.outDir) : join(root, "out");
   mkdirSync(inputsDir, { recursive: true });
   mkdirSync(outDir, { recursive: true });
 
@@ -371,7 +372,7 @@ export function buildTaskPrompt(
     ...outputLines,
     "",
     "硬性要求：",
-    "1. 开始分析或修改前，先创建输出目录和每个期望产物的文件骨架（至少包含标题、任务 ID 和待补项），完成后再回填真实内容。没有产物不算完成。",
+    "1. 开始分析或修改前，先创建输出目录和每个文本文档类期望产物的文件骨架（至少包含标题、任务 ID 和待补项），完成后再回填真实内容。没有产物不算完成。",
     "2. 交付文件只能写入上面的输出目录；输入快照只读。实现任务只允许修改隔离仓库内完成 Issue 所必需的文件并在本地提交；不得修改依赖目录、环境文件或无关文件。",
     "3. 不得联网、不得使用网页搜索、不得访问输入中未提供的链接。",
     "4. 不得编造输入中没有的事实；信息不足时，在产物中明确标注“未知”或“待确认”。",

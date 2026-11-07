@@ -1,10 +1,19 @@
 import type {
+  ApprovalMode,
   ApprovalListItem,
   ApprovalRecord,
   ApprovalStatus,
   ArtifactListItem,
   ChatAttachment,
   ChatMessageRecord,
+  ContextItem,
+  ContextSettings,
+  ContextSettingsPatch,
+  ContextSnapshot,
+  HandoffRecord,
+  TaskContextState,
+  ConversationSettings,
+  ConversationSettingsPatch,
   ConversationRecord,
   ArtifactRecord,
   DesktopCommandKind,
@@ -23,7 +32,12 @@ import type {
   EffectStatus,
   EventEnvelope,
   EventWindow,
+  ExecutorId,
+  ExecutorSettings,
+  ExecutorSettingsPatch,
+  ExecutorSettingsView,
   HealthSnapshot,
+  HermesHealth,
   MaintenanceRun,
   MemoryConflict,
   MemoryConfidence,
@@ -57,6 +71,9 @@ import type {
   RunRecord,
   RunStatus,
   RunUsage,
+  ScheduleRecord,
+  ScheduleRunRecord,
+  ScheduleRunStatus,
   SourceConnection,
   SourceItem,
   SourceKind,
@@ -66,6 +83,8 @@ import type {
   SyncPeer,
   TaskDeliverable,
   TaskListItem,
+  TaskKind,
+  TaskProgressDetail,
   TaskProposalRecord,
   TaskRecord,
   TaskStatus
@@ -73,6 +92,7 @@ import type {
 import type { TaskTemplate } from "@hearth/templates";
 
 export type {
+  ApprovalMode,
   ApprovalListItem,
   ApprovalRecord,
   ApprovalStatus,
@@ -80,6 +100,14 @@ export type {
   ArtifactRecord,
   ChatAttachment,
   ChatMessageRecord,
+  ContextItem,
+  ContextSettings,
+  ContextSettingsPatch,
+  ContextSnapshot,
+  HandoffRecord,
+  TaskContextState,
+  ConversationSettings,
+  ConversationSettingsPatch,
   ConversationRecord,
   DesktopCommandKind,
   DesktopCommandRecord,
@@ -97,7 +125,12 @@ export type {
   EffectStatus,
   EventEnvelope,
   EventWindow,
+  ExecutorId,
+  ExecutorSettings,
+  ExecutorSettingsPatch,
+  ExecutorSettingsView,
   HealthSnapshot,
+  HermesHealth,
   MaintenanceRun,
   MemoryConflict,
   MemoryConfidence,
@@ -131,6 +164,9 @@ export type {
   RunRecord,
   RunStatus,
   RunUsage,
+  ScheduleRecord,
+  ScheduleRunRecord,
+  ScheduleRunStatus,
   SourceConnection,
   SourceItem,
   SourceKind,
@@ -140,6 +176,8 @@ export type {
   SyncPeer,
   TaskDeliverable,
   TaskListItem,
+  TaskKind,
+  TaskProgressDetail,
   TaskProposalRecord,
   TaskRecord,
   TaskStatus,
@@ -155,6 +193,48 @@ export interface TaskView {
   checkpoints: RunCheckpointRecord[];
   events: EventEnvelope[];
   eventTotal: number;
+}
+
+export interface TaskContextResponse extends ContextSnapshot {}
+
+export interface TaskHandoffsResponse {
+  state: TaskContextState | null;
+  handoffs: HandoffRecord[];
+}
+
+export interface ConfirmHandoffResponse {
+  task: TaskRecord;
+  handoff: HandoffRecord | null;
+}
+
+export interface ContextSettingsResponse {
+  settings: ContextSettings;
+}
+
+export interface ContextMetricsResponse {
+  generatedAt: string;
+  ledger: { tasks: number; items: number };
+  handoffs: {
+    total: number;
+    automatic: number;
+    userConfirmed: number;
+    pendingUser: number;
+    prepared: number;
+    running: number;
+    completed: number;
+    failed: number;
+    cancelled: number;
+    successRate: number | null;
+    averageContextTokens: number | null;
+    averageRecoveryMs: number | null;
+  };
+  diagnosis: {
+    total: number;
+    model: number;
+    rules: number;
+    averageDurationMs: number | null;
+    averageContextTokens: number | null;
+  };
 }
 
 export interface SystemStatus {
@@ -291,6 +371,39 @@ export interface ModelSettingsResponse {
   settings: ModelSettingsView;
   presets?: ModelProviderPreset[];
   configured?: boolean;
+}
+
+export interface ExecutorSettingsResponse {
+  settings: ExecutorSettingsView;
+  hermes: HermesHealth;
+}
+
+export interface HermesProbeResponse {
+  ok: boolean;
+  command: string;
+  version: string | null;
+  error: string | null;
+  elapsedMs: number;
+  health: HermesHealth;
+}
+
+export interface ScheduleSnapshot {
+  schedules: ScheduleRecord[];
+}
+
+export interface ScheduleRunSnapshot {
+  runs: ScheduleRunRecord[];
+}
+
+export interface ScheduleInput {
+  name: string;
+  prompt: string;
+  cron: string;
+  timezone?: string;
+  executorId?: ExecutorId;
+  approvalMode?: ApprovalMode;
+  taskKind?: ScheduleRecord["taskKind"];
+  enabled?: boolean;
 }
 
 export interface ModelListResponse {

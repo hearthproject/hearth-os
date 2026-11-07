@@ -11,7 +11,7 @@ const MAX_FETCH_CHARS = 200_000;
 const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", "coverage", ".next", ".cache", ".turbo"]);
 
 export function createBuiltinTools(): AgentTool[] {
-  return [readFileTool, listFilesTool, searchTextTool, writeFileTool, editFileTool, applyPatchTool, shellTool, fetchUrlTool, askUserTool, finishTaskTool];
+  return [readFileTool, listFilesTool, searchTextTool, writeFileTool, editFileTool, applyPatchTool, shellTool, captureScreenTool, fetchUrlTool, askUserTool, finishTaskTool];
 }
 
 export function defaultTaskPermissions(options: {
@@ -257,6 +257,32 @@ const shellTool: AgentTool = {
     const timeoutMs = Math.min(10 * 60_000, Math.max(1_000, intArg(args, "timeoutMs", 120_000)));
     const output = await runCommand(command, cwd, timeoutMs);
     return { content: output || "（命令没有输出）", ...(output.startsWith("命令失败") ? { isError: true } : {}) };
+  }
+};
+
+const captureScreenTool: AgentTool = {
+  definition: {
+    name: "capture_screen",
+    description: "截取当前电脑桌面并保存为 PNG。仅支持 Windows，默认保存到输出目录的 desktop.png。",
+    parameters: {
+      type: "object",
+      properties: {
+        fileName: { type: "string", description: "输出文件名，必须位于输出目录且以 .png 结尾，默认 desktop.png" }
+      },
+      additionalProperties: false
+    }
+  },
+  async execute(input, context) {
+    if (process.platform !== "win32") throw new Error("桌面截图目前只支持 Windows");
+    const args = objectArgs(input);
+    const fileName = optionalStringArg(args, "fileName") ?? "desktop.png";
+    if (!fileName.toLowerCase().endsWith(".png")) throw new Error("截图文件名必须以 .png 结尾");
+    const target = resolveSafe(fileName, context.outDir, context.permissions.writeRoots);
+    assertWritable(target, context.permissions.writeRoots);
+    mkdirSync(dirname(target), { recursive: true });
+    await captureWindowsScreen(target, context.signal);
+    const saved = relative(context.outDir, target).replace(/\\/g, "/");
+    return { content: `桌面截图已保存：${saved}` };
   }
 };
 
@@ -519,6 +545,36 @@ function applyHunk(content: string, hunk: string[]): string {
   const index = content.indexOf(oldText);
   if (index < 0) throw new Error(`补丁片段未匹配：${oldText.slice(0, 80)}`);
   return content.slice(0, index) + newText + content.slice(index + oldText.length);
+}
+
+function captureWindowsScreen(target: string, signal: AbortSignal): Promise<void> {
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "Add-Type -AssemblyName System.Windows.Forms",
+    "Add-Type -AssemblyName System.Drawing",
+    "$bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen",
+    "$bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height",
+    "$graphics = [System.Drawing.Graphics]::FromImage($bitmap)",
+    "$graphics.CopyFromScreen($bounds.Left, $bounds.Top, 0, 0, $bounds.Size)",
+    `$bitmap.Save('${target.replace(/'/g, "''")}', [System.Drawing.Imaging.ImageFormat]::Png)`,
+    "$graphics.Dispose()",
+    "$bitmap.Dispose()"
+  ].join("; ");
+  const encoded = Buffer.from(script, "utf16le").toString("base64");
+  return new Promise((resolvePromise, reject) => {
+    execCallback(
+      `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${encoded}`,
+      { timeout: 30_000, maxBuffer: 1024 * 1024, windowsHide: true, signal },
+      (error, stdout, stderr) => {
+        if (error) {
+          const detail = [stderr, stdout, error.message].filter(Boolean).join("\n").trim();
+          reject(new Error(`桌面截图失败：${detail.slice(-2_000)}`));
+          return;
+        }
+        resolvePromise();
+      }
+    );
+  });
 }
 
 function assertSafeCommand(command: string, networkAllowed: boolean): void {

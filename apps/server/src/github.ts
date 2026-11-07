@@ -100,14 +100,14 @@ export async function prepareGitHubWorkspace(options: {
 }): Promise<PreparedGitHubWorkspace> {
   const run = options.run ?? runCommand;
   const repoPath = join(options.workspaceRoot, "repo");
-  if (existsSync(repoPath)) throw new Error(`GitHub 工作区已存在：${repoPath}`);
-  mkdirSync(options.workspaceRoot, { recursive: true });
+  const reused = existsSync(repoPath);
+  if (!reused) mkdirSync(options.workspaceRoot, { recursive: true });
 
   const cachePath = options.cacheRoot
     ? join(options.cacheRoot, `${options.spec.repo.replace(/[\\/]+/g, "__")}.git`)
     : null;
-  let clonedFromCache = false;
-  if (cachePath && existsSync(cachePath)) {
+  let clonedFromCache = reused;
+  if (!reused && cachePath && existsSync(cachePath)) {
     try {
       await run("git", ["clone", "--no-tags", cachePath, repoPath], { timeoutMs: 10 * 60 * 1000 });
       await run("git", ["remote", "set-url", "origin", `https://github.com/${options.spec.repo}.git`], { cwd: repoPath });
@@ -116,7 +116,7 @@ export async function prepareGitHubWorkspace(options: {
       rmSync(repoPath, { recursive: true, force: true });
     }
   }
-  if (!clonedFromCache) {
+  if (!reused && !clonedFromCache) {
     await retryNetworkCommand(() => run("git", [
       "-c",
       "credential.helper=!gh auth git-credential",
@@ -139,7 +139,18 @@ export async function prepareGitHubWorkspace(options: {
     if (!await refExists(run, repoPath, `refs/remotes/origin/${base}`)) {
       await retryNetworkCommand(() => run("git", ["fetch", "origin", base, "--depth", "50"], { cwd: repoPath }));
     }
-    await run("git", ["checkout", "-B", branch, `origin/${base}`], { cwd: repoPath });
+    if (reused) {
+      const currentBranch = (await run("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: repoPath })).stdout.trim();
+      if (currentBranch !== branch) {
+        if (await refExists(run, repoPath, `refs/heads/${branch}`)) {
+          await run("git", ["checkout", branch], { cwd: repoPath });
+        } else {
+          await run("git", ["checkout", "-B", branch, `origin/${base}`], { cwd: repoPath });
+        }
+      }
+    } else {
+      await run("git", ["checkout", "-B", branch, `origin/${base}`], { cwd: repoPath });
+    }
     const context = await loadGitHubContext(run, options.spec.repo, "issue", options.spec.issue);
     const baseSha = (await run("git", ["rev-parse", "HEAD"], { cwd: repoPath })).stdout.trim();
     const headSha = baseSha;

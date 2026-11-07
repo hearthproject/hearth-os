@@ -11,8 +11,67 @@ export const TASK_STATUSES = [
 
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
-export const EXECUTOR_IDS = ["native", "codex"] as const;
+export const EXECUTOR_IDS = ["native", "codex", "hermes"] as const;
 export type ExecutorId = (typeof EXECUTOR_IDS)[number];
+
+export const APPROVAL_MODES = ["necessary", "full"] as const;
+export type ApprovalMode = (typeof APPROVAL_MODES)[number];
+
+export interface ConversationSettings {
+  executorEnabled: Record<ExecutorId, boolean>;
+  approvalMode: ApprovalMode;
+}
+
+export interface ConversationSettingsPatch {
+  executorEnabled?: {
+    native?: boolean | undefined;
+    codex?: boolean | undefined;
+    hermes?: boolean | undefined;
+  } | undefined;
+  approvalMode?: ApprovalMode | undefined;
+}
+
+export function defaultConversationSettings(approvalMode: ApprovalMode = "necessary"): ConversationSettings {
+  return { executorEnabled: { native: true, codex: true, hermes: true }, approvalMode };
+}
+
+export function mergeConversationSettings(
+  current: ConversationSettings | null | undefined,
+  patch: ConversationSettingsPatch | null | undefined
+): ConversationSettings {
+  const base = current ?? defaultConversationSettings();
+  return {
+    executorEnabled: {
+      native: patch?.executorEnabled?.native ?? base.executorEnabled.native,
+      codex: patch?.executorEnabled?.codex ?? base.executorEnabled.codex,
+      hermes: patch?.executorEnabled?.hermes ?? base.executorEnabled.hermes
+    },
+    approvalMode: patch?.approvalMode ?? base.approvalMode
+  };
+}
+
+export interface ExecutorSettings {
+  defaultApprovalMode: ApprovalMode;
+  concurrency: Record<ExecutorId, number>;
+  hermesCommand: string;
+}
+
+export interface ExecutorSettingsPatch {
+  defaultApprovalMode?: ApprovalMode | undefined;
+  concurrency?: Partial<Record<ExecutorId, number>> | undefined;
+  hermesCommand?: string | undefined;
+}
+
+export interface ExecutorSettingsView extends ExecutorSettings {
+  updatedAt: string | null;
+}
+
+export interface HermesHealth {
+  canRun: boolean;
+  command: string;
+  version: string | null;
+  issues: string[];
+}
 
 export const TASK_KINDS = ["delivery", "workspace", "general"] as const;
 export type TaskKind = (typeof TASK_KINDS)[number];
@@ -42,6 +101,8 @@ export interface TaskError {
   message: string;
   recoverable: boolean;
   guidance: string;
+  cause?: FailureCause;
+  diagnosisId?: string;
 }
 
 export interface TaskPermissions {
@@ -94,7 +155,10 @@ export interface ConversationRecord {
   title: string;
   createdAt: string;
   updatedAt: string;
+  settings: ConversationSettings;
 }
+
+export type ChatMessageKind = "text" | "task_status";
 
 export interface ChatMessageRecord {
   id: string;
@@ -104,6 +168,25 @@ export interface ChatMessageRecord {
   taskId: string | null;
   attachments: ChatAttachment[];
   createdAt: string;
+  kind?: ChatMessageKind;
+  taskStatus?: TaskStatus | null;
+}
+
+export interface TaskProgressDetail {
+  executorId?: ExecutorId;
+  eventType?: string;
+  itemType?: string;
+  title?: string;
+  command?: string;
+  output?: string;
+  input?: unknown;
+  status?: string;
+  exitCode?: number;
+  durationMs?: number;
+  text?: string;
+  query?: string;
+  paths?: string[];
+  truncated?: boolean;
 }
 
 export type ModelProtocol = "openai-chat" | "openai-responses" | "anthropic-messages" | "gemini";
@@ -152,6 +235,8 @@ export interface RunRecord {
   executorId?: ExecutorId;
   checkpointSeq?: number;
   budget?: RunBudget;
+  parentRunId?: string | null;
+  handoffId?: string | null;
 }
 
 export const TASK_PROPOSAL_STATUSES = ["pending", "confirmed", "rejected", "expired"] as const;
@@ -172,6 +257,38 @@ export interface TaskProposalRecord {
   expiresAt: string;
   createdAt: string;
   decidedAt: string | null;
+}
+
+export type ScheduleRunStatus = "queued" | "running" | "completed" | "failed" | "skipped" | "cancelled";
+
+export interface ScheduleRecord {
+  id: string;
+  name: string;
+  prompt: string;
+  cron: string;
+  timezone: string;
+  enabled: boolean;
+  conversationId: string;
+  executorId: ExecutorId;
+  approvalMode: ApprovalMode;
+  taskKind: TaskKind;
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  lastTaskId: string | null;
+  lastStatus: ScheduleRunStatus | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ScheduleRunRecord {
+  id: string;
+  scheduleId: string;
+  scheduledFor: string;
+  taskId: string | null;
+  status: ScheduleRunStatus;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface RunCheckpointRecord {
@@ -838,4 +955,216 @@ export interface HealthSnapshot {
     envKeySource: "process" | "windows-user" | "missing" | "none";
     issues: string[];
   };
+  hermes: HermesHealth;
+}
+
+export const CONTEXT_ITEM_KINDS = [
+  "user_message",
+  "task_input",
+  "assistant_message",
+  "tool_call",
+  "tool_result",
+  "artifact",
+  "checkpoint",
+  "failure",
+  "diagnosis",
+  "handoff",
+  "decision",
+  "summary",
+  "memory_recall",
+  "notice"
+] as const;
+export type ContextItemKind = (typeof CONTEXT_ITEM_KINDS)[number];
+
+export const CONTEXT_ITEM_ROLES = ["system", "user", "assistant", "tool"] as const;
+export type ContextItemRole = (typeof CONTEXT_ITEM_ROLES)[number];
+
+export const CONTEXT_SENSITIVITIES = ["normal", "sensitive", "secret"] as const;
+export type ContextSensitivity = (typeof CONTEXT_SENSITIVITIES)[number];
+
+export interface ContextItem {
+  seq: number;
+  id: string;
+  conversationId: string | null;
+  taskId: string;
+  runId: string | null;
+  executorId: ExecutorId | null;
+  kind: ContextItemKind;
+  role: ContextItemRole;
+  content: string;
+  contentRef: string | null;
+  sha256: string | null;
+  tokens: number;
+  sensitivity: ContextSensitivity;
+  provenance: Record<string, unknown>;
+  parentId: string | null;
+  executorEventId: string | null;
+  createdAt: string;
+}
+
+export interface ContextStep {
+  text: string;
+  contextItemId: string | null;
+}
+
+export interface ContextArtifactRef {
+  artifactId: string;
+  path: string;
+  sha256: string;
+  bytes: number;
+  mimeType: string;
+}
+
+export interface TaskContextState {
+  taskId: string;
+  summary: string;
+  plan: string[];
+  completed: ContextStep[];
+  failed: ContextStep[];
+  artifacts: ContextArtifactRef[];
+  openQuestions: string[];
+  lastFailure: TaskError | null;
+  handoffCount: number;
+  summarySeq: number;
+  updatedAt: string;
+}
+
+export const FAILURE_CAUSES = [
+  "runtime_fault",
+  "transient",
+  "capability_gap",
+  "contract_failure",
+  "permission",
+  "input_missing",
+  "budget",
+  "effect_uncertain",
+  "interrupted",
+  "unknown"
+] as const;
+export type FailureCause = (typeof FAILURE_CAUSES)[number];
+
+export const FAILURE_ACTIONS = ["retry_same", "handoff", "ask_user", "fail"] as const;
+export type FailureAction = (typeof FAILURE_ACTIONS)[number];
+
+export interface FailureDiagnosis {
+  id: string;
+  taskId: string;
+  runId: string;
+  cause: FailureCause;
+  confidence: number;
+  summary: string;
+  evidenceItemIds: string[];
+  recommendedAction: FailureAction;
+  targetExecutor: ExecutorId | null;
+  doNotRepeat: string[];
+  source: "rules" | "model";
+  createdAt: string;
+}
+
+export interface HandoffArtifactRef {
+  path: string;
+  sha256: string;
+  bytes: number;
+  mimeType: string;
+}
+
+export interface HandoffPacket {
+  handoffId: string;
+  taskId: string;
+  fromRunId: string;
+  fromExecutor: ExecutorId;
+  toExecutor: ExecutorId;
+  goal: string;
+  acceptance: string[];
+  permissions: TaskPermissions;
+  remainingBudget: RunBudget;
+  summary: string;
+  completed: ContextStep[];
+  failed: ContextStep[];
+  artifacts: HandoffArtifactRef[];
+  doNotRepeat: string[];
+  openQuestions: string[];
+  nextAction: string;
+}
+
+export const HANDOFF_STATUSES = ["pending_user", "prepared", "running", "completed", "failed", "cancelled"] as const;
+export type HandoffStatus = (typeof HANDOFF_STATUSES)[number];
+
+export interface HandoffRecord {
+  id: string;
+  taskId: string;
+  fromRunId: string;
+  toRunId: string | null;
+  fromExecutor: ExecutorId;
+  toExecutor: ExecutorId;
+  status: HandoffStatus;
+  reasonCode: FailureCause;
+  diagnosis: FailureDiagnosis | null;
+  packet: HandoffPacket | null;
+  contextWatermarkSeq: number;
+  initiatedBy: "auto" | "user";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const CONTEXT_MODES = ["off", "shadow", "on"] as const;
+export type ContextMode = (typeof CONTEXT_MODES)[number];
+
+export interface ContextSettings {
+  mode: ContextMode;
+  maxHandoffs: number;
+  maxSameExecutorRetries: number;
+  retentionDays: number;
+  maxInlineBytes: number;
+  projectionTokenBudget: number;
+  summarizeAfterTokens: number;
+  autoHandoffRisk: "low" | "none";
+  allowCodexNetwork: boolean;
+  updatedAt: string | null;
+}
+
+export interface ContextSettingsPatch {
+  mode?: ContextMode | undefined;
+  maxHandoffs?: number | undefined;
+  maxSameExecutorRetries?: number | undefined;
+  retentionDays?: number | undefined;
+  maxInlineBytes?: number | undefined;
+  projectionTokenBudget?: number | undefined;
+  summarizeAfterTokens?: number | undefined;
+  autoHandoffRisk?: "low" | "none" | undefined;
+  allowCodexNetwork?: boolean | undefined;
+}
+
+export const DEFAULT_CONTEXT_SETTINGS: ContextSettings = {
+  mode: "on",
+  maxHandoffs: 1,
+  maxSameExecutorRetries: 1,
+  retentionDays: 30,
+  maxInlineBytes: 16_384,
+  projectionTokenBudget: 12_000,
+  summarizeAfterTokens: 8_000,
+  autoHandoffRisk: "low",
+  allowCodexNetwork: false,
+  updatedAt: null
+};
+
+export interface ContextItemPage {
+  items: ContextItem[];
+  total: number;
+  nextBefore: number | null;
+}
+
+export interface ContextSnapshot {
+  settings: ContextSettings;
+  state: TaskContextState | null;
+  handoffs: HandoffRecord[];
+  items: ContextItemPage;
+}
+
+export interface ContextDeleteReceipt {
+  taskId: string;
+  deletedItems: number;
+  deletedBlobs: number;
+  deletedHandoffs: number;
+  createdAt: string;
 }

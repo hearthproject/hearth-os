@@ -3,6 +3,7 @@ import { existsSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import type { MaintenanceRun } from "@hearth/core";
 import type { ApprovalManager } from "./approvals.ts";
+import type { ContextService } from "./context.ts";
 import type { HearthService } from "./service.ts";
 
 const DEFAULT_CLAIMED_COMMAND_TTL_MS = 5 * 60 * 1000;
@@ -14,6 +15,7 @@ export interface MaintenanceServiceOptions {
   approvals: ApprovalManager;
   backupRoot: string;
   deviceFrameRoot: string;
+  context?: ContextService;
   clock?: () => Date;
 }
 
@@ -47,6 +49,7 @@ export class MaintenanceService {
   private readonly approvals: ApprovalManager;
   private readonly backupRoot: string;
   private readonly deviceFrameRoot: string;
+  private readonly context: ContextService | null;
   private readonly clock: () => Date;
   private running = false;
   private timer: NodeJS.Timeout | null = null;
@@ -56,6 +59,7 @@ export class MaintenanceService {
     this.approvals = options.approvals;
     this.backupRoot = resolve(options.backupRoot);
     this.deviceFrameRoot = resolve(options.deviceFrameRoot);
+    this.context = options.context ?? null;
     this.clock = options.clock ?? (() => new Date());
   }
 
@@ -100,7 +104,11 @@ export class MaintenanceService {
         frameFileErrors: 0,
         pairingsExpired: 0,
         temporaryFilesRemoved: 0,
-        maintenanceRunsPruned: 0
+        maintenanceRunsPruned: 0,
+        contextTasksPruned: 0,
+        contextItemsPruned: 0,
+        contextBlobsPruned: 0,
+        contextHandoffsPruned: 0
       },
       error: null
     };
@@ -153,6 +161,13 @@ export class MaintenanceService {
       }
 
       run.actions.temporaryFilesRemoved = this.removeTemporaryFiles(nowMs);
+      if (this.context) {
+        const retention = this.context.pruneExpired({ now: new Date(now) });
+        run.actions.contextTasksPruned = retention.tasksPruned;
+        run.actions.contextItemsPruned = retention.deletedItems;
+        run.actions.contextBlobsPruned = retention.deletedBlobs;
+        run.actions.contextHandoffsPruned = retention.deletedHandoffs;
+      }
       run.actions.maintenanceRunsPruned = Number(
         db.prepare(
           "DELETE FROM maintenance_runs WHERE id NOT IN (SELECT id FROM maintenance_runs ORDER BY started_at DESC LIMIT ?)"
