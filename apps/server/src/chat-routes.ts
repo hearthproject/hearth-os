@@ -7,7 +7,7 @@ import { z } from "zod";
 import type { ChatAttachment, ChatMessageRecord, ExecutorId } from "@hearth/core";
 import { defaultConversationSettings, EXECUTOR_IDS, mergeConversationSettings } from "@hearth/core";
 import { loadCodexProfile, probeCodex, type CodexProfile } from "@hearth/codex-executor";
-import { loadExecutorSettings } from "./executor-settings.ts";
+import { loadExecutorSettings, type ExecutorSettingsStore } from "./executor-settings.ts";
 import { EXECUTOR_FALLBACK_ORDER, executorName, resolveExecutorFromEnabled } from "./executors.ts";
 import { executorHealth, isExecutorManagedInstalled } from "./executor-runtime.ts";
 import type { HearthService } from "./service.ts";
@@ -81,6 +81,7 @@ export interface ChatRouteOptions {
   modelSettingsPath: string;
   attachmentRoot: string;
   executorSettingsPath: string;
+  executorSettingsStore?: ExecutorSettingsStore | undefined;
   registry?: ModelRegistry | undefined;
   codexProfile?: (() => CodexProfile) | undefined;
   codexEnv?: (() => Record<string, string>) | undefined;
@@ -90,28 +91,29 @@ export interface ChatRouteOptions {
 export async function registerChatRoutes(app: FastifyInstance, options: ChatRouteOptions): Promise<void> {
   const { service, modelSettingsPath, attachmentRoot, executorSettingsPath } = options;
   const store = service.store;
+  const executorSettings = (): ReturnType<typeof loadExecutorSettings> => options.executorSettingsStore?.load() ?? loadExecutorSettings(executorSettingsPath);
   const chatSettings = (): ModelSettings => options.registry?.chatSettings() ?? loadModelSettings(modelSettingsPath);
   const chatConfigured = (): boolean => chatModelConfigured(chatSettings());
   const executorAvailability = (): Record<ExecutorId, boolean> => {
-    const executorSettings = loadExecutorSettings(executorSettingsPath);
+    const settings = executorSettings();
     const availability = {} as Record<ExecutorId, boolean>;
     for (const id of EXECUTOR_IDS) {
-      availability[id] = executorHealth(id, executorSettings, executorSettingsPath).canRun;
+      availability[id] = executorHealth(id, settings, executorSettingsPath).canRun;
     }
     return availability;
   };
   const defaultSettings = () => {
-    const executorSettings = loadExecutorSettings(executorSettingsPath);
+    const settings = executorSettings();
     const enabled: Partial<Record<ExecutorId, boolean>> = { native: true, codex: true, hermes: true };
     if (options.registry?.settingsForExecutorOrChat("deepseek-harness")) enabled["deepseek-harness"] = true;
     for (const id of ["qoder", "workbuddy", "kimi"] as const) {
-      const runtime = executorSettings.executors[id];
+      const runtime = settings.executors[id];
       enabled[id] = isExecutorManagedInstalled(id, executorSettingsPath)
         || Boolean(runtime?.executablePath || runtime?.command || runtime?.installMode);
     }
     return {
-      ...defaultConversationSettings(executorSettings.defaultApprovalMode, enabled),
-      preferredExecutorId: executorSettings.preferredExecutorId
+      ...defaultConversationSettings(settings.defaultApprovalMode, enabled),
+      preferredExecutorId: settings.preferredExecutorId
     };
   };
   mkdirSync(attachmentRoot, { recursive: true });

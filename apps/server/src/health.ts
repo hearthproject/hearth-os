@@ -1,7 +1,8 @@
 import { statfsSync, statSync } from "node:fs";
 import type { HealthSnapshot } from "@hearth/core";
+import type { ExecutorSettings } from "@hearth/core";
 import { CURRENT_SCHEMA_VERSION } from "@hearth/eventlog";
-import { loadCodexProfile } from "@hearth/codex-executor";
+import { loadCodexProfile, type CodexProfile } from "@hearth/codex-executor";
 import { loadExecutorSettings } from "./executor-settings.ts";
 import { hermesHealth } from "./hermes-health.ts";
 import type { HearthService } from "./service.ts";
@@ -16,6 +17,8 @@ export interface HealthServiceOptions {
   schedulerEnabled: boolean;
   schedulerRunning: () => boolean;
   executorSettingsPath: string;
+  executorSettingsProvider?: (() => ExecutorSettings) | undefined;
+  codexProfile?: (() => CodexProfile) | undefined;
   clock?: () => Date;
 }
 
@@ -27,6 +30,8 @@ export class HealthService {
   private readonly schedulerEnabled: boolean;
   private readonly schedulerRunning: () => boolean;
   private readonly executorSettingsPath: string;
+  private readonly executorSettingsProvider: (() => ExecutorSettings) | null;
+  private readonly codexProfile: (() => CodexProfile) | null;
   private readonly clock: () => Date;
 
   constructor(options: HealthServiceOptions) {
@@ -37,13 +42,16 @@ export class HealthService {
     this.schedulerEnabled = options.schedulerEnabled;
     this.schedulerRunning = options.schedulerRunning;
     this.executorSettingsPath = options.executorSettingsPath;
+    this.executorSettingsProvider = options.executorSettingsProvider ?? null;
+    this.codexProfile = options.codexProfile ?? null;
     this.clock = options.clock ?? (() => new Date());
   }
 
   snapshot(): HealthSnapshot {
     const now = this.clock();
-    const profile = loadCodexProfile();
-    const hermes = hermesHealth(loadExecutorSettings(this.executorSettingsPath).hermesCommand);
+    const profile = this.codexProfile?.() ?? loadCodexProfile();
+    const executorSettings = this.executorSettingsProvider?.() ?? loadExecutorSettings(this.executorSettingsPath);
+    const hermes = hermesHealth(executorSettings.hermesCommand);
     const memory = process.memoryUsage();
     const taskCounts = this.service.store.countTasksByStatus();
     const latestMaintenance = this.service.store.latestMaintenanceRun();

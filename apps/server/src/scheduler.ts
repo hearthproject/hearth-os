@@ -60,6 +60,7 @@ export interface SchedulerOptions {
   executorHealth?: ExecutorHealthProvider;
   executorSettingsPath?: string;
   executorSettings?: ExecutorSettings;
+  executorSettingsProvider?: (() => ExecutorSettings) | undefined;
   modelSettingsPath?: string;
   modelSettingsForExecutor?: ((executorId: ExecutorId) => ModelSettings | null) | undefined;
   runBudget?: RunBudget;
@@ -88,6 +89,7 @@ export class HearthScheduler {
   private readonly executorHealth: ExecutorHealthProvider;
   private readonly executorSettingsPath: string;
   private readonly staticExecutorSettings: ExecutorSettings | null;
+  private readonly executorSettingsProvider: (() => ExecutorSettings) | null;
   private readonly modelSettingsPath: string;
   private readonly modelSettingsForExecutor: (executorId: ExecutorId) => ModelSettings | null;
   private readonly runBudget: RunBudget;
@@ -126,6 +128,7 @@ export class HearthScheduler {
     this.deepseekRunner = options.deepseekRunner;
     this.executorSettingsPath = options.executorSettingsPath ?? EXECUTOR_SETTINGS_PATH;
     this.staticExecutorSettings = options.executorSettings ?? null;
+    this.executorSettingsProvider = options.executorSettingsProvider ?? null;
     this.adapters = createExecutorAdapters({
       codex: this.codexRunner,
       native: this.nativeRunner,
@@ -318,7 +321,7 @@ export class HearthScheduler {
   }
 
   private executorSettings(): ExecutorSettings {
-    return this.staticExecutorSettings ?? loadExecutorSettings(this.executorSettingsPath);
+    return this.staticExecutorSettings ?? this.executorSettingsProvider?.() ?? loadExecutorSettings(this.executorSettingsPath);
   }
 
   private scheduleAvailable(): number {

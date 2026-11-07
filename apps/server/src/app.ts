@@ -10,9 +10,9 @@ import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate } from "@hearth/templates";
 import { loadCodexProfile, runCodex } from "@hearth/codex-executor";
 import { z } from "zod";
-import { ATTACHMENT_DIR, BACKUP_DIR, CODEX_HOME_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, EXECUTOR_SETTINGS_PATH, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST } from "./config.ts";
+import { ATTACHMENT_DIR, BACKUP_DIR, CODEX_HOME_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, DSH_HOME_DIR, EXECUTOR_HOME_DIR, EXECUTOR_SETTINGS_PATH, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST } from "./config.ts";
 import { registerChatRoutes } from "./chat-routes.ts";
-import { loadExecutorSettings, saveExecutorSettings, viewExecutorSettings } from "./executor-settings.ts";
+import { ExecutorSettingsStore } from "./executor-settings.ts";
 import { probeHermes } from "./hermes-executor.ts";
 import { clearHermesHealthCache } from "./hermes-health.ts";
 import { clearExecutorHealthCache, executorHealth as readExecutorHealth, executorRuntimeSettings, probeExecutor } from "./executor-runtime.ts";
@@ -21,6 +21,7 @@ import { EXECUTORS } from "./executors.ts";
 import { ScheduleError, ScheduleService } from "./schedules.ts";
 import { chatModelConfigured, loadModelSettings, viewModelSettings } from "./model-settings.ts";
 import { ModelRegistry, ModelRegistryError } from "./model-registry.ts";
+import { migrateLegacySettings } from "./settings-migration.ts";
 import { ApprovalError, ApprovalManager, type EffectExecutor } from "./approvals.ts";
 import { BackupError, BackupService } from "./backups.ts";
 import { executeEffect } from "./effects.ts";
@@ -465,25 +466,30 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const outbox = new OutboxService(service, approvals);
   const desktop = new DesktopService(service, options.deviceFrameRoot ?? DEVICE_FRAME_DIR, security);
   const modelSettingsPath = options.modelSettingsPath ?? MODEL_SETTINGS_PATH;
+  const executorSettingsPath = options.executorSettingsPath ?? EXECUTOR_SETTINGS_PATH;
+  const executorSettingsStore = new ExecutorSettingsStore(store, executorSettingsPath);
   const secretBox = options.syncSecretBox ?? SecretBox.fromKeyFile(options.masterKeyPath ?? MASTER_KEY_PATH);
   const modelRegistry = new ModelRegistry({
     store,
     secretBox,
     codexHome: CODEX_HOME_DIR
   });
-  if (!modelRegistry.chatProfileId()) {
-    const legacyModelSettings = loadModelSettings(modelSettingsPath);
-    if (legacyModelSettings.baseUrl && legacyModelSettings.model) modelRegistry.importLegacy(legacyModelSettings);
-  }
+  const settingsMigrations = migrateLegacySettings({
+    store,
+    registry: modelRegistry,
+    executorSettings: executorSettingsStore,
+    modelSettingsPath,
+    executorSettingsPath,
+    backupRoot: options.backupRoot ?? BACKUP_DIR
+  });
   const modelSettingsForExecutor = (executorId: ExecutorId) => modelRegistry.settingsForExecutorOrChat(executorId);
   const codexProfile = () => modelRegistry.codexProfile() ?? loadCodexProfile();
   const codexEnv = () => modelRegistry.codexEnv();
   const attachmentRoot = options.attachmentRoot ?? ATTACHMENT_DIR;
-  const executorSettingsPath = options.executorSettingsPath ?? EXECUTOR_SETTINGS_PATH;
   const executorInstaller = options.executorInstaller ?? new ExecutorInstaller();
   const executorHealth = (executorId: ExecutorId) => readExecutorHealth(
     executorId,
-    loadExecutorSettings(executorSettingsPath),
+    executorSettingsStore.load(),
     executorSettingsPath
   );
   const scheduler = options.startScheduler
@@ -494,6 +500,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
         leases,
         attachmentRoot,
         executorSettingsPath,
+        executorSettingsProvider: () => executorSettingsStore.load(),
         executorHealth,
         modelSettingsPath,
         modelSettingsForExecutor,
@@ -516,7 +523,9 @@ export async function buildServer(options: BuildServerOptions = {}) {
     dbPath: options.dbPath ?? DB_PATH,
     schedulerEnabled: Boolean(scheduler),
     schedulerRunning: () => scheduler?.running ?? false,
-    executorSettingsPath
+    executorSettingsPath,
+    executorSettingsProvider: () => executorSettingsStore.load(),
+    codexProfile
   });
   const diagnostics = new DiagnosticsService({ service, health, maintenance, webDist: WEB_DIST });
   if (options.startMaintenance ?? options.startScheduler) maintenance.start();
@@ -531,6 +540,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     modelSettingsPath,
     attachmentRoot,
     executorSettingsPath,
+    executorSettingsStore,
     registry: modelRegistry,
     codexProfile,
     codexEnv,
@@ -590,6 +600,26 @@ export async function buildServer(options: BuildServerOptions = {}) {
     };
   });
 
+  app.get("/api/settings/storage", async () => ({
+    dataDir: options.dataDir ?? DATA_DIR,
+    schemaVersion: store.getAppMeta().schemaVersion,
+    paths: {
+      database: options.dbPath ?? DB_PATH,
+      executors: EXECUTOR_HOME_DIR,
+      codexHome: CODEX_HOME_DIR,
+      deepseekHarnessHome: DSH_HOME_DIR,
+      contextBlobs: options.contextBlobRoot ?? CONTEXT_BLOB_DIR,
+      backups: options.backupRoot ?? BACKUP_DIR,
+      attachments: attachmentRoot
+    },
+    legacy: {
+      modelSettings: modelSettingsPath,
+      executorSettings: executorSettingsPath
+    },
+    migrations: store.listSettingsMigrations(),
+    startupMigrations: settingsMigrations
+  }));
+
   app.post("/api/model-profiles", async (request, reply) => {
     const parsed = createModelProfileSchema.safeParse(request.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: "INVALID_MODEL_PROFILE", message: "模型档案格式不正确" });
@@ -646,14 +676,14 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
 
   app.get("/api/executor-settings", async () => {
-    const settings = viewExecutorSettings(executorSettingsPath);
+    const settings = executorSettingsStore.view();
     return { settings, hermes: executorHealth("hermes") };
   });
 
   app.put("/api/executor-settings", async (request, reply) => {
     const parsed = executorSettingsSchema.safeParse(request.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: "INVALID_EXECUTOR_SETTINGS", message: "执行器设置格式不正确" });
-    const settings = saveExecutorSettings(executorSettingsPath, parsed.data);
+    const settings = executorSettingsStore.save(parsed.data);
     if (parsed.data.hermesCommand !== undefined || parsed.data.executors?.hermes !== undefined) {
       clearHermesHealthCache();
       clearExecutorHealthCache("hermes");
@@ -665,7 +695,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
 
   app.post("/api/hermes/probe", async () => {
-    const settings = loadExecutorSettings(executorSettingsPath);
+    const settings = executorSettingsStore.load();
     const result = await probeHermes(settings.hermesCommand);
     clearHermesHealthCache(settings.hermesCommand);
     clearExecutorHealthCache("hermes");
@@ -673,7 +703,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
 
   app.get("/api/executors", async () => {
-    const settings = loadExecutorSettings(executorSettingsPath);
+    const settings = executorSettingsStore.load();
     const modelBindings = modelRegistry.bindingViews();
     const executors: ExecutorView[] = EXECUTORS.map((descriptor) => ({
       ...descriptor,
@@ -686,7 +716,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     return {
       executors,
       preferredExecutorId: settings.preferredExecutorId,
-      updatedAt: viewExecutorSettings(executorSettingsPath).updatedAt
+      updatedAt: executorSettingsStore.view().updatedAt
     };
   });
 
@@ -695,7 +725,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     if (!(EXECUTOR_IDS as readonly string[]).includes(id)) {
       return reply.code(404).send({ error: "EXECUTOR_NOT_FOUND", message: "执行器不存在" });
     }
-    const settings = loadExecutorSettings(executorSettingsPath);
+    const settings = executorSettingsStore.load();
     if (id === "hermes") clearHermesHealthCache(settings.hermesCommand);
     return probeExecutor(id as ExecutorId, settings, executorSettingsPath);
   });

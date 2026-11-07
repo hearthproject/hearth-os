@@ -9,10 +9,12 @@ import type {
   ExecutorSettingsView
 } from "@hearth/core";
 import { APPROVAL_MODES, EXECUTOR_IDS } from "@hearth/core";
+import type { HearthStore } from "@hearth/eventlog";
 
 export const DEFAULT_EXECUTOR_CONCURRENCY = 3;
 export const MIN_EXECUTOR_CONCURRENCY = 1;
 export const MAX_EXECUTOR_CONCURRENCY = 4;
+const SETTINGS_KEY = "executor.settings";
 
 export function defaultExecutorSettings(): ExecutorSettings {
   const concurrency = {} as Record<ExecutorId, number>;
@@ -77,6 +79,65 @@ export function viewExecutorSettings(path: string): ExecutorSettingsView {
     };
   } catch {
     return { ...defaultExecutorSettings(), updatedAt: null };
+  }
+}
+
+export class ExecutorSettingsStore {
+  constructor(
+    private readonly store: HearthStore,
+    private readonly legacyPath?: string
+  ) {}
+
+  load(): ExecutorSettings {
+    const raw = this.store.getAppSetting(SETTINGS_KEY);
+    if (!raw) return this.legacyPath ? loadExecutorSettings(this.legacyPath) : defaultExecutorSettings();
+    try {
+      return normalizeExecutorSettings(JSON.parse(raw) as Partial<ExecutorSettings>);
+    } catch {
+      return defaultExecutorSettings();
+    }
+  }
+
+  view(): ExecutorSettingsView {
+    const raw = this.store.getAppSetting(SETTINGS_KEY);
+    if (!raw) {
+      return this.legacyPath
+        ? viewExecutorSettings(this.legacyPath)
+        : { ...defaultExecutorSettings(), updatedAt: null };
+    }
+    try {
+      const parsed = JSON.parse(raw) as Partial<ExecutorSettings> & { updatedAt?: unknown };
+      return {
+        ...normalizeExecutorSettings(parsed),
+        updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : null
+      };
+    } catch {
+      return { ...defaultExecutorSettings(), updatedAt: null };
+    }
+  }
+
+  save(patch: {
+    defaultApprovalMode?: ApprovalMode | undefined;
+    preferredExecutorId?: ExecutorId | null | undefined;
+    concurrency?: Partial<Record<ExecutorId, number | undefined>> | undefined;
+    executors?: Partial<Record<ExecutorId, ExecutorRuntimeSettings>> | undefined;
+    hermesCommand?: string | undefined;
+  }): ExecutorSettingsView {
+    const current = this.load();
+    const next = normalizeExecutorSettings({
+      defaultApprovalMode: patch.defaultApprovalMode ?? current.defaultApprovalMode,
+      preferredExecutorId: patch.preferredExecutorId !== undefined ? patch.preferredExecutorId : current.preferredExecutorId,
+      concurrency: { ...current.concurrency, ...(patch.concurrency ?? {}) },
+      executors: mergeExecutorRuntimeSettings(current.executors, patch.executors),
+      hermesCommand: patch.hermesCommand ?? current.hermesCommand
+    });
+    const updatedAt = new Date().toISOString();
+    this.store.setAppSetting(SETTINGS_KEY, JSON.stringify({ ...next, updatedAt }));
+    return { ...next, updatedAt };
+  }
+
+  hasStoredSettings(): boolean {
+    return Boolean(this.store.getAppSetting(SETTINGS_KEY));
   }
 }
 
