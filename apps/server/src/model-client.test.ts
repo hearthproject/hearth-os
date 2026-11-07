@@ -145,4 +145,15 @@ describe("OpenAI-compatible model client", () => {
     expect(route.action).toBe("chat");
     mode = "chat";
   });
+
+  it("still detects GitHub PR work when the router model is not configured", async () => {
+    const route = await decideRoute(
+      "请你审核我的 GitHub 仓库中目前开着的 PR，列出需要回复修改或 rebase 的",
+      false,
+      null,
+      { ...settings(), apiKey: "" },
+      { preferredExecutorId: "deepseek-harness" }
+    );
+    expect(route.action).toBe("task");
+  });
 });

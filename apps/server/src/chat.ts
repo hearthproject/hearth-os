@@ -61,7 +61,7 @@ export async function decideRoute(
   ].filter(Boolean).join("；");
 
   if (!settings.apiKey || !settings.baseUrl || !settings.model) {
-    return heuristicRoute(message);
+    return forcedTaskRoute(message, options.preferredExecutorId ?? null) ?? heuristicRoute(message);
   }
 
   const messages: ChatMessage[] = [
@@ -104,7 +104,8 @@ export async function decideRoute(
     }
     return { ...parsed, goal: message };
   } catch {
-    return heuristicRoute(message, "聊天模型暂时不可用，已按关键词判断");
+    return forcedTaskRoute(message, options.preferredExecutorId ?? null)
+      ?? heuristicRoute(message, "聊天模型暂时不可用，已按关键词判断");
   }
 }
 
