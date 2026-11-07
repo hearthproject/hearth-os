@@ -31,7 +31,7 @@ import type {
   TaskRecord,
   TaskStatus
 } from "@hearth/core";
-import { assertTransition, defaultConversationSettings, TASK_STATUS_LABELS, TASK_STATUSES } from "@hearth/core";
+import { assertTransition, defaultConversationSettings, EXECUTOR_IDS, TASK_STATUS_LABELS, TASK_STATUSES } from "@hearth/core";
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate, TEMPLATES } from "@hearth/templates";
 import { resolveRepoPath } from "./config.ts";
@@ -489,7 +489,7 @@ export class HearthService {
 
   confirmTaskProposal(
     id: string,
-    available: Record<ExecutorId, boolean> = { native: true, codex: true, hermes: true }
+    available: Record<ExecutorId, boolean> = defaultExecutorAvailability()
   ): { proposal: TaskProposalRecord; task: TaskRecord } {
     const proposal = this.requireProposal(id);
     if (proposal.status !== "pending") throw new Error(`提案状态不能确认：${proposal.status}`);
@@ -736,6 +736,14 @@ export function visibleDeliverables(artifacts: ArtifactRecord[], expectedOutputs
       mimeType: artifact.mimeType,
       bytes: artifact.bytes
     }));
+}
+
+function defaultExecutorAvailability(): Record<ExecutorId, boolean> {
+  const available = {} as Record<ExecutorId, boolean>;
+  for (const id of EXECUTOR_IDS) {
+    available[id] = id === "native" || id === "codex" || id === "hermes";
+  }
+  return available;
 }
 
 function isExpectedPath(path: string, expectedOutputs: string[] | undefined): boolean {

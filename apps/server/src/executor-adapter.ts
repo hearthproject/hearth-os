@@ -223,6 +223,21 @@ export function createExecutorAdapters(input: { native: NativeRunner; codex: Cod
   return {
     native: new NativeExecutorAdapter(input.native),
     codex: new CodexExecutorAdapter(input.codex),
-    hermes: new HermesExecutorAdapter(input.hermes)
+    hermes: new HermesExecutorAdapter(input.hermes),
+    qoder: unavailableAdapter("qoder"),
+    workbuddy: unavailableAdapter("workbuddy"),
+    zcode: unavailableAdapter("zcode"),
+    kimi: unavailableAdapter("kimi")
+  };
+}
+
+function unavailableAdapter(id: ExecutorId): ExecutorAdapter {
+  return {
+    id,
+    supportsResume: false,
+    canRun: () => ({ ok: false, reason: `${id} adapter is not installed yet` }),
+    execute: async () => {
+      throw new Error(`${id} adapter is not installed yet`);
+    }
   };
 }

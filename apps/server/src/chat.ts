@@ -1,6 +1,7 @@
 import { completeChat, type ChatMessage } from "./model-client.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import { wantsGithubAccess, wantsScreenshot } from "./task-intent.ts";
+import type { ExecutorId } from "@hearth/core";
 
 export type ChatAction = "chat" | "task";
 
@@ -14,7 +15,7 @@ export interface ChatRoute {
 export type ExecutionCapability = "github" | "desktop-capture";
 
 export interface ExecutionPlan {
-  executorId: "native" | "codex" | "hermes";
+  executorId: ExecutorId;
   taskKind: "general" | "workspace";
   expectedOutputs: string[];
   capability?: ExecutionCapability;

@@ -216,6 +216,10 @@ export function SchedulesPage() {
                 <option value="native">Hearth 原生</option>
                 <option value="codex">Codex</option>
                 <option value="hermes">Hermes</option>
+                <option value="qoder">Qoder</option>
+                <option value="workbuddy">WorkBuddy</option>
+                <option value="zcode">ZCode</option>
+                <option value="kimi">Kimi Code</option>
               </select>
               {draft.executorId === "hermes" && hermes && !hermes.canRun && (
                 <small className="field-warning"><TriangleAlert size={12} /> Hermes 当前未配置，触发时会跳过并记录原因。</small>

@@ -105,8 +105,9 @@ describe("approval manager", () => {
 
   it("auto-approves full-permission conversation effects and writes an audit event", async () => {
     const conversation = store.createConversation("完全权限对话", {
-      executorEnabled: { native: true, codex: true, hermes: true },
-      approvalMode: "full"
+      executorEnabled: { native: true, codex: true, hermes: true, qoder: false, workbuddy: false, zcode: false, kimi: false },
+      approvalMode: "full",
+      preferredExecutorId: null
     });
     const task = service.createTask({ templateId: "T07", conversationId: conversation.id });
     const now = new Date().toISOString();

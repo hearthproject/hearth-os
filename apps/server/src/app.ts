@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyReply } from "fastify";
-import type { EventEnvelope } from "@hearth/core";
-import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_SENSITIVITIES, PROACTIVE_MODES, RUN_STATUSES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
+import type { EventEnvelope, ExecutorId } from "@hearth/core";
+import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, EXECUTOR_IDS, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_SENSITIVITIES, PROACTIVE_MODES, RUN_STATUSES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate } from "@hearth/templates";
 import { loadCodexProfile } from "@hearth/codex-executor";
@@ -47,7 +47,7 @@ const createTaskSchema = z.object({
   goal: z.string().trim().min(1).max(4000).optional(),
   textInput: z.string().max(100_000).optional(),
   sourceItemIds: z.array(z.string().trim().min(1).max(80)).max(20).optional(),
-  executorId: z.enum(["native", "codex", "hermes"]).optional(),
+  executorId: z.enum(EXECUTOR_IDS).optional(),
   taskKind: z.enum(["delivery", "workspace", "general"]).optional(),
   expectedOutputs: z.array(z.string().trim().min(1).max(200)).max(20).optional(),
   permissions: z.object({
@@ -68,7 +68,7 @@ const contextQuerySchema = z.object({
 }).strict();
 
 const confirmHandoffSchema = z.object({
-  executorId: z.enum(["native", "codex", "hermes"])
+  executorId: z.enum(EXECUTOR_IDS)
 }).strict();
 
 const contextSettingsPatchSchema = z.object({
@@ -191,11 +191,15 @@ const killSwitchSchema = z.object({
 
 const executorSettingsSchema = z.object({
   defaultApprovalMode: z.enum(["necessary", "full"]).optional(),
-  concurrency: z.object({
-    native: z.number().int().min(1).max(4).optional(),
-    codex: z.number().int().min(1).max(4).optional(),
-    hermes: z.number().int().min(1).max(4).optional()
-  }).strict().optional(),
+  preferredExecutorId: z.enum(EXECUTOR_IDS).nullable().optional(),
+  concurrency: z.partialRecord(z.enum(EXECUTOR_IDS), z.number().int().min(1).max(4)).optional(),
+  executors: z.partialRecord(z.enum(EXECUTOR_IDS), z.object({
+    command: z.string().trim().min(1).max(1000).optional(),
+    executablePath: z.string().trim().min(1).max(2000).optional(),
+    installMode: z.enum(["managed", "existing", "detected"]).optional(),
+    authMode: z.enum(["local", "pat", "env"]).optional(),
+    version: z.string().max(200).nullable().optional()
+  }).strict()).optional(),
   hermesCommand: z.string().trim().min(1).max(500).optional()
 }).strict().refine((value) => Object.keys(value).length > 0, { message: "至少需要修改一个设置" });
 
@@ -204,7 +208,7 @@ const scheduleSchema = z.object({
   prompt: z.string().trim().min(1).max(20_000),
   cron: z.string().trim().min(1).max(200),
   timezone: z.string().trim().min(1).max(80).optional(),
-  executorId: z.enum(["native", "codex", "hermes"]).optional(),
+  executorId: z.enum(EXECUTOR_IDS).optional(),
   approvalMode: z.enum(["necessary", "full"]).optional(),
   taskKind: z.enum(["delivery", "workspace", "general"]).optional(),
   enabled: z.boolean().optional()
@@ -426,12 +430,13 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const modelSettingsPath = options.modelSettingsPath ?? MODEL_SETTINGS_PATH;
   const attachmentRoot = options.attachmentRoot ?? ATTACHMENT_DIR;
   const executorSettingsPath = options.executorSettingsPath ?? EXECUTOR_SETTINGS_PATH;
-  const executorHealth = (executorId: "native" | "codex" | "hermes") => {
+  const executorHealth = (executorId: ExecutorId) => {
     if (executorId === "native") return { canRun: true, issues: [] };
     if (executorId === "codex") {
       const profile = loadCodexProfile();
       return { canRun: profile.canRun, issues: profile.issues };
     }
+    if (executorId !== "hermes") return { canRun: false, issues: ["executor health is not wired yet"] };
     const settings = loadExecutorSettings(executorSettingsPath);
     const health = hermesHealth(settings.hermesCommand);
     return { canRun: health.canRun, issues: health.issues };
@@ -1621,11 +1626,9 @@ export async function buildServer(options: BuildServerOptions = {}) {
 
   app.post<{ Params: { id: string } }>("/api/task-proposals/:id/confirm", async (request, reply) => {
     try {
-      const result = service.confirmTaskProposal(request.params.id, {
-        native: executorHealth("native").canRun,
-        codex: executorHealth("codex").canRun,
-        hermes: executorHealth("hermes").canRun
-      });
+      const available = {} as Record<ExecutorId, boolean>;
+      for (const id of EXECUTOR_IDS) available[id] = executorHealth(id).canRun;
+      const result = service.confirmTaskProposal(request.params.id, available);
       scheduler?.kick();
       return result;
     } catch (error) {

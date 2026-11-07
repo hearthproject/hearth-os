@@ -1,4 +1,4 @@
-import type { ExecutorId, TaskRecord } from "@hearth/core";
+import { EXECUTOR_IDS, type ExecutorId, type TaskRecord } from "@hearth/core";
 import type { ExecutionCapability } from "./chat.ts";
 
 export interface ExecutorDescriptor {
@@ -6,6 +6,9 @@ export interface ExecutorDescriptor {
   name: string;
   description: string;
   capabilities: string[];
+  provider?: string;
+  experimental?: boolean;
+  supportsResume?: boolean;
 }
 
 export const EXECUTORS: ExecutorDescriptor[] = [
@@ -26,6 +29,39 @@ export const EXECUTORS: ExecutorDescriptor[] = [
     name: "Hermes 执行器",
     description: "通过本机 Hermes CLI 执行通用代理任务，适合多步研究、工具调用和自动化流程。",
     capabilities: ["通用代理", "工具调用", "多步任务", "流式执行"]
+  },
+  {
+    id: "qoder",
+    name: "Qoder",
+    description: "Use Qoder's official agent SDK with a local qodercli login for general coding tasks.",
+    capabilities: ["Code", "Workspace", "Resume"],
+    provider: "Qoder",
+    supportsResume: true
+  },
+  {
+    id: "workbuddy",
+    name: "WorkBuddy",
+    description: "Use the official CodeBuddy CLI that powers WorkBuddy, reusing its local login.",
+    capabilities: ["Code", "Workspace", "Resume"],
+    provider: "Tencent WorkBuddy",
+    supportsResume: true
+  },
+  {
+    id: "zcode",
+    name: "ZCode",
+    description: "Experimental ZCode desktop integration through its bundled zcode.cjs runtime.",
+    capabilities: ["Code", "Workspace", "Resume"],
+    provider: "ZCode",
+    experimental: true,
+    supportsResume: true
+  },
+  {
+    id: "kimi",
+    name: "Kimi Code",
+    description: "Use the official Kimi Code CLI in non-interactive stream-json mode.",
+    capabilities: ["Code", "Workspace", "Resume"],
+    provider: "Moonshot AI",
+    supportsResume: true
   }
 ];
 
@@ -55,13 +91,13 @@ function capabilityLabel(capability: ExecutionCapability): string {
 export function resolveExecutorFromEnabled(
   preferred: ExecutorId,
   enabled: Record<ExecutorId, boolean>,
-  available: Record<ExecutorId, boolean> = { native: true, codex: true, hermes: true },
+  available: Record<ExecutorId, boolean> = defaultExecutorAvailability(),
   capability?: ExecutionCapability
 ): { executorId: ExecutorId | null; reroutedFrom: ExecutorId | null; reason: string | null } {
   if (enabled[preferred] && available[preferred] && executorSupportsCapability(preferred, capability)) {
     return { executorId: preferred, reroutedFrom: null, reason: null };
   }
-  for (const candidate of ["native", "codex", "hermes"] as const) {
+  for (const candidate of EXECUTOR_IDS) {
     if (candidate === preferred) continue;
     if (enabled[candidate] && available[candidate] && executorSupportsCapability(candidate, capability)) {
       return {
@@ -80,4 +116,10 @@ export function resolveExecutorFromEnabled(
     reroutedFrom: null,
     reason: capability ? `${capabilityLabel(capability)}没有已启用的执行器可用` : null
   };
+}
+
+function defaultExecutorAvailability(): Record<ExecutorId, boolean> {
+  const available = {} as Record<ExecutorId, boolean>;
+  for (const id of EXECUTOR_IDS) available[id] = id === "native";
+  return available;
 }

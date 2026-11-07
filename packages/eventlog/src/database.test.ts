@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
+import { defaultConversationSettings, mergeConversationSettings } from "@hearth/core";
 import type {
   ArtifactRecord,
   DesktopCommandRecord,
@@ -267,26 +268,18 @@ describe("HearthStore", () => {
     raw.close();
 
     const store = new HearthStore(path);
-    expect(store.getConversation("legacy-conv")?.settings).toEqual({
-      executorEnabled: { native: true, codex: true, hermes: true },
-      approvalMode: "necessary"
-    });
+    expect(store.getConversation("legacy-conv")?.settings).toEqual(defaultConversationSettings());
 
     const conversation = store.createConversation("新对话");
-    expect(conversation.settings).toEqual({
-      executorEnabled: { native: true, codex: true, hermes: true },
-      approvalMode: "necessary"
-    });
+    expect(conversation.settings).toEqual(defaultConversationSettings());
     const partial = store.updateConversationSettings(conversation.id, { executorEnabled: { codex: false } });
-    expect(partial?.settings).toEqual({
-      executorEnabled: { native: true, codex: false, hermes: true },
-      approvalMode: "necessary"
-    });
+    expect(partial?.settings).toEqual(
+      mergeConversationSettings(defaultConversationSettings(), { executorEnabled: { codex: false } })
+    );
     const full = store.updateConversationSettings(conversation.id, { approvalMode: "full" });
-    expect(full?.settings).toEqual({
-      executorEnabled: { native: true, codex: false, hermes: true },
-      approvalMode: "full"
-    });
+    expect(full?.settings).toEqual(
+      mergeConversationSettings(defaultConversationSettings(), { executorEnabled: { codex: false }, approvalMode: "full" })
+    );
 
     store.createChatMessage({
       id: "status-1",

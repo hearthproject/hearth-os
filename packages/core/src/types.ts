@@ -11,7 +11,7 @@ export const TASK_STATUSES = [
 
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
-export const EXECUTOR_IDS = ["native", "codex", "hermes"] as const;
+export const EXECUTOR_IDS = ["native", "codex", "hermes", "qoder", "workbuddy", "zcode", "kimi"] as const;
 export type ExecutorId = (typeof EXECUTOR_IDS)[number];
 
 export const APPROVAL_MODES = ["necessary", "full"] as const;
@@ -20,19 +20,22 @@ export type ApprovalMode = (typeof APPROVAL_MODES)[number];
 export interface ConversationSettings {
   executorEnabled: Record<ExecutorId, boolean>;
   approvalMode: ApprovalMode;
+  preferredExecutorId: ExecutorId | null;
 }
 
 export interface ConversationSettingsPatch {
-  executorEnabled?: {
-    native?: boolean | undefined;
-    codex?: boolean | undefined;
-    hermes?: boolean | undefined;
-  } | undefined;
+  executorEnabled?: Partial<Record<ExecutorId, boolean | undefined>> | undefined;
   approvalMode?: ApprovalMode | undefined;
+  preferredExecutorId?: ExecutorId | null | undefined;
 }
 
-export function defaultConversationSettings(approvalMode: ApprovalMode = "necessary"): ConversationSettings {
-  return { executorEnabled: { native: true, codex: true, hermes: true }, approvalMode };
+export function defaultConversationSettings(
+  approvalMode: ApprovalMode = "necessary",
+  enabled: Partial<Record<ExecutorId, boolean | undefined>> = { native: true, codex: true, hermes: true }
+): ConversationSettings {
+  const executorEnabled = {} as Record<ExecutorId, boolean>;
+  for (const id of EXECUTOR_IDS) executorEnabled[id] = enabled[id] ?? false;
+  return { executorEnabled, approvalMode, preferredExecutorId: null };
 }
 
 export function mergeConversationSettings(
@@ -40,25 +43,50 @@ export function mergeConversationSettings(
   patch: ConversationSettingsPatch | null | undefined
 ): ConversationSettings {
   const base = current ?? defaultConversationSettings();
+  const executorEnabled = {} as Record<ExecutorId, boolean>;
+  for (const id of EXECUTOR_IDS) {
+    executorEnabled[id] = patch?.executorEnabled?.[id] ?? base.executorEnabled?.[id] ?? false;
+  }
   return {
-    executorEnabled: {
-      native: patch?.executorEnabled?.native ?? base.executorEnabled.native,
-      codex: patch?.executorEnabled?.codex ?? base.executorEnabled.codex,
-      hermes: patch?.executorEnabled?.hermes ?? base.executorEnabled.hermes
-    },
-    approvalMode: patch?.approvalMode ?? base.approvalMode
+    executorEnabled,
+    approvalMode: patch?.approvalMode ?? base.approvalMode,
+    preferredExecutorId: patch?.preferredExecutorId !== undefined
+      ? patch.preferredExecutorId
+      : base.preferredExecutorId ?? null
   };
+}
+
+export interface ExecutorRuntimeSettings {
+  command?: string | undefined;
+  executablePath?: string | undefined;
+  installMode?: "managed" | "existing" | "detected" | undefined;
+  authMode?: "local" | "pat" | "env" | undefined;
+  version?: string | null | undefined;
+}
+
+export interface ExecutorHealth {
+  id: ExecutorId;
+  canRun: boolean;
+  command: string;
+  version: string | null;
+  issues: string[];
+  experimental?: boolean | undefined;
+  installState?: "available" | "missing" | "needs_repair" | "update_available" | "unsupported" | undefined;
 }
 
 export interface ExecutorSettings {
   defaultApprovalMode: ApprovalMode;
+  preferredExecutorId: ExecutorId | null;
   concurrency: Record<ExecutorId, number>;
+  executors: Partial<Record<ExecutorId, ExecutorRuntimeSettings>>;
   hermesCommand: string;
 }
 
 export interface ExecutorSettingsPatch {
   defaultApprovalMode?: ApprovalMode | undefined;
+  preferredExecutorId?: ExecutorId | null | undefined;
   concurrency?: Partial<Record<ExecutorId, number>> | undefined;
+  executors?: Partial<Record<ExecutorId, ExecutorRuntimeSettings>> | undefined;
   hermesCommand?: string | undefined;
 }
 

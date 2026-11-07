@@ -22,6 +22,7 @@ import type {
   DesktopSessionView,
   DeviceCapabilityKind,
   DeviceView,
+  ExecutorId,
   ExecutorSettingsPatch,
   ExecutorSettingsResponse,
   EventWindow,
@@ -324,7 +325,7 @@ export const api = {
   taskContext: (id: string, params: { limit?: number; before?: number } = {}) =>
     request<TaskContextResponse>(`/api/tasks/${encodeURIComponent(id)}/context${query(params)}`),
   taskHandoffs: (id: string) => request<TaskHandoffsResponse>(`/api/tasks/${encodeURIComponent(id)}/handoffs`),
-  confirmHandoff: (id: string, executorId: "native" | "codex" | "hermes") =>
+  confirmHandoff: (id: string, executorId: ExecutorId) =>
     request<ConfirmHandoffResponse>(`/api/tasks/${encodeURIComponent(id)}/handoff`, {
       method: "POST",
       body: JSON.stringify({ executorId })

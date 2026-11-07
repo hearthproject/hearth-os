@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HearthStore } from "@hearth/eventlog";
+import { defaultConversationSettings, mergeConversationSettings } from "@hearth/core";
 import { buildServer } from "./app.ts";
 import { visibleDeliverables } from "./service.ts";
 
@@ -67,7 +68,7 @@ describe("chat-first API", () => {
     const created = await app.inject({ method: "POST", url: "/api/conversations", payload: { title: "测试对话" } });
     expect(created.statusCode).toBe(201);
     const id = created.json().id as string;
-    expect(created.json().settings).toEqual({ executorEnabled: { native: true, codex: true, hermes: true }, approvalMode: "necessary" });
+    expect(created.json().settings).toEqual(defaultConversationSettings());
 
     const renamed = await app.inject({ method: "PATCH", url: `/api/conversations/${id}`, payload: { title: "改名后" } });
     expect(renamed.json().title).toBe("改名后");
@@ -77,10 +78,9 @@ describe("chat-first API", () => {
       url: `/api/conversations/${id}`,
       payload: { settings: { executorEnabled: { codex: false }, approvalMode: "full" } }
     });
-    expect(configured.json().settings).toEqual({
-      executorEnabled: { native: true, codex: false, hermes: true },
-      approvalMode: "full"
-    });
+    expect(configured.json().settings).toEqual(
+      mergeConversationSettings(defaultConversationSettings(), { executorEnabled: { codex: false }, approvalMode: "full" })
+    );
 
     const invalid = await app.inject({
       method: "PATCH",
@@ -127,6 +127,46 @@ describe("chat-first API", () => {
     expect(oldDetail.json().conversation.settings.approvalMode).toBe("necessary");
     await app.close();
   });
+
+  it("merges executor settings patches without dropping fields", async () => {
+    const app = await buildServer({
+      store,
+      serveWeb: false,
+      modelSettingsPath: join(root, "settings.json"),
+      attachmentRoot: join(root, "files"),
+      executorSettingsPath: join(root, "executor-settings.json")
+    });
+
+    const concurrency = await app.inject({
+      method: "PUT",
+      url: "/api/executor-settings",
+      payload: { concurrency: { qoder: 2 } }
+    });
+    expect(concurrency.statusCode).toBe(200);
+    expect(concurrency.json().settings.concurrency).toEqual(
+      expect.objectContaining({ native: 3, codex: 3, hermes: 3, qoder: 2, kimi: 3 })
+    );
+
+    const command = await app.inject({
+      method: "PUT",
+      url: "/api/executor-settings",
+      payload: { executors: { qoder: { command: "qodercli" } } }
+    });
+    expect(command.statusCode).toBe(200);
+
+    const auth = await app.inject({
+      method: "PUT",
+      url: "/api/executor-settings",
+      payload: { executors: { qoder: { authMode: "pat" } }, preferredExecutorId: "kimi" }
+    });
+    expect(auth.statusCode).toBe(200);
+    expect(auth.json().settings.preferredExecutorId).toBe("kimi");
+
+    const view = await app.inject({ method: "GET", url: "/api/executor-settings" });
+    expect(view.json().settings.executors.qoder).toEqual({ command: "qodercli", authMode: "pat" });
+    expect(view.json().settings.concurrency.qoder).toBe(2);
+    await app.close();
+  }, 30_000);
 
   it("routes an execution request to a task and keeps the conversation link", async () => {
     const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });

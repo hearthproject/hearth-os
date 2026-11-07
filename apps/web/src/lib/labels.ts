@@ -145,7 +145,11 @@ export const CATEGORY_LABELS: Record<string, string> = {
 export const EXECUTOR_LABELS: Record<string, string> = {
   native: "Hearth 原生",
   codex: "Codex",
-  hermes: "Hermes"
+  hermes: "Hermes",
+  qoder: "Qoder",
+  workbuddy: "WorkBuddy",
+  zcode: "ZCode",
+  kimi: "Kimi Code"
 };
 
 export const TASK_KIND_LABELS: Record<string, string> = {

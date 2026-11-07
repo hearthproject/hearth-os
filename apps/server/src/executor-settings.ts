@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import type {
   ApprovalMode,
   ExecutorId,
+  ExecutorRuntimeSettings,
   ExecutorSettings,
   ExecutorSettingsPatch,
   ExecutorSettingsView
@@ -14,9 +15,13 @@ export const MIN_EXECUTOR_CONCURRENCY = 1;
 export const MAX_EXECUTOR_CONCURRENCY = 4;
 
 export function defaultExecutorSettings(): ExecutorSettings {
+  const concurrency = {} as Record<ExecutorId, number>;
+  for (const id of EXECUTOR_IDS) concurrency[id] = DEFAULT_EXECUTOR_CONCURRENCY;
   return {
     defaultApprovalMode: "necessary",
-    concurrency: { native: DEFAULT_EXECUTOR_CONCURRENCY, codex: DEFAULT_EXECUTOR_CONCURRENCY, hermes: DEFAULT_EXECUTOR_CONCURRENCY },
+    preferredExecutorId: null,
+    concurrency,
+    executors: {},
     hermesCommand: "hermes"
   };
 }
@@ -35,14 +40,18 @@ export function saveExecutorSettings(
   path: string,
   patch: {
     defaultApprovalMode?: ApprovalMode | undefined;
+    preferredExecutorId?: ExecutorId | null | undefined;
     concurrency?: Partial<Record<ExecutorId, number | undefined>> | undefined;
+    executors?: Partial<Record<ExecutorId, ExecutorRuntimeSettings>> | undefined;
     hermesCommand?: string | undefined;
   }
 ): ExecutorSettingsView {
   const current = loadExecutorSettings(path);
   const next = normalizeExecutorSettings({
     defaultApprovalMode: patch.defaultApprovalMode ?? current.defaultApprovalMode,
+    preferredExecutorId: patch.preferredExecutorId !== undefined ? patch.preferredExecutorId : current.preferredExecutorId,
     concurrency: { ...current.concurrency, ...(patch.concurrency ?? {}) },
+    executors: mergeExecutorRuntimeSettings(current.executors, patch.executors),
     hermesCommand: patch.hermesCommand ?? current.hermesCommand
   });
   const updatedAt = new Date().toISOString();
@@ -71,9 +80,23 @@ export function viewExecutorSettings(path: string): ExecutorSettingsView {
   }
 }
 
+function mergeExecutorRuntimeSettings(
+  current: Partial<Record<ExecutorId, ExecutorRuntimeSettings>>,
+  patch: Partial<Record<ExecutorId, ExecutorRuntimeSettings>> | undefined
+): Partial<Record<ExecutorId, ExecutorRuntimeSettings>> {
+  const merged: Partial<Record<ExecutorId, ExecutorRuntimeSettings>> = { ...current };
+  for (const id of EXECUTOR_IDS) {
+    const next = patch?.[id];
+    if (next) merged[id] = { ...merged[id], ...next };
+  }
+  return merged;
+}
+
 export function normalizeExecutorSettings(input: {
   defaultApprovalMode?: ApprovalMode | undefined;
+  preferredExecutorId?: ExecutorId | null | undefined;
   concurrency?: Partial<Record<ExecutorId, number | undefined>> | undefined;
+  executors?: Partial<Record<ExecutorId, ExecutorRuntimeSettings>> | undefined;
   hermesCommand?: string | undefined;
 }): ExecutorSettings {
   const defaults = defaultExecutorSettings();
@@ -81,13 +104,41 @@ export function normalizeExecutorSettings(input: {
   for (const id of EXECUTOR_IDS) {
     concurrency[id] = normalizeConcurrency(input.concurrency?.[id], defaults.concurrency[id]);
   }
+  const executors = normalizeExecutors(input.executors);
+  const configuredHermesCommand = typeof input.hermesCommand === "string" && input.hermesCommand.trim()
+    ? input.hermesCommand.trim()
+    : executors.hermes?.command?.trim() || defaults.hermesCommand;
+  executors.hermes = { ...executors.hermes, command: configuredHermesCommand };
   return {
     defaultApprovalMode: normalizeApprovalMode(input.defaultApprovalMode),
+    preferredExecutorId: normalizeExecutorId(input.preferredExecutorId),
     concurrency,
-    hermesCommand: typeof input.hermesCommand === "string" && input.hermesCommand.trim()
-      ? input.hermesCommand.trim()
-      : defaults.hermesCommand
+    executors,
+    hermesCommand: configuredHermesCommand
   };
+}
+
+function normalizeExecutorId(value: unknown): ExecutorId | null {
+  return typeof value === "string" && (EXECUTOR_IDS as readonly string[]).includes(value)
+    ? value as ExecutorId
+    : null;
+}
+
+function normalizeExecutors(input: Partial<Record<ExecutorId, ExecutorRuntimeSettings>> | undefined): Partial<Record<ExecutorId, ExecutorRuntimeSettings>> {
+  const output: Partial<Record<ExecutorId, ExecutorRuntimeSettings>> = {};
+  if (!input || typeof input !== "object") return output;
+  for (const id of EXECUTOR_IDS) {
+    const raw = input[id];
+    if (!raw || typeof raw !== "object") continue;
+    const runtime: ExecutorRuntimeSettings = {};
+    if (typeof raw.command === "string" && raw.command.trim()) runtime.command = raw.command.trim();
+    if (typeof raw.executablePath === "string" && raw.executablePath.trim()) runtime.executablePath = raw.executablePath.trim();
+    if (raw.installMode === "managed" || raw.installMode === "existing" || raw.installMode === "detected") runtime.installMode = raw.installMode;
+    if (raw.authMode === "local" || raw.authMode === "pat" || raw.authMode === "env") runtime.authMode = raw.authMode;
+    if (typeof raw.version === "string" || raw.version === null) runtime.version = raw.version;
+    output[id] = runtime;
+  }
+  return output;
 }
 
 function normalizeApprovalMode(value: unknown): ApprovalMode {

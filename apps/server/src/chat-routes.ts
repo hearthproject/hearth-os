@@ -5,7 +5,7 @@ import multipart from "@fastify/multipart";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
 import type { ChatAttachment, ChatMessageRecord, ExecutorId } from "@hearth/core";
-import { defaultConversationSettings, mergeConversationSettings } from "@hearth/core";
+import { defaultConversationSettings, EXECUTOR_IDS, mergeConversationSettings } from "@hearth/core";
 import { loadCodexProfile, probeCodex } from "@hearth/codex-executor";
 import { loadExecutorSettings } from "./executor-settings.ts";
 import { executorName, resolveExecutorFromEnabled } from "./executors.ts";
@@ -32,12 +32,9 @@ const attachmentSchema = z.object({
 }).strict();
 
 const conversationSettingsSchema = z.object({
-  executorEnabled: z.object({
-    native: z.boolean().optional(),
-    codex: z.boolean().optional(),
-    hermes: z.boolean().optional()
-  }).strict().optional(),
-  approvalMode: z.enum(["necessary", "full"]).optional()
+  executorEnabled: z.partialRecord(z.enum(EXECUTOR_IDS), z.boolean()).optional(),
+  approvalMode: z.enum(["necessary", "full"]).optional(),
+  preferredExecutorId: z.enum(EXECUTOR_IDS).nullable().optional()
 }).strict();
 
 const chatSchema = z.object({
@@ -88,15 +85,16 @@ export interface ChatRouteOptions {
 export async function registerChatRoutes(app: FastifyInstance, options: ChatRouteOptions): Promise<void> {
   const { service, modelSettingsPath, attachmentRoot, executorSettingsPath } = options;
   const store = service.store;
-  const defaultSettings = () => defaultConversationSettings(loadExecutorSettings(executorSettingsPath).defaultApprovalMode);
   const executorAvailability = (): Record<ExecutorId, boolean> => {
     const executorSettings = loadExecutorSettings(executorSettingsPath);
-    return {
-      native: true,
-      codex: loadCodexProfile().canRun,
-      hermes: hermesHealth(executorSettings.hermesCommand).canRun
-    };
+    const availability = {} as Record<ExecutorId, boolean>;
+    for (const id of EXECUTOR_IDS) availability[id] = false;
+    availability.native = true;
+    availability.codex = loadCodexProfile().canRun;
+    availability.hermes = hermesHealth(executorSettings.hermesCommand).canRun;
+    return availability;
   };
+  const defaultSettings = () => defaultConversationSettings(loadExecutorSettings(executorSettingsPath).defaultApprovalMode);
   mkdirSync(attachmentRoot, { recursive: true });
   await app.register(multipart, {
     limits: { fileSize: 25 * 1024 * 1024, files: 5, fields: 10, parts: 20 }

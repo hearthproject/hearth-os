@@ -87,8 +87,9 @@ describe("Hearth service agent metadata", () => {
     const store = new HearthStore(":memory:");
     const service = new HearthService(store);
     const conversation = store.createConversation("改派对话", {
-      executorEnabled: { native: false, codex: true, hermes: true },
-      approvalMode: "necessary"
+      executorEnabled: { native: false, codex: true, hermes: true, qoder: false, workbuddy: false, zcode: false, kimi: false },
+      approvalMode: "necessary",
+      preferredExecutorId: null
     });
     const proposal = service.createTaskProposal({
       conversationId: conversation.id,
@@ -110,8 +111,9 @@ describe("Hearth service agent metadata", () => {
     const store = new HearthStore(":memory:");
     const service = new HearthService(store);
     const conversation = store.createConversation("全关对话", {
-      executorEnabled: { native: false, codex: false, hermes: false },
-      approvalMode: "necessary"
+      executorEnabled: { native: false, codex: false, hermes: false, qoder: false, workbuddy: false, zcode: false, kimi: false },
+      approvalMode: "necessary",
+      preferredExecutorId: null
     });
     const proposal = service.createTaskProposal({
       conversationId: conversation.id,
@@ -131,8 +133,9 @@ describe("Hearth service agent metadata", () => {
     const store = new HearthStore(":memory:");
     const service = new HearthService(store);
     const conversation = store.createConversation("完全权限对话", {
-      executorEnabled: { native: true, codex: true, hermes: true },
-      approvalMode: "full"
+      executorEnabled: { native: true, codex: true, hermes: true, qoder: false, workbuddy: false, zcode: false, kimi: false },
+      approvalMode: "full",
+      preferredExecutorId: null
     });
     const task = service.createTask({ title: "外部动作", goal: "发布动作", conversationId: conversation.id });
     service.updateTask(task.id, { status: "running" });

@@ -108,7 +108,7 @@ export class ScheduleService {
     const enabled = input.enabled ?? true;
     const conversation = this.service.store.createConversation(
       `定时 · ${name}`,
-      { ...defaultConversationSettings(approvalMode), executorEnabled: { native: true, codex: true, hermes: true } }
+      defaultConversationSettings(approvalMode)
     );
     const now = this.now();
     const schedule: ScheduleRecord = {

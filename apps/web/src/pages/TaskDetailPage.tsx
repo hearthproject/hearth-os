@@ -22,7 +22,7 @@ import { formatBytes, formatDuration, formatTime, formatTokens, relativeTime } f
 import { executorLabel, taskKindLabel } from "../lib/labels.ts";
 import { ApprovalCard } from "../components/ApprovalCard.tsx";
 import { StatusPill } from "../components/StatusPill.tsx";
-import type { ArtifactRecord, ContextItem, HandoffRecord, RunRecord, TaskContextResponse, TaskDeliverable, TaskProgressDetail, TaskView } from "../lib/types.ts";
+import type { ArtifactRecord, ContextItem, ExecutorId, HandoffRecord, RunRecord, TaskContextResponse, TaskDeliverable, TaskProgressDetail, TaskView } from "../lib/types.ts";
 
 export function TaskDetailPage() {
   const { id = "" } = useParams();
@@ -47,7 +47,7 @@ export function TaskDetailPage() {
     }
   });
   const confirmHandoff = useMutation({
-    mutationFn: (executorId: "native" | "codex" | "hermes") => api.confirmHandoff(id, executorId),
+    mutationFn: (executorId: ExecutorId) => api.confirmHandoff(id, executorId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["task", id] });
       void queryClient.invalidateQueries({ queryKey: ["task-context", id] });

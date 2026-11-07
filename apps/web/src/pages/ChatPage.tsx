@@ -47,8 +47,9 @@ const SUGGESTIONS = [
 ];
 
 const DEFAULT_SETTINGS: ConversationSettings = {
-  executorEnabled: { native: true, codex: true, hermes: true },
-  approvalMode: "necessary"
+  executorEnabled: { native: true, codex: true, hermes: true, qoder: false, workbuddy: false, zcode: false, kimi: false },
+  approvalMode: "necessary",
+  preferredExecutorId: null
 };
 
 interface RoutingState {
@@ -155,9 +156,16 @@ export function ChatPage() {
       executorEnabled: {
         native: patch.executorEnabled?.native ?? conversationSettings.executorEnabled.native,
         codex: patch.executorEnabled?.codex ?? conversationSettings.executorEnabled.codex,
-        hermes: patch.executorEnabled?.hermes ?? conversationSettings.executorEnabled.hermes
+        hermes: patch.executorEnabled?.hermes ?? conversationSettings.executorEnabled.hermes,
+        qoder: patch.executorEnabled?.qoder ?? conversationSettings.executorEnabled.qoder,
+        workbuddy: patch.executorEnabled?.workbuddy ?? conversationSettings.executorEnabled.workbuddy,
+        zcode: patch.executorEnabled?.zcode ?? conversationSettings.executorEnabled.zcode,
+        kimi: patch.executorEnabled?.kimi ?? conversationSettings.executorEnabled.kimi
       },
-      approvalMode: patch.approvalMode ?? conversationSettings.approvalMode
+      approvalMode: patch.approvalMode ?? conversationSettings.approvalMode,
+      preferredExecutorId: patch.preferredExecutorId !== undefined
+        ? patch.preferredExecutorId
+        : conversationSettings.preferredExecutorId
     };
     if (!conversationId) {
       setDraftSettings(next);
@@ -318,12 +326,15 @@ export function ChatPage() {
   const executorAvailability: Record<ExecutorId, boolean> = {
     native: true,
     codex: healthQuery.data?.codex.canRun ?? true,
-    hermes: healthQuery.data?.hermes.canRun ?? false
+    hermes: healthQuery.data?.hermes.canRun ?? false,
+    qoder: false,
+    workbuddy: false,
+    zcode: false,
+    kimi: false
   };
-  const executorReady = executorAvailability.native || executorAvailability.codex || executorAvailability.hermes;
-  const allExecutorsOff = !conversationSettings.executorEnabled.native
-    && !conversationSettings.executorEnabled.codex
-    && !conversationSettings.executorEnabled.hermes;
+  const executorIds = Object.keys(executorAvailability) as ExecutorId[];
+  const executorReady = executorIds.some((id) => executorAvailability[id] && conversationSettings.executorEnabled[id]);
+  const allExecutorsOff = !executorIds.some((id) => conversationSettings.executorEnabled[id]);
   const isEmpty = messages.length === 0 && !streaming && !sending;
 
   return (
