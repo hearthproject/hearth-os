@@ -164,7 +164,7 @@ function notificationHandler(options: DeepSeekHarnessRunOptions): (notification:
     const data = isRecord(record.data) ? record.data : {};
     const sessionId = typeof notification.params.sessionId === "string" ? notification.params.sessionId : "session";
     const executorEventId = `dsh:${sessionId}:${seq ?? executorEventIdFromData(data)}`;
-    if (type === "assistant/message" || type === "assistant/attempt") {
+    if (type === "assistant/message") {
       const message = isRecord(data.message) ? data.message : {};
       const content = contentText(message.content);
       if (content) options.onContextItem?.({
@@ -172,6 +172,12 @@ function notificationHandler(options: DeepSeekHarnessRunOptions): (notification:
         ...(isRecord(data.usage) ? { usage: normalizeUsage(data.usage) } : {})
       });
       options.onProgress?.({ type: "dsh.assistant", message: clip(content || "模型正在生成回复", 1_200) });
+      return;
+    }
+    if (type === "assistant/attempt") {
+      const message = isRecord(data.message) ? data.message : {};
+      const content = contentText(message.content);
+      options.onProgress?.({ type: "dsh.assistant.attempt", message: clip(content || "模型正在准备回复", 1_200) });
       return;
     }
     if (type === "tool/call") {

@@ -1,5 +1,6 @@
 import { execFile, execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { loadCodexProfile } from "@hearth/codex-executor";
@@ -60,6 +61,7 @@ const NODE_CLI_SPECS: Partial<Record<ExecutorId, NodeCliSpec>> = {
 };
 
 const healthCache = new Map<string, CacheEntry>();
+const require = createRequire(import.meta.url);
 
 export function executorHome(settingsPath: string, id: ExecutorId): string {
   return join(dirname(settingsPath), "executors", id);
@@ -176,6 +178,17 @@ function computeHealthSync(id: ExecutorId, settings: ExecutorSettings, settingsP
       installState: profile.canRun ? "available" : "needs_repair"
     };
   }
+  if (id === "deepseek-harness") {
+    const packagePath = dshPackagePath();
+    return {
+      id,
+      canRun: Boolean(packagePath),
+      command: "dsh-sdk",
+      version: packagePath ? packageVersion(packagePath) : null,
+      issues: packagePath ? [] : ["DeepSeek Harness SDK 未安装；请重新安装项目依赖"],
+      installState: packagePath ? "available" : "missing"
+    };
+  }
   if (id === "hermes") {
     const command = executorRuntimeSettings(settings, id).command?.trim() || settings.hermesCommand || "hermes";
     const health = hermesHealth(command);
@@ -201,7 +214,7 @@ async function computeHealthAsync(
   settingsPath: string,
   timeoutMs: number
 ): Promise<ExecutorHealth> {
-  if (id === "native" || id === "codex" || id === "hermes") return computeHealthSync(id, settings, settingsPath);
+  if (id === "native" || id === "codex" || id === "deepseek-harness" || id === "hermes") return computeHealthSync(id, settings, settingsPath);
   const launch = resolveExecutorLaunch(id, settings, settingsPath);
   if (!launch) return missingHealth(id);
   if (id === "qoder") return qoderHealth(launch, executorRuntimeSettings(settings, id));
@@ -428,6 +441,14 @@ function packageVersion(path: string): string | null {
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8")) as { version?: unknown };
     return typeof parsed.version === "string" ? parsed.version : null;
+  } catch {
+    return null;
+  }
+}
+
+function dshPackagePath(): string | null {
+  try {
+    return require.resolve("@deepseek-ai/dsh-sdk-client/package.json");
   } catch {
     return null;
   }

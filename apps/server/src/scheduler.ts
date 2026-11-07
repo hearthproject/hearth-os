@@ -338,8 +338,18 @@ export class HearthScheduler {
       const limit = Math.max(1, settings.concurrency[executorId] ?? 1);
       if (active.size >= limit) continue;
       const health = this.executorHealth(executorId, settings);
-      if (!health.canRun) {
-        this.markExecutorUnavailable(task, executorId, health.issues);
+      const adapterCheck = this.adapters[executorId].canRun({
+        task,
+        prepared: null,
+        settings: this.context.settings(),
+        executorSettings: settings,
+        modelSettings: this.modelSettingsForExecutor(executorId)
+      });
+      if (!health.canRun || !adapterCheck.ok) {
+        this.markExecutorUnavailable(task, executorId, [
+          ...health.issues,
+          ...(adapterCheck.reason ? [adapterCheck.reason] : [])
+        ]);
         continue;
       }
       active.add(task.id);
