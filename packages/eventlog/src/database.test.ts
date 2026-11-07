@@ -86,8 +86,14 @@ describe("HearthStore", () => {
       DROP TABLE IF EXISTS task_context_state;
       DROP TABLE IF EXISTS handoffs;
       DROP TABLE IF EXISTS context_settings;
+      DROP TABLE IF EXISTS method_applications;
+      DROP INDEX IF EXISTS method_candidates_fingerprint_idx;
       ALTER TABLE runs DROP COLUMN parent_run_id;
       ALTER TABLE runs DROP COLUMN handoff_id;
+      ALTER TABLE tasks DROP COLUMN method_id;
+      ALTER TABLE tasks DROP COLUMN method_version;
+      ALTER TABLE method_candidates DROP COLUMN generation;
+      ALTER TABLE method_candidates DROP COLUMN fingerprint;
       PRAGMA user_version = 8;
     `);
     legacy.close();
@@ -106,6 +112,16 @@ describe("HearthStore", () => {
     expect(loaded?.parentRunId).toBe("run-1");
     expect(loaded?.handoffId).toBe("handoff-1");
 
+    const pinned = { ...task("task-2"), methodId: "method-1", methodVersion: 1 };
+    migrated.appendEvent({ type: "task.created", taskId: "task-2", payload: pinned });
+    expect(migrated.getTask("task-2")?.methodId).toBe("method-1");
+    expect(migrated.getTask("task-2")?.methodVersion).toBe(1);
+    migrated.insertMethodApplication({
+      id: "application-1", taskId: "task-2", runId: "run-3", methodId: "method-1",
+      methodVersion: 1, selection: "pinned", promptSha256: "d".repeat(64), createdAt
+    });
+    expect(migrated.listMethodApplications({ taskId: "task-2" })).toHaveLength(1);
+
     const item = migrated.appendContextItem({
       seq: 0, id: "context-1", conversationId: null, taskId: "task-1", runId: "run-2",
       executorId: "codex", kind: "assistant_message", role: "assistant", content: "continued",
@@ -114,6 +130,33 @@ describe("HearthStore", () => {
     });
     expect(item.seq).toBe(1);
     migrated.close();
+  });
+
+  it("stores method generations and keeps applications across projection rebuilds", () => {
+    const store = new HearthStore(":memory:");
+    const createdAt = "2026-11-05T00:00:00.000Z";
+    store.appendEvent({
+      type: "method.candidate.created",
+      payload: {
+        id: "method-1", name: "方法", summary: "摘要", applicability: "T01", steps: ["执行"],
+        sourceTaskIds: ["task-1"], templateId: "T01", status: "adopted", version: 1,
+        generation: 2, fingerprint: "f".repeat(64), previousVersionId: null,
+        allowedCapabilities: [], guardrails: [],
+        baseline: { tasks: 0, completed: 0, failed: 0, successRate: null, avgDurationMs: null, inputTokens: 0, outputTokens: 0, approvals: 0 },
+        trial: { tasks: 0, completed: 0, failed: 0, successRate: null, avgDurationMs: null, inputTokens: 0, outputTokens: 0, approvals: 0 },
+        evaluationVerdict: null, createdAt, updatedAt: createdAt, adoptedAt: createdAt, retiredAt: null
+      }
+    });
+    expect(store.getMethodCandidate("method-1")?.generation).toBe(2);
+    expect(store.getMethodCandidate("method-1")?.fingerprint).toBe("f".repeat(64));
+    store.insertMethodApplication({
+      id: "application-1", taskId: "task-1", runId: "run-1", methodId: "method-1",
+      methodVersion: 1, selection: "auto_template", promptSha256: "e".repeat(64), createdAt
+    });
+    store.rebuildProjections();
+    expect(store.getMethodCandidate("method-1")?.generation).toBe(2);
+    expect(store.listMethodApplications({ taskId: "task-1" })).toHaveLength(1);
+    store.close();
   });
 
   it("pages audit reads without truncation and skips unrecorded usage", () => {

@@ -430,7 +430,7 @@ export class BackupService {
 
   private databaseCounts(store: HearthStore): Record<string, number> {
     const counts: Record<string, number> = {};
-    for (const table of ["tasks", "runs", "events", "approvals", "artifacts", "memories", "method_candidates", "devices"]) {
+    for (const table of ["tasks", "runs", "events", "approvals", "artifacts", "memories", "method_candidates", "method_applications", "devices"]) {
       const row = store.db.prepare(`SELECT COUNT(*) AS total FROM ${quoteIdentifier(table)}`).get() as { total?: number };
       counts[table] = Number(row.total ?? 0);
     }

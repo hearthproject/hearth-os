@@ -31,6 +31,7 @@ import type {
   MemoryRecord,
   MemorySettings,
   MemoryVersion,
+  MethodApplication,
   MethodCandidate,
   MethodEvaluation,
   MethodTrial,
@@ -91,7 +92,7 @@ export interface RunAggregate {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 10;
+export const CURRENT_SCHEMA_VERSION = 11;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -111,7 +112,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   deadline TEXT, inputs_json TEXT NOT NULL, network_hosts_json TEXT NOT NULL,
   output_dir TEXT NOT NULL, current_run_id TEXT, next_action TEXT, error_json TEXT,
   result_summary TEXT, conversation_id TEXT, executor_id TEXT, task_kind TEXT,
-  expected_outputs_json TEXT, permissions_json TEXT, pending_input TEXT
+  expected_outputs_json TEXT, permissions_json TEXT, pending_input TEXT,
+  method_id TEXT, method_version INTEGER
 );
 CREATE TABLE IF NOT EXISTS conversations (
   id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
@@ -352,7 +354,8 @@ CREATE TABLE IF NOT EXISTS settings_migrations (
 CREATE TABLE IF NOT EXISTS method_candidates (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, summary TEXT NOT NULL, applicability TEXT NOT NULL,
   steps_json TEXT NOT NULL, source_task_ids_json TEXT NOT NULL, template_id TEXT,
-  status TEXT NOT NULL, version INTEGER NOT NULL, previous_version_id TEXT,
+  status TEXT NOT NULL, version INTEGER NOT NULL, generation INTEGER, fingerprint TEXT,
+  previous_version_id TEXT,
   allowed_capabilities_json TEXT NOT NULL, guardrails_json TEXT NOT NULL,
   baseline_json TEXT NOT NULL, trial_json TEXT NOT NULL, evaluation_verdict TEXT,
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL, adopted_at TEXT, retired_at TEXT
@@ -366,6 +369,11 @@ CREATE TABLE IF NOT EXISTS method_evaluations (
 CREATE TABLE IF NOT EXISTS method_trials (
   id TEXT PRIMARY KEY, method_id TEXT NOT NULL, method_version INTEGER NOT NULL,
   task_id TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS method_applications (
+  id TEXT PRIMARY KEY, task_id TEXT NOT NULL, run_id TEXT NOT NULL,
+  method_id TEXT NOT NULL, method_version INTEGER NOT NULL,
+  selection TEXT NOT NULL, prompt_sha256 TEXT NOT NULL, created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS sync_peers (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL, status TEXT NOT NULL,
@@ -434,6 +442,8 @@ CREATE INDEX IF NOT EXISTS memory_forget_receipts_memory_idx ON memory_forget_re
 CREATE INDEX IF NOT EXISTS method_candidates_status_idx ON method_candidates(status, updated_at);
 CREATE INDEX IF NOT EXISTS method_evaluations_method_idx ON method_evaluations(method_id, created_at);
 CREATE INDEX IF NOT EXISTS method_trials_method_idx ON method_trials(method_id, created_at);
+CREATE INDEX IF NOT EXISTS method_applications_task_idx ON method_applications(task_id, created_at);
+CREATE INDEX IF NOT EXISTS method_applications_method_idx ON method_applications(method_id, method_version, created_at);
 CREATE INDEX IF NOT EXISTS sync_conflicts_status_idx ON sync_conflicts(status, created_at);
 CREATE INDEX IF NOT EXISTS task_leases_expiry_idx ON task_leases(expires_at);
 CREATE INDEX IF NOT EXISTS chat_messages_conversation_idx ON chat_messages(conversation_id, created_at);
@@ -470,6 +480,10 @@ export class HearthStore {
     ensureColumn(this.db, "tasks", "expected_outputs_json", "TEXT");
     ensureColumn(this.db, "tasks", "permissions_json", "TEXT");
     ensureColumn(this.db, "tasks", "pending_input", "TEXT");
+    ensureColumn(this.db, "tasks", "method_id", "TEXT");
+    ensureColumn(this.db, "tasks", "method_version", "INTEGER");
+    ensureColumn(this.db, "method_candidates", "generation", "INTEGER");
+    ensureColumn(this.db, "method_candidates", "fingerprint", "TEXT");
     ensureColumn(this.db, "task_proposals", "inputs_json", "TEXT");
     ensureColumn(this.db, "runs", "executor_id", "TEXT");
     ensureColumn(this.db, "runs", "checkpoint_seq", "INTEGER");
@@ -494,6 +508,7 @@ export class HearthStore {
         WHERE kind = 'task_status' AND task_id IS NOT NULL;
       CREATE INDEX IF NOT EXISTS model_profiles_provider_idx ON model_profiles(provider_id, updated_at);
       CREATE INDEX IF NOT EXISTS settings_migrations_status_idx ON settings_migrations(status, updated_at);
+      CREATE INDEX IF NOT EXISTS method_candidates_fingerprint_idx ON method_candidates(fingerprint);
     `);
     this.db.exec(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION}`);
     this.setMeta("schemaVersion", String(CURRENT_SCHEMA_VERSION));
@@ -1432,6 +1447,47 @@ export class HearthStore {
     return rows.map(rowToMethodTrial);
   }
 
+  insertMethodApplication(application: MethodApplication): MethodApplication {
+    this.db.prepare(
+      `INSERT INTO method_applications
+       (id, task_id, run_id, method_id, method_version, selection, prompt_sha256, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      application.id,
+      application.taskId,
+      application.runId,
+      application.methodId,
+      application.methodVersion,
+      application.selection,
+      application.promptSha256,
+      application.createdAt
+    );
+    return application;
+  }
+
+  listMethodApplications(filter: { taskId?: string; methodId?: string; methodVersion?: number; limit?: number } = {}): MethodApplication[] {
+    const where: string[] = [];
+    const values: SQLInputValue[] = [];
+    if (filter.taskId !== undefined) {
+      where.push("task_id = ?");
+      values.push(filter.taskId);
+    }
+    if (filter.methodId !== undefined) {
+      where.push("method_id = ?");
+      values.push(filter.methodId);
+    }
+    if (filter.methodVersion !== undefined) {
+      where.push("method_version = ?");
+      values.push(filter.methodVersion);
+    }
+    const limit = Math.max(1, Math.min(filter.limit ?? 500, 1000));
+    const clause = where.length > 0 ? ` WHERE ${where.join(" AND ")}` : "";
+    const rows = this.db.prepare(
+      `SELECT * FROM method_applications${clause} ORDER BY created_at DESC, id DESC LIMIT ?`
+    ).all(...values, limit) as DbRow[];
+    return rows.map(rowToMethodApplication);
+  }
+
   scrubForgottenMemory(memoryId: string, tombstone: { content: string; subjectKey: string; scope: string }): { redactedVersions: number; redactedEvents: number } {
     const versionCount = Number(
       (this.db.prepare("SELECT COUNT(*) AS total FROM memory_versions WHERE memory_id = ?").get(memoryId) as DbRow).total
@@ -1823,8 +1879,8 @@ export class HearthStore {
 
 function upsertTask(db: DatabaseSync, task: TaskRecord): void {
   db.prepare(
-    `INSERT INTO tasks (id, template_id, title, goal, status, created_at, updated_at, deadline, inputs_json, network_hosts_json, output_dir, current_run_id, next_action, error_json, result_summary, conversation_id, executor_id, task_kind, expected_outputs_json, permissions_json, pending_input)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO tasks (id, template_id, title, goal, status, created_at, updated_at, deadline, inputs_json, network_hosts_json, output_dir, current_run_id, next_action, error_json, result_summary, conversation_id, executor_id, task_kind, expected_outputs_json, permissions_json, pending_input, method_id, method_version)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        template_id=excluded.template_id, title=excluded.title, goal=excluded.goal, status=excluded.status,
        updated_at=excluded.updated_at, deadline=excluded.deadline, inputs_json=excluded.inputs_json,
@@ -1833,7 +1889,7 @@ function upsertTask(db: DatabaseSync, task: TaskRecord): void {
        result_summary=excluded.result_summary, conversation_id=excluded.conversation_id,
        executor_id=excluded.executor_id, task_kind=excluded.task_kind,
        expected_outputs_json=excluded.expected_outputs_json, permissions_json=excluded.permissions_json,
-       pending_input=excluded.pending_input`
+       pending_input=excluded.pending_input, method_id=excluded.method_id, method_version=excluded.method_version`
   ).run(
     task.id, task.templateId, task.title, task.goal, task.status, task.createdAt, task.updatedAt,
     task.deadline, JSON.stringify(task.inputs), JSON.stringify(task.networkHosts), task.outputDir,
@@ -1842,7 +1898,8 @@ function upsertTask(db: DatabaseSync, task: TaskRecord): void {
     task.executorId ?? "codex", task.taskKind ?? "general",
     JSON.stringify(task.expectedOutputs ?? ["result.md"]),
     task.permissions ? JSON.stringify(task.permissions) : null,
-    task.pendingInput ?? null
+    task.pendingInput ?? null,
+    task.methodId ?? null, task.methodVersion ?? null
   );
 }
 
@@ -1852,7 +1909,8 @@ function updateTask(db: DatabaseSync, taskId: string | null, patch: Record<strin
     title: "title", goal: "goal", status: "status", updatedAt: "updated_at",
     deadline: "deadline", currentRunId: "current_run_id", nextAction: "next_action",
     resultSummary: "result_summary", conversationId: "conversation_id",
-    pendingInput: "pending_input", executorId: "executor_id", taskKind: "task_kind"
+    pendingInput: "pending_input", executorId: "executor_id", taskKind: "task_kind",
+    methodId: "method_id", methodVersion: "method_version"
   };
   for (const [key, column] of Object.entries(columns)) {
     if (key in patch) db.prepare(`UPDATE tasks SET ${column} = ? WHERE id = ?`).run((patch[key] as SQLInputValue) ?? null, taskId);
@@ -2178,7 +2236,9 @@ function rowToTask(row: DbRow): TaskRecord {
     taskKind: (row.task_kind == null ? "general" : String(row.task_kind)) as NonNullable<TaskRecord["taskKind"]>,
     expectedOutputs: row.expected_outputs_json == null ? ["result.md"] : JSON.parse(String(row.expected_outputs_json)),
     ...(permissions ? { permissions } : {}),
-    pendingInput: row.pending_input == null ? null : String(row.pending_input)
+    pendingInput: row.pending_input == null ? null : String(row.pending_input),
+    methodId: row.method_id == null ? null : String(row.method_id),
+    methodVersion: row.method_version == null ? null : Number(row.method_version)
   };
 }
 
@@ -2810,6 +2870,8 @@ function rowToMethodCandidate(row: DbRow): MethodCandidate {
     templateId: row.template_id == null ? null : String(row.template_id),
     status: String(row.status) as MethodCandidate["status"],
     version: Number(row.version),
+    generation: row.generation == null ? null : Number(row.generation),
+    fingerprint: row.fingerprint == null ? null : String(row.fingerprint),
     previousVersionId: row.previous_version_id == null ? null : String(row.previous_version_id),
     allowedCapabilities: JSON.parse(String(row.allowed_capabilities_json)),
     guardrails: JSON.parse(String(row.guardrails_json)),
@@ -2825,10 +2887,10 @@ function rowToMethodCandidate(row: DbRow): MethodCandidate {
 
 function upsertMethodCandidate(db: DatabaseSync, method: MethodCandidate): void {
   db.prepare(
-    "INSERT INTO method_candidates (id, name, summary, applicability, steps_json, source_task_ids_json, template_id, status, version, previous_version_id, allowed_capabilities_json, guardrails_json, baseline_json, trial_json, evaluation_verdict, created_at, updated_at, adopted_at, retired_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, summary=excluded.summary, applicability=excluded.applicability, steps_json=excluded.steps_json, source_task_ids_json=excluded.source_task_ids_json, template_id=excluded.template_id, status=excluded.status, version=excluded.version, previous_version_id=excluded.previous_version_id, allowed_capabilities_json=excluded.allowed_capabilities_json, guardrails_json=excluded.guardrails_json, baseline_json=excluded.baseline_json, trial_json=excluded.trial_json, evaluation_verdict=excluded.evaluation_verdict, updated_at=excluded.updated_at, adopted_at=excluded.adopted_at, retired_at=excluded.retired_at"
+    "INSERT INTO method_candidates (id, name, summary, applicability, steps_json, source_task_ids_json, template_id, status, version, generation, fingerprint, previous_version_id, allowed_capabilities_json, guardrails_json, baseline_json, trial_json, evaluation_verdict, created_at, updated_at, adopted_at, retired_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, summary=excluded.summary, applicability=excluded.applicability, steps_json=excluded.steps_json, source_task_ids_json=excluded.source_task_ids_json, template_id=excluded.template_id, status=excluded.status, version=excluded.version, generation=excluded.generation, fingerprint=excluded.fingerprint, previous_version_id=excluded.previous_version_id, allowed_capabilities_json=excluded.allowed_capabilities_json, guardrails_json=excluded.guardrails_json, baseline_json=excluded.baseline_json, trial_json=excluded.trial_json, evaluation_verdict=excluded.evaluation_verdict, updated_at=excluded.updated_at, adopted_at=excluded.adopted_at, retired_at=excluded.retired_at"
   ).run(
     method.id, method.name, method.summary, method.applicability, JSON.stringify(method.steps), JSON.stringify(method.sourceTaskIds),
-    method.templateId, method.status, method.version, method.previousVersionId, JSON.stringify(method.allowedCapabilities),
+    method.templateId, method.status, method.version, method.generation ?? null, method.fingerprint ?? null, method.previousVersionId, JSON.stringify(method.allowedCapabilities),
     JSON.stringify(method.guardrails), JSON.stringify(method.baseline), JSON.stringify(method.trial), method.evaluationVerdict,
     method.createdAt, method.updatedAt, method.adoptedAt, method.retiredAt
   );
@@ -2873,6 +2935,19 @@ function insertMethodTrialRow(db: DatabaseSync, trial: MethodTrial): void {
   db.prepare(
     "INSERT INTO method_trials (id, method_id, method_version, task_id, created_at) VALUES (?, ?, ?, ?, ?)"
   ).run(trial.id, trial.methodId, trial.methodVersion, trial.taskId, trial.createdAt);
+}
+
+function rowToMethodApplication(row: DbRow): MethodApplication {
+  return {
+    id: String(row.id),
+    taskId: String(row.task_id),
+    runId: String(row.run_id),
+    methodId: String(row.method_id),
+    methodVersion: Number(row.method_version),
+    selection: String(row.selection) as MethodApplication["selection"],
+    promptSha256: String(row.prompt_sha256),
+    createdAt: String(row.created_at)
+  };
 }
 
 function rowToModelProfile(row: DbRow): ModelProfileRecord {
