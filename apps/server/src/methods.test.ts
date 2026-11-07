@@ -110,21 +110,24 @@ describe("MethodService", () => {
     })).toThrowError(MethodError);
   });
 
-  it("evaluates, promotes, and rolls back with an audit trail", () => {
+  it("evaluates 2+2 samples, promotes, and rolls back with an audit trail", () => {
     const source = terminalTask("completed");
-    const baseline = terminalTask("failed");
-    const trial = terminalTask("completed");
+    const baseline = [terminalTask("failed"), terminalTask("failed")];
+    const trials = [terminalTask("completed"), terminalTask("completed")];
     const candidate = methods.generateFromTask(source.id);
-    injectMethod(trial.id, candidate.id, candidate.version);
+    for (const trial of trials) {
+      injectMethod(trial.id, candidate.id, candidate.version);
+      methods.recordTrial(candidate.id, trial.id);
+    }
 
-    const trialled = methods.recordTrial(candidate.id, trial.id);
-    expect(trialled.status).toBe("trial");
-    expect(trialled.trial.completed).toBe(1);
+    const trialled = store.getMethodCandidate(candidate.id);
+    expect(trialled?.status).toBe("trial");
+    expect(trialled?.trial.completed).toBe(2);
 
     const evaluation = methods.evaluate(candidate.id, {
-      baselineTaskIds: [baseline.id],
-      trialTaskIds: [trial.id],
-      notes: "同一模板，失败基线与完成试跑"
+      baselineTaskIds: baseline.map((task) => task.id),
+      trialTaskIds: trials.map((task) => task.id),
+      notes: "同一模板，2 个失败基线与 2 个完成试跑"
     });
     expect(evaluation.verdict).toBe("improved");
     expect(store.listMethodEvaluations(candidate.id)).toHaveLength(1);
@@ -153,15 +156,35 @@ describe("MethodService", () => {
 
   it("does not promote flat or permission-expanded candidates", () => {
     const source = terminalTask("completed");
-    const trial = terminalTask("completed");
+    const baseline = [source, terminalTask("completed")];
+    const trials = [terminalTask("completed"), terminalTask("completed")];
     const candidate = methods.generateFromTask(source.id);
-    injectMethod(trial.id, candidate.id, candidate.version);
-    methods.recordTrial(candidate.id, trial.id);
+    for (const trial of trials) {
+      injectMethod(trial.id, candidate.id, candidate.version);
+      methods.recordTrial(candidate.id, trial.id);
+    }
     const evaluation = methods.evaluate(candidate.id, {
-      baselineTaskIds: [source.id],
-      trialTaskIds: [trial.id]
+      baselineTaskIds: baseline.map((task) => task.id),
+      trialTaskIds: trials.map((task) => task.id)
     });
     expect(evaluation.verdict).toBe("flat");
     expect(() => methods.promote(candidate.id)).toThrowError(MethodError);
+  });
+
+  it("suggests paired baseline and injected trial samples", () => {
+    const source = terminalTask("completed");
+    const otherBaseline = terminalTask("completed");
+    const trials = [terminalTask("completed"), terminalTask("completed")];
+    const candidate = methods.generateFromTask(source.id);
+    for (const trial of trials) {
+      injectMethod(trial.id, candidate.id, candidate.version);
+      methods.recordTrial(candidate.id, trial.id);
+    }
+
+    const pairing = methods.pairingSuggestion(candidate.id);
+    expect(pairing.trialTaskIds.sort()).toEqual(trials.map((task) => task.id).sort());
+    expect(pairing.baselineTaskIds).toContain(otherBaseline.id);
+    expect(pairing.baselineTaskIds).not.toContain(trials[0]?.id);
+    expect(pairing.notes.length).toBeGreaterThan(0);
   });
 });

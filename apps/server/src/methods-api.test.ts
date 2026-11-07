@@ -37,8 +37,8 @@ describe("methods API", () => {
 
   it("generates, evaluates, promotes, and rolls back a candidate", async () => {
     const source = terminalTask("completed");
-    const baseline = terminalTask("failed");
-    const trial = terminalTask("completed");
+    const baselines = [terminalTask("failed"), terminalTask("failed")];
+    const trials = [terminalTask("completed"), terminalTask("completed")];
     const app = await buildServer({ store, serveWeb: false });
 
     const generated = await app.inject({ method: "POST", url: "/api/methods/generate", payload: { taskId: source.id } });
@@ -46,21 +46,33 @@ describe("methods API", () => {
     const methodId = generated.json().id as string;
     const methodVersion = generated.json().version as number;
     expect(generated.json().status).toBe("candidate");
-    injectMethod(trial.id, methodId, methodVersion);
+    for (const trial of trials) {
+      injectMethod(trial.id, methodId, methodVersion);
+    }
 
     const uninjected = terminalTask("completed");
     const missingEvidence = await app.inject({ method: "POST", url: "/api/methods/" + methodId + "/trials", payload: { taskId: uninjected.id } });
     expect(missingEvidence.statusCode).toBe(409);
     expect(missingEvidence.json().error).toBe("METHOD_TRIAL_NOT_INJECTED");
 
-    const recorded = await app.inject({ method: "POST", url: "/api/methods/" + methodId + "/trials", payload: { taskId: trial.id } });
-    expect(recorded.statusCode).toBe(200);
-    expect(recorded.json().status).toBe("trial");
+    for (const trial of trials) {
+      const recorded = await app.inject({ method: "POST", url: "/api/methods/" + methodId + "/trials", payload: { taskId: trial.id } });
+      expect(recorded.statusCode).toBe(200);
+      expect(recorded.json().status).toBe("trial");
+    }
+
+    const pairing = await app.inject({ method: "GET", url: "/api/methods/" + methodId + "/pairing" });
+    expect(pairing.statusCode).toBe(200);
+    expect(pairing.json().trialTaskIds).toHaveLength(2);
 
     const evaluated = await app.inject({
       method: "POST",
       url: "/api/methods/" + methodId + "/evaluate",
-      payload: { baselineTaskIds: [baseline.id], trialTaskIds: [trial.id], notes: "API 评估" }
+      payload: {
+        baselineTaskIds: baselines.map((task) => task.id),
+        trialTaskIds: trials.map((task) => task.id),
+        notes: "API 评估"
+      }
     });
     expect(evaluated.statusCode).toBe(200);
     expect(evaluated.json().verdict).toBe("improved");
@@ -80,7 +92,7 @@ describe("methods API", () => {
     const snapshot = await app.inject({ method: "GET", url: "/api/methods" });
     expect(snapshot.json().methods).toHaveLength(1);
     expect(snapshot.json().evaluations).toHaveLength(1);
-    expect(snapshot.json().trials).toHaveLength(1);
+    expect(snapshot.json().trials).toHaveLength(2);
     await app.close();
   });
 

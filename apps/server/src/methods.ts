@@ -267,7 +267,25 @@ export class MethodService {
     }
     const overlap = baselineTaskIds.filter((taskId) => trialTaskIds.includes(taskId));
     if (overlap.length > 0) throw new MethodError("METHOD_EVAL_OVERLAP", "基线和试跑样本不能重叠");
-    for (const taskId of [...baselineTaskIds, ...trialTaskIds]) this.requireTrajectoryTask(taskId);
+    const sampleTasks = [...baselineTaskIds, ...trialTaskIds].map((taskId) => this.requireTrajectoryTask(taskId));
+    const expectedTemplate = method.templateId ?? sampleTasks[0]?.templateId ?? null;
+    if (expectedTemplate && sampleTasks.some((task) => task.templateId !== expectedTemplate)) {
+      throw new MethodError("METHOD_EVAL_UNPAIRED", "基线和试跑样本必须属于同一模板", 409);
+    }
+    const trials = this.service.store.listMethodTrials(id);
+    for (const taskId of trialTaskIds) {
+      if (!trials.some((trial) => trial.taskId === taskId && trial.methodVersion === method.version)) {
+        throw new MethodError("METHOD_EVAL_NOT_INJECTED", "试跑样本没有对应的试跑记录", 409);
+      }
+      if (this.service.store.listMethodApplications({ taskId, methodId: id, methodVersion: method.version }).length === 0) {
+        throw new MethodError("METHOD_EVAL_NOT_INJECTED", "试跑样本缺少方法注入证据", 409);
+      }
+    }
+    for (const taskId of baselineTaskIds) {
+      if (this.service.store.listMethodApplications({ taskId, methodId: id }).length > 0) {
+        throw new MethodError("METHOD_EVAL_BASELINE_APPLIED", "基线任务已经注入过这个方法，不能作为基线", 409);
+      }
+    }
 
     const baseline = this.metrics(baselineTaskIds);
     const trial = this.metrics(trialTaskIds);
@@ -302,6 +320,45 @@ export class MethodService {
     };
     this.emit("method.candidate.updated", next);
     return evaluation;
+  }
+
+  pairingSuggestion(id: string): { baselineTaskIds: string[]; trialTaskIds: string[]; notes: string[] } {
+    const method = this.requireMethod(id);
+    const notes: string[] = [];
+    if (!method.templateId) {
+      return { baselineTaskIds: [], trialTaskIds: [], notes: ["方法没有模板，无法自动配对；请手动选择样本。"] };
+    }
+    const trials = this.service.store.listMethodTrials(id)
+      .filter((trial) => trial.methodVersion === method.version)
+      .filter((trial) => this.service.store.listMethodApplications({ taskId: trial.taskId, methodId: id, methodVersion: method.version }).length > 0)
+      .map((trial) => trial.taskId);
+    const trialTaskIds = unique(trials).filter((taskId) => {
+      const task = this.service.store.getTask(taskId);
+      return Boolean(task && TERMINAL_TASK_STATUSES.has(task.status));
+    });
+    const terminal = this.service.store.listTasks()
+      .filter((task) => task.templateId === method.templateId && TERMINAL_TASK_STATUSES.has(task.status))
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    const candidates = terminal.filter((task) =>
+      !trialTaskIds.includes(task.id)
+      && !method.sourceTaskIds.includes(task.id)
+      && this.service.store.listMethodApplications({ taskId: task.id, methodId: id }).length === 0
+    );
+    const fallback = terminal.filter((task) =>
+      !trialTaskIds.includes(task.id)
+      && method.sourceTaskIds.includes(task.id)
+      && this.service.store.listMethodApplications({ taskId: task.id, methodId: id }).length === 0
+    );
+    const wanted = Math.max(2, trialTaskIds.length);
+    const baselineTaskIds = candidates.slice(0, wanted).map((task) => task.id);
+    if (baselineTaskIds.length < wanted) {
+      const fill = fallback.slice(0, wanted - baselineTaskIds.length).map((task) => task.id);
+      baselineTaskIds.push(...fill);
+      if (fill.length > 0) notes.push("基线包含来源任务，证据较弱。");
+    }
+    if (baselineTaskIds.length < 2) notes.push("没有足够的同模板基线任务。");
+    if (trialTaskIds.length < 2) notes.push("试跑样本不足 2 个。");
+    return { baselineTaskIds, trialTaskIds, notes };
   }
 
   promote(id: string): MethodCandidate {
@@ -452,7 +509,7 @@ export class MethodService {
 
 function decideVerdict(baseline: MethodMetrics, trial: MethodMetrics, permissionExpanded: boolean): MethodVerdict {
   if (permissionExpanded) return "regressed";
-  if (baseline.tasks === 0 || trial.tasks === 0 || baseline.successRate === null || trial.successRate === null) return "insufficient";
+  if (baseline.tasks < 2 || trial.tasks < 2 || baseline.successRate === null || trial.successRate === null) return "insufficient";
   if (trial.successRate < baseline.successRate) return "regressed";
   if (trial.successRate > baseline.successRate) return "improved";
   if (baseline.avgDurationMs !== null && trial.avgDurationMs !== null) {

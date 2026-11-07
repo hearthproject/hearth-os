@@ -1108,6 +1108,14 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
   });
 
+  app.get<{ Params: { id: string } }>("/api/methods/:id/pairing", async (request, reply) => {
+    try {
+      return methods.pairingSuggestion(request.params.id);
+    } catch (error) {
+      return sendMethodError(reply, error);
+    }
+  });
+
   app.post<{ Params: { id: string } }>("/api/methods/:id/trials", async (request, reply) => {
     const parsed = methodTrialSchema.safeParse(request.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: "INVALID_METHOD_TRIAL", message: "试跑样本参数不正确" });
