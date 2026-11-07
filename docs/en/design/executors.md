@@ -34,32 +34,77 @@ Hearth keeps several specialized executors side by side rather than building one
 
 The routing order is not a fixed hierarchy. Work that can be done with a rule, script, or official interface does not call a model. External data starts with a connector; browser or desktop is considered only when no connector exists. Deterministic document processing is not given to a generative model. Long chains and complex artifacts may use a stronger executor. A task can change executors midway, but the input, budget, authority, and current evidence must carry over.
 
-The current registry contains six executors, all managed through the same launch resolution, health probe, managed install, and settings surface:
+The current registry contains seven executors in two tiers. They share launch resolution, health checks, managed installation, model binding, context capture, and the settings surface, but their adapters and capability ceilings differ.
 
-| Executor | Connection | Boundary |
-|---|---|---|
-| `native` | Hearth-owned single-agent tool loop | General work, source reading, file delivery, input pauses, and recovery |
-| `codex` | Existing local Codex profile and authentication | Multi-file code, repositories, tests, builds, and GitHub workspaces |
-| `hermes` | `hermes` on `PATH` or a configured command | General agents, multi-step tool use, and automation flows |
-| `qoder` | `@qoder-ai/qoder-agent-sdk`, reusing a local qodercli login or PAT | Coding, workspaces, and resumed sessions |
-| `workbuddy` | `@tencent-ai/codebuddy-code`, reusing the local login | Coding, workspaces, and resumed sessions |
-| `kimi` | `@moonshot-ai/kimi-code` in stream-json mode | Coding, workspaces, and non-interactive batch work |
+| Executor | Tier | Connection | Capability ceiling and boundary |
+|---|---|---|---|
+| `deepseek-harness` | First-class | Official `@deepseek-ai/dsh-sdk-client` SDK/JSON-RPC | Full DeepSeek Harness runtime: native tools, code, repositories, tests, session resume, and a complete event stream; requires a valid model binding |
+| `codex` | First-class | Local Codex profile or a `config.toml` generated from the unified binding | Multi-file code, repositories, tests, builds, and GitHub workspaces; the model protocol is fixed to OpenAI Responses |
+| `native` | First-class | Hearth-owned single-agent tool loop | General work, source reading, web, file delivery, input pauses, recovery, and desktop screenshots; supports four model protocols |
+| `hermes` | External | `hermes` on `PATH` or a configured command | General agents, multi-step tool use, and automation flows; supports CLI session resume |
+| `qoder` | External | `@qoder-ai/qoder-agent-sdk`, reusing a local qodercli login or PAT | Coding, workspaces, and resumed sessions |
+| `workbuddy` | External | `@tencent-ai/codebuddy-code`, reusing the local login | Coding, workspaces, and resumed sessions |
+| `kimi` | External | `@moonshot-ai/kimi-code` in stream-json mode | Coding, workspaces, and non-interactive batch work |
 
-The native executor is a Hearth-owned single-agent tool loop with budgets, checkpoints, input pauses, and recovery; it is not a forwarded prompt. A failed task does not silently replace its executor identity, and the actual executor is recorded in runs and artifact manifests. Tasks that need network access or engineering workspace writes create a proposal in chat and enter the queue only after user confirmation.
+First-class does not mean universally stronger. It means deeper integration and a more complete control surface. Complex code and repository work prefer `codex` or `deepseek-harness`; general work, web, documents, and desktop capability prefer `native`; external executors fit teams that already have the corresponding CLI, login, or workflow. ZCode is no longer integrated.
 
-The Settings page builds six vertical cards from the registry. Every card exposes install, probe, command or script path, concurrency, and diagnostics in the same shape. The global preferred executor seeds new conversations; the picker in the chat composer overrides it per conversation. When a preference is disabled, unavailable, or lacks a required capability, routing first returns to the task-matched executor and then scans the registry for another usable path.
+The native executor is a Hearth-owned single-agent tool loop with budgets, checkpoints, input pauses, and recovery; it is not a forwarded prompt. DeepSeek Harness uses the official SDK rather than parsing command-line text. Codex has a dedicated adapter and obeys the Responses protocol. A failed task does not silently replace its executor identity, and the actual executor is recorded in runs and artifact manifests.
+
+## Unified Model Bindings
+
+Each executor binds a model profile in Settings instead of keeping a private configuration file. A profile stores provider, protocol, base URL, model name, and an encrypted API key. A binding may override the protocol or model, but the server enforces compatibility:
+
+| Executor | Allowed protocols |
+|---|---|
+| `native` | OpenAI Chat, OpenAI Responses, Anthropic Messages, Gemini |
+| `codex` | OpenAI Responses only |
+| `deepseek-harness` | OpenAI Chat, OpenAI Responses, Anthropic Messages |
+| `hermes`, `qoder`, `workbuddy`, `kimi` | OpenAI Chat, OpenAI Responses, Anthropic Messages |
+
+The current Hearth chat model is `app_settings.model.chatProfileId`; it serves chat, the native executor, and failure diagnosis. An external executor uses its own profile only when its binding is valid. A Codex binding generates `.hearth/executors/codex/config.toml` and injects the key through the environment; DeepSeek Harness writes the protocol mapping into its provider configuration. Local models are excluded from the unified registry so a local port is not mistaken for a cloud service. See [Storage and Context Architecture](/en/design/storage) for the full boundary.
+
+## Failure Diagnosis and Handoff
+
+Failure handling classifies the cause before deciding whether to change executors. Permission, missing input, exhausted budget, uncertain external effects, and interruption are not executor failures. Runtime faults, capability gaps, contract failures, and transient faults enter handoff evaluation.
+
+1. Deterministic rules classify first. A transient fault may retry the same executor once.
+2. For executor faults, the **current Hearth chat model** reads the task, failure, runs, and recent context, then proposes a cause, confidence, recommended action, and attempts not to repeat. Diagnosis never uses the failed executor's model, so a broken model does not defend itself.
+3. Under full permission, with context enabled and low risk, Hearth switches to the next eligible executor automatically and continues the task.
+4. Under necessary approval, Hearth asks only “Switch to `target executor` and continue?” and starts a new run with the same task, remaining budget, and context watermark after confirmation.
+5. When the cause is not the executor, Hearth reports the reason directly without switching.
+
+The fallback order is `deepseek-harness → codex → native → hermes → qoder → workbuddy → kimi`. Attempted executors are not selected again, and the default limit is two handoffs. A handoff packet carries the diagnosis summary, completed and failed work, artifacts, open questions, remaining budget, and `context_watermark_seq`; the target continues from the same watermark. Every handoff is written to `handoffs` and produces `HANDOFF.md`, while run records retain both source and target executors.
+
+## Shared Context
+
+Every executor adapts to Hearth task-level context instead of maintaining a separate chat history. Assistant messages, tool calls, tool results, checkpoints, and notices from the native runtime, Codex, DeepSeek Harness, and external CLIs all flow through unified callbacks into `context_items`. `executor_event_id` prevents duplicate events within a run; oversized bodies go to `.hearth/context/blobs/`; the task summary lives in `task_context_state`; startup and handoff generate a budgeted context projection.
+
+A CLI `sessionId` is only an optimization for resume, not a source of truth. Even when session resume fails, Hearth can rebuild the task projection from shared context. Deletion, retention, and handoff limits are managed in the Context section of Settings. See [Storage and Context Architecture](/en/design/storage) for the lifecycle.
+
+## Settings Boundaries
+
+Settings has four sections:
+
+| Section | Responsibility |
+|---|---|
+| Executors | Default executor, installation and health, command or script path, concurrency, and each executor's model binding |
+| Models | Profile CRUD, current chat model, model discovery, connection tests, and masked keys |
+| Context | Mode, budgets, retention, handoff limits, metrics, and deletion |
+| Data | SQLite path, executor directories, context blobs, migration records, and backups |
+
+The global default executor only seeds new conversations; the composer picker overrides it. When a preference is disabled, unavailable, lacks a required capability, or has no valid model binding, routing returns to the task-matched executor and then scans the registry for another usable path.
 
 ## Adding an executor
 
 New executors follow the same registry pipeline instead of a forked special path:
 
-1. Add a stable ID to `EXECUTOR_IDS` in `packages/core/src/types.ts` so conversation settings, concurrency, runs, and API validation gain the field automatically.
-2. Add the name, description, capabilities, provider, and resume support in `apps/server/src/executors.ts`; add the ID to the GitHub capability list when it can read the prepared repository.
+1. Add a stable ID to `EXECUTOR_IDS` in `packages/core/src/types.ts`; add it to `FIRST_CLASS_EXECUTOR_IDS` only when it has complete adaptation, diagnosis, and verification.
+2. Add the name, description, capabilities, tier, provider, and resume support in `apps/server/src/executors.ts`; add the ID to the GitHub capability list when it can read the prepared repository.
 3. Add launch resolution in `apps/server/src/executor-runtime.ts`: configured path first, then managed install, then global installation and `PATH`. Include version probing and health state.
 4. Add a pinned package spec in `apps/server/src/executor-install.ts`. Desktop apps that cannot be installed headlessly should return unsupported with a clear detection or manual-path hint.
-5. Add argument construction and stream parsing in `apps/server/src/external-executor.ts`, normalizing final text, usage, session ID, exit code, and errors into `ExternalRunResult`.
-6. Register the adapter in `apps/server/src/executor-adapter.ts`. External CLIs normally reuse `ExternalExecutorAdapter`, which passes the prompt, workspace, permission mode, budget, and previous session ID.
-7. Add tests for launch resolution, health probes, install jobs, argument and event parsing, preferred routing, and fallback. The Settings page and chat picker render automatically from `/api/executors`; do not add another private toggle path.
+5. Declare the protocol boundary in `EXECUTOR_MODEL_PROTOCOLS` in `apps/server/src/model-registry.ts`, and verify that a binding can generate the CLI or SDK configuration.
+6. Add argument construction and stream parsing in `apps/server/src/external-executor.ts` or a dedicated package; register the adapter in `apps/server/src/executor-adapter.ts` and implement context callbacks.
+7. Add tests for launch resolution, health probes, install jobs, argument and event parsing, model protocol validation, preferred routing, failure classification, handoff, and context capture. Settings and the chat picker render from `/api/executors` and `/api/model-registry`; do not add a private toggle path.
 
 The boundary stays the same: an executor returns results and evidence but cannot mutate task state directly. External effects still pass through Hearth approval and the effect ledger. Credentials stay in the local CLI or environment and never enter task context.
 
