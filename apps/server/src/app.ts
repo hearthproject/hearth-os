@@ -209,6 +209,7 @@ const methodTrialSchema = z.object({ taskId: z.string().trim().min(1).max(100) }
 const methodRollbackSchema = z.object({ reason: z.string().trim().min(1).max(1000) }).strict();
 const methodRejectSchema = z.object({ reason: z.string().trim().max(1000).optional() }).strict();
 const assignTaskMethodSchema = z.object({ methodId: z.string().trim().min(1).max(100).nullable() }).strict();
+const methodSettingsPatchSchema = z.object({ autoLearn: z.boolean().optional() }).strict();
 
 const createSyncPeerSchema = z.object({
   name: z.string().trim().min(1).max(120),
@@ -1070,6 +1071,23 @@ export async function buildServer(options: BuildServerOptions = {}) {
       return memory.resolveConflict(request.params.id, parsed.data.resolution, parsed.data.note, parsed.data.content);
     } catch (error) {
       return sendMemoryError(reply, error);
+    }
+  });
+
+  app.get("/api/methods/settings", async (_request, reply) => {
+    reply.header("cache-control", "no-store");
+    return { settings: methods.settings() };
+  });
+
+  app.patch("/api/methods/settings", async (request, reply) => {
+    const parsed = methodSettingsPatchSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "INVALID_METHOD_SETTINGS", message: "方法设置格式不正确" });
+    }
+    try {
+      return { settings: methods.updateSettings(parsed.data) };
+    } catch (error) {
+      return sendMethodError(reply, error);
     }
   });
 

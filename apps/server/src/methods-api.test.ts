@@ -131,6 +131,25 @@ describe("methods API", () => {
     await app.close();
   });
 
+  it("reads and updates method learning settings", async () => {
+    const app = await buildServer({ store, serveWeb: false });
+    const initial = await app.inject({ method: "GET", url: "/api/methods/settings" });
+    expect(initial.statusCode).toBe(200);
+    expect(initial.json().settings.autoLearn).toBe(true);
+
+    const updated = await app.inject({
+      method: "PATCH",
+      url: "/api/methods/settings",
+      payload: { autoLearn: false }
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json().settings.autoLearn).toBe(false);
+
+    const snapshot = await app.inject({ method: "GET", url: "/api/methods" });
+    expect(snapshot.json().settings.autoLearn).toBe(false);
+    await app.close();
+  });
+
   it("validates method input and exposes permission errors", async () => {
     const source = terminalTask("completed");
     const app = await buildServer({ store, serveWeb: false });

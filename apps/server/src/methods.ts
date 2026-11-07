@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { MethodApplication, MethodCandidate, MethodEvaluation, MethodMetrics, MethodSelection, MethodTrial, MethodVerdict, TaskRecord } from "@hearth/core";
+import type { MethodApplication, MethodCandidate, MethodEvaluation, MethodMetrics, MethodSelection, MethodSettings, MethodTrial, MethodVerdict, TaskRecord } from "@hearth/core";
 import { getTemplate } from "@hearth/templates";
 import type { HearthService } from "./service.ts";
 
@@ -8,7 +8,11 @@ export interface MethodSnapshot {
   evaluations: MethodEvaluation[];
   trials: MethodTrial[];
   applications: MethodApplication[];
+  settings: MethodSettings;
 }
+
+const METHOD_SETTINGS_KEY = "method.settings";
+const DEFAULT_METHOD_SETTINGS: MethodSettings = { autoLearn: true, updatedAt: null };
 
 export interface CreateMethodInput {
   name: string;
@@ -70,12 +74,39 @@ export class MethodService {
     this.clock = clock;
   }
 
+  settings(): MethodSettings {
+    const raw = this.service.store.getAppSetting(METHOD_SETTINGS_KEY);
+    if (!raw) return { ...DEFAULT_METHOD_SETTINGS };
+    try {
+      const parsed = JSON.parse(raw) as Partial<MethodSettings>;
+      return {
+        autoLearn: typeof parsed.autoLearn === "boolean" ? parsed.autoLearn : DEFAULT_METHOD_SETTINGS.autoLearn,
+        updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : null
+      };
+    } catch {
+      return { ...DEFAULT_METHOD_SETTINGS };
+    }
+  }
+
+  updateSettings(patch: { autoLearn?: boolean | undefined }): MethodSettings {
+    if (patch.autoLearn !== undefined && typeof patch.autoLearn !== "boolean") {
+      throw new MethodError("METHOD_SETTINGS_INVALID", "自动学习设置必须是布尔值");
+    }
+    const next: MethodSettings = {
+      autoLearn: patch.autoLearn ?? this.settings().autoLearn,
+      updatedAt: this.nowIso()
+    };
+    this.service.store.setAppSetting(METHOD_SETTINGS_KEY, JSON.stringify(next));
+    return next;
+  }
+
   snapshot(): MethodSnapshot {
     return {
       methods: this.service.store.listMethodCandidates(),
       evaluations: this.service.store.listMethodEvaluations(),
       trials: this.service.store.listMethodTrials(),
-      applications: this.service.store.listMethodApplications({ limit: 500 })
+      applications: this.service.store.listMethodApplications({ limit: 500 }),
+      settings: this.settings()
     };
   }
 
