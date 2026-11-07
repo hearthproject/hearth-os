@@ -47,15 +47,6 @@ export const EXECUTORS: ExecutorDescriptor[] = [
     supportsResume: true
   },
   {
-    id: "zcode",
-    name: "ZCode",
-    description: "Experimental ZCode desktop integration through its bundled zcode.cjs runtime.",
-    capabilities: ["Code", "Workspace", "Resume"],
-    provider: "ZCode",
-    experimental: true,
-    supportsResume: true
-  },
-  {
     id: "kimi",
     name: "Kimi Code",
     description: "Use the official Kimi Code CLI in non-interactive stream-json mode.",
@@ -76,7 +67,7 @@ export function executorName(id: ExecutorId): string {
 }
 
 const CAPABILITY_SUPPORT: Record<ExecutionCapability, ExecutorId[]> = {
-  github: ["codex", "hermes", "qoder", "workbuddy", "zcode", "kimi"],
+  github: ["codex", "hermes", "qoder", "workbuddy", "kimi"],
   "desktop-capture": ["native"]
 };
 

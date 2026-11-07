@@ -34,7 +34,7 @@ Hearth keeps several specialized executors side by side rather than building one
 
 The routing order is not a fixed hierarchy. Work that can be done with a rule, script, or official interface does not call a model. External data starts with a connector; browser or desktop is considered only when no connector exists. Deterministic document processing is not given to a generative model. Long chains and complex artifacts may use a stronger executor. A task can change executors midway, but the input, budget, authority, and current evidence must carry over.
 
-The current registry contains seven executors, all managed through the same launch resolution, health probe, managed install, and settings surface:
+The current registry contains six executors, all managed through the same launch resolution, health probe, managed install, and settings surface:
 
 | Executor | Connection | Boundary |
 |---|---|---|
@@ -43,12 +43,11 @@ The current registry contains seven executors, all managed through the same laun
 | `hermes` | `hermes` on `PATH` or a configured command | General agents, multi-step tool use, and automation flows |
 | `qoder` | `@qoder-ai/qoder-agent-sdk`, reusing a local qodercli login or PAT | Coding, workspaces, and resumed sessions |
 | `workbuddy` | `@tencent-ai/codebuddy-code`, reusing the local login | Coding, workspaces, and resumed sessions |
-| `zcode` | The ZCode desktop `zcode.cjs` runtime, integrated as experimental | Local ZCode workspaces and one-shot JSON execution |
 | `kimi` | `@moonshot-ai/kimi-code` in stream-json mode | Coding, workspaces, and non-interactive batch work |
 
 The native executor is a Hearth-owned single-agent tool loop with budgets, checkpoints, input pauses, and recovery; it is not a forwarded prompt. A failed task does not silently replace its executor identity, and the actual executor is recorded in runs and artifact manifests. Tasks that need network access or engineering workspace writes create a proposal in chat and enter the queue only after user confirmation.
 
-The Settings page builds seven vertical cards from the registry. Every card exposes install, probe, command or script path, concurrency, and diagnostics in the same shape. The global preferred executor seeds new conversations; the picker in the chat composer overrides it per conversation. When a preference is disabled, unavailable, or lacks a required capability, routing first returns to the task-matched executor and then scans the registry for another usable path.
+The Settings page builds six vertical cards from the registry. Every card exposes install, probe, command or script path, concurrency, and diagnostics in the same shape. The global preferred executor seeds new conversations; the picker in the chat composer overrides it per conversation. When a preference is disabled, unavailable, or lacks a required capability, routing first returns to the task-matched executor and then scans the registry for another usable path.
 
 ## Adding an executor
 

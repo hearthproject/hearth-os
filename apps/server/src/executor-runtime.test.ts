@@ -71,7 +71,7 @@ describe("executor runtime", () => {
     expect(health.canRun).toBe(true);
     expect(health.version).toBe("2.5.2");
 
-    const missing = executorHealth("zcode", settings, settingsPath, 0);
+    const missing = executorHealth("workbuddy", settings, settingsPath, 0);
     expect(missing.canRun).toBe(false);
     expect(missing.installState).toBe("missing");
   });

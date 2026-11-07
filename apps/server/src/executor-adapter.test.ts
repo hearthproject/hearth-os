@@ -15,7 +15,7 @@ import type { ExecutorInvocation } from "./executor-adapter.ts";
 import type { PreparedWorkspace } from "./workspace.ts";
 import { defaultExecutorSettings } from "./executor-settings.ts";
 
-const EXTERNAL_IDS = ["qoder", "workbuddy", "zcode", "kimi"] as const;
+const EXTERNAL_IDS = ["qoder", "workbuddy", "kimi"] as const;
 const roots: string[] = [];
 const previousDetect = process.env.HEARTH_EXECUTOR_DETECT;
 
@@ -31,11 +31,8 @@ function writeFile(path: string, content = "export {};\n"): void {
 }
 
 function configureExecutable(settings: ExecutorSettings, id: (typeof EXTERNAL_IDS)[number], root: string): string {
-  const path = id === "zcode"
-    ? join(root, "zcode", "resources", "glm", "zcode.cjs")
-    : join(root, `${id}.mjs`);
+  const path = join(root, `${id}.mjs`);
   writeFile(path);
-  if (id === "zcode") writeFile(join(root, "zcode", "ZCode.exe"), "");
   settings.executors[id] = { executablePath: path };
   return path;
 }

@@ -196,9 +196,6 @@ function npmInvocation(): { command: string; prefixArgs: string[] } {
 }
 
 function unsupportedHint(id: ExecutorId): string {
-  if (id === "zcode") {
-    return "ZCode 不支持托管安装；请安装 ZCode 桌面端，或在执行器设置中指定 resources/glm/zcode.cjs。";
-  }
   if (id === "native" || id === "codex" || id === "hermes") {
     return "该执行器无需托管安装；请使用现有命令或独立安装流程。";
   }

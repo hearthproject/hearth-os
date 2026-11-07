@@ -223,10 +223,9 @@ export class HermesExecutorAdapter implements ExecutorAdapter {
   }
 }
 
-const EXTERNAL_EXECUTOR_NAMES: Record<"qoder" | "workbuddy" | "zcode" | "kimi", string> = {
+const EXTERNAL_EXECUTOR_NAMES: Record<"qoder" | "workbuddy" | "kimi", string> = {
   qoder: "Qoder",
   workbuddy: "WorkBuddy",
-  zcode: "ZCode",
   kimi: "Kimi Code"
 };
 
@@ -234,7 +233,7 @@ export class ExternalExecutorAdapter implements ExecutorAdapter {
   readonly supportsResume = true;
 
   constructor(
-    readonly id: "qoder" | "workbuddy" | "zcode" | "kimi",
+    readonly id: "qoder" | "workbuddy" | "kimi",
     private readonly settingsPath: string,
     private readonly runner: ExternalRunner
   ) {}
@@ -301,7 +300,6 @@ export function createExecutorAdapters(input: {
     hermes: new HermesExecutorAdapter(input.hermes),
     qoder: new ExternalExecutorAdapter("qoder", input.settingsPath, external),
     workbuddy: new ExternalExecutorAdapter("workbuddy", input.settingsPath, external),
-    zcode: new ExternalExecutorAdapter("zcode", input.settingsPath, external),
     kimi: new ExternalExecutorAdapter("kimi", input.settingsPath, external)
   };
 }

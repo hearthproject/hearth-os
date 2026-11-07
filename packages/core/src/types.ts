@@ -11,7 +11,7 @@ export const TASK_STATUSES = [
 
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
-export const EXECUTOR_IDS = ["native", "codex", "hermes", "qoder", "workbuddy", "zcode", "kimi"] as const;
+export const EXECUTOR_IDS = ["native", "codex", "hermes", "qoder", "workbuddy", "kimi"] as const;
 export type ExecutorId = (typeof EXECUTOR_IDS)[number];
 
 export const APPROVAL_MODES = ["necessary", "full"] as const;

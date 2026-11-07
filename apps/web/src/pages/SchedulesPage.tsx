@@ -218,7 +218,6 @@ export function SchedulesPage() {
                 <option value="hermes">Hermes</option>
                 <option value="qoder">Qoder</option>
                 <option value="workbuddy">WorkBuddy</option>
-                <option value="zcode">ZCode</option>
                 <option value="kimi">Kimi Code</option>
               </select>
               {draft.executorId === "hermes" && hermes && !hermes.canRun && (

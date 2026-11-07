@@ -76,7 +76,6 @@ export function isExecutorManagedInstalled(id: ExecutorId, settingsPath: string)
   if (id === "qoder") {
     return existsSync(join(home, "node_modules", "@qoder-ai", "qoder-agent-sdk", "dist", "index.js"));
   }
-  if (id === "zcode") return existsSync(join(home, "zcode.cjs"));
   return false;
 }
 
@@ -113,7 +112,6 @@ export function resolveExecutorLaunch(
     };
   }
   if (id === "qoder") return resolveQoderLaunch(settingsPath, runtime);
-  if (id === "zcode") return resolveZcodeLaunch(settingsPath, runtime);
   const spec = NODE_CLI_SPECS[id];
   return spec ? resolveNodeCliLaunch(id, settingsPath, runtime, spec) : null;
 }
@@ -305,36 +303,6 @@ function resolveQoderLaunch(settingsPath: string, runtime: ExecutorRuntimeSettin
   };
 }
 
-function resolveZcodeLaunch(settingsPath: string, runtime: ExecutorRuntimeSettings): ExecutorLaunch | null {
-  let script: string | null = null;
-  let source: ExecutorLaunchSource = "detected";
-  let electron = runtime.command?.trim() || null;
-  const configuredPath = runtime.executablePath?.trim();
-  if (configuredPath && existsSync(configuredPath)) {
-    if (isScriptPath(configuredPath)) {
-      script = configuredPath;
-      source = "configured";
-    } else {
-      electron = electron ?? configuredPath;
-    }
-  }
-  if (!script) {
-    const managed = join(executorHome(settingsPath, "zcode"), "zcode.cjs");
-    if (existsSync(managed)) {
-      script = managed;
-      source = "managed";
-    }
-  }
-  if (!script && detectGlobalInstallations()) script = detectZcodeScript();
-  if (!script) {
-    if (electron) return commandLaunch("zcode", electron, "configured");
-    return null;
-  }
-  const command = electron ?? findZcodeElectron(script);
-  if (!command) return null;
-  return scriptLaunch("zcode", script, source, { ELECTRON_RUN_AS_NODE: "1" }, command);
-}
-
 function scriptLaunch(
   id: ExecutorId,
   script: string,
@@ -350,7 +318,7 @@ function scriptLaunch(
     env,
     source,
     script,
-    display: id === "zcode" ? `${command} ${script}` : script
+    display: script
   };
 }
 
@@ -374,7 +342,6 @@ function genericLaunchHealth(id: ExecutorId, launch: ExecutorLaunch, check: Vers
     command: launch.display,
     version: check.version,
     issues: check.ok ? [] : [check.error ?? "无法启动执行器"],
-    experimental: id === "zcode",
     installState: check.ok ? "available" : "needs_repair"
   };
 }
@@ -411,7 +378,6 @@ function missingHealth(id: ExecutorId): ExecutorHealth {
     command: "",
     version: null,
     issues: ["未检测到该执行器；请在设置中安装或填写可执行文件路径。"],
-    experimental: id === "zcode",
     installState: "missing"
   };
 }
@@ -496,33 +462,6 @@ function findQoderCli(): string | null {
     }
   }
   return null;
-}
-
-function detectZcodeScript(): string | null {
-  const roots = [
-    process.env.ZCODE_HOME ?? null,
-    process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, "Programs", "ZCode") : null,
-    process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, "ZCode") : null,
-    process.env.ProgramFiles ? join(process.env.ProgramFiles, "ZCode") : null,
-    process.env.ProgramFiles ? join(process.env.ProgramFiles, "ZCode CN") : null,
-    "D:\\App\\ZCode"
-  ].filter((value): value is string => Boolean(value));
-  for (const root of roots) {
-    const candidate = join(root, "resources", "glm", "zcode.cjs");
-    if (existsSync(candidate)) return candidate;
-  }
-  return null;
-}
-
-function findZcodeElectron(script: string): string | null {
-  const appRoot = dirname(dirname(dirname(script)));
-  const candidates = [
-    join(appRoot, "ZCode.exe"),
-    join(appRoot, "zcode.exe"),
-    join(appRoot, "ZCode"),
-    join(appRoot, "electron.exe")
-  ];
-  return candidates.find(existsSync) ?? null;
 }
 
 function globalNodeModuleRoots(): string[] {

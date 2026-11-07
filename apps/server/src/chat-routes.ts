@@ -96,7 +96,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
   const defaultSettings = () => {
     const executorSettings = loadExecutorSettings(executorSettingsPath);
     const enabled: Partial<Record<ExecutorId, boolean>> = { native: true, codex: true, hermes: true };
-    for (const id of ["qoder", "workbuddy", "zcode", "kimi"] as const) {
+    for (const id of ["qoder", "workbuddy", "kimi"] as const) {
       const runtime = executorSettings.executors[id];
       enabled[id] = isExecutorManagedInstalled(id, executorSettingsPath)
         || Boolean(runtime?.executablePath || runtime?.command || runtime?.installMode);

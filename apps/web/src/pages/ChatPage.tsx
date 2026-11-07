@@ -45,12 +45,12 @@ const SUGGESTIONS = [
 ];
 
 const DEFAULT_SETTINGS: ConversationSettings = {
-  executorEnabled: { native: true, codex: true, hermes: true, qoder: false, workbuddy: false, zcode: false, kimi: false },
+  executorEnabled: { native: true, codex: true, hermes: true, qoder: false, workbuddy: false, kimi: false },
   approvalMode: "necessary",
   preferredExecutorId: null
 };
 
-const EXECUTOR_ORDER: ExecutorId[] = ["native", "codex", "hermes", "qoder", "workbuddy", "zcode", "kimi"];
+const EXECUTOR_ORDER: ExecutorId[] = ["native", "codex", "hermes", "qoder", "workbuddy", "kimi"];
 
 interface RoutingState {
   action: "chat" | "task";
@@ -160,7 +160,6 @@ export function ChatPage() {
         hermes: patch.executorEnabled?.hermes ?? conversationSettings.executorEnabled.hermes,
         qoder: patch.executorEnabled?.qoder ?? conversationSettings.executorEnabled.qoder,
         workbuddy: patch.executorEnabled?.workbuddy ?? conversationSettings.executorEnabled.workbuddy,
-        zcode: patch.executorEnabled?.zcode ?? conversationSettings.executorEnabled.zcode,
         kimi: patch.executorEnabled?.kimi ?? conversationSettings.executorEnabled.kimi
       },
       approvalMode: patch.approvalMode ?? conversationSettings.approvalMode,

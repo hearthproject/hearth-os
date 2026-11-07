@@ -54,7 +54,6 @@ interface LineRunnerSpec {
 
 export function runExternalExecutor(options: ExternalRunOptions): Promise<ExternalRunResult> {
   if (options.id === "qoder") return runQoderSdk(options);
-  if (options.id === "zcode") return runZcodeJson(options);
   if (options.id === "workbuddy") {
     return runLineJson(options, {
       args: workbuddyArgs(options),
@@ -85,17 +84,6 @@ export function workbuddyArgs(options: Pick<ExternalRunOptions, "mode" | "resume
   if (options.mode === "full") args.push("-y");
   else args.push("--permission-mode", "acceptEdits");
   if (options.resumeSessionId) args.push("-r", options.resumeSessionId);
-  return args;
-}
-
-export function zcodeArgs(options: Pick<ExternalRunOptions, "prompt" | "workingDirectory" | "mode" | "resumeSessionId">): string[] {
-  const args = [
-    "--prompt", options.prompt,
-    "--json",
-    "--cwd", options.workingDirectory,
-    "--mode", options.mode === "full" ? "yolo" : "guarded"
-  ];
-  if (options.resumeSessionId) args.push("--resume", options.resumeSessionId);
   return args;
 }
 
@@ -289,84 +277,6 @@ function handleWorkbuddyLine(record: Record<string, unknown>, state: LineState, 
   }
 }
 
-function runZcodeJson(options: ExternalRunOptions): Promise<ExternalRunResult> {
-  const started = Date.now();
-  return new Promise((resolve, reject) => {
-    const child = spawn(options.launch.command, [...options.launch.args, ...zcodeArgs(options)], {
-      cwd: options.workingDirectory,
-      windowsHide: true,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, ...options.launch.env },
-      shell: false
-    });
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
-    const emit = (type: string, message: string, detail?: TaskProgressDetail) => {
-      options.onProgress?.({
-        type,
-        message,
-        ...(detail ? { detail: { ...detail, executorId: "zcode" } } : {})
-      });
-    };
-    const finish = (result: ExternalRunResult | Error) => {
-      if (settled) return;
-      settled = true;
-      options.signal?.removeEventListener("abort", onAbort);
-      if (result instanceof Error) reject(result);
-      else resolve(result);
-    };
-    const onAbort = () => {
-      killProcessTree(child.pid);
-      finish(new Error("任务已取消"));
-    };
-    options.signal?.addEventListener("abort", onAbort, { once: true });
-    if (options.signal?.aborted) {
-      onAbort();
-      return;
-    }
-    emit("system", "ZCode 已启动", { executorId: "zcode", eventType: "system", status: "started" });
-    child.stdout?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk: string) => {
-      stdout += chunk;
-      if (stdout.length > 4_000_000) stdout = stdout.slice(-4_000_000);
-    });
-    child.stderr?.setEncoding("utf8");
-    child.stderr?.on("data", (chunk: string) => {
-      stderr += chunk;
-      if (stderr.length > 20_000) stderr = stderr.slice(-20_000);
-    });
-    child.on("error", (error) => finish(new Error(`无法启动 ZCode：${error.message}`)));
-    child.on("close", (code) => {
-      const elapsed = Date.now() - started;
-      const parsed = extractJson(stdout);
-      if (code !== 0) {
-        const message = parsed ? stringValue(parsed.error_message) || stringValue(parsed.response) : "";
-        finish(new Error(`ZCode 执行失败：${clip(message || stderr.trim() || `退出码 ${code ?? "未知"}`, 4_000)}`));
-        return;
-      }
-      if (!parsed) {
-        const text = stdout.trim();
-        if (!text) {
-          finish(new Error(`ZCode 没有返回结果：${clip(stderr.trim(), 2_000)}`));
-          return;
-        }
-        finish({ finalResponse: text, usage: null, sessionId: null, exitCode: code, durationMs: elapsed });
-        return;
-      }
-      const finalResponse = stringValue(parsed.response) || stringValue(parsed.result) || stringValue(parsed.text);
-      emit("result", "ZCode 执行完成", { executorId: "zcode", eventType: "result", text: clip(finalResponse, 8_000) });
-      finish({
-        finalResponse,
-        usage: usageOf(parsed.usage),
-        sessionId: stringValue(parsed.sessionId) || stringValue(parsed.session_id) || null,
-        exitCode: code,
-        durationMs: numberValue(parsed.duration_ms) ?? elapsed
-      });
-    });
-  });
-}
-
 interface QoderSdkModule {
   query?: (input: { prompt: string; options: Record<string, unknown> }) => QoderQuery;
   qodercliAuth?: () => unknown;
@@ -500,32 +410,6 @@ function usageOf(value: unknown): RunUsage | null {
     outputTokens: output,
     reasoningOutputTokens: reasoning
   };
-}
-
-function extractJson(output: string): Record<string, unknown> | null {
-  const trimmed = output.trim();
-  if (!trimmed) return null;
-  const candidates = [trimmed];
-  const lines = trimmed.split(/\r?\n/).reverse();
-  for (const line of lines) {
-    if (line.trim().startsWith("{")) {
-      candidates.push(line.trim());
-      break;
-    }
-  }
-  const first = trimmed.indexOf("{");
-  const last = trimmed.lastIndexOf("}");
-  if (first >= 0 && last > first) candidates.push(trimmed.slice(first, last + 1));
-  for (const candidate of candidates) {
-    try {
-      const parsed = JSON.parse(candidate);
-      const record = asRecord(parsed);
-      if (record) return record;
-    } catch {
-      // Try the next candidate.
-    }
-  }
-  return null;
 }
 
 function killProcessTree(pid: number | undefined): void {

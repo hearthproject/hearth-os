@@ -7,7 +7,6 @@ import {
   kimiArgs,
   runExternalExecutor,
   workbuddyArgs,
-  zcodeArgs,
   type ExternalProgress,
   type ExternalRunOptions
 } from "./external-executor.ts";
@@ -20,7 +19,7 @@ function tempRoot(): string {
   return root;
 }
 
-function launch(id: "qoder" | "workbuddy" | "zcode" | "kimi", script: string): ExecutorLaunch {
+function launch(id: "qoder" | "workbuddy" | "kimi", script: string): ExecutorLaunch {
   return {
     id,
     kind: id === "qoder" ? "qoder-sdk" : "node-script",
@@ -34,7 +33,7 @@ function launch(id: "qoder" | "workbuddy" | "zcode" | "kimi", script: string): E
 }
 
 function options(
-  id: "qoder" | "workbuddy" | "zcode" | "kimi",
+  id: "qoder" | "workbuddy" | "kimi",
   script: string,
   root: string,
   progress: string[] = []
@@ -65,9 +64,6 @@ describe("external executor runners", () => {
     ]);
     expect(workbuddyArgs({ mode: "full", resumeSessionId: "s2" })).toEqual([
       "-p", "--output-format", "stream-json", "--verbose", "-y", "-r", "s2"
-    ]);
-    expect(zcodeArgs({ prompt: "hello", workingDirectory: "C:\\work", mode: "necessary" })).toEqual([
-      "--prompt", "hello", "--json", "--cwd", "C:\\work", "--mode", "guarded"
     ]);
   });
 
@@ -104,19 +100,6 @@ describe("external executor runners", () => {
     expect(result.finalResponse).toBe("WorkBuddy final");
     expect(result.sessionId).toBe("wb-session");
     expect(result.usage).toMatchObject({ inputTokens: 3, outputTokens: 2 });
-  });
-
-  it("parses ZCode one-shot JSON output", async () => {
-    const root = tempRoot();
-    const script = join(root, "zcode.mjs");
-    writeFileSync(script, [
-      "console.log(JSON.stringify({ sessionId: 'zcode-session', response: 'ZCode final', usage: { input_tokens: 5, output_tokens: 1 } }));"
-    ].join("\n"), "utf8");
-
-    const result = await runExternalExecutor(options("zcode", script, root));
-    expect(result.finalResponse).toBe("ZCode final");
-    expect(result.sessionId).toBe("zcode-session");
-    expect(result.usage?.inputTokens).toBe(5);
   });
 
   it("drives the Qoder SDK query API", async () => {

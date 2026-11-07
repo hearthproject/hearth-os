@@ -37,7 +37,7 @@ Models can change, executors can be replaced, and the interface can be rewritten
 |---|---|
 | **Chat-first control plane** | React + Vite single-page app; tasks are proposed in conversation, and task detail shows executor, phase, tokens, duration, and artifacts |
 | **Native agent runtime** | A self-built single-agent tool loop supporting OpenAI Chat, OpenAI Responses, Anthropic Messages, and Gemini |
-| **Seven executors** | `native`, `codex`, `hermes`, `qoder`, `workbuddy`, `zcode`, and `kimi` share one registry, launcher, health probe, install pipeline, and settings surface. Executor identity is written into every run manifest |
+| **Six executors** | `native`, `codex`, `hermes`, `qoder`, `workbuddy`, and `kimi` share one registry, launcher, health probe, install pipeline, and settings surface. Executor identity is written into every run manifest |
 | **Durable task state** | State machine, budgets, checkpoints, waiting-for-input, resume, and retry; an append-only SQLite event log records every fact |
 | **Approvals and receipts** | External actions produce a preview; a one-time approval is bound to a parameter fingerprint; the effect ledger executes once and stores a receipt |
 | **Sources and documents** | Local files, knowledge bases, allowlisted web pages, and text extraction for TXT, Markdown, CSV, JSON, HTML, PDF, DOCX, and XLSX |
@@ -122,7 +122,6 @@ Open **Settings → 执行器管理** to install, probe, configure, and set conc
 | `hermes` | Uses the `hermes` command on `PATH`, or a command path configured in Settings |
 | `qoder` | Managed install of `@qoder-ai/qoder-agent-sdk`; reuses a local `qodercli` login or a personal access token |
 | `workbuddy` | Managed install of `@tencent-ai/codebuddy-code`; reuses the local CodeBuddy/WorkBuddy login |
-| `zcode` | Experimental integration with the bundled ZCode desktop `zcode.cjs` runtime |
 | `kimi` | Managed install of `@moonshot-ai/kimi-code`; runs non-interactive stream-json sessions |
 
 Managed packages live under `.hearth/executors/<id>/`; configuration and preferred routing live in `.hearth/executor-settings.json`. Run `npm test` after adding an executor to verify routing, launch resolution, install jobs, adapter parsing, and health checks together.

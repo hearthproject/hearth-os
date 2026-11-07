@@ -68,7 +68,7 @@ describe("executor installer", () => {
 
   it("rejects unsupported executors", () => {
     const installer = new ExecutorInstaller(async () => ({ code: 0, error: null }));
-    expect(() => installer.start("zcode", join(tempRoot(), "executor-settings.json")))
+    expect(() => installer.start("native", join(tempRoot(), "executor-settings.json")))
       .toThrow(ExecutorInstallError);
   });
 
@@ -93,7 +93,7 @@ describe("executor installer", () => {
     expect(workbuddy.install.supported).toBe(true);
     expect(workbuddy.install.packageSpec).toBe("@tencent-ai/codebuddy-code@2.181.0");
 
-    const unsupported = await app.inject({ method: "POST", url: "/api/executors/zcode/install" });
+    const unsupported = await app.inject({ method: "POST", url: "/api/executors/native/install" });
     expect(unsupported.statusCode).toBe(400);
     expect(unsupported.json().error).toBe("INSTALL_UNSUPPORTED");
 

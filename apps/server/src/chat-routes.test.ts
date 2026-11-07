@@ -182,7 +182,7 @@ describe("chat-first API", () => {
       const listed = await app.inject({ method: "GET", url: "/api/executors" });
       expect(listed.statusCode).toBe(200);
       expect(listed.json().executors.map((executor: { id: string }) => executor.id)).toEqual([
-        "native", "codex", "hermes", "qoder", "workbuddy", "zcode", "kimi"
+        "native", "codex", "hermes", "qoder", "workbuddy", "kimi"
       ]);
       expect(listed.json().executors.every((executor: { health: unknown }) => Boolean(executor.health))).toBe(true);
       expect(listed.json().preferredExecutorId).toBeNull();

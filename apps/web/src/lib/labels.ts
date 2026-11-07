@@ -148,7 +148,6 @@ export const EXECUTOR_LABELS: Record<string, string> = {
   hermes: "Hermes",
   qoder: "Qoder",
   workbuddy: "WorkBuddy",
-  zcode: "ZCode",
   kimi: "Kimi Code"
 };
 
