@@ -5,7 +5,6 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   ArrowUp,
-  Bot,
   Check,
   CheckCircle2,
   Copy,
@@ -19,7 +18,6 @@ import {
   Settings2,
   ShieldAlert,
   ShieldCheck,
-  Terminal,
   Trash2,
   X
 } from "lucide-react";
@@ -51,6 +49,8 @@ const DEFAULT_SETTINGS: ConversationSettings = {
   approvalMode: "necessary",
   preferredExecutorId: null
 };
+
+const EXECUTOR_ORDER: ExecutorId[] = ["native", "codex", "hermes", "qoder", "workbuddy", "zcode", "kimi"];
 
 interface RoutingState {
   action: "chat" | "task";
@@ -90,6 +90,7 @@ export function ChatPage() {
     enabled: Boolean(conversationId)
   });
   const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health });
+  const executorsQuery = useQuery({ queryKey: ["executors"], queryFn: api.executors, refetchInterval: 20_000 });
   const executorSettingsQuery = useQuery({ queryKey: ["executorSettings"], queryFn: api.executorSettings });
   const conversations = conversationsQuery.data?.conversations ?? [];
   const tasks = tasksQuery.data?.tasks ?? [];
@@ -192,12 +193,14 @@ export function ChatPage() {
       });
   }
 
-  function toggleExecutor(executorId: ExecutorId) {
+  function chooseExecutor(executorId: ExecutorId | "") {
+    if (!executorId) {
+      patchSettings({ preferredExecutorId: null });
+      return;
+    }
     patchSettings({
-      executorEnabled: {
-        ...conversationSettings.executorEnabled,
-        [executorId]: !conversationSettings.executorEnabled[executorId]
-      }
+      preferredExecutorId: executorId,
+      executorEnabled: { ...conversationSettings.executorEnabled, [executorId]: true }
     });
   }
 
@@ -323,18 +326,18 @@ export function ChatPage() {
   }
 
   const configured = healthQuery.data?.chatModel.configured ?? true;
-  const executorAvailability: Record<ExecutorId, boolean> = {
-    native: true,
-    codex: healthQuery.data?.codex.canRun ?? true,
-    hermes: healthQuery.data?.hermes.canRun ?? false,
-    qoder: false,
-    workbuddy: false,
-    zcode: false,
-    kimi: false
-  };
-  const executorIds = Object.keys(executorAvailability) as ExecutorId[];
-  const executorReady = executorIds.some((id) => executorAvailability[id] && conversationSettings.executorEnabled[id]);
-  const allExecutorsOff = !executorIds.some((id) => conversationSettings.executorEnabled[id]);
+  const executorViews = executorsQuery.data?.executors ?? [];
+  const executorAvailability = {} as Record<ExecutorId, boolean>;
+  for (const id of EXECUTOR_ORDER) {
+    executorAvailability[id] = executorViews.find((executor) => executor.id === id)?.health.canRun
+      ?? (id === "native" ? true : id === "codex" ? healthQuery.data?.codex.canRun ?? true : id === "hermes" ? healthQuery.data?.hermes.canRun ?? false : false);
+  }
+  const executorReady = EXECUTOR_ORDER.some((id) => executorAvailability[id] && conversationSettings.executorEnabled[id]);
+  const allExecutorsOff = !EXECUTOR_ORDER.some((id) => conversationSettings.executorEnabled[id]);
+  const selectedExecutorId = conversationSettings.preferredExecutorId;
+  const selectedExecutor = executorViews.find((executor) => executor.id === selectedExecutorId) ?? null;
+  const selectedExecutorName = selectedExecutor?.name ?? (selectedExecutorId ? executorLabel(selectedExecutorId) : "");
+  const selectedExecutorUnavailable = Boolean(selectedExecutorId && !executorAvailability[selectedExecutorId]);
   const isEmpty = messages.length === 0 && !streaming && !sending;
 
   return (
@@ -427,41 +430,26 @@ export function ChatPage() {
 
         <div className="composer-wrap">
           <div className="composer-toolbar">
-            <div className="executor-toggles" role="group" aria-label="执行器开关">
-              <button
-                type="button"
-                className={`executor-toggle ${conversationSettings.executorEnabled.native ? "on" : "off"}`}
-                onClick={() => toggleExecutor("native")}
+            <label className="executor-picker" title="选择本对话优先使用的执行器；不可用时会自动回退">
+              <Cpu size={15} />
+              <span className={`status-dot ${selectedExecutorId ? selectedExecutorUnavailable ? "offline" : "online" : executorReady ? "online" : "offline"}`} />
+              <select
+                value={selectedExecutorId ?? ""}
+                onChange={(event) => chooseExecutor(event.target.value as ExecutorId | "")}
                 disabled={!settingsReady}
-                aria-pressed={conversationSettings.executorEnabled.native}
-                title={`Native 执行器 · 始终可用 · 点击${conversationSettings.executorEnabled.native ? "停用" : "启用"}`}
+                aria-label="优先执行器"
               >
-                <Cpu size={15} />
-                <span>Native</span>
-              </button>
-              <button
-                type="button"
-                className={`executor-toggle ${conversationSettings.executorEnabled.codex ? "on" : "off"}`}
-                onClick={() => toggleExecutor("codex")}
-                disabled={!settingsReady}
-                aria-pressed={conversationSettings.executorEnabled.codex}
-                title={`Codex 执行器 · ${executorAvailability.codex ? "当前可用" : "当前未连接"} · 点击${conversationSettings.executorEnabled.codex ? "停用" : "启用"}`}
-              >
-                <Terminal size={15} />
-                <span>Codex</span>
-              </button>
-              <button
-                type="button"
-                className={`executor-toggle ${conversationSettings.executorEnabled.hermes ? "on" : "off"}`}
-                onClick={() => toggleExecutor("hermes")}
-                disabled={!settingsReady}
-                aria-pressed={conversationSettings.executorEnabled.hermes}
-                title={`Hermes 执行器 · ${executorAvailability.hermes ? "当前可用" : "未配置或不可用"} · 点击${conversationSettings.executorEnabled.hermes ? "停用" : "启用"}`}
-              >
-                <Bot size={15} />
-                <span>Hermes</span>
-              </button>
-            </div>
+                <option value="">自动匹配（按任务）</option>
+                {EXECUTOR_ORDER.map((id) => {
+                  const view = executorViews.find((executor) => executor.id === id);
+                  return (
+                    <option key={id} value={id}>
+                      {view?.name ?? executorLabel(id)}{executorAvailability[id] ? "" : " · 不可用"}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
             <span className="composer-toolbar-sep" aria-hidden="true" />
             <button
               type="button"
@@ -475,8 +463,11 @@ export function ChatPage() {
               {conversationSettings.approvalMode === "full" ? <ShieldAlert size={15} /> : <ShieldCheck size={15} />}
               <span>{conversationSettings.approvalMode === "full" ? "完全权限" : "必要审批"}</span>
             </button>
+            {selectedExecutorUnavailable && (
+              <span className="composer-toolbar-note">{selectedExecutorName} 当前不可用，任务会按能力自动回退</span>
+            )}
             {allExecutorsOff && (
-              <span className="composer-toolbar-note">三个执行器都已关闭，任务请求会改为普通回答</span>
+              <span className="composer-toolbar-note">所有执行器都已关闭，任务请求会改为普通回答</span>
             )}
           </div>
           {error && (

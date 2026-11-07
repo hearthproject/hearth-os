@@ -101,7 +101,10 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       enabled[id] = isExecutorManagedInstalled(id, executorSettingsPath)
         || Boolean(runtime?.executablePath || runtime?.command || runtime?.installMode);
     }
-    return defaultConversationSettings(executorSettings.defaultApprovalMode, enabled);
+    return {
+      ...defaultConversationSettings(executorSettings.defaultApprovalMode, enabled),
+      preferredExecutorId: executorSettings.preferredExecutorId
+    };
   };
   mkdirSync(attachmentRoot, { recursive: true });
   await app.register(multipart, {
@@ -332,10 +335,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     const settings = loadModelSettings(modelSettingsPath);
     const route = await decideRoute(userContent, storedFiles.length > 0, detectedUrl, settings);
     const plan = planExecution(userContent);
-    const executorSettings = loadExecutorSettings(executorSettingsPath);
-    const preferredExecutorId = conversation.settings.preferredExecutorId
-      ?? executorSettings.preferredExecutorId
-      ?? plan.executorId;
+    const preferredExecutorId = conversation.settings.preferredExecutorId ?? plan.executorId;
     const resolution = resolveExecutorFromEnabled(preferredExecutorId, conversation.settings.executorEnabled, executorAvailability(), plan.capability);
     send("routing", {
       ...route,
@@ -353,7 +353,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
             role: "assistant",
             content: plan.capability
               ? `${resolution.reason ?? "没有可用的执行器"}，暂时不能派出任务。请在输入框上方启用${plan.capability === "github" ? " Codex 或 Hermes" : " Native"}后重试。`
-              : "所有执行器都已关闭或不可用，暂时不能派出任务。请点击输入框上方的 Native、Codex 或 Hermes 图标启用一个可用执行器，然后再发送。",
+              : "所有执行器都已关闭或不可用，暂时不能派出任务。请在输入框上方的执行器选择器中选择一个可用执行器，然后再发送。",
             taskId: null,
             attachments: [],
             createdAt: new Date().toISOString()
