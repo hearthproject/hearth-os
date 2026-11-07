@@ -382,6 +382,22 @@ export class HearthService {
     return stored;
   }
 
+  private upsertTaskStatusChatMessage(message: ChatMessageRecord): ChatMessageRecord {
+    const { message: stored, created } = this.store.upsertTaskStatusMessage(message);
+    const event = this.store.appendEvent({
+      type: created ? "chat.message.created" : "chat.message.updated",
+      taskId: message.taskId,
+      payload: { message: stored, conversationId: message.conversationId }
+    });
+    this.bus.publish(event);
+    try {
+      this.contextSink?.(stored);
+    } catch {
+      // Context capture is best effort and never blocks chat delivery.
+    }
+    return stored;
+  }
+
   private appendTaskStatusMessage(task: TaskRecord, previousStatus: TaskStatus): void {
     if (!task.conversationId) return;
     const conversation = this.store.getConversation(task.conversationId);
@@ -398,7 +414,7 @@ export class HearthService {
       approvalSummary: approval?.summary ?? task.nextAction,
       attempt
     });
-    this.appendChatMessage({
+    this.upsertTaskStatusChatMessage({
       id: randomUUID(),
       conversationId: task.conversationId,
       role: "assistant",

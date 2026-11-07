@@ -23,8 +23,8 @@ describe("task intent", () => {
     });
     const resolution = resolveExecutorFromEnabled(
       "codex",
-      { native: true, codex: false, hermes: false, qoder: false, workbuddy: false, kimi: false },
-      { native: true, codex: true, hermes: true, qoder: false, workbuddy: false, kimi: false },
+      { native: true, codex: false, "deepseek-harness": false, hermes: false, qoder: false, workbuddy: false, kimi: false },
+      { native: true, codex: true, "deepseek-harness": true, hermes: true, qoder: false, workbuddy: false, kimi: false },
       "github"
     );
     expect(resolution.executorId).toBeNull();
@@ -36,8 +36,8 @@ describe("task intent", () => {
   it("still reroutes ordinary work when codex is off", () => {
     const resolution = resolveExecutorFromEnabled(
       "codex",
-      { native: true, codex: false, hermes: false, qoder: false, workbuddy: false, kimi: false },
-      { native: true, codex: true, hermes: true, qoder: false, workbuddy: false, kimi: false }
+      { native: true, codex: false, "deepseek-harness": false, hermes: false, qoder: false, workbuddy: false, kimi: false },
+      { native: true, codex: true, "deepseek-harness": true, hermes: true, qoder: false, workbuddy: false, kimi: false }
     );
     expect(resolution).toMatchObject({ executorId: "native", reroutedFrom: "codex" });
   });

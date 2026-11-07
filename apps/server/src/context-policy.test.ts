@@ -104,7 +104,7 @@ describe("context fallback policy", () => {
     }).action).toBe("handoff");
     expect(decideFailure({
       cause: "capability_gap", settings: DEFAULT_CONTEXT_SETTINGS, evaluation, targetExecutor: "codex",
-      retriesUsed: 1, handoffsUsed: 1, attemptedExecutors: ["native"]
+      retriesUsed: 1, handoffsUsed: 2, attemptedExecutors: ["native"]
     }).action).toBe("ask_user");
     expect(decideFailure({
       cause: "capability_gap", settings: DEFAULT_CONTEXT_SETTINGS, evaluation, targetExecutor: "codex",

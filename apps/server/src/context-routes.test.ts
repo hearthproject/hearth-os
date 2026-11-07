@@ -50,7 +50,7 @@ describe("context and handoff API", () => {
     expect(defaults.statusCode).toBe(200);
     expect(defaults.json().settings).toMatchObject({
       mode: "on",
-      maxHandoffs: 1,
+      maxHandoffs: 2,
       maxSameExecutorRetries: 1,
       retentionDays: 30,
       maxInlineBytes: 16_384,

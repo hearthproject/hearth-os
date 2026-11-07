@@ -43,7 +43,7 @@ function EventBridge() {
         void queryClient.invalidateQueries({ queryKey: ["health"] });
         void queryClient.invalidateQueries({ queryKey: ["system"] });
         void queryClient.invalidateQueries({ queryKey: ["desktop"] });
-        if (["task.created", "task.updated", "chat.message.created", "message"].includes(event)) {
+        if (["task.created", "task.updated", "chat.message.created", "chat.message.updated", "message"].includes(event)) {
           void queryClient.invalidateQueries({ queryKey: ["conversations"] });
           void queryClient.invalidateQueries({ queryKey: ["conversation"] });
         }

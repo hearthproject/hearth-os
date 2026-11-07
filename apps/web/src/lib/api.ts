@@ -430,7 +430,7 @@ export function subscribeToEvents(onEvent: (event: string) => void): () => void 
   const source = new EventSource("/api/events");
   source.onmessage = () => onEvent("message");
   const eventNames = [
-    "task.created", "task.updated", "task.progress", "chat.message.created", "run.created", "run.updated",
+    "task.created", "task.updated", "task.progress", "chat.message.created", "chat.message.updated", "run.created", "run.updated",
     "approval.created", "approval.updated", "artifact.published", "effect.created", "effect.updated",
     "source.created", "source.updated", "source.item.updated", "source.cleared",
     "proactive.settings.updated", "suggestion.created", "suggestion.updated", "suggestion.event",

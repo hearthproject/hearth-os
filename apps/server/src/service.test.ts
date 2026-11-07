@@ -67,9 +67,9 @@ describe("Hearth service agent metadata", () => {
 
     service.updateTask(task.id, { status: "completed", resultSummary: "已经生成完整结果。" });
     messages = store.listChatMessages(conversation.id);
-    expect(messages).toHaveLength(2);
-    expect(messages[1]).toMatchObject({ kind: "task_status", taskStatus: "completed" });
-    expect(messages[1]?.content).toContain("已经生成完整结果");
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({ kind: "task_status", taskStatus: "completed" });
+    expect(messages[0]?.content).toContain("已经生成完整结果");
     store.close();
   });
 
@@ -87,7 +87,7 @@ describe("Hearth service agent metadata", () => {
     const store = new HearthStore(":memory:");
     const service = new HearthService(store);
     const conversation = store.createConversation("改派对话", {
-      executorEnabled: { native: false, codex: true, hermes: true, qoder: false, workbuddy: false, kimi: false },
+      executorEnabled: { native: false, codex: true, "deepseek-harness": false, hermes: true, qoder: false, workbuddy: false, kimi: false },
       approvalMode: "necessary",
       preferredExecutorId: null
     });
@@ -111,7 +111,7 @@ describe("Hearth service agent metadata", () => {
     const store = new HearthStore(":memory:");
     const service = new HearthService(store);
     const conversation = store.createConversation("全关对话", {
-      executorEnabled: { native: false, codex: false, hermes: false, qoder: false, workbuddy: false, kimi: false },
+      executorEnabled: { native: false, codex: false, "deepseek-harness": false, hermes: false, qoder: false, workbuddy: false, kimi: false },
       approvalMode: "necessary",
       preferredExecutorId: null
     });
@@ -133,7 +133,7 @@ describe("Hearth service agent metadata", () => {
     const store = new HearthStore(":memory:");
     const service = new HearthService(store);
     const conversation = store.createConversation("完全权限对话", {
-      executorEnabled: { native: true, codex: true, hermes: true, qoder: false, workbuddy: false, kimi: false },
+      executorEnabled: { native: true, codex: true, "deepseek-harness": false, hermes: true, qoder: false, workbuddy: false, kimi: false },
       approvalMode: "full",
       preferredExecutorId: null
     });

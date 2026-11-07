@@ -11,8 +11,14 @@ export const TASK_STATUSES = [
 
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
-export const EXECUTOR_IDS = ["native", "codex", "hermes", "qoder", "workbuddy", "kimi"] as const;
+export const EXECUTOR_IDS = ["native", "codex", "deepseek-harness", "hermes", "qoder", "workbuddy", "kimi"] as const;
 export type ExecutorId = (typeof EXECUTOR_IDS)[number];
+
+export const EXECUTOR_TIERS = ["first-class", "external"] as const;
+export type ExecutorTier = (typeof EXECUTOR_TIERS)[number];
+
+export const FIRST_CLASS_EXECUTOR_IDS = ["deepseek-harness", "codex", "native"] as const;
+export type FirstClassExecutorId = (typeof FIRST_CLASS_EXECUTOR_IDS)[number];
 
 export const APPROVAL_MODES = ["necessary", "full"] as const;
 export type ApprovalMode = (typeof APPROVAL_MODES)[number];
@@ -108,6 +114,7 @@ export interface ExecutorView {
   name: string;
   description: string;
   capabilities: string[];
+  tier: ExecutorTier;
   provider?: string | undefined;
   experimental?: boolean | undefined;
   supportsResume?: boolean | undefined;
@@ -280,6 +287,89 @@ export interface ModelSettingsView {
   hasApiKey: boolean;
   apiKeyMasked: string | null;
   updatedAt: string | null;
+}
+
+export interface ModelProfileRecord {
+  id: string;
+  name: string;
+  providerId: string;
+  providerName: string;
+  protocol: ModelProtocol;
+  baseUrl: string;
+  model: string;
+  apiKeyCipher: string | null;
+  isLocal: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ModelProfileView {
+  id: string;
+  name: string;
+  providerId: string;
+  providerName: string;
+  protocol: ModelProtocol;
+  baseUrl: string;
+  model: string;
+  hasApiKey: boolean;
+  apiKeyMasked: string | null;
+  isLocal: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ModelProfilePatch {
+  name?: string | undefined;
+  providerId?: string | undefined;
+  providerName?: string | undefined;
+  protocol?: ModelProtocol | undefined;
+  baseUrl?: string | undefined;
+  model?: string | undefined;
+  apiKey?: string | undefined;
+}
+
+export interface ExecutorModelBinding {
+  executorId: ExecutorId;
+  profileId: string | null;
+  protocolOverride: ModelProtocol | null;
+  modelOverride: string | null;
+  updatedAt: string | null;
+}
+
+export interface ExecutorModelBindingPatch {
+  profileId?: string | null | undefined;
+  protocolOverride?: ModelProtocol | null | undefined;
+  modelOverride?: string | null | undefined;
+}
+
+export interface ExecutorModelBindingView extends ExecutorModelBinding {
+  profile: ModelProfileView | null;
+  effectiveProtocol: ModelProtocol | null;
+  effectiveModel: string | null;
+  allowedProtocols: ModelProtocol[];
+  protocolLocked: boolean;
+  available: boolean;
+  issue: string | null;
+}
+
+export interface ModelRegistryView {
+  chatProfileId: string | null;
+  chatProfile: ModelProfileView | null;
+  profiles: ModelProfileView[];
+  bindings: ExecutorModelBindingView[];
+  updatedAt: string | null;
+}
+
+export type SettingsMigrationStatus = "pending" | "completed" | "failed" | "skipped";
+
+export interface SettingsMigrationRecord {
+  id: string;
+  sourcePath: string;
+  backupPath: string | null;
+  status: SettingsMigrationStatus;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface RunUsage {
@@ -1043,6 +1133,7 @@ export const CONTEXT_ITEM_KINDS = [
   "decision",
   "summary",
   "memory_recall",
+  "usage",
   "notice"
 ] as const;
 export type ContextItemKind = (typeof CONTEXT_ITEM_KINDS)[number];
@@ -1208,7 +1299,7 @@ export interface ContextSettingsPatch {
 
 export const DEFAULT_CONTEXT_SETTINGS: ContextSettings = {
   mode: "on",
-  maxHandoffs: 1,
+  maxHandoffs: 2,
   maxSameExecutorRetries: 1,
   retentionDays: 30,
   maxInlineBytes: 16_384,

@@ -23,6 +23,7 @@ import type {
   EffectRecord,
   EffectStatus,
   EventEnvelope,
+  ExecutorModelBinding,
   HandoffRecord,
   MemoryConflict,
   MemoryForgetReceipt,
@@ -35,6 +36,7 @@ import type {
   MethodTrial,
   MaintenanceRun,
   OutboxDraft,
+  ModelProfileRecord,
   ProactiveSettings,
   ProactiveSuggestion,
   RunCheckpointRecord,
@@ -44,6 +46,7 @@ import type {
   ScheduleRecord,
   ScheduleRunRecord,
   ScheduleRunStatus,
+  SettingsMigrationRecord,
   SourceConnection,
   SourceItem,
   SyncConflict,
@@ -88,7 +91,7 @@ export interface RunAggregate {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 9;
+export const CURRENT_SCHEMA_VERSION = 10;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -312,6 +315,40 @@ CREATE TABLE IF NOT EXISTS context_settings (
   settings_json TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS app_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS model_profiles (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  provider_id TEXT NOT NULL,
+  provider_name TEXT NOT NULL,
+  protocol TEXT NOT NULL,
+  base_url TEXT NOT NULL,
+  model TEXT NOT NULL,
+  api_key_cipher TEXT,
+  is_local INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS executor_model_bindings (
+  executor_id TEXT PRIMARY KEY,
+  profile_id TEXT,
+  protocol_override TEXT,
+  model_override TEXT,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS settings_migrations (
+  id TEXT PRIMARY KEY,
+  source_path TEXT NOT NULL,
+  backup_path TEXT,
+  status TEXT NOT NULL,
+  error TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS method_candidates (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, summary TEXT NOT NULL, applicability TEXT NOT NULL,
   steps_json TEXT NOT NULL, source_task_ids_json TEXT NOT NULL, template_id TEXT,
@@ -444,6 +481,20 @@ export class HearthStore {
     ensureColumn(this.db, "conversations", "settings_json", "TEXT");
     ensureColumn(this.db, "chat_messages", "kind", "TEXT");
     ensureColumn(this.db, "chat_messages", "task_status", "TEXT");
+    this.db.exec(`
+      DELETE FROM chat_messages
+      WHERE kind = 'task_status'
+        AND rowid NOT IN (
+          SELECT MAX(rowid) FROM chat_messages
+          WHERE kind = 'task_status'
+          GROUP BY conversation_id, task_id
+        );
+      CREATE UNIQUE INDEX IF NOT EXISTS chat_messages_task_status_idx
+        ON chat_messages(conversation_id, task_id)
+        WHERE kind = 'task_status' AND task_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS model_profiles_provider_idx ON model_profiles(provider_id, updated_at);
+      CREATE INDEX IF NOT EXISTS settings_migrations_status_idx ON settings_migrations(status, updated_at);
+    `);
     this.db.exec(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION}`);
     this.setMeta("schemaVersion", String(CURRENT_SCHEMA_VERSION));
   }
@@ -467,6 +518,106 @@ export class HearthStore {
     this.db.prepare(
       "INSERT INTO app_meta (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at"
     ).run(key, value, updatedAt);
+  }
+
+  getAppSetting(key: string): string | null {
+    const row = this.db.prepare("SELECT value FROM app_settings WHERE key = ?").get(key) as DbRow | undefined;
+    return row ? String(row.value) : null;
+  }
+
+  setAppSetting(key: string, value: string, updatedAt = new Date().toISOString()): void {
+    this.db.prepare(
+      "INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at"
+    ).run(key, value, updatedAt);
+  }
+
+  deleteAppSetting(key: string): void {
+    this.db.prepare("DELETE FROM app_settings WHERE key = ?").run(key);
+  }
+
+  listModelProfiles(): ModelProfileRecord[] {
+    return (this.db.prepare("SELECT * FROM model_profiles ORDER BY created_at ASC").all() as DbRow[]).map(rowToModelProfile);
+  }
+
+  getModelProfile(id: string): ModelProfileRecord | null {
+    const row = this.db.prepare("SELECT * FROM model_profiles WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToModelProfile(row) : null;
+  }
+
+  upsertModelProfile(profile: ModelProfileRecord): ModelProfileRecord {
+    this.db.prepare(
+      `INSERT INTO model_profiles (id, name, provider_id, provider_name, protocol, base_url, model, api_key_cipher, is_local, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET name=excluded.name, provider_id=excluded.provider_id, provider_name=excluded.provider_name,
+         protocol=excluded.protocol, base_url=excluded.base_url, model=excluded.model,
+         api_key_cipher=COALESCE(excluded.api_key_cipher, model_profiles.api_key_cipher), is_local=excluded.is_local, updated_at=excluded.updated_at`
+    ).run(
+      profile.id, profile.name, profile.providerId, profile.providerName, profile.protocol,
+      profile.baseUrl, profile.model, profile.apiKeyCipher, profile.isLocal ? 1 : 0,
+      profile.createdAt, profile.updatedAt
+    );
+    return profile;
+  }
+
+  deleteModelProfile(id: string): void {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare("UPDATE executor_model_bindings SET profile_id = NULL, updated_at = ? WHERE profile_id = ?")
+        .run(new Date().toISOString(), id);
+      this.db.prepare("DELETE FROM model_profiles WHERE id = ?").run(id);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  listExecutorModelBindings(): ExecutorModelBinding[] {
+    return (this.db.prepare("SELECT * FROM executor_model_bindings ORDER BY executor_id ASC").all() as DbRow[])
+      .map(rowToExecutorModelBinding);
+  }
+
+  getExecutorModelBinding(executorId: string): ExecutorModelBinding | null {
+    const row = this.db.prepare("SELECT * FROM executor_model_bindings WHERE executor_id = ?").get(executorId) as DbRow | undefined;
+    return row ? rowToExecutorModelBinding(row) : null;
+  }
+
+  setExecutorModelBinding(binding: ExecutorModelBinding): ExecutorModelBinding {
+    const updatedAt = binding.updatedAt ?? new Date().toISOString();
+    this.db.prepare(
+      `INSERT INTO executor_model_bindings (executor_id, profile_id, protocol_override, model_override, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(executor_id) DO UPDATE SET profile_id=excluded.profile_id, protocol_override=excluded.protocol_override,
+         model_override=excluded.model_override, updated_at=excluded.updated_at`
+    ).run(binding.executorId, binding.profileId, binding.protocolOverride, binding.modelOverride, updatedAt);
+    return { ...binding, updatedAt };
+  }
+
+  deleteExecutorModelBinding(executorId: string): void {
+    this.db.prepare("DELETE FROM executor_model_bindings WHERE executor_id = ?").run(executorId);
+  }
+
+  getSettingsMigration(id: string): SettingsMigrationRecord | null {
+    const row = this.db.prepare("SELECT * FROM settings_migrations WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToSettingsMigration(row) : null;
+  }
+
+  listSettingsMigrations(): SettingsMigrationRecord[] {
+    return (this.db.prepare("SELECT * FROM settings_migrations ORDER BY created_at ASC").all() as DbRow[])
+      .map(rowToSettingsMigration);
+  }
+
+  upsertSettingsMigration(record: SettingsMigrationRecord): SettingsMigrationRecord {
+    this.db.prepare(
+      `INSERT INTO settings_migrations (id, source_path, backup_path, status, error, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET source_path=excluded.source_path, backup_path=excluded.backup_path,
+         status=excluded.status, error=excluded.error, updated_at=excluded.updated_at`
+    ).run(
+      record.id, record.sourcePath, record.backupPath, record.status, record.error,
+      record.createdAt, record.updatedAt
+    );
+    return record;
   }
 
   getAppMeta(): AppMeta {
@@ -692,6 +843,44 @@ export class HearthStore {
         .run(message.createdAt, message.conversationId);
       this.db.exec("COMMIT");
       return message;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  upsertTaskStatusMessage(message: ChatMessageRecord): { message: ChatMessageRecord; created: boolean } {
+    if (message.kind !== "task_status" || !message.taskId) return { message: this.createChatMessage(message), created: true };
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const existing = this.db.prepare(
+        "SELECT * FROM chat_messages WHERE conversation_id = ? AND task_id = ? AND kind = 'task_status' ORDER BY rowid ASC LIMIT 1"
+      ).get(message.conversationId, message.taskId) as DbRow | undefined;
+      if (existing) {
+        this.db.prepare(
+          "UPDATE chat_messages SET content = ?, attachments_json = ?, created_at = ?, task_status = ? WHERE id = ?"
+        ).run(message.content, JSON.stringify(message.attachments), message.createdAt, message.taskStatus ?? null, String(existing.id));
+        this.db.prepare("UPDATE conversations SET updated_at = ? WHERE id = ?").run(message.createdAt, message.conversationId);
+        this.db.exec("COMMIT");
+        return {
+          message: {
+            ...message,
+            id: String(existing.id)
+          },
+          created: false
+        };
+      }
+      this.db.prepare(
+        `INSERT INTO chat_messages (id, conversation_id, role, content, task_id, attachments_json, created_at, kind, task_status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        message.id, message.conversationId, message.role, message.content,
+        message.taskId, JSON.stringify(message.attachments), message.createdAt,
+        message.kind, message.taskStatus ?? null
+      );
+      this.db.prepare("UPDATE conversations SET updated_at = ? WHERE id = ?").run(message.createdAt, message.conversationId);
+      this.db.exec("COMMIT");
+      return { message, created: true };
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
@@ -1615,6 +1804,7 @@ export class HearthStore {
       case "approval.expired":
       case "approval.auto_approved":
       case "chat.message.created":
+      case "chat.message.updated":
       case "context.item.appended":
       case "context.summary.updated":
       case "context.settings.updated":
@@ -2683,6 +2873,44 @@ function insertMethodTrialRow(db: DatabaseSync, trial: MethodTrial): void {
   db.prepare(
     "INSERT INTO method_trials (id, method_id, method_version, task_id, created_at) VALUES (?, ?, ?, ?, ?)"
   ).run(trial.id, trial.methodId, trial.methodVersion, trial.taskId, trial.createdAt);
+}
+
+function rowToModelProfile(row: DbRow): ModelProfileRecord {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    providerId: String(row.provider_id),
+    providerName: String(row.provider_name),
+    protocol: String(row.protocol) as ModelProfileRecord["protocol"],
+    baseUrl: String(row.base_url),
+    model: String(row.model),
+    apiKeyCipher: row.api_key_cipher == null ? null : String(row.api_key_cipher),
+    isLocal: Number(row.is_local) === 1,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
+  };
+}
+
+function rowToExecutorModelBinding(row: DbRow): ExecutorModelBinding {
+  return {
+    executorId: String(row.executor_id) as ExecutorModelBinding["executorId"],
+    profileId: row.profile_id == null ? null : String(row.profile_id),
+    protocolOverride: row.protocol_override == null ? null : String(row.protocol_override) as ExecutorModelBinding["protocolOverride"],
+    modelOverride: row.model_override == null ? null : String(row.model_override),
+    updatedAt: String(row.updated_at)
+  };
+}
+
+function rowToSettingsMigration(row: DbRow): SettingsMigrationRecord {
+  return {
+    id: String(row.id),
+    sourcePath: String(row.source_path),
+    backupPath: row.backup_path == null ? null : String(row.backup_path),
+    status: String(row.status) as SettingsMigrationRecord["status"],
+    error: row.error == null ? null : String(row.error),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
+  };
 }
 
 function rowToSyncPeer(row: DbRow): SyncPeer {
