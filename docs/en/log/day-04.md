@@ -34,7 +34,7 @@ The day did not treat "the page exists" as closure: server, API, projection, exe
 | Real tasks | Stage-one acceptance still stands: 15 tasks ran, 13 passed; the T07/T08 boundaries are unchanged |
 | Evidence rule | Code closure was not written up as real acceptance; external comments and desktop actions were not described as completed |
 
-> This log records implementation and internal verification, not a v1.0 release. Real accounts, real devices, long-running operation, and failure drills for phases 2–6 remain governed by [capability status](https://hearthproject.github.io/hearth-os/en/delivery/capabilities.html).
+> This log records implementation and internal verification, not a v1.0 release. Real accounts, real devices, long-running operation, and failure drills for phases 2–6 remain governed by [delivery status](/en/delivery/status).
 
 ## Commits
 
@@ -83,4 +83,4 @@ The day did not treat "the page exists" as closure: server, API, projection, exe
 
 - The phase 2–6 code closures run, but real mail/calendar accounts, high-risk desktop actions, the phone entry point, memory production comparisons, two-device switching, and long-running operation are not yet accepted.
 - The chat-first primary navigation only exposes chat, tasks, devices, and settings; memory, methods, sync, safety, and operations have APIs and page components that are not yet wired back into primary navigation.
-- The next stage does not add more pages. It closes real evidence item by item along the [remaining roadmap](https://hearthproject.github.io/hearth-os/en/delivery/roadmap.html).
+- The next stage does not add more pages. It closes real evidence item by item along the [delivery route](/en/delivery/).

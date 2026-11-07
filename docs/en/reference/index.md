@@ -20,4 +20,4 @@ outline: false
   { no: '09', title: 'Documentation Map', text: 'Site structure, recommended reading order, and maintenance rules.', link: '/en/reference/source-map' }
 ]" />
 
-For a first read, start with [Quick start](/en/guide/), [Design](/en/design/), and [Delivery](/en/delivery/). Return here when you need an implementation constraint, a review rule, or a maintenance detail. The reference area records implemented engineering facts, known risks, and checklists that still need review; it does not replace [Acceptance and evidence](/en/delivery/acceptance).
+For a first read, start with [Design](/en/design/) and [Delivery](/en/delivery/). Return here when you need an implementation constraint, a review rule, or a maintenance detail. The appendix records implemented engineering facts, known risks, and checklists that still need review; it does not replace the acceptance evidence on the delivery route.

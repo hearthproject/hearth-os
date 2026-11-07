@@ -32,7 +32,7 @@ outline: [2]
 | Live updates | Server-sent event push | Simpler than a two-way persistent connection for state changes |
 | Browser automation | Not built in | Web sources use `fetch` + `cheerio`; sites that need a signed-in session or interaction stay inside the executor workspace |
 | Documents and data | Server-side TypeScript | `pdfjs-dist`, `mammoth`, and `exceljs` extract PDF, DOCX, and XLSX in-process |
-| Isolation | One workspace per task | Today isolation is the task workspace plus restricted tool permissions; containers and high-risk isolation rooms stay in the [remaining roadmap](/en/delivery/roadmap) |
+| Isolation | One workspace per task | Today isolation is the task workspace plus restricted tool permissions; containers and high-risk isolation rooms remain unfinished work in [Phase 3](/en/delivery/stage-3) |
 
 TypeScript is the language; Node.js is the runtime. The former constrains development-time types, while the latter provides files, networking, processes, and timers. External input and persisted data still need runtime validation. The primary language does not change the real safety boundaries of isolation, approval, recovery, and authority.
 

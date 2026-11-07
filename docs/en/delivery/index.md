@@ -1,76 +1,39 @@
 ---
-title: "Delivery and progress"
-description: "What Hearth has delivered, what is still open, and the order in which the remaining work converges."
+title: "Delivery Route and Implementation Plan"
+description: "Hearth's six delivery phases, from a minimum complete MVP to a long-running Personal Agent OS."
 outline: [2, 3]
 ---
 
-# Delivery and progress
+# Delivery Route and Implementation Plan
 
-<p class="lead">This is not a roadmap that only describes the future. It starts from loops that already run, records which capabilities can be proven by code and tests, which boundaries remain open, and in what order the gaps will be closed.</p>
+<p class="lead">This route answers only two questions: what to build first, and what comes next; and how each phase moves from usable to reliable.</p>
 
-## Bottom line
+## Overall goal
 
-**The phase-one MVP has passed its hard gate. Phases two through six have runnable code loops and automated coverage, but have not completed real-user, real-device, or long-running acceptance.**
+Hearth turns personal digital work into reliable tasks. The route starts from what the user can complete, not from architecture modules: deliver the smallest complete product first, then expand work coverage, proactivity, memory, and multi-device use.
 
-Verification baseline on 2026-11-06: `npm test` passed 40 test files and 198 tests; `npm run typecheck`, `npm run build`, and `npm run docs:build` passed. All 15 phase-one real tasks ran, and 13 passed acceptance.
+## Current progress
+
+As of 2026-11-07, Phase 1 has been accepted: all 15 cross-industry real tasks ran and 13 passed, meeting the 10/15 hard threshold. Phases 2 through 6 have runnable code and automated test loops, but real accounts, real devices, long-running operation, and failure drills remain unfinished, so they cannot be called complete delivery. See [Phase 2–6 delivery status](/en/delivery/status) for item-level evidence and the [Day04 development log](/en/log/day-04) for how it was built.
 
 ## Six phases
 
-| Phase | Status | Proven | Still open |
+Each phase has four steps. Open a phase name for the detailed plan.
+
+| Phase | Goal | Current status | What the user gets |
 |---|---|---|---|
-| [1 · Minimum complete MVP](/en/delivery/mvp) | **Accepted** | 15 real tasks, 13 passed; task, approval, artifact, recovery, and backup loops | T07 did not deliver a PR; T08's external comment awaits user approval |
-| [2 · Everyday content work](/en/delivery/capabilities) | Partial | Local files, knowledge bases, web sources; document extraction; drafts, approvals, local outbox, and receipts | No email or calendar accounts; no real sending |
-| [3 · Desktop operation](/en/delivery/capabilities) | Partial | Windows pairing, capability approval, observation, pause/takeover/hand-back, low-risk input, UIA actions | Sensitive-area masking, isolated desktop, high-risk compensation |
-| [4 · Proactive service and mobile](/en/delivery/capabilities) | Partial | Six trigger types, proactive inbox, accept/ignore/snooze/convert, attention budget | Mobile PWA, phone pairing, push, remote approval and takeover |
-| [5 · Memory and evolution](/en/delivery/capabilities) | Partial | Memory candidate/recall/correct/conflict/forget/export; method evaluate/promote/reject/rollback | Real long-term use and before/after production comparison |
-| [6 · Multi-device and long-running](/en/delivery/capabilities) | Partial | Incremental sync, peer auth, leases and epoch fencing, revocation, encrypted backup, health maintenance | Real two-device switch, lost-device drill, multi-week run |
+| [Phase 1 · Minimum Complete MVP](/en/delivery/stage-1) | Deliver the smallest complete product that passes at least 10 of 15 cross-industry real tasks. | **Accepted:** all 15 tasks ran, 13 passed; T07 and T08 remain open boundaries | A local task workbench that can be used every day across multiple task families |
+| [Phase 2 · Everyday Content Work](/en/delivery/stage-2) | Expand from the initial cross-industry tasks to email, calendar, documents, tables, and the web. | **Partial:** local sources, document extraction, and the local outbox loop run; real email/calendar access is not connected | A personal operator that handles everyday content and writes safely after approval |
+| [Phase 3 · Desktop Operation](/en/delivery/stage-3) | Let Hearth operate desktop software and cross-application workflows without open interfaces. | **Partial:** same-machine Windows pairing, observation, takeover, and allowlisted low-risk actions run; high-risk and isolation work is open | An assistant that can operate desktop software, pause, take over, and recover from failure |
+| [Phase 4 · Proactive Service and Mobile Entry](/en/delivery/stage-4) | Work proactively within limited authority and use the phone for approval and takeover. | **Partial:** triggers, suggestions, inbox, and attention budgets run; the mobile entry is not implemented | An assistant that speaks at the right time and can be approved or taken over from a phone |
+| [Phase 5 · Memory and Capability Evolution](/en/delivery/stage-5) | Let the system accumulate context and improve methods, with every change visible, correctable, and reversible. | **Partial:** the memory and method-candidate loops run; real long-term use and production comparison are open | An assistant that accumulates context and improves methods while staying correctable and reversible |
+| [Phase 6 · Multi-device and Long-running Operation](/en/delivery/stage-6) | Let the same tasks, memory, and authority run safely across devices over the long term. | **Partial:** sync, leases, revocation, backup, and health checks run; real two-device and long-running acceptance is open | A multi-device, portable, long-running Personal Agent OS |
 
-## What "partial" means
+## How to proceed
 
-"Partial" does not mean "the page is done", and it does not mean "the capability is delivered". It means only:
+1. **Complete before expanding.** Complete at least 10 of the initial 15 tasks before adding sources, operation modes, and devices.
+2. **Read-only before writes, low risk before high risk.** Observe first, draft second, and approve execution last.
+3. **Accept every phase with real tasks.** Finished code or finished pages do not count as completion.
+4. **Safety and recovery start in Phase 1.** Approval, artifacts, failure recovery, and permission boundaries are not postponed.
 
-1. The server, API, and projections have a runnable implementation.
-2. Automated tests cover the main code paths and key boundaries.
-3. Real accounts, real devices, real user tasks, or long-running evidence are still missing.
-
-Phases two through six therefore do not become "accepted" just because code merged. Each phase needs its own real task record, failure drill, and user verification.
-
-## Three delivery levels
-
-| Level | Meaning | Current state |
-|---|---|---|
-| **Runnable** | The app starts locally and tasks can be created, executed, and viewed | Present |
-| **Verified** | Tests, isolated runs, or real run records prove key paths | Phase one: yes; phases two–six: partial |
-| **Accepted** | A real user, device, or external account completed the agreed tasks | Phase one: passed; phases two–six: not yet |
-
-## Why the route was rewritten
-
-The old route described an implementation order that had not happened yet across six phases and 24 sub-stages. The project is now substantially built, and future-tense planning hides two questions: which capabilities already run, and which only have code without acceptance.
-
-The new route uses three layers:
-
-- **Delivery overview**: phase status and the evidence boundary first.
-- **Capability status**: implemented, verified, and deliberately empty by phase.
-- **Remaining roadmap**: only unfinished workstreams, each with an exit condition.
-
-## Continue reading
-
-<DocCardGrid :columns="2" :items="[
-  { no: '01', title: 'Phase-one MVP acceptance', text: 'Results for 15 real tasks, T07/T08 boundaries, G1–G9 criteria, and evidence.', link: '/en/delivery/mvp' },
-  { no: '02', title: 'Phase 2–6 capabilities', text: 'Implemented, verified, and deliberately open items by sub-stage.', link: '/en/delivery/capabilities' },
-  { no: '03', title: 'Remaining roadmap', text: 'Seven workstreams, milestones, exit criteria, and explicit non-goals.', link: '/en/delivery/roadmap' },
-  { no: '04', title: 'Acceptance and evidence', text: 'Test levels, evidence rules, reproduction commands, and the definition of done.', link: '/en/delivery/acceptance' }
-]" />
-
-## Next
-
-The priority is not to add more surface area, but to turn existing code loops into capabilities proven by real use:
-
-1. Connect real email and calendar accounts and complete 10–15 everyday content tasks.
-2. Add desktop sensitive-area masking, isolated desktop, and high-risk actions; accept at least 5 desktop tasks.
-3. Build the mobile entry and complete proactive interruption acceptance.
-4. Run before/after comparisons with real memory and methods.
-5. Drill two-device switching, lost-device handling, and backup restore.
-6. Complete multi-week operation, upgrade rollback, and v1.0 acceptance.
-
-See [Remaining roadmap](/en/delivery/roadmap) for order and exit criteria.
+Start with [Phase 1 · Minimum Complete MVP](/en/delivery/stage-1); implemented scope and open items for Phases 2–6 are recorded in [delivery status](/en/delivery/status).

@@ -81,7 +81,7 @@ defineProps<{
 .doc-card:hover {
   transform: translateY(-3px);
   border-color: var(--vp-c-brand-2);
-  box-shadow: 0 18px 44px rgba(122, 55, 20, 0.14);
+  box-shadow: 0 18px 44px rgba(31, 98, 133, 0.12);
 }
 
 .doc-card__no {

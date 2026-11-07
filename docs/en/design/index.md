@@ -59,7 +59,7 @@ TypeScript wins mainly because of shared protocols and integration speed. Tasks,
 
 Rust is not the primary language because the bottleneck is product boundaries, protocol consistency, recovery, and authority judgment, not raw speed. Desktop work first validates real interaction with PowerShell plus a Node bridge; Rust expands only if a single binary, stronger isolation, or device resources become hard constraints. Go and Python are not part of the business stack today; document parsing already runs in the TypeScript server, avoiding a second runtime in the first phase.
 
-The frontend uses React and Vite without a second server-rendered runtime. Task state comes from the local service projection; the browser renders and sends commands. The first phase does not introduce microservices or network boundaries just to look complete. The PWA and phone entrance remain in the [remaining roadmap](/en/delivery/roadmap).
+The frontend uses React and Vite without a second server-rendered runtime. Task state comes from the local service projection; the browser renders and sends commands. The first phase does not introduce microservices or network boundaries just to look complete. The PWA and phone entrance belong to [Phase 4](/en/delivery/stage-4) and are not implemented yet.
 
 ## Module Map and Key Boundaries
 
