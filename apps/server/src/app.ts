@@ -16,6 +16,7 @@ import { ExecutorSettingsStore } from "./executor-settings.ts";
 import { probeHermes } from "./hermes-executor.ts";
 import { clearHermesHealthCache } from "./hermes-health.ts";
 import { clearExecutorHealthCache, executorHealth as readExecutorHealth, executorRuntimeSettings, probeExecutor } from "./executor-runtime.ts";
+import { applyExecutorModelReadiness } from "./executor-readiness.ts";
 import { ExecutorInstallError, ExecutorInstaller } from "./executor-install.ts";
 import { EXECUTORS } from "./executors.ts";
 import { ScheduleError, ScheduleService } from "./schedules.ts";
@@ -489,16 +490,11 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const executorInstaller = options.executorInstaller ?? new ExecutorInstaller();
   const executorHealth = (executorId: ExecutorId): ExecutorHealth => {
     const health = readExecutorHealth(executorId, executorSettingsStore.load(), executorSettingsPath);
-    if (executorId !== "codex") return health;
-    const bound = modelRegistry.settingsForExecutor("codex");
-    if (!bound) return health;
-    const canRun = Boolean(bound.apiKey);
-    return {
-      ...health,
-      canRun,
-      issues: canRun ? [] : ["Codex 模型档案缺少 API Key"],
-      installState: canRun ? "available" : "needs_repair"
-    };
+    return applyExecutorModelReadiness(
+      executorId,
+      health,
+      modelRegistry.settingsForExecutorOrChat(executorId)
+    );
   };
   const scheduler = options.startScheduler
     ? new HearthScheduler({
@@ -552,7 +548,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
     registry: modelRegistry,
     codexProfile,
     codexEnv,
-    modelSettingsForExecutor
+    modelSettingsForExecutor,
+    executorHealth
   });
 
   app.addHook("onClose", async () => {

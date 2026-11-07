@@ -4,7 +4,7 @@ import { extname, join } from "node:path";
 import multipart from "@fastify/multipart";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
-import type { ChatAttachment, ChatMessageRecord, ExecutorId } from "@hearth/core";
+import type { ChatAttachment, ChatMessageRecord, ExecutorHealth, ExecutorId } from "@hearth/core";
 import { defaultConversationSettings, EXECUTOR_IDS, mergeConversationSettings } from "@hearth/core";
 import { loadCodexProfile, probeCodex, type CodexProfile } from "@hearth/codex-executor";
 import { loadExecutorSettings, type ExecutorSettingsStore } from "./executor-settings.ts";
@@ -86,6 +86,7 @@ export interface ChatRouteOptions {
   codexProfile?: (() => CodexProfile) | undefined;
   codexEnv?: (() => Record<string, string>) | undefined;
   modelSettingsForExecutor?: ((executorId: ExecutorId) => ModelSettings | null) | undefined;
+  executorHealth?: ((executorId: ExecutorId) => ExecutorHealth) | undefined;
 }
 
 export async function registerChatRoutes(app: FastifyInstance, options: ChatRouteOptions): Promise<void> {
@@ -98,7 +99,9 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     const settings = executorSettings();
     const availability = {} as Record<ExecutorId, boolean>;
     for (const id of EXECUTOR_IDS) {
-      availability[id] = executorHealth(id, settings, executorSettingsPath).canRun;
+      availability[id] = options.executorHealth
+        ? options.executorHealth(id).canRun
+        : executorHealth(id, settings, executorSettingsPath).canRun;
     }
     return availability;
   };

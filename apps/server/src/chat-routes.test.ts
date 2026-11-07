@@ -1,11 +1,39 @@
 import fs, { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HearthStore } from "@hearth/eventlog";
 import { defaultConversationSettings, mergeConversationSettings } from "@hearth/core";
 import { buildServer } from "./app.ts";
 import { visibleDeliverables } from "./service.ts";
+
+async function createTestProfile(app: FastifyInstance, name = "Test model"): Promise<string> {
+  const created = await app.inject({
+    method: "POST",
+    url: "/api/model-profiles",
+    payload: {
+      name,
+      providerId: "custom",
+      providerName: "Test provider",
+      protocol: "openai-chat",
+      baseUrl: "https://models.example.com/v1",
+      model: "test-model",
+      apiKey: "test-key"
+    }
+  });
+  expect(created.statusCode, created.body).toBe(201);
+  return created.json().profile.id as string;
+}
+
+async function bindProfile(app: FastifyInstance, executorId: string, profileId: string): Promise<void> {
+  const bound = await app.inject({
+    method: "PUT",
+    url: `/api/executors/${executorId}/model-binding`,
+    payload: { profileId }
+  });
+  expect(bound.statusCode, bound.body).toBe(200);
+}
 
 describe("chat-first API", () => {
   let store: HearthStore;
@@ -209,6 +237,12 @@ describe("chat-first API", () => {
       ]);
       expect(listed.json().executors.every((executor: { health: unknown }) => Boolean(executor.health))).toBe(true);
       expect(listed.json().preferredExecutorId).toBeNull();
+      const native = listed.json().executors.find((executor: { id: string }) => executor.id === "native");
+      expect(native.health.canRun).toBe(false);
+      expect(native.health.issues.join(" ")).toContain("聊天模型");
+
+      const unbound = await app.inject({ method: "GET", url: "/api/executors" });
+      expect(unbound.json().executors.find((executor: { id: string }) => executor.id === "deepseek-harness").health.issues.join(" ")).toContain("绑定模型");
 
       const probed = await app.inject({ method: "POST", url: "/api/executors/native/probe" });
       expect(probed.statusCode).toBe(200);
@@ -225,6 +259,7 @@ describe("chat-first API", () => {
 
   it("routes an execution request to a task and keeps the conversation link", async () => {
     const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
+    await bindProfile(app, "native", await createTestProfile(app));
     const response = await app.inject({
       method: "POST",
       url: "/api/chat",
@@ -339,6 +374,7 @@ describe("chat-first API", () => {
 
   it("applies per-message settings to an existing conversation without persisting them", async () => {
     const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
+    await bindProfile(app, "native", await createTestProfile(app));
     const created = await app.inject({ method: "POST", url: "/api/conversations", payload: { title: "设置覆盖" } });
     const conversation = created.json();
 
@@ -379,6 +415,7 @@ describe("chat-first API", () => {
 
   it("reroutes a disabled executor to the other enabled executor", async () => {
     const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
+    await bindProfile(app, "native", await createTestProfile(app));
     const conversation = await app.inject({
       method: "POST",
       url: "/api/conversations",
@@ -521,6 +558,8 @@ describe("chat-first API", () => {
         }
       });
       expect(saved.statusCode, saved.body).toBe(200);
+      const registry = await app.inject({ method: "GET", url: "/api/model-registry" });
+      await bindProfile(app, "deepseek-harness", registry.json().chatProfileId);
       const conversation = await app.inject({
         method: "POST",
         url: "/api/conversations",
