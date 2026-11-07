@@ -219,6 +219,45 @@ describe("chat-first API", () => {
     await app.close();
   }, 30_000);
 
+  it("accepts empty executor fields and exposes conversation defaults", async () => {
+    const app = await buildServer({
+      store,
+      serveWeb: false,
+      modelSettingsPath: join(root, "settings.json"),
+      attachmentRoot: join(root, "files"),
+      executorSettingsPath: join(root, "executor-settings.json")
+    });
+
+    const seeded = await app.inject({
+      method: "PUT",
+      url: "/api/executor-settings",
+      payload: { executors: { qoder: { command: "qodercli" } } }
+    });
+    expect(seeded.statusCode).toBe(200);
+
+    const empty = await app.inject({
+      method: "PUT",
+      url: "/api/executor-settings",
+      payload: {
+        defaultApprovalMode: "full",
+        preferredExecutorId: "native",
+        executors: { qoder: { command: "", executablePath: "  " }, hermes: { command: "" } },
+        hermesCommand: " "
+      }
+    });
+    expect(empty.statusCode, empty.body).toBe(200);
+
+    const view = await app.inject({ method: "GET", url: "/api/executor-settings" });
+    expect(view.json().settings.executors.qoder).toEqual({ command: "qodercli" });
+    expect(view.json().settings.defaultApprovalMode).toBe("full");
+
+    const defaults = await app.inject({ method: "GET", url: "/api/conversation-defaults" });
+    expect(defaults.statusCode).toBe(200);
+    expect(defaults.json().settings.preferredExecutorId).toBe("native");
+    expect(defaults.json().settings.approvalMode).toBe("full");
+    await app.close();
+  });
+
   it("lists every executor with runtime health", async () => {
     const previous = process.env.HEARTH_EXECUTOR_DETECT;
     process.env.HEARTH_EXECUTOR_DETECT = "off";

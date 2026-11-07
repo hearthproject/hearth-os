@@ -148,7 +148,11 @@ function mergeExecutorRuntimeSettings(
   const merged: Partial<Record<ExecutorId, ExecutorRuntimeSettings>> = { ...current };
   for (const id of EXECUTOR_IDS) {
     const next = patch?.[id];
-    if (next) merged[id] = { ...merged[id], ...next };
+    if (!next) continue;
+    const defined = Object.fromEntries(
+      Object.entries(next).filter(([, value]) => value !== undefined)
+    ) as ExecutorRuntimeSettings;
+    merged[id] = { ...merged[id], ...defined };
   }
   return merged;
 }

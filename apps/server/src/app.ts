@@ -227,18 +227,24 @@ const killSwitchSchema = z.object({
   reason: z.string().trim().max(500).optional()
 }).strict();
 
+const optionalExecutorText = (max: number) =>
+  z.preprocess(
+    (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+    z.string().trim().min(1).max(max).optional()
+  );
+
 const executorSettingsSchema = z.object({
   defaultApprovalMode: z.enum(["necessary", "full"]).optional(),
   preferredExecutorId: z.enum(EXECUTOR_IDS).nullable().optional(),
   concurrency: z.partialRecord(z.enum(EXECUTOR_IDS), z.number().int().min(1).max(4)).optional(),
   executors: z.partialRecord(z.enum(EXECUTOR_IDS), z.object({
-    command: z.string().trim().min(1).max(1000).optional(),
-    executablePath: z.string().trim().min(1).max(2000).optional(),
+    command: optionalExecutorText(1000),
+    executablePath: optionalExecutorText(2000),
     installMode: z.enum(["managed", "existing", "detected"]).optional(),
     authMode: z.enum(["local", "pat", "env"]).optional(),
     version: z.string().max(200).nullable().optional()
   }).strict()).optional(),
-  hermesCommand: z.string().trim().min(1).max(500).optional()
+  hermesCommand: optionalExecutorText(500)
 }).strict().refine((value) => Object.keys(value).length > 0, { message: "至少需要修改一个设置" });
 
 const scheduleSchema = z.object({

@@ -212,6 +212,8 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     };
   });
 
+  app.get("/api/conversation-defaults", async () => ({ settings: defaultSettings() }));
+
   app.get("/api/conversations", async () => {
     return {
       conversations: store.listConversations().map((conversation) => {
