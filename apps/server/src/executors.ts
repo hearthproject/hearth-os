@@ -92,12 +92,13 @@ export function resolveExecutorFromEnabled(
   preferred: ExecutorId,
   enabled: Record<ExecutorId, boolean>,
   available: Record<ExecutorId, boolean> = defaultExecutorAvailability(),
-  capability?: ExecutionCapability
+  capability?: ExecutionCapability,
+  fallbackOrder: ExecutorId[] = [...EXECUTOR_IDS]
 ): { executorId: ExecutorId | null; reroutedFrom: ExecutorId | null; reason: string | null } {
   if (enabled[preferred] && available[preferred] && executorSupportsCapability(preferred, capability)) {
     return { executorId: preferred, reroutedFrom: null, reason: null };
   }
-  for (const candidate of EXECUTOR_IDS) {
+  for (const candidate of fallbackOrder) {
     if (candidate === preferred) continue;
     if (enabled[candidate] && available[candidate] && executorSupportsCapability(candidate, capability)) {
       return {

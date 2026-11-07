@@ -373,6 +373,42 @@ describe("chat-first API", () => {
     await app.close();
   });
 
+  it("falls back to the task-matched executor when the preferred external executor is unavailable", async () => {
+    const previous = process.env.HEARTH_EXECUTOR_DETECT;
+    process.env.HEARTH_EXECUTOR_DETECT = "off";
+    try {
+      const app = await buildServer({
+        store,
+        serveWeb: false,
+        modelSettingsPath: join(root, "settings.json"),
+        attachmentRoot: join(root, "files"),
+        executorSettingsPath: join(root, "executor-settings.json")
+      });
+      const conversation = await app.inject({
+        method: "POST",
+        url: "/api/conversations",
+        payload: {
+          title: "Qoder 优先",
+          settings: { preferredExecutorId: "qoder", executorEnabled: { qoder: true } }
+        }
+      });
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/chat",
+        payload: { conversationId: conversation.json().id, message: "帮我修复项目里的 TypeScript 错误" }
+      });
+      const events = parseSse(response.body);
+      const routing = events.find((event) => event.event === "routing")?.data;
+      expect(routing.preferredExecutorId).toBe("qoder");
+      expect(routing.reroutedFrom).toBe("qoder");
+      expect(events.find((event) => event.event === "task")?.data.task.executorId).toBe("codex");
+      await app.close();
+    } finally {
+      if (previous === undefined) delete process.env.HEARTH_EXECUTOR_DETECT;
+      else process.env.HEARTH_EXECUTOR_DETECT = previous;
+    }
+  });
+
   it("does not create tasks when both executors are disabled but leaves chat available", async () => {
     const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
     const conversation = await app.inject({
