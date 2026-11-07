@@ -37,7 +37,9 @@ Models can change, executors can be replaced, and the interface can be rewritten
 |---|---|
 | **Chat-first control plane** | React + Vite single-page app; tasks are proposed in conversation, and task detail shows executor, phase, tokens, duration, and artifacts |
 | **Native agent runtime** | A self-built single-agent tool loop supporting OpenAI Chat, OpenAI Responses, Anthropic Messages, and Gemini |
-| **Six executors** | `native`, `codex`, `hermes`, `qoder`, `workbuddy`, and `kimi` share one registry, launcher, health probe, install pipeline, and settings surface. Executor identity is written into every run manifest |
+| **Seven executors** | Three first-class executors (`deepseek-harness`, `codex`, `native`) and four external executors (`hermes`, `qoder`, `workbuddy`, `kimi`) share one registry, launcher, health probe, install pipeline, model binding, context capture, and settings surface. Executor identity is written into every run manifest |
+| **Unified model registry** | SQLite model profiles and per-executor bindings replace private JSON files. ChatGPT, Anthropic, and Gemini protocols are supported where the executor allows them; Codex is restricted to OpenAI Responses and local models stay outside the registry |
+| **Failure diagnosis and handoff** | Hearth diagnoses executor failures with its current chat model, auto-switches under full permission and low risk, asks only whether to switch under necessary approval, and reports non-executor errors without switching |
 | **Durable task state** | State machine, budgets, checkpoints, waiting-for-input, resume, and retry; an append-only SQLite event log records every fact |
 | **Approvals and receipts** | External actions produce a preview; a one-time approval is bound to a parameter fingerprint; the effect ledger executes once and stores a receipt |
 | **Sources and documents** | Local files, knowledge bases, allowlisted web pages, and text extraction for TXT, Markdown, CSV, JSON, HTML, PDF, DOCX, and XLSX |
@@ -105,36 +107,40 @@ Open <http://127.0.0.1:4317>.
 
 ### Connect a model
 
-In **Settings → Model**, choose a preset provider (DeepSeek, Alibaba Cloud Bailian, Zhipu, Kimi, Volcengine Ark, OpenAI, Anthropic, or Gemini) or a custom endpoint. Hearth supports all four protocols through one loop. The key is stored in `.hearth/model-settings.json`; the settings page only shows a masked value and never returns the raw key to the browser.
+In **Settings → Models**, create a model profile by choosing a preset provider (DeepSeek, Alibaba Cloud Bailian, Zhipu, Kimi, Volcengine Ark, OpenAI, Anthropic, or Gemini) or a custom endpoint, then bind profiles to executors in **Settings → Executors**. Profiles live in `.hearth/hearth.sqlite`; API keys are encrypted with AES-256-GCM through the local `.hearth/master.key`, and the browser only receives a masked value. Local model endpoints are excluded from unified management.
 
 ### Use Codex
 
-The Codex executor reads your existing `~/.codex/config.toml`. A `codex login` session is not required when a `model_provider` and its `env_key` are configured: the key only needs to be present in the terminal that starts Hearth. The Settings page reports the active provider, model, and authentication source.
+The Codex executor uses its unified model binding when one is configured; otherwise it reads your existing `~/.codex/config.toml`. A binding generates an isolated `.hearth/executors/codex/config.toml` with `wire_api = "responses"` and injects the key through the environment, so Codex is restricted to the OpenAI Responses protocol. A `codex login` session is not required when a `model_provider` and its `env_key` are configured. The Settings page reports the active provider, model, and authentication source.
 
 ### Use additional executors
 
-Open **Settings → 执行器管理** to install, probe, configure, and set concurrency for every executor from one place. The chat composer has a single executor picker: a conversation-level choice overrides the global preferred executor and falls back to the task-matched executor when that choice is disabled, missing, or lacks a required capability.
+Open **Settings → Executors** to install, probe, configure, bind a model, and set concurrency for every executor from one place. The chat composer has a single executor picker: a conversation-level choice overrides the global default and falls back to the task-matched executor when that choice is disabled, missing, lacks a required capability, or has no valid model binding.
 
 | Executor | How Hearth connects |
 |---|---|
-| `native` | Built in; uses the model configured under Settings → Model |
-| `codex` | Reads the existing Codex profile and authentication source |
+| `native` | Built in; uses the current chat model or its own binding from Settings → Models |
+| `deepseek-harness` | Official `@deepseek-ai/dsh-sdk-client` SDK/JSON-RPC; native tools, session resume, and full event stream |
+| `codex` | Unified Responses binding, or the existing Codex profile and authentication source |
 | `hermes` | Uses the `hermes` command on `PATH`, or a command path configured in Settings |
 | `qoder` | Managed install of `@qoder-ai/qoder-agent-sdk`; reuses a local `qodercli` login or a personal access token |
 | `workbuddy` | Managed install of `@tencent-ai/codebuddy-code`; reuses the local CodeBuddy/WorkBuddy login |
 | `kimi` | Managed install of `@moonshot-ai/kimi-code`; runs non-interactive stream-json sessions |
 
-Managed packages live under `.hearth/executors/<id>/`; configuration and preferred routing live in `.hearth/executor-settings.json`. Run `npm test` after adding an executor to verify routing, launch resolution, install jobs, adapter parsing, and health checks together.
+Managed packages and executor homes live under `.hearth/executors/<id>/`. Model profiles, executor bindings, default routing, and task status are stored in SQLite; old `.hearth/model-settings.json` and `.hearth/executor-settings.json` files are imported at startup, backed up under `.hearth/backups/legacy-dev/`, and retained as migration sources. Run `npm test` after adding an executor to verify routing, launch resolution, install jobs, adapter parsing, model protocol validation, handoff, context capture, and health checks together.
 
 ## Data and backup
 
 | Path | Contents |
 |---|---|
-| `.hearth/hearth.sqlite` | Tasks, runs, approvals, effects, memory, methods, sync state, and events |
+| `.hearth/hearth.sqlite` | Tasks, runs, approvals, effects, memory, methods, sync state, context, settings, model profiles, and events |
+| `.hearth/master.key` | Local AES-256-GCM key for encrypted settings fields |
+| `.hearth/context/blobs/` | Context bodies above the inline threshold, named by SHA-256 |
+| `.hearth/executors/` | Managed executor installations and isolated Codex/DeepSeek Harness homes |
 | `.hearth/workspaces/` | Isolated task workspaces |
 | `.hearth/artifacts/` | Managed artifacts |
 | `.hearth/outbox/` | Local outbox and receipts |
-| `.hearth/backups/` | Encrypted backup archives |
+| `.hearth/backups/` | Encrypted backup archives and legacy settings backups |
 | `eval/runs/` | Phase-one acceptance runs and artifacts |
 
 The server exposes AES-256-GCM encrypted backup creation and restore, validating schema and `integrity_check` before replacing the database. The chat-first UI does not yet surface the backup entry, so use the API described in [Data, backup, and restore](https://hearthproject.github.io/hearth-os/en/guide/data.html). The archive includes the database and required metadata, but **not artifact bodies, workspaces, source bodies, or external attachments**. For a complete archive, also copy `.hearth/artifacts/`, `.hearth/workspaces/`, and `eval/runs/`.
@@ -150,6 +156,7 @@ packages/
   eventlog/            Append-only SQLite event log and projections
   agent-runtime/       Native single-agent tool loop, budgets, checkpoints, and compaction
   codex-executor/      Codex SDK adapter and provider probing
+  deepseek-executor/   DeepSeek Harness SDK/JSON-RPC adapter
   templates/           Task templates and acceptance constraints
 eval/                  15 real tasks, inputs, acceptance criteria, and run evidence
 docs/                  Bilingual VitePress documentation site
