@@ -6,7 +6,7 @@ import type { ModelSettings } from "./model-settings.ts";
 
 let server: Server;
 let baseUrl = "";
-let mode: "chat" | "route" = "chat";
+let mode: "chat" | "route" | "route-chat" = "chat";
 
 beforeAll(async () => {
   server = createServer(async (request, response) => {
@@ -30,6 +30,11 @@ beforeAll(async () => {
     if (mode === "route") {
       response.setHeader("content-type", "application/json");
       response.end(JSON.stringify({ choices: [{ message: { content: '{"action":"task","title":"写报告","reason":"需要产出文件"}' } }] }));
+      return;
+    }
+    if (mode === "route-chat") {
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ choices: [{ message: { content: '{"action":"chat","title":"","reason":"看起来像问答"}' } }] }));
       return;
     }
     response.setHeader("content-type", "application/json");
@@ -111,6 +116,33 @@ describe("OpenAI-compatible model client", () => {
     mode = "route";
     const route = await decideRoute("整理一下这些内容", false, null, settings());
     expect(route).toMatchObject({ action: "task", title: "写报告" });
+    mode = "chat";
+  });
+
+  it("overrides a chat classification when an explicit executor is selected and the request needs GitHub PR work", async () => {
+    mode = "route-chat";
+    const route = await decideRoute(
+      "请你审核我的 GitHub 仓库中目前开着的 PR，列出需要回复修改或 rebase 的",
+      false,
+      null,
+      settings(),
+      { preferredExecutorId: "deepseek-harness" }
+    );
+    expect(route.action).toBe("task");
+    expect(route.reason).toContain("GitHub");
+    mode = "chat";
+  });
+
+  it("keeps a general GitHub PR question in chat even when an executor is selected", async () => {
+    mode = "route-chat";
+    const route = await decideRoute(
+      "PR 审核一般看什么",
+      false,
+      null,
+      settings(),
+      { preferredExecutorId: "deepseek-harness" }
+    );
+    expect(route.action).toBe("chat");
     mode = "chat";
   });
 });

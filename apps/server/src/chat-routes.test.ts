@@ -1,7 +1,7 @@
 import fs, { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HearthStore } from "@hearth/eventlog";
 import { defaultConversationSettings, mergeConversationSettings } from "@hearth/core";
 import { buildServer } from "./app.ts";
@@ -406,6 +406,57 @@ describe("chat-first API", () => {
     } finally {
       if (previous === undefined) delete process.env.HEARTH_EXECUTOR_DETECT;
       else process.env.HEARTH_EXECUTOR_DETECT = previous;
+    }
+  });
+
+  it("uses the explicitly selected executor when the router misclassifies GitHub PR work as chat", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      choices: [{ message: { content: '{"action":"chat","title":"","reason":"误判为问答"}' } }]
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+    try {
+      const app = await buildServer({
+        store,
+        serveWeb: false,
+        modelSettingsPath: join(root, "settings.json"),
+        attachmentRoot: join(root, "files"),
+        executorSettingsPath: join(root, "executor-settings.json")
+      });
+      const saved = await app.inject({
+        method: "PUT",
+        url: "/api/model-settings",
+        payload: {
+          providerId: "custom",
+          providerName: "Router",
+          baseUrl: "https://router.example.com/v1",
+          model: "router-model",
+          apiKey: "test-key"
+        }
+      });
+      expect(saved.statusCode, saved.body).toBe(200);
+      const conversation = await app.inject({
+        method: "POST",
+        url: "/api/conversations",
+        payload: {
+          title: "DSH 审核",
+          settings: { preferredExecutorId: "deepseek-harness", executorEnabled: { "deepseek-harness": true } }
+        }
+      });
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/chat",
+        payload: {
+          conversationId: conversation.json().id,
+          message: "请你审核我的 GitHub 仓库中目前开着的 PR，列出需要回复修改或 rebase 的"
+        }
+      });
+      const events = parseSse(response.body);
+      const routing = events.find((event) => event.event === "routing")?.data;
+      expect(routing.action).toBe("task");
+      expect(routing.preferredExecutorId).toBe("deepseek-harness");
+      expect(events.find((event) => event.event === "task")?.data.task.executorId).toBe("deepseek-harness");
+      await app.close();
+    } finally {
+      vi.unstubAllGlobals();
     }
   });
 
