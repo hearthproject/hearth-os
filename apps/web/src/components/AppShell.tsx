@@ -25,20 +25,20 @@ export function AppShell() {
 
         <nav className="nav">
           <NavLink to="/" end className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
-            <MessageCircle size={16} /> <span className="nav-label">聊天</span>
+            <MessageCircle size={18} /> <span className="nav-label">聊天</span>
           </NavLink>
           <NavLink to="/tasks" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
-            <ListChecks size={16} /> <span className="nav-label">任务</span>
+            <ListChecks size={18} /> <span className="nav-label">任务</span>
             {activeCount > 0 && <span className="nav-badge">{activeCount}</span>}
           </NavLink>
           <NavLink to="/devices" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
-            <Monitor size={16} /> <span className="nav-label">设备</span>
+            <Monitor size={18} /> <span className="nav-label">设备</span>
           </NavLink>
           <NavLink to="/schedules" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
-            <CalendarClock size={16} /> <span className="nav-label">定时任务</span>
+            <CalendarClock size={18} /> <span className="nav-label">定时任务</span>
           </NavLink>
           <NavLink to="/settings" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
-            <Settings2 size={16} /> <span className="nav-label">设置</span>
+            <Settings2 size={18} /> <span className="nav-label">设置</span>
           </NavLink>
         </nav>
 
