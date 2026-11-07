@@ -34,7 +34,35 @@ Hearth keeps several specialized executors side by side rather than building one
 
 The routing order is not a fixed hierarchy. Work that can be done with a rule, script, or official interface does not call a model. External data starts with a connector; browser or desktop is considered only when no connector exists. Deterministic document processing is not given to a generative model. Long chains and complex artifacts may use a stronger executor. A task can change executors midway, but the input, budget, authority, and current evidence must carry over.
 
-The current default split is `native` for general tasks and `codex` for explicit code and engineering work. The native executor is a Hearth-owned single-agent tool loop with budgets, checkpoints, input pauses, and recovery; it is not a forwarded prompt. A failed task does not silently switch executors, and the executor identity is recorded in runs and artifact manifests. Tasks that need network access or engineering workspace writes create a proposal in chat and enter the queue only after user confirmation.
+The current registry contains seven executors, all managed through the same launch resolution, health probe, managed install, and settings surface:
+
+| Executor | Connection | Boundary |
+|---|---|---|
+| `native` | Hearth-owned single-agent tool loop | General work, source reading, file delivery, input pauses, and recovery |
+| `codex` | Existing local Codex profile and authentication | Multi-file code, repositories, tests, builds, and GitHub workspaces |
+| `hermes` | `hermes` on `PATH` or a configured command | General agents, multi-step tool use, and automation flows |
+| `qoder` | `@qoder-ai/qoder-agent-sdk`, reusing a local qodercli login or PAT | Coding, workspaces, and resumed sessions |
+| `workbuddy` | `@tencent-ai/codebuddy-code`, reusing the local login | Coding, workspaces, and resumed sessions |
+| `zcode` | The ZCode desktop `zcode.cjs` runtime, integrated as experimental | Local ZCode workspaces and one-shot JSON execution |
+| `kimi` | `@moonshot-ai/kimi-code` in stream-json mode | Coding, workspaces, and non-interactive batch work |
+
+The native executor is a Hearth-owned single-agent tool loop with budgets, checkpoints, input pauses, and recovery; it is not a forwarded prompt. A failed task does not silently replace its executor identity, and the actual executor is recorded in runs and artifact manifests. Tasks that need network access or engineering workspace writes create a proposal in chat and enter the queue only after user confirmation.
+
+The Settings page builds seven vertical cards from the registry. Every card exposes install, probe, command or script path, concurrency, and diagnostics in the same shape. The global preferred executor seeds new conversations; the picker in the chat composer overrides it per conversation. When a preference is disabled, unavailable, or lacks a required capability, routing first returns to the task-matched executor and then scans the registry for another usable path.
+
+## Adding an executor
+
+New executors follow the same registry pipeline instead of a forked special path:
+
+1. Add a stable ID to `EXECUTOR_IDS` in `packages/core/src/types.ts` so conversation settings, concurrency, runs, and API validation gain the field automatically.
+2. Add the name, description, capabilities, provider, and resume support in `apps/server/src/executors.ts`; add the ID to the GitHub capability list when it can read the prepared repository.
+3. Add launch resolution in `apps/server/src/executor-runtime.ts`: configured path first, then managed install, then global installation and `PATH`. Include version probing and health state.
+4. Add a pinned package spec in `apps/server/src/executor-install.ts`. Desktop apps that cannot be installed headlessly should return unsupported with a clear detection or manual-path hint.
+5. Add argument construction and stream parsing in `apps/server/src/external-executor.ts`, normalizing final text, usage, session ID, exit code, and errors into `ExternalRunResult`.
+6. Register the adapter in `apps/server/src/executor-adapter.ts`. External CLIs normally reuse `ExternalExecutorAdapter`, which passes the prompt, workspace, permission mode, budget, and previous session ID.
+7. Add tests for launch resolution, health probes, install jobs, argument and event parsing, preferred routing, and fallback. The Settings page and chat picker render automatically from `/api/executors`; do not add another private toggle path.
+
+The boundary stays the same: an executor returns results and evidence but cannot mutate task state directly. External effects still pass through Hearth approval and the effect ledger. Credentials stay in the local CLI or environment and never enter task context.
 
 Executor output contracts are unified even though execution methods are not. The system cares about result type, evidence, artifacts, failure classification, and recoverability, not which model or interface an executor used internally. This lets Hearth replace models, add tools, or fall back to a person without changing the task layer.
 
