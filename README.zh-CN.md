@@ -20,7 +20,7 @@
 
 <p align="center">
   <img alt="Phase 1 MVP accepted" src="https://img.shields.io/badge/phase%201-MVP%20accepted-b8471d">
-  <img alt="292 tests passing" src="https://img.shields.io/badge/tests-292%20passing-2f7d4f">
+  <img alt="296 tests passing" src="https://img.shields.io/badge/tests-296%20passing-2f7d4f">
   <img alt="Node.js 22.13+" src="https://img.shields.io/badge/node-22.13%2B-3c873a">
   <img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-1b1815">
 </p>
@@ -187,7 +187,7 @@ scripts/               文档与交付数据辅助脚本
 ## 验证
 
 ```bash
-npm test           # 54 个测试文件、292 个测试
+npm test           # 54 个测试文件、296 个测试
 npm run typecheck
 npm run build
 npm run docs:build

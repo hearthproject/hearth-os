@@ -77,7 +77,7 @@ const zhSidebar = {
         { text: 'Day01 · 双语文档站上线', link: '/log/day-01' },
         { text: 'Day02 · 站点结构精简', link: '/log/day-02' },
         { text: 'Day03 · 阶段一 MVP 跑通', link: '/log/day-03' },
-        { text: 'Day04 · 运行时就位', link: '/log/day-04' }
+        { text: 'Day04 · 运行时就位与执行器收敛', link: '/log/day-04' }
       ]
     }
   ],
@@ -119,7 +119,7 @@ const enSidebar = {
         { text: 'Day01 · Bilingual documentation launch', link: '/en/log/day-01' },
         { text: 'Day02 · Documentation structure cleanup', link: '/en/log/day-02' },
         { text: 'Day03 · Stage-one MVP runs end to end', link: '/en/log/day-03' },
-        { text: 'Day04 · The runtime takes shape', link: '/en/log/day-04' }
+        { text: 'Day04 · Runtime and executor convergence', link: '/en/log/day-04' }
       ]
     }
   ],
