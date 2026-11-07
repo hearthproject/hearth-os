@@ -179,7 +179,8 @@ async function main() {
       ...process.env,
       HEARTH_HOST: "127.0.0.1",
       HEARTH_PORT: String(port),
-      HEARTH_DATA_DIR: dataDir
+      HEARTH_DATA_DIR: dataDir,
+      HEARTH_EXECUTOR_DETECT: "off"
     },
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -195,7 +196,7 @@ async function main() {
     && startupExecutors.body.executors.some(
       (executor) => executor.health.canRun && startupDefaults.body.settings.executorEnabled[executor.id]
     );
-  log(`Server ready at ${baseUrl}; live chat ${live ? "enabled" : "disabled"}; task executor ${canCreateTasks ? "ready" : "unavailable"}.`);
+  log(`Server ready at ${baseUrl}; live chat ${live ? "enabled" : "disabled"}; task scenarios ${live && canCreateTasks ? "enabled" : "skipped"}.`);
 
   browser = await chromium.launch({ headless: !headed });
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: "zh-CN" });
@@ -282,7 +283,7 @@ async function main() {
     assert.equal(await page.locator(".task-status-bubble").count(), 0, "method questions must stay in chat");
   });
 
-  if (canCreateTasks) {
+  if (live && canCreateTasks) {
     await runTest(page, "creates a task, opens its detail, and shows the executor", async () => {
       await newChat(page, baseUrl);
       await sendMessage(page, "帮我生成本周工作周报，并保存为 weekly.md");
@@ -314,7 +315,7 @@ async function main() {
       await cancelTask(baseUrl, tasks.at(-1).id);
     });
   } else {
-    skipTest("task creation and attachment routing", "no executor is ready");
+    skipTest("task creation and attachment routing", "live model or task executor is unavailable");
   }
 
   await runTest(page, "switches and deletes conversations, and recovers a stale selection", async () => {
