@@ -25,6 +25,22 @@ describe("MethodService", () => {
     return service.requireTask(task.id);
   }
 
+  function promoteCandidate(methodId: string) {
+    const baselines = [terminalTask("failed"), terminalTask("failed")];
+    const trials = [terminalTask("completed"), terminalTask("completed")];
+    const candidate = store.getMethodCandidate(methodId);
+    if (!candidate) throw new Error("candidate missing");
+    for (const trial of trials) {
+      injectMethod(trial.id, methodId, candidate.version);
+      methods.recordTrial(methodId, trial.id);
+    }
+    methods.evaluate(methodId, {
+      baselineTaskIds: baselines.map((task) => task.id),
+      trialTaskIds: trials.map((task) => task.id)
+    });
+    return methods.promote(methodId);
+  }
+
   function injectMethod(taskId: string, methodId: string, methodVersion: number) {
     const runId = "run-" + taskId;
     service.createRun({
@@ -140,6 +156,24 @@ describe("MethodService", () => {
     expect(reverted.status).toBe("reverted");
     expect(reverted.retiredAt).not.toBeNull();
     expect(reverted.guardrails.some((guardrail) => guardrail.includes("试跑后出现回归"))).toBe(true);
+  });
+
+  it("increments adoption generations and restores the previous one on rollback", () => {
+    const first = methods.generateFromTask(terminalTask("completed").id);
+    const adoptedFirst = promoteCandidate(first.id);
+    expect(adoptedFirst.generation).toBe(1);
+
+    const second = methods.generateFromTask(terminalTask("completed").id);
+    const adoptedSecond = promoteCandidate(second.id);
+    expect(adoptedSecond.generation).toBe(2);
+    expect(adoptedSecond.previousVersionId).toBe(first.id);
+    expect(store.getMethodCandidate(first.id)?.status).toBe("superseded");
+    expect(store.listMethodCandidates("adopted")).toHaveLength(1);
+
+    const reverted = methods.rollback(second.id, "新方法回归");
+    expect(reverted.status).toBe("reverted");
+    expect(store.getMethodCandidate(first.id)?.status).toBe("adopted");
+    expect(store.getMethodCandidate(first.id)?.retiredAt).toBeNull();
   });
 
   it("requires injection evidence for a trial", () => {

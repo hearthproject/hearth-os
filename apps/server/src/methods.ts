@@ -364,21 +364,45 @@ export class MethodService {
   promote(id: string): MethodCandidate {
     const method = this.requireMethod(id);
     if (method.status !== "trial") throw new MethodError("METHOD_NOT_IN_TRIAL", "只有试跑中的候选方法可以晋升", 409);
-    if (method.evaluationVerdict !== "improved") throw new MethodError("METHOD_NOT_IMPROVED", "候选方法没有可重复的改进证据", 409);
-    const trialIds = this.service.store.listMethodTrials(id).map((trial) => trial.taskId);
-    if (trialIds.length === 0) throw new MethodError("METHOD_TRIAL_REQUIRED", "晋升前至少需要一个试跑样本", 409);
+    const latestEvaluation = this.service.store.listMethodEvaluations(id)
+      .find((evaluation) => evaluation.methodVersion === method.version);
+    if (!latestEvaluation || latestEvaluation.verdict !== "improved") {
+      throw new MethodError("METHOD_NOT_IMPROVED", "候选方法没有可重复的改进证据", 409);
+    }
+    if (latestEvaluation.baseline.tasks < 2 || latestEvaluation.trial.tasks < 2) {
+      throw new MethodError("METHOD_EVIDENCE_INSUFFICIENT", "晋升至少需要 2 个基线和 2 个试跑样本", 409);
+    }
+    const trialIds = this.service.store.listMethodTrials(id)
+      .filter((trial) => trial.methodVersion === method.version)
+      .filter((trial) => this.service.store.listMethodApplications({ taskId: trial.taskId, methodId: id, methodVersion: method.version }).length > 0)
+      .map((trial) => trial.taskId);
+    if (trialIds.length < 2) throw new MethodError("METHOD_TRIAL_REQUIRED", "晋升前至少需要两个有注入证据的试跑样本", 409);
     const baselineCapabilities = this.intersectionCapabilities(method.sourceTaskIds);
     const expanded = method.allowedCapabilities.filter((capability) => !baselineCapabilities.includes(capability));
     if (expanded.length > 0) throw new MethodError("METHOD_PERMISSION_EXPANSION", "候选方法权限超出基线，不能晋升", 409);
     const now = this.nowIso();
-    const previous = this.service.store.listMethodCandidates("adopted")
-      .find((candidate) => candidate.id !== id && candidate.templateId === method.templateId);
+    const adopted = this.service.store.listMethodCandidates("adopted")
+      .filter((candidate) => candidate.id !== id && candidate.templateId === method.templateId)
+      .sort((left, right) => (right.adoptedAt ?? right.updatedAt).localeCompare(left.adoptedAt ?? left.updatedAt));
+    const previous = adopted[0] ?? null;
+    const generation = previous ? (previous.generation ?? previous.version ?? 1) + 1 : 1;
+    for (const prior of adopted) {
+      this.emit("method.candidate.updated", {
+        ...prior,
+        status: "superseded",
+        guardrails: unique([...prior.guardrails, `被第 ${generation} 代取代`]),
+        retiredAt: now,
+        updatedAt: now
+      });
+    }
     const next: MethodCandidate = {
       ...method,
       status: "adopted",
-      previousVersionId: previous?.id ?? method.previousVersionId,
+      generation,
+      previousVersionId: previous?.id ?? null,
       trial: this.metrics(trialIds),
       adoptedAt: now,
+      retiredAt: null,
       updatedAt: now
     };
     this.emit("method.candidate.updated", next);
@@ -389,14 +413,27 @@ export class MethodService {
     const method = this.requireMethod(id);
     if (method.status !== "adopted") throw new MethodError("METHOD_NOT_ADOPTED", "只有已采用的方法可以回退", 409);
     const explanation = reason.trim() || "用户要求回退";
+    const now = this.nowIso();
     const next: MethodCandidate = {
       ...method,
       status: "reverted",
       guardrails: unique([...method.guardrails, "回退原因：" + explanation]),
-      retiredAt: this.nowIso(),
-      updatedAt: this.nowIso()
+      retiredAt: now,
+      updatedAt: now
     };
     this.emit("method.candidate.updated", next);
+    if (method.previousVersionId) {
+      const previous = this.service.store.getMethodCandidate(method.previousVersionId);
+      if (previous && (previous.status === "superseded" || previous.status === "reverted")) {
+        this.emit("method.candidate.updated", {
+          ...previous,
+          status: "adopted",
+          guardrails: unique([...previous.guardrails, `因回退第 ${method.generation ?? method.version} 代恢复`]),
+          retiredAt: null,
+          updatedAt: now
+        });
+      }
+    }
     return next;
   }
 
@@ -491,7 +528,7 @@ export class MethodService {
 
   private requireMutableMethod(id: string): MethodCandidate {
     const method = this.requireMethod(id);
-    if (["adopted", "reverted", "rejected"].includes(method.status)) {
+    if (["adopted", "reverted", "rejected", "superseded"].includes(method.status)) {
       throw new MethodError("METHOD_READ_ONLY", "当前候选方法状态不允许继续修改", 409);
     }
     return method;
