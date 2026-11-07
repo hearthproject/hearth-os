@@ -11,7 +11,7 @@ import { loadExecutorSettings, type ExecutorSettingsStore } from "./executor-set
 import { EXECUTOR_FALLBACK_ORDER, executorName, resolveExecutorFromEnabled } from "./executors.ts";
 import { executorHealth, isExecutorManagedInstalled } from "./executor-runtime.ts";
 import type { HearthService } from "./service.ts";
-import type { ModelRegistry } from "./model-registry.ts";
+import { ModelRegistryError, type ModelRegistry } from "./model-registry.ts";
 import { chatSystemPrompt, conversationTitle, decideRoute, planExecution } from "./chat.ts";
 import { listModels, ModelClientError, completeChat, streamChat, type ChatMessage } from "./model-client.ts";
 import {
@@ -138,7 +138,16 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     }
     const patch = { ...parsed.data };
     if (patch.baseUrl !== undefined) patch.baseUrl = normalizeBaseUrl(patch.baseUrl);
-    const settings = options.registry ? saveRegistryChatSettings(options.registry, patch) : saveModelSettings(modelSettingsPath, patch);
+    let settings: ModelSettings | null;
+    try {
+      settings = options.registry ? saveRegistryChatSettings(options.registry, patch) : saveModelSettings(modelSettingsPath, patch);
+    } catch (error) {
+      if (error instanceof ModelRegistryError) {
+        const status = error.code === "MODEL_PROFILE_NOT_FOUND" ? 404 : 400;
+        return reply.code(status).send({ error: error.code, message: error.message });
+      }
+      throw error;
+    }
     if (!settings) return reply.code(400).send({ error: "INVALID_MODEL_SETTINGS", message: "新建模型档案需要填写服务名称、地址和模型名" });
     return { settings: viewModelSettings(settings), configured: chatModelConfigured(settings) };
   });

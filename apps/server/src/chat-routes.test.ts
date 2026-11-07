@@ -63,6 +63,29 @@ describe("chat-first API", () => {
     await app.close();
   });
 
+  it("rejects local model endpoints with a 400 instead of a server error", async () => {
+    const app = await buildServer({
+      store,
+      serveWeb: false,
+      modelSettingsPath: join(root, "model-settings.json"),
+      attachmentRoot: join(root, "attachments")
+    });
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/api/model-settings",
+      payload: {
+        providerName: "Local",
+        baseUrl: "http://127.0.0.1:11434/v1",
+        model: "qwen"
+      }
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toBe("LOCAL_MODEL_NOT_MANAGED");
+    expect(response.json().message).toContain("本地模型");
+    await app.close();
+  });
+
   it("creates and manages conversations", async () => {
     const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
     const created = await app.inject({ method: "POST", url: "/api/conversations", payload: { title: "测试对话" } });
