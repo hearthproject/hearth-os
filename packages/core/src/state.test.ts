@@ -9,6 +9,11 @@ describe("task state machine", () => {
     expect(canTransition("running", "completed")).toBe(true);
   });
 
+  it("lets a queued task become recoverable when its executor is unavailable", () => {
+    expect(canTransition("queued", "recoverable")).toBe(true);
+    expect(() => assertTransition("queued", "recoverable")).not.toThrow();
+  });
+
   it("rejects transitions out of terminal states", () => {
     expect(canTransition("completed", "running")).toBe(false);
     expect(canTransition("cancelled", "queued")).toBe(false);

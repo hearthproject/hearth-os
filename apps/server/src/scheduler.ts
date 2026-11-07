@@ -310,9 +310,12 @@ export class HearthScheduler {
 
   private async loop(): Promise<void> {
     while (!this.stopped) {
-      const started = this.scheduleAvailable();
-      if (started === 0) {
-        await this.waitForWake();
+      try {
+        const started = this.scheduleAvailable();
+        if (started === 0) await this.waitForWake();
+      } catch (error) {
+        console.error("[scheduler] scheduling failed:", error);
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
       }
     }
   }

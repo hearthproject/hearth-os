@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { ExecutorId, HandoffRecord, HandoffStatus, TaskRecord, TaskStatus } from "@hearth/core";
+import type { ExecutorHealth, ExecutorId, HandoffRecord, HandoffStatus, TaskRecord, TaskStatus } from "@hearth/core";
 import { defaultConversationSettings } from "@hearth/core";
 import type { CodexRunner, ExecutorHealthProvider, NativeRunner } from "./scheduler.ts";
 import { ApprovalManager } from "./approvals.ts";
@@ -99,6 +99,30 @@ describe("Hearth scheduler", () => {
     const failed = await waitForStatus(service, task.id, "recoverable");
     expect(failed.error?.kind).toBe("input_unavailable");
     expect(store?.listArtifacts(task.id)).toHaveLength(0);
+  });
+
+  it("marks a queued task recoverable when its executor is unavailable without crashing the loop", async () => {
+    const service = setup();
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, {
+      executorHealth: (executorId: ExecutorId): ExecutorHealth => ({
+        id: executorId,
+        canRun: executorId !== "deepseek-harness",
+        command: executorId,
+        version: null,
+        issues: executorId === "deepseek-harness" ? ["DSH 未绑定模型"] : [],
+        installState: executorId === "deepseek-harness" ? "needs_repair" : "available"
+      })
+    });
+    scheduler.start();
+
+    const task = service.createTask({
+      title: "不可用执行器",
+      goal: "验证排队任务不会拖垮调度器",
+      executorId: "deepseek-harness"
+    });
+    const recoverable = await waitForStatus(service, task.id, "recoverable");
+    expect(recoverable.error?.kind).toBe("executor_unavailable");
+    expect(scheduler.running).toBe(true);
   });
 
   it("discards a runner result after another instance takes over the lease", async () => {
