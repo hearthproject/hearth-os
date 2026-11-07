@@ -15,6 +15,7 @@ export interface CodexRunOptions {
   codex?: Codex;
   threadId?: string;
   networkAccessEnabled?: boolean;
+  env?: Record<string, string>;
 }
 
 export interface CodexProgress {
@@ -34,7 +35,7 @@ export async function runCodex(options: CodexRunOptions): Promise<CodexRunResult
   const profile = options.profile ?? loadCodexProfile();
   if (!profile.canRun) throw new Error(`Codex 不可用：${profile.issues.join("；")}`);
 
-  const codex = options.codex ?? new Codex({ env: buildCodexEnv(profile) });
+  const codex = options.codex ?? new Codex({ env: { ...buildCodexEnv(profile), ...(options.env ?? {}) } });
   const threadOptions = {
     ...(profile.model ? { model: profile.model } : {}),
     workingDirectory: options.workingDirectory,
@@ -92,11 +93,15 @@ export async function runCodex(options: CodexRunOptions): Promise<CodexRunResult
   return { threadId: thread.id, finalResponse, usage, profileLabel: describeCodexProfile(profile) };
 }
 
-export async function probeCodex(profile = loadCodexProfile()): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+export async function probeCodex(
+  profile = loadCodexProfile(),
+  env?: Record<string, string>
+): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
   if (!profile.canRun) return { ok: false, error: profile.issues.join("；") };
   try {
     const result = await runCodex({
       profile,
+      ...(env ? { env } : {}),
       workingDirectory: process.cwd(),
       prompt: "Reply with exactly HEARTH_OK and nothing else. Do not use tools."
     });

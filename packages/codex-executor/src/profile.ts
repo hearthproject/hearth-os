@@ -102,6 +102,7 @@ export function buildCodexEnv(profile: CodexProfile): Record<string, string> {
   for (const [key, value] of Object.entries(process.env)) {
     if (typeof value === "string") env[key] = value;
   }
+  env.CODEX_HOME = profile.codexHome;
   if (profile.envKey) {
     const value = env[profile.envKey] ?? readWindowsUserEnv(profile.envKey);
     if (value) env[profile.envKey] = value;

@@ -32,9 +32,11 @@ describe("Codex profile", () => {
     const previous = process.env.CUSTOM_API_KEY;
     process.env.CUSTOM_API_KEY = "from-process";
     try {
-      const profile = loadCodexProfile({ codexHome: homeWithConfig(), env: {} });
+      const home = homeWithConfig();
+      const profile = loadCodexProfile({ codexHome: home, env: {} });
       const env = buildCodexEnv(profile);
       expect(env.CUSTOM_API_KEY).toBe("from-process");
+      expect(env.CODEX_HOME).toBe(home);
     } finally {
       if (previous === undefined) delete process.env.CUSTOM_API_KEY;
       else process.env.CUSTOM_API_KEY = previous;
