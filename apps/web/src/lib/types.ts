@@ -33,9 +33,14 @@ import type {
   EventEnvelope,
   EventWindow,
   ExecutorId,
+  ExecutorInstallInfo,
+  ExecutorInstallJob,
+  ExecutorProbeResult,
+  ExecutorRuntimeSettings,
   ExecutorSettings,
   ExecutorSettingsPatch,
   ExecutorSettingsView,
+  ExecutorView,
   HealthSnapshot,
   HermesHealth,
   MaintenanceRun,
@@ -126,9 +131,14 @@ export type {
   EventEnvelope,
   EventWindow,
   ExecutorId,
+  ExecutorInstallInfo,
+  ExecutorInstallJob,
+  ExecutorProbeResult,
+  ExecutorRuntimeSettings,
   ExecutorSettings,
   ExecutorSettingsPatch,
   ExecutorSettingsView,
+  ExecutorView,
   HealthSnapshot,
   HermesHealth,
   MaintenanceRun,
@@ -376,6 +386,18 @@ export interface ModelSettingsResponse {
 export interface ExecutorSettingsResponse {
   settings: ExecutorSettingsView;
   hermes: HermesHealth;
+}
+
+export interface ExecutorListResponse {
+  executors: ExecutorView[];
+  preferredExecutorId: ExecutorId | null;
+  updatedAt: string | null;
+}
+
+export interface ExecutorInstallResponse {
+  job: ExecutorInstallJob | null;
+  install: ExecutorInstallInfo;
+  health: ExecutorView["health"];
 }
 
 export interface HermesProbeResponse {

@@ -23,6 +23,9 @@ import type {
   DeviceCapabilityKind,
   DeviceView,
   ExecutorId,
+  ExecutorInstallResponse,
+  ExecutorListResponse,
+  ExecutorProbeResult,
   ExecutorSettingsPatch,
   ExecutorSettingsResponse,
   EventWindow,
@@ -150,10 +153,14 @@ export const api = {
     request<ModelTestResponse>("/api/model-settings/test", { method: "POST", body: JSON.stringify(input) }),
   probeCodex: () => request<CodexProbeResponse>("/api/codex/probe", { method: "POST" }),
   executorSettings: () => request<ExecutorSettingsResponse>("/api/executor-settings"),
+  executors: () => request<ExecutorListResponse>("/api/executors"),
   saveExecutorSettings: (input: ExecutorSettingsPatch) => request<ExecutorSettingsResponse>("/api/executor-settings", {
     method: "PUT",
     body: JSON.stringify(input)
   }),
+  probeExecutor: (id: ExecutorId) => request<ExecutorProbeResult>(`/api/executors/${encodeURIComponent(id)}/probe`, { method: "POST" }),
+  installExecutor: (id: ExecutorId) => request<ExecutorInstallResponse>(`/api/executors/${encodeURIComponent(id)}/install`, { method: "POST" }),
+  executorInstall: (id: ExecutorId) => request<ExecutorInstallResponse>(`/api/executors/${encodeURIComponent(id)}/install`),
   probeHermes: () => request<HermesProbeResponse>("/api/hermes/probe", { method: "POST" }),
   schedules: () => request<ScheduleSnapshot>("/api/schedules"),
   createSchedule: (input: ScheduleInput) => request<ScheduleRecord>("/api/schedules", {

@@ -5512,6 +5512,239 @@ body.modal-open {
   white-space: nowrap;
 }
 
+.executor-manager {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  margin-top: 16px;
+}
+
+.executor-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 13px 15px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.executor-card-head,
+.executor-card-title,
+.executor-card-actions,
+.executor-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.executor-card-head {
+  justify-content: space-between;
+}
+
+.executor-card-title {
+  min-width: 0;
+}
+
+.executor-card-title > div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.executor-card-title strong {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: var(--fs-13);
+}
+
+.executor-card-title span:not(.executor-card-icon) {
+  overflow: hidden;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.executor-card-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--surface-sunk);
+  color: var(--ink-secondary);
+}
+
+.executor-badge {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--ember-tint);
+  color: var(--risk);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.executor-card-meta {
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  padding-top: 2px;
+  color: var(--ink-secondary);
+  font-size: var(--fs-11);
+}
+
+.executor-card-meta span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+}
+
+.executor-card-meta small {
+  color: var(--ink-tertiary);
+  font-size: 10px;
+}
+
+.executor-card-meta code {
+  overflow: hidden;
+  max-width: 360px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.executor-card-issues {
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: var(--surface-sunk);
+}
+
+.executor-card-issues p,
+.executor-card-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+  line-height: 1.5;
+}
+
+.executor-card-issues p + p {
+  margin-top: 3px;
+}
+
+.executor-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 11px;
+}
+
+.executor-card-grid label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 4px;
+}
+
+.executor-card-grid label > span {
+  color: var(--ink-secondary);
+  font-size: var(--fs-11);
+}
+
+.executor-card-grid input,
+.executor-card-grid select {
+  width: 100%;
+  height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  outline: none;
+}
+
+.executor-card-grid input:focus,
+.executor-card-grid select:focus {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 2px var(--ember-tint);
+}
+
+.executor-path-field {
+  grid-column: span 2;
+}
+
+.executor-card-actions {
+  flex-wrap: wrap;
+}
+
+.executor-package {
+  overflow: hidden;
+  color: var(--ink-tertiary);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.executor-job {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--line-strong);
+  color: var(--ink-secondary);
+  font-size: var(--fs-11);
+}
+
+.executor-job.succeeded {
+  border-color: var(--ok);
+}
+
+.executor-job.failed {
+  border-color: var(--risk);
+}
+
+.executor-job pre {
+  overflow: auto;
+  max-height: 150px;
+  margin: 4px 0 0;
+  padding: 7px;
+  border-radius: 5px;
+  background: var(--surface-sunk);
+  color: var(--ink-tertiary);
+  font-size: 10px;
+  white-space: pre-wrap;
+}
+
+.executor-probe {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-11);
+}
+
+.executor-probe.ok {
+  color: var(--ok);
+}
+
+.executor-probe.error {
+  color: var(--risk);
+}
+
+@media (max-width: 720px) {
+  .executor-card-grid {
+    grid-template-columns: 1fr;
+  }
+  .executor-path-field {
+    grid-column: auto;
+  }
+}
+
 /* ── Result progress ──────────────────────────────────────────────────── */
 .result-progress {
   margin-bottom: 14px;

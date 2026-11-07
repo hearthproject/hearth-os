@@ -2,23 +2,20 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
-  Bot,
   CheckCircle2,
-  Cpu,
   KeyRound,
   Loader2,
   PlugZap,
   RefreshCw,
   Save,
   ShieldAlert,
-  ShieldCheck,
-  SlidersHorizontal,
   Sparkles,
   Trash2
 } from "lucide-react";
 import { api } from "../lib/api.ts";
 import { formatDuration, formatNumber } from "../lib/format.ts";
-import type { CodexProbeResponse, ContextSettings, ExecutorSettingsView, HermesProbeResponse, ModelProtocol, ModelProviderPreset } from "../lib/types.ts";
+import type { CodexProbeResponse, ContextSettings, ModelProtocol, ModelProviderPreset } from "../lib/types.ts";
+import { ExecutorSettingsPanel } from "../components/ExecutorSettingsPanel.tsx";
 
 interface ModelForm {
   providerId: string;
@@ -49,16 +46,12 @@ export function SettingsPage() {
   const queryClient = useQueryClient();
   const settingsQuery = useQuery({ queryKey: ["modelSettings"], queryFn: api.modelSettings });
   const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 20_000 });
-  const executorQuery = useQuery({ queryKey: ["executorSettings"], queryFn: api.executorSettings });
   const contextQuery = useQuery({ queryKey: ["contextSettings"], queryFn: api.contextSettings });
   const contextMetricsQuery = useQuery({ queryKey: ["contextMetrics"], queryFn: api.contextMetrics, refetchInterval: 30_000 });
   const [form, setForm] = useState<ModelForm>(EMPTY_FORM);
   const [busy, setBusy] = useState<"save" | "test" | "models" | "probe" | "refresh" | null>(null);
   const [notice, setNotice] = useState<{ tone: "ok" | "error" | "info"; text: string } | null>(null);
   const [probe, setProbe] = useState<CodexProbeResponse | null>(null);
-  const [hermesProbe, setHermesProbe] = useState<HermesProbeResponse | null>(null);
-  const [executorForm, setExecutorForm] = useState<ExecutorSettingsView | null>(null);
-  const [executorNotice, setExecutorNotice] = useState<{ tone: "ok" | "error" | "info"; text: string } | null>(null);
   const [models, setModels] = useState<string[]>([]);
   const [contextForm, setContextForm] = useState<ContextSettings | null>(null);
   const [contextNotice, setContextNotice] = useState<{ tone: "ok" | "error" | "info"; text: string } | null>(null);
@@ -71,9 +64,6 @@ export function SettingsPage() {
   const configured = settingsQuery.data?.configured ?? false;
   const codex = healthQuery.data?.codex;
   const chatModel = healthQuery.data?.chatModel;
-  const executorSettings = executorQuery.data?.settings;
-  const hermes = executorQuery.data?.hermes;
-  const executorInitialized = useRef(false);
   const contextInitialized = useRef(false);
 
   useEffect(() => {
@@ -81,12 +71,6 @@ export function SettingsPage() {
     contextInitialized.current = true;
     setContextForm(contextQuery.data.settings);
   }, [contextQuery.data]);
-
-  useEffect(() => {
-    if (!executorSettings || executorInitialized.current) return;
-    executorInitialized.current = true;
-    setExecutorForm(executorSettings);
-  }, [executorSettings]);
 
   useEffect(() => {
     if (!settings || initialized.current) return;
@@ -219,42 +203,6 @@ export function SettingsPage() {
     }
   }
 
-  async function saveExecutorSettings() {
-    if (!executorForm) return;
-    setBusy("save");
-    setExecutorNotice(null);
-    try {
-      const result = await api.saveExecutorSettings({
-        defaultApprovalMode: executorForm.defaultApprovalMode,
-        concurrency: executorForm.concurrency,
-        hermesCommand: executorForm.hermesCommand
-      });
-      setExecutorForm(result.settings);
-      setExecutorNotice({ tone: "ok", text: "执行器与权限设置已保存，只影响之后新建的对话。" });
-      await queryClient.invalidateQueries({ queryKey: ["executorSettings"] });
-      await queryClient.invalidateQueries({ queryKey: ["health"] });
-    } catch (error) {
-      setExecutorNotice({ tone: "error", text: error instanceof Error ? error.message : "保存失败" });
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function probeHermes() {
-    setBusy("probe");
-    setHermesProbe(null);
-    try {
-      const result = await api.probeHermes();
-      setHermesProbe(result);
-      await queryClient.invalidateQueries({ queryKey: ["executorSettings"] });
-      await queryClient.invalidateQueries({ queryKey: ["health"] });
-    } catch (error) {
-      setExecutorNotice({ tone: "error", text: error instanceof Error ? error.message : "Hermes 检测失败" });
-    } finally {
-      setBusy(null);
-    }
-  }
-
   async function refreshHealth() {
     setBusy("refresh");
     try {
@@ -262,13 +210,6 @@ export function SettingsPage() {
     } finally {
       setBusy(null);
     }
-  }
-
-  function updateConcurrency(id: "native" | "codex" | "hermes", value: string) {
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed)) return;
-    const clamped = Math.max(1, Math.min(4, Math.round(parsed)));
-    setExecutorForm((prev) => (prev ? { ...prev, concurrency: { ...prev.concurrency, [id]: clamped } } : prev));
   }
 
   async function saveContextSettings() {
@@ -482,85 +423,7 @@ export function SettingsPage() {
         </details>
       </section>
 
-      <section className="panel settings-section">
-        <details className="settings-fold">
-          <summary className="settings-fold-summary">
-            <div className="settings-fold-copy">
-              <strong>执行器与权限</strong>
-              <span>默认权限与并行数 · Hermes 命令路径</span>
-            </div>
-            <span className={`status-chip ${executorForm?.defaultApprovalMode === "full" ? "warn" : "ok"}`}>
-              {executorForm?.defaultApprovalMode === "full" ? <ShieldAlert size={13} /> : <ShieldCheck size={13} />}
-              {executorForm?.defaultApprovalMode === "full" ? "完全权限" : "必要审批"}
-            </span>
-          </summary>
-          <div className="settings-body">
-            <p className="settings-lead">这里的默认值只影响之后新建的对话；已有对话保持自己的设置。</p>
-            <div className="form-grid">
-              <label>
-                <span>新对话默认权限</span>
-                <select
-                  value={executorForm?.defaultApprovalMode ?? "necessary"}
-                  onChange={(event) => setExecutorForm((prev) => (prev ? { ...prev, defaultApprovalMode: event.target.value as "necessary" | "full" } : prev))}
-                >
-                  <option value="necessary">必要审批</option>
-                  <option value="full">完全权限（警示）</option>
-                </select>
-              </label>
-              <label>
-                <span>Hermes 命令</span>
-                <div className="input-with-action">
-                  <input
-                    value={executorForm?.hermesCommand ?? "hermes"}
-                    onChange={(event) => setExecutorForm((prev) => (prev ? { ...prev, hermesCommand: event.target.value } : prev))}
-                    placeholder="hermes"
-                    spellCheck={false}
-                  />
-                  <button type="button" className="ghost-button compact" onClick={() => void probeHermes()} disabled={busy !== null}>
-                    {busy === "probe" ? <Loader2 size={14} className="spin" /> : <Bot size={14} />} 检测
-                  </button>
-                </div>
-              </label>
-            </div>
-            <div className="concurrency-grid">
-              {(["native", "codex", "hermes"] as const).map((id) => (
-                <label key={id} className="concurrency-field">
-                  <span>{id === "native" ? <Cpu size={13} /> : id === "codex" ? <SlidersHorizontal size={13} /> : <Bot size={13} />} {id === "native" ? "Native" : id === "codex" ? "Codex" : "Hermes"} 并行数</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={4}
-                    value={executorForm?.concurrency[id] ?? 3}
-                    onChange={(event) => updateConcurrency(id, event.target.value)}
-                  />
-                </label>
-              ))}
-            </div>
-            <div className="settings-actions">
-              <button className="primary-button" onClick={() => void saveExecutorSettings()} disabled={busy !== null || !executorForm}>
-                {busy === "save" ? <Loader2 size={15} className="spin" /> : <Save size={15} />} 保存执行器设置
-              </button>
-            </div>
-            {executorNotice && <Notice tone={executorNotice.tone} text={executorNotice.text} />}
-            {hermesProbe && (
-              <div className={`result-banner ${hermesProbe.ok ? "ok" : "error"}`}>
-                {hermesProbe.ok ? <CheckCircle2 size={17} /> : <AlertTriangle size={17} />}
-                <div>
-                  <strong>{hermesProbe.ok ? "Hermes 可用" : "Hermes 不可用"}</strong>
-                  <p>{hermesProbe.ok ? hermesProbe.version : hermesProbe.error}</p>
-                  <small>{hermesProbe.command} · {hermesProbe.elapsedMs} ms</small>
-                </div>
-              </div>
-            )}
-            {hermes && !hermes.canRun && (
-              <p className="codex-hint">
-                Hermes 当前不可用：{hermes.issues.join("；") || "未检测到可执行文件"}。未配置时不影响 Native 和 Codex 执行器。
-              </p>
-            )}
-            <p className="settings-hint"><ShieldAlert size={13} /> 完全权限会让执行器自行决定并执行所有步骤；切换时不再弹窗提示。</p>
-          </div>
-        </details>
-      </section>
+      <ExecutorSettingsPanel />
 
       <section className="panel settings-section">
         <details className="settings-fold">
