@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { MethodApplication, MethodCandidate, MethodEvaluation, MethodMetrics, MethodSelection, MethodTrial, MethodVerdict, TaskRecord } from "@hearth/core";
 import { getTemplate } from "@hearth/templates";
 import type { HearthService } from "./service.ts";
@@ -19,6 +19,7 @@ export interface CreateMethodInput {
   templateId?: string | null;
   allowedCapabilities?: string[];
   guardrails?: string[];
+  fingerprint?: string | null;
 }
 
 export interface EvaluateMethodInput {
@@ -123,28 +124,50 @@ export class MethodService {
   generateFromTask(taskId: string, input: { name?: string; summary?: string } = {}): MethodCandidate {
     const task = this.requireTrajectoryTask(taskId);
     const template = task.templateId ? getTemplate(task.templateId) : undefined;
-    const peers = this.service.store.listTasks().filter((candidate) =>
-      candidate.id === task.id || (task.templateId && candidate.templateId === task.templateId && TERMINAL_TASK_STATUSES.has(candidate.status))
-    ).slice(0, 20);
-    const sourceTaskIds = unique(peers.map((candidate) => candidate.id));
-    const capabilities = this.intersectionCapabilities(sourceTaskIds);
+    const contextItems = [...this.service.store.listContextItems(task.id, { limit: 200 }).items].reverse()
+      .filter((item) => !["method", "summary", "checkpoint", "notice"].includes(item.kind));
     const inputLabels = template?.inputs.map((item) => item.label).join("、") || task.inputs.map((item) => item.label).join("、") || "任务文本";
-    const artifacts = this.service.store.listArtifacts(task.id).map((artifact) => artifact.relativePath);
-    const failureLine = task.error ? `保留失败样本并标注阻塞：${task.error.message}` : "记录完成证据和可复现的验收结果";
+    const toolNames = unique(contextItems
+      .filter((item) => item.kind === "tool_call")
+      .map((item) => item.content.split("\n")[0]?.trim() ?? "")
+      .filter(Boolean)
+      .map((name) => clip(name, 60)))
+      .slice(0, 6);
+    const evidence = unique(contextItems
+      .filter((item) => ["decision", "failure", "diagnosis"].includes(item.kind))
+      .map((item) => clip(item.content.replace(/\s+/g, " ").trim(), 160))
+      .filter(Boolean))
+      .slice(-2);
+    const artifacts = unique(this.service.store.listArtifacts(task.id).map((artifact) => artifact.relativePath));
+    const outputs = template?.expectedOutputs.length ? template.expectedOutputs : artifacts;
+    const outputLine = outputs.length > 0 ? outputs.join("、") : "任务要求的交付物";
+    const capabilities = this.capabilitiesForTask(task);
+    const steps = [
+      "核对输入范围：" + inputLabels,
+      ...(toolNames.length > 0 ? ["按顺序完成关键动作：" + toolNames.join(" → ")] : []),
+      ...(evidence.length > 0 ? ["处理关键决策/失败：" + evidence.join("；")] : []),
+      "生成期望产物：" + outputLine,
+      task.error ? `保留失败样本并标注阻塞：${clip(task.error.message, 160)}` : "记录完成证据和可复现的验收结果",
+      "发布或外部写入前保留原有审批门，不因方法复用而跳过确认"
+    ];
+    const fingerprint = createHash("sha256").update(JSON.stringify({
+      templateId: task.templateId,
+      inputs: task.inputs.map((item) => `${item.kind}:${item.label}`).sort(),
+      steps,
+      capabilities
+    })).digest("hex");
+    const existing = this.service.store.listMethodCandidates()
+      .find((method) => method.fingerprint === fingerprint && !["rejected", "reverted"].includes(method.status));
+    if (existing) return existing;
     return this.create({
       name: input.name?.trim() || (template ? template.title + "复盘方法" : task.title + "复盘方法"),
-      summary: input.summary?.trim() || this.summaryForTask(task, template?.expectedOutputs ?? artifacts),
+      summary: input.summary?.trim() || this.summaryForTask(task, outputs),
       applicability: task.templateId ? "模板 " + task.templateId + " 及同类输入" : "与来源任务目标、输入和输出结构相同的工作",
-      steps: [
-        "核对输入范围：" + inputLabels,
-        "按任务目标拆分可验证的子步骤，并记录每一步的证据来源",
-        "生成期望产物：" + (template?.expectedOutputs.join("、") || artifacts.join("、") || "任务要求的交付物"),
-        failureLine,
-        "发布或外部写入前保留原有审批门，不因方法复用而跳过确认"
-      ],
-      sourceTaskIds,
+      steps,
+      sourceTaskIds: [task.id],
       templateId: task.templateId,
-      allowedCapabilities: capabilities
+      allowedCapabilities: capabilities,
+      fingerprint
     });
   }
 
@@ -202,6 +225,8 @@ export class MethodService {
       templateId: input.templateId?.trim() || null,
       status: "candidate",
       version: 1,
+      generation: null,
+      fingerprint: input.fingerprint?.trim() || null,
       previousVersionId: null,
       allowedCapabilities: requested,
       guardrails: unique([...DEFAULT_GUARDRAILS, ...(input.guardrails ?? [])]),
@@ -558,4 +583,8 @@ function decideVerdict(baseline: MethodMetrics, trial: MethodMetrics, permission
 
 function unique(values: string[]): string[] {
   return [...new Set(values)];
+}
+
+function clip(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
 }

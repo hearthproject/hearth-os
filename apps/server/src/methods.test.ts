@@ -113,6 +113,30 @@ describe("MethodService", () => {
     expect(() => methods.assignToTask(otherTemplate.id, candidate.id)).toThrowError(MethodError);
   });
 
+  it("extracts trajectory evidence and deduplicates candidates by fingerprint", () => {
+    const task = terminalTask("completed");
+    store.appendContextItem({
+      seq: 0, id: "context-tool", conversationId: null, taskId: task.id, runId: "run-1",
+      executorId: "native", kind: "tool_call", role: "assistant", content: "read_file\n{\"path\":\"input.md\"}",
+      contentRef: null, sha256: null, tokens: 5, sensitivity: "normal", provenance: {},
+      parentId: null, executorEventId: "tool:1", createdAt: now.toISOString()
+    });
+    store.appendContextItem({
+      seq: 0, id: "context-decision", conversationId: null, taskId: task.id, runId: "run-1",
+      executorId: "native", kind: "decision", role: "system", content: "先核对输入，再生成产物",
+      contentRef: null, sha256: null, tokens: 5, sensitivity: "normal", provenance: {},
+      parentId: null, executorEventId: "decision:1", createdAt: now.toISOString()
+    });
+
+    const first = methods.generateFromTask(task.id);
+    const second = methods.generateFromTask(task.id);
+    expect(second.id).toBe(first.id);
+    expect(first.sourceTaskIds).toEqual([task.id]);
+    expect(first.steps.some((step) => step.includes("read_file"))).toBe(true);
+    expect(first.steps.some((step) => step.includes("先核对输入"))).toBe(true);
+    expect(first.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+  });
+
   it("rejects capability expansion at candidate creation", () => {
     const task = terminalTask();
     expect(() => methods.create({
@@ -163,7 +187,14 @@ describe("MethodService", () => {
     const adoptedFirst = promoteCandidate(first.id);
     expect(adoptedFirst.generation).toBe(1);
 
-    const second = methods.generateFromTask(terminalTask("completed").id);
+    const secondSource = terminalTask("completed");
+    store.appendContextItem({
+      seq: 0, id: "context-second", conversationId: null, taskId: secondSource.id, runId: "run-second",
+      executorId: "native", kind: "decision", role: "system", content: "第二代方法多一步交叉验证",
+      contentRef: null, sha256: null, tokens: 5, sensitivity: "normal", provenance: {},
+      parentId: null, executorEventId: "decision:second", createdAt: now.toISOString()
+    });
+    const second = methods.generateFromTask(secondSource.id);
     const adoptedSecond = promoteCandidate(second.id);
     expect(adoptedSecond.generation).toBe(2);
     expect(adoptedSecond.previousVersionId).toBe(first.id);
