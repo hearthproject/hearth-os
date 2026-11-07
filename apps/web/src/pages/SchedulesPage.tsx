@@ -215,6 +215,7 @@ export function SchedulesPage() {
               <select value={draft.executorId} onChange={(event) => updateDraft("executorId", event.target.value as ExecutorId)}>
                 <option value="native">Hearth 原生</option>
                 <option value="codex">Codex</option>
+                <option value="deepseek-harness">DeepSeek Harness</option>
                 <option value="hermes">Hermes</option>
                 <option value="qoder">Qoder</option>
                 <option value="workbuddy">WorkBuddy</option>

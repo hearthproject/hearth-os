@@ -9,10 +9,15 @@ export function AppShell() {
   const { pathname } = useLocation();
   const tasksQuery = useQuery({ queryKey: ["tasks"], queryFn: api.tasks, refetchInterval: 10_000 });
   const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 30_000 });
+  const executorsQuery = useQuery({ queryKey: ["executors"], queryFn: api.executors, refetchInterval: 30_000 });
   const tasks = tasksQuery.data?.tasks ?? [];
   const activeCount = tasks.filter((task) => isActive(task.status) || needsAttention(task.status)).length;
-  const codex = healthQuery.data?.codex;
   const chatModel = healthQuery.data?.chatModel;
+  const readyExecutors = (executorsQuery.data?.executors ?? []).filter((executor) => executor.health.canRun);
+  const primaryExecutor = readyExecutors.find((executor) => executor.id === "native")
+    ?? readyExecutors.find((executor) => executor.id === "codex")
+    ?? readyExecutors[0]
+    ?? null;
   const chatMode = pathname === "/";
 
   return (
@@ -53,10 +58,10 @@ export function AppShell() {
         </NavLink>
 
         <NavLink to="/settings" className="codex-status">
-          <span className={`status-dot ${codex?.canRun ? "online" : "offline"}`} />
+          <span className={`status-dot ${primaryExecutor ? "online" : "offline"}`} />
           <span>
-            <strong>{codex?.canRun ? "执行器可用" : "执行器不可用"}</strong>
-            <small>{codex ? `${codex.providerName} · ${codex.model ?? "默认模型"}` : "读取本机配置中"}</small>
+            <strong>{primaryExecutor ? "执行器可用" : "执行器不可用"}</strong>
+            <small>{primaryExecutor ? `${primaryExecutor.name} · 已就绪` : executorsQuery.isLoading ? "读取执行器…" : "到设置里检查"}</small>
           </span>
         </NavLink>
         <p className="sidebar-note">仅监听 127.0.0.1</p>

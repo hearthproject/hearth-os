@@ -55,6 +55,7 @@ function EventBridge() {
         }
         if (taskId) {
           void queryClient.invalidateQueries({ queryKey: ["task", taskId] });
+          void queryClient.invalidateQueries({ queryKey: ["task-context", taskId] });
           void queryClient.invalidateQueries({ queryKey: ["taskEvents", taskId] });
         }
       }, 250);

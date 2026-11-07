@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { ApprovalRecord, EffectRecord } from "@hearth/core";
-import { APPROVAL_STATUSES, EFFECT_STATUSES, RUN_STATUSES, TASK_STATUSES } from "@hearth/core";
+import { APPROVAL_STATUSES, EFFECT_STATUSES, EXECUTOR_IDS, RUN_STATUSES, TASK_STATUSES } from "@hearth/core";
 import {
   APPROVAL_STATUS_LABELS,
   EFFECT_STATUS_LABELS,
+  EXECUTOR_LABELS,
   RUN_STATUS_LABELS,
   TASK_STATUS_LABELS,
   eventDescription,
+  executorLabel,
   externalEffectSummary,
   statusExplanation
 } from "./labels.ts";
@@ -97,5 +99,15 @@ describe("event description", () => {
       originInstanceId: null, originSeq: 1, createdAt: "2026-11-05T00:00:00.000Z"
     });
     expect(description).toBe("执行了一条命令");
+  });
+});
+
+describe("executor labels", () => {
+  it("labels every registered executor", () => {
+    for (const id of EXECUTOR_IDS) expect(EXECUTOR_LABELS[id]).toBeTruthy();
+  });
+
+  it("labels DeepSeek Harness instead of falling back to the raw id", () => {
+    expect(executorLabel("deepseek-harness")).toBe("DeepSeek Harness");
   });
 });

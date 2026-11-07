@@ -33,6 +33,7 @@ const EMPTY_RUNTIME: RuntimeDraft = { command: "", executablePath: "", authMode:
 export function ExecutorSettingsPanel() {
   const queryClient = useQueryClient();
   const executorsQuery = useQuery({ queryKey: ["executors"], queryFn: api.executors, refetchInterval: 30_000 });
+  const executorSettingsQuery = useQuery({ queryKey: ["executorSettings"], queryFn: api.executorSettings });
   const [drafts, setDrafts] = useState<Partial<Record<ExecutorId, RuntimeDraft>>>({});
   const [concurrency, setConcurrency] = useState<Record<ExecutorId, number> | null>(null);
   const [defaultApprovalMode, setDefaultApprovalMode] = useState<"necessary" | "full">("necessary");
@@ -42,8 +43,16 @@ export function ExecutorSettingsPanel() {
   const [probes, setProbes] = useState<Partial<Record<ExecutorId, ExecutorProbeResult>>>({});
   const [notice, setNotice] = useState<{ tone: "ok" | "error" | "info"; text: string } | null>(null);
   const initialized = useRef(false);
+  const settingsInitialized = useRef(false);
 
   const executors = executorsQuery.data?.executors ?? [];
+
+  useEffect(() => {
+    if (!executorSettingsQuery.data || settingsInitialized.current) return;
+    settingsInitialized.current = true;
+    setDefaultApprovalMode(executorSettingsQuery.data.settings.defaultApprovalMode);
+    setPreferredExecutorId(executorSettingsQuery.data.settings.preferredExecutorId ?? "");
+  }, [executorSettingsQuery.data]);
 
   useEffect(() => {
     if (!executorsQuery.data || initialized.current) return;
@@ -94,11 +103,12 @@ export function ExecutorSettingsPanel() {
     try {
       const runtime: Partial<Record<ExecutorId, ExecutorRuntimeSettings>> = {};
       for (const [id, draft] of Object.entries(drafts) as [ExecutorId, RuntimeDraft][]) {
-        runtime[id] = {
-          command: draft.command.trim(),
-          executablePath: draft.executablePath.trim(),
+        const entry: ExecutorRuntimeSettings = {
+          ...(draft.command.trim() ? { command: draft.command.trim() } : {}),
+          ...(draft.executablePath.trim() ? { executablePath: draft.executablePath.trim() } : {}),
           ...(draft.authMode ? { authMode: draft.authMode } : {})
         };
+        if (Object.keys(entry).length > 0) runtime[id] = entry;
       }
       const result = await api.saveExecutorSettings({
         defaultApprovalMode,
