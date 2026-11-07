@@ -483,6 +483,7 @@ function contextKindLabel(kind: ContextItem["kind"]): string {
     decision: "决策",
     summary: "摘要",
     memory_recall: "记忆召回",
+    method: "方法注入",
     usage: "用量",
     notice: "通知"
   };

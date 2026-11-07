@@ -220,6 +220,8 @@ export interface TaskRecord {
   expectedOutputs?: string[];
   permissions?: TaskPermissions;
   pendingInput?: string | null;
+  methodId?: string | null;
+  methodVersion?: number | null;
 }
 
 export interface ChatAttachment {
@@ -969,11 +971,14 @@ export interface MemoryForgetReceipt {
   createdAt: string;
 }
 
-export const METHOD_STATUSES = ["candidate", "evaluating", "trial", "adopted", "rejected", "reverted"] as const;
+export const METHOD_STATUSES = ["candidate", "evaluating", "trial", "adopted", "rejected", "reverted", "superseded"] as const;
 export type MethodStatus = (typeof METHOD_STATUSES)[number];
 
 export const METHOD_VERDICTS = ["insufficient", "improved", "flat", "regressed"] as const;
 export type MethodVerdict = (typeof METHOD_VERDICTS)[number];
+
+export const METHOD_SELECTIONS = ["pinned", "auto_template"] as const;
+export type MethodSelection = (typeof METHOD_SELECTIONS)[number];
 
 export interface MethodMetrics {
   tasks: number;
@@ -996,6 +1001,8 @@ export interface MethodCandidate {
   templateId: string | null;
   status: MethodStatus;
   version: number;
+  generation?: number | null;
+  fingerprint?: string | null;
   previousVersionId: string | null;
   allowedCapabilities: string[];
   guardrails: string[];
@@ -1006,6 +1013,22 @@ export interface MethodCandidate {
   updatedAt: string;
   adoptedAt: string | null;
   retiredAt: string | null;
+}
+
+export interface MethodApplication {
+  id: string;
+  taskId: string;
+  runId: string;
+  methodId: string;
+  methodVersion: number;
+  selection: MethodSelection;
+  promptSha256: string;
+  createdAt: string;
+}
+
+export interface MethodSettings {
+  autoLearn: boolean;
+  updatedAt: string | null;
 }
 
 export interface MethodEvaluation {
@@ -1134,6 +1157,7 @@ export const CONTEXT_ITEM_KINDS = [
   "decision",
   "summary",
   "memory_recall",
+  "method",
   "usage",
   "notice"
 ] as const;

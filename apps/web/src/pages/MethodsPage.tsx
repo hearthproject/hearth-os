@@ -13,7 +13,8 @@ const STATUS_LABELS: Record<MethodStatus, string> = {
   trial: "试跑中",
   adopted: "已采用",
   rejected: "已拒绝",
-  reverted: "已回退"
+  reverted: "已回退",
+  superseded: "已被取代"
 };
 
 const VERDICT_LABELS: Record<MethodVerdict, string> = {
