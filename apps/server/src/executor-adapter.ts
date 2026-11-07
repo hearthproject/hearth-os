@@ -10,9 +10,10 @@ import type {
   TaskRecord
 } from "@hearth/core";
 import type { CodexRunOptions, CodexRunResult } from "@hearth/codex-executor";
+import { runDeepSeekHarness, type DeepSeekHarnessRunOptions, type DeepSeekHarnessRunResult, type DshContextEvent } from "@hearth/deepseek-executor";
 import type { HermesRunOptions, HermesRunResult, HermesStreamEvent } from "./hermes-executor.ts";
 import { runExternalExecutor, type ExternalRunOptions, type ExternalRunResult } from "./external-executor.ts";
-import { resolveExecutorLaunch } from "./executor-runtime.ts";
+import { executorHome, resolveExecutorLaunch } from "./executor-runtime.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import { nativePermissionsFor, type NativeRunOptions, type NativeRunResult } from "./native-executor.ts";
 import type { PreparedWorkspace } from "./workspace.ts";
@@ -22,6 +23,7 @@ export type CodexRunner = (options: CodexRunOptions) => Promise<CodexRunResult>;
 export type NativeRunner = (options: NativeRunOptions) => Promise<NativeRunResult>;
 export type HermesRunner = (options: HermesRunOptions) => Promise<HermesRunResult>;
 export type ExternalRunner = (options: ExternalRunOptions) => Promise<ExternalRunResult>;
+export type DshRunner = (options: DeepSeekHarnessRunOptions) => Promise<DeepSeekHarnessRunResult>;
 export type CodexContextItem = Parameters<NonNullable<CodexRunOptions["onContextItem"]>>[0];
 
 export interface ExecutionOutcome {
@@ -43,6 +45,7 @@ export interface ExecutorAttemptContext {
   fullPermission: boolean;
   contextSettings: ContextSettings;
   nativeSettings: ModelSettings | null;
+  dshSettings: ModelSettings | null;
   executorSettings: ExecutorSettings;
   expectedOutputs: string[];
   activeThreadId?: string;
@@ -50,6 +53,7 @@ export interface ExecutorAttemptContext {
   onNativeContextEvent: (event: RuntimeEvent) => void;
   onNativeCheckpoint: (checkpoint: AgentCheckpoint) => void | Promise<void>;
   onHermesContextItem: (event: HermesStreamEvent) => void;
+  onDshContextItem: (event: DshContextEvent) => void;
   onCodexContextItem: (item: CodexContextItem) => void;
   onCodexThreadStarted: (threadId: string) => void;
 }
@@ -65,6 +69,7 @@ export interface ExecutorAvailabilityInput {
   prepared: PreparedWorkspace | null;
   settings: ContextSettings;
   executorSettings: ExecutorSettings;
+  modelSettings?: ModelSettings | null;
 }
 
 export interface ExecutorAvailability {
@@ -183,6 +188,71 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
   }
 }
 
+export class DeepSeekHarnessExecutorAdapter implements ExecutorAdapter {
+  readonly id = "deepseek-harness" as const;
+  readonly supportsResume = true;
+
+  constructor(
+    private readonly runner: DshRunner,
+    private readonly settingsPath: string
+  ) {}
+
+  canRun(input: ExecutorAvailabilityInput): ExecutorAvailability {
+    if (wantsScreenshot(`${input.task.title}\n${input.task.goal}`) || input.task.permissions?.tools.includes("capture_screen")) {
+      return { ok: false, reason: "DeepSeek Harness 不支持桌面截图任务" };
+    }
+    const settings = input.modelSettings;
+    if (!settings) return { ok: false, reason: "DeepSeek Harness 还没有绑定模型，请到设置中选择模型档案" };
+    if (!settings.baseUrl || !settings.model || !settings.apiKey) {
+      return { ok: false, reason: "DeepSeek Harness 的模型档案缺少服务地址、模型名或 API Key" };
+    }
+    if (settings.protocol === "gemini") {
+      return { ok: false, reason: "DeepSeek Harness 不支持 Gemini 协议" };
+    }
+    return { ok: true };
+  }
+
+  async execute(input: ExecutorInvocation): Promise<ExecutionOutcome> {
+    const settings = input.dshSettings;
+    if (!settings) throw new Error("DeepSeek Harness 还没有绑定模型，请到设置中选择模型档案");
+    if (settings.protocol === "gemini") throw new Error("DeepSeek Harness 不支持 Gemini 协议");
+    const result = await this.runner({
+      settings: {
+        protocol: settings.protocol,
+        baseUrl: settings.baseUrl,
+        model: settings.model,
+        apiKey: settings.apiKey
+      },
+      dshHome: executorHome(this.settingsPath, "deepseek-harness"),
+      workingDirectory: input.prepared.root,
+      prompt: input.prompt,
+      mode: input.fullPermission ? "full" : "necessary",
+      maxTurns: input.budget.maxTurns,
+      runBudgetSeconds: Math.max(1, Math.round(input.budget.maxDurationMs / 1000)),
+      ...(input.activeThreadId ? { resumeSessionId: input.activeThreadId } : {}),
+      signal: input.signal,
+      onProgress: (event) => input.onProgress({
+        kind: event.type,
+        message: event.message,
+        ...(event.detail ? { detail: event.detail as TaskProgressDetail } : {})
+      }),
+      onContextItem: input.onDshContextItem
+    });
+    return {
+      status: "completed",
+      finalResponse: result.finalResponse,
+      usage: result.usage,
+      threadId: result.sessionId,
+      label: `deepseek-harness / ${result.sessionId}`,
+      question: null
+    };
+  }
+
+  resume(input: ExecutorInvocation & { resume: AgentResumeState }): Promise<ExecutionOutcome> {
+    return this.execute(input);
+  }
+}
+
 export class HermesExecutorAdapter implements ExecutorAdapter {
   readonly id = "hermes" as const;
   readonly supportsResume = false;
@@ -289,14 +359,17 @@ export class ExternalExecutorAdapter implements ExecutorAdapter {
 export function createExecutorAdapters(input: {
   native: NativeRunner;
   codex: CodexRunner;
+  deepseek?: DshRunner;
   hermes: HermesRunner;
   settingsPath: string;
   external?: ExternalRunner;
 }): Record<ExecutorId, ExecutorAdapter> {
   const external = input.external ?? runExternalExecutor;
+  const deepseek = input.deepseek ?? runDeepSeekHarness;
   return {
     native: new NativeExecutorAdapter(input.native),
     codex: new CodexExecutorAdapter(input.codex),
+    "deepseek-harness": new DeepSeekHarnessExecutorAdapter(deepseek, input.settingsPath),
     hermes: new HermesExecutorAdapter(input.hermes),
     qoder: new ExternalExecutorAdapter("qoder", input.settingsPath, external),
     workbuddy: new ExternalExecutorAdapter("workbuddy", input.settingsPath, external),

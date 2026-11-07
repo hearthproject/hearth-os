@@ -5,6 +5,7 @@ import type { AgentCheckpoint, AgentResumeState, RuntimeEvent } from "@hearth/ag
 import type { ContextItem, ContextSettings, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, RunBudget, RunCheckpointRecord, RunRecord, TaskError, TaskLease, TaskProgressDetail, TaskRecord } from "@hearth/core";
 import { runCodex } from "@hearth/codex-executor";
 import { getTemplate } from "@hearth/templates";
+import type { DshContextEvent } from "@hearth/deepseek-executor";
 import type { ApprovalRequest, ApprovalManager } from "./approvals.ts";
 import { missingExpectedOutputs, publishArtifacts } from "./artifacts.ts";
 import { CONTEXT_BLOB_DIR, EXECUTOR_SETTINGS_PATH, GIT_CACHE_DIR, MODEL_SETTINGS_PATH, REPO_ROOT, SOURCE_CONTENT_DIR, WORKSPACE_DIR } from "./config.ts";
@@ -23,13 +24,13 @@ import type { CommandRunner } from "./github.ts";
 import { MemoryService } from "./memory.ts";
 import { DEFAULT_LEASE_HEARTBEAT_MS, LeaseError, TaskLeaseService } from "./leases.ts";
 import { DEFAULT_RUN_BUDGET, runNativeTask } from "./native-executor.ts";
-import { chatModelConfigured, loadModelSettings } from "./model-settings.ts";
+import { chatModelConfigured, loadModelSettings, type ModelSettings } from "./model-settings.ts";
 import { prepareTaskRuntime, type RuntimePreparation } from "./runtime.ts";
 import type { HearthService } from "./service.ts";
 import { buildDeliveryRepairPrompt, buildTaskPrompt, prepareWorkspace, UnsupportedInputError, type PreparedWorkspace } from "./workspace.ts";
 import { CapabilityUnavailableError, needsGithubRepository, wantsScreenshot } from "./task-intent.ts";
 
-import { createExecutorAdapters, type CodexContextItem, type CodexRunner, type ExecutionOutcome, type ExecutorAdapter, type ExecutorAttemptContext, type ExternalRunner, type HermesRunner, type NativeRunner } from "./executor-adapter.ts";
+import { createExecutorAdapters, type CodexContextItem, type CodexRunner, type DshRunner, type ExecutionOutcome, type ExecutorAdapter, type ExecutorAttemptContext, type ExternalRunner, type HermesRunner, type NativeRunner } from "./executor-adapter.ts";
 export type { CodexRunner, HermesRunner, NativeRunner } from "./executor-adapter.ts";
 export type ExecutorHealthProvider = (executorId: ExecutorId, settings: ExecutorSettings) => { canRun: boolean; issues: string[] };
 
@@ -54,11 +55,13 @@ export interface SchedulerOptions {
   codexRunner?: CodexRunner;
   nativeRunner?: NativeRunner;
   hermesRunner?: HermesRunner;
+  deepseekRunner?: DshRunner;
   externalRunner?: ExternalRunner;
   executorHealth?: ExecutorHealthProvider;
   executorSettingsPath?: string;
   executorSettings?: ExecutorSettings;
   modelSettingsPath?: string;
+  modelSettingsForExecutor?: ((executorId: ExecutorId) => ModelSettings | null) | undefined;
   runBudget?: RunBudget;
   approvals?: ApprovalManager;
   leases?: TaskLeaseService;
@@ -80,11 +83,13 @@ export class HearthScheduler {
   private readonly codexRunner: CodexRunner;
   private readonly nativeRunner: NativeRunner;
   private readonly hermesRunner: HermesRunner;
+  private readonly deepseekRunner: DshRunner | undefined;
   private readonly adapters: Record<ExecutorId, ExecutorAdapter>;
   private readonly executorHealth: ExecutorHealthProvider;
   private readonly executorSettingsPath: string;
   private readonly staticExecutorSettings: ExecutorSettings | null;
   private readonly modelSettingsPath: string;
+  private readonly modelSettingsForExecutor: (executorId: ExecutorId) => ModelSettings | null;
   private readonly runBudget: RunBudget;
   private readonly approvals: ApprovalManager | undefined;
   private readonly githubRun: CommandRunner | undefined;
@@ -118,18 +123,24 @@ export class HearthScheduler {
     this.codexRunner = options.codexRunner ?? runCodex;
     this.nativeRunner = options.nativeRunner ?? runNativeTask;
     this.hermesRunner = options.hermesRunner ?? runHermes;
+    this.deepseekRunner = options.deepseekRunner;
     this.executorSettingsPath = options.executorSettingsPath ?? EXECUTOR_SETTINGS_PATH;
     this.staticExecutorSettings = options.executorSettings ?? null;
     this.adapters = createExecutorAdapters({
       codex: this.codexRunner,
       native: this.nativeRunner,
       hermes: this.hermesRunner,
+      ...(this.deepseekRunner ? { deepseek: this.deepseekRunner } : {}),
       settingsPath: this.executorSettingsPath,
       ...(options.externalRunner ? { external: options.externalRunner } : {})
     });
     this.executorHealth = options.executorHealth
       ?? ((executorId, settings) => readExecutorHealth(executorId, settings, this.executorSettingsPath));
     this.modelSettingsPath = options.modelSettingsPath ?? MODEL_SETTINGS_PATH;
+    this.modelSettingsForExecutor = options.modelSettingsForExecutor
+      ?? ((executorId) => executorId === "native" || executorId === "deepseek-harness"
+        ? loadModelSettings(this.modelSettingsPath)
+        : null);
     this.runBudget = options.runBudget ?? DEFAULT_RUN_BUDGET;
     this.approvals = options.approvals;
     this.githubRun = options.githubRun;
@@ -837,7 +848,9 @@ export class HearthScheduler {
       const permissionNote = fullPermission
         ? "\n\n完全权限：当前对话已授权你自主决策。不要向用户提问或等待确认；遇到不确定项时选择最安全、可撤销的处理方式，并在最终结果中说明假设。"
         : "";
-      const nativeSettings = executorId === "native" ? loadModelSettings(this.modelSettingsPath) : null;
+      const executorModelSettings = this.modelSettingsForExecutor(executorId);
+      const nativeSettings = executorId === "native" ? executorModelSettings : null;
+      const dshSettings = executorId === "deepseek-harness" ? executorModelSettings : null;
       if (executorId === "native" && (!nativeSettings || !chatModelConfigured(nativeSettings))) {
         throw new Error("还没有配置聊天模型。请到“设置”里选择服务商并填入 API Key，然后重试。");
       }
@@ -893,6 +906,7 @@ export class HearthScheduler {
         fullPermission,
         contextSettings: this.context.settings(),
         nativeSettings,
+        dshSettings,
         executorSettings: this.executorSettings(),
         expectedOutputs,
         ...(activeThreadId ? { activeThreadId } : {}),
@@ -900,6 +914,7 @@ export class HearthScheduler {
         onNativeContextEvent: (event) => this.captureNativeEvent(task, run, event),
         onNativeCheckpoint: (checkpoint) => this.persistNativeCheckpoint(taskId, runId, prepared.root, checkpoint),
         onHermesContextItem: (event) => this.captureHermesEvent(task, run, event, hermesIndex++),
+        onDshContextItem: (event) => this.captureDshContextEvent(task, run, event),
         onCodexContextItem: (item) => this.captureCodexItem(task, run, item),
         onCodexThreadStarted: (threadId) => {
           activeThreadId = threadId;
@@ -1138,6 +1153,37 @@ export class HearthScheduler {
       // Diagnosis capture is best effort.
     }
     return diagnosis;
+  }
+
+  private captureDshContextEvent(task: TaskRecord, run: RunRecord, event: DshContextEvent): void {
+    const base = { taskId: task.id, conversationId: task.conversationId ?? null, runId: run.id, executorId: "deepseek-harness" as const };
+    const kind = event.type === "tool/call"
+      ? "tool_call" as const
+      : event.type === "tool/result"
+        ? "tool_result" as const
+        : event.type === "user/message"
+          ? "user_message" as const
+          : event.type === "system/message"
+            ? "notice" as const
+            : "assistant_message" as const;
+    this.capture({
+      ...base,
+      kind,
+      role: event.role,
+      content: event.content,
+      provenance: { source: "deepseek-harness", eventType: event.type, seq: event.seq },
+      executorEventId: event.executorEventId
+    });
+    if (event.usage) {
+      this.capture({
+        ...base,
+        kind: "usage",
+        role: "system",
+        content: JSON.stringify(event.usage),
+        provenance: { source: "deepseek-harness", eventType: event.type, usage: event.usage },
+        executorEventId: `${event.executorEventId}:usage`
+      });
+    }
   }
 
   private recordRunInput(task: TaskRecord, run: RunRecord, pendingInput: string): void {

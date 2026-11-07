@@ -9,6 +9,7 @@
     "@hearth/agent-runtime": "0.1.0",
     "@hearth/codex-executor": "0.1.0",
     "@hearth/core": "0.1.0",
+    "@hearth/deepseek-executor": "^0.1.0",
     "@hearth/eventlog": "0.1.0",
     "@hearth/templates": "0.1.0",
     "cheerio": "^1.2.0",

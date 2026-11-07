@@ -53,6 +53,7 @@ function invocation(settings: ExecutorSettings, root: string, progress: string[]
     fullPermission: true,
     contextSettings: {} as ContextSettings,
     nativeSettings: null,
+    dshSettings: null,
     executorSettings: settings,
     prompt: "do the work",
     expectedOutputs: ["result.md"],
@@ -61,6 +62,7 @@ function invocation(settings: ExecutorSettings, root: string, progress: string[]
     onNativeContextEvent: () => undefined,
     onNativeCheckpoint: () => undefined,
     onHermesContextItem: () => undefined,
+    onDshContextItem: () => undefined,
     onCodexContextItem: () => undefined,
     onCodexThreadStarted: () => undefined
   };

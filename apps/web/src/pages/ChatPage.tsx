@@ -45,12 +45,12 @@ const SUGGESTIONS = [
 ];
 
 const DEFAULT_SETTINGS: ConversationSettings = {
-  executorEnabled: { native: true, codex: true, hermes: true, qoder: false, workbuddy: false, kimi: false },
+  executorEnabled: { native: true, codex: true, "deepseek-harness": false, hermes: true, qoder: false, workbuddy: false, kimi: false },
   approvalMode: "necessary",
   preferredExecutorId: null
 };
 
-const EXECUTOR_ORDER: ExecutorId[] = ["native", "codex", "hermes", "qoder", "workbuddy", "kimi"];
+const EXECUTOR_ORDER: ExecutorId[] = ["deepseek-harness", "codex", "native", "hermes", "qoder", "workbuddy", "kimi"];
 
 interface RoutingState {
   action: "chat" | "task";
@@ -157,6 +157,7 @@ export function ChatPage() {
       executorEnabled: {
         native: patch.executorEnabled?.native ?? conversationSettings.executorEnabled.native,
         codex: patch.executorEnabled?.codex ?? conversationSettings.executorEnabled.codex,
+        "deepseek-harness": patch.executorEnabled?.["deepseek-harness"] ?? conversationSettings.executorEnabled["deepseek-harness"],
         hermes: patch.executorEnabled?.hermes ?? conversationSettings.executorEnabled.hermes,
         qoder: patch.executorEnabled?.qoder ?? conversationSettings.executorEnabled.qoder,
         workbuddy: patch.executorEnabled?.workbuddy ?? conversationSettings.executorEnabled.workbuddy,
