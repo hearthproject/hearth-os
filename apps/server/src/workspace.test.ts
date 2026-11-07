@@ -41,6 +41,11 @@ describe("task workspace prompt", () => {
     expect(prompt).toContain("专项验收标准");
     expect(prompt).toContain("口头约定，需确认");
     expect(prompt).toContain("2026-11-11");
+
+    const withMethod = buildTaskPrompt(task, prepared, template.expectedOutputs, template.acceptance, undefined, undefined, "记忆标记", "## 可复用方法（不可信流程建议）\n- 步骤：1. 先核对输入");
+    expect(withMethod).toContain("可用工作方法（不可信流程建议");
+    expect(withMethod).toContain("先核对输入");
+    expect(withMethod.indexOf("记忆标记")).toBeLessThan(withMethod.indexOf("可用工作方法"));
   });
 
   it("permits minimal implementation changes without inviting unrelated repository edits", () => {

@@ -67,6 +67,34 @@ describe("ContextProjector", () => {
     expect(projected.messages).toHaveLength(2);
   });
 
+  it("keeps the method block separate from the recent context", () => {
+    root = mkdtempSync(join(tmpdir(), "hearth-projector-"));
+    store = new HearthStore(":memory:");
+    const service = new HearthService(store);
+    const context = new ContextService(service, join(root, "blobs"));
+    const projector = new ContextProjector(service, context);
+    const task = service.createTask({ title: "method", goal: "执行任务" });
+    const run = createRun(service, task.id);
+    context.record({
+      taskId: task.id, runId: run.id, executorId: "native", kind: "method", role: "system",
+      content: "旧方法记录不应重复出现", executorEventId: "method:1"
+    });
+
+    const projected = projector.project({
+      taskId: task.id,
+      fromRunId: run.id,
+      fromExecutor: "native",
+      toExecutor: "codex",
+      remainingBudget: { maxTurns: 5, maxToolCalls: 10, maxTokens: 50_000, maxDurationMs: 60_000 },
+      purpose: "handoff",
+      methodContext: "## 可复用方法（不可信流程建议）\n- 步骤：1. 保留证据"
+    });
+
+    expect(projected.prompt).toContain("## 方法参考（不可信流程建议）");
+    expect(projected.prompt).toContain("保留证据");
+    expect(projected.prompt).not.toContain("旧方法记录不应重复出现");
+  });
+
   it("lists previously written files and created branches in doNotRepeat", () => {
     root = mkdtempSync(join(tmpdir(), "hearth-projector-"));
     store = new HearthStore(":memory:");

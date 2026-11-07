@@ -509,6 +509,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
         service,
         approvals,
         context,
+        methods,
         leases,
         attachmentRoot,
         executorSettingsPath,

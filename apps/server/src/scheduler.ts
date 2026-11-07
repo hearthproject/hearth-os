@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 import type { AgentCheckpoint, AgentResumeState, RuntimeEvent } from "@hearth/agent-runtime";
-import type { ContextItem, ContextSettings, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, RunBudget, RunCheckpointRecord, RunRecord, TaskError, TaskLease, TaskProgressDetail, TaskRecord } from "@hearth/core";
+import type { ContextItem, ContextSettings, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, MethodCandidate, MethodSelection, RunBudget, RunCheckpointRecord, RunRecord, TaskError, TaskLease, TaskProgressDetail, TaskRecord } from "@hearth/core";
 import { runCodex } from "@hearth/codex-executor";
 import { getTemplate } from "@hearth/templates";
 import type { DshContextEvent } from "@hearth/deepseek-executor";
@@ -23,6 +23,8 @@ import { EXECUTOR_FALLBACK_ORDER, executorName, resolveExecutorId } from "./exec
 import { extractProposedComment, inspectRepository, readPrPreview, validatePullRequestPreview } from "./github.ts";
 import type { CommandRunner } from "./github.ts";
 import { MemoryService } from "./memory.ts";
+import { renderMethodBlock } from "./method-context.ts";
+import { MethodService } from "./methods.ts";
 import { DEFAULT_LEASE_HEARTBEAT_MS, LeaseError, TaskLeaseService } from "./leases.ts";
 import { DEFAULT_RUN_BUDGET, runNativeTask } from "./native-executor.ts";
 import { chatModelConfigured, loadModelSettings, type ModelSettings } from "./model-settings.ts";
@@ -73,6 +75,7 @@ export interface SchedulerOptions {
   runtimePreparer?: typeof prepareTaskRuntime | undefined;
   context?: ContextService | undefined;
   contextBlobRoot?: string | undefined;
+  methods?: MethodService | undefined;
 }
 
 export class HearthScheduler {
@@ -98,6 +101,7 @@ export class HearthScheduler {
   private readonly sourceContentRoot: string;
   private readonly runtimePreparer: typeof prepareTaskRuntime;
   private readonly memory: MemoryService;
+  private readonly methods: MethodService;
   private readonly context: ContextService;
   private readonly projector: ContextProjector;
   private readonly summaryTasks = new Set<Promise<void>>();
@@ -148,6 +152,7 @@ export class HearthScheduler {
     this.sourceContentRoot = options.sourceContentRoot ?? SOURCE_CONTENT_DIR;
     this.runtimePreparer = options.runtimePreparer ?? prepareTaskRuntime;
     this.memory = new MemoryService(this.service);
+    this.methods = options.methods ?? new MethodService(this.service);
     this.context = options.context ?? new ContextService(this.service, options.contextBlobRoot ?? CONTEXT_BLOB_DIR);
     this.projector = new ContextProjector(this.service, this.context);
     this.service.setContextSink((message) => {
@@ -680,6 +685,12 @@ export class HearthScheduler {
     this.controllers.set(taskId, controller);
     try {
       const initialTask = this.service.requireTask(taskId);
+      let methodPlan: { method: MethodCandidate; selection: MethodSelection } | null = null;
+      try {
+        methodPlan = this.methods.resolveForTask(initialTask);
+      } catch {
+        methodPlan = null;
+      }
       const preparedHandoff = [...this.service.store.listHandoffs(taskId)].reverse().find((item) => item.status === "prepared") ?? null;
       let handoff: HandoffRecord | null = preparedHandoff;
       let executorId: ExecutorId = handoff?.toExecutor ?? resolveExecutorId(initialTask);
@@ -721,7 +732,7 @@ export class HearthScheduler {
           nextAction: handoff ? `${executorId} 接管执行中` : "正在执行",
           error: null, pendingInput: null
         }, runId);
-        const result = await this.runAttempt({ task, run, executorId, taskRoot, outDir, handoff, pendingInput, resumePrompt, previousRun, controller, budget: remainingBudget });
+        const result = await this.runAttempt({ task, run, executorId, taskRoot, outDir, handoff, pendingInput, resumePrompt, previousRun, controller, budget: remainingBudget, methodPlan });
         if (result.status === "failed" || this.service.requireTask(taskId).status !== "completed") {
           this.assertLease(taskId, leaseEpoch, leaseLost);
         }
@@ -864,6 +875,7 @@ export class HearthScheduler {
     previousRun: RunRecord | null;
     controller: AbortController;
     budget: RunBudget;
+    methodPlan: { method: MethodCandidate; selection: MethodSelection } | null;
   }): Promise<AttemptResult> {
     const { task, run, executorId, taskRoot, outDir, handoff, pendingInput, controller, budget } = input;
     const taskId = task.id;
@@ -919,15 +931,58 @@ export class HearthScheduler {
           provenance: { source: "memory-service" }, executorEventId: `memory:${runId}`
         });
       }
-      const basePrompt = buildTaskPrompt(task, prepared, expectedOutputs, template?.acceptance ?? [], runtime, template?.approvalKind, memoryContext) + permissionNote;
+      const methodContext = input.methodPlan ? renderMethodBlock(input.methodPlan.method) : "";
+      const basePrompt = buildTaskPrompt(task, prepared, expectedOutputs, template?.acceptance ?? [], runtime, template?.approvalKind, memoryContext, methodContext) + permissionNote;
       let prompt = handoff?.packet
-        ? this.buildHandoffPrompt(task, prepared, expectedOutputs, handoff.packet, permissionNote, memoryContext)
+        ? this.buildHandoffPrompt(task, prepared, expectedOutputs, handoff.packet, permissionNote, memoryContext, methodContext)
         : basePrompt;
       if (pendingInput && !resumeState && executorId !== "codex") prompt = `${basePrompt}\n\n用户补充信息：\n${pendingInput}`;
       let activeThreadId = !handoff && input.previousRun?.executorId === executorId
         ? input.previousRun.threadId ?? undefined
         : undefined;
       if (executorId === "codex" && activeThreadId && input.resumePrompt) prompt = input.resumePrompt;
+      if (methodContext && input.methodPlan) {
+        if (prompt.includes(methodContext)) {
+          const promptSha256 = createHash("sha256").update(methodContext).digest("hex");
+          try {
+            this.methods.recordApplication({
+              taskId, runId,
+              methodId: input.methodPlan.method.id,
+              methodVersion: input.methodPlan.method.version,
+              selection: input.methodPlan.selection,
+              promptSha256
+            });
+          } catch {
+            // Method audit is best effort and never blocks execution.
+          }
+          this.capture({
+            taskId, conversationId: task.conversationId ?? null, runId, executorId,
+            kind: "method", role: "system", content: methodContext,
+            provenance: {
+              source: "method-selection",
+              methodId: input.methodPlan.method.id,
+              methodVersion: input.methodPlan.method.version,
+              generation: input.methodPlan.method.generation ?? null,
+              selection: input.methodPlan.selection,
+              promptSha256
+            },
+            executorEventId: `method:${runId}`
+          });
+        } else {
+          this.capture({
+            taskId, conversationId: task.conversationId ?? null, runId, executorId,
+            kind: "notice", role: "system",
+            content: `方法“${input.methodPlan.method.name}”v${input.methodPlan.method.version} 未注入本轮提示词（命中续接或预算限制）。`,
+            provenance: {
+              source: "method-selection",
+              methodId: input.methodPlan.method.id,
+              methodVersion: input.methodPlan.method.version,
+              selection: input.methodPlan.selection
+            },
+            executorEventId: `method:${runId}:skipped`
+          });
+        }
+      }
       const adapter = this.adapters[executorId];
       const attemptContext: ExecutorAttemptContext = {
         task,
@@ -983,7 +1038,7 @@ export class HearthScheduler {
         const issues = await this.deliveryIssues(task, prepared, expectedOutputs);
         if (issues.length === 0) break;
         const missing = missingExpectedOutputs(prepared.outDir, expectedOutputs);
-        const repairPrompt = buildDeliveryRepairPrompt({ task, prepared, expectedOutputs, missing, issues, attempt: repairAttempt }) + permissionNote;
+        const repairPrompt = buildDeliveryRepairPrompt({ task, prepared, expectedOutputs, missing, issues, attempt: repairAttempt, ...(methodContext ? { methodContext } : {}) }) + permissionNote;
         result = await execute(repairPrompt, result.resume, repairPrompt);
         rememberSession(result);
         this.assertLease(taskId, run.leaseEpoch ?? 0, controller.signal.aborted && this.stopping);
@@ -1457,7 +1512,7 @@ export class HearthScheduler {
     return "执行未完成，可以重试";
   }
 
-  private buildHandoffPrompt(task: TaskRecord, prepared: PreparedWorkspace, expectedOutputs: string[], packet: HandoffPacket, permissionNote: string, memoryContext: string): string {
+  private buildHandoffPrompt(task: TaskRecord, prepared: PreparedWorkspace, expectedOutputs: string[], packet: HandoffPacket, permissionNote: string, memoryContext: string, methodContext: string): string {
     const projected = this.projector.project({
       taskId: task.id,
       fromRunId: packet.fromRunId,
@@ -1469,6 +1524,7 @@ export class HearthScheduler {
       purpose: "handoff",
       maxTokens: this.context.settings().projectionTokenBudget,
       memoryContext,
+      methodContext,
       packetOverride: packet
     });
     return [
