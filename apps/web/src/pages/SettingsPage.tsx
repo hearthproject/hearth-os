@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  Bell,
   Bot,
   CheckCircle2,
   Cpu,
@@ -30,9 +31,10 @@ import type {
   ModelProtocol,
   ModelProviderPreset
 } from "../lib/types.ts";
+import { ProactiveSettingsPanel } from "../components/ProactiveSettingsPanel.tsx";
 import { ExecutorSettingsPanel } from "../components/ExecutorSettingsPanel.tsx";
 
-type SettingsTab = "executors" | "models" | "context" | "data";
+type SettingsTab = "executors" | "models" | "context" | "proactive" | "data";
 
 interface ProfileDraft {
   name: string;
@@ -47,6 +49,7 @@ interface ProfileDraft {
 const TABS: Array<{ id: SettingsTab; label: string; hint: string; icon: typeof Cpu }> = [
   { id: "executors", label: "执行器", hint: "默认执行器、安装状态与模型绑定", icon: Cpu },
   { id: "models", label: "模型", hint: "模型档案、聊天模型与连接测试", icon: Layers },
+  { id: "proactive", label: "主动", hint: "提醒预算、安静时段与触发器", icon: Bell },
   { id: "context", label: "上下文", hint: "接管策略、指标与清理", icon: Bot },
   { id: "data", label: "数据", hint: "SQLite、目录结构与迁移记录", icon: Database }
 ];
@@ -114,6 +117,7 @@ export function SettingsPage() {
 
       {tab === "executors" && <ExecutorsTab />}
       {tab === "models" && <ModelsTab />}
+      {tab === "proactive" && <ProactiveTab />}
       {tab === "context" && <ContextTab />}
       {tab === "data" && <DataTab />}
     </div>
@@ -474,6 +478,29 @@ function ModelsTab() {
           </div>
         </section>
       </div>
+    </section>
+  );
+}
+
+function ProactiveTab() {
+  const snapshotQuery = useQuery({ queryKey: ["proactive"], queryFn: api.proactive, refetchInterval: 20_000 });
+
+  return (
+    <section className="settings-tab-panel">
+      <div className="settings-section-intro">
+        <div>
+          <h2>主动服务</h2>
+          <p>系统只在需要你判断、授权或任务出问题时提醒。建议仍会回到普通任务和审批链，不会因为“主动”获得额外权限。</p>
+        </div>
+        <span className={`status-chip ${snapshotQuery.data?.settings.enabled ? "ok" : "warn"}`}>
+          {snapshotQuery.data?.settings.enabled ? "主动模式已开启" : "主动模式已关闭"}
+        </span>
+      </div>
+
+      {snapshotQuery.isLoading && <InlineLoading text="正在读取主动设置" />}
+      {snapshotQuery.isError && <p className="form-error">{snapshotQuery.error.message}</p>}
+      {snapshotQuery.data && <ProactiveSettingsPanel snapshot={snapshotQuery.data} />}
+      <p className="settings-hint">邮件新消息目前通过“来源新条目”触发；日历账户尚未接入。</p>
     </section>
   );
 }

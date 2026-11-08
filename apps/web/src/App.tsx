@@ -5,6 +5,8 @@ import { AppShell } from "./components/AppShell.tsx";
 import { api, subscribeToEvents } from "./lib/api.ts";
 import { ChatPage } from "./pages/ChatPage.tsx";
 import { DevicesPage } from "./pages/DevicesPage.tsx";
+import { InboxPage } from "./pages/InboxPage.tsx";
+import { MemoryPage } from "./pages/MemoryPage.tsx";
 import { MethodsPage } from "./pages/MethodsPage.tsx";
 import { OnboardingPage } from "./pages/OnboardingPage.tsx";
 import { SettingsPage } from "./pages/SettingsPage.tsx";
@@ -23,6 +25,8 @@ export default function App() {
             <Route index element={<ChatPage />} />
             <Route path="tasks" element={<TasksPage />} />
             <Route path="tasks/:id" element={<TaskDetailPage />} />
+            <Route path="inbox" element={<InboxPage />} />
+            <Route path="memory" element={<MemoryPage />} />
             <Route path="methods" element={<MethodsPage />} />
             <Route path="schedules" element={<SchedulesPage />} />
             <Route path="devices" element={<DevicesPage />} />
@@ -63,6 +67,14 @@ function EventBridge() {
         void queryClient.invalidateQueries({ queryKey: ["system"] });
         void queryClient.invalidateQueries({ queryKey: ["desktop"] });
         void queryClient.invalidateQueries({ queryKey: ["methods"] });
+        void queryClient.invalidateQueries({ queryKey: ["proactive"] });
+        void queryClient.invalidateQueries({ queryKey: ["memory"] });
+        void queryClient.invalidateQueries({ queryKey: ["approvals"] });
+        void queryClient.invalidateQueries({ queryKey: ["outbox"] });
+        void queryClient.invalidateQueries({ queryKey: ["sources"] });
+        if (event.startsWith("effect.")) {
+          void queryClient.invalidateQueries({ queryKey: ["task"] });
+        }
         if (["task.created", "task.updated", "chat.message.created", "chat.message.updated", "message"].includes(event)) {
           void queryClient.invalidateQueries({ queryKey: ["conversations"] });
           void queryClient.invalidateQueries({ queryKey: ["conversation"] });

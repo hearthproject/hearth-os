@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { CalendarClock, FlaskConical, ListChecks, MessageCircle, Monitor, Settings2 } from "lucide-react";
+import { Brain, CalendarClock, FlaskConical, Inbox, ListChecks, MessageCircle, Monitor, Settings2 } from "lucide-react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { api } from "../lib/api.ts";
 import { isActive, needsAttention } from "../lib/format.ts";
@@ -10,8 +10,11 @@ export function AppShell() {
   const tasksQuery = useQuery({ queryKey: ["tasks"], queryFn: api.tasks, refetchInterval: 10_000 });
   const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 30_000 });
   const executorsQuery = useQuery({ queryKey: ["executors"], queryFn: api.executors, refetchInterval: 30_000 });
+  const proactiveQuery = useQuery({ queryKey: ["proactive"], queryFn: api.proactive, refetchInterval: 15_000 });
   const tasks = tasksQuery.data?.tasks ?? [];
   const activeCount = tasks.filter((task) => isActive(task.status) || needsAttention(task.status)).length;
+  const needsYouCount = (proactiveQuery.data?.suggestions ?? [])
+    .filter((suggestion) => ["new", "snoozed", "accepted"].includes(suggestion.status)).length;
   const chatModel = healthQuery.data?.chatModel;
   const readyExecutors = (executorsQuery.data?.executors ?? []).filter((executor) => executor.health.canRun);
   const primaryExecutor = readyExecutors.find((executor) => executor.id === "native")
@@ -35,6 +38,13 @@ export function AppShell() {
           <NavLink to="/tasks" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
             <ListChecks size={18} /> <span className="nav-label">任务</span>
             {activeCount > 0 && <span className="nav-badge">{activeCount}</span>}
+          </NavLink>
+          <NavLink to="/inbox" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
+            <Inbox size={18} /> <span className="nav-label">需要你</span>
+            {needsYouCount > 0 && <span className="nav-badge">{needsYouCount}</span>}
+          </NavLink>
+          <NavLink to="/memory" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
+            <Brain size={18} /> <span className="nav-label">记忆</span>
           </NavLink>
           <NavLink to="/devices" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
             <Monitor size={18} /> <span className="nav-label">设备</span>
