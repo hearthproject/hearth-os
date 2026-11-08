@@ -20,7 +20,7 @@
 
 <p align="center">
   <img alt="Phase 1 MVP accepted" src="https://img.shields.io/badge/phase%201-MVP%20accepted-b8471d">
-  <img alt="325 tests passing" src="https://img.shields.io/badge/tests-325%20passing-2f7d4f">
+  <img alt="381 tests passing" src="https://img.shields.io/badge/tests-381%20passing-2f7d4f">
   <img alt="Node.js 22.13+" src="https://img.shields.io/badge/node-22.13%2B-3c873a">
   <img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-1b1815">
 </p>
@@ -42,6 +42,9 @@ Models can change, executors can be replaced, and the interface can be rewritten
 | **Failure diagnosis and handoff** | Hearth diagnoses executor failures with its current chat model, auto-switches under full permission and low risk, asks only whether to switch under necessary approval, and reports non-executor errors without switching |
 | **Durable task state** | State machine, budgets, checkpoints, waiting-for-input, resume, and retry; an append-only SQLite event log records every fact |
 | **Approvals and receipts** | External actions produce a preview; a one-time approval is bound to a parameter fingerprint; the effect ledger executes once and stores a receipt |
+| **First run and entrances** | A four-step wizard for a fresh instance: provider selection, connection test, chat-model save, and native-executor binding; navigation exposes "Needs you", "Memory", "Skills", and "Mail" |
+| **Feishu entry** | Self-built app long connection, open_id allowlist, text/image/file messages, task status, approval summaries, and `/approve` and `/reject` text commands; no public callback URL required |
+| **Real mail** | SMTP sending reuses approvals and the effect ledger, sends after approval, and stores a receipt; IMAP read-only sync writes recent mail into Sources; account secrets are encrypted |
 | **Sources and documents** | Local files, knowledge bases, allowlisted web pages, and text extraction for TXT, Markdown, CSV, JSON, HTML, PDF, DOCX, and XLSX |
 | **Windows desktop control** | Six-digit pairing, per-capability approval, screenshot observation, pause/takeover/hand-back, low-risk clicks and typing, and UIAutomation |
 | **Proactive service and memory** | Six trigger types, a proactive inbox, attention budgets, memory candidates, recall, correction, forgetting, and export |
@@ -56,9 +59,9 @@ Hearth has passed the **phase-one MVP** hard gate: all 15 cross-industry real ta
 | Phase | Status | Proven | Still open |
 |---|---|---|---|
 | 1 · Minimum complete MVP | **Accepted** | 15 tasks, 13 passed; task, approval, artifact, recovery, and backup loops | T07 did not deliver a PR; T08's external comment awaits user approval |
-| 2 · Everyday content work | Partial | Sources, extraction, drafts, approvals, local outbox, and receipts | No email or calendar accounts; no real sending |
+| 2 · Everyday content work | Partial | Sources, extraction, drafts, approvals, local outbox; SMTP real sending and IMAP read-only sync code loops | Real mail accounts, bounce semantics, and calendar accounts not accepted; mail attachment UI absent |
 | 3 · Desktop operation | Partial | Windows pairing, observation, takeover, low-risk input, UIA actions | No sensitive-area masking, isolated desktop, or high-risk compensation |
-| 4 · Proactive service and mobile | Partial | Triggers, inbox, accept/ignore/snooze/convert, attention budget | No mobile PWA, phone pairing, push, or remote approval |
+| 4 · Proactive service and mobile | Partial | Triggers, inbox, attention budget, in-app notifications, Feishu long connection and text approvals | Real Feishu tenant, mobile PWA, pairing, system push, and remote takeover not accepted |
 | 5 · Memory and evolution | Partial | Memory candidate/recall/correct/forget/export; method evaluation/promotion/rollback | No real long-term use or before/after production comparison |
 | 6 · Multi-device and long-running | Partial | Incremental sync, leases, revocation, encrypted backup, health maintenance | No real two-device switch, lost-device drill, or multi-week run |
 
@@ -176,17 +179,17 @@ The full documentation is published at **<https://hearthproject.github.io/hearth
 
 ## Known boundaries
 
-- Email and calendar accounts are not connected; the local outbox writes local files and does not mean a message was sent.
+- Mail still writes to the local outbox by default; with an SMTP account, a real-send approval can be submitted, but real accounts, bounces, and spam semantics are not manually accepted. Calendar accounts are not connected.
 - The Windows helper supports same-machine, foreground, focused operation only. Sensitive-area masking, isolated desktops, and high-risk compensation are not implemented.
-- Mobile entry, push notifications, and remote takeover are not implemented.
+- The Feishu long connection provides phone messaging and text approvals, but it is not a mobile PWA, system push, or complete remote takeover; nothing is pushed after the page closes.
 - Multi-device sync copies filtered event projections only; it does not copy artifact bodies, workspaces, or sensitive memory.
-- The current main navigation exposes chat, tasks, devices, and settings. Memory, methods, sync, security, and operations have APIs and page components, but are not all wired back into the primary navigation.
+- The main navigation exposes chat, tasks, Needs You, memory, skills, schedules, mail, devices, and settings. Sync, security, and operations still have APIs and page components that are not all wired back into the primary navigation.
 - This is a working build with an accepted phase-one MVP and partially completed phases two through six, not a v1.0 release.
 
 ## Verification
 
 ```bash
-npm test           # 56 test files, 325 tests
+npm test           # 61 test files, 381 tests
 npm run typecheck
 npm run build
 npm run docs:build

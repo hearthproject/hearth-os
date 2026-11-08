@@ -18,6 +18,16 @@ Notifications must be restrained. The system interrupts only when judgment, auth
 
 Mobile prioritizes approvals, artifact review, pause, and takeover; it does not try to reproduce every desktop management feature. The interface must also support keyboard operation, readable contrast, screen reading, and recovery on weak networks, because these capabilities determine whether long-term use is comfortable.
 
+## First Run, Entrances, and Notifications
+
+First run no longer requires users to understand "model profile, executor binding, chat model" before they can start. A fresh instance redirects the root path to the four-step `/welcome` wizard: choose a provider and test the connection, inspect executors, choose memory and proactive preferences, then enter chat. One `PUT /api/model-settings` creates the profile, makes it the chat model, and lets `setChatProfile` bind the native executor automatically. The gate only applies when no onboarding state exists and no chat model is configured; query failures, other routes, and configured users are never blocked.
+
+Beyond the main surface, navigation now exposes "Needs you", "Memory", "Skills", "Mail", and "Settings → Connections". "Needs you" shows the pending proactive count. Proactive settings, desktop notification opt-in, Feishu long-connection setup, and mail accounts are all reachable from settings or the mail workspace instead of API-only pages.
+
+Notifications have two layers. While the page is open, Hearth shows an in-app toast and offers optional browser desktop notifications. It does not promise delivery after the page closes. For approvals away from the computer, the Feishu long-connection entry sends task status, approval summaries, and one-time approval commands to mapped chats. The first version uses `/approve` and `/reject` text commands because interactive card callbacks are not supported over the long connection.
+
+The mail workspace has Accounts, Inbox, and Compose views. IMAP sync is read-only, writes recent messages into Sources, and never marks them read. Compose only creates a draft and a one-time approval; approval is required before SMTP sends and stores a receipt. Real accounts, bounce semantics, and attachment selection still need manual acceptance.
+
 ## Design Tradeoffs
 
 Task cards take priority over chat history. Chat is good for expressing intent, but long work needs state, deadlines, artifacts, and recovery. Making chat the only interface forces users to scroll upward and makes it impossible to tell which step truly finished.

@@ -6,15 +6,26 @@ outline: [2, 3]
 
 # Phase 2–6 Delivery Status
 
-Checked on 2026-11-07. This page records only what the current code and real runs can prove; a page existing is not treated as a completed loop.
+Checked on 2026-11-08. This page records only what the current code and real runs can prove; a page existing is not treated as a completed loop.
 
 ## Phase result
 
-- **Phase 2: partially complete.** Local files, knowledge bases, public web, document and spreadsheet extraction, task source references, and the draft → approval → local outbox write → receipt loop are usable. Email and calendar accounts, real sending, and external system writes are not implemented, so Phase 2 is not accepted as a whole.
+- **Phase 2: partially complete.** Local files, knowledge bases, public web, document and spreadsheet extraction, task source references, and the draft → approval → local outbox write → receipt loop are usable. IMAP read-only sync and SMTP sending form code loops, but require a real account and manual acceptance. Calendar accounts and real-provider bounce/spam semantics are still unverified, so Phase 2 is not accepted as a whole.
 - **Phase 3: partially complete.** A same-machine Windows device can pair, approve capabilities individually, observe, pause, resume, take over, hand back, terminate, and run low-risk click, type, key, and UI Automation actions against an explicitly approved target app. Sensitive-area masking, isolated desktops, high-risk actions, snapshots, and compensation are not implemented, so Phase 3 is not accepted as a whole.
-- **Phase 4: partially complete.** Proactive suggestions, the proactive inbox, accept/ignore/snooze/convert actions, the attention budget, and pause controls form a code loop. Mobile web, phone pairing, push, and remote takeover are not implemented, so Phase 4 is not complete.
+- **Phase 4: partially complete.** Proactive suggestions, the proactive inbox, accept/ignore/snooze/convert actions, the attention budget, pause controls, in-app notifications, and Feishu long-connection approvals form code loops. Mobile PWA, phone pairing, system push, and remote takeover are not implemented, so Phase 4 is not complete.
 - **Phase 5: partially complete.** Memory candidates, recall, correction, conflicts, forget propagation, and export, plus method generation, trial evidence, evaluation, promotion, rejection, and rollback, form a code loop. Real long-term memory use, production before/after method comparisons, and full 5.4 acceptance are still missing.
 - **Phase 6: partially complete.** Incremental event sync, peer authentication, conflict handling, task leases with epoch fencing, device revocation and token rotation, the kill switch, encrypted database backup and restore, health checks, maintenance, and redacted diagnostics form a code loop. Real two-device switching, a lost-device drill, complete migration, weeks of continuous operation, and v1.0 release acceptance are still missing.
+
+## Experience completion (2026-11-08)
+
+This round closes user-visible entrances and the last mile without changing existing task, approval, or recovery boundaries:
+
+- **First run:** A fresh instance enters the four-step `/welcome` wizard for provider selection, connection test, chat-model save, native-executor binding, and memory/proactive preferences. The gate fails open and never blocks other routes.
+- **Memory and proactive:** The primary navigation exposes "Needs you" and "Memory". The wizard opts into terminal-task experience candidates; direct chat recalls confirmed memories and shows the count; completed, failed, and recoverable terminal tasks all attempt experience capture.
+- **Notifications:** Proactive service scans once after startup, then every five minutes, and reacts to task, approval, effect, and source events. In-app toasts and optional desktop notifications only surface attention; delivery after the page closes is not promised.
+- **Feishu:** A self-built app long connection, open_id allowlist, text/image/file messages, task status forwarding, approval summaries, and `/approve` and `/reject` text commands form a code loop. Interactive card callbacks are not supported over the long connection and are not implemented in this version.
+- **Mail:** SMTP sending reuses the effect ledger; approval previews state that delivery is real and irreversible. IMAP read-only sync writes recent mail into Sources without marking messages read. The mail workspace has Accounts, Inbox, and Compose; attachment selection is not in the first version.
+- **Still unverified:** a real Feishu tenant, real SMTP/IMAP accounts, bounce and spam semantics, push after the page closes, mail attachment UI, and long-term real-user use.
 
 ## Agent runtime loop
 
@@ -31,9 +42,9 @@ This is a code-and-test loop, not evidence of long-running acceptance with real 
 
 | Step | Status | Implemented | Deliberately unfinished |
 |---|---|---|---|
-| 2.1 Read-only sources | Partial | Local file, knowledge, and public web sources; host allowlists; source status, read time, errors, incremental reads, deduplication, disconnect, reconnect, and clear | Email and calendar only show “needs configuration”; no credentials, reads, or permission verification |
+| 2.1 Read-only sources | Partial | Local file, knowledge, and public web sources; host allowlists; source status, read time, errors, incremental reads, deduplication, disconnect, reconnect, and clear; IMAP read-only sync of the latest 20–50 messages into Sources | Calendar only shows “needs configuration”; real mail accounts, permissions, and throttling are not manually accepted |
 | 2.2 Documents, tables, and web material | Basic loop complete | TXT, Markdown, CSV, JSON, HTML, PDF, DOCX, and XLSX extraction; page, paragraph, sheet, range, and gap metadata; web snapshots and source items can be reviewed | Complex layouts, OCR for scans, page-level citation navigation, and spreadsheet formula fidelity are not implemented |
-| 2.3 Draft, approval, and external write | Partial | Editable, savable, and discardable drafts; one-time short-lived approval; approved effects write to the local outbox with a receipt; rejection and expiry update the draft | Only writes local `.hearth/outbox` files and does not contact mail servers; calendar and other external writes are absent |
+| 2.3 Draft, approval, and external write | Partial | Editable, savable, and discardable drafts; one-time short-lived approval; local outbox by default; selecting `smtp:<accountId>` creates a real-send approval, sends through SMTP after approval, and stores a receipt; rejection and expiry update the draft | Local outbox remains the default; real SMTP accounts, bounce semantics, and calendar writes are not accepted; the first mail UI does not select attachments |
 | 2.4 Everyday-content acceptance | Not complete | Automated tests and isolated-instance checks cover local sources, extraction, and the outbox loop | No 10–15 real everyday tasks, time, accuracy, recovery, or willingness-to-reuse acceptance |
 
 The local outbox is not presented as a fake success: the UI states that it only writes locally and does not send to recipients. It must not be described as sent before a real mail account is connected.
@@ -54,8 +65,8 @@ The Windows helper currently focuses the server-approved target app before captu
 | Step | Status | Implemented | Deliberately unfinished |
 |---|---|---|---|
 | 4.1 Triggers and proactive suggestions | Code loop complete | Six trigger families: a task entering the 24-hour deadline window, a failed or recoverable task, an uncertain external effect, an approval pending for more than two hours, new source items in the last 24 hours, and queue backlog or long-running tasks; suggestions include source, why-now, suggested action, expected impact, estimated cost, risk, approval requirement, and priority; one deduplicated row accumulates repeated occurrences | Email and calendar triggers are disabled placeholders without account reads; proactive mode only produces suggestions and does not execute high-risk actions |
-| 4.2 Proactive inbox | Code loop complete | A dedicated priority-ordered inbox supports accept, ignore, snooze, and convert-to-task; accept and convert are separate, where accept only records the decision and convert only creates a queued task without approving approvals or replaying external effects; an ignored event is not rephrased and pushed again | No multi-device or mobile inbox; no notification-channel delivery, only the local web inbox |
-| 4.3 Phone viewing, approval, and takeover | Not implemented | None | No phone PWA, phone pairing, push, mobile approval, or remote takeover; the current entrance is the same-machine web control plane only |
+| 4.2 Proactive inbox | Code loop complete | A dedicated priority-ordered inbox supports accept, ignore, snooze, and convert-to-task; accept and convert are separate; in-app toasts, optional desktop notifications, and the Feishu long connection can surface approvals and suggestions; an ignored event is not rephrased and pushed again | No system push after the page closes; mobile inbox and remote takeover remain absent |
+| 4.3 Phone viewing, approval, and takeover | Partial | The Feishu long connection supports phone text/image/file messages, task status, and one-time approval text commands; the open_id allowlist restricts access | No phone PWA, phone pairing, system push, card buttons, or complete remote takeover |
 | 4.4 Attention budget and proactive acceptance | Partial | Daily limit 0–50, quiet hours, cooldown, aggregation window, temporary pause and resume; the budget snapshot shows used-today, limit, quiet/paused state, and next-allowed time; the last seven days count deliveries, accepts, ignores, conversions, and completed tasks; the “Needs You” page collects pending approvals | No 5–10 real proactive tasks proving at most one interruption per task on average; no push delivery metrics or long-term user-feel record |
 
 The key Phase 4 boundary is that a suggestion is not an execution. `accept` only changes the suggestion state. Only `convert` creates a new queued task, and that task still follows the normal executor, approval, and effect-ledger rules. A high-risk action does not bypass approval because it arrived as a proactive suggestion.
@@ -93,15 +104,15 @@ The backup boundary must remain visible in the UI: a recoverable database is not
 
 ## Verification evidence
 
-On 2026-11-07, `npm test` on the current branch passed all 54 test files and 296 tests; `npm run typecheck` and `npm run build` also pass. These checks cover service, API, model-protocol, native tool-loop, budget, permission, checkpoint, and proposal-confirmation code loops but do not replace real-user, real-device, or long-running acceptance. See the [Day04 development log](/en/log/day-04) for the implementation record.
+On 2026-11-08, `npm test` on the current branch passed all 61 test files and 381 tests; `npm run typecheck`, `npm run build`, and the offline `npm run test:e2e` suite (13 checks) also pass. These checks cover service, API, model-protocol, native tool-loop, budget, permission, checkpoint, and proposal-confirmation code loops but do not replace real-user, real-device, or long-running acceptance. See the [Day04 development log](/en/log/day-04) for the implementation record.
 
 ## Remaining real acceptance
 
-1. Read-only email and calendar accounts, real test accounts, and real send receipts.
+1. Real SMTP/IMAP accounts, real send receipts, bounce and spam semantics; calendar accounts remain unconnected.
 2. Acceptance records for 10–15 everyday content tasks and at least five desktop tasks.
 3. Sensitive-area masking, isolated desktops, snapshots, compensation, and high-risk actions.
 4. Real UIA setvalue acceptance and failure drills for lost windows, permission changes, and user takeover.
-5. Phase 4 phone entry (PWA, pairing, push, remote approval, and takeover), plus interruption acceptance across 5–10 real proactive tasks.
+5. A real Feishu tenant, reconnect and rate-limit behavior, and a later card-button option; phone PWA, pairing, system push, and remote takeover; interruption acceptance across 5–10 real proactive tasks.
 6. Phase 5 wrong-memory/wrong-method drills, complete export verification, and real production comparisons before and after method adoption.
 7. Phase 6 real two-device sync, offline recovery, lost-device revocation, token rotation, backup restore, and migration verification.
 8. At least several weeks of continuous operation, resource and state-drift checks, an upgrade/rollback pipeline, and overall v1.0 acceptance.

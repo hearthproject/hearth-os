@@ -34,4 +34,12 @@ The authorization scope must be understandable to an ordinary user. An approval 
 
 Idempotency and reconciliation are the foundation of external actions. One send creates one message; one submission creates one record; retries reuse the same identity. When an external system returns no clear result, Hearth enters an uncertain state and queries or asks the user instead of executing again.
 
+## Mail Sending and Read-Only Sync
+
+Mail sending reuses the same effect ledger instead of calling SMTP from the outbox page. When a draft selects real delivery with `smtp:<accountId>`, `OutboxService` creates an `email.smtp-send` approval. The preview shows sender, recipients, cc/bcc, subject, body, attachments, and the impact that "sending cannot be undone". The TTL remains ten minutes, and the parameter hash binds recipients and content. After approval, the effect executor sends through SMTP and stores `receipt.json` (Message-ID, accepted/rejected, server response, and time). Success marks the draft `sent`; rejection or expiry produces no external effect.
+
+Idempotency relies on the approval parameter hash, effect idempotency key, deterministic Message-ID, and a local receipt. A `sending.json` marker claims the effect directory first. If the directory exists without a receipt, the system treats the result as uncertain and never blindly resends. Authentication or envelope errors can be retried safely after clearing the marker. A network failure after sending, or a receipt write failure, is uncertain and asks the user to check the mailbox first.
+
+IMAP reading uses a separate read-only path: `mailboxOpen("INBOX", { readOnly: true })`, the most recent 20–50 messages, and no read flag changes. Messages are deduplicated by Message-ID, written into the existing Source model, and their bodies go to the source content directory for later tasks or proactive use. Scheduled sync defaults to every 15 minutes and can be disabled per account. Real-provider TLS, app passwords, bounce handling, and spam semantics still need manual acceptance.
+
 Human error is also input. A user may approve the wrong content, undo a correct action, or give conflicting instructions. The system keeps context and supports correction, compensation, and re-approval. The goal is a clear responsibility boundary, not pretending the system never makes mistakes.
