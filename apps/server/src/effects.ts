@@ -1,14 +1,16 @@
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import type { ArtifactRecord, EffectRecord } from "@hearth/core";
 import { EffectUncertainError } from "./approvals.ts";
 import { REPO_ROOT } from "./config.ts";
 import { executeGitHubEffect } from "./github.ts";
+import type { EmailService } from "./email.ts";
 
 export interface EffectExecutionContext {
   outboxRoot: string;
   getArtifact(id: string): ArtifactRecord | null;
+  mail?: EmailService | undefined;
 }
 
 interface OutboxTarget {
@@ -39,6 +41,7 @@ export async function executeEffect(
 ): Promise<Record<string, unknown>> {
   if (effect.kind.startsWith("github.")) return executeGitHubEffect(effect);
   if (effect.kind === "outbox.local-write") return executeLocalOutboxEffect(effect, context);
+  if (effect.kind === "email.smtp-send") return executeSmtpOutboxEffect(effect, context);
   throw new Error(`外部动作执行器尚未接入：${effect.kind}`);
 }
 
@@ -115,6 +118,128 @@ function executeLocalOutboxEffect(effect: EffectRecord, context: EffectExecution
   }
 }
 
+interface SmtpOutboxTarget {
+  draftId: string;
+  accountId: string;
+  from: string;
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  subject: string;
+  body: string;
+  attachments: OutboxTarget["attachments"];
+  transport: "smtp";
+}
+
+async function executeSmtpOutboxEffect(effect: EffectRecord, context: EffectExecutionContext): Promise<Record<string, unknown>> {
+  const target = parseSmtpTarget(effect.target);
+  if (!context.mail) throw new Error("邮件发送服务尚未启动");
+  const effectDir = join(context.outboxRoot, effect.id);
+  const receiptPath = join(effectDir, "receipt.json");
+  const sendingPath = join(effectDir, "sending.json");
+
+  if (existsSync(receiptPath)) return parseExistingReceipt(receiptPath);
+  if (existsSync(effectDir)) {
+    throw new EffectUncertainError("邮件发送目录已经存在，但没有可核对的回执；先到邮箱核对是否已经发出");
+  }
+
+  const attachments = prepareAttachments(target, context);
+  mkdirSync(effectDir, { recursive: true });
+  try {
+    writeFileSync(sendingPath, `${JSON.stringify({
+      effectId: effect.id,
+      idempotencyKey: effect.idempotencyKey,
+      startedAt: new Date().toISOString()
+    }, null, 2)}
+`, { flag: "wx" });
+  } catch (error) {
+    throw new EffectUncertainError(`无法写入邮件发送标记：${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  const messageId = `hearth-${effect.id}@hearth.local`;
+  let result;
+  try {
+    result = await context.mail.send(target.accountId, {
+      to: target.to,
+      cc: target.cc,
+      bcc: target.bcc,
+      subject: target.subject,
+      text: target.body,
+      messageId,
+      attachments: attachments.map((attachment) => ({
+        filename: attachment.name,
+        path: attachment.sourcePath,
+        contentType: attachment.mimeType
+      }))
+    });
+  } catch (error) {
+    if (isUncertainSmtpSendError(error)) {
+      throw new EffectUncertainError(`邮件发送中断，无法确认服务端是否已接受：${error instanceof Error ? error.message : String(error)}`);
+    }
+    rmSync(effectDir, { recursive: true, force: true });
+    throw error;
+  }
+
+  const receipt = {
+    transport: "smtp" as const,
+    delivery: "sent" as const,
+    status: "sent" as const,
+    accountId: target.accountId,
+    from: target.from,
+    to: target.to,
+    cc: target.cc,
+    bcc: target.bcc,
+    subject: target.subject,
+    messageId: result.messageId || messageId,
+    accepted: result.accepted,
+    rejected: result.rejected,
+    response: result.response,
+    attachmentCount: attachments.length,
+    idempotencyKey: effect.idempotencyKey,
+    sentAt: new Date().toISOString()
+  };
+  try {
+    writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}
+`, { flag: "wx" });
+  } catch (error) {
+    throw new EffectUncertainError(`邮件已经发出，但回执写入失败：${error instanceof Error ? error.message : String(error)}`);
+  }
+  return receipt;
+}
+
+function parseSmtpTarget(value: Record<string, unknown>): SmtpOutboxTarget {
+  const transport = value.transport;
+  if (transport !== "smtp") throw new Error("邮件发送动作的 transport 不正确");
+  const attachments = Array.isArray(value.attachments) ? value.attachments : [];
+  return {
+    draftId: requireString(value.draftId, "draftId", 80),
+    accountId: requireString(value.accountId, "accountId", 80),
+    from: requireString(value.from, "from", 320),
+    to: requireAddresses(value.to, "收件人"),
+    cc: requireAddresses(value.cc, "抄送"),
+    bcc: requireAddresses(value.bcc, "密送"),
+    subject: requireString(value.subject, "subject", 500),
+    body: requireBody(value.body),
+    attachments: attachments.map((item, index) => {
+      if (!item || typeof item !== "object") throw new Error(`附件 ${index + 1} 格式不正确`);
+      const record = item as Record<string, unknown>;
+      return {
+        artifactId: requireString(record.artifactId, "attachmentId", 80),
+        name: requireString(record.name, "attachmentName", 255),
+        mimeType: requireString(record.mimeType, "attachmentMimeType", 200),
+        sha256: requireString(record.sha256, "attachmentSha256", 64),
+        bytes: requireNumber(record.bytes, "attachmentBytes")
+      };
+    }),
+    transport
+  };
+}
+
+function isUncertainSmtpSendError(error: unknown): boolean {
+  const code = error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code ?? "") : "";
+  return !["EAUTH", "EENVELOPE", "EMESSAGE", "EACCES", "ECONNREFUSED", "ENOTFOUND", "EDNS"].includes(code);
+}
+
 function parseOutboxTarget(value: Record<string, unknown>): OutboxTarget {
   const draftId = requireString(value.draftId, "draftId", 80);
   const transport = value.transport;
@@ -143,7 +268,7 @@ function parseOutboxTarget(value: Record<string, unknown>): OutboxTarget {
   };
 }
 
-function prepareAttachments(target: OutboxTarget, context: EffectExecutionContext): PreparedAttachment[] {
+function prepareAttachments(target: { attachments: OutboxTarget["attachments"] }, context: EffectExecutionContext): PreparedAttachment[] {
   const names = new Set<string>();
   return target.attachments.map((attachment, index) => {
     const artifact = context.getArtifact(attachment.artifactId);

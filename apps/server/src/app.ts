@@ -492,9 +492,17 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const sources = new SourceRegistry(service, {
     contentRoot: options.sourceContentRoot ?? SOURCE_CONTENT_DIR
   });
+  const secretBox = options.syncSecretBox ?? SecretBox.fromKeyFile(options.masterKeyPath ?? MASTER_KEY_PATH);
+  const mail = new EmailService({
+    store,
+    secretBox,
+    ...(options.mailSmtpFactory ? { smtpFactory: options.mailSmtpFactory } : {}),
+    ...(options.mailImapFactory ? { imapFactory: options.mailImapFactory } : {})
+  });
   const effectExecutor = options.effectExecutor ?? ((effect) => executeEffect(effect, {
     outboxRoot: options.outboxRoot ?? OUTBOX_DIR,
-    getArtifact: (id) => store.getArtifact(id)
+    getArtifact: (id) => store.getArtifact(id),
+    mail
   }));
   const proactive = new ProactiveService(service);
   const memory = new MemoryService(service);
@@ -517,12 +525,11 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
   });
   approvals.recoverInterruptedEffects();
-  const outbox = new OutboxService(service, approvals);
+  const outbox = new OutboxService(service, approvals, undefined, mail);
   const desktop = new DesktopService(service, options.deviceFrameRoot ?? DEVICE_FRAME_DIR, security);
   const modelSettingsPath = options.modelSettingsPath ?? MODEL_SETTINGS_PATH;
   const executorSettingsPath = options.executorSettingsPath ?? EXECUTOR_SETTINGS_PATH;
   const executorSettingsStore = new ExecutorSettingsStore(store, executorSettingsPath);
-  const secretBox = options.syncSecretBox ?? SecretBox.fromKeyFile(options.masterKeyPath ?? MASTER_KEY_PATH);
   const modelRegistry = new ModelRegistry({
     store,
     secretBox,
@@ -549,12 +556,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
     outbox,
     ...(options.feishuTransportFactory ? { transportFactory: options.feishuTransportFactory } : {}),
     ...(options.feishuChatClient ? { chatClient: options.feishuChatClient } : {})
-  });
-  const mail = new EmailService({
-    store,
-    secretBox,
-    ...(options.mailSmtpFactory ? { smtpFactory: options.mailSmtpFactory } : {}),
-    ...(options.mailImapFactory ? { imapFactory: options.mailImapFactory } : {})
   });
   const executorInstaller = options.executorInstaller ?? new ExecutorInstaller();
   const executorHealth = (executorId: ExecutorId): ExecutorHealth => {

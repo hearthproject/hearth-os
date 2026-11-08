@@ -6,6 +6,7 @@ import type { ArtifactRecord, EffectRecord } from "@hearth/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { EffectUncertainError } from "./approvals.ts";
 import { executeEffect } from "./effects.ts";
+import type { EmailService, MailMessage } from "./email.ts";
 
 const tempDirs: string[] = [];
 
@@ -67,6 +68,117 @@ function fixture() {
   };
   return { root, effect, artifact };
 }
+
+
+describe("smtp outbox effect", () => {
+  function smtpFixture() {
+    const { root, effect, artifact } = fixture();
+    return {
+      root,
+      artifact,
+      effect: {
+        ...effect,
+        kind: "email.smtp-send",
+        target: {
+          draftId: "draft-1",
+          accountId: "acct-1",
+          from: "sender@example.com",
+          to: ["reviewer@example.test"],
+          cc: [],
+          bcc: ["audit@example.test"],
+          subject: "Weekly update",
+          body: "Hello from SMTP.",
+          attachments: [{
+            artifactId: artifact.id,
+            name: "notes.txt",
+            mimeType: artifact.mimeType,
+            sha256: artifact.sha256,
+            bytes: artifact.bytes
+          }],
+          transport: "smtp"
+        }
+      } satisfies EffectRecord
+    };
+  }
+
+  it("sends through the injected mail service and writes a sent receipt", async () => {
+    const { root, effect, artifact } = smtpFixture();
+    const sent: MailMessage[] = [];
+    const mail = {
+      async send(_accountId: string, message: MailMessage) {
+        sent.push(message);
+        return { messageId: "server-msg-1", accepted: ["reviewer@example.test"], rejected: [], response: "250 OK" };
+      }
+    } as unknown as EmailService;
+    const outboxRoot = join(root, "outbox");
+    const receipt = await executeEffect(effect, {
+      outboxRoot,
+      getArtifact: () => artifact,
+      mail
+    });
+
+    expect(receipt).toMatchObject({
+      transport: "smtp",
+      delivery: "sent",
+      status: "sent",
+      accountId: "acct-1",
+      messageId: "server-msg-1",
+      accepted: ["reviewer@example.test"]
+    });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({
+      to: ["reviewer@example.test"],
+      subject: "Weekly update",
+      text: "Hello from SMTP.",
+      messageId: `hearth-${effect.id}@hearth.local`
+    });
+    expect(sent[0]?.attachments[0]).toMatchObject({ filename: "notes.txt" });
+    expect(existsSync(join(outboxRoot, effect.id, "receipt.json"))).toBe(true);
+    expect(existsSync(join(outboxRoot, effect.id, "sending.json"))).toBe(true);
+  });
+
+  it("reuses a sent receipt instead of sending twice", async () => {
+    const { root, effect, artifact } = smtpFixture();
+    let calls = 0;
+    const mail = {
+      async send() {
+        calls += 1;
+        return { messageId: "server-msg-1", accepted: [], rejected: [], response: "250 OK" };
+      }
+    } as unknown as EmailService;
+    const context = { outboxRoot: join(root, "outbox"), getArtifact: () => artifact, mail };
+    const first = await executeEffect(effect, context);
+    const second = await executeEffect(effect, context);
+    expect(second).toEqual(first);
+    expect(calls).toBe(1);
+  });
+
+  it("marks a post-send network failure uncertain and a pre-send auth failure safe", async () => {
+    const uncertain = smtpFixture();
+    const uncertainMail = {
+      async send() {
+        throw new Error("socket hang up");
+      }
+    } as unknown as EmailService;
+    await expect(executeEffect(uncertain.effect, {
+      outboxRoot: join(uncertain.root, "outbox"),
+      getArtifact: () => uncertain.artifact,
+      mail: uncertainMail
+    })).rejects.toBeInstanceOf(EffectUncertainError);
+
+    const auth = smtpFixture();
+    const authError = Object.assign(new Error("auth failed"), { code: "EAUTH" });
+    const authMail = {
+      async send() {
+        throw authError;
+      }
+    } as unknown as EmailService;
+    const authRoot = join(auth.root, "outbox");
+    await expect(executeEffect(auth.effect, { outboxRoot: authRoot, getArtifact: () => auth.artifact, mail: authMail }))
+      .rejects.toThrow("auth failed");
+    expect(existsSync(join(authRoot, auth.effect.id, "sending.json"))).toBe(false);
+  });
+});
 
 describe("local outbox effect", () => {
   it("writes a message package and returns an explicit not-sent receipt", async () => {

@@ -5,6 +5,7 @@ import type { ApprovalRecord, EffectRecord, OutboxAttachment, OutboxDraft, RunRe
 import { ApprovalManager } from "./approvals.ts";
 import { WORKSPACE_DIR } from "./config.ts";
 import type { HearthService } from "./service.ts";
+import type { EmailService } from "./email.ts";
 
 const OUTBOX_APPROVAL_TTL_MS = 10 * 60 * 1000;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -41,11 +42,13 @@ export class OutboxService {
   private readonly service: HearthService;
   private readonly approvals: ApprovalManager;
   private readonly workspaceRoot: string;
+  private readonly mail: EmailService | null;
 
-  constructor(service: HearthService, approvals: ApprovalManager, workspaceRoot = WORKSPACE_DIR) {
+  constructor(service: HearthService, approvals: ApprovalManager, workspaceRoot = WORKSPACE_DIR, mail?: EmailService) {
     this.service = service;
     this.approvals = approvals;
     this.workspaceRoot = workspaceRoot;
+    this.mail = mail ?? null;
   }
 
   list(): OutboxDraft[] {
@@ -123,10 +126,13 @@ export class OutboxService {
       throw new OutboxError("OUTBOX_DRAFT_LOCKED", "只有草稿或已拒绝的草稿可以提交审批", 409);
     }
     this.assertComplete(draft);
+    const smtpAccount = this.resolveSmtpAccount(draft);
 
     const task = this.service.createTask({
-      title: `本地发件箱：${draft.subject}`,
-      goal: `审批草稿“${draft.subject}”，批准后只写入本机发件箱，不连接邮件服务器。`
+      title: smtpAccount ? `发送邮件：${draft.subject}` : `本地发件箱：${draft.subject}`,
+      goal: smtpAccount
+        ? `审批草稿“${draft.subject}”，批准后通过 ${smtpAccount.smtp.host} 真实发送给收件人。`
+        : `审批草稿“${draft.subject}”，批准后只写入本机发件箱，不连接邮件服务器。`
     });
     const now = new Date().toISOString();
     const runId = randomUUID();
@@ -156,40 +162,73 @@ export class OutboxService {
       this.service.updateTask(task.id, {
         status: "waiting_approval",
         currentRunId: runId,
-        nextAction: "等待你确认写入本地发件箱",
+        nextAction: smtpAccount ? "等待你确认发送邮件" : "等待你确认写入本地发件箱",
         error: null
       }, runId);
 
-      const approval = await this.approvals.request({
-        taskId: task.id,
-        runId,
-        kind: "outbox.local-write",
-        summary: `将“${draft.subject}”写入本地发件箱（不会发送）`,
-        target: {
-          draftId: draft.id,
-          account: draft.account,
-          to: draft.to,
-          cc: draft.cc,
-          bcc: draft.bcc,
-          subject: draft.subject,
-          body: draft.body,
-          attachments: draft.attachments,
-          transport: "local-outbox"
-        },
-        preview: {
-          title: draft.subject,
-          body: draft.body,
-          account: draft.account,
-          to: draft.to,
-          cc: draft.cc,
-          bcc: draft.bcc,
-          attachments: draft.attachments,
-          impact: "只写入本机 .hearth/outbox，不连接邮件服务器，也不会发送给收件人。",
-          reversible: true,
-          undo: "删除对应本地发件箱文件即可撤销；不会影响任何外部账户。"
-        },
-        ttlMs: OUTBOX_APPROVAL_TTL_MS
-      });
+      const approval = smtpAccount
+        ? await this.approvals.request({
+            taskId: task.id,
+            runId,
+            kind: "email.smtp-send",
+            summary: `将“${draft.subject}”发送给 ${draft.to.join("、")}`,
+            target: {
+              draftId: draft.id,
+              accountId: smtpAccount.id,
+              from: smtpAccount.fromAddress,
+              to: draft.to,
+              cc: draft.cc,
+              bcc: draft.bcc,
+              subject: draft.subject,
+              body: draft.body,
+              attachments: draft.attachments,
+              transport: "smtp"
+            },
+            preview: {
+              title: draft.subject,
+              body: draft.body,
+              account: draft.account,
+              from: `${smtpAccount.fromName} <${smtpAccount.fromAddress}>`,
+              to: draft.to,
+              cc: draft.cc,
+              bcc: draft.bcc,
+              attachments: draft.attachments,
+              impact: "会通过 SMTP 真实发送给收件人，发送后无法撤回。",
+              reversible: false,
+              undo: "发送后无法撤回；请在批准前核对收件人和正文。"
+            },
+            ttlMs: OUTBOX_APPROVAL_TTL_MS
+          })
+        : await this.approvals.request({
+            taskId: task.id,
+            runId,
+            kind: "outbox.local-write",
+            summary: `将“${draft.subject}”写入本地发件箱（不会发送）`,
+            target: {
+              draftId: draft.id,
+              account: draft.account,
+              to: draft.to,
+              cc: draft.cc,
+              bcc: draft.bcc,
+              subject: draft.subject,
+              body: draft.body,
+              attachments: draft.attachments,
+              transport: "local-outbox"
+            },
+            preview: {
+              title: draft.subject,
+              body: draft.body,
+              account: draft.account,
+              to: draft.to,
+              cc: draft.cc,
+              bcc: draft.bcc,
+              attachments: draft.attachments,
+              impact: "只写入本机 .hearth/outbox，不连接邮件服务器，也不会发送给收件人。",
+              reversible: true,
+              undo: "删除对应本地发件箱文件即可撤销；不会影响任何外部账户。"
+            },
+            ttlMs: OUTBOX_APPROVAL_TTL_MS
+          });
 
       const submitted = this.service.updateOutboxDraft(draft.id, {
         status: "pending_approval",
@@ -217,7 +256,7 @@ export class OutboxService {
 
   reconcileApproval(approvalId: string): OutboxDraft | null {
     const approval = this.service.store.getApproval(approvalId);
-    if (!approval || approval.kind !== "outbox.local-write") return null;
+    if (!approval || (approval.kind !== "outbox.local-write" && approval.kind !== "email.smtp-send")) return null;
     const draftId = approval.target.draftId;
     if (typeof draftId !== "string") return null;
     const draft = this.service.store.getOutboxDraft(draftId);
@@ -245,7 +284,7 @@ export class OutboxService {
     }
 
     const effect = approval.effectId ? this.service.store.getEffect(approval.effectId) : null;
-    const status = effectStatusToDraftStatus(effect);
+    const status = effectStatusToDraftStatus(effect, approval.kind);
     return this.service.updateOutboxDraft(draft.id, {
       status,
       taskId: approval.taskId,
@@ -258,9 +297,21 @@ export class OutboxService {
   reconcileTask(taskId: string): OutboxDraft[] {
     return this.service.store
       .listApprovals(taskId)
-      .filter((approval) => approval.kind === "outbox.local-write")
+      .filter((approval) => approval.kind === "outbox.local-write" || approval.kind === "email.smtp-send")
       .map((approval) => this.reconcileApproval(approval.id))
       .filter((draft): draft is OutboxDraft => draft !== null);
+  }
+
+  private resolveSmtpAccount(draft: OutboxDraft) {
+    if (!draft.account.startsWith("smtp:")) return null;
+    if (!this.mail) throw new OutboxError("MAIL_NOT_CONFIGURED", "邮件账户服务尚未启动", 503);
+    const accountId = draft.account.slice("smtp:".length).trim();
+    if (!accountId) throw new OutboxError("MAIL_ACCOUNT_REQUIRED", "发件账户缺少账户 ID", 400);
+    try {
+      return this.mail.accounts.get(accountId);
+    } catch (error) {
+      throw new OutboxError("MAIL_ACCOUNT_NOT_FOUND", error instanceof Error ? error.message : "邮件账户不存在", 404);
+    }
   }
 
   private assertComplete(draft: OutboxDraft): void {
@@ -331,9 +382,9 @@ function normalizeText(value: string | undefined, maxLength: number, label: stri
   return value;
 }
 
-function effectStatusToDraftStatus(effect: EffectRecord | null): OutboxDraft["status"] {
+function effectStatusToDraftStatus(effect: EffectRecord | null, kind: string): OutboxDraft["status"] {
   if (!effect) return "failed";
-  if (effect.status === "succeeded") return "stored";
+  if (effect.status === "succeeded") return kind === "email.smtp-send" ? "sent" : "stored";
   if (effect.status === "uncertain") return "uncertain";
   return "failed";
 }

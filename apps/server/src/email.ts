@@ -277,7 +277,7 @@ export class EmailService {
     const account = this.accounts.runtime(accountId);
     const transport = this.smtpFactory(account);
     try {
-      const result = await transport.sendMail({ ...message, from: account.fromAddress });
+      const result = await transport.sendMail({ ...message, from: account.fromName ? `${account.fromName} <${account.fromAddress}>` : account.fromAddress });
       return {
         messageId: result.messageId,
         accepted: result.accepted.map(String),

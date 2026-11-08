@@ -594,6 +594,7 @@ export const OUTBOX_DRAFT_STATUSES = [
   "draft",
   "pending_approval",
   "stored",
+  "sent",
   "rejected",
   "failed",
   "uncertain",
