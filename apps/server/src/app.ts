@@ -40,6 +40,7 @@ import { SourceRegistry, SourceRegistryError } from "./sources.ts";
 import { OutboxError, OutboxService } from "./outbox.ts";
 import { OnboardingService } from "./onboarding.ts";
 import { FeishuError, FeishuService, type FeishuChatClient, type FeishuTransportFactory } from "./feishu.ts";
+import { EmailService, MailError, type MailImapFactory, type MailSmtpFactory } from "./email.ts";
 import { DesktopError, DesktopService } from "./desktop.ts";
 import { MemoryError, MemoryService } from "./memory.ts";
 import { MethodError, MethodService } from "./methods.ts";
@@ -317,6 +318,24 @@ const feishuTestSchema = z.object({
   domain: z.enum(["feishu", "lark"]).optional()
 }).strict();
 
+const mailServerSchema = z.object({
+  host: z.string().trim().min(1).max(255),
+  port: z.number().int().min(1).max(65535),
+  secure: z.boolean(),
+  user: z.string().trim().min(1).max(320),
+  password: z.string().max(500).optional()
+}).strict();
+
+const mailAccountSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  fromName: z.string().trim().min(1).max(120),
+  fromAddress: z.string().trim().min(3).max(320),
+  smtp: mailServerSchema,
+  imap: mailServerSchema,
+  syncEnabled: z.boolean().optional(),
+  syncIntervalMinutes: z.number().int().min(5).max(1440).optional()
+}).strict();
+
 const suggestionActionSchema = z.object({
   title: z.string().trim().min(1).max(120).optional(),
   goal: z.string().trim().min(1).max(4000).optional(),
@@ -440,6 +459,8 @@ export interface BuildServerOptions {
   startProactive?: boolean;
   feishuTransportFactory?: FeishuTransportFactory;
   feishuChatClient?: FeishuChatClient;
+  mailSmtpFactory?: MailSmtpFactory;
+  mailImapFactory?: MailImapFactory;
   effectExecutor?: EffectExecutor;
   sourceContentRoot?: string;
   outboxRoot?: string;
@@ -528,6 +549,12 @@ export async function buildServer(options: BuildServerOptions = {}) {
     outbox,
     ...(options.feishuTransportFactory ? { transportFactory: options.feishuTransportFactory } : {}),
     ...(options.feishuChatClient ? { chatClient: options.feishuChatClient } : {})
+  });
+  const mail = new EmailService({
+    store,
+    secretBox,
+    ...(options.mailSmtpFactory ? { smtpFactory: options.mailSmtpFactory } : {}),
+    ...(options.mailImapFactory ? { imapFactory: options.mailImapFactory } : {})
   });
   const executorInstaller = options.executorInstaller ?? new ExecutorInstaller();
   const executorHealth = (executorId: ExecutorId): ExecutorHealth => {
@@ -699,6 +726,45 @@ export async function buildServer(options: BuildServerOptions = {}) {
   app.post("/api/integrations/feishu/reconnect", async () => {
     await feishu.restart();
     return { settings: feishu.view(), status: feishu.snapshot() };
+  });
+
+  app.get("/api/mail/accounts", async () => ({ accounts: mail.list() }));
+
+  app.post("/api/mail/accounts", async (request, reply) => {
+    const parsed = mailAccountSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_MAIL_ACCOUNT", message: "邮件账户参数不正确" });
+    try {
+      return reply.code(201).send({ account: mail.create(parsed.data) });
+    } catch (error) {
+      return sendMailError(reply, error);
+    }
+  });
+
+  app.patch<{ Params: { id: string } }>("/api/mail/accounts/:id", async (request, reply) => {
+    const parsed = mailAccountSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_MAIL_ACCOUNT", message: "邮件账户参数不正确" });
+    try {
+      return { account: mail.update(request.params.id, parsed.data) };
+    } catch (error) {
+      return sendMailError(reply, error);
+    }
+  });
+
+  app.delete<{ Params: { id: string } }>("/api/mail/accounts/:id", async (request, reply) => {
+    try {
+      mail.remove(request.params.id);
+      return reply.code(204).send();
+    } catch (error) {
+      return sendMailError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/mail/accounts/:id/test", async (request, reply) => {
+    try {
+      return await mail.test(request.params.id);
+    } catch (error) {
+      return sendMailError(reply, error);
+    }
   });
 
   app.get("/api/model-registry", async () => {
@@ -2164,6 +2230,13 @@ function sendSourceError(reply: FastifyReply, error: unknown) {
 
 function sendOutboxError(reply: FastifyReply, error: unknown) {
   if (error instanceof OutboxError) {
+    return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+  }
+  throw error;
+}
+
+function sendMailError(reply: FastifyReply, error: unknown) {
+  if (error instanceof MailError) {
     return reply.code(error.statusCode).send({ error: error.code, message: error.message });
   }
   throw error;
