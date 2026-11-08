@@ -33,6 +33,7 @@ import type {
 } from "../lib/types.ts";
 import { ProactiveSettingsPanel } from "../components/ProactiveSettingsPanel.tsx";
 import { ExecutorSettingsPanel } from "../components/ExecutorSettingsPanel.tsx";
+import { desktopNotificationsEnabled, requestDesktopPermission, setDesktopNotificationsEnabled } from "../lib/notifications.ts";
 
 type SettingsTab = "executors" | "models" | "context" | "proactive" | "data";
 
@@ -484,6 +485,24 @@ function ModelsTab() {
 
 function ProactiveTab() {
   const snapshotQuery = useQuery({ queryKey: ["proactive"], queryFn: api.proactive, refetchInterval: 20_000 });
+  const [desktopEnabled, setDesktopEnabled] = useState(() => desktopNotificationsEnabled());
+  const [permission, setPermission] = useState<NotificationPermission | "unsupported">(() =>
+    typeof window !== "undefined" && "Notification" in window ? Notification.permission : "unsupported"
+  );
+
+  async function toggleDesktop(enabled: boolean) {
+    if (enabled) {
+      const result = await requestDesktopPermission();
+      setPermission(result);
+      if (result !== "granted") {
+        setDesktopNotificationsEnabled(false);
+        setDesktopEnabled(false);
+        return;
+      }
+    }
+    setDesktopNotificationsEnabled(enabled);
+    setDesktopEnabled(enabled);
+  }
 
   return (
     <section className="settings-tab-panel">
@@ -500,6 +519,29 @@ function ProactiveTab() {
       {snapshotQuery.isLoading && <InlineLoading text="正在读取主动设置" />}
       {snapshotQuery.isError && <p className="form-error">{snapshotQuery.error.message}</p>}
       {snapshotQuery.data && <ProactiveSettingsPanel snapshot={snapshotQuery.data} />}
+      <section className="panel settings-section">
+        <div className="settings-body">
+          <div className="section-heading">
+            <div><h3>桌面通知</h3><p>页面打开时，审批、主动建议和异常会在系统通知里出现。页面关闭后不会推送。</p></div>
+          </div>
+          <label className="checkbox-field">
+            <input
+              type="checkbox"
+              checked={desktopEnabled}
+              disabled={permission === "unsupported"}
+              onChange={(event) => void toggleDesktop(event.target.checked)}
+            />
+            <span>允许浏览器发送桌面通知</span>
+          </label>
+          <p className="settings-hint">
+            {permission === "unsupported"
+              ? "当前浏览器不支持 Notification API。"
+              : permission === "denied"
+                ? "浏览器已拒绝通知权限；可在浏览器站点设置里重新允许。"
+                : "只在页面处于后台时发送，避免重复打断。"}
+          </p>
+        </div>
+      </section>
       <p className="settings-hint">邮件新消息目前通过“来源新条目”触发；日历账户尚未接入。</p>
     </section>
   );

@@ -2,6 +2,7 @@ import { useEffect, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AppShell } from "./components/AppShell.tsx";
+import { NotificationCenter } from "./components/NotificationCenter.tsx";
 import { api, subscribeToEvents } from "./lib/api.ts";
 import { ChatPage } from "./pages/ChatPage.tsx";
 import { DevicesPage } from "./pages/DevicesPage.tsx";
@@ -18,6 +19,7 @@ export default function App() {
   return (
     <>
       <EventBridge />
+      <NotificationCenter />
       <FirstRunGate>
         <Routes>
           <Route path="welcome" element={<OnboardingPage />} />

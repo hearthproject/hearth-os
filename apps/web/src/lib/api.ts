@@ -32,6 +32,7 @@ import type {
   ExecutorSettingsPatch,
   ExecutorSettingsResponse,
   EventWindow,
+  EventEnvelope,
   HealthResponse,
   HermesProbeResponse,
   MaintenanceSnapshot,
@@ -486,9 +487,18 @@ export const api = {
   }
 };
 
-export function subscribeToEvents(onEvent: (event: string) => void): () => void {
+export function subscribeToEvents(onEvent: (event: string, envelope?: EventEnvelope) => void): () => void {
   const source = new EventSource("/api/events");
-  source.onmessage = () => onEvent("message");
+  const dispatch = (name: string, raw: string) => {
+    let envelope: EventEnvelope | undefined;
+    try {
+      envelope = raw ? JSON.parse(raw) as EventEnvelope : undefined;
+    } catch {
+      envelope = undefined;
+    }
+    onEvent(name, envelope);
+  };
+  source.onmessage = (message) => dispatch("message", message.data);
   const eventNames = [
     "task.created", "task.updated", "task.progress", "chat.message.created", "chat.message.updated", "run.created", "run.updated",
     "approval.created", "approval.updated", "artifact.published", "effect.created", "effect.updated",
@@ -507,7 +517,7 @@ export function subscribeToEvents(onEvent: (event: string) => void): () => void 
     "desktop.session.created", "desktop.session.updated", "desktop.frame.updated",
     "desktop.command.created", "desktop.command.updated"
   ];
-  for (const name of eventNames) source.addEventListener(name, () => onEvent(name));
+  for (const name of eventNames) source.addEventListener(name, (event) => dispatch(name, (event as MessageEvent).data));
   return () => source.close();
 }
 
