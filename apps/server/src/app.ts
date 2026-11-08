@@ -39,6 +39,7 @@ import { DiagnosticsService } from "./diagnostics.ts";
 import { SourceRegistry, SourceRegistryError } from "./sources.ts";
 import { OutboxError, OutboxService } from "./outbox.ts";
 import { OnboardingService } from "./onboarding.ts";
+import { FeishuError, FeishuService, type FeishuChatClient, type FeishuTransportFactory } from "./feishu.ts";
 import { DesktopError, DesktopService } from "./desktop.ts";
 import { MemoryError, MemoryService } from "./memory.ts";
 import { MethodError, MethodService } from "./methods.ts";
@@ -302,6 +303,20 @@ const onboardingCompleteSchema = z.object({
   skipped: z.boolean().optional()
 }).strict();
 
+const feishuSettingsPatchSchema = z.object({
+  enabled: z.boolean().optional(),
+  appId: z.string().trim().max(100).optional(),
+  appSecret: z.string().max(500).optional(),
+  allowedOpenIds: z.array(z.string().trim().min(1).max(100)).max(50).optional(),
+  domain: z.enum(["feishu", "lark"]).optional()
+}).strict().refine((value) => Object.keys(value).length > 0, { message: "至少需要修改一个设置" });
+
+const feishuTestSchema = z.object({
+  appId: z.string().trim().max(100).optional(),
+  appSecret: z.string().max(500).optional(),
+  domain: z.enum(["feishu", "lark"]).optional()
+}).strict();
+
 const suggestionActionSchema = z.object({
   title: z.string().trim().min(1).max(120).optional(),
   goal: z.string().trim().min(1).max(4000).optional(),
@@ -423,6 +438,8 @@ export interface BuildServerOptions {
   startScheduler?: boolean;
   startMaintenance?: boolean;
   startProactive?: boolean;
+  feishuTransportFactory?: FeishuTransportFactory;
+  feishuChatClient?: FeishuChatClient;
   effectExecutor?: EffectExecutor;
   sourceContentRoot?: string;
   outboxRoot?: string;
@@ -502,6 +519,13 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const codexProfile = () => modelRegistry.codexProfile() ?? loadCodexProfile();
   const codexEnv = () => modelRegistry.codexEnv();
   const attachmentRoot = options.attachmentRoot ?? ATTACHMENT_DIR;
+  const feishu = new FeishuService({
+    store,
+    secretBox,
+    attachmentRoot,
+    ...(options.feishuTransportFactory ? { transportFactory: options.feishuTransportFactory } : {}),
+    ...(options.feishuChatClient ? { chatClient: options.feishuChatClient } : {})
+  });
   const executorInstaller = options.executorInstaller ?? new ExecutorInstaller();
   const executorHealth = (executorId: ExecutorId): ExecutorHealth => {
     const health = readExecutorHealth(executorId, executorSettingsStore.load(), executorSettingsPath);
@@ -565,6 +589,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     logger: options.logger ?? false,
     bodyLimit: 8_000_000
   });
+  app.decorate("feishu", feishu);
 
   schedules.start();
   await registerChatRoutes(app, {
@@ -582,6 +607,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
 
   app.addHook("onClose", async () => {
+    await feishu.stop();
     proactive.stop();
     maintenance.stop();
     schedules.stop();
@@ -635,6 +661,42 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
 
   app.post("/api/onboarding/reset", async () => onboarding.reset());
+
+  app.get("/api/integrations/feishu", async () => ({
+    settings: feishu.view(),
+    status: feishu.snapshot()
+  }));
+
+  app.put("/api/integrations/feishu", async (request, reply) => {
+    const parsed = feishuSettingsPatchSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_FEISHU_SETTINGS", message: "飞书设置参数不正确" });
+    try {
+      return await feishu.updateSettings(parsed.data);
+    } catch (error) {
+      if (error instanceof FeishuError) {
+        return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+      }
+      return reply.code(500).send({ error: "FEISHU_SETTINGS_FAILED", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/integrations/feishu/test", async (request, reply) => {
+    const parsed = feishuTestSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_FEISHU_TEST", message: "飞书测试参数不正确" });
+    try {
+      return await feishu.test(parsed.data);
+    } catch (error) {
+      if (error instanceof FeishuError) {
+        return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+      }
+      return reply.code(500).send({ error: "FEISHU_TEST_FAILED", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/integrations/feishu/reconnect", async () => {
+    await feishu.restart();
+    return { settings: feishu.view(), status: feishu.snapshot() };
+  });
 
   app.get("/api/model-registry", async () => {
     const chat = modelRegistry.chatSettings();

@@ -6,6 +6,9 @@ const app = await buildServer({ logger: true, startScheduler: true, startProacti
 
 try {
   const address = await app.listen({ host: HOST, port: PORT });
+  void app.feishu.start(address).catch((error: unknown) => {
+    console.error("飞书长连接启动失败：", error instanceof Error ? error.message : String(error));
+  });
   const profile = loadCodexProfile();
   console.log(`Hearth 已启动：${address}`);
   console.log(`Codex 执行器：${describeCodexProfile(profile)}（${profile.authSource}）`);

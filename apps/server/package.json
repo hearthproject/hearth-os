@@ -12,6 +12,7 @@
     "@hearth/deepseek-executor": "^0.1.0",
     "@hearth/eventlog": "0.1.0",
     "@hearth/templates": "0.1.0",
+    "@larksuiteoapi/node-sdk": "^1.76.0",
     "cheerio": "^1.2.0",
     "croner": "^11.0.0",
     "exceljs": "^4.4.0",
