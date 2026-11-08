@@ -8,7 +8,7 @@ import { relativeTime } from "../lib/format.ts";
 import type { MethodCandidate, MethodMetrics, MethodSnapshot, MethodStatus, MethodVerdict, TaskRecord } from "../lib/types.ts";
 
 const STATUS_LABELS: Record<MethodStatus, string> = {
-  candidate: "候选",
+  candidate: "候选技能",
   evaluating: "评估中",
   trial: "试跑中",
   adopted: "已采用",
@@ -40,7 +40,7 @@ export function MethodsPage() {
   const generateMutation = useMutation({
     mutationFn: (taskId: string) => api.generateMethod({ taskId }),
     onSuccess: (method) => {
-      setNotice("已从任务轨迹生成候选方法：" + method.name);
+      setNotice("已从任务轨迹生成候选技能：" + method.name);
       setSourceTaskId("");
       refresh();
     },
@@ -63,9 +63,9 @@ export function MethodsPage() {
   return (
     <div className="page methods-page">
       <div className="page-head">
-        <h1>方法进化</h1>
-        <span className="page-meta">候选只继承或收窄来源权限；已采用方法按模板注入，可审计、可回退。</span>
-        <span className="page-meta">已采用 {adoptedCount} 个 · 共 {methods.length} 个候选 · {snapshot?.applications.length ?? 0} 次注入</span>
+        <h1>技能库</h1>
+        <span className="page-meta">候选技能只继承或收窄来源权限；已采用技能按模板注入，可审计、可回退。</span>
+        <span className="page-meta">已采用 {adoptedCount} 个 · 共 {methods.length} 个候选技能 · {snapshot?.applications.length ?? 0} 次注入</span>
       </div>
 
       <div className="task-meta-row">
@@ -81,7 +81,7 @@ export function MethodsPage() {
       {notice && <p className="page-meta">{notice}</p>}
 
       <section className="panel">
-        <div className="panel-head"><h2>从任务轨迹生成候选</h2><span className="panel-meta">成功与失败终态都可复盘；相同指纹不会重复生成</span></div>
+        <div className="panel-head"><h2>从任务轨迹生成候选技能</h2><span className="panel-meta">成功与失败终态都可复盘；相同指纹不会重复生成</span></div>
         <div className="method-generate-row">
           <select value={sourceTaskId} onChange={(event) => setSourceTaskId(event.target.value)}>
             <option value="">选择已完成、失败或可恢复的任务</option>
@@ -96,9 +96,9 @@ export function MethodsPage() {
         {terminalTasks.length === 0 && <p className="section-empty">还没有可供复盘的任务轨迹。</p>}
       </section>
 
-      {snapshotQuery.isLoading && <p className="section-empty">正在读取候选方法…</p>}
+      {snapshotQuery.isLoading && <p className="section-empty">正在读取候选技能…</p>}
       {snapshot && methods.length === 0 && (
-        <section className="panel"><EmptyState title="还没有候选方法" body="完成任务后会自动生成候选，也可以手动选择任务轨迹生成。候选不会自动上线。" /></section>
+        <section className="panel"><EmptyState title="还没有候选技能" body="完成任务后会自动生成候选，也可以手动选择任务轨迹生成。候选不会自动上线。" /></section>
       )}
 
       <div className="method-list">
@@ -156,7 +156,7 @@ function MethodCard({
   });
   const assignMutation = useMutation({
     mutationFn: () => api.assignTaskMethod(assignTaskId, method.id),
-    onSuccess: (task) => { onNotice("已把方法绑定到任务：" + task.title + "。"); setAssignTaskId(""); onRefresh(); },
+    onSuccess: (task) => { onNotice("已把技能绑定到任务：" + task.title + "。"); setAssignTaskId(""); onRefresh(); },
     onError: (error: Error) => onNotice(error.message)
   });
   const evaluateMutation = useMutation({
@@ -176,17 +176,17 @@ function MethodCard({
   });
   const promoteMutation = useMutation({
     mutationFn: () => api.promoteMethod(method.id),
-    onSuccess: (promoted) => { onNotice("候选方法已晋升为第 " + (promoted.generation ?? 1) + " 代；同模板新任务会自动使用。"); onRefresh(); },
+    onSuccess: (promoted) => { onNotice("候选技能已晋升为第 " + (promoted.generation ?? 1) + " 代；同模板新任务会自动使用。"); onRefresh(); },
     onError: (error: Error) => onNotice(error.message)
   });
   const rollbackMutation = useMutation({
     mutationFn: (reason: string) => api.rollbackMethod(method.id, reason),
-    onSuccess: () => { onNotice("方法已回退；上一代如有记录会自动恢复。"); onRefresh(); },
+    onSuccess: () => { onNotice("技能已回退；上一代如有记录会自动恢复。"); onRefresh(); },
     onError: (error: Error) => onNotice(error.message)
   });
   const rejectMutation = useMutation({
     mutationFn: () => api.rejectMethod(method.id, "用户拒绝"),
-    onSuccess: () => { onNotice("候选方法已拒绝。"); onRefresh(); },
+    onSuccess: () => { onNotice("候选技能已拒绝。"); onRefresh(); },
     onError: (error: Error) => onNotice(error.message)
   });
 
@@ -273,7 +273,7 @@ function MethodCard({
                 {assignableTasks.map((task) => <option value={task.id} key={task.id}>{task.title} · {task.status}</option>)}
               </select>
               <button className="ghost-button" disabled={!assignTaskId || assignMutation.isPending} onClick={() => assignMutation.mutate()}>
-                应用方法
+                应用技能
               </button>
             </div>
           )}
@@ -293,9 +293,9 @@ function MethodCard({
 
       {method.status === "adopted" && (
         <div className="method-actions">
-          <span className="page-meta">已采用方法会按模板自动注入同模板新任务；原有审批与权限边界不变。</span>
+          <span className="page-meta">已采用技能会按模板自动注入同模板新任务；原有审批与权限边界不变。</span>
           <button className="ghost-button danger" disabled={rollbackMutation.isPending} onClick={() => {
-            const reason = window.prompt("回退原因（会写入审计）", "观测到回归，恢复上一方法");
+            const reason = window.prompt("回退原因（会写入审计）", "观测到回归，恢复上一技能");
             if (reason?.trim()) rollbackMutation.mutate(reason.trim());
           }}><RotateCcw size={15} /> 回退</button>
         </div>

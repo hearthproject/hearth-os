@@ -50,7 +50,7 @@ export function AppShell() {
             <Monitor size={18} /> <span className="nav-label">设备</span>
           </NavLink>
           <NavLink to="/methods" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
-            <FlaskConical size={18} /> <span className="nav-label">方法</span>
+            <FlaskConical size={18} /> <span className="nav-label">技能</span>
           </NavLink>
           <NavLink to="/schedules" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
             <CalendarClock size={18} /> <span className="nav-label">定时任务</span>
