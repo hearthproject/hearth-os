@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HearthStore } from "@hearth/eventlog";
 import { buildServer } from "./app.ts";
 import {
@@ -12,6 +12,8 @@ import {
   type MailSmtpFactory
 } from "./email.ts";
 import { SecretBox } from "./secrets.ts";
+import { HearthService } from "./service.ts";
+import { SourceRegistry } from "./sources.ts";
 
 const INPUT: MailAccountInput = {
   name: "工作邮箱",
@@ -113,6 +115,76 @@ describe("EmailService", () => {
     imapOk = false;
     const failedImap = await service.test(account.id);
     expect(failedImap).toMatchObject({ ok: false, smtp: { ok: true }, imap: { ok: false, error: "imap refused" } });
+  });
+});
+
+
+describe("IMAP inbox sync", () => {
+  let store: HearthStore;
+  let root: string;
+  let service: EmailService;
+  let sources: SourceRegistry;
+  let fetchCalls: number;
+
+  beforeEach(() => {
+    store = new HearthStore(":memory:");
+    root = mkdtempSync(join(tmpdir(), "hearth-mail-sync-"));
+    const hearth = new HearthService(store);
+    sources = new SourceRegistry(hearth, { contentRoot: join(root, "sources") });
+    fetchCalls = 0;
+    const imapFactory: MailImapFactory = () => ({
+      async connect() {},
+      async logout() {},
+      async fetchRecent(limit) {
+        fetchCalls += 1;
+        return [
+          { messageId: "message-1@example.com", subject: "第一封", from: "Alice <alice@example.com>", date: "2026-11-08T01:00:00.000Z", text: "第一封正文" },
+          { messageId: "message-2@example.com", subject: "第二封", from: "Bob <bob@example.com>", date: "2026-11-08T02:00:00.000Z", text: "第二封正文" }
+        ].slice(0, limit);
+      }
+    });
+    service = new EmailService({
+      store,
+      secretBox: new SecretBox(Buffer.alloc(32, 19)),
+      sources,
+      smtpFactory: () => ({ async verify() {}, async sendMail() { return { messageId: "x", accepted: [], rejected: [], response: "" }; } }),
+      imapFactory
+    });
+  });
+
+  afterEach(() => {
+    service.stop();
+    vi.useRealTimers();
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("creates an email source, ingests messages, and deduplicates the second sync", async () => {
+    const account = service.create(INPUT);
+    const first = await service.syncInbox(account.id);
+    expect(first).toMatchObject({ fetched: 2, changed: 2 });
+    const source = sources.list().find((item) => item.id === first.sourceId);
+    expect(source).toMatchObject({ kind: "email", provider: "imap", status: "connected", itemCount: 2 });
+    const items = sources.items(first.sourceId);
+    expect(items.map((item) => item.itemKey).sort()).toEqual(["message-1@example.com", "message-2@example.com"]);
+    expect(sources.readItemContent(items[0]!.id)).toContain("正文");
+
+    const second = await service.syncInbox(account.id);
+    expect(second).toMatchObject({ fetched: 2, changed: 0 });
+    expect(sources.items(first.sourceId)).toHaveLength(2);
+  });
+
+  it("syncs enabled accounts on the timer and stops cleanly", async () => {
+    vi.useFakeTimers();
+    const account = service.create(INPUT);
+    service.start(60_000);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetchCalls).toBe(1);
+    expect(sources.list().find((item) => item.account === account.id)).toBeTruthy();
+
+    service.stop();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(fetchCalls).toBe(1);
   });
 });
 

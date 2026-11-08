@@ -457,6 +457,7 @@ export interface BuildServerOptions {
   startScheduler?: boolean;
   startMaintenance?: boolean;
   startProactive?: boolean;
+  startMailSync?: boolean;
   feishuTransportFactory?: FeishuTransportFactory;
   feishuChatClient?: FeishuChatClient;
   mailSmtpFactory?: MailSmtpFactory;
@@ -496,6 +497,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const mail = new EmailService({
     store,
     secretBox,
+    sources,
     ...(options.mailSmtpFactory ? { smtpFactory: options.mailSmtpFactory } : {}),
     ...(options.mailImapFactory ? { imapFactory: options.mailImapFactory } : {})
   });
@@ -616,6 +618,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const diagnostics = new DiagnosticsService({ service, health, maintenance, webDist: WEB_DIST });
   if (options.startMaintenance ?? options.startScheduler) maintenance.start();
   if (options.startProactive) proactive.start();
+  if (options.startMailSync) mail.start();
   const app = Fastify({
     logger: options.logger ?? false,
     bodyLimit: 8_000_000
@@ -639,6 +642,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
 
   app.addHook("onClose", async () => {
     await feishu.stop();
+    mail.stop();
     proactive.stop();
     maintenance.stop();
     schedules.stop();
@@ -763,6 +767,14 @@ export async function buildServer(options: BuildServerOptions = {}) {
   app.post<{ Params: { id: string } }>("/api/mail/accounts/:id/test", async (request, reply) => {
     try {
       return await mail.test(request.params.id);
+    } catch (error) {
+      return sendMailError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/mail/accounts/:id/sync", async (request, reply) => {
+    try {
+      return await mail.syncInbox(request.params.id);
     } catch (error) {
       return sendMailError(reply, error);
     }

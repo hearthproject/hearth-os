@@ -2064,7 +2064,7 @@ function upsertSource(db: DatabaseSync, source: SourceConnection): void {
 function updateSource(db: DatabaseSync, patch: Record<string, unknown>): void {
   const id = String(patch.id);
   const columns: Record<string, string> = {
-    displayName: "display_name", account: "account", rootPath: "root_path", status: "status",
+    displayName: "display_name", account: "account", provider: "provider", rootPath: "root_path", status: "status",
     itemCount: "item_count", lastReadAt: "last_read_at", updatedAt: "updated_at"
   };
   for (const [key, column] of Object.entries(columns)) {

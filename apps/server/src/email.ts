@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import nodemailer from "nodemailer";
 import { ImapFlow } from "imapflow";
+import { simpleParser } from "mailparser";
 import type { HearthStore } from "@hearth/eventlog";
 import type { SecretBox } from "./secrets.ts";
+import type { SourceRegistry } from "./sources.ts";
 
 const ACCOUNTS_KEY = "mail.accounts.v1";
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -97,9 +99,24 @@ export interface MailSmtpTransport {
   close?(): void;
 }
 
+export interface MailImapMessage {
+  messageId: string;
+  subject: string;
+  from: string;
+  date: string;
+  text: string;
+}
+
 export interface MailImapTransport {
   connect(): Promise<void>;
   logout(): Promise<void>;
+  fetchRecent?(limit: number): Promise<MailImapMessage[]>;
+}
+
+export interface MailSyncResult {
+  sourceId: string;
+  fetched: number;
+  changed: number;
 }
 
 export type MailSmtpFactory = (account: MailAccountRuntime) => MailSmtpTransport;
@@ -231,19 +248,88 @@ export class EmailService {
   readonly accounts: MailAccountStore;
   private readonly smtpFactory: MailSmtpFactory;
   private readonly imapFactory: MailImapFactory;
+  private readonly sources: SourceRegistry | null;
   private readonly now: () => Date;
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private readonly lastSyncAt = new Map<string, number>();
 
   constructor(options: {
     store: HearthStore;
     secretBox: SecretBox;
     smtpFactory?: MailSmtpFactory;
     imapFactory?: MailImapFactory;
+    sources?: SourceRegistry;
     now?: () => Date;
   }) {
     this.accounts = new MailAccountStore(options.store, options.secretBox);
     this.smtpFactory = options.smtpFactory ?? defaultSmtpFactory;
     this.imapFactory = options.imapFactory ?? defaultImapFactory;
+    this.sources = options.sources ?? null;
     this.now = options.now ?? (() => new Date());
+  }
+
+  start(tickMs = 60_000): void {
+    if (this.timer) return;
+    const tick = () => {
+      const now = Date.now();
+      for (const account of this.accounts.list()) {
+        if (!account.syncEnabled) continue;
+        const last = this.lastSyncAt.get(account.id) ?? 0;
+        if (now - last < account.syncIntervalMinutes * 60_000) continue;
+        this.lastSyncAt.set(account.id, now);
+        void this.syncInbox(account.id).catch(() => undefined);
+      }
+    };
+    this.timer = setInterval(tick, Math.max(10_000, tickMs));
+    this.timer.unref?.();
+  }
+
+  stop(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+  }
+
+  async syncInbox(id: string, limit = 20): Promise<MailSyncResult> {
+    if (!this.sources) throw new MailError("MAIL_SOURCES_UNAVAILABLE", "来源服务尚未启动", 503);
+    const account = this.accounts.runtime(id);
+    const transport = this.imapFactory(account);
+    let messages: MailImapMessage[] = [];
+    try {
+      await transport.connect();
+      if (!transport.fetchRecent) throw new MailError("MAIL_IMAP_SYNC_UNSUPPORTED", "当前 IMAP 连接不支持同步", 501);
+      messages = await transport.fetchRecent(Math.min(50, Math.max(1, limit)));
+    } finally {
+      try {
+        await transport.logout();
+      } catch {
+        // Closing a broken IMAP connection should not mask the sync result.
+      }
+    }
+
+    let source = this.sources.list().find((item) => item.kind === "email" && item.account === account.id);
+    source ??= this.sources.create({
+      kind: "email",
+      account: account.id,
+      displayName: `邮件 · ${account.name}`
+    });
+    const result = this.sources.ingestExternal(source.id, messages.map((message) => ({
+      itemKey: message.messageId,
+      label: message.subject || "(无主题)",
+      locator: `imap://${account.imap.host}/${encodeURIComponent(message.messageId)}`,
+      title: message.subject,
+      markdown: [
+        `# ${message.subject || "(无主题)"}`,
+        "",
+        `- 发件人：${message.from}`,
+        `- 时间：${message.date}`,
+        `- 接收账户：${account.name} <${account.fromAddress}>`,
+        "",
+        message.text || "(没有可读的纯文本正文)"
+      ].join("\n"),
+      fetchedAt: this.now().toISOString()
+    })));
+    this.lastSyncAt.set(account.id, Date.now());
+    return { sourceId: result.source.id, fetched: messages.length, changed: result.changed };
   }
 
   list(): MailAccountView[] {
@@ -359,7 +445,29 @@ function defaultImapFactory(account: MailAccountRuntime): MailImapTransport {
   });
   return {
     connect: () => client.connect(),
-    logout: () => client.logout()
+    logout: () => client.logout(),
+    fetchRecent: async (limit) => {
+      const mailbox = await client.mailboxOpen("INBOX", { readOnly: true });
+      if (mailbox.exists === 0) return [];
+      const start = Math.max(1, mailbox.exists - limit + 1);
+      const messages: MailImapMessage[] = [];
+      for await (const item of client.fetch(`${start}:*`, { source: true, envelope: true, internalDate: true })) {
+        if (!item.source) continue;
+        const parsed = await simpleParser(item.source);
+        const date = parsed.date instanceof Date
+          ? parsed.date.toISOString()
+          : typeof item.internalDate === "string" ? item.internalDate : new Date().toISOString();
+        messages.push({
+          messageId: parsed.messageId ?? `uid:${item.uid}`,
+          subject: parsed.subject ?? "(无主题)",
+          from: parsed.from?.text ?? "未知发件人",
+          date,
+          text: parsed.text ?? ""
+        });
+        if (messages.length >= limit) break;
+      }
+      return messages.reverse();
+    }
   };
 }
 

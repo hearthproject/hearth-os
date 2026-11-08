@@ -48,6 +48,21 @@ export interface ReadSourceInput {
   url?: string | undefined;
 }
 
+export interface ExternalSourceItem {
+  itemKey: string;
+  label: string;
+  locator: string;
+  title?: string | null;
+  markdown: string;
+  fetchedAt: string;
+}
+
+export interface SourceIngestResult {
+  source: SourceConnection;
+  items: SourceItem[];
+  changed: number;
+}
+
 export interface SourceReadResult {
   source: SourceConnection;
   items: SourceItem[];
@@ -214,6 +229,48 @@ export class SourceRegistry {
       throw new SourceRegistryError("SOURCE_CONTENT_UNAVAILABLE", "来源正文已不可用，请重新读取", 410);
     }
     return readFileSync(item.contentPath, "utf8");
+  }
+
+  ingestExternal(id: string, inputs: ExternalSourceItem[]): SourceIngestResult {
+    const source = this.get(id);
+    if (source.kind !== "email" && source.kind !== "calendar") {
+      throw new SourceRegistryError("SOURCE_NOT_EXTERNAL", "只有邮件或日历来源可以接收外部同步", 409);
+    }
+    let changed = 0;
+    for (const input of inputs) {
+      const bytes = Buffer.from(input.markdown, "utf8");
+      const hash = createHash("sha256").update(bytes).digest("hex");
+      const existing = this.service.store.findSourceItem(source.id, input.itemKey);
+      if (existing?.contentHash === hash && existing.status === "ready") continue;
+      const duplicate = this.service.store.findSourceItemByHash(hash);
+      const contentPath = duplicate?.contentPath ?? this.storeContent(source.id, hash, ".md", bytes);
+      const item: SourceItem = {
+        id: existing?.id ?? randomUUID(),
+        sourceId: source.id,
+        itemKey: input.itemKey,
+        label: input.label,
+        locator: input.locator.replace(/\\/g, "/"),
+        contentPath,
+        contentHash: hash,
+        bytes: bytes.byteLength,
+        title: input.title ?? input.label,
+        status: "ready",
+        coverage: { complete: true, pages: null, paragraphs: null, sheets: [], gaps: [] },
+        duplicateOf: duplicate && duplicate.id !== existing?.id ? duplicate.id : null,
+        error: null,
+        fetchedAt: input.fetchedAt
+      };
+      this.publishItem(item);
+      changed += 1;
+    }
+    const current = this.updateSource(source.id, {
+      status: "connected",
+      provider: "imap",
+      lastError: null,
+      lastReadAt: this.timestamp(),
+      itemCount: this.service.store.listSourceItems(source.id).length
+    });
+    return { source: current, items: this.service.store.listSourceItems(source.id), changed };
   }
 
   private async readLocal(source: SourceConnection): Promise<{ changed: number }> {
