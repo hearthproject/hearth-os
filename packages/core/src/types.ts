@@ -951,6 +951,26 @@ export interface MemorySettings {
   updatedAt: string;
 }
 
+export type OnboardingStatus = "completed" | "skipped";
+
+export interface OnboardingState {
+  status: OnboardingStatus;
+  completedAt: string;
+}
+
+export interface OnboardingChecks {
+  chatModelConfigured: boolean;
+  readyExecutorIds: ExecutorId[];
+  memoryAutoCapture: MemorySettings["autoCapture"];
+  proactiveEnabled: boolean;
+}
+
+export interface OnboardingSnapshot {
+  required: boolean;
+  state: OnboardingState | null;
+  checks: OnboardingChecks;
+}
+
 export const MEMORY_FORGET_TARGETS = ["projection", "versions", "event-log", "recall-audit", "devices"] as const;
 export type MemoryForgetTarget = (typeof MEMORY_FORGET_TARGETS)[number];
 

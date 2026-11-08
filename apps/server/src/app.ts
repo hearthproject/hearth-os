@@ -38,6 +38,7 @@ import { MaintenanceError, MaintenanceService } from "./maintenance.ts";
 import { DiagnosticsService } from "./diagnostics.ts";
 import { SourceRegistry, SourceRegistryError } from "./sources.ts";
 import { OutboxError, OutboxService } from "./outbox.ts";
+import { OnboardingService } from "./onboarding.ts";
 import { DesktopError, DesktopService } from "./desktop.ts";
 import { MemoryError, MemoryService } from "./memory.ts";
 import { MethodError, MethodService } from "./methods.ts";
@@ -297,6 +298,10 @@ const proactivePauseSchema = z.object({
   resume: z.boolean().optional()
 }).strict().refine((value) => value.minutes !== undefined || value.off === true || value.resume === true, { message: "暂停参数不完整" });
 
+const onboardingCompleteSchema = z.object({
+  skipped: z.boolean().optional()
+}).strict();
+
 const suggestionActionSchema = z.object({
   title: z.string().trim().min(1).max(120).optional(),
   goal: z.string().trim().min(1).max(4000).optional(),
@@ -505,6 +510,16 @@ export async function buildServer(options: BuildServerOptions = {}) {
       modelRegistry.settingsForExecutorOrChat(executorId)
     );
   };
+  const onboarding = new OnboardingService({
+    store,
+    isChatModelConfigured: () => {
+      const settings = modelRegistry.chatSettings() ?? loadModelSettings(modelSettingsPath);
+      return Boolean(settings && chatModelConfigured(settings));
+    },
+    readyExecutorIds: () => EXECUTORS.map((executor) => executor.id).filter((id) => executorHealth(id).canRun),
+    memoryAutoCapture: () => memory.settings().autoCapture,
+    proactiveEnabled: () => proactive.snapshot().settings.enabled
+  });
   const scheduler = options.startScheduler
     ? new HearthScheduler({
         service,
@@ -606,6 +621,16 @@ export async function buildServer(options: BuildServerOptions = {}) {
       }
     };
   });
+
+  app.get("/api/onboarding", async () => onboarding.snapshot());
+
+  app.post("/api/onboarding/complete", async (request, reply) => {
+    const parsed = onboardingCompleteSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_ONBOARDING", message: "首次运行设置参数不正确" });
+    return onboarding.complete(parsed.data);
+  });
+
+  app.post("/api/onboarding/reset", async () => onboarding.reset());
 
   app.get("/api/model-registry", async () => {
     const chat = modelRegistry.chatSettings();
