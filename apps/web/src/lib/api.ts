@@ -49,6 +49,7 @@ import type {
   ModelRegistryView,
   ModelSettingsResponse,
   ModelTestResponse,
+  OnboardingSnapshot,
   SettingsStorageResponse,
   OutboxDraft,
   OutboxDraftListItem,
@@ -228,6 +229,12 @@ export const api = {
     return (body as AttachmentUploadResult).attachments;
   },
   health: () => request<HealthResponse>("/api/health"),
+  onboarding: () => request<OnboardingSnapshot>("/api/onboarding"),
+  completeOnboarding: (skipped = false) => request<OnboardingSnapshot>("/api/onboarding/complete", {
+    method: "POST",
+    body: JSON.stringify({ skipped })
+  }),
+  resetOnboarding: () => request<OnboardingSnapshot>("/api/onboarding/reset", { method: "POST" }),
   system: () => request<SystemStatus>("/api/system"),
   stopSystem: () => request<SystemStatus>("/api/system/stop", { method: "POST" }),
   startSystem: () => request<SystemStatus>("/api/system/start", { method: "POST" }),

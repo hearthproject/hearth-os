@@ -209,6 +209,24 @@ async function main() {
 
   log("Running E2E scenarios...");
 
+  if (!live) {
+    await runTest(page, "shows first-run setup and can skip into chat", async () => {
+      const reset = await api(baseUrl, "/api/onboarding/reset", { method: "POST" });
+      assert.equal(reset.status, 200, reset.text);
+      await page.goto(baseUrl, { waitUntil: "networkidle" });
+      await page.waitForURL("**/welcome", { timeout: 15_000 });
+      await page.locator(".wizard-card").waitFor({ timeout: 15_000 });
+      await page.getByRole("button", { name: "暂时跳过" }).click();
+      await page.locator(".chat-empty").waitFor({ timeout: 15_000 });
+    });
+  } else {
+    skipTest("first-run setup wizard", "live model settings already satisfy onboarding");
+  }
+  await api(baseUrl, "/api/onboarding/complete", {
+    method: "POST",
+    body: JSON.stringify({ skipped: true })
+  });
+
   await runTest(page, "boots the chat shell without page errors", async () => {
     await openNewChat(page, baseUrl);
     assert.match(await page.title(), /Hearth/);

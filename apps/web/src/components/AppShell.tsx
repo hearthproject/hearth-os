@@ -52,11 +52,11 @@ export function AppShell() {
 
         <div className="sidebar-spacer" />
 
-        <NavLink to="/settings" className="codex-status">
+        <NavLink to={chatModel?.configured ? "/settings" : "/welcome"} className="codex-status">
           <span className={`status-dot ${chatModel?.configured ? "online" : "offline"}`} />
           <span>
             <strong>{chatModel?.configured ? "聊天模型已接入" : "聊天模型未配置"}</strong>
-            <small>{chatModel?.configured ? `${chatModel.settings.providerName} · ${chatModel.settings.model}` : "到设置里接入"}</small>
+            <small>{chatModel?.configured ? `${chatModel.settings.providerName} · ${chatModel.settings.model}` : "开始设置"}</small>
           </span>
         </NavLink>
 

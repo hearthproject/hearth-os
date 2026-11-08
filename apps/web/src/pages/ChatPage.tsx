@@ -410,7 +410,7 @@ export function ChatPage() {
             <div className="message-list">
               {!configured && (
                 <ChatNotice icon={<Settings2 size={15} />} tone="warn">
-                  还没有接入聊天模型。普通问答需要先到<Link to="/settings">设置</Link>里选择服务商并填写 API Key；执行类任务仍会尝试派出。
+                  还没有接入聊天模型。普通问答需要先完成<Link to="/welcome">首次设置</Link>；执行类任务仍会尝试派出。
                 </ChatNotice>
               )}
               {!executorReady && (

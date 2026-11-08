@@ -1,11 +1,12 @@
-import { useEffect } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, type ReactNode } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AppShell } from "./components/AppShell.tsx";
-import { subscribeToEvents } from "./lib/api.ts";
+import { api, subscribeToEvents } from "./lib/api.ts";
 import { ChatPage } from "./pages/ChatPage.tsx";
 import { DevicesPage } from "./pages/DevicesPage.tsx";
 import { MethodsPage } from "./pages/MethodsPage.tsx";
+import { OnboardingPage } from "./pages/OnboardingPage.tsx";
 import { SettingsPage } from "./pages/SettingsPage.tsx";
 import { SchedulesPage } from "./pages/SchedulesPage.tsx";
 import { TaskDetailPage } from "./pages/TaskDetailPage.tsx";
@@ -15,20 +16,36 @@ export default function App() {
   return (
     <>
       <EventBridge />
-      <Routes>
-        <Route element={<AppShell />}>
-          <Route index element={<ChatPage />} />
-          <Route path="tasks" element={<TasksPage />} />
-          <Route path="tasks/:id" element={<TaskDetailPage />} />
-          <Route path="methods" element={<MethodsPage />} />
-          <Route path="schedules" element={<SchedulesPage />} />
-          <Route path="devices" element={<DevicesPage />} />
-          <Route path="settings" element={<SettingsPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Route>
-      </Routes>
+      <FirstRunGate>
+        <Routes>
+          <Route path="welcome" element={<OnboardingPage />} />
+          <Route element={<AppShell />}>
+            <Route index element={<ChatPage />} />
+            <Route path="tasks" element={<TasksPage />} />
+            <Route path="tasks/:id" element={<TaskDetailPage />} />
+            <Route path="methods" element={<MethodsPage />} />
+            <Route path="schedules" element={<SchedulesPage />} />
+            <Route path="devices" element={<DevicesPage />} />
+            <Route path="settings" element={<SettingsPage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Route>
+        </Routes>
+      </FirstRunGate>
     </>
   );
+}
+
+function FirstRunGate({ children }: { children: ReactNode }) {
+  const location = useLocation();
+  const onboardingQuery = useQuery({
+    queryKey: ["onboarding"],
+    queryFn: api.onboarding,
+    staleTime: 10_000
+  });
+  if (location.pathname === "/" && onboardingQuery.data?.required) {
+    return <Navigate to="/welcome" replace />;
+  }
+  return <>{children}</>;
 }
 
 function EventBridge() {

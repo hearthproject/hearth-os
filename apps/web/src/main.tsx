@@ -5,6 +5,7 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./App.tsx";
 import { ViewModeProvider } from "./lib/view-mode.tsx";
 import "./styles.css";
+import "./wizard.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {
