@@ -33,6 +33,9 @@ import type {
   ExecutorSettingsResponse,
   EventWindow,
   EventEnvelope,
+  FeishuDomain,
+  FeishuIntegrationResponse,
+  FeishuTestResponse,
   HealthResponse,
   HermesProbeResponse,
   MaintenanceSnapshot,
@@ -236,6 +239,20 @@ export const api = {
     body: JSON.stringify({ skipped })
   }),
   resetOnboarding: () => request<OnboardingSnapshot>("/api/onboarding/reset", { method: "POST" }),
+  feishu: () => request<FeishuIntegrationResponse>("/api/integrations/feishu"),
+  saveFeishu: (input: {
+    enabled?: boolean;
+    appId?: string;
+    appSecret?: string;
+    allowedOpenIds?: string[];
+    domain?: FeishuDomain;
+  }) => request<FeishuIntegrationResponse>("/api/integrations/feishu", {
+    method: "PUT",
+    body: JSON.stringify(input)
+  }),
+  testFeishu: (input: { appId?: string; appSecret?: string; domain?: FeishuDomain } = {}) =>
+    request<FeishuTestResponse>("/api/integrations/feishu/test", { method: "POST", body: JSON.stringify(input) }),
+  reconnectFeishu: () => request<FeishuIntegrationResponse>("/api/integrations/feishu/reconnect", { method: "POST" }),
   system: () => request<SystemStatus>("/api/system"),
   stopSystem: () => request<SystemStatus>("/api/system/stop", { method: "POST" }),
   startSystem: () => request<SystemStatus>("/api/system/start", { method: "POST" }),

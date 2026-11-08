@@ -430,6 +430,36 @@ export interface ModelSettingsResponse {
   configured?: boolean;
 }
 
+export type FeishuDomain = "feishu" | "lark";
+export type FeishuConnectionState = "disabled" | "starting" | "connected" | "reconnecting" | "error";
+
+export interface FeishuSettingsView {
+  enabled: boolean;
+  appId: string;
+  hasAppSecret: boolean;
+  appSecretMasked: string | null;
+  allowedOpenIds: string[];
+  domain: FeishuDomain;
+  updatedAt: string | null;
+}
+
+export interface FeishuStatus {
+  state: FeishuConnectionState;
+  lastEventAt: string | null;
+  lastError: string | null;
+}
+
+export interface FeishuIntegrationResponse {
+  settings: FeishuSettingsView;
+  status: FeishuStatus;
+}
+
+export interface FeishuTestResponse {
+  ok: boolean;
+  error?: string;
+  elapsedMs: number;
+}
+
 export interface ExecutorSettingsResponse {
   settings: ExecutorSettingsView;
   hermes: HermesHealth;

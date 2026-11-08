@@ -4965,6 +4965,37 @@ body.modal-open {
   box-shadow: 0 0 0 2px var(--ember-tint);
 }
 
+.form-grid textarea {
+  min-height: 76px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  outline: none;
+  resize: vertical;
+}
+
+.form-grid textarea:focus {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 2px var(--ember-tint);
+}
+
+.form-grid .checkbox-field {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.form-grid .checkbox-field input {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  accent-color: var(--ink);
+}
+
 .settings-actions {
   display: flex;
   flex-wrap: wrap;
@@ -6697,7 +6728,7 @@ body.modal-open {
 
 .settings-tabs {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 8px;
   margin: 18px 0;
 }
@@ -7237,4 +7268,40 @@ body.modal-open {
   color: var(--ink-secondary);
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+
+.feishu-checklist {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-sunk);
+}
+
+.feishu-checklist h4 {
+  margin: 0 0 8px;
+  font-size: var(--fs-12);
+}
+
+.feishu-checklist ol {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--ink-secondary);
+  font-size: var(--fs-12);
+  line-height: 1.7;
+}
+
+.feishu-checklist code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+.feishu-checklist p {
+  margin: 8px 0 0;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+  line-height: 1.5;
 }

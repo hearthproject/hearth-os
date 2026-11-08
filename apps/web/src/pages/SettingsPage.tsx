@@ -10,6 +10,7 @@ import {
   FolderTree,
   KeyRound,
   Layers,
+  Link2,
   Loader2,
   Pencil,
   PlugZap,
@@ -33,9 +34,10 @@ import type {
 } from "../lib/types.ts";
 import { ProactiveSettingsPanel } from "../components/ProactiveSettingsPanel.tsx";
 import { ExecutorSettingsPanel } from "../components/ExecutorSettingsPanel.tsx";
+import { FeishuSettingsPanel } from "../components/FeishuSettingsPanel.tsx";
 import { desktopNotificationsEnabled, requestDesktopPermission, setDesktopNotificationsEnabled } from "../lib/notifications.ts";
 
-type SettingsTab = "executors" | "models" | "context" | "proactive" | "data";
+type SettingsTab = "executors" | "models" | "proactive" | "connections" | "context" | "data";
 
 interface ProfileDraft {
   name: string;
@@ -51,6 +53,7 @@ const TABS: Array<{ id: SettingsTab; label: string; hint: string; icon: typeof C
   { id: "executors", label: "执行器", hint: "默认执行器、安装状态与模型绑定", icon: Cpu },
   { id: "models", label: "模型", hint: "模型档案、聊天模型与连接测试", icon: Layers },
   { id: "proactive", label: "主动", hint: "提醒预算、安静时段与触发器", icon: Bell },
+  { id: "connections", label: "连接", hint: "飞书消息入口与外部账户", icon: Link2 },
   { id: "context", label: "上下文", hint: "接管策略、指标与清理", icon: Bot },
   { id: "data", label: "数据", hint: "SQLite、目录结构与迁移记录", icon: Database }
 ];
@@ -90,7 +93,7 @@ export function SettingsPage() {
         <div>
           <span className="eyebrow">本机控制台</span>
           <h1>设置</h1>
-          <p className="page-meta">按“执行器 → 模型 → 上下文 → 数据”完成配置。密钥只保存在本机 SQLite，浏览器只能看到掩码。</p>
+          <p className="page-meta">按“执行器 → 模型 → 主动 → 连接 → 上下文 → 数据”完成配置。密钥只保存在本机 SQLite，浏览器只能看到掩码。</p>
         </div>
         <div className="settings-defaults">
           <strong>一等执行器</strong>
@@ -119,6 +122,7 @@ export function SettingsPage() {
       {tab === "executors" && <ExecutorsTab />}
       {tab === "models" && <ModelsTab />}
       {tab === "proactive" && <ProactiveTab />}
+      {tab === "connections" && <ConnectionsTab />}
       {tab === "context" && <ContextTab />}
       {tab === "data" && <DataTab />}
     </div>
@@ -543,6 +547,22 @@ function ProactiveTab() {
         </div>
       </section>
       <p className="settings-hint">邮件新消息目前通过“来源新条目”触发；日历账户尚未接入。</p>
+    </section>
+  );
+}
+
+function ConnectionsTab() {
+  return (
+    <section className="settings-tab-panel">
+      <div className="settings-section-intro">
+        <div>
+          <h2>连接</h2>
+          <p>把 Hearth 接到你已经在用的消息入口。所有外部动作仍然经过审批和回执，不会因为来自手机而获得额外权限。</p>
+        </div>
+        <span className="status-chip">长连接 · 本机发起</span>
+      </div>
+      <FeishuSettingsPanel />
+      <p className="settings-hint">下一步会加入邮件账户；当前邮件发送仍只写入本机发件箱。</p>
     </section>
   );
 }
