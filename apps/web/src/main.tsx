@@ -7,6 +7,7 @@ import { ViewModeProvider } from "./lib/view-mode.tsx";
 import "./styles.css";
 import "./wizard.css";
 import "./notifications.css";
+import "./mail.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {

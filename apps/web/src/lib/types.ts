@@ -460,6 +460,59 @@ export interface FeishuTestResponse {
   elapsedMs: number;
 }
 
+export interface MailServerView {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  hasPassword: boolean;
+  passwordMasked: string | null;
+}
+
+export interface MailAccountView {
+  id: string;
+  name: string;
+  fromName: string;
+  fromAddress: string;
+  smtp: MailServerView;
+  imap: MailServerView;
+  syncEnabled: boolean;
+  syncIntervalMinutes: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MailServerInput {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  password?: string;
+}
+
+export interface MailAccountInput {
+  name: string;
+  fromName: string;
+  fromAddress: string;
+  smtp: MailServerInput;
+  imap: MailServerInput;
+  syncEnabled?: boolean;
+  syncIntervalMinutes?: number;
+}
+
+export interface MailTestResult {
+  ok: boolean;
+  smtp: { ok: boolean; error: string | null; elapsedMs: number };
+  imap: { ok: boolean; error: string | null; elapsedMs: number };
+}
+
+export interface MailSyncResult {
+  sourceId: string;
+  fetched: number;
+  changed: number;
+}
+
+
 export interface ExecutorSettingsResponse {
   settings: ExecutorSettingsView;
   hermes: HermesHealth;
