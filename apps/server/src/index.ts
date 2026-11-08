@@ -2,7 +2,7 @@ import { loadCodexProfile, describeCodexProfile } from "@hearth/codex-executor";
 import { buildServer } from "./app.ts";
 import { HOST, PORT } from "./config.ts";
 
-const app = await buildServer({ logger: true, startScheduler: true });
+const app = await buildServer({ logger: true, startScheduler: true, startProactive: true });
 
 try {
   const address = await app.listen({ host: HOST, port: PORT });

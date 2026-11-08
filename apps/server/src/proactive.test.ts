@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HearthStore } from "@hearth/eventlog";
-import type { EffectRecord } from "@hearth/core";
+import type { EffectRecord, EventEnvelope } from "@hearth/core";
 import { ProactiveService } from "./proactive.ts";
 import { HearthService } from "./service.ts";
 
@@ -17,7 +17,11 @@ describe("ProactiveService", () => {
     proactive = new ProactiveService(service, () => now);
   });
 
-  afterEach(() => store.close());
+  afterEach(() => {
+    proactive.stop();
+    vi.useRealTimers();
+    store.close();
+  });
 
   function taskWithDeadline(title = "准备发布说明"): string {
     const task = service.createTask({ title, goal: "完成发布准备" });
@@ -165,5 +169,56 @@ describe("ProactiveService", () => {
     expect(converted.suggestion.status).toBe("converted");
     expect(store.listAllEffects()).toHaveLength(1);
     expect(store.getEffect(effect.id)?.status).toBe("uncertain");
+  });
+
+  it("scans once on startup, then on the configured interval, and stops cleanly", () => {
+    vi.useFakeTimers();
+    const scan = vi.spyOn(proactive, "scan").mockReturnValue({ created: 0, updated: 0, delivered: 0, suggestions: [] });
+
+    proactive.start(60_000);
+    vi.advanceTimersByTime(5_000);
+    expect(scan).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(60_000);
+    expect(scan).toHaveBeenCalledTimes(2);
+
+    proactive.stop();
+    vi.advanceTimersByTime(120_000);
+    expect(scan).toHaveBeenCalledTimes(2);
+  });
+
+  it("debounces domain events into a single scan", () => {
+    vi.useFakeTimers();
+    const scan = vi.spyOn(proactive, "scan").mockReturnValue({ created: 0, updated: 0, delivered: 0, suggestions: [] });
+    proactive.start(60_000);
+    vi.advanceTimersByTime(5_000);
+    scan.mockClear();
+
+    const event: EventEnvelope = {
+      seq: 1,
+      id: "event-task-updated",
+      type: "task.updated",
+      taskId: "task-1",
+      runId: null,
+      payload: {},
+      originInstanceId: null,
+      originSeq: null,
+      createdAt: now.toISOString()
+    };
+    service.bus.publish(event);
+    vi.advanceTimersByTime(1_999);
+    expect(scan).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1);
+    expect(scan).toHaveBeenCalledTimes(1);
+
+    service.bus.publish({
+      ...event,
+      seq: 2,
+      id: "event-approval-updated",
+      type: "approval.updated"
+    });
+    vi.advanceTimersByTime(2_000);
+    expect(scan).toHaveBeenCalledTimes(2);
   });
 });

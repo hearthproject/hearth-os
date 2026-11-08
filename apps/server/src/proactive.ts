@@ -18,6 +18,15 @@ const DEFAULT_AGGREGATE_MINUTES = 30;
 const METRIC_WINDOW_DAYS = 7;
 const DEADLINE_WINDOW_MS = 24 * 60 * 60 * 1000;
 const APPROVAL_AGE_MS = 2 * 60 * 60 * 1000;
+const SCAN_TRIGGER_EVENTS = new Set([
+  "task.created",
+  "task.updated",
+  "approval.created",
+  "approval.updated",
+  "effect.updated",
+  "source.item.updated",
+  "source.updated"
+]);
 
 export const DEFAULT_PROACTIVE_SETTINGS: ProactiveSettings = {
   enabled: true,
@@ -91,10 +100,46 @@ interface Candidate {
 export class ProactiveService {
   private readonly service: HearthService;
   private readonly clock: () => Date;
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private initialTimer: ReturnType<typeof setTimeout> | null = null;
+  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private unsubscribe: (() => void) | null = null;
 
   constructor(service: HearthService, clock: () => Date = () => new Date()) {
     this.service = service;
     this.clock = clock;
+  }
+
+  start(intervalMs = 5 * 60_000): void {
+    if (this.timer) return;
+    const tick = () => {
+      try {
+        this.scan();
+      } catch {
+        // A failed scan must not block the scheduler or the event loop.
+      }
+    };
+    this.unsubscribe = this.service.bus.subscribe((event) => {
+      if (!SCAN_TRIGGER_EVENTS.has(event.type)) return;
+      if (this.debounceTimer) clearTimeout(this.debounceTimer);
+      this.debounceTimer = setTimeout(tick, 2_000);
+      this.debounceTimer.unref?.();
+    });
+    this.timer = setInterval(tick, Math.max(60_000, intervalMs));
+    this.timer.unref?.();
+    this.initialTimer = setTimeout(tick, 5_000);
+    this.initialTimer.unref?.();
+  }
+
+  stop(): void {
+    if (this.timer) clearInterval(this.timer);
+    if (this.initialTimer) clearTimeout(this.initialTimer);
+    if (this.debounceTimer) clearTimeout(this.debounceTimer);
+    this.timer = null;
+    this.initialTimer = null;
+    this.debounceTimer = null;
+    this.unsubscribe?.();
+    this.unsubscribe = null;
   }
 
   settings(): ProactiveSettings {
@@ -217,7 +262,11 @@ export class ProactiveService {
           updatedAt: this.nowIso()
         };
         this.emitSuggestion("suggestion.updated", next);
-        this.emitSuggestionEvent(suggestion.id, "delivered", { priority: suggestion.priority });
+        this.emitSuggestionEvent(suggestion.id, "delivered", {
+          priority: suggestion.priority,
+          title: suggestion.title,
+          whyNow: suggestion.whyNow
+        });
         used += 1;
         delivered += 1;
         const idx = touched.findIndex((item) => item.id === suggestion.id);

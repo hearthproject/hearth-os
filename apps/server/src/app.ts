@@ -422,6 +422,7 @@ export interface BuildServerOptions {
   serveWeb?: boolean;
   startScheduler?: boolean;
   startMaintenance?: boolean;
+  startProactive?: boolean;
   effectExecutor?: EffectExecutor;
   sourceContentRoot?: string;
   outboxRoot?: string;
@@ -559,6 +560,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
   const diagnostics = new DiagnosticsService({ service, health, maintenance, webDist: WEB_DIST });
   if (options.startMaintenance ?? options.startScheduler) maintenance.start();
+  if (options.startProactive) proactive.start();
   const app = Fastify({
     logger: options.logger ?? false,
     bodyLimit: 8_000_000
@@ -579,6 +581,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
 
   app.addHook("onClose", async () => {
+    proactive.stop();
     maintenance.stop();
     schedules.stop();
     await scheduler?.stop();
