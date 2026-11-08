@@ -999,6 +999,27 @@ describe("Hearth scheduler", () => {
     expect(store?.listHandoffs(task.id)).toHaveLength(0);
   });
 
+  it("captures a failed task as an experience candidate when auto-capture is enabled", async () => {
+    const service = setup();
+    new MemoryService(service).updateSettings({ autoCapture: "experience" });
+    const conversation = fullConversation();
+    const runner: CodexRunner = async () => FAKE_RESULT;
+    const executorHealth: ExecutorHealthProvider = (executorId) => executorId === "codex"
+      ? { canRun: true, issues: [] }
+      : { canRun: false, issues: ["未安装"] };
+    scheduler = makeScheduler(service, runner, { executorHealth });
+    scheduler.start();
+
+    const task = service.createTask({ templateId: "T01", executorId: "codex", conversationId: conversation.id });
+    const failed = await waitForStatus(service, task.id, "recoverable");
+    expect(failed.error?.message).toContain("缺少期望产物");
+
+    const captured = store?.listMemories({ kind: "experience", limit: 10 })
+      .find((memory) => memory.derivedFromId === task.id);
+    expect(captured).toBeTruthy();
+    expect(captured?.source.type).toBe("task");
+  });
+
   function setup(): HearthService {
     store = new HearthStore(":memory:");
     tempDir = mkdtempSync(join(tmpdir(), "hearth-scheduler-"));

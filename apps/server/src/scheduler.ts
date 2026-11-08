@@ -864,6 +864,11 @@ export class HearthScheduler {
       this.cancelled.delete(taskId);
       if (this.service.store.getTask(taskId)?.status !== "waiting_approval") this.releaseLease(taskId);
       this.learnFromTask(taskId);
+      try {
+        this.memory.captureExperience(taskId);
+      } catch {
+        // Experience capture is best effort and never changes the task outcome.
+      }
     }
   }
 
@@ -1114,11 +1119,6 @@ export class HearthScheduler {
         status: "completed", currentRunId: runId, nextAction: "产物已保存",
         error: null, resultSummary: result.finalResponse
       }, runId);
-      try {
-        this.memory.captureExperience(taskId);
-      } catch {
-        // Experience capture is best effort and never changes task success.
-      }
       this.refreshTaskSummary(taskId);
       return { status: "completed", run: { ...run, status: "completed", threadId: result.threadId, usage: result.usage }, executorId, outDir, error: null, failure: null, aborted: controller.signal.aborted, leaseLost: false, cancelled: false };
     } catch (error) {
