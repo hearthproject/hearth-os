@@ -2,9 +2,13 @@ import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { ChatAttachment, ChatMessageRecord } from "@hearth/core";
+import type { ApprovalRecord, ChatAttachment, ChatMessageRecord } from "@hearth/core";
+import { defaultConversationSettings } from "@hearth/core";
 import { HearthStore } from "@hearth/eventlog";
 import { buildServer } from "./app.ts";
+import type { ApprovalManager } from "./approvals.ts";
+import type { OutboxService } from "./outbox.ts";
+import { HearthService } from "./service.ts";
 import {
   FeishuService,
   FeishuSettingsStore,
@@ -71,10 +75,11 @@ class FakeTransport implements FeishuTransport {
 
 class FakeChat implements FeishuChatClient {
   calls: Array<{ conversationId?: string | undefined; message: string; attachments: ChatAttachment[] }> = [];
+  conversationId = "conv-1";
 
   async send(input: { conversationId?: string | undefined; message: string; attachments: ChatAttachment[] }): Promise<FeishuChatResult> {
     this.calls.push(input);
-    return { conversationId: "conv-1", messages: [assistant()], error: null };
+    return { conversationId: this.conversationId, messages: [assistant()], error: null };
   }
 }
 
@@ -212,6 +217,128 @@ describe("FeishuService", () => {
     expect(chat.calls[0]?.attachments).toHaveLength(1);
     expect(chat.calls[0]?.attachments[0]).toMatchObject({ name: "notes.txt", mimeType: "text/plain", bytes: 15 });
     expect(readdirSync(join(root, "attachments")).some((name) => name.endsWith(".txt"))).toBe(true);
+  });
+});
+
+describe("Feishu notifications and approvals", () => {
+  let store: HearthStore;
+  let root: string;
+  let hearth: HearthService;
+  let service: FeishuService;
+  let transport: FakeTransport;
+  let chat: FakeChat;
+  let decisions: Array<{ id: string; decision: string; hash: string }>;
+  let reconciled: string[];
+  let approval: ApprovalRecord;
+
+  beforeEach(async () => {
+    store = new HearthStore(":memory:");
+    root = mkdtempSync(join(tmpdir(), "hearth-feishu-notify-"));
+    hearth = new HearthService(store);
+    transport = new FakeTransport();
+    chat = new FakeChat();
+    decisions = [];
+    reconciled = [];
+    const fakeApprovals = {
+      async decide(id: string, decision: string, hash: string) {
+        decisions.push({ id, decision, hash });
+        const updated = hearth.updateApproval(id, {
+          status: decision === "approve" ? "approved" : "rejected",
+          decidedAt: new Date().toISOString()
+        });
+        return { approval: updated, task: store.getTask(updated.taskId)!, effect: null };
+      }
+    } as unknown as ApprovalManager;
+    const fakeOutbox = {
+      reconcileApproval(id: string) {
+        reconciled.push(id);
+        return null;
+      }
+    } as unknown as OutboxService;
+    service = new FeishuService({
+      store,
+      secretBox: new SecretBox(Buffer.alloc(32, 11)),
+      attachmentRoot: join(root, "attachments"),
+      transportFactory: () => transport,
+      chatClient: chat,
+      service: hearth,
+      approvals: fakeApprovals,
+      outbox: fakeOutbox
+    });
+    service.settingsStore.save({
+      enabled: true,
+      appId: "cli_x",
+      appSecret: "secret",
+      allowedOpenIds: ["ou_user"],
+      domain: "feishu"
+    });
+    const conversation = store.createConversation("飞书任务", defaultConversationSettings());
+    chat.conversationId = conversation.id;
+    await service.start("http://127.0.0.1:4317");
+
+    const parsed = parseFeishuMessage(event({ text: "帮我处理一下" }))!;
+    transport.handler?.(parsed);
+    await waitFor(() => service.route("oc_chat") !== null);
+
+    const task = hearth.createTask({ title: "发送邮件", goal: "发送邮件", conversationId: conversation.id });
+    store.appendEvent({ type: "task.updated", taskId: task.id, payload: { status: "waiting_approval", updatedAt: new Date().toISOString() } });
+    approval = {
+      id: "abcd1234-1111-4222-8333-444455556666",
+      taskId: task.id,
+      runId: "run-1",
+      kind: "outbox.local-write",
+      summary: "将草稿写入发件箱",
+      target: { draftId: "draft-1" },
+      preview: { impact: "只写入本机发件箱，不会发送" },
+      parameterHash: "a".repeat(64),
+      status: "pending",
+      expiresAt: new Date(Date.now() + 600_000).toISOString(),
+      decidedAt: null,
+      effectId: null,
+      createdAt: new Date().toISOString()
+    };
+    hearth.createApproval(approval);
+  });
+
+  afterEach(async () => {
+    await service.stop();
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("forwards assistant chat messages for mapped conversations", async () => {
+    hearth.appendChatMessage({
+      id: "msg-task-status",
+      conversationId: chat.conversationId,
+      role: "assistant",
+      content: "任务「发送邮件」已完成。",
+      taskId: null,
+      attachments: [],
+      createdAt: new Date().toISOString()
+    });
+    await waitFor(() => transport.sent.some((text) => text.includes("任务「发送邮件」已完成")));
+  });
+
+  it("sends an approval prompt and accepts a text approval command", async () => {
+    await waitFor(() => transport.sent.some((text) => text.includes("/approve abcd1234")));
+    const prompt = transport.sent.find((text) => text.includes("/approve abcd1234"))!;
+    expect(prompt).toContain("只写入本机发件箱");
+
+    const approve = parseFeishuMessage(event({ text: "/approve abcd1234" }))!;
+    approve.messageId = "om_approve";
+    transport.handler?.(approve);
+    await waitFor(() => decisions.length === 1);
+    expect(decisions[0]).toMatchObject({ id: approval.id, decision: "approve", hash: approval.parameterHash });
+    expect(reconciled).toEqual([approval.id]);
+    await waitFor(() => transport.sent.some((text) => text.includes("已批准")));
+  });
+
+  it("rejects an unknown approval prefix", async () => {
+    const reject = parseFeishuMessage(event({ text: "/approve deadbeef" }))!;
+    reject.messageId = "om_reject";
+    transport.handler?.(reject);
+    await waitFor(() => transport.sent.some((text) => text.includes("没有找到")));
+    expect(decisions).toHaveLength(0);
   });
 });
 

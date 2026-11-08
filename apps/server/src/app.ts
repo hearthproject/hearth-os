@@ -523,6 +523,9 @@ export async function buildServer(options: BuildServerOptions = {}) {
     store,
     secretBox,
     attachmentRoot,
+    service,
+    approvals,
+    outbox,
     ...(options.feishuTransportFactory ? { transportFactory: options.feishuTransportFactory } : {}),
     ...(options.feishuChatClient ? { chatClient: options.feishuChatClient } : {})
   });

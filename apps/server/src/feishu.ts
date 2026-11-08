@@ -2,9 +2,12 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import type { FastifyInstance } from "fastify";
-import type { ChatAttachment, ChatMessageRecord } from "@hearth/core";
+import type { ApprovalRecord, ChatAttachment, ChatMessageRecord, TaskRecord } from "@hearth/core";
 import type { HearthStore } from "@hearth/eventlog";
 import type { SecretBox } from "./secrets.ts";
+import type { HearthService } from "./service.ts";
+import type { ApprovalManager } from "./approvals.ts";
+import type { OutboxService } from "./outbox.ts";
 import { SdkFeishuTransport, verifyFeishuCredentials } from "./feishu-transport.ts";
 
 export type FeishuDomain = "feishu" | "lark";
@@ -270,10 +273,14 @@ export class FeishuService {
   private readonly transportFactory: FeishuTransportFactory;
   private readonly chatClient: FeishuChatClient;
   private readonly now: () => Date;
+  private readonly service: HearthService | null;
+  private readonly approvals: ApprovalManager | null;
+  private readonly outbox: OutboxService | null;
   private transport: FeishuTransport | null = null;
   private baseUrl = "";
   private state: FeishuStatus = { state: "disabled", lastEventAt: null, lastError: null };
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
+  private unsubscribe: (() => void) | null = null;
   private readonly seenMessages = new Set<string>();
   private readonly queues = new Map<string, Promise<void>>();
   private readonly sentMessageIds = new Set<string>();
@@ -284,6 +291,9 @@ export class FeishuService {
     attachmentRoot: string;
     transportFactory?: FeishuTransportFactory;
     chatClient?: FeishuChatClient;
+    service?: HearthService;
+    approvals?: ApprovalManager;
+    outbox?: OutboxService;
     now?: () => Date;
   }) {
     this.store = options.store;
@@ -291,6 +301,9 @@ export class FeishuService {
     this.settingsStore = new FeishuSettingsStore(options.store, options.secretBox);
     this.transportFactory = options.transportFactory ?? ((settings, callbacks) => new SdkFeishuTransport(settings, callbacks));
     this.chatClient = options.chatClient ?? new LocalFeishuChatClient(() => this.baseUrl);
+    this.service = options.service ?? null;
+    this.approvals = options.approvals ?? null;
+    this.outbox = options.outbox ?? null;
     this.now = options.now ?? (() => new Date());
     mkdirSync(this.attachmentRoot, { recursive: true });
   }
@@ -345,6 +358,7 @@ export class FeishuService {
         }
       );
       await this.transport.start((message) => this.enqueue(message));
+      this.subscribeEvents();
       if (this.state.state === "starting") {
         this.clearConnectTimer();
         this.state = { ...this.state, state: "connected", lastError: null };
@@ -360,6 +374,8 @@ export class FeishuService {
   }
 
   async stop(): Promise<void> {
+    this.unsubscribe?.();
+    this.unsubscribe = null;
     await this.disposeTransport();
     this.state = { state: "disabled", lastEventAt: this.state.lastEventAt, lastError: null };
   }
@@ -419,6 +435,16 @@ export class FeishuService {
       return;
     }
 
+    const command = parseApprovalCommand(message.text);
+    if (command) {
+      await this.handleApprovalCommand(message, command);
+      return;
+    }
+    if (/^(?:\/approve|\/reject|批准|拒绝)(?:\s|$)/i.test(message.text.trim())) {
+      await this.safeSend(message.chatId, "用法：/approve <审批ID前8位> 或 /reject <审批ID前8位>");
+      return;
+    }
+
     await this.safeSend(message.chatId, "收到，正在处理…");
     try {
       const attachments = await this.prepareAttachments(message);
@@ -439,6 +465,95 @@ export class FeishuService {
     } catch (error) {
       await this.safeSend(message.chatId, `处理失败：${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  private subscribeEvents(): void {
+    if (this.unsubscribe || !this.service) return;
+    this.unsubscribe = this.service.bus.subscribe((event) => {
+      if (event.type === "chat.message.created") {
+        const payload = event.payload as { message?: ChatMessageRecord; conversationId?: string } | null;
+        if (payload?.message) void this.forwardChatMessage(payload.message, payload.conversationId);
+      } else if (event.type === "approval.created") {
+        void this.notifyApproval(event.payload as ApprovalRecord);
+      }
+    });
+  }
+
+  private async forwardChatMessage(message: ChatMessageRecord, conversationId?: string): Promise<void> {
+    if (message.role !== "assistant" || !message.content.trim()) return;
+    if (this.sentMessageIds.has(message.id)) return;
+    const chatId = (conversationId ? this.findChatByConversation(conversationId) : null)
+      ?? this.findChatByConversation(message.conversationId);
+    if (!chatId) return;
+    this.sentMessageIds.add(message.id);
+    await this.safeSend(chatId, message.content);
+  }
+
+  private async notifyApproval(payload: ApprovalRecord): Promise<void> {
+    if (!payload?.id || !this.service) return;
+    const approval = this.service.store.getApproval(payload.id);
+    if (!approval || approval.status !== "pending") return;
+    const task = this.service.store.getTask(approval.taskId);
+    if (!task || task.status !== "waiting_approval") return;
+    const chatId = this.findChatByConversation(task.conversationId);
+    if (!chatId) return;
+    const impact = isRecord(approval.preview) && typeof approval.preview.impact === "string"
+      ? approval.preview.impact
+      : "这是一个需要你确认的外部动作。";
+    const prefix = approval.id.slice(0, 8);
+    await this.safeSend(chatId, [
+      `任务「${task.title}」等待你确认外部动作。`,
+      `审批：${approval.summary}`,
+      `影响：${impact}`,
+      `有效期至：${new Date(approval.expiresAt).toLocaleString("zh-CN")}`,
+      "",
+      `批准：/approve ${prefix}`,
+      `拒绝：/reject ${prefix}`
+    ].join("\n"));
+  }
+
+  private async handleApprovalCommand(
+    message: FeishuInboundMessage,
+    command: { decision: "approve" | "reject"; prefix: string }
+  ): Promise<void> {
+    if (!this.service || !this.approvals || !this.outbox) {
+      await this.safeSend(message.chatId, "审批命令当前不可用。");
+      return;
+    }
+    const route = this.route(message.chatId);
+    if (!route) {
+      await this.safeSend(message.chatId, "这个会话还没有关联任务。");
+      return;
+    }
+    const tasks = this.service.store.listTasks().filter((task) => task.conversationId === route.conversationId);
+    const matches = tasks
+      .flatMap((task) => this.service!.store.listApprovals(task.id))
+      .filter((approval) => approval.status === "pending" && approval.id.startsWith(command.prefix));
+    const unique = [...new Map(matches.map((approval) => [approval.id, approval])).values()];
+    if (unique.length === 0) {
+      await this.safeSend(message.chatId, `没有找到以 ${command.prefix} 开头的待处理审批。`);
+      return;
+    }
+    if (unique.length > 1) {
+      await this.safeSend(message.chatId, `有 ${unique.length} 个待处理审批以 ${command.prefix} 开头，请输入更长的前缀。`);
+      return;
+    }
+    const approval = unique[0]!;
+    try {
+      await this.approvals.decide(approval.id, command.decision, approval.parameterHash);
+      this.outbox.reconcileApproval(approval.id);
+      await this.safeSend(message.chatId, command.decision === "approve" ? "已批准，正在执行外部动作。" : "已拒绝，没有产生外部副作用。");
+    } catch (error) {
+      await this.safeSend(message.chatId, `审批失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private findChatByConversation(conversationId: string | null | undefined): string | null {
+    if (!conversationId) return null;
+    for (const [chatId, route] of Object.entries(this.loadRoutes())) {
+      if (route.conversationId === conversationId) return chatId;
+    }
+    return null;
   }
 
   private async prepareAttachments(message: FeishuInboundMessage): Promise<ChatAttachment[]> {
@@ -517,6 +632,19 @@ export class FeishuService {
 
 function normalizeOpenIds(values: string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))].slice(0, 50);
+}
+
+function parseApprovalCommand(text: string): { decision: "approve" | "reject"; prefix: string } | null {
+  const trimmed = text.trim();
+  const approve = trimmed.match(/^(?:\/approve|批准)\s+([0-9a-f-]{6,36})$/i);
+  if (approve) return { decision: "approve", prefix: approve[1]!.toLowerCase() };
+  const reject = trimmed.match(/^(?:\/reject|拒绝)\s+([0-9a-f-]{6,36})$/i);
+  if (reject) return { decision: "reject", prefix: reject[1]!.toLowerCase() };
+  return null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function sanitizeFileName(name: string, fallbackExtension: string): string {
