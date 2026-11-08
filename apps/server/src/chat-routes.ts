@@ -11,6 +11,7 @@ import { loadExecutorSettings, type ExecutorSettingsStore } from "./executor-set
 import { EXECUTOR_FALLBACK_ORDER, executorName, resolveExecutorFromEnabled } from "./executors.ts";
 import { executorHealth, isExecutorManagedInstalled } from "./executor-runtime.ts";
 import type { HearthService } from "./service.ts";
+import type { MemoryService } from "./memory.ts";
 import { ModelRegistryError, type ModelRegistry } from "./model-registry.ts";
 import { chatSystemPrompt, conversationTitle, decideRoute, planExecution } from "./chat.ts";
 import { listModels, ModelClientError, completeChat, streamChat, type ChatMessage } from "./model-client.ts";
@@ -87,6 +88,7 @@ export interface ChatRouteOptions {
   codexEnv?: (() => Record<string, string>) | undefined;
   modelSettingsForExecutor?: ((executorId: ExecutorId) => ModelSettings | null) | undefined;
   executorHealth?: ((executorId: ExecutorId) => ExecutorHealth) | undefined;
+  memory?: MemoryService | undefined;
 }
 
 export async function registerChatRoutes(app: FastifyInstance, options: ChatRouteOptions): Promise<void> {
@@ -448,7 +450,28 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     const history = store.listChatMessages(conversation.id)
       .slice(-24)
       .map((item): ChatMessage => ({ role: item.role, content: item.content }));
-    const messages: ChatMessage[] = [{ role: "system", content: chatSystemPrompt() }, ...history];
+    let memoryContext = "";
+    if (options.memory) {
+      try {
+        const recalled = options.memory.recallForConversation({
+          conversationId: conversation.id,
+          text: userContent
+        });
+        if (recalled.memories.length > 0) {
+          memoryContext = recalled.contextPack;
+          send("memory", {
+            count: recalled.memories.length,
+            recallIds: recalled.recalls.map((recall) => recall.id)
+          });
+        }
+      } catch {
+        // Memory recall is best effort and never blocks the answer.
+      }
+    }
+    const messages: ChatMessage[] = [
+      { role: "system", content: [chatSystemPrompt(), memoryContext].filter(Boolean).join("\n\n") },
+      ...history
+    ];
 
     try {
       let answer = "";

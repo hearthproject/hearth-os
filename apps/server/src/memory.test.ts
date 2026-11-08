@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { defaultConversationSettings } from "@hearth/core";
 import { HearthStore } from "@hearth/eventlog";
 import { MemoryService } from "./memory.ts";
 import { HearthService } from "./service.ts";
@@ -51,6 +52,22 @@ describe("MemoryService", () => {
     expect(recalled.contextPack).toContain("<hearth-memories");
     expect(recalled.recalls[0]?.reason).toBeTruthy();
     expect(store.getMemory(created.id)?.recallCount).toBe(1);
+  });
+
+  it("recalls memories for a conversation and records a chat audit id", () => {
+    const conversation = store.createConversation("Ember 发布计划", defaultConversationSettings());
+    const created = createMemory();
+    memory.confirm(created.id);
+
+    const recalled = memory.recallForConversation({
+      conversationId: conversation.id,
+      text: "发布窗口是什么时候？"
+    });
+
+    expect(recalled.memories.map((item) => item.id)).toContain(created.id);
+    expect(recalled.recalls[0]?.taskId).toBe(`chat:${conversation.id}`);
+    expect(store.listMemoryRecalls(created.id)[0]?.taskId).toBe(`chat:${conversation.id}`);
+    expect(recalled.contextPack).toContain("<hearth-memories");
   });
 
   it("enforces recall item and character budgets", () => {

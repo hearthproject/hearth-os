@@ -64,6 +64,13 @@ export interface RecallInput {
   maxChars?: number;
 }
 
+export interface RecallConversationInput {
+  conversationId: string;
+  text?: string;
+  maxItems?: number;
+  maxChars?: number;
+}
+
 export interface RecallResult {
   memories: MemoryRecord[];
   recalls: MemoryRecall[];
@@ -315,12 +322,40 @@ export class MemoryService {
   }
 
   recall(input: RecallInput): RecallResult {
-    const settings = this.settings();
     const task = this.service.store.getTask(input.taskId);
     if (!task) throw new MemoryError("TASK_NOT_FOUND", "任务不存在", 404);
+    return this.recallQuery({
+      auditTaskId: task.id,
+      queryText: [task.title, task.goal, input.text ?? ""].join("\n"),
+      runId: input.runId ?? null,
+      ...(input.maxItems !== undefined ? { maxItems: input.maxItems } : {}),
+      ...(input.maxChars !== undefined ? { maxChars: input.maxChars } : {})
+    });
+  }
+
+  recallForConversation(input: RecallConversationInput): RecallResult {
+    const conversation = this.service.store.getConversation(input.conversationId);
+    if (!conversation) throw new MemoryError("CONVERSATION_NOT_FOUND", "对话不存在", 404);
+    return this.recallQuery({
+      auditTaskId: `chat:${conversation.id}`,
+      queryText: [conversation.title, input.text ?? ""].join("\n"),
+      runId: null,
+      ...(input.maxItems !== undefined ? { maxItems: input.maxItems } : {}),
+      ...(input.maxChars !== undefined ? { maxChars: input.maxChars } : {})
+    });
+  }
+
+  private recallQuery(input: {
+    auditTaskId: string;
+    queryText: string;
+    runId: string | null;
+    maxItems?: number | undefined;
+    maxChars?: number | undefined;
+  }): RecallResult {
+    const settings = this.settings();
     const maxItems = clamp(input.maxItems ?? settings.maxItems, 1, 50);
     const maxChars = clamp(input.maxChars ?? settings.maxChars, 200, 100_000);
-    const queryText = [task.title, task.goal, input.text ?? ""].join("\n");
+    const queryText = input.queryText;
     const terms = termsOf(queryText);
     const now = this.clock().getTime();
     const candidates = this.service.store.listMemories({ status: "active", limit: 1000 })
@@ -348,8 +383,8 @@ export class MemoryService {
       const recall: MemoryRecall = {
         id: randomUUID(),
         memoryId: item.memory.id,
-        taskId: task.id,
-        runId: input.runId ?? null,
+        taskId: input.auditTaskId,
+        runId: input.runId,
         reason: item.reason,
         score: item.score,
         createdAt: this.nowIso()

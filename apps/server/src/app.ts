@@ -577,7 +577,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
     codexProfile,
     codexEnv,
     modelSettingsForExecutor,
-    executorHealth
+    executorHealth,
+    memory
   });
 
   app.addHook("onClose", async () => {

@@ -697,6 +697,82 @@ describe("chat-first API", () => {
     await app.close();
   });
 
+  it("injects confirmed memories into direct chat and reports them", async () => {
+    const modelRequests: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : {};
+      const messages = Array.isArray(body.messages) ? body.messages as Array<{ content?: string }> : [];
+      if (messages.some((message) => message.content?.includes("意图路由器"))) {
+        return new Response(JSON.stringify({
+          choices: [{ message: { content: '{"action":"chat","title":"","reason":"普通问答"}' } }]
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      modelRequests.push(body);
+      return new Response(
+        'data: {"choices":[{"delta":{"content":"项目代号是 Ember。"}}]}\n\ndata: [DONE]\n\n',
+        { status: 200, headers: { "content-type": "text/event-stream" } }
+      );
+    }));
+    try {
+      const app = await buildServer({
+        store,
+        serveWeb: false,
+        masterKeyPath: join(root, "master.key"),
+        modelSettingsPath: join(root, "settings.json"),
+        attachmentRoot: join(root, "files")
+      });
+      const saved = await app.inject({
+        method: "PUT",
+        url: "/api/model-settings",
+        payload: {
+          providerId: "custom",
+          providerName: "Test",
+          baseUrl: "https://models.example.com/v1",
+          model: "test-model",
+          apiKey: "test-key"
+        }
+      });
+      expect(saved.statusCode, saved.body).toBe(200);
+
+      const created = await app.inject({
+        method: "POST",
+        url: "/api/memory",
+        payload: {
+          kind: "project",
+          content: "项目代号是 Ember，发布窗口在十一月。",
+          subjectKey: "project.ember",
+          scope: "global",
+          source: { type: "user", id: null, label: "用户说明", excerpt: null },
+          confidence: "high",
+          sensitivity: "normal",
+          allowRecall: true
+        }
+      });
+      expect(created.statusCode, created.body).toBe(201);
+      const confirmed = await app.inject({
+        method: "POST",
+        url: `/api/memory/${created.json().id as string}/confirm`
+      });
+      expect(confirmed.statusCode, confirmed.body).toBe(200);
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/chat",
+        payload: { message: "我们项目的发布窗口是什么时候？" }
+      });
+      const events = parseSse(response.body);
+      expect(events.find((event) => event.event === "memory")?.data.count).toBe(1);
+      expect(events.find((event) => event.event === "error")).toBeUndefined();
+      expect(modelRequests).toHaveLength(1);
+      const system = (modelRequests[0]?.messages as Array<{ content: string }>)[0]?.content ?? "";
+      expect(system).toContain("<hearth-memories");
+      expect(system).toContain("Ember");
+      await app.close();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("answers a question about a pasted URL instead of dispatching a task", async () => {
     const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
     const response = await app.inject({

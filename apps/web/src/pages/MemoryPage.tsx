@@ -122,13 +122,14 @@ export function MemoryPage() {
           )}
 
           <section className="panel memory-recall-log">
-            <div className="panel-head"><h2>最近召回</h2><span className="panel-meta">每一次注入都有原因和任务</span></div>
+            <div className="panel-head"><h2>最近召回</h2><span className="panel-meta">每一次注入都有原因和来源</span></div>
             {(snapshot.recalls ?? []).slice(0, 10).map((recall) => {
               const memory = snapshot.memories.find((item) => item.id === recall.memoryId);
+              const chatRecall = recall.taskId.startsWith("chat:");
               return (
                 <div className="memory-recall-row" key={recall.id}>
                   <div><strong>{memory ? KIND_LABELS[memory.kind] + " · " + truncate(memory.content, 90) : "已删除记忆"}</strong><span>{recall.reason}</span></div>
-                  <Link to={"/tasks/" + recall.taskId}>{formatDate(recall.createdAt)}</Link>
+                  <Link to={chatRecall ? "/" : "/tasks/" + recall.taskId}>{chatRecall ? "对话 · " : ""}{formatDate(recall.createdAt)}</Link>
                 </div>
               );
             })}

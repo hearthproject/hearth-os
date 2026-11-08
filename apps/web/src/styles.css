@@ -7219,3 +7219,22 @@ body.modal-open {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.chat-memory-note {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  margin: 2px 0 8px 42px;
+  padding: 5px 9px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunk);
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+}
+
+.chat-memory-note a {
+  color: var(--ink-secondary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}

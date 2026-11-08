@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   ArrowUp,
+  Brain,
   Check,
   CheckCircle2,
   Copy,
@@ -73,6 +74,7 @@ export function ChatPage() {
   const [streaming, setStreaming] = useState("");
   const [reasoning, setReasoning] = useState("");
   const [routing, setRouting] = useState<RoutingState | null>(null);
+  const [memoryCount, setMemoryCount] = useState(0);
   const [proposals, setProposals] = useState<TaskProposalRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [draftSettings, setDraftSettings] = useState<ConversationSettings | null>(null);
@@ -152,6 +154,7 @@ export function ChatPage() {
     setStreaming("");
     setReasoning("");
     setRouting(null);
+    setMemoryCount(0);
     setProposals([]);
     setDraftSettings(null);
     if (id) localStorage.setItem("hearth.conversation", id);
@@ -262,6 +265,7 @@ export function ChatPage() {
     setStreaming("");
     setReasoning("");
     setRouting(null);
+    setMemoryCount(0);
     setError(null);
     setSending(true);
     const controller = new AbortController();
@@ -290,6 +294,9 @@ export function ChatPage() {
               setMessages((prev) => [...prev, data as ChatMessageRecord]);
             } else if (event === "routing") {
               setRouting(data as RoutingState);
+            } else if (event === "memory") {
+              const payload = data as { count?: number };
+              setMemoryCount(typeof payload.count === "number" ? payload.count : 0);
             } else if (event === "delta") {
               answer += (data as { text: string }).text;
               setStreaming(answer);
@@ -433,6 +440,12 @@ export function ChatPage() {
                 />
               ))}
               {(streaming || reasoning) && <AssistantBubble content={streaming} reasoning={reasoning} streaming />}
+              {memoryCount > 0 && !sending && (
+                <div className="chat-memory-note">
+                  <Brain size={13} /> 本次回答参考了 {memoryCount} 条记忆
+                  <Link to="/memory">查看记忆</Link>
+                </div>
+              )}
               {sending && !streaming && !reasoning && (
                 <div className="typing-row">
                   <Loader2 size={14} className="spin" />
