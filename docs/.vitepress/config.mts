@@ -5,14 +5,14 @@ import { enDeliveryStages, zhDeliveryStages } from './delivery-sidebar.mjs'
 const zhNav = [
   { text: '设计说明', link: '/design/', activeMatch: '^/design/' },
   { text: '交付路线', link: '/delivery/', activeMatch: '^/delivery/' },
-  { text: '开发日志', link: '/log/day-04', activeMatch: '^/log/' },
+  { text: '开发日志', link: '/log/day-05', activeMatch: '^/log/' },
   { text: '附录', link: '/reference/', activeMatch: '^/reference/' }
 ]
 
 const enNav = [
   { text: 'Design', link: '/en/design/', activeMatch: '^/en/design/' },
   { text: 'Delivery', link: '/en/delivery/', activeMatch: '^/en/delivery/' },
-  { text: 'Dev Log', link: '/en/log/day-04', activeMatch: '^/en/log/' },
+  { text: 'Dev Log', link: '/en/log/day-05', activeMatch: '^/en/log/' },
   { text: 'Appendix', link: '/en/reference/', activeMatch: '^/en/reference/' }
 ]
 
@@ -77,7 +77,8 @@ const zhSidebar = {
         { text: 'Day01 · 双语文档站上线', link: '/log/day-01' },
         { text: 'Day02 · 站点结构精简', link: '/log/day-02' },
         { text: 'Day03 · 阶段一 MVP 跑通', link: '/log/day-03' },
-        { text: 'Day04 · 运行时就位与执行器收敛', link: '/log/day-04' }
+        { text: 'Day04 · 运行时就位与执行器收敛', link: '/log/day-04' },
+        { text: 'Day05 · 首次运行、入口与邮件闭环', link: '/log/day-05' }
       ]
     }
   ],
@@ -119,7 +120,8 @@ const enSidebar = {
         { text: 'Day01 · Bilingual documentation launch', link: '/en/log/day-01' },
         { text: 'Day02 · Documentation structure cleanup', link: '/en/log/day-02' },
         { text: 'Day03 · Stage-one MVP runs end to end', link: '/en/log/day-03' },
-        { text: 'Day04 · Runtime and executor convergence', link: '/en/log/day-04' }
+        { text: 'Day04 · Runtime and executor convergence', link: '/en/log/day-04' },
+        { text: 'Day05 · First run, entrances, and mail closure', link: '/en/log/day-05' }
       ]
     }
   ],

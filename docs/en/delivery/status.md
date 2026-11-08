@@ -104,7 +104,7 @@ The backup boundary must remain visible in the UI: a recoverable database is not
 
 ## Verification evidence
 
-On 2026-11-08, `npm test` on the current branch passed all 61 test files and 381 tests; `npm run typecheck`, `npm run build`, and the offline `npm run test:e2e` suite (13 checks) also pass. These checks cover service, API, model-protocol, native tool-loop, budget, permission, checkpoint, and proposal-confirmation code loops but do not replace real-user, real-device, or long-running acceptance. See the [Day04 development log](/en/log/day-04) for the implementation record.
+On 2026-11-08, `npm test` on the current branch passed all 61 test files and 381 tests; `npm run typecheck`, `npm run build`, and the offline `npm run test:e2e` suite (13 checks) also pass. These checks cover service, API, model-protocol, native tool-loop, budget, permission, checkpoint, and proposal-confirmation code loops but do not replace real-user, real-device, or long-running acceptance. See the [Day05 development log](/en/log/day-05) for the implementation record.
 
 ## Remaining real acceptance
 

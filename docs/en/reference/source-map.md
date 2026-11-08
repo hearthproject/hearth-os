@@ -14,7 +14,7 @@ outline: [2]
 |---|---|---|
 | Design | 1 overall design plus 12 parallel module designs, including technology choices and storage architecture | [Overall design](/en/design/) |
 | Delivery | Six phases, 24 sub-stages, Phase 2–6 delivery status, and real acceptance boundaries | [Delivery route](/en/delivery/) |
-| Development log | Day01–Day04 entries with commits, diffstats, and boundaries | [Day04](/en/log/day-04) |
+| Development log | Day01–Day05 entries with commits, diffstats, and boundaries | [Day05](/en/log/day-05) |
 | Appendix | Engineering, risks, decisions, build-vs-integrate, glossary, checklists, and maintenance material | [Appendix](/en/reference/) |
 | Site entry | Home page and language switch | [Home](/en/) |
 
@@ -25,7 +25,7 @@ A first pass can follow "why it exists → what exists now → what is still mis
 1. Read the [overall design](/en/design/) for product positioning, task flow, technology choices, and module boundaries;
 2. Read the twelve modules as needed, in any order;
 3. Check the [delivery route](/en/delivery/) for the real state of the six phases: Phase 1 is accepted, while Phases 2–6 have code loops but no real acceptance yet;
-4. Before continuing development, read [Engineering](/en/reference/engineering), [Key decisions](/en/reference/decisions), [Risks and stop conditions](/en/reference/risks), and the [Day04 development log](/en/log/day-04).
+4. Before continuing development, read [Engineering](/en/reference/engineering), [Key decisions](/en/reference/decisions), [Risks and stop conditions](/en/reference/risks), and the [Day05 development log](/en/log/day-05).
 
 To judge quickly whether the project is worth a longer read, start with "Product positioning and goals" in the overall design and the phase overview in the delivery route. Read the engineering constraints and default checklists before implementing.
 
