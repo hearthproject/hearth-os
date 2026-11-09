@@ -54,6 +54,8 @@ import type {
   ScheduleRunRecord,
   ScheduleRunStatus,
   SettingsMigrationRecord,
+  SkillRecord,
+  SkillVersion,
   SourceConnection,
   SourceItem,
   SyncConflict,
@@ -99,7 +101,7 @@ export interface RunAggregate {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 19;
+export const CURRENT_SCHEMA_VERSION = 20;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -439,6 +441,19 @@ CREATE TABLE IF NOT EXISTS method_applications (
   method_id TEXT NOT NULL, method_version INTEGER NOT NULL,
   selection TEXT NOT NULL, prompt_sha256 TEXT NOT NULL, created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS skills (
+  id TEXT PRIMARY KEY, method_id TEXT, method_version INTEGER, name TEXT NOT NULL, version TEXT NOT NULL,
+  status TEXT NOT NULL, pinned INTEGER NOT NULL, path TEXT NOT NULL, content_hash TEXT NOT NULL,
+  manifest_json TEXT NOT NULL, origin TEXT NOT NULL, source_task_ids_json TEXT NOT NULL,
+  previous_version_id TEXT, change_report TEXT NOT NULL, created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL, adopted_at TEXT, last_used_at TEXT, archived_at TEXT,
+  archive_reason TEXT, previous_status TEXT
+);
+CREATE TABLE IF NOT EXISTS skill_versions (
+  id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, version TEXT NOT NULL,
+  manifest_json TEXT NOT NULL, content_hash TEXT NOT NULL, path TEXT NOT NULL,
+  method_id TEXT, method_version INTEGER, change_report TEXT NOT NULL, created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS sync_peers (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL, status TEXT NOT NULL,
   token_hash TEXT NOT NULL UNIQUE, last_pull_seq INTEGER NOT NULL, last_pull_at TEXT,
@@ -533,6 +548,25 @@ export class HearthStore {
     this.db.exec(SCHEMA);
     this.migrate();
     this.instanceId = this.ensureInstanceId();
+  }
+
+  getSkill(id: string): SkillRecord | null {
+    const row = this.db.prepare("SELECT * FROM skills WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToSkill(row) : null;
+  }
+
+  listSkills(status?: string): SkillRecord[] {
+    const rows = status
+      ? this.db.prepare("SELECT * FROM skills WHERE status = ? ORDER BY pinned DESC, updated_at DESC").all(status) as DbRow[]
+      : this.db.prepare("SELECT * FROM skills ORDER BY pinned DESC, updated_at DESC").all() as DbRow[];
+    return rows.map(rowToSkill);
+  }
+
+  listSkillVersions(skillId?: string): SkillVersion[] {
+    const rows = skillId
+      ? this.db.prepare("SELECT * FROM skill_versions WHERE skill_id = ? ORDER BY created_at DESC").all(skillId) as DbRow[]
+      : this.db.prepare("SELECT * FROM skill_versions ORDER BY created_at DESC").all() as DbRow[];
+    return rows.map(rowToSkillVersion);
   }
 
   private migrate(): void {
@@ -639,6 +673,8 @@ export class HearthStore {
       CREATE INDEX IF NOT EXISTS memory_consolidation_runs_status_idx ON memory_consolidation_runs(status, started_at);
       CREATE INDEX IF NOT EXISTS memory_forget_tombstones_hash_idx ON memory_forget_tombstones(content_hash);
       CREATE INDEX IF NOT EXISTS memory_forget_tombstones_memory_idx ON memory_forget_tombstones(memory_id);
+      CREATE INDEX IF NOT EXISTS skills_status_idx ON skills(status, pinned, updated_at);
+      CREATE INDEX IF NOT EXISTS skill_versions_skill_idx ON skill_versions(skill_id, created_at);
     `);
     this.db.exec(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION}`);
     this.setMeta("schemaVersion", String(CURRENT_SCHEMA_VERSION));
@@ -2024,7 +2060,7 @@ export class HearthStore {
   rebuildProjections(): void {
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      this.db.exec("DELETE FROM backup_records; DELETE FROM maintenance_runs; DELETE FROM task_leases; DELETE FROM sync_conflicts; DELETE FROM sync_peers; DELETE FROM method_trials; DELETE FROM method_evaluations; DELETE FROM method_candidates; DELETE FROM memory_consolidation_runs; DELETE FROM memory_forget_tombstones; DELETE FROM memory_forget_receipts; DELETE FROM memory_recalls; DELETE FROM memory_conflicts; DELETE FROM memory_versions; DELETE FROM memories; DELETE FROM memory_settings; DELETE FROM suggestion_events; DELETE FROM suggestions; DELETE FROM proactive_settings; DELETE FROM desktop_commands; DELETE FROM desktop_frames; DELETE FROM desktop_sessions; DELETE FROM pairing_requests; DELETE FROM devices; DELETE FROM outbox_drafts; DELETE FROM source_items; DELETE FROM sources; DELETE FROM artifacts; DELETE FROM effects; DELETE FROM approvals; DELETE FROM runs; DELETE FROM tasks;");
+      this.db.exec("DELETE FROM backup_records; DELETE FROM maintenance_runs; DELETE FROM task_leases; DELETE FROM sync_conflicts; DELETE FROM sync_peers; DELETE FROM skill_versions; DELETE FROM skills; DELETE FROM method_trials; DELETE FROM method_evaluations; DELETE FROM method_candidates; DELETE FROM memory_consolidation_runs; DELETE FROM memory_forget_tombstones; DELETE FROM memory_forget_receipts; DELETE FROM memory_recalls; DELETE FROM memory_conflicts; DELETE FROM memory_versions; DELETE FROM memories; DELETE FROM memory_settings; DELETE FROM suggestion_events; DELETE FROM suggestions; DELETE FROM proactive_settings; DELETE FROM desktop_commands; DELETE FROM desktop_frames; DELETE FROM desktop_sessions; DELETE FROM pairing_requests; DELETE FROM devices; DELETE FROM outbox_drafts; DELETE FROM source_items; DELETE FROM sources; DELETE FROM artifacts; DELETE FROM effects; DELETE FROM approvals; DELETE FROM runs; DELETE FROM tasks;");
       for (const event of this.listEvents()) this.applyEvent(event);
       this.db.exec("COMMIT");
     } catch (error) {
@@ -2116,6 +2152,8 @@ export class HearthStore {
       case "method.candidate.updated": return upsertMethodCandidate(this.db, event.payload as MethodCandidate);
       case "method.evaluation.recorded": return insertMethodEvaluationRow(this.db, event.payload as MethodEvaluation);
       case "method.trial.recorded": return insertMethodTrialRow(this.db, event.payload as MethodTrial);
+      case "skill.updated": return upsertSkillRow(this.db, event.payload as SkillRecord);
+      case "skill.version.recorded": return insertSkillVersionRow(this.db, event.payload as SkillVersion);
       case "sync.peer.created":
       case "sync.peer.updated": return upsertSyncPeer(this.db, event.payload as SyncPeer & { tokenCipher?: string | null });
       case "sync.conflict.created":
@@ -2624,6 +2662,84 @@ function rowToEvent(row: DbRow): EventEnvelope {
     originSeq: row.origin_seq == null ? null : Number(row.origin_seq),
     createdAt: String(row.created_at)
   };
+}
+
+function rowToSkill(row: DbRow): SkillRecord {
+  return {
+    id: String(row.id),
+    methodId: row.method_id == null ? null : String(row.method_id),
+    methodVersion: row.method_version == null ? null : Number(row.method_version),
+    name: String(row.name),
+    version: String(row.version),
+    status: String(row.status) as SkillRecord["status"],
+    pinned: Number(row.pinned) === 1,
+    path: String(row.path),
+    contentHash: String(row.content_hash),
+    manifest: JSON.parse(String(row.manifest_json)),
+    origin: String(row.origin) as SkillRecord["origin"],
+    sourceTaskIds: JSON.parse(String(row.source_task_ids_json)),
+    previousVersionId: row.previous_version_id == null ? null : String(row.previous_version_id),
+    changeReport: String(row.change_report),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+    adoptedAt: row.adopted_at == null ? null : String(row.adopted_at),
+    lastUsedAt: row.last_used_at == null ? null : String(row.last_used_at),
+    archivedAt: row.archived_at == null ? null : String(row.archived_at),
+    archiveReason: row.archive_reason == null ? null : String(row.archive_reason),
+    previousStatus: row.previous_status == null ? null : String(row.previous_status) as SkillRecord["previousStatus"]
+  };
+}
+
+function upsertSkillRow(db: DatabaseSync, skill: SkillRecord): void {
+  db.prepare(
+    `INSERT INTO skills
+     (id, method_id, method_version, name, version, status, pinned, path, content_hash, manifest_json, origin,
+      source_task_ids_json, previous_version_id, change_report, created_at, updated_at, adopted_at,
+      last_used_at, archived_at, archive_reason, previous_status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET method_id=excluded.method_id, method_version=excluded.method_version, name=excluded.name,
+      version=excluded.version, status=excluded.status, pinned=excluded.pinned, path=excluded.path,
+      content_hash=excluded.content_hash, manifest_json=excluded.manifest_json, origin=excluded.origin,
+      source_task_ids_json=excluded.source_task_ids_json, previous_version_id=excluded.previous_version_id,
+      change_report=excluded.change_report, updated_at=excluded.updated_at, adopted_at=excluded.adopted_at,
+      last_used_at=excluded.last_used_at, archived_at=excluded.archived_at,
+      archive_reason=excluded.archive_reason, previous_status=excluded.previous_status`
+  ).run(
+    skill.id, skill.methodId, skill.methodVersion, skill.name, skill.version, skill.status, skill.pinned ? 1 : 0,
+    skill.path, skill.contentHash, JSON.stringify(skill.manifest), skill.origin,
+    JSON.stringify(skill.sourceTaskIds), skill.previousVersionId, skill.changeReport,
+    skill.createdAt, skill.updatedAt, skill.adoptedAt, skill.lastUsedAt, skill.archivedAt,
+    skill.archiveReason, skill.previousStatus
+  );
+}
+
+function rowToSkillVersion(row: DbRow): SkillVersion {
+  return {
+    id: String(row.id),
+    skillId: String(row.skill_id),
+    version: String(row.version),
+    manifest: JSON.parse(String(row.manifest_json)),
+    contentHash: String(row.content_hash),
+    path: String(row.path),
+    methodId: row.method_id == null ? null : String(row.method_id),
+    methodVersion: row.method_version == null ? null : Number(row.method_version),
+    changeReport: String(row.change_report),
+    createdAt: String(row.created_at)
+  };
+}
+
+function insertSkillVersionRow(db: DatabaseSync, version: SkillVersion): void {
+  db.prepare(
+    `INSERT INTO skill_versions
+     (id, skill_id, version, manifest_json, content_hash, path, method_id, method_version, change_report, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET manifest_json=excluded.manifest_json,
+      content_hash=excluded.content_hash, path=excluded.path, change_report=excluded.change_report`
+  ).run(
+    version.id, version.skillId, version.version, JSON.stringify(version.manifest),
+    version.contentHash, version.path, version.methodId, version.methodVersion,
+    version.changeReport, version.createdAt
+  );
 }
 
 function rowToTask(row: DbRow): TaskRecord {

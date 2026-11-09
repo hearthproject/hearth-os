@@ -18,12 +18,16 @@ import type {
   SkillPackageExport,
   SkillPackageRecord,
   SkillPermissions,
+  SkillRecord,
   SkillResourceRef,
+  SkillStatus,
+  SkillVersion,
   TaskRecord
 } from "@hearth/core";
 import type { MethodService } from "./methods.ts";
 import type { HearthService } from "./service.ts";
 import {
+  buildDailySkillIndex,
   buildSkillIndexEntry,
   classifySkillResource,
   parseSkillDocument,
@@ -56,6 +60,28 @@ export class SkillPackageService {
     return this.rootDir;
   }
 
+  snapshot(): { skills: SkillRecord[]; versions: SkillVersion[]; index: SkillIndexEntry[] } {
+    const skills = this.service.store.listSkills();
+    return {
+      skills,
+      versions: this.service.store.listSkillVersions(),
+      index: buildSkillIndex(skills)
+    };
+  }
+
+  listRecords(status?: SkillStatus): SkillRecord[] {
+    return this.service.store.listSkills(status);
+  }
+
+  getSkill(id: string): SkillRecord | null {
+    return this.service.store.getSkill(id);
+  }
+
+  versions(id: string): SkillVersion[] {
+    this.requireSkill(id);
+    return this.service.store.listSkillVersions(id);
+  }
+
   list(): SkillIndexEntry[] {
     if (!existsSync(this.rootDir)) return [];
     return readdirSync(this.rootDir, { withFileTypes: true })
@@ -75,16 +101,22 @@ export class SkillPackageService {
 
   readIndex(id: string): SkillIndexEntry {
     const record = this.readRecord(id);
+    const lifecycle = this.service.store.getSkill(id);
     return buildSkillIndexEntry({
       document: { manifest: record.manifest, body: "", contentHash: record.contentHash },
-      status: "adopted",
-      pinned: record.manifest.metadata.hearth.pinned,
+      status: lifecycle?.status ?? "adopted",
+      pinned: lifecycle?.pinned ?? record.manifest.metadata.hearth.pinned,
       id: record.id
     });
   }
 
   readDocument(id: string): SkillDocument {
-    return parseSkillDocument(readFileSync(join(this.skillDir(id), "SKILL.md"), "utf8"));
+    const document = parseSkillDocument(readFileSync(join(this.skillDir(id), "SKILL.md"), "utf8"));
+    const record = this.service.store.getSkill(id);
+    if (record && record.contentHash !== document.contentHash) {
+      throw new SkillPackageError("SKILL_CONTENT_HASH_MISMATCH", "技能文件内容与登记哈希不一致", 409);
+    }
+    return document;
   }
 
   readRecord(id: string): SkillPackageExport {
@@ -126,6 +158,67 @@ export class SkillPackageService {
     return resources.sort((left, right) => left.path.localeCompare(right.path));
   }
 
+  pin(id: string, pinned: boolean): SkillRecord {
+    const skill = this.requireSkill(id);
+    if (skill.pinned === pinned) return skill;
+    return this.updateSkill(skill, {
+      pinned,
+      changeReport: appendReport(skill.changeReport, `${pinned ? "固定" : "取消固定"}技能`)
+    });
+  }
+
+  archive(id: string, reason: string): SkillRecord {
+    const skill = this.requireSkill(id);
+    if (skill.status === "archived") return skill;
+    return this.updateSkill(skill, {
+      status: "archived",
+      previousStatus: skill.status,
+      archivedAt: this.nowIso(),
+      archiveReason: reason.trim() || "用户归档",
+      changeReport: appendReport(skill.changeReport, "归档技能：" + (reason.trim() || "用户归档"))
+    });
+  }
+
+  restore(id: string): SkillRecord {
+    const skill = this.requireSkill(id);
+    if (skill.status !== "archived") {
+      throw new SkillPackageError("SKILL_NOT_ARCHIVED", "只有已归档技能可以恢复", 409);
+    }
+    if (!existsSync(join(skill.path, "SKILL.md"))) {
+      throw new SkillPackageError("SKILL_PACKAGE_MISSING", "技能文件不存在，无法恢复", 409);
+    }
+    const restored = skill.previousStatus && skill.previousStatus !== "archived" ? skill.previousStatus : "adopted";
+    return this.updateSkill(skill, {
+      status: restored,
+      archivedAt: null,
+      archiveReason: null,
+      previousStatus: null,
+      changeReport: appendReport(skill.changeReport, "恢复技能到 " + restored)
+    });
+  }
+
+  transition(id: string, status: SkillStatus, reason = ""): SkillRecord {
+    const skill = this.requireSkill(id);
+    if (skill.status === status) return skill;
+    if (!skillTransitionAllowed(skill.status, status)) {
+      throw new SkillPackageError("SKILL_TRANSITION_INVALID", `技能不能从 ${skill.status} 变为 ${status}`, 409);
+    }
+    if (status === "stale" && skill.pinned) {
+      throw new SkillPackageError("SKILL_PINNED", "固定技能不会自动变为 stale", 409);
+    }
+    const now = this.nowIso();
+    return this.updateSkill(skill, {
+      status,
+      adoptedAt: status === "adopted" ? skill.adoptedAt ?? now : skill.adoptedAt,
+      changeReport: appendReport(skill.changeReport, `状态 ${skill.status} -> ${status}` + (reason.trim() ? "：" + reason.trim() : ""))
+    });
+  }
+
+  markUsed(id: string): SkillRecord {
+    const skill = this.requireSkill(id);
+    return this.updateSkill(skill, { lastUsedAt: this.nowIso() });
+  }
+
   exportMethod(methodId: string): SkillPackageExport {
     const method = this.methods.snapshot().methods.find((item) => item.id === methodId);
     if (!method) throw new SkillPackageError("SKILL_METHOD_NOT_FOUND", "来源方法不存在", 404);
@@ -154,6 +247,7 @@ export class SkillPackageService {
     const currentDir = join(this.rootDir, id);
     const existing = this.tryReadRecord(currentDir);
     if (existing && existing.contentHash === record.contentHash && existing.methodVersion === record.methodVersion) {
+      this.ensureSkill(record, currentDir, method);
       return { ...existing, path: currentDir };
     }
 
@@ -161,9 +255,11 @@ export class SkillPackageService {
     const tempDir = resolveInside(this.rootDir, ".tmp-" + id + "-" + randomUUID());
     try {
       this.writePackage(tempDir, document, record);
-      if (existing) this.archiveCurrent(currentDir, id, existing);
+      const previous = this.service.store.getSkill(id);
+      const archivedPath = existing ? this.archiveCurrent(currentDir, id, existing) : null;
       if (existsSync(currentDir)) rmSync(currentDir, { recursive: true, force: true });
       renameSync(tempDir, currentDir);
+      this.persistExportedSkill(record, currentDir, method, existing, previous, archivedPath);
     } catch (error) {
       rmSync(tempDir, { recursive: true, force: true });
       throw error;
@@ -223,7 +319,7 @@ export class SkillPackageService {
     writeFileSync(join(dir, "tests", "README.md"), "# Tests\n\nAdd regression checks for this skill here.\n", "utf8");
   }
 
-  private archiveCurrent(currentDir: string, id: string, existing: SkillPackageExport): void {
+  private archiveCurrent(currentDir: string, id: string, existing: SkillPackageExport): string {
     const archiveRoot = resolveInside(this.rootDir, ".versions", id);
     mkdirSync(archiveRoot, { recursive: true });
     const suffix = existing.contentHash.replace(/^sha256:/, "").slice(0, 12);
@@ -233,6 +329,7 @@ export class SkillPackageService {
     if (!existsSync(join(archiveDir, "skill.json"))) {
       throw new SkillPackageError("SKILL_VERSION_ARCHIVE_FAILED", "无法保留旧版本技能包：" + id, 500);
     }
+    return archiveDir;
   }
 
   private tryReadRecord(dir: string): SkillPackageExport | null {
@@ -248,6 +345,114 @@ export class SkillPackageService {
       throw new SkillPackageError("SKILL_ID_INVALID", "技能 ID 无效", 400);
     }
     return resolveInside(this.rootDir, id);
+  }
+
+  private ensureSkill(record: SkillPackageRecord, path: string, method: MethodCandidate): SkillRecord {
+    const existing = this.service.store.getSkill(record.id);
+    if (existing) return existing;
+    const now = this.nowIso();
+    const skill: SkillRecord = {
+      id: record.id,
+      methodId: method.id,
+      methodVersion: method.version,
+      name: record.manifest.name,
+      version: record.version,
+      status: "adopted",
+      pinned: false,
+      path,
+      contentHash: record.contentHash,
+      manifest: record.manifest,
+      origin: record.manifest.metadata.hearth.origin,
+      sourceTaskIds: [...record.sourceTaskIds],
+      previousVersionId: null,
+      changeReport: `首次导出：method ${method.id} v${method.version}`,
+      createdAt: now,
+      updatedAt: now,
+      adoptedAt: method.adoptedAt ?? now,
+      lastUsedAt: null,
+      archivedAt: null,
+      archiveReason: null,
+      previousStatus: null
+    };
+    this.emitSkills([{ type: "skill.updated", payload: skill }]);
+    return skill;
+  }
+
+  private persistExportedSkill(
+    record: SkillPackageRecord,
+    currentDir: string,
+    method: MethodCandidate,
+    existingFile: SkillPackageExport | null,
+    previous: SkillRecord | null,
+    archivedPath: string | null
+  ): void {
+    const now = this.nowIso();
+    let version: SkillVersion | null = null;
+    if (existingFile || previous) {
+      version = {
+        id: randomUUID(),
+        skillId: record.id,
+        version: existingFile?.version ?? previous?.version ?? "0.0.0",
+        manifest: existingFile?.manifest ?? previous!.manifest,
+        contentHash: existingFile?.contentHash ?? previous!.contentHash,
+        path: archivedPath ?? previous?.path ?? join(this.rootDir, record.id),
+        methodId: previous?.methodId ?? existingFile?.methodId ?? null,
+        methodVersion: previous?.methodVersion ?? existingFile?.methodVersion ?? null,
+        changeReport: "升级前快照",
+        createdAt: now
+      };
+    }
+    const changeReport = version
+      ? `升级：${version.version} (${shortHash(version.contentHash)}) -> ${record.version} (${shortHash(record.contentHash)})；保留旧版本 ${version.id}`
+      : `首次导出：method ${method.id} v${method.version}`;
+    const skill: SkillRecord = {
+      id: record.id,
+      methodId: method.id,
+      methodVersion: method.version,
+      name: record.manifest.name,
+      version: record.version,
+      status: "adopted",
+      pinned: previous?.pinned ?? false,
+      path: currentDir,
+      contentHash: record.contentHash,
+      manifest: record.manifest,
+      origin: record.manifest.metadata.hearth.origin,
+      sourceTaskIds: [...record.sourceTaskIds],
+      previousVersionId: version?.id ?? previous?.previousVersionId ?? null,
+      changeReport: appendReport(previous?.changeReport ?? "", changeReport),
+      createdAt: previous?.createdAt ?? now,
+      updatedAt: now,
+      adoptedAt: previous?.adoptedAt ?? method.adoptedAt ?? now,
+      lastUsedAt: previous?.lastUsedAt ?? null,
+      archivedAt: null,
+      archiveReason: null,
+      previousStatus: null
+    };
+    this.emitSkills([
+      ...(version ? [{ type: "skill.version.recorded", payload: version }] : []),
+      { type: "skill.updated", payload: skill }
+    ]);
+  }
+
+  private requireSkill(id: string): SkillRecord {
+    const skill = this.service.store.getSkill(id);
+    if (!skill) throw new SkillPackageError("SKILL_NOT_FOUND", "技能不存在", 404);
+    return skill;
+  }
+
+  private updateSkill(skill: SkillRecord, patch: Partial<SkillRecord>): SkillRecord {
+    const next: SkillRecord = {
+      ...skill,
+      ...patch,
+      updatedAt: this.nowIso()
+    };
+    this.emitSkills([{ type: "skill.updated", payload: next }]);
+    return next;
+  }
+
+  private emitSkills(events: Array<{ type: string; payload: unknown }>): void {
+    const envelopes = this.service.store.appendEvents(events);
+    for (const envelope of envelopes) this.service.bus.publish(envelope);
   }
 
   private nowIso(): string {
@@ -351,4 +556,41 @@ function clip(text: string, max: number): string {
 
 function unique(values: string[]): string[] {
   return [...new Set(values)];
+}
+
+function buildSkillIndex(skills: SkillRecord[]): SkillIndexEntry[] {
+  return buildDailySkillIndex(skills.map((skill) => ({
+    document: {
+      manifest: skill.manifest,
+      body: "",
+      contentHash: skill.contentHash
+    },
+    status: skill.status,
+    pinned: skill.pinned,
+    id: skill.id
+  })));
+}
+
+function skillTransitionAllowed(from: SkillStatus, to: SkillStatus): boolean {
+  const allowed: Record<SkillStatus, SkillStatus[]> = {
+    candidate: ["trial", "evaluating", "adopted", "rejected", "archived"],
+    trial: ["evaluating", "adopted", "rejected", "archived"],
+    evaluating: ["adopted", "rejected", "archived"],
+    adopted: ["stale", "archived", "reverted", "superseded"],
+    stale: ["adopted", "archived", "superseded"],
+    archived: ["adopted", "stale"],
+    rejected: ["archived"],
+    reverted: ["archived", "adopted"],
+    superseded: ["archived"]
+  };
+  return allowed[from].includes(to);
+}
+
+function appendReport(current: string, line: string): string {
+  const next = current.trim() ? current.trimEnd() + "\n" + line : line;
+  return next.length <= 20_000 ? next : next.slice(next.length - 20_000);
+}
+
+function shortHash(hash: string): string {
+  return hash.replace(/^sha256:/, "").slice(0, 12);
 }

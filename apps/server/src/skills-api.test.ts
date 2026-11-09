@@ -1,0 +1,89 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { HearthStore } from "@hearth/eventlog";
+import { buildServer } from "./app.ts";
+import { HearthService } from "./service.ts";
+import { MethodService } from "./methods.ts";
+
+describe("skills API", () => {
+  let store: HearthStore;
+  let skillRoot: string;
+
+  beforeEach(() => {
+    store = new HearthStore(":memory:");
+    skillRoot = mkdtempSync(join(tmpdir(), "hearth-skills-api-"));
+  });
+
+  afterEach(() => {
+    store.close();
+    rmSync(skillRoot, { recursive: true, force: true });
+  });
+
+  function adoptedMethod() {
+    const service = new HearthService(store);
+    const task = service.createTask({ templateId: "T01", title: "整理周报" });
+    service.updateTask(task.id, { status: "running", nextAction: "执行中" });
+    service.updateTask(task.id, { status: "completed", nextAction: "完成" });
+    const methods = new MethodService(service);
+    const method = methods.autoLearnFromTask(task.id);
+    if (!method) throw new Error("method missing");
+    return method;
+  }
+
+  it("exports, inspects, pins, archives, and restores skills", async () => {
+    const method = adoptedMethod();
+    const app = await buildServer({ store, serveWeb: false, skillRoot });
+
+    const exported = await app.inject({
+      method: "POST",
+      url: "/api/skills/export",
+      payload: { methodId: method.id }
+    });
+    expect(exported.statusCode).toBe(201);
+    const skillId = exported.json().skill.id as string;
+    expect(exported.json().skill).toMatchObject({ status: "adopted", methodId: method.id });
+
+    const detail = await app.inject({ method: "GET", url: "/api/skills/" + skillId });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json().document.body).toContain("## Verification");
+    expect(detail.json().resources.map((item: { path: string }) => item.path)).toContain("tests/README.md");
+
+    const pinned = await app.inject({
+      method: "POST",
+      url: "/api/skills/" + skillId + "/pin",
+      payload: { pinned: true }
+    });
+    expect(pinned.statusCode).toBe(200);
+    expect(pinned.json().pinned).toBe(true);
+    expect(pinned.json().changeReport).toContain("固定技能");
+
+    const archived = await app.inject({
+      method: "POST",
+      url: "/api/skills/" + skillId + "/archive",
+      payload: { reason: "暂时不用" }
+    });
+    expect(archived.statusCode).toBe(200);
+    expect(archived.json()).toMatchObject({ status: "archived", previousStatus: "adopted" });
+    expect((await app.inject({ method: "GET", url: "/api/skills" })).json().index).toEqual([]);
+
+    const restored = await app.inject({ method: "POST", url: "/api/skills/" + skillId + "/restore" });
+    expect(restored.statusCode).toBe(200);
+    expect(restored.json().status).toBe("adopted");
+    const snapshot = await app.inject({ method: "GET", url: "/api/skills" });
+    expect(snapshot.json().index[0]).toMatchObject({ id: skillId, pinned: true });
+
+    await app.close();
+  });
+
+  it("rejects invalid exports and transitions", async () => {
+    const app = await buildServer({ store, serveWeb: false, skillRoot });
+    const invalid = await app.inject({ method: "POST", url: "/api/skills/export", payload: {} });
+    expect(invalid.statusCode).toBe(400);
+    const missing = await app.inject({ method: "POST", url: "/api/skills/missing/restore" });
+    expect(missing.statusCode).toBe(404);
+    expect(missing.json().error).toBe("SKILL_NOT_FOUND");
+    await app.close();
+  });
+});

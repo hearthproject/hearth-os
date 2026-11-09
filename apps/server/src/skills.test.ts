@@ -99,10 +99,16 @@ describe("SkillPackageService", () => {
     const archive = join(skills.root, ".versions", second.id);
     expect(existsSync(archive)).toBe(true);
     expect(skills.list().map((entry) => entry.id)).toEqual([second.id]);
+    const current = skills.getSkill(second.id)!;
+    expect(current.previousVersionId).not.toBeNull();
+    expect(current.changeReport).toContain("升级");
+    const versions = skills.versions(second.id);
+    expect(versions).toHaveLength(1);
+    expect(versions[0]).toMatchObject({ version: "1.0.0", contentHash: first.contentHash });
     expect(first.contentHash).not.toBe(second.contentHash);
   });
 
-  it("does not follow symlinks and ignores broken package directories", () => {
+  it("lists resources and ignores broken package directories", () => {
     const method = adoptedMethod();
     const exported = skills.exportMethod(method.id);
     writeFileSync(join(exported.path, "references", "notes.md"), "notes", "utf8");
@@ -111,6 +117,40 @@ describe("SkillPackageService", () => {
       kind: "reference"
     }));
     expect(skills.list().map((entry) => entry.id)).toContain(exported.id);
+  });
+
+  it("persists lifecycle, respects pins, and restores archived packages", () => {
+    const method = adoptedMethod();
+    const exported = skills.exportMethod(method.id);
+    expect(skills.getSkill(exported.id)).toMatchObject({
+      status: "adopted",
+      methodId: method.id,
+      methodVersion: method.version,
+      previousVersionId: null
+    });
+
+    expect(skills.pin(exported.id, true).pinned).toBe(true);
+    expect(() => skills.transition(exported.id, "stale"))
+      .toThrowError(expect.objectContaining({ code: "SKILL_PINNED" }));
+    skills.pin(exported.id, false);
+    expect(skills.transition(exported.id, "stale").status).toBe("stale");
+    const archived = skills.archive(exported.id, "暂时不用");
+    expect(archived).toMatchObject({ status: "archived", previousStatus: "stale", archiveReason: "暂时不用" });
+    expect(existsSync(join(exported.path, "SKILL.md"))).toBe(true);
+    expect(skills.restore(exported.id).status).toBe("stale");
+    expect(skills.transition(exported.id, "adopted").status).toBe("adopted");
+    expect(() => skills.transition(exported.id, "trial"))
+      .toThrowError(expect.objectContaining({ code: "SKILL_TRANSITION_INVALID" }));
+    expect(store.listEvents(0).filter((event) => event.type === "skill.updated").length).toBeGreaterThan(1);
+  });
+
+  it("rejects tampered skill content against the registered hash", () => {
+    const method = adoptedMethod();
+    const exported = skills.exportMethod(method.id);
+    const skillPath = join(exported.path, "SKILL.md");
+    writeFileSync(skillPath, readFileSync(skillPath, "utf8").replace("## Procedure", "## Procedure\n\nTampered."), "utf8");
+    expect(() => skills.readDocument(exported.id))
+      .toThrowError(expect.objectContaining({ code: "SKILL_CONTENT_HASH_MISMATCH" }));
   });
 
   it("creates stable ASCII slugs for non-Latin method names", () => {

@@ -5,7 +5,7 @@ import { basename, join } from "node:path";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyReply } from "fastify";
 import type { EventEnvelope, ExecutorHealth, ExecutorId, ExecutorView, GoalBudget } from "@hearth/core";
-import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, EXECUTOR_IDS, GOAL_REVIEW_POLICIES, GOAL_STATES, GOAL_VALIDATORS, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_ORIGINS, MEMORY_RETENTIONS, MEMORY_SENSITIVITIES, MEMORY_TAINT_STATES, MEMORY_TIERS, MEMORY_TRUST_LEVELS, PROACTIVE_MODES, RUN_STATUSES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
+import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, EXECUTOR_IDS, GOAL_REVIEW_POLICIES, GOAL_STATES, GOAL_VALIDATORS, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_ORIGINS, MEMORY_RETENTIONS, MEMORY_SENSITIVITIES, MEMORY_TAINT_STATES, MEMORY_TIERS, MEMORY_TRUST_LEVELS, PROACTIVE_MODES, RUN_STATUSES, SKILL_STATUSES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate } from "@hearth/templates";
 import { loadCodexProfile, runCodex } from "@hearth/codex-executor";
@@ -47,6 +47,8 @@ import { EmailService, MailError, type MailImapFactory, type MailSmtpFactory } f
 import { DesktopError, DesktopService } from "./desktop.ts";
 import { MemoryError, MemoryService } from "./memory.ts";
 import { MethodError, MethodService } from "./methods.ts";
+import { SkillPackageError } from "./skill-package.ts";
+import { SkillPackageService } from "./skills.ts";
 import { ProactiveError, ProactiveService } from "./proactive.ts";
 import { SyncError, SyncService } from "./sync.ts";
 import { SecretBox } from "./secrets.ts";
@@ -312,6 +314,13 @@ const evaluateMethodSchema = z.object({
 const methodTrialSchema = z.object({ taskId: z.string().trim().min(1).max(100) }).strict();
 const methodRollbackSchema = z.object({ reason: z.string().trim().min(1).max(1000) }).strict();
 const methodRejectSchema = z.object({ reason: z.string().trim().max(1000).optional() }).strict();
+const skillExportSchema = z.object({ methodId: z.string().trim().min(1).max(100) }).strict();
+const skillPinSchema = z.object({ pinned: z.boolean() }).strict();
+const skillArchiveSchema = z.object({ reason: z.string().trim().max(1000).optional() }).strict();
+const skillTransitionSchema = z.object({
+  status: z.enum(SKILL_STATUSES),
+  reason: z.string().trim().max(1000).optional()
+}).strict();
 const assignTaskMethodSchema = z.object({ methodId: z.string().trim().min(1).max(100).nullable() }).strict();
 const taskOrganizationSchema = z.object({
   pinned: z.boolean().optional(),
@@ -583,6 +592,7 @@ export interface BuildServerOptions {
   executorInstaller?: ExecutorInstaller;
   contextBlobRoot?: string;
   contextIndex?: ContextIndex;
+  skillRoot?: string;
 }
 
 export async function buildServer(options: BuildServerOptions = {}) {
@@ -596,6 +606,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   service.setContextSink((message) => {
     if (context.settings().mode !== "off") context.recordChatMessage(message);
   });
+
   const sources = new SourceRegistry(service, {
     contentRoot: options.sourceContentRoot ?? SOURCE_CONTENT_DIR
   });
@@ -615,6 +626,9 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const proactive = new ProactiveService(service);
   const memory = new MemoryService(service);
   const methods = new MethodService(service);
+  const skills = new SkillPackageService(service, methods, {
+    rootDir: options.skillRoot ?? join(options.dataDir ?? DATA_DIR, "skills")
+  });
   const sync = new SyncService(service, {
     ...(options.syncFetch ? { fetchImpl: options.syncFetch } : {}),
     ...(options.syncSecretBox ? { secretBox: options.syncSecretBox } : {})
@@ -1498,6 +1512,84 @@ export async function buildServer(options: BuildServerOptions = {}) {
       return methods.reject(request.params.id, parsed.data.reason);
     } catch (error) {
       return sendMethodError(reply, error);
+    }
+  });
+
+  app.get("/api/skills", async (_request, reply) => {
+    reply.header("cache-control", "no-store");
+    return skills.snapshot();
+  });
+
+  app.post("/api/skills/export", async (request, reply) => {
+    const parsed = skillExportSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_EXPORT", message: "技能导出参数不正确" });
+    try {
+      const exported = skills.exportMethod(parsed.data.methodId);
+      return reply.code(201).send({ package: exported, skill: skills.getSkill(exported.id) });
+    } catch (error) {
+      return sendSkillError(reply, error);
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/api/skills/:id", async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    try {
+      const skill = skills.getSkill(request.params.id);
+      if (!skill) return reply.code(404).send({ error: "SKILL_NOT_FOUND", message: "技能不存在" });
+      return {
+        skill,
+        document: skills.readDocument(request.params.id),
+        resources: skills.readResources(request.params.id),
+        versions: skills.versions(request.params.id)
+      };
+    } catch (error) {
+      return sendSkillError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/skills/:id/pin", async (request, reply) => {
+    const parsed = skillPinSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_PIN", message: "技能固定参数不正确" });
+    try {
+      return skills.pin(request.params.id, parsed.data.pinned);
+    } catch (error) {
+      return sendSkillError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/skills/:id/archive", async (request, reply) => {
+    const parsed = skillArchiveSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_ARCHIVE", message: "技能归档参数不正确" });
+    try {
+      return skills.archive(request.params.id, parsed.data.reason ?? "用户归档");
+    } catch (error) {
+      return sendSkillError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/skills/:id/restore", async (request, reply) => {
+    try {
+      return skills.restore(request.params.id);
+    } catch (error) {
+      return sendSkillError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/skills/:id/status", async (request, reply) => {
+    const parsed = skillTransitionSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_STATUS", message: "技能状态参数不正确" });
+    try {
+      return skills.transition(request.params.id, parsed.data.status, parsed.data.reason ?? "");
+    } catch (error) {
+      return sendSkillError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/skills/:id/used", async (request, reply) => {
+    try {
+      return skills.markUsed(request.params.id);
+    } catch (error) {
+      return sendSkillError(reply, error);
     }
   });
 
@@ -2590,6 +2682,13 @@ function sendMemoryError(reply: FastifyReply, error: unknown) {
 
 function sendMethodError(reply: FastifyReply, error: unknown) {
   if (error instanceof MethodError) {
+    return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+  }
+  throw error;
+}
+
+function sendSkillError(reply: FastifyReply, error: unknown) {
+  if (error instanceof SkillPackageError) {
     return reply.code(error.statusCode).send({ error: error.code, message: error.message });
   }
   throw error;

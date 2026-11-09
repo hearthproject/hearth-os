@@ -1522,6 +1522,43 @@ export interface SkillPackageExport extends SkillPackageRecord {
   path: string;
 }
 
+export interface SkillRecord {
+  id: string;
+  methodId: string | null;
+  methodVersion: number | null;
+  name: string;
+  version: string;
+  status: SkillStatus;
+  pinned: boolean;
+  path: string;
+  contentHash: string;
+  manifest: SkillManifest;
+  origin: SkillOrigin;
+  sourceTaskIds: string[];
+  previousVersionId: string | null;
+  changeReport: string;
+  createdAt: string;
+  updatedAt: string;
+  adoptedAt: string | null;
+  lastUsedAt: string | null;
+  archivedAt: string | null;
+  archiveReason: string | null;
+  previousStatus: SkillStatus | null;
+}
+
+export interface SkillVersion {
+  id: string;
+  skillId: string;
+  version: string;
+  manifest: SkillManifest;
+  contentHash: string;
+  path: string;
+  methodId: string | null;
+  methodVersion: number | null;
+  changeReport: string;
+  createdAt: string;
+}
+
 export const SYNC_PEER_STATUSES = ["active", "revoked", "error"] as const;
 export type SyncPeerStatus = (typeof SYNC_PEER_STATUSES)[number];
 
