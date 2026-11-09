@@ -4,6 +4,7 @@ import type {
   ApprovalDecider,
   ApprovalRecord,
   EffectRecord,
+  EffectReplayPolicy,
   PermissionMode,
   TaskRecord
 } from "@hearth/core";
@@ -433,7 +434,18 @@ export class ApprovalManager {
       receipt: null,
       error: null,
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
+      goalId: approval.goalId ?? null,
+      effectType: approval.kind,
+      replayPolicy: replayPolicyForKind(approval.kind),
+      actionDigest: approval.actionDigest ?? null,
+      resolvedActionDigest: approval.actionDigest ?? null,
+      attemptCount: 1,
+      maxAttempts: 1,
+      leaseOwner: approval.runId,
+      leaseExpiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+      availableAt: now,
+      targetKey: `${approval.kind}:${stableStringify(approval.target)}`
     };
     this.service.createEffect(effect);
     this.service.updateApproval(approval.id, {
@@ -679,6 +691,11 @@ function isResolvedAction(value: unknown): value is ResolvedAction {
     && "sessionRoot" in value
     && typeof (value as { sessionRoot?: unknown }).sessionRoot === "string"
   );
+}
+
+function replayPolicyForKind(kind: string): EffectReplayPolicy {
+  if (kind.startsWith("tool.")) return "process_bound";
+  return "never_replay";
 }
 
 export function hashApprovalParameters(

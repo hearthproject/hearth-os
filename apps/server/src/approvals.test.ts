@@ -27,6 +27,13 @@ describe("approval manager", () => {
     const result = await manager.decide(approval.id, "approve", approval.parameterHash);
     expect(result.effect?.status).toBe("succeeded");
     expect(result.effect?.receipt?.url).toBe("https://github.com/JasonBuildAI/GoldMind/pull/17");
+    expect(result.effect).toMatchObject({
+      effectType: "github.publish-pr",
+      replayPolicy: "never_replay",
+      attemptCount: 1,
+      maxAttempts: 1
+    });
+    expect(result.effect?.targetKey).toContain("github.publish-pr:");
     expect(result.task.status).toBe("completed");
     expect(calls).toBe(1);
 
