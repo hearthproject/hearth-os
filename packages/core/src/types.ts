@@ -1506,6 +1506,22 @@ export interface SkillResourceRef {
   bytes: number | null;
 }
 
+export interface SkillPackageRecord {
+  schemaVersion: 1;
+  id: string;
+  methodId: string;
+  methodVersion: number;
+  version: string;
+  sourceTaskIds: string[];
+  exportedAt: string;
+  contentHash: string;
+  manifest: SkillManifest;
+}
+
+export interface SkillPackageExport extends SkillPackageRecord {
+  path: string;
+}
+
 export const SYNC_PEER_STATUSES = ["active", "revoked", "error"] as const;
 export type SyncPeerStatus = (typeof SYNC_PEER_STATUSES)[number];
 
