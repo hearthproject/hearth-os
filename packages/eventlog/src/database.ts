@@ -93,7 +93,7 @@ export interface RunAggregate {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 14;
+export const CURRENT_SCHEMA_VERSION = 15;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -160,7 +160,12 @@ CREATE TABLE IF NOT EXISTS approvals (
 CREATE TABLE IF NOT EXISTS effects (
   id TEXT PRIMARY KEY, task_id TEXT NOT NULL, approval_id TEXT NOT NULL, kind TEXT NOT NULL,
   idempotency_key TEXT NOT NULL UNIQUE, status TEXT NOT NULL, target_json TEXT NOT NULL,
-  receipt_json TEXT, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+  receipt_json TEXT, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  goal_id TEXT, effect_type TEXT, replay_policy TEXT, action_digest TEXT,
+  resolved_action_digest TEXT, attempt_count INTEGER, max_attempts INTEGER,
+  lease_owner TEXT, lease_expires_at TEXT, available_at TEXT, provider TEXT,
+  provider_ref TEXT, reconcile_ref TEXT, reconciled_at TEXT, target_key TEXT,
+  suspend_reason TEXT
 );
 CREATE TABLE IF NOT EXISTS artifacts (
   id TEXT PRIMARY KEY, task_id TEXT NOT NULL, run_id TEXT NOT NULL, relative_path TEXT NOT NULL,
@@ -522,6 +527,22 @@ export class HearthStore {
     ensureColumn(this.db, "approvals", "revoked_at", "TEXT");
     ensureColumn(this.db, "approvals", "action_json", "TEXT");
     ensureColumn(this.db, "approvals", "rejection_count", "INTEGER");
+    ensureColumn(this.db, "effects", "goal_id", "TEXT");
+    ensureColumn(this.db, "effects", "effect_type", "TEXT");
+    ensureColumn(this.db, "effects", "replay_policy", "TEXT");
+    ensureColumn(this.db, "effects", "action_digest", "TEXT");
+    ensureColumn(this.db, "effects", "resolved_action_digest", "TEXT");
+    ensureColumn(this.db, "effects", "attempt_count", "INTEGER");
+    ensureColumn(this.db, "effects", "max_attempts", "INTEGER");
+    ensureColumn(this.db, "effects", "lease_owner", "TEXT");
+    ensureColumn(this.db, "effects", "lease_expires_at", "TEXT");
+    ensureColumn(this.db, "effects", "available_at", "TEXT");
+    ensureColumn(this.db, "effects", "provider", "TEXT");
+    ensureColumn(this.db, "effects", "provider_ref", "TEXT");
+    ensureColumn(this.db, "effects", "reconcile_ref", "TEXT");
+    ensureColumn(this.db, "effects", "reconciled_at", "TEXT");
+    ensureColumn(this.db, "effects", "target_key", "TEXT");
+    ensureColumn(this.db, "effects", "suspend_reason", "TEXT");
     this.db.exec(`
       DELETE FROM chat_messages
       WHERE kind = 'task_status'
@@ -539,6 +560,8 @@ export class HearthStore {
       CREATE UNIQUE INDEX IF NOT EXISTS tasks_external_ref_idx
         ON tasks(external_ref) WHERE external_ref IS NOT NULL;
       CREATE INDEX IF NOT EXISTS approvals_action_digest_idx ON approvals(action_digest);
+      CREATE INDEX IF NOT EXISTS effects_target_status_idx ON effects(target_key, status, created_at);
+      CREATE INDEX IF NOT EXISTS effects_available_idx ON effects(status, available_at);
     `);
     this.db.exec(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION}`);
     this.setMeta("schemaVersion", String(CURRENT_SCHEMA_VERSION));
@@ -2121,18 +2144,48 @@ function updateApproval(db: DatabaseSync, patch: Record<string, unknown>): void 
 
 function insertEffect(db: DatabaseSync, effect: EffectRecord): void {
   db.prepare(
-    `INSERT INTO effects (id, task_id, approval_id, kind, idempotency_key, status, target_json, receipt_json, error, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO effects (id, task_id, approval_id, kind, idempotency_key, status, target_json, receipt_json, error, created_at, updated_at,
+       goal_id, effect_type, replay_policy, action_digest, resolved_action_digest, attempt_count, max_attempts,
+       lease_owner, lease_expires_at, available_at, provider, provider_ref, reconcile_ref, reconciled_at, target_key, suspend_reason)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     effect.id, effect.taskId, effect.approvalId, effect.kind, effect.idempotencyKey,
     effect.status, JSON.stringify(effect.target), effect.receipt ? JSON.stringify(effect.receipt) : null,
-    effect.error, effect.createdAt, effect.updatedAt
+    effect.error, effect.createdAt, effect.updatedAt,
+    effect.goalId ?? null, effect.effectType ?? effect.kind, effect.replayPolicy ?? "never_replay",
+    effect.actionDigest ?? null, effect.resolvedActionDigest ?? null,
+    effect.attemptCount ?? 0, effect.maxAttempts ?? 1,
+    effect.leaseOwner ?? null, effect.leaseExpiresAt ?? null,
+    effect.availableAt ?? effect.createdAt, effect.provider ?? null, effect.providerRef ?? null,
+    effect.reconcileRef ?? null, effect.reconciledAt ?? null, effect.targetKey ?? null,
+    effect.suspendReason ?? null
   );
 }
 
 function updateEffect(db: DatabaseSync, patch: Record<string, unknown>): void {
   const id = String(patch.id);
-  for (const [key, column] of Object.entries({ status: "status", error: "error", updatedAt: "updated_at" })) {
+  const columns: Record<string, string> = {
+    status: "status",
+    error: "error",
+    updatedAt: "updated_at",
+    goalId: "goal_id",
+    effectType: "effect_type",
+    replayPolicy: "replay_policy",
+    actionDigest: "action_digest",
+    resolvedActionDigest: "resolved_action_digest",
+    attemptCount: "attempt_count",
+    maxAttempts: "max_attempts",
+    leaseOwner: "lease_owner",
+    leaseExpiresAt: "lease_expires_at",
+    availableAt: "available_at",
+    provider: "provider",
+    providerRef: "provider_ref",
+    reconcileRef: "reconcile_ref",
+    reconciledAt: "reconciled_at",
+    targetKey: "target_key",
+    suspendReason: "suspend_reason"
+  };
+  for (const [key, column] of Object.entries(columns)) {
     if (key in patch) db.prepare(`UPDATE effects SET ${column} = ? WHERE id = ?`).run((patch[key] as SQLInputValue) ?? null, id);
   }
   if ("receipt" in patch) {
@@ -2562,7 +2615,23 @@ function rowToEffect(row: DbRow): EffectRecord {
     target: JSON.parse(String(row.target_json)),
     receipt: row.receipt_json == null ? null : JSON.parse(String(row.receipt_json)),
     error: row.error == null ? null : String(row.error),
-    createdAt: String(row.created_at), updatedAt: String(row.updated_at)
+    createdAt: String(row.created_at), updatedAt: String(row.updated_at),
+    goalId: row.goal_id == null ? null : String(row.goal_id),
+    effectType: row.effect_type == null ? String(row.kind) : String(row.effect_type),
+    replayPolicy: row.replay_policy == null ? "never_replay" : String(row.replay_policy) as NonNullable<EffectRecord["replayPolicy"]>,
+    actionDigest: row.action_digest == null ? null : String(row.action_digest),
+    resolvedActionDigest: row.resolved_action_digest == null ? null : String(row.resolved_action_digest),
+    attemptCount: row.attempt_count == null ? 0 : Number(row.attempt_count),
+    maxAttempts: row.max_attempts == null ? 1 : Number(row.max_attempts),
+    leaseOwner: row.lease_owner == null ? null : String(row.lease_owner),
+    leaseExpiresAt: row.lease_expires_at == null ? null : String(row.lease_expires_at),
+    availableAt: row.available_at == null ? String(row.created_at) : String(row.available_at),
+    provider: row.provider == null ? null : String(row.provider),
+    providerRef: row.provider_ref == null ? null : String(row.provider_ref),
+    reconcileRef: row.reconcile_ref == null ? null : String(row.reconcile_ref),
+    reconciledAt: row.reconciled_at == null ? null : String(row.reconciled_at),
+    targetKey: row.target_key == null ? null : String(row.target_key),
+    suspendReason: row.suspend_reason == null ? null : String(row.suspend_reason)
   };
 }
 

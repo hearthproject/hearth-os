@@ -384,7 +384,9 @@ function normalizeText(value: string | undefined, maxLength: number, label: stri
 
 function effectStatusToDraftStatus(effect: EffectRecord | null, kind: string): OutboxDraft["status"] {
   if (!effect) return "failed";
-  if (effect.status === "succeeded") return kind === "email.smtp-send" ? "sent" : "stored";
+  if (effect.status === "succeeded" || effect.status === "committed" || effect.status === "reconciled_committed") {
+    return kind === "email.smtp-send" ? "sent" : "stored";
+  }
   if (effect.status === "uncertain") return "uncertain";
   return "failed";
 }

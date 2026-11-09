@@ -64,10 +64,16 @@ const TASK_TONE: Record<TaskStatus, Tone> = {
 
 const EFFECT_TONE: Record<EffectRecord["status"], Tone> = {
   pending: "neutral",
+  prepared: "neutral",
+  admitted: "active",
   executing: "active",
+  committed: "done",
   succeeded: "done",
   failed: "risk",
-  uncertain: "risk"
+  uncertain: "risk",
+  reconciled_committed: "done",
+  reconciled_absent: "neutral",
+  abandoned: "neutral"
 };
 
 const RUN_TONE: Record<RunRecord["status"], Tone> = {

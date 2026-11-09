@@ -613,9 +613,24 @@ export interface ApprovalRecord {
   rejectionCount?: number;
 }
 
-export const EFFECT_STATUSES = ["pending", "executing", "succeeded", "failed", "uncertain"] as const;
+export const EFFECT_STATUSES = [
+  "pending",
+  "prepared",
+  "admitted",
+  "executing",
+  "committed",
+  "succeeded",
+  "failed",
+  "uncertain",
+  "reconciled_committed",
+  "reconciled_absent",
+  "abandoned"
+] as const;
 
 export type EffectStatus = (typeof EFFECT_STATUSES)[number];
+
+export const EFFECT_REPLAY_POLICIES = ["replay_safe", "process_bound", "never_replay"] as const;
+export type EffectReplayPolicy = (typeof EFFECT_REPLAY_POLICIES)[number];
 
 export interface EffectRecord {
   id: string;
@@ -629,6 +644,22 @@ export interface EffectRecord {
   error: string | null;
   createdAt: string;
   updatedAt: string;
+  goalId?: string | null;
+  effectType?: string;
+  replayPolicy?: EffectReplayPolicy;
+  actionDigest?: string | null;
+  resolvedActionDigest?: string | null;
+  attemptCount?: number;
+  maxAttempts?: number;
+  leaseOwner?: string | null;
+  leaseExpiresAt?: string | null;
+  availableAt?: string;
+  provider?: string | null;
+  providerRef?: string | null;
+  reconcileRef?: string | null;
+  reconciledAt?: string | null;
+  targetKey?: string | null;
+  suspendReason?: string | null;
 }
 
 export interface ArtifactRecord {

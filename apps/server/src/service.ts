@@ -687,7 +687,11 @@ export class HearthService {
 
   updateEffect(
     effectId: string,
-    patch: Partial<Pick<EffectRecord, "status" | "receipt" | "error" | "updatedAt">>
+    patch: Partial<Pick<EffectRecord,
+      "status" | "receipt" | "error" | "updatedAt" | "goalId" | "effectType" |
+      "replayPolicy" | "actionDigest" | "resolvedActionDigest" | "attemptCount" |
+      "maxAttempts" | "leaseOwner" | "leaseExpiresAt" | "availableAt" | "provider" |
+      "providerRef" | "reconcileRef" | "reconciledAt" | "targetKey" | "suspendReason">>
   ): EffectRecord {
     const current = this.store.getEffect(effectId);
     if (!current) throw new Error(`Effect not found: ${effectId}`);
