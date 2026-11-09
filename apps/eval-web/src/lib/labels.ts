@@ -102,6 +102,16 @@ export const LIFECYCLE_STEPS = [
   { step: 6, label: "完成", detail: "归档结论与产物" }
 ];
 
+export const STATUS_OPTIONS = [
+  { value: "all", label: "全部" },
+  { value: "active", label: "进行中" },
+  { value: "passed", label: "通过" },
+  { value: "failed", label: "失败" },
+  { value: "needs_review", label: "待复核" },
+  { value: "blocked", label: "阻塞" },
+  { value: "error", label: "错误" }
+] as const;
+
 export const EVENT_LABELS: Record<string, string> = {
   "experiment.created": "创建实验",
   "experiment.started": "实验开始",
