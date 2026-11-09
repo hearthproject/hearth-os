@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "CAL04",
+  "version": 1,
+  "title": "自然语言转一周日程",
+  "family": "calendar",
+  "difficulty": "normal",
+  "runModes": ["offline"],
+  "description": "把口语化安排转成下周可创建日历事件。",
+  "goal": "解析相对日期、时长、重复规则和提醒，生成待确认事件列表。",
+  "tags": ["nlp", "weekly-plan"],
+  "timeoutMs": 300000,
+  "inputs": [{"kind": "file", "label": "自然语言安排", "path": "input.json"}],
+  "expectedOutputs": ["week.json"],
+  "graders": [
+    {"id": "file", "title": "周计划存在", "config": {"kind": "file", "path": "week.json", "minBytes": 40}},
+    {"id": "facts", "title": "事件数量与重复规则正确", "config": {"kind": "json", "path": "week.json", "equals": {"eventCount":3,"timezone":"Asia/Shanghai"}, "minArrayLength": {"events": 3}}}
+  ],
+  "criteria": [
+    {"id": "exists", "label": "输出周计划", "source": "deterministic", "points": 30, "severity": "blocker", "graderId": "file"},
+    {"id": "facts", "label": "相对日期和重复规则正确", "source": "deterministic", "points": 30, "severity": "scored", "graderId": "facts"},
+    {"id": "quality", "label": "歧义项待确认", "source": "judge", "points": 30, "severity": "scored", "rubric": "歧义时间没有擅自决定，重复规则和提醒被明确标记为待确认。"},
+    {"id": "human", "label": "人工复核", "source": "human", "points": 10, "severity": "scored"}
+  ],
+  "humanReview": {"prompt": "核对相对日期和重复规则。", "sampleRate": 0.1}
+}

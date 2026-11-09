@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "CAL06",
+  "version": 1,
+  "title": "重复日程与节假日边界",
+  "family": "calendar",
+  "difficulty": "edge",
+  "runModes": ["offline"],
+  "description": "展开每两周一次的会议并避开节假日。",
+  "goal": "生成未来四次实例，跳过节假日并保留时区。",
+  "tags": ["recurrence", "holiday"],
+  "timeoutMs": 300000,
+  "inputs": [{"kind": "file", "label": "重复规则与节假日", "path": "input.json"}],
+  "expectedOutputs": ["instances.json"],
+  "graders": [
+    {"id": "file", "title": "实例列表存在", "config": {"kind": "file", "path": "instances.json", "minBytes": 40}},
+    {"id": "facts", "title": "四次实例与跳过项正确", "config": {"kind": "json", "path": "instances.json", "equals": {"count":4,"skipped":"2026-12-25"}, "minArrayLength": {"instances": 4}}}
+  ],
+  "criteria": [
+    {"id": "exists", "label": "输出实例列表", "source": "deterministic", "points": 30, "severity": "blocker", "graderId": "file"},
+    {"id": "facts", "label": "重复和节假日规则正确", "source": "deterministic", "points": 30, "severity": "scored", "graderId": "facts"},
+    {"id": "quality", "label": "日期解释清楚", "source": "judge", "points": 30, "severity": "scored", "rubric": "每隔两周的节奏保持一致，节假日跳过有说明。"},
+    {"id": "human", "label": "人工复核", "source": "human", "points": 10, "severity": "scored"}
+  ],
+  "humanReview": {"prompt": "核对重复日期和跳过项。", "sampleRate": 0.1}
+}

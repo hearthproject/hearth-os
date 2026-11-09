@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "CAL05",
+  "version": 1,
+  "title": "截止日期倒排计划",
+  "family": "calendar",
+  "difficulty": "edge",
+  "runModes": ["offline"],
+  "description": "根据发布截止日倒排评审、测试和交付节点。",
+  "goal": "生成倒排里程碑，识别工作日、缓冲和不可行项。",
+  "tags": ["deadline", "backward-plan"],
+  "timeoutMs": 300000,
+  "inputs": [{"kind": "file", "label": "发布要求", "path": "input.json"}],
+  "expectedOutputs": ["milestones.json"],
+  "graders": [
+    {"id": "file", "title": "里程碑存在", "config": {"kind": "file", "path": "milestones.json", "minBytes": 40}},
+    {"id": "facts", "title": "截止日和里程碑数量正确", "config": {"kind": "json", "path": "milestones.json", "equals": {"deadline":"2026-11-30","milestoneCount":4,"feasible":false}, "minArrayLength": {"milestones": 4}}}
+  ],
+  "criteria": [
+    {"id": "exists", "label": "输出里程碑", "source": "deterministic", "points": 30, "severity": "blocker", "graderId": "file"},
+    {"id": "facts", "label": "倒排日期和可行性正确", "source": "deterministic", "points": 30, "severity": "scored", "graderId": "facts"},
+    {"id": "quality", "label": "缓冲和阻塞说明合理", "source": "judge", "points": 30, "severity": "scored", "rubric": "倒排顺序合理，明确不可行原因和需要人工决定的取舍。"},
+    {"id": "human", "label": "人工复核", "source": "human", "points": 10, "severity": "scored"}
+  ],
+  "humanReview": {"prompt": "核对倒排日期和可行性判断。", "sampleRate": 0.1}
+}
