@@ -83,6 +83,23 @@ describe("Hearth service agent metadata", () => {
     store.close();
   });
 
+  it("records a follow-up and mirrors it into the originating conversation", () => {
+    const store = new HearthStore(":memory:");
+    const service = new HearthService(store);
+    const conversation = store.createConversation("补充对话");
+    const task = service.createTask({ title: "补充任务", goal: "验证补充记录", conversationId: conversation.id });
+
+    const followUp = service.createTaskFollowUp(task.id, "先检查失败原因，再继续。", "queue");
+    expect(followUp).toMatchObject({ taskId: task.id, conversationId: conversation.id, mode: "queue", status: "queued" });
+    expect(service.view(task.id)?.followUps).toEqual([followUp]);
+
+    const messages = store.listChatMessages(conversation.id);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({ role: "user", taskId: task.id, content: "先检查失败原因，再继续。" });
+    expect(store.listEvents(0, task.id).filter((event) => event.type === "task.follow-up.created")).toHaveLength(1);
+    store.close();
+  });
+
   it("reroutes proposal confirmation when its executor was disabled", () => {
     const store = new HearthStore(":memory:");
     const service = new HearthService(store);

@@ -13,6 +13,15 @@ export interface AgentToolCall {
   rawArguments: string;
 }
 
+export interface AgentToolAuthorizationRequest {
+  call: AgentToolCall;
+  definition: AgentToolDefinition;
+}
+
+export type AgentToolAuthorization =
+  | { allowed: true }
+  | { allowed: false; reason: string };
+
 export type AgentMessage =
   | { role: "system" | "user"; content: string }
   | { role: "assistant"; content: string; toolCalls: AgentToolCall[] }
@@ -98,6 +107,7 @@ export interface AgentRuntimeOptions {
   resume?: AgentResumeState;
   onEvent?: (event: RuntimeEvent) => void;
   onCheckpoint?: (checkpoint: AgentCheckpoint) => void | Promise<void>;
+  authorizeTool?: (request: AgentToolAuthorizationRequest) => Promise<AgentToolAuthorization>;
 }
 
 export type AgentRunStatus = "completed" | "waiting_input" | "failed" | "cancelled" | "budget_exceeded";

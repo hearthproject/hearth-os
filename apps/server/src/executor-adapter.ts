@@ -1,4 +1,10 @@
-import type { AgentCheckpoint, AgentResumeState, RuntimeEvent } from "@hearth/agent-runtime";
+import type {
+  AgentCheckpoint,
+  AgentResumeState,
+  AgentToolAuthorization,
+  AgentToolAuthorizationRequest,
+  RuntimeEvent
+} from "@hearth/agent-runtime";
 import type {
   ContextSettings,
   ExecutorId,
@@ -10,7 +16,7 @@ import type {
   TaskRecord
 } from "@hearth/core";
 import type { CodexRunOptions, CodexRunResult } from "@hearth/codex-executor";
-import { runDeepSeekHarness, type DeepSeekHarnessRunOptions, type DeepSeekHarnessRunResult, type DshContextEvent } from "@hearth/deepseek-executor";
+import { runDeepSeekHarness, type DeepSeekHarnessRunOptions, type DeepSeekHarnessRunResult, type DshApprovalOutcome, type DshApprovalRequest, type DshContextEvent } from "@hearth/deepseek-executor";
 import { runExternalExecutor, type ExternalContextItem, type ExternalRunOptions, type ExternalRunResult } from "./external-executor.ts";
 import { executorHome, resolveExecutorLaunch } from "./executor-runtime.ts";
 import type { ModelSettings } from "./model-settings.ts";
@@ -50,6 +56,8 @@ export interface ExecutorAttemptContext {
   onProgress: (event: { kind: string; message: string; detail?: TaskProgressDetail }) => void;
   onNativeContextEvent: (event: RuntimeEvent) => void;
   onNativeCheckpoint: (checkpoint: AgentCheckpoint) => void | Promise<void>;
+  onAuthorizeTool?: (request: AgentToolAuthorizationRequest) => Promise<AgentToolAuthorization>;
+  onDshApprovalRequest?: (request: DshApprovalRequest) => Promise<DshApprovalOutcome>;
   onExternalContextItem: (event: ExternalContextItem) => void;
   onDshContextItem: (event: DshContextEvent) => void;
   onCodexContextItem: (item: CodexContextItem) => void;
@@ -121,7 +129,8 @@ export class NativeExecutorAdapter implements ExecutorAdapter {
       expectedOutputs: input.expectedOutputs,
       onProgress: input.onProgress,
       onContextEvent: input.onNativeContextEvent,
-      onCheckpoint: input.onNativeCheckpoint
+      onCheckpoint: input.onNativeCheckpoint,
+      ...(input.onAuthorizeTool ? { onAuthorizeTool: input.onAuthorizeTool } : {})
     });
     return {
       status: outcome.status,
@@ -223,6 +232,7 @@ export class DeepSeekHarnessExecutorAdapter implements ExecutorAdapter {
       },
       dshHome: executorHome(this.settingsPath, "deepseek-harness"),
       workingDirectory: input.prepared.root,
+      outDir: input.prepared.outDir,
       prompt: input.prompt,
       mode: input.fullPermission ? "full" : "necessary",
       maxTurns: input.budget.maxTurns,
@@ -234,7 +244,8 @@ export class DeepSeekHarnessExecutorAdapter implements ExecutorAdapter {
         message: event.message,
         ...(event.detail ? { detail: event.detail as TaskProgressDetail } : {})
       }),
-      onContextItem: input.onDshContextItem
+      onContextItem: input.onDshContextItem,
+      ...(input.onDshApprovalRequest ? { onApprovalRequest: input.onDshApprovalRequest } : {})
     });
     return {
       status: "completed",

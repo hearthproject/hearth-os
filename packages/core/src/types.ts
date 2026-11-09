@@ -222,6 +222,27 @@ export interface TaskRecord {
   pendingInput?: string | null;
   methodId?: string | null;
   methodVersion?: number | null;
+  pinnedAt?: string | null;
+  archivedAt?: string | null;
+}
+
+export const TASK_FOLLOW_UP_MODES = ["queue", "steer"] as const;
+export type TaskFollowUpMode = (typeof TASK_FOLLOW_UP_MODES)[number];
+
+export const TASK_FOLLOW_UP_STATUSES = ["queued", "steering", "applied", "cancelled"] as const;
+export type TaskFollowUpStatus = (typeof TASK_FOLLOW_UP_STATUSES)[number];
+
+export interface TaskFollowUpRecord {
+  id: string;
+  taskId: string;
+  conversationId: string | null;
+  content: string;
+  mode: TaskFollowUpMode;
+  status: TaskFollowUpStatus;
+  appliedRunId: string | null;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ChatAttachment {
@@ -465,6 +486,89 @@ export interface RunCheckpointRecord {
   sha256: string;
   usage: RunUsage | null;
   createdAt: string;
+}
+
+export type GitFileStatus = "added" | "modified" | "deleted" | "renamed" | "untracked" | "conflicted";
+
+export interface GitFileChange {
+  path: string;
+  oldPath?: string | null;
+  status: GitFileStatus;
+  additions: number;
+  deletions: number;
+  binary: boolean;
+  staged: boolean;
+  unstaged: boolean;
+}
+
+export interface GitCommitSummary {
+  sha: string;
+  shortSha: string;
+  subject: string;
+  authorName: string;
+  authoredAt: string;
+}
+
+export interface GitCheckSummary {
+  name: string;
+  status: string;
+  conclusion: string | null;
+  url: string | null;
+}
+
+export interface GitPullRequestView {
+  number: number;
+  url: string;
+  title: string;
+  state: string;
+  draft: boolean;
+  mergeable: string | null;
+  reviewDecision: string | null;
+  headSha: string | null;
+  updatedAt: string | null;
+  checks: GitCheckSummary[];
+}
+
+export interface GitRepositoryView {
+  available: boolean;
+  reason: string | null;
+  repo: string | null;
+  branch: string | null;
+  base: string | null;
+  baseSha: string | null;
+  headSha: string | null;
+  filesScope: GitDiffScope;
+  clean: boolean;
+  statusText: string;
+  commitsAhead: number;
+  additions: number;
+  deletions: number;
+  files: GitFileChange[];
+  branchAdditions: number;
+  branchDeletions: number;
+  branchFiles: GitFileChange[];
+  commits: GitCommitSummary[];
+  pullRequest: GitPullRequestView | null;
+  pullRequestError: string | null;
+}
+
+export type GitDiffScope = "working" | "branch";
+
+export interface GitDiffView {
+  scope: GitDiffScope;
+  path: string | null;
+  patch: string;
+  truncated: boolean;
+}
+
+export interface GitFileView {
+  path: string;
+  exists: boolean;
+  fromHead: boolean;
+  binary: boolean;
+  truncated: boolean;
+  bytes: number;
+  content: string;
 }
 
 export const APPROVAL_STATUSES = ["pending", "approved", "rejected", "expired"] as const;

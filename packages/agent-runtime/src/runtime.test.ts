@@ -58,6 +58,60 @@ describe("agent runtime", () => {
     expect(checkpoints.at(-1)?.usage).toEqual(zeroUsage());
   });
 
+  it("executes a tool after the authorizer allows it", async () => {
+    const root = workspace(roots);
+    const out = join(root, "out");
+    const authorized: string[] = [];
+    const result = await runAgent({
+      model: fakeModel([
+        turn("", [call("write_file", { path: "out/approved.md", content: "approved" })]),
+        turn("", [call("finish_task", { summary: "完成" })])
+      ]),
+      tools: createBuiltinTools(),
+      goal: "写文件",
+      systemPrompt: "system",
+      budget: { maxTurns: 4, maxToolCalls: 4, maxTokens: 10_000, maxDurationMs: 30_000 },
+      permissions: defaultTaskPermissions({ workspaceRoot: root, outDir: out, networkHosts: [] }),
+      workspaceRoot: root,
+      outDir: out,
+      authorizeTool: async ({ call }) => {
+        authorized.push(call.name);
+        return { allowed: true };
+      }
+    });
+
+    expect(result.status).toBe("completed");
+    expect(authorized).toEqual(["write_file", "finish_task"]);
+    expect(readFileSync(join(out, "approved.md"), "utf8")).toBe("approved");
+  });
+
+  it("returns a tool error without executing when the authorizer denies", async () => {
+    const root = workspace(roots);
+    const out = join(root, "out");
+    const result = await runAgent({
+      model: fakeModel([
+        turn("", [call("write_file", { path: "out/denied.md", content: "denied" })]),
+        turn("", [call("finish_task", { summary: "完成" })])
+      ]),
+      tools: createBuiltinTools(),
+      goal: "写文件",
+      systemPrompt: "system",
+      budget: { maxTurns: 4, maxToolCalls: 4, maxTokens: 10_000, maxDurationMs: 30_000 },
+      permissions: defaultTaskPermissions({ workspaceRoot: root, outDir: out, networkHosts: [] }),
+      workspaceRoot: root,
+      outDir: out,
+      authorizeTool: async ({ call }) => call.name === "write_file"
+        ? { allowed: false, reason: "用户没有批准" }
+        : { allowed: true }
+    });
+
+    expect(result.status).toBe("completed");
+    expect(() => readFileSync(join(out, "denied.md"), "utf8")).toThrow();
+    expect(result.messages.some((message) =>
+      message.role === "tool" && message.isError && message.content.includes("用户没有批准")
+    )).toBe(true);
+  });
+
   it("stops at the turn budget with an explicit status", async () => {
     const root = workspace(roots);
     const result = await runAgent({

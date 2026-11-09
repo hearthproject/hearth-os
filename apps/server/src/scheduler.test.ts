@@ -14,7 +14,7 @@ import { MemoryService } from "./memory.ts";
 import { MethodService } from "./methods.ts";
 import { TaskLeaseService } from "./leases.ts";
 import type { ModelSettings } from "./model-settings.ts";
-import type { DeepSeekHarnessRunResult } from "@hearth/deepseek-executor";
+import type { DeepSeekHarnessRunOptions, DeepSeekHarnessRunResult, DshApprovalOutcome } from "@hearth/deepseek-executor";
 
 const FAKE_RESULT = {
   threadId: "fake-thread",
@@ -999,6 +999,187 @@ describe("Hearth scheduler", () => {
     expect(store?.listHandoffs(task.id)).toHaveLength(0);
   });
 
+  it("pauses a native task for sensitive tool approval and continues after approval", async () => {
+    const service = setup();
+    const modelSettingsPath = configureModel();
+    const approvals = new ApprovalManager(service, async () => ({}));
+    let authorization: { allowed: boolean; reason?: string } | null = null;
+    const nativeRunner: NativeRunner = async (options) => {
+      authorization = await options.onAuthorizeTool?.({
+        call: {
+          id: "call-write",
+          name: "write_file",
+          arguments: { path: "result.md", content: "# 结果\n" },
+          rawArguments: JSON.stringify({ path: "result.md", content: "# 结果\n" })
+        },
+        definition: { name: "write_file", description: "写入文件", parameters: {} }
+      }) ?? null;
+      writeFileSync(join(options.prepared.outDir, "result.md"), "# 结果\n");
+      return nativeResult("原生任务完成");
+    };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath, approvals });
+    scheduler.start();
+
+    const task = service.createTask({ title: "工具审批", goal: "写入结果", executorId: "native", expectedOutputs: ["result.md"] });
+    await waitForStatus(service, task.id, "waiting_approval");
+    const pending = store?.listApprovals(task.id).find((approval) => approval.status === "pending");
+    expect(pending?.kind).toBe("tool.write_file");
+
+    await approvals.decide(pending!.id, "approve", pending!.parameterHash);
+    const completed = await waitForStatus(service, task.id, "completed");
+    expect(authorization).toEqual({ allowed: true });
+    expect(completed.resultSummary).toBe("原生任务完成");
+  });
+
+  it("continues a native task without executing a rejected sensitive tool", async () => {
+    const service = setup();
+    const modelSettingsPath = configureModel();
+    const approvals = new ApprovalManager(service, async () => ({}));
+    let authorization: { allowed: boolean; reason?: string } | null = null;
+    const nativeRunner: NativeRunner = async (options) => {
+      authorization = await options.onAuthorizeTool?.({
+        call: {
+          id: "call-shell",
+          name: "shell",
+          arguments: { command: "npm test" },
+          rawArguments: JSON.stringify({ command: "npm test" })
+        },
+        definition: { name: "shell", description: "运行命令", parameters: {} }
+      }) ?? null;
+      writeFileSync(join(options.prepared.outDir, "result.md"), "# 跳过命令\n");
+      return nativeResult("已跳过被拒绝的工具");
+    };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath, approvals });
+    scheduler.start();
+
+    const task = service.createTask({ title: "拒绝工具", goal: "运行检查", executorId: "native", expectedOutputs: ["result.md"] });
+    await waitForStatus(service, task.id, "waiting_approval");
+    const pending = store?.listApprovals(task.id).find((approval) => approval.status === "pending");
+    await approvals.decide(pending!.id, "reject", pending!.parameterHash);
+
+    const completed = await waitForStatus(service, task.id, "completed");
+    expect(authorization).toMatchObject({ allowed: false });
+    expect(completed.resultSummary).toBe("已跳过被拒绝的工具");
+  });
+
+  it("bridges a DeepSeek Harness approval request and resumes with allowed-once", async () => {
+    const service = setup();
+    const approvals = new ApprovalManager(service, async () => ({}));
+    let outcome: DshApprovalOutcome | null = null;
+    const deepseekRunner = async (options: DeepSeekHarnessRunOptions): Promise<DeepSeekHarnessRunResult> => {
+      outcome = await options.onApprovalRequest?.({
+        sessionId: "dsh-session",
+        toolName: "shell",
+        callId: "call-dsh-shell",
+        reason: "需要运行测试验证结果"
+      }) ?? null;
+      writeFileSync(join(options.outDir, "result.md"), "# DSH 结果\n");
+      return { finalResponse: "DeepSeek Harness 任务完成", sessionId: "dsh-session", usage: null, finishReason: "completed" };
+    };
+    const executorHealth: ExecutorHealthProvider = (executorId) => executorId === "deepseek-harness"
+      ? { canRun: true, issues: [] }
+      : { canRun: false, issues: ["未安装"] };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, {
+      approvals,
+      deepseekRunner,
+      executorHealth,
+      modelSettingsForExecutor: (executorId) => executorId === "deepseek-harness" ? dshSettings() : null
+    });
+    scheduler.start();
+
+    const task = service.createTask({ title: "DSH 工具审批", goal: "运行测试", executorId: "deepseek-harness", expectedOutputs: ["result.md"] });
+    await waitForStatus(service, task.id, "waiting_approval");
+    const pending = store?.listApprovals(task.id).find((approval) => approval.status === "pending");
+    expect(pending?.kind).toBe("tool.shell");
+    expect(pending?.target).toMatchObject({
+      provider: "deepseek-harness",
+      sessionId: "dsh-session",
+      toolName: "shell",
+      callId: "call-dsh-shell"
+    });
+
+    await approvals.decide(pending!.id, "approve", pending!.parameterHash);
+    const completed = await waitForStatus(service, task.id, "completed");
+    expect(outcome).toBe("allowed-once");
+    expect(completed.resultSummary).toBe("DeepSeek Harness 任务完成");
+  });
+
+  it("maps a rejected DeepSeek Harness approval to rejected without failing the task", async () => {
+    const service = setup();
+    const approvals = new ApprovalManager(service, async () => ({}));
+    let outcome: DshApprovalOutcome | null = null;
+    const deepseekRunner = async (options: DeepSeekHarnessRunOptions): Promise<DeepSeekHarnessRunResult> => {
+      outcome = await options.onApprovalRequest?.({
+        sessionId: "dsh-session",
+        toolName: "write_file",
+        callId: "call-dsh-write"
+      }) ?? null;
+      writeFileSync(join(options.outDir, "result.md"), "# 跳过写入\n");
+      return { finalResponse: "已跳过被拒绝的工具", sessionId: "dsh-session", usage: null, finishReason: "completed" };
+    };
+    const executorHealth: ExecutorHealthProvider = (executorId) => executorId === "deepseek-harness"
+      ? { canRun: true, issues: [] }
+      : { canRun: false, issues: ["未安装"] };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, {
+      approvals,
+      deepseekRunner,
+      executorHealth,
+      modelSettingsForExecutor: (executorId) => executorId === "deepseek-harness" ? dshSettings() : null
+    });
+    scheduler.start();
+
+    const task = service.createTask({ title: "DSH 拒绝工具", goal: "写入结果", executorId: "deepseek-harness", expectedOutputs: ["result.md"] });
+    await waitForStatus(service, task.id, "waiting_approval");
+    const pending = store?.listApprovals(task.id).find((approval) => approval.status === "pending");
+    await approvals.decide(pending!.id, "reject", pending!.parameterHash);
+
+    const completed = await waitForStatus(service, task.id, "completed");
+    expect(outcome).toBe("rejected");
+    expect(completed.resultSummary).toBe("已跳过被拒绝的工具");
+  });
+
+  it("maps DeepSeek Harness approval cancellation to cancelled", async () => {
+    const service = setup();
+    const approvals = new ApprovalManager(service, async () => ({}));
+    let outcome: DshApprovalOutcome | null = null;
+    let resolveCancelled: (() => void) | null = null;
+    const cancelled = new Promise<void>((resolve) => {
+      resolveCancelled = resolve;
+    });
+    const deepseekRunner = async (options: DeepSeekHarnessRunOptions): Promise<DeepSeekHarnessRunResult> => {
+      outcome = await options.onApprovalRequest?.({
+        sessionId: "dsh-session",
+        toolName: "shell",
+        callId: "call-dsh-cancel"
+      }) ?? null;
+      if (outcome === "cancelled") resolveCancelled?.();
+      return { finalResponse: "任务已取消", sessionId: "dsh-session", usage: null, finishReason: "cancelled" };
+    };
+    const executorHealth: ExecutorHealthProvider = (executorId) => executorId === "deepseek-harness"
+      ? { canRun: true, issues: [] }
+      : { canRun: false, issues: ["未安装"] };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, {
+      approvals,
+      deepseekRunner,
+      executorHealth,
+      modelSettingsForExecutor: (executorId) => executorId === "deepseek-harness" ? dshSettings() : null
+    });
+    scheduler.start();
+
+    const task = service.createTask({ title: "DSH 取消审批", goal: "运行测试", executorId: "deepseek-harness", expectedOutputs: ["result.md"] });
+    await waitForStatus(service, task.id, "waiting_approval");
+    scheduler.cancel(task.id);
+
+    await Promise.race([
+      cancelled,
+      delay(2_000).then(() => {
+        throw new Error("DeepSeek Harness approval did not receive cancelled");
+      })
+    ]);
+    expect(outcome).toBe("cancelled");
+    expect(service.store.getTask(task.id)?.status).toBe("cancelled");
+  });
+
   it("captures a failed task as an experience candidate when auto-capture is enabled", async () => {
     const service = setup();
     new MemoryService(service).updateSettings({ autoCapture: "experience" });
@@ -1018,6 +1199,64 @@ describe("Hearth scheduler", () => {
       .find((memory) => memory.derivedFromId === task.id);
     expect(captured).toBeTruthy();
     expect(captured?.source.type).toBe("task");
+  });
+
+  it("continues the same task with a queued follow-up before completing", async () => {
+    const service = setup();
+    const settingsPath = configureModel();
+    let calls = 0;
+    const prompts: string[] = [];
+    const nativeRunner: NativeRunner = async (options) => {
+      calls += 1;
+      prompts.push(options.prompt);
+      if (calls === 1) scheduler?.addFollowUp(options.task.id, "补充要求：只保留一句话结论", "queue");
+      writeFileSync(join(options.prepared.outDir, "result.md"), `# 结果 ${calls}\n`);
+      return nativeResult(`第 ${calls} 轮完成`);
+    };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath: settingsPath });
+    scheduler.start();
+
+    const task = service.createTask({ title: "队列补充", goal: "生成结果", executorId: "native", expectedOutputs: ["result.md"] });
+    const completed = await waitForStatus(service, task.id, "completed");
+    expect(calls).toBe(2);
+    expect(prompts[1]).toContain("补充要求：只保留一句话结论");
+    expect(completed.resultSummary).toBe("第 2 轮完成");
+    expect(store?.listRuns(task.id)).toHaveLength(2);
+    const followUps = store?.listTaskFollowUps(task.id) ?? [];
+    expect(followUps).toHaveLength(1);
+    expect(followUps[0]?.status).toBe("applied");
+    expect(followUps[0]?.appliedRunId).toBe(store?.listRuns(task.id)[1]?.id);
+  });
+
+  it("steers by aborting the current turn and restarting with the new instruction", async () => {
+    const service = setup();
+    const settingsPath = configureModel();
+    let calls = 0;
+    const prompts: string[] = [];
+    const nativeRunner: NativeRunner = async (options) => {
+      calls += 1;
+      prompts.push(options.prompt);
+      if (calls === 1) {
+        scheduler?.addFollowUp(options.task.id, "改方向：输出三条要点", "steer");
+        await new Promise<never>((_, reject) => {
+          if (options.signal.aborted) return reject(new Error("steered"));
+          options.signal.addEventListener("abort", () => reject(new Error("steered")), { once: true });
+        });
+      }
+      writeFileSync(join(options.prepared.outDir, "result.md"), "# 结果\n\n三条要点\n");
+      return nativeResult("按新方向完成");
+    };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath: settingsPath });
+    scheduler.start();
+
+    const task = service.createTask({ title: "中止转向", goal: "生成结果", executorId: "native", expectedOutputs: ["result.md"] });
+    const completed = await waitForStatus(service, task.id, "completed");
+    expect(calls).toBe(2);
+    expect(prompts[1]).toContain("改方向：输出三条要点");
+    expect(completed.resultSummary).toBe("按新方向完成");
+    expect(store?.listRuns(task.id).map((run) => run.status)).toEqual(["cancelled", "completed"]);
+    const followUps = store?.listTaskFollowUps(task.id) ?? [];
+    expect(followUps[0]?.status).toBe("applied");
   });
 
   function setup(): HearthService {
@@ -1045,7 +1284,7 @@ describe("Hearth scheduler", () => {
       nativeRunner?: NativeRunner;
       modelSettingsPath?: string;
       executorHealth?: ExecutorHealthProvider;
-      deepseekRunner?: (options: { workingDirectory: string }) => Promise<DeepSeekHarnessRunResult>;
+      deepseekRunner?: (options: DeepSeekHarnessRunOptions) => Promise<DeepSeekHarnessRunResult>;
       modelSettingsForExecutor?: (executorId: ExecutorId) => ModelSettings | null;
       autoLearn?: boolean;
     } = {}

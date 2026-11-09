@@ -1,12 +1,18 @@
 import { createHash, randomUUID } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
-import type { AgentCheckpoint, AgentResumeState, RuntimeEvent } from "@hearth/agent-runtime";
-import type { ContextItem, ContextSettings, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, MethodCandidate, MethodSelection, RunBudget, RunCheckpointRecord, RunRecord, TaskError, TaskLease, TaskProgressDetail, TaskRecord } from "@hearth/core";
+import type {
+  AgentCheckpoint,
+  AgentResumeState,
+  AgentToolAuthorization,
+  AgentToolAuthorizationRequest,
+  RuntimeEvent
+} from "@hearth/agent-runtime";
+import type { ContextItem, ContextSettings, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, MethodCandidate, MethodSelection, RunBudget, RunCheckpointRecord, RunRecord, TaskError, TaskFollowUpRecord, TaskLease, TaskProgressDetail, TaskRecord } from "@hearth/core";
 import { runCodex } from "@hearth/codex-executor";
 import { getTemplate } from "@hearth/templates";
-import type { DshContextEvent } from "@hearth/deepseek-executor";
-import type { ApprovalRequest, ApprovalManager } from "./approvals.ts";
+import type { DshApprovalOutcome, DshApprovalRequest, DshContextEvent } from "@hearth/deepseek-executor";
+import type { ApprovalRequest, ApprovalManager, PendingToolApproval, ToolApprovalDecision } from "./approvals.ts";
 import { missingExpectedOutputs, publishArtifacts } from "./artifacts.ts";
 import { CONTEXT_BLOB_DIR, EXECUTOR_SETTINGS_PATH, GIT_CACHE_DIR, MODEL_SETTINGS_PATH, REPO_ROOT, SOURCE_CONTENT_DIR, WORKSPACE_DIR } from "./config.ts";
 import { ContextService, estimateTokens } from "./context.ts";
@@ -47,6 +53,8 @@ interface AttemptResult {
   aborted: boolean;
   leaseLost: boolean;
   cancelled: boolean;
+  steered?: boolean;
+  queuedFollowUp?: boolean;
 }
 
 export interface SchedulerOptions {
@@ -112,6 +120,7 @@ export class HearthScheduler {
   private readonly leaseHeartbeatMs: number;
   private readonly leaseHeartbeats = new Map<string, { epoch: number; timer: ReturnType<typeof setInterval> }>();
   private readonly controllers = new Map<string, AbortController>();
+  private readonly steering = new Map<string, string>();
   private readonly cancelled = new Set<string>();
   private readonly activeByExecutor = new Map<ExecutorId, Set<string>>();
   private readonly runPromises = new Set<Promise<void>>();
@@ -207,6 +216,74 @@ export class HearthScheduler {
     this.wake();
   }
 
+  addFollowUp(taskId: string, content: string, mode: "queue" | "steer"): TaskFollowUpRecord {
+    const task = this.service.requireTask(taskId);
+    const text = content.trim();
+    if (!text) throw new Error("补充内容不能为空");
+    if (text.length > 20_000) throw new Error("补充内容不能超过 20000 个字符");
+    if (task.status === "completed" || task.status === "cancelled") {
+      throw new Error("任务已经结束，不能再追加指令");
+    }
+    if (mode === "steer") {
+      if (task.status !== "running" || !this.controllers.has(taskId)) {
+        throw new Error("只有正在运行的任务可以中止当前轮并立即补充");
+      }
+      if (this.service.store.listTaskFollowUps(taskId, "steering").length > 0) {
+        throw new Error("已有一条补充信息正在应用中");
+      }
+      const followUp = this.service.createTaskFollowUp(taskId, text, "steer");
+      this.steering.set(taskId, followUp.id);
+      this.service.updateTask(taskId, {
+        nextAction: "正在中止当前轮，准备应用补充信息"
+      }, task.currentRunId ?? undefined);
+      this.controllers.get(taskId)?.abort();
+      return followUp;
+    }
+    if (this.service.store.listHandoffs(taskId).some((handoff) => handoff.status === "pending_user")
+      && task.status !== "running" && task.status !== "queued") {
+      throw new Error("有等待确认的接管，请先确认接管或取消任务");
+    }
+    const followUp = this.service.createTaskFollowUp(taskId, text, "queue");
+    if (task.status === "waiting_input" || task.status === "recoverable" || task.status === "failed") {
+      this.service.updateTask(taskId, {
+        status: "queued", nextAction: "收到补充信息，等待继续", error: null
+      }, task.currentRunId ?? undefined);
+      this.wake();
+    }
+    return followUp;
+  }
+
+  updateFollowUp(taskId: string, followUpId: string, content: string): TaskFollowUpRecord {
+    const followUp = this.service.store.getTaskFollowUp(followUpId);
+    if (!followUp || followUp.taskId !== taskId) throw new Error("补充信息不存在");
+    if (followUp.status !== "queued") throw new Error("只有排队中的补充信息可以编辑");
+    const text = content.trim();
+    if (!text) throw new Error("补充内容不能为空");
+    if (text.length > 20_000) throw new Error("补充内容不能超过 20000 个字符");
+    return this.service.updateTaskFollowUp(followUpId, { content: text });
+  }
+
+  cancelFollowUp(taskId: string, followUpId: string): TaskFollowUpRecord {
+    const followUp = this.service.store.getTaskFollowUp(followUpId);
+    if (!followUp || followUp.taskId !== taskId) throw new Error("补充信息不存在");
+    if (followUp.status !== "queued") throw new Error("只有排队中的补充信息可以删除");
+    return this.service.updateTaskFollowUp(followUpId, { status: "cancelled" });
+  }
+
+  resumeFollowUp(taskId: string): TaskRecord {
+    const task = this.service.requireTask(taskId);
+    if (!["waiting_input", "recoverable", "failed"].includes(task.status)) return task;
+    if (this.service.store.listTaskFollowUps(taskId, "queued").length === 0) return task;
+    if (this.service.store.listHandoffs(taskId).some((handoff) => handoff.status === "pending_user")) {
+      throw new Error("有等待确认的接管，请先确认接管或取消任务");
+    }
+    const updated = this.service.updateTask(taskId, {
+      status: "queued", nextAction: "收到补充信息，等待继续", error: null
+    }, task.currentRunId ?? undefined);
+    this.wake();
+    return updated;
+  }
+
   get contextService(): ContextService {
     return this.context;
   }
@@ -241,6 +318,12 @@ export class HearthScheduler {
     const task = this.service.requireTask(taskId);
     if (task.status === "completed" || task.status === "cancelled") return task;
     this.cancelled.add(taskId);
+    this.steering.delete(taskId);
+    for (const followUp of this.service.store.listTaskFollowUps(taskId)) {
+      if (followUp.status === "queued" || followUp.status === "steering") {
+        this.service.updateTaskFollowUp(followUp.id, { status: "cancelled", error: "任务已取消" });
+      }
+    }
     this.controllers.get(taskId)?.abort();
     this.approvals?.expireForTask(taskId);
     this.service.updateTask(taskId, {
@@ -300,6 +383,9 @@ export class HearthScheduler {
           guidance: "检查已有产物后点击重试"
         }
       }, task.currentRunId ?? undefined);
+      for (const followUp of this.service.store.listTaskFollowUps(task.id, "steering")) {
+        this.service.updateTaskFollowUp(followUp.id, { status: "cancelled", error: "服务重启中断了这一轮补充" });
+      }
     }
   }
 
@@ -714,6 +800,15 @@ export class HearthScheduler {
           if (handoff) this.context.updateHandoff(handoff.id, { status: "cancelled" });
           return;
         }
+        let appliedFollowUp: TaskFollowUpRecord | null = null;
+        if (!pendingInput) {
+          appliedFollowUp = this.takeNextFollowUp(taskId);
+          if (appliedFollowUp) {
+            pendingInput = appliedFollowUp.content.trim();
+            resumePrompt = `用户补充信息：\n${pendingInput}`;
+            this.steering.delete(taskId);
+          }
+        }
         const attempt = this.service.store.listRuns(taskId).length + 1;
         const runId = randomUUID();
         const taskRoot = this.taskRoot(taskId);
@@ -730,6 +825,11 @@ export class HearthScheduler {
           parentRunId: previousRun?.id ?? null, handoffId: handoff?.id ?? null
         };
         this.service.createRun(run);
+        if (appliedFollowUp) {
+          this.service.updateTaskFollowUp(appliedFollowUp.id, {
+            status: "applied", appliedRunId: runId, error: null
+          });
+        }
         this.service.updateTask(taskId, {
           status: "running", currentRunId: runId,
           nextAction: handoff ? `${executorId} 接管执行中` : "正在执行",
@@ -739,9 +839,26 @@ export class HearthScheduler {
         if (result.status === "failed" || this.service.requireTask(taskId).status !== "completed") {
           this.assertLease(taskId, leaseEpoch, leaseLost);
         }
+        if (result.steered) {
+          if (handoff) {
+            this.context.updateHandoff(handoff.id, { status: "cancelled", toRunId: result.run.id });
+            handoff = null;
+          }
+          previousRun = result.run;
+          pendingInput = "";
+          resumePrompt = null;
+          this.refreshTaskSummary(taskId);
+          continue;
+        }
         if (result.status !== "failed") {
           if (handoff && result.status !== "cancelled" && result.status !== "waiting_input") this.context.updateHandoff(handoff.id, { status: "completed", toRunId: runId });
           this.refreshTaskSummary(taskId);
+          if (result.status === "completed" && result.queuedFollowUp) {
+            previousRun = result.run;
+            pendingInput = "";
+            resumePrompt = null;
+            continue;
+          }
           return;
         }
         if (result.cancelled || result.leaseLost) {
@@ -1029,6 +1146,28 @@ export class HearthScheduler {
         onProgress: (event) => this.publishProgress(taskId, runId, event.kind, event.message, event.detail),
         onNativeContextEvent: (event) => this.captureNativeEvent(task, run, event),
         onNativeCheckpoint: (checkpoint) => this.persistNativeCheckpoint(taskId, runId, prepared.root, checkpoint),
+        ...(executorId === "native"
+          ? {
+              onAuthorizeTool: (request) => this.authorizeNativeTool({
+                task,
+                run,
+                request,
+                fullPermission,
+                signal: controller.signal
+              })
+            }
+          : {}),
+        ...(executorId === "deepseek-harness"
+          ? {
+              onDshApprovalRequest: (request) => this.authorizeDshTool({
+                task,
+                run,
+                request,
+                fullPermission,
+                signal: controller.signal
+              })
+            }
+          : {}),
         onExternalContextItem: (event) => this.captureExternalContextEvent(task, run, event),
         onDshContextItem: (event) => this.captureDshContextEvent(task, run, event),
         onCodexContextItem: (item) => this.captureCodexItem(task, run, item),
@@ -1115,6 +1254,14 @@ export class HearthScheduler {
         await this.approvals.request({ ...request, taskId, runId });
         return { status: "waiting_approval", run: { ...run, status: "completed" }, executorId, outDir, error: null, failure: null, aborted: controller.signal.aborted, leaseLost: false, cancelled: false };
       }
+      if (this.hasPendingFollowUp(taskId)) {
+        this.service.updateTask(taskId, {
+          status: "running", currentRunId: runId, nextAction: "收到补充信息，正在继续",
+          error: null, resultSummary: result.finalResponse
+        }, runId);
+        this.refreshTaskSummary(taskId);
+        return { status: "completed", run: { ...run, status: "completed", threadId: result.threadId, usage: result.usage }, executorId, outDir, error: null, failure: null, aborted: controller.signal.aborted, leaseLost: false, cancelled: false, queuedFollowUp: true };
+      }
       this.service.updateTask(taskId, {
         status: "completed", currentRunId: runId, nextAction: "产物已保存",
         error: null, resultSummary: result.finalResponse
@@ -1122,6 +1269,16 @@ export class HearthScheduler {
       this.refreshTaskSummary(taskId);
       return { status: "completed", run: { ...run, status: "completed", threadId: result.threadId, usage: result.usage }, executorId, outDir, error: null, failure: null, aborted: controller.signal.aborted, leaseLost: false, cancelled: false };
     } catch (error) {
+      if (controller.signal.aborted && this.steering.has(taskId)) {
+        this.service.updateRun(runId, taskId, { status: "cancelled", endedAt: new Date().toISOString(), failure: null });
+        this.service.updateTask(taskId, {
+          status: "running", currentRunId: runId, nextAction: "正在应用补充信息", error: null
+        }, runId);
+        return {
+          status: "cancelled", run: { ...run, status: "cancelled" }, executorId, outDir,
+          error, failure: null, aborted: true, leaseLost: false, cancelled: false, steered: true
+        };
+      }
       const failure = this.markRunFailed(taskId, runId, error, controller.signal.aborted, run.leaseEpoch ?? 0);
       this.refreshTaskSummary(taskId, { lastFailure: failure.failure });
       return {
@@ -1130,6 +1287,150 @@ export class HearthScheduler {
         executorId, outDir, error, failure: failure.failure,
         aborted: controller.signal.aborted, leaseLost: failure.leaseLost, cancelled: failure.cancelled
       };
+    }
+  }
+
+  private async authorizeNativeTool(input: {
+    task: TaskRecord;
+    run: RunRecord;
+    request: AgentToolAuthorizationRequest;
+    fullPermission: boolean;
+    signal: AbortSignal;
+  }): Promise<AgentToolAuthorization> {
+    const toolName = input.request.call.name;
+    if (!TOOL_APPROVAL_REQUIRED.has(toolName)) return { allowed: true };
+    if (input.signal.aborted) return { allowed: false, reason: "任务已取消" };
+    if (input.fullPermission) {
+      this.recordAutoApprovedTool(input.task, input.run, {
+        toolName,
+        arguments: approvalArguments(input.request.call.arguments)
+      });
+      return { allowed: true };
+    }
+    const argumentsValue = approvalArguments(input.request.call.arguments);
+    const decision = await this.requestToolApproval({
+      task: input.task,
+      run: input.run,
+      toolName,
+      summary: toolApprovalSummary(toolName, input.request.call.arguments),
+      target: { tool: toolName, arguments: argumentsValue },
+      preview: { arguments: argumentsValue },
+      signal: input.signal
+    });
+    return decision.allowed
+      ? { allowed: true }
+      : { allowed: false, reason: decision.reason };
+  }
+
+  private async authorizeDshTool(input: {
+    task: TaskRecord;
+    run: RunRecord;
+    request: DshApprovalRequest;
+    fullPermission: boolean;
+    signal: AbortSignal;
+  }): Promise<DshApprovalOutcome> {
+    if (input.signal.aborted) return "cancelled";
+    const metadata = dshApprovalMetadata(input.request);
+    if (input.fullPermission) {
+      this.recordAutoApprovedTool(input.task, input.run, {
+        toolName: input.request.toolName,
+        arguments: null,
+        metadata
+      });
+      return "allowed-once";
+    }
+    const decision = await this.requestToolApproval({
+      task: input.task,
+      run: input.run,
+      toolName: input.request.toolName,
+      summary: dshToolApprovalSummary(input.request),
+      target: metadata,
+      preview: metadata,
+      signal: input.signal
+    });
+    if (decision.allowed) return "allowed-once";
+    if (input.signal.aborted || decision.reason === "任务已取消") return "cancelled";
+    return "rejected";
+  }
+
+  private async requestToolApproval(input: {
+    task: TaskRecord;
+    run: RunRecord;
+    toolName: string;
+    summary: string;
+    target: Record<string, unknown>;
+    preview: Record<string, unknown>;
+    signal: AbortSignal;
+  }): Promise<ToolApprovalDecision> {
+    if (!this.approvals) {
+      return { allowed: false, reason: "审批管理器未启动，敏感工具没有执行" };
+    }
+    let pending: PendingToolApproval;
+    try {
+      pending = await this.approvals.requestTool({
+        taskId: input.task.id,
+        runId: input.run.id,
+        toolName: input.toolName,
+        summary: input.summary,
+        target: input.target,
+        preview: input.preview
+      });
+    } catch (error) {
+      return { allowed: false, reason: `无法创建工具审批：${errorMessage(error)}` };
+    }
+    return this.awaitToolApproval(pending, input.signal);
+  }
+
+  private awaitToolApproval(pending: PendingToolApproval, signal: AbortSignal): Promise<ToolApprovalDecision> {
+    if (signal.aborted) {
+      this.approvals?.cancelToolApproval(pending.approval.id, "任务已取消");
+      return Promise.resolve({ allowed: false, reason: "任务已取消" });
+    }
+    return new Promise<ToolApprovalDecision>((resolve) => {
+      let settled = false;
+      const finish = (decision: ToolApprovalDecision): void => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", onAbort);
+        resolve(decision);
+      };
+      const onAbort = (): void => {
+        this.approvals?.cancelToolApproval(pending.approval.id, "任务已取消");
+        finish({ allowed: false, reason: "任务已取消" });
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      pending.decision.then(finish, (error) => finish({ allowed: false, reason: errorMessage(error) }));
+    });
+  }
+
+  private recordAutoApprovedTool(
+    task: TaskRecord,
+    run: RunRecord,
+    input: { toolName: string; arguments: unknown; metadata?: Record<string, unknown> }
+  ): void {
+    try {
+      const event = this.service.store.appendEvent({
+        type: "approval.auto_approved",
+        taskId: task.id,
+        runId: run.id,
+        payload: {
+          approvalId: null,
+          kind: `tool.${input.toolName}`,
+          toolName: input.toolName,
+          arguments: input.arguments,
+          ...(input.metadata ?? {}),
+          conversationId: task.conversationId ?? null,
+          policy: "conversation.full",
+          effectId: null
+        }
+      });
+      this.service.bus.publish(event);
+    } catch {
+      // Full-permission execution must not fail because an audit event could not be written.
     }
   }
 
@@ -1455,6 +1756,17 @@ export class HearthScheduler {
     return runs.at(-1) ?? null;
   }
 
+  private takeNextFollowUp(taskId: string): TaskFollowUpRecord | null {
+    const steering = this.service.store.listTaskFollowUps(taskId, "steering")[0];
+    if (steering) return steering;
+    return this.service.store.listTaskFollowUps(taskId, "queued")[0] ?? null;
+  }
+
+  private hasPendingFollowUp(taskId: string): boolean {
+    return this.service.store.listTaskFollowUps(taskId, "steering").length > 0
+      || this.service.store.listTaskFollowUps(taskId, "queued").length > 0;
+  }
+
   private taskRoot(taskId: string): string {
     return join(this.workspaceRoot, "tasks", taskId);
   }
@@ -1612,6 +1924,59 @@ export class HearthScheduler {
   }
 
 
+}
+
+const TOOL_APPROVAL_REQUIRED = new Set([
+  "write_file",
+  "edit_file",
+  "apply_patch",
+  "shell",
+  "fetch_url",
+  "capture_screen"
+]);
+
+function toolApprovalSummary(toolName: string, value: unknown): string {
+  const args = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const path = typeof args.path === "string" ? args.path : typeof args.fileName === "string" ? args.fileName : null;
+  const command = typeof args.command === "string" ? args.command : null;
+  const url = typeof args.url === "string" ? args.url : null;
+  if (toolName === "write_file") return `写入工作区文件：${path ?? "未指定路径"}`;
+  if (toolName === "edit_file") return `修改工作区文件：${path ?? "未指定路径"}`;
+  if (toolName === "apply_patch") return "应用补丁修改工作区文件";
+  if (toolName === "shell") return `运行命令：${clipText(command ?? "未指定命令", 160)}`;
+  if (toolName === "fetch_url") return `读取网址：${clipText(url ?? "未指定网址", 200)}`;
+  if (toolName === "capture_screen") return `截取桌面画面：${path ?? "desktop.png"}`;
+  return `执行敏感工具：${toolName}`;
+}
+
+function dshApprovalMetadata(request: DshApprovalRequest): Record<string, unknown> {
+  return {
+    provider: "deepseek-harness",
+    sessionId: request.sessionId,
+    toolName: request.toolName,
+    ...(request.callId ? { callId: request.callId } : {}),
+    ...(request.reason ? { reason: clipText(request.reason, 2_000) } : {})
+  };
+}
+
+function dshToolApprovalSummary(request: DshApprovalRequest): string {
+  const reason = request.reason ? `：${clipText(request.reason, 240)}` : "";
+  return `DeepSeek Harness 请求执行工具 ${request.toolName}${reason}`;
+}
+
+function approvalArguments(value: unknown): unknown {
+  if (value === undefined) return null;
+  try {
+    const serialized = JSON.stringify(value);
+    if (serialized.length <= 16_000) return JSON.parse(serialized) as unknown;
+    return { truncated: true, preview: serialized.slice(0, 16_000) };
+  } catch {
+    return { truncated: true, preview: String(value).slice(0, 16_000) };
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function expectedOutputsForTask(task: TaskRecord): string[] {

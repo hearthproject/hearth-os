@@ -71,6 +71,7 @@ Hearth uses LoopX only as a delivery-method reference. It is not a runtime depen
 | Data retention | Screenshots stay in the local device data directory with short expiry. The server records audit events, not the full screen, in the event log. |
 | Failure handling | Missing drivers, insufficient permissions, lost windows, scope mismatch, or unverifiable results stop the flow and return control to the user. High-risk actions are not retried, and success is never fabricated. |
 | Proactive service | Produce only suggestions with source, why-now, suggested action, impact, and risk. Accept records a decision; convert creates a queued task; external actions still require approval. Daily limits, quiet hours, cooldown, and pause constrain interruption. |
+| Tool-level approval | The native executor asks for one-time approval before writing or editing files, applying patches, running shell commands, fetching web pages, or capturing the desktop. Approval covers only that call; rejection returns a tool error to the model and the task continues. DeepSeek Harness `approval/request` calls reuse the same one-time approval record and map to `allowed-once`, `rejected`, or `cancelled`. Full permission auto-allows and records an audit event. Codex, Hermes, Qoder, WorkBuddy, and Kimi native per-tool approval events are not yet normalized, and external effects remain governed by the separate effect ledger. |
 | Memory | Memory starts as a candidate and needs user confirmation. Recall records reasons and budgets; injected context is marked untrusted background. Sensitive memory is not recalled by default, `secret` is never recalled, and forgetting redacts projections, versions, events, and recall audits. |
 | Method evolution | A candidate can only inherit the intersection of source-task capabilities. Trials read existing terminal traces and create no external side effects. Only repeatable improvement evidence permits promotion, with rejection, rollback, and reasons retained. |
 | Multi-device execution | Task leases use owner, TTL, and epoch. Expired takeover advances the epoch and rejects the old executor's commits. Sync copies only filtered event projections, not approvals, sources, outbox, device, or desktop-control events. |
@@ -87,7 +88,7 @@ Hearth uses LoopX only as a delivery-method reference. It is not a runtime depen
 - Pretending a real Windows helper was verified. Anything not testable in the current environment remains disabled and is listed in delivery status.
 - Turning proactive suggestions into an auto-executor or skipping approval because the system originated the suggestion.
 - Treating candidate memory as fact or a candidate method as an adopted capability.
-- Claiming a live shadow executor, phone PWA/push/remote takeover, or a complete migratable backup.
+- Claiming system push, phone pairing, remote takeover, or real mobile-device acceptance. The PWA currently provides an installable shell and offline navigation only.
 - Describing DeerFlow or LoopX as integrated components. They provide design and delivery-method references only.
 - Describing Pi as an integrated dependency. Hearth uses its single-agent kernel shape as a reference and provides its own TypeScript implementation.
 

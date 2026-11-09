@@ -1,0 +1,39 @@
+{
+  "name": "Hearth · 个人任务控制面",
+  "short_name": "Hearth",
+  "description": "以任务为中心、可审计、可恢复的个人 Agent 控制面。",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#F1E8DA",
+  "theme_color": "#1B1815",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/icons/hearth-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/hearth-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/hearth-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/hearth-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

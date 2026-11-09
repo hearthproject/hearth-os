@@ -28,10 +28,20 @@ export interface DshContextEvent {
   usage?: DshUsage | undefined;
 }
 
+export interface DshApprovalRequest {
+  sessionId: string;
+  toolName: string;
+  callId?: string;
+  reason?: string;
+}
+
+export type DshApprovalOutcome = "allowed-once" | "rejected" | "cancelled";
+
 export interface DeepSeekHarnessRunOptions {
   settings: DshModelSettings;
   dshHome: string;
   workingDirectory: string;
+  outDir: string;
   prompt: string;
   mode: "necessary" | "full";
   maxTurns: number;
@@ -40,6 +50,7 @@ export interface DeepSeekHarnessRunOptions {
   signal?: AbortSignal | undefined;
   onProgress?: ((event: { type: string; message: string; detail?: Record<string, unknown> }) => void) | undefined;
   onContextItem?: ((event: DshContextEvent) => void) | undefined;
+  onApprovalRequest?: ((request: DshApprovalRequest) => DshApprovalOutcome | Promise<DshApprovalOutcome>) | undefined;
 }
 
 export interface DeepSeekHarnessRunResult {
@@ -92,9 +103,24 @@ export async function runDeepSeekHarness(options: DeepSeekHarnessRunOptions): Pr
     onUserQuestion: async () => ({ cancelled: true })
   });
   harness.client.start();
-  harness.client.onRequest(async (method) => {
+  harness.client.onRequest(async (method, params) => {
     if (method !== "approval/request") throw new Error(`Unsupported DSH request: ${method}`);
-    return options.mode === "full" ? { outcome: "allowed-once" } : { outcome: "rejected" };
+    if (options.signal?.aborted) return { outcome: "cancelled" };
+    const request = approvalRequestFromParams(params);
+    if (!options.onApprovalRequest) {
+      return { outcome: options.mode === "full" ? "allowed-once" : "rejected" };
+    }
+    try {
+      return { outcome: await options.onApprovalRequest(request) };
+    } catch (error) {
+      if (options.signal?.aborted) return { outcome: "cancelled" };
+      options.onProgress?.({
+        type: "dsh.approval.failed",
+        message: "工具审批失败，已拒绝本次工具",
+        detail: { error: clip(error instanceof Error ? error.message : String(error), 500) }
+      });
+      return { outcome: "rejected" };
+    }
   });
   let closed = false;
   const abort = (): void => {
@@ -208,6 +234,19 @@ function notificationHandler(options: DeepSeekHarnessRunOptions): (notification:
     }
     if (type === "turn/start") options.onProgress?.({ type, message: "DeepSeek Harness 开始新一轮推理" });
     if (type === "turn/end") options.onProgress?.({ type, message: "DeepSeek Harness 完成一轮推理" });
+  };
+}
+
+function approvalRequestFromParams(params: Record<string, unknown>): DshApprovalRequest {
+  const sessionId = typeof params.sessionId === "string" && params.sessionId.trim() ? params.sessionId : "session";
+  const toolName = typeof params.toolName === "string" && params.toolName.trim() ? params.toolName : "tool";
+  const callId = typeof params.callId === "string" && params.callId.trim() ? params.callId : null;
+  const reason = typeof params.reason === "string" && params.reason.trim() ? params.reason : null;
+  return {
+    sessionId,
+    toolName,
+    ...(callId ? { callId } : {}),
+    ...(reason ? { reason } : {})
   };
 }
 

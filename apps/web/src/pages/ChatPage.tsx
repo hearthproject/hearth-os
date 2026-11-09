@@ -9,12 +9,14 @@ import {
   Check,
   CheckCircle2,
   Copy,
+  CornerDownRight,
   Cpu,
   FileText,
   ListChecks,
   Loader2,
   MessageCircle,
   Paperclip,
+  PauseCircle,
   Plus,
   Settings2,
   ShieldAlert,
@@ -34,6 +36,7 @@ import type {
   ConversationSettings,
   ConversationSettingsPatch,
   ExecutorId,
+  TaskFollowUpMode,
   TaskListItem,
   TaskProposalRecord
 } from "../lib/types.ts";
@@ -77,6 +80,9 @@ export function ChatPage() {
   const [memoryCount, setMemoryCount] = useState(0);
   const [proposals, setProposals] = useState<TaskProposalRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [followUpTaskId, setFollowUpTaskId] = useState<string | null>(null);
+  const [followUpMode, setFollowUpMode] = useState<TaskFollowUpMode>("queue");
+  const [followUpNotice, setFollowUpNotice] = useState<string | null>(null);
   const [draftSettings, setDraftSettings] = useState<ConversationSettings | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -105,6 +111,14 @@ export function ChatPage() {
     tasksByConversation.set(task.conversationId, list);
   }
   const current = conversations.find((item) => item.id === conversationId) ?? null;
+  const followUpTasks = conversationId
+    ? tasks
+      .filter((task) => task.conversationId === conversationId && !["completed", "cancelled"].includes(task.status))
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+    : [];
+  const followUpTarget = followUpTasks.find((task) => task.id === followUpTaskId) ?? null;
+  const canSteerFollowUp = followUpTarget?.status === "running";
+  const followUpBlockedByAttachments = Boolean(followUpTarget && attachments.length > 0);
   const serverDefaults = conversationDefaultsQuery.data?.settings ?? null;
   const conversationSettings = current?.settings
     ?? conversationQuery.data?.conversation.settings
@@ -135,6 +149,18 @@ export function ChatPage() {
   }, [conversationId]);
 
   useEffect(() => {
+    if (!followUpTaskId) return;
+    const target = tasks.find((task) => task.id === followUpTaskId
+      && task.conversationId === conversationId
+      && !["completed", "cancelled"].includes(task.status));
+    if (!target) setFollowUpTaskId(null);
+  }, [conversationId, followUpTaskId, tasks]);
+
+  useEffect(() => {
+    if (!canSteerFollowUp && followUpMode === "steer") setFollowUpMode("queue");
+  }, [canSteerFollowUp, followUpMode]);
+
+  useEffect(() => {
     const element = composerRef.current;
     if (!element) return;
     element.style.height = "auto";
@@ -157,6 +183,9 @@ export function ChatPage() {
     setMemoryCount(0);
     setProposals([]);
     setDraftSettings(null);
+    setFollowUpTaskId(null);
+    setFollowUpMode("queue");
+    setFollowUpNotice(null);
     if (id) localStorage.setItem("hearth.conversation", id);
     else localStorage.removeItem("hearth.conversation");
   }
@@ -259,6 +288,31 @@ export function ChatPage() {
   async function send() {
     const text = input.trim();
     if (sending || uploading || !settingsReady || (!text && attachments.length === 0)) return;
+    if (followUpTarget) {
+      if (!text) return;
+      if (attachments.length > 0) {
+        setError("补充到任务暂不支持附件，请先移除附件或取消任务补充模式");
+        return;
+      }
+      setSending(true);
+      setError(null);
+      setFollowUpNotice(null);
+      try {
+        await api.addFollowUp(followUpTarget.id, text, followUpMode);
+        setInput("");
+        setFollowUpNotice(followUpMode === "steer"
+          ? `已请求中止「${followUpTarget.title}」当前轮，并立即应用补充。`
+          : `已加入「${followUpTarget.title}」的队列，当前轮结束后继续。`);
+        void queryClient.invalidateQueries({ queryKey: ["task", followUpTarget.id] });
+        void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+        if (conversationId) void queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "补充指令发送失败");
+      } finally {
+        setSending(false);
+      }
+      return;
+    }
     const sentAttachments = attachments;
     setInput("");
     setAttachments([]);
@@ -492,13 +546,59 @@ export function ChatPage() {
               {conversationSettings.approvalMode === "full" ? <ShieldAlert size={15} /> : <ShieldCheck size={15} />}
               <span>{conversationSettings.approvalMode === "full" ? "完全权限" : "必要审批"}</span>
             </button>
+            {followUpTasks.length > 0 && (
+              <>
+                <span className="composer-toolbar-sep" aria-hidden="true" />
+                <label className={`followup-picker ${followUpTarget ? "active" : ""}`} title="把这条消息补充到已有任务，而不是新建任务">
+                  <CornerDownRight size={15} />
+                  <select
+                    value={followUpTarget?.id ?? ""}
+                    onChange={(event) => {
+                      setFollowUpTaskId(event.target.value || null);
+                      setFollowUpMode("queue");
+                      setFollowUpNotice(null);
+                    }}
+                    aria-label="补充到任务"
+                  >
+                    <option value="">新消息</option>
+                    {followUpTasks.map((task) => (
+                      <option key={task.id} value={task.id}>{task.title}</option>
+                    ))}
+                  </select>
+                </label>
+                {followUpTarget && (
+                  <button
+                    type="button"
+                    className={`followup-mode-toggle ${followUpMode}`}
+                    onClick={() => setFollowUpMode((current) => current === "queue" ? "steer" : "queue")}
+                    disabled={!canSteerFollowUp && followUpMode === "queue"}
+                    title={canSteerFollowUp
+                      ? (followUpMode === "queue" ? "当前轮结束后继续；点击改为中止当前轮" : "中止当前轮并立即应用；点击改为轮后继续")
+                      : "只有运行中的任务可以中止本轮，消息会在当前轮结束后继续"}
+                  >
+                    {followUpMode === "steer" ? <PauseCircle size={14} /> : <CornerDownRight size={14} />}
+                    <span>{followUpMode === "steer" ? "中止本轮" : "轮后继续"}</span>
+                  </button>
+                )}
+              </>
+            )}
             {selectedExecutorUnavailable && (
               <span className="composer-toolbar-note">{selectedExecutorName} 当前不可用，任务会按能力自动回退</span>
             )}
             {allExecutorsOff && (
               <span className="composer-toolbar-note">所有执行器都已关闭，请先选择一个可用执行器</span>
             )}
+            {followUpBlockedByAttachments && (
+              <span className="composer-toolbar-note">补充到任务暂不支持附件</span>
+            )}
           </div>
+          {followUpNotice && (
+            <div className="composer-followup-notice">
+              <CornerDownRight size={14} />
+              <span>{followUpNotice}</span>
+              <button className="icon-button" onClick={() => setFollowUpNotice(null)} aria-label="关闭提示"><X size={13} /></button>
+            </div>
+          )}
           {error && (
             <div className="composer-error">
               <span>{error}</span>
@@ -538,15 +638,21 @@ export function ChatPage() {
               value={input}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={onComposerKeyDown}
-              placeholder="直接说你要做什么，例如：帮我整理这周的会议记录…"
+              placeholder={followUpTarget
+                ? (followUpMode === "steer" ? "补充修正要求，中止当前轮并重跑…" : "补充下一步要求，当前轮结束后继续…")
+                : "直接说你要做什么，例如：帮我整理这周的会议记录…"}
               rows={1}
               disabled={sending}
             />
-            <button className="composer-send" onClick={() => void send()} disabled={sending || uploading || !settingsReady || (!input.trim() && attachments.length === 0)} title="发送">
+            <button className="composer-send" onClick={() => void send()} disabled={sending || uploading || !settingsReady || followUpBlockedByAttachments || (!input.trim() && attachments.length === 0)} title={followUpTarget ? "发送补充指令" : "发送"}>
               {sending ? <Loader2 size={17} className="spin" /> : <ArrowUp size={18} />}
             </button>
           </div>
-          <p className="composer-hint">Enter 发送 · Shift + Enter 换行 · 附件最多 5 个</p>
+          <p className="composer-hint">
+            {followUpTarget
+              ? `补充到「${followUpTarget.title}」 · ${followUpMode === "steer" ? "中止当前轮后继续" : "当前轮结束后继续"} · Enter 发送`
+              : "Enter 发送 · Shift + Enter 换行 · 附件最多 5 个"}
+          </p>
         </div>
       </section>
     </div>

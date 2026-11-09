@@ -4,6 +4,8 @@ import { Link, useLocation, useParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
+  Archive,
+  ArchiveRestore,
   ArrowLeft,
   ArrowRight,
   ChevronRight,
@@ -11,6 +13,8 @@ import {
   Download,
   FileText,
   Loader2,
+  Pin,
+  PinOff,
   RefreshCw,
   RotateCcw,
   ShieldAlert,
@@ -21,6 +25,8 @@ import { api } from "../lib/api.ts";
 import { formatBytes, formatDuration, formatTime, formatTokens, relativeTime } from "../lib/format.ts";
 import { executorLabel, taskKindLabel } from "../lib/labels.ts";
 import { ApprovalCard } from "../components/ApprovalCard.tsx";
+import { TaskFollowUpPanel } from "../components/TaskFollowUpPanel.tsx";
+import { TaskGitPanel } from "../components/TaskGitPanel.tsx";
 import { StatusPill } from "../components/StatusPill.tsx";
 import type { ArtifactRecord, ContextItem, ExecutorId, HandoffRecord, RunRecord, TaskContextResponse, TaskDeliverable, TaskProgressDetail, TaskView } from "../lib/types.ts";
 
@@ -57,6 +63,13 @@ export function TaskDetailPage() {
   const cancel = useMutation({
     mutationFn: () => api.cancel(id),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["task", id] })
+  });
+  const organize = useMutation({
+    mutationFn: (patch: { pinned?: boolean; archived?: boolean }) => api.setTaskOrganization(id, patch),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["task", id] });
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    }
   });
 
   if (taskQuery.isLoading) {
@@ -115,6 +128,20 @@ export function TaskDetailPage() {
         </div>
         <div className="detail-actions">
           <StatusPill status={task.status} />
+          <button
+            className="ghost-button"
+            onClick={() => organize.mutate({ pinned: !task.pinnedAt })}
+            disabled={organize.isPending}
+          >
+            {task.pinnedAt ? <PinOff size={14} /> : <Pin size={14} />} {task.pinnedAt ? "取消置顶" : "置顶"}
+          </button>
+          <button
+            className="ghost-button"
+            onClick={() => organize.mutate({ archived: !task.archivedAt })}
+            disabled={organize.isPending}
+          >
+            {task.archivedAt ? <ArchiveRestore size={14} /> : <Archive size={14} />} {task.archivedAt ? "恢复" : "归档"}
+          </button>
           <button className="ghost-button" onClick={() => void taskQuery.refetch()} disabled={taskQuery.isFetching}>
             <RefreshCw size={14} className={taskQuery.isFetching ? "spin" : ""} /> 刷新
           </button>
@@ -127,12 +154,15 @@ export function TaskDetailPage() {
         <span className={`phase-tag ${phaseTone(task.status)}`}>{phaseLabel(task.status, task.nextAction)}</span>
         <span className="executor-tag">{executorLabel(task.executorId)}</span>
         <span>{taskKindLabel(task.taskKind)}</span>
+        {task.pinnedAt && <span><Pin size={13} /> 已置顶</span>}
+        {task.archivedAt && <span><Archive size={13} /> 已归档</span>}
         {boundMethod && <span>方法 {boundMethod.name} · v{boundMethod.version}</span>}
         <span><Clock3 size={13} /> {formatDuration(lastDuration(view.runs))}</span>
         <span>Token {formatTokens(lastUsage(view.runs))}</span>
         {view.checkpoints.length > 0 && <span>{view.checkpoints.length} 个检查点</span>}
         <span>更新于 {relativeTime(task.updatedAt)}</span>
       </div>
+      {organize.isError && <p className="form-error">{organize.error instanceof Error ? organize.error.message : "更新任务整理状态失败"}</p>}
 
       {task.error && (
         <div className="result-banner error">
@@ -202,6 +232,8 @@ export function TaskDetailPage() {
           </div>
         </section>
       )}
+
+      <TaskFollowUpPanel taskId={task.id} status={task.status} followUps={view.followUps} />
 
       <section className="panel result-panel">
         <div className="panel-head">
@@ -290,6 +322,8 @@ export function TaskDetailPage() {
           )}
         </div>
       </section>
+
+      <TaskGitPanel taskId={task.id} />
 
       <ContextPanel
         view={view}

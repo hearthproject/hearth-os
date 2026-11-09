@@ -1,28 +1,40 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, FileText, ListChecks, RefreshCw } from "lucide-react";
+import { Archive, ArchiveRestore, FileText, ListChecks, Pin, PinOff, RefreshCw } from "lucide-react";
 import { api } from "../lib/api.ts";
 import { formatDuration, formatTokens, isActive, needsAttention, relativeTime } from "../lib/format.ts";
 import { executorLabel } from "../lib/labels.ts";
 import { StatusPill } from "../components/StatusPill.tsx";
 import type { TaskListItem } from "../lib/types.ts";
 
-type Filter = "all" | "active" | "done" | "problem";
+type Filter = "all" | "active" | "done" | "problem" | "archived";
 
 const FILTERS: { id: Filter; label: string }[] = [
   { id: "all", label: "全部" },
   { id: "active", label: "进行中" },
   { id: "done", label: "已完成" },
-  { id: "problem", label: "需要处理" }
+  { id: "problem", label: "需要处理" },
+  { id: "archived", label: "已归档" }
 ];
 
 export function TasksPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [filter, setFilter] = useState<Filter>("all");
   const tasksQuery = useQuery({ queryKey: ["tasks"], queryFn: api.tasks, refetchInterval: 5_000 });
   const tasks = tasksQuery.data?.tasks ?? [];
-  const visible = tasks.filter((task) => matchesFilter(task, filter));
+  const organization = useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: { pinned?: boolean; archived?: boolean } }) =>
+      api.setTaskOrganization(id, patch),
+    onSuccess: (_task, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      void queryClient.invalidateQueries({ queryKey: ["task", variables.id] });
+    }
+  });
+  const ordered = [...tasks].sort((a, b) => Number(Boolean(b.pinnedAt)) - Number(Boolean(a.pinnedAt)));
+  const visible = ordered.filter((task) => matchesFilter(task, filter));
+  const archivedCount = tasks.filter((task) => matchesFilter(task, "archived")).length;
 
   return (
     <div className="page tasks-page">
@@ -58,8 +70,13 @@ export function TasksPage() {
         </div>
       ) : visible.length === 0 ? (
         <div className="empty-panel">
-          <h2>这个筛选下没有任务</h2>
-          <button className="ghost-button" onClick={() => setFilter("all")}>查看全部</button>
+          <h2>{filter === "archived" ? "还没有归档任务" : "这个筛选下没有任务"}</h2>
+          <button
+            className="ghost-button"
+            onClick={() => setFilter(filter === "archived" ? "all" : archivedCount > 0 ? "archived" : "all")}
+          >
+            {filter === "archived" ? "返回全部" : archivedCount > 0 ? "查看已归档" : "查看全部"}
+          </button>
         </div>
       ) : (
         <div className="task-table-wrap">
@@ -72,16 +89,18 @@ export function TasksPage() {
                 <th>Token</th>
                 <th>耗时</th>
                 <th className="result-column">结果</th>
-                <th aria-label="打开" />
+              <th className="task-row-actions-head" aria-label="操作" />
               </tr>
             </thead>
             <tbody>
               {visible.map((task) => (
-                <tr key={task.id} onClick={() => navigate(`/tasks/${task.id}`)} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") navigate(`/tasks/${task.id}`); }}>
+                <tr key={task.id} className={task.pinnedAt ? "pinned" : ""} onClick={() => navigate(`/tasks/${task.id}`)} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") navigate(`/tasks/${task.id}`); }}>
                   <td>
                     <div className="task-title-line">
+                      {task.pinnedAt && <span className="task-pin-badge" title="已置顶"><Pin size={11} /></span>}
                       <strong>{task.title}</strong>
                       <StatusPill status={task.status} />
+                      {task.archivedAt && <span className="task-archive-badge">已归档</span>}
                     </div>
                     <p className="task-goal">{task.goal}</p>
                     <span className="task-time">{relativeTime(task.updatedAt)}</span>
@@ -93,7 +112,35 @@ export function TasksPage() {
                   <td className="result-column">
                     <ResultCell task={task} />
                   </td>
-                  <td><ArrowRight size={15} className="row-arrow" /></td>
+                  <td className="task-row-actions">
+                    <button
+                      className={`icon-button ${task.pinnedAt ? "active" : ""}`}
+                      title={task.pinnedAt ? "取消置顶" : "置顶"}
+                      aria-label={task.pinnedAt ? "取消置顶" : "置顶"}
+                      aria-pressed={Boolean(task.pinnedAt)}
+                      disabled={organization.isPending && organization.variables?.id === task.id}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        organization.mutate({ id: task.id, patch: { pinned: !task.pinnedAt } });
+                      }}
+                      onKeyDown={(event) => event.stopPropagation()}
+                    >
+                      {task.pinnedAt ? <PinOff size={14} /> : <Pin size={14} />}
+                    </button>
+                    <button
+                      className="icon-button"
+                      title={task.archivedAt ? "恢复任务" : "归档任务"}
+                      aria-label={task.archivedAt ? "恢复任务" : "归档任务"}
+                      disabled={organization.isPending && organization.variables?.id === task.id}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        organization.mutate({ id: task.id, patch: { archived: !task.archivedAt } });
+                      }}
+                      onKeyDown={(event) => event.stopPropagation()}
+                    >
+                      {task.archivedAt ? <ArchiveRestore size={14} /> : <Archive size={14} />}
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -131,6 +178,8 @@ function ResultCell({ task }: { task: TaskListItem }) {
 }
 
 function matchesFilter(task: TaskListItem, filter: Filter): boolean {
+  if (filter === "archived") return Boolean(task.archivedAt);
+  if (task.archivedAt) return false;
   if (filter === "all") return true;
   if (filter === "active") return isActive(task.status);
   if (filter === "done") return task.status === "completed";

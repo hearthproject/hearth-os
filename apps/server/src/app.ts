@@ -10,7 +10,7 @@ import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate } from "@hearth/templates";
 import { loadCodexProfile, runCodex } from "@hearth/codex-executor";
 import { z } from "zod";
-import { ATTACHMENT_DIR, BACKUP_DIR, CODEX_HOME_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, DSH_HOME_DIR, EXECUTOR_HOME_DIR, EXECUTOR_SETTINGS_PATH, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST } from "./config.ts";
+import { ATTACHMENT_DIR, BACKUP_DIR, CODEX_HOME_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, DSH_HOME_DIR, EXECUTOR_HOME_DIR, EXECUTOR_SETTINGS_PATH, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST, WORKSPACE_DIR } from "./config.ts";
 import { registerChatRoutes } from "./chat-routes.ts";
 import { ExecutorSettingsStore } from "./executor-settings.ts";
 import { probeHermes } from "./hermes-executor.ts";
@@ -27,6 +27,7 @@ import { ApprovalError, ApprovalManager, type EffectExecutor } from "./approvals
 import { BackupError, BackupService } from "./backups.ts";
 import { executeEffect } from "./effects.ts";
 import { HearthScheduler } from "./scheduler.ts";
+import { GitViewError, TaskGitService } from "./task-git.ts";
 import { TaskLeaseService } from "./leases.ts";
 import { SecurityError, SecurityService } from "./security.ts";
 import { ContextService } from "./context.ts";
@@ -70,6 +71,15 @@ const createTaskSchema = z.object({
 
 const retryTaskSchema = z.object({
   message: z.string().trim().max(20_000).optional()
+}).strict();
+
+const taskFollowUpSchema = z.object({
+  content: z.string().trim().min(1).max(20_000),
+  mode: z.enum(["queue", "steer"]).default("queue")
+}).strict();
+
+const taskFollowUpPatchSchema = z.object({
+  content: z.string().trim().min(1).max(20_000)
 }).strict();
 
 const contextQuerySchema = z.object({
@@ -212,6 +222,10 @@ const methodTrialSchema = z.object({ taskId: z.string().trim().min(1).max(100) }
 const methodRollbackSchema = z.object({ reason: z.string().trim().min(1).max(1000) }).strict();
 const methodRejectSchema = z.object({ reason: z.string().trim().max(1000).optional() }).strict();
 const assignTaskMethodSchema = z.object({ methodId: z.string().trim().min(1).max(100).nullable() }).strict();
+const taskOrganizationSchema = z.object({
+  pinned: z.boolean().optional(),
+  archived: z.boolean().optional()
+}).strict();
 const methodSettingsPatchSchema = z.object({ autoLearn: z.boolean().optional() }).strict();
 
 const createSyncPeerSchema = z.object({
@@ -485,6 +499,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const store = options.store ?? new HearthStore(DB_PATH);
   const serverStartedAt = new Date().toISOString();
   const service = new HearthService(store);
+  const taskGit = new TaskGitService({ workspaceRoot: WORKSPACE_DIR });
   const context = new ContextService(service, options.contextBlobRoot ?? CONTEXT_BLOB_DIR);
   if (options.contextIndex) context.setIndex(options.contextIndex);
   service.setContextSink((message) => {
@@ -1902,6 +1917,20 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
   });
 
+  app.patch<{ Params: { id: string } }>("/api/tasks/:id/organization", async (request, reply) => {
+    const parsed = taskOrganizationSchema.safeParse(request.body ?? {});
+    if (!parsed.success || (parsed.data.pinned === undefined && parsed.data.archived === undefined)) {
+      return reply.code(400).send({ error: "INVALID_TASK_ORGANIZATION", message: "需要指定置顶或归档状态" });
+    }
+    if (!store.getTask(request.params.id)) {
+      return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    }
+    return service.setTaskOrganization(request.params.id, {
+      ...(parsed.data.pinned === undefined ? {} : { pinned: parsed.data.pinned }),
+      ...(parsed.data.archived === undefined ? {} : { archived: parsed.data.archived })
+    });
+  });
+
   app.get("/api/tasks", async () => ({ tasks: service.listTaskItems() }));
 
   app.get("/api/artifacts", async () => {
@@ -2057,6 +2086,76 @@ export async function buildServer(options: BuildServerOptions = {}) {
     return view;
   });
 
+  app.get<{ Params: { id: string } }>("/api/tasks/:id/follow-ups", async (request, reply) => {
+    if (!store.getTask(request.params.id)) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    return { followUps: store.listTaskFollowUps(request.params.id) };
+  });
+
+  app.get<{ Params: { id: string } }>("/api/tasks/:id/git", async (request, reply) => {
+    if (!store.getTask(request.params.id)) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    try {
+      return await taskGit.view(request.params.id);
+    } catch (error) {
+      if (error instanceof GitViewError) return reply.code(error.statusCode).send({ error: "GIT_VIEW_FAILED", message: error.message });
+      return reply.code(500).send({ error: "GIT_VIEW_FAILED", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.get<{ Params: { id: string }; Querystring: { scope?: string; path?: string } }>("/api/tasks/:id/git/diff", async (request, reply) => {
+    if (!store.getTask(request.params.id)) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    const scope = request.query.scope === "branch" ? "branch" : request.query.scope === "working" || !request.query.scope ? "working" : null;
+    if (!scope) return reply.code(400).send({ error: "INVALID_SCOPE", message: "diff 范围只能是 working 或 branch" });
+    try {
+      return await taskGit.diff(request.params.id, scope, request.query.path ?? null);
+    } catch (error) {
+      if (error instanceof GitViewError) return reply.code(error.statusCode).send({ error: "GIT_DIFF_FAILED", message: error.message });
+      return reply.code(500).send({ error: "GIT_DIFF_FAILED", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.get<{ Params: { id: string }; Querystring: { path?: string; fromHead?: string } }>("/api/tasks/:id/git/file", async (request, reply) => {
+    if (!store.getTask(request.params.id)) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    if (!request.query.path) return reply.code(400).send({ error: "PATH_REQUIRED", message: "需要提供文件路径" });
+    try {
+      return await taskGit.file(request.params.id, request.query.path, request.query.fromHead === "true");
+    } catch (error) {
+      if (error instanceof GitViewError) return reply.code(error.statusCode).send({ error: "GIT_FILE_FAILED", message: error.message });
+      return reply.code(500).send({ error: "GIT_FILE_FAILED", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post<{ Params: { id: string }; Body: unknown }>("/api/tasks/:id/follow-ups", async (request, reply) => {
+    if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFF", message: "执行器未启动" });
+    const parsed = taskFollowUpSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_INPUT", message: "补充信息格式不正确" });
+    try {
+      return scheduler.addFollowUp(request.params.id, parsed.data.content, parsed.data.mode);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return reply.code(message.includes("不存在") ? 404 : 409).send({ error: "FOLLOW_UP_REJECTED", message });
+    }
+  });
+
+  app.patch<{ Params: { id: string; followUpId: string }; Body: unknown }>("/api/tasks/:id/follow-ups/:followUpId", async (request, reply) => {
+    if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFF", message: "执行器未启动" });
+    const parsed = taskFollowUpPatchSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_INPUT", message: "补充信息格式不正确" });
+    try {
+      return scheduler.updateFollowUp(request.params.id, request.params.followUpId, parsed.data.content);
+    } catch (error) {
+      return reply.code(409).send({ error: "FOLLOW_UP_NOT_EDITABLE", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.delete<{ Params: { id: string; followUpId: string } }>("/api/tasks/:id/follow-ups/:followUpId", async (request, reply) => {
+    if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFF", message: "执行器未启动" });
+    try {
+      return scheduler.cancelFollowUp(request.params.id, request.params.followUpId);
+    } catch (error) {
+      return reply.code(409).send({ error: "FOLLOW_UP_NOT_DELETABLE", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
   app.post<{ Params: { id: string }; Body: { message?: string } | undefined }>("/api/tasks/:id/retry", async (request, reply) => {
     if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFF", message: "执行器未启动" });
     const parsed = retryTaskSchema.safeParse(request.body ?? {});
@@ -2111,6 +2210,14 @@ export async function buildServer(options: BuildServerOptions = {}) {
     try {
       const result = await approvals.decide(request.params.id, parsed.data.decision, parsed.data.parameterHash);
       outbox.reconcileApproval(result.approval.id);
+      if (result.effect?.status === "succeeded" && result.task.status === "recoverable"
+        && store.listTaskFollowUps(result.task.id, "queued").length > 0) {
+        try {
+          scheduler?.resumeFollowUp(result.task.id);
+        } catch {
+          // The user can resume the queued follow-up from the task page.
+        }
+      }
       return result;
     } catch (error) {
       if (error instanceof ApprovalError) {

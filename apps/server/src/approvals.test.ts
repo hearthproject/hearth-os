@@ -90,6 +90,65 @@ describe("approval manager", () => {
     expect(store.getApproval(approval.id)?.status).toBe("expired");
   });
 
+  it("pauses a running task for tool approval and resumes after approval", async () => {
+    const manager = new ApprovalManager(service, async () => ({}));
+    const { task, runId } = runningTask(service);
+    const pending = await manager.requestTool({
+      taskId: task.id,
+      runId,
+      toolName: "shell",
+      summary: "运行命令：npm test",
+      target: { tool: "shell", arguments: { command: "npm test" } },
+      preview: { arguments: { command: "npm test" } }
+    });
+
+    expect(service.requireTask(task.id).status).toBe("waiting_approval");
+    expect(store.getApproval(pending.approval.id)?.kind).toBe("tool.shell");
+
+    const result = await manager.decide(pending.approval.id, "approve", pending.approval.parameterHash);
+    await expect(pending.decision).resolves.toEqual({ allowed: true, reason: "已批准" });
+    expect(result.task.status).toBe("running");
+    expect(result.effect).toBeNull();
+    expect(service.requireTask(task.id).status).toBe("running");
+  });
+
+  it("resumes the agent without executing a rejected tool", async () => {
+    const manager = new ApprovalManager(service, async () => ({}));
+    const { task, runId } = runningTask(service);
+    const pending = await manager.requestTool({
+      taskId: task.id,
+      runId,
+      toolName: "write_file",
+      summary: "写入工作区文件：result.md",
+      target: { tool: "write_file", arguments: { path: "result.md", content: "x" } },
+      preview: { arguments: { path: "result.md", content: "x" } }
+    });
+
+    const result = await manager.decide(pending.approval.id, "reject", pending.approval.parameterHash);
+    await expect(pending.decision).resolves.toEqual({ allowed: false, reason: "用户拒绝了这个工具调用" });
+    expect(result.task.status).toBe("running");
+    expect(result.effect).toBeNull();
+    expect(store.listEffects(task.id)).toHaveLength(0);
+  });
+
+  it("resolves a pending tool decision when its approval is cancelled", async () => {
+    const manager = new ApprovalManager(service, async () => ({}));
+    const { task, runId } = runningTask(service);
+    const pending = await manager.requestTool({
+      taskId: task.id,
+      runId,
+      toolName: "fetch_url",
+      summary: "读取网址：https://example.test",
+      target: { tool: "fetch_url", arguments: { url: "https://example.test" } },
+      preview: { arguments: { url: "https://example.test" } }
+    });
+
+    expect(manager.cancelToolApproval(pending.approval.id, "任务已取消")).toBe(true);
+    await expect(pending.decision).resolves.toEqual({ allowed: false, reason: "任务已取消" });
+    expect(store.getApproval(pending.approval.id)?.status).toBe("expired");
+    expect(service.requireTask(task.id).status).toBe("running");
+  });
+
   it("marks an uncertain effect and asks the user to verify before retrying", async () => {
     const manager = new ApprovalManager(service, async () => {
       throw new EffectUncertainError("request timed out after upload");
@@ -193,5 +252,27 @@ describe("approval manager", () => {
       { title: "Fix issue 16", body: "Test PR body" }
     ));
     return { task: service.requireTask(task.id), approval };
+  }
+
+  function runningTask(service: HearthService) {
+    const task = service.createTask({ templateId: "T07" });
+    const now = new Date().toISOString();
+    const runId = randomUUID();
+    service.createRun({
+      id: runId,
+      taskId: task.id,
+      attempt: 1,
+      status: "running",
+      threadId: "thread-tool",
+      workspace: "C:/tmp/tool",
+      startedAt: now,
+      endedAt: null,
+      failure: null,
+      usage: null,
+      leaseEpoch: null,
+      createdAt: now
+    });
+    service.updateTask(task.id, { status: "running", currentRunId: runId, nextAction: "正在执行" }, runId);
+    return { task: service.requireTask(task.id), runId };
   }
 });

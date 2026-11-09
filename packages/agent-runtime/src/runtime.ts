@@ -6,6 +6,7 @@ import type {
   AgentRunResult,
   AgentRunStatus,
   AgentRuntimeOptions,
+  AgentToolResult,
   RuntimeEvent
 } from "./types.ts";
 
@@ -143,19 +144,32 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       const toolStartedAt = Date.now();
       emit({ type: "tool.started", turn: turns, call });
 
-      let result;
-      if (!tool) {
-        result = { content: `未知或未授权工具：${call.name}`, isError: true };
-      } else {
-        try {
-          result = await tool.execute(call.arguments, {
-            workspaceRoot: options.workspaceRoot,
-            outDir: options.outDir,
-            permissions: options.permissions,
-            signal
-          });
-        } catch (error) {
-          result = { content: `工具执行失败：${errorMessage(error)}`, isError: true };
+      let result: AgentToolResult = { content: `未知或未授权工具：${call.name}`, isError: true };
+      if (tool) {
+        let authorized = true;
+        if (options.authorizeTool) {
+          try {
+            const authorization = await options.authorizeTool({ call, definition: tool.definition });
+            authorized = authorization.allowed;
+            if (!authorization.allowed) {
+              result = { content: `用户尚未允许这个工具：${authorization.reason}`, isError: true };
+            }
+          } catch (error) {
+            authorized = false;
+            result = { content: `工具审批失败，已跳过：${errorMessage(error)}`, isError: true };
+          }
+        }
+        if (authorized) {
+          try {
+            result = await tool.execute(call.arguments, {
+              workspaceRoot: options.workspaceRoot,
+              outDir: options.outDir,
+              permissions: options.permissions,
+              signal
+            });
+          } catch (error) {
+            result = { content: `工具执行失败：${errorMessage(error)}`, isError: true };
+          }
         }
       }
 

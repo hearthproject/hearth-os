@@ -11,7 +11,8 @@ See [Phase 2–6 Delivery Status](/en/delivery/status) for implemented scope, ve
 ## Current status
 
 - **Implemented code loop:** Six trigger types, proactive suggestions with provenance and risk, a proactive inbox with accept, ignore, snooze, and convert actions, attention budgets, quiet hours, and a pause entry.
-- **Still open:** Mobile PWA, phone pairing, push, remote approval and takeover, and interruption acceptance with 5–10 real proactive tasks. See [Phase 2–6 delivery status](/en/delivery/status).
+- **Code loop implemented:** Six trigger families, proactive suggestions with source and risk, the proactive inbox (accept, ignore, snooze, convert), attention budget, quiet hours, and pause controls. The web app also ships an installable PWA shell, offline app shell, and mobile bottom navigation.
+- **Still open:** Real-device iOS/Android installation acceptance, phone pairing, system push, remote approval and takeover, and interruption acceptance with 5–10 real proactive tasks. See [Phase 2–6 delivery status](/en/delivery/status).
 
 ## Goal
 

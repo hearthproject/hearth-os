@@ -54,6 +54,7 @@ import type {
   SyncPeer,
   TaskLease,
   TaskContextState,
+  TaskFollowUpRecord,
   TaskProposalRecord,
   TaskRecord,
   TaskStatus
@@ -92,7 +93,7 @@ export interface RunAggregate {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 11;
+export const CURRENT_SCHEMA_VERSION = 13;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -113,7 +114,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   output_dir TEXT NOT NULL, current_run_id TEXT, next_action TEXT, error_json TEXT,
   result_summary TEXT, conversation_id TEXT, executor_id TEXT, task_kind TEXT,
   expected_outputs_json TEXT, permissions_json TEXT, pending_input TEXT,
-  method_id TEXT, method_version INTEGER
+  method_id TEXT, method_version INTEGER, pinned_at TEXT, archived_at TEXT
 );
 CREATE TABLE IF NOT EXISTS conversations (
   id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
@@ -135,6 +136,11 @@ CREATE TABLE IF NOT EXISTS task_proposals (
   executor_id TEXT NOT NULL, task_kind TEXT NOT NULL, expected_outputs_json TEXT NOT NULL,
   permissions_json TEXT NOT NULL, inputs_json TEXT, reason TEXT NOT NULL, status TEXT NOT NULL,
   expires_at TEXT NOT NULL, created_at TEXT NOT NULL, decided_at TEXT
+);
+CREATE TABLE IF NOT EXISTS task_follow_ups (
+  id TEXT PRIMARY KEY, task_id TEXT NOT NULL, conversation_id TEXT,
+  content TEXT NOT NULL, mode TEXT NOT NULL, status TEXT NOT NULL,
+  applied_run_id TEXT, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS run_checkpoints (
   id TEXT PRIMARY KEY, run_id TEXT NOT NULL, task_id TEXT NOT NULL, seq INTEGER NOT NULL,
@@ -449,6 +455,8 @@ CREATE INDEX IF NOT EXISTS task_leases_expiry_idx ON task_leases(expires_at);
 CREATE INDEX IF NOT EXISTS chat_messages_conversation_idx ON chat_messages(conversation_id, created_at);
 CREATE INDEX IF NOT EXISTS task_proposals_conversation_idx ON task_proposals(conversation_id, created_at);
 CREATE INDEX IF NOT EXISTS task_proposals_status_idx ON task_proposals(status, expires_at);
+CREATE INDEX IF NOT EXISTS task_follow_ups_task_idx ON task_follow_ups(task_id, created_at);
+CREATE INDEX IF NOT EXISTS task_follow_ups_status_idx ON task_follow_ups(task_id, status, created_at);
 CREATE INDEX IF NOT EXISTS run_checkpoints_run_idx ON run_checkpoints(run_id, seq);
 CREATE INDEX IF NOT EXISTS scheduled_jobs_due_idx ON scheduled_jobs(enabled, next_run_at);
 CREATE INDEX IF NOT EXISTS scheduled_job_runs_schedule_idx ON scheduled_job_runs(schedule_id, scheduled_for);
@@ -482,6 +490,8 @@ export class HearthStore {
     ensureColumn(this.db, "tasks", "pending_input", "TEXT");
     ensureColumn(this.db, "tasks", "method_id", "TEXT");
     ensureColumn(this.db, "tasks", "method_version", "INTEGER");
+    ensureColumn(this.db, "tasks", "pinned_at", "TEXT");
+    ensureColumn(this.db, "tasks", "archived_at", "TEXT");
     ensureColumn(this.db, "method_candidates", "generation", "INTEGER");
     ensureColumn(this.db, "method_candidates", "fingerprint", "TEXT");
     ensureColumn(this.db, "task_proposals", "inputs_json", "TEXT");
@@ -1023,6 +1033,31 @@ export class HearthStore {
     if (!proposal) return null;
     const next = { ...proposal, ...patch };
     upsertTaskProposal(this.db, next);
+    return next;
+  }
+
+  getTaskFollowUp(id: string): TaskFollowUpRecord | null {
+    const row = this.db.prepare("SELECT * FROM task_follow_ups WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToTaskFollowUp(row) : null;
+  }
+
+  listTaskFollowUps(taskId: string, status?: string): TaskFollowUpRecord[] {
+    const rows = status
+      ? this.db.prepare("SELECT * FROM task_follow_ups WHERE task_id = ? AND status = ? ORDER BY created_at ASC").all(taskId, status)
+      : this.db.prepare("SELECT * FROM task_follow_ups WHERE task_id = ? ORDER BY created_at ASC").all(taskId);
+    return (rows as DbRow[]).map(rowToTaskFollowUp);
+  }
+
+  createTaskFollowUp(record: TaskFollowUpRecord): TaskFollowUpRecord {
+    upsertTaskFollowUp(this.db, record);
+    return record;
+  }
+
+  updateTaskFollowUp(id: string, patch: Partial<Pick<TaskFollowUpRecord, "content" | "status" | "appliedRunId" | "error" | "updatedAt">>): TaskFollowUpRecord | null {
+    const current = this.getTaskFollowUp(id);
+    if (!current) return null;
+    const next = { ...current, ...patch, updatedAt: patch.updatedAt ?? new Date().toISOString() };
+    upsertTaskFollowUp(this.db, next);
     return next;
   }
 
@@ -1805,6 +1840,8 @@ export class HearthStore {
       case "task.updated": return updateTask(this.db, event.taskId, event.payload as Record<string, unknown>);
       case "task.proposal.created":
       case "task.proposal.updated": return upsertTaskProposal(this.db, event.payload as TaskProposalRecord);
+      case "task.follow-up.created":
+      case "task.follow-up.updated": return upsertTaskFollowUp(this.db, event.payload as TaskFollowUpRecord);
       case "run.created": return insertRun(this.db, event.payload as RunRecord);
       case "run.updated": return updateRun(this.db, event.runId, event.payload as Record<string, unknown>);
       case "run.checkpoint.created": return insertRunCheckpoint(this.db, event.payload as RunCheckpointRecord);
@@ -1879,8 +1916,8 @@ export class HearthStore {
 
 function upsertTask(db: DatabaseSync, task: TaskRecord): void {
   db.prepare(
-    `INSERT INTO tasks (id, template_id, title, goal, status, created_at, updated_at, deadline, inputs_json, network_hosts_json, output_dir, current_run_id, next_action, error_json, result_summary, conversation_id, executor_id, task_kind, expected_outputs_json, permissions_json, pending_input, method_id, method_version)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO tasks (id, template_id, title, goal, status, created_at, updated_at, deadline, inputs_json, network_hosts_json, output_dir, current_run_id, next_action, error_json, result_summary, conversation_id, executor_id, task_kind, expected_outputs_json, permissions_json, pending_input, method_id, method_version, pinned_at, archived_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        template_id=excluded.template_id, title=excluded.title, goal=excluded.goal, status=excluded.status,
        updated_at=excluded.updated_at, deadline=excluded.deadline, inputs_json=excluded.inputs_json,
@@ -1889,7 +1926,8 @@ function upsertTask(db: DatabaseSync, task: TaskRecord): void {
        result_summary=excluded.result_summary, conversation_id=excluded.conversation_id,
        executor_id=excluded.executor_id, task_kind=excluded.task_kind,
        expected_outputs_json=excluded.expected_outputs_json, permissions_json=excluded.permissions_json,
-       pending_input=excluded.pending_input, method_id=excluded.method_id, method_version=excluded.method_version`
+       pending_input=excluded.pending_input, method_id=excluded.method_id, method_version=excluded.method_version,
+       pinned_at=excluded.pinned_at, archived_at=excluded.archived_at`
   ).run(
     task.id, task.templateId, task.title, task.goal, task.status, task.createdAt, task.updatedAt,
     task.deadline, JSON.stringify(task.inputs), JSON.stringify(task.networkHosts), task.outputDir,
@@ -1899,7 +1937,8 @@ function upsertTask(db: DatabaseSync, task: TaskRecord): void {
     JSON.stringify(task.expectedOutputs ?? ["result.md"]),
     task.permissions ? JSON.stringify(task.permissions) : null,
     task.pendingInput ?? null,
-    task.methodId ?? null, task.methodVersion ?? null
+    task.methodId ?? null, task.methodVersion ?? null,
+    task.pinnedAt ?? null, task.archivedAt ?? null
   );
 }
 
@@ -1910,7 +1949,8 @@ function updateTask(db: DatabaseSync, taskId: string | null, patch: Record<strin
     deadline: "deadline", currentRunId: "current_run_id", nextAction: "next_action",
     resultSummary: "result_summary", conversationId: "conversation_id",
     pendingInput: "pending_input", executorId: "executor_id", taskKind: "task_kind",
-    methodId: "method_id", methodVersion: "method_version"
+    methodId: "method_id", methodVersion: "method_version",
+    pinnedAt: "pinned_at", archivedAt: "archived_at"
   };
   for (const [key, column] of Object.entries(columns)) {
     if (key in patch) db.prepare(`UPDATE tasks SET ${column} = ? WHERE id = ?`).run((patch[key] as SQLInputValue) ?? null, taskId);
@@ -1978,6 +2018,19 @@ function upsertTaskProposal(db: DatabaseSync, proposal: TaskProposalRecord): voi
     proposal.taskKind, JSON.stringify(proposal.expectedOutputs), JSON.stringify(proposal.permissions),
     JSON.stringify(proposal.inputs),
     proposal.reason, proposal.status, proposal.expiresAt, proposal.createdAt, proposal.decidedAt
+  );
+}
+
+function upsertTaskFollowUp(db: DatabaseSync, followUp: TaskFollowUpRecord): void {
+  db.prepare(
+    `INSERT INTO task_follow_ups (id, task_id, conversation_id, content, mode, status, applied_run_id, error, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       content=excluded.content, mode=excluded.mode, status=excluded.status,
+       applied_run_id=excluded.applied_run_id, error=excluded.error, updated_at=excluded.updated_at`
+  ).run(
+    followUp.id, followUp.taskId, followUp.conversationId, followUp.content, followUp.mode,
+    followUp.status, followUp.appliedRunId, followUp.error, followUp.createdAt, followUp.updatedAt
   );
 }
 
@@ -2238,7 +2291,9 @@ function rowToTask(row: DbRow): TaskRecord {
     ...(permissions ? { permissions } : {}),
     pendingInput: row.pending_input == null ? null : String(row.pending_input),
     methodId: row.method_id == null ? null : String(row.method_id),
-    methodVersion: row.method_version == null ? null : Number(row.method_version)
+    methodVersion: row.method_version == null ? null : Number(row.method_version),
+    pinnedAt: row.pinned_at == null ? null : String(row.pinned_at),
+    archivedAt: row.archived_at == null ? null : String(row.archived_at)
   };
 }
 
@@ -2329,6 +2384,18 @@ function rowToTaskProposal(row: DbRow): TaskProposalRecord {
     reason: String(row.reason), status: String(row.status) as TaskProposalRecord["status"],
     expiresAt: String(row.expires_at), createdAt: String(row.created_at),
     decidedAt: row.decided_at == null ? null : String(row.decided_at)
+  };
+}
+
+function rowToTaskFollowUp(row: DbRow): TaskFollowUpRecord {
+  return {
+    id: String(row.id), taskId: String(row.task_id),
+    conversationId: row.conversation_id == null ? null : String(row.conversation_id),
+    content: String(row.content), mode: String(row.mode) as TaskFollowUpRecord["mode"],
+    status: String(row.status) as TaskFollowUpRecord["status"],
+    appliedRunId: row.applied_run_id == null ? null : String(row.applied_run_id),
+    error: row.error == null ? null : String(row.error),
+    createdAt: String(row.created_at), updatedAt: String(row.updated_at)
   };
 }
 

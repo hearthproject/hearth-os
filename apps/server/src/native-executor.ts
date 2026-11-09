@@ -9,6 +9,8 @@ import {
   type AgentModel,
   type AgentResumeState,
   type AgentRunResult,
+  type AgentToolAuthorization,
+  type AgentToolAuthorizationRequest,
   type RuntimeEvent
 } from "@hearth/agent-runtime";
 import { wantsScreenshot } from "./task-intent.ts";
@@ -36,6 +38,7 @@ export interface NativeRunOptions {
   onProgress?: (event: { kind: string; message: string; detail?: TaskProgressDetail }) => void;
   onContextEvent?: (event: RuntimeEvent) => void;
   onCheckpoint?: (checkpoint: AgentCheckpoint) => void | Promise<void>;
+  onAuthorizeTool?: (request: AgentToolAuthorizationRequest) => Promise<AgentToolAuthorization>;
 }
 
 export interface NativeRunResult {
@@ -95,7 +98,8 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
         options.onProgress?.({ kind: "budget", message: "达到本轮执行预算，正在收尾" });
       }
     },
-    ...(options.onCheckpoint ? { onCheckpoint: options.onCheckpoint } : {})
+    ...(options.onCheckpoint ? { onCheckpoint: options.onCheckpoint } : {}),
+    ...(options.onAuthorizeTool ? { authorizeTool: options.onAuthorizeTool } : {})
   });
 
   return {

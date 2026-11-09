@@ -260,8 +260,9 @@ export function validatePullRequestPreview(value: unknown, repository: Repositor
   const body = requiredString(preview, "body");
   if (title.length > 160) throw new Error("PR 标题不能超过 160 个字符");
   if (body.length > 60_000) throw new Error("PR 正文过长");
-  if (!/(?:closes|fixes|resolves)\s+#16\b/i.test(body) && !/#16\b/.test(body)) {
-    throw new Error("PR 正文必须链接 Issue #16");
+  if (repository.issue != null) {
+    const issueLink = new RegExp(`(?:closes|fixes|resolves)\\s+#${repository.issue}\\b|#${repository.issue}\\b`, "i");
+    if (!issueLink.test(body)) throw new Error(`PR 正文必须链接 Issue #${repository.issue}`);
   }
   const branch = typeof preview.branch === "string" ? preview.branch : repository.branch;
   const base = typeof preview.base === "string" ? preview.base : repository.base;

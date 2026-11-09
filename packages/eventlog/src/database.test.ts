@@ -53,12 +53,25 @@ describe("HearthStore", () => {
     const path = tempDb();
     const store = new HearthStore(path);
     store.appendEvent({ type: "task.created", taskId: "task-1", payload: task() });
-    store.appendEvent({ type: "task.updated", taskId: "task-1", payload: { status: "running", updatedAt: "2026-11-05T00:01:00.000Z" } });
+    store.appendEvent({
+      type: "task.updated",
+      taskId: "task-1",
+      payload: {
+        status: "running",
+        pinnedAt: "2026-11-05T00:01:00.000Z",
+        archivedAt: "2026-11-05T00:02:00.000Z",
+        updatedAt: "2026-11-05T00:02:00.000Z"
+      }
+    });
     store.rebuildProjections();
     expect(store.getTask("task-1")?.status).toBe("running");
+    expect(store.getTask("task-1")?.pinnedAt).toBe("2026-11-05T00:01:00.000Z");
+    expect(store.getTask("task-1")?.archivedAt).toBe("2026-11-05T00:02:00.000Z");
     store.close();
     const reopened = new HearthStore(path);
     expect(reopened.getTask("task-1")?.status).toBe("running");
+    expect(reopened.getTask("task-1")?.pinnedAt).toBe("2026-11-05T00:01:00.000Z");
+    expect(reopened.getTask("task-1")?.archivedAt).toBe("2026-11-05T00:02:00.000Z");
     reopened.close();
   });
 

@@ -56,7 +56,13 @@ export const APPROVAL_KIND_LABELS: Record<string, string> = {
   "github.publish-pr": "创建 GitHub PR",
   "github.comment": "发布 GitHub 评论",
   "outbox.local-write": "写入本地发件箱",
-  "email.smtp-send": "发送邮件"
+  "email.smtp-send": "发送邮件",
+  "tool.write_file": "写入工作区文件",
+  "tool.edit_file": "修改工作区文件",
+  "tool.apply_patch": "应用代码补丁",
+  "tool.shell": "运行命令",
+  "tool.fetch_url": "读取网页",
+  "tool.capture_screen": "截取桌面画面"
 };
 
 export const OUTBOX_STATUS_LABELS: Record<OutboxDraftStatus, string> = {
@@ -176,6 +182,7 @@ export const EVENT_LABELS: Record<string, string> = {
   "run.updated": "执行记录更新",
   "approval.created": "等待你确认",
   "approval.updated": "确认结果已记录",
+  "approval.auto_approved": "完全权限自动放行",
   "artifact.published": "产物已保存",
   "effect.created": "外部动作已开始",
   "effect.updated": "外部动作已更新",
@@ -197,7 +204,7 @@ export const EVENT_LABELS: Record<string, string> = {
 const STATUS_EXPLANATIONS: Record<TaskStatus, string> = {
   queued: "等前一个任务做完就开始。",
   running: "执行器正在隔离工作区处理。",
-  waiting_approval: "外部动作已备好，你确认后只执行一次。",
+  waiting_approval: "有一步操作等你确认；批准后只执行一次。",
   waiting_input: "缺少材料，补齐后可以继续。",
   recoverable: "上一轮未完成，已保留结果，可重试。",
   completed: "产物已保存，交付标准已核对。",
@@ -207,6 +214,10 @@ const STATUS_EXPLANATIONS: Record<TaskStatus, string> = {
 
 export function approvalKindLabel(kind: string): string {
   return APPROVAL_KIND_LABELS[kind] ?? kind;
+}
+
+export function isToolApproval(approval: ApprovalRecord): boolean {
+  return approval.kind.startsWith("tool.");
 }
 
 export function statusExplanation(task: TaskRecord): string {
@@ -233,7 +244,9 @@ export function eventDescription(event: EventEnvelope): string {
 
 export function externalEffectSummary(approvals: ApprovalRecord[], effects: EffectRecord[]): string {
   const pending = approvals.find((approval) => approval.status === "pending");
-  if (pending) return `等待你确认 1 个外部动作：${approvalKindLabel(pending.kind)}。`;
+  if (pending) return isToolApproval(pending)
+    ? `Agent 正在等待你允许一个工具：${approvalKindLabel(pending.kind)}。`
+    : `等待你确认 1 个外部动作：${approvalKindLabel(pending.kind)}。`;
   const uncertain = effects.find((effect) => effect.status === "uncertain");
   if (uncertain) return "外部动作结果不确定，先对账再重试。";
   const failed = effects.find((effect) => effect.status === "failed");

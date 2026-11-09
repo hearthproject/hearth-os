@@ -79,7 +79,7 @@ function EventBridge() {
         if (event.startsWith("effect.")) {
           void queryClient.invalidateQueries({ queryKey: ["task"] });
         }
-        if (["task.created", "task.updated", "chat.message.created", "chat.message.updated", "message"].includes(event)) {
+        if (["task.created", "task.updated", "task.follow-up.created", "task.follow-up.updated", "chat.message.created", "chat.message.updated", "message"].includes(event)) {
           void queryClient.invalidateQueries({ queryKey: ["conversations"] });
           void queryClient.invalidateQueries({ queryKey: ["conversation"] });
         }
@@ -93,6 +93,10 @@ function EventBridge() {
           void queryClient.invalidateQueries({ queryKey: ["task", taskId] });
           void queryClient.invalidateQueries({ queryKey: ["task-context", taskId] });
           void queryClient.invalidateQueries({ queryKey: ["taskEvents", taskId] });
+          void queryClient.invalidateQueries({ queryKey: ["task-follow-ups", taskId] });
+          void queryClient.invalidateQueries({ queryKey: ["task-git", taskId] });
+          void queryClient.invalidateQueries({ queryKey: ["task-git-diff", taskId] });
+          void queryClient.invalidateQueries({ queryKey: ["task-git-file", taskId] });
         }
       }, 250);
     });

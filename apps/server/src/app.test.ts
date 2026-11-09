@@ -495,6 +495,43 @@ describe("Hearth server", () => {
     await app.close();
   });
 
+  it("pins and archives tasks without changing task status", async () => {
+    const app = await buildServer({ store, serveWeb: false });
+    const created = await app.inject({ method: "POST", url: "/api/tasks", payload: { templateId: "T01" } });
+    const taskId = created.json().id as string;
+
+    const pinned = await app.inject({
+      method: "PATCH",
+      url: `/api/tasks/${taskId}/organization`,
+      payload: { pinned: true }
+    });
+    expect(pinned.statusCode).toBe(200);
+    expect(pinned.json()).toMatchObject({ id: taskId, status: "queued" });
+    expect(pinned.json().pinnedAt).toBeTypeOf("string");
+    expect(pinned.json().archivedAt).toBeNull();
+
+    const archived = await app.inject({
+      method: "PATCH",
+      url: `/api/tasks/${taskId}/organization`,
+      payload: { archived: true }
+    });
+    expect(archived.statusCode).toBe(200);
+    expect(archived.json().archivedAt).toBeTypeOf("string");
+    expect(archived.json().status).toBe("queued");
+
+    const cleared = await app.inject({
+      method: "PATCH",
+      url: `/api/tasks/${taskId}/organization`,
+      payload: { pinned: false, archived: false }
+    });
+    expect(cleared.statusCode).toBe(200);
+    expect(cleared.json()).toMatchObject({ pinnedAt: null, archivedAt: null, status: "queued" });
+
+    const invalid = await app.inject({ method: "PATCH", url: `/api/tasks/${taskId}/organization`, payload: {} });
+    expect(invalid.statusCode).toBe(400);
+    await app.close();
+  });
+
   it("rejects unknown templates and cross-site writes", async () => {
     const app = await buildServer({ store, serveWeb: false });
     const unknown = await app.inject({

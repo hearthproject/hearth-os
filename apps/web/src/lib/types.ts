@@ -98,12 +98,24 @@ import type {
   SyncConflict,
   SyncPeer,
   TaskDeliverable,
+  TaskFollowUpMode,
+  TaskFollowUpRecord,
+  TaskFollowUpStatus,
   TaskListItem,
   TaskKind,
   TaskProgressDetail,
   TaskProposalRecord,
   TaskRecord,
-  TaskStatus
+  TaskStatus,
+  GitCheckSummary,
+  GitCommitSummary,
+  GitDiffScope,
+  GitDiffView,
+  GitFileChange,
+  GitFileStatus,
+  GitFileView,
+  GitPullRequestView,
+  GitRepositoryView
 } from "@hearth/core";
 import type { TaskTemplate } from "@hearth/templates";
 
@@ -207,12 +219,24 @@ export type {
   SyncConflict,
   SyncPeer,
   TaskDeliverable,
+  TaskFollowUpMode,
+  TaskFollowUpRecord,
+  TaskFollowUpStatus,
   TaskListItem,
   TaskKind,
   TaskProgressDetail,
   TaskProposalRecord,
   TaskRecord,
   TaskStatus,
+  GitCheckSummary,
+  GitCommitSummary,
+  GitDiffScope,
+  GitDiffView,
+  GitFileChange,
+  GitFileStatus,
+  GitFileView,
+  GitPullRequestView,
+  GitRepositoryView,
   TaskTemplate
 };
 
@@ -250,6 +274,7 @@ export interface TaskView {
   checkpoints: RunCheckpointRecord[];
   events: EventEnvelope[];
   eventTotal: number;
+  followUps: TaskFollowUpRecord[];
 }
 
 export interface TaskContextResponse extends ContextSnapshot {}

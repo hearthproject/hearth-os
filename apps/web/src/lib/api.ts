@@ -36,6 +36,10 @@ import type {
   FeishuDomain,
   FeishuIntegrationResponse,
   FeishuTestResponse,
+  GitDiffScope,
+  GitDiffView,
+  GitFileView,
+  GitRepositoryView,
   MailAccountInput,
   MailAccountView,
   MailSyncResult,
@@ -87,6 +91,8 @@ import type {
   SyncSnapshot,
   SystemStatus,
   TaskContextResponse,
+  TaskFollowUpMode,
+  TaskFollowUpRecord,
   TaskHandoffsResponse,
   TaskListItem,
   TaskProposalRecord,
@@ -423,6 +429,24 @@ export const api = {
   tasks: () => request<{ tasks: TaskListItem[] }>("/api/tasks"),
   artifacts: () => request<{ artifacts: ArtifactListItem[] }>("/api/artifacts"),
   task: (id: string) => request<TaskView>(`/api/tasks/${encodeURIComponent(id)}`),
+  followUps: (id: string) => request<{ followUps: TaskFollowUpRecord[] }>(`/api/tasks/${encodeURIComponent(id)}/follow-ups`),
+  addFollowUp: (id: string, content: string, mode: TaskFollowUpMode) =>
+    request<TaskFollowUpRecord>(`/api/tasks/${encodeURIComponent(id)}/follow-ups`, {
+      method: "POST",
+      body: JSON.stringify({ content, mode })
+    }),
+  updateFollowUp: (id: string, followUpId: string, content: string) =>
+    request<TaskFollowUpRecord>(`/api/tasks/${encodeURIComponent(id)}/follow-ups/${encodeURIComponent(followUpId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ content })
+    }),
+  deleteFollowUp: (id: string, followUpId: string) =>
+    request<TaskFollowUpRecord>(`/api/tasks/${encodeURIComponent(id)}/follow-ups/${encodeURIComponent(followUpId)}`, { method: "DELETE" }),
+  gitView: (id: string) => request<GitRepositoryView>(`/api/tasks/${encodeURIComponent(id)}/git`),
+  gitDiff: (id: string, scope: GitDiffScope, path?: string) =>
+    request<GitDiffView>(`/api/tasks/${encodeURIComponent(id)}/git/diff${query({ scope, path })}`),
+  gitFile: (id: string, path: string, fromHead = false) =>
+    request<GitFileView>(`/api/tasks/${encodeURIComponent(id)}/git/file${query({ path, fromHead })}`),
   taskContext: (id: string, params: { limit?: number; before?: number } = {}) =>
     request<TaskContextResponse>(`/api/tasks/${encodeURIComponent(id)}/context${query(params)}`),
   taskHandoffs: (id: string) => request<TaskHandoffsResponse>(`/api/tasks/${encodeURIComponent(id)}/handoffs`),
@@ -508,6 +532,11 @@ export const api = {
     { method: "POST" }
   ),
   cancel: (id: string) => request<TaskRecord>(`/api/tasks/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
+  setTaskOrganization: (id: string, patch: { pinned?: boolean; archived?: boolean }) =>
+    request<TaskRecord>(`/api/tasks/${encodeURIComponent(id)}/organization`, {
+      method: "PATCH",
+      body: JSON.stringify(patch)
+    }),
   decideApproval: (id: string, decision: "approve" | "reject", parameterHash: string) =>
     request<ApprovalDecisionResult>(`/api/approvals/${encodeURIComponent(id)}/decide`, {
       method: "POST",
@@ -533,7 +562,8 @@ export function subscribeToEvents(onEvent: (event: string, envelope?: EventEnvel
   };
   source.onmessage = (message) => dispatch("message", message.data);
   const eventNames = [
-    "task.created", "task.updated", "task.progress", "chat.message.created", "chat.message.updated", "run.created", "run.updated",
+    "task.created", "task.updated", "task.progress", "task.follow-up.created", "task.follow-up.updated",
+    "chat.message.created", "chat.message.updated", "run.created", "run.updated",
     "approval.created", "approval.updated", "artifact.published", "effect.created", "effect.updated",
     "source.created", "source.updated", "source.item.updated", "source.cleared",
     "proactive.settings.updated", "suggestion.created", "suggestion.updated", "suggestion.event",

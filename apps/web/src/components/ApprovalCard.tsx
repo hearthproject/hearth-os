@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, ExternalLink, Loader2, X } from "lucide-react";
 import { api } from "../lib/api.ts";
 import { abbreviateHash, formatBytes, formatDate, formatTime } from "../lib/format.ts";
-import { APPROVAL_STATUS_LABELS, approvalKindLabel } from "../lib/labels.ts";
+import { APPROVAL_STATUS_LABELS, approvalKindLabel, isToolApproval } from "../lib/labels.ts";
 import type { ApprovalRecord, EffectRecord } from "../lib/types.ts";
 import { EffectStatusTag } from "./StatusPill.tsx";
 import { useViewMode } from "../lib/view-mode.tsx";
@@ -25,6 +25,9 @@ export function ApprovalCard({ approval, effect }: { approval: ApprovalRecord; e
   const isOutbox = approval.kind === "outbox.local-write";
   const isSmtp = approval.kind === "email.smtp-send";
   const isMail = isOutbox || isSmtp;
+  const isTool = isToolApproval(approval);
+  const toolName = isTool ? approval.kind.slice("tool.".length) : null;
+  const toolArguments = isTool ? target.arguments ?? preview.arguments : null;
   const account = text(target.account) ?? text(preview.account) ?? text(target.accountId);
   const from = text(target.from) ?? text(preview.from);
   const recipients = stringArray(target.to ?? preview.to);
@@ -59,7 +62,9 @@ export function ApprovalCard({ approval, effect }: { approval: ApprovalRecord; e
       <p className="approval-summary">{approval.summary}</p>
       {isPending && (
         <p className="approval-scope">
-          {isOutbox
+          {isTool
+            ? "工具调用。只允许本次调用；拒绝后 Agent 会跳过它并继续尝试完成任务。"
+            : isOutbox
             ? "本地写入。确认后只把邮件包写入本机发件箱，不会发送给收件人。"
             : isSmtp
               ? "真实发送。确认后会通过 SMTP 发送给收件人，发送后无法撤回。"
@@ -67,7 +72,13 @@ export function ApprovalCard({ approval, effect }: { approval: ApprovalRecord; e
         </p>
       )}
 
-      {isMail ? (
+      {isTool ? (
+        <dl className="kv-grid">
+          <div><dt>工具</dt><dd className="mono select-all">{toolName}</dd></div>
+          <div><dt>批准范围</dt><dd>仅本次工具调用；不会自动放行后续调用。</dd></div>
+          <div><dt>确认截止到</dt><dd className="mono">{formatTime(approval.expiresAt)}</dd></div>
+        </dl>
+      ) : isMail ? (
         <dl className="kv-grid">
           {isSmtp && <div><dt>发件人</dt><dd className="mono select-all">{from ?? "未提供"}</dd></div>}
           <div><dt>发往</dt><dd className="mono select-all">{recipients.length > 0 ? recipients.join(", ") : "未提供"}</dd></div>
@@ -106,34 +117,41 @@ export function ApprovalCard({ approval, effect }: { approval: ApprovalRecord; e
         </div>
       )}
 
+      {isTool && (
+        <div className="approval-preview">
+          <strong>本次工具参数</strong>
+          <pre>{formatToolArguments(toolArguments)}</pre>
+        </div>
+      )}
+
       {error && <p className="form-error">{error}</p>}
 
       {isPending ? (
         confirming ? (
           <div className="approval-confirm">
             <span>
-              <AlertTriangle size={15} /> {isOutbox ? "只写入本机发件箱，不会发送；可删除文件撤销。" : isSmtp ? "立即通过 SMTP 发送，不能撤回。" : "立即执行，不能撤销。"}
+              <AlertTriangle size={15} /> {isTool ? "仅批准这次工具调用。拒绝后 Agent 会继续执行。" : isOutbox ? "只写入本机发件箱，不会发送；可删除文件撤销。" : isSmtp ? "立即通过 SMTP 发送，不能撤回。" : "立即执行，不能撤销。"}
             </span>
             <div>
               <button className="ghost-button" onClick={() => setConfirming(false)} disabled={decide.isPending}>返回检查</button>
               <button className="primary-button" onClick={() => decide.mutate("approve")} disabled={decide.isPending}>
                 {decide.isPending
                   ? <><Loader2 className="spin" size={15} /> 正在执行</>
-                  : <><CheckCircle2 size={15} /> {isOutbox ? "确认写入本地" : isSmtp ? "确认并发送" : "确认执行"}</>}
+                  : <><CheckCircle2 size={15} /> {isTool ? "允许本次工具" : isOutbox ? "确认写入本地" : isSmtp ? "确认并发送" : "确认执行"}</>}
               </button>
             </div>
           </div>
         ) : (
           <footer className="approval-actions">
-            <button className="ghost-button" onClick={() => decide.mutate("reject")} disabled={decide.isPending}>拒绝</button>
+            <button className="ghost-button" onClick={() => decide.mutate("reject")} disabled={decide.isPending}>{isTool ? "拒绝并继续" : "拒绝"}</button>
             <button className="primary-button" onClick={() => setConfirming(true)} disabled={decide.isPending}>
-              {isOutbox ? "检查并确认写入" : isSmtp ? "检查并确认发送" : "检查并确认执行"}
+              {isTool ? "检查并允许本次工具" : isOutbox ? "检查并确认写入" : isSmtp ? "检查并确认发送" : "检查并确认执行"}
             </button>
           </footer>
         )
       ) : (
         <div className={`approval-result ${approval.status}`}>
-          <span>{approvalResultLabel(approval.status, effect, isOutbox, isSmtp)}</span>
+          <span>{approvalResultLabel(approval.status, effect, isOutbox, isSmtp, isTool)}</span>
           {effect && <EffectStatusTag status={effect.status} />}
           {typeof effect?.receipt?.url === "string" && (
             <a href={effect.receipt.url} target="_blank" rel="noreferrer">打开结果 <ExternalLink size={13} /></a>
@@ -193,7 +211,20 @@ function attachmentList(value: unknown): { name: string; bytes: number }[] {
   });
 }
 
-function approvalResultLabel(status: ApprovalRecord["status"], effect?: EffectRecord, isOutbox = false, isSmtp = false): string {
+function formatToolArguments(value: unknown): string {
+  if (value === null || value === undefined) return "（无参数）";
+  try {
+    const text = JSON.stringify(value, null, 2);
+    return text.length > 16_000 ? `${text.slice(0, 16_000)}\n...（参数过长已截断）` : text;
+  } catch {
+    return String(value);
+  }
+}
+
+function approvalResultLabel(status: ApprovalRecord["status"], effect?: EffectRecord, isOutbox = false, isSmtp = false, isTool = false): string {
+  if (isTool && status === "rejected") return "你拒绝了这次工具调用，Agent 已跳过它继续执行。";
+  if (isTool && status === "expired") return "工具审批已过期，本次调用没有执行。";
+  if (isTool && status === "approved") return "已允许本次工具调用，Agent 已继续执行。";
   if (status === "rejected") return "你拒绝了这次外部动作，没有产生外部影响。";
   if (status === "expired") return "确认已过期，没有执行外部动作。";
   if (effect?.status === "succeeded") return isOutbox ? "已写入本机发件箱，没有发送邮件。" : isSmtp ? "邮件已经发送，回执已记录。" : "外部动作已经完成，回执已记录。";

@@ -23,6 +23,7 @@ import type {
   RunRecord,
   StatsSnapshot,
   TaskDeliverable,
+  TaskFollowUpRecord,
   TaskInput,
   TaskKind,
   TaskListItem,
@@ -76,6 +77,7 @@ export interface TaskView {
   approvals: ReturnType<HearthStore["listApprovals"]>;
   artifacts: ReturnType<HearthStore["listArtifacts"]>;
   effects: ReturnType<HearthStore["listEffects"]>;
+  followUps: TaskFollowUpRecord[];
   checkpoints: RunCheckpointRecord[];
   events: ReturnType<HearthStore["listEvents"]>;
   eventTotal: number;
@@ -98,6 +100,7 @@ export interface ExportSnapshot {
   approvals: ApprovalRecord[];
   artifacts: ArtifactRecord[];
   effects: EffectRecord[];
+  followUps: TaskFollowUpRecord[];
   outboxDrafts: OutboxDraft[];
   events: ReturnType<HearthStore["listEvents"]>;
 }
@@ -223,6 +226,7 @@ export class HearthService {
       approvals: tasks.flatMap((task) => this.store.listApprovals(task.id)),
       artifacts: this.store.listAllArtifacts(),
       effects: this.store.listAllEffects(),
+      followUps: tasks.flatMap((task) => this.store.listTaskFollowUps(task.id)),
       outboxDrafts: this.store.listOutboxDrafts(),
       events: this.store.listEvents(0)
     };
@@ -239,6 +243,7 @@ export class HearthService {
       approvals: this.store.listApprovals(taskId),
       artifacts: this.store.listArtifacts(taskId),
       effects: this.store.listEffects(taskId),
+      followUps: this.store.listTaskFollowUps(taskId),
       checkpoints: runs.flatMap((run) => this.store.listRunCheckpoints(run.id)),
       events: events.slice(-VIEW_EVENT_TAIL),
       eventTotal: events.length
@@ -344,7 +349,7 @@ export class HearthService {
     return new Map(this.store.listTasks().map((task) => [task.id, task.title]));
   }
 
-  updateTask(taskId: string, patch: Partial<Pick<TaskRecord, "status" | "title" | "goal" | "currentRunId" | "nextAction" | "error" | "resultSummary" | "conversationId" | "executorId" | "taskKind" | "expectedOutputs" | "permissions" | "pendingInput" | "methodId" | "methodVersion">>, runId?: string): TaskRecord {
+  updateTask(taskId: string, patch: Partial<Pick<TaskRecord, "status" | "title" | "goal" | "currentRunId" | "nextAction" | "error" | "resultSummary" | "conversationId" | "executorId" | "taskKind" | "expectedOutputs" | "permissions" | "pendingInput" | "methodId" | "methodVersion" | "pinnedAt" | "archivedAt">>, runId?: string): TaskRecord {
     const task = this.requireTask(taskId);
     if (patch.status && patch.status !== task.status) assertTransition(task.status, patch.status);
     const previousStatus = task.status;
@@ -359,6 +364,15 @@ export class HearthService {
     const updated = this.requireTask(taskId);
     if (statusChanged) this.appendTaskStatusMessage(updated, previousStatus);
     return updated;
+  }
+
+  setTaskOrganization(taskId: string, patch: { pinned?: boolean; archived?: boolean }): TaskRecord {
+    const task = this.requireTask(taskId);
+    const now = new Date().toISOString();
+    return this.updateTask(taskId, {
+      ...(patch.pinned === undefined ? {} : { pinnedAt: patch.pinned ? task.pinnedAt ?? now : null }),
+      ...(patch.archived === undefined ? {} : { archivedAt: patch.archived ? task.archivedAt ?? now : null })
+    });
   }
 
   conversationSettings(conversationId: string | null | undefined): ConversationSettings | null {
@@ -420,7 +434,7 @@ export class HearthService {
     });
     this.upsertTaskStatusChatMessage({
       id: randomUUID(),
-      conversationId: task.conversationId,
+      conversationId: task.conversationId ?? null,
       role: "assistant",
       content,
       taskId: task.id,
@@ -503,6 +517,56 @@ export class HearthService {
     const updated = this.store.updateTaskProposal(id, patch);
     if (!updated) throw new Error(`Task proposal not found: ${id}`);
     const event = this.store.appendEvent({ type: "task.proposal.updated", payload: updated });
+    this.bus.publish(event);
+    return updated;
+  }
+
+  createTaskFollowUp(taskId: string, content: string, mode: TaskFollowUpRecord["mode"]): TaskFollowUpRecord {
+    const task = this.requireTask(taskId);
+    const now = new Date().toISOString();
+    const record: TaskFollowUpRecord = {
+      id: randomUUID(),
+      taskId,
+      conversationId: task.conversationId ?? null,
+      content,
+      mode,
+      status: mode === "steer" ? "steering" : "queued",
+      appliedRunId: null,
+      error: null,
+      createdAt: now,
+      updatedAt: now
+    };
+    const event = this.store.appendEvent({ type: "task.follow-up.created", taskId, payload: record });
+    this.bus.publish(event);
+    if (task.conversationId) {
+      this.appendChatMessage({
+        id: randomUUID(),
+        conversationId: task.conversationId,
+        role: "user",
+        content,
+        taskId,
+        attachments: [],
+        createdAt: now
+      });
+    }
+    return record;
+  }
+
+  updateTaskFollowUp(
+    id: string,
+    patch: Partial<Pick<TaskFollowUpRecord, "content" | "status" | "appliedRunId" | "error">>
+  ): TaskFollowUpRecord {
+    const updated = this.store.updateTaskFollowUp(id, {
+      ...patch,
+      updatedAt: new Date().toISOString()
+    });
+    if (!updated) throw new Error(`Task follow-up not found: ${id}`);
+    const event = this.store.appendEvent({
+      type: "task.follow-up.updated",
+      taskId: updated.taskId,
+      runId: updated.appliedRunId,
+      payload: updated
+    });
     this.bus.publish(event);
     return updated;
   }
