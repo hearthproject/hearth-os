@@ -624,6 +624,22 @@ code { font-size: .82em; }
 .family-delta-table td { font-size: 12px; }
 .compare-links { justify-content: flex-start; }
 
+/* Activity */
+.activity-feed { border-radius: 7px; }
+.activity-item { grid-template-columns: 48px minmax(0, 1fr); gap: 12px; padding: 11px 13px; }
+.activity-seq { font-size: 10px; }
+.activity-head strong { font-size: 12px; font-weight: 550; }
+.activity-head time { font-size: 10px; }
+.activity-main > code { font-size: 10px; }
+.activity-links { gap: 8px; margin-top: 4px; }
+.activity-links a { font-size: 10px; }
+.activity-main pre { margin-top: 0; padding: 9px; border: 1px solid var(--line); border-radius: 5px; font-size: 10px; }
+.activity-item.activity-review, .activity-item.activity-system { border-left: 1px solid var(--line); }
+.activity-payload { margin-top: 6px; }
+.activity-payload summary { width: fit-content; color: var(--ink-faint); font-size: 10px; cursor: pointer; }
+.activity-payload summary:hover { color: var(--ink-soft); }
+.activity-payload pre { margin-top: 6px; }
+
 /* Dashboard */
 .overview-card { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 28px; padding: 18px 20px; }
 .overview-main { min-width: 0; }

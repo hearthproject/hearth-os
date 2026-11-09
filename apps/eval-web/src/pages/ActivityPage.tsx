@@ -40,21 +40,20 @@ export function ActivityPage() {
   return (
     <div className="page-stack activity-page">
       <PageHeader
-        eyebrow="EVENT STREAM"
         title="活动流"
         description="评测 Agent 的每次实验创建、任务推进、评分、复核与恢复都会在这里留下时间戳。"
         actions={<button className="button" onClick={() => setPaused((value) => !value)}>{paused ? <Play size={15} /> : <Pause size={15} />}{paused ? "继续刷新" : "暂停刷新"}</button>}
       />
 
       <section className="metric-grid">
-        <MetricCard label="最近事件" value={events.length} detail="最多显示 500 条" icon={<Activity size={17} />} />
-        <MetricCard label="最新序号" value={latest?.seq ?? "—"} detail={latest ? formatDateTime(latest.createdAt) : "暂无活动"} icon={<Stethoscope size={17} />} />
-        <MetricCard label="进行中实验" value={new Set(events.filter((event) => event.type === "experiment.started").map((event) => event.experimentId)).size} detail="当前窗口内启动过" icon={<Activity size={17} />} tone="accent" />
-        <MetricCard label="刷新状态" value={paused ? "已暂停" : "实时"} detail={paused ? "点击右上角继续" : "每 3 秒轮询"} icon={<Activity size={17} />} tone={paused ? "warning" : "success"} />
+        <MetricCard label="最近事件" value={events.length} detail="最多显示 500 条" icon={<Activity size={16} />} />
+        <MetricCard label="最新序号" value={latest?.seq ?? "—"} detail={latest ? formatDateTime(latest.createdAt) : "暂无活动"} icon={<Stethoscope size={16} />} />
+        <MetricCard label="进行中实验" value={new Set(events.filter((event) => event.type === "experiment.started").map((event) => event.experimentId)).size} detail="当前窗口内启动过" icon={<Activity size={16} />} />
+        <MetricCard label="刷新状态" value={paused ? "已暂停" : "实时"} detail={paused ? "点击右上角继续" : "每 3 秒轮询"} icon={<Activity size={16} />} tone={paused ? "warning" : "success"} />
       </section>
 
       <section className="panel">
-        <SectionHeader title="事件时间线" detail={`${filtered.length} 条匹配`} action={<Activity size={18} />} />
+        <SectionHeader title="事件时间线" detail={`${filtered.length} 条匹配`} />
         <div className="run-toolbar">
           <div className="status-filter-tabs">{EVENT_GROUPS.map((item) => <button key={item.value} className={group === item.value ? "active" : ""} onClick={() => setGroup(item.value)}>{item.label}</button>)}</div>
           <div className="search-field compact"><Search size={14} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索事件、实验或运行 ID" /></div>
@@ -71,7 +70,9 @@ export function ActivityPage() {
                     {event.experimentId && <Link to={`/experiments/${event.experimentId}`}>实验 {shortId(event.experimentId, 12)}</Link>}
                     {event.runId && <Link to={`/runs/${event.runId}`}>运行 {shortId(event.runId, 10)}</Link>}
                   </div>
-                  {Object.keys(event.payload).length > 0 && <pre>{JSON.stringify(event.payload, null, 2)}</pre>}
+                  {Object.keys(event.payload).length > 0 && (
+                    <details className="activity-payload"><summary>查看载荷</summary><pre>{JSON.stringify(event.payload, null, 2)}</pre></details>
+                  )}
                 </div>
               </article>
             ))}
