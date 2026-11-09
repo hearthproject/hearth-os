@@ -40,6 +40,8 @@ import type {
   ModelProfileRecord,
   ProactiveSettings,
   ProactiveSuggestion,
+  ReconcileItem,
+  ReconcileStatus,
   RunCheckpointRecord,
   RunRecord,
   RunStatus,
@@ -93,7 +95,7 @@ export interface RunAggregate {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 15;
+export const CURRENT_SCHEMA_VERSION = 16;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -166,6 +168,13 @@ CREATE TABLE IF NOT EXISTS effects (
   lease_owner TEXT, lease_expires_at TEXT, available_at TEXT, provider TEXT,
   provider_ref TEXT, reconcile_ref TEXT, reconciled_at TEXT, target_key TEXT,
   suspend_reason TEXT
+);
+CREATE TABLE IF NOT EXISTS reconcile_queue (
+  id TEXT PRIMARY KEY, effect_id TEXT NOT NULL UNIQUE, task_id TEXT NOT NULL,
+  goal_id TEXT, target_key TEXT, summary TEXT NOT NULL, status TEXT NOT NULL,
+  reason TEXT NOT NULL, attempted_json TEXT NOT NULL, risk TEXT NOT NULL,
+  suggested_actions_json TEXT NOT NULL, provider TEXT, check_count INTEGER NOT NULL,
+  resolution_note TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, resolved_at TEXT
 );
 CREATE TABLE IF NOT EXISTS artifacts (
   id TEXT PRIMARY KEY, task_id TEXT NOT NULL, run_id TEXT NOT NULL, relative_path TEXT NOT NULL,
@@ -562,6 +571,8 @@ export class HearthStore {
       CREATE INDEX IF NOT EXISTS approvals_action_digest_idx ON approvals(action_digest);
       CREATE INDEX IF NOT EXISTS effects_target_status_idx ON effects(target_key, status, created_at);
       CREATE INDEX IF NOT EXISTS effects_available_idx ON effects(status, available_at);
+      CREATE INDEX IF NOT EXISTS reconcile_queue_status_idx ON reconcile_queue(status, created_at);
+      CREATE INDEX IF NOT EXISTS reconcile_queue_task_idx ON reconcile_queue(task_id, status);
     `);
     this.db.exec(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION}`);
     this.setMeta("schemaVersion", String(CURRENT_SCHEMA_VERSION));
@@ -1333,6 +1344,23 @@ export class HearthStore {
     return (this.db.prepare("SELECT * FROM effects ORDER BY created_at ASC").all() as DbRow[]).map(rowToEffect);
   }
 
+  getReconcileItem(id: string): ReconcileItem | null {
+    const row = this.db.prepare("SELECT * FROM reconcile_queue WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToReconcileItem(row) : null;
+  }
+
+  getReconcileItemByEffect(effectId: string): ReconcileItem | null {
+    const row = this.db.prepare("SELECT * FROM reconcile_queue WHERE effect_id = ?").get(effectId) as DbRow | undefined;
+    return row ? rowToReconcileItem(row) : null;
+  }
+
+  listReconcileItems(status?: ReconcileStatus): ReconcileItem[] {
+    const rows = status
+      ? this.db.prepare("SELECT * FROM reconcile_queue WHERE status = ? ORDER BY created_at ASC").all(status) as DbRow[]
+      : this.db.prepare("SELECT * FROM reconcile_queue ORDER BY created_at ASC").all() as DbRow[];
+    return rows.map(rowToReconcileItem);
+  }
+
   getArtifact(id: string): ArtifactRecord | null {
     const row = this.db.prepare("SELECT * FROM artifacts WHERE id = ?").get(id) as DbRow | undefined;
     return row ? rowToArtifact(row) : null;
@@ -1897,6 +1925,9 @@ export class HearthStore {
       case "approval.updated": return updateApproval(this.db, event.payload as Record<string, unknown>);
       case "effect.created": return insertEffect(this.db, event.payload as EffectRecord);
       case "effect.updated": return updateEffect(this.db, event.payload as Record<string, unknown>);
+      case "reconcile.opened":
+      case "reconcile.updated":
+      case "reconcile.resolved": return upsertReconcileItem(this.db, event.payload as ReconcileItem);
       case "artifact.published": return insertArtifact(this.db, event.payload as ArtifactRecord);
       case "source.created": return upsertSource(this.db, event.payload as SourceConnection);
       case "source.updated": return updateSource(this.db, event.payload as Record<string, unknown>);
@@ -2192,6 +2223,25 @@ function updateEffect(db: DatabaseSync, patch: Record<string, unknown>): void {
     const receipt = patch.receipt as EffectRecord["receipt"];
     db.prepare("UPDATE effects SET receipt_json = ? WHERE id = ?").run(receipt ? JSON.stringify(receipt) : null, id);
   }
+}
+
+function upsertReconcileItem(db: DatabaseSync, item: ReconcileItem): void {
+  db.prepare(
+    `INSERT INTO reconcile_queue (id, effect_id, task_id, goal_id, target_key, summary, status, reason,
+       attempted_json, risk, suggested_actions_json, provider, check_count, resolution_note, created_at, updated_at, resolved_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       status=excluded.status, reason=excluded.reason, attempted_json=excluded.attempted_json,
+       risk=excluded.risk, suggested_actions_json=excluded.suggested_actions_json,
+       provider=excluded.provider, check_count=excluded.check_count,
+       resolution_note=excluded.resolution_note, updated_at=excluded.updated_at,
+       resolved_at=excluded.resolved_at`
+  ).run(
+    item.id, item.effectId, item.taskId, item.goalId, item.targetKey, item.summary,
+    item.status, item.reason, JSON.stringify(item.attempted), item.risk,
+    JSON.stringify(item.suggestedActions), item.provider, item.checkCount,
+    item.resolutionNote, item.createdAt, item.updatedAt, item.resolvedAt
+  );
 }
 
 function insertArtifact(db: DatabaseSync, artifact: ArtifactRecord): void {
@@ -2632,6 +2682,28 @@ function rowToEffect(row: DbRow): EffectRecord {
     reconciledAt: row.reconciled_at == null ? null : String(row.reconciled_at),
     targetKey: row.target_key == null ? null : String(row.target_key),
     suspendReason: row.suspend_reason == null ? null : String(row.suspend_reason)
+  };
+}
+
+function rowToReconcileItem(row: DbRow): ReconcileItem {
+  return {
+    id: String(row.id),
+    effectId: String(row.effect_id),
+    taskId: String(row.task_id),
+    goalId: row.goal_id == null ? null : String(row.goal_id),
+    targetKey: row.target_key == null ? null : String(row.target_key),
+    summary: String(row.summary),
+    status: String(row.status) as ReconcileItem["status"],
+    reason: String(row.reason),
+    attempted: JSON.parse(String(row.attempted_json)),
+    risk: String(row.risk) as ReconcileItem["risk"],
+    suggestedActions: JSON.parse(String(row.suggested_actions_json)),
+    provider: row.provider == null ? null : String(row.provider),
+    checkCount: Number(row.check_count),
+    resolutionNote: row.resolution_note == null ? null : String(row.resolution_note),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+    resolvedAt: row.resolved_at == null ? null : String(row.resolved_at)
   };
 }
 

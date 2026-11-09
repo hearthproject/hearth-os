@@ -662,6 +662,32 @@ export interface EffectRecord {
   suspendReason?: string | null;
 }
 
+export const RECONCILE_STATUSES = ["open", "checking", "needs_human", "resolved_committed", "resolved_absent", "conflicting", "abandoned"] as const;
+export type ReconcileStatus = (typeof RECONCILE_STATUSES)[number];
+
+export const RECONCILE_ACTIONS = ["recheck", "mark_committed", "mark_absent", "abandon", "create_task"] as const;
+export type ReconcileAction = (typeof RECONCILE_ACTIONS)[number];
+
+export interface ReconcileItem {
+  id: string;
+  effectId: string;
+  taskId: string;
+  goalId: string | null;
+  targetKey: string | null;
+  summary: string;
+  status: ReconcileStatus;
+  reason: string;
+  attempted: string[];
+  risk: "low" | "medium" | "high" | "critical";
+  suggestedActions: ReconcileAction[];
+  provider: string | null;
+  checkCount: number;
+  resolutionNote: string | null;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt: string | null;
+}
+
 export interface ArtifactRecord {
   id: string;
   taskId: string;

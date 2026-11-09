@@ -13,6 +13,7 @@ import { z } from "zod";
 import { ATTACHMENT_DIR, BACKUP_DIR, CODEX_HOME_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, DSH_HOME_DIR, EXECUTOR_HOME_DIR, EXECUTOR_SETTINGS_PATH, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST, WORKSPACE_DIR } from "./config.ts";
 import { registerChatRoutes } from "./chat-routes.ts";
 import { registerEvalRoutes } from "./eval-routes.ts";
+import { ReconcileService } from "./reconcile.ts";
 import { ExecutorSettingsStore } from "./executor-settings.ts";
 import { probeHermes } from "./hermes-executor.ts";
 import { clearHermesHealthCache } from "./hermes-health.ts";
@@ -536,13 +537,18 @@ export async function buildServer(options: BuildServerOptions = {}) {
     backupRoot: options.backupRoot ?? BACKUP_DIR,
     masterKeyPath: options.masterKeyPath ?? MASTER_KEY_PATH
   });
+  const reconcile = new ReconcileService(service);
   const approvals = new ApprovalManager(service, effectExecutor, {
     guard: (taskId) => {
       security.assertActionsAllowed();
       leases.assertOwnedIfLeased(taskId);
+    },
+    onUncertain: (effect, reason) => {
+      reconcile.enqueue(effect, reason);
     }
   });
   approvals.recoverInterruptedEffects();
+  reconcile.scanUncertain();
   const outbox = new OutboxService(service, approvals, undefined, mail);
   const desktop = new DesktopService(service, options.deviceFrameRoot ?? DEVICE_FRAME_DIR, security);
   const modelSettingsPath = options.modelSettingsPath ?? MODEL_SETTINGS_PATH;

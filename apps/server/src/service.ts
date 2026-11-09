@@ -17,6 +17,7 @@ import type {
   EventWindow,
   ExecutorId,
   OutboxDraft,
+  ReconcileItem,
   RunListItem,
   RunBudget,
   RunCheckpointRecord,
@@ -703,6 +704,39 @@ export class HearthService {
     this.bus.publish(event);
     const updated = this.store.getEffect(effectId);
     if (!updated) throw new Error(`Effect projection missing: ${effectId}`);
+    return updated;
+  }
+
+  createReconcileItem(item: ReconcileItem): ReconcileItem {
+    const event = this.store.appendEvent({
+      type: "reconcile.opened",
+      taskId: item.taskId,
+      payload: item
+    });
+    this.bus.publish(event);
+    return item;
+  }
+
+  updateReconcileItem(
+    itemId: string,
+    patch: Partial<Pick<ReconcileItem,
+      "status" | "reason" | "attempted" | "suggestedActions" | "checkCount" |
+      "resolutionNote" | "updatedAt" | "resolvedAt">>
+  ): ReconcileItem {
+    const current = this.store.getReconcileItem(itemId);
+    if (!current) throw new Error(`Reconcile item not found: ${itemId}`);
+    const next: ReconcileItem = { ...current, ...patch };
+    const type = patch.status === "resolved_committed" || patch.status === "resolved_absent" || patch.status === "abandoned"
+      ? "reconcile.resolved"
+      : "reconcile.updated";
+    const event = this.store.appendEvent({
+      type,
+      taskId: current.taskId,
+      payload: next
+    });
+    this.bus.publish(event);
+    const updated = this.store.getReconcileItem(itemId);
+    if (!updated) throw new Error(`Reconcile projection missing: ${itemId}`);
     return updated;
   }
 

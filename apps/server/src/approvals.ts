@@ -71,6 +71,7 @@ export type EffectExecutor = (effect: EffectRecord) => Promise<Record<string, un
 
 export interface ApprovalManagerOptions {
   guard?: (taskId: string) => void;
+  onUncertain?: (effect: EffectRecord, reason: string) => void;
 }
 
 export class ApprovalError extends Error {
@@ -96,6 +97,7 @@ export class ApprovalManager {
   private readonly service: HearthService;
   private readonly executor: EffectExecutor;
   private readonly guard: ((taskId: string) => void) | undefined;
+  private readonly onUncertain: ((effect: EffectRecord, reason: string) => void) | undefined;
   private readonly inFlight = new Set<string>();
   private readonly toolWaiters = new Map<string, (decision: ToolApprovalDecision) => void>();
 
@@ -103,6 +105,7 @@ export class ApprovalManager {
     this.service = service;
     this.executor = executor;
     this.guard = options.guard;
+    this.onUncertain = options.onUncertain;
   }
 
   async request(input: ApprovalRequest): Promise<ApprovalRecord> {
@@ -478,6 +481,7 @@ export class ApprovalManager {
         }
       }, approval.runId);
       this.service.updateApproval(approval.id, { status: "consumed", usedCount: 1 });
+      if (uncertain) this.onUncertain?.(failed, failed.error ?? "外部动作结果不确定");
       return { approval: this.requireApproval(approval.id), task: recoverableTask, effect: failed };
     } finally {
       this.inFlight.delete(approval.id);
