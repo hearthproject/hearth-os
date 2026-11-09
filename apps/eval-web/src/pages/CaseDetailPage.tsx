@@ -84,7 +84,7 @@ export function CaseDetailPage() {
       <section className="panel">
         <div className="section-header"><div><h2>评分标准</h2><span>确定性、模型评委与人工标准</span></div><ShieldCheck size={18} /></div>
         <div className="table-wrap">
-          <table className="data-table">
+          <table className="data-table criteria-table">
             <thead><tr><th>标准</th><th>来源</th><th>级别</th><th>分值</th><th>说明</th></tr></thead>
             <tbody>
               {manifest.criteria.map((criterion) => (

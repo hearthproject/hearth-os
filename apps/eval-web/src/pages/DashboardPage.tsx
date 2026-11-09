@@ -92,7 +92,7 @@ export function DashboardPage() {
             />
           ) : (
             <div className="table-wrap">
-              <table className="data-table">
+              <table className="data-table dashboard-table">
                 <thead><tr><th>实验</th><th>状态</th><th>任务 / 执行器</th><th>通过率</th><th>均分</th><th>创建时间</th></tr></thead>
                 <tbody>
                   {data.recentExperiments.map((experiment) => {
