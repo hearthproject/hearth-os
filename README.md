@@ -7,88 +7,134 @@
 </p>
 
 <p align="center">
-  <strong>Turn digital labor into durable, auditable, recoverable tasks.</strong><br>
-  A single-user, self-hosted, long-running Personal Agent OS
+  <strong>把数字劳动变成持久、可审计、可恢复的任务。</strong><br>
+  单用户 · 自托管 · 长期驻留的个人 Agent OS
 </p>
 
 <p align="center">
-  <a href="README.zh-CN.md">简体中文</a> ·
-  <a href="https://hearthproject.github.io/hearth-os/">Documentation</a> ·
-  <a href="#quick-start">Quick start</a> ·
-  <a href="#project-status">Project status</a>
+  <a href="https://hearthproject.github.io/hearth-os/"><strong>文档站</strong></a> ·
+  <a href="#界面一览">界面截图</a> ·
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#当前进度">当前进度</a> ·
+  <a href="#架构">架构</a> ·
+  <a href="#验证">验证</a>
 </p>
 
 <p align="center">
   <img alt="Phase 1 MVP accepted" src="https://img.shields.io/badge/phase%201-MVP%20accepted-b8471d">
   <img alt="381 tests passing" src="https://img.shields.io/badge/tests-381%20passing-2f7d4f">
-  <img alt="Node.js 22.13+" src="https://img.shields.io/badge/node-22.13%2B-3c873a">
+  <img alt="Node.js 22.13+" src="https://img.shields.io/badge/node-22.13%2B-3c8773">
   <img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-1b1815">
+  <img alt="Local first" src="https://img.shields.io/badge/local--first-yes-8d3412">
 </p>
 
 ---
 
-Hearth is not another chat wrapper, and it is not an agent built only for code. It is a **task-centric personal control plane**: the user states an intent, and the system owns the goal, executor routing, permissions, evidence, and failure recovery. External effects require an explicit approval before they happen.
+Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是一个**以任务为中心的个人控制面**：用户提出意图，系统保存目标、分配执行器、约束权限、记录证据，并在外部动作发生前要求明确审批。
 
-Models can change, executors can be replaced, and the interface can be rewritten, but task state, authority scope, artifact digests, and external receipts must remain. The question Hearth answers is not "can the model write something?" but "did the work actually finish, can it continue after failure, and can every external effect be audited?"
+模型可以更换，执行器可以替换，界面可以重写，但任务状态、授权范围、产物摘要和外部回执必须留下来。Hearth 要解决的问题不是“模型能不能写出一段话”，而是“这件事有没有真正完成，失败后能不能接着做，外部动作能不能被核对”。
 
-## What exists today
+> **当前状态：** 第一阶段 MVP 已验收；阶段二至六已形成可运行的代码闭环与自动测试，但尚未完成真实用户、真实设备和长期运行验收，因此不宣称 v1.0 整体交付。
 
-| Capability | Current implementation |
+## 界面一览
+
+<p align="center">
+  <img src="docs/public/screenshots/chat.png" alt="Hearth 聊天工作台" width="100%">
+  <br>
+  <sub>聊天工作台：一句意图即可生成任务提案，执行器、阶段、Token、耗时与审批入口都在同一处。</sub>
+</p>
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/public/screenshots/tasks.png" alt="任务列表" width="100%">
+      <p align="center"><sub><strong>任务列表</strong><br>运行中、等待审批、已完成与需要处理的任务一目了然。</sub></p>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/public/screenshots/task-detail.png" alt="任务详情" width="100%">
+      <p align="center"><sub><strong>任务详情</strong><br>目标、执行器、阶段、预算、产物和最终结果完整留档。</sub></p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/public/screenshots/inbox.png" alt="主动收件箱" width="100%">
+      <p align="center"><sub><strong>需要你</strong><br>主动建议进入收件箱，可以接受、忽略、稍后提醒或转为任务。</sub></p>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/public/screenshots/memory.png" alt="记忆管理" width="100%">
+      <p align="center"><sub><strong>记忆</strong><br>记忆候选、召回、纠正、冲突、遗忘与导出都有明确边界。</sub></p>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center">
+      <img src="docs/public/screenshots/settings.png" alt="设置与执行器" width="82%">
+      <p align="center"><sub><strong>设置与执行器</strong><br>统一管理模型档案、执行器安装、健康检测、协议兼容与默认路由。</sub></p>
+    </td>
+  </tr>
+</table>
+
+## 现在就能做什么
+
+| 能力 | 当前实现 |
 |---|---|
-| **Chat-first control plane** | React + Vite single-page app; tasks are proposed in conversation, and task detail shows executor, phase, tokens, duration, and artifacts |
-| **Native agent runtime** | A self-built single-agent tool loop supporting OpenAI Chat, OpenAI Responses, Anthropic Messages, and Gemini |
-| **Seven executors** | Three first-class executors (`deepseek-harness`, `codex`, `native`) and four external executors (`hermes`, `qoder`, `workbuddy`, `kimi`) share one registry, launcher, health probe, install pipeline, model binding, context capture, and settings surface. Executor identity is written into every run manifest |
-| **Unified model registry** | SQLite model profiles and per-executor bindings replace private JSON files. ChatGPT, Anthropic, and Gemini protocols are supported where the executor allows them; Codex is restricted to OpenAI Responses and local models stay outside the registry |
-| **Failure diagnosis and handoff** | Hearth diagnoses executor failures with its current chat model, auto-switches under full permission and low risk, asks only whether to switch under necessary approval, and reports non-executor errors without switching |
-| **Durable task state** | State machine, budgets, checkpoints, waiting-for-input, resume, and retry; an append-only SQLite event log records every fact |
-| **Approvals and receipts** | External actions produce a preview; a one-time approval is bound to a parameter fingerprint; the effect ledger executes once and stores a receipt |
-| **First run and entrances** | A four-step wizard for a fresh instance: provider selection, connection test, chat-model save, and native-executor binding; navigation exposes "Needs you", "Memory", "Skills", and "Mail" |
-| **Feishu entry** | Self-built app long connection, open_id allowlist, text/image/file messages, task status, approval summaries, and `/approve` and `/reject` text commands; no public callback URL required |
-| **Real mail** | SMTP sending reuses approvals and the effect ledger, sends after approval, and stores a receipt; IMAP read-only sync writes recent mail into Sources; account secrets are encrypted |
-| **Sources and documents** | Local files, knowledge bases, allowlisted web pages, and text extraction for TXT, Markdown, CSV, JSON, HTML, PDF, DOCX, and XLSX |
-| **Windows desktop control** | Six-digit pairing, per-capability approval, screenshot observation, pause/takeover/hand-back, low-risk clicks and typing, and UIAutomation |
-| **Proactive service and memory** | Six trigger types, a proactive inbox, attention budgets, memory candidates, recall, correction, forgetting, and export |
-| **Method evolution** | Candidate methods, trial evidence, evaluation, promotion, rejection, and rollback |
-| **Multi-device and security** | Incremental event sync, peer authentication, task leases and epoch fencing, device revocation, token rotation, and a global kill switch |
-| **Backup and operations** | AES-256-GCM encrypted backups with rollback-safe restore, health snapshots, periodic maintenance, and redacted diagnostics |
+| **聊天优先的控制面** | React + Vite 单页应用，对话中生成任务提案；任务详情展示执行器、阶段、Token、耗时、产物与最终结果 |
+| **原生 Agent Runtime** | 自研单 Agent 工具循环，支持 OpenAI Chat、OpenAI Responses、Anthropic Messages、Gemini 四种协议 |
+| **七个执行器** | 三个一等执行器（`deepseek-harness`、`codex`、`native`）和四个外部执行器（`hermes`、`qoder`、`workbuddy`、`kimi`）共用注册表、启动解析、健康检测、模型绑定、上下文采集和设置界面；执行器身份写入运行清单 |
+| **统一模型注册表** | SQLite 模型档案与执行器绑定取代私有 JSON；各执行器按协议兼容性选择模型，Codex 固定使用 OpenAI Responses，本地模型不进入统一管理 |
+| **失败诊断与接管** | 用 Hearth 当前聊天模型诊断执行器故障；完全权限且低风险时自动切换并继续，必要审批时只询问是否切换，非执行器错误直接说明原因 |
+| **持久任务执行** | 状态机、预算、检查点、等待输入、恢复与重试；只追加 SQLite 事件日志保存全部事实 |
+| **审批与回执** | 外部动作先生成预览，一次性审批绑定参数指纹；批准后由效果账本执行并留下回执 |
+| **首次运行与导航** | 全新实例四步向导：服务商选择、连接测试、聊天模型保存、原生执行器绑定；主导航直接暴露聊天、任务、需要你、记忆、技能、定时任务、邮件、设备和设置 |
+| **飞书消息入口** | 企业自建应用长连接、open_id 白名单、文本/图片/文件消息、任务状态、审批摘要与 `/approve`、`/reject` 文本命令；不需要公网回调 |
+| **邮件工作台** | SMTP 发送复用审批与效果账本，批准后发送并保存回执；IMAP 只读同步最近邮件到来源；账户和口令加密保存 |
+| **定时任务与技能** | 定时触发、任务模板、技能页面与可复用方法；执行记录沿用同一套任务、审批和恢复链路 |
+| **来源与文档** | 本地文件、知识库、公开网页，以及 TXT/Markdown/CSV/JSON/HTML/PDF/DOCX/XLSX 文本提取 |
+| **Windows 桌面控制** | 六位配对码、逐项能力审批、截图观察、暂停/接管/交还、低风险点击输入与 UIAutomation |
+| **主动服务与记忆** | 六类触发器、主动收件箱、注意力预算；记忆候选、召回、纠正、遗忘、导出 |
+| **方法进化** | 候选方法生成、试跑证据、评估、晋升、拒绝与回退 |
+| **多设备与安全** | 事件增量同步、对端认证、任务租约与 epoch fencing、设备撤销、令牌轮换、全局 kill switch |
+| **备份与运维** | AES-256-GCM 加密备份与回滚式恢复、健康快照、周期维护、脱敏诊断 |
 
-## Project status
+## 当前进度
 
-Hearth has passed the **phase-one MVP** hard gate: all 15 cross-industry real tasks ran, and 13 passed acceptance. Phases two through six have runnable code loops and automated coverage, but they have **not** completed real-user, real-device, or long-running acceptance. They are not claimed as delivered.
+Hearth 已经越过**第一阶段（MVP）**的硬门槛：15 个跨行业真实任务全部执行，13 个通过验收。阶段二至六已经形成可运行的代码闭环与自动测试，但**尚未完成真实用户、真实设备和长期运行验收**，因此不宣称整体交付。
 
-| Phase | Status | Proven | Still open |
+| 阶段 | 状态 | 已经跑通 | 仍然留空 |
 |---|---|---|---|
-| 1 · Minimum complete MVP | **Accepted** | 15 tasks, 13 passed; task, approval, artifact, recovery, and backup loops | T07 did not deliver a PR; T08's external comment awaits user approval |
-| 2 · Everyday content work | Partial | Sources, extraction, drafts, approvals, local outbox; SMTP real sending and IMAP read-only sync code loops | Real mail accounts, bounce semantics, and calendar accounts not accepted; mail attachment UI absent |
-| 3 · Desktop operation | Partial | Windows pairing, observation, takeover, low-risk input, UIA actions | No sensitive-area masking, isolated desktop, or high-risk compensation |
-| 4 · Proactive service and mobile | Partial | Triggers, inbox, attention budget, in-app notifications, Feishu long connection and text approvals | Real Feishu tenant, mobile PWA, pairing, system push, and remote takeover not accepted |
-| 5 · Memory and evolution | Partial | Memory candidate/recall/correct/forget/export; method evaluation/promotion/rollback | No real long-term use or before/after production comparison |
-| 6 · Multi-device and long-running | Partial | Incremental sync, leases, revocation, encrypted backup, health maintenance | No real two-device switch, lost-device drill, or multi-week run |
+| 一 · 最小完整 MVP | **已验收** | 15 项任务、13 项通过；任务、审批、产物、恢复、备份闭环 | T07 未交付 PR；T08 外部评论等待用户批准 |
+| 二 · 日常内容工作 | 部分完成 | 来源、提取、草稿、审批、本地发件箱；SMTP 真实发送与 IMAP 只读同步代码闭环 | 真实邮件账户、退信语义与日历账户未验收；邮件附件 UI 未实现 |
+| 三 · 桌面操作 | 部分完成 | Windows 配对、观察、接管、低风险输入、UIA 动作 | 敏感区域遮罩、隔离桌面、高风险补偿未实现 |
+| 四 · 主动服务与手机 | 部分完成 | 触发器、收件箱、注意力预算、应用内通知、飞书长连接与文本审批 | 真实飞书租户、手机 PWA、配对、系统推送、远程接管未验收 |
+| 五 · 记忆与进化 | 部分完成 | 记忆候选/召回/纠正/遗忘/导出、方法评估/晋升/回退 | 真实长期使用与采用前后生产对照未完成 |
+| 六 · 多设备与长期运行 | 部分完成 | 增量同步、租约、撤销、加密备份、健康维护 | 真实双设备切换、设备丢失演练、数周运行未完成 |
 
-See [Delivery and progress](https://hearthproject.github.io/hearth-os/en/delivery/) and [Phase 2–6 capability status](https://hearthproject.github.io/hearth-os/en/delivery/capabilities.html) for the detailed matrix and evidence.
+更细的能力矩阵和证据见[交付与进度](https://hearthproject.github.io/hearth-os/delivery/)与[阶段二至六能力状态](https://hearthproject.github.io/hearth-os/delivery/status.html)。
 
-## Architecture
+## 架构
 
 ```mermaid
 flowchart TB
-  U["User<br/>chat · tasks · approvals · devices"] --> W["Web control plane<br/>React + Vite"]
-  W --> A["Local API<br/>Fastify · SSE"]
-  A --> S["Tasks and scheduling<br/>state machine · budgets · checkpoints"]
-  S --> N["Native agent runtime<br/>4 model protocols · built-in tools"]
-  S --> C["Codex executor<br/>code and repository work"]
-  S --> D["Windows desktop helper<br/>pair · observe · take over"]
-  S --> F["Sources and documents<br/>files · web · PDF/DOCX/XLSX"]
-  A --> P["Approvals and effect ledger<br/>one-time authority · receipts"]
-  A --> E["Append-only event log<br/>SQLite WAL · projections"]
-  P --> O["Local outbox / GitHub / desktop actions"]
+  U["用户<br/>聊天 · 任务 · 审批 · 设备"] --> W["Web 控制面<br/>React + Vite"]
+  W --> A["本地 API<br/>Fastify · SSE"]
+  A --> S["任务与调度<br/>状态机 · 预算 · 检查点"]
+  S --> N["原生 Agent Runtime<br/>4 种模型协议 · 内置工具"]
+  S --> H["DeepSeek Harness<br/>官方 SDK/JSON-RPC · 会话恢复"]
+  S --> C["Codex 执行器<br/>代码与仓库任务"]
+  S --> X["外部执行器<br/>Hermes · Qoder · WorkBuddy · Kimi"]
+  S --> D["Windows 桌面助手<br/>配对 · 观察 · 接管"]
+  S --> F["来源与文档<br/>文件 · 网页 · PDF/DOCX/XLSX"]
+  A --> M["邮件与飞书<br/>SMTP · IMAP · 长连接审批"]
+  A --> P["审批与效果账本<br/>一次性授权 · 回执"]
+  A --> E["只追加事件日志<br/>SQLite WAL · 投影"]
+  P --> O["本地发件箱 / GitHub / 桌面动作"]
   E --> W
 ```
 
-The core constraint is one sentence: **interface state comes from rebuildable records, each state has a single write authority, and every external effect is either approved or explicitly exempt, with a receipt that can be checked.**
+核心约束只有一句话：**界面状态来自可重建的记录，每个状态只有一个写权威，外部副作用必须经过审批或明确豁免，并留下可核对回执。**
 
-## Quick start
+## 快速开始
 
-Requires **Node.js 22.13+** (the server uses the built-in `node:sqlite`) and npm.
+要求 **Node.js 22.13+**（服务端使用内置 `node:sqlite`）和 npm。
 
 ```bash
 git clone https://github.com/hearthproject/hearth-os.git
@@ -97,109 +143,111 @@ npm ci
 npm run dev
 ```
 
-Open <http://127.0.0.1:5173>. Vite proxies `/api` to the local service at `127.0.0.1:4317`.
+打开 <http://127.0.0.1:5173>。Vite 会把 `/api` 代理到本机 `127.0.0.1:4317`。
 
-Production-style local run:
+生产式本机运行：
 
 ```bash
 npm run build
 npm start
 ```
 
-Open <http://127.0.0.1:4317>.
+打开 <http://127.0.0.1:4317>。
 
-### Connect a model
+### 接入模型
 
-In **Settings → Models**, create a model profile by choosing a preset provider (DeepSeek, Alibaba Cloud Bailian, Zhipu, Kimi, Volcengine Ark, OpenAI, Anthropic, or Gemini) or a custom endpoint, then bind profiles to executors in **Settings → Executors**. Profiles live in `.hearth/hearth.sqlite`; API keys are encrypted with AES-256-GCM through the local `.hearth/master.key`, and the browser only receives a masked value. Local model endpoints are excluded from unified management.
+在 **设置 → 模型** 中创建模型档案：选择预设服务商（DeepSeek、阿里云百炼、智谱、Kimi、火山方舟、OpenAI、Anthropic、Gemini）或自定义服务，然后在 **设置 → 执行器** 中把档案绑定到执行器。档案保存在 `.hearth/hearth.sqlite`，API Key 通过本机 `.hearth/master.key` 以 AES-256-GCM 加密，设置页只显示掩码。本地模型地址不进入统一管理。
 
-### Use Codex
+### 使用 Codex
 
-The Codex executor uses its unified model binding when one is configured; otherwise it reads your existing `~/.codex/config.toml`. A binding generates an isolated `.hearth/executors/codex/config.toml` with `wire_api = "responses"` and injects the key through the environment, so Codex is restricted to the OpenAI Responses protocol. A `codex login` session is not required when a `model_provider` and its `env_key` are configured. The Settings page reports the active provider, model, and authentication source.
+Codex 执行器优先使用统一模型绑定；没有绑定时读取现有的 `~/.codex/config.toml`。绑定会生成隔离的 `.hearth/executors/codex/config.toml`，固定 `wire_api = "responses"` 并通过环境变量注入密钥，因此 Codex 只能使用 OpenAI Responses 协议。配置了 `model_provider` 和对应 `env_key` 时不需要 `codex login`。设置页会显示当前 Provider、模型和认证来源。
 
-### Use additional executors
+### 使用更多执行器
 
-Open **Settings → Executors** to install, probe, configure, bind a model, and set concurrency for every executor from one place. The chat composer has a single executor picker: a conversation-level choice overrides the global default and falls back to the task-matched executor when that choice is disabled, missing, lacks a required capability, or has no valid model binding.
+在 **设置 → 执行器** 中统一完成安装、健康检测、命令或脚本路径、并发数和模型绑定。对话输入框只有一个执行器选择器：对话级选择覆盖全局默认执行器；当选择被关闭、不可用、缺少任务能力或没有有效模型绑定时，路由先回到任务匹配的执行器，再寻找其他可用项。
 
-| Executor | How Hearth connects |
+| 执行器 | Hearth 如何接入 |
 |---|---|
-| `native` | Built in; uses the current chat model or its own binding from Settings → Models |
-| `deepseek-harness` | Official `@deepseek-ai/dsh-sdk-client` SDK/JSON-RPC; native tools, session resume, and full event stream |
-| `codex` | Unified Responses binding, or the existing Codex profile and authentication source |
-| `hermes` | Uses the `hermes` command on `PATH`, or a command path configured in Settings |
-| `qoder` | Managed install of `@qoder-ai/qoder-agent-sdk`; reuses a local `qodercli` login or a personal access token |
-| `workbuddy` | Managed install of `@tencent-ai/codebuddy-code`; reuses the local CodeBuddy/WorkBuddy login |
-| `kimi` | Managed install of `@moonshot-ai/kimi-code`; runs non-interactive stream-json sessions |
+| `native` | 内置；使用当前聊天模型或自己的模型绑定 |
+| `deepseek-harness` | 官方 `@deepseek-ai/dsh-sdk-client` SDK/JSON-RPC；原生工具、会话恢复和完整事件流 |
+| `codex` | 统一 Responses 模型绑定，或现有 Codex Profile 与认证 |
+| `hermes` | `PATH` 中的 `hermes` 命令，或设置中的自定义命令 |
+| `qoder` | 托管安装 `@qoder-ai/qoder-agent-sdk`；复用本机 qodercli 登录或 PAT |
+| `workbuddy` | 托管安装 `@tencent-ai/codebuddy-code`；复用本机 CodeBuddy/WorkBuddy 登录 |
+| `kimi` | 托管安装 `@moonshot-ai/kimi-code`；以 stream-json 非交互模式运行 |
 
-Managed packages and executor homes live under `.hearth/executors/<id>/`. Model profiles, executor bindings, default routing, and task status are stored in SQLite; old `.hearth/model-settings.json` and `.hearth/executor-settings.json` files are imported at startup, backed up under `.hearth/backups/legacy-dev/`, and retained as migration sources. Run `npm test` after adding an executor to verify routing, launch resolution, install jobs, adapter parsing, model protocol validation, handoff, context capture, and health checks together.
+托管包和执行器运行目录位于 `.hearth/executors/<id>/`。模型档案、执行器绑定、默认路由和任务状态保存在 SQLite；旧 `.hearth/model-settings.json` 与 `.hearth/executor-settings.json` 会在启动时导入，备份到 `.hearth/backups/legacy-dev/` 后保留为迁移来源。新增执行器后运行 `npm test`，一起验证路由、启动解析、安装任务、事件解析、协议校验、接管、上下文采集和健康检测。
 
-## Data and backup
+## 数据与备份
 
-| Path | Contents |
+| 路径 | 内容 |
 |---|---|
-| `.hearth/hearth.sqlite` | Tasks, runs, approvals, effects, memory, methods, sync state, context, settings, model profiles, and events |
-| `.hearth/master.key` | Local AES-256-GCM key for encrypted settings fields |
-| `.hearth/context/blobs/` | Context bodies above the inline threshold, named by SHA-256 |
-| `.hearth/executors/` | Managed executor installations and isolated Codex/DeepSeek Harness homes |
-| `.hearth/workspaces/` | Isolated task workspaces |
-| `.hearth/artifacts/` | Managed artifacts |
-| `.hearth/outbox/` | Local outbox and receipts |
-| `.hearth/backups/` | Encrypted backup archives and legacy settings backups |
-| `eval/runs/` | Phase-one acceptance runs and artifacts |
+| `.hearth/hearth.sqlite` | 任务、运行、审批、效果、记忆、方法、同步、上下文、设置、模型档案与事件 |
+| `.hearth/master.key` | 本机 AES-256-GCM 密钥，用于加密设置字段 |
+| `.hearth/context/blobs/` | 超过内联阈值的上下文正文，以 SHA-256 命名 |
+| `.hearth/executors/` | 托管执行器安装目录与隔离的 Codex/DeepSeek Harness 运行目录 |
+| `.hearth/workspaces/` | 隔离的任务工作区 |
+| `.hearth/artifacts/` | 受管产物 |
+| `.hearth/outbox/` | 本地发件箱与回执 |
+| `.hearth/backups/` | 加密备份归档与旧设置迁移备份 |
+| `eval/runs/` | 第一阶段验收运行与产物 |
 
-The server exposes AES-256-GCM encrypted backup creation and restore, validating schema and `integrity_check` before replacing the database. The chat-first UI does not yet surface the backup entry, so use the API described in [Data, backup, and restore](https://hearthproject.github.io/hearth-os/en/guide/data.html). The archive includes the database and required metadata, but **not artifact bodies, workspaces, source bodies, or external attachments**. For a complete archive, also copy `.hearth/artifacts/`, `.hearth/workspaces/`, and `eval/runs/`.
+服务端提供 AES-256-GCM 加密备份创建与恢复，恢复前校验 schema 与 `integrity_check`。聊天优先界面暂未接回备份入口，具体边界见[存储与上下文架构](https://hearthproject.github.io/hearth-os/design/storage.html)。备份包含数据库与必要元数据，但**不包含产物正文、工作区、来源正文和外部附件**；完整归档需要一并复制 `.hearth/artifacts/`、`.hearth/workspaces/` 和 `eval/runs/`。
 
-## Repository layout
+## 仓库结构
 
 ```text
 apps/
-  server/              Fastify API, scheduler, approvals, sources, desktop, memory, sync, backup, operations
-  web/                 React + Vite chat-first control plane
+  server/              Fastify API、调度器、审批、来源、桌面、记忆、邮件、同步、备份与运维
+  web/                 React + Vite 聊天优先控制面
 packages/
-  core/                State machine, domain types, and DTOs
-  eventlog/            Append-only SQLite event log and projections
-  agent-runtime/       Native single-agent tool loop, budgets, checkpoints, and compaction
-  codex-executor/      Codex SDK adapter and provider probing
-  deepseek-executor/   DeepSeek Harness SDK/JSON-RPC adapter
-  templates/           Task templates and acceptance constraints
-eval/                  15 real tasks, inputs, acceptance criteria, and run evidence
-docs/                  Bilingual VitePress documentation site
-tools/windows-helper/  Windows desktop observation and input helper
-scripts/               Documentation and delivery-data helpers
+  core/                状态机、领域类型与 DTO
+  eventlog/            只追加 SQLite 事件日志与投影
+  agent-runtime/       原生单 Agent 工具循环、预算、检查点与压缩
+  codex-executor/      Codex SDK 适配器与 Provider 探测
+  deepseek-executor/   DeepSeek Harness SDK/JSON-RPC 适配器
+  templates/           任务模板与验收约束
+eval/                  15 个真实任务、输入、验收标准与运行证据
+docs/                  中英双语 VitePress 文档站
+tools/windows-helper/  Windows 桌面观察与输入助手
+scripts/               文档、交付数据与 README 截图辅助脚本
 ```
 
-## Documentation
+## 文档
 
-The full documentation is published at **<https://hearthproject.github.io/hearth-os/>**. Chinese is the default language, and every page has an English mirror.
+完整文档发布在 **<https://hearthproject.github.io/hearth-os/>**。中文是默认语言，每个页面都有英文镜像。
 
-- [Get started](https://hearthproject.github.io/hearth-os/en/guide/) — install, connect a model, data and backup, development and tests.
-- [Product design](https://hearthproject.github.io/hearth-os/en/design/) — positioning, task path, technology choices, and module boundaries.
-- [Delivery and progress](https://hearthproject.github.io/hearth-os/en/delivery/) — accepted scope, deliberate gaps, and the remaining roadmap.
-- [Development log](https://hearthproject.github.io/hearth-os/en/log/) — daily summaries, commits, and concrete changes.
-- [Reference](https://hearthproject.github.io/hearth-os/en/reference/) — engineering, risks, decisions, glossary, checklists, and maintenance.
+- [产品设计](https://hearthproject.github.io/hearth-os/design/) — 产品定位、任务链路、技术选型与模块边界。
+- [存储与上下文](https://hearthproject.github.io/hearth-os/design/storage.html) — SQLite 数据域、上下文生命周期、备份与恢复边界。
+- [交付与进度](https://hearthproject.github.io/hearth-os/delivery/) — 已验收能力、明确留空项与剩余路线。
+- [阶段二至六状态](https://hearthproject.github.io/hearth-os/delivery/status.html) — 当前能力矩阵、验证证据与未完成验收。
+- [开发日志](https://hearthproject.github.io/hearth-os/log/day-05.html) — 最近的入口、飞书与邮件闭环记录。
+- [参考](https://hearthproject.github.io/hearth-os/reference/) — 工程、风险、决策、术语、清单与维护资料。
 
-## Known boundaries
+## 已知边界
 
-- Mail still writes to the local outbox by default; with an SMTP account, a real-send approval can be submitted, but real accounts, bounces, and spam semantics are not manually accepted. Calendar accounts are not connected.
-- The Windows helper supports same-machine, foreground, focused operation only. Sensitive-area masking, isolated desktops, and high-risk compensation are not implemented.
-- The Feishu long connection provides phone messaging and text approvals, but it is not a mobile PWA, system push, or complete remote takeover; nothing is pushed after the page closes.
-- Multi-device sync copies filtered event projections only; it does not copy artifact bodies, workspaces, or sensitive memory.
-- The main navigation exposes chat, tasks, Needs You, memory, skills, schedules, mail, devices, and settings. Sync, security, and operations still have APIs and page components that are not all wired back into the primary navigation.
-- This is a working build with an accepted phase-one MVP and partially completed phases two through six, not a v1.0 release.
+- 邮件默认仍只写本机发件箱；配置 SMTP 账户后可提交真实发送审批，但真实账户、退信和垃圾邮件语义尚未人工验收。日历账户未接入。
+- Windows 助手只支持同机、前台聚焦操作；敏感区域遮挡、隔离桌面和高风险动作补偿尚未实现。
+- 飞书长连接提供手机消息与文本审批，但不是手机 PWA、系统级推送或完整远程接管；页面关闭后不会推送。
+- 多设备同步只同步过滤后的事件投影，不同步产物正文、工作区或敏感记忆。
+- 当前主导航暴露聊天、任务、需要你、记忆、技能、定时任务、邮件、设备和设置；同步、安全、运维仍有 API 与页面组件，但尚未全部接回主导航。
+- 这是一个阶段一已验收、阶段二至六部分完成的工作版本，不是 v1.0 正式发布。
 
-## Verification
+## 验证
 
 ```bash
-npm test           # 61 test files, 381 tests
-npm run typecheck
-npm run build
-npm run docs:build
-npm run test:e2e   # isolated browser E2E; uses .hearth/model-settings.json when present
+npm test              # 61 个测试文件、381 个测试
+npm run typecheck     # TypeScript 类型检查
+npm run build         # 构建 Web 控制面
+npm run docs:build    # 构建 VitePress 文档站
+npm run test:e2e      # 浏览器 E2E；使用隔离数据目录
+npm run screenshots:readme  # 重新生成 README 与文档站截图
 ```
 
-The E2E harness starts a server on a random loopback port with a temporary `HEARTH_DATA_DIR`, so it never touches the real `.hearth` data. Set `HEARTH_E2E_MODEL_SETTINGS` to use another model profile, `HEARTH_E2E_OFFLINE=1` to skip live chat, or `HEARTH_E2E_KEEP=1` to keep the temporary data for inspection.
+E2E 会在随机本地端口启动服务，并使用临时 `HEARTH_DATA_DIR`，不会触碰真实 `.hearth` 数据。可用 `HEARTH_E2E_MODEL_SETTINGS` 指定其他模型配置，`HEARTH_E2E_OFFLINE=1` 跳过在线聊天，`HEARTH_E2E_KEEP=1` 保留临时数据用于排查。
 
-Coverage spans the service layer, API, model protocols, native tool loop, budgets, permissions, checkpoints, proposal confirmation, desktop boundaries, memory, methods, sync, security, backup, and operations. Passing tests are not the same as real-world acceptance; per-task phase-one evidence lives in [`eval/phase-1-acceptance.md`](eval/phase-1-acceptance.md).
+测试覆盖服务层、API、模型协议、原生工具循环、预算、权限、检查点、提案确认、桌面边界、记忆、方法、同步、安全、备份与运维。测试通过不等于真实验收完成；阶段一逐项证据见 [`eval/phase-1-acceptance.md`](eval/phase-1-acceptance.md)。
 
-## License
+## 许可
 
-Apache-2.0. See [LICENSE](LICENSE).
+Apache-2.0。见 [LICENSE](LICENSE)。

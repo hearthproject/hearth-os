@@ -19,7 +19,8 @@
     "helper:windows": "node tools/windows-helper/helper.mjs",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
-    "docs:preview": "vitepress preview docs"
+    "docs:preview": "vitepress preview docs",
+    "screenshots:readme": "node scripts/readme-screenshots.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.10.0",

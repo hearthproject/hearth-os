@@ -3,7 +3,7 @@ layout: home
 hero:
   name: Hearth OS
   text: 把数字劳动变成可靠的任务
-  tagline: 单用户、自托管、长期驻留的个人 Agent OS。用持久执行、真实工具、明确审批和可验证回执，把意图变成可以放心交付的结果。
+  tagline: 单用户、自托管、长期驻留的个人 Agent OS。聊天优先地发起任务，交给七个执行器，在审批与回执约束下完成真实工作。
   image:
     src: /hero.svg
     alt: Hearth OS 任务系统
@@ -15,7 +15,12 @@ hero:
       text: 查看交付路线
       link: /delivery/
 ---
+
 <nav class="home-quicklinks" aria-label="文档入口">
+  <a href="#产品界面">
+    <span class="home-quicklinks__label">产品界面</span>
+    <span class="home-quicklinks__meta">聊天、任务、收件箱、记忆与执行器</span>
+  </a>
   <a href="/hearth-os/design/">
     <span class="home-quicklinks__label">设计说明</span>
     <span class="home-quicklinks__meta">项目定位、总体设计与九个模块</span>
@@ -28,8 +33,103 @@ hero:
     <span class="home-quicklinks__label">开发日志</span>
     <span class="home-quicklinks__meta">每日概述、提交与具体修改</span>
   </a>
-  <a href="/hearth-os/reference/">
-    <span class="home-quicklinks__label">附录</span>
-    <span class="home-quicklinks__meta">工程、风险、决策与维护资料</span>
-  </a>
 </nav>
+
+## 产品界面
+
+<p class="home-section-lead">
+  不是把聊天记录换个皮肤，而是把一次真实工作拆成可追踪的任务：目标、执行器、预算、审批、产物和回执，全部留在同一个控制面里。
+</p>
+
+<section class="home-showcase" aria-label="Hearth 界面截图">
+  <figure class="screenshot-spotlight">
+    <img src="/screenshots/chat.png" alt="Hearth 聊天工作台">
+    <figcaption>
+      <strong>聊天工作台</strong>
+      <span>一句意图生成任务提案；执行器、阶段、Token、耗时和审批入口就地展开。</span>
+    </figcaption>
+  </figure>
+
+  <div class="screenshot-gallery">
+    <figure class="screenshot-card">
+      <img src="/screenshots/tasks.png" alt="任务列表">
+      <figcaption>
+        <strong>任务列表</strong>
+        <span>运行中、等待审批、已完成与需要处理的任务一屏可读。</span>
+      </figcaption>
+    </figure>
+    <figure class="screenshot-card">
+      <img src="/screenshots/task-detail.png" alt="任务详情">
+      <figcaption>
+        <strong>任务详情</strong>
+        <span>目标、执行器、预算、产物与最终结果完整留档。</span>
+      </figcaption>
+    </figure>
+    <figure class="screenshot-card">
+      <img src="/screenshots/inbox.png" alt="主动收件箱">
+      <figcaption>
+        <strong>需要你</strong>
+        <span>主动建议进入收件箱，可以接受、忽略、稍后提醒或转为任务。</span>
+      </figcaption>
+    </figure>
+    <figure class="screenshot-card">
+      <img src="/screenshots/memory.png" alt="记忆管理">
+      <figcaption>
+        <strong>记忆</strong>
+        <span>记忆候选、召回、纠正、冲突、遗忘与导出都有明确边界。</span>
+      </figcaption>
+    </figure>
+    <figure class="screenshot-card screenshot-card--wide">
+      <img src="/screenshots/settings.png" alt="设置与执行器">
+      <figcaption>
+        <strong>设置与执行器</strong>
+        <span>统一管理模型档案、执行器安装、健康检测、协议兼容与默认路由。</span>
+      </figcaption>
+    </figure>
+  </div>
+</section>
+
+## 产品定位
+
+Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是一个**以任务为中心的个人控制面**：用户提出意图，系统保存目标、分配执行器、约束权限、记录证据，并在外部动作发生前要求明确审批。
+
+<DocCardGrid :columns="3" :items="[
+  {
+    no: '01',
+    title: '任务优先，而不是消息优先',
+    text: '每次执行都有目标、预算、检查点和产物摘要。失败可以恢复，中断可以接着做。',
+    link: '/design/tasks',
+    meta: 'Durable execution'
+  },
+  {
+    no: '02',
+    title: '外部动作先审批，再留下回执',
+    text: '发送邮件、操作桌面、提交评论等副作用先生成预览，一次性审批绑定参数指纹。',
+    link: '/design/effects',
+    meta: 'Approval & effects'
+  },
+  {
+    no: '03',
+    title: '执行器可替换，记录不丢失',
+    text: '原生运行时、Codex、DeepSeek Harness 与外部执行器共享注册表、路由和运行清单。',
+    link: '/design/executors',
+    meta: 'Seven executors'
+  }
+]" />
+
+## 从这里开始
+
+<DocCardGrid :columns="2" :items="[
+  {
+    title: '交付与进度',
+    text: '第一阶段 MVP 已验收；阶段二至六已形成代码闭环，真实用户与长期运行验收仍在进行。',
+    link: '/delivery/status',
+    meta: 'Current status'
+  },
+  {
+    title: '存储与备份边界',
+    text: 'SQLite 数据域、上下文生命周期、加密备份，以及数据库可恢复不等于产物可迁移的边界。',
+    link: '/design/storage',
+    meta: 'Data & backup'
+  }
+]" />

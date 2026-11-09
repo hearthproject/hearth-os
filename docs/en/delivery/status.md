@@ -6,7 +6,7 @@ outline: [2, 3]
 
 # Phase 2–6 Delivery Status
 
-Checked on 2026-11-08. This page records only what the current code and real runs can prove; a page existing is not treated as a completed loop.
+Checked on 2026-11-09. This page records only what the current code and real runs can prove; a page existing is not treated as a completed loop.
 
 ## Phase result
 
@@ -104,7 +104,9 @@ The backup boundary must remain visible in the UI: a recoverable database is not
 
 ## Verification evidence
 
-On 2026-11-08, `npm test` on the current branch passed all 61 test files and 381 tests; `npm run typecheck`, `npm run build`, and the offline `npm run test:e2e` suite (13 checks) also pass. These checks cover service, API, model-protocol, native tool-loop, budget, permission, checkpoint, and proposal-confirmation code loops but do not replace real-user, real-device, or long-running acceptance. See the [Day05 development log](/en/log/day-05) for the implementation record.
+On 2026-11-09, `npm test` on the current branch passed all 61 test files and 381 tests; `npm run typecheck`, `npm run build`, `npm run docs:build`, and the offline `npm run test:e2e` suite (13 checks) also pass. These checks cover service, API, model-protocol, native tool-loop, budget, permission, checkpoint, and proposal-confirmation code loops but do not replace real-user, real-device, or long-running acceptance. See the [Day05 development log](/en/log/day-05) for the implementation record.
+
+The README and documentation home screenshots were refreshed on the same day. `npm run screenshots:readme` starts an isolated instance on a random port, seeds demo tasks, approval suggestions, and memory through a temporary `HEARTH_DATA_DIR`, and captures the Chinese light-theme UI with Playwright; it never reads or modifies real `.hearth` data.
 
 ## Remaining real acceptance
 
