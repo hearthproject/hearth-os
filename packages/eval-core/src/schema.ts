@@ -5,6 +5,7 @@ import {
   EVAL_RUN_MODES,
   GRADER_KINDS
 } from "./types.ts";
+import type { CaseManifest } from "./types.ts";
 
 const inputSchema = z.object({
   kind: z.enum(["file", "url", "text"]),
@@ -130,7 +131,7 @@ export const humanReviewInputSchema = z.object({
 });
 
 export type CaseManifestValidation =
-  | { success: true; data: z.infer<typeof caseManifestSchema> }
+  | { success: true; data: CaseManifest }
   | { success: false; issues: Array<{ path: string; message: string }> };
 
 export function validateCaseManifest(input: unknown): CaseManifestValidation {
@@ -187,7 +188,7 @@ export function validateCaseManifest(input: unknown): CaseManifestValidation {
       issues: issues.map((issue) => ({ path: issue.path.map(String).join("."), message: issue.message }))
     };
   }
-  return { success: true, data: manifest as z.infer<typeof caseManifestSchema> };
+  return { success: true, data: manifest as CaseManifest };
 }
 
 export const GRADER_KIND_VALUES = GRADER_KINDS;
