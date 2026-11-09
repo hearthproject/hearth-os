@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "T11",
+  "version": 1,
+  "title": "报销票据核对",
+  "family": "cross-app",
+  "difficulty": "edge",
+  "runModes": ["offline"],
+  "description": "按报销政策逐笔核对 7 张票据。",
+  "goal": "逐笔核对票据与政策，合计应为 2640.00，列明异常和需要补充的材料。",
+  "tags": ["legacy", "finance", "reconciliation"],
+  "timeoutMs": 600000,
+  "inputs": [
+    {"kind": "file", "label": "报销政策", "path": "eval/inputs/T11-expense-policy.md"},
+    {"kind": "file", "label": "票据", "path": "eval/inputs/T11-receipts.md"}
+  ],
+  "expectedOutputs": ["expense-reconciliation.md"],
+  "graders": [
+    {"id": "expense-file", "title": "核对表存在", "config": {"kind": "file", "path": "expense-reconciliation.md", "minBytes": 100}},
+    {"id": "expense-facts", "title": "合计与复核标记正确", "config": {"kind": "text", "path": "expense-reconciliation.md", "includes": ["2640.00", "异常", "补充材料", "财务复核"]}}
+  ],
+  "criteria": [
+    {"id": "expense-exist", "label": "输出报销核对表", "source": "deterministic", "points": 30, "severity": "blocker", "graderId": "expense-file"},
+    {"id": "expense-facts", "label": "合计、异常和补充材料完整", "source": "deterministic", "points": 30, "severity": "scored", "graderId": "expense-facts"},
+    {"id": "expense-quality", "label": "逐笔依据清晰且不越权批准", "source": "judge", "points": 30, "severity": "scored", "rubric": "七笔票据逐笔核对，列明金额、类别、政策依据和异常，不批准或付款。"},
+    {"id": "expense-human", "label": "财务复核", "source": "human", "points": 10, "severity": "scored"}
+  ],
+  "humanReview": {"prompt": "核对七笔金额、合计和异常说明。", "sampleRate": 0.1}
+}

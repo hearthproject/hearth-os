@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "T15",
+  "version": 1,
+  "title": "产品资料转营销简报",
+  "family": "documents",
+  "difficulty": "edge",
+  "runModes": ["offline"],
+  "description": "把产品资料转成三渠道活动简报和素材清单。",
+  "goal": "生成以可审核知识库回复为核心的营销简报和素材清单，不发布或投放。",
+  "tags": ["legacy", "marketing", "approval"],
+  "timeoutMs": 600000,
+  "inputs": [{"kind": "file", "label": "产品简报", "path": "eval/inputs/T15-product-brief.md"}],
+  "expectedOutputs": ["campaign-brief.md", "asset-checklist.md"],
+  "graders": [
+    {"id": "brief-file", "title": "简报与素材清单存在", "config": {"kind": "artifact_count", "suffix": ".md", "min": 2}},
+    {"id": "brief-facts", "title": "110 试用目标与渠道齐全", "config": {"kind": "text", "path": "campaign-brief.md", "includes": ["120", "LinkedIn", "邮件", "落地页", "审批"]}}
+  ],
+  "criteria": [
+    {"id": "brief-exist", "label": "输出简报和素材清单", "source": "deterministic", "points": 30, "severity": "blocker", "graderId": "brief-file"},
+    {"id": "brief-facts", "label": "目标、渠道和审批状态齐全", "source": "deterministic", "points": 30, "severity": "scored", "graderId": "brief-facts"},
+    {"id": "brief-quality", "label": "主张有依据且不夸大", "source": "judge", "points": 30, "severity": "scored", "rubric": "所有数字来自输入，价值主张围绕可审核知识库草稿，不声称自动发送或替代客服。"},
+    {"id": "brief-human", "label": "市场负责人复核", "source": "human", "points": 10, "severity": "scored"}
+  ],
+  "humanReview": {"prompt": "核对事实、渠道和审批状态。", "sampleRate": 0.1}
+}

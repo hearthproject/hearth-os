@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "T13",
+  "version": 1,
+  "title": "招聘需求转 JD 与面试题",
+  "family": "documents",
+  "difficulty": "edge",
+  "runModes": ["offline"],
+  "description": "把岗位需求转成合规 JD 和面试工具包。",
+  "goal": "生成无歧视项的职位说明和包含 6 个能力维度的面试工具包。",
+  "tags": ["legacy", "hiring", "compliance"],
+  "timeoutMs": 600000,
+  "inputs": [{"kind": "file", "label": "岗位需求", "path": "eval/inputs/T13-role-intake.md"}],
+  "expectedOutputs": ["job-description.md", "interview-kit.md"],
+  "graders": [
+    {"id": "jd-file", "title": "JD 与面试包存在", "config": {"kind": "file", "path": "job-description.md", "minBytes": 100}},
+    {"id": "jd-facts", "title": "能力维度与合规边界齐全", "config": {"kind": "text", "path": "job-description.md", "includes": ["Python", "FastAPI", "SQL", "LLM"]}}
+  ],
+  "criteria": [
+    {"id": "jd-exist", "label": "输出 JD", "source": "deterministic", "points": 30, "severity": "blocker", "graderId": "jd-file"},
+    {"id": "jd-facts", "label": "关键能力覆盖", "source": "deterministic", "points": 30, "severity": "scored", "graderId": "jd-facts"},
+    {"id": "jd-quality", "label": "无歧视项且面试包可评分", "source": "judge", "points": 30, "severity": "scored", "rubric": "不包含歧视性条件，六个能力维度均含问题、1–4 分锚点和至少两个追问。"},
+    {"id": "jd-human", "label": "招聘负责人复核", "source": "human", "points": 10, "severity": "scored"}
+  ],
+  "humanReview": {"prompt": "核对合规项和面试评分锚点。", "sampleRate": 0.1}
+}

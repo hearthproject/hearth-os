@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "T06",
+  "version": 1,
+  "title": "AI 治理官方政策更新摘要",
+  "family": "research",
+  "difficulty": "edge",
+  "runModes": ["offline", "live-optional"],
+  "description": "汇总 EU、NIST、ICO 的官方 AI 治理更新。",
+  "goal": "只使用官方来源生成政策更新摘要，记录访问状态和不可访问原因。",
+  "tags": ["legacy", "research", "policy"],
+  "timeoutMs": 900000,
+  "inputs": [{"kind": "file", "label": "政策页面离线快照", "path": "policy-snapshot.md"}],
+  "liveInputs": [
+    {"kind": "url", "label": "EU AI Act", "value": "https://digital-strategy.ec.europa.eu/en/policies/regulatory-framework-ai"},
+    {"kind": "url", "label": "NIST AI RMF", "value": "https://www.nist.gov/itl/ai-risk-management-framework"},
+    {"kind": "url", "label": "UK ICO AI guidance", "value": "https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/artificial-intelligence/"}
+  ],
+  "networkHosts": ["digital-strategy.ec.europa.eu", "www.nist.gov", "ico.org.uk"],
+  "expectedOutputs": ["policy-update-digest.md"],
+  "graders": [
+    {"id": "digest-file", "title": "政策摘要存在", "config": {"kind": "file", "path": "policy-update-digest.md", "minBytes": 100}},
+    {"id": "digest-facts", "title": "官方来源和未知项齐全", "config": {"kind": "text", "path": "policy-update-digest.md", "includes": ["EU", "NIST", "ICO", "访问状态", "未知"]}}
+  ],
+  "criteria": [
+    {"id": "digest-exist", "label": "输出政策摘要", "source": "deterministic", "points": 30, "severity": "blocker", "graderId": "digest-file"},
+    {"id": "digest-facts", "label": "来源、状态和未知项齐全", "source": "deterministic", "points": 30, "severity": "scored", "graderId": "digest-facts"},
+    {"id": "digest-quality", "label": "仅使用官方来源", "source": "judge", "points": 30, "severity": "scored", "rubric": "按主体、变更类型、适用范围、生效时间和原文链接整理；不能确认的日期标为未知。"},
+    {"id": "digest-human", "label": "人工验收", "source": "human", "points": 10, "severity": "scored"}
+  ],
+  "humanReview": {"prompt": "核对官方来源、日期和未知项。", "sampleRate": 0.1}
+}

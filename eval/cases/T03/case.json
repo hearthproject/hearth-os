@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "T03",
+  "version": 1,
+  "title": "多报告合并为执行摘要",
+  "family": "documents",
+  "difficulty": "edge",
+  "runModes": ["offline"],
+  "description": "合并三份报告，保留冲突与来源。",
+  "goal": "生成面向管理层的执行摘要，明确共识、冲突、关键数字和决策建议。",
+  "tags": ["legacy", "synthesis", "sources"],
+  "timeoutMs": 600000,
+  "inputs": [
+    {"kind": "file", "label": "报告 A", "path": "eval/inputs/T03-report-a.md"},
+    {"kind": "file", "label": "报告 B", "path": "eval/inputs/T03-report-b.md"},
+    {"kind": "file", "label": "报告 C", "path": "eval/inputs/T03-report-c.md"}
+  ],
+  "expectedOutputs": ["executive-summary.md"],
+  "graders": [
+    {"id": "summary-file", "title": "执行摘要存在", "config": {"kind": "file", "path": "executive-summary.md", "minBytes": 100}},
+    {"id": "summary-sources", "title": "保留共识与冲突", "config": {"kind": "text", "path": "executive-summary.md", "includes": ["共识", "冲突", "报告 A", "报告 B", "报告 C"]}}
+  ],
+  "criteria": [
+    {"id": "summary-exist", "label": "输出执行摘要", "source": "deterministic", "points": 30, "severity": "blocker", "graderId": "summary-file"},
+    {"id": "summary-sources", "label": "共识、冲突和来源齐全", "source": "deterministic", "points": 30, "severity": "scored", "graderId": "summary-sources"},
+    {"id": "summary-quality", "label": "冲突未被消除且篇幅受控", "source": "judge", "points": 30, "severity": "scored", "rubric": "冲突并列各方说法，关键数字有来源，未知数据明确，正文不超过 1200 个中文字符。"},
+    {"id": "summary-human", "label": "人工验收", "source": "human", "points": 10, "severity": "scored"}
+  ],
+  "humanReview": {"prompt": "核对共识、冲突、来源和篇幅。", "sampleRate": 0.1}
+}

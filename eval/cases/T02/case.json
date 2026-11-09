@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "T02",
+  "version": 1,
+  "title": "合同条款与义务提取",
+  "family": "documents",
+  "difficulty": "edge",
+  "runModes": ["offline"],
+  "description": "提取 SaaS 合同中的关键义务、期限、金额和缺失附件。",
+  "goal": "生成合同条款清单，逐项标注页码、风险、责任方和需要法务确认的问题。",
+  "tags": ["legacy", "contract", "legal"],
+  "timeoutMs": 600000,
+  "inputs": [{"kind": "file", "label": "SaaS 合同", "path": "eval/inputs/T02-saas-contract.md"}],
+  "expectedOutputs": ["clause-checklist.md"],
+  "graders": [
+    {"id": "checklist-file", "title": "条款清单存在", "config": {"kind": "file", "path": "clause-checklist.md", "minBytes": 100}},
+    {"id": "checklist-facts", "title": "关键期限与数字准确", "config": {"kind": "text", "path": "clause-checklist.md", "includes": ["30 日", "0.05%", "72 小时", "2026-12-01"]}}
+  ],
+  "criteria": [
+    {"id": "checklist-exist", "label": "输出条款清单", "source": "deterministic", "points": 30, "severity": "blocker", "graderId": "checklist-file"},
+    {"id": "checklist-facts", "label": "期限、金额和通知窗口正确", "source": "deterministic", "points": 30, "severity": "scored", "graderId": "checklist-facts"},
+    {"id": "checklist-quality", "label": "条款有页码、依据和复核标记", "source": "judge", "points": 30, "severity": "scored", "rubric": "关键结论均附页码和原文摘录，缺失附件得到识别，不擅自给出合法性结论。"},
+    {"id": "checklist-human", "label": "法务复核", "source": "human", "points": 10, "severity": "scored"}
+  ],
+  "humanReview": {"prompt": "核对条款、页码、金额和缺失附件。", "sampleRate": 0.1}
+}
