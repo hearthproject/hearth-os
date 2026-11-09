@@ -892,7 +892,7 @@ export class HearthScheduler {
           attempt: (retriesByExecutor.get(executorId) ?? 0) + 1,
           maxAttempts: settings.maxSameExecutorRetries + 1,
           effectId: uncertainEffect?.id ?? null,
-          repairTarget: failureTask.expectedOutputs.join(", ") || "deliverable"
+          repairTarget: (failureTask.expectedOutputs ?? []).join(", ") || "deliverable"
         });
         const target = this.selectHandoffTarget({ task: failureTask, cause, settings, attemptedExecutors, handoffsUsed, taskRoot });
         const diagnosis = await this.diagnoseFailure(taskId, failureTask, result.run, result.error, cause, target.targetExecutor);
