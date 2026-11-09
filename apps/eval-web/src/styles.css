@@ -689,6 +689,7 @@ code { font-size: .82em; }
 .compare-metric > div strong { font-size: 20px; font-weight: 600; letter-spacing: -.04em; }
 .compare-metric > div i { width: 1px; height: 20px; background: var(--line); }
 .family-delta-table .delta-visual-col { width: 35%; }
+.family-delta-table td:first-child strong { margin-right: 6px; }
 .delta-track { position: relative; height: 5px; background: var(--surface-deep); border-radius: 999px; }
 .delta-track::after { position: absolute; top: -2px; left: 0; width: 1px; height: 9px; background: #bdb5a8; content: ""; }
 .delta-track span { display: block; height: 100%; border-radius: inherit; }
