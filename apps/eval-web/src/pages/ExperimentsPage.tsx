@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, FlaskConical, Plus } from "lucide-react";
+import { ArrowRight, Plus } from "lucide-react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api.ts";
 import { executorLabel, formatDate, formatPercent } from "../lib/labels.ts";
@@ -14,23 +14,19 @@ export function ExperimentsPage() {
   return (
     <div className="page-stack">
       <PageHeader
-        eyebrow="EXPERIMENTS"
         title="实验"
-        description="每一条实验记录都固定 case 版本、执行器、运行模式和模型环境，便于复现与横向比较。"
+        description="每条实验记录都固定任务版本、执行器、运行模式和模型环境，便于复现与对比。"
         actions={<Link className="button button-primary" to="/experiments/new"><Plus size={15} /> 新建实验</Link>}
       />
 
       <section className="panel">
-        <div className="section-header">
-          <div><h2>全部实验</h2><span>{experiments.length} 条记录</span></div>
-          <FlaskConical size={18} />
-        </div>
+        <div className="section-header"><div><h2>全部实验</h2><span>{experiments.length} 条记录</span></div></div>
         {experiments.length === 0 ? (
           <EmptyState title="还没有实验" description="创建实验后，评测 Agent 将自动驱动 Hearth 并追踪完整生命周期。" action={<Link className="button" to="/experiments/new">新建第一条实验</Link>} />
         ) : (
           <div className="table-wrap">
             <table className="data-table experiments-table">
-              <thead><tr><th>实验</th><th>状态</th><th>Case</th><th>执行器</th><th>模式</th><th>通过率</th><th>均分</th><th>开始时间</th><th /></tr></thead>
+              <thead><tr><th>实验</th><th>状态</th><th>任务</th><th>执行器</th><th>模式</th><th>通过率</th><th>均分</th><th>开始时间</th><th /></tr></thead>
               <tbody>
                 {experiments.map((experiment) => (
                   <tr key={experiment.id}>
