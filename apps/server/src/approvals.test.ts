@@ -202,7 +202,7 @@ describe("approval manager", () => {
       preview: { title: "Full permission", body: "Auto-approved effect" }
     });
 
-    expect(approval.status).toBe("approved");
+    expect(approval.status).toBe("consumed");
     expect(calls).toBe(1);
     expect(service.requireTask(task.id).status).toBe("completed");
     const audit = store.listEvents().find((event) => event.type === "approval.auto_approved");

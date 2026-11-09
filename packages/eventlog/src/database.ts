@@ -1921,6 +1921,10 @@ export class HearthStore {
       case "task.progress":
       case "approval.expired":
       case "approval.auto_approved":
+      case "approval.rejected":
+      case "approval.policy_denied":
+      case "approval.revalidation_failed":
+      case "approval.escalation_required":
       case "chat.message.created":
       case "chat.message.updated":
       case "context.item.appended":
