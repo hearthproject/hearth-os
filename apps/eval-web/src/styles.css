@@ -640,6 +640,27 @@ code { font-size: .82em; }
 .activity-payload summary:hover { color: var(--ink-soft); }
 .activity-payload pre { margin-top: 6px; }
 
+/* System */
+.system-banner { gap: 10px; padding: 14px 16px; border-radius: 8px; }
+.system-banner-icon { width: 32px; height: 32px; border-radius: 6px; }
+.system-banner strong { font-size: 13px; }
+.system-banner span { font-size: 11px; }
+.system-banner small { font-size: 10px; }
+.system-executor { padding: 10px; border-radius: 6px; }
+.system-executor strong { font-size: 12px; }
+.system-executor small, .system-executor em, .system-executor > code { font-size: 10px; }
+.ready-badge { padding: 3px 7px; font-size: 10px; font-weight: 500; }
+.system-note { padding: 9px 10px; border-radius: 6px; font-size: 11px; }
+.storage-card { padding: 13px; border-radius: 7px; }
+.storage-icon { width: 30px; height: 30px; border-radius: 6px; }
+.storage-card strong { font-size: 12px; }
+.storage-card code { font-size: 11px; }
+.storage-card small { font-size: 10px; }
+.command-grid div { padding: 12px; background: var(--surface-muted); border-color: var(--line); border-radius: 7px; }
+.command-grid span { color: var(--ink-faint); font-size: 10px; }
+.command-grid code { color: var(--ink); font-size: 12px; }
+.command-grid small { color: var(--ink-faint); font-size: 10px; }
+
 /* Dashboard */
 .overview-card { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 28px; padding: 18px 20px; }
 .overview-main { min-width: 0; }

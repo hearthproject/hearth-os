@@ -6,9 +6,7 @@ import {
   Database,
   FolderOpen,
   Gauge,
-  HardDrive,
   RefreshCw,
-  Server,
   ShieldCheck,
   XCircle
 } from "lucide-react";
@@ -26,7 +24,6 @@ export function SystemPage() {
   return (
     <div className="page-stack system-page">
       <PageHeader
-        eyebrow="ENVIRONMENT"
         title="系统状态"
         description="评测服务与 Hearth、模型评委、执行器和本地存储之间的连接状态。"
         actions={<button className="button" onClick={() => void query.refetch()}><RefreshCw size={15} /> 重新检查</button>}
@@ -39,21 +36,21 @@ export function SystemPage() {
       </section>
 
       <section className="metric-grid">
-        <MetricCard label="任务目录" value={system.catalogCases} detail={system.catalogIssues > 0 ? `${system.catalogIssues} 个目录问题` : "目录校验通过"} icon={<Database size={17} />} tone={system.catalogIssues > 0 ? "warning" : "neutral"} />
-        <MetricCard label="可用执行器" value={`${readyExecutors} / ${system.executors.length}`} detail="来自 Hearth 实时探测" icon={<Cpu size={17} />} tone={readyExecutors > 0 ? "success" : "danger"} />
-        <MetricCard label="模型评委" value={system.judgeConfigured ? "已配置" : "未配置"} detail={system.judgeModel ?? "自动评分将回退到人工复核"} icon={<ShieldCheck size={17} />} tone={system.judgeConfigured ? "success" : "warning"} />
-        <MetricCard label="运行 / 复核" value={`${system.runningExperiments} / ${system.pendingReviews}`} detail="进行中实验 / 待人工复核" icon={<Gauge size={17} />} tone={system.pendingReviews > 0 ? "warning" : "neutral"} />
+        <MetricCard label="任务目录" value={system.catalogCases} detail={system.catalogIssues > 0 ? `${system.catalogIssues} 个目录问题` : "目录校验通过"} icon={<Database size={16} />} tone={system.catalogIssues > 0 ? "warning" : "neutral"} />
+        <MetricCard label="可用执行器" value={`${readyExecutors} / ${system.executors.length}`} detail="来自 Hearth 实时探测" icon={<Cpu size={16} />} tone={readyExecutors > 0 ? "success" : "danger"} />
+        <MetricCard label="模型评委" value={system.judgeConfigured ? "已配置" : "未配置"} detail={system.judgeModel ?? "自动评分将回退到人工复核"} icon={<ShieldCheck size={16} />} tone={system.judgeConfigured ? "success" : "warning"} />
+        <MetricCard label="运行 / 复核" value={`${system.runningExperiments} / ${system.pendingReviews}`} detail="进行中实验 / 待人工复核" icon={<Gauge size={16} />} tone={system.pendingReviews > 0 ? "warning" : "neutral"} />
       </section>
 
       <div className="detail-grid">
         <section className="panel">
-          <SectionHeader title="执行器" detail="Hearth 当前运行时" action={<Server size={18} />} />
+          <SectionHeader title="执行器" detail="Hearth 当前运行时" />
           <div className="system-executor-list">
             {system.executors.map((executor) => (
               <article className={`system-executor ${executor.canRun ? "ready" : "unavailable"}`} key={executor.id}>
                 <span className="executor-icon"><Cpu size={16} /></span>
                 <div><strong>{executorLabel(executor.id)}</strong><small>{executor.description}</small>{executor.issues.map((issue) => <em key={issue}>{issue}</em>)}</div>
-                <span className={`ready-badge ${executor.canRun ? "ok" : "bad"}`}>{executor.canRun ? "Ready" : "Unavailable"}</span>
+                <span className={`ready-badge ${executor.canRun ? "ok" : "bad"}`}>{executor.canRun ? "可用" : "不可用"}</span>
                 {executor.version && <code>{executor.version}</code>}
               </article>
             ))}
@@ -76,7 +73,7 @@ export function SystemPage() {
       </div>
 
       <section className="panel">
-        <SectionHeader title="本地存储" detail="评测数据库与产物根目录" action={<HardDrive size={18} />} />
+        <SectionHeader title="本地存储" detail="评测数据库与产物根目录" />
         <div className="storage-grid">
           <div className="storage-card"><span className="storage-icon"><Database size={18} /></span><div><strong>评测数据库</strong><code>{system.dataDir}</code><small>SQLite 记录实验、运行、grader、复核和事件。</small></div></div>
           <div className="storage-card"><span className="storage-icon"><FolderOpen size={18} /></span><div><strong>产物目录</strong><code>{system.artifactRoot}</code><small>按实验 / case / 执行器 / 重复次数隔离。</small></div></div>
