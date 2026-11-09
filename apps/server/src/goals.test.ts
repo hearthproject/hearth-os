@@ -44,6 +44,17 @@ describe("goal contracts", () => {
 
     const task = service.createTask({ title: "本周摘要", goalId: goal.goalId, executorId: "native" });
     expect(task.goalId).toBe(goal.goalId);
+    service.recordCompletionReport({
+      goalId: goal.goalId,
+      taskId: task.id,
+      verdict: "needs_human",
+      summary: "等待用户确认",
+      criteria: [{ criterionId: "summary", status: "passed", evidenceRefs: ["research-summary.json"], detail: "ok" }],
+      evidenceRefs: ["research-summary.json"],
+      missingEvidence: [],
+      forbiddenActions: [],
+      checkedAt: "2026-11-09T00:00:00.000Z"
+    });
     store.close();
     store = new HearthStore(path);
     const reopened = new HearthService(store);
@@ -55,6 +66,7 @@ describe("goal contracts", () => {
     });
     expect(reopened.view(task.id)?.goal?.goalId).toBe(goal.goalId);
     expect(reopened.view(task.id)?.task.goalId).toBe(goal.goalId);
+    expect(reopened.view(task.id)?.completionReport).toMatchObject({ verdict: "needs_human", checkedAt: "2026-11-09T00:00:00.000Z" });
   });
 
   it("rejects duplicate or incomplete criteria", () => {

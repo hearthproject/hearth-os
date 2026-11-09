@@ -16,6 +16,7 @@ import type {
   EffectRecord,
   EventWindow,
   ExecutorId,
+  GoalCompletionReport,
   GoalContract,
   GoalState,
   OutboxDraft,
@@ -96,6 +97,7 @@ export class TaskInputSelectionError extends Error {
 export interface TaskView {
   task: TaskRecord;
   goal: GoalContract | null;
+  completionReport: GoalCompletionReport | null;
   runs: ReturnType<HearthStore["listRuns"]>;
   approvals: ReturnType<HearthStore["listApprovals"]>;
   artifacts: ReturnType<HearthStore["listArtifacts"]>;
@@ -292,6 +294,16 @@ export class HearthService {
     return this.store.getGoal(goalId) ?? updated;
   }
 
+  recordCompletionReport(report: GoalCompletionReport): GoalCompletionReport {
+    const event = this.store.appendEvent({ type: "goal.completion.recorded", taskId: report.taskId, payload: report });
+    this.bus.publish(event);
+    return report;
+  }
+
+  latestCompletionReport(goalId: string): GoalCompletionReport | null {
+    return this.store.latestGoalCompletionReport(goalId);
+  }
+
   exportSnapshot(): ExportSnapshot {
     const tasks = this.store.listTasks();
     return {
@@ -318,6 +330,7 @@ export class HearthService {
     return {
       task,
       goal: task.goalId ? this.store.getGoal(task.goalId) : null,
+      completionReport: task.goalId ? this.store.latestGoalCompletionReport(task.goalId) : null,
       runs,
       approvals: this.store.listApprovals(taskId),
       artifacts: this.store.listArtifacts(taskId),

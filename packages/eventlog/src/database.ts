@@ -25,6 +25,7 @@ import type {
   EventEnvelope,
   ExecutorModelBinding,
   GoalContract,
+  GoalCompletionReport,
   HandoffRecord,
   MemoryConflict,
   MemoryForgetReceipt,
@@ -128,6 +129,12 @@ CREATE TABLE IF NOT EXISTS goals (
   evidence_requirements_json TEXT NOT NULL, budget_json TEXT NOT NULL,
   deadline TEXT, stop_conditions_json TEXT NOT NULL, review_policy TEXT NOT NULL,
   current_state TEXT NOT NULL, next_handoff TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS goal_completion_reports (
+  goal_id TEXT NOT NULL, task_id TEXT NOT NULL, verdict TEXT NOT NULL, summary TEXT NOT NULL,
+  criteria_json TEXT NOT NULL, evidence_refs_json TEXT NOT NULL, missing_evidence_json TEXT NOT NULL,
+  forbidden_actions_json TEXT NOT NULL, checked_at TEXT NOT NULL,
+  PRIMARY KEY (goal_id, task_id, checked_at)
 );
 CREATE TABLE IF NOT EXISTS conversations (
   id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
@@ -586,6 +593,7 @@ export class HearthStore {
       CREATE INDEX IF NOT EXISTS reconcile_queue_task_idx ON reconcile_queue(task_id, status);
       CREATE INDEX IF NOT EXISTS goals_state_idx ON goals(current_state, updated_at);
       CREATE INDEX IF NOT EXISTS tasks_goal_idx ON tasks(goal_id, created_at);
+      CREATE INDEX IF NOT EXISTS goal_completion_reports_goal_idx ON goal_completion_reports(goal_id, checked_at);
     `);
     this.db.exec(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION}`);
     this.setMeta("schemaVersion", String(CURRENT_SCHEMA_VERSION));
@@ -872,6 +880,17 @@ export class HearthStore {
 
   listGoals(): GoalContract[] {
     return (this.db.prepare("SELECT * FROM goals ORDER BY updated_at DESC").all() as DbRow[]).map(rowToGoal);
+  }
+
+  latestGoalCompletionReport(goalId: string): GoalCompletionReport | null {
+    const row = this.db.prepare("SELECT * FROM goal_completion_reports WHERE goal_id = ? ORDER BY checked_at DESC LIMIT 1")
+      .get(goalId) as DbRow | undefined;
+    return row ? rowToGoalCompletionReport(row) : null;
+  }
+
+  listGoalCompletionReports(goalId: string): GoalCompletionReport[] {
+    return (this.db.prepare("SELECT * FROM goal_completion_reports WHERE goal_id = ? ORDER BY checked_at DESC")
+      .all(goalId) as DbRow[]).map(rowToGoalCompletionReport);
   }
 
   createConversation(title: string, settings: ConversationSettings = defaultConversationSettings()): ConversationRecord {
@@ -1938,6 +1957,7 @@ export class HearthStore {
       case "task.updated": return updateTask(this.db, event.taskId, event.payload as Record<string, unknown>);
       case "goal.created":
       case "goal.updated": return upsertGoal(this.db, event.payload as GoalContract);
+      case "goal.completion.recorded": return insertGoalCompletionReport(this.db, event.payload as GoalCompletionReport);
       case "task.proposal.created":
       case "task.proposal.updated": return upsertTaskProposal(this.db, event.payload as TaskProposalRecord);
       case "task.follow-up.created":
@@ -2068,6 +2088,21 @@ function upsertGoal(db: DatabaseSync, goal: GoalContract): void {
     JSON.stringify(goal.successCriteria), JSON.stringify(goal.evidenceRequirements),
     JSON.stringify(goal.budget), goal.deadline ?? null, JSON.stringify(goal.stopConditions),
     goal.reviewPolicy, goal.currentState, goal.nextHandoff ?? null, goal.createdAt, goal.updatedAt
+  );
+}
+
+function insertGoalCompletionReport(db: DatabaseSync, report: GoalCompletionReport): void {
+  db.prepare(
+    `INSERT INTO goal_completion_reports (goal_id, task_id, verdict, summary, criteria_json, evidence_refs_json, missing_evidence_json, forbidden_actions_json, checked_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(goal_id, task_id, checked_at) DO UPDATE SET
+       verdict=excluded.verdict, summary=excluded.summary, criteria_json=excluded.criteria_json,
+       evidence_refs_json=excluded.evidence_refs_json, missing_evidence_json=excluded.missing_evidence_json,
+       forbidden_actions_json=excluded.forbidden_actions_json`
+  ).run(
+    report.goalId, report.taskId, report.verdict, report.summary,
+    JSON.stringify(report.criteria), JSON.stringify(report.evidenceRefs),
+    JSON.stringify(report.missingEvidence), JSON.stringify(report.forbiddenActions), report.checkedAt
   );
 }
 
@@ -2520,6 +2555,20 @@ function rowToGoal(row: DbRow): GoalContract {
     ...(row.next_handoff == null ? {} : { nextHandoff: String(row.next_handoff) }),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at)
+  };
+}
+
+function rowToGoalCompletionReport(row: DbRow): GoalCompletionReport {
+  return {
+    goalId: String(row.goal_id),
+    taskId: String(row.task_id),
+    verdict: String(row.verdict) as GoalCompletionReport["verdict"],
+    summary: String(row.summary),
+    criteria: JSON.parse(String(row.criteria_json)),
+    evidenceRefs: JSON.parse(String(row.evidence_refs_json)),
+    missingEvidence: JSON.parse(String(row.missing_evidence_json)),
+    forbiddenActions: JSON.parse(String(row.forbidden_actions_json)),
+    checkedAt: String(row.checked_at)
   };
 }
 
