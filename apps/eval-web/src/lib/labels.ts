@@ -112,6 +112,15 @@ export const STATUS_OPTIONS = [
   { value: "error", label: "错误" }
 ] as const;
 
+export const REVIEW_REASON_OPTIONS = [
+  "low_confidence",
+  "judge_conflict",
+  "blocker_anomaly",
+  "failed_sample",
+  "judge_unavailable",
+  "sampled"
+] as const satisfies ReadonlyArray<ReviewTriggerKind>;
+
 export const EVENT_LABELS: Record<string, string> = {
   "experiment.created": "创建实验",
   "experiment.started": "实验开始",
