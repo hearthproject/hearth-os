@@ -86,7 +86,6 @@ export function ExperimentDetailPage() {
     <div className="page-stack experiment-detail-page">
       <Link className="back-link" to="/experiments"><ArrowLeft size={14} /> 返回实验列表</Link>
       <PageHeader
-        eyebrow="EXPERIMENT"
         title={experiment.name}
         description={<span className="header-meta-line"><code>{experiment.id}</code><span>·</span><span>创建于 {formatDate(experiment.createdAt)}</span></span>}
         actions={
@@ -103,10 +102,10 @@ export function ExperimentDetailPage() {
       </section>
 
       <section className="metric-grid">
-        <MetricCard label="通过率" value={formatPercent(summary?.passRate ?? null)} detail={summary ? `${summary.passed} 通过 / ${summary.totalRuns} 运行` : "等待运行数据"} icon={<ShieldCheck size={17} />} tone="success" />
-        <MetricCard label="平均分" value={summary?.avgScore === null || summary?.avgScore === undefined ? "—" : summary.avgScore.toFixed(1)} detail="确定性 + 模型评委 + 人工" icon={<Gauge size={17} />} />
-        <MetricCard label="待复核" value={summary?.needsReview ?? 0} detail="低置信度、冲突或失败样本" icon={<TriangleAlert size={17} />} tone={(summary?.needsReview ?? 0) > 0 ? "warning" : "neutral"} />
-        <MetricCard label="平均耗时" value={summary?.avgDurationMs === null || summary?.avgDurationMs === undefined ? "—" : `${(summary.avgDurationMs / 1_000).toFixed(1)}s`} detail={`${summary?.retries ?? 0} 次重试 · ${summary?.approvals ?? 0} 次审批`} icon={<Clock3 size={17} />} />
+        <MetricCard label="通过率" value={formatPercent(summary?.passRate ?? null)} detail={summary ? `${summary.passed} 通过 / ${summary.totalRuns} 运行` : "等待运行数据"} icon={<ShieldCheck size={16} />} tone="success" />
+        <MetricCard label="平均分" value={summary?.avgScore === null || summary?.avgScore === undefined ? "—" : summary.avgScore.toFixed(1)} detail="确定性 + 模型评委 + 人工" icon={<Gauge size={16} />} />
+        <MetricCard label="待复核" value={summary?.needsReview ?? 0} detail="低置信度、冲突或失败样本" icon={<TriangleAlert size={16} />} tone={(summary?.needsReview ?? 0) > 0 ? "warning" : "neutral"} />
+        <MetricCard label="平均耗时" value={summary?.avgDurationMs === null || summary?.avgDurationMs === undefined ? "—" : `${(summary.avgDurationMs / 1_000).toFixed(1)}s`} detail={`${summary?.retries ?? 0} 次重试 · ${summary?.approvals ?? 0} 次审批`} icon={<Clock3 size={16} />} />
       </section>
 
       <div className="detail-grid result-overview">
@@ -127,7 +126,7 @@ export function ExperimentDetailPage() {
         </section>
 
         <section className="panel">
-          <SectionHeader title="任务族结果" detail="按 case family 聚合" />
+          <SectionHeader title="任务族结果" detail="按任务族聚合" />
           {summary ? (
             <div className="family-result-list">
               {summary.families.filter((family) => family.total > 0).map((family) => (
@@ -165,7 +164,7 @@ export function ExperimentDetailPage() {
         {runs.length === 0 ? <EmptyState title="没有匹配的运行" description="调整状态筛选或搜索词。" /> : (
           <div className="table-wrap">
             <table className="data-table runs-table">
-              <thead><tr><th>Case</th><th>执行器</th><th>重复</th><th>状态</th><th>分数</th><th>耗时</th><th>任务 / 错误</th><th /></tr></thead>
+              <thead><tr><th>任务</th><th>执行器</th><th>重复</th><th>状态</th><th>分数</th><th>耗时</th><th>任务 / 错误</th><th /></tr></thead>
               <tbody>
                 {runs.map((run) => {
                   const caseSummary = caseByKey.get(run.caseKey);

@@ -502,6 +502,35 @@ code { font-size: .82em; }
 .summary-foot { margin-top: 9px; color: var(--ink-faint); font-size: 10px; }
 .inline-error { border-radius: 6px; font-size: 10px; }
 
+/* Experiment detail */
+.experiment-status-banner { gap: 14px; padding: 16px 18px; border-radius: 8px; box-shadow: none; }
+.status-banner-main { gap: 9px; font-size: 12px; }
+.result-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.result-hero { align-items: center; gap: 24px; padding: 2px 0; }
+.result-bars { gap: 16px; }
+.result-stat-row { gap: 7px 14px; }
+.result-stat-row span { font-size: 11px; }
+.family-result-list { gap: 9px; }
+.family-result-row { grid-template-columns: 62px minmax(60px, 1fr) 54px 46px; gap: 10px; font-size: 11px; }
+.mini-track { height: 6px; }
+.mini-track i { background: var(--success); }
+.failure-panel { border-left: 1px solid var(--line); }
+.diagnostic-grid { gap: 8px; }
+.diagnostic-card { padding: 11px; background: var(--warning-wash); border-color: #eadab7; border-radius: 7px; }
+.diagnostic-card span { color: var(--warning); font-size: 10px; }
+.diagnostic-card strong { font-size: 19px; }
+.diagnostic-card small { font-size: 9px; }
+.run-toolbar { gap: 10px; margin-bottom: 10px; }
+.status-filter-tabs button { min-height: 28px; padding: 0 9px; border-radius: 5px; font-size: 11px; font-weight: 500; }
+.status-filter-tabs button.active { background: var(--surface-deep); border-color: var(--line-strong); }
+.executor-tag { font-size: 11px; }
+.task-ref { font-size: 10px; }
+.error-line { font-size: 10px; }
+.compact-event { gap: 9px; padding: 7px 0; }
+.compact-event i { background: var(--ink-faint); box-shadow: none; }
+.compact-event strong { font-size: 11px; font-weight: 550; }
+.compact-event small { font-size: 10px; }
+
 /* Dashboard */
 .overview-card { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 28px; padding: 18px 20px; }
 .overview-main { min-width: 0; }
