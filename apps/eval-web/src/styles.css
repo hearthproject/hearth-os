@@ -595,6 +595,35 @@ code { font-size: .82em; }
 .inline-review-form { gap: 6px; }
 .inline-review-form input { min-height: 34px; border-radius: 6px; font-size: 12px; }
 
+/* Comparison */
+.compare-picker { padding: 14px; border-radius: 8px; }
+.compare-select { gap: 6px; }
+.compare-select > span { font-size: 11px; font-weight: 500; }
+.compare-select > span b { width: 18px; height: 18px; color: var(--ink); background: var(--surface-deep); }
+.compare-select.right > span b { color: var(--accent-deep); background: var(--accent-wash); }
+.compare-select select { min-height: 36px; border-radius: 6px; font-size: 12px; font-weight: 500; }
+.compare-glyph { width: 34px; height: 34px; background: var(--surface-muted); border: 1px solid var(--line); border-radius: 6px; }
+.alignment-banner { gap: 9px; padding: 11px 13px; border-radius: 7px; }
+.alignment-banner strong { font-size: 12px; }
+.alignment-banner span { font-size: 11px; }
+.compare-hero { border-radius: 8px; box-shadow: none; }
+.compare-side { padding: 22px; }
+.compare-label { font-size: 11px; font-weight: 550; }
+.compare-label b { width: 18px; height: 18px; color: var(--ink); background: var(--surface-deep); font-size: 10px; }
+.compare-side:last-child .compare-label b { color: var(--accent-deep); background: var(--accent-wash); }
+.compare-big { margin: 9px 0 2px; font-size: 38px; font-weight: 600; }
+.compare-side > small { font-size: 10px; }
+.compare-side-stats { margin-top: 12px; font-size: 10px; }
+.compare-delta-main { padding: 20px 14px; }
+.compare-delta-main > span:last-child { font-size: 10px; }
+.compare-delta-main .delta-value { font-size: 22px; }
+.compare-metric { gap: 7px; padding: 14px 15px; border-radius: 8px; }
+.compare-metric > span:first-child { font-size: 11px; }
+.compare-metric > div strong { font-size: 19px; }
+.delta-value { font-size: 11px; font-weight: 600; }
+.family-delta-table td { font-size: 12px; }
+.compare-links { justify-content: flex-start; }
+
 /* Dashboard */
 .overview-card { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 28px; padding: 18px 20px; }
 .overview-main { min-width: 0; }

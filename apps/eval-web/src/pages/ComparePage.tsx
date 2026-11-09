@@ -17,7 +17,7 @@ import {
   formatPercent,
   statusMeta
 } from "../lib/labels.ts";
-import { EmptyState, ErrorState, LoadingState, PageHeader, SectionHeader, StatusPill } from "../components/ui.tsx";
+import { EmptyState, ErrorState, LoadingState, PageHeader, SectionHeader } from "../components/ui.tsx";
 
 export function ComparePage() {
   const experimentsQuery = useQuery({ queryKey: ["experiments"], queryFn: api.experiments });
@@ -43,7 +43,6 @@ export function ComparePage() {
   return (
     <div className="page-stack compare-page">
       <PageHeader
-        eyebrow="REGRESSION REVIEW"
         title="实验对比"
         description="对齐 case、执行器与运行模式，观察通过率和任务族层面的质量变化。"
       />
@@ -58,7 +57,6 @@ export function ComparePage() {
               <select value={left} onChange={(event) => setLeft(event.target.value)}>
                 {experiments.map((experiment) => <option key={experiment.id} value={experiment.id}>{experiment.name} · {statusMeta(experiment.status).label}</option>)}
               </select>
-              {experiments.find((experiment) => experiment.id === left) && <StatusPill status={experiments.find((experiment) => experiment.id === left)!.status} subtle />}
             </label>
             <div className="compare-glyph"><ArrowLeftRight size={20} /></div>
             <label className="compare-select right">
@@ -66,7 +64,6 @@ export function ComparePage() {
               <select value={right} onChange={(event) => setRight(event.target.value)}>
                 {experiments.map((experiment) => <option key={experiment.id} value={experiment.id}>{experiment.name} · {statusMeta(experiment.status).label}</option>)}
               </select>
-              {experiments.find((experiment) => experiment.id === right) && <StatusPill status={experiments.find((experiment) => experiment.id === right)!.status} subtle />}
             </label>
           </section>
 
@@ -117,14 +114,14 @@ function CompareResult({ data }: { data: CompareResponse }) {
       </section>
 
       <section className="panel">
-        <SectionHeader title="任务族差异" detail="B 相对 A 的通过率变化" action={<GitCompareArrows size={18} />} />
+        <SectionHeader title="任务族差异" detail="B 相对 A 的通过率变化" />
         <div className="table-wrap">
           <table className="data-table family-delta-table">
             <thead><tr><th>任务族</th><th>A 通过率</th><th>B 通过率</th><th>变化</th><th className="delta-visual-col" /></tr></thead>
             <tbody>
               {data.familyDeltas.map((row) => (
                 <tr key={row.family}>
-                  <td><strong>{FAMILY_LABELS[row.family]}</strong><small>{row.family}</small></td>
+                  <td><strong>{FAMILY_LABELS[row.family]}</strong></td>
                   <td>{formatPercent(row.leftPassRate)}</td>
                   <td>{formatPercent(row.rightPassRate)}</td>
                   <td><DeltaValue value={row.delta} suffix="pp" /></td>
