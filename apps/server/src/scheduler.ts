@@ -19,6 +19,7 @@ import { CONTEXT_BLOB_DIR, EXECUTOR_SETTINGS_PATH, GIT_CACHE_DIR, MODEL_SETTINGS
 import { ContextService, estimateTokens } from "./context.ts";
 import { diagnoseFailure } from "./context-diagnosis.ts";
 import { classifyFailure, decideFailure, evaluateHandoff, isExecutorFailureCause, type FailureDecision } from "./context-policy.ts";
+import { judgeCompletion } from "./completion-judge.ts";
 import { ContextProjector } from "./context-projector.ts";
 import { maybeModelSummary } from "./context-summary.ts";
 import { loadExecutorSettings } from "./executor-settings.ts";
@@ -1291,6 +1292,55 @@ export class HearthScheduler {
         }, runId);
         this.refreshTaskSummary(taskId);
         return { status: "completed", run: { ...run, status: "completed", threadId: result.threadId, usage: result.usage }, executorId, outDir, error: null, failure: null, aborted: controller.signal.aborted, leaseLost: false, cancelled: false, queuedFollowUp: true };
+      }
+      const goal = task.goalId ? this.service.store.getGoal(task.goalId) : null;
+      if (goal) {
+        const goalTasks = this.service.store.listTasks().filter((item) => item.goalId === goal.goalId);
+        const goalArtifacts = goalTasks.flatMap((item) => this.service.store.listArtifacts(item.id));
+        const goalEffects = goalTasks.flatMap((item) => this.service.store.listEffects(item.id));
+        this.service.updateGoal(goal.goalId, { currentState: "validating" });
+        const report = await judgeCompletion({
+          goal,
+          task: this.service.requireTask(taskId),
+          artifacts: goalArtifacts,
+          effects: goalEffects,
+          workspaceRoot: prepared.root
+        });
+        this.service.recordCompletionReport(report);
+        this.capture({
+          taskId, conversationId: task.conversationId ?? null, runId, executorId,
+          kind: "notice", role: "system", content: `完成判定 ${report.verdict}：${report.summary}`,
+          provenance: { source: "completion-judge", report }, executorEventId: `completion:${runId}`
+        });
+        if (report.verdict !== "pass") {
+          const blockedEffect = goalEffects.find((effect) => effect.status === "uncertain" || effect.status === "executing");
+          const failureClass = report.verdict === "blocked" ? "effect_unknown" : "validation_failed";
+          const disposition = report.verdict === "blocked"
+            ? { type: "reconcile" as const, effectId: blockedEffect?.id ?? "" }
+            : { type: "repair" as const, target: goal.successCriteria.map((criterion) => criterion.check).join(", ") || goal.objective, reason: report.summary };
+          const goalError: TaskError = {
+            kind: "completion_not_proven",
+            message: report.summary,
+            recoverable: true,
+            guidance: report.verdict === "blocked" ? "先完成 effect 对账，再重新判定完成" : "按失败项修复证据或请求人工确认",
+            cause: report.verdict === "blocked" ? "effect_uncertain" : "contract_failure",
+            failureClass,
+            disposition
+          };
+          if (report.verdict === "needs_human" || report.verdict === "blocked") {
+            this.service.updateGoal(goal.goalId, { currentState: report.verdict === "blocked" ? "blocked" : "awaiting_user" });
+            this.service.updateTask(taskId, {
+              status: "waiting_input", currentRunId: runId,
+              nextAction: report.verdict === "blocked" ? "外部动作结果未确定，请先对账" : "完成证据仍需人工确认",
+              error: goalError
+            }, runId);
+            this.refreshTaskSummary(taskId, { lastFailure: goalError });
+            return { status: "waiting_input", run: { ...run, status: "completed", threadId: result.threadId, usage: result.usage }, executorId, outDir, error: null, failure: goalError, aborted: controller.signal.aborted, leaseLost: false, cancelled: false };
+          }
+          this.service.updateGoal(goal.goalId, { currentState: "active" });
+          throw new Error(`完成判定失败：${report.summary}`);
+        }
+        this.service.updateGoal(goal.goalId, { currentState: "done" });
       }
       this.service.updateTask(taskId, {
         status: "completed", currentRunId: runId, nextAction: "产物已保存",

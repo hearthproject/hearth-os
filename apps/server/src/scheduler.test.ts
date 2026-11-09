@@ -228,6 +228,59 @@ describe("Hearth scheduler", () => {
     expect(store?.listArtifacts(task.id)).toHaveLength(0);
   });
 
+  it("requires a passing completion judge before marking a goal task completed", async () => {
+    const service = setup();
+    const goal = service.createGoal({
+      title: "研究摘要",
+      objective: "产出可核验摘要",
+      currentState: "active",
+      reviewPolicy: "auto",
+      successCriteria: [{ id: "summary", description: "摘要存在", validator: "file", check: "research-summary.json", required: true }],
+      evidenceRequirements: ["research-summary.json"]
+    });
+    const runner: CodexRunner = async (options) => {
+      writeFileSync(join(testOutDir(options), "research-summary.json"), JSON.stringify({ title: "周报", summary: "完成" }));
+      return FAKE_RESULT;
+    };
+    scheduler = makeScheduler(service, runner);
+    scheduler.start();
+
+    const task = service.createTask({ title: "本周摘要", goalId: goal.goalId, executorId: "codex", expectedOutputs: ["research-summary.json"] });
+    const completed = await waitForStatus(service, task.id, "completed");
+    expect(completed.goalId).toBe(goal.goalId);
+    expect(service.latestCompletionReport(goal.goalId)).toMatchObject({ verdict: "pass", taskId: task.id });
+    expect(service.getGoal(goal.goalId)?.currentState).toBe("done");
+  });
+
+  it("does not accept an executor claim when the goal validator fails", async () => {
+    const service = setup();
+    const goal = service.createGoal({
+      title: "研究摘要",
+      objective: "产出可核验摘要",
+      currentState: "active",
+      reviewPolicy: "auto",
+      successCriteria: [{ id: "schema", description: "字段完整", validator: "schema", check: "research-summary.json#title,summary", required: true }],
+      evidenceRequirements: ["research-summary.json"]
+    });
+    const runner: CodexRunner = async (options) => {
+      writeFileSync(join(testOutDir(options), "research-summary.json"), JSON.stringify({ title: "只有标题" }));
+      return FAKE_RESULT;
+    };
+    const executorHealth: ExecutorHealthProvider = (executorId) => executorId === "codex"
+      ? { canRun: true, issues: [] }
+      : { canRun: false, issues: ["未安装"] };
+    scheduler = makeScheduler(service, runner, { executorHealth });
+    scheduler.start();
+
+    const task = service.createTask({ title: "本周摘要", goalId: goal.goalId, executorId: "codex", expectedOutputs: ["research-summary.json"] });
+    const failed = await waitForStatus(service, task.id, "recoverable");
+    expect(failed.status).not.toBe("completed");
+    expect(failed.error?.failureClass).toBe("validation_failed");
+    expect(failed.error?.disposition).toMatchObject({ type: "repair" });
+    expect(service.latestCompletionReport(goal.goalId)).toMatchObject({ verdict: "fail", taskId: task.id });
+    expect(service.getGoal(goal.goalId)?.currentState).toBe("active");
+  });
+
   it("runs up to three tasks in parallel for the same executor", async () => {
     const service = setup();
     let active = 0;

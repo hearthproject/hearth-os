@@ -48,6 +48,7 @@ export function classifyFailure(input: {
   if (error instanceof LeaseError) return "interrupted";
   if (aborted && stopping) return "interrupted";
   if (/spawn\s+.*\bENOENT\b|process\s+(?:crashed|exited)|进程.*(?:崩溃|退出)|执行器.*不可用|executor.*unavailable/i.test(message)) return "runtime_fault";
+  if (/完成判定失败|完成证据|验收标准|Completion Judge/i.test(message)) return "contract_failure";
   if (/权限|审批|approval|permission|unauthorized|401|403/i.test(message)) return "permission";
   if (/预算|budget|maxTurns|maxToolCalls|maxDuration/i.test(message)) return "budget";
   if (/期望产物|产物|交付|验收|缺少.*文件|deliverable|contract|expected output/i.test(message)) return "contract_failure";
