@@ -43,7 +43,7 @@ export interface HearthClientOptions {
 }
 
 export class HearthClient {
-  private readonly baseUrl: string;
+  readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
 
@@ -63,6 +63,10 @@ export class HearthClient {
 
   async judge(body: JudgeRequest): Promise<JudgeResponse> {
     return this.request("/api/eval/judge", { method: "POST", body: JSON.stringify(body) });
+  }
+
+  async cancelTask(taskId: string): Promise<Record<string, unknown>> {
+    return this.request(`/api/tasks/${encodeURIComponent(taskId)}/cancel`, { method: "POST", body: "{}" });
   }
 
   async system(): Promise<Record<string, unknown>> {
