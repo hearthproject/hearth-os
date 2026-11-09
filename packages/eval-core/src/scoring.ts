@@ -132,10 +132,11 @@ function projectedScore(
   judgeExpected: boolean
 ): number | null {
   if (objectiveScore === null) return null;
-  if (judgeExpected && judgeScore === null) return null;
   if (humanScore !== null && humanCriteriaCount > 0) {
-    return round(objectiveScore * 0.6 + (judgeScore ?? 0) * 0.3 + humanScore * 0.1);
+    const judgeWeight = judgeScore === null ? 0 : 30;
+    return round((objectiveScore * 60 + (judgeScore ?? 0) * 30 + humanScore * 10) / (70 + judgeWeight));
   }
+  if (judgeExpected && judgeScore === null) return null;
   if (judgeExpected && judgeScore !== null) return round(objectiveScore * (60 / 90) + judgeScore * (30 / 90));
   return objectiveScore;
 }

@@ -98,6 +98,25 @@ describe("scoreRun", () => {
     expect(outcome.humanScore).toBe(100);
   });
 
+  it("normalizes human review when the judge is unavailable", () => {
+    const outcome = scoreRun({
+      manifest,
+      deterministic: {
+        blocker: { passed: true, reason: "ok", evidence: [] },
+        content: { passed: true, reason: "ok", evidence: [] }
+      },
+      judge: null,
+      judgeExpected: true,
+      humanDecision: "pass",
+      humanReviewed: true,
+      reviewReasonSeed: "run-6",
+      runFailed: false
+    });
+    expect(outcome.verdict).toBe("passed");
+    expect(outcome.score).toBe(100);
+    expect(outcome.reviewReasons).toEqual([]);
+  });
+
   it("uses deterministic-only normalization when judge is explicitly disabled", () => {
     const outcome = scoreRun({
       manifest,
