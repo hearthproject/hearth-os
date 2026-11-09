@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyReply } from "fastify";
-import type { EventEnvelope, ExecutorHealth, ExecutorId, ExecutorView } from "@hearth/core";
-import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, EXECUTOR_IDS, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_SENSITIVITIES, PROACTIVE_MODES, RUN_STATUSES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
+import type { EventEnvelope, ExecutorHealth, ExecutorId, ExecutorView, GoalBudget } from "@hearth/core";
+import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, EXECUTOR_IDS, GOAL_REVIEW_POLICIES, GOAL_STATES, GOAL_VALIDATORS, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_SENSITIVITIES, PROACTIVE_MODES, RUN_STATUSES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate } from "@hearth/templates";
 import { loadCodexProfile, runCodex } from "@hearth/codex-executor";
@@ -35,7 +35,7 @@ import { SecurityError, SecurityService } from "./security.ts";
 import { ContextService } from "./context.ts";
 import type { ContextIndex } from "./context-index.ts";
 import { contextMetrics } from "./context-metrics.ts";
-import { HearthService, TaskInputSelectionError, type CreateTaskInput } from "./service.ts";
+import { HearthService, TaskInputSelectionError, type CreateGoalInput, type CreateTaskInput } from "./service.ts";
 import { HealthService } from "./health.ts";
 import { MaintenanceError, MaintenanceService } from "./maintenance.ts";
 import { DiagnosticsService } from "./diagnostics.ts";
@@ -63,12 +63,75 @@ const createTaskSchema = z.object({
   taskKind: z.enum(["delivery", "workspace", "general"]).optional(),
   expectedOutputs: z.array(z.string().trim().min(1).max(200)).max(20).optional(),
   methodId: z.string().trim().min(1).max(100).optional(),
+  goalId: z.string().trim().min(1).max(100).optional(),
   permissions: z.object({
     readRoots: z.array(z.string().trim().min(1).max(1000)).max(20),
     writeRoots: z.array(z.string().trim().min(1).max(1000)).max(20),
     networkHosts: z.array(z.string().trim().min(1).max(255)).max(20),
     tools: z.array(z.string().trim().min(1).max(80)).max(40)
   }).optional()
+}).strict();
+
+const goalAuthoritySourceSchema = z.object({
+  kind: z.enum(["user", "document", "system"]),
+  ref: z.string().trim().min(1).max(1000)
+}).strict();
+
+const goalCriterionSchema = z.object({
+  id: z.string().trim().min(1).max(100),
+  description: z.string().trim().min(1).max(2000),
+  validator: z.enum(GOAL_VALIDATORS),
+  check: z.string().trim().min(1).max(4000),
+  required: z.boolean()
+}).strict();
+
+const goalBudgetSchema = z.object({
+  maxTurns: z.number().int().positive().optional(),
+  maxToolCalls: z.number().int().positive().optional(),
+  maxTokens: z.number().int().positive().optional(),
+  maxDurationMs: z.number().int().positive().optional(),
+  maxHumanMinutes: z.number().int().positive().optional()
+}).strict();
+
+function normalizeGoalBudget(input: z.infer<typeof goalBudgetSchema>): GoalBudget {
+  const budget: GoalBudget = {};
+  if (input.maxTurns !== undefined) budget.maxTurns = input.maxTurns;
+  if (input.maxToolCalls !== undefined) budget.maxToolCalls = input.maxToolCalls;
+  if (input.maxTokens !== undefined) budget.maxTokens = input.maxTokens;
+  if (input.maxDurationMs !== undefined) budget.maxDurationMs = input.maxDurationMs;
+  if (input.maxHumanMinutes !== undefined) budget.maxHumanMinutes = input.maxHumanMinutes;
+  return budget;
+}
+
+const createGoalSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+  objective: z.string().trim().min(1).max(20_000),
+  constraints: z.array(z.string().trim().min(1).max(2000)).max(100).optional(),
+  forbiddenActions: z.array(z.string().trim().min(1).max(200)).max(100).optional(),
+  authoritySources: z.array(goalAuthoritySourceSchema).max(50).optional(),
+  successCriteria: z.array(goalCriterionSchema).max(100).optional(),
+  evidenceRequirements: z.array(z.string().trim().min(1).max(1000)).max(100).optional(),
+  budget: goalBudgetSchema.optional(),
+  deadline: z.string().datetime().optional(),
+  stopConditions: z.array(z.string().trim().min(1).max(2000)).max(100).optional(),
+  reviewPolicy: z.enum(GOAL_REVIEW_POLICIES).optional(),
+  currentState: z.enum(GOAL_STATES).optional()
+}).strict();
+
+const updateGoalSchema = z.object({
+  title: z.string().trim().min(1).max(200).optional(),
+  objective: z.string().trim().min(1).max(20_000).optional(),
+  constraints: z.array(z.string().trim().min(1).max(2000)).max(100).optional(),
+  forbiddenActions: z.array(z.string().trim().min(1).max(200)).max(100).optional(),
+  authoritySources: z.array(goalAuthoritySourceSchema).max(50).optional(),
+  successCriteria: z.array(goalCriterionSchema).max(100).optional(),
+  evidenceRequirements: z.array(z.string().trim().min(1).max(1000)).max(100).optional(),
+  budget: goalBudgetSchema.optional(),
+  deadline: z.string().datetime().optional(),
+  stopConditions: z.array(z.string().trim().min(1).max(2000)).max(100).optional(),
+  reviewPolicy: z.enum(GOAL_REVIEW_POLICIES).optional(),
+  currentState: z.enum(GOAL_STATES).optional(),
+  nextHandoff: z.string().trim().max(4000).optional()
 }).strict();
 
 const retryTaskSchema = z.object({
@@ -1865,6 +1928,70 @@ export async function buildServer(options: BuildServerOptions = {}) {
     return reply.code(500).send({ error: "BACKUP_FAILED", message: "备份操作失败，请检查服务端日志" });
   };
 
+  app.get("/api/goals", async () => ({ goals: service.listGoals() }));
+
+  app.post("/api/goals", async (request, reply) => {
+    const parsed = createGoalSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: "INVALID_GOAL",
+        message: "目标参数不完整或格式不正确",
+        issues: parsed.error.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message }))
+      });
+    }
+    try {
+      const input: CreateGoalInput = { title: parsed.data.title, objective: parsed.data.objective };
+      if (parsed.data.constraints !== undefined) input.constraints = parsed.data.constraints;
+      if (parsed.data.forbiddenActions !== undefined) input.forbiddenActions = parsed.data.forbiddenActions;
+      if (parsed.data.authoritySources !== undefined) input.authoritySources = parsed.data.authoritySources;
+      if (parsed.data.successCriteria !== undefined) input.successCriteria = parsed.data.successCriteria;
+      if (parsed.data.evidenceRequirements !== undefined) input.evidenceRequirements = parsed.data.evidenceRequirements;
+      if (parsed.data.budget !== undefined) input.budget = normalizeGoalBudget(parsed.data.budget);
+      if (parsed.data.deadline !== undefined) input.deadline = parsed.data.deadline;
+      if (parsed.data.stopConditions !== undefined) input.stopConditions = parsed.data.stopConditions;
+      if (parsed.data.reviewPolicy !== undefined) input.reviewPolicy = parsed.data.reviewPolicy;
+      if (parsed.data.currentState !== undefined) input.currentState = parsed.data.currentState;
+      return reply.code(201).send(service.createGoal(input));
+    } catch (error) {
+      return reply.code(400).send({ error: "INVALID_GOAL", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/api/goals/:id", async (request, reply) => {
+    const goal = service.getGoal(request.params.id);
+    if (!goal) return reply.code(404).send({ error: "GOAL_NOT_FOUND", message: "目标不存在" });
+    return { goal, completionReports: store.listGoalCompletionReports(goal.goalId) };
+  });
+
+  app.patch<{ Params: { id: string } }>("/api/goals/:id", async (request, reply) => {
+    const parsed = updateGoalSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "INVALID_GOAL", message: "目标更新参数不正确" });
+    }
+    if (!service.getGoal(request.params.id)) {
+      return reply.code(404).send({ error: "GOAL_NOT_FOUND", message: "目标不存在" });
+    }
+    try {
+      const patch: Parameters<HearthService["updateGoal"]>[1] = {};
+      if (parsed.data.title !== undefined) patch.title = parsed.data.title;
+      if (parsed.data.objective !== undefined) patch.objective = parsed.data.objective;
+      if (parsed.data.constraints !== undefined) patch.constraints = parsed.data.constraints;
+      if (parsed.data.forbiddenActions !== undefined) patch.forbiddenActions = parsed.data.forbiddenActions;
+      if (parsed.data.authoritySources !== undefined) patch.authoritySources = parsed.data.authoritySources;
+      if (parsed.data.successCriteria !== undefined) patch.successCriteria = parsed.data.successCriteria;
+      if (parsed.data.evidenceRequirements !== undefined) patch.evidenceRequirements = parsed.data.evidenceRequirements;
+      if (parsed.data.budget !== undefined) patch.budget = normalizeGoalBudget(parsed.data.budget);
+      if (parsed.data.deadline !== undefined) patch.deadline = parsed.data.deadline;
+      if (parsed.data.stopConditions !== undefined) patch.stopConditions = parsed.data.stopConditions;
+      if (parsed.data.reviewPolicy !== undefined) patch.reviewPolicy = parsed.data.reviewPolicy;
+      if (parsed.data.currentState !== undefined) patch.currentState = parsed.data.currentState;
+      if (parsed.data.nextHandoff !== undefined) patch.nextHandoff = parsed.data.nextHandoff;
+      return service.updateGoal(request.params.id, patch);
+    } catch (error) {
+      return reply.code(400).send({ error: "INVALID_GOAL", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
   app.post("/api/tasks", async (request, reply) => {
     const parsed = createTaskSchema.safeParse(request.body ?? {});
     if (!parsed.success) {
@@ -1888,8 +2015,12 @@ export async function buildServer(options: BuildServerOptions = {}) {
     if (parsed.data.taskKind !== undefined) input.taskKind = parsed.data.taskKind;
     if (parsed.data.expectedOutputs !== undefined) input.expectedOutputs = parsed.data.expectedOutputs;
     if (parsed.data.permissions !== undefined) input.permissions = parsed.data.permissions;
+    if (parsed.data.goalId !== undefined) input.goalId = parsed.data.goalId;
     if (input.templateId && !getTemplate(input.templateId)) {
       return reply.code(400).send({ error: "UNKNOWN_TEMPLATE", message: `没有找到任务模板 ${input.templateId}` });
+    }
+    if (input.goalId && !service.getGoal(input.goalId)) {
+      return reply.code(400).send({ error: "UNKNOWN_GOAL", message: `没有找到目标 ${input.goalId}` });
     }
     if (parsed.data.methodId !== undefined) {
       try {
