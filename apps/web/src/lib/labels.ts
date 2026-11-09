@@ -49,6 +49,8 @@ export const APPROVAL_STATUS_LABELS: Record<ApprovalRecord["status"], string> = 
   pending: "等你决定",
   approved: "已批准",
   rejected: "已拒绝",
+  consumed: "已使用",
+  revoked: "已撤销",
   expired: "已过期"
 };
 

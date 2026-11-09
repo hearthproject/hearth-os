@@ -200,6 +200,8 @@ export interface RunBudget {
 
 export interface TaskRecord {
   id: string;
+  externalRef?: string | null;
+  requestHash?: string | null;
   templateId: string | null;
   title: string;
   goal: string;
@@ -571,9 +573,18 @@ export interface GitFileView {
   content: string;
 }
 
-export const APPROVAL_STATUSES = ["pending", "approved", "rejected", "expired"] as const;
+export const APPROVAL_STATUSES = ["pending", "approved", "rejected", "consumed", "expired", "revoked"] as const;
 
 export type ApprovalStatus = (typeof APPROVAL_STATUSES)[number];
+
+export const APPROVAL_CONTEXTS = ["interactive", "scheduled", "webhook", "remote", "delegated"] as const;
+export type ApprovalContext = (typeof APPROVAL_CONTEXTS)[number];
+
+export const PERMISSION_MODES = ["read-only", "guarded", "workspace", "full"] as const;
+export type PermissionMode = (typeof PERMISSION_MODES)[number];
+
+export const APPROVAL_DECIDERS = ["user", "policy", "auto_review"] as const;
+export type ApprovalDecider = (typeof APPROVAL_DECIDERS)[number];
 
 export interface ApprovalRecord {
   id: string;
@@ -589,6 +600,17 @@ export interface ApprovalRecord {
   decidedAt: string | null;
   effectId: string | null;
   createdAt: string;
+  goalId?: string | null;
+  actionDigest?: string | null;
+  permissionMode?: PermissionMode | null;
+  context?: ApprovalContext | null;
+  maxUses?: number;
+  usedCount?: number;
+  approvedBy?: ApprovalDecider | null;
+  issuedAt?: string;
+  revokedAt?: string | null;
+  action?: Record<string, unknown> | null;
+  rejectionCount?: number;
 }
 
 export const EFFECT_STATUSES = ["pending", "executing", "succeeded", "failed", "uncertain"] as const;

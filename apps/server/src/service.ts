@@ -652,7 +652,10 @@ export class HearthService {
 
   updateApproval(
     approvalId: string,
-    patch: Partial<Pick<ApprovalRecord, "status" | "decidedAt" | "effectId">>
+    patch: Partial<Pick<ApprovalRecord,
+      "status" | "decidedAt" | "effectId" | "goalId" | "actionDigest" | "permissionMode" |
+      "context" | "maxUses" | "usedCount" | "approvedBy" | "issuedAt" | "revokedAt" |
+      "action" | "rejectionCount">>
   ): ApprovalRecord {
     const current = this.store.getApproval(approvalId);
     if (!current) throw new Error(`Approval not found: ${approvalId}`);

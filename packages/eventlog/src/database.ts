@@ -93,7 +93,7 @@ export interface RunAggregate {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 13;
+export const CURRENT_SCHEMA_VERSION = 14;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -151,7 +151,10 @@ CREATE TABLE IF NOT EXISTS approvals (
   id TEXT PRIMARY KEY, task_id TEXT NOT NULL, run_id TEXT NOT NULL, kind TEXT NOT NULL,
   summary TEXT NOT NULL, target_json TEXT NOT NULL, preview_json TEXT NOT NULL,
   parameter_hash TEXT NOT NULL, status TEXT NOT NULL, expires_at TEXT NOT NULL,
-  decided_at TEXT, effect_id TEXT, created_at TEXT NOT NULL
+  decided_at TEXT, effect_id TEXT, created_at TEXT NOT NULL,
+  goal_id TEXT, action_digest TEXT, permission_mode TEXT, context TEXT,
+  max_uses INTEGER, used_count INTEGER, approved_by TEXT, issued_at TEXT,
+  revoked_at TEXT, action_json TEXT, rejection_count INTEGER
 );
 CREATE TABLE IF NOT EXISTS effects (
   id TEXT PRIMARY KEY, task_id TEXT NOT NULL, approval_id TEXT NOT NULL, kind TEXT NOT NULL,
@@ -505,6 +508,17 @@ export class HearthStore {
     ensureColumn(this.db, "conversations", "settings_json", "TEXT");
     ensureColumn(this.db, "chat_messages", "kind", "TEXT");
     ensureColumn(this.db, "chat_messages", "task_status", "TEXT");
+    ensureColumn(this.db, "approvals", "goal_id", "TEXT");
+    ensureColumn(this.db, "approvals", "action_digest", "TEXT");
+    ensureColumn(this.db, "approvals", "permission_mode", "TEXT");
+    ensureColumn(this.db, "approvals", "context", "TEXT");
+    ensureColumn(this.db, "approvals", "max_uses", "INTEGER");
+    ensureColumn(this.db, "approvals", "used_count", "INTEGER");
+    ensureColumn(this.db, "approvals", "approved_by", "TEXT");
+    ensureColumn(this.db, "approvals", "issued_at", "TEXT");
+    ensureColumn(this.db, "approvals", "revoked_at", "TEXT");
+    ensureColumn(this.db, "approvals", "action_json", "TEXT");
+    ensureColumn(this.db, "approvals", "rejection_count", "INTEGER");
     this.db.exec(`
       DELETE FROM chat_messages
       WHERE kind = 'task_status'
@@ -519,6 +533,7 @@ export class HearthStore {
       CREATE INDEX IF NOT EXISTS model_profiles_provider_idx ON model_profiles(provider_id, updated_at);
       CREATE INDEX IF NOT EXISTS settings_migrations_status_idx ON settings_migrations(status, updated_at);
       CREATE INDEX IF NOT EXISTS method_candidates_fingerprint_idx ON method_candidates(fingerprint);
+      CREATE INDEX IF NOT EXISTS approvals_action_digest_idx ON approvals(action_digest);
     `);
     this.db.exec(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION}`);
     this.setMeta("schemaVersion", String(CURRENT_SCHEMA_VERSION));
@@ -2048,20 +2063,43 @@ function insertRunCheckpoint(db: DatabaseSync, checkpoint: RunCheckpointRecord):
 
 function insertApproval(db: DatabaseSync, approval: ApprovalRecord): void {
   db.prepare(
-    `INSERT INTO approvals (id, task_id, run_id, kind, summary, target_json, preview_json, parameter_hash, status, expires_at, decided_at, effect_id, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO approvals (id, task_id, run_id, kind, summary, target_json, preview_json, parameter_hash, status, expires_at, decided_at, effect_id, created_at,
+       goal_id, action_digest, permission_mode, context, max_uses, used_count, approved_by, issued_at, revoked_at, action_json, rejection_count)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     approval.id, approval.taskId, approval.runId, approval.kind, approval.summary,
     JSON.stringify(approval.target), JSON.stringify(approval.preview), approval.parameterHash,
-    approval.status, approval.expiresAt, approval.decidedAt, approval.effectId, approval.createdAt
+    approval.status, approval.expiresAt, approval.decidedAt, approval.effectId, approval.createdAt,
+    approval.goalId ?? null, approval.actionDigest ?? null, approval.permissionMode ?? null,
+    approval.context ?? null, approval.maxUses ?? 1, approval.usedCount ?? 0,
+    approval.approvedBy ?? null, approval.issuedAt ?? approval.createdAt, approval.revokedAt ?? null,
+    approval.action ? JSON.stringify(approval.action) : null, approval.rejectionCount ?? 0
   );
 }
 
 function updateApproval(db: DatabaseSync, patch: Record<string, unknown>): void {
   const id = String(patch.id);
-  const columns: Record<string, string> = { status: "status", decidedAt: "decided_at", effectId: "effect_id" };
+  const columns: Record<string, string> = {
+    status: "status",
+    decidedAt: "decided_at",
+    effectId: "effect_id",
+    goalId: "goal_id",
+    actionDigest: "action_digest",
+    permissionMode: "permission_mode",
+    context: "context",
+    maxUses: "max_uses",
+    usedCount: "used_count",
+    approvedBy: "approved_by",
+    issuedAt: "issued_at",
+    revokedAt: "revoked_at",
+    rejectionCount: "rejection_count"
+  };
   for (const [key, column] of Object.entries(columns)) {
     if (key in patch) db.prepare(`UPDATE approvals SET ${column} = ? WHERE id = ?`).run((patch[key] as SQLInputValue) ?? null, id);
+  }
+  if ("action" in patch) {
+    const action = patch.action as ApprovalRecord["action"];
+    db.prepare("UPDATE approvals SET action_json = ? WHERE id = ?").run(action ? JSON.stringify(action) : null, id);
   }
 }
 
@@ -2482,7 +2520,18 @@ function rowToApproval(row: DbRow): ApprovalRecord {
     parameterHash: String(row.parameter_hash), status: String(row.status) as ApprovalRecord["status"],
     expiresAt: String(row.expires_at),
     decidedAt: row.decided_at == null ? null : String(row.decided_at),
-    effectId: row.effect_id == null ? null : String(row.effect_id), createdAt: String(row.created_at)
+    effectId: row.effect_id == null ? null : String(row.effect_id), createdAt: String(row.created_at),
+    goalId: row.goal_id == null ? null : String(row.goal_id),
+    actionDigest: row.action_digest == null ? null : String(row.action_digest),
+    permissionMode: row.permission_mode == null ? null : String(row.permission_mode) as NonNullable<ApprovalRecord["permissionMode"]>,
+    context: row.context == null ? "interactive" : String(row.context) as NonNullable<ApprovalRecord["context"]>,
+    maxUses: row.max_uses == null ? 1 : Number(row.max_uses),
+    usedCount: row.used_count == null ? 0 : Number(row.used_count),
+    approvedBy: row.approved_by == null ? null : String(row.approved_by) as NonNullable<ApprovalRecord["approvedBy"]>,
+    issuedAt: row.issued_at == null ? String(row.created_at) : String(row.issued_at),
+    revokedAt: row.revoked_at == null ? null : String(row.revoked_at),
+    action: row.action_json == null ? null : JSON.parse(String(row.action_json)) as Record<string, unknown>,
+    rejectionCount: row.rejection_count == null ? 0 : Number(row.rejection_count)
   };
 }
 
