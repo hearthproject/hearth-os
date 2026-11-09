@@ -28,6 +28,7 @@ import { executorHealth as readExecutorHealth } from "./executor-runtime.ts";
 import { sanitizeProgressDetail } from "./progress-detail.ts";
 import { EXECUTOR_FALLBACK_ORDER, executorName, resolveExecutorId } from "./executors.ts";
 import { extractProposedComment, inspectRepository, readPrPreview, validatePullRequestPreview } from "./github.ts";
+import { canBlindRetry, classifyFailureClass, decideDisposition } from "./failure-policy.ts";
 import type { CommandRunner } from "./github.ts";
 import { MemoryService } from "./memory.ts";
 import { renderMethodBlock } from "./method-context.ts";
@@ -874,10 +875,28 @@ export class HearthScheduler {
         }
         const failureTask = this.service.requireTask(taskId);
         const cause = classifyFailure({ service: this.service, task: failureTask, run: result.run, error: result.error, aborted: result.aborted, stopping: this.stopping });
+        const uncertainEffect = this.service.store.listEffects(taskId)
+          .find((effect) => effect.status === "uncertain" || effect.status === "executing");
+        const failureClass = classifyFailureClass({
+          message: result.failure?.message ?? (result.error instanceof Error ? result.error.message : String(result.error)),
+          code: errorCode(result.error),
+          aborted: result.aborted,
+          stopping: this.stopping,
+          effectUncertain: Boolean(uncertainEffect),
+          validatorFailed: cause === "contract_failure",
+          budgetExhausted: cause === "budget"
+        });
         const settings = this.context.settings();
+        const disposition = decideDisposition({
+          failure: failureClass,
+          attempt: (retriesByExecutor.get(executorId) ?? 0) + 1,
+          maxAttempts: settings.maxSameExecutorRetries + 1,
+          effectId: uncertainEffect?.id ?? null,
+          repairTarget: failureTask.expectedOutputs.join(", ") || "deliverable"
+        });
         const target = this.selectHandoffTarget({ task: failureTask, cause, settings, attemptedExecutors, handoffsUsed, taskRoot });
         const diagnosis = await this.diagnoseFailure(taskId, failureTask, result.run, result.error, cause, target.targetExecutor);
-        const decision = this.decideNextAction({
+        let decision = this.decideNextAction({
           task: failureTask,
           cause,
           effectiveCause: diagnosis.cause,
@@ -890,10 +909,18 @@ export class HearthScheduler {
           attemptedExecutors,
           taskRoot
         });
+        if (decision.action === "retry_same" && (!canBlindRetry(failureClass) || disposition.type !== "retry")) {
+          decision = {
+            ...decision,
+            action: "ask_user",
+            autoAllowed: false,
+            reason: `${decision.reason}；失败类别 ${failureClass} 不允许盲重试`
+          };
+        }
         this.capture({
           taskId, conversationId: failureTask.conversationId ?? null, runId: result.run.id, executorId,
           kind: "decision", role: "system", content: `${decision.action}：${decision.reason}`,
-          provenance: { source: "fallback-policy", decision, cause, diagnosisId: diagnosis.id },
+          provenance: { source: "fallback-policy", decision, cause, failureClass, disposition, diagnosisId: diagnosis.id },
           executorEventId: `decision:${result.run.id}`
         });
         if (decision.action === "retry_same") {
@@ -904,7 +931,7 @@ export class HearthScheduler {
         if (settings.mode === "shadow") {
           const shadowError: TaskError = {
             ...(result.failure ?? { kind: "execution_failed", message: decision.reason, recoverable: true, guidance: "查看诊断后决定是否重试" }),
-            cause, diagnosisId: diagnosis.id
+            cause, diagnosisId: diagnosis.id, failureClass, disposition
           };
           this.service.updateTask(taskId, {
             status: "recoverable", currentRunId: result.run.id,
@@ -941,7 +968,7 @@ export class HearthScheduler {
           this.appendHandoffNotice(taskId, currentHandoff, false);
           const taskError: TaskError = {
             ...(result.failure ?? { kind: "execution_failed", message: decision.reason, recoverable: true, guidance: "确认后可以切换执行器继续" }),
-            cause, diagnosisId: diagnosis.id
+            cause, diagnosisId: diagnosis.id, failureClass, disposition
           };
           this.service.updateTask(taskId, {
             status: "waiting_input", currentRunId: result.run.id,
@@ -953,7 +980,7 @@ export class HearthScheduler {
         }
         const taskError: TaskError = {
           ...(result.failure ?? { kind: "execution_failed", message: decision.reason, recoverable: true, guidance: "查看运行记录后重试" }),
-          cause, diagnosisId: diagnosis.id
+          cause, diagnosisId: diagnosis.id, failureClass, disposition
         };
         const diagnosisSummary = diagnosis.source === "model" ? diagnosis.summary : decision.reason;
         if (result.failure?.kind === "input_unavailable") {
@@ -1989,6 +2016,12 @@ function approvalArguments(value: unknown): unknown {
   } catch {
     return { truncated: true, preview: String(value).slice(0, 16_000) };
   }
+}
+
+function errorCode(error: unknown): string | null {
+  if (!error || typeof error !== "object" || !("code" in error)) return null;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" ? code : null;
 }
 
 function resolveToolAction(input: {

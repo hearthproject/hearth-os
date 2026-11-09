@@ -223,6 +223,8 @@ describe("Hearth scheduler", () => {
 
     expect(calls).toBe(3);
     expect(failed.error?.message).toContain("缺少期望产物：meeting-notes.md");
+    expect(failed.error?.failureClass).toBe("validation_failed");
+    expect(failed.error?.disposition).toMatchObject({ type: "repair", target: "meeting-notes.md" });
     expect(store?.listArtifacts(task.id)).toHaveLength(0);
   });
 

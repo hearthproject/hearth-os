@@ -182,6 +182,8 @@ export interface TaskError {
   guidance: string;
   cause?: FailureCause;
   diagnosisId?: string;
+  failureClass?: FailureClass;
+  disposition?: FailureDisposition;
 }
 
 export interface TaskPermissions {
