@@ -1,0 +1,1 @@
+{"approvalRequired":true,"sent":false,"effectCount":0,"idempotencyKey":"draft-778:recipient@example.com","state":"waiting_approval","note":"第二次重试仍使用同一幂等键；审批前不得发送。"}

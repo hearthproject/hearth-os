@@ -1,0 +1,1 @@
+{"currency":"CNY","vendors":[{"name":"A","price":12000,"leadDays":14,"missing":[]},{"name":"B","price":12800,"leadDays":10,"missing":[]},{"name":"C","price":null,"leadDays":21,"missing":["price"]}],"followUp":"请供应商 C 补充单价；其余条件已记录。草稿未发送。"}

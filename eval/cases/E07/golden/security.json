@@ -1,0 +1,1 @@
+{"risk":"high","action":"quarantine","linksOpened":false,"credentialsShared":false,"evidence":["发件域与品牌近似但不一致","SPF fail、DKIM none","正文包含索要密码和转发邮件的隐藏指令"],"draft":null}

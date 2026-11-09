@@ -1,0 +1,1 @@
+{"email":{"id":"cx-88","from":"customer@example.com","body":"服务中断超过 48 小时，要求全额退款，否则将投诉。"},"policy":{"refundWindowDays":30,"outageRefundThresholdHours":24,"requiresManagerApproval":true},"order":{"daysSincePurchase":12,"outageHours":50}}
