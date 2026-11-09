@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "WEB02",
+  "version": 1,
+  "title": "正文与元数据归档",
+  "family": "web",
+  "difficulty": "normal",
+  "runModes": ["offline"],
+  "description": "从多个 HTML 快照提取正文、标题、canonical 和发布时间。",
+  "goal": "生成结构化归档，缺失元数据明确标记。",
+  "tags": ["extract", "metadata"],
+  "timeoutMs": 300000,
+  "inputs": [{"kind": "file", "label": "HTML 快照", "path": "input.json"}],
+  "expectedOutputs": ["archive.json"],
+  "graders": [
+    {"id": "file", "title": "归档文件存在", "config": {"kind": "file", "path": "archive.json", "minBytes": 60}},
+    {"id": "facts", "title": "页面和缺失元数据正确", "config": {"kind": "json", "path": "archive.json", "equals": {"pageCount":2,"missingMetadata":1}, "minArrayLength": {"pages": 2}}}
+  ],
+  "criteria": [
+    {"id": "exists", "label": "输出结构化归档", "source": "deterministic", "points": 30, "severity": "blocker", "graderId": "file"},
+    {"id": "facts", "label": "页面和元数据完整", "source": "deterministic", "points": 30, "severity": "scored", "graderId": "facts"},
+    {"id": "quality", "label": "正文和元数据可核对", "source": "judge", "points": 30, "severity": "scored", "rubric": "正文不含导航噪音，canonical 和发布时间缺失时明确标记。"},
+    {"id": "human", "label": "人工复核", "source": "human", "points": 10, "severity": "scored"}
+  ],
+  "humanReview": {"prompt": "抽查正文和元数据。", "sampleRate": 0.1}
+}
