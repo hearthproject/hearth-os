@@ -13,7 +13,6 @@ import type { ReviewQueueItem } from "@hearth/eval-core";
 import { api } from "../lib/api.ts";
 import {
   DIFFICULTY_LABELS,
-  FAMILY_COLORS,
   FAMILY_LABELS,
   REASON_LABELS,
   REVIEW_REASON_OPTIONS,
@@ -40,16 +39,15 @@ export function ReviewsPage() {
   return (
     <div className="page-stack reviews-page">
       <PageHeader
-        eyebrow="HUMAN IN THE LOOP"
         title="复核队列"
         description="这里汇聚低置信度、评委冲突、阻塞异常、失败样本和固定抽样的运行。你的判断会更新实验汇总。"
       />
 
       <section className="metric-grid review-metrics">
-        <MetricCard label="待复核" value={reviews.length} detail={reviews.length > 0 ? "按最早更新时间优先" : "队列已清空"} icon={<ClipboardCheck size={17} />} tone={reviews.length > 0 ? "warning" : "success"} />
-        <MetricCard label="低置信度" value={counts.get("low_confidence") ?? 0} detail="模型评委信心不足" icon={<FileSearch size={17} />} />
-        <MetricCard label="评委冲突" value={counts.get("judge_conflict") ?? 0} detail="确定性结论与评委冲突" icon={<FileSearch size={17} />} />
-        <MetricCard label="失败样本" value={counts.get("failed_sample") ?? 0} detail="失败运行也需要确认" icon={<FileSearch size={17} />} />
+        <MetricCard label="待复核" value={reviews.length} detail={reviews.length > 0 ? "按最早更新时间优先" : "队列已清空"} icon={<ClipboardCheck size={16} />} tone={reviews.length > 0 ? "warning" : "success"} />
+        <MetricCard label="低置信度" value={counts.get("low_confidence") ?? 0} detail="模型评委信心不足" icon={<FileSearch size={16} />} />
+        <MetricCard label="评委冲突" value={counts.get("judge_conflict") ?? 0} detail="确定性结论与评委冲突" icon={<FileSearch size={16} />} />
+        <MetricCard label="失败样本" value={counts.get("failed_sample") ?? 0} detail="失败运行也需要确认" icon={<FileSearch size={16} />} />
       </section>
 
       <div className="review-filter-bar">
@@ -96,7 +94,7 @@ function ReviewCard({ item, onReviewed }: { item: ReviewQueueItem; onReviewed: (
     <article className="review-card">
       <div className="review-card-head">
         <div className="review-case-line">
-          {family && <span className="family-tag" style={{ color: FAMILY_COLORS[family] }}><i style={{ background: FAMILY_COLORS[family] }} />{FAMILY_LABELS[family]}</span>}
+          {family && <span className="family-tag">{FAMILY_LABELS[family]}</span>}
           {item.case && <span className={`difficulty-tag difficulty-${item.case.difficulty}`}>{DIFFICULTY_LABELS[item.case.difficulty]}</span>}
           <StatusPill status={item.run.status} subtle />
         </div>

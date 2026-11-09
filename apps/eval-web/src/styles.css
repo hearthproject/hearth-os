@@ -577,6 +577,24 @@ code { font-size: .82em; }
 .modal-head small { font-size: 11px; }
 .artifact-preview { border-radius: 7px; font-size: 12px; }
 
+/* Review queue */
+.review-filter-bar { gap: 4px; }
+.review-filter-bar button { min-height: 29px; padding: 0 9px; background: transparent; border-color: transparent; border-radius: 5px; font-size: 11px; font-weight: 500; }
+.review-filter-bar button:hover { background: var(--surface-muted); }
+.review-filter-bar button.active { color: var(--ink); background: var(--surface-deep); border-color: var(--line-strong); }
+.review-filter-bar button.active em { color: var(--ink-faint); }
+.review-list { gap: 8px; }
+.review-card { padding: 16px; border-left-width: 1px; border-radius: 8px; box-shadow: none; }
+.review-card h2 { margin-bottom: 3px; font-size: 15px; font-weight: 600; }
+.review-experiment { font-size: 10px; }
+.review-summary { margin-top: 7px; font-size: 12px; }
+.review-reasons { margin-top: 7px; }
+.review-reasons span { color: var(--warning); background: var(--warning-wash); font-size: 10px; font-weight: 500; }
+.review-run-meta { gap: 4px; font-size: 10px; }
+.review-card-actions { padding-top: 12px; }
+.inline-review-form { gap: 6px; }
+.inline-review-form input { min-height: 34px; border-radius: 6px; font-size: 12px; }
+
 /* Dashboard */
 .overview-card { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 28px; padding: 18px 20px; }
 .overview-main { min-width: 0; }
