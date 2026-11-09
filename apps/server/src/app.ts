@@ -274,6 +274,12 @@ const memoryConsolidationSchema = z.object({
   maxGroups: z.number().int().min(1).max(50).optional()
 }).strict();
 
+const memoryForgetSourceSchema = z.object({
+  sourceId: z.string().trim().min(1).max(200),
+  reason: z.string().trim().min(1).max(500).optional(),
+  dryRun: z.boolean().optional()
+}).strict();
+
 const memoryConflictResolveSchema = z.object({
   resolution: z.enum(["keep_left", "keep_right", "merged"]),
   note: z.string().max(1000).optional(),
@@ -1316,6 +1322,16 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
   });
 
+  app.post("/api/memory/forget-source", async (request, reply) => {
+    const parsed = memoryForgetSourceSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_MEMORY_FORGET_SOURCE", message: "来源遗忘参数不正确" });
+    try {
+      return memory.forgetSource(parsed.data);
+    } catch (error) {
+      return sendMemoryError(reply, error);
+    }
+  });
+
   app.get("/api/memory/export", async (_request, reply) => {
     const stamp = new Date().toISOString().slice(0, 10);
     reply.header("content-type", "application/json; charset=utf-8");
@@ -1327,6 +1343,15 @@ export async function buildServer(options: BuildServerOptions = {}) {
     reply.header("cache-control", "no-store");
     try {
       return memory.explain(request.params.id);
+    } catch (error) {
+      return sendMemoryError(reply, error);
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/api/memory/:id/forget-preview", async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    try {
+      return memory.previewForget(request.params.id);
     } catch (error) {
       return sendMemoryError(reply, error);
     }

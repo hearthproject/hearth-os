@@ -1281,7 +1281,7 @@ export interface OnboardingSnapshot {
   checks: OnboardingChecks;
 }
 
-export const MEMORY_FORGET_TARGETS = ["projection", "versions", "event-log", "recall-audit", "devices"] as const;
+export const MEMORY_FORGET_TARGETS = ["projection", "versions", "event-log", "recall-audit", "devices", "derivations", "consolidation"] as const;
 export type MemoryForgetTarget = (typeof MEMORY_FORGET_TARGETS)[number];
 
 export interface MemoryForgetPropagation {
@@ -1298,6 +1298,18 @@ export interface MemoryForgetReceipt {
   redactedVersions: number;
   redactedEvents: number;
   targets: MemoryForgetPropagation[];
+  tombstones?: MemoryForgetTombstone[];
+  createdAt: string;
+}
+
+export interface MemoryForgetTombstone {
+  id: string;
+  memoryId: string;
+  contentHash: string;
+  subjectKey: string;
+  sourceKind: string;
+  sourceRef: string;
+  reason: string;
   createdAt: string;
 }
 

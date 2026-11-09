@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { defaultConversationSettings } from "@hearth/core";
 import { HearthStore } from "@hearth/eventlog";
+import { BackupService } from "./backups.ts";
 import { MemoryService } from "./memory.ts";
 import { HearthService } from "./service.ts";
 
@@ -248,6 +252,102 @@ describe("MemoryService", () => {
     expect(run.skipped.some((item) => item.reason.includes("taint"))).toBe(true);
     expect(run.skipped.some((item) => item.reason.includes("untrusted"))).toBe(true);
     expect(run.skipped.some((item) => item.reason.includes("secret"))).toBe(true);
+  });
+
+  it("propagates forgetting to derived memories and blocks automatic re-ingestion", () => {
+    const source = createMemory({
+      content: "Ember 的预算上限是三百万。",
+      subjectKey: "project.ember.budget",
+      source: { type: "source", id: "doc-1", label: "预算文档", excerpt: null }
+    });
+    memory.confirm(source.id);
+    const derived = createMemory({
+      content: "根据预算文档，Ember 预算上限是三百万。",
+      subjectKey: "project.ember.budget.summary",
+      derivedFromId: source.id,
+      source: { type: "task", id: "task-summary", label: "摘要任务", excerpt: null }
+    });
+    memory.confirm(derived.id);
+
+    const preview = memory.previewForget(source.id);
+    expect(preview.affected.map((item) => item.memoryId)).toEqual(expect.arrayContaining([source.id, derived.id]));
+    expect(preview.affected.find((item) => item.memoryId === derived.id)?.relationship).toBe("derived");
+    expect(store.getMemory(source.id)?.status).toBe("active");
+
+    memory.forget(source.id);
+    const receipt = store.listMemoryForgetReceipts()[0]!;
+    expect(receipt.affectedMemoryIds).toEqual(expect.arrayContaining([source.id, derived.id]));
+    expect(store.getMemory(derived.id)?.status).toBe("forgotten");
+    expect(store.listMemoryForgetTombstones()).toHaveLength(2);
+    expect(() => createMemory({
+      content: "Ember 的预算上限是三百万。",
+      subjectKey: "project.ember.budget",
+      originClass: "web",
+      source: { type: "source", id: "doc-1", label: "网页转载", excerpt: null }
+    })).toThrowError(/已被遗忘/);
+  });
+
+  it("previews and forgets all memories tied to an external source", () => {
+    const first = createMemory({ content: "来源文档要点一。", subjectKey: "doc.point.one", source: { type: "source", id: "doc-2", label: "文档", excerpt: null } });
+    const second = createMemory({ content: "来源文档要点二。", subjectKey: "doc.point.two", source: { type: "source", id: "doc-2", label: "文档", excerpt: null } });
+    memory.confirm(first.id);
+    memory.confirm(second.id);
+
+    const preview = memory.forgetSource({ sourceId: "doc-2", dryRun: true });
+    if (!("affected" in preview)) throw new Error("expected forget preview");
+    expect(preview.rootMemoryIds).toEqual(expect.arrayContaining([first.id, second.id]));
+    expect(store.getMemory(first.id)?.status).toBe("active");
+
+    const result = memory.forgetSource({ sourceId: "doc-2" });
+    expect("receipt" in result).toBe(true);
+    if ("receipt" in result) expect(result.receipt.affectedMemoryIds).toEqual(expect.arrayContaining([first.id, second.id]));
+    expect(store.getMemory(first.id)?.status).toBe("forgotten");
+    expect(store.getMemory(second.id)?.status).toBe("forgotten");
+  });
+
+  it("scrubs consolidation reports when a source memory is forgotten", () => {
+    const first = createMemory({ content: "Ember 的发布密码是 ember-2026。", subjectKey: "project.ember.release" });
+    const second = createMemory({ content: "Ember 的发布密码是 ember-2026。", subjectKey: "project.ember.release" });
+    memory.confirm(first.id);
+    memory.confirm(second.id);
+    const consolidated = memory.consolidate({ apply: true });
+    expect(consolidated.status).toBe("applied");
+
+    memory.forget(first.id, "删除发布密码");
+    const candidate = store.getMemory(consolidated.appliedMemoryIds[0]!);
+    expect(candidate?.status).toBe("forgotten");
+    const run = store.getMemoryConsolidationRun(consolidated.id);
+    expect(run?.report).not.toContain("ember-2026");
+    expect(run?.sources.some((source) => source.content === "[已遗忘]")).toBe(true);
+  });
+
+  it("restores memory and forget tombstones consistently from backups", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-memory-backup-"));
+    try {
+      const backups = new BackupService({
+        service,
+        backupRoot: join(dir, "backups"),
+        masterKeyPath: join(dir, "master.key"),
+        clock: () => now
+      });
+      const passphrase = "correct horse battery staple";
+      const created = createMemory({ content: "Ember 的备份测试内容。", subjectKey: "project.ember.backup" });
+      memory.confirm(created.id);
+      const activeBackup = backups.create(passphrase);
+      memory.forget(created.id, "备份一致性测试");
+      const forgottenBackup = backups.create(passphrase);
+      const forgottenText = backups.readEnvelope(forgottenBackup.id).text;
+
+      backups.restoreRecord(activeBackup.id, passphrase);
+      expect(store.getMemory(created.id)?.status).toBe("active");
+
+      backups.restoreUploadedEnvelope(forgottenText, passphrase);
+      expect(store.getMemory(created.id)?.status).toBe("forgotten");
+      expect(store.listMemoryForgetTombstones(created.id)).toHaveLength(1);
+      expect(memory.exportData().tombstones).toHaveLength(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("recalls memories for a conversation and records a chat audit id", () => {

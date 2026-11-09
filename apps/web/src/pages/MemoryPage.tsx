@@ -37,7 +37,9 @@ const FORGET_TARGET_LABELS = {
   versions: "历史版本",
   "event-log": "事件日志",
   "recall-audit": "召回审计",
-  devices: "设备副本"
+  devices: "设备副本",
+  derivations: "派生记忆",
+  consolidation: "巩固报告"
 } as const;
 
 export function MemoryPage() {

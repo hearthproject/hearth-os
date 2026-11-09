@@ -6,6 +6,7 @@ import type {
   MemoryConsolidationRun,
   MemoryConsolidationSource,
   MemoryForgetReceipt,
+  MemoryForgetTombstone,
   MemoryKind,
   MemoryOriginClass,
   MemoryRecall,
@@ -109,6 +110,24 @@ export interface RecallResult {
   budget: { maxItems: number; maxChars: number };
 }
 
+export interface MemoryForgetPreview {
+  rootMemoryIds: string[];
+  affected: Array<{
+    memoryId: string;
+    relationship: "direct" | "derived";
+    derivationPath: string[];
+    subjectKey: string;
+    sourceLabel: string;
+    contentHash: string;
+  }>;
+}
+
+export interface ForgetSourceInput {
+  sourceId: string;
+  reason?: string | undefined;
+  dryRun?: boolean | undefined;
+}
+
 export interface MemorySnapshot {
   settings: MemorySettings;
   memories: MemoryRecord[];
@@ -194,6 +213,10 @@ export class MemoryService {
     const originClass = input.originClass ?? defaultOriginClass(input.source);
     const tier = input.tier ?? "episodic";
     const retention = input.retention ?? (tier === "instructions" ? "permanent" : "30d");
+    const contentHash = memoryContentHash(content);
+    if (originClass !== "user" && this.service.store.getMemoryForgetTombstone(contentHash)) {
+      throw new MemoryError("FORGOTTEN_CONTENT", "该内容已被遗忘，不能由自动流程重新引入", 409);
+    }
     const memory: MemoryRecord = {
       id: randomUUID(),
       kind: input.kind,
@@ -215,7 +238,7 @@ export class MemoryService {
       importance: clamp(input.importance ?? 0.5, 0, 1),
       retention,
       supersessionKey: input.supersessionKey ?? null,
-      contentHash: memoryContentHash(content),
+      contentHash,
       lastVerifiedAt: input.lastVerifiedAt ?? (originClass === "user" || originClass === "verified_system" ? now : null),
       expiresAt: input.expiresAt ?? null,
       allowRecall: input.allowRecall ?? (input.sensitivity !== "secret" && tier !== "review"),
@@ -293,53 +316,30 @@ export class MemoryService {
   forget(id: string, reason = "用户要求遗忘"): MemoryRecord {
     const memory = this.requireMemory(id);
     if (memory.status === "forgotten") return memory;
-    const subjectKey = "forgotten:" + memory.id;
-    const next: MemoryRecord = {
-      ...memory,
-      status: "forgotten",
-      content: "[已遗忘]",
-      subjectKey,
-      scope: "forgotten",
-      tags: [],
-      source: { type: memory.source.type, id: null, label: "[已遗忘]", excerpt: null },
-      allowRecall: false,
-      validUntil: null,
-      contentHash: memoryContentHash("[已遗忘]"),
-      lastVerifiedAt: null,
-      expiresAt: null,
-      version: memory.version + 1,
-      updatedAt: this.nowIso()
-    };
-    this.emit("memory.updated", next);
-    this.recordVersion(next, reason);
-    for (const conflict of this.service.store.listMemoryConflicts("pending")) {
-      if (!conflict.memoryIds.includes(id)) continue;
-      this.emit("memory.conflict.updated", {
-        ...conflict,
-        status: "resolved",
-        note: [conflict.note, "因记忆遗忘自动关闭"].filter(Boolean).join("；"),
-        resolvedAt: this.nowIso()
-      } satisfies MemoryConflict);
-    }
-    const scrubbed = this.service.store.scrubForgottenMemory(id, { content: next.content, subjectKey, scope: next.scope });
-    const receipt: MemoryForgetReceipt = {
-      id: randomUUID(),
-      memoryId: id,
-      affectedMemoryIds: [id],
-      reason: reason.trim() || "用户要求遗忘",
-      redactedVersions: scrubbed.redactedVersions,
-      redactedEvents: scrubbed.redactedEvents,
-      targets: [
-        { target: "projection", status: "complete", detail: "当前记录已替换为墓碑" },
-        { target: "versions", status: "complete", detail: "历史版本正文与来源摘要已脱敏" },
-        { target: "event-log", status: "complete", detail: "相关记忆事件正文已脱敏" },
-        { target: "recall-audit", status: "complete", detail: "召回原因已移除匹配词" },
-        { target: "devices", status: "complete", detail: "本地没有持久化记忆副本" }
-      ],
-      createdAt: this.nowIso()
-    };
-    this.emit("memory.forgotten", receipt);
-    return next;
+    const preview = this.previewForget(id);
+    this.forgetMemories(preview.affected.map((item) => item.memoryId), reason);
+    return this.requireMemory(id);
+  }
+
+  previewForget(id: string): MemoryForgetPreview {
+    return this.previewForgetMemories([this.requireMemory(id)]);
+  }
+
+  previewForgetSource(sourceId: string): MemoryForgetPreview {
+    const roots = this.service.store.listMemories({ limit: 10_000 })
+      .filter((memory) => memory.source.id === sourceId);
+    if (roots.length === 0) throw new MemoryError("MEMORY_SOURCE_NOT_FOUND", "没有找到该来源对应的记忆", 404);
+    return this.previewForgetMemories(roots);
+  }
+
+  forgetSource(input: ForgetSourceInput): MemoryForgetPreview | { receipt: MemoryForgetReceipt; affectedMemoryIds: string[] } {
+    const preview = this.previewForgetSource(input.sourceId);
+    if (input.dryRun) return preview;
+    const receipt = this.forgetMemories(
+      preview.affected.map((item) => item.memoryId),
+      input.reason?.trim() || "用户要求遗忘来源 " + input.sourceId
+    );
+    return { receipt, affectedMemoryIds: receipt.affectedMemoryIds };
   }
 
   resolveConflict(id: string, resolution: "keep_left" | "keep_right" | "merged", note = "", content?: string): MemoryConflict {
@@ -547,6 +547,7 @@ export class MemoryService {
       conflicts: this.service.store.listMemoryConflicts(),
       recalls: this.service.store.listMemoryRecalls(),
       forgets: this.service.store.listMemoryForgetReceipts(),
+      tombstones: this.service.store.listMemoryForgetTombstones(),
       consolidations: this.service.store.listMemoryConsolidationRuns(500)
     };
   }
@@ -670,6 +671,122 @@ export class MemoryService {
       this.emit("memory.consolidation.updated", run);
       return run;
     }
+  }
+
+  private previewForgetMemories(roots: MemoryRecord[]): MemoryForgetPreview {
+    const all = this.service.store.listMemories({ limit: 10_000 });
+    const affected = new Map<string, MemoryForgetPreview["affected"][number]>();
+    const queue: Array<{ memory: MemoryRecord; path: string[] }> = [];
+    for (const root of roots) {
+      if (affected.has(root.id)) continue;
+      affected.set(root.id, {
+        memoryId: root.id,
+        relationship: "direct",
+        derivationPath: [root.id],
+        subjectKey: root.subjectKey,
+        sourceLabel: root.source.label,
+        contentHash: root.contentHash
+      });
+      queue.push({ memory: root, path: [root.id] });
+    }
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      const derived = all.filter((memory) => memory.id !== current.memory.id
+        && (memory.derivedFromId === current.memory.id || memory.tags.includes("source:" + current.memory.id)));
+      for (const memory of derived) {
+        if (affected.has(memory.id)) continue;
+        const path = [...current.path, memory.id];
+        affected.set(memory.id, {
+          memoryId: memory.id,
+          relationship: "derived",
+          derivationPath: path,
+          subjectKey: memory.subjectKey,
+          sourceLabel: memory.source.label,
+          contentHash: memory.contentHash
+        });
+        queue.push({ memory, path });
+      }
+    }
+    return { rootMemoryIds: roots.map((memory) => memory.id), affected: [...affected.values()] };
+  }
+
+  private forgetMemories(ids: string[], reason: string): MemoryForgetReceipt {
+    const now = this.nowIso();
+    const memories = [...new Set(ids)]
+      .map((id) => this.service.store.getMemory(id))
+      .filter((memory): memory is MemoryRecord => Boolean(memory && memory.status !== "forgotten"));
+    if (memories.length === 0) throw new MemoryError("MEMORY_ALREADY_FORGOTTEN", "没有需要遗忘的记忆", 409);
+    const tombstones: MemoryForgetTombstone[] = [];
+    let redactedVersions = 0;
+    let redactedEvents = 0;
+    for (const memory of memories) {
+      const subjectKey = "forgotten:" + memory.id;
+      const contentHash = memory.contentHash;
+      const next: MemoryRecord = {
+        ...memory,
+        status: "forgotten",
+        content: "[已遗忘]",
+        subjectKey,
+        scope: "forgotten",
+        tags: [],
+        source: { type: memory.source.type, id: null, label: "[已遗忘]", excerpt: null },
+        allowRecall: false,
+        validUntil: null,
+        contentHash: memoryContentHash("[已遗忘]"),
+        lastVerifiedAt: null,
+        expiresAt: null,
+        version: memory.version + 1,
+        updatedAt: now
+      };
+      this.emit("memory.updated", next);
+      this.recordVersion(next, reason);
+      for (const conflict of this.service.store.listMemoryConflicts("pending")) {
+        if (!conflict.memoryIds.includes(memory.id)) continue;
+        this.emit("memory.conflict.updated", {
+          ...conflict,
+          status: "resolved",
+          note: [conflict.note, "因记忆遗忘自动关闭"].filter(Boolean).join("；"),
+          resolvedAt: now
+        } satisfies MemoryConflict);
+      }
+      const scrubbed = this.service.store.scrubForgottenMemory(memory.id, { content: next.content, subjectKey, scope: next.scope });
+      redactedVersions += scrubbed.redactedVersions;
+      redactedEvents += scrubbed.redactedEvents;
+      tombstones.push({
+        id: randomUUID(),
+        memoryId: memory.id,
+        contentHash,
+        subjectKey: "forgotten:" + memory.id,
+        sourceKind: memory.sourceKind,
+        sourceRef: memory.sourceRef,
+        reason,
+        createdAt: now
+      });
+    }
+    const redactedRuns = this.service.store.scrubConsolidationRuns(
+      tombstones.map((tombstone) => ({ memoryId: tombstone.memoryId, content: memories.find((memory) => memory.id === tombstone.memoryId)?.content ?? "" }))
+    );
+    const receipt: MemoryForgetReceipt = {
+      id: randomUUID(),
+      memoryId: memories[0]!.id,
+      affectedMemoryIds: memories.map((memory) => memory.id),
+      reason,
+      redactedVersions,
+      redactedEvents,
+      targets: [
+        { target: "projection", status: "complete", detail: memories.length + " 条记录已替换为墓碑" },
+        { target: "versions", status: "complete", detail: "历史版本正文与来源摘要已脱敏" },
+        { target: "event-log", status: "complete", detail: "相关记忆事件正文已脱敏" },
+        { target: "recall-audit", status: "complete", detail: "召回原因已移除匹配词" },
+        { target: "devices", status: "complete", detail: "本地没有持久化记忆副本" },
+        { target: "derivations", status: "complete", detail: "派生记忆已按来源链传播遗忘" },
+        { target: "consolidation", status: "complete", detail: redactedRuns + " 个巩固报告已脱敏" }
+      ],
+      tombstones,
+      createdAt: now
+    };
+    this.emit("memory.forgotten", receipt);
+    return receipt;
   }
 
   private detectConflict(memory: MemoryRecord): void {

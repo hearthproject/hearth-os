@@ -30,6 +30,7 @@ import type {
   MemoryConflict,
   MemoryConsolidationRun,
   MemoryForgetReceipt,
+  MemoryForgetTombstone,
   MemoryRecall,
   MemoryRecord,
   MemorySettings,
@@ -315,6 +316,11 @@ CREATE TABLE IF NOT EXISTS memory_forget_receipts (
   id TEXT PRIMARY KEY, memory_id TEXT NOT NULL, affected_memory_ids_json TEXT NOT NULL,
   reason TEXT NOT NULL, redacted_versions INTEGER NOT NULL, redacted_events INTEGER NOT NULL,
   targets_json TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS memory_forget_tombstones (
+  id TEXT PRIMARY KEY, memory_id TEXT NOT NULL, content_hash TEXT NOT NULL,
+  subject_key TEXT NOT NULL, source_kind TEXT NOT NULL, source_ref TEXT NOT NULL,
+  reason TEXT NOT NULL, created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS memory_consolidation_runs (
   id TEXT PRIMARY KEY, status TEXT NOT NULL, dry_run INTEGER NOT NULL, scope TEXT,
@@ -631,6 +637,8 @@ export class HearthStore {
       CREATE INDEX IF NOT EXISTS memories_lane_idx ON memories(status, tier, trust, taint, updated_at);
       CREATE INDEX IF NOT EXISTS memories_expiry_idx ON memories(expires_at, status);
       CREATE INDEX IF NOT EXISTS memory_consolidation_runs_status_idx ON memory_consolidation_runs(status, started_at);
+      CREATE INDEX IF NOT EXISTS memory_forget_tombstones_hash_idx ON memory_forget_tombstones(content_hash);
+      CREATE INDEX IF NOT EXISTS memory_forget_tombstones_memory_idx ON memory_forget_tombstones(memory_id);
     `);
     this.db.exec(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION}`);
     this.setMeta("schemaVersion", String(CURRENT_SCHEMA_VERSION));
@@ -1631,6 +1639,20 @@ export class HearthStore {
     return rows.map(rowToMemoryConsolidationRun);
   }
 
+  getMemoryForgetTombstone(contentHash: string): MemoryForgetTombstone | null {
+    const row = this.db.prepare(
+      "SELECT * FROM memory_forget_tombstones WHERE content_hash = ? ORDER BY created_at DESC LIMIT 1"
+    ).get(contentHash) as DbRow | undefined;
+    return row ? rowToMemoryForgetTombstone(row) : null;
+  }
+
+  listMemoryForgetTombstones(memoryId?: string): MemoryForgetTombstone[] {
+    const rows = memoryId
+      ? this.db.prepare("SELECT * FROM memory_forget_tombstones WHERE memory_id = ? ORDER BY created_at DESC").all(memoryId) as DbRow[]
+      : this.db.prepare("SELECT * FROM memory_forget_tombstones ORDER BY created_at DESC").all() as DbRow[];
+    return rows.map(rowToMemoryForgetTombstone);
+  }
+
   getMethodCandidate(id: string): MethodCandidate | null {
     const row = this.db.prepare("SELECT * FROM method_candidates WHERE id = ?").get(id) as DbRow | undefined;
     return row ? rowToMethodCandidate(row) : null;
@@ -1725,6 +1747,40 @@ export class HearthStore {
       redactedEvents += 1;
     }
     return { redactedVersions: versionCount, redactedEvents };
+  }
+
+  scrubConsolidationRuns(memories: Array<{ memoryId: string; content: string }>): number {
+    if (memories.length === 0) return 0;
+    const byId = new Map(memories.map((memory) => [memory.memoryId, memory.content]));
+    const rows = this.db.prepare("SELECT * FROM memory_consolidation_runs").all() as DbRow[];
+    let redacted = 0;
+    for (const row of rows) {
+      const groups = JSON.parse(String(row.groups_json)) as Array<Record<string, unknown>>;
+      const sources = JSON.parse(String(row.sources_json)) as Array<Record<string, unknown>>;
+      let changed = false;
+      for (const source of sources) {
+        const memoryId = typeof source.memoryId === "string" ? source.memoryId : null;
+        if (!memoryId || !byId.has(memoryId)) continue;
+        source.content = "[已遗忘]";
+        source.sourceLabel = "[已遗忘]";
+        changed = true;
+      }
+      for (const group of groups) {
+        const ids = Array.isArray(group.sourceMemoryIds) ? group.sourceMemoryIds : [];
+        if (!ids.some((id) => typeof id === "string" && byId.has(id))) continue;
+        group.proposedContent = "[包含已遗忘记忆，正文已脱敏]";
+        if (Array.isArray(group.conflicts)) group.conflicts = ["[包含已遗忘记忆]"];
+        changed = true;
+      }
+      if (!changed) continue;
+      let report = String(row.report);
+      for (const content of byId.values()) report = report.split(content).join("[已遗忘]");
+      this.db.prepare(
+        "UPDATE memory_consolidation_runs SET groups_json = ?, sources_json = ?, report = ? WHERE id = ?"
+      ).run(JSON.stringify(groups), JSON.stringify(sources), report, String(row.id));
+      redacted += 1;
+    }
+    return redacted;
   }
 
   getOutboxDraft(id: string): OutboxDraft | null {
@@ -1968,7 +2024,7 @@ export class HearthStore {
   rebuildProjections(): void {
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      this.db.exec("DELETE FROM backup_records; DELETE FROM maintenance_runs; DELETE FROM task_leases; DELETE FROM sync_conflicts; DELETE FROM sync_peers; DELETE FROM method_trials; DELETE FROM method_evaluations; DELETE FROM method_candidates; DELETE FROM memory_forget_receipts; DELETE FROM memory_recalls; DELETE FROM memory_conflicts; DELETE FROM memory_versions; DELETE FROM memories; DELETE FROM memory_settings; DELETE FROM suggestion_events; DELETE FROM suggestions; DELETE FROM proactive_settings; DELETE FROM desktop_commands; DELETE FROM desktop_frames; DELETE FROM desktop_sessions; DELETE FROM pairing_requests; DELETE FROM devices; DELETE FROM outbox_drafts; DELETE FROM source_items; DELETE FROM sources; DELETE FROM artifacts; DELETE FROM effects; DELETE FROM approvals; DELETE FROM runs; DELETE FROM tasks;");
+      this.db.exec("DELETE FROM backup_records; DELETE FROM maintenance_runs; DELETE FROM task_leases; DELETE FROM sync_conflicts; DELETE FROM sync_peers; DELETE FROM method_trials; DELETE FROM method_evaluations; DELETE FROM method_candidates; DELETE FROM memory_consolidation_runs; DELETE FROM memory_forget_tombstones; DELETE FROM memory_forget_receipts; DELETE FROM memory_recalls; DELETE FROM memory_conflicts; DELETE FROM memory_versions; DELETE FROM memories; DELETE FROM memory_settings; DELETE FROM suggestion_events; DELETE FROM suggestions; DELETE FROM proactive_settings; DELETE FROM desktop_commands; DELETE FROM desktop_frames; DELETE FROM desktop_sessions; DELETE FROM pairing_requests; DELETE FROM devices; DELETE FROM outbox_drafts; DELETE FROM source_items; DELETE FROM sources; DELETE FROM artifacts; DELETE FROM effects; DELETE FROM approvals; DELETE FROM runs; DELETE FROM tasks;");
       for (const event of this.listEvents()) this.applyEvent(event);
       this.db.exec("COMMIT");
     } catch (error) {
@@ -2047,7 +2103,12 @@ export class HearthStore {
       case "memory.updated": return upsertMemory(this.db, event.payload as MemoryRecord);
       case "memory.version.recorded": return insertMemoryVersionRow(this.db, event.payload as MemoryVersion);
       case "memory.recalled": return insertMemoryRecallRow(this.db, event.payload as MemoryRecall);
-      case "memory.forgotten": return insertMemoryForgetReceiptRow(this.db, event.payload as MemoryForgetReceipt);
+      case "memory.forgotten": {
+        const receipt = event.payload as MemoryForgetReceipt;
+        insertMemoryForgetReceiptRow(this.db, receipt);
+        for (const tombstone of receipt.tombstones ?? []) insertMemoryForgetTombstoneRow(this.db, tombstone);
+        return;
+      }
       case "memory.consolidation.updated": return upsertMemoryConsolidationRun(this.db, event.payload as MemoryConsolidationRun);
       case "memory.conflict.created":
       case "memory.conflict.updated": return upsertMemoryConflict(this.db, event.payload as MemoryConflict);
@@ -3314,6 +3375,28 @@ function insertMemoryForgetReceiptRow(db: DatabaseSync, receipt: MemoryForgetRec
   );
 }
 
+function rowToMemoryForgetTombstone(row: DbRow): MemoryForgetTombstone {
+  return {
+    id: String(row.id),
+    memoryId: String(row.memory_id),
+    contentHash: String(row.content_hash),
+    subjectKey: String(row.subject_key),
+    sourceKind: String(row.source_kind),
+    sourceRef: String(row.source_ref),
+    reason: String(row.reason),
+    createdAt: String(row.created_at)
+  };
+}
+
+function insertMemoryForgetTombstoneRow(db: DatabaseSync, tombstone: MemoryForgetTombstone): void {
+  db.prepare(
+    "INSERT OR IGNORE INTO memory_forget_tombstones (id, memory_id, content_hash, subject_key, source_kind, source_ref, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(
+    tombstone.id, tombstone.memoryId, tombstone.contentHash, tombstone.subjectKey,
+    tombstone.sourceKind, tombstone.sourceRef, tombstone.reason, tombstone.createdAt
+  );
+}
+
 function rowToMemoryConsolidationRun(row: DbRow): MemoryConsolidationRun {
   return {
     id: String(row.id),
@@ -3380,6 +3463,11 @@ function scrubMemoryEventPayload(
   if (Array.isArray(next.memoryIds) && next.memoryIds.includes(memoryId)) {
     if ("subjectKey" in next) next.subjectKey = tombstone.subjectKey;
     if ("note" in next) next.note = "包含已遗忘记忆，正文已脱敏。";
+  }
+  if (Array.isArray(next.sourceMemoryIds) && next.sourceMemoryIds.includes(memoryId)) {
+    if ("proposedContent" in next) next.proposedContent = "[包含已遗忘记忆，正文已脱敏]";
+    if ("conflicts" in next) next.conflicts = ["[包含已遗忘记忆]"];
+    if ("report" in next) next.report = "[包含已遗忘记忆，报告已脱敏]";
   }
   for (const [key, item] of Object.entries(next)) {
     next[key] = scrubMemoryEventPayload(type, item, memoryId, tombstone);
