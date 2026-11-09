@@ -150,8 +150,10 @@ export function NewExperimentPage() {
             <div className="case-picker-toolbar">
               <div className="search-field"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索 case 或标题" /></div>
               <label className="select-field"><select value={familyFilter} onChange={(event) => setFamilyFilter(event.target.value)}><option value="">全部任务族</option>{familyOptions.map((family) => <option key={family} value={family}>{FAMILY_LABELS[family]}</option>)}</select></label>
-              <button className="button button-ghost" onClick={selectVisible}>全选当前</button>
-              <button className="button button-ghost" onClick={clearVisible}>取消当前</button>
+              <div className="case-picker-actions">
+                <button className="button button-ghost" onClick={selectVisible}>全选当前</button>
+                <button className="button button-ghost" onClick={clearVisible}>取消当前</button>
+              </div>
             </div>
             <div className="case-picker">
               {[...groupedCases.entries()].map(([family, items]) => {

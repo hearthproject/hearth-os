@@ -861,6 +861,7 @@ code { font-size: .82em; }
 .option-card strong { font-size: 12px; }
 .option-card small { font-size: 10px; }
 .case-picker-toolbar { gap: 7px; margin-bottom: 10px; }
+.case-picker-actions { display: flex; align-items: center; gap: 2px; }
 .case-picker { max-height: 480px; border-radius: 7px; }
 .case-family-head { min-height: 36px; background: var(--surface-muted); font-size: 11px; }
 .case-family-head:hover { background: var(--surface-deep); }
@@ -1144,6 +1145,8 @@ a.overview-name:hover { color: var(--accent-deep); }
   .option-grid, .form-grid { grid-template-columns: 1fr; }
   .case-picker-toolbar { flex-direction: column; }
   .case-picker-toolbar .search-field, .case-picker-toolbar .select-field { width: 100%; }
+  .case-picker-actions { justify-content: flex-start; gap: 8px; }
+  .case-picker-actions .button { width: auto; padding: 0 4px; }
   .review-card-body { flex-direction: column; gap: 11px; }
   .review-run-meta { flex-direction: row; text-align: left; }
   .review-run-meta span { justify-content: flex-start; }
