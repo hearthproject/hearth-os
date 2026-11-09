@@ -17,7 +17,6 @@ import type { CaseVersionSummary, CreateExperimentRequest } from "@hearth/eval-c
 import { api } from "../lib/api.ts";
 import {
   DIFFICULTY_LABELS,
-  FAMILY_COLORS,
   FAMILY_LABELS,
   executorLabel
 } from "../lib/labels.ts";
@@ -130,7 +129,6 @@ export function NewExperimentPage() {
   return (
     <div className="page-stack new-experiment-page">
       <PageHeader
-        eyebrow="NEW EXPERIMENT"
         title="创建评测实验"
         description="固定任务、执行器和运行环境，生成一条可追踪、可比较的质量记录。"
         actions={<Link className="button button-ghost" to="/experiments">取消</Link>}
@@ -139,7 +137,7 @@ export function NewExperimentPage() {
       <div className="experiment-builder">
         <div className="builder-main">
           <section className="panel">
-            <div className="step-heading"><span>01</span><div><h2>实验信息</h2><p>给这次质量基线一个可识别的名字。</p></div></div>
+            <div className="step-heading"><div><h2>实验信息</h2><p>给这次质量基线一个可识别的名字。</p></div></div>
             <label className="field-label">实验名称<input value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：v0.3 本地工作流基线" maxLength={120} /></label>
             <div className="option-grid">
               <label className={`option-card ${runMode === "offline" ? "selected" : ""}`}><input type="radio" checked={runMode === "offline"} onChange={() => switchRunMode("offline")} /><span><strong>离线评测</strong><small>仅使用仓库内固定输入与 golden，结果可复现。</small></span></label>
@@ -148,7 +146,7 @@ export function NewExperimentPage() {
           </section>
 
           <section className="panel">
-            <div className="step-heading"><span>02</span><div><h2>选择任务</h2><p>已选择 <strong>{validSelected.length}</strong> 个任务，当前模式可用 {eligibleCases.length} 个。</p></div></div>
+            <div className="step-heading"><div><h2>选择任务</h2><p>已选择 <strong>{validSelected.length}</strong> 个任务，当前模式可用 {eligibleCases.length} 个。</p></div></div>
             <div className="case-picker-toolbar">
               <div className="search-field"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索 case 或标题" /></div>
               <label className="select-field"><select value={familyFilter} onChange={(event) => setFamilyFilter(event.target.value)}><option value="">全部任务族</option>{familyOptions.map((family) => <option key={family} value={family}>{FAMILY_LABELS[family]}</option>)}</select></label>
@@ -163,7 +161,6 @@ export function NewExperimentPage() {
                   <div className="case-family" key={family}>
                     <button className="case-family-head" onClick={() => toggleFamily(family)}>
                       {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                      <i style={{ background: FAMILY_COLORS[family] }} />
                       <strong>{FAMILY_LABELS[family]}</strong>
                       <span>{selectedCount} / {items.length} 已选</span>
                     </button>
@@ -186,7 +183,7 @@ export function NewExperimentPage() {
           </section>
 
           <section className="panel">
-            <div className="step-heading"><span>03</span><div><h2>执行器</h2><p>只显示 Hearth 当前检测到的执行器；不可用执行器会附带原因。</p></div></div>
+            <div className="step-heading"><div><h2>执行器</h2><p>只显示 Hearth 当前检测到的执行器；不可用执行器会附带原因。</p></div></div>
             <div className="executor-choice-grid">
               {executors.map((executor) => (
                 <label key={executor.id} className={`executor-choice ${executorIds.has(executor.id) ? "selected" : ""} ${!executor.canRun ? "disabled" : ""}`}>
@@ -201,7 +198,7 @@ export function NewExperimentPage() {
           </section>
 
           <section className="panel">
-            <div className="step-heading"><span>04</span><div><h2>运行参数</h2><p>控制重复次数、并发和自动评分行为。</p></div></div>
+            <div className="step-heading"><div><h2>运行参数</h2><p>控制重复次数、并发和自动评分行为。</p></div></div>
             <div className="form-grid">
               <label className="field-label">重复次数<input type="number" min={1} max={5} value={repetitions} onChange={(event) => setRepetitions(clamp(Number(event.target.value), 1, 5))} /></label>
               <label className="field-label">最大并发<input type="number" min={1} max={8} value={maxConcurrency} onChange={(event) => setMaxConcurrency(clamp(Number(event.target.value), 1, 8))} /></label>
@@ -216,12 +213,12 @@ export function NewExperimentPage() {
 
         <aside className="builder-summary">
           <div className="summary-card sticky-card">
-            <span className="summary-eyebrow">RUN SUMMARY</span>
-            <h2>{name.trim() || "未命名实验"}</h2>
+            <h2>运行摘要</h2>
+            <p className="summary-name">{name.trim() || "未命名实验"}</p>
             <div className="summary-numbers">
-              <div><strong>{validSelected.length}</strong><span>cases</span></div>
-              <div><strong>{executorIds.size}</strong><span>executors</span></div>
-              <div><strong>{validSelected.length * executorIds.size * repetitions}</strong><span>runs</span></div>
+              <div><strong>{validSelected.length}</strong><span>任务</span></div>
+              <div><strong>{executorIds.size}</strong><span>执行器</span></div>
+              <div><strong>{validSelected.length * executorIds.size * repetitions}</strong><span>运行</span></div>
             </div>
             <div className="summary-list">
               <span><Layers3 size={15} /> 模式 <b>{runMode === "offline" ? "离线" : "在线"}</b></span>
