@@ -1,0 +1,1 @@
+{"breakingChanges":2,"safeToMerge":false,"affectedFiles":["src/client.ts","src/auth.ts"],"tests":{"passed":7,"failed":2},"rollback":"restore lockfile and image","plan":["迁移 retry 配置","替换 login API","重跑全部测试","保留单批回滚镜像"]}

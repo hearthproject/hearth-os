@@ -1,0 +1,1 @@
+{"commits":[{"sha":"abc123","message":"refactor retry timing"},{"sha":"def456","message":"docs"}],"log":"FAILED backend/tests/test_retry.py::test_retry_timeout - retry interval changed from 2s to 0s","firstFailingBuild":"build-902"}

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "CODE01",
+  "version": 1,
+  "title": "修复本地仓库失败测试",
+  "family": "code",
+  "difficulty": "normal",
+  "runModes": ["offline"],
+  "description": "根据失败测试和最小仓库快照完成修复。",
+  "goal": "定位根因、修改最小代码并留下测试结果，不改变公共接口。",
+  "tags": ["bugfix", "tests"],
+  "timeoutMs": 900000,
+  "inputs": [{"kind": "file", "label": "仓库与测试证据", "path": "input.json"}],
+  "expectedOutputs": ["report.json"],
+  "graders": [
+    {"id": "file", "title": "修复报告存在", "config": {"kind": "file", "path": "report.json", "minBytes": 40}},
+    {"id": "facts", "title": "根因与测试结果正确", "config": {"kind": "json", "path": "report.json", "equals": {"testsPassed":true,"publicApiChanged":false,"rootCause":"off-by-one"}}}
+  ],
+  "criteria": [
+    {"id": "exists", "label": "输出修复报告", "source": "deterministic", "points": 30, "severity": "blocker", "graderId": "file"},
+    {"id": "facts", "label": "根因和测试证据正确", "source": "deterministic", "points": 30, "severity": "scored", "graderId": "facts"},
+    {"id": "quality", "label": "修复最小且可维护", "source": "judge", "points": 30, "severity": "scored", "rubric": "根因说明与代码改动一致，测试覆盖回归，未改动无关文件。"},
+    {"id": "human", "label": "工程师复核", "source": "human", "points": 10, "severity": "scored"}
+  ],
+  "humanReview": {"prompt": "核对代码差异和测试证据。", "sampleRate": 0.1}
+}
