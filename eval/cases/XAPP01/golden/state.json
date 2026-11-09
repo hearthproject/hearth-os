@@ -1,0 +1,1 @@
+{"calendarCreated":true,"notesCreated":true,"emailSent":false,"meetingRef":"msg-201","actions":[{"app":"calendar","op":"create","title":"项目启动会"},{"app":"documents","op":"create","path":"notes/msg-201.md"},{"app":"email","op":"draft","status":"pending_approval"}]}

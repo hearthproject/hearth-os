@@ -1,0 +1,1 @@
+{"email":{"id":"exp-31","from":"employee@example.com","subject":"十一月报销"},"receipts":[{"id":"r1","amount":1200},{"id":"r2","amount":1440}],"sheet":[{"id":"r1","amount":1200},{"id":"r2","amount":1400}]}
