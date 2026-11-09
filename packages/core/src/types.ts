@@ -1437,6 +1437,30 @@ export type FailureCause = (typeof FAILURE_CAUSES)[number];
 export const FAILURE_ACTIONS = ["retry_same", "handoff", "ask_user", "fail"] as const;
 export type FailureAction = (typeof FAILURE_ACTIONS)[number];
 
+export const FAILURE_CLASSES = [
+  "user_cancelled",
+  "policy_denied",
+  "validation_failed",
+  "effect_unknown",
+  "timeout",
+  "capacity",
+  "rate_limit",
+  "transport",
+  "auth",
+  "budget_exhausted",
+  "internal"
+] as const;
+export type FailureClass = (typeof FAILURE_CLASSES)[number];
+
+export type FailureDisposition =
+  | { type: "retry"; afterMs: number; attempt: number }
+  | { type: "wait"; until: string; reason: string }
+  | { type: "repair"; target: string; reason: string }
+  | { type: "reconcile"; effectId: string }
+  | { type: "ask_user"; question: string; options: string[] }
+  | { type: "handoff"; note: string }
+  | { type: "stop"; reason: string };
+
 export interface FailureDiagnosis {
   id: string;
   taskId: string;

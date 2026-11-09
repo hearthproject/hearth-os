@@ -51,6 +51,15 @@ describe("EvalStore", () => {
       expect(store.countPendingReviews()).toBe(0);
       expect(store.getHumanReview(run.id)?.decision).toBe("pass");
 
+      const failedRun = { ...makeRun(experiment.id, cases[0]?.manifest.id ?? "E01", "failed"), id: "run-failed", externalRef: "exp:failed" };
+      store.createRuns([failedRun]);
+      expect(store.listPendingReviewRuns().map((item) => item.id)).toEqual([failedRun.id]);
+      store.upsertHumanReview({
+        id: "review-2", runId: failedRun.id, reviewer: "owner", decision: "fail", score: 0,
+        note: "confirmed", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+      });
+      expect(store.countPendingReviews()).toBe(0);
+
       const event = store.appendEvent("run.updated", { experimentId: experiment.id, runId: run.id, payload: { status: "needs_review" } });
       expect(store.listEvents({ afterSeq: event.seq - 1 })).toEqual([event]);
     } finally {

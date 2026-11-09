@@ -346,7 +346,8 @@ export class EvalStore {
     return (this.db.prepare(
       `SELECT r.* FROM experiment_runs r
        LEFT JOIN human_reviews h ON h.run_id = r.id
-       WHERE r.status = 'needs_review' AND h.run_id IS NULL
+       WHERE h.run_id IS NULL
+         AND (r.status IN ('needs_review', 'failed', 'blocked', 'error') OR r.review_reasons_json <> '[]')
        ORDER BY r.updated_at ASC LIMIT ?`
     ).all(bounded) as DbRow[]).map(rowToRun);
   }
@@ -355,7 +356,8 @@ export class EvalStore {
     const row = this.db.prepare(
       `SELECT COUNT(*) AS count FROM experiment_runs r
        LEFT JOIN human_reviews h ON h.run_id = r.id
-       WHERE r.status = 'needs_review' AND h.run_id IS NULL`
+       WHERE h.run_id IS NULL
+         AND (r.status IN ('needs_review', 'failed', 'blocked', 'error') OR r.review_reasons_json <> '[]')`
     ).get() as DbRow | undefined;
     return Number(row?.count ?? 0);
   }
