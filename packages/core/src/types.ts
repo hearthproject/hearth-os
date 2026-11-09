@@ -202,6 +202,7 @@ export interface RunBudget {
 
 export interface TaskRecord {
   id: string;
+  goalId?: string | null;
   externalRef?: string | null;
   requestHash?: string | null;
   templateId: string | null;
@@ -228,6 +229,74 @@ export interface TaskRecord {
   methodVersion?: number | null;
   pinnedAt?: string | null;
   archivedAt?: string | null;
+}
+
+export const GOAL_STATES = ["draft", "active", "blocked", "awaiting_user", "validating", "done", "failed", "cancelled"] as const;
+export type GoalState = (typeof GOAL_STATES)[number];
+
+export const GOAL_VALIDATORS = ["command", "file", "schema", "git", "manual", "llm_review"] as const;
+export type GoalValidator = (typeof GOAL_VALIDATORS)[number];
+
+export const GOAL_REVIEW_POLICIES = ["auto", "human_on_risk", "human_on_complete"] as const;
+export type GoalReviewPolicy = (typeof GOAL_REVIEW_POLICIES)[number];
+
+export interface GoalAuthoritySource {
+  kind: "user" | "document" | "system";
+  ref: string;
+}
+
+export interface GoalCriterion {
+  id: string;
+  description: string;
+  validator: GoalValidator;
+  check: string;
+  required: boolean;
+}
+
+export interface GoalBudget {
+  maxTurns?: number;
+  maxToolCalls?: number;
+  maxTokens?: number;
+  maxDurationMs?: number;
+  maxHumanMinutes?: number;
+}
+
+export interface GoalContract {
+  goalId: string;
+  title: string;
+  objective: string;
+  constraints: string[];
+  forbiddenActions: string[];
+  authoritySources: GoalAuthoritySource[];
+  successCriteria: GoalCriterion[];
+  evidenceRequirements: string[];
+  budget: GoalBudget;
+  deadline?: string;
+  stopConditions: string[];
+  reviewPolicy: GoalReviewPolicy;
+  currentState: GoalState;
+  nextHandoff?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GoalCriterionResult {
+  criterionId: string;
+  status: "passed" | "failed" | "not_run" | "not_required";
+  evidenceRefs: string[];
+  detail: string;
+}
+
+export interface GoalCompletionReport {
+  goalId: string;
+  taskId: string;
+  verdict: "pass" | "fail" | "needs_human" | "blocked";
+  summary: string;
+  criteria: GoalCriterionResult[];
+  evidenceRefs: string[];
+  missingEvidence: string[];
+  forbiddenActions: string[];
+  checkedAt: string;
 }
 
 export const TASK_FOLLOW_UP_MODES = ["queue", "steer"] as const;

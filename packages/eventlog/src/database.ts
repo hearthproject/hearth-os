@@ -24,6 +24,7 @@ import type {
   EffectStatus,
   EventEnvelope,
   ExecutorModelBinding,
+  GoalContract,
   HandoffRecord,
   MemoryConflict,
   MemoryForgetReceipt,
@@ -95,7 +96,7 @@ export interface RunAggregate {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 16;
+export const CURRENT_SCHEMA_VERSION = 17;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -111,6 +112,7 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY, external_ref TEXT UNIQUE, request_hash TEXT,
+  goal_id TEXT,
   template_id TEXT, title TEXT NOT NULL, goal TEXT NOT NULL,
   status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
   deadline TEXT, inputs_json TEXT NOT NULL, network_hosts_json TEXT NOT NULL,
@@ -118,6 +120,14 @@ CREATE TABLE IF NOT EXISTS tasks (
   result_summary TEXT, conversation_id TEXT, executor_id TEXT, task_kind TEXT,
   expected_outputs_json TEXT, permissions_json TEXT, pending_input TEXT,
   method_id TEXT, method_version INTEGER, pinned_at TEXT, archived_at TEXT
+);
+CREATE TABLE IF NOT EXISTS goals (
+  id TEXT PRIMARY KEY, title TEXT NOT NULL, objective TEXT NOT NULL,
+  constraints_json TEXT NOT NULL, forbidden_actions_json TEXT NOT NULL,
+  authority_sources_json TEXT NOT NULL, success_criteria_json TEXT NOT NULL,
+  evidence_requirements_json TEXT NOT NULL, budget_json TEXT NOT NULL,
+  deadline TEXT, stop_conditions_json TEXT NOT NULL, review_policy TEXT NOT NULL,
+  current_state TEXT NOT NULL, next_handoff TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS conversations (
   id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
@@ -510,6 +520,7 @@ export class HearthStore {
     ensureColumn(this.db, "tasks", "method_version", "INTEGER");
     ensureColumn(this.db, "tasks", "pinned_at", "TEXT");
     ensureColumn(this.db, "tasks", "archived_at", "TEXT");
+    ensureColumn(this.db, "tasks", "goal_id", "TEXT");
     ensureColumn(this.db, "tasks", "external_ref", "TEXT");
     ensureColumn(this.db, "tasks", "request_hash", "TEXT");
     ensureColumn(this.db, "method_candidates", "generation", "INTEGER");
@@ -573,6 +584,8 @@ export class HearthStore {
       CREATE INDEX IF NOT EXISTS effects_available_idx ON effects(status, available_at);
       CREATE INDEX IF NOT EXISTS reconcile_queue_status_idx ON reconcile_queue(status, created_at);
       CREATE INDEX IF NOT EXISTS reconcile_queue_task_idx ON reconcile_queue(task_id, status);
+      CREATE INDEX IF NOT EXISTS goals_state_idx ON goals(current_state, updated_at);
+      CREATE INDEX IF NOT EXISTS tasks_goal_idx ON tasks(goal_id, created_at);
     `);
     this.db.exec(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION}`);
     this.setMeta("schemaVersion", String(CURRENT_SCHEMA_VERSION));
@@ -850,6 +863,15 @@ export class HearthStore {
 
   listTasks(): TaskRecord[] {
     return (this.db.prepare("SELECT * FROM tasks ORDER BY created_at DESC").all() as DbRow[]).map(rowToTask);
+  }
+
+  getGoal(goalId: string): GoalContract | null {
+    const row = this.db.prepare("SELECT * FROM goals WHERE id = ?").get(goalId) as DbRow | undefined;
+    return row ? rowToGoal(row) : null;
+  }
+
+  listGoals(): GoalContract[] {
+    return (this.db.prepare("SELECT * FROM goals ORDER BY updated_at DESC").all() as DbRow[]).map(rowToGoal);
   }
 
   createConversation(title: string, settings: ConversationSettings = defaultConversationSettings()): ConversationRecord {
@@ -1914,6 +1936,8 @@ export class HearthStore {
     switch (event.type) {
       case "task.created": return upsertTask(this.db, event.payload as TaskRecord);
       case "task.updated": return updateTask(this.db, event.taskId, event.payload as Record<string, unknown>);
+      case "goal.created":
+      case "goal.updated": return upsertGoal(this.db, event.payload as GoalContract);
       case "task.proposal.created":
       case "task.proposal.updated": return upsertTaskProposal(this.db, event.payload as TaskProposalRecord);
       case "task.follow-up.created":
@@ -1999,8 +2023,8 @@ export class HearthStore {
 
 function upsertTask(db: DatabaseSync, task: TaskRecord): void {
   db.prepare(
-    `INSERT INTO tasks (id, external_ref, request_hash, template_id, title, goal, status, created_at, updated_at, deadline, inputs_json, network_hosts_json, output_dir, current_run_id, next_action, error_json, result_summary, conversation_id, executor_id, task_kind, expected_outputs_json, permissions_json, pending_input, method_id, method_version, pinned_at, archived_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO tasks (id, external_ref, request_hash, template_id, title, goal, status, created_at, updated_at, deadline, inputs_json, network_hosts_json, output_dir, current_run_id, next_action, error_json, result_summary, conversation_id, executor_id, task_kind, expected_outputs_json, permissions_json, pending_input, method_id, method_version, pinned_at, archived_at, goal_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        external_ref=excluded.external_ref, request_hash=excluded.request_hash,
        template_id=excluded.template_id, title=excluded.title, goal=excluded.goal, status=excluded.status,
@@ -2011,7 +2035,7 @@ function upsertTask(db: DatabaseSync, task: TaskRecord): void {
        executor_id=excluded.executor_id, task_kind=excluded.task_kind,
        expected_outputs_json=excluded.expected_outputs_json, permissions_json=excluded.permissions_json,
        pending_input=excluded.pending_input, method_id=excluded.method_id, method_version=excluded.method_version,
-       pinned_at=excluded.pinned_at, archived_at=excluded.archived_at`
+        pinned_at=excluded.pinned_at, archived_at=excluded.archived_at, goal_id=excluded.goal_id`
   ).run(
     task.id, task.externalRef ?? null, task.requestHash ?? null,
     task.templateId, task.title, task.goal, task.status, task.createdAt, task.updatedAt,
@@ -2023,7 +2047,27 @@ function upsertTask(db: DatabaseSync, task: TaskRecord): void {
     task.permissions ? JSON.stringify(task.permissions) : null,
     task.pendingInput ?? null,
     task.methodId ?? null, task.methodVersion ?? null,
-    task.pinnedAt ?? null, task.archivedAt ?? null
+    task.pinnedAt ?? null, task.archivedAt ?? null, task.goalId ?? null
+  );
+}
+
+function upsertGoal(db: DatabaseSync, goal: GoalContract): void {
+  db.prepare(
+    `INSERT INTO goals (id, title, objective, constraints_json, forbidden_actions_json, authority_sources_json, success_criteria_json, evidence_requirements_json, budget_json, deadline, stop_conditions_json, review_policy, current_state, next_handoff, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       title=excluded.title, objective=excluded.objective, constraints_json=excluded.constraints_json,
+       forbidden_actions_json=excluded.forbidden_actions_json, authority_sources_json=excluded.authority_sources_json,
+       success_criteria_json=excluded.success_criteria_json, evidence_requirements_json=excluded.evidence_requirements_json,
+       budget_json=excluded.budget_json, deadline=excluded.deadline, stop_conditions_json=excluded.stop_conditions_json,
+       review_policy=excluded.review_policy, current_state=excluded.current_state, next_handoff=excluded.next_handoff,
+       updated_at=excluded.updated_at`
+  ).run(
+    goal.goalId, goal.title, goal.objective, JSON.stringify(goal.constraints),
+    JSON.stringify(goal.forbiddenActions), JSON.stringify(goal.authoritySources),
+    JSON.stringify(goal.successCriteria), JSON.stringify(goal.evidenceRequirements),
+    JSON.stringify(goal.budget), goal.deadline ?? null, JSON.stringify(goal.stopConditions),
+    goal.reviewPolicy, goal.currentState, goal.nextHandoff ?? null, goal.createdAt, goal.updatedAt
   );
 }
 
@@ -2035,7 +2079,7 @@ function updateTask(db: DatabaseSync, taskId: string | null, patch: Record<strin
     resultSummary: "result_summary", conversationId: "conversation_id",
     pendingInput: "pending_input", executorId: "executor_id", taskKind: "task_kind",
     methodId: "method_id", methodVersion: "method_version",
-    pinnedAt: "pinned_at", archivedAt: "archived_at"
+    pinnedAt: "pinned_at", archivedAt: "archived_at", goalId: "goal_id"
   };
   for (const [key, column] of Object.entries(columns)) {
     if (key in patch) db.prepare(`UPDATE tasks SET ${column} = ? WHERE id = ?`).run((patch[key] as SQLInputValue) ?? null, taskId);
@@ -2432,6 +2476,7 @@ function rowToTask(row: DbRow): TaskRecord {
   const permissions = normalizeTaskPermissions(row.permissions_json);
   return {
     id: String(row.id),
+    goalId: row.goal_id == null ? null : String(row.goal_id),
     externalRef: row.external_ref == null ? null : String(row.external_ref),
     requestHash: row.request_hash == null ? null : String(row.request_hash),
     templateId: row.template_id == null ? null : String(row.template_id),
@@ -2454,6 +2499,27 @@ function rowToTask(row: DbRow): TaskRecord {
     methodVersion: row.method_version == null ? null : Number(row.method_version),
     pinnedAt: row.pinned_at == null ? null : String(row.pinned_at),
     archivedAt: row.archived_at == null ? null : String(row.archived_at)
+  };
+}
+
+function rowToGoal(row: DbRow): GoalContract {
+  return {
+    goalId: String(row.id),
+    title: String(row.title),
+    objective: String(row.objective),
+    constraints: JSON.parse(String(row.constraints_json)),
+    forbiddenActions: JSON.parse(String(row.forbidden_actions_json)),
+    authoritySources: JSON.parse(String(row.authority_sources_json)),
+    successCriteria: JSON.parse(String(row.success_criteria_json)),
+    evidenceRequirements: JSON.parse(String(row.evidence_requirements_json)),
+    budget: JSON.parse(String(row.budget_json)),
+    ...(row.deadline == null ? {} : { deadline: String(row.deadline) }),
+    stopConditions: JSON.parse(String(row.stop_conditions_json)),
+    reviewPolicy: String(row.review_policy) as GoalContract["reviewPolicy"],
+    currentState: String(row.current_state) as GoalContract["currentState"],
+    ...(row.next_handoff == null ? {} : { nextHandoff: String(row.next_handoff) }),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
   };
 }
 

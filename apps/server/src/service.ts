@@ -16,6 +16,8 @@ import type {
   EffectRecord,
   EventWindow,
   ExecutorId,
+  GoalContract,
+  GoalState,
   OutboxDraft,
   ReconcileItem,
   RunListItem,
@@ -61,6 +63,22 @@ export interface CreateTaskInput {
   outputDir?: string;
   methodId?: string;
   methodVersion?: number;
+  goalId?: string;
+}
+
+export interface CreateGoalInput {
+  title: string;
+  objective: string;
+  constraints?: string[];
+  forbiddenActions?: string[];
+  authoritySources?: GoalContract["authoritySources"];
+  successCriteria?: GoalContract["successCriteria"];
+  evidenceRequirements?: string[];
+  budget?: GoalContract["budget"];
+  deadline?: string;
+  stopConditions?: string[];
+  reviewPolicy?: GoalContract["reviewPolicy"];
+  currentState?: GoalState;
 }
 
 export class TaskInputSelectionError extends Error {
@@ -77,6 +95,7 @@ export class TaskInputSelectionError extends Error {
 
 export interface TaskView {
   task: TaskRecord;
+  goal: GoalContract | null;
   runs: ReturnType<HearthStore["listRuns"]>;
   approvals: ReturnType<HearthStore["listApprovals"]>;
   artifacts: ReturnType<HearthStore["listArtifacts"]>;
@@ -106,6 +125,7 @@ export interface ExportSnapshot {
   effects: EffectRecord[];
   followUps: TaskFollowUpRecord[];
   outboxDrafts: OutboxDraft[];
+  goals: GoalContract[];
   events: ReturnType<HearthStore["listEvents"]>;
 }
 
@@ -180,10 +200,12 @@ export class HearthService {
     }
     if (input.textInput) inputs.push({ kind: "text", label: "用户请求", value: input.textInput });
     const executorId = input.executorId ?? (template ? "codex" : "native");
+    if (input.goalId && !this.store.getGoal(input.goalId)) throw new Error(`Unknown goal: ${input.goalId}`);
     const taskKind = input.taskKind ?? (template?.github ? "workspace" : "general");
     const expectedOutputs = input.expectedOutputs ?? template?.expectedOutputs ?? ["result.md"];
     const task: TaskRecord = {
       id,
+      goalId: input.goalId ?? null,
       ...(input.externalRef ? { externalRef: input.externalRef, requestHash: input.requestHash ?? null } : {}),
       templateId: template?.id ?? null,
       title: input.title?.trim() || template?.title || "未命名任务",
@@ -220,6 +242,56 @@ export class HearthService {
     return this.store.listTasks();
   }
 
+  createGoal(input: CreateGoalInput): GoalContract {
+    const now = new Date().toISOString();
+    const criteria = input.successCriteria ?? [];
+    const criterionIds = new Set<string>();
+    for (const criterion of criteria) {
+      if (!criterion.id.trim()) throw new Error("Goal criterion id is required");
+      if (criterionIds.has(criterion.id)) throw new Error(`Duplicate goal criterion: ${criterion.id}`);
+      criterionIds.add(criterion.id);
+      if (!criterion.description.trim() || !criterion.check.trim()) throw new Error("Goal criterion description and check are required");
+    }
+    const goal: GoalContract = {
+      goalId: randomUUID(),
+      title: input.title.trim(),
+      objective: input.objective.trim(),
+      constraints: input.constraints ?? [],
+      forbiddenActions: input.forbiddenActions ?? [],
+      authoritySources: input.authoritySources ?? [{ kind: "user", ref: "local-user" }],
+      successCriteria: criteria,
+      evidenceRequirements: input.evidenceRequirements ?? [],
+      budget: input.budget ?? {},
+      ...(input.deadline ? { deadline: input.deadline } : {}),
+      stopConditions: input.stopConditions ?? [],
+      reviewPolicy: input.reviewPolicy ?? "human_on_risk",
+      currentState: input.currentState ?? "draft",
+      createdAt: now,
+      updatedAt: now
+    };
+    if (!goal.title || !goal.objective) throw new Error("Goal title and objective are required");
+    const event = this.store.appendEvent({ type: "goal.created", payload: goal });
+    this.bus.publish(event);
+    return goal;
+  }
+
+  getGoal(goalId: string): GoalContract | null {
+    return this.store.getGoal(goalId);
+  }
+
+  listGoals(): GoalContract[] {
+    return this.store.listGoals();
+  }
+
+  updateGoal(goalId: string, patch: Partial<Omit<GoalContract, "goalId" | "createdAt" | "updatedAt">>): GoalContract {
+    const current = this.store.getGoal(goalId);
+    if (!current) throw new Error(`Unknown goal: ${goalId}`);
+    const updated: GoalContract = { ...current, ...patch, goalId, updatedAt: new Date().toISOString() };
+    const event = this.store.appendEvent({ type: "goal.updated", payload: updated });
+    this.bus.publish(event);
+    return this.store.getGoal(goalId) ?? updated;
+  }
+
   exportSnapshot(): ExportSnapshot {
     const tasks = this.store.listTasks();
     return {
@@ -233,6 +305,7 @@ export class HearthService {
       effects: this.store.listAllEffects(),
       followUps: tasks.flatMap((task) => this.store.listTaskFollowUps(task.id)),
       outboxDrafts: this.store.listOutboxDrafts(),
+      goals: this.store.listGoals(),
       events: this.store.listEvents(0)
     };
   }
@@ -244,6 +317,7 @@ export class HearthService {
     const runs = this.store.listRuns(taskId);
     return {
       task,
+      goal: task.goalId ? this.store.getGoal(task.goalId) : null,
       runs,
       approvals: this.store.listApprovals(taskId),
       artifacts: this.store.listArtifacts(taskId),
@@ -354,7 +428,7 @@ export class HearthService {
     return new Map(this.store.listTasks().map((task) => [task.id, task.title]));
   }
 
-  updateTask(taskId: string, patch: Partial<Pick<TaskRecord, "status" | "title" | "goal" | "currentRunId" | "nextAction" | "error" | "resultSummary" | "conversationId" | "executorId" | "taskKind" | "expectedOutputs" | "permissions" | "pendingInput" | "methodId" | "methodVersion" | "pinnedAt" | "archivedAt">>, runId?: string): TaskRecord {
+  updateTask(taskId: string, patch: Partial<Pick<TaskRecord, "status" | "title" | "goal" | "goalId" | "currentRunId" | "nextAction" | "error" | "resultSummary" | "conversationId" | "executorId" | "taskKind" | "expectedOutputs" | "permissions" | "pendingInput" | "methodId" | "methodVersion" | "pinnedAt" | "archivedAt">>, runId?: string): TaskRecord {
     const task = this.requireTask(taskId);
     if (patch.status && patch.status !== task.status) assertTransition(task.status, patch.status);
     const previousStatus = task.status;
