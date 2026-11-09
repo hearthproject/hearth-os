@@ -1,10 +1,9 @@
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
 import type { ExperimentRunStatus, ExperimentStatus } from "@hearth/eval-core";
 import { AlertTriangle, Inbox, LoaderCircle } from "lucide-react";
 import { statusMeta } from "../lib/labels.ts";
 
 export function PageHeader({
-  eyebrow,
   title,
   description,
   actions
@@ -17,7 +16,6 @@ export function PageHeader({
   return (
     <header className="page-header">
       <div>
-        {eyebrow && <span className="eyebrow">{eyebrow}</span>}
         <h1>{title}</h1>
         {description && <p>{description}</p>}
       </div>
@@ -72,18 +70,10 @@ export function ProgressBar({
 }
 
 export function ScoreDial({ score, caption }: { score: number | null; caption?: string }) {
-  const normalized = score === null ? 0 : Math.max(0, Math.min(100, score));
-  const style = {
-    "--score-angle": `${normalized * 3.6}deg`,
-    "--score-accent": "#d45d35",
-    "--score-track": "#e9e4da"
-  } as CSSProperties;
   return (
-    <div className="score-dial" style={style}>
-      <div>
-        <strong>{score === null ? "—" : score.toFixed(1)}</strong>
-        <small>{caption ?? "平均分"}</small>
-      </div>
+    <div className="score-figure">
+      <strong>{score === null ? "—" : score.toFixed(1)}</strong>
+      <small>{caption ?? "平均分"}</small>
     </div>
   );
 }
