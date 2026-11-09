@@ -95,7 +95,9 @@ export function publishArtifacts(options: PublishArtifactsOptions): ArtifactReco
 
 function isManagedOutputDir(outputDir: string): boolean {
   const normalized = outputDir.replace(/\\/g, "/").replace(/^\.\//, "");
-  return normalized.startsWith("eval/runs/") || normalized.startsWith(".hearth/artifacts/");
+  return normalized.startsWith("eval/runs/")
+    || normalized.startsWith(".hearth/artifacts/")
+    || normalized.startsWith(".hearth/eval-artifacts/");
 }
 
 export function validateExpectedOutputs(outDir: string, expectedOutputs: string[]): void {
