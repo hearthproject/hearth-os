@@ -76,7 +76,8 @@ export function RunDetailPage() {
   if (runQuery.error) return <ErrorState error={runQuery.error} onRetry={() => void runQuery.refetch()} />;
   const data = runQuery.data!;
   const { run } = data;
-  const task = asRecord(data.hearthTask);
+  const taskView = asRecord(data.hearthTask);
+  const task = asRecord(taskView?.task) ?? taskView;
   const active = isActiveRun(run.status);
   const reviewPending = Boolean(data.review) === false && (run.reviewReasons.length > 0 || ["failed", "blocked", "error", "needs_review"].includes(run.status));
   const evidenceCount = data.graders.reduce((sum, grader) => sum + grader.evidence.length, 0);
@@ -201,11 +202,11 @@ export function RunDetailPage() {
                 {typeof task.nextAction === "string" && <KeyValue label="下一步">{task.nextAction}</KeyValue>}
                 {typeof asRecord(task.error)?.message === "string" && <div className="inline-error">{String(asRecord(task.error)?.message)}</div>}
                 <div className="task-counts">
-                  <span><strong>{Array.isArray(task.runs) ? task.runs.length : 0}</strong> executor runs</span>
-                  <span><strong>{Array.isArray(task.approvals) ? task.approvals.length : 0}</strong> approvals</span>
-                  <span><strong>{Array.isArray(task.artifacts) ? task.artifacts.length : 0}</strong> artifacts</span>
+                  <span><strong>{arrayLength(taskView?.runs ?? task.runs)}</strong> executor runs</span>
+                  <span><strong>{arrayLength(taskView?.approvals ?? task.approvals)}</strong> approvals</span>
+                  <span><strong>{arrayLength(taskView?.artifacts ?? task.artifacts)}</strong> artifacts</span>
                 </div>
-                <details className="raw-details"><summary><ChevronDown size={14} /> Hearth 原始响应</summary><pre>{JSON.stringify(task, null, 2)}</pre></details>
+                <details className="raw-details"><summary><ChevronDown size={14} /> Hearth 原始响应</summary><pre>{JSON.stringify(taskView, null, 2)}</pre></details>
               </div>
             ) : <EmptyState title="暂无 Hearth 任务" description="运行排队或创建失败时可能还没有任务 ID。" />}
           </section>
@@ -251,4 +252,8 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
+}
+
+function arrayLength(value: unknown): number {
+  return Array.isArray(value) ? value.length : 0;
 }
