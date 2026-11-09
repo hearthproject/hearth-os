@@ -279,7 +279,9 @@ function normalizeProposal(input: ActionProposal): ActionProposal {
 function resolveCommand(command: ActionCommand, sessionRoot: string, permissionMode: PermissionMode): ResolvedCommand {
   if (!command.executable.trim()) throw new ActionResolutionError("EXECUTABLE_REQUIRED", "命令缺少可执行文件");
   const executable = resolveExecutable(command.executable);
-  const cwd = resolve(command.cwd ?? sessionRoot);
+  const cwd = command.cwd
+    ? (isAbsolute(command.cwd) ? resolve(command.cwd) : resolve(sessionRoot, command.cwd))
+    : sessionRoot;
   if (!existsSync(cwd)) throw new ActionResolutionError("CWD_NOT_FOUND", "命令工作目录不存在");
   if (permissionMode !== "full" && !isInsideRoot(sessionRoot, cwd)) {
     throw new ActionResolutionError("CWD_OUTSIDE_ROOT", "命令工作目录超出会话根目录");
@@ -321,7 +323,7 @@ function resolveFile(file: ActionFileTarget, sessionRoot: string, permissionMode
   if (!["create", "replace", "append", "delete"].includes(file.mode)) {
     throw new ActionResolutionError("INVALID_FILE_MODE", "文件动作模式不正确");
   }
-  const path = resolve(file.path);
+  const path = isAbsolute(file.path) ? resolve(file.path) : resolve(sessionRoot, file.path);
   if (permissionMode !== "full" && !isInsideRoot(sessionRoot, path)) {
     throw new ActionResolutionError("PATH_OUTSIDE_ROOT", "文件动作超出会话根目录");
   }

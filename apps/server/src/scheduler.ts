@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, relative } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import type {
   AgentCheckpoint,
   AgentResumeState,
@@ -13,6 +13,7 @@ import { runCodex } from "@hearth/codex-executor";
 import { getTemplate } from "@hearth/templates";
 import type { DshApprovalOutcome, DshApprovalRequest, DshContextEvent } from "@hearth/deepseek-executor";
 import type { ApprovalRequest, ApprovalManager, PendingToolApproval, ToolApprovalDecision } from "./approvals.ts";
+import { resolveAction, type ActionProposal, type ResolvedAction } from "./action-resolver.ts";
 import { missingExpectedOutputs, publishArtifacts } from "./artifacts.ts";
 import { CONTEXT_BLOB_DIR, EXECUTOR_SETTINGS_PATH, GIT_CACHE_DIR, MODEL_SETTINGS_PATH, REPO_ROOT, SOURCE_CONTENT_DIR, WORKSPACE_DIR } from "./config.ts";
 import { ContextService, estimateTokens } from "./context.ts";
@@ -1154,6 +1155,7 @@ export class HearthScheduler {
                 run,
                 request,
                 fullPermission,
+                workspaceRoot: prepared.root,
                 signal: controller.signal
               })
             }
@@ -1296,6 +1298,7 @@ export class HearthScheduler {
     run: RunRecord;
     request: AgentToolAuthorizationRequest;
     fullPermission: boolean;
+    workspaceRoot: string;
     signal: AbortSignal;
   }): Promise<AgentToolAuthorization> {
     const toolName = input.request.call.name;
@@ -1309,13 +1312,23 @@ export class HearthScheduler {
       return { allowed: true };
     }
     const argumentsValue = approvalArguments(input.request.call.arguments);
+    const summary = toolApprovalSummary(toolName, input.request.call.arguments);
+    const action = resolveToolAction({
+      toolName,
+      argumentsValue,
+      summary,
+      workspaceRoot: input.workspaceRoot,
+      fullPermission: input.fullPermission,
+      context: this.service.store.listScheduleRunByTask(input.task.id) ? "scheduled" : "interactive"
+    });
     const decision = await this.requestToolApproval({
       task: input.task,
       run: input.run,
       toolName,
-      summary: toolApprovalSummary(toolName, input.request.call.arguments),
+      summary,
       target: { tool: toolName, arguments: argumentsValue },
       preview: { arguments: argumentsValue },
+      ...(action ? { action } : {}),
       signal: input.signal
     });
     return decision.allowed
@@ -1361,6 +1374,7 @@ export class HearthScheduler {
     summary: string;
     target: Record<string, unknown>;
     preview: Record<string, unknown>;
+    action?: ResolvedAction;
     signal: AbortSignal;
   }): Promise<ToolApprovalDecision> {
     if (!this.approvals) {
@@ -1374,7 +1388,8 @@ export class HearthScheduler {
         toolName: input.toolName,
         summary: input.summary,
         target: input.target,
-        preview: input.preview
+        preview: input.preview,
+        ...(input.action ? { action: input.action } : {})
       });
     } catch (error) {
       return { allowed: false, reason: `无法创建工具审批：${errorMessage(error)}` };
@@ -1973,6 +1988,78 @@ function approvalArguments(value: unknown): unknown {
     return { truncated: true, preview: serialized.slice(0, 16_000) };
   } catch {
     return { truncated: true, preview: String(value).slice(0, 16_000) };
+  }
+}
+
+function resolveToolAction(input: {
+  toolName: string;
+  argumentsValue: unknown;
+  summary: string;
+  workspaceRoot: string;
+  fullPermission: boolean;
+  context: "interactive" | "scheduled";
+}): ResolvedAction | null {
+  const args = input.argumentsValue && typeof input.argumentsValue === "object"
+    ? input.argumentsValue as Record<string, unknown>
+    : {};
+  const permissionMode = input.fullPermission ? "full" as const : "guarded" as const;
+  let proposal: ActionProposal | null = null;
+  if (input.toolName === "shell" && typeof args.command === "string" && args.command.trim()) {
+    const windows = process.platform === "win32";
+    proposal = {
+      kind: "shell",
+      summary: input.summary,
+      command: {
+        executable: windows ? "powershell.exe" : "sh",
+        argv: windows ? ["-NoProfile", "-NonInteractive", "-Command", args.command] : ["-c", args.command],
+        cwd: input.workspaceRoot,
+        shell: windows ? "powershell" : "sh"
+      }
+    };
+  } else if (input.toolName === "write_file" || input.toolName === "edit_file") {
+    const path = typeof args.path === "string" ? args.path : typeof args.fileName === "string" ? args.fileName : null;
+    if (path) {
+      const absolute = isAbsolute(path) ? resolve(path) : resolve(input.workspaceRoot, path);
+      proposal = {
+        kind: "file_write",
+        summary: input.summary,
+        files: [{ path: absolute, mode: existsSync(absolute) ? "replace" : "create" }]
+      };
+    }
+  } else if (input.toolName === "fetch_url" && typeof args.url === "string") {
+    try {
+      const url = new URL(args.url);
+      proposal = {
+        kind: "network",
+        summary: input.summary,
+        network: {
+          host: url.hostname,
+          ...(url.port ? { port: Number(url.port) } : {}),
+          method: "GET"
+        }
+      };
+    } catch {
+      proposal = null;
+    }
+  } else if (input.toolName === "capture_screen") {
+    const path = typeof args.path === "string" ? args.path : "desktop.png";
+    const absolute = isAbsolute(path) ? resolve(path) : resolve(input.workspaceRoot, path);
+    proposal = {
+      kind: "desktop",
+      summary: input.summary,
+      files: [{ path: absolute, mode: existsSync(absolute) ? "replace" : "create" }]
+    };
+  }
+  if (!proposal) return null;
+  try {
+    return resolveAction({
+      proposal,
+      permissionMode,
+      context: input.context,
+      sessionRoot: input.workspaceRoot
+    });
+  } catch {
+    return null;
   }
 }
 
