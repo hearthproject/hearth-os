@@ -108,7 +108,8 @@ CREATE TABLE IF NOT EXISTS events (
   created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS tasks (
-  id TEXT PRIMARY KEY, template_id TEXT, title TEXT NOT NULL, goal TEXT NOT NULL,
+  id TEXT PRIMARY KEY, external_ref TEXT UNIQUE, request_hash TEXT,
+  template_id TEXT, title TEXT NOT NULL, goal TEXT NOT NULL,
   status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
   deadline TEXT, inputs_json TEXT NOT NULL, network_hosts_json TEXT NOT NULL,
   output_dir TEXT NOT NULL, current_run_id TEXT, next_action TEXT, error_json TEXT,
@@ -495,6 +496,8 @@ export class HearthStore {
     ensureColumn(this.db, "tasks", "method_version", "INTEGER");
     ensureColumn(this.db, "tasks", "pinned_at", "TEXT");
     ensureColumn(this.db, "tasks", "archived_at", "TEXT");
+    ensureColumn(this.db, "tasks", "external_ref", "TEXT");
+    ensureColumn(this.db, "tasks", "request_hash", "TEXT");
     ensureColumn(this.db, "method_candidates", "generation", "INTEGER");
     ensureColumn(this.db, "method_candidates", "fingerprint", "TEXT");
     ensureColumn(this.db, "task_proposals", "inputs_json", "TEXT");
@@ -533,6 +536,8 @@ export class HearthStore {
       CREATE INDEX IF NOT EXISTS model_profiles_provider_idx ON model_profiles(provider_id, updated_at);
       CREATE INDEX IF NOT EXISTS settings_migrations_status_idx ON settings_migrations(status, updated_at);
       CREATE INDEX IF NOT EXISTS method_candidates_fingerprint_idx ON method_candidates(fingerprint);
+      CREATE UNIQUE INDEX IF NOT EXISTS tasks_external_ref_idx
+        ON tasks(external_ref) WHERE external_ref IS NOT NULL;
       CREATE INDEX IF NOT EXISTS approvals_action_digest_idx ON approvals(action_digest);
     `);
     this.db.exec(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION}`);
@@ -801,6 +806,11 @@ export class HearthStore {
 
   getTask(id: string): TaskRecord | null {
     const row = this.db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToTask(row) : null;
+  }
+
+  getTaskByExternalRef(externalRef: string): TaskRecord | null {
+    const row = this.db.prepare("SELECT * FROM tasks WHERE external_ref = ?").get(externalRef) as DbRow | undefined;
     return row ? rowToTask(row) : null;
   }
 
@@ -1931,9 +1941,10 @@ export class HearthStore {
 
 function upsertTask(db: DatabaseSync, task: TaskRecord): void {
   db.prepare(
-    `INSERT INTO tasks (id, template_id, title, goal, status, created_at, updated_at, deadline, inputs_json, network_hosts_json, output_dir, current_run_id, next_action, error_json, result_summary, conversation_id, executor_id, task_kind, expected_outputs_json, permissions_json, pending_input, method_id, method_version, pinned_at, archived_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO tasks (id, external_ref, request_hash, template_id, title, goal, status, created_at, updated_at, deadline, inputs_json, network_hosts_json, output_dir, current_run_id, next_action, error_json, result_summary, conversation_id, executor_id, task_kind, expected_outputs_json, permissions_json, pending_input, method_id, method_version, pinned_at, archived_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
+       external_ref=excluded.external_ref, request_hash=excluded.request_hash,
        template_id=excluded.template_id, title=excluded.title, goal=excluded.goal, status=excluded.status,
        updated_at=excluded.updated_at, deadline=excluded.deadline, inputs_json=excluded.inputs_json,
        network_hosts_json=excluded.network_hosts_json, output_dir=excluded.output_dir,
@@ -1944,7 +1955,8 @@ function upsertTask(db: DatabaseSync, task: TaskRecord): void {
        pending_input=excluded.pending_input, method_id=excluded.method_id, method_version=excluded.method_version,
        pinned_at=excluded.pinned_at, archived_at=excluded.archived_at`
   ).run(
-    task.id, task.templateId, task.title, task.goal, task.status, task.createdAt, task.updatedAt,
+    task.id, task.externalRef ?? null, task.requestHash ?? null,
+    task.templateId, task.title, task.goal, task.status, task.createdAt, task.updatedAt,
     task.deadline, JSON.stringify(task.inputs), JSON.stringify(task.networkHosts), task.outputDir,
     task.currentRunId, task.nextAction, task.error ? JSON.stringify(task.error) : null,
     task.resultSummary ?? null, task.conversationId ?? null,
@@ -2312,7 +2324,10 @@ function rowToTask(row: DbRow): TaskRecord {
   const networkHosts: string[] = JSON.parse(String(row.network_hosts_json));
   const permissions = normalizeTaskPermissions(row.permissions_json);
   return {
-    id: String(row.id), templateId: row.template_id == null ? null : String(row.template_id),
+    id: String(row.id),
+    externalRef: row.external_ref == null ? null : String(row.external_ref),
+    requestHash: row.request_hash == null ? null : String(row.request_hash),
+    templateId: row.template_id == null ? null : String(row.template_id),
     title: String(row.title), goal: String(row.goal), status: String(row.status) as TaskRecord["status"],
     createdAt: String(row.created_at), updatedAt: String(row.updated_at),
     deadline: row.deadline == null ? null : String(row.deadline),

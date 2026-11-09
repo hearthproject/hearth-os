@@ -41,6 +41,8 @@ import { executorName, resolveExecutorFromEnabled } from "./executors.ts";
 import { buildTaskStatusMessage } from "./task-status-messages.ts";
 
 export interface CreateTaskInput {
+  externalRef?: string;
+  requestHash?: string;
   templateId?: string;
   title?: string;
   goal?: string;
@@ -55,6 +57,7 @@ export interface CreateTaskInput {
   taskKind?: TaskKind;
   expectedOutputs?: string[];
   permissions?: TaskPermissions;
+  outputDir?: string;
   methodId?: string;
   methodVersion?: number;
 }
@@ -180,6 +183,7 @@ export class HearthService {
     const expectedOutputs = input.expectedOutputs ?? template?.expectedOutputs ?? ["result.md"];
     const task: TaskRecord = {
       id,
+      ...(input.externalRef ? { externalRef: input.externalRef, requestHash: input.requestHash ?? null } : {}),
       templateId: template?.id ?? null,
       title: input.title?.trim() || template?.title || "未命名任务",
       goal: input.goal?.trim() || template?.goal || input.textInput?.trim() || "完成用户描述的任务",
@@ -189,7 +193,7 @@ export class HearthService {
       deadline: null,
       inputs,
       networkHosts,
-      outputDir: template?.outputDir ?? `.hearth/artifacts/${id}`,
+      outputDir: input.outputDir ?? template?.outputDir ?? `.hearth/artifacts/${id}`,
       currentRunId: null,
       nextAction: "等待执行",
       error: null,
