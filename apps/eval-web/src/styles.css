@@ -246,7 +246,7 @@ code { font-size: .82em; }
 .progress-fill.tone-success { background: var(--success); }
 .progress-fill.tone-danger { background: var(--danger); }
 .progress-fill.tone-warning { background: #c28c2b; }
-.score-dial { display: grid; place-items: center; width: 164px; height: 164px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgb(0 0 0 / 3%); }
+.score-dial { display: grid; place-items: center; width: 164px; height: 164px; background: conic-gradient(var(--score-accent, #d45d35) 0deg var(--score-angle, 0deg), var(--score-track, #e9e4da) var(--score-angle, 0deg) 360deg); border-radius: 50%; box-shadow: inset 0 0 0 1px rgb(0 0 0 / 3%); }
 .score-dial > div { display: grid; place-items: center; width: 132px; height: 132px; color: var(--ink); background: var(--surface); border-radius: 50%; box-shadow: 0 8px 28px rgb(0 0 0 / 7%); }
 .score-dial strong { font-size: 35px; font-weight: 640; letter-spacing: -.06em; line-height: 1; }
 .score-dial small { margin-top: 5px; color: var(--ink-faint); font-size: 9px; font-weight: 650; letter-spacing: .08em; }
@@ -295,7 +295,7 @@ code { font-size: .82em; }
 .hero-actions { display: flex; align-items: center; gap: 17px; margin-top: 23px; }
 .hero-actions .text-link { color: #d8b29f; }
 .hero-score { position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 15px; }
-.hero-score .score-dial { width: 155px; height: 155px; background: conic-gradient(#dd7049 var(--score, 0deg), #34312b 0deg) !important; }
+.hero-score .score-dial { --score-accent: #dd7049; --score-track: #34312b; width: 155px; height: 155px; }
 .hero-score .score-dial > div { width: 123px; height: 123px; color: #f9f4ec; background: #1b1a17; }
 .hero-score .score-dial small { color: #8f8a80; }
 .hero-score-foot { display: flex; gap: 11px; color: #9c978d; font-size: 9px; }
