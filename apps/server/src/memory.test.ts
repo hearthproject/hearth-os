@@ -54,6 +54,43 @@ describe("MemoryService", () => {
     expect(store.getMemory(created.id)?.recallCount).toBe(1);
   });
 
+  it("persists provenance, trust, taint, retention, and a content hash", () => {
+    const created = createMemory({
+      tier: "episodic",
+      originClass: "web",
+      sourceKind: "webpage",
+      sourceRef: "https://example.com/notes",
+      sessionId: "session-1",
+      trust: "low",
+      taint: "suspected",
+      importance: 0.7,
+      retention: "30d",
+      lastVerifiedAt: now.toISOString(),
+      expiresAt: "2026-12-06T10:00:00.000Z",
+      source: { type: "source", id: "source-1", label: "网页摘录", excerpt: "项目代号是 Ember" }
+    });
+
+    const loaded = store.getMemory(created.id);
+    expect(loaded).toMatchObject({
+      tier: "episodic",
+      originClass: "web",
+      sourceKind: "webpage",
+      sourceRef: "https://example.com/notes",
+      sessionId: "session-1",
+      trust: "low",
+      taint: "suspected",
+      importance: 0.7,
+      retention: "30d",
+      lastVerifiedAt: now.toISOString(),
+      expiresAt: "2026-12-06T10:00:00.000Z"
+    });
+    expect(loaded?.contentHash).toMatch(/^sha256:[a-f0-9]{64}$/);
+
+    const corrected = memory.correct(created.id, { content: "项目代号是 Ember，来源仍待核验。", reason: "补充来源" });
+    expect(corrected.contentHash).not.toBe(loaded?.contentHash);
+    expect(store.listMemoryVersions(created.id)[0]?.contentHash).toBe(corrected.contentHash);
+  });
+
   it("recalls memories for a conversation and records a chat audit id", () => {
     const conversation = store.createConversation("Ember 发布计划", defaultConversationSettings());
     const created = createMemory();

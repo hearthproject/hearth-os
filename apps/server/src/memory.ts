@@ -1,14 +1,19 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type {
   MemoryConflict,
   MemoryConfidence,
   MemoryForgetReceipt,
   MemoryKind,
+  MemoryOriginClass,
   MemoryRecall,
   MemoryRecord,
+  MemoryRetention,
   MemorySensitivity,
   MemorySettings,
   MemorySourceRef,
+  MemoryTaint,
+  MemoryTier,
+  MemoryTrust,
   MemoryVersion,
   TaskRecord
 } from "@hearth/core";
@@ -36,6 +41,18 @@ export interface CreateMemoryInput {
   allowRecall?: boolean;
   validUntil?: string | null;
   derivedFromId?: string | null;
+  tier?: MemoryTier;
+  originClass?: MemoryOriginClass;
+  sourceKind?: string;
+  sourceRef?: string;
+  sessionId?: string | null;
+  trust?: MemoryTrust;
+  taint?: MemoryTaint;
+  importance?: number;
+  retention?: MemoryRetention;
+  supersessionKey?: string | null;
+  lastVerifiedAt?: string | null;
+  expiresAt?: string | null;
 }
 
 export interface CorrectMemoryInput {
@@ -159,6 +176,9 @@ export class MemoryService {
     const subjectKey = input.subjectKey.trim().toLowerCase();
     if (!content) throw new MemoryError("EMPTY_CONTENT", "记忆内容不能为空");
     if (!subjectKey) throw new MemoryError("EMPTY_SUBJECT", "记忆主题不能为空");
+    const originClass = input.originClass ?? defaultOriginClass(input.source);
+    const tier = input.tier ?? "episodic";
+    const retention = input.retention ?? (tier === "instructions" ? "permanent" : "30d");
     const memory: MemoryRecord = {
       id: randomUUID(),
       kind: input.kind,
@@ -170,6 +190,19 @@ export class MemoryService {
       source: input.source,
       confidence: input.confidence ?? "medium",
       sensitivity: input.sensitivity ?? "normal",
+      tier,
+      originClass,
+      sourceKind: input.sourceKind ?? input.source.type,
+      sourceRef: input.sourceRef ?? input.source.id ?? input.source.label,
+      sessionId: input.sessionId ?? null,
+      trust: input.trust ?? defaultTrust(originClass),
+      taint: input.taint ?? "clean",
+      importance: clamp(input.importance ?? 0.5, 0, 1),
+      retention,
+      supersessionKey: input.supersessionKey ?? null,
+      contentHash: memoryContentHash(content),
+      lastVerifiedAt: input.lastVerifiedAt ?? (originClass === "user" || originClass === "verified_system" ? now : null),
+      expiresAt: input.expiresAt ?? null,
       allowRecall: input.allowRecall ?? input.sensitivity !== "secret",
       version: 1,
       supersedesId: null,
@@ -213,6 +246,8 @@ export class MemoryService {
       sensitivity: input.sensitivity ?? memory.sensitivity,
       allowRecall: input.allowRecall ?? memory.allowRecall,
       validUntil: input.validUntil === undefined ? memory.validUntil : input.validUntil,
+      contentHash: memoryContentHash(input.content?.trim() || memory.content),
+      lastVerifiedAt: this.nowIso(),
       version: memory.version + 1,
       updatedAt: this.nowIso()
     };
@@ -251,6 +286,9 @@ export class MemoryService {
       source: { type: memory.source.type, id: null, label: "[已遗忘]", excerpt: null },
       allowRecall: false,
       validUntil: null,
+      contentHash: memoryContentHash("[已遗忘]"),
+      lastVerifiedAt: null,
+      expiresAt: null,
       version: memory.version + 1,
       updatedAt: this.nowIso()
     };
@@ -301,6 +339,8 @@ export class MemoryService {
       const next: MemoryRecord = {
         ...left,
         content: merged,
+        contentHash: memoryContentHash(merged),
+        lastVerifiedAt: this.nowIso(),
         status: "active",
         version: left.version + 1,
         updatedAt: this.nowIso()
@@ -493,6 +533,19 @@ export class MemoryService {
       source: memory.source,
       confidence: memory.confidence,
       sensitivity: memory.sensitivity,
+      tier: memory.tier,
+      originClass: memory.originClass,
+      sourceKind: memory.sourceKind,
+      sourceRef: memory.sourceRef,
+      sessionId: memory.sessionId,
+      trust: memory.trust,
+      taint: memory.taint,
+      importance: memory.importance,
+      retention: memory.retention,
+      supersessionKey: memory.supersessionKey,
+      contentHash: memory.contentHash,
+      lastVerifiedAt: memory.lastVerifiedAt,
+      expiresAt: memory.expiresAt,
       allowRecall: memory.allowRecall,
       scope: memory.scope,
       tags: memory.tags,
@@ -528,6 +581,24 @@ function uniqueStrings(values: string[]): string[] {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function defaultOriginClass(source: MemorySourceRef): MemoryOriginClass {
+  if (source.type === "user") return "user";
+  if (source.type === "system") return "verified_system";
+  if (source.type === "source") return "imported";
+  return "agent";
+}
+
+function defaultTrust(origin: MemoryOriginClass): MemoryTrust {
+  if (origin === "user" || origin === "verified_system") return "high";
+  if (origin === "agent") return "medium";
+  if (origin === "untrusted") return "none";
+  return "low";
+}
+
+function memoryContentHash(content: string): string {
+  return "sha256:" + createHash("sha256").update(content).digest("hex");
 }
 
 function termsOf(text: string): string[] {

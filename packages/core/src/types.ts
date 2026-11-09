@@ -1152,6 +1152,21 @@ export type MemorySensitivity = (typeof MEMORY_SENSITIVITIES)[number];
 export const MEMORY_CONFIDENCES = ["low", "medium", "high"] as const;
 export type MemoryConfidence = (typeof MEMORY_CONFIDENCES)[number];
 
+export const MEMORY_TIERS = ["instructions", "curated", "episodic", "prospective", "review"] as const;
+export type MemoryTier = (typeof MEMORY_TIERS)[number];
+
+export const MEMORY_ORIGINS = ["user", "verified_system", "agent", "imported", "web", "email", "untrusted"] as const;
+export type MemoryOriginClass = (typeof MEMORY_ORIGINS)[number];
+
+export const MEMORY_TRUST_LEVELS = ["high", "medium", "low", "none"] as const;
+export type MemoryTrust = (typeof MEMORY_TRUST_LEVELS)[number];
+
+export const MEMORY_TAINT_STATES = ["clean", "suspected", "tainted"] as const;
+export type MemoryTaint = (typeof MEMORY_TAINT_STATES)[number];
+
+export const MEMORY_RETENTIONS = ["session", "30d", "1y", "permanent"] as const;
+export type MemoryRetention = (typeof MEMORY_RETENTIONS)[number];
+
 export interface MemorySourceRef {
   type: "user" | "task" | "source" | "method" | "system";
   id: string | null;
@@ -1159,7 +1174,26 @@ export interface MemorySourceRef {
   excerpt: string | null;
 }
 
-export interface MemoryRecord {
+export interface MemoryMeta {
+  tier: MemoryTier;
+  originClass: MemoryOriginClass;
+  sourceKind: string;
+  sourceRef: string;
+  sessionId: string | null;
+  trust: MemoryTrust;
+  taint: MemoryTaint;
+  sensitivity: MemorySensitivity;
+  confidence: MemoryConfidence;
+  importance: number;
+  retention: MemoryRetention;
+  supersessionKey: string | null;
+  contentHash: string;
+  createdAt: string;
+  lastVerifiedAt: string | null;
+  expiresAt: string | null;
+}
+
+export interface MemoryRecord extends MemoryMeta {
   id: string;
   kind: MemoryKind;
   status: MemoryStatus;
@@ -1168,33 +1202,27 @@ export interface MemoryRecord {
   scope: string;
   tags: string[];
   source: MemorySourceRef;
-  confidence: MemoryConfidence;
-  sensitivity: MemorySensitivity;
   allowRecall: boolean;
   version: number;
   supersedesId: string | null;
   derivedFromId: string | null;
   validUntil: string | null;
-  createdAt: string;
   updatedAt: string;
   lastRecalledAt: string | null;
   recallCount: number;
 }
 
-export interface MemoryVersion {
+export interface MemoryVersion extends MemoryMeta {
   id: string;
   memoryId: string;
   version: number;
   content: string;
   status: MemoryStatus;
   source: MemorySourceRef;
-  confidence: MemoryConfidence;
-  sensitivity: MemorySensitivity;
   allowRecall: boolean;
   scope: string;
   tags: string[];
   reason: string;
-  createdAt: string;
 }
 
 export const MEMORY_CONFLICT_STATUSES = ["pending", "resolved"] as const;

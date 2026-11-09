@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
@@ -97,7 +97,7 @@ export interface RunAggregate {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 18;
+export const CURRENT_SCHEMA_VERSION = 19;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -282,13 +282,23 @@ CREATE TABLE IF NOT EXISTS memories (
   source_json TEXT NOT NULL, confidence TEXT NOT NULL, sensitivity TEXT NOT NULL,
   allow_recall INTEGER NOT NULL, version INTEGER NOT NULL, supersedes_id TEXT,
   derived_from_id TEXT, valid_until TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-  last_recalled_at TEXT, recall_count INTEGER NOT NULL
+  last_recalled_at TEXT, recall_count INTEGER NOT NULL,
+  tier TEXT NOT NULL DEFAULT 'episodic', origin_class TEXT NOT NULL DEFAULT 'agent',
+  source_kind TEXT NOT NULL DEFAULT 'system', source_ref TEXT NOT NULL DEFAULT '', session_id TEXT,
+  trust TEXT NOT NULL DEFAULT 'medium', taint TEXT NOT NULL DEFAULT 'clean',
+  importance REAL NOT NULL DEFAULT 0.5, retention TEXT NOT NULL DEFAULT '30d',
+  supersession_key TEXT, content_hash TEXT NOT NULL DEFAULT '', last_verified_at TEXT, expires_at TEXT
 );
 CREATE TABLE IF NOT EXISTS memory_versions (
   id TEXT PRIMARY KEY, memory_id TEXT NOT NULL, version INTEGER NOT NULL,
   content TEXT NOT NULL, status TEXT NOT NULL, source_json TEXT NOT NULL,
   confidence TEXT NOT NULL, sensitivity TEXT NOT NULL, allow_recall INTEGER NOT NULL,
   scope TEXT NOT NULL, tags_json TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL,
+  tier TEXT NOT NULL DEFAULT 'episodic', origin_class TEXT NOT NULL DEFAULT 'agent',
+  source_kind TEXT NOT NULL DEFAULT 'system', source_ref TEXT NOT NULL DEFAULT '', session_id TEXT,
+  trust TEXT NOT NULL DEFAULT 'medium', taint TEXT NOT NULL DEFAULT 'clean',
+  importance REAL NOT NULL DEFAULT 0.5, retention TEXT NOT NULL DEFAULT '30d',
+  supersession_key TEXT, content_hash TEXT NOT NULL DEFAULT '', last_verified_at TEXT, expires_at TEXT,
   UNIQUE(memory_id, version)
 );
 CREATE TABLE IF NOT EXISTS memory_conflicts (
@@ -571,6 +581,21 @@ export class HearthStore {
     ensureColumn(this.db, "effects", "reconciled_at", "TEXT");
     ensureColumn(this.db, "effects", "target_key", "TEXT");
     ensureColumn(this.db, "effects", "suspend_reason", "TEXT");
+    for (const table of ["memories", "memory_versions"] as const) {
+      ensureColumn(this.db, table, "tier", "TEXT NOT NULL DEFAULT 'episodic'");
+      ensureColumn(this.db, table, "origin_class", "TEXT NOT NULL DEFAULT 'agent'");
+      ensureColumn(this.db, table, "source_kind", "TEXT NOT NULL DEFAULT 'system'");
+      ensureColumn(this.db, table, "source_ref", "TEXT NOT NULL DEFAULT ''");
+      ensureColumn(this.db, table, "session_id", "TEXT");
+      ensureColumn(this.db, table, "trust", "TEXT NOT NULL DEFAULT 'medium'");
+      ensureColumn(this.db, table, "taint", "TEXT NOT NULL DEFAULT 'clean'");
+      ensureColumn(this.db, table, "importance", "REAL NOT NULL DEFAULT 0.5");
+      ensureColumn(this.db, table, "retention", "TEXT NOT NULL DEFAULT '30d'");
+      ensureColumn(this.db, table, "supersession_key", "TEXT");
+      ensureColumn(this.db, table, "content_hash", "TEXT NOT NULL DEFAULT ''");
+      ensureColumn(this.db, table, "last_verified_at", "TEXT");
+      ensureColumn(this.db, table, "expires_at", "TEXT");
+    }
     this.db.exec(`
       DELETE FROM chat_messages
       WHERE kind = 'task_status'
@@ -595,6 +620,8 @@ export class HearthStore {
       CREATE INDEX IF NOT EXISTS goals_state_idx ON goals(current_state, updated_at);
       CREATE INDEX IF NOT EXISTS tasks_goal_idx ON tasks(goal_id, created_at);
       CREATE INDEX IF NOT EXISTS goal_completion_reports_goal_idx ON goal_completion_reports(goal_id, checked_at);
+      CREATE INDEX IF NOT EXISTS memories_lane_idx ON memories(status, tier, trust, taint, updated_at);
+      CREATE INDEX IF NOT EXISTS memories_expiry_idx ON memories(expires_at, status);
     `);
     this.db.exec(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION}`);
     this.setMeta("schemaVersion", String(CURRENT_SCHEMA_VERSION));
@@ -3083,17 +3110,32 @@ function upsertMemorySettings(db: DatabaseSync, settings: MemorySettings): void 
 }
 
 function rowToMemory(row: DbRow): MemoryRecord {
+  const content = String(row.content);
+  const source = JSON.parse(String(row.source_json)) as MemoryRecord["source"];
   return {
     id: String(row.id),
     kind: String(row.kind) as MemoryRecord["kind"],
     status: String(row.status) as MemoryRecord["status"],
-    content: String(row.content),
+    content,
     subjectKey: String(row.subject_key),
     scope: String(row.scope),
     tags: JSON.parse(String(row.tags_json)),
-    source: JSON.parse(String(row.source_json)),
+    source,
     confidence: String(row.confidence) as MemoryRecord["confidence"],
     sensitivity: String(row.sensitivity) as MemoryRecord["sensitivity"],
+    tier: String(row.tier ?? "episodic") as MemoryRecord["tier"],
+    originClass: String(row.origin_class ?? "agent") as MemoryRecord["originClass"],
+    sourceKind: String(row.source_kind ?? source.type),
+    sourceRef: String(row.source_ref ?? source.id ?? source.label),
+    sessionId: row.session_id == null ? null : String(row.session_id),
+    trust: String(row.trust ?? "medium") as MemoryRecord["trust"],
+    taint: String(row.taint ?? "clean") as MemoryRecord["taint"],
+    importance: Number(row.importance ?? 0.5),
+    retention: String(row.retention ?? "30d") as MemoryRecord["retention"],
+    supersessionKey: row.supersession_key == null ? null : String(row.supersession_key),
+    contentHash: String(row.content_hash ?? "") || memoryContentHash(content),
+    lastVerifiedAt: row.last_verified_at == null ? null : String(row.last_verified_at),
+    expiresAt: row.expires_at == null ? null : String(row.expires_at),
     allowRecall: Number(row.allow_recall) === 1,
     version: Number(row.version),
     supersedesId: row.supersedes_id == null ? null : String(row.supersedes_id),
@@ -3108,32 +3150,54 @@ function rowToMemory(row: DbRow): MemoryRecord {
 
 function upsertMemory(db: DatabaseSync, memory: MemoryRecord): void {
   db.prepare(
-    `INSERT INTO memories (id, kind, status, content, subject_key, scope, tags_json, source_json, confidence, sensitivity, allow_recall, version, supersedes_id, derived_from_id, valid_until, created_at, updated_at, last_recalled_at, recall_count)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO memories (id, kind, status, content, subject_key, scope, tags_json, source_json, confidence, sensitivity, allow_recall, version, supersedes_id, derived_from_id, valid_until, created_at, updated_at, last_recalled_at, recall_count, tier, origin_class, source_kind, source_ref, session_id, trust, taint, importance, retention, supersession_key, content_hash, last_verified_at, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, status=excluded.status, content=excluded.content,
        subject_key=excluded.subject_key, scope=excluded.scope, tags_json=excluded.tags_json, source_json=excluded.source_json,
        confidence=excluded.confidence, sensitivity=excluded.sensitivity, allow_recall=excluded.allow_recall,
        version=excluded.version, supersedes_id=excluded.supersedes_id, derived_from_id=excluded.derived_from_id,
        valid_until=excluded.valid_until, updated_at=excluded.updated_at, last_recalled_at=excluded.last_recalled_at,
-       recall_count=excluded.recall_count`
+       recall_count=excluded.recall_count, tier=excluded.tier, origin_class=excluded.origin_class,
+       source_kind=excluded.source_kind, source_ref=excluded.source_ref, session_id=excluded.session_id,
+       trust=excluded.trust, taint=excluded.taint, importance=excluded.importance, retention=excluded.retention,
+       supersession_key=excluded.supersession_key, content_hash=excluded.content_hash,
+       last_verified_at=excluded.last_verified_at, expires_at=excluded.expires_at`
   ).run(
     memory.id, memory.kind, memory.status, memory.content, memory.subjectKey, memory.scope,
     JSON.stringify(memory.tags), JSON.stringify(memory.source), memory.confidence, memory.sensitivity,
     memory.allowRecall ? 1 : 0, memory.version, memory.supersedesId, memory.derivedFromId,
-    memory.validUntil, memory.createdAt, memory.updatedAt, memory.lastRecalledAt, memory.recallCount
+    memory.validUntil, memory.createdAt, memory.updatedAt, memory.lastRecalledAt, memory.recallCount,
+    memory.tier, memory.originClass, memory.sourceKind, memory.sourceRef, memory.sessionId,
+    memory.trust, memory.taint, memory.importance, memory.retention, memory.supersessionKey,
+    memory.contentHash, memory.lastVerifiedAt, memory.expiresAt
   );
 }
 
 function rowToMemoryVersion(row: DbRow): MemoryVersion {
+  const content = String(row.content);
+  const source = JSON.parse(String(row.source_json)) as MemoryVersion["source"];
   return {
     id: String(row.id),
     memoryId: String(row.memory_id),
     version: Number(row.version),
-    content: String(row.content),
+    content,
     status: String(row.status) as MemoryVersion["status"],
-    source: JSON.parse(String(row.source_json)),
+    source,
     confidence: String(row.confidence) as MemoryVersion["confidence"],
     sensitivity: String(row.sensitivity) as MemoryVersion["sensitivity"],
+    tier: String(row.tier ?? "episodic") as MemoryVersion["tier"],
+    originClass: String(row.origin_class ?? "agent") as MemoryVersion["originClass"],
+    sourceKind: String(row.source_kind ?? source.type),
+    sourceRef: String(row.source_ref ?? source.id ?? source.label),
+    sessionId: row.session_id == null ? null : String(row.session_id),
+    trust: String(row.trust ?? "medium") as MemoryVersion["trust"],
+    taint: String(row.taint ?? "clean") as MemoryVersion["taint"],
+    importance: Number(row.importance ?? 0.5),
+    retention: String(row.retention ?? "30d") as MemoryVersion["retention"],
+    supersessionKey: row.supersession_key == null ? null : String(row.supersession_key),
+    contentHash: String(row.content_hash ?? "") || memoryContentHash(content),
+    lastVerifiedAt: row.last_verified_at == null ? null : String(row.last_verified_at),
+    expiresAt: row.expires_at == null ? null : String(row.expires_at),
     allowRecall: Number(row.allow_recall) === 1,
     scope: String(row.scope),
     tags: JSON.parse(String(row.tags_json)),
@@ -3144,12 +3208,19 @@ function rowToMemoryVersion(row: DbRow): MemoryVersion {
 
 function insertMemoryVersionRow(db: DatabaseSync, version: MemoryVersion): void {
   db.prepare(
-    "INSERT INTO memory_versions (id, memory_id, version, content, status, source_json, confidence, sensitivity, allow_recall, scope, tags_json, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "INSERT INTO memory_versions (id, memory_id, version, content, status, source_json, confidence, sensitivity, allow_recall, scope, tags_json, reason, created_at, tier, origin_class, source_kind, source_ref, session_id, trust, taint, importance, retention, supersession_key, content_hash, last_verified_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ).run(
     version.id, version.memoryId, version.version, version.content, version.status,
     JSON.stringify(version.source), version.confidence, version.sensitivity, version.allowRecall ? 1 : 0,
-    version.scope, JSON.stringify(version.tags), version.reason, version.createdAt
+    version.scope, JSON.stringify(version.tags), version.reason, version.createdAt,
+    version.tier, version.originClass, version.sourceKind, version.sourceRef, version.sessionId,
+    version.trust, version.taint, version.importance, version.retention, version.supersessionKey,
+    version.contentHash, version.lastVerifiedAt, version.expiresAt
   );
+}
+
+function memoryContentHash(content: string): string {
+  return "sha256:" + createHash("sha256").update(content).digest("hex");
 }
 
 function rowToMemoryConflict(row: DbRow): MemoryConflict {
