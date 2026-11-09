@@ -434,6 +434,9 @@ code { font-size: .82em; }
 .difficulty-tag { font-size: 10px; font-weight: 500; }
 .case-card > code { font-size: 10px; }
 .case-card-foot { font-size: 10px; }
+.case-table td:first-child { width: 44%; min-width: 260px; white-space: normal; }
+.case-table td:first-child small { margin-top: 3px; }
+.case-table .difficulty-tag { display: inline-flex; }
 
 /* Dashboard */
 .overview-card { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 28px; padding: 18px 20px; }
