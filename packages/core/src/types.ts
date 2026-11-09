@@ -1435,6 +1435,77 @@ export interface MethodTrial {
   createdAt: string;
 }
 
+export const SKILL_STATUSES = [
+  "candidate",
+  "trial",
+  "evaluating",
+  "adopted",
+  "stale",
+  "archived",
+  "rejected",
+  "reverted",
+  "superseded"
+] as const;
+export type SkillStatus = (typeof SKILL_STATUSES)[number];
+
+export const SKILL_PLATFORMS = ["windows", "macos", "linux"] as const;
+export type SkillPlatform = (typeof SKILL_PLATFORMS)[number];
+
+export const SKILL_ORIGINS = ["agent", "user", "imported", "system"] as const;
+export type SkillOrigin = (typeof SKILL_ORIGINS)[number];
+
+export interface SkillPermissions {
+  readRoots: string[];
+  writeRoots: string[];
+  networkHosts: string[];
+}
+
+export interface SkillHearthMetadata {
+  category: string;
+  originTaskId: string | null;
+  originHash: string | null;
+  adoptedAt: string | null;
+  origin: SkillOrigin;
+  pinned: boolean;
+}
+
+export interface SkillManifest {
+  name: string;
+  description: string;
+  version: string;
+  platforms: SkillPlatform[];
+  tools: string[];
+  permissions: SkillPermissions;
+  metadata: {
+    hearth: SkillHearthMetadata;
+  };
+}
+
+export interface SkillDocument {
+  manifest: SkillManifest;
+  body: string;
+  contentHash: string;
+}
+
+export interface SkillIndexEntry {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  platforms: SkillPlatform[];
+  tags: string[];
+  category: string;
+  status: SkillStatus;
+  pinned: boolean;
+  origin: SkillOrigin;
+}
+
+export interface SkillResourceRef {
+  path: string;
+  kind: "reference" | "script" | "template" | "test" | "other";
+  bytes: number | null;
+}
+
 export const SYNC_PEER_STATUSES = ["active", "revoked", "error"] as const;
 export type SyncPeerStatus = (typeof SYNC_PEER_STATUSES)[number];
 
