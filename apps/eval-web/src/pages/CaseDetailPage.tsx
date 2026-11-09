@@ -4,7 +4,6 @@ import { Link, useParams } from "react-router-dom";
 import { api } from "../lib/api.ts";
 import {
   DIFFICULTY_LABELS,
-  FAMILY_COLORS,
   FAMILY_LABELS,
   RUN_MODE_LABELS,
   shortId
@@ -23,23 +22,30 @@ export function CaseDetailPage() {
     <div className="page-stack">
       <Link className="back-link" to="/cases"><ArrowLeft size={14} /> 返回任务目录</Link>
       <PageHeader
-        eyebrow={`${FAMILY_LABELS[manifest.family].toUpperCase()} · CASE`}
         title={manifest.title}
         description={manifest.description}
-        actions={<Link className="button button-primary" to={`/experiments/new?case=${encodeURIComponent(manifest.id)}`}><Play size={15} /> 用此任务实验</Link>}
+        actions={<Link className="button button-primary" to={`/experiments/new?case=${encodeURIComponent(manifest.id)}`}><Play size={15} /> 发起实验</Link>}
       />
 
-      <section className="case-hero">
-        <div>
-          <span className="family-tag" style={{ color: FAMILY_COLORS[manifest.family] }}><i style={{ background: FAMILY_COLORS[manifest.family] }} />{FAMILY_LABELS[manifest.family]}</span>
-          <h2>{manifest.id}</h2>
-          <p>{manifest.goal}</p>
+      <section className="panel case-summary">
+        <div className="case-summary-head">
+          <div>
+            <span className="case-family-label">{FAMILY_LABELS[manifest.family]}</span>
+            <h2>{manifest.id}</h2>
+          </div>
+          <div className="case-summary-badges">
+            <span className={`difficulty-tag difficulty-${manifest.difficulty}`}>{DIFFICULTY_LABELS[manifest.difficulty]}</span>
+            <span className="family-tag">{manifest.runModes.map((mode) => RUN_MODE_LABELS[mode] ?? mode).join(" / ")}</span>
+          </div>
         </div>
-        <div className="case-hero-meta">
-          <KeyValue label="版本">v{manifest.version}</KeyValue>
-          <KeyValue label="难度">{DIFFICULTY_LABELS[manifest.difficulty]}</KeyValue>
-          <KeyValue label="模式">{manifest.runModes.map((mode) => RUN_MODE_LABELS[mode] ?? mode).join(" / ")}</KeyValue>
-          <KeyValue label="超时">{Math.round(manifest.timeoutMs / 1_000)}s</KeyValue>
+        <div className="case-summary-body">
+          <p>{manifest.goal}</p>
+          <div className="case-summary-facts">
+            <div><span>版本</span><strong>v{manifest.version}</strong></div>
+            <div><span>难度</span><strong>{DIFFICULTY_LABELS[manifest.difficulty]}</strong></div>
+            <div><span>超时</span><strong>{Math.round(manifest.timeoutMs / 1_000)}s</strong></div>
+            <div><span>评分标准</span><strong>{manifest.criteria.length}</strong></div>
+          </div>
         </div>
       </section>
 
