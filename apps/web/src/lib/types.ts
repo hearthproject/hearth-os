@@ -48,6 +48,7 @@ import type {
   MaintenanceRun,
   MemoryConflict,
   MemoryConfidence,
+  MemoryConsolidationRun,
   MemoryForgetReceipt,
   MemoryKind,
   MemoryRecall,
@@ -714,6 +715,7 @@ export interface MemorySnapshot {
   conflicts: MemoryConflict[];
   recalls: MemoryRecall[];
   forgets: MemoryForgetReceipt[];
+  consolidations: MemoryConsolidationRun[];
 }
 
 export interface CreateMemoryRequest {

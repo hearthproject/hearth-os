@@ -28,6 +28,7 @@ import type {
   GoalCompletionReport,
   HandoffRecord,
   MemoryConflict,
+  MemoryConsolidationRun,
   MemoryForgetReceipt,
   MemoryRecall,
   MemoryRecord,
@@ -314,6 +315,12 @@ CREATE TABLE IF NOT EXISTS memory_forget_receipts (
   id TEXT PRIMARY KEY, memory_id TEXT NOT NULL, affected_memory_ids_json TEXT NOT NULL,
   reason TEXT NOT NULL, redacted_versions INTEGER NOT NULL, redacted_events INTEGER NOT NULL,
   targets_json TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS memory_consolidation_runs (
+  id TEXT PRIMARY KEY, status TEXT NOT NULL, dry_run INTEGER NOT NULL, scope TEXT,
+  groups_json TEXT NOT NULL, sources_json TEXT NOT NULL, applied_memory_ids_json TEXT NOT NULL,
+  skipped_json TEXT NOT NULL, error TEXT, report TEXT NOT NULL,
+  started_at TEXT NOT NULL, completed_at TEXT
 );
 CREATE TABLE IF NOT EXISTS context_items (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -623,6 +630,7 @@ export class HearthStore {
       CREATE INDEX IF NOT EXISTS goal_completion_reports_goal_idx ON goal_completion_reports(goal_id, checked_at);
       CREATE INDEX IF NOT EXISTS memories_lane_idx ON memories(status, tier, trust, taint, updated_at);
       CREATE INDEX IF NOT EXISTS memories_expiry_idx ON memories(expires_at, status);
+      CREATE INDEX IF NOT EXISTS memory_consolidation_runs_status_idx ON memory_consolidation_runs(status, started_at);
     `);
     this.db.exec(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION}`);
     this.setMeta("schemaVersion", String(CURRENT_SCHEMA_VERSION));
@@ -761,27 +769,36 @@ export class HearthStore {
   }
 
   appendEvent(event: NewEvent, origin?: { instanceId: string; seq: number | null }): EventEnvelope {
-    const createdAt = event.createdAt ?? new Date().toISOString();
-    const id = event.id ?? randomUUID();
-    const originInstanceId = origin?.instanceId ?? this.instanceId;
-    const originSeq = origin?.seq ?? null;
+    return this.appendEvents([event], origin)[0]!;
+  }
+
+  appendEvents(events: NewEvent[], origin?: { instanceId: string; seq: number | null }): EventEnvelope[] {
+    if (events.length === 0) return [];
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      const result = this.db.prepare(
-        "INSERT INTO events (id, type, task_id, run_id, payload_json, origin_instance_id, origin_seq, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-      ).run(id, event.type, event.taskId ?? null, event.runId ?? null, JSON.stringify(event.payload), originInstanceId, originSeq, createdAt);
-      const seq = Number(result.lastInsertRowid);
-      if (originSeq === null) {
-        this.db.prepare("UPDATE events SET origin_seq = ? WHERE seq = ?").run(seq, seq);
+      const envelopes: EventEnvelope[] = [];
+      for (const event of events) {
+        const createdAt = event.createdAt ?? new Date().toISOString();
+        const id = event.id ?? randomUUID();
+        const originInstanceId = origin?.instanceId ?? this.instanceId;
+        const originSeq = origin?.seq ?? null;
+        const result = this.db.prepare(
+          "INSERT INTO events (id, type, task_id, run_id, payload_json, origin_instance_id, origin_seq, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        ).run(id, event.type, event.taskId ?? null, event.runId ?? null, JSON.stringify(event.payload), originInstanceId, originSeq, createdAt);
+        const seq = Number(result.lastInsertRowid);
+        if (originSeq === null) {
+          this.db.prepare("UPDATE events SET origin_seq = ? WHERE seq = ?").run(seq, seq);
+        }
+        const envelope: EventEnvelope = {
+          seq, id, type: event.type,
+          taskId: event.taskId ?? null, runId: event.runId ?? null, payload: event.payload,
+          originInstanceId, originSeq: originSeq ?? seq, createdAt
+        };
+        this.applyEvent(envelope);
+        envelopes.push(envelope);
       }
-      const envelope: EventEnvelope = {
-        seq, id, type: event.type,
-        taskId: event.taskId ?? null, runId: event.runId ?? null, payload: event.payload,
-        originInstanceId, originSeq: originSeq ?? seq, createdAt
-      };
-      this.applyEvent(envelope);
       this.db.exec("COMMIT");
-      return envelope;
+      return envelopes;
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
@@ -1602,6 +1619,18 @@ export class HearthStore {
     return rows.map(rowToMemoryForgetReceipt);
   }
 
+  getMemoryConsolidationRun(id: string): MemoryConsolidationRun | null {
+    const row = this.db.prepare("SELECT * FROM memory_consolidation_runs WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToMemoryConsolidationRun(row) : null;
+  }
+
+  listMemoryConsolidationRuns(limit = 50): MemoryConsolidationRun[] {
+    const rows = this.db.prepare(
+      "SELECT * FROM memory_consolidation_runs ORDER BY started_at DESC LIMIT ?"
+    ).all(limit) as DbRow[];
+    return rows.map(rowToMemoryConsolidationRun);
+  }
+
   getMethodCandidate(id: string): MethodCandidate | null {
     const row = this.db.prepare("SELECT * FROM method_candidates WHERE id = ?").get(id) as DbRow | undefined;
     return row ? rowToMethodCandidate(row) : null;
@@ -2019,6 +2048,7 @@ export class HearthStore {
       case "memory.version.recorded": return insertMemoryVersionRow(this.db, event.payload as MemoryVersion);
       case "memory.recalled": return insertMemoryRecallRow(this.db, event.payload as MemoryRecall);
       case "memory.forgotten": return insertMemoryForgetReceiptRow(this.db, event.payload as MemoryForgetReceipt);
+      case "memory.consolidation.updated": return upsertMemoryConsolidationRun(this.db, event.payload as MemoryConsolidationRun);
       case "memory.conflict.created":
       case "memory.conflict.updated": return upsertMemoryConflict(this.db, event.payload as MemoryConflict);
       case "method.candidate.created":
@@ -3281,6 +3311,38 @@ function insertMemoryForgetReceiptRow(db: DatabaseSync, receipt: MemoryForgetRec
   ).run(
     receipt.id, receipt.memoryId, JSON.stringify(receipt.affectedMemoryIds), receipt.reason,
     receipt.redactedVersions, receipt.redactedEvents, JSON.stringify(receipt.targets), receipt.createdAt
+  );
+}
+
+function rowToMemoryConsolidationRun(row: DbRow): MemoryConsolidationRun {
+  return {
+    id: String(row.id),
+    status: String(row.status) as MemoryConsolidationRun["status"],
+    dryRun: Number(row.dry_run) === 1,
+    scope: row.scope == null ? null : String(row.scope),
+    groups: JSON.parse(String(row.groups_json)),
+    sources: JSON.parse(String(row.sources_json)),
+    appliedMemoryIds: JSON.parse(String(row.applied_memory_ids_json)),
+    skipped: JSON.parse(String(row.skipped_json)),
+    error: row.error == null ? null : String(row.error),
+    report: String(row.report),
+    startedAt: String(row.started_at),
+    completedAt: row.completed_at == null ? null : String(row.completed_at)
+  };
+}
+
+function upsertMemoryConsolidationRun(db: DatabaseSync, run: MemoryConsolidationRun): void {
+  db.prepare(
+    `INSERT INTO memory_consolidation_runs (id, status, dry_run, scope, groups_json, sources_json, applied_memory_ids_json, skipped_json, error, report, started_at, completed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET status=excluded.status, dry_run=excluded.dry_run, scope=excluded.scope,
+       groups_json=excluded.groups_json, sources_json=excluded.sources_json,
+       applied_memory_ids_json=excluded.applied_memory_ids_json, skipped_json=excluded.skipped_json,
+       error=excluded.error, report=excluded.report, completed_at=excluded.completed_at`
+  ).run(
+    run.id, run.status, run.dryRun ? 1 : 0, run.scope, JSON.stringify(run.groups),
+    JSON.stringify(run.sources), JSON.stringify(run.appliedMemoryIds), JSON.stringify(run.skipped),
+    run.error, run.report, run.startedAt, run.completedAt
   );
 }
 

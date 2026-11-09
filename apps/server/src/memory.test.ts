@@ -180,6 +180,76 @@ describe("MemoryService", () => {
     expect(explanation.eligibility.reasons).toContain("taint 不是 clean");
   });
 
+  it("builds a dry-run consolidation report without changing source memories", () => {
+    const first = createMemory({ content: "Ember 发布窗口在十一月。", subjectKey: "project.ember.release" });
+    const second = createMemory({ content: "Ember 发布窗口在十一月。", subjectKey: "project.ember.release" });
+    memory.confirm(first.id);
+    memory.confirm(second.id);
+
+    const run = memory.consolidate();
+    expect(run.status).toBe("planned");
+    expect(run.groups).toHaveLength(1);
+    expect(run.groups[0]?.sourceMemoryIds).toEqual(expect.arrayContaining([first.id, second.id]));
+    expect(run.report).toContain("记忆巩固报告");
+    expect(store.getMemory(first.id)?.status).toBe("active");
+    expect(store.getMemory(second.id)?.status).toBe("active");
+    expect(store.getMemoryConsolidationRun(run.id)?.status).toBe("planned");
+  });
+
+  it("applies a validated consolidation atomically and preserves pre-images", () => {
+    const first = createMemory({ content: "Ember 发布窗口在十一月。", subjectKey: "project.ember.release" });
+    const second = createMemory({ content: "Ember 发布窗口在十一月。", subjectKey: "project.ember.release" });
+    memory.confirm(first.id);
+    memory.confirm(second.id);
+
+    const run = memory.consolidate({ apply: true });
+    expect(run.status).toBe("applied");
+    expect(run.appliedMemoryIds).toHaveLength(1);
+    expect(run.sources).toHaveLength(2);
+    expect(run.sources.every((source) => source.content === "Ember 发布窗口在十一月。")).toBe(true);
+    const consolidated = store.getMemory(run.appliedMemoryIds[0]!);
+    expect(consolidated).toMatchObject({
+      tier: "curated",
+      originClass: "agent",
+      status: "active",
+      content: "Ember 发布窗口在十一月。"
+    });
+    expect(consolidated?.source.label).toBe("记忆巩固");
+    expect(store.getMemory(first.id)?.status).toBe("superseded");
+    expect(store.getMemory(second.id)?.status).toBe("superseded");
+    expect(store.getMemory(first.id)?.allowRecall).toBe(false);
+    expect(store.getMemoryConsolidationRun(run.id)?.appliedMemoryIds).toEqual(run.appliedMemoryIds);
+  });
+
+  it("reports conflicting episodic memories and never overwrites them", () => {
+    const first = createMemory({ content: "Ember 发布窗口在十一月。", subjectKey: "project.ember.release" });
+    const second = createMemory({ content: "Ember 发布窗口在十二月。", subjectKey: "project.ember.release" });
+    store.appendEvent({ type: "memory.updated", payload: { ...first, status: "active" } });
+    store.appendEvent({ type: "memory.updated", payload: { ...second, status: "active" } });
+
+    const run = memory.consolidate({ apply: true });
+    expect(run.groups[0]?.conflicts).toHaveLength(2);
+    expect(run.appliedMemoryIds).toHaveLength(0);
+    expect(run.skipped.some((item) => item.reason.includes("冲突"))).toBe(true);
+    expect(store.getMemory(first.id)?.status).toBe("active");
+    expect(store.getMemory(second.id)?.status).toBe("active");
+  });
+
+  it("excludes tainted, untrusted, and secret memories from consolidation", () => {
+    const tainted = createMemory({ content: "污染内容", subjectKey: "project.ember.tainted", taint: "tainted" });
+    const untrusted = createMemory({ content: "不可信内容", subjectKey: "project.ember.untrusted", originClass: "untrusted", trust: "none" });
+    const secret = createMemory({ content: "机密内容", subjectKey: "project.ember.secret", sensitivity: "secret" });
+    for (const item of [tainted, untrusted, secret]) {
+      store.appendEvent({ type: "memory.updated", payload: { ...item, status: "active" } });
+    }
+
+    const run = memory.consolidate();
+    expect(run.appliedMemoryIds).toHaveLength(0);
+    expect(run.skipped.some((item) => item.reason.includes("taint"))).toBe(true);
+    expect(run.skipped.some((item) => item.reason.includes("untrusted"))).toBe(true);
+    expect(run.skipped.some((item) => item.reason.includes("secret"))).toBe(true);
+  });
+
   it("recalls memories for a conversation and records a chat audit id", () => {
     const conversation = store.createConversation("Ember 发布计划", defaultConversationSettings());
     const created = createMemory();

@@ -1301,6 +1301,47 @@ export interface MemoryForgetReceipt {
   createdAt: string;
 }
 
+export const MEMORY_CONSOLIDATION_STATUSES = ["planned", "applied", "failed"] as const;
+export type MemoryConsolidationStatus = (typeof MEMORY_CONSOLIDATION_STATUSES)[number];
+
+export interface MemoryConsolidationSource {
+  memoryId: string;
+  version: number;
+  contentHash: string;
+  status: MemoryStatus;
+  content: string;
+  sourceLabel: string;
+  updatedAt: string;
+}
+
+export interface MemoryConsolidationGroup {
+  id: string;
+  kind: MemoryKind;
+  supersessionKey: string;
+  subjectKey: string;
+  scope: string;
+  sourceMemoryIds: string[];
+  proposedContent: string;
+  score: number;
+  reasons: string[];
+  conflicts: string[];
+}
+
+export interface MemoryConsolidationRun {
+  id: string;
+  status: MemoryConsolidationStatus;
+  dryRun: boolean;
+  scope: string | null;
+  startedAt: string;
+  completedAt: string | null;
+  groups: MemoryConsolidationGroup[];
+  sources: MemoryConsolidationSource[];
+  appliedMemoryIds: string[];
+  skipped: Array<{ memoryId: string; reason: string }>;
+  error: string | null;
+  report: string;
+}
+
 export const METHOD_STATUSES = ["candidate", "evaluating", "trial", "adopted", "rejected", "reverted", "superseded"] as const;
 export type MethodStatus = (typeof METHOD_STATUSES)[number];
 

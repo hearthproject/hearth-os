@@ -267,6 +267,13 @@ const memoryRecallSchema = z.object({
 
 const memoryCaptureSchema = z.object({ taskId: z.string().trim().min(1).max(100) }).strict();
 
+const memoryConsolidationSchema = z.object({
+  scope: z.string().trim().min(1).max(120).optional(),
+  apply: z.boolean().optional(),
+  minClusterSize: z.number().int().min(2).max(20).optional(),
+  maxGroups: z.number().int().min(1).max(50).optional()
+}).strict();
+
 const memoryConflictResolveSchema = z.object({
   resolution: z.enum(["keep_left", "keep_right", "merged"]),
   note: z.string().max(1000).optional(),
@@ -1294,6 +1301,16 @@ export async function buildServer(options: BuildServerOptions = {}) {
     if (!parsed.success) return reply.code(400).send({ error: "INVALID_MEMORY_CAPTURE", message: "经历捕获参数不正确" });
     try {
       return { memory: memory.captureExperience(parsed.data.taskId) };
+    } catch (error) {
+      return sendMemoryError(reply, error);
+    }
+  });
+
+  app.post("/api/memory/consolidate", async (request, reply) => {
+    const parsed = memoryConsolidationSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_MEMORY_CONSOLIDATION", message: "记忆巩固参数不正确" });
+    try {
+      return memory.consolidate(parsed.data);
     } catch (error) {
       return sendMemoryError(reply, error);
     }

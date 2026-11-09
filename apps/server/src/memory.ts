@@ -2,6 +2,9 @@ import { createHash, randomUUID } from "node:crypto";
 import type {
   MemoryConflict,
   MemoryConfidence,
+  MemoryConsolidationGroup,
+  MemoryConsolidationRun,
+  MemoryConsolidationSource,
   MemoryForgetReceipt,
   MemoryKind,
   MemoryOriginClass,
@@ -18,6 +21,7 @@ import type {
   TaskRecord
 } from "@hearth/core";
 import type { HearthService } from "./service.ts";
+import { consolidationReport, planMemoryConsolidation } from "./memory-consolidation.ts";
 
 const DEFAULT_MEMORY_SETTINGS: MemorySettings = {
   autoCapture: "experience",
@@ -73,6 +77,13 @@ export interface MemorySettingsPatch {
   allowSensitive?: boolean;
 }
 
+export interface ConsolidationInput {
+  scope?: string | undefined;
+  apply?: boolean | undefined;
+  minClusterSize?: number | undefined;
+  maxGroups?: number | undefined;
+}
+
 export interface RecallInput {
   taskId: string;
   runId?: string | null;
@@ -104,6 +115,7 @@ export interface MemorySnapshot {
   conflicts: MemoryConflict[];
   recalls: MemoryRecall[];
   forgets: MemoryForgetReceipt[];
+  consolidations: MemoryConsolidationRun[];
 }
 
 export class MemoryError extends Error {
@@ -168,7 +180,8 @@ export class MemoryService {
       memories: this.service.store.listMemories({ limit: 500 }),
       conflicts: this.service.store.listMemoryConflicts(),
       recalls: this.service.store.listMemoryRecalls().slice(0, 100),
-      forgets: this.service.store.listMemoryForgetReceipts().slice(0, 100)
+      forgets: this.service.store.listMemoryForgetReceipts().slice(0, 100),
+      consolidations: this.service.store.listMemoryConsolidationRuns(20)
     };
   }
 
@@ -533,7 +546,8 @@ export class MemoryService {
       versions: memories.flatMap((memory) => this.service.store.listMemoryVersions(memory.id)),
       conflicts: this.service.store.listMemoryConflicts(),
       recalls: this.service.store.listMemoryRecalls(),
-      forgets: this.service.store.listMemoryForgetReceipts()
+      forgets: this.service.store.listMemoryForgetReceipts(),
+      consolidations: this.service.store.listMemoryConsolidationRuns(500)
     };
   }
 
@@ -563,6 +577,101 @@ export class MemoryService {
     };
   }
 
+  consolidate(input: ConsolidationInput = {}): MemoryConsolidationRun {
+    const startedAt = this.nowIso();
+    const runId = randomUUID();
+    const plan = planMemoryConsolidation(this.service.store.listMemories({ limit: 10_000 }), {
+      scope: input.scope,
+      minClusterSize: input.minClusterSize,
+      maxGroups: input.maxGroups,
+      now: this.clock()
+    });
+    const skipped = [...plan.skipped];
+    const applicableGroups: MemoryConsolidationGroup[] = [];
+    for (const group of plan.groups) {
+      if (group.conflicts.length > 0) {
+        skipped.push({ memoryId: group.sourceMemoryIds[0] ?? group.id, reason: "内容冲突，未自动覆盖；请人工确认" });
+        continue;
+      }
+      applicableGroups.push(group);
+    }
+    const applicableIds = new Set(applicableGroups.flatMap((group) => group.sourceMemoryIds));
+    const sources = plan.sources.filter((source) => !input.apply || applicableIds.has(source.memoryId));
+    const now = this.nowIso();
+    const buildRun = (
+      status: MemoryConsolidationRun["status"],
+      appliedMemoryIds: string[],
+      error: string | null,
+      completedAt: string | null
+    ): MemoryConsolidationRun => {
+      const run: MemoryConsolidationRun = {
+        id: runId,
+        status,
+        dryRun: !input.apply,
+        scope: input.scope?.trim() || null,
+        startedAt,
+        completedAt,
+        groups: plan.groups,
+        sources,
+        appliedMemoryIds,
+        skipped,
+        error,
+        report: ""
+      };
+      run.report = consolidationReport(run);
+      return run;
+    };
+
+    if (!input.apply || applicableGroups.length === 0) {
+      const run = buildRun("planned", [], null, this.nowIso());
+      this.emit("memory.consolidation.updated", run);
+      return run;
+    }
+
+    const stale = sources.find((source) => {
+      const current = this.service.store.getMemory(source.memoryId);
+      return !current || current.status !== "active" || current.contentHash !== source.contentHash || current.version !== source.version;
+    });
+    if (stale) {
+      const run = buildRun("failed", [], "来源记忆已变化，请重新生成巩固计划：" + stale.memoryId, this.nowIso());
+      this.emit("memory.consolidation.updated", run);
+      return run;
+    }
+
+    const events: Array<{ type: string; payload: unknown }> = [];
+    const appliedMemoryIds: string[] = [];
+    try {
+      for (const group of applicableGroups) {
+        const candidate = this.buildConsolidatedMemory(group, runId, now);
+        this.assertGovernance(candidate);
+        events.push({ type: "memory.created", payload: candidate });
+        events.push({ type: "memory.version.recorded", payload: this.versionPayload(candidate, "记忆巩固生成", now) });
+        appliedMemoryIds.push(candidate.id);
+        for (const sourceId of group.sourceMemoryIds) {
+          const source = this.requireMemory(sourceId);
+          const snapshot = sources.find((item) => item.memoryId === sourceId);
+          if (!snapshot || source.status !== "active" || source.contentHash !== snapshot.contentHash || source.version !== snapshot.version) {
+            throw new MemoryError("CONSOLIDATION_STALE", "巩固期间来源记忆发生变化", 409);
+          }
+          events.push({
+            type: "memory.updated",
+            payload: { ...source, status: "superseded", allowRecall: false, version: source.version + 1, updatedAt: now }
+          });
+        }
+      }
+      const run = buildRun("applied", appliedMemoryIds, null, this.nowIso());
+      events.push({ type: "memory.consolidation.updated", payload: run });
+      const envelopes = this.service.store.appendEvents(events);
+      for (const envelope of envelopes) this.service.bus.publish(envelope);
+      return run;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const run = buildRun("failed", [], message, this.nowIso());
+      this.emit("memory.consolidation.updated", run);
+      return run;
+    }
+  }
+
   private detectConflict(memory: MemoryRecord): void {
     const peers = this.service.store.listMemories({ status: "active", limit: 1000 })
       .filter((item) => item.id !== memory.id && item.subjectKey === memory.subjectKey && normalize(item.content) !== normalize(memory.content));
@@ -590,7 +699,11 @@ export class MemoryService {
   }
 
   private recordVersion(memory: MemoryRecord, reason: string): void {
-    const version: MemoryVersion = {
+    this.emit("memory.version.recorded", this.versionPayload(memory, reason));
+  }
+
+  private versionPayload(memory: MemoryRecord, reason: string, createdAt = this.nowIso()): MemoryVersion {
+    return {
       id: randomUUID(),
       memoryId: memory.id,
       version: memory.version,
@@ -616,9 +729,50 @@ export class MemoryService {
       scope: memory.scope,
       tags: memory.tags,
       reason,
-      createdAt: this.nowIso()
+      createdAt
     };
-    this.emit("memory.version.recorded", version);
+  }
+
+  private buildConsolidatedMemory(group: MemoryConsolidationGroup, runId: string, now: string): MemoryRecord {
+    return {
+      id: randomUUID(),
+      kind: group.kind,
+      status: "active",
+      content: group.proposedContent,
+      subjectKey: group.subjectKey,
+      scope: group.scope,
+      tags: ["consolidated", ...group.sourceMemoryIds.map((id) => "source:" + id)],
+      source: {
+        type: "system",
+        id: runId,
+        label: "记忆巩固",
+        excerpt: group.sourceMemoryIds.length + " 条 episodic 记忆合并"
+      },
+      confidence: "medium",
+      sensitivity: "normal",
+      tier: "curated",
+      originClass: "agent",
+      sourceKind: "consolidation",
+      sourceRef: runId,
+      sessionId: null,
+      trust: "medium",
+      taint: "clean",
+      importance: clamp(0.6 + group.sourceMemoryIds.length * 0.05, 0, 1),
+      retention: "1y",
+      supersessionKey: group.supersessionKey,
+      contentHash: memoryContentHash(group.proposedContent),
+      lastVerifiedAt: now,
+      expiresAt: null,
+      allowRecall: true,
+      version: 1,
+      supersedesId: null,
+      derivedFromId: group.sourceMemoryIds[0] ?? null,
+      validUntil: null,
+      createdAt: now,
+      updatedAt: now,
+      lastRecalledAt: null,
+      recallCount: 0
+    };
   }
 
   private assertGovernance(memory: MemoryRecord): void {
