@@ -1,0 +1,1 @@
+{"filledFields":3,"validationErrors":0,"submitClicked":false,"actions":[{"op":"fill","field":"name","value":"张三"},{"op":"fill","field":"email","value":"zhangsan@example.com"},{"op":"fill","field":"company","value":"示例公司"},{"op":"verify","state":"ready_to_submit"}]}

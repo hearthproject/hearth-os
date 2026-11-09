@@ -1,0 +1,1 @@
+{"fieldCount":3,"sendClicked":false,"finalState":"draft","actions":[{"op":"focus","target":"To"},{"op":"type","text":"alex@example.com"},{"op":"focus","target":"Subject"},{"op":"type","text":"明日交付确认"},{"op":"focus","target":"Body"},{"op":"type","text":"材料已按约定更新，请查收。"},{"op":"click","target":"Save Draft"}]}
