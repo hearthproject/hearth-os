@@ -12,6 +12,7 @@ import { loadCodexProfile, runCodex } from "@hearth/codex-executor";
 import { z } from "zod";
 import { ATTACHMENT_DIR, BACKUP_DIR, CODEX_HOME_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, DSH_HOME_DIR, EXECUTOR_HOME_DIR, EXECUTOR_SETTINGS_PATH, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST, WORKSPACE_DIR } from "./config.ts";
 import { registerChatRoutes } from "./chat-routes.ts";
+import { registerEvalRoutes } from "./eval-routes.ts";
 import { ExecutorSettingsStore } from "./executor-settings.ts";
 import { probeHermes } from "./hermes-executor.ts";
 import { clearHermesHealthCache } from "./hermes-health.ts";
@@ -653,6 +654,12 @@ export async function buildServer(options: BuildServerOptions = {}) {
     modelSettingsForExecutor,
     executorHealth,
     memory
+  });
+  registerEvalRoutes(app, {
+    service,
+    store,
+    settings: () => modelRegistry.chatSettings() ?? loadModelSettings(modelSettingsPath),
+    repoRoot: REPO_ROOT
   });
 
   app.addHook("onClose", async () => {
