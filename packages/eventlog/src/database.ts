@@ -308,7 +308,7 @@ CREATE TABLE IF NOT EXISTS memory_conflicts (
 );
 CREATE TABLE IF NOT EXISTS memory_recalls (
   id TEXT PRIMARY KEY, memory_id TEXT NOT NULL, task_id TEXT NOT NULL, run_id TEXT,
-  reason TEXT NOT NULL, score REAL NOT NULL, created_at TEXT NOT NULL
+  lane TEXT NOT NULL DEFAULT 'on_demand', reason TEXT NOT NULL, score REAL NOT NULL, created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS memory_forget_receipts (
   id TEXT PRIMARY KEY, memory_id TEXT NOT NULL, affected_memory_ids_json TEXT NOT NULL,
@@ -581,6 +581,7 @@ export class HearthStore {
     ensureColumn(this.db, "effects", "reconciled_at", "TEXT");
     ensureColumn(this.db, "effects", "target_key", "TEXT");
     ensureColumn(this.db, "effects", "suspend_reason", "TEXT");
+    ensureColumn(this.db, "memory_recalls", "lane", "TEXT NOT NULL DEFAULT 'on_demand'");
     for (const table of ["memories", "memory_versions"] as const) {
       ensureColumn(this.db, table, "tier", "TEXT NOT NULL DEFAULT 'episodic'");
       ensureColumn(this.db, table, "origin_class", "TEXT NOT NULL DEFAULT 'agent'");
@@ -3248,6 +3249,7 @@ function rowToMemoryRecall(row: DbRow): MemoryRecall {
     memoryId: String(row.memory_id),
     taskId: String(row.task_id),
     runId: row.run_id == null ? null : String(row.run_id),
+    lane: String(row.lane ?? "on_demand") as MemoryRecall["lane"],
     reason: String(row.reason),
     score: Number(row.score),
     createdAt: String(row.created_at)
@@ -3256,8 +3258,8 @@ function rowToMemoryRecall(row: DbRow): MemoryRecall {
 
 function insertMemoryRecallRow(db: DatabaseSync, recall: MemoryRecall): void {
   db.prepare(
-    "INSERT INTO memory_recalls (id, memory_id, task_id, run_id, reason, score, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-  ).run(recall.id, recall.memoryId, recall.taskId, recall.runId, recall.reason, recall.score, recall.createdAt);
+    "INSERT INTO memory_recalls (id, memory_id, task_id, run_id, lane, reason, score, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(recall.id, recall.memoryId, recall.taskId, recall.runId, recall.lane, recall.reason, recall.score, recall.createdAt);
 }
 
 function rowToMemoryForgetReceipt(row: DbRow): MemoryForgetReceipt {

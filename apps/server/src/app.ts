@@ -5,7 +5,7 @@ import { basename, join } from "node:path";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyReply } from "fastify";
 import type { EventEnvelope, ExecutorHealth, ExecutorId, ExecutorView, GoalBudget } from "@hearth/core";
-import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, EXECUTOR_IDS, GOAL_REVIEW_POLICIES, GOAL_STATES, GOAL_VALIDATORS, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_SENSITIVITIES, PROACTIVE_MODES, RUN_STATUSES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
+import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, EXECUTOR_IDS, GOAL_REVIEW_POLICIES, GOAL_STATES, GOAL_VALIDATORS, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_ORIGINS, MEMORY_RETENTIONS, MEMORY_SENSITIVITIES, MEMORY_TAINT_STATES, MEMORY_TIERS, MEMORY_TRUST_LEVELS, PROACTIVE_MODES, RUN_STATUSES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate } from "@hearth/templates";
 import { loadCodexProfile, runCodex } from "@hearth/codex-executor";
@@ -218,7 +218,19 @@ const createMemorySchema = z.object({
   sensitivity: z.enum(MEMORY_SENSITIVITIES).optional(),
   allowRecall: z.boolean().optional(),
   validUntil: z.string().datetime().nullable().optional(),
-  derivedFromId: z.string().trim().max(100).nullable().optional()
+  derivedFromId: z.string().trim().max(100).nullable().optional(),
+  tier: z.enum(MEMORY_TIERS).optional(),
+  originClass: z.enum(MEMORY_ORIGINS).optional(),
+  sourceKind: z.string().trim().min(1).max(100).optional(),
+  sourceRef: z.string().trim().max(1000).optional(),
+  sessionId: z.string().trim().max(100).nullable().optional(),
+  trust: z.enum(MEMORY_TRUST_LEVELS).optional(),
+  taint: z.enum(MEMORY_TAINT_STATES).optional(),
+  importance: z.number().min(0).max(1).optional(),
+  retention: z.enum(MEMORY_RETENTIONS).optional(),
+  supersessionKey: z.string().trim().max(200).nullable().optional(),
+  lastVerifiedAt: z.string().datetime().nullable().optional(),
+  expiresAt: z.string().datetime().nullable().optional()
 }).strict();
 
 const correctMemorySchema = z.object({
@@ -248,6 +260,7 @@ const memoryRecallSchema = z.object({
   taskId: z.string().trim().min(1).max(100),
   runId: z.string().trim().max(100).optional(),
   text: z.string().max(20000).optional(),
+  scope: z.string().trim().min(1).max(120).optional(),
   maxItems: z.number().int().min(1).max(50).optional(),
   maxChars: z.number().int().min(200).max(100000).optional()
 }).strict();
@@ -1291,6 +1304,15 @@ export async function buildServer(options: BuildServerOptions = {}) {
     reply.header("content-type", "application/json; charset=utf-8");
     reply.header("content-disposition", "attachment; filename=\"hearth-memories-" + stamp + ".json\"");
     return memory.exportData();
+  });
+
+  app.get<{ Params: { id: string } }>("/api/memory/:id/explain", async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    try {
+      return memory.explain(request.params.id);
+    } catch (error) {
+      return sendMemoryError(reply, error);
+    }
   });
 
   app.patch<{ Params: { id: string } }>("/api/memory/:id", async (request, reply) => {

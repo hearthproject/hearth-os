@@ -1244,10 +1244,14 @@ export interface MemoryRecall {
   memoryId: string;
   taskId: string;
   runId: string | null;
+  lane: MemoryRecallLane;
   reason: string;
   score: number;
   createdAt: string;
 }
+
+export const MEMORY_RECALL_LANES = ["always_on", "on_demand"] as const;
+export type MemoryRecallLane = (typeof MEMORY_RECALL_LANES)[number];
 
 export interface MemorySettings {
   autoCapture: "off" | "experience";
