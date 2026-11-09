@@ -1,0 +1,1 @@
+{"rows":[{"sku":"A-1","name":"传感器","qty":10},{"sku":"A-2","name":"控制器","qty":5},{"sku":"A-3","name":"","qty":2}],"rules":{"requiredFields":["sku","name","qty"]}}
