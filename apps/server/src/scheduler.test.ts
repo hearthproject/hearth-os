@@ -1054,6 +1054,59 @@ describe("Hearth scheduler", () => {
     expect(store?.listHandoffs(task.id)).toHaveLength(0);
   });
 
+  it("records what a native checkpoint proves and restores only after revalidation", async () => {
+    const service = setup();
+    const modelSettingsPath = configureModel();
+    const goal = service.createGoal({
+      title: "可恢复任务",
+      objective: "完成并保留检查点证明",
+      currentState: "active",
+      reviewPolicy: "auto",
+      successCriteria: [{ id: "result", description: "结果存在", validator: "file", check: "result.md", required: true }],
+      evidenceRequirements: ["result.md"]
+    });
+    let calls = 0;
+    const nativeRunner: NativeRunner = async (options) => {
+      calls += 1;
+      if (calls === 1) {
+        await options.onCheckpoint?.({
+          seq: 1,
+          kind: "tool",
+          messages: [
+            { role: "system", content: "system" },
+            { role: "user", content: "goal" },
+            { role: "tool", toolCallId: "call-1", name: "write_file", content: "ok" }
+          ],
+          usage: TEST_USAGE,
+          turns: 1,
+          toolCalls: 1,
+          summary: null
+        });
+        throw new Error("ECONNRESET");
+      }
+      writeFileSync(join(options.prepared.outDir, "result.md"), "# resumed\n");
+      return nativeResult("native resumed");
+    };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath });
+    scheduler.start();
+
+    const task = service.createTask({
+      title: "可恢复", goalId: goal.goalId, executorId: "native", expectedOutputs: ["result.md"]
+    });
+    await waitForStatus(service, task.id, "completed");
+    const runs = store?.listRuns(task.id) ?? [];
+    expect(runs).toHaveLength(2);
+    const checkpoint = runs[0] ? store?.latestRunCheckpoint(runs[0].id) : null;
+    expect(checkpoint?.proof).toMatchObject({
+      goalId: goal.goalId,
+      attemptId: runs[0]?.id,
+      identity: { executorId: "native" },
+      validation: { status: "not_required", evidenceRefs: [] }
+    });
+    expect(checkpoint?.proof?.phasePrefix).toContain("tool:write_file");
+    expect(checkpoint?.proof?.workspaceDigest).toMatch(/^[a-f0-9]{64}$/);
+  });
+
   it("pauses a native task for sensitive tool approval and continues after approval", async () => {
     const service = setup();
     const modelSettingsPath = configureModel();

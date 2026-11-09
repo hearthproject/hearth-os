@@ -559,6 +559,29 @@ export interface RunCheckpointRecord {
   sha256: string;
   usage: RunUsage | null;
   createdAt: string;
+  proof?: RunCheckpointProof;
+}
+
+export interface RunCheckpointProof {
+  goalId: string | null;
+  attemptId: string;
+  identity: {
+    executorId: string;
+    runtimeVersion: string;
+    modelId?: string;
+  };
+  phasePrefix: string[];
+  hostResult?: unknown;
+  validation?: {
+    status: "passed" | "failed" | "not_required";
+    evidenceRefs: string[];
+  };
+  effectReceipts: string[];
+  preparedIntents: string[];
+  permissionsDigest?: string;
+  goalRevision?: string;
+  workspaceDigest?: string;
+  createdAt: string;
 }
 
 export type GitFileStatus = "added" | "modified" | "deleted" | "renamed" | "untracked" | "conflicted";

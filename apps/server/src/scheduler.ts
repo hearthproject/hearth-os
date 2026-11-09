@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import type {
   AgentCheckpoint,
@@ -8,7 +8,7 @@ import type {
   AgentToolAuthorizationRequest,
   RuntimeEvent
 } from "@hearth/agent-runtime";
-import type { ContextItem, ContextSettings, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, MethodCandidate, MethodSelection, RunBudget, RunCheckpointRecord, RunRecord, TaskError, TaskFollowUpRecord, TaskLease, TaskProgressDetail, TaskRecord } from "@hearth/core";
+import type { ContextItem, ContextSettings, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, MethodCandidate, MethodSelection, RunBudget, RunCheckpointProof, RunCheckpointRecord, RunRecord, TaskError, TaskFollowUpRecord, TaskLease, TaskProgressDetail, TaskRecord } from "@hearth/core";
 import { runCodex } from "@hearth/codex-executor";
 import { getTemplate } from "@hearth/templates";
 import type { DshApprovalOutcome, DshApprovalRequest, DshContextEvent } from "@hearth/deepseek-executor";
@@ -508,6 +508,14 @@ export class HearthScheduler {
   }
 
   private restoreResumeState(taskId: string, workspace: string, includeWaitingInput = false): AgentResumeState | undefined {
+    const task = this.service.requireTask(taskId);
+    const unresolved = this.service.store.listEffects(taskId)
+      .filter((effect) => ["prepared", "admitted", "executing", "uncertain"].includes(effect.status));
+    if (unresolved.length > 0) {
+      throw new Error(`存在状态不确定的外部动作，必须先对账，不能从检查点自动恢复：${unresolved.map((effect) => effect.id).join("、")}`);
+    }
+    const goal = task.goalId ? this.service.store.getGoal(task.goalId) : null;
+    const permissionsDigest = task.permissions ? hashStable(task.permissions) : null;
     const runs = this.service.store.listRuns(taskId).filter((run) => run.status !== "running");
     for (let index = runs.length - 1; index >= 0; index -= 1) {
       const run = runs[index];
@@ -515,13 +523,18 @@ export class HearthScheduler {
       const checkpoint = this.service.store.latestRunCheckpoint(run.id);
       if (!checkpoint || checkpoint.kind === "final") continue;
       if (checkpoint.kind === "waiting_input" && !includeWaitingInput) continue;
+      if (checkpoint.proof?.goalId && checkpoint.proof.goalId !== (task.goalId ?? null)) continue;
+      if (checkpoint.proof?.goalRevision && goal && checkpoint.proof.goalRevision !== goal.updatedAt) continue;
+      if (checkpoint.proof?.permissionsDigest && checkpoint.proof.permissionsDigest !== permissionsDigest) continue;
       try {
         if (run.workspace !== workspace && existsSync(run.workspace)) {
           cpSync(run.workspace, workspace, { recursive: true, force: false });
         }
         const path = isAbsolute(checkpoint.path) ? checkpoint.path : join(this.workspaceRoot, checkpoint.path);
         if (!existsSync(path)) continue;
-        const state = JSON.parse(readFileSync(path, "utf8")) as AgentCheckpoint;
+        const body = readFileSync(path, "utf8");
+        if (createHash("sha256").update(body).digest("hex") !== checkpoint.sha256) continue;
+        const state = JSON.parse(body) as AgentCheckpoint;
         if (!Array.isArray(state.messages) || !state.usage) continue;
         return {
           messages: state.messages,
@@ -542,6 +555,30 @@ export class HearthScheduler {
     const absolutePath = join(directory, `${String(checkpoint.seq).padStart(4, "0")}-${checkpoint.kind}.json`);
     const body = `${JSON.stringify(checkpoint, null, 2)}\n`;
     writeFileSync(absolutePath, body, "utf8");
+    const createdAt = new Date().toISOString();
+    const task = this.service.requireTask(taskId);
+    const effects = this.service.store.listEffects(taskId);
+    const goal = task.goalId ? this.service.store.getGoal(task.goalId) : null;
+    const proof: RunCheckpointProof = {
+      goalId: task.goalId ?? null,
+      attemptId: runId,
+      identity: { executorId: "native", runtimeVersion: "0.1.0" },
+      phasePrefix: checkpoint.messages
+        .filter((message) => message.role === "tool")
+        .map((message) => `tool:${message.name}`)
+        .concat(`checkpoint:${checkpoint.kind}:${checkpoint.seq}`),
+      validation: { status: "not_required", evidenceRefs: [] },
+      effectReceipts: effects
+        .filter((effect) => ["committed", "succeeded", "reconciled_committed"].includes(effect.status) && (effect.receipt || effect.providerRef))
+        .map((effect) => effect.id),
+      preparedIntents: effects
+        .filter((effect) => ["prepared", "admitted", "executing", "uncertain"].includes(effect.status))
+        .map((effect) => effect.id),
+      ...(task.permissions ? { permissionsDigest: hashStable(task.permissions) } : {}),
+      ...(goal ? { goalRevision: goal.updatedAt } : {}),
+      ...(existsSync(workspace) ? { workspaceDigest: digestWorkspace(workspace) } : {}),
+      createdAt
+    };
     const record: RunCheckpointRecord = {
       id: randomUUID(),
       runId,
@@ -551,7 +588,8 @@ export class HearthScheduler {
       path: relative(this.workspaceRoot, absolutePath).replace(/\\/g, "/"),
       sha256: createHash("sha256").update(body).digest("hex"),
       usage: checkpoint.usage,
-      createdAt: new Date().toISOString()
+      createdAt,
+      proof
     };
     this.service.createRunCheckpoint(record);
     this.service.updateRun(runId, taskId, { checkpointSeq: checkpoint.seq, usage: checkpoint.usage });
@@ -2017,6 +2055,41 @@ export class HearthScheduler {
   }
 
 
+}
+
+function hashStable(value: unknown): string {
+  return createHash("sha256").update(stableJson(value)).digest("hex");
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map((item) => stableJson(item)).join(",")}]`;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function digestWorkspace(root: string, limit = 5_000): string {
+  const hash = createHash("sha256");
+  let count = 0;
+  const walk = (directory: string): void => {
+    if (count >= limit) return;
+    for (const entry of readdirSync(directory, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+      if (count >= limit) return;
+      if (entry.name === ".git" || entry.name === "node_modules") continue;
+      const absolute = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        walk(absolute);
+        continue;
+      }
+      const stat = statSync(absolute);
+      hash.update(`${relative(root, absolute).replace(/\\/g, "/")}\0${stat.size}\0${stat.mtimeMs}\n`);
+      count += 1;
+    }
+  };
+  walk(root);
+  return hash.digest("hex");
 }
 
 const TOOL_APPROVAL_REQUIRED = new Set([

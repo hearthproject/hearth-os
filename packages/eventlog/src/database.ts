@@ -97,7 +97,7 @@ export interface RunAggregate {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 17;
+export const CURRENT_SCHEMA_VERSION = 18;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -165,7 +165,7 @@ CREATE TABLE IF NOT EXISTS task_follow_ups (
 CREATE TABLE IF NOT EXISTS run_checkpoints (
   id TEXT PRIMARY KEY, run_id TEXT NOT NULL, task_id TEXT NOT NULL, seq INTEGER NOT NULL,
   kind TEXT NOT NULL, path TEXT NOT NULL, sha256 TEXT NOT NULL, usage_json TEXT,
-  created_at TEXT NOT NULL, UNIQUE(run_id, seq)
+  created_at TEXT NOT NULL, proof_json TEXT, UNIQUE(run_id, seq)
 );
 CREATE TABLE IF NOT EXISTS approvals (
   id TEXT PRIMARY KEY, task_id TEXT NOT NULL, run_id TEXT NOT NULL, kind TEXT NOT NULL,
@@ -528,6 +528,7 @@ export class HearthStore {
     ensureColumn(this.db, "tasks", "pinned_at", "TEXT");
     ensureColumn(this.db, "tasks", "archived_at", "TEXT");
     ensureColumn(this.db, "tasks", "goal_id", "TEXT");
+    ensureColumn(this.db, "run_checkpoints", "proof_json", "TEXT");
     ensureColumn(this.db, "tasks", "external_ref", "TEXT");
     ensureColumn(this.db, "tasks", "request_hash", "TEXT");
     ensureColumn(this.db, "method_candidates", "generation", "INTEGER");
@@ -2200,13 +2201,13 @@ function upsertTaskFollowUp(db: DatabaseSync, followUp: TaskFollowUpRecord): voi
 
 function insertRunCheckpoint(db: DatabaseSync, checkpoint: RunCheckpointRecord): void {
   db.prepare(
-    `INSERT INTO run_checkpoints (id, run_id, task_id, seq, kind, path, sha256, usage_json, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(run_id, seq) DO UPDATE SET kind=excluded.kind, path=excluded.path, sha256=excluded.sha256, usage_json=excluded.usage_json`
+    `INSERT INTO run_checkpoints (id, run_id, task_id, seq, kind, path, sha256, usage_json, created_at, proof_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(run_id, seq) DO UPDATE SET kind=excluded.kind, path=excluded.path, sha256=excluded.sha256, usage_json=excluded.usage_json, proof_json=excluded.proof_json`
   ).run(
     checkpoint.id, checkpoint.runId, checkpoint.taskId, checkpoint.seq, checkpoint.kind,
     checkpoint.path, checkpoint.sha256, checkpoint.usage ? JSON.stringify(checkpoint.usage) : null,
-    checkpoint.createdAt
+    checkpoint.createdAt, checkpoint.proof ? JSON.stringify(checkpoint.proof) : null
   );
 }
 
@@ -2680,7 +2681,8 @@ function rowToRunCheckpoint(row: DbRow): RunCheckpointRecord {
     seq: Number(row.seq), kind: String(row.kind), path: String(row.path),
     sha256: String(row.sha256),
     usage: row.usage_json == null ? null : JSON.parse(String(row.usage_json)),
-    createdAt: String(row.created_at)
+    createdAt: String(row.created_at),
+    ...(row.proof_json == null ? {} : { proof: JSON.parse(String(row.proof_json)) })
   };
 }
 
