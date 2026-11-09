@@ -497,7 +497,7 @@ export function ChatPage() {
               {memoryCount > 0 && !sending && (
                 <div className="chat-memory-note">
                   <Brain size={13} /> 本次回答参考了 {memoryCount} 条记忆
-                  <Link to="/memory">查看记忆</Link>
+                  <Link to="/settings?tab=automation">自动记忆</Link>
                 </div>
               )}
               {sending && !streaming && !reasoning && (

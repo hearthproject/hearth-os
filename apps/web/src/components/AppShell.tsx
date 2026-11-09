@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Brain, CalendarClock, Command, FlaskConical, Inbox, ListChecks, Mail, MessageCircle, Monitor, Settings2 } from "lucide-react";
+import { CalendarClock, Command, Inbox, ListChecks, Mail, MessageCircle, Monitor, Settings2 } from "lucide-react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { api } from "../lib/api.ts";
 import { isActive, needsAttention } from "../lib/format.ts";
@@ -63,14 +63,8 @@ export function AppShell() {
             <Inbox size={18} /> <span className="nav-label">需要你</span>
             {needsYouCount > 0 && <span className="nav-badge">{needsYouCount}</span>}
           </NavLink>
-          <NavLink to="/memory" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
-            <Brain size={18} /> <span className="nav-label">记忆</span>
-          </NavLink>
           <NavLink to="/devices" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
             <Monitor size={18} /> <span className="nav-label">设备</span>
-          </NavLink>
-          <NavLink to="/methods" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
-            <FlaskConical size={18} /> <span className="nav-label">技能</span>
           </NavLink>
           <NavLink to="/schedules" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
             <CalendarClock size={18} /> <span className="nav-label">定时任务</span>
@@ -120,9 +114,6 @@ export function AppShell() {
         <NavLink to="/inbox" className={({ isActive: active }) => (active ? "mobile-nav-item active" : "mobile-nav-item")}>
           <Inbox size={19} /><span>需要你</span>
           {needsYouCount > 0 && <span className="mobile-nav-badge">{needsYouCount}</span>}
-        </NavLink>
-        <NavLink to="/memory" className={({ isActive: active }) => (active ? "mobile-nav-item active" : "mobile-nav-item")}>
-          <Brain size={19} /><span>记忆</span>
         </NavLink>
         <NavLink to="/settings" className={({ isActive: active }) => (active ? "mobile-nav-item active" : "mobile-nav-item")}>
           <Settings2 size={19} /><span>设置</span>

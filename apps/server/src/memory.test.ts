@@ -169,15 +169,13 @@ describe("MemoryService", () => {
     expect(receipt?.targets.every((target) => target.status === "complete")).toBe(true);
   });
 
-  it("captures experience only when enabled and never duplicates the same task", () => {
+  it("captures and activates experience automatically without duplicating the same task", () => {
     const task = createTask();
     store.appendEvent({ type: "task.updated", taskId: task.id, payload: { status: "completed", resultSummary: "周报已生成" } });
-    expect(memory.captureExperience(task.id)).toBeNull();
-
-    memory.updateSettings({ autoCapture: "experience" });
+    expect(memory.settings().autoCapture).toBe("experience");
     const captured = memory.captureExperience(task.id);
     expect(captured?.kind).toBe("experience");
-    expect(captured?.status).toBe("candidate");
+    expect(captured?.status).toBe("active");
     expect(memory.captureExperience(task.id)?.id).toBe(captured?.id);
     expect(store.listMemories({ kind: "experience" })).toHaveLength(1);
   });

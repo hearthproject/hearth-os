@@ -79,21 +79,22 @@ export class MethodService {
     if (!raw) return { ...DEFAULT_METHOD_SETTINGS };
     try {
       const parsed = JSON.parse(raw) as Partial<MethodSettings>;
-      return {
-        autoLearn: typeof parsed.autoLearn === "boolean" ? parsed.autoLearn : DEFAULT_METHOD_SETTINGS.autoLearn,
-        updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : null
-      };
+      const updatedAt = typeof parsed.updatedAt === "string" ? parsed.updatedAt : null;
+      if (parsed.autoLearn === true) return { autoLearn: true, updatedAt };
+      const migrated: MethodSettings = { autoLearn: true, updatedAt: this.nowIso() };
+      this.service.store.setAppSetting(METHOD_SETTINGS_KEY, JSON.stringify(migrated));
+      return migrated;
     } catch {
       return { ...DEFAULT_METHOD_SETTINGS };
     }
   }
 
   updateSettings(patch: { autoLearn?: boolean | undefined }): MethodSettings {
-    if (patch.autoLearn !== undefined && typeof patch.autoLearn !== "boolean") {
-      throw new MethodError("METHOD_SETTINGS_INVALID", "自动学习设置必须是布尔值");
+    if (patch.autoLearn !== undefined && patch.autoLearn !== true) {
+      throw new MethodError("METHOD_AUTO_LEARN_REQUIRED", "自动学习始终开启");
     }
     const next: MethodSettings = {
-      autoLearn: patch.autoLearn ?? this.settings().autoLearn,
+      autoLearn: true,
       updatedAt: this.nowIso()
     };
     this.service.store.setAppSetting(METHOD_SETTINGS_KEY, JSON.stringify(next));
@@ -200,6 +201,17 @@ export class MethodService {
       allowedCapabilities: capabilities,
       fingerprint
     });
+  }
+
+  autoLearnFromTask(taskId: string): MethodCandidate | null {
+    const task = this.requireTrajectoryTask(taskId);
+    if (task.status !== "completed") return null;
+    const method = this.generateFromTask(taskId);
+    if (method.status === "adopted") return method;
+    if (!["candidate", "evaluating", "trial"].includes(method.status)) return null;
+    const sources = method.sourceTaskIds.map((id) => this.service.store.getTask(id)).filter((item): item is TaskRecord => Boolean(item));
+    if (sources.length === 0 || sources.some((source) => source.status !== "completed")) return null;
+    return this.adopt(method.id);
   }
 
   validateAssignment(input: { methodId: string; templateId?: string | null }): { methodId: string; methodVersion: number } {
@@ -433,6 +445,15 @@ export class MethodService {
       .filter((trial) => this.service.store.listMethodApplications({ taskId: trial.taskId, methodId: id, methodVersion: method.version }).length > 0)
       .map((trial) => trial.taskId);
     if (trialIds.length < 2) throw new MethodError("METHOD_TRIAL_REQUIRED", "晋升前至少需要两个有注入证据的试跑样本", 409);
+    return this.adopt(id, trialIds);
+  }
+
+  private adopt(id: string, trialTaskIds: string[] = []): MethodCandidate {
+    const method = this.requireMethod(id);
+    if (method.status === "adopted") return method;
+    if (["reverted", "rejected", "superseded"].includes(method.status)) {
+      throw new MethodError("METHOD_READ_ONLY", "当前候选方法状态不允许晋升", 409);
+    }
     const baselineCapabilities = this.intersectionCapabilities(method.sourceTaskIds);
     const expanded = method.allowedCapabilities.filter((capability) => !baselineCapabilities.includes(capability));
     if (expanded.length > 0) throw new MethodError("METHOD_PERMISSION_EXPANSION", "候选方法权限超出基线，不能晋升", 409);
@@ -456,7 +477,7 @@ export class MethodService {
       status: "adopted",
       generation,
       previousVersionId: previous?.id ?? null,
-      trial: this.metrics(trialIds),
+      trial: trialTaskIds.length > 0 ? this.metrics(trialTaskIds) : method.trial,
       adoptedAt: now,
       retiredAt: null,
       updatedAt: now

@@ -164,7 +164,7 @@ export class HearthScheduler {
     this.runtimePreparer = options.runtimePreparer ?? prepareTaskRuntime;
     this.memory = new MemoryService(this.service);
     this.methods = options.methods ?? new MethodService(this.service);
-    this.autoLearn = options.autoLearn ?? false;
+    this.autoLearn = options.autoLearn ?? true;
     this.context = options.context ?? new ContextService(this.service, options.contextBlobRoot ?? CONTEXT_BLOB_DIR);
     this.projector = new ContextProjector(this.service, this.context);
     this.service.setContextSink((message) => {
@@ -1002,8 +1002,9 @@ export class HearthScheduler {
         return;
       }
       if (!this.autoLearn || !this.methods.settings().autoLearn) return;
+      if (task.status !== "completed") return;
       if (this.service.store.listContextItems(taskId, { limit: 3 }).items.length < 3) return;
-      this.methods.generateFromTask(taskId);
+      this.methods.autoLearnFromTask(taskId);
     } catch {
       // Learning must never change the task outcome.
     }

@@ -14,9 +14,7 @@ const NAV_ITEMS = [
   { label: "聊天", detail: "问答与派发任务", path: "/" },
   { label: "任务", detail: "查看全部任务与运行状态", path: "/tasks" },
   { label: "需要你", detail: "审批、接管与主动建议", path: "/inbox" },
-  { label: "记忆", detail: "查看和管理长期记忆", path: "/memory" },
   { label: "设备", detail: "设备、桌面与远程能力", path: "/devices" },
-  { label: "技能", detail: "方法候选、评估与晋升", path: "/methods" },
   { label: "定时任务", detail: "周期执行与运行记录", path: "/schedules" },
   { label: "邮件", detail: "邮箱连接与同步", path: "/mail" },
   { label: "设置", detail: "模型、执行器与存储", path: "/settings" }

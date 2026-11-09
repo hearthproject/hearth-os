@@ -131,22 +131,22 @@ describe("methods API", () => {
     await app.close();
   });
 
-  it("reads and updates method learning settings", async () => {
+  it("keeps method learning settings in automatic mode", async () => {
     const app = await buildServer({ store, serveWeb: false });
     const initial = await app.inject({ method: "GET", url: "/api/methods/settings" });
     expect(initial.statusCode).toBe(200);
     expect(initial.json().settings.autoLearn).toBe(true);
 
-    const updated = await app.inject({
+    const disabled = await app.inject({
       method: "PATCH",
       url: "/api/methods/settings",
       payload: { autoLearn: false }
     });
-    expect(updated.statusCode).toBe(200);
-    expect(updated.json().settings.autoLearn).toBe(false);
+    expect(disabled.statusCode).toBe(400);
+    expect(disabled.json().error).toBe("METHOD_AUTO_LEARN_REQUIRED");
 
     const snapshot = await app.inject({ method: "GET", url: "/api/methods" });
-    expect(snapshot.json().settings.autoLearn).toBe(false);
+    expect(snapshot.json().settings.autoLearn).toBe(true);
     await app.close();
   });
 

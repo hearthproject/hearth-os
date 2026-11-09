@@ -8,8 +8,6 @@ import { ChatPage } from "./pages/ChatPage.tsx";
 import { DevicesPage } from "./pages/DevicesPage.tsx";
 import { InboxPage } from "./pages/InboxPage.tsx";
 import { MailPage } from "./pages/MailPage.tsx";
-import { MemoryPage } from "./pages/MemoryPage.tsx";
-import { MethodsPage } from "./pages/MethodsPage.tsx";
 import { OnboardingPage } from "./pages/OnboardingPage.tsx";
 import { SettingsPage } from "./pages/SettingsPage.tsx";
 import { SchedulesPage } from "./pages/SchedulesPage.tsx";
@@ -29,9 +27,9 @@ export default function App() {
             <Route path="tasks" element={<TasksPage />} />
             <Route path="tasks/:id" element={<TaskDetailPage />} />
             <Route path="inbox" element={<InboxPage />} />
-            <Route path="memory" element={<MemoryPage />} />
+            <Route path="memory" element={<Navigate to="/settings?tab=automation" replace />} />
             <Route path="mail" element={<MailPage />} />
-            <Route path="methods" element={<MethodsPage />} />
+            <Route path="methods" element={<Navigate to="/settings?tab=automation" replace />} />
             <Route path="schedules" element={<SchedulesPage />} />
             <Route path="devices" element={<DevicesPage />} />
             <Route path="settings" element={<SettingsPage />} />

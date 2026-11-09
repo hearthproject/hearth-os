@@ -17,7 +17,7 @@ import { api } from "../lib/api.ts";
 import type { ModelProtocol, ModelProviderPreset } from "../lib/types.ts";
 import { HearthMark } from "../components/HearthMark.tsx";
 
-const STEPS = ["接入模型", "检查执行器", "记忆与主动", "开始使用"];
+const STEPS = ["接入模型", "检查执行器", "自动与主动", "开始使用"];
 
 interface ModelDraft {
   providerId: string;
@@ -43,7 +43,6 @@ export function OnboardingPage() {
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState<ModelDraft>(EMPTY_DRAFT);
   const [draftReady, setDraftReady] = useState(false);
-  const [remember, setRemember] = useState(true);
   const [proactive, setProactive] = useState(true);
   const [preferencesReady, setPreferencesReady] = useState(false);
   const [busy, setBusy] = useState<"test" | "save" | "preferences" | "finish" | "skip" | null>(null);
@@ -79,9 +78,7 @@ export function OnboardingPage() {
 
   useEffect(() => {
     if (preferencesReady || !onboardingQuery.data) return;
-    const firstRun = onboardingQuery.data.state === null;
-    setRemember(firstRun ? true : onboardingQuery.data.checks.memoryAutoCapture === "experience");
-    setProactive(firstRun ? true : onboardingQuery.data.checks.proactiveEnabled);
+    setProactive(onboardingQuery.data.state === null ? true : onboardingQuery.data.checks.proactiveEnabled);
     setPreferencesReady(true);
   }, [preferencesReady, onboardingQuery.data]);
 
@@ -156,7 +153,7 @@ export function OnboardingPage() {
     setNotice(null);
     try {
       await Promise.all([
-        api.updateMemorySettings({ autoCapture: remember ? "experience" : "off" }),
+        api.updateMemorySettings({ autoCapture: "experience" }),
         api.updateProactiveSettings({ enabled: proactive })
       ]);
       await Promise.all([
@@ -324,17 +321,10 @@ export function OnboardingPage() {
           {step === 2 && (
             <section className="wizard-panel">
               <span className="eyebrow">第三步</span>
-              <h1>让它慢慢认识你</h1>
-              <p className="wizard-lead">这两项都可以随时在设置里关闭或修改。记忆先进入候选，确认后才参与召回。</p>
+              <h1>让它自动记住并变熟练</h1>
+              <p className="wizard-lead">记忆和技能会在后台自动整理，不需要确认。你只需要决定是否接收主动提醒。</p>
 
               <div className="wizard-preferences">
-                <label className="wizard-toggle">
-                  <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />
-                  <span>
-                    <strong>记住任务经历</strong>
-                    <small>任务完成后生成经历候选，帮助你少重复说明。默认不写入敏感信息。</small>
-                  </span>
-                </label>
                 <label className="wizard-toggle">
                   <input type="checkbox" checked={proactive} onChange={(event) => setProactive(event.target.checked)} />
                   <span>
@@ -344,7 +334,7 @@ export function OnboardingPage() {
                 </label>
               </div>
 
-              <p className="wizard-note"><KeyRound size={14} /> 你可以在“设置 → 主动”和“记忆”页随时调整预算、安静时段和召回策略。</p>
+              <p className="wizard-note"><KeyRound size={14} /> 自动记忆与技能无需手工管理；提醒预算和安静时段仍可在“设置 → 主动”里调整。</p>
             </section>
           )}
 
@@ -357,7 +347,7 @@ export function OnboardingPage() {
               <div className="wizard-summary">
                 <SummaryRow ok={configured} label="聊天模型" value={configured ? `${draft.providerName} · ${draft.model}` : "尚未配置，可稍后补上"} />
                 <SummaryRow ok={nativeReady} label="原生执行器" value={nativeReady ? "已就绪" : "未就绪，可到设置里检查"} />
-                <SummaryRow ok label="记忆偏好" value={remember ? "任务经历候选已开启" : "保持关闭"} />
+                <SummaryRow ok label="记忆与技能" value="后台自动运行" />
                 <SummaryRow ok label="主动提醒" value={proactive ? "已开启" : "保持关闭"} />
               </div>
 

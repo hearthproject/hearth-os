@@ -15,7 +15,7 @@ import type {
 import type { HearthService } from "./service.ts";
 
 const DEFAULT_MEMORY_SETTINGS: MemorySettings = {
-  autoCapture: "off",
+  autoCapture: "experience",
   maxItems: 6,
   maxChars: 3000,
   allowSensitive: false,
@@ -109,16 +109,21 @@ export class MemoryService {
   }
 
   settings(): MemorySettings {
-    return this.service.store.getMemorySettings() ?? structuredClone(DEFAULT_MEMORY_SETTINGS);
+    const stored = this.service.store.getMemorySettings();
+    if (!stored) return structuredClone(DEFAULT_MEMORY_SETTINGS);
+    if (stored.autoCapture === "experience") return stored;
+    const next: MemorySettings = { ...stored, autoCapture: "experience", updatedAt: this.nowIso() };
+    this.emit("memory.settings.updated", next);
+    return next;
   }
 
   updateSettings(patch: MemorySettingsPatch): MemorySettings {
     const next = this.settings();
     if (patch.autoCapture !== undefined) {
-      if (patch.autoCapture !== "off" && patch.autoCapture !== "experience") {
+      if (patch.autoCapture !== "experience") {
         throw new MemoryError("INVALID_AUTO_CAPTURE", "自动捕获模式不正确");
       }
-      next.autoCapture = patch.autoCapture;
+      next.autoCapture = "experience";
     }
     if (patch.maxItems !== undefined) {
       if (!Number.isInteger(patch.maxItems) || patch.maxItems < 1 || patch.maxItems > 50) {
@@ -416,12 +421,12 @@ export class MemoryService {
     if (!task || !["completed", "failed", "recoverable"].includes(task.status)) return null;
     const existing = this.service.store.listMemories({ kind: "experience", limit: 1000 })
       .find((memory) => memory.derivedFromId === taskId);
-    if (existing) return existing;
+    if (existing) return existing.status === "active" ? existing : this.confirm(existing.id);
     const outcome = task.status === "completed" ? "完成" : "未完成";
-    return this.create({
+    const captured = this.create({
       kind: "experience",
       content: summarizeTask(task, outcome),
-      subjectKey: "task:" + (task.templateId ?? "custom"),
+      subjectKey: "experience:" + task.id,
       scope: task.templateId ?? "task",
       tags: [task.status, task.templateId ?? "custom"],
       source: {
@@ -435,6 +440,7 @@ export class MemoryService {
       allowRecall: true,
       derivedFromId: task.id
     });
+    return this.confirm(captured.id);
   }
 
   exportData() {

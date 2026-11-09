@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
   Bell,
@@ -22,7 +23,7 @@ import {
   Trash2
 } from "lucide-react";
 import { api } from "../lib/api.ts";
-import { formatDuration, formatNumber } from "../lib/format.ts";
+import { formatDuration, formatNumber, relativeTime } from "../lib/format.ts";
 import type {
   ContextSettings,
   ExecutorId,
@@ -37,7 +38,7 @@ import { ExecutorSettingsPanel } from "../components/ExecutorSettingsPanel.tsx";
 import { FeishuSettingsPanel } from "../components/FeishuSettingsPanel.tsx";
 import { desktopNotificationsEnabled, requestDesktopPermission, setDesktopNotificationsEnabled } from "../lib/notifications.ts";
 
-type SettingsTab = "executors" | "models" | "proactive" | "connections" | "context" | "data";
+type SettingsTab = "executors" | "models" | "proactive" | "automation" | "connections" | "context" | "data";
 
 interface ProfileDraft {
   name: string;
@@ -53,10 +54,15 @@ const TABS: Array<{ id: SettingsTab; label: string; hint: string; icon: typeof C
   { id: "executors", label: "执行器", hint: "默认执行器、安装状态与模型绑定", icon: Cpu },
   { id: "models", label: "模型", hint: "模型档案、聊天模型与连接测试", icon: Layers },
   { id: "proactive", label: "主动", hint: "提醒预算、安静时段与触发器", icon: Bell },
+  { id: "automation", label: "记忆与技能", hint: "自动运行状态，无需手工管理", icon: Sparkles },
   { id: "connections", label: "连接", hint: "飞书消息入口与外部账户", icon: Link2 },
   { id: "context", label: "上下文", hint: "接管策略、指标与清理", icon: Bot },
   { id: "data", label: "数据", hint: "SQLite、目录结构与迁移记录", icon: Database }
 ];
+
+function isSettingsTab(value: string | null): value is SettingsTab {
+  return TABS.some((tab) => tab.id === value);
+}
 
 const PROTOCOLS: Array<{ id: ModelProtocol; label: string }> = [
   { id: "openai-chat", label: "OpenAI Chat" },
@@ -86,14 +92,26 @@ const EXECUTOR_LABELS: Record<ExecutorId, string> = {
 };
 
 export function SettingsPage() {
-  const [tab, setTab] = useState<SettingsTab>("executors");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedTab = searchParams.get("tab");
+  const [tab, setTab] = useState<SettingsTab>(isSettingsTab(requestedTab) ? requestedTab : "executors");
+
+  useEffect(() => {
+    if (isSettingsTab(requestedTab)) setTab(requestedTab);
+  }, [requestedTab]);
+
+  function selectTab(next: SettingsTab) {
+    setTab(next);
+    setSearchParams({ tab: next }, { replace: true });
+  }
+
   return (
     <div className="page settings-page">
       <div className="page-head settings-hero">
         <div>
           <span className="eyebrow">本机控制台</span>
           <h1>设置</h1>
-          <p className="page-meta">按“执行器 → 模型 → 主动 → 连接 → 上下文 → 数据”完成配置。密钥只保存在本机 SQLite，浏览器只能看到掩码。</p>
+          <p className="page-meta">按“执行器 → 模型 → 主动 → 记忆与技能 → 连接 → 上下文 → 数据”完成配置。密钥只保存在本机 SQLite，浏览器只能看到掩码。</p>
         </div>
         <div className="settings-defaults">
           <strong>一等执行器</strong>
@@ -110,7 +128,7 @@ export function SettingsPage() {
               key={item.id}
               type="button"
               className={`settings-tab ${tab === item.id ? "active" : ""}`}
-              onClick={() => setTab(item.id)}
+              onClick={() => selectTab(item.id)}
             >
               <Icon size={18} />
               <span><strong>{item.label}</strong><small>{item.hint}</small></span>
@@ -122,6 +140,7 @@ export function SettingsPage() {
       {tab === "executors" && <ExecutorsTab />}
       {tab === "models" && <ModelsTab />}
       {tab === "proactive" && <ProactiveTab />}
+      {tab === "automation" && <AutomationTab />}
       {tab === "connections" && <ConnectionsTab />}
       {tab === "context" && <ContextTab />}
       {tab === "data" && <DataTab />}
@@ -757,6 +776,58 @@ function DataTab() {
           </section>
         </>
       )}
+    </section>
+  );
+}
+
+function AutomationTab() {
+  const memoryQuery = useQuery({ queryKey: ["memory"], queryFn: api.memory, refetchInterval: 30_000 });
+  const methodsQuery = useQuery({ queryKey: ["methods"], queryFn: api.methods, refetchInterval: 30_000 });
+  const activeMemories = (memoryQuery.data?.memories ?? []).filter((memory) => memory.status === "active");
+  const adoptedMethods = (methodsQuery.data?.methods ?? []).filter((method) => method.status === "adopted");
+  const latestRecall = memoryQuery.data?.recalls[0] ?? null;
+  const latestApplication = methodsQuery.data?.applications[0] ?? null;
+
+  return (
+    <section className="settings-tab-panel">
+      <div className="settings-section-intro">
+        <div>
+          <h2>记忆与技能</h2>
+          <p>任务结束后会自动提炼经历、启用记忆，并从成功任务中学习可复用技能。没有候选确认、试跑或晋升步骤。</p>
+        </div>
+        <span className={`status-chip ${memoryQuery.isError || methodsQuery.isError ? "warn" : "ok"}`}>
+          <span className={`status-dot ${memoryQuery.isError || methodsQuery.isError ? "offline" : "online"}`} />
+          全自动运行
+        </span>
+      </div>
+
+      <section className="panel settings-section">
+        <div className="settings-body">
+          <dl className="settings-kv">
+            <div>
+              <dt>自动记忆</dt>
+              <dd>
+                自动提炼并参与后续对话
+                <small>
+                  {memoryQuery.isLoading ? "正在读取…" : `${activeMemories.length} 条已启用`}
+                  {latestRecall ? ` · 最近召回于 ${relativeTime(latestRecall.createdAt)}` : ""}
+                </small>
+              </dd>
+            </div>
+            <div>
+              <dt>自动技能</dt>
+              <dd>
+                成功任务自动学习并用于同模板任务
+                <small>
+                  {methodsQuery.isLoading ? "正在读取…" : `${adoptedMethods.length} 个技能生效中`}
+                  {latestApplication ? ` · 最近复用于 ${relativeTime(latestApplication.createdAt)}` : ""}
+                </small>
+              </dd>
+            </div>
+          </dl>
+          <p className="settings-hint"><ShieldAlert size={13} /> 自动化只复用已有任务的成功路径，并继承或收窄原任务权限；外部动作仍按原有审批边界执行。</p>
+        </div>
+      </section>
     </section>
   );
 }

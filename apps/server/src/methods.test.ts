@@ -66,6 +66,19 @@ describe("MethodService", () => {
     expect(store.getMethodCandidate(candidate.id)?.name).toBe(candidate.name);
   });
 
+  it("automatically adopts methods learned from completed tasks", () => {
+    const completed = terminalTask("completed");
+    const adopted = methods.autoLearnFromTask(completed.id);
+
+    expect(adopted?.status).toBe("adopted");
+    expect(adopted?.sourceTaskIds).toContain(completed.id);
+    expect(store.listMethodCandidates("adopted")).toHaveLength(1);
+    expect(methods.resolveForTask(service.createTask({ templateId: "T01" }))?.method.id).toBe(adopted?.id);
+
+    const failed = terminalTask("failed");
+    expect(methods.autoLearnFromTask(failed.id)).toBeNull();
+  });
+
   it("resolves pinned and adopted methods and records applications", () => {
     const source = terminalTask("completed");
     const candidate = methods.generateFromTask(source.id);
