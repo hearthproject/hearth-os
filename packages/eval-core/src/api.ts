@@ -88,6 +88,16 @@ export interface CompareResponse extends ExperimentComparison {
   rightName: string | null;
 }
 
+export interface EvalExecutorOption {
+  id: string;
+  name: string;
+  description: string;
+  capabilities: string[];
+  canRun: boolean;
+  version: string | null;
+  issues: string[];
+}
+
 export interface EvalSystemResponse {
   evalVersion: string;
   hearthUrl: string;
@@ -95,6 +105,7 @@ export interface EvalSystemResponse {
   hearthStatus: string;
   judgeConfigured: boolean;
   judgeModel: string | null;
+  executors: EvalExecutorOption[];
   catalogCases: number;
   catalogIssues: number;
   artifactRoot: string;

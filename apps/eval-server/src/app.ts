@@ -9,6 +9,7 @@ import type {
   CreateExperimentRequest,
   DashboardResponse,
   EvalFamily,
+  EvalExecutorOption,
   EvalSystemResponse,
   ExperimentComparison,
   ExperimentDetailResponse,
@@ -99,10 +100,16 @@ export async function buildEvalApp(options: EvalAppOptions): Promise<FastifyInst
     const judge = await judgeInfo();
     let reachable = false;
     let hearthStatus = "offline";
+    let executors: EvalExecutorOption[] = [];
     try {
       const health = await client.health();
       reachable = true;
       hearthStatus = typeof health.status === "string" ? health.status : "online";
+      try {
+        executors = executorOptions(await client.executors());
+      } catch {
+        executors = [];
+      }
     } catch {
       reachable = false;
     }
@@ -113,6 +120,7 @@ export async function buildEvalApp(options: EvalAppOptions): Promise<FastifyInst
       hearthStatus,
       judgeConfigured: judge.configured,
       judgeModel: judge.model,
+      executors,
       catalogCases: catalog.size,
       catalogIssues: options.catalogIssues,
       artifactRoot,
@@ -409,6 +417,28 @@ function sameStrings(left: string[], right: string[]): boolean {
   if (left.length !== right.length) return false;
   const rightSet = new Set(right);
   return left.every((value) => rightSet.has(value));
+}
+
+function executorOptions(payload: Record<string, unknown>): EvalExecutorOption[] {
+  if (!Array.isArray(payload.executors)) return [];
+  return payload.executors.flatMap((value): EvalExecutorOption[] => {
+    const record = asRecord(value);
+    const health = asRecord(record?.health);
+    if (!record || typeof record.id !== "string" || typeof record.name !== "string") return [];
+    return [{
+      id: record.id,
+      name: record.name,
+      description: typeof record.description === "string" ? record.description : "",
+      capabilities: Array.isArray(record.capabilities)
+        ? record.capabilities.filter((item): item is string => typeof item === "string")
+        : [],
+      canRun: health?.canRun === true,
+      version: typeof health?.version === "string" ? health.version : null,
+      issues: Array.isArray(health?.issues)
+        ? health.issues.filter((item): item is string => typeof item === "string")
+        : []
+    }];
+  });
 }
 
 function listRunArtifacts(repoRoot: string, artifactRoot: string, outputDir: string): RunArtifactView[] {

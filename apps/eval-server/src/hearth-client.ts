@@ -77,6 +77,10 @@ export class HearthClient {
     return this.request("/api/health");
   }
 
+  async executors(): Promise<Record<string, unknown>> {
+    return this.request("/api/executors");
+  }
+
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
