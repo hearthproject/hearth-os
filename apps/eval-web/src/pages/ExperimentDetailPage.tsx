@@ -63,6 +63,16 @@ export function ExperimentDetailPage() {
       void queryClient.invalidateQueries({ queryKey: ["experiments"] });
     }
   });
+  const runs = useMemo(() => {
+    const source = experimentQuery.data?.runs ?? [];
+    const needle = search.trim().toLowerCase();
+    return source.filter((run) => {
+      if (statusFilter === "active" && !["queued", "created", "running", "waiting", "grading"].includes(run.status)) return false;
+      if (statusFilter !== "all" && statusFilter !== "active" && run.status !== statusFilter) return false;
+      if (!needle) return true;
+      return `${run.caseKey} ${run.executorId} ${run.error ?? ""}`.toLowerCase().includes(needle);
+    });
+  }, [experimentQuery.data?.runs, search, statusFilter]);
 
   if (experimentQuery.isLoading) return <LoadingState text="正在读取实验生命周期" />;
   if (experimentQuery.error) return <ErrorState error={experimentQuery.error} onRetry={() => void experimentQuery.refetch()} />;
@@ -71,15 +81,6 @@ export function ExperimentDetailPage() {
   const summary = data.summary;
   const caseByKey = new Map((casesQuery.data?.cases ?? []).map((item) => [item.caseKey, item]));
   const active = isActiveExperiment(experiment.status);
-  const runs = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    return data.runs.filter((run) => {
-      if (statusFilter === "active" && !["queued", "created", "running", "waiting", "grading"].includes(run.status)) return false;
-      if (statusFilter !== "all" && statusFilter !== "active" && run.status !== statusFilter) return false;
-      if (!needle) return true;
-      return `${run.caseKey} ${run.executorId} ${run.error ?? ""}`.toLowerCase().includes(needle);
-    });
-  }, [data.runs, search, statusFilter]);
 
   return (
     <div className="page-stack experiment-detail-page">
