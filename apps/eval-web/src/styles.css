@@ -435,6 +435,28 @@ code { font-size: .82em; }
 .case-card > code { font-size: 10px; }
 .case-card-foot { font-size: 10px; }
 
+/* Dashboard */
+.overview-card { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 28px; padding: 18px 20px; }
+.overview-main { min-width: 0; }
+.overview-label { display: flex; align-items: center; gap: 9px; color: var(--ink-faint); font-size: 11px; }
+.overview-name { display: inline-block; max-width: 100%; margin-top: 7px; overflow: hidden; color: var(--ink); font-size: 18px; font-weight: 600; letter-spacing: -.02em; text-overflow: ellipsis; white-space: nowrap; }
+a.overview-name:hover { color: var(--accent-deep); }
+.overview-main p { margin: 5px 0 0; color: var(--ink-faint); font-size: 11px; }
+.overview-stats { display: grid; grid-template-columns: repeat(3, minmax(88px, 1fr)); gap: 22px; padding-left: 24px; border-left: 1px solid var(--line); }
+.overview-stats > div { display: flex; flex-direction: column; gap: 3px; }
+.overview-stats span, .overview-stats small { color: var(--ink-faint); font-size: 10px; }
+.overview-stats strong { font-size: 19px; font-weight: 600; letter-spacing: -.025em; }
+.overview-actions { display: flex; align-items: center; }
+.legend-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 18px; margin-top: 16px; }
+.side-action { display: flex; align-items: center; gap: 7px; margin-top: 16px; padding-top: 14px; color: var(--accent-deep); border-top: 1px solid var(--line); font-size: 12px; font-weight: 550; }
+.side-action svg:last-child { margin-left: auto; }
+.side-action:hover { color: var(--accent); }
+.coverage-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.coverage-item { display: grid; grid-template-columns: minmax(0, 1fr) auto 14px; align-items: center; gap: 8px; min-height: 48px; padding: 0 12px; color: var(--ink-soft); background: var(--surface-muted); border: 1px solid var(--line); border-radius: 7px; font-size: 12px; }
+.coverage-item strong { color: var(--ink); font-size: 13px; font-weight: 600; }
+.coverage-item svg { color: var(--ink-faint); }
+.coverage-item:hover { color: var(--ink); background: var(--surface); border-color: var(--line-strong); }
+
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 @keyframes fade-up { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
