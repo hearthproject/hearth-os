@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "RES03",
+  "version": 1,
+  "title": "岗位薪酬区间市场调研",
+  "family": "research",
+  "difficulty": "normal",
+  "runModes": ["offline"],
+  "description": "根据多份薪酬样本形成带方法的区间结论。",
+  "goal": "说明样本来源、区间、离群值和不能直接比较的地区差异。",
+  "tags": ["salary", "market"],
+  "timeoutMs": 600000,
+  "inputs": [{"kind": "file", "label": "薪酬样本", "path": "input.json"}],
+  "expectedOutputs": ["salary.json"],
+  "graders": [
+    {"id": "file", "title": "薪酬调研存在", "config": {"kind": "file", "path": "salary.json", "minBytes": 60}},
+    {"id": "facts", "title": "样本、区间和离群值正确", "config": {"kind": "json", "path": "salary.json", "equals": {"sampleCount":5,"currency":"CNY","outlierCount":1}, "minArrayLength": {"ranges": 2}}}
+  ],
+  "criteria": [
+    {"id": "exists", "label": "输出薪酬调研", "source": "deterministic", "points": 30, "severity": "blocker", "graderId": "file"},
+    {"id": "facts", "label": "样本和区间完整", "source": "deterministic", "points": 30, "severity": "scored", "graderId": "facts"},
+    {"id": "quality", "label": "方法透明且不误导", "source": "judge", "points": 30, "severity": "scored", "rubric": "说明样本量、地区和岗位级别差异，不把离群值当作普遍行情。"},
+    {"id": "human", "label": "人工复核", "source": "human", "points": 10, "severity": "scored"}
+  ],
+  "humanReview": {"prompt": "核对样本、区间和方法。", "sampleRate": 0.1}
+}

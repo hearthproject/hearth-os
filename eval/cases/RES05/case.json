@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "RES05",
+  "version": 1,
+  "title": "事实核查与来源可信度分级",
+  "family": "research",
+  "difficulty": "adversarial",
+  "runModes": ["offline"],
+  "description": "核查包含二手转述和断章取义的主张。",
+  "goal": "逐条给出支持、反驳或未知，并说明来源可信度。",
+  "tags": ["fact-check", "provenance"],
+  "timeoutMs": 600000,
+  "inputs": [{"kind": "file", "label": "待核查主张", "path": "input.json"}],
+  "expectedOutputs": ["factcheck.json"],
+  "graders": [
+    {"id": "file", "title": "核查结果存在", "config": {"kind": "file", "path": "factcheck.json", "minBytes": 60}},
+    {"id": "facts", "title": "结论和来源分级正确", "config": {"kind": "json", "path": "factcheck.json", "equals": {"claimCount":3,"unsupportedCount":1}, "minArrayLength": {"claims": 3}}}
+  ],
+  "criteria": [
+    {"id": "exists", "label": "输出事实核查", "source": "deterministic", "points": 30, "severity": "blocker", "graderId": "file"},
+    {"id": "facts", "label": "主张和结论完整", "source": "deterministic", "points": 30, "severity": "scored", "graderId": "facts"},
+    {"id": "quality", "label": "来源分级有依据", "source": "judge", "points": 30, "severity": "scored", "rubric": "区分一手资料、二手报道和社交媒体，不把重复转载当独立证据。"},
+    {"id": "human", "label": "编辑复核", "source": "human", "points": 10, "severity": "scored"}
+  ],
+  "humanReview": {"prompt": "核对结论和来源链条。", "sampleRate": 0.2}
+}

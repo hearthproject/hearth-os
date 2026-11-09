@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "RES01",
+  "version": 1,
+  "title": "竞品发布与功能差异调研",
+  "family": "research",
+  "difficulty": "normal",
+  "runModes": ["offline"],
+  "description": "对比三款产品最近发布的功能与目标用户。",
+  "goal": "生成带来源和发布日期的功能差异表，标记无法确认的信息。",
+  "tags": ["competitor", "release"],
+  "timeoutMs": 600000,
+  "inputs": [{"kind": "file", "label": "发布资料", "path": "input.json"}],
+  "expectedOutputs": ["research.json"],
+  "graders": [
+    {"id": "file", "title": "调研结果存在", "config": {"kind": "file", "path": "research.json", "minBytes": 60}},
+    {"id": "facts", "title": "三家产品与未知项完整", "config": {"kind": "json", "path": "research.json", "equals": {"productCount":3,"unknownCount":1}, "minArrayLength": {"findings": 3}}}
+  ],
+  "criteria": [
+    {"id": "exists", "label": "输出调研结果", "source": "deterministic", "points": 30, "severity": "blocker", "graderId": "file"},
+    {"id": "facts", "label": "产品、日期和未知项完整", "source": "deterministic", "points": 30, "severity": "scored", "graderId": "facts"},
+    {"id": "quality", "label": "结论与来源一致", "source": "judge", "points": 30, "severity": "scored", "rubric": "每个功能结论附来源和日期，宣传语与可验证事实区分清楚。"},
+    {"id": "human", "label": "人工复核", "source": "human", "points": 10, "severity": "scored"}
+  ],
+  "humanReview": {"prompt": "核对发布事实、来源和未知项。", "sampleRate": 0.1}
+}
