@@ -79,6 +79,25 @@ describe("scoreRun", () => {
     expect(outcome.reviewReasons).toContain("low_confidence");
   });
 
+  it("clears automatic review triggers after a human decision", () => {
+    const outcome = scoreRun({
+      manifest,
+      deterministic: {
+        blocker: { passed: true, reason: "ok", evidence: [] },
+        content: { passed: true, reason: "ok", evidence: [] }
+      },
+      judge: { criteria: { quality: { passed: true, confidence: 0.4, reason: "unsure" } }, overallConfidence: 0.5 },
+      judgeExpected: true,
+      humanDecision: "pass",
+      humanReviewed: true,
+      reviewReasonSeed: "run-5",
+      runFailed: false
+    });
+    expect(outcome.verdict).toBe("passed");
+    expect(outcome.reviewReasons).toEqual([]);
+    expect(outcome.humanScore).toBe(100);
+  });
+
   it("uses deterministic-only normalization when judge is explicitly disabled", () => {
     const outcome = scoreRun({
       manifest,

@@ -19,6 +19,7 @@ export interface ScoreRunInput {
   judge: JudgeOutcome | null;
   judgeExpected: boolean;
   humanDecision: "pass" | "fail" | "unknown" | null;
+  humanReviewed?: boolean;
   reviewReasonSeed: string;
   runFailed: boolean;
   sampleRate?: number;
@@ -79,6 +80,9 @@ export function scoreRun(input: ScoreRunInput): ScoringOutcome {
       : null;
 
   if (input.humanDecision === "unknown") reviewReasons.add("low_confidence");
+  if (input.humanReviewed && (input.humanDecision === "pass" || input.humanDecision === "fail")) {
+    reviewReasons.clear();
+  }
   if (blockerFailures.length > 0) {
     return {
       verdict: "failed",
