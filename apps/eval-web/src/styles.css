@@ -531,6 +531,52 @@ code { font-size: .82em; }
 .compact-event strong { font-size: 11px; font-weight: 550; }
 .compact-event small { font-size: 10px; }
 
+/* Run detail */
+.run-metric-grid .metric-card > strong { font-size: 22px; }
+.live-refresh { font-size: 11px; font-weight: 500; }
+.run-layout { grid-template-columns: minmax(0, 1fr) 320px; gap: 14px; }
+.run-main, .run-side { gap: 14px; }
+.run-side { top: 70px; }
+.trace-event { grid-template-columns: 16px minmax(0, 1fr) auto; gap: 10px; min-height: 48px; }
+.trace-rail span { width: 7px; height: 7px; box-shadow: none; }
+.trace-body { padding-bottom: 13px; }
+.trace-head strong { font-size: 12px; font-weight: 600; }
+.trace-head time { font-size: 10px; }
+.trace-body > code { font-size: 10px; }
+.trace-payload span { padding: 4px 6px; font-size: 10px; }
+.grader-results { gap: 6px; }
+.grader-result { padding: 11px; border-radius: 7px; }
+.grader-result.failed { background: var(--danger-wash); border-color: #edcfca; }
+.grader-result.unknown { background: var(--warning-wash); border-color: #eadab7; }
+.grader-status { width: 24px; height: 24px; }
+.grader-result-head strong { font-size: 11px; }
+.confidence { font-size: 10px; }
+.grader-result p { margin-top: 6px; font-size: 12px; }
+.evidence-list code { font-size: 10px; }
+.grader-model { font-size: 10px; }
+.review-reason-bar { margin-top: 10px; padding: 9px 10px; color: var(--warning); background: var(--warning-wash); border: 1px solid #eadab7; border-radius: 6px; font-size: 11px; }
+.review-reason-bar em { font-size: 10px; }
+.artifact-list { border-radius: 7px; }
+.artifact-row { padding: 10px 11px; }
+.artifact-copy strong { font-size: 11px; }
+.artifact-copy small { font-size: 10px; }
+.artifact-preview-tag { font-size: 10px; }
+.review-panel.needs-attention { border-color: #dfc181; box-shadow: inset 3px 0 0 #d6a844; }
+.review-outcome { border-radius: 7px; }
+.review-outcome strong { font-size: 12px; }
+.review-outcome small { font-size: 10px; }
+.review-note { font-size: 11px; }
+.review-form { gap: 9px; margin-top: 12px; }
+.review-form .field-label input, .review-form .field-label textarea { font-size: 12px; }
+.task-counts span { font-size: 10px; }
+.task-counts strong { font-size: 15px; }
+.raw-details summary { font-size: 10px; }
+.raw-details pre { font-size: 10px; }
+.modal-card { border-radius: 8px; }
+.modal-head h2 { font-size: 15px; }
+.modal-head small { font-size: 11px; }
+.artifact-preview { border-radius: 7px; font-size: 12px; }
+
 /* Dashboard */
 .overview-card { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 28px; padding: 18px 20px; }
 .overview-main { min-width: 0; }

@@ -86,10 +86,9 @@ export function RunDetailPage() {
     <div className="page-stack run-detail-page">
       <Link className="back-link" to={`/experiments/${run.experimentId}`}><ArrowLeft size={14} /> 返回实验</Link>
       <PageHeader
-        eyebrow={`${executorLabel(run.executorId).toUpperCase()} · RUN`}
         title={data.case?.title ?? run.caseKey}
         description={<span className="header-meta-line"><code>{run.id}</code><span>·</span><span>重复 #{run.repetition}</span></span>}
-        actions={<><StatusPill status={run.status} />{active && <span className="live-refresh"><RotateCcw className="spin" size={13} /> 自动刷新中</span>}</>}
+        actions={active ? <span className="live-refresh"><RotateCcw className="spin" size={13} /> 自动刷新中</span> : undefined}
       />
 
       <section className="experiment-status-banner run-status-banner">
@@ -101,10 +100,10 @@ export function RunDetailPage() {
       </section>
 
       <section className="metric-grid run-metric-grid">
-        <MetricCard label="分数" value={run.score === null ? "—" : run.score.toFixed(1)} detail={`${data.graders.length} 项评分证据`} icon={<Gauge size={17} />} />
-        <MetricCard label="执行耗时" value={formatDuration(run.startedAt, run.finishedAt)} detail={formatDateTime(run.startedAt)} icon={<Clock3 size={17} />} />
-        <MetricCard label="执行器" value={executorLabel(run.executorId)} detail={`尝试 ${run.attempt} 次`} icon={<Cpu size={17} />} />
-        <MetricCard label="Hearth 任务" value={run.hearthTaskId ? shortId(run.hearthTaskId, 10) : "—"} detail={task ? `状态：${String(task.status ?? "unknown")}` : "尚未创建"} icon={<ExternalLink size={17} />} />
+        <MetricCard label="分数" value={run.score === null ? "—" : run.score.toFixed(1)} detail={`${data.graders.length} 项评分证据`} icon={<Gauge size={16} />} />
+        <MetricCard label="执行耗时" value={formatDuration(run.startedAt, run.finishedAt)} detail={formatDateTime(run.startedAt)} icon={<Clock3 size={16} />} />
+        <MetricCard label="执行器" value={executorLabel(run.executorId)} detail={`尝试 ${run.attempt} 次`} icon={<Cpu size={16} />} />
+        <MetricCard label="Hearth 任务" value={run.hearthTaskId ? shortId(run.hearthTaskId, 10) : "—"} detail={task ? `状态：${String(task.status ?? "unknown")}` : "尚未创建"} icon={<ExternalLink size={16} />} />
       </section>
 
       <div className="run-layout">
@@ -185,8 +184,8 @@ export function RunDetailPage() {
           <section className="panel">
             <SectionHeader title="运行元数据" detail="固定与实时字段" />
             <div className="kv-stack compact">
-              <KeyValue label="Case" mono>{run.caseKey}</KeyValue>
-              <KeyValue label="Case 版本">v{run.caseVersion}</KeyValue>
+              <KeyValue label="任务" mono>{run.caseKey}</KeyValue>
+              <KeyValue label="任务版本">v{run.caseVersion}</KeyValue>
               <KeyValue label="外部引用" mono>{run.externalRef}</KeyValue>
               <KeyValue label="任务 ID" mono>{run.hearthTaskId ?? "—"}</KeyValue>
               <KeyValue label="产出目录" mono>{run.outputDir}</KeyValue>
@@ -202,9 +201,9 @@ export function RunDetailPage() {
                 {typeof task.nextAction === "string" && <KeyValue label="下一步">{task.nextAction}</KeyValue>}
                 {typeof asRecord(task.error)?.message === "string" && <div className="inline-error">{String(asRecord(task.error)?.message)}</div>}
                 <div className="task-counts">
-                  <span><strong>{arrayLength(taskView?.runs ?? task.runs)}</strong> executor runs</span>
-                  <span><strong>{arrayLength(taskView?.approvals ?? task.approvals)}</strong> approvals</span>
-                  <span><strong>{arrayLength(taskView?.artifacts ?? task.artifacts)}</strong> artifacts</span>
+                  <span><strong>{arrayLength(taskView?.runs ?? task.runs)}</strong> 执行记录</span>
+                  <span><strong>{arrayLength(taskView?.approvals ?? task.approvals)}</strong> 审批</span>
+                  <span><strong>{arrayLength(taskView?.artifacts ?? task.artifacts)}</strong> 产物</span>
                 </div>
                 <details className="raw-details"><summary><ChevronDown size={14} /> Hearth 原始响应</summary><pre>{JSON.stringify(taskView, null, 2)}</pre></details>
               </div>
@@ -216,7 +215,7 @@ export function RunDetailPage() {
       {previewArtifact && (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="产物预览" onClick={() => setPreviewArtifact(null)}>
           <div className="modal-card artifact-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="modal-head"><div><span className="eyebrow">ARTIFACT</span><h2>{previewArtifact.path}</h2><small>{previewArtifact.mimeType} · {formatBytes(previewArtifact.bytes)}</small></div><button className="icon-button" onClick={() => setPreviewArtifact(null)} aria-label="关闭"><X size={18} /></button></div>
+            <div className="modal-head"><div><h2>{previewArtifact.path}</h2><small>{previewArtifact.mimeType} · {formatBytes(previewArtifact.bytes)}</small></div><button className="icon-button" onClick={() => setPreviewArtifact(null)} aria-label="关闭"><X size={18} /></button></div>
             {previewArtifact.preview === null ? <div className="binary-notice"><FileText size={24} /><p>该产物为二进制文件，无法在控制台中预览。</p></div> : <pre className="artifact-preview">{previewArtifact.preview}</pre>}
           </div>
         </div>
