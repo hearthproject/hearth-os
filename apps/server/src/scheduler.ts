@@ -13,7 +13,7 @@ import { runCodex } from "@hearth/codex-executor";
 import { getTemplate } from "@hearth/templates";
 import type { DshApprovalOutcome, DshApprovalRequest, DshContextEvent } from "@hearth/deepseek-executor";
 import type { ApprovalRequest, ApprovalManager, PendingToolApproval, ToolApprovalDecision } from "./approvals.ts";
-import { resolveAction, type ActionFileTarget, type ActionProposal, type ResolvedAction } from "./action-resolver.ts";
+import { actionDigest, resolveAction, type ActionFileTarget, type ActionProposal, type ResolvedAction } from "./action-resolver.ts";
 import { createFileArtifact, missingExpectedOutputs, publishArtifacts } from "./artifacts.ts";
 import { CONTEXT_BLOB_DIR, EXECUTOR_SETTINGS_PATH, GIT_CACHE_DIR, MODEL_SETTINGS_PATH, REPO_ROOT, SOURCE_CONTENT_DIR, WORKSPACE_DIR } from "./config.ts";
 import { ContextService, estimateTokens } from "./context.ts";
@@ -685,7 +685,7 @@ export class HearthScheduler {
     if (template.approvalKind === "github.publish-pr") {
       const repository = prepared.repository;
       if (!repository || !repository.issue) throw new Error("创建 PR 前缺少 GitHub 仓库或 Issue 上下文");
-      const inspection = await inspectRepository(repository);
+      const inspection = await inspectRepository(repository, this.githubRun);
       if (!inspection.clean) throw new Error(`仓库仍有未提交改动：\n${inspection.status}`);
       if (inspection.branch !== repository.branch) throw new Error(`提交所在分支不是 ${repository.branch}`);
       if (inspection.commits < 1) throw new Error("没有检测到本地提交，不能创建 PR");
@@ -693,9 +693,18 @@ export class HearthScheduler {
         readPrPreview(join(prepared.outDir, "pr-preview.json")),
         repository
       );
+      const summary = `推送 ${repository.repo} 的分支 ${repository.branch} 并创建 PR`;
+      const action = this.githubNetworkAction(task, prepared, summary, `github-pr:${repository.repo}#${repository.branch}@${inspection.headSha}:sha256:${actionDigest({
+        repo: repository.repo,
+        branch: repository.branch,
+        base: repository.base,
+        headSha: inspection.headSha,
+        title: preview.title,
+        body: preview.body
+      })}`);
       return {
         kind: "github.publish-pr",
-        summary: `推送 ${repository.repo} 的分支 ${repository.branch} 并创建 PR`,
+        summary,
         target: {
           repo: repository.repo,
           workspace: repository.path,
@@ -714,7 +723,8 @@ export class HearthScheduler {
           commit: inspection.headSha,
           commits: inspection.commits,
           diffStat: inspection.diffStat
-        }
+        },
+        action
       };
     }
 
@@ -725,9 +735,16 @@ export class HearthScheduler {
       if (!reviewFile) throw new Error("评审产物为空，不能发布评论");
       const review = extractProposedComment(reviewFile);
       if (review.length > 60_000) throw new Error("评审评论过长，不能发布");
+      const summary = `在 ${repository.repo} PR #${repository.pull} 发布评审评论`;
+      const action = this.githubNetworkAction(task, prepared, summary, `github-comment:${repository.repo}#${repository.pull}@${repository.headSha}:sha256:${actionDigest({
+        repo: repository.repo,
+        pull: repository.pull,
+        headSha: repository.headSha,
+        body: review
+      })}`);
       return {
         kind: "github.comment",
-        summary: `在 ${repository.repo} PR #${repository.pull} 发布评审评论`,
+        summary,
         target: {
           repo: repository.repo,
           pull: repository.pull,
@@ -740,11 +757,33 @@ export class HearthScheduler {
           headSha: repository.headSha,
           title: `评审 PR #${repository.pull}`,
           body: review
-        }
+        },
+        action
       };
     }
 
     throw new Error(`未实现的审批类型：${template.approvalKind}`);
+  }
+
+  private githubNetworkAction(
+    task: TaskRecord,
+    prepared: Awaited<ReturnType<typeof prepareWorkspace>>,
+    summary: string,
+    targetRevision: string
+  ): ResolvedAction {
+    return resolveAction({
+      proposal: {
+        kind: "network",
+        summary,
+        network: { host: "api.github.com", port: 443, method: "HTTPS" },
+        targetRevision,
+        risk: "high",
+        sideEffectClass: "external_irreversible"
+      },
+      permissionMode: this.service.approvalModeForTask(task) === "full" ? "full" : "guarded",
+      context: "interactive",
+      sessionRoot: prepared.root
+    });
   }
 
   private async deliveryIssues(
@@ -756,7 +795,7 @@ export class HearthScheduler {
       .map((missing) => `缺少期望产物：${missing}`);
     const template = task.templateId ? getTemplate(task.templateId) : undefined;
     if (template?.github?.issue && prepared.repository) {
-      const inspection = await inspectRepository(prepared.repository);
+      const inspection = await inspectRepository(prepared.repository, this.githubRun);
       if (!inspection.clean) issues.push(`仓库仍有未提交改动：\n${inspection.status}`);
       if (inspection.branch !== prepared.repository.branch) {
         issues.push(`提交所在分支不是 ${prepared.repository.branch}`);
