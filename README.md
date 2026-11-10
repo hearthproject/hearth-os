@@ -122,9 +122,17 @@ Hearth 已经越过**第一阶段（MVP）**的硬门槛：15 个跨行业真实
 
 ### 运行时数据流
 
+简化版：
+
+[![Hearth 任务流程图 · 简化版](https://media.githubusercontent.com/media/hearthproject/hearth-os/main/assets/Hearth-Flow-Simple-Light.png)](https://media.githubusercontent.com/media/hearthproject/hearth-os/main/assets/Hearth-Flow-Simple-Light.png)
+
+<sub>简化版：从输入到结果压缩为 4 步主链（分流 → 任务落账 → 调度执行 → 结果判定）、4 类去向和 3 类外部副作用；底部统一说明事件账本、SSE 与界面刷新。点击图片可查看原图。</sub>
+
+详细版：
+
 [![Hearth 端到端任务流程](https://media.githubusercontent.com/media/hearthproject/hearth-os/main/assets/Hearth-Flow-Light.png)](https://media.githubusercontent.com/media/hearthproject/hearth-os/main/assets/Hearth-Flow-Light.png)
 
-<sub>一条请求从聊天、飞书、定时任务、主动建议或邮件进入，经 planExecution 与 decideRoute 分流；任务以 lease + epoch 调度，执行中可等待输入或审批，外部副作用只在审批后发生，最终经 SQLite 事件账本、SSE 与前端缓存投影回界面。点击图片可查看原图。</sub>
+<sub>详细版：一条请求从聊天、飞书、定时任务、主动建议或邮件进入，经 planExecution 与 decideRoute 分流；任务以 lease + epoch 调度，执行中可等待输入或审批，外部副作用只在审批后发生，最终经 SQLite 事件账本、SSE 与前端缓存投影回界面。点击图片可查看原图。</sub>
 
 同一流程的 Mermaid 版本：
 
