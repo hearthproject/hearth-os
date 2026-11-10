@@ -1,4 +1,5 @@
 import type { ExecutorHealth, ExecutorId } from "@hearth/core";
+import type { CodexProfile } from "@hearth/codex-executor";
 import { supportsToolCalling } from "./model-agent.ts";
 import { chatModelConfigured, type ModelSettings } from "./model-settings.ts";
 
@@ -19,7 +20,8 @@ export function applyExecutorModelReadiness(
   id: ExecutorId,
   health: ExecutorHealth,
   modelSettings: ModelSettings | null,
-  binding?: ExecutorBindingReadiness | null | undefined
+  binding?: ExecutorBindingReadiness | null | undefined,
+  codexProfile?: CodexProfile | null | undefined
 ): ExecutorHealth {
   if (id === "native") {
     if (modelSettings && !chatModelConfigured(modelSettings)) return markUnavailable(health, NATIVE_MODEL_ISSUE);
@@ -35,8 +37,15 @@ export function applyExecutorModelReadiness(
         "failed"
       );
     }
-    if (binding?.explicit && modelSettings) return markReady({ ...health, issues: [] });
-    if (!binding?.explicit && !modelSettings) return health;
+    if (binding?.explicit && modelSettings?.apiKey) return markReady({ ...health, issues: [] });
+    if (binding?.explicit && modelSettings) {
+      return markUnavailable(health, CODEX_KEY_ISSUE, "failed");
+    }
+    if (!binding?.explicit) {
+      if (codexProfile?.canRun) return markReady({ ...health, issues: [] });
+      const issue = codexProfile?.issues.join("；") || "本机 Codex 未配置可用的模型认证";
+      return markUnavailable(health, issue);
+    }
     if (!modelSettings) return markUnavailable(health, CODEX_KEY_ISSUE);
     if (modelSettings.apiKey) {
       return markReady({ ...health, issues: [] });

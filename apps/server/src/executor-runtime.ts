@@ -168,7 +168,8 @@ export async function probeExecutor(
     id,
     await computeHealthAsync(id, settings, settingsPath, Math.min(timeoutMs, VERSION_TIMEOUT_MS)),
     options.modelSettings ?? null,
-    options.binding
+    options.binding,
+    options.codexProfile
   );
   const checkedAt = new Date().toISOString();
   let outcome: RealProbeOutcome;

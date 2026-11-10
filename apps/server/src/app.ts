@@ -994,7 +994,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
       modelRegistry.settingsForExecutorOrChat(executorId),
       binding?.profileId
         ? { explicit: true, available: binding.available, issue: binding.issue }
-        : null
+        : null,
+      executorId === "codex" ? codexProfile() : null
     );
   };
   const onboarding = new OnboardingService({
