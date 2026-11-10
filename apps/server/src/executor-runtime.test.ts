@@ -30,6 +30,20 @@ function writeScript(path: string, version: string): void {
   );
 }
 
+function writeQuotaScript(path: string): void {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(
+    path,
+    [
+      "#!/usr/bin/env node",
+      "if (process.argv.includes('--version')) { console.log('9.9.9'); process.exit(0); }",
+      "console.error('Error: HTTP 429 Too Many Requests');",
+      "process.exit(1);"
+    ].join("\n"),
+    "utf8"
+  );
+}
+
 describe("executor runtime", () => {
   beforeEach(() => {
     process.env.HEARTH_EXECUTOR_DETECT = "off";
@@ -98,6 +112,20 @@ describe("executor runtime", () => {
     expect(result.ok).toBe(false);
     expect(result.error).toBeTruthy();
     expect(result.health.installState).toBe("missing");
+  });
+
+  it("keeps a real probe that hits a quota limit unavailable", async () => {
+    const root = tempRoot();
+    const settingsPath = join(root, "executor-settings.json");
+    const script = join(root, "executors", "workbuddy", "node_modules", "@tencent-ai", "codebuddy-code", "bin", "codebuddy");
+    writeQuotaScript(script);
+
+    const probed = await probeExecutor("workbuddy", defaultExecutorSettings(), settingsPath, 10_000);
+    expect(probed.ok).toBe(false);
+    expect(probed.health.state).toBe("quota_exceeded");
+    expect(probed.health.canRun).toBe(false);
+    expect(probed.health.verifiedAt).toBeNull();
+    expect(probed.error).toContain("429");
   });
 
   it("classifies 429 and quota failures as quota_exceeded", () => {
