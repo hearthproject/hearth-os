@@ -23,7 +23,7 @@ import { executorHome, resolveExecutorLaunch } from "./executor-runtime.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import { nativePermissionsFor, withExtraToolPermissions, type NativeRunOptions, type NativeRunResult } from "./native-executor.ts";
 import type { PreparedWorkspace } from "./workspace.ts";
-import { needsGithubRepository, wantsScreenshot } from "./task-intent.ts";
+import { wantsScreenshot } from "./task-intent.ts";
 
 export type CodexRunner = (options: CodexRunOptions) => Promise<CodexRunResult>;
 export type NativeRunner = (options: NativeRunOptions) => Promise<NativeRunResult>;
@@ -101,11 +101,7 @@ export class NativeExecutorAdapter implements ExecutorAdapter {
 
   constructor(private readonly runner: NativeRunner) {}
 
-  canRun(input: ExecutorAvailabilityInput): ExecutorAvailability {
-    const hasGithubInput = input.task.inputs.some((item) => item.kind === "github");
-    if (!hasGithubInput && needsGithubRepository(`${input.task.title} ${input.task.goal}`)) {
-      return { ok: false, reason: "Native 执行器无法访问 GitHub 仓库" };
-    }
+  canRun(_input: ExecutorAvailabilityInput): ExecutorAvailability {
     return { ok: true };
   }
 

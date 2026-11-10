@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ContextSettings, ExecutorSettings, RunBudget, TaskRecord } from "@hearth/core";
 import {
   ExternalExecutorAdapter,
+  NativeExecutorAdapter,
   createExecutorAdapters,
   type CodexRunner,
   type ExternalRunner,
@@ -13,6 +14,7 @@ import {
 import type { ExecutorInvocation } from "./executor-adapter.ts";
 import type { PreparedWorkspace } from "./workspace.ts";
 import { defaultExecutorSettings } from "./executor-settings.ts";
+import { nativePermissionsFor } from "./native-executor.ts";
 
 const EXTERNAL_IDS = ["hermes", "qoder", "workbuddy", "kimi"] as const;
 const roots: string[] = [];
@@ -154,5 +156,43 @@ describe("external executor adapters", () => {
       settingsPath
     });
     for (const id of EXTERNAL_IDS) expect(adapters[id]).toBeInstanceOf(ExternalExecutorAdapter);
+  });
+
+  it("allows native to attempt GitHub repository work", () => {
+    const root = tempRoot();
+    const adapter = new NativeExecutorAdapter(async () => {
+      throw new Error("should not run");
+    });
+    const availability = adapter.canRun({
+      task: {
+        ...invocation(defaultExecutorSettings(), root).task,
+        title: "审核 GitHub PR",
+        goal: "列出需要 rebase 的 PR"
+      },
+      prepared: null,
+      settings: {} as ContextSettings,
+      executorSettings: defaultExecutorSettings()
+    });
+    expect(availability.ok).toBe(true);
+  });
+
+  it("grants native GitHub tasks shell access and GitHub network hosts", () => {
+    const root = tempRoot();
+    const task = {
+      ...invocation(defaultExecutorSettings(), root).task,
+      title: "审核 GitHub PR",
+      goal: "列出需要 rebase 的 PR",
+      taskKind: "workspace",
+      networkHosts: ["github.com", "api.github.com"],
+      permissions: {
+        readRoots: [root],
+        writeRoots: [root],
+        networkHosts: ["github.com", "api.github.com"],
+        tools: ["read_file", "finish_task"]
+      }
+    } as TaskRecord;
+    const permissions = nativePermissionsFor(task, { root, outDir: join(root, "out") } as PreparedWorkspace);
+    expect(permissions.tools).toContain("shell");
+    expect(permissions.networkHosts).toEqual(expect.arrayContaining(["github.com", "api.github.com"]));
   });
 });

@@ -14,7 +14,7 @@ import {
   type AgentToolAuthorizationRequest,
   type RuntimeEvent
 } from "@hearth/agent-runtime";
-import { wantsScreenshot } from "./task-intent.ts";
+import { wantsGithubAccess, wantsScreenshot } from "./task-intent.ts";
 import { supportsToolCalling, streamAgentTurn } from "./model-agent.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import type { PreparedWorkspace } from "./workspace.ts";
@@ -59,13 +59,14 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     throw new Error(`当前模型协议不支持工具调用：${options.settings.protocol}`);
   }
   const screenshotTask = wantsScreenshot(`${options.task.title}\n${options.task.goal}`);
+  const githubTask = wantsGithubAccess(`${options.task.title}\n${options.task.goal}`);
   const permissions = options.permissions ?? defaultTaskPermissions({
     workspaceRoot: options.prepared.root,
     outDir: options.prepared.outDir,
     networkHosts: options.task.networkHosts,
-    ...(options.task.taskKind === "workspace" ? { writeRoots: [options.prepared.outDir, options.prepared.root] } : {}),
+    ...(options.task.taskKind === "workspace" || githubTask ? { writeRoots: [options.prepared.outDir, options.prepared.root] } : {}),
     extraTools: [
-      ...(options.task.taskKind === "workspace" ? ["shell"] : []),
+      ...(options.task.taskKind === "workspace" || githubTask ? ["shell"] : []),
       ...(screenshotTask ? ["capture_screen"] : [])
     ]
   });
@@ -126,14 +127,17 @@ export function withExtraToolPermissions(permissions: TaskPermissions, extraTool
 
 export function nativePermissionsFor(task: TaskRecord, prepared: PreparedWorkspace): TaskPermissions {
   const screenshotTask = wantsScreenshot(`${task.title}\n${task.goal}`);
+  const githubTask = wantsGithubAccess(`${task.title}\n${task.goal}`);
   if (task.permissions) {
-    const tools = screenshotTask && !task.permissions.tools.includes("capture_screen")
-      ? [...task.permissions.tools, "capture_screen"]
-      : task.permissions.tools;
+    const tools = [
+      ...task.permissions.tools,
+      ...(githubTask && !task.permissions.tools.includes("shell") ? ["shell"] : []),
+      ...(screenshotTask && !task.permissions.tools.includes("capture_screen") ? ["capture_screen"] : [])
+    ];
     return {
       ...task.permissions,
       readRoots: [prepared.root],
-      writeRoots: task.taskKind === "workspace" ? [prepared.outDir, prepared.root] : [prepared.outDir],
+      writeRoots: task.taskKind === "workspace" || githubTask ? [prepared.outDir, prepared.root] : [prepared.outDir],
       networkHosts: [...task.networkHosts],
       tools
     };
@@ -142,9 +146,9 @@ export function nativePermissionsFor(task: TaskRecord, prepared: PreparedWorkspa
     workspaceRoot: prepared.root,
     outDir: prepared.outDir,
     networkHosts: task.networkHosts,
-    ...(task.taskKind === "workspace" ? { writeRoots: [prepared.outDir, prepared.root] } : {}),
+    ...(task.taskKind === "workspace" || githubTask ? { writeRoots: [prepared.outDir, prepared.root] } : {}),
     extraTools: [
-      ...(task.taskKind === "workspace" ? ["shell"] : []),
+      ...(task.taskKind === "workspace" || githubTask ? ["shell"] : []),
       ...(screenshotTask ? ["capture_screen"] : [])
     ]
   });
@@ -175,6 +179,9 @@ function nativeSystemPrompt(task: TaskRecord, expectedOutputs: string[]): string
     "先用 list_files、read_file、search_text 了解已有资料，再生成结果。",
     "用户需要的最终产物必须写入输出目录；不要生成中间 JSON、命令日志或调试文件作为交付物。",
     "任务完成后必须调用 finish_task，用中文简洁总结完成结果；如果确实缺少关键输入，才调用 ask_user。",
+    "如果任务涉及 GitHub 或 PR：优先使用 shell 执行 gh 命令，并用 gh 的真实输出作为证据。",
+    "不知道具体仓库时，先用 gh search prs --author @me --state open --limit 20 --json number,title,url,repository,reviewDecision,mergeable,updatedAt 搜索；需要查看或修改某个仓库时，再 gh repo clone <owner/repo> repo 到当前工作区。",
+    "不要假设本地已经有仓库，也不要编造 PR 状态、评审意见或 rebase 结果；命令失败时读取错误并说明限制。",
     "回答使用简体中文，不要编造没有依据的事实。",
     `当前任务：${task.title}`,
     `期望产物：${expectedOutputs.join("、")}`,

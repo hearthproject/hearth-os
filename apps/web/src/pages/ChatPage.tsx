@@ -503,7 +503,7 @@ export function ChatPage() {
               {sending && !streaming && !reasoning && (
                 <div className="typing-row">
                   <Loader2 size={14} className="spin" />
-                  <span>{routing?.action === "task" ? "正在派出任务…" : routing ? "正在回答…" : "正在判断该由谁处理…"}</span>
+                  <span>{routing?.action === "task" ? "正在派出任务…" : routing ? "正在回答…" : selectedExecutorId ? `正在交给 ${selectedExecutorName} 处理…` : "正在判断是回答还是执行…"}</span>
                 </div>
               )}
               <div ref={bottomRef} />
@@ -513,14 +513,14 @@ export function ChatPage() {
 
         <div className="composer-wrap">
           <div className="composer-toolbar">
-            <label className="executor-picker" title="选择本对话优先使用的执行器；不可用时会自动回退">
+            <label className="executor-picker" title="选择本对话锁定的执行器；不会自动切换到其他执行器">
               <Cpu size={15} />
               <span className={`status-dot ${selectedExecutorId ? selectedExecutorUnavailable ? "offline" : "online" : executorReady ? "online" : "offline"}`} />
               <select
                 value={selectedExecutorId ?? ""}
                 onChange={(event) => chooseExecutor(event.target.value as ExecutorId | "")}
                 disabled={!settingsReady}
-                aria-label="优先执行器"
+                aria-label="锁定执行器"
               >
                 <option value="">自动匹配（按任务）</option>
                 {EXECUTOR_ORDER.map((id) => {
@@ -583,7 +583,7 @@ export function ChatPage() {
               </>
             )}
             {selectedExecutorUnavailable && (
-              <span className="composer-toolbar-note">{selectedExecutorName} 当前不可用，任务会按能力自动回退</span>
+              <span className="composer-toolbar-note">{selectedExecutorName} 当前不可用，任务不会自动切换执行器</span>
             )}
             {allExecutorsOff && (
               <span className="composer-toolbar-note">所有执行器都已关闭，请先选择一个可用执行器</span>

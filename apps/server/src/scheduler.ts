@@ -49,7 +49,7 @@ import { chatModelConfigured, loadModelSettings, type ModelSettings } from "./mo
 import { prepareTaskRuntime, type RuntimePreparation } from "./runtime.ts";
 import type { HearthService } from "./service.ts";
 import { buildDeliveryRepairPrompt, buildTaskPrompt, prepareWorkspace, UnsupportedInputError, type PreparedWorkspace } from "./workspace.ts";
-import { CapabilityUnavailableError, needsGithubRepository, wantsScreenshot } from "./task-intent.ts";
+import { wantsScreenshot } from "./task-intent.ts";
 
 import { createExecutorAdapters, type CodexContextItem, type CodexRunner, type DshRunner, type ExecutionOutcome, type ExecutorAdapter, type ExecutorAttemptContext, type ExternalRunner, type NativeRunner } from "./executor-adapter.ts";
 export type { CodexRunner, NativeRunner } from "./executor-adapter.ts";
@@ -903,13 +903,6 @@ export class HearthScheduler {
           recoverable: true,
           guidance: "重新启动后点击重试"
         }
-      : error instanceof CapabilityUnavailableError
-      ? {
-          kind: "capability_unavailable",
-          message,
-          recoverable: true,
-          guidance: "在对话输入框上方启用 Codex 或 Hermes 后重新发送"
-        }
       : {
           kind: error instanceof UnsupportedInputError ? "input_unavailable" : "execution_failed",
           message,
@@ -1372,10 +1365,6 @@ export class HearthScheduler {
     try {
       this.recordRunInput(task, run, pendingInput);
       const template = task.templateId ? getTemplate(task.templateId) : undefined;
-      const hasGithubInput = task.inputs.some((item) => item.kind === "github");
-      if (executorId === "native" && !hasGithubInput && needsGithubRepository(task.title + " " + task.goal)) {
-        throw new CapabilityUnavailableError("这个任务需要读取你的 GitHub 仓库（PR / 评审 / rebase），Native 执行器只能访问隔离工作区。请在对话输入框上方启用 Codex 或 Hermes 后重新发送。");
-      }
       const expectedOutputs = template?.expectedOutputs ?? expectedOutputsForTask(task);
       const fullPermission = this.service.approvalModeForTask(task) === "full";
       const permissionNote = fullPermission
@@ -1940,9 +1929,6 @@ export class HearthScheduler {
     if (aborted && this.stopping) {
       return { kind: "interrupted", message: "Hearth 关闭时中止了这一轮执行", recoverable: true, guidance: "重新启动后点击重试" };
     }
-    if (error instanceof CapabilityUnavailableError) {
-      return { kind: "capability_unavailable", message, recoverable: true, guidance: "在对话输入框上方启用 Codex 或 Hermes 后重新发送" };
-    }
     return {
       kind: error instanceof UnsupportedInputError ? "input_unavailable" : "execution_failed",
       message, recoverable: true,
@@ -2391,6 +2377,14 @@ export class HearthScheduler {
   }): { targetExecutor: ExecutorId | null; highRisk: boolean; reason: string } {
     if (!isExecutorFailureCause(input.cause)) {
       return { targetExecutor: null, highRisk: false, reason: "这不是执行器故障，不需要切换执行器" };
+    }
+    const lockedExecutorId = this.service.conversationSettings(input.task.conversationId)?.preferredExecutorId ?? null;
+    if (lockedExecutorId) {
+      return {
+        targetExecutor: null,
+        highRisk: false,
+        reason: `执行器已锁定为 ${executorName(lockedExecutorId)}，不会自动切换到其他执行器`
+      };
     }
     if (input.handoffsUsed >= input.settings.maxHandoffs) {
       return { targetExecutor: null, highRisk: false, reason: "已达到最大接管次数，所有已尝试执行器均未完成任务" };

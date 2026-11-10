@@ -41,8 +41,9 @@ import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate, TEMPLATES } from "@hearth/templates";
 import { resolveRepoPath } from "./config.ts";
 import { EventBus } from "./events.ts";
-import { executorName, resolveExecutorFromEnabled } from "./executors.ts";
+import { executorName, resolveExecutorFromEnabled, resolveExecutorLocked } from "./executors.ts";
 import { buildTaskStatusMessage } from "./task-status-messages.ts";
+import { GITHUB_NETWORK_HOSTS, wantsGithubAccess } from "./task-intent.ts";
 
 export interface CreateTaskInput {
   externalRef?: string;
@@ -191,6 +192,9 @@ export class HearthService {
       inputs.push({ kind: "file", label: file.label, value: file.path });
     }
     let networkHosts = template?.networkHosts ?? input.networkHosts ?? [];
+    if (template?.github || wantsGithubAccess([input.title, input.goal, input.textInput].filter(Boolean).join("\n"))) {
+      networkHosts = [...new Set([...networkHosts, ...GITHUB_NETWORK_HOSTS])];
+    }
     if (input.url) {
       inputs.push({ kind: "url", label: "网页", value: input.url });
       try {
@@ -673,9 +677,16 @@ export class HearthService {
       this.updateTaskProposal(id, { status: "expired", decidedAt: new Date().toISOString() });
       throw new Error("提案已过期，请重新发起");
     }
-    const enabled = this.conversationSettings(proposal.conversationId)?.executorEnabled ?? defaultConversationSettings().executorEnabled;
-    const resolution = resolveExecutorFromEnabled(proposal.executorId, enabled, available);
+    const conversationSettings = this.conversationSettings(proposal.conversationId);
+    const enabled = conversationSettings?.executorEnabled ?? defaultConversationSettings().executorEnabled;
+    const lockedExecutorId = conversationSettings?.preferredExecutorId ?? null;
+    const resolution = lockedExecutorId
+      ? resolveExecutorLocked(lockedExecutorId, enabled, available)
+      : resolveExecutorFromEnabled(proposal.executorId, enabled, available);
     if (!resolution.executorId) {
+      if (lockedExecutorId) {
+        throw new Error(`已锁定 ${executorName(lockedExecutorId)}，但${resolution.reason ?? "当前无法执行"}。请检查执行器设置，或取消锁定后重试`);
+      }
       throw new Error("所有执行器都已关闭，请先在对话输入框上方启用一个执行器，再确认任务");
     }
     const executorId: ExecutorId = resolution.executorId;

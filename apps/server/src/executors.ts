@@ -84,7 +84,7 @@ export function executorName(id: ExecutorId): string {
 }
 
 const CAPABILITY_SUPPORT: Record<ExecutionCapability, ExecutorId[]> = {
-  github: ["codex", "deepseek-harness", "hermes", "qoder", "workbuddy", "kimi"],
+  github: ["native", "codex", "deepseek-harness", "hermes", "qoder", "workbuddy", "kimi"],
   "desktop-capture": ["native"]
 };
 
@@ -135,6 +135,24 @@ export function resolveExecutorFromEnabled(
     reroutedFrom: null,
     reason: capability ? `${capabilityLabel(capability)}没有已启用的执行器可用` : null
   };
+}
+
+export function resolveExecutorLocked(
+  preferred: ExecutorId,
+  enabled: Record<ExecutorId, boolean>,
+  available: Record<ExecutorId, boolean> = defaultExecutorAvailability(),
+  capability?: ExecutionCapability
+): { executorId: ExecutorId | null; reroutedFrom: null; reason: string | null } {
+  if (!enabled[preferred]) {
+    return { executorId: null, reroutedFrom: null, reason: "它已关闭" };
+  }
+  if (!available[preferred]) {
+    return { executorId: null, reroutedFrom: null, reason: "它当前不可用" };
+  }
+  if (!executorSupportsCapability(preferred, capability)) {
+    return { executorId: null, reroutedFrom: null, reason: "它不支持这项任务所需的能力" };
+  }
+  return { executorId: preferred, reroutedFrom: null, reason: null };
 }
 
 function defaultExecutorAvailability(): Record<ExecutorId, boolean> {

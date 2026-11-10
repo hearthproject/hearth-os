@@ -236,7 +236,7 @@ const applyPatchTool: AgentTool = {
 const shellTool: AgentTool = {
   definition: {
     name: "shell",
-    description: "在授权工作目录内运行一条命令，用于运行测试、检查或脚本。输出会截断。",
+    description: "在授权工作目录内运行一条命令，用于运行测试、检查、脚本，以及 git/gh 等仓库和 GitHub 操作。网络权限由任务授权控制。输出会截断。",
     parameters: {
       type: "object",
       properties: {
@@ -582,7 +582,7 @@ function assertSafeCommand(command: string, networkAllowed: boolean): void {
   if (/rm\s+-rf\s+[\/~]|format\s+[a-z]:|shutdown|reboot|stop-computer/.test(normalized)) {
     throw new Error("命令被安全策略拒绝");
   }
-  if (!networkAllowed && /(curl|wget|invoke-webrequest|ssh|scp|ftp)\b/.test(normalized)) {
+  if (!networkAllowed && /(\bgh\b|(?:^|\s)git\s+(?:clone|fetch|pull|push|ls-remote)|curl|wget|invoke-webrequest|ssh|scp|ftp)\b/.test(normalized)) {
     throw new Error("任务没有网络权限，不能运行联网命令");
   }
 }

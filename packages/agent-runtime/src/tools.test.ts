@@ -68,6 +68,19 @@ describe("builtin tools", () => {
       signal: new AbortController().signal
     })).rejects.toThrow("安全策略");
   });
+
+  it("blocks gh when the task has no network permission", async () => {
+    const root = workspace(roots);
+    const out = join(root, "out");
+    const tools = mapTools();
+    const permissions = defaultTaskPermissions({ workspaceRoot: root, outDir: out, networkHosts: [], extraTools: ["shell"] });
+    await expect(tools.shell!.execute({ command: "gh auth status" }, {
+      workspaceRoot: root,
+      outDir: out,
+      permissions,
+      signal: new AbortController().signal
+    })).rejects.toThrow("没有网络权限");
+  });
 });
 
 function mapTools(): Record<string, ReturnType<typeof createBuiltinTools>[number]> {

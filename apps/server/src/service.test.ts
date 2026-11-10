@@ -124,6 +124,30 @@ describe("Hearth service agent metadata", () => {
     store.close();
   });
 
+  it("keeps a proposal confirmation on the locked executor", () => {
+    const store = new HearthStore(":memory:");
+    const service = new HearthService(store);
+    const conversation = store.createConversation("锁定对话", {
+      executorEnabled: { native: true, codex: true, "deepseek-harness": false, hermes: true, qoder: false, workbuddy: false, kimi: false },
+      approvalMode: "necessary",
+      preferredExecutorId: "native"
+    });
+    const proposal = service.createTaskProposal({
+      conversationId: conversation.id,
+      title: "工程任务",
+      goal: "修复 TypeScript 错误",
+      executorId: "codex",
+      taskKind: "workspace",
+      expectedOutputs: ["result.md"],
+      permissions: { readRoots: ["workspace"], writeRoots: ["workspace"], networkHosts: [], tools: [] },
+      reason: "需要改代码"
+    });
+    const { task } = service.confirmTaskProposal(proposal.id);
+    expect(task.executorId).toBe("native");
+    expect(store.listChatMessages(conversation.id).at(-1)?.content).not.toContain("已自动改由");
+    store.close();
+  });
+
   it("refuses proposal confirmation when both executors are disabled", () => {
     const store = new HearthStore(":memory:");
     const service = new HearthService(store);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { planExecution } from "./chat.ts";
-import { resolveExecutorFromEnabled } from "./executors.ts";
+import { resolveExecutorFromEnabled, resolveExecutorLocked } from "./executors.ts";
 import { needsGithubRepository, wantsGithubAccess, wantsScreenshot } from "./task-intent.ts";
 
 describe("task intent", () => {
@@ -19,7 +19,8 @@ describe("task intent", () => {
     expect(planExecution("帮我审核并列出待处理的 PR")).toMatchObject({
       executorId: "codex",
       taskKind: "workspace",
-      capability: "github"
+      capability: "github",
+      networkHosts: ["github.com", "api.github.com"]
     });
     const resolution = resolveExecutorFromEnabled(
       "codex",
@@ -27,8 +28,7 @@ describe("task intent", () => {
       { native: true, codex: true, "deepseek-harness": true, hermes: true, qoder: false, workbuddy: false, kimi: false },
       "github"
     );
-    expect(resolution.executorId).toBeNull();
-    expect(resolution.reason).toContain("GitHub");
+    expect(resolution).toMatchObject({ executorId: "native", reroutedFrom: "codex" });
     expect(needsGithubRepository("帮我审核并列出待处理的 PR")).toBe(true);
     expect(needsGithubRepository("介绍一下 https://github.com/acme/demo 的用途")).toBe(false);
   });
@@ -40,5 +40,16 @@ describe("task intent", () => {
       { native: true, codex: true, "deepseek-harness": true, hermes: true, qoder: false, workbuddy: false, kimi: false }
     );
     expect(resolution).toMatchObject({ executorId: "native", reroutedFrom: "codex" });
+  });
+
+  it("does not reroute a locked executor that lacks capability", () => {
+    const resolution = resolveExecutorLocked(
+      "codex",
+      { native: true, codex: true, "deepseek-harness": false, hermes: false, qoder: false, workbuddy: false, kimi: false },
+      { native: true, codex: true, "deepseek-harness": true, hermes: true, qoder: false, workbuddy: false, kimi: false },
+      "desktop-capture"
+    );
+    expect(resolution.executorId).toBeNull();
+    expect(resolution.reason).toContain("不支持");
   });
 });

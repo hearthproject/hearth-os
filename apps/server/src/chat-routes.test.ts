@@ -436,6 +436,60 @@ describe("chat-first API", () => {
     await app.close();
   });
 
+  it("locks a selected native executor for GitHub work instead of rerouting", async () => {
+    const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
+    await bindProfile(app, "native", await createTestProfile(app));
+    const conversation = await app.inject({
+      method: "POST",
+      url: "/api/conversations",
+      payload: {
+        title: "Native GitHub 锁定",
+        settings: { preferredExecutorId: "native", executorEnabled: { native: true, codex: true } }
+      }
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/chat",
+      payload: {
+        conversationId: conversation.json().id,
+        message: "请你审核我的 GitHub 仓库中目前开着的 PR，列出需要回复修改或 rebase 的"
+      }
+    });
+    const events = parseSse(response.body);
+    const routing = events.find((event) => event.event === "routing")?.data;
+    expect(routing.preferredExecutorId).toBe("native");
+    expect(routing.lockedExecutorId).toBe("native");
+    expect(routing.reroutedFrom).toBeUndefined();
+    const task = events.find((event) => event.event === "task")?.data.task;
+    expect(task.executorId).toBe("native");
+    expect(task.networkHosts).toEqual(expect.arrayContaining(["github.com", "api.github.com"]));
+    await app.close();
+  });
+
+  it("refuses a task when the locked executor is disabled instead of rerouting", async () => {
+    const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
+    const conversation = await app.inject({
+      method: "POST",
+      url: "/api/conversations",
+      payload: {
+        title: "锁定但关闭",
+        settings: { preferredExecutorId: "native", executorEnabled: { native: false, codex: true } }
+      }
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/chat",
+      payload: { conversationId: conversation.json().id, message: "帮我修复项目里的 TypeScript 错误" }
+    });
+    const events = parseSse(response.body);
+    const routing = events.find((event) => event.event === "routing")?.data;
+    expect(routing.lockedExecutorId).toBe("native");
+    expect(routing.reroutedFrom).toBeUndefined();
+    expect(events.some((event) => event.event === "task")).toBe(false);
+    expect(events.find((event) => event.event === "done")?.data.content).toContain("已锁定 Hearth 原生执行器");
+    await app.close();
+  });
+
   it("keeps a method question in chat when no router model is configured", async () => {
     const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
     const response = await app.inject({
@@ -521,6 +575,7 @@ describe("chat-first API", () => {
       attachmentRoot: join(root, "files"),
       executorSettingsPath
     });
+    await bindProfile(app, "native", await createTestProfile(app));
     const saved = await app.inject({
       method: "PUT",
       url: "/api/executor-settings",
@@ -541,7 +596,7 @@ describe("chat-first API", () => {
     await app.close();
   });
 
-  it("lets a conversation override the global preference and falls back on capability gaps", async () => {
+  it("lets a conversation override the global preference and keeps the locked executor", async () => {
     const executorSettingsPath = join(root, "executor-settings.json");
     const app = await buildServer({
       store,
@@ -550,6 +605,7 @@ describe("chat-first API", () => {
       attachmentRoot: join(root, "files"),
       executorSettingsPath
     });
+    await bindProfile(app, "native", await createTestProfile(app));
     await app.inject({
       method: "PUT",
       url: "/api/executor-settings",
@@ -571,12 +627,13 @@ describe("chat-first API", () => {
     const events = parseSse(response.body);
     const routing = events.find((event) => event.event === "routing")?.data;
     expect(routing.preferredExecutorId).toBe("native");
-    expect(routing.reroutedFrom).toBe("native");
-    expect(events.find((event) => event.event === "task")?.data.task.executorId).toBe("codex");
+    expect(routing.lockedExecutorId).toBe("native");
+    expect(routing.reroutedFrom).toBeUndefined();
+    expect(events.find((event) => event.event === "task")?.data.task.executorId).toBe("native");
     await app.close();
   });
 
-  it("falls back to the task-matched executor when the preferred external executor is unavailable", async () => {
+  it("does not fall back when the locked external executor is unavailable", async () => {
     const previous = process.env.HEARTH_EXECUTOR_DETECT;
     process.env.HEARTH_EXECUTOR_DETECT = "off";
     try {
@@ -603,8 +660,10 @@ describe("chat-first API", () => {
       const events = parseSse(response.body);
       const routing = events.find((event) => event.event === "routing")?.data;
       expect(routing.preferredExecutorId).toBe("qoder");
-      expect(routing.reroutedFrom).toBe("qoder");
-      expect(events.find((event) => event.event === "task")?.data.task.executorId).toBe("codex");
+      expect(routing.lockedExecutorId).toBe("qoder");
+      expect(routing.reroutedFrom).toBeUndefined();
+      expect(events.some((event) => event.event === "task")).toBe(false);
+      expect(events.find((event) => event.event === "done")?.data.content).toContain("已锁定 Qoder");
       await app.close();
     } finally {
       if (previous === undefined) delete process.env.HEARTH_EXECUTOR_DETECT;
