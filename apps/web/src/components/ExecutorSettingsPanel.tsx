@@ -197,6 +197,8 @@ export function ExecutorSettingsPanel() {
               const editable = executor.id !== "native" && executor.id !== "codex";
               const job = jobs[executor.id] ?? executor.install.job;
               const probeResult = probes[executor.id];
+              const lastProbe = probeResult?.health.lastProbe ?? executor.health.lastProbe;
+              const healthState = executor.health.state ?? (executor.health.canRun ? "ready" : "unverified");
               const jobRunning = job?.status === "running";
               return (
                 <article className="executor-card" key={executor.id}>
@@ -210,7 +212,7 @@ export function ExecutorSettingsPanel() {
                     </div>
                     <span className={`status-chip ${executor.health.canRun ? "ok" : "warn"}`}>
                       <span className={`status-dot ${executor.health.canRun ? "online" : "offline"}`} />
-                      {executor.health.canRun ? "可用" : "未就绪"}
+                      {executorStateLabel(healthState)}
                     </span>
                   </header>
 
@@ -273,7 +275,8 @@ export function ExecutorSettingsPanel() {
 
                   <div className="executor-card-actions">
                     <button type="button" className="ghost-button compact" onClick={() => void probe(executor.id)} disabled={busy !== null}>
-                      {busy === `probe:${executor.id}` ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />} 检测
+                      {busy === `probe:${executor.id}` ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}
+                      {busy === `probe:${executor.id}` ? "测试中…" : "测试可用性"}
                     </button>
                     {executor.install.supported && (
                       <button type="button" className="primary-button compact" onClick={() => void install(executor.id)} disabled={busy !== null || jobRunning}>
@@ -298,7 +301,13 @@ export function ExecutorSettingsPanel() {
                   {probeResult && (
                     <div className={`executor-probe ${probeResult.ok ? "ok" : "error"}`}>
                       {probeResult.ok ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
-                      <span>{probeResult.ok ? `检测通过 · ${probeResult.version ?? "版本未知"}` : probeResult.error ?? "检测失败"}（{probeResult.elapsedMs} ms）</span>
+                      <span>{probeResult.ok ? `真实请求通过 · ${probeResult.version ?? "版本未知"}` : probeResult.error ?? "真实请求失败"}（{probeResult.elapsedMs} ms）</span>
+                    </div>
+                  )}
+                  {!probeResult && lastProbe && (
+                    <div className={`executor-probe ${lastProbe.ok ? "ok" : "error"}`}>
+                      {lastProbe.ok ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
+                      <span>{lastProbe.ok ? "上次真实请求通过" : `上次真实请求失败：${lastProbe.error ?? lastProbe.code ?? "未知错误"}`} · {new Date(lastProbe.checkedAt).toLocaleString()}（{lastProbe.elapsedMs} ms）</span>
                     </div>
                   )}
                 </article>
@@ -331,6 +340,15 @@ function installStateLabel(state: string | undefined): string {
   if (state === "update_available") return "可更新";
   if (state === "unsupported") return "不支持托管安装";
   return "未安装";
+}
+
+function executorStateLabel(state: string): string {
+  if (state === "ready") return "真实可用";
+  if (state === "quota_exceeded") return "额度不可用";
+  if (state === "failed") return "测试失败";
+  if (state === "missing") return "未连接";
+  if (state === "unverified") return "未验证";
+  return "未配置";
 }
 
 function tail(text: string, length: number): string {

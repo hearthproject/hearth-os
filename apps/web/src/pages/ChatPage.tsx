@@ -288,6 +288,10 @@ export function ChatPage() {
   async function send() {
     const text = input.trim();
     if (sending || uploading || !settingsReady || (!text && attachments.length === 0)) return;
+    if (selectedExecutorUnavailable) {
+      setError(`${selectedExecutorName} 当前不可用，不会自动切换执行器。${selectedExecutor?.health.issues.join("；") ?? "请到设置中测试可用性。"}`);
+      return;
+    }
     if (followUpTarget) {
       if (!text) return;
       if (attachments.length > 0) {
@@ -415,6 +419,7 @@ export function ChatPage() {
   const selectedExecutor = executorViews.find((executor) => executor.id === selectedExecutorId) ?? null;
   const selectedExecutorName = selectedExecutor?.name ?? (selectedExecutorId ? executorLabel(selectedExecutorId) : "");
   const selectedExecutorUnavailable = Boolean(selectedExecutorId && !executorAvailability[selectedExecutorId]);
+  const visibleExecutorIds = EXECUTOR_ORDER.filter((id) => executorAvailability[id] || id === selectedExecutorId);
   const isEmpty = messages.length === 0 && !streaming && !sending;
 
   return (
@@ -523,11 +528,11 @@ export function ChatPage() {
                 aria-label="锁定执行器"
               >
                 <option value="">自动匹配（按任务）</option>
-                {EXECUTOR_ORDER.map((id) => {
+                {visibleExecutorIds.map((id) => {
                   const view = executorViews.find((executor) => executor.id === id);
                   return (
                     <option key={id} value={id}>
-                      {view?.name ?? executorLabel(id)}{executorAvailability[id] ? "" : " · 不可用"}
+                      {view?.name ?? executorLabel(id)}{executorAvailability[id] ? "" : " · 当前不可用"}
                     </option>
                   );
                 })}
@@ -583,7 +588,9 @@ export function ChatPage() {
               </>
             )}
             {selectedExecutorUnavailable && (
-              <span className="composer-toolbar-note">{selectedExecutorName} 当前不可用，任务不会自动切换执行器</span>
+              <span className="composer-toolbar-note" title={selectedExecutor?.health.issues.join("；")}>
+                {selectedExecutorName} 当前不可用：{selectedExecutor?.health.issues[0] ?? "请到设置中测试可用性"}。不会自动切换执行器
+              </span>
             )}
             {allExecutorsOff && (
               <span className="composer-toolbar-note">所有执行器都已关闭，请先选择一个可用执行器</span>
@@ -644,7 +651,7 @@ export function ChatPage() {
               rows={1}
               disabled={sending}
             />
-            <button className="composer-send" onClick={() => void send()} disabled={sending || uploading || !settingsReady || followUpBlockedByAttachments || (!input.trim() && attachments.length === 0)} title={followUpTarget ? "发送补充指令" : "发送"}>
+            <button className="composer-send" onClick={() => void send()} disabled={sending || uploading || !settingsReady || selectedExecutorUnavailable || followUpBlockedByAttachments || (!input.trim() && attachments.length === 0)} title={selectedExecutorUnavailable ? "当前锁定的执行器不可用" : followUpTarget ? "发送补充指令" : "发送"}>
               {sending ? <Loader2 size={17} className="spin" /> : <ArrowUp size={18} />}
             </button>
           </div>
