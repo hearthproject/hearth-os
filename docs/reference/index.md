@@ -10,7 +10,7 @@ outline: false
 
 <DocCardGrid :columns="2" :items="[
   { no: '01', title: '工程实施', text: '技术栈、运行形态、仓库组织、测试和发布约束。', link: '/reference/engineering' },
-  { no: '02', title: '评测 Agent', text: '60 个 case、独立控制台、评分、复核、对比与产物追踪。', link: '/reference/evaluation-agent' },
+  { no: '02', title: '评测 Agent（独立）', text: '评测代码、60 个 case、控制台与文档已迁至 hearth-eval。', link: '/reference/evaluation-agent' },
   { no: '03', title: '风险与停止条件', text: '哪些信号说明应该暂停、回退或缩小产品。', link: '/reference/risks' },
   { no: '04', title: '关键决策', text: '已经确定、不能随手反转的产品与工程判断。', link: '/reference/decisions' },
   { no: '05', title: '自研与集成', text: 'Hearth 自己做哪一层，哪些成熟能力直接使用。', link: '/reference/build-vs-integrate' },

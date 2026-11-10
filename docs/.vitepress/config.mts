@@ -88,7 +88,7 @@ const zhSidebar = {
       items: [
         { text: '附录总览', link: '/reference/' },
         { text: '工程实施', link: '/reference/engineering' },
-        { text: '评测 Agent', link: '/reference/evaluation-agent' },
+        { text: '评测 Agent（独立）', link: '/reference/evaluation-agent' },
         { text: '风险与停止条件', link: '/reference/risks' },
         { text: '关键决策', link: '/reference/decisions' },
         { text: '自研与集成', link: '/reference/build-vs-integrate' },
@@ -132,7 +132,7 @@ const enSidebar = {
       items: [
         { text: 'Appendix Overview', link: '/en/reference/' },
         { text: 'Engineering', link: '/en/reference/engineering' },
-        { text: 'Evaluation Agent', link: '/en/reference/evaluation-agent' },
+        { text: 'Evaluation Agent (Standalone)', link: '/en/reference/evaluation-agent' },
         { text: 'Risks and Stop Conditions', link: '/en/reference/risks' },
         { text: 'Key Decisions', link: '/en/reference/decisions' },
         { text: 'Build vs. Integrate', link: '/en/reference/build-vs-integrate' },
