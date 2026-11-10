@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ApprovalRecord, RunRecord } from "@hearth/core";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HearthStore } from "@hearth/eventlog";
 import { resolveAction } from "./action-resolver.ts";
 import { ApprovalManager } from "./approvals.ts";
@@ -137,6 +137,128 @@ describe("approval ticket v2", () => {
     })).rejects.toMatchObject({ code: "POLICY_DENIED" });
     expect(service.requireTask(task.id).status).toBe("recoverable");
     expect(store.listEvents().some((event) => event.type === "approval.policy_denied")).toBe(true);
+  });
+
+  it("rejects an expired approval ticket without executing the tool", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-11-10T00:00:00.000Z"));
+      const task = service.createTask({ templateId: "T07" });
+      const runId = createRun(service, task.id, "running");
+      const manager = new ApprovalManager(service, async () => ({}));
+      const pending = await manager.requestTool({
+        taskId: task.id,
+        runId,
+        toolName: "shell",
+        summary: "运行命令",
+        target: { tool: "shell" },
+        preview: { command: "echo late" }
+      });
+      vi.setSystemTime(new Date("2026-11-12T00:00:00.000Z"));
+
+      await expect(manager.decide(pending.approval.id, "approve", pending.approval.parameterHash))
+        .rejects.toMatchObject({ code: "APPROVAL_EXPIRED" });
+      expect(store.getApproval(pending.approval.id)?.status).toBe("expired");
+      expect(service.requireTask(task.id).status).toBe("running");
+      expect(service.requireTask(task.id).nextAction).toContain("过期");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not execute a consumed approval ticket twice", async () => {
+    const task = service.createTask({ templateId: "T07" });
+    const runId = createRun(service, task.id, "running");
+    const manager = new ApprovalManager(service, async () => ({}));
+    const pending = await manager.requestTool({
+      taskId: task.id,
+      runId,
+      toolName: "shell",
+      summary: "运行一次命令",
+      target: { tool: "shell" },
+      preview: { command: "echo once" }
+    });
+
+    const first = await manager.decide(pending.approval.id, "approve", pending.approval.parameterHash);
+    const second = await manager.decide(pending.approval.id, "approve", pending.approval.parameterHash);
+
+    expect(first.approval).toMatchObject({ status: "consumed", usedCount: 1 });
+    expect(second.approval).toMatchObject({ status: "consumed", usedCount: 1 });
+    expect(second.effect).toBeNull();
+  });
+
+  it("rejects execution when the command cwd is redirected after approval", async () => {
+    const root = tempRoot();
+    const workA = join(root, "work-a");
+    const workB = join(root, "work-b");
+    mkdirSync(workA);
+    mkdirSync(workB);
+    const executable = join(root, process.platform === "win32" ? "fake-cwd.cmd" : "fake-cwd.sh");
+    writeFileSync(executable, process.platform === "win32" ? "@echo off\r\nexit /b 0\r\n" : "#!/bin/sh\nexit 0\n", "utf8");
+    if (process.platform !== "win32") chmodSync(executable, 0o755);
+    const action = resolveAction({
+      proposal: {
+        kind: "shell",
+        summary: "在审批目录运行命令",
+        command: { executable, argv: [], cwd: workA }
+      },
+      permissionMode: "guarded",
+      context: "interactive",
+      sessionRoot: root
+    });
+    const task = service.createTask({ templateId: "T07" });
+    const runId = createRun(service, task.id, "running");
+    const manager = new ApprovalManager(service, async () => ({}));
+    const pending = await manager.requestTool({
+      taskId: task.id,
+      runId,
+      toolName: "shell",
+      summary: action.summary,
+      target: { tool: "shell" },
+      preview: { command: action.preview },
+      action
+    });
+
+    rmSync(workA, { recursive: true, force: true });
+    symlinkSync(workB, workA, process.platform === "win32" ? "junction" : "dir");
+
+    await expect(manager.decide(pending.approval.id, "approve", pending.approval.parameterHash))
+      .rejects.toMatchObject({ code: "ACTION_CHANGED" });
+    expect(store.getApproval(pending.approval.id)?.status).toBe("revoked");
+  });
+
+  it("rejects execution when a target file revision changed after approval", async () => {
+    const root = tempRoot();
+    const target = join(root, "notes.md");
+    writeFileSync(target, "approved content", "utf8");
+    const action = resolveAction({
+      proposal: {
+        kind: "file_write",
+        summary: "替换文件内容",
+        files: [{ path: target, mode: "replace" }]
+      },
+      permissionMode: "guarded",
+      context: "interactive",
+      sessionRoot: root
+    });
+    const task = service.createTask({ templateId: "T07" });
+    const runId = createRun(service, task.id, "running");
+    const manager = new ApprovalManager(service, async () => ({}));
+    const pending = await manager.requestTool({
+      taskId: task.id,
+      runId,
+      toolName: "write_file",
+      summary: action.summary,
+      target: { tool: "write_file", path: target },
+      preview: { path: target },
+      action
+    });
+
+    writeFileSync(target, "changed after approval", "utf8");
+
+    await expect(manager.decide(pending.approval.id, "approve", pending.approval.parameterHash))
+      .rejects.toMatchObject({ code: "ACTION_CHANGED" });
+    expect(store.getApproval(pending.approval.id)?.status).toBe("revoked");
   });
 
   it("escalates after three consecutive rejections", async () => {
