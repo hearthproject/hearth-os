@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { exec, execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import type {
   ArtifactRecord,
@@ -116,6 +117,8 @@ async function evaluateCriterion(input: CompletionJudgeInput, criterion: GoalCri
   if (criterion.validator === "schema") return evaluateSchemaCriterion(criterion, artifact);
 
   const custom = input.validators?.[criterion.id];
+  if (!custom && criterion.validator === "command") return evaluateCommandCriterion(criterion, context.workspaceRoot);
+  if (!custom && criterion.validator === "git") return evaluateGitCriterion(criterion, context.workspaceRoot);
   if (!custom) {
     return {
       criterionId: criterion.id,
@@ -140,6 +143,125 @@ async function evaluateCriterion(input: CompletionJudgeInput, criterion: GoalCri
       detail: error instanceof Error ? error.message : String(error)
     };
   }
+}
+
+async function evaluateCommandCriterion(criterion: GoalCriterion, workspaceRoot: string | null): Promise<GoalCriterionResult> {
+  if (!workspaceRoot) return notRun(criterion, "命令 validator 没有可用的工作区");
+  const commandHash = createHash("sha256").update(criterion.check).digest("hex");
+  const result = await runShell(criterion.check, workspaceRoot);
+  if (result.code !== 0) {
+    return failed(criterion.id, `命令校验失败（退出码 ${result.code}）：${outputTail(result)}`);
+  }
+  return {
+    criterionId: criterion.id,
+    status: "passed",
+    evidenceRefs: [`command:sha256=${commandHash}:exit=0`],
+    detail: "命令校验通过（退出码 0）"
+  };
+}
+
+async function evaluateGitCriterion(criterion: GoalCriterion, workspaceRoot: string | null): Promise<GoalCriterionResult> {
+  if (!workspaceRoot) return notRun(criterion, "Git validator 没有可用的工作区");
+  const check = criterion.check.trim();
+  if (check === "clean" || check === "status-clean") {
+    const result = await runFile("git", ["status", "--porcelain"], workspaceRoot);
+    if (result.code !== 0) return failed(criterion.id, `Git 状态检查失败：${outputTail(result)}`);
+    if (result.stdout.trim()) return failed(criterion.id, `Git 工作区不干净：${outputTail(result)}`);
+    return {
+      criterionId: criterion.id,
+      status: "passed",
+      evidenceRefs: [`git:status:clean`],
+      detail: "Git 工作区干净"
+    };
+  }
+  const branchPrefix = "branch=";
+  if (check.startsWith(branchPrefix)) {
+    const expected = check.slice(branchPrefix.length).trim();
+    const result = await runFile("git", ["branch", "--show-current"], workspaceRoot);
+    const actual = result.stdout.trim();
+    if (result.code !== 0 || actual !== expected) {
+      return failed(criterion.id, `Git 分支不匹配：期望 ${expected || "非空"}，实际 ${actual || "未知"}`);
+    }
+    return {
+      criterionId: criterion.id,
+      status: "passed",
+      evidenceRefs: [`git:branch=${actual}`],
+      detail: `Git 分支匹配：${actual}`
+    };
+  }
+  const headPrefix = check.startsWith("head=") ? "head=" : check.startsWith("commit=") ? "commit=" : null;
+  if (headPrefix) {
+    const expected = check.slice(headPrefix.length).trim().toLowerCase();
+    const result = await runFile("git", ["rev-parse", "HEAD"], workspaceRoot);
+    const actual = result.stdout.trim().toLowerCase();
+    if (result.code !== 0 || actual !== expected) {
+      return failed(criterion.id, `Git HEAD 不匹配：期望 ${expected || "非空"}，实际 ${actual || "未知"}`);
+    }
+    return {
+      criterionId: criterion.id,
+      status: "passed",
+      evidenceRefs: [`git:head=${actual}`],
+      detail: `Git HEAD 匹配：${actual}`
+    };
+  }
+  const result = await runShell(`git ${criterion.check}`, workspaceRoot);
+  if (result.code !== 0) return failed(criterion.id, `Git 校验命令失败（退出码 ${result.code}）：${outputTail(result)}`);
+  return {
+    criterionId: criterion.id,
+    status: "passed",
+    evidenceRefs: [`git:command:sha256=${createHash("sha256").update(criterion.check).digest("hex")}:exit=0`],
+    detail: "Git 校验命令通过（退出码 0）"
+  };
+}
+
+function runShell(command: string, cwd: string): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    exec(command, {
+      cwd,
+      timeout: 120_000,
+      maxBuffer: 2 * 1024 * 1024,
+      windowsHide: true,
+      encoding: "utf8",
+      env: process.env
+    }, (error, stdout, stderr) => {
+      const code = error && typeof (error as { code?: unknown }).code === "number"
+        ? (error as { code: number }).code
+        : error ? 1 : 0;
+      resolve({ code, stdout: stdout ?? "", stderr: stderr ?? "" });
+    });
+  });
+}
+
+function runFile(file: string, args: string[], cwd: string): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    execFile(file, args, {
+      cwd,
+      timeout: 30_000,
+      maxBuffer: 2 * 1024 * 1024,
+      windowsHide: true,
+      encoding: "utf8",
+      env: process.env
+    }, (error, stdout, stderr) => {
+      const code = error && typeof (error as { code?: unknown }).code === "number"
+        ? (error as { code: number }).code
+        : error ? 1 : 0;
+      resolve({ code, stdout: stdout ?? "", stderr: stderr ?? "" });
+    });
+  });
+}
+
+function outputTail(result: { stdout: string; stderr: string }): string {
+  const combined = `${result.stderr}\n${result.stdout}`.trim().replace(/\s+/g, " ");
+  return combined.slice(-500) || "没有输出";
+}
+
+function notRun(criterion: GoalCriterion, detail: string): GoalCriterionResult {
+  return {
+    criterionId: criterion.id,
+    status: criterion.required ? "not_run" : "not_required",
+    evidenceRefs: [],
+    detail
+  };
 }
 
 function evaluateFileCriterion(criterion: GoalCriterion, artifact: ArtifactRecord | null): GoalCriterionResult {
