@@ -117,7 +117,9 @@ import type {
   GitFileStatus,
   GitFileView,
   GitPullRequestView,
-  GitRepositoryView
+  GitRepositoryView,
+  GoalCompletionReport,
+  GoalContract
 } from "@hearth/core";
 import type { TaskTemplate } from "@hearth/templates";
 
@@ -240,6 +242,8 @@ export type {
   GitFileView,
   GitPullRequestView,
   GitRepositoryView,
+  GoalCompletionReport,
+  GoalContract,
   TaskTemplate
 };
 
@@ -270,6 +274,8 @@ export interface SettingsStorageResponse {
 
 export interface TaskView {
   task: TaskRecord;
+  goal: GoalContract | null;
+  completionReport: GoalCompletionReport | null;
   runs: RunRecord[];
   approvals: ApprovalRecord[];
   artifacts: ArtifactRecord[];

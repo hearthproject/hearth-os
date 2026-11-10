@@ -4968,6 +4968,129 @@ body.modal-open {
   gap: 4px;
 }
 
+.goal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px 16px;
+}
+
+.goal-verdict {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--surface-sunk);
+  color: var(--ink-secondary);
+  font-size: var(--fs-11);
+}
+
+.goal-verdict.pass { background: rgba(45, 120, 70, 0.1); color: #245f38; }
+.goal-verdict.fail { background: rgba(138, 52, 23, 0.1); color: var(--risk); }
+.goal-verdict.blocked,
+.goal-verdict.needs_human { background: rgba(154, 103, 0, 0.1); color: #805500; }
+
+.goal-summary p {
+  margin: 0;
+  color: var(--ink-secondary);
+  font-size: var(--fs-12);
+  line-height: 1.55;
+}
+
+.goal-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 7px;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+}
+
+.goal-next,
+.goal-missing {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-sunk);
+  color: var(--ink-secondary);
+  font-size: var(--fs-11);
+}
+
+.goal-next strong,
+.goal-missing strong {
+  color: var(--ink-primary);
+}
+
+.goal-criteria {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.goal-criterion {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised, var(--surface));
+}
+
+.goal-criterion-state {
+  align-self: start;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--surface-sunk);
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+  text-align: center;
+}
+
+.goal-criterion.passed .goal-criterion-state { background: rgba(45, 120, 70, 0.1); color: #245f38; }
+.goal-criterion.failed .goal-criterion-state { background: rgba(138, 52, 23, 0.1); color: var(--risk); }
+
+.goal-criterion strong {
+  display: block;
+  font-size: var(--fs-12);
+}
+
+.goal-criterion small,
+.goal-criterion p {
+  display: block;
+  margin: 3px 0 0;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+  line-height: 1.5;
+}
+
+.goal-evidence {
+  margin-top: 5px;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+}
+
+.goal-evidence summary {
+  cursor: pointer;
+}
+
+.goal-evidence ul,
+.goal-missing ul {
+  margin: 5px 0 0;
+  padding-left: 17px;
+  overflow-wrap: anywhere;
+}
+
+.goal-report-summary {
+  margin: 0;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+}
+
 .result-banner {
   display: flex;
   align-items: flex-start;
