@@ -40,7 +40,7 @@ const task = (status: TaskRecord["status"]): TaskRecord => ({
 describe("status labels", () => {
   it("labels every task status without collapsing them", () => {
     const labels = TASK_STATUSES.map((status) => TASK_STATUS_LABELS[status]);
-    expect(labels).toHaveLength(8);
+    expect(labels).toHaveLength(9);
     expect(labels.every((label) => label.trim().length > 0)).toBe(true);
     expect(new Set(labels).size).toBe(labels.length);
   });
