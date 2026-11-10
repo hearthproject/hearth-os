@@ -385,6 +385,11 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       preferredExecutorId: lockedExecutorId
     });
     const available = executorAvailability();
+    const lockedHealth = lockedExecutorId
+      ? options.executorHealth
+        ? options.executorHealth(lockedExecutorId)
+        : executorHealth(lockedExecutorId, executorSettings(), executorSettingsPath)
+      : null;
     const resolution = lockedExecutorId
       ? resolveExecutorLocked(lockedExecutorId, effectiveSettings.executorEnabled, available, plan.capability)
       : resolveExecutorFromEnabled(
@@ -442,8 +447,9 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     if (route.action === "task") {
       try {
         if (!resolution.executorId) {
+          const lockedIssue = lockedHealth?.issues.filter(Boolean).join("；");
           const lockedText = lockedExecutorId
-            ? `已锁定 ${executorName(lockedExecutorId)}，但${resolution.reason ?? "当前无法执行"}。任务没有派出；请检查该执行器设置，或切回“自动匹配（按任务）”后重试。`
+            ? `已锁定 ${executorName(lockedExecutorId)}，但${resolution.reason ?? "当前无法执行"}${lockedIssue ? `：${lockedIssue}` : ""}。任务没有派出；请检查该执行器设置，或切回“自动匹配（按任务）”后重试。`
             : plan.capability
               ? `${resolution.reason ?? "没有可用的执行器"}，暂时不能派出任务。请在输入框上方启用${plan.capability === "github" ? " Codex、Hermes 或 Native" : " Native"}后重试。`
               : "所有执行器都已关闭或不可用，暂时不能派出任务。请在输入框上方的执行器选择器中选择一个可用执行器，然后再发送。";

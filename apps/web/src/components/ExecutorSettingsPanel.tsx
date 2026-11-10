@@ -134,7 +134,10 @@ export function ExecutorSettingsPanel() {
     try {
       const result = await api.probeExecutor(id);
       setProbes((prev) => ({ ...prev, [id]: result }));
-      await queryClient.invalidateQueries({ queryKey: ["executors"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["executors"] }),
+        queryClient.invalidateQueries({ queryKey: ["executorSettings"] })
+      ]);
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "执行器检测失败" });
     } finally {
