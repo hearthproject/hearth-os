@@ -5,7 +5,7 @@ import { basename, join } from "node:path";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyReply } from "fastify";
 import type { EventEnvelope, ExecutorHealth, ExecutorId, ExecutorView, GoalBudget } from "@hearth/core";
-import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, EXECUTOR_IDS, GOAL_REVIEW_POLICIES, GOAL_STATES, GOAL_VALIDATORS, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_ORIGINS, MEMORY_RETENTIONS, MEMORY_SENSITIVITIES, MEMORY_TAINT_STATES, MEMORY_TIERS, MEMORY_TRUST_LEVELS, PROACTIVE_MODES, RUN_STATUSES, SKILL_STATUSES, SKILL_USAGE_SOURCES, SKILL_USAGE_STATUSES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
+import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DELEGATION_WORKSPACE_POLICIES, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, EXECUTOR_IDS, GOAL_REVIEW_POLICIES, GOAL_STATES, GOAL_VALIDATORS, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_ORIGINS, MEMORY_RETENTIONS, MEMORY_SENSITIVITIES, MEMORY_TAINT_STATES, MEMORY_TIERS, MEMORY_TRUST_LEVELS, PROACTIVE_MODES, RUN_STATUSES, SKILL_STATUSES, SKILL_USAGE_SOURCES, SKILL_USAGE_STATUSES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate } from "@hearth/templates";
 import { loadCodexProfile, runCodex } from "@hearth/codex-executor";
@@ -27,10 +27,12 @@ import { ModelRegistry, ModelRegistryError } from "./model-registry.ts";
 import { migrateLegacySettings } from "./settings-migration.ts";
 import { ApprovalError, ApprovalManager, type EffectExecutor } from "./approvals.ts";
 import { BackupError, BackupService } from "./backups.ts";
+import { DelegationError, DelegationService, type CreateDelegationInput } from "./delegation.ts";
 import { executeEffect } from "./effects.ts";
 import { HearthScheduler } from "./scheduler.ts";
 import { GitViewError, TaskGitService } from "./task-git.ts";
 import { TaskLeaseService } from "./leases.ts";
+import { SandboxError, SandboxService } from "./sandbox.ts";
 import { SecurityError, SecurityService } from "./security.ts";
 import { ContextService } from "./context.ts";
 import type { ContextIndex } from "./context-index.ts";
@@ -159,6 +161,44 @@ const contextQuerySchema = z.object({
 
 const confirmHandoffSchema = z.object({
   executorId: z.enum(EXECUTOR_IDS)
+}).strict();
+
+const delegationPermissionsSchema = z.object({
+  readRoots: z.array(z.string().trim().min(1).max(1000)).max(20),
+  writeRoots: z.array(z.string().trim().min(1).max(1000)).max(20),
+  networkHosts: z.array(z.string().trim().min(1).max(255)).max(20),
+  tools: z.array(z.string().trim().min(1).max(80)).max(40)
+}).strict();
+
+const createDelegationSchema = z.object({
+  goalSlice: z.string().trim().min(1).max(4000),
+  targetExecutor: z.enum(EXECUTOR_IDS),
+  contextPackRef: z.string().trim().min(1).max(1000),
+  contextPack: z.record(z.string(), z.unknown()).optional(),
+  workspacePolicy: z.enum(DELEGATION_WORKSPACE_POLICIES).optional(),
+  toolPolicy: z.array(z.string().trim().min(1).max(80)).max(40).optional(),
+  networkPolicy: z.array(z.string().trim().min(1).max(255)).max(20).optional(),
+  budget: z.object({
+    tokens: z.number().int().positive().optional(),
+    wallClockMs: z.number().int().positive().optional(),
+    maxSteps: z.number().int().positive().optional()
+  }).strict().optional(),
+  deadline: z.string().datetime().nullable().optional(),
+  resultSchemaRef: z.string().trim().min(1).max(1000).nullable().optional(),
+  idempotencyKey: z.string().trim().min(1).max(200),
+  requestedPermissions: delegationPermissionsSchema.optional(),
+  createChildTask: z.boolean().optional()
+}).strict();
+
+const verifyDelegationSchema = z.object({
+  verdict: z.enum(["accepted", "rejected"]),
+  summary: z.string().trim().min(1).max(4000),
+  evidenceRefs: z.array(z.string().trim().min(1).max(1000)).min(1).max(50),
+  checkedAt: z.string().datetime().optional()
+}).strict();
+
+const cancelDelegationSchema = z.object({
+  reason: z.string().trim().min(1).max(1000).default("用户取消")
 }).strict();
 
 const contextSettingsPatchSchema = z.object({
@@ -755,6 +795,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const connections = new ConnectionService({ service });
   const security = new SecurityService(service);
   const leases = new TaskLeaseService(service);
+  const sandbox = new SandboxService();
+  const delegations = new DelegationService({ service, sandbox });
   const backups = new BackupService({
     service,
     backupRoot: options.backupRoot ?? BACKUP_DIR,
@@ -765,6 +807,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     guard: (taskId) => {
       security.assertActionsAllowed();
       leases.assertOwnedIfLeased(taskId);
+      delegations.assertEffectAllowed(taskId);
     },
     onUncertain: (effect, reason) => {
       reconcile.enqueue(effect, reason);
@@ -2773,6 +2816,106 @@ export async function buildServer(options: BuildServerOptions = {}) {
     });
   });
 
+  app.get<{ Params: { id: string } }>("/api/tasks/:id/delegations", async (request, reply) => {
+    if (!store.getTask(request.params.id)) {
+      return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    }
+    reply.header("cache-control", "no-store");
+    return { delegations: delegations.list(request.params.id) };
+  });
+
+  app.post<{ Params: { id: string } }>("/api/tasks/:id/delegations", async (request, reply) => {
+    if (!store.getTask(request.params.id)) {
+      return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    }
+    const parsed = createDelegationSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: "INVALID_DELEGATION",
+        message: "委派参数不正确",
+        issues: parsed.error.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message }))
+      });
+    }
+    try {
+      const input: CreateDelegationInput = {
+        parentTaskId: request.params.id,
+        goalSlice: parsed.data.goalSlice,
+        targetExecutor: parsed.data.targetExecutor,
+        contextPackRef: parsed.data.contextPackRef,
+        idempotencyKey: parsed.data.idempotencyKey
+      };
+      if (parsed.data.contextPack !== undefined) input.contextPack = parsed.data.contextPack;
+      if (parsed.data.workspacePolicy !== undefined) input.workspacePolicy = parsed.data.workspacePolicy;
+      if (parsed.data.toolPolicy !== undefined) input.toolPolicy = parsed.data.toolPolicy;
+      if (parsed.data.networkPolicy !== undefined) input.networkPolicy = parsed.data.networkPolicy;
+      if (parsed.data.budget !== undefined) {
+        input.budget = {
+          ...(parsed.data.budget.tokens !== undefined ? { tokens: parsed.data.budget.tokens } : {}),
+          ...(parsed.data.budget.wallClockMs !== undefined ? { wallClockMs: parsed.data.budget.wallClockMs } : {}),
+          ...(parsed.data.budget.maxSteps !== undefined ? { maxSteps: parsed.data.budget.maxSteps } : {})
+        };
+      }
+      if (parsed.data.deadline !== undefined) input.deadline = parsed.data.deadline;
+      if (parsed.data.resultSchemaRef !== undefined) input.resultSchemaRef = parsed.data.resultSchemaRef;
+      if (parsed.data.requestedPermissions !== undefined) input.requestedPermissions = parsed.data.requestedPermissions;
+      if (parsed.data.createChildTask !== undefined) input.createChildTask = parsed.data.createChildTask;
+      return reply.code(201).send(delegations.create(input));
+    } catch (error) {
+      return sendDelegationFailure(reply, error);
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/api/delegations/:id", async (request, reply) => {
+    const job = store.getDelegationJob(request.params.id);
+    if (!job) return reply.code(404).send({ error: "DELEGATION_NOT_FOUND", message: "委派不存在" });
+    reply.header("cache-control", "no-store");
+    return job;
+  });
+
+  app.post<{ Params: { id: string } }>("/api/delegations/:id/verify", async (request, reply) => {
+    const job = store.getDelegationJob(request.params.id);
+    if (!job) return reply.code(404).send({ error: "DELEGATION_NOT_FOUND", message: "委派不存在" });
+    const parsed = verifyDelegationSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "INVALID_DELEGATION_VERIFICATION", message: "验收参数不正确" });
+    }
+    try {
+      return delegations.verify(job.id, {
+        parentTaskId: job.parentTaskId,
+        verdict: parsed.data.verdict,
+        summary: parsed.data.summary,
+        evidenceRefs: parsed.data.evidenceRefs,
+        checkedAt: parsed.data.checkedAt ?? new Date().toISOString()
+      });
+    } catch (error) {
+      return sendDelegationFailure(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/delegations/:id/cancel", async (request, reply) => {
+    const job = store.getDelegationJob(request.params.id);
+    if (!job) return reply.code(404).send({ error: "DELEGATION_NOT_FOUND", message: "委派不存在" });
+    const parsed = cancelDelegationSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "INVALID_DELEGATION_CANCEL", message: "取消原因不正确" });
+    }
+    try {
+      return delegations.cancel(job.id, parsed.data.reason);
+    } catch (error) {
+      return sendDelegationFailure(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/delegations/:id/retry", async (request, reply) => {
+    const job = store.getDelegationJob(request.params.id);
+    if (!job) return reply.code(404).send({ error: "DELEGATION_NOT_FOUND", message: "委派不存在" });
+    try {
+      return delegations.retry(job.id);
+    } catch (error) {
+      return sendDelegationFailure(reply, error);
+    }
+  });
+
   app.get<{ Params: { id: string } }>("/api/tasks/:id/handoffs", async (request, reply) => {
     if (!store.getTask(request.params.id)) {
       return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
@@ -3071,6 +3214,20 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
 
   return app;
+}
+
+function sendDelegationFailure(reply: FastifyReply, error: unknown) {
+  if (error instanceof DelegationError) {
+    return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+  }
+  if (error instanceof SandboxError) {
+    return reply.code(error.statusCode).send({
+      error: error.code,
+      message: error.message,
+      failureClass: error.failureClass
+    });
+  }
+  throw error;
 }
 
 function parseAfterSeq(value: string | undefined): number | null {

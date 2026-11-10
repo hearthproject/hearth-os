@@ -532,6 +532,57 @@ describe("Hearth server", () => {
     await app.close();
   });
 
+  it("creates idempotent delegations and cancels the child task", async () => {
+    const root = mkdtempSync(join(tmpdir(), "hearth-app-delegation-"));
+    try {
+      const app = await buildServer({ store, serveWeb: false });
+      const created = await app.inject({
+        method: "POST",
+        url: "/api/tasks",
+        payload: {
+          title: "委派父任务",
+          goal: "验证委派 API",
+          permissions: {
+            readRoots: [root],
+            writeRoots: [],
+            networkHosts: [],
+            tools: ["read_file", "finish_task"]
+          }
+        }
+      });
+      expect(created.statusCode).toBe(201);
+      const parentId = created.json().id as string;
+      const payload = {
+        goalSlice: "只读检索",
+        targetExecutor: "native",
+        contextPackRef: "context:task",
+        workspacePolicy: "read-only",
+        idempotencyKey: "app-delegation-1"
+      };
+
+      const first = await app.inject({ method: "POST", url: `/api/tasks/${parentId}/delegations`, payload });
+      expect(first.statusCode).toBe(201);
+      expect(first.json()).toMatchObject({ status: "queued", parentTaskId: parentId });
+      const childTaskId = first.json().childTaskId as string;
+
+      const duplicate = await app.inject({ method: "POST", url: `/api/tasks/${parentId}/delegations`, payload });
+      expect(duplicate.statusCode).toBe(201);
+      expect(duplicate.json().id).toBe(first.json().id);
+
+      const listed = await app.inject({ method: "GET", url: `/api/tasks/${parentId}/delegations` });
+      expect(listed.statusCode).toBe(200);
+      expect(listed.json().delegations).toHaveLength(1);
+
+      const cancelled = await app.inject({ method: "POST", url: `/api/delegations/${first.json().id}/cancel`, payload: { reason: "测试取消" } });
+      expect(cancelled.statusCode).toBe(200);
+      expect(cancelled.json()).toMatchObject({ status: "cancelled", cancelReason: "测试取消" });
+      expect(store.getTask(childTaskId)?.status).toBe("cancelled");
+      await app.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("rejects unknown templates and cross-site writes", async () => {
     const app = await buildServer({ store, serveWeb: false });
     const unknown = await app.inject({
