@@ -8,7 +8,7 @@ import type {
   AgentToolAuthorizationRequest,
   RuntimeEvent
 } from "@hearth/agent-runtime";
-import type { ContextItem, ContextSettings, DelegationJob, DelegationResult, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, MethodCandidate, MethodSelection, RunBudget, RunCheckpointProof, RunCheckpointRecord, RunRecord, TaskError, TaskFollowUpRecord, TaskLease, TaskProgressDetail, TaskRecord } from "@hearth/core";
+import type { BudgetDimension, BudgetExhaustion, ContextItem, ContextSettings, DelegationJob, DelegationResult, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, MethodCandidate, MethodSelection, RunBudget, RunCheckpointProof, RunCheckpointRecord, RunRecord, TaskError, TaskFollowUpRecord, TaskLease, TaskProgressDetail, TaskRecord } from "@hearth/core";
 import { runCodex } from "@hearth/codex-executor";
 import { getTemplate } from "@hearth/templates";
 import type { DshApprovalOutcome, DshApprovalRequest, DshContextEvent } from "@hearth/deepseek-executor";
@@ -56,7 +56,7 @@ export type { CodexRunner, NativeRunner } from "./executor-adapter.ts";
 export type ExecutorHealthProvider = (executorId: ExecutorId, settings: ExecutorSettings) => { canRun: boolean; issues: string[] };
 
 interface AttemptResult {
-  status: "completed" | "waiting_input" | "waiting_approval" | "failed" | "cancelled";
+  status: "completed" | "waiting_input" | "waiting_approval" | "waiting_budget" | "failed" | "cancelled";
   run: RunRecord;
   executorId: ExecutorId;
   outDir: string;
@@ -426,6 +426,35 @@ export class HearthScheduler {
       error: null,
       ...(pendingInput ? { pendingInput } : {})
     }, task.currentRunId ?? undefined);
+    this.wake();
+    return updated;
+  }
+
+  extendBudget(taskId: string): TaskRecord {
+    const task = this.service.requireTask(taskId);
+    if (task.status !== "waiting_budget") {
+      throw new Error(`当前状态不能扩展预算：${task.status}`);
+    }
+    const current = this.effectiveBudget(task);
+    const budgetOverride: RunBudget = {
+      maxTurns: current.maxTurns * 2,
+      maxToolCalls: current.maxToolCalls * 2,
+      maxTokens: current.maxTokens * 2,
+      maxDurationMs: current.maxDurationMs * 2
+    };
+    const updated = this.service.updateTask(taskId, {
+      budgetOverride,
+      status: "queued",
+      nextAction: "预算已扩展一倍，准备从检查点继续",
+      error: null
+    }, task.currentRunId ?? undefined);
+    const event = this.service.store.appendEvent({
+      type: "task.budget.extended",
+      taskId,
+      runId: task.currentRunId ?? null,
+      payload: { budgetOverride, previousBudget: current, at: new Date().toISOString() }
+    });
+    this.service.bus.publish(event);
     this.wake();
     return updated;
   }
@@ -1313,7 +1342,7 @@ export class HearthScheduler {
         this.delegations.cancel(jobId, "子任务已取消");
         return;
       }
-      if (task.status === "waiting_input" || task.status === "waiting_approval") {
+      if (task.status === "waiting_input" || task.status === "waiting_approval" || task.status === "waiting_budget") {
         this.delegations.requeue(jobId, owner);
         return;
       }
@@ -1558,6 +1587,7 @@ export class HearthScheduler {
       let result = await execute(prompt, resumeState, input.resumePrompt ?? undefined);
       rememberSession(result);
       this.assertLease(taskId, run.leaseEpoch ?? 0, controller.signal.aborted && this.stopping);
+      if (result.status === "budget_exceeded") return this.finishBudgetExhausted(taskId, run, result, budget);
       if (result.status === "waiting_input") return this.finishWaitingInput(taskId, run, result);
       this.assertCompleted(result);
       for (let repairAttempt = 1; repairAttempt <= 2; repairAttempt += 1) {
@@ -1568,6 +1598,7 @@ export class HearthScheduler {
         result = await execute(repairPrompt, result.resume, repairPrompt);
         rememberSession(result);
         this.assertLease(taskId, run.leaseEpoch ?? 0, controller.signal.aborted && this.stopping);
+        if (result.status === "budget_exceeded") return this.finishBudgetExhausted(taskId, run, result, budget);
         if (result.status === "waiting_input") return this.finishWaitingInput(taskId, run, result);
         this.assertCompleted(result);
       }
@@ -1883,6 +1914,90 @@ export class HearthScheduler {
     }, run.id);
       this.refreshTaskSummary(taskId);
     return { status: "waiting_input", run: { ...run, status: "waiting_input", usage }, executorId: run.executorId ?? "codex", outDir: this.outDirForRun(taskId, run), error: null, failure: null, aborted: false, leaseLost: false, cancelled: false };
+  }
+
+  private finishBudgetExhausted(taskId: string, run: RunRecord, result: ExecutionOutcome, budget: RunBudget): AttemptResult {
+    const task = this.service.requireTask(taskId);
+    const usage = this.usageWithMetrics(result.usage, result.turns, result.toolCalls);
+    const effective = this.effectiveBudget(task);
+    const dimension = result.budgetExhaustion?.dimension ?? this.inferBudgetDimension(result, budget);
+    const previousRuns = this.service.store.listRuns(taskId).filter((candidate) => candidate.id !== run.id);
+    const previous = this.usageForRuns(previousRuns);
+    const runValues = {
+      turns: Math.max(0, result.turns ?? usage?.turns ?? 0),
+      toolCalls: Math.max(0, result.toolCalls ?? usage?.toolCalls ?? 0),
+      tokens: (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0),
+      duration: run.startedAt ? Math.max(0, Date.now() - Date.parse(run.startedAt)) : 0
+    };
+    const exhaustion: BudgetExhaustion = {
+      dimension,
+      used: (dimension === "duration" ? previous.durationMs : previous[dimension]) + runValues[dimension],
+      limit: effective[this.budgetLimitKey(dimension)]
+    };
+    const message = `执行预算已触顶：${budgetDimensionLabel(dimension)} ${formatBudgetValue(dimension, exhaustion.used)} / ${formatBudgetValue(dimension, exhaustion.limit)}。`;
+    const failure: TaskError = {
+      kind: "budget_exhausted",
+      message,
+      recoverable: true,
+      guidance: "确认后可以把四项预算同时翻倍，并从最近检查点继续。",
+      cause: "budget",
+      failureClass: "budget_exhausted",
+      disposition: { type: "ask_user", question: "是否扩展一倍预算并继续？", options: ["扩展一倍并继续", "暂时保留"] },
+      budgetExhaustion: exhaustion
+    };
+    this.service.updateRun(run.id, taskId, { status: "failed", endedAt: new Date().toISOString(), usage, failure });
+    this.service.updateTask(taskId, {
+      status: "waiting_budget",
+      currentRunId: run.id,
+      nextAction: "预算已触顶，等待扩展",
+      error: failure,
+      resultSummary: result.finalResponse.trim() || message
+    }, run.id);
+    this.publishProgress(taskId, run.id, "budget", message, {
+      eventType: "budget.exhausted",
+      status: "waiting_budget",
+      text: `${exhaustion.used}/${exhaustion.limit}`,
+      ...(run.executorId ? { executorId: run.executorId } : {})
+    });
+    const event = this.service.store.appendEvent({
+      type: "task.budget.exhausted",
+      taskId,
+      runId: run.id,
+      payload: { ...exhaustion, effectiveBudget: effective, at: new Date().toISOString() }
+    });
+    this.service.bus.publish(event);
+    this.refreshTaskSummary(taskId, { lastFailure: failure });
+    return {
+      status: "waiting_budget",
+      run: { ...run, status: "failed", usage, failure },
+      executorId: run.executorId ?? "codex",
+      outDir: this.outDirForRun(taskId, run),
+      error: null,
+      failure,
+      aborted: false,
+      leaseLost: false,
+      cancelled: false
+    };
+  }
+
+  private inferBudgetDimension(result: ExecutionOutcome, budget: RunBudget): BudgetDimension {
+    const turns = Math.max(0, result.turns ?? 0);
+    const toolCalls = Math.max(0, result.toolCalls ?? 0);
+    const tokens = (result.usage?.inputTokens ?? 0) + (result.usage?.outputTokens ?? 0);
+    const candidates: Array<{ dimension: BudgetDimension; ratio: number }> = [
+      { dimension: "turns", ratio: budget.maxTurns <= 0 ? 1 : turns / budget.maxTurns },
+      { dimension: "toolCalls", ratio: budget.maxToolCalls <= 0 ? 1 : toolCalls / budget.maxToolCalls },
+      { dimension: "tokens", ratio: budget.maxTokens <= 0 ? 1 : tokens / budget.maxTokens },
+      { dimension: "duration", ratio: result.status === "budget_exceeded" ? 0 : 0 }
+    ];
+    return candidates.sort((left, right) => right.ratio - left.ratio)[0]?.dimension ?? "turns";
+  }
+
+  private budgetLimitKey(dimension: BudgetDimension): keyof RunBudget {
+    if (dimension === "turns") return "maxTurns";
+    if (dimension === "toolCalls") return "maxToolCalls";
+    if (dimension === "tokens") return "maxTokens";
+    return "maxDurationMs";
   }
 
   private markRunFailed(taskId: string, runId: string, error: unknown, aborted: boolean, leaseEpoch: number): { failure: TaskError | null; cancelled: boolean; leaseLost: boolean } {
@@ -2216,19 +2331,34 @@ export class HearthScheduler {
 
   private remainingBudget(taskId: string): RunBudget {
     const task = this.service.requireTask(taskId);
-    const goal = task.goalId ? this.service.store.getGoal(task.goalId) : null;
+    const goal = !task.budgetOverride && task.goalId ? this.service.store.getGoal(task.goalId) : null;
     const runs = goal ? this.goalRuns(goal.goalId) : this.service.store.listRuns(taskId);
     const used = this.usageForRuns(runs);
-    const goalBudget = goal?.budget ?? {};
-    const maxTurns = Math.min(goalBudget.maxTurns ?? this.runBudget.maxTurns, this.runBudget.maxTurns);
-    const maxToolCalls = Math.min(goalBudget.maxToolCalls ?? this.runBudget.maxToolCalls, this.runBudget.maxToolCalls);
-    const maxTokens = Math.min(goalBudget.maxTokens ?? this.runBudget.maxTokens, this.runBudget.maxTokens);
-    const maxDurationMs = Math.min(goalBudget.maxDurationMs ?? this.runBudget.maxDurationMs, this.runBudget.maxDurationMs);
+    const effective = this.effectiveBudget(task);
     return {
-      maxTurns: Math.max(0, maxTurns - used.turns),
-      maxToolCalls: Math.max(0, maxToolCalls - used.toolCalls),
-      maxTokens: Math.max(0, maxTokens - used.tokens),
-      maxDurationMs: Math.max(0, maxDurationMs - used.durationMs)
+      maxTurns: Math.max(0, effective.maxTurns - used.turns),
+      maxToolCalls: Math.max(0, effective.maxToolCalls - used.toolCalls),
+      maxTokens: Math.max(0, effective.maxTokens - used.tokens),
+      maxDurationMs: Math.max(0, effective.maxDurationMs - used.durationMs)
+    };
+  }
+
+  private effectiveBudget(task: TaskRecord): RunBudget {
+    if (task.budgetOverride) {
+      return {
+        maxTurns: Math.max(1, Math.floor(task.budgetOverride.maxTurns)),
+        maxToolCalls: Math.max(1, Math.floor(task.budgetOverride.maxToolCalls)),
+        maxTokens: Math.max(1, Math.floor(task.budgetOverride.maxTokens)),
+        maxDurationMs: Math.max(1, Math.floor(task.budgetOverride.maxDurationMs))
+      };
+    }
+    const goal = task.goalId ? this.service.store.getGoal(task.goalId) : null;
+    const goalBudget = goal?.budget ?? {};
+    return {
+      maxTurns: Math.min(goalBudget.maxTurns ?? this.runBudget.maxTurns, this.runBudget.maxTurns),
+      maxToolCalls: Math.min(goalBudget.maxToolCalls ?? this.runBudget.maxToolCalls, this.runBudget.maxToolCalls),
+      maxTokens: Math.min(goalBudget.maxTokens ?? this.runBudget.maxTokens, this.runBudget.maxTokens),
+      maxDurationMs: Math.min(goalBudget.maxDurationMs ?? this.runBudget.maxDurationMs, this.runBudget.maxDurationMs)
     };
   }
 
@@ -2272,16 +2402,12 @@ export class HearthScheduler {
       };
     }
 
-    const goalBudget = goal.budget;
-    const maxTurns = Math.min(goalBudget.maxTurns ?? this.runBudget.maxTurns, this.runBudget.maxTurns);
-    const maxToolCalls = Math.min(goalBudget.maxToolCalls ?? this.runBudget.maxToolCalls, this.runBudget.maxToolCalls);
-    const maxTokens = Math.min(goalBudget.maxTokens ?? this.runBudget.maxTokens, this.runBudget.maxTokens);
-    const maxDurationMs = Math.min(goalBudget.maxDurationMs ?? this.runBudget.maxDurationMs, this.runBudget.maxDurationMs);
-    const exhausted = [
-      used.turns >= maxTurns ? `轮次 ${used.turns}/${maxTurns}` : null,
-      used.toolCalls >= maxToolCalls ? `工具调用 ${used.toolCalls}/${maxToolCalls}` : null,
-      used.tokens >= maxTokens ? `tokens ${used.tokens}/${maxTokens}` : null,
-      used.durationMs >= maxDurationMs ? `时长 ${Math.round(used.durationMs / 1000)}s/${Math.round(maxDurationMs / 1000)}s` : null
+    const effective = this.effectiveBudget(task);
+    const exhausted = task.budgetOverride ? [] : [
+      used.turns >= effective.maxTurns ? `轮次 ${used.turns}/${effective.maxTurns}` : null,
+      used.toolCalls >= effective.maxToolCalls ? `工具调用 ${used.toolCalls}/${effective.maxToolCalls}` : null,
+      used.tokens >= effective.maxTokens ? `tokens ${used.tokens}/${effective.maxTokens}` : null,
+      used.durationMs >= effective.maxDurationMs ? `时长 ${Math.round(used.durationMs / 1000)}s/${Math.round(effective.maxDurationMs / 1000)}s` : null
     ].filter((item): item is string => item !== null);
     if (exhausted.length > 0) {
       return {
@@ -2741,4 +2867,16 @@ function safeStringify(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function budgetDimensionLabel(dimension: BudgetDimension): string {
+  if (dimension === "turns") return "轮次";
+  if (dimension === "toolCalls") return "工具调用";
+  if (dimension === "tokens") return "Token";
+  return "执行时长";
+}
+
+function formatBudgetValue(dimension: BudgetDimension, value: number): string {
+  if (dimension === "duration") return `${Math.round(value / 1000)} 秒`;
+  return new Intl.NumberFormat("zh-CN").format(Math.max(0, Math.round(value)));
 }

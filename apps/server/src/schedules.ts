@@ -828,7 +828,7 @@ function boundedInt(value: number | undefined, fallback: number, min: number, ma
 
 function scheduleStatusForTask(status: TaskStatus): ScheduleRunStatus {
   if (status === "queued") return "queued";
-  if (status === "running" || status === "waiting_input" || status === "waiting_approval") return "running";
+  if (status === "running" || status === "waiting_input" || status === "waiting_approval" || status === "waiting_budget") return "running";
   if (status === "completed") return "completed";
   if (status === "cancelled") return "cancelled";
   return "failed";

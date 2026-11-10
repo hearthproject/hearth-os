@@ -3473,6 +3473,8 @@ export class HearthStore {
       case "schedule.run.created":
       case "schedule.run.updated":
       case "task.progress":
+      case "task.budget.exhausted":
+      case "task.budget.extended":
       case "approval.expired":
       case "approval.auto_approved":
       case "approval.rejected":

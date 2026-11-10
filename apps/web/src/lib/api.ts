@@ -647,6 +647,7 @@ export const api = {
     method: "POST",
     ...(message ? { body: JSON.stringify({ message }) } : {})
   }),
+  extendBudget: (id: string) => request<TaskRecord>(`/api/tasks/${encodeURIComponent(id)}/budget/extend`, { method: "POST" }),
   confirmTaskProposal: (id: string) => request<{ proposal: TaskProposalRecord; task: TaskRecord }>(
     `/api/task-proposals/${encodeURIComponent(id)}/confirm`,
     { method: "POST" }

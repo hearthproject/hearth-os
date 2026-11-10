@@ -7,6 +7,7 @@ import type {
   RuntimeEvent
 } from "@hearth/agent-runtime";
 import type {
+  BudgetExhaustion,
   ContextSettings,
   ExecutorId,
   ExecutorSettings,
@@ -41,6 +42,7 @@ export interface ExecutionOutcome {
   label: string;
   question: string | null;
   resume?: AgentResumeState;
+  budgetExhaustion?: Pick<BudgetExhaustion, "dimension" | "limit">;
 }
 
 export interface ExecutorAttemptContext {
@@ -144,6 +146,7 @@ export class NativeExecutorAdapter implements ExecutorAdapter {
       threadId: null,
       label: `native / ${input.nativeSettings.model}`,
       question: outcome.question,
+      ...(outcome.budgetExhaustion ? { budgetExhaustion: outcome.budgetExhaustion } : {}),
       ...(outcome.messages
         ? { resume: { messages: outcome.messages, usage: outcome.usage, turns: outcome.turns, toolCalls: outcome.toolCalls } }
         : {})

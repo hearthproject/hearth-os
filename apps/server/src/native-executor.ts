@@ -1,4 +1,4 @@
-import type { RunBudget, RunUsage, TaskPermissions, TaskProgressDetail, TaskRecord } from "@hearth/core";
+import type { BudgetDimension, RunBudget, RunUsage, TaskPermissions, TaskProgressDetail, TaskRecord } from "@hearth/core";
 import {
   createBuiltinTools,
   defaultTaskPermissions,
@@ -20,10 +20,10 @@ import type { ModelSettings } from "./model-settings.ts";
 import type { PreparedWorkspace } from "./workspace.ts";
 
 export const DEFAULT_RUN_BUDGET: RunBudget = {
-  maxTurns: 12,
-  maxToolCalls: 40,
-  maxTokens: 200_000,
-  maxDurationMs: 15 * 60_000
+  maxTurns: 200,
+  maxToolCalls: 4_000,
+  maxTokens: 2_000_000_000,
+  maxDurationMs: 36_000_000
 };
 
 export interface NativeRunOptions {
@@ -53,6 +53,7 @@ export interface NativeRunResult {
   question: string | null;
   outputs: string[];
   messages?: AgentMessage[];
+  budgetExhaustion?: { dimension: BudgetDimension; limit: number };
 }
 
 export async function runNativeTask(options: NativeRunOptions): Promise<NativeRunResult> {
@@ -71,6 +72,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
       ...(screenshotTask ? ["capture_screen"] : [])
     ]
   });
+  let budgetExhaustion: NativeRunResult["budgetExhaustion"];
   const result = await runAgent({
     model: modelAdapter(options.settings),
     tools: [...createBuiltinTools(), ...(options.extraTools ?? [])],
@@ -99,7 +101,8 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
       } else if (event.type === "compacted") {
         options.onProgress?.({ kind: "context", message: "整理执行上下文，继续推进" });
       } else if (event.type === "budget.exceeded") {
-        options.onProgress?.({ kind: "budget", message: "达到本轮执行预算，正在收尾" });
+        budgetExhaustion = { dimension: event.budget, limit: event.limit };
+        options.onProgress?.({ kind: "budget", message: `达到本轮执行预算（${budgetDimensionLabel(event.budget)}）`, detail: { executorId: "native", eventType: "budget.exceeded", status: event.budget } });
       }
     },
     ...(options.onCheckpoint ? { onCheckpoint: options.onCheckpoint } : {}),
@@ -115,8 +118,16 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     toolCalls: result.toolCalls,
     question: result.question,
     outputs: result.outputs,
-    messages: result.messages
+    messages: result.messages,
+    ...(budgetExhaustion ? { budgetExhaustion } : {})
   };
+}
+
+function budgetDimensionLabel(dimension: BudgetDimension): string {
+  if (dimension === "turns") return "轮次";
+  if (dimension === "toolCalls") return "工具调用";
+  if (dimension === "tokens") return "Token";
+  return "时长";
 }
 
 export function withExtraToolPermissions(permissions: TaskPermissions, extraTools: AgentTool[]): TaskPermissions {

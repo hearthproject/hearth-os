@@ -49,6 +49,10 @@ export function buildTaskStatusMessage(input: TaskStatusMessageInput): string {
     }`;
   }
 
+  if (task.status === "waiting_budget") {
+    return `任务「${title}」的执行预算已触顶，等待你决定是否扩展。${errorLines(task)}`;
+  }
+
   if (task.status === "completed") {
     const summary = task.resultSummary?.trim();
     return `任务「${title}」已完成。${summary ? `\n\n${clip(summary, 700)}` : ""}`;

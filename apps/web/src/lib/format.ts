@@ -1,7 +1,7 @@
 import type { RunUsage, TaskStatus } from "./types.ts";
 
 export function needsAttention(status: TaskStatus): boolean {
-  return status === "waiting_approval" || status === "waiting_input" || status === "recoverable" || status === "failed";
+  return status === "waiting_approval" || status === "waiting_input" || status === "waiting_budget" || status === "recoverable" || status === "failed";
 }
 
 export function isActive(status: TaskStatus): boolean {

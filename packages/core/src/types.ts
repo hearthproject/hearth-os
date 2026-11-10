@@ -201,6 +201,7 @@ export interface TaskError {
   diagnosisId?: string;
   failureClass?: FailureClass;
   disposition?: FailureDisposition;
+  budgetExhaustion?: BudgetExhaustion;
 }
 
 export interface TaskPermissions {
@@ -215,6 +216,14 @@ export interface RunBudget {
   maxToolCalls: number;
   maxTokens: number;
   maxDurationMs: number;
+}
+
+export type BudgetDimension = "turns" | "toolCalls" | "tokens" | "duration";
+
+export interface BudgetExhaustion {
+  dimension: BudgetDimension;
+  used: number;
+  limit: number;
 }
 
 export interface TaskRecord {

@@ -25,7 +25,7 @@ export class TaskGraphError extends Error {
 }
 
 const DEFAULT_LIMITS: TaskGraphLimits = { maxDepth: 3, maxChildren: 5, maxParallel: 3 };
-const ACTIVE = new Set(["queued", "running", "waiting_input", "waiting_approval", "recoverable"]);
+const ACTIVE = new Set(["queued", "running", "waiting_input", "waiting_approval", "waiting_budget", "recoverable"]);
 
 export class TaskGraphService {
   private readonly limits: TaskGraphLimits;

@@ -38,12 +38,32 @@ export function notificationForEvent(event: string, envelope?: EventEnvelope): A
   }
 
   if (event === "task.updated") {
+    if (payload.status === "waiting_budget") {
+      return {
+        key,
+        tone: "task",
+        title: "任务预算已触顶",
+        body: "可以扩展一倍预算并从检查点继续。",
+        href: taskId ? `/tasks/${encodeURIComponent(taskId)}` : "/tasks"
+      };
+    }
     if (payload.status !== "waiting_input") return null;
     return {
       key,
       tone: "task",
       title: "任务需要你补充信息",
       body: "执行器停在一个需要判断的位置，打开任务继续。",
+      href: taskId ? `/tasks/${encodeURIComponent(taskId)}` : "/tasks"
+    };
+  }
+
+  if (event === "task.budget.exhausted") {
+    const dimension = typeof payload.dimension === "string" ? payload.dimension : "执行预算";
+    return {
+      key,
+      tone: "task",
+      title: "任务预算已触顶",
+      body: `${dimension} 已达到上限，打开任务可扩展一倍并继续。`,
       href: taskId ? `/tasks/${encodeURIComponent(taskId)}` : "/tasks"
     };
   }

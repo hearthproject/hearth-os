@@ -18,6 +18,7 @@ import { TaskLeaseService } from "./leases.ts";
 import { SandboxService } from "./sandbox.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import type { DeepSeekHarnessRunOptions, DeepSeekHarnessRunResult, DshApprovalOutcome } from "@hearth/deepseek-executor";
+import { DEFAULT_RUN_BUDGET } from "./native-executor.ts";
 
 const FAKE_RESULT = {
   threadId: "fake-thread",
@@ -683,6 +684,72 @@ describe("Hearth scheduler", () => {
     expect(resumed).toContain("预算 1000 元");
     expect(completed.pendingInput).toBeNull();
     expect(completed.resultSummary).toBe("已按补充预算完成");
+  });
+
+  it("waits at budget exhaustion and doubles all limits on extension", async () => {
+    const service = setup();
+    const settingsPath = configureModel();
+    let calls = 0;
+    const observedBudgets: Array<{ maxTurns: number; maxToolCalls: number; maxTokens: number }> = [];
+    const resumedCounts: number[] = [];
+    const nativeRunner: NativeRunner = async (options) => {
+      calls += 1;
+      const budget = options.budget ?? DEFAULT_RUN_BUDGET;
+      observedBudgets.push({
+        maxTurns: budget.maxTurns,
+        maxToolCalls: budget.maxToolCalls,
+        maxTokens: budget.maxTokens
+      });
+      resumedCounts.push(options.resume?.messages.length ?? 0);
+      if (calls < 3) {
+        await options.onCheckpoint?.({
+          seq: calls,
+          kind: "budget",
+          messages: [
+            { role: "system", content: "system" },
+            { role: "user", content: "goal" },
+            { role: "assistant", content: `第 ${calls} 次预算边界`, toolCalls: [] }
+          ],
+          usage: { inputTokens: 100, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 50, reasoningOutputTokens: 0 },
+          turns: 200,
+          toolCalls: 10,
+          summary: null
+        });
+        return {
+          status: "budget_exceeded",
+          finalResponse: "预算触顶",
+          usage: { inputTokens: 100, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 50, reasoningOutputTokens: 0 },
+          turns: 200,
+          toolCalls: 10,
+          question: null,
+          outputs: [],
+          budgetExhaustion: { dimension: "turns", limit: budget.maxTurns }
+        };
+      }
+      writeFileSync(join(options.prepared.outDir, "result.md"), "# 扩展后完成\n");
+      return nativeResult("预算扩展后完成");
+    };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath: settingsPath });
+    scheduler.start();
+
+    const task = service.createTask({ title: "长任务", goal: "完成一项长任务" });
+    const first = await waitForStatus(service, task.id, "waiting_budget");
+    expect(DEFAULT_RUN_BUDGET).toMatchObject({ maxTurns: 200, maxToolCalls: 4_000, maxTokens: 2_000_000_000, maxDurationMs: 36_000_000 });
+    expect(observedBudgets[0]).toMatchObject({ maxTurns: 200, maxToolCalls: 4_000, maxTokens: 2_000_000_000 });
+    expect(first.error?.budgetExhaustion).toEqual({ dimension: "turns", used: 200, limit: 200 });
+
+    scheduler.extendBudget(task.id);
+    const second = await waitForStatus(service, task.id, "waiting_budget");
+    expect(service.requireTask(task.id).budgetOverride).toMatchObject({ maxTurns: 400, maxToolCalls: 8_000, maxTokens: 4_000_000_000, maxDurationMs: 72_000_000 });
+    expect(observedBudgets[1]).toMatchObject({ maxTurns: 200, maxToolCalls: 7_990, maxTokens: 3_999_999_850 });
+    expect(second.error?.budgetExhaustion).toEqual({ dimension: "turns", used: 400, limit: 400 });
+    expect(resumedCounts[1]).toBeGreaterThan(0);
+
+    scheduler.extendBudget(task.id);
+    const completed = await waitForStatus(service, task.id, "completed");
+    expect(completed.budgetOverride).toMatchObject({ maxTurns: 800, maxToolCalls: 16_000, maxTokens: 8_000_000_000, maxDurationMs: 144_000_000 });
+    expect(observedBudgets[2]).toMatchObject({ maxTurns: 400, maxToolCalls: 15_980, maxTokens: 7_999_999_700 });
+    expect(resumedCounts[2]).toBeGreaterThan(0);
   });
 
   it("resets runtime budget counters when resuming an old checkpoint", async () => {

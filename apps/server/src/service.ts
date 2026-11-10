@@ -445,7 +445,7 @@ export class HearthService {
     return new Map(this.store.listTasks().map((task) => [task.id, task.title]));
   }
 
-  updateTask(taskId: string, patch: Partial<Pick<TaskRecord, "status" | "title" | "goal" | "goalId" | "currentRunId" | "nextAction" | "error" | "resultSummary" | "conversationId" | "executorId" | "taskKind" | "expectedOutputs" | "permissions" | "pendingInput" | "methodId" | "methodVersion" | "pinnedAt" | "archivedAt">>, runId?: string): TaskRecord {
+  updateTask(taskId: string, patch: Partial<Pick<TaskRecord, "status" | "title" | "goal" | "goalId" | "currentRunId" | "nextAction" | "error" | "resultSummary" | "conversationId" | "executorId" | "taskKind" | "expectedOutputs" | "permissions" | "pendingInput" | "methodId" | "methodVersion" | "pinnedAt" | "archivedAt" | "budgetOverride">>, runId?: string): TaskRecord {
     const task = this.requireTask(taskId);
     if (patch.status && patch.status !== task.status) assertTransition(task.status, patch.status);
     const previousStatus = task.status;

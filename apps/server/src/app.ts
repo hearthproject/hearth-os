@@ -3698,6 +3698,15 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
   });
 
+  app.post<{ Params: { id: string } }>("/api/tasks/:id/budget/extend", async (request, reply) => {
+    if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFF", message: "执行器未启动" });
+    try {
+      return scheduler.extendBudget(request.params.id);
+    } catch (error) {
+      return reply.code(409).send({ error: "BUDGET_EXTEND_NOT_ALLOWED", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
   app.post<{ Params: { id: string } }>("/api/tasks/:id/cancel", async (request, reply) => {
     if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFF", message: "执行器未启动" });
     try {

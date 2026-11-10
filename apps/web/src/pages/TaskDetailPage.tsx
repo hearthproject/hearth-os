@@ -12,6 +12,7 @@ import {
   Clock3,
   Download,
   FileText,
+  Gauge,
   Loader2,
   Pin,
   PinOff,
@@ -54,6 +55,13 @@ export function TaskDetailPage() {
     onSuccess: () => {
       setResumeInput("");
       void queryClient.invalidateQueries({ queryKey: ["task", id] });
+    }
+  });
+  const extendBudget = useMutation({
+    mutationFn: () => api.extendBudget(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["task", id] });
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
     }
   });
   const confirmHandoff = useMutation({
@@ -173,6 +181,11 @@ export function TaskDetailPage() {
             <RefreshCw size={14} className={taskQuery.isFetching ? "spin" : ""} /> 刷新
           </button>
           {canRetry && <button className="primary-button" onClick={() => retry.mutate(undefined)} disabled={retry.isPending}><RotateCcw size={14} /> 重试</button>}
+          {task.status === "waiting_budget" && (
+            <button className="primary-button" onClick={() => extendBudget.mutate()} disabled={extendBudget.isPending}>
+              {extendBudget.isPending ? <Loader2 className="spin" size={14} /> : <Gauge size={14} />} 扩展一倍并继续
+            </button>
+          )}
           {canCancel && <button className="ghost-button danger" onClick={() => cancel.mutate()} disabled={cancel.isPending}><Square size={13} /> 取消</button>}
           <button className="ghost-button danger" onClick={() => void deleteCurrentTask()}><Trash2 size={13} /> 移入回收站</button>
         </div>
@@ -193,7 +206,20 @@ export function TaskDetailPage() {
       {organize.isError && <p className="form-error">{organize.error instanceof Error ? organize.error.message : "更新任务整理状态失败"}</p>}
       {deleteError && <p className="form-error">{deleteError}</p>}
 
-      {task.error && (
+      {task.status === "waiting_budget" ? (
+        <div className="result-banner budget">
+          <Gauge size={17} />
+          <div>
+            <strong>预算已触顶，等待扩展</strong>
+            <p>{task.error?.message ?? "本轮执行达到预算上限，工作区和检查点已保留。"}</p>
+            <small>确认后四项预算会同时翻倍，并从最近检查点继续；再次触顶时可以继续扩展。</small>
+            {extendBudget.isError && <small className="form-error">{extendBudget.error instanceof Error ? extendBudget.error.message : "扩展预算失败"}</small>}
+            <button className="primary-button" onClick={() => extendBudget.mutate()} disabled={extendBudget.isPending}>
+              {extendBudget.isPending ? <Loader2 className="spin" size={14} /> : <Gauge size={14} />} 扩展一倍并继续
+            </button>
+          </div>
+        </div>
+      ) : task.error && (
         <div className="result-banner error">
           <XCircle size={17} />
           <div>

@@ -187,6 +187,8 @@ export const EVENT_LABELS: Record<string, string> = {
   "task.created": "任务已创建",
   "task.updated": "状态更新",
   "task.progress": "执行进展",
+  "task.budget.exhausted": "执行预算已触顶",
+  "task.budget.extended": "执行预算已扩展",
   "run.created": "开始新一轮执行",
   "run.updated": "执行记录更新",
   "approval.created": "等待你确认",
