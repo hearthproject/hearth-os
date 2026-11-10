@@ -34,6 +34,7 @@ export function parseFeishuMessage(data: unknown): FeishuInboundMessage | null {
   const fileKey = typeof content.file_key === "string" ? content.file_key : null;
   const imageKey = typeof content.image_key === "string" ? content.image_key : null;
   const fileName = typeof content.file_name === "string" ? content.file_name : null;
+  const createdAt = parseMessageCreatedAt(message.create_time);
 
   return {
     messageId,
@@ -45,6 +46,14 @@ export function parseFeishuMessage(data: unknown): FeishuInboundMessage | null {
     imageKey,
     fileKey,
     fileName,
-    createdAt: new Date().toISOString()
+    createdAt: createdAt ?? new Date().toISOString()
   };
+}
+
+function parseMessageCreatedAt(value: unknown): string | null {
+  if (typeof value === "number" && Number.isFinite(value)) return new Date(value).toISOString();
+  if (typeof value !== "string" || !value.trim()) return null;
+  const timestamp = Number(value);
+  const date = Number.isFinite(timestamp) ? new Date(timestamp) : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }

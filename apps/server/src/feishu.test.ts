@@ -21,7 +21,14 @@ import {
 } from "./feishu.ts";
 import { SecretBox } from "./secrets.ts";
 
-function event(overrides: { text?: string; chatType?: string; mentions?: unknown[]; messageType?: string; content?: Record<string, unknown> } = {}) {
+function event(overrides: {
+  text?: string;
+  chatType?: string;
+  mentions?: unknown[];
+  messageType?: string;
+  content?: Record<string, unknown>;
+  createdAtMs?: string;
+} = {}) {
   return {
     sender: { sender_type: "user", sender_id: { open_id: "ou_user" } },
     message: {
@@ -30,7 +37,8 @@ function event(overrides: { text?: string; chatType?: string; mentions?: unknown
       chat_type: overrides.chatType ?? "p2p",
       message_type: overrides.messageType ?? "text",
       content: JSON.stringify(overrides.content ?? { text: overrides.text ?? "你好" }),
-      mentions: overrides.mentions ?? []
+      mentions: overrides.mentions ?? [],
+      ...(overrides.createdAtMs ? { create_time: overrides.createdAtMs } : {})
     }
   };
 }
@@ -76,9 +84,14 @@ class FakeTransport implements FeishuTransport {
 class FakeChat implements FeishuChatClient {
   calls: Array<{ conversationId?: string | undefined; message: string; attachments: ChatAttachment[] }> = [];
   conversationId = "conv-1";
+  failuresRemaining = 0;
 
   async send(input: { conversationId?: string | undefined; message: string; attachments: ChatAttachment[] }): Promise<FeishuChatResult> {
     this.calls.push(input);
+    if (this.failuresRemaining > 0) {
+      this.failuresRemaining -= 1;
+      throw new Error("temporary channel outage");
+    }
     return { conversationId: this.conversationId, messages: [assistant()], error: null };
   }
 }
@@ -117,6 +130,11 @@ describe("parseFeishuMessage", () => {
       .toMatchObject({ messageType: "file", fileKey: "file-1", fileName: "notes.txt" });
     expect(parseFeishuMessage(event({ messageType: "image", content: { image_key: "img-1" } })))
       .toMatchObject({ messageType: "image", imageKey: "img-1" });
+  });
+
+  it("preserves the upstream message timestamp for channel ordering", () => {
+    const createdAt = "2026-11-10T03:30:00.123Z";
+    expect(parseFeishuMessage(event({ createdAtMs: String(Date.parse(createdAt)) }))?.createdAt).toBe(createdAt);
   });
 });
 
@@ -199,14 +217,81 @@ describe("FeishuService", () => {
     const parsed = parseFeishuMessage(event())!;
     transport.handler?.(parsed);
     transport.handler?.(parsed);
-    await waitFor(() => chat.calls.length === 1);
+    await waitFor(() => chat.calls.length === 1
+      && store.getChannelDelivery("feishu", parsed.messageId, "inbound")?.status === "processed");
     expect(chat.calls).toHaveLength(1);
+    expect(store.getChannelDelivery("feishu", parsed.messageId, "inbound")).toMatchObject({
+      status: "processed",
+      attemptCount: 1,
+      receipt: { outcome: "chat", conversationId: "conv-1", replyCount: 1 }
+    });
 
     const stranger = parseFeishuMessage(event({ text: "陌生人的消息" }))!;
     stranger.senderOpenId = "ou_other";
     transport.handler?.(stranger);
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(chat.calls).toHaveLength(1);
+  });
+
+  it("keeps inbound idempotency after a service restart", async () => {
+    const parsed = parseFeishuMessage(event())!;
+    transport.handler?.(parsed);
+    await waitFor(() => store.getChannelDelivery("feishu", parsed.messageId, "inbound")?.status === "processed");
+    expect(chat.calls).toHaveLength(1);
+
+    chat.calls = [];
+    await service.stop();
+    service = new FeishuService({
+      store,
+      secretBox: new SecretBox(Buffer.alloc(32, 9)),
+      attachmentRoot: join(root, "attachments"),
+      transportFactory: (_settings, _callbacks: FeishuTransportCallbacks) => transport,
+      chatClient: chat
+    });
+    await service.start("http://127.0.0.1:4317");
+
+    transport.handler?.(parsed);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(chat.calls).toHaveLength(0);
+    expect(store.listChannelDeliveries("feishu", "oc_chat")).toHaveLength(1);
+  });
+
+  it("rejects an older cursor after reconnect without overwriting the newer state", async () => {
+    const newer = parseFeishuMessage(event({ text: "新消息" }))!;
+    newer.messageId = "om_newer";
+    newer.createdAt = "2026-11-10T03:40:00.000Z";
+    transport.handler?.(newer);
+    await waitFor(() => chat.calls.length === 1);
+
+    const older = parseFeishuMessage(event({ text: "旧消息" }))!;
+    older.messageId = "om_older";
+    older.createdAt = "2026-11-10T03:39:59.000Z";
+    transport.handler?.(older);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(chat.calls).toHaveLength(1);
+    expect(store.getChannelDelivery("feishu", older.messageId, "inbound")).toBeNull();
+    expect(store.getChannelCursor("feishu", "oc_chat")).toMatchObject({
+      generation: 1,
+      cursor: Date.parse(newer.createdAt)
+    });
+    expect(service.snapshot().lastError).toContain("渠道游标已过期");
+  });
+
+  it("retries a transient delivery failure when Feishu redelivers the message", async () => {
+    const parsed = parseFeishuMessage(event())!;
+    chat.failuresRemaining = 1;
+    transport.handler?.(parsed);
+    await waitFor(() => store.getChannelDelivery("feishu", parsed.messageId, "inbound")?.status === "retrying");
+    expect(store.getChannelDelivery("feishu", parsed.messageId, "inbound")).toMatchObject({
+      status: "retrying",
+      attemptCount: 2,
+      lastError: "temporary channel outage"
+    });
+
+    transport.handler?.(parsed);
+    await waitFor(() => store.getChannelDelivery("feishu", parsed.messageId, "inbound")?.status === "processed");
+    expect(chat.calls).toHaveLength(2);
   });
 
   it("downloads file attachments into the managed attachment directory", async () => {
