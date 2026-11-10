@@ -8914,3 +8914,74 @@ body.modal-open {
     max-width: 240px;
   }
 }
+
+.trash-disclosure {
+  margin-top: 18px;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 10px;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-12);
+}
+
+.trash-disclosure > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.trash-body {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.trash-toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.trash-toolbar label {
+  display: grid;
+  gap: 4px;
+  font-size: var(--fs-11);
+}
+
+.trash-toolbar > div {
+  display: flex;
+  gap: 6px;
+}
+
+.trash-list {
+  display: grid;
+  gap: 4px;
+}
+
+.trash-row {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--surface-raised);
+}
+
+.trash-title {
+  overflow: hidden;
+  color: var(--ink-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trash-kind,
+.trash-status,
+.trash-row time {
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+}

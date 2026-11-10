@@ -99,6 +99,8 @@ import type {
   TaskListItem,
   TaskProposalRecord,
   TaskRecord,
+  TrashItem,
+  TrashKind,
   TaskTemplate,
   TaskView,
   BackgroundToolJob,
@@ -185,7 +187,24 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ settings })
     }),
-  deleteConversation: (id: string) => request<void>(`/api/conversations/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  deleteConversation: (id: string, cancelRunning = false) => request<void>(`/api/conversations/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    ...(cancelRunning ? { body: JSON.stringify({ cancelRunning: true }) } : {})
+  }),
+  deleteTask: (id: string, cancelRunning = false) => request<void>(`/api/tasks/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    ...(cancelRunning ? { body: JSON.stringify({ cancelRunning: true }) } : {})
+  }),
+  trash: (params: { kind?: TrashKind | "all"; olderThanDays?: 7 | 15 | 30 } = {}) =>
+    request<{ items: TrashItem[]; total: number }>(`/api/trash${query(params)}`),
+  restoreTrash: (items: Array<{ kind: TrashKind; id: string }>) => request<{ restoredConversations: string[]; restoredTasks: string[] }>("/api/trash/restore", {
+    method: "POST",
+    body: JSON.stringify({ items })
+  }),
+  purgeTrash: (items: Array<{ kind: TrashKind; id: string }>) => request<{ purgedConversations: number; purgedTasks: number; removedAttachments: number }>("/api/trash/purge", {
+    method: "POST",
+    body: JSON.stringify({ items })
+  }),
   modelSettings: () => request<ModelSettingsResponse>("/api/model-settings"),
   modelRegistry: () => request<ModelRegistryResponse>("/api/model-registry"),
   createModelProfile: (input: ModelProfilePatch) => request<{ profile: ModelProfileView }>("/api/model-profiles", {

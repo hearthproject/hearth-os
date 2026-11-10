@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { api } from "../lib/api.ts";
 import { formatDuration, formatNumber, relativeTime } from "../lib/format.ts";
+import { TASK_STATUS_LABELS } from "../lib/labels.ts";
 import type {
   ContextSettings,
   ExecutorId,
@@ -31,7 +32,9 @@ import type {
   ExecutorView,
   ModelProfileView,
   ModelProtocol,
-  ModelProviderPreset
+  ModelProviderPreset,
+  TrashItem,
+  TrashKind
 } from "../lib/types.ts";
 import { ProactiveSettingsPanel } from "../components/ProactiveSettingsPanel.tsx";
 import { ExecutorSettingsPanel } from "../components/ExecutorSettingsPanel.tsx";
@@ -776,8 +779,108 @@ function DataTab() {
           </section>
         </>
       )}
+      <TrashPanel />
     </section>
   );
+}
+
+function TrashPanel() {
+  const queryClient = useQueryClient();
+  const [olderThanDays, setOlderThanDays] = useState<7 | 15 | 30 | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [notice, setNotice] = useState<NoticeState>(null);
+  const trashQuery = useQuery({
+    queryKey: ["trash", olderThanDays ?? "all"],
+    queryFn: () => api.trash(olderThanDays ? { olderThanDays } : {}),
+    refetchInterval: 30_000
+  });
+  const items = trashQuery.data?.items ?? [];
+  const selectedItems = items.filter((item) => selected.has(trashKey(item)));
+
+  function toggle(item: TrashItem) {
+    const key = trashKey(item);
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  async function restoreSelected() {
+    if (selectedItems.length === 0) return;
+    setNotice(null);
+    try {
+      await api.restoreTrash(selectedItems.map(({ kind, id }) => ({ kind, id })));
+      setSelected(new Set());
+      setNotice({ tone: "ok", text: `已恢复 ${selectedItems.length} 个项目` });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["trash"] }),
+        queryClient.invalidateQueries({ queryKey: ["conversations"] }),
+        queryClient.invalidateQueries({ queryKey: ["tasks"] })
+      ]);
+    } catch (caught) {
+      setNotice({ tone: "error", text: caught instanceof Error ? caught.message : "恢复失败" });
+    }
+  }
+
+  async function purgeSelected() {
+    if (selectedItems.length === 0) return;
+    if (!window.confirm(`要彻底删除所选的 ${selectedItems.length} 个项目吗？此操作不能撤销。`)) return;
+    if (!window.confirm("再次确认：数据库记录、受管工作区和产物将被永久移除。")) return;
+    setNotice(null);
+    try {
+      const result = await api.purgeTrash(selectedItems.map(({ kind, id }) => ({ kind, id })));
+      setSelected(new Set());
+      setNotice({
+        tone: "ok",
+        text: `已彻底删除 ${result.purgedConversations} 个对话、${result.purgedTasks} 个任务，并清理 ${result.removedAttachments} 个孤立附件`
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["trash"] }),
+        queryClient.invalidateQueries({ queryKey: ["conversations"] }),
+        queryClient.invalidateQueries({ queryKey: ["tasks"] })
+      ]);
+    } catch (caught) {
+      setNotice({ tone: "error", text: caught instanceof Error ? caught.message : "彻底删除失败" });
+    }
+  }
+
+  return (
+    <details className="trash-disclosure">
+      <summary><Trash2 size={14} /> 回收站{items.length > 0 ? ` · ${items.length}` : ""}</summary>
+      <div className="trash-body">
+        <div className="trash-toolbar">
+          <label><span>删除时间</span><select value={olderThanDays ?? ""} onChange={(event) => { setSelected(new Set()); setOlderThanDays(event.target.value ? Number(event.target.value) as 7 | 15 | 30 : null); }}><option value="">全部</option><option value="7">7 天以前</option><option value="15">15 天以前</option><option value="30">30 天以前</option></select></label>
+          <div>
+            <button className="ghost-button compact" onClick={() => void restoreSelected()} disabled={selectedItems.length === 0}>恢复所选</button>
+            <button className="ghost-button compact danger" onClick={() => void purgeSelected()} disabled={selectedItems.length === 0}>彻底删除</button>
+          </div>
+        </div>
+        {trashQuery.isLoading && <InlineLoading text="正在读取回收站" />}
+        {!trashQuery.isLoading && items.length === 0 && <EmptyState text="回收站是空的。" />}
+        {items.length > 0 && (
+          <div className="trash-list">
+            {items.map((item) => (
+              <label key={trashKey(item)} className="trash-row">
+                <input type="checkbox" checked={selected.has(trashKey(item))} onChange={() => toggle(item)} />
+                <span className="trash-kind">{item.kind === "conversation" ? "对话" : "任务"}</span>
+                <span className="trash-title">{item.title}</span>
+                {item.status && <span className="trash-status">{TASK_STATUS_LABELS[item.status]}</span>}
+                <time>{relativeTime(item.deletedAt)}</time>
+              </label>
+            ))}
+          </div>
+        )}
+        {notice && <Notice tone={notice.tone} text={notice.text} />}
+        <p className="settings-hint">这里只恢复经 Hearth 删除的对话和任务；在文件系统中直接删除的文件不会进入回收站。</p>
+      </div>
+    </details>
+  );
+}
+
+function trashKey(item: { kind: TrashKind; id: string }): string {
+  return `${item.kind}:${item.id}`;
 }
 
 function AutomationTab() {

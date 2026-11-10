@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useLocation, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -19,9 +19,10 @@ import {
   RotateCcw,
   ShieldAlert,
   Square,
+  Trash2,
   XCircle
 } from "lucide-react";
-import { api } from "../lib/api.ts";
+import { ApiError, api } from "../lib/api.ts";
 import { formatBytes, formatDuration, formatTime, formatTokens, relativeTime } from "../lib/format.ts";
 import { executorLabel, taskKindLabel } from "../lib/labels.ts";
 import { ApprovalCard } from "../components/ApprovalCard.tsx";
@@ -33,6 +34,7 @@ import type { ArtifactRecord, ContextItem, ExecutorId, GoalCompletionReport, Goa
 export function TaskDetailPage() {
   const { id = "" } = useParams();
   const location = useLocation();
+  const navigate = useNavigate();
   const navState = location.state as { fromChat?: boolean; conversationId?: string } | null;
   const fromChat = Boolean(navState?.fromChat);
   const backTo = fromChat ? "/" : "/tasks";
@@ -42,6 +44,7 @@ export function TaskDetailPage() {
   const taskQuery = useQuery({ queryKey: ["task", id], queryFn: () => api.task(id), enabled: Boolean(id), refetchInterval: 4_000 });
   const [preview, setPreview] = useState<{ artifact: TaskDeliverable; content: string | null; loading: boolean; error: string | null } | null>(null);
   const [resumeInput, setResumeInput] = useState("");
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const contextQuery = useQuery({ queryKey: ["task-context", id], queryFn: () => api.taskContext(id, { limit: 80 }), enabled: Boolean(id), refetchInterval: 4_000 });
   const methodsQuery = useQuery({ queryKey: ["methods"], queryFn: api.methods, refetchInterval: 30_000 });
   const pendingHandoff = contextQuery.data?.handoffs.find((item) => item.status === "pending_user") ?? null;
@@ -117,6 +120,30 @@ export function TaskDetailPage() {
     }
   }
 
+  async function deleteCurrentTask() {
+    setDeleteError(null);
+    try {
+      await api.deleteTask(task.id);
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.code === "TASK_RUNNING") {
+        const confirmed = window.confirm("任务正在运行。取消当前运行并把任务移入回收站吗？");
+        if (!confirmed) return;
+        try {
+          await api.deleteTask(task.id, true);
+        } catch (retryError) {
+          setDeleteError(retryError instanceof Error ? retryError.message : "删除任务失败");
+          return;
+        }
+      } else {
+        setDeleteError(caught instanceof Error ? caught.message : "删除任务失败");
+        return;
+      }
+    }
+    await queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    await queryClient.invalidateQueries({ queryKey: ["trash"] });
+    navigate("/tasks");
+  }
+
   return (
     <div className="page task-detail-page">
       <Link className="back-link" to={backTo} state={backState}><ArrowLeft size={14} /> {backLabel}</Link>
@@ -147,6 +174,7 @@ export function TaskDetailPage() {
           </button>
           {canRetry && <button className="primary-button" onClick={() => retry.mutate(undefined)} disabled={retry.isPending}><RotateCcw size={14} /> 重试</button>}
           {canCancel && <button className="ghost-button danger" onClick={() => cancel.mutate()} disabled={cancel.isPending}><Square size={13} /> 取消</button>}
+          <button className="ghost-button danger" onClick={() => void deleteCurrentTask()}><Trash2 size={13} /> 移入回收站</button>
         </div>
       </div>
 
@@ -163,6 +191,7 @@ export function TaskDetailPage() {
         <span>更新于 {relativeTime(task.updatedAt)}</span>
       </div>
       {organize.isError && <p className="form-error">{organize.error instanceof Error ? organize.error.message : "更新任务整理状态失败"}</p>}
+      {deleteError && <p className="form-error">{deleteError}</p>}
 
       {task.error && (
         <div className="result-banner error">

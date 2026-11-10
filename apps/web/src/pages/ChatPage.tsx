@@ -255,9 +255,23 @@ export function ChatPage() {
   async function removeConversation(event: MouseEvent, id: string) {
     event.stopPropagation();
     if (sending) return;
-    await api.deleteConversation(id);
+    setError(null);
+    try {
+      await api.deleteConversation(id);
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.code === "TASK_RUNNING") {
+        const confirmed = window.confirm("这个对话里还有任务正在运行。取消运行中的任务并把整个对话移入回收站吗？");
+        if (!confirmed) return;
+        await api.deleteConversation(id, true);
+      } else {
+        setError(caught instanceof Error ? caught.message : "删除对话失败");
+        return;
+      }
+    }
     if (conversationId === id) selectConversation(null);
     await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    await queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    await queryClient.invalidateQueries({ queryKey: ["trash"] });
   }
 
   async function pickFiles(event: ChangeEvent<HTMLInputElement>) {
