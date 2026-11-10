@@ -956,6 +956,50 @@ describe("Hearth scheduler", () => {
     expect(store?.listContextItems(task.id, { limit: 200 }).items.some((item) => item.kind === "diagnosis")).toBe(true);
   });
 
+  it("keeps goal evidence from both executors across a handoff", async () => {
+    const service = setup();
+    const modelSettingsPath = configureModel();
+    const conversation = fullConversation();
+    const goal = service.createGoal({
+      title: "跨执行器交付",
+      objective: "前后两个执行器都留下可核验产物",
+      currentState: "active",
+      reviewPolicy: "auto",
+      successCriteria: [
+        { id: "partial", description: "前序产物存在", validator: "file", check: "partial.md", required: true },
+        { id: "result", description: "最终产物存在", validator: "file", check: "result.md", required: true }
+      ],
+      evidenceRequirements: ["partial.md", "result.md"]
+    });
+    const nativeRunner: NativeRunner = async (options) => {
+      writeFileSync(join(options.prepared.outDir, "partial.md"), "# partial\n\nfirst executor evidence\n");
+      throw new Error("工具连续失败，需要切换执行器");
+    };
+    const codexRunner: CodexRunner = async (options) => {
+      writeFileSync(join(testOutDir(options), "result.md"), "# result\n\nsecond executor evidence\n");
+      return FAKE_RESULT;
+    };
+    scheduler = makeScheduler(service, codexRunner, { nativeRunner, modelSettingsPath });
+    scheduler.start();
+
+    const task = service.createTask({
+      title: "跨执行器目标", goalId: goal.goalId, textInput: "从 native 开始",
+      executorId: "native", expectedOutputs: ["result.md"], conversationId: conversation.id
+    });
+    await waitForStatus(service, task.id, "completed");
+
+    const runs = store?.listRuns(task.id) ?? [];
+    expect(runs.map((run) => run.executorId)).toEqual(["native", "codex"]);
+    const report = service.latestCompletionReport(goal.goalId);
+    expect(report).toMatchObject({ verdict: "pass", taskId: task.id });
+    expect(report?.criteria.map((criterion) => criterion.status)).toEqual(["passed", "passed"]);
+    expect(report?.evidenceRefs).toEqual(expect.arrayContaining([
+      expect.stringContaining("partial.md#sha256="),
+      expect.stringContaining("result.md#sha256=")
+    ]));
+    expect(service.getGoal(goal.goalId)?.currentState).toBe("done");
+  });
+
   it("hands off a native runtime crash without spending a same-executor retry", async () => {
     const service = setup();
     const modelSettingsPath = configureModel();
