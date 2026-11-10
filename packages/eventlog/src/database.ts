@@ -15,6 +15,8 @@ import type {
   ConversationSettingsPatch,
   ContextItem,
   ContextItemPage,
+  ConnectionOutboxItem,
+  ConnectionSession,
   ContextSettings,
   DesktopCommandRecord,
   DesktopFrameRecord,
@@ -106,7 +108,7 @@ export interface RunAggregate {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 24;
+export const CURRENT_SCHEMA_VERSION = 25;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -531,6 +533,22 @@ CREATE TABLE IF NOT EXISTS scheduled_job_runs (
   status TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
   UNIQUE(schedule_id, scheduled_for)
 );
+CREATE TABLE IF NOT EXISTS connection_sessions (
+  id TEXT PRIMARY KEY, device_id TEXT NOT NULL, user_id TEXT NOT NULL,
+  generation INTEGER NOT NULL, cursor INTEGER, scopes_json TEXT NOT NULL,
+  pending_scopes_json TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL, last_error TEXT,
+  connected_at TEXT NOT NULL, expires_at TEXT NOT NULL, last_heartbeat_at TEXT NOT NULL,
+  cursor_at TEXT NOT NULL, disconnected_at TEXT, disconnect_reason TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  UNIQUE(device_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS connection_outbox (
+  id TEXT PRIMARY KEY, connection_id TEXT NOT NULL, generation INTEGER NOT NULL,
+  device_id TEXT NOT NULL, user_id TEXT NOT NULL, scope TEXT NOT NULL, kind TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL, payload_json TEXT NOT NULL, status TEXT NOT NULL, error TEXT,
+  effect_id TEXT, result_json TEXT, submitted_at TEXT, committed_at TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  UNIQUE(connection_id, idempotency_key)
+);
 CREATE INDEX IF NOT EXISTS events_task_idx ON events(task_id, seq);
 CREATE INDEX IF NOT EXISTS runs_task_idx ON runs(task_id, created_at);
 CREATE INDEX IF NOT EXISTS approvals_task_idx ON approvals(task_id, status);
@@ -573,6 +591,8 @@ CREATE INDEX IF NOT EXISTS task_follow_ups_status_idx ON task_follow_ups(task_id
 CREATE INDEX IF NOT EXISTS run_checkpoints_run_idx ON run_checkpoints(run_id, seq);
 CREATE INDEX IF NOT EXISTS scheduled_jobs_due_idx ON scheduled_jobs(enabled, next_run_at);
 CREATE INDEX IF NOT EXISTS scheduled_job_runs_schedule_idx ON scheduled_job_runs(schedule_id, scheduled_for);
+CREATE INDEX IF NOT EXISTS connection_sessions_status_idx ON connection_sessions(status, updated_at);
+CREATE INDEX IF NOT EXISTS connection_outbox_connection_idx ON connection_outbox(connection_id, generation, status, created_at);
 `;
 
 export class HearthStore {
@@ -722,6 +742,7 @@ export class HearthStore {
     ensureColumn(this.db, "conversations", "settings_json", "TEXT");
     ensureColumn(this.db, "chat_messages", "kind", "TEXT");
     ensureColumn(this.db, "chat_messages", "task_status", "TEXT");
+    ensureColumn(this.db, "connection_sessions", "disconnect_reason", "TEXT");
     ensureColumn(this.db, "approvals", "goal_id", "TEXT");
     ensureColumn(this.db, "approvals", "action_digest", "TEXT");
     ensureColumn(this.db, "approvals", "permission_mode", "TEXT");
@@ -1040,6 +1061,42 @@ export class HearthStore {
 
   listTaskLeases(): TaskLease[] {
     return (this.db.prepare("SELECT * FROM task_leases ORDER BY expires_at ASC").all() as DbRow[]).map(rowToTaskLease);
+  }
+
+  getConnectionSession(id: string): ConnectionSession | null {
+    const row = this.db.prepare("SELECT * FROM connection_sessions WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToConnectionSession(row) : null;
+  }
+
+  getConnectionSessionByDevice(deviceId: string, userId: string): ConnectionSession | null {
+    const row = this.db.prepare("SELECT * FROM connection_sessions WHERE device_id = ? AND user_id = ?").get(deviceId, userId) as DbRow | undefined;
+    return row ? rowToConnectionSession(row) : null;
+  }
+
+  listConnectionSessions(): ConnectionSession[] {
+    return (this.db.prepare("SELECT * FROM connection_sessions ORDER BY updated_at DESC").all() as DbRow[]).map(rowToConnectionSession);
+  }
+
+  getConnectionOutboxItem(id: string): ConnectionOutboxItem | null {
+    const row = this.db.prepare("SELECT * FROM connection_outbox WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToConnectionOutboxItem(row) : null;
+  }
+
+  getConnectionOutboxByIdempotencyKey(connectionId: string, idempotencyKey: string): ConnectionOutboxItem | null {
+    const row = this.db.prepare("SELECT * FROM connection_outbox WHERE connection_id = ? AND idempotency_key = ?").get(connectionId, idempotencyKey) as DbRow | undefined;
+    return row ? rowToConnectionOutboxItem(row) : null;
+  }
+
+  listConnectionOutbox(connectionId: string, status?: string): ConnectionOutboxItem[] {
+    const rows = status
+      ? this.db.prepare("SELECT * FROM connection_outbox WHERE connection_id = ? AND status = ? ORDER BY created_at ASC").all(connectionId, status) as DbRow[]
+      : this.db.prepare("SELECT * FROM connection_outbox WHERE connection_id = ? ORDER BY created_at ASC").all(connectionId) as DbRow[];
+    return rows.map(rowToConnectionOutboxItem);
+  }
+
+  eventTimestampAtOrBefore(seq: number): string | null {
+    const row = this.db.prepare("SELECT created_at FROM events WHERE seq <= ? ORDER BY seq DESC LIMIT 1").get(seq) as DbRow | undefined;
+    return row?.created_at == null ? null : String(row.created_at);
   }
 
   getBackupRecord(id: string): BackupRecord | null {
@@ -2128,6 +2185,11 @@ export class HearthStore {
     return Number(row.latest ?? 0);
   }
 
+  latestDataEventSeq(): number {
+    const row = this.db.prepare("SELECT MAX(seq) AS latest FROM events WHERE type NOT LIKE 'connection.%'").get() as DbRow;
+    return Number(row.latest ?? 0);
+  }
+
   countTasksByStatus(): Record<TaskStatus, number> {
     return this.countByStatus("tasks", TASK_STATUSES);
   }
@@ -2219,7 +2281,7 @@ export class HearthStore {
   rebuildProjections(): void {
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      this.db.exec("DELETE FROM backup_records; DELETE FROM maintenance_runs; DELETE FROM task_leases; DELETE FROM sync_conflicts; DELETE FROM sync_peers; DELETE FROM heartbeat_runs; DELETE FROM attention_items; DELETE FROM standing_intents; DELETE FROM skill_curator_runs; DELETE FROM skill_usage_events; DELETE FROM skill_versions; DELETE FROM skills; DELETE FROM method_trials; DELETE FROM method_evaluations; DELETE FROM method_candidates; DELETE FROM memory_consolidation_runs; DELETE FROM memory_forget_tombstones; DELETE FROM memory_forget_receipts; DELETE FROM memory_recalls; DELETE FROM memory_conflicts; DELETE FROM memory_versions; DELETE FROM memories; DELETE FROM memory_settings; DELETE FROM suggestion_events; DELETE FROM suggestions; DELETE FROM proactive_settings; DELETE FROM desktop_commands; DELETE FROM desktop_frames; DELETE FROM desktop_sessions; DELETE FROM pairing_requests; DELETE FROM devices; DELETE FROM outbox_drafts; DELETE FROM source_items; DELETE FROM sources; DELETE FROM artifacts; DELETE FROM effects; DELETE FROM approvals; DELETE FROM runs; DELETE FROM tasks;");
+      this.db.exec("DELETE FROM connection_outbox; DELETE FROM connection_sessions; DELETE FROM backup_records; DELETE FROM maintenance_runs; DELETE FROM task_leases; DELETE FROM sync_conflicts; DELETE FROM sync_peers; DELETE FROM heartbeat_runs; DELETE FROM attention_items; DELETE FROM standing_intents; DELETE FROM skill_curator_runs; DELETE FROM skill_usage_events; DELETE FROM skill_versions; DELETE FROM skills; DELETE FROM method_trials; DELETE FROM method_evaluations; DELETE FROM method_candidates; DELETE FROM memory_consolidation_runs; DELETE FROM memory_forget_tombstones; DELETE FROM memory_forget_receipts; DELETE FROM memory_recalls; DELETE FROM memory_conflicts; DELETE FROM memory_versions; DELETE FROM memories; DELETE FROM memory_settings; DELETE FROM suggestion_events; DELETE FROM suggestions; DELETE FROM proactive_settings; DELETE FROM desktop_commands; DELETE FROM desktop_frames; DELETE FROM desktop_sessions; DELETE FROM pairing_requests; DELETE FROM devices; DELETE FROM outbox_drafts; DELETE FROM source_items; DELETE FROM sources; DELETE FROM artifacts; DELETE FROM effects; DELETE FROM approvals; DELETE FROM runs; DELETE FROM tasks;");
       for (const event of this.listEvents()) this.applyEvent(event);
       this.db.exec("COMMIT");
     } catch (error) {
@@ -2323,6 +2385,8 @@ export class HearthStore {
       case "sync.conflict.created":
       case "sync.conflict.updated": return upsertSyncConflict(this.db, event.payload as SyncConflict);
       case "task.lease.updated": return upsertTaskLease(this.db, event.payload as TaskLease);
+      case "connection.updated": return upsertConnectionSession(this.db, event.payload as ConnectionSession);
+      case "connection.outbox.updated": return upsertConnectionOutboxItem(this.db, event.payload as ConnectionOutboxItem);
       case "outbox.created": return upsertOutboxDraft(this.db, event.payload as OutboxDraft);
       case "outbox.updated": return updateOutboxDraft(this.db, event.payload as Record<string, unknown>);
       case "device.paired":
@@ -4116,6 +4180,84 @@ function rowToTaskLease(row: DbRow): TaskLease {
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at)
   };
+}
+
+function rowToConnectionSession(row: DbRow): ConnectionSession {
+  return {
+    id: String(row.id),
+    deviceId: String(row.device_id),
+    userId: String(row.user_id),
+    generation: Number(row.generation),
+    cursor: row.cursor == null ? null : Number(row.cursor),
+    scopes: JSON.parse(String(row.scopes_json)),
+    pendingScopes: row.pending_scopes_json == null ? [] : JSON.parse(String(row.pending_scopes_json)),
+    status: String(row.status) as ConnectionSession["status"],
+    lastError: row.last_error == null ? null : String(row.last_error),
+    connectedAt: String(row.connected_at),
+    expiresAt: String(row.expires_at),
+    lastHeartbeatAt: String(row.last_heartbeat_at),
+    cursorAt: String(row.cursor_at),
+    disconnectedAt: row.disconnected_at == null ? null : String(row.disconnected_at),
+    disconnectReason: row.disconnect_reason == null ? null : String(row.disconnect_reason),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
+  };
+}
+
+function upsertConnectionSession(db: DatabaseSync, session: ConnectionSession): void {
+  db.prepare(
+    `INSERT INTO connection_sessions (id, device_id, user_id, generation, cursor, scopes_json, pending_scopes_json, status, last_error, connected_at, expires_at, last_heartbeat_at, cursor_at, disconnected_at, disconnect_reason, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       device_id=excluded.device_id, user_id=excluded.user_id, generation=excluded.generation,
+       cursor=excluded.cursor, scopes_json=excluded.scopes_json, pending_scopes_json=excluded.pending_scopes_json,
+       status=excluded.status, last_error=excluded.last_error, connected_at=excluded.connected_at,
+       expires_at=excluded.expires_at, last_heartbeat_at=excluded.last_heartbeat_at, cursor_at=excluded.cursor_at,
+       disconnected_at=excluded.disconnected_at, disconnect_reason=excluded.disconnect_reason, updated_at=excluded.updated_at`
+  ).run(
+    session.id, session.deviceId, session.userId, session.generation, session.cursor,
+    JSON.stringify(session.scopes), JSON.stringify(session.pendingScopes), session.status, session.lastError,
+    session.connectedAt, session.expiresAt, session.lastHeartbeatAt, session.cursorAt,
+    session.disconnectedAt, session.disconnectReason, session.createdAt, session.updatedAt
+  );
+}
+
+function rowToConnectionOutboxItem(row: DbRow): ConnectionOutboxItem {
+  return {
+    id: String(row.id),
+    connectionId: String(row.connection_id),
+    generation: Number(row.generation),
+    deviceId: String(row.device_id),
+    userId: String(row.user_id),
+    scope: String(row.scope),
+    kind: String(row.kind),
+    idempotencyKey: String(row.idempotency_key),
+    payload: JSON.parse(String(row.payload_json)),
+    status: String(row.status) as ConnectionOutboxItem["status"],
+    error: row.error == null ? null : String(row.error),
+    effectId: row.effect_id == null ? null : String(row.effect_id),
+    result: row.result_json == null ? null : JSON.parse(String(row.result_json)),
+    submittedAt: row.submitted_at == null ? null : String(row.submitted_at),
+    committedAt: row.committed_at == null ? null : String(row.committed_at),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
+  };
+}
+
+function upsertConnectionOutboxItem(db: DatabaseSync, item: ConnectionOutboxItem): void {
+  db.prepare(
+    `INSERT INTO connection_outbox (id, connection_id, generation, device_id, user_id, scope, kind, idempotency_key, payload_json, status, error, effect_id, result_json, submitted_at, committed_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       generation=excluded.generation, status=excluded.status, error=excluded.error, effect_id=excluded.effect_id,
+       result_json=excluded.result_json, submitted_at=excluded.submitted_at, committed_at=excluded.committed_at,
+       updated_at=excluded.updated_at`
+  ).run(
+    item.id, item.connectionId, item.generation, item.deviceId, item.userId, item.scope, item.kind,
+    item.idempotencyKey, JSON.stringify(item.payload), item.status, item.error, item.effectId,
+    item.result == null ? null : JSON.stringify(item.result), item.submittedAt, item.committedAt,
+    item.createdAt, item.updatedAt
+  );
 }
 
 function rowToBackupRecord(row: DbRow): BackupRecord {

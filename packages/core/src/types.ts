@@ -1750,6 +1750,106 @@ export interface TaskLease {
   updatedAt: string;
 }
 
+export const CONNECTION_TRANSPORT_STATES = ["connected", "connecting", "disconnected", "failed"] as const;
+export type ConnectionTransportState = (typeof CONNECTION_TRANSPORT_STATES)[number];
+
+export const CONNECTION_SUBSCRIPTION_STATES = ["live", "catching_up", "stale", "failed"] as const;
+export type ConnectionSubscriptionState = (typeof CONNECTION_SUBSCRIPTION_STATES)[number];
+
+export const CONNECTION_DATA_FRESHNESS = ["current", "cached", "expired"] as const;
+export type ConnectionDataFreshness = (typeof CONNECTION_DATA_FRESHNESS)[number];
+
+export const CONNECTION_EXECUTION_OWNERSHIP = ["owned", "leased", "unknown"] as const;
+export type ConnectionExecutionOwnership = (typeof CONNECTION_EXECUTION_OWNERSHIP)[number];
+
+export const CONNECTION_SESSION_STATUSES = ["connected", "disconnected"] as const;
+export type ConnectionSessionStatus = (typeof CONNECTION_SESSION_STATUSES)[number];
+
+export interface ConnectionSession {
+  id: string;
+  deviceId: string;
+  userId: string;
+  generation: number;
+  cursor: number | null;
+  scopes: string[];
+  pendingScopes: string[];
+  status: ConnectionSessionStatus;
+  lastError: string | null;
+  connectedAt: string;
+  expiresAt: string;
+  lastHeartbeatAt: string;
+  cursorAt: string;
+  disconnectedAt: string | null;
+  disconnectReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ConnectionRuntimeStatus {
+  connectionId: string;
+  deviceId: string;
+  generation: number;
+  transport: ConnectionTransportState;
+  subscription: ConnectionSubscriptionState;
+  dataFreshness: ConnectionDataFreshness;
+  executionOwnership: ConnectionExecutionOwnership;
+  sourceCursor: number;
+  latestCursor: number;
+  asOf: string;
+  cacheExpiresAt: string;
+  pendingScopes: string[];
+  scopeApprovalRequired: boolean;
+  lastError: string | null;
+  session: ConnectionSession;
+}
+
+export const CONNECTION_OUTBOX_STATUSES = ["queued", "submitted", "committed", "uncertain", "rejected", "conflict"] as const;
+export type ConnectionOutboxStatus = (typeof CONNECTION_OUTBOX_STATUSES)[number];
+
+export interface ConnectionOutboxItem {
+  id: string;
+  connectionId: string;
+  generation: number;
+  deviceId: string;
+  userId: string;
+  scope: string;
+  kind: string;
+  idempotencyKey: string;
+  payload: Record<string, unknown>;
+  status: ConnectionOutboxStatus;
+  error: string | null;
+  effectId: string | null;
+  result: Record<string, unknown> | null;
+  submittedAt: string | null;
+  committedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OfflineProjection<T = unknown> {
+  connectionId: string;
+  generation: number;
+  scope: string;
+  data: T;
+  dataFreshness: ConnectionDataFreshness;
+  cached: boolean;
+  asOf: string;
+  sourceCursor: number;
+  latestCursor: number;
+}
+
+export interface ConnectionReplayPlan {
+  connectionId: string;
+  generation: number;
+  ready: boolean;
+  reason: string | null;
+  sourceCursor: number;
+  latestCursor: number;
+  pulledEvents: number;
+  staleItems: number;
+  items: ConnectionOutboxItem[];
+}
+
 export interface BackupRecord {
   id: string;
   kind: string;

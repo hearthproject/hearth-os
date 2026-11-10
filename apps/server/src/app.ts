@@ -45,6 +45,7 @@ import { OnboardingService } from "./onboarding.ts";
 import { FeishuError, FeishuService, type FeishuChatClient, type FeishuTransportFactory } from "./feishu.ts";
 import { EmailService, MailError, type MailImapFactory, type MailSmtpFactory } from "./email.ts";
 import { DesktopError, DesktopService } from "./desktop.ts";
+import { ConnectionError, ConnectionService } from "./connections.ts";
 import { MemoryError, MemoryService } from "./memory.ts";
 import { MethodError, MethodService } from "./methods.ts";
 import { SkillPackageError } from "./skill-package.ts";
@@ -368,6 +369,40 @@ const syncExportSchema = z.object({
 });
 
 const syncConflictResolveSchema = z.object({ resolution: z.enum(["local", "remote"]) }).strict();
+
+const connectionScopeSchema = z.string().trim().min(1).max(80).regex(/^[a-zA-Z0-9*._:-]+$/);
+const createConnectionSchema = z.object({
+  deviceId: z.string().trim().min(1).max(120),
+  userId: z.string().trim().min(1).max(120),
+  scopes: z.array(connectionScopeSchema).max(20).optional()
+}).strict();
+const connectionGenerationSchema = z.object({ generation: z.number().int().min(1) }).strict();
+const disconnectConnectionSchema = z.object({
+  generation: z.number().int().min(1),
+  reason: z.string().trim().max(500).optional()
+}).strict();
+const reconnectConnectionSchema = z.object({
+  generation: z.number().int().min(1),
+  scopes: z.array(connectionScopeSchema).max(20).optional()
+}).strict();
+const connectionProjectionQuerySchema = z.object({
+  scope: z.string().trim().max(80).default("all"),
+  generation: z.coerce.number().int().min(1).optional()
+}).strict();
+const connectionOutboxSchema = z.object({
+  generation: z.number().int().min(1),
+  scope: z.string().trim().min(1).max(80),
+  kind: z.string().trim().min(1).max(80),
+  idempotencyKey: z.string().trim().min(8).max(200),
+  payload: z.record(z.string(), z.unknown()).default({})
+}).strict();
+const connectionOutboxResolveSchema = z.object({
+  generation: z.number().int().min(1),
+  status: z.enum(["committed", "rejected", "conflict"]),
+  result: z.record(z.string(), z.unknown()).optional(),
+  error: z.string().trim().max(2000).optional()
+}).strict();
+const connectionScopesSchema = z.object({ scopes: z.array(connectionScopeSchema).min(1).max(20) }).strict();
 
 const killSwitchSchema = z.object({
   enabled: z.boolean(),
@@ -717,6 +752,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     ...(options.syncFetch ? { fetchImpl: options.syncFetch } : {}),
     ...(options.syncSecretBox ? { secretBox: options.syncSecretBox } : {})
   });
+  const connections = new ConnectionService({ service });
   const security = new SecurityService(service);
   const leases = new TaskLeaseService(service);
   const backups = new BackupService({
@@ -1964,6 +2000,115 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
   });
 
+  app.post("/api/connections", async (request, reply) => {
+    const parsed = createConnectionSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_CONNECTION", message: "连接参数不正确" });
+    try {
+      return reply.code(201).send(connections.connect(parsed.data));
+    } catch (error) {
+      return sendConnectionError(reply, error);
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/api/connections/:id/status", async (request, reply) => {
+    try {
+      reply.header("cache-control", "no-store");
+      return connections.status(request.params.id);
+    } catch (error) {
+      return sendConnectionError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/connections/:id/heartbeat", async (request, reply) => {
+    const parsed = connectionGenerationSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_CONNECTION_GENERATION", message: "缺少有效的连接代次" });
+    try {
+      return connections.heartbeat(request.params.id, parsed.data.generation);
+    } catch (error) {
+      return sendConnectionError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/connections/:id/disconnect", async (request, reply) => {
+    const parsed = disconnectConnectionSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_CONNECTION_GENERATION", message: "断开连接需要有效的连接代次" });
+    try {
+      return connections.disconnect(request.params.id, parsed.data.generation, parsed.data.reason);
+    } catch (error) {
+      return sendConnectionError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/connections/:id/reconnect", async (request, reply) => {
+    const parsed = reconnectConnectionSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_CONNECTION_RECONNECT", message: "重连参数不正确" });
+    try {
+      return connections.reconnect(request.params.id, parsed.data);
+    } catch (error) {
+      return sendConnectionError(reply, error);
+    }
+  });
+
+  app.get<{ Params: { id: string }; Querystring: Record<string, string> }>("/api/connections/:id/projection", async (request, reply) => {
+    const parsed = connectionProjectionQuerySchema.safeParse(request.query);
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_PROJECTION", message: "离线投影参数不正确" });
+    try {
+      reply.header("cache-control", "no-store");
+      return connections.projection(request.params.id, parsed.data.scope, parsed.data.generation);
+    } catch (error) {
+      return sendConnectionError(reply, error);
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/api/connections/:id/outbox", async (request, reply) => {
+    try {
+      reply.header("cache-control", "no-store");
+      return { items: connections.listOutbox(request.params.id) };
+    } catch (error) {
+      return sendConnectionError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/connections/:id/outbox", async (request, reply) => {
+    const parsed = connectionOutboxSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_CONNECTION_OUTBOX", message: "离线操作参数不正确" });
+    try {
+      return reply.code(201).send(connections.enqueue(request.params.id, parsed.data));
+    } catch (error) {
+      return sendConnectionError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string; itemId: string } }>("/api/connections/:id/outbox/:itemId/submit", async (request, reply) => {
+    const parsed = connectionGenerationSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_CONNECTION_GENERATION", message: "提交离线操作需要有效的连接代次" });
+    try {
+      return connections.submit(request.params.id, request.params.itemId, parsed.data.generation);
+    } catch (error) {
+      return sendConnectionError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string; itemId: string } }>("/api/connections/:id/outbox/:itemId/resolve", async (request, reply) => {
+    const parsed = connectionOutboxResolveSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_OUTBOX_RESOLUTION", message: "对账参数不正确" });
+    try {
+      return connections.resolveOutbox(request.params.id, request.params.itemId, parsed.data);
+    } catch (error) {
+      return sendConnectionError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/connections/:id/scopes", async (request, reply) => {
+    const parsed = connectionScopesSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_CONNECTION_SCOPES", message: "能力扩权参数不正确" });
+    try {
+      return connections.approveScopes(request.params.id, parsed.data.scopes);
+    } catch (error) {
+      return sendConnectionError(reply, error);
+    }
+  });
+
   app.get("/api/templates", async () => ({ templates: service.listTemplates() }));
 
   app.get("/api/sources", async () => ({ sources: sources.list() }));
@@ -3026,6 +3171,13 @@ function sendStandingIntentError(reply: FastifyReply, error: unknown) {
 
 function sendProactiveError(reply: FastifyReply, error: unknown) {
   if (error instanceof ProactiveError) {
+    return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+  }
+  throw error;
+}
+
+function sendConnectionError(reply: FastifyReply, error: unknown) {
+  if (error instanceof ConnectionError) {
     return reply.code(error.statusCode).send({ error: error.code, message: error.message });
   }
   throw error;

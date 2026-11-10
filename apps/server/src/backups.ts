@@ -36,6 +36,8 @@ const LOCAL_ONLY_TABLES = new Set([
   "backup_records",
   "maintenance_runs",
   "task_leases",
+  "connection_sessions",
+  "connection_outbox",
   "pairing_requests",
   "desktop_sessions",
   "desktop_frames",
