@@ -278,11 +278,14 @@ export async function prepareWorkspace(options: {
   return { root, outDir, inputs: prepared, ...(repository ? { repository } : {}) };
 }
 
-function resolveTaskInputPath(options: { repoRoot: string; attachmentRoot?: string | undefined }, value: string): string {
+function resolveTaskInputPath(options: { repoRoot: string; task: TaskRecord; attachmentRoot?: string | undefined }, value: string): string {
   if (!isAbsolute(value)) return resolveInside(options.repoRoot, value);
   const absolute = resolve(value);
-  const allowedRoot = options.attachmentRoot ? resolve(options.attachmentRoot) : null;
-  if (!allowedRoot || (absolute !== allowedRoot && !absolute.startsWith(allowedRoot + sep))) {
+  const allowedRoots = [
+    ...(options.attachmentRoot ? [resolve(options.attachmentRoot)] : []),
+    ...(options.task.permissions?.readRoots ?? []).map((root) => isAbsolute(root) ? resolve(root) : resolve(options.repoRoot, root))
+  ];
+  if (!allowedRoots.some((root) => absolute === root || absolute.startsWith(root + sep))) {
     throw new UnsupportedInputError(`输入文件不在允许的附件目录中：${value}`);
   }
   return absolute;

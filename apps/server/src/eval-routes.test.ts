@@ -59,6 +59,23 @@ describe("eval routes", () => {
     expect(url.json().error).toBe("OFFLINE_NETWORK_FORBIDDEN");
   });
 
+  it("accepts absolute inputs from the configured external evaluation repository", async () => {
+    const externalRoot = mkdtempSync(join(tmpdir(), "hearth-eval-inputs-"));
+    const inputPath = join(externalRoot, "mail.txt");
+    writeFileSync(inputPath, "external evaluation input", "utf8");
+    const fixture = await createFixture(true, externalRoot);
+
+    const created = await fixture.app.inject({
+      method: "POST",
+      url: "/api/eval/tasks",
+      payload: { ...taskBody(), inputs: [{ kind: "file", label: "邮件", value: inputPath }] }
+    });
+    expect(created.statusCode).toBe(201);
+    const task = fixture.store.getTask(created.json().task.id);
+    expect(task?.inputs[0]?.value).toBe(inputPath);
+    expect(task?.permissions?.readRoots).toEqual([externalRoot]);
+  });
+
   it("returns a normalized judge result from the configured model", async () => {
     const fixture = await createFixture();
     const created = await fixture.app.inject({ method: "POST", url: "/api/eval/tasks", payload: taskBody() });
@@ -108,10 +125,13 @@ describe("eval routes", () => {
   });
 });
 
-async function createFixture(withModel = true) {
+async function createFixture(withModel = true, externalInputRoot?: string) {
   const root = mkdtempSync(join(tmpdir(), "hearth-eval-routes-"));
-  mkdirSync(join(root, "eval", "inputs"), { recursive: true });
-  writeFileSync(join(root, "eval", "inputs", "mail.txt"), "incoming mail", "utf8");
+  const evalInputRoot = externalInputRoot ?? join(root, "eval");
+  if (!externalInputRoot) {
+    mkdirSync(join(root, "eval", "inputs"), { recursive: true });
+    writeFileSync(join(root, "eval", "inputs", "mail.txt"), "incoming mail", "utf8");
+  }
   const store = new HearthStore(":memory:");
   stores.push(store);
   const service = new HearthService(store);
@@ -120,6 +140,7 @@ async function createFixture(withModel = true) {
     service,
     store,
     repoRoot: root,
+    evalInputRoot,
     settings: () => withModel ? judgeSettings : null,
     complete: async () => ({
       content: '{"criteria":[{"id":"quality","passed":true,"confidence":0.91,"reason":"清晰","evidence":["已回复"]}],"overallConfidence":0.91}',
@@ -135,7 +156,7 @@ function taskBody() {
     externalRef: "exp-1:E01:codex:r1",
     title: "E01 邮件回复",
     goal: "根据输入文件写一封回复",
-    inputs: [{ kind: "file", label: "邮件", value: "eval/inputs/mail.txt" }],
+    inputs: [{ kind: "file", label: "邮件", value: "inputs/mail.txt" }],
     expectedOutputs: ["result.md"],
     executorId: "codex",
     runMode: "offline",

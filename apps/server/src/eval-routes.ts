@@ -2,7 +2,6 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { EXECUTOR_IDS, type TaskRecord } from "@hearth/core";
-import type { JudgeRequest, JudgeResponse } from "@hearth/eval-core";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { ModelSettings } from "./model-settings.ts";
@@ -52,13 +51,29 @@ interface EvalRouteOptions {
   store: HearthStore;
   settings: () => ModelSettings | null;
   repoRoot: string;
+  evalInputRoot?: string;
   complete?: typeof completeChat;
+}
+
+interface JudgeRequest {
+  taskId: string;
+  criteria: Array<{ id: string; label: string; rubric: string; points: number }>;
+  deterministic: Array<{ criterionId: string; passed: boolean; reason: string }>;
+  locale?: string;
+}
+
+interface JudgeResponse {
+  model: string;
+  promptHash: string;
+  criteria: Array<{ id: string; passed: boolean; confidence: number; reason: string; evidence: string[] }>;
+  overallConfidence: number;
+  usage: { inputTokens: number; outputTokens: number };
 }
 
 export function registerEvalRoutes(app: FastifyInstance, options: EvalRouteOptions): void {
   const { service, store, repoRoot } = options;
   const complete = options.complete ?? completeChat;
-  const evalRoot = resolve(repoRoot, "eval");
+  const evalInputRoot = resolve(options.evalInputRoot ?? process.env.HEARTH_EVAL_INPUT_ROOT ?? resolve(repoRoot, "eval"));
   const outputRoot = resolve(repoRoot, ".hearth", "eval-artifacts");
 
   app.post("/api/eval/tasks", async (request, reply) => {
@@ -75,7 +90,7 @@ export function registerEvalRoutes(app: FastifyInstance, options: EvalRouteOptio
       body = {
         ...parsed.data,
         inputs: parsed.data.inputs.map((input) => input.kind === "file"
-          ? { ...input, value: normalizeEvalInput(repoRoot, evalRoot, input.value) }
+          ? { ...input, value: normalizeEvalInput(evalInputRoot, input.value) }
           : input
         ),
         expectedOutputs: parsed.data.expectedOutputs.map(validateRelativeOutput),
@@ -120,7 +135,7 @@ export function registerEvalRoutes(app: FastifyInstance, options: EvalRouteOptio
         expectedOutputs: body.expectedOutputs,
         outputDir: body.outputDir,
         permissions: {
-          readRoots: ["eval"],
+          readRoots: [evalInputRoot],
           writeRoots: [body.outputDir],
           networkHosts,
           tools: []
@@ -177,11 +192,11 @@ export function registerEvalRoutes(app: FastifyInstance, options: EvalRouteOptio
   });
 }
 
-function normalizeEvalInput(repoRoot: string, evalRoot: string, value: string): string {
-  const candidate = isAbsolute(value) ? resolve(value) : resolve(repoRoot, value);
-  if (!isPathInside(evalRoot, candidate)) throw new Error(`输入必须位于 eval/：${value}`);
+function normalizeEvalInput(evalInputRoot: string, value: string): string {
+  const candidate = isAbsolute(value) ? resolve(value) : resolve(evalInputRoot, value);
+  if (!isPathInside(evalInputRoot, candidate)) throw new Error(`输入必须位于 HEARTH_EVAL_INPUT_ROOT：${value}`);
   if (!existsSync(candidate) || !statSync(candidate).isFile()) throw new Error(`评测输入文件不存在：${value}`);
-  return relative(repoRoot, candidate).replace(/\\/g, "/");
+  return candidate;
 }
 
 function normalizeEvalOutput(repoRoot: string, outputRoot: string, value: string): string {
