@@ -1,0 +1,170 @@
+{
+  "version": 1,
+  "scenarios": [
+    {
+      "id": "reminder-roundtrip",
+      "title": "提醒回环：创建、触发、投递、确认、取消",
+      "mechanism": "schedule",
+      "priority": "P1",
+      "fault": "duplicate",
+      "expectedInvariant": "同一计划时刻最多产生一次运行和一份回执；取消后不再触发",
+      "evidence": ["schedule-run", "effect-receipt", "task", "events"],
+      "repeat": 3,
+      "tags": ["reminder", "schedule"]
+    },
+    {
+      "id": "approval-rejected-stops",
+      "title": "审批拒绝后停止外部动作",
+      "mechanism": "action_resolver",
+      "priority": "P0",
+      "fault": "none",
+      "expectedInvariant": "拒绝外部动作审批后任务进入可恢复状态且没有执行副作用",
+      "evidence": ["approval-status", "task-status", "effect-count", "events"],
+      "repeat": 3,
+      "tags": ["approval"]
+    },
+    {
+      "id": "action-binding-tamper",
+      "title": "动作绑定：审批后替换可执行文件被拒绝",
+      "mechanism": "action_resolver",
+      "priority": "P0",
+      "fault": "tamper",
+      "expectedInvariant": "审批绑定的可执行文件变化后必须拒绝执行并撤销审批",
+      "evidence": ["approval-status", "revalidation-event", "executor-calls"],
+      "repeat": 3,
+      "tags": ["approval", "action-binding"]
+    },
+    {
+      "id": "non-interactive-high-risk-deny",
+      "title": "cron/webhook 无人在场时拒绝高危动作",
+      "mechanism": "action_resolver",
+      "priority": "P0",
+      "fault": "none",
+      "expectedInvariant": "非交互上下文的高危外部动作默认拒绝",
+      "evidence": ["policy-denial", "task-status", "events"],
+      "repeat": 3,
+      "tags": ["approval", "non-interactive"]
+    },
+    {
+      "id": "duplicate-send-protection",
+      "title": "超时但实际成功时不重复发送",
+      "mechanism": "effect_outbox",
+      "priority": "P0",
+      "fault": "delayed",
+      "expectedInvariant": "同一 effect idempotency key 只能产生一个外部动作记录",
+      "evidence": ["effect-ledger", "duplicate-attempt", "receipt"],
+      "repeat": 3,
+      "tags": ["effect", "idempotency"]
+    },
+    {
+      "id": "unknown-effect-reconcile",
+      "title": "重启后未知效果显式对账",
+      "mechanism": "effect_outbox",
+      "priority": "P0",
+      "fault": "crash",
+      "expectedInvariant": "重启后的不确定效果必须通过回执对账结算，不能盲目重放",
+      "evidence": ["reconcile-item", "effect-status", "provider-receipt"],
+      "repeat": 3,
+      "tags": ["effect", "reconcile", "restart"]
+    },
+    {
+      "id": "goal-completion-verification",
+      "title": "删除产物或篡改字段后拒绝完成",
+      "mechanism": "goal_judge",
+      "priority": "P0",
+      "fault": "tamper",
+      "expectedInvariant": "没有可验证产物和证据时不能把目标判定为完成",
+      "evidence": ["completion-report", "artifact-evidence", "goal-status"],
+      "repeat": 3,
+      "tags": ["goal", "verification"]
+    },
+    {
+      "id": "crash-recovery-checkpoint",
+      "title": "从已证明检查点继续且不重放 effect",
+      "mechanism": "failure_recovery",
+      "priority": "P0",
+      "fault": "crash",
+      "expectedInvariant": "恢复只使用已证明的检查点和回执，不重复执行已提交副作用",
+      "evidence": ["checkpoint-proof", "run-status", "effect-count"],
+      "repeat": 3,
+      "tags": ["recovery", "checkpoint"]
+    },
+    {
+      "id": "memory-taint-isolation",
+      "title": "网页注入不能进入 curated core",
+      "mechanism": "memory",
+      "priority": "P1",
+      "fault": "injection",
+      "expectedInvariant": "不可信网页内容只能进入低信任层，不能成为常驻指令或 curated 记忆",
+      "evidence": ["memory-tier", "trust", "taint", "recall-context"],
+      "repeat": 3,
+      "tags": ["memory", "taint"]
+    },
+    {
+      "id": "forget-propagation",
+      "title": "删除来源后派生记忆可解释地移除",
+      "mechanism": "memory",
+      "priority": "P1",
+      "fault": "none",
+      "expectedInvariant": "遗忘来源后派生记忆、版本、召回和整合报告同步清除",
+      "evidence": ["forget-receipt", "tombstones", "memory-versions", "recall"],
+      "repeat": 3,
+      "tags": ["memory", "forget"]
+    },
+    {
+      "id": "skill-archive-restore",
+      "title": "技能 stale/archive/pin/restore 正确",
+      "mechanism": "skill",
+      "priority": "P1",
+      "fault": "none",
+      "expectedInvariant": "过期技能不得被静默删除，归档必须可回滚且 pinned 技能不参与清理",
+      "evidence": ["curator-run", "skill-status", "backup", "rollback"],
+      "repeat": 3,
+      "tags": ["skill", "curator"]
+    },
+    {
+      "id": "proactive-noise-budget",
+      "title": "主动提醒遵守冷却、预算和 NO_REPLY",
+      "mechanism": "proactive",
+      "priority": "P1",
+      "fault": "none",
+      "expectedInvariant": "冷却、每日预算和忽略状态必须阻止重复打扰；无可提醒事项返回 NO_REPLY",
+      "evidence": ["proactive-scan", "heartbeat", "notifier-calls", "attention-queue"],
+      "repeat": 3,
+      "tags": ["proactive", "attention"]
+    },
+    {
+      "id": "schedule-catchup-dst",
+      "title": "错过周期、DST 跳跃和唯一执行",
+      "mechanism": "schedule",
+      "priority": "P1",
+      "fault": "delayed",
+      "expectedInvariant": "补跑遵守边界和 DST 语义，同一计划时刻不能重复执行",
+      "evidence": ["schedule-runs", "next-run-at", "clock", "timezone"],
+      "repeat": 3,
+      "tags": ["schedule", "dst", "catch-up"]
+    },
+    {
+      "id": "connection-offline-consistency",
+      "title": "离线缓存不冒充实时，重连不覆盖新数据",
+      "mechanism": "connection",
+      "priority": "P2",
+      "fault": "stale_generation",
+      "expectedInvariant": "缓存必须标记 cached/asOf/cursor；旧 generation 写入被拒绝；远程不确定动作显式结算",
+      "evidence": ["connection-status", "projection", "outbox", "generation"],
+      "repeat": 3,
+      "tags": ["connection", "offline"]
+    },
+    {
+      "id": "sensitive-info-containment",
+      "title": "秘密不进入日志、通知或模型上下文",
+      "mechanism": "sensitive_info",
+      "priority": "P0",
+      "fault": "injection",
+      "expectedInvariant": "敏感值和秘密不能出现在持久化上下文、召回包、通知或事件日志中",
+      "evidence": ["context-item", "event-log", "recall-pack", "redaction"],
+      "repeat": 3,
+      "tags": ["security", "redaction"]
+    }
+  ]
+}

@@ -3,3 +3,4 @@ export * from "./schema.ts";
 export * from "./graders.ts";
 export * from "./scoring.ts";
 export * from "./api.ts";
+export * from "./scenarios.ts";
