@@ -3231,6 +3231,89 @@ body.modal-open {
   padding: 10px 12px;
 }
 
+.reconcile-panel {
+  margin-bottom: var(--gap-3);
+  border-color: color-mix(in srgb, var(--risk) 38%, var(--line));
+}
+
+.reconcile-list {
+  display: grid;
+  gap: 10px;
+  padding: 0 12px 12px;
+}
+
+.reconcile-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+}
+
+.reconcile-card.risk-high,
+.reconcile-card.risk-critical {
+  border-color: color-mix(in srgb, var(--risk) 55%, var(--line));
+}
+
+.reconcile-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--gap-3);
+}
+
+.reconcile-head h3 {
+  margin: 0 0 4px;
+}
+
+.reconcile-head p {
+  margin: 0;
+  color: var(--ink-secondary);
+  font-size: var(--fs-13);
+}
+
+.reconcile-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.reconcile-facts > div {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.reconcile-facts dt {
+  color: var(--ink-muted);
+  font-size: var(--fs-11);
+}
+
+.reconcile-facts dd {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-12);
+}
+
+.reconcile-attempts {
+  color: var(--ink-secondary);
+  font-size: var(--fs-12);
+}
+
+.reconcile-attempts p {
+  margin: 5px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.reconcile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
 .form-error {
   color: var(--risk);
   font-size: var(--fs-12);
@@ -3238,7 +3321,8 @@ body.modal-open {
 
 @media (max-width: 900px) {
   .proactive-budget-grid,
-  .suggestion-facts {
+  .suggestion-facts,
+  .reconcile-facts {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

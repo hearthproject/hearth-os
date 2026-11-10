@@ -14,10 +14,13 @@ export function AppShell() {
   const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 30_000 });
   const executorsQuery = useQuery({ queryKey: ["executors"], queryFn: api.executors, refetchInterval: 30_000 });
   const proactiveQuery = useQuery({ queryKey: ["proactive"], queryFn: api.proactive, refetchInterval: 15_000 });
+  const reconcileQuery = useQuery({ queryKey: ["reconcile"], queryFn: () => api.reconcile(), refetchInterval: 15_000 });
   const tasks = tasksQuery.data?.tasks ?? [];
   const activeCount = tasks.filter((task) => !task.archivedAt && (isActive(task.status) || needsAttention(task.status))).length;
+  const reconcileCount = (reconcileQuery.data?.items ?? [])
+    .filter((item) => ["open", "checking", "needs_human", "conflicting"].includes(item.status)).length;
   const needsYouCount = (proactiveQuery.data?.suggestions ?? [])
-    .filter((suggestion) => ["new", "snoozed", "accepted"].includes(suggestion.status)).length;
+    .filter((suggestion) => ["new", "snoozed", "accepted"].includes(suggestion.status)).length + reconcileCount;
   const chatModel = healthQuery.data?.chatModel;
   const readyExecutors = (executorsQuery.data?.executors ?? []).filter((executor) => executor.health.canRun);
   const primaryExecutor = readyExecutors.find((executor) => executor.id === "native")

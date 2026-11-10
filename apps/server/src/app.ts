@@ -5,7 +5,7 @@ import { basename, join } from "node:path";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyReply } from "fastify";
 import type { EventEnvelope, ExecutorHealth, ExecutorId, ExecutorView, GoalBudget } from "@hearth/core";
-import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DELEGATION_WORKSPACE_POLICIES, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, EXECUTOR_IDS, GOAL_REVIEW_POLICIES, GOAL_STATES, GOAL_VALIDATORS, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_ORIGINS, MEMORY_RETENTIONS, MEMORY_SENSITIVITIES, MEMORY_TAINT_STATES, MEMORY_TIERS, MEMORY_TRUST_LEVELS, PROACTIVE_MODES, RUN_STATUSES, SKILL_STATUSES, SKILL_USAGE_SOURCES, SKILL_USAGE_STATUSES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
+import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DELEGATION_WORKSPACE_POLICIES, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, EXECUTOR_IDS, GOAL_REVIEW_POLICIES, GOAL_STATES, GOAL_VALIDATORS, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_ORIGINS, MEMORY_RETENTIONS, MEMORY_SENSITIVITIES, MEMORY_TAINT_STATES, MEMORY_TIERS, MEMORY_TRUST_LEVELS, PROACTIVE_MODES, RECONCILE_STATUSES, RUN_STATUSES, SKILL_STATUSES, SKILL_USAGE_SOURCES, SKILL_USAGE_STATUSES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate } from "@hearth/templates";
 import { loadCodexProfile, runCodex } from "@hearth/codex-executor";
@@ -13,7 +13,7 @@ import { z } from "zod";
 import { ATTACHMENT_DIR, BACKUP_DIR, CODEX_HOME_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, DSH_HOME_DIR, EXECUTOR_HOME_DIR, EXECUTOR_SETTINGS_PATH, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST, WORKSPACE_DIR } from "./config.ts";
 import { registerChatRoutes } from "./chat-routes.ts";
 import { registerEvalRoutes } from "./eval-routes.ts";
-import { ReconcileService } from "./reconcile.ts";
+import { ReconcileError, ReconcileService } from "./reconcile.ts";
 import { ExecutorSettingsStore } from "./executor-settings.ts";
 import { probeHermes } from "./hermes-executor.ts";
 import { clearHermesHealthCache } from "./hermes-health.ts";
@@ -704,6 +704,12 @@ const listQuerySchema = z.object({
 const runQuerySchema = listQuerySchema.extend({ status: z.enum(RUN_STATUSES).optional() }).strict();
 const approvalQuerySchema = listQuerySchema.extend({ status: z.enum(APPROVAL_STATUSES).optional() }).strict();
 const effectQuerySchema = listQuerySchema.extend({ status: z.enum(EFFECT_STATUSES).optional() }).strict();
+const reconcileQuerySchema = z.object({ status: z.enum(RECONCILE_STATUSES).optional() }).strict();
+const reconcileResolveSchema = z.object({
+  resolution: z.enum(["committed", "absent", "abandoned"]),
+  note: z.string().trim().min(1).max(2000)
+}).strict();
+const reconcileTaskSchema = z.object({ note: z.string().trim().max(2000).optional() }).strict();
 
 const seqParam = z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 
@@ -2770,6 +2776,47 @@ export async function buildServer(options: BuildServerOptions = {}) {
     return service.listEffectItems(pageOptions(parsed.data));
   });
 
+  app.get<{ Querystring: Record<string, string> }>("/api/reconcile", async (request, reply) => {
+    const parsed = reconcileQuerySchema.safeParse(request.query ?? {});
+    if (!parsed.success) return invalidQuery(reply);
+    reply.header("cache-control", "no-store");
+    const items = reconcile.list(parsed.data.status);
+    return { items, total: items.length };
+  });
+
+  app.post<{ Params: { id: string } }>("/api/reconcile/:id/check", async (request, reply) => {
+    try {
+      reply.header("cache-control", "no-store");
+      return await reconcile.check(request.params.id);
+    } catch (error) {
+      return sendReconcileError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string }; Body: unknown }>("/api/reconcile/:id/resolve", async (request, reply) => {
+    const parsed = reconcileResolveSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "INVALID_RECONCILE_RESOLUTION", message: "请选择已提交、未执行或放弃，并填写核对说明。" });
+    }
+    try {
+      return reconcile.resolveManually(request.params.id, parsed.data.resolution, parsed.data.note);
+    } catch (error) {
+      return sendReconcileError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string }; Body: unknown }>("/api/reconcile/:id/task", async (request, reply) => {
+    const parsed = reconcileTaskSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "INVALID_RECONCILE_TASK", message: "人工任务说明过长或格式不正确。" });
+    }
+    try {
+      return reply.code(201).send(reconcile.createTask(request.params.id, parsed.data.note ?? ""));
+    } catch (error) {
+      return sendReconcileError(reply, error);
+    }
+  });
+
   app.get("/api/stats", async (request, reply) => {
     reply.header("cache-control", "no-store");
     return service.stats();
@@ -3254,6 +3301,13 @@ function pageOptions(query: {
 
 function invalidQuery(reply: FastifyReply) {
   return reply.code(400).send({ error: "INVALID_QUERY", message: "分页参数不正确" });
+}
+
+function sendReconcileError(reply: FastifyReply, error: unknown) {
+  if (error instanceof ReconcileError) {
+    return reply.code(error.code === "RECONCILE_NOT_FOUND" ? 404 : 409).send({ error: error.code, message: error.message });
+  }
+  throw error;
 }
 
 function sendSourceError(reply: FastifyReply, error: unknown) {

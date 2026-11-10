@@ -71,6 +71,7 @@ import type {
   ProactiveSettings,
   ProactiveSnapshot,
   ProactiveSuggestion,
+  ReconcileItem,
   RunListItem,
   RunManifest,
   ScheduleInput,
@@ -469,6 +470,20 @@ export const api = {
     request<{ approvals: ApprovalListItem[]; total: number }>(`/api/approvals${query(params)}`),
   effects: (params: { taskId?: string; status?: string; limit?: number; offset?: number } = {}) =>
     request<{ effects: EffectListItem[]; total: number }>(`/api/effects${query(params)}`),
+  reconcile: (params: { status?: string } = {}) =>
+    request<{ items: ReconcileItem[]; total: number }>(`/api/reconcile${query(params)}`),
+  checkReconcile: (id: string) =>
+    request<ReconcileItem>(`/api/reconcile/${encodeURIComponent(id)}/check`, { method: "POST" }),
+  resolveReconcile: (id: string, resolution: "committed" | "absent" | "abandoned", note: string) =>
+    request<ReconcileItem>(`/api/reconcile/${encodeURIComponent(id)}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ resolution, note })
+    }),
+  createReconcileTask: (id: string, note?: string) =>
+    request<TaskRecord>(`/api/reconcile/${encodeURIComponent(id)}/task`, {
+      method: "POST",
+      body: JSON.stringify({ ...(note ? { note } : {}) })
+    }),
   outbox: () => request<{ drafts: OutboxDraftListItem[] }>("/api/outbox"),
   outboxDraft: (id: string) => request<OutboxDraftListItem>(`/api/outbox/${encodeURIComponent(id)}`),
   createOutboxDraft: (input: OutboxDraftRequest) => request<OutboxDraft>("/api/outbox", {

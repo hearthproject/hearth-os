@@ -697,6 +697,54 @@ describe("Hearth server", () => {
     await app.close();
   });
 
+  it("exposes uncertain effects for explicit reconciliation and human follow-up", async () => {
+    const createdAt = "2026-11-05T02:02:00.000Z";
+    const effect: EffectRecord = {
+      id: "effect-reconcile-1",
+      taskId: "task-reconcile-1",
+      approvalId: "approval-reconcile-1",
+      kind: "email.smtp-send",
+      idempotencyKey: "approval:approval-reconcile-1",
+      status: "uncertain",
+      target: { to: ["reviewer@example.test"] },
+      receipt: null,
+      error: "发送响应中断",
+      createdAt,
+      updatedAt: createdAt,
+      provider: "email"
+    };
+    store.appendEvent({ type: "effect.created", taskId: effect.taskId, payload: effect });
+    const app = await buildServer({ store, serveWeb: false });
+
+    const opened = await app.inject({ method: "GET", url: "/api/reconcile?status=open" });
+    expect(opened.statusCode).toBe(200);
+    expect(opened.json()).toMatchObject({ total: 1, items: [{ effectId: effect.id, status: "open" }] });
+    const itemId = opened.json().items[0].id as string;
+
+    const checked = await app.inject({ method: "POST", url: `/api/reconcile/${itemId}/check` });
+    expect(checked.statusCode).toBe(200);
+    expect(checked.json()).toMatchObject({ status: "needs_human", checkCount: 0 });
+
+    const resolved = await app.inject({
+      method: "POST",
+      url: `/api/reconcile/${itemId}/resolve`,
+      payload: { resolution: "absent", note: "登录发件箱确认没有发送记录" }
+    });
+    expect(resolved.statusCode).toBe(200);
+    expect(resolved.json()).toMatchObject({ status: "resolved_absent", resolutionNote: "登录发件箱确认没有发送记录" });
+    expect(store.getEffect(effect.id)?.status).toBe("reconciled_absent");
+
+    const task = await app.inject({
+      method: "POST",
+      url: `/api/reconcile/${itemId}/task`,
+      payload: { note: "请人工核对邮件服务商日志" }
+    });
+    expect(task.statusCode).toBe(201);
+    expect(task.json()).toMatchObject({ title: expect.stringContaining("核对") });
+    expect(store.getReconcileItem(itemId)?.attempted).toContain(`task:${task.json().id}`);
+    await app.close();
+  });
+
   it("streams newly created events over SSE", async () => {
     const app = await buildServer({ store, serveWeb: false });
     await app.listen({ host: "127.0.0.1", port: 0 });

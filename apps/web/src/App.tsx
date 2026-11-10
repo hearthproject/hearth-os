@@ -72,6 +72,7 @@ function EventBridge() {
         void queryClient.invalidateQueries({ queryKey: ["proactive"] });
         void queryClient.invalidateQueries({ queryKey: ["memory"] });
         void queryClient.invalidateQueries({ queryKey: ["approvals"] });
+        void queryClient.invalidateQueries({ queryKey: ["reconcile"] });
         void queryClient.invalidateQueries({ queryKey: ["outbox"] });
         void queryClient.invalidateQueries({ queryKey: ["sources"] });
         if (event.startsWith("effect.")) {

@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import type {
   EffectRecord,
   ReconcileAction,
-  ReconcileItem
+  ReconcileItem,
+  ReconcileStatus,
+  TaskRecord
 } from "@hearth/core";
 import { stableStringify } from "./approvals.ts";
 import type { HearthService } from "./service.ts";
@@ -86,6 +88,10 @@ export class ReconcileService {
     return this.service.store.listReconcileItems().filter((item) => isOpen(item.status));
   }
 
+  list(status?: ReconcileStatus): ReconcileItem[] {
+    return this.service.store.listReconcileItems(status);
+  }
+
   async check(itemId: string): Promise<ReconcileItem> {
     const item = this.service.store.getReconcileItem(itemId);
     if (!item) throw new ReconcileError("RECONCILE_NOT_FOUND", "对账项不存在");
@@ -160,6 +166,28 @@ export class ReconcileService {
       resolvedAt: now,
       updatedAt: now
     });
+  }
+
+  createTask(itemId: string, note: string): TaskRecord {
+    const item = this.service.store.getReconcileItem(itemId);
+    if (!item) throw new ReconcileError("RECONCILE_NOT_FOUND", "对账项不存在");
+    const task = this.service.createTask({
+      title: `核对：${item.summary}`.slice(0, 120),
+      goal: [
+        "核对外部动作是否已经发生，并把结论记录回 Hearth 对账入口。",
+        `对账项：${item.id}`,
+        `效果：${item.effectId}`,
+        `目标：${item.targetKey ?? "未知"}`,
+        `原因：${item.reason}`,
+        note.trim() ? `补充说明：${note.trim()}` : "",
+        "核对完成后，请在对账入口标记“已提交”或“未执行”。"
+      ].filter(Boolean).join("\n")
+    });
+    this.service.updateReconcileItem(item.id, {
+      attempted: [...item.attempted, `task:${task.id}`],
+      updatedAt: this.now().toISOString()
+    });
+    return task;
   }
 
   private applyResult(item: ReconcileItem, effect: EffectRecord, result: ReconcileCheckResult): ReconcileItem {

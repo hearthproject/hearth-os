@@ -75,6 +75,36 @@ describe("effect reconcile queue", () => {
     expect(resumed?.suspendReason).toBeNull();
     expect(resumed?.availableAt).not.toBe("9999-12-31T23:59:59.999Z");
   });
+
+  it("keeps manual resolution explicit and records the human note", () => {
+    const effect = createEffect(service, "uncertain", { to: ["reviewer@example.test"] });
+    const reconcile = new ReconcileService(service);
+    const item = reconcile.enqueue(effect, "发送响应中断");
+
+    const resolved = reconcile.resolveManually(item.id, "committed", "在邮件服务商已看到发送成功回执");
+
+    expect(resolved.status).toBe("resolved_committed");
+    expect(resolved.resolutionNote).toContain("发送成功回执");
+    expect(store.getEffect(effect.id)).toMatchObject({
+      status: "reconciled_committed",
+      reconcileRef: item.id,
+      receipt: { manualResolution: "committed", note: "在邮件服务商已看到发送成功回执" }
+    });
+  });
+
+  it("creates a human follow-up task without closing the reconcile item", () => {
+    const effect = createEffect(service, "uncertain", { to: ["reviewer@example.test"] });
+    const reconcile = new ReconcileService(service);
+    const item = reconcile.enqueue(effect, "发送响应中断");
+
+    const task = reconcile.createTask(item.id, "请登录邮箱核对是否已发送");
+
+    expect(task.goal).toContain(item.id);
+    expect(task.goal).toContain("请登录邮箱核对是否已发送");
+    expect(store.getReconcileItem(item.id)?.status).toBe("open");
+    expect(store.getReconcileItem(item.id)?.attempted).toContain(`task:${task.id}`);
+    expect(reconcile.list("open")).toHaveLength(1);
+  });
 });
 
 function createEffect(
