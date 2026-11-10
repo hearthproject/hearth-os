@@ -14,7 +14,7 @@ import { getTemplate } from "@hearth/templates";
 import type { DshApprovalOutcome, DshApprovalRequest, DshContextEvent } from "@hearth/deepseek-executor";
 import type { ApprovalRequest, ApprovalManager, PendingToolApproval, ToolApprovalDecision } from "./approvals.ts";
 import { resolveAction, type ActionProposal, type ResolvedAction } from "./action-resolver.ts";
-import { missingExpectedOutputs, publishArtifacts } from "./artifacts.ts";
+import { createFileArtifact, missingExpectedOutputs, publishArtifacts } from "./artifacts.ts";
 import { CONTEXT_BLOB_DIR, EXECUTOR_SETTINGS_PATH, GIT_CACHE_DIR, MODEL_SETTINGS_PATH, REPO_ROOT, SOURCE_CONTENT_DIR, WORKSPACE_DIR } from "./config.ts";
 import { ContextService, estimateTokens } from "./context.ts";
 import { DelegationError, DelegationService } from "./delegation.ts";
@@ -1087,8 +1087,48 @@ export class HearthScheduler {
             contextWatermarkSeq: this.context.getState(taskId)?.summarySeq ?? 0, initiatedBy: "auto"
           });
           const finalPacket: HandoffPacket = preparedHandoff.packet;
-          const currentHandoff: HandoffRecord = preparedHandoff.handoff;
-          this.writeHandoffFile(taskRoot, result.outDir, currentHandoff.id, finalPacket);
+          const verification = this.handoffs.verify(finalPacket, { baseDir: result.outDir });
+          const verifiedHandoff = this.handoffs.markVerification(preparedHandoff.handoff.id, verification)
+            ?? preparedHandoff.handoff;
+          const verifiedPacket = verifiedHandoff.packet ?? finalPacket;
+          const handoffArtifact = this.writeHandoffFile(
+            failureTask,
+            result.run,
+            taskRoot,
+            result.outDir,
+            verifiedHandoff.id,
+            verifiedPacket
+          );
+          const currentHandoff: HandoffRecord = this.context.updateHandoff(verifiedHandoff.id, {
+            artifactRef: handoffArtifact.id,
+            ...(verification.status === "failed" ? { status: "failed" as const } : {})
+          }) ?? verifiedHandoff;
+          if (verification.status !== "passed") {
+            this.appendHandoffNotice(taskId, currentHandoff, false);
+            const failedChecks = verification.checks
+              .filter((check) => !check.ok)
+              .map((check) => `${check.name}: ${check.detail}`)
+              .join("；");
+            const handoffError: TaskError = {
+              kind: "handoff_verification_failed",
+              message: `交接验证失败：${failedChecks || "未知错误"}`,
+              recoverable: true,
+              guidance: "交接包未通过宿主校验，已阻止执行器切换；请修复证据或产物后重试",
+              cause,
+              diagnosisId: diagnosis.id,
+              failureClass: "validation_failed",
+              disposition
+            };
+            this.service.updateTask(taskId, {
+              status: "recoverable",
+              currentRunId: result.run.id,
+              nextAction: "交接验证失败，未切换执行器",
+              error: handoffError,
+              resultSummary: handoffError.message
+            }, result.run.id);
+            this.refreshTaskSummary(taskId, { lastFailure: handoffError });
+            return;
+          }
           if (status === "prepared") {
             executorId = decision.targetExecutor;
             attemptedExecutors.add(decision.targetExecutor);
@@ -2142,13 +2182,29 @@ export class HearthScheduler {
     ].join("\n");
   }
 
-  private writeHandoffFile(taskRoot: string, previousOutDir: string, handoffId: string, packet: HandoffPacket): void {
+  private writeHandoffFile(
+    task: TaskRecord,
+    run: RunRecord,
+    taskRoot: string,
+    previousOutDir: string,
+    handoffId: string,
+    packet: HandoffPacket
+  ): ReturnType<typeof createFileArtifact> {
     const markdown = this.projector.renderHandoffMarkdown(packet);
     const directory = join(taskRoot, ".hearth", "handoffs", handoffId);
     mkdirSync(directory, { recursive: true });
-    writeFileSync(join(directory, "HANDOFF.md"), markdown, "utf8");
+    const absolutePath = join(directory, "HANDOFF.md");
+    writeFileSync(absolutePath, markdown, "utf8");
     writeFileSync(join(taskRoot, "HANDOFF.md"), markdown, "utf8");
     if (existsSync(previousOutDir)) writeFileSync(join(previousOutDir, "HANDOFF.md"), markdown, "utf8");
+    const artifact = createFileArtifact({
+      task,
+      run,
+      absolutePath,
+      relativePath: `handoffs/${handoffId}/HANDOFF.md`
+    });
+    this.service.publishArtifact(artifact);
+    return artifact;
   }
 
   private appendHandoffNotice(taskId: string, handoff: HandoffRecord, started = true): void {

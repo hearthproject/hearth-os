@@ -802,6 +802,13 @@ describe("Hearth scheduler", () => {
     expect(codexPrompt).toContain("Hearth 任务交接");
     expect(codexPrompt).toContain("partial.md");
     expect(store?.listArtifacts(task.id).map((artifact) => artifact.relativePath)).not.toContain("HANDOFF.md");
+    expect(handoffs[0]?.verification?.status).toBe("passed");
+    const handoffArtifact = (store?.listArtifacts(task.id) ?? []).find((artifact) =>
+      artifact.relativePath === `handoffs/${handoffs[0]?.id}/HANDOFF.md`
+    );
+    expect(handoffArtifact).toBeDefined();
+    expect(handoffs[0]?.artifactRef).toBe(handoffArtifact?.id);
+    expect(readFileSync(handoffArtifact?.absolutePath ?? "", "utf8")).toContain("最小验证动作");
     expect(store?.listContextItems(task.id, { limit: 200 }).items.some((item) => item.kind === "diagnosis")).toBe(true);
   });
 

@@ -55,6 +55,7 @@ export class ContextProjector {
     const template = task.templateId ? getTemplate(task.templateId) : undefined;
     const artifactMap = new Map<string, { path: string; sha256: string; bytes: number; mimeType: string }>();
     for (const artifact of state.artifacts) {
+      if (artifact.path.startsWith("handoffs/")) continue;
       artifactMap.set(artifact.path, {
         path: artifact.path,
         sha256: artifact.sha256,

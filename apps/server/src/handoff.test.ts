@@ -76,6 +76,7 @@ describe("HandoffService", () => {
     noAction.verification.action = "";
     noAction.verification.expected = [];
     const prepared = handoffs.prepare(prepareInput(task, "run-1", noAction));
+    expect(prepared.handoff.artifactRef).toBeNull();
     expect(prepared.packet.verification.action).toContain("最小验证");
     expect(prepared.packet.verification.expected.length).toBeGreaterThan(0);
     expect(prepared.packet.verification.status).toBe("pending");
@@ -108,6 +109,9 @@ describe("HandoffService", () => {
     expect(failed.checks).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "artifact:report.md", ok: false, detail: "哈希不一致" })
     ]));
+    const markedFailed = handoffs.markVerification(prepared.handoff.id, failed);
+    expect(markedFailed?.verification?.status).toBe("failed");
+    expect(store.getHandoff(prepared.handoff.id)?.packet?.verification.status).toBe("failed");
   });
 });
 

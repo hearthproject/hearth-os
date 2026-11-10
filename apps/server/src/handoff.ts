@@ -106,8 +106,7 @@ export class HandoffService {
     const finalPacket: HandoffPacket = { ...packet, handoffId: created.id };
     const handoff = this.context.updateHandoff(created.id, {
       packet: finalPacket,
-      verification: packet.verification,
-      artifactRef: `handoff://${created.id}/HANDOFF.md`
+      verification: packet.verification
     }) ?? { ...created, packet: finalPacket };
     return { handoff, packet: finalPacket };
   }
