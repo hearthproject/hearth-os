@@ -25,16 +25,20 @@ import { ScheduleError, ScheduleService } from "./schedules.ts";
 import { chatModelConfigured, loadModelSettings, viewModelSettings } from "./model-settings.ts";
 import { ModelRegistry, ModelRegistryError } from "./model-registry.ts";
 import { migrateLegacySettings } from "./settings-migration.ts";
-import { ApprovalError, ApprovalManager, type EffectExecutor } from "./approvals.ts";
+import { ApprovalError, ApprovalManager, type EffectExecutor, type PendingToolApproval, type ToolApprovalDecision } from "./approvals.ts";
 import { BackupError, BackupService } from "./backups.ts";
 import { DelegationError, DelegationService, type CreateDelegationInput } from "./delegation.ts";
 import { executeEffect } from "./effects.ts";
-import { HearthScheduler } from "./scheduler.ts";
+import { HearthScheduler, resolveToolAction } from "./scheduler.ts";
 import { GitViewError, TaskGitService } from "./task-git.ts";
 import { TaskLeaseService } from "./leases.ts";
 import { SandboxError, SandboxService } from "./sandbox.ts";
 import { SecurityError, SecurityService } from "./security.ts";
 import { ContextService } from "./context.ts";
+import { ContextBroker } from "./context-broker.ts";
+import { MentionResolver } from "./mentions.ts";
+import { OntologyService } from "./ontology.ts";
+import { OntologyWriter } from "./ontology-writer.ts";
 import type { ContextIndex } from "./context-index.ts";
 import { contextMetrics } from "./context-metrics.ts";
 import { HearthService, TaskInputSelectionError, type CreateGoalInput, type CreateTaskInput } from "./service.ts";
@@ -54,11 +58,52 @@ import { SkillPackageError } from "./skill-package.ts";
 import { SkillPackageService } from "./skills.ts";
 import { SkillCuratorService } from "./skill-curator.ts";
 import { ProactiveError, ProactiveService } from "./proactive.ts";
+import { AttentionGovernor } from "./attention-governor.ts";
+import { BackgroundToolError, BackgroundToolService } from "./background-tools.ts";
+import { PreparedActionService } from "./prepared-actions.ts";
+import { ThreadSubscriptionService } from "./thread-subscriptions.ts";
+import { WatchdogService } from "./watchdog.ts";
+import { IntakeRouter } from "./intake-router.ts";
+import { isBackgroundToolReadOnly, requiresToolApproval, toolApprovalSummary } from "./tool-policy.ts";
+import { createBuiltinTools } from "@hearth/agent-runtime";
 import { StandingIntentError, StandingIntentService } from "./standing-intents.ts";
 import { SyncError, SyncService } from "./sync.ts";
 import { SecretBox } from "./secrets.ts";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
+
+function awaitToolDecision(
+  pending: PendingToolApproval,
+  signal: AbortSignal,
+  approvals: ApprovalManager,
+  toolName: string
+): Promise<ToolApprovalDecision> {
+  if (signal.aborted) {
+    approvals.cancelToolApproval(pending.approval.id, "任务已取消");
+    return Promise.resolve({ allowed: false, reason: "任务已取消" });
+  }
+  return new Promise<ToolApprovalDecision>((resolve) => {
+    let settled = false;
+    const finish = (decision: ToolApprovalDecision): void => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      resolve(decision);
+    };
+    const onAbort = (): void => {
+      approvals.cancelToolApproval(pending.approval.id, "任务已取消");
+      finish({ allowed: false, reason: "任务已取消" });
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    void pending.decision.then((decision) => finish({
+      ...decision,
+      reason: decision.reason || `后台工具 ${toolName} 审批结束`
+    })).catch((error: unknown) => finish({
+      allowed: false,
+      reason: error instanceof Error ? error.message : String(error)
+    }));
+  });
+}
 
 const createTaskSchema = z.object({
   templateId: z.string().trim().min(1).max(20).optional(),
@@ -766,12 +811,17 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const taskGit = new TaskGitService({ workspaceRoot: WORKSPACE_DIR });
   const context = new ContextService(service, options.contextBlobRoot ?? CONTEXT_BLOB_DIR);
   if (options.contextIndex) context.setIndex(options.contextIndex);
+  const ontology = new OntologyService(service);
+  const mentions = new MentionResolver(service, ontology);
+  const contextBroker = new ContextBroker(service, context, ontology);
+  const ontologyWriter = new OntologyWriter(service, ontology);
   service.setContextSink((message) => {
     if (context.settings().mode !== "off") context.recordChatMessage(message);
   });
 
   const sources = new SourceRegistry(service, {
-    contentRoot: options.sourceContentRoot ?? SOURCE_CONTENT_DIR
+    contentRoot: options.sourceContentRoot ?? SOURCE_CONTENT_DIR,
+    onItemReady: (item) => ontologyWriter.captureSourceItem(item)
   });
   const secretBox = options.syncSecretBox ?? SecretBox.fromKeyFile(options.masterKeyPath ?? MASTER_KEY_PATH);
   const mail = new EmailService({
@@ -787,7 +837,15 @@ export async function buildServer(options: BuildServerOptions = {}) {
     mail
   }));
   const proactive = new ProactiveService(service);
-  const standingIntents = new StandingIntentService({ service });
+  const attentionGovernor = new AttentionGovernor(service);
+  const standingIntents = new StandingIntentService({
+    service,
+    deliveryGate: (run) => attentionGovernor.deliveryAllowed(run)
+  });
+  const preparedActions = new PreparedActionService(service);
+  const threadSubscriptions = new ThreadSubscriptionService(service);
+  const watchdog = new WatchdogService({ service, standingIntents });
+  const intake = new IntakeRouter(service);
   const memory = new MemoryService(service);
   const methods = new MethodService(service);
   const skills = new SkillPackageService(service, methods, {
@@ -817,10 +875,74 @@ export async function buildServer(options: BuildServerOptions = {}) {
     },
     onUncertain: (effect, reason) => {
       reconcile.enqueue(effect, reason);
-    }
+    },
+    onDecided: (approval) => ontologyWriter.captureApprovalDecision(approval)
   });
   approvals.recoverInterruptedEffects();
   reconcile.scanUncertain();
+  const backgroundTools = new BackgroundToolService(service, {
+    runner: async (job, signal) => {
+      const task = service.requireTask(job.taskId);
+      const tool = createBuiltinTools().find((candidate) => candidate.definition.name === job.toolName);
+      if (!tool) throw new Error(`后台工具不支持：${job.toolName}`);
+      const permissions = task.permissions ?? {
+        readRoots: [task.outputDir],
+        writeRoots: [],
+        networkHosts: task.networkHosts,
+        tools: ["read_file", "list_files", "search_text"]
+      };
+      if (!permissions.tools.includes(job.toolName)) throw new Error(`任务未授权工具：${job.toolName}`);
+      const result = await tool.execute(job.args, {
+        workspaceRoot: task.outputDir, outDir: task.outputDir, permissions, signal
+      });
+      return { output: result.content, exitCode: result.isError ? 1 : 0 };
+    },
+    authorize: async ({ job, signal }) => {
+      if (isBackgroundToolReadOnly(job.toolName) && !requiresToolApproval(job.toolName)) return;
+      const task = service.requireTask(job.taskId);
+      if (!job.runId) {
+        throw new BackgroundToolError("BACKGROUND_TOOL_RUN_REQUIRED", "后台敏感工具必须绑定运行中的 run", 409);
+      }
+      const run = store.getRun(job.runId);
+      if (!run || run.taskId !== task.id || run.status !== "running") {
+        throw new BackgroundToolError("BACKGROUND_TOOL_RUN_NOT_ACTIVE", "后台敏感工具只能由当前运行中的任务发起", 409);
+      }
+      const summary = toolApprovalSummary(job.toolName, job.args);
+      let action;
+      try {
+        action = resolveToolAction({
+          toolName: job.toolName,
+          argumentsValue: job.args,
+          summary,
+          workspaceRoot: task.outputDir,
+          fullPermission: false,
+          context: "interactive"
+        });
+      } catch (error) {
+        throw new BackgroundToolError(
+          "BACKGROUND_TOOL_ACTION_UNRESOLVED",
+          `后台敏感工具无法绑定为可审批动作：${error instanceof Error ? error.message : String(error)}`,
+          403
+        );
+      }
+      if (!action) {
+        throw new BackgroundToolError("BACKGROUND_TOOL_ACTION_UNRESOLVED", `后台敏感工具 ${job.toolName} 无法解析为可绑定动作`, 403);
+      }
+      const pending = await approvals.requestTool({
+        taskId: task.id,
+        runId: run.id,
+        toolName: job.toolName,
+        summary,
+        target: { tool: job.toolName, arguments: job.args },
+        preview: { arguments: job.args },
+        action
+      });
+      const decision = await awaitToolDecision(pending, signal, approvals, job.toolName);
+      if (!decision.allowed) {
+        throw new BackgroundToolError("BACKGROUND_TOOL_APPROVAL_DENIED", decision.reason, 403);
+      }
+    }
+  });
   const outbox = new OutboxService(service, approvals, undefined, mail);
   const desktop = new DesktopService(service, options.deviceFrameRoot ?? DEVICE_FRAME_DIR, security);
   const modelSettingsPath = options.modelSettingsPath ?? MODEL_SETTINGS_PATH;
@@ -877,10 +999,12 @@ export async function buildServer(options: BuildServerOptions = {}) {
         service,
         approvals,
         context,
+        contextBroker,
         methods,
         autoLearn: true,
         leases,
         delegations,
+        backgroundTools,
         attachmentRoot,
         executorSettingsPath,
         executorSettingsProvider: () => executorSettingsStore.load(),
@@ -914,6 +1038,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   if (options.startMaintenance ?? options.startScheduler) {
     maintenance.start();
     skillCurator.start();
+    watchdog.start();
   }
   if (options.startProactive) proactive.start();
   if (options.startHeartbeat) standingIntents.start();
@@ -936,7 +1061,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
     codexEnv,
     modelSettingsForExecutor,
     executorHealth,
-    memory
+    memory,
+    personal: { ontology, mentions, broker: contextBroker, writer: ontologyWriter }
   });
   registerEvalRoutes(app, {
     service,
@@ -950,6 +1076,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
     mail.stop();
     proactive.stop();
     standingIntents.stop();
+    watchdog.stop();
+    threadSubscriptions.close();
     maintenance.stop();
     skillCurator.stop();
     schedules.stop();
@@ -1501,7 +1629,43 @@ export async function buildServer(options: BuildServerOptions = {}) {
 
   app.get("/api/attention", async (_request, reply) => {
     reply.header("cache-control", "no-store");
-    return { items: standingIntents.queue(), budget: standingIntents.budget() };
+    return {
+      items: attentionGovernor.list(standingIntents.queue()),
+      budget: standingIntents.budget(),
+      governor: attentionGovernor.settings()
+    };
+  });
+
+  app.get<{ Params: { id: string } }>("/api/attention/:id/explain", async (request, reply) => {
+    const explanation = attentionGovernor.explain(request.params.id);
+    if (!explanation) return reply.code(404).send({ error: "ATTENTION_NOT_FOUND", message: "注意力事项不存在" });
+    return explanation;
+  });
+
+  app.post<{ Params: { id: string } }>("/api/attention/:id/feedback", async (request, reply) => {
+    const parsed = z.object({
+      action: z.enum(["accept", "ignore", "snooze", "resolve", "wrong"]),
+      channel: z.string().trim().max(80).optional(),
+      note: z.string().trim().max(500).optional()
+    }).strict().safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_ATTENTION_FEEDBACK", message: "反馈格式不正确" });
+    try {
+      return attentionGovernor.feedback(request.params.id, definedObject(parsed.data) as unknown as Parameters<AttentionGovernor["feedback"]>[1]);
+    } catch (error) {
+      if (error instanceof Error && error.message === "ATTENTION_NOT_FOUND") {
+        return reply.code(404).send({ error: "ATTENTION_NOT_FOUND", message: "注意力事项不存在" });
+      }
+      throw error;
+    }
+  });
+
+  app.patch("/api/attention/governor", async (request, reply) => {
+    const parsed = z.object({
+      shadowMode: z.boolean().optional(),
+      minFeedbackSamples: z.number().int().min(20).max(500).optional()
+    }).strict().safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_ATTENTION_GOVERNOR", message: "注意力治理设置不正确" });
+    return attentionGovernor.updateSettings(definedObject(parsed.data) as Parameters<AttentionGovernor["updateSettings"]>[0]);
   });
 
   app.patch("/api/attention/settings", async (request, reply) => {
@@ -1536,6 +1700,53 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
   });
 
+  app.get<{ Querystring: { query?: string; kind?: string; limit?: string } }>("/api/ontology/entities", async (request) => {
+    const queryText = (request.query.query ?? "").trim().toLowerCase();
+    const kind = (request.query.kind ?? "").trim();
+    const limit = Math.max(1, Math.min(500, Number(request.query.limit ?? 100) || 100));
+    const entities = service.store.listEntities({ ...(kind ? { kind } : {}), status: "active", limit: 2000 })
+      .filter((entity) => !queryText || entity.canonicalName.toLowerCase().includes(queryText) || entity.id.toLowerCase().includes(queryText))
+      .slice(0, limit)
+      .map((entity) => ({
+        ...entity,
+        states: service.store.listEntityStates({ entityId: entity.id, activeOnly: true, limit: 30 }),
+        aliases: service.store.listEntityAliases(entity.id)
+      }));
+    return { entities };
+  });
+
+  app.get<{ Querystring: { status?: string; limit?: string } }>("/api/ontology/commitments", async (request) => {
+    const limit = Math.max(1, Math.min(500, Number(request.query.limit ?? 100) || 100));
+    return { commitments: service.store.listCommitments({ status: request.query.status ?? "open", limit }) };
+  });
+
+  app.get<{ Querystring: { status?: string; limit?: string } }>("/api/ontology/decisions", async (request) => {
+    const limit = Math.max(1, Math.min(500, Number(request.query.limit ?? 100) || 100));
+    return { decisions: service.store.listDecisions({ status: request.query.status ?? "active", limit }) };
+  });
+
+  app.post<{ Params: { id: string } }>("/api/ontology/entities/:id/correct", async (request, reply) => {
+    const parsed = z.object({
+      key: z.string().trim().min(1).max(120),
+      value: z.unknown(),
+      evidenceRef: z.string().trim().min(1).max(500).optional()
+    }).strict().safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_ONTOLOGY_CORRECTION", message: "纠正内容格式不正确" });
+    if (!service.store.getEntity(request.params.id)) return reply.code(404).send({ error: "ENTITY_NOT_FOUND", message: "实体不存在" });
+    return ontologyWriter.userCorrects({
+      entityId: request.params.id,
+      key: parsed.data.key,
+      value: parsed.data.value,
+      evidenceRef: parsed.data.evidenceRef ?? `user-correction:${request.params.id}:${Date.now()}`
+    });
+  });
+
+  app.post("/api/ontology/forget", async (request, reply) => {
+    const parsed = z.object({ evidenceRef: z.string().trim().min(1).max(500) }).strict().safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_ONTOLOGY_FORGET", message: "遗忘请求格式不正确" });
+    return ontologyWriter.forget(parsed.data.evidenceRef);
+  });
+
   app.get("/api/heartbeat", async (request, reply) => {
     reply.header("cache-control", "no-store");
     const limit = Number((request.query as { limit?: string } | undefined)?.limit ?? 50);
@@ -1552,6 +1763,190 @@ export async function buildServer(options: BuildServerOptions = {}) {
       return await standingIntents.heartbeat(definedObject(parsed.data) as unknown as Parameters<StandingIntentService["heartbeat"]>[0]);
     } catch (error) {
       return sendStandingIntentError(reply, error);
+    }
+  });
+
+  app.get("/api/prepared-actions", async (request) => {
+    const query = request.query as { taskId?: string; status?: string; limit?: string };
+    return {
+      actions: preparedActions.list({
+        ...(query.taskId ? { taskId: query.taskId } : {}),
+        ...(query.status ? { status: query.status } : {}),
+        limit: query.limit ? Number(query.limit) : 100
+      })
+    };
+  });
+
+  app.post("/api/prepared-actions", async (request, reply) => {
+    const body = definedObject((request.body ?? {}) as Record<string, unknown>);
+    const kinds = new Set(["draft_email", "calendar_check", "research", "test_run", "diff"]);
+    if (!kinds.has(String(body.kind))) {
+      return reply.code(400).send({ error: "INVALID_PREPARED_ACTION", message: "预备动作类型不正确" });
+    }
+    try {
+      return reply.code(201).send(preparedActions.prepare({
+        ...(typeof body.taskId === "string" ? { taskId: body.taskId } : {}),
+        ...(typeof body.goalId === "string" ? { goalId: body.goalId } : {}),
+        kind: String(body.kind) as Parameters<PreparedActionService["prepare"]>[0]["kind"],
+        preview: body.preview && typeof body.preview === "object" ? body.preview as Record<string, unknown> : {},
+        evidenceRefs: Array.isArray(body.evidenceRefs) ? body.evidenceRefs.filter((ref): ref is string => typeof ref === "string") : [],
+        ...(typeof body.expiresAt === "string" ? { expiresAt: body.expiresAt } : {})
+      }));
+    } catch (error) {
+      return reply.code((error as { statusCode?: number }).statusCode ?? 400).send({
+        error: (error as { code?: string }).code ?? "PREPARED_ACTION_FAILED",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/prepared-actions/:id/commit", async (request, reply) => {
+    const body = definedObject((request.body ?? {}) as Record<string, unknown>);
+    try {
+      return preparedActions.commit(request.params.id, {
+        ...(typeof body.approvalRef === "string" ? { approvalRef: body.approvalRef } : {})
+      });
+    } catch (error) {
+      return reply.code((error as { statusCode?: number }).statusCode ?? 400).send({
+        error: (error as { code?: string }).code ?? "PREPARED_ACTION_FAILED",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/prepared-actions/:id/discard", async (request, reply) => {
+    try {
+      return preparedActions.discard(request.params.id);
+    } catch (error) {
+      return reply.code((error as { statusCode?: number }).statusCode ?? 400).send({
+        error: (error as { code?: string }).code ?? "PREPARED_ACTION_FAILED",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
+  app.get("/api/background-tools", async (request) => {
+    const query = request.query as { taskId?: string; status?: string; limit?: string };
+    return {
+      jobs: backgroundTools.list({
+        ...(query.taskId ? { taskId: query.taskId } : {}),
+        ...(query.status ? { status: query.status } : {}),
+        limit: query.limit ? Number(query.limit) : 100
+      })
+    };
+  });
+
+  app.post("/api/background-tools", async (request, reply) => {
+    const body = definedObject((request.body ?? {}) as Record<string, unknown>);
+    try {
+      return reply.code(202).send(await backgroundTools.start({
+        taskId: String(body.taskId ?? ""),
+        toolName: String(body.toolName ?? ""),
+        ...(typeof body.runId === "string" ? { runId: body.runId } : {}),
+        args: body.args && typeof body.args === "object" ? body.args as Record<string, unknown> : {},
+        ...(typeof body.timeoutMs === "number" ? { timeoutMs: body.timeoutMs } : {})
+      }));
+    } catch (error) {
+      return reply.code((error as { statusCode?: number }).statusCode ?? 400).send({
+        error: (error as { code?: string }).code ?? "BACKGROUND_TOOL_FAILED",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/background-tools/:id/stop", async (request, reply) => {
+    const body = definedObject((request.body ?? {}) as Record<string, unknown>);
+    try {
+      return backgroundTools.stop(request.params.id, typeof body.reason === "string" ? body.reason : undefined);
+    } catch (error) {
+      return reply.code((error as { statusCode?: number }).statusCode ?? 400).send({
+        error: (error as { code?: string }).code ?? "BACKGROUND_TOOL_FAILED",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
+  app.get("/api/thread-subscriptions/deliveries", async (request) => {
+    const query = request.query as { limit?: string };
+    return { deliveries: threadSubscriptions.recentDeliveries(query.limit ? Number(query.limit) : 50) };
+  });
+
+  app.get("/api/thread-subscriptions", async (request) => {
+    const query = request.query as { threadKey?: string; taskId?: string; status?: string };
+    return {
+      subscriptions: threadSubscriptions.list({
+        ...(query.threadKey ? { threadKey: query.threadKey } : {}),
+        ...(query.taskId ? { taskId: query.taskId } : {}),
+        ...(query.status ? { status: query.status } : {})
+      })
+    };
+  });
+
+  app.post("/api/thread-subscriptions", async (request, reply) => {
+    const body = definedObject((request.body ?? {}) as Record<string, unknown>);
+    try {
+      return reply.code(201).send(threadSubscriptions.subscribe({
+        threadKey: String(body.threadKey ?? ""),
+        taskId: String(body.taskId ?? ""),
+        ...(typeof body.runId === "string" ? { runId: body.runId } : {}),
+        filter: body.filter && typeof body.filter === "object" ? body.filter as Record<string, unknown> : {}
+      }));
+    } catch (error) {
+      return reply.code((error as { statusCode?: number }).statusCode ?? 400).send({
+        error: (error as { code?: string }).code ?? "THREAD_SUBSCRIPTION_FAILED",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
+  for (const action of ["pause", "resume", "end"] as const) {
+    app.post<{ Params: { id: string } }>(`/api/thread-subscriptions/:id/${action}`, async (request, reply) => {
+      try {
+        return threadSubscriptions[action](request.params.id);
+      } catch (error) {
+        return reply.code((error as { statusCode?: number }).statusCode ?? 400).send({
+          error: (error as { code?: string }).code ?? "THREAD_SUBSCRIPTION_FAILED",
+          message: error instanceof Error ? error.message : String(error)
+        });
+      }
+    });
+  }
+
+  app.get("/api/watchdog", async (request) => {
+    const query = request.query as { limit?: string };
+    return {
+      settings: watchdog.settings(),
+      events: store.listWatchdogEvents({ limit: query.limit ? Number(query.limit) : 100 })
+    };
+  });
+
+  app.post("/api/watchdog/scan", async () => ({ events: watchdog.scan(), settings: watchdog.settings() }));
+
+  app.patch("/api/watchdog/settings", async (request, reply) => {
+    const body = definedObject((request.body ?? {}) as Record<string, unknown>);
+    try {
+      return watchdog.updateSettings(body as Parameters<WatchdogService["updateSettings"]>[0]);
+    } catch (error) {
+      return reply.code(400).send({ error: "INVALID_WATCHDOG_SETTINGS", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.get("/api/intake/decisions", async (request) => {
+    const query = request.query as { limit?: string };
+    return { decisions: intake.list(query.limit ? Number(query.limit) : 100) };
+  });
+
+  app.post("/api/intake/route", async (request, reply) => {
+    const body = definedObject((request.body ?? {}) as Record<string, unknown>);
+    try {
+      return intake.route({
+        sourceRef: String(body.sourceRef ?? ""),
+        text: String(body.text ?? ""),
+        ...(typeof body.sender === "string" ? { sender: body.sender } : {}),
+        ...(typeof body.channel === "string" ? { channel: body.channel } : {})
+      });
+    } catch (error) {
+      return reply.code(400).send({ error: "INVALID_INTAKE_INPUT", message: error instanceof Error ? error.message : String(error) });
     }
   });
 

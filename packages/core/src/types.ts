@@ -1614,7 +1614,19 @@ export interface StandingIntentRecord {
   updatedAt: string;
 }
 
-export const ATTENTION_ITEM_KINDS = ["decision", "credential", "approval", "reconcile", "progress", "suggestion"] as const;
+export const ATTENTION_ITEM_KINDS = [
+  "decision",
+  "approval",
+  "credential",
+  "reconcile",
+  "conflict",
+  "commitment",
+  "deadline",
+  "blocked",
+  "opportunity",
+  "progress",
+  "suggestion"
+] as const;
 export type AttentionItemKind = (typeof ATTENTION_ITEM_KINDS)[number];
 
 export const ATTENTION_ITEM_STATUSES = ["open", "acknowledged", "ignored", "snoozed", "resolved"] as const;
@@ -1648,8 +1660,46 @@ export interface AttentionItem {
   source: string;
   status: AttentionItemStatus;
   snoozeUntil: string | null;
+  entityId?: string | null;
+  evidenceRefs?: string[];
+  options?: AttentionOption[];
+  impact?: number;
+  urgency?: number;
+  confidence?: number;
+  reversibility?: "easy" | "hard" | "irreversible";
+  blastRadius?: "self" | "team" | "public";
+  score?: number;
+  aggregationKey?: string | null;
+  shadowed?: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface AttentionOption {
+  id: string;
+  label: string;
+  action: string;
+  consequence?: string;
+}
+
+export interface AttentionCandidate {
+  id: string;
+  kind: AttentionItemKind;
+  subjectRef: string;
+  title: string;
+  whyNow: string;
+  consequence: string;
+  nextAction: string;
+  options: AttentionOption[];
+  impact: 1 | 2 | 3 | 4 | 5;
+  urgency: 1 | 2 | 3 | 4 | 5;
+  confidence: number;
+  reversibility: "easy" | "hard" | "irreversible";
+  blastRadius: "self" | "team" | "public";
+  critical: boolean;
+  evidenceRefs: string[];
+  dedupeKey: string;
+  expiresAt?: string;
 }
 
 export interface HeartbeatRun {

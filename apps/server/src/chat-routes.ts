@@ -12,6 +12,10 @@ import { EXECUTOR_FALLBACK_ORDER, executorName, resolveExecutorFromEnabled } fro
 import { executorHealth, isExecutorManagedInstalled } from "./executor-runtime.ts";
 import type { HearthService } from "./service.ts";
 import type { MemoryService } from "./memory.ts";
+import type { ContextBroker } from "./context-broker.ts";
+import type { MentionResolver } from "./mentions.ts";
+import type { OntologyService } from "./ontology.ts";
+import type { OntologyWriter } from "./ontology-writer.ts";
 import { ModelRegistryError, type ModelRegistry } from "./model-registry.ts";
 import { chatSystemPrompt, conversationTitle, decideRoute, planExecution } from "./chat.ts";
 import { listModels, ModelClientError, completeChat, streamChat, type ChatMessage } from "./model-client.ts";
@@ -89,6 +93,12 @@ export interface ChatRouteOptions {
   modelSettingsForExecutor?: ((executorId: ExecutorId) => ModelSettings | null) | undefined;
   executorHealth?: ((executorId: ExecutorId) => ExecutorHealth) | undefined;
   memory?: MemoryService | undefined;
+  personal?: {
+    ontology: OntologyService;
+    mentions: MentionResolver;
+    broker: ContextBroker;
+    writer: OntologyWriter;
+  } | undefined;
 }
 
 export async function registerChatRoutes(app: FastifyInstance, options: ChatRouteOptions): Promise<void> {
@@ -358,6 +368,11 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
 
     send("conversation", conversation);
     send("user", userRecord);
+    try {
+      options.personal?.writer.captureChatTurn(userRecord);
+    } catch {
+      // Ontology writeback is best effort and never blocks the reply.
+    }
 
     const settings = chatSettings();
     const plan = planExecution(userContent);
@@ -384,6 +399,41 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       preferredExecutorId,
       ...(resolution.reroutedFrom ? { reroutedFrom: resolution.reroutedFrom } : {})
     });
+
+    let mentionResult: ReturnType<MentionResolver["resolveText"]> | null = null;
+    if (options.personal) {
+      try {
+        mentionResult = options.personal.mentions.resolveText({
+          text: userContent,
+          conversationId: conversation.id,
+          messageId: userRecord.id,
+          irreversible: route.action === "task"
+        });
+        if (mentionResult.mentions.length > 0) {
+          send("mentions", {
+            resolved: mentionResult.mentions.filter((mention) => mention.resolution === "resolved").length,
+            ambiguous: mentionResult.mentions.filter((mention) => mention.resolution !== "resolved").length
+          });
+        }
+      } catch {
+        mentionResult = null;
+      }
+    }
+    if (route.action === "task" && mentionResult?.blocksAction) {
+      const assistant = store.createChatMessage({
+        id: randomUUID(),
+        conversationId: conversation.id,
+        role: "assistant",
+        content: `在派出任务前需要先确认指代：${mentionResult.question ?? "请补充具体对象。"}`,
+        taskId: null,
+        attachments: [],
+        createdAt: new Date().toISOString()
+      });
+      send("clarification", { question: mentionResult.question, mentions: mentionResult.mentions });
+      send("done", assistant);
+      finish(reply, send);
+      return reply;
+    }
 
     if (route.action === "task") {
       try {
@@ -468,8 +518,25 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
         // Memory recall is best effort and never blocks the answer.
       }
     }
+    let personalContext = "";
+    if (options.personal) {
+      try {
+        const pack = options.personal.broker.compile({
+          scopeKind: "chat",
+          scopeId: conversation.id,
+          conversationId: conversation.id,
+          query: userContent,
+          budgetTokens: 1600,
+          includeRecentContext: false
+        });
+        personalContext = options.personal.broker.render(pack);
+        send("context", { packId: pack.id, usedTokens: pack.usedTokens, budgetTokens: pack.budgetTokens });
+      } catch {
+        personalContext = "";
+      }
+    }
     const messages: ChatMessage[] = [
-      { role: "system", content: [chatSystemPrompt(), memoryContext].filter(Boolean).join("\n\n") },
+      { role: "system", content: [chatSystemPrompt(), personalContext, memoryContext].filter(Boolean).join("\n\n") },
       ...history
     ];
 

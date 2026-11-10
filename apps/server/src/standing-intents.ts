@@ -38,11 +38,16 @@ export const DEFAULT_ATTENTION_BUDGET: AttentionBudgetSettings = {
 
 const ATTENTION_PRIORITY: Record<AttentionItemKind, number> = {
   decision: 1,
-  credential: 2,
-  approval: 3,
+  approval: 2,
+  credential: 3,
+  conflict: 2,
+  commitment: 2,
+  deadline: 2,
+  blocked: 3,
   reconcile: 4,
-  progress: 5,
-  suggestion: 6
+  opportunity: 5,
+  progress: 6,
+  suggestion: 7
 };
 
 export interface CreateStandingIntentInput {
@@ -109,6 +114,7 @@ export interface StandingIntentOptions {
   staleTaskMs?: number;
   defaultBudget?: AttentionBudgetSettings;
   notifier?: (run: HeartbeatRun, items: AttentionItem[]) => void | Promise<void>;
+  deliveryGate?: (run: HeartbeatRun, items: AttentionItem[]) => boolean;
 }
 
 export class StandingIntentError extends Error {
@@ -126,6 +132,7 @@ export class StandingIntentError extends Error {
 export class StandingIntentService {
   private readonly service: HearthService;
   private readonly clock: () => Date;
+  private readonly deliveryGate: ((run: HeartbeatRun, items: AttentionItem[]) => boolean) | undefined;
   private readonly maxCandidates: number;
   private readonly staleTaskMs: number;
   private readonly defaultBudget: AttentionBudgetSettings;
@@ -140,6 +147,7 @@ export class StandingIntentService {
     this.staleTaskMs = options.staleTaskMs ?? STALE_TASK_MS;
     this.defaultBudget = { ...DEFAULT_ATTENTION_BUDGET, ...(options.defaultBudget ?? {}) };
     this.notifier = options.notifier;
+    this.deliveryGate = options.deliveryGate;
   }
 
   start(intervalMs = 5 * 60_000): void {
@@ -400,6 +408,27 @@ export class StandingIntentService {
       addCandidate(this.dueGoalCandidate(goal));
     }
 
+    for (const commitment of this.service.store.listCommitments({ status: "open", limit: 200 })) {
+      if (!commitment.dueAt) continue;
+      const due = Date.parse(commitment.dueAt);
+      if (!Number.isFinite(due) || due > now.getTime() + 72 * 60 * 60 * 1000) continue;
+      triggerKinds.add("commitment.due");
+      addCandidate({
+        dedupeKey: `commitment:${commitment.id}`,
+        kind: due <= now.getTime() ? "deadline" : "commitment",
+        title: `${due <= now.getTime() ? "承诺已到期" : "承诺即将到期"}：${commitment.description.slice(0, 80)}`,
+        waitingOn: "user",
+        waitingSince: commitment.createdAt,
+        nextAction: "确认是否已完成、需要延期，或交给我继续推进",
+        consequence: due <= now.getTime() ? "未兑现的承诺会影响信任与后续计划" : "临近截止，越晚处理越难按时完成",
+        whyNow: `截止时间 ${commitment.dueAt}`,
+        goalId: commitment.goalId,
+        taskId: commitment.taskId,
+        source: "commitment",
+        priority: ATTENTION_PRIORITY[due <= now.getTime() ? "deadline" : "commitment"]
+      });
+    }
+
     for (const effect of this.service.store.listAllEffects()) {
       if (effect.status !== "uncertain") continue;
       triggerKinds.add("effect.uncertain");
@@ -507,7 +536,8 @@ export class StandingIntentService {
       endedAt
     };
     this.persistHeartbeat(run);
-    if (this.notifier && delivered.length > 0) {
+    const allowed = this.deliveryGate ? this.deliveryGate(run, delivered) : true;
+    if (allowed && this.notifier && delivered.length > 0) {
       try {
         await this.notifier(run, delivered);
       } catch {

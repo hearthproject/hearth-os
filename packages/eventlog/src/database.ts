@@ -7,7 +7,9 @@ import type {
   ApprovalRecord,
   ApprovalStatus,
   ArtifactRecord,
+  AttentionFeedbackRecord,
   AttentionItem,
+  BackgroundToolJob,
   BackupRecord,
   ChannelCursor,
   ChannelDeliveryRecord,
@@ -17,6 +19,8 @@ import type {
   ConversationSettingsPatch,
   ContextItem,
   ContextItemPage,
+  ContextPack,
+  ContextPackItem,
   ConnectionOutboxItem,
   ConnectionSession,
   ContextSettings,
@@ -24,6 +28,8 @@ import type {
   DesktopFrameRecord,
   DesktopSessionRecord,
   DelegationJob,
+  DecisionRecord,
+  CommitmentRecord,
   DevicePairingRequest,
   DeviceRecord,
   EffectRecord,
@@ -33,12 +39,17 @@ import type {
   GoalContract,
   GoalCompletionReport,
   HandoffRecord,
+  EntityAliasRecord,
+  EntityRecord,
+  EntityStateRecord,
+  IntakeDecisionRecord,
   MemoryConflict,
   MemoryConsolidationRun,
   MemoryForgetReceipt,
   MemoryForgetTombstone,
   MemoryRecall,
   MemoryRecord,
+  MemoryEntityLink,
   MemorySettings,
   MemoryVersion,
   MethodApplication,
@@ -53,6 +64,7 @@ import type {
   HeartbeatRun,
   ReconcileItem,
   ReconcileStatus,
+  RelationRecord,
   RunCheckpointRecord,
   RunRecord,
   RunStatus,
@@ -75,7 +87,12 @@ import type {
   TaskFollowUpRecord,
   TaskProposalRecord,
   TaskRecord,
-  TaskStatus
+  TaskEdge,
+  TaskStatus,
+  MentionRecord,
+  PreparedActionRecord,
+  ThreadSubscriptionRecord,
+  WatchdogEvent
 } from "@hearth/core";
 import {
   APPROVAL_STATUSES,
@@ -111,7 +128,7 @@ export interface RunAggregate {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 26;
+export const CURRENT_SCHEMA_VERSION = 28;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -549,6 +566,10 @@ CREATE TABLE IF NOT EXISTS attention_items (
   waiting_on TEXT NOT NULL, waiting_since TEXT NOT NULL, next_action TEXT NOT NULL,
   consequence TEXT NOT NULL, why_now TEXT NOT NULL, goal_id TEXT, task_id TEXT,
   intent_id TEXT, source TEXT NOT NULL, status TEXT NOT NULL, snooze_until TEXT,
+  entity_id TEXT, evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+  options_json TEXT NOT NULL DEFAULT '[]', impact REAL, urgency REAL, confidence REAL,
+  reversibility TEXT, blast_radius TEXT, score REAL, aggregation_key TEXT,
+  shadowed INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS heartbeat_runs (
@@ -614,6 +635,92 @@ CREATE TABLE IF NOT EXISTS connection_outbox (
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
   UNIQUE(connection_id, idempotency_key)
 );
+CREATE TABLE IF NOT EXISTS entities (
+  id TEXT PRIMARY KEY, kind TEXT NOT NULL, canonical_name TEXT NOT NULL,
+  status TEXT NOT NULL, sensitivity TEXT NOT NULL DEFAULT 'normal',
+  confidence TEXT NOT NULL, merged_into TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS entity_aliases (
+  id TEXT PRIMARY KEY, entity_id TEXT NOT NULL, alias TEXT NOT NULL,
+  normalized TEXT NOT NULL, source_kind TEXT NOT NULL, confidence TEXT NOT NULL,
+  created_at TEXT NOT NULL, UNIQUE(entity_id, normalized)
+);
+CREATE TABLE IF NOT EXISTS relations (
+  id TEXT PRIMARY KEY, from_entity_id TEXT NOT NULL, predicate TEXT NOT NULL,
+  to_entity_id TEXT NOT NULL, confidence TEXT NOT NULL, valid_from TEXT, valid_to TEXT,
+  recorded_at TEXT NOT NULL, evidence_refs_json TEXT NOT NULL, superseded_by TEXT
+);
+CREATE TABLE IF NOT EXISTS entity_states (
+  id TEXT PRIMARY KEY, entity_id TEXT NOT NULL, key TEXT NOT NULL, value_json TEXT NOT NULL,
+  confidence TEXT NOT NULL, valid_from TEXT NOT NULL, valid_to TEXT, recorded_at TEXT NOT NULL,
+  source_ref TEXT, evidence_refs_json TEXT NOT NULL, superseded_by TEXT
+);
+CREATE TABLE IF NOT EXISTS decisions (
+  id TEXT PRIMARY KEY, subject_entity_id TEXT, goal_id TEXT, task_id TEXT,
+  title TEXT NOT NULL, decision TEXT NOT NULL, rationale TEXT, alternatives_json TEXT NOT NULL,
+  decided_by TEXT NOT NULL, decided_at TEXT NOT NULL, status TEXT NOT NULL,
+  superseded_by TEXT, evidence_refs_json TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS commitments (
+  id TEXT PRIMARY KEY, entity_id TEXT, counterparty_entity_id TEXT, goal_id TEXT, task_id TEXT,
+  description TEXT NOT NULL, due_at TEXT, status TEXT NOT NULL, confidence TEXT NOT NULL,
+  source_ref TEXT, evidence_refs_json TEXT NOT NULL, fulfilled_at TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS mentions (
+  id TEXT PRIMARY KEY, surface TEXT NOT NULL, normalized TEXT NOT NULL, entity_id TEXT,
+  conversation_id TEXT, task_id TEXT, message_id TEXT, resolution TEXT NOT NULL,
+  candidates_json TEXT NOT NULL, confidence REAL NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS context_packs (
+  id TEXT PRIMARY KEY, scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL,
+  goal_id TEXT, task_id TEXT, conversation_id TEXT, hash TEXT NOT NULL,
+  budget_tokens INTEGER NOT NULL, used_tokens INTEGER NOT NULL, omitted_json TEXT NOT NULL,
+  parent_pack_id TEXT, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS context_pack_items (
+  pack_id TEXT NOT NULL, ref TEXT NOT NULL, lane TEXT NOT NULL, source_kind TEXT NOT NULL,
+  source_id TEXT NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL, confidence TEXT NOT NULL,
+  source TEXT NOT NULL, valid_until TEXT, reason TEXT NOT NULL, score REAL NOT NULL,
+  tokens INTEGER NOT NULL, expandable INTEGER NOT NULL, PRIMARY KEY (pack_id, ref)
+);
+CREATE TABLE IF NOT EXISTS memory_entities (
+  memory_id TEXT NOT NULL, entity_id TEXT NOT NULL, relation TEXT NOT NULL,
+  PRIMARY KEY (memory_id, entity_id, relation)
+);
+CREATE TABLE IF NOT EXISTS task_edges (
+  parent_task_id TEXT NOT NULL, child_task_id TEXT NOT NULL, kind TEXT NOT NULL,
+  join_policy TEXT NOT NULL, required_count INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL, PRIMARY KEY (parent_task_id, child_task_id)
+);
+CREATE TABLE IF NOT EXISTS prepared_actions (
+  id TEXT PRIMARY KEY, task_id TEXT, goal_id TEXT, kind TEXT NOT NULL,
+  action_digest TEXT NOT NULL, preview_json TEXT NOT NULL, status TEXT NOT NULL,
+  expires_at TEXT, evidence_refs_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS thread_subscriptions (
+  id TEXT PRIMARY KEY, thread_key TEXT NOT NULL, task_id TEXT NOT NULL, run_id TEXT,
+  cursor TEXT, filter_json TEXT NOT NULL, status TEXT NOT NULL,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(thread_key, task_id)
+);
+CREATE TABLE IF NOT EXISTS background_tool_jobs (
+  id TEXT PRIMARY KEY, task_id TEXT NOT NULL, run_id TEXT, tool_name TEXT NOT NULL,
+  args_json TEXT NOT NULL, status TEXT NOT NULL, output TEXT NOT NULL DEFAULT '',
+  output_ref TEXT, exit_code INTEGER, stop_reason TEXT, created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL, finished_at TEXT
+);
+CREATE TABLE IF NOT EXISTS watchdog_events (
+  id TEXT PRIMARY KEY, task_id TEXT, run_id TEXT, reason TEXT NOT NULL, detail TEXT NOT NULL,
+  action TEXT NOT NULL, evidence_refs_json TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS attention_feedback (
+  id TEXT PRIMARY KEY, attention_id TEXT NOT NULL, kind TEXT NOT NULL, action TEXT NOT NULL,
+  time_of_day TEXT NOT NULL, channel TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS intake_decisions (
+  id TEXT PRIMARY KEY, source_ref TEXT NOT NULL, route TEXT NOT NULL, reason TEXT NOT NULL,
+  confidence REAL NOT NULL, created_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS events_task_idx ON events(task_id, seq);
 CREATE INDEX IF NOT EXISTS runs_task_idx ON runs(task_id, created_at);
 CREATE INDEX IF NOT EXISTS approvals_task_idx ON approvals(task_id, status);
@@ -664,6 +771,21 @@ CREATE INDEX IF NOT EXISTS scheduled_jobs_due_idx ON scheduled_jobs(enabled, nex
 CREATE INDEX IF NOT EXISTS scheduled_job_runs_schedule_idx ON scheduled_job_runs(schedule_id, scheduled_for);
 CREATE INDEX IF NOT EXISTS connection_sessions_status_idx ON connection_sessions(status, updated_at);
 CREATE INDEX IF NOT EXISTS connection_outbox_connection_idx ON connection_outbox(connection_id, generation, status, created_at);
+CREATE INDEX IF NOT EXISTS entities_kind_name_idx ON entities(kind, canonical_name);
+CREATE INDEX IF NOT EXISTS aliases_normalized_idx ON entity_aliases(normalized);
+CREATE INDEX IF NOT EXISTS relations_from_idx ON relations(from_entity_id, predicate);
+CREATE INDEX IF NOT EXISTS relations_to_idx ON relations(to_entity_id, predicate);
+CREATE INDEX IF NOT EXISTS states_entity_key_idx ON entity_states(entity_id, key, valid_to);
+CREATE INDEX IF NOT EXISTS commitments_status_due_idx ON commitments(status, due_at);
+CREATE INDEX IF NOT EXISTS mentions_surface_idx ON mentions(normalized);
+CREATE INDEX IF NOT EXISTS packs_scope_idx ON context_packs(scope_kind, scope_id, created_at);
+CREATE INDEX IF NOT EXISTS context_pack_items_source_idx ON context_pack_items(source_kind, source_id);
+CREATE INDEX IF NOT EXISTS task_edges_child_idx ON task_edges(child_task_id, parent_task_id);
+CREATE INDEX IF NOT EXISTS prepared_actions_status_idx ON prepared_actions(status, expires_at);
+CREATE INDEX IF NOT EXISTS thread_subscriptions_thread_idx ON thread_subscriptions(thread_key, status);
+CREATE INDEX IF NOT EXISTS background_tool_jobs_status_idx ON background_tool_jobs(status, updated_at);
+CREATE INDEX IF NOT EXISTS watchdog_events_created_idx ON watchdog_events(created_at);
+CREATE INDEX IF NOT EXISTS attention_feedback_kind_idx ON attention_feedback(kind, time_of_day, created_at);
 `;
 
 export class HearthStore {
@@ -780,6 +902,359 @@ export class HearthStore {
     return this.listHeartbeatRuns(1)[0] ?? null;
   }
 
+  getEntity(id: string): EntityRecord | null {
+    const row = this.db.prepare("SELECT * FROM entities WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToEntity(row) : null;
+  }
+
+  listEntities(opts: { kind?: string; status?: string; limit?: number } = {}): EntityRecord[] {
+    const filters: string[] = [];
+    const params: SQLInputValue[] = [];
+    if (opts.kind) { filters.push("kind = ?"); params.push(opts.kind); }
+    if (opts.status) { filters.push("status = ?"); params.push(opts.status); }
+    const where = filters.length > 0 ? ` WHERE ${filters.join(" AND ")}` : "";
+    const rows = this.db.prepare(`SELECT * FROM entities${where} ORDER BY updated_at DESC LIMIT ?`)
+      .all(...params, opts.limit ?? 500) as DbRow[];
+    return rows.map(rowToEntity);
+  }
+
+  findEntitiesByName(name: string, kind?: string): EntityRecord[] {
+    const normalized = normalizeOntologyText(name);
+    const rows = kind
+      ? this.db.prepare("SELECT * FROM entities WHERE kind = ? AND lower(canonical_name) = ? ORDER BY updated_at DESC").all(kind, normalized) as DbRow[]
+      : this.db.prepare("SELECT * FROM entities WHERE lower(canonical_name) = ? ORDER BY updated_at DESC").all(normalized) as DbRow[];
+    return rows.map(rowToEntity);
+  }
+
+  findEntitiesByAlias(normalized: string, kind?: string): EntityRecord[] {
+    const rows = kind
+      ? this.db.prepare(`SELECT e.* FROM entities e JOIN entity_aliases a ON a.entity_id = e.id
+          WHERE a.normalized = ? AND e.kind = ? AND e.status = 'active' ORDER BY a.created_at DESC`).all(normalized, kind) as DbRow[]
+      : this.db.prepare(`SELECT e.* FROM entities e JOIN entity_aliases a ON a.entity_id = e.id
+          WHERE a.normalized = ? AND e.status = 'active' ORDER BY a.created_at DESC`).all(normalized) as DbRow[];
+    return rows.map(rowToEntity);
+  }
+
+  upsertEntity(entity: EntityRecord): EntityRecord {
+    upsertEntityRow(this.db, entity);
+    return entity;
+  }
+
+  getEntityAlias(id: string): EntityAliasRecord | null {
+    const row = this.db.prepare("SELECT * FROM entity_aliases WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToEntityAlias(row) : null;
+  }
+
+  listEntityAliases(entityId?: string): EntityAliasRecord[] {
+    const rows = entityId
+      ? this.db.prepare("SELECT * FROM entity_aliases WHERE entity_id = ? ORDER BY created_at").all(entityId) as DbRow[]
+      : this.db.prepare("SELECT * FROM entity_aliases ORDER BY created_at").all() as DbRow[];
+    return rows.map(rowToEntityAlias);
+  }
+
+  upsertEntityAlias(alias: EntityAliasRecord): EntityAliasRecord {
+    upsertEntityAliasRow(this.db, alias);
+    return alias;
+  }
+
+  listRelations(opts: { fromEntityId?: string; toEntityId?: string; predicate?: string; activeOnly?: boolean; limit?: number } = {}): RelationRecord[] {
+    const filters: string[] = [];
+    const params: SQLInputValue[] = [];
+    if (opts.fromEntityId) { filters.push("from_entity_id = ?"); params.push(opts.fromEntityId); }
+    if (opts.toEntityId) { filters.push("to_entity_id = ?"); params.push(opts.toEntityId); }
+    if (opts.predicate) { filters.push("predicate = ?"); params.push(opts.predicate); }
+    if (opts.activeOnly) filters.push("valid_to IS NULL AND superseded_by IS NULL");
+    const where = filters.length > 0 ? ` WHERE ${filters.join(" AND ")}` : "";
+    const rows = this.db.prepare(`SELECT * FROM relations${where} ORDER BY recorded_at DESC LIMIT ?`)
+      .all(...params, opts.limit ?? 500) as DbRow[];
+    return rows.map(rowToRelation);
+  }
+
+  upsertRelation(relation: RelationRecord): RelationRecord {
+    upsertRelationRow(this.db, relation);
+    return relation;
+  }
+
+  getEntityState(id: string): EntityStateRecord | null {
+    const row = this.db.prepare("SELECT * FROM entity_states WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToEntityState(row) : null;
+  }
+
+  listEntityStates(opts: { entityId?: string; key?: string; activeOnly?: boolean; limit?: number } = {}): EntityStateRecord[] {
+    const filters: string[] = [];
+    const params: SQLInputValue[] = [];
+    if (opts.entityId) { filters.push("entity_id = ?"); params.push(opts.entityId); }
+    if (opts.key) { filters.push("key = ?"); params.push(opts.key); }
+    if (opts.activeOnly) filters.push("valid_to IS NULL AND superseded_by IS NULL");
+    const where = filters.length > 0 ? ` WHERE ${filters.join(" AND ")}` : "";
+    const rows = this.db.prepare(`SELECT * FROM entity_states${where} ORDER BY valid_from DESC LIMIT ?`)
+      .all(...params, opts.limit ?? 500) as DbRow[];
+    return rows.map(rowToEntityState);
+  }
+
+  upsertEntityState(state: EntityStateRecord): EntityStateRecord {
+    upsertEntityStateRow(this.db, state);
+    return state;
+  }
+
+  getDecision(id: string): DecisionRecord | null {
+    const row = this.db.prepare("SELECT * FROM decisions WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToDecision(row) : null;
+  }
+
+  listDecisions(opts: { status?: string; goalId?: string; taskId?: string; subjectEntityId?: string; limit?: number } = {}): DecisionRecord[] {
+    const filters: string[] = [];
+    const params: SQLInputValue[] = [];
+    if (opts.status) { filters.push("status = ?"); params.push(opts.status); }
+    if (opts.goalId) { filters.push("goal_id = ?"); params.push(opts.goalId); }
+    if (opts.taskId) { filters.push("task_id = ?"); params.push(opts.taskId); }
+    if (opts.subjectEntityId) { filters.push("subject_entity_id = ?"); params.push(opts.subjectEntityId); }
+    const where = filters.length > 0 ? ` WHERE ${filters.join(" AND ")}` : "";
+    const rows = this.db.prepare(`SELECT * FROM decisions${where} ORDER BY decided_at DESC LIMIT ?`)
+      .all(...params, opts.limit ?? 200) as DbRow[];
+    return rows.map(rowToDecision);
+  }
+
+  upsertDecision(decision: DecisionRecord): DecisionRecord {
+    upsertDecisionRow(this.db, decision);
+    return decision;
+  }
+
+  getCommitment(id: string): CommitmentRecord | null {
+    const row = this.db.prepare("SELECT * FROM commitments WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToCommitment(row) : null;
+  }
+
+  listCommitments(opts: { status?: string; dueBefore?: string; goalId?: string; taskId?: string; limit?: number } = {}): CommitmentRecord[] {
+    const filters: string[] = [];
+    const params: SQLInputValue[] = [];
+    if (opts.status) { filters.push("status = ?"); params.push(opts.status); }
+    if (opts.dueBefore) { filters.push("due_at IS NOT NULL AND due_at <= ?"); params.push(opts.dueBefore); }
+    if (opts.goalId) { filters.push("goal_id = ?"); params.push(opts.goalId); }
+    if (opts.taskId) { filters.push("task_id = ?"); params.push(opts.taskId); }
+    const where = filters.length > 0 ? ` WHERE ${filters.join(" AND ")}` : "";
+    const rows = this.db.prepare(`SELECT * FROM commitments${where} ORDER BY due_at IS NULL, due_at ASC LIMIT ?`)
+      .all(...params, opts.limit ?? 200) as DbRow[];
+    return rows.map(rowToCommitment);
+  }
+
+  upsertCommitment(commitment: CommitmentRecord): CommitmentRecord {
+    upsertCommitmentRow(this.db, commitment);
+    return commitment;
+  }
+
+  recordMention(mention: MentionRecord): MentionRecord {
+    upsertMentionRow(this.db, mention);
+    return mention;
+  }
+
+  listMentions(opts: { conversationId?: string; taskId?: string; normalized?: string; limit?: number } = {}): MentionRecord[] {
+    const filters: string[] = [];
+    const params: SQLInputValue[] = [];
+    if (opts.conversationId) { filters.push("conversation_id = ?"); params.push(opts.conversationId); }
+    if (opts.taskId) { filters.push("task_id = ?"); params.push(opts.taskId); }
+    if (opts.normalized) { filters.push("normalized = ?"); params.push(opts.normalized); }
+    const where = filters.length > 0 ? ` WHERE ${filters.join(" AND ")}` : "";
+    const rows = this.db.prepare(`SELECT * FROM mentions${where} ORDER BY created_at DESC LIMIT ?`)
+      .all(...params, opts.limit ?? 500) as DbRow[];
+    return rows.map(rowToMention);
+  }
+
+  saveContextPack(pack: ContextPack): ContextPack {
+    upsertContextPackRow(this.db, pack);
+    return pack;
+  }
+
+  getContextPack(id: string): ContextPack | null {
+    const row = this.db.prepare("SELECT * FROM context_packs WHERE id = ?").get(id) as DbRow | undefined;
+    if (!row) return null;
+    return { ...rowToContextPack(row), items: this.listContextPackItems(id) };
+  }
+
+  findContextPackByHash(hash: string): ContextPack | null {
+    const row = this.db.prepare("SELECT * FROM context_packs WHERE hash = ? ORDER BY created_at DESC LIMIT 1").get(hash) as DbRow | undefined;
+    if (!row) return null;
+    return { ...rowToContextPack(row), items: this.listContextPackItems(String(row.id)) };
+  }
+
+  listContextPacks(opts: { scopeKind?: string; scopeId?: string; limit?: number } = {}): ContextPack[] {
+    const filters: string[] = [];
+    const params: SQLInputValue[] = [];
+    if (opts.scopeKind) { filters.push("scope_kind = ?"); params.push(opts.scopeKind); }
+    if (opts.scopeId) { filters.push("scope_id = ?"); params.push(opts.scopeId); }
+    const where = filters.length > 0 ? ` WHERE ${filters.join(" AND ")}` : "";
+    const rows = this.db.prepare(`SELECT * FROM context_packs${where} ORDER BY created_at DESC LIMIT ?`)
+      .all(...params, opts.limit ?? 100) as DbRow[];
+    return rows.map((row) => ({ ...rowToContextPack(row), items: this.listContextPackItems(String(row.id)) }));
+  }
+
+  listContextPackItems(packId: string): ContextPackItem[] {
+    const rows = this.db.prepare("SELECT * FROM context_pack_items WHERE pack_id = ? ORDER BY lane, score DESC").all(packId) as DbRow[];
+    return rows.map(rowToContextPackItem);
+  }
+
+  invalidateContextPacksForEvidence(evidenceRef: string): number {
+    const packs = this.db.prepare("SELECT DISTINCT pack_id FROM context_pack_items WHERE source_id = ?").all(evidenceRef) as DbRow[];
+    for (const row of packs) {
+      this.db.prepare("UPDATE context_packs SET hash = ?, omitted_json = ? WHERE id = ?")
+        .run(`${String(row.pack_id)}:invalidated:${Date.now()}`, JSON.stringify([`证据 ${evidenceRef} 已遗忘`]), String(row.pack_id));
+    }
+    return packs.length;
+  }
+
+  linkMemoryEntity(link: MemoryEntityLink): MemoryEntityLink {
+    this.db.prepare("INSERT OR IGNORE INTO memory_entities (memory_id, entity_id, relation) VALUES (?, ?, ?)")
+      .run(link.memoryId, link.entityId, link.relation);
+    return link;
+  }
+
+  listMemoryEntityLinks(opts: { memoryId?: string; entityId?: string } = {}): MemoryEntityLink[] {
+    const rows = opts.memoryId
+      ? this.db.prepare("SELECT * FROM memory_entities WHERE memory_id = ?").all(opts.memoryId) as DbRow[]
+      : opts.entityId
+        ? this.db.prepare("SELECT * FROM memory_entities WHERE entity_id = ?").all(opts.entityId) as DbRow[]
+        : this.db.prepare("SELECT * FROM memory_entities").all() as DbRow[];
+    return rows.map((row) => ({
+      memoryId: String(row.memory_id),
+      entityId: String(row.entity_id),
+      relation: String(row.relation) as MemoryEntityLink["relation"]
+    }));
+  }
+
+  upsertTaskEdge(edge: TaskEdge): TaskEdge {
+    upsertTaskEdgeRow(this.db, edge);
+    return edge;
+  }
+
+  listTaskEdges(opts: { parentTaskId?: string; childTaskId?: string } = {}): TaskEdge[] {
+    const rows = opts.parentTaskId
+      ? this.db.prepare("SELECT * FROM task_edges WHERE parent_task_id = ? ORDER BY created_at").all(opts.parentTaskId) as DbRow[]
+      : opts.childTaskId
+        ? this.db.prepare("SELECT * FROM task_edges WHERE child_task_id = ? ORDER BY created_at").all(opts.childTaskId) as DbRow[]
+        : this.db.prepare("SELECT * FROM task_edges ORDER BY created_at").all() as DbRow[];
+    return rows.map(rowToTaskEdge);
+  }
+
+  upsertPreparedAction(action: PreparedActionRecord): PreparedActionRecord {
+    upsertPreparedActionRow(this.db, action);
+    return action;
+  }
+
+  getPreparedAction(id: string): PreparedActionRecord | null {
+    const row = this.db.prepare("SELECT * FROM prepared_actions WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToPreparedAction(row) : null;
+  }
+
+  listPreparedActions(opts: { taskId?: string; status?: string; limit?: number } = {}): PreparedActionRecord[] {
+    const filters: string[] = [];
+    const params: SQLInputValue[] = [];
+    if (opts.taskId) { filters.push("task_id = ?"); params.push(opts.taskId); }
+    if (opts.status) { filters.push("status = ?"); params.push(opts.status); }
+    const where = filters.length > 0 ? ` WHERE ${filters.join(" AND ")}` : "";
+    const rows = this.db.prepare(`SELECT * FROM prepared_actions${where} ORDER BY created_at DESC LIMIT ?`)
+      .all(...params, opts.limit ?? 100) as DbRow[];
+    return rows.map(rowToPreparedAction);
+  }
+
+  upsertThreadSubscription(subscription: ThreadSubscriptionRecord): ThreadSubscriptionRecord {
+    upsertThreadSubscriptionRow(this.db, subscription);
+    return subscription;
+  }
+
+  listThreadSubscriptions(opts: { threadKey?: string; taskId?: string; status?: string } = {}): ThreadSubscriptionRecord[] {
+    const filters: string[] = [];
+    const params: SQLInputValue[] = [];
+    if (opts.threadKey) { filters.push("thread_key = ?"); params.push(opts.threadKey); }
+    if (opts.taskId) { filters.push("task_id = ?"); params.push(opts.taskId); }
+    if (opts.status) { filters.push("status = ?"); params.push(opts.status); }
+    const where = filters.length > 0 ? ` WHERE ${filters.join(" AND ")}` : "";
+    const rows = this.db.prepare(`SELECT * FROM thread_subscriptions${where} ORDER BY updated_at DESC`).all(...params) as DbRow[];
+    return rows.map(rowToThreadSubscription);
+  }
+
+  getBackgroundToolJob(id: string): BackgroundToolJob | null {
+    const row = this.db.prepare("SELECT * FROM background_tool_jobs WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToBackgroundToolJob(row) : null;
+  }
+
+  listBackgroundToolJobs(opts: { taskId?: string; runId?: string; status?: string; limit?: number } = {}): BackgroundToolJob[] {
+    const filters: string[] = [];
+    const params: SQLInputValue[] = [];
+    if (opts.taskId) { filters.push("task_id = ?"); params.push(opts.taskId); }
+    if (opts.runId) { filters.push("run_id = ?"); params.push(opts.runId); }
+    if (opts.status) { filters.push("status = ?"); params.push(opts.status); }
+    const where = filters.length > 0 ? ` WHERE ${filters.join(" AND ")}` : "";
+    const rows = this.db.prepare(`SELECT * FROM background_tool_jobs${where} ORDER BY created_at DESC LIMIT ?`)
+      .all(...params, opts.limit ?? 200) as DbRow[];
+    return rows.map(rowToBackgroundToolJob);
+  }
+
+  upsertBackgroundToolJob(job: BackgroundToolJob): BackgroundToolJob {
+    upsertBackgroundToolJobRow(this.db, job);
+    return job;
+  }
+
+  recordWatchdogEvent(event: WatchdogEvent): WatchdogEvent {
+    upsertWatchdogEventRow(this.db, event);
+    return event;
+  }
+
+  listWatchdogEvents(opts: { taskId?: string; limit?: number } = {}): WatchdogEvent[] {
+    const rows = opts.taskId
+      ? this.db.prepare("SELECT * FROM watchdog_events WHERE task_id = ? ORDER BY created_at DESC LIMIT ?").all(opts.taskId, opts.limit ?? 200) as DbRow[]
+      : this.db.prepare("SELECT * FROM watchdog_events ORDER BY created_at DESC LIMIT ?").all(opts.limit ?? 200) as DbRow[];
+    return rows.map(rowToWatchdogEvent);
+  }
+
+  recordAttentionFeedback(feedback: AttentionFeedbackRecord): AttentionFeedbackRecord {
+    this.db.prepare(`INSERT INTO attention_feedback
+      (id, attention_id, kind, action, time_of_day, channel, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET action=excluded.action, time_of_day=excluded.time_of_day, channel=excluded.channel`)
+      .run(feedback.id, feedback.attentionId, feedback.kind, feedback.action, feedback.timeOfDay, feedback.channel, feedback.createdAt);
+    return feedback;
+  }
+
+  listAttentionFeedback(opts: { attentionId?: string; kind?: string; since?: string; limit?: number } = {}): AttentionFeedbackRecord[] {
+    const filters: string[] = [];
+    const params: SQLInputValue[] = [];
+    if (opts.attentionId) { filters.push("attention_id = ?"); params.push(opts.attentionId); }
+    if (opts.kind) { filters.push("kind = ?"); params.push(opts.kind); }
+    if (opts.since) { filters.push("created_at >= ?"); params.push(opts.since); }
+    const where = filters.length > 0 ? ` WHERE ${filters.join(" AND ")}` : "";
+    const rows = this.db.prepare(`SELECT * FROM attention_feedback${where} ORDER BY created_at DESC LIMIT ?`)
+      .all(...params, opts.limit ?? 500) as DbRow[];
+    return rows.map(rowToAttentionFeedback);
+  }
+
+  recordIntakeDecision(decision: IntakeDecisionRecord): IntakeDecisionRecord {
+    this.db.prepare(`INSERT INTO intake_decisions (id, source_ref, route, reason, confidence, created_at)
+      VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET route=excluded.route, reason=excluded.reason,
+      confidence=excluded.confidence`).run(decision.id, decision.sourceRef, decision.route, decision.reason, decision.confidence, decision.createdAt);
+    return decision;
+  }
+
+  listIntakeDecisions(limit = 200): IntakeDecisionRecord[] {
+    return (this.db.prepare("SELECT * FROM intake_decisions ORDER BY created_at DESC LIMIT ?").all(limit) as DbRow[]).map(rowToIntakeDecision);
+  }
+
+  forgetOntologyEvidence(evidenceRef: string, now = new Date().toISOString()): {
+    relations: number; states: number; decisions: number; commitments: number; mentions: number; packs: number; entities: number;
+  } {
+    const affected = this.db.prepare("SELECT DISTINCT entity_id, id FROM entity_states WHERE evidence_refs_json LIKE ?").all(`%${evidenceRef}%`) as DbRow[];
+    const relations = Number(this.db.prepare("UPDATE relations SET valid_to = ?, superseded_by = 'forgotten' WHERE evidence_refs_json LIKE ? AND valid_to IS NULL").run(now, `%${evidenceRef}%`).changes);
+    const states = Number(this.db.prepare("UPDATE entity_states SET valid_to = ?, superseded_by = 'forgotten', confidence = 'stale' WHERE evidence_refs_json LIKE ? AND valid_to IS NULL").run(now, `%${evidenceRef}%`).changes);
+    const decisions = Number(this.db.prepare("UPDATE decisions SET status = 'revoked' WHERE evidence_refs_json LIKE ? AND status = 'active'").run(`%${evidenceRef}%`).changes);
+    const commitments = Number(this.db.prepare("UPDATE commitments SET status = 'cancelled', confidence = 'stale', updated_at = ? WHERE evidence_refs_json LIKE ? AND status = 'open'").run(now, `%${evidenceRef}%`).changes);
+    const mentions = Number(this.db.prepare("UPDATE mentions SET entity_id = NULL, resolution = 'unresolved', candidates_json = '[]', confidence = 0 WHERE id IN (SELECT m.id FROM mentions m WHERE m.entity_id IN (SELECT DISTINCT entity_id FROM entity_states WHERE superseded_by = 'forgotten'))").run().changes);
+    const entities = Number(this.db.prepare("UPDATE entities SET status = 'deleted', updated_at = ? WHERE id IN (SELECT DISTINCT entity_id FROM entity_states WHERE evidence_refs_json LIKE ?)").run(now, `%${evidenceRef}%`).changes);
+    let packs = this.invalidateContextPacksForEvidence(evidenceRef);
+    for (const row of affected) {
+      packs += this.invalidateContextPacksForEvidence(String(row.id));
+      packs += this.invalidateContextPacksForEvidence(String(row.entity_id));
+    }
+    return { relations, states, decisions, commitments, mentions, packs, entities };
+  }
+
   private migrate(): void {
     ensureColumn(this.db, "events", "origin_instance_id", "TEXT");
     ensureColumn(this.db, "events", "origin_seq", "INTEGER");
@@ -858,6 +1333,18 @@ export class HearthStore {
     ensureColumn(this.db, "scheduled_job_runs", "failure_class", "TEXT");
     ensureColumn(this.db, "scheduled_job_runs", "receipt_json", "TEXT");
     ensureColumn(this.db, "memory_recalls", "lane", "TEXT NOT NULL DEFAULT 'on_demand'");
+    ensureColumn(this.db, "attention_items", "entity_id", "TEXT");
+    ensureColumn(this.db, "attention_items", "evidence_refs_json", "TEXT NOT NULL DEFAULT '[]'");
+    ensureColumn(this.db, "attention_items", "options_json", "TEXT NOT NULL DEFAULT '[]'");
+    ensureColumn(this.db, "attention_items", "impact", "REAL");
+    ensureColumn(this.db, "attention_items", "urgency", "REAL");
+    ensureColumn(this.db, "attention_items", "confidence", "REAL");
+    ensureColumn(this.db, "attention_items", "reversibility", "TEXT");
+    ensureColumn(this.db, "attention_items", "blast_radius", "TEXT");
+    ensureColumn(this.db, "attention_items", "score", "REAL");
+    ensureColumn(this.db, "attention_items", "aggregation_key", "TEXT");
+    ensureColumn(this.db, "attention_items", "shadowed", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn(this.db, "context_packs", "parent_pack_id", "TEXT");
     for (const table of ["memories", "memory_versions"] as const) {
       ensureColumn(this.db, table, "tier", "TEXT NOT NULL DEFAULT 'episodic'");
       ensureColumn(this.db, table, "origin_class", "TEXT NOT NULL DEFAULT 'agent'");
@@ -2698,7 +3185,42 @@ export class HearthStore {
       case "skill.curator.updated": return upsertSkillCuratorRunRow(this.db, event.payload as SkillCuratorRun);
       case "standing-intent.updated": return upsertStandingIntentRow(this.db, event.payload as StandingIntentRecord);
       case "attention.updated": return upsertAttentionItemRow(this.db, event.payload as AttentionItem);
+      case "attention.feedback.recorded": {
+        const feedback = event.payload as AttentionFeedbackRecord;
+        this.db.prepare(`INSERT INTO attention_feedback
+          (id, attention_id, kind, action, time_of_day, channel, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET action=excluded.action, time_of_day=excluded.time_of_day, channel=excluded.channel`)
+          .run(feedback.id, feedback.attentionId, feedback.kind, feedback.action, feedback.timeOfDay, feedback.channel, feedback.createdAt);
+        return;
+      }
       case "heartbeat.recorded": return upsertHeartbeatRunRow(this.db, event.payload as HeartbeatRun);
+      case "entity.created":
+      case "entity.updated": return upsertEntityRow(this.db, event.payload as EntityRecord);
+      case "entity.alias.upserted": return upsertEntityAliasRow(this.db, event.payload as EntityAliasRecord);
+      case "relation.upserted": return upsertRelationRow(this.db, event.payload as RelationRecord);
+      case "entity.state.upserted": return upsertEntityStateRow(this.db, event.payload as EntityStateRecord);
+      case "decision.upserted": return upsertDecisionRow(this.db, event.payload as DecisionRecord);
+      case "commitment.upserted": return upsertCommitmentRow(this.db, event.payload as CommitmentRecord);
+      case "mention.recorded": return upsertMentionRow(this.db, event.payload as MentionRecord);
+      case "context.pack.created": return upsertContextPackRow(this.db, event.payload as ContextPack);
+      case "memory.entity.linked": {
+        const link = event.payload as MemoryEntityLink;
+        this.db.prepare("INSERT OR IGNORE INTO memory_entities (memory_id, entity_id, relation) VALUES (?, ?, ?)")
+          .run(link.memoryId, link.entityId, link.relation);
+        return;
+      }
+      case "task.edge.upserted": return upsertTaskEdgeRow(this.db, event.payload as TaskEdge);
+      case "prepared-action.updated": return upsertPreparedActionRow(this.db, event.payload as PreparedActionRecord);
+      case "thread-subscription.updated": return upsertThreadSubscriptionRow(this.db, event.payload as ThreadSubscriptionRecord);
+      case "tool.job.updated": return upsertBackgroundToolJobRow(this.db, event.payload as BackgroundToolJob);
+      case "watchdog.recorded": return upsertWatchdogEventRow(this.db, event.payload as WatchdogEvent);
+      case "intake.recorded": {
+        const decision = event.payload as IntakeDecisionRecord;
+        this.db.prepare(`INSERT INTO intake_decisions (id, source_ref, route, reason, confidence, created_at)
+          VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET route=excluded.route, reason=excluded.reason,
+          confidence=excluded.confidence`).run(decision.id, decision.sourceRef, decision.route, decision.reason, decision.confidence, decision.createdAt);
+        return;
+      }
       case "sync.peer.created":
       case "sync.peer.updated": return upsertSyncPeer(this.db, event.payload as SyncPeer & { tokenCipher?: string | null });
       case "sync.conflict.created":
@@ -3393,6 +3915,321 @@ function upsertStandingIntentRow(db: DatabaseSync, intent: StandingIntentRecord)
   );
 }
 
+function normalizeOntologyText(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function rowToEntity(row: DbRow): EntityRecord {
+  return {
+    id: String(row.id), kind: String(row.kind) as EntityRecord["kind"],
+    canonicalName: String(row.canonical_name), status: String(row.status) as EntityRecord["status"],
+    sensitivity: String(row.sensitivity) as EntityRecord["sensitivity"],
+    confidence: String(row.confidence) as EntityRecord["confidence"],
+    mergedInto: row.merged_into == null ? null : String(row.merged_into),
+    createdAt: String(row.created_at), updatedAt: String(row.updated_at)
+  };
+}
+
+function upsertEntityRow(db: DatabaseSync, entity: EntityRecord): void {
+  db.prepare(`INSERT INTO entities
+    (id, kind, canonical_name, status, sensitivity, confidence, merged_into, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, canonical_name=excluded.canonical_name,
+      status=excluded.status, sensitivity=excluded.sensitivity, confidence=excluded.confidence,
+      merged_into=excluded.merged_into, updated_at=excluded.updated_at`)
+    .run(entity.id, entity.kind, entity.canonicalName, entity.status, entity.sensitivity,
+      entity.confidence, entity.mergedInto, entity.createdAt, entity.updatedAt);
+}
+
+function rowToEntityAlias(row: DbRow): EntityAliasRecord {
+  return {
+    id: String(row.id), entityId: String(row.entity_id), alias: String(row.alias),
+    normalized: String(row.normalized), sourceKind: String(row.source_kind),
+    confidence: String(row.confidence) as EntityAliasRecord["confidence"], createdAt: String(row.created_at)
+  };
+}
+
+function upsertEntityAliasRow(db: DatabaseSync, alias: EntityAliasRecord): void {
+  db.prepare(`INSERT INTO entity_aliases
+    (id, entity_id, alias, normalized, source_kind, confidence, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(entity_id, normalized) DO UPDATE SET alias=excluded.alias,
+      source_kind=excluded.source_kind, confidence=excluded.confidence`)
+    .run(alias.id, alias.entityId, alias.alias, alias.normalized, alias.sourceKind, alias.confidence, alias.createdAt);
+}
+
+function rowToRelation(row: DbRow): RelationRecord {
+  return {
+    id: String(row.id), fromEntityId: String(row.from_entity_id), predicate: String(row.predicate),
+    toEntityId: String(row.to_entity_id), confidence: String(row.confidence) as RelationRecord["confidence"],
+    validFrom: row.valid_from == null ? null : String(row.valid_from),
+    validTo: row.valid_to == null ? null : String(row.valid_to), recordedAt: String(row.recorded_at),
+    evidenceRefs: JSON.parse(String(row.evidence_refs_json)) as string[],
+    supersededBy: row.superseded_by == null ? null : String(row.superseded_by)
+  };
+}
+
+function upsertRelationRow(db: DatabaseSync, relation: RelationRecord): void {
+  db.prepare(`INSERT INTO relations
+    (id, from_entity_id, predicate, to_entity_id, confidence, valid_from, valid_to, recorded_at, evidence_refs_json, superseded_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET confidence=excluded.confidence, valid_from=excluded.valid_from,
+      valid_to=excluded.valid_to, evidence_refs_json=excluded.evidence_refs_json, superseded_by=excluded.superseded_by`)
+    .run(relation.id, relation.fromEntityId, relation.predicate, relation.toEntityId, relation.confidence,
+      relation.validFrom, relation.validTo, relation.recordedAt, JSON.stringify(relation.evidenceRefs), relation.supersededBy);
+}
+
+function rowToEntityState(row: DbRow): EntityStateRecord {
+  return {
+    id: String(row.id), entityId: String(row.entity_id), key: String(row.key),
+    value: JSON.parse(String(row.value_json)) as unknown,
+    confidence: String(row.confidence) as EntityStateRecord["confidence"],
+    validFrom: String(row.valid_from), validTo: row.valid_to == null ? null : String(row.valid_to),
+    recordedAt: String(row.recorded_at), sourceRef: row.source_ref == null ? null : String(row.source_ref),
+    evidenceRefs: JSON.parse(String(row.evidence_refs_json)) as string[],
+    supersededBy: row.superseded_by == null ? null : String(row.superseded_by)
+  };
+}
+
+function upsertEntityStateRow(db: DatabaseSync, state: EntityStateRecord): void {
+  db.prepare(`INSERT INTO entity_states
+    (id, entity_id, key, value_json, confidence, valid_from, valid_to, recorded_at, source_ref, evidence_refs_json, superseded_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET value_json=excluded.value_json, confidence=excluded.confidence,
+      valid_from=excluded.valid_from, valid_to=excluded.valid_to, source_ref=excluded.source_ref,
+      evidence_refs_json=excluded.evidence_refs_json, superseded_by=excluded.superseded_by`)
+    .run(state.id, state.entityId, state.key, JSON.stringify(state.value), state.confidence,
+      state.validFrom, state.validTo, state.recordedAt, state.sourceRef, JSON.stringify(state.evidenceRefs), state.supersededBy);
+}
+
+function rowToDecision(row: DbRow): DecisionRecord {
+  return {
+    id: String(row.id), subjectEntityId: row.subject_entity_id == null ? null : String(row.subject_entity_id),
+    goalId: row.goal_id == null ? null : String(row.goal_id), taskId: row.task_id == null ? null : String(row.task_id),
+    title: String(row.title), decision: String(row.decision), rationale: row.rationale == null ? null : String(row.rationale),
+    alternatives: JSON.parse(String(row.alternatives_json)) as string[],
+    decidedBy: String(row.decided_by) as DecisionRecord["decidedBy"], decidedAt: String(row.decided_at),
+    status: String(row.status) as DecisionRecord["status"],
+    supersededBy: row.superseded_by == null ? null : String(row.superseded_by),
+    evidenceRefs: JSON.parse(String(row.evidence_refs_json)) as string[]
+  };
+}
+
+function upsertDecisionRow(db: DatabaseSync, decision: DecisionRecord): void {
+  db.prepare(`INSERT INTO decisions
+    (id, subject_entity_id, goal_id, task_id, title, decision, rationale, alternatives_json, decided_by, decided_at, status, superseded_by, evidence_refs_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET subject_entity_id=excluded.subject_entity_id, goal_id=excluded.goal_id,
+      task_id=excluded.task_id, title=excluded.title, decision=excluded.decision, rationale=excluded.rationale,
+      alternatives_json=excluded.alternatives_json, status=excluded.status, superseded_by=excluded.superseded_by,
+      evidence_refs_json=excluded.evidence_refs_json`)
+    .run(decision.id, decision.subjectEntityId, decision.goalId, decision.taskId, decision.title, decision.decision,
+      decision.rationale, JSON.stringify(decision.alternatives), decision.decidedBy, decision.decidedAt,
+      decision.status, decision.supersededBy, JSON.stringify(decision.evidenceRefs));
+}
+
+function rowToCommitment(row: DbRow): CommitmentRecord {
+  return {
+    id: String(row.id), entityId: row.entity_id == null ? null : String(row.entity_id),
+    counterpartyEntityId: row.counterparty_entity_id == null ? null : String(row.counterparty_entity_id),
+    goalId: row.goal_id == null ? null : String(row.goal_id), taskId: row.task_id == null ? null : String(row.task_id),
+    description: String(row.description), dueAt: row.due_at == null ? null : String(row.due_at),
+    status: String(row.status) as CommitmentRecord["status"], confidence: String(row.confidence) as CommitmentRecord["confidence"],
+    sourceRef: row.source_ref == null ? null : String(row.source_ref),
+    evidenceRefs: JSON.parse(String(row.evidence_refs_json)) as string[],
+    fulfilledAt: row.fulfilled_at == null ? null : String(row.fulfilled_at),
+    createdAt: String(row.created_at), updatedAt: String(row.updated_at)
+  };
+}
+
+function upsertCommitmentRow(db: DatabaseSync, commitment: CommitmentRecord): void {
+  db.prepare(`INSERT INTO commitments
+    (id, entity_id, counterparty_entity_id, goal_id, task_id, description, due_at, status, confidence,
+     source_ref, evidence_refs_json, fulfilled_at, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET entity_id=excluded.entity_id, counterparty_entity_id=excluded.counterparty_entity_id,
+      goal_id=excluded.goal_id, task_id=excluded.task_id, description=excluded.description, due_at=excluded.due_at,
+      status=excluded.status, confidence=excluded.confidence, source_ref=excluded.source_ref,
+      evidence_refs_json=excluded.evidence_refs_json, fulfilled_at=excluded.fulfilled_at, updated_at=excluded.updated_at`)
+    .run(commitment.id, commitment.entityId, commitment.counterpartyEntityId, commitment.goalId, commitment.taskId,
+      commitment.description, commitment.dueAt, commitment.status, commitment.confidence, commitment.sourceRef,
+      JSON.stringify(commitment.evidenceRefs), commitment.fulfilledAt, commitment.createdAt, commitment.updatedAt);
+}
+
+function rowToMention(row: DbRow): MentionRecord {
+  return {
+    id: String(row.id), surface: String(row.surface), normalized: String(row.normalized),
+    entityId: row.entity_id == null ? null : String(row.entity_id),
+    conversationId: row.conversation_id == null ? null : String(row.conversation_id),
+    taskId: row.task_id == null ? null : String(row.task_id), messageId: row.message_id == null ? null : String(row.message_id),
+    resolution: String(row.resolution) as MentionRecord["resolution"],
+    candidates: JSON.parse(String(row.candidates_json)) as MentionRecord["candidates"],
+    confidence: Number(row.confidence), createdAt: String(row.created_at)
+  };
+}
+
+function upsertMentionRow(db: DatabaseSync, mention: MentionRecord): void {
+  db.prepare(`INSERT INTO mentions
+    (id, surface, normalized, entity_id, conversation_id, task_id, message_id, resolution, candidates_json, confidence, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET entity_id=excluded.entity_id, resolution=excluded.resolution,
+      candidates_json=excluded.candidates_json, confidence=excluded.confidence`)
+    .run(mention.id, mention.surface, mention.normalized, mention.entityId, mention.conversationId,
+      mention.taskId, mention.messageId, mention.resolution, JSON.stringify(mention.candidates), mention.confidence, mention.createdAt);
+}
+
+function rowToContextPack(row: DbRow): Omit<ContextPack, "items"> {
+  return {
+    id: String(row.id), scopeKind: String(row.scope_kind) as ContextPack["scopeKind"],
+    scopeId: String(row.scope_id), goalId: row.goal_id == null ? null : String(row.goal_id),
+    taskId: row.task_id == null ? null : String(row.task_id),
+    conversationId: row.conversation_id == null ? null : String(row.conversation_id),
+    hash: String(row.hash), budgetTokens: Number(row.budget_tokens), usedTokens: Number(row.used_tokens),
+    omitted: JSON.parse(String(row.omitted_json)) as string[],
+    parentPackId: row.parent_pack_id == null ? null : String(row.parent_pack_id),
+    createdAt: String(row.created_at)
+  };
+}
+
+function rowToContextPackItem(row: DbRow): ContextPackItem {
+  return {
+    packId: String(row.pack_id), ref: String(row.ref), lane: String(row.lane) as ContextPackItem["lane"],
+    sourceKind: String(row.source_kind), sourceId: String(row.source_id), title: String(row.title),
+    summary: String(row.summary), confidence: String(row.confidence) as ContextPackItem["confidence"],
+    source: String(row.source), validUntil: row.valid_until == null ? null : String(row.valid_until),
+    reason: String(row.reason), score: Number(row.score), tokens: Number(row.tokens),
+    expandable: Number(row.expandable) === 1
+  };
+}
+
+function upsertContextPackRow(db: DatabaseSync, pack: ContextPack): void {
+  db.prepare(`INSERT INTO context_packs
+    (id, scope_kind, scope_id, goal_id, task_id, conversation_id, hash, budget_tokens, used_tokens, omitted_json, parent_pack_id, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET hash=excluded.hash, budget_tokens=excluded.budget_tokens,
+      used_tokens=excluded.used_tokens, omitted_json=excluded.omitted_json`)
+    .run(pack.id, pack.scopeKind, pack.scopeId, pack.goalId, pack.taskId, pack.conversationId,
+      pack.hash, pack.budgetTokens, pack.usedTokens, JSON.stringify(pack.omitted), pack.parentPackId, pack.createdAt);
+  db.prepare("DELETE FROM context_pack_items WHERE pack_id = ?").run(pack.id);
+  const insert = db.prepare(`INSERT INTO context_pack_items
+    (pack_id, ref, lane, source_kind, source_id, title, summary, confidence, source, valid_until, reason, score, tokens, expandable)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  for (const item of pack.items) {
+    insert.run(item.packId, item.ref, item.lane, item.sourceKind, item.sourceId, item.title, item.summary,
+      item.confidence, item.source, item.validUntil, item.reason, item.score, item.tokens, item.expandable ? 1 : 0);
+  }
+}
+
+function rowToTaskEdge(row: DbRow): TaskEdge {
+  return {
+    parentTaskId: String(row.parent_task_id), childTaskId: String(row.child_task_id),
+    kind: String(row.kind) as TaskEdge["kind"], joinPolicy: String(row.join_policy) as TaskEdge["joinPolicy"],
+    requiredCount: Number(row.required_count), createdAt: String(row.created_at)
+  };
+}
+
+function upsertTaskEdgeRow(db: DatabaseSync, edge: TaskEdge): void {
+  db.prepare(`INSERT INTO task_edges
+    (parent_task_id, child_task_id, kind, join_policy, required_count, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(parent_task_id, child_task_id) DO UPDATE SET kind=excluded.kind,
+      join_policy=excluded.join_policy, required_count=excluded.required_count`)
+    .run(edge.parentTaskId, edge.childTaskId, edge.kind, edge.joinPolicy, edge.requiredCount, edge.createdAt);
+}
+
+function rowToPreparedAction(row: DbRow): PreparedActionRecord {
+  return {
+    id: String(row.id), taskId: row.task_id == null ? null : String(row.task_id),
+    goalId: row.goal_id == null ? null : String(row.goal_id), kind: String(row.kind) as PreparedActionRecord["kind"],
+    actionDigest: String(row.action_digest), preview: JSON.parse(String(row.preview_json)) as Record<string, unknown>,
+    status: String(row.status) as PreparedActionRecord["status"],
+    expiresAt: row.expires_at == null ? null : String(row.expires_at),
+    evidenceRefs: JSON.parse(String(row.evidence_refs_json)) as string[],
+    createdAt: String(row.created_at), updatedAt: String(row.updated_at)
+  };
+}
+
+function upsertPreparedActionRow(db: DatabaseSync, action: PreparedActionRecord): void {
+  db.prepare(`INSERT INTO prepared_actions
+    (id, task_id, goal_id, kind, action_digest, preview_json, status, expires_at, evidence_refs_json, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET preview_json=excluded.preview_json, status=excluded.status,
+      expires_at=excluded.expires_at, evidence_refs_json=excluded.evidence_refs_json, updated_at=excluded.updated_at`)
+    .run(action.id, action.taskId, action.goalId, action.kind, action.actionDigest, JSON.stringify(action.preview),
+      action.status, action.expiresAt, JSON.stringify(action.evidenceRefs), action.createdAt, action.updatedAt);
+}
+
+function rowToThreadSubscription(row: DbRow): ThreadSubscriptionRecord {
+  return {
+    id: String(row.id), threadKey: String(row.thread_key), taskId: String(row.task_id),
+    runId: row.run_id == null ? null : String(row.run_id), cursor: row.cursor == null ? null : String(row.cursor),
+    filter: JSON.parse(String(row.filter_json)) as Record<string, unknown>,
+    status: String(row.status) as ThreadSubscriptionRecord["status"],
+    createdAt: String(row.created_at), updatedAt: String(row.updated_at)
+  };
+}
+
+function upsertThreadSubscriptionRow(db: DatabaseSync, subscription: ThreadSubscriptionRecord): void {
+  db.prepare(`INSERT INTO thread_subscriptions
+    (id, thread_key, task_id, run_id, cursor, filter_json, status, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(thread_key, task_id) DO UPDATE SET run_id=excluded.run_id, cursor=excluded.cursor,
+      filter_json=excluded.filter_json, status=excluded.status, updated_at=excluded.updated_at`)
+    .run(subscription.id, subscription.threadKey, subscription.taskId, subscription.runId, subscription.cursor,
+      JSON.stringify(subscription.filter), subscription.status, subscription.createdAt, subscription.updatedAt);
+}
+
+function rowToBackgroundToolJob(row: DbRow): BackgroundToolJob {
+  return {
+    id: String(row.id), taskId: String(row.task_id), runId: row.run_id == null ? null : String(row.run_id),
+    toolName: String(row.tool_name), args: JSON.parse(String(row.args_json)) as Record<string, unknown>,
+    status: String(row.status) as BackgroundToolJob["status"], output: String(row.output),
+    outputRef: row.output_ref == null ? null : String(row.output_ref),
+    exitCode: row.exit_code == null ? null : Number(row.exit_code), stopReason: row.stop_reason == null ? null : String(row.stop_reason),
+    createdAt: String(row.created_at), updatedAt: String(row.updated_at), finishedAt: row.finished_at == null ? null : String(row.finished_at)
+  };
+}
+
+function upsertBackgroundToolJobRow(db: DatabaseSync, job: BackgroundToolJob): void {
+  db.prepare(`INSERT INTO background_tool_jobs
+    (id, task_id, run_id, tool_name, args_json, status, output, output_ref, exit_code, stop_reason, created_at, updated_at, finished_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET status=excluded.status, output=excluded.output, output_ref=excluded.output_ref,
+      exit_code=excluded.exit_code, stop_reason=excluded.stop_reason, updated_at=excluded.updated_at, finished_at=excluded.finished_at`)
+    .run(job.id, job.taskId, job.runId, job.toolName, JSON.stringify(job.args), job.status, job.output,
+      job.outputRef, job.exitCode, job.stopReason, job.createdAt, job.updatedAt, job.finishedAt);
+}
+
+function rowToWatchdogEvent(row: DbRow): WatchdogEvent {
+  return {
+    id: String(row.id), taskId: row.task_id == null ? null : String(row.task_id),
+    runId: row.run_id == null ? null : String(row.run_id), reason: String(row.reason), detail: String(row.detail),
+    action: String(row.action) as WatchdogEvent["action"],
+    evidenceRefs: JSON.parse(String(row.evidence_refs_json)) as string[], createdAt: String(row.created_at)
+  };
+}
+
+function upsertWatchdogEventRow(db: DatabaseSync, event: WatchdogEvent): void {
+  db.prepare(`INSERT INTO watchdog_events (id, task_id, run_id, reason, detail, action, evidence_refs_json, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET detail=excluded.detail, action=excluded.action`)
+    .run(event.id, event.taskId, event.runId, event.reason, event.detail, event.action, JSON.stringify(event.evidenceRefs), event.createdAt);
+}
+
+function rowToAttentionFeedback(row: DbRow): AttentionFeedbackRecord {
+  return {
+    id: String(row.id), attentionId: String(row.attention_id), kind: String(row.kind),
+    action: String(row.action) as AttentionFeedbackRecord["action"], timeOfDay: String(row.time_of_day),
+    channel: String(row.channel), createdAt: String(row.created_at)
+  };
+}
+
+function rowToIntakeDecision(row: DbRow): IntakeDecisionRecord {
+  return {
+    id: String(row.id), sourceRef: String(row.source_ref), route: String(row.route) as IntakeDecisionRecord["route"],
+    reason: String(row.reason), confidence: Number(row.confidence), createdAt: String(row.created_at)
+  };
+}
+
 function rowToAttentionItem(row: DbRow): AttentionItem {
   return {
     id: String(row.id),
@@ -3412,6 +4249,17 @@ function rowToAttentionItem(row: DbRow): AttentionItem {
     source: String(row.source),
     status: String(row.status) as AttentionItem["status"],
     snoozeUntil: row.snooze_until == null ? null : String(row.snooze_until),
+    entityId: row.entity_id == null ? null : String(row.entity_id),
+    evidenceRefs: row.evidence_refs_json == null ? [] : JSON.parse(String(row.evidence_refs_json)) as string[],
+    options: row.options_json == null ? [] : JSON.parse(String(row.options_json)) as NonNullable<AttentionItem["options"]>,
+    ...(row.impact == null ? {} : { impact: Number(row.impact) }),
+    ...(row.urgency == null ? {} : { urgency: Number(row.urgency) }),
+    ...(row.confidence == null ? {} : { confidence: Number(row.confidence) }),
+    ...(row.reversibility == null ? {} : { reversibility: String(row.reversibility) as NonNullable<AttentionItem["reversibility"]> }),
+    ...(row.blast_radius == null ? {} : { blastRadius: String(row.blast_radius) as NonNullable<AttentionItem["blastRadius"]> }),
+    ...(row.score == null ? {} : { score: Number(row.score) }),
+    aggregationKey: row.aggregation_key == null ? null : String(row.aggregation_key),
+    shadowed: Number(row.shadowed ?? 0) === 1,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at)
   };
@@ -3421,19 +4269,29 @@ function upsertAttentionItemRow(db: DatabaseSync, item: AttentionItem): void {
   db.prepare(
     `INSERT INTO attention_items
      (id, dedupe_key, kind, priority, critical, title, waiting_on, waiting_since, next_action,
-      consequence, why_now, goal_id, task_id, intent_id, source, status, snooze_until, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      consequence, why_now, goal_id, task_id, intent_id, source, status, snooze_until,
+      entity_id, evidence_refs_json, options_json, impact, urgency, confidence, reversibility,
+      blast_radius, score, aggregation_key, shadowed, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET dedupe_key=excluded.dedupe_key, kind=excluded.kind,
        priority=excluded.priority, critical=excluded.critical, title=excluded.title,
        waiting_on=excluded.waiting_on, waiting_since=excluded.waiting_since,
        next_action=excluded.next_action, consequence=excluded.consequence, why_now=excluded.why_now,
        goal_id=excluded.goal_id, task_id=excluded.task_id, intent_id=excluded.intent_id,
        source=excluded.source, status=excluded.status, snooze_until=excluded.snooze_until,
+       entity_id=excluded.entity_id, evidence_refs_json=excluded.evidence_refs_json,
+       options_json=excluded.options_json, impact=excluded.impact, urgency=excluded.urgency,
+       confidence=excluded.confidence, reversibility=excluded.reversibility,
+       blast_radius=excluded.blast_radius, score=excluded.score,
+       aggregation_key=excluded.aggregation_key, shadowed=excluded.shadowed,
        updated_at=excluded.updated_at`
   ).run(
     item.id, item.dedupeKey, item.kind, item.priority, item.critical ? 1 : 0, item.title,
     item.waitingOn, item.waitingSince, item.nextAction, item.consequence, item.whyNow,
     item.goalId, item.taskId, item.intentId, item.source, item.status, item.snoozeUntil,
+    item.entityId ?? null, JSON.stringify(item.evidenceRefs ?? []), JSON.stringify(item.options ?? []),
+    item.impact ?? null, item.urgency ?? null, item.confidence ?? null, item.reversibility ?? null,
+    item.blastRadius ?? null, item.score ?? null, item.aggregationKey ?? null, item.shadowed ? 1 : 0,
     item.createdAt, item.updatedAt
   );
 }

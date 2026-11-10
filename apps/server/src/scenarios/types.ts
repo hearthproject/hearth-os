@@ -1,4 +1,4 @@
-import type { ScenarioAssertion, ScenarioDefinition } from "@hearth/eval-core";
+import type { ScenarioAssertion, ScenarioDefinition, ScenarioMetricKey, ScenarioMetricRecord } from "@hearth/eval-core";
 
 export interface ControlledClock {
   now(): Date;
@@ -16,8 +16,10 @@ export interface ScenarioContext {
   fakePreference: string;
   fakeSecret: string;
   assertions: ScenarioAssertion[];
+  metrics: ScenarioMetricRecord[];
   evidence: Record<string, unknown>;
   check(name: string, passed: boolean, detail: string): boolean;
+  recordMetric(key: ScenarioMetricKey, value: number, detail: string): void;
   record(key: string, value: unknown): void;
 }
 

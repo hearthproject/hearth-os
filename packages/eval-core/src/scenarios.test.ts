@@ -13,8 +13,8 @@ describe("personal agent scenario harness", () => {
   it("validates the local scenario manifest and P0 fault coverage", () => {
     const raw = readFileSync(new URL("../../../eval/scenarios/scenarios.json", import.meta.url), "utf8");
     const manifest = validateScenarioManifest(JSON.parse(raw));
-    expect(manifest.scenarios).toHaveLength(20);
-    expect(new Set(manifest.scenarios.map((scenario) => scenario.id)).size).toBe(20);
+    expect(manifest.scenarios).toHaveLength(30);
+    expect(new Set(manifest.scenarios.map((scenario) => scenario.id)).size).toBe(30);
     expect(manifest.scenarios.every((scenario) => scenario.repeat >= 3 && scenario.repeat <= 5)).toBe(true);
     const coverage = scenarioP0Coverage(manifest);
     expect(coverage.length).toBeGreaterThanOrEqual(5);
@@ -37,6 +37,9 @@ describe("personal agent scenario harness", () => {
       durationDispersionMs: 10
     });
     expect(aggregate?.failedAssertions).toEqual(["invariant"]);
+    expect(aggregate?.metrics).toEqual([
+      { key: "attention_precision", unit: "ratio", samples: 3, median: 0.8, p95: 0.9, min: 0.7, max: 0.9 }
+    ]);
     expect(median([5, 1, 3])).toBe(3);
   });
 });
@@ -53,6 +56,12 @@ function runRecord(repetition: number, durationMs: number, status: ScenarioRunRe
     durationMs,
     evidencePath: null,
     error: status === "failed" ? "invariant" : null,
-    assertions: [{ name: "invariant", passed: status === "passed", detail: "detail" }]
+    assertions: [{ name: "invariant", passed: status === "passed", detail: "detail" }],
+    metrics: [{
+      key: "attention_precision",
+      value: 0.6 + repetition * 0.1,
+      unit: "ratio",
+      detail: "test sample"
+    }]
   };
 }

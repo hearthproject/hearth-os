@@ -73,6 +73,7 @@ export type EffectExecutor = (effect: EffectRecord) => Promise<Record<string, un
 export interface ApprovalManagerOptions {
   guard?: (taskId: string) => void;
   onUncertain?: (effect: EffectRecord, reason: string) => void;
+  onDecided?: (approval: ApprovalRecord) => void;
 }
 
 export class ApprovalError extends Error {
@@ -99,6 +100,7 @@ export class ApprovalManager {
   private readonly executor: EffectExecutor;
   private readonly guard: ((taskId: string) => void) | undefined;
   private readonly onUncertain: ((effect: EffectRecord, reason: string) => void) | undefined;
+  private readonly onDecided: ((approval: ApprovalRecord) => void) | undefined;
   private readonly inFlight = new Set<string>();
   private readonly toolWaiters = new Map<string, (decision: ToolApprovalDecision) => void>();
 
@@ -107,6 +109,7 @@ export class ApprovalManager {
     this.executor = executor;
     this.guard = options.guard;
     this.onUncertain = options.onUncertain;
+    this.onDecided = options.onDecided;
   }
 
   async request(input: ApprovalRequest): Promise<ApprovalRecord> {
@@ -367,6 +370,7 @@ export class ApprovalManager {
           decidedAt: new Date().toISOString(),
           rejectionCount: (approval.rejectionCount ?? 0) + 1
         });
+        this.notifyDecided(updated);
         this.resolveTool(approval.id, false, "用户拒绝了这个工具调用");
         const continuedTask = this.service.updateTask(task.id, {
           status: "running",
@@ -391,6 +395,7 @@ export class ApprovalManager {
         nextAction: "工具已获批准，继续执行",
         error: null
       }, approval.runId);
+      this.notifyDecided(updated);
       this.resolveTool(approval.id, true, "已批准");
       return { approval: updated, task: continuedTask, effect: null };
     }
@@ -412,6 +417,7 @@ export class ApprovalManager {
           guidance: "检查产物后可以重试任务"
         }
       }, approval.runId);
+      this.notifyDecided(updated);
       this.recordRejection(task, approval, options.decider ?? "user");
       return { approval: updated, task: rejectedTask, effect: null };
     }
@@ -448,13 +454,14 @@ export class ApprovalManager {
       targetKey: `${approval.kind}:${stableStringify(approval.target)}`
     };
     this.service.createEffect(effect);
-    this.service.updateApproval(approval.id, {
+    const decided = this.service.updateApproval(approval.id, {
       status: "approved",
       decidedAt: now,
       effectId: effect.id,
       approvedBy: options.decider ?? "user",
       usedCount: 1
     });
+    this.notifyDecided(decided);
     this.service.updateTask(task.id, { status: "running", nextAction: "正在执行已批准的外部动作" }, approval.runId);
 
     try {
@@ -578,9 +585,18 @@ export class ApprovalManager {
     }
   }
 
+  private notifyDecided(approval: ApprovalRecord): void {
+    try {
+      this.onDecided?.(approval);
+    } catch {
+      // Ontology writeback is best effort and never blocks approval handling.
+    }
+  }
+
   private revokeAction(approval: ApprovalRecord, reason: string, currentDigest: string | null = null): void {
     const now = new Date().toISOString();
-    this.service.updateApproval(approval.id, { status: "revoked", revokedAt: now, decidedAt: now });
+    const revoked = this.service.updateApproval(approval.id, { status: "revoked", revokedAt: now, decidedAt: now });
+    this.notifyDecided(revoked);
     const event = this.service.store.appendEvent({
       type: "approval.revalidation_failed",
       taskId: approval.taskId,
