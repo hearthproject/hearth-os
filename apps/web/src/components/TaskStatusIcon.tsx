@@ -15,6 +15,7 @@ const ICONS = {
   running: Loader2,
   waiting_input: MessageCircleQuestion,
   waiting_approval: ShieldQuestion,
+  waiting_budget: Clock3,
   completed: CheckCircle2,
   failed: XCircle,
   recoverable: TriangleAlert,

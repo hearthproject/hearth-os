@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyReply } from "fastify";
-import type { EventEnvelope, ExecutorHealth, ExecutorId, ExecutorView, GoalBudget } from "@hearth/core";
+import type { EventEnvelope, ExecutorHealth, ExecutorId, ExecutorView, GoalBudget, TaskRecord } from "@hearth/core";
 import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DELEGATION_WORKSPACE_POLICIES, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, EXECUTOR_IDS, GOAL_REVIEW_POLICIES, GOAL_STATES, GOAL_VALIDATORS, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_ORIGINS, MEMORY_RETENTIONS, MEMORY_SENSITIVITIES, MEMORY_TAINT_STATES, MEMORY_TIERS, MEMORY_TRUST_LEVELS, PROACTIVE_MODES, RECONCILE_STATUSES, RUN_STATUSES, SKILL_STATUSES, SKILL_USAGE_SOURCES, SKILL_USAGE_STATUSES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate } from "@hearth/templates";
@@ -437,6 +437,24 @@ const assignTaskMethodSchema = z.object({ methodId: z.string().trim().min(1).max
 const taskOrganizationSchema = z.object({
   pinned: z.boolean().optional(),
   archived: z.boolean().optional()
+}).strict();
+
+const deleteTaskSchema = z.object({
+  cancelRunning: z.boolean().optional()
+}).strict();
+
+const trashQuerySchema = z.object({
+  kind: z.enum(["all", "conversation", "task"]).optional(),
+  olderThanDays: z.coerce.number().int().refine((value) => [7, 15, 30].includes(value), {
+    message: "olderThanDays 只能是 7、15 或 30"
+  }).optional()
+}).strict();
+
+const trashSelectionSchema = z.object({
+  items: z.array(z.object({
+    kind: z.enum(["conversation", "task"]),
+    id: z.string().trim().min(1).max(120)
+  }).strict()).min(1).max(200)
 }).strict();
 const methodSettingsPatchSchema = z.object({ autoLearn: z.boolean().optional() }).strict();
 
@@ -1076,6 +1094,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     modelSettingsForExecutor,
     executorHealth,
     approvals,
+    cancelTask: scheduler ? (taskId: string) => scheduler.cancel(taskId) : undefined,
     memory,
     personal: { ontology, mentions, broker: contextBroker, writer: ontologyWriter }
   });
@@ -3172,6 +3191,113 @@ export async function buildServer(options: BuildServerOptions = {}) {
 
   app.get("/api/tasks", async () => ({ tasks: service.listTaskItems() }));
 
+  app.get<{ Querystring: Record<string, string> }>("/api/trash", async (request, reply) => {
+    const parsed = trashQuerySchema.safeParse(request.query ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_TRASH_QUERY", message: "回收站筛选参数不正确" });
+    const items = store.listTrash(parsed.data.kind ?? "all", parsed.data.olderThanDays ?? null);
+    return { items, total: items.length };
+  });
+
+  app.post<{ Body: unknown }>("/api/trash/restore", async (request, reply) => {
+    const parsed = trashSelectionSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_TRASH_SELECTION", message: "请选择要恢复的对话或任务" });
+    const selection = dedupeTrashSelection(parsed.data.items);
+    for (const item of selection) {
+      const record = item.kind === "conversation"
+        ? store.getConversation(item.id, { includeDeleted: true })
+        : store.getTask(item.id, { includeDeleted: true });
+      if (!record || !record.deletedAt) {
+        return reply.code(409).send({ error: "TRASH_ITEM_NOT_FOUND", message: "回收站中没有找到所选项目" });
+      }
+    }
+    const restoredTaskIds = new Set<string>();
+    const restoredConversationIds: string[] = [];
+    for (const item of selection.filter((entry) => entry.kind === "conversation")) {
+      const restored = store.restoreConversation(item.id);
+      if (!restored) continue;
+      restoredConversationIds.push(item.id);
+      for (const taskId of restored.taskIds) restoredTaskIds.add(taskId);
+    }
+    for (const item of selection.filter((entry) => entry.kind === "task")) {
+      if (restoredTaskIds.has(item.id)) continue;
+      const restored = store.restoreTask(item.id);
+      if (restored) restoredTaskIds.add(item.id);
+    }
+    return {
+      restoredConversations: restoredConversationIds,
+      restoredTasks: [...restoredTaskIds]
+    };
+  });
+
+  app.post<{ Body: unknown }>("/api/trash/purge", async (request, reply) => {
+    const parsed = trashSelectionSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_TRASH_SELECTION", message: "请选择要彻底删除的对话或任务" });
+    const selection = dedupeTrashSelection(parsed.data.items);
+    for (const item of selection) {
+      const record = item.kind === "conversation"
+        ? store.getConversation(item.id, { includeDeleted: true })
+        : store.getTask(item.id, { includeDeleted: true });
+      if (!record || !record.deletedAt) {
+        return reply.code(409).send({ error: "TRASH_ITEM_NOT_FOUND", message: "回收站中没有找到所选项目" });
+      }
+    }
+
+    const conversationIds = selection.filter((item) => item.kind === "conversation").map((item) => item.id);
+    const taskIds = new Set(selection.filter((item) => item.kind === "task").map((item) => item.id));
+    const taskRecords = new Map<string, NonNullable<ReturnType<typeof store.getTask>>>();
+    for (const conversationId of conversationIds) {
+      for (const task of store.listTasks({ includeDeleted: true })) {
+        if (task.conversationId === conversationId) {
+          taskIds.add(task.id);
+          taskRecords.set(task.id, task);
+        }
+      }
+    }
+    for (const taskId of taskIds) {
+      const task = store.getTask(taskId, { includeDeleted: true });
+      if (task) taskRecords.set(taskId, task);
+    }
+
+    const attachmentIds = new Set<string>();
+    for (const conversationId of conversationIds) {
+      for (const message of store.listChatMessages(conversationId)) {
+        for (const attachment of message.attachments) attachmentIds.add(attachment.id);
+      }
+    }
+    for (const taskId of taskIds) {
+      for (const message of store.listChatMessagesByTaskId(taskId)) {
+        for (const attachment of message.attachments) attachmentIds.add(attachment.id);
+      }
+    }
+
+    const purgedTaskIds = new Set<string>();
+    let purgedConversations = 0;
+    for (const conversationId of conversationIds) {
+      const purged = store.purgeConversation(conversationId);
+      purgedConversations += 1;
+      for (const taskId of purged) purgedTaskIds.add(taskId);
+    }
+    for (const taskId of taskIds) {
+      if (store.purgeTask(taskId)) purgedTaskIds.add(taskId);
+    }
+    for (const task of taskRecords.values()) removeManagedTaskPaths(task, options.dataDir ?? DATA_DIR);
+
+    const inUse = new Set(store.listAttachmentIdsInUse());
+    let removedAttachments = 0;
+    for (const attachmentId of attachmentIds) {
+      if (inUse.has(attachmentId)) continue;
+      const path = findStoredAttachment(attachmentRoot, attachmentId);
+      if (!path) continue;
+      rmSync(path, { force: true });
+      removedAttachments += 1;
+    }
+    return {
+      purgedConversations,
+      purgedTasks: purgedTaskIds.size,
+      removedAttachments
+    };
+  });
+
   app.get("/api/artifacts", async () => {
     const titles = service.taskTitles();
     return {
@@ -3466,6 +3592,29 @@ export async function buildServer(options: BuildServerOptions = {}) {
     const view = service.view(request.params.id);
     if (!view) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
     return view;
+  });
+
+  app.delete<{ Params: { id: string }; Body: unknown }>("/api/tasks/:id", async (request, reply) => {
+    const task = store.getTask(request.params.id);
+    if (!task) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    const parsed = deleteTaskSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_DELETE_REQUEST", message: "删除参数不正确" });
+    if (task.status === "running" && !parsed.data.cancelRunning) {
+      return reply.code(409).send({
+        error: "TASK_RUNNING",
+        message: "任务正在运行，请确认取消后再移入回收站",
+        runningTaskIds: [task.id]
+      });
+    }
+    if (task.status === "running" && parsed.data.cancelRunning) {
+      if (scheduler) scheduler.cancel(task.id);
+      else service.updateTask(task.id, {
+        status: "cancelled", currentRunId: task.currentRunId, nextAction: null, error: null
+      }, task.currentRunId ?? undefined);
+    }
+    outbox.reconcileTask(task.id);
+    store.softDeleteTask(task.id);
+    return reply.code(204).send();
   });
 
   app.get<{ Params: { id: string } }>("/api/tasks/:id/follow-ups", async (request, reply) => {
@@ -3867,4 +4016,42 @@ function isLoopbackOrigin(origin: string): boolean {
 function isPathInside(root: string, candidate: string): boolean {
   const normalizedRoot = root.replace(/[\\/]+$/, "");
   return candidate === normalizedRoot || candidate.startsWith(`${normalizedRoot}\\`) || candidate.startsWith(`${normalizedRoot}/`);
+}
+
+type TrashSelectionItem = { kind: "conversation" | "task"; id: string };
+
+function dedupeTrashSelection(items: TrashSelectionItem[]): TrashSelectionItem[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = `${item.kind}:${item.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function findStoredAttachment(root: string, id: string): string | null {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
+  try {
+    for (const name of readdirSync(root)) {
+      if (name.startsWith(`${id}.`)) return join(root, name);
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function removeManagedTaskPaths(task: TaskRecord, dataDir: string): void {
+  const workspaceTaskRoot = join(WORKSPACE_DIR, "tasks", task.id);
+  const managedArtifactRoots = new Set([
+    resolve(dataDir, "artifacts", task.id),
+    resolve(REPO_ROOT, ".hearth", "artifacts", task.id)
+  ]);
+  const outputRoot = resolve(REPO_ROOT, task.outputDir);
+  rmSync(workspaceTaskRoot, { recursive: true, force: true });
+  for (const root of managedArtifactRoots) {
+    rmSync(root, { recursive: true, force: true });
+  }
+  if (managedArtifactRoots.has(outputRoot)) rmSync(outputRoot, { recursive: true, force: true });
 }

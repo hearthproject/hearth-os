@@ -89,6 +89,8 @@ import type {
   TaskRecord,
   TaskEdge,
   TaskStatus,
+  TrashKind,
+  TrashItem,
   MentionRecord,
   PreparedActionRecord,
   ThreadSubscriptionRecord,
@@ -128,7 +130,7 @@ export interface RunAggregate {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 28;
+export const CURRENT_SCHEMA_VERSION = 29;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -151,7 +153,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   output_dir TEXT NOT NULL, current_run_id TEXT, next_action TEXT, error_json TEXT,
   result_summary TEXT, conversation_id TEXT, executor_id TEXT, task_kind TEXT,
   expected_outputs_json TEXT, permissions_json TEXT, pending_input TEXT,
-  method_id TEXT, method_version INTEGER, pinned_at TEXT, archived_at TEXT
+  method_id TEXT, method_version INTEGER, pinned_at TEXT, archived_at TEXT,
+  budget_override_json TEXT, deleted_at TEXT, trash_batch_id TEXT
 );
 CREATE TABLE IF NOT EXISTS goals (
   id TEXT PRIMARY KEY, title TEXT NOT NULL, objective TEXT NOT NULL,
@@ -169,7 +172,7 @@ CREATE TABLE IF NOT EXISTS goal_completion_reports (
 );
 CREATE TABLE IF NOT EXISTS conversations (
   id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-  settings_json TEXT
+  settings_json TEXT, deleted_at TEXT, trash_batch_id TEXT
 );
 CREATE TABLE IF NOT EXISTS chat_messages (
   id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, role TEXT NOT NULL,
@@ -1290,6 +1293,11 @@ export class HearthStore {
     ensureColumn(this.db, "sync_peers", "token_cipher", "TEXT");
     ensureColumn(this.db, "sync_peers", "remote_instance_id", "TEXT");
     ensureColumn(this.db, "conversations", "settings_json", "TEXT");
+    ensureColumn(this.db, "conversations", "deleted_at", "TEXT");
+    ensureColumn(this.db, "conversations", "trash_batch_id", "TEXT");
+    ensureColumn(this.db, "tasks", "budget_override_json", "TEXT");
+    ensureColumn(this.db, "tasks", "deleted_at", "TEXT");
+    ensureColumn(this.db, "tasks", "trash_batch_id", "TEXT");
     ensureColumn(this.db, "chat_messages", "kind", "TEXT");
     ensureColumn(this.db, "chat_messages", "task_status", "TEXT");
     ensureColumn(this.db, "connection_sessions", "disconnect_reason", "TEXT");
@@ -1708,18 +1716,30 @@ export class HearthStore {
     return row ? rowToMaintenanceRun(row) : null;
   }
 
-  getTask(id: string): TaskRecord | null {
-    const row = this.db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as DbRow | undefined;
+  getTask(id: string, options: { includeDeleted?: boolean } = {}): TaskRecord | null {
+    const row = this.db.prepare(
+      options.includeDeleted
+        ? "SELECT * FROM tasks WHERE id = ?"
+        : "SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL"
+    ).get(id) as DbRow | undefined;
     return row ? rowToTask(row) : null;
   }
 
-  getTaskByExternalRef(externalRef: string): TaskRecord | null {
-    const row = this.db.prepare("SELECT * FROM tasks WHERE external_ref = ?").get(externalRef) as DbRow | undefined;
+  getTaskByExternalRef(externalRef: string, options: { includeDeleted?: boolean } = {}): TaskRecord | null {
+    const row = this.db.prepare(
+      options.includeDeleted
+        ? "SELECT * FROM tasks WHERE external_ref = ?"
+        : "SELECT * FROM tasks WHERE external_ref = ? AND deleted_at IS NULL"
+    ).get(externalRef) as DbRow | undefined;
     return row ? rowToTask(row) : null;
   }
 
-  listTasks(): TaskRecord[] {
-    return (this.db.prepare("SELECT * FROM tasks ORDER BY created_at DESC").all() as DbRow[]).map(rowToTask);
+  listTasks(options: { includeDeleted?: boolean } = {}): TaskRecord[] {
+    return (this.db.prepare(
+      options.includeDeleted
+        ? "SELECT * FROM tasks ORDER BY created_at DESC"
+        : "SELECT * FROM tasks WHERE deleted_at IS NULL ORDER BY created_at DESC"
+    ).all() as DbRow[]).map(rowToTask);
   }
 
   getGoal(goalId: string): GoalContract | null {
@@ -1757,13 +1777,21 @@ export class HearthStore {
     return conversation;
   }
 
-  listConversations(): ConversationRecord[] {
-    return (this.db.prepare("SELECT * FROM conversations ORDER BY updated_at DESC").all() as DbRow[])
+  listConversations(options: { includeDeleted?: boolean } = {}): ConversationRecord[] {
+    return (this.db.prepare(
+      options.includeDeleted
+        ? "SELECT * FROM conversations ORDER BY updated_at DESC"
+        : "SELECT * FROM conversations WHERE deleted_at IS NULL ORDER BY updated_at DESC"
+    ).all() as DbRow[])
       .map(rowToConversation);
   }
 
-  getConversation(id: string): ConversationRecord | null {
-    const row = this.db.prepare("SELECT * FROM conversations WHERE id = ?").get(id) as DbRow | undefined;
+  getConversation(id: string, options: { includeDeleted?: boolean } = {}): ConversationRecord | null {
+    const row = this.db.prepare(
+      options.includeDeleted
+        ? "SELECT * FROM conversations WHERE id = ?"
+        : "SELECT * FROM conversations WHERE id = ? AND deleted_at IS NULL"
+    ).get(id) as DbRow | undefined;
     return row ? rowToConversation(row) : null;
   }
 
@@ -1793,6 +1821,193 @@ export class HearthStore {
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
+    }
+  }
+
+  softDeleteConversation(id: string): { batchId: string; deletedAt: string; taskIds: string[] } | null {
+    const conversation = this.getConversation(id);
+    if (!conversation) return null;
+    const batchId = randomUUID();
+    const deletedAt = new Date().toISOString();
+    const taskIds = (this.db.prepare(
+      "SELECT id FROM tasks WHERE conversation_id = ? AND deleted_at IS NULL"
+    ).all(id) as DbRow[]).map((row) => String(row.id));
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare(
+        "UPDATE conversations SET deleted_at = ?, trash_batch_id = ?, updated_at = ? WHERE id = ?"
+      ).run(deletedAt, batchId, deletedAt, id);
+      this.db.prepare(
+        "UPDATE tasks SET deleted_at = ?, trash_batch_id = ?, updated_at = ? WHERE conversation_id = ? AND deleted_at IS NULL"
+      ).run(deletedAt, batchId, deletedAt, id);
+      this.db.exec("COMMIT");
+      return { batchId, deletedAt, taskIds };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  softDeleteTask(id: string): { batchId: string; deletedAt: string } | null {
+    const task = this.getTask(id);
+    if (!task) return null;
+    const batchId = randomUUID();
+    const deletedAt = new Date().toISOString();
+    this.db.prepare(
+      "UPDATE tasks SET deleted_at = ?, trash_batch_id = ?, updated_at = ? WHERE id = ?"
+    ).run(deletedAt, batchId, deletedAt, id);
+    return { batchId, deletedAt };
+  }
+
+  restoreConversation(id: string): { conversation: ConversationRecord; taskIds: string[] } | null {
+    const deleted = this.getConversation(id, { includeDeleted: true });
+    if (!deleted || !deleted.deletedAt) return null;
+    const restoredAt = new Date().toISOString();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare(
+        "UPDATE conversations SET deleted_at = NULL, trash_batch_id = NULL, updated_at = ? WHERE id = ?"
+      ).run(restoredAt, id);
+      const taskIds = (this.db.prepare(
+        "SELECT id FROM tasks WHERE conversation_id = ? AND deleted_at IS NOT NULL"
+      ).all(id) as DbRow[]).map((row) => String(row.id));
+      this.db.prepare(
+        "UPDATE tasks SET deleted_at = NULL, trash_batch_id = NULL, updated_at = ? WHERE conversation_id = ? AND deleted_at IS NOT NULL"
+      ).run(restoredAt, id);
+      this.db.exec("COMMIT");
+      return { conversation: this.getConversation(id)!, taskIds };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  restoreTask(id: string): { task: TaskRecord; conversationId: string | null } | null {
+    const deleted = this.getTask(id, { includeDeleted: true });
+    if (!deleted || !deleted.deletedAt) return null;
+    const restoredAt = new Date().toISOString();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare(
+        "UPDATE tasks SET deleted_at = NULL, trash_batch_id = NULL, updated_at = ? WHERE id = ?"
+      ).run(restoredAt, id);
+      if (deleted.conversationId) {
+        this.db.prepare(
+          "UPDATE conversations SET deleted_at = NULL, trash_batch_id = NULL, updated_at = ? WHERE id = ? AND deleted_at IS NOT NULL"
+        ).run(restoredAt, deleted.conversationId);
+      }
+      this.db.exec("COMMIT");
+      return { task: this.getTask(id)!, conversationId: deleted.conversationId ?? null };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  listTrash(kind: TrashKind | "all" = "all", olderThanDays: number | null = null): TrashItem[] {
+    const cutoff = olderThanDays === null
+      ? null
+      : new Date(Date.now() - Math.max(1, olderThanDays) * 24 * 60 * 60_000).toISOString();
+    const items: TrashItem[] = [];
+    if (kind === "all" || kind === "conversation") {
+      for (const conversation of this.listConversations({ includeDeleted: true })) {
+        if (!conversation.deletedAt) continue;
+        if (cutoff && conversation.deletedAt >= cutoff) continue;
+        items.push({
+          kind: "conversation",
+          id: conversation.id,
+          title: conversation.title,
+          deletedAt: conversation.deletedAt,
+          trashBatchId: conversation.trashBatchId ?? null,
+          status: null,
+          conversationId: conversation.id
+        });
+      }
+    }
+    if (kind === "all" || kind === "task") {
+      for (const task of this.listTasks({ includeDeleted: true })) {
+        if (!task.deletedAt) continue;
+        if (cutoff && task.deletedAt >= cutoff) continue;
+        items.push({
+          kind: "task",
+          id: task.id,
+          title: task.title,
+          deletedAt: task.deletedAt,
+          trashBatchId: task.trashBatchId ?? null,
+          status: task.status,
+          conversationId: task.conversationId ?? null
+        });
+      }
+    }
+    return items.sort((left, right) => right.deletedAt.localeCompare(left.deletedAt));
+  }
+
+  purgeTask(id: string): boolean {
+    const task = this.getTask(id, { includeDeleted: true });
+    if (!task || !task.deletedAt) return false;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.purgeTaskRecord(id);
+      this.db.exec("COMMIT");
+      return true;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  purgeConversation(id: string): string[] {
+    const conversation = this.getConversation(id, { includeDeleted: true });
+    if (!conversation || !conversation.deletedAt) return [];
+    const taskIds = (this.db.prepare("SELECT id FROM tasks WHERE conversation_id = ?").all(id) as DbRow[])
+      .map((row) => String(row.id));
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const taskId of taskIds) this.purgeTaskRecord(taskId);
+      this.deleteRowsByColumn("conversation_id", id);
+      this.db.prepare("DELETE FROM conversations WHERE id = ?").run(id);
+      this.db.exec("COMMIT");
+      return taskIds;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  listAllChatMessages(): ChatMessageRecord[] {
+    return (this.db.prepare("SELECT * FROM chat_messages ORDER BY rowid ASC").all() as DbRow[])
+      .map(rowToChatMessage);
+  }
+
+  listChatMessagesByTaskId(taskId: string): ChatMessageRecord[] {
+    return (this.db.prepare("SELECT * FROM chat_messages WHERE task_id = ? ORDER BY rowid ASC").all(taskId) as DbRow[])
+      .map(rowToChatMessage);
+  }
+
+  listAttachmentIdsInUse(): string[] {
+    const ids = new Set<string>();
+    for (const message of this.listAllChatMessages()) {
+      for (const attachment of message.attachments) ids.add(attachment.id);
+    }
+    return [...ids];
+  }
+
+  private purgeTaskRecord(id: string): void {
+    this.deleteRowsByColumn("task_id", id);
+    this.db.prepare("DELETE FROM task_edges WHERE parent_task_id = ? OR child_task_id = ?").run(id, id);
+    this.db.prepare("UPDATE schedules SET last_task_id = NULL WHERE last_task_id = ?").run(id);
+    this.db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
+  }
+
+  private deleteRowsByColumn(column: string, value: string): void {
+    const tables = this.db.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+    ).all() as DbRow[];
+    for (const table of tables) {
+      const name = String(table.name);
+      const columns = this.db.prepare(`PRAGMA table_info("${name.replaceAll('"', '""')}")`).all() as DbRow[];
+      if (!columns.some((item) => String(item.name) === column)) continue;
+      this.db.prepare(`DELETE FROM "${name.replaceAll('"', '""')}" WHERE "${column}" = ?`).run(value);
     }
   }
 
@@ -3284,8 +3499,8 @@ export class HearthStore {
 
 function upsertTask(db: DatabaseSync, task: TaskRecord): void {
   db.prepare(
-    `INSERT INTO tasks (id, external_ref, request_hash, template_id, title, goal, status, created_at, updated_at, deadline, inputs_json, network_hosts_json, output_dir, current_run_id, next_action, error_json, result_summary, conversation_id, executor_id, task_kind, expected_outputs_json, permissions_json, pending_input, method_id, method_version, pinned_at, archived_at, goal_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO tasks (id, external_ref, request_hash, template_id, title, goal, status, created_at, updated_at, deadline, inputs_json, network_hosts_json, output_dir, current_run_id, next_action, error_json, result_summary, conversation_id, executor_id, task_kind, expected_outputs_json, permissions_json, pending_input, method_id, method_version, pinned_at, archived_at, goal_id, budget_override_json, deleted_at, trash_batch_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        external_ref=excluded.external_ref, request_hash=excluded.request_hash,
        template_id=excluded.template_id, title=excluded.title, goal=excluded.goal, status=excluded.status,
@@ -3296,7 +3511,9 @@ function upsertTask(db: DatabaseSync, task: TaskRecord): void {
        executor_id=excluded.executor_id, task_kind=excluded.task_kind,
        expected_outputs_json=excluded.expected_outputs_json, permissions_json=excluded.permissions_json,
        pending_input=excluded.pending_input, method_id=excluded.method_id, method_version=excluded.method_version,
-        pinned_at=excluded.pinned_at, archived_at=excluded.archived_at, goal_id=excluded.goal_id`
+        pinned_at=excluded.pinned_at, archived_at=excluded.archived_at, goal_id=excluded.goal_id,
+        budget_override_json=excluded.budget_override_json, deleted_at=excluded.deleted_at,
+        trash_batch_id=excluded.trash_batch_id`
   ).run(
     task.id, task.externalRef ?? null, task.requestHash ?? null,
     task.templateId, task.title, task.goal, task.status, task.createdAt, task.updatedAt,
@@ -3308,7 +3525,9 @@ function upsertTask(db: DatabaseSync, task: TaskRecord): void {
     task.permissions ? JSON.stringify(task.permissions) : null,
     task.pendingInput ?? null,
     task.methodId ?? null, task.methodVersion ?? null,
-    task.pinnedAt ?? null, task.archivedAt ?? null, task.goalId ?? null
+    task.pinnedAt ?? null, task.archivedAt ?? null, task.goalId ?? null,
+    task.budgetOverride ? JSON.stringify(task.budgetOverride) : null,
+    task.deletedAt ?? null, task.trashBatchId ?? null
   );
 }
 
@@ -3355,7 +3574,8 @@ function updateTask(db: DatabaseSync, taskId: string | null, patch: Record<strin
     resultSummary: "result_summary", conversationId: "conversation_id",
     pendingInput: "pending_input", executorId: "executor_id", taskKind: "task_kind",
     methodId: "method_id", methodVersion: "method_version",
-    pinnedAt: "pinned_at", archivedAt: "archived_at", goalId: "goal_id"
+    pinnedAt: "pinned_at", archivedAt: "archived_at", goalId: "goal_id",
+    deletedAt: "deleted_at", trashBatchId: "trash_batch_id"
   };
   for (const [key, column] of Object.entries(columns)) {
     if (key in patch) db.prepare(`UPDATE tasks SET ${column} = ? WHERE id = ?`).run((patch[key] as SQLInputValue) ?? null, taskId);
@@ -3371,6 +3591,10 @@ function updateTask(db: DatabaseSync, taskId: string | null, patch: Record<strin
   if ("permissions" in patch) {
     db.prepare("UPDATE tasks SET permissions_json = ? WHERE id = ?")
       .run(patch.permissions ? JSON.stringify(patch.permissions) : null, taskId);
+  }
+  if ("budgetOverride" in patch) {
+    db.prepare("UPDATE tasks SET budget_override_json = ? WHERE id = ?")
+      .run(patch.budgetOverride ? JSON.stringify(patch.budgetOverride) : null, taskId);
   }
 }
 
@@ -4349,7 +4573,10 @@ function rowToTask(row: DbRow): TaskRecord {
     methodId: row.method_id == null ? null : String(row.method_id),
     methodVersion: row.method_version == null ? null : Number(row.method_version),
     pinnedAt: row.pinned_at == null ? null : String(row.pinned_at),
-    archivedAt: row.archived_at == null ? null : String(row.archived_at)
+    archivedAt: row.archived_at == null ? null : String(row.archived_at),
+    budgetOverride: row.budget_override_json == null ? null : JSON.parse(String(row.budget_override_json)),
+    deletedAt: row.deleted_at == null ? null : String(row.deleted_at),
+    trashBatchId: row.trash_batch_id == null ? null : String(row.trash_batch_id)
   };
 }
 
@@ -4394,7 +4621,9 @@ function rowToConversation(row: DbRow): ConversationRecord {
     createdAt: String(row.created_at), updatedAt: String(row.updated_at),
     settings: row.settings_json == null
       ? defaultConversationSettings()
-      : mergeConversationSettings(defaultConversationSettings(), JSON.parse(String(row.settings_json)))
+      : mergeConversationSettings(defaultConversationSettings(), JSON.parse(String(row.settings_json))),
+    deletedAt: row.deleted_at == null ? null : String(row.deleted_at),
+    trashBatchId: row.trash_batch_id == null ? null : String(row.trash_batch_id)
   };
 }
 

@@ -62,6 +62,10 @@ const conversationPatchSchema = z.object({
   settings: conversationSettingsSchema.optional()
 }).strict();
 
+const deleteConversationSchema = z.object({
+  cancelRunning: z.boolean().optional()
+}).strict();
+
 const modelProtocolSchema = z.enum(["openai-chat", "openai-responses", "anthropic-messages", "gemini"]);
 
 const modelSettingsSchema = z.object({
@@ -94,6 +98,7 @@ export interface ChatRouteOptions {
   modelSettingsForExecutor?: ((executorId: ExecutorId) => ModelSettings | null) | undefined;
   executorHealth?: ((executorId: ExecutorId) => ExecutorHealth) | undefined;
   approvals?: ApprovalManager | undefined;
+  cancelTask?: ((taskId: string) => unknown) | undefined;
   memory?: MemoryService | undefined;
   personal?: {
     ontology: OntologyService;
@@ -294,11 +299,32 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     return conversation;
   });
 
-  app.delete<{ Params: { id: string } }>("/api/conversations/:id", async (request, reply) => {
-    if (!store.getConversation(request.params.id)) {
+  app.delete<{ Params: { id: string }; Body: unknown }>("/api/conversations/:id", async (request, reply) => {
+    const conversation = store.getConversation(request.params.id);
+    if (!conversation) {
       return reply.code(404).send({ error: "CONVERSATION_NOT_FOUND", message: "对话不存在" });
     }
-    store.deleteConversation(request.params.id);
+    const parsed = deleteConversationSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_DELETE_REQUEST", message: "删除参数不正确" });
+    const running = store.listTasks().filter((task) =>
+      task.conversationId === conversation.id && task.status === "running"
+    );
+    if (running.length > 0 && !parsed.data.cancelRunning) {
+      return reply.code(409).send({
+        error: "TASK_RUNNING",
+        message: "对话中还有任务在运行，请确认取消后再移入回收站",
+        runningTaskIds: running.map((task) => task.id)
+      });
+    }
+    if (parsed.data.cancelRunning) {
+      for (const task of running) {
+        if (options.cancelTask) options.cancelTask(task.id);
+        else service.updateTask(task.id, {
+          status: "cancelled", currentRunId: task.currentRunId, nextAction: null, error: null
+        }, task.currentRunId ?? undefined);
+      }
+    }
+    store.softDeleteConversation(conversation.id);
     return reply.code(204).send();
   });
 

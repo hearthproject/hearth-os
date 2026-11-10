@@ -3,6 +3,7 @@ export const TASK_STATUSES = [
   "running",
   "waiting_input",
   "waiting_approval",
+  "waiting_budget",
   "completed",
   "failed",
   "recoverable",
@@ -245,6 +246,9 @@ export interface TaskRecord {
   methodVersion?: number | null;
   pinnedAt?: string | null;
   archivedAt?: string | null;
+  budgetOverride?: RunBudget | null;
+  deletedAt?: string | null;
+  trashBatchId?: string | null;
 }
 
 export const GOAL_STATES = ["draft", "active", "blocked", "awaiting_user", "validating", "done", "failed", "cancelled"] as const;
@@ -347,6 +351,20 @@ export interface ConversationRecord {
   createdAt: string;
   updatedAt: string;
   settings: ConversationSettings;
+  deletedAt?: string | null;
+  trashBatchId?: string | null;
+}
+
+export type TrashKind = "conversation" | "task";
+
+export interface TrashItem {
+  kind: TrashKind;
+  id: string;
+  title: string;
+  deletedAt: string;
+  trashBatchId: string | null;
+  status: TaskStatus | null;
+  conversationId: string | null;
 }
 
 export type ChatMessageKind = "text" | "task_status";
