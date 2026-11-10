@@ -122,6 +122,12 @@ Hearth 已经越过**第一阶段（MVP）**的硬门槛：15 个跨行业真实
 
 ### 运行时数据流
 
+[![Hearth 端到端任务流程](https://media.githubusercontent.com/media/hearthproject/hearth-os/main/assets/Hearth-Flow-Light.png)](https://media.githubusercontent.com/media/hearthproject/hearth-os/main/assets/Hearth-Flow-Light.png)
+
+<sub>一条请求从聊天、飞书、定时任务、主动建议或邮件进入，经 planExecution 与 decideRoute 分流；任务以 lease + epoch 调度，执行中可等待输入或审批，外部副作用只在审批后发生，最终经 SQLite 事件账本、SSE 与前端缓存投影回界面。点击图片可查看原图。</sub>
+
+同一流程的 Mermaid 版本：
+
 ```mermaid
 flowchart TB
   U["用户<br/>聊天 · 任务 · 审批 · 设备"] --> W["Web 控制面<br/>React + Vite · PWA 壳"]
