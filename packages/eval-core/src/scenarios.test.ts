@@ -13,8 +13,8 @@ describe("personal agent scenario harness", () => {
   it("validates the local scenario manifest and P0 fault coverage", () => {
     const raw = readFileSync(new URL("../../../eval/scenarios/scenarios.json", import.meta.url), "utf8");
     const manifest = validateScenarioManifest(JSON.parse(raw));
-    expect(manifest.scenarios).toHaveLength(15);
-    expect(new Set(manifest.scenarios.map((scenario) => scenario.id)).size).toBe(15);
+    expect(manifest.scenarios).toHaveLength(20);
+    expect(new Set(manifest.scenarios.map((scenario) => scenario.id)).size).toBe(20);
     expect(manifest.scenarios.every((scenario) => scenario.repeat >= 3 && scenario.repeat <= 5)).toBe(true);
     const coverage = scenarioP0Coverage(manifest);
     expect(coverage.length).toBeGreaterThanOrEqual(5);

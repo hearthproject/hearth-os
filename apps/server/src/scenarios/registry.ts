@@ -1,4 +1,5 @@
 import { p0ActionScenarios } from "./p0-action.ts";
+import { p0BoundaryScenarios } from "./p0-boundary.ts";
 import { p0EffectScenarios } from "./p0-effect.ts";
 import { p0SensitiveScenarios } from "./p0-sensitive.ts";
 import { p1MemorySkillScenarios } from "./p1-memory-skill.ts";
@@ -9,6 +10,7 @@ import type { ScenarioHandler } from "./types.ts";
 
 export const scenarioHandlers: Record<string, ScenarioHandler> = {
   ...p0ActionScenarios,
+  ...p0BoundaryScenarios,
   ...p0EffectScenarios,
   ...p0SensitiveScenarios,
   ...p1MemorySkillScenarios,

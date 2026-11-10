@@ -165,6 +165,61 @@
       "evidence": ["context-item", "event-log", "recall-pack", "redaction"],
       "repeat": 3,
       "tags": ["security", "redaction"]
+    },
+    {
+      "id": "delegation-permission-cancel",
+      "title": "委派权限不超过父任务，取消后阻断效果",
+      "mechanism": "delegation",
+      "priority": "P0",
+      "fault": "none",
+      "expectedInvariant": "子任务不能获得父任务未声明的权限；取消后执行器和效果守卫都不得继续",
+      "evidence": ["delegation-job", "child-task", "effect-guard", "effect-count"],
+      "repeat": 3,
+      "tags": ["delegation", "permission", "cancel"]
+    },
+    {
+      "id": "delegation-idempotency",
+      "title": "重复委派幂等 key 不创建第二个 Job",
+      "mechanism": "delegation",
+      "priority": "P0",
+      "fault": "duplicate",
+      "expectedInvariant": "同一幂等 key 只能绑定一个 Job 和一个子任务；不同目标必须显式冲突",
+      "evidence": ["delegation-job", "child-task", "idempotency-conflict"],
+      "repeat": 3,
+      "tags": ["delegation", "idempotency"]
+    },
+    {
+      "id": "handoff-generation-trace",
+      "title": "跨 Provider 交接保留证据并拒绝旧代次写入",
+      "mechanism": "handoff",
+      "priority": "P0",
+      "fault": "stale_generation",
+      "expectedInvariant": "目标、约束、证据和下一步必须可追溯；旧 generation 写入必须被拒绝",
+      "evidence": ["handoff-packet", "verification", "generation-fence", "artifact"],
+      "repeat": 3,
+      "tags": ["handoff", "generation", "evidence"]
+    },
+    {
+      "id": "sandbox-boundary-classification",
+      "title": "沙箱逃逸、网络越界和凭据过期有明确分类",
+      "mechanism": "sandbox",
+      "priority": "P0",
+      "fault": "credential_expiry",
+      "expectedInvariant": "路径逃逸、网络越界和凭据过期必须分别返回 sandbox_escape、network_violation、credential_expired",
+      "evidence": ["sandbox-checks", "failure-classification", "allowed-request"],
+      "repeat": 3,
+      "tags": ["sandbox", "security", "credentials"]
+    },
+    {
+      "id": "channel-inbound-idempotency",
+      "title": "重复渠道消息只处理一次，旧游标不覆盖新状态",
+      "mechanism": "channel",
+      "priority": "P0",
+      "fault": "duplicate",
+      "expectedInvariant": "同一 externalId 只产生一份投递记录；旧 generation 或 cursor 不得覆盖新游标",
+      "evidence": ["channel-delivery", "ack-receipt", "cursor", "stale-rejection"],
+      "repeat": 3,
+      "tags": ["channel", "idempotency", "cursor"]
     }
   ]
 }
