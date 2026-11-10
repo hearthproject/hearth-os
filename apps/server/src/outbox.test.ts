@@ -95,6 +95,16 @@ describe("outbox service", () => {
       from: "sender@example.com",
       transport: "smtp"
     });
+    expect(submitted.approval.actionDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(submitted.approval.action).toMatchObject({
+      resolvedAction: {
+        kind: "email",
+        network: { host: "smtp.example.com", method: "SMTP" },
+        targetRevision: expect.stringMatching(/^draft-sha256:[a-f0-9]{64}$/),
+        risk: "high",
+        sideEffectClass: "external_irreversible"
+      }
+    });
     expect(service.requireTask(submitted.task.id).status).toBe("waiting_approval");
 
     const decision = await approvals.decide(submitted.approval.id, "approve", submitted.approval.parameterHash);
