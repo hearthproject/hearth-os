@@ -10,6 +10,7 @@ import { loadCodexProfile, probeCodex, type CodexProfile } from "@hearth/codex-e
 import { loadExecutorSettings, type ExecutorSettingsStore } from "./executor-settings.ts";
 import { EXECUTOR_FALLBACK_ORDER, executorName, resolveExecutorFromEnabled, resolveExecutorLocked } from "./executors.ts";
 import { executorHealth, isExecutorManagedInstalled } from "./executor-runtime.ts";
+import type { ApprovalManager } from "./approvals.ts";
 import type { HearthService } from "./service.ts";
 import type { MemoryService } from "./memory.ts";
 import type { ContextBroker } from "./context-broker.ts";
@@ -92,6 +93,7 @@ export interface ChatRouteOptions {
   codexEnv?: (() => Record<string, string>) | undefined;
   modelSettingsForExecutor?: ((executorId: ExecutorId) => ModelSettings | null) | undefined;
   executorHealth?: ((executorId: ExecutorId) => ExecutorHealth) | undefined;
+  approvals?: ApprovalManager | undefined;
   memory?: MemoryService | undefined;
   personal?: {
     ontology: OntologyService;
@@ -266,12 +268,29 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     if (!parsed.success || (!parsed.data.title && !parsed.data.settings)) {
       return reply.code(400).send({ error: "INVALID_CONVERSATION", message: "对话参数不正确" });
     }
-    if (!store.getConversation(request.params.id)) {
+    const existing = store.getConversation(request.params.id);
+    if (!existing) {
       return reply.code(404).send({ error: "CONVERSATION_NOT_FOUND", message: "对话不存在" });
     }
-    let conversation = store.getConversation(request.params.id);
-    if (parsed.data.title) conversation = store.renameConversation(request.params.id, parsed.data.title);
-    if (parsed.data.settings) conversation = store.updateConversationSettings(request.params.id, parsed.data.settings);
+    let conversation = existing;
+    if (parsed.data.title) conversation = store.renameConversation(request.params.id, parsed.data.title) ?? conversation;
+    if (parsed.data.settings) conversation = store.updateConversationSettings(request.params.id, parsed.data.settings) ?? conversation;
+    if (parsed.data.settings?.approvalMode === "full") {
+      await options.approvals?.approvePendingForConversation(request.params.id);
+      const resumable = store.listTasks().filter((task) =>
+        task.conversationId === request.params.id
+        && task.status === "waiting_input"
+        && task.error === null
+        && !store.listHandoffs(task.id).some((handoff) => handoff.status === "pending_user")
+      );
+      for (const task of resumable) {
+        service.updateTask(task.id, {
+          status: "queued",
+          nextAction: "完全权限已开启，自动继续",
+          pendingInput: "当前对话已切换为完全权限。请自行决策并继续完成剩余工作，不要再询问用户。"
+        }, task.currentRunId ?? undefined);
+      }
+    }
     return conversation;
   });
 

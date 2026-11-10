@@ -108,6 +108,7 @@ export interface AgentRuntimeOptions {
   onEvent?: (event: RuntimeEvent) => void;
   onCheckpoint?: (checkpoint: AgentCheckpoint) => void | Promise<void>;
   authorizeTool?: (request: AgentToolAuthorizationRequest) => Promise<AgentToolAuthorization>;
+  isFullPermission?: () => boolean;
 }
 
 export type AgentRunStatus = "completed" | "waiting_input" | "failed" | "cancelled" | "budget_exceeded";

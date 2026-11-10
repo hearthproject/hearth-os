@@ -50,6 +50,7 @@ export interface ExecutorAttemptContext {
   budget: RunBudget;
   signal: AbortSignal;
   fullPermission: boolean;
+  isFullPermission?: (() => boolean) | undefined;
   contextSettings: ContextSettings;
   nativeSettings: ModelSettings | null;
   dshSettings: ModelSettings | null;
@@ -131,7 +132,8 @@ export class NativeExecutorAdapter implements ExecutorAdapter {
       onProgress: input.onProgress,
       onContextEvent: input.onNativeContextEvent,
       onCheckpoint: input.onNativeCheckpoint,
-      ...(input.onAuthorizeTool ? { onAuthorizeTool: input.onAuthorizeTool } : {})
+      ...(input.onAuthorizeTool ? { onAuthorizeTool: input.onAuthorizeTool } : {}),
+      ...(input.isFullPermission ? { isFullPermission: input.isFullPermission } : {})
     });
     return {
       status: outcome.status,

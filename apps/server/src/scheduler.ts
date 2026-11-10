@@ -1494,6 +1494,7 @@ export class HearthScheduler {
         budget,
         signal: controller.signal,
         fullPermission,
+        isFullPermission: () => this.service.approvalModeForTask(task) === "full",
         contextSettings: this.context.settings(),
         nativeSettings,
         dshSettings,
@@ -1510,7 +1511,6 @@ export class HearthScheduler {
                 task,
                 run,
                 request,
-                fullPermission,
                 workspaceRoot: prepared.root,
                 signal: controller.signal
               })
@@ -1522,7 +1522,6 @@ export class HearthScheduler {
                 task,
                 run,
                 request,
-                fullPermission,
                 signal: controller.signal
               })
             }
@@ -1707,7 +1706,6 @@ export class HearthScheduler {
     task: TaskRecord;
     run: RunRecord;
     request: AgentToolAuthorizationRequest;
-    fullPermission: boolean;
     workspaceRoot: string;
     signal: AbortSignal;
   }): Promise<AgentToolAuthorization> {
@@ -1716,6 +1714,7 @@ export class HearthScheduler {
     if (input.signal.aborted) return { allowed: false, reason: "任务已取消" };
     const argumentsValue = approvalArguments(input.request.call.arguments);
     const summary = toolApprovalSummary(toolName, input.request.call.arguments);
+    const fullPermission = this.service.approvalModeForTask(input.task) === "full";
     let action: ResolvedAction;
     try {
       const resolved = resolveToolAction({
@@ -1723,7 +1722,7 @@ export class HearthScheduler {
         argumentsValue,
         summary,
         workspaceRoot: input.workspaceRoot,
-        fullPermission: input.fullPermission,
+        fullPermission,
         context: this.service.store.listScheduleRunByTask(input.task.id) ? "scheduled" : "interactive"
       });
       if (!resolved) {
@@ -1733,7 +1732,7 @@ export class HearthScheduler {
     } catch (error) {
       return { allowed: false, reason: `敏感工具 ${toolName} 无法绑定到真实动作：${errorMessage(error)}` };
     }
-    if (input.fullPermission) {
+    if (fullPermission) {
       this.recordAutoApprovedTool(input.task, input.run, {
         toolName,
         arguments: argumentsValue,
@@ -1766,12 +1765,11 @@ export class HearthScheduler {
     task: TaskRecord;
     run: RunRecord;
     request: DshApprovalRequest;
-    fullPermission: boolean;
     signal: AbortSignal;
   }): Promise<DshApprovalOutcome> {
     if (input.signal.aborted) return "cancelled";
     const metadata = dshApprovalMetadata(input.request);
-    if (input.fullPermission) {
+    if (this.service.approvalModeForTask(input.task) === "full") {
       this.recordAutoApprovedTool(input.task, input.run, {
         toolName: input.request.toolName,
         arguments: null,

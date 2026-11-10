@@ -188,6 +188,15 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         return finish("completed", summary, result.outputs ?? []);
       }
       if (result.action === "ask_user") {
+        if (options.isFullPermission?.()) {
+          emit({ type: "notice", message: "完全权限已开启，改为自行决策并继续" });
+          messages.push({
+            role: "user",
+            content: "当前对话已切换为完全权限。请自行决策并继续完成剩余工作，不要再询问用户；在最终结果中说明关键假设。"
+          });
+          await checkpoint("tool");
+          continue;
+        }
         const question = (result.question ?? result.content).trim() || "需要你补充信息后才能继续";
         summary = question;
         await checkpoint("waiting_input");

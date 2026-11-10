@@ -40,6 +40,7 @@ export interface NativeRunOptions {
   onContextEvent?: (event: RuntimeEvent) => void;
   onCheckpoint?: (checkpoint: AgentCheckpoint) => void | Promise<void>;
   onAuthorizeTool?: (request: AgentToolAuthorizationRequest) => Promise<AgentToolAuthorization>;
+  isFullPermission?: () => boolean;
   extraTools?: AgentTool[];
 }
 
@@ -102,7 +103,8 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
       }
     },
     ...(options.onCheckpoint ? { onCheckpoint: options.onCheckpoint } : {}),
-    ...(options.onAuthorizeTool ? { authorizeTool: options.onAuthorizeTool } : {})
+    ...(options.onAuthorizeTool ? { authorizeTool: options.onAuthorizeTool } : {}),
+    ...(options.isFullPermission ? { isFullPermission: options.isFullPermission } : {})
   });
 
   return {

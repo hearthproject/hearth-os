@@ -119,6 +119,51 @@ describe("approval manager", () => {
     expect(service.requireTask(task.id).status).toBe("running");
   });
 
+  it("auto-approves pending tool approvals when the conversation switches to full", async () => {
+    const conversation = store.createConversation("切换权限", {
+      executorEnabled: { native: true, codex: true, "deepseek-harness": false, hermes: false, qoder: false, workbuddy: false, kimi: false },
+      approvalMode: "necessary",
+      preferredExecutorId: null
+    });
+    const manager = new ApprovalManager(service, async () => ({}));
+    const task = service.createTask({ templateId: "T07", conversationId: conversation.id });
+    const now = new Date().toISOString();
+    const runId = randomUUID();
+    service.createRun({
+      id: runId,
+      taskId: task.id,
+      attempt: 1,
+      status: "running",
+      threadId: "thread-switch",
+      workspace: "C:/tmp/switch",
+      startedAt: now,
+      endedAt: null,
+      failure: null,
+      usage: null,
+      leaseEpoch: null,
+      createdAt: now
+    });
+    service.updateTask(task.id, { status: "running", currentRunId: runId }, runId);
+    const pending = await manager.requestTool({
+      taskId: task.id,
+      runId,
+      toolName: "shell",
+      summary: "运行命令：npm test",
+      target: { tool: "shell", arguments: { command: "npm test" } },
+      preview: { arguments: { command: "npm test" } }
+    });
+    store.updateConversationSettings(conversation.id, { approvalMode: "full" });
+
+    expect(await manager.approvePendingForConversation(conversation.id)).toBe(1);
+    await expect(pending.decision).resolves.toEqual({ allowed: true, reason: "已批准" });
+    expect(store.getApproval(pending.approval.id)?.status).toBe("consumed");
+    expect(service.requireTask(task.id).status).toBe("running");
+    expect(store.listEvents().some((event) =>
+      event.type === "approval.auto_approved"
+      && (event.payload as { approvalId?: string }).approvalId === pending.approval.id
+    )).toBe(true);
+  });
+
   it("resumes the agent without executing a rejected tool", async () => {
     const manager = new ApprovalManager(service, async () => ({}));
     const { task, runId } = runningTask(service);

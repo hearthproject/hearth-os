@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HearthStore } from "@hearth/eventlog";
 import { defaultConversationSettings, mergeConversationSettings } from "@hearth/core";
 import { buildServer } from "./app.ts";
-import { visibleDeliverables } from "./service.ts";
+import { HearthService, visibleDeliverables } from "./service.ts";
 
 async function createTestProfile(app: FastifyInstance, name = "Test model"): Promise<string> {
   const created = await app.inject({
@@ -176,6 +176,26 @@ describe("chat-first API", () => {
 
     const oldDetail = await app.inject({ method: "GET", url: `/api/conversations/${oldConversation.json().id}` });
     expect(oldDetail.json().conversation.settings.approvalMode).toBe("necessary");
+    await app.close();
+  });
+
+  it("resumes waiting-input tasks when the conversation switches to full permission", async () => {
+    const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
+    const service = new HearthService(store);
+    const conversation = store.createConversation("自动继续", defaultConversationSettings());
+    const task = service.createTask({ templateId: "T07", conversationId: conversation.id });
+    service.updateTask(task.id, { status: "running" });
+    service.updateTask(task.id, { status: "waiting_input", nextAction: "等待你补充信息", error: null });
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: `/api/conversations/${conversation.id}`,
+      payload: { settings: { approvalMode: "full" } }
+    });
+    expect(response.statusCode).toBe(200);
+    const resumed = store.getTask(task.id);
+    expect(resumed?.status).toBe("queued");
+    expect(resumed?.pendingInput).toContain("完全权限");
     await app.close();
   });
 

@@ -275,6 +275,36 @@ export class ApprovalManager {
     return pending.length;
   }
 
+  async approvePendingForConversation(conversationId: string): Promise<number> {
+    const tasks = this.service.store.listTasks().filter((task) => task.conversationId === conversationId);
+    let approved = 0;
+    for (const task of tasks) {
+      const pending = this.service.store.listApprovals(task.id).filter((approval) => approval.status === "pending");
+      for (const approval of pending) {
+        try {
+          const result = await this.decide(approval.id, "approve", approval.parameterHash, { decider: "policy" });
+          const event = this.service.store.appendEvent({
+            type: "approval.auto_approved",
+            taskId: approval.taskId,
+            runId: approval.runId,
+            payload: {
+              approvalId: approval.id,
+              kind: approval.kind,
+              conversationId,
+              policy: "conversation.full",
+              effectId: result.effect?.id ?? null
+            }
+          });
+          this.service.bus.publish(event);
+          approved += 1;
+        } catch {
+          // One stale approval must not block the remaining conversation tasks.
+        }
+      }
+    }
+    return approved;
+  }
+
   expirePastDue(): { approvals: number; tasks: number } {
     const now = new Date().toISOString();
     let approvals = 0;

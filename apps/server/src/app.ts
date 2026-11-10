@@ -1075,6 +1075,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     codexEnv,
     modelSettingsForExecutor,
     executorHealth,
+    approvals,
     memory,
     personal: { ontology, mentions, broker: contextBroker, writer: ontologyWriter }
   });

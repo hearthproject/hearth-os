@@ -146,6 +146,32 @@ describe("agent runtime", () => {
     expect(result.question).toBe("预算上限是多少？");
   });
 
+  it("continues autonomously when ask_user runs after switching to full permission", async () => {
+    const root = workspace(roots);
+    const notices: string[] = [];
+    const result = await runAgent({
+      model: fakeModel([
+        turn("", [call("ask_user", { question: "要用哪个方案？" })]),
+        turn("", [call("finish_task", { summary: "已自行选择方案并完成" })])
+      ]),
+      tools: createBuiltinTools(),
+      goal: "自主完成任务",
+      systemPrompt: "system",
+      budget: { maxTurns: 4, maxToolCalls: 4, maxTokens: 10_000, maxDurationMs: 30_000 },
+      permissions: defaultTaskPermissions({ workspaceRoot: root, outDir: join(root, "out"), networkHosts: [] }),
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      isFullPermission: () => true,
+      onEvent: (event) => {
+        if (event.type === "notice") notices.push(event.message);
+      }
+    });
+
+    expect(result.status).toBe("completed");
+    expect(result.summary).toContain("自行选择");
+    expect(notices.join(" ")).toContain("完全权限");
+  });
+
   it("rejects tools that are not in the task permissions", async () => {
     const root = workspace(roots);
     const result = await runAgent({
