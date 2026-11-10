@@ -10,7 +10,7 @@ outline: false
 
 <DocCardGrid :columns="2" :items="[
   { no: '01', title: 'Engineering', text: 'Technology stack, runtime shape, repository organization, testing, and release constraints.', link: '/en/reference/engineering' },
-  { no: '02', title: 'Evaluation Agent (Standalone)', text: 'The evaluation code, 60 cases, console, and documentation now live in hearth-eval.', link: '/en/reference/evaluation-agent' },
+  { no: '02', title: 'Evaluation Agent (Standalone)', text: 'The evaluation code, 30 scenarios, 60 cases, console, and documentation now live in hearth-eval.', link: '/en/reference/evaluation-agent' },
   { no: '03', title: 'Risks and Stop Conditions', text: 'Signals that mean Hearth should pause, roll back, or narrow the product.', link: '/en/reference/risks' },
   { no: '04', title: 'Key Decisions', text: 'Product and engineering judgments that should not be reversed casually.', link: '/en/reference/decisions' },
   { no: '05', title: 'Build vs. Integrate', text: 'Which layer Hearth owns and which mature capabilities it uses directly.', link: '/en/reference/build-vs-integrate' },

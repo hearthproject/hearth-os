@@ -19,9 +19,14 @@ outline: false
 | Executors | Multiple specialized executors routed by capability, risk, and cost | No single model is asked to do everything |
 | Codex position | A high-capability external executor, not the product | Hearth retains tasks, authority, verification, memory, and receipts |
 | External action | Preview, authorize, execute, then reconcile | Sends, writes, deletes, publishes, and payments are not blindly retried |
+| Goal completion | Goal contract plus evidence-driven completion judgement | Model self-assessment, executor exit, or UI state cannot close a goal-backed task |
+| Delegation and handoff | Single-layer delegation; child work and handoffs may only narrow authority | Handoff packets carry generations, and old results cannot overwrite newer state |
 | Safety | Least privilege, short-lived credentials, isolation, default-deny network | Models and executors never see long-lived raw credentials |
+| Personal context | Personal ontology, Context Packs, and attention budgets | Context carries provenance, sensitivity, budget, and interruption cost; conflicts stay visible |
 | Memory and evolution | Correctable, forgettable memory; evaluated, canaried, reversible methods | No unbounded self-modification and no self-expanded authority |
 | Acceptance | Real tasks, independent verification, human time, recovery, and cost | A demo or model self-assessment does not prove capability |
+| Evaluation ownership | The evaluation stack is standalone in `hearth-eval`; the main repository keeps only the bridge | Product automated tests cannot masquerade as real experiments or pass rates |
+| Connection runtime | Transport, subscription, freshness, and execution ownership are separate, with generation fencing | Offline actions enter the outbox; old connections cannot write or advance state |
 | Mobile | Phone focuses on approval, review, takeover, and simple starts | It does not duplicate every desktop management feature |
 | Explicit non-goals | Enterprise multi-tenancy, public agent marketplace, unapproved high-risk automation | The product remains focused and personally controllable |
 

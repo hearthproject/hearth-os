@@ -13,11 +13,13 @@ outline: [2]
 Before an external action happens, confirm:
 
 - [ ] The action type matches the real intent;
+- [ ] The goal's acceptance criteria, constraints, and forbidden actions were checked;
 - [ ] The recipient, file, account, device, or resource is correct;
 - [ ] The content and attachments are correct;
 - [ ] The action does not exceed the current authorization scope;
 - [ ] Reversibility and likely impact are explained;
 - [ ] Approval is still valid and has not been replayed;
+- [ ] Approval binds the resolved real action and parameter fingerprint; changed parameters invalidate it;
 - [ ] Failure, retry, and reconciliation paths are ready;
 - [ ] No network, credential, or safety boundary is bypassed.
 
@@ -26,13 +28,17 @@ Reading and organizing may be authorized within the task scope. Sending, publish
 Before a task is marked complete, confirm:
 
 - [ ] The target artifact exists and the user can find it;
+- [ ] Every goal acceptance criterion has a verdict and evidence reference;
 - [ ] A verifier passed; the executor saying so is not enough;
 - [ ] Key facts have sources, and changes have diffs or versions;
 - [ ] No unauthorized external effect occurred;
 - [ ] External actions have receipts, and uncertain results were reconciled;
+- [ ] Uncertain effects entered an explicit reconciliation queue and have a user decision;
 - [ ] Failures, skipped work, and open items are explained;
 - [ ] Tokens, time, human minutes, and cost are recorded;
 - [ ] Workspaces, temporary authority, and execution rights are released;
+- [ ] Handoffs carry a generation and evidence, and old-generation results did not advance new state;
+- [ ] Sandbox path, network, process, and credential boundaries were not bypassed, and escape attempts failed closed;
 - [ ] The user can inspect, undo, retry, or continue.
 
 ## Coverage Boundaries

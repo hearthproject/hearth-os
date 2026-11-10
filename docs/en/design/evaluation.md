@@ -22,6 +22,8 @@ Cost must be tied to effective completion. The goal is not merely fewer tokens, 
 
 Tests and evaluations are separate. A test is a deterministic pass/fail gate suitable for every commit. An evaluation is a statistical quality measurement that needs task sets, baselines, and repeated comparison. Both matter, but they cannot be mixed into one CI gate that only looks at an average score.
 
+Evaluation tasks, the scenario runner, console, scoring, and review now live in the standalone [hearth-eval](https://github.com/hearthproject/hearth-eval) project. The main repository keeps only the controlled task and judge bridge so product tests and evaluation experiments do not become one source of truth. The standalone repository does not mean real experiments, pass rates, or long-term effects have been verified.
+
 | Evaluation layer | What it observes | When to use it |
 |---|---|---|
 | Component tests | Parsing, connectors, policy, verifiers, and recovery logic | Every commit |

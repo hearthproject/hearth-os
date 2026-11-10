@@ -23,13 +23,13 @@ hero:
   </a>
   <a href="/hearth-os/en/design/">
     <span class="home-quicklinks__label">Design</span>
-    <span class="home-quicklinks__meta">Positioning, overall design, and nine modules</span>
+    <span class="home-quicklinks__meta">Positioning, fifteen design modules, and current boundaries</span>
   </a>
   <a href="/hearth-os/en/delivery/">
     <span class="home-quicklinks__label">Delivery</span>
     <span class="home-quicklinks__meta">Phased plan from MVP to v1.0</span>
   </a>
-  <a href="/hearth-os/en/log/day-05.html">
+  <a href="/hearth-os/en/log/day-07.html">
     <span class="home-quicklinks__label">Dev Log</span>
     <span class="home-quicklinks__meta">Daily summary, commits, and concrete changes</span>
   </a>
@@ -62,7 +62,7 @@ hero:
       <img src="/screenshots/task-detail.png" alt="Task detail">
       <figcaption>
         <strong>Task detail</strong>
-        <span>Goal, executor, budget, artifacts, and final result remain on record.</span>
+        <span>Goal, acceptance criteria, executor, budget, evidence, artifacts, and final result remain on record.</span>
       </figcaption>
     </figure>
     <figure class="screenshot-card">
@@ -97,8 +97,8 @@ Hearth is not another chat shell, and it is not an agent that only serves code. 
   {
     no: '01',
     title: 'Tasks first, not messages first',
-    text: 'Every run has a goal, budget, checkpoints, and an artifact summary. Failures can be recovered; interruptions can be resumed.',
-    link: '/en/design/tasks',
+    text: 'Every run has a goal contract, acceptance criteria, budget, checkpoints, and evidence. Failures can be recovered, and completion cannot rely on model self-assessment.',
+    link: '/en/design/goals-and-evidence',
     meta: 'Durable execution'
   },
   {
@@ -131,5 +131,17 @@ Hearth is not another chat shell, and it is not an agent that only serves code. 
     text: 'SQLite data domains, context lifecycle, encrypted backup, and why a recoverable database is not a portable artifact archive.',
     link: '/en/design/storage',
     meta: 'Data & backup'
+  },
+  {
+    title: 'Delegation, handoff, and sandboxing',
+    text: 'Single-layer durable delegation, reviewable handoff packets, leases and generations, and path, network, process, and credential boundaries.',
+    link: '/en/design/delegation-and-sandbox',
+    meta: 'Delegation & sandbox'
+  },
+  {
+    title: 'Personal context and attention',
+    text: 'How the personal ontology, context packs, memory recall, standing intents, and interruption budgets decide what the agent sees and when it should speak.',
+    link: '/en/design/personal-context',
+    meta: 'Context & attention'
   }
 ]" />

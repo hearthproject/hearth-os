@@ -26,6 +26,8 @@ Beyond the main surface, navigation now exposes "Needs you", "Memory", "Skills",
 
 Notifications have two layers. While the page is open, Hearth shows an in-app toast and offers optional browser desktop notifications. It does not promise delivery after the page closes. For approvals away from the computer, the Feishu long-connection entry sends task status, approval summaries, and one-time approval commands to mapped chats. The first version uses `/approve` and `/reject` text commands because interactive card callbacks are not supported over the long connection.
 
+The web app now ships an installable PWA shell, offline app shell, and mobile bottom navigation. Task detail shows acceptance criteria, the completion verdict, missing evidence, artifacts, and the final result. Phone pairing, system push, and remote takeover remain unaccepted, so the current PWA shell is not a complete mobile client.
+
 The mail workspace has Accounts, Inbox, and Compose views. IMAP sync is read-only, writes recent messages into Sources, and never marks them read. Compose only creates a draft and a one-time approval; approval is required before SMTP sends and stores a receipt. Real accounts, bounce semantics, and attachment selection still need manual acceptance.
 
 ## Design Tradeoffs

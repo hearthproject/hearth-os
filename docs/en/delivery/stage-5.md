@@ -10,8 +10,8 @@ See [Phase 2–6 Delivery Status](/en/delivery/status) for implemented scope, ve
 
 ## Current status
 
-- **Implemented code loop:** Memory candidates, recall, correction, conflict handling, forgetting propagation, and export; method candidates are generated from finished task traces and pass through trial evidence, evaluation, promotion, rejection, and rollback.
-- **Still open:** Real long-term memory use, error-memory and error-method drills, before/after production comparison, and the full 5.4 acceptance. See [Phase 2–6 delivery status](/en/delivery/status).
+- **Implemented code loop:** Memory candidates, recall, correction, conflict handling, consolidation, forgetting propagation, tombstones, and export; method candidates are generated from finished task traces and pass through trial evidence, evaluation, promotion, rejection, and rollback; skills have scoped permissions, lifecycle, stale cleanup, and rollback; durable single-layer delegation, handoff generations, and sandbox boundaries also exist.
+- **Still open:** Real long-term memory use, error-memory and error-method drills, before/after production comparison, real multi-executor stress, and the full 5.4 acceptance. See [Phase 2–6 delivery status](/en/delivery/status).
 
 ## Goal
 

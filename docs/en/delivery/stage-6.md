@@ -10,8 +10,8 @@ See [Phase 2–6 Delivery Status](/en/delivery/status) for implemented scope, ve
 
 ## Current status
 
-- **Implemented code loop:** Incremental event sync with conflict choice, task leases and epoch fencing, device revocation and token rotation, kill switch, encrypted backup and restore, health checks, maintenance, and redacted diagnostics.
-- **Still open:** Two real devices switching, a lost-device drill, full migration, multi-week continuous operation, and v1.0 release acceptance. See [Phase 2–6 delivery status](/en/delivery/status).
+- **Implemented code loop:** Incremental event sync with conflict choice, task leases and epoch fencing, device revocation and token rotation, kill switch, encrypted backup and restore, health checks, maintenance, and redacted diagnostics. The connection runtime separates transport, subscription, data freshness, and execution ownership, with generation isolation, an offline outbox, and cached projections.
+- **Still open:** Real remote nodes and phones, real offline reconnect and cross-node outbox reconciliation, two real devices switching, a lost-device drill, full migration, multi-week continuous operation, and v1.0 release acceptance. See [Phase 2–6 delivery status](/en/delivery/status).
 
 ## Goal
 

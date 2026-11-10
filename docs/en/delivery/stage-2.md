@@ -10,8 +10,8 @@ See [Phase 2–6 Delivery Status](/en/delivery/status) for implemented scope, ve
 
 ## Current status
 
-- **Implemented code loop:** Local files, knowledge base, and public web sources; TXT, Markdown, CSV, JSON, HTML, PDF, DOCX, and XLSX extraction; and the draft → approval → local outbox write → receipt chain.
-- **Still open:** Email and calendar account access, real sending or external-system writes, and acceptance with 10–15 real everyday tasks. See [Phase 2–6 delivery status](/en/delivery/status) for item-level evidence.
+- **Implemented code loop:** Local files, knowledge base, and public web sources; TXT, Markdown, CSV, JSON, HTML, PDF, DOCX, and XLSX extraction; IMAP read-only sync; SMTP sending; and the draft → approval → local outbox or real send → receipt chain.
+- **Still open:** Real mail accounts, bounce and spam semantics, calendar accounts, the mail attachment UI, and acceptance with 10–15 real everyday tasks. See [Phase 2–6 delivery status](/en/delivery/status) for item-level evidence.
 
 ## Goal
 

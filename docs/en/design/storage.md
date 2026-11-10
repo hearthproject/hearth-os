@@ -18,7 +18,7 @@ outline: [2]
 | Every run is traceable | A context item carries `task_id`, `run_id`, `executor_id`, `provenance_json`, and a stable `executor_event_id` |
 | Executors do not hold long-lived credentials | Model keys are encrypted with AES-256-GCM in the database; an executor gets decrypted configuration only for its run |
 
-The current database schema version is **11**. At startup, `packages/eventlog/src/database.ts` runs table creation and incremental migrations in order, then writes `PRAGMA user_version` and `app_meta.schemaVersion`.
+The current database schema version is **28**. At startup, `packages/eventlog/src/database.ts` runs table creation and incremental migrations in order, then writes `PRAGMA user_version` and `app_meta.schemaVersion`.
 
 ## The `.hearth` Directory
 
@@ -49,16 +49,21 @@ The default data directory is `.hearth/` under the repository root and can be ov
 | Domain | Main tables | Purpose |
 |---|---|---|
 | Event ledger | `events` | Append-only fact stream that drives SSE, sync, and projection rebuilds |
-| Tasks and runs | `tasks`, `runs`, `run_checkpoints`, `task_proposals` | Task state machine, attempts, budgets, and recovery points |
+| Goals and completion | `goals`, `goal_completion_reports`, `prepared_actions` | Goal contracts, acceptance evidence, verdicts, and prepared-action previews |
+| Tasks and runs | `tasks`, `runs`, `task_follow_ups`, `run_checkpoints`, `task_proposals` | Task state machine, follow-up input, attempts, budgets, and recovery points |
 | Conversations | `conversations`, `chat_messages` | Chat messages and upsertable `task_status` cards |
-| Approvals and effects | `approvals`, `effects`, `outbox_drafts` | One-time authority, idempotent execution, and external receipts |
+| Approvals and effects | `approvals`, `effects`, `reconcile_queue`, `outbox_drafts` | One-time authority, idempotent execution, uncertain-effect reconciliation, and external receipts |
 | Artifacts and sources | `artifacts`, `sources`, `source_items` | Deliverable indexes, source body indexes, and fetch records |
-| Context | `context_items`, `task_context_state`, `context_settings`, `handoffs` | Execution trail, task summary, context policy, and handoff records |
+| Delegation and task graph | `delegation_jobs`, `handoffs`, `task_edges` | Single-layer delegation, executor handoff, and dependency/join edges |
+| Context | `context_items`, `task_context_state`, `context_settings` | Execution trail, task summary, and context policy |
+| Context packs | `context_packs`, `context_pack_items`, `memory_entities` | Channeled context, budgets, references, and memory-entity links |
 | Model management | `model_profiles`, `executor_model_bindings`, `app_settings` | Unified model profiles, executor bindings, and chat model selection |
 | Settings migration | `settings_migrations` | Legacy JSON source, backup path, status, and error |
-| Memory and methods | `memories`, `memory_*`, `method_*`, `method_applications` | Correctable memory, recall audit, method evolution, and per-run injection evidence |
-| Multi-device and security | `devices`, `pairing_requests`, `sync_*`, `task_leases`, `security_*` | Pairing, sync, leases, revocation, and fencing |
-| Operations | `maintenance_runs`, `backup_records`, `scheduled_jobs` | Maintenance, backups, and periodic jobs |
+| Personal context | `entities`, `entity_aliases`, `relations`, `entity_states`, `decisions`, `commitments`, `mentions` | Personal ontology, states, decisions, commitments, and mention evidence |
+| Memory and methods | `memories`, `memory_*`, `method_*`, `method_applications`, `skills`, `skill_*` | Correctable memory, recall audit, method evolution, and skill lifecycle |
+| Attention | `standing_intents`, `attention_items`, `heartbeat_runs`, `attention_feedback` | Standing intents, heartbeat, candidates, budgets, and user feedback |
+| Multi-device and security | `devices`, `pairing_requests`, `sync_*`, `task_leases`, `connection_*`, `channel_*` | Pairing, sync, leases, connection runtime, offline outbox, and channel idempotency |
+| Operations | `maintenance_runs`, `backup_records`, `scheduled_jobs`, `scheduled_job_runs`, `watchdog_events` | Maintenance, backups, periodic jobs, catch-up, cooldown, and watchdog records |
 
 Method applications are append-only local audit records; they are not replayed as events or synchronized across devices. `tasks.method_id/method_version` pins an explicit binding, while `method_applications` records the method version, selection mode, and prompt hash actually injected in each run. `method_candidates.generation` identifies the adoption generation and `fingerprint` deduplicates deterministic candidate creation.
 

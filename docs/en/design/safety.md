@@ -34,4 +34,6 @@ Containers are useful operational isolation, not an absolute guarantee against m
 
 Credentials never enter the model context. Hearth grants short-lived capability by account, resource, action, device, and time, then revokes it when the task ends. Logs, errors, and model inputs are redacted automatically. Users can see which connections remain active and revoke all grants at once.
 
+Delegation is single-layer, and a child task can only inherit and narrow the parent's workspace, network, and credential scope. A handoff packet must carry the goal, evidence, remaining budget, and generation; results from an old generation cannot overwrite newer state. The current local sandbox checks path, process, network, and credential policy and fails closed on escape. It is not a container- or VM-level strong boundary, so high-risk code still needs a stronger isolated environment. See [Delegation, Handoff, and Sandboxing](/en/design/delegation-and-sandbox).
+
 Supply chain and device safety are product boundaries too. Dependencies are pinned, audited, and minimized. Extensions do not receive all permissions by default. Device pairing declares identity and capability, and a lost device can be revoked, have keys rotated, and have local data cleared. A serious incident needs a global pause and isolation entry, not only one-by-one task cancellation.

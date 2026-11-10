@@ -14,14 +14,14 @@ outline: [2]
 
 | 目录 | 内容 |
 |---|---|
-| `docs/design/` | 1 篇总体设计和 9 篇并列模块设计 |
+| `docs/design/` | 1 篇总体设计和 15 篇并列模块设计，按 3 组组织 |
 | `docs/delivery/` | 六个阶段、24 个小阶段和交付总览 |
 | `docs/reference/` | 工程、风险、决策、边界、术语、清单和维护资料 |
 | `docs/en/` | 所有页面的英文镜像 |
 | `docs/.vitepress/` | 站点配置、导航、侧栏和主题 |
 | `scripts/` | 交付页面生成和覆盖检查 |
 
-本地开发需要 Node.js 20 或更新版本以及 npm。安装依赖运行 `npm ci`，开发预览运行 `npm run docs:dev`，构建运行 `npm run docs:build`，预览构建结果运行 `npm run docs:preview`。构建产物写入 `docs/.vitepress/dist`，不要提交。
+本地开发需要 Node.js 22.13 或更新版本以及 npm。安装依赖运行 `npm ci`，开发预览运行 `npm run docs:dev`，构建运行 `npm run docs:build`，预览构建结果运行 `npm run docs:preview`。构建产物写入 `docs/.vitepress/dist`，不要提交。
 
 写作时先讲结论，再讲原因；一个段落只承担一个主要意思。设计说明只写产品目标和设计取舍，不写代码路径、内部类名和实现细节。文章尽量少用二级标题，不要用三级标题拆分碎片内容；需要比较时优先用表格，需要步骤时用短列表。
 

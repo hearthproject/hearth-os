@@ -14,7 +14,7 @@ outline: false
 
 **Does it require an internet connection?** Local-first by default. Tasks, artifacts, memory, and credentials stay in an environment the user controls. Models, remote execution, and sync services are optional. When cloud capability is used, Hearth explains which data leaves the device, how long it is retained, and how it can be deleted.
 
-**What can Phase 1 do?** Phase 1 delivers the smallest complete MVP. It starts from 15 cross-industry real tasks and passes at least 10 of them while covering the full path in a real browser: create, execute, approve, inspect artifacts, and recover from failure. It still does not include sending email, writing calendars, desktop operation, proactive loops, full memory, or multiple devices.
+**What can Phase 1 do?** Phase 1 delivers the smallest complete MVP. It starts from 15 cross-industry real tasks and passes at least 10 of them while covering the full path in a real browser: create, execute, approve, inspect artifacts, and recover from failure. Phase 1 itself did not include sending email, writing calendars, desktop operation, proactive loops, full memory, or multiple devices; later phases formed code loops for these capabilities, but real accounts, real devices, and long-running acceptance remain incomplete.
 
 **Why not build one universal agent?** Because "universal" usually means permission, context, and failure boundaries are all uncontrolled. Hearth uses multiple specialized executors and chooses a path by capability, risk, reversibility, and cost. Each executor has explicit boundaries, verification, and human takeover.
 
@@ -22,6 +22,6 @@ outline: false
 
 **Will Hearth modify itself automatically?** Not without bounds. Hearth can propose new methods from real traces, but a candidate must pass permission checks, replay, side-effect-free trials, limited real use, and rollback verification. The model cannot change authorization rules, approval thresholds, or core safety boundaries.
 
-**Does it support multiple users, enterprises, and mobile?** Hearth is a single-user, self-hosted product. Enterprise multi-tenancy, organizational audit, and billing are not first-version goals. Mobile is a controlled entry focused on review, approval, takeover, simple starts, and notifications; it does not duplicate every desktop management feature. Phase 1 only guarantees the minimal complete path on local web.
+**Does it support multiple users, enterprises, and mobile?** Hearth is a single-user, self-hosted product. Enterprise multi-tenancy, organizational audit, and billing are not first-version goals. Mobile is a controlled entry focused on review, approval, takeover, simple starts, and notifications; it does not duplicate every desktop management feature. A PWA shell, mobile bottom navigation, and Feishu text approval exist, but phone pairing, system-level push, remote takeover, and real-device installation remain unaccepted.
 
 To continue, read the [overall design](/en/design/) and the [delivery route](/en/delivery/). For implementation or maintenance details, use the other appendix pages.

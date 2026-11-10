@@ -12,6 +12,8 @@ outline: false
 
 Users should see the same tasks, approvals, and artifacts on different devices and continue from where they stopped when switching devices. Devices can have different capabilities: a phone is better for approvals and takeover, a desktop can operate local software, and a home server can stay online. The system cannot assume every device is equal.
 
+The connection runtime separates transport, subscription, data freshness, and execution ownership. Each device and user has an owner connection; reconnect advances the generation and rejects old-generation writes. Offline actions enter only the connection outbox, while cached projections expose `cached`, `asOf`, and cursor values so they cannot masquerade as live data. A remote action that disconnects becomes uncertain and requires explicit reconciliation. Real remote nodes, phone reconnect, and cross-node outbox reconciliation are still unaccepted, so a code loop is not a completed multi-device delivery.
+
 Offline is a normal state. A disconnected device can still inspect existing tasks, record actions, and queue pending actions. When it reconnects, actions are submitted in order. A conflict preserves both sources and asks for confirmation; it is never silently overwritten. When a device is lost or revoked, other devices stop sending it sensitive data and withdraw capability and keys as soon as possible.
 
 Long-running operation is about resources, not merely "it did not crash". Memory, disk, caches, logs, background tasks, connections, and temporary files need limits and cleanup rules. Health checks, anomaly alerts, upgrades, and rollback cover the service, database, device agents, and external connections.

@@ -18,7 +18,7 @@ outline: [2]
 | 每次执行可追溯 | 上下文条目带 `task_id`、`run_id`、`executor_id`、`provenance_json` 和稳定的 `executor_event_id` |
 | 执行器不持有长期凭据 | 模型密钥经 AES-256-GCM 加密后存入数据库；执行器只在单次运行中获得解密后的配置 |
 
-当前数据库 schema 版本为 **11**。启动时由 `packages/eventlog/src/database.ts` 顺序执行建表与增量迁移，并写入 `PRAGMA user_version` 和 `app_meta.schemaVersion`。
+当前数据库 schema 版本为 **28**。启动时由 `packages/eventlog/src/database.ts` 顺序执行建表与增量迁移，并写入 `PRAGMA user_version` 和 `app_meta.schemaVersion`。
 
 ## `.hearth` 目录
 
@@ -49,16 +49,21 @@ outline: [2]
 | 数据域 | 主要表 | 作用 |
 |---|---|---|
 | 事件账本 | `events` | 只追加的事实流，驱动 SSE、同步和投影重建 |
-| 任务与运行 | `tasks`、`runs`、`run_checkpoints`、`task_proposals` | 任务状态机、执行尝试、预算与恢复点 |
+| 目标与完成 | `goals`、`goal_completion_reports`、`prepared_actions` | 目标契约、验收证据、完成结论和待审批动作预览 |
+| 任务与运行 | `tasks`、`runs`、`task_follow_ups`、`run_checkpoints`、`task_proposals` | 任务状态机、追加输入、执行尝试、预算与恢复点 |
 | 对话 | `conversations`、`chat_messages` | 聊天消息和可 upsert 的 `task_status` 状态卡片 |
-| 审批与副作用 | `approvals`、`effects`、`outbox_drafts` | 一次性授权、幂等执行和外部回执 |
+| 审批与副作用 | `approvals`、`effects`、`reconcile_queue`、`outbox_drafts` | 一次性授权、幂等执行、不确定效果对账和外部回执 |
 | 产物与来源 | `artifacts`、`sources`、`source_items` | 交付物索引、来源正文索引和抓取记录 |
-| 上下文 | `context_items`、`task_context_state`、`context_settings`、`handoffs` | 执行轨迹、任务摘要、上下文策略和交接记录 |
+| 委派与任务图 | `delegation_jobs`、`handoffs`、`task_edges` | 单层委派、执行器交接和任务依赖/汇合关系 |
+| 上下文 | `context_items`、`task_context_state`、`context_settings` | 执行轨迹、任务摘要和上下文策略 |
+| Context Pack | `context_packs`、`context_pack_items`、`memory_entities` | 分通道上下文、预算、引用和记忆-实体链接 |
 | 模型管理 | `model_profiles`、`executor_model_bindings`、`app_settings` | 统一模型档案、执行器绑定和聊天模型选择 |
 | 设置迁移 | `settings_migrations` | 旧 JSON 导入的来源、备份路径、状态和错误 |
-| 记忆与方法 | `memories`、`memory_*`、`method_*`、`method_applications` | 可纠正记忆、召回审计、方法演进和逐次注入证据 |
-| 多设备与安全 | `devices`、`pairing_requests`、`sync_*`、`task_leases`、`security_*` | 配对、同步、租约、撤销与设备围栏 |
-| 运维 | `maintenance_runs`、`backup_records`、`scheduled_jobs` | 维护任务、备份记录和周期作业 |
+| 个人上下文 | `entities`、`entity_aliases`、`relations`、`entity_states`、`decisions`、`commitments`、`mentions` | 个人本体、状态、决定、承诺和提及证据 |
+| 记忆与方法 | `memories`、`memory_*`、`method_*`、`method_applications`、`skills`、`skill_*` | 可纠正记忆、召回审计、方法演进和技能生命周期 |
+| 注意力 | `standing_intents`、`attention_items`、`heartbeat_runs`、`attention_feedback` | 标准意图、心跳、候选、预算与用户反馈 |
+| 多设备与安全 | `devices`、`pairing_requests`、`sync_*`、`task_leases`、`connection_*`、`channel_*` | 配对、同步、租约、连接运行时、离线 outbox 和渠道幂等 |
+| 运维 | `maintenance_runs`、`backup_records`、`scheduled_jobs`、`scheduled_job_runs`、`watchdog_events` | 维护、备份、周期作业、补跑、冷却和看门狗记录 |
 
 方法应用记录是 append-only 的本地审计，不参与事件重放和跨设备同步。`tasks.method_id/method_version` 钉住显式绑定，`method_applications` 记录每次运行实际注入的方法版本、选择方式和提示词哈希；`method_candidates.generation` 表示采用代数，`fingerprint` 用于确定性候选去重。
 

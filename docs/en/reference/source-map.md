@@ -12,20 +12,20 @@ outline: [2]
 
 | Area | Content | Entry |
 |---|---|---|
-| Design | 1 overall design plus 12 parallel module designs, including technology choices and storage architecture | [Overall design](/en/design/) |
+| Design | 1 overall design plus 15 parallel module designs in three groups, including technology choices and storage architecture | [Overall design](/en/design/) |
 | Delivery | Six phases, 24 sub-stages, Phase 2–6 delivery status, and real acceptance boundaries | [Delivery route](/en/delivery/) |
-| Development log | Day01–Day05 entries with commits, diffstats, and boundaries | [Day05](/en/log/day-05) |
+| Development log | Day01–Day07 entries with commits, diffstats, and boundaries | [Day07](/en/log/day-07) |
 | Appendix | Engineering, risks, decisions, build-vs-integrate, glossary, checklists, and maintenance material | [Appendix](/en/reference/) |
 | Site entry | Home page and language switch | [Home](/en/) |
 
-The twelve design modules are Entrances and Experience, Tasks and Durable Execution, Control and Authority, Executors and Routing, Storage and Context Architecture, Native Agent Runtime, Approvals and External Effects, Runtime and Safety, Memory and Capability Evolution, Evaluation and Cost, Multi-device and Long-running Operation, and Agent Reference Patterns. They are parallel reads, not organized by code directory.
+The fifteen design modules are Entrances and Experience, Tasks and Durable Execution, Goals/Completion and Evidence, Control and Authority, Executors and Routing, Native Agent Runtime, Delegation/Handoff and Sandboxing, Approvals and External Effects, Runtime and Safety, Storage and Context Architecture, Personal Context and Attention, Memory and Capability Evolution, Evaluation and Cost, Multi-device and Long-running Operation, and Agent Reference Patterns. They are parallel reads, not organized by code directory.
 
 A first pass can follow "why it exists → what exists now → what is still missing → how it is built":
 
 1. Read the [overall design](/en/design/) for product positioning, task flow, technology choices, and module boundaries;
-2. Read the twelve modules as needed, in any order;
+2. Read the fifteen modules as needed, in any order;
 3. Check the [delivery route](/en/delivery/) for the real state of the six phases: Phase 1 is accepted, while Phases 2–6 have code loops but no real acceptance yet;
-4. Before continuing development, read [Engineering](/en/reference/engineering), [Key decisions](/en/reference/decisions), [Risks and stop conditions](/en/reference/risks), and the [Day05 development log](/en/log/day-05).
+4. Before continuing development, read [Engineering](/en/reference/engineering), [Key decisions](/en/reference/decisions), [Risks and stop conditions](/en/reference/risks), and the [Day07 development log](/en/log/day-07).
 
 To judge quickly whether the project is worth a longer read, start with "Product positioning and goals" in the overall design and the phase overview in the delivery route. Read the engineering constraints and default checklists before implementing.
 

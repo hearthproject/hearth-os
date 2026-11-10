@@ -5,30 +5,43 @@ import { enDeliveryStages, zhDeliveryStages } from './delivery-sidebar.mjs'
 const zhNav = [
   { text: '设计说明', link: '/design/', activeMatch: '^/design/' },
   { text: '交付路线', link: '/delivery/', activeMatch: '^/delivery/' },
-  { text: '开发日志', link: '/log/day-05', activeMatch: '^/log/' },
+  { text: '开发日志', link: '/log/day-07', activeMatch: '^/log/' },
   { text: '附录', link: '/reference/', activeMatch: '^/reference/' }
 ]
 
 const enNav = [
   { text: 'Design', link: '/en/design/', activeMatch: '^/en/design/' },
   { text: 'Delivery', link: '/en/delivery/', activeMatch: '^/en/delivery/' },
-  { text: 'Dev Log', link: '/en/log/day-05', activeMatch: '^/en/log/' },
+  { text: 'Dev Log', link: '/en/log/day-07', activeMatch: '^/en/log/' },
   { text: 'Appendix', link: '/en/reference/', activeMatch: '^/en/reference/' }
 ]
 
 const zhDesignSidebar = [
   {
-    text: '设计说明',
+    text: '定位与任务',
     items: [
       { text: '总体设计', link: '/design/' },
       { text: '入口与交互', link: '/design/experience' },
       { text: '任务与持久执行', link: '/design/tasks' },
+      { text: '目标、完成判定与证据', link: '/design/goals-and-evidence' }
+    ]
+  },
+  {
+    text: '执行与控制',
+    items: [
       { text: '控制面与授权', link: '/design/control' },
       { text: '执行器与路由', link: '/design/executors' },
-      { text: '存储与上下文架构', link: '/design/storage' },
       { text: '原生 Agent Runtime', link: '/design/native-agent-runtime' },
+      { text: '委派、交接与沙箱', link: '/design/delegation-and-sandbox' },
       { text: '审批、接管与外部副作用', link: '/design/effects' },
-      { text: '运行环境与安全', link: '/design/safety' },
+      { text: '运行环境与安全', link: '/design/safety' }
+    ]
+  },
+  {
+    text: '上下文与长期运行',
+    items: [
+      { text: '存储与上下文架构', link: '/design/storage' },
+      { text: '个人上下文与注意力', link: '/design/personal-context' },
       { text: '记忆与能力进化', link: '/design/memory' },
       { text: '评估与成本', link: '/design/evaluation' },
       { text: '多设备与长期运行', link: '/design/operations' },
@@ -39,17 +52,30 @@ const zhDesignSidebar = [
 
 const enDesignSidebar = [
   {
-    text: 'Design',
+    text: 'Positioning and Tasks',
     items: [
       { text: 'Overall Design', link: '/en/design/' },
       { text: 'Entrances and Experience', link: '/en/design/experience' },
       { text: 'Tasks and Durable Execution', link: '/en/design/tasks' },
+      { text: 'Goals, Completion, and Evidence', link: '/en/design/goals-and-evidence' }
+    ]
+  },
+  {
+    text: 'Execution and Control',
+    items: [
       { text: 'Control and Authority', link: '/en/design/control' },
       { text: 'Executors and Routing', link: '/en/design/executors' },
-      { text: 'Storage and Context Architecture', link: '/en/design/storage' },
       { text: 'Native Agent Runtime', link: '/en/design/native-agent-runtime' },
+      { text: 'Delegation, Handoff, and Sandboxing', link: '/en/design/delegation-and-sandbox' },
       { text: 'Approvals, Takeover, and External Effects', link: '/en/design/effects' },
-      { text: 'Runtime and Safety', link: '/en/design/safety' },
+      { text: 'Runtime and Safety', link: '/en/design/safety' }
+    ]
+  },
+  {
+    text: 'Context and Long-running Operation',
+    items: [
+      { text: 'Storage and Context Architecture', link: '/en/design/storage' },
+      { text: 'Personal Context and Attention', link: '/en/design/personal-context' },
       { text: 'Memory and Capability Evolution', link: '/en/design/memory' },
       { text: 'Evaluation and Cost', link: '/en/design/evaluation' },
       { text: 'Multi-device and Long-running Operation', link: '/en/design/operations' },
@@ -78,7 +104,9 @@ const zhSidebar = {
         { text: 'Day02 · 站点结构精简', link: '/log/day-02' },
         { text: 'Day03 · 阶段一 MVP 跑通', link: '/log/day-03' },
         { text: 'Day04 · 运行时就位与执行器收敛', link: '/log/day-04' },
-        { text: 'Day05 · 首次运行、入口与邮件闭环', link: '/log/day-05' }
+        { text: 'Day05 · 首次运行、入口与邮件闭环', link: '/log/day-05' },
+        { text: 'Day06 · 工作流、技能与评测控制台', link: '/log/day-06' },
+        { text: 'Day07 · 目标证据、委派与个人上下文', link: '/log/day-07' }
       ]
     }
   ],
@@ -122,7 +150,9 @@ const enSidebar = {
         { text: 'Day02 · Documentation structure cleanup', link: '/en/log/day-02' },
         { text: 'Day03 · Stage-one MVP runs end to end', link: '/en/log/day-03' },
         { text: 'Day04 · Runtime and executor convergence', link: '/en/log/day-04' },
-        { text: 'Day05 · First run, entrances, and mail closure', link: '/en/log/day-05' }
+        { text: 'Day05 · First run, entrances, and mail closure', link: '/en/log/day-05' },
+        { text: 'Day06 · Workflows, skills, and the evaluation console', link: '/en/log/day-06' },
+        { text: 'Day07 · Goal evidence, delegation, and personal context', link: '/en/log/day-07' }
       ]
     }
   ],

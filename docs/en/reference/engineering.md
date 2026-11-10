@@ -28,7 +28,7 @@ outline: [2]
 | Resident service | One modular-monolith process | Reduces early operational cost and protocol drift |
 | Local storage | SQLite in WAL mode | Enough for single-user, local-first, single-writer use with simple backup |
 | Data validation | Versioned data structures | External input, records, and actions still need runtime validation |
-| Web | React and Vite | Fits task cards, approvals, artifacts, and live state; the mobile PWA is not implemented |
+| Web | React and Vite | Fits task cards, approvals, artifacts, and live state; the PWA shell and mobile navigation exist, while phone pairing, system push, and remote takeover are not accepted |
 | Live updates | Server-sent event push | Simpler than a two-way persistent connection for state changes |
 | Browser automation | Not built in | Web sources use `fetch` + `cheerio`; sites that need a signed-in session or interaction stay inside the executor workspace |
 | Documents and data | Server-side TypeScript | `pdfjs-dist`, `mammoth`, and `exceljs` extract PDF, DOCX, and XLSX in-process |

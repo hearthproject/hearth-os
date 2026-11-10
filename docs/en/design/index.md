@@ -48,7 +48,7 @@ Technology follows system constraints, not language preference. Hearth must run 
 | Primary language | TypeScript | Control, tasks, command line, web, and adapters share concepts and validation, reducing protocol drift |
 | Service runtime | Node.js 22.13+ | Fits high-I/O orchestration and event delivery; one process, one writer; document work uses built-in `node:sqlite` |
 | Local storage | SQLite WAL | Enough for a single-user, local-first, single-writer system, with simple backup and migration |
-| Web interface | React and Vite | Fits task cards, approvals, artifacts, and live state; the mobile PWA stays in phase four and is not claimed early |
+| Web interface | React and Vite | Fits task cards, approvals, artifacts, and live state; the PWA shell and mobile navigation exist, while phone pairing, system push, and remote takeover remain unaccepted |
 | Live updates | Server-Sent Events | Simpler than a two-way persistent connection for server-side state changes |
 | Documents and data | Server-side TypeScript | `cheerio`, `pdfjs-dist`, `mammoth`, and `exceljs` extract HTML, PDF, DOCX, and XLSX in-process, without a second business protocol |
 | Native boundary | PowerShell + Node bridge | The Windows helper owns window observation, UIA, and input; Rust appears only when a single binary or stronger isolation becomes a hard constraint |
@@ -59,25 +59,28 @@ TypeScript wins mainly because of shared protocols and integration speed. Tasks,
 
 Rust is not the primary language because the bottleneck is product boundaries, protocol consistency, recovery, and authority judgment, not raw speed. Desktop work first validates real interaction with PowerShell plus a Node bridge; Rust expands only if a single binary, stronger isolation, or device resources become hard constraints. Go and Python are not part of the business stack today; document parsing already runs in the TypeScript server, avoiding a second runtime in the first phase.
 
-The frontend uses React and Vite without a second server-rendered runtime. Task state comes from the local service projection; the browser renders and sends commands. The first phase does not introduce microservices or network boundaries just to look complete. The PWA and phone entrance belong to [Phase 4](/en/delivery/stage-4) and are not implemented yet.
+The frontend uses React and Vite without a second server-rendered runtime. Task state comes from the local service projection; the browser renders and sends commands. The first phase does not introduce microservices or network boundaries just to look complete. The PWA shell, mobile bottom navigation, and offline application shell exist, but phone pairing, iOS/Android installation, system push, and remote takeover remain unaccepted parts of [Phase 4](/en/delivery/stage-4).
 
 ## Module Map and Key Boundaries
 
-The twelve modules below are parallel design notes. Together they cover the product from the first entrance to long-running operation, without following a code directory layout.
+The fifteen modules below are parallel design notes. Together they cover the product from the first entrance to long-running operation, without following a code directory layout.
 
 | Module | What it solves first |
 |---|---|
 | [Entrances and Experience](/en/design/experience) | Let the user know what the system is doing, when attention is needed, and where results live |
 | [Tasks and Durable Execution](/en/design/tasks) | Keep work alive across restarts, sleep, and failure, with evidence and recovery |
+| [Goals, Completion, and Evidence](/en/design/goals-and-evidence) | Turn goals into acceptance contracts and decide completion from evidence rather than model self-assessment |
 | [Control and Authority](/en/design/control) | Decide when to observe, suggest, execute, or stop, within explicit authority |
 | [Executors and Routing](/en/design/executors) | Use specialized capabilities instead of one universal model |
-| [Storage and Context Architecture](/en/design/storage) | Unify facts, model bindings, and handoff watermarks with SQLite, content blobs, and task context |
 | [Native Agent Runtime](/en/design/native-agent-runtime) | A self-built single-agent loop that unifies model protocols, tool permissions, budgets, and checkpoints |
+| [Delegation, Handoff, and Sandboxing](/en/design/delegation-and-sandbox) | Delegate bounded work, continue with handoff packets, and enforce path, network, and credential boundaries |
 | [Approvals, Takeover, and External Effects](/en/design/effects) | Make sends, writes, deletes, and publishes previewable, authorized, and reconcilable |
 | [Runtime and Safety](/en/design/safety) | Limit real-world impact with isolation, least privilege, and credential boundaries |
+| [Storage and Context Architecture](/en/design/storage) | Unify facts, model bindings, and handoff watermarks with SQLite, content blobs, and task context |
+| [Personal Context and Attention](/en/design/personal-context) | Use a personal ontology, context packs, memory recall, and interruption budgets to decide what the agent knows and when to speak |
 | [Memory and Capability Evolution](/en/design/memory) | Accumulate context and methods while staying correctable, forgettable, and reversible |
 | [Evaluation and Cost](/en/design/evaluation) | Prove reliability and cost with real tasks instead of demos |
 | [Multi-device and Long-running Operation](/en/design/operations) | Keep one set of tasks, authority, and data consistent across devices over time |
 | [Agent Reference Patterns](/en/design/agent-reference-patterns) | Record borrowed patterns and trade-offs instead of treating an external framework as the product architecture |
 
-The non-negotiable boundaries are: every interface is rebuilt from a record; each state has one write authority; external actions have approval or an explicit exemption plus a reconcilable receipt; executors never see long-lived raw credentials; every task has a budget, deadline, and cancellation path; memory has provenance, sensitivity, and forgetting rules; method changes require evaluation, canary, promotion, and rollback.
+The non-negotiable boundaries are: every interface is rebuilt from a record; each state has one write authority; goal-backed tasks require acceptance criteria and a completion verdict; external actions have approval or an explicit exemption plus a reconcilable receipt; executors never see long-lived raw credentials; handoffs can narrow authority but never expand it; every task has a budget, deadline, and cancellation path; memory has provenance, sensitivity, and forgetting rules; method changes require evaluation, canary, promotion, and rollback.

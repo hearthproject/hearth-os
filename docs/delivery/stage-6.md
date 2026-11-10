@@ -10,8 +10,8 @@ outline: [2, 3]
 
 ## 当前状态
 
-- **已实现代码闭环：** 增量事件同步与冲突选择、任务租约与 epoch fencing、设备撤销与令牌轮换、kill switch、加密备份恢复、健康检查、维护和脱敏诊断。
-- **仍未完成：** 真实双设备切换、设备丢失演练、完整迁移、数周连续运行和 v1.0 发布验收。逐项证据见[阶段二至六交付状态](/delivery/status)。
+- **已实现代码闭环：** 增量事件同步与冲突选择、任务租约与 epoch fencing、设备撤销与令牌轮换、kill switch、加密备份恢复、健康检查、维护和脱敏诊断；连接运行时分离 transport、subscription、dataFreshness 与 executionOwnership，并提供 generation 隔离、离线 outbox 和缓存投影。
+- **仍未完成：** 真实远程节点与手机接入、真实断网重连与跨节点 outbox 对账、真实双设备切换、设备丢失演练、完整迁移、数周连续运行和 v1.0 发布验收。逐项证据见[阶段二至六交付状态](/delivery/status)。
 
 ## 目标
 

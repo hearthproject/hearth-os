@@ -14,14 +14,14 @@ Formal documentation lives only under `docs/`, and the site builds directly from
 
 | Directory | Content |
 |---|---|
-| `docs/design/` | One overall design and nine parallel module notes |
+| `docs/design/` | One overall design and fifteen parallel module notes, grouped into three sets |
 | `docs/delivery/` | Six phases, 24 small stages, and the delivery overview |
 | `docs/reference/` | Engineering, risk, decisions, boundaries, terminology, checklists, and maintenance |
 | `docs/en/` | English mirror of every page |
 | `docs/.vitepress/` | Site configuration, navigation, sidebar, and theme |
 | `scripts/` | Delivery-page generation and coverage checks |
 
-Local development needs Node.js 20 or newer and npm. Install dependencies with `npm ci`, develop with `npm run docs:dev`, build with `npm run docs:build`, and preview with `npm run docs:preview`. The build output goes to `docs/.vitepress/dist` and is not committed.
+Local development needs Node.js 22.13 or newer and npm. Install dependencies with `npm ci`, develop with `npm run docs:dev`, build with `npm run docs:build`, and preview with `npm run docs:preview`. The build output goes to `docs/.vitepress/dist` and is not committed.
 
 State the conclusion first, then the reason. One paragraph should carry one main point. Design pages describe product goals and tradeoffs only, not code paths, internal class names, or implementation detail. Use as few second-level headings as possible and avoid third-level headings that fragment the argument. Prefer tables for comparison and short lists for steps.
 

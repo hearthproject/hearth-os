@@ -34,6 +34,8 @@ The authorization scope must be understandable to an ordinary user. An approval 
 
 Idempotency and reconciliation are the foundation of external actions. One send creates one message; one submission creates one record; retries reuse the same identity. When an external system returns no clear result, Hearth enters an uncertain state and queries or asks the user instead of executing again.
 
+Approval binds the resolved real action, not the parameters first proposed by a model. Patches, full-permission operations, GitHub writes, and SMTP sends record an action digest and parameter fingerprint; changed parameters, expiry, or replay invalidate the approval. After a disconnect, timeout, or lost receipt, the action enters an explicit reconciliation queue where the user can confirm, retry, or abandon it instead of letting the system resend blindly.
+
 ## Mail Sending and Read-Only Sync
 
 Mail sending reuses the same effect ledger instead of calling SMTP from the outbox page. When a draft selects real delivery with `smtp:<accountId>`, `OutboxService` creates an `email.smtp-send` approval. The preview shows sender, recipients, cc/bcc, subject, body, attachments, and the impact that "sending cannot be undone". The TTL remains ten minutes, and the parameter hash binds recipients and content. After approval, the effect executor sends through SMTP and stores `receipt.json` (Message-ID, accepted/rejected, server response, and time). Success marks the draft `sent`; rejection or expiry produces no external effect.

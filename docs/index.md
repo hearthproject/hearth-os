@@ -23,13 +23,13 @@ hero:
   </a>
   <a href="/hearth-os/design/">
     <span class="home-quicklinks__label">设计说明</span>
-    <span class="home-quicklinks__meta">项目定位、总体设计与九个模块</span>
+    <span class="home-quicklinks__meta">项目定位、十五个设计模块与当前边界</span>
   </a>
   <a href="/hearth-os/delivery/">
     <span class="home-quicklinks__label">交付路线</span>
     <span class="home-quicklinks__meta">从 MVP 到 v1.0 的分阶段计划</span>
   </a>
-  <a href="/hearth-os/log/day-05.html">
+  <a href="/hearth-os/log/day-07.html">
     <span class="home-quicklinks__label">开发日志</span>
     <span class="home-quicklinks__meta">每日概述、提交与具体修改</span>
   </a>
@@ -62,7 +62,7 @@ hero:
       <img src="/screenshots/task-detail.png" alt="任务详情">
       <figcaption>
         <strong>任务详情</strong>
-        <span>目标、执行器、预算、产物与最终结果完整留档。</span>
+        <span>目标、验收条件、执行器、预算、证据、产物与最终结果完整留档。</span>
       </figcaption>
     </figure>
     <figure class="screenshot-card">
@@ -97,8 +97,8 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
   {
     no: '01',
     title: '任务优先，而不是消息优先',
-    text: '每次执行都有目标、预算、检查点和产物摘要。失败可以恢复，中断可以接着做。',
-    link: '/design/tasks',
+    text: '每次执行都有目标契约、验收条件、预算、检查点和证据。失败可以恢复，完成不能只凭模型自评。',
+    link: '/design/goals-and-evidence',
     meta: 'Durable execution'
   },
   {
@@ -131,5 +131,17 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
     text: 'SQLite 数据域、上下文生命周期、加密备份，以及数据库可恢复不等于产物可迁移的边界。',
     link: '/design/storage',
     meta: 'Data & backup'
+  },
+  {
+    title: '委派、交接与沙箱',
+    text: '单层持久委派、可审阅交接包、租约与代次，以及路径、网络、进程和凭据边界。',
+    link: '/design/delegation-and-sandbox',
+    meta: 'Delegation & sandbox'
+  },
+  {
+    title: '个人上下文与注意力',
+    text: '个人本体、Context Pack、记忆召回、标准意图和打扰预算如何共同决定 Agent 能看到什么、何时提醒。',
+    link: '/design/personal-context',
+    meta: 'Context & attention'
   }
 ]" />

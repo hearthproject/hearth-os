@@ -12,6 +12,8 @@ outline: false
 
 A task needs a clear goal, acceptance method, deadline, budget, and cancellation path. Work can be divided into smaller work units, and each work unit has only one executor advancing it at a time. Every real attempt should retain its input, result, artifacts, failure reason, and whether work can continue.
 
+A goal is not a sentence used as a task title; it is a separately stored contract. Acceptance criteria, evidence requirements, budget, deadline, stop conditions, and review policy live with the goal. Before a goal-backed task closes, the scheduler produces a completion report; without evidence the task can only remain waiting, become blocked, or go to human review. See [Goals, Completion, and Evidence](/en/design/goals-and-evidence).
+
 Task state must be honest. Queued, running, waiting for approval, waiting for input, retrying, failed, paused, and completed are different states; none of them can be hidden behind "processing". Users need to know why work stopped, how long it has been stopped, what happens next, and whether they must intervene.
 
 Durable execution must cover real failures: service restarts, computer sleep, lost connectivity, executor crashes, external timeouts, offline devices, and version upgrades. After recovery, the system rechecks the goal and current state. It does not trust an old natural-language claim that work is complete, and it does not repeat external effects without verification.
