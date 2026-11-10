@@ -73,7 +73,7 @@ Hearth 当前聊天模型是 `app_settings.model.chatProfileId`，用于聊天�
 4. 处于必要审批模式时，只询问“是否切换到 `目标执行器` 继续？”，确认后才复用原任务、剩余预算和上下文水位启动新运行。
 5. 不是执行器问题时直接向用户说明错误原因，不切换执行器。
 
-回退顺序为 `deepseek-harness → codex → native → hermes → qoder → workbuddy → kimi`。已尝试的执行器不会重复选择；默认最多接管两次。接管包包含诊断摘要、已完成事项、失败事项、产物、未解决问题、剩余预算和 `context_watermark_seq`，目标执行器从同一上下文水位继续。每次交接都写入 `handoffs` 并生成 `HANDOFF.md`，运行记录保留来源执行器和目标执行器。
+回退顺序为 `deepseek-harness → codex → native → hermes → qoder → workbuddy → kimi`。已尝试的执行器不会重复选择；默认最多接管两次。接管包包含诊断摘要、已完成事项、失败事项、产物、未解决问题、剩余预算和 `context_watermark_seq`，目标执行器从同一上下文水位继续。每次交接都写入 `handoffs` 并生成 `HANDOFF.md`；宿主在切换前校验目标、验收、权限、游标和产物哈希，验证失败会阻止执行器切换，`HANDOFF.md` 作为真实 artifact 持久化并记录 `artifactRef`。运行记录保留来源执行器和目标执行器，旧 generation 的工具写入会被拒绝，但失败运行自己的诊断和决策证据仍会保留。
 
 ## 统一上下文
 
