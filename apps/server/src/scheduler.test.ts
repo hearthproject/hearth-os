@@ -7,6 +7,7 @@ import type { DelegationJob, ExecutorHealth, ExecutorId, HandoffRecord, HandoffS
 import { defaultConversationSettings } from "@hearth/core";
 import type { CodexRunner, ExecutorHealthProvider, NativeRunner } from "./scheduler.ts";
 import { ApprovalManager } from "./approvals.ts";
+import type { GoalValidatorRunner } from "./completion-judge.ts";
 import { HearthStore } from "@hearth/eventlog";
 import { HearthScheduler } from "./scheduler.ts";
 import { HearthService } from "./service.ts";
@@ -431,6 +432,71 @@ describe("Hearth scheduler", () => {
     expect(failed.error?.disposition).toMatchObject({ type: "repair" });
     expect(service.latestCompletionReport(goal.goalId)).toMatchObject({ verdict: "fail", taskId: task.id });
     expect(service.getGoal(goal.goalId)?.currentState).toBe("active");
+  });
+
+  it("uses scheduler-provided completion validators for manual goal criteria", async () => {
+    const service = setup();
+    const goal = service.createGoal({
+      title: "人工验收目标",
+      objective: "由外部验收器确认结果",
+      currentState: "active",
+      reviewPolicy: "auto",
+      successCriteria: [{ id: "review", description: "外部复核通过", validator: "manual", check: "确认结果", required: true }],
+      evidenceRequirements: []
+    });
+    let reviewedTaskId = "";
+    const completionValidators: Record<string, GoalValidatorRunner> = {
+      review: (context) => {
+        reviewedTaskId = context.task.id;
+        return { status: "passed", evidenceRefs: [`manual:${context.task.id}`], detail: "外部验收器已确认" };
+      }
+    };
+    const runner: CodexRunner = async (options) => {
+      writeFileSync(join(testOutDir(options), "result.md"), "# result\n");
+      return FAKE_RESULT;
+    };
+    scheduler = makeScheduler(service, runner, { completionValidators });
+    scheduler.start();
+
+    const task = service.createTask({ title: "等待复核", goalId: goal.goalId, executorId: "codex", expectedOutputs: ["result.md"] });
+    const completed = await waitForStatus(service, task.id, "completed");
+
+    expect(completed.goalId).toBe(goal.goalId);
+    expect(reviewedTaskId).toBe(task.id);
+    expect(service.latestCompletionReport(goal.goalId)).toMatchObject({
+      verdict: "pass",
+      taskId: task.id,
+      criteria: [{ criterionId: "review", status: "passed" }]
+    });
+    expect(service.getGoal(goal.goalId)?.currentState).toBe("done");
+  });
+
+  it("does not complete a manual goal criterion without an injected validator", async () => {
+    const service = setup();
+    const goal = service.createGoal({
+      title: "人工验收目标",
+      objective: "由外部验收器确认结果",
+      currentState: "active",
+      reviewPolicy: "auto",
+      successCriteria: [{ id: "review", description: "外部复核通过", validator: "manual", check: "确认结果", required: true }],
+      evidenceRequirements: []
+    });
+    const runner: CodexRunner = async (options) => {
+      writeFileSync(join(testOutDir(options), "result.md"), "# result\n");
+      return FAKE_RESULT;
+    };
+    scheduler = makeScheduler(service, runner);
+    scheduler.start();
+
+    const task = service.createTask({ title: "等待复核", goalId: goal.goalId, executorId: "codex", expectedOutputs: ["result.md"] });
+    const waiting = await waitForStatus(service, task.id, "waiting_input");
+
+    expect(waiting.error?.kind).toBe("completion_not_proven");
+    expect(service.latestCompletionReport(goal.goalId)).toMatchObject({
+      verdict: "needs_human",
+      criteria: [{ criterionId: "review", status: "not_run" }]
+    });
+    expect(service.getGoal(goal.goalId)?.currentState).toBe("awaiting_user");
   });
 
   it("runs up to three tasks in parallel for the same executor", async () => {
@@ -1568,6 +1634,7 @@ describe("Hearth scheduler", () => {
       modelSettingsForExecutor?: (executorId: ExecutorId) => ModelSettings | null;
       autoLearn?: boolean;
       delegations?: DelegationService;
+      completionValidators?: Record<string, GoalValidatorRunner>;
     } = {}
   ): HearthScheduler {
     return new HearthScheduler({

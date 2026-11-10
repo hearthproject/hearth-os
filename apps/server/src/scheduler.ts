@@ -20,7 +20,7 @@ import { ContextService, estimateTokens } from "./context.ts";
 import { DelegationError, DelegationService } from "./delegation.ts";
 import { diagnoseFailure } from "./context-diagnosis.ts";
 import { classifyFailure, decideFailure, evaluateHandoff, isExecutorFailureCause, type FailureDecision } from "./context-policy.ts";
-import { judgeCompletion } from "./completion-judge.ts";
+import { judgeCompletion, type GoalValidatorRunner } from "./completion-judge.ts";
 import { ContextProjector } from "./context-projector.ts";
 import { maybeModelSummary } from "./context-summary.ts";
 import { HandoffService } from "./handoff.ts";
@@ -92,6 +92,7 @@ export interface SchedulerOptions {
   contextBlobRoot?: string | undefined;
   methods?: MethodService | undefined;
   autoLearn?: boolean | undefined;
+  completionValidators?: Record<string, GoalValidatorRunner> | undefined;
 }
 
 export class HearthScheduler {
@@ -119,6 +120,7 @@ export class HearthScheduler {
   private readonly memory: MemoryService;
   private readonly methods: MethodService;
   private readonly autoLearn: boolean;
+  private readonly completionValidators: Record<string, GoalValidatorRunner> | null;
   private readonly context: ContextService;
   private readonly projector: ContextProjector;
   private readonly handoffs: HandoffService;
@@ -174,6 +176,7 @@ export class HearthScheduler {
     this.memory = new MemoryService(this.service);
     this.methods = options.methods ?? new MethodService(this.service);
     this.autoLearn = options.autoLearn ?? true;
+    this.completionValidators = options.completionValidators ?? null;
     this.context = options.context ?? new ContextService(this.service, options.contextBlobRoot ?? CONTEXT_BLOB_DIR);
     this.projector = new ContextProjector(this.service, this.context);
     this.handoffs = new HandoffService(this.service, this.context);
@@ -1557,7 +1560,8 @@ export class HearthScheduler {
           task: this.service.requireTask(taskId),
           artifacts: goalArtifacts,
           effects: goalEffects,
-          workspaceRoot: prepared.root
+          workspaceRoot: prepared.root,
+          ...(this.completionValidators ? { validators: this.completionValidators } : {})
         });
         this.service.recordCompletionReport(report);
         this.capture({
