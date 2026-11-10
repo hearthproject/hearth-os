@@ -45,12 +45,28 @@ export interface ActionNetworkTarget {
   method?: string | undefined;
 }
 
+export interface ActionDesktopTarget {
+  deviceId: string;
+  sessionId: string;
+  frameId: string;
+  frameSha256: string;
+  activeApp: string;
+  controlEpoch: number;
+  action: string;
+  payload: Record<string, unknown>;
+}
+
+export interface ResolvedDesktopTarget extends ActionDesktopTarget {
+  payloadDigest: string;
+}
+
 export interface ActionProposal {
   kind: ActionKind;
   summary: string;
   command?: ActionCommand | undefined;
   files?: ActionFileTarget[] | undefined;
   network?: ActionNetworkTarget | undefined;
+  desktop?: ActionDesktopTarget | undefined;
   targetRevision?: string | undefined;
   risk?: ActionRisk | undefined;
   sideEffectClass?: SideEffectClass | undefined;
@@ -82,6 +98,7 @@ export interface ResolvedAction {
   command: ResolvedCommand | null;
   files: ResolvedFile[];
   network: ActionNetworkTarget | null;
+  desktop: ResolvedDesktopTarget | null;
   targetRevision: string | null;
   risk: ActionRisk;
   sideEffectClass: SideEffectClass;
@@ -138,12 +155,13 @@ export function resolveAction(input: ResolveActionInput): ResolvedAction {
   const command = proposal.command ? resolveCommand(proposal.command, sessionRoot, permissionMode) : null;
   const files = (proposal.files ?? []).map((file) => resolveFile(file, sessionRoot, permissionMode));
   const network = proposal.network ? normalizeNetwork(proposal.network) : null;
-  if (!command && files.length === 0 && !network) {
-    throw new ActionResolutionError("ACTION_TARGET_REQUIRED", "动作缺少可解析的命令、文件或网络目标");
+  const desktop = proposal.desktop ? resolveDesktopTarget(proposal.desktop) : null;
+  if (!command && files.length === 0 && !network && !desktop) {
+    throw new ActionResolutionError("ACTION_TARGET_REQUIRED", "动作缺少可解析的命令、文件、网络或桌面目标");
   }
   const risk = proposal.risk ?? defaultRisk(proposal);
   const sideEffectClass = proposal.sideEffectClass ?? defaultSideEffectClass(proposal);
-  const preview = buildPreview(proposal, command, files, network);
+  const preview = buildPreview(proposal, command, files, network, desktop);
   const digestInput = {
     kind: proposal.kind,
     summary: proposal.summary,
@@ -153,6 +171,7 @@ export function resolveAction(input: ResolveActionInput): ResolvedAction {
     command,
     files,
     network,
+    desktop,
     targetRevision: proposal.targetRevision ?? null,
     risk,
     sideEffectClass,
@@ -168,6 +187,7 @@ export function resolveAction(input: ResolveActionInput): ResolvedAction {
     command,
     files,
     network,
+    desktop,
     targetRevision: proposal.targetRevision ?? null,
     risk,
     sideEffectClass,
@@ -207,6 +227,15 @@ export function verifyResolvedAction(expected: ResolvedAction, now = new Date())
     };
   }
   return { ok: true, reason: "动作未变化", expectedDigest: expected.actionDigest, current };
+}
+
+export function isResolvedAction(value: unknown): value is ResolvedAction {
+  return typeof value === "object"
+    && value !== null
+    && "actionId" in value
+    && "actionDigest" in value
+    && "proposal" in value
+    && "sessionRoot" in value;
 }
 
 export function decideActionPolicy(action: ResolvedAction, input: ActionPolicyInput = {}): ActionPolicyDecision {
@@ -272,7 +301,11 @@ function normalizeProposal(input: ActionProposal): ActionProposal {
       argv: input.command.argv ? [...input.command.argv] : [],
       env: input.command.env ? Object.fromEntries(Object.entries(input.command.env).sort(([left], [right]) => left.localeCompare(right))) : {}
     } : undefined,
-    files: input.files ? input.files.map((file) => ({ ...file })) : []
+    files: input.files ? input.files.map((file) => ({ ...file })) : [],
+    desktop: input.desktop ? {
+      ...input.desktop,
+      payload: cloneRecord(input.desktop.payload)
+    } : undefined
   };
 }
 
@@ -352,6 +385,29 @@ function normalizeNetwork(input: ActionNetworkTarget): ActionNetworkTarget {
   return { host, ...(input.port === undefined ? {} : { port: input.port }), ...(input.method ? { method: input.method.toUpperCase() } : {}) };
 }
 
+function resolveDesktopTarget(input: ActionDesktopTarget): ResolvedDesktopTarget {
+  for (const key of ["deviceId", "sessionId", "frameId", "frameSha256", "activeApp", "action"] as const) {
+    if (typeof input[key] !== "string" || !input[key].trim()) {
+      throw new ActionResolutionError("DESKTOP_TARGET_INCOMPLETE", `桌面动作缺少 ${key}`);
+    }
+  }
+  if (!Number.isInteger(input.controlEpoch) || input.controlEpoch < 1) {
+    throw new ActionResolutionError("DESKTOP_EPOCH_INVALID", "桌面动作控制代次不正确");
+  }
+  const payload = cloneRecord(input.payload);
+  return {
+    deviceId: input.deviceId,
+    sessionId: input.sessionId,
+    frameId: input.frameId,
+    frameSha256: input.frameSha256,
+    activeApp: input.activeApp,
+    controlEpoch: input.controlEpoch,
+    action: input.action,
+    payload,
+    payloadDigest: actionDigest(payload)
+  };
+}
+
 function defaultRisk(proposal: ActionProposal): ActionRisk {
   if (proposal.kind === "file_write" || proposal.kind === "file_delete" || proposal.kind === "mcp") return "medium";
   if (proposal.kind === "network" || proposal.kind === "email" || proposal.kind === "calendar") return "high";
@@ -367,7 +423,13 @@ function defaultSideEffectClass(proposal: ActionProposal): SideEffectClass {
   return "none";
 }
 
-function buildPreview(proposal: ActionProposal, command: ResolvedCommand | null, files: ResolvedFile[], network: ActionNetworkTarget | null): string {
+function buildPreview(
+  proposal: ActionProposal,
+  command: ResolvedCommand | null,
+  files: ResolvedFile[],
+  network: ActionNetworkTarget | null,
+  desktop: ResolvedDesktopTarget | null
+): string {
   if (command) {
     return `${command.executableRealPath} ${command.argv.join(" ")}`.trim();
   }
@@ -375,7 +437,15 @@ function buildPreview(proposal: ActionProposal, command: ResolvedCommand | null,
     return files.map((file) => `${file.mode} ${file.pathRealPath}`).join("\n");
   }
   if (network) return `${network.method ?? "CONNECT"} ${network.host}${network.port ? `:${network.port}` : ""}`;
+  if (desktop) return `${desktop.action} ${desktop.activeApp} frame ${desktop.frameId}`;
   return proposal.summary;
+}
+
+function cloneRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ActionResolutionError("DESKTOP_PAYLOAD_INVALID", "桌面动作参数必须是对象");
+  }
+  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
 }
 
 function fileSha256(path: string): string {

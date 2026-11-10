@@ -105,4 +105,48 @@ describe("action resolver", () => {
     expect(first.actionDigest).toBe(second.actionDigest);
     expect(actionDigest({ b: 2, a: 1 })).toBe(actionDigest({ a: 1, b: 2 }));
   });
+
+  it("binds a desktop action to its frame and exact payload", () => {
+    const root = tempRoot();
+    const resolved = resolveAction({
+      proposal: {
+        kind: "desktop",
+        summary: "click submit",
+        desktop: {
+          deviceId: "device-1",
+          sessionId: "session-1",
+          frameId: "frame-1",
+          frameSha256: "a".repeat(64),
+          activeApp: "notepad",
+          controlEpoch: 3,
+          action: "click",
+          payload: { x: 0.5, y: 0.25, button: "left" }
+        }
+      },
+      sessionRoot: root
+    });
+    expect(resolved.desktop?.payloadDigest).toHaveLength(64);
+    expect(verifyResolvedAction(resolved).ok).toBe(true);
+
+    const changedPayload = {
+      ...resolved,
+      proposal: {
+        ...resolved.proposal,
+        desktop: {
+          ...resolved.desktop!,
+          payload: { x: 0.75, y: 0.25, button: "left" }
+        }
+      }
+    };
+    expect(verifyResolvedAction(changedPayload).ok).toBe(false);
+
+    const changedFrame = {
+      ...resolved,
+      proposal: {
+        ...resolved.proposal,
+        desktop: { ...resolved.desktop!, frameSha256: "b".repeat(64) }
+      }
+    };
+    expect(verifyResolvedAction(changedFrame).ok).toBe(false);
+  });
 });

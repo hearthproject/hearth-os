@@ -99,6 +99,40 @@ describe("desktop device service", () => {
     })).toThrowError(expect.objectContaining({ code: "FRAME_STALE" }));
   });
 
+  it("binds desktop actions to the resolved frame and cancels stale actions", () => {
+    const { device } = pairDevice();
+    desktop.approveCapability(device.id, "observe", ["notepad"]);
+    desktop.approveCapability(device.id, "desktop.control", ["notepad"]);
+    desktop.authenticateDevice(DEVICE_TOKEN);
+    const created = desktop.createSession(device.id);
+    const observation = desktop.nextCommand(desktop.authenticateDevice(DEVICE_TOKEN));
+    const frame = desktop.uploadObservation(desktop.authenticateDevice(DEVICE_TOKEN), {
+      sessionId: created.session.id,
+      commandId: observation!.id,
+      jpegBase64: JPEG,
+      width: 100,
+      height: 100,
+      activeApp: "notepad",
+      windowTitle: "Draft - Notepad"
+    });
+    const action = desktop.enqueueAction(created.session.id, {
+      kind: "click", frameId: frame.id, x: 0.5, y: 0.5
+    });
+    expect(action.payload).toMatchObject({ x: 0.5, y: 0.5, expectedApp: "notepad" });
+    expect(action.payload).not.toHaveProperty("_resolvedAction");
+
+    const storedFrame = service.store.getDesktopFrame(frame.id);
+    expect(storedFrame).not.toBeNull();
+    service.updateDesktopFrame({
+      ...storedFrame!,
+      expiresAt: new Date(Date.now() - 1_000).toISOString()
+    });
+
+    expect(desktop.nextCommand(desktop.authenticateDevice(DEVICE_TOKEN))).toBeNull();
+    const rejected = desktop.sessionView(created.session.id).commands.find((command) => command.id === action.id);
+    expect(rejected).toMatchObject({ status: "cancelled", error: expect.stringContaining("观察结果已经失效") });
+  });
+
   it("cancels queued input on pause and takeover, then requires a new observation", () => {
     const { device } = pairDevice();
     desktop.approveCapability(device.id, "observe", ["notepad"]);

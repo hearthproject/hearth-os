@@ -11,6 +11,7 @@ import type {
   DeviceRecord
 } from "@hearth/core";
 import { DEVICE_CAPABILITY_KINDS } from "@hearth/core";
+import { actionDigest, isResolvedAction, resolveAction, verifyResolvedAction, type ResolvedAction } from "./action-resolver.ts";
 import type { HearthService } from "./service.ts";
 import { SecurityError, type SecurityService } from "./security.ts";
 
@@ -20,6 +21,7 @@ const DEVICE_TOUCH_MS = 5_000;
 const FRAME_TTL_MS = 2 * 60 * 1000;
 const COMMAND_TTL_MS = 30_000;
 const MAX_FRAME_BYTES = 4_000_000;
+const RESOLVED_ACTION_KEY = "_resolvedAction";
 const ALLOWED_PRESS_KEYS = new Set(["Enter", "Tab", "Escape", "Ctrl+S"]);
 const ALLOWED_CONTROL_TYPES = new Set([
   "Button", "MenuItem", "Edit", "ListItem", "TabItem", "Hyperlink", "CheckBox", "ComboBox", "TreeItem"
@@ -398,7 +400,11 @@ export class DesktopService {
     this.assertAppAllowed(controlCapability, frame.activeApp);
     const payload = { ...actionPayload(input), expectedApp: frame.activeApp };
     if (input.kind === "focus") this.assertAppAllowed(controlCapability, normalizeApp(input.app));
-    const command = this.createCommand(session, input.kind, payload, frame.id);
+    const resolvedAction = this.resolveDesktopAction(session, device, frame, input.kind, payload);
+    const command = this.createCommand(session, input.kind, {
+      ...payload,
+      [RESOLVED_ACTION_KEY]: resolvedAction
+    }, frame.id);
     this.updateSession(session, { currentFrameId: null });
     return publicCommand(command);
   }
@@ -416,6 +422,19 @@ export class DesktopService {
       if (command.kind !== "observe" && (session.status !== "active" || session.controlEpoch !== command.controlEpoch)) {
         this.updateCommand(command, { status: "cancelled", error: "桌面控制状态已经变化", completedAt: new Date().toISOString() });
         continue;
+      }
+      if (command.kind !== "observe") {
+        const rejection = this.desktopActionRejection(command, session, device);
+        if (rejection) {
+          const now = new Date().toISOString();
+          this.updateCommand(command, {
+            status: "cancelled",
+            error: rejection,
+            updatedAt: now,
+            completedAt: now
+          });
+          continue;
+        }
       }
       return publicCommand(this.updateCommand(command, { status: "claimed", updatedAt: new Date().toISOString() }));
     }
@@ -527,6 +546,81 @@ export class DesktopService {
       });
     }
     return this.createCommand(session, "observe", { targetApp }, null);
+  }
+
+  private resolveDesktopAction(
+    session: DesktopSessionRecord,
+    device: DeviceRecord,
+    frame: DesktopFrameRecord,
+    kind: DesktopCommandKind,
+    payload: Record<string, unknown>
+  ): ResolvedAction {
+    try {
+      return resolveAction({
+        proposal: {
+          kind: "desktop",
+          summary: `桌面动作 ${kind}：${frame.activeApp}`,
+          desktop: {
+            deviceId: device.id,
+            sessionId: session.id,
+            frameId: frame.id,
+            frameSha256: frame.sha256,
+            activeApp: frame.activeApp,
+            controlEpoch: session.controlEpoch,
+            action: kind,
+            payload
+          },
+          targetRevision: `desktop-frame-sha256:${frame.sha256}`
+        },
+        permissionMode: "guarded",
+        context: "interactive",
+        sessionRoot: this.frameRoot
+      });
+    } catch (error) {
+      throw new DesktopError(
+        "ACTION_RESOLUTION_FAILED",
+        error instanceof Error ? error.message : "桌面动作无法解析",
+        400
+      );
+    }
+  }
+
+  private desktopActionRejection(
+    command: DesktopCommandRecord,
+    session: DesktopSessionRecord,
+    device: DeviceRecord
+  ): string | null {
+    const resolved = command.payload[RESOLVED_ACTION_KEY];
+    if (!isResolvedAction(resolved) || resolved.kind !== "desktop" || !resolved.desktop) {
+      return "桌面动作缺少可验证的解析结果";
+    }
+    const expected = resolved.desktop;
+    if (
+      expected.deviceId !== device.id
+      || expected.sessionId !== session.id
+      || expected.controlEpoch !== command.controlEpoch
+      || expected.controlEpoch !== session.controlEpoch
+    ) {
+      return "桌面动作与当前设备或控制代次不一致";
+    }
+    const verification = verifyResolvedAction(resolved);
+    if (!verification.ok) return verification.reason;
+    if (actionDigest(desktopPayload(command.payload)) !== expected.payloadDigest) {
+      return "桌面动作参数在解析后发生变化，需要重新观察并提交";
+    }
+    const frame = command.frameId ? this.service.store.getDesktopFrame(command.frameId) : null;
+    if (
+      !frame
+      || frame.deviceId !== device.id
+      || frame.sessionId !== session.id
+      || frame.id !== expected.frameId
+      || frame.sha256 !== expected.frameSha256
+      || frame.activeApp !== expected.activeApp
+      || rowDateExpired(frame.expiresAt)
+    ) {
+      return "桌面动作绑定的观察结果已经失效，需要重新观察";
+    }
+    return null;
   }
 
   private observationTarget(session: DesktopSessionRecord | null, device: DeviceRecord, requestedApp?: string): string {
@@ -727,7 +821,13 @@ function publicFrame(frame: DesktopFrameRecord): DesktopFrameView {
 }
 
 function publicCommand(command: DesktopCommandRecord): DesktopCommandView {
-  return { ...command, payload: command.payload };
+  return { ...command, payload: desktopPayload(command.payload) };
+}
+
+function desktopPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  const copy = { ...payload };
+  delete copy[RESOLVED_ACTION_KEY];
+  return copy;
 }
 
 function capability(device: DeviceRecord, kind: DeviceCapabilityKind): DeviceRecord["capabilities"][number] {
