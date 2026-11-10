@@ -1,6 +1,7 @@
 import type {
   AgentCheckpoint,
   AgentResumeState,
+  AgentTool,
   AgentToolAuthorization,
   AgentToolAuthorizationRequest,
   RuntimeEvent
@@ -20,7 +21,7 @@ import { runDeepSeekHarness, type DeepSeekHarnessRunOptions, type DeepSeekHarnes
 import { runExternalExecutor, type ExternalContextItem, type ExternalRunOptions, type ExternalRunResult } from "./external-executor.ts";
 import { executorHome, resolveExecutorLaunch } from "./executor-runtime.ts";
 import type { ModelSettings } from "./model-settings.ts";
-import { nativePermissionsFor, type NativeRunOptions, type NativeRunResult } from "./native-executor.ts";
+import { nativePermissionsFor, withExtraToolPermissions, type NativeRunOptions, type NativeRunResult } from "./native-executor.ts";
 import type { PreparedWorkspace } from "./workspace.ts";
 import { needsGithubRepository, wantsScreenshot } from "./task-intent.ts";
 
@@ -55,6 +56,7 @@ export interface ExecutorAttemptContext {
   executorSettings: ExecutorSettings;
   expectedOutputs: string[];
   activeThreadId?: string;
+  extraNativeTools?: AgentTool[];
   onProgress: (event: { kind: string; message: string; detail?: TaskProgressDetail }) => void;
   onNativeContextEvent: (event: RuntimeEvent) => void;
   onNativeCheckpoint: (checkpoint: AgentCheckpoint) => void | Promise<void>;
@@ -117,7 +119,7 @@ export class NativeExecutorAdapter implements ExecutorAdapter {
             : input.resume.messages
         }
       : undefined;
-    const permissions = nativePermissionsFor(input.task, input.prepared);
+    const permissions = withExtraToolPermissions(nativePermissionsFor(input.task, input.prepared), input.extraNativeTools ?? []);
     if (input.fullPermission) permissions.tools = permissions.tools.filter((tool) => tool !== "ask_user");
     const outcome = await this.runner({
       task: input.task,
@@ -128,6 +130,7 @@ export class NativeExecutorAdapter implements ExecutorAdapter {
       budget: input.budget,
       signal: input.signal,
       ...(resumable ? { resume: resumable } : {}),
+      ...(input.extraNativeTools?.length ? { extraTools: input.extraNativeTools } : {}),
       expectedOutputs: input.expectedOutputs,
       onProgress: input.onProgress,
       onContextEvent: input.onNativeContextEvent,

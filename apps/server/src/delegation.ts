@@ -16,6 +16,7 @@ import { redactSecrets } from "./context.ts";
 import { WORKSPACE_DIR } from "./config.ts";
 import type { HearthService } from "./service.ts";
 import type { SandboxService } from "./sandbox.ts";
+import { TaskGraphError, TaskGraphService } from "./task-graph.ts";
 
 export const SAFE_DELEGATION_TOOLS = [
   "read_file",
@@ -52,6 +53,7 @@ export interface DelegationServiceOptions {
   workspaceRoot?: string;
   now?: () => Date;
   sandbox?: SandboxService;
+  taskGraph?: TaskGraphService;
 }
 
 export class DelegationError extends Error {
@@ -71,12 +73,14 @@ export class DelegationService {
   private readonly workspaceRoot: string;
   private readonly now: () => Date;
   private readonly sandbox: SandboxService | undefined;
+  private readonly taskGraph: TaskGraphService;
 
   constructor(options: DelegationServiceOptions) {
     this.service = options.service;
     this.workspaceRoot = resolve(options.workspaceRoot ?? join(WORKSPACE_DIR, "delegations"));
     this.now = options.now ?? (() => new Date());
     this.sandbox = options.sandbox;
+    this.taskGraph = options.taskGraph ?? new TaskGraphService(options.service);
   }
 
   create(input: CreateDelegationInput): DelegationJob {
@@ -91,8 +95,12 @@ export class DelegationService {
     if (["completed", "cancelled"].includes(parent.status)) {
       throw new DelegationError("DELEGATION_PARENT_CLOSED", `父任务已结束：${parent.status}`);
     }
-    if (this.service.store.getDelegationJobByChildTask(parent.id)) {
-      throw new DelegationError("DELEGATION_RECURSION_NOT_ALLOWED", "第一版只允许单层委派，子任务不能继续委派");
+    let depth: number;
+    try {
+      depth = this.taskGraph.assertCanAddChild(parent.id).depth;
+    } catch (error) {
+      if (error instanceof TaskGraphError) throw new DelegationError(error.code, error.message);
+      throw error;
     }
     if (!EXECUTOR_IDS.includes(input.targetExecutor)) {
       throw new DelegationError("DELEGATION_EXECUTOR_INVALID", `未知执行器：${input.targetExecutor}`, 400);
@@ -143,7 +151,7 @@ export class DelegationService {
       deadline: input.deadline ?? null,
       resultSchemaRef: input.resultSchemaRef ?? null,
       status: "queued",
-      depth: 1,
+      depth,
       idempotencyKey,
       lease: null,
       attempt: 1,
@@ -169,6 +177,7 @@ export class DelegationService {
         ...(parent.goalId ? { goalId: parent.goalId } : {})
       });
       job = this.service.store.updateDelegationJob(id, { childTaskId: child.id }) ?? job;
+      this.taskGraph.addEdge({ parentTaskId: parent.id, childTaskId: child.id, kind: "subtask", joinPolicy: "all" });
     }
     this.emit("delegation.created", job);
     return job;
@@ -183,13 +192,13 @@ export class DelegationService {
     if (job.lease && new Date(job.lease.expiresAt).getTime() > now.getTime() && job.lease.owner !== owner) {
       throw new DelegationError("DELEGATION_LEASE_HELD", `委派已被 ${job.lease.owner} 持有`);
     }
-    const busy = this.service.store.listActiveDelegationJobs().find((candidate) =>
+    const busy = this.service.store.listActiveDelegationJobs().filter((candidate) =>
       candidate.id !== job.id
       && candidate.targetExecutor === job.targetExecutor
       && ["leased", "running"].includes(candidate.status)
     );
-    if (busy) {
-      throw new DelegationError("DELEGATION_EXECUTOR_BUSY", `${job.targetExecutor} 已有委派 ${busy.id} 在运行`);
+    if (busy.length >= this.taskGraph.maxParallel) {
+      throw new DelegationError("DELEGATION_EXECUTOR_BUSY", `${job.targetExecutor} 已达到并行上限 ${this.taskGraph.maxParallel}（运行中：${busy.map((candidate) => candidate.id).join(", ")}）`);
     }
     const updated = this.service.store.updateDelegationJob(job.id, {
       status: "leased",
@@ -316,6 +325,7 @@ export class DelegationService {
         // A terminal child task is already fenced; the delegation job remains cancelled.
       }
     }
+    if (child) this.taskGraph.cancelDescendants(child.id, reason);
     const updated = this.service.store.updateDelegationJob(job.id, {
       status: "cancelled",
       lease: null,

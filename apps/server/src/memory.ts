@@ -254,6 +254,7 @@ export class MemoryService {
     this.assertGovernance(memory);
     this.emit("memory.created", memory);
     this.recordVersion(memory, "创建记忆候选");
+    this.linkEntities(memory);
     return memory;
   }
 
@@ -410,6 +411,24 @@ export class MemoryService {
     });
   }
 
+  private linkEntities(memory: MemoryRecord): void {
+    const keys = [memory.subjectKey, ...memory.tags].map((value) => value.trim()).filter(Boolean).slice(0, 8);
+    for (const key of keys) {
+      for (const entity of this.service.store.findEntitiesByName(key).slice(0, 5)) {
+        try {
+          const event = this.service.store.appendEvent({
+            type: "memory.entity.linked",
+            taskId: null,
+            payload: { memoryId: memory.id, entityId: entity.id, relation: "subject" }
+          });
+          this.service.bus.publish(event);
+        } catch {
+          // Entity linking is best effort and never blocks memory creation.
+        }
+      }
+    }
+  }
+
   private recallQuery(input: {
     auditTaskId: string;
     queryText: string;
@@ -431,14 +450,25 @@ export class MemoryService {
       .filter((memory) => memory.taint === "clean")
       .filter((memory) => memory.originClass !== "untrusted")
       .filter((memory) => memory.tier !== "review")
-      .filter((memory) => memoryScopeAllowed(memory, input.scope, queryText))
       .filter((memory) => recallSensitivityAllowed(memory, settings));
+
+    const queryEntities = this.service.store.listEntities({ status: "active", limit: 5000 })
+      .filter((entity) => entity.canonicalName.trim().length >= 2 && normalize(queryText).includes(normalize(entity.canonicalName)))
+      .map((entity) => entity.id);
+    const entityIdSet = new Set(queryEntities);
+    const linksByMemory = new Map<string, string[]>();
+    for (const link of this.service.store.listMemoryEntityLinks()) {
+      const list = linksByMemory.get(link.memoryId) ?? [];
+      list.push(link.entityId);
+      linksByMemory.set(link.memoryId, list);
+    }
 
     const alwaysOnBudgetItems = Math.min(3, maxItems);
     const alwaysOnBudgetChars = Math.floor(maxChars * 0.4);
     const alwaysOn = candidates
       .filter((memory) => memory.tier === "instructions" || memory.tier === "curated")
       .filter((memory) => memory.trust === "high" || memory.trust === "medium")
+      .filter((memory) => memory.scope === "global" || memoryScopeAllowed(memory, input.scope, queryText))
       .sort((left, right) => tierRank(left.tier) - tierRank(right.tier)
         || right.importance - left.importance
         || right.updatedAt.localeCompare(left.updatedAt));
@@ -462,7 +492,12 @@ export class MemoryService {
     const scored = candidates
       .filter((memory) => !pickedIds.has(memory.id))
       .filter((memory) => memory.tier === "episodic" || memory.tier === "prospective")
-      .map((memory) => scoreMemory(memory, queryText, terms))
+      .map((memory) => scoreMemory(memory, queryText, terms, {
+        scope: input.scope,
+        now,
+        entityIds: entityIdSet,
+        memoryEntityIds: linksByMemory.get(memory.id) ?? []
+      }))
       .filter((item) => item.score > 0)
       .sort((left, right) => right.score - left.score || right.memory.updatedAt.localeCompare(left.memory.updatedAt));
 
@@ -1012,12 +1047,22 @@ function explainEligibility(memory: MemoryRecord, settings: MemorySettings): {
   return { alwaysOn, onDemand, reasons };
 }
 
-function scoreMemory(memory: MemoryRecord, queryText: string, terms: string[]): { memory: MemoryRecord; score: number; reason: string } {
+function scoreMemory(
+  memory: MemoryRecord,
+  queryText: string,
+  terms: string[],
+  context?: { scope: string; now: number; entityIds: Set<string>; memoryEntityIds: string[] }
+): { memory: MemoryRecord; score: number; reason: string } {
   let score = CONFIDENCE_BONUS[memory.confidence];
   const reasons: string[] = [];
   const subject = normalize(memory.subjectKey);
   const content = normalize(memory.content);
   const query = normalize(queryText);
+  const scopeMatches = memory.scope === "global" || !context || memoryScopeAllowed(memory, context.scope, queryText);
+  const entityMatches = Boolean(context && context.memoryEntityIds.some((id) => context.entityIds.has(id)));
+  if (!scopeMatches && !entityMatches) {
+    return { memory, score: 0, reason: "范围不匹配且没有实体图关联" };
+  }
   if (query.includes(subject)) {
     score += 5;
     reasons.push("主题匹配");
@@ -1039,7 +1084,23 @@ function scoreMemory(memory: MemoryRecord, queryText: string, terms: string[]): 
   if (memory.scope !== "global" && query.includes(normalize(memory.scope))) {
     score += 2;
     reasons.push("范围匹配");
+  } else if (memory.scope !== "global" && context && normalize(context.scope) === normalize(memory.scope)) {
+    score += 2;
+    reasons.push("同一范围");
   }
+  if (context && context.memoryEntityIds.some((id) => context.entityIds.has(id))) {
+    score += 4;
+    reasons.push("实体图关联");
+  }
+  const ageDays = Math.max(0, (context?.now ?? Date.now()) - Date.parse(memory.updatedAt)) / 86_400_000;
+  if (ageDays <= 7) {
+    score += 1.5;
+    reasons.push("近期记忆");
+  } else if (ageDays >= 180) {
+    score -= 1;
+    reasons.push("较旧记忆");
+  }
+  score += Math.min(2, memory.recallCount * 0.2);
   if (score === 0 && memory.scope === "global" && (memory.kind === "preference" || memory.kind === "project")) {
     score = 0.5;
     reasons.push("全局背景");

@@ -18,6 +18,7 @@ import { createFileArtifact, missingExpectedOutputs, publishArtifacts } from "./
 import { CONTEXT_BLOB_DIR, EXECUTOR_SETTINGS_PATH, GIT_CACHE_DIR, MODEL_SETTINGS_PATH, REPO_ROOT, SOURCE_CONTENT_DIR, WORKSPACE_DIR } from "./config.ts";
 import { ContextService, estimateTokens } from "./context.ts";
 import { DelegationError, DelegationService } from "./delegation.ts";
+import type { BackgroundToolService } from "./background-tools.ts";
 import { diagnoseFailure } from "./context-diagnosis.ts";
 import { classifyFailure, decideFailure, evaluateHandoff, isExecutorFailureCause, type FailureDecision } from "./context-policy.ts";
 import { judgeCompletion, type GoalValidatorRunner } from "./completion-judge.ts";
@@ -38,7 +39,12 @@ import { renderMethodBlock } from "./method-context.ts";
 import { MethodService } from "./methods.ts";
 import { DEFAULT_LEASE_HEARTBEAT_MS, LeaseError, TaskLeaseService } from "./leases.ts";
 import { SandboxService } from "./sandbox.ts";
+import { TOOL_APPROVAL_REQUIRED, toolApprovalSummary } from "./tool-policy.ts";
 import { DEFAULT_RUN_BUDGET, runNativeTask } from "./native-executor.ts";
+import { ContextBroker } from "./context-broker.ts";
+import { OntologyService } from "./ontology.ts";
+import { createPersonalReadTools } from "./personal-tools.ts";
+import { OntologyWriter } from "./ontology-writer.ts";
 import { chatModelConfigured, loadModelSettings, type ModelSettings } from "./model-settings.ts";
 import { prepareTaskRuntime, type RuntimePreparation } from "./runtime.ts";
 import type { HearthService } from "./service.ts";
@@ -93,6 +99,7 @@ export interface SchedulerOptions {
   approvals?: ApprovalManager;
   leases?: TaskLeaseService;
   delegations?: DelegationService;
+  backgroundTools?: BackgroundToolService;
   leaseHeartbeatMs?: number;
   githubRun?: CommandRunner | undefined;
   githubCacheRoot?: string | undefined;
@@ -104,6 +111,8 @@ export interface SchedulerOptions {
   autoLearn?: boolean | undefined;
   sandbox?: SandboxService | undefined;
   completionValidators?: Record<string, GoalValidatorRunner> | undefined;
+  contextBroker?: ContextBroker | undefined;
+  ontologyWriter?: OntologyWriter | undefined;
 }
 
 export class HearthScheduler {
@@ -134,12 +143,16 @@ export class HearthScheduler {
   private readonly sandbox: SandboxService;
   private readonly completionValidators: Record<string, GoalValidatorRunner> | null;
   private readonly context: ContextService;
+  private readonly contextBroker: ContextBroker | undefined;
+  private readonly ontology: OntologyService;
+  private readonly ontologyWriter: OntologyWriter;
   private readonly projector: ContextProjector;
   private readonly handoffs: HandoffService;
   private readonly summaryTasks = new Set<Promise<void>>();
   private readonly summaryControllers = new Map<string, AbortController>();
   private readonly leases: TaskLeaseService;
   private readonly delegations: DelegationService;
+  private readonly backgroundTools: BackgroundToolService | undefined;
   private readonly leaseHeartbeatMs: number;
   private readonly leaseHeartbeats = new Map<string, { epoch: number; timer: ReturnType<typeof setInterval> }>();
   private readonly controllers = new Map<string, AbortController>();
@@ -190,13 +203,17 @@ export class HearthScheduler {
     this.autoLearn = options.autoLearn ?? true;
     this.completionValidators = options.completionValidators ?? null;
     this.context = options.context ?? new ContextService(this.service, options.contextBlobRoot ?? CONTEXT_BLOB_DIR);
-    this.projector = new ContextProjector(this.service, this.context);
+    this.contextBroker = options.contextBroker;
+    this.ontology = new OntologyService(this.service);
+    this.ontologyWriter = options.ontologyWriter ?? new OntologyWriter(this.service, this.ontology);
+    this.projector = new ContextProjector(this.service, this.context, options.contextBroker);
     this.handoffs = new HandoffService(this.service, this.context);
     this.service.setContextSink((message) => {
       if (this.context.settings().mode !== "off") this.context.recordChatMessage(message);
     });
     this.leases = options.leases ?? new TaskLeaseService(this.service);
     this.sandbox = options.sandbox ?? new SandboxService();
+    this.backgroundTools = options.backgroundTools;
     this.delegations = options.delegations ?? new DelegationService({
       service: this.service,
       sandbox: this.sandbox
@@ -1263,6 +1280,14 @@ export class HearthScheduler {
       } catch {
         // Experience capture is best effort and never changes the task outcome.
       }
+      try {
+        const finalTask = this.service.store.getTask(taskId);
+        if (finalTask && ["completed", "failed", "recoverable", "cancelled"].includes(finalTask.status)) {
+          this.ontologyWriter.captureTaskOutcome(taskId);
+        }
+      } catch {
+        // Ontology writeback is best effort and never changes the task outcome.
+      }
     }
   }
 
@@ -1397,9 +1422,28 @@ export class HearthScheduler {
       }
       const methodContext = input.methodPlan ? renderMethodBlock(input.methodPlan.method) : "";
       const basePrompt = buildTaskPrompt(task, prepared, expectedOutputs, template?.acceptance ?? [], runtime, template?.approvalKind, memoryContext, methodContext) + permissionNote;
-      let prompt = handoff?.packet
+      const handoffPrompt = handoff?.packet
         ? this.buildHandoffPrompt(task, prepared, expectedOutputs, handoff.packet, permissionNote, memoryContext, methodContext)
-        : basePrompt;
+        : null;
+      let prompt = handoffPrompt?.prompt ?? basePrompt;
+      let contextPackId = handoffPrompt?.packId ?? null;
+      if (!contextPackId && this.contextBroker) {
+        try {
+          const pack = this.contextBroker.compile({
+            scopeKind: "task",
+            scopeId: task.id,
+            goalId: task.goalId ?? null,
+            taskId: task.id,
+            query: [task.goal, task.nextAction ?? "", memoryContext, methodContext].filter(Boolean).join("\n"),
+            budgetTokens: Math.max(500, Math.floor(this.context.settings().projectionTokenBudget * 0.25)),
+            parentPackId: this.inheritedPackId(task.id)
+          });
+          prompt = `${prompt}\n\n## 个人上下文包\npack: ${pack.id}\n${this.contextBroker.render(pack)}`;
+          contextPackId = pack.id;
+        } catch {
+          contextPackId = null;
+        }
+      }
       if (pendingInput && !resumeState && executorId !== "codex") prompt = `${basePrompt}\n\n用户补充信息：\n${pendingInput}`;
       let activeThreadId = !handoff && input.previousRun?.executorId === executorId
         ? input.previousRun.threadId ?? undefined
@@ -1447,6 +1491,12 @@ export class HearthScheduler {
           });
         }
       }
+      const extraNativeTools: import("@hearth/agent-runtime").AgentTool[] = createPersonalReadTools({
+        service: this.service,
+        ontology: this.ontology
+      });
+      if (contextPackId && this.contextBroker) extraNativeTools.push(this.expandRefTool(contextPackId));
+      if (this.backgroundTools) extraNativeTools.push(...this.backgroundTools.toolsFor(task));
       const adapter = this.adapters[executorId];
       const attemptContext: ExecutorAttemptContext = {
         task,
@@ -1460,6 +1510,7 @@ export class HearthScheduler {
         dshSettings,
         executorSettings: this.executorSettings(),
         expectedOutputs,
+        ...(extraNativeTools.length > 0 ? { extraNativeTools } : {}),
         ...(activeThreadId ? { activeThreadId } : {}),
         onProgress: (event) => this.publishProgress(taskId, runId, event.kind, event.message, event.detail),
         onNativeContextEvent: (event) => this.captureNativeEvent(task, run, event),
@@ -2387,7 +2438,15 @@ export class HearthScheduler {
     return "执行未完成，可以重试";
   }
 
-  private buildHandoffPrompt(task: TaskRecord, prepared: PreparedWorkspace, expectedOutputs: string[], packet: HandoffPacket, permissionNote: string, memoryContext: string, methodContext: string): string {
+  private inheritedPackId(taskId: string): string | null {
+    const job = this.service.store.getDelegationJobByChildTask(taskId);
+    if (job?.contextPackRef?.startsWith("ctxpack:")) return job.contextPackRef;
+    const parentTaskId = this.service.store.listTaskEdges({ childTaskId: taskId })[0]?.parentTaskId;
+    if (!parentTaskId) return null;
+    return this.service.store.listContextPacks({ scopeKind: "task", scopeId: parentTaskId, limit: 1 })[0]?.id ?? null;
+  }
+
+  private buildHandoffPrompt(task: TaskRecord, prepared: PreparedWorkspace, expectedOutputs: string[], packet: HandoffPacket, permissionNote: string, memoryContext: string, methodContext: string): { prompt: string; packId: string | null } {
     const projected = this.projector.project({
       taskId: task.id,
       fromRunId: packet.fromRunId,
@@ -2402,7 +2461,9 @@ export class HearthScheduler {
       methodContext,
       packetOverride: packet
     });
-    return [
+    return {
+      packId: projected.packId,
+      prompt: [
       projected.prompt,
       "## 工作区",
       `- 当前工作区：${prepared.root}`,
@@ -2411,7 +2472,28 @@ export class HearthScheduler {
       `- 任务：${task.title}`,
       "",
       "请先核对工作区和产物哈希，再从“下一步”继续执行；不要重复已经产生外部副作用的动作。" + permissionNote
-    ].join("\n");
+      ].join("\n")
+    };
+  }
+
+  private expandRefTool(packId: string): import("@hearth/agent-runtime").AgentTool {
+    return {
+      definition: {
+        name: "expand_ref",
+        description: "展开个人上下文包中的引用（ent:/st:/rel:/dec:/cmt:/mem:/src:/goal:/task:），读取被省略或摘要化的原文。",
+        parameters: {
+          type: "object",
+          properties: { ref: { type: "string", description: "上下文包中的稳定引用" } },
+          required: ["ref"],
+          additionalProperties: false
+        }
+      },
+      execute: async (input) => {
+        const ref = input && typeof input === "object" && "ref" in input && typeof input.ref === "string" ? input.ref.trim() : "";
+        if (!ref) return { content: "缺少 ref。", isError: true };
+        return { content: this.contextBroker?.expandRef(ref, packId) ?? "上下文服务不可用。" };
+      }
+    };
   }
 
   private writeHandoffFile(
@@ -2514,29 +2596,6 @@ function digestWorkspace(root: string, limit = 5_000): string {
   };
   walk(root);
   return hash.digest("hex");
-}
-
-const TOOL_APPROVAL_REQUIRED = new Set([
-  "write_file",
-  "edit_file",
-  "apply_patch",
-  "shell",
-  "fetch_url",
-  "capture_screen"
-]);
-
-function toolApprovalSummary(toolName: string, value: unknown): string {
-  const args = value && typeof value === "object" ? value as Record<string, unknown> : {};
-  const path = typeof args.path === "string" ? args.path : typeof args.fileName === "string" ? args.fileName : null;
-  const command = typeof args.command === "string" ? args.command : null;
-  const url = typeof args.url === "string" ? args.url : null;
-  if (toolName === "write_file") return `写入工作区文件：${path ?? "未指定路径"}`;
-  if (toolName === "edit_file") return `修改工作区文件：${path ?? "未指定路径"}`;
-  if (toolName === "apply_patch") return "应用补丁修改工作区文件";
-  if (toolName === "shell") return `运行命令：${clipText(command ?? "未指定命令", 160)}`;
-  if (toolName === "fetch_url") return `读取网址：${clipText(url ?? "未指定网址", 200)}`;
-  if (toolName === "capture_screen") return `截取桌面画面：${path ?? "desktop.png"}`;
-  return `执行敏感工具：${toolName}`;
 }
 
 function dshApprovalMetadata(request: DshApprovalRequest): Record<string, unknown> {

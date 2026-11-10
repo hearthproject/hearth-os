@@ -8,9 +8,17 @@
       "priority": "P1",
       "fault": "duplicate",
       "expectedInvariant": "同一计划时刻最多产生一次运行和一份回执；取消后不再触发",
-      "evidence": ["schedule-run", "effect-receipt", "task", "events"],
+      "evidence": [
+        "schedule-run",
+        "effect-receipt",
+        "task",
+        "events"
+      ],
       "repeat": 3,
-      "tags": ["reminder", "schedule"]
+      "tags": [
+        "reminder",
+        "schedule"
+      ]
     },
     {
       "id": "approval-rejected-stops",
@@ -19,9 +27,16 @@
       "priority": "P0",
       "fault": "none",
       "expectedInvariant": "拒绝外部动作审批后任务进入可恢复状态且没有执行副作用",
-      "evidence": ["approval-status", "task-status", "effect-count", "events"],
+      "evidence": [
+        "approval-status",
+        "task-status",
+        "effect-count",
+        "events"
+      ],
       "repeat": 3,
-      "tags": ["approval"]
+      "tags": [
+        "approval"
+      ]
     },
     {
       "id": "action-binding-tamper",
@@ -30,9 +45,16 @@
       "priority": "P0",
       "fault": "tamper",
       "expectedInvariant": "审批绑定的可执行文件变化后必须拒绝执行并撤销审批",
-      "evidence": ["approval-status", "revalidation-event", "executor-calls"],
+      "evidence": [
+        "approval-status",
+        "revalidation-event",
+        "executor-calls"
+      ],
       "repeat": 3,
-      "tags": ["approval", "action-binding"]
+      "tags": [
+        "approval",
+        "action-binding"
+      ]
     },
     {
       "id": "non-interactive-high-risk-deny",
@@ -41,9 +63,16 @@
       "priority": "P0",
       "fault": "none",
       "expectedInvariant": "非交互上下文的高危外部动作默认拒绝",
-      "evidence": ["policy-denial", "task-status", "events"],
+      "evidence": [
+        "policy-denial",
+        "task-status",
+        "events"
+      ],
       "repeat": 3,
-      "tags": ["approval", "non-interactive"]
+      "tags": [
+        "approval",
+        "non-interactive"
+      ]
     },
     {
       "id": "duplicate-send-protection",
@@ -52,9 +81,16 @@
       "priority": "P0",
       "fault": "delayed",
       "expectedInvariant": "同一 effect idempotency key 只能产生一个外部动作记录",
-      "evidence": ["effect-ledger", "duplicate-attempt", "receipt"],
+      "evidence": [
+        "effect-ledger",
+        "duplicate-attempt",
+        "receipt"
+      ],
       "repeat": 3,
-      "tags": ["effect", "idempotency"]
+      "tags": [
+        "effect",
+        "idempotency"
+      ]
     },
     {
       "id": "unknown-effect-reconcile",
@@ -63,9 +99,17 @@
       "priority": "P0",
       "fault": "crash",
       "expectedInvariant": "重启后的不确定效果必须通过回执对账结算，不能盲目重放",
-      "evidence": ["reconcile-item", "effect-status", "provider-receipt"],
+      "evidence": [
+        "reconcile-item",
+        "effect-status",
+        "provider-receipt"
+      ],
       "repeat": 3,
-      "tags": ["effect", "reconcile", "restart"]
+      "tags": [
+        "effect",
+        "reconcile",
+        "restart"
+      ]
     },
     {
       "id": "goal-completion-verification",
@@ -74,9 +118,16 @@
       "priority": "P0",
       "fault": "tamper",
       "expectedInvariant": "没有可验证产物和证据时不能把目标判定为完成",
-      "evidence": ["completion-report", "artifact-evidence", "goal-status"],
+      "evidence": [
+        "completion-report",
+        "artifact-evidence",
+        "goal-status"
+      ],
       "repeat": 3,
-      "tags": ["goal", "verification"]
+      "tags": [
+        "goal",
+        "verification"
+      ]
     },
     {
       "id": "crash-recovery-checkpoint",
@@ -85,9 +136,16 @@
       "priority": "P0",
       "fault": "crash",
       "expectedInvariant": "恢复只使用已证明的检查点和回执，不重复执行已提交副作用",
-      "evidence": ["checkpoint-proof", "run-status", "effect-count"],
+      "evidence": [
+        "checkpoint-proof",
+        "run-status",
+        "effect-count"
+      ],
       "repeat": 3,
-      "tags": ["recovery", "checkpoint"]
+      "tags": [
+        "recovery",
+        "checkpoint"
+      ]
     },
     {
       "id": "memory-taint-isolation",
@@ -96,9 +154,17 @@
       "priority": "P1",
       "fault": "injection",
       "expectedInvariant": "不可信网页内容只能进入低信任层，不能成为常驻指令或 curated 记忆",
-      "evidence": ["memory-tier", "trust", "taint", "recall-context"],
+      "evidence": [
+        "memory-tier",
+        "trust",
+        "taint",
+        "recall-context"
+      ],
       "repeat": 3,
-      "tags": ["memory", "taint"]
+      "tags": [
+        "memory",
+        "taint"
+      ]
     },
     {
       "id": "forget-propagation",
@@ -107,9 +173,17 @@
       "priority": "P1",
       "fault": "none",
       "expectedInvariant": "遗忘来源后派生记忆、版本、召回和整合报告同步清除",
-      "evidence": ["forget-receipt", "tombstones", "memory-versions", "recall"],
+      "evidence": [
+        "forget-receipt",
+        "tombstones",
+        "memory-versions",
+        "recall"
+      ],
       "repeat": 3,
-      "tags": ["memory", "forget"]
+      "tags": [
+        "memory",
+        "forget"
+      ]
     },
     {
       "id": "skill-archive-restore",
@@ -118,9 +192,17 @@
       "priority": "P1",
       "fault": "none",
       "expectedInvariant": "过期技能不得被静默删除，归档必须可回滚且 pinned 技能不参与清理",
-      "evidence": ["curator-run", "skill-status", "backup", "rollback"],
+      "evidence": [
+        "curator-run",
+        "skill-status",
+        "backup",
+        "rollback"
+      ],
       "repeat": 3,
-      "tags": ["skill", "curator"]
+      "tags": [
+        "skill",
+        "curator"
+      ]
     },
     {
       "id": "proactive-noise-budget",
@@ -129,9 +211,17 @@
       "priority": "P1",
       "fault": "none",
       "expectedInvariant": "冷却、每日预算和忽略状态必须阻止重复打扰；无可提醒事项返回 NO_REPLY",
-      "evidence": ["proactive-scan", "heartbeat", "notifier-calls", "attention-queue"],
+      "evidence": [
+        "proactive-scan",
+        "heartbeat",
+        "notifier-calls",
+        "attention-queue"
+      ],
       "repeat": 3,
-      "tags": ["proactive", "attention"]
+      "tags": [
+        "proactive",
+        "attention"
+      ]
     },
     {
       "id": "schedule-catchup-dst",
@@ -140,9 +230,18 @@
       "priority": "P1",
       "fault": "delayed",
       "expectedInvariant": "补跑遵守边界和 DST 语义，同一计划时刻不能重复执行",
-      "evidence": ["schedule-runs", "next-run-at", "clock", "timezone"],
+      "evidence": [
+        "schedule-runs",
+        "next-run-at",
+        "clock",
+        "timezone"
+      ],
       "repeat": 3,
-      "tags": ["schedule", "dst", "catch-up"]
+      "tags": [
+        "schedule",
+        "dst",
+        "catch-up"
+      ]
     },
     {
       "id": "connection-offline-consistency",
@@ -151,9 +250,17 @@
       "priority": "P2",
       "fault": "stale_generation",
       "expectedInvariant": "缓存必须标记 cached/asOf/cursor；旧 generation 写入被拒绝；远程不确定动作显式结算",
-      "evidence": ["connection-status", "projection", "outbox", "generation"],
+      "evidence": [
+        "connection-status",
+        "projection",
+        "outbox",
+        "generation"
+      ],
       "repeat": 3,
-      "tags": ["connection", "offline"]
+      "tags": [
+        "connection",
+        "offline"
+      ]
     },
     {
       "id": "sensitive-info-containment",
@@ -162,9 +269,17 @@
       "priority": "P0",
       "fault": "injection",
       "expectedInvariant": "敏感值和秘密不能出现在持久化上下文、召回包、通知或事件日志中",
-      "evidence": ["context-item", "event-log", "recall-pack", "redaction"],
+      "evidence": [
+        "context-item",
+        "event-log",
+        "recall-pack",
+        "redaction"
+      ],
       "repeat": 3,
-      "tags": ["security", "redaction"]
+      "tags": [
+        "security",
+        "redaction"
+      ]
     },
     {
       "id": "delegation-permission-cancel",
@@ -173,9 +288,18 @@
       "priority": "P0",
       "fault": "none",
       "expectedInvariant": "子任务不能获得父任务未声明的权限；取消后执行器和效果守卫都不得继续",
-      "evidence": ["delegation-job", "child-task", "effect-guard", "effect-count"],
+      "evidence": [
+        "delegation-job",
+        "child-task",
+        "effect-guard",
+        "effect-count"
+      ],
       "repeat": 3,
-      "tags": ["delegation", "permission", "cancel"]
+      "tags": [
+        "delegation",
+        "permission",
+        "cancel"
+      ]
     },
     {
       "id": "delegation-idempotency",
@@ -184,9 +308,16 @@
       "priority": "P0",
       "fault": "duplicate",
       "expectedInvariant": "同一幂等 key 只能绑定一个 Job 和一个子任务；不同目标必须显式冲突",
-      "evidence": ["delegation-job", "child-task", "idempotency-conflict"],
+      "evidence": [
+        "delegation-job",
+        "child-task",
+        "idempotency-conflict"
+      ],
       "repeat": 3,
-      "tags": ["delegation", "idempotency"]
+      "tags": [
+        "delegation",
+        "idempotency"
+      ]
     },
     {
       "id": "handoff-generation-trace",
@@ -195,9 +326,18 @@
       "priority": "P0",
       "fault": "stale_generation",
       "expectedInvariant": "目标、约束、证据和下一步必须可追溯；旧 generation 写入必须被拒绝",
-      "evidence": ["handoff-packet", "verification", "generation-fence", "artifact"],
+      "evidence": [
+        "handoff-packet",
+        "verification",
+        "generation-fence",
+        "artifact"
+      ],
       "repeat": 3,
-      "tags": ["handoff", "generation", "evidence"]
+      "tags": [
+        "handoff",
+        "generation",
+        "evidence"
+      ]
     },
     {
       "id": "sandbox-boundary-classification",
@@ -206,9 +346,17 @@
       "priority": "P0",
       "fault": "credential_expiry",
       "expectedInvariant": "路径逃逸、网络越界和凭据过期必须分别返回 sandbox_escape、network_violation、credential_expired",
-      "evidence": ["sandbox-checks", "failure-classification", "allowed-request"],
+      "evidence": [
+        "sandbox-checks",
+        "failure-classification",
+        "allowed-request"
+      ],
       "repeat": 3,
-      "tags": ["sandbox", "security", "credentials"]
+      "tags": [
+        "sandbox",
+        "security",
+        "credentials"
+      ]
     },
     {
       "id": "channel-inbound-idempotency",
@@ -217,9 +365,198 @@
       "priority": "P0",
       "fault": "duplicate",
       "expectedInvariant": "同一 externalId 只产生一份投递记录；旧 generation 或 cursor 不得覆盖新游标",
-      "evidence": ["channel-delivery", "ack-receipt", "cursor", "stale-rejection"],
+      "evidence": [
+        "channel-delivery",
+        "ack-receipt",
+        "cursor",
+        "stale-rejection"
+      ],
       "repeat": 3,
-      "tags": ["channel", "idempotency", "cursor"]
+      "tags": [
+        "channel",
+        "idempotency",
+        "cursor"
+      ]
+    },
+    {
+      "id": "mention-ambiguous",
+      "title": "歧义提及阻断不可逆动作",
+      "mechanism": "mentions",
+      "priority": "P1",
+      "fault": "none",
+      "expectedInvariant": "同名实体有多个候选时必须澄清；不可逆动作必须被阻断",
+      "evidence": [
+        "mention-record",
+        "clarification",
+        "action-block"
+      ],
+      "repeat": 3,
+      "tags": [
+        "mention",
+        "ontology"
+      ]
+    },
+    {
+      "id": "cross-session-continue",
+      "title": "跨会话延续决定与约束",
+      "mechanism": "continuity",
+      "priority": "P1",
+      "fault": "none",
+      "expectedInvariant": "新会话无需用户重复输入即可召回已确认决定",
+      "evidence": [
+        "decision",
+        "context-pack",
+        "conversation"
+      ],
+      "repeat": 3,
+      "tags": [
+        "continuity",
+        "context"
+      ]
+    },
+    {
+      "id": "stale-state-deadline",
+      "title": "过期状态不注入上下文",
+      "mechanism": "ontology",
+      "priority": "P1",
+      "fault": "stale_generation",
+      "expectedInvariant": "过期实体状态保留审计标记但不得作为当前事实注入",
+      "evidence": [
+        "entity-state",
+        "context-pack",
+        "stale"
+      ],
+      "repeat": 3,
+      "tags": [
+        "ontology",
+        "stale"
+      ]
+    },
+    {
+      "id": "source-conflict-owner",
+      "title": "来源冲突不静默覆盖",
+      "mechanism": "ontology",
+      "priority": "P0",
+      "fault": "tamper",
+      "expectedInvariant": "冲突状态必须生成注意力卡片并保留原值与双方证据",
+      "evidence": [
+        "entity-state",
+        "attention",
+        "evidence"
+      ],
+      "repeat": 3,
+      "tags": [
+        "ontology",
+        "conflict"
+      ]
+    },
+    {
+      "id": "attention-budget-30",
+      "title": "三十条提醒受每日预算约束",
+      "mechanism": "attention",
+      "priority": "P1",
+      "fault": "duplicate",
+      "expectedInvariant": "单日投递不超过预算，剩余项保留在队列中",
+      "evidence": [
+        "attention-queue",
+        "heartbeat",
+        "budget"
+      ],
+      "repeat": 3,
+      "tags": [
+        "attention",
+        "budget"
+      ]
+    },
+    {
+      "id": "forget-propagation-ontology",
+      "title": "遗忘证据传播到本体与上下文包",
+      "mechanism": "ontology",
+      "priority": "P0",
+      "fault": "none",
+      "expectedInvariant": "遗忘来源后实体、状态、提及和引用该证据的上下文包同步失效",
+      "evidence": [
+        "forget",
+        "entity",
+        "context-pack"
+      ],
+      "repeat": 3,
+      "tags": [
+        "forget",
+        "ontology"
+      ]
+    },
+    {
+      "id": "prompt-injection-ontology",
+      "title": "网页注入不进入上下文或决定",
+      "mechanism": "ontology",
+      "priority": "P0",
+      "fault": "injection",
+      "expectedInvariant": "不可信网页内容保持 taint，不进入上下文包，也不会被写成决定",
+      "evidence": [
+        "memory",
+        "context-pack",
+        "decision"
+      ],
+      "repeat": 3,
+      "tags": [
+        "injection",
+        "security"
+      ]
+    },
+    {
+      "id": "four-week-continuity",
+      "title": "四周后承诺和决定仍可召回",
+      "mechanism": "continuity",
+      "priority": "P1",
+      "fault": "delayed",
+      "expectedInvariant": "跨四周后承诺临近到期被提醒，已确认决定仍出现在上下文",
+      "evidence": [
+        "commitment",
+        "heartbeat",
+        "context-pack"
+      ],
+      "repeat": 3,
+      "tags": [
+        "continuity",
+        "commitment"
+      ]
+    },
+    {
+      "id": "task-dag-fan-in",
+      "title": "任务 DAG 的 n_of_m 汇聚",
+      "mechanism": "delegation",
+      "priority": "P1",
+      "fault": "none",
+      "expectedInvariant": "3 个子任务中完成 2 个即可满足汇聚，未用分支可取消且边持久化",
+      "evidence": [
+        "task-edge",
+        "delegation-job",
+        "join"
+      ],
+      "repeat": 3,
+      "tags": [
+        "delegation",
+        "dag"
+      ]
+    },
+    {
+      "id": "async-tool-interrupt",
+      "title": "后台工具可中断且不泄露半成品",
+      "mechanism": "background_tool",
+      "priority": "P1",
+      "fault": "timeout",
+      "expectedInvariant": "中断后台工具后状态为 stopped，未完成输出不得进入结果",
+      "evidence": [
+        "tool-job",
+        "interrupt",
+        "output"
+      ],
+      "repeat": 3,
+      "tags": [
+        "tool",
+        "async"
+      ]
     }
   ]
 }

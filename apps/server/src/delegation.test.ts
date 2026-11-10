@@ -61,26 +61,33 @@ describe("DelegationService", () => {
     })).toThrowError(expect.objectContaining({ code: "DELEGATION_PERMISSION_ESCALATION" }));
   });
 
-  it("serializes the same target executor but allows another executor to run in parallel", () => {
+  it("allows parallel leases up to the executor limit and rejects beyond it", () => {
     const parent = createParent(service, root);
-    const first = delegations.create(input(parent.id, "serial-1"));
-    const second = delegations.create(input(parent.id, "serial-2"));
-    const other = delegations.create({ ...input(parent.id, "serial-3"), targetExecutor: "codex" });
+    const jobs = [1, 2, 3, 4].map((index) => delegations.create(input(parent.id, `serial-${index}`)));
+    const other = delegations.create({ ...input(parent.id, "serial-other"), targetExecutor: "codex" });
 
-    expect(delegations.lease(first.id, "worker-a", 30_000).status).toBe("leased");
-    expect(() => delegations.lease(second.id, "worker-b", 30_000)).toThrowError(
+    for (const job of jobs.slice(0, 3)) {
+      expect(delegations.lease(job.id, `worker-${job.id}`, 30_000).status).toBe("leased");
+    }
+    expect(() => delegations.lease(jobs[3]!.id, "worker-4", 30_000)).toThrowError(
       expect.objectContaining({ code: "DELEGATION_EXECUTOR_BUSY" })
     );
     expect(delegations.lease(other.id, "worker-c", 30_000).status).toBe("leased");
   });
 
-  it("rejects recursive delegation from a child task", () => {
+  it("allows bounded recursive delegation and rejects beyond the depth limit", () => {
     const parent = createParent(service, root);
     const first = delegations.create(input(parent.id, "recursive-1"));
-    expect(first.childTaskId).toBeTruthy();
-    expect(() => delegations.create(input(first.childTaskId ?? "", "recursive-2"))).toThrowError(
-      expect.objectContaining({ code: "DELEGATION_RECURSION_NOT_ALLOWED" })
+    expect(first.depth).toBe(1);
+    const second = delegations.create(input(first.childTaskId ?? "", "recursive-2"));
+    expect(second.depth).toBe(2);
+    const third = delegations.create(input(second.childTaskId ?? "", "recursive-3"));
+    expect(third.depth).toBe(3);
+    expect(() => delegations.create(input(third.childTaskId ?? "", "recursive-4"))).toThrowError(
+      expect.objectContaining({ code: "TASK_GRAPH_MAX_DEPTH" })
     );
+    expect(store.listTaskEdges({ parentTaskId: parent.id })).toHaveLength(1);
+    expect(store.listTaskEdges({ parentTaskId: first.childTaskId ?? "" })).toHaveLength(1);
   });
 
   it("cancels the child and blocks any later effect", () => {

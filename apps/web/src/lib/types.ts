@@ -3,6 +3,7 @@ import type {
   ApprovalListItem,
   ApprovalRecord,
   ApprovalStatus,
+  AttentionItem,
   ArtifactListItem,
   ChatAttachment,
   ChatMessageRecord,
@@ -119,11 +120,25 @@ import type {
   GitPullRequestView,
   GitRepositoryView,
   GoalCompletionReport,
-  GoalContract
+  GoalContract,
+  AssertionConfidence,
+  BackgroundToolJob,
+  CommitmentRecord,
+  DecisionRecord,
+  EntityAliasRecord,
+  EntityKind,
+  EntityRecord,
+  EntityStateRecord,
+  IntakeDecision,
+  IntakeDecisionRecord,
+  PreparedActionRecord,
+  ThreadSubscriptionRecord,
+  WatchdogEvent
 } from "@hearth/core";
 import type { TaskTemplate } from "@hearth/templates";
 
 export type {
+  AttentionItem,
   ApprovalMode,
   ApprovalListItem,
   ApprovalRecord,
@@ -244,6 +259,19 @@ export type {
   GitRepositoryView,
   GoalCompletionReport,
   GoalContract,
+  AssertionConfidence,
+  BackgroundToolJob,
+  CommitmentRecord,
+  DecisionRecord,
+  EntityAliasRecord,
+  EntityKind,
+  EntityRecord,
+  EntityStateRecord,
+  IntakeDecision,
+  IntakeDecisionRecord,
+  PreparedActionRecord,
+  ThreadSubscriptionRecord,
+  WatchdogEvent,
   TaskTemplate
 };
 
@@ -768,4 +796,40 @@ export interface CreateMethodRequest {
   templateId?: string | null;
   allowedCapabilities?: string[];
   guardrails?: string[];
+}
+
+
+export interface OntologyEntityView extends EntityRecord {
+  states: EntityStateRecord[];
+  aliases: EntityAliasRecord[];
+}
+
+export interface WatchdogSettingsView {
+  enabled: boolean;
+  shadow: boolean;
+  stallMinutes: number;
+  maxRunMinutes: number;
+  repeatedFailureCount: number;
+  failureWindowMinutes: number;
+  dedupeMinutes: number;
+  intervalMs: number;
+  autoCancel: boolean;
+}
+
+export interface WatchdogSnapshot {
+  settings: WatchdogSettingsView;
+  events: WatchdogEvent[];
+}
+
+export interface ThreadDeliveryView {
+  subscriptionId: string;
+  seq: number;
+  type: string;
+  taskId: string | null;
+  runId: string | null;
+  recordedAt: string;
+}
+
+export interface IntakeRouteResult extends IntakeDecisionRecord {
+  signals: string[];
 }

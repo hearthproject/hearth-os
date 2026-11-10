@@ -9,6 +9,7 @@ import {
   type AgentModel,
   type AgentResumeState,
   type AgentRunResult,
+  type AgentTool,
   type AgentToolAuthorization,
   type AgentToolAuthorizationRequest,
   type RuntimeEvent
@@ -39,6 +40,7 @@ export interface NativeRunOptions {
   onContextEvent?: (event: RuntimeEvent) => void;
   onCheckpoint?: (checkpoint: AgentCheckpoint) => void | Promise<void>;
   onAuthorizeTool?: (request: AgentToolAuthorizationRequest) => Promise<AgentToolAuthorization>;
+  extraTools?: AgentTool[];
 }
 
 export interface NativeRunResult {
@@ -69,7 +71,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
   });
   const result = await runAgent({
     model: modelAdapter(options.settings),
-    tools: createBuiltinTools(),
+    tools: [...createBuiltinTools(), ...(options.extraTools ?? [])],
     goal: options.prompt,
     systemPrompt: nativeSystemPrompt(options.task, options.expectedOutputs),
     budget: options.budget ?? DEFAULT_RUN_BUDGET,
@@ -111,6 +113,14 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     question: result.question,
     outputs: result.outputs,
     messages: result.messages
+  };
+}
+
+export function withExtraToolPermissions(permissions: TaskPermissions, extraTools: AgentTool[]): TaskPermissions {
+  if (extraTools.length === 0) return permissions;
+  return {
+    ...permissions,
+    tools: [...new Set([...permissions.tools, ...extraTools.map((tool) => tool.definition.name)])]
   };
 }
 

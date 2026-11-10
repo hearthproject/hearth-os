@@ -6,7 +6,7 @@ import { EmptyState } from "../components/EmptyState.tsx";
 import { ProactiveSettingsPanel } from "../components/ProactiveSettingsPanel.tsx";
 import { api } from "../lib/api.ts";
 import { relativeTime } from "../lib/format.ts";
-import type { ProactiveSuggestion, ReconcileItem } from "../lib/types.ts";
+import type { AttentionItem, ProactiveSuggestion, ReconcileItem } from "../lib/types.ts";
 
 const STATUS_LABELS: Record<ProactiveSuggestion["status"], string> = {
   new: "待处理",
@@ -42,12 +42,27 @@ const RECONCILE_STATUS_LABELS: Record<ReconcileItem["status"], string> = {
 
 const RECONCILE_OPEN_STATUSES: ReconcileItem["status"][] = ["open", "checking", "needs_human", "conflicting"];
 
+const ATTENTION_KIND_LABELS: Record<AttentionItem["kind"], string> = {
+  decision: "需要决定",
+  approval: "等待审批",
+  credential: "需要授权",
+  reconcile: "需要对账",
+  conflict: "信息冲突",
+  commitment: "承诺",
+  deadline: "截止",
+  blocked: "被阻塞",
+  opportunity: "机会",
+  progress: "进展",
+  suggestion: "建议"
+};
+
 export function InboxPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [filter, setFilter] = useState<"active" | "all">("active");
   const [notice, setNotice] = useState<string | null>(null);
   const snapshotQuery = useQuery({ queryKey: ["proactive"], queryFn: api.proactive, refetchInterval: 15_000 });
+  const attentionQuery = useQuery({ queryKey: ["attention"], queryFn: api.attention, refetchInterval: 15_000 });
   const reconcileQuery = useQuery({ queryKey: ["reconcile"], queryFn: () => api.reconcile(), refetchInterval: 15_000 });
 
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ["proactive"] });
@@ -74,6 +89,20 @@ export function InboxPage() {
       refresh();
     }
   });
+  const attentionMutation = useMutation({
+    mutationFn: async (input: { id: string; action: "ack" | "ignore" | "resolve" | "snooze" | "wrong" }) => {
+      if (input.action === "ack") return api.attentionAck(input.id);
+      if (input.action === "ignore") return api.attentionIgnore(input.id);
+      if (input.action === "resolve") return api.attentionResolve(input.id);
+      if (input.action === "snooze") return api.attentionSnooze(input.id, 60);
+      await api.attentionFeedback(input.id, "wrong");
+      return api.attentionIgnore(input.id);
+    },
+    onSuccess: (_result, input) => {
+      setNotice(input.action === "wrong" ? "已记录为误报，并会用于调整同类提醒。" : "注意力事项已更新。");
+      void queryClient.invalidateQueries({ queryKey: ["attention"] });
+    }
+  });
   const reconcileMutation = useMutation({
     mutationFn: async (input: { id: string; action: "check" | "committed" | "absent" | "abandoned" | "task"; note?: string }) => {
       if (input.action === "check") return api.checkReconcile(input.id);
@@ -98,7 +127,8 @@ export function InboxPage() {
     .sort((left, right) => right.priority - left.priority || right.lastSeenAt.localeCompare(left.lastSeenAt));
   const pendingCount = (snapshot?.suggestions ?? []).filter((item) => ["new", "snoozed", "accepted"].includes(item.status)).length;
   const reconcileItems = (reconcileQuery.data?.items ?? []).filter((item) => RECONCILE_OPEN_STATUSES.includes(item.status));
-  const error = scanMutation.error ?? actionMutation.error ?? reconcileQuery.error ?? reconcileMutation.error;
+  const attentionItems = attentionQuery.data?.items ?? [];
+  const error = scanMutation.error ?? actionMutation.error ?? attentionQuery.error ?? attentionMutation.error ?? reconcileQuery.error ?? reconcileMutation.error;
 
   function reconcileAction(item: ReconcileItem, action: "check" | "committed" | "absent" | "abandoned" | "task") {
     if (action === "check") {
@@ -135,6 +165,68 @@ export function InboxPage() {
 
       {snapshotQuery.isLoading && <p className="section-empty">正在读取主动建议…</p>}
       {snapshotQuery.isError && <p className="form-error">{snapshotQuery.error.message}</p>}
+
+      {attentionItems.length > 0 && (
+        <section className="panel attention-panel">
+          <div className="panel-head">
+            <div>
+              <h2><Sparkles size={17} /> 现在需要你注意</h2>
+              <span className="panel-meta">按“为什么现在、有什么后果、建议动作”排序；可稍后、忽略或标记误报。</span>
+            </div>
+            <span className="tag">{attentionItems.length} 项</span>
+          </div>
+          <div className="suggestion-list">
+            {attentionItems.map((item) => (
+              <article className={"panel suggestion-card risk-" + (item.critical ? "critical" : "medium")} key={item.id}>
+                <div className="suggestion-head">
+                  <div>
+                    <div className="suggestion-kicker">
+                      <span className="tag">{ATTENTION_KIND_LABELS[item.kind] ?? item.kind}</span>
+                      <span className="tag">{item.waitingOn === "user" ? "等你处理" : item.waitingOn === "agent" ? "Agent 推进中" : "等外部系统"}</span>
+                      {item.critical && <span className="tag risk-tag"><ShieldAlert size={11} /> 高影响</span>}
+                      {item.shadowed && <span className="tag">影子模式</span>}
+                      {typeof item.score === "number" && <span className="tag">分数 {Math.round(item.score)}</span>}
+                    </div>
+                    <h2>{item.title}</h2>
+                    <p>{item.whyNow}</p>
+                  </div>
+                  <span className="panel-meta">{relativeTime(item.waitingSince)}</span>
+                </div>
+                <div className="suggestion-facts">
+                  <div><span>不处理会怎样</span><strong>{item.consequence}</strong></div>
+                  <div><span>建议动作</span><strong>{item.nextAction}</strong></div>
+                  <div><span>来源</span><strong>{item.source}</strong></div>
+                </div>
+                <details>
+                  <summary>为什么我看到这个</summary>
+                  <p>{item.whyNow}</p>
+                  {item.evidenceRefs?.length ? <p className="mono">证据：{item.evidenceRefs.slice(0, 6).join("、")}</p> : <p>没有外部证据引用；这是系统根据状态推断的提醒。</p>}
+                </details>
+                <div className="suggestion-foot">
+                  <span className="page-meta">
+                    {item.options?.length ? "可选：" + item.options.map((option) => option.label).join(" / ") : "只有一个明确下一步时，不要求额外选择"}
+                  </span>
+                  <div className="suggestion-actions">
+                    {item.taskId && <Link className="link-button" to={"/tasks/" + item.taskId}>查看任务</Link>}
+                    <button className="primary-button" disabled={attentionMutation.isPending} onClick={() => attentionMutation.mutate({ id: item.id, action: "ack" })}>
+                      <Check size={14} /> 我看到
+                    </button>
+                    <button className="ghost-button" disabled={attentionMutation.isPending} onClick={() => attentionMutation.mutate({ id: item.id, action: "snooze" })}>
+                      <Clock3 size={14} /> 稍后 1 小时
+                    </button>
+                    <button className="ghost-button" disabled={attentionMutation.isPending} onClick={() => attentionMutation.mutate({ id: item.id, action: "resolve" })}>
+                      <CheckCircle2 size={14} /> 已处理
+                    </button>
+                    <button className="ghost-button danger" disabled={attentionMutation.isPending} onClick={() => attentionMutation.mutate({ id: item.id, action: "wrong" })}>
+                      <X size={14} /> 误报
+                    </button>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
 
       {reconcileItems.length > 0 && (
         <section className="panel reconcile-panel">

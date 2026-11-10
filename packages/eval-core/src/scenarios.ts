@@ -12,9 +12,61 @@ export const SCENARIO_MECHANISMS = [
   "delegation",
   "handoff",
   "sandbox",
-  "channel"
+  "channel",
+  "ontology",
+  "mentions",
+  "continuity",
+  "attention",
+  "background_tool",
+  "dag"
 ] as const;
 export type ScenarioMechanism = (typeof SCENARIO_MECHANISMS)[number];
+
+export const SCENARIO_METRIC_KEYS = [
+  "context_reconstruction_turns",
+  "repeated_input_chars",
+  "entity_resolution_accuracy",
+  "cross_session_recall_accuracy",
+  "stale_state_error_rate",
+  "attention_precision",
+  "interruption_rate",
+  "time_to_decision",
+  "human_minutes_saved",
+  "context_pack_hit_rate",
+  "safety_regression"
+] as const;
+export type ScenarioMetricKey = (typeof SCENARIO_METRIC_KEYS)[number];
+
+export const SCENARIO_METRIC_UNITS: Record<ScenarioMetricKey, string> = {
+  context_reconstruction_turns: "turns",
+  repeated_input_chars: "chars",
+  entity_resolution_accuracy: "ratio",
+  cross_session_recall_accuracy: "ratio",
+  stale_state_error_rate: "ratio",
+  attention_precision: "ratio",
+  interruption_rate: "per_hour",
+  time_to_decision: "minutes",
+  human_minutes_saved: "minutes",
+  context_pack_hit_rate: "ratio",
+  safety_regression: "ratio"
+};
+
+export interface ScenarioMetricRecord {
+  key: ScenarioMetricKey;
+  value: number;
+  unit: string;
+  detail: string;
+}
+
+export interface ScenarioMetricAggregate {
+  key: ScenarioMetricKey;
+  unit: string;
+  samples: number;
+  median: number;
+  p95: number;
+  min: number;
+  max: number;
+}
 
 export const SCENARIO_PRIORITIES = ["P0", "P1", "P2"] as const;
 export type ScenarioPriority = (typeof SCENARIO_PRIORITIES)[number];
@@ -75,6 +127,7 @@ export interface ScenarioRunRecord {
   evidencePath: string | null;
   error: string | null;
   assertions: ScenarioAssertion[];
+  metrics: ScenarioMetricRecord[];
 }
 
 export interface ScenarioAggregate {
@@ -89,6 +142,7 @@ export interface ScenarioAggregate {
   medianDurationMs: number;
   durationDispersionMs: number;
   failedAssertions: string[];
+  metrics: ScenarioMetricAggregate[];
 }
 
 export interface ScenarioP0Coverage {
@@ -107,6 +161,7 @@ export interface ScenarioSuiteReport {
   runs: ScenarioRunRecord[];
   aggregates: ScenarioAggregate[];
   p0Coverage: ScenarioP0Coverage[];
+  metricSummary: ScenarioMetricAggregate[];
   passRate: number;
 }
 
@@ -148,6 +203,37 @@ export function durationDispersionMs(values: number[]): number {
   return median(values.map((value) => Math.abs(value - center)));
 }
 
+export function percentile(values: number[], ratio: number): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((left, right) => left - right);
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * ratio) - 1));
+  return sorted[index]!;
+}
+
+export function aggregateScenarioMetrics(metrics: ScenarioMetricRecord[]): ScenarioMetricAggregate[] {
+  const groups = new Map<ScenarioMetricKey, ScenarioMetricRecord[]>();
+  for (const metric of metrics) {
+    if (!Number.isFinite(metric.value)) continue;
+    const group = groups.get(metric.key) ?? [];
+    group.push(metric);
+    groups.set(metric.key, group);
+  }
+  return [...groups.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, group]) => {
+      const values = group.map((metric) => metric.value);
+      return {
+        key,
+        unit: group[0]!.unit,
+        samples: values.length,
+        median: median(values),
+        p95: percentile(values, 0.95),
+        min: Math.min(...values),
+        max: Math.max(...values)
+      };
+    });
+}
+
 export function aggregateScenarioRuns(runs: ScenarioRunRecord[]): ScenarioAggregate[] {
   const groups = new Map<string, ScenarioRunRecord[]>();
   for (const run of runs) {
@@ -172,7 +258,8 @@ export function aggregateScenarioRuns(runs: ScenarioRunRecord[]): ScenarioAggreg
         passRate: group.length === 0 ? 0 : passed / group.length,
         medianDurationMs: median(durations),
         durationDispersionMs: durationDispersionMs(durations),
-        failedAssertions: [...new Set(group.flatMap((run) => run.assertions.filter((assertion) => !assertion.passed).map((assertion) => assertion.name)))]
+        failedAssertions: [...new Set(group.flatMap((run) => run.assertions.filter((assertion) => !assertion.passed).map((assertion) => assertion.name)))],
+        metrics: aggregateScenarioMetrics(group.flatMap((run) => run.metrics ?? []))
       };
     });
 }
@@ -214,6 +301,7 @@ export function summarizeScenarioSuite(input: {
     runs: input.runs,
     aggregates: aggregateScenarioRuns(input.runs),
     p0Coverage,
+    metricSummary: aggregateScenarioMetrics(input.runs.flatMap((run) => run.metrics ?? [])),
     passRate: input.runs.length === 0 ? 0 : passed / input.runs.length
   };
 }
