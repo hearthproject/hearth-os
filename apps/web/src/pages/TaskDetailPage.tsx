@@ -389,7 +389,7 @@ export function TaskDetailPage() {
         error={contextQuery.isError ? (contextQuery.error instanceof Error ? contextQuery.error.message : "上下文读取失败") : null}
       />
       <section className="panel process-panel">
-        <details open={false}>
+        <details open={task.status === "running" || task.status === "queued"}>
           <summary>
             <span>执行过程</span>
             <small>{executorLabel(task.executorId)} · {view.runs.length} 次运行 · {visibleProgress.length} 条进度 · 点击展开</small>

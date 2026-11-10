@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hermesArgs, hermesProbeErrorCode, hermesProgress, parseHermesEvent, probeHermes } from "./hermes-executor.ts";
+import { hermesArgs, hermesProbeErrorCode, hermesProgress, hermesStderrProgress, parseHermesEvent, probeHermes } from "./hermes-executor.ts";
 
 describe("Hermes stream-json adapter", () => {
   it("parses init, text, tool and result events", () => {
@@ -72,6 +72,18 @@ describe("Hermes stream-json adapter", () => {
     expect(hermesProbeErrorCode("HTTP 429 Too Many Requests")).toBe("HTTP_429");
     expect(hermesProbeErrorCode("provider quota exceeded")).toBe("HTTP_429");
     expect(hermesProbeErrorCode("login required")).toBe("AUTH_FAILED");
+  });
+
+  it("publishes stderr chunks and marks quota errors as visible progress", () => {
+    expect(hermesStderrProgress("connecting to provider")).toMatchObject({
+      type: "stderr",
+      detail: { executorId: "hermes", eventType: "stderr", status: "running" }
+    });
+    expect(hermesStderrProgress("HTTP 429 Too Many Requests")).toMatchObject({
+      type: "stderr",
+      message: expect.stringContaining("额度或频率限制"),
+      detail: { executorId: "hermes", eventType: "stderr", status: "quota_exceeded" }
+    });
   });
 
   it("passes an existing session back to Hermes when resuming", () => {

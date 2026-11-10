@@ -781,7 +781,7 @@ function TaskStatusBubble({ message, conversationId }: { message: ChatMessageRec
             to={`/tasks/${message.taskId}`}
             state={{ fromChat: true, ...(conversationId ? { conversationId } : {}) }}
           >
-            查看任务
+            {message.taskStatus === "running" ? "查看任务与执行过程" : "查看任务"}
           </Link>
         )}
       </div>

@@ -86,24 +86,11 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     ...(options.resume ? { resume: options.resume } : {}),
     onEvent: (event) => {
       options.onContextEvent?.(event);
-      if (event.type === "tool.started") {
-        options.onProgress?.({
-          kind: "tool",
-          message: describeToolStart(event.call.name, event.call.arguments),
-          detail: { executorId: "native", eventType: "tool.started", title: event.call.name, input: event.call.arguments }
-        });
-      } else if (event.type === "tool.finished" && event.result.isError) {
-        options.onProgress?.({
-          kind: "tool",
-          message: `有一项操作没有完成，正在调整`,
-          detail: { executorId: "native", eventType: "tool.finished", title: event.call.name, output: event.result.content, status: "failed" }
-        });
-      } else if (event.type === "compacted") {
-        options.onProgress?.({ kind: "context", message: "整理执行上下文，继续推进" });
-      } else if (event.type === "budget.exceeded") {
+      if (event.type === "budget.exceeded") {
         budgetExhaustion = { dimension: event.budget, limit: event.limit };
-        options.onProgress?.({ kind: "budget", message: `达到本轮执行预算（${budgetDimensionLabel(event.budget)}）`, detail: { executorId: "native", eventType: "budget.exceeded", status: event.budget } });
       }
+      const progress = nativeProgressForEvent(event);
+      if (progress) options.onProgress?.(progress);
     },
     ...(options.onCheckpoint ? { onCheckpoint: options.onCheckpoint } : {}),
     ...(options.onAuthorizeTool ? { authorizeTool: options.onAuthorizeTool } : {}),
@@ -121,6 +108,48 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     messages: result.messages,
     ...(budgetExhaustion ? { budgetExhaustion } : {})
   };
+}
+
+export function nativeProgressForEvent(event: RuntimeEvent): { kind: string; message: string; detail?: TaskProgressDetail } | null {
+  if (event.type === "turn.started") {
+    return {
+      kind: "turn",
+      message: `开始第 ${event.turn} 轮执行`,
+      detail: { executorId: "native", eventType: "turn.started", status: "running" }
+    };
+  }
+  if (event.type === "tool.started") {
+    return {
+      kind: "tool",
+      message: describeToolStart(event.call.name, event.call.arguments),
+      detail: { executorId: "native", eventType: "tool.started", title: event.call.name, input: event.call.arguments }
+    };
+  }
+  if (event.type === "tool.finished") {
+    return {
+      kind: "tool",
+      message: event.result.isError ? `操作没有完成，正在调整：${event.call.name}` : `完成一步：${event.call.name}`,
+      detail: {
+        executorId: "native",
+        eventType: "tool.finished",
+        title: event.call.name,
+        output: event.result.content,
+        status: event.result.isError ? "failed" : "completed",
+        durationMs: event.durationMs
+      }
+    };
+  }
+  if (event.type === "compacted") {
+    return { kind: "context", message: "整理执行上下文，继续推进", detail: { executorId: "native", eventType: "compacted", status: "completed" } };
+  }
+  if (event.type === "budget.exceeded") {
+    return {
+      kind: "budget",
+      message: `达到本轮执行预算（${budgetDimensionLabel(event.budget)}）`,
+      detail: { executorId: "native", eventType: "budget.exceeded", status: event.budget }
+    };
+  }
+  return null;
 }
 
 function budgetDimensionLabel(dimension: BudgetDimension): string {

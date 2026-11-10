@@ -196,6 +196,22 @@ export function hermesProgress(event: HermesStreamEvent): HermesProgress | null 
   return { type: "error", message: event.message, detail: { executorId: "hermes", eventType: "error", text: event.message } };
 }
 
+export function hermesStderrProgress(line: string): HermesProgress | null {
+  const message = line.trim();
+  if (!message) return null;
+  const quota = hermesProbeErrorCode(message) === "HTTP_429";
+  return {
+    type: "stderr",
+    message: quota ? `Hermes 报告额度或频率限制：${clip(message, 180)}` : `Hermes 输出：${clip(message, 180)}`,
+    detail: {
+      executorId: "hermes",
+      eventType: "stderr",
+      text: clip(message, 8_000),
+      status: quota ? "quota_exceeded" : "running"
+    }
+  };
+}
+
 export async function runHermes(options: HermesRunOptions): Promise<HermesRunResult> {
   const started = Date.now();
   const promptDir = mkdtempSync(join(tmpdir(), "hearth-hermes-"));
@@ -219,6 +235,7 @@ export async function runHermes(options: HermesRunOptions): Promise<HermesRunRes
       });
       let settled = false;
       let buffer = "";
+      let stderrBuffer = "";
       let stderr = "";
       let finalText = "";
       let sessionId: string | null = null;
@@ -269,6 +286,10 @@ export async function runHermes(options: HermesRunOptions): Promise<HermesRunRes
           terminalError = event.message;
         }
       };
+      const emitStderr = (line: string) => {
+        const progress = hermesStderrProgress(line);
+        if (progress) options.onEvent?.(progress);
+      };
 
       child.stdout?.setEncoding("utf8");
       child.stdout?.on("data", (chunk: string) => {
@@ -284,13 +305,21 @@ export async function runHermes(options: HermesRunOptions): Promise<HermesRunRes
       child.stderr?.setEncoding("utf8");
       child.stderr?.on("data", (chunk: string) => {
         stderr += chunk;
+        stderrBuffer += chunk;
         if (stderr.length > 20_000) stderr = stderr.slice(-20_000);
+        let index = stderrBuffer.indexOf("\n");
+        while (index >= 0) {
+          emitStderr(stderrBuffer.slice(0, index));
+          stderrBuffer = stderrBuffer.slice(index + 1);
+          index = stderrBuffer.indexOf("\n");
+        }
       });
       child.on("error", (error) => {
         finish(new HermesStartupError(`无法启动 Hermes：${error.message}。请在设置里检查 Hermes 命令路径。`));
       });
       child.on("close", (code) => {
         if (buffer.trim()) handleLine(buffer);
+        if (stderrBuffer.trim()) emitStderr(stderrBuffer);
         const elapsed = durationMs ?? Date.now() - started;
         if (approvalRequired) {
           finish(new HermesApprovalRequiredError("Hermes 需要人工审批才能继续。必要审批模式下不会静默放行；请配置 Hermes 授权或切换为完全权限后重试。"));
@@ -298,6 +327,17 @@ export async function runHermes(options: HermesRunOptions): Promise<HermesRunRes
         }
         if (code !== 0 || (exitCode !== null && exitCode !== 0) || terminalError) {
           const detail = terminalError || stderr.trim() || `退出码 ${code ?? exitCode ?? "未知"}`;
+          options.onEvent?.({
+            type: "error",
+            message: `Hermes 执行失败：${clip(detail, 300)}`,
+            detail: {
+              executorId: "hermes",
+              eventType: "error",
+              text: clip(detail, 8_000),
+              ...(code === null ? {} : { exitCode: code }),
+              status: hermesProbeErrorCode(detail) === "HTTP_429" ? "quota_exceeded" : "failed"
+            }
+          });
           finish(new Error(`Hermes 执行失败：${clip(detail, 4_000)}`));
           return;
         }
