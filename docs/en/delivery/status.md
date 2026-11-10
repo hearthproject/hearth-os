@@ -116,7 +116,9 @@ The backup boundary must remain visible in the UI: a recoverable database is not
 
 ## Verification evidence
 
-On 2026-11-09, `npm test` on the current branch passed all 62 test files and 398 tests; `npm run typecheck`, `npm run build`, `npm run docs:build`, and the offline `npm run test:e2e` suite (13 checks) also pass. These checks cover service, API, model-protocol, native tool-loop, budget, permission, checkpoint, and proposal-confirmation code loops but do not replace real-user, real-device, or long-running acceptance. See the [Day05 development log](/en/log/day-05) for the implementation record.
+On 2026-11-10, `npm test` on the current branch passed all 89 test files and 579 tests; `npm run typecheck`, `npm run build`, and `npm run docs:build` also pass. These checks cover service, API, model-protocol, native tool-loop, budget, permission, checkpoint, and proposal-confirmation code loops but do not replace real-user, real-device, or long-running acceptance.
+
+The 60-case corpus, white-box scenarios, evaluation console, scoring, review, comparison, and experiment evidence now live in the standalone [hearth-eval](https://github.com/hearthproject/hearth-eval) repository. The main repository retains only the controlled evaluation-task and judge bridge. This documentation update did not run a real evaluation on the user's behalf.
 
 The README and documentation home screenshots were refreshed on the same day. `npm run screenshots:readme` starts an isolated instance on a random port, seeds demo tasks, approval suggestions, and memory through a temporary `HEARTH_DATA_DIR`, and captures the Chinese light-theme UI with Playwright; it never reads or modifies real `.hearth` data.
 

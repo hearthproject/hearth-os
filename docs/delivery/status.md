@@ -97,7 +97,7 @@ Windows 助手目前采用“先聚焦服务端批准的目标应用，再截图
 | 5.8 Standing Intents、Heartbeat 与注意力预算 | 已实现代码闭环 | 支持意图 scope、触发词、冷却、每日预算、安静时段、去重和 NO_REPLY；只有实际投递的注意力事项才调用通知器；主动提醒仍回到普通任务/审批链 | 尚未用真实用户完成 5–10 个主动任务的打扰率和漏报验收 |
 | 5.9 调度器可靠性 | 已实现代码闭环 | 同一计划时刻最多一次运行；支持 catch-up 策略、DST 重复墙钟去重、失败退避/冷却和审批暂停；场景包覆盖补跑、DST 和取消后不再触发 | 尚未在真实时区和长期运行中验证全部 cron/DST 边界及进程重启组合 |
 | 5.10 连接运行时与离线投影 | 已实现代码闭环 | 实现与证据见 6.5：owner connection、generation fencing、cached/asOf/cursor、离线 outbox、远程动作 uncertain 和 scope 隔离 | 见 6.5：尚未接入真实远程节点、手机和跨节点离线对账 |
-| 5.11 个人 Agent 评估与回归体系 | 已实现代码闭环 | 当前场景包共 30 个本地可重复场景，覆盖提醒回环、审批拒绝、动作绑定、非交互高危、重复发送、未知 effect、目标完成、崩溃恢复、记忆污染/遗忘、技能生命周期、主动噪声、调度补跑/DST、离线一致性、敏感信息，以及 10 个 Personal Agent 专项场景；每个场景重复 3 次；`npm run eval:scenarios` 一条命令运行，输出 `report.json`、`summary.md` 和逐次 `evidence.json`；P0 机制均有故障注入；失败非零退出 | 尚未接入真实模型 provider、真实账户、真实设备和数周运行数据；场景通过不能替代人工验收，也不能用模型 judge 替代事实验证 |
+| 5.11 个人 Agent 评估与回归体系 | 已迁出主仓库 | 30 个本地可重复场景、60 个评测 case、全周期评测控制台、评分复核与实验对比已迁移到独立仓库 [hearth-eval](https://github.com/hearthproject/hearth-eval)；场景覆盖提醒回环、审批拒绝、动作绑定、非交互高危、未知 effect、目标完成、崩溃恢复、记忆污染/遗忘、技能生命周期、主动噪声、调度补跑/DST、离线一致性、敏感信息，以及 10 个 Personal Agent 专项场景；主仓库只保留评测任务与裁判桥接 | 真实模型 provider、真实账户、真实设备和数周运行数据仍需在独立仓库中实际执行；场景通过不能替代人工验收，也不能用模型 judge 替代事实验证 |
 | 5.12 持久委派、交接、沙箱与渠道边界 | 已实现代码闭环 | 单层委派 Job 支持幂等 key、lease、heartbeat、取消传播、父任务验收和 orphan recovery；子任务权限必须为父任务子集，父任务未声明权限时默认空工具；取消后效果守卫拒绝新副作用。Handoff 包持久目标、验收、权限、预算、证据和下一步，宿主校验通过后发布真实 `HANDOFF.md` 产物并记录 `artifactRef`；generation fence 拒绝旧代次工具写入，同时保留失败运行自己的诊断/决策证据。Sandbox 对路径逃逸、网络越界、进程/工具越权和凭据过期返回明确 failure class。飞书入站接入持久 ChannelIngressService，支持 externalId 幂等、ack/fail、可重试失败重投和上游时间游标；重连后的旧消息不会覆盖新状态。5 个边界场景各重复 3 次全部通过 | 当前只支持单层委派；Docker、SSH、VM、remote-worker 后端尚未实现；没有真实多执行器并发压力、真实飞书租户重连/限频、真实跨 Provider 长任务交接和凭据轮换验收 |
 | 5.13 个人本体、上下文连续性与注意力治理 | 已实现代码闭环 | SQLite schema v28 增加实体、别名、关系、状态、决定、承诺、提及、Context Pack、记忆-实体链接、任务边、预备动作、后台工具、线程订阅、看门狗和 Intake 决策。聊天、任务、审批和来源写回个人状态；实体与状态支持四档置信度、冲突注意力、用户纠正和按证据遗忘。Context Broker 提供四 lane、稳定 ref、预算、敏感度、taint、trust、有效期、`expand_ref` 和委派父包继承；Mention Resolver 对歧义指代提问并阻断不可逆动作。Attention Governor 统一候选、预算、解释与反馈，Inbox 以注意力事项为主模型。原生执行器新增 `get_entity`、`get_entity_state`、`get_relations`、`get_decision`、`list_commitments` 五个只读工具。Task DAG 支持深度、子任务和并行上限，`all`/`any`/`n_of_m` 汇聚与取消传播。预备动作、后台工具、线程订阅、Watchdog 与 Intake 均有 API 和 `/runtime` 控制面，`/personal` 提供实体、承诺、决定、纠正和遗忘操作 | 场景与本地隔离数据证明机制，不证明真实用户长期价值；实体解析只在单场景 ground truth 上验证；`human_minutes_saved` 是显式建模值；生产阈值仍需 2 周 dogfooding 基线校准 |
 
@@ -144,23 +144,9 @@ Windows 助手目前采用“先聚焦服务端批准的目标应用，再截图
 
 ## 验证证据
 
-2026-11-10 在当前分支运行 `npm test`，97 个测试文件、604 个测试全部通过；`npm run typecheck`、`npm run build` 和 `npm run docs:build` 通过。测试覆盖服务层、API、模型协议、原生工具循环、预算、权限、检查点、提案确认、记忆/技能治理、主动提醒、调度、连接运行时、持久委派、交接产物、沙箱分类、渠道幂等、个人本体、Context Broker、任务图和只读本体工具，但不替代真实用户、真实设备和长期运行验收。
+2026-11-10 在当前分支运行 `npm test`，89 个测试文件、579 个测试全部通过；`npm run typecheck`、`npm run build` 和 `npm run docs:build` 通过。测试覆盖服务层、API、模型协议、原生工具循环、预算、权限、检查点、提案确认、记忆/技能治理、主动提醒、调度、连接运行时、持久委派、交接产物、沙箱分类、渠道幂等、个人本体、Context Broker、任务图和只读本体工具，但不替代真实用户、真实设备和长期运行验收。
 
-同日运行 `npm run eval:scenarios`，30 个场景各重复 3 次，共 90 次运行全部通过；报告位于 `eval/scenario-runs/2026-11-10T08-34-53-669Z/`。10 个 P0 机制全部有场景覆盖，`safety_regression` 在 90 次采样中恒为 0。Personal Agent 指标汇总如下：
-
-| 指标 | 单位 | 样本 | 中位数 | P95 | 说明 |
-|---|---|---:|---:|---:|---|
-| `entity_resolution_accuracy` | ratio | 3 | 1 | 1 | 单场景 ground truth，不等于生产总体准确率 |
-| `cross_session_recall_accuracy` | ratio | 6 | 1 | 1 | 跨会话继续场景 |
-| `stale_state_error_rate` | ratio | 3 | 0 | 0 | 旧状态未注入 |
-| `context_reconstruction_turns` | turns | 9 | 0 | 1 | 受控场景内的追问轮次 |
-| `repeated_input_chars` | chars | 9 | 0 | 0 | 受控场景内的重复输入 |
-| `attention_precision` | ratio | 6 | 1 | 1 | 2/30 可行动事项的 ground truth |
-| `interruption_rate` | per_hour | 3 | 2 | 2 | 受控 1 小时窗口 |
-| `time_to_decision` | minutes | 3 | 2 | 2 | 受控时钟 |
-| `human_minutes_saved` | minutes | 6 | 6.75 | 13 | 显式建模值，不是用户实测 |
-
-每次运行的断言、中位数、离散度和证据写入 `eval/scenario-runs/<timestamp>/report.json`、`summary.md` 和逐场景 `evidence.json`。生成目录不纳入版本控制。本轮回归使用假用户、假偏好、假秘密和临时数据目录，不触碰真实账户，也不把模型 judge 当作事实验证。
+个人 Agent 的场景回归、评测 case、实验结果和指标证据已迁移到独立仓库 [hearth-eval](https://github.com/hearthproject/hearth-eval)。该仓库负责 30 个白盒场景、60 个 case、评测控制台、评分复核和真实实验；主仓库不再保留 `eval/scenarios`、`eval/scenario-runs` 或评测数据库。本轮文档更新没有代替用户运行真实评测实验。
 
 同日刷新 README 与文档站首页截图：`npm run screenshots:readme` 在随机端口启动隔离实例，使用临时 `HEARTH_DATA_DIR` 写入演示任务、审批建议和记忆，再通过 Playwright 生成中文浅色界面截图；脚本不读取或修改真实 `.hearth` 数据。
 

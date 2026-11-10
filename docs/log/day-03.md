@@ -5,7 +5,7 @@ outline: false
 
 2026-11-05 完成 Hearth 从规格到阶段一 MVP 的工程落地：先补齐技术选型、将交付路线重写为六阶段 24 个小阶段，并重写设计与附录；随后建立 15 个跨行业真实任务和 G1–G9 验收基线，落成本机控制面、原生 Codex 执行器、SQLite 事件日志、串行调度、产物发布、一次性审批与效果账本、隔离 GitHub 工作区、Web 快照、全局停止/恢复和备份导出。当天 46 次提交涉及 358 个文件（+58,200/−28,879）。
 
-15 项任务全部执行：T01–T06、T09–T15 共 13 项通过，达到至少 10/15 的硬门槛；T07 因存在未提交测试文件而未通过，未推送分支或创建 PR；T08 已产出评审并固定 PR head，但外部评论仍等待用户批准。`npm test` 的 51 项测试、TypeScript 类型检查和 Web 生产构建均通过。逐项证据见[第一阶段验收报告](https://github.com/hearthproject/hearth-os/blob/main/eval/phase-1-acceptance.md)。
+15 项任务全部执行：T01–T06、T09–T15 共 13 项通过，达到至少 10/15 的硬门槛；T07 因存在未提交测试文件而未通过，未推送分支或创建 PR；T08 已产出评审并固定 PR head，但外部评论仍等待用户批准。`npm test` 的 51 项测试、TypeScript 类型检查和 Web 生产构建均通过。评测材料现已迁至独立仓库，逐项证据见[第一阶段验收报告](https://github.com/hearthproject/hearth-eval/blob/main/eval/phase-1-acceptance.md)。
 
 ## 验收结果
 
