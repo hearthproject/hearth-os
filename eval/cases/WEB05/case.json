@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "WEB05",
+  "version": 1,
+  "title": "多页文档合并",
+  "family": "web",
+  "difficulty": "normal",
+  "runModes": ["offline"],
+  "description": "按导航顺序合并多页文档并保留来源。",
+  "goal": "生成单一 Markdown，保留目录、章节顺序和每页来源链接。",
+  "tags": ["merge", "documentation"],
+  "timeoutMs": 300000,
+  "inputs": [{"kind": "file", "label": "多页文档", "path": "input.json"}],
+  "expectedOutputs": ["merged.md"],
+  "graders": [
+    {"id": "file", "title": "合并文档存在", "config": {"kind": "file", "path": "merged.md", "minBytes": 60}},
+    {"id": "facts", "title": "章节顺序和来源齐全", "config": {"kind": "text", "path": "merged.md", "includes": ["目录", "安装", "配置", "来源"]}}
+  ],
+  "criteria": [
+    {"id": "exists", "label": "输出合并文档", "source": "deterministic", "points": 30, "severity": "blocker", "graderId": "file"},
+    {"id": "facts", "label": "目录、顺序和来源完整", "source": "deterministic", "points": 30, "severity": "scored", "graderId": "facts"},
+    {"id": "quality", "label": "页面衔接自然且无重复", "source": "judge", "points": 30, "severity": "scored", "rubric": "导航顺序正确，重复标题和页脚被清理，每页来源可追溯。"},
+    {"id": "human", "label": "文档复核", "source": "human", "points": 10, "severity": "scored"}
+  ],
+  "humanReview": {"prompt": "核对章节顺序和来源。", "sampleRate": 0.1}
+}

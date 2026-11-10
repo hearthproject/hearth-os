@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "CAL01",
+  "version": 1,
+  "title": "跨时区会议排期",
+  "family": "calendar",
+  "difficulty": "normal",
+  "runModes": ["offline"],
+  "description": "为上海、伦敦和纽约参会人选择可用会议时段。",
+  "goal": "生成排期结果，明确 UTC 时间、各时区本地时间和冲突。",
+  "tags": ["timezone", "scheduling"],
+  "timeoutMs": 300000,
+  "inputs": [{"kind": "file", "label": "参会人与空闲信息", "path": "input.json"}],
+  "expectedOutputs": ["schedule.json"],
+  "graders": [
+    {"id": "file", "title": "排期文件存在", "config": {"kind": "file", "path": "schedule.json", "minBytes": 40}},
+    {"id": "facts", "title": "UTC 时间与参会人数正确", "config": {"kind": "json", "path": "schedule.json", "equals": {"selectedUtc":"2026-11-16T15:00:00Z","attendeeCount":3,"conflicts":false}}}
+  ],
+  "criteria": [
+    {"id": "exists", "label": "输出排期", "source": "deterministic", "points": 30, "severity": "blocker", "graderId": "file"},
+    {"id": "facts", "label": "时区和冲突正确", "source": "deterministic", "points": 30, "severity": "scored", "graderId": "facts"},
+    {"id": "quality", "label": "排期理由清晰", "source": "judge", "points": 30, "severity": "scored", "rubric": "所有参会人本地时间均在合理工作时段，时区换算准确。"},
+    {"id": "human", "label": "人工复核", "source": "human", "points": 10, "severity": "scored"}
+  ],
+  "humanReview": {"prompt": "核对时区与本地时间。", "sampleRate": 0.1}
+}

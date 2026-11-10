@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "DOC03",
+  "version": 1,
+  "title": "表格资料转结构化交付包",
+  "family": "documents",
+  "difficulty": "normal",
+  "runModes": ["offline"],
+  "description": "把规格表转成结构化清单、异常说明和可发送摘要。",
+  "goal": "生成标准化 JSON、异常清单和用途摘要，保持数据可追溯。",
+  "tags": ["table", "package"],
+  "timeoutMs": 300000,
+  "inputs": [{"kind": "file", "label": "规格表", "path": "input.json"}],
+  "expectedOutputs": ["delivery.json", "summary.md"],
+  "graders": [
+    {"id": "files", "title": "交付文件齐全", "config": {"kind": "artifact_count", "min": 2}},
+    {"id": "facts", "title": "结构化条目和异常正确", "config": {"kind": "json", "path": "delivery.json", "equals": {"itemCount":3,"exceptionCount":1}, "minArrayLength": {"items": 3}}}
+  ],
+  "criteria": [
+    {"id": "exists", "label": "输出交付包", "source": "deterministic", "points": 30, "severity": "blocker", "graderId": "files"},
+    {"id": "facts", "label": "条目和异常完整", "source": "deterministic", "points": 30, "severity": "scored", "graderId": "facts"},
+    {"id": "quality", "label": "交付包可复用且可追溯", "source": "judge", "points": 30, "severity": "scored", "rubric": "字段命名一致，异常有原行依据，摘要与结构化数据一致。"},
+    {"id": "human", "label": "业务复核", "source": "human", "points": 10, "severity": "scored"}
+  ],
+  "humanReview": {"prompt": "核对结构化字段和异常。", "sampleRate": 0.1}
+}

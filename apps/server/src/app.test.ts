@@ -532,6 +532,57 @@ describe("Hearth server", () => {
     await app.close();
   });
 
+  it("creates idempotent delegations and cancels the child task", async () => {
+    const root = mkdtempSync(join(tmpdir(), "hearth-app-delegation-"));
+    try {
+      const app = await buildServer({ store, serveWeb: false });
+      const created = await app.inject({
+        method: "POST",
+        url: "/api/tasks",
+        payload: {
+          title: "委派父任务",
+          goal: "验证委派 API",
+          permissions: {
+            readRoots: [root],
+            writeRoots: [],
+            networkHosts: [],
+            tools: ["read_file", "finish_task"]
+          }
+        }
+      });
+      expect(created.statusCode).toBe(201);
+      const parentId = created.json().id as string;
+      const payload = {
+        goalSlice: "只读检索",
+        targetExecutor: "native",
+        contextPackRef: "context:task",
+        workspacePolicy: "read-only",
+        idempotencyKey: "app-delegation-1"
+      };
+
+      const first = await app.inject({ method: "POST", url: `/api/tasks/${parentId}/delegations`, payload });
+      expect(first.statusCode).toBe(201);
+      expect(first.json()).toMatchObject({ status: "queued", parentTaskId: parentId });
+      const childTaskId = first.json().childTaskId as string;
+
+      const duplicate = await app.inject({ method: "POST", url: `/api/tasks/${parentId}/delegations`, payload });
+      expect(duplicate.statusCode).toBe(201);
+      expect(duplicate.json().id).toBe(first.json().id);
+
+      const listed = await app.inject({ method: "GET", url: `/api/tasks/${parentId}/delegations` });
+      expect(listed.statusCode).toBe(200);
+      expect(listed.json().delegations).toHaveLength(1);
+
+      const cancelled = await app.inject({ method: "POST", url: `/api/delegations/${first.json().id}/cancel`, payload: { reason: "测试取消" } });
+      expect(cancelled.statusCode).toBe(200);
+      expect(cancelled.json()).toMatchObject({ status: "cancelled", cancelReason: "测试取消" });
+      expect(store.getTask(childTaskId)?.status).toBe("cancelled");
+      await app.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("rejects unknown templates and cross-site writes", async () => {
     const app = await buildServer({ store, serveWeb: false });
     const unknown = await app.inject({
@@ -643,6 +694,54 @@ describe("Hearth server", () => {
     const artifacts = await app.inject({ method: "GET", url: "/api/artifacts" });
     expect(JSON.stringify(artifacts.json())).not.toContain("D:/secret/path");
     expect(artifacts.json().artifacts[0].sha256).toBe(HASH);
+    await app.close();
+  });
+
+  it("exposes uncertain effects for explicit reconciliation and human follow-up", async () => {
+    const createdAt = "2026-11-05T02:02:00.000Z";
+    const effect: EffectRecord = {
+      id: "effect-reconcile-1",
+      taskId: "task-reconcile-1",
+      approvalId: "approval-reconcile-1",
+      kind: "email.smtp-send",
+      idempotencyKey: "approval:approval-reconcile-1",
+      status: "uncertain",
+      target: { to: ["reviewer@example.test"] },
+      receipt: null,
+      error: "发送响应中断",
+      createdAt,
+      updatedAt: createdAt,
+      provider: "email"
+    };
+    store.appendEvent({ type: "effect.created", taskId: effect.taskId, payload: effect });
+    const app = await buildServer({ store, serveWeb: false });
+
+    const opened = await app.inject({ method: "GET", url: "/api/reconcile?status=open" });
+    expect(opened.statusCode).toBe(200);
+    expect(opened.json()).toMatchObject({ total: 1, items: [{ effectId: effect.id, status: "open" }] });
+    const itemId = opened.json().items[0].id as string;
+
+    const checked = await app.inject({ method: "POST", url: `/api/reconcile/${itemId}/check` });
+    expect(checked.statusCode).toBe(200);
+    expect(checked.json()).toMatchObject({ status: "needs_human", checkCount: 0 });
+
+    const resolved = await app.inject({
+      method: "POST",
+      url: `/api/reconcile/${itemId}/resolve`,
+      payload: { resolution: "absent", note: "登录发件箱确认没有发送记录" }
+    });
+    expect(resolved.statusCode).toBe(200);
+    expect(resolved.json()).toMatchObject({ status: "resolved_absent", resolutionNote: "登录发件箱确认没有发送记录" });
+    expect(store.getEffect(effect.id)?.status).toBe("reconciled_absent");
+
+    const task = await app.inject({
+      method: "POST",
+      url: `/api/reconcile/${itemId}/task`,
+      payload: { note: "请人工核对邮件服务商日志" }
+    });
+    expect(task.statusCode).toBe(201);
+    expect(task.json()).toMatchObject({ title: expect.stringContaining("核对") });
+    expect(store.getReconcileItem(itemId)?.attempted).toContain(`task:${task.json().id}`);
     await app.close();
   });
 

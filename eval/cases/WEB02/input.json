@@ -1,0 +1,1 @@
+{"pages":[{"url":"https://example.com/a","html":"<title>页面 A</title><link rel=canonical href='https://example.com/a'><time>2026-10-01</time><main>正文 A</main>"},{"url":"https://example.com/b","html":"<title>页面 B</title><main>正文 B</main>"}]}

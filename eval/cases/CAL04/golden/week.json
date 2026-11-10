@@ -1,0 +1,1 @@
+{"timezone":"Asia/Shanghai","eventCount":3,"events":[{"title":"周会","start":"2026-11-16T10:00:00+08:00","durationMinutes":60},{"title":"客户对齐","start":"2026-11-18T14:00:00+08:00","needsConfirmation":true},{"title":"整理文档","time":"16:00","recurrence":"daily","needsConfirmation":true}],"unknowns":["周三下午具体时间"]}

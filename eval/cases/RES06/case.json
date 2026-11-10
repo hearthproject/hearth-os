@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "RES06",
+  "version": 1,
+  "title": "研究缺口与后续检索计划",
+  "family": "research",
+  "difficulty": "edge",
+  "runModes": ["offline"],
+  "description": "从现有资料中识别未回答问题并制定检索计划。",
+  "goal": "区分已知、未知和冲突，给出优先级明确的后续检索步骤。",
+  "tags": ["research-gap", "planning"],
+  "timeoutMs": 600000,
+  "inputs": [{"kind": "file", "label": "现有研究摘要", "path": "input.json"}],
+  "expectedOutputs": ["gaps.json"],
+  "graders": [
+    {"id": "file", "title": "研究计划存在", "config": {"kind": "file", "path": "gaps.json", "minBytes": 60}},
+    {"id": "facts", "title": "缺口和优先级完整", "config": {"kind": "json", "path": "gaps.json", "equals": {"knownCount":2,"unknownCount":2}, "minArrayLength": {"nextQueries": 3}}}
+  ],
+  "criteria": [
+    {"id": "exists", "label": "输出研究计划", "source": "deterministic", "points": 30, "severity": "blocker", "graderId": "file"},
+    {"id": "facts", "label": "已知、未知和检索项完整", "source": "deterministic", "points": 30, "severity": "scored", "graderId": "facts"},
+    {"id": "quality", "label": "问题分解与优先级合理", "source": "judge", "points": 30, "severity": "scored", "rubric": "不把假设写成事实，检索步骤能直接执行并说明为什么优先。"},
+    {"id": "human", "label": "研究复核", "source": "human", "points": 10, "severity": "scored"}
+  ],
+  "humanReview": {"prompt": "核对缺口、优先级和检索计划。", "sampleRate": 0.1}
+}

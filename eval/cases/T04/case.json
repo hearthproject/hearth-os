@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "T04",
+  "version": 1,
+  "title": "指定网页归档为 Markdown",
+  "family": "web",
+  "difficulty": "normal",
+  "runModes": ["offline", "live-optional"],
+  "description": "抓取三篇公开网页并保留来源清单。",
+  "goal": "把指定网页正文归档为 Markdown，保留标题、表格、代码块、链接和抓取证据。",
+  "tags": ["legacy", "web", "archive"],
+  "timeoutMs": 900000,
+  "inputs": [{"kind": "file", "label": "网页离线快照", "path": "web-snapshot.md"}],
+  "liveInputs": [
+    {"kind": "url", "label": "MDN HTTP 指南", "value": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview"},
+    {"kind": "url", "label": "GitHub Issues 文档", "value": "https://docs.github.com/en/issues/tracking-your-work-with-issues/learning-about-issues/about-issues"},
+    {"kind": "url", "label": "WCAG 2.2 快速参考", "value": "https://www.w3.org/WAI/WCAG22/quickref/"}
+  ],
+  "networkHosts": ["developer.mozilla.org", "docs.github.com", "www.w3.org"],
+  "expectedOutputs": ["pages/", "manifest.json"],
+  "graders": [
+    {"id": "manifest-file", "title": "来源清单存在", "config": {"kind": "file", "path": "manifest.json", "minBytes": 50}},
+    {"id": "manifest-items", "title": "三个来源都有记录", "config": {"kind": "json", "path": "manifest.json", "requiredPaths": ["items.0.url", "items.0.status", "items.2.sha256"], "minArrayLength": {"items": 3}}}
+  ],
+  "criteria": [
+    {"id": "manifest-exist", "label": "输出 manifest", "source": "deterministic", "points": 30, "severity": "blocker", "graderId": "manifest-file"},
+    {"id": "manifest-items", "label": "三个 URL 的状态、路径和哈希齐全", "source": "deterministic", "points": 30, "severity": "scored", "graderId": "manifest-items"},
+    {"id": "archive-quality", "label": "页面正文与来源可核对", "source": "judge", "points": 30, "severity": "scored", "rubric": "页面 Markdown 可阅读并保留标题、表格、代码块和链接；访问失败明确记录。"},
+    {"id": "archive-human", "label": "人工验收", "source": "human", "points": 10, "severity": "scored"}
+  ],
+  "humanReview": {"prompt": "抽查页面正文、manifest 和失败记录。", "sampleRate": 0.1}
+}

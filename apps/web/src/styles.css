@@ -3231,6 +3231,89 @@ body.modal-open {
   padding: 10px 12px;
 }
 
+.reconcile-panel {
+  margin-bottom: var(--gap-3);
+  border-color: color-mix(in srgb, var(--risk) 38%, var(--line));
+}
+
+.reconcile-list {
+  display: grid;
+  gap: 10px;
+  padding: 0 12px 12px;
+}
+
+.reconcile-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+}
+
+.reconcile-card.risk-high,
+.reconcile-card.risk-critical {
+  border-color: color-mix(in srgb, var(--risk) 55%, var(--line));
+}
+
+.reconcile-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--gap-3);
+}
+
+.reconcile-head h3 {
+  margin: 0 0 4px;
+}
+
+.reconcile-head p {
+  margin: 0;
+  color: var(--ink-secondary);
+  font-size: var(--fs-13);
+}
+
+.reconcile-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.reconcile-facts > div {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.reconcile-facts dt {
+  color: var(--ink-muted);
+  font-size: var(--fs-11);
+}
+
+.reconcile-facts dd {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-12);
+}
+
+.reconcile-attempts {
+  color: var(--ink-secondary);
+  font-size: var(--fs-12);
+}
+
+.reconcile-attempts p {
+  margin: 5px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.reconcile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
 .form-error {
   color: var(--risk);
   font-size: var(--fs-12);
@@ -3238,7 +3321,8 @@ body.modal-open {
 
 @media (max-width: 900px) {
   .proactive-budget-grid,
-  .suggestion-facts {
+  .suggestion-facts,
+  .reconcile-facts {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -4882,6 +4966,129 @@ body.modal-open {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+.goal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px 16px;
+}
+
+.goal-verdict {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--surface-sunk);
+  color: var(--ink-secondary);
+  font-size: var(--fs-11);
+}
+
+.goal-verdict.pass { background: rgba(45, 120, 70, 0.1); color: #245f38; }
+.goal-verdict.fail { background: rgba(138, 52, 23, 0.1); color: var(--risk); }
+.goal-verdict.blocked,
+.goal-verdict.needs_human { background: rgba(154, 103, 0, 0.1); color: #805500; }
+
+.goal-summary p {
+  margin: 0;
+  color: var(--ink-secondary);
+  font-size: var(--fs-12);
+  line-height: 1.55;
+}
+
+.goal-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 7px;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+}
+
+.goal-next,
+.goal-missing {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-sunk);
+  color: var(--ink-secondary);
+  font-size: var(--fs-11);
+}
+
+.goal-next strong,
+.goal-missing strong {
+  color: var(--ink-primary);
+}
+
+.goal-criteria {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.goal-criterion {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised, var(--surface));
+}
+
+.goal-criterion-state {
+  align-self: start;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--surface-sunk);
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+  text-align: center;
+}
+
+.goal-criterion.passed .goal-criterion-state { background: rgba(45, 120, 70, 0.1); color: #245f38; }
+.goal-criterion.failed .goal-criterion-state { background: rgba(138, 52, 23, 0.1); color: var(--risk); }
+
+.goal-criterion strong {
+  display: block;
+  font-size: var(--fs-12);
+}
+
+.goal-criterion small,
+.goal-criterion p {
+  display: block;
+  margin: 3px 0 0;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+  line-height: 1.5;
+}
+
+.goal-evidence {
+  margin-top: 5px;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+}
+
+.goal-evidence summary {
+  cursor: pointer;
+}
+
+.goal-evidence ul,
+.goal-missing ul {
+  margin: 5px 0 0;
+  padding-left: 17px;
+  overflow-wrap: anywhere;
+}
+
+.goal-report-summary {
+  margin: 0;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
 }
 
 .result-banner {
@@ -8492,5 +8699,218 @@ body.modal-open {
 
   .follow-up-submit-row .primary-button {
     width: 100%;
+  }
+}
+
+/* ── personal agent control surfaces ───────────────────────────────── */
+.personal-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  flex-wrap: wrap;
+  padding: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.personal-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 260px;
+  padding: 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink-tertiary);
+}
+
+.personal-search input {
+  width: 100%;
+  height: 28px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  outline: none;
+}
+
+.personal-toolbar select,
+.panel-head select {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--fs-12);
+}
+
+.personal-entity-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+  gap: var(--gap-2);
+  padding: 10px;
+}
+
+.entity-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-2);
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface-sunk);
+}
+
+.entity-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--gap-2);
+}
+
+.entity-card-head h3 {
+  margin: 5px 0 2px;
+  font-size: var(--fs-14);
+  word-break: break-word;
+}
+
+.entity-aliases,
+.entity-evidence {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.entity-aliases {
+  color: var(--ink-tertiary);
+}
+
+.entity-states {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.entity-state {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 9px;
+  border-left: 2px solid var(--line-strong);
+  background: var(--surface);
+}
+
+.entity-state-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.entity-state strong {
+  color: var(--ink);
+  font-size: var(--fs-13);
+  word-break: break-word;
+}
+
+.runtime-settings-grid,
+.runtime-intake-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--gap-2);
+  padding: 10px;
+}
+
+.runtime-settings-grid {
+  border-bottom: 1px solid var(--line);
+}
+
+.runtime-settings-grid label,
+.runtime-intake-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--ink-secondary);
+  font-size: var(--fs-12);
+}
+
+.runtime-settings-grid label.checkbox-field {
+  flex-direction: row;
+  align-items: center;
+  align-self: end;
+  min-height: 28px;
+}
+
+.runtime-settings-grid input[type="number"],
+.runtime-intake-form input,
+.runtime-intake-form textarea {
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--fs-12);
+}
+
+.runtime-intake-form textarea {
+  resize: vertical;
+}
+
+.runtime-intake-form .span-2 {
+  grid-column: span 2;
+}
+
+.runtime-form-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  flex-wrap: wrap;
+}
+
+.runtime-preview,
+.runtime-output {
+  max-width: 360px;
+  max-height: 120px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--ink-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}
+
+.runtime-output {
+  max-width: 520px;
+  max-height: 160px;
+}
+
+.runtime-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 720px) {
+  .personal-entity-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .runtime-intake-form .span-2 {
+    grid-column: span 1;
+  }
+
+  .runtime-preview,
+  .runtime-output {
+    max-width: 240px;
   }
 }

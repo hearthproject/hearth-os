@@ -20,6 +20,9 @@ work/screenshots/
 *.sqlite-shm
 *.sqlite-wal
 
+# Generated personal-agent scenario evidence
+eval/scenario-runs/
+
 # OS files
 .DS_Store
 Thumbs.db

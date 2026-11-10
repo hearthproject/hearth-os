@@ -192,6 +192,8 @@ Codex 执行器优先使用统一模型绑定；没有绑定时读取现有的 `
 | `.hearth/artifacts/` | 受管产物 |
 | `.hearth/outbox/` | 本地发件箱与回执 |
 | `.hearth/backups/` | 加密备份归档与旧设置迁移备份 |
+| `.hearth/eval/eval.sqlite` | 评测 case 版本、实验、运行、评分、人工复核与事件 |
+| `.hearth/eval-artifacts/` | 评测运行产物，按实验、case、执行器和重复次数隔离 |
 | `eval/runs/` | 第一阶段验收运行与产物 |
 
 服务端提供 AES-256-GCM 加密备份创建与恢复，恢复前校验 schema 与 `integrity_check`。聊天优先界面暂未接回备份入口，具体边界见[存储与上下文架构](https://hearthproject.github.io/hearth-os/design/storage.html)。备份包含数据库与必要元数据，但**不包含产物正文、工作区、来源正文和外部附件**；完整归档需要一并复制 `.hearth/artifacts/`、`.hearth/workspaces/` 和 `eval/runs/`。
@@ -202,6 +204,8 @@ Codex 执行器优先使用统一模型绑定；没有绑定时读取现有的 `
 apps/
   server/              Fastify API、调度器、审批、来源、桌面、记忆、邮件、同步、备份与运维
   web/                 React + Vite 聊天优先控制面
+  eval-server/         独立评测编排、评分、复核、对比 API 与 SPA 托管
+  eval-web/            React + Vite 评测控制台
 packages/
   core/                状态机、领域类型与 DTO
   eventlog/            只追加 SQLite 事件日志与投影
@@ -209,7 +213,7 @@ packages/
   codex-executor/      Codex SDK 适配器与 Provider 探测
   deepseek-executor/   DeepSeek Harness SDK/JSON-RPC 适配器
   templates/           任务模板与验收约束
-eval/                  15 个真实任务、输入、验收标准与运行证据
+eval/                  60 个评测 case、输入、验收标准、golden 与历史运行证据
 docs/                  中英双语 VitePress 文档站
 tools/windows-helper/  Windows 桌面观察与输入助手
 scripts/               文档、交付数据与 README 截图辅助脚本
@@ -224,6 +228,7 @@ scripts/               文档、交付数据与 README 截图辅助脚本
 - [交付与进度](https://hearthproject.github.io/hearth-os/delivery/) — 已验收能力、明确留空项与剩余路线。
 - [阶段二至六状态](https://hearthproject.github.io/hearth-os/delivery/status.html) — 当前能力矩阵、验证证据与未完成验收。
 - [开发日志](https://hearthproject.github.io/hearth-os/log/day-05.html) — 最近的入口、飞书与邮件闭环记录。
+- [评测 Agent](https://hearthproject.github.io/hearth-os/reference/evaluation-agent.html) — 60 个 case、端口、实验周期、评分、复核与安全边界。
 - [参考](https://hearthproject.github.io/hearth-os/reference/) — 工程、风险、决策、术语、清单与维护资料。
 
 ## 已知边界

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { CalendarClock, Command, Inbox, ListChecks, Mail, MessageCircle, Monitor, Settings2 } from "lucide-react";
+import { Activity, CalendarClock, Command, Inbox, ListChecks, Mail, MessageCircle, Monitor, Settings2, UserRound } from "lucide-react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { api } from "../lib/api.ts";
 import { isActive, needsAttention } from "../lib/format.ts";
@@ -14,10 +14,17 @@ export function AppShell() {
   const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 30_000 });
   const executorsQuery = useQuery({ queryKey: ["executors"], queryFn: api.executors, refetchInterval: 30_000 });
   const proactiveQuery = useQuery({ queryKey: ["proactive"], queryFn: api.proactive, refetchInterval: 15_000 });
+  const attentionQuery = useQuery({ queryKey: ["attention"], queryFn: api.attention, refetchInterval: 15_000 });
+  const reconcileQuery = useQuery({ queryKey: ["reconcile"], queryFn: () => api.reconcile(), refetchInterval: 15_000 });
   const tasks = tasksQuery.data?.tasks ?? [];
   const activeCount = tasks.filter((task) => !task.archivedAt && (isActive(task.status) || needsAttention(task.status))).length;
-  const needsYouCount = (proactiveQuery.data?.suggestions ?? [])
-    .filter((suggestion) => ["new", "snoozed", "accepted"].includes(suggestion.status)).length;
+  const reconcileCount = (reconcileQuery.data?.items ?? [])
+    .filter((item) => ["open", "checking", "needs_human", "conflicting"].includes(item.status)).length;
+  const attentionCount = (attentionQuery.data?.items ?? []).filter((item) => item.waitingOn === "user").length;
+  const needsYouCount = Math.max(
+    attentionCount,
+    (proactiveQuery.data?.suggestions ?? []).filter((suggestion) => ["new", "snoozed", "accepted"].includes(suggestion.status)).length + reconcileCount
+  );
   const chatModel = healthQuery.data?.chatModel;
   const readyExecutors = (executorsQuery.data?.executors ?? []).filter((executor) => executor.health.canRun);
   const primaryExecutor = readyExecutors.find((executor) => executor.id === "native")
@@ -62,6 +69,12 @@ export function AppShell() {
           <NavLink to="/inbox" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
             <Inbox size={18} /> <span className="nav-label">需要你</span>
             {needsYouCount > 0 && <span className="nav-badge">{needsYouCount}</span>}
+          </NavLink>
+          <NavLink to="/personal" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
+            <UserRound size={18} /> <span className="nav-label">个人</span>
+          </NavLink>
+          <NavLink to="/runtime" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
+            <Activity size={18} /> <span className="nav-label">运行</span>
           </NavLink>
           <NavLink to="/devices" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
             <Monitor size={18} /> <span className="nav-label">设备</span>

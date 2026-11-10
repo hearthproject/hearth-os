@@ -9,6 +9,7 @@ import type { HearthService } from "./service.ts";
 import type { ApprovalManager } from "./approvals.ts";
 import type { OutboxService } from "./outbox.ts";
 import { SdkFeishuTransport, verifyFeishuCredentials } from "./feishu-transport.ts";
+import { ChannelIngressService } from "./channel-adapter.ts";
 
 export type FeishuDomain = "feishu" | "lark";
 
@@ -276,12 +277,12 @@ export class FeishuService {
   private readonly service: HearthService | null;
   private readonly approvals: ApprovalManager | null;
   private readonly outbox: OutboxService | null;
+  private readonly channels: ChannelIngressService;
   private transport: FeishuTransport | null = null;
   private baseUrl = "";
   private state: FeishuStatus = { state: "disabled", lastEventAt: null, lastError: null };
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
   private unsubscribe: (() => void) | null = null;
-  private readonly seenMessages = new Set<string>();
   private readonly queues = new Map<string, Promise<void>>();
   private readonly sentMessageIds = new Set<string>();
 
@@ -294,6 +295,7 @@ export class FeishuService {
     service?: HearthService;
     approvals?: ApprovalManager;
     outbox?: OutboxService;
+    channels?: ChannelIngressService;
     now?: () => Date;
   }) {
     this.store = options.store;
@@ -305,6 +307,7 @@ export class FeishuService {
     this.approvals = options.approvals ?? null;
     this.outbox = options.outbox ?? null;
     this.now = options.now ?? (() => new Date());
+    this.channels = options.channels ?? new ChannelIngressService(options.store, this.now);
     mkdirSync(this.attachmentRoot, { recursive: true });
   }
 
@@ -418,53 +421,86 @@ export class FeishuService {
     const settings = this.settingsStore.load();
     if (!settings.enabled) return;
     if (!settings.allowedOpenIds.includes(message.senderOpenId)) return;
-    if (this.seenMessages.has(message.messageId)) return;
-    this.seenMessages.add(message.messageId);
-    if (this.seenMessages.size > 500) {
-      const oldest = this.seenMessages.values().next().value;
-      if (oldest) this.seenMessages.delete(oldest);
+
+    let received;
+    try {
+      received = this.channels.receive({
+        channel: "feishu",
+        externalId: message.messageId,
+        threadKey: message.chatId,
+        sender: message.senderOpenId,
+        text: message.text,
+        attachments: [
+          ...(message.imageKey ? [`image:${message.imageKey}`] : []),
+          ...(message.fileKey ? [`file:${message.fileKey}`] : [])
+        ],
+        receivedAt: message.createdAt,
+        generation: 1,
+        cursor: Date.parse(message.createdAt) || 0,
+        auth: { ok: true, principal: message.senderOpenId }
+      });
+    } catch (error) {
+      this.state = { ...this.state, lastError: error instanceof Error ? error.message : String(error) };
+      return;
     }
+    if (received.duplicate && !["received", "processing", "retrying"].includes(received.record.status)) return;
     this.state = { ...this.state, lastEventAt: this.now().toISOString() };
 
+    try {
+      const receipt = await this.handleMessage(message);
+      this.channels.ack(received.record.id, receipt);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      this.channels.fail(received.record.id, error, isRetryableFeishuFailure(error));
+      this.state = { ...this.state, lastError: detail };
+      await this.safeSend(message.chatId, `处理失败：${detail}`);
+    }
+  }
+
+  private async handleMessage(message: FeishuInboundMessage): Promise<Record<string, unknown>> {
     if (!["text", "image", "file"].includes(message.messageType)) {
       await this.safeSend(message.chatId, "目前支持文字、图片和文件消息。");
-      return;
+      return { outcome: "unsupported", messageType: message.messageType };
     }
     if (!message.text && !message.imageKey && !message.fileKey) {
       await this.safeSend(message.chatId, "我只收到了空消息，请再发一次。");
-      return;
+      return { outcome: "empty" };
     }
 
     const command = parseApprovalCommand(message.text);
     if (command) {
       await this.handleApprovalCommand(message, command);
-      return;
+      return { outcome: "approval_command", decision: command.decision };
     }
     if (/^(?:\/approve|\/reject|批准|拒绝)(?:\s|$)/i.test(message.text.trim())) {
       await this.safeSend(message.chatId, "用法：/approve <审批ID前8位> 或 /reject <审批ID前8位>");
-      return;
+      return { outcome: "approval_usage" };
     }
 
     await this.safeSend(message.chatId, "收到，正在处理…");
-    try {
-      const attachments = await this.prepareAttachments(message);
-      const route = this.route(message.chatId);
-      const result = await this.chatClient.send({
-        ...(route ? { conversationId: route.conversationId } : {}),
-        message: message.text,
-        attachments
-      });
-      if (result.conversationId && !route) this.saveRoute(message.chatId, result.conversationId);
-      if (result.error) await this.safeSend(message.chatId, `处理失败：${result.error}`);
-      for (const reply of result.messages) {
-        if (reply.role !== "assistant" || !reply.content.trim()) continue;
-        if (this.sentMessageIds.has(reply.id)) continue;
-        this.sentMessageIds.add(reply.id);
-        await this.safeSend(message.chatId, reply.content);
-      }
-    } catch (error) {
-      await this.safeSend(message.chatId, `处理失败：${error instanceof Error ? error.message : String(error)}`);
+    const attachments = await this.prepareAttachments(message);
+    const route = this.route(message.chatId);
+    const result = await this.chatClient.send({
+      ...(route ? { conversationId: route.conversationId } : {}),
+      message: message.text,
+      attachments
+    });
+    if (result.conversationId && !route) this.saveRoute(message.chatId, result.conversationId);
+    if (result.error) await this.safeSend(message.chatId, `处理失败：${result.error}`);
+    let replyCount = 0;
+    for (const reply of result.messages) {
+      if (reply.role !== "assistant" || !reply.content.trim()) continue;
+      if (this.sentMessageIds.has(reply.id)) continue;
+      this.sentMessageIds.add(reply.id);
+      replyCount += 1;
+      await this.safeSend(message.chatId, reply.content);
     }
+    return {
+      outcome: "chat",
+      conversationId: result.conversationId,
+      replyCount,
+      ...(result.error ? { error: result.error } : {})
+    };
   }
 
   private subscribeEvents(): void {
@@ -641,6 +677,18 @@ function parseApprovalCommand(text: string): { decision: "approve" | "reject"; p
   const reject = trimmed.match(/^(?:\/reject|拒绝)\s+([0-9a-f-]{6,36})$/i);
   if (reject) return { decision: "reject", prefix: reject[1]!.toLowerCase() };
   return null;
+}
+
+function isRetryableFeishuFailure(error: unknown): boolean {
+  if (error instanceof FeishuError) {
+    return error.statusCode === 408 || error.statusCode === 425 || error.statusCode === 429 || error.statusCode >= 500;
+  }
+  if (error instanceof Error && "code" in error) {
+    const code = String((error as NodeJS.ErrnoException).code);
+    if (["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EAI_AGAIN", "ENOTFOUND", "EPIPE"].includes(code)) return true;
+  }
+  if (error instanceof Error && ["AbortError", "TimeoutError"].includes(error.name)) return true;
+  return true;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

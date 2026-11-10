@@ -212,7 +212,7 @@ describe("HearthStore", () => {
     expect(store.countRunsByStatus()).toEqual({
       queued: 0, running: 0, waiting_input: 0, waiting_approval: 0, completed: 1, failed: 1, cancelled: 0
     });
-    expect(store.countApprovalsByStatus()).toEqual({ pending: 0, approved: 0, rejected: 0, expired: 0 });
+    expect(store.countApprovalsByStatus()).toEqual({ pending: 0, approved: 0, rejected: 0, consumed: 0, expired: 0, revoked: 0 });
     expect(store.countEffectsByStatus().uncertain).toBe(0);
     store.close();
   });

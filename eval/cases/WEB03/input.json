@@ -1,0 +1,1 @@
+{"table":{"headers":["plan","price","limit"],"rows":[["Free","0","3 users"],["Pro","99","20 users"],["Team",null,"unlimited"]]},"notes":"Team 价格合并自上一列，源表格为空。"}

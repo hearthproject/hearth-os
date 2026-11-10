@@ -1,6 +1,7 @@
 import type {
   ApprovalDecisionResult,
   ApprovalListItem,
+  AttentionItem,
   AttachmentUploadResult,
   ChatAttachment,
   CodexProbeResponse,
@@ -71,6 +72,7 @@ import type {
   ProactiveSettings,
   ProactiveSnapshot,
   ProactiveSuggestion,
+  ReconcileItem,
   RunListItem,
   RunManifest,
   ScheduleInput,
@@ -98,7 +100,19 @@ import type {
   TaskProposalRecord,
   TaskRecord,
   TaskTemplate,
-  TaskView
+  TaskView,
+  BackgroundToolJob,
+  CommitmentRecord,
+  DecisionRecord,
+  IntakeDecisionRecord,
+  IntakeRouteResult,
+  OntologyEntityView,
+  PreparedActionRecord,
+  ThreadDeliveryView,
+  ThreadSubscriptionRecord,
+  WatchdogEvent,
+  WatchdogSettingsView,
+  WatchdogSnapshot
 } from "./types.ts";
 
 export interface ChatStreamBody {
@@ -381,6 +395,83 @@ export const api = {
     method: "POST",
     body: JSON.stringify({ resolution })
   }),
+  attention: () => request<{
+    items: AttentionItem[];
+    budget: { dailyLimit: number; quietStart: string; quietEnd: string; cooldownSeconds: number };
+    governor: { shadowMode: boolean; minFeedbackSamples: number };
+  }>("/api/attention"),
+  attentionExplain: (id: string) => request<{
+    item: AttentionItem;
+    score: Record<string, number>;
+    whyYouSeeThis: string;
+    feedback: { total: number; accepted: number; ignored: number; wrong: number; bias: number };
+    aggregation: { key: string; peers: number };
+  }>("/api/attention/" + encodeURIComponent(id) + "/explain"),
+  attentionFeedback: (id: string, action: "accept" | "ignore" | "snooze" | "resolve" | "wrong") =>
+    request<{ record: unknown; stats: { total: number; accepted: number; ignored: number; wrong: number; bias: number } }>(
+      "/api/attention/" + encodeURIComponent(id) + "/feedback",
+      { method: "POST", body: JSON.stringify({ action }) }
+    ),
+  attentionAck: (id: string) => request<AttentionItem>("/api/attention/" + encodeURIComponent(id) + "/ack", { method: "POST" }),
+  attentionIgnore: (id: string) => request<AttentionItem>("/api/attention/" + encodeURIComponent(id) + "/ignore", { method: "POST" }),
+  attentionResolve: (id: string) => request<AttentionItem>("/api/attention/" + encodeURIComponent(id) + "/resolve", { method: "POST" }),
+  attentionSnooze: (id: string, minutes = 60) => request<AttentionItem>("/api/attention/" + encodeURIComponent(id) + "/snooze", {
+    method: "POST",
+    body: JSON.stringify({ minutes })
+  }),
+  updateAttentionGovernor: (input: { shadowMode?: boolean; minFeedbackSamples?: number }) =>
+    request<{ shadowMode: boolean; minFeedbackSamples: number }>("/api/attention/governor", {
+      method: "PATCH",
+      body: JSON.stringify(input)
+    }),
+  ontologyEntities: (search?: string, kind?: string) => request<{ entities: OntologyEntityView[] }>(
+    "/api/ontology/entities" + query({ query: search, kind })
+  ),
+  ontologyCommitments: (status?: string) => request<{ commitments: CommitmentRecord[] }>(
+    "/api/ontology/commitments" + query({ status })
+  ),
+  ontologyDecisions: (status?: string) => request<{ decisions: DecisionRecord[] }>(
+    "/api/ontology/decisions" + query({ status })
+  ),
+  correctEntity: (id: string, input: { key: string; value: unknown; evidenceRef?: string }) =>
+    request<Record<string, unknown>>("/api/ontology/entities/" + encodeURIComponent(id) + "/correct", {
+      method: "POST",
+      body: JSON.stringify(input)
+    }),
+  forgetOntologyEvidence: (evidenceRef: string) =>
+    request<Record<string, unknown>>("/api/ontology/forget", { method: "POST", body: JSON.stringify({ evidenceRef }) }),
+  preparedActions: (params: { taskId?: string; status?: string; limit?: number } = {}) =>
+    request<{ actions: PreparedActionRecord[] }>("/api/prepared-actions" + query(params)),
+  commitPreparedAction: (id: string, input: { approvalRef?: string } = {}) =>
+    request<PreparedActionRecord>("/api/prepared-actions/" + encodeURIComponent(id) + "/commit", {
+      method: "POST",
+      body: JSON.stringify(input)
+    }),
+  discardPreparedAction: (id: string) =>
+    request<PreparedActionRecord>("/api/prepared-actions/" + encodeURIComponent(id) + "/discard", { method: "POST" }),
+  backgroundTools: (params: { taskId?: string; status?: string; limit?: number } = {}) =>
+    request<{ jobs: BackgroundToolJob[] }>("/api/background-tools" + query(params)),
+  stopBackgroundTool: (id: string, reason?: string) =>
+    request<BackgroundToolJob>("/api/background-tools/" + encodeURIComponent(id) + "/stop", {
+      method: "POST",
+      body: JSON.stringify(reason ? { reason } : {})
+    }),
+  threadSubscriptions: (params: { threadKey?: string; taskId?: string; status?: string } = {}) =>
+    request<{ subscriptions: ThreadSubscriptionRecord[] }>("/api/thread-subscriptions" + query(params)),
+  threadDeliveries: (limit = 50) =>
+    request<{ deliveries: ThreadDeliveryView[] }>("/api/thread-subscriptions/deliveries" + query({ limit })),
+  threadSubscriptionAction: (id: string, action: "pause" | "resume" | "end") =>
+    request<ThreadSubscriptionRecord>("/api/thread-subscriptions/" + encodeURIComponent(id) + "/" + action, { method: "POST" }),
+  watchdog: () => request<WatchdogSnapshot>("/api/watchdog"),
+  scanWatchdog: () => request<{ events: WatchdogEvent[]; settings: WatchdogSettingsView }>("/api/watchdog/scan", { method: "POST" }),
+  updateWatchdogSettings: (input: Partial<WatchdogSettingsView>) =>
+    request<WatchdogSettingsView>("/api/watchdog/settings", { method: "PATCH", body: JSON.stringify(input) }),
+  intakeDecisions: (limit = 100) => request<{ decisions: IntakeDecisionRecord[] }>("/api/intake/decisions" + query({ limit })),
+  routeIntake: (input: { sourceRef: string; text: string; sender?: string; channel?: string }) =>
+    request<IntakeRouteResult>("/api/intake/route", { method: "POST", body: JSON.stringify(input) }),
+  heartbeat: (limit = 50) => request<{ runs: Array<Record<string, unknown>>; last: Record<string, unknown> | null }>(
+    "/api/heartbeat" + query({ limit })
+  ),
   proactive: () => request<ProactiveSnapshot>("/api/proactive"),
   scanProactive: () => request<{ created: number; updated: number; delivered: number; suggestions: ProactiveSuggestion[] }>("/api/proactive/scan", { method: "POST" }),
   updateProactiveSettings: (input: Partial<Omit<ProactiveSettings, "triggers" | "updatedAt">> & {
@@ -469,6 +560,20 @@ export const api = {
     request<{ approvals: ApprovalListItem[]; total: number }>(`/api/approvals${query(params)}`),
   effects: (params: { taskId?: string; status?: string; limit?: number; offset?: number } = {}) =>
     request<{ effects: EffectListItem[]; total: number }>(`/api/effects${query(params)}`),
+  reconcile: (params: { status?: string } = {}) =>
+    request<{ items: ReconcileItem[]; total: number }>(`/api/reconcile${query(params)}`),
+  checkReconcile: (id: string) =>
+    request<ReconcileItem>(`/api/reconcile/${encodeURIComponent(id)}/check`, { method: "POST" }),
+  resolveReconcile: (id: string, resolution: "committed" | "absent" | "abandoned", note: string) =>
+    request<ReconcileItem>(`/api/reconcile/${encodeURIComponent(id)}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ resolution, note })
+    }),
+  createReconcileTask: (id: string, note?: string) =>
+    request<TaskRecord>(`/api/reconcile/${encodeURIComponent(id)}/task`, {
+      method: "POST",
+      body: JSON.stringify({ ...(note ? { note } : {}) })
+    }),
   outbox: () => request<{ drafts: OutboxDraftListItem[] }>("/api/outbox"),
   outboxDraft: (id: string) => request<OutboxDraftListItem>(`/api/outbox/${encodeURIComponent(id)}`),
   createOutboxDraft: (input: OutboxDraftRequest) => request<OutboxDraft>("/api/outbox", {
@@ -578,7 +683,9 @@ export function subscribeToEvents(onEvent: (event: string, envelope?: EventEnvel
     "schedule.created", "schedule.updated", "schedule.run.created", "schedule.run.updated",
     "device.paired", "device.updated", "device.pairing-requested", "device.pairing-updated",
     "desktop.session.created", "desktop.session.updated", "desktop.frame.updated",
-    "desktop.command.created", "desktop.command.updated"
+    "desktop.command.created", "desktop.command.updated",
+    "prepared-action.updated", "tool.job.updated", "thread-subscription.updated",
+    "watchdog.recorded", "intake.recorded"
   ];
   for (const name of eventNames) source.addEventListener(name, (event) => dispatch(name, (event as MessageEvent).data));
   return () => source.close();

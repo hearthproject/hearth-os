@@ -1,0 +1,1 @@
+{"form":{"fields":[{"name":"name","required":true},{"name":"email","required":true},{"name":"company","required":true},{"name":"notes","required":false}]},"profile":{"name":"张三","email":"zhangsan@example.com","company":"示例公司","notes":""}}

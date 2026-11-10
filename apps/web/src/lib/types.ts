@@ -3,6 +3,7 @@ import type {
   ApprovalListItem,
   ApprovalRecord,
   ApprovalStatus,
+  AttentionItem,
   ArtifactListItem,
   ChatAttachment,
   ChatMessageRecord,
@@ -48,6 +49,7 @@ import type {
   MaintenanceRun,
   MemoryConflict,
   MemoryConfidence,
+  MemoryConsolidationRun,
   MemoryForgetReceipt,
   MemoryKind,
   MemoryRecall,
@@ -81,6 +83,7 @@ import type {
   ProactiveSettings,
   ProactiveSnapshot,
   ProactiveSuggestion,
+  ReconcileItem,
   RunListItem,
   RunCheckpointRecord,
   RunRecord,
@@ -115,11 +118,27 @@ import type {
   GitFileStatus,
   GitFileView,
   GitPullRequestView,
-  GitRepositoryView
+  GitRepositoryView,
+  GoalCompletionReport,
+  GoalContract,
+  AssertionConfidence,
+  BackgroundToolJob,
+  CommitmentRecord,
+  DecisionRecord,
+  EntityAliasRecord,
+  EntityKind,
+  EntityRecord,
+  EntityStateRecord,
+  IntakeDecision,
+  IntakeDecisionRecord,
+  PreparedActionRecord,
+  ThreadSubscriptionRecord,
+  WatchdogEvent
 } from "@hearth/core";
 import type { TaskTemplate } from "@hearth/templates";
 
 export type {
+  AttentionItem,
   ApprovalMode,
   ApprovalListItem,
   ApprovalRecord,
@@ -202,6 +221,7 @@ export type {
   ProactiveSettings,
   ProactiveSnapshot,
   ProactiveSuggestion,
+  ReconcileItem,
   RunListItem,
   RunCheckpointRecord,
   RunRecord,
@@ -237,6 +257,21 @@ export type {
   GitFileView,
   GitPullRequestView,
   GitRepositoryView,
+  GoalCompletionReport,
+  GoalContract,
+  AssertionConfidence,
+  BackgroundToolJob,
+  CommitmentRecord,
+  DecisionRecord,
+  EntityAliasRecord,
+  EntityKind,
+  EntityRecord,
+  EntityStateRecord,
+  IntakeDecision,
+  IntakeDecisionRecord,
+  PreparedActionRecord,
+  ThreadSubscriptionRecord,
+  WatchdogEvent,
   TaskTemplate
 };
 
@@ -267,6 +302,8 @@ export interface SettingsStorageResponse {
 
 export interface TaskView {
   task: TaskRecord;
+  goal: GoalContract | null;
+  completionReport: GoalCompletionReport | null;
   runs: RunRecord[];
   approvals: ApprovalRecord[];
   artifacts: ArtifactRecord[];
@@ -714,6 +751,7 @@ export interface MemorySnapshot {
   conflicts: MemoryConflict[];
   recalls: MemoryRecall[];
   forgets: MemoryForgetReceipt[];
+  consolidations: MemoryConsolidationRun[];
 }
 
 export interface CreateMemoryRequest {
@@ -758,4 +796,40 @@ export interface CreateMethodRequest {
   templateId?: string | null;
   allowedCapabilities?: string[];
   guardrails?: string[];
+}
+
+
+export interface OntologyEntityView extends EntityRecord {
+  states: EntityStateRecord[];
+  aliases: EntityAliasRecord[];
+}
+
+export interface WatchdogSettingsView {
+  enabled: boolean;
+  shadow: boolean;
+  stallMinutes: number;
+  maxRunMinutes: number;
+  repeatedFailureCount: number;
+  failureWindowMinutes: number;
+  dedupeMinutes: number;
+  intervalMs: number;
+  autoCancel: boolean;
+}
+
+export interface WatchdogSnapshot {
+  settings: WatchdogSettingsView;
+  events: WatchdogEvent[];
+}
+
+export interface ThreadDeliveryView {
+  subscriptionId: string;
+  seq: number;
+  type: string;
+  taskId: string | null;
+  runId: string | null;
+  recordedAt: string;
+}
+
+export interface IntakeRouteResult extends IntakeDecisionRecord {
+  signals: string[];
 }

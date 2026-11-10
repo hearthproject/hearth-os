@@ -1,7 +1,8 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { ApprovalRecord, EffectRecord, OutboxAttachment, OutboxDraft, RunRecord, TaskRecord } from "@hearth/core";
+import { resolveAction } from "./action-resolver.ts";
 import { ApprovalManager } from "./approvals.ts";
 import { WORKSPACE_DIR } from "./config.ts";
 import type { HearthService } from "./service.ts";
@@ -127,6 +128,33 @@ export class OutboxService {
     }
     this.assertComplete(draft);
     const smtpAccount = this.resolveSmtpAccount(draft);
+    const smtpAction = smtpAccount
+      ? resolveAction({
+          proposal: {
+            kind: "email",
+            summary: `将“${draft.subject}”发送给 ${draft.to.join("、")}`,
+            network: {
+              host: smtpAccount.smtp.host,
+              ...(smtpAccount.smtp.port ? { port: smtpAccount.smtp.port } : {}),
+              method: "SMTP"
+            },
+            targetRevision: `draft-sha256:${createHash("sha256").update(JSON.stringify({
+              draftId: draft.id,
+              accountId: smtpAccount.id,
+              from: smtpAccount.fromAddress,
+              to: draft.to,
+              cc: draft.cc,
+              bcc: draft.bcc,
+              subject: draft.subject,
+              body: draft.body,
+              attachments: draft.attachments
+            })).digest("hex")}`
+          },
+          permissionMode: "guarded",
+          context: "interactive",
+          sessionRoot: this.workspaceRoot
+        })
+      : null;
 
     const task = this.service.createTask({
       title: smtpAccount ? `发送邮件：${draft.subject}` : `本地发件箱：${draft.subject}`,
@@ -197,6 +225,7 @@ export class OutboxService {
               reversible: false,
               undo: "发送后无法撤回；请在批准前核对收件人和正文。"
             },
+            ...(smtpAction ? { action: smtpAction } : {}),
             ttlMs: OUTBOX_APPROVAL_TTL_MS
           })
         : await this.approvals.request({
@@ -384,7 +413,9 @@ function normalizeText(value: string | undefined, maxLength: number, label: stri
 
 function effectStatusToDraftStatus(effect: EffectRecord | null, kind: string): OutboxDraft["status"] {
   if (!effect) return "failed";
-  if (effect.status === "succeeded") return kind === "email.smtp-send" ? "sent" : "stored";
+  if (effect.status === "succeeded" || effect.status === "committed" || effect.status === "reconciled_committed") {
+    return kind === "email.smtp-send" ? "sent" : "stored";
+  }
   if (effect.status === "uncertain") return "uncertain";
   return "failed";
 }

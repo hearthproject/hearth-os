@@ -4,14 +4,16 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyReply } from "fastify";
-import type { EventEnvelope, ExecutorHealth, ExecutorId, ExecutorView } from "@hearth/core";
-import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, EXECUTOR_IDS, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_SENSITIVITIES, PROACTIVE_MODES, RUN_STATUSES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
+import type { EventEnvelope, ExecutorHealth, ExecutorId, ExecutorView, GoalBudget } from "@hearth/core";
+import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DELEGATION_WORKSPACE_POLICIES, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, EXECUTOR_IDS, GOAL_REVIEW_POLICIES, GOAL_STATES, GOAL_VALIDATORS, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_ORIGINS, MEMORY_RETENTIONS, MEMORY_SENSITIVITIES, MEMORY_TAINT_STATES, MEMORY_TIERS, MEMORY_TRUST_LEVELS, PROACTIVE_MODES, RECONCILE_STATUSES, RUN_STATUSES, SKILL_STATUSES, SKILL_USAGE_SOURCES, SKILL_USAGE_STATUSES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate } from "@hearth/templates";
 import { loadCodexProfile, runCodex } from "@hearth/codex-executor";
 import { z } from "zod";
 import { ATTACHMENT_DIR, BACKUP_DIR, CODEX_HOME_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, DSH_HOME_DIR, EXECUTOR_HOME_DIR, EXECUTOR_SETTINGS_PATH, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST, WORKSPACE_DIR } from "./config.ts";
 import { registerChatRoutes } from "./chat-routes.ts";
+import { registerEvalRoutes } from "./eval-routes.ts";
+import { ReconcileError, ReconcileService } from "./reconcile.ts";
 import { ExecutorSettingsStore } from "./executor-settings.ts";
 import { probeHermes } from "./hermes-executor.ts";
 import { clearHermesHealthCache } from "./hermes-health.ts";
@@ -23,17 +25,23 @@ import { ScheduleError, ScheduleService } from "./schedules.ts";
 import { chatModelConfigured, loadModelSettings, viewModelSettings } from "./model-settings.ts";
 import { ModelRegistry, ModelRegistryError } from "./model-registry.ts";
 import { migrateLegacySettings } from "./settings-migration.ts";
-import { ApprovalError, ApprovalManager, type EffectExecutor } from "./approvals.ts";
+import { ApprovalError, ApprovalManager, type EffectExecutor, type PendingToolApproval, type ToolApprovalDecision } from "./approvals.ts";
 import { BackupError, BackupService } from "./backups.ts";
+import { DelegationError, DelegationService, type CreateDelegationInput } from "./delegation.ts";
 import { executeEffect } from "./effects.ts";
-import { HearthScheduler } from "./scheduler.ts";
+import { HearthScheduler, resolveToolAction } from "./scheduler.ts";
 import { GitViewError, TaskGitService } from "./task-git.ts";
 import { TaskLeaseService } from "./leases.ts";
+import { SandboxError, SandboxService } from "./sandbox.ts";
 import { SecurityError, SecurityService } from "./security.ts";
 import { ContextService } from "./context.ts";
+import { ContextBroker } from "./context-broker.ts";
+import { MentionResolver } from "./mentions.ts";
+import { OntologyService } from "./ontology.ts";
+import { OntologyWriter } from "./ontology-writer.ts";
 import type { ContextIndex } from "./context-index.ts";
 import { contextMetrics } from "./context-metrics.ts";
-import { HearthService, TaskInputSelectionError, type CreateTaskInput } from "./service.ts";
+import { HearthService, TaskInputSelectionError, type CreateGoalInput, type CreateTaskInput } from "./service.ts";
 import { HealthService } from "./health.ts";
 import { MaintenanceError, MaintenanceService } from "./maintenance.ts";
 import { DiagnosticsService } from "./diagnostics.ts";
@@ -43,13 +51,59 @@ import { OnboardingService } from "./onboarding.ts";
 import { FeishuError, FeishuService, type FeishuChatClient, type FeishuTransportFactory } from "./feishu.ts";
 import { EmailService, MailError, type MailImapFactory, type MailSmtpFactory } from "./email.ts";
 import { DesktopError, DesktopService } from "./desktop.ts";
+import { ConnectionError, ConnectionService } from "./connections.ts";
 import { MemoryError, MemoryService } from "./memory.ts";
 import { MethodError, MethodService } from "./methods.ts";
+import { SkillPackageError } from "./skill-package.ts";
+import { SkillPackageService } from "./skills.ts";
+import { SkillCuratorService } from "./skill-curator.ts";
 import { ProactiveError, ProactiveService } from "./proactive.ts";
+import { AttentionGovernor } from "./attention-governor.ts";
+import { BackgroundToolError, BackgroundToolService } from "./background-tools.ts";
+import { PreparedActionService } from "./prepared-actions.ts";
+import { ThreadSubscriptionService } from "./thread-subscriptions.ts";
+import { WatchdogService } from "./watchdog.ts";
+import { IntakeRouter } from "./intake-router.ts";
+import { isBackgroundToolReadOnly, requiresToolApproval, toolApprovalSummary } from "./tool-policy.ts";
+import { createBuiltinTools } from "@hearth/agent-runtime";
+import { StandingIntentError, StandingIntentService } from "./standing-intents.ts";
 import { SyncError, SyncService } from "./sync.ts";
 import { SecretBox } from "./secrets.ts";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
+
+function awaitToolDecision(
+  pending: PendingToolApproval,
+  signal: AbortSignal,
+  approvals: ApprovalManager,
+  toolName: string
+): Promise<ToolApprovalDecision> {
+  if (signal.aborted) {
+    approvals.cancelToolApproval(pending.approval.id, "任务已取消");
+    return Promise.resolve({ allowed: false, reason: "任务已取消" });
+  }
+  return new Promise<ToolApprovalDecision>((resolve) => {
+    let settled = false;
+    const finish = (decision: ToolApprovalDecision): void => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      resolve(decision);
+    };
+    const onAbort = (): void => {
+      approvals.cancelToolApproval(pending.approval.id, "任务已取消");
+      finish({ allowed: false, reason: "任务已取消" });
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    void pending.decision.then((decision) => finish({
+      ...decision,
+      reason: decision.reason || `后台工具 ${toolName} 审批结束`
+    })).catch((error: unknown) => finish({
+      allowed: false,
+      reason: error instanceof Error ? error.message : String(error)
+    }));
+  });
+}
 
 const createTaskSchema = z.object({
   templateId: z.string().trim().min(1).max(20).optional(),
@@ -61,12 +115,75 @@ const createTaskSchema = z.object({
   taskKind: z.enum(["delivery", "workspace", "general"]).optional(),
   expectedOutputs: z.array(z.string().trim().min(1).max(200)).max(20).optional(),
   methodId: z.string().trim().min(1).max(100).optional(),
+  goalId: z.string().trim().min(1).max(100).optional(),
   permissions: z.object({
     readRoots: z.array(z.string().trim().min(1).max(1000)).max(20),
     writeRoots: z.array(z.string().trim().min(1).max(1000)).max(20),
     networkHosts: z.array(z.string().trim().min(1).max(255)).max(20),
     tools: z.array(z.string().trim().min(1).max(80)).max(40)
   }).optional()
+}).strict();
+
+const goalAuthoritySourceSchema = z.object({
+  kind: z.enum(["user", "document", "system"]),
+  ref: z.string().trim().min(1).max(1000)
+}).strict();
+
+const goalCriterionSchema = z.object({
+  id: z.string().trim().min(1).max(100),
+  description: z.string().trim().min(1).max(2000),
+  validator: z.enum(GOAL_VALIDATORS),
+  check: z.string().trim().min(1).max(4000),
+  required: z.boolean()
+}).strict();
+
+const goalBudgetSchema = z.object({
+  maxTurns: z.number().int().positive().optional(),
+  maxToolCalls: z.number().int().positive().optional(),
+  maxTokens: z.number().int().positive().optional(),
+  maxDurationMs: z.number().int().positive().optional(),
+  maxHumanMinutes: z.number().int().positive().optional()
+}).strict();
+
+function normalizeGoalBudget(input: z.infer<typeof goalBudgetSchema>): GoalBudget {
+  const budget: GoalBudget = {};
+  if (input.maxTurns !== undefined) budget.maxTurns = input.maxTurns;
+  if (input.maxToolCalls !== undefined) budget.maxToolCalls = input.maxToolCalls;
+  if (input.maxTokens !== undefined) budget.maxTokens = input.maxTokens;
+  if (input.maxDurationMs !== undefined) budget.maxDurationMs = input.maxDurationMs;
+  if (input.maxHumanMinutes !== undefined) budget.maxHumanMinutes = input.maxHumanMinutes;
+  return budget;
+}
+
+const createGoalSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+  objective: z.string().trim().min(1).max(20_000),
+  constraints: z.array(z.string().trim().min(1).max(2000)).max(100).optional(),
+  forbiddenActions: z.array(z.string().trim().min(1).max(200)).max(100).optional(),
+  authoritySources: z.array(goalAuthoritySourceSchema).max(50).optional(),
+  successCriteria: z.array(goalCriterionSchema).max(100).optional(),
+  evidenceRequirements: z.array(z.string().trim().min(1).max(1000)).max(100).optional(),
+  budget: goalBudgetSchema.optional(),
+  deadline: z.string().datetime().optional(),
+  stopConditions: z.array(z.string().trim().min(1).max(2000)).max(100).optional(),
+  reviewPolicy: z.enum(GOAL_REVIEW_POLICIES).optional(),
+  currentState: z.enum(GOAL_STATES).optional()
+}).strict();
+
+const updateGoalSchema = z.object({
+  title: z.string().trim().min(1).max(200).optional(),
+  objective: z.string().trim().min(1).max(20_000).optional(),
+  constraints: z.array(z.string().trim().min(1).max(2000)).max(100).optional(),
+  forbiddenActions: z.array(z.string().trim().min(1).max(200)).max(100).optional(),
+  authoritySources: z.array(goalAuthoritySourceSchema).max(50).optional(),
+  successCriteria: z.array(goalCriterionSchema).max(100).optional(),
+  evidenceRequirements: z.array(z.string().trim().min(1).max(1000)).max(100).optional(),
+  budget: goalBudgetSchema.optional(),
+  deadline: z.string().datetime().optional(),
+  stopConditions: z.array(z.string().trim().min(1).max(2000)).max(100).optional(),
+  reviewPolicy: z.enum(GOAL_REVIEW_POLICIES).optional(),
+  currentState: z.enum(GOAL_STATES).optional(),
+  nextHandoff: z.string().trim().max(4000).optional()
 }).strict();
 
 const retryTaskSchema = z.object({
@@ -89,6 +206,44 @@ const contextQuerySchema = z.object({
 
 const confirmHandoffSchema = z.object({
   executorId: z.enum(EXECUTOR_IDS)
+}).strict();
+
+const delegationPermissionsSchema = z.object({
+  readRoots: z.array(z.string().trim().min(1).max(1000)).max(20),
+  writeRoots: z.array(z.string().trim().min(1).max(1000)).max(20),
+  networkHosts: z.array(z.string().trim().min(1).max(255)).max(20),
+  tools: z.array(z.string().trim().min(1).max(80)).max(40)
+}).strict();
+
+const createDelegationSchema = z.object({
+  goalSlice: z.string().trim().min(1).max(4000),
+  targetExecutor: z.enum(EXECUTOR_IDS),
+  contextPackRef: z.string().trim().min(1).max(1000),
+  contextPack: z.record(z.string(), z.unknown()).optional(),
+  workspacePolicy: z.enum(DELEGATION_WORKSPACE_POLICIES).optional(),
+  toolPolicy: z.array(z.string().trim().min(1).max(80)).max(40).optional(),
+  networkPolicy: z.array(z.string().trim().min(1).max(255)).max(20).optional(),
+  budget: z.object({
+    tokens: z.number().int().positive().optional(),
+    wallClockMs: z.number().int().positive().optional(),
+    maxSteps: z.number().int().positive().optional()
+  }).strict().optional(),
+  deadline: z.string().datetime().nullable().optional(),
+  resultSchemaRef: z.string().trim().min(1).max(1000).nullable().optional(),
+  idempotencyKey: z.string().trim().min(1).max(200),
+  requestedPermissions: delegationPermissionsSchema.optional(),
+  createChildTask: z.boolean().optional()
+}).strict();
+
+const verifyDelegationSchema = z.object({
+  verdict: z.enum(["accepted", "rejected"]),
+  summary: z.string().trim().min(1).max(4000),
+  evidenceRefs: z.array(z.string().trim().min(1).max(1000)).min(1).max(50),
+  checkedAt: z.string().datetime().optional()
+}).strict();
+
+const cancelDelegationSchema = z.object({
+  reason: z.string().trim().min(1).max(1000).default("用户取消")
 }).strict();
 
 const contextSettingsPatchSchema = z.object({
@@ -153,7 +308,19 @@ const createMemorySchema = z.object({
   sensitivity: z.enum(MEMORY_SENSITIVITIES).optional(),
   allowRecall: z.boolean().optional(),
   validUntil: z.string().datetime().nullable().optional(),
-  derivedFromId: z.string().trim().max(100).nullable().optional()
+  derivedFromId: z.string().trim().max(100).nullable().optional(),
+  tier: z.enum(MEMORY_TIERS).optional(),
+  originClass: z.enum(MEMORY_ORIGINS).optional(),
+  sourceKind: z.string().trim().min(1).max(100).optional(),
+  sourceRef: z.string().trim().max(1000).optional(),
+  sessionId: z.string().trim().max(100).nullable().optional(),
+  trust: z.enum(MEMORY_TRUST_LEVELS).optional(),
+  taint: z.enum(MEMORY_TAINT_STATES).optional(),
+  importance: z.number().min(0).max(1).optional(),
+  retention: z.enum(MEMORY_RETENTIONS).optional(),
+  supersessionKey: z.string().trim().max(200).nullable().optional(),
+  lastVerifiedAt: z.string().datetime().nullable().optional(),
+  expiresAt: z.string().datetime().nullable().optional()
 }).strict();
 
 const correctMemorySchema = z.object({
@@ -183,11 +350,25 @@ const memoryRecallSchema = z.object({
   taskId: z.string().trim().min(1).max(100),
   runId: z.string().trim().max(100).optional(),
   text: z.string().max(20000).optional(),
+  scope: z.string().trim().min(1).max(120).optional(),
   maxItems: z.number().int().min(1).max(50).optional(),
   maxChars: z.number().int().min(200).max(100000).optional()
 }).strict();
 
 const memoryCaptureSchema = z.object({ taskId: z.string().trim().min(1).max(100) }).strict();
+
+const memoryConsolidationSchema = z.object({
+  scope: z.string().trim().min(1).max(120).optional(),
+  apply: z.boolean().optional(),
+  minClusterSize: z.number().int().min(2).max(20).optional(),
+  maxGroups: z.number().int().min(1).max(50).optional()
+}).strict();
+
+const memoryForgetSourceSchema = z.object({
+  sourceId: z.string().trim().min(1).max(200),
+  reason: z.string().trim().min(1).max(500).optional(),
+  dryRun: z.boolean().optional()
+}).strict();
 
 const memoryConflictResolveSchema = z.object({
   resolution: z.enum(["keep_left", "keep_right", "merged"]),
@@ -221,6 +402,38 @@ const evaluateMethodSchema = z.object({
 const methodTrialSchema = z.object({ taskId: z.string().trim().min(1).max(100) }).strict();
 const methodRollbackSchema = z.object({ reason: z.string().trim().min(1).max(1000) }).strict();
 const methodRejectSchema = z.object({ reason: z.string().trim().max(1000).optional() }).strict();
+const skillExportSchema = z.object({ methodId: z.string().trim().min(1).max(100) }).strict();
+const skillImportSchema = z.object({
+  content: z.string().min(1).max(200_000),
+  origin: z.enum(["imported", "user"]).optional()
+}).strict();
+const skillTrialSchema = z.object({
+  taskIds: z.array(z.string().trim().min(1).max(100)).min(1).max(50)
+}).strict();
+const skillCheckSchema = z.object({
+  taskId: z.string().trim().min(1).max(100),
+  readPaths: z.array(z.string().trim().min(1).max(2000)).max(100).optional(),
+  writePaths: z.array(z.string().trim().min(1).max(2000)).max(100).optional(),
+  networkHosts: z.array(z.string().trim().min(1).max(300)).max(100).optional(),
+  tools: z.array(z.string().trim().min(1).max(200)).max(100).optional(),
+  allowImported: z.boolean().optional()
+}).strict();
+const skillPermissionQuerySchema = z.object({ taskId: z.string().trim().min(1).max(100) }).strict();
+const skillPinSchema = z.object({ pinned: z.boolean() }).strict();
+const skillArchiveSchema = z.object({ reason: z.string().trim().max(1000).optional() }).strict();
+const skillTransitionSchema = z.object({
+  status: z.enum(SKILL_STATUSES),
+  reason: z.string().trim().max(1000).optional()
+}).strict();
+const skillUsageSchema = z.object({
+  taskId: z.string().trim().min(1).max(100).nullable().optional(),
+  runId: z.string().trim().min(1).max(100).nullable().optional(),
+  status: z.enum(SKILL_USAGE_STATUSES),
+  source: z.enum(SKILL_USAGE_SOURCES).optional(),
+  note: z.string().trim().max(1000).optional()
+}).strict();
+const skillCuratorRunSchema = z.object({ dryRun: z.boolean().optional() }).strict();
+const skillCuratorRollbackSchema = z.object({ runId: z.string().trim().min(1).max(100) }).strict();
 const assignTaskMethodSchema = z.object({ methodId: z.string().trim().min(1).max(100).nullable() }).strict();
 const taskOrganizationSchema = z.object({
   pinned: z.boolean().optional(),
@@ -241,6 +454,40 @@ const syncExportSchema = z.object({
 });
 
 const syncConflictResolveSchema = z.object({ resolution: z.enum(["local", "remote"]) }).strict();
+
+const connectionScopeSchema = z.string().trim().min(1).max(80).regex(/^[a-zA-Z0-9*._:-]+$/);
+const createConnectionSchema = z.object({
+  deviceId: z.string().trim().min(1).max(120),
+  userId: z.string().trim().min(1).max(120),
+  scopes: z.array(connectionScopeSchema).max(20).optional()
+}).strict();
+const connectionGenerationSchema = z.object({ generation: z.number().int().min(1) }).strict();
+const disconnectConnectionSchema = z.object({
+  generation: z.number().int().min(1),
+  reason: z.string().trim().max(500).optional()
+}).strict();
+const reconnectConnectionSchema = z.object({
+  generation: z.number().int().min(1),
+  scopes: z.array(connectionScopeSchema).max(20).optional()
+}).strict();
+const connectionProjectionQuerySchema = z.object({
+  scope: z.string().trim().max(80).default("all"),
+  generation: z.coerce.number().int().min(1).optional()
+}).strict();
+const connectionOutboxSchema = z.object({
+  generation: z.number().int().min(1),
+  scope: z.string().trim().min(1).max(80),
+  kind: z.string().trim().min(1).max(80),
+  idempotencyKey: z.string().trim().min(8).max(200),
+  payload: z.record(z.string(), z.unknown()).default({})
+}).strict();
+const connectionOutboxResolveSchema = z.object({
+  generation: z.number().int().min(1),
+  status: z.enum(["committed", "rejected", "conflict"]),
+  result: z.record(z.string(), z.unknown()).optional(),
+  error: z.string().trim().max(2000).optional()
+}).strict();
+const connectionScopesSchema = z.object({ scopes: z.array(connectionScopeSchema).min(1).max(20) }).strict();
 
 const killSwitchSchema = z.object({
   enabled: z.boolean(),
@@ -275,7 +522,11 @@ const scheduleSchema = z.object({
   executorId: z.enum(EXECUTOR_IDS).optional(),
   approvalMode: z.enum(["necessary", "full"]).optional(),
   taskKind: z.enum(["delivery", "workspace", "general"]).optional(),
-  enabled: z.boolean().optional()
+  enabled: z.boolean().optional(),
+  catchUpPolicy: z.enum(["skip", "run_once", "run_all_bounded"]).optional(),
+  catchUpMaxRuns: z.number().int().min(1).max(20).optional(),
+  priority: z.number().int().min(0).max(100).optional(),
+  deleteAfterRun: z.boolean().optional()
 }).strict();
 
 const schedulePatchSchema = scheduleSchema.partial().strict().refine((value) => Object.keys(value).length > 0, { message: "至少需要修改一个设置" });
@@ -313,6 +564,56 @@ const proactivePauseSchema = z.object({
   off: z.boolean().optional(),
   resume: z.boolean().optional()
 }).strict().refine((value) => value.minutes !== undefined || value.off === true || value.resume === true, { message: "暂停参数不完整" });
+
+const standingIntentEntrySchema = z.object({
+  terms: z.array(z.string().trim().min(1).max(64)).min(1).max(20),
+  mode: z.enum(["all", "any"])
+}).strict();
+
+const standingIntentSchema = z.object({
+  ownerId: z.string().trim().min(1).max(120).optional(),
+  description: z.string().trim().min(1).max(500),
+  triggerEntries: z.array(standingIntentEntrySchema).min(1).max(20),
+  scope: z.object({
+    channel: z.string().trim().min(1).max(120).nullable().optional(),
+    sender: z.string().trim().min(1).max(200).nullable().optional(),
+    taskId: z.string().trim().min(1).max(120).nullable().optional(),
+    goalId: z.string().trim().min(1).max(120).nullable().optional(),
+    anywhere: z.boolean().optional()
+  }).strict().optional(),
+  action: z.enum(["remind", "ask", "prepare_task", "notify"]).optional(),
+  cooldownSeconds: z.number().int().min(0).max(31_536_000).optional(),
+  maxFires: z.number().int().min(1).max(100).optional(),
+  expiresAt: z.string().datetime().optional(),
+  armed: z.boolean().optional()
+}).strict();
+
+const intentMatchSchema = z.object({
+  ownerId: z.string().trim().min(1).max(120).optional(),
+  text: z.string().min(1).max(200_000),
+  channel: z.string().trim().min(1).max(120).nullable().optional(),
+  sender: z.string().trim().min(1).max(200).nullable().optional(),
+  taskId: z.string().trim().min(1).max(120).nullable().optional(),
+  goalId: z.string().trim().min(1).max(120).nullable().optional()
+}).strict();
+
+const heartbeatRunSchema = intentMatchSchema.partial().extend({
+  since: z.string().datetime().optional()
+}).strict().refine((value) => value.text === undefined || value.text.length > 0, { message: "text 不能为空" });
+
+const attentionBudgetSchema = z.object({
+  dailyLimit: z.number().int().min(0).max(100).optional(),
+  quietStart: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+  quietEnd: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+  cooldownSeconds: z.number().int().min(0).max(604_800).optional(),
+  maxPerGoalPerDay: z.number().int().min(0).max(100).optional(),
+  maxHighPriorityPerDay: z.number().int().min(0).max(100).optional(),
+  ignoredPenalty: z.number().int().min(0).max(10).optional()
+}).strict().refine((value) => Object.keys(value).length > 0, { message: "至少需要修改一个设置" });
+
+const attentionSnoozeSchema = z.object({
+  minutes: z.number().int().min(1).max(10_080).optional()
+}).strict();
 
 const onboardingCompleteSchema = z.object({
   skipped: z.boolean().optional()
@@ -448,6 +749,12 @@ const listQuerySchema = z.object({
 const runQuerySchema = listQuerySchema.extend({ status: z.enum(RUN_STATUSES).optional() }).strict();
 const approvalQuerySchema = listQuerySchema.extend({ status: z.enum(APPROVAL_STATUSES).optional() }).strict();
 const effectQuerySchema = listQuerySchema.extend({ status: z.enum(EFFECT_STATUSES).optional() }).strict();
+const reconcileQuerySchema = z.object({ status: z.enum(RECONCILE_STATUSES).optional() }).strict();
+const reconcileResolveSchema = z.object({
+  resolution: z.enum(["committed", "absent", "abandoned"]),
+  note: z.string().trim().min(1).max(2000)
+}).strict();
+const reconcileTaskSchema = z.object({ note: z.string().trim().max(2000).optional() }).strict();
 
 const seqParam = z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 
@@ -471,6 +778,7 @@ export interface BuildServerOptions {
   startScheduler?: boolean;
   startMaintenance?: boolean;
   startProactive?: boolean;
+  startHeartbeat?: boolean;
   startMailSync?: boolean;
   feishuTransportFactory?: FeishuTransportFactory;
   feishuChatClient?: FeishuChatClient;
@@ -492,6 +800,7 @@ export interface BuildServerOptions {
   executorInstaller?: ExecutorInstaller;
   contextBlobRoot?: string;
   contextIndex?: ContextIndex;
+  skillRoot?: string;
 }
 
 export async function buildServer(options: BuildServerOptions = {}) {
@@ -502,11 +811,17 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const taskGit = new TaskGitService({ workspaceRoot: WORKSPACE_DIR });
   const context = new ContextService(service, options.contextBlobRoot ?? CONTEXT_BLOB_DIR);
   if (options.contextIndex) context.setIndex(options.contextIndex);
+  const ontology = new OntologyService(service);
+  const mentions = new MentionResolver(service, ontology);
+  const contextBroker = new ContextBroker(service, context, ontology);
+  const ontologyWriter = new OntologyWriter(service, ontology);
   service.setContextSink((message) => {
     if (context.settings().mode !== "off") context.recordChatMessage(message);
   });
+
   const sources = new SourceRegistry(service, {
-    contentRoot: options.sourceContentRoot ?? SOURCE_CONTENT_DIR
+    contentRoot: options.sourceContentRoot ?? SOURCE_CONTENT_DIR,
+    onItemReady: (item) => ontologyWriter.captureSourceItem(item)
   });
   const secretBox = options.syncSecretBox ?? SecretBox.fromKeyFile(options.masterKeyPath ?? MASTER_KEY_PATH);
   const mail = new EmailService({
@@ -522,26 +837,112 @@ export async function buildServer(options: BuildServerOptions = {}) {
     mail
   }));
   const proactive = new ProactiveService(service);
+  const attentionGovernor = new AttentionGovernor(service);
+  const standingIntents = new StandingIntentService({
+    service,
+    deliveryGate: (run) => attentionGovernor.deliveryAllowed(run)
+  });
+  const preparedActions = new PreparedActionService(service);
+  const threadSubscriptions = new ThreadSubscriptionService(service);
+  const watchdog = new WatchdogService({ service, standingIntents });
+  const intake = new IntakeRouter(service);
   const memory = new MemoryService(service);
   const methods = new MethodService(service);
+  const skills = new SkillPackageService(service, methods, {
+    rootDir: options.skillRoot ?? join(options.dataDir ?? DATA_DIR, "skills")
+  });
+  const skillCurator = new SkillCuratorService({ service, skills });
   const sync = new SyncService(service, {
     ...(options.syncFetch ? { fetchImpl: options.syncFetch } : {}),
     ...(options.syncSecretBox ? { secretBox: options.syncSecretBox } : {})
   });
+  const connections = new ConnectionService({ service });
   const security = new SecurityService(service);
   const leases = new TaskLeaseService(service);
+  const sandbox = new SandboxService();
+  const delegations = new DelegationService({ service, sandbox });
   const backups = new BackupService({
     service,
     backupRoot: options.backupRoot ?? BACKUP_DIR,
     masterKeyPath: options.masterKeyPath ?? MASTER_KEY_PATH
   });
+  const reconcile = new ReconcileService(service);
   const approvals = new ApprovalManager(service, effectExecutor, {
     guard: (taskId) => {
       security.assertActionsAllowed();
       leases.assertOwnedIfLeased(taskId);
-    }
+      delegations.assertEffectAllowed(taskId);
+    },
+    onUncertain: (effect, reason) => {
+      reconcile.enqueue(effect, reason);
+    },
+    onDecided: (approval) => ontologyWriter.captureApprovalDecision(approval)
   });
   approvals.recoverInterruptedEffects();
+  reconcile.scanUncertain();
+  const backgroundTools = new BackgroundToolService(service, {
+    runner: async (job, signal) => {
+      const task = service.requireTask(job.taskId);
+      const tool = createBuiltinTools().find((candidate) => candidate.definition.name === job.toolName);
+      if (!tool) throw new Error(`后台工具不支持：${job.toolName}`);
+      const permissions = task.permissions ?? {
+        readRoots: [task.outputDir],
+        writeRoots: [],
+        networkHosts: task.networkHosts,
+        tools: ["read_file", "list_files", "search_text"]
+      };
+      if (!permissions.tools.includes(job.toolName)) throw new Error(`任务未授权工具：${job.toolName}`);
+      const result = await tool.execute(job.args, {
+        workspaceRoot: task.outputDir, outDir: task.outputDir, permissions, signal
+      });
+      return { output: result.content, exitCode: result.isError ? 1 : 0 };
+    },
+    authorize: async ({ job, signal }) => {
+      if (isBackgroundToolReadOnly(job.toolName) && !requiresToolApproval(job.toolName)) return;
+      const task = service.requireTask(job.taskId);
+      if (!job.runId) {
+        throw new BackgroundToolError("BACKGROUND_TOOL_RUN_REQUIRED", "后台敏感工具必须绑定运行中的 run", 409);
+      }
+      const run = store.getRun(job.runId);
+      if (!run || run.taskId !== task.id || run.status !== "running") {
+        throw new BackgroundToolError("BACKGROUND_TOOL_RUN_NOT_ACTIVE", "后台敏感工具只能由当前运行中的任务发起", 409);
+      }
+      const summary = toolApprovalSummary(job.toolName, job.args);
+      let action;
+      try {
+        action = resolveToolAction({
+          toolName: job.toolName,
+          argumentsValue: job.args,
+          summary,
+          workspaceRoot: task.outputDir,
+          fullPermission: false,
+          context: "interactive"
+        });
+      } catch (error) {
+        throw new BackgroundToolError(
+          "BACKGROUND_TOOL_ACTION_UNRESOLVED",
+          `后台敏感工具无法绑定为可审批动作：${error instanceof Error ? error.message : String(error)}`,
+          403
+        );
+      }
+      if (!action) {
+        throw new BackgroundToolError("BACKGROUND_TOOL_ACTION_UNRESOLVED", `后台敏感工具 ${job.toolName} 无法解析为可绑定动作`, 403);
+      }
+      const pending = await approvals.requestTool({
+        taskId: task.id,
+        runId: run.id,
+        toolName: job.toolName,
+        summary,
+        target: { tool: job.toolName, arguments: job.args },
+        preview: { arguments: job.args },
+        action
+      });
+      const decision = await awaitToolDecision(pending, signal, approvals, job.toolName);
+      if (!decision.allowed) {
+        throw new BackgroundToolError("BACKGROUND_TOOL_APPROVAL_DENIED", decision.reason, 403);
+      }
+    }
+  });
   const outbox = new OutboxService(service, approvals, undefined, mail);
   const desktop = new DesktopService(service, options.deviceFrameRoot ?? DEVICE_FRAME_DIR, security);
   const modelSettingsPath = options.modelSettingsPath ?? MODEL_SETTINGS_PATH;
@@ -598,9 +999,12 @@ export async function buildServer(options: BuildServerOptions = {}) {
         service,
         approvals,
         context,
+        contextBroker,
         methods,
         autoLearn: true,
         leases,
+        delegations,
+        backgroundTools,
         attachmentRoot,
         executorSettingsPath,
         executorSettingsProvider: () => executorSettingsStore.load(),
@@ -631,8 +1035,13 @@ export async function buildServer(options: BuildServerOptions = {}) {
     codexProfile
   });
   const diagnostics = new DiagnosticsService({ service, health, maintenance, webDist: WEB_DIST });
-  if (options.startMaintenance ?? options.startScheduler) maintenance.start();
+  if (options.startMaintenance ?? options.startScheduler) {
+    maintenance.start();
+    skillCurator.start();
+    watchdog.start();
+  }
   if (options.startProactive) proactive.start();
+  if (options.startHeartbeat) standingIntents.start();
   if (options.startMailSync) mail.start();
   const app = Fastify({
     logger: options.logger ?? false,
@@ -652,14 +1061,25 @@ export async function buildServer(options: BuildServerOptions = {}) {
     codexEnv,
     modelSettingsForExecutor,
     executorHealth,
-    memory
+    memory,
+    personal: { ontology, mentions, broker: contextBroker, writer: ontologyWriter }
+  });
+  registerEvalRoutes(app, {
+    service,
+    store,
+    settings: () => modelRegistry.chatSettings() ?? loadModelSettings(modelSettingsPath),
+    repoRoot: REPO_ROOT
   });
 
   app.addHook("onClose", async () => {
     await feishu.stop();
     mail.stop();
     proactive.stop();
+    standingIntents.stop();
+    watchdog.stop();
+    threadSubscriptions.close();
     maintenance.stop();
+    skillCurator.stop();
     schedules.stop();
     await scheduler?.stop();
     if (ownsStore) store.close();
@@ -1165,6 +1585,371 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
   });
 
+  app.get("/api/intents", async (_request, reply) => {
+    reply.header("cache-control", "no-store");
+    return { intents: standingIntents.list(), budget: standingIntents.budget() };
+  });
+
+  app.post("/api/intents", async (request, reply) => {
+    const parsed = standingIntentSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_INTENT", message: "意图参数不正确" });
+    try {
+      return reply.code(201).send(standingIntents.create(definedObject(parsed.data) as unknown as Parameters<StandingIntentService["create"]>[0]));
+    } catch (error) {
+      return sendStandingIntentError(reply, error);
+    }
+  });
+
+  app.post("/api/intents/match", async (request, reply) => {
+    const parsed = intentMatchSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_INTENT_MATCH", message: "意图匹配参数不正确" });
+    try {
+      const matches = standingIntents.match(definedObject(parsed.data) as unknown as Parameters<StandingIntentService["match"]>[0]);
+      return { matches, intents: matches.map((match) => match.intent), attention: matches.map((match) => match.attention) };
+    } catch (error) {
+      return sendStandingIntentError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/intents/:id/arm", async (request, reply) => {
+    try {
+      return standingIntents.arm(request.params.id);
+    } catch (error) {
+      return sendStandingIntentError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/intents/:id/cancel", async (request, reply) => {
+    try {
+      return standingIntents.cancel(request.params.id);
+    } catch (error) {
+      return sendStandingIntentError(reply, error);
+    }
+  });
+
+  app.get("/api/attention", async (_request, reply) => {
+    reply.header("cache-control", "no-store");
+    return {
+      items: attentionGovernor.list(standingIntents.queue()),
+      budget: standingIntents.budget(),
+      governor: attentionGovernor.settings()
+    };
+  });
+
+  app.get<{ Params: { id: string } }>("/api/attention/:id/explain", async (request, reply) => {
+    const explanation = attentionGovernor.explain(request.params.id);
+    if (!explanation) return reply.code(404).send({ error: "ATTENTION_NOT_FOUND", message: "注意力事项不存在" });
+    return explanation;
+  });
+
+  app.post<{ Params: { id: string } }>("/api/attention/:id/feedback", async (request, reply) => {
+    const parsed = z.object({
+      action: z.enum(["accept", "ignore", "snooze", "resolve", "wrong"]),
+      channel: z.string().trim().max(80).optional(),
+      note: z.string().trim().max(500).optional()
+    }).strict().safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_ATTENTION_FEEDBACK", message: "反馈格式不正确" });
+    try {
+      return attentionGovernor.feedback(request.params.id, definedObject(parsed.data) as unknown as Parameters<AttentionGovernor["feedback"]>[1]);
+    } catch (error) {
+      if (error instanceof Error && error.message === "ATTENTION_NOT_FOUND") {
+        return reply.code(404).send({ error: "ATTENTION_NOT_FOUND", message: "注意力事项不存在" });
+      }
+      throw error;
+    }
+  });
+
+  app.patch("/api/attention/governor", async (request, reply) => {
+    const parsed = z.object({
+      shadowMode: z.boolean().optional(),
+      minFeedbackSamples: z.number().int().min(20).max(500).optional()
+    }).strict().safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_ATTENTION_GOVERNOR", message: "注意力治理设置不正确" });
+    return attentionGovernor.updateSettings(definedObject(parsed.data) as Parameters<AttentionGovernor["updateSettings"]>[0]);
+  });
+
+  app.patch("/api/attention/settings", async (request, reply) => {
+    const parsed = attentionBudgetSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_ATTENTION_BUDGET", message: "注意力预算设置不正确" });
+    try {
+      return standingIntents.updateBudget(definedObject(parsed.data) as unknown as Parameters<StandingIntentService["updateBudget"]>[0]);
+    } catch (error) {
+      return sendStandingIntentError(reply, error);
+    }
+  });
+
+  for (const action of ["ack", "ignore", "resolve"] as const) {
+    app.post<{ Params: { id: string } }>("/api/attention/:id/" + action, async (request, reply) => {
+      try {
+        if (action === "ack") return standingIntents.acknowledge(request.params.id);
+        if (action === "ignore") return standingIntents.ignore(request.params.id);
+        return standingIntents.resolve(request.params.id);
+      } catch (error) {
+        return sendStandingIntentError(reply, error);
+      }
+    });
+  }
+
+  app.post<{ Params: { id: string } }>("/api/attention/:id/snooze", async (request, reply) => {
+    const parsed = attentionSnoozeSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_ATTENTION_SNOOZE", message: "稍后提醒参数不正确" });
+    try {
+      return standingIntents.snooze(request.params.id, parsed.data.minutes);
+    } catch (error) {
+      return sendStandingIntentError(reply, error);
+    }
+  });
+
+  app.get<{ Querystring: { query?: string; kind?: string; limit?: string } }>("/api/ontology/entities", async (request) => {
+    const queryText = (request.query.query ?? "").trim().toLowerCase();
+    const kind = (request.query.kind ?? "").trim();
+    const limit = Math.max(1, Math.min(500, Number(request.query.limit ?? 100) || 100));
+    const entities = service.store.listEntities({ ...(kind ? { kind } : {}), status: "active", limit: 2000 })
+      .filter((entity) => !queryText || entity.canonicalName.toLowerCase().includes(queryText) || entity.id.toLowerCase().includes(queryText))
+      .slice(0, limit)
+      .map((entity) => ({
+        ...entity,
+        states: service.store.listEntityStates({ entityId: entity.id, activeOnly: true, limit: 30 }),
+        aliases: service.store.listEntityAliases(entity.id)
+      }));
+    return { entities };
+  });
+
+  app.get<{ Querystring: { status?: string; limit?: string } }>("/api/ontology/commitments", async (request) => {
+    const limit = Math.max(1, Math.min(500, Number(request.query.limit ?? 100) || 100));
+    return { commitments: service.store.listCommitments({ status: request.query.status ?? "open", limit }) };
+  });
+
+  app.get<{ Querystring: { status?: string; limit?: string } }>("/api/ontology/decisions", async (request) => {
+    const limit = Math.max(1, Math.min(500, Number(request.query.limit ?? 100) || 100));
+    return { decisions: service.store.listDecisions({ status: request.query.status ?? "active", limit }) };
+  });
+
+  app.post<{ Params: { id: string } }>("/api/ontology/entities/:id/correct", async (request, reply) => {
+    const parsed = z.object({
+      key: z.string().trim().min(1).max(120),
+      value: z.unknown(),
+      evidenceRef: z.string().trim().min(1).max(500).optional()
+    }).strict().safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_ONTOLOGY_CORRECTION", message: "纠正内容格式不正确" });
+    if (!service.store.getEntity(request.params.id)) return reply.code(404).send({ error: "ENTITY_NOT_FOUND", message: "实体不存在" });
+    return ontologyWriter.userCorrects({
+      entityId: request.params.id,
+      key: parsed.data.key,
+      value: parsed.data.value,
+      evidenceRef: parsed.data.evidenceRef ?? `user-correction:${request.params.id}:${Date.now()}`
+    });
+  });
+
+  app.post("/api/ontology/forget", async (request, reply) => {
+    const parsed = z.object({ evidenceRef: z.string().trim().min(1).max(500) }).strict().safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_ONTOLOGY_FORGET", message: "遗忘请求格式不正确" });
+    return ontologyWriter.forget(parsed.data.evidenceRef);
+  });
+
+  app.get("/api/heartbeat", async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const limit = Number((request.query as { limit?: string } | undefined)?.limit ?? 50);
+    return {
+      runs: standingIntents.listHeartbeatRuns(Number.isInteger(limit) ? Math.max(1, Math.min(limit, 500)) : 50),
+      last: standingIntents.latestHeartbeatRun()
+    };
+  });
+
+  app.post("/api/heartbeat/run", async (request, reply) => {
+    const parsed = heartbeatRunSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_HEARTBEAT", message: "心跳参数不正确" });
+    try {
+      return await standingIntents.heartbeat(definedObject(parsed.data) as unknown as Parameters<StandingIntentService["heartbeat"]>[0]);
+    } catch (error) {
+      return sendStandingIntentError(reply, error);
+    }
+  });
+
+  app.get("/api/prepared-actions", async (request) => {
+    const query = request.query as { taskId?: string; status?: string; limit?: string };
+    return {
+      actions: preparedActions.list({
+        ...(query.taskId ? { taskId: query.taskId } : {}),
+        ...(query.status ? { status: query.status } : {}),
+        limit: query.limit ? Number(query.limit) : 100
+      })
+    };
+  });
+
+  app.post("/api/prepared-actions", async (request, reply) => {
+    const body = definedObject((request.body ?? {}) as Record<string, unknown>);
+    const kinds = new Set(["draft_email", "calendar_check", "research", "test_run", "diff"]);
+    if (!kinds.has(String(body.kind))) {
+      return reply.code(400).send({ error: "INVALID_PREPARED_ACTION", message: "预备动作类型不正确" });
+    }
+    try {
+      return reply.code(201).send(preparedActions.prepare({
+        ...(typeof body.taskId === "string" ? { taskId: body.taskId } : {}),
+        ...(typeof body.goalId === "string" ? { goalId: body.goalId } : {}),
+        kind: String(body.kind) as Parameters<PreparedActionService["prepare"]>[0]["kind"],
+        preview: body.preview && typeof body.preview === "object" ? body.preview as Record<string, unknown> : {},
+        evidenceRefs: Array.isArray(body.evidenceRefs) ? body.evidenceRefs.filter((ref): ref is string => typeof ref === "string") : [],
+        ...(typeof body.expiresAt === "string" ? { expiresAt: body.expiresAt } : {})
+      }));
+    } catch (error) {
+      return reply.code((error as { statusCode?: number }).statusCode ?? 400).send({
+        error: (error as { code?: string }).code ?? "PREPARED_ACTION_FAILED",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/prepared-actions/:id/commit", async (request, reply) => {
+    const body = definedObject((request.body ?? {}) as Record<string, unknown>);
+    try {
+      return preparedActions.commit(request.params.id, {
+        ...(typeof body.approvalRef === "string" ? { approvalRef: body.approvalRef } : {})
+      });
+    } catch (error) {
+      return reply.code((error as { statusCode?: number }).statusCode ?? 400).send({
+        error: (error as { code?: string }).code ?? "PREPARED_ACTION_FAILED",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/prepared-actions/:id/discard", async (request, reply) => {
+    try {
+      return preparedActions.discard(request.params.id);
+    } catch (error) {
+      return reply.code((error as { statusCode?: number }).statusCode ?? 400).send({
+        error: (error as { code?: string }).code ?? "PREPARED_ACTION_FAILED",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
+  app.get("/api/background-tools", async (request) => {
+    const query = request.query as { taskId?: string; status?: string; limit?: string };
+    return {
+      jobs: backgroundTools.list({
+        ...(query.taskId ? { taskId: query.taskId } : {}),
+        ...(query.status ? { status: query.status } : {}),
+        limit: query.limit ? Number(query.limit) : 100
+      })
+    };
+  });
+
+  app.post("/api/background-tools", async (request, reply) => {
+    const body = definedObject((request.body ?? {}) as Record<string, unknown>);
+    try {
+      return reply.code(202).send(await backgroundTools.start({
+        taskId: String(body.taskId ?? ""),
+        toolName: String(body.toolName ?? ""),
+        ...(typeof body.runId === "string" ? { runId: body.runId } : {}),
+        args: body.args && typeof body.args === "object" ? body.args as Record<string, unknown> : {},
+        ...(typeof body.timeoutMs === "number" ? { timeoutMs: body.timeoutMs } : {})
+      }));
+    } catch (error) {
+      return reply.code((error as { statusCode?: number }).statusCode ?? 400).send({
+        error: (error as { code?: string }).code ?? "BACKGROUND_TOOL_FAILED",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/background-tools/:id/stop", async (request, reply) => {
+    const body = definedObject((request.body ?? {}) as Record<string, unknown>);
+    try {
+      return backgroundTools.stop(request.params.id, typeof body.reason === "string" ? body.reason : undefined);
+    } catch (error) {
+      return reply.code((error as { statusCode?: number }).statusCode ?? 400).send({
+        error: (error as { code?: string }).code ?? "BACKGROUND_TOOL_FAILED",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
+  app.get("/api/thread-subscriptions/deliveries", async (request) => {
+    const query = request.query as { limit?: string };
+    return { deliveries: threadSubscriptions.recentDeliveries(query.limit ? Number(query.limit) : 50) };
+  });
+
+  app.get("/api/thread-subscriptions", async (request) => {
+    const query = request.query as { threadKey?: string; taskId?: string; status?: string };
+    return {
+      subscriptions: threadSubscriptions.list({
+        ...(query.threadKey ? { threadKey: query.threadKey } : {}),
+        ...(query.taskId ? { taskId: query.taskId } : {}),
+        ...(query.status ? { status: query.status } : {})
+      })
+    };
+  });
+
+  app.post("/api/thread-subscriptions", async (request, reply) => {
+    const body = definedObject((request.body ?? {}) as Record<string, unknown>);
+    try {
+      return reply.code(201).send(threadSubscriptions.subscribe({
+        threadKey: String(body.threadKey ?? ""),
+        taskId: String(body.taskId ?? ""),
+        ...(typeof body.runId === "string" ? { runId: body.runId } : {}),
+        filter: body.filter && typeof body.filter === "object" ? body.filter as Record<string, unknown> : {}
+      }));
+    } catch (error) {
+      return reply.code((error as { statusCode?: number }).statusCode ?? 400).send({
+        error: (error as { code?: string }).code ?? "THREAD_SUBSCRIPTION_FAILED",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
+  for (const action of ["pause", "resume", "end"] as const) {
+    app.post<{ Params: { id: string } }>(`/api/thread-subscriptions/:id/${action}`, async (request, reply) => {
+      try {
+        return threadSubscriptions[action](request.params.id);
+      } catch (error) {
+        return reply.code((error as { statusCode?: number }).statusCode ?? 400).send({
+          error: (error as { code?: string }).code ?? "THREAD_SUBSCRIPTION_FAILED",
+          message: error instanceof Error ? error.message : String(error)
+        });
+      }
+    });
+  }
+
+  app.get("/api/watchdog", async (request) => {
+    const query = request.query as { limit?: string };
+    return {
+      settings: watchdog.settings(),
+      events: store.listWatchdogEvents({ limit: query.limit ? Number(query.limit) : 100 })
+    };
+  });
+
+  app.post("/api/watchdog/scan", async () => ({ events: watchdog.scan(), settings: watchdog.settings() }));
+
+  app.patch("/api/watchdog/settings", async (request, reply) => {
+    const body = definedObject((request.body ?? {}) as Record<string, unknown>);
+    try {
+      return watchdog.updateSettings(body as Parameters<WatchdogService["updateSettings"]>[0]);
+    } catch (error) {
+      return reply.code(400).send({ error: "INVALID_WATCHDOG_SETTINGS", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.get("/api/intake/decisions", async (request) => {
+    const query = request.query as { limit?: string };
+    return { decisions: intake.list(query.limit ? Number(query.limit) : 100) };
+  });
+
+  app.post("/api/intake/route", async (request, reply) => {
+    const body = definedObject((request.body ?? {}) as Record<string, unknown>);
+    try {
+      return intake.route({
+        sourceRef: String(body.sourceRef ?? ""),
+        text: String(body.text ?? ""),
+        ...(typeof body.sender === "string" ? { sender: body.sender } : {}),
+        ...(typeof body.channel === "string" ? { channel: body.channel } : {})
+      });
+    } catch (error) {
+      return reply.code(400).send({ error: "INVALID_INTAKE_INPUT", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
   app.get("/api/memory", async (_request, reply) => {
     reply.header("cache-control", "no-store");
     return memory.snapshot();
@@ -1210,11 +1995,49 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
   });
 
+  app.post("/api/memory/consolidate", async (request, reply) => {
+    const parsed = memoryConsolidationSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_MEMORY_CONSOLIDATION", message: "记忆巩固参数不正确" });
+    try {
+      return memory.consolidate(parsed.data);
+    } catch (error) {
+      return sendMemoryError(reply, error);
+    }
+  });
+
+  app.post("/api/memory/forget-source", async (request, reply) => {
+    const parsed = memoryForgetSourceSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_MEMORY_FORGET_SOURCE", message: "来源遗忘参数不正确" });
+    try {
+      return memory.forgetSource(parsed.data);
+    } catch (error) {
+      return sendMemoryError(reply, error);
+    }
+  });
+
   app.get("/api/memory/export", async (_request, reply) => {
     const stamp = new Date().toISOString().slice(0, 10);
     reply.header("content-type", "application/json; charset=utf-8");
     reply.header("content-disposition", "attachment; filename=\"hearth-memories-" + stamp + ".json\"");
     return memory.exportData();
+  });
+
+  app.get<{ Params: { id: string } }>("/api/memory/:id/explain", async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    try {
+      return memory.explain(request.params.id);
+    } catch (error) {
+      return sendMemoryError(reply, error);
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/api/memory/:id/forget-preview", async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    try {
+      return memory.previewForget(request.params.id);
+    } catch (error) {
+      return sendMemoryError(reply, error);
+    }
   });
 
   app.patch<{ Params: { id: string } }>("/api/memory/:id", async (request, reply) => {
@@ -1361,6 +2184,206 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
   });
 
+  app.get("/api/skills", async (_request, reply) => {
+    reply.header("cache-control", "no-store");
+    return skills.snapshot();
+  });
+
+  app.post("/api/skills/export", async (request, reply) => {
+    const parsed = skillExportSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_EXPORT", message: "技能导出参数不正确" });
+    try {
+      const exported = skills.exportMethod(parsed.data.methodId);
+      return reply.code(201).send({ package: exported, skill: skills.getSkill(exported.id) });
+    } catch (error) {
+      return sendSkillError(reply, error);
+    }
+  });
+
+  app.post("/api/skills/import", async (request, reply) => {
+    const parsed = skillImportSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_IMPORT", message: "技能导入参数不正确" });
+    try {
+      const imported = skills.importPackage(parsed.data.content, parsed.data.origin ?? "imported");
+      return reply.code(201).send(imported);
+    } catch (error) {
+      return sendSkillError(reply, error);
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/api/skills/:id/permissions", async (request, reply) => {
+    const parsed = skillPermissionQuerySchema.safeParse(request.query ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_PERMISSION_QUERY", message: "技能权限查询参数不正确" });
+    try {
+      return {
+        effective: skills.effectivePermissions(request.params.id, parsed.data.taskId),
+        changes: skills.permissionChanges(request.params.id)
+      };
+    } catch (error) {
+      return sendSkillError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/skills/:id/trials", async (request, reply) => {
+    const parsed = skillTrialSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_TRIAL", message: "技能试跑参数不正确" });
+    try {
+      return skills.setTrialTasks(request.params.id, parsed.data.taskIds);
+    } catch (error) {
+      return sendSkillError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/skills/:id/check", async (request, reply) => {
+    const parsed = skillCheckSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_CHECK", message: "技能执行检查参数不正确" });
+    try {
+      const permissionRequest = {
+        ...(parsed.data.readPaths ? { readPaths: parsed.data.readPaths } : {}),
+        ...(parsed.data.writePaths ? { writePaths: parsed.data.writePaths } : {}),
+        ...(parsed.data.networkHosts ? { networkHosts: parsed.data.networkHosts } : {}),
+        ...(parsed.data.tools ? { tools: parsed.data.tools } : {})
+      };
+      return skills.checkExecution(request.params.id, parsed.data.taskId, permissionRequest, {
+        allowImported: parsed.data.allowImported === true
+      });
+    } catch (error) {
+      return sendSkillError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/skills/:id/authorize", async (request, reply) => {
+    const parsed = skillCheckSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_AUTHORIZE", message: "技能授权参数不正确" });
+    try {
+      const permissionRequest = {
+        ...(parsed.data.readPaths ? { readPaths: parsed.data.readPaths } : {}),
+        ...(parsed.data.writePaths ? { writePaths: parsed.data.writePaths } : {}),
+        ...(parsed.data.networkHosts ? { networkHosts: parsed.data.networkHosts } : {}),
+        ...(parsed.data.tools ? { tools: parsed.data.tools } : {})
+      };
+      return skills.assertExecution(request.params.id, parsed.data.taskId, permissionRequest, {
+        allowImported: parsed.data.allowImported === true
+      });
+    } catch (error) {
+      return sendSkillError(reply, error);
+    }
+  });
+
+  app.get("/api/skills/usage", async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const skillId = typeof (request.query as { skillId?: unknown } | undefined)?.skillId === "string"
+      ? String((request.query as { skillId: string }).skillId)
+      : undefined;
+    return { usage: skills.snapshot().skills.length ? store.listSkillUsage(skillId, 200) : [] };
+  });
+
+  app.get("/api/skills/curator", async (_request, reply) => {
+    reply.header("cache-control", "no-store");
+    return skillCurator.snapshot();
+  });
+
+  app.post("/api/skills/curator/run", async (request, reply) => {
+    const parsed = skillCuratorRunSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_CURATOR_RUN", message: "Curator 参数不正确" });
+    return skillCurator.run({ dryRun: parsed.data.dryRun === true });
+  });
+
+  app.post("/api/skills/curator/rollback", async (request, reply) => {
+    const parsed = skillCuratorRollbackSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_CURATOR_ROLLBACK", message: "Curator 回滚参数不正确" });
+    try {
+      return skillCurator.rollback(parsed.data.runId);
+    } catch (error) {
+      return reply.code(409).send({ error: "SKILL_CURATOR_ROLLBACK_FAILED", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/skills/:id/usage", async (request, reply) => {
+    const parsed = skillUsageSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_USAGE", message: "技能使用记录参数不正确" });
+    try {
+      return skills.recordUsage({
+        skillId: request.params.id,
+        taskId: parsed.data.taskId ?? null,
+        runId: parsed.data.runId ?? null,
+        status: parsed.data.status,
+        ...(parsed.data.source ? { source: parsed.data.source } : {}),
+        ...(parsed.data.note ? { note: parsed.data.note } : {})
+      });
+    } catch (error) {
+      return sendSkillError(reply, error);
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/api/skills/:id", async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    try {
+      const skill = skills.getSkill(request.params.id);
+      if (!skill) return reply.code(404).send({ error: "SKILL_NOT_FOUND", message: "技能不存在" });
+      return {
+        skill,
+        document: skills.readDocument(request.params.id),
+        resources: skills.readResources(request.params.id),
+        versions: skills.versions(request.params.id)
+      };
+    } catch (error) {
+      return sendSkillError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/skills/:id/pin", async (request, reply) => {
+    const parsed = skillPinSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_PIN", message: "技能固定参数不正确" });
+    try {
+      return skills.pin(request.params.id, parsed.data.pinned);
+    } catch (error) {
+      return sendSkillError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/skills/:id/archive", async (request, reply) => {
+    const parsed = skillArchiveSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_ARCHIVE", message: "技能归档参数不正确" });
+    try {
+      return skills.archive(request.params.id, parsed.data.reason ?? "用户归档");
+    } catch (error) {
+      return sendSkillError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/skills/:id/restore", async (request, reply) => {
+    try {
+      return skills.restore(request.params.id);
+    } catch (error) {
+      return sendSkillError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/skills/:id/status", async (request, reply) => {
+    const parsed = skillTransitionSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_STATUS", message: "技能状态参数不正确" });
+    try {
+      return skills.transition(request.params.id, parsed.data.status, parsed.data.reason ?? "");
+    } catch (error) {
+      return sendSkillError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/skills/:id/used", async (request, reply) => {
+    try {
+      const parsed = skillUsageSchema.partial().safeParse(request.body ?? {});
+      if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_USAGE", message: "技能使用记录参数不正确" });
+      return skills.markUsed(request.params.id, {
+        taskId: parsed.data.taskId ?? null,
+        runId: parsed.data.runId ?? null,
+        ...(parsed.data.source ? { source: parsed.data.source } : {})
+      });
+    } catch (error) {
+      return sendSkillError(reply, error);
+    }
+  });
+
   app.get("/api/sync", async (_request, reply) => {
     reply.header("cache-control", "no-store");
     return sync.snapshot();
@@ -1419,6 +2442,115 @@ export async function buildServer(options: BuildServerOptions = {}) {
       return sync.exportEvents(parsed.data.after, parsed.data.limit);
     } catch (error) {
       return sendSyncError(reply, error);
+    }
+  });
+
+  app.post("/api/connections", async (request, reply) => {
+    const parsed = createConnectionSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_CONNECTION", message: "连接参数不正确" });
+    try {
+      return reply.code(201).send(connections.connect(parsed.data));
+    } catch (error) {
+      return sendConnectionError(reply, error);
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/api/connections/:id/status", async (request, reply) => {
+    try {
+      reply.header("cache-control", "no-store");
+      return connections.status(request.params.id);
+    } catch (error) {
+      return sendConnectionError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/connections/:id/heartbeat", async (request, reply) => {
+    const parsed = connectionGenerationSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_CONNECTION_GENERATION", message: "缺少有效的连接代次" });
+    try {
+      return connections.heartbeat(request.params.id, parsed.data.generation);
+    } catch (error) {
+      return sendConnectionError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/connections/:id/disconnect", async (request, reply) => {
+    const parsed = disconnectConnectionSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_CONNECTION_GENERATION", message: "断开连接需要有效的连接代次" });
+    try {
+      return connections.disconnect(request.params.id, parsed.data.generation, parsed.data.reason);
+    } catch (error) {
+      return sendConnectionError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/connections/:id/reconnect", async (request, reply) => {
+    const parsed = reconnectConnectionSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_CONNECTION_RECONNECT", message: "重连参数不正确" });
+    try {
+      return connections.reconnect(request.params.id, parsed.data);
+    } catch (error) {
+      return sendConnectionError(reply, error);
+    }
+  });
+
+  app.get<{ Params: { id: string }; Querystring: Record<string, string> }>("/api/connections/:id/projection", async (request, reply) => {
+    const parsed = connectionProjectionQuerySchema.safeParse(request.query);
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_PROJECTION", message: "离线投影参数不正确" });
+    try {
+      reply.header("cache-control", "no-store");
+      return connections.projection(request.params.id, parsed.data.scope, parsed.data.generation);
+    } catch (error) {
+      return sendConnectionError(reply, error);
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/api/connections/:id/outbox", async (request, reply) => {
+    try {
+      reply.header("cache-control", "no-store");
+      return { items: connections.listOutbox(request.params.id) };
+    } catch (error) {
+      return sendConnectionError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/connections/:id/outbox", async (request, reply) => {
+    const parsed = connectionOutboxSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_CONNECTION_OUTBOX", message: "离线操作参数不正确" });
+    try {
+      return reply.code(201).send(connections.enqueue(request.params.id, parsed.data));
+    } catch (error) {
+      return sendConnectionError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string; itemId: string } }>("/api/connections/:id/outbox/:itemId/submit", async (request, reply) => {
+    const parsed = connectionGenerationSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_CONNECTION_GENERATION", message: "提交离线操作需要有效的连接代次" });
+    try {
+      return connections.submit(request.params.id, request.params.itemId, parsed.data.generation);
+    } catch (error) {
+      return sendConnectionError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string; itemId: string } }>("/api/connections/:id/outbox/:itemId/resolve", async (request, reply) => {
+    const parsed = connectionOutboxResolveSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_OUTBOX_RESOLUTION", message: "对账参数不正确" });
+    try {
+      return connections.resolveOutbox(request.params.id, request.params.itemId, parsed.data);
+    } catch (error) {
+      return sendConnectionError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/connections/:id/scopes", async (request, reply) => {
+    const parsed = connectionScopesSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_CONNECTION_SCOPES", message: "能力扩权参数不正确" });
+    try {
+      return connections.approveScopes(request.params.id, parsed.data.scopes);
+    } catch (error) {
+      return sendConnectionError(reply, error);
     }
   });
 
@@ -1852,6 +2984,70 @@ export async function buildServer(options: BuildServerOptions = {}) {
     return reply.code(500).send({ error: "BACKUP_FAILED", message: "备份操作失败，请检查服务端日志" });
   };
 
+  app.get("/api/goals", async () => ({ goals: service.listGoals() }));
+
+  app.post("/api/goals", async (request, reply) => {
+    const parsed = createGoalSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: "INVALID_GOAL",
+        message: "目标参数不完整或格式不正确",
+        issues: parsed.error.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message }))
+      });
+    }
+    try {
+      const input: CreateGoalInput = { title: parsed.data.title, objective: parsed.data.objective };
+      if (parsed.data.constraints !== undefined) input.constraints = parsed.data.constraints;
+      if (parsed.data.forbiddenActions !== undefined) input.forbiddenActions = parsed.data.forbiddenActions;
+      if (parsed.data.authoritySources !== undefined) input.authoritySources = parsed.data.authoritySources;
+      if (parsed.data.successCriteria !== undefined) input.successCriteria = parsed.data.successCriteria;
+      if (parsed.data.evidenceRequirements !== undefined) input.evidenceRequirements = parsed.data.evidenceRequirements;
+      if (parsed.data.budget !== undefined) input.budget = normalizeGoalBudget(parsed.data.budget);
+      if (parsed.data.deadline !== undefined) input.deadline = parsed.data.deadline;
+      if (parsed.data.stopConditions !== undefined) input.stopConditions = parsed.data.stopConditions;
+      if (parsed.data.reviewPolicy !== undefined) input.reviewPolicy = parsed.data.reviewPolicy;
+      if (parsed.data.currentState !== undefined) input.currentState = parsed.data.currentState;
+      return reply.code(201).send(service.createGoal(input));
+    } catch (error) {
+      return reply.code(400).send({ error: "INVALID_GOAL", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/api/goals/:id", async (request, reply) => {
+    const goal = service.getGoal(request.params.id);
+    if (!goal) return reply.code(404).send({ error: "GOAL_NOT_FOUND", message: "目标不存在" });
+    return { goal, completionReports: store.listGoalCompletionReports(goal.goalId) };
+  });
+
+  app.patch<{ Params: { id: string } }>("/api/goals/:id", async (request, reply) => {
+    const parsed = updateGoalSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "INVALID_GOAL", message: "目标更新参数不正确" });
+    }
+    if (!service.getGoal(request.params.id)) {
+      return reply.code(404).send({ error: "GOAL_NOT_FOUND", message: "目标不存在" });
+    }
+    try {
+      const patch: Parameters<HearthService["updateGoal"]>[1] = {};
+      if (parsed.data.title !== undefined) patch.title = parsed.data.title;
+      if (parsed.data.objective !== undefined) patch.objective = parsed.data.objective;
+      if (parsed.data.constraints !== undefined) patch.constraints = parsed.data.constraints;
+      if (parsed.data.forbiddenActions !== undefined) patch.forbiddenActions = parsed.data.forbiddenActions;
+      if (parsed.data.authoritySources !== undefined) patch.authoritySources = parsed.data.authoritySources;
+      if (parsed.data.successCriteria !== undefined) patch.successCriteria = parsed.data.successCriteria;
+      if (parsed.data.evidenceRequirements !== undefined) patch.evidenceRequirements = parsed.data.evidenceRequirements;
+      if (parsed.data.budget !== undefined) patch.budget = normalizeGoalBudget(parsed.data.budget);
+      if (parsed.data.deadline !== undefined) patch.deadline = parsed.data.deadline;
+      if (parsed.data.stopConditions !== undefined) patch.stopConditions = parsed.data.stopConditions;
+      if (parsed.data.reviewPolicy !== undefined) patch.reviewPolicy = parsed.data.reviewPolicy;
+      if (parsed.data.currentState !== undefined) patch.currentState = parsed.data.currentState;
+      if (parsed.data.nextHandoff !== undefined) patch.nextHandoff = parsed.data.nextHandoff;
+      return service.updateGoal(request.params.id, patch);
+    } catch (error) {
+      return reply.code(400).send({ error: "INVALID_GOAL", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
   app.post("/api/tasks", async (request, reply) => {
     const parsed = createTaskSchema.safeParse(request.body ?? {});
     if (!parsed.success) {
@@ -1875,8 +3071,12 @@ export async function buildServer(options: BuildServerOptions = {}) {
     if (parsed.data.taskKind !== undefined) input.taskKind = parsed.data.taskKind;
     if (parsed.data.expectedOutputs !== undefined) input.expectedOutputs = parsed.data.expectedOutputs;
     if (parsed.data.permissions !== undefined) input.permissions = parsed.data.permissions;
+    if (parsed.data.goalId !== undefined) input.goalId = parsed.data.goalId;
     if (input.templateId && !getTemplate(input.templateId)) {
       return reply.code(400).send({ error: "UNKNOWN_TEMPLATE", message: `没有找到任务模板 ${input.templateId}` });
+    }
+    if (input.goalId && !service.getGoal(input.goalId)) {
+      return reply.code(400).send({ error: "UNKNOWN_GOAL", message: `没有找到目标 ${input.goalId}` });
     }
     if (parsed.data.methodId !== undefined) {
       try {
@@ -1971,6 +3171,47 @@ export async function buildServer(options: BuildServerOptions = {}) {
     return service.listEffectItems(pageOptions(parsed.data));
   });
 
+  app.get<{ Querystring: Record<string, string> }>("/api/reconcile", async (request, reply) => {
+    const parsed = reconcileQuerySchema.safeParse(request.query ?? {});
+    if (!parsed.success) return invalidQuery(reply);
+    reply.header("cache-control", "no-store");
+    const items = reconcile.list(parsed.data.status);
+    return { items, total: items.length };
+  });
+
+  app.post<{ Params: { id: string } }>("/api/reconcile/:id/check", async (request, reply) => {
+    try {
+      reply.header("cache-control", "no-store");
+      return await reconcile.check(request.params.id);
+    } catch (error) {
+      return sendReconcileError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string }; Body: unknown }>("/api/reconcile/:id/resolve", async (request, reply) => {
+    const parsed = reconcileResolveSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "INVALID_RECONCILE_RESOLUTION", message: "请选择已提交、未执行或放弃，并填写核对说明。" });
+    }
+    try {
+      return reconcile.resolveManually(request.params.id, parsed.data.resolution, parsed.data.note);
+    } catch (error) {
+      return sendReconcileError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string }; Body: unknown }>("/api/reconcile/:id/task", async (request, reply) => {
+    const parsed = reconcileTaskSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "INVALID_RECONCILE_TASK", message: "人工任务说明过长或格式不正确。" });
+    }
+    try {
+      return reply.code(201).send(reconcile.createTask(request.params.id, parsed.data.note ?? ""));
+    } catch (error) {
+      return sendReconcileError(reply, error);
+    }
+  });
+
   app.get("/api/stats", async (request, reply) => {
     reply.header("cache-control", "no-store");
     return service.stats();
@@ -2016,6 +3257,108 @@ export async function buildServer(options: BuildServerOptions = {}) {
       limit: parsed.data.limit ?? 50,
       beforeSeq: parsed.data.before ?? null
     });
+  });
+
+  app.get<{ Params: { id: string } }>("/api/tasks/:id/delegations", async (request, reply) => {
+    if (!store.getTask(request.params.id)) {
+      return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    }
+    reply.header("cache-control", "no-store");
+    return { delegations: delegations.list(request.params.id) };
+  });
+
+  app.post<{ Params: { id: string } }>("/api/tasks/:id/delegations", async (request, reply) => {
+    if (!store.getTask(request.params.id)) {
+      return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    }
+    const parsed = createDelegationSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: "INVALID_DELEGATION",
+        message: "委派参数不正确",
+        issues: parsed.error.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message }))
+      });
+    }
+    try {
+      const input: CreateDelegationInput = {
+        parentTaskId: request.params.id,
+        goalSlice: parsed.data.goalSlice,
+        targetExecutor: parsed.data.targetExecutor,
+        contextPackRef: parsed.data.contextPackRef,
+        idempotencyKey: parsed.data.idempotencyKey
+      };
+      if (parsed.data.contextPack !== undefined) input.contextPack = parsed.data.contextPack;
+      if (parsed.data.workspacePolicy !== undefined) input.workspacePolicy = parsed.data.workspacePolicy;
+      if (parsed.data.toolPolicy !== undefined) input.toolPolicy = parsed.data.toolPolicy;
+      if (parsed.data.networkPolicy !== undefined) input.networkPolicy = parsed.data.networkPolicy;
+      if (parsed.data.budget !== undefined) {
+        input.budget = {
+          ...(parsed.data.budget.tokens !== undefined ? { tokens: parsed.data.budget.tokens } : {}),
+          ...(parsed.data.budget.wallClockMs !== undefined ? { wallClockMs: parsed.data.budget.wallClockMs } : {}),
+          ...(parsed.data.budget.maxSteps !== undefined ? { maxSteps: parsed.data.budget.maxSteps } : {})
+        };
+      }
+      if (parsed.data.deadline !== undefined) input.deadline = parsed.data.deadline;
+      if (parsed.data.resultSchemaRef !== undefined) input.resultSchemaRef = parsed.data.resultSchemaRef;
+      if (parsed.data.requestedPermissions !== undefined) input.requestedPermissions = parsed.data.requestedPermissions;
+      if (parsed.data.createChildTask !== undefined) input.createChildTask = parsed.data.createChildTask;
+      return reply.code(201).send(delegations.create(input));
+    } catch (error) {
+      return sendDelegationFailure(reply, error);
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/api/delegations/:id", async (request, reply) => {
+    const job = store.getDelegationJob(request.params.id);
+    if (!job) return reply.code(404).send({ error: "DELEGATION_NOT_FOUND", message: "委派不存在" });
+    reply.header("cache-control", "no-store");
+    return job;
+  });
+
+  app.post<{ Params: { id: string } }>("/api/delegations/:id/verify", async (request, reply) => {
+    const job = store.getDelegationJob(request.params.id);
+    if (!job) return reply.code(404).send({ error: "DELEGATION_NOT_FOUND", message: "委派不存在" });
+    const parsed = verifyDelegationSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "INVALID_DELEGATION_VERIFICATION", message: "验收参数不正确" });
+    }
+    try {
+      return delegations.verify(job.id, {
+        parentTaskId: job.parentTaskId,
+        verdict: parsed.data.verdict,
+        summary: parsed.data.summary,
+        evidenceRefs: parsed.data.evidenceRefs,
+        checkedAt: parsed.data.checkedAt ?? new Date().toISOString()
+      });
+    } catch (error) {
+      return sendDelegationFailure(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/delegations/:id/cancel", async (request, reply) => {
+    const job = store.getDelegationJob(request.params.id);
+    if (!job) return reply.code(404).send({ error: "DELEGATION_NOT_FOUND", message: "委派不存在" });
+    const parsed = cancelDelegationSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "INVALID_DELEGATION_CANCEL", message: "取消原因不正确" });
+    }
+    try {
+      const cancelled = delegations.cancel(job.id, parsed.data.reason);
+      if (scheduler && cancelled.childTaskId) scheduler.cancel(cancelled.childTaskId);
+      return cancelled;
+    } catch (error) {
+      return sendDelegationFailure(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/delegations/:id/retry", async (request, reply) => {
+    const job = store.getDelegationJob(request.params.id);
+    if (!job) return reply.code(404).send({ error: "DELEGATION_NOT_FOUND", message: "委派不存在" });
+    try {
+      return delegations.retry(job.id);
+    } catch (error) {
+      return sendDelegationFailure(reply, error);
+    }
   });
 
   app.get<{ Params: { id: string } }>("/api/tasks/:id/handoffs", async (request, reply) => {
@@ -2318,6 +3661,20 @@ export async function buildServer(options: BuildServerOptions = {}) {
   return app;
 }
 
+function sendDelegationFailure(reply: FastifyReply, error: unknown) {
+  if (error instanceof DelegationError) {
+    return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+  }
+  if (error instanceof SandboxError) {
+    return reply.code(error.statusCode).send({
+      error: error.code,
+      message: error.message,
+      failureClass: error.failureClass
+    });
+  }
+  throw error;
+}
+
 function parseAfterSeq(value: string | undefined): number | null {
   if (value === undefined || value === "") return 0;
   if (!/^\d+$/.test(value)) return null;
@@ -2339,6 +3696,13 @@ function pageOptions(query: {
 
 function invalidQuery(reply: FastifyReply) {
   return reply.code(400).send({ error: "INVALID_QUERY", message: "分页参数不正确" });
+}
+
+function sendReconcileError(reply: FastifyReply, error: unknown) {
+  if (error instanceof ReconcileError) {
+    return reply.code(error.code === "RECONCILE_NOT_FOUND" ? 404 : 409).send({ error: error.code, message: error.message });
+  }
+  throw error;
 }
 
 function sendSourceError(reply: FastifyReply, error: unknown) {
@@ -2387,6 +3751,13 @@ function sendMethodError(reply: FastifyReply, error: unknown) {
   throw error;
 }
 
+function sendSkillError(reply: FastifyReply, error: unknown) {
+  if (error instanceof SkillPackageError) {
+    return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+  }
+  throw error;
+}
+
 function sendSyncError(reply: FastifyReply, error: unknown) {
   if (error instanceof SyncError) {
     return reply.code(error.statusCode).send({ error: error.code, message: error.message });
@@ -2400,8 +3771,22 @@ function syncBearerToken(value: string | string[] | undefined): string {
   return header.slice(7).trim();
 }
 
+function sendStandingIntentError(reply: FastifyReply, error: unknown) {
+  if (error instanceof StandingIntentError) {
+    return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+  }
+  throw error;
+}
+
 function sendProactiveError(reply: FastifyReply, error: unknown) {
   if (error instanceof ProactiveError) {
+    return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+  }
+  throw error;
+}
+
+function sendConnectionError(reply: FastifyReply, error: unknown) {
+  if (error instanceof ConnectionError) {
     return reply.code(error.statusCode).send({ error: error.code, message: error.message });
   }
   throw error;

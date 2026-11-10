@@ -1,0 +1,1 @@
+{"itemCount":3,"exceptionCount":1,"items":[{"sku":"A-1","name":"传感器","qty":10},{"sku":"A-2","name":"控制器","qty":5},{"sku":"A-3","name":null,"qty":2}],"exceptions":[{"row":3,"field":"name","issue":"缺失"}]}

@@ -9,6 +9,8 @@ import { DevicesPage } from "./pages/DevicesPage.tsx";
 import { InboxPage } from "./pages/InboxPage.tsx";
 import { MailPage } from "./pages/MailPage.tsx";
 import { OnboardingPage } from "./pages/OnboardingPage.tsx";
+import { PersonalPage } from "./pages/PersonalPage.tsx";
+import { RuntimePage } from "./pages/RuntimePage.tsx";
 import { SettingsPage } from "./pages/SettingsPage.tsx";
 import { SchedulesPage } from "./pages/SchedulesPage.tsx";
 import { TaskDetailPage } from "./pages/TaskDetailPage.tsx";
@@ -27,6 +29,8 @@ export default function App() {
             <Route path="tasks" element={<TasksPage />} />
             <Route path="tasks/:id" element={<TaskDetailPage />} />
             <Route path="inbox" element={<InboxPage />} />
+            <Route path="personal" element={<PersonalPage />} />
+            <Route path="runtime" element={<RuntimePage />} />
             <Route path="memory" element={<Navigate to="/settings?tab=automation" replace />} />
             <Route path="mail" element={<MailPage />} />
             <Route path="methods" element={<Navigate to="/settings?tab=automation" replace />} />
@@ -72,8 +76,25 @@ function EventBridge() {
         void queryClient.invalidateQueries({ queryKey: ["proactive"] });
         void queryClient.invalidateQueries({ queryKey: ["memory"] });
         void queryClient.invalidateQueries({ queryKey: ["approvals"] });
+        void queryClient.invalidateQueries({ queryKey: ["reconcile"] });
         void queryClient.invalidateQueries({ queryKey: ["outbox"] });
         void queryClient.invalidateQueries({ queryKey: ["sources"] });
+        if (event === "prepared-action.updated") {
+          void queryClient.invalidateQueries({ queryKey: ["prepared-actions"] });
+        }
+        if (event === "tool.job.updated") {
+          void queryClient.invalidateQueries({ queryKey: ["background-tools"] });
+          void queryClient.invalidateQueries({ queryKey: ["watchdog"] });
+        }
+        if (event === "thread-subscription.updated") {
+          void queryClient.invalidateQueries({ queryKey: ["thread-subscriptions"] });
+        }
+        if (event === "watchdog.recorded") {
+          void queryClient.invalidateQueries({ queryKey: ["watchdog"] });
+        }
+        if (event === "intake.recorded") {
+          void queryClient.invalidateQueries({ queryKey: ["intake"] });
+        }
         if (event.startsWith("effect.")) {
           void queryClient.invalidateQueries({ queryKey: ["task"] });
         }

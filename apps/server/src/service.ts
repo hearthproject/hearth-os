@@ -16,7 +16,11 @@ import type {
   EffectRecord,
   EventWindow,
   ExecutorId,
+  GoalCompletionReport,
+  GoalContract,
+  GoalState,
   OutboxDraft,
+  ReconcileItem,
   RunListItem,
   RunBudget,
   RunCheckpointRecord,
@@ -41,6 +45,8 @@ import { executorName, resolveExecutorFromEnabled } from "./executors.ts";
 import { buildTaskStatusMessage } from "./task-status-messages.ts";
 
 export interface CreateTaskInput {
+  externalRef?: string;
+  requestHash?: string;
   templateId?: string;
   title?: string;
   goal?: string;
@@ -55,8 +61,25 @@ export interface CreateTaskInput {
   taskKind?: TaskKind;
   expectedOutputs?: string[];
   permissions?: TaskPermissions;
+  outputDir?: string;
   methodId?: string;
   methodVersion?: number;
+  goalId?: string;
+}
+
+export interface CreateGoalInput {
+  title: string;
+  objective: string;
+  constraints?: string[];
+  forbiddenActions?: string[];
+  authoritySources?: GoalContract["authoritySources"];
+  successCriteria?: GoalContract["successCriteria"];
+  evidenceRequirements?: string[];
+  budget?: GoalContract["budget"];
+  deadline?: string;
+  stopConditions?: string[];
+  reviewPolicy?: GoalContract["reviewPolicy"];
+  currentState?: GoalState;
 }
 
 export class TaskInputSelectionError extends Error {
@@ -73,6 +96,8 @@ export class TaskInputSelectionError extends Error {
 
 export interface TaskView {
   task: TaskRecord;
+  goal: GoalContract | null;
+  completionReport: GoalCompletionReport | null;
   runs: ReturnType<HearthStore["listRuns"]>;
   approvals: ReturnType<HearthStore["listApprovals"]>;
   artifacts: ReturnType<HearthStore["listArtifacts"]>;
@@ -102,6 +127,7 @@ export interface ExportSnapshot {
   effects: EffectRecord[];
   followUps: TaskFollowUpRecord[];
   outboxDrafts: OutboxDraft[];
+  goals: GoalContract[];
   events: ReturnType<HearthStore["listEvents"]>;
 }
 
@@ -176,10 +202,13 @@ export class HearthService {
     }
     if (input.textInput) inputs.push({ kind: "text", label: "用户请求", value: input.textInput });
     const executorId = input.executorId ?? (template ? "codex" : "native");
+    if (input.goalId && !this.store.getGoal(input.goalId)) throw new Error(`Unknown goal: ${input.goalId}`);
     const taskKind = input.taskKind ?? (template?.github ? "workspace" : "general");
     const expectedOutputs = input.expectedOutputs ?? template?.expectedOutputs ?? ["result.md"];
     const task: TaskRecord = {
       id,
+      goalId: input.goalId ?? null,
+      ...(input.externalRef ? { externalRef: input.externalRef, requestHash: input.requestHash ?? null } : {}),
       templateId: template?.id ?? null,
       title: input.title?.trim() || template?.title || "未命名任务",
       goal: input.goal?.trim() || template?.goal || input.textInput?.trim() || "完成用户描述的任务",
@@ -189,7 +218,7 @@ export class HearthService {
       deadline: null,
       inputs,
       networkHosts,
-      outputDir: template?.outputDir ?? `.hearth/artifacts/${id}`,
+      outputDir: input.outputDir ?? template?.outputDir ?? `.hearth/artifacts/${id}`,
       currentRunId: null,
       nextAction: "等待执行",
       error: null,
@@ -215,6 +244,66 @@ export class HearthService {
     return this.store.listTasks();
   }
 
+  createGoal(input: CreateGoalInput): GoalContract {
+    const now = new Date().toISOString();
+    const criteria = input.successCriteria ?? [];
+    const criterionIds = new Set<string>();
+    for (const criterion of criteria) {
+      if (!criterion.id.trim()) throw new Error("Goal criterion id is required");
+      if (criterionIds.has(criterion.id)) throw new Error(`Duplicate goal criterion: ${criterion.id}`);
+      criterionIds.add(criterion.id);
+      if (!criterion.description.trim() || !criterion.check.trim()) throw new Error("Goal criterion description and check are required");
+    }
+    const goal: GoalContract = {
+      goalId: randomUUID(),
+      title: input.title.trim(),
+      objective: input.objective.trim(),
+      constraints: input.constraints ?? [],
+      forbiddenActions: input.forbiddenActions ?? [],
+      authoritySources: input.authoritySources ?? [{ kind: "user", ref: "local-user" }],
+      successCriteria: criteria,
+      evidenceRequirements: input.evidenceRequirements ?? [],
+      budget: input.budget ?? {},
+      ...(input.deadline ? { deadline: input.deadline } : {}),
+      stopConditions: input.stopConditions ?? [],
+      reviewPolicy: input.reviewPolicy ?? "human_on_risk",
+      currentState: input.currentState ?? "draft",
+      createdAt: now,
+      updatedAt: now
+    };
+    if (!goal.title || !goal.objective) throw new Error("Goal title and objective are required");
+    const event = this.store.appendEvent({ type: "goal.created", payload: goal });
+    this.bus.publish(event);
+    return goal;
+  }
+
+  getGoal(goalId: string): GoalContract | null {
+    return this.store.getGoal(goalId);
+  }
+
+  listGoals(): GoalContract[] {
+    return this.store.listGoals();
+  }
+
+  updateGoal(goalId: string, patch: Partial<Omit<GoalContract, "goalId" | "createdAt" | "updatedAt">>): GoalContract {
+    const current = this.store.getGoal(goalId);
+    if (!current) throw new Error(`Unknown goal: ${goalId}`);
+    const updated: GoalContract = { ...current, ...patch, goalId, updatedAt: new Date().toISOString() };
+    const event = this.store.appendEvent({ type: "goal.updated", payload: updated });
+    this.bus.publish(event);
+    return this.store.getGoal(goalId) ?? updated;
+  }
+
+  recordCompletionReport(report: GoalCompletionReport): GoalCompletionReport {
+    const event = this.store.appendEvent({ type: "goal.completion.recorded", taskId: report.taskId, payload: report });
+    this.bus.publish(event);
+    return report;
+  }
+
+  latestCompletionReport(goalId: string): GoalCompletionReport | null {
+    return this.store.latestGoalCompletionReport(goalId);
+  }
+
   exportSnapshot(): ExportSnapshot {
     const tasks = this.store.listTasks();
     return {
@@ -228,6 +317,7 @@ export class HearthService {
       effects: this.store.listAllEffects(),
       followUps: tasks.flatMap((task) => this.store.listTaskFollowUps(task.id)),
       outboxDrafts: this.store.listOutboxDrafts(),
+      goals: this.store.listGoals(),
       events: this.store.listEvents(0)
     };
   }
@@ -239,6 +329,8 @@ export class HearthService {
     const runs = this.store.listRuns(taskId);
     return {
       task,
+      goal: task.goalId ? this.store.getGoal(task.goalId) : null,
+      completionReport: task.goalId ? this.store.latestGoalCompletionReport(task.goalId) : null,
       runs,
       approvals: this.store.listApprovals(taskId),
       artifacts: this.store.listArtifacts(taskId),
@@ -349,7 +441,7 @@ export class HearthService {
     return new Map(this.store.listTasks().map((task) => [task.id, task.title]));
   }
 
-  updateTask(taskId: string, patch: Partial<Pick<TaskRecord, "status" | "title" | "goal" | "currentRunId" | "nextAction" | "error" | "resultSummary" | "conversationId" | "executorId" | "taskKind" | "expectedOutputs" | "permissions" | "pendingInput" | "methodId" | "methodVersion" | "pinnedAt" | "archivedAt">>, runId?: string): TaskRecord {
+  updateTask(taskId: string, patch: Partial<Pick<TaskRecord, "status" | "title" | "goal" | "goalId" | "currentRunId" | "nextAction" | "error" | "resultSummary" | "conversationId" | "executorId" | "taskKind" | "expectedOutputs" | "permissions" | "pendingInput" | "methodId" | "methodVersion" | "pinnedAt" | "archivedAt">>, runId?: string): TaskRecord {
     const task = this.requireTask(taskId);
     if (patch.status && patch.status !== task.status) assertTransition(task.status, patch.status);
     const previousStatus = task.status;
@@ -652,7 +744,10 @@ export class HearthService {
 
   updateApproval(
     approvalId: string,
-    patch: Partial<Pick<ApprovalRecord, "status" | "decidedAt" | "effectId">>
+    patch: Partial<Pick<ApprovalRecord,
+      "status" | "decidedAt" | "effectId" | "goalId" | "actionDigest" | "permissionMode" |
+      "context" | "maxUses" | "usedCount" | "approvedBy" | "issuedAt" | "revokedAt" |
+      "action" | "rejectionCount">>
   ): ApprovalRecord {
     const current = this.store.getApproval(approvalId);
     if (!current) throw new Error(`Approval not found: ${approvalId}`);
@@ -680,7 +775,11 @@ export class HearthService {
 
   updateEffect(
     effectId: string,
-    patch: Partial<Pick<EffectRecord, "status" | "receipt" | "error" | "updatedAt">>
+    patch: Partial<Pick<EffectRecord,
+      "status" | "receipt" | "error" | "updatedAt" | "goalId" | "effectType" |
+      "replayPolicy" | "actionDigest" | "resolvedActionDigest" | "attemptCount" |
+      "maxAttempts" | "leaseOwner" | "leaseExpiresAt" | "availableAt" | "provider" |
+      "providerRef" | "reconcileRef" | "reconciledAt" | "targetKey" | "suspendReason">>
   ): EffectRecord {
     const current = this.store.getEffect(effectId);
     if (!current) throw new Error(`Effect not found: ${effectId}`);
@@ -692,6 +791,39 @@ export class HearthService {
     this.bus.publish(event);
     const updated = this.store.getEffect(effectId);
     if (!updated) throw new Error(`Effect projection missing: ${effectId}`);
+    return updated;
+  }
+
+  createReconcileItem(item: ReconcileItem): ReconcileItem {
+    const event = this.store.appendEvent({
+      type: "reconcile.opened",
+      taskId: item.taskId,
+      payload: item
+    });
+    this.bus.publish(event);
+    return item;
+  }
+
+  updateReconcileItem(
+    itemId: string,
+    patch: Partial<Pick<ReconcileItem,
+      "status" | "reason" | "attempted" | "suggestedActions" | "checkCount" |
+      "resolutionNote" | "updatedAt" | "resolvedAt">>
+  ): ReconcileItem {
+    const current = this.store.getReconcileItem(itemId);
+    if (!current) throw new Error(`Reconcile item not found: ${itemId}`);
+    const next: ReconcileItem = { ...current, ...patch };
+    const type = patch.status === "resolved_committed" || patch.status === "resolved_absent" || patch.status === "abandoned"
+      ? "reconcile.resolved"
+      : "reconcile.updated";
+    const event = this.store.appendEvent({
+      type,
+      taskId: current.taskId,
+      payload: next
+    });
+    this.bus.publish(event);
+    const updated = this.store.getReconcileItem(itemId);
+    if (!updated) throw new Error(`Reconcile projection missing: ${itemId}`);
     return updated;
   }
 

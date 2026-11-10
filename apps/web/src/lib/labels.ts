@@ -39,16 +39,24 @@ export const RUN_STATUS_LABELS: Record<RunStatus, string> = {
 
 export const EFFECT_STATUS_LABELS: Record<EffectRecord["status"], string> = {
   pending: "待执行",
+  prepared: "已准备",
+  admitted: "已准入",
   executing: "执行中",
+  committed: "已提交",
   succeeded: "已完成",
   failed: "失败",
-  uncertain: "结果不确定"
+  uncertain: "结果不确定",
+  reconciled_committed: "对账确认已提交",
+  reconciled_absent: "对账确认未执行",
+  abandoned: "已放弃"
 };
 
 export const APPROVAL_STATUS_LABELS: Record<ApprovalRecord["status"], string> = {
   pending: "等你决定",
   approved: "已批准",
   rejected: "已拒绝",
+  consumed: "已使用",
+  revoked: "已撤销",
   expired: "已过期"
 };
 

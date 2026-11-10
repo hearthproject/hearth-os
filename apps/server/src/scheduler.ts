@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, relative } from "node:path";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import type {
   AgentCheckpoint,
   AgentResumeState,
@@ -8,18 +8,23 @@ import type {
   AgentToolAuthorizationRequest,
   RuntimeEvent
 } from "@hearth/agent-runtime";
-import type { ContextItem, ContextSettings, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, MethodCandidate, MethodSelection, RunBudget, RunCheckpointRecord, RunRecord, TaskError, TaskFollowUpRecord, TaskLease, TaskProgressDetail, TaskRecord } from "@hearth/core";
+import type { ContextItem, ContextSettings, DelegationJob, DelegationResult, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, MethodCandidate, MethodSelection, RunBudget, RunCheckpointProof, RunCheckpointRecord, RunRecord, TaskError, TaskFollowUpRecord, TaskLease, TaskProgressDetail, TaskRecord } from "@hearth/core";
 import { runCodex } from "@hearth/codex-executor";
 import { getTemplate } from "@hearth/templates";
 import type { DshApprovalOutcome, DshApprovalRequest, DshContextEvent } from "@hearth/deepseek-executor";
 import type { ApprovalRequest, ApprovalManager, PendingToolApproval, ToolApprovalDecision } from "./approvals.ts";
-import { missingExpectedOutputs, publishArtifacts } from "./artifacts.ts";
+import { actionDigest, resolveAction, type ActionFileTarget, type ActionProposal, type ResolvedAction } from "./action-resolver.ts";
+import { createFileArtifact, missingExpectedOutputs, publishArtifacts } from "./artifacts.ts";
 import { CONTEXT_BLOB_DIR, EXECUTOR_SETTINGS_PATH, GIT_CACHE_DIR, MODEL_SETTINGS_PATH, REPO_ROOT, SOURCE_CONTENT_DIR, WORKSPACE_DIR } from "./config.ts";
 import { ContextService, estimateTokens } from "./context.ts";
+import { DelegationError, DelegationService } from "./delegation.ts";
+import type { BackgroundToolService } from "./background-tools.ts";
 import { diagnoseFailure } from "./context-diagnosis.ts";
 import { classifyFailure, decideFailure, evaluateHandoff, isExecutorFailureCause, type FailureDecision } from "./context-policy.ts";
+import { judgeCompletion, type GoalValidatorRunner } from "./completion-judge.ts";
 import { ContextProjector } from "./context-projector.ts";
 import { maybeModelSummary } from "./context-summary.ts";
+import { HandoffService } from "./handoff.ts";
 import { loadExecutorSettings } from "./executor-settings.ts";
 import { HermesApprovalRequiredError, HermesStartupError } from "./hermes-executor.ts";
 import type { ExternalContextItem } from "./external-executor.ts";
@@ -27,12 +32,19 @@ import { executorHealth as readExecutorHealth } from "./executor-runtime.ts";
 import { sanitizeProgressDetail } from "./progress-detail.ts";
 import { EXECUTOR_FALLBACK_ORDER, executorName, resolveExecutorId } from "./executors.ts";
 import { extractProposedComment, inspectRepository, readPrPreview, validatePullRequestPreview } from "./github.ts";
+import { canBlindRetry, classifyFailureClass, decideDisposition } from "./failure-policy.ts";
 import type { CommandRunner } from "./github.ts";
 import { MemoryService } from "./memory.ts";
 import { renderMethodBlock } from "./method-context.ts";
 import { MethodService } from "./methods.ts";
 import { DEFAULT_LEASE_HEARTBEAT_MS, LeaseError, TaskLeaseService } from "./leases.ts";
+import { SandboxService } from "./sandbox.ts";
+import { TOOL_APPROVAL_REQUIRED, toolApprovalSummary } from "./tool-policy.ts";
 import { DEFAULT_RUN_BUDGET, runNativeTask } from "./native-executor.ts";
+import { ContextBroker } from "./context-broker.ts";
+import { OntologyService } from "./ontology.ts";
+import { createPersonalReadTools } from "./personal-tools.ts";
+import { OntologyWriter } from "./ontology-writer.ts";
 import { chatModelConfigured, loadModelSettings, type ModelSettings } from "./model-settings.ts";
 import { prepareTaskRuntime, type RuntimePreparation } from "./runtime.ts";
 import type { HearthService } from "./service.ts";
@@ -57,6 +69,16 @@ interface AttemptResult {
   queuedFollowUp?: boolean;
 }
 
+interface GoalBoundaryStop {
+  code: "deadline_reached" | "budget_exhausted" | "effect_uncertain" | "declared_stop";
+  currentState: "blocked" | "awaiting_user";
+  message: string;
+  nextAction: string;
+  handoff: string;
+  failureClass: NonNullable<TaskError["failureClass"]>;
+  cause: NonNullable<TaskError["cause"]>;
+}
+
 export interface SchedulerOptions {
   service: HearthService;
   repoRoot?: string;
@@ -76,6 +98,8 @@ export interface SchedulerOptions {
   runBudget?: RunBudget;
   approvals?: ApprovalManager;
   leases?: TaskLeaseService;
+  delegations?: DelegationService;
+  backgroundTools?: BackgroundToolService;
   leaseHeartbeatMs?: number;
   githubRun?: CommandRunner | undefined;
   githubCacheRoot?: string | undefined;
@@ -85,6 +109,10 @@ export interface SchedulerOptions {
   contextBlobRoot?: string | undefined;
   methods?: MethodService | undefined;
   autoLearn?: boolean | undefined;
+  sandbox?: SandboxService | undefined;
+  completionValidators?: Record<string, GoalValidatorRunner> | undefined;
+  contextBroker?: ContextBroker | undefined;
+  ontologyWriter?: OntologyWriter | undefined;
 }
 
 export class HearthScheduler {
@@ -112,11 +140,19 @@ export class HearthScheduler {
   private readonly memory: MemoryService;
   private readonly methods: MethodService;
   private readonly autoLearn: boolean;
+  private readonly sandbox: SandboxService;
+  private readonly completionValidators: Record<string, GoalValidatorRunner> | null;
   private readonly context: ContextService;
+  private readonly contextBroker: ContextBroker | undefined;
+  private readonly ontology: OntologyService;
+  private readonly ontologyWriter: OntologyWriter;
   private readonly projector: ContextProjector;
+  private readonly handoffs: HandoffService;
   private readonly summaryTasks = new Set<Promise<void>>();
   private readonly summaryControllers = new Map<string, AbortController>();
   private readonly leases: TaskLeaseService;
+  private readonly delegations: DelegationService;
+  private readonly backgroundTools: BackgroundToolService | undefined;
   private readonly leaseHeartbeatMs: number;
   private readonly leaseHeartbeats = new Map<string, { epoch: number; timer: ReturnType<typeof setInterval> }>();
   private readonly controllers = new Map<string, AbortController>();
@@ -165,12 +201,23 @@ export class HearthScheduler {
     this.memory = new MemoryService(this.service);
     this.methods = options.methods ?? new MethodService(this.service);
     this.autoLearn = options.autoLearn ?? true;
+    this.completionValidators = options.completionValidators ?? null;
     this.context = options.context ?? new ContextService(this.service, options.contextBlobRoot ?? CONTEXT_BLOB_DIR);
-    this.projector = new ContextProjector(this.service, this.context);
+    this.contextBroker = options.contextBroker;
+    this.ontology = new OntologyService(this.service);
+    this.ontologyWriter = options.ontologyWriter ?? new OntologyWriter(this.service, this.ontology);
+    this.projector = new ContextProjector(this.service, this.context, options.contextBroker);
+    this.handoffs = new HandoffService(this.service, this.context);
     this.service.setContextSink((message) => {
       if (this.context.settings().mode !== "off") this.context.recordChatMessage(message);
     });
     this.leases = options.leases ?? new TaskLeaseService(this.service);
+    this.sandbox = options.sandbox ?? new SandboxService();
+    this.backgroundTools = options.backgroundTools;
+    this.delegations = options.delegations ?? new DelegationService({
+      service: this.service,
+      sandbox: this.sandbox
+    });
     this.leaseHeartbeatMs = Math.max(50, options.leaseHeartbeatMs ?? DEFAULT_LEASE_HEARTBEAT_MS);
   }
 
@@ -182,6 +229,7 @@ export class HearthScheduler {
     if (!this.stopped) return;
     this.stopped = false;
     this.stopping = false;
+    this.delegations.recoverOrphans();
     this.recoverInterruptedTasks();
     this.resumeWaitingApprovalLeases();
     this.unsubscribe = this.service.bus.subscribe((event) => {
@@ -316,8 +364,14 @@ export class HearthScheduler {
 
   cancel(taskId: string): TaskRecord {
     const task = this.service.requireTask(taskId);
-    if (task.status === "completed" || task.status === "cancelled") return task;
+    if (task.status === "completed") return task;
+    if (task.status === "cancelled") {
+      this.controllers.get(taskId)?.abort();
+      this.releaseLease(taskId);
+      return task;
+    }
     this.cancelled.add(taskId);
+    this.cancelDelegationJobs(taskId);
     this.steering.delete(taskId);
     for (const followUp of this.service.store.listTaskFollowUps(taskId)) {
       if (followUp.status === "queued" || followUp.status === "steering") {
@@ -334,6 +388,27 @@ export class HearthScheduler {
     }, task.currentRunId ?? undefined);
     this.releaseLease(taskId);
     return this.service.requireTask(taskId);
+  }
+
+  private cancelDelegationJobs(taskId: string): void {
+    const jobs = [...this.service.store.listDelegationJobs(taskId)];
+    const childJob = this.service.store.getDelegationJobByChildTask(taskId);
+    if (childJob) jobs.push(childJob);
+    const seen = new Set<string>();
+    for (const job of jobs) {
+      if (seen.has(job.id) || job.status === "succeeded") continue;
+      seen.add(job.id);
+      try {
+        this.delegations.cancel(job.id, "任务已取消");
+        if (job.childTaskId) {
+          this.cancelled.add(job.childTaskId);
+          this.controllers.get(job.childTaskId)?.abort();
+          this.approvals?.expireForTask(job.childTaskId);
+        }
+      } catch {
+        // Cancellation is best effort; the parent task cancellation still fences new effects.
+      }
+    }
   }
 
   retry(taskId: string, input?: string): TaskRecord {
@@ -428,9 +503,22 @@ export class HearthScheduler {
     );
     queued.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
     let started = 0;
+    const scheduledDelegationExecutors = new Set<ExecutorId>();
     for (const task of queued) {
       if (this.stopped) break;
+      if (this.enforceGoalBoundary(task)) continue;
       const executorId = resolveExecutorId(task);
+      const delegationJob = this.service.store.getDelegationJobByChildTask(task.id);
+      if (delegationJob) {
+        if (delegationJob.status !== "queued") continue;
+        if (scheduledDelegationExecutors.has(delegationJob.targetExecutor)) continue;
+        const executorBusy = this.service.store.listActiveDelegationJobs().some((candidate) =>
+          candidate.id !== delegationJob.id
+          && candidate.targetExecutor === delegationJob.targetExecutor
+          && ["leased", "running"].includes(candidate.status)
+        );
+        if (executorBusy) continue;
+      }
       const active = this.activeByExecutor.get(executorId) ?? new Set<string>();
       const limit = Math.max(1, settings.concurrency[executorId] ?? 1);
       if (active.size >= limit) continue;
@@ -449,6 +537,7 @@ export class HearthScheduler {
         ]);
         continue;
       }
+      if (delegationJob) scheduledDelegationExecutors.add(delegationJob.targetExecutor);
       active.add(task.id);
       this.activeByExecutor.set(executorId, active);
       const promise = this.runTask(task)
@@ -505,6 +594,14 @@ export class HearthScheduler {
   }
 
   private restoreResumeState(taskId: string, workspace: string, includeWaitingInput = false): AgentResumeState | undefined {
+    const task = this.service.requireTask(taskId);
+    const unresolved = this.service.store.listEffects(taskId)
+      .filter((effect) => ["prepared", "admitted", "executing", "uncertain"].includes(effect.status));
+    if (unresolved.length > 0) {
+      throw new Error(`存在状态不确定的外部动作，必须先对账，不能从检查点自动恢复：${unresolved.map((effect) => effect.id).join("、")}`);
+    }
+    const goal = task.goalId ? this.service.store.getGoal(task.goalId) : null;
+    const permissionsDigest = task.permissions ? hashStable(task.permissions) : null;
     const runs = this.service.store.listRuns(taskId).filter((run) => run.status !== "running");
     for (let index = runs.length - 1; index >= 0; index -= 1) {
       const run = runs[index];
@@ -512,13 +609,18 @@ export class HearthScheduler {
       const checkpoint = this.service.store.latestRunCheckpoint(run.id);
       if (!checkpoint || checkpoint.kind === "final") continue;
       if (checkpoint.kind === "waiting_input" && !includeWaitingInput) continue;
+      if (checkpoint.proof?.goalId && checkpoint.proof.goalId !== (task.goalId ?? null)) continue;
+      if (checkpoint.proof?.goalRevision && goal && checkpoint.proof.goalRevision !== goal.updatedAt) continue;
+      if (checkpoint.proof?.permissionsDigest && checkpoint.proof.permissionsDigest !== permissionsDigest) continue;
       try {
         if (run.workspace !== workspace && existsSync(run.workspace)) {
           cpSync(run.workspace, workspace, { recursive: true, force: false });
         }
         const path = isAbsolute(checkpoint.path) ? checkpoint.path : join(this.workspaceRoot, checkpoint.path);
         if (!existsSync(path)) continue;
-        const state = JSON.parse(readFileSync(path, "utf8")) as AgentCheckpoint;
+        const body = readFileSync(path, "utf8");
+        if (createHash("sha256").update(body).digest("hex") !== checkpoint.sha256) continue;
+        const state = JSON.parse(body) as AgentCheckpoint;
         if (!Array.isArray(state.messages) || !state.usage) continue;
         return {
           messages: state.messages,
@@ -539,6 +641,30 @@ export class HearthScheduler {
     const absolutePath = join(directory, `${String(checkpoint.seq).padStart(4, "0")}-${checkpoint.kind}.json`);
     const body = `${JSON.stringify(checkpoint, null, 2)}\n`;
     writeFileSync(absolutePath, body, "utf8");
+    const createdAt = new Date().toISOString();
+    const task = this.service.requireTask(taskId);
+    const effects = this.service.store.listEffects(taskId);
+    const goal = task.goalId ? this.service.store.getGoal(task.goalId) : null;
+    const proof: RunCheckpointProof = {
+      goalId: task.goalId ?? null,
+      attemptId: runId,
+      identity: { executorId: "native", runtimeVersion: "0.1.0" },
+      phasePrefix: checkpoint.messages
+        .filter((message) => message.role === "tool")
+        .map((message) => `tool:${message.name}`)
+        .concat(`checkpoint:${checkpoint.kind}:${checkpoint.seq}`),
+      validation: { status: "not_required", evidenceRefs: [] },
+      effectReceipts: effects
+        .filter((effect) => ["committed", "succeeded", "reconciled_committed"].includes(effect.status) && (effect.receipt || effect.providerRef))
+        .map((effect) => effect.id),
+      preparedIntents: effects
+        .filter((effect) => ["prepared", "admitted", "executing", "uncertain"].includes(effect.status))
+        .map((effect) => effect.id),
+      ...(task.permissions ? { permissionsDigest: hashStable(task.permissions) } : {}),
+      ...(goal ? { goalRevision: goal.updatedAt } : {}),
+      ...(existsSync(workspace) ? { workspaceDigest: digestWorkspace(workspace) } : {}),
+      createdAt
+    };
     const record: RunCheckpointRecord = {
       id: randomUUID(),
       runId,
@@ -548,18 +674,36 @@ export class HearthScheduler {
       path: relative(this.workspaceRoot, absolutePath).replace(/\\/g, "/"),
       sha256: createHash("sha256").update(body).digest("hex"),
       usage: checkpoint.usage,
-      createdAt: new Date().toISOString()
+      createdAt,
+      proof
     };
     this.service.createRunCheckpoint(record);
-    this.service.updateRun(runId, taskId, { checkpointSeq: checkpoint.seq, usage: checkpoint.usage });
+    this.service.updateRun(runId, taskId, {
+      checkpointSeq: checkpoint.seq,
+      usage: this.usageWithMetrics(checkpoint.usage, checkpoint.turns, checkpoint.toolCalls)
+    });
   }
 
-  private startLeaseHeartbeat(taskId: string, epoch: number, onLost: () => void): void {
+  private usageWithMetrics(
+    usage: RunRecord["usage"],
+    turns?: number,
+    toolCalls?: number
+  ): RunRecord["usage"] {
+    if (!usage && turns === undefined && toolCalls === undefined) return null;
+    return {
+      ...(usage ?? { inputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0 }),
+      ...(turns === undefined ? {} : { turns }),
+      ...(toolCalls === undefined ? {} : { toolCalls })
+    };
+  }
+
+  private startLeaseHeartbeat(taskId: string, epoch: number, onLost: () => void, onHeartbeat?: () => void): void {
     const existing = this.leaseHeartbeats.get(taskId);
     if (existing) clearInterval(existing.timer);
     const timer = setInterval(() => {
       try {
         this.leases.heartbeat(taskId, epoch);
+        onHeartbeat?.();
       } catch {
         onLost();
         this.releaseLease(taskId);
@@ -591,7 +735,7 @@ export class HearthScheduler {
     if (template.approvalKind === "github.publish-pr") {
       const repository = prepared.repository;
       if (!repository || !repository.issue) throw new Error("创建 PR 前缺少 GitHub 仓库或 Issue 上下文");
-      const inspection = await inspectRepository(repository);
+      const inspection = await inspectRepository(repository, this.githubRun);
       if (!inspection.clean) throw new Error(`仓库仍有未提交改动：\n${inspection.status}`);
       if (inspection.branch !== repository.branch) throw new Error(`提交所在分支不是 ${repository.branch}`);
       if (inspection.commits < 1) throw new Error("没有检测到本地提交，不能创建 PR");
@@ -599,9 +743,18 @@ export class HearthScheduler {
         readPrPreview(join(prepared.outDir, "pr-preview.json")),
         repository
       );
+      const summary = `推送 ${repository.repo} 的分支 ${repository.branch} 并创建 PR`;
+      const action = this.githubNetworkAction(task, prepared, summary, `github-pr:${repository.repo}#${repository.branch}@${inspection.headSha}:sha256:${actionDigest({
+        repo: repository.repo,
+        branch: repository.branch,
+        base: repository.base,
+        headSha: inspection.headSha,
+        title: preview.title,
+        body: preview.body
+      })}`);
       return {
         kind: "github.publish-pr",
-        summary: `推送 ${repository.repo} 的分支 ${repository.branch} 并创建 PR`,
+        summary,
         target: {
           repo: repository.repo,
           workspace: repository.path,
@@ -620,7 +773,8 @@ export class HearthScheduler {
           commit: inspection.headSha,
           commits: inspection.commits,
           diffStat: inspection.diffStat
-        }
+        },
+        action
       };
     }
 
@@ -631,9 +785,16 @@ export class HearthScheduler {
       if (!reviewFile) throw new Error("评审产物为空，不能发布评论");
       const review = extractProposedComment(reviewFile);
       if (review.length > 60_000) throw new Error("评审评论过长，不能发布");
+      const summary = `在 ${repository.repo} PR #${repository.pull} 发布评审评论`;
+      const action = this.githubNetworkAction(task, prepared, summary, `github-comment:${repository.repo}#${repository.pull}@${repository.headSha}:sha256:${actionDigest({
+        repo: repository.repo,
+        pull: repository.pull,
+        headSha: repository.headSha,
+        body: review
+      })}`);
       return {
         kind: "github.comment",
-        summary: `在 ${repository.repo} PR #${repository.pull} 发布评审评论`,
+        summary,
         target: {
           repo: repository.repo,
           pull: repository.pull,
@@ -646,11 +807,33 @@ export class HearthScheduler {
           headSha: repository.headSha,
           title: `评审 PR #${repository.pull}`,
           body: review
-        }
+        },
+        action
       };
     }
 
     throw new Error(`未实现的审批类型：${template.approvalKind}`);
+  }
+
+  private githubNetworkAction(
+    task: TaskRecord,
+    prepared: Awaited<ReturnType<typeof prepareWorkspace>>,
+    summary: string,
+    targetRevision: string
+  ): ResolvedAction {
+    return resolveAction({
+      proposal: {
+        kind: "network",
+        summary,
+        network: { host: "api.github.com", port: 443, method: "HTTPS" },
+        targetRevision,
+        risk: "high",
+        sideEffectClass: "external_irreversible"
+      },
+      permissionMode: this.service.approvalModeForTask(task) === "full" ? "full" : "guarded",
+      context: "interactive",
+      sessionRoot: prepared.root
+    });
   }
 
   private async deliveryIssues(
@@ -662,7 +845,7 @@ export class HearthScheduler {
       .map((missing) => `缺少期望产物：${missing}`);
     const template = task.templateId ? getTemplate(task.templateId) : undefined;
     if (template?.github?.issue && prepared.repository) {
-      const inspection = await inspectRepository(prepared.repository);
+      const inspection = await inspectRepository(prepared.repository, this.githubRun);
       if (!inspection.clean) issues.push(`仓库仍有未提交改动：\n${inspection.status}`);
       if (inspection.branch !== prepared.repository.branch) {
         issues.push(`提交所在分支不是 ${prepared.repository.branch}`);
@@ -765,14 +948,57 @@ export class HearthScheduler {
       throw error;
     }
     const leaseEpoch = lease.epoch;
+    const delegationJob = this.service.store.getDelegationJobByChildTask(taskId);
+    const delegationJobId = delegationJob?.id ?? null;
+    const delegationOwner = delegationJob ? `scheduler:${this.leases.ownerId}` : null;
+    let delegationHeartbeat: (() => void) | null = null;
     const controller = new AbortController();
     let leaseLost = false;
     this.startLeaseHeartbeat(taskId, leaseEpoch, () => {
       leaseLost = true;
       controller.abort();
-    });
+    }, () => delegationHeartbeat?.());
     this.controllers.set(taskId, controller);
     try {
+      if (delegationJobId && delegationOwner) {
+        const currentJob = this.service.store.getDelegationJob(delegationJobId);
+        if (!currentJob || currentJob.status === "cancelled") {
+          if (this.service.store.getTask(taskId)?.status !== "cancelled") {
+            this.service.updateTask(taskId, {
+              status: "cancelled",
+              nextAction: null,
+              error: null
+            });
+          }
+          return;
+        }
+        if (!["queued", "leased", "running"].includes(currentJob.status)) {
+          this.service.updateTask(taskId, {
+            status: "recoverable",
+            nextAction: "委派已结束，请从父任务重试或验收",
+            error: {
+              kind: "delegation_closed",
+              message: `委派当前状态为 ${currentJob.status}`,
+              recoverable: true,
+              guidance: "回到父任务查看委派结果，必要时重试"
+            }
+          });
+          return;
+        }
+        try {
+          this.delegations.lease(currentJob.id, delegationOwner);
+          this.delegations.start(currentJob.id, delegationOwner);
+        } catch (error) {
+          if (error instanceof DelegationError && error.code === "DELEGATION_EXECUTOR_BUSY") {
+            this.service.updateTask(taskId, { status: "queued", nextAction: "等待同一执行器完成当前委派" });
+            return;
+          }
+          throw error;
+        }
+        delegationHeartbeat = () => {
+          this.delegations.heartbeat(currentJob.id, delegationOwner);
+        };
+      }
       const initialTask = this.service.requireTask(taskId);
       let methodPlan: { method: MethodCandidate; selection: MethodSelection } | null = null;
       try {
@@ -796,6 +1022,7 @@ export class HearthScheduler {
       }
       for (;;) {
         const task = this.service.requireTask(taskId);
+        if (this.enforceGoalBoundary(task)) return;
         if (this.cancelled.has(taskId) || task.status === "cancelled") {
           if (handoff) this.context.updateHandoff(handoff.id, { status: "cancelled" });
           return;
@@ -866,6 +1093,7 @@ export class HearthScheduler {
           this.refreshTaskSummary(taskId, { lastFailure: result.failure });
           return;
         }
+        if (result.status === "failed" && this.enforceGoalBoundary(this.service.requireTask(taskId), result.failure)) return;
         previousRun = result.run;
         if (handoff) {
           this.context.updateHandoff(handoff.id, { status: "failed", toRunId: runId });
@@ -873,10 +1101,28 @@ export class HearthScheduler {
         }
         const failureTask = this.service.requireTask(taskId);
         const cause = classifyFailure({ service: this.service, task: failureTask, run: result.run, error: result.error, aborted: result.aborted, stopping: this.stopping });
+        const uncertainEffect = this.service.store.listEffects(taskId)
+          .find((effect) => effect.status === "uncertain" || effect.status === "executing");
+        const failureClass = classifyFailureClass({
+          message: result.failure?.message ?? (result.error instanceof Error ? result.error.message : String(result.error)),
+          code: errorCode(result.error),
+          aborted: result.aborted,
+          stopping: this.stopping,
+          effectUncertain: Boolean(uncertainEffect),
+          validatorFailed: cause === "contract_failure",
+          budgetExhausted: cause === "budget"
+        });
         const settings = this.context.settings();
+        const disposition = decideDisposition({
+          failure: failureClass,
+          attempt: (retriesByExecutor.get(executorId) ?? 0) + 1,
+          maxAttempts: settings.maxSameExecutorRetries + 1,
+          effectId: uncertainEffect?.id ?? null,
+          repairTarget: (failureTask.expectedOutputs ?? []).join(", ") || "deliverable"
+        });
         const target = this.selectHandoffTarget({ task: failureTask, cause, settings, attemptedExecutors, handoffsUsed, taskRoot });
         const diagnosis = await this.diagnoseFailure(taskId, failureTask, result.run, result.error, cause, target.targetExecutor);
-        const decision = this.decideNextAction({
+        let decision = this.decideNextAction({
           task: failureTask,
           cause,
           effectiveCause: diagnosis.cause,
@@ -889,10 +1135,18 @@ export class HearthScheduler {
           attemptedExecutors,
           taskRoot
         });
+        if (decision.action === "retry_same" && (!canBlindRetry(failureClass) || disposition.type !== "retry")) {
+          decision = {
+            ...decision,
+            action: "ask_user",
+            autoAllowed: false,
+            reason: `${decision.reason}；失败类别 ${failureClass} 不允许盲重试`
+          };
+        }
         this.capture({
           taskId, conversationId: failureTask.conversationId ?? null, runId: result.run.id, executorId,
           kind: "decision", role: "system", content: `${decision.action}：${decision.reason}`,
-          provenance: { source: "fallback-policy", decision, cause, diagnosisId: diagnosis.id },
+          provenance: { source: "fallback-policy", decision, cause, failureClass, disposition, diagnosisId: diagnosis.id },
           executorEventId: `decision:${result.run.id}`
         });
         if (decision.action === "retry_same") {
@@ -903,7 +1157,7 @@ export class HearthScheduler {
         if (settings.mode === "shadow") {
           const shadowError: TaskError = {
             ...(result.failure ?? { kind: "execution_failed", message: decision.reason, recoverable: true, guidance: "查看诊断后决定是否重试" }),
-            cause, diagnosisId: diagnosis.id
+            cause, diagnosisId: diagnosis.id, failureClass, disposition
           };
           this.service.updateTask(taskId, {
             status: "recoverable", currentRunId: result.run.id,
@@ -918,15 +1172,54 @@ export class HearthScheduler {
             remainingBudget: this.remainingBudget(taskId), diagnosisSummary: diagnosis.summary, outDir: result.outDir
           });
           const status = decision.autoAllowed ? "prepared" : "pending_user";
-          const created = this.context.createHandoff({
+          const preparedHandoff = this.handoffs.prepare({
             taskId, fromRunId: result.run.id, fromExecutor: executorId, toExecutor: decision.targetExecutor,
             status, reasonCode: cause, diagnosis, packet,
             contextWatermarkSeq: this.context.getState(taskId)?.summarySeq ?? 0, initiatedBy: "auto"
           });
-          const finalPacket: HandoffPacket = { ...packet, handoffId: created.id };
-          this.context.updateHandoff(created.id, { packet: finalPacket });
-          this.writeHandoffFile(taskRoot, result.outDir, created.id, finalPacket);
-          const currentHandoff: HandoffRecord = { ...created, packet: finalPacket };
+          const finalPacket: HandoffPacket = preparedHandoff.packet;
+          const verification = this.handoffs.verify(finalPacket, { baseDir: result.outDir });
+          const verifiedHandoff = this.handoffs.markVerification(preparedHandoff.handoff.id, verification)
+            ?? preparedHandoff.handoff;
+          const verifiedPacket = verifiedHandoff.packet ?? finalPacket;
+          const handoffArtifact = this.writeHandoffFile(
+            failureTask,
+            result.run,
+            taskRoot,
+            result.outDir,
+            verifiedHandoff.id,
+            verifiedPacket
+          );
+          const currentHandoff: HandoffRecord = this.context.updateHandoff(verifiedHandoff.id, {
+            artifactRef: handoffArtifact.id,
+            ...(verification.status === "failed" ? { status: "failed" as const } : {})
+          }) ?? verifiedHandoff;
+          if (verification.status !== "passed") {
+            this.appendHandoffNotice(taskId, currentHandoff, false);
+            const failedChecks = verification.checks
+              .filter((check) => !check.ok)
+              .map((check) => `${check.name}: ${check.detail}`)
+              .join("；");
+            const handoffError: TaskError = {
+              kind: "handoff_verification_failed",
+              message: `交接验证失败：${failedChecks || "未知错误"}`,
+              recoverable: true,
+              guidance: "交接包未通过宿主校验，已阻止执行器切换；请修复证据或产物后重试",
+              cause,
+              diagnosisId: diagnosis.id,
+              failureClass: "validation_failed",
+              disposition
+            };
+            this.service.updateTask(taskId, {
+              status: "recoverable",
+              currentRunId: result.run.id,
+              nextAction: "交接验证失败，未切换执行器",
+              error: handoffError,
+              resultSummary: handoffError.message
+            }, result.run.id);
+            this.refreshTaskSummary(taskId, { lastFailure: handoffError });
+            return;
+          }
           if (status === "prepared") {
             executorId = decision.targetExecutor;
             attemptedExecutors.add(decision.targetExecutor);
@@ -940,7 +1233,7 @@ export class HearthScheduler {
           this.appendHandoffNotice(taskId, currentHandoff, false);
           const taskError: TaskError = {
             ...(result.failure ?? { kind: "execution_failed", message: decision.reason, recoverable: true, guidance: "确认后可以切换执行器继续" }),
-            cause, diagnosisId: diagnosis.id
+            cause, diagnosisId: diagnosis.id, failureClass, disposition
           };
           this.service.updateTask(taskId, {
             status: "waiting_input", currentRunId: result.run.id,
@@ -952,7 +1245,7 @@ export class HearthScheduler {
         }
         const taskError: TaskError = {
           ...(result.failure ?? { kind: "execution_failed", message: decision.reason, recoverable: true, guidance: "查看运行记录后重试" }),
-          cause, diagnosisId: diagnosis.id
+          cause, diagnosisId: diagnosis.id, failureClass, disposition
         };
         const diagnosisSummary = diagnosis.source === "model" ? diagnosis.summary : decision.reason;
         if (result.failure?.kind === "input_unavailable") {
@@ -977,6 +1270,7 @@ export class HearthScheduler {
         return;
       }
     } finally {
+      this.finalizeDelegation(taskId, delegationJobId, delegationOwner);
       this.controllers.delete(taskId);
       this.cancelled.delete(taskId);
       if (this.service.store.getTask(taskId)?.status !== "waiting_approval") this.releaseLease(taskId);
@@ -986,6 +1280,54 @@ export class HearthScheduler {
       } catch {
         // Experience capture is best effort and never changes the task outcome.
       }
+      try {
+        const finalTask = this.service.store.getTask(taskId);
+        if (finalTask && ["completed", "failed", "recoverable", "cancelled"].includes(finalTask.status)) {
+          this.ontologyWriter.captureTaskOutcome(taskId);
+        }
+      } catch {
+        // Ontology writeback is best effort and never changes the task outcome.
+      }
+    }
+  }
+
+  private finalizeDelegation(taskId: string, jobId: string | null, owner: string | null): void {
+    if (!jobId || !owner) return;
+    try {
+      const job = this.service.store.getDelegationJob(jobId);
+      if (!job || !["leased", "running"].includes(job.status) || job.lease?.owner !== owner) return;
+      const task = this.service.store.getTask(taskId);
+      if (!task) {
+        this.delegations.fail(jobId, "子任务记录丢失", false);
+        return;
+      }
+      if (task.status === "completed") {
+        const artifacts = this.service.store.listArtifacts(taskId);
+        const evidenceRefs = artifacts.map((artifact) => `artifact:${artifact.id}`);
+        if (evidenceRefs.length === 0) evidenceRefs.push(`run:${task.currentRunId ?? task.id}`);
+        const result: DelegationResult = {
+          summary: task.resultSummary?.trim() || "子任务已完成",
+          evidenceRefs,
+          artifacts: artifacts.map((artifact) => artifact.relativePath),
+          unresolved: [],
+          status: "completed",
+          producedAt: new Date().toISOString()
+        };
+        this.delegations.complete(jobId, result);
+        return;
+      }
+      if (task.status === "cancelled") {
+        this.delegations.cancel(jobId, "子任务已取消");
+        return;
+      }
+      if (task.status === "waiting_input" || task.status === "waiting_approval") {
+        this.delegations.requeue(jobId, owner);
+        return;
+      }
+      const message = task.error?.message ?? task.nextAction ?? `子任务以 ${task.status} 结束`;
+      this.delegations.fail(jobId, message, task.error?.recoverable !== false);
+    } catch (error) {
+      console.error("[scheduler] delegation finalization failed:", error);
     }
   }
 
@@ -1080,9 +1422,28 @@ export class HearthScheduler {
       }
       const methodContext = input.methodPlan ? renderMethodBlock(input.methodPlan.method) : "";
       const basePrompt = buildTaskPrompt(task, prepared, expectedOutputs, template?.acceptance ?? [], runtime, template?.approvalKind, memoryContext, methodContext) + permissionNote;
-      let prompt = handoff?.packet
+      const handoffPrompt = handoff?.packet
         ? this.buildHandoffPrompt(task, prepared, expectedOutputs, handoff.packet, permissionNote, memoryContext, methodContext)
-        : basePrompt;
+        : null;
+      let prompt = handoffPrompt?.prompt ?? basePrompt;
+      let contextPackId = handoffPrompt?.packId ?? null;
+      if (!contextPackId && this.contextBroker) {
+        try {
+          const pack = this.contextBroker.compile({
+            scopeKind: "task",
+            scopeId: task.id,
+            goalId: task.goalId ?? null,
+            taskId: task.id,
+            query: [task.goal, task.nextAction ?? "", memoryContext, methodContext].filter(Boolean).join("\n"),
+            budgetTokens: Math.max(500, Math.floor(this.context.settings().projectionTokenBudget * 0.25)),
+            parentPackId: this.inheritedPackId(task.id)
+          });
+          prompt = `${prompt}\n\n## 个人上下文包\npack: ${pack.id}\n${this.contextBroker.render(pack)}`;
+          contextPackId = pack.id;
+        } catch {
+          contextPackId = null;
+        }
+      }
       if (pendingInput && !resumeState && executorId !== "codex") prompt = `${basePrompt}\n\n用户补充信息：\n${pendingInput}`;
       let activeThreadId = !handoff && input.previousRun?.executorId === executorId
         ? input.previousRun.threadId ?? undefined
@@ -1130,6 +1491,12 @@ export class HearthScheduler {
           });
         }
       }
+      const extraNativeTools: import("@hearth/agent-runtime").AgentTool[] = createPersonalReadTools({
+        service: this.service,
+        ontology: this.ontology
+      });
+      if (contextPackId && this.contextBroker) extraNativeTools.push(this.expandRefTool(contextPackId));
+      if (this.backgroundTools) extraNativeTools.push(...this.backgroundTools.toolsFor(task));
       const adapter = this.adapters[executorId];
       const attemptContext: ExecutorAttemptContext = {
         task,
@@ -1143,6 +1510,7 @@ export class HearthScheduler {
         dshSettings,
         executorSettings: this.executorSettings(),
         expectedOutputs,
+        ...(extraNativeTools.length > 0 ? { extraNativeTools } : {}),
         ...(activeThreadId ? { activeThreadId } : {}),
         onProgress: (event) => this.publishProgress(taskId, runId, event.kind, event.message, event.detail),
         onNativeContextEvent: (event) => this.captureNativeEvent(task, run, event),
@@ -1154,6 +1522,7 @@ export class HearthScheduler {
                 run,
                 request,
                 fullPermission,
+                workspaceRoot: prepared.root,
                 signal: controller.signal
               })
             }
@@ -1242,7 +1611,7 @@ export class HearthScheduler {
       }
       this.service.updateRun(runId, taskId, {
         status: "completed", threadId: result.threadId, endedAt: new Date().toISOString(),
-        usage: result.usage, executorId, failure: null
+        usage: this.usageWithMetrics(result.usage, result.turns, result.toolCalls), executorId, failure: null
       });
       if (template && template.approvalKind !== "none") {
         if (!this.approvals) throw new Error("审批管理器未启动，无法安全执行外部动作");
@@ -1261,14 +1630,68 @@ export class HearthScheduler {
           error: null, resultSummary: result.finalResponse
         }, runId);
         this.refreshTaskSummary(taskId);
-        return { status: "completed", run: { ...run, status: "completed", threadId: result.threadId, usage: result.usage }, executorId, outDir, error: null, failure: null, aborted: controller.signal.aborted, leaseLost: false, cancelled: false, queuedFollowUp: true };
+        return { status: "completed", run: { ...run, status: "completed", threadId: result.threadId, usage: this.usageWithMetrics(result.usage, result.turns, result.toolCalls) }, executorId, outDir, error: null, failure: null, aborted: controller.signal.aborted, leaseLost: false, cancelled: false, queuedFollowUp: true };
+      }
+      const goal = task.goalId ? this.service.store.getGoal(task.goalId) : null;
+      if (goal) {
+        const goalTasks = this.service.store.listTasks().filter((item) => item.goalId === goal.goalId);
+        const goalArtifacts = goalTasks.flatMap((item) => this.service.store.listArtifacts(item.id));
+        const goalEffects = goalTasks.flatMap((item) => this.service.store.listEffects(item.id));
+        this.service.updateGoal(goal.goalId, { currentState: "validating" });
+        const report = await judgeCompletion({
+          goal,
+          task: this.service.requireTask(taskId),
+          artifacts: goalArtifacts,
+          effects: goalEffects,
+          workspaceRoot: prepared.root,
+          sandbox: this.sandbox,
+          ...(this.completionValidators ? { validators: this.completionValidators } : {})
+        });
+        this.service.recordCompletionReport(report);
+        this.capture({
+          taskId, conversationId: task.conversationId ?? null, runId, executorId,
+          kind: "notice", role: "system", content: `完成判定 ${report.verdict}：${report.summary}`,
+          provenance: { source: "completion-judge", report }, executorEventId: `completion:${runId}`
+        });
+        if (report.verdict !== "pass") {
+          const blockedEffect = goalEffects.find((effect) => effect.status === "uncertain" || effect.status === "executing");
+          const failureClass = report.verdict === "blocked" ? "effect_unknown" : "validation_failed";
+          const disposition = report.verdict === "blocked"
+            ? { type: "reconcile" as const, effectId: blockedEffect?.id ?? "" }
+            : { type: "repair" as const, target: goal.successCriteria.map((criterion) => criterion.check).join(", ") || goal.objective, reason: report.summary };
+          const goalError: TaskError = {
+            kind: "completion_not_proven",
+            message: report.summary,
+            recoverable: true,
+            guidance: report.verdict === "blocked" ? "先完成 effect 对账，再重新判定完成" : "按失败项修复证据或请求人工确认",
+            cause: report.verdict === "blocked" ? "effect_uncertain" : "contract_failure",
+            failureClass,
+            disposition
+          };
+          if (report.verdict === "needs_human" || report.verdict === "blocked") {
+            this.service.updateGoal(goal.goalId, {
+              currentState: report.verdict === "blocked" ? "blocked" : "awaiting_user",
+              nextHandoff: report.summary
+            });
+            this.service.updateTask(taskId, {
+              status: "waiting_input", currentRunId: runId,
+              nextAction: report.verdict === "blocked" ? "外部动作结果未确定，请先对账" : "完成证据仍需人工确认",
+              error: goalError
+            }, runId);
+            this.refreshTaskSummary(taskId, { lastFailure: goalError });
+            return { status: "waiting_input", run: { ...run, status: "completed", threadId: result.threadId, usage: this.usageWithMetrics(result.usage, result.turns, result.toolCalls) }, executorId, outDir, error: null, failure: goalError, aborted: controller.signal.aborted, leaseLost: false, cancelled: false };
+          }
+          this.service.updateGoal(goal.goalId, { currentState: "active", nextHandoff: report.summary });
+          throw new Error(`完成判定失败：${report.summary}`);
+        }
+        this.service.updateGoal(goal.goalId, { currentState: "done", nextHandoff: "" });
       }
       this.service.updateTask(taskId, {
         status: "completed", currentRunId: runId, nextAction: "产物已保存",
         error: null, resultSummary: result.finalResponse
       }, runId);
       this.refreshTaskSummary(taskId);
-      return { status: "completed", run: { ...run, status: "completed", threadId: result.threadId, usage: result.usage }, executorId, outDir, error: null, failure: null, aborted: controller.signal.aborted, leaseLost: false, cancelled: false };
+      return { status: "completed", run: { ...run, status: "completed", threadId: result.threadId, usage: this.usageWithMetrics(result.usage, result.turns, result.toolCalls) }, executorId, outDir, error: null, failure: null, aborted: controller.signal.aborted, leaseLost: false, cancelled: false };
     } catch (error) {
       if (controller.signal.aborted && this.steering.has(taskId)) {
         this.service.updateRun(runId, taskId, { status: "cancelled", endedAt: new Date().toISOString(), failure: null });
@@ -1296,26 +1719,53 @@ export class HearthScheduler {
     run: RunRecord;
     request: AgentToolAuthorizationRequest;
     fullPermission: boolean;
+    workspaceRoot: string;
     signal: AbortSignal;
   }): Promise<AgentToolAuthorization> {
     const toolName = input.request.call.name;
     if (!TOOL_APPROVAL_REQUIRED.has(toolName)) return { allowed: true };
     if (input.signal.aborted) return { allowed: false, reason: "任务已取消" };
+    const argumentsValue = approvalArguments(input.request.call.arguments);
+    const summary = toolApprovalSummary(toolName, input.request.call.arguments);
+    let action: ResolvedAction;
+    try {
+      const resolved = resolveToolAction({
+        toolName,
+        argumentsValue,
+        summary,
+        workspaceRoot: input.workspaceRoot,
+        fullPermission: input.fullPermission,
+        context: this.service.store.listScheduleRunByTask(input.task.id) ? "scheduled" : "interactive"
+      });
+      if (!resolved) {
+        return { allowed: false, reason: `敏感工具 ${toolName} 无法解析为可绑定动作，已拒绝执行` };
+      }
+      action = resolved;
+    } catch (error) {
+      return { allowed: false, reason: `敏感工具 ${toolName} 无法绑定到真实动作：${errorMessage(error)}` };
+    }
     if (input.fullPermission) {
       this.recordAutoApprovedTool(input.task, input.run, {
         toolName,
-        arguments: approvalArguments(input.request.call.arguments)
+        arguments: argumentsValue,
+        metadata: {
+          actionId: action.actionId,
+          actionDigest: action.actionDigest,
+          actionKind: action.kind,
+          permissionMode: action.permissionMode,
+          risk: action.risk
+        }
       });
       return { allowed: true };
     }
-    const argumentsValue = approvalArguments(input.request.call.arguments);
     const decision = await this.requestToolApproval({
       task: input.task,
       run: input.run,
       toolName,
-      summary: toolApprovalSummary(toolName, input.request.call.arguments),
+      summary,
       target: { tool: toolName, arguments: argumentsValue },
       preview: { arguments: argumentsValue },
+      action,
       signal: input.signal
     });
     return decision.allowed
@@ -1361,6 +1811,7 @@ export class HearthScheduler {
     summary: string;
     target: Record<string, unknown>;
     preview: Record<string, unknown>;
+    action?: ResolvedAction;
     signal: AbortSignal;
   }): Promise<ToolApprovalDecision> {
     if (!this.approvals) {
@@ -1374,7 +1825,8 @@ export class HearthScheduler {
         toolName: input.toolName,
         summary: input.summary,
         target: input.target,
-        preview: input.preview
+        preview: input.preview,
+        ...(input.action ? { action: input.action } : {})
       });
     } catch (error) {
       return { allowed: false, reason: `无法创建工具审批：${errorMessage(error)}` };
@@ -1436,13 +1888,14 @@ export class HearthScheduler {
   }
 
   private finishWaitingInput(taskId: string, run: RunRecord, result: ExecutionOutcome): AttemptResult {
-    this.service.updateRun(run.id, taskId, { status: "waiting_input", endedAt: new Date().toISOString(), usage: result.usage, failure: null });
+    const usage = this.usageWithMetrics(result.usage, result.turns, result.toolCalls);
+    this.service.updateRun(run.id, taskId, { status: "waiting_input", endedAt: new Date().toISOString(), usage, failure: null });
     this.service.updateTask(taskId, {
       status: "waiting_input", currentRunId: run.id, nextAction: "等待你补充信息",
       error: null, resultSummary: result.question ?? result.finalResponse
     }, run.id);
       this.refreshTaskSummary(taskId);
-    return { status: "waiting_input", run: { ...run, status: "waiting_input", usage: result.usage }, executorId: run.executorId ?? "codex", outDir: this.outDirForRun(taskId, run), error: null, failure: null, aborted: false, leaseLost: false, cancelled: false };
+    return { status: "waiting_input", run: { ...run, status: "waiting_input", usage }, executorId: run.executorId ?? "codex", outDir: this.outDirForRun(taskId, run), error: null, failure: null, aborted: false, leaseLost: false, cancelled: false };
   }
 
   private markRunFailed(taskId: string, runId: string, error: unknown, aborted: boolean, leaseEpoch: number): { failure: TaskError | null; cancelled: boolean; leaseLost: boolean } {
@@ -1778,18 +2231,154 @@ export class HearthScheduler {
   }
 
   private remainingBudget(taskId: string): RunBudget {
-    const runs = this.service.store.listRuns(taskId);
-    const usedTokens = runs.reduce((sum, run) => sum + (run.usage?.inputTokens ?? 0) + (run.usage?.outputTokens ?? 0), 0);
-    const usedMs = runs.reduce((sum, run) => {
-      if (!run.startedAt || !run.endedAt) return sum;
-      return sum + Math.max(0, Date.parse(run.endedAt) - Date.parse(run.startedAt));
-    }, 0);
+    const task = this.service.requireTask(taskId);
+    const goal = task.goalId ? this.service.store.getGoal(task.goalId) : null;
+    const runs = goal ? this.goalRuns(goal.goalId) : this.service.store.listRuns(taskId);
+    const used = this.usageForRuns(runs);
+    const goalBudget = goal?.budget ?? {};
+    const maxTurns = Math.min(goalBudget.maxTurns ?? this.runBudget.maxTurns, this.runBudget.maxTurns);
+    const maxToolCalls = Math.min(goalBudget.maxToolCalls ?? this.runBudget.maxToolCalls, this.runBudget.maxToolCalls);
+    const maxTokens = Math.min(goalBudget.maxTokens ?? this.runBudget.maxTokens, this.runBudget.maxTokens);
+    const maxDurationMs = Math.min(goalBudget.maxDurationMs ?? this.runBudget.maxDurationMs, this.runBudget.maxDurationMs);
     return {
-      maxTurns: Math.max(1, this.runBudget.maxTurns - runs.length),
-      maxToolCalls: this.runBudget.maxToolCalls,
-      maxTokens: Math.max(1, this.runBudget.maxTokens - usedTokens),
-      maxDurationMs: Math.max(1_000, this.runBudget.maxDurationMs - usedMs)
+      maxTurns: Math.max(0, maxTurns - used.turns),
+      maxToolCalls: Math.max(0, maxToolCalls - used.toolCalls),
+      maxTokens: Math.max(0, maxTokens - used.tokens),
+      maxDurationMs: Math.max(0, maxDurationMs - used.durationMs)
     };
+  }
+
+  private goalRuns(goalId: string): RunRecord[] {
+    return this.goalTasks(goalId).flatMap((task) => this.service.store.listRuns(task.id));
+  }
+
+  private usageForRuns(runs: RunRecord[]): { tokens: number; turns: number; toolCalls: number; durationMs: number } {
+    const now = Date.now();
+    return runs.reduce((usage, run) => {
+      const endedAt = run.endedAt ? Date.parse(run.endedAt) : null;
+      const startedAt = run.startedAt ? Date.parse(run.startedAt) : null;
+      const durationMs = startedAt === null || !Number.isFinite(startedAt)
+        ? 0
+        : Math.max(0, (endedAt !== null && Number.isFinite(endedAt) ? endedAt : now) - startedAt);
+      return {
+        tokens: usage.tokens + (run.usage?.inputTokens ?? 0) + (run.usage?.outputTokens ?? 0),
+        turns: usage.turns + Math.max(0, run.usage?.turns ?? (run.status === "running" ? 0 : 1)),
+        toolCalls: usage.toolCalls + Math.max(0, run.usage?.toolCalls ?? 0),
+        durationMs: usage.durationMs + durationMs
+      };
+    }, { tokens: 0, turns: 0, toolCalls: 0, durationMs: 0 });
+  }
+
+  private goalBoundaryStop(task: TaskRecord, failure: TaskError | null = null): GoalBoundaryStop | null {
+    if (!task.goalId) return null;
+    const goal = this.service.store.getGoal(task.goalId);
+    if (!goal || goal.currentState === "done" || goal.currentState === "cancelled") return null;
+    const runs = this.goalRuns(goal.goalId);
+    const used = this.usageForRuns(runs);
+    const deadline = goal.deadline ? Date.parse(goal.deadline) : Number.NaN;
+    if (Number.isFinite(deadline) && deadline <= Date.now()) {
+      return {
+        code: "deadline_reached",
+        currentState: "awaiting_user",
+        message: `Goal「${goal.title}」已超过截止时间 ${goal.deadline}，不能继续自动执行`,
+        nextAction: "Goal 已超过截止时间，等待调整期限或终止",
+        handoff: `截止时间已到（${goal.deadline}）。已完成 ${runs.length} 轮；下一步：请用户调整 deadline、缩小目标，或确认终止。`,
+        failureClass: "budget_exhausted",
+        cause: "budget"
+      };
+    }
+
+    const goalBudget = goal.budget;
+    const maxTurns = Math.min(goalBudget.maxTurns ?? this.runBudget.maxTurns, this.runBudget.maxTurns);
+    const maxToolCalls = Math.min(goalBudget.maxToolCalls ?? this.runBudget.maxToolCalls, this.runBudget.maxToolCalls);
+    const maxTokens = Math.min(goalBudget.maxTokens ?? this.runBudget.maxTokens, this.runBudget.maxTokens);
+    const maxDurationMs = Math.min(goalBudget.maxDurationMs ?? this.runBudget.maxDurationMs, this.runBudget.maxDurationMs);
+    const exhausted = [
+      used.turns >= maxTurns ? `轮次 ${used.turns}/${maxTurns}` : null,
+      used.toolCalls >= maxToolCalls ? `工具调用 ${used.toolCalls}/${maxToolCalls}` : null,
+      used.tokens >= maxTokens ? `tokens ${used.tokens}/${maxTokens}` : null,
+      used.durationMs >= maxDurationMs ? `时长 ${Math.round(used.durationMs / 1000)}s/${Math.round(maxDurationMs / 1000)}s` : null
+    ].filter((item): item is string => item !== null);
+    if (exhausted.length > 0) {
+      return {
+        code: "budget_exhausted",
+        currentState: "awaiting_user",
+        message: `Goal「${goal.title}」预算已耗尽：${exhausted.join("，")}`,
+        nextAction: "Goal 预算已耗尽，等待调整预算或人工接手",
+        handoff: `预算已耗尽（${exhausted.join("，")}）。已完成 ${runs.length} 轮；下一步：检查已证明阶段，调整 budget 后继续，或由用户接手。`,
+        failureClass: "budget_exhausted",
+        cause: "budget"
+      };
+    }
+
+    const goalEffects = this.goalTasks(goal.goalId).flatMap((item) => this.service.store.listEffects(item.id));
+    const unresolved = goalEffects.filter((effect) => effect.status === "executing" || effect.status === "uncertain");
+    if (unresolved.length > 0) {
+      return {
+        code: "effect_uncertain",
+        currentState: "blocked",
+        message: `Goal「${goal.title}」存在未结算外部动作：${unresolved.map((effect) => effect.id).join("、")}`,
+        nextAction: "外部动作结果未确定，请先完成对账",
+        handoff: `外部动作 ${unresolved.map((effect) => effect.id).join("、")} 状态未知；下一步：先完成 reconcile，确认 committed 或 absent 后再继续。`,
+        failureClass: "effect_unknown",
+        cause: "effect_uncertain"
+      };
+    }
+
+    const conditions = new Set(goal.stopConditions.map((condition) => condition.trim().toLowerCase()));
+    const taskFailure = failure ?? task.error;
+    if (conditions.has("task_failed") && taskFailure) {
+      return {
+        code: "declared_stop",
+        currentState: "awaiting_user",
+        message: `Goal「${goal.title}」命中停止条件 task_failed：${taskFailure.message}`,
+        nextAction: "Goal 命中停止条件，等待你决定是否继续",
+        handoff: `命中停止条件 task_failed。上一步失败：${taskFailure.message}；下一步：确认原因、补充授权或调整目标后再继续。`,
+        failureClass: "validation_failed",
+        cause: "unknown"
+      };
+    }
+    const latestApproval = this.service.store.listApprovals(task.id).at(-1);
+    if (conditions.has("approval_rejected") && latestApproval?.status === "rejected") {
+      return {
+        code: "declared_stop",
+        currentState: "awaiting_user",
+        message: `Goal「${goal.title}」命中停止条件 approval_rejected`,
+        nextAction: "审批已被拒绝，等待你调整方案或目标",
+        handoff: "命中停止条件 approval_rejected。下一步：不要重试同一动作，先由用户调整范围或授权。",
+        failureClass: "policy_denied",
+        cause: "permission"
+      };
+    }
+    return null;
+  }
+
+  private goalTasks(goalId: string): TaskRecord[] {
+    return this.service.store.listTasks().filter((task) => task.goalId === goalId);
+  }
+
+  private enforceGoalBoundary(task: TaskRecord, failure: TaskError | null = null): boolean {
+    const stop = this.goalBoundaryStop(task, failure);
+    const goal = task.goalId ? this.service.store.getGoal(task.goalId) : null;
+    if (!stop || !goal) return false;
+    const handoff = goal.nextHandoff?.trim() || stop.handoff;
+    this.service.updateGoal(goal.goalId, { currentState: stop.currentState, nextHandoff: handoff });
+    const error: TaskError = {
+      kind: `goal_${stop.code}`,
+      message: stop.message,
+      recoverable: true,
+      guidance: stop.code === "effect_uncertain" ? "先完成外部动作对账，再重新开始任务" : "调整 Goal 的预算或截止时间后重试",
+      cause: stop.cause,
+      failureClass: stop.failureClass,
+      disposition: { type: "handoff", note: handoff }
+    };
+    const status = task.status === "running" || task.status === "waiting_approval" ? "waiting_input" : "recoverable";
+    this.service.updateTask(task.id, {
+      status, currentRunId: task.currentRunId,
+      nextAction: stop.nextAction, error, resultSummary: stop.message
+    }, task.currentRunId ?? undefined);
+    this.refreshTaskSummary(task.id, { lastFailure: error });
+    return true;
   }
 
   private selectHandoffTarget(input: {
@@ -1849,7 +2438,15 @@ export class HearthScheduler {
     return "执行未完成，可以重试";
   }
 
-  private buildHandoffPrompt(task: TaskRecord, prepared: PreparedWorkspace, expectedOutputs: string[], packet: HandoffPacket, permissionNote: string, memoryContext: string, methodContext: string): string {
+  private inheritedPackId(taskId: string): string | null {
+    const job = this.service.store.getDelegationJobByChildTask(taskId);
+    if (job?.contextPackRef?.startsWith("ctxpack:")) return job.contextPackRef;
+    const parentTaskId = this.service.store.listTaskEdges({ childTaskId: taskId })[0]?.parentTaskId;
+    if (!parentTaskId) return null;
+    return this.service.store.listContextPacks({ scopeKind: "task", scopeId: parentTaskId, limit: 1 })[0]?.id ?? null;
+  }
+
+  private buildHandoffPrompt(task: TaskRecord, prepared: PreparedWorkspace, expectedOutputs: string[], packet: HandoffPacket, permissionNote: string, memoryContext: string, methodContext: string): { prompt: string; packId: string | null } {
     const projected = this.projector.project({
       taskId: task.id,
       fromRunId: packet.fromRunId,
@@ -1864,7 +2461,9 @@ export class HearthScheduler {
       methodContext,
       packetOverride: packet
     });
-    return [
+    return {
+      packId: projected.packId,
+      prompt: [
       projected.prompt,
       "## 工作区",
       `- 当前工作区：${prepared.root}`,
@@ -1873,16 +2472,53 @@ export class HearthScheduler {
       `- 任务：${task.title}`,
       "",
       "请先核对工作区和产物哈希，再从“下一步”继续执行；不要重复已经产生外部副作用的动作。" + permissionNote
-    ].join("\n");
+      ].join("\n")
+    };
   }
 
-  private writeHandoffFile(taskRoot: string, previousOutDir: string, handoffId: string, packet: HandoffPacket): void {
+  private expandRefTool(packId: string): import("@hearth/agent-runtime").AgentTool {
+    return {
+      definition: {
+        name: "expand_ref",
+        description: "展开个人上下文包中的引用（ent:/st:/rel:/dec:/cmt:/mem:/src:/goal:/task:），读取被省略或摘要化的原文。",
+        parameters: {
+          type: "object",
+          properties: { ref: { type: "string", description: "上下文包中的稳定引用" } },
+          required: ["ref"],
+          additionalProperties: false
+        }
+      },
+      execute: async (input) => {
+        const ref = input && typeof input === "object" && "ref" in input && typeof input.ref === "string" ? input.ref.trim() : "";
+        if (!ref) return { content: "缺少 ref。", isError: true };
+        return { content: this.contextBroker?.expandRef(ref, packId) ?? "上下文服务不可用。" };
+      }
+    };
+  }
+
+  private writeHandoffFile(
+    task: TaskRecord,
+    run: RunRecord,
+    taskRoot: string,
+    previousOutDir: string,
+    handoffId: string,
+    packet: HandoffPacket
+  ): ReturnType<typeof createFileArtifact> {
     const markdown = this.projector.renderHandoffMarkdown(packet);
     const directory = join(taskRoot, ".hearth", "handoffs", handoffId);
     mkdirSync(directory, { recursive: true });
-    writeFileSync(join(directory, "HANDOFF.md"), markdown, "utf8");
+    const absolutePath = join(directory, "HANDOFF.md");
+    writeFileSync(absolutePath, markdown, "utf8");
     writeFileSync(join(taskRoot, "HANDOFF.md"), markdown, "utf8");
     if (existsSync(previousOutDir)) writeFileSync(join(previousOutDir, "HANDOFF.md"), markdown, "utf8");
+    const artifact = createFileArtifact({
+      task,
+      run,
+      absolutePath,
+      relativePath: `handoffs/${handoffId}/HANDOFF.md`
+    });
+    this.service.publishArtifact(artifact);
+    return artifact;
   }
 
   private appendHandoffNotice(taskId: string, handoff: HandoffRecord, started = true): void {
@@ -1927,27 +2563,39 @@ export class HearthScheduler {
 
 }
 
-const TOOL_APPROVAL_REQUIRED = new Set([
-  "write_file",
-  "edit_file",
-  "apply_patch",
-  "shell",
-  "fetch_url",
-  "capture_screen"
-]);
+function hashStable(value: unknown): string {
+  return createHash("sha256").update(stableJson(value)).digest("hex");
+}
 
-function toolApprovalSummary(toolName: string, value: unknown): string {
-  const args = value && typeof value === "object" ? value as Record<string, unknown> : {};
-  const path = typeof args.path === "string" ? args.path : typeof args.fileName === "string" ? args.fileName : null;
-  const command = typeof args.command === "string" ? args.command : null;
-  const url = typeof args.url === "string" ? args.url : null;
-  if (toolName === "write_file") return `写入工作区文件：${path ?? "未指定路径"}`;
-  if (toolName === "edit_file") return `修改工作区文件：${path ?? "未指定路径"}`;
-  if (toolName === "apply_patch") return "应用补丁修改工作区文件";
-  if (toolName === "shell") return `运行命令：${clipText(command ?? "未指定命令", 160)}`;
-  if (toolName === "fetch_url") return `读取网址：${clipText(url ?? "未指定网址", 200)}`;
-  if (toolName === "capture_screen") return `截取桌面画面：${path ?? "desktop.png"}`;
-  return `执行敏感工具：${toolName}`;
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map((item) => stableJson(item)).join(",")}]`;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function digestWorkspace(root: string, limit = 5_000): string {
+  const hash = createHash("sha256");
+  let count = 0;
+  const walk = (directory: string): void => {
+    if (count >= limit) return;
+    for (const entry of readdirSync(directory, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+      if (count >= limit) return;
+      if (entry.name === ".git" || entry.name === "node_modules") continue;
+      const absolute = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        walk(absolute);
+        continue;
+      }
+      const stat = statSync(absolute);
+      hash.update(`${relative(root, absolute).replace(/\\/g, "/")}\0${stat.size}\0${stat.mtimeMs}\n`);
+      count += 1;
+    }
+  };
+  walk(root);
+  return hash.digest("hex");
 }
 
 function dshApprovalMetadata(request: DshApprovalRequest): Record<string, unknown> {
@@ -1974,6 +2622,105 @@ function approvalArguments(value: unknown): unknown {
   } catch {
     return { truncated: true, preview: String(value).slice(0, 16_000) };
   }
+}
+
+function errorCode(error: unknown): string | null {
+  if (!error || typeof error !== "object" || !("code" in error)) return null;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" ? code : null;
+}
+
+export function resolveToolAction(input: {
+  toolName: string;
+  argumentsValue: unknown;
+  summary: string;
+  workspaceRoot: string;
+  fullPermission: boolean;
+  context: "interactive" | "scheduled";
+}): ResolvedAction | null {
+  const args = input.argumentsValue && typeof input.argumentsValue === "object"
+    ? input.argumentsValue as Record<string, unknown>
+    : {};
+  const permissionMode = input.fullPermission ? "full" as const : "guarded" as const;
+  let proposal: ActionProposal | null = null;
+  if (input.toolName === "shell" && typeof args.command === "string" && args.command.trim()) {
+    const windows = process.platform === "win32";
+    proposal = {
+      kind: "shell",
+      summary: input.summary,
+      command: {
+        executable: windows ? "powershell.exe" : "sh",
+        argv: windows ? ["-NoProfile", "-NonInteractive", "-Command", args.command] : ["-c", args.command],
+        cwd: input.workspaceRoot,
+        shell: windows ? "powershell" : "sh"
+      }
+    };
+  } else if (input.toolName === "write_file" || input.toolName === "edit_file") {
+    const path = typeof args.path === "string" ? args.path : typeof args.fileName === "string" ? args.fileName : null;
+    if (path) {
+      const absolute = isAbsolute(path) ? resolve(path) : resolve(input.workspaceRoot, path);
+      proposal = {
+        kind: "file_write",
+        summary: input.summary,
+        files: [{ path: absolute, mode: existsSync(absolute) ? "replace" : "create" }]
+      };
+    }
+  } else if (input.toolName === "apply_patch" && typeof args.patch === "string") {
+    const files = patchFileTargets(args.patch, input.workspaceRoot);
+    if (files.length > 0) {
+      proposal = {
+        kind: "file_write",
+        summary: input.summary,
+        files,
+        targetRevision: `patch-sha256:${createHash("sha256").update(args.patch).digest("hex")}`
+      };
+    }
+  } else if (input.toolName === "fetch_url" && typeof args.url === "string") {
+    try {
+      const url = new URL(args.url);
+      proposal = {
+        kind: "network",
+        summary: input.summary,
+        network: {
+          host: url.hostname,
+          ...(url.port ? { port: Number(url.port) } : {}),
+          method: "GET"
+        }
+      };
+    } catch {
+      proposal = null;
+    }
+  } else if (input.toolName === "capture_screen") {
+    const path = typeof args.path === "string" ? args.path : "desktop.png";
+    const absolute = isAbsolute(path) ? resolve(path) : resolve(input.workspaceRoot, path);
+    proposal = {
+      kind: "desktop",
+      summary: input.summary,
+      files: [{ path: absolute, mode: existsSync(absolute) ? "replace" : "create" }]
+    };
+  }
+  if (!proposal) return null;
+  return resolveAction({
+    proposal,
+    permissionMode,
+    context: input.context,
+    sessionRoot: input.workspaceRoot
+  });
+}
+
+function patchFileTargets(patch: string, workspaceRoot: string): ActionFileTarget[] {
+  const files = new Map<string, ActionFileTarget>();
+  for (const line of patch.split(/\r?\n/)) {
+    const match = /^\*\*\* (Update File|Add File|Delete File):\s*(.+?)\s*$/.exec(line);
+    if (!match) continue;
+    const rawPath = match[2];
+    if (!rawPath) continue;
+    const absolute = isAbsolute(rawPath) ? resolve(rawPath) : resolve(workspaceRoot, rawPath);
+    if (match[1] === "Delete File" && !existsSync(absolute)) continue;
+    const mode = match[1] === "Add File" ? "create" : match[1] === "Delete File" ? "delete" : "replace";
+    files.set(absolute, { path: absolute, mode });
+  }
+  return [...files.values()];
 }
 
 function errorMessage(error: unknown): string {

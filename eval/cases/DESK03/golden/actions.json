@@ -1,0 +1,1 @@
+{"cellEdits":3,"saveAs":"cleaned.xlsx","originalOverwritten":false,"actions":[{"op":"setCell","cell":"A2","value":"2026-11-02"},{"op":"setCell","cell":"A3","value":"2026-11-03"},{"op":"setCell","cell":"B3","value":"0"},{"op":"saveAs","path":"cleaned.xlsx"}]}

@@ -1,0 +1,1 @@
+{"productCount":3,"unknownCount":1,"findings":[{"product":"Atlas","finding":"已发布离线模式","date":"2026-10-02","confidence":"high"},{"product":"Beacon","finding":"已发布审计日志","date":"2026-10-15","confidence":"high"},{"product":"Cinder","finding":"本地模型仅为路线图","date":null,"confidence":"low"}],"unknowns":["Cinder 发布日期"]}

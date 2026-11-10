@@ -73,7 +73,7 @@ Failure handling classifies the cause before deciding whether to change executor
 4. Under necessary approval, Hearth asks only “Switch to `target executor` and continue?” and starts a new run with the same task, remaining budget, and context watermark after confirmation.
 5. When the cause is not the executor, Hearth reports the reason directly without switching.
 
-The fallback order is `deepseek-harness → codex → native → hermes → qoder → workbuddy → kimi`. Attempted executors are not selected again, and the default limit is two handoffs. A handoff packet carries the diagnosis summary, completed and failed work, artifacts, open questions, remaining budget, and `context_watermark_seq`; the target continues from the same watermark. Every handoff is written to `handoffs` and produces `HANDOFF.md`, while run records retain both source and target executors.
+The fallback order is `deepseek-harness → codex → native → hermes → qoder → workbuddy → kimi`. Attempted executors are not selected again, and the default limit is two handoffs. A handoff packet carries the diagnosis summary, completed and failed work, artifacts, open questions, remaining budget, and `context_watermark_seq`; the target continues from the same watermark. Every handoff is written to `handoffs` and produces `HANDOFF.md`. The host validates the target, acceptance, permissions, cursor, and artifact hashes before switching; a failed validation blocks the switch. `HANDOFF.md` is published as a real artifact with an `artifactRef`. Run records retain both source and target executors, stale-generation tool writes are rejected, and the failed run's own diagnosis and decision evidence remains available.
 
 ## Shared Context
 

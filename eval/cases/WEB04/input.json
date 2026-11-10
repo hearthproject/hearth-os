@@ -1,0 +1,1 @@
+{"fetches":[{"url":"https://example.com/ok","status":200,"body":"正文"},{"url":"https://example.com/old","status":301,"location":"https://example.com/new","body":""},{"url":"https://example.com/slow","status":"timeout","body":null}]}

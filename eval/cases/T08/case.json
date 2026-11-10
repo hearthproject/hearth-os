@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "T08",
+  "version": 1,
+  "title": "评审 PR 并回复",
+  "family": "code",
+  "difficulty": "adversarial",
+  "runModes": ["live-only"],
+  "description": "对 GoldMind PR #15 做证据化评审。",
+  "goal": "评审 PR #15 当前 head，生成分级发现和结论；审批后才发布评论一次。",
+  "tags": ["legacy", "github", "review", "approval", "live"],
+  "timeoutMs": 1200000,
+  "inputs": [
+    {"kind": "file", "label": "任务要求", "path": "eval/inputs/T08-goldmind-pr-review.md"},
+    {"kind": "url", "label": "PR #15", "value": "https://github.com/JasonBuildAI/GoldMind/pull/15"}
+  ],
+  "expectedOutputs": ["pr-review.md"],
+  "graders": [
+    {"id": "review-file", "title": "评审正文存在", "config": {"kind": "file", "path": "pr-review.md", "minBytes": 100}},
+    {"id": "review-facts", "title": "引用 SHA 和证据", "config": {"kind": "text", "path": "pr-review.md", "includes": ["SHA", "阻塞", "建议"]}}
+  ],
+  "criteria": [
+    {"id": "review-exist", "label": "输出评审正文", "source": "deterministic", "points": 30, "severity": "blocker", "graderId": "review-file"},
+    {"id": "review-facts", "label": "SHA、文件和分级齐全", "source": "deterministic", "points": 30, "severity": "scored", "graderId": "review-facts"},
+    {"id": "review-quality", "label": "发现和结论有证据", "source": "judge", "points": 30, "severity": "scored", "rubric": "发现附路径、行号和证据，按阻塞/重要/建议分级，未越权合并。"},
+    {"id": "review-human", "label": "技术负责人复核", "source": "human", "points": 10, "severity": "scored"}
+  ],
+  "humanReview": {"prompt": "核对评审证据、分级和发布审批。", "sampleRate": 0.2}
+}

@@ -1,0 +1,562 @@
+{
+  "version": 1,
+  "scenarios": [
+    {
+      "id": "reminder-roundtrip",
+      "title": "提醒回环：创建、触发、投递、确认、取消",
+      "mechanism": "schedule",
+      "priority": "P1",
+      "fault": "duplicate",
+      "expectedInvariant": "同一计划时刻最多产生一次运行和一份回执；取消后不再触发",
+      "evidence": [
+        "schedule-run",
+        "effect-receipt",
+        "task",
+        "events"
+      ],
+      "repeat": 3,
+      "tags": [
+        "reminder",
+        "schedule"
+      ]
+    },
+    {
+      "id": "approval-rejected-stops",
+      "title": "审批拒绝后停止外部动作",
+      "mechanism": "action_resolver",
+      "priority": "P0",
+      "fault": "none",
+      "expectedInvariant": "拒绝外部动作审批后任务进入可恢复状态且没有执行副作用",
+      "evidence": [
+        "approval-status",
+        "task-status",
+        "effect-count",
+        "events"
+      ],
+      "repeat": 3,
+      "tags": [
+        "approval"
+      ]
+    },
+    {
+      "id": "action-binding-tamper",
+      "title": "动作绑定：审批后替换可执行文件被拒绝",
+      "mechanism": "action_resolver",
+      "priority": "P0",
+      "fault": "tamper",
+      "expectedInvariant": "审批绑定的可执行文件变化后必须拒绝执行并撤销审批",
+      "evidence": [
+        "approval-status",
+        "revalidation-event",
+        "executor-calls"
+      ],
+      "repeat": 3,
+      "tags": [
+        "approval",
+        "action-binding"
+      ]
+    },
+    {
+      "id": "non-interactive-high-risk-deny",
+      "title": "cron/webhook 无人在场时拒绝高危动作",
+      "mechanism": "action_resolver",
+      "priority": "P0",
+      "fault": "none",
+      "expectedInvariant": "非交互上下文的高危外部动作默认拒绝",
+      "evidence": [
+        "policy-denial",
+        "task-status",
+        "events"
+      ],
+      "repeat": 3,
+      "tags": [
+        "approval",
+        "non-interactive"
+      ]
+    },
+    {
+      "id": "duplicate-send-protection",
+      "title": "超时但实际成功时不重复发送",
+      "mechanism": "effect_outbox",
+      "priority": "P0",
+      "fault": "delayed",
+      "expectedInvariant": "同一 effect idempotency key 只能产生一个外部动作记录",
+      "evidence": [
+        "effect-ledger",
+        "duplicate-attempt",
+        "receipt"
+      ],
+      "repeat": 3,
+      "tags": [
+        "effect",
+        "idempotency"
+      ]
+    },
+    {
+      "id": "unknown-effect-reconcile",
+      "title": "重启后未知效果显式对账",
+      "mechanism": "effect_outbox",
+      "priority": "P0",
+      "fault": "crash",
+      "expectedInvariant": "重启后的不确定效果必须通过回执对账结算，不能盲目重放",
+      "evidence": [
+        "reconcile-item",
+        "effect-status",
+        "provider-receipt"
+      ],
+      "repeat": 3,
+      "tags": [
+        "effect",
+        "reconcile",
+        "restart"
+      ]
+    },
+    {
+      "id": "goal-completion-verification",
+      "title": "删除产物或篡改字段后拒绝完成",
+      "mechanism": "goal_judge",
+      "priority": "P0",
+      "fault": "tamper",
+      "expectedInvariant": "没有可验证产物和证据时不能把目标判定为完成",
+      "evidence": [
+        "completion-report",
+        "artifact-evidence",
+        "goal-status"
+      ],
+      "repeat": 3,
+      "tags": [
+        "goal",
+        "verification"
+      ]
+    },
+    {
+      "id": "crash-recovery-checkpoint",
+      "title": "从已证明检查点继续且不重放 effect",
+      "mechanism": "failure_recovery",
+      "priority": "P0",
+      "fault": "crash",
+      "expectedInvariant": "恢复只使用已证明的检查点和回执，不重复执行已提交副作用",
+      "evidence": [
+        "checkpoint-proof",
+        "run-status",
+        "effect-count"
+      ],
+      "repeat": 3,
+      "tags": [
+        "recovery",
+        "checkpoint"
+      ]
+    },
+    {
+      "id": "memory-taint-isolation",
+      "title": "网页注入不能进入 curated core",
+      "mechanism": "memory",
+      "priority": "P1",
+      "fault": "injection",
+      "expectedInvariant": "不可信网页内容只能进入低信任层，不能成为常驻指令或 curated 记忆",
+      "evidence": [
+        "memory-tier",
+        "trust",
+        "taint",
+        "recall-context"
+      ],
+      "repeat": 3,
+      "tags": [
+        "memory",
+        "taint"
+      ]
+    },
+    {
+      "id": "forget-propagation",
+      "title": "删除来源后派生记忆可解释地移除",
+      "mechanism": "memory",
+      "priority": "P1",
+      "fault": "none",
+      "expectedInvariant": "遗忘来源后派生记忆、版本、召回和整合报告同步清除",
+      "evidence": [
+        "forget-receipt",
+        "tombstones",
+        "memory-versions",
+        "recall"
+      ],
+      "repeat": 3,
+      "tags": [
+        "memory",
+        "forget"
+      ]
+    },
+    {
+      "id": "skill-archive-restore",
+      "title": "技能 stale/archive/pin/restore 正确",
+      "mechanism": "skill",
+      "priority": "P1",
+      "fault": "none",
+      "expectedInvariant": "过期技能不得被静默删除，归档必须可回滚且 pinned 技能不参与清理",
+      "evidence": [
+        "curator-run",
+        "skill-status",
+        "backup",
+        "rollback"
+      ],
+      "repeat": 3,
+      "tags": [
+        "skill",
+        "curator"
+      ]
+    },
+    {
+      "id": "proactive-noise-budget",
+      "title": "主动提醒遵守冷却、预算和 NO_REPLY",
+      "mechanism": "proactive",
+      "priority": "P1",
+      "fault": "none",
+      "expectedInvariant": "冷却、每日预算和忽略状态必须阻止重复打扰；无可提醒事项返回 NO_REPLY",
+      "evidence": [
+        "proactive-scan",
+        "heartbeat",
+        "notifier-calls",
+        "attention-queue"
+      ],
+      "repeat": 3,
+      "tags": [
+        "proactive",
+        "attention"
+      ]
+    },
+    {
+      "id": "schedule-catchup-dst",
+      "title": "错过周期、DST 跳跃和唯一执行",
+      "mechanism": "schedule",
+      "priority": "P1",
+      "fault": "delayed",
+      "expectedInvariant": "补跑遵守边界和 DST 语义，同一计划时刻不能重复执行",
+      "evidence": [
+        "schedule-runs",
+        "next-run-at",
+        "clock",
+        "timezone"
+      ],
+      "repeat": 3,
+      "tags": [
+        "schedule",
+        "dst",
+        "catch-up"
+      ]
+    },
+    {
+      "id": "connection-offline-consistency",
+      "title": "离线缓存不冒充实时，重连不覆盖新数据",
+      "mechanism": "connection",
+      "priority": "P2",
+      "fault": "stale_generation",
+      "expectedInvariant": "缓存必须标记 cached/asOf/cursor；旧 generation 写入被拒绝；远程不确定动作显式结算",
+      "evidence": [
+        "connection-status",
+        "projection",
+        "outbox",
+        "generation"
+      ],
+      "repeat": 3,
+      "tags": [
+        "connection",
+        "offline"
+      ]
+    },
+    {
+      "id": "sensitive-info-containment",
+      "title": "秘密不进入日志、通知或模型上下文",
+      "mechanism": "sensitive_info",
+      "priority": "P0",
+      "fault": "injection",
+      "expectedInvariant": "敏感值和秘密不能出现在持久化上下文、召回包、通知或事件日志中",
+      "evidence": [
+        "context-item",
+        "event-log",
+        "recall-pack",
+        "redaction"
+      ],
+      "repeat": 3,
+      "tags": [
+        "security",
+        "redaction"
+      ]
+    },
+    {
+      "id": "delegation-permission-cancel",
+      "title": "委派权限不超过父任务，取消后阻断效果",
+      "mechanism": "delegation",
+      "priority": "P0",
+      "fault": "none",
+      "expectedInvariant": "子任务不能获得父任务未声明的权限；取消后执行器和效果守卫都不得继续",
+      "evidence": [
+        "delegation-job",
+        "child-task",
+        "effect-guard",
+        "effect-count"
+      ],
+      "repeat": 3,
+      "tags": [
+        "delegation",
+        "permission",
+        "cancel"
+      ]
+    },
+    {
+      "id": "delegation-idempotency",
+      "title": "重复委派幂等 key 不创建第二个 Job",
+      "mechanism": "delegation",
+      "priority": "P0",
+      "fault": "duplicate",
+      "expectedInvariant": "同一幂等 key 只能绑定一个 Job 和一个子任务；不同目标必须显式冲突",
+      "evidence": [
+        "delegation-job",
+        "child-task",
+        "idempotency-conflict"
+      ],
+      "repeat": 3,
+      "tags": [
+        "delegation",
+        "idempotency"
+      ]
+    },
+    {
+      "id": "handoff-generation-trace",
+      "title": "跨 Provider 交接保留证据并拒绝旧代次写入",
+      "mechanism": "handoff",
+      "priority": "P0",
+      "fault": "stale_generation",
+      "expectedInvariant": "目标、约束、证据和下一步必须可追溯；旧 generation 写入必须被拒绝",
+      "evidence": [
+        "handoff-packet",
+        "verification",
+        "generation-fence",
+        "artifact"
+      ],
+      "repeat": 3,
+      "tags": [
+        "handoff",
+        "generation",
+        "evidence"
+      ]
+    },
+    {
+      "id": "sandbox-boundary-classification",
+      "title": "沙箱逃逸、网络越界和凭据过期有明确分类",
+      "mechanism": "sandbox",
+      "priority": "P0",
+      "fault": "credential_expiry",
+      "expectedInvariant": "路径逃逸、网络越界和凭据过期必须分别返回 sandbox_escape、network_violation、credential_expired",
+      "evidence": [
+        "sandbox-checks",
+        "failure-classification",
+        "allowed-request"
+      ],
+      "repeat": 3,
+      "tags": [
+        "sandbox",
+        "security",
+        "credentials"
+      ]
+    },
+    {
+      "id": "channel-inbound-idempotency",
+      "title": "重复渠道消息只处理一次，旧游标不覆盖新状态",
+      "mechanism": "channel",
+      "priority": "P0",
+      "fault": "duplicate",
+      "expectedInvariant": "同一 externalId 只产生一份投递记录；旧 generation 或 cursor 不得覆盖新游标",
+      "evidence": [
+        "channel-delivery",
+        "ack-receipt",
+        "cursor",
+        "stale-rejection"
+      ],
+      "repeat": 3,
+      "tags": [
+        "channel",
+        "idempotency",
+        "cursor"
+      ]
+    },
+    {
+      "id": "mention-ambiguous",
+      "title": "歧义提及阻断不可逆动作",
+      "mechanism": "mentions",
+      "priority": "P1",
+      "fault": "none",
+      "expectedInvariant": "同名实体有多个候选时必须澄清；不可逆动作必须被阻断",
+      "evidence": [
+        "mention-record",
+        "clarification",
+        "action-block"
+      ],
+      "repeat": 3,
+      "tags": [
+        "mention",
+        "ontology"
+      ]
+    },
+    {
+      "id": "cross-session-continue",
+      "title": "跨会话延续决定与约束",
+      "mechanism": "continuity",
+      "priority": "P1",
+      "fault": "none",
+      "expectedInvariant": "新会话无需用户重复输入即可召回已确认决定",
+      "evidence": [
+        "decision",
+        "context-pack",
+        "conversation"
+      ],
+      "repeat": 3,
+      "tags": [
+        "continuity",
+        "context"
+      ]
+    },
+    {
+      "id": "stale-state-deadline",
+      "title": "过期状态不注入上下文",
+      "mechanism": "ontology",
+      "priority": "P1",
+      "fault": "stale_generation",
+      "expectedInvariant": "过期实体状态保留审计标记但不得作为当前事实注入",
+      "evidence": [
+        "entity-state",
+        "context-pack",
+        "stale"
+      ],
+      "repeat": 3,
+      "tags": [
+        "ontology",
+        "stale"
+      ]
+    },
+    {
+      "id": "source-conflict-owner",
+      "title": "来源冲突不静默覆盖",
+      "mechanism": "ontology",
+      "priority": "P0",
+      "fault": "tamper",
+      "expectedInvariant": "冲突状态必须生成注意力卡片并保留原值与双方证据",
+      "evidence": [
+        "entity-state",
+        "attention",
+        "evidence"
+      ],
+      "repeat": 3,
+      "tags": [
+        "ontology",
+        "conflict"
+      ]
+    },
+    {
+      "id": "attention-budget-30",
+      "title": "三十条提醒受每日预算约束",
+      "mechanism": "attention",
+      "priority": "P1",
+      "fault": "duplicate",
+      "expectedInvariant": "单日投递不超过预算，剩余项保留在队列中",
+      "evidence": [
+        "attention-queue",
+        "heartbeat",
+        "budget"
+      ],
+      "repeat": 3,
+      "tags": [
+        "attention",
+        "budget"
+      ]
+    },
+    {
+      "id": "forget-propagation-ontology",
+      "title": "遗忘证据传播到本体与上下文包",
+      "mechanism": "ontology",
+      "priority": "P0",
+      "fault": "none",
+      "expectedInvariant": "遗忘来源后实体、状态、提及和引用该证据的上下文包同步失效",
+      "evidence": [
+        "forget",
+        "entity",
+        "context-pack"
+      ],
+      "repeat": 3,
+      "tags": [
+        "forget",
+        "ontology"
+      ]
+    },
+    {
+      "id": "prompt-injection-ontology",
+      "title": "网页注入不进入上下文或决定",
+      "mechanism": "ontology",
+      "priority": "P0",
+      "fault": "injection",
+      "expectedInvariant": "不可信网页内容保持 taint，不进入上下文包，也不会被写成决定",
+      "evidence": [
+        "memory",
+        "context-pack",
+        "decision"
+      ],
+      "repeat": 3,
+      "tags": [
+        "injection",
+        "security"
+      ]
+    },
+    {
+      "id": "four-week-continuity",
+      "title": "四周后承诺和决定仍可召回",
+      "mechanism": "continuity",
+      "priority": "P1",
+      "fault": "delayed",
+      "expectedInvariant": "跨四周后承诺临近到期被提醒，已确认决定仍出现在上下文",
+      "evidence": [
+        "commitment",
+        "heartbeat",
+        "context-pack"
+      ],
+      "repeat": 3,
+      "tags": [
+        "continuity",
+        "commitment"
+      ]
+    },
+    {
+      "id": "task-dag-fan-in",
+      "title": "任务 DAG 的 n_of_m 汇聚",
+      "mechanism": "delegation",
+      "priority": "P1",
+      "fault": "none",
+      "expectedInvariant": "3 个子任务中完成 2 个即可满足汇聚，未用分支可取消且边持久化",
+      "evidence": [
+        "task-edge",
+        "delegation-job",
+        "join"
+      ],
+      "repeat": 3,
+      "tags": [
+        "delegation",
+        "dag"
+      ]
+    },
+    {
+      "id": "async-tool-interrupt",
+      "title": "后台工具可中断且不泄露半成品",
+      "mechanism": "background_tool",
+      "priority": "P1",
+      "fault": "timeout",
+      "expectedInvariant": "中断后台工具后状态为 stopped，未完成输出不得进入结果",
+      "evidence": [
+        "tool-job",
+        "interrupt",
+        "output"
+      ],
+      "repeat": 3,
+      "tags": [
+        "tool",
+        "async"
+      ]
+    }
+  ]
+}

@@ -34,6 +34,7 @@ export interface SourceRegistryOptions {
   contentRoot: string;
   webFetch?: typeof fetchWebSnapshot;
   now?: () => Date;
+  onItemReady?: (item: SourceItem) => void;
 }
 
 export interface CreateSourceInput {
@@ -86,12 +87,14 @@ export class SourceRegistry {
   private readonly contentRoot: string;
   private readonly webFetch: typeof fetchWebSnapshot;
   private readonly now: () => Date;
+  private readonly onItemReady: ((item: SourceItem) => void) | undefined;
 
   constructor(service: HearthService, options: SourceRegistryOptions) {
     this.service = service;
     this.contentRoot = resolve(options.contentRoot);
     this.webFetch = options.webFetch ?? fetchWebSnapshot;
     this.now = options.now ?? (() => new Date());
+    this.onItemReady = options.onItemReady;
   }
 
   list(): SourceConnection[] {
@@ -412,6 +415,12 @@ export class SourceRegistry {
 
   private publishItem(item: SourceItem): void {
     this.publish("source.item.updated", item);
+    if (item.status !== "ready") return;
+    try {
+      this.onItemReady?.(item);
+    } catch {
+      // Ontology writeback is best effort and never blocks source ingestion.
+    }
   }
 
   private updateSource(id: string, patch: Record<string, unknown>): SourceConnection {

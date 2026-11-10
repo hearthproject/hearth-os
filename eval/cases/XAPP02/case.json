@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "XAPP02",
+  "version": 1,
+  "title": "报销邮件票据与表格对账",
+  "family": "cross-app",
+  "difficulty": "edge",
+  "runModes": ["offline"],
+  "description": "从邮件和票据提取报销数据并与表格逐笔对账。",
+  "goal": "生成差异清单和待审批回复，保持原始表格不变。",
+  "tags": ["email", "finance", "spreadsheet"],
+  "timeoutMs": 600000,
+  "inputs": [{"kind": "file", "label": "邮件票据与表格", "path": "input.json"}],
+  "expectedOutputs": ["reconciliation.json"],
+  "graders": [
+    {"id": "file", "title": "对账结果存在", "config": {"kind": "file", "path": "reconciliation.json", "minBytes": 60}},
+    {"id": "facts", "title": "合计与差异正确", "config": {"kind": "json", "path": "reconciliation.json", "equals": {"receiptTotal":2640,"sheetTotal":2600,"difference":40,"originalSheetChanged":false}}}
+  ],
+  "criteria": [
+    {"id": "exists", "label": "输出对账结果", "source": "deterministic", "points": 30, "severity": "blocker", "graderId": "file"},
+    {"id": "facts", "label": "合计、差异和原表状态正确", "source": "deterministic", "points": 30, "severity": "scored", "graderId": "facts"},
+    {"id": "quality", "label": "差异逐笔可追溯", "source": "judge", "points": 30, "severity": "scored", "rubric": "差异定位到票据和表格行，回复等待财务审批。"},
+    {"id": "human", "label": "财务复核", "source": "human", "points": 10, "severity": "scored"}
+  ],
+  "humanReview": {"prompt": "核对合计和差异来源。", "sampleRate": 0.1}
+}

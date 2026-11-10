@@ -1,12 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Clock3, Inbox, RefreshCw, ShieldAlert, Sparkles, X } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, Clock3, Inbox, ListChecks, RefreshCw, ShieldAlert, Sparkles, X } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { EmptyState } from "../components/EmptyState.tsx";
 import { ProactiveSettingsPanel } from "../components/ProactiveSettingsPanel.tsx";
 import { api } from "../lib/api.ts";
 import { relativeTime } from "../lib/format.ts";
-import type { ProactiveSuggestion } from "../lib/types.ts";
+import type { AttentionItem, ProactiveSuggestion, ReconcileItem } from "../lib/types.ts";
 
 const STATUS_LABELS: Record<ProactiveSuggestion["status"], string> = {
   new: "待处理",
@@ -28,7 +28,33 @@ const TRIGGER_LABELS: Record<string, string> = {
   "calendar.upcoming": "日历"
 };
 
-const RISK_LABELS = { low: "低风险", medium: "中风险", high: "高风险" };
+const RISK_LABELS: Record<ReconcileItem["risk"], string> = { low: "低风险", medium: "中风险", high: "高风险", critical: "严重风险" };
+
+const RECONCILE_STATUS_LABELS: Record<ReconcileItem["status"], string> = {
+  open: "待核对",
+  checking: "正在检查",
+  needs_human: "需要人工判断",
+  conflicting: "结果冲突",
+  resolved_committed: "已确认提交",
+  resolved_absent: "已确认未执行",
+  abandoned: "已放弃"
+};
+
+const RECONCILE_OPEN_STATUSES: ReconcileItem["status"][] = ["open", "checking", "needs_human", "conflicting"];
+
+const ATTENTION_KIND_LABELS: Record<AttentionItem["kind"], string> = {
+  decision: "需要决定",
+  approval: "等待审批",
+  credential: "需要授权",
+  reconcile: "需要对账",
+  conflict: "信息冲突",
+  commitment: "承诺",
+  deadline: "截止",
+  blocked: "被阻塞",
+  opportunity: "机会",
+  progress: "进展",
+  suggestion: "建议"
+};
 
 export function InboxPage() {
   const queryClient = useQueryClient();
@@ -36,6 +62,8 @@ export function InboxPage() {
   const [filter, setFilter] = useState<"active" | "all">("active");
   const [notice, setNotice] = useState<string | null>(null);
   const snapshotQuery = useQuery({ queryKey: ["proactive"], queryFn: api.proactive, refetchInterval: 15_000 });
+  const attentionQuery = useQuery({ queryKey: ["attention"], queryFn: api.attention, refetchInterval: 15_000 });
+  const reconcileQuery = useQuery({ queryKey: ["reconcile"], queryFn: () => api.reconcile(), refetchInterval: 15_000 });
 
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ["proactive"] });
   const scanMutation = useMutation({
@@ -61,13 +89,69 @@ export function InboxPage() {
       refresh();
     }
   });
+  const attentionMutation = useMutation({
+    mutationFn: async (input: { id: string; action: "ack" | "ignore" | "resolve" | "snooze" | "wrong" }) => {
+      if (input.action === "ack") return api.attentionAck(input.id);
+      if (input.action === "ignore") return api.attentionIgnore(input.id);
+      if (input.action === "resolve") return api.attentionResolve(input.id);
+      if (input.action === "snooze") return api.attentionSnooze(input.id, 60);
+      await api.attentionFeedback(input.id, "wrong");
+      return api.attentionIgnore(input.id);
+    },
+    onSuccess: (_result, input) => {
+      setNotice(input.action === "wrong" ? "已记录为误报，并会用于调整同类提醒。" : "注意力事项已更新。");
+      void queryClient.invalidateQueries({ queryKey: ["attention"] });
+    }
+  });
+  const reconcileMutation = useMutation({
+    mutationFn: async (input: { id: string; action: "check" | "committed" | "absent" | "abandoned" | "task"; note?: string }) => {
+      if (input.action === "check") return api.checkReconcile(input.id);
+      if (input.action === "task") return api.createReconcileTask(input.id, input.note);
+      return api.resolveReconcile(input.id, input.action, input.note ?? "");
+    },
+    onSuccess: (result, input) => {
+      if ("goal" in result) {
+        navigate("/tasks/" + result.id);
+        return;
+      }
+      setNotice(reconcileNotice(input.action, result.status));
+      void queryClient.invalidateQueries({ queryKey: ["reconcile"] });
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      void queryClient.invalidateQueries({ queryKey: ["task"] });
+    }
+  });
 
   const snapshot = snapshotQuery.data;
   const suggestions = (snapshot?.suggestions ?? [])
     .filter((suggestion) => filter === "all" || ["new", "snoozed", "accepted"].includes(suggestion.status))
     .sort((left, right) => right.priority - left.priority || right.lastSeenAt.localeCompare(left.lastSeenAt));
   const pendingCount = (snapshot?.suggestions ?? []).filter((item) => ["new", "snoozed", "accepted"].includes(item.status)).length;
-  const error = scanMutation.error ?? actionMutation.error;
+  const reconcileItems = (reconcileQuery.data?.items ?? []).filter((item) => RECONCILE_OPEN_STATUSES.includes(item.status));
+  const attentionItems = attentionQuery.data?.items ?? [];
+  const error = scanMutation.error ?? actionMutation.error ?? attentionQuery.error ?? attentionMutation.error ?? reconcileQuery.error ?? reconcileMutation.error;
+
+  function reconcileAction(item: ReconcileItem, action: "check" | "committed" | "absent" | "abandoned" | "task") {
+    if (action === "check") {
+      reconcileMutation.mutate({ id: item.id, action });
+      return;
+    }
+    if (action === "abandoned" && !window.confirm("放弃后不会自动重试这个外部动作，但仍会保留审计记录。确认放弃？")) return;
+    const promptText = action === "task"
+      ? "补充给人工任务的信息（可留空）："
+      : action === "committed"
+        ? "请说明你在外部服务看到的提交证据："
+        : action === "absent"
+          ? "请说明为什么确认动作没有发生："
+          : "请说明放弃核对的原因：";
+    const answer = window.prompt(promptText);
+    if (answer === null) return;
+    const note = answer.trim();
+    if (action !== "task" && !note) {
+      setNotice("手动判定必须填写核对说明。");
+      return;
+    }
+    reconcileMutation.mutate({ id: item.id, action, ...(note ? { note } : {}) });
+  }
 
   return (
     <div className="page inbox-page">
@@ -81,6 +165,126 @@ export function InboxPage() {
 
       {snapshotQuery.isLoading && <p className="section-empty">正在读取主动建议…</p>}
       {snapshotQuery.isError && <p className="form-error">{snapshotQuery.error.message}</p>}
+
+      {attentionItems.length > 0 && (
+        <section className="panel attention-panel">
+          <div className="panel-head">
+            <div>
+              <h2><Sparkles size={17} /> 现在需要你注意</h2>
+              <span className="panel-meta">按“为什么现在、有什么后果、建议动作”排序；可稍后、忽略或标记误报。</span>
+            </div>
+            <span className="tag">{attentionItems.length} 项</span>
+          </div>
+          <div className="suggestion-list">
+            {attentionItems.map((item) => (
+              <article className={"panel suggestion-card risk-" + (item.critical ? "critical" : "medium")} key={item.id}>
+                <div className="suggestion-head">
+                  <div>
+                    <div className="suggestion-kicker">
+                      <span className="tag">{ATTENTION_KIND_LABELS[item.kind] ?? item.kind}</span>
+                      <span className="tag">{item.waitingOn === "user" ? "等你处理" : item.waitingOn === "agent" ? "Agent 推进中" : "等外部系统"}</span>
+                      {item.critical && <span className="tag risk-tag"><ShieldAlert size={11} /> 高影响</span>}
+                      {item.shadowed && <span className="tag">影子模式</span>}
+                      {typeof item.score === "number" && <span className="tag">分数 {Math.round(item.score)}</span>}
+                    </div>
+                    <h2>{item.title}</h2>
+                    <p>{item.whyNow}</p>
+                  </div>
+                  <span className="panel-meta">{relativeTime(item.waitingSince)}</span>
+                </div>
+                <div className="suggestion-facts">
+                  <div><span>不处理会怎样</span><strong>{item.consequence}</strong></div>
+                  <div><span>建议动作</span><strong>{item.nextAction}</strong></div>
+                  <div><span>来源</span><strong>{item.source}</strong></div>
+                </div>
+                <details>
+                  <summary>为什么我看到这个</summary>
+                  <p>{item.whyNow}</p>
+                  {item.evidenceRefs?.length ? <p className="mono">证据：{item.evidenceRefs.slice(0, 6).join("、")}</p> : <p>没有外部证据引用；这是系统根据状态推断的提醒。</p>}
+                </details>
+                <div className="suggestion-foot">
+                  <span className="page-meta">
+                    {item.options?.length ? "可选：" + item.options.map((option) => option.label).join(" / ") : "只有一个明确下一步时，不要求额外选择"}
+                  </span>
+                  <div className="suggestion-actions">
+                    {item.taskId && <Link className="link-button" to={"/tasks/" + item.taskId}>查看任务</Link>}
+                    <button className="primary-button" disabled={attentionMutation.isPending} onClick={() => attentionMutation.mutate({ id: item.id, action: "ack" })}>
+                      <Check size={14} /> 我看到
+                    </button>
+                    <button className="ghost-button" disabled={attentionMutation.isPending} onClick={() => attentionMutation.mutate({ id: item.id, action: "snooze" })}>
+                      <Clock3 size={14} /> 稍后 1 小时
+                    </button>
+                    <button className="ghost-button" disabled={attentionMutation.isPending} onClick={() => attentionMutation.mutate({ id: item.id, action: "resolve" })}>
+                      <CheckCircle2 size={14} /> 已处理
+                    </button>
+                    <button className="ghost-button danger" disabled={attentionMutation.isPending} onClick={() => attentionMutation.mutate({ id: item.id, action: "wrong" })}>
+                      <X size={14} /> 误报
+                    </button>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {reconcileItems.length > 0 && (
+        <section className="panel reconcile-panel">
+          <div className="panel-head">
+            <div>
+              <h2><AlertTriangle size={17} /> 外部动作待对账</h2>
+              <span className="panel-meta">结果不确定的动作不会自动重试；先核对真实结果，再决定后续。</span>
+            </div>
+            <span className="tag risk-tag">{reconcileItems.length} 项</span>
+          </div>
+          <div className="reconcile-list">
+            {reconcileItems.map((item) => (
+              <article className={"reconcile-card risk-" + item.risk} key={item.id}>
+                <div className="reconcile-head">
+                  <div>
+                    <div className="suggestion-kicker">
+                      <span className="tag">{RECONCILE_STATUS_LABELS[item.status]}</span>
+                      <span className="tag">{RISK_LABELS[item.risk]}</span>
+                      {item.provider && <span className="tag">{item.provider}</span>}
+                    </div>
+                    <h3>{item.summary}</h3>
+                    <p>{item.reason}</p>
+                  </div>
+                  <span className="panel-meta">{relativeTime(item.updatedAt)}</span>
+                </div>
+                <dl className="reconcile-facts">
+                  <div><dt>效果</dt><dd className="mono select-all">{item.effectId}</dd></div>
+                  <div><dt>目标</dt><dd className="mono">{item.targetKey ?? "未知"}</dd></div>
+                  <div><dt>检查次数</dt><dd>{item.checkCount}</dd></div>
+                </dl>
+                {item.attempted.length > 0 && (
+                  <details className="reconcile-attempts">
+                    <summary>查看已尝试的核对记录</summary>
+                    {item.attempted.map((attempt, index) => <p key={attempt + index}>{attempt}</p>)}
+                  </details>
+                )}
+                <div className="reconcile-actions">
+                  <button className="primary-button" disabled={reconcileMutation.isPending} onClick={() => reconcileAction(item, "check")}>
+                    <RefreshCw size={14} /> 重新检查
+                  </button>
+                  <button className="ghost-button" disabled={reconcileMutation.isPending} onClick={() => reconcileAction(item, "committed")}>
+                    <CheckCircle2 size={14} /> 标记已提交
+                  </button>
+                  <button className="ghost-button" disabled={reconcileMutation.isPending} onClick={() => reconcileAction(item, "absent")}>
+                    <Check size={14} /> 标记未执行
+                  </button>
+                  <button className="ghost-button" disabled={reconcileMutation.isPending} onClick={() => reconcileAction(item, "task")}>
+                    <ListChecks size={14} /> 转人工任务
+                  </button>
+                  <button className="ghost-button danger" disabled={reconcileMutation.isPending} onClick={() => reconcileAction(item, "abandoned")}>
+                    <X size={14} /> 放弃
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
 
       {snapshot && (
         <>
@@ -198,4 +402,12 @@ function actionNotice(action: "accept" | "convert" | "ignore" | "snooze"): strin
   if (action === "ignore") return "已忽略；同一来源不会换一种说法继续推送。";
   if (action === "snooze") return "已稍后提醒 1 小时。";
   return "已转成任务。";
+}
+
+function reconcileNotice(action: "check" | "committed" | "absent" | "abandoned" | "task", status: ReconcileItem["status"]): string {
+  if (action === "check") return status === "needs_human" ? "没有可用适配器，已转人工判断。" : "重新检查完成。";
+  if (action === "committed") return "已记录为外部动作已提交。";
+  if (action === "absent") return "已记录为外部动作未执行。";
+  if (action === "abandoned") return "已放弃该对账项，审计记录仍保留。";
+  return "已创建人工任务。";
 }

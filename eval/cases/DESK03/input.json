@@ -1,0 +1,1 @@
+{"workbook":"sales.xlsx","sheet":"Sheet1","rows":[["date","amount"],["11/02/2026","100"],["2026-11-03",""]],"rules":{"normalizeDate":"YYYY-MM-DD","emptyAmount":"0"}}

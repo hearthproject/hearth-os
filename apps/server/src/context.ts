@@ -49,10 +49,14 @@ export interface CreateHandoffInput {
   toRunId?: string | null;
   fromExecutor: ExecutorId;
   toExecutor: ExecutorId;
+  generation?: number;
+  sourceCursor?: number;
   status: HandoffStatus;
   reasonCode: FailureCause;
   diagnosis: FailureDiagnosis | null;
   packet: HandoffPacket | null;
+  verification?: HandoffPacket["verification"] | null;
+  artifactRef?: string | null;
   contextWatermarkSeq: number;
   initiatedBy: "auto" | "user";
 }
@@ -70,6 +74,15 @@ export interface ContextRetentionReceipt {
   deletedItems: number;
   deletedBlobs: number;
   deletedHandoffs: number;
+}
+
+export class HandoffFenceError extends Error {
+  readonly code = "HANDOFF_GENERATION_STALE";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "HandoffFenceError";
+  }
 }
 
 export class ContextService {
@@ -134,6 +147,7 @@ export class ContextService {
   }
 
   record(input: ContextRecordInput): ContextItem {
+    this.assertHandoffFence(input);
     const settings = this.settings();
     const content = redactSecrets(input.content);
     const sha256 = createHash("sha256").update(content).digest("hex");
@@ -192,6 +206,24 @@ export class ContextService {
     });
   }
 
+  private assertHandoffFence(input: ContextRecordInput): void {
+    if (!input.runId || input.kind === "handoff") return;
+    const run = this.service.store.getRun(input.runId);
+    if (!run) return;
+    const latest = [...this.service.store.listHandoffs(input.taskId)]
+      .sort((left, right) => right.generation - left.generation)[0];
+    if (!latest) return;
+    const runHandoff = run.handoffId ? this.service.store.getHandoff(run.handoffId) : null;
+    const runGeneration = runHandoff?.generation ?? 0;
+    if (runGeneration < latest.generation) {
+      throw new HandoffFenceError(`执行器代次已过期：当前 ${latest.generation}，写入来自 ${runGeneration}`);
+    }
+    if (runGeneration === latest.generation && (latest.status === "failed" || latest.status === "cancelled")) {
+      if (["failure", "diagnosis", "decision", "notice", "usage"].includes(input.kind)) return;
+      throw new HandoffFenceError(`交接 ${latest.id} 已结束：${latest.status}`);
+    }
+  }
+
   recordFailure(task: TaskRecord, runId: string, executorId: ExecutorId, error: unknown): ContextItem {
     const message = error instanceof Error ? error.message : String(error);
     return this.record({
@@ -235,10 +267,14 @@ export class ContextService {
       toRunId: input.toRunId ?? null,
       fromExecutor: input.fromExecutor,
       toExecutor: input.toExecutor,
+      generation: input.generation ?? 1,
+      sourceCursor: input.sourceCursor ?? input.contextWatermarkSeq,
       status: input.status,
       reasonCode: input.reasonCode,
       diagnosis: input.diagnosis,
       packet: input.packet,
+      verification: input.verification ?? input.packet?.verification ?? null,
+      artifactRef: input.artifactRef ?? null,
       contextWatermarkSeq: input.contextWatermarkSeq,
       initiatedBy: input.initiatedBy,
       createdAt: now,
@@ -265,7 +301,7 @@ export class ContextService {
     return handoff;
   }
 
-  updateHandoff(id: string, patch: Partial<Pick<HandoffRecord, "toRunId" | "status" | "diagnosis" | "packet" | "updatedAt">>): HandoffRecord | null {
+  updateHandoff(id: string, patch: Partial<Pick<HandoffRecord, "toRunId" | "status" | "diagnosis" | "packet" | "verification" | "artifactRef" | "updatedAt">>): HandoffRecord | null {
     const updated = this.service.store.updateHandoff(id, { ...patch, updatedAt: new Date().toISOString() });
     if (!updated) return null;
     const type = updated.status === "completed"

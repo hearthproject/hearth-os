@@ -182,6 +182,8 @@ export interface TaskError {
   guidance: string;
   cause?: FailureCause;
   diagnosisId?: string;
+  failureClass?: FailureClass;
+  disposition?: FailureDisposition;
 }
 
 export interface TaskPermissions {
@@ -200,6 +202,9 @@ export interface RunBudget {
 
 export interface TaskRecord {
   id: string;
+  goalId?: string | null;
+  externalRef?: string | null;
+  requestHash?: string | null;
   templateId: string | null;
   title: string;
   goal: string;
@@ -224,6 +229,74 @@ export interface TaskRecord {
   methodVersion?: number | null;
   pinnedAt?: string | null;
   archivedAt?: string | null;
+}
+
+export const GOAL_STATES = ["draft", "active", "blocked", "awaiting_user", "validating", "done", "failed", "cancelled"] as const;
+export type GoalState = (typeof GOAL_STATES)[number];
+
+export const GOAL_VALIDATORS = ["command", "file", "schema", "git", "manual", "llm_review"] as const;
+export type GoalValidator = (typeof GOAL_VALIDATORS)[number];
+
+export const GOAL_REVIEW_POLICIES = ["auto", "human_on_risk", "human_on_complete"] as const;
+export type GoalReviewPolicy = (typeof GOAL_REVIEW_POLICIES)[number];
+
+export interface GoalAuthoritySource {
+  kind: "user" | "document" | "system";
+  ref: string;
+}
+
+export interface GoalCriterion {
+  id: string;
+  description: string;
+  validator: GoalValidator;
+  check: string;
+  required: boolean;
+}
+
+export interface GoalBudget {
+  maxTurns?: number;
+  maxToolCalls?: number;
+  maxTokens?: number;
+  maxDurationMs?: number;
+  maxHumanMinutes?: number;
+}
+
+export interface GoalContract {
+  goalId: string;
+  title: string;
+  objective: string;
+  constraints: string[];
+  forbiddenActions: string[];
+  authoritySources: GoalAuthoritySource[];
+  successCriteria: GoalCriterion[];
+  evidenceRequirements: string[];
+  budget: GoalBudget;
+  deadline?: string;
+  stopConditions: string[];
+  reviewPolicy: GoalReviewPolicy;
+  currentState: GoalState;
+  nextHandoff?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GoalCriterionResult {
+  criterionId: string;
+  status: "passed" | "failed" | "not_run" | "not_required";
+  evidenceRefs: string[];
+  detail: string;
+}
+
+export interface GoalCompletionReport {
+  goalId: string;
+  taskId: string;
+  verdict: "pass" | "fail" | "needs_human" | "blocked";
+  summary: string;
+  criteria: GoalCriterionResult[];
+  evidenceRefs: string[];
+  missingEvidence: string[];
+  forbiddenActions: string[];
+  checkedAt: string;
 }
 
 export const TASK_FOLLOW_UP_MODES = ["queue", "steer"] as const;
@@ -402,6 +475,8 @@ export interface RunUsage {
   cacheWriteInputTokens: number;
   outputTokens: number;
   reasoningOutputTokens: number;
+  turns?: number;
+  toolCalls?: number;
 }
 
 export interface RunRecord {
@@ -446,6 +521,9 @@ export interface TaskProposalRecord {
 
 export type ScheduleRunStatus = "queued" | "running" | "completed" | "failed" | "skipped" | "cancelled";
 
+export const SCHEDULE_CATCH_UP_POLICIES = ["skip", "run_once", "run_all_bounded"] as const;
+export type ScheduleCatchUpPolicy = (typeof SCHEDULE_CATCH_UP_POLICIES)[number];
+
 export interface ScheduleRecord {
   id: string;
   name: string;
@@ -461,6 +539,13 @@ export interface ScheduleRecord {
   lastRunAt: string | null;
   lastTaskId: string | null;
   lastStatus: ScheduleRunStatus | null;
+  catchUpPolicy: ScheduleCatchUpPolicy;
+  catchUpMaxRuns: number;
+  priority: number;
+  failureCount: number;
+  cooldownUntil: string | null;
+  deleteAfterRun: boolean;
+  pausedReason: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -470,6 +555,11 @@ export interface ScheduleRunRecord {
   scheduleId: string;
   scheduledFor: string;
   taskId: string | null;
+  effectId: string | null;
+  idempotencyKey: string | null;
+  attempt: number;
+  failureClass: FailureClass | null;
+  receipt: Record<string, unknown> | null;
   status: ScheduleRunStatus;
   error: string | null;
   createdAt: string;
@@ -485,6 +575,29 @@ export interface RunCheckpointRecord {
   path: string;
   sha256: string;
   usage: RunUsage | null;
+  createdAt: string;
+  proof?: RunCheckpointProof;
+}
+
+export interface RunCheckpointProof {
+  goalId: string | null;
+  attemptId: string;
+  identity: {
+    executorId: string;
+    runtimeVersion: string;
+    modelId?: string;
+  };
+  phasePrefix: string[];
+  hostResult?: unknown;
+  validation?: {
+    status: "passed" | "failed" | "not_required";
+    evidenceRefs: string[];
+  };
+  effectReceipts: string[];
+  preparedIntents: string[];
+  permissionsDigest?: string;
+  goalRevision?: string;
+  workspaceDigest?: string;
   createdAt: string;
 }
 
@@ -571,9 +684,18 @@ export interface GitFileView {
   content: string;
 }
 
-export const APPROVAL_STATUSES = ["pending", "approved", "rejected", "expired"] as const;
+export const APPROVAL_STATUSES = ["pending", "approved", "rejected", "consumed", "expired", "revoked"] as const;
 
 export type ApprovalStatus = (typeof APPROVAL_STATUSES)[number];
+
+export const APPROVAL_CONTEXTS = ["interactive", "scheduled", "webhook", "remote", "delegated"] as const;
+export type ApprovalContext = (typeof APPROVAL_CONTEXTS)[number];
+
+export const PERMISSION_MODES = ["read-only", "guarded", "workspace", "full"] as const;
+export type PermissionMode = (typeof PERMISSION_MODES)[number];
+
+export const APPROVAL_DECIDERS = ["user", "policy", "auto_review"] as const;
+export type ApprovalDecider = (typeof APPROVAL_DECIDERS)[number];
 
 export interface ApprovalRecord {
   id: string;
@@ -589,11 +711,37 @@ export interface ApprovalRecord {
   decidedAt: string | null;
   effectId: string | null;
   createdAt: string;
+  goalId?: string | null;
+  actionDigest?: string | null;
+  permissionMode?: PermissionMode | null;
+  context?: ApprovalContext | null;
+  maxUses?: number;
+  usedCount?: number;
+  approvedBy?: ApprovalDecider | null;
+  issuedAt?: string;
+  revokedAt?: string | null;
+  action?: Record<string, unknown> | null;
+  rejectionCount?: number;
 }
 
-export const EFFECT_STATUSES = ["pending", "executing", "succeeded", "failed", "uncertain"] as const;
+export const EFFECT_STATUSES = [
+  "pending",
+  "prepared",
+  "admitted",
+  "executing",
+  "committed",
+  "succeeded",
+  "failed",
+  "uncertain",
+  "reconciled_committed",
+  "reconciled_absent",
+  "abandoned"
+] as const;
 
 export type EffectStatus = (typeof EFFECT_STATUSES)[number];
+
+export const EFFECT_REPLAY_POLICIES = ["replay_safe", "process_bound", "never_replay"] as const;
+export type EffectReplayPolicy = (typeof EFFECT_REPLAY_POLICIES)[number];
 
 export interface EffectRecord {
   id: string;
@@ -607,6 +755,48 @@ export interface EffectRecord {
   error: string | null;
   createdAt: string;
   updatedAt: string;
+  goalId?: string | null;
+  effectType?: string;
+  replayPolicy?: EffectReplayPolicy;
+  actionDigest?: string | null;
+  resolvedActionDigest?: string | null;
+  attemptCount?: number;
+  maxAttempts?: number;
+  leaseOwner?: string | null;
+  leaseExpiresAt?: string | null;
+  availableAt?: string;
+  provider?: string | null;
+  providerRef?: string | null;
+  reconcileRef?: string | null;
+  reconciledAt?: string | null;
+  targetKey?: string | null;
+  suspendReason?: string | null;
+}
+
+export const RECONCILE_STATUSES = ["open", "checking", "needs_human", "resolved_committed", "resolved_absent", "conflicting", "abandoned"] as const;
+export type ReconcileStatus = (typeof RECONCILE_STATUSES)[number];
+
+export const RECONCILE_ACTIONS = ["recheck", "mark_committed", "mark_absent", "abandon", "create_task"] as const;
+export type ReconcileAction = (typeof RECONCILE_ACTIONS)[number];
+
+export interface ReconcileItem {
+  id: string;
+  effectId: string;
+  taskId: string;
+  goalId: string | null;
+  targetKey: string | null;
+  summary: string;
+  status: ReconcileStatus;
+  reason: string;
+  attempted: string[];
+  risk: "low" | "medium" | "high" | "critical";
+  suggestedActions: ReconcileAction[];
+  provider: string | null;
+  checkCount: number;
+  resolutionNote: string | null;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt: string | null;
 }
 
 export interface ArtifactRecord {
@@ -979,6 +1169,21 @@ export type MemorySensitivity = (typeof MEMORY_SENSITIVITIES)[number];
 export const MEMORY_CONFIDENCES = ["low", "medium", "high"] as const;
 export type MemoryConfidence = (typeof MEMORY_CONFIDENCES)[number];
 
+export const MEMORY_TIERS = ["instructions", "curated", "episodic", "prospective", "review"] as const;
+export type MemoryTier = (typeof MEMORY_TIERS)[number];
+
+export const MEMORY_ORIGINS = ["user", "verified_system", "agent", "imported", "web", "email", "untrusted"] as const;
+export type MemoryOriginClass = (typeof MEMORY_ORIGINS)[number];
+
+export const MEMORY_TRUST_LEVELS = ["high", "medium", "low", "none"] as const;
+export type MemoryTrust = (typeof MEMORY_TRUST_LEVELS)[number];
+
+export const MEMORY_TAINT_STATES = ["clean", "suspected", "tainted"] as const;
+export type MemoryTaint = (typeof MEMORY_TAINT_STATES)[number];
+
+export const MEMORY_RETENTIONS = ["session", "30d", "1y", "permanent"] as const;
+export type MemoryRetention = (typeof MEMORY_RETENTIONS)[number];
+
 export interface MemorySourceRef {
   type: "user" | "task" | "source" | "method" | "system";
   id: string | null;
@@ -986,7 +1191,26 @@ export interface MemorySourceRef {
   excerpt: string | null;
 }
 
-export interface MemoryRecord {
+export interface MemoryMeta {
+  tier: MemoryTier;
+  originClass: MemoryOriginClass;
+  sourceKind: string;
+  sourceRef: string;
+  sessionId: string | null;
+  trust: MemoryTrust;
+  taint: MemoryTaint;
+  sensitivity: MemorySensitivity;
+  confidence: MemoryConfidence;
+  importance: number;
+  retention: MemoryRetention;
+  supersessionKey: string | null;
+  contentHash: string;
+  createdAt: string;
+  lastVerifiedAt: string | null;
+  expiresAt: string | null;
+}
+
+export interface MemoryRecord extends MemoryMeta {
   id: string;
   kind: MemoryKind;
   status: MemoryStatus;
@@ -995,33 +1219,27 @@ export interface MemoryRecord {
   scope: string;
   tags: string[];
   source: MemorySourceRef;
-  confidence: MemoryConfidence;
-  sensitivity: MemorySensitivity;
   allowRecall: boolean;
   version: number;
   supersedesId: string | null;
   derivedFromId: string | null;
   validUntil: string | null;
-  createdAt: string;
   updatedAt: string;
   lastRecalledAt: string | null;
   recallCount: number;
 }
 
-export interface MemoryVersion {
+export interface MemoryVersion extends MemoryMeta {
   id: string;
   memoryId: string;
   version: number;
   content: string;
   status: MemoryStatus;
   source: MemorySourceRef;
-  confidence: MemoryConfidence;
-  sensitivity: MemorySensitivity;
   allowRecall: boolean;
   scope: string;
   tags: string[];
   reason: string;
-  createdAt: string;
 }
 
 export const MEMORY_CONFLICT_STATUSES = ["pending", "resolved"] as const;
@@ -1043,10 +1261,14 @@ export interface MemoryRecall {
   memoryId: string;
   taskId: string;
   runId: string | null;
+  lane: MemoryRecallLane;
   reason: string;
   score: number;
   createdAt: string;
 }
+
+export const MEMORY_RECALL_LANES = ["always_on", "on_demand"] as const;
+export type MemoryRecallLane = (typeof MEMORY_RECALL_LANES)[number];
 
 export interface MemorySettings {
   autoCapture: "off" | "experience";
@@ -1076,7 +1298,7 @@ export interface OnboardingSnapshot {
   checks: OnboardingChecks;
 }
 
-export const MEMORY_FORGET_TARGETS = ["projection", "versions", "event-log", "recall-audit", "devices"] as const;
+export const MEMORY_FORGET_TARGETS = ["projection", "versions", "event-log", "recall-audit", "devices", "derivations", "consolidation"] as const;
 export type MemoryForgetTarget = (typeof MEMORY_FORGET_TARGETS)[number];
 
 export interface MemoryForgetPropagation {
@@ -1093,7 +1315,60 @@ export interface MemoryForgetReceipt {
   redactedVersions: number;
   redactedEvents: number;
   targets: MemoryForgetPropagation[];
+  tombstones?: MemoryForgetTombstone[];
   createdAt: string;
+}
+
+export interface MemoryForgetTombstone {
+  id: string;
+  memoryId: string;
+  contentHash: string;
+  subjectKey: string;
+  sourceKind: string;
+  sourceRef: string;
+  reason: string;
+  createdAt: string;
+}
+
+export const MEMORY_CONSOLIDATION_STATUSES = ["planned", "applied", "failed"] as const;
+export type MemoryConsolidationStatus = (typeof MEMORY_CONSOLIDATION_STATUSES)[number];
+
+export interface MemoryConsolidationSource {
+  memoryId: string;
+  version: number;
+  contentHash: string;
+  status: MemoryStatus;
+  content: string;
+  sourceLabel: string;
+  updatedAt: string;
+}
+
+export interface MemoryConsolidationGroup {
+  id: string;
+  kind: MemoryKind;
+  supersessionKey: string;
+  subjectKey: string;
+  scope: string;
+  sourceMemoryIds: string[];
+  proposedContent: string;
+  score: number;
+  reasons: string[];
+  conflicts: string[];
+}
+
+export interface MemoryConsolidationRun {
+  id: string;
+  status: MemoryConsolidationStatus;
+  dryRun: boolean;
+  scope: string | null;
+  startedAt: string;
+  completedAt: string | null;
+  groups: MemoryConsolidationGroup[];
+  sources: MemoryConsolidationSource[];
+  appliedMemoryIds: string[];
+  skipped: Array<{ memoryId: string; reason: string }>;
+  error: string | null;
+  report: string;
 }
 
 export const METHOD_STATUSES = ["candidate", "evaluating", "trial", "adopted", "rejected", "reverted", "superseded"] as const;
@@ -1177,6 +1452,313 @@ export interface MethodTrial {
   createdAt: string;
 }
 
+export const SKILL_STATUSES = [
+  "candidate",
+  "trial",
+  "evaluating",
+  "adopted",
+  "stale",
+  "archived",
+  "rejected",
+  "reverted",
+  "superseded"
+] as const;
+export type SkillStatus = (typeof SKILL_STATUSES)[number];
+
+export const SKILL_PLATFORMS = ["windows", "macos", "linux"] as const;
+export type SkillPlatform = (typeof SKILL_PLATFORMS)[number];
+
+export const SKILL_ORIGINS = ["agent", "user", "imported", "system"] as const;
+export type SkillOrigin = (typeof SKILL_ORIGINS)[number];
+
+export interface SkillPermissions {
+  readRoots: string[];
+  writeRoots: string[];
+  networkHosts: string[];
+}
+
+export interface SkillHearthMetadata {
+  category: string;
+  originTaskId: string | null;
+  originHash: string | null;
+  adoptedAt: string | null;
+  origin: SkillOrigin;
+  pinned: boolean;
+}
+
+export interface SkillManifest {
+  name: string;
+  description: string;
+  version: string;
+  platforms: SkillPlatform[];
+  tools: string[];
+  permissions: SkillPermissions;
+  metadata: {
+    hearth: SkillHearthMetadata;
+  };
+}
+
+export interface SkillDocument {
+  manifest: SkillManifest;
+  body: string;
+  contentHash: string;
+}
+
+export interface SkillIndexEntry {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  platforms: SkillPlatform[];
+  tags: string[];
+  category: string;
+  status: SkillStatus;
+  pinned: boolean;
+  origin: SkillOrigin;
+}
+
+export interface SkillResourceRef {
+  path: string;
+  kind: "reference" | "script" | "template" | "test" | "other";
+  bytes: number | null;
+}
+
+export interface SkillPackageRecord {
+  schemaVersion: 1;
+  id: string;
+  methodId: string | null;
+  methodVersion: number | null;
+  version: string;
+  sourceTaskIds: string[];
+  exportedAt: string;
+  contentHash: string;
+  manifest: SkillManifest;
+}
+
+export interface SkillPackageExport extends SkillPackageRecord {
+  path: string;
+}
+
+export interface SkillRecord {
+  id: string;
+  methodId: string | null;
+  methodVersion: number | null;
+  name: string;
+  version: string;
+  status: SkillStatus;
+  pinned: boolean;
+  path: string;
+  contentHash: string;
+  manifest: SkillManifest;
+  origin: SkillOrigin;
+  sourceTaskIds: string[];
+  trialTaskIds: string[];
+  previousVersionId: string | null;
+  changeReport: string;
+  createdAt: string;
+  updatedAt: string;
+  adoptedAt: string | null;
+  lastUsedAt: string | null;
+  archivedAt: string | null;
+  archiveReason: string | null;
+  previousStatus: SkillStatus | null;
+}
+
+export interface SkillVersion {
+  id: string;
+  skillId: string;
+  version: string;
+  manifest: SkillManifest;
+  contentHash: string;
+  path: string;
+  methodId: string | null;
+  methodVersion: number | null;
+  changeReport: string;
+  createdAt: string;
+}
+
+export const STANDING_INTENT_STATES = ["pending", "armed", "fired", "done", "cancelled", "expired"] as const;
+export type StandingIntentState = (typeof STANDING_INTENT_STATES)[number];
+
+export const STANDING_INTENT_ACTIONS = ["remind", "ask", "prepare_task", "notify"] as const;
+export type StandingIntentAction = (typeof STANDING_INTENT_ACTIONS)[number];
+
+export interface StandingIntentTriggerEntry {
+  terms: string[];
+  mode: "all" | "any";
+}
+
+export interface StandingIntentScope {
+  channel: string | null;
+  sender: string | null;
+  taskId: string | null;
+  goalId: string | null;
+  anywhere: boolean;
+}
+
+export interface StandingIntentRecord {
+  id: string;
+  ownerId: string;
+  description: string;
+  triggerEntries: StandingIntentTriggerEntry[];
+  scope: StandingIntentScope;
+  action: StandingIntentAction;
+  cooldownSeconds: number;
+  maxFires: number;
+  fireCount: number;
+  state: StandingIntentState;
+  expiresAt: string;
+  lastFiredAt: string | null;
+  lastMatchedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const ATTENTION_ITEM_KINDS = [
+  "decision",
+  "approval",
+  "credential",
+  "reconcile",
+  "conflict",
+  "commitment",
+  "deadline",
+  "blocked",
+  "opportunity",
+  "progress",
+  "suggestion"
+] as const;
+export type AttentionItemKind = (typeof ATTENTION_ITEM_KINDS)[number];
+
+export const ATTENTION_ITEM_STATUSES = ["open", "acknowledged", "ignored", "snoozed", "resolved"] as const;
+export type AttentionItemStatus = (typeof ATTENTION_ITEM_STATUSES)[number];
+
+export interface AttentionBudgetSettings {
+  dailyLimit: number;
+  quietStart: string;
+  quietEnd: string;
+  cooldownSeconds: number;
+  maxPerGoalPerDay: number;
+  maxHighPriorityPerDay: number;
+  ignoredPenalty: number;
+}
+
+export interface AttentionItem {
+  id: string;
+  dedupeKey: string;
+  kind: AttentionItemKind;
+  priority: number;
+  critical: boolean;
+  title: string;
+  waitingOn: "user" | "external" | "agent";
+  waitingSince: string;
+  nextAction: string;
+  consequence: string;
+  whyNow: string;
+  goalId: string | null;
+  taskId: string | null;
+  intentId: string | null;
+  source: string;
+  status: AttentionItemStatus;
+  snoozeUntil: string | null;
+  entityId?: string | null;
+  evidenceRefs?: string[];
+  options?: AttentionOption[];
+  impact?: number;
+  urgency?: number;
+  confidence?: number;
+  reversibility?: "easy" | "hard" | "irreversible";
+  blastRadius?: "self" | "team" | "public";
+  score?: number;
+  aggregationKey?: string | null;
+  shadowed?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AttentionOption {
+  id: string;
+  label: string;
+  action: string;
+  consequence?: string;
+}
+
+export interface AttentionCandidate {
+  id: string;
+  kind: AttentionItemKind;
+  subjectRef: string;
+  title: string;
+  whyNow: string;
+  consequence: string;
+  nextAction: string;
+  options: AttentionOption[];
+  impact: 1 | 2 | 3 | 4 | 5;
+  urgency: 1 | 2 | 3 | 4 | 5;
+  confidence: number;
+  reversibility: "easy" | "hard" | "irreversible";
+  blastRadius: "self" | "team" | "public";
+  critical: boolean;
+  evidenceRefs: string[];
+  dedupeKey: string;
+  expiresAt?: string;
+}
+
+export interface HeartbeatRun {
+  id: string;
+  decision: "notify" | "NO_REPLY";
+  triggerKinds: string[];
+  attentionIds: string[];
+  reason: string;
+  startedAt: string;
+  endedAt: string;
+}
+
+export interface StandingIntentSnapshot {
+  intents: StandingIntentRecord[];
+  attention: AttentionItem[];
+  budget: AttentionBudgetSettings;
+  lastHeartbeat: HeartbeatRun | null;
+}
+
+export const SKILL_USAGE_STATUSES = ["started", "completed", "failed", "cancelled"] as const;
+export type SkillUsageStatus = (typeof SKILL_USAGE_STATUSES)[number];
+
+export const SKILL_USAGE_SOURCES = ["manual", "api", "scheduler", "agent", "trial"] as const;
+export type SkillUsageSource = (typeof SKILL_USAGE_SOURCES)[number];
+
+export interface SkillUsageEvent {
+  id: string;
+  skillId: string;
+  taskId: string | null;
+  runId: string | null;
+  status: SkillUsageStatus;
+  source: SkillUsageSource;
+  note: string;
+  createdAt: string;
+}
+
+export const SKILL_CURATOR_RUN_STATUSES = ["planned", "applied", "failed", "rolled_back"] as const;
+export type SkillCuratorRunStatus = (typeof SKILL_CURATOR_RUN_STATUSES)[number];
+
+export interface SkillCuratorAction {
+  skillId: string;
+  name: string;
+  from: SkillStatus;
+  to: SkillStatus;
+  reason: string;
+}
+
+export interface SkillCuratorRun {
+  id: string;
+  status: SkillCuratorRunStatus;
+  dryRun: boolean;
+  startedAt: string;
+  endedAt: string | null;
+  actions: SkillCuratorAction[];
+  backupPath: string | null;
+  report: string;
+  rolledBackAt: string | null;
+}
+
 export const SYNC_PEER_STATUSES = ["active", "revoked", "error"] as const;
 export type SyncPeerStatus = (typeof SYNC_PEER_STATUSES)[number];
 
@@ -1218,6 +1800,106 @@ export interface TaskLease {
   heartbeatAt: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export const CONNECTION_TRANSPORT_STATES = ["connected", "connecting", "disconnected", "failed"] as const;
+export type ConnectionTransportState = (typeof CONNECTION_TRANSPORT_STATES)[number];
+
+export const CONNECTION_SUBSCRIPTION_STATES = ["live", "catching_up", "stale", "failed"] as const;
+export type ConnectionSubscriptionState = (typeof CONNECTION_SUBSCRIPTION_STATES)[number];
+
+export const CONNECTION_DATA_FRESHNESS = ["current", "cached", "expired"] as const;
+export type ConnectionDataFreshness = (typeof CONNECTION_DATA_FRESHNESS)[number];
+
+export const CONNECTION_EXECUTION_OWNERSHIP = ["owned", "leased", "unknown"] as const;
+export type ConnectionExecutionOwnership = (typeof CONNECTION_EXECUTION_OWNERSHIP)[number];
+
+export const CONNECTION_SESSION_STATUSES = ["connected", "disconnected"] as const;
+export type ConnectionSessionStatus = (typeof CONNECTION_SESSION_STATUSES)[number];
+
+export interface ConnectionSession {
+  id: string;
+  deviceId: string;
+  userId: string;
+  generation: number;
+  cursor: number | null;
+  scopes: string[];
+  pendingScopes: string[];
+  status: ConnectionSessionStatus;
+  lastError: string | null;
+  connectedAt: string;
+  expiresAt: string;
+  lastHeartbeatAt: string;
+  cursorAt: string;
+  disconnectedAt: string | null;
+  disconnectReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ConnectionRuntimeStatus {
+  connectionId: string;
+  deviceId: string;
+  generation: number;
+  transport: ConnectionTransportState;
+  subscription: ConnectionSubscriptionState;
+  dataFreshness: ConnectionDataFreshness;
+  executionOwnership: ConnectionExecutionOwnership;
+  sourceCursor: number;
+  latestCursor: number;
+  asOf: string;
+  cacheExpiresAt: string;
+  pendingScopes: string[];
+  scopeApprovalRequired: boolean;
+  lastError: string | null;
+  session: ConnectionSession;
+}
+
+export const CONNECTION_OUTBOX_STATUSES = ["queued", "submitted", "committed", "uncertain", "rejected", "conflict"] as const;
+export type ConnectionOutboxStatus = (typeof CONNECTION_OUTBOX_STATUSES)[number];
+
+export interface ConnectionOutboxItem {
+  id: string;
+  connectionId: string;
+  generation: number;
+  deviceId: string;
+  userId: string;
+  scope: string;
+  kind: string;
+  idempotencyKey: string;
+  payload: Record<string, unknown>;
+  status: ConnectionOutboxStatus;
+  error: string | null;
+  effectId: string | null;
+  result: Record<string, unknown> | null;
+  submittedAt: string | null;
+  committedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OfflineProjection<T = unknown> {
+  connectionId: string;
+  generation: number;
+  scope: string;
+  data: T;
+  dataFreshness: ConnectionDataFreshness;
+  cached: boolean;
+  asOf: string;
+  sourceCursor: number;
+  latestCursor: number;
+}
+
+export interface ConnectionReplayPlan {
+  connectionId: string;
+  generation: number;
+  ready: boolean;
+  reason: string | null;
+  sourceCursor: number;
+  latestCursor: number;
+  pulledEvents: number;
+  staleItems: number;
+  items: ConnectionOutboxItem[];
 }
 
 export interface BackupRecord {
@@ -1358,6 +2040,30 @@ export type FailureCause = (typeof FAILURE_CAUSES)[number];
 export const FAILURE_ACTIONS = ["retry_same", "handoff", "ask_user", "fail"] as const;
 export type FailureAction = (typeof FAILURE_ACTIONS)[number];
 
+export const FAILURE_CLASSES = [
+  "user_cancelled",
+  "policy_denied",
+  "validation_failed",
+  "effect_unknown",
+  "timeout",
+  "capacity",
+  "rate_limit",
+  "transport",
+  "auth",
+  "budget_exhausted",
+  "internal"
+] as const;
+export type FailureClass = (typeof FAILURE_CLASSES)[number];
+
+export type FailureDisposition =
+  | { type: "retry"; afterMs: number; attempt: number }
+  | { type: "wait"; until: string; reason: string }
+  | { type: "repair"; target: string; reason: string }
+  | { type: "reconcile"; effectId: string }
+  | { type: "ask_user"; question: string; options: string[] }
+  | { type: "handoff"; note: string }
+  | { type: "stop"; reason: string };
+
 export interface FailureDiagnosis {
   id: string;
   taskId: string;
@@ -1386,6 +2092,9 @@ export interface HandoffPacket {
   fromRunId: string;
   fromExecutor: ExecutorId;
   toExecutor: ExecutorId;
+  generation: number;
+  sourceCursor: number;
+  createdAt: string;
   goal: string;
   acceptance: string[];
   permissions: TaskPermissions;
@@ -1397,6 +2106,22 @@ export interface HandoffPacket {
   doNotRepeat: string[];
   openQuestions: string[];
   nextAction: string;
+  omittedHistory: string[];
+  redaction: HandoffRedaction;
+  verification: HandoffVerification;
+}
+
+export interface HandoffRedaction {
+  policy: "host-redaction-v1";
+  redactedFields: string[];
+}
+
+export interface HandoffVerification {
+  action: string;
+  expected: string[];
+  status: "pending" | "passed" | "failed";
+  checkedAt?: string | null;
+  evidenceRefs?: string[];
 }
 
 export const HANDOFF_STATUSES = ["pending_user", "prepared", "running", "completed", "failed", "cancelled"] as const;
@@ -1409,13 +2134,134 @@ export interface HandoffRecord {
   toRunId: string | null;
   fromExecutor: ExecutorId;
   toExecutor: ExecutorId;
+  generation: number;
+  sourceCursor: number;
   status: HandoffStatus;
   reasonCode: FailureCause;
   diagnosis: FailureDiagnosis | null;
   packet: HandoffPacket | null;
+  verification: HandoffVerification | null;
+  artifactRef: string | null;
   contextWatermarkSeq: number;
   initiatedBy: "auto" | "user";
   createdAt: string;
+  updatedAt: string;
+}
+
+export const DELEGATION_JOB_STATUSES = [
+  "queued",
+  "leased",
+  "running",
+  "awaiting_verification",
+  "succeeded",
+  "failed",
+  "cancelled",
+  "orphaned"
+] as const;
+export type DelegationJobStatus = (typeof DELEGATION_JOB_STATUSES)[number];
+
+export const DELEGATION_WORKSPACE_POLICIES = ["read-only", "isolated-write", "shared-read"] as const;
+export type DelegationWorkspacePolicy = (typeof DELEGATION_WORKSPACE_POLICIES)[number];
+
+export interface DelegationBudget {
+  tokens?: number;
+  wallClockMs?: number;
+  maxSteps?: number;
+}
+
+export interface DelegationFailure {
+  code: string;
+  message: string;
+  retryable: boolean;
+  occurredAt: string;
+}
+
+export interface DelegationResult {
+  summary: string;
+  evidenceRefs: string[];
+  artifacts: string[];
+  unresolved: string[];
+  status: "completed" | "failed";
+  producedAt: string;
+}
+
+export interface DelegationVerification {
+  parentTaskId: string;
+  verdict: "accepted" | "rejected";
+  summary: string;
+  evidenceRefs: string[];
+  checkedAt: string;
+}
+
+export interface DelegationJob {
+  id: string;
+  parentTaskId: string;
+  parentRunId: string | null;
+  childTaskId: string | null;
+  childRunId: string | null;
+  goalSlice: string;
+  targetExecutor: ExecutorId;
+  contextPackRef: string;
+  contextPack: Record<string, unknown>;
+  workspacePolicy: DelegationWorkspacePolicy;
+  permissions: TaskPermissions;
+  toolPolicy: string[];
+  networkPolicy: string[];
+  budget: DelegationBudget;
+  deadline: string | null;
+  resultSchemaRef: string | null;
+  status: DelegationJobStatus;
+  depth: number;
+  idempotencyKey: string;
+  lease: { owner: string; expiresAt: string } | null;
+  attempt: number;
+  result: DelegationResult | null;
+  verification: DelegationVerification | null;
+  failure: DelegationFailure | null;
+  cancelReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const CHANNEL_DIRECTIONS = ["inbound", "outbound"] as const;
+export type ChannelDirection = (typeof CHANNEL_DIRECTIONS)[number];
+
+export const CHANNEL_DELIVERY_STATUSES = [
+  "received",
+  "processing",
+  "processed",
+  "duplicate",
+  "retrying",
+  "failed",
+  "uncertain"
+] as const;
+export type ChannelDeliveryStatus = (typeof CHANNEL_DELIVERY_STATUSES)[number];
+
+export interface ChannelDeliveryRecord {
+  id: string;
+  channel: string;
+  externalId: string;
+  threadKey: string;
+  direction: ChannelDirection;
+  idempotencyKey: string;
+  generation: number;
+  status: ChannelDeliveryStatus;
+  payload: Record<string, unknown>;
+  attemptCount: number;
+  lastError: string | null;
+  lastAttemptAt: string | null;
+  processedAt: string | null;
+  effectId: string | null;
+  receipt: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChannelCursor {
+  channel: string;
+  threadKey: string;
+  generation: number;
+  cursor: number;
   updatedAt: string;
 }
 

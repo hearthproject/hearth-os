@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "E03",
+  "version": 1,
+  "title": "客诉退款回复与升级",
+  "family": "email",
+  "difficulty": "edge",
+  "runModes": ["offline"],
+  "description": "处理包含退款诉求和威胁投诉的客户邮件。",
+  "goal": "依据政策生成退款回复草稿，识别需升级的异常并保留证据。",
+  "tags": ["support", "refund", "escalation"],
+  "timeoutMs": 300000,
+  "inputs": [{"kind": "file", "label": "客诉与政策", "path": "input.json"}],
+  "expectedOutputs": ["complaint.json"],
+  "graders": [
+    {"id": "file", "title": "处理结果存在", "config": {"kind": "file", "path": "complaint.json", "minBytes": 40}},
+    {"id": "facts", "title": "退款资格与升级正确", "config": {"kind": "json", "path": "complaint.json", "equals": {"eligible": true, "escalate": true, "send": false}}}
+  ],
+  "criteria": [
+    {"id": "exists", "label": "输出客诉处理", "source": "deterministic", "points": 30, "severity": "blocker", "graderId": "file"},
+    {"id": "facts", "label": "退款判断与升级动作正确", "source": "deterministic", "points": 30, "severity": "scored", "graderId": "facts"},
+    {"id": "quality", "label": "回复不越权承诺", "source": "judge", "points": 30, "severity": "scored", "rubric": "依据政策说明退款路径，不承诺未批准的赔付，升级原因清楚。"},
+    {"id": "human", "label": "客服负责人复核", "source": "human", "points": 10, "severity": "scored"}
+  ],
+  "humanReview": {"prompt": "核对退款资格、升级和草稿。", "sampleRate": 0.1}
+}

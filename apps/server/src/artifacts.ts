@@ -35,6 +35,30 @@ interface WalkedFile {
   bytes: number;
 }
 
+export interface FileArtifactOptions {
+  task: TaskRecord;
+  run: RunRecord;
+  absolutePath: string;
+  relativePath: string;
+  createdAt?: string;
+}
+
+export function createFileArtifact(options: FileArtifactOptions): ArtifactRecord {
+  const stat = statSync(options.absolutePath);
+  if (!stat.isFile() || stat.size === 0) throw new Error(`产物文件不存在或为空：${options.absolutePath}`);
+  return {
+    id: randomUUID(),
+    taskId: options.task.id,
+    runId: options.run.id,
+    relativePath: options.relativePath.replace(/\\/g, "/"),
+    absolutePath: options.absolutePath,
+    mimeType: mimeType(options.relativePath),
+    sha256: sha256File(options.absolutePath),
+    bytes: stat.size,
+    createdAt: options.createdAt ?? new Date().toISOString()
+  };
+}
+
 export function publishArtifacts(options: PublishArtifactsOptions): ArtifactRecord[] {
   const now = options.generatedAt ?? new Date().toISOString();
   validateExpectedOutputs(options.outDir, options.expectedOutputs);
@@ -95,7 +119,9 @@ export function publishArtifacts(options: PublishArtifactsOptions): ArtifactReco
 
 function isManagedOutputDir(outputDir: string): boolean {
   const normalized = outputDir.replace(/\\/g, "/").replace(/^\.\//, "");
-  return normalized.startsWith("eval/runs/") || normalized.startsWith(".hearth/artifacts/");
+  return normalized.startsWith("eval/runs/")
+    || normalized.startsWith(".hearth/artifacts/")
+    || normalized.startsWith(".hearth/eval-artifacts/");
 }
 
 export function validateExpectedOutputs(outDir: string, expectedOutputs: string[]): void {

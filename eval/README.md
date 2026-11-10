@@ -34,3 +34,35 @@
 ## 第一阶段验收结果
 
 验收日期：2026-11-05。15 项任务均已创建并执行；T01–T06、T09–T15 共 13 项完成并通过验收，已达到至少 10/15 的硬门槛。T08 产物已完成，但发布 PR #15 评论仍在等待用户批准；T07 因存在未提交测试文件未通过交付校验，按用户指示暂停重试，未推送分支或创建 PR。逐项证据、T07/T08 的边界和运行方式见 [`phase-1-acceptance.md`](./phase-1-acceptance.md)。
+
+## 个人 Agent 场景回归（5.11）
+
+`eval/scenarios/scenarios.json` 定义 30 个本地可重复场景，覆盖审批、动作绑定、效果对账、目标完成、崩溃恢复、记忆、技能、主动提醒、调度、连接一致性，以及 Personal Agent 专项的歧义指代、跨会话恢复、陈旧状态、来源冲突、注意力预算、本体遗忘、提示注入、四周连续性、任务图汇聚和异步工具中断。每个场景默认重复 3 次，用于观察通过率、中位数和离散度，而不是用单次演示下结论。
+
+运行全部场景：
+
+```powershell
+npm run eval:scenarios
+```
+
+只运行指定场景，便于复现单个失败：
+
+```powershell
+npx tsx apps/server/src/scenarios/run-scenarios.ts --only approval-rejected-stops,unknown-effect-reconcile
+```
+
+场景使用 `HearthStore(":memory:")` 或临时 SQLite / 临时目录、假用户、假偏好、假秘密和可控时钟；不读取或修改真实账户与真实 `.hearth` 数据。P0 机制均有故障注入覆盖：
+
+- `action_resolver`：审批拒绝、动作绑定篡改、非交互高危拒绝；
+- `effect_outbox`：重复发送、未知效果对账；
+- `goal_judge`：删除产物或篡改字段后拒绝完成；
+- `failure_recovery`：崩溃后从已证明检查点继续；
+- `sensitive_info`：秘密不进入日志、通知或模型上下文。
+
+每次运行的产物写入：
+
+- `eval/scenario-runs/<timestamp>/report.json`：逐次断言、机制汇总、通过率、中位数和离散度；
+- `eval/scenario-runs/<timestamp>/summary.md`：人类可读摘要；
+- `eval/scenario-runs/<timestamp>/<scenario>/run-N/evidence.json`：单次运行的输入、断言和证据。
+
+任一场景失败时命令以非零状态退出。`eval/scenario-runs/` 是生成物，不纳入版本控制。2026-11-10 在本地隔离环境运行完整场景包，30 个场景共 90 次运行全部通过；这只证明当前代码路径和故障边界，不替代真实模型、真实设备、真实账户和长期运行验收。
