@@ -4052,7 +4052,7 @@ function findStoredAttachment(root: string, id: string): string | null {
 }
 
 function removeManagedTaskPaths(task: TaskRecord, dataDir: string): void {
-  const workspaceTaskRoot = join(WORKSPACE_DIR, "tasks", task.id);
+  const workspaceTaskRoot = join(dataDir, "workspaces", "tasks", task.id);
   const managedArtifactRoots = new Set([
     resolve(dataDir, "artifacts", task.id),
     resolve(REPO_ROOT, ".hearth", "artifacts", task.id)

@@ -1995,7 +1995,7 @@ export class HearthStore {
   private purgeTaskRecord(id: string): void {
     this.deleteRowsByColumn("task_id", id);
     this.db.prepare("DELETE FROM task_edges WHERE parent_task_id = ? OR child_task_id = ?").run(id, id);
-    this.db.prepare("UPDATE schedules SET last_task_id = NULL WHERE last_task_id = ?").run(id);
+    this.db.prepare("UPDATE scheduled_jobs SET last_task_id = NULL WHERE last_task_id = ?").run(id);
     this.db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
   }
 
