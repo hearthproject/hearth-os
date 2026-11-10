@@ -22,7 +22,7 @@
 
 <p align="center">
   <img alt="Phase 1 MVP accepted" src="https://img.shields.io/badge/phase%201-MVP%20accepted-b8471d">
-  <img alt="398 tests passing" src="https://img.shields.io/badge/tests-398%20passing-2f7d4f">
+  <img alt="579 tests passing" src="https://img.shields.io/badge/tests-579%20passing-2f7d4f">
   <img alt="Node.js 22.13+" src="https://img.shields.io/badge/node-22.13%2B-3c8773">
   <img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-1b1815">
   <img alt="Local first" src="https://img.shields.io/badge/local--first-yes-8d3412">
@@ -132,6 +132,8 @@ flowchart TB
   E --> W
 ```
 
+评测 Agent 已拆分到独立仓库 **<https://github.com/hearthproject/hearth-eval>**。评测前端、评测服务、评测核心、60 个 case、场景运行器和评测文档都在该仓库维护；主仓库只保留 `/api/eval/tasks`、`/api/eval/judge`、`HEARTH_EVAL_INPUT_ROOT` 与 `.hearth/eval-artifacts/` 这组最小桥接。
+
 核心约束只有一句话：**界面状态来自可重建的记录，每个状态只有一个写权威，外部副作用必须经过审批或明确豁免，并留下可核对回执。**
 
 ## 快速开始
@@ -192,11 +194,9 @@ Codex 执行器优先使用统一模型绑定；没有绑定时读取现有的 `
 | `.hearth/artifacts/` | 受管产物 |
 | `.hearth/outbox/` | 本地发件箱与回执 |
 | `.hearth/backups/` | 加密备份归档与旧设置迁移备份 |
-| `.hearth/eval/eval.sqlite` | 评测 case 版本、实验、运行、评分、人工复核与事件 |
-| `.hearth/eval-artifacts/` | 评测运行产物，按实验、case、执行器和重复次数隔离 |
-| `eval/runs/` | 第一阶段验收运行与产物 |
+| `.hearth/eval-artifacts/` | 独立评测 Agent 经桥接写入的受管评测产物 |
 
-服务端提供 AES-256-GCM 加密备份创建与恢复，恢复前校验 schema 与 `integrity_check`。聊天优先界面暂未接回备份入口，具体边界见[存储与上下文架构](https://hearthproject.github.io/hearth-os/design/storage.html)。备份包含数据库与必要元数据，但**不包含产物正文、工作区、来源正文和外部附件**；完整归档需要一并复制 `.hearth/artifacts/`、`.hearth/workspaces/` 和 `eval/runs/`。
+服务端提供 AES-256-GCM 加密备份创建与恢复，恢复前校验 schema 与 `integrity_check`。聊天优先界面暂未接回备份入口，具体边界见[存储与上下文架构](https://hearthproject.github.io/hearth-os/design/storage.html)。备份包含数据库与必要元数据，但**不包含产物正文、工作区、来源正文和外部附件**；完整归档需要一并复制 `.hearth/artifacts/`、`.hearth/workspaces/` 和可选的 `.hearth/eval-artifacts/`。评测数据库、case 和场景证据由独立评测仓库管理。
 
 ## 仓库结构
 
@@ -204,16 +204,13 @@ Codex 执行器优先使用统一模型绑定；没有绑定时读取现有的 `
 apps/
   server/              Fastify API、调度器、审批、来源、桌面、记忆、邮件、同步、备份与运维
   web/                 React + Vite 聊天优先控制面
-  eval-server/         独立评测编排、评分、复核、对比 API 与 SPA 托管
-  eval-web/            React + Vite 评测控制台
 packages/
   core/                状态机、领域类型与 DTO
   eventlog/            只追加 SQLite 事件日志与投影
   agent-runtime/       原生单 Agent 工具循环、预算、检查点与压缩
   codex-executor/      Codex SDK 适配器与 Provider 探测
   deepseek-executor/   DeepSeek Harness SDK/JSON-RPC 适配器
-  templates/           任务模板与验收约束
-eval/                  60 个评测 case、输入、验收标准、golden 与历史运行证据
+  templates/           任务模板与产品示例输入
 docs/                  中英双语 VitePress 文档站
 tools/windows-helper/  Windows 桌面观察与输入助手
 scripts/               文档、交付数据与 README 截图辅助脚本
@@ -228,7 +225,7 @@ scripts/               文档、交付数据与 README 截图辅助脚本
 - [交付与进度](https://hearthproject.github.io/hearth-os/delivery/) — 已验收能力、明确留空项与剩余路线。
 - [阶段二至六状态](https://hearthproject.github.io/hearth-os/delivery/status.html) — 当前能力矩阵、验证证据与未完成验收。
 - [开发日志](https://hearthproject.github.io/hearth-os/log/day-05.html) — 最近的入口、飞书与邮件闭环记录。
-- [评测 Agent](https://hearthproject.github.io/hearth-os/reference/evaluation-agent.html) — 60 个 case、端口、实验周期、评分、复核与安全边界。
+- [评测 Agent（独立仓库）](https://hearthproject.github.io/hearth-eval/) — 60 个 case、独立控制台、全周期轨迹、评分、复核与对比。
 - [参考](https://hearthproject.github.io/hearth-os/reference/) — 工程、风险、决策、术语、清单与维护资料。
 
 ## 已知边界
@@ -243,7 +240,7 @@ scripts/               文档、交付数据与 README 截图辅助脚本
 ## 验证
 
 ```bash
-npm test              # 62 个测试文件、398 个测试
+npm test              # 89 个测试文件、579 个测试
 npm run typecheck     # TypeScript 类型检查
 npm run build         # 构建 Web 控制面
 npm run docs:build    # 构建 VitePress 文档站
@@ -253,7 +250,7 @@ npm run screenshots:readme  # 重新生成 README 与文档站截图
 
 E2E 会在随机本地端口启动服务，并使用临时 `HEARTH_DATA_DIR`，不会触碰真实 `.hearth` 数据。可用 `HEARTH_E2E_MODEL_SETTINGS` 指定其他模型配置，`HEARTH_E2E_OFFLINE=1` 跳过在线聊天，`HEARTH_E2E_KEEP=1` 保留临时数据用于排查。
 
-测试覆盖服务层、API、模型协议、原生工具循环、预算、权限、检查点、提案确认、桌面边界、记忆、方法、同步、安全、备份与运维。测试通过不等于真实验收完成；阶段一逐项证据见 [`eval/phase-1-acceptance.md`](eval/phase-1-acceptance.md)。
+测试覆盖服务层、API、模型协议、原生工具循环、预算、权限、检查点、提案确认、桌面边界、记忆、方法、同步、安全、备份与运维。测试通过不等于真实验收完成；阶段一逐项证据见 [hearth-eval 的第一阶段验收报告](https://github.com/hearthproject/hearth-eval/blob/main/eval/phase-1-acceptance.md)。
 
 ## 许可
 
