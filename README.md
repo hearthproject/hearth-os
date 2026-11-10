@@ -17,7 +17,7 @@
   <a href="#现在能做什么">能力</a> ·
   <a href="#快速开始">快速开始</a> ·
   <a href="#当前进度">当前进度</a> ·
-  <a href="#架构">架构</a> ·
+  <a href="#架构图">架构图</a> ·
   <a href="#验证">验证</a>
 </p>
 
@@ -114,7 +114,13 @@ Hearth 已经越过**第一阶段（MVP）**的硬门槛：15 个跨行业真实
 
 逐项能力矩阵、验证证据和未完成验收见[阶段二至六交付状态](https://hearthproject.github.io/hearth-os/delivery/status.html)。
 
-## 架构
+## 架构图
+
+![Hearth OS 当前代码架构](./assets/Hearth-OS-Architecture-Portrait.png)
+
+<sub>当前代码架构覆盖入口与触发、Fastify API、控制与编排、执行器与 Runtime、事实源与文件、前端状态闭环、外部世界与副作用，以及代码事实边界。竖版长图按 README 列宽直接阅读即可。</sub>
+
+### 运行时数据流
 
 ```mermaid
 flowchart TB
