@@ -1,1 +1,0 @@
-{"issueCount":3,"criticalCount":1,"issues":[{"severity":"critical","element":"img","issue":"缺少替代文本","fix":"添加说明性 alt"},{"severity":"serious","element":"button 提交","issue":"无法键盘聚焦","fix":"改用原生 button 或恢复 tabindex"},{"severity":"serious","element":"hint 文本","issue":"对比度 2.1 低于要求","fix":"提高到至少 4.5:1"}]}

@@ -1,1 +1,0 @@
-{"productionCodeChanged":false,"testsPassed":true,"cases":[{"case":"invalid body","status":400},{"case":"missing item","status":404},{"case":"duplicate idempotency key","status":"201 replay with same id"}],"command":"npm test -- items"}

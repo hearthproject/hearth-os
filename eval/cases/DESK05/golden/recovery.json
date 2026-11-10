@@ -1,1 +1,0 @@
-{"resumedFromCheckpoint":true,"duplicateSubmitBlocked":true,"finalState":"saved","actions":[{"op":"restore","step":"form_filled"},{"op":"verify","path":"document.saved","equals":true},{"op":"save","once":true}],"note":"超时不代表未保存，先验证再执行一次保存。"}

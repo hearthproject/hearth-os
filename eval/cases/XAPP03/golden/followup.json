@@ -1,1 +1,0 @@
-{"knowledgeGap":true,"calendarReminderCreated":true,"customerMessageSent":false,"gap":"知识库没有筛选条件导出说明","actions":[{"app":"calendar","op":"create_internal_reminder","at":"2026-11-15T10:00:00+08:00"},{"app":"knowledge","op":"create_draft","title":"筛选导出说明"}],"escalation":"交由产品支持确认导出能力。"}

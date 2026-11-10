@@ -1,1 +1,0 @@
-{"draft":{"id":"draft-778","to":"recipient@example.com","subject":"交付确认","body":"附件已按约定更新。"},"attempts":[{"status":"timeout"},{"status":"retry_requested"}],"approval":{"status":"pending"},"existingEffects":[]}

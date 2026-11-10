@@ -1,1 +1,0 @@
-{"email":{"from":"billing@supplier.example","subject":"发票 INV-2026-881"},"invoice":{"number":"INV-2026-881","amount":2640,"currency":"CNY","supplier":"星海办公"},"attachments":[{"name":"INV-2026-881.pdf","sha256":"d44f4b6e2a4ecfc4a0a58a46952ec4d0c34276a92b2ee123456789abcdef0123","bytes":38120}]}

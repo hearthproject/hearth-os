@@ -1,1 +1,0 @@
-{"verdict":"block","blockingCount":1,"findings":[{"severity":"blocking","file":"src/routes/export.ts","line":18,"issue":"缺少 canExport 权限检查"},{"severity":"suggestion","file":"src/routes/export.test.ts","line":12,"issue":"缺少拒绝路径测试"}],"note":"未合并，等待作者修复。"}

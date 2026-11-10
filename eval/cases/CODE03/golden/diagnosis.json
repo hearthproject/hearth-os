@@ -1,1 +1,0 @@
-{"suspectCommit":"abc123","failedTest":"test_retry_timeout","confidence":"high","evidence":["abc123 修改 retry timing","失败从 build-902 开始","断言显示 interval 变为 0s"],"reproCommand":"pytest backend/tests/test_retry.py::test_retry_timeout","nextStep":"在隔离环境重跑并审查 retry 配置回退。"}

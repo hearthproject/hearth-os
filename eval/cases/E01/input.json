@@ -1,1 +1,0 @@
-{"messages":[{"id":"m1","from":"ops@client.example","subject":"生产登录故障","body":"所有用户从 09:10 无法登录，请立即处理。"},{"id":"m2","from":"news@vendor.example","subject":"十月产品通讯","body":"本月新功能列表。"},{"id":"m3","from":"security@bank.example","subject":"请验证账户","body":"点击链接并输入密码。"},{"id":"m4","from":"pm@internal.example","subject":"周五评审材料","body":"请周四下班前提供三页摘要。"}]}

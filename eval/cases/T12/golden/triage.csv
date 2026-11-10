@@ -1,9 +1,0 @@
-ticket_id,category,priority
-TCK-01,billing,high
-TCK-02,login,medium
-TCK-03,billing,high
-TCK-04,shipping,medium
-TCK-05,login,high
-TCK-06,account,low
-TCK-07,shipping,medium
-TCK-08,other,high

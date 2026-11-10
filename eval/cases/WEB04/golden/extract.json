@@ -1,1 +1,0 @@
-{"successCount":1,"redirectCount":1,"timeoutCount":1,"fabricatedBody":false,"pages":[{"url":"https://example.com/ok","status":200,"body":"正文"},{"url":"https://example.com/old","status":301,"finalUrl":"https://example.com/new","body":null},{"url":"https://example.com/slow","status":"timeout","finalUrl":null,"body":null,"reason":"请求超时"}]}

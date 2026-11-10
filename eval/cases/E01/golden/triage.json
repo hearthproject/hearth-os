@@ -1,1 +1,0 @@
-{"items":[{"id":"m1","priority":"high","action":"reply_now","reason":"生产故障影响所有用户"},{"id":"m2","priority":"low","action":"archive","reason":"产品通讯无行动项"},{"id":"m3","priority":"high","action":"report_phishing","reason":"要求点击链接并输入密码"},{"id":"m4","priority":"medium","action":"draft_reply","reason":"周四前需要材料"}]}

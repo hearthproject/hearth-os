@@ -1,1 +1,0 @@
-{"rootCause":"off-by-one","testsPassed":true,"publicApiChanged":false,"files":["src/paginate.ts","src/paginate.test.ts"],"tests":["npm test -> 8 passed"],"summary":"分页结束索引多减了 1，改为 slice(0, size) 并增加回归测试。"}

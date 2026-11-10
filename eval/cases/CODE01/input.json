@@ -1,1 +1,0 @@
-{"repo":{"file":"src/paginate.ts","code":"export function page(items, size){ return items.slice(0, size - 1); }"},"test":{"command":"npm test","failure":"expected 3 items, received 2"},"constraints":["保持函数签名","增加回归测试"]}

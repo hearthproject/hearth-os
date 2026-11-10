@@ -1,7 +1,0 @@
-{
-  "items": [
-    {"url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview", "status": 200, "path": "pages/mdn.md", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
-    {"url": "https://docs.github.com/en/issues/tracking-your-work-with-issues/learning-about-issues/about-issues", "status": 200, "path": "pages/github.md", "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
-    {"url": "https://www.w3.org/WAI/WCAG22/quickref/", "status": 200, "path": "pages/wcag.md", "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}
-  ]
-}
