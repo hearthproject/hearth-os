@@ -624,9 +624,9 @@ export class HearthScheduler {
         if (!Array.isArray(state.messages) || !state.usage) continue;
         return {
           messages: state.messages,
-          usage: state.usage,
-          turns: state.turns,
-          toolCalls: state.toolCalls
+          usage: { inputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0 },
+          turns: 0,
+          toolCalls: 0
         };
       } catch {
         // A missing or unreadable checkpoint falls back to a fresh run.

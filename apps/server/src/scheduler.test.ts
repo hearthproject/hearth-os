@@ -685,6 +685,70 @@ describe("Hearth scheduler", () => {
     expect(completed.resultSummary).toBe("已按补充预算完成");
   });
 
+  it("resets runtime budget counters when resuming an old checkpoint", async () => {
+    const service = setup();
+    const settingsPath = configureModel();
+    let calls = 0;
+    let resumedTurns = -1;
+    let resumedToolCalls = -1;
+    let resumedTokens = -1;
+    const nativeRunner: NativeRunner = async (options) => {
+      calls += 1;
+      if (calls === 1) {
+        const usage = { inputTokens: 700_000, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 300_000, reasoningOutputTokens: 0 };
+        await options.onCheckpoint?.({
+          seq: 1,
+          kind: "waiting_input",
+          messages: [
+            { role: "system", content: "system" },
+            { role: "user", content: "goal" },
+            { role: "assistant", content: "", toolCalls: [{ id: "call-1", name: "ask_user", arguments: { question: "继续吗？" }, rawArguments: "{\"question\":\"继续吗？\"}" }] },
+            { role: "tool", toolCallId: "call-1", name: "ask_user", content: "需要用户补充：继续吗？" }
+          ],
+          usage,
+          turns: 60,
+          toolCalls: 120,
+          summary: "继续吗？"
+        });
+        return {
+          status: "waiting_input",
+          finalResponse: "继续吗？",
+          usage,
+          turns: 60,
+          toolCalls: 120,
+          question: "继续吗？",
+          outputs: []
+        };
+      }
+      resumedTurns = options.resume?.turns ?? -1;
+      resumedToolCalls = options.resume?.toolCalls ?? -1;
+      const resumeUsage = options.resume?.usage;
+      resumedTokens = (resumeUsage?.inputTokens ?? 0) + (resumeUsage?.outputTokens ?? 0);
+      writeFileSync(join(options.prepared.outDir, "result.md"), "# 已完成\n");
+      return {
+        status: "completed",
+        finalResponse: "检查点恢复后完成",
+        usage: { inputTokens: 20, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 8, reasoningOutputTokens: 0 },
+        turns: 1,
+        toolCalls: 1,
+        question: null,
+        outputs: ["result.md"]
+      };
+    };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath: settingsPath });
+    scheduler.start();
+
+    const task = service.createTask({ title: "恢复长检查点", goal: "继续完成报告" });
+    await waitForStatus(service, task.id, "waiting_input");
+    scheduler.retry(task.id, "继续");
+    const completed = await waitForStatus(service, task.id, "completed");
+
+    expect(completed.resultSummary).toBe("检查点恢复后完成");
+    expect(resumedTurns).toBe(0);
+    expect(resumedToolCalls).toBe(0);
+    expect(resumedTokens).toBe(0);
+  });
+
   it("repairs missing native deliverables with the previous agent context", async () => {
     const service = setup();
     const settingsPath = join(requireTemp(), "model-settings.json");
