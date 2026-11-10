@@ -1224,6 +1224,8 @@ describe("Hearth scheduler", () => {
     await waitForStatus(service, task.id, "waiting_approval");
     const pending = store?.listApprovals(task.id).find((approval) => approval.status === "pending");
     expect(pending?.kind).toBe("tool.write_file");
+    expect(pending?.actionDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(pending?.action).toMatchObject({ resolvedAction: { kind: "file_write", permissionMode: "guarded" } });
 
     await approvals.decide(pending!.id, "approve", pending!.parameterHash);
     const completed = await waitForStatus(service, task.id, "completed");

@@ -13,7 +13,7 @@ import { runCodex } from "@hearth/codex-executor";
 import { getTemplate } from "@hearth/templates";
 import type { DshApprovalOutcome, DshApprovalRequest, DshContextEvent } from "@hearth/deepseek-executor";
 import type { ApprovalRequest, ApprovalManager, PendingToolApproval, ToolApprovalDecision } from "./approvals.ts";
-import { resolveAction, type ActionProposal, type ResolvedAction } from "./action-resolver.ts";
+import { resolveAction, type ActionFileTarget, type ActionProposal, type ResolvedAction } from "./action-resolver.ts";
 import { createFileArtifact, missingExpectedOutputs, publishArtifacts } from "./artifacts.ts";
 import { CONTEXT_BLOB_DIR, EXECUTOR_SETTINGS_PATH, GIT_CACHE_DIR, MODEL_SETTINGS_PATH, REPO_ROOT, SOURCE_CONTENT_DIR, WORKSPACE_DIR } from "./config.ts";
 import { ContextService, estimateTokens } from "./context.ts";
@@ -1595,23 +1595,39 @@ export class HearthScheduler {
     const toolName = input.request.call.name;
     if (!TOOL_APPROVAL_REQUIRED.has(toolName)) return { allowed: true };
     if (input.signal.aborted) return { allowed: false, reason: "任务已取消" };
+    const argumentsValue = approvalArguments(input.request.call.arguments);
+    const summary = toolApprovalSummary(toolName, input.request.call.arguments);
+    let action: ResolvedAction;
+    try {
+      const resolved = resolveToolAction({
+        toolName,
+        argumentsValue,
+        summary,
+        workspaceRoot: input.workspaceRoot,
+        fullPermission: input.fullPermission,
+        context: this.service.store.listScheduleRunByTask(input.task.id) ? "scheduled" : "interactive"
+      });
+      if (!resolved) {
+        return { allowed: false, reason: `敏感工具 ${toolName} 无法解析为可绑定动作，已拒绝执行` };
+      }
+      action = resolved;
+    } catch (error) {
+      return { allowed: false, reason: `敏感工具 ${toolName} 无法绑定到真实动作：${errorMessage(error)}` };
+    }
     if (input.fullPermission) {
       this.recordAutoApprovedTool(input.task, input.run, {
         toolName,
-        arguments: approvalArguments(input.request.call.arguments)
+        arguments: argumentsValue,
+        metadata: {
+          actionId: action.actionId,
+          actionDigest: action.actionDigest,
+          actionKind: action.kind,
+          permissionMode: action.permissionMode,
+          risk: action.risk
+        }
       });
       return { allowed: true };
     }
-    const argumentsValue = approvalArguments(input.request.call.arguments);
-    const summary = toolApprovalSummary(toolName, input.request.call.arguments);
-    const action = resolveToolAction({
-      toolName,
-      argumentsValue,
-      summary,
-      workspaceRoot: input.workspaceRoot,
-      fullPermission: input.fullPermission,
-      context: this.service.store.listScheduleRunByTask(input.task.id) ? "scheduled" : "interactive"
-    });
     const decision = await this.requestToolApproval({
       task: input.task,
       run: input.run,
@@ -1619,7 +1635,7 @@ export class HearthScheduler {
       summary,
       target: { tool: toolName, arguments: argumentsValue },
       preview: { arguments: argumentsValue },
-      ...(action ? { action } : {}),
+      action,
       signal: input.signal
     });
     return decision.allowed
@@ -2339,7 +2355,7 @@ function errorCode(error: unknown): string | null {
   return typeof code === "string" ? code : null;
 }
 
-function resolveToolAction(input: {
+export function resolveToolAction(input: {
   toolName: string;
   argumentsValue: unknown;
   summary: string;
@@ -2374,6 +2390,16 @@ function resolveToolAction(input: {
         files: [{ path: absolute, mode: existsSync(absolute) ? "replace" : "create" }]
       };
     }
+  } else if (input.toolName === "apply_patch" && typeof args.patch === "string") {
+    const files = patchFileTargets(args.patch, input.workspaceRoot);
+    if (files.length > 0) {
+      proposal = {
+        kind: "file_write",
+        summary: input.summary,
+        files,
+        targetRevision: `patch-sha256:${createHash("sha256").update(args.patch).digest("hex")}`
+      };
+    }
   } else if (input.toolName === "fetch_url" && typeof args.url === "string") {
     try {
       const url = new URL(args.url);
@@ -2399,16 +2425,27 @@ function resolveToolAction(input: {
     };
   }
   if (!proposal) return null;
-  try {
-    return resolveAction({
-      proposal,
-      permissionMode,
-      context: input.context,
-      sessionRoot: input.workspaceRoot
-    });
-  } catch {
-    return null;
+  return resolveAction({
+    proposal,
+    permissionMode,
+    context: input.context,
+    sessionRoot: input.workspaceRoot
+  });
+}
+
+function patchFileTargets(patch: string, workspaceRoot: string): ActionFileTarget[] {
+  const files = new Map<string, ActionFileTarget>();
+  for (const line of patch.split(/\r?\n/)) {
+    const match = /^\*\*\* (Update File|Add File|Delete File):\s*(.+?)\s*$/.exec(line);
+    if (!match) continue;
+    const rawPath = match[2];
+    if (!rawPath) continue;
+    const absolute = isAbsolute(rawPath) ? resolve(rawPath) : resolve(workspaceRoot, rawPath);
+    if (match[1] === "Delete File" && !existsSync(absolute)) continue;
+    const mode = match[1] === "Add File" ? "create" : match[1] === "Delete File" ? "delete" : "replace";
+    files.set(absolute, { path: absolute, mode });
   }
+  return [...files.values()];
 }
 
 function errorMessage(error: unknown): string {
