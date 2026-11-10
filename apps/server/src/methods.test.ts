@@ -60,7 +60,7 @@ describe("MethodService", () => {
     expect(candidate.status).toBe("candidate");
     expect(candidate.templateId).toBe("T01");
     expect(candidate.sourceTaskIds).toContain(task.id);
-    expect(candidate.allowedCapabilities).toContain("input:file");
+    expect(candidate.allowedCapabilities).toContain("input:text");
     expect(candidate.baseline.tasks).toBeGreaterThanOrEqual(1);
     expect(candidate.guardrails.some((guardrail) => guardrail.includes("审批"))).toBe(true);
     expect(store.getMethodCandidate(candidate.id)?.name).toBe(candidate.name);
@@ -158,7 +158,7 @@ describe("MethodService", () => {
       applicability: "测试",
       steps: ["执行"],
       sourceTaskIds: [task.id],
-      allowedCapabilities: ["input:file", "network:evil.example"],
+      allowedCapabilities: ["input:text", "network:evil.example"],
       templateId: "T01"
     })).toThrowError(MethodError);
   });
