@@ -9,6 +9,8 @@ import type {
   ArtifactRecord,
   AttentionItem,
   BackupRecord,
+  ChannelCursor,
+  ChannelDeliveryRecord,
   ChatMessageRecord,
   ConversationRecord,
   ConversationSettings,
@@ -21,6 +23,7 @@ import type {
   DesktopCommandRecord,
   DesktopFrameRecord,
   DesktopSessionRecord,
+  DelegationJob,
   DevicePairingRequest,
   DeviceRecord,
   EffectRecord,
@@ -108,7 +111,7 @@ export interface RunAggregate {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 25;
+export const CURRENT_SCHEMA_VERSION = 26;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -376,14 +379,76 @@ CREATE TABLE IF NOT EXISTS handoffs (
   to_run_id TEXT,
   from_executor TEXT NOT NULL,
   to_executor TEXT NOT NULL,
+  generation INTEGER NOT NULL DEFAULT 0,
+  source_cursor INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL,
   reason_code TEXT NOT NULL,
   diagnosis_json TEXT,
   packet_json TEXT,
+  verification_json TEXT,
+  artifact_ref TEXT,
   context_watermark_seq INTEGER NOT NULL,
   initiated_by TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS delegation_jobs (
+  id TEXT PRIMARY KEY,
+  parent_task_id TEXT NOT NULL,
+  parent_run_id TEXT,
+  child_task_id TEXT,
+  child_run_id TEXT,
+  goal_slice TEXT NOT NULL,
+  target_executor TEXT NOT NULL,
+  context_pack_ref TEXT NOT NULL,
+  context_pack_json TEXT NOT NULL,
+  workspace_policy TEXT NOT NULL,
+  permissions_json TEXT NOT NULL,
+  tool_policy_json TEXT NOT NULL,
+  network_policy_json TEXT NOT NULL,
+  budget_json TEXT NOT NULL,
+  deadline TEXT,
+  result_schema_ref TEXT,
+  status TEXT NOT NULL,
+  depth INTEGER NOT NULL DEFAULT 1,
+  idempotency_key TEXT NOT NULL UNIQUE,
+  lease_owner TEXT,
+  lease_expires_at TEXT,
+  attempt INTEGER NOT NULL DEFAULT 1,
+  result_json TEXT,
+  verification_json TEXT,
+  failure_json TEXT,
+  cancel_reason TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS channel_deliveries (
+  id TEXT PRIMARY KEY,
+  channel TEXT NOT NULL,
+  external_id TEXT NOT NULL,
+  thread_key TEXT NOT NULL,
+  direction TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  generation INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  last_attempt_at TEXT,
+  processed_at TEXT,
+  effect_id TEXT,
+  receipt_json TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(channel, external_id, direction)
+);
+CREATE TABLE IF NOT EXISTS channel_cursors (
+  channel TEXT NOT NULL,
+  thread_key TEXT NOT NULL,
+  generation INTEGER NOT NULL,
+  cursor INTEGER NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(channel, thread_key)
 );
 CREATE TABLE IF NOT EXISTS context_settings (
   id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -575,6 +640,12 @@ CREATE INDEX IF NOT EXISTS context_items_conversation_idx ON context_items(conve
 CREATE INDEX IF NOT EXISTS context_items_run_idx ON context_items(run_id, seq);
 CREATE UNIQUE INDEX IF NOT EXISTS context_items_executor_event_idx ON context_items(run_id, executor_event_id) WHERE executor_event_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS handoffs_task_idx ON handoffs(task_id, created_at);
+CREATE INDEX IF NOT EXISTS handoffs_generation_idx ON handoffs(task_id, generation);
+CREATE INDEX IF NOT EXISTS delegation_jobs_parent_idx ON delegation_jobs(parent_task_id, created_at);
+CREATE INDEX IF NOT EXISTS delegation_jobs_status_idx ON delegation_jobs(status, target_executor, created_at);
+CREATE INDEX IF NOT EXISTS delegation_jobs_child_idx ON delegation_jobs(child_task_id);
+CREATE INDEX IF NOT EXISTS channel_deliveries_thread_idx ON channel_deliveries(channel, thread_key, created_at);
+CREATE INDEX IF NOT EXISTS channel_deliveries_status_idx ON channel_deliveries(status, updated_at);
 CREATE INDEX IF NOT EXISTS memory_forget_receipts_memory_idx ON memory_forget_receipts(memory_id, created_at);
 CREATE INDEX IF NOT EXISTS method_candidates_status_idx ON method_candidates(status, updated_at);
 CREATE INDEX IF NOT EXISTS method_evaluations_method_idx ON method_evaluations(method_id, created_at);
@@ -737,6 +808,10 @@ export class HearthStore {
     ensureColumn(this.db, "runs", "budget_json", "TEXT");
     ensureColumn(this.db, "runs", "parent_run_id", "TEXT");
     ensureColumn(this.db, "runs", "handoff_id", "TEXT");
+    ensureColumn(this.db, "handoffs", "generation", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn(this.db, "handoffs", "source_cursor", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn(this.db, "handoffs", "verification_json", "TEXT");
+    ensureColumn(this.db, "handoffs", "artifact_ref", "TEXT");
     ensureColumn(this.db, "sync_peers", "token_cipher", "TEXT");
     ensureColumn(this.db, "sync_peers", "remote_instance_id", "TEXT");
     ensureColumn(this.db, "conversations", "settings_json", "TEXT");
@@ -1584,10 +1659,10 @@ export class HearthStore {
   createHandoff(handoff: HandoffRecord): HandoffRecord {
     this.db.prepare(
       `INSERT INTO handoffs
-       (id, task_id, from_run_id, to_run_id, from_executor, to_executor, status,
-        reason_code, diagnosis_json, packet_json, context_watermark_seq, initiated_by,
-        created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       (id, task_id, from_run_id, to_run_id, from_executor, to_executor, generation,
+        source_cursor, status, reason_code, diagnosis_json, packet_json, verification_json,
+        artifact_ref, context_watermark_seq, initiated_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       handoff.id,
       handoff.taskId,
@@ -1595,10 +1670,14 @@ export class HearthStore {
       handoff.toRunId,
       handoff.fromExecutor,
       handoff.toExecutor,
+      handoff.generation,
+      handoff.sourceCursor,
       handoff.status,
       handoff.reasonCode,
       handoff.diagnosis ? JSON.stringify(handoff.diagnosis) : null,
       handoff.packet ? JSON.stringify(handoff.packet) : null,
+      handoff.verification ? JSON.stringify(handoff.verification) : null,
+      handoff.artifactRef,
       handoff.contextWatermarkSeq,
       handoff.initiatedBy,
       handoff.createdAt,
@@ -1607,17 +1686,20 @@ export class HearthStore {
     return handoff;
   }
 
-  updateHandoff(id: string, patch: Partial<Pick<HandoffRecord, "toRunId" | "status" | "diagnosis" | "packet" | "updatedAt">>): HandoffRecord | null {
+  updateHandoff(id: string, patch: Partial<Pick<HandoffRecord, "toRunId" | "status" | "diagnosis" | "packet" | "verification" | "artifactRef" | "updatedAt">>): HandoffRecord | null {
     const current = this.getHandoff(id);
     if (!current) return null;
     const next: HandoffRecord = { ...current, ...patch };
     this.db.prepare(
-      `UPDATE handoffs SET to_run_id = ?, status = ?, diagnosis_json = ?, packet_json = ?, updated_at = ? WHERE id = ?`
+      `UPDATE handoffs SET to_run_id = ?, status = ?, diagnosis_json = ?, packet_json = ?,
+       verification_json = ?, artifact_ref = ?, updated_at = ? WHERE id = ?`
     ).run(
       next.toRunId,
       next.status,
       next.diagnosis ? JSON.stringify(next.diagnosis) : null,
       next.packet ? JSON.stringify(next.packet) : null,
+      next.verification ? JSON.stringify(next.verification) : null,
+      next.artifactRef,
       next.updatedAt,
       id
     );
@@ -1631,6 +1713,243 @@ export class HearthStore {
 
   listHandoffs(taskId: string): HandoffRecord[] {
     return (this.db.prepare("SELECT * FROM handoffs WHERE task_id = ? ORDER BY created_at ASC").all(taskId) as DbRow[]).map(rowToHandoff);
+  }
+
+  createDelegationJob(job: DelegationJob): DelegationJob {
+    this.db.prepare(
+      `INSERT INTO delegation_jobs
+       (id, parent_task_id, parent_run_id, child_task_id, child_run_id, goal_slice,
+        target_executor, context_pack_ref, context_pack_json, workspace_policy,
+        permissions_json, tool_policy_json, network_policy_json, budget_json, deadline,
+        result_schema_ref, status, depth, idempotency_key, lease_owner, lease_expires_at,
+        attempt, result_json, verification_json, failure_json, cancel_reason, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         parent_task_id = excluded.parent_task_id,
+         parent_run_id = excluded.parent_run_id,
+         child_task_id = excluded.child_task_id,
+         child_run_id = excluded.child_run_id,
+         goal_slice = excluded.goal_slice,
+         target_executor = excluded.target_executor,
+         context_pack_ref = excluded.context_pack_ref,
+         context_pack_json = excluded.context_pack_json,
+         workspace_policy = excluded.workspace_policy,
+         permissions_json = excluded.permissions_json,
+         tool_policy_json = excluded.tool_policy_json,
+         network_policy_json = excluded.network_policy_json,
+         budget_json = excluded.budget_json,
+         deadline = excluded.deadline,
+         result_schema_ref = excluded.result_schema_ref,
+         status = excluded.status,
+         depth = excluded.depth,
+         idempotency_key = excluded.idempotency_key,
+         lease_owner = excluded.lease_owner,
+         lease_expires_at = excluded.lease_expires_at,
+         attempt = excluded.attempt,
+         result_json = excluded.result_json,
+         verification_json = excluded.verification_json,
+         failure_json = excluded.failure_json,
+         cancel_reason = excluded.cancel_reason,
+         updated_at = excluded.updated_at`
+    ).run(
+      job.id,
+      job.parentTaskId,
+      job.parentRunId,
+      job.childTaskId,
+      job.childRunId,
+      job.goalSlice,
+      job.targetExecutor,
+      job.contextPackRef,
+      JSON.stringify(job.contextPack),
+      job.workspacePolicy,
+      JSON.stringify(job.permissions),
+      JSON.stringify(job.toolPolicy),
+      JSON.stringify(job.networkPolicy),
+      JSON.stringify(job.budget),
+      job.deadline,
+      job.resultSchemaRef,
+      job.status,
+      job.depth,
+      job.idempotencyKey,
+      job.lease?.owner ?? null,
+      job.lease?.expiresAt ?? null,
+      job.attempt,
+      job.result ? JSON.stringify(job.result) : null,
+      job.verification ? JSON.stringify(job.verification) : null,
+      job.failure ? JSON.stringify(job.failure) : null,
+      job.cancelReason,
+      job.createdAt,
+      job.updatedAt
+    );
+    return job;
+  }
+
+  updateDelegationJob(id: string, patch: Partial<Omit<DelegationJob, "id" | "createdAt">>): DelegationJob | null {
+    const current = this.getDelegationJob(id);
+    if (!current) return null;
+    const next: DelegationJob = { ...current, ...patch, id: current.id, createdAt: current.createdAt };
+    this.db.prepare(
+      `UPDATE delegation_jobs SET parent_task_id = ?, parent_run_id = ?, child_task_id = ?,
+       child_run_id = ?, goal_slice = ?, target_executor = ?, context_pack_ref = ?,
+       context_pack_json = ?, workspace_policy = ?, permissions_json = ?, tool_policy_json = ?,
+       network_policy_json = ?, budget_json = ?, deadline = ?, result_schema_ref = ?, status = ?,
+       depth = ?, idempotency_key = ?, lease_owner = ?, lease_expires_at = ?, attempt = ?,
+       result_json = ?, verification_json = ?, failure_json = ?, cancel_reason = ?, updated_at = ?
+       WHERE id = ?`
+    ).run(
+      next.parentTaskId,
+      next.parentRunId,
+      next.childTaskId,
+      next.childRunId,
+      next.goalSlice,
+      next.targetExecutor,
+      next.contextPackRef,
+      JSON.stringify(next.contextPack),
+      next.workspacePolicy,
+      JSON.stringify(next.permissions),
+      JSON.stringify(next.toolPolicy),
+      JSON.stringify(next.networkPolicy),
+      JSON.stringify(next.budget),
+      next.deadline,
+      next.resultSchemaRef,
+      next.status,
+      next.depth,
+      next.idempotencyKey,
+      next.lease?.owner ?? null,
+      next.lease?.expiresAt ?? null,
+      next.attempt,
+      next.result ? JSON.stringify(next.result) : null,
+      next.verification ? JSON.stringify(next.verification) : null,
+      next.failure ? JSON.stringify(next.failure) : null,
+      next.cancelReason,
+      next.updatedAt,
+      id
+    );
+    return next;
+  }
+
+  getDelegationJob(id: string): DelegationJob | null {
+    const row = this.db.prepare("SELECT * FROM delegation_jobs WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToDelegationJob(row) : null;
+  }
+
+  getDelegationJobByIdempotencyKey(idempotencyKey: string): DelegationJob | null {
+    const row = this.db.prepare("SELECT * FROM delegation_jobs WHERE idempotency_key = ?").get(idempotencyKey) as DbRow | undefined;
+    return row ? rowToDelegationJob(row) : null;
+  }
+
+  getDelegationJobByChildTask(childTaskId: string): DelegationJob | null {
+    const row = this.db.prepare("SELECT * FROM delegation_jobs WHERE child_task_id = ?").get(childTaskId) as DbRow | undefined;
+    return row ? rowToDelegationJob(row) : null;
+  }
+
+  listDelegationJobs(parentTaskId: string): DelegationJob[] {
+    return (this.db.prepare("SELECT * FROM delegation_jobs WHERE parent_task_id = ? ORDER BY created_at ASC").all(parentTaskId) as DbRow[]).map(rowToDelegationJob);
+  }
+
+  listActiveDelegationJobs(): DelegationJob[] {
+    return (this.db.prepare(
+      "SELECT * FROM delegation_jobs WHERE status IN ('queued','leased','running','awaiting_verification') ORDER BY created_at ASC"
+    ).all() as DbRow[]).map(rowToDelegationJob);
+  }
+
+  listDelegationJobsByStatus(status: string): DelegationJob[] {
+    return (this.db.prepare("SELECT * FROM delegation_jobs WHERE status = ? ORDER BY created_at ASC").all(status) as DbRow[]).map(rowToDelegationJob);
+  }
+
+  getChannelDelivery(channel: string, externalId: string, direction: string): ChannelDeliveryRecord | null {
+    const row = this.db.prepare(
+      "SELECT * FROM channel_deliveries WHERE channel = ? AND external_id = ? AND direction = ?"
+    ).get(channel, externalId, direction) as DbRow | undefined;
+    return row ? rowToChannelDelivery(row) : null;
+  }
+
+  createChannelDelivery(delivery: ChannelDeliveryRecord): ChannelDeliveryRecord {
+    this.db.prepare(
+      `INSERT INTO channel_deliveries
+       (id, channel, external_id, thread_key, direction, idempotency_key, generation, status,
+        payload_json, attempt_count, last_error, last_attempt_at, processed_at, effect_id,
+        receipt_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      delivery.id,
+      delivery.channel,
+      delivery.externalId,
+      delivery.threadKey,
+      delivery.direction,
+      delivery.idempotencyKey,
+      delivery.generation,
+      delivery.status,
+      JSON.stringify(delivery.payload),
+      delivery.attemptCount,
+      delivery.lastError,
+      delivery.lastAttemptAt,
+      delivery.processedAt,
+      delivery.effectId,
+      delivery.receipt ? JSON.stringify(delivery.receipt) : null,
+      delivery.createdAt,
+      delivery.updatedAt
+    );
+    return delivery;
+  }
+
+  updateChannelDelivery(id: string, patch: Partial<Omit<ChannelDeliveryRecord, "id" | "createdAt">>): ChannelDeliveryRecord | null {
+    const current = this.getChannelDeliveryById(id);
+    if (!current) return null;
+    const next: ChannelDeliveryRecord = { ...current, ...patch, id: current.id, createdAt: current.createdAt };
+    this.db.prepare(
+      `UPDATE channel_deliveries SET channel = ?, external_id = ?, thread_key = ?, direction = ?,
+       idempotency_key = ?, generation = ?, status = ?, payload_json = ?, attempt_count = ?,
+       last_error = ?, last_attempt_at = ?, processed_at = ?, effect_id = ?, receipt_json = ?,
+       updated_at = ? WHERE id = ?`
+    ).run(
+      next.channel,
+      next.externalId,
+      next.threadKey,
+      next.direction,
+      next.idempotencyKey,
+      next.generation,
+      next.status,
+      JSON.stringify(next.payload),
+      next.attemptCount,
+      next.lastError,
+      next.lastAttemptAt,
+      next.processedAt,
+      next.effectId,
+      next.receipt ? JSON.stringify(next.receipt) : null,
+      next.updatedAt,
+      id
+    );
+    return next;
+  }
+
+  getChannelDeliveryById(id: string): ChannelDeliveryRecord | null {
+    const row = this.db.prepare("SELECT * FROM channel_deliveries WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToChannelDelivery(row) : null;
+  }
+
+  listChannelDeliveries(channel: string, threadKey?: string): ChannelDeliveryRecord[] {
+    const rows = threadKey
+      ? this.db.prepare("SELECT * FROM channel_deliveries WHERE channel = ? AND thread_key = ? ORDER BY created_at ASC").all(channel, threadKey)
+      : this.db.prepare("SELECT * FROM channel_deliveries WHERE channel = ? ORDER BY created_at ASC").all(channel);
+    return (rows as DbRow[]).map(rowToChannelDelivery);
+  }
+
+  getChannelCursor(channel: string, threadKey: string): ChannelCursor | null {
+    const row = this.db.prepare(
+      "SELECT * FROM channel_cursors WHERE channel = ? AND thread_key = ?"
+    ).get(channel, threadKey) as DbRow | undefined;
+    return row ? rowToChannelCursor(row) : null;
+  }
+
+  setChannelCursor(cursor: ChannelCursor): ChannelCursor {
+    this.db.prepare(
+      `INSERT INTO channel_cursors (channel, thread_key, generation, cursor, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(channel, thread_key) DO UPDATE SET
+         generation = excluded.generation, cursor = excluded.cursor, updated_at = excluded.updated_at`
+    ).run(cursor.channel, cursor.threadKey, cursor.generation, cursor.cursor, cursor.updatedAt);
+    return cursor;
   }
 
   getContextSettings(): ContextSettings {
@@ -2387,6 +2706,18 @@ export class HearthStore {
       case "task.lease.updated": return upsertTaskLease(this.db, event.payload as TaskLease);
       case "connection.updated": return upsertConnectionSession(this.db, event.payload as ConnectionSession);
       case "connection.outbox.updated": return upsertConnectionOutboxItem(this.db, event.payload as ConnectionOutboxItem);
+      case "delegation.created":
+      case "delegation.leased":
+      case "delegation.started":
+      case "delegation.result.submitted":
+      case "delegation.verified":
+      case "delegation.rejected":
+      case "delegation.cancelled":
+      case "delegation.retried":
+      case "delegation.orphaned": {
+        this.createDelegationJob(event.payload as DelegationJob);
+        return;
+      }
       case "outbox.created": return upsertOutboxDraft(this.db, event.payload as OutboxDraft);
       case "outbox.updated": return updateOutboxDraft(this.db, event.payload as Record<string, unknown>);
       case "device.paired":
@@ -3368,13 +3699,83 @@ function rowToHandoff(row: DbRow): HandoffRecord {
     toRunId: row.to_run_id == null ? null : String(row.to_run_id),
     fromExecutor: String(row.from_executor) as HandoffRecord["fromExecutor"],
     toExecutor: String(row.to_executor) as HandoffRecord["toExecutor"],
+    generation: Number(row.generation ?? 0),
+    sourceCursor: Number(row.source_cursor ?? 0),
     status: String(row.status) as HandoffRecord["status"],
     reasonCode: String(row.reason_code) as HandoffRecord["reasonCode"],
     diagnosis: row.diagnosis_json == null ? null : JSON.parse(String(row.diagnosis_json)),
     packet: row.packet_json == null ? null : JSON.parse(String(row.packet_json)),
+    verification: row.verification_json == null ? null : JSON.parse(String(row.verification_json)),
+    artifactRef: row.artifact_ref == null ? null : String(row.artifact_ref),
     contextWatermarkSeq: Number(row.context_watermark_seq),
     initiatedBy: String(row.initiated_by) as HandoffRecord["initiatedBy"],
     createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
+  };
+}
+
+function rowToDelegationJob(row: DbRow): DelegationJob {
+  return {
+    id: String(row.id),
+    parentTaskId: String(row.parent_task_id),
+    parentRunId: row.parent_run_id == null ? null : String(row.parent_run_id),
+    childTaskId: row.child_task_id == null ? null : String(row.child_task_id),
+    childRunId: row.child_run_id == null ? null : String(row.child_run_id),
+    goalSlice: String(row.goal_slice),
+    targetExecutor: String(row.target_executor) as DelegationJob["targetExecutor"],
+    contextPackRef: String(row.context_pack_ref),
+    contextPack: JSON.parse(String(row.context_pack_json)),
+    workspacePolicy: String(row.workspace_policy) as DelegationJob["workspacePolicy"],
+    permissions: JSON.parse(String(row.permissions_json)),
+    toolPolicy: JSON.parse(String(row.tool_policy_json)),
+    networkPolicy: JSON.parse(String(row.network_policy_json)),
+    budget: JSON.parse(String(row.budget_json)),
+    deadline: row.deadline == null ? null : String(row.deadline),
+    resultSchemaRef: row.result_schema_ref == null ? null : String(row.result_schema_ref),
+    status: String(row.status) as DelegationJob["status"],
+    depth: Number(row.depth),
+    idempotencyKey: String(row.idempotency_key),
+    lease: row.lease_owner == null || row.lease_expires_at == null
+      ? null
+      : { owner: String(row.lease_owner), expiresAt: String(row.lease_expires_at) },
+    attempt: Number(row.attempt),
+    result: row.result_json == null ? null : JSON.parse(String(row.result_json)),
+    verification: row.verification_json == null ? null : JSON.parse(String(row.verification_json)),
+    failure: row.failure_json == null ? null : JSON.parse(String(row.failure_json)),
+    cancelReason: row.cancel_reason == null ? null : String(row.cancel_reason),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
+  };
+}
+
+function rowToChannelDelivery(row: DbRow): ChannelDeliveryRecord {
+  return {
+    id: String(row.id),
+    channel: String(row.channel),
+    externalId: String(row.external_id),
+    threadKey: String(row.thread_key),
+    direction: String(row.direction) as ChannelDeliveryRecord["direction"],
+    idempotencyKey: String(row.idempotency_key),
+    generation: Number(row.generation),
+    status: String(row.status) as ChannelDeliveryRecord["status"],
+    payload: JSON.parse(String(row.payload_json)),
+    attemptCount: Number(row.attempt_count),
+    lastError: row.last_error == null ? null : String(row.last_error),
+    lastAttemptAt: row.last_attempt_at == null ? null : String(row.last_attempt_at),
+    processedAt: row.processed_at == null ? null : String(row.processed_at),
+    effectId: row.effect_id == null ? null : String(row.effect_id),
+    receipt: row.receipt_json == null ? null : JSON.parse(String(row.receipt_json)),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
+  };
+}
+
+function rowToChannelCursor(row: DbRow): ChannelCursor {
+  return {
+    channel: String(row.channel),
+    threadKey: String(row.thread_key),
+    generation: Number(row.generation),
+    cursor: Number(row.cursor),
     updatedAt: String(row.updated_at)
   };
 }

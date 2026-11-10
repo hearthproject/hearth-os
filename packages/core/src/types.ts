@@ -2040,6 +2040,9 @@ export interface HandoffPacket {
   fromRunId: string;
   fromExecutor: ExecutorId;
   toExecutor: ExecutorId;
+  generation: number;
+  sourceCursor: number;
+  createdAt: string;
   goal: string;
   acceptance: string[];
   permissions: TaskPermissions;
@@ -2051,6 +2054,22 @@ export interface HandoffPacket {
   doNotRepeat: string[];
   openQuestions: string[];
   nextAction: string;
+  omittedHistory: string[];
+  redaction: HandoffRedaction;
+  verification: HandoffVerification;
+}
+
+export interface HandoffRedaction {
+  policy: "host-redaction-v1";
+  redactedFields: string[];
+}
+
+export interface HandoffVerification {
+  action: string;
+  expected: string[];
+  status: "pending" | "passed" | "failed";
+  checkedAt?: string | null;
+  evidenceRefs?: string[];
 }
 
 export const HANDOFF_STATUSES = ["pending_user", "prepared", "running", "completed", "failed", "cancelled"] as const;
@@ -2063,13 +2082,134 @@ export interface HandoffRecord {
   toRunId: string | null;
   fromExecutor: ExecutorId;
   toExecutor: ExecutorId;
+  generation: number;
+  sourceCursor: number;
   status: HandoffStatus;
   reasonCode: FailureCause;
   diagnosis: FailureDiagnosis | null;
   packet: HandoffPacket | null;
+  verification: HandoffVerification | null;
+  artifactRef: string | null;
   contextWatermarkSeq: number;
   initiatedBy: "auto" | "user";
   createdAt: string;
+  updatedAt: string;
+}
+
+export const DELEGATION_JOB_STATUSES = [
+  "queued",
+  "leased",
+  "running",
+  "awaiting_verification",
+  "succeeded",
+  "failed",
+  "cancelled",
+  "orphaned"
+] as const;
+export type DelegationJobStatus = (typeof DELEGATION_JOB_STATUSES)[number];
+
+export const DELEGATION_WORKSPACE_POLICIES = ["read-only", "isolated-write", "shared-read"] as const;
+export type DelegationWorkspacePolicy = (typeof DELEGATION_WORKSPACE_POLICIES)[number];
+
+export interface DelegationBudget {
+  tokens?: number;
+  wallClockMs?: number;
+  maxSteps?: number;
+}
+
+export interface DelegationFailure {
+  code: string;
+  message: string;
+  retryable: boolean;
+  occurredAt: string;
+}
+
+export interface DelegationResult {
+  summary: string;
+  evidenceRefs: string[];
+  artifacts: string[];
+  unresolved: string[];
+  status: "completed" | "failed";
+  producedAt: string;
+}
+
+export interface DelegationVerification {
+  parentTaskId: string;
+  verdict: "accepted" | "rejected";
+  summary: string;
+  evidenceRefs: string[];
+  checkedAt: string;
+}
+
+export interface DelegationJob {
+  id: string;
+  parentTaskId: string;
+  parentRunId: string | null;
+  childTaskId: string | null;
+  childRunId: string | null;
+  goalSlice: string;
+  targetExecutor: ExecutorId;
+  contextPackRef: string;
+  contextPack: Record<string, unknown>;
+  workspacePolicy: DelegationWorkspacePolicy;
+  permissions: TaskPermissions;
+  toolPolicy: string[];
+  networkPolicy: string[];
+  budget: DelegationBudget;
+  deadline: string | null;
+  resultSchemaRef: string | null;
+  status: DelegationJobStatus;
+  depth: number;
+  idempotencyKey: string;
+  lease: { owner: string; expiresAt: string } | null;
+  attempt: number;
+  result: DelegationResult | null;
+  verification: DelegationVerification | null;
+  failure: DelegationFailure | null;
+  cancelReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const CHANNEL_DIRECTIONS = ["inbound", "outbound"] as const;
+export type ChannelDirection = (typeof CHANNEL_DIRECTIONS)[number];
+
+export const CHANNEL_DELIVERY_STATUSES = [
+  "received",
+  "processing",
+  "processed",
+  "duplicate",
+  "retrying",
+  "failed",
+  "uncertain"
+] as const;
+export type ChannelDeliveryStatus = (typeof CHANNEL_DELIVERY_STATUSES)[number];
+
+export interface ChannelDeliveryRecord {
+  id: string;
+  channel: string;
+  externalId: string;
+  threadKey: string;
+  direction: ChannelDirection;
+  idempotencyKey: string;
+  generation: number;
+  status: ChannelDeliveryStatus;
+  payload: Record<string, unknown>;
+  attemptCount: number;
+  lastError: string | null;
+  lastAttemptAt: string | null;
+  processedAt: string | null;
+  effectId: string | null;
+  receipt: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChannelCursor {
+  channel: string;
+  threadKey: string;
+  generation: number;
+  cursor: number;
   updatedAt: string;
 }
 

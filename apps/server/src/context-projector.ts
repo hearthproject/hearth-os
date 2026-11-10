@@ -70,12 +70,16 @@ export class ContextProjector {
     const artifacts = [...artifactMap.values()];
     const permissions = effectivePermissions(task, input.toExecutor, this.context.settings().allowCodexNetwork);
     const doNotRepeat = this.doNotRepeatFor(task.id);
+    const now = new Date().toISOString();
     return {
       handoffId: "pending",
       taskId: task.id,
       fromRunId: input.fromRunId,
       fromExecutor: input.fromExecutor,
       toExecutor: input.toExecutor,
+      generation: 0,
+      sourceCursor: state.summarySeq,
+      createdAt: now,
       goal: task.goal,
       acceptance: template?.acceptance ?? task.expectedOutputs ?? [],
       permissions,
@@ -84,9 +88,18 @@ export class ContextProjector {
       completed: state.completed,
       failed: state.failed,
       artifacts,
-        doNotRepeat,
+      doNotRepeat,
       openQuestions: state.openQuestions,
-      nextAction: task.nextAction ?? "继续完成任务并产出所有预期交付物"
+      nextAction: task.nextAction ?? "继续完成任务并产出所有预期交付物",
+      omittedHistory: [],
+      redaction: { policy: "host-redaction-v1", redactedFields: [] },
+      verification: {
+        action: "先读取当前工作区并核对目标、权限、证据和下一步，再执行一个只读最小验证动作",
+        expected: ["目标与验收标准一致", "权限没有扩大", "证据引用可读取", "下一步明确且无重复副作用"],
+        status: "pending",
+        checkedAt: null,
+        evidenceRefs: []
+      }
     };
   }
 
@@ -115,6 +128,9 @@ export class ContextProjector {
       `- taskId: ${packet.taskId}`,
       `- from: ${packet.fromExecutor}`,
       `- to: ${packet.toExecutor}`,
+      `- generation: ${packet.generation}`,
+      `- sourceCursor: ${packet.sourceCursor}`,
+      `- createdAt: ${packet.createdAt}`,
       "",
       "## 目标",
       packet.goal,
@@ -153,6 +169,13 @@ export class ContextProjector {
       "",
       "## 下一步",
       packet.nextAction,
+      "",
+      "## 最小验证动作",
+      packet.verification.action,
+      ...packet.verification.expected.map((item) => `- ${item}`),
+      "",
+      "## 省略历史",
+      ...(packet.omittedHistory.length ? packet.omittedHistory.map((item) => `- ${item}`) : ["- 无；需要时可重新读取 thread/context"]),
       ""
     ].join("\n");
   }

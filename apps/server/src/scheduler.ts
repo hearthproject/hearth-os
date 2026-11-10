@@ -22,6 +22,7 @@ import { classifyFailure, decideFailure, evaluateHandoff, isExecutorFailureCause
 import { judgeCompletion } from "./completion-judge.ts";
 import { ContextProjector } from "./context-projector.ts";
 import { maybeModelSummary } from "./context-summary.ts";
+import { HandoffService } from "./handoff.ts";
 import { loadExecutorSettings } from "./executor-settings.ts";
 import { HermesApprovalRequiredError, HermesStartupError } from "./hermes-executor.ts";
 import type { ExternalContextItem } from "./external-executor.ts";
@@ -117,6 +118,7 @@ export class HearthScheduler {
   private readonly autoLearn: boolean;
   private readonly context: ContextService;
   private readonly projector: ContextProjector;
+  private readonly handoffs: HandoffService;
   private readonly summaryTasks = new Set<Promise<void>>();
   private readonly summaryControllers = new Map<string, AbortController>();
   private readonly leases: TaskLeaseService;
@@ -170,6 +172,7 @@ export class HearthScheduler {
     this.autoLearn = options.autoLearn ?? true;
     this.context = options.context ?? new ContextService(this.service, options.contextBlobRoot ?? CONTEXT_BLOB_DIR);
     this.projector = new ContextProjector(this.service, this.context);
+    this.handoffs = new HandoffService(this.service, this.context);
     this.service.setContextSink((message) => {
       if (this.context.settings().mode !== "off") this.context.recordChatMessage(message);
     });
@@ -985,15 +988,14 @@ export class HearthScheduler {
             remainingBudget: this.remainingBudget(taskId), diagnosisSummary: diagnosis.summary, outDir: result.outDir
           });
           const status = decision.autoAllowed ? "prepared" : "pending_user";
-          const created = this.context.createHandoff({
+          const preparedHandoff = this.handoffs.prepare({
             taskId, fromRunId: result.run.id, fromExecutor: executorId, toExecutor: decision.targetExecutor,
             status, reasonCode: cause, diagnosis, packet,
             contextWatermarkSeq: this.context.getState(taskId)?.summarySeq ?? 0, initiatedBy: "auto"
           });
-          const finalPacket: HandoffPacket = { ...packet, handoffId: created.id };
-          this.context.updateHandoff(created.id, { packet: finalPacket });
-          this.writeHandoffFile(taskRoot, result.outDir, created.id, finalPacket);
-          const currentHandoff: HandoffRecord = { ...created, packet: finalPacket };
+          const finalPacket: HandoffPacket = preparedHandoff.packet;
+          const currentHandoff: HandoffRecord = preparedHandoff.handoff;
+          this.writeHandoffFile(taskRoot, result.outDir, currentHandoff.id, finalPacket);
           if (status === "prepared") {
             executorId = decision.targetExecutor;
             attemptedExecutors.add(decision.targetExecutor);
