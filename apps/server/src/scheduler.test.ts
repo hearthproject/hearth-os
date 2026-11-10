@@ -324,12 +324,12 @@ describe("Hearth scheduler", () => {
 
     const first = service.createTask({ templateId: "T01" });
     await waitForStatus(service, first.id, "completed");
-    expect(existsSync(join(requireTemp(), "eval", "runs", "T01", "stale.md"))).toBe(true);
+    expect(existsSync(join(requireTemp(), ".hearth", "artifacts", "T01", "stale.md"))).toBe(true);
 
     const second = service.createTask({ templateId: "T01" });
     await waitForStatus(service, second.id, "completed");
-    expect(existsSync(join(requireTemp(), "eval", "runs", "T01", "stale.md"))).toBe(false);
-    expect(readFileSync(join(requireTemp(), "eval", "runs", "T01", "meeting-notes.md"), "utf8")).toContain("纪要 2");
+    expect(existsSync(join(requireTemp(), ".hearth", "artifacts", "T01", "stale.md"))).toBe(false);
+    expect(readFileSync(join(requireTemp(), ".hearth", "artifacts", "T01", "meeting-notes.md"), "utf8")).toContain("纪要 2");
   });
 
   it("asks the executor once to repair missing required artifacts", async () => {
@@ -353,7 +353,7 @@ describe("Hearth scheduler", () => {
     expect(completed.nextAction).toBe("产物已保存");
     expect(calls).toBe(2);
     expect(prompts[1]).toContain("缺少期望产物：meeting-notes.md");
-    expect(existsSync(join(requireTemp(), "eval", "runs", "T01", "meeting-notes.md"))).toBe(true);
+    expect(existsSync(join(requireTemp(), ".hearth", "artifacts", "T01", "meeting-notes.md"))).toBe(true);
     expect(store?.listRuns(task.id)[0]?.status).toBe("completed");
   });
 
