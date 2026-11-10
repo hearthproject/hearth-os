@@ -34,6 +34,8 @@ export interface ExecutionOutcome {
   status: "completed" | "waiting_input" | "failed" | "cancelled" | "budget_exceeded";
   finalResponse: string;
   usage: RunUsage | null;
+  turns?: number;
+  toolCalls?: number;
   threadId: string | null;
   label: string;
   question: string | null;
@@ -136,6 +138,8 @@ export class NativeExecutorAdapter implements ExecutorAdapter {
       status: outcome.status,
       finalResponse: outcome.finalResponse,
       usage: outcome.usage,
+      turns: outcome.turns,
+      toolCalls: outcome.toolCalls,
       threadId: null,
       label: `native / ${input.nativeSettings.model}`,
       question: outcome.question,

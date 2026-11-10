@@ -1000,6 +1000,90 @@ describe("Hearth scheduler", () => {
     expect(service.getGoal(goal.goalId)?.currentState).toBe("done");
   });
 
+  it("does not start a task after its goal deadline and persists a handoff", async () => {
+    const service = setup();
+    let runnerCalls = 0;
+    scheduler = makeScheduler(service, async () => {
+      runnerCalls += 1;
+      return FAKE_RESULT;
+    }, {
+      executorHealth: (executorId: ExecutorId) => ({ canRun: executorId === "codex", issues: [] })
+    });
+    scheduler.start();
+    const goal = service.createGoal({
+      title: "已过期目标",
+      objective: "不应在截止时间后继续执行",
+      currentState: "active",
+      reviewPolicy: "auto",
+      deadline: new Date(Date.now() - 60_000).toISOString()
+    });
+    const task = service.createTask({
+      title: "不应启动", goalId: goal.goalId, textInput: "执行", executorId: "codex"
+    });
+
+    const blocked = await waitForStatus(service, task.id, "recoverable");
+    expect(runnerCalls).toBe(0);
+    expect(blocked.error?.kind).toBe("goal_deadline_reached");
+    expect(service.getGoal(goal.goalId)).toMatchObject({ currentState: "awaiting_user" });
+    expect(service.getGoal(goal.goalId)?.nextHandoff).toContain("截止时间已到");
+  });
+
+  it("stops a goal after its cumulative budget is exhausted", async () => {
+    const service = setup();
+    let runnerCalls = 0;
+    scheduler = makeScheduler(service, async () => {
+      runnerCalls += 1;
+      throw new Error("executor failed");
+    }, {
+      executorHealth: (executorId: ExecutorId) => ({ canRun: executorId === "codex", issues: [] })
+    });
+    scheduler.start();
+    const goal = service.createGoal({
+      title: "有限预算目标",
+      objective: "预算耗尽后必须停止",
+      currentState: "active",
+      reviewPolicy: "auto",
+      budget: { maxTurns: 1 },
+      stopConditions: ["budget_exhausted"]
+    });
+    const task = service.createTask({
+      title: "只允许一轮", goalId: goal.goalId, textInput: "执行", executorId: "codex"
+    });
+
+    const blocked = await waitForStatus(service, task.id, "waiting_input");
+    expect(runnerCalls).toBe(1);
+    expect(store?.listRuns(task.id)).toHaveLength(1);
+    expect(blocked.error?.kind).toBe("goal_budget_exhausted");
+    expect(service.getGoal(goal.goalId)?.nextHandoff).toContain("预算已耗尽");
+  });
+
+  it("honors a deterministic task_failed stop condition instead of retrying", async () => {
+    const service = setup();
+    let runnerCalls = 0;
+    scheduler = makeScheduler(service, async () => {
+      runnerCalls += 1;
+      throw new Error("executor failed");
+    }, {
+      executorHealth: (executorId: ExecutorId) => ({ canRun: executorId === "codex", issues: [] })
+    });
+    scheduler.start();
+    const goal = service.createGoal({
+      title: "失败即停",
+      objective: "任何失败都交给用户决定",
+      currentState: "active",
+      reviewPolicy: "auto",
+      stopConditions: ["task_failed"]
+    });
+    const task = service.createTask({
+      title: "失败后不重试", goalId: goal.goalId, textInput: "执行", executorId: "codex"
+    });
+
+    const blocked = await waitForStatus(service, task.id, "waiting_input");
+    expect(runnerCalls).toBe(1);
+    expect(blocked.error?.kind).toBe("goal_declared_stop");
+    expect(service.getGoal(goal.goalId)?.nextHandoff).toContain("task_failed");
+  });
+
   it("hands off a native runtime crash without spending a same-executor retry", async () => {
     const service = setup();
     const modelSettingsPath = configureModel();

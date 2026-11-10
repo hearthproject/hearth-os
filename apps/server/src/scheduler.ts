@@ -63,6 +63,16 @@ interface AttemptResult {
   queuedFollowUp?: boolean;
 }
 
+interface GoalBoundaryStop {
+  code: "deadline_reached" | "budget_exhausted" | "effect_uncertain" | "declared_stop";
+  currentState: "blocked" | "awaiting_user";
+  message: string;
+  nextAction: string;
+  handoff: string;
+  failureClass: NonNullable<TaskError["failureClass"]>;
+  cause: NonNullable<TaskError["cause"]>;
+}
+
 export interface SchedulerOptions {
   service: HearthService;
   repoRoot?: string;
@@ -476,6 +486,7 @@ export class HearthScheduler {
     const scheduledDelegationExecutors = new Set<ExecutorId>();
     for (const task of queued) {
       if (this.stopped) break;
+      if (this.enforceGoalBoundary(task)) continue;
       const executorId = resolveExecutorId(task);
       const delegationJob = this.service.store.getDelegationJobByChildTask(task.id);
       if (delegationJob) {
@@ -647,7 +658,23 @@ export class HearthScheduler {
       proof
     };
     this.service.createRunCheckpoint(record);
-    this.service.updateRun(runId, taskId, { checkpointSeq: checkpoint.seq, usage: checkpoint.usage });
+    this.service.updateRun(runId, taskId, {
+      checkpointSeq: checkpoint.seq,
+      usage: this.usageWithMetrics(checkpoint.usage, checkpoint.turns, checkpoint.toolCalls)
+    });
+  }
+
+  private usageWithMetrics(
+    usage: RunRecord["usage"],
+    turns?: number,
+    toolCalls?: number
+  ): RunRecord["usage"] {
+    if (!usage && turns === undefined && toolCalls === undefined) return null;
+    return {
+      ...(usage ?? { inputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0 }),
+      ...(turns === undefined ? {} : { turns }),
+      ...(toolCalls === undefined ? {} : { toolCalls })
+    };
   }
 
   private startLeaseHeartbeat(taskId: string, epoch: number, onLost: () => void, onHeartbeat?: () => void): void {
@@ -975,6 +1002,7 @@ export class HearthScheduler {
       }
       for (;;) {
         const task = this.service.requireTask(taskId);
+        if (this.enforceGoalBoundary(task)) return;
         if (this.cancelled.has(taskId) || task.status === "cancelled") {
           if (handoff) this.context.updateHandoff(handoff.id, { status: "cancelled" });
           return;
@@ -1045,6 +1073,7 @@ export class HearthScheduler {
           this.refreshTaskSummary(taskId, { lastFailure: result.failure });
           return;
         }
+        if (result.status === "failed" && this.enforceGoalBoundary(this.service.requireTask(taskId), result.failure)) return;
         previousRun = result.run;
         if (handoff) {
           this.context.updateHandoff(handoff.id, { status: "failed", toRunId: runId });
@@ -1528,7 +1557,7 @@ export class HearthScheduler {
       }
       this.service.updateRun(runId, taskId, {
         status: "completed", threadId: result.threadId, endedAt: new Date().toISOString(),
-        usage: result.usage, executorId, failure: null
+        usage: this.usageWithMetrics(result.usage, result.turns, result.toolCalls), executorId, failure: null
       });
       if (template && template.approvalKind !== "none") {
         if (!this.approvals) throw new Error("审批管理器未启动，无法安全执行外部动作");
@@ -1547,7 +1576,7 @@ export class HearthScheduler {
           error: null, resultSummary: result.finalResponse
         }, runId);
         this.refreshTaskSummary(taskId);
-        return { status: "completed", run: { ...run, status: "completed", threadId: result.threadId, usage: result.usage }, executorId, outDir, error: null, failure: null, aborted: controller.signal.aborted, leaseLost: false, cancelled: false, queuedFollowUp: true };
+        return { status: "completed", run: { ...run, status: "completed", threadId: result.threadId, usage: this.usageWithMetrics(result.usage, result.turns, result.toolCalls) }, executorId, outDir, error: null, failure: null, aborted: controller.signal.aborted, leaseLost: false, cancelled: false, queuedFollowUp: true };
       }
       const goal = task.goalId ? this.service.store.getGoal(task.goalId) : null;
       if (goal) {
@@ -1585,26 +1614,29 @@ export class HearthScheduler {
             disposition
           };
           if (report.verdict === "needs_human" || report.verdict === "blocked") {
-            this.service.updateGoal(goal.goalId, { currentState: report.verdict === "blocked" ? "blocked" : "awaiting_user" });
+            this.service.updateGoal(goal.goalId, {
+              currentState: report.verdict === "blocked" ? "blocked" : "awaiting_user",
+              nextHandoff: report.summary
+            });
             this.service.updateTask(taskId, {
               status: "waiting_input", currentRunId: runId,
               nextAction: report.verdict === "blocked" ? "外部动作结果未确定，请先对账" : "完成证据仍需人工确认",
               error: goalError
             }, runId);
             this.refreshTaskSummary(taskId, { lastFailure: goalError });
-            return { status: "waiting_input", run: { ...run, status: "completed", threadId: result.threadId, usage: result.usage }, executorId, outDir, error: null, failure: goalError, aborted: controller.signal.aborted, leaseLost: false, cancelled: false };
+            return { status: "waiting_input", run: { ...run, status: "completed", threadId: result.threadId, usage: this.usageWithMetrics(result.usage, result.turns, result.toolCalls) }, executorId, outDir, error: null, failure: goalError, aborted: controller.signal.aborted, leaseLost: false, cancelled: false };
           }
-          this.service.updateGoal(goal.goalId, { currentState: "active" });
+          this.service.updateGoal(goal.goalId, { currentState: "active", nextHandoff: report.summary });
           throw new Error(`完成判定失败：${report.summary}`);
         }
-        this.service.updateGoal(goal.goalId, { currentState: "done" });
+        this.service.updateGoal(goal.goalId, { currentState: "done", nextHandoff: "" });
       }
       this.service.updateTask(taskId, {
         status: "completed", currentRunId: runId, nextAction: "产物已保存",
         error: null, resultSummary: result.finalResponse
       }, runId);
       this.refreshTaskSummary(taskId);
-      return { status: "completed", run: { ...run, status: "completed", threadId: result.threadId, usage: result.usage }, executorId, outDir, error: null, failure: null, aborted: controller.signal.aborted, leaseLost: false, cancelled: false };
+      return { status: "completed", run: { ...run, status: "completed", threadId: result.threadId, usage: this.usageWithMetrics(result.usage, result.turns, result.toolCalls) }, executorId, outDir, error: null, failure: null, aborted: controller.signal.aborted, leaseLost: false, cancelled: false };
     } catch (error) {
       if (controller.signal.aborted && this.steering.has(taskId)) {
         this.service.updateRun(runId, taskId, { status: "cancelled", endedAt: new Date().toISOString(), failure: null });
@@ -1801,13 +1833,14 @@ export class HearthScheduler {
   }
 
   private finishWaitingInput(taskId: string, run: RunRecord, result: ExecutionOutcome): AttemptResult {
-    this.service.updateRun(run.id, taskId, { status: "waiting_input", endedAt: new Date().toISOString(), usage: result.usage, failure: null });
+    const usage = this.usageWithMetrics(result.usage, result.turns, result.toolCalls);
+    this.service.updateRun(run.id, taskId, { status: "waiting_input", endedAt: new Date().toISOString(), usage, failure: null });
     this.service.updateTask(taskId, {
       status: "waiting_input", currentRunId: run.id, nextAction: "等待你补充信息",
       error: null, resultSummary: result.question ?? result.finalResponse
     }, run.id);
       this.refreshTaskSummary(taskId);
-    return { status: "waiting_input", run: { ...run, status: "waiting_input", usage: result.usage }, executorId: run.executorId ?? "codex", outDir: this.outDirForRun(taskId, run), error: null, failure: null, aborted: false, leaseLost: false, cancelled: false };
+    return { status: "waiting_input", run: { ...run, status: "waiting_input", usage }, executorId: run.executorId ?? "codex", outDir: this.outDirForRun(taskId, run), error: null, failure: null, aborted: false, leaseLost: false, cancelled: false };
   }
 
   private markRunFailed(taskId: string, runId: string, error: unknown, aborted: boolean, leaseEpoch: number): { failure: TaskError | null; cancelled: boolean; leaseLost: boolean } {
@@ -2143,18 +2176,154 @@ export class HearthScheduler {
   }
 
   private remainingBudget(taskId: string): RunBudget {
-    const runs = this.service.store.listRuns(taskId);
-    const usedTokens = runs.reduce((sum, run) => sum + (run.usage?.inputTokens ?? 0) + (run.usage?.outputTokens ?? 0), 0);
-    const usedMs = runs.reduce((sum, run) => {
-      if (!run.startedAt || !run.endedAt) return sum;
-      return sum + Math.max(0, Date.parse(run.endedAt) - Date.parse(run.startedAt));
-    }, 0);
+    const task = this.service.requireTask(taskId);
+    const goal = task.goalId ? this.service.store.getGoal(task.goalId) : null;
+    const runs = goal ? this.goalRuns(goal.goalId) : this.service.store.listRuns(taskId);
+    const used = this.usageForRuns(runs);
+    const goalBudget = goal?.budget ?? {};
+    const maxTurns = Math.min(goalBudget.maxTurns ?? this.runBudget.maxTurns, this.runBudget.maxTurns);
+    const maxToolCalls = Math.min(goalBudget.maxToolCalls ?? this.runBudget.maxToolCalls, this.runBudget.maxToolCalls);
+    const maxTokens = Math.min(goalBudget.maxTokens ?? this.runBudget.maxTokens, this.runBudget.maxTokens);
+    const maxDurationMs = Math.min(goalBudget.maxDurationMs ?? this.runBudget.maxDurationMs, this.runBudget.maxDurationMs);
     return {
-      maxTurns: Math.max(1, this.runBudget.maxTurns - runs.length),
-      maxToolCalls: this.runBudget.maxToolCalls,
-      maxTokens: Math.max(1, this.runBudget.maxTokens - usedTokens),
-      maxDurationMs: Math.max(1_000, this.runBudget.maxDurationMs - usedMs)
+      maxTurns: Math.max(0, maxTurns - used.turns),
+      maxToolCalls: Math.max(0, maxToolCalls - used.toolCalls),
+      maxTokens: Math.max(0, maxTokens - used.tokens),
+      maxDurationMs: Math.max(0, maxDurationMs - used.durationMs)
     };
+  }
+
+  private goalRuns(goalId: string): RunRecord[] {
+    return this.goalTasks(goalId).flatMap((task) => this.service.store.listRuns(task.id));
+  }
+
+  private usageForRuns(runs: RunRecord[]): { tokens: number; turns: number; toolCalls: number; durationMs: number } {
+    const now = Date.now();
+    return runs.reduce((usage, run) => {
+      const endedAt = run.endedAt ? Date.parse(run.endedAt) : null;
+      const startedAt = run.startedAt ? Date.parse(run.startedAt) : null;
+      const durationMs = startedAt === null || !Number.isFinite(startedAt)
+        ? 0
+        : Math.max(0, (endedAt !== null && Number.isFinite(endedAt) ? endedAt : now) - startedAt);
+      return {
+        tokens: usage.tokens + (run.usage?.inputTokens ?? 0) + (run.usage?.outputTokens ?? 0),
+        turns: usage.turns + Math.max(0, run.usage?.turns ?? (run.status === "running" ? 0 : 1)),
+        toolCalls: usage.toolCalls + Math.max(0, run.usage?.toolCalls ?? 0),
+        durationMs: usage.durationMs + durationMs
+      };
+    }, { tokens: 0, turns: 0, toolCalls: 0, durationMs: 0 });
+  }
+
+  private goalBoundaryStop(task: TaskRecord, failure: TaskError | null = null): GoalBoundaryStop | null {
+    if (!task.goalId) return null;
+    const goal = this.service.store.getGoal(task.goalId);
+    if (!goal || goal.currentState === "done" || goal.currentState === "cancelled") return null;
+    const runs = this.goalRuns(goal.goalId);
+    const used = this.usageForRuns(runs);
+    const deadline = goal.deadline ? Date.parse(goal.deadline) : Number.NaN;
+    if (Number.isFinite(deadline) && deadline <= Date.now()) {
+      return {
+        code: "deadline_reached",
+        currentState: "awaiting_user",
+        message: `Goal「${goal.title}」已超过截止时间 ${goal.deadline}，不能继续自动执行`,
+        nextAction: "Goal 已超过截止时间，等待调整期限或终止",
+        handoff: `截止时间已到（${goal.deadline}）。已完成 ${runs.length} 轮；下一步：请用户调整 deadline、缩小目标，或确认终止。`,
+        failureClass: "budget_exhausted",
+        cause: "budget"
+      };
+    }
+
+    const goalBudget = goal.budget;
+    const maxTurns = Math.min(goalBudget.maxTurns ?? this.runBudget.maxTurns, this.runBudget.maxTurns);
+    const maxToolCalls = Math.min(goalBudget.maxToolCalls ?? this.runBudget.maxToolCalls, this.runBudget.maxToolCalls);
+    const maxTokens = Math.min(goalBudget.maxTokens ?? this.runBudget.maxTokens, this.runBudget.maxTokens);
+    const maxDurationMs = Math.min(goalBudget.maxDurationMs ?? this.runBudget.maxDurationMs, this.runBudget.maxDurationMs);
+    const exhausted = [
+      used.turns >= maxTurns ? `轮次 ${used.turns}/${maxTurns}` : null,
+      used.toolCalls >= maxToolCalls ? `工具调用 ${used.toolCalls}/${maxToolCalls}` : null,
+      used.tokens >= maxTokens ? `tokens ${used.tokens}/${maxTokens}` : null,
+      used.durationMs >= maxDurationMs ? `时长 ${Math.round(used.durationMs / 1000)}s/${Math.round(maxDurationMs / 1000)}s` : null
+    ].filter((item): item is string => item !== null);
+    if (exhausted.length > 0) {
+      return {
+        code: "budget_exhausted",
+        currentState: "awaiting_user",
+        message: `Goal「${goal.title}」预算已耗尽：${exhausted.join("，")}`,
+        nextAction: "Goal 预算已耗尽，等待调整预算或人工接手",
+        handoff: `预算已耗尽（${exhausted.join("，")}）。已完成 ${runs.length} 轮；下一步：检查已证明阶段，调整 budget 后继续，或由用户接手。`,
+        failureClass: "budget_exhausted",
+        cause: "budget"
+      };
+    }
+
+    const goalEffects = this.goalTasks(goal.goalId).flatMap((item) => this.service.store.listEffects(item.id));
+    const unresolved = goalEffects.filter((effect) => effect.status === "executing" || effect.status === "uncertain");
+    if (unresolved.length > 0) {
+      return {
+        code: "effect_uncertain",
+        currentState: "blocked",
+        message: `Goal「${goal.title}」存在未结算外部动作：${unresolved.map((effect) => effect.id).join("、")}`,
+        nextAction: "外部动作结果未确定，请先完成对账",
+        handoff: `外部动作 ${unresolved.map((effect) => effect.id).join("、")} 状态未知；下一步：先完成 reconcile，确认 committed 或 absent 后再继续。`,
+        failureClass: "effect_unknown",
+        cause: "effect_uncertain"
+      };
+    }
+
+    const conditions = new Set(goal.stopConditions.map((condition) => condition.trim().toLowerCase()));
+    const taskFailure = failure ?? task.error;
+    if (conditions.has("task_failed") && taskFailure) {
+      return {
+        code: "declared_stop",
+        currentState: "awaiting_user",
+        message: `Goal「${goal.title}」命中停止条件 task_failed：${taskFailure.message}`,
+        nextAction: "Goal 命中停止条件，等待你决定是否继续",
+        handoff: `命中停止条件 task_failed。上一步失败：${taskFailure.message}；下一步：确认原因、补充授权或调整目标后再继续。`,
+        failureClass: "validation_failed",
+        cause: "unknown"
+      };
+    }
+    const latestApproval = this.service.store.listApprovals(task.id).at(-1);
+    if (conditions.has("approval_rejected") && latestApproval?.status === "rejected") {
+      return {
+        code: "declared_stop",
+        currentState: "awaiting_user",
+        message: `Goal「${goal.title}」命中停止条件 approval_rejected`,
+        nextAction: "审批已被拒绝，等待你调整方案或目标",
+        handoff: "命中停止条件 approval_rejected。下一步：不要重试同一动作，先由用户调整范围或授权。",
+        failureClass: "policy_denied",
+        cause: "permission"
+      };
+    }
+    return null;
+  }
+
+  private goalTasks(goalId: string): TaskRecord[] {
+    return this.service.store.listTasks().filter((task) => task.goalId === goalId);
+  }
+
+  private enforceGoalBoundary(task: TaskRecord, failure: TaskError | null = null): boolean {
+    const stop = this.goalBoundaryStop(task, failure);
+    const goal = task.goalId ? this.service.store.getGoal(task.goalId) : null;
+    if (!stop || !goal) return false;
+    const handoff = goal.nextHandoff?.trim() || stop.handoff;
+    this.service.updateGoal(goal.goalId, { currentState: stop.currentState, nextHandoff: handoff });
+    const error: TaskError = {
+      kind: `goal_${stop.code}`,
+      message: stop.message,
+      recoverable: true,
+      guidance: stop.code === "effect_uncertain" ? "先完成外部动作对账，再重新开始任务" : "调整 Goal 的预算或截止时间后重试",
+      cause: stop.cause,
+      failureClass: stop.failureClass,
+      disposition: { type: "handoff", note: handoff }
+    };
+    const status = task.status === "running" || task.status === "waiting_approval" ? "waiting_input" : "recoverable";
+    this.service.updateTask(task.id, {
+      status, currentRunId: task.currentRunId,
+      nextAction: stop.nextAction, error, resultSummary: stop.message
+    }, task.currentRunId ?? undefined);
+    this.refreshTaskSummary(task.id, { lastFailure: error });
+    return true;
   }
 
   private selectHandoffTarget(input: {

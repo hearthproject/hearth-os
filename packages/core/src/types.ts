@@ -475,6 +475,8 @@ export interface RunUsage {
   cacheWriteInputTokens: number;
   outputTokens: number;
   reasoningOutputTokens: number;
+  turns?: number;
+  toolCalls?: number;
 }
 
 export interface RunRecord {
