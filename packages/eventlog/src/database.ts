@@ -2715,6 +2715,7 @@ export class HearthStore {
       case "delegation.failed":
       case "delegation.cancelled":
       case "delegation.retried":
+      case "delegation.requeued":
       case "delegation.orphaned": {
         this.createDelegationJob(event.payload as DelegationJob);
         return;

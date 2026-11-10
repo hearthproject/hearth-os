@@ -211,6 +211,34 @@ export class DelegationService {
     return updated ?? job;
   }
 
+  heartbeat(jobId: string, owner: string, ttlMs = 30_000): DelegationJob {
+    const job = this.require(jobId);
+    if (!["leased", "running"].includes(job.status)) return job;
+    this.assertLease(job, owner);
+    const now = this.now();
+    const updated = this.service.store.updateDelegationJob(job.id, {
+      lease: {
+        owner,
+        expiresAt: new Date(now.getTime() + Math.max(1_000, ttlMs)).toISOString()
+      },
+      updatedAt: now.toISOString()
+    });
+    return updated ?? job;
+  }
+
+  requeue(jobId: string, owner: string): DelegationJob {
+    const job = this.require(jobId);
+    if (!["leased", "running"].includes(job.status)) return job;
+    this.assertLease(job, owner);
+    const updated = this.service.store.updateDelegationJob(job.id, {
+      status: "queued",
+      lease: null,
+      updatedAt: this.now().toISOString()
+    });
+    this.emit("delegation.requeued", updated ?? job);
+    return updated ?? job;
+  }
+
   complete(jobId: string, result: DelegationResult): DelegationJob {
     const job = this.require(jobId);
     if (!["leased", "running"].includes(job.status)) {

@@ -209,6 +209,19 @@ describe("DelegationService", () => {
     });
     expect(delegations.fail(job.id, "重复失败", false)).toEqual(failed);
   });
+
+  it("heartbeats a lease and requeues a paused child", () => {
+    const parent = createParent(service, root);
+    const job = delegations.create(input(parent.id, "heartbeat-1"));
+    delegations.lease(job.id, "worker-a", 10_000);
+    now = new Date("2026-11-10T03:00:05.000Z");
+    const heartbeated = delegations.heartbeat(job.id, "worker-a", 20_000);
+
+    expect(heartbeated.lease?.expiresAt).toBe("2026-11-10T03:00:25.000Z");
+    const requeued = delegations.requeue(job.id, "worker-a");
+    expect(requeued).toMatchObject({ status: "queued", lease: null });
+    expect(() => delegations.assertEffectAllowed(job.childTaskId ?? "")).not.toThrow();
+  });
 });
 
 function createParent(service: HearthService, root: string, permissions = {
