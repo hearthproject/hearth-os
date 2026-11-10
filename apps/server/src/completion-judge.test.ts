@@ -94,7 +94,7 @@ describe("completion judge", () => {
     execFileSync("git", ["add", "README.md"], { cwd: root });
     execFileSync("git", ["commit", "-m", "test"], { cwd: root, stdio: "ignore" });
     const goal = createGoal(service, "auto", [
-      { id: "tests", description: "测试通过", validator: "command", check: "node -e \"process.exit(0)\"", required: true },
+      { id: "tests", description: "测试通过", validator: "command", check: JSON.stringify({ executable: "node", args: ["-e", "process.exit(0)"] }), required: true },
       { id: "branch", description: "分支正确", validator: "git", check: "branch=main", required: true },
       { id: "clean", description: "工作区干净", validator: "git", check: "clean", required: true }
     ], []);
@@ -105,12 +105,17 @@ describe("completion judge", () => {
     expect(report.verdict).toBe("pass");
     expect(report.criteria.map((criterion) => criterion.status)).toEqual(["passed", "passed", "passed"]);
     expect(report.evidenceRefs.some((ref) => ref.startsWith("command:sha256="))).toBe(true);
+    expect(report.evidenceRefs.some((ref) => ref.startsWith("action:"))).toBe(true);
+    expect(report.evidenceRefs).toContain("sandbox:local");
     expect(report.evidenceRefs).toContain("git:branch=main");
   });
 
   it("fails a command validator with a non-zero exit code", async () => {
     const goal = createGoal(service, "auto", [
-      { id: "failing", description: "测试必须失败", validator: "command", check: "node -e \"process.exit(7)\"", required: true }
+      {
+        id: "failing", description: "测试必须失败", validator: "command",
+        check: JSON.stringify({ executable: "node", args: ["-e", "process.exit(7)"] }), required: true
+      }
     ], []);
     const task = service.createTask({ title: "失败验收", goalId: goal.goalId, executorId: "native" });
 
@@ -119,6 +124,33 @@ describe("completion judge", () => {
     expect(report.verdict).toBe("fail");
     expect(report.criteria[0]).toMatchObject({ status: "failed" });
     expect(report.criteria[0]?.detail).toContain("退出码 7");
+  });
+
+  it("rejects free-form shell command validators", async () => {
+    const goal = createGoal(service, "auto", [
+      { id: "freeform", description: "不应执行 shell", validator: "command", check: "node -e \"process.exit(0)\"", required: true }
+    ], []);
+    const task = service.createTask({ title: "拒绝自由 shell", goalId: goal.goalId, executorId: "native" });
+
+    const report = await judgeCompletion({ goal, task, artifacts: [], effects: [], workspaceRoot: root });
+
+    expect(report.verdict).toBe("fail");
+    expect(report.criteria[0]?.detail).toContain("结构化 JSON");
+  });
+
+  it("rejects a command validator whose cwd escapes the workspace", async () => {
+    const goal = createGoal(service, "auto", [
+      {
+        id: "escape", description: "不能越界", validator: "command",
+        check: JSON.stringify({ executable: "node", args: ["-e", "process.exit(0)"], cwd: ".." }), required: true
+      }
+    ], []);
+    const task = service.createTask({ title: "拒绝路径逃逸", goalId: goal.goalId, executorId: "native" });
+
+    const report = await judgeCompletion({ goal, task, artifacts: [], effects: [], workspaceRoot: root });
+
+    expect(report.verdict).toBe("fail");
+    expect(report.criteria[0]?.detail).toContain("超出会话根目录");
   });
 
   it("requires human review even when all criteria pass", async () => {

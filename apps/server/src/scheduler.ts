@@ -102,6 +102,7 @@ export interface SchedulerOptions {
   contextBlobRoot?: string | undefined;
   methods?: MethodService | undefined;
   autoLearn?: boolean | undefined;
+  sandbox?: SandboxService | undefined;
   completionValidators?: Record<string, GoalValidatorRunner> | undefined;
 }
 
@@ -130,6 +131,7 @@ export class HearthScheduler {
   private readonly memory: MemoryService;
   private readonly methods: MethodService;
   private readonly autoLearn: boolean;
+  private readonly sandbox: SandboxService;
   private readonly completionValidators: Record<string, GoalValidatorRunner> | null;
   private readonly context: ContextService;
   private readonly projector: ContextProjector;
@@ -194,9 +196,10 @@ export class HearthScheduler {
       if (this.context.settings().mode !== "off") this.context.recordChatMessage(message);
     });
     this.leases = options.leases ?? new TaskLeaseService(this.service);
+    this.sandbox = options.sandbox ?? new SandboxService();
     this.delegations = options.delegations ?? new DelegationService({
       service: this.service,
-      sandbox: new SandboxService()
+      sandbox: this.sandbox
     });
     this.leaseHeartbeatMs = Math.max(50, options.leaseHeartbeatMs ?? DEFAULT_LEASE_HEARTBEAT_MS);
   }
@@ -1590,6 +1593,7 @@ export class HearthScheduler {
           artifacts: goalArtifacts,
           effects: goalEffects,
           workspaceRoot: prepared.root,
+          sandbox: this.sandbox,
           ...(this.completionValidators ? { validators: this.completionValidators } : {})
         });
         this.service.recordCompletionReport(report);

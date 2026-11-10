@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { exec, execFile } from "node:child_process";
+import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import type {
   ArtifactRecord,
@@ -10,6 +10,8 @@ import type {
   GoalCriterionResult,
   TaskRecord
 } from "@hearth/core";
+import { ActionResolutionError, resolveAction } from "./action-resolver.ts";
+import { SandboxError, SandboxService } from "./sandbox.ts";
 
 export interface GoalValidatorContext {
   goal: GoalContract;
@@ -37,6 +39,7 @@ export interface CompletionJudgeInput {
   workspaceRoot?: string | null;
   observedActions?: string[];
   validators?: Record<string, GoalValidatorRunner>;
+  sandbox?: SandboxService;
   now?: Date;
 }
 
@@ -117,7 +120,9 @@ async function evaluateCriterion(input: CompletionJudgeInput, criterion: GoalCri
   if (criterion.validator === "schema") return evaluateSchemaCriterion(criterion, artifact);
 
   const custom = input.validators?.[criterion.id];
-  if (!custom && criterion.validator === "command") return evaluateCommandCriterion(criterion, context.workspaceRoot);
+  if (!custom && criterion.validator === "command") {
+    return evaluateCommandCriterion(criterion, context, input.sandbox ?? new SandboxService());
+  }
   if (!custom && criterion.validator === "git") return evaluateGitCriterion(criterion, context.workspaceRoot);
   if (!custom) {
     return {
@@ -145,19 +150,77 @@ async function evaluateCriterion(input: CompletionJudgeInput, criterion: GoalCri
   }
 }
 
-async function evaluateCommandCriterion(criterion: GoalCriterion, workspaceRoot: string | null): Promise<GoalCriterionResult> {
+interface GoalCommandSpec {
+  executable: string;
+  args: string[];
+  cwd?: string;
+  env: Record<string, string>;
+  timeoutMs: number;
+}
+
+async function evaluateCommandCriterion(
+  criterion: GoalCriterion,
+  context: GoalValidatorContext,
+  sandbox: SandboxService
+): Promise<GoalCriterionResult> {
+  const workspaceRoot = context.workspaceRoot;
   if (!workspaceRoot) return notRun(criterion, "命令 validator 没有可用的工作区");
-  const commandHash = createHash("sha256").update(criterion.check).digest("hex");
-  const result = await runShell(criterion.check, workspaceRoot);
-  if (result.code !== 0) {
-    return failed(criterion.id, `命令校验失败（退出码 ${result.code}）：${outputTail(result)}`);
+  const parsed = parseCommandSpec(criterion.check);
+  if (!parsed.ok) return failed(criterion.id, parsed.detail);
+  try {
+    const action = resolveAction({
+      proposal: {
+        kind: "shell",
+        summary: `Goal criterion ${criterion.id}`,
+        command: {
+          executable: parsed.spec.executable,
+          argv: parsed.spec.args,
+          env: parsed.spec.env,
+          ...(parsed.spec.cwd ? { cwd: parsed.spec.cwd } : {})
+        }
+      },
+      sessionRoot: workspaceRoot,
+      permissionMode: "workspace"
+    });
+    if (!action.command) return failed(criterion.id, "命令 validator 没有解析出可执行命令");
+    const permissions = context.task.permissions ?? {
+      readRoots: [workspaceRoot],
+      writeRoots: [],
+      networkHosts: [],
+      tools: []
+    };
+    const decision = sandbox.evaluate({
+      workspaceRoot,
+      permissions,
+      allowedProcesses: [action.command.executableRealPath]
+    }, {
+      cwd: action.command.cwdRealPath,
+      readPaths: [workspaceRoot],
+      process: action.command.executableRealPath
+    });
+    const result = await runFile(action.command.executableRealPath, action.command.argv, action.command.cwdRealPath, {
+      timeoutMs: parsed.spec.timeoutMs,
+      env: commandEnvironment(action.command.env)
+    });
+    if (result.code !== 0) {
+      return failed(criterion.id, `命令校验失败（退出码 ${result.code}）：${outputTail(result)}`);
+    }
+    return {
+      criterionId: criterion.id,
+      status: "passed",
+      evidenceRefs: [
+        `command:sha256=${action.command.executableSha256}:exit=0`,
+        `action:${action.actionDigest}`,
+        `sandbox:${decision.backend}`
+      ],
+      detail: `结构化命令校验通过（退出码 0，沙箱 ${decision.backend}）`
+    };
+  } catch (error) {
+    if (error instanceof ActionResolutionError || error instanceof SandboxError) {
+      return failed(criterion.id, `命令未通过动作或沙箱检查：${error.message}`);
+    }
+    return failed(criterion.id, `命令校验无法执行：${error instanceof Error ? error.message : String(error)}`);
   }
-  return {
-    criterionId: criterion.id,
-    status: "passed",
-    evidenceRefs: [`command:sha256=${commandHash}:exit=0`],
-    detail: "命令校验通过（退出码 0）"
-  };
 }
 
 async function evaluateGitCriterion(criterion: GoalCriterion, workspaceRoot: string | null): Promise<GoalCriterionResult> {
@@ -204,48 +267,91 @@ async function evaluateGitCriterion(criterion: GoalCriterion, workspaceRoot: str
       detail: `Git HEAD 匹配：${actual}`
     };
   }
-  const result = await runShell(`git ${criterion.check}`, workspaceRoot);
-  if (result.code !== 0) return failed(criterion.id, `Git 校验命令失败（退出码 ${result.code}）：${outputTail(result)}`);
+  return failed(criterion.id, "不支持的 Git 检查；只允许 clean、branch=<name> 或 head=<sha>，不接受自由 shell");
+}
+
+function parseCommandSpec(check: string): { ok: true; spec: GoalCommandSpec } | { ok: false; detail: string } {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(check);
+  } catch {
+    return {
+      ok: false,
+      detail: "命令 validator 必须使用结构化 JSON，例如 {\"executable\":\"node\",\"args\":[\"--test\"]}；不接受自由 shell 字符串"
+    };
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, detail: "命令 validator 的 check 必须是 JSON 对象" };
+  }
+  const value = raw as Record<string, unknown>;
+  if (typeof value.executable !== "string" || !value.executable.trim()) {
+    return { ok: false, detail: "命令 validator 缺少 executable" };
+  }
+  if ("shell" in value || "command" in value) {
+    return { ok: false, detail: "命令 validator 不接受 shell 或 command 字段，只允许 executable、args、cwd、env、timeoutMs" };
+  }
+  const args = value.args ?? [];
+  if (!Array.isArray(args) || args.some((arg) => typeof arg !== "string") || args.length > 128) {
+    return { ok: false, detail: "命令 validator 的 args 必须是最多 128 个字符串" };
+  }
+  const env = value.env ?? {};
+  if (!env || typeof env !== "object" || Array.isArray(env) || Object.values(env).some((item) => typeof item !== "string")) {
+    return { ok: false, detail: "命令 validator 的 env 必须是字符串键值对象" };
+  }
+  const timeoutMs = value.timeoutMs ?? 120_000;
+  if (typeof timeoutMs !== "number" || !Number.isInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 120_000) {
+    return { ok: false, detail: "命令 validator 的 timeoutMs 必须是 1000–120000 的整数" };
+  }
+  if (value.cwd !== undefined && (typeof value.cwd !== "string" || !value.cwd.trim())) {
+    return { ok: false, detail: "命令 validator 的 cwd 必须是非空字符串" };
+  }
   return {
-    criterionId: criterion.id,
-    status: "passed",
-    evidenceRefs: [`git:command:sha256=${createHash("sha256").update(criterion.check).digest("hex")}:exit=0`],
-    detail: "Git 校验命令通过（退出码 0）"
+    ok: true,
+    spec: {
+      executable: value.executable.trim(),
+      args: args as string[],
+      ...(typeof value.cwd === "string" ? { cwd: value.cwd } : {}),
+      env: env as Record<string, string>,
+      timeoutMs
+    }
   };
 }
 
-function runShell(command: string, cwd: string): Promise<{ code: number; stdout: string; stderr: string }> {
-  return new Promise((resolve) => {
-    exec(command, {
-      cwd,
-      timeout: 120_000,
-      maxBuffer: 2 * 1024 * 1024,
-      windowsHide: true,
-      encoding: "utf8",
-      env: process.env
-    }, (error, stdout, stderr) => {
-      const code = error && typeof (error as { code?: unknown }).code === "number"
-        ? (error as { code: number }).code
-        : error ? 1 : 0;
-      resolve({ code, stdout: stdout ?? "", stderr: stderr ?? "" });
-    });
-  });
+function commandEnvironment(extra: Record<string, string>): NodeJS.ProcessEnv {
+  const allowed = new Set([
+    "PATH", "PATHEXT", "SystemRoot", "SYSTEMROOT", "WINDIR", "COMSPEC", "ComSpec",
+    "TEMP", "TMP", "TMPDIR", "HOME", "USERPROFILE", "LANG", "LC_ALL"
+  ]);
+  const base: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined && allowed.has(key)) base[key] = value;
+  }
+  return { ...base, ...extra };
 }
 
-function runFile(file: string, args: string[], cwd: string): Promise<{ code: number; stdout: string; stderr: string }> {
+function runFile(
+  file: string,
+  args: string[],
+  cwd: string,
+  options: { timeoutMs: number; env: NodeJS.ProcessEnv } = { timeoutMs: 30_000, env: commandEnvironment({}) }
+): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     execFile(file, args, {
       cwd,
-      timeout: 30_000,
+      timeout: options.timeoutMs,
       maxBuffer: 2 * 1024 * 1024,
       windowsHide: true,
       encoding: "utf8",
-      env: process.env
+      env: options.env
     }, (error, stdout, stderr) => {
       const code = error && typeof (error as { code?: unknown }).code === "number"
         ? (error as { code: number }).code
         : error ? 1 : 0;
-      resolve({ code, stdout: stdout ?? "", stderr: stderr ?? "" });
+      resolve({
+        code,
+        stdout: stdout ?? "",
+        stderr: [stderr ?? "", error?.message ?? ""].filter(Boolean).join("\n")
+      });
     });
   });
 }
