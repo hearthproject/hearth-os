@@ -356,6 +356,79 @@ describe("HearthStore", () => {
     store.close();
   });
 
+  it("soft deletes conversations with their tasks and restores the linked batch", () => {
+    const store = new HearthStore(":memory:");
+    const conversation = store.createConversation("可恢复对话");
+    const linkedTask = { ...task("task-linked"), conversationId: conversation.id };
+    store.appendEvent({ type: "task.created", taskId: linkedTask.id, payload: linkedTask });
+    store.createChatMessage({
+      id: "message-1",
+      conversationId: conversation.id,
+      role: "user",
+      content: "保留这条消息直到彻底删除",
+      taskId: linkedTask.id,
+      attachments: [],
+      createdAt: "2026-11-07T00:00:00.000Z"
+    });
+
+    const deleted = store.softDeleteConversation(conversation.id);
+    expect(deleted?.taskIds).toEqual([linkedTask.id]);
+    expect(store.getConversation(conversation.id)).toBeNull();
+    expect(store.getTask(linkedTask.id)).toBeNull();
+    expect(store.listTrash()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "conversation", id: conversation.id, trashBatchId: deleted?.batchId }),
+      expect.objectContaining({ kind: "task", id: linkedTask.id, trashBatchId: deleted?.batchId })
+    ]));
+    expect(store.listChatMessages(conversation.id)).toHaveLength(1);
+
+    const restored = store.restoreConversation(conversation.id);
+    expect(restored?.taskIds).toEqual([linkedTask.id]);
+    expect(store.getConversation(conversation.id)?.deletedAt).toBeNull();
+    expect(store.getTask(linkedTask.id)?.deletedAt).toBeNull();
+    expect(store.listTrash()).toEqual([]);
+    store.close();
+  });
+
+  it("restores a deleted parent conversation with a deleted task", () => {
+    const store = new HearthStore(":memory:");
+    const conversation = store.createConversation("父对话");
+    const linkedTask = { ...task("task-parent"), conversationId: conversation.id };
+    store.appendEvent({ type: "task.created", taskId: linkedTask.id, payload: linkedTask });
+    store.softDeleteConversation(conversation.id);
+
+    const restored = store.restoreTask(linkedTask.id);
+    expect(restored?.conversationId).toBe(conversation.id);
+    expect(store.getTask(linkedTask.id)?.deletedAt).toBeNull();
+    expect(store.getConversation(conversation.id)?.deletedAt).toBeNull();
+    expect(store.listTrash()).toEqual([]);
+    store.close();
+  });
+
+  it("filters trash by 7, 15 and 30 day age buckets", () => {
+    const path = tempDb();
+    const store = new HearthStore(path);
+    const oldConversation = store.createConversation("30 天前");
+    const recentConversation = store.createConversation("刚刚删除");
+    store.softDeleteConversation(oldConversation.id);
+    store.softDeleteConversation(recentConversation.id);
+    store.close();
+
+    const raw = new DatabaseSync(path);
+    const oldAt = new Date(Date.now() - 40 * 24 * 60 * 60_000).toISOString();
+    raw.prepare("UPDATE conversations SET deleted_at = ? WHERE id = ?").run(oldAt, oldConversation.id);
+    raw.close();
+
+    const reopened = new HearthStore(path);
+    for (const days of [7, 15, 30]) {
+      expect(reopened.listTrash("all", days).map((item) => item.id)).toEqual([oldConversation.id]);
+    }
+    expect(reopened.listTrash("all", null).map((item) => item.id)).toEqual(
+      expect.arrayContaining([oldConversation.id, recentConversation.id])
+    );
+    expect(reopened.listTrash("task", null)).toEqual([]);
+    reopened.close();
+  });
+
   it("overwrites a model profile API key with null instead of keeping the old cipher", () => {
     const store = new HearthStore(":memory:");
     const record = {
