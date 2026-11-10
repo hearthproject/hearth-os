@@ -315,6 +315,22 @@ const methodTrialSchema = z.object({ taskId: z.string().trim().min(1).max(100) }
 const methodRollbackSchema = z.object({ reason: z.string().trim().min(1).max(1000) }).strict();
 const methodRejectSchema = z.object({ reason: z.string().trim().max(1000).optional() }).strict();
 const skillExportSchema = z.object({ methodId: z.string().trim().min(1).max(100) }).strict();
+const skillImportSchema = z.object({
+  content: z.string().min(1).max(200_000),
+  origin: z.enum(["imported", "user"]).optional()
+}).strict();
+const skillTrialSchema = z.object({
+  taskIds: z.array(z.string().trim().min(1).max(100)).min(1).max(50)
+}).strict();
+const skillCheckSchema = z.object({
+  taskId: z.string().trim().min(1).max(100),
+  readPaths: z.array(z.string().trim().min(1).max(2000)).max(100).optional(),
+  writePaths: z.array(z.string().trim().min(1).max(2000)).max(100).optional(),
+  networkHosts: z.array(z.string().trim().min(1).max(300)).max(100).optional(),
+  tools: z.array(z.string().trim().min(1).max(200)).max(100).optional(),
+  allowImported: z.boolean().optional()
+}).strict();
+const skillPermissionQuerySchema = z.object({ taskId: z.string().trim().min(1).max(100) }).strict();
 const skillPinSchema = z.object({ pinned: z.boolean() }).strict();
 const skillArchiveSchema = z.object({ reason: z.string().trim().max(1000).optional() }).strict();
 const skillTransitionSchema = z.object({
@@ -1526,6 +1542,76 @@ export async function buildServer(options: BuildServerOptions = {}) {
     try {
       const exported = skills.exportMethod(parsed.data.methodId);
       return reply.code(201).send({ package: exported, skill: skills.getSkill(exported.id) });
+    } catch (error) {
+      return sendSkillError(reply, error);
+    }
+  });
+
+  app.post("/api/skills/import", async (request, reply) => {
+    const parsed = skillImportSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_IMPORT", message: "技能导入参数不正确" });
+    try {
+      const imported = skills.importPackage(parsed.data.content, parsed.data.origin ?? "imported");
+      return reply.code(201).send(imported);
+    } catch (error) {
+      return sendSkillError(reply, error);
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/api/skills/:id/permissions", async (request, reply) => {
+    const parsed = skillPermissionQuerySchema.safeParse(request.query ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_PERMISSION_QUERY", message: "技能权限查询参数不正确" });
+    try {
+      return {
+        effective: skills.effectivePermissions(request.params.id, parsed.data.taskId),
+        changes: skills.permissionChanges(request.params.id)
+      };
+    } catch (error) {
+      return sendSkillError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/skills/:id/trials", async (request, reply) => {
+    const parsed = skillTrialSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_TRIAL", message: "技能试跑参数不正确" });
+    try {
+      return skills.setTrialTasks(request.params.id, parsed.data.taskIds);
+    } catch (error) {
+      return sendSkillError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/skills/:id/check", async (request, reply) => {
+    const parsed = skillCheckSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_CHECK", message: "技能执行检查参数不正确" });
+    try {
+      const permissionRequest = {
+        ...(parsed.data.readPaths ? { readPaths: parsed.data.readPaths } : {}),
+        ...(parsed.data.writePaths ? { writePaths: parsed.data.writePaths } : {}),
+        ...(parsed.data.networkHosts ? { networkHosts: parsed.data.networkHosts } : {}),
+        ...(parsed.data.tools ? { tools: parsed.data.tools } : {})
+      };
+      return skills.checkExecution(request.params.id, parsed.data.taskId, permissionRequest, {
+        allowImported: parsed.data.allowImported === true
+      });
+    } catch (error) {
+      return sendSkillError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/skills/:id/authorize", async (request, reply) => {
+    const parsed = skillCheckSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_AUTHORIZE", message: "技能授权参数不正确" });
+    try {
+      const permissionRequest = {
+        ...(parsed.data.readPaths ? { readPaths: parsed.data.readPaths } : {}),
+        ...(parsed.data.writePaths ? { writePaths: parsed.data.writePaths } : {}),
+        ...(parsed.data.networkHosts ? { networkHosts: parsed.data.networkHosts } : {}),
+        ...(parsed.data.tools ? { tools: parsed.data.tools } : {})
+      };
+      return skills.assertExecution(request.params.id, parsed.data.taskId, permissionRequest, {
+        allowImported: parsed.data.allowImported === true
+      });
     } catch (error) {
       return sendSkillError(reply, error);
     }

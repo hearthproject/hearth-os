@@ -22,6 +22,7 @@ import type {
   SkillResourceRef,
   SkillStatus,
   SkillVersion,
+  TaskPermissions,
   TaskRecord
 } from "@hearth/core";
 import type { MethodService } from "./methods.ts";
@@ -35,6 +36,17 @@ import {
   skillIdFromName,
   SkillPackageError
 } from "./skill-package.ts";
+import {
+  assertSkillScriptPath,
+  auditSkillInstructions,
+  effectiveSkillPermissions,
+  evaluateSkillExecution,
+  formatPermissionDiff,
+  skillPermissionDiff,
+  type SkillPermissionDecision,
+  type SkillPermissionDiff,
+  type SkillPermissionRequest
+} from "./skill-permissions.ts";
 
 const SKILL_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 
@@ -80,6 +92,166 @@ export class SkillPackageService {
   versions(id: string): SkillVersion[] {
     this.requireSkill(id);
     return this.service.store.listSkillVersions(id);
+  }
+
+  permissionChanges(id: string): SkillPermissionDiff | null {
+    const skill = this.requireSkill(id);
+    const previous = this.service.store.listSkillVersions(id)[0];
+    return previous ? skillPermissionDiff(previous.manifest, skill.manifest) : null;
+  }
+
+  effectivePermissions(id: string, taskId: string): TaskPermissions {
+    const skill = this.requireSkill(id);
+    const task = this.requireTask(taskId);
+    return effectiveSkillPermissions(skill, task);
+  }
+
+  checkExecution(
+    id: string,
+    taskId: string,
+    request: SkillPermissionRequest = {},
+    options: { allowImported?: boolean } = {}
+  ): SkillPermissionDecision {
+    const skill = this.requireSkill(id);
+    const task = this.requireTask(taskId);
+    let contentVerified = true;
+    let safetyFindings: ReturnType<typeof auditSkillInstructions> = [];
+    try {
+      const document = this.readDocument(id);
+      safetyFindings = auditSkillInstructions(document.body);
+    } catch (error) {
+      if (error instanceof SkillPackageError && error.code === "SKILL_CONTENT_HASH_MISMATCH") {
+        contentVerified = false;
+      } else {
+        throw error;
+      }
+    }
+    return evaluateSkillExecution({
+      skill,
+      task,
+      request,
+      contentVerified,
+      safetyFindings,
+      allowImported: options.allowImported === true
+    });
+  }
+
+  assertExecution(
+    id: string,
+    taskId: string,
+    request: SkillPermissionRequest = {},
+    options: { allowImported?: boolean } = {}
+  ): SkillPermissionDecision {
+    const decision = this.checkExecution(id, taskId, request, options);
+    if (!decision.allowed) {
+      throw new SkillPackageError(
+        "SKILL_PERMISSION_DENIED",
+        decision.denied.map((denial) => denial.reason + "（" + denial.value + "）").join("；"),
+        403
+      );
+    }
+    this.markUsed(id);
+    return decision;
+  }
+
+  scriptPath(id: string, relativePath: string): string {
+    const skill = this.requireSkill(id);
+    try {
+      return assertSkillScriptPath(skill.path, relativePath);
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "SKILL_SCRIPT_INVALID";
+      throw new SkillPackageError(code, "技能脚本路径不在受限 scripts/ 目录内", 403);
+    }
+  }
+
+  setTrialTasks(id: string, taskIds: string[]): SkillRecord {
+    const skill = this.requireSkill(id);
+    if (skill.status !== "candidate" && skill.status !== "trial") {
+      throw new SkillPackageError("SKILL_TRIAL_STATUS_INVALID", "只有候选或试跑技能可以设置试跑范围", 409);
+    }
+    const trialTaskIds = [...new Set(taskIds.map((taskId) => taskId.trim()).filter(Boolean))];
+    if (trialTaskIds.length === 0) {
+      throw new SkillPackageError("SKILL_TRIAL_TASKS_REQUIRED", "试跑技能至少需要一个明确任务范围", 400);
+    }
+    for (const taskId of trialTaskIds) this.requireTask(taskId);
+    return this.updateSkill(skill, {
+      status: "trial",
+      trialTaskIds,
+      changeReport: appendReport(skill.changeReport, "设置试跑任务：" + trialTaskIds.join("、"))
+    });
+  }
+
+  importPackage(content: string, origin: "imported" | "user" = "imported"): { skill: SkillRecord; document: SkillDocument } {
+    const parsed = parseSkillDocument(content);
+    const id = skillIdFromName(parsed.manifest.name);
+    if (this.service.store.getSkill(id) || existsSync(join(this.rootDir, id))) {
+      throw new SkillPackageError("SKILL_ALREADY_EXISTS", "同名技能已经存在", 409);
+    }
+    const manifest: SkillManifest = {
+      ...parsed.manifest,
+      metadata: {
+        hearth: {
+          ...parsed.manifest.metadata.hearth,
+          origin,
+          adoptedAt: null,
+          pinned: false
+        }
+      }
+    };
+    const document = parseSkillDocument(renderSkillDocument({ manifest, body: parsed.body, contentHash: "" }));
+    const securityFindings = auditSkillInstructions(document.body);
+    const record: SkillPackageRecord = {
+      schemaVersion: 1,
+      id,
+      methodId: null,
+      methodVersion: null,
+      version: document.manifest.version,
+      sourceTaskIds: document.manifest.metadata.hearth.originTaskId ? [document.manifest.metadata.hearth.originTaskId] : [],
+      exportedAt: this.nowIso(),
+      contentHash: document.contentHash,
+      manifest: document.manifest
+    };
+    mkdirSync(this.rootDir, { recursive: true });
+    const target = resolveInside(this.rootDir, id);
+    const tempDir = resolveInside(this.rootDir, ".tmp-" + id + "-" + randomUUID());
+    try {
+      this.writePackage(tempDir, document, record);
+      renameSync(tempDir, target);
+    } catch (error) {
+      rmSync(tempDir, { recursive: true, force: true });
+      throw error;
+    }
+    const now = this.nowIso();
+    const report = [
+      `导入技能包（${origin}），状态 candidate，默认不可自动执行`,
+      ...securityFindings.map((finding) => "安全提示：" + finding.code + "：" + finding.excerpt)
+    ].join("\n");
+    const skill: SkillRecord = {
+      id,
+      methodId: null,
+      methodVersion: null,
+      name: document.manifest.name,
+      version: document.manifest.version,
+      status: "candidate",
+      pinned: false,
+      path: target,
+      contentHash: document.contentHash,
+      manifest: document.manifest,
+      origin,
+      sourceTaskIds: record.sourceTaskIds,
+      trialTaskIds: [],
+      previousVersionId: null,
+      changeReport: report,
+      createdAt: now,
+      updatedAt: now,
+      adoptedAt: null,
+      lastUsedAt: null,
+      archivedAt: null,
+      archiveReason: null,
+      previousStatus: null
+    };
+    this.emitSkills([{ type: "skill.updated", payload: skill }]);
+    return { skill, document };
   }
 
   list(): SkillIndexEntry[] {
@@ -209,6 +381,7 @@ export class SkillPackageService {
     const now = this.nowIso();
     return this.updateSkill(skill, {
       status,
+      trialTaskIds: status === "trial" ? skill.trialTaskIds : [],
       adoptedAt: status === "adopted" ? skill.adoptedAt ?? now : skill.adoptedAt,
       changeReport: appendReport(skill.changeReport, `状态 ${skill.status} -> ${status}` + (reason.trim() ? "：" + reason.trim() : ""))
     });
@@ -364,6 +537,7 @@ export class SkillPackageService {
       manifest: record.manifest,
       origin: record.manifest.metadata.hearth.origin,
       sourceTaskIds: [...record.sourceTaskIds],
+      trialTaskIds: [],
       previousVersionId: null,
       changeReport: `首次导出：method ${method.id} v${method.version}`,
       createdAt: now,
@@ -376,6 +550,12 @@ export class SkillPackageService {
     };
     this.emitSkills([{ type: "skill.updated", payload: skill }]);
     return skill;
+  }
+
+  private requireTask(taskId: string): TaskRecord {
+    const task = this.service.store.getTask(taskId);
+    if (!task) throw new SkillPackageError("SKILL_TASK_NOT_FOUND", "任务不存在", 404);
+    return task;
   }
 
   private persistExportedSkill(
@@ -418,6 +598,7 @@ export class SkillPackageService {
       manifest: record.manifest,
       origin: record.manifest.metadata.hearth.origin,
       sourceTaskIds: [...record.sourceTaskIds],
+      trialTaskIds: previous?.trialTaskIds ?? [],
       previousVersionId: version?.id ?? previous?.previousVersionId ?? null,
       changeReport: appendReport(previous?.changeReport ?? "", changeReport),
       createdAt: previous?.createdAt ?? now,

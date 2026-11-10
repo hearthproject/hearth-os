@@ -77,6 +77,102 @@ describe("skills API", () => {
     await app.close();
   });
 
+  it("imports, scopes trials, and checks skill execution", async () => {
+    const importedSkill = `---
+name: imported-review
+description: Imported review workflow.
+version: 1.0.0
+platforms: [windows, macos, linux]
+tools: [read_file]
+permissions:
+  readRoots: ["~/.hearth/notes"]
+  writeRoots: []
+  networkHosts: []
+metadata:
+  hearth:
+    category: imported
+    originTaskId: null
+    originHash: null
+    adoptedAt: null
+---
+# Imported Review Skill
+
+## When to Use
+
+Use for imported review tasks.
+
+## Prerequisites
+
+Read the notes folder.
+
+## Procedure
+
+1. Read notes.
+
+## Quick Reference
+
+- notes: local
+
+## Pitfalls
+
+Do not execute without approval.
+
+## Verification
+
+Report the source note.
+`;
+    const app = await buildServer({ store, serveWeb: false, skillRoot });
+    const imported = await app.inject({ method: "POST", url: "/api/skills/import", payload: { content: importedSkill } });
+    expect(imported.statusCode).toBe(201);
+    const skillId = imported.json().skill.id as string;
+    expect(imported.json().skill).toMatchObject({ status: "candidate", origin: "imported", trialTaskIds: [] });
+
+    const service = new HearthService(store);
+    const task = service.createTask({
+      templateId: "T01",
+      title: "导入技能试跑",
+      permissions: {
+        readRoots: ["~/.hearth/notes"],
+        writeRoots: [],
+        networkHosts: [],
+        tools: ["read_file"]
+      }
+    });
+    const trial = await app.inject({
+      method: "POST",
+      url: "/api/skills/" + skillId + "/trials",
+      payload: { taskIds: [task.id] }
+    });
+    expect(trial.statusCode).toBe(200);
+    expect(trial.json()).toMatchObject({ status: "trial", trialTaskIds: [task.id] });
+
+    const checked = await app.inject({
+      method: "POST",
+      url: "/api/skills/" + skillId + "/check",
+      payload: { taskId: task.id, readPaths: ["~/.hearth/notes/week.md"], allowImported: true }
+    });
+    expect(checked.statusCode).toBe(200);
+    expect(checked.json().allowed).toBe(true);
+
+    const outside = await app.inject({
+      method: "POST",
+      url: "/api/skills/" + skillId + "/check",
+      payload: { taskId: task.id, readPaths: ["/etc/passwd"], allowImported: true }
+    });
+    expect(outside.statusCode).toBe(200);
+    expect(outside.json().allowed).toBe(false);
+    expect(outside.json().denied.some((item: { category: string }) => item.category === "read")).toBe(true);
+
+    const authorize = await app.inject({
+      method: "POST",
+      url: "/api/skills/" + skillId + "/authorize",
+      payload: { taskId: task.id }
+    });
+    expect(authorize.statusCode).toBe(403);
+    expect(authorize.json().error).toBe("SKILL_PERMISSION_DENIED");
+    await app.close();
+  });
+
   it("rejects invalid exports and transitions", async () => {
     const app = await buildServer({ store, serveWeb: false, skillRoot });
     const invalid = await app.inject({ method: "POST", url: "/api/skills/export", payload: {} });

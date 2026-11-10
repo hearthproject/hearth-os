@@ -101,7 +101,7 @@ export interface RunAggregate {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 20;
+export const CURRENT_SCHEMA_VERSION = 21;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -445,6 +445,7 @@ CREATE TABLE IF NOT EXISTS skills (
   id TEXT PRIMARY KEY, method_id TEXT, method_version INTEGER, name TEXT NOT NULL, version TEXT NOT NULL,
   status TEXT NOT NULL, pinned INTEGER NOT NULL, path TEXT NOT NULL, content_hash TEXT NOT NULL,
   manifest_json TEXT NOT NULL, origin TEXT NOT NULL, source_task_ids_json TEXT NOT NULL,
+  trial_task_ids_json TEXT NOT NULL DEFAULT '[]',
   previous_version_id TEXT, change_report TEXT NOT NULL, created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL, adopted_at TEXT, last_used_at TEXT, archived_at TEXT,
   archive_reason TEXT, previous_status TEXT
@@ -590,6 +591,7 @@ export class HearthStore {
     ensureColumn(this.db, "tasks", "request_hash", "TEXT");
     ensureColumn(this.db, "method_candidates", "generation", "INTEGER");
     ensureColumn(this.db, "method_candidates", "fingerprint", "TEXT");
+    ensureColumn(this.db, "skills", "trial_task_ids_json", "TEXT NOT NULL DEFAULT '[]'");
     ensureColumn(this.db, "task_proposals", "inputs_json", "TEXT");
     ensureColumn(this.db, "runs", "executor_id", "TEXT");
     ensureColumn(this.db, "runs", "checkpoint_seq", "INTEGER");
@@ -2678,6 +2680,7 @@ function rowToSkill(row: DbRow): SkillRecord {
     manifest: JSON.parse(String(row.manifest_json)),
     origin: String(row.origin) as SkillRecord["origin"],
     sourceTaskIds: JSON.parse(String(row.source_task_ids_json)),
+    trialTaskIds: JSON.parse(String(row.trial_task_ids_json ?? "[]")),
     previousVersionId: row.previous_version_id == null ? null : String(row.previous_version_id),
     changeReport: String(row.change_report),
     createdAt: String(row.created_at),
@@ -2694,20 +2697,21 @@ function upsertSkillRow(db: DatabaseSync, skill: SkillRecord): void {
   db.prepare(
     `INSERT INTO skills
      (id, method_id, method_version, name, version, status, pinned, path, content_hash, manifest_json, origin,
-      source_task_ids_json, previous_version_id, change_report, created_at, updated_at, adopted_at,
+      source_task_ids_json, trial_task_ids_json, previous_version_id, change_report, created_at, updated_at, adopted_at,
       last_used_at, archived_at, archive_reason, previous_status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET method_id=excluded.method_id, method_version=excluded.method_version, name=excluded.name,
       version=excluded.version, status=excluded.status, pinned=excluded.pinned, path=excluded.path,
       content_hash=excluded.content_hash, manifest_json=excluded.manifest_json, origin=excluded.origin,
-      source_task_ids_json=excluded.source_task_ids_json, previous_version_id=excluded.previous_version_id,
+      source_task_ids_json=excluded.source_task_ids_json, trial_task_ids_json=excluded.trial_task_ids_json,
+      previous_version_id=excluded.previous_version_id,
       change_report=excluded.change_report, updated_at=excluded.updated_at, adopted_at=excluded.adopted_at,
       last_used_at=excluded.last_used_at, archived_at=excluded.archived_at,
       archive_reason=excluded.archive_reason, previous_status=excluded.previous_status`
   ).run(
     skill.id, skill.methodId, skill.methodVersion, skill.name, skill.version, skill.status, skill.pinned ? 1 : 0,
     skill.path, skill.contentHash, JSON.stringify(skill.manifest), skill.origin,
-    JSON.stringify(skill.sourceTaskIds), skill.previousVersionId, skill.changeReport,
+    JSON.stringify(skill.sourceTaskIds), JSON.stringify(skill.trialTaskIds), skill.previousVersionId, skill.changeReport,
     skill.createdAt, skill.updatedAt, skill.adoptedAt, skill.lastUsedAt, skill.archivedAt,
     skill.archiveReason, skill.previousStatus
   );

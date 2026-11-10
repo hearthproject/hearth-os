@@ -1509,8 +1509,8 @@ export interface SkillResourceRef {
 export interface SkillPackageRecord {
   schemaVersion: 1;
   id: string;
-  methodId: string;
-  methodVersion: number;
+  methodId: string | null;
+  methodVersion: number | null;
   version: string;
   sourceTaskIds: string[];
   exportedAt: string;
@@ -1535,6 +1535,7 @@ export interface SkillRecord {
   manifest: SkillManifest;
   origin: SkillOrigin;
   sourceTaskIds: string[];
+  trialTaskIds: string[];
   previousVersionId: string | null;
   changeReport: string;
   createdAt: string;
