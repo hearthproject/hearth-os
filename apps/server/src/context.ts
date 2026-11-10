@@ -219,6 +219,7 @@ export class ContextService {
       throw new HandoffFenceError(`执行器代次已过期：当前 ${latest.generation}，写入来自 ${runGeneration}`);
     }
     if (runGeneration === latest.generation && (latest.status === "failed" || latest.status === "cancelled")) {
+      if (["failure", "diagnosis", "decision", "notice", "usage"].includes(input.kind)) return;
       throw new HandoffFenceError(`交接 ${latest.id} 已结束：${latest.status}`);
     }
   }

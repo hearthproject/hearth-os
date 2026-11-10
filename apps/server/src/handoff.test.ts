@@ -82,6 +82,34 @@ describe("HandoffService", () => {
     expect(prepared.packet.verification.status).toBe("pending");
   });
 
+  it("allows terminal evidence from a closed handoff but rejects execution writes", () => {
+    const task = createTask(service, root);
+    const first = handoffs.prepare(prepareInput(task, "run-1", packet(task)));
+    const run = createRun(service, task.id, "run-1", first.handoff.id);
+    context.updateHandoff(first.handoff.id, { status: "failed" });
+
+    expect(() => context.record({
+      taskId: task.id,
+      runId: run.id,
+      executorId: "native",
+      kind: "tool_result",
+      role: "tool",
+      content: "失败后继续执行",
+      executorEventId: "closed-write-1"
+    })).toThrowError(expect.objectContaining({ code: "HANDOFF_GENERATION_STALE" }));
+
+    const diagnosis = context.record({
+      taskId: task.id,
+      runId: run.id,
+      executorId: "native",
+      kind: "diagnosis",
+      role: "system",
+      content: "执行器失败，记录终态诊断",
+      executorEventId: "closed-diagnosis-1"
+    });
+    expect(diagnosis.kind).toBe("diagnosis");
+  });
+
   it("verifies artifact hashes and persists passed or failed verification", () => {
     const task = createTask(service, root);
     const artifactDir = join(root, "artifacts");
