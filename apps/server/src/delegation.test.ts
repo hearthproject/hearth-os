@@ -185,6 +185,30 @@ describe("DelegationService", () => {
       checkedAt: now.toISOString()
     })).toThrowError(expect.objectContaining({ code: "DELEGATION_NOT_VERIFIABLE" }));
   });
+
+  it("marks a running child as failed and rejects an invalid deadline", () => {
+    const parent = createParent(service, root);
+    expect(() => delegations.create({
+      ...input(parent.id, "deadline-invalid"),
+      deadline: "not-a-date"
+    })).toThrowError(expect.objectContaining({ code: "DELEGATION_DEADLINE_INVALID" }));
+
+    const job = delegations.create(input(parent.id, "failure-1"));
+    delegations.lease(job.id, "worker-a");
+    delegations.start(job.id, "worker-a");
+    const failed = delegations.fail(job.id, "子任务执行器退出", true);
+
+    expect(failed).toMatchObject({
+      status: "failed",
+      lease: null,
+      failure: {
+        code: "DELEGATION_CHILD_FAILED",
+        message: "子任务执行器退出",
+        retryable: true
+      }
+    });
+    expect(delegations.fail(job.id, "重复失败", false)).toEqual(failed);
+  });
 });
 
 function createParent(service: HearthService, root: string, permissions = {

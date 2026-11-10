@@ -2712,6 +2712,7 @@ export class HearthStore {
       case "delegation.result.submitted":
       case "delegation.verified":
       case "delegation.rejected":
+      case "delegation.failed":
       case "delegation.cancelled":
       case "delegation.retried":
       case "delegation.orphaned": {

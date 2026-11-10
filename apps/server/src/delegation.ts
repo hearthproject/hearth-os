@@ -15,6 +15,7 @@ import { EXECUTOR_IDS } from "@hearth/core";
 import { redactSecrets } from "./context.ts";
 import { WORKSPACE_DIR } from "./config.ts";
 import type { HearthService } from "./service.ts";
+import type { SandboxService } from "./sandbox.ts";
 
 export const SAFE_DELEGATION_TOOLS = [
   "read_file",
@@ -50,6 +51,7 @@ export interface DelegationServiceOptions {
   service: HearthService;
   workspaceRoot?: string;
   now?: () => Date;
+  sandbox?: SandboxService;
 }
 
 export class DelegationError extends Error {
@@ -68,11 +70,13 @@ export class DelegationService {
   private readonly service: HearthService;
   private readonly workspaceRoot: string;
   private readonly now: () => Date;
+  private readonly sandbox: SandboxService | undefined;
 
   constructor(options: DelegationServiceOptions) {
     this.service = options.service;
     this.workspaceRoot = resolve(options.workspaceRoot ?? join(WORKSPACE_DIR, "delegations"));
     this.now = options.now ?? (() => new Date());
+    this.sandbox = options.sandbox;
   }
 
   create(input: CreateDelegationInput): DelegationJob {
@@ -102,11 +106,24 @@ export class DelegationService {
       throw new DelegationError("DELEGATION_WORKSPACE_POLICY_INVALID", "工作区策略不正确", 400);
     }
     const budget = normalizeBudget(input.budget);
+    if (input.deadline && Number.isNaN(Date.parse(input.deadline))) {
+      throw new DelegationError("DELEGATION_DEADLINE_INVALID", "委派截止时间格式不正确", 400);
+    }
     const id = randomUUID();
     const toolPolicy = this.deriveTools(parent, workspacePolicy, input.toolPolicy);
     const permissions = this.derivePermissions(parent, workspacePolicy, input.requestedPermissions);
     permissions.tools = toolPolicy;
     const networkPolicy = this.deriveNetwork(parent, input.networkPolicy);
+    this.sandbox?.evaluate({
+      workspaceRoot: permissions.readRoots[0] ?? parent.outputDir,
+      permissions,
+      allowedProcesses: toolPolicy.includes("shell") ? ["shell"] : []
+    }, {
+      readPaths: permissions.readRoots,
+      writePaths: permissions.writeRoots,
+      networkHosts: networkPolicy,
+      tools: toolPolicy
+    });
     const now = this.now().toISOString();
     let job: DelegationJob = {
       id,
@@ -236,6 +253,26 @@ export class DelegationService {
       updatedAt: this.now().toISOString()
     });
     this.emit(accepted ? "delegation.verified" : "delegation.rejected", updated ?? job);
+    return updated ?? job;
+  }
+
+  fail(jobId: string, message: string, retryable = true): DelegationJob {
+    const job = this.require(jobId);
+    if (job.status === "succeeded") throw new DelegationError("DELEGATION_ALREADY_SUCCEEDED", "已成功的委派不能标记失败");
+    if (job.status === "cancelled") return job;
+    if (job.status === "failed") return job;
+    const updated = this.service.store.updateDelegationJob(job.id, {
+      status: "failed",
+      lease: null,
+      failure: {
+        code: "DELEGATION_CHILD_FAILED",
+        message,
+        retryable,
+        occurredAt: this.now().toISOString()
+      },
+      updatedAt: this.now().toISOString()
+    });
+    this.emit("delegation.failed", updated ?? job);
     return updated ?? job;
   }
 
