@@ -51,6 +51,7 @@ import { SkillPackageError } from "./skill-package.ts";
 import { SkillPackageService } from "./skills.ts";
 import { SkillCuratorService } from "./skill-curator.ts";
 import { ProactiveError, ProactiveService } from "./proactive.ts";
+import { StandingIntentError, StandingIntentService } from "./standing-intents.ts";
 import { SyncError, SyncService } from "./sync.ts";
 import { SecretBox } from "./secrets.ts";
 
@@ -440,6 +441,56 @@ const proactivePauseSchema = z.object({
   resume: z.boolean().optional()
 }).strict().refine((value) => value.minutes !== undefined || value.off === true || value.resume === true, { message: "暂停参数不完整" });
 
+const standingIntentEntrySchema = z.object({
+  terms: z.array(z.string().trim().min(1).max(64)).min(1).max(20),
+  mode: z.enum(["all", "any"])
+}).strict();
+
+const standingIntentSchema = z.object({
+  ownerId: z.string().trim().min(1).max(120).optional(),
+  description: z.string().trim().min(1).max(500),
+  triggerEntries: z.array(standingIntentEntrySchema).min(1).max(20),
+  scope: z.object({
+    channel: z.string().trim().min(1).max(120).nullable().optional(),
+    sender: z.string().trim().min(1).max(200).nullable().optional(),
+    taskId: z.string().trim().min(1).max(120).nullable().optional(),
+    goalId: z.string().trim().min(1).max(120).nullable().optional(),
+    anywhere: z.boolean().optional()
+  }).strict().optional(),
+  action: z.enum(["remind", "ask", "prepare_task", "notify"]).optional(),
+  cooldownSeconds: z.number().int().min(0).max(31_536_000).optional(),
+  maxFires: z.number().int().min(1).max(100).optional(),
+  expiresAt: z.string().datetime().optional(),
+  armed: z.boolean().optional()
+}).strict();
+
+const intentMatchSchema = z.object({
+  ownerId: z.string().trim().min(1).max(120).optional(),
+  text: z.string().min(1).max(200_000),
+  channel: z.string().trim().min(1).max(120).nullable().optional(),
+  sender: z.string().trim().min(1).max(200).nullable().optional(),
+  taskId: z.string().trim().min(1).max(120).nullable().optional(),
+  goalId: z.string().trim().min(1).max(120).nullable().optional()
+}).strict();
+
+const heartbeatRunSchema = intentMatchSchema.partial().extend({
+  since: z.string().datetime().optional()
+}).strict().refine((value) => value.text === undefined || value.text.length > 0, { message: "text 不能为空" });
+
+const attentionBudgetSchema = z.object({
+  dailyLimit: z.number().int().min(0).max(100).optional(),
+  quietStart: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+  quietEnd: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+  cooldownSeconds: z.number().int().min(0).max(604_800).optional(),
+  maxPerGoalPerDay: z.number().int().min(0).max(100).optional(),
+  maxHighPriorityPerDay: z.number().int().min(0).max(100).optional(),
+  ignoredPenalty: z.number().int().min(0).max(10).optional()
+}).strict().refine((value) => Object.keys(value).length > 0, { message: "至少需要修改一个设置" });
+
+const attentionSnoozeSchema = z.object({
+  minutes: z.number().int().min(1).max(10_080).optional()
+}).strict();
+
 const onboardingCompleteSchema = z.object({
   skipped: z.boolean().optional()
 }).strict();
@@ -597,6 +648,7 @@ export interface BuildServerOptions {
   startScheduler?: boolean;
   startMaintenance?: boolean;
   startProactive?: boolean;
+  startHeartbeat?: boolean;
   startMailSync?: boolean;
   feishuTransportFactory?: FeishuTransportFactory;
   feishuChatClient?: FeishuChatClient;
@@ -650,6 +702,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     mail
   }));
   const proactive = new ProactiveService(service);
+  const standingIntents = new StandingIntentService({ service });
   const memory = new MemoryService(service);
   const methods = new MethodService(service);
   const skills = new SkillPackageService(service, methods, {
@@ -773,6 +826,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     skillCurator.start();
   }
   if (options.startProactive) proactive.start();
+  if (options.startHeartbeat) standingIntents.start();
   if (options.startMailSync) mail.start();
   const app = Fastify({
     logger: options.logger ?? false,
@@ -805,6 +859,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     await feishu.stop();
     mail.stop();
     proactive.stop();
+    standingIntents.stop();
     maintenance.stop();
     skillCurator.stop();
     schedules.stop();
@@ -1309,6 +1364,104 @@ export async function buildServer(options: BuildServerOptions = {}) {
       return proactive.snooze(request.params.id, parsed.data.minutes);
     } catch (error) {
       return sendProactiveError(reply, error);
+    }
+  });
+
+  app.get("/api/intents", async (_request, reply) => {
+    reply.header("cache-control", "no-store");
+    return { intents: standingIntents.list(), budget: standingIntents.budget() };
+  });
+
+  app.post("/api/intents", async (request, reply) => {
+    const parsed = standingIntentSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_INTENT", message: "意图参数不正确" });
+    try {
+      return reply.code(201).send(standingIntents.create(definedObject(parsed.data) as unknown as Parameters<StandingIntentService["create"]>[0]));
+    } catch (error) {
+      return sendStandingIntentError(reply, error);
+    }
+  });
+
+  app.post("/api/intents/match", async (request, reply) => {
+    const parsed = intentMatchSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_INTENT_MATCH", message: "意图匹配参数不正确" });
+    try {
+      const matches = standingIntents.match(definedObject(parsed.data) as unknown as Parameters<StandingIntentService["match"]>[0]);
+      return { matches, intents: matches.map((match) => match.intent), attention: matches.map((match) => match.attention) };
+    } catch (error) {
+      return sendStandingIntentError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/intents/:id/arm", async (request, reply) => {
+    try {
+      return standingIntents.arm(request.params.id);
+    } catch (error) {
+      return sendStandingIntentError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/intents/:id/cancel", async (request, reply) => {
+    try {
+      return standingIntents.cancel(request.params.id);
+    } catch (error) {
+      return sendStandingIntentError(reply, error);
+    }
+  });
+
+  app.get("/api/attention", async (_request, reply) => {
+    reply.header("cache-control", "no-store");
+    return { items: standingIntents.queue(), budget: standingIntents.budget() };
+  });
+
+  app.patch("/api/attention/settings", async (request, reply) => {
+    const parsed = attentionBudgetSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_ATTENTION_BUDGET", message: "注意力预算设置不正确" });
+    try {
+      return standingIntents.updateBudget(definedObject(parsed.data) as unknown as Parameters<StandingIntentService["updateBudget"]>[0]);
+    } catch (error) {
+      return sendStandingIntentError(reply, error);
+    }
+  });
+
+  for (const action of ["ack", "ignore", "resolve"] as const) {
+    app.post<{ Params: { id: string } }>("/api/attention/:id/" + action, async (request, reply) => {
+      try {
+        if (action === "ack") return standingIntents.acknowledge(request.params.id);
+        if (action === "ignore") return standingIntents.ignore(request.params.id);
+        return standingIntents.resolve(request.params.id);
+      } catch (error) {
+        return sendStandingIntentError(reply, error);
+      }
+    });
+  }
+
+  app.post<{ Params: { id: string } }>("/api/attention/:id/snooze", async (request, reply) => {
+    const parsed = attentionSnoozeSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_ATTENTION_SNOOZE", message: "稍后提醒参数不正确" });
+    try {
+      return standingIntents.snooze(request.params.id, parsed.data.minutes);
+    } catch (error) {
+      return sendStandingIntentError(reply, error);
+    }
+  });
+
+  app.get("/api/heartbeat", async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const limit = Number((request.query as { limit?: string } | undefined)?.limit ?? 50);
+    return {
+      runs: standingIntents.listHeartbeatRuns(Number.isInteger(limit) ? Math.max(1, Math.min(limit, 500)) : 50),
+      last: standingIntents.latestHeartbeatRun()
+    };
+  });
+
+  app.post("/api/heartbeat/run", async (request, reply) => {
+    const parsed = heartbeatRunSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_HEARTBEAT", message: "心跳参数不正确" });
+    try {
+      return await standingIntents.heartbeat(definedObject(parsed.data) as unknown as Parameters<StandingIntentService["heartbeat"]>[0]);
+    } catch (error) {
+      return sendStandingIntentError(reply, error);
     }
   });
 
@@ -2858,6 +3011,13 @@ function syncBearerToken(value: string | string[] | undefined): string {
   const header = headerValue(value);
   if (!header.startsWith("Bearer ")) throw new SyncError("SYNC_UNAUTHORIZED", "缺少同步令牌", 401);
   return header.slice(7).trim();
+}
+
+function sendStandingIntentError(reply: FastifyReply, error: unknown) {
+  if (error instanceof StandingIntentError) {
+    return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+  }
+  throw error;
 }
 
 function sendProactiveError(reply: FastifyReply, error: unknown) {

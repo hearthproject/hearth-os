@@ -1560,6 +1560,98 @@ export interface SkillVersion {
   createdAt: string;
 }
 
+export const STANDING_INTENT_STATES = ["pending", "armed", "fired", "done", "cancelled", "expired"] as const;
+export type StandingIntentState = (typeof STANDING_INTENT_STATES)[number];
+
+export const STANDING_INTENT_ACTIONS = ["remind", "ask", "prepare_task", "notify"] as const;
+export type StandingIntentAction = (typeof STANDING_INTENT_ACTIONS)[number];
+
+export interface StandingIntentTriggerEntry {
+  terms: string[];
+  mode: "all" | "any";
+}
+
+export interface StandingIntentScope {
+  channel: string | null;
+  sender: string | null;
+  taskId: string | null;
+  goalId: string | null;
+  anywhere: boolean;
+}
+
+export interface StandingIntentRecord {
+  id: string;
+  ownerId: string;
+  description: string;
+  triggerEntries: StandingIntentTriggerEntry[];
+  scope: StandingIntentScope;
+  action: StandingIntentAction;
+  cooldownSeconds: number;
+  maxFires: number;
+  fireCount: number;
+  state: StandingIntentState;
+  expiresAt: string;
+  lastFiredAt: string | null;
+  lastMatchedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const ATTENTION_ITEM_KINDS = ["decision", "credential", "approval", "reconcile", "progress", "suggestion"] as const;
+export type AttentionItemKind = (typeof ATTENTION_ITEM_KINDS)[number];
+
+export const ATTENTION_ITEM_STATUSES = ["open", "acknowledged", "ignored", "snoozed", "resolved"] as const;
+export type AttentionItemStatus = (typeof ATTENTION_ITEM_STATUSES)[number];
+
+export interface AttentionBudgetSettings {
+  dailyLimit: number;
+  quietStart: string;
+  quietEnd: string;
+  cooldownSeconds: number;
+  maxPerGoalPerDay: number;
+  maxHighPriorityPerDay: number;
+  ignoredPenalty: number;
+}
+
+export interface AttentionItem {
+  id: string;
+  dedupeKey: string;
+  kind: AttentionItemKind;
+  priority: number;
+  critical: boolean;
+  title: string;
+  waitingOn: "user" | "external" | "agent";
+  waitingSince: string;
+  nextAction: string;
+  consequence: string;
+  whyNow: string;
+  goalId: string | null;
+  taskId: string | null;
+  intentId: string | null;
+  source: string;
+  status: AttentionItemStatus;
+  snoozeUntil: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface HeartbeatRun {
+  id: string;
+  decision: "notify" | "NO_REPLY";
+  triggerKinds: string[];
+  attentionIds: string[];
+  reason: string;
+  startedAt: string;
+  endedAt: string;
+}
+
+export interface StandingIntentSnapshot {
+  intents: StandingIntentRecord[];
+  attention: AttentionItem[];
+  budget: AttentionBudgetSettings;
+  lastHeartbeat: HeartbeatRun | null;
+}
+
 export const SKILL_USAGE_STATUSES = ["started", "completed", "failed", "cancelled"] as const;
 export type SkillUsageStatus = (typeof SKILL_USAGE_STATUSES)[number];
 

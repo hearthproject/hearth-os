@@ -7,6 +7,7 @@ import type {
   ApprovalRecord,
   ApprovalStatus,
   ArtifactRecord,
+  AttentionItem,
   BackupRecord,
   ChatMessageRecord,
   ConversationRecord,
@@ -44,6 +45,7 @@ import type {
   ModelProfileRecord,
   ProactiveSettings,
   ProactiveSuggestion,
+  HeartbeatRun,
   ReconcileItem,
   ReconcileStatus,
   RunCheckpointRecord,
@@ -58,6 +60,7 @@ import type {
   SkillRecord,
   SkillUsageEvent,
   SkillVersion,
+  StandingIntentRecord,
   SourceConnection,
   SourceItem,
   SyncConflict,
@@ -103,7 +106,7 @@ export interface RunAggregate {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 22;
+export const CURRENT_SCHEMA_VERSION = 23;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -466,6 +469,26 @@ CREATE TABLE IF NOT EXISTS skill_curator_runs (
   started_at TEXT NOT NULL, ended_at TEXT, actions_json TEXT NOT NULL,
   backup_path TEXT, report TEXT NOT NULL, rolled_back_at TEXT
 );
+CREATE TABLE IF NOT EXISTS standing_intents (
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, description TEXT NOT NULL,
+  trigger_entries_json TEXT NOT NULL, scope_json TEXT NOT NULL, action TEXT NOT NULL,
+  cooldown_seconds INTEGER NOT NULL, max_fires INTEGER NOT NULL, fire_count INTEGER NOT NULL,
+  state TEXT NOT NULL, expires_at TEXT NOT NULL, last_fired_at TEXT, last_matched_at TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS attention_items (
+  id TEXT PRIMARY KEY, dedupe_key TEXT NOT NULL UNIQUE, kind TEXT NOT NULL,
+  priority INTEGER NOT NULL, critical INTEGER NOT NULL, title TEXT NOT NULL,
+  waiting_on TEXT NOT NULL, waiting_since TEXT NOT NULL, next_action TEXT NOT NULL,
+  consequence TEXT NOT NULL, why_now TEXT NOT NULL, goal_id TEXT, task_id TEXT,
+  intent_id TEXT, source TEXT NOT NULL, status TEXT NOT NULL, snooze_until TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS heartbeat_runs (
+  id TEXT PRIMARY KEY, decision TEXT NOT NULL, trigger_kinds_json TEXT NOT NULL,
+  attention_ids_json TEXT NOT NULL, reason TEXT NOT NULL, started_at TEXT NOT NULL,
+  ended_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS sync_peers (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL, status TEXT NOT NULL,
   token_hash TEXT NOT NULL UNIQUE, last_pull_seq INTEGER NOT NULL, last_pull_at TEXT,
@@ -608,6 +631,59 @@ export class HearthStore {
     return row ? String(row.created_at) : null;
   }
 
+  getStandingIntent(id: string): StandingIntentRecord | null {
+    const row = this.db.prepare("SELECT * FROM standing_intents WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToStandingIntent(row) : null;
+  }
+
+  listStandingIntents(state?: string): StandingIntentRecord[] {
+    const rows = state
+      ? this.db.prepare("SELECT * FROM standing_intents WHERE state = ? ORDER BY created_at DESC").all(state) as DbRow[]
+      : this.db.prepare("SELECT * FROM standing_intents ORDER BY created_at DESC").all() as DbRow[];
+    return rows.map(rowToStandingIntent);
+  }
+
+  upsertStandingIntent(intent: StandingIntentRecord): StandingIntentRecord {
+    upsertStandingIntentRow(this.db, intent);
+    return intent;
+  }
+
+  getAttentionItem(id: string): AttentionItem | null {
+    const row = this.db.prepare("SELECT * FROM attention_items WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToAttentionItem(row) : null;
+  }
+
+  findOpenAttentionByDedupe(dedupeKey: string): AttentionItem | null {
+    const row = this.db.prepare("SELECT * FROM attention_items WHERE dedupe_key = ? AND status IN ('open','snoozed')").get(dedupeKey) as DbRow | undefined;
+    return row ? rowToAttentionItem(row) : null;
+  }
+
+  listAttentionItems(opts: { status?: string; limit?: number } = {}): AttentionItem[] {
+    const rows = opts.status
+      ? this.db.prepare("SELECT * FROM attention_items WHERE status = ? ORDER BY priority ASC, waiting_since ASC LIMIT ?").all(opts.status, opts.limit ?? 200) as DbRow[]
+      : this.db.prepare("SELECT * FROM attention_items ORDER BY priority ASC, waiting_since ASC LIMIT ?").all(opts.limit ?? 200) as DbRow[];
+    return rows.map(rowToAttentionItem);
+  }
+
+  upsertAttentionItem(item: AttentionItem): AttentionItem {
+    upsertAttentionItemRow(this.db, item);
+    return item;
+  }
+
+  insertHeartbeatRun(run: HeartbeatRun): HeartbeatRun {
+    upsertHeartbeatRunRow(this.db, run);
+    return run;
+  }
+
+  listHeartbeatRuns(limit = 50): HeartbeatRun[] {
+    const rows = this.db.prepare("SELECT * FROM heartbeat_runs ORDER BY started_at DESC LIMIT ?").all(limit) as DbRow[];
+    return rows.map(rowToHeartbeatRun);
+  }
+
+  latestHeartbeatRun(): HeartbeatRun | null {
+    return this.listHeartbeatRuns(1)[0] ?? null;
+  }
+
   private migrate(): void {
     ensureColumn(this.db, "events", "origin_instance_id", "TEXT");
     ensureColumn(this.db, "events", "origin_seq", "INTEGER");
@@ -718,6 +794,10 @@ export class HearthStore {
       CREATE INDEX IF NOT EXISTS skill_usage_skill_idx ON skill_usage_events(skill_id, created_at);
       CREATE INDEX IF NOT EXISTS skill_usage_task_idx ON skill_usage_events(task_id, created_at);
       CREATE INDEX IF NOT EXISTS skill_curator_runs_started_idx ON skill_curator_runs(started_at);
+      CREATE INDEX IF NOT EXISTS standing_intents_state_idx ON standing_intents(state, updated_at);
+      CREATE INDEX IF NOT EXISTS attention_items_status_idx ON attention_items(status, priority, waiting_since);
+      CREATE INDEX IF NOT EXISTS attention_items_goal_idx ON attention_items(goal_id, status);
+      CREATE INDEX IF NOT EXISTS heartbeat_runs_started_idx ON heartbeat_runs(started_at);
     `);
     this.db.exec(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION}`);
     this.setMeta("schemaVersion", String(CURRENT_SCHEMA_VERSION));
@@ -2103,7 +2183,7 @@ export class HearthStore {
   rebuildProjections(): void {
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      this.db.exec("DELETE FROM backup_records; DELETE FROM maintenance_runs; DELETE FROM task_leases; DELETE FROM sync_conflicts; DELETE FROM sync_peers; DELETE FROM skill_curator_runs; DELETE FROM skill_usage_events; DELETE FROM skill_versions; DELETE FROM skills; DELETE FROM method_trials; DELETE FROM method_evaluations; DELETE FROM method_candidates; DELETE FROM memory_consolidation_runs; DELETE FROM memory_forget_tombstones; DELETE FROM memory_forget_receipts; DELETE FROM memory_recalls; DELETE FROM memory_conflicts; DELETE FROM memory_versions; DELETE FROM memories; DELETE FROM memory_settings; DELETE FROM suggestion_events; DELETE FROM suggestions; DELETE FROM proactive_settings; DELETE FROM desktop_commands; DELETE FROM desktop_frames; DELETE FROM desktop_sessions; DELETE FROM pairing_requests; DELETE FROM devices; DELETE FROM outbox_drafts; DELETE FROM source_items; DELETE FROM sources; DELETE FROM artifacts; DELETE FROM effects; DELETE FROM approvals; DELETE FROM runs; DELETE FROM tasks;");
+      this.db.exec("DELETE FROM backup_records; DELETE FROM maintenance_runs; DELETE FROM task_leases; DELETE FROM sync_conflicts; DELETE FROM sync_peers; DELETE FROM heartbeat_runs; DELETE FROM attention_items; DELETE FROM standing_intents; DELETE FROM skill_curator_runs; DELETE FROM skill_usage_events; DELETE FROM skill_versions; DELETE FROM skills; DELETE FROM method_trials; DELETE FROM method_evaluations; DELETE FROM method_candidates; DELETE FROM memory_consolidation_runs; DELETE FROM memory_forget_tombstones; DELETE FROM memory_forget_receipts; DELETE FROM memory_recalls; DELETE FROM memory_conflicts; DELETE FROM memory_versions; DELETE FROM memories; DELETE FROM memory_settings; DELETE FROM suggestion_events; DELETE FROM suggestions; DELETE FROM proactive_settings; DELETE FROM desktop_commands; DELETE FROM desktop_frames; DELETE FROM desktop_sessions; DELETE FROM pairing_requests; DELETE FROM devices; DELETE FROM outbox_drafts; DELETE FROM source_items; DELETE FROM sources; DELETE FROM artifacts; DELETE FROM effects; DELETE FROM approvals; DELETE FROM runs; DELETE FROM tasks;");
       for (const event of this.listEvents()) this.applyEvent(event);
       this.db.exec("COMMIT");
     } catch (error) {
@@ -2199,6 +2279,9 @@ export class HearthStore {
       case "skill.version.recorded": return insertSkillVersionRow(this.db, event.payload as SkillVersion);
       case "skill.usage.recorded": return insertSkillUsageRow(this.db, event.payload as SkillUsageEvent);
       case "skill.curator.updated": return upsertSkillCuratorRunRow(this.db, event.payload as SkillCuratorRun);
+      case "standing-intent.updated": return upsertStandingIntentRow(this.db, event.payload as StandingIntentRecord);
+      case "attention.updated": return upsertAttentionItemRow(this.db, event.payload as AttentionItem);
+      case "heartbeat.recorded": return upsertHeartbeatRunRow(this.db, event.payload as HeartbeatRun);
       case "sync.peer.created":
       case "sync.peer.updated": return upsertSyncPeer(this.db, event.payload as SyncPeer & { tokenCipher?: string | null });
       case "sync.conflict.created":
@@ -2834,6 +2917,117 @@ function upsertSkillCuratorRunRow(db: DatabaseSync, run: SkillCuratorRun): void 
   ).run(
     run.id, run.status, run.dryRun ? 1 : 0, run.startedAt, run.endedAt,
     JSON.stringify(run.actions), run.backupPath, run.report, run.rolledBackAt
+  );
+}
+
+function rowToStandingIntent(row: DbRow): StandingIntentRecord {
+  return {
+    id: String(row.id),
+    ownerId: String(row.owner_id),
+    description: String(row.description),
+    triggerEntries: JSON.parse(String(row.trigger_entries_json)) as StandingIntentRecord["triggerEntries"],
+    scope: JSON.parse(String(row.scope_json)) as StandingIntentRecord["scope"],
+    action: String(row.action) as StandingIntentRecord["action"],
+    cooldownSeconds: Number(row.cooldown_seconds),
+    maxFires: Number(row.max_fires),
+    fireCount: Number(row.fire_count),
+    state: String(row.state) as StandingIntentRecord["state"],
+    expiresAt: String(row.expires_at),
+    lastFiredAt: row.last_fired_at == null ? null : String(row.last_fired_at),
+    lastMatchedAt: row.last_matched_at == null ? null : String(row.last_matched_at),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
+  };
+}
+
+function upsertStandingIntentRow(db: DatabaseSync, intent: StandingIntentRecord): void {
+  db.prepare(
+    `INSERT INTO standing_intents
+     (id, owner_id, description, trigger_entries_json, scope_json, action, cooldown_seconds,
+      max_fires, fire_count, state, expires_at, last_fired_at, last_matched_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET owner_id=excluded.owner_id, description=excluded.description,
+       trigger_entries_json=excluded.trigger_entries_json, scope_json=excluded.scope_json,
+       action=excluded.action, cooldown_seconds=excluded.cooldown_seconds, max_fires=excluded.max_fires,
+       fire_count=excluded.fire_count, state=excluded.state, expires_at=excluded.expires_at,
+       last_fired_at=excluded.last_fired_at, last_matched_at=excluded.last_matched_at,
+       updated_at=excluded.updated_at`
+  ).run(
+    intent.id, intent.ownerId, intent.description, JSON.stringify(intent.triggerEntries),
+    JSON.stringify(intent.scope), intent.action, intent.cooldownSeconds, intent.maxFires,
+    intent.fireCount, intent.state, intent.expiresAt, intent.lastFiredAt, intent.lastMatchedAt,
+    intent.createdAt, intent.updatedAt
+  );
+}
+
+function rowToAttentionItem(row: DbRow): AttentionItem {
+  return {
+    id: String(row.id),
+    dedupeKey: String(row.dedupe_key),
+    kind: String(row.kind) as AttentionItem["kind"],
+    priority: Number(row.priority),
+    critical: Number(row.critical) === 1,
+    title: String(row.title),
+    waitingOn: String(row.waiting_on) as AttentionItem["waitingOn"],
+    waitingSince: String(row.waiting_since),
+    nextAction: String(row.next_action),
+    consequence: String(row.consequence),
+    whyNow: String(row.why_now),
+    goalId: row.goal_id == null ? null : String(row.goal_id),
+    taskId: row.task_id == null ? null : String(row.task_id),
+    intentId: row.intent_id == null ? null : String(row.intent_id),
+    source: String(row.source),
+    status: String(row.status) as AttentionItem["status"],
+    snoozeUntil: row.snooze_until == null ? null : String(row.snooze_until),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
+  };
+}
+
+function upsertAttentionItemRow(db: DatabaseSync, item: AttentionItem): void {
+  db.prepare(
+    `INSERT INTO attention_items
+     (id, dedupe_key, kind, priority, critical, title, waiting_on, waiting_since, next_action,
+      consequence, why_now, goal_id, task_id, intent_id, source, status, snooze_until, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET dedupe_key=excluded.dedupe_key, kind=excluded.kind,
+       priority=excluded.priority, critical=excluded.critical, title=excluded.title,
+       waiting_on=excluded.waiting_on, waiting_since=excluded.waiting_since,
+       next_action=excluded.next_action, consequence=excluded.consequence, why_now=excluded.why_now,
+       goal_id=excluded.goal_id, task_id=excluded.task_id, intent_id=excluded.intent_id,
+       source=excluded.source, status=excluded.status, snooze_until=excluded.snooze_until,
+       updated_at=excluded.updated_at`
+  ).run(
+    item.id, item.dedupeKey, item.kind, item.priority, item.critical ? 1 : 0, item.title,
+    item.waitingOn, item.waitingSince, item.nextAction, item.consequence, item.whyNow,
+    item.goalId, item.taskId, item.intentId, item.source, item.status, item.snoozeUntil,
+    item.createdAt, item.updatedAt
+  );
+}
+
+function rowToHeartbeatRun(row: DbRow): HeartbeatRun {
+  return {
+    id: String(row.id),
+    decision: String(row.decision) as HeartbeatRun["decision"],
+    triggerKinds: JSON.parse(String(row.trigger_kinds_json)) as string[],
+    attentionIds: JSON.parse(String(row.attention_ids_json)) as string[],
+    reason: String(row.reason),
+    startedAt: String(row.started_at),
+    endedAt: String(row.ended_at)
+  };
+}
+
+function upsertHeartbeatRunRow(db: DatabaseSync, run: HeartbeatRun): void {
+  db.prepare(
+    `INSERT INTO heartbeat_runs
+     (id, decision, trigger_kinds_json, attention_ids_json, reason, started_at, ended_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET decision=excluded.decision,
+       trigger_kinds_json=excluded.trigger_kinds_json, attention_ids_json=excluded.attention_ids_json,
+       reason=excluded.reason, ended_at=excluded.ended_at`
+  ).run(
+    run.id, run.decision, JSON.stringify(run.triggerKinds), JSON.stringify(run.attentionIds),
+    run.reason, run.startedAt, run.endedAt
   );
 }
 
