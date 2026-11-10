@@ -402,7 +402,11 @@ const scheduleSchema = z.object({
   executorId: z.enum(EXECUTOR_IDS).optional(),
   approvalMode: z.enum(["necessary", "full"]).optional(),
   taskKind: z.enum(["delivery", "workspace", "general"]).optional(),
-  enabled: z.boolean().optional()
+  enabled: z.boolean().optional(),
+  catchUpPolicy: z.enum(["skip", "run_once", "run_all_bounded"]).optional(),
+  catchUpMaxRuns: z.number().int().min(1).max(20).optional(),
+  priority: z.number().int().min(0).max(100).optional(),
+  deleteAfterRun: z.boolean().optional()
 }).strict();
 
 const schedulePatchSchema = scheduleSchema.partial().strict().refine((value) => Object.keys(value).length > 0, { message: "至少需要修改一个设置" });

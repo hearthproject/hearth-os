@@ -519,6 +519,9 @@ export interface TaskProposalRecord {
 
 export type ScheduleRunStatus = "queued" | "running" | "completed" | "failed" | "skipped" | "cancelled";
 
+export const SCHEDULE_CATCH_UP_POLICIES = ["skip", "run_once", "run_all_bounded"] as const;
+export type ScheduleCatchUpPolicy = (typeof SCHEDULE_CATCH_UP_POLICIES)[number];
+
 export interface ScheduleRecord {
   id: string;
   name: string;
@@ -534,6 +537,13 @@ export interface ScheduleRecord {
   lastRunAt: string | null;
   lastTaskId: string | null;
   lastStatus: ScheduleRunStatus | null;
+  catchUpPolicy: ScheduleCatchUpPolicy;
+  catchUpMaxRuns: number;
+  priority: number;
+  failureCount: number;
+  cooldownUntil: string | null;
+  deleteAfterRun: boolean;
+  pausedReason: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -543,6 +553,11 @@ export interface ScheduleRunRecord {
   scheduleId: string;
   scheduledFor: string;
   taskId: string | null;
+  effectId: string | null;
+  idempotencyKey: string | null;
+  attempt: number;
+  failureClass: FailureClass | null;
+  receipt: Record<string, unknown> | null;
   status: ScheduleRunStatus;
   error: string | null;
   createdAt: string;

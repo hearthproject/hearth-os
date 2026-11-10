@@ -106,7 +106,7 @@ export interface RunAggregate {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 23;
+export const CURRENT_SCHEMA_VERSION = 24;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -519,11 +519,16 @@ CREATE TABLE IF NOT EXISTS scheduled_jobs (
   timezone TEXT NOT NULL, enabled INTEGER NOT NULL, conversation_id TEXT NOT NULL,
   executor_id TEXT NOT NULL, approval_mode TEXT NOT NULL, task_kind TEXT NOT NULL,
   next_run_at TEXT, last_run_at TEXT, last_task_id TEXT, last_status TEXT,
+  catch_up_policy TEXT NOT NULL DEFAULT 'run_once', catch_up_max_runs INTEGER NOT NULL DEFAULT 3,
+  priority INTEGER NOT NULL DEFAULT 5, failure_count INTEGER NOT NULL DEFAULT 0,
+  cooldown_until TEXT, delete_after_run INTEGER NOT NULL DEFAULT 0, paused_reason TEXT,
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS scheduled_job_runs (
   id TEXT PRIMARY KEY, schedule_id TEXT NOT NULL, scheduled_for TEXT NOT NULL,
-  task_id TEXT, status TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  task_id TEXT, effect_id TEXT, idempotency_key TEXT, attempt INTEGER NOT NULL DEFAULT 1,
+  failure_class TEXT, receipt_json TEXT,
+  status TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
   UNIQUE(schedule_id, scheduled_for)
 );
 CREATE INDEX IF NOT EXISTS events_task_idx ON events(task_id, seq);
@@ -744,6 +749,18 @@ export class HearthStore {
     ensureColumn(this.db, "effects", "reconciled_at", "TEXT");
     ensureColumn(this.db, "effects", "target_key", "TEXT");
     ensureColumn(this.db, "effects", "suspend_reason", "TEXT");
+    ensureColumn(this.db, "scheduled_jobs", "catch_up_policy", "TEXT NOT NULL DEFAULT 'run_once'");
+    ensureColumn(this.db, "scheduled_jobs", "catch_up_max_runs", "INTEGER NOT NULL DEFAULT 3");
+    ensureColumn(this.db, "scheduled_jobs", "priority", "INTEGER NOT NULL DEFAULT 5");
+    ensureColumn(this.db, "scheduled_jobs", "failure_count", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn(this.db, "scheduled_jobs", "cooldown_until", "TEXT");
+    ensureColumn(this.db, "scheduled_jobs", "delete_after_run", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn(this.db, "scheduled_jobs", "paused_reason", "TEXT");
+    ensureColumn(this.db, "scheduled_job_runs", "effect_id", "TEXT");
+    ensureColumn(this.db, "scheduled_job_runs", "idempotency_key", "TEXT");
+    ensureColumn(this.db, "scheduled_job_runs", "attempt", "INTEGER NOT NULL DEFAULT 1");
+    ensureColumn(this.db, "scheduled_job_runs", "failure_class", "TEXT");
+    ensureColumn(this.db, "scheduled_job_runs", "receipt_json", "TEXT");
     ensureColumn(this.db, "memory_recalls", "lane", "TEXT NOT NULL DEFAULT 'on_demand'");
     for (const table of ["memories", "memory_versions"] as const) {
       ensureColumn(this.db, table, "tier", "TEXT NOT NULL DEFAULT 'episodic'");
@@ -1228,12 +1245,16 @@ export class HearthStore {
   createSchedule(schedule: ScheduleRecord): ScheduleRecord {
     this.db.prepare(
       `INSERT INTO scheduled_jobs (id, name, prompt, cron, timezone, enabled, conversation_id, executor_id,
-         approval_mode, task_kind, next_run_at, last_run_at, last_task_id, last_status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         approval_mode, task_kind, next_run_at, last_run_at, last_task_id, last_status,
+         catch_up_policy, catch_up_max_runs, priority, failure_count, cooldown_until, delete_after_run,
+         paused_reason, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       schedule.id, schedule.name, schedule.prompt, schedule.cron, schedule.timezone,
       schedule.enabled ? 1 : 0, schedule.conversationId, schedule.executorId, schedule.approvalMode,
       schedule.taskKind, schedule.nextRunAt, schedule.lastRunAt, schedule.lastTaskId, schedule.lastStatus,
+      schedule.catchUpPolicy, schedule.catchUpMaxRuns, schedule.priority, schedule.failureCount,
+      schedule.cooldownUntil, schedule.deleteAfterRun ? 1 : 0, schedule.pausedReason,
       schedule.createdAt, schedule.updatedAt
     );
     return schedule;
@@ -1255,11 +1276,13 @@ export class HearthStore {
     this.db.prepare(
       `UPDATE scheduled_jobs SET name = ?, prompt = ?, cron = ?, timezone = ?, enabled = ?, conversation_id = ?,
          executor_id = ?, approval_mode = ?, task_kind = ?, next_run_at = ?, last_run_at = ?, last_task_id = ?,
-         last_status = ?, updated_at = ? WHERE id = ?`
+         last_status = ?, catch_up_policy = ?, catch_up_max_runs = ?, priority = ?, failure_count = ?,
+         cooldown_until = ?, delete_after_run = ?, paused_reason = ?, updated_at = ? WHERE id = ?`
     ).run(
       next.name, next.prompt, next.cron, next.timezone, next.enabled ? 1 : 0, next.conversationId,
       next.executorId, next.approvalMode, next.taskKind, next.nextRunAt, next.lastRunAt, next.lastTaskId,
-      next.lastStatus, next.updatedAt, id
+      next.lastStatus, next.catchUpPolicy, next.catchUpMaxRuns, next.priority, next.failureCount,
+      next.cooldownUntil, next.deleteAfterRun ? 1 : 0, next.pausedReason, next.updatedAt, id
     );
     return this.getSchedule(id);
   }
@@ -1283,19 +1306,32 @@ export class HearthStore {
     ).get(run.scheduleId, run.scheduledFor) as DbRow | undefined;
     if (existing) return null;
     this.db.prepare(
-      `INSERT INTO scheduled_job_runs (id, schedule_id, scheduled_for, task_id, status, error, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(run.id, run.scheduleId, run.scheduledFor, run.taskId, run.status, run.error, run.createdAt, run.updatedAt);
+      `INSERT INTO scheduled_job_runs (id, schedule_id, scheduled_for, task_id, effect_id, idempotency_key,
+         attempt, failure_class, receipt_json, status, error, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      run.id, run.scheduleId, run.scheduledFor, run.taskId, run.effectId, run.idempotencyKey,
+      run.attempt, run.failureClass, run.receipt ? JSON.stringify(run.receipt) : null,
+      run.status, run.error, run.createdAt, run.updatedAt
+    );
     return run;
   }
 
-  updateScheduleRun(id: string, patch: Partial<Pick<ScheduleRunRecord, "taskId" | "status" | "error">>): ScheduleRunRecord | null {
+  updateScheduleRun(
+    id: string,
+    patch: Partial<Pick<ScheduleRunRecord,
+      "taskId" | "effectId" | "idempotencyKey" | "attempt" | "failureClass" | "receipt" | "status" | "error">>
+  ): ScheduleRunRecord | null {
     const current = this.getScheduleRun(id);
     if (!current) return null;
     const next = { ...current, ...patch, updatedAt: new Date().toISOString() };
     this.db.prepare(
-      "UPDATE scheduled_job_runs SET task_id = ?, status = ?, error = ?, updated_at = ? WHERE id = ?"
-    ).run(next.taskId, next.status, next.error, next.updatedAt, id);
+      `UPDATE scheduled_job_runs SET task_id = ?, effect_id = ?, idempotency_key = ?, attempt = ?,
+         failure_class = ?, receipt_json = ?, status = ?, error = ?, updated_at = ? WHERE id = ?`
+    ).run(
+      next.taskId, next.effectId, next.idempotencyKey, next.attempt, next.failureClass,
+      next.receipt ? JSON.stringify(next.receipt) : null, next.status, next.error, next.updatedAt, id
+    );
     return next;
   }
 
@@ -3123,6 +3159,13 @@ function rowToSchedule(row: DbRow): ScheduleRecord {
     lastRunAt: row.last_run_at == null ? null : String(row.last_run_at),
     lastTaskId: row.last_task_id == null ? null : String(row.last_task_id),
     lastStatus: row.last_status == null ? null : String(row.last_status) as ScheduleRunStatus,
+    catchUpPolicy: String(row.catch_up_policy ?? "run_once") as ScheduleRecord["catchUpPolicy"],
+    catchUpMaxRuns: row.catch_up_max_runs == null ? 3 : Number(row.catch_up_max_runs),
+    priority: row.priority == null ? 5 : Number(row.priority),
+    failureCount: row.failure_count == null ? 0 : Number(row.failure_count),
+    cooldownUntil: row.cooldown_until == null ? null : String(row.cooldown_until),
+    deleteAfterRun: Number(row.delete_after_run ?? 0) === 1,
+    pausedReason: row.paused_reason == null ? null : String(row.paused_reason),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at)
   };
@@ -3134,6 +3177,11 @@ function rowToScheduleRun(row: DbRow): ScheduleRunRecord {
     scheduleId: String(row.schedule_id),
     scheduledFor: String(row.scheduled_for),
     taskId: row.task_id == null ? null : String(row.task_id),
+    effectId: row.effect_id == null ? null : String(row.effect_id),
+    idempotencyKey: row.idempotency_key == null ? null : String(row.idempotency_key),
+    attempt: row.attempt == null ? 1 : Number(row.attempt),
+    failureClass: row.failure_class == null ? null : String(row.failure_class) as ScheduleRunRecord["failureClass"],
+    receipt: row.receipt_json == null ? null : JSON.parse(String(row.receipt_json)),
     status: String(row.status) as ScheduleRunStatus,
     error: row.error == null ? null : String(row.error),
     createdAt: String(row.created_at),
