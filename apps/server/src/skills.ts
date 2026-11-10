@@ -21,6 +21,9 @@ import type {
   SkillRecord,
   SkillResourceRef,
   SkillStatus,
+  SkillUsageEvent,
+  SkillUsageSource,
+  SkillUsageStatus,
   SkillVersion,
   TaskPermissions,
   TaskRecord
@@ -387,9 +390,62 @@ export class SkillPackageService {
     });
   }
 
-  markUsed(id: string): SkillRecord {
-    const skill = this.requireSkill(id);
-    return this.updateSkill(skill, { lastUsedAt: this.nowIso() });
+  recordUsage(input: {
+    skillId: string;
+    taskId?: string | null;
+    runId?: string | null;
+    status: SkillUsageStatus;
+    source?: SkillUsageSource;
+    note?: string;
+  }): SkillUsageEvent {
+    const skill = this.requireSkill(idFromUsage(input));
+    const now = this.nowIso();
+    const usage: SkillUsageEvent = {
+      id: randomUUID(),
+      skillId: skill.id,
+      taskId: input.taskId ?? null,
+      runId: input.runId ?? null,
+      status: input.status,
+      source: input.source ?? "manual",
+      note: input.note?.trim() ?? "",
+      createdAt: now
+    };
+    const next = input.status === "started" || input.status === "completed"
+      ? { ...skill, lastUsedAt: now, updatedAt: now }
+      : { ...skill, updatedAt: now };
+    this.emitSkills([
+      { type: "skill.usage.recorded", payload: usage },
+      { type: "skill.updated", payload: next }
+    ]);
+    return usage;
+  }
+
+  markUsed(id: string, input: { taskId?: string | null; runId?: string | null; source?: SkillUsageSource } = {}): SkillRecord {
+    this.recordUsage({
+      skillId: id,
+      taskId: input.taskId ?? null,
+      runId: input.runId ?? null,
+      status: "started",
+      source: input.source ?? "manual",
+      note: "技能开始执行"
+    });
+    return this.requireSkill(id);
+  }
+
+  applySnapshot(snapshot: SkillRecord, reason: string): SkillRecord {
+    const current = this.requireSkill(snapshot.id);
+    const next: SkillRecord = {
+      ...snapshot,
+      updatedAt: this.nowIso(),
+      changeReport: appendReport(current.changeReport, reason)
+    };
+    this.emitSkills([{ type: "skill.updated", payload: next }]);
+    return next;
+  }
+
+  usage(id: string, limit = 50): SkillUsageEvent[] {
+    this.requireSkill(id);
+    return this.service.store.listSkillUsage(id, limit);
   }
 
   exportMethod(methodId: string): SkillPackageExport {
@@ -639,6 +695,10 @@ export class SkillPackageService {
   private nowIso(): string {
     return this.clock().toISOString();
   }
+}
+
+function idFromUsage(input: { skillId: string }): string {
+  return input.skillId;
 }
 
 export function skillSlug(method: Pick<MethodCandidate, "id" | "name">): string {

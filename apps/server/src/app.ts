@@ -5,7 +5,7 @@ import { basename, join } from "node:path";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyReply } from "fastify";
 import type { EventEnvelope, ExecutorHealth, ExecutorId, ExecutorView, GoalBudget } from "@hearth/core";
-import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, EXECUTOR_IDS, GOAL_REVIEW_POLICIES, GOAL_STATES, GOAL_VALIDATORS, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_ORIGINS, MEMORY_RETENTIONS, MEMORY_SENSITIVITIES, MEMORY_TAINT_STATES, MEMORY_TIERS, MEMORY_TRUST_LEVELS, PROACTIVE_MODES, RUN_STATUSES, SKILL_STATUSES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
+import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, EXECUTOR_IDS, GOAL_REVIEW_POLICIES, GOAL_STATES, GOAL_VALIDATORS, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_ORIGINS, MEMORY_RETENTIONS, MEMORY_SENSITIVITIES, MEMORY_TAINT_STATES, MEMORY_TIERS, MEMORY_TRUST_LEVELS, PROACTIVE_MODES, RUN_STATUSES, SKILL_STATUSES, SKILL_USAGE_SOURCES, SKILL_USAGE_STATUSES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate } from "@hearth/templates";
 import { loadCodexProfile, runCodex } from "@hearth/codex-executor";
@@ -49,6 +49,7 @@ import { MemoryError, MemoryService } from "./memory.ts";
 import { MethodError, MethodService } from "./methods.ts";
 import { SkillPackageError } from "./skill-package.ts";
 import { SkillPackageService } from "./skills.ts";
+import { SkillCuratorService } from "./skill-curator.ts";
 import { ProactiveError, ProactiveService } from "./proactive.ts";
 import { SyncError, SyncService } from "./sync.ts";
 import { SecretBox } from "./secrets.ts";
@@ -337,6 +338,15 @@ const skillTransitionSchema = z.object({
   status: z.enum(SKILL_STATUSES),
   reason: z.string().trim().max(1000).optional()
 }).strict();
+const skillUsageSchema = z.object({
+  taskId: z.string().trim().min(1).max(100).nullable().optional(),
+  runId: z.string().trim().min(1).max(100).nullable().optional(),
+  status: z.enum(SKILL_USAGE_STATUSES),
+  source: z.enum(SKILL_USAGE_SOURCES).optional(),
+  note: z.string().trim().max(1000).optional()
+}).strict();
+const skillCuratorRunSchema = z.object({ dryRun: z.boolean().optional() }).strict();
+const skillCuratorRollbackSchema = z.object({ runId: z.string().trim().min(1).max(100) }).strict();
 const assignTaskMethodSchema = z.object({ methodId: z.string().trim().min(1).max(100).nullable() }).strict();
 const taskOrganizationSchema = z.object({
   pinned: z.boolean().optional(),
@@ -645,6 +655,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const skills = new SkillPackageService(service, methods, {
     rootDir: options.skillRoot ?? join(options.dataDir ?? DATA_DIR, "skills")
   });
+  const skillCurator = new SkillCuratorService({ service, skills });
   const sync = new SyncService(service, {
     ...(options.syncFetch ? { fetchImpl: options.syncFetch } : {}),
     ...(options.syncSecretBox ? { secretBox: options.syncSecretBox } : {})
@@ -757,7 +768,10 @@ export async function buildServer(options: BuildServerOptions = {}) {
     codexProfile
   });
   const diagnostics = new DiagnosticsService({ service, health, maintenance, webDist: WEB_DIST });
-  if (options.startMaintenance ?? options.startScheduler) maintenance.start();
+  if (options.startMaintenance ?? options.startScheduler) {
+    maintenance.start();
+    skillCurator.start();
+  }
   if (options.startProactive) proactive.start();
   if (options.startMailSync) mail.start();
   const app = Fastify({
@@ -792,6 +806,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     mail.stop();
     proactive.stop();
     maintenance.stop();
+    skillCurator.stop();
     schedules.stop();
     await scheduler?.stop();
     if (ownsStore) store.close();
@@ -1617,6 +1632,52 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
   });
 
+  app.get("/api/skills/usage", async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const skillId = typeof (request.query as { skillId?: unknown } | undefined)?.skillId === "string"
+      ? String((request.query as { skillId: string }).skillId)
+      : undefined;
+    return { usage: skills.snapshot().skills.length ? store.listSkillUsage(skillId, 200) : [] };
+  });
+
+  app.get("/api/skills/curator", async (_request, reply) => {
+    reply.header("cache-control", "no-store");
+    return skillCurator.snapshot();
+  });
+
+  app.post("/api/skills/curator/run", async (request, reply) => {
+    const parsed = skillCuratorRunSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_CURATOR_RUN", message: "Curator 参数不正确" });
+    return skillCurator.run({ dryRun: parsed.data.dryRun === true });
+  });
+
+  app.post("/api/skills/curator/rollback", async (request, reply) => {
+    const parsed = skillCuratorRollbackSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_CURATOR_ROLLBACK", message: "Curator 回滚参数不正确" });
+    try {
+      return skillCurator.rollback(parsed.data.runId);
+    } catch (error) {
+      return reply.code(409).send({ error: "SKILL_CURATOR_ROLLBACK_FAILED", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/skills/:id/usage", async (request, reply) => {
+    const parsed = skillUsageSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_USAGE", message: "技能使用记录参数不正确" });
+    try {
+      return skills.recordUsage({
+        skillId: request.params.id,
+        taskId: parsed.data.taskId ?? null,
+        runId: parsed.data.runId ?? null,
+        status: parsed.data.status,
+        ...(parsed.data.source ? { source: parsed.data.source } : {}),
+        ...(parsed.data.note ? { note: parsed.data.note } : {})
+      });
+    } catch (error) {
+      return sendSkillError(reply, error);
+    }
+  });
+
   app.get<{ Params: { id: string } }>("/api/skills/:id", async (request, reply) => {
     reply.header("cache-control", "no-store");
     try {
@@ -1673,7 +1734,13 @@ export async function buildServer(options: BuildServerOptions = {}) {
 
   app.post<{ Params: { id: string } }>("/api/skills/:id/used", async (request, reply) => {
     try {
-      return skills.markUsed(request.params.id);
+      const parsed = skillUsageSchema.partial().safeParse(request.body ?? {});
+      if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_USAGE", message: "技能使用记录参数不正确" });
+      return skills.markUsed(request.params.id, {
+        taskId: parsed.data.taskId ?? null,
+        runId: parsed.data.runId ?? null,
+        ...(parsed.data.source ? { source: parsed.data.source } : {})
+      });
     } catch (error) {
       return sendSkillError(reply, error);
     }

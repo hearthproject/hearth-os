@@ -45,6 +45,21 @@ describe("skills API", () => {
     const skillId = exported.json().skill.id as string;
     expect(exported.json().skill).toMatchObject({ status: "adopted", methodId: method.id });
 
+    const used = await app.inject({
+      method: "POST",
+      url: "/api/skills/" + skillId + "/usage",
+      payload: { status: "completed", source: "api" }
+    });
+    expect(used.statusCode).toBe(200);
+    const usage = await app.inject({ method: "GET", url: "/api/skills/usage?skillId=" + skillId });
+    expect(usage.statusCode).toBe(200);
+    expect(usage.json().usage[0]).toMatchObject({ skillId, status: "completed", source: "api" });
+    const curator = await app.inject({ method: "GET", url: "/api/skills/curator" });
+    expect(curator.statusCode).toBe(200);
+    const curatorRun = await app.inject({ method: "POST", url: "/api/skills/curator/run", payload: { dryRun: true } });
+    expect(curatorRun.statusCode).toBe(200);
+    expect(curatorRun.json().status).toBe("planned");
+
     const detail = await app.inject({ method: "GET", url: "/api/skills/" + skillId });
     expect(detail.statusCode).toBe(200);
     expect(detail.json().document.body).toContain("## Verification");

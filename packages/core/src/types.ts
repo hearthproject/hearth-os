@@ -1560,6 +1560,46 @@ export interface SkillVersion {
   createdAt: string;
 }
 
+export const SKILL_USAGE_STATUSES = ["started", "completed", "failed", "cancelled"] as const;
+export type SkillUsageStatus = (typeof SKILL_USAGE_STATUSES)[number];
+
+export const SKILL_USAGE_SOURCES = ["manual", "api", "scheduler", "agent", "trial"] as const;
+export type SkillUsageSource = (typeof SKILL_USAGE_SOURCES)[number];
+
+export interface SkillUsageEvent {
+  id: string;
+  skillId: string;
+  taskId: string | null;
+  runId: string | null;
+  status: SkillUsageStatus;
+  source: SkillUsageSource;
+  note: string;
+  createdAt: string;
+}
+
+export const SKILL_CURATOR_RUN_STATUSES = ["planned", "applied", "failed", "rolled_back"] as const;
+export type SkillCuratorRunStatus = (typeof SKILL_CURATOR_RUN_STATUSES)[number];
+
+export interface SkillCuratorAction {
+  skillId: string;
+  name: string;
+  from: SkillStatus;
+  to: SkillStatus;
+  reason: string;
+}
+
+export interface SkillCuratorRun {
+  id: string;
+  status: SkillCuratorRunStatus;
+  dryRun: boolean;
+  startedAt: string;
+  endedAt: string | null;
+  actions: SkillCuratorAction[];
+  backupPath: string | null;
+  report: string;
+  rolledBackAt: string | null;
+}
+
 export const SYNC_PEER_STATUSES = ["active", "revoked", "error"] as const;
 export type SyncPeerStatus = (typeof SYNC_PEER_STATUSES)[number];
 

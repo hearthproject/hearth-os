@@ -54,7 +54,9 @@ import type {
   ScheduleRunRecord,
   ScheduleRunStatus,
   SettingsMigrationRecord,
+  SkillCuratorRun,
   SkillRecord,
+  SkillUsageEvent,
   SkillVersion,
   SourceConnection,
   SourceItem,
@@ -101,7 +103,7 @@ export interface RunAggregate {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 21;
+export const CURRENT_SCHEMA_VERSION = 22;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -455,6 +457,15 @@ CREATE TABLE IF NOT EXISTS skill_versions (
   manifest_json TEXT NOT NULL, content_hash TEXT NOT NULL, path TEXT NOT NULL,
   method_id TEXT, method_version INTEGER, change_report TEXT NOT NULL, created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS skill_usage_events (
+  id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, task_id TEXT, run_id TEXT,
+  status TEXT NOT NULL, source TEXT NOT NULL, note TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS skill_curator_runs (
+  id TEXT PRIMARY KEY, status TEXT NOT NULL, dry_run INTEGER NOT NULL,
+  started_at TEXT NOT NULL, ended_at TEXT, actions_json TEXT NOT NULL,
+  backup_path TEXT, report TEXT NOT NULL, rolled_back_at TEXT
+);
 CREATE TABLE IF NOT EXISTS sync_peers (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL, status TEXT NOT NULL,
   token_hash TEXT NOT NULL UNIQUE, last_pull_seq INTEGER NOT NULL, last_pull_at TEXT,
@@ -570,6 +581,33 @@ export class HearthStore {
     return rows.map(rowToSkillVersion);
   }
 
+  listSkillUsage(skillId?: string, limit = 100): SkillUsageEvent[] {
+    const rows = skillId
+      ? this.db.prepare("SELECT * FROM skill_usage_events WHERE skill_id = ? ORDER BY created_at DESC LIMIT ?").all(skillId, limit) as DbRow[]
+      : this.db.prepare("SELECT * FROM skill_usage_events ORDER BY created_at DESC LIMIT ?").all(limit) as DbRow[];
+    return rows.map(rowToSkillUsage);
+  }
+
+  getSkillCuratorRun(id: string): SkillCuratorRun | null {
+    const row = this.db.prepare("SELECT * FROM skill_curator_runs WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToSkillCuratorRun(row) : null;
+  }
+
+  listSkillCuratorRuns(limit = 50): SkillCuratorRun[] {
+    const rows = this.db.prepare("SELECT * FROM skill_curator_runs ORDER BY started_at DESC LIMIT ?").all(limit) as DbRow[];
+    return rows.map(rowToSkillCuratorRun);
+  }
+
+  upsertSkillCuratorRun(run: SkillCuratorRun): SkillCuratorRun {
+    upsertSkillCuratorRunRow(this.db, run);
+    return run;
+  }
+
+  latestEventCreatedAt(): string | null {
+    const row = this.db.prepare("SELECT created_at FROM events ORDER BY seq DESC LIMIT 1").get() as DbRow | undefined;
+    return row ? String(row.created_at) : null;
+  }
+
   private migrate(): void {
     ensureColumn(this.db, "events", "origin_instance_id", "TEXT");
     ensureColumn(this.db, "events", "origin_seq", "INTEGER");
@@ -677,6 +715,9 @@ export class HearthStore {
       CREATE INDEX IF NOT EXISTS memory_forget_tombstones_memory_idx ON memory_forget_tombstones(memory_id);
       CREATE INDEX IF NOT EXISTS skills_status_idx ON skills(status, pinned, updated_at);
       CREATE INDEX IF NOT EXISTS skill_versions_skill_idx ON skill_versions(skill_id, created_at);
+      CREATE INDEX IF NOT EXISTS skill_usage_skill_idx ON skill_usage_events(skill_id, created_at);
+      CREATE INDEX IF NOT EXISTS skill_usage_task_idx ON skill_usage_events(task_id, created_at);
+      CREATE INDEX IF NOT EXISTS skill_curator_runs_started_idx ON skill_curator_runs(started_at);
     `);
     this.db.exec(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION}`);
     this.setMeta("schemaVersion", String(CURRENT_SCHEMA_VERSION));
@@ -2062,7 +2103,7 @@ export class HearthStore {
   rebuildProjections(): void {
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      this.db.exec("DELETE FROM backup_records; DELETE FROM maintenance_runs; DELETE FROM task_leases; DELETE FROM sync_conflicts; DELETE FROM sync_peers; DELETE FROM skill_versions; DELETE FROM skills; DELETE FROM method_trials; DELETE FROM method_evaluations; DELETE FROM method_candidates; DELETE FROM memory_consolidation_runs; DELETE FROM memory_forget_tombstones; DELETE FROM memory_forget_receipts; DELETE FROM memory_recalls; DELETE FROM memory_conflicts; DELETE FROM memory_versions; DELETE FROM memories; DELETE FROM memory_settings; DELETE FROM suggestion_events; DELETE FROM suggestions; DELETE FROM proactive_settings; DELETE FROM desktop_commands; DELETE FROM desktop_frames; DELETE FROM desktop_sessions; DELETE FROM pairing_requests; DELETE FROM devices; DELETE FROM outbox_drafts; DELETE FROM source_items; DELETE FROM sources; DELETE FROM artifacts; DELETE FROM effects; DELETE FROM approvals; DELETE FROM runs; DELETE FROM tasks;");
+      this.db.exec("DELETE FROM backup_records; DELETE FROM maintenance_runs; DELETE FROM task_leases; DELETE FROM sync_conflicts; DELETE FROM sync_peers; DELETE FROM skill_curator_runs; DELETE FROM skill_usage_events; DELETE FROM skill_versions; DELETE FROM skills; DELETE FROM method_trials; DELETE FROM method_evaluations; DELETE FROM method_candidates; DELETE FROM memory_consolidation_runs; DELETE FROM memory_forget_tombstones; DELETE FROM memory_forget_receipts; DELETE FROM memory_recalls; DELETE FROM memory_conflicts; DELETE FROM memory_versions; DELETE FROM memories; DELETE FROM memory_settings; DELETE FROM suggestion_events; DELETE FROM suggestions; DELETE FROM proactive_settings; DELETE FROM desktop_commands; DELETE FROM desktop_frames; DELETE FROM desktop_sessions; DELETE FROM pairing_requests; DELETE FROM devices; DELETE FROM outbox_drafts; DELETE FROM source_items; DELETE FROM sources; DELETE FROM artifacts; DELETE FROM effects; DELETE FROM approvals; DELETE FROM runs; DELETE FROM tasks;");
       for (const event of this.listEvents()) this.applyEvent(event);
       this.db.exec("COMMIT");
     } catch (error) {
@@ -2156,6 +2197,8 @@ export class HearthStore {
       case "method.trial.recorded": return insertMethodTrialRow(this.db, event.payload as MethodTrial);
       case "skill.updated": return upsertSkillRow(this.db, event.payload as SkillRecord);
       case "skill.version.recorded": return insertSkillVersionRow(this.db, event.payload as SkillVersion);
+      case "skill.usage.recorded": return insertSkillUsageRow(this.db, event.payload as SkillUsageEvent);
+      case "skill.curator.updated": return upsertSkillCuratorRunRow(this.db, event.payload as SkillCuratorRun);
       case "sync.peer.created":
       case "sync.peer.updated": return upsertSyncPeer(this.db, event.payload as SyncPeer & { tokenCipher?: string | null });
       case "sync.conflict.created":
@@ -2743,6 +2786,54 @@ function insertSkillVersionRow(db: DatabaseSync, version: SkillVersion): void {
     version.id, version.skillId, version.version, JSON.stringify(version.manifest),
     version.contentHash, version.path, version.methodId, version.methodVersion,
     version.changeReport, version.createdAt
+  );
+}
+
+function rowToSkillUsage(row: DbRow): SkillUsageEvent {
+  return {
+    id: String(row.id),
+    skillId: String(row.skill_id),
+    taskId: row.task_id == null ? null : String(row.task_id),
+    runId: row.run_id == null ? null : String(row.run_id),
+    status: String(row.status) as SkillUsageEvent["status"],
+    source: String(row.source) as SkillUsageEvent["source"],
+    note: String(row.note),
+    createdAt: String(row.created_at)
+  };
+}
+
+function insertSkillUsageRow(db: DatabaseSync, usage: SkillUsageEvent): void {
+  db.prepare(
+    `INSERT INTO skill_usage_events (id, skill_id, task_id, run_id, status, source, note, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET status=excluded.status, source=excluded.source, note=excluded.note`
+  ).run(usage.id, usage.skillId, usage.taskId, usage.runId, usage.status, usage.source, usage.note, usage.createdAt);
+}
+
+function rowToSkillCuratorRun(row: DbRow): SkillCuratorRun {
+  return {
+    id: String(row.id),
+    status: String(row.status) as SkillCuratorRun["status"],
+    dryRun: Number(row.dry_run) === 1,
+    startedAt: String(row.started_at),
+    endedAt: row.ended_at == null ? null : String(row.ended_at),
+    actions: JSON.parse(String(row.actions_json)),
+    backupPath: row.backup_path == null ? null : String(row.backup_path),
+    report: String(row.report),
+    rolledBackAt: row.rolled_back_at == null ? null : String(row.rolled_back_at)
+  };
+}
+
+function upsertSkillCuratorRunRow(db: DatabaseSync, run: SkillCuratorRun): void {
+  db.prepare(
+    `INSERT INTO skill_curator_runs (id, status, dry_run, started_at, ended_at, actions_json, backup_path, report, rolled_back_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET status=excluded.status, dry_run=excluded.dry_run, ended_at=excluded.ended_at,
+       actions_json=excluded.actions_json, backup_path=excluded.backup_path, report=excluded.report,
+       rolled_back_at=excluded.rolled_back_at`
+  ).run(
+    run.id, run.status, run.dryRun ? 1 : 0, run.startedAt, run.endedAt,
+    JSON.stringify(run.actions), run.backupPath, run.report, run.rolledBackAt
   );
 }
 
