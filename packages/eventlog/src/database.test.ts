@@ -34,8 +34,8 @@ function task(id = "task-1"): TaskRecord {
   return {
     id, templateId: "T01", title: "Meeting notes", goal: "Summarize a meeting", status: "queued",
     createdAt: "2026-11-05T00:00:00.000Z", updatedAt: "2026-11-05T00:00:00.000Z", deadline: null,
-    inputs: [{ kind: "file", label: "transcript", value: "eval/inputs/T01-meeting-transcript.md" }],
-    networkHosts: [], outputDir: "eval/runs/T01", currentRunId: null, nextAction: "开始执行", error: null
+    inputs: [{ kind: "text", label: "transcript", value: "Meeting decided to split evaluation tooling." }],
+    networkHosts: [], outputDir: ".hearth/artifacts/T01", currentRunId: null, nextAction: "开始执行", error: null
   };
 }
 

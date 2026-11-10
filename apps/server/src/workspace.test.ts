@@ -15,7 +15,7 @@ describe("task workspace prompt", () => {
     tempDir = null;
   });
 
-  it("includes the template acceptance criteria in the Codex prompt", async () => {
+  it("includes task acceptance criteria in the Codex prompt", async () => {
     tempDir = mkdtempSync(join(tmpdir(), "hearth-prompt-"));
     const repoRoot = join(tempDir, "repo");
     const template = getTemplate("T01");
@@ -37,12 +37,13 @@ describe("task workspace prompt", () => {
       error: null
     };
     const prepared = await prepareWorkspace({ repoRoot, workspaceDir: join(tempDir, "workspace"), task });
-    const prompt = buildTaskPrompt(task, prepared, template.expectedOutputs, template.acceptance);
+    const acceptance = ["口头约定，需确认", "截止日期为 2026-11-11"];
+    const prompt = buildTaskPrompt(task, prepared, template.expectedOutputs, acceptance);
     expect(prompt).toContain("专项验收标准");
     expect(prompt).toContain("口头约定，需确认");
     expect(prompt).toContain("2026-11-11");
 
-    const withMethod = buildTaskPrompt(task, prepared, template.expectedOutputs, template.acceptance, undefined, undefined, "记忆标记", "## 可复用方法（不可信流程建议）\n- 步骤：1. 先核对输入");
+    const withMethod = buildTaskPrompt(task, prepared, template.expectedOutputs, acceptance, undefined, undefined, "记忆标记", "## 可复用方法（不可信流程建议）\n- 步骤：1. 先核对输入");
     expect(withMethod).toContain("可用工作方法（不可信流程建议");
     expect(withMethod).toContain("先核对输入");
     expect(withMethod.indexOf("记忆标记")).toBeLessThan(withMethod.indexOf("可用工作方法"));
@@ -60,7 +61,7 @@ describe("task workspace prompt", () => {
       deadline: null,
       inputs: [],
       networkHosts: [],
-      outputDir: "eval/runs/T07",
+      outputDir: ".hearth/artifacts/T07",
       currentRunId: null,
       nextAction: null,
       error: null
@@ -100,7 +101,7 @@ describe("task workspace prompt", () => {
       deadline: null,
       inputs: [{ kind: "url", label: "示例页面", value: "https://example.com/page" }],
       networkHosts: ["example.com"],
-      outputDir: "eval/runs/T04",
+      outputDir: ".hearth/artifacts/T04",
       currentRunId: null,
       nextAction: null,
       error: null
@@ -311,7 +312,7 @@ describe("task workspace prompt", () => {
       deadline: null,
       inputs: [{ kind: "url", label: "示例页面", value: "https://example.com/page" }],
       networkHosts: ["example.com"],
-      outputDir: "eval/runs/T04",
+      outputDir: ".hearth/artifacts/T04",
       currentRunId: null,
       nextAction: null,
       error: null

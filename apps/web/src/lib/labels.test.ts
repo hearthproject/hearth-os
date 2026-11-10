@@ -34,7 +34,7 @@ function effect(overrides: Partial<EffectRecord> = {}): EffectRecord {
 const task = (status: TaskRecord["status"]): TaskRecord => ({
   id: "task-1", templateId: "T01", title: "标题", goal: "目标", status,
   createdAt: "2026-11-05T00:00:00.000Z", updatedAt: "2026-11-05T00:00:00.000Z", deadline: null,
-  inputs: [], networkHosts: [], outputDir: "eval/runs/T01", currentRunId: null, nextAction: null, error: null
+  inputs: [], networkHosts: [], outputDir: ".hearth/artifacts/T01", currentRunId: null, nextAction: null, error: null
 });
 
 describe("status labels", () => {

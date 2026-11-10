@@ -482,7 +482,7 @@ describe("Hearth server", () => {
     const task = response.json();
     expect(task.templateId).toBe("T01");
     expect(task.status).toBe("queued");
-    expect(task.outputDir).toBe("eval/runs/T01");
+    expect(task.outputDir).toBe(".hearth/artifacts/T01");
 
     const detail = await app.inject({ method: "GET", url: `/api/tasks/${task.id}` });
     expect(detail.statusCode).toBe(200);

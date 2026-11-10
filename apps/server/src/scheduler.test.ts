@@ -71,12 +71,12 @@ describe("Hearth scheduler", () => {
 
     const task = service.createTask({ templateId: "T01" });
     const completed = await waitForStatus(service, task.id, "completed");
-    expect(completed.outputDir).toBe("eval/runs/T01");
+    expect(completed.outputDir).toBe(".hearth/artifacts/T01");
 
-    const published = join(requireTemp(), "eval", "runs", "T01", "meeting-notes.md");
+    const published = join(requireTemp(), ".hearth", "artifacts", "T01", "meeting-notes.md");
     expect(existsSync(published)).toBe(true);
     expect(readFileSync(published, "utf8")).toContain("会议纪要");
-    const manifestPath = join(requireTemp(), "eval", "runs", "T01", "run-manifest.json");
+    const manifestPath = join(requireTemp(), ".hearth", "artifacts", "T01", "run-manifest.json");
     expect(existsSync(manifestPath)).toBe(true);
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
     expect(manifest.taskId).toBe(task.id);
