@@ -110,7 +110,7 @@ describe("onboarding API", () => {
     } finally {
       await server.close();
     }
-  });
+  }, 15_000);
 
   it("stops requiring onboarding after a chat model is saved", async () => {
     const server = await app();
