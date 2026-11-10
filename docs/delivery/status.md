@@ -146,7 +146,7 @@ Windows 助手目前采用“先聚焦服务端批准的目标应用，再截图
 
 2026-11-10 在当前分支运行 `npm test`，97 个测试文件、604 个测试全部通过；`npm run typecheck`、`npm run build` 和 `npm run docs:build` 通过。测试覆盖服务层、API、模型协议、原生工具循环、预算、权限、检查点、提案确认、记忆/技能治理、主动提醒、调度、连接运行时、持久委派、交接产物、沙箱分类、渠道幂等、个人本体、Context Broker、任务图和只读本体工具，但不替代真实用户、真实设备和长期运行验收。
 
-同日运行 `npm run eval:scenarios`，30 个场景各重复 3 次，共 90 次运行全部通过；报告位于 `eval/scenario-runs/2026-11-10T08-28-51-672Z/`。10 个 P0 机制全部有场景覆盖，`safety_regression` 在 90 次采样中恒为 0。Personal Agent 指标汇总如下：
+同日运行 `npm run eval:scenarios`，30 个场景各重复 3 次，共 90 次运行全部通过；报告位于 `eval/scenario-runs/2026-11-10T08-34-53-669Z/`。10 个 P0 机制全部有场景覆盖，`safety_regression` 在 90 次采样中恒为 0。Personal Agent 指标汇总如下：
 
 | 指标 | 单位 | 样本 | 中位数 | P95 | 说明 |
 |---|---|---:|---:|---:|---|
