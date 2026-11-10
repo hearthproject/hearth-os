@@ -8,7 +8,7 @@ import type {
   AgentToolAuthorizationRequest,
   RuntimeEvent
 } from "@hearth/agent-runtime";
-import type { ContextItem, ContextSettings, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, MethodCandidate, MethodSelection, RunBudget, RunCheckpointProof, RunCheckpointRecord, RunRecord, TaskError, TaskFollowUpRecord, TaskLease, TaskProgressDetail, TaskRecord } from "@hearth/core";
+import type { ContextItem, ContextSettings, DelegationJob, DelegationResult, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, MethodCandidate, MethodSelection, RunBudget, RunCheckpointProof, RunCheckpointRecord, RunRecord, TaskError, TaskFollowUpRecord, TaskLease, TaskProgressDetail, TaskRecord } from "@hearth/core";
 import { runCodex } from "@hearth/codex-executor";
 import { getTemplate } from "@hearth/templates";
 import type { DshApprovalOutcome, DshApprovalRequest, DshContextEvent } from "@hearth/deepseek-executor";
@@ -17,6 +17,7 @@ import { resolveAction, type ActionProposal, type ResolvedAction } from "./actio
 import { missingExpectedOutputs, publishArtifacts } from "./artifacts.ts";
 import { CONTEXT_BLOB_DIR, EXECUTOR_SETTINGS_PATH, GIT_CACHE_DIR, MODEL_SETTINGS_PATH, REPO_ROOT, SOURCE_CONTENT_DIR, WORKSPACE_DIR } from "./config.ts";
 import { ContextService, estimateTokens } from "./context.ts";
+import { DelegationError, DelegationService } from "./delegation.ts";
 import { diagnoseFailure } from "./context-diagnosis.ts";
 import { classifyFailure, decideFailure, evaluateHandoff, isExecutorFailureCause, type FailureDecision } from "./context-policy.ts";
 import { judgeCompletion } from "./completion-judge.ts";
@@ -36,6 +37,7 @@ import { MemoryService } from "./memory.ts";
 import { renderMethodBlock } from "./method-context.ts";
 import { MethodService } from "./methods.ts";
 import { DEFAULT_LEASE_HEARTBEAT_MS, LeaseError, TaskLeaseService } from "./leases.ts";
+import { SandboxService } from "./sandbox.ts";
 import { DEFAULT_RUN_BUDGET, runNativeTask } from "./native-executor.ts";
 import { chatModelConfigured, loadModelSettings, type ModelSettings } from "./model-settings.ts";
 import { prepareTaskRuntime, type RuntimePreparation } from "./runtime.ts";
@@ -80,6 +82,7 @@ export interface SchedulerOptions {
   runBudget?: RunBudget;
   approvals?: ApprovalManager;
   leases?: TaskLeaseService;
+  delegations?: DelegationService;
   leaseHeartbeatMs?: number;
   githubRun?: CommandRunner | undefined;
   githubCacheRoot?: string | undefined;
@@ -122,6 +125,7 @@ export class HearthScheduler {
   private readonly summaryTasks = new Set<Promise<void>>();
   private readonly summaryControllers = new Map<string, AbortController>();
   private readonly leases: TaskLeaseService;
+  private readonly delegations: DelegationService;
   private readonly leaseHeartbeatMs: number;
   private readonly leaseHeartbeats = new Map<string, { epoch: number; timer: ReturnType<typeof setInterval> }>();
   private readonly controllers = new Map<string, AbortController>();
@@ -177,6 +181,10 @@ export class HearthScheduler {
       if (this.context.settings().mode !== "off") this.context.recordChatMessage(message);
     });
     this.leases = options.leases ?? new TaskLeaseService(this.service);
+    this.delegations = options.delegations ?? new DelegationService({
+      service: this.service,
+      sandbox: new SandboxService()
+    });
     this.leaseHeartbeatMs = Math.max(50, options.leaseHeartbeatMs ?? DEFAULT_LEASE_HEARTBEAT_MS);
   }
 
@@ -188,6 +196,7 @@ export class HearthScheduler {
     if (!this.stopped) return;
     this.stopped = false;
     this.stopping = false;
+    this.delegations.recoverOrphans();
     this.recoverInterruptedTasks();
     this.resumeWaitingApprovalLeases();
     this.unsubscribe = this.service.bus.subscribe((event) => {
@@ -322,8 +331,14 @@ export class HearthScheduler {
 
   cancel(taskId: string): TaskRecord {
     const task = this.service.requireTask(taskId);
-    if (task.status === "completed" || task.status === "cancelled") return task;
+    if (task.status === "completed") return task;
+    if (task.status === "cancelled") {
+      this.controllers.get(taskId)?.abort();
+      this.releaseLease(taskId);
+      return task;
+    }
     this.cancelled.add(taskId);
+    this.cancelDelegationJobs(taskId);
     this.steering.delete(taskId);
     for (const followUp of this.service.store.listTaskFollowUps(taskId)) {
       if (followUp.status === "queued" || followUp.status === "steering") {
@@ -340,6 +355,27 @@ export class HearthScheduler {
     }, task.currentRunId ?? undefined);
     this.releaseLease(taskId);
     return this.service.requireTask(taskId);
+  }
+
+  private cancelDelegationJobs(taskId: string): void {
+    const jobs = [...this.service.store.listDelegationJobs(taskId)];
+    const childJob = this.service.store.getDelegationJobByChildTask(taskId);
+    if (childJob) jobs.push(childJob);
+    const seen = new Set<string>();
+    for (const job of jobs) {
+      if (seen.has(job.id) || job.status === "succeeded") continue;
+      seen.add(job.id);
+      try {
+        this.delegations.cancel(job.id, "任务已取消");
+        if (job.childTaskId) {
+          this.cancelled.add(job.childTaskId);
+          this.controllers.get(job.childTaskId)?.abort();
+          this.approvals?.expireForTask(job.childTaskId);
+        }
+      } catch {
+        // Cancellation is best effort; the parent task cancellation still fences new effects.
+      }
+    }
   }
 
   retry(taskId: string, input?: string): TaskRecord {
@@ -434,9 +470,21 @@ export class HearthScheduler {
     );
     queued.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
     let started = 0;
+    const scheduledDelegationExecutors = new Set<ExecutorId>();
     for (const task of queued) {
       if (this.stopped) break;
       const executorId = resolveExecutorId(task);
+      const delegationJob = this.service.store.getDelegationJobByChildTask(task.id);
+      if (delegationJob) {
+        if (delegationJob.status !== "queued") continue;
+        if (scheduledDelegationExecutors.has(delegationJob.targetExecutor)) continue;
+        const executorBusy = this.service.store.listActiveDelegationJobs().some((candidate) =>
+          candidate.id !== delegationJob.id
+          && candidate.targetExecutor === delegationJob.targetExecutor
+          && ["leased", "running"].includes(candidate.status)
+        );
+        if (executorBusy) continue;
+      }
       const active = this.activeByExecutor.get(executorId) ?? new Set<string>();
       const limit = Math.max(1, settings.concurrency[executorId] ?? 1);
       if (active.size >= limit) continue;
@@ -455,6 +503,7 @@ export class HearthScheduler {
         ]);
         continue;
       }
+      if (delegationJob) scheduledDelegationExecutors.add(delegationJob.targetExecutor);
       active.add(task.id);
       this.activeByExecutor.set(executorId, active);
       const promise = this.runTask(task)
@@ -598,12 +647,13 @@ export class HearthScheduler {
     this.service.updateRun(runId, taskId, { checkpointSeq: checkpoint.seq, usage: checkpoint.usage });
   }
 
-  private startLeaseHeartbeat(taskId: string, epoch: number, onLost: () => void): void {
+  private startLeaseHeartbeat(taskId: string, epoch: number, onLost: () => void, onHeartbeat?: () => void): void {
     const existing = this.leaseHeartbeats.get(taskId);
     if (existing) clearInterval(existing.timer);
     const timer = setInterval(() => {
       try {
         this.leases.heartbeat(taskId, epoch);
+        onHeartbeat?.();
       } catch {
         onLost();
         this.releaseLease(taskId);
@@ -809,14 +859,57 @@ export class HearthScheduler {
       throw error;
     }
     const leaseEpoch = lease.epoch;
+    const delegationJob = this.service.store.getDelegationJobByChildTask(taskId);
+    const delegationJobId = delegationJob?.id ?? null;
+    const delegationOwner = delegationJob ? `scheduler:${this.leases.ownerId}` : null;
+    let delegationHeartbeat: (() => void) | null = null;
     const controller = new AbortController();
     let leaseLost = false;
     this.startLeaseHeartbeat(taskId, leaseEpoch, () => {
       leaseLost = true;
       controller.abort();
-    });
+    }, () => delegationHeartbeat?.());
     this.controllers.set(taskId, controller);
     try {
+      if (delegationJobId && delegationOwner) {
+        const currentJob = this.service.store.getDelegationJob(delegationJobId);
+        if (!currentJob || currentJob.status === "cancelled") {
+          if (this.service.store.getTask(taskId)?.status !== "cancelled") {
+            this.service.updateTask(taskId, {
+              status: "cancelled",
+              nextAction: null,
+              error: null
+            });
+          }
+          return;
+        }
+        if (!["queued", "leased", "running"].includes(currentJob.status)) {
+          this.service.updateTask(taskId, {
+            status: "recoverable",
+            nextAction: "委派已结束，请从父任务重试或验收",
+            error: {
+              kind: "delegation_closed",
+              message: `委派当前状态为 ${currentJob.status}`,
+              recoverable: true,
+              guidance: "回到父任务查看委派结果，必要时重试"
+            }
+          });
+          return;
+        }
+        try {
+          this.delegations.lease(currentJob.id, delegationOwner);
+          this.delegations.start(currentJob.id, delegationOwner);
+        } catch (error) {
+          if (error instanceof DelegationError && error.code === "DELEGATION_EXECUTOR_BUSY") {
+            this.service.updateTask(taskId, { status: "queued", nextAction: "等待同一执行器完成当前委派" });
+            return;
+          }
+          throw error;
+        }
+        delegationHeartbeat = () => {
+          this.delegations.heartbeat(currentJob.id, delegationOwner);
+        };
+      }
       const initialTask = this.service.requireTask(taskId);
       let methodPlan: { method: MethodCandidate; selection: MethodSelection } | null = null;
       try {
@@ -1046,6 +1139,7 @@ export class HearthScheduler {
         return;
       }
     } finally {
+      this.finalizeDelegation(taskId, delegationJobId, delegationOwner);
       this.controllers.delete(taskId);
       this.cancelled.delete(taskId);
       if (this.service.store.getTask(taskId)?.status !== "waiting_approval") this.releaseLease(taskId);
@@ -1055,6 +1149,46 @@ export class HearthScheduler {
       } catch {
         // Experience capture is best effort and never changes the task outcome.
       }
+    }
+  }
+
+  private finalizeDelegation(taskId: string, jobId: string | null, owner: string | null): void {
+    if (!jobId || !owner) return;
+    try {
+      const job = this.service.store.getDelegationJob(jobId);
+      if (!job || !["leased", "running"].includes(job.status) || job.lease?.owner !== owner) return;
+      const task = this.service.store.getTask(taskId);
+      if (!task) {
+        this.delegations.fail(jobId, "子任务记录丢失", false);
+        return;
+      }
+      if (task.status === "completed") {
+        const artifacts = this.service.store.listArtifacts(taskId);
+        const evidenceRefs = artifacts.map((artifact) => `artifact:${artifact.id}`);
+        if (evidenceRefs.length === 0) evidenceRefs.push(`run:${task.currentRunId ?? task.id}`);
+        const result: DelegationResult = {
+          summary: task.resultSummary?.trim() || "子任务已完成",
+          evidenceRefs,
+          artifacts: artifacts.map((artifact) => artifact.relativePath),
+          unresolved: [],
+          status: "completed",
+          producedAt: new Date().toISOString()
+        };
+        this.delegations.complete(jobId, result);
+        return;
+      }
+      if (task.status === "cancelled") {
+        this.delegations.cancel(jobId, "子任务已取消");
+        return;
+      }
+      if (task.status === "waiting_input" || task.status === "waiting_approval") {
+        this.delegations.requeue(jobId, owner);
+        return;
+      }
+      const message = task.error?.message ?? task.nextAction ?? `子任务以 ${task.status} 结束`;
+      this.delegations.fail(jobId, message, task.error?.recoverable !== false);
+    } catch (error) {
+      console.error("[scheduler] delegation finalization failed:", error);
     }
   }
 

@@ -3,16 +3,18 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { ExecutorHealth, ExecutorId, HandoffRecord, HandoffStatus, TaskRecord, TaskStatus } from "@hearth/core";
+import type { DelegationJob, ExecutorHealth, ExecutorId, HandoffRecord, HandoffStatus, TaskRecord, TaskStatus } from "@hearth/core";
 import { defaultConversationSettings } from "@hearth/core";
 import type { CodexRunner, ExecutorHealthProvider, NativeRunner } from "./scheduler.ts";
 import { ApprovalManager } from "./approvals.ts";
 import { HearthStore } from "@hearth/eventlog";
 import { HearthScheduler } from "./scheduler.ts";
 import { HearthService } from "./service.ts";
+import { DelegationService } from "./delegation.ts";
 import { MemoryService } from "./memory.ts";
 import { MethodService } from "./methods.ts";
 import { TaskLeaseService } from "./leases.ts";
+import { SandboxService } from "./sandbox.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import type { DeepSeekHarnessRunOptions, DeepSeekHarnessRunResult, DshApprovalOutcome } from "@hearth/deepseek-executor";
 
@@ -100,6 +102,89 @@ describe("Hearth scheduler", () => {
     const failed = await waitForStatus(service, task.id, "recoverable");
     expect(failed.error?.kind).toBe("input_unavailable");
     expect(store?.listArtifacts(task.id)).toHaveLength(0);
+  });
+
+  it("runs a delegated child and waits for parent verification", async () => {
+    const service = setup();
+    const delegations = new DelegationService({
+      service,
+      workspaceRoot: join(requireTemp(), "delegations"),
+      sandbox: new SandboxService()
+    });
+    const runner: CodexRunner = async (options) => {
+      writeFileSync(join(testOutDir(options), "result.md"), "# 委派结果\n\n已完成只读检索。\n");
+      return FAKE_RESULT;
+    };
+    scheduler = makeScheduler(service, runner, { delegations });
+    const parent = service.createTask({
+      title: "委派父任务",
+      goal: "验证 Scheduler 委派生命周期",
+      permissions: {
+        readRoots: [requireTemp()],
+        writeRoots: [requireTemp()],
+        networkHosts: [],
+        tools: ["read_file", "finish_task"]
+      }
+    });
+    const job = delegations.create({
+      parentTaskId: parent.id,
+      goalSlice: "只读检索并写入 result.md",
+      targetExecutor: "codex",
+      contextPackRef: "context:task",
+      contextPack: { objective: "只读检索" },
+      workspacePolicy: "read-only",
+      idempotencyKey: "scheduler-delegation-1"
+    });
+
+    scheduler.start();
+    const awaiting = await waitForDelegationStatus(store as HearthStore, job.id, "awaiting_verification");
+    const child = service.requireTask(awaiting.childTaskId ?? "");
+    expect(child.status).toBe("completed");
+    expect(awaiting.result?.summary).toBe("done");
+    expect(awaiting.result?.artifacts).toContain("result.md");
+    expect(awaiting.result?.evidenceRefs.length).toBeGreaterThan(0);
+
+    const accepted = delegations.verify(job.id, {
+      parentTaskId: parent.id,
+      verdict: "accepted",
+      summary: "父任务已核对委派产物",
+      evidenceRefs: awaiting.result?.evidenceRefs ?? [],
+      checkedAt: new Date().toISOString()
+    });
+    expect(accepted.status).toBe("succeeded");
+  });
+
+  it("cancels delegated children with the parent task", async () => {
+    const service = setup();
+    const delegations = new DelegationService({
+      service,
+      workspaceRoot: join(requireTemp(), "delegations"),
+      sandbox: new SandboxService()
+    });
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, { delegations });
+    const parent = service.createTask({
+      title: "取消父任务",
+      goal: "验证取消传播",
+      permissions: {
+        readRoots: [requireTemp()],
+        writeRoots: [requireTemp()],
+        networkHosts: [],
+        tools: ["read_file", "finish_task"]
+      }
+    });
+    const job = delegations.create({
+      parentTaskId: parent.id,
+      goalSlice: "不会执行的子任务",
+      targetExecutor: "codex",
+      contextPackRef: "context:task",
+      workspacePolicy: "read-only",
+      idempotencyKey: "scheduler-cancel-1"
+    });
+
+    scheduler.cancel(parent.id);
+
+    expect(store?.getDelegationJob(job.id)?.status).toBe("cancelled");
+    expect(service.requireTask(job.childTaskId ?? "").status).toBe("cancelled");
   });
 
   it("marks a queued task recoverable when its executor is unavailable without crashing the loop", async () => {
@@ -1395,6 +1480,7 @@ describe("Hearth scheduler", () => {
       deepseekRunner?: (options: DeepSeekHarnessRunOptions) => Promise<DeepSeekHarnessRunResult>;
       modelSettingsForExecutor?: (executorId: ExecutorId) => ModelSettings | null;
       autoLearn?: boolean;
+      delegations?: DelegationService;
     } = {}
   ): HearthScheduler {
     return new HearthScheduler({
@@ -1480,6 +1566,17 @@ async function waitForHandoff(store: HearthStore, taskId: string, expected: Hand
   }
   const current = store.listHandoffs(taskId);
   throw new Error(`Timed out waiting for handoff ${expected}; current=${current.map((handoff) => handoff.status).join(",")}`);
+}
+
+async function waitForDelegationStatus(store: HearthStore, jobId: string, expected: DelegationJob["status"]): Promise<DelegationJob> {
+  const deadline = Date.now() + 4_000;
+  while (Date.now() < deadline) {
+    const job = store.getDelegationJob(jobId);
+    if (job?.status === expected) return job;
+    await delay(20);
+  }
+  const current = store.getDelegationJob(jobId);
+  throw new Error(`Timed out waiting for delegation ${expected}; current=${current?.status}`);
 }
 
 function delay(ms: number): Promise<void> {

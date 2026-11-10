@@ -874,6 +874,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
         methods,
         autoLearn: true,
         leases,
+        delegations,
         attachmentRoot,
         executorSettingsPath,
         executorSettingsProvider: () => executorSettingsStore.load(),
@@ -2900,7 +2901,9 @@ export async function buildServer(options: BuildServerOptions = {}) {
       return reply.code(400).send({ error: "INVALID_DELEGATION_CANCEL", message: "取消原因不正确" });
     }
     try {
-      return delegations.cancel(job.id, parsed.data.reason);
+      const cancelled = delegations.cancel(job.id, parsed.data.reason);
+      if (scheduler && cancelled.childTaskId) scheduler.cancel(cancelled.childTaskId);
+      return cancelled;
     } catch (error) {
       return sendDelegationFailure(reply, error);
     }
