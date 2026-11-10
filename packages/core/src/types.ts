@@ -78,6 +78,20 @@ export interface ExecutorHealth {
   issues: string[];
   experimental?: boolean | undefined;
   installState?: "available" | "missing" | "needs_repair" | "update_available" | "unsupported" | undefined;
+  state?: ExecutorHealthState | undefined;
+  verifiedAt?: string | null | undefined;
+  lastProbe?: ExecutorProbeSummary | null | undefined;
+}
+
+export type ExecutorHealthState = "missing" | "unconfigured" | "unverified" | "ready" | "failed" | "quota_exceeded";
+
+export interface ExecutorProbeSummary {
+  ok: boolean;
+  state: ExecutorHealthState;
+  error: string | null;
+  code: string | null;
+  elapsedMs: number;
+  checkedAt: string;
 }
 
 export interface ExecutorProbeResult {
@@ -150,6 +164,8 @@ export interface HermesHealth {
   command: string;
   version: string | null;
   issues: string[];
+  configured?: boolean | undefined;
+  configPath?: string | null | undefined;
 }
 
 export const TASK_KINDS = ["delivery", "workspace", "general"] as const;

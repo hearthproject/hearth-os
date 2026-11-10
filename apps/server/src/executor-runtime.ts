@@ -1,9 +1,10 @@
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { loadCodexProfile } from "@hearth/codex-executor";
+import { loadCodexProfile, probeCodex, type CodexProfile } from "@hearth/codex-executor";
+import { runDeepSeekHarness } from "@hearth/deepseek-executor";
 import type {
   ExecutorHealth,
   ExecutorId,
@@ -11,10 +12,17 @@ import type {
   ExecutorRuntimeSettings,
   ExecutorSettings
 } from "@hearth/core";
+import { applyExecutorModelReadiness, markExecutorUnavailable, type ExecutorBindingReadiness } from "./executor-readiness.ts";
+import { runExternalExecutor } from "./external-executor.ts";
 import { hermesHealth } from "./hermes-health.ts";
+import { probeHermes } from "./hermes-executor.ts";
+import { completeChat } from "./model-client.ts";
+import type { ModelSettings } from "./model-settings.ts";
 
 const HEALTH_TTL_MS = 30_000;
+const VERIFIED_TTL_MS = 24 * 60 * 60_000;
 const VERSION_TIMEOUT_MS = 6_000;
+const REAL_PROBE_TIMEOUT_MS = 60_000;
 
 export type ExecutorLaunchKind = "builtin" | "command" | "node-script" | "qoder-sdk";
 export type ExecutorLaunchSource = "builtin" | "configured" | "managed" | "detected" | "path";
@@ -47,6 +55,19 @@ interface CacheEntry {
   value: ExecutorHealth;
 }
 
+export interface ExecutorProbeOptions {
+  modelSettings?: ModelSettings | null | undefined;
+  binding?: ExecutorBindingReadiness | null | undefined;
+  codexProfile?: CodexProfile | null | undefined;
+  codexEnv?: Record<string, string> | undefined;
+}
+
+interface RealProbeOutcome {
+  ok: boolean;
+  error: string | null;
+  code: string | null;
+}
+
 const NODE_CLI_SPECS: Partial<Record<ExecutorId, NodeCliSpec>> = {
   workbuddy: {
     packageName: "@tencent-ai/codebuddy-code",
@@ -61,6 +82,7 @@ const NODE_CLI_SPECS: Partial<Record<ExecutorId, NodeCliSpec>> = {
 };
 
 const healthCache = new Map<string, CacheEntry>();
+const verifiedHealthCache = new Map<string, CacheEntry>();
 const require = createRequire(import.meta.url);
 
 export function executorHome(settingsPath: string, id: ExecutorId): string {
@@ -125,6 +147,8 @@ export function executorHealth(
   maxAgeMs = HEALTH_TTL_MS
 ): ExecutorHealth {
   const key = cacheKey(settingsPath, id);
+  const verified = verifiedHealthCache.get(key);
+  if (verified && Date.now() - verified.at < VERIFIED_TTL_MS) return verified.value;
   const cached = healthCache.get(key);
   if (cached && Date.now() - cached.at < maxAgeMs) return cached.value;
   const value = computeHealthSync(id, settings, settingsPath);
@@ -136,18 +160,57 @@ export async function probeExecutor(
   id: ExecutorId,
   settings: ExecutorSettings,
   settingsPath: string,
-  timeoutMs = VERSION_TIMEOUT_MS
+  timeoutMs = REAL_PROBE_TIMEOUT_MS,
+  options: ExecutorProbeOptions = {}
 ): Promise<ExecutorProbeResult> {
   const started = Date.now();
-  const health = await computeHealthAsync(id, settings, settingsPath, timeoutMs);
+  const quick = applyExecutorModelReadiness(
+    id,
+    await computeHealthAsync(id, settings, settingsPath, Math.min(timeoutMs, VERSION_TIMEOUT_MS)),
+    options.modelSettings ?? null,
+    options.binding
+  );
+  const checkedAt = new Date().toISOString();
+  let outcome: RealProbeOutcome;
+  if (quick.state === "missing" || quick.state === "unconfigured" || quick.state === "failed") {
+    outcome = {
+      ok: false,
+      error: quick.issues.join("；") || "执行器尚未配置完成",
+      code: quick.state === "missing" ? "EXECUTOR_MISSING" : quick.state === "unconfigured" ? "EXECUTOR_UNCONFIGURED" : "EXECUTOR_FAILED"
+    };
+  } else {
+    outcome = await runRealProbe(id, settings, settingsPath, timeoutMs, options);
+  }
+  const elapsedMs = Date.now() - started;
+  const failure = outcome.ok ? null : classifyExecutorProbeFailure(outcome.error ?? "执行器测试失败", outcome.code);
+  const state = outcome.ok ? "ready" : failure?.state ?? "failed";
+  const error = outcome.ok ? null : failure?.message ?? outcome.error ?? "执行器测试失败";
+  const health: ExecutorHealth = {
+    ...quick,
+    canRun: outcome.ok,
+    state,
+    verifiedAt: outcome.ok ? checkedAt : null,
+    lastProbe: {
+      ok: outcome.ok,
+      state,
+      error,
+      code: outcome.ok ? null : failure?.code ?? outcome.code,
+      elapsedMs,
+      checkedAt
+    },
+    issues: outcome.ok ? [] : [error ?? "执行器测试失败"],
+    installState: outcome.ok || state === "quota_exceeded" ? "available" : quick.installState ?? "needs_repair"
+  };
   healthCache.set(cacheKey(settingsPath, id), { at: Date.now(), value: health });
+  if (outcome.ok) verifiedHealthCache.set(cacheKey(settingsPath, id), { at: Date.now(), value: health });
+  else verifiedHealthCache.delete(cacheKey(settingsPath, id));
   return {
     id,
     ok: health.canRun,
     command: health.command,
     version: health.version,
-    error: health.issues.length > 0 ? health.issues.join("；") : null,
-    elapsedMs: Date.now() - started,
+    error,
+    elapsedMs,
     health
   };
 }
@@ -155,23 +218,28 @@ export async function probeExecutor(
 export function clearExecutorHealthCache(id?: ExecutorId): void {
   if (!id) {
     healthCache.clear();
+    verifiedHealthCache.clear();
     return;
   }
   const suffix = `::${id}`;
   for (const key of [...healthCache.keys()]) {
     if (key.endsWith(suffix)) healthCache.delete(key);
   }
+  for (const key of [...verifiedHealthCache.keys()]) {
+    if (key.endsWith(suffix)) verifiedHealthCache.delete(key);
+  }
 }
 
 function computeHealthSync(id: ExecutorId, settings: ExecutorSettings, settingsPath: string): ExecutorHealth {
   if (id === "native") {
-    return { id, canRun: true, command: "native", version: "builtin", issues: [], installState: "available" };
+    return { id, canRun: true, state: "ready", command: "native", version: "builtin", issues: [], installState: "available" };
   }
   if (id === "codex") {
     const profile = loadCodexProfile();
     return {
       id,
       canRun: profile.canRun,
+      state: profile.canRun ? "ready" : "unconfigured",
       command: "codex",
       version: null,
       issues: profile.issues,
@@ -183,6 +251,7 @@ function computeHealthSync(id: ExecutorId, settings: ExecutorSettings, settingsP
     return {
       id,
       canRun: Boolean(packagePath),
+      state: packagePath ? "unverified" : "missing",
       command: "dsh-sdk",
       version: packagePath ? packageVersion(packagePath) : null,
       issues: packagePath ? [] : ["DeepSeek Harness SDK 未安装；请重新安装项目依赖"],
@@ -194,11 +263,14 @@ function computeHealthSync(id: ExecutorId, settings: ExecutorSettings, settingsP
     const health = hermesHealth(command);
     return {
       id,
-      canRun: health.canRun,
+      canRun: false,
+      state: health.canRun ? "unverified" : health.version ? "unconfigured" : "missing",
       command: health.command,
       version: health.version,
-      issues: health.issues,
-      installState: health.canRun ? "available" : "missing"
+      issues: health.canRun
+        ? ["Hermes 尚未完成真实可用性测试；请在设置中点击“测试可用性”"]
+        : health.issues,
+      installState: health.canRun ? "available" : health.version ? "needs_repair" : "missing"
     };
   }
 
@@ -351,10 +423,11 @@ function commandLaunch(id: ExecutorId, command: string, source: ExecutorLaunchSo
 function genericLaunchHealth(id: ExecutorId, launch: ExecutorLaunch, check: VersionCheck): ExecutorHealth {
   return {
     id,
-    canRun: check.ok,
+    canRun: false,
+    state: check.ok ? "unverified" : "failed",
     command: launch.display,
     version: check.version,
-    issues: check.ok ? [] : [check.error ?? "无法启动执行器"],
+    issues: check.ok ? ["尚未完成真实可用性测试；请在设置中点击“测试可用性”"] : [check.error ?? "无法启动执行器"],
     installState: check.ok ? "available" : "needs_repair"
   };
 }
@@ -376,10 +449,11 @@ function qoderHealth(launch: ExecutorLaunch, runtime: ExecutorRuntimeSettings): 
   const versionParts = [sdkVersion ? `sdk ${sdkVersion}` : null, cliVersion ? `cli ${cliVersion}` : null].filter(Boolean);
   return {
     id: "qoder",
-    canRun: issues.length === 0,
+    canRun: false,
+    state: issues.length === 0 ? "unverified" : "failed",
     command: launch.display,
     version: versionParts.length > 0 ? versionParts.join(" / ") : null,
-    issues,
+    issues: issues.length === 0 ? ["尚未完成真实可用性测试；请在设置中点击“测试可用性”"] : issues,
     installState: issues.length === 0 ? "available" : "needs_repair"
   };
 }
@@ -388,11 +462,156 @@ function missingHealth(id: ExecutorId): ExecutorHealth {
   return {
     id,
     canRun: false,
+    state: "missing",
     command: "",
     version: null,
     issues: ["未检测到该执行器；请在设置中安装或填写可执行文件路径。"],
     installState: "missing"
   };
+}
+
+async function runRealProbe(
+  id: ExecutorId,
+  settings: ExecutorSettings,
+  settingsPath: string,
+  timeoutMs: number,
+  options: ExecutorProbeOptions
+): Promise<RealProbeOutcome> {
+  try {
+    if (id === "codex") {
+      const profile = options.codexProfile ?? loadCodexProfile();
+      const result = await withProbeTimeout(
+        probeCodex(profile, options.codexEnv),
+        timeoutMs,
+        "Codex 测试超时，请检查模型地址、网络和登录状态"
+      );
+      if (!result.ok) return { ok: false, error: result.error, code: null };
+      return verifyProbeText(result.text);
+    }
+    if (id === "native") {
+      if (!options.modelSettings) return { ok: false, error: "尚未配置聊天模型", code: "EXECUTOR_UNCONFIGURED" };
+      const result = await completeChat(options.modelSettings, [
+        { role: "system", content: "You are a connectivity probe. Reply with exactly HEARTH_OK and nothing else." },
+        { role: "user", content: "Reply with exactly HEARTH_OK. Do not use tools." }
+      ], { maxTokens: 24, temperature: 0, timeoutMs: Math.min(timeoutMs, 60_000) });
+      return verifyProbeText(result.content);
+    }
+    if (id === "deepseek-harness") {
+      if (!options.modelSettings) return { ok: false, error: "DeepSeek Harness 还没有绑定模型", code: "EXECUTOR_UNCONFIGURED" };
+      const root = mkdtempSync(join(tmpdir(), "hearth-probe-dsh-"));
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const result = await runDeepSeekHarness({
+          settings: {
+            protocol: options.modelSettings.protocol as "openai-chat" | "openai-responses" | "anthropic-messages",
+            baseUrl: options.modelSettings.baseUrl,
+            model: options.modelSettings.model,
+            apiKey: options.modelSettings.apiKey
+          },
+          dshHome: executorHome(settingsPath, "deepseek-harness"),
+          workingDirectory: root,
+          outDir: root,
+          prompt: "Reply with exactly HEARTH_OK and nothing else. Do not use tools.",
+          mode: "full",
+          maxTurns: 1,
+          runBudgetSeconds: Math.max(1, Math.round(timeoutMs / 1_000)),
+          signal: controller.signal
+        });
+        return verifyProbeText(result.finalResponse);
+      } finally {
+        clearTimeout(timer);
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+
+    const launch = resolveExecutorLaunch(id, settings, settingsPath);
+    if (!launch) return { ok: false, error: "未检测到该执行器；请先安装或配置命令路径", code: "EXECUTOR_MISSING" };
+    if (id === "hermes") {
+      const result = await withProbeTimeout(
+        probeHermes(launch.command, timeoutMs),
+        timeoutMs,
+        "Hermes 测试超时，请检查 provider、网络和额度"
+      );
+      if (!result.ok) return { ok: false, error: result.error ?? "Hermes 测试失败", code: result.code ?? null };
+      return verifyProbeText(result.text ?? "");
+    }
+
+    const root = mkdtempSync(join(tmpdir(), `hearth-probe-${id}-`));
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const result = await runExternalExecutor({
+        id,
+        launch,
+        workingDirectory: root,
+        prompt: "Reply with exactly HEARTH_OK and nothing else. Do not use tools.",
+        mode: "full",
+        maxTurns: 1,
+        runBudgetSeconds: Math.max(1, Math.round(timeoutMs / 1_000)),
+        signal: controller.signal
+      });
+      return verifyProbeText(result.finalResponse);
+    } catch (error) {
+      if (controller.signal.aborted) return { ok: false, error: `${id} 测试超时（${Math.round(timeoutMs / 1_000)} 秒）`, code: "PROBE_TIMEOUT" };
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      rmSync(root, { recursive: true, force: true });
+    }
+  } catch (error) {
+    return probeOutcomeFromError(error);
+  }
+}
+
+function verifyProbeText(text: string): RealProbeOutcome {
+  const normalized = text.trim();
+  if (normalized.includes("HEARTH_OK")) return { ok: true, error: null, code: null };
+  return {
+    ok: false,
+    error: `执行器未返回预期的最小响应 HEARTH_OK，实际返回：${normalized.slice(0, 500) || "（空）"}`,
+    code: "UNEXPECTED_PROBE_RESPONSE"
+  };
+}
+
+function probeOutcomeFromError(error: unknown): RealProbeOutcome {
+  const record = typeof error === "object" && error !== null ? error as { status?: unknown; code?: unknown } : {};
+  const status = typeof record.status === "number" ? record.status : null;
+  return {
+    ok: false,
+    error: error instanceof Error ? error.message : String(error),
+    code: typeof record.code === "string" ? record.code : status ? `HTTP_${status}` : null
+  };
+}
+
+function withProbeTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
+
+export function classifyExecutorProbeFailure(
+  message: string,
+  code?: string | null
+): { state: "failed" | "quota_exceeded"; code: string; message: string } {
+  const text = message.trim();
+  if (
+    code === "HTTP_429"
+    || /(?:HTTP\s*)?\b429\b|too many requests|rate.?limit|quota|insufficient_quota|usage limit|exceeded.*(?:quota|limit)|额度|余额不足|配额|请求过于频繁/i.test(`${code ?? ""} ${text}`)
+  ) {
+    return { state: "quota_exceeded", code: code ?? "QUOTA_EXCEEDED", message: text };
+  }
+  return { state: "failed", code: code ?? "PROBE_FAILED", message: text };
 }
 
 function checkVersionSync(launch: ExecutorLaunch): VersionCheck {

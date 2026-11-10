@@ -285,7 +285,8 @@ describe("chat-first API", () => {
 
       const probed = await app.inject({ method: "POST", url: "/api/executors/native/probe" });
       expect(probed.statusCode).toBe(200);
-      expect(probed.json().ok).toBe(true);
+      expect(probed.json().ok).toBe(false);
+      expect(probed.json().health.state).toBe("unconfigured");
 
       const unknown = await app.inject({ method: "POST", url: "/api/executors/unknown/probe" });
       expect(unknown.statusCode).toBe(404);

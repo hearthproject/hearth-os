@@ -15,7 +15,6 @@ import { registerChatRoutes } from "./chat-routes.ts";
 import { registerEvalRoutes } from "./eval-routes.ts";
 import { ReconcileError, ReconcileService } from "./reconcile.ts";
 import { ExecutorSettingsStore } from "./executor-settings.ts";
-import { probeHermes } from "./hermes-executor.ts";
 import { clearHermesHealthCache } from "./hermes-health.ts";
 import { clearExecutorHealthCache, executorHealth as readExecutorHealth, executorRuntimeSettings, probeExecutor } from "./executor-runtime.ts";
 import { applyExecutorModelReadiness } from "./executor-readiness.ts";
@@ -962,7 +961,17 @@ export async function buildServer(options: BuildServerOptions = {}) {
     backupRoot: options.backupRoot ?? BACKUP_DIR
   });
   const modelSettingsForExecutor = (executorId: ExecutorId) => modelRegistry.settingsForExecutorOrChat(executorId);
-  const codexProfile = () => modelRegistry.codexProfile() ?? loadCodexProfile();
+  const codexProfile = () => {
+    const binding = modelRegistry.bindingViews().find((item) => item.executorId === "codex");
+    if (binding?.profileId && !binding.available) {
+      return {
+        ...loadCodexProfile(),
+        canRun: false,
+        issues: [`Codex 的 Hearth 模型绑定不可用：${binding.issue ?? "请重新选择模型档案"}`]
+      };
+    }
+    return modelRegistry.codexProfile() ?? loadCodexProfile();
+  };
   const codexEnv = () => modelRegistry.codexEnv();
   const attachmentRoot = options.attachmentRoot ?? ATTACHMENT_DIR;
   const feishu = new FeishuService({
@@ -978,10 +987,14 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const executorInstaller = options.executorInstaller ?? new ExecutorInstaller();
   const executorHealth = (executorId: ExecutorId): ExecutorHealth => {
     const health = readExecutorHealth(executorId, executorSettingsStore.load(), executorSettingsPath);
+    const binding = modelRegistry.bindingViews().find((item) => item.executorId === executorId);
     return applyExecutorModelReadiness(
       executorId,
       health,
-      modelRegistry.settingsForExecutorOrChat(executorId)
+      modelRegistry.settingsForExecutorOrChat(executorId),
+      binding?.profileId
+        ? { explicit: true, available: binding.available, issue: binding.issue }
+        : null
     );
   };
   const onboarding = new OnboardingService({
@@ -1248,7 +1261,9 @@ export async function buildServer(options: BuildServerOptions = {}) {
     const parsed = createModelProfileSchema.safeParse(request.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: "INVALID_MODEL_PROFILE", message: "模型档案格式不正确" });
     try {
-      return reply.code(201).send({ profile: modelRegistry.createProfile(parsed.data) });
+      const profile = modelRegistry.createProfile(parsed.data);
+      clearExecutorHealthCache();
+      return reply.code(201).send({ profile });
     } catch (error) {
       return sendModelRegistryError(reply, error);
     }
@@ -1258,7 +1273,9 @@ export async function buildServer(options: BuildServerOptions = {}) {
     const parsed = updateModelProfileSchema.safeParse(request.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: "INVALID_MODEL_PROFILE", message: "模型档案格式不正确" });
     try {
-      return { profile: modelRegistry.updateProfile(request.params.id, parsed.data) };
+      const profile = modelRegistry.updateProfile(request.params.id, parsed.data);
+      clearExecutorHealthCache();
+      return { profile };
     } catch (error) {
       return sendModelRegistryError(reply, error);
     }
@@ -1267,6 +1284,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   app.delete<{ Params: { id: string } }>("/api/model-profiles/:id", async (request, reply) => {
     try {
       modelRegistry.deleteProfile(request.params.id);
+      clearExecutorHealthCache();
       return reply.code(204).send();
     } catch (error) {
       return sendModelRegistryError(reply, error);
@@ -1278,6 +1296,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     if (!parsed.success) return reply.code(400).send({ error: "INVALID_CHAT_PROFILE", message: "聊天模型选择格式不正确" });
     try {
       modelRegistry.setChatProfile(parsed.data.profileId);
+      clearExecutorHealthCache();
       const chat = modelRegistry.chatSettings();
       return { registry: modelRegistry.view(), chatConfigured: Boolean(chat && chatModelConfigured(chat)) };
     } catch (error) {
@@ -1293,7 +1312,9 @@ export async function buildServer(options: BuildServerOptions = {}) {
     const parsed = executorModelBindingSchema.safeParse(request.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: "INVALID_MODEL_BINDING", message: "执行器模型绑定格式不正确" });
     try {
-      return { binding: modelRegistry.saveBinding(id as ExecutorId, parsed.data) };
+      const binding = modelRegistry.saveBinding(id as ExecutorId, parsed.data);
+      clearExecutorHealthCache(id as ExecutorId);
+      return { binding };
     } catch (error) {
       return sendModelRegistryError(reply, error);
     }
@@ -1320,10 +1341,18 @@ export async function buildServer(options: BuildServerOptions = {}) {
 
   app.post("/api/hermes/probe", async () => {
     const settings = executorSettingsStore.load();
-    const result = await probeHermes(settings.hermesCommand);
-    clearHermesHealthCache(settings.hermesCommand);
+    clearHermesHealthCache(executorRuntimeSettings(settings, "hermes").command?.trim() || settings.hermesCommand);
     clearExecutorHealthCache("hermes");
-    return { ...result, health: executorHealth("hermes") };
+    const binding = modelRegistry.bindingViews().find((item) => item.executorId === "hermes");
+    const result = await probeExecutor("hermes", settings, executorSettingsPath, 60_000, {
+      modelSettings: modelRegistry.settingsForExecutorOrChat("hermes"),
+      binding: binding?.profileId ? { explicit: true, available: binding.available, issue: binding.issue } : null
+    });
+    return {
+      ...result,
+      code: result.health.lastProbe?.code ?? null,
+      health: executorHealth("hermes")
+    };
   });
 
   app.get("/api/executors", async () => {
@@ -1351,7 +1380,15 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
     const settings = executorSettingsStore.load();
     if (id === "hermes") clearHermesHealthCache(settings.hermesCommand);
-    return probeExecutor(id as ExecutorId, settings, executorSettingsPath);
+    const executorId = id as ExecutorId;
+    const binding = modelRegistry.bindingViews().find((item) => item.executorId === executorId);
+    const result = await probeExecutor(executorId, settings, executorSettingsPath, 60_000, {
+      modelSettings: modelRegistry.settingsForExecutorOrChat(executorId),
+      binding: binding?.profileId ? { explicit: true, available: binding.available, issue: binding.issue } : null,
+      codexProfile: codexProfile(),
+      codexEnv: codexEnv()
+    });
+    return { ...result, health: executorHealth(executorId) };
   });
 
   app.post<{ Params: { id: string } }>("/api/executors/:id/install", async (request, reply) => {

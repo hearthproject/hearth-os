@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { clearExecutorHealthCache, executorHealth, probeExecutor, resolveExecutorLaunch } from "./executor-runtime.ts";
+import { classifyExecutorProbeFailure, clearExecutorHealthCache, executorHealth, probeExecutor, resolveExecutorLaunch } from "./executor-runtime.ts";
 import { defaultExecutorSettings } from "./executor-settings.ts";
 
 const roots: string[] = [];
@@ -21,7 +21,10 @@ function writeScript(path: string, version: string): void {
     [
       "#!/usr/bin/env node",
       `if (process.argv.includes("--version")) { console.log(${JSON.stringify(version)}); process.exit(0); }`,
-      "console.log(JSON.stringify({ argv: process.argv.slice(2) }));"
+      "console.log(JSON.stringify({ type: 'system', subtype: 'init', session_id: 'probe-session' }));",
+      "console.log(JSON.stringify({ role: 'assistant', content: 'HEARTH_OK' }));",
+      "console.log(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'HEARTH_OK' }] } }));",
+      "console.log(JSON.stringify({ type: 'result', subtype: 'success', result: 'HEARTH_OK', session_id: 'probe-session' }));"
     ].join("\n"),
     "utf8"
   );
@@ -42,7 +45,7 @@ describe("executor runtime", () => {
     else process.env.HEARTH_EXECUTOR_DETECT = previousDetect;
   });
 
-  it("resolves and probes a managed node cli", () => {
+  it("resolves a managed node cli and only marks it ready after a real probe", async () => {
     const root = tempRoot();
     const settingsPath = join(root, "executor-settings.json");
     const script = join(root, "executors", "workbuddy", "node_modules", "@tencent-ai", "codebuddy-code", "bin", "codebuddy");
@@ -54,12 +57,19 @@ describe("executor runtime", () => {
     expect(launch?.kind).toBe("node-script");
 
     const health = executorHealth("workbuddy", settings, settingsPath, 0);
-    expect(health.canRun).toBe(true);
+    expect(health.canRun).toBe(false);
+    expect(health.state).toBe("unverified");
     expect(health.version).toBe("9.9.9");
     expect(health.installState).toBe("available");
+
+    const probed = await probeExecutor("workbuddy", settings, settingsPath, 10_000);
+    expect(probed.ok).toBe(true);
+    expect(probed.health.state).toBe("ready");
+    expect(probed.health.verifiedAt).toBeTruthy();
+    expect(executorHealth("workbuddy", settings, settingsPath, 0).canRun).toBe(true);
   });
 
-  it("uses a configured executable path and reports a missing executor", () => {
+  it("uses a configured executable path and reports a missing executor", async () => {
     const root = tempRoot();
     const settingsPath = join(root, "executor-settings.json");
     const script = join(root, "fake-kimi.mjs");
@@ -68,8 +78,12 @@ describe("executor runtime", () => {
     const settings = defaultExecutorSettings();
     settings.executors.kimi = { executablePath: script };
     const health = executorHealth("kimi", settings, settingsPath, 0);
-    expect(health.canRun).toBe(true);
+    expect(health.canRun).toBe(false);
+    expect(health.state).toBe("unverified");
     expect(health.version).toBe("2.5.2");
+
+    const probed = await probeExecutor("kimi", settings, settingsPath, 10_000);
+    expect(probed.ok).toBe(true);
 
     const missing = executorHealth("workbuddy", settings, settingsPath, 0);
     expect(missing.canRun).toBe(false);
@@ -84,5 +98,11 @@ describe("executor runtime", () => {
     expect(result.ok).toBe(false);
     expect(result.error).toBeTruthy();
     expect(result.health.installState).toBe("missing");
+  });
+
+  it("classifies 429 and quota failures as quota_exceeded", () => {
+    expect(classifyExecutorProbeFailure("429 Too Many Requests", "HTTP_429").state).toBe("quota_exceeded");
+    expect(classifyExecutorProbeFailure("当前账户额度已用尽", null).state).toBe("quota_exceeded");
+    expect(classifyExecutorProbeFailure("connection refused", null).state).toBe("failed");
   });
 });

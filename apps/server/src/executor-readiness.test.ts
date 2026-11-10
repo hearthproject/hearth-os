@@ -40,6 +40,14 @@ describe("executor model readiness", () => {
     const missing = applyExecutorModelReadiness("codex", base, settings({ apiKey: "" }));
     expect(missing.canRun).toBe(false);
     expect(missing.issues.join(" ")).toContain("API Key");
+
+    const invalidBinding = applyExecutorModelReadiness("codex", base, null, {
+      explicit: true,
+      available: false,
+      issue: "模型档案缺少 API Key"
+    });
+    expect(invalidBinding.canRun).toBe(false);
+    expect(invalidBinding.issues.join(" ")).toContain("Hearth 模型绑定不可用");
   });
 
   it("requires a usable DeepSeek Harness binding", () => {

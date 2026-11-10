@@ -36,7 +36,9 @@ export interface HermesProbeResult {
   ok: boolean;
   command: string;
   version: string | null;
+  text: string | null;
   error: string | null;
+  code: string | null;
   elapsedMs: number;
 }
 
@@ -331,25 +333,76 @@ export function hermesArgs(options: {
   return args;
 }
 
-export function probeHermes(command: string, timeoutMs = 8_000): Promise<HermesProbeResult> {
+export function probeHermes(command: string, timeoutMs = 60_000): Promise<HermesProbeResult> {
   const started = Date.now();
   return new Promise((resolve) => {
-    execFile(command, ["--version"], { timeout: timeoutMs, windowsHide: true }, (error, stdout, stderr) => {
-      const elapsedMs = Date.now() - started;
+    execFile(command, ["--version"], { timeout: Math.min(timeoutMs, 8_000), windowsHide: true }, async (error, stdout, stderr) => {
       if (error) {
         resolve({
           ok: false,
           command,
           version: null,
+          text: null,
           error: `无法运行“${command} --version”：${error.message}`,
-          elapsedMs
+          code: "EXECUTOR_MISSING",
+          elapsedMs: Date.now() - started
         });
         return;
       }
       const version = `${stdout}${stderr}`.trim().split(/\r?\n/)[0] ?? null;
-      resolve({ ok: true, command, version: version || null, error: null, elapsedMs });
+      const root = mkdtempSync(join(tmpdir(), "hearth-hermes-probe-"));
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), Math.max(1_000, timeoutMs - (Date.now() - started)));
+      try {
+        const result = await runHermes({
+          command,
+          workingDirectory: root,
+          prompt: "Reply with exactly HEARTH_OK and nothing else. Do not use tools or read any files.",
+          mode: "full",
+          maxTurns: 1,
+          runBudgetSeconds: Math.max(1, Math.round(timeoutMs / 1_000)),
+          signal: controller.signal
+        });
+        const text = result.finalResponse.trim();
+        if (text.includes("HEARTH_OK")) {
+          resolve({ ok: true, command, version: version || null, text, error: null, code: null, elapsedMs: Date.now() - started });
+        } else {
+          resolve({
+            ok: false,
+            command,
+            version: version || null,
+            text,
+            error: `Hermes 未返回预期的最小响应 HEARTH_OK，实际返回：${clip(text, 500) || "（空）"}`,
+            code: "UNEXPECTED_PROBE_RESPONSE",
+            elapsedMs: Date.now() - started
+          });
+        }
+      } catch (caught) {
+        const message = controller.signal.aborted
+          ? `Hermes 测试超时（${Math.round(timeoutMs / 1_000)} 秒）`
+          : caught instanceof Error ? caught.message : String(caught);
+        resolve({
+          ok: false,
+          command,
+          version: version || null,
+          text: null,
+          error: message,
+          code: hermesProbeErrorCode(message),
+          elapsedMs: Date.now() - started
+        });
+      } finally {
+        clearTimeout(timer);
+        rmSync(root, { recursive: true, force: true });
+      }
     });
   });
+}
+
+export function hermesProbeErrorCode(message: string): string {
+  if (/\b429\b|too many requests|rate.?limit|quota|额度|配额|余额|上限/i.test(message)) return "HTTP_429";
+  if (/approval|审批/i.test(message)) return "APPROVAL_REQUIRED";
+  if (/login|auth|api.?key|credential|登录|认证/i.test(message)) return "AUTH_FAILED";
+  return "PROBE_FAILED";
 }
 
 function killProcessTree(pid: number | undefined): void {
