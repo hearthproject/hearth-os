@@ -116,9 +116,9 @@ Hearth 已经越过**第一阶段（MVP）**的硬门槛：15 个跨行业真实
 
 ## 架构图
 
-![Hearth OS 当前代码架构](./assets/Hearth-OS-Architecture-Portrait.png)
+[![Hearth OS 代码架构](./assets/Hearth-OS-Architecture-Light.png)](./assets/Hearth-OS-Architecture-Light.png)
 
-<sub>当前代码架构覆盖入口与触发、Fastify API、控制与编排、执行器与 Runtime、事实源与文件、前端状态闭环、外部世界与副作用，以及代码事实边界。竖版长图按 README 列宽直接阅读即可。</sub>
+<sub>当前代码架构覆盖入口与触发、Fastify API、控制与编排、执行器与 Runtime、事实源与文件、前端状态闭环、外部世界与副作用，以及代码事实边界。点击图片可查看原图。</sub>
 
 ### 运行时数据流
 
