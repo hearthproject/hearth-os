@@ -116,9 +116,9 @@ Hearth 已经越过**第一阶段（MVP）**的硬门槛：15 个跨行业真实
 
 ## 架构图
 
-[![Hearth OS 代码架构](https://media.githubusercontent.com/media/hearthproject/hearth-os/a7bc16c/assets/Hearth-OS-Architecture-Light.png)](https://media.githubusercontent.com/media/hearthproject/hearth-os/a7bc16c/assets/Hearth-OS-Architecture-Light.png)
+[![Hearth 本地代理操作系统架构](https://media.githubusercontent.com/media/hearthproject/hearth-os/main/assets/Hearth-Architecture-Light.png)](https://media.githubusercontent.com/media/hearthproject/hearth-os/main/assets/Hearth-Architecture-Light.png)
 
-<sub>当前代码架构覆盖入口与触发、Fastify API、控制与编排、执行器与 Runtime、事实源与文件、前端状态闭环、外部世界与副作用，以及代码事实边界。点击图片可查看原图。</sub>
+<sub>当前架构：单进程 Fastify 控制平面 + SQLite 事件账本 + 可插拔执行器；覆盖触点与入口、本地控制平面、执行平面、事实层及边界约束。点击图片可查看原图。</sub>
 
 ### 运行时数据流
 
