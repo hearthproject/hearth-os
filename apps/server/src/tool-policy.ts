@@ -1,5 +1,7 @@
 export const TOOL_APPROVAL_REQUIRED = new Set([
   "write_file",
+  "write_spreadsheet",
+  "write_document",
   "edit_file",
   "apply_patch",
   "shell",
@@ -27,6 +29,8 @@ export function toolApprovalSummary(toolName: string, value: unknown): string {
   const command = typeof args.command === "string" ? args.command : null;
   const url = typeof args.url === "string" ? args.url : null;
   if (toolName === "write_file") return `写入工作区文件：${path ?? "未指定路径"}`;
+  if (toolName === "write_spreadsheet") return `生成表格文件：${path ?? "未指定路径"}`;
+  if (toolName === "write_document") return `生成文档文件：${path ?? "未指定路径"}`;
   if (toolName === "edit_file") return `修改工作区文件：${path ?? "未指定路径"}`;
   if (toolName === "apply_patch") return "应用补丁修改工作区文件";
   if (toolName === "shell") return `运行命令：${clipText(command ?? "未指定命令", 160)}`;

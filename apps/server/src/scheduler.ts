@@ -2773,7 +2773,7 @@ export function resolveToolAction(input: {
         shell: windows ? "powershell" : "sh"
       }
     };
-  } else if (input.toolName === "write_file" || input.toolName === "edit_file") {
+  } else if (input.toolName === "write_file" || input.toolName === "write_spreadsheet" || input.toolName === "write_document" || input.toolName === "edit_file") {
     const path = typeof args.path === "string" ? args.path : typeof args.fileName === "string" ? args.fileName : null;
     if (path) {
       const absolute = isAbsolute(path) ? resolve(path) : resolve(input.workspaceRoot, path);

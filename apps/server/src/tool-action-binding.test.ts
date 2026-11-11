@@ -12,6 +12,22 @@ afterEach(() => {
 });
 
 describe("native tool action binding", () => {
+  it("binds office artifact writes to their destination files", () => {
+    const root = tempRoot();
+    for (const toolName of ["write_spreadsheet", "write_document"]) {
+      const action = resolveToolAction({
+        toolName,
+        argumentsValue: { path: `${toolName}.out` },
+        summary: "生成办公文件",
+        workspaceRoot: root,
+        fullPermission: false,
+        context: "interactive"
+      });
+      expect(action?.kind).toBe("file_write");
+      expect(action?.files[0]?.mode).toBe("create");
+    }
+  });
+
   it("binds every apply_patch file and detects post-approval content changes", () => {
     const root = tempRoot();
     const existing = join(root, "notes.md");
