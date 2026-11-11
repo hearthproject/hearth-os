@@ -283,6 +283,15 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
       break;
     }
   }
+  if (!Array.isArray(root.ranges) && isPlainObject(root.statistics)) {
+    for (const key of ["byCity", "byRegion", "byGroup"]) {
+      const ranges = (root.statistics as Record<string, unknown>)[key];
+      if (!Array.isArray(ranges) || ranges.length < 2) continue;
+      root.ranges = ranges;
+      changed = true;
+      break;
+    }
+  }
   for (const [key, countKey] of Object.entries(ARRAY_COUNTS)) {
     if (Object.hasOwn(root, countKey) || !Array.isArray(root[key])) continue;
     root[countKey] = (root[key] as unknown[]).length;

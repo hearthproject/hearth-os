@@ -266,6 +266,26 @@ describe("json deliverables", () => {
     }
   });
 
+  it("derives ranges from grouped statistics", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "result.json");
+      writeFileSync(path, JSON.stringify({
+        statistics: {
+          byCity: [
+            { city: "上海", min: 420000, max: 460000 },
+            { city: "杭州", min: 380000, max: 380000 }
+          ]
+        }
+      }));
+      normalizeJsonDeliverables(dir, ["result.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.ranges).toHaveLength(2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("normalizes review, delivery and send result contracts", () => {
     const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
     try {
