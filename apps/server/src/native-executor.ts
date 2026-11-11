@@ -434,7 +434,7 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
     }
   }
   if (!Object.hasOwn(root, "feasible")) {
-    const verdict = String(root.verdict ?? root.planStatus ?? "").toLowerCase();
+    const verdict = String(root.verdict ?? root.planStatus ?? root.status ?? "").toLowerCase();
     if (/infeasible|not[_ ]?feasible|unachievable|blocked/.test(verdict)) {
       root.feasible = false;
       changed = true;

@@ -225,7 +225,7 @@ describe("json deliverables", () => {
     try {
       const path = join(dir, "result.json");
       writeFileSync(path, JSON.stringify({
-        facts: { verdict: "conditionally_feasible" }
+        facts: { status: "conditionally_feasible" }
       }));
       normalizeJsonDeliverables(dir, ["result.json"]);
       const parsed = JSON.parse(readFileSync(path, "utf8"));
