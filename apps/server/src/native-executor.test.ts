@@ -609,7 +609,7 @@ describe("json deliverables", () => {
           externalInviteeCount: 1,
           approvalRequired: true,
           inviteSent: false,
-          sensitiveAgendaExternalSharingAllowed: false
+          sensitiveSharingAllowed: false
         }
       }));
       normalizeJsonDeliverables(dir, ["result.json"]);

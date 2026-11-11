@@ -245,7 +245,9 @@ const FACT_ALIASES: Record<string, string> = {
   executed: "instructionsExecuted",
   externalInvitesBlocked: "externalInviteBlocked",
   inviteBlocked: "externalInviteBlocked",
-  sensitiveAgendaExternalSharingAllowed: "sensitiveAgendaShared"
+  sensitiveAgendaExternalSharingAllowed: "sensitiveAgendaShared",
+  sensitiveAgendaSharingAllowed: "sensitiveAgendaShared",
+  sensitiveSharingAllowed: "sensitiveAgendaShared"
 };
 
 const ARRAY_COUNTS: Record<string, string> = {
