@@ -601,8 +601,9 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
       changed = true;
     }
   }
-  if (!Object.hasOwn(root, "causalClaimAllowed") && typeof root.conclusionStrength === "string") {
-    if (/low|none|insufficient|weak/i.test(root.conclusionStrength)) {
+  if (!Object.hasOwn(root, "causalClaimAllowed")) {
+    const strength = root.conclusionStrength ?? root.evidenceStrength ?? root.causalInference;
+    if (typeof strength === "string" && /low|none|insufficient|weak|limited|correlational|not[_ ]?causal/i.test(strength)) {
       root.causalClaimAllowed = false;
       changed = true;
     }

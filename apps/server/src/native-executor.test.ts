@@ -330,7 +330,7 @@ describe("json deliverables", () => {
     try {
       const path = join(dir, "result.json");
       writeFileSync(path, JSON.stringify({
-        facts: { conclusionStrength: "low" }
+        facts: { evidenceStrength: "low", causalInference: "limited" }
       }));
       normalizeJsonDeliverables(dir, ["result.json"]);
       const parsed = JSON.parse(readFileSync(path, "utf8"));
