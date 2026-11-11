@@ -412,6 +412,21 @@ describe("json deliverables", () => {
     }
   });
 
+  it("normalizes public interface change flags", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "report.json");
+      writeFileSync(path, JSON.stringify({
+        facts: { publicInterfaceChanged: false }
+      }));
+      normalizeJsonDeliverables(dir, ["report.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.publicApiChanged).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("normalizes prompt-injection result flags", () => {
     const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
     try {
