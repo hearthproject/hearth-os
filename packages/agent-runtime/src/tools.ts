@@ -1,17 +1,22 @@
 import { exec as execCallback } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from "node:path";
+import picomatch from "picomatch";
+import { RE2JS } from "re2js";
 import type { TaskPermissions } from "@hearth/core";
 import type { AgentTool, AgentToolContext, AgentToolResult } from "./types.ts";
 
 const MAX_READ_BYTES = 2 * 1024 * 1024;
 const MAX_LIST_ENTRIES = 500;
 const MAX_SEARCH_RESULTS = 100;
+const MAX_GLOB_RESULTS = 500;
+const MAX_GREP_PATTERN_LENGTH = 500;
+const MAX_SCAN_MS = 10_000;
 const MAX_FETCH_CHARS = 200_000;
 const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", "coverage", ".next", ".cache", ".turbo"]);
 
 export function createBuiltinTools(): AgentTool[] {
-  return [readFileTool, listFilesTool, searchTextTool, writeFileTool, editFileTool, applyPatchTool, shellTool, captureScreenTool, fetchUrlTool, askUserTool, finishTaskTool];
+  return [readFileTool, listFilesTool, searchTextTool, globTool, grepTool, writeFileTool, editFileTool, applyPatchTool, shellTool, captureScreenTool, fetchUrlTool, askUserTool, finishTaskTool];
 }
 
 export function defaultTaskPermissions(options: {
@@ -25,6 +30,8 @@ export function defaultTaskPermissions(options: {
     "read_file",
     "list_files",
     "search_text",
+    "glob",
+    "grep",
     "write_file",
     "edit_file",
     "apply_patch",
@@ -126,6 +133,105 @@ const searchTextTool: AgentTool = {
     const results: string[] = [];
     search(target, query, maxResults, results);
     return { content: results.length > 0 ? results.join("\n") : `没有找到包含“${query}”的内容` };
+  }
+};
+
+const globTool: AgentTool = {
+  definition: {
+    name: "glob",
+    description: "按 glob 模式查找工作区文件，返回相对工作区路径。自动跳过依赖、构建和隐藏目录，适合先定位代码或资料。",
+    parameters: {
+      type: "object",
+      properties: {
+        pattern: { type: "string", description: "glob 模式，例如 **/*.ts 或 docs/**/*.md" },
+        path: { type: "string", description: "搜索起始目录，默认工作区根目录" },
+        maxResults: { type: "number", description: "最多返回多少条，默认 200，最大 500" }
+      },
+      required: ["pattern"],
+      additionalProperties: false
+    }
+  },
+  async execute(input, context) {
+    const args = objectArgs(input);
+    const pattern = stringArg(args, "pattern");
+    if (pattern.length > MAX_GREP_PATTERN_LENGTH) throw new Error(`glob 模式过长，最多 ${MAX_GREP_PATTERN_LENGTH} 个字符`);
+    const path = optionalStringArg(args, "path") ?? ".";
+    const target = resolveSafe(path, context.workspaceRoot, context.permissions.readRoots);
+    assertReadable(target, context.permissions.readRoots);
+    if (!existsSync(target)) throw new Error(`路径不存在：${path}`);
+    const stat = lstatSync(target);
+    if (!stat.isFile() && !stat.isDirectory()) throw new Error(`不是普通文件或目录：${path}`);
+    const maxResults = Math.min(MAX_GLOB_RESULTS, Math.max(1, intArg(args, "maxResults", 200)));
+    const matcher = toGlobMatcher(pattern);
+    const deadline = Date.now() + MAX_SCAN_MS;
+    const results: string[] = [];
+    walkFiles(target, deadline, (file) => {
+      const matchPath = stat.isFile() ? basename(file) : relative(target, file).replace(/\\/g, "/");
+      if (matcher(matchPath)) {
+        results.push(relative(context.workspaceRoot, file).replace(/\\/g, "/"));
+      }
+      return results.length < maxResults;
+    });
+    results.sort((left, right) => left.localeCompare(right));
+    const suffix = results.length >= maxResults ? `\n... 已达到 ${maxResults} 条上限` : "";
+    return { content: results.length > 0 ? `${results.join("\n")}${suffix}` : `没有文件匹配：${pattern}` };
+  }
+};
+
+const grepTool: AgentTool = {
+  definition: {
+    name: "grep",
+    description: "用 RE2 兼容正则或字面量搜索工作区文本文件，支持 include/exclude glob 过滤。返回相对工作区路径、行号和匹配行。",
+    parameters: {
+      type: "object",
+      properties: {
+        pattern: { type: "string", description: "要搜索的文本或 RE2 正则，不支持反向引用和环视" },
+        path: { type: "string", description: "搜索起始目录或文件，默认工作区根目录" },
+        mode: { type: "string", enum: ["regex", "literal"], description: "匹配模式，默认 regex" },
+        include: { oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }], description: "只搜索匹配这些 glob 的文件" },
+        exclude: { oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }], description: "排除匹配这些 glob 的文件" },
+        caseSensitive: { type: "boolean", description: "是否区分大小写，默认 false" },
+        maxResults: { type: "number", description: "最多返回多少条，默认 50，最大 100" }
+      },
+      required: ["pattern"],
+      additionalProperties: false
+    }
+  },
+  async execute(input, context) {
+    const args = objectArgs(input);
+    const pattern = stringArg(args, "pattern");
+    if (pattern.length > MAX_GREP_PATTERN_LENGTH) throw new Error(`搜索模式过长，最多 ${MAX_GREP_PATTERN_LENGTH} 个字符`);
+    const mode = optionalStringArg(args, "mode") ?? "regex";
+    if (mode !== "regex" && mode !== "literal") throw new Error(`不支持的匹配模式：${mode}`);
+    const path = optionalStringArg(args, "path") ?? ".";
+    const target = resolveSafe(path, context.workspaceRoot, context.permissions.readRoots);
+    assertReadable(target, context.permissions.readRoots);
+    if (!existsSync(target)) throw new Error(`路径不存在：${path}`);
+    const stat = lstatSync(target);
+    if (!stat.isFile() && !stat.isDirectory()) throw new Error(`不是普通文件或目录：${path}`);
+    const includes = stringArrayArg(args, "include").map(toGlobMatcher);
+    const excludes = stringArrayArg(args, "exclude").map(toGlobMatcher);
+    const maxResults = Math.min(MAX_SEARCH_RESULTS, Math.max(1, intArg(args, "maxResults", 50)));
+    const expression = mode === "literal" ? RE2JS.quote(pattern) : pattern;
+    let regex: RE2JS;
+    try {
+      regex = RE2JS.compile(expression, args.caseSensitive === true ? 0 : RE2JS.CASE_INSENSITIVE);
+    } catch (error) {
+      throw new Error(`无效的 RE2 正则：${error instanceof Error ? error.message : String(error)}`);
+    }
+    const deadline = Date.now() + MAX_SCAN_MS;
+    const results: string[] = [];
+    walkFiles(target, deadline, (file) => {
+      const matchPath = stat.isFile() ? basename(file) : relative(target, file).replace(/\\/g, "/");
+      const name = basename(file);
+      if (includes.length > 0 && !includes.some((matcher) => matcher(matchPath) || matcher(name))) return true;
+      if (excludes.some((matcher) => matcher(matchPath) || matcher(name))) return true;
+      grepFile(file, context.workspaceRoot, regex, maxResults, results);
+      return results.length < maxResults;
+    });
+    results.sort((left, right) => left.localeCompare(right));
+    const suffix = results.length >= maxResults ? `\n... 已达到 ${maxResults} 条上限` : "";
+    return { content: results.length > 0 ? `${results.join("\n")}${suffix}` : `没有找到匹配“${pattern}”的内容` };
   }
 };
 
@@ -375,6 +481,11 @@ function resolveSafe(candidate: string, base: string, roots: string[]): string {
 
 function assertReadable(target: string, roots: string[]): void {
   if (!roots.length) throw new Error("没有读取权限");
+  const root = roots.find((item) => target === resolve(item) || target.startsWith(resolve(item) + sep));
+  if (!root) throw new Error(`路径不在读取范围内：${target}`);
+  const realRoot = canonicalPath(root);
+  const realTarget = canonicalPath(target);
+  if (realTarget !== realRoot && !realTarget.startsWith(realRoot + sep)) throw new Error(`路径通过符号链接越界：${target}`);
 }
 
 function assertWritable(target: string, roots: string[]): void {
@@ -418,6 +529,69 @@ function optionalStringArg(args: Record<string, unknown>, key: string): string |
 function intArg(args: Record<string, unknown>, key: string, fallback: number): number {
   const value = Number(args[key]);
   return Number.isFinite(value) ? Math.trunc(value) : fallback;
+}
+
+function stringArrayArg(args: Record<string, unknown>, key: string): string[] {
+  const value = args[key];
+  const values = Array.isArray(value) ? value : value === undefined ? [] : [value];
+  return values.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim());
+}
+
+function toGlobMatcher(pattern: string): (candidate: string) => boolean {
+  if (pattern.length > MAX_GREP_PATTERN_LENGTH) throw new Error(`glob 模式过长，最多 ${MAX_GREP_PATTERN_LENGTH} 个字符`);
+  return picomatch(pattern.replace(/\\/g, "/"), { dot: false, nocase: process.platform === "win32" });
+}
+
+function walkFiles(root: string, deadline: number, visit: (file: string) => boolean): void {
+  const ensureTime = () => {
+    if (Date.now() > deadline) throw new Error(`文件扫描超过 ${MAX_SCAN_MS / 1_000} 秒预算，请缩小搜索范围`);
+  };
+  ensureTime();
+  const rootStat = lstatSync(root);
+  if (rootStat.isFile()) {
+    visit(root);
+    return;
+  }
+  if (!rootStat.isDirectory()) throw new Error(`不是普通文件或目录：${root}`);
+  const visitDirectory = (directory: string): boolean => {
+    ensureTime();
+    let children;
+    try {
+      children = readdirSync(directory, { withFileTypes: true });
+    } catch {
+      return true;
+    }
+    for (const child of children) {
+      ensureTime();
+      if (child.name.startsWith(".") || SKIP_DIRS.has(child.name)) continue;
+      const absolute = resolve(directory, child.name);
+      if (child.isDirectory()) {
+        if (!visitDirectory(absolute)) return false;
+      } else if (child.isFile() && !visit(absolute)) {
+        return false;
+      }
+    }
+    return true;
+  };
+  visitDirectory(root);
+}
+
+function grepFile(file: string, root: string, regex: RE2JS, maxResults: number, results: string[]): void {
+  if (!isTextExtension(extname(file).toLowerCase())) return;
+  try {
+    if (statSync(file).size > MAX_READ_BYTES) return;
+    const content = readFileSync(file, "utf8");
+    if (content.includes("\u0000")) return;
+    const lines = content.split(/\r?\n/);
+    for (let index = 0; index < lines.length && results.length < maxResults; index += 1) {
+      const line = lines[index] ?? "";
+      if (regex.matcher(line).find()) {
+        results.push(`${relative(root, file).replace(/\\/g, "/")}:${index + 1}: ${line.trim().slice(0, 240)}`);
+      }
+    }
+  } catch {
+    // Ignore unreadable files during search.
+  }
 }
 
 function walk(root: string, directory: string, depth: number, entries: string[]): void {

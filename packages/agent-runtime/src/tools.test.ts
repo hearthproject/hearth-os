@@ -1,7 +1,7 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createBuiltinTools, defaultTaskPermissions } from "./tools.ts";
 import type { AgentToolContext } from "./types.ts";
 
@@ -9,7 +9,78 @@ describe("builtin tools", () => {
   const roots: string[] = [];
 
   afterEach(() => {
+    vi.restoreAllMocks();
     for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  });
+
+  it("finds files with glob while skipping dependencies and hidden directories", async () => {
+    const root = workspace(roots);
+    mkdirSync(join(root, "src", "nested"), { recursive: true });
+    mkdirSync(join(root, "node_modules", "pkg"), { recursive: true });
+    mkdirSync(join(root, ".cache"), { recursive: true });
+    writeFileSync(join(root, "src", "a.ts"), "export const a = 1;\n");
+    writeFileSync(join(root, "src", "nested", "b.ts"), "export const b = 2;\n");
+    writeFileSync(join(root, "node_modules", "pkg", "ignored.ts"), "export const ignored = true;\n");
+    writeFileSync(join(root, ".cache", "hidden.ts"), "export const hidden = true;\n");
+    const result = await mapTools().glob!.execute({ pattern: "**/*.ts" }, contextFor(root, join(root, "out")));
+    expect(result.content).toContain("src/a.ts");
+    expect(result.content).toContain("src/nested/b.ts");
+    expect(result.content).not.toContain("node_modules");
+    expect(result.content).not.toContain(".cache");
+  });
+
+  it("greps with RE2 regex, literal mode, and include/exclude filters", async () => {
+    const root = workspace(roots);
+    mkdirSync(join(root, "src"), { recursive: true });
+    writeFileSync(join(root, "src", "a.ts"), "const Alpha = 1;\n");
+    writeFileSync(join(root, "src", "a.test.ts"), "const ALPHA = 2;\n");
+    writeFileSync(join(root, "src", "literal.ts"), "value = a.b;\n");
+    const tools = mapTools();
+    const regex = await tools.grep!.execute({
+      pattern: "^const alpha",
+      include: "**/*.ts",
+      exclude: "**/*.test.ts"
+    }, contextFor(root, join(root, "out")));
+    expect(regex.content).toContain("src/a.ts:1:");
+    expect(regex.content).not.toContain("a.test.ts");
+    const literal = await tools.grep!.execute({
+      pattern: "a.b",
+      mode: "literal",
+      include: ["literal.ts"]
+    }, contextFor(root, join(root, "out")));
+    expect(literal.content).toContain("src/literal.ts:1:");
+  });
+
+  it("rejects unsafe grep patterns and paths outside the workspace", async () => {
+    const root = workspace(roots);
+    const tools = mapTools();
+    const context = contextFor(root, join(root, "out"));
+    await expect(tools.grep!.execute({ pattern: "(" }, context)).rejects.toThrow("无效的 RE2 正则");
+    await expect(tools.grep!.execute({ pattern: "x".repeat(501) }, context)).rejects.toThrow("搜索模式过长");
+    await expect(tools.grep!.execute({ pattern: "x", path: "../outside" }, context)).rejects.toThrow("路径不在授权范围内");
+    await expect(tools.glob!.execute({ pattern: "**/*.ts", path: "../outside" }, context)).rejects.toThrow("路径不在授权范围内");
+  });
+
+  it("rejects symlinks that escape the workspace", async () => {
+    const root = workspace(roots);
+    const outside = workspace(roots);
+    const secret = join(outside, "secret.ts");
+    writeFileSync(secret, "const leaked = true;\n");
+    try {
+      symlinkSync(secret, join(root, "escape.ts"), "file");
+    } catch {
+      return;
+    }
+    const tools = mapTools();
+    await expect(tools.grep!.execute({ pattern: "leaked", path: "escape.ts" }, contextFor(root, join(root, "out")))).rejects.toThrow("符号链接越界");
+    await expect(tools.glob!.execute({ pattern: "*.ts", path: "escape.ts" }, contextFor(root, join(root, "out")))).rejects.toThrow("符号链接越界");
+  });
+
+  it("stops scans after the time budget", async () => {
+    const root = workspace(roots);
+    writeFileSync(join(root, "a.ts"), "const a = 1;\n");
+    vi.spyOn(Date, "now").mockReturnValueOnce(0).mockReturnValue(10_001);
+    await expect(mapTools().glob!.execute({ pattern: "**/*.ts" }, contextFor(root, join(root, "out")))).rejects.toThrow("秒预算");
   });
 
   it("writes and edits files inside the authorized output directory", async () => {
