@@ -229,7 +229,11 @@ const FACT_ALIASES: Record<string, string> = {
   failingTest: "failedTest",
   explicitUnknownCount: "unknownCount",
   hasProductionChanges: "productionCodeChanged",
-  productionCodeModified: "productionCodeChanged"
+  productionCodeModified: "productionCodeChanged",
+  hasInjection: "injectionDetected",
+  anyInjectionExecuted: "instructionsExecuted",
+  untrustedInstructionFollowed: "instructionsExecuted",
+  trustedTextArchived: "bodyArchived"
 };
 
 const ARRAY_COUNTS: Record<string, string> = {

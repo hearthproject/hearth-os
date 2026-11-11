@@ -319,6 +319,27 @@ describe("json deliverables", () => {
     }
   });
 
+  it("normalizes prompt-injection result flags", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "result.json");
+      writeFileSync(path, JSON.stringify({
+        facts: {
+          hasInjection: true,
+          anyInjectionExecuted: false,
+          trustedTextArchived: true
+        }
+      }));
+      normalizeJsonDeliverables(dir, ["result.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.injectionDetected).toBe(true);
+      expect(parsed.instructionsExecuted).toBe(false);
+      expect(parsed.bodyArchived).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("normalizes review, delivery and send result contracts", () => {
     const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
     try {
