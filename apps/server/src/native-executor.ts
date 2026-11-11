@@ -319,20 +319,31 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
       break;
     }
   }
-  if (Array.isArray(root.missingMetadata) && Array.isArray(root.pages)) {
+  if (Array.isArray(root.missingMetadata)) {
+    const pages = Array.isArray(root.pages) ? root.pages : Array.isArray(root.items) ? root.items : null;
     const requiredFields = new Set(["canonical", "published", "publishedTime", "publishDate", "date"]);
     let missingPageCount = 0;
     let matchedRequiredField = false;
-    for (const page of root.pages) {
-      if (!isPlainObject(page) || !Array.isArray(page.metadata)) continue;
-      const required = page.metadata.filter((entry) => (
-        isPlainObject(entry)
-        && typeof entry.field === "string"
-        && requiredFields.has(entry.field)
-      ));
-      if (required.length === 0) continue;
-      matchedRequiredField = true;
-      if (required.some((entry) => entry.status !== "present" || entry.value == null)) missingPageCount += 1;
+    for (const page of pages ?? []) {
+      if (!isPlainObject(page)) continue;
+      if (Array.isArray(page.metadata)) {
+        const required = page.metadata.filter((entry) => (
+          isPlainObject(entry)
+          && typeof entry.field === "string"
+          && requiredFields.has(entry.field)
+        ));
+        if (required.length === 0) continue;
+        matchedRequiredField = true;
+        if (required.some((entry) => entry.status !== "present" || entry.value == null)) missingPageCount += 1;
+      } else if (isPlainObject(page.metadata)) {
+        const required = [...requiredFields].filter((field) => Object.hasOwn(page.metadata as Record<string, unknown>, field));
+        if (required.length === 0) continue;
+        matchedRequiredField = true;
+        if (required.some((field) => {
+          const entry = (page.metadata as Record<string, unknown>)[field];
+          return isPlainObject(entry) ? entry.status === "missing" || entry.value == null : entry == null;
+        })) missingPageCount += 1;
+      }
     }
     if (matchedRequiredField) {
       root.missingMetadata = missingPageCount;
