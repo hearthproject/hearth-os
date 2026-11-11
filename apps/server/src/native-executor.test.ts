@@ -905,7 +905,7 @@ describe("json deliverables", () => {
         verdict: "policy_violation_unresolved",
         action: "block",
         blocksMerge: true,
-        blockingFindingCount: 1,
+        blockingFindingsCount: 1,
         findings: [{ severity: "high" }, { severity: "medium" }]
       }));
       normalizeJsonDeliverables(dir, ["review.json"]);

@@ -230,6 +230,7 @@ const FACT_ALIASES: Record<string, string> = {
   recordCount: "itemCount",
   sendPerformed: "sent",
   blockingFindingCount: "blockingCount",
+  blockingFindingsCount: "blockingCount",
   invalidCount: "exceptionCount",
   competingProductCount: "productCount",
   competitorCount: "productCount",
