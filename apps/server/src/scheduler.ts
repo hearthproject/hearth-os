@@ -40,11 +40,12 @@ import { MethodService } from "./methods.ts";
 import { DEFAULT_LEASE_HEARTBEAT_MS, LeaseError, TaskLeaseService } from "./leases.ts";
 import { SandboxService } from "./sandbox.ts";
 import { TOOL_APPROVAL_REQUIRED, toolApprovalSummary } from "./tool-policy.ts";
-import { DEFAULT_RUN_BUDGET, runNativeTask } from "./native-executor.ts";
+import { DEFAULT_RUN_BUDGET, nativePermissionsFor, runNativeTask } from "./native-executor.ts";
 import { ContextBroker } from "./context-broker.ts";
 import { OntologyService } from "./ontology.ts";
 import { createPersonalReadTools } from "./personal-tools.ts";
 import { buildNativeSkillIndex, createSkillTools } from "./skill-tools.ts";
+import { createSubagentTool } from "./subagents.ts";
 import type { SkillPackageService } from "./skills.ts";
 import { OntologyWriter } from "./ontology-writer.ts";
 import { chatModelConfigured, loadModelSettings, type ModelSettings } from "./model-settings.ts";
@@ -1541,6 +1542,32 @@ export class HearthScheduler {
         if (availableSkills.length > 0) {
           extraNativeTools.push(...createSkillTools({ skills: this.skills, taskId: task.id, runId }));
           nativeSkillIndex = buildNativeSkillIndex(availableSkills);
+        }
+      }
+      if (executorId === "native") {
+        const usedSubagents = this.service.store.listEvents(0, task.id)
+          .filter((event) => event.type === "subagent.delegated").length;
+        const remainingSubagents = 2 - usedSubagents;
+        if (remainingSubagents > 0) {
+          extraNativeTools.push(createSubagentTool({
+            task,
+            prepared,
+            settings: nativeSettings!,
+            permissions: nativePermissionsFor(task, prepared),
+            signal: controller.signal,
+            worktrees: this.worktrees,
+            parentWorktree: worktree,
+            maxSubagents: remainingSubagents,
+            onStarted: (info) => {
+              const event = this.service.store.appendEvent({
+                type: "subagent.delegated",
+                taskId,
+                runId,
+                payload: { ...info, at: new Date().toISOString() }
+              });
+              this.service.bus.publish(event);
+            }
+          }));
         }
       }
       const adapter = this.adapters[executorId];

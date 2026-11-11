@@ -32,7 +32,10 @@ export class TaskWorktreeService {
     this.clock = options.clock ?? (() => new Date());
   }
 
-  ensure(task: Pick<TaskRecord, "id" | "projectId">): TaskWorktree {
+  ensure(
+    task: Pick<TaskRecord, "id" | "projectId">,
+    options: { baseBranch?: string | undefined; baseSha?: string | undefined } = {}
+  ): TaskWorktree {
     if (!task.projectId) throw new WorktreeError("PROJECT_REQUIRED", "任务没有关联本地项目", 400);
     validateTaskId(task.id);
     const project = this.store.getLocalProject(task.projectId);
@@ -69,8 +72,10 @@ export class TaskWorktreeService {
       throw new WorktreeError("WORKTREE_PATH_EXISTS", "Worktree 路径已被占用", 409);
     }
 
-    const baseBranch = existing?.baseBranch ?? project.defaultBranch;
-    const baseSha = existing?.baseSha ?? this.resolveCommit(project.path, baseBranch);
+    const baseBranch = existing?.baseBranch ?? options.baseBranch ?? project.defaultBranch;
+    const baseSha = existing?.baseSha
+      ?? options.baseSha
+      ?? this.resolveCommit(project.path, baseBranch);
     const branchExists = git(["-C", project.path, "show-ref", "--verify", "--quiet", `refs/heads/${branch}`]).ok;
     const args = branchExists
       ? ["-C", project.path, "worktree", "add", path, branch]

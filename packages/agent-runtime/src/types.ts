@@ -57,6 +57,7 @@ export interface AgentToolResult {
   summary?: string;
   outputs?: string[];
   question?: string;
+  usage?: RunUsage;
 }
 
 export interface AgentTool {

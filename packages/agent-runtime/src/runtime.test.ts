@@ -466,6 +466,48 @@ describe("context compaction", () => {
     expect(checkpoints[0]?.kind).toBe("compaction");
     expect(checkpoints[0]?.summary).toBe("恢复摘要");
   });
+
+  it("adds usage reported by a delegated tool to the parent run", async () => {
+    const root = workspace(roots);
+    const usageEvents: number[] = [];
+    const result = await runAgent({
+      model: fakeModel([
+        turn("", [call("delegate_task", { objective: "调查", mode: "read-only" })]),
+        turn("", [call("finish_task", { summary: "父任务完成" })])
+      ]),
+      tools: [
+        {
+          definition: { name: "delegate_task", description: "delegate", parameters: { type: "object" } },
+          async execute() {
+            return {
+              content: "子代理完成",
+              usage: { inputTokens: 31, cachedInputTokens: 2, cacheWriteInputTokens: 3, outputTokens: 12, reasoningOutputTokens: 1 }
+            };
+          }
+        },
+        ...createBuiltinTools()
+      ],
+      goal: "委派",
+      systemPrompt: "system",
+      budget: { maxTurns: 4, maxToolCalls: 4, maxTokens: 10_000, maxDurationMs: 30_000 },
+      permissions: { readRoots: [root], writeRoots: [], networkHosts: [], tools: ["delegate_task", "finish_task"] },
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      onEvent: (event) => {
+        if (event.type === "usage") usageEvents.push(event.usage.inputTokens);
+      }
+    });
+
+    expect(result.status).toBe("completed");
+    expect(result.usage).toEqual({
+      inputTokens: 31,
+      cachedInputTokens: 2,
+      cacheWriteInputTokens: 3,
+      outputTokens: 12,
+      reasoningOutputTokens: 1
+    });
+    expect(usageEvents).toEqual([31]);
+  });
 });
 
 function toolPairsComplete(messages: Array<{ role: string; content: string; toolCalls?: Array<{ id: string }>; toolCallId?: string }>): boolean {

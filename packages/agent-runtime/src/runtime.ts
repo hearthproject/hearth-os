@@ -225,6 +225,10 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       }
 
       emit({ type: "tool.finished", turn: turns, call, result, durationMs: Date.now() - toolStartedAt });
+      if (result.usage) {
+        addUsage(usage, result.usage);
+        emit({ type: "usage", usage: { ...usage } });
+      }
       messages.push({
         role: "tool",
         toolCallId: call.id,
@@ -279,6 +283,14 @@ function cloneMessages(messages: AgentMessage[]): AgentMessage[] {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function addUsage(target: RunUsage, value: RunUsage): void {
+  target.inputTokens += Math.max(0, value.inputTokens);
+  target.cachedInputTokens += Math.max(0, value.cachedInputTokens);
+  target.cacheWriteInputTokens += Math.max(0, value.cacheWriteInputTokens);
+  target.outputTokens += Math.max(0, value.outputTokens);
+  target.reasoningOutputTokens += Math.max(0, value.reasoningOutputTokens);
 }
 
 function toolSignature(call: AgentToolCall): string {
