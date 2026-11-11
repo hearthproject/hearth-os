@@ -220,6 +220,21 @@ describe("json deliverables", () => {
     }
   });
 
+  it("normalizes a reported completion lift as the effect", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "result.json");
+      writeFileSync(path, JSON.stringify({
+        facts: { completionLiftReported: "12%", completionLiftValue: 12 }
+      }));
+      normalizeJsonDeliverables(dir, ["result.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.effect).toBe("12%");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("does not mark a conditional plan as currently feasible", () => {
     const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
     try {

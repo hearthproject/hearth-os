@@ -228,6 +228,7 @@ const FACT_ALIASES: Record<string, string> = {
   competingProductCount: "productCount",
   competitorCount: "productCount",
   completionLift: "effect",
+  completionLiftReported: "effect",
   treatmentEffect: "effect",
   observedEffect: "effect",
   likelyCommit: "suspectCommit",
