@@ -308,6 +308,26 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
       break;
     }
   }
+  if (Array.isArray(root.missingMetadata) && Array.isArray(root.pages)) {
+    const requiredFields = new Set(["canonical", "published", "publishedTime", "publishDate", "date"]);
+    let missingPageCount = 0;
+    let matchedRequiredField = false;
+    for (const page of root.pages) {
+      if (!isPlainObject(page) || !Array.isArray(page.metadata)) continue;
+      const required = page.metadata.filter((entry) => (
+        isPlainObject(entry)
+        && typeof entry.field === "string"
+        && requiredFields.has(entry.field)
+      ));
+      if (required.length === 0) continue;
+      matchedRequiredField = true;
+      if (required.some((entry) => entry.status !== "present" || entry.value == null)) missingPageCount += 1;
+    }
+    if (matchedRequiredField) {
+      root.missingMetadata = missingPageCount;
+      changed = true;
+    }
+  }
   for (const [key, countKey] of Object.entries(ARRAY_COUNTS)) {
     if (Object.hasOwn(root, countKey) || !Array.isArray(root[key])) continue;
     root[countKey] = (root[key] as unknown[]).length;

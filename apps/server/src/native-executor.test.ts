@@ -340,6 +340,25 @@ describe("json deliverables", () => {
     }
   });
 
+  it("counts pages with missing required metadata", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "result.json");
+      writeFileSync(path, JSON.stringify({
+        missingMetadata: [{ pageId: "p1" }, { pageId: "p2" }],
+        pages: [
+          { metadata: [{ field: "canonical", status: "present", value: "https://a" }, { field: "publishedTime", status: "present", value: "2026-10-01" }] },
+          { metadata: [{ field: "canonical", status: "missing", value: null }, { field: "publishedTime", status: "missing", value: null }] }
+        ]
+      }));
+      normalizeJsonDeliverables(dir, ["result.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.missingMetadata).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("normalizes review, delivery and send result contracts", () => {
     const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
     try {
