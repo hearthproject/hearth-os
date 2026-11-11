@@ -641,8 +641,8 @@ describe("json deliverables", () => {
     try {
       const path = join(dir, "result.json");
       writeFileSync(path, JSON.stringify({
-        formRecovery: { recovered: [{ item: "阶段", value: "form_filled" }] },
-        facts: { duplicatedActionCount: 0, retryPerformed: false, savedStatus: "unconfirmed_saved" }
+        recoveredCheckpoint: { recoveredItems: [{ key: "workflowStep", value: "form_filled" }] },
+        facts: { duplicatedActionCount: 0, retryCount: 0, saveResent: false, savedStatus: "unconfirmed_saved" }
       }));
       normalizeJsonDeliverables(dir, ["result.json"]);
       const parsed = JSON.parse(readFileSync(path, "utf8"));

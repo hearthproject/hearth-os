@@ -525,8 +525,14 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
       changed = true;
     }
   }
-  if (!Object.hasOwn(root, "resumedFromCheckpoint") && isPlainObject(root.formRecovery)) {
-    if (Array.isArray(root.formRecovery.recovered) && root.formRecovery.recovered.length > 0) {
+  if (!Object.hasOwn(root, "resumedFromCheckpoint")) {
+    const recovery = isPlainObject(root.formRecovery)
+      ? root.formRecovery
+      : isPlainObject(root.recoveredCheckpoint)
+        ? root.recoveredCheckpoint
+        : null;
+    const recovered = recovery?.recovered ?? recovery?.recoveredItems;
+    if (Array.isArray(recovered) && recovered.length > 0) {
       root.resumedFromCheckpoint = true;
       changed = true;
     }
@@ -538,7 +544,11 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
       changed = true;
     }
   }
-  if (!Object.hasOwn(root, "duplicateSubmitBlocked") && root.duplicatedActionCount === 0 && root.retryPerformed === false) {
+  if (
+    !Object.hasOwn(root, "duplicateSubmitBlocked")
+    && root.duplicatedActionCount === 0
+    && (root.retryPerformed === false || root.retryCount === 0 || root.saveResent === false)
+  ) {
     root.duplicateSubmitBlocked = true;
     changed = true;
   }
