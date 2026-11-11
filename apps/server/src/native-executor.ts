@@ -185,6 +185,13 @@ export function normalizeJsonDeliverables(outDir: string, expectedOutputs: strin
           changed = true;
         }
       }
+      for (const key of ["dateUnknownCount", "unknownDateCount", "unknownReleaseDateCount"]) {
+        const value = (facts as Record<string, unknown>)[key];
+        if (typeof value !== "number" || root.unknownCount === value) continue;
+        root.unknownCount = value;
+        changed = true;
+        break;
+      }
     }
     if (normalizeJsonFacts(root)) changed = true;
     if (changed) writeFileSync(path, `${JSON.stringify(root, null, 2)}\n`, "utf8");
