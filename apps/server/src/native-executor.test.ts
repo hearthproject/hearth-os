@@ -170,6 +170,23 @@ describe("json deliverables", () => {
     }
   });
 
+  it("derives findings from an equivalent result array", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "result.json");
+      writeFileSync(path, JSON.stringify({
+        facts: { verdict: "ok" },
+        releases: [{ id: "a" }, { id: "b" }, { id: "c" }]
+      }));
+      normalizeJsonDeliverables(dir, ["result.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.findings).toHaveLength(3);
+      expect(parsed.findingCount).toBe(3);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("normalizes review, delivery and send result contracts", () => {
     const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
     try {

@@ -268,6 +268,14 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
       }
     }
   }
+  if (!Array.isArray(root.findings)) {
+    for (const key of ["releases", "featureDiffs", "observations", "results"]) {
+      if (!Array.isArray(root[key]) || root[key].length === 0) continue;
+      root.findings = root[key];
+      changed = true;
+      break;
+    }
+  }
   for (const [key, countKey] of Object.entries(ARRAY_COUNTS)) {
     if (Object.hasOwn(root, countKey) || !Array.isArray(root[key])) continue;
     root[countKey] = (root[key] as unknown[]).length;
