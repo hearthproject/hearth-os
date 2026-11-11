@@ -498,6 +498,27 @@ describe("json deliverables", () => {
     }
   });
 
+  it("promotes nested search-plan query drafts", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "gaps.json");
+      writeFileSync(path, JSON.stringify({
+        searchPlan: {
+          queryDrafts: [
+            { text: "确认预算上限" },
+            { text: "确认决策人" },
+            { text: "确认部署形态" }
+          ]
+        }
+      }));
+      normalizeJsonDeliverables(dir, ["gaps.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.nextQueries).toHaveLength(3);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("normalizes production code change flags", () => {
     const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
     try {
