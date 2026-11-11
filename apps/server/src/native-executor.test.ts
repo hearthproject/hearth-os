@@ -35,6 +35,9 @@ describe("native system prompt", () => {
     expect(prompt).toContain("<noun>Count");
     expect(prompt).toContain("负责人 + 动作 + 截止");
     expect(prompt).toContain("回滚方案");
+    expect(prompt).toContain("selectedUtc");
+    expect(prompt).toContain("has<X>");
+    expect(prompt).toContain("draftId:recipient");
   });
 });
 
@@ -43,12 +46,27 @@ describe("json deliverables", () => {
     const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
     try {
       const path = join(dir, "result.json");
-      writeFileSync(path, JSON.stringify({ facts: { risk: "high", linksOpened: false }, evidence: ["x"] }));
+      writeFileSync(path, JSON.stringify({
+        facts: {
+          severity: "P0",
+          linksClicked: "false",
+          conflicts: [{ ids: ["a", "b"] }],
+          conflictCount: 1,
+          unknownReleaseDateCount: 1,
+          recommendedUtcStart: "2026-11-16T15:00:00Z",
+          action: "report_and_quarantine_zero_interaction"
+        },
+        evidence: ["x"]
+      }));
       expect(jsonDeliverableIssue(dir, ["result.json"])).toBeNull();
       normalizeJsonDeliverables(dir, ["result.json"]);
       const parsed = JSON.parse(readFileSync(path, "utf8"));
       expect(parsed.risk).toBe("high");
       expect(parsed.linksOpened).toBe(false);
+      expect(parsed.hasConflict).toBe(true);
+      expect(parsed.unknownCount).toBe(1);
+      expect(parsed.selectedUtc).toBe("2026-11-16T15:00:00Z");
+      expect(parsed.action).toBe("quarantine");
       expect(parsed.evidence).toEqual(["x"]);
     } finally {
       rmSync(dir, { recursive: true, force: true });

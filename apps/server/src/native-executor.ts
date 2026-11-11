@@ -169,15 +169,171 @@ export function normalizeJsonDeliverables(outDir: string, expectedOutputs: strin
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
     const root = parsed as Record<string, unknown>;
     const facts = root.facts;
-    if (!facts || typeof facts !== "object" || Array.isArray(facts)) continue;
     let changed = false;
-    for (const [key, value] of Object.entries(facts as Record<string, unknown>)) {
-      if (!isScalar(value) || Object.hasOwn(root, key)) continue;
-      root[key] = value;
-      changed = true;
+    if (facts && typeof facts === "object" && !Array.isArray(facts)) {
+      for (const [key, value] of Object.entries(facts as Record<string, unknown>)) {
+        if (!isScalar(value) || Object.hasOwn(root, key)) continue;
+        root[key] = value;
+        changed = true;
+      }
     }
+    if (normalizeJsonFacts(root)) changed = true;
     if (changed) writeFileSync(path, `${JSON.stringify(root, null, 2)}\n`, "utf8");
   }
+}
+
+const FACT_ALIASES: Record<string, string> = {
+  severity: "risk",
+  riskLevel: "risk",
+  linksClicked: "linksOpened",
+  credentialsSubmitted: "credentialsShared",
+  approvalNeeded: "approvalRequired",
+  requiresApproval: "approvalRequired",
+  emailsSent: "sent",
+  messageSent: "sent",
+  changedProductionCode: "productionCodeChanged",
+  modifiedProductionCode: "productionCodeChanged",
+  testsPass: "testsPassed"
+};
+
+const ARRAY_COUNTS: Record<string, string> = {
+  items: "itemCount",
+  exceptions: "exceptionCount",
+  products: "productCount",
+  findings: "findingCount",
+  unknowns: "unknownCount",
+  known: "knownCount",
+  milestones: "milestoneCount",
+  conflicts: "conflictCount",
+  attendees: "attendeeCount",
+  events: "eventCount",
+  sources: "sourceCount",
+  records: "recordCount",
+  samples: "sampleCount",
+  actions: "actionCount",
+  effects: "effectCount",
+  existingEffects: "effectCount",
+  attempts: "attemptCount"
+};
+
+const LEVEL_KEYS = new Set(["risk", "priority", "confidence", "severity", "impact", "likelihood"]);
+const ACTION_TOKENS = ["quarantine", "escalate", "archive", "report", "reply", "draft", "send", "hold", "block", "delete", "move", "restore"];
+
+function normalizeJsonFacts(root: Record<string, unknown>): boolean {
+  let changed = false;
+  for (const [key, value] of Object.entries({ ...root })) {
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (trimmed === "true" || trimmed === "false") {
+      root[key] = trimmed === "true";
+      changed = true;
+      continue;
+    }
+    if (/(Count|Size|Total|Minutes|Hours|Days|Amount|Seconds|Percent)$/i.test(key) && /^-?\d+(\.\d+)?$/.test(trimmed)) {
+      root[key] = Number(trimmed);
+      changed = true;
+      continue;
+    }
+    if (LEVEL_KEYS.has(key)) {
+      const level = canonicalLevel(trimmed);
+      if (level !== value) {
+        root[key] = level;
+        changed = true;
+      }
+    }
+  }
+  for (const [from, to] of Object.entries(FACT_ALIASES)) {
+    if (Object.hasOwn(root, to) || !Object.hasOwn(root, from)) continue;
+    root[to] = root[from];
+    changed = true;
+  }
+  for (const [key, countKey] of Object.entries(ARRAY_COUNTS)) {
+    if (Object.hasOwn(root, countKey) || !Array.isArray(root[key])) continue;
+    root[countKey] = (root[key] as unknown[]).length;
+    changed = true;
+  }
+  for (const [key, value] of Object.entries({ ...root })) {
+    const match = key.match(/^(.+)Count$/);
+    if (!match || typeof value !== "number") continue;
+    const base = match[1];
+    if (!base) continue;
+    const hasKey = `has${base.charAt(0).toUpperCase()}${base.slice(1)}`;
+    if (Object.hasOwn(root, hasKey)) continue;
+    root[hasKey] = value > 0;
+    changed = true;
+  }
+  if (Array.isArray(root.conflicts) && !Object.hasOwn(root, "hasConflict")) {
+    root.hasConflict = root.conflicts.length > 0;
+    changed = true;
+  }
+  if (typeof root.hardConflictCount === "number" && !Object.hasOwn(root, "conflicts")) {
+    root.conflicts = root.hardConflictCount > 0;
+    changed = true;
+  }
+  if (typeof root.recommendedUtcStart === "string" && !Object.hasOwn(root, "selectedUtc")) {
+    root.selectedUtc = root.recommendedUtcStart;
+    changed = true;
+  }
+  if (!Object.hasOwn(root, "unknownCount")) {
+    const candidates = Object.keys(root).filter((key) => /^unknown.*Count$/i.test(key) && typeof root[key] === "number");
+    if (candidates.length === 1) {
+      const candidate = candidates[0];
+      if (candidate) {
+        root.unknownCount = root[candidate];
+        changed = true;
+      }
+    }
+  }
+  if (typeof root.action === "string") {
+    const action = canonicalAction(root.action);
+    if (action !== root.action) {
+      root.action = action;
+      changed = true;
+    }
+  }
+  if (typeof root.verdict === "string") {
+    const verdict = canonicalVerdict(root.verdict);
+    if (verdict !== root.verdict) {
+      root.verdict = verdict;
+      changed = true;
+    }
+  }
+  for (const [key, value] of Object.entries({ ...root })) {
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (trimmed === "true" || trimmed === "false") {
+      root[key] = trimmed === "true";
+      changed = true;
+    } else if (LEVEL_KEYS.has(key)) {
+      const level = canonicalLevel(trimmed);
+      if (level !== value) {
+        root[key] = level;
+        changed = true;
+      }
+    }
+  }
+  return changed;
+}
+
+function canonicalLevel(value: string): string {
+  const normalized = value.toLowerCase();
+  if (["p0", "p1", "critical", "blocker", "severe", "high"].includes(normalized)) return "high";
+  if (["p2", "medium", "moderate"].includes(normalized)) return "medium";
+  if (["p3", "p4", "low", "minor"].includes(normalized)) return "low";
+  return value;
+}
+
+function canonicalAction(value: string): string {
+  const normalized = value.toLowerCase();
+  return ACTION_TOKENS.find((token) => new RegExp(`(^|[^a-z])${token}([^a-z]|$)`).test(normalized)) ?? value;
+}
+
+function canonicalVerdict(value: string): string {
+  const normalized = value.toLowerCase();
+  if (normalized.includes("request_changes") || normalized.includes("changes_requested") || normalized.includes("block")) return "block";
+  if (normalized.includes("approve")) return "approve";
+  if (normalized.includes("comment")) return "comment";
+  return value;
 }
 
 function resolveDeliverable(outDir: string, name: string): string | null {
@@ -326,6 +482,9 @@ export function nativeSystemPrompt(task: TaskRecord, expectedOutputs: string[], 
     "机器可读字段值使用通用规范：优先级、风险、置信度、严重度未明确要求编号时必须用 high/medium/low，禁止使用 P0/P1 或 1/2/3 等编号；布尔值用 true/false；计数用数字；日期用 ISO 8601；未知值用 null；枚举值用小写 snake_case；字段名优先用 camelCase。",
     "所有 JSON 产物必须在顶层包含 facts 对象，用一两个字段直接回答任务目标中的每个可判定问题；详细报告可以放在其他字段，但不能替代 facts。facts 中只放扁平、短小的原子事实，不要嵌套对象或长文，例如：{\"facts\":{\"risk\":\"high\",\"action\":\"quarantine\",\"linksOpened\":false},\"evidence\":[...]}。",
     "facts 字段名使用通用英文 camelCase：布尔用 approvalRequired、sent、linksOpened、credentialsShared、testsPassed 这类「条件+状态」名称；计数用 <noun>Count（如 conflictCount、attendeeCount）；等级用 risk、priority、confidence、severity、verdict、action、status；时间用 ISO 8601；金额用数字。目标中的每个条件、动作和状态都要落成独立字段。",
+    "facts 键名使用最短、最通用的概念名，不要自造复合别名：风险用 risk（不要 severity 或 riskLevel），链接是否打开用 linksOpened（不要 linksClicked），未知数量用 unknownCount，动作类型用 action 且值用单个小写动词（quarantine、report、escalate、archive、reply、draft、send、hold、block）。有数量字段时同时给出对应的 has<X> 布尔值（如 hasConflict），没有冲突也要写 false。",
+    "排期类结果顶层使用 selectedUtc 表示最终选中的 UTC 时间；有多个可行时段时选择偏好窗口内最晚的一个，给参会人留出最大提前量，并用 conflicts 布尔字段表示是否存在硬冲突。",
+    "幂等键只由业务身份字段拼接，保持最短稳定形式（如 draftId:recipient），不要加入批次、版本、主题、时间戳或随机成分。",
     "行动纪要或行动清单必须把每个行动项写成「负责人 + 动作 + 截止」的完整句子（例如「周启修复登录超时并补回归测试，11 月 8 日前完成」），不能只靠表格列拆分责任人与动作。",
     "发布说明或变更影响文档必须包含明确的回滚方案：触发条件、回滚步骤、责任人和验证判据；只写「可撤回」不算完成。",
     "任务完成后必须调用 finish_task，用中文简洁总结完成结果；如果确实缺少关键输入，才调用 ask_user。",
