@@ -46,6 +46,7 @@ describe("native system prompt", () => {
     expect(prompt).toContain("主数组优先使用 items");
     expect(prompt).toContain("默认使用 move");
     expect(prompt).toContain("saveAs（目标文件名");
+    expect(prompt).toContain("finalState=\"saved\"");
   });
 });
 
@@ -533,12 +534,13 @@ describe("json deliverables", () => {
       const path = join(dir, "result.json");
       writeFileSync(path, JSON.stringify({
         formRecovery: { recovered: [{ item: "阶段", value: "form_filled" }] },
-        facts: { duplicatedActionCount: 0, retryPerformed: false }
+        facts: { duplicatedActionCount: 0, retryPerformed: false, savedStatus: "unconfirmed_saved" }
       }));
       normalizeJsonDeliverables(dir, ["result.json"]);
       const parsed = JSON.parse(readFileSync(path, "utf8"));
       expect(parsed.resumedFromCheckpoint).toBe(true);
       expect(parsed.duplicateSubmitBlocked).toBe(true);
+      expect(parsed.finalState).toBe("saved");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
