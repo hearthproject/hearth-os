@@ -790,6 +790,11 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
       }
     }
   }
+  for (const [from, to] of Object.entries(FACT_ALIASES)) {
+    if (Object.hasOwn(root, to) || !Object.hasOwn(root, from)) continue;
+    root[to] = root[from];
+    changed = true;
+  }
   return changed;
 }
 

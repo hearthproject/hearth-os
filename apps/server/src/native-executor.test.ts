@@ -529,7 +529,7 @@ describe("json deliverables", () => {
       const path = join(dir, "result.json");
       writeFileSync(path, JSON.stringify({
         facts: {
-          hasInjection: true,
+          injectionCount: 1,
           anyInjectionExecuted: false,
           trustedTextArchived: true
         }
