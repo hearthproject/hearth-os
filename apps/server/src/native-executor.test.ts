@@ -47,6 +47,7 @@ describe("native system prompt", () => {
     expect(prompt).toContain("<noun>Count");
     expect(prompt).toContain("负责人 + 动作 + 截止");
     expect(prompt).toContain("回滚方案");
+    expect(prompt).toContain("可撤销路径");
     expect(prompt).toContain("selectedUtc");
     expect(prompt).toContain("has<X>");
     expect(prompt).toContain("draft-778:recipient@example.com");
