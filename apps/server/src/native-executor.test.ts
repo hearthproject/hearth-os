@@ -47,6 +47,7 @@ describe("native system prompt", () => {
     expect(prompt).toContain("默认使用 move");
     expect(prompt).toContain("saveAs（目标文件名");
     expect(prompt).toContain("finalState=\"saved\"");
+    expect(prompt).toContain("只有一个 primary 候选");
   });
 });
 
@@ -484,6 +485,27 @@ describe("json deliverables", () => {
       normalizeJsonDeliverables(dir, ["result.json"]);
       const parsed = JSON.parse(readFileSync(path, "utf8"));
       expect(parsed.suspectCommit).toBe("abc123");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("raises confidence for a single primary regression candidate", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "diagnosis.json");
+      writeFileSync(path, JSON.stringify({
+        suspectCommit: "abc123",
+        failedTest: "test_retry_timeout",
+        confidence: "medium",
+        candidates: [
+          { sha: "abc123", level: "primary" },
+          { sha: "def456", level: "unlikely" }
+        ]
+      }));
+      normalizeJsonDeliverables(dir, ["diagnosis.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.confidence).toBe("high");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

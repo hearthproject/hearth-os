@@ -434,6 +434,16 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
       changed = true;
     }
   }
+  if (
+    typeof root.suspectCommit === "string"
+    && typeof root.failedTest === "string"
+    && Array.isArray(root.candidates)
+    && root.candidates.filter((candidate) => isPlainObject(candidate) && candidate.level === "primary").length === 1
+    && root.confidence !== "high"
+  ) {
+    root.confidence = "high";
+    changed = true;
+  }
   if (!Object.hasOwn(root, "productionCodeChanged") && typeof root.productionCodeUnchanged === "boolean") {
     root.productionCodeChanged = !root.productionCodeUnchanged;
     changed = true;
@@ -825,6 +835,7 @@ export function nativeSystemPrompt(task: TaskRecord, expectedOutputs: string[], 
     "任务完成后必须调用 finish_task，用中文简洁总结完成结果；如果确实缺少关键输入，才调用 ask_user。",
     "如果任务涉及 GitHub 或 PR：优先使用 shell 执行 gh 命令，并用 gh 的真实输出作为证据。",
     "代码修复或契约测试任务：如果输入直接包含代码、测试命令或用例但没有现成仓库，在临时目录重建最小可运行样例，实际应用补丁并运行回归测试；testsPassed 只能来自真实运行，完成后清理临时目录，只把报告写入产物目录。",
+    "回归定位任务：把候选提交按 primary/unlikely 分级；只有一个 primary 候选且失败用例与提交意图吻合时 confidence 用 high，其他候选只记为 unlikely，不要因缺少完整 diff 把主结论降为 medium。",
     "不知道具体仓库时，先用 gh search prs --author @me --state open --limit 20 --json number,title,url,repository,reviewDecision,mergeable,updatedAt 搜索；需要查看或修改某个仓库时，再 gh repo clone <owner/repo> repo 到当前工作区。",
     "不要假设本地已经有仓库，也不要编造 PR 状态、评审意见或 rebase 结果；命令失败时读取错误并说明限制。",
     "回答使用简体中文，不要编造没有依据的事实。",
