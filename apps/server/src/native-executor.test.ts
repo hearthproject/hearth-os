@@ -145,6 +145,45 @@ describe("json deliverables", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("normalizes review, delivery and send result contracts", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const reviewPath = join(dir, "review.json");
+      writeFileSync(reviewPath, JSON.stringify({
+        facts: { risk: "high" },
+        verdict: "policy_violation_unresolved",
+        action: "block",
+        blocksMerge: true,
+        blockingFindingCount: 1,
+        findings: [{ severity: "high" }, { severity: "medium" }]
+      }));
+      normalizeJsonDeliverables(dir, ["review.json"]);
+      const review = JSON.parse(readFileSync(reviewPath, "utf8"));
+      expect(review.verdict).toBe("block");
+      expect(review.blockingCount).toBe(1);
+
+      const deliveryPath = join(dir, "delivery.json");
+      writeFileSync(deliveryPath, JSON.stringify({
+        facts: { verdict: "ok" },
+        verdict: "phishing",
+        action: "report",
+        phishingEvidenceCount: 2,
+        sendPerformed: false,
+        invalidCount: 1,
+        records: [{ sku: "A-1" }, { sku: "A-2" }, { sku: "A-3" }]
+      }));
+      normalizeJsonDeliverables(dir, ["delivery.json"]);
+      const delivery = JSON.parse(readFileSync(deliveryPath, "utf8"));
+      expect(delivery.action).toBe("quarantine");
+      expect(delivery.sent).toBe(false);
+      expect(delivery.exceptionCount).toBe(1);
+      expect(delivery.itemCount).toBe(3);
+      expect(delivery.items).toHaveLength(3);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("native execution progress", () => {
