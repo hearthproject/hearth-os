@@ -180,6 +180,31 @@ describe("json deliverables", () => {
     }
   });
 
+  it("counts desktop move and delete actions", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "actions.json");
+      writeFileSync(path, JSON.stringify({
+        actions: [
+          { op: "move", from: "a", to: "Projects/Q4/a" },
+          { op: "move", from: "b", to: "Projects/Q4/b" },
+          { op: "move", from: "c", to: "Sensitive/c" },
+          { op: "keep", from: "unknown" }
+        ],
+        preserved: ["unknown"],
+        protectedInPlace: 1,
+        unknownCount: 1
+      }));
+      normalizeJsonDeliverables(dir, ["actions.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.moveCount).toBe(3);
+      expect(parsed.deleteCount).toBe(0);
+      expect(parsed.unknownPreserved).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("derives findings from an equivalent result array", () => {
     const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
     try {

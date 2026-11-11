@@ -426,6 +426,36 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
     root[countKey] = (root[key] as unknown[]).length;
     changed = true;
   }
+  const actionEntries = Array.isArray(root.actions)
+    ? root.actions
+    : Array.isArray(root.items)
+      ? root.items
+      : [];
+  if (actionEntries.length > 0) {
+    const operation = (entry: unknown): string => (
+      isPlainObject(entry) ? String(entry.op ?? entry.action ?? entry.type ?? "").toLowerCase() : ""
+    );
+    const moveCount = actionEntries.filter((entry) => /^(move|archive)$/.test(operation(entry))).length;
+    const deleteCount = actionEntries.filter((entry) => operation(entry) === "delete").length;
+    if (moveCount > 0 && root.moveCount !== moveCount) {
+      root.moveCount = moveCount;
+      changed = true;
+    }
+    if ((deleteCount > 0 || Object.hasOwn(root, "moveCount")) && root.deleteCount !== deleteCount) {
+      root.deleteCount = deleteCount;
+      changed = true;
+    }
+    if (
+      !Object.hasOwn(root, "unknownPreserved")
+      && (
+        (Array.isArray(root.preserved) && root.preserved.length > 0)
+        || (typeof root.protectedInPlace === "number" && root.protectedInPlace > 0 && typeof root.unknownCount === "number" && root.unknownCount > 0)
+      )
+    ) {
+      root.unknownPreserved = true;
+      changed = true;
+    }
+  }
   if (!Array.isArray(root.items) && Array.isArray(root.records)) {
     root.items = root.records;
     changed = true;
