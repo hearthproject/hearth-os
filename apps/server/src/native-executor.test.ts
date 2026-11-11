@@ -35,6 +35,7 @@ describe("native system prompt", () => {
     expect(prompt).toContain("顶层 evidence 数组");
     expect(prompt).toContain("200 行");
     expect(prompt).toContain("testsPassed 只能来自真实运行");
+    expect(prompt).toContain("禁止只交付设计或草案");
     expect(prompt).toContain("「财务复核」");
     expect(prompt).toContain("「异常」");
     expect(prompt).toContain("「补充材料」");
