@@ -93,6 +93,59 @@ describe("builtin tools", () => {
     expect(readFileSync(join(out, "note.md"), "utf8")).toBe("第二版");
   });
 
+  it("writes an XLSX workbook and reads it back as a document", async () => {
+    const root = workspace(roots);
+    const out = join(root, "out");
+    const tools = mapTools();
+    const context = contextFor(root, out);
+    await tools.write_spreadsheet!.execute({
+      path: "out/sales.xlsx",
+      sheets: [{ name: "销售", rows: [["订单", "金额"], ["A-1", 42], ["A-2", 18]] }]
+    }, context);
+    const result = await tools.read_document!.execute({ path: "out/sales.xlsx" }, context);
+    expect(result.content).toContain("工作表：销售");
+    expect(result.content).toContain("A-1");
+    expect(result.content).toContain("42");
+  });
+
+  it("writes a DOCX document and reads it back as a document", async () => {
+    const root = workspace(roots);
+    const out = join(root, "out");
+    const tools = mapTools();
+    const context = contextFor(root, out);
+    await tools.write_document!.execute({
+      path: "out/report.docx",
+      title: "季度报告",
+      blocks: [
+        { type: "heading", text: "概述", level: 2 },
+        { type: "paragraph", text: "这是第一段正文。" },
+        { type: "bullet", text: "关键结论" },
+        { type: "numbered", text: "后续行动" }
+      ]
+    }, context);
+    const result = await tools.read_document!.execute({ path: "out/report.docx" }, context);
+    expect(result.content).toContain("季度报告");
+    expect(result.content).toContain("这是第一段正文。");
+    expect(result.content).toContain("关键结论");
+    expect(result.content).toContain("后续行动");
+  });
+
+  it("reads CSV documents and rejects document path escapes", async () => {
+    const root = workspace(roots);
+    const out = join(root, "out");
+    mkdirSync(out, { recursive: true });
+    writeFileSync(join(out, "orders.csv"), "订单,金额\nA-1,42\n");
+    const tools = mapTools();
+    const context = contextFor(root, out);
+    const result = await tools.read_document!.execute({ path: "out/orders.csv" }, context);
+    expect(result.content).toContain("| 源文件行 | 订单 | 金额 |");
+    await expect(tools.read_document!.execute({ path: "../outside.csv" }, context)).rejects.toThrow("路径不在授权范围内");
+    await expect(tools.write_spreadsheet!.execute({
+      path: "out/not-a-sheet.csv",
+      sheets: [{ name: "数据", rows: [["a"]] }]
+    }, context)).rejects.toThrow(".xlsx");
+  });
+
   it("rejects writes outside the authorized roots", async () => {
     const root = workspace(roots);
     const out = join(root, "out");

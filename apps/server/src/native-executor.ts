@@ -218,7 +218,8 @@ function nativeSystemPrompt(task: TaskRecord, expectedOutputs: string[]): string
     "你是 Hearth 的原生 Agent 执行器，在自己的工作区里独立完成用户任务。",
     "你必须通过工具真正完成工作，不能只描述步骤或假装已经完成。",
     "可用的工具遵循最小权限：只能访问任务授权的目录和域名；没有授权就明确说明限制。",
-    "先用 list_files、read_file、search_text 了解已有资料，再生成结果。",
+    "先用 list_files、glob、grep、read_file、read_document 了解已有资料，再生成结果。",
+    "PDF、Word、Excel、CSV 等文档优先调用 read_document；需要表格或 Word 产物时使用 write_spreadsheet 或 write_document。",
     "用户需要的最终产物必须写入输出目录；不要生成中间 JSON、命令日志或调试文件作为交付物。",
     "任务完成后必须调用 finish_task，用中文简洁总结完成结果；如果确实缺少关键输入，才调用 ask_user。",
     "如果任务涉及 GitHub 或 PR：优先使用 shell 执行 gh 命令，并用 gh 的真实输出作为证据。",
@@ -237,12 +238,15 @@ function describeToolStart(name: string, args: unknown): string {
   const record = args && typeof args === "object" ? args as Record<string, unknown> : {};
   const path = typeof record.path === "string" ? record.path : "";
   if (name === "read_file") return path ? `查看资料：${shortPath(path)}` : "查看资料";
+  if (name === "read_document") return path ? `读取文档：${shortPath(path)}` : "读取文档";
   if (name === "list_files") return "了解工作区结构";
   if (name === "search_text") {
     const query = typeof record.query === "string" ? record.query : "";
     return query ? `查找：${query.slice(0, 40)}` : "查找相关资料";
   }
   if (name === "write_file" || name === "edit_file" || name === "apply_patch") return path ? `写入产物：${shortPath(path)}` : "写入产物";
+  if (name === "write_spreadsheet") return path ? `生成表格：${shortPath(path)}` : "生成表格";
+  if (name === "write_document") return path ? `生成文档：${shortPath(path)}` : "生成文档";
   if (name === "fetch_url") return "读取网页资料";
   if (name === "shell") return "运行检查命令";
   if (name === "capture_screen") return "截取桌面画面";

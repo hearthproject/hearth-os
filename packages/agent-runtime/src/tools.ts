@@ -5,6 +5,7 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } 
 import picomatch from "picomatch";
 import { RE2JS } from "re2js";
 import type { TaskPermissions } from "@hearth/core";
+import type { DocumentBlockInput, SpreadsheetSheetInput } from "./documents.ts";
 import type { AgentTool, AgentToolContext, AgentToolResult } from "./types.ts";
 
 const MAX_READ_BYTES = 2 * 1024 * 1024;
@@ -15,10 +16,12 @@ const MAX_GREP_PATTERN_LENGTH = 500;
 const MAX_SCAN_MS = 10_000;
 const MAX_SHELL_OUTPUT_CHARS = 8_000;
 const MAX_FETCH_CHARS = 200_000;
+const MAX_DOCUMENT_BYTES = 25 * 1024 * 1024;
+const MAX_DOCUMENT_OUTPUT_CHARS = 200_000;
 const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", "coverage", ".next", ".cache", ".turbo"]);
 
 export function createBuiltinTools(): AgentTool[] {
-  return [readFileTool, listFilesTool, searchTextTool, globTool, grepTool, writeFileTool, editFileTool, applyPatchTool, shellTool, captureScreenTool, fetchUrlTool, askUserTool, finishTaskTool];
+  return [readFileTool, readDocumentTool, listFilesTool, searchTextTool, globTool, grepTool, writeFileTool, writeSpreadsheetTool, writeDocumentTool, editFileTool, applyPatchTool, shellTool, captureScreenTool, fetchUrlTool, askUserTool, finishTaskTool];
 }
 
 export function defaultTaskPermissions(options: {
@@ -30,11 +33,14 @@ export function defaultTaskPermissions(options: {
 }): TaskPermissions {
   const tools = [
     "read_file",
+    "read_document",
     "list_files",
     "search_text",
     "glob",
     "grep",
     "write_file",
+    "write_spreadsheet",
+    "write_document",
     "edit_file",
     "apply_patch",
     "ask_user",
@@ -81,6 +87,40 @@ const readFileTool: AgentTool = {
     const body = selected.map((line, index) => `${offset + index}: ${line}`).join("\n");
     const more = offset - 1 + limit < lines.length ? `\n... 共 ${lines.length} 行，继续读取请调大 offset` : "";
     return { content: body + more };
+  }
+};
+
+const readDocumentTool: AgentTool = {
+  definition: {
+    name: "read_document",
+    description: "读取 PDF、DOCX、XLSX、CSV、JSON、HTML 或文本资料并返回 Markdown。支持页码、工作表和覆盖缺口说明。",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "文件路径，相对于工作区根目录" },
+        maxChars: { type: "number", description: "最多返回多少字符，默认 80000，最大 200000" }
+      },
+      required: ["path"],
+      additionalProperties: false
+    }
+  },
+  async execute(input, context) {
+    const args = objectArgs(input);
+    const path = stringArg(args, "path");
+    const target = resolveSafe(path, context.workspaceRoot, context.permissions.readRoots);
+    assertReadable(target, context.permissions.readRoots);
+    if (!existsSync(target)) throw new Error(`文件不存在：${path}`);
+    const stat = lstatSync(target);
+    if (!stat.isFile()) throw new Error(`不是普通文件：${path}`);
+    if (stat.size > MAX_DOCUMENT_BYTES) throw new Error(`文档过大，最大支持 ${MAX_DOCUMENT_BYTES / 1024 / 1024}MB：${path}`);
+    const { extractSourceBytes } = await import("./documents.ts");
+    const extracted = await extractSourceBytes(readFileSync(target), basename(target));
+    const maxChars = Math.min(MAX_DOCUMENT_OUTPUT_CHARS, Math.max(1_000, intArg(args, "maxChars", 80_000)));
+    const markdown = extracted.markdown.length > maxChars
+      ? `${extracted.markdown.slice(0, maxChars)}\n\n... 文档内容已截断，请缩小资料范围或分段处理`
+      : extracted.markdown;
+    const gaps = extracted.coverage.gaps.length > 0 ? `\n覆盖缺口：${extracted.coverage.gaps.join("；")}` : "";
+    return { content: `文档：${extracted.title ?? basename(target)}${gaps}\n\n${markdown}` };
   }
 };
 
@@ -260,6 +300,89 @@ const writeFileTool: AgentTool = {
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, content, "utf8");
     return { content: `已写入 ${relative(context.workspaceRoot, target).replace(/\\/g, "/")}（${Buffer.byteLength(content)} 字节）` };
+  }
+};
+
+const writeSpreadsheetTool: AgentTool = {
+  definition: {
+    name: "write_spreadsheet",
+    description: "生成 XLSX 表格。每个工作表提供名称和二维行数据，第一行作为表头并加粗。",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "输出 .xlsx 路径，相对于工作区根目录" },
+        sheets: {
+          type: "array",
+          description: "工作表列表",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string", description: "工作表名称" },
+              rows: {
+                type: "array",
+                items: { type: "array", items: { type: ["string", "number", "boolean", "null"] } }
+              }
+            },
+            required: ["name", "rows"],
+            additionalProperties: false
+          }
+        }
+      },
+      required: ["path", "sheets"],
+      additionalProperties: false
+    }
+  },
+  async execute(input, context) {
+    const args = objectArgs(input);
+    const path = stringArg(args, "path");
+    if (!path.toLowerCase().endsWith(".xlsx")) throw new Error("表格输出必须使用 .xlsx 扩展名");
+    const target = resolveSafe(path, context.workspaceRoot, context.permissions.writeRoots);
+    assertWritable(target, context.permissions.writeRoots);
+    const { writeSpreadsheetBytes } = await import("./documents.ts");
+    const bytes = await writeSpreadsheetBytes(spreadsheetSheetsArg(args.sheets));
+    writeFileAtomic(target, bytes);
+    return { content: `已生成表格 ${relative(context.workspaceRoot, target).replace(/\\/g, "/")}（${bytes.byteLength} 字节）` };
+  }
+};
+
+const writeDocumentTool: AgentTool = {
+  definition: {
+    name: "write_document",
+    description: "生成 DOCX 文档。支持标题、段落、项目符号和编号列表；标题层级为 1-6。",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "输出 .docx 路径，相对于工作区根目录" },
+        title: { type: "string", description: "文档标题" },
+        blocks: {
+          type: "array",
+          description: "文档段落列表",
+          items: {
+            type: "object",
+            properties: {
+              type: { type: "string", enum: ["heading", "paragraph", "bullet", "numbered"] },
+              text: { type: "string" },
+              level: { type: "number", description: "标题或列表层级" }
+            },
+            required: ["type", "text"],
+            additionalProperties: false
+          }
+        }
+      },
+      required: ["path", "blocks"],
+      additionalProperties: false
+    }
+  },
+  async execute(input, context) {
+    const args = objectArgs(input);
+    const path = stringArg(args, "path");
+    if (!path.toLowerCase().endsWith(".docx")) throw new Error("文档输出必须使用 .docx 扩展名");
+    const target = resolveSafe(path, context.workspaceRoot, context.permissions.writeRoots);
+    assertWritable(target, context.permissions.writeRoots);
+    const { writeDocumentBytes } = await import("./documents.ts");
+    const bytes = await writeDocumentBytes(optionalStringArg(args, "title") ?? null, documentBlocksArg(args.blocks));
+    writeFileAtomic(target, bytes);
+    return { content: `已生成文档 ${relative(context.workspaceRoot, target).replace(/\\/g, "/")}（${bytes.byteLength} 字节）` };
   }
 };
 
@@ -576,6 +699,39 @@ function stringArrayArg(args: Record<string, unknown>, key: string): string[] {
   const value = args[key];
   const values = Array.isArray(value) ? value : value === undefined ? [] : [value];
   return values.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim());
+}
+
+function spreadsheetSheetsArg(value: unknown): SpreadsheetSheetInput[] {
+  if (!Array.isArray(value) || value.length === 0) throw new Error("sheets 必须是非空数组");
+  return value.map((entry, index) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error(`第 ${index + 1} 个工作表参数无效`);
+    const sheet = entry as Record<string, unknown>;
+    const name = stringArg(sheet, "name");
+    if (!Array.isArray(sheet.rows)) throw new Error(`工作表 ${name} 缺少 rows 数组`);
+    const rows = sheet.rows.map((row, rowIndex) => {
+      if (!Array.isArray(row)) throw new Error(`工作表 ${name} 第 ${rowIndex + 1} 行必须是数组`);
+      return row.map((cell, columnIndex) => {
+        if (cell === null || typeof cell === "string" || typeof cell === "number" || typeof cell === "boolean") return cell;
+        throw new Error(`工作表 ${name} 第 ${rowIndex + 1} 行第 ${columnIndex + 1} 列类型不受支持`);
+      });
+    });
+    return { name, rows };
+  });
+}
+
+function documentBlocksArg(value: unknown): DocumentBlockInput[] {
+  if (!Array.isArray(value) || value.length === 0) throw new Error("blocks 必须是非空数组");
+  return value.map((entry, index) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error(`第 ${index + 1} 个文档段落参数无效`);
+    const block = entry as Record<string, unknown>;
+    const type = stringArg(block, "type");
+    if (type !== "heading" && type !== "paragraph" && type !== "bullet" && type !== "numbered") throw new Error(`不支持的文档段落类型：${type}`);
+    return {
+      type,
+      text: stringArg(block, "text", true),
+      ...(block.level === undefined ? {} : { level: intArg(block, "level", 1) })
+    };
+  });
 }
 
 function toGlobMatcher(pattern: string): (candidate: string) => boolean {
@@ -944,7 +1100,7 @@ function countOccurrences(content: string, needle: string): number {
   return count;
 }
 
-function writeFileAtomic(target: string, content: string): void {
+function writeFileAtomic(target: string, content: string | Uint8Array): void {
   mkdirSync(dirname(target), { recursive: true });
   const temporary = `${target}.${randomUUID()}.tmp`;
   try {

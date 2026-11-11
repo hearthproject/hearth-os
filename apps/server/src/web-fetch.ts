@@ -1,9 +1,7 @@
 import { createHash } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
-import * as cheerio from "cheerio";
-import TurndownService from "turndown";
-import { gfm } from "turndown-plugin-gfm";
+import { extractMarkdown } from "@hearth/agent-runtime";
 
 const MAX_REDIRECTS = 5;
 const DEFAULT_TIMEOUT_MS = 20_000;
@@ -247,50 +245,4 @@ function isChallengePage(html: string): boolean {
     || /cf-chl-|captcha|verify you are human/i.test(sample);
 }
 
-export function extractMarkdown(html: string, baseUrl: string): { title: string; markdown: string } {
-  const $ = cheerio.load(html);
-  const title = (
-    $("meta[property='og:title']").attr("content")
-    || $("title").first().text()
-    || $("h1").first().text()
-    || ""
-  ).replace(/\s+/g, " ").trim();
-
-  $("script,style,noscript,svg,iframe,form,nav,footer,aside,header,[role='navigation'],[aria-hidden='true']").remove();
-  $("a[href]").each((_, element) => {
-    const href = $(element).attr("href");
-    if (!href || href.startsWith("#") || href.startsWith("javascript:")) return;
-    try {
-      $(element).attr("href", new URL(href, baseUrl).href);
-    } catch {
-      $(element).removeAttr("href");
-    }
-  });
-  $("img[src]").each((_, element) => {
-    const src = $(element).attr("src");
-    if (!src) return;
-    try {
-      $(element).attr("src", new URL(src, baseUrl).href);
-    } catch {
-      $(element).removeAttr("src");
-    }
-  });
-
-  const candidates = ["main", "article", "[role='main']", "#main-content", ".markdown-body", ".content", "body"];
-  const selected = candidates.map((selector) => $(selector).first()).find((element) => element.length > 0);
-  const body = selected?.html() ?? $.root().html() ?? "";
-
-  const turndown = new TurndownService({
-    headingStyle: "atx",
-    codeBlockStyle: "fenced",
-    bulletListMarker: "-"
-  });
-  turndown.use(gfm);
-  turndown.remove(["script", "style", "noscript"]);
-
-  const markdown = turndown.turndown(body)
-    .replace(/\n{3,}/g, "\n\n")
-    .replace(/[ \t]+\n/g, "\n")
-    .trim();
-  return { title: title || "未命名网页", markdown };
-}
+export { extractMarkdown };
