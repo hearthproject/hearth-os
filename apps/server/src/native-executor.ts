@@ -427,8 +427,13 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
     root.rootCause = root.defectType.replace(/_/g, "-");
     changed = true;
   }
-  if (Array.isArray(root.items)) {
-    const edits = root.items.filter((item) => (
+  const cellEntries = Array.isArray(root.cellActions)
+    ? root.cellActions
+    : Array.isArray(root.items)
+      ? root.items
+      : null;
+  if (cellEntries) {
+    const edits = cellEntries.filter((item) => (
       isPlainObject(item)
       && item.role !== "header"
       && (
@@ -436,7 +441,7 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
         || (typeof item.rule === "string" && /normalize/i.test(item.rule) && (item.targetValue != null || item.after != null))
       )
     )).length;
-    if (edits > 0 && (typeof root.cellEdits !== "number" || root.cellEdits < edits)) {
+    if (edits > 0 && root.cellEdits !== edits) {
       root.cellEdits = edits;
       changed = true;
     }

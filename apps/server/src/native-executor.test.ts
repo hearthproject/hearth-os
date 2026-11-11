@@ -663,6 +663,29 @@ describe("json deliverables", () => {
     }
   });
 
+  it("counts only applicable cleaning rules in cell actions", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "actions.json");
+      writeFileSync(path, JSON.stringify({
+        cellEdits: 4,
+        workbook: "sales.xlsx",
+        cellActions: [
+          { cell: "A1", role: "header", action: "keep", sourceValue: "date" },
+          { cell: "A2", role: "data", action: "update", rule: "normalizeDate", targetValue: "2026-11-02" },
+          { cell: "B2", role: "data", action: "keep", rule: "emptyAmount", sourceValue: "100", targetValue: "100" },
+          { cell: "A3", role: "data", action: "keep", rule: "normalizeDate", targetValue: "2026-11-03" },
+          { cell: "B3", role: "data", action: "update", rule: "emptyAmount", targetValue: "0" }
+        ]
+      }));
+      normalizeJsonDeliverables(dir, ["actions.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.cellEdits).toBe(3);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("derives spreadsheet save target and original overwrite state", () => {
     const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
     try {
