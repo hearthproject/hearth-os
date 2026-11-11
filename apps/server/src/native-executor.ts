@@ -341,6 +341,19 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
       changed = true;
     }
   }
+  if (!Object.hasOwn(root, "feasible")) {
+    const verdict = String(root.verdict ?? root.planStatus ?? "").toLowerCase();
+    if (/infeasible|not[_ ]?feasible|unachievable|blocked/.test(verdict)) {
+      root.feasible = false;
+      changed = true;
+    } else if (/conditionally[_ ]?feasible|conditional|at[_ ]?risk|needs?.?(approval|confirm)|pending/.test(verdict)) {
+      root.feasible = false;
+      changed = true;
+    } else if (/^feasible$|on[_ ]?track|achievable/.test(verdict)) {
+      root.feasible = true;
+      changed = true;
+    }
+  }
   if (!Object.hasOwn(root, "escalate")) {
     if (typeof root.escalationCount === "number") {
       root.escalate = root.escalationCount > 0;
