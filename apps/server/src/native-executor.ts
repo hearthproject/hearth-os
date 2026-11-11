@@ -333,7 +333,7 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
       break;
     }
   }
-  if (Array.isArray(root.missingMetadata)) {
+  {
     const pages = Array.isArray(root.pages) ? root.pages : Array.isArray(root.items) ? root.items : null;
     const requiredFields = new Set(["canonical", "published", "publishedTime", "publishDate", "date"]);
     let missingPageCount = 0;
@@ -348,7 +348,7 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
         ));
         if (required.length === 0) continue;
         matchedRequiredField = true;
-        if (required.some((entry) => entry.status !== "present" || entry.value == null)) missingPageCount += 1;
+        if (required.some((entry) => entry.status === "missing" || entry.value == null)) missingPageCount += 1;
       } else if (isPlainObject(page.metadata)) {
         const required = [...requiredFields].filter((field) => Object.hasOwn(page.metadata as Record<string, unknown>, field));
         if (required.length === 0) continue;
@@ -359,7 +359,7 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
         })) missingPageCount += 1;
       }
     }
-    if (matchedRequiredField) {
+    if (matchedRequiredField && root.missingMetadata !== missingPageCount) {
       root.missingMetadata = missingPageCount;
       changed = true;
     }

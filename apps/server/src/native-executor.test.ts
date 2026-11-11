@@ -472,7 +472,7 @@ describe("json deliverables", () => {
     try {
       const path = join(dir, "result.json");
       writeFileSync(path, JSON.stringify({
-        missingMetadata: [{ id: "m1" }],
+        missingMetadata: 2,
         items: [
           { metadata: { canonical: { status: "present", value: "https://a" }, publishedTime: { status: "present_but_ambiguous", value: "2026-10-01" } } },
           { metadata: { canonical: { status: "missing", value: null }, publishedTime: { status: "missing", value: null } } }
