@@ -28,6 +28,10 @@ describe("native system prompt", () => {
     expect(prompt).toContain("P0/P1");
     expect(prompt).toContain("核心事实直接放在顶层");
     expect(prompt).toContain("沿用输入对象的字段名");
+    expect(prompt).toContain("顶层包含 facts 对象");
+    expect(prompt).toContain("<noun>Count");
+    expect(prompt).toContain("负责人 + 动作 + 截止");
+    expect(prompt).toContain("回滚方案");
   });
 });
 
