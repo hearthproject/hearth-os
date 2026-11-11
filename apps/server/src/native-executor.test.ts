@@ -359,6 +359,22 @@ describe("json deliverables", () => {
     }
   });
 
+  it("overrides a contradictory feasible flag on conditional plans", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "result.json");
+      writeFileSync(path, JSON.stringify({
+        facts: { status: "conditionally_feasible", feasible: true }
+      }));
+      normalizeJsonDeliverables(dir, ["result.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.feasible).toBe(false);
+      expect(parsed.facts.feasible).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("counts only work milestones in a schedule", () => {
     const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
     try {

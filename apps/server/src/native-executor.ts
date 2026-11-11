@@ -657,15 +657,14 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
       changed = true;
     }
   }
-  if (!Object.hasOwn(root, "feasible")) {
+  {
     const verdict = String(root.verdict ?? root.planStatus ?? root.status ?? "").toLowerCase();
-    if (/infeasible|not[_ ]?feasible|unachievable|blocked/.test(verdict)) {
+    const notCurrentlyFeasible = /infeasible|not[_ ]?feasible|unachievable|blocked/.test(verdict)
+      || /conditionally[_ ]?feasible|conditional|at[_ ]?risk|needs?.?(approval|confirm)|pending/.test(verdict);
+    if (notCurrentlyFeasible && root.feasible !== false) {
       root.feasible = false;
       changed = true;
-    } else if (/conditionally[_ ]?feasible|conditional|at[_ ]?risk|needs?.?(approval|confirm)|pending/.test(verdict)) {
-      root.feasible = false;
-      changed = true;
-    } else if (/^feasible$|on[_ ]?track|achievable/.test(verdict)) {
+    } else if (!Object.hasOwn(root, "feasible") && /^feasible$|on[_ ]?track|achievable/.test(verdict)) {
       root.feasible = true;
       changed = true;
     }
