@@ -418,9 +418,12 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
         matchedRequiredField = true;
         if (required.some((field) => {
           const entry = page[field];
-          return isPlainObject(entry)
-            ? entry.status === "missing" || (entry.status !== "present_but_ambiguous" && entry.value == null)
-            : entry == null;
+          if (isPlainObject(entry)) {
+            return entry.status === "missing" || (entry.status !== "present_but_ambiguous" && entry.value == null);
+          }
+          if (entry != null) return false;
+          const status = String(page[`${field}Status`] ?? page[`${field}_status`] ?? "").toLowerCase();
+          return !/present|ambiguous/.test(status);
         })) missingPageCount += 1;
       }
     }

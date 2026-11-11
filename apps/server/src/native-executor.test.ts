@@ -630,6 +630,27 @@ describe("json deliverables", () => {
     }
   });
 
+  it("counts missing page metadata from flat status fields", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "archive.json");
+      writeFileSync(path, JSON.stringify({
+        facts: { pageCount: 2, missingMetadata: 2 },
+        items: [
+          { canonical: "https://a", canonicalStatus: "present_self_reference", publishedTime: null, publishedTimeStatus: "present_but_ambiguous" },
+          { canonical: null, canonicalStatus: "missing", publishedTime: null, publishedTimeStatus: "missing" }
+        ]
+      }));
+      normalizeJsonDeliverables(dir, ["archive.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.pages).toHaveLength(2);
+      expect(parsed.missingMetadata).toBe(1);
+      expect(parsed.facts.missingMetadata).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("normalizes a structured root cause from its defect type", () => {
     const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
     try {
