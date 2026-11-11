@@ -57,6 +57,7 @@ import type {
   MethodEvaluation,
   MethodTrial,
   MaintenanceRun,
+  LocalProject,
   OutboxDraft,
   ModelProfileRecord,
   ProactiveSettings,
@@ -130,7 +131,7 @@ export interface RunAggregate {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 30;
+export const CURRENT_SCHEMA_VERSION = 31;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -495,6 +496,10 @@ CREATE TABLE IF NOT EXISTS model_profiles (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS local_projects (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE,
+  default_branch TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS executor_model_bindings (
   executor_id TEXT PRIMARY KEY,
   profile_id TEXT,
@@ -811,6 +816,30 @@ export class HearthStore {
   getSkill(id: string): SkillRecord | null {
     const row = this.db.prepare("SELECT * FROM skills WHERE id = ?").get(id) as DbRow | undefined;
     return row ? rowToSkill(row) : null;
+  }
+
+  getLocalProject(id: string): LocalProject | null {
+    const row = this.db.prepare("SELECT * FROM local_projects WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToLocalProject(row) : null;
+  }
+
+  listLocalProjects(): LocalProject[] {
+    return (this.db.prepare("SELECT * FROM local_projects ORDER BY created_at ASC").all() as DbRow[])
+      .map(rowToLocalProject);
+  }
+
+  upsertLocalProject(project: LocalProject): LocalProject {
+    this.db.prepare(
+      `INSERT INTO local_projects (id, name, path, default_branch, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET name=excluded.name, path=excluded.path,
+         default_branch=excluded.default_branch, updated_at=excluded.updated_at`
+    ).run(project.id, project.name, project.path, project.defaultBranch, project.createdAt, project.updatedAt);
+    return project;
+  }
+
+  deleteLocalProject(id: string): void {
+    this.db.prepare("DELETE FROM local_projects WHERE id = ?").run(id);
   }
 
   listSkills(status?: string): SkillRecord[] {
@@ -5577,6 +5606,17 @@ function rowToMethodApplication(row: DbRow): MethodApplication {
     selection: String(row.selection) as MethodApplication["selection"],
     promptSha256: String(row.prompt_sha256),
     createdAt: String(row.created_at)
+  };
+}
+
+function rowToLocalProject(row: DbRow): LocalProject {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    path: String(row.path),
+    defaultBranch: String(row.default_branch),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
   };
 }
 

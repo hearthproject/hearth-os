@@ -172,6 +172,22 @@ export interface HermesHealth {
 export const TASK_KINDS = ["delivery", "workspace", "general"] as const;
 export type TaskKind = (typeof TASK_KINDS)[number];
 
+export interface LocalProject {
+  id: string;
+  name: string;
+  path: string;
+  defaultBranch: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LocalProjectView extends LocalProject {
+  available: boolean;
+  currentBranch: string | null;
+  dirty: boolean;
+  error: string | null;
+}
+
 export const RUN_STATUSES = [
   "queued",
   "running",

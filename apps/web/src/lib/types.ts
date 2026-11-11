@@ -133,6 +133,8 @@ import type {
   EntityStateRecord,
   IntakeDecision,
   IntakeDecisionRecord,
+  LocalProject,
+  LocalProjectView,
   PreparedActionRecord,
   ThreadSubscriptionRecord,
   WatchdogEvent
@@ -273,6 +275,8 @@ export type {
   EntityStateRecord,
   IntakeDecision,
   IntakeDecisionRecord,
+  LocalProject,
+  LocalProjectView,
   PreparedActionRecord,
   ThreadSubscriptionRecord,
   WatchdogEvent,

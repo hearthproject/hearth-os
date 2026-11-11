@@ -47,6 +47,7 @@ import type {
   MailTestResult,
   HealthResponse,
   HermesProbeResponse,
+  LocalProjectView,
   MaintenanceSnapshot,
   CreateMemoryRequest,
   CreateMethodRequest,
@@ -206,6 +207,16 @@ export const api = {
     body: JSON.stringify({ items })
   }),
   modelSettings: () => request<ModelSettingsResponse>("/api/model-settings"),
+  projects: () => request<{ projects: LocalProjectView[] }>("/api/projects"),
+  createProject: (input: { name?: string; path: string; defaultBranch?: string }) => request<{ project: LocalProjectView }>("/api/projects", {
+    method: "POST",
+    body: JSON.stringify(input)
+  }),
+  updateProject: (id: string, input: { name?: string; defaultBranch?: string }) => request<{ project: LocalProjectView }>(`/api/projects/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  }),
+  deleteProject: (id: string) => request<void>(`/api/projects/${encodeURIComponent(id)}`, { method: "DELETE" }),
   modelRegistry: () => request<ModelRegistryResponse>("/api/model-registry"),
   createModelProfile: (input: ModelProfilePatch) => request<{ profile: ModelProfileView }>("/api/model-profiles", {
     method: "POST",

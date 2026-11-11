@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   Cpu,
   Database,
+  FolderGit2,
   FolderTree,
   KeyRound,
   Layers,
@@ -41,7 +42,7 @@ import { ExecutorSettingsPanel } from "../components/ExecutorSettingsPanel.tsx";
 import { FeishuSettingsPanel } from "../components/FeishuSettingsPanel.tsx";
 import { desktopNotificationsEnabled, requestDesktopPermission, setDesktopNotificationsEnabled } from "../lib/notifications.ts";
 
-type SettingsTab = "executors" | "models" | "proactive" | "automation" | "connections" | "context" | "data";
+type SettingsTab = "executors" | "models" | "projects" | "proactive" | "automation" | "connections" | "context" | "data";
 
 interface ProfileDraft {
   name: string;
@@ -58,6 +59,7 @@ interface ProfileDraft {
 const TABS: Array<{ id: SettingsTab; label: string; hint: string; icon: typeof Cpu }> = [
   { id: "executors", label: "执行器", hint: "默认执行器、安装状态与模型绑定", icon: Cpu },
   { id: "models", label: "模型", hint: "模型档案、聊天模型与连接测试", icon: Layers },
+  { id: "projects", label: "项目", hint: "本地 Git 项目与默认分支", icon: FolderGit2 },
   { id: "proactive", label: "主动", hint: "提醒预算、安静时段与触发器", icon: Bell },
   { id: "automation", label: "记忆与技能", hint: "自动运行状态，无需手工管理", icon: Sparkles },
   { id: "connections", label: "连接", hint: "飞书消息入口与外部账户", icon: Link2 },
@@ -118,7 +120,7 @@ export function SettingsPage() {
         <div>
           <span className="eyebrow">本机控制台</span>
           <h1>设置</h1>
-          <p className="page-meta">按“执行器 → 模型 → 主动 → 记忆与技能 → 连接 → 上下文 → 数据”完成配置。密钥只保存在本机 SQLite，浏览器只能看到掩码。</p>
+          <p className="page-meta">按“执行器 → 模型 → 项目 → 主动 → 记忆与技能 → 连接 → 上下文 → 数据”完成配置。密钥只保存在本机 SQLite，浏览器只能看到掩码。</p>
         </div>
         <div className="settings-defaults">
           <strong>一等执行器</strong>
@@ -146,6 +148,7 @@ export function SettingsPage() {
 
       {tab === "executors" && <ExecutorsTab />}
       {tab === "models" && <ModelsTab />}
+      {tab === "projects" && <ProjectsTab />}
       {tab === "proactive" && <ProactiveTab />}
       {tab === "automation" && <AutomationTab />}
       {tab === "connections" && <ConnectionsTab />}
@@ -516,6 +519,102 @@ function ModelsTab() {
           </div>
         </section>
       </div>
+    </section>
+  );
+}
+
+function ProjectsTab() {
+  const queryClient = useQueryClient();
+  const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: api.projects });
+  const [path, setPath] = useState("");
+  const [name, setName] = useState("");
+  const [defaultBranch, setDefaultBranch] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<NoticeState>(null);
+
+  async function addProject() {
+    setBusy(true);
+    setNotice(null);
+    try {
+      const result = await api.createProject({
+        path,
+        ...(name.trim() ? { name: name.trim() } : {}),
+        ...(defaultBranch.trim() ? { defaultBranch: defaultBranch.trim() } : {})
+      });
+      setPath("");
+      setName("");
+      setDefaultBranch("");
+      setNotice({ tone: "ok", text: `已注册项目：${result.project.name}` });
+      await queryClient.invalidateQueries({ queryKey: ["projects"] });
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeProject(id: string, projectName: string) {
+    if (!window.confirm(`从 Hearth 移除项目“${projectName}”？不会删除本地文件。`)) return;
+    setBusy(true);
+    try {
+      await api.deleteProject(id);
+      setNotice({ tone: "info", text: `已移除项目：${projectName}` });
+      await queryClient.invalidateQueries({ queryKey: ["projects"] });
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const projects = projectsQuery.data?.projects ?? [];
+  return (
+    <section className="settings-tab-panel">
+      <div className="settings-section-intro">
+        <div>
+          <h2>本地项目</h2>
+          <p>注册本机 Git 仓库根目录后，本地项目任务默认由 Hearth 原生执行器在独立 Worktree 中运行。这里只登记仓库，不会复制或删除项目文件。</p>
+        </div>
+        <span className={`status-chip ${projectsQuery.isError ? "warn" : "ok"}`}>{projects.length} 个项目</span>
+      </div>
+
+      <section className="panel settings-section">
+        <div className="settings-body">
+          <div className="section-heading"><div><h3>注册 Git 项目</h3><p>必须选择包含 <code>.git</code> 的仓库根目录；默认分支在当前仓库和 Worktree 中都必须存在。</p></div><FolderGit2 size={20} /></div>
+          <div className="form-grid">
+            <label className="span-2"><span>仓库根目录</span><input value={path} onChange={(event) => setPath(event.target.value)} placeholder="D:\\code\\my-project" spellCheck={false} /></label>
+            <label><span>显示名称（可选）</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="默认使用目录名" /></label>
+            <label><span>默认分支（可选）</span><input value={defaultBranch} onChange={(event) => setDefaultBranch(event.target.value)} placeholder="默认使用当前分支" spellCheck={false} /></label>
+          </div>
+          <div className="settings-actions">
+            <button className="primary-button" onClick={() => void addProject()} disabled={busy || !path.trim()}>{busy ? <Loader2 size={15} className="spin" /> : <Plus size={15} />} 注册项目</button>
+            <button className="ghost-button" onClick={() => void projectsQuery.refetch()} disabled={busy}><RefreshCw size={15} /> 刷新状态</button>
+          </div>
+          {notice && <Notice tone={notice.tone} text={notice.text} />}
+        </div>
+      </section>
+
+      <section className="panel settings-section">
+        <div className="settings-body">
+          <div className="section-heading"><div><h3>已注册项目</h3><p>状态直接读取本地 Git，不缓存分支或脏工作区信息。</p></div></div>
+          {projectsQuery.isLoading && <InlineLoading text="正在读取本地项目" />}
+          {projectsQuery.isError && <p className="form-error">{projectsQuery.error.message}</p>}
+          {!projectsQuery.isLoading && projects.length === 0 && <EmptyState text="还没有注册本地 Git 项目。" />}
+          <div className="data-table-list">
+            {projects.map((project) => (
+              <article key={project.id} className="migration-row">
+                <span className={`status-dot ${project.available ? "online" : "offline"}`} />
+                <div>
+                  <strong>{project.name}</strong>
+                  <small><code>{project.path}</code> · 默认分支 {project.defaultBranch} · 当前 {project.currentBranch ?? "不可用"}{project.dirty ? " · 有未提交改动" : ""}</small>
+                  {project.error && <p>{project.error}</p>}
+                </div>
+                <button className="ghost-button danger compact" onClick={() => void removeProject(project.id, project.name)} disabled={busy}><Trash2 size={14} /> 移除</button>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
     </section>
   );
 }

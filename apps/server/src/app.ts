@@ -56,6 +56,7 @@ import { MethodError, MethodService } from "./methods.ts";
 import { SkillPackageError } from "./skill-package.ts";
 import { SkillPackageService } from "./skills.ts";
 import { SkillCuratorService } from "./skill-curator.ts";
+import { ProjectError, ProjectService } from "./projects.ts";
 import { ProactiveError, ProactiveService } from "./proactive.ts";
 import { AttentionGovernor } from "./attention-governor.ts";
 import { BackgroundToolError, BackgroundToolService } from "./background-tools.ts";
@@ -122,6 +123,17 @@ const createTaskSchema = z.object({
     networkHosts: z.array(z.string().trim().min(1).max(255)).max(20),
     tools: z.array(z.string().trim().min(1).max(80)).max(40)
   }).optional()
+}).strict();
+
+const createProjectSchema = z.object({
+  name: z.string().trim().min(1).max(100).optional(),
+  path: z.string().trim().min(1).max(2000),
+  defaultBranch: z.string().trim().min(1).max(255).optional()
+}).strict();
+
+const updateProjectSchema = z.object({
+  name: z.string().trim().min(1).max(100).optional(),
+  defaultBranch: z.string().trim().min(1).max(255).optional()
 }).strict();
 
 const goalAuthoritySourceSchema = z.object({
@@ -873,6 +885,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const skills = new SkillPackageService(service, methods, {
     rootDir: options.skillRoot ?? join(options.dataDir ?? DATA_DIR, "skills")
   });
+  const projects = new ProjectService(store);
   const skillCurator = new SkillCuratorService({ service, skills });
   const sync = new SyncService(service, {
     ...(options.syncFetch ? { fetchImpl: options.syncFetch } : {}),
@@ -1267,6 +1280,45 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
 
   app.get("/api/web-search/settings", async () => webSearch.view());
+
+  app.get("/api/projects", async () => ({ projects: projects.list() }));
+
+  app.post("/api/projects", async (request, reply) => {
+    const parsed = createProjectSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_PROJECT", message: "项目设置格式不正确" });
+    try {
+      return reply.code(201).send({ project: projects.create(parsed.data) });
+    } catch (error) {
+      return sendProjectError(reply, error);
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/api/projects/:id", async (request, reply) => {
+    try {
+      return { project: projects.get(request.params.id) };
+    } catch (error) {
+      return sendProjectError(reply, error);
+    }
+  });
+
+  app.patch<{ Params: { id: string } }>("/api/projects/:id", async (request, reply) => {
+    const parsed = updateProjectSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_PROJECT", message: "项目设置格式不正确" });
+    try {
+      return { project: projects.update(request.params.id, parsed.data) };
+    } catch (error) {
+      return sendProjectError(reply, error);
+    }
+  });
+
+  app.delete<{ Params: { id: string } }>("/api/projects/:id", async (request, reply) => {
+    try {
+      projects.delete(request.params.id);
+      return reply.code(204).send();
+    } catch (error) {
+      return sendProjectError(reply, error);
+    }
+  });
 
   app.patch("/api/web-search/settings", async (request, reply) => {
     const parsed = z.object({
@@ -3976,6 +4028,13 @@ function sendMethodError(reply: FastifyReply, error: unknown) {
 
 function sendSkillError(reply: FastifyReply, error: unknown) {
   if (error instanceof SkillPackageError) {
+    return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+  }
+  throw error;
+}
+
+function sendProjectError(reply: FastifyReply, error: unknown) {
+  if (error instanceof ProjectError) {
     return reply.code(error.statusCode).send({ error: error.code, message: error.message });
   }
   throw error;
