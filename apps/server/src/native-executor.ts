@@ -227,7 +227,9 @@ const FACT_ALIASES: Record<string, string> = {
   observedEffect: "effect",
   likelyCommit: "suspectCommit",
   failingTest: "failedTest",
-  explicitUnknownCount: "unknownCount"
+  explicitUnknownCount: "unknownCount",
+  hasProductionChanges: "productionCodeChanged",
+  productionCodeModified: "productionCodeChanged"
 };
 
 const ARRAY_COUNTS: Record<string, string> = {
@@ -322,6 +324,10 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
       root.failedTest = shortName;
       changed = true;
     }
+  }
+  if (!Object.hasOwn(root, "productionCodeChanged") && typeof root.productionCodeUnchanged === "boolean") {
+    root.productionCodeChanged = !root.productionCodeUnchanged;
+    changed = true;
   }
   for (const [key, value] of Object.entries({ ...root })) {
     const match = key.match(/^(.+)Count$/);
