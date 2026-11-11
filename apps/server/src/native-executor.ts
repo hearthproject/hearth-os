@@ -535,6 +535,13 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
       changed = true;
     }
   }
+  if (typeof root.rootCause === "string") {
+    const rootCause = canonicalRootCause(root.rootCause);
+    if (rootCause !== root.rootCause) {
+      root.rootCause = rootCause;
+      changed = true;
+    }
+  }
   if (root.verdict !== "block" && (
     root.action === "block"
     || root.blocksMerge === true
@@ -585,6 +592,11 @@ function canonicalVerdict(value: string): string {
   if (normalized.includes("request_changes") || normalized.includes("changes_requested") || normalized.includes("block")) return "block";
   if (normalized.includes("approve")) return "approve";
   if (normalized.includes("comment")) return "comment";
+  return value;
+}
+
+function canonicalRootCause(value: string): string {
+  if (/off[_\s-]?by[_\s-]?one/i.test(value)) return "off-by-one";
   return value;
 }
 

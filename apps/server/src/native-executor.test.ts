@@ -413,6 +413,21 @@ describe("json deliverables", () => {
     }
   });
 
+  it("normalizes an off-by-one root cause label", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "result.json");
+      writeFileSync(path, JSON.stringify({
+        facts: { rootCause: "off_by_one_slice_end_index" }
+      }));
+      normalizeJsonDeliverables(dir, ["result.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.rootCause).toBe("off-by-one");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("counts planned spreadsheet cell edits", () => {
     const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
     try {
