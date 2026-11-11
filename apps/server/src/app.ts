@@ -63,6 +63,7 @@ import { PreparedActionService } from "./prepared-actions.ts";
 import { ThreadSubscriptionService } from "./thread-subscriptions.ts";
 import { WatchdogService } from "./watchdog.ts";
 import { IntakeRouter } from "./intake-router.ts";
+import { WebSearchError, WebSearchService } from "./web-search.ts";
 import { isBackgroundToolReadOnly, requiresToolApproval, toolApprovalSummary } from "./tool-policy.ts";
 import { createBuiltinTools } from "@hearth/agent-runtime";
 import { StandingIntentError, StandingIntentService } from "./standing-intents.ts";
@@ -970,6 +971,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     secretBox,
     codexHome: CODEX_HOME_DIR
   });
+  const webSearch = new WebSearchService({ store, secretBox });
   const settingsMigrations = migrateLegacySettings({
     store,
     registry: modelRegistry,
@@ -1037,6 +1039,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
         leases,
         delegations,
         backgroundTools,
+        webSearch,
         attachmentRoot,
         executorSettingsPath,
         executorSettingsProvider: () => executorSettingsStore.load(),
@@ -1256,6 +1259,24 @@ export async function buildServer(options: BuildServerOptions = {}) {
       presets: modelRegistry.presets(),
       chatConfigured: Boolean(chat && chatModelConfigured(chat))
     };
+  });
+
+  app.get("/api/web-search/settings", async () => webSearch.view());
+
+  app.patch("/api/web-search/settings", async (request, reply) => {
+    const parsed = z.object({
+      enabled: z.boolean().optional(),
+      provider: z.enum(["tavily", "searxng"]).optional(),
+      apiKey: z.string().max(500).optional(),
+      searxngUrl: z.string().max(500).optional()
+    }).strict().safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_WEB_SEARCH_SETTINGS", message: "搜索设置格式不正确" });
+    try {
+      return webSearch.update(parsed.data);
+    } catch (error) {
+      if (error instanceof WebSearchError) return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+      throw error;
+    }
   });
 
   app.get("/api/settings/storage", async () => ({

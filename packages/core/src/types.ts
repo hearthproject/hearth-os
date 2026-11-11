@@ -429,6 +429,30 @@ export interface ModelSettingsView {
   updatedAt: string | null;
 }
 
+export type WebSearchProvider = "tavily" | "searxng";
+
+export interface WebSearchSettingsView {
+  enabled: boolean;
+  provider: WebSearchProvider;
+  searxngUrl: string;
+  hasApiKey: boolean;
+  apiKeyMasked: string | null;
+  updatedAt: string | null;
+}
+
+export interface WebSearchResult {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
+export interface WebSearchResponse {
+  query: string;
+  provider: WebSearchProvider;
+  results: WebSearchResult[];
+  fetchedAt: string;
+}
+
 export interface ModelProfileRecord {
   id: string;
   name: string;

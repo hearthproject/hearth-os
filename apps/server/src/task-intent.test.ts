@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { planExecution } from "./chat.ts";
 import { resolveExecutorFromEnabled, resolveExecutorLocked } from "./executors.ts";
-import { needsGithubRepository, wantsGithubAccess, wantsScreenshot } from "./task-intent.ts";
+import { needsGithubRepository, wantsGithubAccess, wantsPublicWebResearch, wantsScreenshot } from "./task-intent.ts";
 
 describe("task intent", () => {
   it("recognizes desktop screenshot requests", () => {
@@ -12,6 +12,12 @@ describe("task intent", () => {
       expectedOutputs: ["desktop.png"],
       capability: "desktop-capture"
     });
+  });
+
+  it("recognizes public web research without granting it to ordinary tasks", () => {
+    expect(wantsPublicWebResearch("调研 2026 年本地优先 Agent 的最新进展")).toBe(true);
+    expect(wantsPublicWebResearch("搜索公开资料并整理引用")).toBe(true);
+    expect(wantsPublicWebResearch("把这份会议记录整理成周报")).toBe(false);
   });
 
   it("requires a github-capable executor for PR work", () => {

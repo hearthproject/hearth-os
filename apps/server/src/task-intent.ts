@@ -1,6 +1,7 @@
 const SCREENSHOT_HINTS = /(截图|截屏|屏幕快照|screenshot|capture\s+(?:the\s+)?screen)/i;
 const SCREENSHOT_PHRASE = /截.{0,8}(桌面|屏幕)/;
 const GITHUB_HINTS = /(github|pull\s*request|\bPRs?\b|拉取请求)/i;
+const PUBLIC_RESEARCH_HINTS = /(联网|上网|搜索|检索|调研|研究|公开资料|最新消息|最新进展|web\s*search|research|browse|look\s*up|latest\s+news)/i;
 export const GITHUB_NETWORK_HOSTS = ["github.com", "api.github.com"];
 
 export function wantsScreenshot(text: string): boolean {
@@ -9,6 +10,10 @@ export function wantsScreenshot(text: string): boolean {
 
 export function wantsGithubAccess(text: string): boolean {
   return GITHUB_HINTS.test(text);
+}
+
+export function wantsPublicWebResearch(text: string): boolean {
+  return PUBLIC_RESEARCH_HINTS.test(text);
 }
 
 const PR_ACTION_HINTS = /(审核|评审|review|列出|处理|回复|修改|rebase|关闭|合并|merge)/i;

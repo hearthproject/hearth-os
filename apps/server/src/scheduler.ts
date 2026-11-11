@@ -49,7 +49,8 @@ import { chatModelConfigured, loadModelSettings, type ModelSettings } from "./mo
 import { prepareTaskRuntime, type RuntimePreparation } from "./runtime.ts";
 import type { HearthService } from "./service.ts";
 import { buildDeliveryRepairPrompt, buildTaskPrompt, prepareWorkspace, UnsupportedInputError, type PreparedWorkspace } from "./workspace.ts";
-import { wantsScreenshot } from "./task-intent.ts";
+import { wantsPublicWebResearch, wantsScreenshot } from "./task-intent.ts";
+import type { WebSearchService } from "./web-search.ts";
 
 import { createExecutorAdapters, type CodexContextItem, type CodexRunner, type DshRunner, type ExecutionOutcome, type ExecutorAdapter, type ExecutorAttemptContext, type ExternalRunner, type NativeRunner } from "./executor-adapter.ts";
 export type { CodexRunner, NativeRunner } from "./executor-adapter.ts";
@@ -100,6 +101,7 @@ export interface SchedulerOptions {
   leases?: TaskLeaseService;
   delegations?: DelegationService;
   backgroundTools?: BackgroundToolService;
+  webSearch?: WebSearchService;
   leaseHeartbeatMs?: number;
   githubRun?: CommandRunner | undefined;
   githubCacheRoot?: string | undefined;
@@ -153,6 +155,7 @@ export class HearthScheduler {
   private readonly leases: TaskLeaseService;
   private readonly delegations: DelegationService;
   private readonly backgroundTools: BackgroundToolService | undefined;
+  private readonly webSearch: WebSearchService | undefined;
   private readonly leaseHeartbeatMs: number;
   private readonly leaseHeartbeats = new Map<string, { epoch: number; timer: ReturnType<typeof setInterval> }>();
   private readonly controllers = new Map<string, AbortController>();
@@ -214,6 +217,7 @@ export class HearthScheduler {
     this.leases = options.leases ?? new TaskLeaseService(this.service);
     this.sandbox = options.sandbox ?? new SandboxService();
     this.backgroundTools = options.backgroundTools;
+    this.webSearch = options.webSearch;
     this.delegations = options.delegations ?? new DelegationService({
       service: this.service,
       sandbox: this.sandbox
@@ -1515,6 +1519,9 @@ export class HearthScheduler {
       });
       if (contextPackId && this.contextBroker) extraNativeTools.push(this.expandRefTool(contextPackId));
       if (this.backgroundTools) extraNativeTools.push(...this.backgroundTools.toolsFor(task));
+      if (this.webSearch && (wantsPublicWebResearch(`${task.title}\n${task.goal}`) || task.networkHosts.includes("*"))) {
+        extraNativeTools.push(this.webSearch.tool());
+      }
       const adapter = this.adapters[executorId];
       const attemptContext: ExecutorAttemptContext = {
         task,

@@ -7,6 +7,7 @@ import { RE2JS } from "re2js";
 import type { TaskPermissions } from "@hearth/core";
 import type { DocumentBlockInput, SpreadsheetSheetInput } from "./documents.ts";
 import type { AgentTool, AgentToolContext, AgentToolResult } from "./types.ts";
+import { fetchWebSnapshot } from "./web-fetch.ts";
 
 const MAX_READ_BYTES = 2 * 1024 * 1024;
 const MAX_LIST_ENTRIES = 500;
@@ -15,7 +16,6 @@ const MAX_GLOB_RESULTS = 500;
 const MAX_GREP_PATTERN_LENGTH = 500;
 const MAX_SCAN_MS = 10_000;
 const MAX_SHELL_OUTPUT_CHARS = 8_000;
-const MAX_FETCH_CHARS = 200_000;
 const MAX_DOCUMENT_BYTES = 25 * 1024 * 1024;
 const MAX_DOCUMENT_OUTPUT_CHARS = 200_000;
 const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", "coverage", ".next", ".cache", ".turbo"]);
@@ -559,7 +559,7 @@ const captureScreenTool: AgentTool = {
 const fetchUrlTool: AgentTool = {
   definition: {
     name: "fetch_url",
-    description: "读取一个已授权域名下的网页并返回纯文本。网络默认关闭，只有任务声明的域名可用。",
+    description: "读取一个已授权域名下的网页并返回 Markdown。服务端会校验重定向、DNS 和内网地址；网络默认关闭。",
     parameters: {
       type: "object",
       properties: {
@@ -577,18 +577,12 @@ const fetchUrlTool: AgentTool = {
     if (!hostAllowed(parsed.hostname, context.permissions.networkHosts)) {
       throw new Error(`域名未授权：${parsed.hostname}`);
     }
-    const response = await fetch(url, {
-      redirect: "follow",
-      signal: withTimeout(context.signal, 30_000),
-      headers: { "user-agent": "Hearth/0.1 (+local agent)" }
+    const snapshot = await fetchWebSnapshot(url, {
+      allowedHosts: context.permissions.networkHosts,
+      timeoutMs: 30_000,
+      signal: context.signal
     });
-    if (!response.ok) throw new Error(`网页返回 HTTP ${response.status}`);
-    const finalHost = new URL(response.url).hostname;
-    if (!hostAllowed(finalHost, context.permissions.networkHosts)) throw new Error(`重定向到未授权域名：${finalHost}`);
-    const html = (await response.text()).slice(0, MAX_FETCH_CHARS);
-    const isHtml = /html/i.test(response.headers.get("content-type") ?? "");
-    const text = isHtml ? htmlToText(html) : html;
-    return { content: text.trim() || "（网页没有文本内容）" };
+    return { content: `# ${snapshot.title}\n\n来源：${snapshot.finalUrl}\n\n${snapshot.markdown}` };
   }
 };
 
@@ -1060,33 +1054,11 @@ function killProcessTree(pid: number | undefined): void {
 
 function hostAllowed(hostname: string, allowed: string[]): boolean {
   const host = hostname.toLowerCase();
+  if (allowed.includes("*")) return true;
   return allowed.some((item) => {
     const allowedHost = item.toLowerCase();
     return host === allowedHost || (allowedHost.startsWith("*.") && host.endsWith(allowedHost.slice(1)));
   });
-}
-
-function withTimeout(signal: AbortSignal, timeoutMs: number): AbortSignal {
-  const timeout = AbortSignal.timeout(timeoutMs);
-  return signal ? AbortSignal.any([signal, timeout]) : timeout;
-}
-
-function htmlToText(html: string): string {
-  const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1]?.trim() ?? "";
-  const body = html
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, "\"")
-    .replace(/&#39;/g, "'")
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-  return title ? `# ${title}\n\n${body}` : body;
 }
 
 function countOccurrences(content: string, needle: string): number {

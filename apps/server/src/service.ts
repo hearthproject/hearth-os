@@ -43,7 +43,7 @@ import { resolveRepoPath } from "./config.ts";
 import { EventBus } from "./events.ts";
 import { executorName, resolveExecutorFromEnabled, resolveExecutorLocked } from "./executors.ts";
 import { buildTaskStatusMessage } from "./task-status-messages.ts";
-import { GITHUB_NETWORK_HOSTS, wantsGithubAccess } from "./task-intent.ts";
+import { GITHUB_NETWORK_HOSTS, wantsGithubAccess, wantsPublicWebResearch } from "./task-intent.ts";
 
 export interface CreateTaskInput {
   externalRef?: string;
@@ -194,6 +194,9 @@ export class HearthService {
     let networkHosts = template?.networkHosts ?? input.networkHosts ?? [];
     if (template?.github || wantsGithubAccess([input.title, input.goal, input.textInput].filter(Boolean).join("\n"))) {
       networkHosts = [...new Set([...networkHosts, ...GITHUB_NETWORK_HOSTS])];
+    }
+    if (wantsPublicWebResearch([input.title, input.goal, input.textInput].filter(Boolean).join("\n"))) {
+      networkHosts = [...new Set([...networkHosts, "*"])];
     }
     if (input.url) {
       inputs.push({ kind: "url", label: "网页", value: input.url });
