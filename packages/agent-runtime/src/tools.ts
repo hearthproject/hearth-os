@@ -1,7 +1,7 @@
-import { exec as execCallback } from "node:child_process";
+import { exec as execCallback, spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from "node:path";
+import { createWriteStream, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import picomatch from "picomatch";
 import { RE2JS } from "re2js";
 import type { TaskPermissions } from "@hearth/core";
@@ -13,6 +13,7 @@ const MAX_SEARCH_RESULTS = 100;
 const MAX_GLOB_RESULTS = 500;
 const MAX_GREP_PATTERN_LENGTH = 500;
 const MAX_SCAN_MS = 10_000;
+const MAX_SHELL_OUTPUT_CHARS = 8_000;
 const MAX_FETCH_CHARS = 200_000;
 const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", "coverage", ".next", ".cache", ".turbo"]);
 
@@ -401,8 +402,8 @@ const shellTool: AgentTool = {
     const cwd = resolveSafe(optionalStringArg(args, "cwd") ?? ".", context.workspaceRoot, context.permissions.readRoots);
     assertReadable(cwd, context.permissions.readRoots);
     const timeoutMs = Math.min(10 * 60_000, Math.max(1_000, intArg(args, "timeoutMs", 120_000)));
-    const output = await runCommand(command, cwd, timeoutMs);
-    return { content: output || "（命令没有输出）", ...(output.startsWith("命令失败") ? { isError: true } : {}) };
+    const result = await runCommand(command, cwd, timeoutMs, context.signal, context.workspaceRoot);
+    return { content: result.content, ...(result.isError ? { isError: true } : {}) };
   }
 };
 
@@ -805,18 +806,100 @@ function assertSafeCommand(command: string, networkAllowed: boolean): void {
   }
 }
 
-function runCommand(command: string, cwd: string, timeoutMs: number): Promise<string> {
+function runCommand(
+  command: string,
+  cwd: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+  workspaceRoot: string
+): Promise<{ content: string; isError: boolean }> {
   return new Promise((resolvePromise) => {
-    execCallback(command, { cwd, timeout: timeoutMs, maxBuffer: 2 * 1024 * 1024, windowsHide: true }, (error, stdout, stderr) => {
-      const output = [stdout, stderr].filter(Boolean).join("\n").trim();
-      if (error) {
-        const detail = output ? `${output}\n${error.message}` : error.message;
-        resolvePromise(`命令失败：${detail.slice(-4_000)}`);
-      } else {
-        resolvePromise(output.slice(-6_000));
+    const logDirectory = join(workspaceRoot, ".hearth", "shell");
+    mkdirSync(logDirectory, { recursive: true });
+    const logPath = join(logDirectory, `${new Date().toISOString().replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}.log`);
+    const log = createWriteStream(logPath, { flags: "a", encoding: "utf8" });
+    log.on("error", () => undefined);
+    log.write(`$ ${command}\n# cwd: ${cwd}\n# started: ${new Date().toISOString()}\n\n`);
+    const logLabel = relative(workspaceRoot, logPath).replace(/\\/g, "/");
+    let tail = "";
+    let timedOut = false;
+    let aborted = false;
+    let settled = false;
+    let spawnError: Error | null = null;
+    const capture = (chunk: Buffer | string): void => {
+      const text = chunk.toString();
+      log.write(text);
+      tail = `${tail}${text}`.slice(-MAX_SHELL_OUTPUT_CHARS * 2);
+    };
+    const child = spawn(command, {
+      cwd,
+      shell: true,
+      windowsHide: true,
+      detached: process.platform !== "win32",
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    child.stdout?.on("data", capture);
+    child.stderr?.on("data", capture);
+    const timer = setTimeout(() => {
+      timedOut = true;
+      killProcessTree(child.pid);
+    }, timeoutMs);
+    const onAbort = (): void => {
+      aborted = true;
+      killProcessTree(child.pid);
+    };
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+    child.on("error", (error) => {
+      spawnError = error;
+    });
+    child.on("close", (code, closeSignal) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      const footer = `\n\n# exited: ${new Date().toISOString()}\n# code: ${code ?? "null"} signal: ${closeSignal ?? "none"} timeout: ${timedOut} aborted: ${aborted}\n`;
+      const complete = (content: string, isError: boolean): void => {
+        log.end(footer, () => resolvePromise({ content, isError }));
+      };
+      const detail = tail.trim();
+      const logNotice = `完整日志：${logLabel}`;
+      if (timedOut) {
+        complete(`命令失败：执行超过 ${timeoutMs}ms，进程树已终止。\n${detail ? `${detail.slice(-4_000)}\n` : ""}${logNotice}`, true);
+        return;
       }
+      if (aborted) {
+        complete(`命令失败：任务已取消，进程树已终止。\n${logNotice}`, true);
+        return;
+      }
+      if (spawnError) {
+        complete(`命令失败：${spawnError.message}\n${logNotice}`, true);
+        return;
+      }
+      if (code !== 0) {
+        complete(`命令失败：退出码 ${code ?? "unknown"}${closeSignal ? `，信号 ${closeSignal}` : ""}\n${detail ? `${detail.slice(-4_000)}\n` : ""}${logNotice}`, true);
+        return;
+      }
+      complete(`${detail ? detail.slice(-MAX_SHELL_OUTPUT_CHARS) : "（命令没有输出）"}\n${logNotice}`, false);
     });
   });
+}
+
+function killProcessTree(pid: number | undefined): void {
+  if (!pid) return;
+  if (process.platform === "win32") {
+    spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+    return;
+  }
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // The process may already have exited.
+    }
+  }
 }
 
 function hostAllowed(hostname: string, allowed: string[]): boolean {

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -234,6 +234,56 @@ describe("builtin tools", () => {
       signal: new AbortController().signal
     })).rejects.toThrow("没有网络权限");
   });
+
+  it("stores full shell output in the task log and returns only the tail", async () => {
+    const root = workspace(roots);
+    const out = join(root, "out");
+    const script = join(root, "large-output.cjs");
+    writeFileSync(script, "process.stdout.write('x'.repeat(12000));\n");
+    const permissions = defaultTaskPermissions({ workspaceRoot: root, outDir: out, networkHosts: [], extraTools: ["shell"] });
+    const result = await mapTools().shell!.execute({ command: `node "${script}"` }, {
+      workspaceRoot: root,
+      outDir: out,
+      permissions,
+      signal: new AbortController().signal
+    });
+    expect(result.isError).toBeFalsy();
+    expect(result.content.length).toBeLessThan(9_000);
+    expect(result.content).toContain(".hearth/shell/");
+    const logs = readdirSync(join(root, ".hearth", "shell"));
+    expect(logs).toHaveLength(1);
+    const fullLog = readFileSync(join(root, ".hearth", "shell", logs[0]!), "utf8");
+    expect(fullLog).toContain("x".repeat(12000));
+    expect(fullLog).toContain("$ node");
+  });
+
+  it("kills the whole shell process tree on timeout", async () => {
+    const root = workspace(roots);
+    const out = join(root, "out");
+    const marker = join(root, "child-still-alive.txt");
+    const child = join(root, "timeout-child.cjs");
+    const parent = join(root, "timeout-parent.cjs");
+    writeFileSync(child, "setTimeout(() => require('node:fs').writeFileSync(process.argv[2], 'alive'), 1800);\nsetInterval(() => {}, 1000);\n");
+    writeFileSync(parent, [
+      "const { spawn } = require('node:child_process');",
+      "spawn(process.execPath, [process.argv[3], process.argv[2]], { stdio: 'ignore' });",
+      "setInterval(() => {}, 1000);"
+    ].join("\n"));
+    const permissions = defaultTaskPermissions({ workspaceRoot: root, outDir: out, networkHosts: [], extraTools: ["shell"] });
+    const result = await mapTools().shell!.execute({
+      command: `node "${parent}" "${marker}" "${child}"`,
+      timeoutMs: 1_000
+    }, {
+      workspaceRoot: root,
+      outDir: out,
+      permissions,
+      signal: new AbortController().signal
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("进程树已终止");
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_500));
+    expect(existsSync(marker)).toBe(false);
+  }, 10_000);
 });
 
 function mapTools(): Record<string, ReturnType<typeof createBuiltinTools>[number]> {
