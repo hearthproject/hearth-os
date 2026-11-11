@@ -45,6 +45,7 @@ describe("native system prompt", () => {
     expect(prompt).toContain("负责人与动作之间不要插入顿号");
     expect(prompt).toContain("主数组优先使用 items");
     expect(prompt).toContain("默认使用 move");
+    expect(prompt).toContain("saveAs（目标文件名");
   });
 });
 
@@ -445,6 +446,28 @@ describe("json deliverables", () => {
       normalizeJsonDeliverables(dir, ["result.json"]);
       const parsed = JSON.parse(readFileSync(path, "utf8"));
       expect(parsed.cellEdits).toBe(3);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("derives spreadsheet save target and original overwrite state", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "actions.json");
+      writeFileSync(path, JSON.stringify({
+        workbook: "sales.xlsx",
+        cellEdits: 3,
+        originalWorkbookPreserved: true,
+        originalWorkbookPolicy: {
+          originalWorkbookModified: false,
+          cleanedCopyStatus: "not_performed"
+        }
+      }));
+      normalizeJsonDeliverables(dir, ["actions.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.saveAs).toBe("cleaned.xlsx");
+      expect(parsed.originalOverwritten).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
