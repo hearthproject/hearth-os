@@ -1,5 +1,32 @@
 import { describe, expect, it } from "vitest";
-import { nativeProgressForEvent } from "./native-executor.ts";
+import type { TaskRecord } from "@hearth/core";
+import { nativeProgressForEvent, nativeSystemPrompt } from "./native-executor.ts";
+
+const baseTask = {
+  id: "task-1",
+  title: "测试任务",
+  goal: "生成结构化结果",
+  status: "queued",
+  templateId: null,
+  createdAt: "2026-11-11T00:00:00.000Z",
+  updatedAt: "2026-11-11T00:00:00.000Z",
+  deadline: null,
+  inputs: [],
+  networkHosts: [],
+  outputDir: "/tmp/out",
+  currentRunId: null,
+  nextAction: null,
+  error: null
+} as TaskRecord;
+
+describe("native system prompt", () => {
+  it("asks for machine-readable enum and boolean values", () => {
+    const prompt = nativeSystemPrompt(baseTask, ["triage.json"]);
+    expect(prompt).toContain("high/medium/low");
+    expect(prompt).toContain("true/false");
+    expect(prompt).toContain("null");
+  });
+});
 
 describe("native execution progress", () => {
   it("publishes visible progress for turns, tools, compaction and budgets", () => {
