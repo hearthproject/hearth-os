@@ -32,6 +32,7 @@ describe("native system prompt", () => {
     expect(prompt).toContain("核心事实直接放在顶层");
     expect(prompt).toContain("沿用输入对象的字段名");
     expect(prompt).toContain("顶层包含 facts 对象");
+    expect(prompt).toContain("顶层 evidence 数组");
     expect(prompt).toContain("<noun>Count");
     expect(prompt).toContain("负责人 + 动作 + 截止");
     expect(prompt).toContain("回滚方案");
@@ -134,13 +135,17 @@ describe("json deliverables", () => {
         facts: { verdict: "ok" },
         existingEffectCount: 0,
         dateUnknownCount: 1,
-        recordCount: 3
+        unknownDateCount: 1,
+        unknownCount: 9,
+        recordCount: 3,
+        findings: [{ id: "a" }, { id: "b" }]
       }));
       normalizeJsonDeliverables(dir, ["result.json"]);
       const parsed = JSON.parse(readFileSync(path, "utf8"));
       expect(parsed.effectCount).toBe(0);
       expect(parsed.unknownCount).toBe(1);
       expect(parsed.itemCount).toBe(3);
+      expect(parsed.evidence).toHaveLength(2);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -207,6 +207,7 @@ const FACT_ALIASES: Record<string, string> = {
   testsPass: "testsPassed",
   existingEffectCount: "effectCount",
   dateUnknownCount: "unknownCount",
+  unknownDateCount: "unknownCount",
   unknownReleaseDateCount: "unknownCount",
   recordCount: "itemCount",
   sendPerformed: "sent",
@@ -351,6 +352,20 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
         root.unknownCount = root[candidate];
         changed = true;
       }
+    }
+  }
+  for (const key of ["unknownDateCount", "dateUnknownCount", "unknownReleaseDateCount"]) {
+    if (typeof root[key] !== "number" || root.unknownCount === root[key]) continue;
+    root.unknownCount = root[key];
+    changed = true;
+    break;
+  }
+  if (!Array.isArray(root.evidence)) {
+    for (const key of ["findings", "signals", "indicators", "observations", "anomalies", "sources"]) {
+      if (!Array.isArray(root[key]) || root[key].length === 0) continue;
+      root.evidence = (root[key] as unknown[]).slice(0, 20);
+      changed = true;
+      break;
     }
   }
   if (typeof root.action === "string") {
@@ -569,6 +584,7 @@ export function nativeSystemPrompt(task: TaskRecord, expectedOutputs: string[], 
     "交付 JSON 等机器可读产物时，遵循最简结构约定：核心事实直接放在顶层，不要包进 metadata、result、data 等外层对象；列表使用语义明确的复数数组键（如 items、findings、milestones），数组元素沿用输入对象的字段名（如 id），不要改名或加前缀。",
     "机器可读字段值使用通用规范：优先级、风险、置信度、严重度未明确要求编号时必须用 high/medium/low，禁止使用 P0/P1 或 1/2/3 等编号；布尔值用 true/false；计数用数字；日期用 ISO 8601；未知值用 null；枚举值用小写 snake_case；字段名优先用 camelCase。",
     "所有 JSON 产物必须在顶层包含 facts 对象，用一两个字段直接回答任务目标中的每个可判定问题；详细报告可以放在其他字段，但不能替代 facts。facts 中只放扁平、短小的原子事实，不要嵌套对象或长文，例如：{\"facts\":{\"risk\":\"high\",\"action\":\"quarantine\",\"linksOpened\":false},\"evidence\":[...]}。",
+    "所有 JSON 产物还必须包含顶层 evidence 数组，至少给出两条可核验证据（原文摘录、文件路径、行号、来源或观察结果）；不要把证据只埋在 findings、signals 或正文里。",
     "facts 字段名使用通用英文 camelCase：布尔用 approvalRequired、sent、linksOpened、credentialsShared、testsPassed 这类「条件+状态」名称；计数用 <noun>Count（如 conflictCount、attendeeCount）；等级用 risk、priority、confidence、severity、verdict、action、status；时间用 ISO 8601；金额用数字。目标中的每个条件、动作和状态都要落成独立字段。",
     "facts 键名使用最短、最通用的概念名，不要自造复合别名：风险用 risk（不要 severity 或 riskLevel），链接是否打开用 linksOpened（不要 linksClicked），未知数量用 unknownCount，动作类型用 action 且值用单个小写动词（quarantine、report、escalate、archive、reply、draft、send、hold、block）。有数量字段时同时给出对应的 has<X> 布尔值（如 hasConflict），没有冲突也要写 false。",
     "排期类结果顶层使用 selectedUtc 表示最终选中的 UTC 时间；有多个可行时段时选择偏好窗口内最晚的一个，给参会人留出最大提前量，并用 conflicts 布尔字段表示是否存在硬冲突。",
