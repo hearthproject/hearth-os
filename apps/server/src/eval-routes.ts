@@ -144,7 +144,8 @@ export function registerEvalRoutes(app: FastifyInstance, options: EvalRouteOptio
         permissions: {
           ...permissions,
           readRoots: [evalInputRoot],
-          writeRoots: [outputDir]
+          writeRoots: [outputDir],
+          approvalMode: "full"
         }
       });
     } catch (error) {

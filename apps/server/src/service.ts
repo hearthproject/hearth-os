@@ -495,7 +495,9 @@ export class HearthService {
   }
 
   approvalModeForTask(task: TaskRecord): ApprovalMode {
-    return this.conversationSettings(task.conversationId)?.approvalMode ?? "necessary";
+    return task.permissions?.approvalMode
+      ?? this.conversationSettings(task.conversationId)?.approvalMode
+      ?? "necessary";
   }
 
   appendChatMessage(message: ChatMessageRecord): ChatMessageRecord {

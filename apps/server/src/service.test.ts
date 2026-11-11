@@ -13,6 +13,26 @@ describe("Hearth service agent metadata", () => {
     store.close();
   });
 
+  it("lets task-scoped permissions override the conversation approval mode", () => {
+    const store = new HearthStore(":memory:");
+    const service = new HearthService(store);
+    const conversation = store.createConversation("eval conversation");
+    const task = service.createTask({
+      title: "eval task",
+      goal: "deliver within scoped roots",
+      conversationId: conversation.id,
+      permissions: {
+        readRoots: ["inputs"],
+        writeRoots: ["out"],
+        networkHosts: [],
+        tools: ["finish_task"],
+        approvalMode: "full"
+      }
+    });
+    expect(service.approvalModeForTask(task)).toBe("full");
+    store.close();
+  });
+
   it("keeps template tasks on the codex executor", () => {
     const store = new HearthStore(":memory:");
     const service = new HearthService(store);

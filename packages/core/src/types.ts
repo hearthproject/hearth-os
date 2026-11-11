@@ -270,6 +270,7 @@ export interface TaskPermissions {
   writeRoots: string[];
   networkHosts: string[];
   tools: string[];
+  approvalMode?: ApprovalMode | undefined;
 }
 
 export interface RunBudget {
