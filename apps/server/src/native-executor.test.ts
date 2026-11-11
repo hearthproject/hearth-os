@@ -223,6 +223,24 @@ describe("json deliverables", () => {
     }
   });
 
+  it("syncs derived facts into the facts layer", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "actions.json");
+      writeFileSync(path, JSON.stringify({
+        facts: { risk: "low" },
+        items: [{ action: "move" }, { action: "move" }],
+        preserved: ["unknown.txt"]
+      }));
+      normalizeJsonDeliverables(dir, ["actions.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.facts.moveCount).toBe(2);
+      expect(parsed.facts.unknownPreserved).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("derives findings from an equivalent result array", () => {
     const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
     try {

@@ -200,6 +200,7 @@ export function normalizeJsonDeliverables(outDir: string, expectedOutputs: strin
       }
     }
     if (normalizeJsonFacts(root)) changed = true;
+    if (syncFactsFromRoot(root, facts)) changed = true;
     if (changed) writeFileSync(path, `${JSON.stringify(root, null, 2)}\n`, "utf8");
   }
 }
@@ -274,6 +275,37 @@ const ARRAY_COUNTS: Record<string, string> = {
   existingEffects: "effectCount",
   attempts: "attemptCount"
 };
+
+const FACT_STRING_KEYS = new Set([
+  ...Object.values(FACT_ALIASES),
+  "action",
+  "risk",
+  "verdict",
+  "status",
+  "confidence",
+  "priority",
+  "severity",
+  "saveAs",
+  "deadline",
+  "finalState",
+  "effect",
+  "rootCause",
+  "selectedUtc"
+]);
+
+function syncFactsFromRoot(root: Record<string, unknown>, facts: unknown): boolean {
+  if (!isPlainObject(facts)) return false;
+  let changed = false;
+  for (const [key, value] of Object.entries(root)) {
+    const atomic = typeof value === "boolean"
+      || typeof value === "number"
+      || (typeof value === "string" && FACT_STRING_KEYS.has(key) && value.length <= 160);
+    if (!atomic || facts[key] === value) continue;
+    facts[key] = value;
+    changed = true;
+  }
+  return changed;
+}
 
 const LEVEL_KEYS = new Set(["risk", "priority", "confidence", "severity", "impact", "likelihood"]);
 const ACTION_TOKENS = ["quarantine", "escalate", "archive", "report", "reply", "draft", "send", "hold", "block", "delete", "move", "restore"];
