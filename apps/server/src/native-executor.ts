@@ -221,7 +221,10 @@ const FACT_ALIASES: Record<string, string> = {
   blockingFindingCount: "blockingCount",
   invalidCount: "exceptionCount",
   competingProductCount: "productCount",
-  competitorCount: "productCount"
+  competitorCount: "productCount",
+  completionLift: "effect",
+  treatmentEffect: "effect",
+  observedEffect: "effect"
 };
 
 const ARRAY_COUNTS: Record<string, string> = {
