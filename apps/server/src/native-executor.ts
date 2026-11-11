@@ -534,6 +534,19 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
     root.unknownPreserved = true;
     changed = true;
   }
+  if (!Object.hasOwn(root, "unknownPreserved") && typeof root.unknownCount === "number" && root.unknownCount > 0) {
+    const preservesUnknown = actionEntries.some((entry) => {
+      if (!isPlainObject(entry)) return false;
+      const ownership = String(entry.project ?? entry.category ?? entry.group ?? entry.classification ?? "").toLowerCase();
+      const operation = String(entry.op ?? entry.action ?? entry.type ?? "").toLowerCase();
+      return (entry.unknown === true || /unknown|unclassified|undetermined/.test(ownership))
+        && /^(keep|hold|preserve|retain)$/.test(operation);
+    });
+    if (preservesUnknown) {
+      root.unknownPreserved = true;
+      changed = true;
+    }
+  }
   if (!Array.isArray(root.items) && Array.isArray(root.records)) {
     root.items = root.records;
     changed = true;

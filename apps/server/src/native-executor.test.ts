@@ -265,6 +265,27 @@ describe("json deliverables", () => {
     }
   });
 
+  it("recognizes an unknown item kept in place as preserved", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "actions.json");
+      writeFileSync(path, JSON.stringify({
+        facts: {},
+        unknownCount: 1,
+        items: [
+          { project: "Q4", action: "move" },
+          { project: "unknown", action: "keep" }
+        ]
+      }));
+      normalizeJsonDeliverables(dir, ["actions.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.unknownPreserved).toBe(true);
+      expect(parsed.facts.unknownPreserved).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("derives findings from an equivalent result array", () => {
     const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
     try {
