@@ -269,6 +269,26 @@ scripts/               文档、交付数据、E2E 与 README 截图辅助脚本
 
 ## 验证
 
+### 评测桥接回归测试
+
+在仓库根目录执行 `npm ci` 安装依赖后，可单独运行外部样本到产物发布、裁判评分及幂等重试的回归测试：
+
+```bash
+npm test -- apps/server/src/scheduler.test.ts -t "runs an offline eval task from an external sample through publication and judging"
+```
+
+`-t` 后的文字是测试名称，用于筛选这一条用例。预期结果为 `1 passed`，同文件的其他用例显示为 `skipped`。运行 `npm test` 会自动包含这条测试，无需额外指定名称。Windows PowerShell 中也可以使用 `npm.cmd` 代替 `npm`。
+
+测试使用临时目录、假执行器和模拟裁判，可离线运行，无需真实模型账号或启动独立评测仓库。它检查外部样本经工作区准备后被执行器读取、产物发布到受管目录并登记到任务、裁判收到已发布的正文，以及相同请求重试返回同一个任务且无重复记录。真实执行器的产物质量和前端展示需另外验收。
+
+相关回归可一起运行，当前预期为 3 个测试文件、65 条测试通过：
+
+```bash
+npm test -- apps/server/src/eval-routes.test.ts apps/server/src/workspace.test.ts apps/server/src/scheduler.test.ts
+```
+
+### 整体验证
+
 2026-11-10 在当前分支运行：
 
 ```bash
