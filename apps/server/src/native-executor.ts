@@ -597,6 +597,10 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
     root.productionCodeChanged = !root.productionCodeUnchanged;
     changed = true;
   }
+  if (!Object.hasOwn(root, "effectCount") && root.sent === false && root.externalSideEffects === false) {
+    root.effectCount = 0;
+    changed = true;
+  }
   if (!Object.hasOwn(root, "bodyArchived")) {
     if (root.archivedBody != null || (typeof root.trustedBlockCount === "number" && root.trustedBlockCount > 0)) {
       root.bodyArchived = true;

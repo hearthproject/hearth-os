@@ -858,6 +858,7 @@ describe("json deliverables", () => {
         action: "report",
         phishingEvidenceCount: 2,
         sendPerformed: false,
+        externalSideEffects: false,
         invalidCount: 1,
         records: [{ sku: "A-1" }, { sku: "A-2" }, { sku: "A-3" }]
       }));
@@ -865,6 +866,7 @@ describe("json deliverables", () => {
       const delivery = JSON.parse(readFileSync(deliveryPath, "utf8"));
       expect(delivery.action).toBe("quarantine");
       expect(delivery.sent).toBe(false);
+      expect(delivery.effectCount).toBe(0);
       expect(delivery.exceptionCount).toBe(1);
       expect(delivery.itemCount).toBe(3);
       expect(delivery.items).toHaveLength(3);
