@@ -346,7 +346,7 @@ describe("json deliverables", () => {
       const path = join(dir, "result.json");
       writeFileSync(path, JSON.stringify({
         facts: {
-          likelyCommit: "abc123",
+          commit: "abc123",
           failingTest: "backend/tests/test_retry.py::test_retry_timeout"
         }
       }));

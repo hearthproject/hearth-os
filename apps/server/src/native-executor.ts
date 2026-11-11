@@ -491,6 +491,14 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
       changed = true;
     }
   }
+  if (!Object.hasOwn(root, "suspectCommit")) {
+    for (const key of ["commit", "suspectedCommit", "culpritCommit", "likelyCommitSha"]) {
+      if (typeof root[key] !== "string" || !root[key].trim()) continue;
+      root.suspectCommit = root[key].trim();
+      changed = true;
+      break;
+    }
+  }
   if (
     typeof root.suspectCommit === "string"
     && typeof root.failedTest === "string"
