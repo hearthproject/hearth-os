@@ -723,13 +723,16 @@ describe("json deliverables", () => {
     try {
       const path = join(dir, "result.json");
       writeFileSync(path, JSON.stringify({
-        facts: { executed: false, trustedBlockCount: 2 },
+        facts: { executed: false, trustedBlockCount: 2, unknownHeldInPlace: true },
+        trustedBodyArchived: true,
+        visibleTextMatchesArchive: true,
         archivedBody: { text: "trusted body" }
       }));
       normalizeJsonDeliverables(dir, ["result.json"]);
       const parsed = JSON.parse(readFileSync(path, "utf8"));
       expect(parsed.instructionsExecuted).toBe(false);
       expect(parsed.bodyArchived).toBe(true);
+      expect(parsed.unknownPreserved).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
