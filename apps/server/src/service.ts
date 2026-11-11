@@ -66,6 +66,7 @@ export interface CreateTaskInput {
   methodId?: string;
   methodVersion?: number;
   goalId?: string;
+  projectId?: string;
 }
 
 export interface CreateGoalInput {
@@ -151,9 +152,22 @@ export class HearthService {
     const now = new Date().toISOString();
     const template = input.templateId ? getTemplate(input.templateId) : undefined;
     if (input.templateId && !template) throw new Error(`Unknown template: ${input.templateId}`);
+    const project = input.projectId ? this.store.getLocalProject(input.projectId) : null;
+    if (input.projectId && !project) {
+      throw new TaskInputSelectionError("PROJECT_NOT_FOUND", "选择的本地项目不存在", 404);
+    }
+    if (project && template?.github) {
+      throw new TaskInputSelectionError("PROJECT_GITHUB_CONFLICT", "本地项目任务不能同时使用 GitHub 仓库模板", 409);
+    }
+    if (project && input.executorId && input.executorId !== "native") {
+      throw new TaskInputSelectionError("PROJECT_EXECUTOR_UNSUPPORTED", "本地项目任务当前仅支持 native 执行器", 409);
+    }
     const id = `${template?.id ?? "CUSTOM"}-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
     const inputs = template ? [...template.inputs] : [];
     if (input.inputs) inputs.push(...input.inputs);
+    if (project && inputs.some((item) => item.kind === "github")) {
+      throw new TaskInputSelectionError("PROJECT_GITHUB_CONFLICT", "本地项目任务不能同时包含 GitHub 仓库输入", 409);
+    }
     const sourceItemIds = [...new Set(input.sourceItemIds ?? [])];
     if (sourceItemIds.length > 20) {
       throw new TaskInputSelectionError("TOO_MANY_SOURCE_ITEMS", "一次最多附加 20 个来源条目", 400);
@@ -208,9 +222,9 @@ export class HearthService {
       }
     }
     if (input.textInput) inputs.push({ kind: "text", label: "用户请求", value: input.textInput });
-    const executorId = input.executorId ?? (template ? "codex" : "native");
+    const executorId = project ? "native" : input.executorId ?? (template ? "codex" : "native");
     if (input.goalId && !this.store.getGoal(input.goalId)) throw new Error(`Unknown goal: ${input.goalId}`);
-    const taskKind = input.taskKind ?? (template?.github ? "workspace" : "general");
+    const taskKind = input.taskKind ?? (template?.github || project ? "workspace" : "general");
     const expectedOutputs = input.expectedOutputs ?? template?.expectedOutputs ?? ["result.md"];
     const task: TaskRecord = {
       id,
@@ -236,7 +250,8 @@ export class HearthService {
       expectedOutputs,
       ...(input.permissions ? { permissions: input.permissions } : {}),
       methodId: input.methodId ?? null,
-      methodVersion: input.methodVersion ?? null
+      methodVersion: input.methodVersion ?? null,
+      ...(project ? { projectId: project.id } : {})
     };
     const event = this.store.appendEvent({ type: "task.created", taskId: id, payload: task });
     this.bus.publish(event);
@@ -672,7 +687,8 @@ export class HearthService {
 
   confirmTaskProposal(
     id: string,
-    available: Record<ExecutorId, boolean> = defaultExecutorAvailability()
+    available: Record<ExecutorId, boolean> = defaultExecutorAvailability(),
+    options: { projectId?: string | null | undefined } = {}
   ): { proposal: TaskProposalRecord; task: TaskRecord } {
     const proposal = this.requireProposal(id);
     if (proposal.status !== "pending") throw new Error(`提案状态不能确认：${proposal.status}`);
@@ -694,16 +710,21 @@ export class HearthService {
     }
     const executorId: ExecutorId = resolution.executorId;
     const reroutedFrom = resolution.reroutedFrom;
+    const projectId = options.projectId?.trim() || null;
+    if (projectId && executorId !== "native") {
+      throw new Error("本地项目任务当前仅支持 native 执行器，请先切换到 native 再确认");
+    }
     const task = this.createTask({
       title: proposal.title,
       goal: proposal.goal,
       conversationId: proposal.conversationId,
       executorId,
-      taskKind: proposal.taskKind,
+      taskKind: projectId ? "workspace" : proposal.taskKind,
       expectedOutputs: proposal.expectedOutputs,
       permissions: proposal.permissions,
       inputs: proposal.inputs,
-      networkHosts: proposal.permissions.networkHosts
+      networkHosts: proposal.permissions.networkHosts,
+      ...(projectId ? { projectId } : {})
     });
     const updated = this.updateTaskProposal(id, { status: "confirmed", decidedAt: new Date().toISOString() });
     this.appendChatMessage({

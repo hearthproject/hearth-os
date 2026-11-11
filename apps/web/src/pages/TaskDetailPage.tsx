@@ -29,6 +29,7 @@ import { executorLabel, taskKindLabel } from "../lib/labels.ts";
 import { ApprovalCard } from "../components/ApprovalCard.tsx";
 import { TaskFollowUpPanel } from "../components/TaskFollowUpPanel.tsx";
 import { TaskGitPanel } from "../components/TaskGitPanel.tsx";
+import { TaskWorktreePanel } from "../components/TaskWorktreePanel.tsx";
 import { StatusPill } from "../components/StatusPill.tsx";
 import type { ArtifactRecord, ContextItem, ExecutorId, GoalCompletionReport, GoalContract, HandoffRecord, RunRecord, TaskContextResponse, TaskDeliverable, TaskProgressDetail, TaskView } from "../lib/types.ts";
 
@@ -381,6 +382,7 @@ export function TaskDetailPage() {
       </section>
 
       <TaskGitPanel taskId={task.id} />
+      <TaskWorktreePanel taskId={task.id} />
 
       <ContextPanel
         view={view}

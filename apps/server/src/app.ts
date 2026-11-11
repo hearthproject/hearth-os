@@ -57,6 +57,7 @@ import { SkillPackageError } from "./skill-package.ts";
 import { SkillPackageService } from "./skills.ts";
 import { SkillCuratorService } from "./skill-curator.ts";
 import { ProjectError, ProjectService } from "./projects.ts";
+import { TaskWorktreeService, WorktreeError } from "./worktrees.ts";
 import { ProactiveError, ProactiveService } from "./proactive.ts";
 import { AttentionGovernor } from "./attention-governor.ts";
 import { BackgroundToolError, BackgroundToolService } from "./background-tools.ts";
@@ -117,6 +118,7 @@ const createTaskSchema = z.object({
   expectedOutputs: z.array(z.string().trim().min(1).max(200)).max(20).optional(),
   methodId: z.string().trim().min(1).max(100).optional(),
   goalId: z.string().trim().min(1).max(100).optional(),
+  projectId: z.string().trim().min(1).max(120).optional(),
   permissions: z.object({
     readRoots: z.array(z.string().trim().min(1).max(1000)).max(20),
     writeRoots: z.array(z.string().trim().min(1).max(1000)).max(20),
@@ -134,6 +136,10 @@ const createProjectSchema = z.object({
 const updateProjectSchema = z.object({
   name: z.string().trim().min(1).max(100).optional(),
   defaultBranch: z.string().trim().min(1).max(255).optional()
+}).strict();
+
+const confirmTaskProposalSchema = z.object({
+  projectId: z.string().trim().min(1).max(120).optional()
 }).strict();
 
 const goalAuthoritySourceSchema = z.object({
@@ -842,7 +848,11 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const store = options.store ?? new HearthStore(DB_PATH);
   const serverStartedAt = new Date().toISOString();
   const service = new HearthService(store);
-  const taskGit = new TaskGitService({ workspaceRoot: WORKSPACE_DIR });
+  const worktrees = new TaskWorktreeService(store, { workspaceRoot: WORKSPACE_DIR });
+  const taskGit = new TaskGitService({
+    workspaceRoot: WORKSPACE_DIR,
+    worktreeFor: (taskId) => store.getTaskWorktree(taskId)
+  });
   const context = new ContextService(service, options.contextBlobRoot ?? CONTEXT_BLOB_DIR);
   if (options.contextIndex) context.setIndex(options.contextIndex);
   const ontology = new OntologyService(service);
@@ -1058,6 +1068,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
         backgroundTools,
         webSearch,
         skills,
+        worktrees,
         attachmentRoot,
         executorSettingsPath,
         executorSettingsProvider: () => executorSettingsStore.load(),
@@ -3208,6 +3219,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     if (parsed.data.expectedOutputs !== undefined) input.expectedOutputs = parsed.data.expectedOutputs;
     if (parsed.data.permissions !== undefined) input.permissions = parsed.data.permissions;
     if (parsed.data.goalId !== undefined) input.goalId = parsed.data.goalId;
+    if (parsed.data.projectId !== undefined) input.projectId = parsed.data.projectId;
     if (input.templateId && !getTemplate(input.templateId)) {
       return reply.code(400).send({ error: "UNKNOWN_TEMPLATE", message: `没有找到任务模板 ${input.templateId}` });
     }
@@ -3710,6 +3722,20 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
   });
 
+  app.get<{ Params: { id: string } }>("/api/tasks/:id/worktree", async (request, reply) => {
+    if (!store.getTask(request.params.id)) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    return { worktree: worktrees.view(request.params.id) };
+  });
+
+  app.delete<{ Params: { id: string } }>("/api/tasks/:id/worktree", async (request, reply) => {
+    if (!store.getTask(request.params.id)) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    try {
+      return worktrees.cleanup(request.params.id);
+    } catch (error) {
+      return sendWorktreeError(reply, error);
+    }
+  });
+
   app.get<{ Params: { id: string }; Querystring: { scope?: string; path?: string } }>("/api/tasks/:id/git/diff", async (request, reply) => {
     if (!store.getTask(request.params.id)) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
     const scope = request.query.scope === "branch" ? "branch" : request.query.scope === "working" || !request.query.scope ? "working" : null;
@@ -3801,10 +3827,14 @@ export async function buildServer(options: BuildServerOptions = {}) {
   }));
 
   app.post<{ Params: { id: string } }>("/api/task-proposals/:id/confirm", async (request, reply) => {
+    const parsed = confirmTaskProposalSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "INVALID_PROPOSAL_CONFIRMATION", message: "任务确认参数不正确" });
+    }
     try {
       const available = {} as Record<ExecutorId, boolean>;
       for (const id of EXECUTOR_IDS) available[id] = executorHealth(id).canRun;
-      const result = service.confirmTaskProposal(request.params.id, available);
+      const result = service.confirmTaskProposal(request.params.id, available, parsed.data);
       scheduler?.kick();
       return result;
     } catch (error) {
@@ -4035,6 +4065,13 @@ function sendSkillError(reply: FastifyReply, error: unknown) {
 
 function sendProjectError(reply: FastifyReply, error: unknown) {
   if (error instanceof ProjectError) {
+    return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+  }
+  throw error;
+}
+
+function sendWorktreeError(reply: FastifyReply, error: unknown) {
+  if (error instanceof WorktreeError) {
     return reply.code(error.statusCode).send({ error: error.code, message: error.message });
   }
   throw error;

@@ -924,12 +924,15 @@ function ProposalCard({
   const [busy, setBusy] = useState<"confirm" | "reject" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
+  const [projectId, setProjectId] = useState("");
+  const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: api.projects });
+  const projects = projectsQuery.data?.projects.filter((project) => project.available) ?? [];
 
   async function confirm() {
     setBusy("confirm");
     setError(null);
     try {
-      const result = await api.confirmTaskProposal(proposal.id);
+      const result = await api.confirmTaskProposal(proposal.id, projectId || undefined);
       setTaskId(result.task.id);
       onResolved(proposal.id);
     } catch (caught) {
@@ -965,6 +968,18 @@ function ProposalCard({
       <p className="proposal-reason">{proposal.reason}</p>
       {proposal.permissions.networkHosts.length > 0 && (
         <p className="proposal-permission">联网：{proposal.permissions.networkHosts.join("、")}</p>
+      )}
+      {projects.length > 0 && (
+        <label className="proposal-project">
+          <span>在本地项目中执行（可选）</span>
+          <select value={projectId} onChange={(event) => setProjectId(event.target.value)} disabled={busy !== null}>
+            <option value="">不绑定项目</option>
+            {projects.map((project) => (
+              <option value={project.id} key={project.id}>{project.name} · {project.currentBranch ?? project.defaultBranch}</option>
+            ))}
+          </select>
+          {projectId && <small>将使用 native 执行器，并自动创建独立 Git Worktree。</small>}
+        </label>
       )}
       {error && <p className="form-error">{error}</p>}
       {taskId ? (

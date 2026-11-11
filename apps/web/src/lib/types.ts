@@ -135,6 +135,7 @@ import type {
   IntakeDecisionRecord,
   LocalProject,
   LocalProjectView,
+  TaskWorktreeView,
   PreparedActionRecord,
   ThreadSubscriptionRecord,
   WatchdogEvent
@@ -277,6 +278,7 @@ export type {
   IntakeDecisionRecord,
   LocalProject,
   LocalProjectView,
+  TaskWorktreeView,
   PreparedActionRecord,
   ThreadSubscriptionRecord,
   WatchdogEvent,
@@ -670,6 +672,7 @@ export interface CreateTaskRequest {
   textInput?: string;
   sourceItemIds?: string[];
   methodId?: string;
+  projectId?: string;
 }
 
 export interface ApprovalDecisionResult {

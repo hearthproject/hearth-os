@@ -100,6 +100,7 @@ import type {
   TaskListItem,
   TaskProposalRecord,
   TaskRecord,
+  TaskWorktreeView,
   TrashItem,
   TrashKind,
   TaskTemplate,
@@ -217,6 +218,8 @@ export const api = {
     body: JSON.stringify(input)
   }),
   deleteProject: (id: string) => request<void>(`/api/projects/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  taskWorktree: (id: string) => request<{ worktree: TaskWorktreeView | null }>(`/api/tasks/${encodeURIComponent(id)}/worktree`),
+  cleanupTaskWorktree: (id: string) => request<{ removed: boolean; branchKept: boolean }>(`/api/tasks/${encodeURIComponent(id)}/worktree`, { method: "DELETE" }),
   modelRegistry: () => request<ModelRegistryResponse>("/api/model-registry"),
   createModelProfile: (input: ModelProfilePatch) => request<{ profile: ModelProfileView }>("/api/model-profiles", {
     method: "POST",
@@ -659,9 +662,9 @@ export const api = {
     ...(message ? { body: JSON.stringify({ message }) } : {})
   }),
   extendBudget: (id: string) => request<TaskRecord>(`/api/tasks/${encodeURIComponent(id)}/budget/extend`, { method: "POST" }),
-  confirmTaskProposal: (id: string) => request<{ proposal: TaskProposalRecord; task: TaskRecord }>(
+  confirmTaskProposal: (id: string, projectId?: string) => request<{ proposal: TaskProposalRecord; task: TaskRecord }>(
     `/api/task-proposals/${encodeURIComponent(id)}/confirm`,
-    { method: "POST" }
+    { method: "POST", ...(projectId ? { body: JSON.stringify({ projectId }) } : {}) }
   ),
   rejectTaskProposal: (id: string) => request<TaskProposalRecord>(
     `/api/task-proposals/${encodeURIComponent(id)}/reject`,

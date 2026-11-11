@@ -53,6 +53,7 @@ import type { HearthService } from "./service.ts";
 import { buildDeliveryRepairPrompt, buildTaskPrompt, prepareWorkspace, UnsupportedInputError, type PreparedWorkspace } from "./workspace.ts";
 import { wantsPublicWebResearch, wantsScreenshot } from "./task-intent.ts";
 import type { WebSearchService } from "./web-search.ts";
+import { TaskWorktreeService } from "./worktrees.ts";
 
 import { createExecutorAdapters, type CodexContextItem, type CodexRunner, type DshRunner, type ExecutionOutcome, type ExecutorAdapter, type ExecutorAttemptContext, type ExternalRunner, type NativeRunner } from "./executor-adapter.ts";
 export type { CodexRunner, NativeRunner } from "./executor-adapter.ts";
@@ -105,6 +106,7 @@ export interface SchedulerOptions {
   backgroundTools?: BackgroundToolService;
   webSearch?: WebSearchService;
   skills?: SkillPackageService;
+  worktrees?: TaskWorktreeService;
   leaseHeartbeatMs?: number;
   githubRun?: CommandRunner | undefined;
   githubCacheRoot?: string | undefined;
@@ -160,6 +162,7 @@ export class HearthScheduler {
   private readonly backgroundTools: BackgroundToolService | undefined;
   private readonly webSearch: WebSearchService | undefined;
   private readonly skills: SkillPackageService | undefined;
+  private readonly worktrees: TaskWorktreeService;
   private readonly leaseHeartbeatMs: number;
   private readonly leaseHeartbeats = new Map<string, { epoch: number; timer: ReturnType<typeof setInterval> }>();
   private readonly controllers = new Map<string, AbortController>();
@@ -223,6 +226,7 @@ export class HearthScheduler {
     this.backgroundTools = options.backgroundTools;
     this.webSearch = options.webSearch;
     this.skills = options.skills;
+    this.worktrees = options.worktrees ?? new TaskWorktreeService(this.service.store, { workspaceRoot: this.workspaceRoot });
     this.delegations = options.delegations ?? new DelegationService({
       service: this.service,
       sandbox: this.sandbox
@@ -1415,9 +1419,13 @@ export class HearthScheduler {
         throw new Error("还没有配置聊天模型。请到“设置”里选择服务商并填入 API Key，然后重试。");
       }
       const resumeState = executorId === "native" && !handoff ? this.restoreResumeState(taskId, taskRoot, Boolean(pendingInput)) : undefined;
+      const worktree = task.projectId && !task.inputs.some((input) => input.kind === "github")
+        ? this.worktrees.ensure(task)
+        : null;
       const prepared = await prepareWorkspace({
         repoRoot: this.repoRoot,
         workspaceDir: taskRoot,
+        ...(worktree ? { executionRoot: worktree.path } : {}),
         outDir,
         task,
         githubCacheRoot: this.githubCacheRoot,

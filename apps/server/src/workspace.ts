@@ -37,6 +37,7 @@ export class UnsupportedInputError extends Error {
 export async function prepareWorkspace(options: {
   repoRoot: string;
   workspaceDir: string;
+  executionRoot?: string;
   outDir?: string;
   task: TaskRecord;
   webFetch?: typeof fetchWebSnapshot;
@@ -47,9 +48,10 @@ export async function prepareWorkspace(options: {
   attachmentRoot?: string | undefined;
   getSourceItem?: (id: string) => SourceItem | null;
 }): Promise<PreparedWorkspace> {
-  const root = resolve(options.workspaceDir);
-  const inputsDir = join(root, "inputs");
-  const outDir = options.outDir ? resolve(options.outDir) : join(root, "out");
+  const taskRoot = resolve(options.workspaceDir);
+  const root = options.executionRoot ? resolve(options.executionRoot) : taskRoot;
+  const inputsDir = join(taskRoot, "inputs");
+  const outDir = options.outDir ? resolve(options.outDir) : join(taskRoot, "out");
   mkdirSync(inputsDir, { recursive: true });
   mkdirSync(outDir, { recursive: true });
 
@@ -226,7 +228,7 @@ export async function prepareWorkspace(options: {
         preparedGitHub = await prepareGitHubWorkspace({
           spec: template.github,
           taskId: options.task.id,
-          workspaceRoot: root,
+          workspaceRoot: taskRoot,
           run: options.githubRun,
           cacheRoot: options.githubCacheRoot
         });

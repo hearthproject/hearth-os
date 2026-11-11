@@ -188,6 +188,23 @@ export interface LocalProjectView extends LocalProject {
   error: string | null;
 }
 
+export interface TaskWorktree {
+  taskId: string;
+  projectId: string;
+  path: string;
+  branch: string;
+  baseBranch: string;
+  baseSha: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TaskWorktreeView extends TaskWorktree {
+  available: boolean;
+  dirty: boolean;
+  error: string | null;
+}
+
 export const RUN_STATUSES = [
   "queued",
   "running",
@@ -269,6 +286,7 @@ export interface TaskRecord {
   pendingInput?: string | null;
   methodId?: string | null;
   methodVersion?: number | null;
+  projectId?: string | null;
   pinnedAt?: string | null;
   archivedAt?: string | null;
   budgetOverride?: RunBudget | null;

@@ -4477,6 +4477,23 @@ body.modal-open {
 
 .proposal-permission { color: var(--ink-tertiary); }
 
+.proposal-project {
+  display: grid;
+  gap: 5px;
+  margin: 10px 0 2px;
+  color: var(--ink-secondary);
+  font-size: var(--fs-12);
+}
+
+.proposal-project select {
+  width: 100%;
+}
+
+.proposal-project small {
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+}
+
 .proposal-actions {
   display: flex;
   gap: 8px;
@@ -8068,6 +8085,45 @@ body.modal-open {
 /* ── Git workbench ───────────────────────────────────────────────────── */
 .git-panel {
   overflow: hidden;
+}
+
+.worktree-panel {
+  overflow: hidden;
+}
+
+.worktree-body {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.worktree-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  color: var(--ink-secondary);
+  font-size: var(--fs-12);
+}
+
+.worktree-summary span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.worktree-summary code {
+  word-break: break-all;
+}
+
+.worktree-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.worktree-notice {
+  margin: 0;
+  color: var(--ink-secondary);
+  font-size: var(--fs-12);
 }
 
 .git-head-actions {

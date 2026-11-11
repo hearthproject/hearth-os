@@ -88,6 +88,7 @@ import type {
   TaskFollowUpRecord,
   TaskProposalRecord,
   TaskRecord,
+  TaskWorktree,
   TaskEdge,
   TaskStatus,
   TrashKind,
@@ -131,7 +132,7 @@ export interface RunAggregate {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 31;
+export const CURRENT_SCHEMA_VERSION = 32;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -154,8 +155,13 @@ CREATE TABLE IF NOT EXISTS tasks (
   output_dir TEXT NOT NULL, current_run_id TEXT, next_action TEXT, error_json TEXT,
   result_summary TEXT, conversation_id TEXT, executor_id TEXT, task_kind TEXT,
   expected_outputs_json TEXT, permissions_json TEXT, pending_input TEXT,
-  method_id TEXT, method_version INTEGER, pinned_at TEXT, archived_at TEXT,
+  method_id TEXT, method_version INTEGER, project_id TEXT, pinned_at TEXT, archived_at TEXT,
   budget_override_json TEXT, deleted_at TEXT, trash_batch_id TEXT
+);
+CREATE TABLE IF NOT EXISTS task_worktrees (
+  task_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, path TEXT NOT NULL,
+  branch TEXT NOT NULL, base_branch TEXT NOT NULL, base_sha TEXT NOT NULL,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS goals (
   id TEXT PRIMARY KEY, title TEXT NOT NULL, objective TEXT NOT NULL,
@@ -842,6 +848,36 @@ export class HearthStore {
     this.db.prepare("DELETE FROM local_projects WHERE id = ?").run(id);
   }
 
+  getTaskWorktree(taskId: string): TaskWorktree | null {
+    const row = this.db.prepare("SELECT * FROM task_worktrees WHERE task_id = ?").get(taskId) as DbRow | undefined;
+    return row ? rowToTaskWorktree(row) : null;
+  }
+
+  listTaskWorktrees(projectId?: string): TaskWorktree[] {
+    const rows = projectId
+      ? this.db.prepare("SELECT * FROM task_worktrees WHERE project_id = ? ORDER BY created_at ASC").all(projectId) as DbRow[]
+      : this.db.prepare("SELECT * FROM task_worktrees ORDER BY created_at ASC").all() as DbRow[];
+    return rows.map(rowToTaskWorktree);
+  }
+
+  upsertTaskWorktree(worktree: TaskWorktree): TaskWorktree {
+    this.db.prepare(
+      `INSERT INTO task_worktrees (task_id, project_id, path, branch, base_branch, base_sha, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(task_id) DO UPDATE SET project_id=excluded.project_id, path=excluded.path,
+         branch=excluded.branch, base_branch=excluded.base_branch, base_sha=excluded.base_sha,
+         updated_at=excluded.updated_at`
+    ).run(
+      worktree.taskId, worktree.projectId, worktree.path, worktree.branch,
+      worktree.baseBranch, worktree.baseSha, worktree.createdAt, worktree.updatedAt
+    );
+    return worktree;
+  }
+
+  deleteTaskWorktree(taskId: string): void {
+    this.db.prepare("DELETE FROM task_worktrees WHERE task_id = ?").run(taskId);
+  }
+
   listSkills(status?: string): SkillRecord[] {
     const rows = status
       ? this.db.prepare("SELECT * FROM skills WHERE status = ? ORDER BY pinned DESC, updated_at DESC").all(status) as DbRow[]
@@ -1302,6 +1338,7 @@ export class HearthStore {
     ensureColumn(this.db, "tasks", "pending_input", "TEXT");
     ensureColumn(this.db, "tasks", "method_id", "TEXT");
     ensureColumn(this.db, "tasks", "method_version", "INTEGER");
+    ensureColumn(this.db, "tasks", "project_id", "TEXT");
     ensureColumn(this.db, "tasks", "pinned_at", "TEXT");
     ensureColumn(this.db, "tasks", "archived_at", "TEXT");
     ensureColumn(this.db, "tasks", "goal_id", "TEXT");
@@ -3535,8 +3572,8 @@ export class HearthStore {
 
 function upsertTask(db: DatabaseSync, task: TaskRecord): void {
   db.prepare(
-    `INSERT INTO tasks (id, external_ref, request_hash, template_id, title, goal, status, created_at, updated_at, deadline, inputs_json, network_hosts_json, output_dir, current_run_id, next_action, error_json, result_summary, conversation_id, executor_id, task_kind, expected_outputs_json, permissions_json, pending_input, method_id, method_version, pinned_at, archived_at, goal_id, budget_override_json, deleted_at, trash_batch_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO tasks (id, external_ref, request_hash, template_id, title, goal, status, created_at, updated_at, deadline, inputs_json, network_hosts_json, output_dir, current_run_id, next_action, error_json, result_summary, conversation_id, executor_id, task_kind, expected_outputs_json, permissions_json, pending_input, method_id, method_version, project_id, pinned_at, archived_at, goal_id, budget_override_json, deleted_at, trash_batch_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        external_ref=excluded.external_ref, request_hash=excluded.request_hash,
        template_id=excluded.template_id, title=excluded.title, goal=excluded.goal, status=excluded.status,
@@ -3547,6 +3584,7 @@ function upsertTask(db: DatabaseSync, task: TaskRecord): void {
        executor_id=excluded.executor_id, task_kind=excluded.task_kind,
        expected_outputs_json=excluded.expected_outputs_json, permissions_json=excluded.permissions_json,
        pending_input=excluded.pending_input, method_id=excluded.method_id, method_version=excluded.method_version,
+       project_id=excluded.project_id,
         pinned_at=excluded.pinned_at, archived_at=excluded.archived_at, goal_id=excluded.goal_id,
         budget_override_json=excluded.budget_override_json, deleted_at=excluded.deleted_at,
         trash_batch_id=excluded.trash_batch_id`
@@ -3560,7 +3598,7 @@ function upsertTask(db: DatabaseSync, task: TaskRecord): void {
     JSON.stringify(task.expectedOutputs ?? ["result.md"]),
     task.permissions ? JSON.stringify(task.permissions) : null,
     task.pendingInput ?? null,
-    task.methodId ?? null, task.methodVersion ?? null,
+    task.methodId ?? null, task.methodVersion ?? null, task.projectId ?? null,
     task.pinnedAt ?? null, task.archivedAt ?? null, task.goalId ?? null,
     task.budgetOverride ? JSON.stringify(task.budgetOverride) : null,
     task.deletedAt ?? null, task.trashBatchId ?? null
@@ -4608,6 +4646,7 @@ function rowToTask(row: DbRow): TaskRecord {
     pendingInput: row.pending_input == null ? null : String(row.pending_input),
     methodId: row.method_id == null ? null : String(row.method_id),
     methodVersion: row.method_version == null ? null : Number(row.method_version),
+    projectId: row.project_id == null ? null : String(row.project_id),
     pinnedAt: row.pinned_at == null ? null : String(row.pinned_at),
     archivedAt: row.archived_at == null ? null : String(row.archived_at),
     budgetOverride: row.budget_override_json == null ? null : JSON.parse(String(row.budget_override_json)),
@@ -5615,6 +5654,19 @@ function rowToLocalProject(row: DbRow): LocalProject {
     name: String(row.name),
     path: String(row.path),
     defaultBranch: String(row.default_branch),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
+  };
+}
+
+function rowToTaskWorktree(row: DbRow): TaskWorktree {
+  return {
+    taskId: String(row.task_id),
+    projectId: String(row.project_id),
+    path: String(row.path),
+    branch: String(row.branch),
+    baseBranch: String(row.base_branch),
+    baseSha: String(row.base_sha),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at)
   };

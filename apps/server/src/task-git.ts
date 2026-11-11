@@ -9,7 +9,9 @@ import type {
   GitFileStatus,
   GitFileView,
   GitPullRequestView,
-  GitRepositoryView
+  GitRepositoryView,
+  TaskWorktree,
+  TaskWorktreeView
 } from "@hearth/core";
 import { runCommand, type CommandRunner } from "./github.ts";
 
@@ -22,6 +24,7 @@ export interface TaskGitOptions {
   run?: CommandRunner;
   maxDiffBytes?: number;
   maxFileBytes?: number;
+  worktreeFor?: (taskId: string) => TaskWorktree | TaskWorktreeView | null;
 }
 
 interface RawStatusFile {
@@ -43,12 +46,14 @@ export class TaskGitService {
   private readonly run: CommandRunner;
   private readonly maxDiffBytes: number;
   private readonly maxFileBytes: number;
+  private readonly worktreeFor: ((taskId: string) => TaskWorktree | TaskWorktreeView | null) | null;
 
   constructor(options: TaskGitOptions) {
     this.workspaceRoot = resolve(options.workspaceRoot);
     this.run = options.run ?? runCommand;
     this.maxDiffBytes = options.maxDiffBytes ?? DEFAULT_MAX_DIFF_BYTES;
     this.maxFileBytes = options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
+    this.worktreeFor = options.worktreeFor ?? null;
   }
 
   async view(taskId: string): Promise<GitRepositoryView> {
@@ -60,8 +65,9 @@ export class TaskGitService {
       const headSha = (await this.git(repoPath, ["rev-parse", "HEAD"])).trim();
       const branch = (await this.git(repoPath, ["branch", "--show-current"])).trim();
       const repo = await this.repositoryName(repoPath);
-      const base = await this.baseBranch(repoPath, repo);
-      const baseSha = base ? await this.revParse(repoPath, `origin/${base}`) : null;
+      const baseline = await this.baseline(taskId, repoPath, repo);
+      const base = baseline.base;
+      const baseSha = baseline.baseSha;
       const statusRaw = await this.git(repoPath, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
       const statusFiles = parsePorcelainStatus(statusRaw);
       const workingStats = await this.numStat(repoPath, ["diff", "--numstat", "HEAD", "--"], statusFiles);
@@ -110,8 +116,9 @@ export class TaskGitService {
     const safePath = path ? this.safePath(repoPath, path) : null;
     let patch = "";
     if (scope === "branch") {
-      const base = await this.baseBranch(repoPath, await this.repositoryName(repoPath));
-      const baseSha = base ? await this.revParse(repoPath, `origin/${base}`) : null;
+      const baseline = await this.baseline(taskId, repoPath, await this.repositoryName(repoPath));
+      const base = baseline.base;
+      const baseSha = baseline.baseSha;
       if (!baseSha) throw new GitViewError("无法确定任务分支的基线", 409);
       patch = await this.git(repoPath, ["diff", "--no-color", "--unified=3", `${baseSha}...HEAD`, ...(safePath ? ["--", safePath] : [])]);
     } else {
@@ -308,6 +315,18 @@ export class TaskGitService {
     return "main";
   }
 
+  private async baseline(
+    taskId: string,
+    repoPath: string,
+    repo: string | null
+  ): Promise<{ base: string | null; baseSha: string | null }> {
+    const worktree = this.worktreeFor?.(taskId) ?? null;
+    if (worktree) return { base: worktree.baseBranch, baseSha: worktree.baseSha };
+    const base = await this.baseBranch(repoPath, repo);
+    const baseSha = base ? await this.revParse(repoPath, `origin/${base}`) : null;
+    return { base, baseSha };
+  }
+
   private async revParse(repoPath: string, ref: string, symbolic = false): Promise<string | null> {
     try {
       const args = symbolic ? ["symbolic-ref", "--short", ref] : ["rev-parse", "--verify", "--quiet", ref];
@@ -322,6 +341,8 @@ export class TaskGitService {
     if (!/^[A-Za-z0-9._-]+$/.test(taskId) || taskId === "." || taskId === "..") {
       throw new GitViewError("任务标识不合法", 400);
     }
+    const worktree = this.worktreeFor?.(taskId) ?? null;
+    if (worktree) return resolve(worktree.path);
     const path = resolve(this.workspaceRoot, "tasks", taskId, "repo");
     const rel = relative(this.workspaceRoot, path);
     if (rel.startsWith("..") || isAbsolute(rel)) throw new GitViewError("任务工作区超出允许范围", 400);
