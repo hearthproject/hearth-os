@@ -44,6 +44,7 @@ describe("native system prompt", () => {
     expect(prompt).toContain("draft-778:recipient@example.com");
     expect(prompt).toContain("负责人与动作之间不要插入顿号");
     expect(prompt).toContain("主数组优先使用 items");
+    expect(prompt).toContain("默认使用 move");
   });
 });
 
