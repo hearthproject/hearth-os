@@ -16,7 +16,7 @@ import {
   type AgentToolAuthorizationRequest,
   type RuntimeEvent
 } from "@hearth/agent-runtime";
-import { wantsGithubAccess, wantsScreenshot } from "./task-intent.ts";
+import { wantsCodeExecution, wantsGithubAccess, wantsScreenshot } from "./task-intent.ts";
 import { supportsToolCalling, streamAgentTurn } from "./model-agent.ts";
 import { completeChat } from "./model-client.ts";
 import type { ModelSettings } from "./model-settings.ts";
@@ -67,13 +67,14 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
   }
   const screenshotTask = wantsScreenshot(`${options.task.title}\n${options.task.goal}`);
   const githubTask = wantsGithubAccess(`${options.task.title}\n${options.task.goal}`);
+  const codeTask = wantsCodeExecution(`${options.task.title}\n${options.task.goal}`);
   const permissions = options.permissions ?? defaultTaskPermissions({
     workspaceRoot: options.prepared.root,
     outDir: options.prepared.outDir,
     networkHosts: options.task.networkHosts,
-    ...(options.task.taskKind === "workspace" || githubTask ? { writeRoots: [options.prepared.outDir, options.prepared.root] } : {}),
+    ...(options.task.taskKind === "workspace" || githubTask || codeTask ? { writeRoots: [options.prepared.outDir, options.prepared.root] } : {}),
     extraTools: [
-      ...(options.task.taskKind === "workspace" || githubTask ? ["shell"] : []),
+      ...(options.task.taskKind === "workspace" || githubTask || codeTask ? ["shell"] : []),
       ...(screenshotTask ? ["capture_screen"] : [])
     ]
   });
@@ -661,16 +662,17 @@ export function withExtraToolPermissions(permissions: TaskPermissions, extraTool
 export function nativePermissionsFor(task: TaskRecord, prepared: PreparedWorkspace): TaskPermissions {
   const screenshotTask = wantsScreenshot(`${task.title}\n${task.goal}`);
   const githubTask = wantsGithubAccess(`${task.title}\n${task.goal}`);
+  const codeTask = wantsCodeExecution(`${task.title}\n${task.goal}`);
   if (task.permissions) {
     const tools = [
       ...task.permissions.tools,
-      ...(githubTask && !task.permissions.tools.includes("shell") ? ["shell"] : []),
+      ...((githubTask || codeTask) && !task.permissions.tools.includes("shell") ? ["shell"] : []),
       ...(screenshotTask && !task.permissions.tools.includes("capture_screen") ? ["capture_screen"] : [])
     ];
     return {
       ...task.permissions,
       readRoots: [prepared.root],
-      writeRoots: task.taskKind === "workspace" || githubTask ? [prepared.outDir, prepared.root] : [prepared.outDir],
+      writeRoots: task.taskKind === "workspace" || githubTask || codeTask ? [prepared.outDir, prepared.root] : [prepared.outDir],
       networkHosts: [...task.networkHosts],
       tools
     };
@@ -679,9 +681,9 @@ export function nativePermissionsFor(task: TaskRecord, prepared: PreparedWorkspa
     workspaceRoot: prepared.root,
     outDir: prepared.outDir,
     networkHosts: task.networkHosts,
-    ...(task.taskKind === "workspace" || githubTask ? { writeRoots: [prepared.outDir, prepared.root] } : {}),
+    ...(task.taskKind === "workspace" || githubTask || codeTask ? { writeRoots: [prepared.outDir, prepared.root] } : {}),
     extraTools: [
-      ...(task.taskKind === "workspace" || githubTask ? ["shell"] : []),
+      ...(task.taskKind === "workspace" || githubTask || codeTask ? ["shell"] : []),
       ...(screenshotTask ? ["capture_screen"] : [])
     ]
   });

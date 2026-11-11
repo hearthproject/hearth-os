@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { planExecution } from "./chat.ts";
 import { resolveExecutorFromEnabled, resolveExecutorLocked } from "./executors.ts";
-import { needsGithubRepository, wantsGithubAccess, wantsPublicWebResearch, wantsScreenshot } from "./task-intent.ts";
+import { needsGithubRepository, wantsCodeExecution, wantsGithubAccess, wantsPublicWebResearch, wantsScreenshot } from "./task-intent.ts";
 
 describe("task intent", () => {
   it("recognizes desktop screenshot requests", () => {
@@ -18,6 +18,13 @@ describe("task intent", () => {
     expect(wantsPublicWebResearch("调研 2026 年本地优先 Agent 的最新进展")).toBe(true);
     expect(wantsPublicWebResearch("搜索公开资料并整理引用")).toBe(true);
     expect(wantsPublicWebResearch("把这份会议记录整理成周报")).toBe(false);
+  });
+
+  it("recognizes tasks that need a code workspace and test execution", () => {
+    expect(wantsCodeExecution("定位根因、修改最小代码并留下测试结果")).toBe(true);
+    expect(wantsCodeExecution("根据 CI 日志定位回归")).toBe(true);
+    expect(wantsCodeExecution("补全 API 契约测试")).toBe(true);
+    expect(wantsCodeExecution("把这份会议记录整理成周报")).toBe(false);
   });
 
   it("requires a github-capable executor for PR work", () => {
