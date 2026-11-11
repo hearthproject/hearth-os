@@ -416,7 +416,21 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
         if (required.some((entry) => entry.status === "missing" || entry.value == null)) missingPageCount += 1;
       } else if (isPlainObject(page.metadata)) {
         const required = [...requiredFields].filter((field) => Object.hasOwn(page.metadata as Record<string, unknown>, field));
-        if (required.length === 0) continue;
+        if (required.length === 0) {
+          const flatRequired = [...requiredFields].filter((field) => Object.hasOwn(page, field));
+          if (flatRequired.length === 0) continue;
+          matchedRequiredField = true;
+          if (flatRequired.some((field) => {
+            const entry = page[field];
+            if (isPlainObject(entry)) {
+              return entry.status === "missing" || (entry.status !== "present_but_ambiguous" && entry.value == null);
+            }
+            if (entry != null) return false;
+            const status = String(page[`${field}Status`] ?? page[`${field}_status`] ?? "").toLowerCase();
+            return !/present|ambiguous/.test(status);
+          })) missingPageCount += 1;
+          continue;
+        }
         matchedRequiredField = true;
         if (required.some((field) => {
           const entry = (page.metadata as Record<string, unknown>)[field];
