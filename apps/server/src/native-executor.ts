@@ -335,6 +335,20 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
     root.rootCause = root.defectType.replace(/_/g, "-");
     changed = true;
   }
+  if (!Object.hasOwn(root, "cellEdits") && Array.isArray(root.items)) {
+    const edits = root.items.filter((item) => (
+      isPlainObject(item)
+      && item.role !== "header"
+      && (
+        (typeof item.action === "string" && !/^(keep|skip|noop|unchanged)$/i.test(item.action))
+        || (typeof item.rule === "string" && /normalize/i.test(item.rule) && item.targetValue != null)
+      )
+    )).length;
+    if (edits > 0) {
+      root.cellEdits = edits;
+      changed = true;
+    }
+  }
   for (const [key, countKey] of Object.entries(ARRAY_COUNTS)) {
     if (Object.hasOwn(root, countKey) || !Array.isArray(root[key])) continue;
     root[countKey] = (root[key] as unknown[]).length;

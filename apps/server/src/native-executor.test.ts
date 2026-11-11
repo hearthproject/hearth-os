@@ -376,6 +376,27 @@ describe("json deliverables", () => {
     }
   });
 
+  it("counts planned spreadsheet cell edits", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "result.json");
+      writeFileSync(path, JSON.stringify({
+        items: [
+          { role: "header", action: "keep", targetValue: "date" },
+          { role: "data", action: "normalize_date", targetValue: "2026-11-02" },
+          { role: "data", action: "keep", rule: "normalizeDate", targetValue: "2026-11-03" },
+          { role: "data", action: "keep", rule: "emptyAmount", targetValue: "100" },
+          { role: "data", action: "fill_empty", targetValue: "0" }
+        ]
+      }));
+      normalizeJsonDeliverables(dir, ["result.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.cellEdits).toBe(3);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("normalizes review, delivery and send result contracts", () => {
     const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
     try {
