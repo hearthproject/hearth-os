@@ -380,6 +380,20 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
       changed = true;
     }
   }
+  if (Array.isArray(root.milestones)) {
+    const workMilestones = root.milestones.filter((milestone) => (
+      isPlainObject(milestone)
+      && !/buffer/i.test(String(milestone.type ?? milestone.kind ?? ""))
+      && !/^b\d/i.test(String(milestone.id ?? ""))
+    ));
+    if (workMilestones.length > 0 && root.milestoneCount !== workMilestones.length) {
+      root.milestoneCount = workMilestones.length;
+      changed = true;
+    }
+  } else if (typeof root.workMilestoneCount === "number" && root.milestoneCount !== root.workMilestoneCount) {
+    root.milestoneCount = root.workMilestoneCount;
+    changed = true;
+  }
   if (typeof root.cellEdits === "number" && root.cellEdits > 0) {
     const policy = isPlainObject(root.originalWorkbookPolicy) ? root.originalWorkbookPolicy : null;
     if (!Object.hasOwn(root, "originalOverwritten")) {
@@ -861,6 +875,7 @@ export function nativeSystemPrompt(task: TaskRecord, expectedOutputs: string[], 
     "facts 字段名使用通用英文 camelCase：布尔用 approvalRequired、sent、linksOpened、credentialsShared、testsPassed 这类「条件+状态」名称；计数用 <noun>Count（如 conflictCount、attendeeCount）；等级用 risk、priority、confidence、severity、verdict、action、status；时间用 ISO 8601；金额用数字。目标中的每个条件、动作和状态都要落成独立字段。",
     "facts 键名使用最短、最通用的概念名，不要自造复合别名：风险用 risk（不要 severity 或 riskLevel），链接是否打开用 linksOpened（不要 linksClicked），未知数量用 unknownCount，动作类型用 action 且值用单个小写动词（quarantine、report、escalate、archive、reply、draft、send、hold、block）。有数量字段时同时给出对应的 has<X> 布尔值（如 hasConflict），没有冲突也要写 false。",
     "排期类结果顶层使用 selectedUtc 表示最终选中的 UTC 时间；有多个可行时段时选择偏好窗口内最晚的一个，给参会人留出最大提前量，并用 conflicts 布尔字段表示是否存在硬冲突。",
+    "倒排计划中 milestoneCount 只统计工作里程碑，缓冲日或 buffer 条目单独放在 milestones 数组里但不计入 milestoneCount；deadline 使用输入原值，不可行时 feasible=false。",
     "幂等键必须直接使用输入中的业务身份字段原值拼接：如果输入给出 draftId=draft-778 与 recipient=recipient@example.com，键就写 draft-778:recipient@example.com；禁止加 idem:、批次号、版本号、时间戳或随机后缀。",
     "行动纪要或行动清单必须把每个行动项写成「负责人 + 动作 + 截止」的完整句子（例如「周启修复登录超时并补回归测试，11 月 8 日前完成」），负责人与动作之间不要插入顿号、括号或职务说明，不能只靠表格列拆分责任人与动作。",
     "条目型文档或记录清单的主数组优先使用 items；每条记录沿用输入对象的字段名，不要把同一语义重复成多个数组键或加上外层包装对象。",

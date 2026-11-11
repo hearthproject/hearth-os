@@ -51,6 +51,7 @@ describe("native system prompt", () => {
     expect(prompt).toContain("finalState=\"saved\"");
     expect(prompt).toContain("只有一个 primary 候选");
     expect(prompt).toContain("顶层必须使用 cases 数组");
+    expect(prompt).toContain("milestoneCount 只统计工作里程碑");
   });
 });
 
@@ -296,6 +297,29 @@ describe("json deliverables", () => {
       normalizeJsonDeliverables(dir, ["result.json"]);
       const parsed = JSON.parse(readFileSync(path, "utf8"));
       expect(parsed.feasible).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("counts only work milestones in a schedule", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "milestones.json");
+      writeFileSync(path, JSON.stringify({
+        milestoneCount: 6,
+        milestones: [
+          { id: "M1", type: "work" },
+          { id: "M2", type: "work" },
+          { id: "M3", type: "work" },
+          { id: "M4", type: "work" },
+          { id: "B1", type: "buffer" },
+          { id: "B2", type: "buffer" }
+        ]
+      }));
+      normalizeJsonDeliverables(dir, ["milestones.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.milestoneCount).toBe(4);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
