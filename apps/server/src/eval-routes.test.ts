@@ -20,12 +20,19 @@ describe("eval routes", () => {
     const body = taskBody();
     const first = await fixture.app.inject({ method: "POST", url: "/api/eval/tasks", payload: body });
     expect(first.statusCode).toBe(201);
-    const created = first.json<{ task: { id: string; externalRef: string; networkHosts: string[]; outputDir: string; requestHash: string }; created: boolean }>();
+    const created = first.json<{ task: { id: string; externalRef: string; networkHosts: string[]; outputDir: string; requestHash: string; permissions: { tools: string[]; readRoots: string[]; writeRoots: string[] } }; created: boolean }>();
     expect(created.created).toBe(true);
     expect(created.task.externalRef).toBe("exp-1:E01:codex:r1");
     expect(created.task.networkHosts).toEqual([]);
     expect(created.task.outputDir).toBe(".hearth/eval-artifacts/exp-1/E01/r1");
     expect(created.task.requestHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(created.task.permissions.readRoots).toEqual([fixture.evalInputRoot]);
+    expect(created.task.permissions.writeRoots).toEqual([join(fixture.root, ".hearth", "eval-artifacts", "exp-1", "E01", "r1")]);
+    expect(created.task.permissions.tools).toEqual(expect.arrayContaining([
+      "read_file",
+      "write_file",
+      "finish_task"
+    ]));
 
     const repeated = await fixture.app.inject({ method: "POST", url: "/api/eval/tasks", payload: body });
     expect(repeated.statusCode).toBe(200);
@@ -148,7 +155,7 @@ async function createFixture(withModel = true, externalInputRoot?: string) {
     })
   });
   await app.ready();
-  return { root, app, service, store };
+  return { root, evalInputRoot, app, service, store };
 }
 
 function taskBody() {

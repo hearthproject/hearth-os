@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
+import { defaultTaskPermissions } from "@hearth/agent-runtime";
 import { EXECUTOR_IDS, type TaskRecord } from "@hearth/core";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
@@ -123,6 +124,12 @@ export function registerEvalRoutes(app: FastifyInstance, options: EvalRouteOptio
     }
     let task: TaskRecord;
     try {
+      const outputDir = resolve(repoRoot, body.outputDir);
+      const permissions = defaultTaskPermissions({
+        workspaceRoot: evalInputRoot,
+        outDir: outputDir,
+        networkHosts
+      });
       task = service.createTask({
         externalRef: body.externalRef,
         requestHash,
@@ -135,10 +142,9 @@ export function registerEvalRoutes(app: FastifyInstance, options: EvalRouteOptio
         expectedOutputs: body.expectedOutputs,
         outputDir: body.outputDir,
         permissions: {
+          ...permissions,
           readRoots: [evalInputRoot],
-          writeRoots: [body.outputDir],
-          networkHosts,
-          tools: []
+          writeRoots: [outputDir]
         }
       });
     } catch (error) {
