@@ -79,7 +79,7 @@ export type RuntimeEvent =
 
 export interface AgentCheckpoint {
   seq: number;
-  kind: "turn" | "tool" | "final" | "budget" | "waiting_input";
+  kind: "turn" | "tool" | "compaction" | "final" | "budget" | "waiting_input";
   messages: AgentMessage[];
   usage: RunUsage;
   turns: number;
@@ -109,6 +109,10 @@ export interface AgentRuntimeOptions {
   onCheckpoint?: (checkpoint: AgentCheckpoint) => void | Promise<void>;
   authorizeTool?: (request: AgentToolAuthorizationRequest) => Promise<AgentToolAuthorization>;
   isFullPermission?: () => boolean;
+  contextWindowTokens?: number;
+  contextReserveTokens?: number;
+  recentContextTokens?: number;
+  summarizeContext?: (messages: AgentMessage[], signal: AbortSignal) => Promise<string | null>;
 }
 
 export type AgentRunStatus = "completed" | "waiting_input" | "failed" | "cancelled" | "budget_exceeded";
@@ -128,4 +132,8 @@ export interface CompactOptions {
   keepRecent?: number;
   maxChars?: number;
   maxToolChars?: number;
+  contextWindowTokens?: number;
+  reserveTokens?: number;
+  recentTokens?: number;
+  signal?: AbortSignal;
 }

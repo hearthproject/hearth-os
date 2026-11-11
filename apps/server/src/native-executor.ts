@@ -16,6 +16,7 @@ import {
 } from "@hearth/agent-runtime";
 import { wantsGithubAccess, wantsScreenshot } from "./task-intent.ts";
 import { supportsToolCalling, streamAgentTurn } from "./model-agent.ts";
+import { completeChat } from "./model-client.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import type { PreparedWorkspace } from "./workspace.ts";
 
@@ -42,6 +43,7 @@ export interface NativeRunOptions {
   onAuthorizeTool?: (request: AgentToolAuthorizationRequest) => Promise<AgentToolAuthorization>;
   isFullPermission?: () => boolean;
   extraTools?: AgentTool[];
+  onContextSummary?: (messages: AgentMessage[], signal: AbortSignal) => Promise<string | null>;
 }
 
 export interface NativeRunResult {
@@ -84,6 +86,8 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     outDir: options.prepared.outDir,
     signal: options.signal,
     ...(options.resume ? { resume: options.resume } : {}),
+    contextWindowTokens: options.settings.contextWindowTokens,
+    summarizeContext: options.onContextSummary ?? ((messages, signal) => summarizeNativeContext(options.settings, messages, signal)),
     onEvent: (event) => {
       options.onContextEvent?.(event);
       if (event.type === "budget.exceeded") {
@@ -201,7 +205,7 @@ function modelAdapter(settings: ModelSettings): AgentModel {
     const result = await streamAgentTurn(settings, messages, tools, onDelta, {
       signal,
       temperature: 0.2,
-      maxTokens: 8_000,
+      maxTokens: settings.maxOutputTokens,
       timeoutMs: 180_000
     });
     return {
@@ -211,6 +215,26 @@ function modelAdapter(settings: ModelSettings): AgentModel {
       finishReason: result.finishReason
     };
   };
+}
+
+async function summarizeNativeContext(settings: ModelSettings, messages: AgentMessage[], signal: AbortSignal): Promise<string | null> {
+  const transcript = messages.map((message) => {
+    if (message.role === "tool") return `[工具 ${message.name}${message.isError ? "，失败" : ""}]\n${message.content}`;
+    if (message.role === "assistant") {
+      const calls = message.toolCalls.map((call) => `${call.name}(${JSON.stringify(call.arguments)})`).join(", ");
+      return `[助手]\n${message.content}${calls ? `\n工具调用：${calls}` : ""}`;
+    }
+    return `[${message.role}]\n${message.content}`;
+  }).join("\n\n").slice(0, 80_000);
+  try {
+    const result = await completeChat(settings, [
+      { role: "system", content: "压缩执行上下文。保留目标、已完成工作、关键证据、失败原因、产物路径和剩余事项；不要编造，输出简洁中文摘要。" },
+      { role: "user", content: transcript }
+    ], { maxTokens: 2_000, temperature: 0.1, timeoutMs: 60_000, signal });
+    return result.content.trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 function nativeSystemPrompt(task: TaskRecord, expectedOutputs: string[]): string {

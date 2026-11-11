@@ -1,5 +1,5 @@
 import type { RunUsage } from "@hearth/core";
-import { compactAgentMessages } from "./compaction.ts";
+import { compactAgentMessages, compactAgentMessagesWithSummary } from "./compaction.ts";
 import type {
   AgentCheckpoint,
   AgentMessage,
@@ -91,10 +91,19 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       return finish("budget_exceeded", summary ?? "Token 用量超过预算，已停止");
     }
 
-    const compacted = compactAgentMessages(messages);
+    const compacted = options.contextWindowTokens
+      ? await compactAgentMessagesWithSummary(messages, {
+          contextWindowTokens: options.contextWindowTokens,
+          ...(options.contextReserveTokens !== undefined ? { reserveTokens: options.contextReserveTokens } : {}),
+          ...(options.recentContextTokens !== undefined ? { recentTokens: options.recentContextTokens } : {}),
+          signal
+        }, options.summarizeContext)
+      : compactAgentMessages(messages);
     if (compacted.compacted) {
       messages.splice(0, messages.length, ...compacted.messages);
       emit({ type: "compacted", before: compacted.before, after: compacted.after });
+      if ("summary" in compacted && typeof compacted.summary === "string") summary = compacted.summary;
+      await checkpoint("compaction");
     }
 
     turns += 1;

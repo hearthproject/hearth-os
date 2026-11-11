@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { compactAgentMessages } from "./compaction.ts";
+import { compactAgentMessages, compactAgentMessagesWithSummary } from "./compaction.ts";
 import { runAgent, zeroUsage } from "./runtime.ts";
 import { createBuiltinTools, defaultTaskPermissions } from "./tools.ts";
 import type { AgentCheckpoint, AgentModel, AgentModelTurn, AgentToolCall } from "./types.ts";
@@ -194,6 +194,12 @@ describe("agent runtime", () => {
 });
 
 describe("context compaction", () => {
+  const roots: string[] = [];
+
+  afterEach(() => {
+    for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  });
+
   it("keeps the system prompt and recent tool results", () => {
     const messages = [
       { role: "system" as const, content: "system" },
@@ -218,7 +224,110 @@ describe("context compaction", () => {
     expect(compacted.messages[0]).toEqual({ role: "system", content: "system" });
     expect(compacted.messages.some((message) => message.role === "tool")).toBe(true);
   });
+
+  it("summarizes complete earlier turns and keeps every tool call paired", async () => {
+    const messages = [
+      { role: "system" as const, content: "system" },
+      { role: "user" as const, content: "goal" },
+      ...Array.from({ length: 24 }, (_, index) => [
+        {
+          role: "assistant" as const,
+          content: "",
+          toolCalls: [{ id: `call-${index}`, name: "read_file", arguments: { path: `file-${index}.txt` }, rawArguments: "{}" }]
+        },
+        {
+          role: "tool" as const,
+          toolCallId: `call-${index}`,
+          name: "read_file",
+          content: "evidence ".repeat(1_000)
+        }
+      ]).flat()
+    ];
+    let summarized = 0;
+    const compacted = await compactAgentMessagesWithSummary(messages, {
+      contextWindowTokens: 3_000,
+      reserveTokens: 500,
+      recentTokens: 400,
+      maxToolChars: 4_000
+    }, async (omitted) => {
+      summarized = omitted.length;
+      return "已经读取前 20 个文件，关键结论是 A。";
+    });
+
+    expect(compacted.compacted).toBe(true);
+    expect(summarized).toBeGreaterThan(0);
+    expect(compacted.messages[0]).toEqual({ role: "system", content: "system" });
+    expect(compacted.messages.some((message) => message.role === "user" && message.content.includes("关键结论是 A"))).toBe(true);
+    expect(compacted.afterTokens).toBeLessThan(compacted.beforeTokens);
+    expect(toolPairsComplete(compacted.messages)).toBe(true);
+  });
+
+  it("falls back to safe truncation when the summary model fails", async () => {
+    const messages = [
+      { role: "system" as const, content: "system" },
+      { role: "user" as const, content: "goal" },
+      ...Array.from({ length: 20 }, (_, index) => [
+        { role: "assistant" as const, content: "", toolCalls: [{ id: `call-${index}`, name: "grep", arguments: {}, rawArguments: "{}" }] },
+        { role: "tool" as const, toolCallId: `call-${index}`, name: "grep", content: "match ".repeat(2_000) }
+      ]).flat()
+    ];
+    const compacted = await compactAgentMessagesWithSummary(messages, {
+      contextWindowTokens: 2_000,
+      reserveTokens: 200,
+      recentTokens: 300,
+      maxToolChars: 3_000
+    }, async () => { throw new Error("summary unavailable"); });
+    expect(compacted.compacted).toBe(true);
+    expect(compacted.summarized).toBe(false);
+    expect(compacted.messages.some((message) => message.role === "user" && message.content.includes("摘要"))).toBe(false);
+    expect(toolPairsComplete(compacted.messages)).toBe(true);
+  });
+
+  it("compacts a resumed large context and writes a checkpoint", async () => {
+    const root = workspace(roots);
+    const checkpoints: AgentCheckpoint[] = [];
+    const events: string[] = [];
+    const messages = [
+      { role: "system" as const, content: "system" },
+      { role: "user" as const, content: "goal" },
+      ...Array.from({ length: 16 }, (_, index) => [
+        { role: "assistant" as const, content: "", toolCalls: [{ id: `old-${index}`, name: "read_file", arguments: {}, rawArguments: "{}" }] },
+        { role: "tool" as const, toolCallId: `old-${index}`, name: "read_file", content: "history ".repeat(2_000) }
+      ]).flat()
+    ];
+    const result = await runAgent({
+      model: fakeModel([turn("", [call("finish_task", { summary: "恢复后完成" })])]),
+      tools: createBuiltinTools(),
+      goal: "resume",
+      systemPrompt: "system",
+      budget: { maxTurns: 4, maxToolCalls: 4, maxTokens: 1_000_000, maxDurationMs: 30_000 },
+      permissions: defaultTaskPermissions({ workspaceRoot: root, outDir: join(root, "out"), networkHosts: [] }),
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      resume: { messages, usage: zeroUsage(), turns: 0, toolCalls: 0 },
+      contextWindowTokens: 3_000,
+      contextReserveTokens: 500,
+      recentContextTokens: 400,
+      summarizeContext: async () => "恢复摘要",
+      onCheckpoint: (checkpoint) => { checkpoints.push(checkpoint); },
+      onEvent: (event) => { if (event.type === "compacted") events.push("compacted"); }
+    });
+    expect(result.status).toBe("completed");
+    expect(events).toEqual(["compacted"]);
+    expect(checkpoints[0]?.kind).toBe("compaction");
+    expect(checkpoints[0]?.summary).toBe("恢复摘要");
+  });
 });
+
+function toolPairsComplete(messages: Array<{ role: string; content: string; toolCalls?: Array<{ id: string }>; toolCallId?: string }>): boolean {
+  const callIds = new Set<string>();
+  const resultIds = new Set<string>();
+  for (const message of messages) {
+    if (message.role === "assistant") for (const call of message.toolCalls ?? []) callIds.add(call.id);
+    if (message.role === "tool" && message.toolCallId) resultIds.add(message.toolCallId);
+  }
+  return [...callIds].every((id) => resultIds.has(id)) && [...resultIds].every((id) => callIds.has(id));
+}
 
 function workspace(roots: string[]): string {
   const root = mkdtempSync(join(tmpdir(), "hearth-runtime-"));
