@@ -33,12 +33,25 @@ export interface CompleteResult {
 export type StreamDeltaKind = "content" | "reasoning";
 export type StreamDeltaHandler = (text: string, kind: StreamDeltaKind) => void;
 
+const MODEL_RETRY_ATTEMPTS = 3;
+const MODEL_RETRY_BASE_DELAY_MS = 400;
+const RETRYABLE_HTTP_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
+const RETRYABLE_PROVIDER_ERROR = /workspace_billing_scope_unavailable|database_unavailable|context deadline exceeded|deadline exceeded|rate.?limit|too many requests|overloaded|temporarily unavailable|service unavailable|bad gateway|gateway timeout|upstream|econnreset|econnrefused|eai_again|etimedout|socket hang up|fetch failed|network error|connection reset/i;
+
 export async function completeChat(
   settings: ModelSettings,
   messages: ChatMessage[],
   options: CompleteOptions = {}
 ): Promise<CompleteResult> {
   assertConfigured(settings);
+  return withModelRetry(() => completeChatOnce(settings, messages, options), options.signal);
+}
+
+async function completeChatOnce(
+  settings: ModelSettings,
+  messages: ChatMessage[],
+  options: CompleteOptions
+): Promise<CompleteResult> {
   switch (protocolOf(settings)) {
     case "openai-responses":
       return completeOpenAiResponses(settings, messages, options);
@@ -58,6 +71,19 @@ export async function streamChat(
   options: CompleteOptions = {}
 ): Promise<CompleteResult> {
   assertConfigured(settings);
+  let emitted = false;
+  return withModelRetry(() => streamChatOnce(settings, messages, (text, kind) => {
+    emitted = true;
+    onDelta(text, kind);
+  }, options), options.signal, () => !emitted);
+}
+
+async function streamChatOnce(
+  settings: ModelSettings,
+  messages: ChatMessage[],
+  onDelta: StreamDeltaHandler,
+  options: CompleteOptions
+): Promise<CompleteResult> {
   switch (protocolOf(settings)) {
     case "openai-responses":
       return streamOpenAiResponses(settings, messages, onDelta, options);
@@ -68,6 +94,59 @@ export async function streamChat(
     default:
       return streamOpenAiChat(settings, messages, onDelta, options);
   }
+}
+
+async function withModelRetry<T>(
+  attempt: () => Promise<T>,
+  signal: AbortSignal | undefined,
+  allowRetry: () => boolean = () => true
+): Promise<T> {
+  for (let index = 0; index < MODEL_RETRY_ATTEMPTS; index += 1) {
+    try {
+      return await attempt();
+    } catch (error) {
+      const canRetry = index + 1 < MODEL_RETRY_ATTEMPTS
+        && !signal?.aborted
+        && allowRetry()
+        && isRetryableModelError(error);
+      if (!canRetry) throw error;
+      await retryDelay(MODEL_RETRY_BASE_DELAY_MS * 2 ** index, signal);
+    }
+  }
+  throw new ModelClientError("MODEL_REQUEST_FAILED", "模型请求重试失败");
+}
+
+function isRetryableModelError(error: unknown): boolean {
+  if (error instanceof ModelClientError) {
+    if (error.code === "MODEL_NOT_CONFIGURED") return false;
+    if (RETRYABLE_PROVIDER_ERROR.test(`${error.code} ${error.message}`)) return true;
+    if (error.status === 400 || error.status === 401 || error.status === 403 || error.status === 404) return false;
+    return error.status !== null && RETRYABLE_HTTP_STATUS.has(error.status);
+  }
+  if (error instanceof Error) {
+    if (error.name === "AbortError" || error.name === "TimeoutError") return false;
+    const cause = (error as Error & { cause?: { code?: unknown } }).cause;
+    return RETRYABLE_PROVIDER_ERROR.test(`${error.name} ${error.message} ${String(cause?.code ?? "")}`);
+  }
+  return false;
+}
+
+function retryDelay(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason ?? new Error("aborted"));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason ?? new Error("aborted"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 export async function listModels(settings: ModelSettings, timeoutMs = 30_000): Promise<string[]> {

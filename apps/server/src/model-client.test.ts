@@ -110,6 +110,95 @@ describe("OpenAI-compatible model client", () => {
     expect(result.usage).toEqual({ inputTokens: 3, outputTokens: 1 });
   });
 
+  it("retries transient provider errors before returning content", async () => {
+    let calls = 0;
+    const flaky = createServer(async (request, response) => {
+      for await (const _chunk of request) {
+        // Drain the request body before replying.
+      }
+      calls += 1;
+      if (calls === 1) {
+        response.writeHead(503, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: { message: "workspace_billing_scope_unavailable" } }));
+        return;
+      }
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ choices: [{ message: { content: "OK" } }] }));
+    });
+    await new Promise<void>((resolve) => flaky.listen(0, "127.0.0.1", resolve));
+    const address = flaky.address();
+    if (!address || typeof address === "string") throw new Error("no server address");
+    try {
+      const result = await completeChat(
+        { ...settings(), baseUrl: `http://127.0.0.1:${address.port}/v1` },
+        [{ role: "user", content: "hi" }]
+      );
+      expect(result.content).toBe("OK");
+      expect(calls).toBe(2);
+    } finally {
+      await new Promise<void>((resolve, reject) => flaky.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
+  it("does not retry authentication failures", async () => {
+    let calls = 0;
+    const unauthorized = createServer(async (request, response) => {
+      for await (const _chunk of request) {
+        // Drain the request body before replying.
+      }
+      calls += 1;
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { message: "invalid api key" } }));
+    });
+    await new Promise<void>((resolve) => unauthorized.listen(0, "127.0.0.1", resolve));
+    const address = unauthorized.address();
+    if (!address || typeof address === "string") throw new Error("no server address");
+    try {
+      await expect(completeChat(
+        { ...settings(), baseUrl: `http://127.0.0.1:${address.port}/v1` },
+        [{ role: "user", content: "hi" }]
+      )).rejects.toMatchObject({ status: 401 });
+      expect(calls).toBe(1);
+    } finally {
+      await new Promise<void>((resolve, reject) => unauthorized.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
+  it("retries a stream failure before any delta is emitted", async () => {
+    let calls = 0;
+    const flaky = createServer(async (request, response) => {
+      for await (const _chunk of request) {
+        // Drain the request body before replying.
+      }
+      calls += 1;
+      if (calls === 1) {
+        response.writeHead(502, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: { message: "database_unavailable" } }));
+        return;
+      }
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write(`data: ${JSON.stringify({ choices: [{ delta: { content: "你" } }] })}\n\n`);
+      response.write(`data: ${JSON.stringify({ choices: [{ delta: { content: "好" } }] })}\n\n`);
+      response.end("data: [DONE]\n\n");
+    });
+    await new Promise<void>((resolve) => flaky.listen(0, "127.0.0.1", resolve));
+    const address = flaky.address();
+    if (!address || typeof address === "string") throw new Error("no server address");
+    const deltas: string[] = [];
+    try {
+      const result = await streamChat(
+        { ...settings(), baseUrl: `http://127.0.0.1:${address.port}/v1` },
+        [{ role: "user", content: "hi" }],
+        (delta) => deltas.push(delta)
+      );
+      expect(deltas.join("")).toBe("你好");
+      expect(result.content).toBe("你好");
+      expect(calls).toBe(2);
+    } finally {
+      await new Promise<void>((resolve, reject) => flaky.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
   it("lists provider models from /models", async () => {
     expect(await listModels(settings())).toEqual(["model-a", "model-b"]);
   });
