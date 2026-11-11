@@ -87,6 +87,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     signal: options.signal,
     ...(options.resume ? { resume: options.resume } : {}),
     contextWindowTokens: options.settings.contextWindowTokens,
+    requireFinishTool: true,
     summarizeContext: options.onContextSummary ?? ((messages, signal) => summarizeNativeContext(options.settings, messages, signal)),
     onEvent: (event) => {
       options.onContextEvent?.(event);

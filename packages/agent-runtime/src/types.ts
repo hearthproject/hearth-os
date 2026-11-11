@@ -113,6 +113,7 @@ export interface AgentRuntimeOptions {
   contextReserveTokens?: number;
   recentContextTokens?: number;
   summarizeContext?: (messages: AgentMessage[], signal: AbortSignal) => Promise<string | null>;
+  requireFinishTool?: boolean;
 }
 
 export type AgentRunStatus = "completed" | "waiting_input" | "failed" | "cancelled" | "budget_exceeded";

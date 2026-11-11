@@ -191,6 +191,47 @@ describe("agent runtime", () => {
     expect(result.status).toBe("completed");
     expect(result.messages.some((message) => message.role === "tool" && message.content.includes("未知或未授权工具"))).toBe(true);
   });
+
+  it("prompts once before accepting plain-text completion in native mode", async () => {
+    const root = workspace(roots);
+    const notices: string[] = [];
+    const result = await runAgent({
+      model: fakeModel([
+        turn("看起来已经完成了", []),
+        turn("", [call("finish_task", { summary: "确认完成" })])
+      ]),
+      tools: createBuiltinTools(),
+      goal: "完成",
+      systemPrompt: "system",
+      budget: { maxTurns: 5, maxToolCalls: 4, maxTokens: 10_000, maxDurationMs: 30_000 },
+      permissions: defaultTaskPermissions({ workspaceRoot: root, outDir: join(root, "out"), networkHosts: [] }),
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      requireFinishTool: true,
+      onEvent: (event) => { if (event.type === "notice") notices.push(event.message); }
+    });
+    expect(result.status).toBe("completed");
+    expect(result.summary).toBe("确认完成");
+    expect(notices).toHaveLength(1);
+    expect(result.messages.some((message) => message.role === "user" && message.content.includes("finish_task"))).toBe(true);
+  });
+
+  it("fails when the model keeps claiming completion without finish_task", async () => {
+    const root = workspace(roots);
+    const result = await runAgent({
+      model: fakeModel([turn("完成了", []), turn("真的完成了", [])]),
+      tools: createBuiltinTools(),
+      goal: "完成",
+      systemPrompt: "system",
+      budget: { maxTurns: 5, maxToolCalls: 4, maxTokens: 10_000, maxDurationMs: 30_000 },
+      permissions: defaultTaskPermissions({ workspaceRoot: root, outDir: join(root, "out"), networkHosts: [] }),
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      requireFinishTool: true
+    });
+    expect(result.status).toBe("failed");
+    expect(result.summary).toContain("finish_task");
+  });
 });
 
 describe("context compaction", () => {

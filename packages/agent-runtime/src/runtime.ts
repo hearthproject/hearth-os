@@ -37,6 +37,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   let seq = 0;
   let summary: string | null = null;
   let emptyTurns = 0;
+  let missingFinishTurns = 0;
   const startedAt = Date.now();
   const signal = options.signal ?? new AbortController().signal;
 
@@ -132,13 +133,21 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     await checkpoint("turn");
 
     if (turn.toolCalls.length === 0) {
-      if (turn.content.trim()) return finish("completed", turn.content.trim());
+      if (turn.content.trim() && !options.requireFinishTool) return finish("completed", turn.content.trim());
+      if (turn.content.trim()) {
+        missingFinishTurns += 1;
+        if (missingFinishTurns > 1) return finish("failed", "模型连续用纯文本声称完成，但没有调用 finish_task");
+        emit({ type: "notice", message: "原生任务必须调用 finish_task 收尾；已要求模型补充正式完成结果" });
+        messages.push({ role: "user", content: "不要只用文本回复完成。请先核对产物，然后调用 finish_task，提供中文总结和输出路径。" });
+        continue;
+      }
       emptyTurns += 1;
       if (emptyTurns >= 3) return finish("failed", "模型连续没有返回可执行内容");
       messages.push({ role: "user", content: "请继续完成当前任务；如果已经完成，请调用 finish_task 并给出中文总结。" });
       continue;
     }
     emptyTurns = 0;
+    missingFinishTurns = 0;
 
     for (const call of turn.toolCalls) {
       if (aborted()) return finish("cancelled", "任务已取消");
