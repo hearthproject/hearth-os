@@ -54,7 +54,11 @@ describe("json deliverables", () => {
           conflictCount: 1,
           unknownReleaseDateCount: 1,
           recommendedUtcStart: "2026-11-16T15:00:00Z",
-          action: "report_and_quarantine_zero_interaction"
+          action: "report_and_quarantine_zero_interaction",
+          verdict: "eligible_pending_manager_approval",
+          escalationCount: 1,
+          sent: false,
+          managerApprovalRequired: true
         },
         evidence: ["x"]
       }));
@@ -67,6 +71,10 @@ describe("json deliverables", () => {
       expect(parsed.unknownCount).toBe(1);
       expect(parsed.selectedUtc).toBe("2026-11-16T15:00:00Z");
       expect(parsed.action).toBe("quarantine");
+      expect(parsed.eligible).toBe(true);
+      expect(parsed.escalate).toBe(true);
+      expect(parsed.send).toBe(false);
+      expect(parsed.approvalRequired).toBe(true);
       expect(parsed.evidence).toEqual(["x"]);
     } finally {
       rmSync(dir, { recursive: true, force: true });

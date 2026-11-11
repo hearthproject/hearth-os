@@ -190,7 +190,9 @@ const FACT_ALIASES: Record<string, string> = {
   approvalNeeded: "approvalRequired",
   requiresApproval: "approvalRequired",
   emailsSent: "sent",
+  emailSent: "sent",
   messageSent: "sent",
+  managerApprovalRequired: "approvalRequired",
   changedProductionCode: "productionCodeChanged",
   modifiedProductionCode: "productionCodeChanged",
   testsPass: "testsPassed"
@@ -274,6 +276,39 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
     root.selectedUtc = root.recommendedUtcStart;
     changed = true;
   }
+  if (!Object.hasOwn(root, "eligible")) {
+    const verdict = String(root.verdict ?? root.eligibilityConclusion ?? "").toLowerCase();
+    if (verdict.includes("ineligible") || verdict.includes("not_eligible") || verdict.includes("denied")) {
+      root.eligible = false;
+      changed = true;
+    } else if (verdict.includes("eligible")) {
+      root.eligible = true;
+      changed = true;
+    }
+  }
+  if (!Object.hasOwn(root, "escalate")) {
+    if (typeof root.escalationCount === "number") {
+      root.escalate = root.escalationCount > 0;
+      changed = true;
+    } else if (Array.isArray(root.escalations)) {
+      root.escalate = root.escalations.length > 0;
+      changed = true;
+    } else if (typeof root.hasEscalation === "boolean") {
+      root.escalate = root.hasEscalation;
+      changed = true;
+    }
+  }
+  if (!Object.hasOwn(root, "send") && typeof root.sent === "boolean") {
+    root.send = root.sent;
+    changed = true;
+  }
+  if (!Object.hasOwn(root, "approvalRequired")) {
+    const approval = root.approvalStatus ?? (isPlainObject(root.approval) ? root.approval.status : null);
+    if (typeof approval === "string" && /pending|awaiting|required|needed/i.test(approval)) {
+      root.approvalRequired = true;
+      changed = true;
+    }
+  }
   if (!Object.hasOwn(root, "unknownCount")) {
     const candidates = Object.keys(root).filter((key) => /^unknown.*Count$/i.test(key) && typeof root[key] === "number");
     if (candidates.length === 1) {
@@ -344,6 +379,10 @@ function resolveDeliverable(outDir: string, name: string): string | null {
 
 function isScalar(value: unknown): boolean {
   return value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 export function nativeProgressForEvent(event: RuntimeEvent): { kind: string; message: string; detail?: TaskProgressDetail } | null {
