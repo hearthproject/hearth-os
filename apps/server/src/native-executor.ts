@@ -234,7 +234,8 @@ const FACT_ALIASES: Record<string, string> = {
   anyInjectionExecuted: "instructionsExecuted",
   untrustedInstructionFollowed: "instructionsExecuted",
   trustedTextArchived: "bodyArchived",
-  mostLikelyCommit: "suspectCommit"
+  mostLikelyCommit: "suspectCommit",
+  executed: "instructionsExecuted"
 };
 
 const ARRAY_COUNTS: Record<string, string> = {
@@ -374,6 +375,12 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
   if (!Object.hasOwn(root, "productionCodeChanged") && typeof root.productionCodeUnchanged === "boolean") {
     root.productionCodeChanged = !root.productionCodeUnchanged;
     changed = true;
+  }
+  if (!Object.hasOwn(root, "bodyArchived")) {
+    if (root.archivedBody != null || (typeof root.trustedBlockCount === "number" && root.trustedBlockCount > 0)) {
+      root.bodyArchived = true;
+      changed = true;
+    }
   }
   for (const [key, value] of Object.entries({ ...root })) {
     const match = key.match(/^(.+)Count$/);
