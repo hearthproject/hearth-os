@@ -192,6 +192,11 @@ export function normalizeJsonDeliverables(outDir: string, expectedOutputs: strin
         changed = true;
         break;
       }
+      const explicitUnknownCount = (facts as Record<string, unknown>).explicitUnknownCount;
+      if (typeof explicitUnknownCount === "number" && root.unknownCount !== explicitUnknownCount) {
+        root.unknownCount = explicitUnknownCount;
+        changed = true;
+      }
     }
     if (normalizeJsonFacts(root)) changed = true;
     if (changed) writeFileSync(path, `${JSON.stringify(root, null, 2)}\n`, "utf8");

@@ -429,6 +429,21 @@ describe("json deliverables", () => {
     }
   });
 
+  it("prefers an explicit unknown count from the facts layer", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "result.json");
+      writeFileSync(path, JSON.stringify({
+        facts: { explicitUnknownCount: 2, unknownCount: 8 }
+      }));
+      normalizeJsonDeliverables(dir, ["result.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.unknownCount).toBe(2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("normalizes review, delivery and send result contracts", () => {
     const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
     try {
