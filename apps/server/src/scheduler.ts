@@ -39,7 +39,9 @@ import { renderMethodBlock } from "./method-context.ts";
 import { MethodService } from "./methods.ts";
 import { DEFAULT_LEASE_HEARTBEAT_MS, LeaseError, TaskLeaseService } from "./leases.ts";
 import { SandboxService } from "./sandbox.ts";
-import { TOOL_APPROVAL_REQUIRED, toolApprovalSummary } from "./tool-policy.ts";
+import { requiresToolApproval, toolApprovalSummary } from "./tool-policy.ts";
+import { createMcpTools, parseMcpToolName } from "./mcp-tools.ts";
+import type { McpServerService } from "./mcp-servers.ts";
 import { DEFAULT_RUN_BUDGET, nativePermissionsFor, runNativeTask } from "./native-executor.ts";
 import { ContextBroker } from "./context-broker.ts";
 import { OntologyService } from "./ontology.ts";
@@ -106,6 +108,7 @@ export interface SchedulerOptions {
   delegations?: DelegationService;
   backgroundTools?: BackgroundToolService;
   webSearch?: WebSearchService;
+  mcpServers?: McpServerService;
   skills?: SkillPackageService;
   worktrees?: TaskWorktreeService;
   leaseHeartbeatMs?: number;
@@ -162,6 +165,7 @@ export class HearthScheduler {
   private readonly delegations: DelegationService;
   private readonly backgroundTools: BackgroundToolService | undefined;
   private readonly webSearch: WebSearchService | undefined;
+  private readonly mcpServers: McpServerService | undefined;
   private readonly skills: SkillPackageService | undefined;
   private readonly worktrees: TaskWorktreeService;
   private readonly leaseHeartbeatMs: number;
@@ -226,6 +230,7 @@ export class HearthScheduler {
     this.sandbox = options.sandbox ?? new SandboxService();
     this.backgroundTools = options.backgroundTools;
     this.webSearch = options.webSearch;
+    this.mcpServers = options.mcpServers;
     this.skills = options.skills;
     this.worktrees = options.worktrees ?? new TaskWorktreeService(this.service.store, { workspaceRoot: this.workspaceRoot });
     this.delegations = options.delegations ?? new DelegationService({
@@ -1545,6 +1550,23 @@ export class HearthScheduler {
         }
       }
       if (executorId === "native") {
+        if (this.mcpServers) {
+          try {
+            extraNativeTools.push(...createMcpTools(this.mcpServers));
+          } catch (error) {
+            this.capture({
+              taskId,
+              conversationId: task.conversationId ?? null,
+              runId,
+              executorId,
+              kind: "notice",
+              role: "system",
+              content: `MCP 工具未注入：${errorMessage(error)}`,
+              provenance: { source: "mcp", phase: "tool-binding" },
+              executorEventId: `mcp:tool-binding:${runId}`
+            });
+          }
+        }
         const usedSubagents = this.service.store.listEvents(0, task.id)
           .filter((event) => event.type === "subagent.delegated").length;
         const remainingSubagents = 2 - usedSubagents;
@@ -1797,7 +1819,7 @@ export class HearthScheduler {
     signal: AbortSignal;
   }): Promise<AgentToolAuthorization> {
     const toolName = input.request.call.name;
-    if (!TOOL_APPROVAL_REQUIRED.has(toolName)) return { allowed: true };
+    if (!requiresToolApproval(toolName)) return { allowed: true };
     if (input.signal.aborted) return { allowed: false, reason: "任务已取消" };
     const argumentsValue = approvalArguments(input.request.call.arguments);
     const summary = toolApprovalSummary(toolName, input.request.call.arguments);
@@ -1807,6 +1829,7 @@ export class HearthScheduler {
       const resolved = resolveToolAction({
         toolName,
         argumentsValue,
+        mcpArgumentsValue: input.request.call.arguments,
         summary,
         workspaceRoot: input.workspaceRoot,
         fullPermission,
@@ -1838,7 +1861,15 @@ export class HearthScheduler {
       run: input.run,
       toolName,
       summary,
-      target: { tool: toolName, arguments: argumentsValue },
+      target: action.kind === "mcp" && action.mcp
+        ? {
+            tool: toolName,
+            serverId: action.mcp.serverId,
+            serverTool: action.mcp.toolName,
+            argumentsDigest: action.mcp.argumentsDigest,
+            arguments: argumentsValue
+          }
+        : { tool: toolName, arguments: argumentsValue },
       preview: { arguments: argumentsValue },
       action,
       signal: input.signal
@@ -2807,6 +2838,7 @@ function errorCode(error: unknown): string | null {
 export function resolveToolAction(input: {
   toolName: string;
   argumentsValue: unknown;
+  mcpArgumentsValue?: unknown;
   summary: string;
   workspaceRoot: string;
   fullPermission: boolean;
@@ -2817,7 +2849,17 @@ export function resolveToolAction(input: {
     : {};
   const permissionMode = input.fullPermission ? "full" as const : "guarded" as const;
   let proposal: ActionProposal | null = null;
-  if (input.toolName === "shell" && typeof args.command === "string" && args.command.trim()) {
+  const mcp = parseMcpToolName(input.toolName);
+  if (mcp) {
+    proposal = {
+      kind: "mcp",
+      summary: input.summary,
+      mcp: {
+        ...mcp,
+        argumentsDigest: actionDigest(input.mcpArgumentsValue ?? input.argumentsValue)
+      }
+    };
+  } else if (input.toolName === "shell" && typeof args.command === "string" && args.command.trim()) {
     const windows = process.platform === "win32";
     proposal = {
       kind: "shell",

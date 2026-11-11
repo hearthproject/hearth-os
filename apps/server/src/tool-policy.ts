@@ -16,7 +16,7 @@ export const BACKGROUND_READ_ONLY_TOOLS = new Set([
 ]);
 
 export function requiresToolApproval(toolName: string): boolean {
-  return TOOL_APPROVAL_REQUIRED.has(toolName);
+  return TOOL_APPROVAL_REQUIRED.has(toolName) || toolName.startsWith("mcp__");
 }
 
 export function isBackgroundToolReadOnly(toolName: string): boolean {
@@ -28,6 +28,7 @@ export function toolApprovalSummary(toolName: string, value: unknown): string {
   const path = typeof args.path === "string" ? args.path : typeof args.fileName === "string" ? args.fileName : null;
   const command = typeof args.command === "string" ? args.command : null;
   const url = typeof args.url === "string" ? args.url : null;
+  const mcp = parseMcpToolName(toolName);
   if (toolName === "write_file") return `写入工作区文件：${path ?? "未指定路径"}`;
   if (toolName === "write_spreadsheet") return `生成表格文件：${path ?? "未指定路径"}`;
   if (toolName === "write_document") return `生成文档文件：${path ?? "未指定路径"}`;
@@ -36,7 +37,16 @@ export function toolApprovalSummary(toolName: string, value: unknown): string {
   if (toolName === "shell") return `运行命令：${clipText(command ?? "未指定命令", 160)}`;
   if (toolName === "fetch_url") return `读取网址：${clipText(url ?? "未指定网址", 200)}`;
   if (toolName === "capture_screen") return `截取桌面画面：${path ?? "desktop.png"}`;
+  if (mcp) return `调用 MCP 工具：${mcp.serverId}/${mcp.toolName}`;
   return `执行敏感工具：${toolName}`;
+}
+
+function parseMcpToolName(toolName: string): { serverId: string; toolName: string } | null {
+  if (!toolName.startsWith("mcp__")) return null;
+  const rest = toolName.slice("mcp__".length);
+  const separator = rest.indexOf("__");
+  if (separator <= 0 || separator >= rest.length - 2) return null;
+  return { serverId: rest.slice(0, separator), toolName: rest.slice(separator + 2) };
 }
 
 function clipText(value: string, max: number): string {

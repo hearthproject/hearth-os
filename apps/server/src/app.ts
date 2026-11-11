@@ -1085,6 +1085,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
         delegations,
         backgroundTools,
         webSearch,
+        mcpServers,
         skills,
         worktrees,
         attachmentRoot,

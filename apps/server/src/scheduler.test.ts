@@ -1,7 +1,8 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DelegationJob, ExecutorHealth, ExecutorId, HandoffRecord, HandoffStatus, TaskRecord, TaskStatus } from "@hearth/core";
 import { defaultConversationSettings } from "@hearth/core";
@@ -19,6 +20,10 @@ import { SandboxService } from "./sandbox.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import type { DeepSeekHarnessRunOptions, DeepSeekHarnessRunResult, DshApprovalOutcome } from "@hearth/deepseek-executor";
 import { DEFAULT_RUN_BUDGET } from "./native-executor.ts";
+import { McpServerService } from "./mcp-servers.ts";
+import { SecretBox } from "./secrets.ts";
+
+const MOCK_MCP_SERVER = fileURLToPath(new URL("./test-fixtures/mock-mcp-server.mjs", import.meta.url));
 
 const FAKE_RESULT = {
   threadId: "fake-thread",
@@ -1667,6 +1672,128 @@ describe("Hearth scheduler", () => {
     expect(completed.resultSummary).toBe("已跳过被拒绝的工具");
   });
 
+  it("requires approval for each native MCP call with server, tool and argument binding", async () => {
+    const service = setup();
+    const modelSettingsPath = configureModel();
+    const secretBox = new SecretBox(randomBytes(32));
+    const mcpServers = new McpServerService({ store: store as HearthStore, secretBox, timeoutMs: 3_000 });
+    const mcp = await mcpServers.create({ name: "Scheduler Mock", command: process.execPath, args: [MOCK_MCP_SERVER] });
+    const approvals = new ApprovalManager(service, async () => ({}));
+    const seen: string[] = [];
+    const authorizations: Array<{ allowed: boolean; reason?: string }> = [];
+    const nativeRunner: NativeRunner = async (options) => {
+      const tool = options.extraTools?.find((item) => item.definition.name === `mcp__${mcp.id}__echo`);
+      if (!tool) throw new Error("MCP tool was not injected");
+      for (const text of ["one", "two"]) {
+        const authorization = await options.onAuthorizeTool?.({
+          call: {
+            id: `call-mcp-${text}`,
+            name: tool.definition.name,
+            arguments: { text },
+            rawArguments: JSON.stringify({ text })
+          },
+          definition: tool.definition
+        });
+        if (!authorization) throw new Error("Missing authorization callback");
+        authorizations.push(authorization);
+        if (!authorization.allowed) continue;
+        const result = await tool.execute({ text }, {
+          workspaceRoot: options.prepared.root,
+          outDir: options.prepared.outDir,
+          permissions: options.permissions ?? { readRoots: [], writeRoots: [], networkHosts: [], tools: [] },
+          signal: options.signal
+        });
+        seen.push(result.content);
+      }
+      writeFileSync(join(options.prepared.outDir, "result.md"), "# MCP 结果\n");
+      return nativeResult("MCP 调用完成");
+    };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, {
+      nativeRunner,
+      modelSettingsPath,
+      approvals,
+      mcpServers
+    });
+    scheduler.start();
+
+    const task = service.createTask({ title: "MCP 审批", goal: "调用 MCP", executorId: "native", expectedOutputs: ["result.md"] });
+    await waitForStatus(service, task.id, "waiting_approval");
+    const first = store?.listApprovals(task.id).find((approval) => approval.status === "pending");
+    expect(first?.kind).toBe(`tool.mcp__${mcp.id}__echo`);
+    expect(first?.target).toMatchObject({ serverId: mcp.id, serverTool: "echo" });
+    expect(first?.target.argumentsDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(first?.action).toMatchObject({ resolvedAction: { kind: "mcp", mcp: { serverId: mcp.id, toolName: "echo" } } });
+    await approvals.decide(first!.id, "approve", first!.parameterHash);
+
+    const deadline = Date.now() + 4_000;
+    let second: typeof first;
+    do {
+      await delay(20);
+      second = store?.listApprovals(task.id).find((approval) => approval.status === "pending");
+    } while (!second && Date.now() < deadline);
+    expect(second?.id).not.toBe(first?.id);
+    expect(second?.target.argumentsDigest).not.toBe(first?.target.argumentsDigest);
+    await approvals.decide(second!.id, "approve", second!.parameterHash);
+
+    await waitForStatus(service, task.id, "completed");
+    expect(authorizations).toEqual([{ allowed: true }, { allowed: true }]);
+    expect(seen.join("\n")).toContain("echo:one");
+    expect(seen.join("\n")).toContain("echo:two");
+  }, 20_000);
+
+  it("auto-approves MCP calls only in full permission mode and audits the action", async () => {
+    const service = setup();
+    const modelSettingsPath = configureModel();
+    const conversation = fullConversation();
+    const secretBox = new SecretBox(randomBytes(32));
+    const mcpServers = new McpServerService({ store: store as HearthStore, secretBox, timeoutMs: 3_000 });
+    const mcp = await mcpServers.create({ name: "Full Mock", command: process.execPath, args: [MOCK_MCP_SERVER] });
+    let authorization: { allowed: boolean; reason?: string } | null = null;
+    let output = "";
+    const nativeRunner: NativeRunner = async (options) => {
+      const tool = options.extraTools?.find((item) => item.definition.name === `mcp__${mcp.id}__echo`);
+      if (!tool) throw new Error("MCP tool was not injected");
+      authorization = await options.onAuthorizeTool?.({
+        call: {
+          id: "call-mcp-full",
+          name: tool.definition.name,
+          arguments: { text: "full" },
+          rawArguments: JSON.stringify({ text: "full" })
+        },
+        definition: tool.definition
+      }) ?? null;
+      const result = await tool.execute({ text: "full" }, {
+        workspaceRoot: options.prepared.root,
+        outDir: options.prepared.outDir,
+        permissions: options.permissions ?? { readRoots: [], writeRoots: [], networkHosts: [], tools: [] },
+        signal: options.signal
+      });
+      output = result.content;
+      writeFileSync(join(options.prepared.outDir, "result.md"), "# 完全权限 MCP\n");
+      return nativeResult("完全权限 MCP 完成");
+    };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath, mcpServers });
+    scheduler.start();
+
+    const task = service.createTask({
+      title: "MCP 完全权限",
+      goal: "调用 MCP",
+      executorId: "native",
+      expectedOutputs: ["result.md"],
+      conversationId: conversation.id
+    });
+    await waitForStatus(service, task.id, "completed");
+    expect(authorization).toEqual({ allowed: true });
+    expect(output).toContain("echo:full");
+    expect(store?.listApprovals(task.id)).toHaveLength(0);
+    const audit = store?.listEvents(0, task.id).find((event) => event.type === "approval.auto_approved");
+    expect(audit?.payload).toMatchObject({
+      toolName: `mcp__${mcp.id}__echo`,
+      actionKind: "mcp",
+      permissionMode: "full"
+    });
+  }, 20_000);
+
   it("bridges a DeepSeek Harness approval request and resumes with allowed-once", async () => {
     const service = setup();
     const approvals = new ApprovalManager(service, async () => ({}));
@@ -1894,6 +2021,7 @@ describe("Hearth scheduler", () => {
       autoLearn?: boolean;
       delegations?: DelegationService;
       completionValidators?: Record<string, GoalValidatorRunner>;
+      mcpServers?: McpServerService;
     } = {}
   ): HearthScheduler {
     return new HearthScheduler({

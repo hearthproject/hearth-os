@@ -38,7 +38,7 @@ describe("local MCP server management", () => {
       error: null,
       envKeys: ["MOCK_MCP_SECRET"]
     });
-    expect(server.tools.map((tool) => tool.name)).toEqual(["echo", "slow"]);
+    expect(server.tools.map((tool) => tool.name)).toEqual(["echo", "slow", "crash", "leak", "large"]);
     expect(server.tools[0]?.inputSchema).toMatchObject({ type: "object", required: ["text"] });
     expect(JSON.stringify(service.list())).not.toContain("super-secret-value");
     const stored = store.getMcpServer(server.id);
@@ -74,6 +74,41 @@ describe("local MCP server management", () => {
     expect(server.status).toBe("error");
     expect(server.error).toBeTruthy();
     expect(hanging.get(server.id).status).toBe("error");
+  }, 15_000);
+
+  it("calls a discovered tool with schema validation and bounds the result", async () => {
+    const server = await service.create({
+      name: "Callable",
+      command: process.execPath,
+      args: [mockServer],
+      env: { MOCK_MCP_SECRET: "call-secret-value" }
+    });
+
+    const echoed = await service.callTool(server.id, "echo", { text: "hello" });
+    expect(echoed).toMatchObject({ isError: false });
+    expect(echoed.content).toContain("echo:hello");
+    expect(echoed.content).toContain('"echoed": "hello"');
+
+    const leaked = await service.callTool(server.id, "leak", {});
+    expect(leaked.content).not.toContain("call-secret-value");
+    expect(leaked.content).toContain("***");
+
+    const large = await service.callTool(server.id, "large", {});
+    expect(large.content.length).toBeLessThan(101_000);
+    expect(large.content).toContain("MCP 工具结果已截断");
+
+    await expect(service.callTool(server.id, "echo", { text: 42 })).rejects.toMatchObject({
+      code: "MCP_ARGUMENTS_INVALID"
+    });
+    expect(JSON.stringify(await service.callTool(server.id, "echo", { text: "safe" }))).not.toContain("call-secret-value");
+  }, 15_000);
+
+  it("isolates a call timeout and a crash during tool execution", async () => {
+    const server = await service.create({ name: "Fragile", command: process.execPath, args: [mockServer] });
+    await expect(service.callTool(server.id, "slow", {})).rejects.toMatchObject({ code: "MCP_TOOL_TIMEOUT" });
+    expect(service.get(server.id).status).toBe("ready");
+    await expect(service.callTool(server.id, "crash", {})).rejects.toMatchObject({ code: "MCP_TOOL_CALL_FAILED" });
+    expect(service.get(server.id).status).toBe("ready");
   }, 15_000);
 
   it("exposes create, list, probe and delete over the local API", async () => {

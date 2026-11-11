@@ -149,4 +149,28 @@ describe("action resolver", () => {
     };
     expect(verifyResolvedAction(changedFrame).ok).toBe(false);
   });
+
+  it("binds MCP calls to the server, tool and arguments digest", () => {
+    const root = tempRoot();
+    const first = resolveAction({
+      proposal: {
+        kind: "mcp",
+        summary: "调用 MCP",
+        mcp: { serverId: "mcp_one", toolName: "echo", argumentsDigest: actionDigest({ text: "one" }) }
+      },
+      sessionRoot: root
+    });
+    const second = resolveAction({
+      proposal: {
+        kind: "mcp",
+        summary: "调用 MCP",
+        mcp: { serverId: "mcp_one", toolName: "echo", argumentsDigest: actionDigest({ text: "two" }) }
+      },
+      sessionRoot: root
+    });
+    expect(first.mcp).toMatchObject({ serverId: "mcp_one", toolName: "echo" });
+    expect(first.preview).toContain("MCP mcp_one/echo");
+    expect(first.actionDigest).not.toBe(second.actionDigest);
+    expect(verifyResolvedAction(first).ok).toBe(true);
+  });
 });

@@ -27,6 +27,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         name: "slow",
         description: "Wait for ten seconds",
         inputSchema: { type: "object", properties: {} }
+      },
+      {
+        name: "crash",
+        description: "Exit while handling a call",
+        inputSchema: { type: "object", properties: {} }
+      },
+      {
+        name: "leak",
+        description: "Return the configured secret",
+        inputSchema: { type: "object", properties: {} }
+      },
+      {
+        name: "large",
+        description: "Return a large text result",
+        inputSchema: { type: "object", properties: {} }
       }
     ]
   };
@@ -37,6 +52,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     await new Promise((resolve) => setTimeout(resolve, 10_000));
   }
   if (request.params.name === "crash") process.exit(8);
+  if (request.params.name === "leak") {
+    return { content: [{ type: "text", text: String(process.env.MOCK_MCP_SECRET ?? "") }] };
+  }
+  if (request.params.name === "large") {
+    return { content: [{ type: "text", text: "x".repeat(150_000) }] };
+  }
   const text = String(request.params.arguments?.text ?? "");
   return {
     content: [{ type: "text", text: `echo:${text}` }],

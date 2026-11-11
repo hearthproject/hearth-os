@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { verifyResolvedAction } from "./action-resolver.ts";
+import { actionDigest, verifyResolvedAction } from "./action-resolver.ts";
 import { resolveToolAction } from "./scheduler.ts";
 
 const roots: string[] = [];
@@ -75,6 +75,27 @@ describe("native tool action binding", () => {
       fullPermission: false,
       context: "interactive"
     })).toThrow(/超出会话根目录/);
+  });
+
+  it("binds an MCP tool call to its server, tool and full arguments", () => {
+    const root = tempRoot();
+    const argumentsValue = { text: "hello" };
+    const action = resolveToolAction({
+      toolName: "mcp__mcp_one__echo",
+      argumentsValue,
+      mcpArgumentsValue: argumentsValue,
+      summary: "调用 MCP 工具：mcp_one/echo",
+      workspaceRoot: root,
+      fullPermission: false,
+      context: "interactive"
+    });
+    expect(action?.kind).toBe("mcp");
+    expect(action?.mcp).toEqual({
+      serverId: "mcp_one",
+      toolName: "echo",
+      argumentsDigest: actionDigest(argumentsValue)
+    });
+    expect(verifyResolvedAction(action!).ok).toBe(true);
   });
 
   it("does not invent an action for an unrecognized sensitive tool call", () => {

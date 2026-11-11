@@ -60,6 +60,12 @@ export interface ResolvedDesktopTarget extends ActionDesktopTarget {
   payloadDigest: string;
 }
 
+export interface ActionMcpTarget {
+  serverId: string;
+  toolName: string;
+  argumentsDigest: string;
+}
+
 export interface ActionProposal {
   kind: ActionKind;
   summary: string;
@@ -67,6 +73,7 @@ export interface ActionProposal {
   files?: ActionFileTarget[] | undefined;
   network?: ActionNetworkTarget | undefined;
   desktop?: ActionDesktopTarget | undefined;
+  mcp?: ActionMcpTarget | undefined;
   targetRevision?: string | undefined;
   risk?: ActionRisk | undefined;
   sideEffectClass?: SideEffectClass | undefined;
@@ -99,6 +106,7 @@ export interface ResolvedAction {
   files: ResolvedFile[];
   network: ActionNetworkTarget | null;
   desktop: ResolvedDesktopTarget | null;
+  mcp: ActionMcpTarget | null;
   targetRevision: string | null;
   risk: ActionRisk;
   sideEffectClass: SideEffectClass;
@@ -156,12 +164,13 @@ export function resolveAction(input: ResolveActionInput): ResolvedAction {
   const files = (proposal.files ?? []).map((file) => resolveFile(file, sessionRoot, permissionMode));
   const network = proposal.network ? normalizeNetwork(proposal.network) : null;
   const desktop = proposal.desktop ? resolveDesktopTarget(proposal.desktop) : null;
-  if (!command && files.length === 0 && !network && !desktop) {
-    throw new ActionResolutionError("ACTION_TARGET_REQUIRED", "动作缺少可解析的命令、文件、网络或桌面目标");
+  const mcp = proposal.mcp ? resolveMcpTarget(proposal.mcp) : null;
+  if (!command && files.length === 0 && !network && !desktop && !mcp) {
+    throw new ActionResolutionError("ACTION_TARGET_REQUIRED", "动作缺少可解析的命令、文件、网络、桌面或 MCP 目标");
   }
   const risk = proposal.risk ?? defaultRisk(proposal);
   const sideEffectClass = proposal.sideEffectClass ?? defaultSideEffectClass(proposal);
-  const preview = buildPreview(proposal, command, files, network, desktop);
+  const preview = buildPreview(proposal, command, files, network, desktop, mcp);
   const digestInput = {
     kind: proposal.kind,
     summary: proposal.summary,
@@ -172,6 +181,7 @@ export function resolveAction(input: ResolveActionInput): ResolvedAction {
     files,
     network,
     desktop,
+    mcp,
     targetRevision: proposal.targetRevision ?? null,
     risk,
     sideEffectClass,
@@ -188,6 +198,7 @@ export function resolveAction(input: ResolveActionInput): ResolvedAction {
     files,
     network,
     desktop,
+    mcp,
     targetRevision: proposal.targetRevision ?? null,
     risk,
     sideEffectClass,
@@ -305,7 +316,8 @@ function normalizeProposal(input: ActionProposal): ActionProposal {
     desktop: input.desktop ? {
       ...input.desktop,
       payload: cloneRecord(input.desktop.payload)
-    } : undefined
+    } : undefined,
+    mcp: input.mcp ? { ...input.mcp } : undefined
   };
 }
 
@@ -408,6 +420,21 @@ function resolveDesktopTarget(input: ActionDesktopTarget): ResolvedDesktopTarget
   };
 }
 
+function resolveMcpTarget(input: ActionMcpTarget): ActionMcpTarget {
+  const serverId = input.serverId.trim();
+  const toolName = input.toolName.trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(serverId)) {
+    throw new ActionResolutionError("MCP_SERVER_ID_INVALID", "MCP 服务器 id 不合法");
+  }
+  if (!toolName || toolName.length > 128 || !/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(toolName)) {
+    throw new ActionResolutionError("MCP_TOOL_NAME_INVALID", "MCP 工具名称不合法");
+  }
+  if (!/^[a-f0-9]{64}$/.test(input.argumentsDigest)) {
+    throw new ActionResolutionError("MCP_ARGUMENTS_DIGEST_INVALID", "MCP 参数摘要不合法");
+  }
+  return { serverId, toolName, argumentsDigest: input.argumentsDigest };
+}
+
 function defaultRisk(proposal: ActionProposal): ActionRisk {
   if (proposal.kind === "file_write" || proposal.kind === "file_delete" || proposal.kind === "mcp") return "medium";
   if (proposal.kind === "network" || proposal.kind === "email" || proposal.kind === "calendar") return "high";
@@ -428,7 +455,8 @@ function buildPreview(
   command: ResolvedCommand | null,
   files: ResolvedFile[],
   network: ActionNetworkTarget | null,
-  desktop: ResolvedDesktopTarget | null
+  desktop: ResolvedDesktopTarget | null,
+  mcp: ActionMcpTarget | null
 ): string {
   if (command) {
     return `${command.executableRealPath} ${command.argv.join(" ")}`.trim();
@@ -438,6 +466,7 @@ function buildPreview(
   }
   if (network) return `${network.method ?? "CONNECT"} ${network.host}${network.port ? `:${network.port}` : ""}`;
   if (desktop) return `${desktop.action} ${desktop.activeApp} frame ${desktop.frameId}`;
+  if (mcp) return `MCP ${mcp.serverId}/${mcp.toolName} args ${mcp.argumentsDigest.slice(0, 12)}`;
   return proposal.summary;
 }
 

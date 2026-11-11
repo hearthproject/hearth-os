@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { Ajv, type ValidateFunction } from "ajv";
 import type { McpServerConfig, McpServerView, McpToolDescriptor } from "@hearth/core";
 import type { HearthStore, McpServerRecord } from "@hearth/eventlog";
 import type { SecretBox } from "./secrets.ts";
@@ -9,6 +11,8 @@ const MAX_TOOLS = 100;
 const MAX_DESCRIPTION_CHARS = 2_000;
 const MAX_TOOL_NAME_CHARS = 128;
 const MAX_PROBE_ERROR_CHARS = 1_000;
+const MAX_SCHEMA_CHARS = 64_000;
+const MAX_RESULT_CHARS = 100_000;
 
 export class McpServerError extends Error {
   readonly code: string;
@@ -45,17 +49,28 @@ export interface McpServerServiceOptions {
   timeoutMs?: number;
 }
 
+export interface McpToolCallOptions {
+  signal?: AbortSignal | undefined;
+}
+
+export interface McpToolCallResult {
+  content: string;
+  isError: boolean;
+}
+
 export class McpServerService {
   private readonly store: HearthStore;
   private readonly secretBox: SecretBox;
   private readonly clock: () => Date;
   private readonly timeoutMs: number;
+  private readonly ajv: Ajv;
 
   constructor(options: McpServerServiceOptions) {
     this.store = options.store;
     this.secretBox = options.secretBox;
     this.clock = options.clock ?? (() => new Date());
     this.timeoutMs = Math.max(1_000, Math.min(60_000, options.timeoutMs ?? 12_000));
+    this.ajv = new Ajv({ allErrors: true, strict: false, validateFormats: false });
   }
 
   list(): McpServerView[] {
@@ -144,6 +159,23 @@ export class McpServerService {
     return this.decryptEnv(this.require(id));
   }
 
+  async callTool(
+    serverId: string,
+    toolName: string,
+    args: unknown,
+    options: McpToolCallOptions = {}
+  ): Promise<McpToolCallResult> {
+    const record = this.require(serverId);
+    if (!record.enabled) throw new McpServerError("MCP_SERVER_DISABLED", "MCP 服务器已停用", 409);
+    if (record.status !== "ready") throw new McpServerError("MCP_SERVER_NOT_READY", "MCP 服务器尚未通过探测", 409);
+    const tool = record.tools.find((item) => item.name === toolName);
+    if (!tool) throw new McpServerError("MCP_TOOL_NOT_FOUND", "MCP 工具不存在或已被移除", 404);
+    const env = this.decryptEnv(record);
+    const argumentsValue = args === undefined ? {} : args;
+    this.validateArguments(tool, argumentsValue, env);
+    return this.executeTool(record, tool, argumentsValue as Record<string, unknown>, env, options.signal);
+  }
+
   private async discover(record: McpServerRecord, env: Record<string, string>): Promise<McpToolDescriptor[]> {
     const client = new Client({ name: "hearth", version: "0.1.0" });
     const transport = new StdioClientTransport({
@@ -171,10 +203,20 @@ export class McpServerService {
         }
         if (seen.has(name)) throw new McpServerError("MCP_TOOL_DUPLICATE", `MCP 工具名称重复：${name}`, 409);
         seen.add(name);
+        const inputSchema = normalizeSchema(tool.inputSchema);
+        const schemaText = JSON.stringify(inputSchema);
+        if (schemaText.length > MAX_SCHEMA_CHARS) {
+          throw new McpServerError("MCP_SCHEMA_TOO_LARGE", `MCP 工具 ${name} 的输入 Schema 过大`, 409);
+        }
+        try {
+          this.ajv.compile(inputSchema);
+        } catch (error) {
+          throw new McpServerError("MCP_SCHEMA_INVALID", `MCP 工具 ${name} 的输入 Schema 不合法：${redactError(error, env || {})}`, 409);
+        }
         return {
           name,
           description: String(tool.description ?? "").slice(0, MAX_DESCRIPTION_CHARS),
-          inputSchema: normalizeSchema(tool.inputSchema)
+          inputSchema
         };
       });
     } catch (error) {
@@ -203,6 +245,64 @@ export class McpServerService {
     const record = this.store.getMcpServer(id);
     if (!record) throw new McpServerError("MCP_SERVER_NOT_FOUND", "MCP 服务器不存在", 404);
     return record;
+  }
+
+  private validateArguments(tool: McpToolDescriptor, args: unknown, env: Record<string, string>): void {
+    let validate: ValidateFunction;
+    try {
+      validate = this.ajv.compile(tool.inputSchema);
+    } catch (error) {
+      throw new McpServerError("MCP_SCHEMA_INVALID", `MCP 工具 ${tool.name} 的输入 Schema 不合法：${redactError(error, env)}`, 409);
+    }
+    if (!validate(args)) {
+      const details = (validate.errors ?? [])
+        .slice(0, 5)
+        .map((error) => `${error.instancePath || "/"} ${error.message ?? "不合法"}`)
+        .join("；");
+      throw new McpServerError("MCP_ARGUMENTS_INVALID", `MCP 工具参数不合法：${redactText(details, env).slice(0, 1_000)}`);
+    }
+  }
+
+  private async executeTool(
+    record: McpServerRecord,
+    tool: McpToolDescriptor,
+    args: Record<string, unknown>,
+    env: Record<string, string>,
+    signal: AbortSignal | undefined
+  ): Promise<McpToolCallResult> {
+    const client = new Client({ name: "hearth", version: "0.1.0" });
+    const transport = new StdioClientTransport({
+      command: record.command,
+      args: record.args,
+      env,
+      stderr: "pipe",
+      maxBufferSize: 4 * 1024 * 1024
+    });
+    let stderr = "";
+    transport.stderr?.on("data", (chunk: Buffer | string) => {
+      stderr = `${stderr}${String(chunk)}`.slice(-4_000);
+    });
+    const timeoutSignal = AbortSignal.timeout(this.timeoutMs);
+    const callSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+    try {
+      await client.connect(transport, { timeout: this.timeoutMs, signal: callSignal });
+      const result = await client.callTool(
+        { name: tool.name, arguments: args },
+        undefined,
+        { timeout: this.timeoutMs, signal: callSignal }
+      );
+      return normalizeCallResult(result as CallToolResult, env);
+    } catch (error) {
+      if (signal?.aborted) throw new McpServerError("MCP_TOOL_CANCELLED", "MCP 工具调用已取消", 499);
+      if (timeoutSignal.aborted) {
+        throw new McpServerError("MCP_TOOL_TIMEOUT", `MCP 工具调用超时（${this.timeoutMs}ms）`, 504);
+      }
+      const message = redactError(error, env);
+      const stderrMessage = stderr.trim() ? `；服务器输出：${redactText(stderr.trim(), env)}` : "";
+      throw new McpServerError("MCP_TOOL_CALL_FAILED", `${message}${stderrMessage}`.slice(0, MAX_PROBE_ERROR_CHARS), 502);
+    } finally {
+      await client.close().catch(() => undefined);
+    }
   }
 }
 
@@ -267,9 +367,42 @@ function normalizeSchema(value: unknown): Record<string, unknown> {
 }
 
 function redactError(error: unknown, env: Record<string, string>): string {
-  let message = error instanceof Error ? error.message : String(error);
+  const message = error instanceof Error ? error.message : String(error);
+  return redactText(message, env).trim() || "MCP 服务器探测失败";
+}
+
+function redactText(message: string, env: Record<string, string>): string {
+  let redacted = message;
   for (const value of Object.values(env)) {
-    if (value.length >= 4) message = message.split(value).join("***");
+    if (value) redacted = redacted.split(value).join("***");
   }
-  return message.trim() || "MCP 服务器探测失败";
+  return redacted;
+}
+
+function normalizeCallResult(result: CallToolResult, env: Record<string, string>): McpToolCallResult {
+  const parts: string[] = [];
+  for (const block of result.content) {
+    if (block.type === "text") {
+      parts.push(block.text);
+    } else if (block.type === "resource") {
+      const resource = block.resource;
+      parts.push("text" in resource
+        ? `[资源 ${resource.uri}]\n${resource.text}`
+        : `[资源 ${resource.uri}，二进制内容已省略]`);
+    } else if (block.type === "resource_link") {
+      parts.push(`[资源链接 ${block.name}]\n${block.uri}`);
+    } else {
+      parts.push(`[${block.type} 内容已省略]`);
+    }
+  }
+  if (result.structuredContent !== undefined) {
+    parts.push(`结构化结果：\n${JSON.stringify(result.structuredContent, null, 2)}`);
+  }
+  const text = redactText(parts.filter(Boolean).join("\n\n"), env) || "（MCP 工具没有返回内容）";
+  return {
+    content: text.length <= MAX_RESULT_CHARS
+      ? text
+      : `${text.slice(0, MAX_RESULT_CHARS)}\n\n... MCP 工具结果已截断（原始 ${text.length} 字符）`,
+    isError: result.isError === true
+  };
 }
