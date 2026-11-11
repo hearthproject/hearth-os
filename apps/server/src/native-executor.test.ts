@@ -37,7 +37,9 @@ describe("native system prompt", () => {
     expect(prompt).toContain("回滚方案");
     expect(prompt).toContain("selectedUtc");
     expect(prompt).toContain("has<X>");
-    expect(prompt).toContain("draftId:recipient");
+    expect(prompt).toContain("draft-778:recipient@example.com");
+    expect(prompt).toContain("负责人与动作之间不要插入顿号");
+    expect(prompt).toContain("主数组优先使用 items");
   });
 });
 
