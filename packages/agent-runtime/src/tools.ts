@@ -1,5 +1,6 @@
 import { exec as execCallback } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from "node:path";
 import picomatch from "picomatch";
 import { RE2JS } from "re2js";
@@ -264,14 +265,15 @@ const writeFileTool: AgentTool = {
 const editFileTool: AgentTool = {
   definition: {
     name: "edit_file",
-    description: "对授权目录内的文本文件做精确替换。oldText 必须与文件内容完全一致。",
+    description: "对授权目录内的文本文件做精确替换。oldText 必须与文件内容完全一致；dryRun 可先查看差异而不写盘。",
     parameters: {
       type: "object",
       properties: {
         path: { type: "string", description: "文件路径，相对于工作区根目录" },
         oldText: { type: "string", description: "要被替换的原文" },
         newText: { type: "string", description: "替换后的内容" },
-        replaceAll: { type: "boolean", description: "是否替换所有匹配，默认只替换唯一匹配" }
+        replaceAll: { type: "boolean", description: "是否替换所有匹配，默认只替换唯一匹配" },
+        dryRun: { type: "boolean", description: "只返回差异预览，不修改文件" }
       },
       required: ["path", "oldText", "newText"],
       additionalProperties: false
@@ -291,19 +293,22 @@ const editFileTool: AgentTool = {
     if (count === 0) throw new Error("没有找到要替换的原文");
     if (count > 1 && !replaceAll) throw new Error(`原文出现 ${count} 次，请提供更长的唯一片段或设置 replaceAll`);
     const next = replaceAll ? content.split(oldText).join(newText) : content.replace(oldText, newText);
-    writeFileSync(target, next, "utf8");
-    return { content: `已更新 ${path}（替换 ${replaceAll ? count : 1} 处）` };
+    const diff = previewDiff(path, content, next);
+    if (args.dryRun === true) return { content: `差异预览（未写入）：\n${diff}` };
+    writeFileAtomic(target, next);
+    return { content: `已更新 ${path}（替换 ${replaceAll ? count : 1} 处）\n${diff}` };
   }
 };
 
 const applyPatchTool: AgentTool = {
   definition: {
     name: "apply_patch",
-    description: "按补丁格式修改一个或多个文本文件。支持 *** Update File、*** Add File、*** Delete File。",
+    description: "按补丁格式修改一个或多个文本文件。支持 *** Update File、*** Move to、*** Add File、*** Delete File；全部操作预校验通过后才原子提交。",
     parameters: {
       type: "object",
       properties: {
-        patch: { type: "string", description: "补丁正文；行首用 + / - / 空格表示新增、删除和上下文" }
+        patch: { type: "string", description: "补丁正文；行首用 + / - / 空格表示新增、删除和上下文" },
+        dryRun: { type: "boolean", description: "只返回差异预览，不修改文件" }
       },
       required: ["patch"],
       additionalProperties: false
@@ -314,28 +319,63 @@ const applyPatchTool: AgentTool = {
     const patch = stringArg(args, "patch", true);
     const operations = parsePatch(patch);
     if (operations.length === 0) throw new Error("补丁没有包含任何文件操作");
-    let changed = 0;
+    const current = new Map<string, string | null>();
+    const originals = new Map<string, string | null>();
+    const readState = (target: string, displayPath: string): string | null => {
+      if (!current.has(target)) {
+        let value: string | null = null;
+        if (existsSync(target)) {
+          const stat = lstatSync(target);
+          if (!stat.isFile()) throw new Error(`不是普通文件：${displayPath}`);
+          value = readFileSync(target, "utf8");
+        }
+        current.set(target, value);
+        originals.set(target, value);
+      }
+      return current.get(target) ?? null;
+    };
+    const writeState = (target: string, content: string): void => {
+      readState(target, target);
+      current.set(target, content);
+    };
     for (const operation of operations) {
       const target = resolveSafe(operation.path, context.workspaceRoot, context.permissions.writeRoots);
       assertWritable(target, context.permissions.writeRoots);
       if (operation.type === "add") {
-        mkdirSync(dirname(target), { recursive: true });
-        writeFileSync(target, operation.content, "utf8");
-        changed += 1;
+        if (readState(target, operation.path) !== null) throw new Error(`文件已存在，不能重复添加：${operation.path}`);
+        writeState(target, operation.content);
         continue;
       }
       if (operation.type === "delete") {
-        if (existsSync(target)) writeFileSync(target, "", "utf8");
-        changed += 1;
+        if (readState(target, operation.path) === null) throw new Error(`文件不存在：${operation.path}`);
+        current.set(target, null);
         continue;
       }
-      if (!existsSync(target)) throw new Error(`文件不存在：${operation.path}`);
-      let content = readFileSync(target, "utf8");
+      const original = readState(target, operation.path);
+      if (original === null) throw new Error(`文件不存在：${operation.path}`);
+      let content = original;
       for (const hunk of operation.hunks) content = applyHunk(content, hunk);
-      writeFileSync(target, content, "utf8");
-      changed += 1;
+      if (operation.moveTo) {
+        const destination = resolveSafe(operation.moveTo, context.workspaceRoot, context.permissions.writeRoots);
+        assertWritable(destination, context.permissions.writeRoots);
+        if (readState(destination, operation.moveTo) !== null) throw new Error(`移动目标已存在：${operation.moveTo}`);
+        writeState(destination, content);
+        current.set(target, null);
+      } else {
+        current.set(target, content);
+      }
     }
-    return { content: `补丁已应用，修改 ${changed} 个文件` };
+    const changes = [...current.entries()]
+      .filter(([target, content]) => content !== (originals.get(target) ?? null))
+      .map(([target, content]) => ({ target, content, previous: originals.get(target) ?? null }));
+    const preview = changes.map((change) => {
+      const path = relative(context.workspaceRoot, change.target).replace(/\\/g, "/");
+      return previewDiff(path, change.previous ?? "", change.content ?? "");
+    }).join("\n");
+    if (changes.length === 0) return { content: "补丁没有产生文件变化" };
+    if (args.dryRun === true) return { content: `差异预览（未写入，${changes.length} 个文件）：\n${preview}` };
+    commitFileChanges(changes);
+    return { content: `补丁已应用，修改 ${changes.length} 个文件\n${preview}` };
   }
 };
 
@@ -661,17 +701,17 @@ function isTextExtension(extension: string): boolean {
 }
 
 function parsePatch(patch: string): Array<
-  | { type: "update"; path: string; hunks: string[][] }
+  | { type: "update"; path: string; hunks: string[][]; moveTo?: string }
   | { type: "add"; path: string; content: string }
   | { type: "delete"; path: string }
 > {
   const lines = patch.replace(/\r\n/g, "\n").split("\n");
   const operations: Array<
-    | { type: "update"; path: string; hunks: string[][] }
+    | { type: "update"; path: string; hunks: string[][]; moveTo?: string }
     | { type: "add"; path: string; content: string }
     | { type: "delete"; path: string }
   > = [];
-  let current: { type: "update"; path: string; hunks: string[][] } | { type: "add"; path: string; lines: string[] } | { type: "delete"; path: string } | null = null;
+  let current: { type: "update"; path: string; hunks: string[][]; moveTo?: string } | { type: "add"; path: string; lines: string[] } | { type: "delete"; path: string } | null = null;
   for (const line of lines) {
     if (line.startsWith("*** Update File: ")) {
       current = { type: "update", path: line.slice("*** Update File: ".length).trim(), hunks: [] };
@@ -686,6 +726,10 @@ function parsePatch(patch: string): Array<
     if (line.startsWith("*** Delete File: ")) {
       current = { type: "delete", path: line.slice("*** Delete File: ".length).trim() };
       operations.push(current);
+      continue;
+    }
+    if (line.startsWith("*** Move to: ") && current?.type === "update") {
+      current.moveTo = line.slice("*** Move to: ".length).trim();
       continue;
     }
     if (line === "*** End Patch" || line === "*** Begin Patch") continue;
@@ -815,4 +859,88 @@ function countOccurrences(content: string, needle: string): number {
     index = content.indexOf(needle, index + needle.length);
   }
   return count;
+}
+
+function writeFileAtomic(target: string, content: string): void {
+  mkdirSync(dirname(target), { recursive: true });
+  const temporary = `${target}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temporary, content, "utf8");
+    renameSync(temporary, target);
+  } catch (error) {
+    if (existsSync(temporary)) unlinkSync(temporary);
+    throw error;
+  }
+}
+
+function commitFileChanges(changes: Array<{ target: string; content: string | null; previous: string | null }>): void {
+  const staged = new Map<string, string>();
+  let committing = false;
+  try {
+    for (const change of changes) {
+      if (change.content === null) continue;
+      mkdirSync(dirname(change.target), { recursive: true });
+      const temporary = `${change.target}.${randomUUID()}.tmp`;
+      writeFileSync(temporary, change.content, "utf8");
+      staged.set(change.target, temporary);
+    }
+    committing = true;
+    for (const change of changes) {
+      if (change.content === null) {
+        unlinkSync(change.target);
+      } else {
+        renameSync(staged.get(change.target)!, change.target);
+        staged.delete(change.target);
+      }
+    }
+  } catch (error) {
+    if (committing) {
+      for (const change of [...changes].reverse()) {
+        try {
+          if (change.previous === null) {
+            if (existsSync(change.target)) unlinkSync(change.target);
+          } else {
+            writeFileAtomic(change.target, change.previous);
+          }
+        } catch {
+          // Keep the original failure and best-effort rollback.
+        }
+      }
+    }
+    throw error;
+  } finally {
+    for (const temporary of staged.values()) {
+      try {
+        if (existsSync(temporary)) unlinkSync(temporary);
+      } catch {
+        // Ignore temporary cleanup failures.
+      }
+    }
+  }
+}
+
+function previewDiff(path: string, before: string, after: string): string {
+  if (before === after) return "";
+  const oldLines = before === "" ? [] : before.replace(/\r\n/g, "\n").split("\n");
+  const newLines = after === "" ? [] : after.replace(/\r\n/g, "\n").split("\n");
+  let prefix = 0;
+  while (prefix < oldLines.length && prefix < newLines.length && oldLines[prefix] === newLines[prefix]) prefix += 1;
+  let suffix = 0;
+  while (
+    suffix < oldLines.length - prefix &&
+    suffix < newLines.length - prefix &&
+    oldLines[oldLines.length - 1 - suffix] === newLines[newLines.length - 1 - suffix]
+  ) suffix += 1;
+  const removed = oldLines.slice(prefix, oldLines.length - suffix);
+  const added = newLines.slice(prefix, newLines.length - suffix);
+  const start = prefix + 1;
+  const lines = [
+    `--- a/${path}`,
+    `+++ b/${path}`,
+    `@@ -${start},${removed.length} +${start},${added.length} @@`,
+    ...removed.map((line) => `-${line}`),
+    ...added.map((line) => `+${line}`)
+  ];
+  const text = lines.join("\n");
+  return text.length > 4_000 ? `${text.slice(0, 4_000)}\n... 差异已截断` : text;
 }

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -119,6 +119,88 @@ describe("builtin tools", () => {
       ].join("\n")
     }, { workspaceRoot: root, outDir: out, permissions, signal: new AbortController().signal });
     expect(readFileSync(join(root, "source.md"), "utf8")).toContain("BETA");
+  });
+
+  it("previews edit_file changes without writing them", async () => {
+    const root = workspace(roots);
+    const out = join(root, "out");
+    mkdirSync(out, { recursive: true });
+    writeFileSync(join(out, "note.md"), "alpha\nbeta\n");
+    const permissions = defaultTaskPermissions({ workspaceRoot: root, outDir: out, networkHosts: [] });
+    const result = await mapTools().edit_file!.execute({
+      path: "out/note.md",
+      oldText: "beta",
+      newText: "BETA",
+      dryRun: true
+    }, { workspaceRoot: root, outDir: out, permissions, signal: new AbortController().signal });
+    expect(result.content).toContain("差异预览");
+    expect(result.content).toContain("-beta");
+    expect(result.content).toContain("+BETA");
+    expect(readFileSync(join(out, "note.md"), "utf8")).toBe("alpha\nbeta\n");
+  });
+
+  it("moves and deletes files with an apply_patch", async () => {
+    const root = workspace(roots);
+    const out = join(root, "out");
+    writeFileSync(join(root, "source.md"), "alpha\n");
+    const permissions = defaultTaskPermissions({ workspaceRoot: root, outDir: out, networkHosts: [], writeRoots: [out, join(root, "source.md"), join(root, "moved.md")] });
+    const context = { workspaceRoot: root, outDir: out, permissions, signal: new AbortController().signal };
+    const tools = mapTools();
+    await tools.apply_patch!.execute({
+      patch: [
+        "*** Begin Patch",
+        "*** Update File: source.md",
+        "*** Move to: moved.md",
+        "@@",
+        "-alpha",
+        "+ALPHA",
+        "*** End Patch"
+      ].join("\n")
+    }, context);
+    expect(existsSync(join(root, "source.md"))).toBe(false);
+    expect(readFileSync(join(root, "moved.md"), "utf8")).toContain("ALPHA");
+    await tools.apply_patch!.execute({
+      patch: ["*** Begin Patch", "*** Delete File: moved.md", "*** End Patch"].join("\n")
+    }, context);
+    expect(existsSync(join(root, "moved.md"))).toBe(false);
+  });
+
+  it("validates every patch hunk before writing any file", async () => {
+    const root = workspace(roots);
+    const out = join(root, "out");
+    writeFileSync(join(root, "a.md"), "alpha\n");
+    writeFileSync(join(root, "b.md"), "beta\n");
+    const permissions = defaultTaskPermissions({ workspaceRoot: root, outDir: out, networkHosts: [], writeRoots: [out, join(root, "a.md"), join(root, "b.md")] });
+    const context = { workspaceRoot: root, outDir: out, permissions, signal: new AbortController().signal };
+    await expect(mapTools().apply_patch!.execute({
+      patch: [
+        "*** Begin Patch",
+        "*** Update File: a.md",
+        "@@",
+        "-alpha",
+        "+ALPHA",
+        "*** Update File: b.md",
+        "@@",
+        "-missing",
+        "+MISSING",
+        "*** End Patch"
+      ].join("\n")
+    }, context)).rejects.toThrow("补丁片段未匹配");
+    expect(readFileSync(join(root, "a.md"), "utf8")).toBe("alpha\n");
+    expect(readFileSync(join(root, "b.md"), "utf8")).toBe("beta\n");
+  });
+
+  it("previews apply_patch changes without writing them", async () => {
+    const root = workspace(roots);
+    const out = join(root, "out");
+    writeFileSync(join(root, "source.md"), "alpha\n");
+    const permissions = defaultTaskPermissions({ workspaceRoot: root, outDir: out, networkHosts: [], writeRoots: [out, join(root, "source.md")] });
+    const result = await mapTools().apply_patch!.execute({
+      patch: ["*** Begin Patch", "*** Update File: source.md", "@@", "-alpha", "+ALPHA", "*** End Patch"].join("\n"),
+      dryRun: true
+    }, { workspaceRoot: root, outDir: out, permissions, signal: new AbortController().signal });
+    expect(result.content).toContain("差异预览");
+    expect(readFileSync(join(root, "source.md"), "utf8")).toBe("alpha\n");
   });
 
   it("requires an authorized host before fetching a URL", async () => {
