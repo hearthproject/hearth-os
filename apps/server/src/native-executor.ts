@@ -372,6 +372,10 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
       break;
     }
   }
+  if (!Array.isArray(root.pages) && Array.isArray(root.items) && typeof root.pageCount === "number" && root.pageCount > 0) {
+    root.pages = root.items;
+    changed = true;
+  }
   {
     const pages = Array.isArray(root.pages) ? root.pages : Array.isArray(root.items) ? root.items : null;
     const requiredFields = new Set(["canonical", "published", "publishedTime", "publishDate", "date"]);

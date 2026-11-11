@@ -595,6 +595,7 @@ describe("json deliverables", () => {
       }));
       normalizeJsonDeliverables(dir, ["result.json"]);
       const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.pages).toHaveLength(2);
       expect(parsed.missingMetadata).toBe(1);
       expect(parsed.facts.missingMetadata).toBe(1);
     } finally {
