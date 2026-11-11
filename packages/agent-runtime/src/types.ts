@@ -114,6 +114,7 @@ export interface AgentRuntimeOptions {
   recentContextTokens?: number;
   summarizeContext?: (messages: AgentMessage[], signal: AbortSignal) => Promise<string | null>;
   requireFinishTool?: boolean;
+  retryDelayMs?: number;
 }
 
 export type AgentRunStatus = "completed" | "waiting_input" | "failed" | "cancelled" | "budget_exceeded";

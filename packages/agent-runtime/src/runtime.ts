@@ -6,6 +6,7 @@ import type {
   AgentRunResult,
   AgentRunStatus,
   AgentRuntimeOptions,
+  AgentToolCall,
   AgentToolResult,
   RuntimeEvent
 } from "./types.ts";
@@ -38,12 +39,31 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   let summary: string | null = null;
   let emptyTurns = 0;
   let missingFinishTurns = 0;
+  let lastToolSignature: string | null = null;
+  let repeatedToolCalls = 0;
   const startedAt = Date.now();
   const signal = options.signal ?? new AbortController().signal;
 
   const emit = (event: RuntimeEvent): void => options.onEvent?.(event);
   const aborted = (): boolean => signal.aborted;
   const totalTokens = (): number => usage.inputTokens + usage.outputTokens;
+
+  async function compactContext(force: boolean): Promise<boolean> {
+    const compacted = options.contextWindowTokens
+      ? await compactAgentMessagesWithSummary(messages, {
+          contextWindowTokens: force ? 1 : options.contextWindowTokens,
+          reserveTokens: force ? 0 : options.contextReserveTokens ?? Math.max(16_000, Math.floor(options.contextWindowTokens * 0.15)),
+          ...(options.recentContextTokens !== undefined ? { recentTokens: options.recentContextTokens } : {}),
+          signal
+        }, options.summarizeContext)
+      : compactAgentMessages(messages);
+    if (!compacted.compacted) return false;
+    messages.splice(0, messages.length, ...compacted.messages);
+    emit({ type: "compacted", before: compacted.before, after: compacted.after });
+    if ("summary" in compacted && typeof compacted.summary === "string") summary = compacted.summary;
+    await checkpoint("compaction");
+    return true;
+  }
 
   function finish(status: AgentRunStatus, resultSummary: string, outputs: string[] = [], question: string | null = null): AgentRunResult {
     return {
@@ -92,35 +112,40 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       return finish("budget_exceeded", summary ?? "Token 用量超过预算，已停止");
     }
 
-    const compacted = options.contextWindowTokens
-      ? await compactAgentMessagesWithSummary(messages, {
-          contextWindowTokens: options.contextWindowTokens,
-          ...(options.contextReserveTokens !== undefined ? { reserveTokens: options.contextReserveTokens } : {}),
-          ...(options.recentContextTokens !== undefined ? { recentTokens: options.recentContextTokens } : {}),
-          signal
-        }, options.summarizeContext)
-      : compactAgentMessages(messages);
-    if (compacted.compacted) {
-      messages.splice(0, messages.length, ...compacted.messages);
-      emit({ type: "compacted", before: compacted.before, after: compacted.after });
-      if ("summary" in compacted && typeof compacted.summary === "string") summary = compacted.summary;
-      await checkpoint("compaction");
-    }
+    await compactContext(false);
 
     turns += 1;
     emit({ type: "turn.started", turn: turns });
 
     let turn;
-    try {
-      turn = await options.model(
-        cloneMessages(messages),
-        definitions,
-        (text) => emit({ type: "assistant.delta", turn: turns, text }),
-        signal
-      );
-    } catch (error) {
-      if (aborted()) return finish("cancelled", "任务已取消");
-      throw error;
+    let transientRetries = 0;
+    let overflowRetried = false;
+    while (true) {
+      try {
+        turn = await options.model(
+          cloneMessages(messages),
+          definitions,
+          (text) => emit({ type: "assistant.delta", turn: turns, text }),
+          signal
+        );
+        break;
+      } catch (error) {
+        if (aborted()) return finish("cancelled", "任务已取消");
+        if (isContextOverflow(error) && !overflowRetried && options.contextWindowTokens) {
+          overflowRetried = true;
+          emit({ type: "notice", message: "模型上下文超限，正在压缩历史后重试" });
+          await compactContext(true);
+          continue;
+        }
+        if (isTransientModelError(error) && transientRetries < 2) {
+          transientRetries += 1;
+          emit({ type: "notice", message: `模型暂时不可用，正在进行第 ${transientRetries} 次重试` });
+          const delay = (options.retryDelayMs ?? 1_000) * transientRetries;
+          if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+          continue;
+        }
+        throw error;
+      }
     }
 
     if (turn.usage) {
@@ -162,8 +187,16 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       const toolStartedAt = Date.now();
       emit({ type: "tool.started", turn: turns, call });
 
+      const signature = toolSignature(call);
+      repeatedToolCalls = signature === lastToolSignature ? repeatedToolCalls + 1 : 0;
+      lastToolSignature = signature;
+
       let result: AgentToolResult = { content: `未知或未授权工具：${call.name}`, isError: true };
-      if (tool) {
+      if (repeatedToolCalls >= 2) {
+        return finish("failed", "模型连续重复相同工具调用，已停止以避免死循环");
+      } else if (repeatedToolCalls === 1) {
+        result = { content: `检测到相同的工具调用 ${call.name} 和参数。该调用已跳过；请检查上一步结果，改用不同参数或继续推进。`, isError: true };
+      } else if (tool) {
         let authorized = true;
         if (options.authorizeTool) {
           try {
@@ -246,4 +279,33 @@ function cloneMessages(messages: AgentMessage[]): AgentMessage[] {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function toolSignature(call: AgentToolCall): string {
+  return `${call.name}:${stableJson(call.arguments)}`;
+}
+
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
+}
+
+function isTransientModelError(error: unknown): boolean {
+  const record = error && typeof error === "object" ? error as Record<string, unknown> : {};
+  const status = typeof record.status === "number" ? record.status : null;
+  if (status === 429 || (status !== null && status >= 500 && status <= 599)) return true;
+  const code = typeof record.code === "string" ? record.code : "";
+  if (/^(ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|UND_ERR_|ENOTFOUND)/.test(code)) return true;
+  const message = errorMessage(error);
+  return /(fetch failed|network error|socket hang up|connection reset|temporarily unavailable|rate limit|too many requests)/i.test(message);
+}
+
+function isContextOverflow(error: unknown): boolean {
+  const record = error && typeof error === "object" ? error as Record<string, unknown> : {};
+  const status = typeof record.status === "number" ? record.status : null;
+  const message = errorMessage(error);
+  return status === 413
+    || /(context[_ ]length|context window|maximum context|too many tokens|prompt is too long|input is too long|token limit)/i.test(message);
 }

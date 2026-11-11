@@ -232,6 +232,114 @@ describe("agent runtime", () => {
     expect(result.status).toBe("failed");
     expect(result.summary).toContain("finish_task");
   });
+
+  it("retries 429 and 5xx model failures twice", async () => {
+    const root = workspace(roots);
+    let attempts = 0;
+    const model: AgentModel = async () => {
+      attempts += 1;
+      if (attempts === 1) throw Object.assign(new Error("rate limited"), { status: 429 });
+      if (attempts === 2) throw Object.assign(new Error("upstream failed"), { status: 503 });
+      return turn("", [call("finish_task", { summary: "重试后完成" })]);
+    };
+    const result = await runAgent({
+      model,
+      tools: createBuiltinTools(),
+      goal: "重试",
+      systemPrompt: "system",
+      budget: { maxTurns: 3, maxToolCalls: 4, maxTokens: 10_000, maxDurationMs: 30_000 },
+      permissions: defaultTaskPermissions({ workspaceRoot: root, outDir: join(root, "out"), networkHosts: [] }),
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      retryDelayMs: 0
+    });
+    expect(result.status).toBe("completed");
+    expect(attempts).toBe(3);
+  });
+
+  it("does not retry ordinary 4xx model errors", async () => {
+    const root = workspace(roots);
+    let attempts = 0;
+    const model: AgentModel = async () => {
+      attempts += 1;
+      throw Object.assign(new Error("bad request"), { status: 400 });
+    };
+    await expect(runAgent({
+      model,
+      tools: createBuiltinTools(),
+      goal: "不要重试",
+      systemPrompt: "system",
+      budget: { maxTurns: 3, maxToolCalls: 4, maxTokens: 10_000, maxDurationMs: 30_000 },
+      permissions: defaultTaskPermissions({ workspaceRoot: root, outDir: join(root, "out"), networkHosts: [] }),
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      retryDelayMs: 0
+    })).rejects.toThrow("bad request");
+    expect(attempts).toBe(1);
+  });
+
+  it("force-compacts once after a context overflow before retrying", async () => {
+    const root = workspace(roots);
+    const summaries: number[] = [];
+    const checkpoints: AgentCheckpoint[] = [];
+    let attempts = 0;
+    const messages = [
+      { role: "system" as const, content: "system" },
+      { role: "user" as const, content: "goal" },
+      ...Array.from({ length: 14 }, (_, index) => [
+        { role: "assistant" as const, content: "", toolCalls: [{ id: `old-${index}`, name: "read_file", arguments: {}, rawArguments: "{}" }] },
+        { role: "tool" as const, toolCallId: `old-${index}`, name: "read_file", content: "history ".repeat(1_500) }
+      ]).flat()
+    ];
+    const model: AgentModel = async () => {
+      attempts += 1;
+      if (attempts === 1) throw Object.assign(new Error("maximum context length exceeded"), { status: 400 });
+      return turn("", [call("finish_task", { summary: "压缩后完成" })]);
+    };
+    const result = await runAgent({
+      model,
+      tools: createBuiltinTools(),
+      goal: "overflow",
+      systemPrompt: "system",
+      budget: { maxTurns: 3, maxToolCalls: 4, maxTokens: 1_000_000, maxDurationMs: 30_000 },
+      permissions: defaultTaskPermissions({ workspaceRoot: root, outDir: join(root, "out"), networkHosts: [] }),
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      resume: { messages, usage: zeroUsage(), turns: 0, toolCalls: 0 },
+      contextWindowTokens: 100_000,
+      recentContextTokens: 300,
+      summarizeContext: async (omitted) => { summaries.push(omitted.length); return "超限摘要"; },
+      onCheckpoint: (checkpoint) => { checkpoints.push(checkpoint); },
+      retryDelayMs: 0
+    });
+    expect(result.status).toBe("completed");
+    expect(attempts).toBe(2);
+    expect(summaries[0]).toBeGreaterThan(0);
+    expect(checkpoints.some((checkpoint) => checkpoint.kind === "compaction" && checkpoint.summary === "超限摘要")).toBe(true);
+  });
+
+  it("skips repeated tool calls and fails before an infinite loop", async () => {
+    const root = workspace(roots);
+    const repeated = call("read_file", { path: "missing.txt" });
+    const result = await runAgent({
+      model: fakeModel([
+        turn("", [repeated]),
+        turn("", [{ ...repeated, id: "repeat-1" }]),
+        turn("", [{ ...repeated, id: "repeat-2" }])
+      ]),
+      tools: createBuiltinTools(),
+      goal: "不要重复",
+      systemPrompt: "system",
+      budget: { maxTurns: 5, maxToolCalls: 10, maxTokens: 10_000, maxDurationMs: 30_000 },
+      permissions: defaultTaskPermissions({ workspaceRoot: root, outDir: join(root, "out"), networkHosts: [] }),
+      workspaceRoot: root,
+      outDir: join(root, "out")
+    });
+    expect(result.status).toBe("failed");
+    expect(result.summary).toContain("重复相同工具调用");
+    expect(result.messages.filter((message) => message.role === "tool")).toHaveLength(2);
+    expect(result.messages.some((message) => message.role === "tool" && message.content.includes("已跳过"))).toBe(true);
+  });
 });
 
 describe("context compaction", () => {
