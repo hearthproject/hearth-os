@@ -223,6 +223,28 @@ describe("json deliverables", () => {
     }
   });
 
+  it("derives concise desktop counts and unknown preservation", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "actions.json");
+      writeFileSync(path, JSON.stringify({
+        facts: { movedCount: 3, keptInPlaceCount: 1, unknownCount: 1 },
+        items: [
+          { action: "move" },
+          { action: "move" },
+          { action: "move" },
+          { action: "keep" }
+        ]
+      }));
+      normalizeJsonDeliverables(dir, ["actions.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.facts.moveCount).toBe(3);
+      expect(parsed.facts.unknownPreserved).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("syncs derived facts into the facts layer", () => {
     const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
     try {
