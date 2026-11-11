@@ -354,6 +354,12 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
       changed = true;
     }
   }
+  if (!Object.hasOwn(root, "causalClaimAllowed") && typeof root.conclusionStrength === "string") {
+    if (/low|none|insufficient|weak/i.test(root.conclusionStrength)) {
+      root.causalClaimAllowed = false;
+      changed = true;
+    }
+  }
   if (!Object.hasOwn(root, "escalate")) {
     if (typeof root.escalationCount === "number") {
       root.escalate = root.escalationCount > 0;
