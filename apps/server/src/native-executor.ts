@@ -308,7 +308,7 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
     }
   }
   if (!Array.isArray(root.nextQueries)) {
-    for (const key of ["searchQueries", "queries", "followUpQueries"]) {
+    for (const key of ["searchQueries", "queryDrafts", "queries", "followUpQueries"]) {
       if (!Array.isArray(root[key]) || root[key].length === 0) continue;
       root.nextQueries = root[key];
       changed = true;
