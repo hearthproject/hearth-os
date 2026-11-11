@@ -58,6 +58,9 @@ import type {
   MethodTrial,
   MaintenanceRun,
   LocalProject,
+  McpServerConfig,
+  McpServerStatus,
+  McpToolDescriptor,
   OutboxDraft,
   ModelProfileRecord,
   ProactiveSettings,
@@ -117,6 +120,14 @@ export type NewEvent = {
   createdAt?: string;
 };
 
+export interface McpServerRecord extends McpServerConfig {
+  status: McpServerStatus;
+  tools: McpToolDescriptor[];
+  error: string | null;
+  lastProbeAt: string | null;
+  envCipher: string | null;
+}
+
 export interface PageOptions {
   limit: number;
   offset: number;
@@ -132,7 +143,7 @@ export interface RunAggregate {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 32;
+export const CURRENT_SCHEMA_VERSION = 33;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -506,6 +517,12 @@ CREATE TABLE IF NOT EXISTS local_projects (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE,
   default_branch TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS mcp_servers (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, transport TEXT NOT NULL, command TEXT NOT NULL,
+  args_json TEXT NOT NULL, env_keys_json TEXT NOT NULL, env_cipher TEXT,
+  enabled INTEGER NOT NULL, tools_json TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'unchecked',
+  error TEXT, last_probe_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS executor_model_bindings (
   executor_id TEXT PRIMARY KEY,
   profile_id TEXT,
@@ -846,6 +863,48 @@ export class HearthStore {
 
   deleteLocalProject(id: string): void {
     this.db.prepare("DELETE FROM local_projects WHERE id = ?").run(id);
+  }
+
+  getMcpServer(id: string): McpServerRecord | null {
+    const row = this.db.prepare("SELECT * FROM mcp_servers WHERE id = ?").get(id) as DbRow | undefined;
+    return row ? rowToMcpServer(row) : null;
+  }
+
+  listMcpServers(): McpServerRecord[] {
+    return (this.db.prepare("SELECT * FROM mcp_servers ORDER BY created_at ASC").all() as DbRow[])
+      .map(rowToMcpServer);
+  }
+
+  upsertMcpServer(server: McpServerConfig, envCipher: string | null): McpServerRecord {
+    this.db.prepare(
+      `INSERT INTO mcp_servers (id, name, transport, command, args_json, env_keys_json, env_cipher, enabled, tools_json, status, error, last_probe_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, '[]', 'unchecked', NULL, NULL, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET name=excluded.name, transport=excluded.transport, command=excluded.command,
+         args_json=excluded.args_json, env_keys_json=excluded.env_keys_json, env_cipher=excluded.env_cipher,
+         enabled=excluded.enabled, updated_at=excluded.updated_at`
+    ).run(
+      server.id, server.name, server.transport, server.command, JSON.stringify(server.args),
+      JSON.stringify(server.envKeys), envCipher, server.enabled ? 1 : 0, server.createdAt, server.updatedAt
+    );
+    const record = this.getMcpServer(server.id);
+    if (!record) throw new Error("Failed to persist MCP server");
+    return record;
+  }
+
+  updateMcpServerProbe(
+    id: string,
+    input: { status: McpServerStatus; tools: McpToolDescriptor[]; error: string | null; lastProbeAt: string }
+  ): McpServerRecord {
+    this.db.prepare(
+      "UPDATE mcp_servers SET status = ?, tools_json = ?, error = ?, last_probe_at = ?, updated_at = ? WHERE id = ?"
+    ).run(input.status, JSON.stringify(input.tools), input.error, input.lastProbeAt, input.lastProbeAt, id);
+    const record = this.getMcpServer(id);
+    if (!record) throw new Error("MCP server disappeared during probe");
+    return record;
+  }
+
+  deleteMcpServer(id: string): void {
+    this.db.prepare("DELETE FROM mcp_servers WHERE id = ?").run(id);
   }
 
   getTaskWorktree(taskId: string): TaskWorktree | null {
@@ -5657,6 +5716,54 @@ function rowToLocalProject(row: DbRow): LocalProject {
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at)
   };
+}
+
+function rowToMcpServer(row: DbRow): McpServerRecord {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    transport: "stdio",
+    command: String(row.command),
+    args: stringArray(row.args_json),
+    envKeys: stringArray(row.env_keys_json),
+    enabled: Number(row.enabled) === 1,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+    status: mcpStatus(row.status),
+    tools: toolDescriptors(row.tools_json),
+    error: row.error == null ? null : String(row.error),
+    lastProbeAt: row.last_probe_at == null ? null : String(row.last_probe_at),
+    envCipher: row.env_cipher == null ? null : String(row.env_cipher)
+  };
+}
+
+function stringArray(value: unknown): string[] {
+  try {
+    const parsed = JSON.parse(String(value ?? "[]")) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function toolDescriptors(value: unknown): McpToolDescriptor[] {
+  try {
+    const parsed = JSON.parse(String(value ?? "[]")) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((entry): entry is McpToolDescriptor => {
+      if (!entry || typeof entry !== "object") return false;
+      const record = entry as Record<string, unknown>;
+      return typeof record.name === "string"
+        && typeof record.description === "string"
+        && Boolean(record.inputSchema && typeof record.inputSchema === "object");
+    });
+  } catch {
+    return [];
+  }
+}
+
+function mcpStatus(value: unknown): McpServerStatus {
+  return value === "ready" || value === "error" ? value : "unchecked";
 }
 
 function rowToTaskWorktree(row: DbRow): TaskWorktree {

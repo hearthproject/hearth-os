@@ -31,18 +31,21 @@ import type {
   ExecutorId,
   ExecutorModelBindingView,
   ExecutorView,
+  McpServerView,
   ModelProfileView,
   ModelProtocol,
   ModelProviderPreset,
   TrashItem,
-  TrashKind
+  TrashKind,
+  WebSearchProvider,
+  WebSearchSettingsView
 } from "../lib/types.ts";
 import { ProactiveSettingsPanel } from "../components/ProactiveSettingsPanel.tsx";
 import { ExecutorSettingsPanel } from "../components/ExecutorSettingsPanel.tsx";
 import { FeishuSettingsPanel } from "../components/FeishuSettingsPanel.tsx";
 import { desktopNotificationsEnabled, requestDesktopPermission, setDesktopNotificationsEnabled } from "../lib/notifications.ts";
 
-type SettingsTab = "executors" | "models" | "projects" | "proactive" | "automation" | "connections" | "context" | "data";
+type SettingsTab = "executors" | "models" | "projects" | "extensions" | "proactive" | "automation" | "connections" | "context" | "data";
 
 interface ProfileDraft {
   name: string;
@@ -60,6 +63,7 @@ const TABS: Array<{ id: SettingsTab; label: string; hint: string; icon: typeof C
   { id: "executors", label: "执行器", hint: "默认执行器、安装状态与模型绑定", icon: Cpu },
   { id: "models", label: "模型", hint: "模型档案、聊天模型与连接测试", icon: Layers },
   { id: "projects", label: "项目", hint: "本地 Git 项目与默认分支", icon: FolderGit2 },
+  { id: "extensions", label: "扩展", hint: "本地 MCP 服务器与网页搜索", icon: PlugZap },
   { id: "proactive", label: "主动", hint: "提醒预算、安静时段与触发器", icon: Bell },
   { id: "automation", label: "记忆与技能", hint: "自动运行状态，无需手工管理", icon: Sparkles },
   { id: "connections", label: "连接", hint: "飞书消息入口与外部账户", icon: Link2 },
@@ -120,7 +124,7 @@ export function SettingsPage() {
         <div>
           <span className="eyebrow">本机控制台</span>
           <h1>设置</h1>
-          <p className="page-meta">按“执行器 → 模型 → 项目 → 主动 → 记忆与技能 → 连接 → 上下文 → 数据”完成配置。密钥只保存在本机 SQLite，浏览器只能看到掩码。</p>
+          <p className="page-meta">按“执行器 → 模型 → 项目 → 扩展 → 主动 → 记忆与技能 → 连接 → 上下文 → 数据”完成配置。密钥只保存在本机 SQLite，浏览器只能看到掩码。</p>
         </div>
         <div className="settings-defaults">
           <strong>一等执行器</strong>
@@ -149,6 +153,7 @@ export function SettingsPage() {
       {tab === "executors" && <ExecutorsTab />}
       {tab === "models" && <ModelsTab />}
       {tab === "projects" && <ProjectsTab />}
+      {tab === "extensions" && <ExtensionsTab />}
       {tab === "proactive" && <ProactiveTab />}
       {tab === "automation" && <AutomationTab />}
       {tab === "connections" && <ConnectionsTab />}
@@ -617,6 +622,207 @@ function ProjectsTab() {
       </section>
     </section>
   );
+}
+
+function ExtensionsTab() {
+  const queryClient = useQueryClient();
+  const mcpQuery = useQuery({ queryKey: ["mcpServers"], queryFn: api.mcpServers });
+  const searchQuery = useQuery({ queryKey: ["webSearchSettings"], queryFn: api.webSearchSettings });
+  const [name, setName] = useState("");
+  const [command, setCommand] = useState("");
+  const [argsText, setArgsText] = useState("");
+  const [envText, setEnvText] = useState("");
+  const [enabled, setEnabled] = useState(true);
+  const [search, setSearch] = useState<WebSearchSettingsView | null>(null);
+  const [apiKey, setApiKey] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [notice, setNotice] = useState<NoticeState>(null);
+
+  useEffect(() => {
+    if (searchQuery.data) setSearch(searchQuery.data);
+  }, [searchQuery.data]);
+
+  async function addServer() {
+    setBusy("create");
+    setNotice(null);
+    try {
+      const env = parseEnvText(envText);
+      const result = await api.createMcpServer({
+        name,
+        command,
+        args: argsText.split("\n").map((entry) => entry.trim()).filter(Boolean),
+        ...(Object.keys(env).length ? { env } : {}),
+        enabled
+      });
+      setNotice({
+        tone: result.server.status === "ready" ? "ok" : "error",
+        text: result.server.status === "ready"
+          ? `已连接 ${result.server.name}，发现 ${result.server.tools.length} 个工具。`
+          : `服务器已保存，但探测失败：${result.server.error ?? "未知错误"}`
+      });
+      setName("");
+      setCommand("");
+      setArgsText("");
+      setEnvText("");
+      await queryClient.invalidateQueries({ queryKey: ["mcpServers"] });
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function probe(server: McpServerView) {
+    setBusy(server.id);
+    setNotice(null);
+    try {
+      const result = await api.probeMcpServer(server.id);
+      setNotice({
+        tone: result.server.status === "ready" ? "ok" : "error",
+        text: result.server.status === "ready"
+          ? `${result.server.name} 探测成功，共 ${result.server.tools.length} 个工具。`
+          : `${result.server.name} 探测失败：${result.server.error ?? "未知错误"}`
+      });
+      await queryClient.invalidateQueries({ queryKey: ["mcpServers"] });
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function toggleServer(server: McpServerView, nextEnabled: boolean) {
+    setBusy(server.id);
+    try {
+      await api.updateMcpServer(server.id, { enabled: nextEnabled });
+      await queryClient.invalidateQueries({ queryKey: ["mcpServers"] });
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function removeServer(server: McpServerView) {
+    if (!window.confirm(`删除 MCP 服务器“${server.name}”？这不会删除它的程序或数据。`)) return;
+    setBusy(server.id);
+    try {
+      await api.deleteMcpServer(server.id);
+      await queryClient.invalidateQueries({ queryKey: ["mcpServers"] });
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function saveSearch() {
+    if (!search) return;
+    setBusy("search");
+    setNotice(null);
+    try {
+      const saved = await api.saveWebSearchSettings({
+        enabled: search.enabled,
+        provider: search.provider,
+        searxngUrl: search.searxngUrl,
+        ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {})
+      });
+      setSearch(saved);
+      setApiKey("");
+      setNotice({ tone: "ok", text: saved.enabled ? "网页搜索已启用。" : "网页搜索已关闭。" });
+      await queryClient.invalidateQueries({ queryKey: ["webSearchSettings"] });
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const servers = mcpQuery.data?.servers ?? [];
+  return (
+    <section className="settings-tab-panel">
+      <div className="settings-section-intro">
+        <div>
+          <h2>扩展</h2>
+          <p>MCP 只支持本机 stdio 启动；Hearth 不会继承模型密钥或其他父进程密钥。服务器环境值会加密保存，并在页面中只显示键名。</p>
+        </div>
+        <span className={`status-chip ${servers.some((server) => server.status === "ready") ? "ok" : "warn"}`}>{servers.length} 个 MCP 服务器</span>
+      </div>
+
+      <section className="panel settings-section">
+        <div className="settings-body">
+          <div className="section-heading"><div><h3>添加本地 MCP 服务器</h3><p>命令直接以参数数组启动，不经过 shell。参数一行一个；环境变量一行一个 <code>KEY=VALUE</code>。</p></div><PlugZap size={20} /></div>
+          <div className="form-grid">
+            <label><span>名称</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="filesystem" /></label>
+            <label><span>启动命令</span><input value={command} onChange={(event) => setCommand(event.target.value)} placeholder="npx" spellCheck={false} /></label>
+            <label className="span-2"><span>启动参数（一行一个）</span><textarea value={argsText} onChange={(event) => setArgsText(event.target.value)} rows={4} placeholder={"-y\n@modelcontextprotocol/server-filesystem\nD:\\\\projects"} spellCheck={false} /></label>
+            <label className="span-2"><span>环境变量（密钥会加密）</span><textarea value={envText} onChange={(event) => setEnvText(event.target.value)} rows={3} placeholder="MCP_API_KEY=..." spellCheck={false} /></label>
+          </div>
+          <label className="checkbox-row"><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} /> 启用并立即探测</label>
+          <div className="settings-actions">
+            <button className="primary-button" onClick={() => void addServer()} disabled={busy !== null || !name.trim() || !command.trim()}>{busy === "create" ? <Loader2 size={15} className="spin" /> : <Plus size={15} />} 添加并探测</button>
+            <button className="ghost-button" onClick={() => void mcpQuery.refetch()} disabled={busy !== null}><RefreshCw size={15} /> 刷新</button>
+          </div>
+        </div>
+      </section>
+
+      <section className="panel settings-section">
+        <div className="settings-body">
+          <div className="section-heading"><div><h3>已配置服务器</h3><p>探测会启动一次独立进程；崩溃或超时只会把当前服务器标记为错误，不影响 Hearth。</p></div></div>
+          {mcpQuery.isLoading && <InlineLoading text="正在读取 MCP 服务器" />}
+          {!mcpQuery.isLoading && servers.length === 0 && <EmptyState text="还没有配置 MCP 服务器。" />}
+          <div className="data-table-list">
+            {servers.map((server) => (
+              <article key={server.id} className="migration-row">
+                <span className={`status-dot ${server.status === "ready" ? "online" : "offline"}`} />
+                <div>
+                  <strong>{server.name} {server.enabled ? "" : "（已停用）"}</strong>
+                  <small><code>{server.command} {server.args.join(" ")}</code>{server.envKeys.length ? ` · 环境键 ${server.envKeys.join(", ")}` : ""}</small>
+                  <small>{server.tools.length} 个工具{server.lastProbeAt ? ` · 最近探测 ${relativeTime(server.lastProbeAt)}` : ""}</small>
+                  {server.tools.length > 0 && <p>{server.tools.map((tool) => tool.name).join(" · ")}</p>}
+                  {server.error && <p className="form-error">{server.error}</p>}
+                </div>
+                <div className="row-actions">
+                  <button className="ghost-button compact" onClick={() => void probe(server)} disabled={busy !== null}>{busy === server.id ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />} 探测</button>
+                  <button className="ghost-button compact" onClick={() => void toggleServer(server, !server.enabled)} disabled={busy !== null}>{server.enabled ? "停用" : "启用"}</button>
+                  <button className="ghost-button danger compact" onClick={() => void removeServer(server)} disabled={busy !== null}><Trash2 size={14} /> 删除</button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="panel settings-section">
+        <div className="settings-body">
+          <div className="section-heading"><div><h3>网页搜索</h3><p>默认关闭。只有研究任务获得公共网络权限时才会暴露搜索工具；抓取网页仍需逐次审批。</p></div><KeyRound size={20} /></div>
+          {searchQuery.isLoading && <InlineLoading text="正在读取搜索设置" />}
+          {search && (
+            <div className="form-grid">
+              <label><span>服务</span><select value={search.provider} onChange={(event) => setSearch({ ...search, provider: event.target.value as WebSearchProvider })}><option value="tavily">Tavily</option><option value="searxng">SearXNG</option></select></label>
+              <label><span>Tavily API Key {search.apiKeyMasked ? `（当前 ${search.apiKeyMasked}）` : ""}</span><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={search.hasApiKey ? "留空则保留原密钥" : "填写 API Key"} autoComplete="off" /></label>
+              <label className="span-2"><span>SearXNG 实例地址</span><input value={search.searxngUrl} onChange={(event) => setSearch({ ...search, searxngUrl: event.target.value })} placeholder="http://127.0.0.1:8888" spellCheck={false} /></label>
+            </div>
+          )}
+          <label className="checkbox-row"><input type="checkbox" checked={search?.enabled ?? false} onChange={(event) => setSearch(search ? { ...search, enabled: event.target.checked } : search)} /> 启用网页搜索</label>
+          <div className="settings-actions"><button className="primary-button" onClick={() => void saveSearch()} disabled={busy !== null || !search}>{busy === "search" ? <Loader2 size={15} className="spin" /> : <Save size={15} />} 保存搜索设置</button></div>
+        </div>
+      </section>
+      {notice && <Notice tone={notice.tone} text={notice.text} />}
+    </section>
+  );
+}
+
+function parseEnvText(value: string): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const line of value.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const separator = trimmed.indexOf("=");
+    if (separator <= 0) throw new Error(`环境变量格式不正确：${trimmed}`);
+    env[trimmed.slice(0, separator).trim()] = trimmed.slice(separator + 1);
+  }
+  return env;
 }
 
 function ProactiveTab() {

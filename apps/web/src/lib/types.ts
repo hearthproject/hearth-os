@@ -135,10 +135,13 @@ import type {
   IntakeDecisionRecord,
   LocalProject,
   LocalProjectView,
+  McpServerView,
   TaskWorktreeView,
   PreparedActionRecord,
   ThreadSubscriptionRecord,
-  WatchdogEvent
+  WatchdogEvent,
+  WebSearchProvider,
+  WebSearchSettingsView
 } from "@hearth/core";
 import type { TaskTemplate } from "@hearth/templates";
 
@@ -278,10 +281,13 @@ export type {
   IntakeDecisionRecord,
   LocalProject,
   LocalProjectView,
+  McpServerView,
   TaskWorktreeView,
   PreparedActionRecord,
   ThreadSubscriptionRecord,
   WatchdogEvent,
+  WebSearchProvider,
+  WebSearchSettingsView,
   TaskTemplate
 };
 

@@ -48,6 +48,7 @@ import type {
   HealthResponse,
   HermesProbeResponse,
   LocalProjectView,
+  McpServerView,
   MaintenanceSnapshot,
   CreateMemoryRequest,
   CreateMethodRequest,
@@ -118,6 +119,7 @@ import type {
   WatchdogSettingsView,
   WatchdogSnapshot
 } from "./types.ts";
+import type { WebSearchProvider, WebSearchSettingsView } from "@hearth/core";
 
 export interface ChatStreamBody {
   conversationId?: string;
@@ -220,6 +222,22 @@ export const api = {
   deleteProject: (id: string) => request<void>(`/api/projects/${encodeURIComponent(id)}`, { method: "DELETE" }),
   taskWorktree: (id: string) => request<{ worktree: TaskWorktreeView | null }>(`/api/tasks/${encodeURIComponent(id)}/worktree`),
   cleanupTaskWorktree: (id: string) => request<{ removed: boolean; branchKept: boolean }>(`/api/tasks/${encodeURIComponent(id)}/worktree`, { method: "DELETE" }),
+  mcpServers: () => request<{ servers: McpServerView[] }>("/api/mcp/servers"),
+  createMcpServer: (input: { name: string; command: string; args?: string[]; env?: Record<string, string>; enabled?: boolean }) => request<{ server: McpServerView }>("/api/mcp/servers", {
+    method: "POST",
+    body: JSON.stringify(input)
+  }),
+  updateMcpServer: (id: string, input: { name?: string; command?: string; args?: string[]; env?: Record<string, string>; enabled?: boolean }) => request<{ server: McpServerView }>(`/api/mcp/servers/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  }),
+  probeMcpServer: (id: string) => request<{ server: McpServerView }>(`/api/mcp/servers/${encodeURIComponent(id)}/probe`, { method: "POST" }),
+  deleteMcpServer: (id: string) => request<void>(`/api/mcp/servers/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  webSearchSettings: () => request<WebSearchSettingsView>("/api/web-search/settings"),
+  saveWebSearchSettings: (input: { enabled?: boolean; provider?: WebSearchProvider; apiKey?: string; searxngUrl?: string }) => request<WebSearchSettingsView>("/api/web-search/settings", {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  }),
   modelRegistry: () => request<ModelRegistryResponse>("/api/model-registry"),
   createModelProfile: (input: ModelProfilePatch) => request<{ profile: ModelProfileView }>("/api/model-profiles", {
     method: "POST",

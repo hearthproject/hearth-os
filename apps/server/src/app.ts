@@ -71,6 +71,7 @@ import { createBuiltinTools } from "@hearth/agent-runtime";
 import { StandingIntentError, StandingIntentService } from "./standing-intents.ts";
 import { SyncError, SyncService } from "./sync.ts";
 import { SecretBox } from "./secrets.ts";
+import { McpServerError, McpServerService } from "./mcp-servers.ts";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 
@@ -136,6 +137,22 @@ const createProjectSchema = z.object({
 const updateProjectSchema = z.object({
   name: z.string().trim().min(1).max(100).optional(),
   defaultBranch: z.string().trim().min(1).max(255).optional()
+}).strict();
+
+const mcpEnvSchema = z.record(z.string(), z.string().max(4_000));
+const createMcpServerSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  command: z.string().trim().min(1).max(1_000),
+  args: z.array(z.string().max(4_000)).max(64).optional(),
+  env: mcpEnvSchema.optional(),
+  enabled: z.boolean().optional()
+}).strict();
+const updateMcpServerSchema = z.object({
+  name: z.string().trim().min(1).max(100).optional(),
+  command: z.string().trim().min(1).max(1_000).optional(),
+  args: z.array(z.string().max(4_000)).max(64).optional(),
+  env: mcpEnvSchema.optional(),
+  enabled: z.boolean().optional()
 }).strict();
 
 const confirmTaskProposalSchema = z.object({
@@ -868,6 +885,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     onItemReady: (item) => ontologyWriter.captureSourceItem(item)
   });
   const secretBox = options.syncSecretBox ?? SecretBox.fromKeyFile(options.masterKeyPath ?? MASTER_KEY_PATH);
+  const mcpServers = new McpServerService({ store, secretBox });
   const mail = new EmailService({
     store,
     secretBox,
@@ -1291,6 +1309,53 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
 
   app.get("/api/web-search/settings", async () => webSearch.view());
+
+  app.get("/api/mcp/servers", async () => ({ servers: mcpServers.list() }));
+
+  app.post("/api/mcp/servers", async (request, reply) => {
+    const parsed = createMcpServerSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_MCP_SERVER", message: "MCP 服务器配置格式不正确" });
+    try {
+      return reply.code(201).send({ server: await mcpServers.create(parsed.data) });
+    } catch (error) {
+      return sendMcpServerError(reply, error);
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/api/mcp/servers/:id", async (request, reply) => {
+    try {
+      return { server: mcpServers.get(request.params.id) };
+    } catch (error) {
+      return sendMcpServerError(reply, error);
+    }
+  });
+
+  app.patch<{ Params: { id: string } }>("/api/mcp/servers/:id", async (request, reply) => {
+    const parsed = updateMcpServerSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_MCP_SERVER", message: "MCP 服务器配置格式不正确" });
+    try {
+      return { server: await mcpServers.update(request.params.id, parsed.data) };
+    } catch (error) {
+      return sendMcpServerError(reply, error);
+    }
+  });
+
+  app.delete<{ Params: { id: string } }>("/api/mcp/servers/:id", async (request, reply) => {
+    try {
+      mcpServers.delete(request.params.id);
+      return reply.code(204).send();
+    } catch (error) {
+      return sendMcpServerError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/mcp/servers/:id/probe", async (request, reply) => {
+    try {
+      return { server: await mcpServers.probe(request.params.id) };
+    } catch (error) {
+      return sendMcpServerError(reply, error);
+    }
+  });
 
   app.get("/api/projects", async () => ({ projects: projects.list() }));
 
@@ -4121,6 +4186,13 @@ function sendDesktopError(reply: FastifyReply, error: unknown) {
 function sendModelRegistryError(reply: FastifyReply, error: unknown) {
   if (error instanceof ModelRegistryError) {
     return reply.code(error.code === "MODEL_PROFILE_NOT_FOUND" ? 404 : 400).send({ error: error.code, message: error.message });
+  }
+  throw error;
+}
+
+function sendMcpServerError(reply: FastifyReply, error: unknown) {
+  if (error instanceof McpServerError) {
+    return reply.code(error.statusCode).send({ error: error.code, message: error.message });
   }
   throw error;
 }

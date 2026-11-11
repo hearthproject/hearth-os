@@ -205,6 +205,34 @@ export interface TaskWorktreeView extends TaskWorktree {
   error: string | null;
 }
 
+export const MCP_SERVER_STATUSES = ["unchecked", "ready", "error"] as const;
+export type McpServerStatus = (typeof MCP_SERVER_STATUSES)[number];
+
+export interface McpToolDescriptor {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+}
+
+export interface McpServerConfig {
+  id: string;
+  name: string;
+  transport: "stdio";
+  command: string;
+  args: string[];
+  envKeys: string[];
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface McpServerView extends McpServerConfig {
+  status: McpServerStatus;
+  tools: McpToolDescriptor[];
+  error: string | null;
+  lastProbeAt: string | null;
+}
+
 export const RUN_STATUSES = [
   "queued",
   "running",
