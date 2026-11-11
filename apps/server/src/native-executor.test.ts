@@ -187,6 +187,21 @@ describe("json deliverables", () => {
     }
   });
 
+  it("normalizes competing product counts", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "result.json");
+      writeFileSync(path, JSON.stringify({
+        facts: { verdict: "ok", competingProductCount: 3 }
+      }));
+      normalizeJsonDeliverables(dir, ["result.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.productCount).toBe(3);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("normalizes review, delivery and send result contracts", () => {
     const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
     try {

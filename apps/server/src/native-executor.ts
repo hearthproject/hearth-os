@@ -219,7 +219,9 @@ const FACT_ALIASES: Record<string, string> = {
   recordCount: "itemCount",
   sendPerformed: "sent",
   blockingFindingCount: "blockingCount",
-  invalidCount: "exceptionCount"
+  invalidCount: "exceptionCount",
+  competingProductCount: "productCount",
+  competitorCount: "productCount"
 };
 
 const ARRAY_COUNTS: Record<string, string> = {
