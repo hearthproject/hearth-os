@@ -238,6 +238,7 @@ const FACT_ALIASES: Record<string, string> = {
   likelyCommit: "suspectCommit",
   failingTest: "failedTest",
   explicitUnknownCount: "unknownCount",
+  unknownKeptInPlace: "unknownPreserved",
   hasProductionChanges: "productionCodeChanged",
   productionCodeModified: "productionCodeChanged",
   hasInjection: "injectionDetected",

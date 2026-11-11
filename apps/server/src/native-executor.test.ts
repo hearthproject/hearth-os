@@ -206,6 +206,22 @@ describe("json deliverables", () => {
     }
   });
 
+  it("normalizes desktop unknown preservation aliases", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "actions.json");
+      writeFileSync(path, JSON.stringify({
+        actions: [{ op: "move", from: "a", to: "Projects/Q4/a" }],
+        facts: { unknownKeptInPlace: true }
+      }));
+      normalizeJsonDeliverables(dir, ["actions.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.unknownPreserved).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("derives findings from an equivalent result array", () => {
     const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
     try {
