@@ -24,7 +24,7 @@ Hearth keeps several specialized executors side by side rather than building one
 
 | Executor | Better suited for | Not suited for |
 |---|---|---|
-| Hearth native | Complete tool loops for general work: reading inputs, web access, file outputs, pausing for input, and recovery | Work that needs full repository semantics and multi-file engineering checks |
+| Hearth native | General execution kernel: multi-file editing, source reading, web research, office artifacts, skill reuse, bounded delegation, local MCP, and project worktrees | Work that needs LSP, formatters, or full IDE semantics |
 | Codex | Multi-file code, long documents, complex research, and deep writing | Continuous online listening or low-cost high-frequency responses |
 | Connectors | Email, calendars, cloud drives, messaging, and ticketing with interfaces | Software without an interface that needs graphical operation |
 | Browser | Web research, signed-in sessions, forms, and software as a service | Direct exposure of highly sensitive credentials or unauditable bulk actions |
@@ -40,15 +40,15 @@ The current registry contains seven executors in two tiers. They share launch re
 |---|---|---|---|
 | `deepseek-harness` | First-class | Official `@deepseek-ai/dsh-sdk-client` SDK/JSON-RPC | Full DeepSeek Harness runtime: native tools, code, repositories, tests, session resume, and a complete event stream; requires a valid model binding |
 | `codex` | First-class | Local Codex profile or a `config.toml` generated from the unified binding | Multi-file code, repositories, tests, builds, and GitHub workspaces; the model protocol is fixed to OpenAI Responses |
-| `native` | First-class | Hearth-owned single-agent tool loop | General work, source reading, web, file delivery, input pauses, recovery, and desktop screenshots; supports four model protocols |
+| `native` | First-class | Hearth-owned general execution kernel (model protocols, tools, compaction, delegation, worktrees, local MCP) | General work, multi-file editing, research and office output, skills, isolated worktrees, and local stdio MCP; supports four model protocols |
 | `hermes` | External | `hermes` on `PATH` or a configured command | General agents, multi-step tool use, and automation flows; supports CLI session resume |
 | `qoder` | External | `@qoder-ai/qoder-agent-sdk`, reusing a local qodercli login or PAT | Coding, workspaces, and resumed sessions |
 | `workbuddy` | External | `@tencent-ai/codebuddy-code`, reusing the local login | Coding, workspaces, and resumed sessions |
 | `kimi` | External | `@moonshot-ai/kimi-code` in stream-json mode | Coding, workspaces, and non-interactive batch work |
 
-First-class does not mean universally stronger. It means deeper integration and a more complete control surface. Complex code and repository work prefer `codex` or `deepseek-harness`; general work, web, documents, and desktop capability prefer `native`; external executors fit teams that already have the corresponding CLI, login, or workflow. ZCode is no longer integrated.
+First-class does not mean universally stronger. It means deeper integration and a more complete control surface. Complex code and repository work prefer `codex` or `deepseek-harness`; general work, web, documents, skills, and local project worktrees prefer `native`; external executors fit teams that already have the corresponding CLI, login, or workflow. After the user explicitly selects a local project, tasks default to native in an isolated worktree; GitHub engineering work still defaults to Codex. ZCode is no longer integrated.
 
-The native executor is a Hearth-owned single-agent tool loop with budgets, checkpoints, input pauses, and recovery; it is not a forwarded prompt. DeepSeek Harness uses the official SDK rather than parsing command-line text. Codex has a dedicated adapter and obeys the Responses protocol. A failed task does not silently replace its executor identity, and the actual executor is recorded in runs and artifact manifests.
+The native executor is a Hearth-owned general execution kernel with budgets, checkpoints, input pauses, context compaction, on-demand skills, bounded delegation, local MCP, and recovery; it is not a forwarded prompt. DeepSeek Harness uses the official SDK rather than parsing command-line text. Codex has a dedicated adapter and obeys the Responses protocol. A failed task does not silently replace its executor identity, and the actual executor is recorded in runs and artifact manifests.
 
 ## Unified Model Bindings
 
@@ -83,12 +83,17 @@ A CLI `sessionId` is only an optimization for resume, not a source of truth. Eve
 
 ## Settings Boundaries
 
-Settings has four sections:
+Settings has nine sections:
 
 | Section | Responsibility |
 |---|---|
 | Executors | Default executor, installation and health, command or script path, concurrency, and each executor's model binding |
 | Models | Profile CRUD, current chat model, model discovery, connection tests, and masked keys |
+| Projects | Local Git project registration, default branches, and repository state |
+| Extensions | Local stdio MCP servers and Tavily/SearXNG web-search settings |
+| Proactive | Reminder budgets, quiet hours, and triggers |
+| Memory and skills | Automatic runtime state and skill governance |
+| Connections | Feishu entry and external accounts |
 | Context | Mode, budgets, retention, handoff limits, metrics, and deletion |
 | Data | SQLite path, executor directories, context blobs, migration records, and backups |
 

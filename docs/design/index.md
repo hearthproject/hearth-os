@@ -50,7 +50,7 @@ Hearth 把一次工作拆成同一条链路：入口接收请求，控制层判�
 | 本地存储 | SQLite WAL | 单用户、本地优先、单写者场景足够，部署简单，迁移和备份容易 |
 | Web 界面 | React、Vite | 适合任务卡、审批、产物和实时状态；PWA 壳与移动导航已存在，手机配对、系统推送和远程接管仍未验收 |
 | 实时更新 | Server-Sent Events | 比双向长连接更简单，适合服务端把状态变化推送到界面 |
-| 文档与数据 | 服务端 TypeScript | `cheerio`、`pdfjs-dist`、`mammoth`、`exceljs` 在本进程完成 HTML、PDF、DOCX、XLSX 提取，不引入第二套业务协议 |
+| 文档与数据 | 服务端 TypeScript | `cheerio`、`pdfjs-dist`、`mammoth`、`exceljs`、`docx` 在本进程完成 HTML、PDF、DOCX、XLSX、CSV 提取与 XLSX/CSV/DOCX 生成，不引入第二套业务协议 |
 | 原生边界 | PowerShell + Node 桥接 | Windows 助手负责窗口观察、UIA 与输入；只有确实需要单二进制或更强隔离时才引入 Rust |
 
 TypeScript 是语言，Node.js 是运行时，两者不是同一层，也不是二选一。TypeScript 提供开发期的类型约束，Node.js 提供文件、网络、进程和定时能力；外部输入和持久化数据仍然需要运行时校验。
@@ -72,7 +72,7 @@ TypeScript 是语言，Node.js 是运行时，两者不是同一层，也不是�
 | [目标、完成判定与证据](/design/goals-and-evidence) | 把目标变成验收契约，用证据而不是模型自评决定是否完成 |
 | [控制面与授权](/design/control) | 判断什么时候观察、建议、执行或停下，并把权限收在明确范围内 |
 | [执行器与路由](/design/executors) | 用不同专长完成不同工作，而不是把所有事情交给一个万能模型 |
-| [原生 Agent Runtime](/design/native-agent-runtime) | 自建单 Agent 工具循环，统一模型协议、工具权限、预算和检查点 |
+| [原生 Agent Runtime](/design/native-agent-runtime) | 自建通用执行内核，统一模型协议、工具面、压缩、技能、委派、Worktree、MCP、预算和检查点 |
 | [委派、交接与沙箱](/design/delegation-and-sandbox) | 把有界工作交给子任务，用交接包继续，并守住路径、网络和凭据边界 |
 | [审批、接管与外部副作用](/design/effects) | 让发送、写入、删除、发布等动作可预览、可授权、可对账 |
 | [运行环境与安全](/design/safety) | 用隔离、最小权限和凭据代理限制真实世界的影响 |

@@ -50,7 +50,7 @@ Technology follows system constraints, not language preference. Hearth must run 
 | Local storage | SQLite WAL | Enough for a single-user, local-first, single-writer system, with simple backup and migration |
 | Web interface | React and Vite | Fits task cards, approvals, artifacts, and live state; the PWA shell and mobile navigation exist, while phone pairing, system push, and remote takeover remain unaccepted |
 | Live updates | Server-Sent Events | Simpler than a two-way persistent connection for server-side state changes |
-| Documents and data | Server-side TypeScript | `cheerio`, `pdfjs-dist`, `mammoth`, and `exceljs` extract HTML, PDF, DOCX, and XLSX in-process, without a second business protocol |
+| Documents and data | Server-side TypeScript | `cheerio`, `pdfjs-dist`, `mammoth`, `exceljs`, and `docx` read HTML, PDF, DOCX, XLSX, and CSV and write XLSX/CSV/DOCX in-process, without a second business protocol |
 | Native boundary | PowerShell + Node bridge | The Windows helper owns window observation, UIA, and input; Rust appears only when a single binary or stronger isolation becomes a hard constraint |
 
 TypeScript is the language; Node.js is the runtime. They are not alternatives. TypeScript provides development-time types, while Node.js provides files, network, processes, and timers. External input and stored data still need runtime validation.
@@ -72,7 +72,7 @@ The fifteen modules below are parallel design notes. Together they cover the pro
 | [Goals, Completion, and Evidence](/en/design/goals-and-evidence) | Turn goals into acceptance contracts and decide completion from evidence rather than model self-assessment |
 | [Control and Authority](/en/design/control) | Decide when to observe, suggest, execute, or stop, within explicit authority |
 | [Executors and Routing](/en/design/executors) | Use specialized capabilities instead of one universal model |
-| [Native Agent Runtime](/en/design/native-agent-runtime) | A self-built single-agent loop that unifies model protocols, tool permissions, budgets, and checkpoints |
+| [Native Agent Runtime](/en/design/native-agent-runtime) | A self-built general execution kernel that unifies model protocols, tools, compaction, skills, delegation, worktrees, MCP, budgets, and checkpoints |
 | [Delegation, Handoff, and Sandboxing](/en/design/delegation-and-sandbox) | Delegate bounded work, continue with handoff packets, and enforce path, network, and credential boundaries |
 | [Approvals, Takeover, and External Effects](/en/design/effects) | Make sends, writes, deletes, and publishes previewable, authorized, and reconcilable |
 | [Runtime and Safety](/en/design/safety) | Limit real-world impact with isolation, least privilege, and credential boundaries |

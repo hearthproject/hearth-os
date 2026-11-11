@@ -1,14 +1,14 @@
 ---
-title: 'Agent Reference Patterns: Pi, OpenClaw, Hermes, DeerFlow, and LoopX'
-description: 'Patterns Hearth adopts or rejects for proactive service, desktop operation, memory, method evolution, multi-device use, and long-running operation.'
+title: 'Agent Reference Patterns: Pi, OpenClaw, Hermes, DeerFlow, OpenCode, and LoopX'
+description: 'Patterns Hearth adopts or rejects for a general execution kernel, proactive service, desktop operation, memory, method evolution, multi-device use, and long-running operation.'
 outline: [2, 3]
 ---
 
-# Agent Reference Patterns: Pi, OpenClaw, Hermes, DeerFlow, and LoopX
+# Agent Reference Patterns: Pi, OpenClaw, Hermes, DeerFlow, OpenCode, and LoopX
 
-Across Phases 3–6, Hearth does not invent device control, proactive service, memory, method evaluation, or long-running operation from scratch. We studied working open agents and adopted only the parts that reduce accidental input, unauthorized expansion, wrong memory, and irreversible change. These notes reflect a review of public OpenClaw, Hermes, DeerFlow, and LoopX implementation or design documentation on 2026-11-06.
+Across Phases 3–6, Hearth does not invent a general execution kernel, device control, proactive service, memory, method evaluation, or long-running operation from scratch. We studied working open agents and adopted only the parts that reduce accidental input, unauthorized expansion, wrong memory, and irreversible change. These notes reflect public implementation or design documentation and a 2026-11-11 review of Hearth's current code.
 
-This page records design references, not integration claims. Hearth does not import these projects' runtimes, codebases, or protocol implementations. Pi influences the message loop and tool shape of the native agent kernel; DeerFlow and LoopX influence task decomposition, evaluation layering, and delivery method only.
+This page records design references, not integration claims. Hearth does not import these projects' runtimes, codebases, or protocol implementations. Pi influences the message loop and tool shape of the native agent kernel; DeerFlow influences long-horizon orchestration boundaries; OpenCode influences the capability choices of the general execution surface; LoopX influences task decomposition, evaluation layering, and delivery method. OpenCode's installable npm version and public documentation have not always described the same behavior, so Hearth learns only from the public capability shape and neither copies its runtime nor pins behavior to a version.
 
 ## Shared conclusions
 
@@ -42,14 +42,26 @@ OpenClaw and Hermes separate connection, capability grants, action execution, an
 - **Recoverable execution.** Checkpoints are written after turns and tool steps. Waiting input, budget exhaustion, and service restart resume from an explicit position.
 - **A compact completion signal.** A completion tool declares the result, and the system verifies artifacts. The model saying “done” is not completion.
 
-Hearth implements these principles in its own `@hearth/agent-runtime` without importing the Pi npm package. The native executor handles general tasks; Codex remains responsible for repository and engineering work. Both share task state, permissions, budgets, and the artifact contract.
+Hearth implements these principles in its own `@hearth/agent-runtime` without importing the Pi npm package. The native kernel keeps a small, explicit loop while adding token-aware compaction, transient retries, loop detection, on-demand skills, bounded delegation, local MCP, and worktrees. These are Hearth task-control capabilities, not a claim of feature parity with Pi. Codex remains the default executor for GitHub engineering work, and both paths share task state, permissions, budgets, and the artifact contract.
 
 ## DeerFlow patterns worth adopting
 
 - **Task decomposition and staged evidence.** Break a complex task into inspectable stages, then let later steps reference prior evidence instead of handing the entire goal to one opaque execution.
 - **Separate research, generation, and evaluation.** Candidate production and candidate evaluation can be separate, so one run does not both change a method and grade its own change.
+- **Middleware and lazy tools.** Long tasks need separate handling for context, tool availability, memory, and subtasks instead of putting every capability into one prompt.
+- **Sandbox, subagent, and memory boundaries.** Subtasks need independent boundaries, and long-lived information needs provenance and a recall budget.
 
-Hearth borrows only this decomposition, evidence, and layered-evaluation structure for method-candidate generation and baseline/trial comparison. It does not integrate DeerFlow or add a multi-agent collaboration runtime.
+Hearth borrows this decomposition, evidence, layered-evaluation, and long-horizon middleware structure for method-candidate generation, baseline/trial comparison, and native compaction, recovery, and bounded delegation. It does not integrate DeerFlow or adopt its multi-agent collaboration runtime. DeerFlow still has broader coverage of long-horizon orchestration, sandboxes, subagents, skills, memory, and lazy tools than the current native kernel.
+
+## OpenCode patterns worth adopting
+
+- **Execution surface before orchestration.** glob/grep, atomic editing, shell, skills, subagents, MCP, compaction, and worktrees together form general task completion, not just one read/write loop.
+- **Edits must be previewable.** Show a diff before modifying, and validate every patch target before one atomic write so a multi-file patch cannot partially succeed.
+- **Tools are discoverable capabilities.** Skills and extension tools load on demand; MCP server management, tool discovery, and call lifecycle are modeled separately.
+- **Delegation has explicit boundaries.** A subagent starts with fresh context, writes in an isolated worktree, and leaves the parent to inspect and merge the result.
+- **Context must be actively managed.** Compact at the model window, retain recent context and complete tool pairs, and make compaction part of recovery.
+
+Hearth has adopted these public capability shapes with its own glob/grep, atomic edits, bounded shell output and process-tree timeout, office artifacts, search, skill index, bounded subagents, local stdio MCP, and project worktrees. It has not copied OpenCode's code or runtime; approval, the task ledger, checkpoints, recovery, and artifact verification remain Hearth implementations. The remaining gap is mainly LSP, formatters, remote MCP, browser automation, visual understanding, automatic merging, and a more complete worktree experience.
 
 ## LoopX patterns worth adopting
 
@@ -71,7 +83,7 @@ Hearth uses LoopX only as a delivery-method reference. It is not a runtime depen
 | Data retention | Screenshots stay in the local device data directory with short expiry. The server records audit events, not the full screen, in the event log. |
 | Failure handling | Missing drivers, insufficient permissions, lost windows, scope mismatch, or unverifiable results stop the flow and return control to the user. High-risk actions are not retried, and success is never fabricated. |
 | Proactive service | Produce only suggestions with source, why-now, suggested action, impact, and risk. Accept records a decision; convert creates a queued task; external actions still require approval. Daily limits, quiet hours, cooldown, and pause constrain interruption. |
-| Tool-level approval | The native executor asks for one-time approval before writing or editing files, applying patches, running shell commands, fetching web pages, or capturing the desktop. Approval covers only that call; rejection returns a tool error to the model and the task continues. DeepSeek Harness `approval/request` calls reuse the same one-time approval record and map to `allowed-once`, `rejected`, or `cancelled`. Full permission auto-allows and records an audit event. Codex, Hermes, Qoder, WorkBuddy, and Kimi native per-tool approval events are not yet normalized, and external effects remain governed by the separate effect ledger. |
+| Tool-level approval | The native executor asks for one-time approval before writing or editing files, applying patches, running shell commands, fetching web pages, capturing the desktop, and calling MCP tools. Approval covers only that call; MCP approval binds the server, tool, and argument digest. Rejection returns a tool error to the model and the task continues. DeepSeek Harness `approval/request` calls reuse the same one-time approval record and map to `allowed-once`, `rejected`, or `cancelled`. Full permission auto-allows and records an audit event. Codex, Hermes, Qoder, WorkBuddy, and Kimi native per-tool approval events are not yet normalized, and external effects remain governed by the separate effect ledger. |
 | Memory | Memory starts as a candidate and needs user confirmation. Recall records reasons and budgets; injected context is marked untrusted background. Sensitive memory is not recalled by default, `secret` is never recalled, and forgetting redacts projections, versions, events, and recall audits. |
 | Method evolution | A candidate can only inherit the intersection of source-task capabilities. Trials read existing terminal traces and create no external side effects. Only repeatable improvement evidence permits promotion, with rejection, rollback, and reasons retained. |
 | Multi-device execution | Task leases use owner, TTL, and epoch. Expired takeover advances the epoch and rejects the old executor's commits. Sync copies only filtered event projections, not approvals, sources, outbox, device, or desktop-control events. |
@@ -89,8 +101,9 @@ Hearth uses LoopX only as a delivery-method reference. It is not a runtime depen
 - Turning proactive suggestions into an auto-executor or skipping approval because the system originated the suggestion.
 - Treating candidate memory as fact or a candidate method as an adopted capability.
 - Claiming system push, phone pairing, remote takeover, or real mobile-device acceptance. The PWA currently provides an installable shell and offline navigation only.
-- Describing DeerFlow or LoopX as integrated components. They provide design and delivery-method references only.
+- Describing DeerFlow, OpenCode, or LoopX as integrated components. They provide design, capability-tradeoff, and delivery-method references only.
 - Describing Pi as an integrated dependency. Hearth uses its single-agent kernel shape as a reference and provides its own TypeScript implementation.
+- Treating OpenCode's public execution surface as something Hearth has fully copied. LSP, formatters, remote MCP, browser automation, visual understanding, and automatic merging are not implemented.
 
 ## Impact by phase
 

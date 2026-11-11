@@ -6,7 +6,7 @@ outline: [2, 3]
 
 # Phase 2–6 Delivery Status
 
-Checked on 2026-11-10. This page records only what the current code and real runs can prove; a page existing is not treated as a completed loop.
+Checked on 2026-11-11. This page records only what the current code and real runs can prove; a page existing is not treated as a completed loop.
 
 ## Phase result
 
@@ -37,18 +37,31 @@ This round prioritizes entrances tied to Hearth's task ownership, approval ledge
 - **Fast entry and mobile shell:** `Ctrl/Command + K` jumps to pages and tasks. The web app ships a PWA manifest, icons, offline app shell, and mobile bottom navigation.
 - **Task organization:** The task list supports pinning, archiving, and restoring. Archived tasks are hidden from All, Active, Done, and Needs attention by default and can be found through the Archived filter; pinned tasks sort first. Organization is stored in separate `pinnedAt`/`archivedAt` fields and does not change task status, approvals, leases, or execution results.
 
-**Still deliberately open:** Codex, Hermes, Qoder, WorkBuddy, and Kimi do not yet normalize provider-native per-tool approval events into Hearth approvals. There is no arbitrary project/worktree management, hidden-ref file restore, PR review decision/auto-merge/revert, subagent, MCP server, or provider-native skills/commands. The PWA still lacks real iOS/Android installation acceptance, system push, phone pairing, and remote takeover.
+**Still deliberately open in that round (see “General execution kernel upgrade” for later status):** Codex, Hermes, Qoder, WorkBuddy, and Kimi do not yet normalize provider-native per-tool approval events into Hearth approvals. At that time there was no arbitrary project/worktree management, hidden-ref file restore, PR review decision/auto-merge/revert, subagent, MCP server, or provider-native skills/commands. The 2026-11-11 work added local project worktrees, bounded subagents, local stdio MCP, and on-demand skills; hidden-ref file restore, PR review decision/auto-merge/revert, remote MCP, and provider-native skills/commands remain unimplemented. The PWA still lacks real iOS/Android installation acceptance, system push, phone pairing, and remote takeover.
 
 ## Agent runtime loop
 
-- **Implemented:** `native` and `codex` executors are peers; executor identity is recorded in runs and artifact manifests. General tasks default to native, explicit code/engineering tasks use Codex, and failures do not silently switch executors.
-- **Implemented:** Four model protocols (OpenAI Chat, OpenAI Responses, Anthropic Messages, Gemini) with normalized streaming text and tool calls; providers can be selected or customized in settings.
-- **Implemented:** A `@hearth/agent-runtime` single-agent tool loop covering read, search, write, edit, patch, shell, web fetch, ask-user, and finish tools, with task-scoped roots, hosts, and tool allowlists.
-- **Implemented:** Turn, tool-call, token, and duration budgets; checkpoints after model turns and tool steps; recovery with user follow-up; and up to two repair rounds with prior agent context when declared deliverables are missing.
+- **Implemented:** `native` and `codex` executors are peers; executor identity is recorded in runs and artifact manifests. General tasks default to native, GitHub code/engineering tasks use Codex, and a user-selected local project runs native in an isolated worktree. Failures do not silently switch executors.
+- **Implemented:** Four model protocols (OpenAI Chat, OpenAI Responses, Anthropic Messages, Gemini) with normalized streaming text and tool calls. Model profiles expose documented context-window and maximum-output budgets, and providers can be selected or customized in settings.
+- **Implemented:** A `@hearth/agent-runtime` general execution kernel covering read, document, glob/grep, write, atomic edit, patch, shell, web search, skills, delegation, local MCP, ask-user, and finish tools, with task-scoped roots, hosts, and tool allowlists.
+- **Implemented:** Turn, tool-call, token, and duration budgets; checkpoints after model turns and tool steps; token-aware compaction, transient retries, and repeated-tool-call detection; recovery with user follow-up; and up to two repair rounds with prior agent context when declared deliverables are missing.
 - **Implemented:** Tasks requiring network access or engineering workspace writes create a chat proposal and enter the queue only after confirmation. Ordinary general tasks dispatch directly.
 - **UI contract:** The task list shows executor, phase, tokens, duration, and result. Details show the final summary and declared artifacts first; intermediate JSON, command logs, and checkpoints remain folded technical details.
 
 This is a code-and-test loop, not evidence of long-running acceptance with real users.
+
+## General execution kernel upgrade (2026-11-11)
+
+This round upgraded native from a compact coding loop into a general execution kernel across 16 planned items: items 1–15 are code and test delivery, and the final item is this status page and the capability matrix. The evidence proves code and automated-test closures only. It is not a shared benchmark against Pi, DeerFlow, or OpenCode and does not support a numeric superiority claim.
+
+- **Files and commands:** Added glob/grep, document reading, and XLSX/CSV/DOCX generation. `edit_file` previews diffs; patches validate every target before one atomic write and support moves and real deletion. Shell keeps full output in task-local `.hearth/shell` logs, returns only the tail, and kills the whole process tree on timeout.
+- **Context and stability:** Model windows default to 128K and maximum output to 8K. Compaction reserves `max(16K, 15%)`, keeps roughly 20K recent tokens, starts only at complete turn boundaries, never splits a tool call from its result, and falls back to safe truncation if summarization fails. It writes a checkpoint after compacting. Plain text no longer completes a task; repeated failure to call `finish_task` fails explicitly. Only 429/5xx/network failures retry twice, and repeated identical tool calls are reported and suppressed.
+- **Skills and delegation:** Prompts receive only a skill index. `load_skill` verifies the content hash, task permissions, and audit before returning content; `read_skill_resource` stays inside the skill package. `delegate_task` uses fresh context, permits only read-only or isolated writes, is single-layer and serial, caps at two children per parent, forbids MCP and automatic merging, and rolls child usage into the parent.
+- **Projects and worktrees:** Added local Git project registration, path/Git-root/branch validation, and the settings project list. Project tasks use an isolated `hearth/<task-id>` worktree, reuse it on resume, retain it after success or failure, and delete it only on explicit cleanup when the worktree is clean. GitHub tasks still use Codex.
+- **Local MCP:** Only stdio is supported. The settings page manages the command, arguments, and encrypted environment values; startup probing, tool discovery, timeout, and crash isolation form a code loop. Tools use `mcp__<serverId>__<toolName>`, `ajv` validates the JSON Schema before invocation, result size is bounded, output/errors/stderr are redacted, and cross-server or built-in name conflicts are rejected.
+- **MCP approval and boundaries:** Every MCP call uses the existing per-call tool approval and binds the server, tool, and argument digest. Only full-permission mode auto-approves, with an audit event. MCP calls are not automatically retried and exactly-once is not promised. Search is off by default and supports only Tavily and SearXNG; public-network grants still enforce DNS, redirect, and private-address checks, and every fetch still requires approval.
+
+This round still has no remote MCP, OAuth, browser-automation search, image/scan visual understanding, PPTX, LSP, formatter, background shell session, or automatic cherry-pick. More tools do not prove that execution quality has passed real-user acceptance.
 
 ## Phase 2 capabilities
 
@@ -114,12 +127,16 @@ The backup boundary must remain visible in the UI: a recoverable database is not
 - **Hermes:** explicit capability manifests, target revalidation before execution, and session isolation. Hearth adopts app allowlists and target/epoch checks. It does not claim background focus-free input because the current Windows layer cannot reliably prove input still lands in the approved window.
 - **OpenClaw proactive-service pattern:** suggestions are separate from execution, and a suggested action returns to the normal approval chain. Hearth adopts this and has not turned proactive suggestions into an auto-executor.
 - **Hermes health-check pattern:** expose drivers, permissions, runtime state, and the latest maintenance result explicitly. Hearth uses health snapshots, maintenance records, and redacted diagnostics for this boundary.
-- **DeerFlow:** task decomposition, method candidates, and layered evaluation are design references only. Hearth does not integrate DeerFlow or adopt its multi-agent runtime.
+- **DeerFlow:** task decomposition, method candidates, layered evaluation, long-horizon middleware, sandboxes, and subagent boundaries are design references. Hearth does not integrate DeerFlow or adopt its multi-agent runtime; native still trails DeerFlow in long-horizon orchestration, sandboxes, subagents, skills, memory, and lazy tools.
+- **OpenCode:** only the public execution-surface shape is studied, not its code or runtime. Hearth added glob/grep, atomic edits, shell, office artifacts, search, on-demand skills, bounded subagents, local stdio MCP, compaction, and project worktrees, but LSP, formatters, remote MCP, browser automation, visual understanding, automatic merging, and a more complete worktree experience remain unsupported.
+- **MCP approval:** local stdio, independent startup probing, and per-call approval binding are used without remote transport or an exactly-once promise. Server environment values are encrypted with `SecretBox` and inherit neither Hearth model keys nor arbitrary parent-process secrets.
 - **LoopX:** only small-loop commits, status evidence, and acceptance boundaries are used as delivery-method references; LoopX is not a runtime dependency.
 
 ## Verification evidence
 
-On 2026-11-10, `npm test` on the current branch passed all 89 test files and 579 tests; `npm run typecheck`, `npm run build`, and `npm run docs:build` also pass. These checks cover service, API, model-protocol, native tool-loop, budget, permission, checkpoint, and proposal-confirmation code loops but do not replace real-user, real-device, or long-running acceptance.
+On 2026-11-11, `npm test` on the current branch passed all 100 test files and 667 tests; `npm run typecheck`, `npm run build`, and `npm run docs:build` also pass. These checks cover service, API, model-protocol, native tool-loop, glob/grep, atomic patches, shell process-tree timeout, office-file reads and writes, context compaction, transient retries, loop detection, explicit completion, skill loading, projects and worktrees, subagent boundaries, MCP management/calls/approval, search adapters, budgets, permissions, checkpoints, proposal confirmation, memory/skill governance, proactive reminders, scheduling, connection runtime, durable delegation, handoff artifacts, sandbox classification, channel idempotency, personal ontology, Context Broker, task graphs, and read-only ontology tools. They do not replace real-user, real-device, or long-running acceptance.
+
+This round did not establish a shared external capability benchmark against Pi, DeerFlow, or OpenCode, nor did it run a quantitative evaluation that could support a claim of being stronger than them. Only public capability, code maturity, and boundary differences are supported, not an overall performance ranking.
 
 The 60-case corpus, white-box scenarios, evaluation console, scoring, review, comparison, and experiment evidence now live in the standalone [hearth-eval](https://github.com/hearthproject/hearth-eval) repository. The main repository retains only the controlled evaluation-task and judge bridge. This documentation update did not run a real evaluation on the user's behalf.
 
@@ -135,5 +152,6 @@ The README and documentation home screenshots were refreshed on the same day. `n
 6. Phase 5 wrong-memory/wrong-method drills, complete export verification, and real production comparisons before and after method adoption.
 7. Phase 6 real two-device sync, offline recovery, lost-device revocation, token rotation, backup restore, and migration verification.
 8. At least several weeks of continuous operation, resource and state-drift checks, an upgrade/rollback pipeline, and overall v1.0 acceptance.
+9. Real acceptance for local project worktrees, isolated subagent writes, Tavily/SearXNG, and local MCP server installation, crashes, and approvals. Completion rate, tokens, latency, and human attention for the new tools in real multi-file and research/office tasks still require usage records; test count is not a substitute.
 
 These gaps are intentionally left open rather than replaced with simulated data or UI that only looks complete.
