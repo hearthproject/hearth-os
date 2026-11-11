@@ -1,5 +1,5 @@
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -18,6 +18,7 @@ import { hermesHealth } from "./hermes-health.ts";
 import { probeHermes } from "./hermes-executor.ts";
 import { completeChat } from "./model-client.ts";
 import type { ModelSettings } from "./model-settings.ts";
+import { removeTempDirectory } from "./temp-cleanup.ts";
 
 const HEALTH_TTL_MS = 30_000;
 const VERIFIED_TTL_MS = 24 * 60 * 60_000;
@@ -522,7 +523,7 @@ async function runRealProbe(
         return verifyProbeText(result.finalResponse);
       } finally {
         clearTimeout(timer);
-        rmSync(root, { recursive: true, force: true });
+        removeTempDirectory(root);
       }
     }
 
@@ -558,7 +559,7 @@ async function runRealProbe(
       throw error;
     } finally {
       clearTimeout(timer);
-      rmSync(root, { recursive: true, force: true });
+      removeTempDirectory(root);
     }
   } catch (error) {
     return probeOutcomeFromError(error);

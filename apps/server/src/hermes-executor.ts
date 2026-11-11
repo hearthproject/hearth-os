@@ -1,9 +1,10 @@
 import { execFile } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import type { ApprovalMode, RunUsage, TaskProgressDetail } from "@hearth/core";
+import { removeTempDirectory } from "./temp-cleanup.ts";
 
 export interface HermesProgress {
   type: string;
@@ -345,11 +346,7 @@ export async function runHermes(options: HermesRunOptions): Promise<HermesRunRes
       });
     });
   } finally {
-    try {
-      rmSync(promptDir, { recursive: true, force: true });
-    } catch {
-      // Temp cleanup is best effort.
-    }
+    removeTempDirectory(promptDir);
   }
 }
 
@@ -432,7 +429,7 @@ export function probeHermes(command: string, timeoutMs = 60_000): Promise<Hermes
         });
       } finally {
         clearTimeout(timer);
-        rmSync(root, { recursive: true, force: true });
+        removeTempDirectory(root);
       }
     });
   });
