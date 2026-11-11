@@ -49,6 +49,7 @@ describe("native system prompt", () => {
     expect(prompt).toContain("主数组优先使用 items");
     expect(prompt).toContain("默认使用 move");
     expect(prompt).toContain("处置方案完成后的目标态");
+    expect(prompt).toContain("不要把 unconfirmed_saved 写进 finalState");
     expect(prompt).toContain("saveAs（目标文件名");
     expect(prompt).toContain("finalState=\"saved\"");
     expect(prompt).toContain("只有一个 primary 候选");
