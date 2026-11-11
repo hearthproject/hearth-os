@@ -2586,6 +2586,9 @@ export class HearthScheduler {
     handoffsUsed: number;
     taskRoot: string;
   }): { targetExecutor: ExecutorId | null; highRisk: boolean; reason: string } {
+    if (input.task.externalRef?.startsWith("eval:")) {
+      return { targetExecutor: null, highRisk: false, reason: "评测任务只允许使用已选定的执行器，已禁止接管" };
+    }
     if (!isExecutorFailureCause(input.cause)) {
       return { targetExecutor: null, highRisk: false, reason: "这不是执行器故障，不需要切换执行器" };
     }

@@ -1269,6 +1269,33 @@ describe("Hearth scheduler", () => {
     expect(store?.listHandoffs(task.id)).toHaveLength(0);
   });
 
+  it("never hands an evaluation task to another executor", async () => {
+    const service = setup();
+    const modelSettingsPath = configureModel();
+    const modelSettings = JSON.parse(readFileSync(modelSettingsPath, "utf8"));
+    writeFileSync(modelSettingsPath, JSON.stringify({ ...modelSettings, baseUrl: "http://127.0.0.1:1/v1" }));
+    let codexCalls = 0;
+    const nativeRunner: NativeRunner = async () => {
+      throw new Error("执行器不可用：native 崩溃");
+    };
+    const codexRunner: CodexRunner = async () => {
+      codexCalls += 1;
+      return FAKE_RESULT;
+    };
+    scheduler = makeScheduler(service, codexRunner, { nativeRunner, modelSettingsPath });
+    scheduler.start();
+
+    const task = service.createTask({
+      title: "eval isolated", goal: "生成结果", executorId: "native",
+      externalRef: "eval:exp-1:E01:native:r1", expectedOutputs: ["result.md"]
+    });
+    const failed = await waitForStatus(service, task.id, "recoverable");
+    expect(failed.nextAction).toContain("评测任务只允许使用已选定的执行器");
+    expect(codexCalls).toBe(0);
+    expect(store?.listHandoffs(task.id)).toHaveLength(0);
+    expect(store?.listRuns(task.id)).toHaveLength(1);
+  });
+
   it("waits for user authorization instead of handing off permission failures", async () => {
     const service = setup();
     const modelSettingsPath = configureModel();
