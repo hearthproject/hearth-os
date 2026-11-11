@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import Fastify from "fastify";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DelegationJob, ExecutorHealth, ExecutorId, HandoffRecord, HandoffStatus, TaskRecord, TaskStatus } from "@hearth/core";
 import { defaultConversationSettings } from "@hearth/core";
 import type { CodexRunner, ExecutorHealthProvider, NativeRunner } from "./scheduler.ts";
@@ -19,6 +20,8 @@ import { SandboxService } from "./sandbox.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import type { DeepSeekHarnessRunOptions, DeepSeekHarnessRunResult, DshApprovalOutcome } from "@hearth/deepseek-executor";
 import { DEFAULT_RUN_BUDGET } from "./native-executor.ts";
+import { registerEvalRoutes } from "./eval-routes.ts";
+import type { completeChat } from "./model-client.ts";
 
 const FAKE_RESULT = {
   threadId: "fake-thread",
@@ -89,6 +92,87 @@ describe("Hearth scheduler", () => {
     expect(runs[0]?.status).toBe("completed");
     expect(runs[0]?.threadId).toBe("fake-thread");
     expect(existsSync(join(runs[0]?.workspace ?? "", "inputs"))).toBe(true);
+  });
+
+  it("runs an offline eval task from an external sample through publication and judging", async ({ onTestFinished }) => {
+    const service = setup();
+    const repoRoot = join(requireTemp(), "repo");
+    const evalInputRoot = join(requireTemp(), "external-eval");
+    const sample = "Please confirm the Friday delivery.";
+    mkdirSync(evalInputRoot);
+    writeFileSync(join(evalInputRoot, "mail.txt"), sample, "utf8");
+    vi.stubEnv("HEARTH_EVAL_INPUT_ROOT", evalInputRoot);
+    onTestFinished(() => vi.unstubAllEnvs());
+
+    const outputName = "result.md";
+    const expectedArtifact = `# Reply\n\nReceived: ${sample}\n`;
+    const runner = vi.fn<CodexRunner>(async (options) => {
+      const input = readFileSync(join(options.workingDirectory, "inputs", "01-mail", "mail.txt"), "utf8");
+      expect(input).toBe(sample);
+      writeFileSync(join(testOutDir(options), outputName), `# Reply\n\nReceived: ${input}\n`, "utf8");
+      return FAKE_RESULT;
+    });
+    scheduler = makeScheduler(service, runner, {
+      repoRoot,
+      executorSettingsPath: join(requireTemp(), "executor-settings.json"),
+      executorHealth: (id) => ({ canRun: id === "codex", issues: [] })
+    });
+
+    const score = { id: "quality", passed: true, confidence: 0.91, reason: "Clear reply", evidence: [sample] };
+    const judgment = { criteria: [score], overallConfidence: 0.91 };
+    const complete = vi.fn<typeof completeChat>(async () => ({
+      content: JSON.stringify(judgment),
+      usage: { inputTokens: 100, outputTokens: 20 }
+    }));
+    const app = Fastify();
+    onTestFinished(() => app.close());
+    registerEvalRoutes(app, { service, store: service.store, repoRoot, settings: chatSettings, complete });
+    scheduler.start();
+
+    const body = {
+      externalRef: "bridge:mail:codex:r1",
+      title: "Reply to a sample email",
+      goal: "Write a reply to the input email",
+      inputs: [{ kind: "file", label: "mail", value: "mail.txt" }],
+      expectedOutputs: [outputName],
+      executorId: "codex",
+      runMode: "offline",
+      outputDir: ".hearth/eval-artifacts/bridge/mail/r1"
+    };
+    const createRequest = { method: "POST", url: "/api/eval/tasks", payload: body } as const;
+    const created = await app.inject(createRequest);
+    expect(created.statusCode, created.body).toBe(201);
+    const { task, created: wasCreated } = created.json<{ task: TaskRecord; created: boolean }>();
+    expect(wasCreated).toBe(true);
+    expect(task.networkHosts).toEqual([]);
+    const completed = await waitForStatus(service, task.id, "completed");
+    expect(runner).toHaveBeenCalledTimes(1);
+
+    const publishedPath = join(repoRoot, body.outputDir, outputName);
+    expect(readFileSync(publishedPath, "utf8")).toBe(expectedArtifact);
+    expect(service.store.listArtifacts(task.id)).toContainEqual(expect.objectContaining({
+      taskId: task.id,
+      runId: completed.currentRunId,
+      relativePath: outputName,
+      absolutePath: publishedPath
+    }));
+
+    const judged = await app.inject({
+      method: "POST",
+      url: "/api/eval/judge",
+      payload: { taskId: task.id, criteria: [{ id: score.id, label: "Quality", rubric: "Clear reply", points: 30 }], deterministic: [] }
+    });
+    expect(judged.statusCode, judged.body).toBe(200);
+    expect(complete).toHaveBeenCalledTimes(1);
+    const judgePrompt = complete.mock.calls[0]?.[1].find(({ role }) => role === "user");
+    expect(judgePrompt?.content).toContain(`### ${outputName}\n${expectedArtifact}`);
+    expect(judged.json()).toMatchObject({ model: chatSettings().model, ...judgment });
+
+    const repeated = await app.inject(createRequest);
+    expect(repeated.statusCode, repeated.body).toBe(200);
+    expect(repeated.json()).toMatchObject({ task: { id: task.id }, created: false });
+    expect(service.store.listTasks({ includeDeleted: true }).filter(({ externalRef }) => externalRef === body.externalRef))
+      .toEqual([expect.objectContaining({ id: task.id })]);
   });
 
   it("marks unsupported inputs recoverable instead of inventing output", async () => {
@@ -1882,6 +1966,8 @@ describe("Hearth scheduler", () => {
     service: HearthService,
     codexRunner: CodexRunner,
     extra: {
+      repoRoot?: string;
+      executorSettingsPath?: string;
       githubRun?: (command: string, args: string[]) => Promise<{ stdout: string; stderr: string }>;
       approvals?: ApprovalManager;
       leases?: TaskLeaseService;
@@ -1903,7 +1989,7 @@ describe("Hearth scheduler", () => {
       modelSettingsPath: extra.modelSettingsPath ?? join(requireTemp(), "model-settings.json"),
       workspaceRoot: join(requireTemp(), "workspaces"),
       githubCacheRoot: join(requireTemp(), "git-cache"),
-      artifactBase: requireTemp(),
+      artifactBase: extra.repoRoot ?? requireTemp(),
       runtimePreparer: async (options) => ({
         ok: true,
         workspaceRoot: options.workspaceRoot,
