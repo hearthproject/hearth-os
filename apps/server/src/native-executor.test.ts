@@ -91,6 +91,58 @@ describe("json deliverables", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("treats scalar facts as authoritative over conflicting top-level fields", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "result.json");
+      writeFileSync(path, JSON.stringify({
+        conflicts: [{ ids: ["a", "b"] }],
+        hasConflict: true,
+        action: "report_and_quarantine_zero_interaction",
+        risk: "low",
+        sent: true,
+        send: true,
+        facts: {
+          conflicts: false,
+          action: "quarantine",
+          risk: "high",
+          sent: false
+        }
+      }));
+      normalizeJsonDeliverables(dir, ["result.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.conflicts).toBe(false);
+      expect(parsed.conflictsDetails).toEqual([{ ids: ["a", "b"] }]);
+      expect(parsed.hasConflict).toBe(false);
+      expect(parsed.action).toBe("quarantine");
+      expect(parsed.risk).toBe("high");
+      expect(parsed.sent).toBe(false);
+      expect(parsed.send).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("derives common count aliases from facts and top-level fields", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "result.json");
+      writeFileSync(path, JSON.stringify({
+        facts: { verdict: "ok" },
+        existingEffectCount: 0,
+        dateUnknownCount: 1,
+        recordCount: 3
+      }));
+      normalizeJsonDeliverables(dir, ["result.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.effectCount).toBe(0);
+      expect(parsed.unknownCount).toBe(1);
+      expect(parsed.itemCount).toBe(3);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("native execution progress", () => {

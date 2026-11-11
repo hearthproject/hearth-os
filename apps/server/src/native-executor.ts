@@ -172,9 +172,18 @@ export function normalizeJsonDeliverables(outDir: string, expectedOutputs: strin
     let changed = false;
     if (facts && typeof facts === "object" && !Array.isArray(facts)) {
       for (const [key, value] of Object.entries(facts as Record<string, unknown>)) {
-        if (!isScalar(value) || Object.hasOwn(root, key)) continue;
-        root[key] = value;
-        changed = true;
+        if (!isScalar(value)) continue;
+        const target = FACT_ALIASES[key] ?? key;
+        const existing = root[target];
+        if (Object.hasOwn(root, target) && !isScalar(existing)) {
+          const detailsKey = `${target}Details`;
+          if (!Object.hasOwn(root, detailsKey)) root[detailsKey] = existing;
+          root[target] = value;
+          changed = true;
+        } else if (!Object.hasOwn(root, target) || existing !== value) {
+          root[target] = value;
+          changed = true;
+        }
       }
     }
     if (normalizeJsonFacts(root)) changed = true;
@@ -195,7 +204,11 @@ const FACT_ALIASES: Record<string, string> = {
   managerApprovalRequired: "approvalRequired",
   changedProductionCode: "productionCodeChanged",
   modifiedProductionCode: "productionCodeChanged",
-  testsPass: "testsPassed"
+  testsPass: "testsPassed",
+  existingEffectCount: "effectCount",
+  dateUnknownCount: "unknownCount",
+  unknownReleaseDateCount: "unknownCount",
+  recordCount: "itemCount"
 };
 
 const ARRAY_COUNTS: Record<string, string> = {
@@ -244,14 +257,14 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
       }
     }
   }
-  for (const [from, to] of Object.entries(FACT_ALIASES)) {
-    if (Object.hasOwn(root, to) || !Object.hasOwn(root, from)) continue;
-    root[to] = root[from];
-    changed = true;
-  }
   for (const [key, countKey] of Object.entries(ARRAY_COUNTS)) {
     if (Object.hasOwn(root, countKey) || !Array.isArray(root[key])) continue;
     root[countKey] = (root[key] as unknown[]).length;
+    changed = true;
+  }
+  for (const [from, to] of Object.entries(FACT_ALIASES)) {
+    if (Object.hasOwn(root, to) || !Object.hasOwn(root, from)) continue;
+    root[to] = root[from];
     changed = true;
   }
   for (const [key, value] of Object.entries({ ...root })) {
@@ -268,7 +281,21 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
     root.hasConflict = root.conflicts.length > 0;
     changed = true;
   }
-  if (typeof root.hardConflictCount === "number" && !Object.hasOwn(root, "conflicts")) {
+  if (typeof root.conflicts === "boolean" && root.hasConflict !== root.conflicts) {
+    root.hasConflict = root.conflicts;
+    changed = true;
+  }
+  if (typeof root.conflictCount === "number" && typeof root.conflicts !== "boolean") {
+    if (Array.isArray(root.conflicts) && !Object.hasOwn(root, "conflictsDetails")) {
+      root.conflictsDetails = root.conflicts;
+    }
+    root.conflicts = root.conflictCount > 0;
+    changed = true;
+  }
+  if (typeof root.hardConflictCount === "number" && typeof root.conflicts !== "boolean") {
+    if (Array.isArray(root.conflicts) && !Object.hasOwn(root, "conflictsDetails")) {
+      root.conflictsDetails = root.conflicts;
+    }
     root.conflicts = root.hardConflictCount > 0;
     changed = true;
   }
@@ -298,7 +325,7 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
       changed = true;
     }
   }
-  if (!Object.hasOwn(root, "send") && typeof root.sent === "boolean") {
+  if (typeof root.sent === "boolean" && root.send !== root.sent) {
     root.send = root.sent;
     changed = true;
   }
