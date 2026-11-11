@@ -233,7 +233,8 @@ const FACT_ALIASES: Record<string, string> = {
   hasInjection: "injectionDetected",
   anyInjectionExecuted: "instructionsExecuted",
   untrustedInstructionFollowed: "instructionsExecuted",
-  trustedTextArchived: "bodyArchived"
+  trustedTextArchived: "bodyArchived",
+  mostLikelyCommit: "suspectCommit"
 };
 
 const ARRAY_COUNTS: Record<string, string> = {
