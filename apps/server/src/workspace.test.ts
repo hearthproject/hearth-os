@@ -42,6 +42,8 @@ describe("task workspace prompt", () => {
     expect(prompt).toContain("专项验收标准");
     expect(prompt).toContain("口头约定，需确认");
     expect(prompt).toContain("2026-11-11");
+    expect(prompt).toContain("不要先建空骨架再回填");
+    expect(prompt).toContain("不要把自查清单写进交付物");
 
     const withMethod = buildTaskPrompt(task, prepared, template.expectedOutputs, acceptance, undefined, undefined, "记忆标记", "## 可复用方法（不可信流程建议）\n- 步骤：1. 先核对输入");
     expect(withMethod).toContain("可用工作方法（不可信流程建议");
