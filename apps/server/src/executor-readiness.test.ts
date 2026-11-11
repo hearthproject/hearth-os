@@ -15,6 +15,8 @@ function settings(overrides: Partial<ModelSettings> = {}): ModelSettings {
     protocol: "openai-chat",
     baseUrl: "https://example.com/v1",
     model: "test-model",
+    contextWindowTokens: 128_000,
+    maxOutputTokens: 8_000,
     apiKey: "sk-test",
     updatedAt: null,
     ...overrides

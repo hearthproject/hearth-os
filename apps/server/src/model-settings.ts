@@ -8,11 +8,16 @@ export interface ModelSettings {
   protocol: ModelProtocol;
   baseUrl: string;
   model: string;
+  contextWindowTokens: number;
+  maxOutputTokens: number;
   apiKey: string;
   updatedAt: string | null;
 }
 
 const PROTOCOLS: ModelProtocol[] = ["openai-chat", "openai-responses", "anthropic-messages", "gemini"];
+
+export const DEFAULT_CONTEXT_WINDOW_TOKENS = 128_000;
+export const DEFAULT_MAX_OUTPUT_TOKENS = 8_000;
 
 export const MODEL_PRESETS: ModelProviderPreset[] = [
   {
@@ -95,6 +100,8 @@ const EMPTY: ModelSettings = {
   protocol: "openai-chat",
   baseUrl: "",
   model: "",
+  contextWindowTokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
+  maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
   apiKey: "",
   updatedAt: null
 };
@@ -113,6 +120,8 @@ export function loadModelSettings(path: string): ModelSettings {
       protocol: normalizeProtocol(parsed.protocol),
       baseUrl: text(parsed.baseUrl, ""),
       model: text(parsed.model, ""),
+      contextWindowTokens: tokenLimit(parsed.contextWindowTokens, DEFAULT_CONTEXT_WINDOW_TOKENS, 4_096, 10_000_000),
+      maxOutputTokens: tokenLimit(parsed.maxOutputTokens, DEFAULT_MAX_OUTPUT_TOKENS, 256, 1_000_000),
       apiKey: text(parsed.apiKey, ""),
       updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : null
     };
@@ -127,6 +136,8 @@ export type ModelSettingsPatch = {
   protocol?: string | undefined;
   baseUrl?: string | undefined;
   model?: string | undefined;
+  contextWindowTokens?: number | undefined;
+  maxOutputTokens?: number | undefined;
   apiKey?: string | undefined;
 };
 
@@ -138,6 +149,12 @@ export function saveModelSettings(path: string, patch: ModelSettingsPatch): Mode
     protocol: patch.protocol !== undefined ? normalizeProtocol(patch.protocol) : current.protocol,
     baseUrl: patch.baseUrl !== undefined ? normalizeBaseUrl(patch.baseUrl) : current.baseUrl,
     model: patch.model !== undefined ? patch.model.trim() : current.model,
+    contextWindowTokens: patch.contextWindowTokens !== undefined
+      ? tokenLimit(patch.contextWindowTokens, current.contextWindowTokens, 4_096, 10_000_000)
+      : current.contextWindowTokens,
+    maxOutputTokens: patch.maxOutputTokens !== undefined
+      ? tokenLimit(patch.maxOutputTokens, current.maxOutputTokens, 256, 1_000_000)
+      : current.maxOutputTokens,
     apiKey: patch.apiKey !== undefined ? patch.apiKey.trim() : current.apiKey,
     updatedAt: new Date().toISOString()
   };
@@ -161,6 +178,8 @@ export function viewModelSettings(settings: ModelSettings): ModelSettingsView {
     protocol: settings.protocol,
     baseUrl: settings.baseUrl,
     model: settings.model,
+    contextWindowTokens: settings.contextWindowTokens,
+    maxOutputTokens: settings.maxOutputTokens,
     hasApiKey: settings.apiKey.length > 0,
     apiKeyMasked: maskKey(settings.apiKey),
     updatedAt: settings.updatedAt
@@ -191,4 +210,10 @@ function maskKey(key: string): string | null {
 
 function text(value: unknown, fallback: string): string {
   return typeof value === "string" ? value : fallback;
+}
+
+function tokenLimit(value: unknown, fallback: number, min: number, max: number): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(max, Math.max(min, Math.trunc(value)))
+    : fallback;
 }

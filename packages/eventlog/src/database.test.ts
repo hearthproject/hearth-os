@@ -439,6 +439,8 @@ describe("HearthStore", () => {
       protocol: "openai-chat" as const,
       baseUrl: "https://example.com/v1",
       model: "chat-model",
+      contextWindowTokens: 128_000,
+      maxOutputTokens: 8_000,
       apiKeyCipher: "cipher-old",
       isLocal: false,
       createdAt: "2026-11-07T00:00:00.000Z",

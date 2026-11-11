@@ -130,7 +130,7 @@ export interface RunAggregate {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 29;
+export const CURRENT_SCHEMA_VERSION = 30;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -488,6 +488,8 @@ CREATE TABLE IF NOT EXISTS model_profiles (
   protocol TEXT NOT NULL,
   base_url TEXT NOT NULL,
   model TEXT NOT NULL,
+  context_window_tokens INTEGER NOT NULL DEFAULT 128000,
+  max_output_tokens INTEGER NOT NULL DEFAULT 8000,
   api_key_cipher TEXT,
   is_local INTEGER NOT NULL,
   created_at TEXT NOT NULL,
@@ -1279,6 +1281,8 @@ export class HearthStore {
     ensureColumn(this.db, "tasks", "request_hash", "TEXT");
     ensureColumn(this.db, "method_candidates", "generation", "INTEGER");
     ensureColumn(this.db, "method_candidates", "fingerprint", "TEXT");
+    ensureColumn(this.db, "model_profiles", "context_window_tokens", "INTEGER NOT NULL DEFAULT 128000");
+    ensureColumn(this.db, "model_profiles", "max_output_tokens", "INTEGER NOT NULL DEFAULT 8000");
     ensureColumn(this.db, "skills", "trial_task_ids_json", "TEXT NOT NULL DEFAULT '[]'");
     ensureColumn(this.db, "task_proposals", "inputs_json", "TEXT");
     ensureColumn(this.db, "runs", "executor_id", "TEXT");
@@ -1458,14 +1462,15 @@ export class HearthStore {
 
   upsertModelProfile(profile: ModelProfileRecord): ModelProfileRecord {
     this.db.prepare(
-      `INSERT INTO model_profiles (id, name, provider_id, provider_name, protocol, base_url, model, api_key_cipher, is_local, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO model_profiles (id, name, provider_id, provider_name, protocol, base_url, model, context_window_tokens, max_output_tokens, api_key_cipher, is_local, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET name=excluded.name, provider_id=excluded.provider_id, provider_name=excluded.provider_name,
          protocol=excluded.protocol, base_url=excluded.base_url, model=excluded.model,
+         context_window_tokens=excluded.context_window_tokens, max_output_tokens=excluded.max_output_tokens,
          api_key_cipher=excluded.api_key_cipher, is_local=excluded.is_local, updated_at=excluded.updated_at`
     ).run(
       profile.id, profile.name, profile.providerId, profile.providerName, profile.protocol,
-      profile.baseUrl, profile.model, profile.apiKeyCipher, profile.isLocal ? 1 : 0,
+      profile.baseUrl, profile.model, profile.contextWindowTokens, profile.maxOutputTokens, profile.apiKeyCipher, profile.isLocal ? 1 : 0,
       profile.createdAt, profile.updatedAt
     );
     return profile;
@@ -5584,6 +5589,8 @@ function rowToModelProfile(row: DbRow): ModelProfileRecord {
     protocol: String(row.protocol) as ModelProfileRecord["protocol"],
     baseUrl: String(row.base_url),
     model: String(row.model),
+    contextWindowTokens: Number(row.context_window_tokens ?? 128000),
+    maxOutputTokens: Number(row.max_output_tokens ?? 8000),
     apiKeyCipher: row.api_key_cipher == null ? null : String(row.api_key_cipher),
     isLocal: Number(row.is_local) === 1,
     createdAt: String(row.created_at),

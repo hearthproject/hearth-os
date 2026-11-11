@@ -267,6 +267,8 @@ const createModelProfileSchema = z.object({
   protocol: modelProtocolEnum.optional(),
   baseUrl: z.string().trim().min(1).max(500),
   model: z.string().trim().min(1).max(200),
+  contextWindowTokens: z.number().int().min(4096).max(10_000_000).optional(),
+  maxOutputTokens: z.number().int().min(256).max(1_000_000).optional(),
   apiKey: z.string().max(500).optional()
 }).strict();
 
@@ -277,6 +279,8 @@ const updateModelProfileSchema = z.object({
   protocol: modelProtocolEnum.optional(),
   baseUrl: z.string().trim().max(500).optional(),
   model: z.string().trim().max(200).optional(),
+  contextWindowTokens: z.number().int().min(4096).max(10_000_000).optional(),
+  maxOutputTokens: z.number().int().min(256).max(1_000_000).optional(),
   apiKey: z.string().max(500).optional()
 }).strict();
 

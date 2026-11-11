@@ -87,7 +87,7 @@ function settings(protocol: ModelProtocol): ModelSettings {
       : protocol === "openai-responses"
         ? `${origin}/responses/v1`
         : `${origin}/openai/v1`;
-  return { providerId: "custom", providerName: "Test", protocol, baseUrl, model: "test-model", apiKey: "test-key", updatedAt: null };
+  return { providerId: "custom", providerName: "Test", protocol, baseUrl, model: "test-model", contextWindowTokens: 128_000, maxOutputTokens: 8_000, apiKey: "test-key", updatedAt: null };
 }
 
 describe("agent tool calling", () => {

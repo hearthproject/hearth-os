@@ -1927,6 +1927,8 @@ describe("Hearth scheduler", () => {
       protocol: "openai-chat",
       baseUrl: "https://example.invalid/v1",
       model: "test-model",
+      contextWindowTokens: 128_000,
+      maxOutputTokens: 8_000,
       apiKey: "sk-test",
       updatedAt: null
     }));
@@ -1940,6 +1942,8 @@ describe("Hearth scheduler", () => {
       protocol: "openai-chat",
       baseUrl: "https://example.invalid/v1",
       model: "test-model",
+      contextWindowTokens: 128_000,
+      maxOutputTokens: 8_000,
       apiKey: "sk-test",
       updatedAt: null
     };

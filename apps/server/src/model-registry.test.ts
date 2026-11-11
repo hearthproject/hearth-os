@@ -64,6 +64,25 @@ describe("model registry protocol constraints", () => {
 });
 
 describe("model registry persistence", () => {
+  it("stores context-window and output-token limits", () => {
+    const registry = setup();
+    const profile = registry.createProfile({
+      name: "Long context",
+      protocol: "openai-chat",
+      baseUrl: "https://example.com/v1",
+      model: "long-context",
+      contextWindowTokens: 256_000,
+      maxOutputTokens: 32_000,
+      apiKey: "sk-secret"
+    });
+    expect(profile).toMatchObject({ contextWindowTokens: 256_000, maxOutputTokens: 32_000 });
+    expect(registry.settingsForProfile(profile.id)).toMatchObject({ contextWindowTokens: 256_000, maxOutputTokens: 32_000 });
+
+    const updated = registry.updateProfile(profile.id, { contextWindowTokens: 512_000 });
+    expect(updated.contextWindowTokens).toBe(512_000);
+    expect(updated.maxOutputTokens).toBe(32_000);
+  });
+
   it("clears a stored API key when the profile is updated with an empty key", () => {
     const registry = setup();
     const profile = registry.createProfile({

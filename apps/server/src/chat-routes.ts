@@ -74,6 +74,8 @@ const modelSettingsSchema = z.object({
   protocol: modelProtocolSchema.optional(),
   baseUrl: z.string().trim().max(500).optional(),
   model: z.string().trim().max(200).optional(),
+  contextWindowTokens: z.number().int().min(4096).max(10_000_000).optional(),
+  maxOutputTokens: z.number().int().min(256).max(1_000_000).optional(),
   apiKey: z.string().max(500).optional()
 }).strict();
 
@@ -83,6 +85,8 @@ const modelProbeSchema = z.object({
   protocol: modelProtocolSchema.optional(),
   baseUrl: z.string().trim().max(500).optional(),
   model: z.string().trim().max(200).optional(),
+  contextWindowTokens: z.number().int().min(4096).max(10_000_000).optional(),
+  maxOutputTokens: z.number().int().min(256).max(1_000_000).optional(),
   apiKey: z.string().max(500).optional()
 }).strict();
 
@@ -676,6 +680,8 @@ function mergeModelSettings(current: ModelSettings, patch: {
   protocol?: string | undefined;
   baseUrl?: string | undefined;
   model?: string | undefined;
+  contextWindowTokens?: number | undefined;
+  maxOutputTokens?: number | undefined;
   apiKey?: string | undefined;
 }): ModelSettings {
   return {
@@ -685,6 +691,8 @@ function mergeModelSettings(current: ModelSettings, patch: {
     ...(patch.protocol !== undefined ? { protocol: normalizeProtocol(patch.protocol) } : {}),
     ...(patch.baseUrl !== undefined ? { baseUrl: normalizeBaseUrl(patch.baseUrl) } : {}),
     ...(patch.model !== undefined ? { model: patch.model } : {}),
+    ...(patch.contextWindowTokens !== undefined ? { contextWindowTokens: patch.contextWindowTokens } : {}),
+    ...(patch.maxOutputTokens !== undefined ? { maxOutputTokens: patch.maxOutputTokens } : {}),
     ...(patch.apiKey !== undefined ? { apiKey: patch.apiKey } : {})
   };
 }
@@ -697,6 +705,8 @@ function saveRegistryChatSettings(
     protocol?: string | undefined;
     baseUrl?: string | undefined;
     model?: string | undefined;
+    contextWindowTokens?: number | undefined;
+    maxOutputTokens?: number | undefined;
     apiKey?: string | undefined;
   }
 ): ModelSettings | null {
@@ -708,6 +718,8 @@ function saveRegistryChatSettings(
       ...(patch.protocol !== undefined ? { protocol: normalizeProtocol(patch.protocol) } : {}),
       ...(patch.baseUrl !== undefined ? { baseUrl: normalizeBaseUrl(patch.baseUrl) } : {}),
       ...(patch.model !== undefined ? { model: patch.model } : {}),
+      ...(patch.contextWindowTokens !== undefined ? { contextWindowTokens: patch.contextWindowTokens } : {}),
+      ...(patch.maxOutputTokens !== undefined ? { maxOutputTokens: patch.maxOutputTokens } : {}),
       ...(patch.apiKey !== undefined ? { apiKey: patch.apiKey } : {})
     });
     return registry.chatSettings();
@@ -721,6 +733,8 @@ function saveRegistryChatSettings(
     protocol: patch.protocol ? normalizeProtocol(patch.protocol) : "openai-chat",
     baseUrl: normalizeBaseUrl(patch.baseUrl),
     model: patch.model,
+    ...(patch.contextWindowTokens !== undefined ? { contextWindowTokens: patch.contextWindowTokens } : {}),
+    ...(patch.maxOutputTokens !== undefined ? { maxOutputTokens: patch.maxOutputTokens } : {}),
     ...(patch.apiKey ? { apiKey: patch.apiKey } : {})
   });
   registry.setChatProfile(created.id);

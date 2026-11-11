@@ -97,6 +97,8 @@ function settings(protocol: ModelProtocol): ModelSettings {
     protocol,
     baseUrl,
     model: "test-model",
+    contextWindowTokens: 128_000,
+    maxOutputTokens: 8_000,
     apiKey: "test-key",
     updatedAt: null
   };

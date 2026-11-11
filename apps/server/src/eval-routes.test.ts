@@ -172,6 +172,8 @@ const judgeSettings: ModelSettings = {
   protocol: "openai-chat",
   baseUrl: "http://127.0.0.1:9999/v1",
   model: "judge-model",
+  contextWindowTokens: 128_000,
+  maxOutputTokens: 8_000,
   apiKey: "test-key",
   updatedAt: null
 };

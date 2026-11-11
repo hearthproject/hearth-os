@@ -50,6 +50,8 @@ interface ProfileDraft {
   protocol: ModelProtocol;
   baseUrl: string;
   model: string;
+  contextWindowTokens: number;
+  maxOutputTokens: number;
   apiKey: string;
 }
 
@@ -81,6 +83,8 @@ const EMPTY_DRAFT: ProfileDraft = {
   protocol: "openai-chat",
   baseUrl: "",
   model: "",
+  contextWindowTokens: 128000,
+  maxOutputTokens: 8000,
   apiKey: ""
 };
 
@@ -300,6 +304,8 @@ function ModelsTab() {
       protocol: profile.protocol,
       baseUrl: profile.baseUrl,
       model: profile.model,
+      contextWindowTokens: profile.contextWindowTokens,
+      maxOutputTokens: profile.maxOutputTokens,
       apiKey: ""
     });
     setModels([]);
@@ -328,6 +334,8 @@ function ModelsTab() {
         protocol: draft.protocol,
         baseUrl: draft.baseUrl.trim(),
         model: draft.model.trim(),
+        contextWindowTokens: draft.contextWindowTokens,
+        maxOutputTokens: draft.maxOutputTokens,
         ...(draft.apiKey.trim() ? { apiKey: draft.apiKey.trim() } : {})
       };
       if (editingId) await api.updateModelProfile(editingId, input);
@@ -461,6 +469,7 @@ function ModelsTab() {
                   </div>
                   <dl className="model-meta">
                     <div><dt>模型</dt><dd>{profile.model}</dd></div>
+                    <div><dt>上下文</dt><dd>{formatNumber(profile.contextWindowTokens)} / 输出 {formatNumber(profile.maxOutputTokens)}</dd></div>
                     <div><dt>地址</dt><dd title={profile.baseUrl}>{profile.baseUrl}</dd></div>
                     <div><dt>密钥</dt><dd>{profile.hasApiKey ? profile.apiKeyMasked ?? "已保存" : "未设置"}</dd></div>
                   </dl>
@@ -495,6 +504,8 @@ function ModelsTab() {
               <label className="span-2"><span>服务地址</span><input value={draft.baseUrl} onChange={(event) => update("baseUrl", event.target.value)} placeholder="https://api.deepseek.com/v1" spellCheck={false} /></label>
               <label><span>模型</span><div className="input-with-action"><input value={draft.model} onChange={(event) => update("model", event.target.value)} placeholder="手工填写或拉取" list="settings-model-options" spellCheck={false} /><button type="button" className="ghost-button compact" onClick={() => void fetchModels()} disabled={busy !== null}>{busy === "models" ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />} 拉取</button></div><datalist id="settings-model-options">{models.map((model) => <option key={model} value={model} />)}</datalist></label>
               <label><span>API Key</span><input type="password" value={draft.apiKey} onChange={(event) => update("apiKey", event.target.value)} placeholder={editingId ? "留空保留原密钥" : "sk-..."} autoComplete="off" /></label>
+              <label><span>上下文窗口（Token）</span><input type="number" min={4096} max={10000000} step={1000} value={draft.contextWindowTokens} onChange={(event) => update("contextWindowTokens", Number(event.target.value))} /></label>
+              <label><span>单次最大输出（Token）</span><input type="number" min={256} max={1000000} step={256} value={draft.maxOutputTokens} onChange={(event) => update("maxOutputTokens", Number(event.target.value))} /></label>
             </div>
             <div className="settings-actions">
               <button className="primary-button" onClick={() => void save()} disabled={busy !== null}>{busy === "save" ? <Loader2 size={15} className="spin" /> : <Save size={15} />} {editingId ? "保存修改" : "创建档案"}</button>

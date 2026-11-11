@@ -8,6 +8,8 @@ const NO_MODEL: ModelSettings = {
   protocol: "openai-chat",
   baseUrl: "",
   model: "",
+  contextWindowTokens: 128_000,
+  maxOutputTokens: 8_000,
   apiKey: "",
   updatedAt: null
 };

@@ -57,6 +57,8 @@ function settings(): ModelSettings {
     protocol: "openai-chat",
     baseUrl,
     model: "test-model",
+    contextWindowTokens: 128_000,
+    maxOutputTokens: 8_000,
     apiKey: "test-key",
     updatedAt: null
   };

@@ -118,6 +118,8 @@ export class ModelRegistry {
       protocol: patch.protocol ?? "openai-chat",
       baseUrl: patch.baseUrl ?? "",
       model: patch.model ?? "",
+      contextWindowTokens: patch.contextWindowTokens ?? 128_000,
+      maxOutputTokens: patch.maxOutputTokens ?? 8_000,
       apiKeyCipher: patch.apiKey ? this.secretBox.encrypt(patch.apiKey) : null,
       isLocal: false,
       createdAt: now,
@@ -139,6 +141,8 @@ export class ModelRegistry {
       protocol: patch.protocol !== undefined ? normalizeProtocol(patch.protocol) : current.protocol,
       baseUrl: patch.baseUrl !== undefined ? normalizeBaseUrl(patch.baseUrl) : current.baseUrl,
       model: patch.model !== undefined ? patch.model.trim() : current.model,
+      contextWindowTokens: patch.contextWindowTokens ?? current.contextWindowTokens,
+      maxOutputTokens: patch.maxOutputTokens ?? current.maxOutputTokens,
       apiKeyCipher: patch.apiKey === undefined
         ? current.apiKeyCipher
         : patch.apiKey.trim()
@@ -241,6 +245,8 @@ export class ModelRegistry {
       protocol: binding.effectiveProtocol ?? record.protocol,
       baseUrl: record.baseUrl,
       model: binding.effectiveModel ?? record.model,
+      contextWindowTokens: record.contextWindowTokens,
+      maxOutputTokens: record.maxOutputTokens,
       apiKey: record.apiKeyCipher ? this.secretBox.decrypt(record.apiKeyCipher) : "",
       updatedAt: record.updatedAt
     };
@@ -255,6 +261,8 @@ export class ModelRegistry {
       protocol: record.protocol,
       baseUrl: record.baseUrl,
       model: record.model,
+      contextWindowTokens: record.contextWindowTokens,
+      maxOutputTokens: record.maxOutputTokens,
       apiKey: record.apiKeyCipher ? this.secretBox.decrypt(record.apiKeyCipher) : "",
       updatedAt: record.updatedAt
     };
@@ -370,6 +378,8 @@ export class ModelRegistry {
       protocol: normalizeProtocol(record.protocol),
       baseUrl: normalizeBaseUrl(record.baseUrl),
       model: record.model.trim(),
+      contextWindowTokens: tokenLimit(record.contextWindowTokens, 128_000, 4_096, 10_000_000),
+      maxOutputTokens: tokenLimit(record.maxOutputTokens, 8_000, 256, 1_000_000),
       isLocal: false
     };
   }
@@ -384,6 +394,8 @@ export class ModelRegistry {
       protocol: record.protocol,
       baseUrl: record.baseUrl,
       model: record.model,
+      contextWindowTokens: record.contextWindowTokens,
+      maxOutputTokens: record.maxOutputTokens,
       hasApiKey: Boolean(apiKey),
       apiKeyMasked: maskKey(apiKey),
       isLocal: record.isLocal,
@@ -430,6 +442,12 @@ function maskKey(key: string): string | null {
   if (!key) return null;
   if (key.length <= 8) return "********";
   return `${key.slice(0, 4)}••••${key.slice(-4)}`;
+}
+
+function tokenLimit(value: unknown, fallback: number, min: number, max: number): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(max, Math.max(min, Math.trunc(value)))
+    : fallback;
 }
 
 function tomlString(value: string): string {

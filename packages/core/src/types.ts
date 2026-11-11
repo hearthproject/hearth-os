@@ -424,6 +424,8 @@ export interface ModelSettingsView {
   protocol: ModelProtocol;
   baseUrl: string;
   model: string;
+  contextWindowTokens: number;
+  maxOutputTokens: number;
   hasApiKey: boolean;
   apiKeyMasked: string | null;
   updatedAt: string | null;
@@ -461,6 +463,8 @@ export interface ModelProfileRecord {
   protocol: ModelProtocol;
   baseUrl: string;
   model: string;
+  contextWindowTokens: number;
+  maxOutputTokens: number;
   apiKeyCipher: string | null;
   isLocal: boolean;
   createdAt: string;
@@ -475,6 +479,8 @@ export interface ModelProfileView {
   protocol: ModelProtocol;
   baseUrl: string;
   model: string;
+  contextWindowTokens: number;
+  maxOutputTokens: number;
   hasApiKey: boolean;
   apiKeyMasked: string | null;
   isLocal: boolean;
@@ -489,6 +495,8 @@ export interface ModelProfilePatch {
   protocol?: ModelProtocol | undefined;
   baseUrl?: string | undefined;
   model?: string | undefined;
+  contextWindowTokens?: number | undefined;
+  maxOutputTokens?: number | undefined;
   apiKey?: string | undefined;
 }
 
