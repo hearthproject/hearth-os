@@ -396,6 +396,16 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
           const entry = (page.metadata as Record<string, unknown>)[field];
           return isPlainObject(entry) ? entry.status === "missing" || entry.value == null : entry == null;
         })) missingPageCount += 1;
+      } else {
+        const required = [...requiredFields].filter((field) => Object.hasOwn(page, field));
+        if (required.length === 0) continue;
+        matchedRequiredField = true;
+        if (required.some((field) => {
+          const entry = page[field];
+          return isPlainObject(entry)
+            ? entry.status === "missing" || (entry.status !== "present_but_ambiguous" && entry.value == null)
+            : entry == null;
+        })) missingPageCount += 1;
       }
     }
     if (matchedRequiredField && root.missingMetadata !== missingPageCount) {
