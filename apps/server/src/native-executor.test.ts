@@ -196,6 +196,25 @@ describe("json deliverables", () => {
     }
   });
 
+  it("normalizes contract test cases into a cases array", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "contract-report.json");
+      writeFileSync(path, JSON.stringify({
+        testCases: [
+          { case: "invalid body", status: 400 },
+          { case: "missing item", status: 404 }
+        ]
+      }));
+      normalizeJsonDeliverables(dir, ["contract-report.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.cases).toHaveLength(2);
+      expect(parsed.cases[0].case).toBe("invalid body");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("normalizes competing product counts", () => {
     const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
     try {

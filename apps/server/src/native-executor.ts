@@ -303,6 +303,14 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
       break;
     }
   }
+  if (!Array.isArray(root.cases)) {
+    for (const key of ["testCases", "contractCases", "caseResults"]) {
+      if (!Array.isArray(root[key]) || root[key].length === 0) continue;
+      root.cases = root[key];
+      changed = true;
+      break;
+    }
+  }
   if (!Array.isArray(root.ranges) && isPlainObject(root.statistics)) {
     for (const key of ["byCity", "byRegion", "byGroup"]) {
       const ranges = (root.statistics as Record<string, unknown>)[key];
