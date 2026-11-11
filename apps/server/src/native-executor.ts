@@ -417,6 +417,14 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
       } else if (isPlainObject(page.metadata)) {
         const required = [...requiredFields].filter((field) => Object.hasOwn(page.metadata as Record<string, unknown>, field));
         if (required.length === 0) {
+          const declaredMissing = Array.isArray(page.missingFields)
+            ? page.missingFields.filter((field) => typeof field === "string" && requiredFields.has(field))
+            : [];
+          if (declaredMissing.length > 0) {
+            matchedRequiredField = true;
+            missingPageCount += 1;
+            continue;
+          }
           const flatRequired = [...requiredFields].filter((field) => Object.hasOwn(page, field));
           if (flatRequired.length === 0) continue;
           matchedRequiredField = true;
