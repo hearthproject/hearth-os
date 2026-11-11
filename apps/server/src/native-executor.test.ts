@@ -288,6 +288,7 @@ describe("json deliverables", () => {
       const parsed = JSON.parse(readFileSync(path, "utf8"));
       expect(parsed.unknownPreserved).toBe(true);
       expect(parsed.facts.unknownPreserved).toBe(true);
+      expect(parsed.actions).toHaveLength(2);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

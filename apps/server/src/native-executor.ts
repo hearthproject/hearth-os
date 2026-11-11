@@ -518,6 +518,14 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
     root[countKey] = (root[key] as unknown[]).length;
     changed = true;
   }
+  if (
+    !Array.isArray(root.actions)
+    && Array.isArray(root.items)
+    && root.items.some((entry) => isPlainObject(entry) && typeof entry.action === "string")
+  ) {
+    root.actions = root.items;
+    changed = true;
+  }
   const actionEntries = Array.isArray(root.actions)
     ? root.actions
     : Array.isArray(root.items)
