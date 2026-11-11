@@ -50,6 +50,7 @@ describe("native system prompt", () => {
     expect(prompt).toContain("saveAs（目标文件名");
     expect(prompt).toContain("finalState=\"saved\"");
     expect(prompt).toContain("只有一个 primary 候选");
+    expect(prompt).toContain("顶层必须使用 cases 数组");
   });
 });
 
