@@ -226,7 +226,8 @@ const FACT_ALIASES: Record<string, string> = {
   treatmentEffect: "effect",
   observedEffect: "effect",
   likelyCommit: "suspectCommit",
-  failingTest: "failedTest"
+  failingTest: "failedTest",
+  explicitUnknownCount: "unknownCount"
 };
 
 const ARRAY_COUNTS: Record<string, string> = {
@@ -235,6 +236,7 @@ const ARRAY_COUNTS: Record<string, string> = {
   products: "productCount",
   findings: "findingCount",
   unknowns: "unknownCount",
+  unknown: "unknownCount",
   known: "knownCount",
   milestones: "milestoneCount",
   conflicts: "conflictCount",
@@ -288,6 +290,14 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
       const ranges = (root.statistics as Record<string, unknown>)[key];
       if (!Array.isArray(ranges) || ranges.length < 2) continue;
       root.ranges = ranges;
+      changed = true;
+      break;
+    }
+  }
+  if (!Array.isArray(root.nextQueries)) {
+    for (const key of ["searchQueries", "queries", "followUpQueries"]) {
+      if (!Array.isArray(root[key]) || root[key].length === 0) continue;
+      root.nextQueries = root[key];
       changed = true;
       break;
     }

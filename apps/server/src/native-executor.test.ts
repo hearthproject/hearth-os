@@ -286,6 +286,23 @@ describe("json deliverables", () => {
     }
   });
 
+  it("normalizes explicit unknown counts and search queries", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "result.json");
+      writeFileSync(path, JSON.stringify({
+        facts: { explicitUnknownCount: 2 },
+        searchQueries: [{ query: "q1" }, { query: "q2" }, { query: "q3" }]
+      }));
+      normalizeJsonDeliverables(dir, ["result.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.unknownCount).toBe(2);
+      expect(parsed.nextQueries).toHaveLength(3);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("normalizes review, delivery and send result contracts", () => {
     const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
     try {
