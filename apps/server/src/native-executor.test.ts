@@ -247,6 +247,25 @@ describe("json deliverables", () => {
     }
   });
 
+  it("normalizes suspected commit and failing test names", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "result.json");
+      writeFileSync(path, JSON.stringify({
+        facts: {
+          likelyCommit: "abc123",
+          failingTest: "backend/tests/test_retry.py::test_retry_timeout"
+        }
+      }));
+      normalizeJsonDeliverables(dir, ["result.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.suspectCommit).toBe("abc123");
+      expect(parsed.failedTest).toBe("test_retry_timeout");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("normalizes review, delivery and send result contracts", () => {
     const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
     try {

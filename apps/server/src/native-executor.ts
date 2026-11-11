@@ -224,7 +224,9 @@ const FACT_ALIASES: Record<string, string> = {
   competitorCount: "productCount",
   completionLift: "effect",
   treatmentEffect: "effect",
-  observedEffect: "effect"
+  observedEffect: "effect",
+  likelyCommit: "suspectCommit",
+  failingTest: "failedTest"
 };
 
 const ARRAY_COUNTS: Record<string, string> = {
@@ -294,6 +296,13 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
     if (Object.hasOwn(root, to) || !Object.hasOwn(root, from)) continue;
     root[to] = root[from];
     changed = true;
+  }
+  if (typeof root.failedTest === "string" && root.failedTest.includes("::")) {
+    const shortName = root.failedTest.split("::").pop()?.trim();
+    if (shortName) {
+      root.failedTest = shortName;
+      changed = true;
+    }
   }
   for (const [key, value] of Object.entries({ ...root })) {
     const match = key.match(/^(.+)Count$/);
