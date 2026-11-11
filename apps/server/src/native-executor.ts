@@ -420,16 +420,16 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
     root.rootCause = root.defectType.replace(/_/g, "-");
     changed = true;
   }
-  if (!Object.hasOwn(root, "cellEdits") && Array.isArray(root.items)) {
+  if (Array.isArray(root.items)) {
     const edits = root.items.filter((item) => (
       isPlainObject(item)
       && item.role !== "header"
       && (
         (typeof item.action === "string" && !/^(keep|skip|noop|unchanged)$/i.test(item.action))
-        || (typeof item.rule === "string" && /normalize/i.test(item.rule) && item.targetValue != null)
+        || (typeof item.rule === "string" && /normalize/i.test(item.rule) && (item.targetValue != null || item.after != null))
       )
     )).length;
-    if (edits > 0) {
+    if (edits > 0 && (typeof root.cellEdits !== "number" || root.cellEdits < edits)) {
       root.cellEdits = edits;
       changed = true;
     }

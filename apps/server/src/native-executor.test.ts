@@ -639,10 +639,11 @@ describe("json deliverables", () => {
     try {
       const path = join(dir, "result.json");
       writeFileSync(path, JSON.stringify({
+        cellEdits: 2,
         items: [
           { role: "header", action: "keep", targetValue: "date" },
           { role: "data", action: "normalize_date", targetValue: "2026-11-02" },
-          { role: "data", action: "keep", rule: "normalizeDate", targetValue: "2026-11-03" },
+          { role: "data", action: "keep", rule: "normalizeDate", after: "2026-11-03" },
           { role: "data", action: "keep", rule: "emptyAmount", targetValue: "100" },
           { role: "data", action: "fill_empty", targetValue: "0" }
         ]
