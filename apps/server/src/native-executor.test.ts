@@ -1,6 +1,9 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { TaskRecord } from "@hearth/core";
-import { nativeProgressForEvent, nativeSystemPrompt } from "./native-executor.ts";
+import { jsonDeliverableIssue, nativeProgressForEvent, nativeSystemPrompt, normalizeJsonDeliverables } from "./native-executor.ts";
 
 const baseTask = {
   id: "task-1",
@@ -32,6 +35,35 @@ describe("native system prompt", () => {
     expect(prompt).toContain("<noun>Count");
     expect(prompt).toContain("负责人 + 动作 + 截止");
     expect(prompt).toContain("回滚方案");
+  });
+});
+
+describe("json deliverables", () => {
+  it("requires a facts layer and promotes its scalar fields to the top level", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "result.json");
+      writeFileSync(path, JSON.stringify({ facts: { risk: "high", linksOpened: false }, evidence: ["x"] }));
+      expect(jsonDeliverableIssue(dir, ["result.json"])).toBeNull();
+      normalizeJsonDeliverables(dir, ["result.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.risk).toBe("high");
+      expect(parsed.linksOpened).toBe(false);
+      expect(parsed.evidence).toEqual(["x"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports missing or malformed facts layers", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      writeFileSync(join(dir, "result.json"), JSON.stringify({ verdict: { risk: "high" } }));
+      expect(jsonDeliverableIssue(dir, ["result.json"])).toContain("缺少 facts");
+      expect(jsonDeliverableIssue(dir, ["missing.json"])).toContain("缺少 JSON 产物");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

@@ -109,6 +109,7 @@ export interface AgentRuntimeOptions {
   onEvent?: (event: RuntimeEvent) => void;
   onCheckpoint?: (checkpoint: AgentCheckpoint) => void | Promise<void>;
   authorizeTool?: (request: AgentToolAuthorizationRequest) => Promise<AgentToolAuthorization>;
+  validateFinish?: (result: AgentToolResult, context: AgentToolContext) => string | null | Promise<string | null>;
   isFullPermission?: () => boolean;
   contextWindowTokens?: number;
   contextReserveTokens?: number;

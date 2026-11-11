@@ -1,4 +1,6 @@
 import type { BudgetDimension, RunBudget, RunUsage, TaskPermissions, TaskProgressDetail, TaskRecord } from "@hearth/core";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { isAbsolute, resolve, sep } from "node:path";
 import {
   createBuiltinTools,
   defaultTaskPermissions,
@@ -89,6 +91,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     ...(options.resume ? { resume: options.resume } : {}),
     contextWindowTokens: options.settings.contextWindowTokens,
     requireFinishTool: true,
+    validateFinish: () => jsonDeliverableIssue(options.prepared.outDir, options.expectedOutputs),
     summarizeContext: options.onContextSummary ?? ((messages, signal) => summarizeNativeContext(options.settings, messages, signal)),
     onEvent: (event) => {
       options.onContextEvent?.(event);
@@ -103,6 +106,8 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     ...(options.isFullPermission ? { isFullPermission: options.isFullPermission } : {})
   });
 
+  normalizeJsonDeliverables(options.prepared.outDir, options.expectedOutputs);
+
   return {
     status: result.status,
     finalResponse: result.summary,
@@ -114,6 +119,75 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     messages: result.messages,
     ...(budgetExhaustion ? { budgetExhaustion } : {})
   };
+}
+
+export function jsonDeliverableIssue(outDir: string, expectedOutputs: string[]): string | null {
+  const issues: string[] = [];
+  for (const output of expectedOutputs.filter((name) => /\.json$/i.test(name))) {
+    const path = resolveDeliverable(outDir, output);
+    if (!path) {
+      issues.push(`${output} 的路径不在输出目录内`);
+      continue;
+    }
+    if (!existsSync(path)) {
+      issues.push(`缺少 JSON 产物 ${output}`);
+      continue;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(readFileSync(path, "utf8"));
+    } catch (error) {
+      issues.push(`${output} 不是合法 JSON：${error instanceof Error ? error.message : String(error)}`);
+      continue;
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      issues.push(`${output} 的顶层必须是 JSON 对象`);
+      continue;
+    }
+    const facts = (parsed as Record<string, unknown>).facts;
+    if (!facts || typeof facts !== "object" || Array.isArray(facts)) {
+      issues.push(`${output} 顶层缺少 facts 对象`);
+      continue;
+    }
+    if (Object.values(facts as Record<string, unknown>).every((value) => !isScalar(value))) {
+      issues.push(`${output} 的 facts 中没有任何布尔、数字、字符串或 null 原子事实`);
+    }
+  }
+  return issues.length > 0 ? issues.join("；") : null;
+}
+
+export function normalizeJsonDeliverables(outDir: string, expectedOutputs: string[]): void {
+  for (const output of expectedOutputs.filter((name) => /\.json$/i.test(name))) {
+    const path = resolveDeliverable(outDir, output);
+    if (!path || !existsSync(path)) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(readFileSync(path, "utf8"));
+    } catch {
+      continue;
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+    const root = parsed as Record<string, unknown>;
+    const facts = root.facts;
+    if (!facts || typeof facts !== "object" || Array.isArray(facts)) continue;
+    let changed = false;
+    for (const [key, value] of Object.entries(facts as Record<string, unknown>)) {
+      if (!isScalar(value) || Object.hasOwn(root, key)) continue;
+      root[key] = value;
+      changed = true;
+    }
+    if (changed) writeFileSync(path, `${JSON.stringify(root, null, 2)}\n`, "utf8");
+  }
+}
+
+function resolveDeliverable(outDir: string, name: string): string | null {
+  const root = resolve(outDir);
+  const candidate = isAbsolute(name) ? resolve(name) : resolve(root, name);
+  return candidate === root || candidate.startsWith(root + sep) ? candidate : null;
+}
+
+function isScalar(value: unknown): boolean {
+  return value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean";
 }
 
 export function nativeProgressForEvent(event: RuntimeEvent): { kind: string; message: string; detail?: TaskProgressDetail } | null {

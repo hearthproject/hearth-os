@@ -32,6 +32,32 @@ describe("agent runtime", () => {
     expect(result.toolCalls).toBe(1);
   });
 
+  it("rejects finish_task until deliverable validation passes", async () => {
+    const root = workspace(roots);
+    let attempts = 0;
+    const result = await runAgent({
+      model: fakeModel([
+        turn("", [call("finish_task", { summary: "第一次" })]),
+        turn("", [call("finish_task", { summary: "第二次" })])
+      ]),
+      tools: createBuiltinTools(),
+      goal: "完成一件事",
+      systemPrompt: "system",
+      budget: { maxTurns: 4, maxToolCalls: 4, maxTokens: 10_000, maxDurationMs: 30_000 },
+      permissions: defaultTaskPermissions({ workspaceRoot: root, outDir: join(root, "out"), networkHosts: [] }),
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      validateFinish: () => {
+        attempts += 1;
+        return attempts === 1 ? "缺少 facts" : null;
+      }
+    });
+
+    expect(attempts).toBe(2);
+    expect(result.status).toBe("completed");
+    expect(result.summary).toBe("第二次");
+  });
+
   it("executes a file-writing tool before finishing", async () => {
     const root = workspace(roots);
     const out = join(root, "out");

@@ -39,6 +39,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   let summary: string | null = null;
   let emptyTurns = 0;
   let missingFinishTurns = 0;
+  let finishRejections = 0;
   let lastToolSignature: string | null = null;
   let repeatedToolCalls = 0;
   const startedAt = Date.now();
@@ -238,6 +239,29 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       });
 
       if (result.action === "finish") {
+        if (options.validateFinish && finishRejections < 2) {
+          let issue: string | null = null;
+          try {
+            issue = await options.validateFinish(result, {
+              workspaceRoot: options.workspaceRoot,
+              outDir: options.outDir,
+              permissions: options.permissions,
+              signal
+            });
+          } catch (error) {
+            issue = `交付物自检失败：${errorMessage(error)}`;
+          }
+          if (issue) {
+            finishRejections += 1;
+            emit({ type: "notice", message: `交付物自检未通过：${issue}` });
+            messages.push({
+              role: "user",
+              content: `交付物自检未通过：${issue}\n请先修正产物，然后重新调用 finish_task。`
+            });
+            await checkpoint("tool");
+            continue;
+          }
+        }
         summary = (result.summary ?? result.content).trim() || "任务完成";
         await checkpoint("final");
         return finish("completed", summary, result.outputs ?? []);
