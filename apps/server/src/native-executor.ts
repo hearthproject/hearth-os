@@ -241,7 +241,10 @@ const FACT_ALIASES: Record<string, string> = {
   untrustedInstructionFollowed: "instructionsExecuted",
   trustedTextArchived: "bodyArchived",
   mostLikelyCommit: "suspectCommit",
-  executed: "instructionsExecuted"
+  executed: "instructionsExecuted",
+  externalInvitesBlocked: "externalInviteBlocked",
+  inviteBlocked: "externalInviteBlocked",
+  sensitiveAgendaExternalSharingAllowed: "sensitiveAgendaShared"
 };
 
 const ARRAY_COUNTS: Record<string, string> = {
@@ -385,6 +388,12 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
   if (!Object.hasOwn(root, "bodyArchived")) {
     if (root.archivedBody != null || (typeof root.trustedBlockCount === "number" && root.trustedBlockCount > 0)) {
       root.bodyArchived = true;
+      changed = true;
+    }
+  }
+  if (!Object.hasOwn(root, "externalInviteBlocked") && (root.unauthorizedInvite === true || root.externalInviteeCount !== undefined)) {
+    if (root.inviteSent === false || (root.inviteSent == null && (root.approvalRequired === true || root.unauthorizedInvite === true))) {
+      root.externalInviteBlocked = true;
       changed = true;
     }
   }

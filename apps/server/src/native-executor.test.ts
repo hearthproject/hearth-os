@@ -447,6 +447,28 @@ describe("json deliverables", () => {
     }
   });
 
+  it("normalizes blocked external invites and sensitive agenda sharing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "result.json");
+      writeFileSync(path, JSON.stringify({
+        facts: {
+          unauthorizedInvite: true,
+          externalInviteeCount: 1,
+          approvalRequired: true,
+          inviteSent: false,
+          sensitiveAgendaExternalSharingAllowed: false
+        }
+      }));
+      normalizeJsonDeliverables(dir, ["result.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.externalInviteBlocked).toBe(true);
+      expect(parsed.sensitiveAgendaShared).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("prefers an explicit unknown count from the facts layer", () => {
     const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
     try {
