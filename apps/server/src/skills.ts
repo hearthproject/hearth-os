@@ -1,15 +1,20 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
+  closeSync,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
+  readSync,
+  realpathSync,
   renameSync,
   rmSync,
   writeFileSync
 } from "node:fs";
-import { basename, join, relative, resolve, sep } from "node:path";
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type {
   MethodCandidate,
   SkillDocument,
@@ -45,6 +50,7 @@ import {
   effectiveSkillPermissions,
   evaluateSkillExecution,
   formatPermissionDiff,
+  isPathWithin,
   skillPermissionDiff,
   type SkillPermissionDecision,
   type SkillPermissionDiff,
@@ -52,6 +58,16 @@ import {
 } from "./skill-permissions.ts";
 
 const SKILL_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
+const MAX_AGENT_RESOURCE_BYTES = 256 * 1024;
+const MAX_AGENT_RESOURCE_CHARS = 48_000;
+
+export interface AgentSkillResource {
+  path: string;
+  kind: SkillResourceRef["kind"];
+  content: string;
+  bytes: number;
+  truncated: boolean;
+}
 
 export interface SkillPackageServiceOptions {
   rootDir: string;
@@ -90,6 +106,51 @@ export class SkillPackageService {
 
   getSkill(id: string): SkillRecord | null {
     return this.service.store.getSkill(id);
+  }
+
+  agentSkills(taskId: string): SkillRecord[] {
+    const task = this.requireTask(taskId);
+    return this.service.store.listSkills()
+      .filter((skill) =>
+        skill.status === "adopted"
+        || (skill.status === "trial" && skill.trialTaskIds.includes(task.id))
+      )
+      .sort((left, right) =>
+        Number(right.pinned) - Number(left.pinned)
+        || left.name.localeCompare(right.name)
+      );
+  }
+
+  loadForAgent(id: string, taskId: string): SkillDocument {
+    const task = this.requireTask(taskId);
+    const decision = this.checkExecution(id, task.id, {}, { allowImported: true });
+    if (!decision.allowed) {
+      if (decision.denied.some((denial) => denial.category === "hash")) {
+        throw new SkillPackageError("SKILL_CONTENT_HASH_MISMATCH", "技能文件内容与登记哈希不一致", 409);
+      }
+      throw new SkillPackageError(
+        "SKILL_PERMISSION_DENIED",
+        decision.denied.map((denial) => denial.reason + "（" + denial.value + "）").join("；"),
+        403
+      );
+    }
+    return this.readDocument(id);
+  }
+
+  readResourceForAgent(id: string, resourcePath: string, taskId: string): AgentSkillResource {
+    const task = this.requireTask(taskId);
+    const decision = this.checkExecution(id, task.id, {}, { allowImported: true });
+    if (!decision.allowed) {
+      if (decision.denied.some((denial) => denial.category === "hash")) {
+        throw new SkillPackageError("SKILL_CONTENT_HASH_MISMATCH", "技能文件内容与登记哈希不一致", 409);
+      }
+      throw new SkillPackageError(
+        "SKILL_PERMISSION_DENIED",
+        decision.denied.map((denial) => denial.reason + "（" + denial.value + "）").join("；"),
+        403
+      );
+    }
+    return this.readAgentResource(id, resourcePath);
   }
 
   versions(id: string): SkillVersion[] {
@@ -331,6 +392,68 @@ export class SkillPackageService {
     };
     visit(dir, 0);
     return resources.sort((left, right) => left.path.localeCompare(right.path));
+  }
+
+  private readAgentResource(id: string, resourcePath: string): AgentSkillResource {
+    const normalized = resourcePath.replace(/\\/g, "/").trim();
+    if (
+      !normalized
+      || isAbsolute(normalized)
+      || /^[a-z]:/i.test(normalized)
+      || normalized.split("/").includes("..")
+    ) {
+      throw new SkillPackageError("SKILL_RESOURCE_PATH_INVALID", "技能资源路径无效", 400);
+    }
+    const listed = this.readResources(id).find((resource) => resource.path === normalized);
+    if (!listed) {
+      throw new SkillPackageError("SKILL_RESOURCE_NOT_FOUND", "技能资源不在包内的允许列表中", 404);
+    }
+    const dir = resolve(this.skillDir(id));
+    const target = resolve(dir, normalized);
+    if (!isPathWithin(target, dir)) {
+      throw new SkillPackageError("SKILL_RESOURCE_PATH_ESCAPE", "技能资源路径越界", 403);
+    }
+    const info = lstatSync(target);
+    if (info.isSymbolicLink()) {
+      throw new SkillPackageError("SKILL_RESOURCE_SYMLINK", "技能资源不能使用符号链接", 409);
+    }
+    if (!info.isFile()) {
+      throw new SkillPackageError("SKILL_RESOURCE_NOT_FILE", "技能资源不是文件", 409);
+    }
+    const realDir = realpathSync(dir);
+    const realTarget = realpathSync(target);
+    if (!isPathWithin(realTarget, realDir)) {
+      throw new SkillPackageError("SKILL_RESOURCE_PATH_ESCAPE", "技能资源路径越界", 403);
+    }
+    const fd = openSync(target, "r");
+    try {
+      const stat = fstatSync(fd);
+      const byteBudget = Math.min(stat.size, MAX_AGENT_RESOURCE_BYTES);
+      const buffer = Buffer.alloc(byteBudget);
+      const bytes = readSync(fd, buffer, 0, byteBudget, 0);
+      const chunk = buffer.subarray(0, bytes);
+      if (chunk.includes(0)) {
+        throw new SkillPackageError("SKILL_RESOURCE_BINARY", "技能资源不是可读文本", 415);
+      }
+      const text = chunk.toString("utf8");
+      const findings = auditSkillInstructions(text);
+      if (findings.length > 0) {
+        throw new SkillPackageError(
+          "SKILL_RESOURCE_UNSAFE",
+          "技能资源包含试图覆盖安全规则的指令",
+          403
+        );
+      }
+      return {
+        path: normalized,
+        kind: listed.kind,
+        content: text.slice(0, MAX_AGENT_RESOURCE_CHARS),
+        bytes: stat.size,
+        truncated: stat.size > byteBudget || text.length > MAX_AGENT_RESOURCE_CHARS
+      };
+    } finally {
+      closeSync(fd);
+    }
   }
 
   pin(id: string, pinned: boolean): SkillRecord {

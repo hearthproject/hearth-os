@@ -1044,6 +1044,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
         delegations,
         backgroundTools,
         webSearch,
+        skills,
         attachmentRoot,
         executorSettingsPath,
         executorSettingsProvider: () => executorSettingsStore.load(),

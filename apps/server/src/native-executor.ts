@@ -43,6 +43,7 @@ export interface NativeRunOptions {
   onAuthorizeTool?: (request: AgentToolAuthorizationRequest) => Promise<AgentToolAuthorization>;
   isFullPermission?: () => boolean;
   extraTools?: AgentTool[];
+  skillIndex?: string;
   onContextSummary?: (messages: AgentMessage[], signal: AbortSignal) => Promise<string | null>;
 }
 
@@ -79,7 +80,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     model: modelAdapter(options.settings),
     tools: [...createBuiltinTools(), ...(options.extraTools ?? [])],
     goal: options.prompt,
-    systemPrompt: nativeSystemPrompt(options.task, options.expectedOutputs),
+    systemPrompt: nativeSystemPrompt(options.task, options.expectedOutputs, options.skillIndex),
     budget: options.budget ?? DEFAULT_RUN_BUDGET,
     permissions,
     workspaceRoot: options.prepared.root,
@@ -238,7 +239,7 @@ async function summarizeNativeContext(settings: ModelSettings, messages: AgentMe
   }
 }
 
-function nativeSystemPrompt(task: TaskRecord, expectedOutputs: string[]): string {
+export function nativeSystemPrompt(task: TaskRecord, expectedOutputs: string[], skillIndex?: string): string {
   return [
     "你是 Hearth 的原生 Agent 执行器，在自己的工作区里独立完成用户任务。",
     "你必须通过工具真正完成工作，不能只描述步骤或假装已经完成。",
@@ -253,6 +254,7 @@ function nativeSystemPrompt(task: TaskRecord, expectedOutputs: string[]): string
     "回答使用简体中文，不要编造没有依据的事实。",
     `当前任务：${task.title}`,
     `期望产物：${expectedOutputs.join("、")}`,
+    ...(skillIndex?.trim() ? [skillIndex.trim()] : []),
     ...(expectedOutputs.some((output) => /\.(png|jpe?g|webp)$/i.test(output))
       ? ["这是截图类任务：必须调用 capture_screen 生成真实图片产物，不要用文本或占位文件代替。"]
       : [])
