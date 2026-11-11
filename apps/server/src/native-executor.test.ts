@@ -39,6 +39,8 @@ describe("native system prompt", () => {
     expect(prompt).toContain("输入没有现成仓库不是跳过执行的例外");
     expect(prompt).toContain("testsExecuted=false");
     expect(prompt).toContain("单一数字 status");
+    expect(prompt).toContain("3 到 5 个核心用例");
+    expect(prompt).toContain("不做变异测试");
     expect(prompt).toContain("「财务复核」");
     expect(prompt).toContain("「异常」");
     expect(prompt).toContain("「补充材料」");
