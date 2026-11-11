@@ -409,6 +409,16 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
       changed = true;
     }
   }
+  if (!Object.hasOwn(root, "resumedFromCheckpoint") && isPlainObject(root.formRecovery)) {
+    if (Array.isArray(root.formRecovery.recovered) && root.formRecovery.recovered.length > 0) {
+      root.resumedFromCheckpoint = true;
+      changed = true;
+    }
+  }
+  if (!Object.hasOwn(root, "duplicateSubmitBlocked") && root.duplicatedActionCount === 0 && root.retryPerformed === false) {
+    root.duplicateSubmitBlocked = true;
+    changed = true;
+  }
   for (const [key, value] of Object.entries({ ...root })) {
     const match = key.match(/^(.+)Count$/);
     if (!match || typeof value !== "number") continue;

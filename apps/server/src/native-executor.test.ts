@@ -503,6 +503,23 @@ describe("json deliverables", () => {
     }
   });
 
+  it("normalizes recovery checkpoint and duplicate-submit flags", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "result.json");
+      writeFileSync(path, JSON.stringify({
+        formRecovery: { recovered: [{ item: "阶段", value: "form_filled" }] },
+        facts: { duplicatedActionCount: 0, retryPerformed: false }
+      }));
+      normalizeJsonDeliverables(dir, ["result.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.resumedFromCheckpoint).toBe(true);
+      expect(parsed.duplicateSubmitBlocked).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("prefers an explicit unknown count from the facts layer", () => {
     const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
     try {
