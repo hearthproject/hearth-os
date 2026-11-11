@@ -328,6 +328,13 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
       changed = true;
     }
   }
+  if (typeof root.defectType === "string" && !isScalar(root.rootCause)) {
+    if (root.rootCause != null && !Object.hasOwn(root, "rootCauseDetails")) {
+      root.rootCauseDetails = root.rootCause;
+    }
+    root.rootCause = root.defectType.replace(/_/g, "-");
+    changed = true;
+  }
   for (const [key, countKey] of Object.entries(ARRAY_COUNTS)) {
     if (Object.hasOwn(root, countKey) || !Array.isArray(root[key])) continue;
     root[countKey] = (root[key] as unknown[]).length;

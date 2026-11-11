@@ -359,6 +359,23 @@ describe("json deliverables", () => {
     }
   });
 
+  it("normalizes a structured root cause from its defect type", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "result.json");
+      writeFileSync(path, JSON.stringify({
+        rootCause: { file: "src/paginate.ts" },
+        defectType: "off_by_one"
+      }));
+      normalizeJsonDeliverables(dir, ["result.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.rootCause).toBe("off-by-one");
+      expect(parsed.rootCauseDetails.file).toBe("src/paginate.ts");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("normalizes review, delivery and send result contracts", () => {
     const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
     try {
