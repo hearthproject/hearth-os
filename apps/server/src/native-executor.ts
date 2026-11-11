@@ -358,13 +358,22 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
       break;
     }
   }
-  if (!Array.isArray(root.ranges) && isPlainObject(root.statistics)) {
-    for (const key of ["byCity", "byRegion", "byGroup"]) {
-      const ranges = (root.statistics as Record<string, unknown>)[key];
+  if (!Array.isArray(root.ranges)) {
+    for (const key of ["bands", "salaryBands", "rangesDetails"]) {
+      const ranges = root[key];
       if (!Array.isArray(ranges) || ranges.length < 2) continue;
       root.ranges = ranges;
       changed = true;
       break;
+    }
+    if (!Array.isArray(root.ranges) && isPlainObject(root.statistics)) {
+      for (const key of ["byCity", "byRegion", "byGroup"]) {
+        const ranges = (root.statistics as Record<string, unknown>)[key];
+        if (!Array.isArray(ranges) || ranges.length < 2) continue;
+        root.ranges = ranges;
+        changed = true;
+        break;
+      }
     }
   }
   if (!Array.isArray(root.nextQueries)) {

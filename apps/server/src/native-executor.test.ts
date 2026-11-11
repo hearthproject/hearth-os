@@ -483,6 +483,24 @@ describe("json deliverables", () => {
     }
   });
 
+  it("maps salary bands to ranges", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "salary.json");
+      writeFileSync(path, JSON.stringify({
+        bands: [
+          { label: "domestic", min: 380000, max: 460000 },
+          { label: "all", min: 380000, max: 900000 }
+        ]
+      }));
+      normalizeJsonDeliverables(dir, ["salary.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.ranges).toHaveLength(2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("normalizes explicit unknown counts and search queries", () => {
     const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
     try {
