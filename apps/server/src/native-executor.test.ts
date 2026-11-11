@@ -25,6 +25,9 @@ describe("native system prompt", () => {
     expect(prompt).toContain("high/medium/low");
     expect(prompt).toContain("true/false");
     expect(prompt).toContain("null");
+    expect(prompt).toContain("P0/P1");
+    expect(prompt).toContain("核心事实直接放在顶层");
+    expect(prompt).toContain("沿用输入对象的字段名");
   });
 });
 
