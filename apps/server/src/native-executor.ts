@@ -737,6 +737,10 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
     root.conflicts = root.conflictCount > 0;
     changed = true;
   }
+  if (typeof root.conflictCount === "number" && root.conflictCount > 0 && root.hasConflict !== true) {
+    root.hasConflict = true;
+    changed = true;
+  }
   if (typeof root.hardConflictCount === "number" && typeof root.conflicts !== "boolean") {
     if (Array.isArray(root.conflicts) && !Object.hasOwn(root, "conflictsDetails")) {
       root.conflictsDetails = root.conflicts;

@@ -960,6 +960,25 @@ describe("json deliverables", () => {
     }
   });
 
+  it("marks hasConflict when the conflict count is positive", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "result.json");
+      writeFileSync(path, JSON.stringify({
+        facts: { conflictCount: 1, hasConflict: false },
+        conflictCount: 1,
+        hasConflict: false,
+        conflicts: false
+      }));
+      normalizeJsonDeliverables(dir, ["result.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.hasConflict).toBe(true);
+      expect(parsed.facts.hasConflict).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("derives next queries from research plan steps", () => {
     const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
     try {
