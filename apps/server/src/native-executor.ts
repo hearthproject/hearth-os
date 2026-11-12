@@ -393,6 +393,15 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
       changed = true;
       break;
     }
+    if (!Array.isArray(root.nextQueries) && Array.isArray((root.searchPlan as Record<string, unknown>).steps)) {
+      const queries = ((root.searchPlan as Record<string, unknown>).steps as unknown[])
+        .map((step) => (isPlainObject(step) ? step.query ?? step.title : null))
+        .filter((query): query is string => typeof query === "string" && query.trim().length > 0);
+      if (queries.length >= 3) {
+        root.nextQueries = queries;
+        changed = true;
+      }
+    }
   }
   if (!Array.isArray(root.pages) && Array.isArray(root.items) && typeof root.pageCount === "number" && root.pageCount > 0) {
     root.pages = root.items;

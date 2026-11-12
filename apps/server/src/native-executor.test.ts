@@ -945,6 +945,27 @@ describe("json deliverables", () => {
     }
   });
 
+  it("derives next queries from research plan steps", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "result.json");
+      writeFileSync(path, JSON.stringify({
+        searchPlan: {
+          steps: [
+            { stepId: "S1", title: "确认预算上限" },
+            { stepId: "S2", title: "确认决策链" },
+            { stepId: "S3", title: "确认部署形态" }
+          ]
+        }
+      }));
+      normalizeJsonDeliverables(dir, ["result.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.nextQueries).toHaveLength(3);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("normalizes review, delivery and send result contracts", () => {
     const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
     try {
