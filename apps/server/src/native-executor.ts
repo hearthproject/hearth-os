@@ -359,6 +359,10 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
       break;
     }
   }
+  if (!Array.isArray(root.alternatives) && Array.isArray(root.alternateSlots)) {
+    root.alternatives = root.alternateSlots;
+    changed = true;
+  }
   if (!Array.isArray(root.ranges)) {
     for (const key of ["bands", "salaryBands", "rangesDetails"]) {
       const ranges = root[key];

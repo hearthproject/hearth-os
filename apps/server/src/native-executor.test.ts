@@ -945,6 +945,21 @@ describe("json deliverables", () => {
     }
   });
 
+  it("normalizes alternate slots as alternatives", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "result.json");
+      writeFileSync(path, JSON.stringify({
+        alternateSlots: [{ start: "2026-11-18T10:30:00+08:00" }, { start: "2026-11-18T14:00:00+08:00" }]
+      }));
+      normalizeJsonDeliverables(dir, ["result.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.alternatives).toHaveLength(2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("derives next queries from research plan steps", () => {
     const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
     try {
