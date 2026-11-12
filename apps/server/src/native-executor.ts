@@ -620,6 +620,13 @@ function normalizeJsonFacts(root: Record<string, unknown>): boolean {
     root[to] = root[from];
     changed = true;
   }
+  if (!Object.hasOwn(root, "blockingCount") && Array.isArray(root.findings)) {
+    const blockingCount = root.findings.filter((entry) => isPlainObject(entry) && entry.blocking === true).length;
+    if (blockingCount > 0) {
+      root.blockingCount = blockingCount;
+      changed = true;
+    }
+  }
   if (typeof root.failedTest === "string" && root.failedTest.includes("::")) {
     const shortName = root.failedTest.split("::").pop()?.trim();
     if (shortName) {

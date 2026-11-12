@@ -985,6 +985,27 @@ describe("json deliverables", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("derives a blocking finding count from explicit finding flags", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-facts-"));
+    try {
+      const path = join(dir, "review.json");
+      writeFileSync(path, JSON.stringify({
+        facts: { verdict: "block", hasBlocker: true },
+        verdict: "block",
+        findings: [
+          { id: "F1", blocking: true },
+          { id: "F2", blocking: false }
+        ]
+      }));
+      normalizeJsonDeliverables(dir, ["review.json"]);
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      expect(parsed.blockingCount).toBe(1);
+      expect(parsed.facts.blockingCount).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("native execution progress", () => {
