@@ -37,6 +37,17 @@ outline: deep
 
 任务创建、执行器、审批、记忆、调度和产品产物仍由主仓库负责；评测服务不复制一条旁路的 Agent 执行链。
 
+## 评测服务内部适配层
+
+评测编排不再直接绑死在 Hearth 的 HTTP 客户端上。`apps/eval-server` 定义两个窄接口，把“运行 Agent”和“评分产物”从实验编排中拆开：
+
+| 接口 | 职责 | 默认实现 |
+|---|---|---|
+| `AgentAdapter` | `createTask`、`getTask`、`getArtifacts`、`cancelTask`、`health`；把不同 Agent 提供方的任务状态翻译成 runner 消费的视图 | `HearthClient` |
+| `JudgeAdapter` | 用 runner 已取得的产物执行 rubric 评分，不要求裁判端重新读取任务 | `HearthJudgeAdapter`，转调 `POST /api/eval/judge` |
+
+runner 只依赖 `AgentAdapter.getArtifacts` 返回的 `ArtifactMap`，以相对输出路径为键；Hearth 默认实现按 `HEARTH_EVAL_ARTIFACT_ROOT` 解析受管产物。新增一个 Agent 后端时不需要复制实验编排、SQLite、复核或控制台，只需实现 adapter 接口。当前 Hearth 仍是默认实现，两个专用桥接接口保持不变。
+
 ## 启动方式
 
 主服务与评测服务可以并排运行：
@@ -85,7 +96,7 @@ npm run build
 npm run docs:build
 ```
 
-评测仓库验证：
+评测仓库验证（当前 11 个测试文件、41 个测试）：
 
 ```bash
 npm test

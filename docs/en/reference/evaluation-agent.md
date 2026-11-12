@@ -35,6 +35,17 @@ outline: deep
 
 Task creation, executors, approvals, memory, scheduling, and product artifacts remain owned by the main repository. The evaluation service does not create a second Agent execution path.
 
+## Evaluation-service adapters
+
+Evaluation orchestration is no longer tied directly to Hearth's HTTP client. `apps/eval-server` defines two narrow interfaces that separate "running an agent" and "judging artifacts" from experiment orchestration:
+
+| Interface | Responsibility | Default implementation |
+|---|---|---|
+| `AgentAdapter` | `createTask`, `getTask`, `getArtifacts`, `cancelTask`, `health`; translates provider-specific task states into the view consumed by the runner | `HearthClient` |
+| `JudgeAdapter` | Runs rubric scoring against artifacts already fetched by the runner, without requiring the judge to read the task again | `HearthJudgeAdapter`, which calls `POST /api/eval/judge` |
+
+The runner depends only on the `ArtifactMap` returned by `AgentAdapter.getArtifacts`, keyed by relative output path; the Hearth implementation resolves it through `HEARTH_EVAL_ARTIFACT_ROOT`. Adding another agent backend means implementing the adapter interfaces, not copying orchestration, SQLite, review, or the console. Hearth remains the default implementation and the two dedicated bridge endpoints are unchanged.
+
 ## Local startup
 
 Run the main service and the evaluation service side by side:
@@ -83,7 +94,7 @@ npm run build
 npm run docs:build
 ```
 
-Evaluation repository:
+Evaluation repository (currently 11 test files, 41 tests):
 
 ```bash
 npm test
