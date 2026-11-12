@@ -301,8 +301,7 @@ hearth-os/
 │   ├── brand/                                        # Logo、图标与品牌板源文件
 │   ├── .vitepress/                                   # config.mts、delivery-sidebar.mjs 与主题
 │   └── index.md                                      # 文档站首页
-├── scripts/                                          # E2E、README 截图、交付页生成与覆盖率检查
-│   └── delivery-data/                                # s0–s6 阶段交付数据 JSON
+├── scripts/                                          # E2E 与 README 截图脚本
 ├── tools/windows-helper/                             # helper.mjs 与 windows.ps1 桌面助手
 ├── assets/                                           # 架构图与流程图（3 张 PNG）
 ├── package.json / package-lock.json                  # npm workspaces 与 dev / build / test / docs 脚本
