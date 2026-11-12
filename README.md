@@ -308,7 +308,7 @@ E2E 会在随机本地端口启动服务，并使用临时 `HEARTH_DATA_DIR`，�
 
 `vitest.config.ts` 将单个测试的超时设为 20 秒，避免 Windows 上 Git、Worktree 和 MCP 探测测试被默认 5 秒超时误判。测试覆盖服务层、API、模型协议、原生工具循环、glob/grep、原子补丁、Shell 进程树超时、办公文件读写、上下文压缩、瞬态重试、循环检测、显式完成、技能按需加载、项目与 Worktree、子代理边界、MCP 管理/调用/审批、搜索适配器、预算、权限、检查点、目标契约、完成判定、审批参数绑定、效果对账、执行器交接、委派、沙箱、记忆/技能治理、个人本体、Context Broker、标准意图、注意力、连接运行时、桌面边界、同步与备份。测试通过不等于真实验收完成；阶段一逐项证据见 [hearth-eval 的第一阶段验收报告](https://github.com/hearthproject/hearth-eval/blob/main/eval/phase-1-acceptance.md)。
 
-独立评测仓库当前有 11 个测试文件、41 个测试；`npm run typecheck`、`npm run typecheck:scenarios`、`npm run build` 与 `npm run docs:build` 均通过。自动测试不执行真实评测实验。
+独立评测仓库当前有 11 个测试文件、42 个测试；`npm run typecheck`、`npm run typecheck:scenarios`、`npm run build` 与 `npm run docs:build` 均通过。自动测试不执行真实评测实验。
 
 ## 许可
 

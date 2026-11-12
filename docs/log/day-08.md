@@ -45,7 +45,7 @@ npm run build         # Web 控制面
 npm run docs:build    # VitePress 文档站
 ```
 
-`vitest.config.ts` 将单个测试超时提高到 20 秒，避免 Windows 上 Git、Worktree 和 MCP 探测测试被默认 5 秒超时误判。独立评测仓库当前有 11 个测试文件、41 个测试；`npm run typecheck:scenarios` 已补上 `turndown-plugin-gfm` 的模块声明并通过。
+`vitest.config.ts` 将单个测试超时提高到 20 秒，避免 Windows 上 Git、Worktree 和 MCP 探测测试被默认 5 秒超时误判。独立评测仓库当前有 11 个测试文件、42 个测试；`npm run typecheck:scenarios` 已补上 `turndown-plugin-gfm` 的模块声明并通过。
 
 ## 关键提交
 

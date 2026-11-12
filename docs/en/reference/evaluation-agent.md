@@ -94,7 +94,7 @@ npm run build
 npm run docs:build
 ```
 
-Evaluation repository (currently 11 test files, 41 tests):
+Evaluation repository (currently 11 test files, 42 tests):
 
 ```bash
 npm test

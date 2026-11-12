@@ -96,7 +96,7 @@ npm run build
 npm run docs:build
 ```
 
-评测仓库验证（当前 11 个测试文件、41 个测试）：
+评测仓库验证（当前 11 个测试文件、42 个测试）：
 
 ```bash
 npm test

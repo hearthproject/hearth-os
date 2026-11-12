@@ -45,7 +45,7 @@ npm run build         # Web control surface
 npm run docs:build    # VitePress documentation site
 ```
 
-`vitest.config.ts` raises the per-test timeout to 20 seconds so Git, worktree, and MCP-probe tests on Windows are not failed by the default 5-second timeout. The standalone evaluation repository has 11 test files and 41 tests; `npm run typecheck:scenarios` now passes with a module declaration for `turndown-plugin-gfm`.
+`vitest.config.ts` raises the per-test timeout to 20 seconds so Git, worktree, and MCP-probe tests on Windows are not failed by the default 5-second timeout. The standalone evaluation repository has 11 test files and 42 tests; `npm run typecheck:scenarios` now passes with a module declaration for `turndown-plugin-gfm`.
 
 ## Selected commits
 
