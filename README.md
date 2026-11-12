@@ -23,7 +23,7 @@
 
 <p align="center">
   <img alt="Phase 1 MVP accepted" src="https://img.shields.io/badge/phase%201-MVP%20accepted-b8471d">
-  <img alt="579 tests passing" src="https://img.shields.io/badge/tests-579%20passing-2f7d4f">
+  <img alt="725 tests passing" src="https://img.shields.io/badge/tests-725%20passing-2f7d4f">
   <img alt="Node.js 22.13+" src="https://img.shields.io/badge/node-22.13%2B-3c8773">
   <img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-1b1815">
   <img alt="Local first" src="https://img.shields.io/badge/local--first-yes-8d3412">
@@ -35,7 +35,7 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
 
 模型可以更换，执行器可以替换，界面可以重写，但任务状态、授权范围、完成证据、产物摘要和外部回执必须留下来。Hearth 要回答的不是“模型能不能写出一段话”，而是“这件事有没有真正完成，失败后能不能接着做，外部动作能不能被核对”。
 
-> **当前状态（2026-11-10）：** 第一阶段 MVP 已验收；第二阶段至第六阶段已形成可运行的代码闭环和自动测试，但尚未完成真实账户、真实设备、真实长期使用和 v1.0 整体验收。本文不把代码闭环写成产品验收完成。
+> **当前状态（2026-11-12）：** 第一阶段 MVP 已验收；第二阶段至第六阶段已形成可运行的代码闭环和自动测试；原生执行器已在独立评测仓库完成 30 个离线 case 的测量，最好完整单轮为 18/30，累计定向确认 19/30，但最终提交尚未连续复测。真实账户、真实设备、真实长期使用和 v1.0 整体验收仍未完成。本文不把代码闭环或评测分数写成产品验收完成。
 
 ## 界面一览
 
@@ -80,7 +80,9 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
 |---|---|
 | **目标契约与完成判定** | 目标保存验收条件、约束、禁止动作、证据要求、预算、截止时间、停止条件和复核策略；完成判定支持命令、文件、schema、Git、人工和模型复核，结果以证据报告保存，不能只凭模型说“完成” |
 | **聊天优先的控制面** | React + Vite 单页应用，对话中生成任务提案；任务详情展示执行器、阶段、Token、耗时、验收条件、证据、产物与最终结果；`Ctrl/Command + K` 快速跳转页面和任务 |
-| **原生 Agent Runtime** | 自研单 Agent 工具循环，支持 OpenAI Chat、OpenAI Responses、Anthropic Messages、Gemini 四种协议；预算、检查点、暂停补问、恢复和产物校验在同一条链路内 |
+| **原生 Agent Runtime** | 自研通用执行内核，支持 OpenAI Chat、OpenAI Responses、Anthropic Messages、Gemini 四种协议；读取、文档、glob/grep、写入、原子编辑、补丁、命令、联网搜索、技能、委派、本地 MCP、询问用户和完成工具共享同一条预算、检查点、审批与恢复链路 |
+| **项目、子代理与 MCP** | 注册本地 Git 项目后，任务在独立 `hearth/<task-id>` Worktree 中执行；子代理使用新上下文、只读或隔离写、单层串行且最多两个；本地 stdio MCP 服务器支持启动探测、工具发现、JSON Schema 校验、逐次审批、超时和崩溃隔离 |
+| **上下文与办公产物** | 模型窗口默认 128K、最大输出默认 8K；只在完整回合边界做 Token 感知压缩，压缩后写检查点；可生成 XLSX/CSV/DOCX，Shell 完整输出写入任务日志、只回填尾部并杀死超时进程树 |
 | **七个执行器** | 三个一等执行器（`deepseek-harness`、`codex`、`native`）和四个外部执行器（`hermes`、`qoder`、`workbuddy`、`kimi`）共用注册表、启动解析、健康检测、模型绑定、上下文采集和设置界面 |
 | **统一模型注册表** | SQLite 模型档案与执行器绑定取代私有 JSON；各执行器按协议兼容性选择模型，Codex 固定使用 OpenAI Responses，本地模型不进入统一管理 |
 | **持久任务执行** | 状态机、预算、检查点、等待输入、恢复与重试；只追加 SQLite 事件日志保存全部事实；运行中可“轮后继续”或中止当前轮并带补充重跑 |
@@ -114,6 +116,23 @@ Hearth 已经越过**第一阶段（MVP）**的硬门槛：15 个跨行业真实
 
 逐项能力矩阵、验证证据和未完成验收见[阶段二至六交付状态](https://hearthproject.github.io/hearth-os/delivery/status.html)。
 
+## 评测结果
+
+评测栈已拆分到独立仓库 **<https://github.com/hearthproject/hearth-eval>**。主仓库只保留 `/api/eval/tasks`、`/api/eval/judge`、`HEARTH_EVAL_INPUT_ROOT` 与 `.hearth/eval-artifacts/` 桥接，case、实验编排、评分、复核、对比和控制台都由评测仓库维护。
+
+2026-11-11 至 11-12 使用 30 个离线 case（8 个任务族均匀分布）、仅 `native` 执行器、重复 1 次、自动评分与自动重试开启、并发 4 进行测量：
+
+| 指标 | 结果 |
+|---|---:|
+| 最好完整单轮 | **18/30 通过（60%）**，平均分 88.89，实验 `EXP-20261111145332-7a95ea` |
+| 累计定向确认 | **19/30** 个 case 曾达到 100 分；不是一次连续实验 |
+| 最近完整单轮 | 12/30 通过（40%），平均分 73.33，实验 `EXP-20261112003215-b1172b` |
+| 最终修复提交 | `eb32ad5`；尚未做不中断的完整 30 题复测 |
+
+最近完整单轮受到 provider 慢响应、评分 JSON 截断和任务超时影响，且早于最后四个归一化修复，不能直接等同于最终代码能力。CAL01、WEB01 等 case 还存在输入与评分 rubric 的语义歧义；T02、T11、WEB03 虽得到 100 分，但因 `sampled` 标记未计为正式通过。
+
+详细报告：[最终评测报告](https://hearthproject.github.io/hearth-os/evaluation/native-30-final-report-2026-11-12.html) · [基线报告](https://hearthproject.github.io/hearth-os/evaluation/native-30-baseline-2026-11-11.html) · [评测文档站](https://hearthproject.github.io/hearth-eval/)。
+
 ## 架构图
 
 [![Hearth 本地代理操作系统架构](https://media.githubusercontent.com/media/hearthproject/hearth-os/main/assets/Hearth-Architecture-Light.png)](https://media.githubusercontent.com/media/hearthproject/hearth-os/main/assets/Hearth-Architecture-Light.png)
@@ -142,7 +161,10 @@ flowchart TB
   W --> A["本地 API<br/>Fastify · SSE"]
   A --> G["目标契约<br/>验收条件 · 预算 · 完成判定"]
   A --> S["任务与调度<br/>状态机 · 检查点 · 租约"]
-  S --> N["原生 Agent Runtime<br/>4 种模型协议 · 内置工具"]
+  S --> N["原生 Agent Runtime<br/>4 种模型协议 · 通用工具内核"]
+  N --> PJ["本地项目与 Worktree<br/>隔离分支 · 恢复复用"]
+  N --> SA["有界子代理<br/>新上下文 · 单层串行"]
+  N --> MCP["本地 stdio MCP<br/>探测 · Schema 校验 · 逐次审批"]
   S --> H["DeepSeek Harness<br/>官方 SDK/JSON-RPC · 会话恢复"]
   S --> C["Codex 执行器<br/>代码与仓库任务"]
   S --> X["外部执行器<br/>Hermes · Qoder · WorkBuddy · Kimi"]
@@ -227,16 +249,16 @@ Codex 执行器优先使用统一模型绑定；没有绑定时读取现有的 `
 
 ```text
 apps/
-  server/              Fastify API、调度器、目标与完成判定、审批、来源、桌面、记忆、邮件、同步、连接、备份与运维
+  server/              Fastify API、调度器、目标与完成判定、审批、来源、桌面、记忆、邮件、同步、连接、项目、MCP、备份与运维
   web/                 React + Vite 聊天优先控制面与 PWA 壳
 packages/
   core/                状态机、领域类型与 DTO
   eventlog/            只追加 SQLite 事件日志与投影
-  agent-runtime/       原生单 Agent 工具循环、预算、检查点与压缩
+  agent-runtime/       通用执行内核：工具循环、预算、检查点、压缩、技能、搜索与委派边界
   codex-executor/      Codex SDK 适配器与 Provider 探测
   deepseek-executor/   DeepSeek Harness SDK/JSON-RPC 适配器
   templates/           任务模板与产品示例输入
-docs/                  中英双语 VitePress 文档站
+docs/                  中英双语 VitePress 文档站与评测报告
 tools/windows-helper/  Windows 桌面观察与输入助手
 scripts/               文档、交付数据、E2E 与 README 截图辅助脚本
 ```
@@ -252,7 +274,8 @@ scripts/               文档、交付数据、E2E 与 README 截图辅助脚本
 - [存储与上下文](https://hearthproject.github.io/hearth-os/design/storage.html) — SQLite 数据域、上下文生命周期、备份与恢复边界。
 - [交付与进度](https://hearthproject.github.io/hearth-os/delivery/) — 已验收能力、明确留空项与剩余路线。
 - [阶段二至六状态](https://hearthproject.github.io/hearth-os/delivery/status.html) — 当前能力矩阵、验证证据与未完成验收。
-- [开发日志](https://hearthproject.github.io/hearth-os/log/day-07.html) — 最近的目标判定、委派、个人上下文与评测拆分记录。
+- [评测与结果](https://hearthproject.github.io/hearth-os/evaluation/) — native 30 题基线、最终报告与评测边界。
+- [开发日志](https://hearthproject.github.io/hearth-os/log/day-08.html) — 通用执行内核升级、评测拆分与 native 30 题结果。
 - [评测 Agent（独立仓库）](https://hearthproject.github.io/hearth-eval/) — 场景、case、独立控制台、全周期轨迹、评分、复核与对比。
 - [参考](https://hearthproject.github.io/hearth-os/reference/) — 工程、风险、决策、术语、清单与维护资料。
 
@@ -264,15 +287,16 @@ scripts/               文档、交付数据、E2E 与 README 截图辅助脚本
 - PWA 壳、移动底部导航和离线应用壳已存在，但手机配对、iOS/Android 真机安装、系统推送和远程接管未验收。
 - 多设备同步只同步过滤后的事件投影，不同步产物正文、工作区或敏感记忆；连接运行时也未接入真实远程节点或手机。
 - 当前主导航暴露聊天、任务、需要你、记忆、技能、定时任务、邮件、设备和设置；同步、安全、运维仍有 API 与页面组件，但尚未全部接回主导航。
-- 评测 case、场景和实验已迁到独立仓库；主仓库的测试不代表真实评测实验已经运行。
+- 评测 case、场景和实验已迁到独立仓库；主仓库的测试不代表真实评测实验已经运行。native 30 题的最终提交 `eb32ad5` 尚未完成连续复测，18/30 与累计 19/30 都不是最终官方单轮成绩。
+- 原生运行时仍不支持远程 MCP、OAuth、浏览器自动化搜索、图片/扫描件视觉理解、PPTX、LSP、格式化器、Shell 后台会话或自动 cherry-pick。
 - 这是一个阶段一已验收、阶段二至六部分完成的工作版本，不是 v1.0 正式发布。
 
 ## 验证
 
-2026-11-10 在当前分支运行：
+2026-11-12 在当前分支运行：
 
 ```bash
-npm test              # 89 个测试文件、579 个测试全部通过
+npm test              # 100 个测试文件、725 个测试全部通过
 npm run typecheck     # TypeScript 类型检查
 npm run build         # 构建 Web 控制面
 npm run docs:build    # 构建 VitePress 文档站
@@ -282,7 +306,9 @@ npm run screenshots:readme  # 重新生成 README 与文档站截图
 
 E2E 会在随机本地端口启动服务，并使用临时 `HEARTH_DATA_DIR`，不会触碰真实 `.hearth` 数据。可用 `HEARTH_E2E_MODEL_SETTINGS` 指定其他模型配置，`HEARTH_E2E_OFFLINE=1` 跳过在线聊天，`HEARTH_E2E_KEEP=1` 保留临时数据用于排查。
 
-测试覆盖服务层、API、模型协议、原生工具循环、预算、权限、检查点、目标契约、完成判定、审批参数绑定、效果对账、执行器交接、委派、沙箱、记忆/技能治理、个人本体、Context Broker、标准意图、注意力、连接运行时、桌面边界、同步与备份。测试通过不等于真实验收完成；阶段一逐项证据见 [hearth-eval 的第一阶段验收报告](https://github.com/hearthproject/hearth-eval/blob/main/eval/phase-1-acceptance.md)。
+`vitest.config.ts` 将单个测试的超时设为 20 秒，避免 Windows 上 Git、Worktree 和 MCP 探测测试被默认 5 秒超时误判。测试覆盖服务层、API、模型协议、原生工具循环、glob/grep、原子补丁、Shell 进程树超时、办公文件读写、上下文压缩、瞬态重试、循环检测、显式完成、技能按需加载、项目与 Worktree、子代理边界、MCP 管理/调用/审批、搜索适配器、预算、权限、检查点、目标契约、完成判定、审批参数绑定、效果对账、执行器交接、委派、沙箱、记忆/技能治理、个人本体、Context Broker、标准意图、注意力、连接运行时、桌面边界、同步与备份。测试通过不等于真实验收完成；阶段一逐项证据见 [hearth-eval 的第一阶段验收报告](https://github.com/hearthproject/hearth-eval/blob/main/eval/phase-1-acceptance.md)。
+
+独立评测仓库当前有 9 个测试文件、28 个测试；`npm run typecheck`、`npm run typecheck:scenarios`、`npm run build` 与 `npm run docs:build` 均通过。自动测试不执行真实评测实验。
 
 ## 许可
 

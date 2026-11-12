@@ -18,7 +18,7 @@ outline: deep
 ## What moved out
 
 - `apps/eval-server`: experiment orchestration, SQLite, scoring, review, comparison, and SPA hosting;
-- `apps/eval-web`: task catalog, experiments, run detail, review queue, comparison, and system views;
+- `apps/eval-web`: 11 pages covering overview, task catalog, experiments, run detail, review queue, comparison, activity, and system status;
 - `packages/eval-core`: case contracts, catalog loading, graders, scoring, and scenario statistics;
 - `eval/`: 60 cases, inputs, golden files, historical run evidence, and phase-one acceptance material;
 - the white-box scenario runner previously stored under `apps/server/src/scenarios`;
@@ -53,10 +53,24 @@ npm run dev
 cd D:\App\hearth-eval
 npm install
 Copy-Item .env.example .env
+$env:HEARTH_EVAL_ARTIFACT_ROOT='D:\App\hearth-os\.hearth\eval-artifacts'
 npm run dev
 ```
 
-The first evaluation-service startup only validates the case catalog, synchronizes versions, and recovers interrupted runs. It never starts an experiment automatically. Real pass rates, executor differences, and cost data must come from experiments you run.
+The first evaluation-service startup only validates the case catalog, synchronizes versions, and recovers interrupted runs. It never starts an experiment automatically. `HEARTH_EVAL_ARTIFACT_ROOT` must match the artifact root the main service actually writes; without it, run detail cannot find registered artifacts and incorrectly reports `BLOCKER_FAILED: exists`. After a restart, confirm `artifactRoot` through `GET /api/system` before starting an experiment.
+
+## Native 30-case results
+
+From 2026-11-11 to 11-12, 30 offline cases ran with `native` only, one repetition, auto-scoring and auto-retry, and concurrency 4:
+
+| Metric | Result |
+|---|---:|
+| Best complete run | **18/30 (60%)**, average 88.89, `EXP-20261111145332-7a95ea` |
+| Cumulative targeted confirmation | **19/30**, not one continuous experiment |
+| Most recent complete run | 12/30 (40%), average 73.33, `EXP-20261112003215-b1172b` |
+| Final fix commit | `eb32ad5`, not yet retested continuously |
+
+The most recent complete run was affected by provider instability, truncated scoring JSON, and timeouts, and it predates the final four normalization fixes. See [Evaluation and Results](/en/evaluation/) for the detailed boundaries and retest guidance.
 
 ## Verification
 

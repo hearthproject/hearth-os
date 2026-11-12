@@ -29,9 +29,13 @@ hero:
     <span class="home-quicklinks__label">交付路线</span>
     <span class="home-quicklinks__meta">从 MVP 到 v1.0 的分阶段计划</span>
   </a>
-  <a href="/hearth-os/log/day-07.html">
+  <a href="/hearth-os/evaluation/">
+    <span class="home-quicklinks__label">评测与结果</span>
+    <span class="home-quicklinks__meta">Native 30 题报告、复现方式与评测边界</span>
+  </a>
+  <a href="/hearth-os/log/day-08.html">
     <span class="home-quicklinks__label">开发日志</span>
-    <span class="home-quicklinks__meta">每日概述、提交与具体修改</span>
+    <span class="home-quicklinks__meta">通用执行内核、评测升级与每日提交</span>
   </a>
 </nav>
 

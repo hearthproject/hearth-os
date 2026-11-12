@@ -6,7 +6,7 @@ outline: [2, 3]
 
 # Phase 2–6 Delivery Status
 
-Checked on 2026-11-11. This page records only what the current code and real runs can prove; a page existing is not treated as a completed loop.
+Checked on 2026-11-12. This page records only what the current code and real runs can prove; a page existing is not treated as a completed loop.
 
 ## Phase result
 
@@ -62,6 +62,21 @@ This round upgraded native from a compact coding loop into a general execution k
 - **MCP approval and boundaries:** Every MCP call uses the existing per-call tool approval and binds the server, tool, and argument digest. Only full-permission mode auto-approves, with an audit event. MCP calls are not automatically retried and exactly-once is not promised. Search is off by default and supports only Tavily and SearXNG; public-network grants still enforce DNS, redirect, and private-address checks, and every fetch still requires approval.
 
 This round still has no remote MCP, OAuth, browser-automation search, image/scan visual understanding, PPTX, LSP, formatter, background shell session, or automatic cherry-pick. More tools do not prove that execution quality has passed real-user acceptance.
+
+## Native 30-case evaluation results (2026-11-12)
+
+The standalone `hearthproject/hearth-eval` repository ran 30 offline cases (evenly sampled from eight task families) with the `native` executor only, one repetition, auto-scoring and auto-retry enabled, and concurrency 4:
+
+| Metric | Result |
+|---|---:|
+| Best complete run | **18/30 passed (60%)**, average 88.89, experiment `EXP-20261111145332-7a95ea` |
+| Cumulative targeted confirmation | **19/30** cases reached 100 at least once, not one continuous experiment |
+| Most recent complete run | 12/30 passed (40%), average 73.33, experiment `EXP-20261112003215-b1172b` |
+| Final fix commit | `eb32ad5`, not yet retested in one uninterrupted 30-case run |
+
+The initial baseline passed 0/30 because evaluation-bridge tasks carried an empty `permissions.tools`; after restoring the allowlist, the first complete run reached 15/30. The most recent complete run was affected by slow provider responses, truncated scoring JSON, and task timeouts, and it predates the final four normalization fixes, so it cannot be attributed directly to final code capability. CAL01 and WEB01 still have semantic ambiguity between input and rubric; T02, T11, and WEB03 were marked `sampled` and were not counted as formal passes.
+
+See [Evaluation and Results](/en/evaluation/) for the reports, experiment IDs, per-task results, fix list, and retest guidance.
 
 ## Phase 2 capabilities
 
@@ -134,11 +149,11 @@ The backup boundary must remain visible in the UI: a recoverable database is not
 
 ## Verification evidence
 
-On 2026-11-11, `npm test` on the current branch passed all 100 test files and 667 tests; `npm run typecheck`, `npm run build`, and `npm run docs:build` also pass. These checks cover service, API, model-protocol, native tool-loop, glob/grep, atomic patches, shell process-tree timeout, office-file reads and writes, context compaction, transient retries, loop detection, explicit completion, skill loading, projects and worktrees, subagent boundaries, MCP management/calls/approval, search adapters, budgets, permissions, checkpoints, proposal confirmation, memory/skill governance, proactive reminders, scheduling, connection runtime, durable delegation, handoff artifacts, sandbox classification, channel idempotency, personal ontology, Context Broker, task graphs, and read-only ontology tools. They do not replace real-user, real-device, or long-running acceptance.
+On 2026-11-12, `npm test` on the current branch passed all 100 test files and 725 tests; `npm run typecheck`, `npm run build`, and `npm run docs:build` also pass. These checks cover service, API, model-protocol, native tool-loop, glob/grep, atomic patches, shell process-tree timeout, office-file reads and writes, context compaction, transient retries, loop detection, explicit completion, skill loading, projects and worktrees, subagent boundaries, MCP management/calls/approval, search adapters, budgets, permissions, checkpoints, proposal confirmation, memory/skill governance, proactive reminders, scheduling, connection runtime, durable delegation, handoff artifacts, sandbox classification, channel idempotency, personal ontology, Context Broker, task graphs, and read-only ontology tools. They do not replace real-user, real-device, or long-running acceptance.
 
 This round did not establish a shared external capability benchmark against Pi, DeerFlow, or OpenCode, nor did it run a quantitative evaluation that could support a claim of being stronger than them. Only public capability, code maturity, and boundary differences are supported, not an overall performance ranking.
 
-The 60-case corpus, white-box scenarios, evaluation console, scoring, review, comparison, and experiment evidence now live in the standalone [hearth-eval](https://github.com/hearthproject/hearth-eval) repository. The main repository retains only the controlled evaluation-task and judge bridge. This documentation update did not run a real evaluation on the user's behalf.
+The 60-case corpus, white-box scenarios, evaluation console, scoring, review, comparison, and experiment evidence now live in the standalone [hearth-eval](https://github.com/hearthproject/hearth-eval) repository. The main repository retains only the controlled evaluation-task and judge bridge. The native 30-case experiment ran in the standalone repository, but the final commit has not been retested continuously; passing tests and scenarios still do not replace real-user, real-device, or long-running acceptance.
 
 The README and documentation home screenshots were refreshed on the same day. `npm run screenshots:readme` starts an isolated instance on a random port, seeds demo tasks, approval suggestions, and memory through a temporary `HEARTH_DATA_DIR`, and captures the Chinese light-theme UI with Playwright; it never reads or modifies real `.hearth` data.
 

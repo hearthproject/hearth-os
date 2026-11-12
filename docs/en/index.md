@@ -29,9 +29,13 @@ hero:
     <span class="home-quicklinks__label">Delivery</span>
     <span class="home-quicklinks__meta">Phased plan from MVP to v1.0</span>
   </a>
-  <a href="/hearth-os/en/log/day-07.html">
+  <a href="/hearth-os/en/evaluation/">
+    <span class="home-quicklinks__label">Evaluation</span>
+    <span class="home-quicklinks__meta">Native 30-case reports, reproduction, and boundaries</span>
+  </a>
+  <a href="/hearth-os/en/log/day-08.html">
     <span class="home-quicklinks__label">Dev Log</span>
-    <span class="home-quicklinks__meta">Daily summary, commits, and concrete changes</span>
+    <span class="home-quicklinks__meta">Execution kernel, evaluation updates, and daily commits</span>
   </a>
 </nav>
 

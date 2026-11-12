@@ -24,6 +24,8 @@ Tests and evaluations are separate. A test is a deterministic pass/fail gate sui
 
 Evaluation tasks, the scenario runner, console, scoring, and review now live in the standalone [hearth-eval](https://github.com/hearthproject/hearth-eval) project. The main repository keeps only the controlled task and judge bridge so product tests and evaluation experiments do not become one source of truth. The standalone repository does not mean real experiments, pass rates, or long-term effects have been verified.
 
+From 2026-11-11 to 11-12, that repository completed a native 30-case offline measurement: the best complete run passed 18/30 with an average score of 88.89; cumulative targeted confirmation reached 19/30; final fix commit `eb32ad5` has not been retested continuously. Experiment IDs, per-task results, and boundaries are in [Evaluation and Results](/en/evaluation/). These numbers describe capability and evaluation usability on this sample, not product acceptance.
+
 | Evaluation layer | What it observes | When to use it |
 |---|---|---|
 | Component tests | Parsing, connectors, policy, verifiers, and recovery logic | Every commit |

@@ -14,7 +14,7 @@ Hearth turns personal digital work into reliable tasks. The route starts from wh
 
 ## Current progress
 
-As of 2026-11-10, Phase 1 has been accepted: all 15 cross-industry real tasks ran and 13 passed, meeting the 10/15 hard threshold. Phases 2 through 6 have runnable code and automated test loops, but real accounts, real devices, long-running operation, and failure drills remain unfinished, so they cannot be called complete delivery. See [Phase 2–6 delivery status](/en/delivery/status) for item-level evidence and the [Day07 development log](/en/log/day-07) for the latest work.
+As of 2026-11-12, Phase 1 has been accepted: all 15 cross-industry real tasks ran and 13 passed, meeting the 10/15 hard threshold. Phases 2 through 6 have runnable code and automated test loops, and the native executor has been measured on 30 offline cases in the standalone evaluation repository, but real accounts, real devices, long-running operation, and failure drills remain unfinished, so they cannot be called complete delivery. See [Phase 2–6 delivery status](/en/delivery/status) for item-level evidence, [Evaluation and Results](/en/evaluation/) for the measurements, and the [Day08 development log](/en/log/day-08) for the latest work.
 
 ## Six phases
 

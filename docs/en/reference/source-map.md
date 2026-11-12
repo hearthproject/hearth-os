@@ -14,7 +14,8 @@ outline: [2]
 |---|---|---|
 | Design | 1 overall design plus 15 parallel module designs in three groups, including technology choices and storage architecture | [Overall design](/en/design/) |
 | Delivery | Six phases, 24 sub-stages, Phase 2–6 delivery status, and real acceptance boundaries | [Delivery route](/en/delivery/) |
-| Development log | Day01–Day07 entries with commits, diffstats, and boundaries | [Day07](/en/log/day-07) |
+| Evaluation and results | Native 30-case baseline, final report, reproduction, and scoring boundaries | [Evaluation and Results](/en/evaluation/) |
+| Development log | Day01–Day08 entries with commits, diffstats, and boundaries | [Day08](/en/log/day-08) |
 | Appendix | Engineering, risks, decisions, build-vs-integrate, glossary, checklists, and maintenance material | [Appendix](/en/reference/) |
 | Site entry | Home page and language switch | [Home](/en/) |
 
@@ -25,7 +26,8 @@ A first pass can follow "why it exists → what exists now → what is still mis
 1. Read the [overall design](/en/design/) for product positioning, task flow, technology choices, and module boundaries;
 2. Read the fifteen modules as needed, in any order;
 3. Check the [delivery route](/en/delivery/) for the real state of the six phases: Phase 1 is accepted, while Phases 2–6 have code loops but no real acceptance yet;
-4. Before continuing development, read [Engineering](/en/reference/engineering), [Key decisions](/en/reference/decisions), [Risks and stop conditions](/en/reference/risks), and the [Day07 development log](/en/log/day-07).
+4. Read [Evaluation and Results](/en/evaluation/) for the native 30-case experiment IDs, scores, and the untested-final-commit boundary;
+5. Before continuing development, read [Engineering](/en/reference/engineering), [Key decisions](/en/reference/decisions), [Risks and stop conditions](/en/reference/risks), and the [Day08 development log](/en/log/day-08).
 
 To judge quickly whether the project is worth a longer read, start with "Product positioning and goals" in the overall design and the phase overview in the delivery route. Read the engineering constraints and default checklists before implementing.
 

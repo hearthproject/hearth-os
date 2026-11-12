@@ -5,14 +5,16 @@ import { enDeliveryStages, zhDeliveryStages } from './delivery-sidebar.mjs'
 const zhNav = [
   { text: '设计说明', link: '/design/', activeMatch: '^/design/' },
   { text: '交付路线', link: '/delivery/', activeMatch: '^/delivery/' },
-  { text: '开发日志', link: '/log/day-07', activeMatch: '^/log/' },
+  { text: '评测', link: '/evaluation/', activeMatch: '^/evaluation/' },
+  { text: '开发日志', link: '/log/day-08', activeMatch: '^/log/' },
   { text: '附录', link: '/reference/', activeMatch: '^/reference/' }
 ]
 
 const enNav = [
   { text: 'Design', link: '/en/design/', activeMatch: '^/en/design/' },
   { text: 'Delivery', link: '/en/delivery/', activeMatch: '^/en/delivery/' },
-  { text: 'Dev Log', link: '/en/log/day-07', activeMatch: '^/en/log/' },
+  { text: 'Evaluation', link: '/en/evaluation/', activeMatch: '^/en/evaluation/' },
+  { text: 'Dev Log', link: '/en/log/day-08', activeMatch: '^/en/log/' },
   { text: 'Appendix', link: '/en/reference/', activeMatch: '^/en/reference/' }
 ]
 
@@ -96,6 +98,22 @@ const zhSidebar = {
     },
     ...zhDeliveryStages
   ],
+  '/evaluation/': [
+    {
+      text: '评测与结果',
+      items: [
+        { text: '评测总览', link: '/evaluation/' },
+        {
+          text: 'Native 30 题最终报告（2026-11-12）',
+          link: '/evaluation/native-30-final-report-2026-11-12'
+        },
+        {
+          text: 'Native 30 题基线（2026-11-11）',
+          link: '/evaluation/native-30-baseline-2026-11-11'
+        }
+      ]
+    }
+  ],
   '/log/': [
     {
       text: '开发日志',
@@ -106,7 +124,8 @@ const zhSidebar = {
         { text: 'Day04 · 运行时就位与执行器收敛', link: '/log/day-04' },
         { text: 'Day05 · 首次运行、入口与邮件闭环', link: '/log/day-05' },
         { text: 'Day06 · 工作流、技能与评测控制台', link: '/log/day-06' },
-        { text: 'Day07 · 目标证据、委派与个人上下文', link: '/log/day-07' }
+        { text: 'Day07 · 目标证据、委派与个人上下文', link: '/log/day-07' },
+        { text: 'Day08 · 通用执行内核与 native 评测', link: '/log/day-08' }
       ]
     }
   ],
@@ -142,6 +161,22 @@ const enSidebar = {
     },
     ...enDeliveryStages
   ],
+  '/en/evaluation/': [
+    {
+      text: 'Evaluation and Results',
+      items: [
+        { text: 'Evaluation Overview', link: '/en/evaluation/' },
+        {
+          text: 'Native 30-case Final Report (2026-11-12)',
+          link: '/evaluation/native-30-final-report-2026-11-12'
+        },
+        {
+          text: 'Native 30-case Baseline (2026-11-11)',
+          link: '/evaluation/native-30-baseline-2026-11-11'
+        }
+      ]
+    }
+  ],
   '/en/log/': [
     {
       text: 'Development Log',
@@ -152,7 +187,8 @@ const enSidebar = {
         { text: 'Day04 · Runtime and executor convergence', link: '/en/log/day-04' },
         { text: 'Day05 · First run, entrances, and mail closure', link: '/en/log/day-05' },
         { text: 'Day06 · Workflows, skills, and the evaluation console', link: '/en/log/day-06' },
-        { text: 'Day07 · Goal evidence, delegation, and personal context', link: '/en/log/day-07' }
+        { text: 'Day07 · Goal evidence, delegation, and personal context', link: '/en/log/day-07' },
+        { text: 'Day08 · General execution kernel and native evaluation', link: '/en/log/day-08' }
       ]
     }
   ],

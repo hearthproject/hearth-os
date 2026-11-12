@@ -18,7 +18,7 @@ outline: deep
 ## 已迁出的内容
 
 - `apps/eval-server`：实验编排、SQLite、评分、复核、对比和 SPA 托管；
-- `apps/eval-web`：任务目录、实验、运行详情、复核队列、对比和系统视图；
+- `apps/eval-web`：总览、任务目录、实验、运行详情、复核队列、对比、活动流和系统状态等 11 个页面；
 - `packages/eval-core`：case 契约、目录加载、grader、评分和场景统计；
 - `eval/`：60 个 case、输入、golden、历史运行证据和第一阶段验收材料；
 - `apps/server/src/scenarios` 对应的白盒场景运行器；
@@ -55,10 +55,24 @@ npm run dev
 cd D:\App\hearth-eval
 npm install
 Copy-Item .env.example .env
+$env:HEARTH_EVAL_ARTIFACT_ROOT='D:\App\hearth-os\.hearth\eval-artifacts'
 npm run dev
 ```
 
-首次启动评测服务只校验 case 目录、同步版本并恢复中断运行，不会自动执行任何实验。真实通过率、执行器差异和成本数据必须由实际实验产生。
+首次启动评测服务只校验 case 目录、同步版本并恢复中断运行，不会自动执行任何实验。`HEARTH_EVAL_ARTIFACT_ROOT` 必须与主服务实际写入的产物根一致；遗漏时运行详情会找不到已登记产物，并错误报告 `BLOCKER_FAILED: exists`。重启后先通过 `GET /api/system` 确认 `artifactRoot`，再开始实验。
+
+## Native 30 题结果
+
+2026-11-11 至 11-12 使用 30 个离线 case、仅 `native`、重复 1 次、自动评分和自动重试、并发 4：
+
+| 指标 | 结果 |
+|---|---:|
+| 最好完整单轮 | **18/30（60%）**，平均分 88.89，`EXP-20261111145332-7a95ea` |
+| 累计定向确认 | **19/30**，不是一次连续实验 |
+| 最近完整单轮 | 12/30（40%），平均分 73.33，`EXP-20261112003215-b1172b` |
+| 最终修复提交 | `eb32ad5`，尚未连续复测 |
+
+最近完整实验受 provider 抖动、评分 JSON 截断和超时影响，且早于最后四个归一化修复。详细边界与复测建议见[评测与结果](/evaluation/)。
 
 ## 验证
 
