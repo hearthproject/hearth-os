@@ -268,7 +268,7 @@ hearth-os/
 │   │   │   ├── backups.ts / leases.ts                # 加密备份与租约 fencing
 │   │   │   ├── eval-routes.ts                        # 通往独立评测仓库的最小桥接
 │   │   │   ├── test-fixtures/                        # 服务端测试夹具
-│   │   │   └── *.test.ts                             # 91 个测试文件，与实现并列
+│   │   │   └── *.test.ts                             # 与实现并列；全仓库 100 个测试文件、725 个用例
 │   │   └── package.json                              # @hearth/server：依赖全部 workspace 包
 │   ├── web/                                          # React + Vite 聊天优先控制面（PWA）
 │   │   ├── src/App.tsx                               # 路由、首跑向导与事件驱动缓存失效
