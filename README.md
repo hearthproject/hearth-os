@@ -249,63 +249,69 @@ Codex 执行器优先使用统一模型绑定；没有绑定时读取现有的 `
 
 ```text
 hearth-os/
-├── apps/                                         # 应用入口
-│   ├── server/                                   # 单进程控制平面（Fastify · 127.0.0.1:4317）
-│   │   ├── src/                                  # 192 个源文件；实现与同名 *.test.ts 并列
-│   │   │   ├── index.ts                          # 进程入口：调度器 / 心跳 / 主动服务 / 邮件同步
-│   │   │   ├── app.ts                            # **buildServer**：组装 40+ 服务、REST 与 SSE
-│   │   │   ├── service.ts                        # **任务写权威**：目标契约、状态、产物落账
-│   │   │   ├── scheduler.ts                      # 租约 epoch、预算、检查点、恢复与交接
-│   │   │   ├── chat.ts / chat-routes.ts          # 意图分流 decideRoute 与执行计划 planExecution
-│   │   │   ├── approvals.ts / effects.ts         # 动作预览 + 参数指纹 → 效果账本与回执
-│   │   │   ├── reconcile.ts / security.ts        # 不确定效果对账 / 全局 kill switch
-│   │   │   ├── executors.ts                      # **7 个执行器**注册表、能力匹配与可用性回退
-│   │   │   ├── executor-*.ts / model-*.ts        # 安装、健康检测、4 种模型协议与绑定
-│   │   │   ├── native-executor.ts                # 把 agent-runtime 接入调度器的桥接层
-│   │   │   ├── external-executor.ts              # Hermes / Qoder / WorkBuddy / Kimi CLI 适配
-│   │   │   ├── context*.ts                       # Context Broker、投影、策略与上下文水位
-│   │   │   ├── memory.ts / methods.ts            # 记忆治理与从终态轨迹进化出可复用方法
-│   │   │   ├── skills.ts / ontology*.ts          # 技能包治理、个人本体与标准意图
-│   │   │   ├── proactive.ts / feishu.ts          # 主动收件箱、注意力预算与飞书长连接
-│   │   │   ├── email.ts / desktop.ts             # SMTP 发送审批、IMAP 同步与 Windows 桌面控制
-│   │   │   ├── mcp-*.ts / subagents.ts           # 本地 stdio MCP 与有界子代理
-│   │   │   ├── worktrees.ts / sources.ts         # 任务隔离 Worktree、来源注册与文档提取
-│   │   │   ├── backups.ts / leases.ts            # 加密备份、租约 fencing 与设备同步
-│   │   │   └── *.test.ts                         # 100 个测试文件、725 个用例
-│   │   └── package.json                          # @hearth/server：依赖全部 workspace 包
-│   ├── web/                                      # React + Vite 聊天优先控制面（5173 → 代理 /api）
-│   │   ├── src/pages/                            # 聊天、任务、详情、需要你、记忆、设置等 16 页
-│   │   ├── src/components/                       # ApprovalCard、命令面板、通知中心等 14 个组件
-│   │   ├── src/lib/api.ts                        # REST 客户端与 SSE 事件订阅
-│   │   ├── src/App.tsx                           # 路由、首跑向导与事件驱动的缓存失效
-│   │   └── public/                               # PWA 清单、Service Worker 与应用图标
-│   └── eval-web/                                 # 评测控制台构建产物（主体已迁至独立仓库）
-├── packages/                                     # 可复用 workspace 包，依赖方向自下而上
-│   ├── core/                                     # 领域类型、DTO 与 **9 状态状态机**
-│   │   └── src/types.ts / state.ts               # 任务 / 目标 / 审批契约与 assertTransition
-│   ├── eventlog/                                 # **只追加事件账本**：SQLite WAL · schema v33
-│   │   └── src/database.ts                       # HearthStore：80+ 表、投影、迁移与同步对端
-│   ├── agent-runtime/                            # **通用 Agent 内核**，与模型协议解耦
-│   │   ├── src/runtime.ts                        # runAgent：工具白名单、预算、检查点、循环检测
-│   │   ├── src/tools.ts                          # 16 个内建工具：读写 / glob / 补丁 / Shell / 联网
-│   │   └── src/compaction.ts                     # 只在完整回合边界做 Token 感知压缩
-│   ├── codex-executor/                           # Codex Responses 适配器与 Profile 探测
-│   ├── deepseek-executor/                        # DeepSeek Harness SDK / JSON-RPC 适配器
-│   └── templates/                                # 任务模板与产品示例输入
-├── docs/                                         # 中英双语 VitePress 文档站
-│   ├── design/                                   # 15 篇模块设计（约定不写类名与代码路径）
-│   ├── delivery/                                 # 六个阶段、24 个小阶段与验收状态
-│   ├── evaluation/ / log/                        # native 30 题报告与 Day01–Day08 开发日志
-│   ├── reference/ / en/                          # 工程、决策、风险与英文镜像
-│   └── public/                                   # 站点截图、架构图与品牌资源
-├── scripts/                                      # E2E、README 截图、架构图渲染与交付数据
-├── tools/windows-helper/                         # Windows 桌面观察与输入助手
-├── assets/                                       # 架构图与流程图（PNG / SVG）
-├── package.json                                  # workspaces 与 dev / build / test / docs 脚本
-├── tsconfig*.json / vitest.config.ts             # 类型检查与 Vitest（单测超时 20s）
-├── .hearth/                                      # **运行时数据**：SQLite、密钥、工作区、产物（已忽略）
-└── README.md / LICENSE                           # 中文主文档与 Apache-2.0
+├── apps/                                             # 应用入口
+│   ├── server/                                       # Fastify 单进程控制平面
+│   │   ├── src/                                      # 192 个源文件；实现与同名 *.test.ts 并列
+│   │   │   ├── index.ts / app.ts                     # 进程入口与 **buildServer** 组装（REST + SSE）
+│   │   │   ├── service.ts / scheduler.ts             # **任务写权威** / 租约、预算、检查点与恢复
+│   │   │   ├── chat.ts / chat-routes.ts              # 意图分流与执行计划
+│   │   │   ├── approvals.ts / effects.ts             # 参数指纹审批与效果账本
+│   │   │   ├── reconcile.ts / security.ts            # 不确定效果对账 / 全局 kill switch
+│   │   │   ├── executors.ts / native-executor.ts     # 执行器注册表与通用内核桥接
+│   │   │   ├── external-executor.ts / model-client.ts # 外部 CLI 适配与模型协议
+│   │   │   ├── context*.ts / memory.ts / methods.ts  # 上下文投影、记忆与方法治理
+│   │   │   ├── skills*.ts / ontology*.ts             # 技能包治理、个人本体与标准意图
+│   │   │   ├── proactive.ts / feishu*.ts             # 主动收件箱与飞书长连接
+│   │   │   ├── email.ts / desktop.ts                 # 邮件收发与 Windows 桌面边界
+│   │   │   ├── mcp-*.ts / subagents.ts               # 本地 stdio MCP 与有界子代理
+│   │   │   ├── worktrees.ts / sources.ts             # 任务隔离 Worktree 与来源提取
+│   │   │   ├── backups.ts / leases.ts                # 加密备份与租约 fencing
+│   │   │   ├── eval-routes.ts                        # 通往独立评测仓库的最小桥接
+│   │   │   ├── test-fixtures/                        # 服务端测试夹具
+│   │   │   └── *.test.ts                             # 91 个测试文件，与实现并列
+│   │   └── package.json                              # @hearth/server：依赖全部 workspace 包
+│   ├── web/                                          # React + Vite 聊天优先控制面（PWA）
+│   │   ├── src/App.tsx                               # 路由、首跑向导与事件驱动缓存失效
+│   │   ├── src/pages/                                # 16 个页面：Chat / Tasks / TaskDetail / Inbox / Memory …
+│   │   ├── src/components/                           # 14 个组件：AppShell / ApprovalCard / CommandPalette …
+│   │   ├── src/lib/                                  # 9 个文件：api.ts / types.ts / notifications.ts …
+│   │   ├── public/                                   # manifest.webmanifest、sw.js 与 icons/
+│   │   └── index.html / vite.config.ts               # SPA 入口与 /api 代理
+├── packages/                                         # 可复用 workspace 包，依赖方向自下而上
+│   ├── core/                                         # 领域类型、DTO 与状态机
+│   │   └── src/                                      # types.ts / state.ts / dto.ts / personal-agent.ts
+│   ├── eventlog/                                     # **只追加事件账本**：SQLite WAL 与投影
+│   │   └── src/                                      # database.ts / index.ts / database.test.ts
+│   ├── agent-runtime/                                # **通用 Agent 内核**：工具循环、预算、压缩
+│   │   └── src/                                      # runtime.ts / tools.ts / compaction.ts / web-fetch.ts / documents.ts
+│   ├── codex-executor/                               # Codex 适配器与 Profile 探测
+│   │   └── src/                                      # executor.ts / profile.ts / index.ts
+│   ├── deepseek-executor/                            # DeepSeek 适配器
+│   │   └── src/                                      # index.ts
+│   ├── templates/                                    # 任务模板与产品示例输入
+│   │   └── src/                                      # index.ts
+├── docs/                                             # 中英双语 VitePress 文档站
+│   ├── design/                                       # 15 篇模块设计 + index.md
+│   ├── delivery/                                     # 六阶段、24 个小阶段与验收状态
+│   ├── evaluation/                                   # native 30 题基线与最终报告
+│   ├── log/                                          # Day01–Day08 开发日志
+│   ├── reference/                                    # 工程、决策、风险、术语与 source-map
+│   ├── en/                                           # design / delivery / reference / log 英文镜像
+│   ├── public/                                       # hero、brand/ 与 screenshots/
+│   ├── brand/                                        # Logo、图标与品牌板源文件
+│   ├── .vitepress/                                   # config.mts、delivery-sidebar.mjs 与主题
+│   └── index.md                                      # 文档站首页
+├── scripts/                                          # E2E、README 截图、交付页生成与覆盖率检查
+│   └── delivery-data/                                # s0–s6 阶段交付数据 JSON
+├── tools/windows-helper/                             # helper.mjs 与 windows.ps1 桌面助手
+├── assets/                                           # 架构图与流程图（3 张 PNG）
+├── package.json / package-lock.json                  # npm workspaces 与 dev / build / test / docs 脚本
+├── tsconfig*.json / vitest.config.ts                 # 类型检查与 Vitest（单测超时 20s）
+├── .gitignore / .gitattributes                       # 忽略规则与文本换行约定
+└── README.md / LICENSE                               # 中文主文档与 Apache-2.0
 ```
+
+> 运行时数据目录 `.hearth/`（SQLite、密钥、工作区、产物）由程序在本地生成，不纳入版本控制，不在上方仓库结构中。
 
 ## 文档
 
