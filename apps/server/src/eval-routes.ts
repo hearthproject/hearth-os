@@ -7,7 +7,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { ModelSettings } from "./model-settings.ts";
 import { chatModelConfigured } from "./model-settings.ts";
-import { completeChat, type ChatMessage } from "./model-client.ts";
+import { completeChat, type ChatMessage, type CompleteOptions } from "./model-client.ts";
 import type { HearthService } from "./service.ts";
 import type { HearthStore } from "@hearth/eventlog";
 
@@ -69,6 +69,7 @@ interface JudgeResponse {
   criteria: Array<{ id: string; passed: boolean; confidence: number; reason: string; evidence: string[] }>;
   overallConfidence: number;
   usage: { inputTokens: number; outputTokens: number };
+  diagnostics: Record<string, unknown>;
 }
 
 export function registerEvalRoutes(app: FastifyInstance, options: EvalRouteOptions): void {
@@ -182,19 +183,44 @@ export function registerEvalRoutes(app: FastifyInstance, options: EvalRouteOptio
       { role: "system", content: "你是严格、保守的任务评测裁判。只根据提供的产物和确定性结果判断，不臆测未展示的事实。" },
       { role: "user", content: prompt }
     ];
+    const isGlm53 = /^glm-5\.3(?:-|$)/i.test(settings.model);
+    const completionOptions: CompleteOptions = {
+      maxTokens: settings.maxOutputTokens,
+      temperature: isGlm53 ? 1 : 0,
+      timeoutMs: 90_000,
+      ...(settings.protocol === "openai-chat" ? {
+        responseFormat: { type: "json_object" as const },
+        ...(isGlm53 ? { reasoningEffort: "low" as const } : {})
+      } : {})
+    };
+    const diagnostics: Record<string, unknown> = {
+      model: settings.model,
+      maxTokens: completionOptions.maxTokens,
+      responseFormat: completionOptions.responseFormat?.type ?? null,
+      reasoningEffort: completionOptions.reasoningEffort ?? null
+    };
     try {
-      const result = await complete(settings, messages, { maxTokens: 2_400, temperature: 0, timeoutMs: 90_000 });
+      const result = await complete(settings, messages, completionOptions);
+      Object.assign(diagnostics, result.diagnostics, {
+        usage: result.usage,
+        contentCharacters: result.content.length
+      });
+      request.log.info({ taskId: body.taskId, diagnostics }, "评委模型响应");
+      if (result.diagnostics?.finishReason === "length") {
+        throw new Error(`评委输出达到 ${completionOptions.maxTokens} token 上限，结果被截断；请提高模型最大输出预算后重新评分`);
+      }
       const judge = parseJudgeResult(result.content, body);
       const response: JudgeResponse = {
         model: settings.model,
         promptHash,
         criteria: judge.criteria,
         overallConfidence: judge.overallConfidence,
-        usage: result.usage ?? { inputTokens: 0, outputTokens: 0 }
+        usage: result.usage ?? { inputTokens: 0, outputTokens: 0 },
+        diagnostics
       };
       return response;
     } catch (error) {
-      return reply.code(502).send({ error: "JUDGE_FAILED", message: errorMessage(error) });
+      return reply.code(502).send({ error: "JUDGE_FAILED", message: errorMessage(error), diagnostics });
     }
   });
 }

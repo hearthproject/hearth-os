@@ -20,6 +20,8 @@ export class ModelClientError extends Error {
 
 export interface CompleteOptions {
   maxTokens?: number;
+  responseFormat?: { type: "json_object" };
+  reasoningEffort?: "low" | "high" | "max";
   temperature?: number;
   signal?: AbortSignal;
   timeoutMs?: number;
@@ -28,6 +30,11 @@ export interface CompleteOptions {
 export interface CompleteResult {
   content: string;
   usage: { inputTokens: number; outputTokens: number } | null;
+  diagnostics?: {
+    requestId: string | null;
+    finishReason: string | null;
+    reasoningCharacters: number;
+  };
 }
 
 export type StreamDeltaKind = "content" | "reasoning";
@@ -188,14 +195,26 @@ async function completeOpenAiChat(
       messages,
       stream: false,
       temperature: options.temperature ?? 0.2,
-      max_tokens: options.maxTokens ?? 1_200
+      max_tokens: options.maxTokens ?? 1_200,
+      ...(options.responseFormat ? { response_format: options.responseFormat } : {}),
+      ...(options.reasoningEffort ? { reasoning_effort: options.reasoningEffort } : {})
     }),
     signal: withTimeout(options.signal, options.timeoutMs ?? 60_000)
   });
   const payload = await readJson(response);
   if (!response.ok) throw apiError(response.status, payload);
   const content = String(payload?.choices?.[0]?.message?.content ?? "");
-  return { content, usage: readUsage(payload?.usage) };
+  const choice = payload?.choices?.[0];
+  const reasoning = choice?.message?.reasoning_content ?? choice?.message?.reasoning;
+  return {
+    content,
+    usage: readUsage(payload?.usage),
+    diagnostics: {
+      requestId: typeof payload?.request_id === "string" ? payload.request_id : typeof payload?.id === "string" ? payload.id : null,
+      finishReason: typeof choice?.finish_reason === "string" ? choice.finish_reason : null,
+      reasoningCharacters: typeof reasoning === "string" ? reasoning.length : 0
+    }
+  };
 }
 
 async function streamOpenAiChat(
