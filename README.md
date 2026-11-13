@@ -292,6 +292,7 @@ hearth-os/
 │   │   └── src/                                      # index.ts
 ├── docs/                                             # 中英双语 VitePress 文档站
 │   ├── design/                                       # 15 篇模块设计 + index.md
+│   ├── architecture/                                 # 19 篇代码视角架构说明 + index.md
 │   ├── delivery/                                     # 六阶段、24 个小阶段与验收状态
 │   ├── evaluation/                                   # native 30 题基线与最终报告
 │   ├── log/                                          # Day01–Day08 开发日志
@@ -314,8 +315,9 @@ hearth-os/
 
 ## 文档
 
-完整文档发布在 **<https://hearthproject.github.io/hearth-os/>**。中文是默认语言，每个页面都有英文镜像。
+完整文档发布在 **<https://hearthproject.github.io/hearth-os/>**。中文是默认语言，设计、交付、评测、日志与附录均有英文镜像；代码架构板块目前只有中文。
 
+- [代码架构](https://hearthproject.github.io/hearth-os/architecture/) — 完全依据源码整理的 19 篇说明，覆盖服务组装、调度、执行器、上下文、存储、前端与渠道接入。
 - [产品设计](https://hearthproject.github.io/hearth-os/design/) — 产品定位、任务链路、技术选型与模块边界。
 - [目标、完成判定与证据](https://hearthproject.github.io/hearth-os/design/goals-and-evidence.html) — 目标契约、预算、停止条件、验证器和完成报告。
 - [委派、交接与沙箱](https://hearthproject.github.io/hearth-os/design/delegation-and-sandbox.html) — 单层持久委派、交接包、租约、路径/网络/凭据边界。

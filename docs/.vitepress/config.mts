@@ -4,6 +4,7 @@ import { enDeliveryStages, zhDeliveryStages } from './delivery-sidebar.mjs'
 
 const zhNav = [
   { text: '设计说明', link: '/design/', activeMatch: '^/design/' },
+  { text: '代码架构', link: '/architecture/', activeMatch: '^/architecture/' },
   { text: '交付路线', link: '/delivery/', activeMatch: '^/delivery/' },
   { text: '评测', link: '/evaluation/', activeMatch: '^/evaluation/' },
   { text: '开发日志', link: '/log/day-08', activeMatch: '^/log/' },
@@ -12,6 +13,7 @@ const zhNav = [
 
 const enNav = [
   { text: 'Design', link: '/en/design/', activeMatch: '^/en/design/' },
+  { text: 'Code Architecture (ZH)', link: '/architecture/', activeMatch: '^/architecture/' },
   { text: 'Delivery', link: '/en/delivery/', activeMatch: '^/en/delivery/' },
   { text: 'Evaluation', link: '/en/evaluation/', activeMatch: '^/en/evaluation/' },
   { text: 'Dev Log', link: '/en/log/day-08', activeMatch: '^/en/log/' },
@@ -86,8 +88,60 @@ const enDesignSidebar = [
   }
 ]
 
+const zhArchitectureSidebar = [
+  {
+    text: '总览',
+    items: [{ text: '代码架构总览', link: '/architecture/' }]
+  },
+  {
+    text: '基座与运维',
+    items: [
+      { text: '领域契约与状态机', link: '/architecture/Hearth-领域契约与状态机设计说明' },
+      { text: '事件溯源与存储管理', link: '/architecture/Hearth-存储设计说明' },
+      { text: '定时任务与后台周期', link: '/architecture/定时任务设计说明' },
+      { text: '可观测性与首次引导', link: '/architecture/Hearth-可观测性与首次引导设计说明' }
+    ]
+  },
+  {
+    text: '执行主干',
+    items: [
+      { text: '任务执行调度器', link: '/architecture/Hearth-任务执行调度器设计说明' },
+      { text: '模型接入与执行器适配', link: '/architecture/Hearth-模型接入与执行器适配设计说明' },
+      { text: 'Agent 运行时', link: '/architecture/Hearth-Agent运行时设计说明' },
+      { text: '工作区隔离与产物', link: '/architecture/Hearth-工作区隔离与产物设计说明' },
+      { text: 'MCP 与任务委派', link: '/architecture/Hearth-MCP与任务委派设计说明' },
+      { text: '意图识别与执行器选择', link: '/architecture/意图识别路由与执行器自动选择' }
+    ]
+  },
+  {
+    text: '认知与知识',
+    items: [
+      { text: '上下文管理', link: '/architecture/hearth-os-上下文管理设计' },
+      { text: '知识本体与指代消解', link: '/architecture/Hearth-知识本体与指代消解设计说明' },
+      { text: '技能与方法资产', link: '/architecture/Hearth-自进化机制设计说明' },
+      { text: '数据源与联网', link: '/architecture/Hearth-数据源与联网设计说明' }
+    ]
+  },
+  {
+    text: '接入与治理',
+    items: [
+      { text: '服务组装与 API 接入', link: '/architecture/Hearth-服务组装与API接入设计说明' },
+      { text: '判定、审批与安全', link: '/architecture/判定审批机制说明' },
+      { text: '主动式引擎与注意力', link: '/architecture/Hearth-主动式引擎设计说明' }
+    ]
+  },
+  {
+    text: '交互与触达',
+    items: [
+      { text: '前端设计与实时事件桥', link: '/architecture/Hearth-前端架构设计说明' },
+      { text: '渠道与设备接入', link: '/architecture/Hearth-渠道与设备接入设计说明' }
+    ]
+  }
+]
+
 const zhSidebar = {
   '/design/': zhDesignSidebar,
+  '/architecture/': zhArchitectureSidebar,
   '/delivery/': [
     {
       text: '交付路线',
@@ -151,6 +205,15 @@ const zhSidebar = {
 
 const enSidebar = {
   '/en/design/': enDesignSidebar,
+  '/en/architecture/': [
+    {
+      text: 'Code Architecture (中文)',
+      items: [
+        { text: 'About this section', link: '/en/architecture/' },
+        { text: 'Open the Chinese overview', link: '/architecture/' }
+      ]
+    }
+  ],
   '/en/delivery/': [
     {
       text: 'Delivery',
