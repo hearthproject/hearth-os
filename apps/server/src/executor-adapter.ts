@@ -91,6 +91,8 @@ export interface ExecutorAvailability {
   reason?: string;
 }
 
+
+//用统一接口约定“怎么调用执行器”
 export interface ExecutorAdapter {
   id: ExecutorId;
   supportsResume: boolean;

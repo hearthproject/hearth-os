@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HearthStore } from "@hearth/eventlog";
 import Fastify from "fastify";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { completeChat } from "./model-client.ts";
 import { registerEvalRoutes } from "./eval-routes.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import { HearthService } from "./service.ts";
@@ -120,6 +121,10 @@ describe("eval routes", () => {
       { id: "quality", passed: true, confidence: 0.91, reason: "清晰", evidence: ["已回复"] }
     ]);
     expect(judged.overallConfidence).toBe(0.91);
+    expect(judged.diagnostics).toMatchObject({
+      maxTokens: 8000, responseFormat: "json_object", reasoningEffort: null,
+      usage: { inputTokens: 100, outputTokens: 20 }
+    });
   });
 
   it("uses an unavailable response when no chat model is configured", async () => {
@@ -131,9 +136,33 @@ describe("eval routes", () => {
     });
     expect(response.statusCode).toBe(404);
   });
+
+  it.each(["length", "stop"])("reports judge response diagnostics for %s failures", async (finishReason) => {
+    const complete = vi.fn<typeof completeChat>().mockResolvedValue({
+      content: "", usage: { inputTokens: 2438, outputTokens: 8000 },
+      diagnostics: { requestId: "judge-request", finishReason, reasoningCharacters: 12000 }
+    });
+    const fixture = await createFixture(true, undefined, complete, { ...judgeSettings, model: "glm-5.3-flash" });
+    const created = await fixture.app.inject({ method: "POST", url: "/api/eval/tasks", payload: taskBody() });
+    const response = await fixture.app.inject({
+      method: "POST", url: "/api/eval/judge", payload: {
+        taskId: created.json().task.id,
+        criteria: [{ id: "quality", label: "质量", rubric: "清晰", points: 30 }], deterministic: []
+      }
+    });
+    expect(complete.mock.calls[0]?.[2]).toMatchObject({
+      maxTokens: 8000, responseFormat: { type: "json_object" }, reasoningEffort: "low", temperature: 1
+    });
+    expect(response.statusCode).toBe(502);
+    expect(response.json().message).toContain(finishReason === "length" ? "结果被截断" : "没有返回 JSON");
+    expect(response.json().diagnostics).toMatchObject({
+      finishReason, requestId: "judge-request", reasoningCharacters: 12000, contentCharacters: 0,
+      usage: { inputTokens: 2438, outputTokens: 8000 }
+    });
+  });
 });
 
-async function createFixture(withModel = true, externalInputRoot?: string) {
+async function createFixture(withModel = true, externalInputRoot?: string, complete?: typeof completeChat, settings = judgeSettings) {
   const root = mkdtempSync(join(tmpdir(), "hearth-eval-routes-"));
   const evalInputRoot = externalInputRoot ?? join(root, "eval");
   if (!externalInputRoot) {
@@ -149,11 +178,11 @@ async function createFixture(withModel = true, externalInputRoot?: string) {
     store,
     repoRoot: root,
     evalInputRoot,
-    settings: () => withModel ? judgeSettings : null,
-    complete: async () => ({
+    settings: () => withModel ? settings : null,
+    complete: complete ?? (async () => ({
       content: '{"criteria":[{"id":"quality","passed":true,"confidence":0.91,"reason":"清晰","evidence":["已回复"]}],"overallConfidence":0.91}',
       usage: { inputTokens: 100, outputTokens: 20 }
-    })
+    }))
   });
   await app.ready();
   return { root, evalInputRoot, app, service, store };

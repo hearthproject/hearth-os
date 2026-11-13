@@ -1,5 +1,5 @@
 import { createServer, type Server } from "node:http";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { completeChat, listModels, streamChat } from "./model-client.ts";
 import { decideRoute } from "./chat.ts";
 import type { ModelSettings } from "./model-settings.ts";
@@ -65,6 +65,27 @@ function settings(): ModelSettings {
 }
 
 describe("OpenAI-compatible model client", () => {
+  it("sends judge options and retains truncation diagnostics", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({
+      request_id: "judge-request", choices: [{ finish_reason: "length", message: { content: "", reasoning_content: "thinking" } }],
+      usage: { prompt_tokens: 2400, completion_tokens: 8000 }
+    }), { status: 200 }));
+    try {
+      const result = await completeChat(settings(), [{ role: "user", content: "Return JSON" }], {
+        maxTokens: 8000, responseFormat: { type: "json_object" }, reasoningEffort: "low"
+      });
+      expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+        max_tokens: 8000, response_format: { type: "json_object" }, reasoning_effort: "low"
+      });
+      expect(result).toMatchObject({
+        content: "", usage: { inputTokens: 2400, outputTokens: 8000 },
+        diagnostics: { requestId: "judge-request", finishReason: "length", reasoningCharacters: 8 }
+      });
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
   it("streams deltas from SSE", async () => {
     const deltas: string[] = [];
     const result = await streamChat(settings(), [{ role: "user", content: "hi" }], (delta) => deltas.push(delta));
