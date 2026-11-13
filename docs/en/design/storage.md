@@ -18,7 +18,7 @@ outline: [2]
 | Every run is traceable | A context item carries `task_id`, `run_id`, `executor_id`, `provenance_json`, and a stable `executor_event_id` |
 | Executors do not hold long-lived credentials | Model keys are encrypted with AES-256-GCM in the database; an executor gets decrypted configuration only for its run |
 
-The current database schema version is **28**. At startup, `packages/eventlog/src/database.ts` runs table creation and incremental migrations in order, then writes `PRAGMA user_version` and `app_meta.schemaVersion`.
+The current database schema version is **33** (as defined by `CURRENT_SCHEMA_VERSION` in `packages/eventlog/src/database.ts`). At startup, `packages/eventlog/src/database.ts` runs table creation and incremental migrations in order, then writes `PRAGMA user_version` and `app_meta.schemaVersion`.
 
 ## The `.hearth` Directory
 

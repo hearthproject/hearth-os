@@ -18,7 +18,7 @@ outline: [2]
 | 每次执行可追溯 | 上下文条目带 `task_id`、`run_id`、`executor_id`、`provenance_json` 和稳定的 `executor_event_id` |
 | 执行器不持有长期凭据 | 模型密钥经 AES-256-GCM 加密后存入数据库；执行器只在单次运行中获得解密后的配置 |
 
-当前数据库 schema 版本为 **28**。启动时由 `packages/eventlog/src/database.ts` 顺序执行建表与增量迁移，并写入 `PRAGMA user_version` 和 `app_meta.schemaVersion`。
+当前数据库 schema 版本为 **33**（以 `packages/eventlog/src/database.ts` 的 `CURRENT_SCHEMA_VERSION` 为准）。启动时由 `packages/eventlog/src/database.ts` 顺序执行建表与增量迁移，并写入 `PRAGMA user_version` 和 `app_meta.schemaVersion`。
 
 ## `.hearth` 目录
 
