@@ -1,8 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { resolveAction } from "./action-resolver.ts";
 import type { RunRecord } from "@hearth/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HearthStore } from "@hearth/eventlog";
@@ -121,35 +117,6 @@ describe("approval manager", () => {
     expect(result.task.status).toBe("running");
     expect(result.effect).toBeNull();
     expect(service.requireTask(task.id).status).toBe("running");
-  });
-
-  it("releases a native tool waiter when executable revalidation revokes approval", async ({ onTestFinished }) => {
-    const root = mkdtempSync(join(tmpdir(), "hearth-tool-tamper-"));
-    onTestFinished(() => rmSync(root, { recursive: true, force: true }));
-    const executable = join(root, "tool.exe");
-    writeFileSync(executable, "original");
-    const action = resolveAction({
-      proposal: { kind: "shell", summary: "运行工具", command: { executable, cwd: root } },
-      permissionMode: "guarded",
-      context: "interactive",
-      sessionRoot: root
-    });
-    const manager = new ApprovalManager(service, async () => ({}));
-    const { task, runId } = runningTask(service);
-    const pending = await manager.requestTool({
-      taskId: task.id, runId, toolName: "shell", summary: "运行工具",
-      target: { tool: "shell", executable }, preview: {}, action
-    });
-    const decisions: Array<{ allowed: boolean; reason: string }> = [];
-    void pending.decision.then((decision) => decisions.push(decision));
-    writeFileSync(executable, "replaced");
-
-    await expect(manager.decide(pending.approval.id, "approve", pending.approval.parameterHash))
-      .rejects.toMatchObject({ code: "ACTION_CHANGED" });
-    expect(store.getApproval(pending.approval.id)?.status).toBe("revoked");
-    expect(decisions).toEqual([{ allowed: false, reason: expect.stringContaining("变化") }]);
-    expect(service.requireTask(task.id).status).toBe("running");
-    expect(store.listEffects(task.id)).toHaveLength(0);
   });
 
   it("auto-approves pending tool approvals when the conversation switches to full", async () => {

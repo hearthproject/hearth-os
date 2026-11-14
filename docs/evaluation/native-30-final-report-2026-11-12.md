@@ -1,7 +1,5 @@
 # Native 执行器 30 任务最终评测报告（2026-11-12）
 
-本文的 30 题实验数据记录于 2026-11-12。2026-11-14 的审批修复与自检验证追加在文末，可通过[定向验证更新](#定向验证更新)查看；当前工作区的完整 30 题复测仍待执行。
-
 ## 结论摘要
 
 本轮使用 `hearthproject/hearth-eval` 的 30 个离线 case（8 个任务族均匀分布），仅运行 `native` 执行器，重复 1 次，自动评分和自动重试开启，并发 4。
@@ -264,48 +262,3 @@ $env:HEARTH_EVAL_ARTIFACT_ROOT='D:\App\hearth-os\.hearth\eval-artifacts'
 - 所有评测均为离线模式，没有执行 `live-only` case。
 - 没有把 provider 抖动、评委不可用或采样标记伪造成确定性通过。
 - 没有把累计定向结果表述为单次官方 30 题成绩。
-
-## 定向验证更新
-
-记录日期为 2026-11-14。
-
-### 代码与环境
-
-- Hearth OS 基于 `0de76a1`，包含本地尚未提交的 `approvals.ts` 修复和回归测试。
-- Hearth Eval 基于 `2a65c78`，包含本地尚未提交的场景自检、内存批次、前端展示和场景断言更新。
-- 环境为 Windows、Node.js v24.14.0，使用内存数据库与临时测试目录。
-
-### 已复现并修复的问题
-
-`action-binding-tamper` 的旧失败记录为 `realpath ... tool.exe` 抛出 `EPERM`。在受限沙箱内复跑三次均复现，取得文件访问权限后相同代码三次通过。这一差异定位到测试环境的文件访问权限。
-
-进一步检查 Native 的 `requestTool()` 路径后，新增回归测试实际复现了另一处缺陷：审批已撤销，等待工具审批的 Promise 仍处于 pending。修复 `ApprovalManager.revokeAction()` 后，有活动等待者的工具审批会返回 `allowed: false` 和拒绝原因，任务恢复运行状态，Agent 可跳过该工具。场景新增 `native-waiter-released` 与 `native-resumes` 检查项，连同文件摘要校验、审批撤销、无执行器调用和无 effect 一起验证。
-
-### 验证结果与复现
-
-| 检查 | 结果 |
-|---|---|
-| Hearth OS 定向回归 | 5 个测试文件、106 项测试通过 |
-| 动作绑定场景 | 1 个场景重复 3 次，3/3 通过 |
-| Hearth Eval 自检与 API 回归 | 2 个测试文件、9 项测试通过 |
-| Hearth Eval 类型检查与前端构建 | 通过 |
-| Hearth OS 全量类型检查 | MCP 回调参数隐式 `any`、PDF 模块类型声明错误 |
-| 场景类型检查 | PDF 模块类型声明错误 |
-| 完整 Native 30 题实验 | 待执行 |
-
-在 Hearth OS 根目录执行定向回归：
-
-```bash
-npx vitest run apps/server/src/approvals.test.ts apps/server/src/approval-ticket.test.ts apps/server/src/action-resolver.test.ts apps/server/src/scheduler.test.ts packages/agent-runtime/src/runtime.test.ts
-```
-
-在 Hearth Eval 根目录执行自检接口测试或保留单场景报告：
-
-```bash
-npx vitest run apps/eval-server/src/scenario-self-check.test.ts apps/eval-server/src/app.test.ts
-npm run eval:scenarios -- --only action-binding-tamper
-```
-
-也可以在评测控制台点击“开始自检”。测试通过真实场景运行器执行，完成后生成内存批次并更新“最近一次”，支持查看检查项、证据和 Markdown 日志。页面结果随下次自检替换，重启服务后清空，临时测试目录执行后清理。命令行报告保存在 `eval/scenario-runs/`，可用于需要留档的复测。
-
-本次实测覆盖动作绑定单场景和上述定向测试集。全部 30 个场景的整套自检、真实模型与网页审批的完整人工流程，以及新一轮 Native 30 题实验，均需后续验证。
