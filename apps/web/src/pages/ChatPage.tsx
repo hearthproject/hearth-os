@@ -208,6 +208,7 @@ export function ChatPage() {
         kimi: patch.executorEnabled?.kimi ?? conversationSettings.executorEnabled.kimi
       },
       approvalMode: patch.approvalMode ?? conversationSettings.approvalMode,
+      executionMode: patch.executionMode ?? conversationSettings.executionMode ?? "standard",
       preferredExecutorId: patch.preferredExecutorId !== undefined
         ? patch.preferredExecutorId
         : conversationSettings.preferredExecutorId
@@ -553,6 +554,18 @@ export function ChatPage() {
               </select>
             </label>
             <span className="composer-toolbar-sep" aria-hidden="true" />
+            <label className="executor-picker" title="控制原生执行器的分析深度和执行预算；适用于新建任务">
+              <select
+                aria-label="原生执行深度"
+                value={conversationSettings.executionMode ?? "standard"}
+                disabled={!settingsReady}
+                onChange={(event) => patchSettings({ executionMode: event.target.value as "quick" | "standard" | "deep" })}
+              >
+                <option value="quick">快速</option>
+                <option value="standard">标准</option>
+                <option value="deep">深入</option>
+              </select>
+            </label>
             <button
               type="button"
               className={`permission-toggle ${conversationSettings.approvalMode}`}

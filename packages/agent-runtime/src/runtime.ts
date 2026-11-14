@@ -44,6 +44,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   let finishRejections = 0;
   let lastToolSignature: string | null = null;
   let repeatedToolCalls = 0;
+  let budgetReminderSent = false;
   const startedAt = Date.now();
   const signal = options.signal ?? new AbortController().signal;
 
@@ -115,6 +116,18 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       return finish("budget_exceeded", summary ?? "Token 用量超过预算，已停止");
     }
 
+    if (!budgetReminderSent && (
+      options.budget.maxTurns - turns <= 2 ||
+      totalTokens() >= options.budget.maxTokens * 0.8 ||
+      toolCalls >= options.budget.maxToolCalls * 0.8 ||
+      elapsed >= options.budget.maxDurationMs * 0.8
+    )) {
+      messages.push({
+        role: "user",
+        content: "执行预算即将耗尽。请优先整理已有证据、写入所需交付物并调用 finish_task，明确说明未完成事项和材料缺口；如果无法满足交付要求，请如实说明，不要声称已完成。"
+      });
+      budgetReminderSent = true;
+    }
     await compactContext(false);
 
     turns += 1;

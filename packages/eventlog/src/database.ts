@@ -1425,6 +1425,7 @@ export class HearthStore {
     ensureColumn(this.db, "conversations", "deleted_at", "TEXT");
     ensureColumn(this.db, "conversations", "trash_batch_id", "TEXT");
     ensureColumn(this.db, "tasks", "budget_override_json", "TEXT");
+    ensureColumn(this.db, "tasks", "execution_mode", "TEXT");
     ensureColumn(this.db, "tasks", "deleted_at", "TEXT");
     ensureColumn(this.db, "tasks", "trash_batch_id", "TEXT");
     ensureColumn(this.db, "chat_messages", "kind", "TEXT");
@@ -3631,8 +3632,8 @@ export class HearthStore {
 
 function upsertTask(db: DatabaseSync, task: TaskRecord): void {
   db.prepare(
-    `INSERT INTO tasks (id, external_ref, request_hash, template_id, title, goal, status, created_at, updated_at, deadline, inputs_json, network_hosts_json, output_dir, current_run_id, next_action, error_json, result_summary, conversation_id, executor_id, task_kind, expected_outputs_json, permissions_json, pending_input, method_id, method_version, project_id, pinned_at, archived_at, goal_id, budget_override_json, deleted_at, trash_batch_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO tasks (id, external_ref, request_hash, template_id, title, goal, status, created_at, updated_at, deadline, inputs_json, network_hosts_json, output_dir, current_run_id, next_action, error_json, result_summary, conversation_id, executor_id, task_kind, expected_outputs_json, permissions_json, pending_input, method_id, method_version, project_id, pinned_at, archived_at, goal_id, budget_override_json, deleted_at, trash_batch_id, execution_mode)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        external_ref=excluded.external_ref, request_hash=excluded.request_hash,
        template_id=excluded.template_id, title=excluded.title, goal=excluded.goal, status=excluded.status,
@@ -3646,7 +3647,7 @@ function upsertTask(db: DatabaseSync, task: TaskRecord): void {
        project_id=excluded.project_id,
         pinned_at=excluded.pinned_at, archived_at=excluded.archived_at, goal_id=excluded.goal_id,
         budget_override_json=excluded.budget_override_json, deleted_at=excluded.deleted_at,
-        trash_batch_id=excluded.trash_batch_id`
+        trash_batch_id=excluded.trash_batch_id, execution_mode=excluded.execution_mode`
   ).run(
     task.id, task.externalRef ?? null, task.requestHash ?? null,
     task.templateId, task.title, task.goal, task.status, task.createdAt, task.updatedAt,
@@ -3660,7 +3661,7 @@ function upsertTask(db: DatabaseSync, task: TaskRecord): void {
     task.methodId ?? null, task.methodVersion ?? null, task.projectId ?? null,
     task.pinnedAt ?? null, task.archivedAt ?? null, task.goalId ?? null,
     task.budgetOverride ? JSON.stringify(task.budgetOverride) : null,
-    task.deletedAt ?? null, task.trashBatchId ?? null
+    task.deletedAt ?? null, task.trashBatchId ?? null, task.executionMode ?? null
   );
 }
 
@@ -4709,6 +4710,7 @@ function rowToTask(row: DbRow): TaskRecord {
     pinnedAt: row.pinned_at == null ? null : String(row.pinned_at),
     archivedAt: row.archived_at == null ? null : String(row.archived_at),
     budgetOverride: row.budget_override_json == null ? null : JSON.parse(String(row.budget_override_json)),
+    ...(row.execution_mode == null ? {} : { executionMode: String(row.execution_mode) as NonNullable<TaskRecord["executionMode"]> }),
     deletedAt: row.deleted_at == null ? null : String(row.deleted_at),
     trashBatchId: row.trash_batch_id == null ? null : String(row.trash_batch_id)
   };

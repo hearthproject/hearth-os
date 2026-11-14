@@ -1,4 +1,5 @@
 import type { BudgetDimension, RunBudget, RunUsage, TaskPermissions, TaskProgressDetail, TaskRecord } from "@hearth/core";
+import { EXECUTION_PROFILES } from "@hearth/core";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, resolve, sep } from "node:path";
 import {
@@ -1091,6 +1092,9 @@ export function nativeSystemPrompt(task: TaskRecord, expectedOutputs: string[], 
     "不要假设本地已经有仓库，也不要编造 PR 状态、评审意见或 rebase 结果；命令失败时读取错误并说明限制。",
     "回答使用简体中文，不要编造没有依据的事实。",
     `当前任务：${task.title}`,
+    ...(task.executionMode ? [
+      `执行模式：${EXECUTION_PROFILES[task.executionMode].label}。${EXECUTION_PROFILES[task.executionMode].instruction}`
+    ] : []),
     `期望产物：${expectedOutputs.join("、")}`,
     ...(skillIndex?.trim() ? [skillIndex.trim()] : []),
     ...(expectedOutputs.some((output) => /\.(png|jpe?g|webp)$/i.test(output))

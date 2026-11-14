@@ -1,3 +1,5 @@
+import type { ExecutionMode } from "./execution-mode.ts";
+
 export const TASK_STATUSES = [
   "queued",
   "running",
@@ -25,12 +27,14 @@ export const APPROVAL_MODES = ["necessary", "full"] as const;
 export type ApprovalMode = (typeof APPROVAL_MODES)[number];
 
 export interface ConversationSettings {
+  executionMode?: ExecutionMode;
   executorEnabled: Record<ExecutorId, boolean>;
   approvalMode: ApprovalMode;
   preferredExecutorId: ExecutorId | null;
 }
 
 export interface ConversationSettingsPatch {
+  executionMode?: ExecutionMode | undefined;
   executorEnabled?: Partial<Record<ExecutorId, boolean | undefined>> | undefined;
   approvalMode?: ApprovalMode | undefined;
   preferredExecutorId?: ExecutorId | null | undefined;
@@ -42,7 +46,7 @@ export function defaultConversationSettings(
 ): ConversationSettings {
   const executorEnabled = {} as Record<ExecutorId, boolean>;
   for (const id of EXECUTOR_IDS) executorEnabled[id] = enabled[id] ?? false;
-  return { executorEnabled, approvalMode, preferredExecutorId: null };
+  return { executorEnabled, approvalMode, preferredExecutorId: null, executionMode: "standard" };
 }
 
 export function mergeConversationSettings(
@@ -56,6 +60,7 @@ export function mergeConversationSettings(
   }
   return {
     executorEnabled,
+    executionMode: patch?.executionMode ?? base.executionMode ?? "standard",
     approvalMode: patch?.approvalMode ?? base.approvalMode,
     preferredExecutorId: patch?.preferredExecutorId !== undefined
       ? patch.preferredExecutorId
@@ -289,6 +294,7 @@ export interface BudgetExhaustion {
 }
 
 export interface TaskRecord {
+  executionMode?: ExecutionMode;
   id: string;
   goalId?: string | null;
   externalRef?: string | null;
