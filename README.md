@@ -23,7 +23,7 @@
 
 <p align="center">
   <img alt="Phase 1 MVP accepted" src="https://img.shields.io/badge/phase%201-MVP%20accepted-b8471d">
-  <img alt="725 tests passing" src="https://img.shields.io/badge/tests-725%20passing-2f7d4f">
+  <img alt="106 targeted tests passing on 2026-11-14" src="https://img.shields.io/badge/targeted%20tests-106%20passing-2f7d4f">
   <img alt="Node.js 22.13+" src="https://img.shields.io/badge/node-22.13%2B-3c8773">
   <img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-1b1815">
   <img alt="Local first" src="https://img.shields.io/badge/local--first-yes-8d3412">
@@ -35,7 +35,7 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
 
 模型可以更换，执行器可以替换，界面可以重写，但任务状态、授权范围、完成证据、产物摘要和外部回执必须留下来。Hearth 要回答的不是“模型能不能写出一段话”，而是“这件事有没有真正完成，失败后能不能接着做，外部动作能不能被核对”。
 
-> **当前状态（2026-11-12）：** 第一阶段 MVP 已验收；第二阶段至第六阶段已形成可运行的代码闭环和自动测试；原生执行器已在独立评测仓库完成 30 个离线 case 的测量，最好完整单轮为 18/30，累计定向确认 19/30，但最终提交尚未连续复测。真实账户、真实设备、真实长期使用和 v1.0 整体验收仍未完成。本文不把代码闭环或评测分数写成产品验收完成。
+> **当前状态（2026-11-14）：** 第一阶段 MVP 已验收；第二阶段至第六阶段已形成可运行的代码闭环和自动测试。Native 30 题的历史最好完整单轮为 18/30，累计定向确认 19/30；当前代码尚待完整 30 题复测。11 月 14 日补齐 Native 工具审批撤销后的等待解除，106 项相关回归测试通过，动作绑定场景定向运行 3/3 通过。真实账户、真实设备、真实长期使用和 v1.0 整体验收仍未完成。
 
 ## 界面一览
 
@@ -127,9 +127,22 @@ Hearth 已经越过**第一阶段（MVP）**的硬门槛：15 个跨行业真实
 | 最好完整单轮 | **18/30 通过（60%）**，平均分 88.89，实验 `EXP-20261111145332-7a95ea` |
 | 累计定向确认 | **19/30** 个 case 曾达到 100 分；不是一次连续实验 |
 | 最近完整单轮 | 12/30 通过（40%），平均分 73.33，实验 `EXP-20261112003215-b1172b` |
-| 最终修复提交 | `eb32ad5`；尚未做不中断的完整 30 题复测 |
+| 11 月 12 日报告的修复提交 | `eb32ad5`；尚未做不中断的完整 30 题复测 |
 
 最近完整单轮受到 provider 慢响应、评分 JSON 截断和任务超时影响，且早于最后四个归一化修复，不能直接等同于最终代码能力。CAL01、WEB01 等 case 还存在输入与评分 rubric 的语义歧义；T02、T11、WEB03 虽得到 100 分，但因 `sampled` 标记未计为正式通过。
+
+**2026-11-14 定向验证更新**
+
+| 验证范围 | 结果 |
+|---|---|
+| Native 审批、动作绑定、调度与工具循环 | 5 个测试文件，**106/106 通过** |
+| `action-binding-tamper` 单场景 | **3/3 通过**，覆盖文件变化后撤销审批、拒绝执行和解除 Native 审批等待 |
+| 评测控制台自检与批次接口 | 2 个测试文件，**9/9 通过**；评测项目类型检查和前端构建通过 |
+| 新一轮 Native 30 题实验 | 待执行，当前可引用的完整实验成绩仍为上表记录 |
+
+修复前的新增回归测试确认，工具审批撤销后，Native 等待的 Promise 未收到拒绝结果。修复后，Agent 能获得拒绝原因并跳过该工具。评测控制台现在支持点击“开始自检”，结束后自动更新“最近一次”批次、统计、检查项和证据，并展示 `log.md`。页面自检结果保存在内存中，下次自检替换，服务重启后清空，临时测试文件执行后清理。
+
+本次验证基于 Hearth OS `0de76a1` 与 Hearth Eval `2a65c78` 上的本地工作区改动；审批修复和自检改动在记录时尚未提交。验证范围、复现命令及类型检查问题见[定向验证记录](docs/evaluation/native-30-final-report-2026-11-12.md#定向验证更新)。
 
 详细报告：[最终评测报告](https://hearthproject.github.io/hearth-os/evaluation/native-30-final-report-2026-11-12.html) · [基线报告](https://hearthproject.github.io/hearth-os/evaluation/native-30-baseline-2026-11-11.html) · [评测文档站](https://hearthproject.github.io/hearth-eval/)。
 
@@ -344,7 +357,14 @@ hearth-os/
 
 ## 验证
 
-2026-11-12 在当前分支运行：
+2026-11-14 定向回归验证通过，可在 Hearth OS 根目录复现：
+
+```bash
+npx vitest run apps/server/src/approvals.test.ts apps/server/src/approval-ticket.test.ts apps/server/src/action-resolver.test.ts apps/server/src/scheduler.test.ts packages/agent-runtime/src/runtime.test.ts
+# 5 个测试文件、106 个测试通过
+```
+
+本轮完整类型检查仍报告 MCP 回调参数隐式 `any` 和 `pdfjs-dist/legacy/build/pdf.mjs` 缺少类型声明。全仓测试数量与以下命令记录对应 2026-11-12 的历史验证：
 
 ```bash
 npm test              # 100 个测试文件、725 个测试全部通过
@@ -359,7 +379,7 @@ E2E 会在随机本地端口启动服务，并使用临时 `HEARTH_DATA_DIR`，�
 
 `vitest.config.ts` 将单个测试的超时设为 20 秒，避免 Windows 上 Git、Worktree 和 MCP 探测测试被默认 5 秒超时误判。测试覆盖服务层、API、模型协议、原生工具循环、glob/grep、原子补丁、Shell 进程树超时、办公文件读写、上下文压缩、瞬态重试、循环检测、显式完成、技能按需加载、项目与 Worktree、子代理边界、MCP 管理/调用/审批、搜索适配器、预算、权限、检查点、目标契约、完成判定、审批参数绑定、效果对账、执行器交接、委派、沙箱、记忆/技能治理、个人本体、Context Broker、标准意图、注意力、连接运行时、桌面边界、同步与备份。测试通过不等于真实验收完成；阶段一逐项证据见 [hearth-eval 的第一阶段验收报告](https://github.com/hearthproject/hearth-eval/blob/main/eval/phase-1-acceptance.md)。
 
-独立评测仓库当前有 11 个测试文件、42 个测试；`npm run typecheck`、`npm run typecheck:scenarios`、`npm run build` 与 `npm run docs:build` 均通过。自动测试不执行真实评测实验。
+独立评测仓库在 2026-11-14 完成自检服务与 API 的 9 项定向测试，`npm run typecheck` 和 `npm run build` 通过。`npm run typecheck:scenarios` 仍受 Hearth OS 的 PDF 模块类型声明问题影响；完整 30 题实验待后续复测。
 
 ## 许可
 

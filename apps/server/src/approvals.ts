@@ -639,6 +639,16 @@ export class ApprovalManager {
       }
     });
     this.service.bus.publish(event);
+    if (this.toolWaiters.has(approval.id)) {
+      this.service.updateTask(approval.taskId, {
+        status: "running",
+        currentRunId: approval.runId,
+        nextAction: "动作校验失败，Agent 将跳过该工具继续",
+        error: null
+      }, approval.runId);
+      this.resolveTool(approval.id, false, reason);
+      return;
+    }
     this.service.updateTask(approval.taskId, {
       status: "recoverable",
       currentRunId: approval.runId,
