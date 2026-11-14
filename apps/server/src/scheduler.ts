@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { EXECUTION_PROFILES } from "@hearth/core";
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import type {
@@ -2441,11 +2442,14 @@ export class HearthScheduler {
     }
     const goal = task.goalId ? this.service.store.getGoal(task.goalId) : null;
     const goalBudget = goal?.budget ?? {};
+    const modeBudget = task.executorId === "native" && task.executionMode
+      ? EXECUTION_PROFILES[task.executionMode].budget
+      : this.runBudget;
     return {
-      maxTurns: Math.min(goalBudget.maxTurns ?? this.runBudget.maxTurns, this.runBudget.maxTurns),
-      maxToolCalls: Math.min(goalBudget.maxToolCalls ?? this.runBudget.maxToolCalls, this.runBudget.maxToolCalls),
-      maxTokens: Math.min(goalBudget.maxTokens ?? this.runBudget.maxTokens, this.runBudget.maxTokens),
-      maxDurationMs: Math.min(goalBudget.maxDurationMs ?? this.runBudget.maxDurationMs, this.runBudget.maxDurationMs)
+      maxTurns: Math.min(goalBudget.maxTurns ?? this.runBudget.maxTurns, this.runBudget.maxTurns, modeBudget.maxTurns),
+      maxToolCalls: Math.min(goalBudget.maxToolCalls ?? this.runBudget.maxToolCalls, this.runBudget.maxToolCalls, modeBudget.maxToolCalls),
+      maxTokens: Math.min(goalBudget.maxTokens ?? this.runBudget.maxTokens, this.runBudget.maxTokens, modeBudget.maxTokens),
+      maxDurationMs: Math.min(goalBudget.maxDurationMs ?? this.runBudget.maxDurationMs, this.runBudget.maxDurationMs, modeBudget.maxDurationMs)
     };
   }
 

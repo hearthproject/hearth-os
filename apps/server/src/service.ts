@@ -46,6 +46,7 @@ import { buildTaskStatusMessage } from "./task-status-messages.ts";
 import { GITHUB_NETWORK_HOSTS, wantsGithubAccess, wantsPublicWebResearch } from "./task-intent.ts";
 
 export interface CreateTaskInput {
+  executionMode?: TaskRecord["executionMode"];
   externalRef?: string;
   requestHash?: string;
   templateId?: string;
@@ -228,6 +229,7 @@ export class HearthService {
     const expectedOutputs = input.expectedOutputs ?? template?.expectedOutputs ?? ["result.md"];
     const task: TaskRecord = {
       id,
+      ...(input.executionMode ? { executionMode: input.executionMode } : {}),
       goalId: input.goalId ?? null,
       ...(input.externalRef ? { externalRef: input.externalRef, requestHash: input.requestHash ?? null } : {}),
       templateId: template?.id ?? null,

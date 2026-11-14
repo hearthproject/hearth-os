@@ -41,6 +41,7 @@ const attachmentSchema = z.object({
 const conversationSettingsSchema = z.object({
   executorEnabled: z.partialRecord(z.enum(EXECUTOR_IDS), z.boolean()).optional(),
   approvalMode: z.enum(["necessary", "full"]).optional(),
+  executionMode: z.enum(["quick", "standard", "deep"]).optional(),
   preferredExecutorId: z.enum(EXECUTOR_IDS).nullable().optional()
 }).strict();
 
@@ -523,6 +524,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
           ...(detectedUrl ? { url: detectedUrl } : {}),
           conversationId: conversation.id,
           executorId: resolution.executorId,
+          ...(resolution.executorId === "native" ? { executionMode: effectiveSettings.executionMode ?? "standard" } : {}),
           taskKind: plan.taskKind,
           expectedOutputs: plan.expectedOutputs,
           ...(plan.networkHosts ? { networkHosts: plan.networkHosts } : {})

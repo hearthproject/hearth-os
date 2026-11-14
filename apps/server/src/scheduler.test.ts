@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DelegationJob, ExecutorHealth, ExecutorId, HandoffRecord, HandoffStatus, TaskRecord, TaskStatus } from "@hearth/core";
-import { defaultConversationSettings } from "@hearth/core";
+import { defaultConversationSettings, EXECUTION_PROFILES } from "@hearth/core";
 import type { CodexRunner, ExecutorHealthProvider, NativeRunner } from "./scheduler.ts";
 import { ApprovalManager } from "./approvals.ts";
 import type { GoalValidatorRunner } from "./completion-judge.ts";
@@ -689,6 +689,22 @@ describe("Hearth scheduler", () => {
     expect(resumed).toContain("预算 1000 元");
     expect(completed.pendingInput).toBeNull();
     expect(completed.resultSummary).toBe("已按补充预算完成");
+  });
+
+  it.each(["quick", "standard", "deep"] as const)("uses persisted %s task execution budgets", async (executionMode) => {
+    const service = setup();
+    const settingsPath = configureModel();
+    const nativeRunner: NativeRunner = async (options) => {
+      expect(options.budget).toEqual(EXECUTION_PROFILES[executionMode].budget);
+      expect(options.task.executionMode).toBe(executionMode);
+      writeFileSync(join(options.prepared.outDir, "result.md"), "# 分析结果\n\n已完成。\n");
+      return nativeResult("已完成分析");
+    };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath: settingsPath });
+    const task = service.createTask({ title: "分析材料", goal: "生成分析结果", executionMode });
+    expect(service.requireTask(task.id).executionMode).toBe(executionMode);
+    scheduler.start();
+    await waitForStatus(service, task.id, "completed");
   });
 
   it("waits at budget exhaustion and doubles all limits on extension", async () => {

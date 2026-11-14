@@ -323,10 +323,13 @@ describe("chat-first API", () => {
     const response = await app.inject({
       method: "POST",
       url: "/api/chat",
-      payload: { message: "帮我写一份本周工作周报" }
+      payload: { message: "帮我写一份本周工作周报", settings: { executionMode: "quick" } }
     });
     expect(response.statusCode).toBe(200);
     const events = parseSse(response.body);
+    const dispatchedTask = events.find((event) => event.event === "task")?.data.task;
+    expect(dispatchedTask.executionMode).toBe("quick");
+    expect(store.getTask(dispatchedTask.id)?.executionMode).toBe("quick");
     const routing = events.find((event) => event.event === "routing");
     expect(routing?.data.action).toBe("task");
     const taskEvent = events.find((event) => event.event === "task");
