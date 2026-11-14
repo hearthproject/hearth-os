@@ -1,3 +1,5 @@
+//消息、工具、模型、检查点和运行结果的数据结构
+
 import type { RunBudget, RunUsage, TaskPermissions } from "@hearth/core";
 
 export interface AgentToolDefinition {

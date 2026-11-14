@@ -61,6 +61,7 @@ export interface NativeRunResult {
   budgetExhaustion?: { dimension: BudgetDimension; limit: number };
 }
 
+//runNativeTask() 把模型、工具、提示词、预算、权限和回调装配起来
 export async function runNativeTask(options: NativeRunOptions): Promise<NativeRunResult> {
   if (!supportsToolCalling(options.settings.protocol)) {
     throw new Error(`当前模型协议不支持工具调用：${options.settings.protocol}`);
@@ -78,7 +79,9 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
       ...(screenshotTask ? ["capture_screen"] : [])
     ]
   });
+
   let budgetExhaustion: NativeRunResult["budgetExhaustion"];
+  //具体实现
   const result = await runAgent({
     model: modelAdapter(options.settings),
     tools: [...createBuiltinTools(), ...(options.extraTools ?? [])],
@@ -121,6 +124,8 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     ...(budgetExhaustion ? { budgetExhaustion } : {})
   };
 }
+
+
 
 export function jsonDeliverableIssue(outDir: string, expectedOutputs: string[]): string | null {
   const issues: string[] = [];
