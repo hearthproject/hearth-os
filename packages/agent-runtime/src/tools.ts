@@ -20,6 +20,8 @@ const MAX_DOCUMENT_BYTES = 25 * 1024 * 1024;
 const MAX_DOCUMENT_OUTPUT_CHARS = 200_000;
 const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", "coverage", ".next", ".cache", ".turbo"]);
 
+
+//模型能使用的工具和实现
 export function createBuiltinTools(): AgentTool[] {
   return [readFileTool, readDocumentTool, listFilesTool, searchTextTool, globTool, grepTool, writeFileTool, writeSpreadsheetTool, writeDocumentTool, editFileTool, applyPatchTool, shellTool, captureScreenTool, fetchUrlTool, askUserTool, finishTaskTool];
 }

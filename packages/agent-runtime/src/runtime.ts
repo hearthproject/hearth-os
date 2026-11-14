@@ -21,6 +21,8 @@ export function zeroUsage(): RunUsage {
   };
 }
 
+
+//整个agent的执行循环
 export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunResult> {
   const allowed = new Set(options.permissions.tools);
   const tools = options.tools.filter((tool) => allowed.has(tool.definition.name));

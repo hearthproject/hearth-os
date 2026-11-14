@@ -52,6 +52,8 @@ export interface AgentTurnOptions extends CompleteOptions {
   toolChoice?: "auto" | "none";
 }
 
+
+//把不同模型协议转换成统一的文本和工具调用
 export async function streamAgentTurn(
   settings: ModelSettings,
   messages: AgentMessage[],
