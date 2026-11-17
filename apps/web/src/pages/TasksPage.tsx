@@ -1,6 +1,7 @@
 import { TaskActionsMenu } from "../components/TaskActionsMenu.tsx";
 import { TaskTokens } from "../components/TaskTokens.tsx";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { markTasksRead } from "../lib/task-read-state.ts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { FileText, ListChecks, Pin, PinOff, RefreshCw } from "lucide-react";
@@ -25,6 +26,9 @@ export function TasksPage() {
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<Filter>("all");
   const tasksQuery = useQuery({ queryKey: ["tasks"], queryFn: api.tasks, refetchInterval: 5_000 });
+  useEffect(() => {
+    if (tasksQuery.data) markTasksRead(tasksQuery.data.tasks.filter((task) => matchesFilter(task, filter)));
+  }, [tasksQuery.data, filter]);
   const tasks = tasksQuery.data?.tasks ?? [];
   const organization = useMutation({
     mutationFn: ({ id, patch }: { id: string; patch: { pinned?: boolean; archived?: boolean } }) =>

@@ -1,4 +1,5 @@
 import { TaskTokens } from "../components/TaskTokens.tsx";
+import { markTasksRead } from "../lib/task-read-state.ts";
 import { useEffect, useState, useId, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
@@ -45,6 +46,9 @@ export function TaskDetailPage() {
   const backState = fromChat && navState?.conversationId ? { conversationId: navState.conversationId } : undefined;
   const queryClient = useQueryClient();
   const taskQuery = useQuery({ queryKey: ["task", id], queryFn: () => api.task(id), enabled: Boolean(id), refetchInterval: 4_000 });
+  useEffect(() => {
+    if (taskQuery.data?.task) markTasksRead([taskQuery.data.task]);
+  }, [taskQuery.data?.task]);
   const overviewQuery = useQuery({ queryKey: ["task-overview", id, taskQuery.data?.task.title, taskQuery.data?.task.goal, taskQuery.data?.task.resultSummary, taskQuery.data?.task.status], queryFn: () => api.taskOverview(id), enabled: Boolean(taskQuery.data), staleTime: Infinity, retry: false });
   const [processOpen, setProcessOpen] = useState(false);
   const processStatus = taskQuery.data?.task.status;

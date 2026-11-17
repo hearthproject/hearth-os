@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import nodemailer from "nodemailer";
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
+import { GmailService } from "./gmail.ts";
 import type { HearthStore } from "@hearth/eventlog";
 import type { SecretBox } from "./secrets.ts";
 import type { SourceRegistry } from "./sources.ts";
@@ -58,6 +59,7 @@ export interface MailServerView {
 }
 
 export interface MailAccountView {
+  authType?: "google-oauth";
   id: string;
   name: string;
   fromName: string;
@@ -230,8 +232,8 @@ export class MailAccountStore {
     const account = this.get(id);
     return {
       ...account,
-      smtp: { ...account.smtp, password: this.decrypt(account.smtp.passwordCipher, "SMTP") },
-      imap: { ...account.imap, password: this.decrypt(account.imap.passwordCipher, "IMAP") }
+      smtp: { ...account.smtp, password: normalizeMailPassword(account.smtp.host, this.decrypt(account.smtp.passwordCipher, "SMTP")) },
+      imap: { ...account.imap, password: normalizeMailPassword(account.imap.host, this.decrypt(account.imap.passwordCipher, "IMAP")) }
     };
   }
 
@@ -245,6 +247,7 @@ export class MailAccountStore {
 }
 
 export class EmailService {
+  readonly gmail: GmailService;
   readonly accounts: MailAccountStore;
   private readonly smtpFactory: MailSmtpFactory;
   private readonly imapFactory: MailImapFactory;
@@ -261,6 +264,7 @@ export class EmailService {
     sources?: SourceRegistry;
     now?: () => Date;
   }) {
+    this.gmail = new GmailService(options.store, options.secretBox);
     this.accounts = new MailAccountStore(options.store, options.secretBox);
     this.smtpFactory = options.smtpFactory ?? defaultSmtpFactory;
     this.imapFactory = options.imapFactory ?? defaultImapFactory;
@@ -290,6 +294,7 @@ export class EmailService {
   }
 
   async syncInbox(id: string, limit = 20): Promise<MailSyncResult> {
+    if (id.startsWith("gmail:")) throw new MailError("GMAIL_SEND_ONLY", "Google 连接仅授予发送权限，不读取收件箱。");
     if (!this.sources) throw new MailError("MAIL_SOURCES_UNAVAILABLE", "来源服务尚未启动", 503);
     const account = this.accounts.runtime(id);
     const transport = this.imapFactory(account);
@@ -333,7 +338,13 @@ export class EmailService {
   }
 
   list(): MailAccountView[] {
-    return this.accounts.views();
+    return [...this.gmail.list(), ...this.accounts.views()];
+  }
+
+  deliveryAccount(id: string): MailAccountView {
+    const account = this.list().find((item) => item.id === id);
+    if (!account) throw new MailError("MAIL_ACCOUNT_NOT_FOUND", "邮件账户不存在", 404);
+    return account;
   }
 
   create(input: MailAccountInput): MailAccountView {
@@ -341,14 +352,25 @@ export class EmailService {
   }
 
   update(id: string, input: MailAccountInput): MailAccountView {
+    if (id.startsWith("gmail:")) throw new MailError("GMAIL_RECONNECT_REQUIRED", "Google 账户请使用重新连接更新授权。");
     return viewAccount(this.accounts.update(id, input));
   }
 
   remove(id: string): void {
+    if (id.startsWith("gmail:")) { this.gmail.remove(id); return; }
     this.accounts.remove(id);
   }
 
   async test(id: string): Promise<MailTestResult> {
+    if (id.startsWith("gmail:")) {
+      const started = Date.now();
+      try {
+        await this.gmail.test(id);
+        return { ok: true, smtp: { ok: true, error: null, elapsedMs: Date.now() - started }, imap: { ok: false, error: "未申请收件箱权限", elapsedMs: 0 } };
+      } catch (error) {
+        return { ok: false, smtp: { ok: false, error: error instanceof Error ? error.message : "Google 授权测试失败", elapsedMs: Date.now() - started }, imap: { ok: false, error: "未申请收件箱权限", elapsedMs: 0 } };
+      }
+    }
     const account = this.accounts.runtime(id);
     return this.testRuntime(account);
   }
@@ -360,6 +382,7 @@ export class EmailService {
   }
 
   async send(accountId: string, message: Omit<MailMessage, "from">): Promise<MailSendResult> {
+    if (accountId.startsWith("gmail:")) return this.gmail.send(accountId, message);
     const account = this.accounts.runtime(accountId);
     const transport = this.smtpFactory(account);
     try {
@@ -387,7 +410,7 @@ export class EmailService {
       await transport.verify();
       return { ok: true, error: null, elapsedMs: Date.now() - started };
     } catch (error) {
-      return { ok: false, error: error instanceof Error ? error.message : String(error), elapsedMs: Date.now() - started };
+      return { ok: false, error: mailConnectionError(account.smtp.host, error), elapsedMs: Date.now() - started };
     } finally {
       try {
         transport?.close?.();
@@ -405,7 +428,7 @@ export class EmailService {
       await transport.connect();
       return { ok: true, error: null, elapsedMs: Date.now() - started };
     } catch (error) {
-      return { ok: false, error: error instanceof Error ? error.message : String(error), elapsedMs: Date.now() - started };
+      return { ok: false, error: mailConnectionError(account.imap.host, error), elapsedMs: Date.now() - started };
     } finally {
       try {
         await transport?.logout();
@@ -506,6 +529,18 @@ function validateServer(input: MailServerInput, label: string, requireSecret: bo
 function requirePassword(value: string | undefined, label: string): string {
   if (!value?.trim()) throw new MailError("MAIL_PASSWORD_REQUIRED", `${label} 密码不能为空`);
   return value.trim();
+}
+
+export function normalizeMailPassword(host: string, password: string): string {
+  return /^(smtp|imap)\.gmail\.com$/i.test(host) ? password.replace(/\s/g, "") : password;
+}
+
+export function mailConnectionError(host: string, error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/^(smtp|imap)\.gmail\.com$/i.test(host) && /535|5\.7\.8|credentials|authentication|invalid login/i.test(message)) {
+    return "Gmail 登录被拒绝：请使用完整邮箱地址，以及同一 Google 账户在开启两步验证后生成的 16 位应用专用密码（不是登录密码）。修改 Google 密码后需重新生成；学校或工作账户可能禁止此方式。";
+  }
+  return message;
 }
 
 function clean(value: string, maxLength: number, label: string): string {

@@ -16,6 +16,7 @@ import {
   X
 } from "lucide-react";
 import { api } from "../lib/api.ts";
+import { GmailConnect } from "../components/GmailConnect.tsx";
 import { formatDate } from "../lib/format.ts";
 import type { MailAccountInput, MailAccountView, SourceItem } from "../lib/types.ts";
 
@@ -34,8 +35,8 @@ const EMPTY_ACCOUNT: MailAccountInput = {
 export function MailPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const [tab, setTab] = useState<MailTab>("inbox");
-  const [notice, setNotice] = useState<{ tone: "ok" | "error" | "info"; text: string } | null>(null);
+  const [tab, setTab] = useState<MailTab>(() => new URLSearchParams(window.location.search).has("gmail") ? "accounts" : "inbox");
+  const [notice, setNotice] = useState<{ tone: "ok" | "error" | "info"; text: string } | null>(() => new URLSearchParams(window.location.search).get("gmail") === "connected" ? { tone: "ok", text: "Google 授权已完成。回到聊天信件卡片，选择新连接的 Gmail 账户即可准备发送。" } : null);
 
   const accountsQuery = useQuery({ queryKey: ["mailAccounts"], queryFn: api.mailAccounts, refetchInterval: 30_000 });
   const sourcesQuery = useQuery({ queryKey: ["sources"], queryFn: api.sources, refetchInterval: 20_000 });
@@ -97,7 +98,7 @@ export function MailPage() {
         <div>
           <span className="eyebrow">邮件</span>
           <h1>邮件工作台</h1>
-          <p className="page-meta">读取是只读的；发送会生成一次性审批，批准后才通过 SMTP 真正发出。</p>
+          <p className="page-meta">发送会生成一次性审批，批准后才通过已连接的邮箱真正发出。</p>
         </div>
         <div className="mail-tabs" role="tablist" aria-label="邮件视图">
           <button className={tab === "inbox" ? "active" : ""} onClick={() => setTab("inbox")}><Inbox size={15} /> 收件箱</button>
@@ -323,10 +324,12 @@ function MailAccounts({
   onChanged: () => Promise<void>;
 }) {
   const [draft, setDraft] = useState<MailAccountInput>(EMPTY_ACCOUNT);
+  const [provider, setProvider] = useState<"custom" | "gmail">("custom");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   function edit(account: MailAccountView) {
+    setProvider(account.smtp.host === "smtp.gmail.com" ? "gmail" : "custom");
     setEditingId(account.id);
     setDraft({
       name: account.name,
@@ -352,6 +355,7 @@ function MailAccounts({
       await onChanged();
       onNotice({ tone: "ok", text: editingId ? "账户已更新。" : "账户已创建，可以测试或同步。" });
       setDraft(EMPTY_ACCOUNT);
+      setProvider("custom");
       setEditingId(null);
     } catch (error) {
       onNotice({ tone: "error", text: error instanceof Error ? error.message : "保存失败" });
@@ -367,7 +371,7 @@ function MailAccounts({
       const result = await api.testMailAccount(account.id);
       onNotice({
         tone: result.ok ? "ok" : "error",
-        text: `SMTP：${result.smtp.ok ? "可用" : result.smtp.error}；IMAP：${result.imap.ok ? "可用" : result.imap.error}`
+        text: account.authType === "google-oauth" ? (result.ok ? "Google 授权有效，可发送邮件；未申请读取收件箱权限。" : result.smtp.error ?? "授权不可用，请重新连接 Google。") : `SMTP：${result.smtp.ok ? "可用" : result.smtp.error}；IMAP：${result.imap.ok ? "可用" : result.imap.error}`
       });
     } catch (error) {
       onNotice({ tone: "error", text: error instanceof Error ? error.message : "测试失败" });
@@ -406,6 +410,7 @@ function MailAccounts({
 
   return (
     <section className="mail-accounts-layout">
+      <GmailConnect />
       <div className="panel mail-account-list">
         <div className="panel-head"><h2>邮件账户</h2><span className="panel-meta">{loading ? "读取中" : `${accounts.length} 个`}</span></div>
         {accounts.length === 0 && <p className="section-empty">还没有账户。</p>}
@@ -413,17 +418,17 @@ function MailAccounts({
           <article key={account.id} className="mail-account-card">
             <div className="mail-account-head">
               <div><strong>{account.name}</strong><small>{account.fromName} · {account.fromAddress}</small></div>
-              <span className="status-chip ok">只读同步</span>
+              <span className="status-chip ok">确认后发送</span>
             </div>
-            <dl className="mail-account-meta">
+            {account.authType === "google-oauth" ? <p>Google OAuth · Gmail API · 仅发送</p> : <dl className="mail-account-meta">
               <div><dt>SMTP</dt><dd>{account.smtp.host}:{account.smtp.port}{account.smtp.secure ? " · TLS" : ""}</dd></div>
               <div><dt>IMAP</dt><dd>{account.imap.host}:{account.imap.port}{account.imap.secure ? " · TLS" : ""}</dd></div>
               <div><dt>密钥</dt><dd>{account.smtp.hasPassword ? account.smtp.passwordMasked : "未设置"}</dd></div>
-            </dl>
+            </dl>}
             <div className="mail-account-actions">
               <button className="ghost-button compact" onClick={() => void test(account)} disabled={busy !== null}>{busy === account.id ? <Loader2 size={13} className="spin" /> : <CheckCircle2 size={13} />} 测试</button>
-              <button className="ghost-button compact" onClick={() => void sync(account)} disabled={busy !== null}>{busy === account.id ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} />} 同步</button>
-              <button className="ghost-button compact" onClick={() => edit(account)}>编辑</button>
+              {account.authType !== "google-oauth" && <><button className="ghost-button compact" onClick={() => void sync(account)} disabled={busy !== null}>{busy === account.id ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} />} 同步</button>
+              <button className="ghost-button compact" onClick={() => edit(account)}>编辑</button></>}
               <button className="ghost-button compact danger" onClick={() => void remove(account)} disabled={busy !== null}><Trash2 size={13} /> 删除</button>
             </div>
           </article>
@@ -433,14 +438,31 @@ function MailAccounts({
       <div className="panel mail-account-editor">
         <div className="panel-head">
           <h2>{editingId ? "编辑账户" : "添加账户"}</h2>
-          {editingId && <button className="ghost-button compact" onClick={() => { setEditingId(null); setDraft(EMPTY_ACCOUNT); }}>取消编辑</button>}
+          {editingId && <button className="ghost-button compact" onClick={() => { setEditingId(null); setProvider("custom"); setDraft(EMPTY_ACCOUNT); }}>取消编辑</button>}
         </div>
         <div className="mail-form">
+          {!editingId && <label className="span-2"><span>邮箱服务</span><select value={provider} onChange={(event) => {
+            const gmail = event.target.value === "gmail";
+            setProvider(gmail ? "gmail" : "custom");
+            setDraft({ ...EMPTY_ACCOUNT, ...(gmail ? {
+              name: "Gmail", fromName: "", syncEnabled: false,
+              smtp: { host: "smtp.gmail.com", port: 465, secure: true, user: "", password: "" },
+              imap: { host: "imap.gmail.com", port: 993, secure: true, user: "", password: "" }
+            } : {}) });
+          }}><option value="custom">自定义 SMTP / IMAP</option><option value="gmail">Gmail（应用专用密码）</option></select></label>}
           <label><span>账户名称</span><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="工作邮箱" /></label>
           <label><span>发件人名称</span><input value={draft.fromName} onChange={(event) => setDraft({ ...draft, fromName: event.target.value })} /></label>
-          <label className="span-2"><span>发件地址</span><input value={draft.fromAddress} onChange={(event) => setDraft({ ...draft, fromAddress: event.target.value })} placeholder="hearth@example.com" /></label>
-          <ServerFields label="SMTP" value={draft.smtp} onChange={(key, value) => updateServer("smtp", key, value)} defaultPort={465} />
-          <ServerFields label="IMAP" value={draft.imap} onChange={(key, value) => updateServer("imap", key, value)} defaultPort={993} />
+          <label className="span-2"><span>发件地址</span><input type="email" value={draft.fromAddress} onChange={(event) => setDraft({ ...draft, fromAddress: event.target.value, ...(provider === "gmail" ? { smtp: { ...draft.smtp, user: event.target.value }, imap: { ...draft.imap, user: event.target.value } } : {}) })} placeholder="hearth@example.com" /></label>
+          {provider === "gmail" ? <>
+            <label className="span-2"><span>Google 应用专用密码{editingId ? "（留空保留）" : ""}</span><input type="password" autoComplete="new-password" value={draft.smtp.password ?? ""} onChange={(event) => {
+              const password = event.target.value.replace(/\s/g, "");
+              setDraft({ ...draft, smtp: { ...draft.smtp, password }, imap: { ...draft.imap, password } });
+            }} /></label>
+            <p className="settings-hint span-2">开启 Google 两步验证后，<a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer">创建应用专用密码</a>并填入此处；不要填写 Google 登录密码。部分学校或工作账户禁用此功能，需联系管理员。默认不读取收件箱。</p>
+          </> : <>
+            <ServerFields label="SMTP" value={draft.smtp} onChange={(key, value) => updateServer("smtp", key, value)} defaultPort={465} />
+            <ServerFields label="IMAP" value={draft.imap} onChange={(key, value) => updateServer("imap", key, value)} defaultPort={993} />
+          </>}
           <label className="checkbox-field span-2"><input type="checkbox" checked={draft.syncEnabled ?? true} onChange={(event) => setDraft({ ...draft, syncEnabled: event.target.checked })} /> <span>定时同步收件箱（只读）</span></label>
           <label><span>同步间隔（分钟）</span><input type="number" min={5} max={1440} value={draft.syncIntervalMinutes ?? 15} onChange={(event) => setDraft({ ...draft, syncIntervalMinutes: Number(event.target.value) })} /></label>
         </div>

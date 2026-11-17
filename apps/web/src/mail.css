@@ -208,6 +208,8 @@
   margin-top: 14px;
 }
 
+.mail-account-editor.gmail-connect { grid-column: 1 / -1; position: static; }
+
 .mail-account-list {
   min-height: 320px;
 }

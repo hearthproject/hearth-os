@@ -181,7 +181,7 @@ async function executeSmtpOutboxEffect(effect: EffectRecord, context: EffectExec
   }
 
   const receipt = {
-    transport: "smtp" as const,
+    transport: target.accountId.startsWith("gmail:") ? "gmail-api" : "smtp",
     delivery: "sent" as const,
     status: "sent" as const,
     accountId: target.accountId,

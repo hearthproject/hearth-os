@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent, type
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
+import { ChatMailDraft } from "../components/ChatMailDraft.tsx";
+import { isMailDraftReply } from "../lib/mail-draft.ts";
 import remarkGfm from "remark-gfm";
 import {
   ArrowUp,
@@ -77,6 +79,7 @@ export function ChatPage() {
   const [streaming, setStreaming] = useState("");
   const [reasoning, setReasoning] = useState("");
   const [routing, setRouting] = useState<RoutingState | null>(null);
+  const [routeMode, setRouteMode] = useState<"auto" | "chat" | "task">("auto");
   const [memoryCount, setMemoryCount] = useState(0);
   const [proposals, setProposals] = useState<TaskProposalRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -174,6 +177,7 @@ export function ChatPage() {
   useEffect(() => () => abortRef.current?.abort(), []);
 
   function resetConversationView(id: string | null) {
+    setRouteMode("auto");
     setConversationId(id);
     conversationIdRef.current = id;
     setMessages([]);
@@ -303,7 +307,11 @@ export function ChatPage() {
   async function send() {
     const text = input.trim();
     if (sending || uploading || !settingsReady || (!text && attachments.length === 0)) return;
-    if (selectedExecutorUnavailable) {
+    if (routeMode === "chat" && attachments.length > 0) {
+      setError("继续聊天模式暂不读取附件。请粘贴文字，或选择派为任务。");
+      return;
+    }
+    if (selectedExecutorUnavailable && routeMode !== "chat") {
       setError(`${selectedExecutorName} 当前不可用，不会自动切换执行器。${selectedExecutor?.health.issues.join("；") ?? "请到设置中测试可用性。"}`);
       return;
     }
@@ -349,6 +357,7 @@ export function ChatPage() {
     try {
       await chatStream(
         {
+          routeMode,
           ...(conversationId ? { conversationId } : {}),
           ...(text ? { message: text } : {}),
           ...(sentAttachments.length > 0 ? { attachments: sentAttachments } : {}),
@@ -499,7 +508,7 @@ export function ChatPage() {
                   当前没有可用的执行器，任务无法派出。到<Link to="/settings">设置</Link>查看连接诊断。
                 </ChatNotice>
               )}
-              {messages.map((message) => <ChatBubble key={message.id} message={message} conversationId={conversationId} />)}
+              {messages.map((message, index) => <ChatBubble key={message.id} message={message} conversationId={conversationId} mailDraft={!message.taskId && isMailDraftReply(messages, index)} />)}
               {proposals.map((proposal) => (
                 <ProposalCard
                   key={proposal.id}
@@ -533,6 +542,16 @@ export function ChatPage() {
 
         <div className="composer-wrap">
           <div className="composer-toolbar">
+            <label className="executor-picker" title="决定继续聊天还是创建执行任务">
+              <select aria-label="消息处理方式" value={routeMode} disabled={sending} onChange={(event) => {
+                setRouteMode(event.target.value as "auto" | "chat" | "task");
+                setFollowUpTaskId(null);
+              }}>
+                <option value="auto">自动判断</option>
+                <option value="chat">继续聊天（不派任务）</option>
+                <option value="task">派为任务（携带上下文）</option>
+              </select>
+            </label>
             <label className="executor-picker" title="选择本对话锁定的执行器；不会自动切换到其他执行器">
               <Cpu size={15} />
               <span className={`status-dot ${selectedExecutorId ? selectedExecutorUnavailable ? "offline" : "online" : executorReady ? "online" : "offline"}`} />
@@ -587,6 +606,7 @@ export function ChatPage() {
                     value={followUpTarget?.id ?? ""}
                     onChange={(event) => {
                       setFollowUpTaskId(event.target.value || null);
+                      if (event.target.value) setRouteMode("task");
                       setFollowUpMode("queue");
                       setFollowUpNotice(null);
                     }}
@@ -678,7 +698,7 @@ export function ChatPage() {
               rows={1}
               disabled={sending}
             />
-            <button className="composer-send" onClick={() => void send()} disabled={sending || uploading || !settingsReady || selectedExecutorUnavailable || followUpBlockedByAttachments || (!input.trim() && attachments.length === 0)} title={selectedExecutorUnavailable ? "当前锁定的执行器不可用" : followUpTarget ? "发送补充指令" : "发送"}>
+            <button className="composer-send" onClick={() => void send()} disabled={sending || uploading || !settingsReady || (selectedExecutorUnavailable && routeMode !== "chat") || followUpBlockedByAttachments || (!input.trim() && attachments.length === 0)} title={selectedExecutorUnavailable && routeMode !== "chat" ? "当前锁定的执行器不可用" : followUpTarget ? "发送补充指令" : "发送"}>
               {sending ? <Loader2 size={17} className="spin" /> : <ArrowUp size={18} />}
             </button>
           </div>
@@ -739,7 +759,7 @@ function ConversationItem({
   );
 }
 
-function ChatBubble({ message, conversationId }: { message: ChatMessageRecord; conversationId: string | null }) {
+function ChatBubble({ message, conversationId, mailDraft = false }: { message: ChatMessageRecord; conversationId: string | null; mailDraft?: boolean }) {
   if (message.kind === "task_status") {
     return <TaskStatusBubble message={message} conversationId={conversationId} />;
   }
@@ -765,13 +785,14 @@ function ChatBubble({ message, conversationId }: { message: ChatMessageRecord; c
   }
   return (
     <div className="message-row assistant">
+      {mailDraft ? <ChatMailDraft content={message.content} /> :
       <AssistantBubble
         content={message.content}
         copyText={message.content}
         taskId={message.taskId}
         createdAt={message.createdAt}
         conversationId={conversationId}
-      />
+      />}
     </div>
   );
 }

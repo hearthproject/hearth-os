@@ -68,6 +68,13 @@ describe("chat-first API", () => {
       expect(requests.every((body) => body.stream === true && !body.tools && body.max_tokens === 1200)).toBe(true);
       expect(JSON.stringify(requests)).not.toContain("个人上下文包");
       expect(requests[1].messages.some((message: any) => message.role === "assistant")).toBe(true);
+      const third = await app.inject({ method: "POST", url: "/api/chat", payload: { conversationId, message: "再加一句 这是由Hearth agent发送的邮件！" } });
+      expect(parseSse(third.body).some((event) => event.event === "task" || event.event === "error")).toBe(false);
+      expect(requests).toHaveLength(3);
+      expect(requests[2].messages.some((message: any) => message.role === "assistant" && message.content.includes("小兰"))).toBe(true);
+      const forcedChat = await app.inject({ method: "POST", url: "/api/chat", payload: { conversationId, routeMode: "chat", message: "帮我运行项目测试" } });
+      expect(parseSse(forcedChat.body).some((event) => event.event === "task" || event.event === "error")).toBe(false);
+      expect(requests).toHaveLength(4);
       expect(store.listTasks()).toHaveLength(0);
     } finally { await app.close(); vi.unstubAllGlobals(); }
   });
@@ -368,6 +375,11 @@ describe("chat-first API", () => {
     const detail = await app.inject({ method: "GET", url: `/api/conversations/${taskEvent?.data.conversationId}` });
     expect(detail.json().tasks).toHaveLength(1);
     expect(detail.json().tasks[0].executorId).toBe("native");
+    store.createChatMessage({ id: "draft-context", conversationId: taskEvent!.data.conversationId, role: "assistant", content: "主题：12月初回国\n妈，我12月初回国。", taskId: null, attachments: [], createdAt: new Date().toISOString() });
+    const forced = await app.inject({ method: "POST", url: "/api/chat", payload: { conversationId: taskEvent!.data.conversationId, message: "再加一句这是 Hearth 写的", routeMode: "task" } });
+    const forcedTask = parseSse(forced.body).find((event) => event.event === "task")?.data.task;
+    expect(forcedTask).toBeDefined();
+    expect(forcedTask.inputs.some((input: { kind: string; value?: string }) => input.kind === "text" && input.value?.includes("妈，我12月初回国"))).toBe(true);
     await app.close();
   });
 

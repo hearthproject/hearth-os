@@ -48,6 +48,9 @@ import { DEFAULT_RUN_BUDGET, nativePermissionsFor, runNativeTask } from "./nativ
 import { ContextBroker } from "./context-broker.ts";
 import { OntologyService } from "./ontology.ts";
 import { createPersonalReadTools } from "./personal-tools.ts";
+import { createMailTools } from "./mail-tools.ts";
+import type { EmailService } from "./email.ts";
+import type { OutboxService } from "./outbox.ts";
 import { buildNativeSkillIndex, createSkillTools } from "./skill-tools.ts";
 import { createSubagentTool } from "./subagents.ts";
 import type { SkillPackageService } from "./skills.ts";
@@ -89,6 +92,8 @@ interface GoalBoundaryStop {
 }
 
 export interface SchedulerOptions {
+  mail?: EmailService;
+  outbox?: OutboxService;
   service: HearthService;
   repoRoot?: string;
   workspaceRoot?: string;
@@ -129,6 +134,8 @@ export interface SchedulerOptions {
 }
 
 export class HearthScheduler {
+  private readonly mail: EmailService | undefined;
+  private readonly outbox: OutboxService | undefined;
   private readonly service: HearthService;
   private readonly repoRoot: string;
   private readonly workspaceRoot: string;
@@ -184,6 +191,8 @@ export class HearthScheduler {
   private stopping = false;
 
   constructor(options: SchedulerOptions) {
+    this.mail = options.mail;
+    this.outbox = options.outbox;
     this.service = options.service;
     this.repoRoot = options.repoRoot ?? REPO_ROOT;
     this.workspaceRoot = options.workspaceRoot ?? WORKSPACE_DIR;
@@ -1549,6 +1558,9 @@ export class HearthScheduler {
         ontology: this.ontology
       });
       if (contextPackId && this.contextBroker) extraNativeTools.push(this.expandRefTool(contextPackId));
+      if (this.mail && this.outbox && /邮件|邮箱|发信|gmail|e-?mail/i.test(`${task.title}\n${task.goal}`)) {
+        extraNativeTools.push(...createMailTools(this.mail, this.outbox));
+      }
       if (this.backgroundTools) extraNativeTools.push(...this.backgroundTools.toolsFor(task));
       if (this.webSearch && (wantsPublicWebResearch(`${task.title}\n${task.goal}`) || task.networkHosts.includes("*"))) {
         extraNativeTools.push(this.webSearch.tool());

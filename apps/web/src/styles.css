@@ -9105,3 +9105,11 @@ body.modal-open {
 .process-extra-toggle:hover { color: var(--ink-secondary); }
 .process-extra-toggle:focus-visible { outline: 2px solid var(--ink-secondary); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .process-extra-toggle svg { transition: none; } }
+.chat-mail-draft { width: min(100%, 720px); padding: 18px; border: 1px solid var(--border, #ddd); border-radius: 16px; background: var(--panel, #fffdf9); }
+.chat-mail-fields { display: grid; gap: 10px; }
+.chat-mail-fields label { display: grid; gap: 5px; font-size: 12px; }
+.chat-mail-fields input, .chat-mail-fields select, .chat-mail-fields textarea { width: 100%; box-sizing: border-box; padding: 9px 11px; border: 1px solid var(--border, #ddd); border-radius: 8px; background: transparent; color: inherit; font: inherit; }
+.chat-mail-fields textarea { resize: vertical; min-height: 220px; line-height: 1.7; }
+.chat-mail-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 12px; }
+.chat-mail-footer span { font-size: 12px; opacity: .7; }
+.chat-mail-footer button { flex-shrink: 0; }
