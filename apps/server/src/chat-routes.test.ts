@@ -49,6 +49,29 @@ describe("chat-first API", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it("drafts and revises a leave letter with one model call per message and no task", async () => {
+    const requests: any[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: unknown, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)));
+      return new Response('data: {"choices":[{"delta":{"content":"老师您好，我是小兰，今天感冒不适，申请请假，明天返校。"}}]}\n\ndata: [DONE]\n\n', { headers: { "content-type": "text/event-stream" } });
+    }));
+    const app = await buildServer({ store, serveWeb: false, masterKeyPath: join(root, "master.key"), modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
+    try {
+      await app.inject({ method: "PUT", url: "/api/model-settings", payload: { providerId: "custom", providerName: "Test", baseUrl: "https://models.example.com/v1", model: "test-model", apiKey: "test-key" } });
+      const first = await app.inject({ method: "POST", url: "/api/chat", payload: { message: "我要跟lecture老师请假，帮我拟一封请假信，就说我感冒了不舒服 明天能来", settings: { preferredExecutorId: "native", executionMode: "quick" } } });
+      const events = parseSse(first.body);
+      expect(events.find((event) => event.event === "error")).toBeUndefined();
+      const conversationId = events.find((event) => event.event === "conversation")!.data.id;
+      const second = await app.inject({ method: "POST", url: "/api/chat", payload: { conversationId, message: "跟老师说我叫小兰" } });
+      expect(parseSse(second.body).find((event) => event.event === "error")).toBeUndefined();
+      expect(requests).toHaveLength(2);
+      expect(requests.every((body) => body.stream === true && !body.tools && body.max_tokens === 1200)).toBe(true);
+      expect(JSON.stringify(requests)).not.toContain("个人上下文包");
+      expect(requests[1].messages.some((message: any) => message.role === "assistant")).toBe(true);
+      expect(store.listTasks()).toHaveLength(0);
+    } finally { await app.close(); vi.unstubAllGlobals(); }
+  });
+
   it("saves model settings and never returns the raw key", async () => {
     const app = await buildServer({
       store,

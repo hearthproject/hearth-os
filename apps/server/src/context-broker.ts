@@ -1,3 +1,4 @@
+import { isEvaluationMemory } from "./draft-intent.ts";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import type {
@@ -79,7 +80,7 @@ export class ContextBroker {
     }
     for (const item of this.expiredOrRestrictedItems(input)) lanes.omitted.push(item);
     const omitted = lanes.omitted.map((item) => `${item.ref}: ${item.reason}`);
-    const hash = packHash(input, lanes, stateVersion);
+    const hash = packHash(input, lanes, `render-v2:${stateVersion}`);
     const existing = this.service.store.findContextPackByHash(hash);
     if (existing) return existing;
     const now = new Date().toISOString();
@@ -98,23 +99,22 @@ export class ContextBroker {
       createdAt: now,
       items: [...lanes.must_know, ...lanes.relevant, ...lanes.recallable, ...lanes.omitted].map((item) => ({ ...item, packId: `ctxpack:${hash.slice(0, 24)}` }))
     };
+    pack.usedTokens = estimateTokens(this.render(pack));
     const event = this.service.store.appendEvent({ type: "context.pack.created", taskId: input.taskId ?? null, payload: pack });
     this.service.bus.publish(event);
     return pack;
   }
 
   render(pack: ContextPack): string {
-    const sections: string[] = [];
-    const add = (title: string, lane: ContextPackLane, intro: string): void => {
-      const items = pack.items.filter((item) => item.lane === lane);
-      if (items.length === 0) return;
-      sections.push(`## ${title}\n${intro}\n${items.map((item) => renderItem(item)).join("\n")}`);
-    };
-    add("你必须知道的", "must_know", "这些是身份、目标、硬约束、最新决定和开放承诺；全部注入。每个引用都可以用 expand_ref 展开。");
-    add("相关", "relevant", "与当前任务直接相关，已按预算注入。");
-    add("可展开", "recallable", "只注入摘要和 ref；需要全文时调用 expand_ref(ref)。");
-    add("已省略", "omitted", "以下内容因预算、权限或时效未注入。不要假设它们不存在；如确需使用，先 expand_ref 或向用户确认。");
-    return sections.join("\n\n");
+    const lines: string[] = [];
+    const limit = Math.max(0, pack.budgetTokens);
+    for (const item of pack.items) {
+      const text = item.lane === "omitted"
+        ? `- [${item.ref}] ${item.expandable ? "可按需展开" : "未注入"}`
+        : renderItem(item);
+      if (estimateTokens([...lines, text].join("\n")) <= limit) lines.push(text);
+    }
+    return lines.join("\n");
   }
 
   expandRef(ref: string, packId?: string | null): string {
@@ -218,6 +218,7 @@ export class ContextBroker {
     const allowedSensitive = this.service.store.getMemorySettings()?.allowSensitive ?? false;
     for (const memory of this.service.store.listMemories({ status: "active", limit: 500 })) {
       if (!memoryRecallAllowed(memory, allowedSensitive)) continue;
+      if (!isEvaluationMemory(input.query) && isEvaluationMemory(memory.content)) continue;
       const lexical = lexicalScore(input.query, `${memory.subjectKey}\n${memory.tags.join(" ")}\n${memory.content}`);
       if (lexical === 0 && !entityIds.size) continue;
       const linked = this.service.store.listMemoryEntityLinks({ memoryId: memory.id }).some((link) => entityIds.has(link.entityId));

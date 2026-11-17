@@ -1,10 +1,12 @@
+import { TaskActionsMenu } from "../components/TaskActionsMenu.tsx";
+import { TaskTokens } from "../components/TaskTokens.tsx";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
-import { Archive, ArchiveRestore, FileText, ListChecks, Pin, PinOff, RefreshCw } from "lucide-react";
+import { FileText, ListChecks, Pin, PinOff, RefreshCw } from "lucide-react";
 import { api } from "../lib/api.ts";
-import { formatDuration, formatTokens, isActive, needsAttention, relativeTime } from "../lib/format.ts";
-import { executorLabel } from "../lib/labels.ts";
+import { formatDuration, isActive, needsAttention, relativeTime } from "../lib/format.ts";
+import { executorLabel, executionModeLabel } from "../lib/labels.ts";
 import { StatusPill } from "../components/StatusPill.tsx";
 import type { TaskListItem } from "../lib/types.ts";
 
@@ -61,6 +63,7 @@ export function TasksPage() {
         ))}
       </div>
 
+      {organization.isError && <p className="form-error" role="alert">整理任务失败，请重试。</p>}
       {tasks.length === 0 ? (
         <div className="empty-panel">
           <ListChecks size={22} />
@@ -105,10 +108,10 @@ export function TasksPage() {
                     <p className="task-goal">{task.goal}</p>
                     <span className="task-time">{relativeTime(task.updatedAt)}</span>
                   </td>
-                  <td><span className="executor-tag">{executorLabel(task.executorId)}</span></td>
+                  <td><span className="executor-tag">{executorLabel(task.executorId)}</span><span className="task-mode-tag">{executionModeLabel(task.executionMode)}</span></td>
                   <td><span className={`phase-tag ${phaseTone(task.status)}`}>{task.summary.phase}</span></td>
-                  <td className="mono">{formatTokens(task.summary.lastUsage)}</td>
-                  <td className="mono">{formatDuration(task.summary.lastDurationMs)}</td>
+                  <td className="mono task-token-cell"><TaskTokens usage={task.summary.lastUsage} /></td>
+                  <td className="mono task-duration-cell">{formatDuration(task.summary.lastDurationMs)}</td>
                   <td className="result-column">
                     <ResultCell task={task} />
                   </td>
@@ -127,19 +130,7 @@ export function TasksPage() {
                     >
                       {task.pinnedAt ? <PinOff size={14} /> : <Pin size={14} />}
                     </button>
-                    <button
-                      className="icon-button"
-                      title={task.archivedAt ? "恢复任务" : "归档任务"}
-                      aria-label={task.archivedAt ? "恢复任务" : "归档任务"}
-                      disabled={organization.isPending && organization.variables?.id === task.id}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        organization.mutate({ id: task.id, patch: { archived: !task.archivedAt } });
-                      }}
-                      onKeyDown={(event) => event.stopPropagation()}
-                    >
-                      {task.archivedAt ? <ArchiveRestore size={14} /> : <Archive size={14} />}
-                    </button>
+                    <TaskActionsMenu task={task} />
                   </td>
                 </tr>
               ))}

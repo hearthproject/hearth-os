@@ -230,6 +230,7 @@ async function streamOpenAiChat(
       model: settings.model,
       messages,
       stream: true,
+      ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
       temperature: options.temperature ?? 0.5
     }),
     signal: withTimeout(options.signal, options.timeoutMs ?? 180_000)

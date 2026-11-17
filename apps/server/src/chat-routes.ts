@@ -1,3 +1,4 @@
+import { isSimpleDraft, isDraftRevision, DRAFT_INSTRUCTION } from "./draft-intent.ts";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { extname, join } from "node:path";
@@ -431,7 +432,10 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       : conversation.settings;
     const lockedExecutorId = effectiveSettings.preferredExecutorId;
     const preferredExecutorId = lockedExecutorId ?? plan.executorId;
-    const route = await decideRoute(userContent, storedFiles.length > 0, detectedUrl, settings, {
+    const previousMessages = store.listChatMessages(conversation.id).filter((item) => item.id !== userRecord.id);
+    const recentDraft = previousMessages.slice(-8).some((item) => item.role === "user" && isSimpleDraft(item.content));
+    const directDraft = storedFiles.length === 0 && !detectedUrl && (isSimpleDraft(userContent) || (recentDraft && isDraftRevision(userContent)));
+    const route = directDraft ? { action: "chat" as const, title: "", goal: userContent, reason: "直接拟稿或修订现有草稿" } : await decideRoute(userContent, storedFiles.length > 0, detectedUrl, settings, {
       preferredExecutorId: lockedExecutorId
     });
     const available = executorAvailability();
@@ -563,10 +567,10 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     }
 
     const history = store.listChatMessages(conversation.id)
-      .slice(-24)
+      .slice(directDraft ? -8 : -24)
       .map((item): ChatMessage => ({ role: item.role, content: item.content }));
     let memoryContext = "";
-    if (options.memory) {
+    if (options.memory && !directDraft) {
       try {
         const recalled = options.memory.recallForConversation({
           conversationId: conversation.id,
@@ -584,7 +588,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       }
     }
     let personalContext = "";
-    if (options.personal) {
+    if (options.personal && !directDraft) {
       try {
         const pack = options.personal.broker.compile({
           scopeKind: "chat",
@@ -601,7 +605,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       }
     }
     const messages: ChatMessage[] = [
-      { role: "system", content: [chatSystemPrompt(), personalContext, memoryContext].filter(Boolean).join("\n\n") },
+      { role: "system", content: [chatSystemPrompt(), directDraft ? DRAFT_INSTRUCTION : "", personalContext, memoryContext].filter(Boolean).join("\n\n") },
       ...history
     ];
 
@@ -614,7 +618,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
         }
         answer += delta;
         send("delta", { text: delta });
-      }, { signal: controller.signal, temperature: 0.5, timeoutMs: 180_000 });
+      }, { signal: controller.signal, temperature: 0.5, timeoutMs: 180_000, ...(directDraft ? { maxTokens: 1200 } : {}) });
       const assistant = store.createChatMessage({
         id: randomUUID(),
         conversationId: conversation.id,

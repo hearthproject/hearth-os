@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import type { RunUsage } from "@hearth/core";
 import { compactAgentMessages, compactAgentMessagesWithSummary } from "./compaction.ts";
 import type {
@@ -46,6 +47,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   let lastToolSignature: string | null = null;
   let repeatedToolCalls = 0;
   let budgetReminderSent = false;
+  const deniedPaths = new Map<string, number>();
   const startedAt = Date.now();
   const signal = options.signal ?? new AbortController().signal;
 
@@ -261,6 +263,15 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         }
       }
 
+      const deniedPath = result.isError ? /路径不在授权范围内[：:]\s*(.+)/.exec(result.content)?.[1]?.trim() : undefined;
+      let repeatedDenial = false;
+      if (deniedPath) {
+        const key = resolve(options.workspaceRoot, deniedPath.replace(/[\\/]/g, "/")).toLowerCase();
+        const count = (deniedPaths.get(key) ?? 0) + 1;
+        deniedPaths.set(key, count);
+        repeatedDenial = count >= 2;
+        result = { ...result, content: `${result.content}\n当前产物输出目录：${options.outDir}。请使用当前目录；更换工具或路径分隔符不会扩大权限。` };
+      }
       emit({ type: "tool.finished", turn: turns, call, result, durationMs: Date.now() - toolStartedAt });
       if (result.usage) {
         addUsage(usage, result.usage);
@@ -273,6 +284,16 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         content: result.content,
         ...(result.isError ? { isError: true } : {})
       });
+
+      if (options.stopOnToolError && result.isError) {
+        await checkpoint("tool");
+        return finish("failed", result.content);
+      }
+
+      if (repeatedDenial) {
+        await checkpoint("tool");
+        return finish("failed", `同一路径连续被权限边界拒绝，已停止重复尝试。当前产物输出目录：${options.outDir}`);
+      }
 
       if (result.action === "finish") {
         if (options.validateFinish && finishRejections < 2) {

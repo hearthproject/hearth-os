@@ -122,6 +122,7 @@ export interface AgentRuntimeOptions {
   recentContextTokens?: number;
   summarizeContext?: (messages: AgentMessage[], signal: AbortSignal) => Promise<ContextSummary>;
   requireFinishTool?: boolean;
+  stopOnToolError?: boolean;
   retryDelayMs?: number;
 }
 

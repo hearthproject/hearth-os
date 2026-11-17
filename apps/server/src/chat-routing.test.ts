@@ -45,3 +45,13 @@ describe("chat routing heuristics", () => {
     expect(route.action).toBe("chat");
   });
 });
+
+
+describe("direct drafting", () => {
+  it.each(["我要跟lecture老师请假，帮我拟一封请假信，就说我感冒了不舒服 明天能来", "帮我写一封感谢信", "draft a short email to my teacher"])("bypasses task routing even with a locked executor: %s", async (message) => {
+    expect((await decideRoute(message, false, null, NO_MODEL, { preferredExecutorId: "native" })).action).toBe("chat");
+  });
+  it.each(["帮我写请假信并保存为 result.md", "帮我写邮件并发送给老师", "帮我读取附件写邮件"])("keeps real actions in the task route: %s", (message) => {
+    expect(heuristicRoute(message).action).toBe("task");
+  });
+});

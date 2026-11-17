@@ -42,6 +42,15 @@ describe("MemoryService", () => {
     });
   }
 
+  it("excludes evaluation experience from normal work without deleting it", () => {
+    const record = createMemory({ content: "项目发布建议。评测运行约束：不得访问网络，只写入 .hearth/eval-artifacts/EXP-20261113024947/result.md。" });
+    memory.confirm(record.id);
+    const task = createTask();
+    const recalled = memory.recall({ taskId: task.id });
+    expect(recalled.memories.some((item) => item.id === record.id)).toBe(false);
+    expect(store.getMemory(record.id)?.status).toBe("active");
+  });
+
   it("keeps new memories as candidates until the user confirms them", () => {
     const created = createMemory();
     expect(created.status).toBe("candidate");

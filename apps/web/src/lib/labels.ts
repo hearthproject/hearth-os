@@ -270,3 +270,7 @@ export function externalEffectSummary(approvals: ApprovalRecord[], effects: Effe
   if (approvals.length > 0) return `已记录 ${approvals.length} 次确认，没有外部动作。`;
   return "没有外部动作。";
 }
+
+export function executionModeLabel(mode: TaskRecord["executionMode"]): string {
+  return mode === "quick" ? "快速" : mode === "deep" ? "深入" : "标准";
+}

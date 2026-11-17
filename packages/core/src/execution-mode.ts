@@ -7,7 +7,7 @@ export const EXECUTION_PROFILES: Record<ExecutionMode, { label: string; budget: 
   quick: {
     label: "快速",
     budget: { maxTurns: 8, maxToolCalls: 16, maxTokens: 60_000, maxDurationMs: 5 * 60_000 },
-    instruction: "优先使用已有材料和网页正文，围绕用户问题提取要点。避免重复读取同一内容，仅在关键事实缺失时补充读取。尽早生成交付物并调用 finish_task；材料截断或证据不足时在结果中明确说明覆盖范围，不声称完整分析。"
+    instruction: "快速模式：简单拟稿直接给出一份短稿，补充信息只做局部修订，不生成来源索引或自查报告；不为了润色重复读写。优先使用已有材料和网页正文，围绕用户问题提取要点。避免重复读取同一内容，仅在关键事实缺失时补充读取。尽早生成交付物并调用 finish_task；材料截断或证据不足时在结果中明确说明覆盖范围，不声称完整分析。"
   },
   standard: {
     label: "标准",

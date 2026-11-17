@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { TaskRecord } from "@hearth/core";
-import { jsonDeliverableIssue, nativeProgressForEvent, nativeSystemPrompt, normalizeJsonDeliverables } from "./native-executor.ts";
+import { refreshNativeResume, jsonDeliverableIssue, nativeProgressForEvent, nativeSystemPrompt, normalizeJsonDeliverables } from "./native-executor.ts";
 
 const baseTask = {
   id: "task-1",
@@ -1111,4 +1111,20 @@ describe("native execution progress", () => {
       detail: { eventType: "budget.exceeded", status: "turns" }
     });
   });
+});
+
+
+it("refreshes stale execution instructions without rewriting historical tool evidence", () => {
+  const usage = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0, reasoningOutputTokens: 0 };
+  const restored = refreshNativeResume({ messages: [
+    { role: "system", content: "old system" }, { role: "user", content: "write to out/old" },
+    { role: "assistant", content: "", toolCalls: [{ id: "c1", name: "read_file", arguments: { path: "out/old/result.md" }, rawArguments: "{}" }] },
+    { role: "tool", toolCallId: "c1", name: "read_file", content: "original draft" },
+    { role: "user", content: "跟老师说我叫小兰" }
+  ], usage, turns: 0, toolCalls: 0 }, "new system", "write to out/new", "out/new");
+  expect(restored.messages[0]?.content).toContain("本轮唯一产物输出目录：out/new");
+  expect(restored.messages[1]?.content).toBe("write to out/new");
+  expect(JSON.stringify(restored.messages)).toContain("out/old/result.md");
+  expect(restored.messages.some((message) => message.content === "跟老师说我叫小兰")).toBe(true);
+  expect(restored.messages.at(-1)?.content).toContain("局部修订");
 });
