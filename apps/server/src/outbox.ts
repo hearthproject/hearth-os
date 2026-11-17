@@ -136,7 +136,7 @@ export class OutboxService {
             network: {
               host: smtpAccount.smtp.host,
               ...(smtpAccount.smtp.port ? { port: smtpAccount.smtp.port } : {}),
-              method: "SMTP"
+              method: smtpAccount.authType === "google-oauth" ? "POST" : "SMTP"
             },
             targetRevision: `draft-sha256:${createHash("sha256").update(JSON.stringify({
               draftId: draft.id,
@@ -221,7 +221,7 @@ export class OutboxService {
               cc: draft.cc,
               bcc: draft.bcc,
               attachments: draft.attachments,
-              impact: "会通过 SMTP 真实发送给收件人，发送后无法撤回。",
+              impact: `会通过 ${smtpAccount.authType === "google-oauth" ? "Gmail API" : "SMTP"} 真实发送给收件人，发送后无法撤回。`,
               reversible: false,
               undo: "发送后无法撤回；请在批准前核对收件人和正文。"
             },
@@ -337,7 +337,7 @@ export class OutboxService {
     const accountId = draft.account.slice("smtp:".length).trim();
     if (!accountId) throw new OutboxError("MAIL_ACCOUNT_REQUIRED", "发件账户缺少账户 ID", 400);
     try {
-      return this.mail.accounts.get(accountId);
+      return this.mail.deliveryAccount(accountId);
     } catch (error) {
       throw new OutboxError("MAIL_ACCOUNT_NOT_FOUND", error instanceof Error ? error.message : "邮件账户不存在", 404);
     }

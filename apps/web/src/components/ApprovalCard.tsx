@@ -67,7 +67,7 @@ export function ApprovalCard({ approval, effect }: { approval: ApprovalRecord; e
             : isOutbox
             ? "本地写入。确认后只把邮件包写入本机发件箱，不会发送给收件人。"
             : isSmtp
-              ? "真实发送。确认后会通过 SMTP 发送给收件人，发送后无法撤回。"
+              ? "真实发送。确认后会通过已连接的邮箱发送给收件人，发送后无法撤回。"
               : "外部副作用。确认后执行一次。"}
         </p>
       )}

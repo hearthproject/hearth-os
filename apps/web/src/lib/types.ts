@@ -548,6 +548,7 @@ export interface MailServerView {
 }
 
 export interface MailAccountView {
+  authType?: "google-oauth";
   id: string;
   name: string;
   fromName: string;

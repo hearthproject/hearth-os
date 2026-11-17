@@ -3,6 +3,7 @@ import { Activity, CalendarClock, Command, Inbox, ListChecks, Mail, MessageCircl
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { api } from "../lib/api.ts";
 import { isActive, needsAttention } from "../lib/format.ts";
+import { isTaskUnread, useTaskReadState } from "../lib/task-read-state.ts";
 import { HearthMark } from "./HearthMark.tsx";
 import { CommandPalette } from "./CommandPalette.tsx";
 import { useEffect, useState } from "react";
@@ -17,7 +18,8 @@ export function AppShell() {
   const attentionQuery = useQuery({ queryKey: ["attention"], queryFn: api.attention, refetchInterval: 15_000 });
   const reconcileQuery = useQuery({ queryKey: ["reconcile"], queryFn: () => api.reconcile(), refetchInterval: 15_000 });
   const tasks = tasksQuery.data?.tasks ?? [];
-  const activeCount = tasks.filter((task) => !task.archivedAt && (isActive(task.status) || needsAttention(task.status))).length;
+  const seenTasks = useTaskReadState();
+  const activeCount = tasks.filter((task) => !task.archivedAt && (isActive(task.status) || needsAttention(task.status)) && isTaskUnread(task, seenTasks)).length;
   const reconcileCount = (reconcileQuery.data?.items ?? [])
     .filter((item) => ["open", "checking", "needs_human", "conflicting"].includes(item.status)).length;
   const attentionCount = (attentionQuery.data?.items ?? []).filter((item) => item.waitingOn === "user").length;

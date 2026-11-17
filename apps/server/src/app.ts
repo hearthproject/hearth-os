@@ -1086,6 +1086,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
         delegations,
         backgroundTools,
         webSearch,
+        mail,
+        outbox,
         mcpServers,
         skills,
         worktrees,
@@ -1176,7 +1178,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
     if (!LOOPBACK_HOSTS.has(request.hostname) && !inboundSync) {
       return reply.code(403).send({ error: "LOCAL_ONLY", message: "Hearth 仅接受本机访问" });
     }
-    if (request.headers["sec-fetch-site"] === "cross-site") {
+    const gmailCallback = request.method === "GET" && request.url.split("?")[0] === "/api/mail/gmail/callback";
+    if (request.headers["sec-fetch-site"] === "cross-site" && !gmailCallback) {
       return reply.code(403).send({ error: "CROSS_SITE_BLOCKED", message: "已阻止跨站请求" });
     }
     if (!["GET", "HEAD", "OPTIONS"].includes(request.method) && request.headers.origin) {
@@ -1255,6 +1258,37 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
 
   app.get("/api/mail/accounts", async () => ({ accounts: mail.list() }));
+
+  app.get("/api/mail/gmail/settings", async (_request, reply) => {
+    reply.header("cache-control", "no-store");
+    return mail.gmail.settings();
+  });
+  app.put("/api/mail/gmail/settings", async (request, reply) => {
+    const parsed = z.object({ clientId: z.string().trim().min(1).max(500), clientSecret: z.string().max(1000).optional(), redirectUri: z.string().url().max(2000) }).strict().safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ message: "OAuth 配置格式不正确" });
+    try { return mail.gmail.configure(parsed.data); }
+    catch (error) { return reply.code(400).send({ message: error instanceof Error ? error.message : "OAuth 配置失败" }); }
+  });
+  app.post("/api/mail/gmail/connect", async (request, reply) => {
+    const parsed = z.object({ returnOrigin: z.string().url().max(2000) }).strict().safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ message: "返回地址不正确" });
+    try {
+      const result = mail.gmail.start(parsed.data.returnOrigin);
+      reply.header("cache-control", "no-store");
+      reply.header("set-cookie", `hearth_gmail_state=${result.state}; Path=/api/mail/gmail; HttpOnly; SameSite=Lax; Max-Age=600`);
+      return { url: result.url };
+    } catch (error) { return reply.code(400).send({ message: error instanceof Error ? error.message : "Google 连接失败" }); }
+  });
+  app.get<{ Querystring: { state?: string; code?: string; error?: string } }>("/api/mail/gmail/callback", { logLevel: "silent" }, async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    reply.header("referrer-policy", "no-referrer");
+    const cookieState = request.headers.cookie?.split(";").map((item) => item.trim()).find((item) => item.startsWith("hearth_gmail_state="))?.slice("hearth_gmail_state=".length) ?? "";
+    reply.header("set-cookie", "hearth_gmail_state=; Path=/api/mail/gmail; HttpOnly; SameSite=Lax; Max-Age=0");
+    try {
+      const target = await mail.gmail.callback(request.query.state ?? "", cookieState, request.query.code ?? "", request.query.error);
+      return reply.redirect(target);
+    } catch (error) { return reply.code(400).type("text/plain; charset=utf-8").send(`${error instanceof Error ? error.message : "Google 授权失败"}\n请返回 Hearth 邮件账户页重试。`); }
+  });
 
   app.post("/api/mail/accounts", async (request, reply) => {
     const parsed = mailAccountSchema.safeParse(request.body ?? {});

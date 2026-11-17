@@ -66,17 +66,16 @@ describe("outbox service", () => {
   });
 
 
-  it("creates a real-send approval for an SMTP account and reconciles it as sent", async () => {
+  it.each([false, true])("creates a real-send approval and reconciles it as sent (Google OAuth: %s)", async (google) => {
     const mail = {
-      accounts: {
-        get: (id: string) => ({
+        deliveryAccount: (id: string) => ({
           id,
           name: "工作邮箱",
           fromName: "Hearth",
           fromAddress: "sender@example.com",
-          smtp: { host: "smtp.example.com" }
+          ...(google ? { authType: "google-oauth" } : {}),
+          smtp: { host: google ? "gmail.googleapis.com" : "smtp.example.com", ...(google ? { port: 443 } : {}) }
         })
-      }
     } as unknown as EmailService;
     const smtpOutbox = new OutboxService(service, approvals, "C:/tmp/outbox-runs", mail);
     const draft = smtpOutbox.create({
@@ -99,7 +98,7 @@ describe("outbox service", () => {
     expect(submitted.approval.action).toMatchObject({
       resolvedAction: {
         kind: "email",
-        network: { host: "smtp.example.com", method: "SMTP" },
+        network: { host: google ? "gmail.googleapis.com" : "smtp.example.com", method: google ? "POST" : "SMTP" },
         targetRevision: expect.stringMatching(/^draft-sha256:[a-f0-9]{64}$/),
         risk: "high",
         sideEffectClass: "external_irreversible"
