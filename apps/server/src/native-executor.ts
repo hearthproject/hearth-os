@@ -1,3 +1,4 @@
+import { isTextDraftTask, DRAFT_INSTRUCTION } from "./draft-intent.ts";
 import { nativeTaskInstructions } from "./native-task-instructions.ts";
 import type { BudgetDimension, RunBudget, RunUsage, TaskPermissions, TaskProgressDetail, TaskRecord } from "@hearth/core";
 import { EXECUTION_PROFILES } from "@hearth/core";
@@ -83,21 +84,36 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     ]
   });
 
+  const drafting = isTextDraftTask({ ...options.task, expectedOutputs: options.expectedOutputs });
+  const systemPrompt = nativeSystemPrompt(options.task, options.expectedOutputs, options.skillIndex);
+  const resume = options.resume ? refreshNativeResume(options.resume, systemPrompt, options.prompt, options.prepared.outDir) : undefined;
+  const draftTools = new Set(["read_file", "write_file", "finish_task", "ask_user"]);
   let budgetExhaustion: NativeRunResult["budgetExhaustion"];
   //具体实现
   const result = await runAgent({
-    model: modelAdapter(options.settings),
-    tools: [...createBuiltinTools(), ...(options.extraTools ?? [])],
+    model: drafting ? draftModelAdapter(options.settings, resolve(options.prepared.outDir, options.expectedOutputs[0] ?? "result.md")) : modelAdapter(options.settings),
+    tools: [...createBuiltinTools(), ...(options.extraTools ?? [])]
+      .filter((tool) => !drafting || draftTools.has(tool.definition.name))
+      .map((tool) => !drafting || tool.definition.name !== "write_file" ? tool : {
+        ...tool,
+        execute: async (input, context) => {
+          const saved = await tool.execute(input, context);
+          if (saved.isError) return saved;
+          const content = (input as { content: string }).content;
+          return { ...saved, action: "finish" as const, summary: content, outputs: options.expectedOutputs };
+        }
+      }),
     goal: options.prompt,
-    systemPrompt: nativeSystemPrompt(options.task, options.expectedOutputs, options.skillIndex),
+    systemPrompt,
     budget: options.budget ?? DEFAULT_RUN_BUDGET,
     permissions,
     workspaceRoot: options.prepared.root,
     outDir: options.prepared.outDir,
     signal: options.signal,
-    ...(options.resume ? { resume: options.resume } : {}),
+    ...(resume ? { resume } : {}),
     contextWindowTokens: options.settings.contextWindowTokens,
     requireFinishTool: true,
+    stopOnToolError: drafting,
     validateFinish: () => jsonDeliverableIssue(options.prepared.outDir, options.expectedOutputs),
     summarizeContext: options.onContextSummary ?? ((messages, signal) => summarizeNativeContext(options.settings, messages, signal)),
     onEvent: (event) => {
@@ -1059,6 +1075,7 @@ async function summarizeNativeContext(settings: ModelSettings, messages: AgentMe
 }
 
 export function nativeSystemPrompt(task: TaskRecord, expectedOutputs: string[], skillIndex?: string): string {
+  if (isTextDraftTask({ ...task, expectedOutputs })) return [DRAFT_INSTRUCTION, "仅将最终草稿写入本轮输出目录，已有草稿时只应用用户新增信息。写入成功后直接调用 finish_task，不反复润色，不读取无关文件。", `期望产物：${expectedOutputs.join("、")}`].join("\n");
   return [
     "你是 Hearth 的原生 Agent 执行器，在自己的工作区里独立完成用户任务。",
     "你必须通过工具真正完成工作，不能只描述步骤或假装已经完成。",
@@ -1108,4 +1125,32 @@ function describeToolStart(name: string, args: unknown): string {
 function shortPath(path: string): string {
   const parts = path.replace(/\\/g, "/").split("/").filter(Boolean);
   return parts.slice(-2).join("/");
+}
+
+export function refreshNativeResume(resume: AgentResumeState, systemPrompt: string, prompt: string, outDir: string): AgentResumeState {
+  let replacedGoal = false;
+  const messages: AgentMessage[] = resume.messages.filter((message) => message.role !== "system").map((message) => {
+    if (!replacedGoal && message.role === "user") { replacedGoal = true; return { role: "user", content: prompt }; }
+    return message;
+  });
+  if (!replacedGoal) messages.unshift({ role: "user", content: prompt });
+  messages.unshift({ role: "system", content: `${systemPrompt}\n本轮唯一产物输出目录：${outDir}。历史记录中的输出目录属于之前的运行，不能写入。旧产物已复制到本轮目录，请在本轮目录继续。` });
+  messages.push({ role: "user", content: `恢复执行：当前输出目录是 ${outDir}。只完成剩余工作；用户补充内容只需局部修订已有产物，完成后立即 finish_task。` });
+  return { ...resume, messages };
+}
+
+// The model writes prose once. Runtime performs the single authorized save and ends.
+function draftModelAdapter(settings: ModelSettings, outputPath: string): AgentModel {
+  let attempted = false;
+  return async (messages, _tools, _onDelta, signal) => {
+    if (attempted) throw new Error("草稿保存未成功，已停止自动重试；请检查权限或输出目录后继续。");
+    attempted = true;
+    const response = await completeChat(settings, [
+      { role: "system", content: DRAFT_INSTRUCTION + "只返回草稿正文。" },
+      ...messages.filter((message) => message.role === "user").slice(-4).map((message) => ({ role: "user" as const, content: message.content }))
+    ], { maxTokens: 1200, temperature: 0.3, signal, timeoutMs: 60_000 });
+    if (!response.content.trim()) throw new Error("模型未返回草稿正文");
+    const args = { path: outputPath, content: response.content.trim() };
+    return { content: "", toolCalls: [{ id: "save-draft", name: "write_file", arguments: args, rawArguments: JSON.stringify(args) }], usage: response.usage, finishReason: "tool_calls" };
+  };
 }

@@ -1,0 +1,128 @@
+import { chromium } from 'playwright';
+import { createServer } from 'node:http';
+import { readFile } from 'node:fs/promises';
+import { resolve, extname } from 'node:path';
+import assert from 'node:assert/strict';
+const root = resolve('apps/web/dist');
+const server = createServer(async (req, res) => {
+  const pathname = new URL(req.url, 'http://localhost').pathname;
+  const path = resolve(root, '.' + (pathname.startsWith('/assets/') ? pathname : '/index.html'));
+  try {
+    res.setHeader('content-type', extname(path) === '.js' ? 'text/javascript' : extname(path) === '.css' ? 'text/css' : 'text/html');
+    res.end(await readFile(path));
+  } catch { res.writeHead(404).end(); }
+});
+await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+const origin = `http://127.0.0.1:${server.address().port}`;
+let browser;
+try {
+  browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, permissions: ['clipboard-read', 'clipboard-write'], serviceWorkers: 'block' });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const task = { id: 'task-ui', title: '核对季度报销', goal: '这是完整原始需求，不应直接出现在详情顶部。', status: 'completed', executionMode: 'deep', executorId: 'native', taskKind: 'general', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), expectedOutputs: [], inputs: [], networkHosts: [], resultSummary: null, error: null };
+  const usage = { inputTokens: 123456789, outputTokens: 98765432, cachedInputTokens: 0, cacheWriteInputTokens: 0, reasoningOutputTokens: 0 };
+  const runs = [{ id: 'run-ui', taskId: task.id, attempt: 1, executorId: 'native', status: 'completed', startedAt: '2026-11-17T01:00:00Z', endedAt: '2026-11-17T01:02:00Z', usage, failure: null }];
+  const events = [{ seq: 1, runId: 'run-ui', taskId: task.id, type: 'task.progress', createdAt: '2026-11-17T01:01:00Z', payload: { message: '核对季度费用', detail: { title: '数据核对', output: '检查完成' } } }];
+  let removed = false, overviewCalls = 0, deletes = 0;
+  const budgetActions = [];
+  await page.route('**/api/**', async route => {
+    const path = new URL(route.request().url()).pathname;
+    let data = {};
+    if (path === '/api/tasks') data = { tasks: removed ? [] : [{ ...task, summary: { phase: '已完成', lastUsage: usage, lastDurationMs: 446400000, deliverables: [] } }] };
+    else if (path.endsWith('/overview')) { overviewCalls++; data = { summary: '已完成季度报销核对，发现两笔重复费用。' }; }
+    else if (path.endsWith('/budget/extend')) { const body = JSON.parse(route.request().postData()); budgetActions.push(body); if (body.executionMode) task.executionMode = body.executionMode; task.status = 'queued'; data = task; }
+    else if (path.endsWith('/organization')) { Object.assign(task, JSON.parse(route.request().postData())); task.archivedAt = task.archived ? new Date().toISOString() : null; data = task; }
+    else if (path === '/api/tasks/task-ui' && route.request().method() === 'DELETE') { removed = true; deletes++; return route.fulfill({ status: 204 }); }
+    else if (path === '/api/tasks/task-ui') data = { task, runs, goal: null, completionReport: null, approvals: [], artifacts: [], effects: [], checkpoints: [{ id: "checkpoint-ui", seq: 1, kind: "tool", createdAt: "2026-11-17T01:01:00Z" }], events, eventTotal: 1, followUps: [] };
+    else if (path.endsWith('/context')) data = { handoffs: [], items: { total: 0, items: [] }, state: null };
+    else if (path === '/api/methods') data = { methods: [] };
+    return route.fulfill({ json: data });
+  });
+  await page.goto(`${origin}/tasks`);
+  await page.getByText('输入 123,456,789', { exact: true }).waitFor();
+  assert.equal(await page.getByText('深入', { exact: true }).count(), 1);
+  await page.getByText('124 时 0 分', { exact: true }).waitFor();
+  assert.equal(await page.locator('.task-duration-cell').evaluate(el => getComputedStyle(el).textOverflow), 'clip');
+  assert.equal(await page.locator('.task-token-cell').evaluate(el => getComputedStyle(el).textOverflow), 'clip');
+  await page.getByRole('button', { name: '更多操作：核对季度报销' }).click();
+  await page.getByRole('menuitem', { name: '分享 · 复制任务摘要' }).waitFor();
+  await page.screenshot({ path: '../task-ui-check.png', fullPage: true });
+  await page.keyboard.press('Escape');
+  assert.equal(await page.getByRole('menu').count(), 0);
+  assert.equal(new URL(page.url()).pathname, '/tasks');
+  await page.getByRole('button', { name: '更多操作：核对季度报销' }).click();
+  await page.getByRole('menuitem', { name: '分享 · 复制任务摘要' }).click();
+  await page.getByRole('status').filter({ hasText: '任务摘要已复制' }).waitFor();
+  assert.match(await page.evaluate(() => navigator.clipboard.readText()), /发现两笔重复费用/);
+  await page.getByText('核对季度报销', { exact: true }).click();
+  await page.locator('.task-overview').getByText('已完成季度报销核对，发现两笔重复费用。').waitFor();
+  assert.equal(await page.locator('.task-original-request').getAttribute('open'), null);
+  await page.locator('.task-original-request summary').click();
+  await page.getByText(task.goal, { exact: true }).waitFor({ state: 'visible' });
+  const process = page.locator('.process-toggle');
+  assert.equal(await process.getAttribute('aria-expanded'), 'false');
+  assert.ok(await page.locator('.process-panel').evaluate(el => Boolean(el.nextElementSibling?.textContent?.includes('执行链路 / 上下文'))));
+  await process.click();
+  assert.equal(await process.getAttribute('aria-expanded'), 'true');
+  task.status = 'running';
+  await page.getByRole('button', { name: '刷新', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('.process-toggle')?.getAttribute('aria-expanded') === 'true');
+  task.status = 'completed';
+  await page.getByRole('button', { name: '刷新', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('.process-toggle')?.getAttribute('aria-expanded') === 'false');
+  await process.click();
+  assert.equal(await process.getAttribute('aria-expanded'), 'true');
+  assert.equal(await page.locator('#task-process-content').evaluate(el => getComputedStyle(el).display), 'grid');
+  const runHeader = page.locator('.process-panel .run-head');
+  assert.match(await runHeader.innerText(), /第 1 次执行\s+2 分/);
+  const rawToggle = page.getByRole('button', { name: '查看第 1 次执行的原始输出' });
+  await rawToggle.click();
+  assert.equal(await rawToggle.getAttribute('aria-expanded'), 'true');
+  const rawId = await rawToggle.getAttribute('aria-controls');
+  assert.equal(await page.locator(`[id="${rawId}"]`).evaluate(el => getComputedStyle(el).display), 'grid');
+  await page.locator('.run-card pre').waitFor({ state: 'visible' });
+  const checkpointToggle = page.getByRole('button', { name: '查看检查点 · 1 个' });
+  await checkpointToggle.click();
+  assert.equal(await checkpointToggle.getAttribute('aria-expanded'), 'true');
+  await page.getByText('第 1 步 · tool', { exact: true }).waitFor({ state: 'visible' });
+  await checkpointToggle.click();
+  assert.equal(await checkpointToggle.getAttribute('aria-expanded'), 'false');
+  const checkpointId = await checkpointToggle.getAttribute('aria-controls');
+  assert.equal(await page.locator(`[id="${checkpointId}"]`).evaluate(el => getComputedStyle(el).display), 'grid');
+  await page.screenshot({ path: '../task-detail-check.png', fullPage: true });
+  task.status = 'waiting_budget'; task.executionMode = 'quick';
+  await page.getByRole('button', { name: '刷新', exact: true }).click();
+  await page.getByRole('button', { name: '升级标准模式并继续' }).click();
+  await page.locator('.task-meta-row .task-mode-tag').getByText('标准', { exact: true }).waitFor();
+  assert.deepEqual(budgetActions[0], { executionMode: 'standard' });
+  task.status = 'waiting_budget';
+  await page.getByRole('button', { name: '刷新', exact: true }).click();
+  await page.getByRole('button', { name: '预算翻倍并继续（模式不变）', exact: true }).first().click();
+  await page.waitForFunction(() => !document.querySelector('.result-banner.budget'));
+  assert.deepEqual(budgetActions[1], {});
+  assert.equal(task.executionMode, 'standard');
+  task.status = 'completed';
+  await page.getByRole('link', { name: '返回任务' }).click();
+  await page.setViewportSize({ width: 760, height: 800 });
+  await page.getByRole('button', { name: '更多操作：核对季度报销' }).click();
+  await page.getByRole('menuitem', { name: '归档任务', exact: true }).click();
+  await page.getByRole('heading', { name: '这个筛选下没有任务' }).waitFor();
+  await page.getByRole('button', { name: /^已归档/ }).click();
+  await page.getByText('已归档', { exact: true }).waitFor();
+  await page.getByRole('button', { name: '更多操作：核对季度报销' }).click();
+  page.once('dialog', dialog => dialog.dismiss());
+  await page.getByRole('menuitem', { name: '删除 · 移入回收站' }).click();
+  assert.equal(deletes, 0);
+  await page.getByRole('button', { name: '更多操作：核对季度报销' }).click();
+  page.once('dialog', dialog => dialog.accept());
+  await page.getByRole('menuitem', { name: '删除 · 移入回收站' }).click();
+  await page.getByRole('heading', { name: '还没有任务' }).waitFor();
+  assert.equal(deletes, 1);
+  assert.deepEqual(errors, []);
+  console.log('PASS: mode, complete token counts, menu/Escape, clipboard sharing, summary, original request, archive, confirmed deletion; overview requests:', overviewCalls);
+} finally {
+  await browser?.close();
+  await new Promise(resolve => server.close(resolve));
+}

@@ -57,6 +57,22 @@ describe("agent runtime", () => {
     expect(checkpoints.at(-1)?.usage).toEqual(result.usage);
   });
 
+  it("stops equivalent denied paths across different tools", async () => {
+    let turns = 0;
+    const root = workspace(roots);
+    const options = {
+      model: async () => turn("", [call(++turns === 1 ? "write" : "edit", {})]),
+      tools: ["write", "edit"].map((name) => ({ definition: { name, description: name, parameters: {} }, execute: async () => ({ content: `工具执行失败：路径不在授权范围内：${name === "write" ? "out/old/result.md" : join(root, "out/old/result.md")}`, isError: true }) })),
+      goal: "test", systemPrompt: "system", workspaceRoot: root, outDir: join(root, "out/new"),
+      permissions: { tools: ["write", "edit"], readRoots: [], writeRoots: [], networkHosts: [] },
+      budget: { maxTurns: 10, maxToolCalls: 10, maxTokens: 100000, maxDurationMs: 30000 }
+    };
+    const result = await runAgent(options);
+    expect(result.status).toBe("failed");
+    expect(turns).toBe(2);
+    expect(result.messages.at(-1)?.content).toContain("当前产物输出目录");
+  });
+
   it("completes when the model calls finish_task", async () => {
     const root = workspace(roots);
     const result = await runAgent({

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { HearthStore } from "@hearth/eventlog";
 import { ContextBroker } from "./context-broker.ts";
-import { ContextService } from "./context.ts";
+import { ContextService, estimateTokens } from "./context.ts";
 import { OntologyService } from "./ontology.ts";
 import { HearthService } from "./service.ts";
 
@@ -27,6 +27,16 @@ describe("ContextBroker delegation scope", () => {
     const ontology = new OntologyService(service);
     return { service, ontology, broker: new ContextBroker(service, context, ontology) };
   }
+
+  it("does not inject omitted summaries and accounts for the serialized prompt", () => {
+    const { broker } = setup();
+    const pack = broker.compile({ scopeKind: "chat", scopeId: "budget-test", query: "", budgetTokens: 160, includeIdentity: false,
+      mustKnow: [{ packId: "pending", ref: "mem:test", lane: "must_know", sourceKind: "memory", sourceId: "test", title: "short", summary: "useful", confidence: "confirmed", source: "user", reason: "test", score: 1, tokens: 2, expandable: true, validUntil: null }] });
+    expect(pack.usedTokens).toBe(estimateTokens(broker.render(pack)));
+    const rendered = broker.render({ ...pack, items: [...pack.items, { ...pack.items[0]!, ref: "mem:omitted", lane: "omitted", summary: "DO_NOT_INJECT".repeat(1000), tokens: 0 }] });
+    expect(rendered).not.toContain("DO_NOT_INJECT");
+    expect(estimateTokens(rendered)).toBeLessThanOrEqual(160);
+  });
 
   it("keeps a delegated child pack inside the parent pack", () => {
     const { service, ontology, broker } = setup();

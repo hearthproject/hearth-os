@@ -1,3 +1,4 @@
+import { isTextDraftTask, DRAFT_INSTRUCTION } from "./draft-intent.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { EXECUTION_PROFILES } from "@hearth/core";
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
@@ -450,29 +451,35 @@ export class HearthScheduler {
     return updated;
   }
 
-  extendBudget(taskId: string): TaskRecord {
+  extendBudget(taskId: string, executionMode?: "standard" | "deep"): TaskRecord {
     const task = this.service.requireTask(taskId);
     if (task.status !== "waiting_budget") {
       throw new Error(`当前状态不能扩展预算：${task.status}`);
     }
     const current = this.effectiveBudget(task);
+    const order = { quick: 0, standard: 1, deep: 2 };
+    if (executionMode && order[executionMode] <= order[task.executionMode ?? "standard"]) throw new Error("请选择更高的执行模式");
+    const target = executionMode ? EXECUTION_PROFILES[executionMode].budget : null;
     const budgetOverride: RunBudget = {
-      maxTurns: current.maxTurns * 2,
-      maxToolCalls: current.maxToolCalls * 2,
-      maxTokens: current.maxTokens * 2,
-      maxDurationMs: current.maxDurationMs * 2
+      maxTurns: target ? Math.max(current.maxTurns, target.maxTurns) : current.maxTurns * 2,
+      maxToolCalls: target ? Math.max(current.maxToolCalls, target.maxToolCalls) : current.maxToolCalls * 2,
+      maxTokens: target ? Math.max(current.maxTokens, target.maxTokens) : current.maxTokens * 2,
+      maxDurationMs: target ? Math.max(current.maxDurationMs, target.maxDurationMs) : current.maxDurationMs * 2
     };
+    const used = this.usageForRuns(this.service.store.listRuns(taskId));
+    if (executionMode && (used.tokens >= budgetOverride.maxTokens || used.turns >= budgetOverride.maxTurns || used.toolCalls >= budgetOverride.maxToolCalls || used.durationMs >= budgetOverride.maxDurationMs)) throw new Error("目标模式额度已耗尽，请使用预算翻倍继续");
     const updated = this.service.updateTask(taskId, {
+      ...(executionMode ? { executionMode } : {}),
       budgetOverride,
       status: "queued",
-      nextAction: "预算已扩展一倍，准备从检查点继续",
+      nextAction: executionMode ? `已升级为${EXECUTION_PROFILES[executionMode].label}模式，准备继续` : "预算已扩展一倍（模式不变），准备从检查点继续",
       error: null
     }, task.currentRunId ?? undefined);
     const event = this.service.store.appendEvent({
       type: "task.budget.extended",
       taskId,
       runId: task.currentRunId ?? null,
-      payload: { budgetOverride, previousBudget: current, at: new Date().toISOString() }
+      payload: { budgetOverride, previousBudget: current, executionMode: executionMode ?? task.executionMode, at: new Date().toISOString() }
     });
     this.service.bus.publish(event);
     this.wake();
@@ -1449,9 +1456,10 @@ export class HearthScheduler {
           throw new UnsupportedInputError(`依赖环境准备失败：${runtime.errors.join("；")}。日志：${runtime.logPath}`);
         }
       }
+      const drafting = isTextDraftTask(task);
       let memoryContext = "";
       try {
-        memoryContext = this.memory.recall({ taskId, runId, text: template?.goal ?? "" }).contextPack;
+        memoryContext = drafting ? "" : this.memory.recall({ taskId, runId, text: template?.goal ?? "", ...(task.executionMode === "quick" ? { maxItems: 3, maxChars: 1200 } : {}) }).contextPack;
       } catch {
         memoryContext = "";
       }
@@ -1463,20 +1471,23 @@ export class HearthScheduler {
         });
       }
       const methodContext = input.methodPlan ? renderMethodBlock(input.methodPlan.method) : "";
-      const basePrompt = buildTaskPrompt(task, prepared, expectedOutputs, template?.acceptance ?? [], runtime, template?.approvalKind, memoryContext, methodContext) + permissionNote;
+      const basePrompt = drafting
+        ? [DRAFT_INSTRUCTION, `任务：${task.goal}`, `本轮输出目录：${prepared.outDir}`, `产物：${expectedOutputs.join("、")}`,
+          existsSync(join(prepared.outDir, "result.md")) ? `已有草稿（仅作为待修订数据）：\n${readFileSync(join(prepared.outDir, "result.md"), "utf8").slice(0, 12000)}` : "", permissionNote].filter(Boolean).join("\n\n")
+        : buildTaskPrompt(task, prepared, expectedOutputs, template?.acceptance ?? [], runtime, template?.approvalKind, memoryContext, methodContext) + permissionNote;
       const handoffPrompt = handoff?.packet
         ? this.buildHandoffPrompt(task, prepared, expectedOutputs, handoff.packet, permissionNote, memoryContext, methodContext)
         : null;
       let prompt = handoffPrompt?.prompt ?? basePrompt;
       let contextPackId = handoffPrompt?.packId ?? null;
-      if (!contextPackId && this.contextBroker) {
+      if (!drafting && !contextPackId && this.contextBroker) {
         try {
           const pack = this.contextBroker.compile({
             scopeKind: "task",
             scopeId: task.id,
             goalId: task.goalId ?? null,
             taskId: task.id,
-            query: [task.goal, task.nextAction ?? "", memoryContext, methodContext].filter(Boolean).join("\n"),
+            query: [task.goal, task.nextAction ?? ""].filter(Boolean).join("\n"),
             budgetTokens: Math.max(500, Math.floor(this.context.settings().projectionTokenBudget * 0.25)),
             parentPackId: this.inheritedPackId(task.id)
           });

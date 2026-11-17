@@ -66,6 +66,24 @@ describe("Hearth scheduler", () => {
     tempDir = null;
   });
 
+  it("distinguishes a budget increase from an execution mode upgrade", () => {
+    const service = setup();
+    scheduler = makeScheduler(service, async () => FAKE_RESULT);
+    const task = service.createTask({ title: "quick", goal: "test", executionMode: "quick" });
+    service.updateTask(task.id, { status: "running" });
+    service.updateTask(task.id, { status: "waiting_budget" });
+    expect(scheduler.extendBudget(task.id).executionMode).toBe("quick");
+    expect(service.requireTask(task.id).budgetOverride?.maxTokens).toBe(120_000);
+    service.updateTask(task.id, { status: "running" });
+    service.updateTask(task.id, { status: "waiting_budget" });
+    const upgraded = scheduler.extendBudget(task.id, "standard");
+    expect(upgraded.executionMode).toBe("standard");
+    expect(upgraded.budgetOverride?.maxTokens).toBe(200_000);
+    service.updateTask(task.id, { status: "running" });
+    service.updateTask(task.id, { status: "waiting_budget" });
+    expect(() => scheduler!.extendBudget(task.id, "standard")).toThrow("更高");
+  });
+
   it("runs a local task and publishes validated artifacts with a manifest", async () => {
     const service = setup();
     const runner: CodexRunner = async (options) => {

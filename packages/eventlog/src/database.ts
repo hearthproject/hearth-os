@@ -3706,7 +3706,7 @@ function updateTask(db: DatabaseSync, taskId: string | null, patch: Record<strin
     title: "title", goal: "goal", status: "status", updatedAt: "updated_at",
     deadline: "deadline", currentRunId: "current_run_id", nextAction: "next_action",
     resultSummary: "result_summary", conversationId: "conversation_id",
-    pendingInput: "pending_input", executorId: "executor_id", taskKind: "task_kind",
+    pendingInput: "pending_input", executorId: "executor_id", taskKind: "task_kind", executionMode: "execution_mode",
     methodId: "method_id", methodVersion: "method_version",
     pinnedAt: "pinned_at", archivedAt: "archived_at", goalId: "goal_id",
     deletedAt: "deleted_at", trashBatchId: "trash_batch_id"

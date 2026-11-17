@@ -58,6 +58,17 @@ describe("trash API", () => {
 
   afterEach(() => store.close());
 
+  it("serves existing task summaries and rejects missing tasks", async () => {
+    const app = await buildServer({ store, serveWeb: false, dataDir, attachmentRoot });
+    const task = seedTask(store, { resultSummary: "整理完成，共三项结果。" });
+    const response = await app.inject({ method: "POST", url: `/api/tasks/${task.id}/overview` });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ summary: "整理完成，共三项结果。" });
+    const missing = await app.inject({ method: "POST", url: "/api/tasks/missing/overview" });
+    expect(missing.statusCode).toBe(404);
+    await app.close();
+  });
+
   it("soft deletes a conversation with its tasks and restores the batch", async () => {
     const app = await buildServer({ store, serveWeb: false, dataDir, attachmentRoot });
     const conversation = store.createConversation("待删除对话");

@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { TaskTokens } from "../components/TaskTokens.tsx";
+import { useEffect, useState, useId, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
@@ -25,7 +26,7 @@ import {
 } from "lucide-react";
 import { ApiError, api } from "../lib/api.ts";
 import { formatBytes, formatDuration, formatTime, formatTokens, relativeTime } from "../lib/format.ts";
-import { executorLabel, taskKindLabel } from "../lib/labels.ts";
+import { executorLabel, executionModeLabel, taskKindLabel } from "../lib/labels.ts";
 import { ApprovalCard } from "../components/ApprovalCard.tsx";
 import { TaskFollowUpPanel } from "../components/TaskFollowUpPanel.tsx";
 import { TaskGitPanel } from "../components/TaskGitPanel.tsx";
@@ -44,6 +45,12 @@ export function TaskDetailPage() {
   const backState = fromChat && navState?.conversationId ? { conversationId: navState.conversationId } : undefined;
   const queryClient = useQueryClient();
   const taskQuery = useQuery({ queryKey: ["task", id], queryFn: () => api.task(id), enabled: Boolean(id), refetchInterval: 4_000 });
+  const overviewQuery = useQuery({ queryKey: ["task-overview", id, taskQuery.data?.task.title, taskQuery.data?.task.goal, taskQuery.data?.task.resultSummary, taskQuery.data?.task.status], queryFn: () => api.taskOverview(id), enabled: Boolean(taskQuery.data), staleTime: Infinity, retry: false });
+  const [processOpen, setProcessOpen] = useState(false);
+  const processStatus = taskQuery.data?.task.status;
+  useEffect(() => {
+    setProcessOpen(Boolean(processStatus && !["completed", "failed", "cancelled", "recoverable"].includes(processStatus)));
+  }, [id, processStatus]);
   const [preview, setPreview] = useState<{ artifact: TaskDeliverable; content: string | null; loading: boolean; error: string | null } | null>(null);
   const [resumeInput, setResumeInput] = useState("");
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -59,7 +66,7 @@ export function TaskDetailPage() {
     }
   });
   const extendBudget = useMutation({
-    mutationFn: () => api.extendBudget(id),
+    mutationFn: (mode?: "standard" | "deep") => api.extendBudget(id, mode),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["task", id] });
       void queryClient.invalidateQueries({ queryKey: ["tasks"] });
@@ -130,6 +137,7 @@ export function TaskDetailPage() {
   }
 
   async function deleteCurrentTask() {
+    if (!window.confirm("将任务移入回收站？可以从回收站恢复。")) return;
     setDeleteError(null);
     try {
       await api.deleteTask(task.id);
@@ -160,7 +168,10 @@ export function TaskDetailPage() {
       <div className="page-head">
         <div className="task-detail-title">
           <h1>{task.title}</h1>
-          <p className="page-meta">{task.goal}</p>
+          <div className="task-overview" aria-live="polite">
+            {overviewQuery.isPending ? <p>正在生成任务摘要…</p> : overviewQuery.data ? <p>{overviewQuery.data.summary}</p> : <p>摘要暂不可用。<button className="ghost-button" onClick={() => void overviewQuery.refetch()}>重试</button></p>}
+          </div>
+          <details className="task-original-request"><summary>原始需求</summary><p>{task.goal}</p></details>
         </div>
         <div className="detail-actions">
           <StatusPill status={task.status} />
@@ -183,8 +194,8 @@ export function TaskDetailPage() {
           </button>
           {canRetry && <button className="primary-button" onClick={() => retry.mutate(undefined)} disabled={retry.isPending}><RotateCcw size={14} /> 重试</button>}
           {task.status === "waiting_budget" && (
-            <button className="primary-button" onClick={() => extendBudget.mutate()} disabled={extendBudget.isPending}>
-              {extendBudget.isPending ? <Loader2 className="spin" size={14} /> : <Gauge size={14} />} 扩展一倍并继续
+            <button className="primary-button" onClick={() => extendBudget.mutate(undefined)} disabled={extendBudget.isPending}>
+              {extendBudget.isPending ? <Loader2 className="spin" size={14} /> : <Gauge size={14} />} 预算翻倍并继续（模式不变）
             </button>
           )}
           {canCancel && <button className="ghost-button danger" onClick={() => cancel.mutate()} disabled={cancel.isPending}><Square size={13} /> 取消</button>}
@@ -196,11 +207,12 @@ export function TaskDetailPage() {
         <span className={`phase-tag ${phaseTone(task.status)}`}>{phaseLabel(task.status, task.nextAction)}</span>
         <span className="executor-tag">{executorLabel(task.executorId)}</span>
         <span>{taskKindLabel(task.taskKind)}</span>
+        <span className="task-mode-tag">{executionModeLabel(task.executionMode)}</span>
         {task.pinnedAt && <span><Pin size={13} /> 已置顶</span>}
         {task.archivedAt && <span><Archive size={13} /> 已归档</span>}
         {boundMethod && <span>方法 {boundMethod.name} · v{boundMethod.version}</span>}
         <span><Clock3 size={13} /> {formatDuration(lastDuration(view.runs))}</span>
-        <span>Token {formatTokens(lastUsage(view.runs))}</span>
+        <span>Token <TaskTokens usage={lastUsage(view.runs)} /></span>
         {view.checkpoints.length > 0 && <span>{view.checkpoints.length} 个检查点</span>}
         <span>更新于 {relativeTime(task.updatedAt)}</span>
       </div>
@@ -213,10 +225,13 @@ export function TaskDetailPage() {
           <div>
             <strong>预算已触顶，等待扩展</strong>
             <p>{task.error?.message ?? "本轮执行达到预算上限，工作区和检查点已保留。"}</p>
-            <small>确认后四项预算会同时翻倍，并从最近检查点继续；再次触顶时可以继续扩展。</small>
+            <small>预算翻倍保留当前模式；升级模式会应用对应的执行策略与额度。已使用的预算不会清零。</small>
+            {(task.executionMode ?? "standard") !== "deep" && <button className="ghost-button" disabled={extendBudget.isPending} onClick={() => extendBudget.mutate(task.executionMode === "quick" ? "standard" : "deep")}>
+              {task.executionMode === "quick" ? "升级标准模式并继续" : "升级深入模式并继续"}
+            </button>}
             {extendBudget.isError && <small className="form-error">{extendBudget.error instanceof Error ? extendBudget.error.message : "扩展预算失败"}</small>}
-            <button className="primary-button" onClick={() => extendBudget.mutate()} disabled={extendBudget.isPending}>
-              {extendBudget.isPending ? <Loader2 className="spin" size={14} /> : <Gauge size={14} />} 扩展一倍并继续
+            <button className="primary-button" onClick={() => extendBudget.mutate(undefined)} disabled={extendBudget.isPending}>
+              {extendBudget.isPending ? <Loader2 className="spin" size={14} /> : <Gauge size={14} />} 预算翻倍并继续（模式不变）
             </button>
           </div>
         </div>
@@ -384,28 +399,22 @@ export function TaskDetailPage() {
       <TaskGitPanel taskId={task.id} />
       <TaskWorktreePanel taskId={task.id} />
 
-      <ContextPanel
-        view={view}
-        context={contextQuery.data}
-        loading={contextQuery.isLoading}
-        error={contextQuery.isError ? (contextQuery.error instanceof Error ? contextQuery.error.message : "上下文读取失败") : null}
-      />
       <section className="panel process-panel">
-        <details open={task.status === "running" || task.status === "queued"}>
-          <summary>
+        <button className="process-toggle" aria-expanded={processOpen} aria-controls="task-process-content" onClick={() => setProcessOpen((open) => !open)}>
             <span>执行过程</span>
-            <small>{executorLabel(task.executorId)} · {view.runs.length} 次运行 · {visibleProgress.length} 条进度 · 点击展开</small>
-          </summary>
-          <div className="process-body">
+            <small>{executorLabel(task.executorId)} · {view.runs.length} 次运行 · {visibleProgress.length} 条进度 · {processOpen ? "点击收起" : "点击展开"}</small>
+        </button>
+        <div id="task-process-content" className={`animated-disclosure ${processOpen ? "is-open" : ""}`} aria-hidden={!processOpen} ref={(node) => { if (node) node.inert = !processOpen; }}>
+          <div className="disclosure-clip"><div className="process-body">
             {view.runs.map((run) => (
               <div key={run.id} className="run-card">
-                <div className="run-head">
+                <ExpandableOutput className="run-head" details={progress.filter((event) => event.runId === run.id).map(progressDetail)} label={`查看第 ${run.attempt} 次执行的原始输出`}>
                   <strong>第 {run.attempt} 次执行</strong>
+                  <span>{formatDuration(runDuration(run))}</span>
                   <span>{executorLabel(run.executorId)}</span>
                   <span className={`run-status ${run.status}`}>{runStatusLabel(run.status)}</span>
-                  <span>{formatDuration(runDuration(run))}</span>
                   <span>Token {formatTokens(run.usage)}</span>
-                </div>
+                </ExpandableOutput>
                 {run.failure && <p className="run-error">{run.failure.message}</p>}
               </div>
             ))}
@@ -415,34 +424,32 @@ export function TaskDetailPage() {
                   <li key={item.seq}>
                     <span className="dot" />
                     <div>
-                      <p>{item.message}</p>
-                      <small>{formatTime(item.createdAt)}</small>
-                      <ProgressDetails details={item.details} />
+                      <ExpandableOutput className="progress-entry-head" details={item.details} label="查看原始输出">
+                        <p>{item.message}</p><small>{formatTime(item.createdAt)}</small>
+                      </ExpandableOutput>
                     </div>
                   </li>
                 ))}
               </ol>
             ) : <p className="muted">{technicalProgress.length > 0 ? "这个任务来自旧版本，执行命令已收进技术细节。" : "还没有执行进度记录。"}</p>}
             {technicalProgress.length > 0 && (
-              <details className="technical-details">
-                <summary>查看技术细节 · {technicalProgress.length} 条</summary>
+              <ProcessDisclosure label={`查看技术细节 · ${technicalProgress.length} 条`}>
                 <ol className="progress-timeline technical">
                   {technicalProgress.map((event) => (
                     <li key={event.seq}>
                       <span className="dot" />
                       <div>
-                        <p>{progressMessage(event)}</p>
-                        <small>{formatTime(event.createdAt)}</small>
-                        <ProgressDetails details={[progressDetail(event)]} />
+                        <ExpandableOutput className="progress-entry-head" details={[progressDetail(event)]} label="查看原始输出">
+                          <p>{progressMessage(event)}</p><small>{formatTime(event.createdAt)}</small>
+                        </ExpandableOutput>
                       </div>
                     </li>
                   ))}
                 </ol>
-              </details>
+              </ProcessDisclosure>
             )}
             {view.checkpoints.length > 0 && (
-              <details className="technical-details">
-                <summary>查看检查点 · {view.checkpoints.length} 个</summary>
+              <ProcessDisclosure label={`查看检查点 · ${view.checkpoints.length} 个`}>
                 <ol className="progress-timeline technical">
                   {view.checkpoints.slice(-20).map((checkpoint) => (
                     <li key={checkpoint.id}>
@@ -454,14 +461,20 @@ export function TaskDetailPage() {
                     </li>
                   ))}
                 </ol>
-              </details>
+              </ProcessDisclosure>
             )}
             {task.conversationId && (
               <Link className="back-link" to="/">来自对话 {task.conversationId.slice(0, 8)} <ChevronRight size={13} /></Link>
             )}
-          </div>
-        </details>
+          </div></div>
+        </div>
       </section>
+      <ContextPanel
+        view={view}
+        context={contextQuery.data}
+        loading={contextQuery.isLoading}
+        error={contextQuery.isError ? (contextQuery.error instanceof Error ? contextQuery.error.message : "上下文读取失败") : null}
+      />
     </div>
   );
 }
@@ -771,19 +784,36 @@ function progressDetail(event: TaskView["events"][number]): TaskProgressDetail |
   return detail && typeof detail === "object" ? detail as TaskProgressDetail : null;
 }
 
-function ProgressDetails({ details }: { details: Array<TaskProgressDetail | null> }) {
-  const present = details.filter((detail): detail is TaskProgressDetail => Boolean(detail));
-  if (present.length === 0) return null;
-  return (
-    <div className="progress-raw-group">
-      {present.map((detail, index) => (
-        <details className="progress-raw" key={index}>
-          <summary>查看原始输出{detail.title ? ` · ${detail.title}` : ""}</summary>
-          <pre>{formatProgressDetail(detail)}</pre>
-        </details>
-      ))}
+function ProcessDisclosure({ label, children }: { label: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  return <div className="process-extra">
+    <button className="process-extra-toggle" aria-expanded={open} aria-controls={id} onClick={() => setOpen((value) => !value)}>
+      <span>{label}</span><ChevronRight size={13} />
+    </button>
+    <div id={id} className={`animated-disclosure ${open ? "is-open" : ""}`} aria-hidden={!open} ref={(node) => { if (node) node.inert = !open; }}>
+      <div className="disclosure-clip">{children}</div>
     </div>
-  );
+  </div>;
+}
+
+function ExpandableOutput({ children, details, label, className }: {
+  children: ReactNode; details: Array<TaskProgressDetail | null>; label: string; className: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  const present = details.filter((detail): detail is TaskProgressDetail => Boolean(detail));
+  return <div className="expandable-output">
+    <div className={className}>
+      {children}
+      {present.length > 0 && <button className="raw-output-toggle" aria-label={label} title={label} aria-expanded={open} aria-controls={id} onClick={() => setOpen((value) => !value)}><ChevronRight size={13} /></button>}
+    </div>
+    {present.length > 0 && <div id={id} className={`animated-disclosure ${open ? "is-open" : ""}`} aria-hidden={!open} ref={(node) => { if (node) node.inert = !open; }}>
+      <div className="disclosure-clip"><div className="progress-raw">
+        {present.map((detail, index) => <pre key={index}>{formatProgressDetail(detail)}</pre>)}
+      </div></div>
+    </div>}
+  </div>;
 }
 
 function formatProgressDetail(detail: TaskProgressDetail): string {

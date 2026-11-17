@@ -9051,3 +9051,57 @@ body.modal-open {
   color: var(--ink-tertiary);
   font-size: var(--fs-11);
 }
+
+/* Task metadata must stay readable, including large token counts and actions. */
+.task-table th:nth-child(4) { width: 150px; }
+.task-table th.task-row-actions-head { width: 92px; }
+.task-table td.task-token-cell, .task-table td.task-row-actions { overflow: visible; text-overflow: clip; white-space: normal; }
+.task-token-values { display: inline-flex; flex-direction: column; gap: 3px; font-variant-numeric: tabular-nums; }
+.task-token-values > span { white-space: normal; overflow-wrap: anywhere; }
+.task-mode-tag { display: block; margin-top: 5px; color: var(--ink-secondary); font-size: 12px; }
+.task-meta-row .task-mode-tag { margin-top: 0; }
+.task-menu-anchor { display: inline-block; }
+.task-action-notice { display: block; width: 140px; white-space: normal; overflow-wrap: anywhere; font-size: 11px; }
+.task-actions-menu { position: fixed; z-index: 1000; width: 200px; padding: 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: 0 8px 28px #0002; }
+.task-actions-menu button { display: block; width: 100%; padding: 10px; text-align: left; border: 0; border-radius: 6px; background: transparent; color: var(--ink); cursor: pointer; }
+.task-actions-menu button:hover, .task-actions-menu button:focus-visible { background: var(--surface-sunk); }
+.task-actions-menu button.danger { color: var(--risk); }
+.task-overview { max-width: 72ch; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink-secondary); }
+.task-original-request { margin-top: 12px; color: var(--ink-secondary); }
+.task-original-request summary { cursor: pointer; }
+.task-original-request p { max-width: 72ch; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Keep durations complete; execution progress is a quiet, expandable activity log. */
+.task-table th:nth-child(5) { width: 120px; }
+.task-table td.task-duration-cell { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+.process-panel { background: transparent; border-color: var(--line); box-shadow: none; }
+.process-panel > details > summary { flex-wrap: wrap; color: var(--ink-secondary); }
+.process-panel > details > summary small { font-size: var(--fs-11); white-space: normal; overflow-wrap: anywhere; }
+.process-panel .run-card { padding: 6px 0; border: 0; border-radius: 0; background: transparent; }
+.process-panel .run-head strong { color: var(--ink-secondary); font-weight: 400; }
+.process-panel .progress-timeline p { color: var(--ink-secondary); font-weight: 400; line-height: 1.65; overflow-wrap: anywhere; }
+.process-panel .progress-timeline .dot { background: var(--ink-tertiary); width: 5px; height: 5px; flex-basis: 5px; margin-left: -3px; }
+.process-panel .progress-timeline li > div { min-width: 0; }
+.process-panel .run-head > span { white-space: normal; overflow-wrap: anywhere; }
+
+.process-toggle { display: flex; width: 100%; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 10px 12px; border: 0; background: transparent; color: var(--ink-secondary); text-align: left; cursor: pointer; font: inherit; font-size: var(--fs-13); }
+.process-toggle small { color: var(--ink-tertiary); font-size: var(--fs-11); }
+.animated-disclosure { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 200ms ease, opacity 160ms ease; }
+.animated-disclosure.is-open { grid-template-rows: 1fr; opacity: 1; }
+.disclosure-clip { min-height: 0; overflow: hidden; }
+.progress-entry-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+.raw-output-toggle { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--ink-tertiary); cursor: pointer; }
+.raw-output-toggle:hover { background: var(--surface-sunk); color: var(--ink); }
+.raw-output-toggle svg { transition: transform 160ms ease; }
+.raw-output-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
+.process-toggle:focus-visible, .raw-output-toggle:focus-visible { outline: 2px solid var(--ink-secondary); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  .animated-disclosure, .raw-output-toggle svg { transition: none; }
+}
+
+.process-extra-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 4px 0; border: 0; background: transparent; color: var(--ink-tertiary); font: inherit; font-size: var(--fs-11); cursor: pointer; }
+.process-extra-toggle svg { transition: transform 160ms ease; }
+.process-extra-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
+.process-extra-toggle:hover { color: var(--ink-secondary); }
+.process-extra-toggle:focus-visible { outline: 2px solid var(--ink-secondary); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .process-extra-toggle svg { transition: none; } }

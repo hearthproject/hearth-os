@@ -1,3 +1,4 @@
+import { isEvaluationMemory } from "./draft-intent.ts";
 import { createHash, randomUUID } from "node:crypto";
 import type {
   MemoryConflict,
@@ -445,6 +446,7 @@ export class MemoryService {
     const now = this.clock().getTime();
     const candidates = this.service.store.listMemories({ status: "active", limit: 1000 })
       .filter((memory) => memory.allowRecall)
+      .filter((memory) => isEvaluationMemory(queryText) || !isEvaluationMemory(memory.content))
       .filter((memory) => !memory.validUntil || Date.parse(memory.validUntil) > now)
       .filter((memory) => !memory.expiresAt || Date.parse(memory.expiresAt) > now)
       .filter((memory) => memory.taint === "clean")

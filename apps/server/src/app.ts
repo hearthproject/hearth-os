@@ -1,3 +1,4 @@
+import { TaskOverviewService } from "./task-overview.ts";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -3744,6 +3745,14 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
   });
 
+  const taskOverviews = new TaskOverviewService(store, () => modelRegistry.chatSettings() ?? loadModelSettings(modelSettingsPath));
+  app.post<{ Params: { id: string } }>("/api/tasks/:id/overview", async (request, reply) => {
+    const task = store.getTask(request.params.id);
+    if (!task) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    try { return await taskOverviews.get(task); }
+    catch { return reply.code(503).send({ error: "TASK_OVERVIEW_UNAVAILABLE", message: "摘要暂不可用，请检查聊天模型配置后重试" }); }
+  });
+
   app.get<{ Params: { id: string } }>("/api/tasks/:id", async (request, reply) => {
     const view = service.view(request.params.id);
     if (!view) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
@@ -3868,10 +3877,12 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
   });
 
-  app.post<{ Params: { id: string } }>("/api/tasks/:id/budget/extend", async (request, reply) => {
+  app.post<{ Params: { id: string }; Body: unknown }>("/api/tasks/:id/budget/extend", async (request, reply) => {
     if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFF", message: "执行器未启动" });
     try {
-      return scheduler.extendBudget(request.params.id);
+      const parsed = z.object({ executionMode: z.enum(["standard", "deep"]).optional() }).strict().safeParse(request.body ?? {});
+      if (!parsed.success) return reply.code(400).send({ error: "INVALID_BUDGET_REQUEST", message: "预算操作参数不正确" });
+      return scheduler.extendBudget(request.params.id, parsed.data.executionMode);
     } catch (error) {
       return reply.code(409).send({ error: "BUDGET_EXTEND_NOT_ALLOWED", message: error instanceof Error ? error.message : String(error) });
     }

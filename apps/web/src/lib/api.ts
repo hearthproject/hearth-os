@@ -195,6 +195,7 @@ export const api = {
     method: "DELETE",
     ...(cancelRunning ? { body: JSON.stringify({ cancelRunning: true }) } : {})
   }),
+  taskOverview: (id: string) => request<{ summary: string }>(`/api/tasks/${encodeURIComponent(id)}/overview`, { method: "POST" }),
   deleteTask: (id: string, cancelRunning = false) => request<void>(`/api/tasks/${encodeURIComponent(id)}`, {
     method: "DELETE",
     ...(cancelRunning ? { body: JSON.stringify({ cancelRunning: true }) } : {})
@@ -679,7 +680,7 @@ export const api = {
     method: "POST",
     ...(message ? { body: JSON.stringify({ message }) } : {})
   }),
-  extendBudget: (id: string) => request<TaskRecord>(`/api/tasks/${encodeURIComponent(id)}/budget/extend`, { method: "POST" }),
+  extendBudget: (id: string, executionMode?: "standard" | "deep") => request<TaskRecord>(`/api/tasks/${encodeURIComponent(id)}/budget/extend`, { method: "POST", body: JSON.stringify(executionMode ? { executionMode } : {}) }),
   confirmTaskProposal: (id: string, projectId?: string) => request<{ proposal: TaskProposalRecord; task: TaskRecord }>(
     `/api/task-proposals/${encodeURIComponent(id)}/confirm`,
     { method: "POST", ...(projectId ? { body: JSON.stringify({ projectId }) } : {}) }

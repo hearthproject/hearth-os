@@ -1,3 +1,4 @@
+import { isSimpleDraft } from "./draft-intent.ts";
 import { completeChat, type ChatMessage } from "./model-client.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import { GITHUB_NETWORK_HOSTS, needsGithubRepository, wantsGithubAccess, wantsScreenshot } from "./task-intent.ts";
@@ -62,6 +63,7 @@ export async function decideRoute(
   settings: ModelSettings,
   options: { preferredExecutorId?: ExecutorId | null } = {}
 ): Promise<ChatRoute> {
+  if (!hasAttachments && !url && isSimpleDraft(message)) return { action: "chat", title: "", goal: message, reason: "直接拟稿，无需工具执行" };
   const material = [
     hasAttachments ? "消息带有附件" : "",
     url ? "消息带有网址：" + url : ""
@@ -167,6 +169,7 @@ function isExplanationRequest(message: string): boolean {
 }
 
 export function heuristicRoute(message: string, reason = "包含执行类指令，交给任务执行器"): ChatRoute {
+  if (isSimpleDraft(message)) return { action: "chat", title: "", goal: message, reason: "直接拟稿，无需工具执行" };
   const normalized = message.trim().toLowerCase();
   if (isExplanationRequest(message)) {
     return { action: "chat", title: "", goal: message, reason: "询问方法或解释，直接由聊天模型回答" };
