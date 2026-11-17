@@ -1157,7 +1157,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     store,
     settings: () => modelRegistry.chatSettings() ?? loadModelSettings(modelSettingsPath),
     repoRoot: REPO_ROOT,
-    operator: { approvals, outbox, reconcile, ...(scheduler ? { scheduler } : {}), schedules }
+    operator: { approvals, outbox, reconcile, ...(scheduler ? { scheduler } : {}), schedules, memory, skills }
   });
 
   app.addHook("onClose", async () => {

@@ -2,12 +2,15 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { defaultTaskPermissions } from "@hearth/agent-runtime";
-import { APPROVAL_MODES, EXECUTOR_IDS, TASK_KINDS, type EffectRecord, type TaskRecord } from "@hearth/core";
+import { APPROVAL_MODES, EXECUTOR_IDS, MEMORY_KINDS, SKILL_STATUSES, TASK_KINDS, type EffectRecord, type TaskRecord } from "@hearth/core";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { ApprovalError, type ApprovalManager } from "./approvals.ts";
 import { OutboxError, type OutboxService } from "./outbox.ts";
 import { ReconcileError, type ReconcileService } from "./reconcile.ts";
+import type { MemoryService } from "./memory.ts";
+import type { ScheduleService } from "./schedules.ts";
+import type { SkillPackageService } from "./skills.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import { chatModelConfigured } from "./model-settings.ts";
 import { completeChat, type ChatMessage, type CompleteOptions } from "./model-client.ts";
@@ -71,14 +74,57 @@ const operatorSchema = z.object({
     "reconcile.mark_uncertain",
     "reconcile.check",
     "reconcile.resolve",
-    "checkpoint.restore"
+    "checkpoint.restore",
+    "schedule.run",
+    "memory.create",
+    "memory.confirm",
+    "memory.correct",
+    "memory.forget",
+    "memory.recall",
+    "skill.import",
+    "skill.transition",
+    "skill.execution_check"
   ]),
   targetId: z.string().trim().min(1).max(200).optional(),
   decision: z.enum(["approve", "reject"]).optional(),
   parameterHash: z.string().trim().min(1).max(200).optional(),
   resolution: z.enum(["committed", "absent", "abandoned"]).optional(),
   note: z.string().max(2_000).optional(),
-  expectedStatus: z.string().trim().min(1).max(100).optional()
+  expectedStatus: z.string().trim().min(1).max(100).optional(),
+  payload: z.record(z.string(), z.unknown()).optional()
+}).strict();
+
+const memoryCreatePayload = z.object({
+  kind: z.enum(MEMORY_KINDS),
+  content: z.string().trim().min(1).max(8_000),
+  subjectKey: z.string().trim().min(1).max(200),
+  scope: z.string().trim().min(1).max(200).optional(),
+  tags: z.array(z.string().trim().min(1).max(100)).max(20).optional()
+}).strict();
+
+const memoryCorrectPayload = z.object({
+  content: z.string().trim().min(1).max(8_000).optional(),
+  reason: z.string().trim().min(1).max(1_000)
+}).strict();
+
+const memoryRecallPayload = z.object({
+  text: z.string().max(4_000).optional(),
+  maxItems: z.number().int().min(1).max(50).optional()
+}).strict();
+
+const skillImportPayload = z.object({
+  content: z.string().trim().min(1).max(200_000)
+}).strict();
+
+const skillTransitionPayload = z.object({
+  status: z.enum(SKILL_STATUSES),
+  reason: z.string().max(1_000).optional()
+}).strict();
+
+const skillExecutionPayload = z.object({
+  toolName: z.string().trim().min(1).max(200).optional(),
+  networkHosts: z.array(z.string().trim().min(1).max(255)).max(10).optional(),
+  paths: z.array(z.string().trim().min(1).max(500)).max(10).optional()
 }).strict();
 
 interface EvalOperatorDeps {
@@ -86,7 +132,9 @@ interface EvalOperatorDeps {
   outbox: OutboxService;
   reconcile: ReconcileService;
   scheduler?: { retry(taskId: string, input?: string): TaskRecord };
-  schedules?: { runNow(scheduleId: string): unknown };
+  schedules?: ScheduleService;
+  memory?: MemoryService;
+  skills?: SkillPackageService;
 }
 
 class EvalOperatorError extends Error {
@@ -443,7 +491,87 @@ async function executeOperator(
       }
       return { task: deps.scheduler.retry(task.id) };
     }
+    case "schedule.run": {
+      if (!deps.schedules) {
+        throw new EvalOperatorError("EVAL_OPERATOR_UNAVAILABLE", "定时任务服务未装配", 503);
+      }
+      return { run: deps.schedules.runNow(requireTarget(body)) };
+    }
+    case "memory.create": {
+      if (!deps.memory) throw new EvalOperatorError("EVAL_OPERATOR_UNAVAILABLE", "记忆服务未装配", 503);
+      const input = parsePayload(memoryCreatePayload, body.payload, body.action);
+      const record = deps.memory.create({
+        kind: input.kind,
+        content: input.content,
+        subjectKey: input.subjectKey,
+        ...(input.scope ? { scope: input.scope } : {}),
+        ...(input.tags ? { tags: input.tags } : {}),
+        source: { type: "task", id: task.id, label: "评测任务", excerpt: null }
+      });
+      return { memory: record };
+    }
+    case "memory.confirm": {
+      if (!deps.memory) throw new EvalOperatorError("EVAL_OPERATOR_UNAVAILABLE", "记忆服务未装配", 503);
+      return { memory: deps.memory.confirm(requireTarget(body)) };
+    }
+    case "memory.correct": {
+      if (!deps.memory) throw new EvalOperatorError("EVAL_OPERATOR_UNAVAILABLE", "记忆服务未装配", 503);
+      const input = parsePayload(memoryCorrectPayload, body.payload, body.action);
+      return {
+        memory: deps.memory.correct(requireTarget(body), {
+          reason: input.reason,
+          ...(input.content ? { content: input.content } : {})
+        })
+      };
+    }
+    case "memory.forget": {
+      if (!deps.memory) throw new EvalOperatorError("EVAL_OPERATOR_UNAVAILABLE", "记忆服务未装配", 503);
+      return { memory: deps.memory.forget(requireTarget(body), body.note ?? "评测要求遗忘") };
+    }
+    case "memory.recall": {
+      if (!deps.memory) throw new EvalOperatorError("EVAL_OPERATOR_UNAVAILABLE", "记忆服务未装配", 503);
+      const input = parsePayload(memoryRecallPayload, body.payload, body.action);
+      return {
+        recall: deps.memory.recall({
+          taskId: task.id,
+          ...(input.text ? { text: input.text } : {}),
+          ...(input.maxItems ? { maxItems: input.maxItems } : {})
+        })
+      };
+    }
+    case "skill.import": {
+      if (!deps.skills) throw new EvalOperatorError("EVAL_OPERATOR_UNAVAILABLE", "技能服务未装配", 503);
+      const input = parsePayload(skillImportPayload, body.payload, body.action);
+      const imported = deps.skills.importPackage(input.content);
+      return { skill: imported.skill, document: imported.document };
+    }
+    case "skill.transition": {
+      if (!deps.skills) throw new EvalOperatorError("EVAL_OPERATOR_UNAVAILABLE", "技能服务未装配", 503);
+      const input = parsePayload(skillTransitionPayload, body.payload, body.action);
+      return { skill: deps.skills.transition(requireTarget(body), input.status, input.reason ?? "评测晋级") };
+    }
+    case "skill.execution_check": {
+      if (!deps.skills) throw new EvalOperatorError("EVAL_OPERATOR_UNAVAILABLE", "技能服务未装配", 503);
+      const input = parsePayload(skillExecutionPayload, body.payload, body.action);
+      const decision = deps.skills.checkExecution(requireTarget(body), task.id, {
+        ...(input.toolName ? { toolName: input.toolName } : {}),
+        ...(input.networkHosts ? { networkHosts: input.networkHosts } : {}),
+        ...(input.paths ? { paths: input.paths } : {})
+      });
+      return { decision };
+    }
   }
+}
+
+function parsePayload<T extends z.ZodType>(schema: T, payload: Record<string, unknown> | undefined, action: string): z.infer<T> {
+  const parsed = schema.safeParse(payload ?? {});
+  if (!parsed.success) {
+    const detail = parsed.error.issues
+      .map((issue) => `${issue.path.join(".") || "payload"}: ${issue.message}`)
+      .join("；");
+    throw new EvalOperatorError("INVALID_EVAL_OPERATION", `${action} 参数不正确：${detail}`, 400);
+  }
+  return parsed.data;
 }
 
 function requireTarget(body: z.infer<typeof operatorSchema>): string {

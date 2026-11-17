@@ -11,6 +11,10 @@ import { HearthService } from "./service.ts";
 import { ApprovalManager } from "./approvals.ts";
 import { OutboxService } from "./outbox.ts";
 import { ReconcileService } from "./reconcile.ts";
+import { MemoryService } from "./memory.ts";
+import { MethodService } from "./methods.ts";
+import { ScheduleService } from "./schedules.ts";
+import { SkillPackageService } from "./skills.ts";
 
 const stores: HearthStore[] = [];
 
@@ -318,6 +322,90 @@ describe("eval routes", () => {
     expect(rejected.statusCode).toBe(403);
     expect(rejected.json().error).toBe("NOT_EVAL_TASK");
   });
+
+  it("drives memory lifecycle and skill promotion through the operator", async () => {
+    const fixture = await createFixture();
+    const created = await fixture.app.inject({
+      method: "POST", url: "/api/eval/tasks", payload: { ...taskBody(), externalRef: "eval:mem:1" }
+    });
+    const taskId = created.json().task.id as string;
+    const operate = (payload: Record<string, unknown>) => fixture.app.inject({
+      method: "POST", url: `/api/eval/tasks/${taskId}/operator`, payload
+    });
+
+    const made = await operate({
+      operationId: "mem-create-1",
+      action: "memory.create",
+      payload: { kind: "preference", content: "咖啡只喝无糖燕麦拿铁", subjectKey: "user.drink" }
+    });
+    expect(made.statusCode).toBe(200);
+    const memoryId = made.json<{ memory: { id: string; status: string } }>().memory.id;
+    expect(made.json().memory.status).toBe("candidate");
+
+    const confirmed = await operate({ operationId: "mem-confirm-1", action: "memory.confirm", targetId: memoryId });
+    expect(confirmed.json().memory.status).toBe("active");
+
+    const recalled = await operate({
+      operationId: "mem-recall-1", action: "memory.recall", payload: { text: "咖啡" }
+    });
+    expect(recalled.json().recall.memories.map((item: { id: string }) => item.id)).toContain(memoryId);
+
+    const corrected = await operate({
+      operationId: "mem-correct-1", action: "memory.correct", targetId: memoryId,
+      payload: { content: "咖啡只喝无糖燕麦拿铁，不加浓缩", reason: "用户补充偏好" }
+    });
+    expect(corrected.json().memory.content).toContain("不加浓缩");
+
+    const forgotten = await operate({ operationId: "mem-forget-1", action: "memory.forget", targetId: memoryId });
+    expect(forgotten.json().memory.status).toBe("forgotten");
+    const afterForget = await operate({
+      operationId: "mem-recall-2", action: "memory.recall", payload: { text: "咖啡" }
+    });
+    expect(afterForget.json().recall.memories.map((item: { id: string }) => item.id)).not.toContain(memoryId);
+
+    const methodTask = fixture.service.createTask({ title: "整理周报", goal: "每周整理周报" });
+    fixture.service.updateTask(methodTask.id, { status: "running" });
+    fixture.service.updateTask(methodTask.id, { status: "completed" });
+    const method = fixture.methods.autoLearnFromTask(methodTask.id);
+    if (!method) throw new Error("method missing");
+    const exported = fixture.skills.exportMethod(method.id);
+
+    const checked = await operate({
+      operationId: "skill-check-1", action: "skill.execution_check", targetId: exported.id,
+      payload: { toolName: "read_file" }
+    });
+    expect(checked.statusCode).toBe(200);
+    expect(typeof checked.json().decision.allowed).toBe("boolean");
+
+    const transitioned = await operate({
+      operationId: "skill-transition-1", action: "skill.transition", targetId: exported.id,
+      payload: { status: "archived", reason: "评测归档" }
+    });
+    expect(transitioned.json().skill.status).toBe("archived");
+  });
+
+  it("triggers a scheduled task through the operator", async () => {
+    const fixture = await createFixture();
+    const created = await fixture.app.inject({
+      method: "POST", url: "/api/eval/tasks", payload: { ...taskBody(), externalRef: "eval:sched:1" }
+    });
+    const taskId = created.json().task.id as string;
+    const schedule = fixture.schedules.create({
+      name: "每日邮件摘要",
+      prompt: "汇总过去 24 小时的重要邮件",
+      cron: "0 9 * * *",
+      timezone: "Asia/Shanghai"
+    });
+    const triggered = await fixture.app.inject({
+      method: "POST",
+      url: `/api/eval/tasks/${taskId}/operator`,
+      payload: { operationId: "schedule-run-1", action: "schedule.run", targetId: schedule.id }
+    });
+    expect(triggered.statusCode).toBe(200);
+    const run = triggered.json<{ run: { scheduleId: string; taskId: string } }>().run;
+    expect(run.scheduleId).toBe(schedule.id);
+    expect(fixture.service.store.getTask(run.taskId)).toBeTruthy();
+  });
 });
 
 async function createFixture(
@@ -339,13 +427,17 @@ async function createFixture(
   const approvals = new ApprovalManager(service, async () => ({ delivered: true }));
   const outbox = new OutboxService(service, approvals, join(root, "workspace"));
   const reconcile = new ReconcileService(service);
+  const memory = new MemoryService(service);
+  const methods = new MethodService(service);
+  const skills = new SkillPackageService(service, methods, { rootDir: join(root, "skills") });
+  const schedules = new ScheduleService({ service, executorAvailable: () => ({ canRun: true, issues: [] }) });
   const app = Fastify();
   registerEvalRoutes(app, {
     service,
     store,
     repoRoot: root,
     evalInputRoot,
-    operator: { approvals, outbox, reconcile },
+    operator: { approvals, outbox, reconcile, memory, skills, schedules },
     ...(operator.operatorEnabled === false ? { operatorEnabled: false } : { operatorEnabled: true }),
     settings: () => withModel ? settings : null,
     complete: complete ?? (async () => ({
@@ -354,7 +446,7 @@ async function createFixture(
     }))
   });
   await app.ready();
-  return { root, evalInputRoot, app, service, store };
+  return { root, evalInputRoot, app, service, store, memory, methods, skills, schedules };
 }
 
 function taskBody() {
