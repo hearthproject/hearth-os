@@ -19,7 +19,13 @@ import { SkillPackageService } from "./skills.ts";
 const stores: HearthStore[] = [];
 
 afterEach(() => {
-  for (const store of stores.splice(0)) store.close();
+  for (const store of stores.splice(0)) {
+    try {
+      store.close();
+    } catch {
+      // already closed by a restart test
+    }
+  }
 });
 
 describe("eval routes", () => {
@@ -406,14 +412,122 @@ describe("eval routes", () => {
     expect(run.scheduleId).toBe(schedule.id);
     expect(fixture.service.store.getTask(run.taskId)).toBeTruthy();
   });
+
+  it("rejects a concurrent duplicate operation while the first is running", async () => {
+    const fixture = await createFixture(true, undefined, undefined, judgeSettings, { effectDelayMs: 300 });
+    const created = await fixture.app.inject({
+      method: "POST", url: "/api/eval/tasks", payload: { ...taskBody(), externalRef: "eval:conc:1", allowExternalEffects: true }
+    });
+    const taskId = created.json().task.id as string;
+    const runId = "run-conc-1";
+    fixture.service.updateTask(taskId, { status: "running", currentRunId: runId }, runId);
+    fixture.service.updateTask(taskId, { status: "waiting_approval", currentRunId: runId }, runId);
+    const approval = fixture.service.createApproval({
+      id: "approval-conc-1",
+      taskId,
+      runId,
+      kind: "email.smtp-send",
+      summary: "并发评测",
+      target: {},
+      preview: {},
+      parameterHash: "hash-conc",
+      status: "pending",
+      expiresAt: new Date(Date.now() + 600_000).toISOString(),
+      decidedAt: null,
+      effectId: null,
+      createdAt: new Date().toISOString()
+    });
+    const payload = {
+      operationId: "op-conc-1",
+      action: "approval.decide",
+      targetId: approval.id,
+      decision: "approve",
+      parameterHash: "hash-conc"
+    };
+    const [first, second] = await Promise.all([
+      fixture.app.inject({ method: "POST", url: `/api/eval/tasks/${taskId}/operator`, payload }),
+      fixture.app.inject({ method: "POST", url: `/api/eval/tasks/${taskId}/operator`, payload })
+    ]);
+    expect([first.statusCode, second.statusCode].sort()).toEqual([200, 409]);
+    const rejected = first.statusCode === 409 ? first : second;
+    expect(rejected.json().error).toBe("OPERATION_IN_PROGRESS");
+    expect(fixture.store.listEffects(taskId)).toHaveLength(1);
+  });
+
+  it("keeps operator idempotency and trace across a store restart", async () => {
+    const root = mkdtempSync(join(tmpdir(), "hearth-eval-restart-"));
+    mkdirSync(join(root, "eval", "inputs"), { recursive: true });
+    writeFileSync(join(root, "eval", "inputs", "mail.txt"), "incoming mail", "utf8");
+    const evalInputRoot = join(root, "eval");
+    const databasePath = join(root, "eval.sqlite");
+
+    const first = await buildEvalApp({
+      root, evalInputRoot, store: new HearthStore(databasePath), withModel: true, settings: judgeSettings, options: {}
+    });
+    const created = await first.app.inject({
+      method: "POST", url: "/api/eval/tasks", payload: { ...taskBody(), externalRef: "eval:restart:1", allowExternalEffects: true }
+    });
+    const taskId = created.json().task.id as string;
+    const runId = "run-restart-1";
+    first.service.updateTask(taskId, { status: "running", currentRunId: runId }, runId);
+    first.service.updateTask(taskId, { status: "waiting_approval", currentRunId: runId }, runId);
+    const approval = first.service.createApproval({
+      id: "approval-restart-1",
+      taskId,
+      runId,
+      kind: "email.smtp-send",
+      summary: "重启评测",
+      target: {},
+      preview: {},
+      parameterHash: "hash-restart",
+      status: "pending",
+      expiresAt: new Date(Date.now() + 600_000).toISOString(),
+      decidedAt: null,
+      effectId: null,
+      createdAt: new Date().toISOString()
+    });
+    const payload = {
+      operationId: "op-restart-1",
+      action: "approval.decide",
+      targetId: approval.id,
+      decision: "approve",
+      parameterHash: "hash-restart"
+    };
+    expect((await first.app.inject({ method: "POST", url: `/api/eval/tasks/${taskId}/operator`, payload })).statusCode).toBe(200);
+    await first.app.close();
+    first.store.close();
+
+    const second = await buildEvalApp({
+      root, evalInputRoot, store: new HearthStore(databasePath), withModel: true, settings: judgeSettings, options: {}
+    });
+    try {
+      const replayed = await second.app.inject({ method: "POST", url: `/api/eval/tasks/${taskId}/operator`, payload });
+      expect(replayed.statusCode).toBe(200);
+      expect(replayed.json().replayed).toBe(true);
+      expect(second.store.listEffects(taskId)).toHaveLength(1);
+
+      const trace = await second.app.inject({ method: "GET", url: `/api/eval/tasks/${taskId}/trace` });
+      expect(trace.statusCode).toBe(200);
+      expect(trace.json().events.some((event: { type: string }) => event.type === "eval.operator")).toBe(true);
+    } finally {
+      await second.app.close();
+      second.store.close();
+    }
+  });
 });
+
+interface EvalFixtureOptions {
+  operatorEnabled?: boolean;
+  databasePath?: string;
+  effectDelayMs?: number;
+}
 
 async function createFixture(
   withModel = true,
   externalInputRoot?: string,
   complete?: typeof completeChat,
   settings = judgeSettings,
-  operator: { operatorEnabled?: boolean } = {}
+  options: EvalFixtureOptions = {}
 ) {
   const root = mkdtempSync(join(tmpdir(), "hearth-eval-routes-"));
   const evalInputRoot = externalInputRoot ?? join(root, "eval");
@@ -421,10 +535,26 @@ async function createFixture(
     mkdirSync(join(root, "eval", "inputs"), { recursive: true });
     writeFileSync(join(root, "eval", "inputs", "mail.txt"), "incoming mail", "utf8");
   }
-  const store = new HearthStore(":memory:");
+  const store = new HearthStore(options.databasePath ?? ":memory:");
   stores.push(store);
+  return buildEvalApp({ root, evalInputRoot, store, withModel, complete, settings, options });
+}
+
+async function buildEvalApp(input: {
+  root: string;
+  evalInputRoot: string;
+  store: HearthStore;
+  withModel: boolean;
+  complete?: typeof completeChat | undefined;
+  settings: ModelSettings;
+  options: EvalFixtureOptions;
+}) {
+  const { root, evalInputRoot, store, withModel, settings, options } = input;
   const service = new HearthService(store);
-  const approvals = new ApprovalManager(service, async () => ({ delivered: true }));
+  const approvals = new ApprovalManager(service, async () => {
+    if (options.effectDelayMs) await new Promise((resolve) => setTimeout(resolve, options.effectDelayMs));
+    return { delivered: true };
+  });
   const outbox = new OutboxService(service, approvals, join(root, "workspace"));
   const reconcile = new ReconcileService(service);
   const memory = new MemoryService(service);
@@ -438,9 +568,9 @@ async function createFixture(
     repoRoot: root,
     evalInputRoot,
     operator: { approvals, outbox, reconcile, memory, skills, schedules },
-    ...(operator.operatorEnabled === false ? { operatorEnabled: false } : { operatorEnabled: true }),
+    ...(options.operatorEnabled === false ? { operatorEnabled: false } : { operatorEnabled: true }),
     settings: () => withModel ? settings : null,
-    complete: complete ?? (async () => ({
+    complete: input.complete ?? (async () => ({
       content: '{"criteria":[{"id":"quality","passed":true,"confidence":0.91,"reason":"清晰","evidence":["已回复"]}],"overallConfidence":0.91}',
       usage: { inputTokens: 100, outputTokens: 20 }
     }))
