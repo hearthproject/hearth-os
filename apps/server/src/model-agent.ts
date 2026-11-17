@@ -312,13 +312,14 @@ async function streamAnthropicTurn(
 
   let content = "";
   let usage: CompleteResult["usage"] = null;
+  let rawUsage: Record<string, unknown> = {};
   let finishReason: string | null = null;
   const partial = new Map<number, { id: string; name: string; raw: string }>();
   await readSse(response, (event, payload) => {
     const type = typeof payload?.type === "string" ? payload.type : event;
     if (type === "message_start") {
-      const inputTokens = Number(payload?.message?.usage?.input_tokens ?? 0);
-      usage = { inputTokens: Number.isFinite(inputTokens) ? inputTokens : 0, outputTokens: 0 };
+      rawUsage = { ...rawUsage, ...payload?.message?.usage };
+      usage = readAnthropicUsage(rawUsage);
     } else if (type === "content_block_start" && payload?.content_block?.type === "tool_use") {
       partial.set(Number(payload.index ?? partial.size), {
         id: String(payload.content_block.id ?? `tool_${payload.index ?? partial.size}`),
@@ -338,8 +339,8 @@ async function streamAnthropicTurn(
         partial.set(index, current);
       }
     } else if (type === "message_delta") {
-      const outputTokens = Number(payload?.usage?.output_tokens ?? 0);
-      usage = { inputTokens: usage?.inputTokens ?? 0, outputTokens: Number.isFinite(outputTokens) ? outputTokens : 0 };
+      rawUsage = { ...rawUsage, ...payload?.usage };
+      usage = readAnthropicUsage(rawUsage);
       finishReason = payload?.delta?.stop_reason == null ? finishReason : String(payload.delta.stop_reason);
     } else if (type === "error") {
       throw new ModelClientError("MODEL_REQUEST_FAILED", String(payload?.error?.message ?? "模型服务返回错误"));

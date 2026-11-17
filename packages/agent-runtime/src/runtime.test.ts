@@ -14,6 +14,49 @@ describe("agent runtime", () => {
     for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   });
 
+  it.each([undefined, 128_000])("trims tool results before the next model call with window %s", async (contextWindowTokens) => {
+    let calls = 0;
+    const result = await runAgent({
+      model: async (messages) => {
+        calls++;
+        if (calls === 1) return turn("", [call("large", {})]);
+        const output = messages.find((message) => message.role === "tool");
+        expect(output?.content).toBe("x".repeat(8000) + "\n[工具输出较长，已截断]");
+        return { ...turn("done", []), usage: { inputTokens: 20, outputTokens: 5, cachedInputTokens: 10, cacheWriteInputTokens: 2, reasoningOutputTokens: 3 } };
+      },
+      tools: [{ definition: { name: "large", description: "large output", parameters: {} }, execute: async () => ({ content: "x".repeat(30_000) }) }],
+      goal: "test", systemPrompt: "system", workspaceRoot: ".", outDir: ".",
+      permissions: { tools: ["large"], readRoots: [], writeRoots: [], networkHosts: [] },
+      budget: { maxTurns: 5, maxToolCalls: 5, maxTokens: 100_000, maxDurationMs: 30_000 },
+      ...(contextWindowTokens ? { contextWindowTokens } : {})
+    });
+    expect(result.status).toBe("completed");
+    expect(result.usage).toMatchObject({ cachedInputTokens: 10, cacheWriteInputTokens: 2, reasoningOutputTokens: 3 });
+  });
+
+  it("charges summary usage and stops before another model call when it exhausts the budget", async () => {
+    let modelCalls = 0;
+    const checkpoints: AgentCheckpoint[] = [];
+    const result = await runAgent({
+      model: async () => { modelCalls++; return turn("done", []); },
+      tools: [], goal: "test", systemPrompt: "system", workspaceRoot: ".", outDir: ".",
+      permissions: { tools: [], readRoots: [], writeRoots: [], networkHosts: [] },
+      budget: { maxTurns: 5, maxToolCalls: 5, maxTokens: 100, maxDurationMs: 30_000 },
+      resume: { messages: [
+        { role: "system", content: "system" }, { role: "user", content: "goal" },
+        { role: "assistant", content: "old".repeat(5000), toolCalls: [] },
+        { role: "user", content: "continue" }
+      ], usage: zeroUsage(), turns: 0, toolCalls: 0 },
+      contextWindowTokens: 2000, contextReserveTokens: 200, recentContextTokens: 1,
+      summarizeContext: async () => ({ summary: "summary", usage: { inputTokens: 90, outputTokens: 10, cachedInputTokens: 40, reasoningOutputTokens: 2 } }),
+      onCheckpoint: (checkpoint) => { checkpoints.push(checkpoint); }
+    });
+    expect(modelCalls).toBe(0);
+    expect(result.status).toBe("budget_exceeded");
+    expect(result.usage).toEqual({ ...zeroUsage(), inputTokens: 90, outputTokens: 10, cachedInputTokens: 40, reasoningOutputTokens: 2 });
+    expect(checkpoints.at(-1)?.usage).toEqual(result.usage);
+  });
+
   it("completes when the model calls finish_task", async () => {
     const root = workspace(roots);
     const result = await runAgent({
@@ -334,12 +377,14 @@ describe("agent runtime", () => {
       resume: { messages, usage: zeroUsage(), turns: 0, toolCalls: 0 },
       contextWindowTokens: 100_000,
       recentContextTokens: 300,
-      summarizeContext: async (omitted) => { summaries.push(omitted.length); return "超限摘要"; },
+      summarizeContext: async (omitted) => { summaries.push(omitted.length); return { summary: "超限摘要", usage: { inputTokens: 40, outputTokens: 10, cachedInputTokens: 20 } }; },
       onCheckpoint: (checkpoint) => { checkpoints.push(checkpoint); },
       retryDelayMs: 0
     });
     expect(result.status).toBe("completed");
     expect(attempts).toBe(2);
+    expect(result.usage.cachedInputTokens).toBe(20);
+    expect(result.usage.inputTokens).toBeGreaterThanOrEqual(40);
     expect(summaries[0]).toBeGreaterThan(0);
     expect(checkpoints.some((checkpoint) => checkpoint.kind === "compaction" && checkpoint.summary === "超限摘要")).toBe(true);
   });

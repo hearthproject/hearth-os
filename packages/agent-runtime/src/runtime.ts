@@ -2,6 +2,7 @@ import type { RunUsage } from "@hearth/core";
 import { compactAgentMessages, compactAgentMessagesWithSummary } from "./compaction.ts";
 import type {
   AgentCheckpoint,
+  AgentUsage,
   AgentMessage,
   AgentRunResult,
   AgentRunStatus,
@@ -59,10 +60,21 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
           reserveTokens: force ? 0 : options.contextReserveTokens ?? Math.max(16_000, Math.floor(options.contextWindowTokens * 0.15)),
           ...(options.recentContextTokens !== undefined ? { recentTokens: options.recentContextTokens } : {}),
           signal
-        }, options.summarizeContext)
+        }, options.summarizeContext ? async (omitted, signal) => {
+          const result = await options.summarizeContext!(omitted, signal);
+          if (result && typeof result === "object") {
+            if (result.usage) {
+              addUsage(usage, result.usage);
+              emit({ type: "usage", usage: { ...usage } });
+            }
+            return result.summary;
+          }
+          return result;
+        } : undefined)
       : compactAgentMessages(messages);
-    if (!compacted.compacted) return false;
+    // Output trimming applies even when history summarization is unnecessary.
     messages.splice(0, messages.length, ...compacted.messages);
+    if (!compacted.compacted) return false;
     emit({ type: "compacted", before: compacted.before, after: compacted.after });
     if ("summary" in compacted && typeof compacted.summary === "string") summary = compacted.summary;
     await checkpoint("compaction");
@@ -129,6 +141,11 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       budgetReminderSent = true;
     }
     await compactContext(false);
+    if (totalTokens() >= options.budget.maxTokens) {
+      emit({ type: "budget.exceeded", budget: "tokens", limit: options.budget.maxTokens });
+      await checkpoint("budget");
+      return finish("budget_exceeded", summary ?? "Token 用量达到预算，已停止");
+    }
 
     turns += 1;
     emit({ type: "turn.started", turn: turns });
@@ -151,6 +168,11 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
           overflowRetried = true;
           emit({ type: "notice", message: "模型上下文超限，正在压缩历史后重试" });
           await compactContext(true);
+          if (totalTokens() >= options.budget.maxTokens) {
+            emit({ type: "budget.exceeded", budget: "tokens", limit: options.budget.maxTokens });
+            await checkpoint("budget");
+            return finish("budget_exceeded", summary ?? "Token 用量达到预算，已停止");
+          }
           continue;
         }
         if (isTransientModelError(error) && transientRetries < 2) {
@@ -165,8 +187,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     }
 
     if (turn.usage) {
-      usage.inputTokens += Math.max(0, turn.usage.inputTokens);
-      usage.outputTokens += Math.max(0, turn.usage.outputTokens);
+      addUsage(usage, turn.usage);
       emit({ type: "usage", usage: { ...usage } });
     }
     if (turn.content.trim()) emit({ type: "assistant.message", turn: turns, text: turn.content });
@@ -324,12 +345,12 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function addUsage(target: RunUsage, value: RunUsage): void {
-  target.inputTokens += Math.max(0, value.inputTokens);
-  target.cachedInputTokens += Math.max(0, value.cachedInputTokens);
-  target.cacheWriteInputTokens += Math.max(0, value.cacheWriteInputTokens);
-  target.outputTokens += Math.max(0, value.outputTokens);
-  target.reasoningOutputTokens += Math.max(0, value.reasoningOutputTokens);
+function addUsage(target: RunUsage, value: AgentUsage): void {
+  target.inputTokens += (Number.isFinite(value.inputTokens) ? Math.max(0, value.inputTokens ?? 0) : 0);
+  target.cachedInputTokens += (Number.isFinite(value.cachedInputTokens) ? Math.max(0, value.cachedInputTokens ?? 0) : 0);
+  target.cacheWriteInputTokens += (Number.isFinite(value.cacheWriteInputTokens) ? Math.max(0, value.cacheWriteInputTokens ?? 0) : 0);
+  target.outputTokens += (Number.isFinite(value.outputTokens) ? Math.max(0, value.outputTokens ?? 0) : 0);
+  target.reasoningOutputTokens += (Number.isFinite(value.reasoningOutputTokens) ? Math.max(0, value.reasoningOutputTokens ?? 0) : 0);
 }
 
 function toolSignature(call: AgentToolCall): string {

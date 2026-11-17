@@ -34,34 +34,35 @@ describe("native system prompt", () => {
     expect(prompt).toContain("顶层包含 facts 对象");
     expect(prompt).toContain("顶层 evidence 数组");
     expect(prompt).toContain("200 行");
-    expect(prompt).toContain("testsPassed 只能来自真实运行");
-    expect(prompt).toContain("禁止只交付设计或草案");
-    expect(prompt).toContain("输入没有现成仓库不是跳过执行的例外");
-    expect(prompt).toContain("testsExecuted=false");
-    expect(prompt).toContain("单一数字 status");
-    expect(prompt).toContain("3 到 5 个核心用例");
-    expect(prompt).toContain("不做变异测试");
-    expect(prompt).toContain("「财务复核」");
-    expect(prompt).toContain("「异常」");
-    expect(prompt).toContain("「补充材料」");
     expect(prompt).toContain("<noun>Count");
-    expect(prompt).toContain("负责人 + 动作 + 截止");
-    expect(prompt).toContain("回滚方案");
-    expect(prompt).toContain("可撤销路径");
-    expect(prompt).toContain("selectedUtc");
-    expect(prompt).toContain("has<X>");
-    expect(prompt).toContain("draft-778:recipient@example.com");
-    expect(prompt).toContain("负责人与动作之间不要插入顿号");
-    expect(prompt).toContain("主数组优先使用 items");
-    expect(prompt).toContain("默认使用 move");
-    expect(prompt).toContain("处置方案完成后的目标态");
-    expect(prompt).toContain("不要把 unconfirmed_saved 写进 finalState");
-    expect(prompt).toContain("saveAs（用户未指定");
-    expect(prompt).toContain("sales.cleaned.xlsx");
-    expect(prompt).toContain("finalState=\"saved\"");
-    expect(prompt).toContain("只有一个 primary 候选");
-    expect(prompt).toContain("顶层必须使用 cases 数组");
-    expect(prompt).toContain("milestoneCount 只统计工作里程碑");
+    expect(prompt).not.toContain("契约测试用 Node");
+    expect(prompt).not.toContain("财务复核");
+    expect(prompt).not.toContain("selectedUtc");
+  });
+
+  it.each([
+    ["代码修复与契约测试", "testsPassed 只能来自真实运行", "财务复核"],
+    ["财务报销对账", "「财务复核」", "契约测试用 Node"],
+    ["会议时间排期", "selectedUtc", "默认使用 move"],
+    ["桌面文件整理", "默认使用 move", "selectedUtc"],
+    ["会话中断恢复", "resumedFromCheckpoint", "财务复核"],
+    ["发布说明", "回滚方案", "saveAs（用户未指定"],
+    ["表格清洗", "saveAs（用户未指定", "回滚方案"],
+    ["GitHub PR 评审", "gh search prs", "财务复核"]
+  ])("selects instructions for %s", (goal, included, excluded) => {
+    const prompt = nativeSystemPrompt({ ...baseTask, goal }, ["result.json"]);
+    expect(prompt).toContain(included);
+    expect(prompt).not.toContain(excluded);
+  });
+
+  it("keeps plain document tasks free of JSON and unrelated contracts", () => {
+    const prompt = nativeSystemPrompt(baseTask, ["result.md"]);
+    expect(prompt).not.toContain("facts 对象");
+    expect(prompt).not.toContain("财务复核");
+    expect(prompt).not.toContain("契约测试用 Node");
+    expect(prompt).toContain("finish_task");
+    expect(prompt).toContain("任务授权的目录和域名");
+    expect(prompt.length).toBeLessThan(1600);
   });
 });
 
