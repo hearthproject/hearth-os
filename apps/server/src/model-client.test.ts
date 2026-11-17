@@ -1,6 +1,6 @@
 import { createServer, type Server } from "node:http";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { completeChat, listModels, streamChat } from "./model-client.ts";
+import { completeChat, listModels, streamChat, readUsage, readAnthropicUsage, readGeminiUsage } from "./model-client.ts";
 import { decideRoute } from "./chat.ts";
 import type { ModelSettings } from "./model-settings.ts";
 
@@ -267,5 +267,33 @@ describe("OpenAI-compatible model client", () => {
       { preferredExecutorId: "deepseek-harness" }
     );
     expect(route.action).toBe("task");
+  });
+});
+
+
+describe("normalized usage", () => {
+  it.each([
+    { prompt_tokens: 100, completion_tokens: 30, prompt_tokens_details: { cached_tokens: 60 }, completion_tokens_details: { reasoning_tokens: 20 } },
+    { input_tokens: 100, output_tokens: 30, input_tokens_details: { cached_tokens: 60 }, output_tokens_details: { reasoning_tokens: 20 } }
+  ])("preserves OpenAI totals without adding cache or reasoning twice", (raw) => {
+    expect(readUsage(raw)).toEqual({ inputTokens: 100, outputTokens: 30, cachedInputTokens: 60, reasoningOutputTokens: 20 });
+  });
+
+  it("includes Anthropic cache reads and writes in total input", () => {
+    expect(readAnthropicUsage({ input_tokens: 20, cache_read_input_tokens: 60, cache_creation_input_tokens: 10, output_tokens: 5 }))
+      .toEqual({ inputTokens: 90, cachedInputTokens: 60, cacheWriteInputTokens: 10, outputTokens: 5 });
+  });
+
+  it("includes Gemini thoughts in output and preserves the cache breakdown", () => {
+    expect(readGeminiUsage({ promptTokenCount: 100, toolUsePromptTokenCount: 4, candidatesTokenCount: 10, thoughtsTokenCount: 20, cachedContentTokenCount: 60 }))
+      .toEqual({ inputTokens: 104, outputTokens: 30, cachedInputTokens: 60, reasoningOutputTokens: 20 });
+  });
+
+  it("sanitizes malformed counts and tolerates absent usage", () => {
+    expect(readUsage({ prompt_tokens: Infinity, completion_tokens: -3, prompt_tokens_details: { cached_tokens: "invalid" } }))
+      .toEqual({ inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 });
+    expect(readUsage(null)).toBeNull();
+    expect(readAnthropicUsage(null)).toBeNull();
+    expect(readGeminiUsage(null)).toBeNull();
   });
 });

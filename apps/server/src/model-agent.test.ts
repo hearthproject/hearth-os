@@ -51,7 +51,7 @@ beforeAll(async () => {
     }
 
     if (url.pathname === "/anthropic/v1/messages") {
-      response.write(`event: message_start\ndata: ${JSON.stringify({ type: "message_start", message: { usage: { input_tokens: 7 } } })}\n\n`);
+      response.write(`event: message_start\ndata: ${JSON.stringify({ type: "message_start", message: { usage: { input_tokens: 7, cache_read_input_tokens: 11, cache_creation_input_tokens: 3 } } })}\n\n`);
       response.write(`event: content_block_start\ndata: ${JSON.stringify({ type: "content_block_start", index: 1, content_block: { type: "tool_use", id: "call_a", name: "read_file" } })}\n\n`);
       response.write(`event: content_block_delta\ndata: ${JSON.stringify({ type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: "{\"path\":\"c.txt\"}" } })}\n\n`);
       response.write(`event: content_block_stop\ndata: ${JSON.stringify({ type: "content_block_stop", index: 1 })}\n\n`);
@@ -114,7 +114,7 @@ describe("agent tool calling", () => {
   it("assembles Anthropic tool_use blocks", async () => {
     const result = await streamAgentTurn(settings("anthropic-messages"), messages, tools, () => undefined);
     expect(result.toolCalls).toEqual([{ id: "call_a", name: "read_file", arguments: { path: "c.txt" }, rawArguments: "{\"path\":\"c.txt\"}" }]);
-    expect(result.usage).toEqual({ inputTokens: 7, outputTokens: 4 });
+    expect(result.usage).toEqual({ inputTokens: 21, outputTokens: 4, cachedInputTokens: 11, cacheWriteInputTokens: 3 });
     const request = seen.find((item) => item.path === "/anthropic/v1/messages");
     expect(request?.body.tools[0].input_schema.properties.path.type).toBe("string");
     expect(request?.body.messages.some((item: any) => item.content?.some((block: any) => block.type === "tool_result"))).toBe(true);

@@ -1,4 +1,4 @@
-import type { ModelProtocol } from "@hearth/core";
+import type { ModelProtocol, RunUsage } from "@hearth/core";
 import type { ModelSettings } from "./model-settings.ts";
 
 export interface ChatMessage {
@@ -29,7 +29,7 @@ export interface CompleteOptions {
 
 export interface CompleteResult {
   content: string;
-  usage: { inputTokens: number; outputTokens: number } | null;
+  usage: (Pick<RunUsage, "inputTokens" | "outputTokens"> & Partial<RunUsage>) | null;
   diagnostics?: {
     requestId: string | null;
     finishReason: string | null;
@@ -368,6 +368,7 @@ async function streamAnthropic(
 
   let content = "";
   let usage: CompleteResult["usage"] = null;
+  let rawUsage: Record<string, unknown> = {};
   await readSse(response, (event, payload) => {
     const type = typeof payload?.type === "string" ? payload.type : event;
     if (type === "content_block_delta") {
@@ -382,11 +383,11 @@ async function streamAnthropic(
         onDelta(delta, "content");
       }
     } else if (type === "message_start") {
-      const inputTokens = Number(payload?.message?.usage?.input_tokens ?? 0);
-      usage = { inputTokens: Number.isFinite(inputTokens) ? inputTokens : 0, outputTokens: 0 };
+      rawUsage = { ...rawUsage, ...payload?.message?.usage };
+      usage = readAnthropicUsage(rawUsage);
     } else if (type === "message_delta") {
-      const outputTokens = Number(payload?.usage?.output_tokens ?? 0);
-      usage = { inputTokens: usage?.inputTokens ?? 0, outputTokens: Number.isFinite(outputTokens) ? outputTokens : 0 };
+      rawUsage = { ...rawUsage, ...payload?.usage };
+      usage = readAnthropicUsage(rawUsage);
     } else if (type === "error") {
       throw new ModelClientError("MODEL_REQUEST_FAILED", String(payload?.error?.message ?? "模型服务返回错误"));
     }
@@ -692,26 +693,43 @@ export function apiError(status: number, payload: Record<string, any> | null): M
   return new ModelClientError("MODEL_REQUEST_FAILED", message, status);
 }
 
+// input/output are totals; cache and reasoning fields are breakdowns, not additions.
+function tokenCount(value: unknown): number {
+  const count = Number(value ?? 0);
+  return Number.isFinite(count) ? Math.max(0, count) : 0;
+}
+
 export function readUsage(usage: any): CompleteResult["usage"] {
   if (!usage || typeof usage !== "object") return null;
-  const inputTokens = Number(usage.prompt_tokens ?? usage.input_tokens ?? 0);
-  const outputTokens = Number(usage.completion_tokens ?? usage.output_tokens ?? 0);
-  if (!Number.isFinite(inputTokens) && !Number.isFinite(outputTokens)) return null;
-  return { inputTokens: inputTokens || 0, outputTokens: outputTokens || 0 };
+  const cached = usage.prompt_tokens_details?.cached_tokens ?? usage.input_tokens_details?.cached_tokens;
+  const reasoning = usage.completion_tokens_details?.reasoning_tokens ?? usage.output_tokens_details?.reasoning_tokens;
+  return {
+    inputTokens: tokenCount(usage.prompt_tokens ?? usage.input_tokens),
+    outputTokens: tokenCount(usage.completion_tokens ?? usage.output_tokens),
+    ...(cached != null ? { cachedInputTokens: tokenCount(cached) } : {}),
+    ...(reasoning != null ? { reasoningOutputTokens: tokenCount(reasoning) } : {})
+  };
 }
 
 export function readAnthropicUsage(usage: any): CompleteResult["usage"] {
   if (!usage || typeof usage !== "object") return null;
-  const inputTokens = Number(usage.input_tokens ?? 0);
-  const outputTokens = Number(usage.output_tokens ?? 0);
-  if (!Number.isFinite(inputTokens) && !Number.isFinite(outputTokens)) return null;
-  return { inputTokens: inputTokens || 0, outputTokens: outputTokens || 0 };
+  const cached = tokenCount(usage.cache_read_input_tokens);
+  const written = tokenCount(usage.cache_creation_input_tokens);
+  return {
+    inputTokens: tokenCount(usage.input_tokens) + cached + written,
+    outputTokens: tokenCount(usage.output_tokens),
+    ...(usage.cache_read_input_tokens != null ? { cachedInputTokens: cached } : {}),
+    ...(usage.cache_creation_input_tokens != null ? { cacheWriteInputTokens: written } : {})
+  };
 }
 
 export function readGeminiUsage(usage: any): CompleteResult["usage"] {
   if (!usage || typeof usage !== "object") return null;
-  const inputTokens = Number(usage.promptTokenCount ?? 0);
-  const outputTokens = Number(usage.candidatesTokenCount ?? 0);
-  if (!Number.isFinite(inputTokens) && !Number.isFinite(outputTokens)) return null;
-  return { inputTokens: inputTokens || 0, outputTokens: outputTokens || 0 };
+  const reasoning = tokenCount(usage.thoughtsTokenCount);
+  return {
+    inputTokens: tokenCount(usage.promptTokenCount) + tokenCount(usage.toolUsePromptTokenCount),
+    outputTokens: tokenCount(usage.candidatesTokenCount) + reasoning,
+    ...(usage.cachedContentTokenCount != null ? { cachedInputTokens: tokenCount(usage.cachedContentTokenCount) } : {}),
+    ...(usage.thoughtsTokenCount != null ? { reasoningOutputTokens: reasoning } : {})
+  };
 }

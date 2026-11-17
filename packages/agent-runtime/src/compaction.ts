@@ -102,10 +102,11 @@ export function compactAgentMessages(messages: AgentMessage[], options: CompactO
 
 function trimToolOutputs(messages: AgentMessage[], maxToolChars: number): AgentMessage[] {
   return messages.map((message) => {
-    if (message.role === "tool" && message.content.length > maxToolChars) {
+    const suffix = "\n[工具输出较长，已截断]";
+    if (message.role === "tool" && message.content.length > maxToolChars && !(message.content.length === maxToolChars + suffix.length && message.content.endsWith(suffix))) {
       return {
         ...message,
-        content: `${message.content.slice(0, maxToolChars)}\n[工具输出较长，已截断]`
+        content: `${message.content.slice(0, maxToolChars)}${suffix}`
       };
     }
     return message;

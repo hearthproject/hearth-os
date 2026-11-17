@@ -29,10 +29,14 @@ export type AgentMessage =
   | { role: "assistant"; content: string; toolCalls: AgentToolCall[] }
   | { role: "tool"; toolCallId: string; name: string; content: string; isError?: boolean };
 
+export type AgentUsage = Pick<RunUsage, "inputTokens" | "outputTokens"> & Partial<RunUsage>;
+
+export type ContextSummary = string | null | { summary: string | null; usage: AgentUsage | null };
+
 export interface AgentModelTurn {
   content: string;
   toolCalls: AgentToolCall[];
-  usage: Pick<RunUsage, "inputTokens" | "outputTokens"> | null;
+  usage: AgentUsage | null;
   finishReason: string | null;
 }
 
@@ -116,7 +120,7 @@ export interface AgentRuntimeOptions {
   contextWindowTokens?: number;
   contextReserveTokens?: number;
   recentContextTokens?: number;
-  summarizeContext?: (messages: AgentMessage[], signal: AbortSignal) => Promise<string | null>;
+  summarizeContext?: (messages: AgentMessage[], signal: AbortSignal) => Promise<ContextSummary>;
   requireFinishTool?: boolean;
   retryDelayMs?: number;
 }
