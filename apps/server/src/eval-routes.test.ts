@@ -8,6 +8,9 @@ import type { completeChat } from "./model-client.ts";
 import { registerEvalRoutes } from "./eval-routes.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import { HearthService } from "./service.ts";
+import { ApprovalManager } from "./approvals.ts";
+import { OutboxService } from "./outbox.ts";
+import { ReconcileService } from "./reconcile.ts";
 
 const stores: HearthStore[] = [];
 
@@ -207,9 +210,123 @@ describe("eval routes", () => {
     expect(oversized.statusCode).toBe(400);
     expect(oversized.json().error).toBe("INVALID_TRACE_QUERY");
   });
+
+  it("runs operator actions idempotently and records the effect on the eval task", async () => {
+    const fixture = await createFixture();
+    const created = await fixture.app.inject({
+      method: "POST",
+      url: "/api/eval/tasks",
+      payload: { ...taskBody(), externalRef: "eval:ops:1", allowExternalEffects: true }
+    });
+    expect(created.statusCode).toBe(201);
+    const task = created.json<{ task: { id: string; taskKind: string; permissions: { approvalMode?: string } } }>().task;
+    expect(task.taskKind).toBe("delivery");
+    const runId = "run-op-1";
+    fixture.service.updateTask(task.id, { status: "running", currentRunId: runId }, runId);
+    fixture.service.updateTask(task.id, { status: "waiting_approval", currentRunId: runId }, runId);
+    const approval = fixture.service.createApproval({
+      id: "approval-op-1",
+      taskId: task.id,
+      runId,
+      kind: "email.smtp-send",
+      summary: "发送评测邮件",
+      target: { to: ["reviewer@example.test"] },
+      preview: {},
+      parameterHash: "hash-1",
+      status: "pending",
+      expiresAt: new Date(Date.now() + 600_000).toISOString(),
+      decidedAt: null,
+      effectId: null,
+      createdAt: new Date().toISOString()
+    });
+
+    const decide = await fixture.app.inject({
+      method: "POST",
+      url: `/api/eval/tasks/${task.id}/operator`,
+      payload: { operationId: "op-decide-1", action: "approval.decide", targetId: approval.id, decision: "approve", parameterHash: "hash-1" }
+    });
+    expect(decide.statusCode).toBe(200);
+    const decided = decide.json<{ replayed: boolean; effect: { id: string; status: string; taskId: string } }>();
+    expect(decided.replayed).toBe(false);
+    expect(decided.effect.taskId).toBe(task.id);
+    expect(decided.effect.status).toBe("succeeded");
+
+    const replay = await fixture.app.inject({
+      method: "POST",
+      url: `/api/eval/tasks/${task.id}/operator`,
+      payload: { operationId: "op-decide-1", action: "approval.decide", targetId: approval.id, decision: "approve", parameterHash: "hash-1" }
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().replayed).toBe(true);
+    expect(fixture.store.listEffects(task.id)).toHaveLength(1);
+
+    const conflict = await fixture.app.inject({
+      method: "POST",
+      url: `/api/eval/tasks/${task.id}/operator`,
+      payload: { operationId: "op-decide-1", action: "approval.decide", targetId: "other", decision: "approve", parameterHash: "hash-1" }
+    });
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.json().error).toBe("OPERATION_ID_CONFLICT");
+
+    const asserted = await fixture.app.inject({
+      method: "POST",
+      url: `/api/eval/tasks/${task.id}/operator`,
+      payload: { operationId: "op-assert-1", action: "effect.assert", expectedStatus: "succeeded" }
+    });
+    expect(asserted.statusCode).toBe(200);
+    expect(asserted.json().satisfied).toBe(true);
+
+    const uncertain = await fixture.app.inject({
+      method: "POST",
+      url: `/api/eval/tasks/${task.id}/operator`,
+      payload: { operationId: "op-uncertain-1", action: "reconcile.mark_uncertain", targetId: decided.effect.id, note: "回执丢失" }
+    });
+    expect(uncertain.statusCode).toBe(200);
+    const item = uncertain.json<{ reconcileItem: { id: string; status: string } }>().reconcileItem;
+    expect(item.status).toBe("open");
+
+    const resolved = await fixture.app.inject({
+      method: "POST",
+      url: `/api/eval/tasks/${task.id}/operator`,
+      payload: { operationId: "op-resolve-1", action: "reconcile.resolve", targetId: item.id, resolution: "committed", note: "上游已确认" }
+    });
+    expect(resolved.statusCode).toBe(200);
+    expect(resolved.json().reconcileItem.status).toBe("resolved_committed");
+    expect(fixture.store.getEffect(decided.effect.id)?.status).toBe("reconciled_committed");
+  });
+
+  it("refuses operator access when disabled or when the task is not an eval task", async () => {
+    const disabled = await createFixture(true, undefined, undefined, judgeSettings, { operatorEnabled: false });
+    const created = await disabled.app.inject({
+      method: "POST", url: "/api/eval/tasks", payload: { ...taskBody(), externalRef: "eval:ops:2" }
+    });
+    const disabledResponse = await disabled.app.inject({
+      method: "POST",
+      url: `/api/eval/tasks/${created.json().task.id}/operator`,
+      payload: { operationId: "op-1", action: "effect.assert" }
+    });
+    expect(disabledResponse.statusCode).toBe(403);
+    expect(disabledResponse.json().error).toBe("EVAL_OPERATOR_DISABLED");
+
+    const fixture = await createFixture();
+    const plain = fixture.service.createTask({ title: "普通任务", goal: "不经过评测入口" });
+    const rejected = await fixture.app.inject({
+      method: "POST",
+      url: `/api/eval/tasks/${plain.id}/operator`,
+      payload: { operationId: "op-2", action: "effect.assert" }
+    });
+    expect(rejected.statusCode).toBe(403);
+    expect(rejected.json().error).toBe("NOT_EVAL_TASK");
+  });
 });
 
-async function createFixture(withModel = true, externalInputRoot?: string, complete?: typeof completeChat, settings = judgeSettings) {
+async function createFixture(
+  withModel = true,
+  externalInputRoot?: string,
+  complete?: typeof completeChat,
+  settings = judgeSettings,
+  operator: { operatorEnabled?: boolean } = {}
+) {
   const root = mkdtempSync(join(tmpdir(), "hearth-eval-routes-"));
   const evalInputRoot = externalInputRoot ?? join(root, "eval");
   if (!externalInputRoot) {
@@ -219,12 +336,17 @@ async function createFixture(withModel = true, externalInputRoot?: string, compl
   const store = new HearthStore(":memory:");
   stores.push(store);
   const service = new HearthService(store);
+  const approvals = new ApprovalManager(service, async () => ({ delivered: true }));
+  const outbox = new OutboxService(service, approvals, join(root, "workspace"));
+  const reconcile = new ReconcileService(service);
   const app = Fastify();
   registerEvalRoutes(app, {
     service,
     store,
     repoRoot: root,
     evalInputRoot,
+    operator: { approvals, outbox, reconcile },
+    ...(operator.operatorEnabled === false ? { operatorEnabled: false } : { operatorEnabled: true }),
     settings: () => withModel ? settings : null,
     complete: complete ?? (async () => ({
       content: '{"criteria":[{"id":"quality","passed":true,"confidence":0.91,"reason":"清晰","evidence":["已回复"]}],"overallConfidence":0.91}',

@@ -156,7 +156,8 @@ export class OutboxService {
         })
       : null;
 
-    const task = this.service.createTask({
+    const linkedTask = draft.taskId ? this.service.store.getTask(draft.taskId) : null;
+    const task = linkedTask ?? this.service.createTask({
       title: smtpAccount ? `发送邮件：${draft.subject}` : `本地发件箱：${draft.subject}`,
       goal: smtpAccount
         ? `审批草稿“${draft.subject}”，批准后通过 ${smtpAccount.smtp.host} 真实发送给收件人。`

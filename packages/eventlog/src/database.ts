@@ -3478,6 +3478,7 @@ export class HearthStore {
     switch (event.type) {
       case "task.created": return upsertTask(this.db, event.payload as TaskRecord);
       case "task.updated": return updateTask(this.db, event.taskId, event.payload as Record<string, unknown>);
+      case "eval.operator": return;
       case "goal.created":
       case "goal.updated": return upsertGoal(this.db, event.payload as GoalContract);
       case "goal.completion.recorded": return insertGoalCompletionReport(this.db, event.payload as GoalCompletionReport);

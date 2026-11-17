@@ -2,9 +2,12 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { defaultTaskPermissions } from "@hearth/agent-runtime";
-import { EXECUTOR_IDS, type TaskRecord } from "@hearth/core";
+import { APPROVAL_MODES, EXECUTOR_IDS, TASK_KINDS, type EffectRecord, type TaskRecord } from "@hearth/core";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { ApprovalError, type ApprovalManager } from "./approvals.ts";
+import { OutboxError, type OutboxService } from "./outbox.ts";
+import { ReconcileError, type ReconcileService } from "./reconcile.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import { chatModelConfigured } from "./model-settings.ts";
 import { completeChat, type ChatMessage, type CompleteOptions } from "./model-client.ts";
@@ -26,6 +29,9 @@ const evalTaskSchema = z.object({
   expectedOutputs: z.array(z.string().trim().min(1).max(500)).min(1).max(20),
   executorId: z.enum(EXECUTOR_IDS).optional(),
   runMode: z.enum(["offline", "live"]),
+  taskKind: z.enum(TASK_KINDS).optional(),
+  approvalMode: z.enum(APPROVAL_MODES).optional(),
+  allowExternalEffects: z.boolean().optional(),
   networkHosts: z.array(z.string().trim().min(1).max(255)).max(30).optional(),
   outputDir: z.string().trim().min(1).max(1_000),
   timeoutMs: z.number().int().min(1_000).max(3_600_000).optional()
@@ -53,6 +59,47 @@ const traceQuerySchema = z.object({
 }).strict();
 
 const TRACE_DEFAULT_LIMIT = 500;
+const inflightOperations = new Set<string>();
+
+const operatorSchema = z.object({
+  operationId: z.string().trim().min(1).max(200),
+  action: z.enum([
+    "approval.decide",
+    "outbox.submit",
+    "outbox.retry",
+    "effect.assert",
+    "reconcile.mark_uncertain",
+    "reconcile.check",
+    "reconcile.resolve",
+    "checkpoint.restore"
+  ]),
+  targetId: z.string().trim().min(1).max(200).optional(),
+  decision: z.enum(["approve", "reject"]).optional(),
+  parameterHash: z.string().trim().min(1).max(200).optional(),
+  resolution: z.enum(["committed", "absent", "abandoned"]).optional(),
+  note: z.string().max(2_000).optional(),
+  expectedStatus: z.string().trim().min(1).max(100).optional()
+}).strict();
+
+interface EvalOperatorDeps {
+  approvals: ApprovalManager;
+  outbox: OutboxService;
+  reconcile: ReconcileService;
+  scheduler?: { retry(taskId: string, input?: string): TaskRecord };
+  schedules?: { runNow(scheduleId: string): unknown };
+}
+
+class EvalOperatorError extends Error {
+  readonly code: string;
+  readonly statusCode: number;
+
+  constructor(code: string, message: string, statusCode: number) {
+    super(message);
+    this.name = "EvalOperatorError";
+    this.code = code;
+    this.statusCode = statusCode;
+  }
+}
 
 interface EvalRouteOptions {
   service: HearthService;
@@ -61,6 +108,8 @@ interface EvalRouteOptions {
   repoRoot: string;
   evalInputRoot?: string;
   complete?: typeof completeChat;
+  operator?: EvalOperatorDeps;
+  operatorEnabled?: boolean;
 }
 
 interface JudgeRequest {
@@ -84,6 +133,7 @@ export function registerEvalRoutes(app: FastifyInstance, options: EvalRouteOptio
   const complete = options.complete ?? completeChat;
   const evalInputRoot = resolve(options.evalInputRoot ?? process.env.HEARTH_EVAL_INPUT_ROOT ?? resolve(repoRoot, "eval"));
   const outputRoot = resolve(repoRoot, ".hearth", "eval-artifacts");
+  const operatorEnabled = options.operatorEnabled ?? process.env.HEARTH_EVAL_MODE === "1";
 
   app.post("/api/eval/tasks", async (request, reply) => {
     const parsed = evalTaskSchema.safeParse(request.body ?? {});
@@ -142,18 +192,18 @@ export function registerEvalRoutes(app: FastifyInstance, options: EvalRouteOptio
         externalRef: body.externalRef,
         requestHash,
         title: body.title,
-        goal: `${body.goal}\n\n评测运行约束：${body.runMode === "offline" ? "不得访问网络。" : "只允许访问声明的网络主机。"}只将产物写入 ${body.outputDir}，不得产生外部副作用。`,
+        goal: `${body.goal}\n\n评测运行约束：${body.runMode === "offline" ? "不得访问网络。" : "只允许访问声明的网络主机。"}只将产物写入 ${body.outputDir}，${body.allowExternalEffects ? "允许产生经审批的外部效果，且仅限评测专用账号与目标。" : "不得产生外部副作用。"}`,
         inputs: body.inputs.map((input) => ({ kind: input.kind, label: input.label, value: input.value, ...(input.sha256 ? { sha256: input.sha256 } : {}) })),
         networkHosts,
         ...(body.executorId ? { executorId: body.executorId } : {}),
-        taskKind: "delivery",
+        taskKind: body.taskKind ?? "delivery",
         expectedOutputs: body.expectedOutputs,
         outputDir: body.outputDir,
         permissions: {
           ...permissions,
           readRoots: [evalInputRoot],
           writeRoots: [outputDir],
-          approvalMode: "full"
+          approvalMode: body.approvalMode ?? "full"
         }
       });
     } catch (error) {
@@ -167,6 +217,58 @@ export function registerEvalRoutes(app: FastifyInstance, options: EvalRouteOptio
       throw error;
     }
     return reply.code(201).send({ task, created: true });
+  });
+
+  app.post<{ Params: { id: string } }>("/api/eval/tasks/:id/operator", async (request, reply) => {
+    if (!operatorEnabled) {
+      return reply.code(403).send({ error: "EVAL_OPERATOR_DISABLED", message: "未开启评测操作模式" });
+    }
+    const deps = options.operator;
+    if (!deps) {
+      return reply.code(503).send({ error: "EVAL_OPERATOR_UNAVAILABLE", message: "评测操作服务未装配" });
+    }
+    const parsed = operatorSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: "INVALID_EVAL_OPERATION",
+        message: "评测操作参数不正确",
+        issues: parsed.error.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message }))
+      });
+    }
+    const task = store.getTask(request.params.id);
+    if (!task) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "评测任务不存在" });
+    if (!isEvalTask(task)) {
+      return reply.code(403).send({ error: "NOT_EVAL_TASK", message: "只能对评测任务执行操作" });
+    }
+    const body = parsed.data;
+    const requestHash = sha256(JSON.stringify({ ...body, operationId: undefined }));
+    const prior = findOperatorEvent(store, task.id, body.operationId);
+    if (prior) {
+      if (prior.requestHash !== requestHash) {
+        return reply.code(409).send({ error: "OPERATION_ID_CONFLICT", message: "operationId 已用于不同参数的请求" });
+      }
+      return reply.code(200).send({ ...prior.result, replayed: true });
+    }
+    const key = `${task.id}:${body.operationId}`;
+    if (inflightOperations.has(key)) {
+      return reply.code(409).send({ error: "OPERATION_IN_PROGRESS", message: "相同 operationId 正在执行" });
+    }
+    inflightOperations.add(key);
+    try {
+      const result = await executeOperator(deps, service, store, task, body);
+      store.appendEvent({
+        type: "eval.operator",
+        taskId: task.id,
+        runId: typeof result.runId === "string" ? result.runId : task.currentRunId ?? null,
+        payload: { operationId: body.operationId, action: body.action, requestHash, result, statusCode: 200 }
+      });
+      return reply.code(200).send({ ...result, replayed: false });
+    } catch (error) {
+      const mapped = mapOperatorError(error);
+      return reply.code(mapped.statusCode).send({ error: mapped.code, message: mapped.message, replayed: false });
+    } finally {
+      inflightOperations.delete(key);
+    }
   });
 
   app.get<{ Params: { id: string } }>("/api/eval/tasks/:id/trace", async (request, reply) => {
@@ -273,6 +375,125 @@ export function registerEvalRoutes(app: FastifyInstance, options: EvalRouteOptio
   });
 }
 
+async function executeOperator(
+  deps: EvalOperatorDeps,
+  service: HearthService,
+  store: HearthStore,
+  task: TaskRecord,
+  body: z.infer<typeof operatorSchema>
+): Promise<Record<string, unknown>> {
+  switch (body.action) {
+    case "approval.decide": {
+      if (!body.decision || !body.parameterHash) {
+        throw new EvalOperatorError("INVALID_EVAL_OPERATION", "approval.decide 需要 decision 与 parameterHash", 400);
+      }
+      const approvalId = requireTarget(body);
+      const approval = store.getApproval(approvalId);
+      if (!approval) throw new EvalOperatorError("APPROVAL_NOT_FOUND", "审批不存在", 404);
+      if (approval.taskId !== task.id) {
+        throw new EvalOperatorError("APPROVAL_TASK_MISMATCH", "审批不属于该评测任务", 409);
+      }
+      const result = await deps.approvals.decide(approvalId, body.decision, body.parameterHash);
+      deps.outbox.reconcileApproval(result.approval.id);
+      return { approval: result.approval, task: result.task, effect: result.effect ?? null };
+    }
+    case "outbox.submit":
+    case "outbox.retry": {
+      const draftId = requireTarget(body);
+      const draft = service.requireOutboxDraft(draftId);
+      if (draft.taskId && draft.taskId !== task.id) {
+        throw new EvalOperatorError("OUTBOX_TASK_MISMATCH", "草稿已属于其他任务", 409);
+      }
+      if (draft.taskId !== task.id) service.updateOutboxDraft(draftId, { taskId: task.id });
+      const result = await deps.outbox.submit(draftId);
+      return { ...result, effects: store.listEffects(task.id) };
+    }
+    case "effect.assert": {
+      const effects = store.listEffects(task.id)
+        .filter((effect) => !body.targetId || effect.id === body.targetId);
+      const satisfied = effects.length > 0
+        && (!body.expectedStatus || effects.some((effect) => effect.status === body.expectedStatus));
+      return { satisfied, expectedStatus: body.expectedStatus ?? null, effects };
+    }
+    case "reconcile.mark_uncertain": {
+      const effectId = requireTarget(body);
+      const effect = store.getEffect(effectId);
+      if (!effect) throw new EvalOperatorError("EFFECT_NOT_FOUND", "效果不存在", 404);
+      if (effect.taskId !== task.id) {
+        throw new EvalOperatorError("EFFECT_TASK_MISMATCH", "效果不属于该评测任务", 409);
+      }
+      const reason = body.note ?? "评测注入的不确定状态";
+      service.updateEffect(effect.id, { status: "uncertain", suspendReason: reason });
+      const uncertain: EffectRecord = { ...effect, status: "uncertain", suspendReason: reason };
+      const item = deps.reconcile.enqueue(uncertain, reason);
+      return { effect: store.getEffect(effect.id), reconcileItem: item };
+    }
+    case "reconcile.check":
+      return { reconcileItem: await deps.reconcile.check(requireTarget(body)) };
+    case "reconcile.resolve": {
+      if (!body.resolution) {
+        throw new EvalOperatorError("INVALID_EVAL_OPERATION", "reconcile.resolve 需要 resolution", 400);
+      }
+      const item = deps.reconcile.resolveManually(requireTarget(body), body.resolution, body.note ?? "");
+      return { reconcileItem: item };
+    }
+    case "checkpoint.restore": {
+      if (!deps.scheduler) {
+        throw new EvalOperatorError("EVAL_OPERATOR_UNAVAILABLE", "调度器未装配，无法恢复检查点", 503);
+      }
+      return { task: deps.scheduler.retry(task.id) };
+    }
+  }
+}
+
+function requireTarget(body: z.infer<typeof operatorSchema>): string {
+  if (!body.targetId) {
+    throw new EvalOperatorError("INVALID_EVAL_OPERATION", `${body.action} 需要 targetId`, 400);
+  }
+  return body.targetId;
+}
+
+function mapOperatorError(error: unknown): { code: string; message: string; statusCode: number } {
+  if (error instanceof EvalOperatorError) {
+    return { code: error.code, message: error.message, statusCode: error.statusCode };
+  }
+  if (error instanceof ApprovalError) {
+    const statusCode = error.code === "APPROVAL_NOT_FOUND" ? 404 : error.code === "APPROVAL_EXPIRED" ? 410 : 409;
+    return { code: error.code, message: error.message, statusCode };
+  }
+  if (error instanceof OutboxError) {
+    return { code: error.code, message: error.message, statusCode: error.statusCode };
+  }
+  if (error instanceof ReconcileError) {
+    const statusCode = error.code === "RECONCILE_NOT_FOUND" ? 404 : 409;
+    return { code: error.code, message: error.message, statusCode };
+  }
+  return { code: "EVAL_OPERATION_FAILED", message: errorMessage(error), statusCode: 500 };
+}
+
+function findOperatorEvent(
+  store: HearthStore,
+  taskId: string,
+  operationId: string
+): { requestHash: string; result: Record<string, unknown> } | null {
+  const events = store.listEvents(0, taskId);
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]!;
+    if (event.type !== "eval.operator") continue;
+    const payload = event.payload as { operationId?: unknown; requestHash?: unknown; result?: unknown } | null;
+    if (payload?.operationId !== operationId) continue;
+    return {
+      requestHash: String(payload.requestHash ?? ""),
+      result: (payload.result as Record<string, unknown> | null) ?? {}
+    };
+  }
+  return null;
+}
+
+function isEvalTask(task: TaskRecord): boolean {
+  return Boolean(task.externalRef?.startsWith("eval:")) || Boolean(task.requestHash);
+}
+
 function normalizeEvalInput(evalInputRoot: string, value: string): string {
   const candidate = isAbsolute(value) ? resolve(value) : resolve(evalInputRoot, value);
   if (!isPathInside(evalInputRoot, candidate)) throw new Error(`输入必须位于 HEARTH_EVAL_INPUT_ROOT：${value}`);
@@ -306,6 +527,9 @@ function hashEvalTask(body: z.infer<typeof evalTaskSchema>): string {
     expectedOutputs: body.expectedOutputs,
     executorId: body.executorId ?? null,
     runMode: body.runMode,
+    taskKind: body.taskKind ?? "delivery",
+    approvalMode: body.approvalMode ?? "full",
+    allowExternalEffects: body.allowExternalEffects ?? false,
     networkHosts: [...body.networkHosts ?? []].sort(),
     outputDir: body.outputDir,
     timeoutMs: body.timeoutMs ?? null
