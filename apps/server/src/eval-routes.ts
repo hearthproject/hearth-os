@@ -47,6 +47,13 @@ const judgeSchema = z.object({
   locale: z.string().trim().min(1).max(40).optional()
 }).strict();
 
+const traceQuerySchema = z.object({
+  afterSeq: z.coerce.number().int().min(0).max(9_000_000_000).optional(),
+  limit: z.coerce.number().int().min(1).max(500).optional()
+}).strict();
+
+const TRACE_DEFAULT_LIMIT = 500;
+
 interface EvalRouteOptions {
   service: HearthService;
   store: HearthStore;
@@ -160,6 +167,47 @@ export function registerEvalRoutes(app: FastifyInstance, options: EvalRouteOptio
       throw error;
     }
     return reply.code(201).send({ task, created: true });
+  });
+
+  app.get<{ Params: { id: string } }>("/api/eval/tasks/:id/trace", async (request, reply) => {
+    const parsed = traceQuerySchema.safeParse(request.query ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: "INVALID_TRACE_QUERY",
+        message: "trace 查询参数不正确",
+        issues: parsed.error.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message }))
+      });
+    }
+    const task = store.getTask(request.params.id);
+    if (!task) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "评测任务不存在" });
+    const afterSeq = parsed.data.afterSeq ?? 0;
+    const limit = parsed.data.limit ?? TRACE_DEFAULT_LIMIT;
+    const pending = store.listEvents(afterSeq, task.id);
+    const window = pending.slice(0, limit);
+    const last = window.at(-1);
+    const byType: Record<string, number> = {};
+    for (const event of pending) byType[event.type] = (byType[event.type] ?? 0) + 1;
+    return {
+      taskId: task.id,
+      externalRef: task.externalRef ?? null,
+      status: task.status,
+      afterSeq,
+      limit,
+      nextSeq: last?.seq ?? afterSeq,
+      hasMore: pending.length > window.length,
+      remaining: pending.length - window.length,
+      total: store.countEvents(task.id),
+      counts: { window: window.length, byType },
+      events: window.map((event) => ({
+        seq: event.seq,
+        id: event.id,
+        type: event.type,
+        taskId: event.taskId,
+        runId: event.runId,
+        payload: event.payload,
+        createdAt: event.createdAt
+      }))
+    };
   });
 
   app.post("/api/eval/judge", async (request, reply) => {

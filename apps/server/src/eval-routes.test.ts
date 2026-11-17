@@ -160,6 +160,53 @@ describe("eval routes", () => {
       usage: { inputTokens: 2438, outputTokens: 8000 }
     });
   });
+
+  it("serves a paged trace with monotonic sequence numbers", async () => {
+    const fixture = await createFixture();
+    const created = await fixture.app.inject({ method: "POST", url: "/api/eval/tasks", payload: taskBody() });
+    const task = created.json<{ task: { id: string } }>().task;
+    for (let index = 0; index < 3; index += 1) {
+      fixture.store.appendEvent({
+        type: "task.updated",
+        taskId: task.id,
+        runId: "run-1",
+        payload: {}
+      });
+    }
+
+    const first = await fixture.app.inject({ method: "GET", url: `/api/eval/tasks/${task.id}/trace?limit=2` });
+    expect(first.statusCode).toBe(200);
+    const page = first.json<{
+      taskId: string; nextSeq: number; hasMore: boolean; total: number;
+      counts: { window: number; byType: Record<string, number> };
+      events: Array<{ seq: number; type: string }>;
+    }>();
+    expect(page.taskId).toBe(task.id);
+    expect(page.events).toHaveLength(2);
+    expect(page.nextSeq).toBe(page.events[1]?.seq);
+    expect(page.hasMore).toBe(true);
+    expect(page.counts.window).toBe(2);
+    expect(page.counts.byType["task.updated"]).toBe(3);
+
+    const second = await fixture.app.inject({
+      method: "GET",
+      url: `/api/eval/tasks/${task.id}/trace?afterSeq=${page.nextSeq}&limit=500`
+    });
+    expect(second.statusCode).toBe(200);
+    const rest = second.json<typeof page>();
+    expect(rest.events[0]!.seq).toBeGreaterThan(page.nextSeq);
+    expect(rest.total).toBe(page.total);
+    const seqs = [...page.events, ...rest.events].map((event) => event.seq);
+    expect(seqs).toEqual([...seqs].sort((left, right) => left - right));
+
+    const missing = await fixture.app.inject({ method: "GET", url: "/api/eval/tasks/missing/trace" });
+    expect(missing.statusCode).toBe(404);
+    expect(missing.json().error).toBe("TASK_NOT_FOUND");
+
+    const oversized = await fixture.app.inject({ method: "GET", url: `/api/eval/tasks/${task.id}/trace?limit=501` });
+    expect(oversized.statusCode).toBe(400);
+    expect(oversized.json().error).toBe("INVALID_TRACE_QUERY");
+  });
 });
 
 async function createFixture(withModel = true, externalInputRoot?: string, complete?: typeof completeChat, settings = judgeSettings) {
