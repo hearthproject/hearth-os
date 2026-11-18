@@ -80,7 +80,7 @@ async function probeModel(
 ): Promise<{ configured: boolean; reachable: boolean; detail: string }> {
   try {
     const response = await fetchImpl(`${baseUrl}/api/health`, {
-      signal: AbortSignal.timeout(5000)
+      signal: AbortSignal.timeout(15_000)
     });
     if (!response.ok) return { configured: false, reachable: false, detail: `健康检查返回 HTTP ${response.status}` };
     const body = (await response.json()) as { chatModel?: { configured?: boolean } };
