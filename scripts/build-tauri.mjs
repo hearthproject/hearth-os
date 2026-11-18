@@ -52,6 +52,27 @@ const nodeExe = process.env.HEARTH_NODE_PATH ?? process.execPath;
 if (!existsSync(nodeExe)) throw new Error(`missing node runtime: ${nodeExe}`);
 copyTree(nodeExe, join(resources, "node.exe"));
 
+const npmRoot = [
+  join(dirname(nodeExe), "node_modules", "npm"),
+  "C:\\Program Files\\nodejs\\node_modules\\npm"
+].find((path) => existsSync(join(path, "bin", "npm-cli.js")));
+if (!npmRoot) throw new Error("missing npm runtime next to node.exe; managed executor installs would fail");
+copyTree(npmRoot, join(resources, "node_modules", "npm"));
+
+function pruneServerResources(serverRoot) {
+  const modules = join(serverRoot, "node_modules");
+  const removable = [
+    join(modules, "@types"),
+    join(modules, "pdfjs-dist", "build"),
+    join(modules, "pdfjs-dist", "web"),
+    join(modules, "pdfjs-dist", "image_decoders")
+  ];
+  for (const path of removable) {
+    rmSync(path, { recursive: true, force: true });
+  }
+}
+pruneServerResources(join(resources, "server"));
+
 if (existsSync(join(desktopResources, "helper"))) {
   copyTree(join(desktopResources, "helper"), join(resources, "helper"));
 }

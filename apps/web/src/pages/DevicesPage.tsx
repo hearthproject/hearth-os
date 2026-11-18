@@ -640,7 +640,7 @@ function DeviceAudit({ device, session }: { device: DeviceView; session: Desktop
 }
 
 function HelperCommand({ pro }: { pro: boolean }) {
-  const isDesktop = window.hearthDesktop?.isDesktop === true;
+  const isDesktop = window.hearthDesktop?.isDesktop === true || "__TAURI_INTERNALS__" in window;
   return (
     <div className="device-helper">
       <div>
