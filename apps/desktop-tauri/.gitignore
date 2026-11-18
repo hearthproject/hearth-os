@@ -1,0 +1,6 @@
+/src-tauri/target/
+/src-tauri/gen/
+/src-tauri/resources/node.exe
+/src-tauri/resources/server/
+/src-tauri/resources/web/
+/src-tauri/resources/helper/
