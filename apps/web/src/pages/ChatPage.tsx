@@ -790,6 +790,7 @@ function ChatBubble({ message, conversationId, mailDraft = false }: { message: C
         content={message.content}
         copyText={message.content}
         taskId={message.taskId}
+        taskStatus={message.taskStatus}
         createdAt={message.createdAt}
         conversationId={conversationId}
       />}
@@ -828,6 +829,7 @@ function AssistantBubble({
   copyText,
   reasoning = "",
   taskId,
+  taskStatus,
   createdAt,
   streaming = false,
   conversationId
@@ -836,6 +838,7 @@ function AssistantBubble({
   copyText?: string;
   reasoning?: string;
   taskId?: string | null;
+  taskStatus?: ChatMessageRecord["taskStatus"];
   createdAt?: string;
   streaming?: boolean;
   conversationId?: string | null;
@@ -873,7 +876,7 @@ function AssistantBubble({
           state={{ fromChat: true, ...(conversationId ? { conversationId } : {}) }}
         >
           <CheckCircle2 size={15} />
-          <span>任务已派出，查看进度和结果</span>
+          <span>{taskStatus === "completed" ? "查看任务详情与产物" : "任务已派出，查看进度和结果"}</span>
         </Link>
       )}
       {createdAt && <time>{formatTime(createdAt)}</time>}

@@ -1,9 +1,13 @@
-import type { ApprovalMode, TaskRecord, TaskStatus } from "@hearth/core";
+import type { ApprovalMode, ArtifactRecord, TaskRecord, TaskStatus } from "@hearth/core";
 
 const EXECUTOR_TEXT: Record<string, string> = {
   native: "Hearth 原生执行器",
   codex: "Codex"
 };
+
+const INTERNAL_ARTIFACT_NAMES = new Set(["run-manifest.json", "pr-preview.json"]);
+const ANSWER_BODY_LIMIT = 4_000;
+const ANSWER_ARTIFACT_LIMIT = 6;
 
 export interface TaskStatusMessageInput {
   task: TaskRecord;
@@ -54,8 +58,7 @@ export function buildTaskStatusMessage(input: TaskStatusMessageInput): string {
   }
 
   if (task.status === "completed") {
-    const summary = task.resultSummary?.trim();
-    return `任务「${title}」已完成。${summary ? `\n\n${clip(summary, 700)}` : ""}`;
+    return `任务「${title}」已完成。`;
   }
 
   if (task.status === "failed") {
@@ -77,6 +80,69 @@ function errorLines(task: TaskRecord): string {
   if (!task.error) return "";
   const guidance = task.error.guidance ? `\n建议：${task.error.guidance}` : "";
   return `\n\n${task.error.message}${guidance}`;
+}
+
+export interface TaskResultAnswerInput {
+  task: TaskRecord;
+  artifacts: Array<Pick<ArtifactRecord, "id" | "relativePath" | "bytes">>;
+}
+
+/**
+ * Chat-facing answer for a completed task. The status bubble only reports the
+ * state; this message carries the actual result and the files it produced.
+ */
+export function buildTaskResultAnswer(input: TaskResultAnswerInput): string {
+  const title = input.task.title || "未命名任务";
+  const body = clip(input.task.resultSummary?.trim() ?? "", ANSWER_BODY_LIMIT);
+  const files = deliverableArtifacts(input.task, input.artifacts);
+  if (!body && files.length === 0) {
+    return `任务「${title}」已完成，但没有返回文字结果或交付文件。`;
+  }
+  const sections: string[] = [];
+  if (body) sections.push(body);
+  if (files.length > 0) {
+    const links = files.map((file) => {
+      const url = `/api/tasks/${encodeURIComponent(input.task.id)}/artifacts/${encodeURIComponent(file.id)}`;
+      return `- [${file.name}](${url}) · ${formatBytes(file.bytes)}`;
+    });
+    sections.push(["**交付文件**", "", ...links].join("\n"));
+  }
+  return sections.join("\n\n");
+}
+
+function deliverableArtifacts(
+  task: TaskRecord,
+  artifacts: TaskResultAnswerInput["artifacts"]
+): Array<{ id: string; name: string; bytes: number }> {
+  return artifacts
+    .filter((artifact) => {
+      const path = artifact.relativePath.replace(/\\/g, "/");
+      const name = path.split("/").pop() ?? path;
+      if (INTERNAL_ARTIFACT_NAMES.has(name)) return false;
+      if (path.startsWith("inputs/") || path.startsWith("runtime/") || path.startsWith(".hearth/")) return false;
+      if (path.toLowerCase().endsWith(".json") && !isExpectedPath(path, task.expectedOutputs)) return false;
+      return true;
+    })
+    .slice(0, ANSWER_ARTIFACT_LIMIT)
+    .map((artifact) => ({
+      id: artifact.id,
+      name: artifact.relativePath.replace(/\\/g, "/").split("/").pop() ?? artifact.relativePath,
+      bytes: artifact.bytes
+    }));
+}
+
+function isExpectedPath(path: string, expectedOutputs: string[] | undefined): boolean {
+  if (!expectedOutputs) return true;
+  return expectedOutputs.some((expected) => {
+    const normalized = expected.replace(/\\/g, "/").replace(/\/+$/, "");
+    return path === normalized || path.startsWith(`${normalized}/`);
+  });
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function clip(value: string, limit: number): string {

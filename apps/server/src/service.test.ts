@@ -87,9 +87,11 @@ describe("Hearth service agent metadata", () => {
 
     service.updateTask(task.id, { status: "completed", resultSummary: "已经生成完整结果。" });
     messages = store.listChatMessages(conversation.id);
-    expect(messages).toHaveLength(1);
+    expect(messages).toHaveLength(2);
     expect(messages[0]).toMatchObject({ kind: "task_status", taskStatus: "completed" });
-    expect(messages[0]?.content).toContain("已经生成完整结果");
+    expect(messages[0]?.content).toBe("任务「状态任务」已完成。");
+    expect(messages[1]).toMatchObject({ role: "assistant", kind: "text", taskStatus: "completed" });
+    expect(messages[1]?.content).toContain("已经生成完整结果");
     store.close();
   });
 

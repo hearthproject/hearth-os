@@ -1510,9 +1510,11 @@ describe("Hearth scheduler", () => {
     });
     await waitForStatus(service, task.id, "completed");
     const messages = (store as HearthStore).listChatMessages(conversation.id);
+    expect(messages.some((message) => message.kind === "task_status" && message.taskStatus === "completed")).toBe(true);
     expect(messages.some((message) =>
-      message.kind === "task_status" && message.taskStatus === "completed" && message.content.includes("最终结果已生成")
+      message.kind === "text" && message.role === "assistant" && message.content.includes("最终结果已生成")
     )).toBe(true);
+    expect(messages.some((message) => message.kind === "text" && message.content.includes("result.md"))).toBe(true);
   });
 
   it("blocks handoff while an external effect needs reconciliation", async () => {

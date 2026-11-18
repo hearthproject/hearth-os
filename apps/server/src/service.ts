@@ -42,7 +42,7 @@ import { getTemplate, TEMPLATES } from "@hearth/templates";
 import { resolveRepoPath } from "./config.ts";
 import { EventBus } from "./events.ts";
 import { executorName, resolveExecutorFromEnabled, resolveExecutorLocked } from "./executors.ts";
-import { buildTaskStatusMessage } from "./task-status-messages.ts";
+import { buildTaskResultAnswer, buildTaskStatusMessage } from "./task-status-messages.ts";
 import { GITHUB_NETWORK_HOSTS, wantsGithubAccess, wantsPublicWebResearch } from "./task-intent.ts";
 
 export interface CreateTaskInput {
@@ -561,6 +561,19 @@ export class HearthService {
       kind: "task_status",
       taskStatus: task.status
     });
+    if (task.status === "completed") {
+      this.appendChatMessage({
+        id: randomUUID(),
+        conversationId: task.conversationId ?? null,
+        role: "assistant",
+        content: buildTaskResultAnswer({ task, artifacts: this.store.listArtifacts(task.id) }),
+        taskId: task.id,
+        attachments: [],
+        createdAt: new Date().toISOString(),
+        kind: "text",
+        taskStatus: "completed"
+      });
+    }
   }
 
   createRun(run: RunRecord): RunRecord {
