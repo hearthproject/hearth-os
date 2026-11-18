@@ -25,6 +25,10 @@ extraResources:
       - "**/*"
   - from: resources/tray.png
     to: tray.png
+  - from: resources/helper
+    to: helper
+    filter:
+      - "**/*"
 win:
   icon: build/icon.ico
   signExecutable: false

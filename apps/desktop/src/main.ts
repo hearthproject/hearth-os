@@ -16,6 +16,7 @@ import {
   formatEnvironmentReport,
   type EnvironmentReport
 } from "./environment";
+import { openDesktopHelper } from "./helper";
 import { createDesktopLogs, type DesktopLogs } from "./logs";
 import {
   buildServerLaunch,
@@ -332,6 +333,11 @@ async function start(): Promise<void> {
   tray = createTray(resolveTrayIcon(selection.root), {
     open: showMainWindow,
     environment: () => void showEnvironmentDialog(),
+    helper: () => {
+      void openDesktopHelper(selection.root, app.isPackaged, process.resourcesPath).then((error) => {
+        if (error) dialog.showErrorBox("无法启动桌面助手", error);
+      });
+    },
     openDataDir: () => {
       if (dataDir) void shell.openPath(dataDir);
     },
