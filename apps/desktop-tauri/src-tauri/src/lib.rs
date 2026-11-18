@@ -223,6 +223,25 @@ fn wait_for_server(window: WebviewWindow, root: PathBuf, port: u16) {
     });
 }
 
+fn request_shutdown(port: u16) -> bool {
+    let Ok(mut stream) = std::net::TcpStream::connect_timeout(
+        &format!("127.0.0.1:{port}").parse().expect("loopback address"),
+        Duration::from_millis(250),
+    ) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
+    let request = format!(
+        "POST /api/desktop/shutdown HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}"
+    );
+    if stream.write_all(request.as_bytes()).is_err() {
+        return false;
+    }
+    let mut response = String::new();
+    let _ = stream.read_to_string(&mut response);
+    response.starts_with("HTTP/1.1 2")
+}
+
 fn stop_server(app: &tauri::AppHandle) {
     let Some(state) = app.try_state::<ServerProcess>() else {
         return;
@@ -234,6 +253,17 @@ fn stop_server(app: &tauri::AppHandle) {
         return;
     };
     let pid = child.id();
+    let shutdown_requested = request_shutdown(4317);
+    if shutdown_requested {
+        for _ in 0..30 {
+            if child.try_wait().ok().flatten().is_some() {
+                let lock = root_lock_path(&resolve_data_root());
+                let _ = fs::remove_file(lock);
+                return;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+    }
     if cfg!(windows) {
         let _ = Command::new("taskkill")
             .args(["/PID", &pid.to_string(), "/T", "/F"])

@@ -1139,6 +1139,15 @@ export async function buildServer(options: BuildServerOptions = {}) {
     bodyLimit: 8_000_000
   });
   app.get("/api/ready", async () => ({ ok: true, name: "Hearth" }));
+  app.post("/api/desktop/shutdown", async (request, reply) => {
+    if (!LOOPBACK_HOSTS.has(request.hostname)) {
+      return reply.code(403).send({ error: "LOCAL_ONLY", message: "Hearth 仅接受本机访问" });
+    }
+    reply.code(202).send({ ok: true });
+    setTimeout(() => {
+      void app.close().catch(() => undefined);
+    }, 150);
+  });
   app.decorate("feishu", feishu);
 
   schedules.start();
