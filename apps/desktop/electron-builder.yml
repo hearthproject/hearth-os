@@ -1,0 +1,32 @@
+appId: ai.hearth.os
+productName: Hearth
+electronVersion: 45.3.4
+asar: true
+publish: null
+directories:
+  output: ../../release
+  buildResources: build
+files:
+  - dist/**
+  - package.json
+extraResources:
+  - from: resources/web
+    to: web
+    filter:
+      - "**/*"
+  - from: resources/server
+    to: server
+    filter:
+      - "**/*"
+      - "!**/node_modules/**"
+  - from: resources/server/node_modules
+    to: server/node_modules
+    filter:
+      - "**/*"
+win:
+  signAndEditExecutable: false
+  target:
+    - target: dir
+      arch:
+        - x64
+npmRebuild: false
