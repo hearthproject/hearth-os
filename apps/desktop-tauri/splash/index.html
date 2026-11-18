@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hearth</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      display: grid;
+      place-items: center;
+      background: #0b0d10;
+      color: #f2f4f7;
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+    .wrap { display: grid; justify-items: center; gap: 18px; }
+    .mark {
+      width: 92px; height: 92px; border-radius: 24px;
+      display: grid; place-items: center;
+      background: #15191e; border: 1px solid #252b33;
+      font-size: 42px; font-weight: 700; color: #ff8a3d;
+    }
+    h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: .12em; }
+    p { margin: 0; color: #8a93a0; font-size: 13px; }
+    .bar { width: 180px; height: 3px; border-radius: 3px; background: #20262e; overflow: hidden; }
+    .bar span { display: block; width: 40%; height: 100%; background: #ff8a3d; animation: slide 1.2s ease-in-out infinite; }
+    @keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(350%); } }
+    #error { max-width: 520px; white-space: pre-wrap; color: #ffb4a8; font-size: 12px; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="mark">H</div>
+    <h1>HEARTH</h1>
+    <div class="bar"><span></span></div>
+    <p id="status">正在启动本地服务…</p>
+    <div id="error"></div>
+  </div>
+  <script>
+    window.hearthSplash = {
+      status(text) { document.getElementById('status').textContent = text; },
+      fail(text) { document.getElementById('status').textContent = '启动失败'; document.getElementById('error').textContent = text; }
+    };
+  </script>
+</body>
+</html>
