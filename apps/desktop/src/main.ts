@@ -1,19 +1,18 @@
 import { app, BrowserWindow, dialog } from "electron";
-import type { ChildProcess } from "node:child_process";
 import { join } from "node:path";
+import { createDesktopLogs, type DesktopLogs } from "./logs";
 import {
   buildServerLaunch,
   defaultServerPaths,
   resolveDesktopRoot,
-  spawnServer,
-  stopServer,
-  waitForHealth,
+  ServerSupervisor,
   type DesktopMode,
   type ServerLaunch
 } from "./server-process";
 
-let server: ChildProcess | null = null;
+let supervisor: ServerSupervisor | null = null;
 let mainWindow: BrowserWindow | null = null;
+let logs: DesktopLogs | null = null;
 let shuttingDown = false;
 
 function resolveLaunch(): ServerLaunch {
@@ -59,17 +58,37 @@ function createWindow(launch: ServerLaunch): BrowserWindow {
   return window;
 }
 
+function logMain(message: string): void {
+  logs?.main.write(`[main] ${message}`);
+}
+
 async function start(): Promise<void> {
+  logs = createDesktopLogs();
+  logMain("desktop shell starting");
+
   const launch = resolveLaunch();
-  server = spawnServer(launch);
+  logMain(`mode=${app.isPackaged ? "prod" : "dev"} root=${launch.env.HEARTH_ROOT}`);
+
+  supervisor = new ServerSupervisor({
+    launch,
+    onLog: (stream, text) => {
+      logs?.server.write(`[${stream}] ${text.trimEnd()}`);
+    },
+    onRestart: (attempt, delayMs) => {
+      logMain(`server restart attempt=${attempt} delay=${delayMs}ms`);
+    },
+    onFatal: (message) => {
+      logMain(message);
+      dialog.showErrorBox("Hearth 服务端停止", message);
+    }
+  });
 
   try {
-    await waitForHealth(launch.baseUrl);
+    await supervisor.start();
   } catch (error) {
-    dialog.showErrorBox(
-      "Hearth 启动失败",
-      error instanceof Error ? error.message : String(error)
-    );
+    const message = error instanceof Error ? error.message : String(error);
+    logMain(`startup failed: ${message}`);
+    dialog.showErrorBox("Hearth 启动失败", message);
     await shutdown();
     return;
   }
@@ -78,10 +97,9 @@ async function start(): Promise<void> {
   try {
     await mainWindow.loadURL(launch.baseUrl);
   } catch (error) {
-    dialog.showErrorBox(
-      "Hearth 页面加载失败",
-      error instanceof Error ? error.message : String(error)
-    );
+    const message = error instanceof Error ? error.message : String(error);
+    logMain(`load failed: ${message}`);
+    dialog.showErrorBox("Hearth 页面加载失败", message);
     await shutdown();
   }
 }
@@ -89,8 +107,9 @@ async function start(): Promise<void> {
 async function shutdown(): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
-  await stopServer(server);
-  server = null;
+  logMain("desktop shell shutting down");
+  await supervisor?.stop();
+  supervisor = null;
   app.quit();
 }
 
