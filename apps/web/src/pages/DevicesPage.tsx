@@ -640,13 +640,16 @@ function DeviceAudit({ device, session }: { device: DeviceView; session: Desktop
 }
 
 function HelperCommand({ pro }: { pro: boolean }) {
+  const isDesktop = window.hearthDesktop?.isDesktop === true;
   return (
     <div className="device-helper">
       <div>
         <strong><Terminal size={14} /> 启动桌面助手</strong>
         <p>在要连接的 Windows 电脑上运行。助手会显示六位配对码。</p>
       </div>
-      {pro ? (
+      {isDesktop ? (
+        <span className="subtle">请从系统托盘菜单启动“桌面助手”，按提示输入配对码。</span>
+      ) : pro ? (
         <code>npm run helper:windows -- --apps notepad,calculator</code>
       ) : (
         <span className="subtle">先把助手下载到同一台电脑，再输入配对码。</span>

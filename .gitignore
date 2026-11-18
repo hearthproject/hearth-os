@@ -21,7 +21,9 @@ work/screenshots/
 *.sqlite-wal
 
 # Desktop build staging
-apps/desktop/resources/
+apps/desktop/resources/*
+!apps/desktop/resources/helper/
+!apps/desktop/resources/helper/**
 apps/desktop/release/
 release/
 apps/desktop/build/icon-*.png

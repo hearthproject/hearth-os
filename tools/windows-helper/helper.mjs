@@ -35,7 +35,7 @@ function usage() {
   return [
     "Hearth Windows 桌面助手",
     "",
-    "npm run helper:windows -- [选项]",
+    "由 Hearth 系统托盘菜单的“桌面助手”启动",
     "",
     "--apps notepad,calculator  允许观察和操作的应用进程（逗号分隔）",
     "--server http://127.0.0.1:4317  仅允许本机 Hearth 地址",

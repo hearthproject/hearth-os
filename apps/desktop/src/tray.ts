@@ -3,6 +3,7 @@ import { Menu, Tray, nativeImage } from "electron";
 export interface TrayActions {
   open: () => void;
   environment: () => void;
+  helper: () => void;
   openDataDir: () => void;
   openLogs: () => void;
   quit: () => void;
@@ -17,6 +18,7 @@ export function createTray(iconPath: string, actions: TrayActions): Tray {
     { label: "打开 Hearth", click: actions.open },
     { type: "separator" },
     { label: "环境体检", click: actions.environment },
+    { label: "桌面助手", click: actions.helper },
     { type: "separator" },
     { label: "数据目录", click: actions.openDataDir },
     { label: "日志目录", click: actions.openLogs },
