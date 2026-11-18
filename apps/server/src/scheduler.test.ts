@@ -73,15 +73,29 @@ describe("Hearth scheduler", () => {
     service.updateTask(task.id, { status: "running" });
     service.updateTask(task.id, { status: "waiting_budget" });
     expect(scheduler.extendBudget(task.id).executionMode).toBe("quick");
-    expect(service.requireTask(task.id).budgetOverride?.maxTokens).toBe(120_000);
+    expect(service.requireTask(task.id).budgetOverride?.maxTokens).toBe(1_200_000_000);
     service.updateTask(task.id, { status: "running" });
     service.updateTask(task.id, { status: "waiting_budget" });
     const upgraded = scheduler.extendBudget(task.id, "standard");
     expect(upgraded.executionMode).toBe("standard");
-    expect(upgraded.budgetOverride?.maxTokens).toBe(200_000);
+    expect(upgraded.budgetOverride?.maxTokens).toBe(1_200_000_000);
+    expect(upgraded.budgetOverride?.maxTurns).toBe(24);
     service.updateTask(task.id, { status: "running" });
     service.updateTask(task.id, { status: "waiting_budget" });
     expect(() => scheduler!.extendBudget(task.id, "standard")).toThrow("更高");
+  });
+
+  it("keeps an extended token budget above the current execution mode floor", () => {
+    const service = setup();
+    scheduler = makeScheduler(service, async () => FAKE_RESULT);
+    const task = service.createTask({ title: "legacy override", goal: "test", executionMode: "deep", executorId: "native" });
+    service.updateTask(task.id, {
+      budgetOverride: { maxTurns: 10, maxToolCalls: 10, maxTokens: 1_200_000, maxDurationMs: 60_000 }
+    });
+    service.updateTask(task.id, { status: "running" });
+    service.updateTask(task.id, { status: "waiting_budget" });
+    scheduler.extendBudget(task.id);
+    expect(service.requireTask(task.id).budgetOverride?.maxTokens).toBe(1_200_000_000);
   });
 
   it("runs a local task and publishes validated artifacts with a manifest", async () => {
