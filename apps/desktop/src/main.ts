@@ -1,10 +1,17 @@
 import { app, BrowserWindow, dialog } from "electron";
 import { join } from "node:path";
+import {
+  candidateFor,
+  configCandidate,
+  existingCandidate,
+  freshCandidate,
+  resolveDesktopConfigPath,
+  writeDesktopConfig,
+  type DataRootCandidate
+} from "./data-root";
 import { createDesktopLogs, type DesktopLogs } from "./logs";
 import {
   buildServerLaunch,
-  defaultServerPaths,
-  resolveDesktopRoot,
   ServerSupervisor,
   type DesktopMode,
   type ServerLaunch
@@ -15,18 +22,56 @@ let mainWindow: BrowserWindow | null = null;
 let logs: DesktopLogs | null = null;
 let shuttingDown = false;
 
-function resolveLaunch(): ServerLaunch {
+function resolveLaunch(root: string, dataDir: string): ServerLaunch {
   const mode: DesktopMode = app.isPackaged ? "prod" : "dev";
-  const root = process.env.HEARTH_ROOT ?? resolveDesktopRoot(__dirname);
-  const paths = defaultServerPaths(root);
 
   return buildServerLaunch({
     mode,
     root,
-    dataDir: paths.dataDir,
-    webDist: app.isPackaged ? join(process.resourcesPath, "web") : paths.webDist,
+    dataDir,
+    webDist: app.isPackaged ? join(process.resourcesPath, "web") : join(root, "apps", "web", "dist"),
     resourcesPath: process.resourcesPath
   });
+}
+
+async function chooseDataRoot(): Promise<DataRootCandidate | null> {
+  const envRoot = process.env.HEARTH_ROOT;
+  if (envRoot) return candidateFor(envRoot);
+
+  const configPath = resolveDesktopConfigPath();
+  const saved = configCandidate(configPath);
+  if (saved?.hasDatabase) {
+    return saved;
+  }
+
+  const existing = existingCandidate();
+  const fresh = freshCandidate();
+  const defaultId = existing.hasDatabase ? 0 : 1;
+
+  const message = dialog.showMessageBoxSync({
+    type: "question",
+    title: "选择 Hearth 数据目录",
+    message: existing.hasDatabase ? "检测到现有 Hearth 数据" : "没有检测到现有 Hearth 数据库",
+    detail: [
+      saved ? `之前选择的数据目录没有找到 hearth.sqlite：${saved.dataDir}` : "",
+      `现有数据：${existing.dataDir}${existing.hasDatabase ? "（推荐）" : "（尚未初始化）"}`,
+      `新数据目录：${fresh.dataDir}`
+    ].filter(Boolean).join("\n\n"),
+    buttons: [
+      existing.hasDatabase ? "使用现有数据（推荐）" : "使用现有目录",
+      "新建数据目录",
+      "退出"
+    ],
+    defaultId,
+    cancelId: 2,
+    noLink: true
+  });
+
+  if (message === 2) return null;
+
+  const chosen = message === 0 ? existing : fresh;
+  writeDesktopConfig(configPath, chosen.root);
+  return chosen;
 }
 
 function createWindow(launch: ServerLaunch): BrowserWindow {
@@ -66,11 +111,22 @@ async function start(): Promise<void> {
   logs = createDesktopLogs();
   logMain("desktop shell starting");
 
-  const launch = resolveLaunch();
-  logMain(`mode=${app.isPackaged ? "prod" : "dev"} root=${launch.env.HEARTH_ROOT}`);
+  const selection = await chooseDataRoot();
+  if (!selection) {
+    logMain("data root selection cancelled");
+    await shutdown();
+    return;
+  }
+
+  logMain(`data root=${selection.root} data=${selection.dataDir}`);
+  writeDesktopConfig(resolveDesktopConfigPath(), selection.root);
+
+  const launch = resolveLaunch(selection.root, selection.dataDir);
+  logMain(`mode=${app.isPackaged ? "prod" : "dev"} port=${new URL(launch.baseUrl).port}`);
 
   supervisor = new ServerSupervisor({
     launch,
+    dataDir: selection.dataDir,
     onLog: (stream, text) => {
       logs?.server.write(`[${stream}] ${text.trimEnd()}`);
     },

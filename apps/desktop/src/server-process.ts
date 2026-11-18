@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { createConnection } from "node:net";
 import { join, resolve } from "node:path";
 
@@ -178,9 +178,33 @@ export async function stopServer(child: ChildProcess | null, timeoutMs = 5_000):
 
 export interface ServerSupervisorOptions {
   launch: ServerLaunch;
+  dataDir: string;
   onLog?: LogSink;
   onFatal?: (message: string) => void;
   onRestart?: (attempt: number, delayMs: number) => void;
+}
+
+function isProcessAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error instanceof Error && "code" in error && error.code === "EPERM";
+  }
+}
+
+function clearDataDirLock(dataDir: string, pid: number | undefined): void {
+  const path = join(dataDir, "hearth.lock");
+  try {
+    const info = JSON.parse(readFileSync(path, "utf8")) as { pid?: unknown };
+    const lockPid = typeof info.pid === "number" ? info.pid : null;
+    if (lockPid !== null && (lockPid === pid || !isProcessAlive(lockPid))) {
+      unlinkSync(path);
+    }
+  } catch {
+    // The server already released it or the file is gone.
+  }
 }
 
 export class ServerSupervisor {
@@ -215,8 +239,10 @@ export class ServerSupervisor {
       clearTimeout(this.restartTimer);
       this.restartTimer = null;
     }
+    const pid = this.child?.pid;
     await stopServer(this.child);
     this.child = null;
+    clearDataDirLock(this.options.dataDir, pid);
   }
 
   private port(): number {
