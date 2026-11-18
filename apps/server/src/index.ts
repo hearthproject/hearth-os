@@ -1,10 +1,17 @@
 import { loadCodexProfile, describeCodexProfile } from "@hearth/codex-executor";
 import { buildServer } from "./app.ts";
-import { assertRootLayout, HOST, PORT } from "./config.ts";
+import { assertRootLayout, DATA_DIR, HOST, PORT } from "./config.ts";
+import { acquireDataDirLock } from "./data-lock.ts";
 
 assertRootLayout({ requireWeb: process.env.HEARTH_DESKTOP === "1" });
 
-const app = await buildServer({ logger: true, startScheduler: true, startProactive: true, startHeartbeat: true, startMailSync: true });
+const dataLock = acquireDataDirLock(DATA_DIR, PORT);
+
+const app = await buildServer({ logger: true, startScheduler: true, startProactive: true, startHeartbeat: true, startMailSync: true })
+  .catch((error: unknown) => {
+    dataLock.release();
+    throw error;
+  });
 
 try {
   const address = await app.listen({ host: HOST, port: PORT });
@@ -17,6 +24,7 @@ try {
   if (!profile.canRun) console.warn(`Codex 当前不可用：${profile.issues.join("；")}`);
 } catch (error) {
   app.log.error(error);
+  dataLock.release();
   process.exitCode = 1;
 }
 
@@ -25,7 +33,11 @@ async function shutdown(signal: string): Promise<void> {
   if (stopping) return;
   stopping = true;
   app.log.info(`收到 ${signal}，正在关闭 Hearth`);
-  await app.close();
+  try {
+    await app.close();
+  } finally {
+    dataLock.release();
+  }
 }
 
 process.once("SIGINT", () => void shutdown("SIGINT"));
