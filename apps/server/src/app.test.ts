@@ -785,6 +785,46 @@ describe("Hearth server", () => {
     }
   });
 
+  it("does not replay existing events on a fresh connection", async () => {
+    const app = await buildServer({ store, serveWeb: false });
+    store.appendEvent({ type: "context.item.appended", taskId: null, payload: { id: "history-1", kind: "assistant_message", content: "历史回放不应该出现" } });
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const address = app.server.address();
+    if (!address || typeof address === "string") throw new Error("Missing test server address");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4_000);
+    try {
+      const response = await fetch(`http://127.0.0.1:${address.port}/api/events`, { signal: controller.signal });
+      expect(response.status).toBe(200);
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("Missing response stream");
+
+      const created = await fetch(`http://127.0.0.1:${address.port}/api/tasks`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ templateId: "T04" }),
+        signal: controller.signal
+      });
+      expect(created.status).toBe(201);
+
+      const decoder = new TextDecoder();
+      let received = "";
+      while (!received.includes("task.created")) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        received += decoder.decode(chunk.value, { stream: true });
+      }
+      expect(received).toContain('"templateId":"T04"');
+      expect(received).not.toContain("历史回放不应该出现");
+      await reader.cancel();
+    } finally {
+      clearTimeout(timeout);
+      controller.abort();
+      await app.close();
+    }
+  });
+
   it("replays context events after a reconnect cursor", async () => {
     const app = await buildServer({ store, serveWeb: false });
     const created = await app.inject({ method: "POST", url: "/api/tasks", payload: { templateId: "T04" } });

@@ -2,13 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { EventEnvelope } from "./types.ts";
 import { notificationForEvent } from "./notifications.ts";
 
-function envelope(type: string, payload: unknown, taskId: string | null = "task-1"): EventEnvelope {
+function envelope(type: string, payload: unknown, taskId: string | null = "task-1", runId: string | null = null): EventEnvelope {
   return {
     seq: 1,
     id: "event-1",
     type,
     taskId,
-    runId: null,
+    runId,
     payload,
     originInstanceId: null,
     originSeq: null,
@@ -69,5 +69,14 @@ describe("notificationForEvent", () => {
 
   it("returns null without an envelope", () => {
     expect(notificationForEvent("approval.created")).toBeNull();
+  });
+
+  it("merges the two budget-exhausted events of one run into a single notification", () => {
+    const updated = notificationForEvent("task.updated", envelope("task.updated", { status: "waiting_budget" }, "task-1", "run-1"));
+    const exhausted = notificationForEvent("task.budget.exhausted", envelope("task.budget.exhausted", { dimension: "tokens" }, "task-1", "run-1"));
+    expect(updated?.key).toBe("budget:task-1:run-1");
+    expect(exhausted?.key).toBe(updated?.key);
+    expect(notificationForEvent("task.updated", envelope("task.updated", { status: "waiting_budget" }, "task-1", "run-2"))?.key)
+      .toBe("budget:task-1:run-2");
   });
 });

@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { RunBudget, RunUsage, TaskPermissions, TaskRecord, TaskWorktree } from "@hearth/core";
+import { NATIVE_TOKEN_CEILING } from "@hearth/core";
 import { zeroUsage, type AgentTool, type AgentToolResult } from "@hearth/agent-runtime";
 import { runNativeTask, type NativeRunOptions, type NativeRunResult } from "./native-executor.ts";
 import type { ModelSettings } from "./model-settings.ts";
@@ -23,7 +24,7 @@ const READ_ONLY_TOOLS = new Set([
 const SUBAGENT_BUDGET: RunBudget = {
   maxTurns: 40,
   maxToolCalls: 400,
-  maxTokens: 200_000,
+  maxTokens: NATIVE_TOKEN_CEILING,
   maxDurationMs: 10 * 60_000
 };
 

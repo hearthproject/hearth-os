@@ -17,6 +17,9 @@ export function notificationForEvent(event: string, envelope?: EventEnvelope): A
   const payload = (envelope.payload ?? {}) as Record<string, unknown>;
   const key = envelope.id || `${event}:${envelope.seq}:${envelope.createdAt}`;
   const taskId = typeof payload.taskId === "string" ? payload.taskId : envelope.taskId;
+  // 同一次运行只会提醒一次：task.updated(waiting_budget) 与 task.budget.exhausted 是同一件事，
+  // 用任务 + 运行标识合并，避免一次触顶弹出两条相同提示。
+  const budgetKey = `budget:${taskId ?? key}:${envelope.runId ?? "run"}`;
 
   if (event === "approval.created") {
     if (payload.status !== "pending") return null;
@@ -40,7 +43,7 @@ export function notificationForEvent(event: string, envelope?: EventEnvelope): A
   if (event === "task.updated") {
     if (payload.status === "waiting_budget") {
       return {
-        key,
+        key: budgetKey,
         tone: "task",
         title: "任务预算已触顶",
         body: "可以扩展一倍预算并从检查点继续。",
@@ -60,7 +63,7 @@ export function notificationForEvent(event: string, envelope?: EventEnvelope): A
   if (event === "task.budget.exhausted") {
     const dimension = typeof payload.dimension === "string" ? payload.dimension : "执行预算";
     return {
-      key,
+      key: budgetKey,
       tone: "task",
       title: "任务预算已触顶",
       body: `${dimension} 已达到上限，打开任务可扩展一倍并继续。`,

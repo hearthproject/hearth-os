@@ -1,6 +1,6 @@
 import { isTextDraftTask, DRAFT_INSTRUCTION } from "./draft-intent.ts";
 import { createHash, randomUUID } from "node:crypto";
-import { EXECUTION_PROFILES } from "@hearth/core";
+import { EXECUTION_PROFILES, NATIVE_TOKEN_CEILING } from "@hearth/core";
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import type {
@@ -2455,14 +2455,12 @@ export class HearthScheduler {
   }
 
   private effectiveBudget(task: TaskRecord): RunBudget {
-    const modeTokenFloor = task.executorId === "native" && task.executionMode
-      ? EXECUTION_PROFILES[task.executionMode].budget.maxTokens
-      : 0;
+    const nativeTokenFloor = task.executorId === "native" ? NATIVE_TOKEN_CEILING : 0;
     if (task.budgetOverride) {
       return {
         maxTurns: Math.max(1, Math.floor(task.budgetOverride.maxTurns)),
         maxToolCalls: Math.max(1, Math.floor(task.budgetOverride.maxToolCalls)),
-        maxTokens: Math.max(1, Math.floor(task.budgetOverride.maxTokens), modeTokenFloor),
+        maxTokens: Math.max(1, Math.floor(task.budgetOverride.maxTokens), nativeTokenFloor),
         maxDurationMs: Math.max(1, Math.floor(task.budgetOverride.maxDurationMs))
       };
     }
