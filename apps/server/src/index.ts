@@ -1,6 +1,8 @@
 import { loadCodexProfile, describeCodexProfile } from "@hearth/codex-executor";
 import { buildServer } from "./app.ts";
-import { HOST, PORT } from "./config.ts";
+import { assertRootLayout, HOST, PORT } from "./config.ts";
+
+assertRootLayout({ requireWeb: process.env.HEARTH_DESKTOP === "1" });
 
 const app = await buildServer({ logger: true, startScheduler: true, startProactive: true, startHeartbeat: true, startMailSync: true });
 

@@ -1,10 +1,25 @@
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { join, resolve } from "node:path";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
 
-export const REPO_ROOT = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
+const DEFAULT_HEARTH_ROOT = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
+
+/**
+ * The root every data-relative path is anchored to. In development this is the
+ * repository root; in the desktop build it is the root the user selected (for
+ * example D:\App\hearth-os).
+ */
+export const HEARTH_ROOT = resolve(process.env.HEARTH_ROOT ?? DEFAULT_HEARTH_ROOT);
+
+/**
+ * Kept as an alias while the server code migrates to HEARTH_ROOT. The two
+ * values are intentionally identical.
+ */
+export const REPO_ROOT = HEARTH_ROOT;
+
 export const HOST = process.env.HEARTH_HOST ?? "127.0.0.1";
 export const PORT = Number(process.env.HEARTH_PORT ?? 4317);
-export const DATA_DIR = resolve(process.env.HEARTH_DATA_DIR ?? join(REPO_ROOT, ".hearth"));
+export const DATA_DIR = resolve(process.env.HEARTH_DATA_DIR ?? join(HEARTH_ROOT, ".hearth"));
 export const DB_PATH = join(DATA_DIR, "hearth.sqlite");
 export const WORKSPACE_DIR = join(DATA_DIR, "workspaces");
 export const GIT_CACHE_DIR = join(DATA_DIR, "git-cache");
@@ -20,8 +35,67 @@ export const DSH_HOME_DIR = join(EXECUTOR_HOME_DIR, "deepseek-harness");
 export const MODEL_SETTINGS_PATH = join(DATA_DIR, "model-settings.json");
 export const EXECUTOR_SETTINGS_PATH = join(DATA_DIR, "executor-settings.json");
 export const ATTACHMENT_DIR = join(DATA_DIR, "attachments");
-export const WEB_DIST = join(REPO_ROOT, "apps", "web", "dist");
+export const WEB_DIST = resolve(process.env.HEARTH_WEB_DIST ?? join(HEARTH_ROOT, "apps", "web", "dist"));
 export const MASTER_KEY_PATH = join(DATA_DIR, "master.key");
+
+export interface RootLayoutOptions {
+  /**
+   * Desktop builds must ship a web dist. Development can run with Vite on a
+   * separate port, so this check is opt-in.
+   */
+  requireWeb?: boolean;
+}
+
+function samePath(left: string, right: string): boolean {
+  return process.platform === "win32"
+    ? left.toLowerCase() === right.toLowerCase()
+    : left === right;
+}
+
+/**
+ * Validate the root/data/web layout before the server opens the database.
+ *
+ * The `.hearth` name is not cosmetic: existing task records store outputDir as
+ * `.hearth/artifacts/<id>`. Changing the directory name silently breaks every
+ * historical task path.
+ */
+export function validateRootLayout(
+  root: string,
+  dataDir: string,
+  webDist: string,
+  options: RootLayoutOptions = {}
+): void {
+  const resolvedRoot = resolve(root);
+  const resolvedDataDir = resolve(dataDir);
+  const expectedDataDir = resolve(resolvedRoot, ".hearth");
+
+  const relativeDataDir = relative(resolvedRoot, resolvedDataDir);
+  if (relativeDataDir === "" || relativeDataDir.startsWith("..") || isAbsolute(relativeDataDir)) {
+    throw new Error(`数据目录必须位于 HEARTH_ROOT 内（${resolvedDataDir} 不在 ${resolvedRoot}）。`);
+  }
+
+  if (!samePath(resolvedDataDir, expectedDataDir)) {
+    throw new Error(
+      `HEARTH_DATA_DIR 必须是 ${expectedDataDir}（当前为 ${resolvedDataDir}）。` +
+      "历史任务的 outputDir 以 .hearth/artifacts 开头，不能改用其他目录名。"
+    );
+  }
+
+  const dataDirName = basename(resolvedDataDir);
+  const isHearthDir = process.platform === "win32"
+    ? dataDirName.toLowerCase() === ".hearth"
+    : dataDirName === ".hearth";
+  if (!isHearthDir) {
+    throw new Error(`数据目录必须以 .hearth 结尾（当前为 ${resolvedDataDir}）。`);
+  }
+  if (options.requireWeb && !existsSync(join(webDist, "index.html"))) {
+    throw new Error(`前端未构建：${join(webDist, "index.html")} 不存在。请先运行 npm run build。`);
+  }
+}
+
+export function assertRootLayout(options: RootLayoutOptions = {}): void {
+  validateRootLayout(HEARTH_ROOT, DATA_DIR, WEB_DIST, options);
+}
 
 export function resolveRepoPath(path: string): string {
   const absolute = resolve(REPO_ROOT, path);
@@ -30,3 +104,4 @@ export function resolveRepoPath(path: string): string {
   }
   return absolute;
 }
+
