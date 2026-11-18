@@ -3,9 +3,14 @@ import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  MAX_RESTARTS,
+  RESTART_DELAYS_MS,
   buildServerLaunch,
   defaultServerPaths,
+  portStatus,
+  probePort,
   resolveDesktopRoot,
+  restartDelay,
   waitForHealth
 } from "./server-process";
 
@@ -94,5 +99,41 @@ describe("desktop server launch", () => {
 
   it("reports a timeout when the server never responds", async () => {
     await expect(waitForHealth("http://127.0.0.1:1", 1_000)).rejects.toThrow(/没有就绪/);
+  });
+
+  it("uses a bounded restart backoff and then gives up", () => {
+    expect(RESTART_DELAYS_MS).toHaveLength(MAX_RESTARTS);
+    expect(restartDelay(0)).toBe(1_000);
+    expect(restartDelay(4)).toBe(30_000);
+    expect(restartDelay(5)).toBeNull();
+  });
+
+  it("detects a listening port and identifies a Hearth health response", async () => {
+    let name = "Hearth";
+    const server = createServer((request, response) => {
+      if (request.url === "/api/health") {
+        response.statusCode = 200;
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify({ name }));
+        return;
+      }
+      response.statusCode = 404;
+      response.end();
+    });
+    servers.push(server);
+
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address() as AddressInfo;
+
+    expect(await probePort(address.port)).toBe(true);
+    expect(await portStatus(`http://127.0.0.1:${address.port}`, address.port)).toBe("hearth");
+
+    name = "OtherService";
+    expect(await portStatus(`http://127.0.0.1:${address.port}`, address.port)).toBe("occupied");
+  });
+
+  it("treats a closed port as free", async () => {
+    expect(await probePort(1)).toBe(false);
+    expect(await portStatus("http://127.0.0.1:1", 1)).toBe("free");
   });
 });
