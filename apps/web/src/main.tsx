@@ -32,7 +32,7 @@ createRoot(document.getElementById("root")!).render(
 );
 
 if ("serviceWorker" in navigator) {
-  if (window.hearthDesktop?.isDesktop) {
+  if (window.hearthDesktop?.isDesktop || "__TAURI_INTERNALS__" in window) {
     // A previous browser session may have registered /sw.js on the same origin.
     // Desktop mode must run without a stale service worker so the packaged
     // server is always the source of truth.

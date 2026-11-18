@@ -6,5 +6,6 @@ declare global {
       isDesktop: true;
       platform: string;
     };
+    __TAURI_INTERNALS__?: unknown;
   }
 }
