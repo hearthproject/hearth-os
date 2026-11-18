@@ -20,6 +20,10 @@ work/screenshots/
 *.sqlite-shm
 *.sqlite-wal
 
+# Desktop build staging
+apps/desktop/resources/
+apps/desktop/release/
+
 # Generated personal-agent scenario evidence
 eval/scenario-runs/
 
