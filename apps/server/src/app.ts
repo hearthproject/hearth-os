@@ -11,7 +11,7 @@ import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate } from "@hearth/templates";
 import { loadCodexProfile, runCodex } from "@hearth/codex-executor";
 import { z } from "zod";
-import { ATTACHMENT_DIR, BACKUP_DIR, CODEX_HOME_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, DSH_HOME_DIR, EXECUTOR_HOME_DIR, EXECUTOR_SETTINGS_PATH, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST, WORKSPACE_DIR } from "./config.ts";
+import { ARTIFACT_DIR, ATTACHMENT_DIR, BACKUP_DIR, CODEX_HOME_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, DSH_HOME_DIR, EXECUTOR_HOME_DIR, EXECUTOR_SETTINGS_PATH, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST, WORKSPACE_DIR } from "./config.ts";
 import { registerChatRoutes } from "./chat-routes.ts";
 import { registerEvalRoutes } from "./eval-routes.ts";
 import { ReconcileError, ReconcileService } from "./reconcile.ts";
@@ -4296,7 +4296,7 @@ function removeManagedTaskPaths(task: TaskRecord, dataDir: string): void {
   const workspaceTaskRoot = join(dataDir, "workspaces", "tasks", task.id);
   const managedArtifactRoots = new Set([
     resolve(dataDir, "artifacts", task.id),
-    resolve(REPO_ROOT, ".hearth", "artifacts", task.id)
+    resolve(ARTIFACT_DIR, task.id)
   ]);
   const outputRoot = resolve(REPO_ROOT, task.outputDir);
   rmSync(workspaceTaskRoot, { recursive: true, force: true });
