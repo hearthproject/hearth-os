@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, shell, type Tray } from "electron";
+import { app, BrowserWindow, dialog, session, shell, type Tray } from "electron";
 import { join } from "node:path";
 import {
   candidateFor,
@@ -26,6 +26,49 @@ let tray: Tray | null = null;
 let logs: DesktopLogs | null = null;
 let dataDir: string | null = null;
 let shuttingDown = false;
+let allowedOrigin = "http://127.0.0.1:4317";
+
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "connect-src 'self'",
+  "media-src 'self' blob:",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "frame-ancestors 'none'"
+].join("; ");
+
+function isAllowedNavigation(url: string): boolean {
+  return url === allowedOrigin || url.startsWith(`${allowedOrigin}/`);
+}
+
+function openExternalIfHttp(url: string): void {
+  if (url.startsWith("http://") || url.startsWith("https://")) {
+    void shell.openExternal(url);
+  }
+}
+
+async function configureSession(): Promise<void> {
+  await session.defaultSession.clearStorageData({
+    storages: ["serviceworkers", "cachestorage"]
+  });
+
+  session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
+    callback(false);
+  });
+
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        "Content-Security-Policy": [CONTENT_SECURITY_POLICY]
+      }
+    });
+  });
+}
 
 function resolveLaunch(root: string, selectedDataDir: string): ServerLaunch {
   const mode: DesktopMode = app.isPackaged ? "prod" : "dev";
@@ -89,11 +132,13 @@ function createWindow(launch: ServerLaunch): BrowserWindow {
     backgroundColor: "#0b0d10",
     title: "Hearth",
     webPreferences: {
+      preload: join(__dirname, "preload.js"),
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
       webviewTag: false,
-      spellcheck: false
+      spellcheck: false,
+      devTools: !app.isPackaged
     }
   });
 
@@ -134,6 +179,7 @@ function logMain(message: string): void {
 
 async function start(): Promise<void> {
   logs = createDesktopLogs();
+  app.setAppUserModelId("ai.hearth.os");
   logMain("desktop shell starting");
 
   const selection = await chooseDataRoot();
@@ -148,6 +194,8 @@ async function start(): Promise<void> {
   writeDesktopConfig(resolveDesktopConfigPath(), selection.root);
 
   const launch = resolveLaunch(selection.root, selection.dataDir);
+  allowedOrigin = new URL(launch.baseUrl).origin;
+  await configureSession();
   logMain(`mode=${app.isPackaged ? "prod" : "dev"} port=${new URL(launch.baseUrl).port}`);
 
   supervisor = new ServerSupervisor({
@@ -186,6 +234,22 @@ async function start(): Promise<void> {
     return;
   }
 
+  if (process.env.HEARTH_DESKTOP_SELF_CHECK === "1") {
+    const result = await mainWindow.webContents.executeJavaScript(
+      `(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        return {
+          desktop: window.hearthDesktop?.isDesktop === true,
+          platform: window.hearthDesktop?.platform ?? null,
+          sw: "serviceWorker" in navigator
+            ? (await navigator.serviceWorker.getRegistrations()).length
+            : 0
+        };
+      })()`
+    );
+    logMain(`self-check ${JSON.stringify(result)}`);
+  }
+
   tray = createTray(resolveTrayIcon(selection.root), {
     open: showMainWindow,
     openDataDir: () => {
@@ -221,6 +285,23 @@ if (!singleInstance) {
 } else {
   app.on("second-instance", () => {
     showMainWindow();
+  });
+
+  app.on("web-contents-created", (_event, contents) => {
+    contents.on("will-navigate", (event, url) => {
+      if (isAllowedNavigation(url)) return;
+      event.preventDefault();
+      openExternalIfHttp(url);
+    });
+
+    contents.setWindowOpenHandler(({ url }) => {
+      openExternalIfHttp(url);
+      return { action: "deny" };
+    });
+
+    contents.on("will-attach-webview", (event) => {
+      event.preventDefault();
+    });
   });
 
   app.whenReady().then(start).catch(async (error: unknown) => {

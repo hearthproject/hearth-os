@@ -31,10 +31,21 @@ createRoot(document.getElementById("root")!).render(
   </StrictMode>
 );
 
-if (import.meta.env.PROD && "serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    void navigator.serviceWorker.register("/sw.js").catch((error) => {
-      console.warn("Hearth service worker registration failed", error);
+if ("serviceWorker" in navigator) {
+  if (window.hearthDesktop?.isDesktop) {
+    // A previous browser session may have registered /sw.js on the same origin.
+    // Desktop mode must run without a stale service worker so the packaged
+    // server is always the source of truth.
+    void navigator.serviceWorker.getRegistrations()
+      .then((registrations) => Promise.all(registrations.map((registration) => registration.unregister())))
+      .catch((error) => {
+        console.warn("Hearth desktop service worker cleanup failed", error);
+      });
+  } else if (import.meta.env.PROD) {
+    window.addEventListener("load", () => {
+      void navigator.serviceWorker.register("/sw.js").catch((error) => {
+        console.warn("Hearth service worker registration failed", error);
+      });
     });
-  });
+  }
 }
