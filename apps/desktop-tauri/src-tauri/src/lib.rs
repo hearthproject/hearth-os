@@ -73,10 +73,23 @@ fn repo_root() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+fn strip_verbatim(path: PathBuf) -> PathBuf {
+    let text = path.to_string_lossy();
+    if let Some(rest) = text.strip_prefix(r"\\?\") {
+        return PathBuf::from(rest);
+    }
+    path
+}
+
 fn resolve_resource(app: &tauri::AppHandle, relative: &str) -> Option<PathBuf> {
-    let packaged = app.path().resource_dir().ok()?.join(relative);
+    let resource_root = app.path().resource_dir().ok()?;
+    let packaged = resource_root.join(relative);
     if packaged.exists() {
-        return Some(packaged);
+        return Some(strip_verbatim(packaged));
+    }
+    let nested = resource_root.join("resources").join(relative);
+    if nested.exists() {
+        return Some(strip_verbatim(nested));
     }
     let dev = repo_root().join(relative);
     dev.exists().then_some(dev)

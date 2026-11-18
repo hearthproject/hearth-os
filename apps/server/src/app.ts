@@ -1186,7 +1186,11 @@ export async function buildServer(options: BuildServerOptions = {}) {
       return reply.code(403).send({ error: "LOCAL_ONLY", message: "Hearth 仅接受本机访问" });
     }
     const gmailCallback = request.method === "GET" && request.url.split("?")[0] === "/api/mail/gmail/callback";
-    if (request.headers["sec-fetch-site"] === "cross-site" && !gmailCallback) {
+    const desktopShellNavigation =
+      request.method === "GET" &&
+      request.url.split("?")[0] === "/" &&
+      LOOPBACK_HOSTS.has(request.hostname);
+    if (request.headers["sec-fetch-site"] === "cross-site" && !gmailCallback && !desktopShellNavigation) {
       return reply.code(403).send({ error: "CROSS_SITE_BLOCKED", message: "已阻止跨站请求" });
     }
     if (!["GET", "HEAD", "OPTIONS"].includes(request.method) && request.headers.origin) {
