@@ -76,7 +76,7 @@ try {
   await page.getByText(task.goal, { exact: true }).waitFor({ state: 'visible' });
   const process = page.locator('.process-toggle');
   assert.equal(await process.getAttribute('aria-expanded'), 'false');
-  assert.ok(await page.locator('.process-panel').evaluate(el => Boolean(el.nextElementSibling?.textContent?.includes('执行链路 / 上下文'))));
+  assert.equal(await page.getByText('执行链路 / 上下文').count(), 0);
   await process.click();
   assert.equal(await process.getAttribute('aria-expanded'), 'true');
   task.status = 'running';

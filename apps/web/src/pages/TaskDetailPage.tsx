@@ -33,7 +33,7 @@ import { TaskFollowUpPanel } from "../components/TaskFollowUpPanel.tsx";
 import { TaskGitPanel } from "../components/TaskGitPanel.tsx";
 import { TaskWorktreePanel } from "../components/TaskWorktreePanel.tsx";
 import { StatusPill } from "../components/StatusPill.tsx";
-import type { ArtifactRecord, ContextItem, ExecutorId, GoalCompletionReport, GoalContract, HandoffRecord, RunRecord, TaskContextResponse, TaskDeliverable, TaskProgressDetail, TaskView } from "../lib/types.ts";
+import type { ArtifactRecord, ExecutorId, GoalCompletionReport, GoalContract, RunRecord, TaskDeliverable, TaskProgressDetail, TaskView } from "../lib/types.ts";
 
 export function TaskDetailPage() {
   const { id = "" } = useParams();
@@ -58,7 +58,7 @@ export function TaskDetailPage() {
   const [preview, setPreview] = useState<{ artifact: TaskDeliverable; content: string | null; loading: boolean; error: string | null } | null>(null);
   const [resumeInput, setResumeInput] = useState("");
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const contextQuery = useQuery({ queryKey: ["task-context", id], queryFn: () => api.taskContext(id, { limit: 80 }), enabled: Boolean(id), refetchInterval: 4_000 });
+  const contextQuery = useQuery({ queryKey: ["task-context", id], queryFn: () => api.taskContext(id, { limit: 1 }), enabled: Boolean(id), refetchInterval: 4_000 });
   const methodsQuery = useQuery({ queryKey: ["methods"], queryFn: api.methods, refetchInterval: 30_000 });
   const pendingHandoff = contextQuery.data?.handoffs.find((item) => item.status === "pending_user") ?? null;
 
@@ -473,12 +473,6 @@ export function TaskDetailPage() {
           </div></div>
         </div>
       </section>
-      <ContextPanel
-        view={view}
-        context={contextQuery.data}
-        loading={contextQuery.isLoading}
-        error={contextQuery.isError ? (contextQuery.error instanceof Error ? contextQuery.error.message : "上下文读取失败") : null}
-      />
     </div>
   );
 }
@@ -575,133 +569,6 @@ function criterionResultLabel(status: "passed" | "failed" | "not_run" | "not_req
   if (status === "failed") return "未通过";
   if (status === "not_required") return "可选未跑";
   return "未运行";
-}
-
-function ContextPanel({ view, context, loading, error }: {
-  view: TaskView;
-  context: TaskContextResponse | undefined;
-  loading: boolean;
-  error: string | null;
-}) {
-  const handoffs = context?.handoffs ?? [];
-  const latestHandoff = [...handoffs].reverse()[0] ?? null;
-  const state = context?.state ?? null;
-  const timeline = context ? [...context.items.items].reverse().slice(-20) : [];
-  return (
-    <section className="panel context-panel">
-      <div className="panel-head">
-        <h2>执行链路 / 上下文</h2>
-        <span className="panel-meta">{view.runs.length} 次运行 · {handoffs.length} 次接管 · {context?.items.total ?? 0} 条上下文</span>
-      </div>
-      <div className="context-body">
-        {loading && <p className="muted"><Loader2 className="spin" size={14} /> 正在读取上下文账本</p>}
-        {error && <p className="form-error">{error}</p>}
-        <div className="context-section">
-          <h3>执行链路</h3>
-          <div className="context-chain">
-            {view.runs.map((run) => {
-              const handoff = handoffs.find((item) => item.toRunId === run.id);
-              return (
-                <div key={run.id} className="chain-entry">
-                  {handoff && (
-                    <div className="chain-handoff">
-                      <span>{executorLabel(handoff.fromExecutor)}</span>
-                      <ArrowRight size={14} />
-                      <strong>{executorLabel(handoff.toExecutor)}</strong>
-                      <small>{handoff.packet?.summary ?? handoff.reasonCode}</small>
-                    </div>
-                  )}
-                  <div className="chain-run">
-                    <strong>第 {run.attempt} 次</strong>
-                    <span>{executorLabel(run.executorId)}</span>
-                    <span className={`run-status ${run.status}`}>{runStatusLabel(run.status)}</span>
-                    <span>{formatDuration(runDuration(run))}</span>
-                    <span>Token {formatTokens(run.usage)}</span>
-                  </div>
-                  {run.failure && <p className="run-error">{run.failure.message}</p>}
-                </div>
-              );
-            })}
-            {view.runs.length === 0 && <p className="muted">还没有运行记录。</p>}
-          </div>
-        </div>
-        <div className="context-section">
-          <h3>任务摘要</h3>
-          {state?.summary ? <pre className="context-summary">{state.summary}</pre> : <p className="muted">本轮结束后会生成任务级摘要。</p>}
-          {state?.lastFailure && (
-            <div className="context-failure"><ShieldAlert size={14} /><span>{state.lastFailure.message}</span></div>
-          )}
-        </div>
-        <div className="context-section">
-          <h3>产物清单</h3>
-          {state && state.artifacts.length > 0 ? (
-            <ul className="context-artifacts">
-              {state.artifacts.map((artifact) => (
-                <li key={artifact.artifactId}>
-                  <span>{artifact.path}</span>
-                  <code>{artifact.sha256.slice(0, 12)}</code>
-                  <small>{formatBytes(artifact.bytes)}</small>
-                </li>
-              ))}
-            </ul>
-          ) : <p className="muted">还没有已登记产物。</p>}
-        </div>
-        <div className="context-section">
-          <h3>上下文时间线</h3>
-          {timeline.length > 0 ? (
-            <ol className="context-timeline">
-              {timeline.map((item) => (
-                <li key={item.id}>
-                  <span className="context-kind">{contextKindLabel(item.kind)}</span>
-                  <p>{previewText(item.content)}</p>
-                  <small>{formatTime(item.createdAt)} · {item.executorId ? executorLabel(item.executorId) : "Hearth"}</small>
-                </li>
-              ))}
-            </ol>
-          ) : <p className="muted">执行器事件会依次记录到这里。</p>}
-        </div>
-        {latestHandoff?.packet && (
-          <div className="context-section">
-            <h3>最近一次接管包</h3>
-            <p>{latestHandoff.packet.summary}</p>
-            <dl className="context-kv">
-              <div><dt>下一步</dt><dd>{latestHandoff.packet.nextAction}</dd></div>
-              <div><dt>剩余预算</dt><dd>{latestHandoff.packet.remainingBudget.maxTurns} turns · {latestHandoff.packet.remainingBudget.maxTokens} tokens</dd></div>
-              <div><dt>产物</dt><dd>{latestHandoff.packet.artifacts.map((item) => item.path).join("、") || "无"}</dd></div>
-              <div><dt>不要重复</dt><dd>{latestHandoff.packet.doNotRepeat.join("；") || "无"}</dd></div>
-            </dl>
-          </div>
-        )}
-      </div>
-    </section>
-  );
-}
-
-function contextKindLabel(kind: ContextItem["kind"]): string {
-  const labels: Record<ContextItem["kind"], string> = {
-    user_message: "用户消息",
-    task_input: "任务输入",
-    assistant_message: "执行器回复",
-    tool_call: "工具调用",
-    tool_result: "工具结果",
-    artifact: "产物",
-    checkpoint: "检查点",
-    failure: "失败",
-    diagnosis: "诊断",
-    handoff: "接管",
-    decision: "决策",
-    summary: "摘要",
-    memory_recall: "记忆召回",
-    method: "方法注入",
-    usage: "用量",
-    notice: "通知"
-  };
-  return labels[kind];
-}
-
-function previewText(text: string, max = 260): string {
-  const clean = text.replace(/\s+/g, " ").trim();
-  return clean.length > max ? `${clean.slice(0, max)}…` : clean;
 }
 
 function visibleDeliverables(artifacts: ArtifactRecord[], expectedOutputs?: string[]): TaskDeliverable[] {
