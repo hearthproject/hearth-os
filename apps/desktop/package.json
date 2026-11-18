@@ -1,6 +1,9 @@
 {
   "name": "@hearth/desktop",
+  "productName": "Hearth",
   "version": "0.1.0",
+  "description": "Hearth personal agent OS desktop shell",
+  "author": "Hearth",
   "private": true,
   "type": "commonjs",
   "main": "dist/main.js",

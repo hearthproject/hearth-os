@@ -23,10 +23,32 @@ extraResources:
     to: server/node_modules
     filter:
       - "**/*"
+  - from: resources/tray.png
+    to: tray.png
 win:
-  signAndEditExecutable: false
+  icon: build/icon.ico
+  signExecutable: false
   target:
-    - target: dir
+    - target: nsis
       arch:
         - x64
+    - target: portable
+      arch:
+        - x64
+nsis:
+  oneClick: true
+  perMachine: false
+  allowToChangeInstallationDirectory: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  runAfterFinish: true
+  deleteAppDataOnUninstall: false
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerHeaderIcon: build/icon.ico
+  artifactName: "Hearth-Setup-${version}.${ext}"
+  include: build/installer.nsh
+portable:
+  artifactName: "Hearth-Portable-${version}.${ext}"
+  unpackDirName: "HearthPortable"
 npmRebuild: false
