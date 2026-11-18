@@ -787,21 +787,21 @@ describe("Hearth scheduler", () => {
 
     const task = service.createTask({ title: "长任务", goal: "完成一项长任务" });
     const first = await waitForStatus(service, task.id, "waiting_budget");
-    expect(DEFAULT_RUN_BUDGET).toMatchObject({ maxTurns: 200, maxToolCalls: 4_000, maxTokens: 2_000_000_000, maxDurationMs: 36_000_000 });
-    expect(observedBudgets[0]).toMatchObject({ maxTurns: 200, maxToolCalls: 4_000, maxTokens: 2_000_000_000 });
+    expect(DEFAULT_RUN_BUDGET).toMatchObject({ maxTurns: 200, maxToolCalls: 4_000, maxTokens: 600_000_000, maxDurationMs: 36_000_000 });
+    expect(observedBudgets[0]).toMatchObject({ maxTurns: 200, maxToolCalls: 4_000, maxTokens: 600_000_000 });
     expect(first.error?.budgetExhaustion).toEqual({ dimension: "turns", used: 200, limit: 200 });
 
     scheduler.extendBudget(task.id);
     const second = await waitForStatus(service, task.id, "waiting_budget");
-    expect(service.requireTask(task.id).budgetOverride).toMatchObject({ maxTurns: 400, maxToolCalls: 8_000, maxTokens: 4_000_000_000, maxDurationMs: 72_000_000 });
-    expect(observedBudgets[1]).toMatchObject({ maxTurns: 200, maxToolCalls: 7_990, maxTokens: 3_999_999_850 });
+    expect(service.requireTask(task.id).budgetOverride).toMatchObject({ maxTurns: 400, maxToolCalls: 8_000, maxTokens: 1_200_000_000, maxDurationMs: 72_000_000 });
+    expect(observedBudgets[1]).toMatchObject({ maxTurns: 200, maxToolCalls: 7_990, maxTokens: 1_199_999_850 });
     expect(second.error?.budgetExhaustion).toEqual({ dimension: "turns", used: 400, limit: 400 });
     expect(resumedCounts[1]).toBeGreaterThan(0);
 
     scheduler.extendBudget(task.id);
     const completed = await waitForStatus(service, task.id, "completed");
-    expect(completed.budgetOverride).toMatchObject({ maxTurns: 800, maxToolCalls: 16_000, maxTokens: 8_000_000_000, maxDurationMs: 144_000_000 });
-    expect(observedBudgets[2]).toMatchObject({ maxTurns: 400, maxToolCalls: 15_980, maxTokens: 7_999_999_700 });
+    expect(completed.budgetOverride).toMatchObject({ maxTurns: 800, maxToolCalls: 16_000, maxTokens: 2_400_000_000, maxDurationMs: 144_000_000 });
+    expect(observedBudgets[2]).toMatchObject({ maxTurns: 400, maxToolCalls: 15_980, maxTokens: 2_399_999_700 });
     expect(resumedCounts[2]).toBeGreaterThan(0);
   });
 

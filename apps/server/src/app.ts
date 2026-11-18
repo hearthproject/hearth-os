@@ -4011,7 +4011,15 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
 
   app.get<{ Querystring: { after?: string; taskId?: string } }>("/api/events", async (request, reply) => {
-    const afterSeq = parseAfterSeq(request.query.after);
+    // 默认只推送连接之后的新事件，避免每次打开应用都把全部历史重放一遍（旧库已有十几万条事件）。
+    // 需要补历史时显式传 after；浏览器断线重连会自动带上 Last-Event-ID，同样从断点续传。
+    const headerCursor = request.headers["last-event-id"];
+    const lastEventId = Array.isArray(headerCursor) ? headerCursor[0] : headerCursor;
+    const afterSeq = request.query.after !== undefined
+      ? parseAfterSeq(request.query.after)
+      : lastEventId
+        ? parseAfterSeq(lastEventId) ?? store.latestEventSeq()
+        : store.latestEventSeq();
     if (afterSeq === null) {
       return reply.code(400).send({ error: "INVALID_CURSOR", message: "after 必须是非负整数" });
     }
