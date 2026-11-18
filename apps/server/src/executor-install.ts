@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ExecutorId, ExecutorInstallInfo, ExecutorInstallJob } from "@hearth/core";
@@ -189,10 +189,24 @@ function npmInvocation(): { command: string; prefixArgs: string[] } {
     join(dirname(process.execPath), "..", "lib", "node_modules", "npm", "bin", "npm-cli.js")
   ].find(existsSync);
   if (cli) return { command: process.execPath, prefixArgs: [cli] };
-  if (process.platform === "win32") {
-    return { command: process.env.ComSpec ?? "cmd.exe", prefixArgs: ["/d", "/s", "/c", "npm"] };
+
+  const command = process.platform === "win32" ? process.env.ComSpec ?? "cmd.exe" : "npm";
+  const args = process.platform === "win32" ? ["/d", "/s", "/c", "npm --version"] : ["--version"];
+  const probe = spawnSync(command, args, {
+    encoding: "utf8",
+    timeout: 5_000,
+    windowsHide: true
+  });
+  if (probe.status === 0) {
+    return process.platform === "win32"
+      ? { command, prefixArgs: ["/d", "/s", "/c", "npm"] }
+      : { command, prefixArgs: [] };
   }
-  return { command: "npm", prefixArgs: [] };
+
+  throw new ExecutorInstallError(
+    "NPM_NOT_FOUND",
+    "未找到 npm。托管安装执行器需要先安装 Node.js/npm，或手动安装该执行器。"
+  );
 }
 
 function unsupportedHint(id: ExecutorId): string {

@@ -1,6 +1,6 @@
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DeepSeekHarness, type HarnessNotification, type RunResult } from "@deepseek-ai/dsh-sdk-client";
+import type { DeepSeekHarness, HarnessNotification, RunResult } from "@deepseek-ai/dsh-sdk-client";
 
 export type DshProtocol = "openai-chat" | "openai-responses" | "anthropic-messages";
 
@@ -70,6 +70,24 @@ export class DeepSeekHarnessError extends Error {
   }
 }
 
+export class DeepSeekRuntimeMissingError extends DeepSeekHarnessError {
+  constructor(message: string, options?: ErrorOptions) {
+    super("EXECUTOR_RUNTIME_MISSING", message, options);
+    this.name = "DeepSeekRuntimeMissingError";
+  }
+}
+
+async function loadDeepSeekHarness(): Promise<typeof import("@deepseek-ai/dsh-sdk-client")> {
+  try {
+    return await import("@deepseek-ai/dsh-sdk-client");
+  } catch (error) {
+    throw new DeepSeekRuntimeMissingError(
+      "DeepSeek Harness 运行时未安装。请安装 @deepseek-ai/dsh-sdk-client，或改用 native / Codex 执行器。",
+      { cause: error }
+    );
+  }
+}
+
 const API_KEY_ENV = "HEARTH_DSH_API_KEY";
 const PROVIDER = "hearth";
 const API_BY_PROTOCOL: Record<DshProtocol, string> = {
@@ -79,6 +97,7 @@ const API_BY_PROTOCOL: Record<DshProtocol, string> = {
 };
 
 export async function runDeepSeekHarness(options: DeepSeekHarnessRunOptions): Promise<DeepSeekHarnessRunResult> {
+  const { DeepSeekHarness } = await loadDeepSeekHarness();
   validateSettings(options.settings);
   mkdirSync(options.dshHome, { recursive: true });
   const patchPath = writeProviderPatch(options.dshHome, options.settings);
