@@ -28,6 +28,7 @@ function run(command, args, cwd = repoRoot) {
 }
 
 await run(process.platform === "win32" ? "npm.cmd" : "npm", ["run", "build", "-w", "@hearth/web"]);
+await run(process.platform === "win32" ? "npm.cmd" : "npm", ["run", "desktop:build:shell"]);
 await run(process.execPath, [join(repoRoot, "scripts", "make-icon.mjs")]);
 await run(process.execPath, [join(repoRoot, "scripts", "build-server.mjs")]);
 await run(process.execPath, [join(repoRoot, "scripts", "stage-server-deps.mjs")]);
