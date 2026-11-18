@@ -1,4 +1,5 @@
 import { Codex, type ThreadItem } from "@openai/codex-sdk";
+import { existsSync } from "node:fs";
 import type { RunUsage, TaskProgressDetail } from "@hearth/core";
 import { buildCodexEnv, describeCodexProfile, loadCodexProfile, type CodexProfile } from "./profile.ts";
 
@@ -13,6 +14,7 @@ export interface CodexRunOptions {
   onThreadStarted?: (threadId: string) => void;
   profile?: CodexProfile;
   codex?: Codex;
+  codexPathOverride?: string;
   threadId?: string;
   networkAccessEnabled?: boolean;
   env?: Record<string, string>;
@@ -34,8 +36,14 @@ export interface CodexRunResult {
 export async function runCodex(options: CodexRunOptions): Promise<CodexRunResult> {
   const profile = options.profile ?? loadCodexProfile();
   if (!profile.canRun) throw new Error(`Codex 不可用：${profile.issues.join("；")}`);
+  if (options.codexPathOverride && !existsSync(options.codexPathOverride)) {
+    throw new Error(`Codex 可执行文件不存在：${options.codexPathOverride}`);
+  }
 
-  const codex = options.codex ?? new Codex({ env: { ...buildCodexEnv(profile), ...(options.env ?? {}) } });
+  const codex = options.codex ?? new Codex({
+    env: { ...buildCodexEnv(profile), ...(options.env ?? {}) },
+    ...(options.codexPathOverride ? { codexPathOverride: options.codexPathOverride } : {})
+  });
   const threadOptions = {
     ...(profile.model ? { model: profile.model } : {}),
     workingDirectory: options.workingDirectory,
@@ -95,13 +103,15 @@ export async function runCodex(options: CodexRunOptions): Promise<CodexRunResult
 
 export async function probeCodex(
   profile = loadCodexProfile(),
-  env?: Record<string, string>
+  env?: Record<string, string>,
+  codexPathOverride?: string
 ): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
   if (!profile.canRun) return { ok: false, error: profile.issues.join("；") };
   try {
     const result = await runCodex({
       profile,
       ...(env ? { env } : {}),
+      ...(codexPathOverride ? { codexPathOverride } : {}),
       workingDirectory: process.cwd(),
       prompt: "Reply with exactly HEARTH_OK and nothing else. Do not use tools."
     });

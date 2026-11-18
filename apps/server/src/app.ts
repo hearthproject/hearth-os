@@ -1097,7 +1097,12 @@ export async function buildServer(options: BuildServerOptions = {}) {
         executorHealth,
         modelSettingsPath,
         modelSettingsForExecutor,
-        codexRunner: (runOptions) => runCodex({ ...runOptions, profile: codexProfile(), env: codexEnv() }),
+        codexRunner: (runOptions) => runCodex({
+          ...runOptions,
+          profile: codexProfile(),
+          env: codexEnv(),
+          ...(process.env.HEARTH_CODEX_PATH ? { codexPathOverride: process.env.HEARTH_CODEX_PATH } : {})
+        }),
         ...(options.sourceContentRoot ? { sourceContentRoot: options.sourceContentRoot } : {})
       })
     : null;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { describeItem } from "./executor.ts";
+import { describeItem, runCodex } from "./executor.ts";
+import type { CodexProfile } from "./profile.ts";
 
 describe("describeItem", () => {
   it("turns test commands into a high-level check step", () => {
@@ -35,5 +36,29 @@ describe("describeItem", () => {
   it("drops model metadata warnings", () => {
     const item = { id: "6", type: "error" as const, message: "Model metadata for `gpt-5.1-codex` not found. Defaulting to fallback metadata; this may impact performance." };
     expect(describeItem(item).message).toBe("");
+  });
+
+  it("refuses a missing codexPathOverride before constructing the SDK", async () => {
+    const profile: CodexProfile = {
+      codexHome: "C:\\codex",
+      configPath: "C:\\codex\\config.toml",
+      model: null,
+      providerId: "openai",
+      providerName: "OpenAI",
+      baseUrl: null,
+      wireApi: null,
+      envKey: null,
+      envKeyPresent: false,
+      envKeySource: "none",
+      authSource: "openai-login",
+      canRun: true,
+      issues: []
+    };
+    await expect(runCodex({
+      profile,
+      workingDirectory: process.cwd(),
+      prompt: "HEARTH_OK",
+      codexPathOverride: "C:\\missing\\codex.exe"
+    })).rejects.toThrow("Codex 可执行文件不存在");
   });
 });

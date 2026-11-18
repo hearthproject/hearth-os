@@ -256,7 +256,7 @@ function computeHealthSync(id: ExecutorId, settings: ExecutorSettings, settingsP
       state: packagePath ? "unverified" : "missing",
       command: "dsh-sdk",
       version: packagePath ? packageVersion(packagePath) : null,
-      issues: packagePath ? [] : ["DeepSeek Harness SDK 未安装；请重新安装项目依赖"],
+      issues: packagePath ? [] : ["未安装可选运行时 @deepseek-ai/dsh-sdk-client；DeepSeek 执行器暂不可用，native / Codex 不受影响"],
       installState: packagePath ? "available" : "missing"
     };
   }
@@ -483,7 +483,7 @@ async function runRealProbe(
     if (id === "codex") {
       const profile = options.codexProfile ?? loadCodexProfile();
       const result = await withProbeTimeout(
-        probeCodex(profile, options.codexEnv),
+        probeCodex(profile, options.codexEnv, process.env.HEARTH_CODEX_PATH),
         timeoutMs,
         "Codex 测试超时，请检查模型地址、网络和登录状态"
       );
