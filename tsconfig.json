@@ -6,5 +6,5 @@
     "jsx": "react-jsx"
   },
   "include": ["packages/**/*.ts", "apps/**/*.ts", "apps/**/*.tsx", "vitest.config.ts"],
-  "exclude": ["node_modules", "dist", "docs"]
+  "exclude": ["node_modules", "dist", "docs", "apps/desktop"]
 }
