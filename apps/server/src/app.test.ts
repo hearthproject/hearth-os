@@ -111,6 +111,14 @@ describe("Hearth server", () => {
     await app.close();
   });
 
+  it("exposes a lightweight ready probe without a health snapshot", async () => {
+    const app = await buildServer({ store, serveWeb: false });
+    const response = await app.inject({ method: "GET", url: "/api/ready" });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true, name: "Hearth" });
+    await app.close();
+  });
+
   it("keeps outbox drafts separate from approval until the user submits them", async () => {
     const app = await buildServer({ store, serveWeb: false });
     const created = await app.inject({

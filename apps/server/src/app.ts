@@ -1138,6 +1138,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     logger: options.logger ?? false,
     bodyLimit: 8_000_000
   });
+  app.get("/api/ready", async () => ({ ok: true, name: "Hearth" }));
   app.decorate("feishu", feishu);
 
   schedules.start();
