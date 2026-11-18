@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog } from "electron";
+import { app, BrowserWindow, dialog, shell, type Tray } from "electron";
 import { join } from "node:path";
 import {
   candidateFor,
@@ -16,19 +16,24 @@ import {
   type DesktopMode,
   type ServerLaunch
 } from "./server-process";
+import { createTray } from "./tray";
+
+const singleInstance = app.requestSingleInstanceLock();
 
 let supervisor: ServerSupervisor | null = null;
 let mainWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
 let logs: DesktopLogs | null = null;
+let dataDir: string | null = null;
 let shuttingDown = false;
 
-function resolveLaunch(root: string, dataDir: string): ServerLaunch {
+function resolveLaunch(root: string, selectedDataDir: string): ServerLaunch {
   const mode: DesktopMode = app.isPackaged ? "prod" : "dev";
 
   return buildServerLaunch({
     mode,
     root,
-    dataDir,
+    dataDir: selectedDataDir,
     webDist: app.isPackaged ? join(process.resourcesPath, "web") : join(root, "apps", "web", "dist"),
     resourcesPath: process.resourcesPath
   });
@@ -96,11 +101,31 @@ function createWindow(launch: ServerLaunch): BrowserWindow {
     window.show();
   });
 
+  window.on("close", (event) => {
+    if (shuttingDown) return;
+    event.preventDefault();
+    window.hide();
+    logMain("window hidden to tray");
+  });
+
   window.on("closed", () => {
     if (mainWindow === window) mainWindow = null;
   });
 
   return window;
+}
+
+function showMainWindow(): void {
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function resolveTrayIcon(root: string): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, "tray.png")
+    : join(root, "docs", "public", "brand", "hearth-os-logo.png");
 }
 
 function logMain(message: string): void {
@@ -118,6 +143,7 @@ async function start(): Promise<void> {
     return;
   }
 
+  dataDir = selection.dataDir;
   logMain(`data root=${selection.root} data=${selection.dataDir}`);
   writeDesktopConfig(resolveDesktopConfigPath(), selection.root);
 
@@ -157,6 +183,25 @@ async function start(): Promise<void> {
     logMain(`load failed: ${message}`);
     dialog.showErrorBox("Hearth 页面加载失败", message);
     await shutdown();
+    return;
+  }
+
+  tray = createTray(resolveTrayIcon(selection.root), {
+    open: showMainWindow,
+    openDataDir: () => {
+      if (dataDir) void shell.openPath(dataDir);
+    },
+    openLogs: () => {
+      if (logs) void shell.openPath(logs.dir);
+    },
+    quit: () => void shutdown()
+  });
+  logMain("tray created");
+
+  const autoQuitMs = Number(process.env.HEARTH_DESKTOP_AUTO_QUIT_MS ?? 0);
+  if (Number.isFinite(autoQuitMs) && autoQuitMs > 0) {
+    logMain(`auto quit scheduled in ${autoQuitMs}ms`);
+    setTimeout(() => void shutdown(), autoQuitMs);
   }
 }
 
@@ -164,22 +209,36 @@ async function shutdown(): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   logMain("desktop shell shutting down");
+  tray?.destroy();
+  tray = null;
   await supervisor?.stop();
   supervisor = null;
   app.quit();
 }
 
-app.whenReady().then(start).catch(async (error: unknown) => {
-  dialog.showErrorBox("Hearth 启动失败", error instanceof Error ? error.message : String(error));
-  await shutdown();
-});
+if (!singleInstance) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    showMainWindow();
+  });
 
-app.on("window-all-closed", () => {
-  void shutdown();
-});
+  app.whenReady().then(start).catch(async (error: unknown) => {
+    dialog.showErrorBox("Hearth 启动失败", error instanceof Error ? error.message : String(error));
+    await shutdown();
+  });
 
-app.on("before-quit", (event) => {
-  if (shuttingDown) return;
-  event.preventDefault();
-  void shutdown();
-});
+  app.on("activate", () => {
+    showMainWindow();
+  });
+
+  app.on("window-all-closed", () => {
+    // Keep the server and tray alive; quit happens from the tray menu.
+  });
+
+  app.on("before-quit", (event) => {
+    if (shuttingDown) return;
+    event.preventDefault();
+    void shutdown();
+  });
+}
