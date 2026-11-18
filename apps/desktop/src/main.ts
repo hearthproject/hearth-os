@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, session, shell, type Tray } from "electron";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   candidateFor,
@@ -9,6 +10,12 @@ import {
   writeDesktopConfig,
   type DataRootCandidate
 } from "./data-root";
+import {
+  checkEnvironment,
+  environmentSummary,
+  formatEnvironmentReport,
+  type EnvironmentReport
+} from "./environment";
 import { createDesktopLogs, type DesktopLogs } from "./logs";
 import {
   buildServerLaunch,
@@ -177,6 +184,78 @@ function logMain(message: string): void {
   logs?.main.write(`[main] ${message}`);
 }
 
+async function runEnvironmentCheck(): Promise<EnvironmentReport | null> {
+  if (!supervisor) return null;
+  try {
+    const report = await checkEnvironment({
+      baseUrl: allowedOrigin,
+      resourcesPath: process.resourcesPath,
+      port: Number(new URL(allowedOrigin).port || 4317)
+    });
+    const missing = report.items.filter((item) => item.status !== "ok");
+    for (const item of missing) {
+      logMain(`environment ${item.status} ${item.id}: ${item.detail}`);
+    }
+    logMain(`environment summary missing=${report.missing} warnings=${report.warnings}`);
+    return report;
+  } catch (error) {
+    logMain(`environment check failed: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
+async function showEnvironmentDialog(): Promise<void> {
+  const report = await runEnvironmentCheck();
+  if (!report) {
+    dialog.showErrorBox("环境体检失败", "无法读取本地环境和 Hearth 服务状态。查看日志目录获取详情。");
+    return;
+  }
+  await dialog.showMessageBox({
+    type: report.healthy ? "info" : report.missing > 0 ? "warning" : "info",
+    title: "Hearth 环境体检",
+    message: environmentSummary(report),
+    detail: formatEnvironmentReport(report),
+    buttons: ["关闭"],
+    noLink: true
+  });
+}
+
+function environmentIntroMarkerPath(): string {
+  return join(app.getPath("userData"), "environment-intro-shown");
+}
+
+async function maybeShowEnvironmentIntro(): Promise<void> {
+  if (process.env.HEARTH_ENV_SKIP_INTRO === "1") return;
+  const marker = environmentIntroMarkerPath();
+  if (existsSync(marker)) return;
+
+  const report = await runEnvironmentCheck();
+  if (!report) return;
+  const model = report.items.find((item) => item.id === "model");
+  if (model?.status !== "missing") {
+    try {
+      writeFileSync(marker, new Date().toISOString(), "utf8");
+    } catch (error) {
+      logMain(`environment marker write failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return;
+  }
+
+  await dialog.showMessageBox({
+    type: "warning",
+    title: "Hearth 还差一步",
+    message: "还没有配置聊天模型。",
+    detail: "应用已经可用，但聊天需要先在界面里填写模型 API Key。你现在也可以先浏览任务和设置。",
+    buttons: ["进入 Hearth"],
+    noLink: true
+  });
+  try {
+    writeFileSync(marker, new Date().toISOString(), "utf8");
+  } catch (error) {
+    logMain(`environment marker write failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 async function start(): Promise<void> {
   logs = createDesktopLogs();
   app.setAppUserModelId("ai.hearth.os");
@@ -252,6 +331,7 @@ async function start(): Promise<void> {
 
   tray = createTray(resolveTrayIcon(selection.root), {
     open: showMainWindow,
+    environment: () => void showEnvironmentDialog(),
     openDataDir: () => {
       if (dataDir) void shell.openPath(dataDir);
     },
@@ -261,6 +341,8 @@ async function start(): Promise<void> {
     quit: () => void shutdown()
   });
   logMain("tray created");
+
+  void maybeShowEnvironmentIntro();
 
   const autoQuitMs = Number(process.env.HEARTH_DESKTOP_AUTO_QUIT_MS ?? 0);
   if (Number.isFinite(autoQuitMs) && autoQuitMs > 0) {
