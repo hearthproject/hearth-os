@@ -2455,11 +2455,14 @@ export class HearthScheduler {
   }
 
   private effectiveBudget(task: TaskRecord): RunBudget {
+    const modeTokenFloor = task.executorId === "native" && task.executionMode
+      ? EXECUTION_PROFILES[task.executionMode].budget.maxTokens
+      : 0;
     if (task.budgetOverride) {
       return {
         maxTurns: Math.max(1, Math.floor(task.budgetOverride.maxTurns)),
         maxToolCalls: Math.max(1, Math.floor(task.budgetOverride.maxToolCalls)),
-        maxTokens: Math.max(1, Math.floor(task.budgetOverride.maxTokens)),
+        maxTokens: Math.max(1, Math.floor(task.budgetOverride.maxTokens), modeTokenFloor),
         maxDurationMs: Math.max(1, Math.floor(task.budgetOverride.maxDurationMs))
       };
     }
