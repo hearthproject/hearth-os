@@ -2,7 +2,7 @@ use serde::Deserialize;
 use std::{
     env,
     fs::{self, OpenOptions},
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Read, Write},
     net::TcpStream,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
@@ -161,14 +161,24 @@ fn spawn_server(
     Ok(child)
 }
 
-fn port_open(port: u16) -> bool {
-    TcpStream::connect_timeout(
-        &format!("127.0.0.1:{port}")
-            .parse()
-            .expect("loopback address"),
+fn ready_probe(port: u16) -> bool {
+    let address = format!("127.0.0.1:{port}");
+    let Ok(mut stream) = TcpStream::connect_timeout(
+        &address.parse().expect("loopback address"),
         Duration::from_millis(250),
-    )
-    .is_ok()
+    ) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
+    let request = format!(
+        "GET /api/ready HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+    );
+    if stream.write_all(request.as_bytes()).is_err() {
+        return false;
+    }
+    let mut response = String::new();
+    let _ = stream.read_to_string(&mut response);
+    response.starts_with("HTTP/1.1 200") && response.contains("\"ok\":true")
 }
 
 fn show_error(window: &WebviewWindow, message: &str) {
@@ -184,7 +194,7 @@ fn wait_for_server(window: WebviewWindow, root: PathBuf, port: u16) {
         let deadline = Instant::now() + Duration::from_secs(30);
         log_line(&root, "[tauri] waiting for local server");
         while Instant::now() < deadline {
-            if port_open(port) {
+            if ready_probe(port) {
                 let url = format!("http://127.0.0.1:{port}");
                 log_line(&root, &format!("[tauri] server ready at {url}"));
                 let _ = window.eval(&format!("window.location.replace({:?})", url));
@@ -221,6 +231,12 @@ fn stop_server(app: &tauri::AppHandle) {
         let _ = child.kill();
     }
     let _ = child.wait();
+    let lock = root_lock_path(&resolve_data_root());
+    let _ = fs::remove_file(lock);
+}
+
+fn root_lock_path(root: &Path) -> PathBuf {
+    root.join(".hearth").join("hearth.lock")
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
