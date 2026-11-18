@@ -218,6 +218,17 @@ npm start
 
 打开 <http://127.0.0.1:4317>。
 
+### Windows 桌面版（实验）
+
+```powershell
+npm ci
+npm run desktop:build
+```
+
+生成 `release\Hearth-Setup-0.1.0.exe`（按用户安装，免 UAC）和 `release\Hearth-Portable-0.1.0.exe`。安装后双击开始菜单的 Hearth 即可；关窗会隐藏到托盘，托盘菜单负责退出、数据目录、日志和桌面助手。首次启动会让你选择现有 `.hearth` 或新建数据目录。
+
+构建、数据目录、日志、环境体检和已知限制见 [docs/design/desktop.md](docs/design/desktop.md)。
+
 ### 接入模型
 
 在 **设置 → 模型** 中创建模型档案：选择预设服务商（DeepSeek、阿里云百炼、智谱、Kimi、火山方舟、OpenAI、Anthropic、Gemini）或自定义服务，然后在 **设置 → 执行器** 中把档案绑定到执行器。档案保存在 `.hearth/hearth.sqlite`，API Key 通过本机 `.hearth/master.key` 以 AES-256-GCM 加密，设置页只显示掩码。本地模型地址不进入统一管理。
