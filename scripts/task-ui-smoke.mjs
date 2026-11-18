@@ -77,6 +77,7 @@ try {
   const process = page.locator('.process-toggle');
   assert.equal(await process.getAttribute('aria-expanded'), 'false');
   assert.equal(await page.getByText('执行链路 / 上下文').count(), 0);
+  assert.equal(await page.locator('.git-panel').count(), 0);
   await process.click();
   assert.equal(await process.getAttribute('aria-expanded'), 'true');
   task.status = 'running';

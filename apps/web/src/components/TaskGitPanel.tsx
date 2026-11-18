@@ -44,35 +44,7 @@ export function TaskGitPanel({ taskId }: TaskGitPanelProps) {
     retry: false
   });
 
-  if (gitQuery.isLoading) {
-    return <section className="panel git-panel"><div className="git-loading"><Loader2 size={15} className="spin" /> 正在读取任务仓库</div></section>;
-  }
-  if (gitQuery.isError) {
-    return (
-      <section className="panel git-panel">
-        <div className="panel-head"><h2>代码改动</h2></div>
-        <div className="git-empty">
-          <XCircle size={17} />
-          <div><strong>无法读取 Git 工作区</strong><p>{gitQuery.error instanceof Error ? gitQuery.error.message : "未知错误"}</p></div>
-        </div>
-      </section>
-    );
-  }
-  if (!view) return null;
-  if (!view.available) {
-    return (
-      <section className="panel git-panel">
-        <div className="panel-head">
-          <h2>代码改动</h2>
-          <span className="panel-meta">Git 工作台</span>
-        </div>
-        <div className="git-empty">
-          <GitBranch size={17} />
-          <div><strong>这个任务没有可用的 Git 仓库</strong><p>{view.reason ?? "工作区中没有 .git 目录。"}</p></div>
-        </div>
-      </section>
-    );
-  }
+  if (gitQuery.isLoading || gitQuery.isError || !view || !view.available) return null;
 
   const activeFiles = activeScope === "branch" ? view.branchFiles : view.files;
   const activeAdditions = activeScope === "branch" ? view.branchAdditions : view.additions;

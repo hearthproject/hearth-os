@@ -217,7 +217,6 @@ export function TaskDetailPage() {
         {boundMethod && <span>方法 {boundMethod.name} · v{boundMethod.version}</span>}
         <span><Clock3 size={13} /> {formatDuration(lastDuration(view.runs))}</span>
         <span>Token <TaskTokens usage={lastUsage(view.runs)} /></span>
-        {view.checkpoints.length > 0 && <span>{view.checkpoints.length} 个检查点</span>}
         <span>更新于 {relativeTime(task.updatedAt)}</span>
       </div>
       {organize.isError && <p className="form-error">{organize.error instanceof Error ? organize.error.message : "更新任务整理状态失败"}</p>}
