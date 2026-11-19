@@ -72,6 +72,8 @@ import { createBuiltinTools } from "@hearth/agent-runtime";
 import { StandingIntentError, StandingIntentService } from "./standing-intents.ts";
 import { SyncError, SyncService } from "./sync.ts";
 import { SecretBox } from "./secrets.ts";
+import { KnowledgeRecallService } from "./knowledge/recall.ts";
+import { KnowledgeSettingsStore } from "./knowledge/settings.ts";
 import { McpServerError, McpServerService } from "./mcp-servers.ts";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
@@ -886,6 +888,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
     onItemReady: (item) => ontologyWriter.captureSourceItem(item)
   });
   const secretBox = options.syncSecretBox ?? SecretBox.fromKeyFile(options.masterKeyPath ?? MASTER_KEY_PATH);
+  const knowledgeSettings = new KnowledgeSettingsStore(store, secretBox);
+  const knowledge = new KnowledgeRecallService({ store, settings: knowledgeSettings });
   const mcpServers = new McpServerService({ store, secretBox });
   const mail = new EmailService({
     store,
@@ -1091,6 +1095,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
         mcpServers,
         skills,
         worktrees,
+        knowledge,
         attachmentRoot,
         executorSettingsPath,
         executorSettingsProvider: () => executorSettingsStore.load(),

@@ -2108,6 +2108,7 @@ export const CONTEXT_ITEM_KINDS = [
   "decision",
   "summary",
   "memory_recall",
+  "knowledge_recall",
   "method",
   "usage",
   "notice"

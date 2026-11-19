@@ -46,6 +46,7 @@ import { createMcpTools, parseMcpToolName } from "./mcp-tools.ts";
 import type { McpServerService } from "./mcp-servers.ts";
 import { DEFAULT_RUN_BUDGET, nativePermissionsFor, runNativeTask } from "./native-executor.ts";
 import { ContextBroker } from "./context-broker.ts";
+import type { KnowledgeRecallService } from "./knowledge/recall.ts";
 import { OntologyService } from "./ontology.ts";
 import { createPersonalReadTools } from "./personal-tools.ts";
 import { createMailTools } from "./mail-tools.ts";
@@ -130,6 +131,7 @@ export interface SchedulerOptions {
   sandbox?: SandboxService | undefined;
   completionValidators?: Record<string, GoalValidatorRunner> | undefined;
   contextBroker?: ContextBroker | undefined;
+  knowledge?: KnowledgeRecallService | undefined;
   ontologyWriter?: OntologyWriter | undefined;
 }
 
@@ -164,6 +166,7 @@ export class HearthScheduler {
   private readonly completionValidators: Record<string, GoalValidatorRunner> | null;
   private readonly context: ContextService;
   private readonly contextBroker: ContextBroker | undefined;
+  private readonly knowledge: KnowledgeRecallService | undefined;
   private readonly ontology: OntologyService;
   private readonly ontologyWriter: OntologyWriter;
   private readonly projector: ContextProjector;
@@ -230,6 +233,7 @@ export class HearthScheduler {
     this.completionValidators = options.completionValidators ?? null;
     this.context = options.context ?? new ContextService(this.service, options.contextBlobRoot ?? CONTEXT_BLOB_DIR);
     this.contextBroker = options.contextBroker;
+    this.knowledge = options.knowledge;
     this.ontology = new OntologyService(this.service);
     this.ontologyWriter = options.ontologyWriter ?? new OntologyWriter(this.service, this.ontology);
     this.projector = new ContextProjector(this.service, this.context, options.contextBroker);
@@ -1479,6 +1483,29 @@ export class HearthScheduler {
           provenance: { source: "memory-service" }, executorEventId: `memory:${runId}`
         });
       }
+      let knowledgeContext = "";
+      if (!drafting && this.knowledge?.isEnabled()) {
+        try {
+          const recalled = await this.knowledge.recall({
+            query: template?.goal ?? task.goal,
+            taskId,
+            goalId: task.goalId ?? null,
+            conversationId: task.conversationId ?? null,
+            executorId
+          });
+          if (recalled.block) {
+            knowledgeContext = recalled.block;
+            this.capture({
+              taskId, conversationId: task.conversationId ?? null, runId, executorId,
+              kind: "knowledge_recall", role: "system", content: recalled.block,
+              provenance: { source: "openviking", uris: recalled.hits.map((hit) => hit.uri) },
+              executorEventId: `knowledge:${runId}`
+            });
+          }
+        } catch {
+          knowledgeContext = "";
+        }
+      }
       const methodContext = input.methodPlan ? renderMethodBlock(input.methodPlan.method) : "";
       const basePrompt = drafting
         ? [DRAFT_INSTRUCTION, `任务：${task.goal}`, `本轮输出目录：${prepared.outDir}`, `产物：${expectedOutputs.join("、")}`,
@@ -1507,6 +1534,7 @@ export class HearthScheduler {
         }
       }
       if (pendingInput && !resumeState && executorId !== "codex") prompt = `${basePrompt}\n\n用户补充信息：\n${pendingInput}`;
+      if (knowledgeContext) prompt = `${prompt}\n\n${knowledgeContext}`;
       let activeThreadId = !handoff && input.previousRun?.executorId === executorId
         ? input.previousRun.threadId ?? undefined
         : undefined;
