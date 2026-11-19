@@ -63,7 +63,7 @@ try {
   await page.screenshot({ path: join(outputDir, "task-detail.png") });
 
   await page.goto(`${baseUrl}/inbox`, { waitUntil: "domcontentloaded" });
-  await page.locator(".suggestion-card").first().waitFor({ timeout: 20_000 });
+  await page.locator(".triage-row").first().waitFor({ timeout: 20_000 });
   await page.waitForTimeout(500);
   await dismissNotifications(page);
   await page.screenshot({ path: join(outputDir, "inbox.png") });

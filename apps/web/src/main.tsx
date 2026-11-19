@@ -13,6 +13,7 @@ import "./styles/chat.css";
 import "./styles/tasks.css";
 import "./styles/task-detail.css";
 import "./styles/settings.css";
+import "./styles/inbox.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {

@@ -1,21 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Check, CheckCircle2, Clock3, Inbox, ListChecks, RefreshCw, ShieldAlert, Sparkles, X } from "lucide-react";
+import { Check, CheckCircle2, Clock3, Inbox, ListChecks, RefreshCw, X } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { EmptyState } from "../components/EmptyState.tsx";
-import { ProactiveSettingsPanel } from "../components/ProactiveSettingsPanel.tsx";
 import { api } from "../lib/api.ts";
 import { relativeTime } from "../lib/format.ts";
 import type { AttentionItem, ProactiveSuggestion, ReconcileItem } from "../lib/types.ts";
-
-const STATUS_LABELS: Record<ProactiveSuggestion["status"], string> = {
-  new: "待处理",
-  accepted: "已接受",
-  ignored: "已忽略",
-  snoozed: "稍后提醒",
-  converted: "已转任务",
-  expired: "已过期"
-};
 
 const TRIGGER_LABELS: Record<string, string> = {
   "task.deadline": "任务截止",
@@ -155,58 +144,54 @@ export function InboxPage() {
 
   return (
     <div className="page inbox-page">
-      <div className="page-head">
-        <h1>主动收件箱</h1>
-        <span className="page-meta">先解释为什么现在重要，再由你决定是否处理。</span>
-        <button className="ghost-button" onClick={() => scanMutation.mutate()} disabled={scanMutation.isPending}>
-          <RefreshCw size={15} className={scanMutation.isPending ? "spin" : ""} /> 立即扫描
+      <div className="inbox-head">
+        <h1>需要你</h1>
+        <button className="icon-button inbox-scan" aria-label="立即扫描" title="立即扫描" onClick={() => scanMutation.mutate()} disabled={scanMutation.isPending}>
+          <RefreshCw size={15} className={scanMutation.isPending ? "spin" : ""} />
         </button>
       </div>
 
-      {snapshotQuery.isLoading && <p className="section-empty">正在读取主动建议…</p>}
+      {snapshotQuery.isLoading && <p className="triage-empty">正在读取…</p>}
       {snapshotQuery.isError && <p className="form-error">{snapshotQuery.error.message}</p>}
 
+      <div className="inbox-filters">
+        <button className={`filter-tab ${filter === "active" ? "active" : ""}`} aria-pressed={filter === "active"} onClick={() => setFilter("active")}>
+          待处理 <span className="filter-count">{pendingCount}</span>
+        </button>
+        <button className={`filter-tab ${filter === "all" ? "active" : ""}`} aria-pressed={filter === "all"} onClick={() => setFilter("all")}>
+          全部 <span className="filter-count">{snapshot?.suggestions.length ?? 0}</span>
+        </button>
+        {notice && <span className="triage-notice">{notice}</span>}
+      </div>
+
+      {error && <p className="form-error">{error.message}</p>}
+
       {attentionItems.length > 0 && (
-        <section className="panel attention-panel">
-          <div className="panel-head">
-            <div>
-              <h2><Sparkles size={17} /> 现在需要你注意</h2>
-              <span className="panel-meta">按“为什么现在、有什么后果、建议动作”排序；可稍后、忽略或标记误报。</span>
-            </div>
-            <span className="tag">{attentionItems.length} 项</span>
+        <section className="triage-section">
+          <div className="triage-section-head">
+            <h2>需要你注意</h2>
+            <span>{attentionItems.length}</span>
           </div>
-          <div className="suggestion-list">
+          <div className="triage-list">
             {attentionItems.map((item) => (
-              <article className={"panel suggestion-card risk-" + (item.critical ? "critical" : "medium")} key={item.id}>
-                <div className="suggestion-head">
-                  <div>
-                    <div className="suggestion-kicker">
-                      <span className="tag">{ATTENTION_KIND_LABELS[item.kind] ?? item.kind}</span>
-                      <span className="tag">{item.waitingOn === "user" ? "等你处理" : item.waitingOn === "agent" ? "Agent 推进中" : "等外部系统"}</span>
-                      {item.critical && <span className="tag risk-tag"><ShieldAlert size={11} /> 高影响</span>}
-                      {item.shadowed && <span className="tag">影子模式</span>}
-                      {typeof item.score === "number" && <span className="tag">分数 {Math.round(item.score)}</span>}
-                    </div>
-                    <h2>{item.title}</h2>
-                    <p>{item.whyNow}</p>
-                  </div>
-                  <span className="panel-meta">{relativeTime(item.waitingSince)}</span>
-                </div>
-                <div className="suggestion-facts">
-                  <div><span>不处理会怎样</span><strong>{item.consequence}</strong></div>
-                  <div><span>建议动作</span><strong>{item.nextAction}</strong></div>
-                  <div><span>来源</span><strong>{item.source}</strong></div>
-                </div>
-                <details>
-                  <summary>为什么我看到这个</summary>
-                  <p>{item.whyNow}</p>
-                  {item.evidenceRefs?.length ? <p className="mono">证据：{item.evidenceRefs.slice(0, 6).join("、")}</p> : <p>没有外部证据引用；这是系统根据状态推断的提醒。</p>}
-                </details>
-                <div className="suggestion-foot">
-                  <span className="page-meta">
-                    {item.options?.length ? "可选：" + item.options.map((option) => option.label).join(" / ") : "只有一个明确下一步时，不要求额外选择"}
+              <details className="triage-row" key={item.id}>
+                <summary className="triage-summary">
+                  <span className="triage-main">
+                    <span className="triage-title">{item.title}</span>
+                    <span className="triage-why">{item.whyNow}</span>
                   </span>
-                  <div className="suggestion-actions">
+                  <span className="triage-meta">
+                    {item.critical ? "高影响 · " : ""}{ATTENTION_KIND_LABELS[item.kind] ?? item.kind} · {relativeTime(item.waitingSince)}
+                  </span>
+                </summary>
+                <div className="triage-body">
+                  <dl className="triage-facts">
+                    <div><dt>不处理</dt><dd>{item.consequence}</dd></div>
+                    <div><dt>建议</dt><dd>{item.nextAction}</dd></div>
+                    <div><dt>来源</dt><dd>{item.source}</dd></div>
+                  </dl>
+                  {item.evidenceRefs?.length ? <p className="triage-evidence">证据：{item.evidenceRefs.slice(0, 6).join("、")}</p> : null}
+                  <div className="triage-actions">
                     {item.taskId && <Link className="link-button" to={"/tasks/" + item.taskId}>查看任务</Link>}
                     <button className="primary-button" disabled={attentionMutation.isPending} onClick={() => attentionMutation.mutate({ id: item.id, action: "ack" })}>
                       <Check size={14} /> 我看到
@@ -222,100 +207,77 @@ export function InboxPage() {
                     </button>
                   </div>
                 </div>
-              </article>
+              </details>
             ))}
           </div>
         </section>
       )}
 
       {reconcileItems.length > 0 && (
-        <section className="panel reconcile-panel">
-          <div className="panel-head">
-            <div>
-              <h2><AlertTriangle size={17} /> 外部动作待对账</h2>
-              <span className="panel-meta">结果不确定的动作不会自动重试；先核对真实结果，再决定后续。</span>
-            </div>
-            <span className="tag risk-tag">{reconcileItems.length} 项</span>
+        <section className="triage-section">
+          <div className="triage-section-head">
+            <h2>外部动作待对账</h2>
+            <span>{reconcileItems.length}</span>
           </div>
-          <div className="reconcile-list">
+          <div className="triage-list">
             {reconcileItems.map((item) => (
-              <article className={"reconcile-card risk-" + item.risk} key={item.id}>
-                <div className="reconcile-head">
-                  <div>
-                    <div className="suggestion-kicker">
-                      <span className="tag">{RECONCILE_STATUS_LABELS[item.status]}</span>
-                      <span className="tag">{RISK_LABELS[item.risk]}</span>
-                      {item.provider && <span className="tag">{item.provider}</span>}
-                    </div>
-                    <h3>{item.summary}</h3>
-                    <p>{item.reason}</p>
+              <details className="triage-row" key={item.id}>
+                <summary className="triage-summary">
+                  <span className="triage-main">
+                    <span className="triage-title">{item.summary}</span>
+                    <span className="triage-why">{item.reason}</span>
+                  </span>
+                  <span className="triage-meta">{RECONCILE_STATUS_LABELS[item.status]} · {relativeTime(item.updatedAt)}</span>
+                </summary>
+                <div className="triage-body">
+                  <dl className="triage-facts">
+                    <div><dt>效果</dt><dd className="mono select-all">{item.effectId}</dd></div>
+                    <div><dt>目标</dt><dd className="mono">{item.targetKey ?? "未知"}</dd></div>
+                    <div><dt>风险</dt><dd>{RISK_LABELS[item.risk]}</dd></div>
+                    <div><dt>检查次数</dt><dd>{item.checkCount}</dd></div>
+                  </dl>
+                  {item.attempted.length > 0 && (
+                    <details className="triage-evidence">
+                      <summary>核对记录 {item.attempted.length} 条</summary>
+                      {item.attempted.map((attempt, index) => <p key={attempt + index}>{attempt}</p>)}
+                    </details>
+                  )}
+                  <div className="triage-actions">
+                    <button className="primary-button" disabled={reconcileMutation.isPending} onClick={() => reconcileAction(item, "check")}>
+                      <RefreshCw size={14} /> 重新检查
+                    </button>
+                    <button className="ghost-button" disabled={reconcileMutation.isPending} onClick={() => reconcileAction(item, "committed")}>
+                      <CheckCircle2 size={14} /> 标记已提交
+                    </button>
+                    <button className="ghost-button" disabled={reconcileMutation.isPending} onClick={() => reconcileAction(item, "absent")}>
+                      <Check size={14} /> 标记未执行
+                    </button>
+                    <button className="ghost-button" disabled={reconcileMutation.isPending} onClick={() => reconcileAction(item, "task")}>
+                      <ListChecks size={14} /> 转人工任务
+                    </button>
+                    <button className="ghost-button danger" disabled={reconcileMutation.isPending} onClick={() => reconcileAction(item, "abandoned")}>
+                      <X size={14} /> 放弃
+                    </button>
                   </div>
-                  <span className="panel-meta">{relativeTime(item.updatedAt)}</span>
                 </div>
-                <dl className="reconcile-facts">
-                  <div><dt>效果</dt><dd className="mono select-all">{item.effectId}</dd></div>
-                  <div><dt>目标</dt><dd className="mono">{item.targetKey ?? "未知"}</dd></div>
-                  <div><dt>检查次数</dt><dd>{item.checkCount}</dd></div>
-                </dl>
-                {item.attempted.length > 0 && (
-                  <details className="reconcile-attempts">
-                    <summary>查看已尝试的核对记录</summary>
-                    {item.attempted.map((attempt, index) => <p key={attempt + index}>{attempt}</p>)}
-                  </details>
-                )}
-                <div className="reconcile-actions">
-                  <button className="primary-button" disabled={reconcileMutation.isPending} onClick={() => reconcileAction(item, "check")}>
-                    <RefreshCw size={14} /> 重新检查
-                  </button>
-                  <button className="ghost-button" disabled={reconcileMutation.isPending} onClick={() => reconcileAction(item, "committed")}>
-                    <CheckCircle2 size={14} /> 标记已提交
-                  </button>
-                  <button className="ghost-button" disabled={reconcileMutation.isPending} onClick={() => reconcileAction(item, "absent")}>
-                    <Check size={14} /> 标记未执行
-                  </button>
-                  <button className="ghost-button" disabled={reconcileMutation.isPending} onClick={() => reconcileAction(item, "task")}>
-                    <ListChecks size={14} /> 转人工任务
-                  </button>
-                  <button className="ghost-button danger" disabled={reconcileMutation.isPending} onClick={() => reconcileAction(item, "abandoned")}>
-                    <X size={14} /> 放弃
-                  </button>
-                </div>
-              </article>
+              </details>
             ))}
           </div>
         </section>
       )}
 
       {snapshot && (
-        <>
-          <ProactiveSettingsPanel snapshot={snapshot} />
-
-          <div className="inbox-toolbar">
-            <div className="segmented">
-              <button className={filter === "active" ? "active" : ""} onClick={() => setFilter("active")}>
-                待处理 {pendingCount}
-              </button>
-              <button className={filter === "all" ? "active" : ""} onClick={() => setFilter("all")}>
-                全部 {snapshot.suggestions.length}
-              </button>
-            </div>
-            {notice && <span className="page-meta">{notice}</span>}
+        <section className="triage-section">
+          <div className="triage-section-head">
+            <h2>建议</h2>
+            <span>{suggestions.length}</span>
           </div>
-
-          {error && <p className="form-error">{error.message}</p>}
-
           {suggestions.length === 0 ? (
-            <section className="panel">
-              <EmptyState
-                title="收件箱是空的"
-                body="Hearth 只会在任务截止、失败、审批等待或来源有新资料时提出建议。"
-                action={<button className="ghost-button" onClick={() => scanMutation.mutate()}><Sparkles size={15} /> 扫描一次</button>}
-              />
-            </section>
+            <p className="triage-empty">{filter === "active" ? "没有待处理的建议。" : "收件箱是空的。"}</p>
           ) : (
-            <div className="suggestion-list">
+            <div className="triage-list">
               {suggestions.map((suggestion) => (
-                <SuggestionCard
+                <SuggestionRow
                   key={suggestion.id}
                   suggestion={suggestion}
                   busy={actionMutation.isPending}
@@ -324,13 +286,13 @@ export function InboxPage() {
               ))}
             </div>
           )}
-        </>
+        </section>
       )}
     </div>
   );
 }
 
-function SuggestionCard({
+function SuggestionRow({
   suggestion,
   busy,
   onAction
@@ -341,35 +303,25 @@ function SuggestionCard({
 }) {
   const active = ["new", "snoozed", "accepted"].includes(suggestion.status);
   return (
-    <article className={"panel suggestion-card risk-" + suggestion.riskLevel}>
-      <div className="suggestion-head">
-        <div>
-          <div className="suggestion-kicker">
-            <span className="tag">{TRIGGER_LABELS[suggestion.triggerKind] ?? suggestion.triggerKind}</span>
-            <span className="tag">{RISK_LABELS[suggestion.riskLevel]}</span>
-            <span className="tag">{STATUS_LABELS[suggestion.status]}</span>
-            {suggestion.requiresApproval && <span className="tag risk-tag"><ShieldAlert size={11} /> 动作仍需审批</span>}
-          </div>
-          <h2>{suggestion.title}</h2>
-          <p>{suggestion.whyNow}</p>
-        </div>
-        <span className="panel-meta">{relativeTime(suggestion.lastSeenAt)}</span>
-      </div>
-
-      <div className="suggestion-facts">
-        <div><span>建议动作</span><strong>{suggestion.suggestedAction}</strong></div>
-        <div><span>预计影响</span><strong>{suggestion.expectedImpact}</strong></div>
-        <div><span>预计花费</span><strong>{suggestion.estimatedCost}</strong></div>
-        <div><span>来源</span><strong>{suggestion.source.label}{suggestion.source.detail ? " · " + suggestion.source.detail : ""}</strong></div>
-      </div>
-
-      <div className="suggestion-foot">
-        <span className="page-meta">
-          首次 {relativeTime(suggestion.firstSeenAt)}
-          {suggestion.occurrenceCount > 1 ? " · 已聚合 " + suggestion.occurrenceCount + " 次" : ""}
-          {suggestion.snoozeUntil ? " · 提醒到 " + new Date(suggestion.snoozeUntil).toLocaleString("zh-CN") : ""}
+    <details className="triage-row">
+      <summary className="triage-summary">
+        <span className="triage-main">
+          <span className="triage-title">{suggestion.title}</span>
+          <span className="triage-why">{suggestion.whyNow}</span>
         </span>
-        <div className="suggestion-actions">
+        <span className="triage-meta">
+          {TRIGGER_LABELS[suggestion.triggerKind] ?? suggestion.triggerKind}
+          {suggestion.requiresApproval ? " · 仍需审批" : ""}{suggestion.occurrenceCount > 1 ? ` · 聚合 ${suggestion.occurrenceCount} 次` : ""} · {relativeTime(suggestion.lastSeenAt)}
+        </span>
+      </summary>
+      <div className="triage-body">
+        <dl className="triage-facts">
+          <div><dt>建议动作</dt><dd>{suggestion.suggestedAction}</dd></div>
+          <div><dt>预计影响</dt><dd>{suggestion.expectedImpact}</dd></div>
+          <div><dt>预计花费</dt><dd>{suggestion.estimatedCost}</dd></div>
+          <div><dt>来源</dt><dd>{suggestion.source.label}{suggestion.source.detail ? " · " + suggestion.source.detail : ""}</dd></div>
+        </dl>
+        <div className="triage-actions">
           {active && suggestion.status !== "accepted" && (
             <button className="ghost-button" onClick={() => onAction("accept")} disabled={busy}>
               <Check size={15} /> 接受
@@ -393,7 +345,7 @@ function SuggestionCard({
           )}
         </div>
       </div>
-    </article>
+    </details>
   );
 }
 
