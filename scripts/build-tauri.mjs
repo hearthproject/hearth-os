@@ -135,7 +135,9 @@ async function main() {
   await run("npm", ["run", "build", "-w", "@hearth/web"]);
   await run("node", ["scripts/build-server.mjs"]);
 
-  copyTree(join(repoRoot, "apps", "web", "dist"), join(resources, "web"));
+  const webResources = join(resources, "web");
+  rmSync(webResources, { recursive: true, force: true });
+  copyTree(join(repoRoot, "apps", "web", "dist"), webResources);
 
   const node = await ensurePinnedNode();
   copyTree(node.nodeExe, join(resources, "node.exe"));
