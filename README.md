@@ -218,16 +218,18 @@ npm start
 
 打开 <http://127.0.0.1:4317>。
 
-### Windows 桌面版（实验）
+### Windows 桌面版
 
 ```powershell
 npm ci
-npm run desktop:build
+npm run tauri:build
 ```
 
-生成 `release\Hearth-Setup-0.1.0.exe`（按用户安装，免 UAC）和 `release\Hearth-Portable-0.1.0.exe`。安装后双击开始菜单的 Hearth 即可；关窗会隐藏到托盘，托盘菜单负责退出、数据目录、日志和桌面助手。首次启动会让你选择现有 `.hearth` 或新建数据目录。
+生成 `release\Hearth_0.1.0_x64-setup.exe`（NSIS 按用户安装，免 UAC，安装到 `%LOCALAPPDATA%\Programs\Hearth`）。安装后双击开始菜单的 Hearth 即可；关窗会隐藏到托盘，托盘菜单负责退出、环境体检、桌面助手、数据目录和日志目录。首次启动会让你选择现有 `.hearth` 或新建数据目录。
 
-构建、数据目录、日志、环境体检和已知限制见 [docs/design/desktop.md](docs/design/desktop.md)。
+桌面版只保留 Tauri 实现：内置官方 Node 22.23.2、npm 10.9.8 和全部服务端功能，安装包约 27.7 MiB，安装后约 113 MiB。Codex 使用系统中的 `codex.exe`，不内置 479 MiB 平台二进制。
+
+构建、体积、数据目录、日志、托盘、环境体检和已知限制见 [docs/design/desktop.md](docs/design/desktop.md)。
 
 ### 接入模型
 

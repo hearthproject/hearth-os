@@ -21,12 +21,16 @@ work/screenshots/
 *.sqlite-wal
 
 # Desktop build staging
-apps/desktop/resources/*
-!apps/desktop/resources/helper/
-!apps/desktop/resources/helper/**
-apps/desktop/release/
+apps/desktop-tauri/.cache/
+apps/desktop-tauri/src-tauri/resources/server/
+apps/desktop-tauri/src-tauri/resources/web/
+apps/desktop-tauri/src-tauri/resources/node.exe
+apps/desktop-tauri/src-tauri/resources/node_modules/
+apps/desktop-tauri/src-tauri/resources/npm.cmd
+apps/desktop-tauri/src-tauri/resources/helper/
+apps/desktop-tauri/src-tauri/resources/licenses/
+apps/desktop-tauri/src-tauri/resources/THIRD_PARTY_NOTICES.txt
 release/
-apps/desktop/build/icon-*.png
 
 # Generated personal-agent scenario evidence
 eval/scenario-runs/
