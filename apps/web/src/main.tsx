@@ -9,6 +9,7 @@ import "./notifications.css";
 import "./mail.css";
 import "./styles/foundation.css";
 import "./styles/shell.css";
+import "./styles/chat.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {

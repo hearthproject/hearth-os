@@ -7,16 +7,13 @@ import { isMailDraftReply } from "../lib/mail-draft.ts";
 import remarkGfm from "remark-gfm";
 import {
   ArrowUp,
-  Brain,
   Check,
   CheckCircle2,
   Copy,
   CornerDownRight,
   Cpu,
   FileText,
-  ListChecks,
   Loader2,
-  MessageCircle,
   Paperclip,
   PauseCircle,
   Plus,
@@ -42,13 +39,6 @@ import type {
   TaskListItem,
   TaskProposalRecord
 } from "../lib/types.ts";
-
-const SUGGESTIONS = [
-  "整理一份本周工作周报",
-  "分析一个网址的内容并给出要点",
-  "写一个批量重命名文件的脚本",
-  "帮我检查项目里的 TypeScript 错误"
-];
 
 const PENDING_SETTINGS: ConversationSettings = {
   executorEnabled: { native: false, codex: false, "deepseek-harness": false, hermes: false, qoder: false, workbuddy: false, kimi: false },
@@ -80,7 +70,6 @@ export function ChatPage() {
   const [reasoning, setReasoning] = useState("");
   const [routing, setRouting] = useState<RoutingState | null>(null);
   const [routeMode, setRouteMode] = useState<"auto" | "chat" | "task">("auto");
-  const [memoryCount, setMemoryCount] = useState(0);
   const [proposals, setProposals] = useState<TaskProposalRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [followUpTaskId, setFollowUpTaskId] = useState<string | null>(null);
@@ -184,7 +173,6 @@ export function ChatPage() {
     setStreaming("");
     setReasoning("");
     setRouting(null);
-    setMemoryCount(0);
     setProposals([]);
     setDraftSettings(null);
     setFollowUpTaskId(null);
@@ -346,7 +334,6 @@ export function ChatPage() {
     setStreaming("");
     setReasoning("");
     setRouting(null);
-    setMemoryCount(0);
     setError(null);
     setSending(true);
     const controller = new AbortController();
@@ -376,9 +363,6 @@ export function ChatPage() {
               setMessages((prev) => [...prev, data as ChatMessageRecord]);
             } else if (event === "routing") {
               setRouting(data as RoutingState);
-            } else if (event === "memory") {
-              const payload = data as { count?: number };
-              setMemoryCount(typeof payload.count === "number" ? payload.count : 0);
             } else if (event === "delta") {
               answer += (data as { text: string }).text;
               setStreaming(answer);
@@ -444,7 +428,6 @@ export function ChatPage() {
   const selectedExecutorName = selectedExecutor?.name ?? (selectedExecutorId ? executorLabel(selectedExecutorId) : "");
   const selectedExecutorUnavailable = Boolean(selectedExecutorId && !executorAvailability[selectedExecutorId]);
   const visibleExecutorIds = EXECUTOR_ORDER.filter((id) => executorAvailability[id] || id === selectedExecutorId);
-  const isEmpty = messages.length === 0 && !streaming && !sending;
 
   return (
     <div className="chat-layout">
@@ -470,74 +453,44 @@ export function ChatPage() {
 
       <section className="chat-main">
         <header className="chat-header">
-          <div>
-            <h1>{current?.title ?? "新对话"}</h1>
-            <p className="page-meta">说清楚你要完成什么，Hearth 会自动回答或派出任务。</p>
-          </div>
-          <div className="chat-header-status">
-            <span className={`status-chip ${executorReady ? "ok" : "warn"}`}>
-              <span className={`status-dot ${executorReady ? "online" : "offline"}`} />
-              {executorReady ? "执行器可用" : "执行器未连接"}
-            </span>
-          </div>
+          <h1>{current?.title ?? "新对话"}</h1>
         </header>
 
         <div className="chat-scroll">
-          {isEmpty ? (
-            <div className="chat-empty">
-              <div className="chat-empty-mark"><MessageCircle size={24} /></div>
-              <h2>今天想完成什么？</h2>
-              <p>可以直接提问，也可以让 Hearth 去做一份文件、查一个网址、写一段代码。它会自己判断。</p>
-              <div className="suggestion-grid">
-                {SUGGESTIONS.map((suggestion) => (
-                  <button key={suggestion} className="suggestion-card" onClick={() => setInput(suggestion)}>
-                    {suggestion}
-                  </button>
-                ))}
+          <div className="message-list">
+            {!configured && (
+              <ChatNotice icon={<Settings2 size={15} />} tone="warn">
+                还没有接入聊天模型。普通问答需要先完成<Link to="/welcome">首次设置</Link>；执行类任务仍会尝试派出。
+              </ChatNotice>
+            )}
+            {!executorReady && (
+              <ChatNotice icon={<Settings2 size={15} />} tone="warn">
+                当前没有可用的执行器，任务无法派出。到<Link to="/settings">设置</Link>查看连接诊断。
+              </ChatNotice>
+            )}
+            {messages.map((message, index) => <ChatBubble key={message.id} message={message} conversationId={conversationId} mailDraft={!message.taskId && isMailDraftReply(messages, index)} />)}
+            {proposals.map((proposal) => (
+              <ProposalCard
+                key={proposal.id}
+                proposal={proposal}
+                conversationId={conversationId}
+                onResolved={(id) => {
+                  setProposals((prev) => prev.filter((item) => item.id !== id));
+                  void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+                  void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+                  if (conversationId) void queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
+                }}
+              />
+            ))}
+            {(streaming || reasoning) && <AssistantBubble content={streaming} reasoning={reasoning} streaming />}
+            {sending && !streaming && !reasoning && (
+              <div className="typing-row">
+                <Loader2 size={14} className="spin" />
+                <span>{routing?.action === "task" ? "正在派出任务…" : routing ? "正在回答…" : selectedExecutorId ? `正在交给 ${selectedExecutorName} 处理…` : "正在判断是回答还是执行…"}</span>
               </div>
-            </div>
-          ) : (
-            <div className="message-list">
-              {!configured && (
-                <ChatNotice icon={<Settings2 size={15} />} tone="warn">
-                  还没有接入聊天模型。普通问答需要先完成<Link to="/welcome">首次设置</Link>；执行类任务仍会尝试派出。
-                </ChatNotice>
-              )}
-              {!executorReady && (
-                <ChatNotice icon={<Settings2 size={15} />} tone="warn">
-                  当前没有可用的执行器，任务无法派出。到<Link to="/settings">设置</Link>查看连接诊断。
-                </ChatNotice>
-              )}
-              {messages.map((message, index) => <ChatBubble key={message.id} message={message} conversationId={conversationId} mailDraft={!message.taskId && isMailDraftReply(messages, index)} />)}
-              {proposals.map((proposal) => (
-                <ProposalCard
-                  key={proposal.id}
-                  proposal={proposal}
-                  conversationId={conversationId}
-                  onResolved={(id) => {
-                    setProposals((prev) => prev.filter((item) => item.id !== id));
-                    void queryClient.invalidateQueries({ queryKey: ["tasks"] });
-                    void queryClient.invalidateQueries({ queryKey: ["conversations"] });
-                    if (conversationId) void queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
-                  }}
-                />
-              ))}
-              {(streaming || reasoning) && <AssistantBubble content={streaming} reasoning={reasoning} streaming />}
-              {memoryCount > 0 && !sending && (
-                <div className="chat-memory-note">
-                  <Brain size={13} /> 本次回答参考了 {memoryCount} 条记忆
-                  <Link to="/settings?tab=automation">自动记忆</Link>
-                </div>
-              )}
-              {sending && !streaming && !reasoning && (
-                <div className="typing-row">
-                  <Loader2 size={14} className="spin" />
-                  <span>{routing?.action === "task" ? "正在派出任务…" : routing ? "正在回答…" : selectedExecutorId ? `正在交给 ${selectedExecutorName} 处理…` : "正在判断是回答还是执行…"}</span>
-                </div>
-              )}
-              <div ref={bottomRef} />
-            </div>
-          )}
+            )}
+            <div ref={bottomRef} />
+          </div>
         </div>
 
         <div className="composer-wrap">
@@ -692,9 +645,7 @@ export function ChatPage() {
               value={input}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={onComposerKeyDown}
-              placeholder={followUpTarget
-                ? (followUpMode === "steer" ? "补充修正要求，中止当前轮并重跑…" : "补充下一步要求，当前轮结束后继续…")
-                : "直接说你要做什么，例如：帮我整理这周的会议记录…"}
+              aria-label="消息"
               rows={1}
               disabled={sending}
             />
@@ -702,11 +653,6 @@ export function ChatPage() {
               {sending ? <Loader2 size={17} className="spin" /> : <ArrowUp size={18} />}
             </button>
           </div>
-          <p className="composer-hint">
-            {followUpTarget
-              ? `补充到「${followUpTarget.title}」 · ${followUpMode === "steer" ? "中止当前轮后继续" : "当前轮结束后继续"} · Enter 发送`
-              : "Enter 发送 · Shift + Enter 换行 · 附件最多 5 个"}
-          </p>
         </div>
       </section>
     </div>

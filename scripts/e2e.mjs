@@ -110,19 +110,19 @@ async function openNewChat(page, baseUrl) {
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.evaluate(() => localStorage.removeItem("hearth.conversation"));
   await page.reload({ waitUntil: "networkidle" });
-  await page.locator(".chat-empty").waitFor({ timeout: 15_000 });
+  await page.locator(".message-list").waitFor({ timeout: 15_000 });
   await waitForComposerReady(page);
 }
 
 async function newChat(page, baseUrl) {
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.locator(".new-chat-button").click();
-  await page.locator(".chat-empty").waitFor({ timeout: 15_000 });
+  await page.locator(".message-list").waitFor({ timeout: 15_000 });
   await waitForComposerReady(page);
 }
 
 async function sendMessage(page, text) {
-  const composer = page.locator('textarea[placeholder^="直接说你要做什么"]');
+  const composer = page.locator('textarea[aria-label="消息"]');
   await composer.fill(text);
   await page.locator(".composer-send").click();
 }
@@ -225,7 +225,7 @@ async function main() {
       await page.waitForURL("**/welcome", { timeout: 15_000 });
       await page.locator(".wizard-card").waitFor({ timeout: 15_000 });
       await page.getByRole("button", { name: "暂时跳过" }).click();
-      await page.locator(".chat-empty").waitFor({ timeout: 15_000 });
+      await page.locator(".message-list").waitFor({ timeout: 15_000 });
     });
   } else {
     skipTest("first-run setup wizard", "live model settings already satisfy onboarding");
@@ -238,8 +238,8 @@ async function main() {
   await runTest(page, "boots the chat shell without page errors", async () => {
     await openNewChat(page, baseUrl);
     assert.match(await page.title(), /Hearth/);
-    assert.ok(await page.locator(".suggestion-card").count() > 0, "suggestion cards should render");
-    assert.ok(await page.locator(".chat-header-status").innerText());
+    assert.equal(await page.locator(".message-list").count(), 1, "chat canvas should render");
+    assert.ok(await page.locator('textarea[aria-label="消息"]').isVisible(), "composer should be ready");
   });
 
   await runTest(page, "shows a connection warning only when something is unavailable", async () => {
@@ -266,11 +266,6 @@ async function main() {
     } else {
       assert.equal(await page.locator('[data-connection-state="degraded"]').count(), 0);
     }
-    await page.waitForFunction(
-      (expected) => (document.querySelector(".chat-header-status")?.textContent ?? "").includes("执行器可用") === expected,
-      anyReadyEnabled,
-      { timeout: 15_000 }
-    );
   });
 
   await runTest(page, "keeps five primary destinations and discloses the rest", async () => {
@@ -301,7 +296,7 @@ async function main() {
 
   await runTest(page, "ignores Enter while the IME is composing", async () => {
     await newChat(page, baseUrl);
-    const composer = page.locator('textarea[placeholder^="直接说你要做什么"]');
+    const composer = page.locator('textarea[aria-label="消息"]');
     await composer.fill("你好");
     await composer.evaluate((element) => {
       element.dispatchEvent(new KeyboardEvent("keydown", {
@@ -405,7 +400,7 @@ async function main() {
 
     await page.evaluate(() => localStorage.setItem("hearth.conversation", "missing-conversation-id"));
     await page.reload({ waitUntil: "networkidle" });
-    await page.locator(".chat-empty").waitFor({ timeout: 15_000 });
+    await page.locator(".message-list").waitFor({ timeout: 15_000 });
     await page.waitForFunction(() => localStorage.getItem("hearth.conversation") === null);
     await page.locator(".composer-error").waitFor({ timeout: 15_000 });
     assert.match(await page.locator(".composer-error").innerText(), /失效/);

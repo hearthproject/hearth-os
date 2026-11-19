@@ -1,0 +1,211 @@
+/* Chat: one document column, no bubbles, no onboarding copy. */
+
+.chat-layout {
+  grid-template-columns: 232px minmax(0, 1fr);
+}
+
+.conversation-rail {
+  gap: 6px;
+  padding: 10px 8px;
+  background: var(--bg);
+  border-right: 1px solid var(--line);
+}
+
+.new-chat-button {
+  justify-content: flex-start;
+  height: var(--row-h);
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--ink-secondary);
+  font-size: var(--fs-12);
+  font-weight: 500;
+}
+
+.new-chat-button:hover:not(:disabled) {
+  background: var(--surface-sunk);
+  color: var(--ink);
+}
+
+.conversation-list {
+  gap: 1px;
+}
+
+.conversation-item {
+  border-radius: var(--radius);
+}
+
+.conversation-select {
+  padding: 7px 8px;
+}
+
+.conversation-title {
+  font-size: var(--fs-12);
+}
+
+.conversation-preview {
+  font-size: var(--fs-11);
+}
+
+.conversation-item.active .conversation-preview {
+  color: var(--ink-secondary);
+}
+
+.conversation-tasks {
+  margin: 0 6px 6px 14px;
+  padding-left: 6px;
+}
+
+.chat-header {
+  align-items: center;
+  padding: 12px 24px;
+  background: var(--bg);
+}
+
+.chat-header h1 {
+  margin: 0;
+  font-size: var(--fs-15);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.chat-scroll {
+  padding: 28px 24px 16px;
+}
+
+.message-list {
+  max-width: 760px;
+  gap: 22px;
+}
+
+.message-row.user,
+.message-row.assistant {
+  justify-content: flex-start;
+}
+
+.message-bubble {
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: var(--fs-14);
+  line-height: 1.65;
+}
+
+.user-bubble {
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--surface-sunk);
+  color: var(--ink);
+  box-shadow: inset 2px 0 0 var(--line-strong);
+}
+
+.user-bubble time {
+  color: var(--ink-tertiary);
+}
+
+.user-bubble .copy-button {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--ink-tertiary);
+}
+
+.user-bubble .copy-button:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.user-bubble .plain-message {
+  padding-right: 24px;
+}
+
+.assistant-bubble,
+.assistant-bubble.streaming {
+  border: 0;
+}
+
+.task-link-card {
+  display: inline-flex;
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ember);
+  font-size: var(--fs-12);
+  font-weight: 500;
+}
+
+.task-link-card:hover {
+  background: transparent;
+  color: var(--ember-fill-hover);
+  text-decoration: underline;
+}
+
+.task-status-bubble {
+  max-width: 100%;
+  padding: 4px 0 4px 12px;
+  border: 0;
+  border-left: 2px solid var(--line-strong);
+  border-radius: 0;
+  background: transparent;
+}
+
+.task-status-bubble.running,
+.task-status-bubble.waiting_approval,
+.task-status-bubble.waiting_input,
+.task-status-bubble.queued {
+  border-left-color: var(--ember);
+}
+
+.task-status-bubble.completed {
+  border-left-color: var(--ok);
+}
+
+.task-status-bubble.failed,
+.task-status-bubble.recoverable {
+  border-left-color: var(--risk);
+}
+
+.composer-wrap {
+  padding: 12px 24px 16px;
+  background: var(--bg);
+}
+
+.composer {
+  max-width: 760px;
+  padding: 3px;
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.composer:focus-within {
+  border-color: var(--ink-tertiary);
+}
+
+.composer textarea {
+  padding: 7px 4px;
+  font-size: var(--fs-14);
+  line-height: 1.5;
+}
+
+.composer-icon,
+.composer-send {
+  width: 30px;
+  height: 30px;
+  flex-basis: 30px;
+  border-radius: var(--radius);
+}
+
+.composer-toolbar {
+  max-width: 760px;
+}
+
+@media (max-width: 820px) {
+  .chat-scroll,
+  .composer-wrap {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+}
