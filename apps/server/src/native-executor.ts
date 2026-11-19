@@ -166,7 +166,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     validateFinish: (result, context) => {
       const jsonIssue = jsonDeliverableIssue(options.prepared.outDir, options.expectedOutputs);
       if (jsonIssue) return jsonIssue;
-      return coding ? codingFinishIssue(context) : null;
+      return coding ? codingFinishIssue(context, result) : null;
     },
     summarizeContext: options.onContextSummary ?? ((messages, signal) => summarizeNativeContext(options.settings, messages, signal)),
     onEvent: (event) => {

@@ -80,7 +80,7 @@ export const diagnosticsTool: AgentTool = {
   }
 };
 
-export function codingFinishIssue(context: AgentToolContext): string | null {
+export function codingFinishIssue(context: AgentToolContext, result?: AgentToolResult): string | null {
   const issues: string[] = [];
   const state = context.state;
   const openTodos = incompleteTodos(state?.todos);
@@ -88,8 +88,12 @@ export function codingFinishIssue(context: AgentToolContext): string | null {
 
   const git = gitChangedFiles(context.workspaceRoot);
   const changed = git.files;
-  if (git.isRepository && changed.length === 0 && state?.progress.filesModified.length === 0) {
-    issues.push("没有检测到任何代码改动；如果这是只读任务，请在 finish_task 的 summary 中说明 noChangesReason。");
+  const modified = state?.progress.filesModified ?? [];
+  const noChanges = changed.length === 0 && modified.length === 0;
+  if (noChanges) {
+    if (!/noChangesReason|只读|read-only/i.test(result?.summary ?? "")) {
+      issues.push("没有检测到任何代码改动；如果这是只读任务，请在 finish_task 的 summary 中说明 noChangesReason。");
+    }
   } else {
     for (const file of changed.slice(0, 50)) {
       const path = resolve(context.workspaceRoot, file);
@@ -103,7 +107,8 @@ export function codingFinishIssue(context: AgentToolContext): string | null {
     }
   }
 
-  if (state && state.progress.tests.length === 0 && changed.some((file) => !/\.(md|txt|json|yaml|yml)$/i.test(file))) {
+  const touched = [...new Set([...changed, ...modified])];
+  if (touched.some((file) => !/\.(md|txt|json|yaml|yml)$/i.test(file)) && (state?.progress.tests.length ?? 0) === 0) {
     issues.push("还没有运行过测试命令。请先 run_tests 或运行项目测试，再调用 finish_task。");
   }
 
