@@ -229,7 +229,7 @@ npm run tauri:build
 
 桌面版只保留 Tauri 实现：内置官方 Node 22.23.2、npm 10.9.8 和全部服务端功能，安装包约 27.7 MiB，安装后约 113 MiB。Codex 使用系统中的 `codex.exe`，不内置 479 MiB 平台二进制。
 
-构建、体积、数据目录、日志、托盘、环境体检和已知限制见 [docs/design/desktop.md](docs/design/desktop.md)。
+构建、体积、数据目录、日志、托盘、环境体检和已知限制见 [docs/design/desktop.md](docs/design/desktop.md)；从 Electron 到 113 MiB 的完整压缩过程、体积去向和使用前提见 [docs/design/desktop-compression.md](docs/design/desktop-compression.md)。
 
 ### 接入模型
 
