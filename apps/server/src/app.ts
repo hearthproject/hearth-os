@@ -888,6 +888,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const knowledgeSettings = new KnowledgeSettingsStore(store, secretBox);
   const knowledge = new KnowledgeRecallService({ store, settings: knowledgeSettings });
   const knowledgeSync = new KnowledgeSyncService({ store, settings: knowledgeSettings });
+  knowledgeSync.start();
   service.bus.subscribe((event) => {
     if (event.type === "memory.forgotten") {
       const affected = (event.payload as { affectedMemoryIds?: string[] } | null)?.affectedMemoryIds ?? [];
@@ -1204,6 +1205,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
 
   app.addHook("onClose", async () => {
+    knowledgeSync.stop();
     await feishu.stop();
     mail.stop();
     proactive.stop();

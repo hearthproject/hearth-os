@@ -7,7 +7,7 @@ import { HearthStore } from "@hearth/eventlog";
 import { SecretBox } from "../secrets.ts";
 import { KnowledgeClient, type KnowledgeWriteInput } from "./client.ts";
 import { KnowledgeSettingsStore } from "./settings.ts";
-import { KnowledgeSyncService, memoryDocument, taskDocument } from "./sync.ts";
+import { KnowledgeSyncService, cronMatches, memoryDocument, taskDocument } from "./sync.ts";
 
 function memory(overrides: Partial<MemoryRecord> = {}): MemoryRecord {
   return {
@@ -50,6 +50,7 @@ describe("KnowledgeSyncService", () => {
   let root: string;
   const writes: KnowledgeWriteInput[] = [];
   const removes: string[] = [];
+  const reindexes: string[] = [];
 
   beforeEach(() => {
     store = new HearthStore(":memory:");
@@ -57,6 +58,7 @@ describe("KnowledgeSyncService", () => {
     root = mkdtempSync(join(tmpdir(), "hearth-knowledge-sync-"));
     writes.length = 0;
     removes.length = 0;
+    reindexes.length = 0;
   });
 
   afterEach(() => {
@@ -64,7 +66,7 @@ describe("KnowledgeSyncService", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  function service(): KnowledgeSyncService {
+  function service(clock?: () => Date): KnowledgeSyncService {
     const client = {
       write: async (input: KnowledgeWriteInput) => {
         writes.push(input);
@@ -72,12 +74,17 @@ describe("KnowledgeSyncService", () => {
       },
       remove: async (uri: string) => {
         removes.push(uri);
+      },
+      reindex: async (uri: string) => {
+        reindexes.push(uri);
+        return {};
       }
     };
     return new KnowledgeSyncService({
       store,
       settings,
-      clientFactory: () => client as unknown as KnowledgeClient
+      clientFactory: () => client as unknown as KnowledgeClient,
+      ...(clock ? { clock } : {})
     });
   }
 
@@ -137,6 +144,33 @@ describe("KnowledgeSyncService", () => {
     const doc = memoryDocument(memory({ content: "api_key: sk-abcdefgh12345" }));
     expect(doc.content).not.toContain("sk-abcdefgh12345");
     expect(doc.contentHash).toHaveLength(64);
+  });
+
+  it("reconciles existing memories and completed tasks", async () => {
+    settings.update({ enabled: true });
+    const record = memory();
+    const task = completedTask();
+    store.appendEvent({ type: "memory.updated", payload: record });
+    store.appendEvent({ type: "task.created", taskId: task.id, payload: task });
+    const sync = service();
+    const result = await sync.reconcile();
+    expect(result.memories).toBe(1);
+    expect(result.tasks).toBe(1);
+    expect(store.knowledgeStateGet("last_full_reconcile_at")).toBeTruthy();
+    expect(writes).toHaveLength(2);
+  });
+
+  it("runs the nightly reindex at most once per day", async () => {
+    settings.update({ enabled: true });
+    let now = new Date(2026, 10, 19, 3, 0, 0);
+    const sync = service(() => now);
+    expect(cronMatches("0 3 * * *", now)).toBe(true);
+    expect(cronMatches("0 4 * * *", now)).toBe(false);
+    expect(await sync.maybeReindex()).toBe(true);
+    expect(reindexes).toEqual(["viking://resources/hearth", "viking://user/default"]);
+    expect(await sync.maybeReindex()).toBe(false);
+    now = new Date(2026, 10, 20, 3, 0, 0);
+    expect(await sync.maybeReindex()).toBe(true);
   });
 
   it("deletes the indexed file and mapping after a memory is forgotten", async () => {

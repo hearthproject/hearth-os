@@ -37,6 +37,7 @@ export class KnowledgeSyncService {
   private readonly clock: () => Date;
   private readonly readFile: (path: string) => string;
   private flushing = false;
+  private timer: NodeJS.Timeout | null = null;
 
   constructor(deps: KnowledgeSyncDeps) {
     this.store = deps.store;
@@ -104,6 +105,58 @@ export class KnowledgeSyncService {
       updatedAt: now
     });
     return true;
+  }
+
+  start(intervalMs = 15_000): void {
+    if (this.timer) return;
+    this.timer = setInterval(() => {
+      void this.flush();
+      void this.maybeReindex();
+    }, intervalMs);
+    this.timer.unref();
+  }
+
+  stop(): void {
+    if (!this.timer) return;
+    clearInterval(this.timer);
+    this.timer = null;
+  }
+
+  async reconcile(): Promise<{ memories: number; tasks: number; sources: number }> {
+    const result = { memories: 0, tasks: 0, sources: 0 };
+    if (!this.settings.get().enabled) return result;
+    for (const memory of this.store.listMemories({ status: "active", limit: 10_000 })) {
+      if (this.enqueueMemory(memory)) result.memories += 1;
+    }
+    for (const task of this.store.listTasks()) {
+      if (task.status === "completed" && this.enqueueTask(task)) result.tasks += 1;
+    }
+    for (const item of this.store.listReadySourceItems(1000)) {
+      if (this.enqueueSource(item)) result.sources += 1;
+    }
+    this.store.knowledgeStateSet("last_full_reconcile_at", this.clock().toISOString());
+    await this.flush(50);
+    return result;
+  }
+
+  async maybeReindex(): Promise<boolean> {
+    const settings = this.settings.get();
+    if (!settings.enabled || !settings.write.reindexCron) return false;
+    const now = this.clock();
+    if (!cronMatches(settings.write.reindexCron, now)) return false;
+    const today = now.toISOString().slice(0, 10);
+    if (this.store.knowledgeStateGet("last_reindex_date") === today) return false;
+    try {
+      const client = this.clientFactory(settings);
+      await Promise.all([
+        client.reindex("viking://resources/hearth", { mode: "vectors_only", wait: false, recursive: true }),
+        client.reindex("viking://user/default", { mode: "vectors_only", wait: false, recursive: true })
+      ]);
+      this.store.knowledgeStateSet("last_reindex_date", today);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async flush(limit = 8): Promise<KnowledgeFlushResult> {
@@ -308,8 +361,34 @@ export function sourceDocument(item: SourceItem, text: string): KnowledgeDocumen
   };
 }
 
-function isMemoryWritable(memory: MemoryRecord, mode: "curated" | "all"): boolean {
-  if (memory.status !== "active" || !memory.allowRecall) return false;
+export function cronMatches(expression: string, date: Date): boolean {
+  const parts = expression.trim().split(/\s+/);
+  if (parts.length !== 5) return false;
+  const values = [date.getMinutes(), date.getHours(), date.getDate(), date.getMonth() + 1, date.getDay()];
+  return parts.every((part, index) => fieldMatches(part, values[index] ?? -1));
+}
+
+function fieldMatches(field: string, value: number): boolean {
+  for (const segment of field.split(",")) {
+    if (segment === "*") return true;
+    if (segment.startsWith("*/")) {
+      const step = Number(segment.slice(2));
+      if (Number.isFinite(step) && step > 0 && value % step === 0) return true;
+      continue;
+    }
+    if (segment.includes("-")) {
+      const bounds = segment.split("-").map(Number);
+      const from = bounds[0];
+      const to = bounds[1];
+      if (from !== undefined && to !== undefined && value >= from && value <= to) return true;
+      continue;
+    }
+    if (Number(segment) === value) return true;
+  }
+  return false;
+}
+
+function isMemoryWritable(memory: MemoryRecord, mode: "curated" | "all"): boolean {  if (memory.status !== "active" || !memory.allowRecall) return false;
   if (memory.sensitivity === "secret") return false;
   if (memory.taint !== "clean") return false;
   if (memory.originClass === "untrusted") return false;
