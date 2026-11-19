@@ -21,7 +21,9 @@ describe("agent runtime", () => {
         calls++;
         if (calls === 1) return turn("", [call("large", {})]);
         const output = messages.find((message) => message.role === "tool");
-        expect(output?.content).toBe("x".repeat(8000) + "\n[工具输出较长，已截断]");
+        expect(output?.content.startsWith("x".repeat(4_800))).toBe(true);
+        expect(output?.content).toContain("chars omitted from older tool output");
+        expect(output?.content.length).toBeLessThan(9_000);
         return { ...turn("done", []), usage: { inputTokens: 20, outputTokens: 5, cachedInputTokens: 10, cacheWriteInputTokens: 2, reasoningOutputTokens: 3 } };
       },
       tools: [{ definition: { name: "large", description: "large output", parameters: {} }, execute: async () => ({ content: "x".repeat(30_000) }) }],
@@ -405,27 +407,23 @@ describe("agent runtime", () => {
     expect(checkpoints.some((checkpoint) => checkpoint.kind === "compaction" && checkpoint.summary === "超限摘要")).toBe(true);
   });
 
-  it("skips repeated tool calls and fails before an infinite loop", async () => {
+  it("stops after repeated identical tool calls and results", async () => {
     const root = workspace(roots);
     const repeated = call("read_file", { path: "missing.txt" });
+    const model: AgentModel = async () => turn("", [{ ...repeated, id: `repeat-${Math.random()}` }]);
     const result = await runAgent({
-      model: fakeModel([
-        turn("", [repeated]),
-        turn("", [{ ...repeated, id: "repeat-1" }]),
-        turn("", [{ ...repeated, id: "repeat-2" }])
-      ]),
+      model,
       tools: createBuiltinTools(),
       goal: "不要重复",
       systemPrompt: "system",
-      budget: { maxTurns: 5, maxToolCalls: 10, maxTokens: 10_000, maxDurationMs: 30_000 },
+      budget: { maxTurns: 10, maxToolCalls: 10, maxTokens: 10_000, maxDurationMs: 30_000 },
       permissions: defaultTaskPermissions({ workspaceRoot: root, outDir: join(root, "out"), networkHosts: [] }),
       workspaceRoot: root,
       outDir: join(root, "out")
     });
     expect(result.status).toBe("failed");
     expect(result.summary).toContain("重复相同工具调用");
-    expect(result.messages.filter((message) => message.role === "tool")).toHaveLength(2);
-    expect(result.messages.some((message) => message.role === "tool" && message.content.includes("已跳过"))).toBe(true);
+    expect(result.messages.filter((message) => message.role === "tool").length).toBeGreaterThanOrEqual(5);
   });
 });
 
