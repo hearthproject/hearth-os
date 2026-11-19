@@ -24,6 +24,7 @@ export interface CompileContextInput {
   budgetTokens: number;
   parentPackId?: string | null;
   mustKnow?: ContextPackItem[];
+  externalItems?: ContextPackItem[];
   includeIdentity?: boolean;
   includeRecentContext?: boolean;
 }
@@ -184,6 +185,9 @@ export class ContextBroker {
 
   private candidates(input: CompileContextInput): Candidate[] {
     const candidates: Candidate[] = [];
+    for (const item of input.externalItems ?? []) {
+      candidates.push({ item, lexical: 0.5, recency: 0.5, graph: 0.2 });
+    }
     const matchedEntities = this.matchEntities(input.query);
     for (const entity of matchedEntities) candidates.push(this.entityCandidate(entity, input.query));
     const entityIds = new Set(matchedEntities.map((entity) => entity.id));

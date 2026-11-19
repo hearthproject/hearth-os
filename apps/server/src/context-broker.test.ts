@@ -90,4 +90,23 @@ describe("ContextBroker delegation scope", () => {
     expect(service.store.getContextPack(childPack.id)?.parentPackId).toBe(parentPack.id);
     expect(service.store.findContextPackByHash(childPack.hash)?.parentPackId).toBe(parentPack.id);
   });
+
+  it("injects external knowledge items into the relevant lane", () => {
+    const { broker } = setup();
+    const pack = broker.compile({
+      scopeKind: "chat", scopeId: "knowledge-test", query: "部署回滚", budgetTokens: 1000,
+      includeIdentity: false,
+      externalItems: [{
+        packId: "pending", ref: "kn:viking://resources/hearth/p0/baseline.md", lane: "relevant",
+        sourceKind: "knowledge", sourceId: "viking://resources/hearth/p0/baseline.md",
+        title: "baseline", summary: "先停止本地服务，再用快照恢复", confidence: "confirmed",
+        source: "OpenViking", reason: "语义检索命中", score: 0.77, tokens: 30, expandable: true,
+        validUntil: null
+      }]
+    });
+    const knowledge = pack.items.find((item) => item.sourceKind === "knowledge");
+    expect(knowledge?.lane).toBe("relevant");
+    expect(knowledge?.sourceId).toContain("viking://resources/hearth");
+    expect(broker.render(pack)).toContain("baseline");
+  });
 });
