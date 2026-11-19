@@ -1,0 +1,145 @@
+/* Hearth foundation: tokens, reset, typography, focus. Page rules do not belong here. */
+
+:root {
+  /* neutral canvas — keep legacy brand names as aliases while pages migrate */
+  --charcoal: #1d1d1b;
+  --ember: #f26b38;
+  --sand: #fbfbfa;
+  --cream: #ffffff;
+  --stone: #8b8984;
+
+  --bg: #fbfbfa;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-sunk: #f1f1ef;
+  --surface-muted: rgba(23, 23, 22, 0.04);
+  --rail: #f7f7f5;
+
+  --line: rgba(23, 23, 22, 0.08);
+  --line-strong: rgba(23, 23, 22, 0.14);
+  --line-subtle: rgba(23, 23, 22, 0.06);
+
+  --ink: #1d1d1b;
+  --ink-secondary: #64635f;
+  --ink-tertiary: #8b8984;
+
+  --accent: var(--ember);
+  --ember-fill: var(--ember);
+  --ember-fill-hover: #dc5827;
+  --ember-tint: rgba(242, 107, 56, 0.08);
+  --ember-on-ink: #ffffff;
+  --risk: #a33a1a;
+  --risk-tint: rgba(163, 58, 26, 0.08);
+  --ok: #34724a;
+  --ok-tint: rgba(52, 114, 74, 0.08);
+
+  --focus: 0 0 0 2px var(--surface), 0 0 0 4px var(--ember);
+
+  --font-ui: "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+
+  --fs-11: 11px;
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-14: 14px;
+  --fs-15: 15px;
+  --fs-16: 16px;
+  --fs-18: 18px;
+  --fs-20: 20px;
+  --fs-24: 24px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  --gap-1: 4px;
+  --gap-2: 8px;
+  --gap-3: 12px;
+  --gap-4: 16px;
+  --gap-5: 20px;
+  --gap-6: 24px;
+  --gap-7: 32px;
+
+  --rail-w: 232px;
+  --content-list: 1120px;
+  --content-doc: 760px;
+  --control-h: 28px;
+  --row-h: 32px;
+
+  --radius: 4px;
+  --radius-pill: 999px;
+  --shadow-pop: 0 8px 24px rgba(23, 23, 22, 0.12);
+
+  color-scheme: light;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  line-height: 1.5;
+}
+
+h1 {
+  letter-spacing: -0.02em;
+}
+
+h2,
+h3 {
+  letter-spacing: -0.01em;
+}
+
+a {
+  color: var(--ink);
+  text-decoration-color: var(--line-strong);
+}
+
+a:hover {
+  color: var(--ink);
+  text-decoration-color: var(--ember);
+}
+
+::selection {
+  background: var(--ember-tint);
+}
+
+/* shared primitives — new surfaces use these; old pages migrate per commit */
+.ui-section {
+  border-top: 1px solid var(--line);
+  padding: var(--space-5) 0;
+}
+
+.ui-row {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  min-height: var(--row-h);
+  min-width: 0;
+}
+
+.ui-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ui-field > label,
+.ui-label {
+  color: var(--ink-secondary);
+  font-size: var(--fs-12);
+  font-weight: 500;
+}
+
+.ui-meta {
+  color: var(--ink-tertiary);
+  font-size: var(--fs-12);
+}
+
+.ui-empty {
+  color: var(--ink-tertiary);
+  font-size: var(--fs-13);
+  padding: var(--space-6) 0;
+}
