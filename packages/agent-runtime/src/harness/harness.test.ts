@@ -8,6 +8,7 @@ import { compactAgentMessagesWithSummary } from "../compaction.ts";
 import { searchFiles } from "./search.ts";
 import { todoReadTool, todoWriteTool, todoReminder } from "./todo.ts";
 import { commandPolicyIssue } from "./command-policy.ts";
+import { redactSecrets } from "./tool-output.ts";
 import { detectProjectProfile } from "./project-profile.ts";
 import { runShellSession, startShellSession, shellOutput, killShellSession } from "./shell-session.ts";
 import { defaultTaskPermissions } from "../tools.ts";
@@ -143,6 +144,17 @@ describe("todo and command policy", () => {
     expect(commandPolicyIssue("git reset --hard HEAD")).toBeTruthy();
     expect(commandPolicyIssue("git push --force origin main")).toBeTruthy();
     expect(commandPolicyIssue("git status --short")).toBeNull();
+  });
+});
+
+describe("tool output", () => {
+  it("redacts credentials before they reach the model", () => {
+    const token = `ghp_${"a".repeat(36)}`;
+    const key = `sk-${"b".repeat(32)}`;
+    expect(redactSecrets(`token ${token}`)).toContain("[REDACTED_GITHUB_TOKEN]");
+    expect(redactSecrets(`api_key=${key}`)).toContain("[REDACTED_API_KEY]");
+    expect(redactSecrets("Authorization: Bearer abcdefghijklmnopqrstuvwxyz")).toContain("Bearer [REDACTED]");
+    expect(redactSecrets("password=hunter2hunter2")).toContain("password=[REDACTED]");
   });
 });
 

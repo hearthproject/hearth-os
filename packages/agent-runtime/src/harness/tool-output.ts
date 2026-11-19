@@ -8,10 +8,28 @@ export interface TruncatedText {
   fullOutputPath?: string;
 }
 
+const SECRET_PATTERNS: Array<{ pattern: RegExp; replacement: string }> = [
+  { pattern: /sk-[A-Za-z0-9_-]{20,}/g, replacement: "[REDACTED_API_KEY]" },
+  { pattern: /gh[pousr]_[A-Za-z0-9]{20,}/g, replacement: "[REDACTED_GITHUB_TOKEN]" },
+  { pattern: /github_pat_[A-Za-z0-9_]{20,}/g, replacement: "[REDACTED_GITHUB_TOKEN]" },
+  { pattern: /AKIA[0-9A-Z]{16}/g, replacement: "[REDACTED_AWS_KEY]" },
+  { pattern: /xox[baprs]-[A-Za-z0-9-]{10,}/g, replacement: "[REDACTED_SLACK_TOKEN]" },
+  { pattern: /-----BEGIN [A-Z ]+PRIVATE KEY-----[\s\S]+?-----END [A-Z ]+PRIVATE KEY-----/g, replacement: "[REDACTED_PRIVATE_KEY]" },
+  { pattern: /(Bearer\s+)[A-Za-z0-9._~+/=-]{16,}/gi, replacement: "$1[REDACTED]" },
+  { pattern: /([?&](?:api[_-]?key|token|secret|password)=)[^&\s]+/gi, replacement: "$1[REDACTED]" },
+  { pattern: /((?:api[_-]?key|access[_-]?token|secret|password)\s*[:=]\s*["']?)[A-Za-z0-9._~+/=-]{12,}/gi, replacement: "$1[REDACTED]" }
+];
+
+export function redactSecrets(text: string): string {
+  let result = text;
+  for (const { pattern, replacement } of SECRET_PATTERNS) result = result.replace(pattern, replacement);
+  return result;
+}
+
 export function truncateToolOutput(text: string, options: { maxChars?: number; maxLines?: number; label?: string } = {}): TruncatedText {
   const maxChars = options.maxChars ?? 8_000;
   const maxLines = options.maxLines ?? 240;
-  const normalized = text.replace(/\r\n/g, "\n");
+  const normalized = redactSecrets(text).replace(/\r\n/g, "\n");
   const lines = normalized.split("\n");
   if (normalized.length <= maxChars && lines.length <= maxLines) return { content: normalized, truncated: false };
 
