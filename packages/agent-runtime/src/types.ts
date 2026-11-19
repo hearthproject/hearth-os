@@ -2,10 +2,17 @@
 
 import type { RunBudget, RunUsage, TaskPermissions } from "@hearth/core";
 
+export type HarnessProfile = "general" | "coding";
+export type HarnessMode = "build" | "plan";
+
 export interface AgentToolDefinition {
   name: string;
   description: string;
   parameters: Record<string, unknown>;
+  /** Read-only tools can run in a bounded parallel batch. */
+  executionMode?: "parallel" | "sequential";
+  /** Per-tool timeout. Defaults to 120s, shell tools may override. */
+  timeoutMs?: number;
 }
 
 export interface AgentToolCall {
@@ -52,9 +59,26 @@ export interface AgentToolContext {
   outDir: string;
   permissions: TaskPermissions;
   signal: AbortSignal;
+  state?: AgentToolState;
+  fullAccess?: boolean;
 }
 
-export type AgentToolAction = "finish" | "ask_user";
+export type AgentToolAction = "finish" | "ask_user" | "plan";
+
+export interface AgentToolMetadata {
+  truncated?: boolean;
+  fullOutputPath?: string;
+  exitCode?: number | null;
+  durationMs?: number;
+  filesChanged?: string[];
+  diff?: string;
+  failedTests?: string[];
+  diagnostics?: Array<{ file: string; line?: number; code?: string; message: string }>;
+  sessionId?: string;
+  background?: boolean;
+  snapshotId?: string;
+  snapshotIds?: string[];
+}
 
 export interface AgentToolResult {
   content: string;
@@ -64,6 +88,39 @@ export interface AgentToolResult {
   outputs?: string[];
   question?: string;
   usage?: RunUsage;
+  metadata?: AgentToolMetadata;
+}
+
+export type AgentTodoStatus = "pending" | "in_progress" | "completed";
+
+export interface AgentTodo {
+  id: string;
+  content: string;
+  status: AgentTodoStatus;
+}
+
+export interface AgentReadFileState {
+  size: number;
+  mtimeMs: number;
+  hash: string;
+}
+
+export interface AgentProgress {
+  filesRead: string[];
+  filesModified: string[];
+  commands: Array<{ command: string; exitCode: number | null; test: boolean; at: number }>;
+  tests: Array<{ command: string; passed: boolean | null; at: number }>;
+  diagnostics: Array<{ file: string; line?: number; code?: string; message: string; at: number }>;
+}
+
+export interface AgentToolState {
+  workspaceRoot: string;
+  readFiles: Map<string, AgentReadFileState>;
+  todos: AgentTodo[];
+  progress: AgentProgress;
+  startedAt: number;
+  snapshots: Map<string, string>;
+  snapshotSeq: number;
 }
 
 export interface AgentTool {
@@ -77,16 +134,20 @@ export type RuntimeEvent =
   | { type: "assistant.message"; turn: number; text: string }
   | { type: "tool.started"; turn: number; call: AgentToolCall }
   | { type: "tool.finished"; turn: number; call: AgentToolCall; result: AgentToolResult; durationMs: number }
+  | { type: "tool.batch.started"; turn: number; calls: AgentToolCall[]; parallel: boolean }
+  | { type: "tool.batch.finished"; turn: number; calls: AgentToolCall[]; parallel: boolean; durationMs: number }
   | { type: "checkpoint.created"; seq: number; kind: string }
   | { type: "checkpoint.failed"; seq: number; kind: string; message: string }
   | { type: "compacted"; before: number; after: number }
+  | { type: "context.watermark"; estimatedTokens: number; usedTokens: number; compactions: number }
+  | { type: "progress.updated"; filesRead: number; filesModified: number; commands: number; tests: number; todosOpen?: number }
   | { type: "usage"; usage: RunUsage }
   | { type: "budget.exceeded"; budget: "turns" | "toolCalls" | "tokens" | "duration"; limit: number }
   | { type: "notice"; message: string };
 
 export interface AgentCheckpoint {
   seq: number;
-  kind: "turn" | "tool" | "compaction" | "final" | "budget" | "waiting_input";
+  kind: "turn" | "tool" | "compaction" | "final" | "budget" | "waiting_input" | "plan";
   messages: AgentMessage[];
   usage: RunUsage;
   turns: number;
@@ -124,6 +185,21 @@ export interface AgentRuntimeOptions {
   requireFinishTool?: boolean;
   stopOnToolError?: boolean;
   retryDelayMs?: number;
+  profile?: HarnessProfile;
+  mode?: HarnessMode;
+  state?: AgentToolState;
+  steering?: () => AgentMessage[];
+  toolTimeoutMs?: number;
+  maxParallelTools?: number;
+  keepRecentToolOutputs?: number;
+  projectInstructions?: string;
+  reminders?: AgentRuntimeReminders;
+}
+
+export interface AgentRuntimeReminders {
+  emptyTurn?: string;
+  missingFinish?: string;
+  repeated?: string;
 }
 
 export type AgentRunStatus = "completed" | "waiting_input" | "failed" | "cancelled" | "budget_exceeded";
@@ -143,8 +219,11 @@ export interface CompactOptions {
   keepRecent?: number;
   maxChars?: number;
   maxToolChars?: number;
+  keepRecentToolOutputs?: number;
   contextWindowTokens?: number;
   reserveTokens?: number;
   recentTokens?: number;
+  stateSummary?: string;
+  projectInstructions?: string;
   signal?: AbortSignal;
 }

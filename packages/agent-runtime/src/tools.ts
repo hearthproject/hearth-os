@@ -8,6 +8,16 @@ import type { TaskPermissions } from "@hearth/core";
 import type { DocumentBlockInput, SpreadsheetSheetInput } from "./documents.ts";
 import type { AgentTool, AgentToolContext, AgentToolResult } from "./types.ts";
 import { fetchWebSnapshot } from "./web-fetch.ts";
+import { applyEdit, findEditMatch, normalizeFile, restoreFile } from "./harness/edit-match.ts";
+import { searchFiles } from "./harness/search.ts";
+import { hashContent, recordCommand, recordFileModified, recordFileRead, requireReadBeforeWrite } from "./harness/file-state.ts";
+import { rewindTool, snapshotBeforeMutation } from "./harness/snapshots.ts";
+import { killShellSession, runShellSession, shellOutput, shellSessionInfo, startShellSession } from "./harness/shell-session.ts";
+import { truncateToolOutput, writeFullToolOutput } from "./harness/tool-output.ts";
+import { commandPolicyIssue } from "./harness/command-policy.ts";
+import { todoReadTool, todoWriteTool } from "./harness/todo.ts";
+import { submitPlanTool } from "./harness/plan.ts";
+import { diagnosticsTool, runTestsTool } from "./harness/verification.ts";
 
 const MAX_READ_BYTES = 2 * 1024 * 1024;
 const MAX_LIST_ENTRIES = 500;
@@ -23,7 +33,7 @@ const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", "coverage", 
 
 //模型能使用的工具和实现
 export function createBuiltinTools(): AgentTool[] {
-  return [readFileTool, readDocumentTool, listFilesTool, searchTextTool, globTool, grepTool, writeFileTool, writeSpreadsheetTool, writeDocumentTool, editFileTool, applyPatchTool, shellTool, captureScreenTool, fetchUrlTool, askUserTool, finishTaskTool];
+  return [readFileTool, readDocumentTool, listFilesTool, searchTextTool, globTool, grepTool, writeFileTool, writeSpreadsheetTool, writeDocumentTool, editFileTool, applyPatchTool, shellTool, shellOutputTool, shellKillTool, todoWriteTool, todoReadTool, runTestsTool, diagnosticsTool, submitPlanTool, rewindTool, captureScreenTool, fetchUrlTool, askUserTool, finishTaskTool];
 }
 
 export function defaultTaskPermissions(options: {
@@ -62,6 +72,7 @@ const readFileTool: AgentTool = {
   definition: {
     name: "read_file",
     description: "读取工作区内一个文本文件的内容。返回带行号的文本，适合查看输入材料、代码和已有产物。",
+    executionMode: "parallel",
     parameters: {
       type: "object",
       properties: {
@@ -82,13 +93,15 @@ const readFileTool: AgentTool = {
     const stat = lstatSync(target);
     if (!stat.isFile()) throw new Error(`不是普通文件：${path}`);
     if (stat.size > MAX_READ_BYTES) throw new Error(`文件过大，请先用 search_text 定位：${path}`);
-    const lines = readFileSync(target, "utf8").split(/\r?\n/);
+    const content = readFileSync(target, "utf8");
+    recordFileRead(context.state, target, content);
+    const lines = content.replace(/\uFEFF/, "").split(/\r?\n/);
     const offset = Math.max(1, intArg(args, "offset", 1));
     const limit = Math.min(2_000, Math.max(1, intArg(args, "limit", 400)));
     const selected = lines.slice(offset - 1, offset - 1 + limit);
     const body = selected.map((line, index) => `${offset + index}: ${line}`).join("\n");
     const more = offset - 1 + limit < lines.length ? `\n... 共 ${lines.length} 行，继续读取请调大 offset` : "";
-    return { content: body + more };
+    return { content: body + more, ...(more ? { metadata: { truncated: true } } : {}) };
   }
 };
 
@@ -96,6 +109,7 @@ const readDocumentTool: AgentTool = {
   definition: {
     name: "read_document",
     description: "读取 PDF、DOCX、XLSX、CSV、JSON、HTML 或文本资料并返回 Markdown。支持页码、工作表和覆盖缺口说明。",
+    executionMode: "parallel",
     parameters: {
       type: "object",
       properties: {
@@ -130,6 +144,7 @@ const listFilesTool: AgentTool = {
   definition: {
     name: "list_files",
     description: "列出工作区内的文件和目录。用于了解工作区结构，默认跳过依赖和构建目录。",
+    executionMode: "parallel",
     parameters: {
       type: "object",
       properties: {
@@ -156,6 +171,7 @@ const searchTextTool: AgentTool = {
   definition: {
     name: "search_text",
     description: "在工作区文本文件中搜索关键词，返回文件路径、行号和匹配行。",
+    executionMode: "parallel",
     parameters: {
       type: "object",
       properties: {
@@ -174,9 +190,25 @@ const searchTextTool: AgentTool = {
     const target = resolveSafe(path, context.workspaceRoot, context.permissions.readRoots);
     assertReadable(target, context.permissions.readRoots);
     const maxResults = Math.min(MAX_SEARCH_RESULTS, Math.max(1, intArg(args, "maxResults", 50)));
-    const results: string[] = [];
-    search(target, query, maxResults, results);
-    return { content: results.length > 0 ? results.join("\n") : `没有找到包含“${query}”的内容` };
+    try {
+      const result = searchFiles({
+        pattern: stringArg(args, "query"),
+        root: context.workspaceRoot,
+        path: target,
+        literal: true,
+        ignoreCase: true,
+        maxResults,
+        timeoutMs: MAX_SCAN_MS
+      });
+      if (result.matches.length === 0) return { content: `没有找到包含“${stringArg(args, "query")}”的内容`, metadata: { truncated: result.truncated } };
+      const rendered = result.matches.map((match) => `${match.file}:${match.line}: ${match.text}`);
+      return {
+        content: `${rendered.join("\n")}${result.truncated ? `\n... 已达到 ${maxResults} 条上限` : ""}`,
+        metadata: { truncated: result.truncated }
+      };
+    } catch (error) {
+      throw new Error(`搜索失败：${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 };
 
@@ -184,6 +216,7 @@ const globTool: AgentTool = {
   definition: {
     name: "glob",
     description: "按 glob 模式查找工作区文件，返回相对工作区路径。自动跳过依赖、构建和隐藏目录，适合先定位代码或资料。",
+    executionMode: "parallel",
     parameters: {
       type: "object",
       properties: {
@@ -226,6 +259,7 @@ const grepTool: AgentTool = {
   definition: {
     name: "grep",
     description: "用 RE2 兼容正则或字面量搜索工作区文本文件，支持 include/exclude glob 过滤。返回相对工作区路径、行号和匹配行。",
+    executionMode: "parallel",
     parameters: {
       type: "object",
       properties: {
@@ -253,29 +287,31 @@ const grepTool: AgentTool = {
     if (!existsSync(target)) throw new Error(`路径不存在：${path}`);
     const stat = lstatSync(target);
     if (!stat.isFile() && !stat.isDirectory()) throw new Error(`不是普通文件或目录：${path}`);
-    const includes = stringArrayArg(args, "include").map(toGlobMatcher);
-    const excludes = stringArrayArg(args, "exclude").map(toGlobMatcher);
+    const includes = stringArrayArg(args, "include");
+    const excludes = stringArrayArg(args, "exclude");
     const maxResults = Math.min(MAX_SEARCH_RESULTS, Math.max(1, intArg(args, "maxResults", 50)));
-    const expression = mode === "literal" ? RE2JS.quote(pattern) : pattern;
-    let regex: RE2JS;
+    let result;
     try {
-      regex = RE2JS.compile(expression, args.caseSensitive === true ? 0 : RE2JS.CASE_INSENSITIVE);
+      result = searchFiles({
+        pattern,
+        root: context.workspaceRoot,
+        path: target,
+        ...(includes.length ? { include: includes } : {}),
+        ...(excludes.length ? { exclude: excludes } : {}),
+        literal: mode === "literal",
+        ignoreCase: args.caseSensitive !== true,
+        maxResults,
+        timeoutMs: MAX_SCAN_MS
+      });
     } catch (error) {
       throw new Error(`无效的 RE2 正则：${error instanceof Error ? error.message : String(error)}`);
     }
-    const deadline = Date.now() + MAX_SCAN_MS;
-    const results: string[] = [];
-    walkFiles(target, deadline, (file) => {
-      const matchPath = stat.isFile() ? basename(file) : relative(target, file).replace(/\\/g, "/");
-      const name = basename(file);
-      if (includes.length > 0 && !includes.some((matcher) => matcher(matchPath) || matcher(name))) return true;
-      if (excludes.some((matcher) => matcher(matchPath) || matcher(name))) return true;
-      grepFile(file, context.workspaceRoot, regex, maxResults, results);
-      return results.length < maxResults;
-    });
-    results.sort((left, right) => left.localeCompare(right));
-    const suffix = results.length >= maxResults ? `\n... 已达到 ${maxResults} 条上限` : "";
-    return { content: results.length > 0 ? `${results.join("\n")}${suffix}` : `没有找到匹配“${pattern}”的内容` };
+    const rendered = result.matches.map((match) => `${match.file}:${match.line}: ${match.text}`).sort((left, right) => left.localeCompare(right));
+    const suffix = result.truncated ? `\n... 已达到 ${maxResults} 条上限（${result.backend}）` : "";
+    return {
+      content: rendered.length > 0 ? `${rendered.join("\n")}${suffix}` : `没有找到匹配“${pattern}”的内容`,
+      metadata: { truncated: result.truncated }
+    };
   }
 };
 
@@ -287,7 +323,8 @@ const writeFileTool: AgentTool = {
       type: "object",
       properties: {
         path: { type: "string", description: "文件路径，相对于工作区根目录" },
-        content: { type: "string", description: "完整文件内容" }
+        content: { type: "string", description: "完整文件内容" },
+        overwrite: { type: "boolean", description: "已存在且未读取的文件必须显式覆盖；默认 false" }
       },
       required: ["path", "content"],
       additionalProperties: false
@@ -299,9 +336,19 @@ const writeFileTool: AgentTool = {
     const content = stringArg(args, "content", true);
     const target = resolveSafe(path, context.workspaceRoot, context.permissions.writeRoots);
     assertWritable(target, context.permissions.writeRoots);
+    const existed = existsSync(target);
+    if (existed && args.overwrite !== true) {
+      const issue = requireReadBeforeWrite(context, target);
+      if (issue) throw new Error(issue);
+    }
+    const snapshotId = existed ? snapshotBeforeMutation(context, target) : null;
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, content, "utf8");
-    return { content: `已写入 ${relative(context.workspaceRoot, target).replace(/\\/g, "/")}（${Buffer.byteLength(content)} 字节）` };
+    recordFileModified(context.state, target, content);
+    return {
+      content: `已写入 ${relative(context.workspaceRoot, target).replace(/\\/g, "/")}（${Buffer.byteLength(content)} 字节）`,
+      metadata: { filesChanged: [relative(context.workspaceRoot, target).replace(/\\/g, "/")], ...(snapshotId ? { snapshotId } : {}) }
+    };
   }
 };
 
@@ -391,40 +438,104 @@ const writeDocumentTool: AgentTool = {
 const editFileTool: AgentTool = {
   definition: {
     name: "edit_file",
-    description: "对授权目录内的文本文件做精确替换。oldText 必须与文件内容完全一致；dryRun 可先查看差异而不写盘。",
+    description: "Edit a text file with one or more replacements. Matching tolerates CRLF, indentation and minor whitespace drift; all edits are atomic and the original is snapshotted.",
     parameters: {
       type: "object",
       properties: {
         path: { type: "string", description: "文件路径，相对于工作区根目录" },
-        oldText: { type: "string", description: "要被替换的原文" },
-        newText: { type: "string", description: "替换后的内容" },
-        replaceAll: { type: "boolean", description: "是否替换所有匹配，默认只替换唯一匹配" },
-        dryRun: { type: "boolean", description: "只返回差异预览，不修改文件" }
+        oldText: { type: "string", description: "要被替换的原文（单次编辑时使用）" },
+        newText: { type: "string", description: "替换后的内容（单次编辑时使用）" },
+        edits: {
+          type: "array",
+          description: "多次替换；按顺序应用，任一失败则全部不写盘",
+          items: {
+            type: "object",
+            properties: {
+              oldText: { type: "string" },
+              newText: { type: "string" },
+              replaceAll: { type: "boolean" }
+            },
+            required: ["oldText", "newText"],
+            additionalProperties: false
+          }
+        },
+        replaceAll: { type: "boolean", description: "单次编辑时替换所有精确匹配" },
+        dryRun: { type: "boolean", description: "只返回差异预览，不修改文件" },
+        expectedHash: { type: "string", description: "可选：读取时的内容哈希前缀；文件已被外部修改时拒绝" }
       },
-      required: ["path", "oldText", "newText"],
+      required: ["path"],
       additionalProperties: false
     }
   },
   async execute(input, context) {
     const args = objectArgs(input);
     const path = stringArg(args, "path");
-    const oldText = stringArg(args, "oldText");
-    const newText = stringArg(args, "newText", true);
-    const replaceAll = args.replaceAll === true;
     const target = resolveSafe(path, context.workspaceRoot, context.permissions.writeRoots);
     assertWritable(target, context.permissions.writeRoots);
     if (!existsSync(target)) throw new Error(`文件不存在：${path}`);
-    const content = readFileSync(target, "utf8");
-    const count = countOccurrences(content, oldText);
-    if (count === 0) throw new Error("没有找到要替换的原文");
-    if (count > 1 && !replaceAll) throw new Error(`原文出现 ${count} 次，请提供更长的唯一片段或设置 replaceAll`);
-    const next = replaceAll ? content.split(oldText).join(newText) : content.replace(oldText, newText);
-    const diff = previewDiff(path, content, next);
+    const issue = requireReadBeforeWrite(context, target);
+    if (issue) throw new Error(issue);
+    const raw = readFileSync(target, "utf8");
+    if (typeof args.expectedHash === "string" && args.expectedHash && !hashContent(raw).startsWith(args.expectedHash)) {
+      throw new Error(`文件内容与 expectedHash 不匹配，可能已被外部修改：${path}`);
+    }
+    const normalized = normalizeFile(raw);
+    const edits = editRequests(args);
+    if (edits.length === 0) throw new Error("没有提供 oldText/newText 或 edits");
+    let next = normalized.text;
+    let applied = 0;
+    for (const edit of edits) {
+      if (edit.replaceAll) {
+        const count = countOccurrences(next, edit.oldText);
+        if (count === 0) throw new Error(editFailure(next, edit.oldText));
+        next = next.split(edit.oldText).join(edit.newText.replace(/\r\n/g, "\n"));
+        applied += count;
+        continue;
+      }
+      const match = findEditMatch(next, edit.oldText);
+      if (!("start" in match)) throw new Error(match.error);
+      next = applyEdit(next, match, edit.newText);
+      applied += 1;
+    }
+    const nextRaw = restoreFile({ ...normalized, text: next });
+    const diff = previewDiff(path, raw, nextRaw);
     if (args.dryRun === true) return { content: `差异预览（未写入）：\n${diff}` };
-    writeFileAtomic(target, next);
-    return { content: `已更新 ${path}（替换 ${replaceAll ? count : 1} 处）\n${diff}` };
+    const snapshotId = snapshotBeforeMutation(context, target);
+    writeFileAtomic(target, nextRaw);
+    recordFileModified(context.state, target, nextRaw);
+    const relativePath = relative(context.workspaceRoot, target).replace(/\\/g, "/");
+    return {
+      content: `已更新 ${relativePath}（${applied} 处）\n${diff}`,
+      metadata: {
+        filesChanged: [relativePath],
+        diff,
+        ...(snapshotId ? { snapshotId } : {})
+      }
+    };
   }
 };
+
+function editRequests(args: Record<string, unknown>): Array<{ oldText: string; newText: string; replaceAll: boolean }> {
+  const edits: Array<{ oldText: string; newText: string; replaceAll: boolean }> = [];
+  if (Array.isArray(args.edits)) {
+    for (const value of args.edits) {
+      if (!value || typeof value !== "object") continue;
+      const record = value as Record<string, unknown>;
+      if (typeof record.oldText !== "string" || typeof record.newText !== "string") continue;
+      edits.push({ oldText: record.oldText, newText: record.newText, replaceAll: record.replaceAll === true });
+    }
+    return edits;
+  }
+  if (typeof args.oldText === "string" && typeof args.newText === "string") {
+    edits.push({ oldText: args.oldText, newText: args.newText, replaceAll: args.replaceAll === true });
+  }
+  return edits;
+}
+
+function editFailure(content: string, oldText: string): string {
+  const match = findEditMatch(content, oldText);
+  return "start" in match ? "没有唯一匹配" : match.error;
+}
 
 const applyPatchTool: AgentTool = {
   definition: {
@@ -479,6 +590,8 @@ const applyPatchTool: AgentTool = {
       }
       const original = readState(target, operation.path);
       if (original === null) throw new Error(`文件不存在：${operation.path}`);
+      const issue = requireReadBeforeWrite(context, target);
+      if (issue) throw new Error(issue);
       let content = original;
       for (const hunk of operation.hunks) content = applyHunk(content, hunk);
       if (operation.moveTo) {
@@ -500,21 +613,44 @@ const applyPatchTool: AgentTool = {
     }).join("\n");
     if (changes.length === 0) return { content: "补丁没有产生文件变化" };
     if (args.dryRun === true) return { content: `差异预览（未写入，${changes.length} 个文件）：\n${preview}` };
+    const snapshotIds: string[] = [];
+    for (const change of changes) {
+      if (change.previous !== null) {
+        const snapshotId = snapshotBeforeMutation(context, change.target);
+        if (snapshotId) snapshotIds.push(snapshotId);
+      }
+    }
     commitFileChanges(changes);
-    return { content: `补丁已应用，修改 ${changes.length} 个文件\n${preview}` };
+    for (const change of changes) {
+      recordFileModified(context.state, change.target, change.content ?? "");
+    }
+    return {
+      content: `补丁已应用，修改 ${changes.length} 个文件\n${preview}`,
+      metadata: {
+        filesChanged: changes.map((change) => relative(context.workspaceRoot, change.target).replace(/\\/g, "/")),
+        diff: preview,
+        ...(snapshotIds.length ? { snapshotIds } : {})
+      }
+    };
   }
 };
 
 const shellTool: AgentTool = {
   definition: {
     name: "shell",
-    description: "在授权工作目录内运行一条命令，用于运行测试、检查、脚本，以及 git/gh 等仓库和 GitHub 操作。网络权限由任务授权控制。输出会截断。",
+    description: "Run a shell command in the workspace. Use background=true for servers, watchers and long builds; use shell_output to inspect and shell_kill to stop. Foreground timeouts are migrated to a background session instead of being killed.",
+    executionMode: "sequential",
+    timeoutMs: 10 * 60_000,
     parameters: {
       type: "object",
       properties: {
         command: { type: "string", description: "要运行的命令" },
         cwd: { type: "string", description: "工作目录，默认为工作区根目录" },
-        timeoutMs: { type: "number", description: "超时时间，默认 120000" }
+        timeoutMs: { type: "number", description: "前台等待超时，默认 120000；超时后进程转后台，不会被杀掉" },
+        yieldMs: { type: "number", description: "前台等待多少毫秒后返回增量输出，默认等待到退出或超时" },
+        background: { type: "boolean", description: "立即后台启动，返回 sessionId" },
+        env: { type: "object", description: "附加环境变量", additionalProperties: { type: "string" } },
+        stdin: { type: "string", description: "写入 stdin 后关闭（用于交互式命令）" }
       },
       required: ["command"],
       additionalProperties: false
@@ -524,11 +660,91 @@ const shellTool: AgentTool = {
     const args = objectArgs(input);
     const command = stringArg(args, "command");
     assertSafeCommand(command, context.permissions.networkHosts.length > 0);
+    const policy = commandPolicyIssue(command, { fullAccess: context.fullAccess === true });
+    if (policy) throw new Error(policy);
     const cwd = resolveSafe(optionalStringArg(args, "cwd") ?? ".", context.workspaceRoot, context.permissions.readRoots);
     assertReadable(cwd, context.permissions.readRoots);
+    const env = stringRecord(args.env);
+    const stdin = optionalStringArg(args, "stdin");
+    if (args.background === true) {
+      const started = startShellSession({ command, cwd, outDir: context.outDir, ...(env ? { env } : {}), ...(stdin !== undefined ? { stdin } : {}) });
+      recordCommand(context.state, command, null, isTestCommand(command));
+      return {
+        content: `已在后台启动：${command}\nsessionId=${started.sessionId}\noutput=${started.outputPath}`,
+        metadata: { sessionId: started.sessionId, background: true, fullOutputPath: started.outputPath }
+      };
+    }
     const timeoutMs = Math.min(10 * 60_000, Math.max(1_000, intArg(args, "timeoutMs", 120_000)));
-    const result = await runCommand(command, cwd, timeoutMs, context.signal, context.workspaceRoot);
-    return { content: result.content, ...(result.isError ? { isError: true } : {}) };
+    const yieldMs = Math.min(timeoutMs, Math.max(0, intArg(args, "yieldMs", timeoutMs)));
+    const result = await runShellSession({ command, cwd, outDir: context.outDir, timeoutMs: yieldMs, ...(env ? { env } : {}), ...(stdin !== undefined ? { stdin } : {}) });
+    recordCommand(context.state, command, result.exitCode, isTestCommand(command));
+    const truncated = truncateToolOutput(result.output, { maxChars: MAX_SHELL_OUTPUT_CHARS, maxLines: 240, label: "use shell_output or a narrower command" });
+    const fullPath = truncated.truncated ? result.outputPath : undefined;
+    const status = result.running
+      ? `still running in background (session ${result.sessionId}); use shell_output to inspect, shell_kill to stop`
+      : `exit ${result.exitCode ?? "unknown"}`;
+    return {
+      content: `$ ${command}\n${status} (${result.durationMs}ms)\n\n${truncated.content}${fullPath ? `\n\n[full output: ${fullPath.replace(/\\/g, "/")}]` : ""}`,
+      isError: result.running ? false : result.exitCode !== 0,
+      metadata: {
+        exitCode: result.exitCode,
+        durationMs: result.durationMs,
+        sessionId: result.sessionId,
+        background: result.running,
+        truncated: truncated.truncated,
+        ...(fullPath ? { fullOutputPath: fullPath } : {})
+      }
+    };
+  }
+};
+
+const shellOutputTool: AgentTool = {
+  definition: {
+    name: "shell_output",
+    description: "Read incremental output from a background or still-running shell session.",
+    executionMode: "parallel",
+    parameters: {
+      type: "object",
+      properties: {
+        sessionId: { type: "string", description: "shell 返回的 sessionId" },
+        offset: { type: "number", description: "从第几个字符开始读取；默认 0 返回全部缓冲" }
+      },
+      required: ["sessionId"],
+      additionalProperties: false
+    }
+  },
+  async execute(input) {
+    const args = objectArgs(input);
+    const sessionId = stringArg(args, "sessionId");
+    const output = shellOutput(sessionId, intArg(args, "offset", 0));
+    if (!output) throw new Error(`找不到 shell session：${sessionId}`);
+    const truncated = truncateToolOutput(output.output, { maxChars: MAX_SHELL_OUTPUT_CHARS, maxLines: 240, label: "read with a larger offset or narrower output" });
+    return {
+      content: `session ${sessionId}: ${output.running ? "running" : `exit ${output.exitCode ?? "unknown"}`}\n\n${truncated.content}`,
+      metadata: { sessionId, background: output.running, exitCode: output.exitCode, truncated: truncated.truncated, ...(output.outputPath ? { fullOutputPath: output.outputPath } : {}) }
+    };
+  }
+};
+
+const shellKillTool: AgentTool = {
+  definition: {
+    name: "shell_kill",
+    description: "Stop a background shell session and its process tree.",
+    executionMode: "sequential",
+    parameters: {
+      type: "object",
+      properties: { sessionId: { type: "string" } },
+      required: ["sessionId"],
+      additionalProperties: false
+    }
+  },
+  async execute(input) {
+    const args = objectArgs(input);
+    const sessionId = stringArg(args, "sessionId");
+    const info = shellSessionInfo(sessionId);
+    if (!info) throw new Error(`找不到 shell session：${sessionId}`);
+    killShellSession(sessionId);
+    return { content: `已停止 session ${sessionId}（${info.command}）。`, metadata: { sessionId } };
   }
 };
 
@@ -562,6 +778,7 @@ const fetchUrlTool: AgentTool = {
   definition: {
     name: "fetch_url",
     description: "读取一个已授权域名下的网页并返回 Markdown。服务端会校验重定向、DNS 和内网地址；网络默认关闭。",
+    executionMode: "parallel",
     parameters: {
       type: "object",
       properties: {
@@ -912,10 +1129,16 @@ function applyHunk(content: string, hunk: string[]): string {
   }
   const oldText = oldLines.join("\n");
   const newText = newLines.join("\n");
-  if (!oldText.trim()) return `${content}${newText}`;
-  const index = content.indexOf(oldText);
-  if (index < 0) throw new Error(`补丁片段未匹配：${oldText.slice(0, 80)}`);
-  return content.slice(0, index) + newText + content.slice(index + oldText.length);
+  const hadCrlf = content.includes("\r\n");
+  const normalized = content.replace(/\r\n/g, "\n");
+  if (!oldText.trim()) {
+    const appended = `${normalized}${newText}`;
+    return hadCrlf ? appended.replace(/\n/g, "\r\n") : appended;
+  }
+  const match = findEditMatch(normalized, oldText);
+  if (!("start" in match)) throw new Error(`补丁片段未匹配：${match.error}`);
+  const result = applyEdit(normalized, match, newText);
+  return hadCrlf ? result.replace(/\n/g, "\r\n") : result;
 }
 
 function captureWindowsScreen(target: string, signal: AbortSignal): Promise<void> {
@@ -946,6 +1169,19 @@ function captureWindowsScreen(target: string, signal: AbortSignal): Promise<void
       }
     );
   });
+}
+
+function stringRecord(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const result: Record<string, string> = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof item === "string") result[key] = item;
+  }
+  return Object.keys(result).length ? result : undefined;
+}
+
+function isTestCommand(command: string): boolean {
+  return /(^|\s)(npm|pnpm|yarn|bun)\s+(run\s+)?test\b|\b(pytest|vitest|jest|go test|cargo test|mvn test|gradlew test|rspec|phpunit|dotnet test|ctest)\b/i.test(command);
 }
 
 function assertSafeCommand(command: string, networkAllowed: boolean): void {

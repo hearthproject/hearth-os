@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createBuiltinTools, defaultTaskPermissions } from "./tools.ts";
+import { killShellSession } from "./harness/shell-session.ts";
 import type { AgentToolContext } from "./types.ts";
 
 describe("builtin tools", () => {
@@ -303,14 +304,14 @@ describe("builtin tools", () => {
     expect(result.isError).toBeFalsy();
     expect(result.content.length).toBeLessThan(9_000);
     expect(result.content).toContain(".hearth/shell/");
-    const logs = readdirSync(join(root, ".hearth", "shell"));
+    const logs = readdirSync(join(out, ".hearth", "shell"));
     expect(logs).toHaveLength(1);
-    const fullLog = readFileSync(join(root, ".hearth", "shell", logs[0]!), "utf8");
+    const fullLog = readFileSync(join(out, ".hearth", "shell", logs[0]!), "utf8");
     expect(fullLog).toContain("x".repeat(12000));
     expect(fullLog).toContain("$ node");
   });
 
-  it("kills the whole shell process tree on timeout", async () => {
+  it("migrates a timed-out command to a killable background session", async () => {
     const root = workspace(roots);
     const out = join(root, "out");
     const marker = join(root, "child-still-alive.txt");
@@ -332,8 +333,10 @@ describe("builtin tools", () => {
       permissions,
       signal: new AbortController().signal
     });
-    expect(result.isError).toBe(true);
-    expect(result.content).toContain("进程树已终止");
+    expect(result.isError).toBe(false);
+    expect(result.metadata?.background).toBe(true);
+    expect(result.metadata?.sessionId).toBeTruthy();
+    killShellSession(result.metadata!.sessionId!);
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_500));
     expect(existsSync(marker)).toBe(false);
   }, 10_000);
