@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { CODING_RUN_BUDGET, codingFinishIssue, codingSystemPrompt, createAgentState, createBuiltinTools, defaultTaskPermissions, runAgent } from "../../packages/agent-runtime/src/index.ts";
+import { CODING_REMINDERS, CODING_RUN_BUDGET, codingFinishIssue, codingSystemPrompt, createAgentState, createBuiltinTools, defaultTaskPermissions, runAgent } from "../../packages/agent-runtime/src/index.ts";
 import type { AgentModel } from "../../packages/agent-runtime/src/types.ts";
 import { streamAgentTurn } from "../../apps/server/src/model-agent.ts";
 import type { ModelSettings } from "../../apps/server/src/model-settings.ts";
@@ -68,6 +68,7 @@ async function main(): Promise<void> {
     toolTimeoutMs: 10 * 60_000,
     maxParallelTools: 4,
     keepRecentToolOutputs: 3,
+    reminders: CODING_REMINDERS,
     contextWindowTokens: settings.contextWindowTokens,
     requireFinishTool: true,
     isFullPermission: () => false,

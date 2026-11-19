@@ -6,6 +6,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import {
   CODING_RUN_BUDGET,
+  CODING_REMINDERS,
   codingFinishIssue,
   codingHarnessEnabled,
   codingSystemPrompt,
@@ -161,6 +162,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     maxParallelTools: coding ? 4 : 1,
     ...(coding ? { keepRecentToolOutputs: 3 } : {}),
     ...(coding ? { projectInstructions: instructionsBlock(discoverInstructions(options.prepared.root)) } : {}),
+    ...(coding ? { reminders: CODING_REMINDERS } : {}),
     signal: options.signal,
     ...(resume ? { resume } : {}),
     contextWindowTokens: options.settings.contextWindowTokens,

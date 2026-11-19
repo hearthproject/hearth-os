@@ -284,12 +284,12 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         missingFinishTurns += 1;
         if (missingFinishTurns > 1) return finish("failed", "模型连续用纯文本声称完成，但没有调用 finish_task");
         emit({ type: "notice", message: "原生任务必须调用 finish_task 收尾；已要求模型补充正式完成结果" });
-        messages.push({ role: "user", content: "不要只用文本回复完成。请先核对产物，然后调用 finish_task，提供中文总结和输出路径。" });
+        messages.push({ role: "user", content: options.reminders?.missingFinish ?? "不要只用文本回复完成。请先核对产物，然后调用 finish_task，提供中文总结和输出路径。" });
         continue;
       }
       emptyTurns += 1;
       if (emptyTurns >= 3) return finish("failed", "模型连续没有返回可执行内容");
-      messages.push({ role: "user", content: "请继续完成当前任务；如果已经完成，请调用 finish_task 并给出中文总结。" });
+      messages.push({ role: "user", content: options.reminders?.emptyTurn ?? "请继续完成当前任务；如果已经完成，请调用 finish_task 并给出中文总结。" });
       continue;
     }
     emptyTurns = 0;
@@ -362,7 +362,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       lastProgressHash = progressHash;
       if (sameProgressCount >= 4) {
         emit({ type: "notice", message: "检测到连续相同工具调用和结果。请不要重复同一调用；重新读取相关文件、缩小验证范围或改变策略。" });
-        messages.push({ role: "user", content: "连续多次工具调用和结果完全相同。请停止重复，重新阅读错误信息并换一种做法；如果被环境阻塞，请调用 finish_task 说明阻塞原因。" });
+        messages.push({ role: "user", content: options.reminders?.repeated ?? "连续多次工具调用和结果完全相同。请停止重复，重新阅读错误信息并换一种做法；如果被环境阻塞，请调用 finish_task 说明阻塞原因。" });
       }
       if (sameProgressCount >= 5) {
         return finish("failed", "模型连续多次产生重复相同工具调用和结果，已停止以避免死循环");

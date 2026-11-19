@@ -193,6 +193,13 @@ export interface AgentRuntimeOptions {
   maxParallelTools?: number;
   keepRecentToolOutputs?: number;
   projectInstructions?: string;
+  reminders?: AgentRuntimeReminders;
+}
+
+export interface AgentRuntimeReminders {
+  emptyTurn?: string;
+  missingFinish?: string;
+  repeated?: string;
 }
 
 export type AgentRunStatus = "completed" | "waiting_input" | "failed" | "cancelled" | "budget_exceeded";

@@ -2,6 +2,13 @@ import { detectProjectProfile, describeProjectProfile } from "./project-profile.
 import { discoverInstructions, instructionsBlock } from "./instructions.ts";
 import { environmentBlock, readGitEnvironment } from "./environment.ts";
 import type { TaskPermissions } from "@hearth/core";
+import type { AgentRuntimeReminders } from "../types.ts";
+
+export const CODING_REMINDERS: AgentRuntimeReminders = {
+  emptyTurn: "Continue the task. Re-read the current error or diff, make the next concrete change, and call finish_task only after verification.",
+  missingFinish: "Do not stop with prose. Inspect the diff, run the relevant tests, then call finish_task with a summary and changed files.",
+  repeated: "The same tool call returned the same result repeatedly. Stop retrying, read the error again, and change approach; if the environment blocks you, call finish_task with the blocker."
+};
 
 export interface CodingPromptOptions {
   workspaceRoot: string;
