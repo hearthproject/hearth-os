@@ -74,6 +74,7 @@ import { SyncError, SyncService } from "./sync.ts";
 import { SecretBox } from "./secrets.ts";
 import { KnowledgeRecallService } from "./knowledge/recall.ts";
 import { KnowledgeSettingsStore } from "./knowledge/settings.ts";
+import { KnowledgeSyncService } from "./knowledge/sync.ts";
 import { McpServerError, McpServerService } from "./mcp-servers.ts";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
@@ -883,13 +884,24 @@ export async function buildServer(options: BuildServerOptions = {}) {
     if (context.settings().mode !== "off") context.recordChatMessage(message);
   });
 
-  const sources = new SourceRegistry(service, {
-    contentRoot: options.sourceContentRoot ?? SOURCE_CONTENT_DIR,
-    onItemReady: (item) => ontologyWriter.captureSourceItem(item)
-  });
   const secretBox = options.syncSecretBox ?? SecretBox.fromKeyFile(options.masterKeyPath ?? MASTER_KEY_PATH);
   const knowledgeSettings = new KnowledgeSettingsStore(store, secretBox);
   const knowledge = new KnowledgeRecallService({ store, settings: knowledgeSettings });
+  const knowledgeSync = new KnowledgeSyncService({ store, settings: knowledgeSettings });
+  service.bus.subscribe((event) => {
+    if (event.type !== "memory.created" && event.type !== "memory.updated") return;
+    const memoryId = (event.payload as { id?: string } | null)?.id;
+    if (!memoryId) return;
+    const memory = store.getMemory(memoryId);
+    if (memory) knowledgeSync.enqueueMemory(memory);
+  });
+  const sources = new SourceRegistry(service, {
+    contentRoot: options.sourceContentRoot ?? SOURCE_CONTENT_DIR,
+    onItemReady: (item) => {
+      ontologyWriter.captureSourceItem(item);
+      knowledgeSync.enqueueSource(item);
+    }
+  });
   const mcpServers = new McpServerService({ store, secretBox });
   const mail = new EmailService({
     store,
@@ -1096,6 +1108,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
         skills,
         worktrees,
         knowledge,
+        knowledgeSync,
         attachmentRoot,
         executorSettingsPath,
         executorSettingsProvider: () => executorSettingsStore.load(),

@@ -47,6 +47,7 @@ import type { McpServerService } from "./mcp-servers.ts";
 import { DEFAULT_RUN_BUDGET, nativePermissionsFor, runNativeTask } from "./native-executor.ts";
 import { ContextBroker } from "./context-broker.ts";
 import type { KnowledgeRecallService } from "./knowledge/recall.ts";
+import type { KnowledgeSyncService } from "./knowledge/sync.ts";
 import { OntologyService } from "./ontology.ts";
 import { createPersonalReadTools } from "./personal-tools.ts";
 import { createMailTools } from "./mail-tools.ts";
@@ -132,6 +133,7 @@ export interface SchedulerOptions {
   completionValidators?: Record<string, GoalValidatorRunner> | undefined;
   contextBroker?: ContextBroker | undefined;
   knowledge?: KnowledgeRecallService | undefined;
+  knowledgeSync?: KnowledgeSyncService | undefined;
   ontologyWriter?: OntologyWriter | undefined;
 }
 
@@ -167,6 +169,7 @@ export class HearthScheduler {
   private readonly context: ContextService;
   private readonly contextBroker: ContextBroker | undefined;
   private readonly knowledge: KnowledgeRecallService | undefined;
+  private readonly knowledgeSync: KnowledgeSyncService | undefined;
   private readonly ontology: OntologyService;
   private readonly ontologyWriter: OntologyWriter;
   private readonly projector: ContextProjector;
@@ -234,6 +237,7 @@ export class HearthScheduler {
     this.context = options.context ?? new ContextService(this.service, options.contextBlobRoot ?? CONTEXT_BLOB_DIR);
     this.contextBroker = options.contextBroker;
     this.knowledge = options.knowledge;
+    this.knowledgeSync = options.knowledgeSync;
     this.ontology = new OntologyService(this.service);
     this.ontologyWriter = options.ontologyWriter ?? new OntologyWriter(this.service, this.ontology);
     this.projector = new ContextProjector(this.service, this.context, options.contextBroker);
@@ -1341,6 +1345,12 @@ export class HearthScheduler {
         this.memory.captureExperience(taskId);
       } catch {
         // Experience capture is best effort and never changes the task outcome.
+      }
+      try {
+        const finalTask = this.service.store.getTask(taskId);
+        if (finalTask) this.knowledgeSync?.enqueueTask(finalTask);
+      } catch {
+        // Knowledge writeback is best effort and never changes the task outcome.
       }
       try {
         const finalTask = this.service.store.getTask(taskId);

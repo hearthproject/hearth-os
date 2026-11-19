@@ -1,0 +1,297 @@
+import { createHash, randomUUID } from "node:crypto";
+import { readFileSync, statSync } from "node:fs";
+import type { MemoryRecord, SourceItem, TaskRecord } from "@hearth/core";
+import type { HearthStore } from "@hearth/eventlog";
+import { redactSecrets } from "../context.ts";
+import { KnowledgeClient, type KnowledgeWriteInput } from "./client.ts";
+import type { KnowledgeSettings, KnowledgeSettingsStore } from "./settings.ts";
+
+const MAX_SOURCE_BYTES = 2 * 1024 * 1024;
+const MAX_ATTEMPTS = 5;
+
+export interface KnowledgeSyncDeps {
+  store: HearthStore;
+  settings: KnowledgeSettingsStore;
+  clientFactory?: (settings: KnowledgeSettings) => KnowledgeClient;
+  clock?: () => Date;
+  readFile?: (path: string) => string;
+}
+
+export interface KnowledgeFlushResult {
+  written: number;
+  failed: number;
+  skipped: number;
+}
+
+export interface KnowledgeDocument {
+  uri: string;
+  content: string;
+  tags: string[];
+  contentHash: string;
+}
+
+export class KnowledgeSyncService {
+  private readonly store: HearthStore;
+  private readonly settings: KnowledgeSettingsStore;
+  private readonly clientFactory: (settings: KnowledgeSettings) => KnowledgeClient;
+  private readonly clock: () => Date;
+  private readonly readFile: (path: string) => string;
+  private flushing = false;
+
+  constructor(deps: KnowledgeSyncDeps) {
+    this.store = deps.store;
+    this.settings = deps.settings;
+    this.clock = deps.clock ?? (() => new Date());
+    this.readFile = deps.readFile ?? ((path) => readFileSync(path, "utf8"));
+    this.clientFactory = deps.clientFactory ?? ((settings) => new KnowledgeClient(settings));
+  }
+
+  enqueueMemory(memory: MemoryRecord): boolean {
+    const settings = this.settings.get();
+    if (!settings.enabled || settings.write.memories === "off") return false;
+    if (!isMemoryWritable(memory, settings.write.memories)) return false;
+    const document = memoryDocument(memory);
+    return this.enqueue({ kind: "memory", ref: memory.id, document });
+  }
+
+  enqueueTask(task: TaskRecord): boolean {
+    const settings = this.settings.get();
+    if (!settings.enabled || settings.write.tasks === "off") return false;
+    if (task.status !== "completed") return false;
+    const document = taskDocument(task);
+    return this.enqueue({ kind: "task", ref: task.id, document });
+  }
+
+  enqueueSource(item: SourceItem): boolean {
+    const settings = this.settings.get();
+    if (!settings.enabled || !settings.write.sources) return false;
+    if (item.status !== "ready" || !item.contentPath) return false;
+    try {
+      if (statSync(item.contentPath).size > MAX_SOURCE_BYTES) return false;
+    } catch {
+      return false;
+    }
+    let text: string;
+    try {
+      text = this.readFile(item.contentPath);
+    } catch {
+      return false;
+    }
+    const document = sourceDocument(item, text);
+    return this.enqueue({ kind: "source", ref: item.id, document });
+  }
+
+  async flush(limit = 8): Promise<KnowledgeFlushResult> {
+    if (this.flushing) return { written: 0, failed: 0, skipped: 0 };
+    const settings = this.settings.get();
+    if (!settings.enabled) return { written: 0, failed: 0, skipped: 0 };
+    this.flushing = true;
+    const result: KnowledgeFlushResult = { written: 0, failed: 0, skipped: 0 };
+    try {
+      const jobs = this.store.claimKnowledgeJobs(limit, this.clock().toISOString());
+      for (const job of jobs) {
+        const document = this.resolveDocument(job.kind, job.ref);
+        if (!document) {
+          this.store.finishKnowledgeJob(job.id, { status: "dead", lastError: "source object not found" });
+          result.skipped += 1;
+          continue;
+        }
+        try {
+          const input: KnowledgeWriteInput = {
+            uri: document.uri,
+            content: document.content,
+            mode: "create",
+            processingMode: "vectors_only",
+            tags: document.tags,
+            wait: false
+          };
+          await this.clientFactory(settings).write(input);
+          this.store.knowledgeMapUpsert({
+            hearthId: job.ref,
+            uri: document.uri,
+            kind: job.kind,
+            contentHash: document.contentHash,
+            updatedAt: this.clock().toISOString()
+          });
+          this.store.finishKnowledgeJob(job.id, { status: "done", attempts: job.attempts });
+          result.written += 1;
+        } catch (error) {
+          const attempts = job.attempts + 1;
+          const dead = attempts >= MAX_ATTEMPTS;
+          const delayMs = Math.min(2 ** attempts * 30_000, 30 * 60_000);
+          this.store.finishKnowledgeJob(job.id, {
+            status: dead ? "dead" : "failed",
+            attempts,
+            lastError: error instanceof Error ? error.message : String(error),
+            nextAttemptAt: dead
+              ? null
+              : new Date(this.clock().getTime() + delayMs).toISOString()
+          });
+          result.failed += 1;
+        }
+      }
+      return result;
+    } finally {
+      this.flushing = false;
+    }
+  }
+
+  private enqueue(input: { kind: "memory" | "task" | "source"; ref: string; document: KnowledgeDocument }): boolean {
+    const existing = this.store.knowledgeMapGet(input.ref);
+    if (existing && existing.contentHash === input.document.contentHash && existing.uri === input.document.uri) {
+      return false;
+    }
+    const previous = this.store.getKnowledgeJob(input.kind, input.ref, input.document.uri, "write");
+    if (
+      previous &&
+      previous.contentHash === input.document.contentHash &&
+      ["pending", "running", "done"].includes(previous.status)
+    ) {
+      return false;
+    }
+    const now = this.clock().toISOString();
+    this.store.upsertKnowledgeJob({
+      id: randomUUID(),
+      kind: input.kind,
+      ref: input.ref,
+      uri: input.document.uri,
+      op: "write",
+      contentHash: input.document.contentHash,
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: null,
+      lastError: null,
+      createdAt: now,
+      updatedAt: now
+    });
+    return true;
+  }
+
+  private resolveDocument(kind: string, ref: string): KnowledgeDocument | null {
+    if (kind === "memory") {
+      const memory = this.store.getMemory(ref);
+      if (!memory || memory.status === "forgotten") return null;
+      return memoryDocument(memory);
+    }
+    if (kind === "task") {
+      const task = this.store.getTask(ref);
+      if (!task || task.status !== "completed") return null;
+      return taskDocument(task);
+    }
+    if (kind === "source") {
+      const item = this.store.getSourceItem(ref);
+      if (!item || !item.contentPath) return null;
+      try {
+        return sourceDocument(item, this.readFile(item.contentPath));
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+}
+
+export function memoryDocument(memory: MemoryRecord): KnowledgeDocument {
+  const body = redactSecrets(memory.content);
+  const content = [
+    "---",
+    `hearth_id: ${memory.id}`,
+    `kind: ${memory.kind}`,
+    `tier: ${memory.tier}`,
+    `confidence: ${memory.confidence}`,
+    `trust: ${memory.trust}`,
+    `scope: ${memory.scope}`,
+    `origin: ${memory.originClass}`,
+    `updated_at: ${memory.updatedAt}`,
+    "---",
+    `# ${memory.kind} · ${memory.subjectKey}`,
+    "",
+    body
+  ].join("\n");
+  const bucket = memory.kind === "preference" ? "preferences" : memory.tier;
+  return {
+    uri: `viking://user/default/memories/${bucket}/${slug(memory.subjectKey, memory.kind)}-${hash8(memory.id)}.md`,
+    content,
+    tags: ["source=hearth", `hearth_kind=${memory.kind}`, `hearth_tier=${memory.tier}`],
+    contentHash: sha256(content)
+  };
+}
+
+export function taskDocument(task: TaskRecord): KnowledgeDocument {
+  const content = redactSecrets([
+    "---",
+    `hearth_task_id: ${task.id}`,
+    `status: ${task.status}`,
+    `executor: ${task.executorId ?? "unknown"}`,
+    `completed_at: ${task.updatedAt}`,
+    "---",
+    `# ${task.title}`,
+    "",
+    "## 目标",
+    task.goal,
+    "",
+    "## 验收",
+    ...(task.expectedOutputs && task.expectedOutputs.length > 0
+      ? task.expectedOutputs.map((output) => `- ${output}`)
+      : ["- 见任务记录"]),
+    "",
+    "## 结果",
+    task.resultSummary?.trim() || "已完成",
+    "",
+    `产物目录：${task.outputDir}`
+  ].join("\n"));
+  return {
+    uri: `viking://resources/hearth/tasks/${task.id}/task.md`,
+    content,
+    tags: ["source=hearth", "hearth_kind=task", `hearth_status=${task.status}`],
+    contentHash: sha256(content)
+  };
+}
+
+export function sourceDocument(item: SourceItem, text: string): KnowledgeDocument {
+  const content = [
+    "---",
+    `hearth_source_id: ${item.sourceId}`,
+    `hearth_item_id: ${item.id}`,
+    `hearth_item_key: ${item.itemKey}`,
+    `locator: ${item.locator}`,
+    `content_hash: ${item.contentHash ?? "unknown"}`,
+    `fetched_at: ${item.fetchedAt}`,
+    "---",
+    `# ${item.title ?? item.label}`,
+    "",
+    redactSecrets(text)
+  ].join("\n");
+  return {
+    uri: `viking://resources/hearth/sources/${item.sourceId}/${hash8(item.itemKey)}.md`,
+    content,
+    tags: ["source=hearth", "hearth_kind=source", `hearth_source=${item.sourceId}`],
+    contentHash: sha256(content)
+  };
+}
+
+function isMemoryWritable(memory: MemoryRecord, mode: "curated" | "all"): boolean {
+  if (memory.status !== "active" || !memory.allowRecall) return false;
+  if (memory.sensitivity === "secret") return false;
+  if (memory.taint !== "clean") return false;
+  if (memory.originClass === "untrusted") return false;
+  if (mode === "curated" && !["instructions", "curated"].includes(memory.tier)) return false;
+  return true;
+}
+
+function slug(value: string, fallback: string): string {
+  const text = value
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+  return text || fallback;
+}
+
+function hash8(value: string): string {
+  return sha256(value).slice(0, 8);
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}

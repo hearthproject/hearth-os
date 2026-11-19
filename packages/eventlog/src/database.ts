@@ -1655,8 +1655,14 @@ export class HearthStore {
     );
   }
 
-  listKnowledgeJobs(options: { status?: KnowledgeJobStatus; limit?: number } = {}): KnowledgeSyncJob[] {
-    const rows = options.status
+  getKnowledgeJob(kind: string, ref: string, uri: string, op: "write" | "delete"): KnowledgeSyncJob | null {
+    const row = this.db.prepare(
+      "SELECT * FROM knowledge_sync_jobs WHERE kind = ? AND ref = ? AND uri = ? AND op = ?"
+    ).get(kind, ref, uri, op) as DbRow | undefined;
+    return row ? rowToKnowledgeJob(row) : null;
+  }
+
+  listKnowledgeJobs(options: { status?: KnowledgeJobStatus; limit?: number } = {}): KnowledgeSyncJob[] {    const rows = options.status
       ? this.db.prepare("SELECT * FROM knowledge_sync_jobs WHERE status = ? ORDER BY created_at ASC LIMIT ?").all(options.status, options.limit ?? 100)
       : this.db.prepare("SELECT * FROM knowledge_sync_jobs ORDER BY created_at ASC LIMIT ?").all(options.limit ?? 100);
     return (rows as DbRow[]).map(rowToKnowledgeJob);
