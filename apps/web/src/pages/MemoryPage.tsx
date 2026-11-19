@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Brain, Check, Download, EyeOff, Pencil, Save, ShieldAlert, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { EmptyState } from "../components/EmptyState.tsx";
 import { api } from "../lib/api.ts";
 import { formatDate, relativeTime } from "../lib/format.ts";
 import type {
@@ -32,6 +31,7 @@ const STATUS_LABELS: Record<MemoryRecord["status"], string> = {
 };
 
 const SENSITIVITY_LABELS = { normal: "普通", sensitive: "敏感", secret: "机密" };
+const CONFIDENCE_LABELS: Record<MemoryRecord["confidence"], string> = { low: "低", medium: "中", high: "高" };
 const FORGET_TARGET_LABELS = {
   projection: "当前记录",
   versions: "历史版本",
@@ -72,7 +72,7 @@ export function MemoryPage() {
   });
 
   return (
-    <div className="page memory-page">
+    <div className="page workbench-page memory-page">
       <div className="page-head">
         <h1>记忆</h1>
         <span className="page-meta">记忆只提供背景，不是事实源，也不能扩大权限。</span>
@@ -114,7 +114,7 @@ export function MemoryPage() {
           {actionMutation.error && <p className="form-error">{actionMutation.error.message}</p>}
 
           {memories.length === 0 ? (
-            <section className="panel"><EmptyState title="这里还没有记忆" body="用户明确提供的事实、偏好和项目背景会先进入候选，确认后才参与召回。" /></section>
+            <p className="section-empty">这里还没有记忆。</p>
           ) : (
             <div className="memory-list">
               {memories.map((memory) => (
@@ -124,7 +124,7 @@ export function MemoryPage() {
           )}
 
           <section className="panel memory-recall-log">
-            <div className="panel-head"><h2>最近召回</h2><span className="panel-meta">每一次注入都有原因和来源</span></div>
+            <div className="panel-head"><h2>最近召回</h2></div>
             {(snapshot.recalls ?? []).slice(0, 10).map((recall) => {
               const memory = snapshot.memories.find((item) => item.id === recall.memoryId);
               const chatRecall = recall.taskId.startsWith("chat:");
@@ -139,7 +139,7 @@ export function MemoryPage() {
           </section>
 
           <section className="panel memory-forget-log">
-            <div className="panel-head"><h2>遗忘回执</h2><span className="panel-meta">逐项确认正文已从本地副本移除</span></div>
+            <div className="panel-head"><h2>遗忘回执</h2></div>
             {(snapshot.forgets ?? []).slice(0, 10).map((receipt) => (
               <div className="memory-forget-row" key={receipt.id}>
                 <div>
@@ -182,7 +182,7 @@ function MemoryCreateForm({ onCreate }: { onCreate: (input: CreateMemoryRequest)
   }
   return (
     <section className="panel">
-      <div className="panel-head"><h2>新增记忆</h2><span className="panel-meta">事实、偏好和承诺必须由用户明确创建</span></div>
+      <div className="panel-head"><h2>新增记忆</h2></div>
       <form className="memory-create-form" onSubmit={submit}>
         <div className="proactive-number-grid">
           <label>类型<select name="kind" defaultValue="fact">{Object.entries(KIND_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
@@ -217,7 +217,7 @@ function MemorySettingsPanel({ settings, onSave }: { settings: MemorySnapshot["s
   }
   return (
     <section className="panel memory-settings">
-      <div className="panel-head"><h2>记忆预算与自动捕获</h2><span className="panel-meta">{settings.autoCapture === "experience" ? "经历自动捕获：开启" : "仅手动创建"}</span></div>
+      <div className="panel-head"><h2>记忆预算与自动捕获</h2></div>
       <form className="proactive-settings-form" onSubmit={submit}>
         <div className="proactive-number-grid">
           <label>自动捕获<select name="autoCapture" defaultValue={settings.autoCapture}><option value="off">关闭</option><option value="experience">仅任务经历</option></select></label>
@@ -257,13 +257,11 @@ function MemoryCard({
           <div className="suggestion-kicker">
             <span className="tag">{KIND_LABELS[memory.kind]}</span>
             <span className="tag">{STATUS_LABELS[memory.status]}</span>
-            <span className="tag">{SENSITIVITY_LABELS[memory.sensitivity]}</span>
-            <span className="tag">{memory.confidence}</span>
-            {memory.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}
+            {memory.sensitivity !== "normal" && <span className="tag">{SENSITIVITY_LABELS[memory.sensitivity]}</span>}
+            <span className="tag">{CONFIDENCE_LABELS[memory.confidence]}</span>
           </div>
           <strong className="memory-subject">{memory.subjectKey}</strong>
         </div>
-        <span className="panel-meta">v{memory.version} · 召回 {memory.recallCount} 次</span>
       </div>
       {editing ? (
         <form className="memory-edit-form" onSubmit={submit}>
@@ -277,12 +275,13 @@ function MemoryCard({
       <div className="memory-meta">
         <span>来源：{memory.source.label}</span>
         <span>范围：{memory.scope}</span>
+        <span>召回 {memory.recallCount} 次</span>
         <span>更新：{relativeTime(memory.updatedAt)}</span>
         {memory.validUntil && <span>有效至：{formatDate(memory.validUntil)}</span>}
         {memory.knowledge && <span title={memory.knowledge.uri}>知识库：已索引 · {relativeTime(memory.knowledge.syncedAt)}</span>}
       </div>
       <div className="suggestion-foot">
-        <span className="page-meta">{memory.allowRecall ? "允许召回" : "不参与召回"}</span>
+        {!memory.allowRecall && <span className="page-meta">不参与召回</span>}
         <div className="suggestion-actions">
           {memory.status === "candidate" && <button className="primary-button" onClick={() => onAction("confirm")} disabled={busy}><Check size={15} /> 确认启用</button>}
           {memory.status !== "forgotten" && <button className="ghost-button" onClick={() => setEditing(!editing)} disabled={busy}><Pencil size={15} /> 纠正</button>}

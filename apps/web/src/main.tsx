@@ -14,6 +14,7 @@ import "./styles/tasks.css";
 import "./styles/task-detail.css";
 import "./styles/settings.css";
 import "./styles/inbox.css";
+import "./styles/workbench.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {

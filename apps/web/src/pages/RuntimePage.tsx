@@ -155,7 +155,7 @@ export function RuntimePage() {
   }
 
   return (
-    <div className="page runtime-page">
+    <div className="page workbench-page runtime-page">
       <div className="page-head">
         <div>
           <h1>运行控制台</h1>

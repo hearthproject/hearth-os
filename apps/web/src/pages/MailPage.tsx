@@ -93,10 +93,9 @@ export function MailPage() {
   }
 
   return (
-    <div className="page mail-page">
+    <div className="page workbench-page mail-page">
       <div className="page-head">
         <div>
-          <span className="eyebrow">邮件</span>
           <h1>邮件工作台</h1>
           <p className="page-meta">发送会生成一次性审批，批准后才通过已连接的邮箱真正发出。</p>
         </div>
@@ -185,10 +184,10 @@ function MailInbox({
   onGoAccounts: () => void;
 }) {
   if (accounts.length === 0) {
-    return <EmptyMail title="还没有邮件账户" body="先添加一个 SMTP/IMAP 账户，才能同步收件箱和发送邮件。" action={<button className="primary-button" onClick={onGoAccounts}><Plus size={15} /> 添加账户</button>} />;
+    return <EmptyMail title="还没有邮件账户" action={<button className="primary-button" onClick={onGoAccounts}><Plus size={15} /> 添加账户</button>} />;
   }
   if (sources.length === 0) {
-    return <EmptyMail title="还没有同步过收件箱" body="到账户页点击“同步”，或等待每 15 分钟自动同步。" action={<button className="primary-button" onClick={onGoAccounts}><RefreshCw size={15} /> 去账户页</button>} />;
+    return <EmptyMail title="还没有同步过收件箱" action={<button className="primary-button" onClick={onGoAccounts}><RefreshCw size={15} /> 去账户页</button>} />;
   }
   return (
     <section className="mail-layout">
@@ -208,7 +207,7 @@ function MailInbox({
         </label>
         <div className="mail-item-list">
           {itemsLoading && <p className="section-empty"><Loader2 size={14} className="spin" /> 正在读取…</p>}
-          {!itemsLoading && items.length === 0 && <p className="section-empty">收件箱还没有条目，点击“同步”读取最近邮件。</p>}
+          {!itemsLoading && items.length === 0 && <p className="section-empty">收件箱为空。</p>}
           {items.map((item) => (
             <button key={item.id} className={`mail-item ${activeItem?.id === item.id ? "active" : ""}`} onClick={() => onOpenItem(item)}>
               <strong>{item.title || item.label}</strong>
@@ -222,10 +221,10 @@ function MailInbox({
         <div className="panel-head">
           <div>
             <h2>{activeItem?.title || activeItem?.label || "选择一封邮件"}</h2>
-            <span className="panel-meta">{activeItem?.locator ?? "只读预览；不会标记为已读"}</span>
+            {activeItem && <span className="panel-meta">{activeItem.locator}</span>}
           </div>
         </div>
-        {contentBusy ? <p className="section-empty"><Loader2 size={14} className="spin" /> 正在读取正文…</p> : <pre className="mail-content-body">{content || "从左侧选择一封邮件查看正文。"}</pre>}
+        {contentBusy ? <p className="section-empty"><Loader2 size={14} className="spin" /> 正在读取正文…</p> : <pre className="mail-content-body">{content}</pre>}
       </div>
     </section>
   );
@@ -281,15 +280,12 @@ function MailCompose({
   }
 
   if (accounts.length === 0) {
-    return <EmptyMail title="还没有发件账户" body="先配置 SMTP 账户，再写信。" action={<button className="primary-button" onClick={onGoAccounts}><Plus size={15} /> 添加账户</button>} />;
+    return <EmptyMail title="还没有发件账户" action={<button className="primary-button" onClick={onGoAccounts}><Plus size={15} /> 添加账户</button>} />;
   }
 
   return (
     <section className="mail-compose panel">
-      <div className="panel-head">
-        <h2>写邮件</h2>
-        <span className="panel-meta">提交后进入一次性审批，不会立即发送</span>
-      </div>
+      <div className="panel-head"><h2>写邮件</h2></div>
       <div className="mail-compose-grid">
         <label><span>发件账户</span>
           <select value={accountId} onChange={(event) => setAccountId(event.target.value)}>
@@ -303,7 +299,6 @@ function MailCompose({
         <label className="span-2"><span>正文</span><textarea value={body} onChange={(event) => setBody(event.target.value)} rows={10} placeholder="写邮件正文…" /></label>
       </div>
       <div className="mail-compose-foot">
-        <p className="page-meta">首版不支持选择附件；后端已支持 artifact 附件。</p>
         <button className="primary-button" onClick={() => void submit()} disabled={busy || !account}>
           {busy ? <Loader2 size={15} className="spin" /> : <Send size={15} />} 提交审批
         </button>
@@ -497,12 +492,10 @@ function ServerFields({
   );
 }
 
-function EmptyMail({ title, body, action }: { title: string; body: string; action: ReactNode }) {
+function EmptyMail({ title, action }: { title: string; action: ReactNode }) {
   return (
     <section className="panel mail-empty">
-      <Mail size={24} />
       <h2>{title}</h2>
-      <p>{body}</p>
       {action}
     </section>
   );

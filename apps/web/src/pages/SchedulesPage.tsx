@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
-  CalendarClock,
   ChevronDown,
   Clock3,
   History,
@@ -183,15 +182,15 @@ export function SchedulesPage() {
   }
 
   return (
-    <div className="page schedules-page">
+    <div className="page workbench-page schedules-page">
       <div className="page-head">
         <div>
           <h1>定时任务</h1>
           <p className="page-meta">按固定时间自动创建任务。每次执行都会进入专属对话，进度、结果和失败原因都能回看。</p>
         </div>
         <div className="page-actions">
-          <button className="ghost-button" onClick={() => void schedulesQuery.refetch()} disabled={schedulesQuery.isFetching}>
-            <RefreshCw size={15} className={schedulesQuery.isFetching ? "spin" : ""} /> 刷新
+          <button className="icon-button" aria-label="刷新定时任务" title="刷新定时任务" onClick={() => void schedulesQuery.refetch()} disabled={schedulesQuery.isFetching}>
+            <RefreshCw size={15} className={schedulesQuery.isFetching ? "spin" : ""} />
           </button>
           <button className="primary-button" onClick={startCreate}><Plus size={15} /> 新建计划</button>
         </div>
@@ -292,12 +291,7 @@ export function SchedulesPage() {
       {schedulesQuery.isLoading ? (
         <div className="empty-panel"><Loader2 className="spin" /> 正在读取定时任务</div>
       ) : schedules.length === 0 && !draft ? (
-        <div className="empty-panel">
-          <CalendarClock size={24} />
-          <h2>还没有定时任务</h2>
-          <p>创建一个计划，让 Hearth 在指定时间自动开始工作。</p>
-          <button className="primary-button" onClick={startCreate}><Plus size={15} /> 新建计划</button>
-        </div>
+        <p className="section-empty">还没有定时任务。</p>
       ) : (
         <div className="schedule-list">
           {schedules.map((schedule) => (

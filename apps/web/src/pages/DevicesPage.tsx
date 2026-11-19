@@ -101,7 +101,7 @@ export function DevicesPage() {
   }
 
   return (
-    <div className="page devices-page">
+    <div className="page workbench-page devices-page">
       <div className="page-head">
         <div>
           <h1>桌面设备</h1>
@@ -611,7 +611,7 @@ function DeviceAudit({ device, session }: { device: DeviceView; session: Desktop
     <div className="panel device-audit-panel">
       <div className="panel-head">
         <h2>设备审计</h2>
-        <span className="panel-meta">仅专业版显示</span>
+        <span className="panel-meta">本机设备</span>
       </div>
       <dl className="kv-grid device-audit">
         <div><dt>设备 ID</dt><dd className="mono select-all">{device.id}</dd></div>

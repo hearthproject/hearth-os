@@ -101,11 +101,15 @@ try {
     await route.fulfill({ contentType: 'text/event-stream', body: `event: done\ndata: ${JSON.stringify(reply)}\n\nevent: end\ndata: {}\n\n` });
   });
   for (const mode of ['chat', 'task']) {
+    await page.getByRole('button', { name: '会话选项' }).click();
     await page.getByLabel('消息处理方式').selectOption(mode);
     await page.locator('.composer textarea').fill('再加一句 这是由Hearth agent发送的邮件！');
     await page.locator('.composer-send').click();
-    await page.getByLabel('消息处理方式').waitFor();
-    await page.waitForFunction(() => !document.querySelector('[aria-label="消息处理方式"]').disabled);
+    await page.getByRole('button', { name: '会话选项' }).waitFor();
+    await page.waitForFunction(() => {
+      const trigger = document.querySelector('[aria-label="会话选项"]');
+      return trigger instanceof HTMLButtonElement && !trigger.disabled;
+    });
   }
   assert.deepEqual(routeModes, ['chat', 'task']);
   assert.deepEqual(errors, []);

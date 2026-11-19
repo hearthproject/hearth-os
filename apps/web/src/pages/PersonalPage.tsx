@@ -111,7 +111,7 @@ export function PersonalPage() {
   }
 
   return (
-    <div className="page personal-page">
+    <div className="page workbench-page personal-page">
       <div className="page-head">
         <div>
           <h1>个人状态</h1>
@@ -133,8 +133,7 @@ export function PersonalPage() {
 
       <section className="panel">
         <div className="panel-head">
-          <h2><Brain size={16} /> 个人本体</h2>
-          <span className="panel-meta">确认 / 观察 / 推断 / 过期四档置信度</span>
+          <h2>个人本体</h2>
         </div>
         <div className="personal-toolbar">
           <label className="personal-search">
@@ -149,7 +148,7 @@ export function PersonalPage() {
         {loading && entities.length === 0 ? (
           <p className="section-empty">正在读取个人本体…</p>
         ) : entities.length === 0 ? (
-          <p className="section-empty">还没有可展示的实体。聊天、来源同步或任务完成后，代理会逐步建立个人本体。</p>
+          <p className="section-empty">还没有可展示的实体。</p>
         ) : (
           <div className="personal-entity-grid">
             {entities.map((entity) => (
@@ -179,9 +178,7 @@ export function PersonalPage() {
                     {entity.aliases.slice(0, 8).map((alias) => <span className="tag" key={alias.id}>{alias.alias}</span>)}
                   </div>
                 )}
-                {entity.states.length === 0 ? (
-                  <p className="section-empty">还没有记录状态。</p>
-                ) : (
+                {entity.states.length > 0 && (
                   <div className="entity-states">
                     {entity.states.map((state) => (
                       <div className="entity-state" key={state.id}>
