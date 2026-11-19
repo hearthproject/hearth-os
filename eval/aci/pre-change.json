@@ -1,0 +1,67 @@
+{
+  "generatedAt": "2026-11-19T10:34:11.644Z",
+  "passed": 3,
+  "total": 10,
+  "results": [
+    {
+      "name": "edit-exact",
+      "pass": true,
+      "detail": "exact replacement",
+      "ms": 6
+    },
+    {
+      "name": "edit-crlf-indent-drift",
+      "pass": false,
+      "detail": "exact match failed on CRLF and indentation drift",
+      "ms": 2
+    },
+    {
+      "name": "search-java",
+      "pass": false,
+      "detail": "没有找到匹配“void run”的内容",
+      "ms": 10
+    },
+    {
+      "name": "shell-output-tail",
+      "pass": true,
+      "detail": "length=8057",
+      "ms": 113
+    },
+    {
+      "name": "shell-timeout-kill",
+      "pass": true,
+      "detail": "命令失败：执行超过 1000ms，进程树已终止。\n完整日志：.hearth/shell/2026-11-19T10-34-09-954Z-b594fec1.lo",
+      "ms": 1685
+    },
+    {
+      "name": "edit-multi",
+      "pass": false,
+      "detail": "缺少参数：oldText",
+      "ms": 2
+    },
+    {
+      "name": "patch-fuzzy-context",
+      "pass": false,
+      "detail": "补丁片段未匹配：if (ready) {\nrun();",
+      "ms": 7
+    },
+    {
+      "name": "todo-tool",
+      "pass": false,
+      "detail": "todo_write missing",
+      "ms": 0
+    },
+    {
+      "name": "run-tests-tool",
+      "pass": false,
+      "detail": "run_tests missing",
+      "ms": 0
+    },
+    {
+      "name": "rewind-tool",
+      "pass": false,
+      "detail": "rewind missing",
+      "ms": 0
+    }
+  ]
+}

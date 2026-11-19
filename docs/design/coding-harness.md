@@ -83,12 +83,47 @@ The coding profile uses `CODING_RUN_BUDGET` (300 turns, 2500 tool calls, the nat
 
 | Benchmark | What it measures | Adapter |
 | --- | --- | --- |
-| Internal `hearth-coding` suite | Repository navigation, editing, tests, multi-file changes | `scripts/bench` fixtures |
+| Internal `hearth-coding` suite | Repository navigation, editing, tests, multi-file changes | `scripts/bench/aci-bench.ts` |
 | Aider Polyglot | 225 exercises, 6 languages, pass@2 and format errors | `hearth-eval` Aider adapter |
 | SWE-bench Verified | 500 Python issues, easy/hard split | Docker + patch adapter |
 | Terminal-Bench 2.x | 89 terminal tasks, 16 categories | Harbor adapter |
 
 The first milestone is harness-only: all unit tests green and the internal suite improves over the recorded baseline for the same model. Public benchmark runs require Docker/Linux and are tracked separately.
+
+### Measured ACI baseline
+
+`scripts/bench/legacy-aci.ts` runs the same fixture tasks against the pre-change worktree (`c6fbf41`) and the new harness. Results from 2026-11-19:
+
+| Capability | Before | After |
+| --- | --- | ---: |
+| Exact edit | pass | pass |
+| CRLF + indentation edit | fail | pass |
+| Multi-edit | fail | pass |
+| Fuzzy patch context | fail | pass |
+| Java search | fail | pass |
+| Read-before-write guard | not present | pass |
+| Background shell timeout | killed tree | migrated session |
+| `run_tests` / finish gate | missing | pass |
+| Todo state | missing | pass |
+| Rewind | missing | pass |
+| Total | 3/10 | 10/10 |
+
+Reports live in `eval/aci/pre-change.json` and `eval/aci/post-change.json`. These measure the harness, not model quality; model benchmarks still need a configured model and Docker.
+
+### Headless runner
+
+```bash
+npm run agent:run -- \
+  --workspace /path/to/repo \
+  --goal "Fix the failing test in src/cart.ts" \
+  --out /tmp/hearth-run \
+  --base-url https://api.example.com/v1 \
+  --api-key "$HEARTH_MODEL_API_KEY" \
+  --model example-model
+```
+
+The runner uses the same coding prompt, tools, budget and finish gate as the server, so benchmark adapters can drive it without starting the desktop app.
+
 
 ## Commit policy
 
