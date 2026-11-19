@@ -242,23 +242,33 @@ async function main() {
     assert.ok(await page.locator(".chat-header-status").innerText());
   });
 
-  await runTest(page, "keeps sidebar and chat readiness consistent with the executor API", async () => {
+  await runTest(page, "shows a connection warning only when something is unavailable", async () => {
     const executors = await api(baseUrl, "/api/executors");
     assert.equal(executors.status, 200, executors.text);
     const defaults = await api(baseUrl, "/api/conversation-defaults");
     assert.equal(defaults.status, 200, defaults.text);
-    const anyReady = executors.body.executors.some((executor) => executor.health.canRun);
+    const health = await api(baseUrl, "/api/health");
+    assert.equal(health.status, 200, health.text);
     const anyReadyEnabled = executors.body.executors.some(
       (executor) => executor.health.canRun && defaults.body.settings.executorEnabled[executor.id]
     );
+    const modelReady = Boolean(health.body.chatModel?.configured);
+    const degraded = !modelReady || !anyReadyEnabled;
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.waitForFunction(
+      (expected) => Boolean(document.querySelector('[data-connection-state="degraded"]')) === expected,
+      degraded,
+      { timeout: 15_000 }
+    );
+    if (degraded) {
+      const text = await page.locator('[data-connection-state="degraded"]').innerText();
+      assert.match(text, modelReady ? /执行器不可用/ : /聊天模型未配置/);
+    } else {
+      assert.equal(await page.locator('[data-connection-state="degraded"]').count(), 0);
+    }
     await page.waitForFunction(
       (expected) => (document.querySelector(".chat-header-status")?.textContent ?? "").includes("执行器可用") === expected,
       anyReadyEnabled,
-      { timeout: 15_000 }
-    );
-    await page.waitForFunction(
-      (expected) => ([...document.querySelectorAll(".codex-status")].at(-1)?.textContent ?? "").includes("执行器可用") === expected,
-      anyReady,
       { timeout: 15_000 }
     );
   });

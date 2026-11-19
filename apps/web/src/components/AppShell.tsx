@@ -40,6 +40,11 @@ export function AppShell() {
     ?? readyExecutors[0]
     ?? null;
   const chatMode = pathname === "/";
+  const connectionIssue = healthQuery.isSuccess && !chatModel?.configured
+    ? { label: "聊天模型未配置", to: "/welcome" }
+    : executorsQuery.isSuccess && !primaryExecutor
+      ? { label: "执行器不可用", to: "/settings" }
+      : null;
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -99,22 +104,17 @@ export function AppShell() {
         <div className="sidebar-spacer" />
 
         <NavRow item={SETTINGS_ITEM} badge={0} />
-        <NavLink to={chatModel?.configured ? "/settings" : "/welcome"} className="codex-status">
-          <span className={`status-dot ${chatModel?.configured ? "online" : "offline"}`} />
-          <span>
-            <strong>{chatModel?.configured ? "聊天模型已接入" : "聊天模型未配置"}</strong>
-            <small>{chatModel?.configured ? `${chatModel.settings.providerName} · ${chatModel.settings.model}` : "开始设置"}</small>
-          </span>
-        </NavLink>
 
-        <NavLink to="/settings" className="codex-status">
-          <span className={`status-dot ${primaryExecutor ? "online" : "offline"}`} />
-          <span>
-            <strong>{primaryExecutor ? "执行器可用" : "执行器不可用"}</strong>
-            <small>{primaryExecutor ? `${primaryExecutor.name} · 已就绪` : executorsQuery.isLoading ? "读取执行器…" : "到设置里检查"}</small>
-          </span>
-        </NavLink>
-        <p className="sidebar-note">仅监听 127.0.0.1</p>
+        {connectionIssue && (
+          <NavLink
+            to={connectionIssue.to}
+            className="connection-state"
+            data-connection-state="degraded"
+          >
+            <span className="status-dot offline" />
+            <span>{connectionIssue.label}</span>
+          </NavLink>
+        )}
       </aside>
 
       <main className="main">

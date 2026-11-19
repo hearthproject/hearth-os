@@ -79,7 +79,8 @@ try {
 
   await page.goto(`${baseUrl}/settings`, { waitUntil: "domcontentloaded" });
   await page.locator(".settings-page").waitFor({ timeout: 20_000 });
-  await page.locator("text=OpenAI · GPT-5").first().waitFor({ timeout: 20_000 });
+  await page.locator(".settings-tab").filter({ hasText: "执行器" }).click();
+  await page.locator(".settings-tab.active").waitFor({ timeout: 20_000 });
   await page.waitForTimeout(700);
   await dismissNotifications(page);
   await page.screenshot({ path: join(outputDir, "settings.png") });
@@ -89,9 +90,17 @@ try {
   if (browser) await browser.close().catch(() => {});
   if (server && server.exitCode === null) {
     server.kill();
-    await Promise.race([onceExit(server), sleep(3_000)]);
+    await Promise.race([onceExit(server), sleep(5_000)]);
   }
-  rmSync(dataRoot, { recursive: true, force: true });
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      rmSync(dataRoot, { recursive: true, force: true });
+      break;
+    } catch (error) {
+      if (attempt === 7) console.warn(`Could not remove ${dataRoot}: ${error.message}`);
+      else await sleep(250);
+    }
+  }
 }
 
 async function freePort() {

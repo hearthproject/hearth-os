@@ -1,9 +1,102 @@
 /* Shell-only rules. Page surfaces belong in their own files. */
 
+@media (min-width: 1041px) {
+  .shell {
+    grid-template-columns: var(--rail-w) minmax(0, 1fr);
+  }
+}
+
+.sidebar {
+  background: var(--rail);
+  padding: 12px 10px;
+  gap: 12px;
+}
+
+.brand {
+  padding: 2px 6px 6px;
+}
+
+.brand-name {
+  font-size: var(--fs-15);
+  letter-spacing: -0.02em;
+}
+
+.command-trigger {
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-tertiary);
+  font-size: var(--fs-12);
+}
+
+.command-trigger:hover {
+  border-color: var(--line-strong);
+  background: var(--surface);
+  color: var(--ink-secondary);
+}
+
+.command-trigger kbd {
+  background: var(--bg);
+  color: var(--ink-tertiary);
+  font-size: 10px;
+}
+
+.nav {
+  gap: 1px;
+}
+
+.nav-item {
+  width: 100%;
+  height: var(--row-h);
+  padding: 0 8px;
+  border-radius: var(--radius);
+  color: var(--ink-secondary);
+  font-size: var(--fs-13);
+}
+
+.nav-item:hover {
+  background: var(--surface-sunk);
+  color: var(--ink);
+}
+
+.nav-item.active {
+  background: var(--surface-sunk);
+  color: var(--ink);
+  box-shadow: inset 2px 0 0 var(--ember);
+  font-weight: 500;
+}
+
+.nav-badge {
+  margin-left: auto;
+  min-width: 0;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+  font-weight: 500;
+  text-align: right;
+}
+
+.nav-item.active .nav-badge {
+  background: transparent;
+  color: var(--ink-secondary);
+}
+
 .nav-more {
   display: grid;
-  gap: 3px;
+  gap: 1px;
   padding-left: 12px;
+}
+
+.nav-more .nav-item {
+  color: var(--ink-tertiary);
+}
+
+.nav-more .nav-item:hover,
+.nav-more .nav-item.active {
+  color: var(--ink);
 }
 
 .nav-more-toggle {
@@ -12,6 +105,11 @@
   background: transparent;
   text-align: left;
   cursor: pointer;
+  color: var(--ink-tertiary);
+}
+
+.nav-more-toggle.open {
+  color: var(--ink-secondary);
 }
 
 .nav-more-chevron {
@@ -22,4 +120,80 @@
 
 .nav-more-toggle[aria-expanded="true"] .nav-more-chevron {
   transform: rotate(180deg);
+}
+
+.connection-state {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  height: var(--control-h);
+  padding: 0 8px;
+  border-radius: var(--radius);
+  color: var(--risk);
+  font-size: var(--fs-12);
+  text-decoration: none;
+}
+
+.connection-state:hover {
+  background: var(--risk-tint);
+  color: var(--risk);
+}
+
+@media (max-width: 1040px) and (min-width: 721px) {
+  .sidebar {
+    padding: 12px 8px;
+  }
+
+  .nav-item {
+    justify-content: center;
+    padding: 0;
+  }
+
+  .nav-more {
+    padding-left: 0;
+  }
+
+  .connection-state {
+    justify-content: center;
+    padding: 0;
+  }
+
+  .connection-state span:last-child {
+    display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .mobile-nav {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    background: var(--surface);
+  }
+
+  .mobile-nav-item {
+    color: var(--ink-tertiary);
+    font-size: 10px;
+  }
+
+  .mobile-nav-item.active {
+    background: var(--surface-sunk);
+    color: var(--ink);
+  }
+
+  .mobile-nav-item.active svg {
+    color: var(--ember);
+  }
+
+  .mobile-nav-badge {
+    position: absolute;
+    top: 4px;
+    right: calc(50% - 18px);
+    min-width: 0;
+    height: auto;
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--ink-secondary);
+    font-size: 9px;
+    line-height: 1;
+  }
 }
