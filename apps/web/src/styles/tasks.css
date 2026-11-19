@@ -1,0 +1,269 @@
+/* Tasks: one quiet table. Filters are text, not pills. */
+
+.tasks-page {
+  max-width: 1120px;
+}
+
+.tasks-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tasks-head h1 {
+  margin: 0;
+  font-size: var(--fs-20);
+}
+
+.tasks-refresh {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-tertiary);
+}
+
+.tasks-refresh:hover:not(:disabled) {
+  background: var(--surface-sunk);
+  color: var(--ink);
+}
+
+.task-filters {
+  gap: 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.filter-tab {
+  position: relative;
+  height: 32px;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-12);
+  cursor: pointer;
+}
+
+.filter-tab:hover {
+  color: var(--ink);
+}
+
+.filter-tab.active {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.filter-tab.active::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 1px;
+  background: var(--ember);
+}
+
+.filter-count {
+  margin-left: 5px;
+  color: var(--ink-tertiary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.task-table-wrap {
+  overflow-x: auto;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+
+.task-table th {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.task-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.task-table tbody tr:hover,
+.task-table tbody tr:focus-visible {
+  background: var(--surface-sunk);
+}
+
+.task-table tbody tr.pinned td:first-child {
+  box-shadow: inset 2px 0 0 var(--ember);
+}
+
+.task-title-line {
+  gap: 6px;
+}
+
+.task-title-line strong {
+  font-size: var(--fs-13);
+  font-weight: 600;
+}
+
+.task-pin-badge {
+  width: auto;
+  height: auto;
+  background: transparent;
+  color: var(--ember);
+}
+
+.task-archive-badge {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 9px;
+}
+
+.tasks-page .status-pill {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.tasks-page .status-pill svg {
+  width: 11px;
+  height: 11px;
+}
+
+.tasks-page .status-pill.tone-active {
+  color: var(--ember);
+}
+
+.tasks-page .status-pill.tone-risk {
+  color: var(--risk);
+}
+
+.tasks-page .status-pill.tone-done {
+  color: var(--ok);
+}
+
+.tasks-page .status-pill.tone-neutral {
+  color: var(--ink-tertiary);
+}
+
+.task-goal {
+  -webkit-line-clamp: 1;
+  margin: 2px 0;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+  line-height: 1.4;
+}
+
+.task-time {
+  font-size: 10px;
+}
+
+.task-row-actions .icon-button {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  background: transparent;
+}
+
+.task-row-actions .icon-button.active {
+  border: 0;
+  background: transparent;
+  color: var(--ember);
+}
+
+.executor-tag {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-secondary);
+  font-size: var(--fs-11);
+}
+
+.task-mode-tag {
+  margin-top: 2px;
+  color: var(--ink-tertiary);
+  font-size: 10px;
+}
+
+.phase-tag {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-secondary);
+  font-size: var(--fs-11);
+  font-weight: 500;
+}
+
+.phase-tag.running {
+  color: var(--ember);
+}
+
+.phase-tag.done {
+  color: var(--ok);
+}
+
+.phase-tag.problem {
+  color: var(--risk);
+}
+
+.phase-tag.waiting {
+  color: #78500b;
+}
+
+.task-token-cell,
+.task-duration-cell {
+  color: var(--ink-tertiary);
+  font-size: 10px;
+}
+
+.result-cell p {
+  -webkit-line-clamp: 2;
+  color: var(--ink-secondary);
+  font-size: var(--fs-11);
+}
+
+.deliverable-count {
+  margin-top: 3px;
+  font-size: 10px;
+}
+
+.task-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  padding: 40px 16px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-tertiary);
+  font-size: var(--fs-12);
+  text-align: center;
+}
+
+.task-empty h2 {
+  margin: 0;
+  color: var(--ink-secondary);
+  font-size: var(--fs-13);
+  font-weight: 500;
+}
+
+.task-empty p {
+  margin: 0;
+}
+
+.task-empty a {
+  color: var(--ember);
+  text-decoration: none;
+}
+
+.task-empty a:hover {
+  text-decoration: underline;
+}

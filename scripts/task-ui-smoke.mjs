@@ -132,7 +132,7 @@ try {
   await page.getByRole('button', { name: '更多操作：核对季度报销' }).click();
   page.once('dialog', dialog => dialog.accept());
   await page.getByRole('menuitem', { name: '删除 · 移入回收站' }).click();
-  await page.getByRole('heading', { name: '还没有任务' }).waitFor();
+  await page.locator('.task-empty').getByText('还没有任务').waitFor();
   assert.equal(deletes, 1);
   assert.deepEqual(errors, []);
   console.log('PASS: mode, complete token counts, menu/Escape, clipboard sharing, summary, original request, archive, confirmed deletion; overview requests:', overviewCalls);

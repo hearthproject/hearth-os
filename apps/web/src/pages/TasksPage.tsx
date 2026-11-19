@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { markTasksRead } from "../lib/task-read-state.ts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
-import { FileText, ListChecks, Pin, PinOff, RefreshCw } from "lucide-react";
+import { FileText, Pin, PinOff, RefreshCw } from "lucide-react";
 import { api } from "../lib/api.ts";
 import { formatDuration, isActive, needsAttention, relativeTime } from "../lib/format.ts";
 import { executorLabel, executionModeLabel } from "../lib/labels.ts";
@@ -40,50 +40,44 @@ export function TasksPage() {
   });
   const ordered = [...tasks].sort((a, b) => Number(Boolean(b.pinnedAt)) - Number(Boolean(a.pinnedAt)));
   const visible = ordered.filter((task) => matchesFilter(task, filter));
-  const archivedCount = tasks.filter((task) => matchesFilter(task, "archived")).length;
 
   return (
     <div className="page tasks-page">
-      <div className="page-head">
-        <div>
-          <h1>任务</h1>
-          <p className="page-meta">在这里看每一次派出去的执行：当前阶段、Token、耗时和最终结果。</p>
-        </div>
-        <button className="ghost-button" onClick={() => void tasksQuery.refetch()} disabled={tasksQuery.isFetching}>
-          <RefreshCw size={15} className={tasksQuery.isFetching ? "spin" : ""} /> 刷新
+      <div className="page-head tasks-head">
+        <h1>任务</h1>
+        <button
+          className="icon-button tasks-refresh"
+          onClick={() => void tasksQuery.refetch()}
+          disabled={tasksQuery.isFetching}
+          aria-label="刷新任务"
+          title="刷新任务"
+        >
+          <RefreshCw size={15} className={tasksQuery.isFetching ? "spin" : ""} />
         </button>
       </div>
 
-      <div className="filter-row">
+      <div className="filter-row task-filters">
         {FILTERS.map((item) => (
           <button
             key={item.id}
-            className={`filter-chip ${filter === item.id ? "active" : ""}`}
+            className={`filter-tab ${filter === item.id ? "active" : ""}`}
             onClick={() => setFilter(item.id)}
+            aria-pressed={filter === item.id}
           >
             {item.label}
-            <span>{tasks.filter((task) => matchesFilter(task, item.id)).length}</span>
+            <span className="filter-count">{tasks.filter((task) => matchesFilter(task, item.id)).length}</span>
           </button>
         ))}
       </div>
 
       {organization.isError && <p className="form-error" role="alert">整理任务失败，请重试。</p>}
       {tasks.length === 0 ? (
-        <div className="empty-panel">
-          <ListChecks size={22} />
-          <h2>还没有任务</h2>
-          <p>回到聊天页，直接说出你要完成的事。执行类请求会自动出现在这里。</p>
-          <Link className="primary-button" to="/">去聊天</Link>
+        <div className="task-empty">
+          <p>还没有任务。从<Link to="/">聊天</Link>开始。</p>
         </div>
       ) : visible.length === 0 ? (
-        <div className="empty-panel">
+        <div className="task-empty">
           <h2>{filter === "archived" ? "还没有归档任务" : "这个筛选下没有任务"}</h2>
-          <button
-            className="ghost-button"
-            onClick={() => setFilter(filter === "archived" ? "all" : archivedCount > 0 ? "archived" : "all")}
-          >
-            {filter === "archived" ? "返回全部" : archivedCount > 0 ? "查看已归档" : "查看全部"}
-          </button>
         </div>
       ) : (
         <div className="task-table-wrap">
