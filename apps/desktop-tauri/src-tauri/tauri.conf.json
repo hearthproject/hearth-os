@@ -10,21 +10,6 @@
     "beforeBuildCommand": ""
   },
   "app": {
-    "windows": [
-      {
-        "label": "main",
-        "title": "Hearth",
-        "width": 1280,
-        "height": 860,
-        "minWidth": 960,
-        "minHeight": 640,
-        "center": true,
-        "visible": true,
-        "resizable": true,
-        "fullscreen": false,
-        "url": "index.html"
-      }
-    ],
     "security": {
       "csp": null
     }
@@ -42,9 +27,14 @@
     "resources": ["resources"],
     "createUpdaterArtifacts": false,
     "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
       "nsis": {
         "installMode": "currentUser",
-        "displayLanguageSelector": false
+        "displayLanguageSelector": false,
+        "installerHooks": "installer-hooks.nsh"
       }
     }
   },
