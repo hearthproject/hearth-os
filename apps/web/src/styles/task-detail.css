@@ -282,6 +282,27 @@
   color: var(--ink-tertiary);
 }
 
+.task-detail-page .deliverable-info {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.task-detail-page .deliverable-info strong {
+  overflow: hidden;
+  font-size: var(--fs-12);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-detail-page .deliverable-info small {
+  color: var(--ink-tertiary);
+  font-size: 10px;
+}
+
 .task-detail-page .artifact-preview-panel {
   margin-top: 12px;
   padding: 10px 0 0;
@@ -381,6 +402,79 @@
   padding-bottom: 6px;
 }
 
+.deliverable-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line-subtle);
+}
+
+.deliverable-item > svg {
+  flex: 0 0 auto;
+  color: var(--ink-tertiary);
+}
+
+.deliverable-item > div {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.deliverable-item strong {
+  overflow: hidden;
+  font-size: var(--fs-12);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deliverable-item small {
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+}
+
+.artifact-preview-panel {
+  margin-top: 16px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.artifact-preview-panel .panel-head {
+  margin-bottom: 8px;
+}
+
+.artifact-text {
+  overflow: auto;
+  max-height: 420px;
+  margin: 0;
+  padding: 10px;
+  border-radius: var(--radius);
+  background: var(--surface-sunk);
+  color: var(--ink-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.artifact-image {
+  display: block;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.preview-loading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-12);
+}
+
 .process-panel {
   margin-top: 12px;
   border-top: 1px solid var(--line);
@@ -404,20 +498,4 @@
 .task-detail-page .process-toggle small {
   color: var(--ink-tertiary);
   font-size: var(--fs-11);
-}
-
-@media (max-width: 720px) {
-  .task-detail-head {
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .task-detail-actions {
-    width: 100%;
-  }
-
-  .task-detail-menu {
-    right: auto;
-    left: 0;
-  }
 }

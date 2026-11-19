@@ -1,0 +1,117 @@
+/* Approval cards in chat and task detail. */
+
+.approval-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 0 10px;
+  border: 1px solid var(--ember-fill);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.approval-card.rejected,
+.approval-card.expired {
+  border-color: var(--line-strong);
+  border-left-color: var(--line-strong);
+}
+
+.approval-card .panel-head {
+  padding-bottom: 4px;
+  border-bottom: 0;
+}
+
+.approval-summary {
+  padding: 0 10px;
+  font-size: var(--fs-14);
+  font-weight: 600;
+}
+
+.approval-scope {
+  padding: 0 10px;
+  color: var(--risk);
+  font-size: var(--fs-12);
+}
+
+.approval-card .kv-grid {
+  padding-top: 0;
+}
+
+.approval-preview {
+  max-height: 320px;
+  overflow: auto;
+  margin: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-sunk);
+}
+
+.approval-preview strong {
+  display: block;
+  padding: 8px 10px 0;
+  font-size: var(--fs-12);
+}
+
+.approval-preview pre {
+  margin: 0;
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.approval-actions,
+.approval-confirm {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 0 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.approval-confirm {
+  justify-content: space-between;
+  padding: 8px;
+  border-top-color: var(--risk);
+  border-radius: var(--radius);
+  background: var(--risk-tint);
+  font-size: var(--fs-12);
+}
+
+.approval-confirm > div {
+  display: flex;
+  gap: 8px;
+}
+
+.approval-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 10px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-sunk);
+  font-size: var(--fs-12);
+}
+
+.approval-result.rejected,
+.approval-result.expired {
+  color: var(--ink-tertiary);
+}
+
+.approval-binding {
+  padding: 0 10px;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+}
+
+.approval-audit {
+  margin: 0 10px;
+}

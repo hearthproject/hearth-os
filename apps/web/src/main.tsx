@@ -3,18 +3,7 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App.tsx";
-import "./styles.css";
-import "./wizard.css";
-import "./notifications.css";
-import "./mail.css";
-import "./styles/foundation.css";
-import "./styles/shell.css";
-import "./styles/chat.css";
-import "./styles/tasks.css";
-import "./styles/task-detail.css";
-import "./styles/settings.css";
-import "./styles/inbox.css";
-import "./styles/workbench.css";
+import "./styles/index.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {

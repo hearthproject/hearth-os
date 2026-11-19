@@ -1,5 +1,67 @@
 /* Shell-only rules. Page surfaces belong in their own files. */
 
+.shell {
+  display: grid;
+  height: 100%;
+  grid-template-columns: var(--rail-w) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  background: var(--bg);
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.main-body {
+  flex: 1 1 auto;
+  display: block;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  text-decoration: none;
+}
+
+.nav-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-spacer {
+  flex: 1 1 auto;
+}
+
 @media (min-width: 1041px) {
   .shell {
     grid-template-columns: var(--rail-w) minmax(0, 1fr);
@@ -47,7 +109,6 @@
 }
 
 .nav-item {
-  width: 100%;
   height: var(--row-h);
   padding: 0 8px;
   border-radius: var(--radius);
@@ -160,6 +221,53 @@
 
   .connection-state span:last-child {
     display: none;
+  }
+}
+
+.mobile-nav {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .sidebar {
+    display: none;
+  }
+
+  .main {
+    grid-column: 1;
+    grid-row: 1;
+    min-height: 0;
+  }
+
+  .mobile-nav {
+    grid-column: 1;
+    grid-row: 2;
+    display: grid;
+    padding: 5px 6px calc(5px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .mobile-nav-item {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    min-height: 46px;
+    border: 0;
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--ink-tertiary);
+    font-size: 9px;
+    text-decoration: none;
+    cursor: pointer;
   }
 }
 

@@ -94,7 +94,10 @@
 }
 
 .settings-content .section-heading {
+  display: flex;
   align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
   margin: 0 0 14px;
 }
 
@@ -104,133 +107,37 @@
   font-weight: 600;
 }
 
-.settings-content .section-heading p,
-.settings-content .settings-lead,
-.settings-content .settings-fold-copy span {
-  display: none;
-}
-
-.settings-content .settings-hint {
-  margin-top: 10px;
+.settings-content .muted-count {
   color: var(--ink-tertiary);
   font-size: var(--fs-11);
+  white-space: nowrap;
 }
 
-.settings-content .settings-hint svg {
+.settings-content .settings-fold > summary::-webkit-details-marker {
   display: none;
-}
-
-.settings-content .settings-split {
-  display: block;
-}
-
-.settings-content .settings-tab-panel {
-  display: block;
 }
 
 .settings-content .settings-fold-summary {
-  padding: 12px 0;
-  border: 0;
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-  border-radius: 0;
-  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  list-style: none;
+  cursor: pointer;
 }
 
-.settings-content .settings-fold-copy strong {
-  font-size: var(--fs-13);
-  font-weight: 500;
+.settings-content .settings-fold-summary > span {
+  flex: 0 0 auto;
 }
 
-.settings-content .settings-actions {
-  margin-top: 16px;
-}
-
-.settings-content .model-list,
-.settings-content .binding-list,
-.settings-content .data-table-list {
-  border-top: 1px solid var(--line);
-}
-
-.settings-content .model-card,
-.settings-content .binding-row,
-.settings-content .migration-row,
-.settings-content .executor-card {
-  padding: 12px 0;
-  border: 0;
-  border-bottom: 1px solid var(--line-subtle);
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-}
-
-.settings-content .executor-card {
-  padding: 14px 0;
-}
-
-.settings-content .provider-card {
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  background: var(--surface);
-}
-
-.settings-content .provider-card.active {
-  border-color: var(--ember);
-  background: var(--surface-sunk);
-}
-
-.settings-content .context-metrics,
-.settings-content .settings-metric-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 1px;
-  margin-bottom: 28px;
-  border: 0;
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-  background: var(--line);
-}
-
-.settings-content .settings-metric-grid > div {
-  padding: 12px;
-  background: var(--surface);
-}
-
-.settings-content .settings-metric-grid > div span {
-  display: block;
+.settings-content .settings-fold[open] .settings-fold-copy strong::before {
+  content: "▾ ";
   color: var(--ink-tertiary);
-  font-size: var(--fs-11);
+  font-size: 10px;
 }
 
-.settings-content .settings-metric-grid > div strong {
-  display: block;
-  margin-top: 4px;
-  font-size: var(--fs-18);
-  font-weight: 500;
-}
-
-@media (max-width: 900px) {
-  .settings-layout {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 20px;
-  }
-
-  .settings-tabs {
-    position: static;
-    flex-direction: row;
-    gap: 2px;
-    overflow-x: auto;
-    padding-bottom: 8px;
-    border-bottom: 1px solid var(--line);
-  }
-
-  .settings-tab {
-    width: auto;
-    flex: none;
-    white-space: nowrap;
-  }
-
-  .settings-tab.active {
-    box-shadow: inset 0 -2px 0 var(--ember);
-  }
+.settings-content .settings-fold:not([open]) .settings-fold-copy strong::before {
+  content: "▸ ";
+  color: var(--ink-tertiary);
+  font-size: 10px;
 }

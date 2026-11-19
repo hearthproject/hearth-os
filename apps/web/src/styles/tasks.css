@@ -267,3 +267,52 @@
 .task-empty a:hover {
   text-decoration: underline;
 }
+
+@media (max-width: 720px) {
+  .task-table-wrap {
+    overflow: visible;
+  }
+
+  .task-table {
+    width: 100%;
+  }
+
+  .task-table thead {
+    display: none;
+  }
+
+  .task-table,
+  .task-table tbody,
+  .task-table tr,
+  .task-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .task-table tr {
+    position: relative;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--line-subtle);
+  }
+
+  .task-table td:first-child {
+    padding-right: 56px;
+  }
+
+  .task-table td:nth-child(2),
+  .task-table td:nth-child(3),
+  .task-table td:nth-child(4),
+  .task-table td:nth-child(5),
+  .task-table .result-column {
+    display: none;
+  }
+
+  .task-table .task-row-actions {
+    position: absolute;
+    top: 6px;
+    right: 0;
+    display: flex;
+    width: auto;
+    gap: 2px;
+  }
+}

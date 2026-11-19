@@ -226,7 +226,7 @@ function MemorySettingsPanel({ settings, onSave }: { settings: MemorySnapshot["s
         </div>
         <div className="proactive-form-foot">
           <label className="memory-check"><input name="allowSensitive" type="checkbox" defaultChecked={settings.allowSensitive} /> 允许敏感记忆参与自动召回（机密始终排除）</label>
-          <button className="primary-button" type="submit" disabled={saving}><Save size={15} /> 保存设置</button>
+          <button className="button" type="submit" disabled={saving}><Save size={15} /> 保存设置</button>
         </div>
       </form>
     </section>

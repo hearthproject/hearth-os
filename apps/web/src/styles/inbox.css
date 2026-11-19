@@ -138,6 +138,7 @@
   font-size: var(--fs-13);
   font-weight: 600;
   line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .triage-why {
@@ -146,6 +147,7 @@
   color: var(--ink-secondary);
   font-size: var(--fs-11);
   line-height: 1.55;
+  overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
@@ -155,6 +157,7 @@
   color: var(--ink-tertiary);
   font-size: var(--fs-10);
   line-height: 1.55;
+  overflow-wrap: anywhere;
   text-align: right;
 }
 
