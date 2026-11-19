@@ -889,11 +889,20 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const knowledge = new KnowledgeRecallService({ store, settings: knowledgeSettings });
   const knowledgeSync = new KnowledgeSyncService({ store, settings: knowledgeSettings });
   service.bus.subscribe((event) => {
+    if (event.type === "memory.forgotten") {
+      const affected = (event.payload as { affectedMemoryIds?: string[] } | null)?.affectedMemoryIds ?? [];
+      for (const memoryId of affected) knowledgeSync.enqueueDelete("memory", memoryId);
+      return;
+    }
     if (event.type !== "memory.created" && event.type !== "memory.updated") return;
     const memoryId = (event.payload as { id?: string } | null)?.id;
     if (!memoryId) return;
     const memory = store.getMemory(memoryId);
-    if (memory) knowledgeSync.enqueueMemory(memory);
+    if (memory?.status === "forgotten") {
+      knowledgeSync.enqueueDelete("memory", memoryId);
+    } else if (memory) {
+      knowledgeSync.enqueueMemory(memory);
+    }
   });
   const sources = new SourceRegistry(service, {
     contentRoot: options.sourceContentRoot ?? SOURCE_CONTENT_DIR,
@@ -3510,6 +3519,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     for (const taskId of taskIds) {
       if (store.purgeTask(taskId)) purgedTaskIds.add(taskId);
     }
+    for (const taskId of purgedTaskIds) knowledgeSync.enqueueDelete("task", taskId);
     for (const task of taskRecords.values()) removeManagedTaskPaths(task, options.dataDir ?? DATA_DIR);
 
     const inUse = new Set(store.listAttachmentIdsInUse());

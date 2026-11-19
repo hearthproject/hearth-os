@@ -49,12 +49,14 @@ describe("KnowledgeSyncService", () => {
   let settings: KnowledgeSettingsStore;
   let root: string;
   const writes: KnowledgeWriteInput[] = [];
+  const removes: string[] = [];
 
   beforeEach(() => {
     store = new HearthStore(":memory:");
     settings = new KnowledgeSettingsStore(store, new SecretBox(Buffer.alloc(32, 4)));
     root = mkdtempSync(join(tmpdir(), "hearth-knowledge-sync-"));
     writes.length = 0;
+    removes.length = 0;
   });
 
   afterEach(() => {
@@ -67,6 +69,9 @@ describe("KnowledgeSyncService", () => {
       write: async (input: KnowledgeWriteInput) => {
         writes.push(input);
         return { uri: input.uri };
+      },
+      remove: async (uri: string) => {
+        removes.push(uri);
       }
     };
     return new KnowledgeSyncService({
@@ -132,5 +137,23 @@ describe("KnowledgeSyncService", () => {
     const doc = memoryDocument(memory({ content: "api_key: sk-abcdefgh12345" }));
     expect(doc.content).not.toContain("sk-abcdefgh12345");
     expect(doc.contentHash).toHaveLength(64);
+  });
+
+  it("deletes the indexed file and mapping after a memory is forgotten", async () => {
+    settings.update({ enabled: true });
+    const record = memory();
+    store.appendEvent({ type: "memory.updated", payload: record });
+    const sync = service();
+    sync.enqueueMemory(record);
+    await sync.flush();
+    const uri = writes[0]?.uri;
+    expect(uri).toBeTruthy();
+
+    expect(sync.enqueueDelete("memory", record.id)).toBe(true);
+    expect(sync.enqueueDelete("memory", record.id)).toBe(false);
+    const deleted = await sync.flush();
+    expect(deleted.written).toBe(1);
+    expect(removes).toEqual([uri]);
+    expect(store.knowledgeMapGet(record.id)).toBeNull();
   });
 });

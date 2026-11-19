@@ -81,6 +81,31 @@ export class KnowledgeSyncService {
     return this.enqueue({ kind: "source", ref: item.id, document });
   }
 
+  enqueueDelete(kind: "memory" | "task" | "source", ref: string): boolean {
+    const settings = this.settings.get();
+    if (!settings.enabled) return false;
+    const mapping = this.store.knowledgeMapGet(ref);
+    if (!mapping) return false;
+    const previous = this.store.getKnowledgeJob("delete", ref, mapping.uri, "delete");
+    if (previous && ["pending", "running", "done"].includes(previous.status)) return false;
+    const now = this.clock().toISOString();
+    this.store.upsertKnowledgeJob({
+      id: randomUUID(),
+      kind: "delete",
+      ref,
+      uri: mapping.uri,
+      op: "delete",
+      contentHash: null,
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: null,
+      lastError: null,
+      createdAt: now,
+      updatedAt: now
+    });
+    return true;
+  }
+
   async flush(limit = 8): Promise<KnowledgeFlushResult> {
     if (this.flushing) return { written: 0, failed: 0, skipped: 0 };
     const settings = this.settings.get();
@@ -90,6 +115,17 @@ export class KnowledgeSyncService {
     try {
       const jobs = this.store.claimKnowledgeJobs(limit, this.clock().toISOString());
       for (const job of jobs) {
+        if (job.op === "delete") {
+          try {
+            await this.clientFactory(settings).remove(job.uri, { recursive: false });
+            this.store.knowledgeMapDelete(job.ref);
+            this.store.finishKnowledgeJob(job.id, { status: "done", attempts: job.attempts });
+            result.written += 1;
+          } catch (error) {
+            this.markFailure(job, error, result);
+          }
+          continue;
+        }
         const document = this.resolveDocument(job.kind, job.ref);
         if (!document) {
           this.store.finishKnowledgeJob(job.id, { status: "dead", lastError: "source object not found" });
@@ -116,24 +152,26 @@ export class KnowledgeSyncService {
           this.store.finishKnowledgeJob(job.id, { status: "done", attempts: job.attempts });
           result.written += 1;
         } catch (error) {
-          const attempts = job.attempts + 1;
-          const dead = attempts >= MAX_ATTEMPTS;
-          const delayMs = Math.min(2 ** attempts * 30_000, 30 * 60_000);
-          this.store.finishKnowledgeJob(job.id, {
-            status: dead ? "dead" : "failed",
-            attempts,
-            lastError: error instanceof Error ? error.message : String(error),
-            nextAttemptAt: dead
-              ? null
-              : new Date(this.clock().getTime() + delayMs).toISOString()
-          });
-          result.failed += 1;
+          this.markFailure(job, error, result);
         }
       }
       return result;
     } finally {
       this.flushing = false;
     }
+  }
+
+  private markFailure(job: { id: string; attempts: number }, error: unknown, result: KnowledgeFlushResult): void {
+    const attempts = job.attempts + 1;
+    const dead = attempts >= MAX_ATTEMPTS;
+    const delayMs = Math.min(2 ** attempts * 30_000, 30 * 60_000);
+    this.store.finishKnowledgeJob(job.id, {
+      status: dead ? "dead" : "failed",
+      attempts,
+      lastError: error instanceof Error ? error.message : String(error),
+      nextAttemptAt: dead ? null : new Date(this.clock().getTime() + delayMs).toISOString()
+    });
+    result.failed += 1;
   }
 
   private enqueue(input: { kind: "memory" | "task" | "source"; ref: string; document: KnowledgeDocument }): boolean {
