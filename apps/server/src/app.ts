@@ -2345,7 +2345,14 @@ export async function buildServer(options: BuildServerOptions = {}) {
 
   app.get("/api/memory", async (_request, reply) => {
     reply.header("cache-control", "no-store");
-    return memory.snapshot();
+    const snapshot = memory.snapshot();
+    return {
+      ...snapshot,
+      memories: snapshot.memories.map((record) => {
+        const mapping = store.knowledgeMapGet(record.id);
+        return mapping ? { ...record, knowledge: { uri: mapping.uri, syncedAt: mapping.updatedAt } } : record;
+      })
+    };
   });
 
   app.patch("/api/memory/settings", async (request, reply) => {
@@ -3936,7 +3943,11 @@ export async function buildServer(options: BuildServerOptions = {}) {
   app.get<{ Params: { id: string } }>("/api/tasks/:id", async (request, reply) => {
     const view = service.view(request.params.id);
     if (!view) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
-    return view;
+    const mapping = store.knowledgeMapGet(request.params.id);
+    return {
+      ...view,
+      knowledge: mapping ? { uri: mapping.uri, syncedAt: mapping.updatedAt, contentHash: mapping.contentHash } : null
+    };
   });
 
   app.delete<{ Params: { id: string }; Body: unknown }>("/api/tasks/:id", async (request, reply) => {

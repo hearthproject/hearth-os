@@ -238,7 +238,7 @@ function MemoryCard({
   busy,
   onAction
 }: {
-  memory: MemoryRecord;
+  memory: MemoryRecord & { knowledge?: { uri: string; syncedAt: string } };
   busy: boolean;
   onAction: (action: string, payload?: unknown) => void;
 }) {
@@ -279,6 +279,7 @@ function MemoryCard({
         <span>范围：{memory.scope}</span>
         <span>更新：{relativeTime(memory.updatedAt)}</span>
         {memory.validUntil && <span>有效至：{formatDate(memory.validUntil)}</span>}
+        {memory.knowledge && <span title={memory.knowledge.uri}>知识库：已索引 · {relativeTime(memory.knowledge.syncedAt)}</span>}
       </div>
       <div className="suggestion-foot">
         <span className="page-meta">{memory.allowRecall ? "允许召回" : "不参与召回"}</span>

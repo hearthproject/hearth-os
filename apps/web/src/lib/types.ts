@@ -328,6 +328,7 @@ export interface TaskView {
   events: EventEnvelope[];
   eventTotal: number;
   followUps: TaskFollowUpRecord[];
+  knowledge?: { uri: string; syncedAt: string; contentHash: string | null } | null;
 }
 
 export interface TaskContextResponse extends ContextSnapshot {}
@@ -765,7 +766,7 @@ export type DesktopActionRequest =
 
 export interface MemorySnapshot {
   settings: MemorySettings;
-  memories: MemoryRecord[];
+  memories: Array<MemoryRecord & { knowledge?: { uri: string; syncedAt: string } }>;
   conflicts: MemoryConflict[];
   recalls: MemoryRecall[];
   forgets: MemoryForgetReceipt[];

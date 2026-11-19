@@ -12,6 +12,7 @@ import {
   ArrowRight,
   ChevronRight,
   Clock3,
+  Database,
   Download,
   FileText,
   Gauge,
@@ -214,6 +215,7 @@ export function TaskDetailPage() {
         <span className="task-mode-tag">{executionModeLabel(task.executionMode)}</span>
         {task.pinnedAt && <span><Pin size={13} /> 已置顶</span>}
         {task.archivedAt && <span><Archive size={13} /> 已归档</span>}
+        {view.knowledge && <span title={view.knowledge.uri}><Database size={13} /> 已入知识库</span>}
         {boundMethod && <span>方法 {boundMethod.name} · v{boundMethod.version}</span>}
         <span><Clock3 size={13} /> {formatDuration(lastDuration(view.runs))}</span>
         <span>Token <TaskTokens usage={lastUsage(view.runs)} /></span>
