@@ -50,7 +50,7 @@ hero:
     <img src="/screenshots/chat.png" alt="Hearth chat workspace">
     <figcaption>
       <strong>Chat workspace</strong>
-      <span>One intent becomes a task proposal; executor, stage, tokens, duration, and approval actions stay in context.</span>
+      <span>One intent moves work forward; progress, results, and artifacts appear in place.</span>
     </figcaption>
   </figure>
 
@@ -59,35 +59,35 @@ hero:
       <img src="/screenshots/tasks.png" alt="Task list">
       <figcaption>
         <strong>Task list</strong>
-        <span>Running, waiting for approval, completed, and attention-needed work in one view.</span>
+        <span>Running, waiting for confirmation, and completed work read in one line.</span>
       </figcaption>
     </figure>
     <figure class="screenshot-card">
       <img src="/screenshots/task-detail.png" alt="Task detail">
       <figcaption>
         <strong>Task detail</strong>
-        <span>Goal, acceptance criteria, executor, budget, evidence, artifacts, and final result remain on record.</span>
+        <span>Result first; original request, execution trace, and deliverables open on demand.</span>
       </figcaption>
     </figure>
     <figure class="screenshot-card">
       <img src="/screenshots/inbox.png" alt="Proactive inbox">
       <figcaption>
         <strong>Needs you</strong>
-        <span>Proactive suggestions can be accepted, ignored, snoozed, or converted into tasks.</span>
+        <span>One line per suggestion; evidence and actions appear when expanded.</span>
       </figcaption>
     </figure>
     <figure class="screenshot-card">
       <img src="/screenshots/memory.png" alt="Memory management">
       <figcaption>
         <strong>Memory</strong>
-        <span>Candidates, recall, correction, conflict, forgetting, and export all have explicit boundaries.</span>
+        <span>Capture, budget, pending candidates, and recent recall on one page.</span>
       </figcaption>
     </figure>
     <figure class="screenshot-card screenshot-card--wide">
       <img src="/screenshots/settings.png" alt="Settings and executors">
       <figcaption>
         <strong>Settings and executors</strong>
-        <span>Model profiles, executor installation, health checks, protocol compatibility, and default routing in one place.</span>
+        <span>Navigation on the left; model bindings, health, and configuration in one right column.</span>
       </figcaption>
     </figure>
   </div>

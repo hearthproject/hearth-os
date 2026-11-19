@@ -42,34 +42,34 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
 <p align="center">
   <img src="docs/public/screenshots/chat.png" alt="Hearth 聊天工作台" width="100%">
   <br>
-  <sub>聊天工作台：一句意图即可生成任务提案；执行器、阶段、Token、耗时与审批入口都在同一处。</sub>
+  <sub>聊天工作台：一句意图即可推进任务；进度、结果与产物就地出现。</sub>
 </p>
 
 <table>
   <tr>
     <td width="50%" valign="top">
       <img src="docs/public/screenshots/tasks.png" alt="任务列表" width="100%">
-      <p align="center"><sub><strong>任务列表</strong><br>运行中、等待审批、已完成与需要处理的任务一屏可读。</sub></p>
+      <p align="center"><sub><strong>任务列表</strong><br>运行中、等待确认与已完成的任务一行读完。</sub></p>
     </td>
     <td width="50%" valign="top">
       <img src="docs/public/screenshots/task-detail.png" alt="任务详情" width="100%">
-      <p align="center"><sub><strong>任务详情</strong><br>目标、验收条件、执行器、预算、证据、产物和最终结果完整留档。</sub></p>
+      <p align="center"><sub><strong>任务详情</strong><br>结果在前，原始需求、执行过程与交付文件按需展开。</sub></p>
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
       <img src="docs/public/screenshots/inbox.png" alt="主动收件箱" width="100%">
-      <p align="center"><sub><strong>需要你</strong><br>主动建议进入收件箱，可以接受、忽略、稍后提醒或转为任务。</sub></p>
+      <p align="center"><sub><strong>需要你</strong><br>每条建议一行；展开后才是证据与操作。</sub></p>
     </td>
     <td width="50%" valign="top">
       <img src="docs/public/screenshots/memory.png" alt="记忆管理" width="100%">
-      <p align="center"><sub><strong>记忆</strong><br>记忆候选、来源、可信度、召回、纠正、遗忘与导出都有明确边界。</sub></p>
+      <p align="center"><sub><strong>记忆</strong><br>新增、预算、待确认与最近召回都在同一页。</sub></p>
     </td>
   </tr>
   <tr>
     <td colspan="2" align="center">
       <img src="docs/public/screenshots/settings.png" alt="设置与执行器" width="82%">
-      <p align="center"><sub><strong>设置与执行器</strong><br>统一管理模型档案、执行器安装、健康检测、协议兼容与默认路由。</sub></p>
+      <p align="center"><sub><strong>设置与执行器</strong><br>左侧只做分区；模型绑定、健康状态与配置都在右侧一栏。</sub></p>
     </td>
   </tr>
 </table>
