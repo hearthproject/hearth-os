@@ -86,6 +86,17 @@
   background: var(--bg);
   font-size: 10px;
   font-weight: 500;
+  text-align: left;
+}
+
+.task-table th:first-child { width: 32%; }
+.task-table th:nth-child(2) { width: 10%; }
+.task-table th:nth-child(3) { width: 9%; }
+.task-table th:nth-child(4) { width: 8%; }
+.task-table th:nth-child(5) { width: 7%; }
+
+.task-table th.task-row-actions-head {
+  width: 56px;
 }
 
 .task-table td {
