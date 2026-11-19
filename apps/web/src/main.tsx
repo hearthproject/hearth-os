@@ -8,6 +8,7 @@ import "./wizard.css";
 import "./notifications.css";
 import "./mail.css";
 import "./styles/foundation.css";
+import "./styles/shell.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {

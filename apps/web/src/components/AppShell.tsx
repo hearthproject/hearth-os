@@ -1,16 +1,21 @@
 import { useQuery } from "@tanstack/react-query";
-import { Activity, CalendarClock, Command, Inbox, ListChecks, Mail, MessageCircle, Monitor, Settings2, UserRound } from "lucide-react";
+import { ChevronDown, Command, MoreHorizontal } from "lucide-react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { api } from "../lib/api.ts";
 import { isActive, needsAttention } from "../lib/format.ts";
 import { isTaskUnread, useTaskReadState } from "../lib/task-read-state.ts";
+import { FOOTER_NAV, MAIN_NAV, MORE_NAV, type NavBadge, type NavItem } from "../lib/navigation.ts";
 import { HearthMark } from "./HearthMark.tsx";
 import { CommandPalette } from "./CommandPalette.tsx";
 import { useEffect, useState } from "react";
 
+const MORE_STORAGE_KEY = "hearth.nav-more";
+
 export function AppShell() {
   const { pathname } = useLocation();
   const [commandOpen, setCommandOpen] = useState(false);
+  const moreActive = MORE_NAV.some((item) => pathname === item.path || pathname.startsWith(`${item.path}/`));
+  const [moreOpen, setMoreOpen] = useState(() => moreActive || readMoreOpen());
   const tasksQuery = useQuery({ queryKey: ["tasks"], queryFn: api.tasks, refetchInterval: 10_000 });
   const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 30_000 });
   const executorsQuery = useQuery({ queryKey: ["executors"], queryFn: api.executors, refetchInterval: 30_000 });
@@ -27,6 +32,7 @@ export function AppShell() {
     attentionCount,
     (proactiveQuery.data?.suggestions ?? []).filter((suggestion) => ["new", "snoozed", "accepted"].includes(suggestion.status)).length + reconcileCount
   );
+  const badges: Record<NavBadge, number> = { tasks: activeCount, needsYou: needsYouCount };
   const chatModel = healthQuery.data?.chatModel;
   const readyExecutors = (executorsQuery.data?.executors ?? []).filter((executor) => executor.health.canRun);
   const primaryExecutor = readyExecutors.find((executor) => executor.id === "native")
@@ -46,6 +52,17 @@ export function AppShell() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  useEffect(() => {
+    if (moreActive) setMoreOpen(true);
+  }, [moreActive]);
+
+  function toggleMore() {
+    setMoreOpen((current) => {
+      writeMoreOpen(!current);
+      return !current;
+    });
+  }
+
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -54,46 +71,34 @@ export function AppShell() {
           <span className="brand-name">Hearth</span>
         </div>
 
-        <button className="command-trigger" onClick={() => setCommandOpen(true)} title="快速跳转（Ctrl/⌘ + K）">
+        <button className="command-trigger" onClick={() => setCommandOpen(true)} aria-label="搜索（Ctrl/⌘ + K）">
           <Command size={15} />
-          <span>快速跳转</span>
+          <span>搜索</span>
           <kbd>Ctrl K</kbd>
         </button>
 
-        <nav className="nav">
-          <NavLink to="/" end className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
-            <MessageCircle size={18} /> <span className="nav-label">聊天</span>
-          </NavLink>
-          <NavLink to="/tasks" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
-            <ListChecks size={18} /> <span className="nav-label">任务</span>
-            {activeCount > 0 && <span className="nav-badge">{activeCount}</span>}
-          </NavLink>
-          <NavLink to="/inbox" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
-            <Inbox size={18} /> <span className="nav-label">需要你</span>
-            {needsYouCount > 0 && <span className="nav-badge">{needsYouCount}</span>}
-          </NavLink>
-          <NavLink to="/personal" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
-            <UserRound size={18} /> <span className="nav-label">个人</span>
-          </NavLink>
-          <NavLink to="/runtime" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
-            <Activity size={18} /> <span className="nav-label">运行</span>
-          </NavLink>
-          <NavLink to="/devices" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
-            <Monitor size={18} /> <span className="nav-label">设备</span>
-          </NavLink>
-          <NavLink to="/schedules" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
-            <CalendarClock size={18} /> <span className="nav-label">定时任务</span>
-          </NavLink>
-          <NavLink to="/mail" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
-            <Mail size={18} /> <span className="nav-label">邮件</span>
-          </NavLink>
-          <NavLink to="/settings" className={({ isActive: active }) => (active ? "nav-item active" : "nav-item")}>
-            <Settings2 size={18} /> <span className="nav-label">设置</span>
-          </NavLink>
+        <nav className="nav" aria-label="主导航">
+          {MAIN_NAV.map((item) => <NavRow key={item.id} item={item} badge={badgeFor(item, badges)} />)}
+          <button
+            className={`nav-item nav-more-toggle${moreOpen ? " open" : ""}`}
+            onClick={toggleMore}
+            aria-expanded={moreOpen}
+            aria-controls="nav-more"
+          >
+            <MoreHorizontal size={18} />
+            <span className="nav-label">更多</span>
+            <ChevronDown size={14} className="nav-more-chevron" />
+          </button>
+          {moreOpen && (
+            <div className="nav-more" id="nav-more">
+              {MORE_NAV.map((item) => <NavRow key={item.id} item={item} badge={badgeFor(item, badges)} />)}
+            </div>
+          )}
         </nav>
 
         <div className="sidebar-spacer" />
 
+        <NavRow item={SETTINGS_ITEM} badge={0} />
         <NavLink to={chatModel?.configured ? "/settings" : "/welcome"} className="codex-status">
           <span className={`status-dot ${chatModel?.configured ? "online" : "offline"}`} />
           <span>
@@ -119,20 +124,7 @@ export function AppShell() {
       </main>
 
       <nav className="mobile-nav" aria-label="移动端导航">
-        <NavLink to="/" end className={({ isActive: active }) => (active ? "mobile-nav-item active" : "mobile-nav-item")}>
-          <MessageCircle size={19} /><span>聊天</span>
-        </NavLink>
-        <NavLink to="/tasks" className={({ isActive: active }) => (active ? "mobile-nav-item active" : "mobile-nav-item")}>
-          <ListChecks size={19} /><span>任务</span>
-          {activeCount > 0 && <span className="mobile-nav-badge">{activeCount}</span>}
-        </NavLink>
-        <NavLink to="/inbox" className={({ isActive: active }) => (active ? "mobile-nav-item active" : "mobile-nav-item")}>
-          <Inbox size={19} /><span>需要你</span>
-          {needsYouCount > 0 && <span className="mobile-nav-badge">{needsYouCount}</span>}
-        </NavLink>
-        <NavLink to="/settings" className={({ isActive: active }) => (active ? "mobile-nav-item active" : "mobile-nav-item")}>
-          <Settings2 size={19} /><span>设置</span>
-        </NavLink>
+        {MAIN_NAV.map((item) => <NavRow key={item.id} item={item} badge={badgeFor(item, badges)} mobile />)}
         <button className="mobile-nav-item" onClick={() => setCommandOpen(true)}>
           <Command size={19} /><span>更多</span>
         </button>
@@ -140,4 +132,42 @@ export function AppShell() {
       <CommandPalette open={commandOpen} tasks={tasks} onClose={() => setCommandOpen(false)} />
     </div>
   );
+}
+
+function NavRow({ item, badge, mobile = false }: { item: NavItem; badge: number; mobile?: boolean }) {
+  const Icon = item.icon;
+  const base = mobile ? "mobile-nav-item" : "nav-item";
+  return (
+    <NavLink
+      to={item.path}
+      end={item.end === true}
+      className={({ isActive: active }) => (active ? `${base} active` : base)}
+    >
+      <Icon size={mobile ? 19 : 18} />
+      <span className={mobile ? undefined : "nav-label"}>{item.label}</span>
+      {badge > 0 && <span className={mobile ? "mobile-nav-badge" : "nav-badge"}>{badge}</span>}
+    </NavLink>
+  );
+}
+
+function badgeFor(item: NavItem, badges: Record<NavBadge, number>): number {
+  return item.badge ? badges[item.badge] : 0;
+}
+
+const SETTINGS_ITEM = FOOTER_NAV[0]!;
+
+function readMoreOpen(): boolean {
+  try {
+    return window.localStorage.getItem(MORE_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeMoreOpen(open: boolean): void {
+  try {
+    window.localStorage.setItem(MORE_STORAGE_KEY, open ? "1" : "0");
+  } catch {
+    // localStorage 不可用时只影响下次打开时的默认值
+  }
 }

@@ -263,6 +263,32 @@ async function main() {
     );
   });
 
+  await runTest(page, "keeps five primary destinations and discloses the rest", async () => {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    const nav = page.locator(".nav");
+    for (const label of ["聊天", "任务", "需要你", "记忆"]) {
+      assert.equal(await nav.getByRole("link", { name: label, exact: true }).count(), 1, `${label} should be a primary link`);
+    }
+    assert.equal(await page.getByRole("link", { name: "设置", exact: true }).count(), 1, "settings should stay reachable");
+    if (await page.locator("#nav-more").count() === 0) {
+      await page.locator(".nav-more-toggle").click();
+    }
+    for (const label of ["邮件", "定时任务", "设备", "运行", "个人"]) {
+      assert.equal(await page.locator("#nav-more").getByRole("link", { name: label, exact: true }).count(), 1, `${label} should be a secondary link`);
+    }
+    await page.getByRole("link", { name: "记忆", exact: true }).click();
+    await page.waitForURL("**/memory", { timeout: 15_000 });
+    await page.locator(".memory-page").waitFor({ timeout: 15_000 });
+
+    await page.keyboard.press("Control+k");
+    await page.locator(".command-dialog").waitFor({ timeout: 15_000 });
+    for (const label of ["聊天", "任务", "需要你", "记忆", "邮件", "定时任务", "设备", "运行", "个人", "设置"]) {
+      assert.equal(await page.locator(".command-group").getByRole("button", { name: label, exact: true }).count(), 1, `${label} should be searchable`);
+    }
+    await page.keyboard.press("Escape");
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+  });
+
   await runTest(page, "ignores Enter while the IME is composing", async () => {
     await newChat(page, baseUrl);
     const composer = page.locator('textarea[placeholder^="直接说你要做什么"]');
