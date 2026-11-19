@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { execSync, spawn } from "node:child_process";
-import { copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -11,13 +11,16 @@ import { chromium } from "playwright";
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const artifactsDir = mkdtempSync(join(tmpdir(), "hearth-e2e-artifacts-"));
-const dataDir = mkdtempSync(join(tmpdir(), "hearth-e2e-data-"));
+const dataRoot = mkdtempSync(join(tmpdir(), "hearth-e2e-root-"));
+const dataDir = join(dataRoot, ".hearth");
+mkdirSync(dataDir, { recursive: true });
 const keep = process.env.HEARTH_E2E_KEEP === "1";
 const headed = process.env.HEARTH_E2E_HEADED === "1";
 let server = null;
 let browser = null;
 let failed = 0;
 let passed = 0;
+let serverLog = "";
 
 function log(message) {
   console.log(message);
@@ -96,9 +99,9 @@ async function runTest(page, name, fn) {
 }
 
 async function waitForComposerReady(page) {
-  await page.locator('select[aria-label="优先执行器"]').waitFor({ state: "visible", timeout: 15_000 });
+  await page.locator('select[aria-label="锁定执行器"]').waitFor({ state: "visible", timeout: 15_000 });
   await page.waitForFunction(() => {
-    const select = document.querySelector('select[aria-label="优先执行器"]');
+    const select = document.querySelector('select[aria-label="锁定执行器"]');
     return select instanceof HTMLSelectElement && !select.disabled;
   }, null, { timeout: 15_000 });
 }
@@ -172,16 +175,18 @@ async function main() {
 
   const port = Number(process.env.HEARTH_E2E_PORT ?? await freePort());
   const baseUrl = `http://127.0.0.1:${port}`;
-  let serverLog = "";
+  const serverEnv = {
+    ...process.env,
+    HEARTH_ROOT: dataRoot,
+    HEARTH_WEB_DIST: join(repoRoot, "apps", "web", "dist"),
+    HEARTH_HOST: "127.0.0.1",
+    HEARTH_PORT: String(port),
+    HEARTH_EXECUTOR_DETECT: "off"
+  };
+  delete serverEnv.HEARTH_DATA_DIR;
   server = spawn(process.execPath, [join(repoRoot, "node_modules/tsx/dist/cli.mjs"), join(repoRoot, "apps/server/src/index.ts")], {
     cwd: repoRoot,
-    env: {
-      ...process.env,
-      HEARTH_HOST: "127.0.0.1",
-      HEARTH_PORT: String(port),
-      HEARTH_DATA_DIR: dataDir,
-      HEARTH_EXECUTOR_DETECT: "off"
-    },
+    env: serverEnv,
     stdio: ["ignore", "pipe", "pipe"]
   });
   server.stdout.on("data", (chunk) => { serverLog += chunk.toString(); });
@@ -203,7 +208,10 @@ async function main() {
   const page = await context.newPage();
   const consoleErrors = [];
   page.on("console", (message) => {
-    if (message.type() === "error") consoleErrors.push(message.text());
+    if (message.type() === "error") {
+      const location = message.location();
+      consoleErrors.push(location.url ? `${message.text()} @ ${location.url}` : message.text());
+    }
   });
   page.on("pageerror", (error) => consoleErrors.push(error.message));
 
@@ -392,7 +400,7 @@ async function main() {
 
   await runTest(page, "uses the global preferred executor for a new chat", async () => {
     await newChat(page, baseUrl);
-    assert.equal(await page.locator('select[aria-label="优先执行器"]').inputValue(), "native");
+    assert.equal(await page.locator('select[aria-label="锁定执行器"]').inputValue(), "native");
     const defaults = await api(baseUrl, "/api/conversation-defaults");
     assert.equal(defaults.body.settings.preferredExecutorId, "native");
   });
@@ -499,10 +507,14 @@ async function main() {
   });
 
   await runTest(page, "records no unexpected browser console errors", async () => {
-    const unexpected = consoleErrors.filter((text) =>
-      !/Failed to load resource.*404/i.test(text)
-      && !/CONVERSATION_NOT_FOUND/.test(text)
-    );
+    const offlineExpected = [
+      /503 .*\/api\/tasks\/[^/]+\/overview/ // overview needs a chat model; offline mode intentionally has none
+    ];
+    const unexpected = consoleErrors.filter((text) => {
+      if (/Failed to load resource.*404/i.test(text) || /CONVERSATION_NOT_FOUND/.test(text)) return false;
+      if (process.env.HEARTH_E2E_OFFLINE === "1" && offlineExpected.some((pattern) => pattern.test(text))) return false;
+      return true;
+    });
     assert.deepEqual(unexpected, []);
   });
 
@@ -520,6 +532,7 @@ try {
 } catch (error) {
   failed += 1;
   console.error("E2E harness failed:", error instanceof Error ? error.stack ?? error.message : error);
+  if (serverLog.trim()) console.error(`\nServer log tail:\n${serverLog.slice(-8_000)}`);
   process.exitCode = 1;
 } finally {
   if (browser) await browser.close().catch(() => undefined);
@@ -532,7 +545,7 @@ try {
     if (server.exitCode === null) server.kill("SIGKILL");
   }
   if (!keep) {
-    rmSync(dataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+    rmSync(dataRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
   } else {
     console.log(`Kept data directory: ${dataDir}`);
   }

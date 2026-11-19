@@ -11,8 +11,12 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const outputDir = join(repoRoot, "docs", "public", "screenshots");
-const dataDir = mkdtempSync(join(tmpdir(), "hearth-readme-data-"));
+const outputDir = process.env.HEARTH_SCREENSHOT_DIR
+  ? resolve(process.env.HEARTH_SCREENSHOT_DIR)
+  : join(repoRoot, "docs", "public", "screenshots");
+const dataRoot = mkdtempSync(join(tmpdir(), "hearth-readme-root-"));
+const dataDir = join(dataRoot, ".hearth");
+mkdirSync(dataDir, { recursive: true });
 const port = await freePort();
 const baseUrl = `http://127.0.0.1:${port}`;
 const now = Date.now();
@@ -87,7 +91,7 @@ try {
     server.kill();
     await Promise.race([onceExit(server), sleep(3_000)]);
   }
-  rmSync(dataDir, { recursive: true, force: true });
+  rmSync(dataRoot, { recursive: true, force: true });
 }
 
 async function freePort() {
@@ -103,14 +107,17 @@ async function freePort() {
 }
 
 async function startServer() {
+  const serverEnv = {
+    ...process.env,
+    HEARTH_ROOT: dataRoot,
+    HEARTH_WEB_DIST: join(repoRoot, "apps", "web", "dist"),
+    HEARTH_HOST: "127.0.0.1",
+    HEARTH_PORT: String(port)
+  };
+  delete serverEnv.HEARTH_DATA_DIR;
   const child = spawn(process.execPath, [join(repoRoot, "node_modules", "tsx", "dist", "cli.mjs"), join(repoRoot, "apps", "server", "src", "index.ts")], {
     cwd: repoRoot,
-    env: {
-      ...process.env,
-      HEARTH_HOST: "127.0.0.1",
-      HEARTH_PORT: String(port),
-      HEARTH_DATA_DIR: dataDir
-    },
+    env: serverEnv,
     stdio: ["ignore", "pipe", "pipe"]
   });
   child.stdout.on("data", () => {});
