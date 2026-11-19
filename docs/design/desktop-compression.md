@@ -8,7 +8,7 @@
 |---|---:|---:|---:|
 | NSIS 安装包 | 155.3 MiB | 40.6 MiB | **27.65 MiB** |
 | 安装后占用 | 558.1 MiB | 279.7 MiB | **113.20 MiB** |
-| 安装文件数 | 约 3.9 万 | 约 1.8 万 | **1,847** |
+| 安装文件数 | — | — | **1,847** |
 | 运行时 `node_modules` | 有 | 有 | **无** |
 
 当前安装包为 `release/Hearth_0.1.0_x64-setup.exe`，按用户安装到 `%LOCALAPPDATA%\Programs\Hearth`，不需要管理员权限。
@@ -75,7 +75,7 @@ await esbuild.build({
 - `standard_fonts/` → `resources/server/assets/pdfjs/standard_fonts/`
 - `wasm/` → `resources/server/assets/pdfjs/wasm/`
 
-服务端启动时注入 `HEARTH_PDF_ASSETS`。`packages/agent-runtime/src/documents.ts` 的 PDF 提取器把 `cMapUrl`、`standardFontDataUrl`、`wasmUrl` 指向该目录，使用正斜杠并以 `/` 结尾；未设置时回退到仓库 `node_modules/pdfjs-dist`。这样中文 PDF 的 cMap 和标准字体在安装版中真正生效。
+服务端启动时注入 `HEARTH_PDF_ASSETS`。`packages/agent-runtime/src/documents.ts` 的 PDF 提取器把 `cMapUrl`、`standardFontDataUrl`、`wasmUrl` 指向该目录，使用正斜杠并以 `/` 结尾；未设置时回退到仓库 `node_modules/pdfjs-dist`。这样中文 PDF 所需的 cMap 与标准字体在安装版中可用。
 
 ### 第三方声明
 
@@ -235,7 +235,7 @@ npm run tauri:build
 - `npm test`：115 个文件、843 项测试全部通过。
 - `cargo test`：Rust 壳纯函数测试通过（日期换算、导航白名单、重启退避、体检报告、chunked 解码）。
 - staged server 冒烟：`/api/ready`、`/api/health`、`/api/executors`、`/` 均正常，HTML 响应带 CSP。
-- PDF：经 sources API 读取中文/测试 PDF 成功，cMap 与标准字体路径生效。
+- PDF：经 sources API 读取测试 PDF 成功；cMap、标准字体与 wasm 路径已指向安装目录。
 - 安装后：schemaVersion 33，363 个任务可见，数据目录仍为 `D:\App\hearth-os\.hearth`。
 - 单实例：第二次启动立即退出并聚焦已有窗口。
 - 服务端恢复：结束 node 子进程后约 3.2 秒自动拉起，`/api/ready` 恢复。
