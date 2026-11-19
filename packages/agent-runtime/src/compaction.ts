@@ -37,7 +37,7 @@ export async function compactAgentMessagesWithSummary(
 ): Promise<TokenCompactResult> {
   const before = messages.length;
   const beforeTokens = estimateMessageTokens(messages);
-  const trimmed = trimToolOutputs(messages, options.maxToolChars ?? DEFAULTS.maxToolChars);
+  const trimmed = trimToolOutputs(messages, options.maxToolChars ?? DEFAULTS.maxToolChars, options.keepRecentToolOutputs ?? 3);
   const contextWindowTokens = options.contextWindowTokens ?? 128_000;
   const reserveTokens = options.reserveTokens ?? Math.max(DEFAULTS.reserveTokens, Math.floor(contextWindowTokens * 0.15));
   if (!options.contextWindowTokens || !shouldCompactContext(trimmed, contextWindowTokens, reserveTokens)) {
@@ -62,9 +62,20 @@ export async function compactAgentMessagesWithSummary(
     }
   }
 
-  const summaryMessage: AgentMessage[] = summaryText
-    ? [{ role: "user", content: `以下是更早执行上下文的摘要，请把它当作已完成工作的可靠记录：\n\n${summaryText}` }]
-    : [];
+  const summaryMessage: AgentMessage[] = [];
+  if (options.stateSummary?.trim() || summaryText) {
+    const parts = [
+      "<compaction_summary>",
+      "Earlier work is summarized below. Treat file paths, commands and test results as authoritative records of what already happened.",
+      options.stateSummary?.trim() ? `## Progress ledger\n${options.stateSummary.trim()}` : "",
+      summaryText ? `## Narrative summary\n${summaryText}` : ""
+    ].filter(Boolean);
+    parts.push("</compaction_summary>");
+    summaryMessage.push({ role: "user", content: parts.join("\n\n") });
+  }
+  if (options.projectInstructions?.trim()) {
+    summaryMessage.push({ role: "user", content: `<project_instructions>\n${options.projectInstructions.trim()}\n</project_instructions>` });
+  }
   const result = [...system, ...anchor, ...summaryMessage, ...completeRecent(recent)];
   return {
     messages: result,
@@ -84,7 +95,7 @@ export function compactAgentMessages(messages: AgentMessage[], options: CompactO
   const maxToolChars = options.maxToolChars ?? DEFAULTS.maxToolChars;
   const before = messages.length;
 
-  let result: AgentMessage[] = trimToolOutputs(messages, maxToolChars);
+  let result: AgentMessage[] = trimToolOutputs(messages, maxToolChars, options.keepRecentToolOutputs ?? 1);
 
   if (result.length <= keepRecent + 6 && messageChars(result) <= maxChars) {
     return { messages: result, compacted: false, before, after: result.length };
@@ -100,17 +111,21 @@ export function compactAgentMessages(messages: AgentMessage[], options: CompactO
   return { messages: result, compacted: true, before, after: result.length };
 }
 
-function trimToolOutputs(messages: AgentMessage[], maxToolChars: number): AgentMessage[] {
-  return messages.map((message) => {
-    const suffix = "\n[工具输出较长，已截断]";
-    if (message.role === "tool" && message.content.length > maxToolChars && !(message.content.length === maxToolChars + suffix.length && message.content.endsWith(suffix))) {
-      return {
-        ...message,
-        content: `${message.content.slice(0, maxToolChars)}${suffix}`
-      };
-    }
-    return message;
-  });
+function trimToolOutputs(messages: AgentMessage[], maxToolChars: number, keepRecentToolOutputs: number): AgentMessage[] {
+  let kept = 0;
+  return messages.map((message) => message).reverse().map((message) => {
+    if (message.role !== "tool") return message;
+    const keep = kept < keepRecentToolOutputs;
+    kept += 1;
+    if (keep || message.content.length <= maxToolChars) return message;
+    const head = Math.floor(maxToolChars * 0.6);
+    const tail = Math.floor(maxToolChars * 0.35);
+    const omitted = message.content.length - head - tail;
+    return {
+      ...message,
+      content: `${message.content.slice(0, head)}\n\n[... ${omitted} chars omitted from older tool output; rerun the command or read the file again if needed ...]\n\n${message.content.slice(-tail)}`
+    };
+  }).reverse();
 }
 
 function findRecentBoundary(messages: AgentMessage[], recentTokens: number): number {
