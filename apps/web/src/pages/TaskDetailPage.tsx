@@ -1,6 +1,6 @@
 import { TaskTokens } from "../components/TaskTokens.tsx";
 import { markTasksRead } from "../lib/task-read-state.ts";
-import { useEffect, useState, useId, type ReactNode } from "react";
+import { useEffect, useRef, useState, useId, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
@@ -17,6 +17,7 @@ import {
   FileText,
   Gauge,
   Loader2,
+  MoreHorizontal,
   Pin,
   PinOff,
   RefreshCw,
@@ -53,6 +54,23 @@ export function TaskDetailPage() {
   const overviewQuery = useQuery({ queryKey: ["task-overview", id, taskQuery.data?.task.title, taskQuery.data?.task.goal, taskQuery.data?.task.resultSummary, taskQuery.data?.task.status], queryFn: () => api.taskOverview(id), enabled: Boolean(taskQuery.data), staleTime: Infinity, retry: false });
   const [processOpen, setProcessOpen] = useState(false);
   const processStatus = taskQuery.data?.task.status;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    function onPointerDown(event: PointerEvent) {
+      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false);
+    }
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") setMenuOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [menuOpen]);
   useEffect(() => {
     setProcessOpen(Boolean(processStatus && !["completed", "failed", "cancelled", "recoverable"].includes(processStatus)));
   }, [id, processStatus]);
@@ -170,46 +188,61 @@ export function TaskDetailPage() {
     <div className="page task-detail-page">
       <Link className="back-link" to={backTo} state={backState}><ArrowLeft size={14} /> {backLabel}</Link>
 
-      <div className="page-head">
+      <div className="task-detail-head">
         <div className="task-detail-title">
           <h1>{task.title}</h1>
           <div className="task-overview" aria-live="polite">
-            {overviewQuery.isPending ? <p>正在生成任务摘要…</p> : overviewQuery.data ? <p>{overviewQuery.data.summary}</p> : <p>摘要暂不可用。<button className="ghost-button" onClick={() => void overviewQuery.refetch()}>重试</button></p>}
+            {overviewQuery.isPending ? <p>正在生成任务摘要…</p> : overviewQuery.data ? <p>{cleanSummary(overviewQuery.data.summary)}</p> : <p>摘要暂不可用。<button className="ghost-button" onClick={() => void overviewQuery.refetch()}>重试</button></p>}
           </div>
-          <details className="task-original-request"><summary>原始需求</summary><p>{task.goal}</p></details>
         </div>
-        <div className="detail-actions">
-          <StatusPill status={task.status} />
-          <button
-            className="ghost-button"
-            onClick={() => organize.mutate({ pinned: !task.pinnedAt })}
-            disabled={organize.isPending}
-          >
-            {task.pinnedAt ? <PinOff size={14} /> : <Pin size={14} />} {task.pinnedAt ? "取消置顶" : "置顶"}
-          </button>
-          <button
-            className="ghost-button"
-            onClick={() => organize.mutate({ archived: !task.archivedAt })}
-            disabled={organize.isPending}
-          >
-            {task.archivedAt ? <ArchiveRestore size={14} /> : <Archive size={14} />} {task.archivedAt ? "恢复" : "归档"}
-          </button>
-          <button className="ghost-button" onClick={() => void taskQuery.refetch()} disabled={taskQuery.isFetching}>
-            <RefreshCw size={14} className={taskQuery.isFetching ? "spin" : ""} /> 刷新
-          </button>
-          {canRetry && <button className="primary-button" onClick={() => retry.mutate(undefined)} disabled={retry.isPending}><RotateCcw size={14} /> 重试</button>}
+        <div className="task-detail-actions">
           {task.status === "waiting_budget" && (
             <button className="primary-button" onClick={() => extendBudget.mutate(undefined)} disabled={extendBudget.isPending}>
-              {extendBudget.isPending ? <Loader2 className="spin" size={14} /> : <Gauge size={14} />} 预算翻倍并继续（模式不变）
+              {extendBudget.isPending ? <Loader2 className="spin" size={14} /> : <Gauge size={14} />} 预算翻倍并继续
             </button>
           )}
-          {canCancel && <button className="ghost-button danger" onClick={() => cancel.mutate()} disabled={cancel.isPending}><Square size={13} /> 取消</button>}
-          <button className="ghost-button danger" onClick={() => void deleteCurrentTask()}><Trash2 size={13} /> 移入回收站</button>
+          {canRetry && (
+            <button className="primary-button" onClick={() => retry.mutate(undefined)} disabled={retry.isPending}>
+              {retry.isPending ? <Loader2 className="spin" size={14} /> : <RotateCcw size={14} />} 重试
+            </button>
+          )}
+          <div className="task-detail-more-wrap" ref={menuRef}>
+            <button
+              className="icon-button task-detail-more"
+              aria-label="更多任务操作"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((open) => !open)}
+            >
+              <MoreHorizontal size={17} />
+            </button>
+            {menuOpen && (
+              <div className="task-detail-menu" role="menu" aria-label="任务操作">
+                <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); organize.mutate({ pinned: !task.pinnedAt }); }} disabled={organize.isPending}>
+                  {task.pinnedAt ? <PinOff size={14} /> : <Pin size={14} />} {task.pinnedAt ? "取消置顶" : "置顶"}
+                </button>
+                <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); organize.mutate({ archived: !task.archivedAt }); }} disabled={organize.isPending}>
+                  {task.archivedAt ? <ArchiveRestore size={14} /> : <Archive size={14} />} {task.archivedAt ? "恢复" : "归档"}
+                </button>
+                <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); void taskQuery.refetch(); }} disabled={taskQuery.isFetching}>
+                  <RefreshCw size={14} className={taskQuery.isFetching ? "spin" : ""} /> 刷新
+                </button>
+                {canCancel && (
+                  <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); cancel.mutate(); }} disabled={cancel.isPending}>
+                    <Square size={13} /> 取消任务
+                  </button>
+                )}
+                <button type="button" role="menuitem" className="danger" onClick={() => { setMenuOpen(false); void deleteCurrentTask(); }}>
+                  <Trash2 size={13} /> 移入回收站
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
       <div className="task-meta-row">
-        <span className={`phase-tag ${phaseTone(task.status)}`}>{phaseLabel(task.status, task.nextAction)}</span>
+        <StatusPill status={task.status} />
         <span className="executor-tag">{executorLabel(task.executorId)}</span>
         <span>{taskKindLabel(task.taskKind)}</span>
         <span className="task-mode-tag">{executionModeLabel(task.executionMode)}</span>
@@ -235,9 +268,6 @@ export function TaskDetailPage() {
               {task.executionMode === "quick" ? "升级标准模式并继续" : "升级深入模式并继续"}
             </button>}
             {extendBudget.isError && <small className="form-error">{extendBudget.error instanceof Error ? extendBudget.error.message : "扩展预算失败"}</small>}
-            <button className="primary-button" onClick={() => extendBudget.mutate(undefined)} disabled={extendBudget.isPending}>
-              {extendBudget.isPending ? <Loader2 className="spin" size={14} /> : <Gauge size={14} />} 预算翻倍并继续（模式不变）
-            </button>
           </div>
         </div>
       ) : task.error && (
@@ -250,8 +280,6 @@ export function TaskDetailPage() {
           </div>
         </div>
       )}
-
-      {view.goal && <GoalCompletionPanel goal={view.goal} report={view.completionReport} />}
 
       {pendingApprovals.map((approval) => (
         <ApprovalCard key={approval.id} approval={approval} effect={view.effects.find((effect) => effect.id === approval.effectId)} />
@@ -310,8 +338,6 @@ export function TaskDetailPage() {
           </div>
         </section>
       )}
-
-      <TaskFollowUpPanel taskId={task.id} status={task.status} followUps={view.followUps} />
 
       <section className="panel result-panel">
         <div className="panel-head">
@@ -401,13 +427,22 @@ export function TaskDetailPage() {
         </div>
       </section>
 
+      <details className="task-original-request">
+        <summary>原始需求</summary>
+        <p>{task.goal}</p>
+      </details>
+
+      <TaskFollowUpPanel taskId={task.id} status={task.status} followUps={view.followUps} />
+
+      {view.goal && <GoalCompletionPanel goal={view.goal} report={view.completionReport} />}
+
       <TaskGitPanel taskId={task.id} />
       <TaskWorktreePanel taskId={task.id} />
 
       <section className="panel process-panel">
         <button className="process-toggle" aria-expanded={processOpen} aria-controls="task-process-content" onClick={() => setProcessOpen((open) => !open)}>
             <span>执行过程</span>
-            <small>{executorLabel(task.executorId)} · {view.runs.length} 次运行 · {visibleProgress.length} 条进度 · {processOpen ? "点击收起" : "点击展开"}</small>
+            <small>{executorLabel(task.executorId)} · {view.runs.length} 次运行 · {visibleProgress.length} 条进度</small>
         </button>
         <div id="task-process-content" className={`animated-disclosure ${processOpen ? "is-open" : ""}`} aria-hidden={!processOpen} ref={(node) => { if (node) node.inert = !processOpen; }}>
           <div className="disclosure-clip"><div className="process-body">
@@ -482,12 +517,13 @@ function GoalCompletionPanel({ goal, report }: { goal: GoalContract; report: Goa
   const resultById = new Map((report?.criteria ?? []).map((criterion) => [criterion.criterionId, criterion]));
   return (
     <section className="panel goal-panel">
-      <div className="panel-head">
-        <h2>目标与完成证据</h2>
-        <span className={`goal-verdict ${report?.verdict ?? "pending"}`}>
-          {report ? completionVerdictLabel(report.verdict) : "尚未判定"}
-        </span>
-      </div>
+      <details className="task-fold">
+        <summary className="task-fold-summary">
+          <span>目标与验收</span>
+          <span className={`goal-verdict ${report?.verdict ?? "pending"}`}>
+            {report ? completionVerdictLabel(report.verdict) : "尚未判定"}
+          </span>
+        </summary>
       <div className="goal-body">
         <div className="goal-summary">
           <p>{goal.objective}</p>
@@ -543,8 +579,19 @@ function GoalCompletionPanel({ goal, report }: { goal: GoalContract; report: Goa
           <p className="goal-report-summary">任务结束后会按上述标准逐条核验，执行器自述不算完成。</p>
         )}
       </div>
+      </details>
     </section>
   );
+}
+
+function cleanSummary(value: string): string {
+  return value
+    .replace(/^#{1,6}\s*/gm, "")
+    .replace(/^[-*]\s+/gm, "")
+    .replace(/\*\*/g, "")
+    .replace(/`/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function completionVerdictLabel(verdict: GoalCompletionReport["verdict"]): string {

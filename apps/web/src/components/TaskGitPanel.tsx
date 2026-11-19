@@ -69,15 +69,16 @@ export function TaskGitPanel({ taskId }: TaskGitPanelProps) {
 
   return (
     <section className="panel git-panel">
-      <div className="panel-head">
-        <h2>代码改动</h2>
+      <details className="task-fold">
+        <summary className="task-fold-summary">
+          <span>代码改动</span>
+          <span className="task-fold-meta">{view.repo ?? "任务仓库"}</span>
+        </summary>
         <div className="git-head-actions">
-          <span className="panel-meta">{view.repo ?? "任务仓库"}</span>
           <button className="icon-button" onClick={() => void gitQuery.refetch()} disabled={gitQuery.isFetching} title="刷新 Git 状态">
             <RefreshCw size={13} className={gitQuery.isFetching ? "spin" : ""} />
           </button>
         </div>
-      </div>
       <div className="git-body">
         <div className="git-summary-row">
           <span className="git-branch"><GitBranch size={14} /> {view.branch || "detached"}</span>
@@ -203,6 +204,7 @@ export function TaskGitPanel({ taskId }: TaskGitPanelProps) {
           </details>
         )}
       </div>
+      </details>
     </section>
   );
 }

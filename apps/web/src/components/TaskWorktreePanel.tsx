@@ -35,15 +35,16 @@ export function TaskWorktreePanel({ taskId }: { taskId: string }) {
 
   return (
     <section className="panel worktree-panel">
-      <div className="panel-head">
-        <h2>任务 Worktree</h2>
+      <details className="task-fold">
+        <summary className="task-fold-summary">
+          <span>任务 Worktree</span>
+          <span className="task-fold-meta">{worktree?.available ? (worktree.dirty ? "有未提交改动" : "工作区干净") : "不可用"}</span>
+        </summary>
         <div className="git-head-actions">
-          <span className="panel-meta">{worktree?.available ? (worktree.dirty ? "有未提交改动" : "工作区干净") : "不可用"}</span>
           <button className="icon-button" onClick={() => void worktreeQuery.refetch()} disabled={worktreeQuery.isFetching} title="刷新 Worktree 状态">
             <RefreshCw size={13} className={worktreeQuery.isFetching ? "spin" : ""} />
           </button>
         </div>
-      </div>
       <div className="worktree-body">
         {worktree ? (
           <>
@@ -65,6 +66,7 @@ export function TaskWorktreePanel({ taskId }: { taskId: string }) {
         )}
         {notice && worktree && <p className="worktree-notice">{notice}</p>}
       </div>
+      </details>
     </section>
   );
 }

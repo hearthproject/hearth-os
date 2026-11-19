@@ -11,6 +11,7 @@ import "./styles/foundation.css";
 import "./styles/shell.css";
 import "./styles/chat.css";
 import "./styles/tasks.css";
+import "./styles/task-detail.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {

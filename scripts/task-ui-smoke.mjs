@@ -14,6 +14,10 @@ const server = createServer(async (req, res) => {
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const origin = `http://127.0.0.1:${server.address().port}`;
+async function refreshDetail(page) {
+  await page.getByRole('button', { name: '更多任务操作' }).click();
+  await page.getByRole('menuitem', { name: '刷新', exact: true }).click();
+}
 let browser;
 try {
   browser = await chromium.launch({ headless: true });
@@ -81,10 +85,10 @@ try {
   await process.click();
   assert.equal(await process.getAttribute('aria-expanded'), 'true');
   task.status = 'running';
-  await page.getByRole('button', { name: '刷新', exact: true }).click();
+  await refreshDetail(page);
   await page.waitForFunction(() => document.querySelector('.process-toggle')?.getAttribute('aria-expanded') === 'true');
   task.status = 'completed';
-  await page.getByRole('button', { name: '刷新', exact: true }).click();
+  await refreshDetail(page);
   await page.waitForFunction(() => document.querySelector('.process-toggle')?.getAttribute('aria-expanded') === 'false');
   await process.click();
   assert.equal(await process.getAttribute('aria-expanded'), 'true');
@@ -107,13 +111,13 @@ try {
   assert.equal(await page.locator(`[id="${checkpointId}"]`).evaluate(el => getComputedStyle(el).display), 'grid');
   await page.screenshot({ path: '../task-detail-check.png', fullPage: true });
   task.status = 'waiting_budget'; task.executionMode = 'quick';
-  await page.getByRole('button', { name: '刷新', exact: true }).click();
+  await refreshDetail(page);
   await page.getByRole('button', { name: '升级标准模式并继续' }).click();
   await page.locator('.task-meta-row .task-mode-tag').getByText('标准', { exact: true }).waitFor();
   assert.deepEqual(budgetActions[0], { executionMode: 'standard' });
   task.status = 'waiting_budget';
-  await page.getByRole('button', { name: '刷新', exact: true }).click();
-  await page.getByRole('button', { name: '预算翻倍并继续（模式不变）', exact: true }).first().click();
+  await refreshDetail(page);
+  await page.getByRole('button', { name: '预算翻倍并继续', exact: true }).click();
   await page.waitForFunction(() => !document.querySelector('.result-banner.budget'));
   assert.deepEqual(budgetActions[1], {});
   assert.equal(task.executionMode, 'standard');
