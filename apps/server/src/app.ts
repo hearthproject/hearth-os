@@ -1168,6 +1168,27 @@ export async function buildServer(options: BuildServerOptions = {}) {
     logger: options.logger ?? false,
     bodyLimit: 8_000_000
   });
+  if (process.env.HEARTH_DESKTOP === "1") {
+    const desktopCsp = [
+      "default-src 'self'",
+      "script-src 'self'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob:",
+      "font-src 'self' data:",
+      "connect-src 'self'",
+      "media-src 'self' blob:",
+      "object-src 'none'",
+      "base-uri 'none'",
+      "frame-ancestors 'none'"
+    ].join("; ");
+    app.addHook("onSend", async (_request, reply, payload) => {
+      const contentType = String(reply.getHeader("content-type") ?? "");
+      if (!contentType || /text\/html|application\/xhtml\+xml/i.test(contentType)) {
+        reply.header("Content-Security-Policy", desktopCsp);
+      }
+      return payload;
+    });
+  }
   app.get("/api/ready", async () => ({ ok: true, name: "Hearth" }));
   app.post("/api/desktop/shutdown", async (request, reply) => {
     if (!LOOPBACK_HOSTS.has(request.hostname)) {

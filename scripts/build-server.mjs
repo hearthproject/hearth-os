@@ -1,60 +1,110 @@
 import { build } from "esbuild";
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const outputRoot = join(repoRoot, "apps", "desktop-tauri", "src-tauri", "resources", "server");
+const resourcesRoot = join(repoRoot, "apps", "desktop-tauri", "src-tauri", "resources");
 
-function collectExternalDependencies() {
-  const packages = [
-    "apps/server/package.json",
-    ...["agent-runtime", "codex-executor", "core", "deepseek-executor", "eventlog", "templates"].map(
-      (name) => `packages/${name}/package.json`
-    )
-  ];
-  const dependencies = new Map();
-  for (const relative of packages) {
-    const path = join(repoRoot, relative);
-    if (!existsSync(path)) continue;
-    const manifest = JSON.parse(readFileSync(path, "utf8"));
-    for (const [name, version] of Object.entries(manifest.dependencies ?? {})) {
-      dependencies.set(name, version);
-    }
-  }
-  return [...dependencies.keys()]
-    .filter((name) => !name.startsWith("@hearth/"))
-    .filter((name) => !name.startsWith("@deepseek-ai/"))
-    .filter((name) => name !== "@openai/codex-win32-x64")
-    .sort();
-}
-
-export function externalDependencies() {
-  return collectExternalDependencies();
-}
-
-const outputRoot = join(repoRoot, "apps", "desktop", "resources", "server");
 rmSync(outputRoot, { recursive: true, force: true });
 mkdirSync(outputRoot, { recursive: true });
 
-await build({
+const result = await build({
   entryPoints: [join(repoRoot, "apps", "server", "src", "index.ts")],
   outfile: join(outputRoot, "server.mjs"),
   bundle: true,
   platform: "node",
   format: "esm",
   target: "node22",
-  external: [...collectExternalDependencies(), "@deepseek-ai/*"],
+  minify: true,
+  external: ["@openai/codex-win32-x64"],
   legalComments: "none",
+  metafile: true,
+  banner: {
+    js: 'import { createRequire as __hearthCreateRequire } from "node:module"; const require = __hearthCreateRequire(import.meta.url);'
+  },
   logLevel: "info"
 });
 
 const pdfjsRoot = join(repoRoot, "node_modules", "pdfjs-dist");
+const workerSource = join(pdfjsRoot, "legacy", "build", "pdf.worker.min.mjs");
+if (!existsSync(workerSource)) throw new Error(`missing pdf worker: ${workerSource}`);
+cpSync(workerSource, join(outputRoot, "pdf.worker.mjs"));
+
 const pdfjsAssets = join(outputRoot, "assets", "pdfjs");
 for (const name of ["cmaps", "standard_fonts", "wasm"]) {
   const source = join(pdfjsRoot, name);
-  if (existsSync(source)) {
-    cpSync(source, join(pdfjsAssets, name), { recursive: true });
+  if (!existsSync(source)) throw new Error(`missing pdfjs asset directory: ${source}`);
+  cpSync(source, join(pdfjsAssets, name), { recursive: true });
+}
+
+function findPackageRoot(file) {
+  let current = dirname(join(repoRoot, file));
+  while (true) {
+    const manifest = join(current, "package.json");
+    if (existsSync(manifest)) return current;
+    const parent = dirname(current);
+    if (parent === current || !current.startsWith(repoRoot)) return null;
+    current = parent;
   }
 }
 
-console.log(`server bundle: ${join(outputRoot, "server.mjs")}`);
+function readJson(path) {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function licenseText(root) {
+  for (const name of ["LICENSE", "LICENSE.md", "LICENSE.txt", "LICENCE", "COPYING", "NOTICE"]) {
+    const path = join(root, name);
+    if (!existsSync(path)) continue;
+    const text = readFileSync(path, "utf8");
+    return text.length > 200_000 ? `${text.slice(0, 200_000)}\n\n[license text truncated]\n` : text;
+  }
+  return "";
+}
+
+const packages = new Map();
+for (const input of Object.keys(result.metafile.inputs)) {
+  if (!input.startsWith("node_modules") && !input.startsWith(`node_modules${sep}`)) continue;
+  const root = findPackageRoot(input);
+  if (!root) continue;
+  const manifest = readJson(join(root, "package.json"));
+  if (!manifest?.name || !manifest.version) continue;
+  if (manifest.name.startsWith("@hearth/") || manifest.name === "hearth") continue;
+  const key = `${manifest.name}@${manifest.version}`;
+  if (packages.has(key)) continue;
+  packages.set(key, {
+    name: manifest.name,
+    version: manifest.version,
+    license: typeof manifest.license === "string" ? manifest.license : "see license text",
+    text: licenseText(root)
+  });
+}
+
+const sorted = [...packages.values()].sort((a, b) => a.name.localeCompare(b.name));
+const noticeLines = [
+  "Hearth bundled third-party notices",
+  "",
+  "This file covers JavaScript packages bundled into resources/server/server.mjs.",
+  "Node.js and npm retain their own license files under resources/.",
+  ""
+];
+for (const item of sorted) {
+  noticeLines.push("=".repeat(78));
+  noticeLines.push(`${item.name} ${item.version}`);
+  noticeLines.push(`License: ${item.license}`);
+  noticeLines.push("");
+  noticeLines.push(item.text.trim() || "No license file was shipped with this package.");
+  noticeLines.push("");
+}
+writeFileSync(join(resourcesRoot, "THIRD_PARTY_NOTICES.txt"), `${noticeLines.join("\n")}\n`, "utf8");
+
+const serverSize = statSync(join(outputRoot, "server.mjs")).size;
+console.log(`server bundle: ${(serverSize / 1048576).toFixed(2)} MiB`);
+console.log(`pdf worker:   ${(statSync(join(outputRoot, "pdf.worker.mjs")).size / 1048576).toFixed(2)} MiB`);
+console.log(`notices:      ${sorted.length} packages`);

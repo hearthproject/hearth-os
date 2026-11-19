@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import { join } from "node:path";
 import JSZip from "jszip";
 import { describe, expect, it } from "vitest";
 import { extractSourceBytes, UnsupportedSourceFormatError } from "./extractors.ts";
@@ -45,6 +46,18 @@ describe("source extractors", () => {
     expect(result.markdown).toContain("## 第 1 页");
     expect(result.markdown).toContain("Hello PDF");
     expect(result.coverage.pages).toBe(1);
+  });
+  it("extracts PDF text with staged pdfjs assets", async () => {
+    const previous = process.env.HEARTH_PDF_ASSETS;
+    process.env.HEARTH_PDF_ASSETS = join(process.cwd(), "node_modules", "pdfjs-dist");
+    try {
+      const result = await extractSourceBytes(makePdf("Hello PDF assets"), "assets.pdf");
+      expect(result.markdown).toContain("Hello PDF assets");
+      expect(result.coverage.pages).toBe(1);
+    } finally {
+      if (previous === undefined) delete process.env.HEARTH_PDF_ASSETS;
+      else process.env.HEARTH_PDF_ASSETS = previous;
+    }
   });
 
   it("rejects legacy formats instead of claiming they were read", async () => {

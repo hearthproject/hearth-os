@@ -1,4 +1,5 @@
-import { extname } from "node:path";
+import { existsSync } from "node:fs";
+import { extname, join } from "node:path";
 import * as cheerio from "cheerio";
 import {
   AlignmentType,
@@ -162,9 +163,28 @@ function extractCsv(text: string, fileName: string): ExtractionResult {
   return finish(markdown, fileName.replace(/\.[^.]+$/, ""), gaps, limited.length + 1);
 }
 
+function pdfAssetUrl(root: string | undefined, folder: string): string | null {
+  if (!root) return null;
+  const path = join(root, folder);
+  if (!existsSync(path)) return null;
+  const normalized = path.replace(/\\/g, "/");
+  return normalized.endsWith("/") ? normalized : `${normalized}/`;
+}
+
 async function extractPdf(bytes: Uint8Array, fileName: string): Promise<ExtractionResult> {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  const loading = pdfjs.getDocument({ data: new Uint8Array(bytes), disableFontFace: true, useWorkerFetch: false });
+  const assets = process.env.HEARTH_PDF_ASSETS;
+  const cMapUrl = pdfAssetUrl(assets, "cmaps");
+  const standardFontDataUrl = pdfAssetUrl(assets, "standard_fonts");
+  const wasmUrl = pdfAssetUrl(assets, "wasm");
+  const loading = pdfjs.getDocument({
+    data: new Uint8Array(bytes),
+    disableFontFace: true,
+    useWorkerFetch: false,
+    ...(cMapUrl ? { cMapUrl } : {}),
+    ...(standardFontDataUrl ? { standardFontDataUrl } : {}),
+    ...(wasmUrl ? { wasmUrl } : {})
+  });
   const document = await loading.promise;
   const gaps: string[] = [];
   const parts: string[] = [];

@@ -12,6 +12,6 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
-    sourcemap: true
+    sourcemap: process.env.HEARTH_SOURCEMAP === "1"
   }
 });
