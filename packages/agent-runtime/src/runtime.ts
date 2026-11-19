@@ -1,6 +1,9 @@
+import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import type { RunUsage } from "@hearth/core";
 import { compactAgentMessages, compactAgentMessagesWithSummary } from "./compaction.ts";
+import { createAgentState, progressSummary } from "./harness/file-state.ts";
+import { todoReminder } from "./harness/todo.ts";
 import type {
   AgentCheckpoint,
   AgentUsage,
@@ -8,7 +11,9 @@ import type {
   AgentRunResult,
   AgentRunStatus,
   AgentRuntimeOptions,
+  AgentTool,
   AgentToolCall,
+  AgentToolContext,
   AgentToolResult,
   RuntimeEvent
 } from "./types.ts";
@@ -44,12 +49,14 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   let emptyTurns = 0;
   let missingFinishTurns = 0;
   let finishRejections = 0;
-  let lastToolSignature: string | null = null;
-  let repeatedToolCalls = 0;
+  let sameProgressCount = 0;
+  let lastProgressHash: string | null = null;
   let budgetReminderSent = false;
+  let compactions = 0;
   const deniedPaths = new Map<string, number>();
   const startedAt = Date.now();
   const signal = options.signal ?? new AbortController().signal;
+  const state = options.state ?? createAgentState(options.workspaceRoot);
 
   const emit = (event: RuntimeEvent): void => options.onEvent?.(event);
   const aborted = (): boolean => signal.aborted;
@@ -61,6 +68,9 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
           contextWindowTokens: force ? 1 : options.contextWindowTokens,
           reserveTokens: force ? 0 : options.contextReserveTokens ?? Math.max(16_000, Math.floor(options.contextWindowTokens * 0.15)),
           ...(options.recentContextTokens !== undefined ? { recentTokens: options.recentContextTokens } : {}),
+          keepRecentToolOutputs: options.keepRecentToolOutputs ?? 0,
+          stateSummary: progressSummary(state.progress),
+          ...(options.projectInstructions ? { projectInstructions: options.projectInstructions } : {}),
           signal
         }, options.summarizeContext ? async (omitted, signal) => {
           const result = await options.summarizeContext!(omitted, signal);
@@ -73,11 +83,22 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
           }
           return result;
         } : undefined)
-      : compactAgentMessages(messages);
+      : compactAgentMessages(messages, {
+          keepRecentToolOutputs: options.keepRecentToolOutputs ?? 0,
+          stateSummary: progressSummary(state.progress),
+          ...(options.projectInstructions ? { projectInstructions: options.projectInstructions } : {})
+        });
     // Output trimming applies even when history summarization is unnecessary.
     messages.splice(0, messages.length, ...compacted.messages);
     if (!compacted.compacted) return false;
+    compactions += 1;
     emit({ type: "compacted", before: compacted.before, after: compacted.after });
+    emit({
+      type: "context.watermark",
+      estimatedTokens: Number("beforeTokens" in compacted ? compacted.beforeTokens : 0),
+      usedTokens: totalTokens(),
+      compactions
+    });
     if ("summary" in compacted && typeof compacted.summary === "string") summary = compacted.summary;
     await checkpoint("compaction");
     return true;
@@ -117,6 +138,16 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
 
   while (turns < options.budget.maxTurns) {
     if (aborted()) return finish("cancelled", "任务已取消");
+
+    if (options.steering) {
+      const pending = options.steering();
+      for (const message of pending) messages.push(message);
+    }
+
+    if (turns > 0 && turns % 6 === 0) {
+      const reminder = todoReminder(state.todos);
+      if (reminder) messages.push({ role: "user", content: reminder });
+    }
 
     const elapsed = Date.now() - startedAt;
     if (elapsed > options.budget.maxDurationMs) {
@@ -227,15 +258,9 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       emit({ type: "tool.started", turn: turns, call });
 
       const signature = toolSignature(call);
-      repeatedToolCalls = signature === lastToolSignature ? repeatedToolCalls + 1 : 0;
-      lastToolSignature = signature;
 
       let result: AgentToolResult = { content: `未知或未授权工具：${call.name}`, isError: true };
-      if (repeatedToolCalls >= 2) {
-        return finish("failed", "模型连续重复相同工具调用，已停止以避免死循环");
-      } else if (repeatedToolCalls === 1) {
-        result = { content: `检测到相同的工具调用 ${call.name} 和参数。该调用已跳过；请检查上一步结果，改用不同参数或继续推进。`, isError: true };
-      } else if (tool) {
+      if (tool) {
         let authorized = true;
         if (options.authorizeTool) {
           try {
@@ -251,12 +276,14 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         }
         if (authorized) {
           try {
-            result = await tool.execute(call.arguments, {
+            result = await executeToolWithTimeout(tool, call, {
               workspaceRoot: options.workspaceRoot,
               outDir: options.outDir,
               permissions: options.permissions,
-              signal
-            });
+              signal,
+              state,
+              fullAccess: options.isFullPermission?.() === true
+            }, options.toolTimeoutMs ?? 120_000, signal);
           } catch (error) {
             result = { content: `工具执行失败：${errorMessage(error)}`, isError: true };
           }
@@ -273,6 +300,24 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         result = { ...result, content: `${result.content}\n当前产物输出目录：${options.outDir}。请使用当前目录；更换工具或路径分隔符不会扩大权限。` };
       }
       emit({ type: "tool.finished", turn: turns, call, result, durationMs: Date.now() - toolStartedAt });
+      const progressHash = `${signature}|${result.isError === true}|${createHash("sha1").update(result.content).digest("hex")}`;
+      sameProgressCount = progressHash === lastProgressHash ? sameProgressCount + 1 : 0;
+      lastProgressHash = progressHash;
+      if (sameProgressCount >= 4) {
+        emit({ type: "notice", message: "检测到连续相同工具调用和结果。请不要重复同一调用；重新读取相关文件、缩小验证范围或改变策略。" });
+        messages.push({ role: "user", content: "连续多次工具调用和结果完全相同。请停止重复，重新阅读错误信息并换一种做法；如果被环境阻塞，请调用 finish_task 说明阻塞原因。" });
+      }
+      if (sameProgressCount >= 5) {
+        return finish("failed", "模型连续多次产生重复相同工具调用和结果，已停止以避免死循环");
+      }
+      emit({
+        type: "progress.updated",
+        filesRead: state.progress.filesRead.length,
+        filesModified: state.progress.filesModified.length,
+        commands: state.progress.commands.length,
+        tests: state.progress.tests.length,
+        todosOpen: state.todos.filter((todo) => todo.status !== "completed").length
+      });
       if (result.usage) {
         addUsage(usage, result.usage);
         emit({ type: "usage", usage: { ...usage } });
@@ -303,7 +348,8 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
               workspaceRoot: options.workspaceRoot,
               outDir: options.outDir,
               permissions: options.permissions,
-              signal
+              signal,
+              state
             });
           } catch (error) {
             issue = `交付物自检失败：${errorMessage(error)}`;
@@ -322,6 +368,12 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         summary = (result.summary ?? result.content).trim() || "任务完成";
         await checkpoint("final");
         return finish("completed", summary, result.outputs ?? []);
+      }
+      if (result.action === "plan") {
+        const plan = (result.summary ?? result.question ?? result.content).trim() || "计划已生成，等待确认";
+        summary = plan;
+        await checkpoint("plan");
+        return finish("waiting_input", plan, result.outputs ?? [], plan);
       }
       if (result.action === "ask_user") {
         if (options.isFullPermission?.()) {
@@ -372,6 +424,34 @@ function addUsage(target: RunUsage, value: AgentUsage): void {
   target.cacheWriteInputTokens += (Number.isFinite(value.cacheWriteInputTokens) ? Math.max(0, value.cacheWriteInputTokens ?? 0) : 0);
   target.outputTokens += (Number.isFinite(value.outputTokens) ? Math.max(0, value.outputTokens ?? 0) : 0);
   target.reasoningOutputTokens += (Number.isFinite(value.reasoningOutputTokens) ? Math.max(0, value.reasoningOutputTokens ?? 0) : 0);
+}
+
+async function executeToolWithTimeout(
+  tool: AgentTool,
+  call: AgentToolCall,
+  context: AgentToolContext,
+  fallbackTimeoutMs: number,
+  parentSignal: AbortSignal
+): Promise<AgentToolResult> {
+  const timeoutMs = tool.definition.timeoutMs ?? fallbackTimeoutMs;
+  if (!timeoutMs || timeoutMs <= 0) return tool.execute(call.arguments, context);
+  const controller = new AbortController();
+  const onAbort = (): void => controller.abort();
+  if (parentSignal.aborted) controller.abort();
+  else parentSignal.addEventListener("abort", onAbort, { once: true });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error(`工具 ${call.name} 执行超时（${timeoutMs}ms）`));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([tool.execute(call.arguments, { ...context, signal: controller.signal }), timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    parentSignal.removeEventListener("abort", onAbort);
+  }
 }
 
 function toolSignature(call: AgentToolCall): string {
