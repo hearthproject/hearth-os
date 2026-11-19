@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import picomatch from "picomatch";
+import { RE2JS } from "re2js";
 
 export interface SearchOptions {
   pattern: string;
@@ -76,7 +77,7 @@ function searchWithJavaScript(options: SearchOptions): SearchResult {
   const start = resolve(root, options.path ?? ".");
   const include = normalizeGlobs(options.include);
   const exclude = normalizeGlobs(options.exclude);
-  const matcher = options.literal ? null : new RegExp(options.pattern, options.ignoreCase ? "i" : "");
+  const matcher = options.literal ? null : RE2JS.compile(options.pattern, options.ignoreCase ? RE2JS.CASE_INSENSITIVE : 0);
   const literal = options.literal ? (options.ignoreCase ? options.pattern.toLowerCase() : options.pattern) : "";
   const matches: SearchMatch[] = [];
   const maxResults = options.maxResults ?? 200;

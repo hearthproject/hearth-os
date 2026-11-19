@@ -9,6 +9,7 @@ import type { DocumentBlockInput, SpreadsheetSheetInput } from "./documents.ts";
 import type { AgentTool, AgentToolContext, AgentToolResult } from "./types.ts";
 import { fetchWebSnapshot } from "./web-fetch.ts";
 import { applyEdit, findEditMatch, normalizeFile, restoreFile } from "./harness/edit-match.ts";
+import { searchFiles } from "./harness/search.ts";
 import { hashContent, recordCommand, recordFileModified, recordFileRead, requireReadBeforeWrite } from "./harness/file-state.ts";
 import { rewindTool, snapshotBeforeMutation } from "./harness/snapshots.ts";
 import { killShellSession, runShellSession, shellOutput, shellSessionInfo, startShellSession } from "./harness/shell-session.ts";
@@ -185,9 +186,25 @@ const searchTextTool: AgentTool = {
     const target = resolveSafe(path, context.workspaceRoot, context.permissions.readRoots);
     assertReadable(target, context.permissions.readRoots);
     const maxResults = Math.min(MAX_SEARCH_RESULTS, Math.max(1, intArg(args, "maxResults", 50)));
-    const results: string[] = [];
-    search(target, query, maxResults, results);
-    return { content: results.length > 0 ? results.join("\n") : `没有找到包含“${query}”的内容` };
+    try {
+      const result = searchFiles({
+        pattern: stringArg(args, "query"),
+        root: context.workspaceRoot,
+        path: target,
+        literal: true,
+        ignoreCase: true,
+        maxResults,
+        timeoutMs: MAX_SCAN_MS
+      });
+      if (result.matches.length === 0) return { content: `没有找到包含“${stringArg(args, "query")}”的内容`, metadata: { truncated: result.truncated } };
+      const rendered = result.matches.map((match) => `${match.file}:${match.line}: ${match.text}`);
+      return {
+        content: `${rendered.join("\n")}${result.truncated ? `\n... 已达到 ${maxResults} 条上限` : ""}`,
+        metadata: { truncated: result.truncated }
+      };
+    } catch (error) {
+      throw new Error(`搜索失败：${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 };
 
@@ -264,29 +281,31 @@ const grepTool: AgentTool = {
     if (!existsSync(target)) throw new Error(`路径不存在：${path}`);
     const stat = lstatSync(target);
     if (!stat.isFile() && !stat.isDirectory()) throw new Error(`不是普通文件或目录：${path}`);
-    const includes = stringArrayArg(args, "include").map(toGlobMatcher);
-    const excludes = stringArrayArg(args, "exclude").map(toGlobMatcher);
+    const includes = stringArrayArg(args, "include");
+    const excludes = stringArrayArg(args, "exclude");
     const maxResults = Math.min(MAX_SEARCH_RESULTS, Math.max(1, intArg(args, "maxResults", 50)));
-    const expression = mode === "literal" ? RE2JS.quote(pattern) : pattern;
-    let regex: RE2JS;
+    let result;
     try {
-      regex = RE2JS.compile(expression, args.caseSensitive === true ? 0 : RE2JS.CASE_INSENSITIVE);
+      result = searchFiles({
+        pattern,
+        root: context.workspaceRoot,
+        path: target,
+        ...(includes.length ? { include: includes } : {}),
+        ...(excludes.length ? { exclude: excludes } : {}),
+        literal: mode === "literal",
+        ignoreCase: args.caseSensitive !== true,
+        maxResults,
+        timeoutMs: MAX_SCAN_MS
+      });
     } catch (error) {
       throw new Error(`无效的 RE2 正则：${error instanceof Error ? error.message : String(error)}`);
     }
-    const deadline = Date.now() + MAX_SCAN_MS;
-    const results: string[] = [];
-    walkFiles(target, deadline, (file) => {
-      const matchPath = stat.isFile() ? basename(file) : relative(target, file).replace(/\\/g, "/");
-      const name = basename(file);
-      if (includes.length > 0 && !includes.some((matcher) => matcher(matchPath) || matcher(name))) return true;
-      if (excludes.some((matcher) => matcher(matchPath) || matcher(name))) return true;
-      grepFile(file, context.workspaceRoot, regex, maxResults, results);
-      return results.length < maxResults;
-    });
-    results.sort((left, right) => left.localeCompare(right));
-    const suffix = results.length >= maxResults ? `\n... 已达到 ${maxResults} 条上限` : "";
-    return { content: results.length > 0 ? `${results.join("\n")}${suffix}` : `没有找到匹配“${pattern}”的内容` };
+    const rendered = result.matches.map((match) => `${match.file}:${match.line}: ${match.text}`).sort((left, right) => left.localeCompare(right));
+    const suffix = result.truncated ? `\n... 已达到 ${maxResults} 条上限（${result.backend}）` : "";
+    return {
+      content: rendered.length > 0 ? `${rendered.join("\n")}${suffix}` : `没有找到匹配“${pattern}”的内容`,
+      metadata: { truncated: result.truncated }
+    };
   }
 };
 
