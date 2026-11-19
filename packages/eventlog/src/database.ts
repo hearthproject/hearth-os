@@ -1697,6 +1697,10 @@ export class HearthStore {
     ).run(key, value, updatedAt);
   }
 
+  resetKnowledgeIndex(): void {
+    this.db.exec("DELETE FROM knowledge_sync_jobs; DELETE FROM knowledge_map; DELETE FROM knowledge_state;");
+  }
+
   getAppSetting(key: string): string | null {
     const row = this.db.prepare("SELECT value FROM app_settings WHERE key = ?").get(key) as DbRow | undefined;
     return row ? String(row.value) : null;

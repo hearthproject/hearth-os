@@ -146,13 +146,19 @@ export class KnowledgeSyncService {
     if (!cronMatches(settings.write.reindexCron, now)) return false;
     const today = now.toISOString().slice(0, 10);
     if (this.store.knowledgeStateGet("last_reindex_date") === today) return false;
+    return this.reindexNow();
+  }
+
+  async reindexNow(): Promise<boolean> {
+    const settings = this.settings.get();
+    if (!settings.enabled) return false;
     try {
       const client = this.clientFactory(settings);
       await Promise.all([
         client.reindex("viking://resources/hearth", { mode: "vectors_only", wait: false, recursive: true }),
         client.reindex("viking://user/default", { mode: "vectors_only", wait: false, recursive: true })
       ]);
-      this.store.knowledgeStateSet("last_reindex_date", today);
+      this.store.knowledgeStateSet("last_reindex_date", this.clock().toISOString().slice(0, 10));
       return true;
     } catch {
       return false;

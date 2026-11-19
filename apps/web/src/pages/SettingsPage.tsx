@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   Bell,
   Bot,
+  Brain,
   CheckCircle2,
   Cpu,
   Database,
@@ -43,9 +44,10 @@ import type {
 import { ProactiveSettingsPanel } from "../components/ProactiveSettingsPanel.tsx";
 import { ExecutorSettingsPanel } from "../components/ExecutorSettingsPanel.tsx";
 import { FeishuSettingsPanel } from "../components/FeishuSettingsPanel.tsx";
+import { KnowledgeSettingsPanel } from "../components/KnowledgeSettingsPanel.tsx";
 import { desktopNotificationsEnabled, requestDesktopPermission, setDesktopNotificationsEnabled } from "../lib/notifications.ts";
 
-type SettingsTab = "executors" | "models" | "projects" | "extensions" | "proactive" | "automation" | "connections" | "context" | "data";
+type SettingsTab = "executors" | "models" | "projects" | "extensions" | "proactive" | "automation" | "knowledge" | "connections" | "context" | "data";
 
 interface ProfileDraft {
   name: string;
@@ -66,6 +68,7 @@ const TABS: Array<{ id: SettingsTab; label: string; hint: string; icon: typeof C
   { id: "extensions", label: "扩展", hint: "本地 MCP 服务器与网页搜索", icon: PlugZap },
   { id: "proactive", label: "主动", hint: "提醒预算、安静时段与触发器", icon: Bell },
   { id: "automation", label: "记忆与技能", hint: "自动运行状态，无需手工管理", icon: Sparkles },
+  { id: "knowledge", label: "知识库", hint: "OpenViking 语义索引与写回", icon: Brain },
   { id: "connections", label: "连接", hint: "飞书消息入口与外部账户", icon: Link2 },
   { id: "context", label: "上下文", hint: "接管策略、指标与清理", icon: Bot },
   { id: "data", label: "数据", hint: "SQLite、目录结构与迁移记录", icon: Database }
@@ -156,6 +159,7 @@ export function SettingsPage() {
       {tab === "extensions" && <ExtensionsTab />}
       {tab === "proactive" && <ProactiveTab />}
       {tab === "automation" && <AutomationTab />}
+      {tab === "knowledge" && <KnowledgeSettingsPanel />}
       {tab === "connections" && <ConnectionsTab />}
       {tab === "context" && <ContextTab />}
       {tab === "data" && <DataTab />}

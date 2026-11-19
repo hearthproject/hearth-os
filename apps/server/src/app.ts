@@ -73,7 +73,8 @@ import { StandingIntentError, StandingIntentService } from "./standing-intents.t
 import { SyncError, SyncService } from "./sync.ts";
 import { SecretBox } from "./secrets.ts";
 import { KnowledgeRecallService } from "./knowledge/recall.ts";
-import { KnowledgeSettingsStore } from "./knowledge/settings.ts";
+import { KnowledgeClient } from "./knowledge/client.ts";
+import { KnowledgeSettingsError, KnowledgeSettingsStore, type KnowledgeSettingsPatch } from "./knowledge/settings.ts";
 import { KnowledgeSyncService } from "./knowledge/sync.ts";
 import { McpServerError, McpServerService } from "./mcp-servers.ts";
 
@@ -1600,8 +1601,102 @@ export async function buildServer(options: BuildServerOptions = {}) {
     return { settings, hermes: executorHealth("hermes") };
   });
 
-  app.post("/api/hermes/probe", async () => {
-    const settings = executorSettingsStore.load();
+  app.get("/api/knowledge/status", async () => {
+    const view = knowledgeSettings.view();
+    const settings = knowledgeSettings.get();
+    const jobs = {
+      pending: store.listKnowledgeJobs({ status: "pending", limit: 1000 }).length,
+      running: store.listKnowledgeJobs({ status: "running", limit: 1000 }).length,
+      failed: store.listKnowledgeJobs({ status: "failed", limit: 1000 }).length,
+      dead: store.listKnowledgeJobs({ status: "dead", limit: 1000 }).length
+    };
+    let health: { ok: boolean; latencyMs: number; version: string | null; authMode: string | null; detail: string | null };
+    if (settings.enabled) {
+      try {
+        health = await new KnowledgeClient(settings).health();
+      } catch (error) {
+        health = {
+          ok: false, latencyMs: 0, version: null, authMode: null,
+          detail: error instanceof Error ? error.message : String(error)
+        };
+      }
+    } else {
+      health = { ok: false, latencyMs: 0, version: null, authMode: null, detail: "未启用" };
+    }
+    return {
+      settings: view,
+      health,
+      jobs,
+      lastReconcileAt: store.knowledgeStateGet("last_full_reconcile_at"),
+      lastReindexDate: store.knowledgeStateGet("last_reindex_date")
+    };
+  });
+
+  app.patch("/api/knowledge/settings", async (request, reply) => {
+    try {
+      return { settings: knowledgeSettings.update((request.body ?? {}) as KnowledgeSettingsPatch) };
+    } catch (error) {
+      if (error instanceof KnowledgeSettingsError) {
+        return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+      }
+      throw error;
+    }
+  });
+
+  app.post("/api/knowledge/test", async () => {
+    const settings = knowledgeSettings.get();
+    try {
+      const client = new KnowledgeClient(settings);
+      const health = await client.health();
+      const hits = health.ok
+        ? await client.find({ query: "Hearth", limit: 3, timeoutMs: settings.recall.timeoutMs, targetUri: "viking://resources/hearth" })
+        : [];
+      return { health, hits: hits.length };
+    } catch (error) {
+      return { health: { ok: false, latencyMs: 0, version: null, authMode: null, detail: error instanceof Error ? error.message : String(error) }, hits: 0 };
+    }
+  });
+
+  app.post("/api/knowledge/sync", async () => ({ result: await knowledgeSync.flush(50) }));
+
+  app.post("/api/knowledge/reconcile", async () => ({ result: await knowledgeSync.reconcile() }));
+
+  app.post("/api/knowledge/reindex", async () => ({ ok: await knowledgeSync.reindexNow() }));
+
+  app.get("/api/knowledge/search", async (request, reply) => {
+    const query = request.query as { q?: string; uri?: string };
+    if (!query.q?.trim()) return reply.code(400).send({ error: "INVALID_QUERY", message: "缺少 q 参数" });
+    try {
+      const hits = await new KnowledgeClient(knowledgeSettings.get()).find({
+        query: query.q,
+        limit: 10,
+        timeoutMs: 5000,
+        ...(query.uri ? { targetUri: query.uri } : {})
+      });
+      return { hits };
+    } catch (error) {
+      return reply.code(502).send({ error: "KNOWLEDGE_SEARCH_FAILED", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.delete("/api/knowledge/index", async (request, reply) => {
+    const body = (request.body ?? {}) as { confirm?: string };
+    if (body.confirm !== "DELETE") {
+      return reply.code(400).send({ error: "CONFIRM_REQUIRED", message: "危险操作，请在请求体传 confirm=DELETE" });
+    }
+    const settings = knowledgeSettings.get();
+    try {
+      const client = new KnowledgeClient(settings);
+      await client.remove("viking://resources/hearth", { recursive: true });
+      await client.remove("viking://user/default", { recursive: true });
+      store.resetKnowledgeIndex();
+      return { ok: true };
+    } catch (error) {
+      return reply.code(502).send({ error: "KNOWLEDGE_CLEAR_FAILED", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/hermes/probe", async () => {    const settings = executorSettingsStore.load();
     clearHermesHealthCache(executorRuntimeSettings(settings, "hermes").command?.trim() || settings.hermesCommand);
     clearExecutorHealthCache("hermes");
     const binding = modelRegistry.bindingViews().find((item) => item.executorId === "hermes");

@@ -8932,3 +8932,34 @@ body.modal-open {
 .chat-mail-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 12px; }
 .chat-mail-footer span { font-size: 12px; opacity: .7; }
 .chat-mail-footer button { flex-shrink: 0; }
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--gap-2);
+  margin-top: var(--gap-3);
+}
+
+.metric-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+}
+
+.metric-card span {
+  font-size: var(--fs-12);
+  color: var(--ink-tertiary);
+}
+
+.metric-card strong {
+  font-size: var(--fs-20);
+  color: var(--ink);
+}
+
+.metric-card.warn strong {
+  color: var(--risk);
+}
