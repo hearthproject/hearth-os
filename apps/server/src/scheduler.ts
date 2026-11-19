@@ -47,7 +47,9 @@ import type { McpServerService } from "./mcp-servers.ts";
 import { DEFAULT_RUN_BUDGET, nativePermissionsFor, runNativeTask } from "./native-executor.ts";
 import { ContextBroker } from "./context-broker.ts";
 import type { KnowledgeRecallService } from "./knowledge/recall.ts";
+import type { KnowledgeSettingsStore } from "./knowledge/settings.ts";
 import type { KnowledgeSyncService } from "./knowledge/sync.ts";
+import { createKnowledgeTools } from "./knowledge/tools.ts";
 import { OntologyService } from "./ontology.ts";
 import { createPersonalReadTools } from "./personal-tools.ts";
 import { createMailTools } from "./mail-tools.ts";
@@ -133,6 +135,7 @@ export interface SchedulerOptions {
   completionValidators?: Record<string, GoalValidatorRunner> | undefined;
   contextBroker?: ContextBroker | undefined;
   knowledge?: KnowledgeRecallService | undefined;
+  knowledgeSettings?: KnowledgeSettingsStore | undefined;
   knowledgeSync?: KnowledgeSyncService | undefined;
   ontologyWriter?: OntologyWriter | undefined;
 }
@@ -169,6 +172,7 @@ export class HearthScheduler {
   private readonly context: ContextService;
   private readonly contextBroker: ContextBroker | undefined;
   private readonly knowledge: KnowledgeRecallService | undefined;
+  private readonly knowledgeSettings: KnowledgeSettingsStore | undefined;
   private readonly knowledgeSync: KnowledgeSyncService | undefined;
   private readonly ontology: OntologyService;
   private readonly ontologyWriter: OntologyWriter;
@@ -237,6 +241,7 @@ export class HearthScheduler {
     this.context = options.context ?? new ContextService(this.service, options.contextBlobRoot ?? CONTEXT_BLOB_DIR);
     this.contextBroker = options.contextBroker;
     this.knowledge = options.knowledge;
+    this.knowledgeSettings = options.knowledgeSettings;
     this.knowledgeSync = options.knowledgeSync;
     this.ontology = new OntologyService(this.service);
     this.ontologyWriter = options.ontologyWriter ?? new OntologyWriter(this.service, this.ontology);
@@ -1612,6 +1617,9 @@ export class HearthScheduler {
         }
       }
       if (executorId === "native") {
+        if (this.knowledge?.isEnabled() && this.knowledgeSettings) {
+          extraNativeTools.push(...createKnowledgeTools({ settings: this.knowledgeSettings }));
+        }
         if (this.mcpServers) {
           try {
             extraNativeTools.push(...createMcpTools(this.mcpServers));
@@ -2745,7 +2753,10 @@ export class HearthScheduler {
       `- 期望产物：${expectedOutputs.join("、")}`,
       `- 任务：${task.title}`,
       "",
-      "请先核对工作区和产物哈希，再从“下一步”继续执行；不要重复已经产生外部副作用的动作。" + permissionNote
+      "请先核对工作区和产物哈希，再从“下一步”继续执行；不要重复已经产生外部副作用的动作。" + permissionNote,
+      ...(packet.vikingRefs && packet.vikingRefs.length > 0
+        ? ["", "## 可读取的知识库资料", ...packet.vikingRefs.map((uri) => `- ${uri}`)]
+        : [])
       ].join("\n")
     };
   }

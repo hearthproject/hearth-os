@@ -2283,6 +2283,7 @@ export interface HandoffPacket {
   omittedHistory: string[];
   redaction: HandoffRedaction;
   verification: HandoffVerification;
+  vikingRefs?: string[];
 }
 
 export interface HandoffRedaction {

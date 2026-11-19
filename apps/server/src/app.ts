@@ -1119,6 +1119,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
         skills,
         worktrees,
         knowledge,
+        knowledgeSettings,
         knowledgeSync,
         attachmentRoot,
         executorSettingsPath,

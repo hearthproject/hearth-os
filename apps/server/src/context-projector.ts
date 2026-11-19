@@ -77,6 +77,10 @@ export class ContextProjector {
     const permissions = effectivePermissions(task, input.toExecutor, this.context.settings().allowCodexNetwork);
     const doNotRepeat = this.doNotRepeatFor(task.id);
     const now = new Date().toISOString();
+    const vikingRefs = [
+      this.service.store.knowledgeMapGet(task.id)?.uri,
+      task.projectId ? this.service.store.knowledgeMapGet(task.projectId)?.uri : null
+    ].filter((uri): uri is string => Boolean(uri));
     return {
       handoffId: "pending",
       taskId: task.id,
@@ -105,7 +109,8 @@ export class ContextProjector {
         status: "pending",
         checkedAt: null,
         evidenceRefs: []
-      }
+      },
+      ...(vikingRefs.length > 0 ? { vikingRefs } : {})
     };
   }
 
