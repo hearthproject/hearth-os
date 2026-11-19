@@ -4,12 +4,10 @@ import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
   ArrowRight,
-  Check,
   CheckCircle2,
   Cpu,
   KeyRound,
   Loader2,
-  ShieldCheck,
   Sparkles,
   X
 } from "lucide-react";
@@ -17,7 +15,7 @@ import { api } from "../lib/api.ts";
 import type { ModelProtocol, ModelProviderPreset } from "../lib/types.ts";
 import { HearthMark } from "../components/HearthMark.tsx";
 
-const STEPS = ["接入模型", "检查执行器", "自动与主动", "开始使用"];
+const STEPS = ["模型", "执行器", "偏好", "完成"];
 
 interface ModelDraft {
   providerId: string;
@@ -214,11 +212,8 @@ export function OnboardingPage() {
       <div className="wizard-card">
         <header className="wizard-head">
           <div className="wizard-brand">
-            <HearthMark size={28} />
-            <div>
-              <strong>Hearth</strong>
-              <small>把第一件事交给它</small>
-            </div>
+            <HearthMark size={24} />
+            <strong>Hearth</strong>
           </div>
           {skipButton}
         </header>
@@ -226,7 +221,6 @@ export function OnboardingPage() {
         <ol className="wizard-steps" aria-label="设置步骤">
           {STEPS.map((label, index) => (
             <li key={label} className={`${index === step ? "active" : ""} ${index < step ? "done" : ""}`}>
-              <span className="wizard-step-dot">{index < step ? <Check size={12} /> : index + 1}</span>
               <span>{label}</span>
             </li>
           ))}
@@ -235,9 +229,7 @@ export function OnboardingPage() {
         <main className="wizard-body">
           {step === 0 && (
             <section className="wizard-panel">
-              <span className="eyebrow">第一步</span>
-              <h1>先让 Hearth 能说话</h1>
-              <p className="wizard-lead">选一个模型服务商，填入 API Key。保存后会自动设为聊天模型，并绑定 Hearth 原生执行器。</p>
+              <h1>模型</h1>
 
               <div className="wizard-provider-grid">
                 {(registryQuery.data?.presets ?? []).map((preset) => (
@@ -249,7 +241,6 @@ export function OnboardingPage() {
                     title={preset.note}
                   >
                     <strong>{preset.name}</strong>
-                    <small>{preset.protocol}</small>
                   </button>
                 ))}
               </div>
@@ -273,19 +264,13 @@ export function OnboardingPage() {
                 <button className="ghost-button" onClick={() => void testConnection()} disabled={busy !== null || !modelReady}>
                   {busy === "test" ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />} 测试连接
                 </button>
-                <span className="wizard-hint"><ShieldCheck size={13} /> Key 只保存在本机 SQLite，加密存储，界面只显示掩码。</span>
               </div>
-              {configured && (
-                <p className="wizard-note"><CheckCircle2 size={14} /> 当前已有聊天模型；只改想改的字段，Key 留空即可。</p>
-              )}
             </section>
           )}
 
           {step === 1 && (
             <section className="wizard-panel">
-              <span className="eyebrow">第二步</span>
-              <h1>执行器检查</h1>
-              <p className="wizard-lead">Hearth 原生执行器已经随聊天模型就绪。Codex、Hermes 等外部执行器可以稍后在设置里接入。</p>
+              <h1>执行器</h1>
 
               <div className="wizard-executor-list">
                 {(["native", "codex", "hermes"] as const).map((id) => {
@@ -293,74 +278,57 @@ export function OnboardingPage() {
                   if (!executor) return null;
                   const healthy = executor.health.canRun;
                   return (
-                    <article key={id} className={`wizard-executor ${id === "native" ? "featured" : ""}`}>
+                    <article key={id} className="wizard-executor">
                       <span className={`status-dot ${healthy ? "online" : "offline"}`} />
                       <div>
-                        <strong>{executor.name}{id === "native" ? " · 推荐" : ""}</strong>
+                        <strong>{executor.name}</strong>
                         <small>{healthy ? "已就绪" : executor.health.issues.join("；") || "暂未就绪"}</small>
                       </div>
-                      <span className={`status-chip ${healthy ? "ok" : "warn"}`}>{healthy ? "可用" : "未就绪"}</span>
                     </article>
                   );
                 })}
               </div>
 
               {!nativeReady && (
-                <p className="wizard-note warn"><Cpu size={14} /> 原生执行器还需要模型绑定。保存模型后通常会自动完成；如果仍不可用，可以到执行器设置里手动绑定。</p>
+                <p className="wizard-note warn"><Cpu size={14} /> 原生执行器还需要模型绑定。</p>
               )}
 
               <div className="wizard-inline-actions">
                 <button className="ghost-button" onClick={() => void executorsQuery.refetch()} disabled={executorsQuery.isFetching}>
                   {executorsQuery.isFetching ? <Loader2 size={14} className="spin" /> : <Cpu size={14} />} 重新检测
                 </button>
-                <button className="ghost-button mostly-ghost" onClick={() => navigate("/settings")}>管理全部执行器</button>
               </div>
             </section>
           )}
 
           {step === 2 && (
             <section className="wizard-panel">
-              <span className="eyebrow">第三步</span>
-              <h1>让它自动记住并变熟练</h1>
-              <p className="wizard-lead">记忆和技能会在后台自动整理，不需要确认。你只需要决定是否接收主动提醒。</p>
+              <h1>偏好</h1>
 
               <div className="wizard-preferences">
                 <label className="wizard-toggle">
                   <input type="checkbox" checked={proactive} onChange={(event) => setProactive(event.target.checked)} />
                   <span>
                     <strong>主动提醒</strong>
-                    <small>只在任务需要你确认、失败或临近截止时出现。默认每天最多 5 条，22:00–08:00 静默。</small>
                   </span>
                 </label>
               </div>
-
-              <p className="wizard-note"><KeyRound size={14} /> 自动记忆与技能无需手工管理；提醒预算和安静时段仍可在“设置 → 主动”里调整。</p>
             </section>
           )}
 
           {step === 3 && (
-            <section className="wizard-panel wizard-finish">
-              <span className="eyebrow">最后一步</span>
-              <h1>可以开始了</h1>
-              <p className="wizard-lead">Hearth 会先回答问题；需要动手的任务会进入任务页，外部动作仍然要经过你的审批。</p>
+            <section className="wizard-panel">
+              <h1>完成</h1>
 
               <div className="wizard-summary">
-                <SummaryRow ok={configured} label="聊天模型" value={configured ? `${draft.providerName} · ${draft.model}` : "尚未配置，可稍后补上"} />
-                <SummaryRow ok={nativeReady} label="原生执行器" value={nativeReady ? "已就绪" : "未就绪，可到设置里检查"} />
+                <SummaryRow ok={configured} label="聊天模型" value={configured ? `${draft.providerName} · ${draft.model}` : "尚未配置"} />
+                <SummaryRow ok={nativeReady} label="原生执行器" value={nativeReady ? "已就绪" : "未就绪"} />
                 <SummaryRow ok label="记忆与技能" value="后台自动运行" />
                 <SummaryRow ok label="主动提醒" value={proactive ? "已开启" : "保持关闭"} />
               </div>
 
-              <div className="wizard-tip">
-                <Sparkles size={16} />
-                <div>
-                  <strong>第一件事可以很小</strong>
-                  <p>比如“整理这周的会议记录”“分析一个网址并给出要点”，或者让 Hearth 帮你写一个批量重命名脚本。</p>
-                </div>
-              </div>
-
               {!configured && (
-                <p className="wizard-note warn"><X size={14} /> 还没有可用的聊天模型。可以返回上一步配置，或者先跳过，在设置里随时补上。</p>
+                <p className="wizard-note warn"><X size={14} /> 还没有可用的聊天模型，可以先跳过，在设置里补上。</p>
               )}
             </section>
           )}
@@ -373,10 +341,9 @@ export function OnboardingPage() {
             <ArrowLeft size={14} /> 上一步
           </button>
           <div className="wizard-footer-right">
-            <span className="wizard-footer-hint">{step === 0 ? "保存后可随时更换" : step === 3 ? "之后都能在设置里修改" : "大约还需要 1 分钟"}</span>
             <button className="primary-button" onClick={next} disabled={busy !== null || (step === 0 && !modelReady)}>
               {busy === "save" || busy === "preferences" || busy === "finish" ? <Loader2 size={15} className="spin" /> : null}
-              {step === 3 ? "进入 Hearth" : step === 0 ? "保存并继续" : "继续"}
+              {step === 3 ? "完成" : step === 0 ? "保存并继续" : "继续"}
               {step < 3 && <ArrowRight size={14} />}
             </button>
           </div>
