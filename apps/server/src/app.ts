@@ -1170,6 +1170,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     approvals,
     cancelTask: scheduler ? (taskId: string) => scheduler.cancel(taskId) : undefined,
     memory,
+    knowledge,
     personal: { ontology, mentions, broker: contextBroker, writer: ontologyWriter }
   });
   registerEvalRoutes(app, {
