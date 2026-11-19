@@ -72,6 +72,7 @@ const readFileTool: AgentTool = {
   definition: {
     name: "read_file",
     description: "读取工作区内一个文本文件的内容。返回带行号的文本，适合查看输入材料、代码和已有产物。",
+    executionMode: "parallel",
     parameters: {
       type: "object",
       properties: {
@@ -108,6 +109,7 @@ const readDocumentTool: AgentTool = {
   definition: {
     name: "read_document",
     description: "读取 PDF、DOCX、XLSX、CSV、JSON、HTML 或文本资料并返回 Markdown。支持页码、工作表和覆盖缺口说明。",
+    executionMode: "parallel",
     parameters: {
       type: "object",
       properties: {
@@ -142,6 +144,7 @@ const listFilesTool: AgentTool = {
   definition: {
     name: "list_files",
     description: "列出工作区内的文件和目录。用于了解工作区结构，默认跳过依赖和构建目录。",
+    executionMode: "parallel",
     parameters: {
       type: "object",
       properties: {
@@ -168,6 +171,7 @@ const searchTextTool: AgentTool = {
   definition: {
     name: "search_text",
     description: "在工作区文本文件中搜索关键词，返回文件路径、行号和匹配行。",
+    executionMode: "parallel",
     parameters: {
       type: "object",
       properties: {
@@ -212,6 +216,7 @@ const globTool: AgentTool = {
   definition: {
     name: "glob",
     description: "按 glob 模式查找工作区文件，返回相对工作区路径。自动跳过依赖、构建和隐藏目录，适合先定位代码或资料。",
+    executionMode: "parallel",
     parameters: {
       type: "object",
       properties: {
@@ -254,6 +259,7 @@ const grepTool: AgentTool = {
   definition: {
     name: "grep",
     description: "用 RE2 兼容正则或字面量搜索工作区文本文件，支持 include/exclude glob 过滤。返回相对工作区路径、行号和匹配行。",
+    executionMode: "parallel",
     parameters: {
       type: "object",
       properties: {
@@ -772,6 +778,7 @@ const fetchUrlTool: AgentTool = {
   definition: {
     name: "fetch_url",
     description: "读取一个已授权域名下的网页并返回 Markdown。服务端会校验重定向、DNS 和内网地址；网络默认关闭。",
+    executionMode: "parallel",
     parameters: {
       type: "object",
       properties: {
