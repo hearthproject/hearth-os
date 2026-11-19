@@ -11,7 +11,6 @@ import {
   CheckCircle2,
   Copy,
   CornerDownRight,
-  Cpu,
   FileText,
   Loader2,
   Paperclip,
@@ -20,6 +19,7 @@ import {
   Settings2,
   ShieldAlert,
   ShieldCheck,
+  SlidersHorizontal,
   Trash2,
   X
 } from "lucide-react";
@@ -76,8 +76,10 @@ export function ChatPage() {
   const [followUpMode, setFollowUpMode] = useState<TaskFollowUpMode>("queue");
   const [followUpNotice, setFollowUpNotice] = useState<string | null>(null);
   const [draftSettings, setDraftSettings] = useState<ConversationSettings | null>(null);
+  const [optionsOpen, setOptionsOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const optionsRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const conversationIdRef = useRef<string | null>(conversationId);
@@ -165,6 +167,22 @@ export function ChatPage() {
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
+  useEffect(() => {
+    if (!optionsOpen) return;
+    function onPointerDown(event: PointerEvent) {
+      if (!optionsRef.current?.contains(event.target as Node)) setOptionsOpen(false);
+    }
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") setOptionsOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [optionsOpen]);
+
   function resetConversationView(id: string | null) {
     setRouteMode("auto");
     setConversationId(id);
@@ -178,6 +196,7 @@ export function ChatPage() {
     setFollowUpTaskId(null);
     setFollowUpMode("queue");
     setFollowUpNotice(null);
+    setOptionsOpen(false);
     if (id) localStorage.setItem("hearth.conversation", id);
     else localStorage.removeItem("hearth.conversation");
   }
@@ -303,6 +322,7 @@ export function ChatPage() {
       setError(`${selectedExecutorName} 当前不可用，不会自动切换执行器。${selectedExecutor?.health.issues.join("；") ?? "请到设置中测试可用性。"}`);
       return;
     }
+    setOptionsOpen(false);
     if (followUpTarget) {
       if (!text) return;
       if (attachments.length > 0) {
@@ -494,67 +514,98 @@ export function ChatPage() {
         </div>
 
         <div className="composer-wrap">
-          <div className="composer-toolbar">
-            <label className="executor-picker" title="决定继续聊天还是创建执行任务">
-              <select aria-label="消息处理方式" value={routeMode} disabled={sending} onChange={(event) => {
-                setRouteMode(event.target.value as "auto" | "chat" | "task");
-                setFollowUpTaskId(null);
-              }}>
-                <option value="auto">自动判断</option>
-                <option value="chat">继续聊天（不派任务）</option>
-                <option value="task">派为任务（携带上下文）</option>
-              </select>
-            </label>
-            <label className="executor-picker" title="选择本对话锁定的执行器；不会自动切换到其他执行器">
-              <Cpu size={15} />
-              <span className={`status-dot ${selectedExecutorId ? selectedExecutorUnavailable ? "offline" : "online" : executorReady ? "online" : "offline"}`} />
-              <select
-                value={selectedExecutorId ?? ""}
-                onChange={(event) => chooseExecutor(event.target.value as ExecutorId | "")}
+          <div className="composer-tools">
+            <div className="composer-options-wrap" ref={optionsRef}>
+              <button
+                type="button"
+                className="composer-options-trigger"
+                onClick={() => setOptionsOpen((open) => !open)}
                 disabled={!settingsReady}
-                aria-label="锁定执行器"
+                aria-expanded={optionsOpen}
+                aria-haspopup="dialog"
+                aria-label="会话选项"
               >
-                <option value="">自动匹配（按任务）</option>
-                {visibleExecutorIds.map((id) => {
-                  const view = executorViews.find((executor) => executor.id === id);
-                  return (
-                    <option key={id} value={id}>
-                      {view?.name ?? executorLabel(id)}{executorAvailability[id] ? "" : " · 当前不可用"}
-                    </option>
-                  );
-                })}
-              </select>
-            </label>
-            <span className="composer-toolbar-sep" aria-hidden="true" />
-            <label className="executor-picker" title="控制原生执行器的分析深度和执行预算；适用于新建任务">
-              <select
-                aria-label="原生执行深度"
-                value={conversationSettings.executionMode ?? "standard"}
-                disabled={!settingsReady}
-                onChange={(event) => patchSettings({ executionMode: event.target.value as "quick" | "standard" | "deep" })}
-              >
-                <option value="quick">快速</option>
-                <option value="standard">标准</option>
-                <option value="deep">深入</option>
-              </select>
-            </label>
-            <button
-              type="button"
-              className={`permission-toggle ${conversationSettings.approvalMode}`}
-              onClick={toggleApprovalMode}
-              disabled={!settingsReady}
-              title={conversationSettings.approvalMode === "full"
-                ? "完全权限：所有动作自动决策并执行，点击切回必要审批"
-                : "必要审批：只有不可逆的外部动作才询问你，点击切换为完全权限"}
-            >
-              {conversationSettings.approvalMode === "full" ? <ShieldAlert size={15} /> : <ShieldCheck size={15} />}
-              <span>{conversationSettings.approvalMode === "full" ? "完全权限" : "必要审批"}</span>
-            </button>
+                <SlidersHorizontal size={15} />
+                <span>选项</span>
+              </button>
+              {optionsOpen && (
+                <div className="composer-options" role="dialog" aria-label="会话选项">
+                  <label className="composer-option">
+                    <span>处理方式</span>
+                    <select aria-label="消息处理方式" value={routeMode} disabled={sending} onChange={(event) => {
+                      setRouteMode(event.target.value as "auto" | "chat" | "task");
+                      setFollowUpTaskId(null);
+                    }}>
+                      <option value="auto">自动判断</option>
+                      <option value="chat">继续聊天</option>
+                      <option value="task">派为任务</option>
+                    </select>
+                  </label>
+                  <label className="composer-option">
+                    <span>执行器</span>
+                    <select
+                      value={selectedExecutorId ?? ""}
+                      onChange={(event) => chooseExecutor(event.target.value as ExecutorId | "")}
+                      disabled={!settingsReady}
+                      aria-label="锁定执行器"
+                    >
+                      <option value="">自动匹配</option>
+                      {visibleExecutorIds.map((id) => {
+                        const view = executorViews.find((executor) => executor.id === id);
+                        return (
+                          <option key={id} value={id}>
+                            {view?.name ?? executorLabel(id)}{executorAvailability[id] ? "" : " · 当前不可用"}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </label>
+                  <label className="composer-option">
+                    <span>深度</span>
+                    <select
+                      aria-label="原生执行深度"
+                      value={conversationSettings.executionMode ?? "standard"}
+                      disabled={!settingsReady}
+                      onChange={(event) => patchSettings({ executionMode: event.target.value as "quick" | "standard" | "deep" })}
+                    >
+                      <option value="quick">快速</option>
+                      <option value="standard">标准</option>
+                      <option value="deep">深入</option>
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    className={`composer-option approval ${conversationSettings.approvalMode}`}
+                    onClick={toggleApprovalMode}
+                    disabled={!settingsReady}
+                    title={conversationSettings.approvalMode === "full"
+                      ? "完全权限：所有动作自动决策并执行，点击切回必要审批"
+                      : "必要审批：只有不可逆的外部动作才询问你，点击切换为完全权限"}
+                  >
+                    <span>权限</span>
+                    <strong>
+                      {conversationSettings.approvalMode === "full" ? <ShieldAlert size={15} /> : <ShieldCheck size={15} />}
+                      {conversationSettings.approvalMode === "full" ? "完全权限" : "必要审批"}
+                    </strong>
+                  </button>
+                  {selectedExecutorUnavailable && (
+                    <p className="composer-options-note" title={selectedExecutor?.health.issues.join("；")}>
+                      {selectedExecutorName} 当前不可用：{selectedExecutor?.health.issues[0] ?? "请到设置中测试可用性"}。不会自动切换执行器
+                    </p>
+                  )}
+                  {allExecutorsOff && (
+                    <p className="composer-options-note">所有执行器都已关闭，请先选择一个可用执行器</p>
+                  )}
+                  {followUpBlockedByAttachments && (
+                    <p className="composer-options-note">补充到任务暂不支持附件</p>
+                  )}
+                </div>
+              )}
+            </div>
             {followUpTasks.length > 0 && (
-              <>
-                <span className="composer-toolbar-sep" aria-hidden="true" />
-                <label className={`followup-picker ${followUpTarget ? "active" : ""}`} title="把这条消息补充到已有任务，而不是新建任务">
-                  <CornerDownRight size={15} />
+              <div className="composer-followup">
+                <label className={`followup-chip ${followUpTarget ? "active" : ""}`} title="把这条消息补充到已有任务，而不是新建任务">
+                  <CornerDownRight size={14} />
                   <select
                     value={followUpTarget?.id ?? ""}
                     onChange={(event) => {
@@ -565,7 +616,7 @@ export function ChatPage() {
                     }}
                     aria-label="补充到任务"
                   >
-                    <option value="">新消息</option>
+                    <option value="">补充任务</option>
                     {followUpTasks.map((task) => (
                       <option key={task.id} value={task.id}>{task.title}</option>
                     ))}
@@ -585,18 +636,7 @@ export function ChatPage() {
                     <span>{followUpMode === "steer" ? "中止本轮" : "轮后继续"}</span>
                   </button>
                 )}
-              </>
-            )}
-            {selectedExecutorUnavailable && (
-              <span className="composer-toolbar-note" title={selectedExecutor?.health.issues.join("；")}>
-                {selectedExecutorName} 当前不可用：{selectedExecutor?.health.issues[0] ?? "请到设置中测试可用性"}。不会自动切换执行器
-              </span>
-            )}
-            {allExecutorsOff && (
-              <span className="composer-toolbar-note">所有执行器都已关闭，请先选择一个可用执行器</span>
-            )}
-            {followUpBlockedByAttachments && (
-              <span className="composer-toolbar-note">补充到任务暂不支持附件</span>
+              </div>
             )}
           </div>
           {followUpNotice && (

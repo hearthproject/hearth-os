@@ -99,10 +99,10 @@ async function runTest(page, name, fn) {
 }
 
 async function waitForComposerReady(page) {
-  await page.locator('select[aria-label="锁定执行器"]').waitFor({ state: "visible", timeout: 15_000 });
+  await page.locator(".composer-options-trigger").waitFor({ state: "visible", timeout: 15_000 });
   await page.waitForFunction(() => {
-    const select = document.querySelector('select[aria-label="锁定执行器"]');
-    return select instanceof HTMLSelectElement && !select.disabled;
+    const button = document.querySelector(".composer-options-trigger");
+    return button instanceof HTMLButtonElement && !button.disabled;
   }, null, { timeout: 15_000 });
 }
 
@@ -240,6 +240,23 @@ async function main() {
     assert.match(await page.title(), /Hearth/);
     assert.equal(await page.locator(".message-list").count(), 1, "chat canvas should render");
     assert.ok(await page.locator('textarea[aria-label="消息"]').isVisible(), "composer should be ready");
+  });
+
+  await runTest(page, "opens and closes conversation options", async () => {
+    await openNewChat(page, baseUrl);
+    const trigger = page.locator(".composer-options-trigger");
+    const panel = page.locator(".composer-options");
+    await trigger.click();
+    await panel.waitFor({ timeout: 15_000 });
+    assert.equal(await trigger.getAttribute("aria-expanded"), "true");
+    assert.equal(await panel.getByRole("combobox").count(), 3, "route, executor and depth should live in the panel");
+    await page.keyboard.press("Escape");
+    await panel.waitFor({ state: "hidden", timeout: 15_000 });
+    assert.equal(await trigger.getAttribute("aria-expanded"), "false");
+    await trigger.click();
+    await panel.waitFor({ timeout: 15_000 });
+    await page.locator(".chat-header").click();
+    await panel.waitFor({ state: "hidden", timeout: 15_000 });
   });
 
   await runTest(page, "shows a connection warning only when something is unavailable", async () => {
@@ -431,6 +448,8 @@ async function main() {
 
   await runTest(page, "uses the global preferred executor for a new chat", async () => {
     await newChat(page, baseUrl);
+    await page.locator(".composer-options-trigger").click();
+    await page.locator(".composer-options").waitFor({ timeout: 15_000 });
     assert.equal(await page.locator('select[aria-label="锁定执行器"]').inputValue(), "native");
     const defaults = await api(baseUrl, "/api/conversation-defaults");
     assert.equal(defaults.body.settings.preferredExecutorId, "native");
