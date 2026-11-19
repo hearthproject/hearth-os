@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { compactAgentMessages, compactAgentMessagesWithSummary } from "./compaction.ts";
 import { runAgent, zeroUsage } from "./runtime.ts";
 import { createBuiltinTools, defaultTaskPermissions } from "./tools.ts";
-import type { AgentCheckpoint, AgentModel, AgentModelTurn, AgentToolCall } from "./types.ts";
+import type { AgentCheckpoint, AgentModel, AgentModelTurn, AgentTool, AgentToolCall } from "./types.ts";
 
 describe("agent runtime", () => {
   const roots: string[] = [];
@@ -405,6 +405,40 @@ describe("agent runtime", () => {
     expect(result.usage.inputTokens).toBeGreaterThanOrEqual(40);
     expect(summaries[0]).toBeGreaterThan(0);
     expect(checkpoints.some((checkpoint) => checkpoint.kind === "compaction" && checkpoint.summary === "超限摘要")).toBe(true);
+  });
+
+  it("runs parallel-safe tools in one batch and preserves result order", async () => {
+    const root = workspace(roots);
+    let active = 0;
+    let maxActive = 0;
+    const parallelTool = (name: string): AgentTool => ({
+      definition: { name, description: name, parameters: {}, executionMode: "parallel" },
+      execute: async () => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 30));
+        active -= 1;
+        return { content: name };
+      }
+    });
+    const result = await runAgent({
+      model: fakeModel([
+        turn("", [call("read_a", {}), call("read_b", {})]),
+        turn("", [call("finish_task", { summary: "done" })])
+      ]),
+      tools: [parallelTool("read_a"), parallelTool("read_b"), createBuiltinTools().find((tool) => tool.definition.name === "finish_task")!],
+      goal: "parallel",
+      systemPrompt: "system",
+      budget: { maxTurns: 4, maxToolCalls: 10, maxTokens: 10_000, maxDurationMs: 30_000 },
+      permissions: { tools: ["read_a", "read_b", "finish_task"], readRoots: [], writeRoots: [], networkHosts: [] },
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      maxParallelTools: 2
+    });
+    expect(result.status).toBe("completed");
+    expect(maxActive).toBeGreaterThan(1);
+    const outputs = result.messages.filter((message) => message.role === "tool").map((message) => message.content);
+    expect(outputs.slice(0, 2)).toEqual(["read_a", "read_b"]);
   });
 
   it("stops after repeated identical tool calls and results", async () => {

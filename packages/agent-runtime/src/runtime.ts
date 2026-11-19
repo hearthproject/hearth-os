@@ -136,6 +136,57 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     }
   }
 
+  async function executeParallelBatch(calls: AgentToolCall[]): Promise<Map<string, { result: AgentToolResult; durationMs: number }> | null> {
+    const limit = options.maxParallelTools ?? 1;
+    if (limit < 2 || calls.length < 2 || calls.length > limit) return null;
+    const entries = calls.map((call) => ({ call, tool: toolMap.get(call.name) }));
+    if (!entries.every((entry) => entry.tool?.definition.executionMode === "parallel")) return null;
+    if (toolCalls + calls.length > options.budget.maxToolCalls || aborted()) return null;
+
+    emit({ type: "tool.batch.started", turn: turns, calls, parallel: true });
+    const started = Date.now();
+    const results = new Map<string, { result: AgentToolResult; durationMs: number }>();
+    const runnable: Array<{ call: AgentToolCall; tool: AgentTool }> = [];
+    for (const entry of entries) {
+      if (!entry.tool) continue;
+      let authorized = true;
+      if (options.authorizeTool) {
+        try {
+          const authorization = await options.authorizeTool({ call: entry.call, definition: entry.tool.definition });
+          authorized = authorization.allowed;
+          if (!authorization.allowed) {
+            results.set(entry.call.id, { result: { content: `用户尚未允许这个工具：${"reason" in authorization ? authorization.reason : "未授权"}`, isError: true }, durationMs: 0 });
+          }
+        } catch (error) {
+          authorized = false;
+          results.set(entry.call.id, { result: { content: `工具审批失败，已跳过：${errorMessage(error)}`, isError: true }, durationMs: 0 });
+        }
+      }
+      if (authorized) runnable.push({ call: entry.call, tool: entry.tool });
+    }
+
+    await Promise.all(runnable.map(async ({ call, tool }) => {
+      const entryStarted = Date.now();
+      let result: AgentToolResult;
+      try {
+        result = await executeToolWithTimeout(tool, call, {
+          workspaceRoot: options.workspaceRoot,
+          outDir: options.outDir,
+          permissions: options.permissions,
+          signal,
+          state,
+          fullAccess: options.isFullPermission?.() === true
+        }, options.toolTimeoutMs ?? 120_000, signal);
+      } catch (error) {
+        result = { content: `工具执行失败：${errorMessage(error)}`, isError: true };
+      }
+      results.set(call.id, { result, durationMs: Date.now() - entryStarted });
+    }));
+
+    emit({ type: "tool.batch.finished", turn: turns, calls, parallel: true, durationMs: Date.now() - started });
+    return results;
+  }
+
   while (turns < options.budget.maxTurns) {
     if (aborted()) return finish("cancelled", "任务已取消");
 
@@ -243,6 +294,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     }
     emptyTurns = 0;
     missingFinishTurns = 0;
+    const parallelResults = await executeParallelBatch(turn.toolCalls);
 
     for (const call of turn.toolCalls) {
       if (aborted()) return finish("cancelled", "任务已取消");
@@ -254,6 +306,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
 
       toolCalls += 1;
       const tool = toolMap.get(call.name);
+      const precomputed = parallelResults?.get(call.id);
       const toolStartedAt = Date.now();
       emit({ type: "tool.started", turn: turns, call });
 
@@ -261,6 +314,9 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
 
       let result: AgentToolResult = { content: `未知或未授权工具：${call.name}`, isError: true };
       if (tool) {
+        if (precomputed) {
+          result = precomputed.result;
+        } else {
         let authorized = true;
         if (options.authorizeTool) {
           try {
@@ -288,6 +344,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
             result = { content: `工具执行失败：${errorMessage(error)}`, isError: true };
           }
         }
+        }
       }
 
       const deniedPath = result.isError ? /路径不在授权范围内[：:]\s*(.+)/.exec(result.content)?.[1]?.trim() : undefined;
@@ -299,7 +356,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         repeatedDenial = count >= 2;
         result = { ...result, content: `${result.content}\n当前产物输出目录：${options.outDir}。请使用当前目录；更换工具或路径分隔符不会扩大权限。` };
       }
-      emit({ type: "tool.finished", turn: turns, call, result, durationMs: Date.now() - toolStartedAt });
+      emit({ type: "tool.finished", turn: turns, call, result, durationMs: precomputed?.durationMs ?? (Date.now() - toolStartedAt) });
       const progressHash = `${signature}|${result.isError === true}|${createHash("sha1").update(result.content).digest("hex")}`;
       sameProgressCount = progressHash === lastProgressHash ? sameProgressCount + 1 : 0;
       lastProgressHash = progressHash;
