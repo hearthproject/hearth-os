@@ -6,10 +6,8 @@ import { abbreviateHash, formatBytes, formatDate, formatTime } from "../lib/form
 import { APPROVAL_STATUS_LABELS, approvalKindLabel, isToolApproval } from "../lib/labels.ts";
 import type { ApprovalRecord, EffectRecord } from "../lib/types.ts";
 import { EffectStatusTag } from "./StatusPill.tsx";
-import { useViewMode } from "../lib/view-mode.tsx";
 
 export function ApprovalCard({ approval, effect }: { approval: ApprovalRecord; effect?: EffectRecord | undefined }) {
-  const { mode } = useViewMode();
   const queryClient = useQueryClient();
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,7 +35,6 @@ export function ApprovalCard({ approval, effect }: { approval: ApprovalRecord; e
   const impact = text(preview.impact);
   const undo = text(preview.undo);
   const isPending = approval.status === "pending";
-  const pro = mode === "pro";
 
   const decide = useMutation({
     mutationFn: (decision: "approve" | "reject") => api.decideApproval(approval.id, decision, approval.parameterHash),
@@ -165,29 +162,26 @@ export function ApprovalCard({ approval, effect }: { approval: ApprovalRecord; e
         </div>
       )}
 
-      {pro && (
-        <div className="approval-audit">
-          <dl className="kv-grid">
-            <div><dt>审批 ID</dt><dd className="mono select-all">{approval.id}</dd></div>
-            <div><dt>参数指纹</dt><dd className="mono select-all">{approval.parameterHash}</dd></div>
-            <div><dt>创建时间</dt><dd className="mono">{formatTime(approval.createdAt)}</dd></div>
-            <div><dt>决定时间</dt><dd className="mono">{formatDate(approval.decidedAt)}</dd></div>
-            <div><dt>关联外部动作</dt><dd className="mono select-all">{approval.effectId ?? "无"}</dd></div>
-          </dl>
-          <details className="raw-block">
-            <summary>核对 target 原文</summary>
-            <pre className="json-block">{JSON.stringify(approval.target, null, 2)}</pre>
-          </details>
-          <details className="raw-block">
-            <summary>核对 preview 原文</summary>
-            <pre className="json-block">{JSON.stringify(approval.preview, null, 2)}</pre>
-          </details>
-        </div>
-      )}
+      <p className="approval-binding">内容变化后必须重新确认 · 指纹 {abbreviateHash(approval.parameterHash, 12, 6)}</p>
 
-      {!pro && (
-        <p className="approval-binding">内容变化后必须重新确认 · 指纹 {abbreviateHash(approval.parameterHash, 12, 6)}</p>
-      )}
+      <details className="approval-audit">
+        <summary>审计信息</summary>
+        <dl className="kv-grid">
+          <div><dt>审批 ID</dt><dd className="mono select-all">{approval.id}</dd></div>
+          <div><dt>参数指纹</dt><dd className="mono select-all">{approval.parameterHash}</dd></div>
+          <div><dt>创建时间</dt><dd className="mono">{formatTime(approval.createdAt)}</dd></div>
+          <div><dt>决定时间</dt><dd className="mono">{formatDate(approval.decidedAt)}</dd></div>
+          <div><dt>关联外部动作</dt><dd className="mono select-all">{approval.effectId ?? "无"}</dd></div>
+        </dl>
+        <details className="raw-block">
+          <summary>核对 target 原文</summary>
+          <pre className="json-block">{JSON.stringify(approval.target, null, 2)}</pre>
+        </details>
+        <details className="raw-block">
+          <summary>核对 preview 原文</summary>
+          <pre className="json-block">{JSON.stringify(approval.preview, null, 2)}</pre>
+        </details>
+      </details>
     </section>
   );
 }

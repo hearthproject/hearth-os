@@ -42,7 +42,6 @@ import type {
   DeviceView,
   PairingRequestView
 } from "../lib/types.ts";
-import { useViewMode } from "../lib/view-mode.tsx";
 
 const CAPABILITY_ORDER: DeviceCapabilityKind[] = ["observe", "desktop.control", "ui.automation"];
 const PRESS_KEYS = ["Enter", "Tab", "Escape", "Ctrl+S"];
@@ -58,8 +57,6 @@ const COMMAND_KIND_LABELS: Record<string, string> = {
 
 export function DevicesPage() {
   const queryClient = useQueryClient();
-  const { mode } = useViewMode();
-  const pro = mode === "pro";
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -130,7 +127,7 @@ export function DevicesPage() {
       ) : devices.length === 0 && pendingPairings.length === 0 ? (
         <section className="panel">
           <EmptyState title="还没有桌面设备" body="在这台电脑的终端启动桌面助手，配对码会显示在终端里。" />
-          <HelperCommand pro={pro} />
+          <HelperCommand />
         </section>
       ) : (
         <>
@@ -167,7 +164,6 @@ export function DevicesPage() {
                 key={device.id}
                 device={device}
                 session={session}
-                pro={pro}
                 busy={busy}
                 perform={perform}
                 onRotate={() => void rotateDevice(device)}
@@ -175,7 +171,7 @@ export function DevicesPage() {
             );
           })}
 
-          {(devices.length > 0 || pro) && <HelperCommand pro={pro} />}
+          {devices.length > 0 && <HelperCommand />}
         </>
       )}
 
@@ -219,14 +215,12 @@ function PairingRow({
 function DevicePanel({
   device,
   session,
-  pro,
   busy,
   perform,
   onRotate
 }: {
   device: DeviceView;
   session: DesktopSessionView | null;
-  pro: boolean;
   busy: string | null;
   perform: (key: string, work: () => Promise<unknown>, message: string) => Promise<boolean>;
   onRotate: () => void;
@@ -298,7 +292,7 @@ function DevicePanel({
 
       {device.status !== "revoked" && (
         session ? (
-          <SessionPanel sessionView={session} observeApps={observeApps} pro={pro} busy={busy} perform={perform} />
+          <SessionPanel sessionView={session} observeApps={observeApps} busy={busy} perform={perform} />
         ) : (
           <div className="device-session-start">
             <div>
@@ -329,7 +323,10 @@ function DevicePanel({
         )
       )}
 
-      {pro && <DeviceAudit device={device} session={session} />}
+      <details className="device-details">
+        <summary>诊断</summary>
+        <DeviceAudit device={device} session={session} />
+      </details>
     </section>
   );
 }
@@ -392,13 +389,11 @@ function CapabilityRow({
 function SessionPanel({
   sessionView,
   observeApps,
-  pro,
   busy,
   perform
 }: {
   sessionView: DesktopSessionView;
   observeApps: string[];
-  pro: boolean;
   busy: string | null;
   perform: (key: string, work: () => Promise<unknown>, message: string) => Promise<boolean>;
 }) {
@@ -480,9 +475,10 @@ function SessionPanel({
               <MousePointerClick size={13} /> {targetMismatch ? "观察目标已切换，等待新截图后再操作。" : canAct ? "点击截图会在当前白名单应用中点按一次。" : "会话不在自动控制状态，截图仅供查看。"}
               <span>{frame.activeApp} · {frame.windowTitle || "未命名窗口"} · {formatDate(frame.capturedAt)}</span>
             </p>
-            {pro && (
+            <details className="device-details device-frame-details">
+              <summary>截图信息</summary>
               <p className="mono tiny device-frame-hash">frame {frame.id} · {frame.width}×{frame.height} · sha256 {abbreviateHash(frame.sha256)} · 到期 {formatDate(frame.expiresAt)}</p>
-            )}
+            </details>
           </>
         ) : (
           <div className="device-frame-empty">
@@ -527,51 +523,53 @@ function SessionPanel({
               )}>{keys}</button>
             ))}
           </div>
-          {pro && (
-            <>
-              <div className="device-action-row">
-                <label className="device-action-field">
-                  <span><Monitor size={13} /> 切换到应用</span>
-                  <input value={focusApp} onChange={(event) => setFocusApp(event.target.value)} placeholder={frame.activeApp} />
-                </label>
-                <button className="ghost-button" disabled={!canAct || !focusApp || busy !== null} onClick={() => void sendAction(
-                  { kind: "focus", frameId: frame.id, app: focusApp },
-                  "切换窗口已排队。"
-                )}>切换</button>
-              </div>
-              <div className="device-action-row device-uia-row">
-                <label className="device-action-field">
-                  <span>界面元素</span>
-                  <input value={uiaName} onChange={(event) => setUiaName(event.target.value)} placeholder="按钮或输入框名称" />
-                </label>
-                <label className="device-action-field compact">
-                  <span>控件类型</span>
-                  <select value={uiaType} onChange={(event) => setUiaType(event.target.value)}>
-                    {["Button", "MenuItem", "Edit", "ListItem", "TabItem", "Hyperlink", "CheckBox", "ComboBox", "TreeItem"].map((type) => <option key={type} value={type}>{type}</option>)}
-                  </select>
-                </label>
-                <button className="ghost-button" disabled={!canAct || !uiaName || busy !== null} onClick={() => void sendAction(
-                  { kind: "uia.invoke", frameId: frame.id, elementName: uiaName, controlType: uiaType },
-                  "界面调用已排队。"
-                )}><MousePointerClick size={14} /> 调用</button>
-                <label className="device-action-field">
-                  <span>写入值</span>
-                  <input value={uiaValue} onChange={(event) => setUiaValue(event.target.value)} maxLength={500} placeholder="只写草稿或筛选条件" />
-                </label>
-                <button className="ghost-button" disabled={!canAct || !uiaName || busy !== null} onClick={() => void sendAction(
-                  { kind: "uia.setvalue", frameId: frame.id, elementName: uiaName, value: uiaValue, controlType: uiaType },
-                  "界面写入已排队。"
-                )}>写入</button>
-              </div>
-            </>
-          )}
+          <details className="device-details device-advanced">
+            <summary>高级操作</summary>
+            <div className="device-action-row">
+              <label className="device-action-field">
+                <span><Monitor size={13} /> 切换到应用</span>
+                <input value={focusApp} onChange={(event) => setFocusApp(event.target.value)} placeholder={frame.activeApp} />
+              </label>
+              <button className="ghost-button" disabled={!canAct || !focusApp || busy !== null} onClick={() => void sendAction(
+                { kind: "focus", frameId: frame.id, app: focusApp },
+                "切换窗口已排队。"
+              )}>切换</button>
+            </div>
+            <div className="device-action-row device-uia-row">
+              <label className="device-action-field">
+                <span>界面元素</span>
+                <input value={uiaName} onChange={(event) => setUiaName(event.target.value)} placeholder="按钮或输入框名称" />
+              </label>
+              <label className="device-action-field compact">
+                <span>控件类型</span>
+                <select value={uiaType} onChange={(event) => setUiaType(event.target.value)}>
+                  {["Button", "MenuItem", "Edit", "ListItem", "TabItem", "Hyperlink", "CheckBox", "ComboBox", "TreeItem"].map((type) => <option key={type} value={type}>{type}</option>)}
+                </select>
+              </label>
+              <button className="ghost-button" disabled={!canAct || !uiaName || busy !== null} onClick={() => void sendAction(
+                { kind: "uia.invoke", frameId: frame.id, elementName: uiaName, controlType: uiaType },
+                "界面调用已排队。"
+              )}><MousePointerClick size={14} /> 调用</button>
+              <label className="device-action-field">
+                <span>写入值</span>
+                <input value={uiaValue} onChange={(event) => setUiaValue(event.target.value)} maxLength={500} placeholder="只写草稿或筛选条件" />
+              </label>
+              <button className="ghost-button" disabled={!canAct || !uiaName || busy !== null} onClick={() => void sendAction(
+                { kind: "uia.setvalue", frameId: frame.id, elementName: uiaName, value: uiaValue, controlType: uiaType },
+                "界面写入已排队。"
+              )}>写入</button>
+            </div>
+          </details>
         </div>
       )}
 
       {session.status === "taken_over" && (
         <p className="device-takeover-note">你正在操作这台设备。Hearth 不会发送输入；完成后点“交还”，系统会先重新观察。</p>
       )}
-      {pro && <DeviceCommands sessionView={sessionView} />}
+      <details className="device-details">
+        <summary>设备命令</summary>
+        <DeviceCommands sessionView={sessionView} />
+      </details>
     </div>
   );
 }
@@ -639,7 +637,7 @@ function DeviceAudit({ device, session }: { device: DeviceView; session: Desktop
   );
 }
 
-function HelperCommand({ pro }: { pro: boolean }) {
+function HelperCommand() {
   const isDesktop = window.hearthDesktop?.isDesktop === true || "__TAURI_INTERNALS__" in window;
   return (
     <div className="device-helper">
@@ -649,10 +647,8 @@ function HelperCommand({ pro }: { pro: boolean }) {
       </div>
       {isDesktop ? (
         <span className="subtle">请从系统托盘菜单启动“桌面助手”，按提示输入配对码。</span>
-      ) : pro ? (
-        <code>npm run helper:windows -- --apps notepad,calculator</code>
       ) : (
-        <span className="subtle">先把助手下载到同一台电脑，再输入配对码。</span>
+        <code>npm run helper:windows -- --apps notepad,calculator</code>
       )}
     </div>
   );
