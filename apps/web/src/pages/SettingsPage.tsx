@@ -3,17 +3,11 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
-  Bell,
-  Bot,
-  Brain,
   CheckCircle2,
   Cpu,
-  Database,
   FolderGit2,
   FolderTree,
   KeyRound,
-  Layers,
-  Link2,
   Loader2,
   Pencil,
   PlugZap,
@@ -61,17 +55,17 @@ interface ProfileDraft {
   apiKey: string;
 }
 
-const TABS: Array<{ id: SettingsTab; label: string; hint: string; icon: typeof Cpu }> = [
-  { id: "executors", label: "执行器", hint: "默认执行器、安装状态与模型绑定", icon: Cpu },
-  { id: "models", label: "模型", hint: "模型档案、聊天模型与连接测试", icon: Layers },
-  { id: "projects", label: "项目", hint: "本地 Git 项目与默认分支", icon: FolderGit2 },
-  { id: "extensions", label: "扩展", hint: "本地 MCP 服务器与网页搜索", icon: PlugZap },
-  { id: "proactive", label: "主动", hint: "提醒预算、安静时段与触发器", icon: Bell },
-  { id: "automation", label: "记忆与技能", hint: "自动运行状态，无需手工管理", icon: Sparkles },
-  { id: "knowledge", label: "知识库", hint: "OpenViking 语义索引与写回", icon: Brain },
-  { id: "connections", label: "连接", hint: "飞书消息入口与外部账户", icon: Link2 },
-  { id: "context", label: "上下文", hint: "接管策略、指标与清理", icon: Bot },
-  { id: "data", label: "数据", hint: "SQLite、目录结构与迁移记录", icon: Database }
+const TABS: Array<{ id: SettingsTab; label: string }> = [
+  { id: "executors", label: "执行器" },
+  { id: "models", label: "模型" },
+  { id: "projects", label: "项目" },
+  { id: "extensions", label: "扩展" },
+  { id: "proactive", label: "主动" },
+  { id: "automation", label: "记忆与技能" },
+  { id: "knowledge", label: "知识库" },
+  { id: "connections", label: "连接" },
+  { id: "context", label: "上下文" },
+  { id: "data", label: "数据" }
 ];
 
 function isSettingsTab(value: string | null): value is SettingsTab {
@@ -123,46 +117,37 @@ export function SettingsPage() {
 
   return (
     <div className="page settings-page">
-      <div className="page-head settings-hero">
-        <div>
-          <span className="eyebrow">本机控制台</span>
-          <h1>设置</h1>
-          <p className="page-meta">按“执行器 → 模型 → 项目 → 扩展 → 主动 → 记忆与技能 → 连接 → 上下文 → 数据”完成配置。密钥只保存在本机 SQLite，浏览器只能看到掩码。</p>
-        </div>
-        <div className="settings-defaults">
-          <strong>一等执行器</strong>
-          <span>DeepSeek Harness · Codex · Hearth 原生</span>
-          <small>失败后由 Hearth 当前聊天模型诊断，并按权限模式决定是否切换。</small>
-        </div>
-      </div>
+      <header className="settings-head">
+        <h1>设置</h1>
+      </header>
 
-      <nav className="settings-tabs" aria-label="设置分区">
-        {TABS.map((item) => {
-          const Icon = item.icon;
-          return (
+      <div className="settings-layout">
+        <nav className="settings-tabs" aria-label="设置分区">
+          {TABS.map((item) => (
             <button
               key={item.id}
               type="button"
               className={`settings-tab ${tab === item.id ? "active" : ""}`}
               onClick={() => selectTab(item.id)}
             >
-              <Icon size={18} />
-              <span><strong>{item.label}</strong><small>{item.hint}</small></span>
+              <strong>{item.label}</strong>
             </button>
-          );
-        })}
-      </nav>
+          ))}
+        </nav>
 
-      {tab === "executors" && <ExecutorsTab />}
-      {tab === "models" && <ModelsTab />}
-      {tab === "projects" && <ProjectsTab />}
-      {tab === "extensions" && <ExtensionsTab />}
-      {tab === "proactive" && <ProactiveTab />}
-      {tab === "automation" && <AutomationTab />}
-      {tab === "knowledge" && <KnowledgeSettingsPanel />}
-      {tab === "connections" && <ConnectionsTab />}
-      {tab === "context" && <ContextTab />}
-      {tab === "data" && <DataTab />}
+        <div className="settings-content">
+          {tab === "executors" && <ExecutorsTab />}
+          {tab === "models" && <ModelsTab />}
+          {tab === "projects" && <ProjectsTab />}
+          {tab === "extensions" && <ExtensionsTab />}
+          {tab === "proactive" && <ProactiveTab />}
+          {tab === "automation" && <AutomationTab />}
+          {tab === "knowledge" && <KnowledgeSettingsPanel />}
+          {tab === "connections" && <ConnectionsTab />}
+          {tab === "context" && <ContextTab />}
+          {tab === "data" && <DataTab />}
+        </div>
+      </div>
     </div>
   );
 }
@@ -176,7 +161,6 @@ function ExecutorsTab() {
   const registry = registryQuery.data;
   const executors = executorsQuery.data?.executors ?? [];
   const executorById = new Map(executors.map((executor) => [executor.id, executor]));
-  const onlineExecutorCount = executors.filter((executor) => executor.health.canRun).length;
   const readyBindingCount = registry?.bindings.filter(
     (binding) => binding.available && executorById.get(binding.executorId)?.health.canRun
   ).length ?? 0;
@@ -201,14 +185,6 @@ function ExecutorsTab() {
 
   return (
     <section className="settings-tab-panel">
-      <div className="settings-section-intro">
-        <div><h2>执行器</h2><p>先安装并检测执行器，再指定它使用哪个模型。外部执行器仍使用各自 CLI 的登录与沙箱。</p></div>
-        <span className={`status-chip ${onlineExecutorCount > 0 ? "ok" : "warn"}`}>
-          <span className={`status-dot ${onlineExecutorCount > 0 ? "online" : "offline"}`} />
-          {executorsQuery.isLoading ? "检测执行器中" : `${onlineExecutorCount} / ${executors.length} 个执行器可用`}
-        </span>
-      </div>
-
       <ExecutorSettingsPanel />
 
       <section className="panel settings-section">
@@ -440,11 +416,6 @@ function ModelsTab() {
 
   return (
     <section className="settings-tab-panel">
-      <div className="settings-section-intro">
-        <div><h2>模型</h2><p>一个模型档案只描述一个接口地址和模型。先建档案，再给聊天或其他执行器绑定。</p></div>
-        <span className={`status-chip ${registry?.chatConfigured ? "ok" : "warn"}`}>{registry?.chatConfigured ? "聊天模型已就绪" : "尚未配置聊天模型"}</span>
-      </div>
-
       <section className="panel settings-section">
         <div className="settings-body">
           <div className="section-heading">
@@ -579,14 +550,6 @@ function ProjectsTab() {
   const projects = projectsQuery.data?.projects ?? [];
   return (
     <section className="settings-tab-panel">
-      <div className="settings-section-intro">
-        <div>
-          <h2>本地项目</h2>
-          <p>注册本机 Git 仓库根目录后，本地项目任务默认由 Hearth 原生执行器在独立 Worktree 中运行。这里只登记仓库，不会复制或删除项目文件。</p>
-        </div>
-        <span className={`status-chip ${projectsQuery.isError ? "warn" : "ok"}`}>{projects.length} 个项目</span>
-      </div>
-
       <section className="panel settings-section">
         <div className="settings-body">
           <div className="section-heading"><div><h3>注册 Git 项目</h3><p>必须选择包含 <code>.git</code> 的仓库根目录；默认分支在当前仓库和 Worktree 中都必须存在。</p></div><FolderGit2 size={20} /></div>
@@ -745,14 +708,6 @@ function ExtensionsTab() {
   const servers = mcpQuery.data?.servers ?? [];
   return (
     <section className="settings-tab-panel">
-      <div className="settings-section-intro">
-        <div>
-          <h2>扩展</h2>
-          <p>MCP 只支持本机 stdio 启动；Hearth 不会继承模型密钥或其他父进程密钥。服务器环境值会加密保存，并在页面中只显示键名。</p>
-        </div>
-        <span className={`status-chip ${servers.some((server) => server.status === "ready") ? "ok" : "warn"}`}>{servers.length} 个 MCP 服务器</span>
-      </div>
-
       <section className="panel settings-section">
         <div className="settings-body">
           <div className="section-heading"><div><h3>添加本地 MCP 服务器</h3><p>命令直接以参数数组启动，不经过 shell。参数一行一个；环境变量一行一个 <code>KEY=VALUE</code>。</p></div><PlugZap size={20} /></div>
@@ -852,16 +807,6 @@ function ProactiveTab() {
 
   return (
     <section className="settings-tab-panel">
-      <div className="settings-section-intro">
-        <div>
-          <h2>主动服务</h2>
-          <p>系统只在需要你判断、授权或任务出问题时提醒。建议仍会回到普通任务和审批链，不会因为“主动”获得额外权限。</p>
-        </div>
-        <span className={`status-chip ${snapshotQuery.data?.settings.enabled ? "ok" : "warn"}`}>
-          {snapshotQuery.data?.settings.enabled ? "主动模式已开启" : "主动模式已关闭"}
-        </span>
-      </div>
-
       {snapshotQuery.isLoading && <InlineLoading text="正在读取主动设置" />}
       {snapshotQuery.isError && <p className="form-error">{snapshotQuery.error.message}</p>}
       {snapshotQuery.data && <ProactiveSettingsPanel snapshot={snapshotQuery.data} />}
@@ -896,13 +841,6 @@ function ProactiveTab() {
 function ConnectionsTab() {
   return (
     <section className="settings-tab-panel">
-      <div className="settings-section-intro">
-        <div>
-          <h2>连接</h2>
-          <p>把 Hearth 接到你已经在用的消息入口。所有外部动作仍然经过审批和回执，不会因为来自手机而获得额外权限。</p>
-        </div>
-        <span className="status-chip">长连接 · 本机发起</span>
-      </div>
       <FeishuSettingsPanel />
       <p className="settings-hint">下一步会加入邮件账户；当前邮件发送仍只写入本机发件箱。</p>
     </section>
@@ -970,11 +908,6 @@ function ContextTab() {
 
   return (
     <section className="settings-tab-panel">
-      <div className="settings-section-intro">
-        <div><h2>上下文</h2><p>所有执行器共享同一份上下文账本。切换执行器时传递摘要、产物、失败证据和未决问题，而不是各存一份历史。</p></div>
-        <span className={`status-chip ${form?.mode === "on" ? "ok" : "warn"}`}>{contextModeLabel(form?.mode)}</span>
-      </div>
-
       <div className="context-metrics settings-metric-grid">
         <Metric label="上下文条目" value={metrics ? formatNumber(metrics.ledger.items) : "—"} />
         <Metric label="自动接管" value={metrics ? formatNumber(metrics.handoffs.automatic) : "—"} />
@@ -1033,11 +966,6 @@ function DataTab() {
   const storage = storageQuery.data;
   return (
     <section className="settings-tab-panel">
-      <div className="settings-section-intro">
-        <div><h2>数据</h2><p>设置、模型档案、执行器绑定、任务、事件和上下文元数据统一写入 SQLite；大块正文放在受控 blob 目录。</p></div>
-        {storage && <span className="status-chip ok">SQLite schema v{storage.schemaVersion}</span>}
-      </div>
-
       {storageQuery.isLoading && <InlineLoading text="正在读取存储信息" />}
       {storage && (
         <>
@@ -1213,17 +1141,6 @@ function AutomationTab() {
 
   return (
     <section className="settings-tab-panel">
-      <div className="settings-section-intro">
-        <div>
-          <h2>记忆与技能</h2>
-          <p>任务结束后会自动提炼经历、启用记忆，并从成功任务中学习可复用技能。没有候选确认、试跑或晋升步骤。</p>
-        </div>
-        <span className={`status-chip ${memoryQuery.isError || methodsQuery.isError ? "warn" : "ok"}`}>
-          <span className={`status-dot ${memoryQuery.isError || methodsQuery.isError ? "offline" : "online"}`} />
-          全自动运行
-        </span>
-      </div>
-
       <section className="panel settings-section">
         <div className="settings-body">
           <dl className="settings-kv">
@@ -1308,11 +1225,4 @@ function bindingStatus(binding: ExecutorModelBindingView, health: ExecutorView["
     };
   }
   return { tone: "ok", dot: "online", label: "可执行", title: "模型档案与执行器都可用" };
-}
-
-function contextModeLabel(mode: ContextSettings["mode"] | undefined): string {
-  if (mode === "on") return "上下文已开启";
-  if (mode === "shadow") return "只诊断，不接管";
-  if (mode === "off") return "上下文已关闭";
-  return "读取中";
 }

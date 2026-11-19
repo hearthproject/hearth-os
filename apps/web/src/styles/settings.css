@@ -1,0 +1,236 @@
+/* Settings: a tab rail and one 760px form column. */
+
+.settings-page {
+  max-width: 1000px;
+}
+
+.settings-head {
+  margin-bottom: 24px;
+}
+
+.settings-head h1 {
+  margin: 0;
+  font-size: var(--fs-24);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 760px);
+  gap: 48px;
+  align-items: start;
+}
+
+.settings-tabs {
+  position: sticky;
+  top: 0;
+  display: flex;
+  width: auto;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.settings-tab {
+  display: flex;
+  width: 100%;
+  height: 32px;
+  align-items: center;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink-secondary);
+  font-size: var(--fs-12);
+  text-align: left;
+}
+
+.settings-tab strong {
+  font-weight: 500;
+}
+
+.settings-tab:hover {
+  background: var(--surface-sunk);
+  color: var(--ink);
+}
+
+.settings-tab.active {
+  background: var(--surface-sunk);
+  box-shadow: inset 2px 0 0 var(--ember);
+  color: var(--ink);
+}
+
+.settings-content {
+  min-width: 0;
+}
+
+.settings-content .panel,
+.settings-content .settings-section {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.settings-content .settings-section {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.settings-content .settings-section:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.settings-content .settings-body {
+  padding: 0;
+}
+
+.settings-content .section-heading {
+  align-items: flex-start;
+  margin: 0 0 14px;
+}
+
+.settings-content .section-heading h3 {
+  margin: 0;
+  font-size: var(--fs-13);
+  font-weight: 600;
+}
+
+.settings-content .section-heading p,
+.settings-content .settings-lead,
+.settings-content .settings-fold-copy span {
+  display: none;
+}
+
+.settings-content .settings-hint {
+  margin-top: 10px;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+}
+
+.settings-content .settings-hint svg {
+  display: none;
+}
+
+.settings-content .settings-split {
+  display: block;
+}
+
+.settings-content .settings-tab-panel {
+  display: block;
+}
+
+.settings-content .settings-fold-summary {
+  padding: 12px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+
+.settings-content .settings-fold-copy strong {
+  font-size: var(--fs-13);
+  font-weight: 500;
+}
+
+.settings-content .settings-actions {
+  margin-top: 16px;
+}
+
+.settings-content .model-list,
+.settings-content .binding-list,
+.settings-content .data-table-list {
+  border-top: 1px solid var(--line);
+}
+
+.settings-content .model-card,
+.settings-content .binding-row,
+.settings-content .migration-row,
+.settings-content .executor-card {
+  padding: 12px 0;
+  border: 0;
+  border-bottom: 1px solid var(--line-subtle);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.settings-content .executor-card {
+  padding: 14px 0;
+}
+
+.settings-content .provider-card {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+.settings-content .provider-card.active {
+  border-color: var(--ember);
+  background: var(--surface-sunk);
+}
+
+.settings-content .context-metrics,
+.settings-content .settings-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  margin-bottom: 28px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--line);
+}
+
+.settings-content .settings-metric-grid > div {
+  padding: 12px;
+  background: var(--surface);
+}
+
+.settings-content .settings-metric-grid > div span {
+  display: block;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+}
+
+.settings-content .settings-metric-grid > div strong {
+  display: block;
+  margin-top: 4px;
+  font-size: var(--fs-18);
+  font-weight: 500;
+}
+
+@media (max-width: 900px) {
+  .settings-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+  }
+
+  .settings-tabs {
+    position: static;
+    flex-direction: row;
+    gap: 2px;
+    overflow-x: auto;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .settings-tab {
+    width: auto;
+    flex: none;
+    white-space: nowrap;
+  }
+
+  .settings-tab.active {
+    box-shadow: inset 0 -2px 0 var(--ember);
+  }
+}
