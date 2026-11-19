@@ -193,6 +193,35 @@ export interface LocalProjectView extends LocalProject {
   error: string | null;
 }
 
+export const KNOWLEDGE_JOB_KINDS = ["memory", "task", "source", "project", "delete"] as const;
+export type KnowledgeJobKind = (typeof KNOWLEDGE_JOB_KINDS)[number];
+
+export const KNOWLEDGE_JOB_STATUSES = ["pending", "running", "done", "failed", "dead"] as const;
+export type KnowledgeJobStatus = (typeof KNOWLEDGE_JOB_STATUSES)[number];
+
+export interface KnowledgeSyncJob {
+  id: string;
+  kind: KnowledgeJobKind;
+  ref: string;
+  uri: string;
+  op: "write" | "delete";
+  contentHash: string | null;
+  status: KnowledgeJobStatus;
+  attempts: number;
+  nextAttemptAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KnowledgeMapEntry {
+  hearthId: string;
+  uri: string;
+  kind: string;
+  contentHash: string | null;
+  updatedAt: string;
+}
+
 export interface TaskWorktree {
   taskId: string;
   projectId: string;

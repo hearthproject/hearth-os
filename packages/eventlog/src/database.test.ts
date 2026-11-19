@@ -472,4 +472,33 @@ describe("HearthStore", () => {
     expect(store.getTask("task-legacy")?.permissions).toBeUndefined();
     store.close();
   });
+
+  it("tracks knowledge sync jobs, maps and state", () => {
+    const store = new HearthStore(":memory:");
+    const base = {
+      id: "kj-1", kind: "memory" as const, ref: "mem-1", uri: "viking://user/default/memories/1.md",
+      op: "write" as const, contentHash: "hash-1", status: "pending" as const, attempts: 0,
+      nextAttemptAt: null, lastError: null,
+      createdAt: "2026-11-19T00:00:00.000Z", updatedAt: "2026-11-19T00:00:00.000Z"
+    };
+    store.upsertKnowledgeJob(base);
+    const claimed = store.claimKnowledgeJobs(10, "2026-11-19T00:01:00.000Z");
+    expect(claimed).toHaveLength(1);
+    expect(claimed[0]?.status).toBe("running");
+
+    store.finishKnowledgeJob("kj-1", { status: "failed", attempts: 1, lastError: "503", nextAttemptAt: "2026-11-19T00:06:00.000Z" });
+    expect(store.listKnowledgeJobs({ status: "failed" })).toHaveLength(1);
+    expect(store.claimKnowledgeJobs(10, "2026-11-19T00:05:00.000Z")).toHaveLength(0);
+    const retried = store.claimKnowledgeJobs(10, "2026-11-19T00:07:00.000Z");
+    expect(retried[0]?.attempts).toBe(1);
+
+    store.knowledgeMapUpsert({ hearthId: "mem-1", uri: base.uri, kind: "memory", contentHash: "hash-1", updatedAt: base.updatedAt });
+    expect(store.knowledgeMapGet("mem-1")?.uri).toBe(base.uri);
+    store.knowledgeMapDelete("mem-1");
+    expect(store.knowledgeMapGet("mem-1")).toBeNull();
+
+    store.knowledgeStateSet("index_ready", "true");
+    expect(store.knowledgeStateGet("index_ready")).toBe("true");
+    store.close();
+  });
 });
