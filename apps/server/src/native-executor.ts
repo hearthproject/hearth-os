@@ -3,10 +3,16 @@ import { nativeTaskInstructions } from "./native-task-instructions.ts";
 import type { BudgetDimension, RunBudget, RunUsage, TaskPermissions, TaskProgressDetail, TaskRecord } from "@hearth/core";
 import { EXECUTION_PROFILES, NATIVE_TOKEN_CEILING } from "@hearth/core";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { isAbsolute, resolve, sep } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 import {
+  CODING_RUN_BUDGET,
+  codingFinishIssue,
+  codingHarnessEnabled,
+  codingSystemPrompt,
+  createAgentState,
   createBuiltinTools,
   defaultTaskPermissions,
+  resolveHarnessProfile,
   runAgent,
   zeroUsage,
   type AgentCheckpoint,
@@ -73,6 +79,14 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
   const screenshotTask = wantsScreenshot(`${options.task.title}\n${options.task.goal}`);
   const githubTask = wantsGithubAccess(`${options.task.title}\n${options.task.goal}`);
   const codeTask = wantsCodeExecution(`${options.task.title}\n${options.task.goal}`);
+  const profile = codingHarnessEnabled()
+    ? resolveHarnessProfile({
+        taskKind: options.task.taskKind,
+        hasRepository: existsSync(join(options.prepared.root, ".git")),
+        codeIntent: codeTask || githubTask
+      })
+    : "general";
+  const coding = profile === "coding";
   const permissions = options.permissions ?? defaultTaskPermissions({
     workspaceRoot: options.prepared.root,
     outDir: options.prepared.outDir,
@@ -83,12 +97,41 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
       ...(screenshotTask ? ["capture_screen"] : [])
     ]
   });
+  if (coding) {
+    permissions.tools = [
+      ...new Set([
+        ...permissions.tools,
+        "todo_write",
+        "todo_read",
+        "run_tests",
+        "diagnostics",
+        "submit_plan",
+        "rewind",
+        "shell_output",
+        "shell_kill"
+      ])
+    ];
+  }
 
-  const drafting = isTextDraftTask({ ...options.task, expectedOutputs: options.expectedOutputs });
-  const systemPrompt = nativeSystemPrompt(options.task, options.expectedOutputs, options.skillIndex);
+  const drafting = !coding && isTextDraftTask({ ...options.task, expectedOutputs: options.expectedOutputs });
+  const systemPrompt = coding
+    ? codingSystemPrompt({
+        workspaceRoot: options.prepared.root,
+        outDir: options.prepared.outDir,
+        permissions,
+        ...(options.skillIndex ? { skillIndex: options.skillIndex } : {}),
+        mode: "build",
+        extraInstructions: [
+          `Current task: ${options.task.title}`,
+          `Expected outputs: ${options.expectedOutputs.join(", ") || "(no explicit file)"}`,
+          `Task language: reply in the user's language; keep code, identifiers and commit messages in English.`
+        ]
+      })
+    : nativeSystemPrompt(options.task, options.expectedOutputs, options.skillIndex);
   const resume = options.resume ? refreshNativeResume(options.resume, systemPrompt, options.prompt, options.prepared.outDir) : undefined;
   const draftTools = new Set(["read_file", "write_file", "finish_task", "ask_user"]);
   let budgetExhaustion: NativeRunResult["budgetExhaustion"];
+  const state = createAgentState(options.prepared.root);
   //具体实现
   const result = await runAgent({
     model: drafting ? draftModelAdapter(options.settings, resolve(options.prepared.outDir, options.expectedOutputs[0] ?? "result.md")) : modelAdapter(options.settings),
@@ -105,16 +148,26 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
       }),
     goal: options.prompt,
     systemPrompt,
-    budget: options.budget ?? DEFAULT_RUN_BUDGET,
+    budget: options.budget ?? (coding ? CODING_RUN_BUDGET : DEFAULT_RUN_BUDGET),
     permissions,
     workspaceRoot: options.prepared.root,
     outDir: options.prepared.outDir,
+    state,
+    profile,
+    mode: "build",
+    toolTimeoutMs: coding ? 10 * 60_000 : 120_000,
+    maxParallelTools: coding ? 4 : 1,
+    ...(coding ? { keepRecentToolOutputs: 3 } : {}),
     signal: options.signal,
     ...(resume ? { resume } : {}),
     contextWindowTokens: options.settings.contextWindowTokens,
     requireFinishTool: true,
     stopOnToolError: drafting,
-    validateFinish: () => jsonDeliverableIssue(options.prepared.outDir, options.expectedOutputs),
+    validateFinish: (result, context) => {
+      const jsonIssue = jsonDeliverableIssue(options.prepared.outDir, options.expectedOutputs);
+      if (jsonIssue) return jsonIssue;
+      return coding ? codingFinishIssue(context) : null;
+    },
     summarizeContext: options.onContextSummary ?? ((messages, signal) => summarizeNativeContext(options.settings, messages, signal)),
     onEvent: (event) => {
       options.onContextEvent?.(event);
