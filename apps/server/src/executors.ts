@@ -16,8 +16,8 @@ export const EXECUTORS: ExecutorDescriptor[] = [
   {
     id: "native",
     name: "Hearth 原生执行器",
-    description: "使用当前配置的模型和任务授权工具直接完成工作，适合文档、分析、整理和网页任务。",
-    capabilities: ["文件", "搜索", "网页", "通用交付"],
+    description: "使用当前配置的模型和任务授权工具直接完成工作；工作区或仓库任务会自动启用编码 profile，支持仓库分析、编辑、测试、计划和验证闭环。",
+    capabilities: ["文件", "搜索", "网页", "通用交付", "代码", "仓库", "测试", "计划"],
     tier: "first-class"
   },
   {
