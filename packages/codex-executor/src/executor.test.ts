@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeItem, runCodex } from "./executor.ts";
+import { codexMcpConfig, describeItem, runCodex } from "./executor.ts";
 import type { CodexProfile } from "./profile.ts";
 
 describe("describeItem", () => {
@@ -60,5 +60,21 @@ describe("describeItem", () => {
       prompt: "HEARTH_OK",
       codexPathOverride: "C:\\missing\\codex.exe"
     })).rejects.toThrow("Codex 可执行文件不存在");
+  });
+});
+
+describe("codexMcpConfig", () => {
+  it("publishes the Hearth library as a standard stdio MCP server", () => {
+    expect(codexMcpConfig({
+      hearth: { command: "node", args: ["library-mcp.mjs"], env: { HEARTH_BASE_URL: "http://127.0.0.1:4317" } }
+    })).toEqual({
+      hearth: {
+        command: "node",
+        args: ["library-mcp.mjs"],
+        env: { HEARTH_BASE_URL: "http://127.0.0.1:4317" },
+        startup_timeout_sec: 20,
+        tool_timeout_sec: 120
+      }
+    });
   });
 });

@@ -59,6 +59,7 @@ export interface ExecutorAttemptContext {
   expectedOutputs: string[];
   activeThreadId?: string;
   extraNativeTools?: AgentTool[];
+  mcpServers?: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
   steering?: (() => AgentMessage[]) | undefined;
   onProgress: (event: { kind: string; message: string; detail?: TaskProgressDetail }) => void;
   onNativeContextEvent: (event: RuntimeEvent) => void;
@@ -180,6 +181,7 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
       prompt: input.prompt,
       signal: input.signal,
       networkAccessEnabled: input.contextSettings.allowCodexNetwork,
+      ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
       ...(input.activeThreadId ? { threadId: input.activeThreadId } : {}),
       onEvent: (event) => input.onProgress({
         kind: event.type,
@@ -255,6 +257,7 @@ export class DeepSeekHarnessExecutorAdapter implements ExecutorAdapter {
         ...(event.detail ? { detail: event.detail as TaskProgressDetail } : {})
       }),
       onContextItem: input.onDshContextItem,
+      ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
       ...(input.onDshApprovalRequest ? { onApprovalRequest: input.onDshApprovalRequest } : {})
     });
     return {

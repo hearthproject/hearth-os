@@ -37,6 +37,12 @@ export interface DshApprovalRequest {
 
 export type DshApprovalOutcome = "allowed-once" | "rejected" | "cancelled";
 
+export interface DshMcpServer {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+}
+
 export interface DeepSeekHarnessRunOptions {
   settings: DshModelSettings;
   dshHome: string;
@@ -51,6 +57,7 @@ export interface DeepSeekHarnessRunOptions {
   onProgress?: ((event: { type: string; message: string; detail?: Record<string, unknown> }) => void) | undefined;
   onContextItem?: ((event: DshContextEvent) => void) | undefined;
   onApprovalRequest?: ((request: DshApprovalRequest) => DshApprovalOutcome | Promise<DshApprovalOutcome>) | undefined;
+  mcpServers?: Record<string, DshMcpServer> | undefined;
 }
 
 export interface DeepSeekHarnessRunResult {
@@ -100,7 +107,7 @@ export async function runDeepSeekHarness(options: DeepSeekHarnessRunOptions): Pr
   const { DeepSeekHarness } = await loadDeepSeekHarness();
   validateSettings(options.settings);
   mkdirSync(options.dshHome, { recursive: true });
-  const patchPath = writeProviderPatch(options.dshHome, options.settings);
+  const patchPath = writeProviderPatch(options.dshHome, options.settings, options.mcpServers);
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     [API_KEY_ENV]: options.settings.apiKey,
@@ -269,13 +276,9 @@ function approvalRequestFromParams(params: Record<string, unknown>): DshApproval
   };
 }
 
-function writeProviderPatch(dshHome: string, settings: DshModelSettings): string {
-  const directory = join(dshHome, "hearth");
-  mkdirSync(directory, { recursive: true });
-  const digest = Buffer.from(`${settings.baseUrl}\n${settings.model}\n${settings.protocol}`).toString("base64url").slice(0, 18);
-  const path = join(directory, `provider-${digest}.yml`);
+export function buildDshPatch(settings: DshModelSettings, mcpServers: Record<string, DshMcpServer> = {}): string {
   const api = API_BY_PROTOCOL[settings.protocol];
-  const content = [
+  const lines = [
     "- id: llm-pi-ai",
     "  config:",
     "    providers:",
@@ -290,9 +293,38 @@ function writeProviderPatch(dshHome: string, settings: DshModelSettings): string
     `          - id: ${yamlString(settings.model)}`,
     `            name: ${yamlString(settings.model)}`,
     "            contextWindow: 131072",
-    "            maxTokens: 32768",
-    ""
-  ].join("\n");
+    "            maxTokens: 32768"
+  ];
+  for (const [name, server] of Object.entries(mcpServers)) {
+    lines.push(
+      `- id: mcp-${name}`,
+      "  name: '@deepseek-ai/dsh-mcp-client'",
+      "  config:",
+      `    serverName: ${yamlString(name)}`,
+      "    transport: stdio",
+      `    command: ${yamlString(server.command)}`,
+      "    toolCallTimeoutMs: 120000",
+      "    failOnStartupError: false"
+    );
+    if (server.args?.length) {
+      lines.push("    args:");
+      for (const arg of server.args) lines.push(`      - ${yamlString(arg)}`);
+    }
+    if (server.env && Object.keys(server.env).length > 0) {
+      lines.push("    env:");
+      for (const [key, value] of Object.entries(server.env)) lines.push(`      ${key}: ${yamlString(value)}`);
+    }
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function writeProviderPatch(dshHome: string, settings: DshModelSettings, mcpServers?: Record<string, DshMcpServer>): string {
+  const directory = join(dshHome, "hearth");
+  mkdirSync(directory, { recursive: true });
+  const mcpKey = JSON.stringify(mcpServers ?? {});
+  const digest = Buffer.from(`${settings.baseUrl}\n${settings.model}\n${settings.protocol}\n${mcpKey}`).toString("base64url").slice(0, 18);
+  const path = join(directory, `provider-${digest}.yml`);
+  const content = buildDshPatch(settings, mcpServers);
   const temp = `${path}.${process.pid}.${Date.now()}.tmp`;
   writeFileSync(temp, content, { encoding: "utf8", mode: 0o600 });
   renameSync(temp, path);

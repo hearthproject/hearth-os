@@ -1,4 +1,4 @@
-import { Codex, type ThreadItem } from "@openai/codex-sdk";
+import { Codex, type CodexOptions, type ThreadItem } from "@openai/codex-sdk";
 import { existsSync } from "node:fs";
 import type { RunUsage, TaskProgressDetail } from "@hearth/core";
 import { buildCodexEnv, describeCodexProfile, loadCodexProfile, type CodexProfile } from "./profile.ts";
@@ -17,6 +17,13 @@ export interface CodexRunOptions {
   codexPathOverride?: string;
   threadId?: string;
   networkAccessEnabled?: boolean;
+  env?: Record<string, string>;
+  mcpServers?: Record<string, CodexMcpServer>;
+}
+
+export interface CodexMcpServer {
+  command: string;
+  args?: string[];
   env?: Record<string, string>;
 }
 
@@ -42,7 +49,10 @@ export async function runCodex(options: CodexRunOptions): Promise<CodexRunResult
 
   const codex = options.codex ?? new Codex({
     env: { ...buildCodexEnv(profile), ...(options.env ?? {}) },
-    ...(options.codexPathOverride ? { codexPathOverride: options.codexPathOverride } : {})
+    ...(options.codexPathOverride ? { codexPathOverride: options.codexPathOverride } : {}),
+    ...(options.mcpServers && Object.keys(options.mcpServers).length > 0
+      ? { config: { mcp_servers: codexMcpConfig(options.mcpServers) } as NonNullable<CodexOptions["config"]> }
+      : {})
   });
   const threadOptions = {
     ...(profile.model ? { model: profile.model } : {}),
@@ -99,6 +109,16 @@ export async function runCodex(options: CodexRunOptions): Promise<CodexRunResult
   }
 
   return { threadId: thread.id, finalResponse, usage, profileLabel: describeCodexProfile(profile) };
+}
+
+export function codexMcpConfig(servers: Record<string, CodexMcpServer>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(servers).map(([name, server]) => [name, {
+    command: server.command,
+    ...(server.args ? { args: server.args } : {}),
+    ...(server.env ? { env: server.env } : {}),
+    startup_timeout_sec: 20,
+    tool_timeout_sec: 120
+  }]));
 }
 
 export async function probeCodex(

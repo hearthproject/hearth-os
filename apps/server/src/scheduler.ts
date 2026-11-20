@@ -52,6 +52,9 @@ import type { KnowledgeRecallService } from "./knowledge/recall.ts";
 import type { KnowledgeSettingsStore } from "./knowledge/settings.ts";
 import type { KnowledgeSyncService } from "./knowledge/sync.ts";
 import { createKnowledgeTools } from "./knowledge/tools.ts";
+import type { LibraryService } from "./library/service.ts";
+import { createLibraryTools } from "./library/tools.ts";
+import type { LibraryMcpLaunch } from "./library/mcp-runtime.ts";
 import { OntologyService } from "./ontology.ts";
 import { createPersonalReadTools } from "./personal-tools.ts";
 import { createMailTools } from "./mail-tools.ts";
@@ -123,6 +126,8 @@ export interface SchedulerOptions {
   knowledge?: KnowledgeRecallService | undefined;
   knowledgeSettings?: KnowledgeSettingsStore | undefined;
   knowledgeSync?: KnowledgeSyncService | undefined;
+  library?: LibraryService | undefined;
+  libraryMcp?: LibraryMcpLaunch | undefined;
   ontologyWriter?: OntologyWriter | undefined;
 }
 
@@ -164,6 +169,8 @@ export class HearthScheduler {
   private readonly knowledge: KnowledgeRecallService | undefined;
   private readonly knowledgeSettings: KnowledgeSettingsStore | undefined;
   private readonly knowledgeSync: KnowledgeSyncService | undefined;
+  private readonly library: LibraryService | undefined;
+  private readonly libraryMcp: LibraryMcpLaunch | undefined;
   private readonly ontology: OntologyService;
   private readonly ontologyWriter: OntologyWriter;
   private readonly projector: ContextProjector;
@@ -232,6 +239,8 @@ export class HearthScheduler {
     this.knowledge = options.knowledge;
     this.knowledgeSettings = options.knowledgeSettings;
     this.knowledgeSync = options.knowledgeSync;
+    this.library = options.library;
+    this.libraryMcp = options.libraryMcp;
     this.ontology = new OntologyService(this.service);
     this.ontologyWriter = options.ontologyWriter ?? new OntologyWriter(this.service, this.ontology);
     this.projector = new ContextProjector(this.service, this.context, options.contextBroker);
@@ -1533,26 +1542,29 @@ export class HearthScheduler {
           provenance: { source: "memory-service" }, executorEventId: `memory:${runId}`
         });
       }
-      let knowledgeContext = "";
-      if (!drafting && this.knowledge?.isEnabled()) {
+      let libraryContext = "";
+      if (!drafting && this.library) {
         try {
-          const recalled = await this.knowledge.recall({
-            query: task.goal,
-            taskId,
-            conversationId: task.conversationId ?? null,
-            executorId
-          });
-          if (recalled.block) {
-            knowledgeContext = recalled.block;
+          const recalled = await this.library.search([task.title, task.goal, task.nextAction ?? ""].filter(Boolean).join("\n"), 6);
+          if (recalled.hits.length > 0) {
+            libraryContext = [
+              "## 相关资料",
+              "以下是 Hearth 从统一资料库找到的内容。需要更多信息时，运行中可继续使用 library_search、library_read、library_summary 和 library_tree。",
+              ...recalled.hits.map((hit) => [
+                `### ${hit.node.title} [${hit.node.kind}]`,
+                `引用：${hit.node.ref}`,
+                hit.snippet
+              ].join("\n"))
+            ].join("\n\n");
             this.capture({
               taskId, conversationId: task.conversationId ?? null, runId, executorId,
-              kind: "knowledge_recall", role: "system", content: recalled.block,
-              provenance: { source: "openviking", uris: recalled.hits.map((hit) => hit.uri) },
-              executorEventId: `knowledge:${runId}`
+              kind: "library_recall", role: "system", content: libraryContext,
+              provenance: { source: "hearth-library", refs: recalled.hits.map((hit) => hit.node.ref) },
+              executorEventId: `library:${runId}`
             });
           }
         } catch {
-          knowledgeContext = "";
+          libraryContext = "";
         }
       }
       const basePrompt = drafting
@@ -1581,7 +1593,7 @@ export class HearthScheduler {
         }
       }
       if (pendingInput && !resumeState && executorId !== "codex") prompt = `${basePrompt}\n\n用户补充信息：\n${pendingInput}`;
-      if (knowledgeContext) prompt = `${prompt}\n\n${knowledgeContext}`;
+      if (libraryContext) prompt = `${prompt}\n\n${libraryContext}`;
       let activeThreadId = !handoff && input.previousRun?.executorId === executorId
         ? input.previousRun.threadId ?? undefined
         : undefined;
@@ -1613,6 +1625,7 @@ export class HearthScheduler {
         }));
       }
       let subagentManager: SubagentTaskManager | undefined;
+      if (this.library) extraNativeTools.push(...createLibraryTools(this.library));
       if (executorId === "native") {
         if (this.knowledge?.isEnabled() && this.knowledgeSettings) {
           extraNativeTools.push(...createKnowledgeTools({ settings: this.knowledgeSettings }));
@@ -1681,6 +1694,7 @@ export class HearthScheduler {
         executorSettings: this.executorSettings(),
         expectedOutputs,
         ...(extraNativeTools.length > 0 ? { extraNativeTools } : {}),
+        ...(this.libraryMcp ? { mcpServers: { hearth: this.libraryMcp } } : {}),
         ...(activeThreadId ? { activeThreadId } : {}),
         onProgress: (event) => this.publishProgress(taskId, runId, event.kind, event.message, event.detail),
         onNativeContextEvent: (event) => this.captureNativeEvent(task, run, event),

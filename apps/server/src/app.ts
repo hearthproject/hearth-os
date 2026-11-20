@@ -71,6 +71,7 @@ import { LibraryService } from "./library/service.ts";
 import { registerLibraryRoutes } from "./library/routes.ts";
 import { LocalEmbeddingProvider, type EmbeddingProvider } from "./library/embedding.ts";
 import { createModelSummaryGenerator, type LibrarySummaryGenerator } from "./library/summary.ts";
+import { libraryMcpLaunch } from "./library/mcp-runtime.ts";
 import { McpServerError, McpServerService } from "./mcp-servers.ts";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
@@ -696,6 +697,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
       ? {}
       : { embeddingProvider: options.libraryEmbeddingProvider ?? new LocalEmbeddingProvider({ cacheDir: LIBRARY_MODEL_DIR }) })
   });
+  const libraryMcp = libraryMcpLaunch();
   service.bus.subscribe((event) => {
     if (
       event.type.startsWith("memory.")
@@ -884,6 +886,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
         knowledge,
         knowledgeSettings,
         knowledgeSync,
+        library,
+        libraryMcp,
         attachmentRoot,
         executorSettingsPath,
         executorSettingsProvider: () => executorSettingsStore.load(),

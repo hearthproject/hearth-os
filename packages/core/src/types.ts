@@ -2111,6 +2111,7 @@ export const CONTEXT_ITEM_KINDS = [
   "summary",
   "memory_recall",
   "knowledge_recall",
+  "library_recall",
   "method",
   "usage",
   "notice"

@@ -1,5 +1,5 @@
 import { build } from "esbuild";
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,8 +12,13 @@ rmSync(outputRoot, { recursive: true, force: true });
 mkdirSync(outputRoot, { recursive: true });
 
 const result = await build({
-  entryPoints: [join(repoRoot, "apps", "server", "src", "index.ts")],
-  outfile: join(outputRoot, "server.mjs"),
+  entryPoints: [
+    join(repoRoot, "apps", "server", "src", "index.ts"),
+    join(repoRoot, "apps", "server", "src", "library", "mcp-main.ts")
+  ],
+  outdir: outputRoot,
+  entryNames: "[name]",
+  outExtension: { ".js": ".mjs" },
   bundle: true,
   platform: "node",
   format: "esm",
@@ -28,6 +33,9 @@ const result = await build({
   },
   logLevel: "info"
 });
+
+renameSync(join(outputRoot, "index.mjs"), join(outputRoot, "server.mjs"));
+renameSync(join(outputRoot, "mcp-main.mjs"), join(outputRoot, "library-mcp.mjs"));
 
 // playwright-core ships an internal coreBundle that statically requires its
 // optional WebDriver BiDi mapper. Hearth only speaks CDP to Chromium, and
