@@ -2777,16 +2777,40 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
-const MAX_RUN_CHECKPOINT_FILES = 20;
+const MAX_RUN_CHECKPOINT_FILES = 40;
+const MAX_RUN_CHECKPOINT_BYTES = 200 * 1024 * 1024;
+const MILESTONE_CHECKPOINT_KINDS = new Set(["compaction", "final", "plan"]);
 
-function pruneRunCheckpointFiles(directory: string): void {
-  const names = readdirSync(directory)
+export function pruneRunCheckpointFiles(directory: string): void {
+  const entries = readdirSync(directory)
     .filter((name) => /^\d+-(turn|tool|compaction|final|budget|waiting_input|plan)\.json$/.test(name))
-    .map((name) => ({ name, seq: Number(name.slice(0, name.indexOf("-"))) }))
+    .map((name) => ({
+      name,
+      seq: Number(name.slice(0, name.indexOf("-"))),
+      kind: name.slice(name.indexOf("-") + 1, -".json".length),
+      bytes: statSync(join(directory, name)).size
+    }))
     .sort((left, right) => left.seq - right.seq);
-  for (const entry of names.slice(0, Math.max(0, names.length - MAX_RUN_CHECKPOINT_FILES))) {
+
+  const nonMilestones = entries.filter((entry) => !MILESTONE_CHECKPOINT_KINDS.has(entry.kind));
+  const excess = Math.max(0, nonMilestones.length - MAX_RUN_CHECKPOINT_FILES);
+  for (const entry of nonMilestones.slice(0, excess)) {
     unlinkSync(join(directory, entry.name));
   }
+
+  let totalBytes = entries.reduce((sum, entry) => sum + entry.bytes, 0)
+    - nonMilestones.slice(0, excess).reduce((sum, entry) => sum + entry.bytes, 0);
+  for (const entry of nonMilestones.slice(excess)) {
+    if (totalBytes <= MAX_RUN_CHECKPOINT_BYTES) break;
+    unlinkSync(join(directory, entry.name));
+    totalBytes -= entry.bytes;
+  }
+  for (const entry of entries.filter((item) => MILESTONE_CHECKPOINT_KINDS.has(item.kind) && item.kind !== "final")) {
+    if (totalBytes <= MAX_RUN_CHECKPOINT_BYTES) break;
+    unlinkSync(join(directory, entry.name));
+    totalBytes -= entry.bytes;
+  }
+
   for (const name of readdirSync(directory)) {
     if (name.endsWith(".tmp")) unlinkSync(join(directory, name));
   }
