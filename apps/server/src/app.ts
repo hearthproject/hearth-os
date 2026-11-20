@@ -863,6 +863,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
         worktrees,
         library,
         libraryMcp,
+        skills,
         attachmentRoot,
         executorSettingsPath,
         executorSettingsProvider: () => executorSettingsStore.load(),

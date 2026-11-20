@@ -66,6 +66,8 @@ import type { HearthService } from "./service.ts";
 import { buildDeliveryRepairPrompt, buildTaskPrompt, prepareWorkspace, UnsupportedInputError, type PreparedWorkspace, type TaskApprovalKind } from "./workspace.ts";
 import { wantsPublicWebResearch, wantsScreenshot } from "./task-intent.ts";
 import type { WebSearchService } from "./web-search.ts";
+import type { SkillService } from "./skills/service.ts";
+import { createSkillTools } from "./skill-tools.ts";
 import { TaskWorktreeService } from "./worktrees.ts";
 
 import { createExecutorAdapters, type CodexContextItem, type CodexRunner, type DshRunner, type ExecutionOutcome, type ExecutorAdapter, type ExecutorAttemptContext, type NativeRunner } from "./executor-adapter.ts";
@@ -122,6 +124,7 @@ export interface SchedulerOptions {
   contextBroker?: ContextBroker | undefined;
   library?: LibraryService | undefined;
   libraryMcp?: LibraryMcpLaunch | undefined;
+  skills?: SkillService | undefined;
   ontologyWriter?: OntologyWriter | undefined;
 }
 
@@ -162,6 +165,7 @@ export class HearthScheduler {
   private readonly contextBroker: ContextBroker | undefined;
   private readonly library: LibraryService | undefined;
   private readonly libraryMcp: LibraryMcpLaunch | undefined;
+  private readonly skills: SkillService | undefined;
   private readonly ontology: OntologyService;
   private readonly ontologyWriter: OntologyWriter;
   private readonly projector: ContextProjector;
@@ -230,6 +234,7 @@ export class HearthScheduler {
     this.contextBroker = options.contextBroker;
     this.library = options.library;
     this.libraryMcp = options.libraryMcp;
+    this.skills = options.skills;
     this.ontology = new OntologyService(this.service);
     this.ontologyWriter = options.ontologyWriter ?? new OntologyWriter(this.service, this.ontology);
     this.projector = new ContextProjector(this.service, this.context, options.contextBroker);
@@ -1718,6 +1723,7 @@ export class HearthScheduler {
       }
       let subagentManager: SubagentTaskManager | undefined;
       if (this.library) extraNativeTools.push(...createLibraryTools(this.library));
+      if (this.skills) extraNativeTools.push(...createSkillTools({ skills: this.skills, taskId, runId }));
       if (executorId === "native") {
         if (this.mcpServers) {
           try {
