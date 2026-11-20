@@ -131,7 +131,6 @@ export function MemoryPage() {
   const setup = setupQuery.data;
   const enabled = status?.settings.enabled ?? false;
   const connected = enabled && status?.health.ok === true;
-  const memoryReferenceOff = status?.settings.write.memories === "off";
   const writeMode = status?.settings.write.memories ?? "curated";
   const allMemories = snapshot?.memories ?? [];
   const evaluationCount = allMemories.filter(isEvaluationMemory).length;
@@ -334,6 +333,7 @@ function KnowledgeOverview({
   const enabled = status?.settings.enabled ?? false;
   const connected = enabled && status?.health.ok === true;
   const installed = setup?.installed ?? true;
+  const memoryReferenceOff = status?.settings.write.memories === "off";
   const title = connected
     ? "记忆助手已开启"
     : enabled
