@@ -26,6 +26,9 @@ export type FirstClassExecutorId = (typeof FIRST_CLASS_EXECUTOR_IDS)[number];
 export const APPROVAL_MODES = ["necessary", "full"] as const;
 export type ApprovalMode = (typeof APPROVAL_MODES)[number];
 
+export const SANDBOX_MODES = ["read-only", "workspace-write", "danger-full-access"] as const;
+export type SandboxMode = (typeof SANDBOX_MODES)[number];
+
 export interface ConversationSettings {
   executionMode?: ExecutionMode;
   executorEnabled: Record<ExecutorId, boolean>;
@@ -306,6 +309,7 @@ export interface TaskPermissions {
   networkHosts: string[];
   tools: string[];
   approvalMode?: ApprovalMode | undefined;
+  sandboxMode?: SandboxMode | undefined;
 }
 
 export interface RunBudget {
@@ -505,6 +509,12 @@ export interface TaskProgressDetail {
   query?: string;
   paths?: string[];
   truncated?: boolean;
+  sandbox?: {
+    backend: string;
+    mode: string;
+    enforcement: string;
+    networkEnforcement: string;
+  };
 }
 
 export type ModelProtocol = "openai-chat" | "openai-responses" | "anthropic-messages" | "gemini";

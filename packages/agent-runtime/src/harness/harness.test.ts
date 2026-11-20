@@ -246,10 +246,10 @@ describe("shell sessions", () => {
   it("captures output, exits, and supports explicit kill", async () => {
     const root = workspace();
     const out = join(root, "out");
-    const result = await runShellSession({ command: "node -e \"process.stdout.write('hello')\"", cwd: root, outDir: out, timeoutMs: 10_000 });
+    const result = await runShellSession({ command: "node -e \"process.stdout.write('hello')\"", cwd: root, outDir: out, timeoutMs: 10_000, unsafeNoSandbox: true });
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain("hello");
-    const started = startShellSession({ command: "node -e \"setInterval(() => {}, 1000)\"", cwd: tmpdir(), outDir: out });
+    const started = await startShellSession({ command: "node -e \"setInterval(() => {}, 1000)\"", cwd: tmpdir(), outDir: out, unsafeNoSandbox: true });
     expect(shellOutput(started.sessionId)?.running).toBe(true);
     killShellSession(started.sessionId);
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_500));

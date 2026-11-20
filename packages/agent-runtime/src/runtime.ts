@@ -231,7 +231,8 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
           signal,
           state,
           fullAccess: options.isFullPermission?.() === true,
-          mode: options.mode ?? "build"
+          mode: options.mode ?? "build",
+          ...(options.sandbox ? { sandbox: options.sandbox } : {})
         }, options.toolTimeoutMs ?? 120_000, signal);
       } catch (error) {
         result = { content: `工具执行失败：${errorMessage(error)}`, isError: true };
@@ -408,7 +409,8 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
               signal,
               state,
               fullAccess: options.isFullPermission?.() === true,
-              mode: options.mode ?? "build"
+              mode: options.mode ?? "build",
+              ...(options.sandbox ? { sandbox: options.sandbox } : {})
             }, options.toolTimeoutMs ?? 120_000, signal);
           } catch (error) {
             result = { content: `工具执行失败：${errorMessage(error)}`, isError: true };

@@ -283,7 +283,7 @@ describe("builtin tools", () => {
     const root = workspace(roots);
     const out = join(root, "out");
     const tools = mapTools();
-    const permissions = defaultTaskPermissions({ workspaceRoot: root, outDir: out, networkHosts: [], extraTools: ["shell"] });
+    const permissions = { ...defaultTaskPermissions({ workspaceRoot: root, outDir: out, networkHosts: [], extraTools: ["shell"] }), sandboxMode: "danger-full-access" as const };
     await expect(tools.shell!.execute({ command: "rm -rf /" }, {
       workspaceRoot: root,
       outDir: out,
@@ -296,7 +296,7 @@ describe("builtin tools", () => {
     const root = workspace(roots);
     const out = join(root, "out");
     const tools = mapTools();
-    const permissions = defaultTaskPermissions({ workspaceRoot: root, outDir: out, networkHosts: [], extraTools: ["shell"] });
+    const permissions = { ...defaultTaskPermissions({ workspaceRoot: root, outDir: out, networkHosts: [], extraTools: ["shell"] }), sandboxMode: "danger-full-access" as const };
     await expect(tools.shell!.execute({ command: "gh auth status" }, {
       workspaceRoot: root,
       outDir: out,
@@ -409,7 +409,7 @@ describe("builtin tools", () => {
     const out = join(root, "out");
     const script = join(root, "large-output.cjs");
     writeFileSync(script, "process.stdout.write('x'.repeat(12000));\n");
-    const permissions = defaultTaskPermissions({ workspaceRoot: root, outDir: out, networkHosts: [], extraTools: ["shell"] });
+    const permissions = { ...defaultTaskPermissions({ workspaceRoot: root, outDir: out, networkHosts: [], extraTools: ["shell"] }), sandboxMode: "danger-full-access" as const };
     const result = await mapTools().shell!.execute({ command: `node "${script}"` }, {
       workspaceRoot: root,
       outDir: out,
@@ -438,7 +438,7 @@ describe("builtin tools", () => {
       "spawn(process.execPath, [process.argv[3], process.argv[2]], { stdio: 'ignore' });",
       "setInterval(() => {}, 1000);"
     ].join("\n"));
-    const permissions = defaultTaskPermissions({ workspaceRoot: root, outDir: out, networkHosts: [], extraTools: ["shell"] });
+    const permissions = { ...defaultTaskPermissions({ workspaceRoot: root, outDir: out, networkHosts: [], extraTools: ["shell"] }), sandboxMode: "danger-full-access" as const };
     const result = await mapTools().shell!.execute({
       command: `node "${parent}" "${marker}" "${child}"`,
       timeoutMs: 1_000
@@ -465,7 +465,7 @@ function contextFor(root: string, out: string): AgentToolContext {
   return {
     workspaceRoot: root,
     outDir: out,
-    permissions: defaultTaskPermissions({ workspaceRoot: root, outDir: out, networkHosts: [] }),
+    permissions: { ...defaultTaskPermissions({ workspaceRoot: root, outDir: out, networkHosts: [] }), sandboxMode: "danger-full-access" },
     signal: new AbortController().signal
   };
 }

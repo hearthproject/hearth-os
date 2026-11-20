@@ -1,6 +1,7 @@
 //消息、工具、模型、检查点和运行结果的数据结构
 
 import type { RunBudget, RunUsage, TaskPermissions } from "@hearth/core";
+import type { SandboxRuntime } from "./harness/sandbox.ts";
 
 export type HarnessProfile = "general" | "coding";
 export type HarnessMode = "build" | "plan";
@@ -62,6 +63,7 @@ export interface AgentToolContext {
   state?: AgentToolState;
   fullAccess?: boolean;
   mode?: HarnessMode;
+  sandbox?: SandboxRuntime;
 }
 
 export type AgentToolAction = "finish" | "ask_user" | "plan";
@@ -88,6 +90,8 @@ export interface AgentToolMetadata {
   transcriptPath?: string;
   matched?: boolean;
   timedOut?: boolean;
+  sandbox?: { backend: string; enforcement: string; networkEnforcement: string; mode: string };
+  sandboxFailure?: "denied" | "runner_failure";
   insertions?: number;
   deletions?: number;
   failures?: Array<{ path: string; reason: string }>;
@@ -225,6 +229,7 @@ export interface AgentRuntimeOptions {
   permissions: TaskPermissions;
   workspaceRoot: string;
   outDir: string;
+  sandbox?: SandboxRuntime;
   signal?: AbortSignal;
   resume?: AgentResumeState;
   onEvent?: (event: RuntimeEvent) => void;

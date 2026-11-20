@@ -6,7 +6,7 @@ import { basename, join, resolve } from "node:path";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyReply } from "fastify";
 import type { EventEnvelope, ExecutorHealth, ExecutorId, ExecutorView, GoalBudget, TaskRecord } from "@hearth/core";
-import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DELEGATION_WORKSPACE_POLICIES, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, EXECUTOR_IDS, GOAL_REVIEW_POLICIES, GOAL_STATES, GOAL_VALIDATORS, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_ORIGINS, MEMORY_RETENTIONS, MEMORY_SENSITIVITIES, MEMORY_TAINT_STATES, MEMORY_TIERS, MEMORY_TRUST_LEVELS, PROACTIVE_MODES, RECONCILE_STATUSES, RUN_STATUSES, SKILL_STATUSES, SKILL_USAGE_SOURCES, SKILL_USAGE_STATUSES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
+import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DELEGATION_WORKSPACE_POLICIES, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, EXECUTOR_IDS, GOAL_REVIEW_POLICIES, GOAL_STATES, GOAL_VALIDATORS, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_ORIGINS, MEMORY_RETENTIONS, MEMORY_SENSITIVITIES, MEMORY_TAINT_STATES, MEMORY_TIERS, MEMORY_TRUST_LEVELS, PROACTIVE_MODES, RECONCILE_STATUSES, RUN_STATUSES, SANDBOX_MODES, SKILL_STATUSES, SKILL_USAGE_SOURCES, SKILL_USAGE_STATUSES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate } from "@hearth/templates";
 import { loadCodexProfile, runCodex } from "@hearth/codex-executor";
@@ -130,7 +130,8 @@ const createTaskSchema = z.object({
     readRoots: z.array(z.string().trim().min(1).max(1000)).max(20),
     writeRoots: z.array(z.string().trim().min(1).max(1000)).max(20),
     networkHosts: z.array(z.string().trim().min(1).max(255)).max(20),
-    tools: z.array(z.string().trim().min(1).max(80)).max(40)
+    tools: z.array(z.string().trim().min(1).max(80)).max(40),
+    sandboxMode: z.enum(SANDBOX_MODES).optional()
   }).optional()
 }).strict();
 

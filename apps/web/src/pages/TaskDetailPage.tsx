@@ -250,6 +250,9 @@ export function TaskDetailPage() {
       <div className="task-meta-row">
         <StatusPill status={task.status} />
         <span className="executor-tag">{executorLabel(task.executorId)}</span>
+        {task.permissions?.sandboxMode === "workspace-write" && <span className="executor-tag" title="Windows ACL 仅限制 shell 的文件写入/删除">沙箱 · 工作区写</span>}
+        {task.permissions?.sandboxMode === "read-only" && <span className="executor-tag" title="Windows ACL 禁止 shell 写入/删除">沙箱 · 只读</span>}
+        {task.permissions?.sandboxMode === "danger-full-access" && <span className="executor-tag" title="shell 未隔离">完全权限</span>}
         <span>{taskKindLabel(task.taskKind)}</span>
         <span className="task-mode-tag">{executionModeLabel(task.executionMode)}</span>
         {task.pinnedAt && <span><Pin size={13} /> 已置顶</span>}

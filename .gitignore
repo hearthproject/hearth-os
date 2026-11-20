@@ -29,6 +29,7 @@ apps/desktop-tauri/src-tauri/resources/node_modules/
 apps/desktop-tauri/src-tauri/resources/npm.cmd
 apps/desktop-tauri/src-tauri/resources/helper/
 apps/desktop-tauri/src-tauri/resources/licenses/
+apps/desktop-tauri/src-tauri/resources/sandbox/
 apps/desktop-tauri/src-tauri/resources/THIRD_PARTY_NOTICES.txt
 release/
 

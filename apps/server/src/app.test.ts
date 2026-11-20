@@ -503,6 +503,21 @@ describe("Hearth server", () => {
     await app.close();
   });
 
+  it("accepts a per-task sandbox mode", async () => {
+    const app = await buildServer({ store, serveWeb: false });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: {
+        templateId: "T01",
+        permissions: { readRoots: [], writeRoots: [], networkHosts: [], tools: ["shell"], sandboxMode: "read-only" }
+      }
+    });
+    expect(response.statusCode).toBe(201);
+    expect(response.json().permissions.sandboxMode).toBe("read-only");
+    await app.close();
+  });
+
   it("pins and archives tasks without changing task status", async () => {
     const app = await buildServer({ store, serveWeb: false });
     const created = await app.inject({ method: "POST", url: "/api/tasks", payload: { templateId: "T01" } });
