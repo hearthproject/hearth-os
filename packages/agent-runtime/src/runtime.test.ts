@@ -441,6 +441,63 @@ describe("agent runtime", () => {
     expect(outputs.slice(0, 2)).toEqual(["read_a", "read_b"]);
   });
 
+  it("parallelizes contiguous read tools and treats writes as barriers", async () => {
+    const root = workspace(roots);
+    const events: string[] = [];
+    let activeReads = 0;
+    let maxActiveReads = 0;
+    let writeDone = false;
+    const readTool = (name: string): AgentTool => ({
+      definition: { name, description: name, parameters: {}, executionMode: "parallel" },
+      execute: async () => {
+        const startedAfterWrite = writeDone;
+        events.push(`${name}:start:${startedAfterWrite}`);
+        activeReads += 1;
+        maxActiveReads = Math.max(maxActiveReads, activeReads);
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+        activeReads -= 1;
+        events.push(`${name}:end`);
+        return { content: name };
+      }
+    });
+    const writeTool: AgentTool = {
+      definition: { name: "write_state", description: "write", parameters: {}, executionMode: "sequential" },
+      execute: async () => {
+        events.push("write:start");
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
+        writeDone = true;
+        events.push("write:end");
+        return { content: "write" };
+      }
+    };
+    const tools = [readTool("read_a"), readTool("read_b"), writeTool, readTool("read_c"), readTool("read_d")];
+    const result = await runAgent({
+      model: fakeModel([
+        turn("", [call("read_a", {}), call("read_b", {}), call("write_state", {}), call("read_c", {}), call("read_d", {})]),
+        turn("", [call("finish_task", { summary: "done" })])
+      ]),
+      tools: [...tools, createBuiltinTools().find((tool) => tool.definition.name === "finish_task")!],
+      goal: "mixed batch",
+      systemPrompt: "system",
+      budget: { maxTurns: 4, maxToolCalls: 10, maxTokens: 10_000, maxDurationMs: 30_000 },
+      permissions: { tools: ["read_a", "read_b", "write_state", "read_c", "read_d", "finish_task"], readRoots: [], writeRoots: [], networkHosts: [] },
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      maxParallelTools: 2
+    });
+
+    expect(result.status).toBe("completed");
+    expect(maxActiveReads).toBe(2);
+    expect(events).toContain("read_a:start:false");
+    expect(events).toContain("read_b:start:false");
+    expect(events.indexOf("read_b:end")).toBeLessThan(events.indexOf("write:start"));
+    expect(events).toContain("read_c:start:true");
+    expect(events).toContain("read_d:start:true");
+    expect(events.indexOf("write:end")).toBeLessThan(events.indexOf("read_c:start:true"));
+    const outputs = result.messages.filter((message) => message.role === "tool").map((message) => message.content);
+    expect(outputs.slice(0, 5)).toEqual(["read_a", "read_b", "write", "read_c", "read_d"]);
+  });
+
   it("stops after repeated identical tool calls and results", async () => {
     const root = workspace(roots);
     const repeated = call("read_file", { path: "missing.txt" });

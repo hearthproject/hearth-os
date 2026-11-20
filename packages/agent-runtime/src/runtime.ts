@@ -159,6 +159,30 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     return null;
   }
 
+  function partitionToolCalls(calls: AgentToolCall[]): AgentToolCall[][] {
+    const chunks: AgentToolCall[][] = [];
+    const parallelLimit = Math.max(1, options.maxParallelTools ?? 1);
+    let parallelChunk: AgentToolCall[] = [];
+    for (const call of calls) {
+      const executionMode = toolMap.get(call.name)?.definition.executionMode;
+      if (executionMode === "parallel") {
+        parallelChunk.push(call);
+        if (parallelChunk.length >= parallelLimit) {
+          chunks.push(parallelChunk);
+          parallelChunk = [];
+        }
+        continue;
+      }
+      if (parallelChunk.length > 0) {
+        chunks.push(parallelChunk);
+        parallelChunk = [];
+      }
+      chunks.push([call]);
+    }
+    if (parallelChunk.length > 0) chunks.push(parallelChunk);
+    return chunks;
+  }
+
   async function executeParallelBatch(calls: AgentToolCall[]): Promise<Map<string, { result: AgentToolResult; durationMs: number }> | null> {
     const limit = options.maxParallelTools ?? 1;
     if (limit < 2 || calls.length < 2 || calls.length > limit) return null;
@@ -323,9 +347,18 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     }
     emptyTurns = 0;
     missingFinishTurns = 0;
-    const parallelResults = await executeParallelBatch(turn.toolCalls);
+    const parallelChunks = new Map<string, AgentToolCall[]>();
+    for (const chunk of partitionToolCalls(turn.toolCalls)) {
+      if (chunk.length > 1 && chunk[0]) parallelChunks.set(chunk[0].id, chunk);
+    }
+    const parallelResults = new Map<string, { result: AgentToolResult; durationMs: number }>();
 
     for (const call of turn.toolCalls) {
+      const chunk = parallelChunks.get(call.id);
+      if (chunk) {
+        const results = await executeParallelBatch(chunk);
+        if (results) for (const [id, value] of results) parallelResults.set(id, value);
+      }
       if (aborted()) return finish("cancelled", "任务已取消");
       if (toolCalls >= options.budget.maxToolCalls) {
         emit({ type: "budget.exceeded", budget: "toolCalls", limit: options.budget.maxToolCalls });
@@ -335,7 +368,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
 
       toolCalls += 1;
       const tool = toolMap.get(call.name);
-      const precomputed = parallelResults?.get(call.id);
+      const precomputed = parallelResults.get(call.id);
       const toolStartedAt = Date.now();
       emit({ type: "tool.started", turn: turns, call });
 
