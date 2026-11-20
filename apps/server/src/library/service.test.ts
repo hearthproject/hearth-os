@@ -12,15 +12,16 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-function seedMemory(store: HearthStore, id: string, content: string): void {
+function seedMemory(store: HearthStore, id: string, content: string, status = "active"): void {
   const now = "2026-11-20T00:00:00.000Z";
   store.db.prepare(
     `INSERT INTO memories
       (id, kind, status, content, subject_key, scope, tags_json, source_json, confidence, sensitivity,
        allow_recall, version, created_at, updated_at, recall_count, content_hash)
-     VALUES (?, 'fact', 'active', ?, '项目资料', 'global', '[]', ?, 'high', 'normal', 1, 1, ?, ?, 0, ?)`
+     VALUES (?, 'fact', ?, ?, '项目资料', 'global', '[]', ?, 'high', 'normal', 1, 1, ?, ?, 0, ?)`
   ).run(
     id,
+    status,
     content,
     JSON.stringify({ type: "user", id: null, label: "用户", excerpt: null }),
     now,
@@ -91,12 +92,13 @@ describe("LibraryService", () => {
     const cached = await library.summarizeNode(memoryRoot.id);
     expect(cached.generated).toBe(false);
 
-    seedMemory(store, "mem-summary-2", "新增一条记忆后摘要会更新。");
+    seedMemory(store, "mem-summary-2", "新增一条待确认记忆后摘要会更新。", "candidate");
     library.markDirty();
     await library.reindex();
     const refreshed = await library.summarizeNode(memoryRoot.id);
     expect(refreshed.generated).toBe(true);
     expect(refreshed.content).toContain("共有 2 项");
+    expect(refreshed.content).toContain("待确认");
     library.stop();
     store.close();
   });

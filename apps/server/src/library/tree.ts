@@ -39,7 +39,16 @@ export class LibraryTreeService {
 
   syncAll(): { nodes: number } {
     this.ensureRoots();
-    for (const memory of this.store.listMemories({ limit: 10_000 })) {
+    const memories = this.store.listMemories({ limit: 10_000 });
+    const memoryRefs = new Set(
+      memories
+        .filter((memory) => memory.status !== "forgotten")
+        .map((memory) => refFor("memory", memory.id))
+    );
+    for (const node of this.repository.listNodes({ kind: "memory", limit: 10_000 })) {
+      if (!memoryRefs.has(node.ref)) this.repository.deleteNode(node.id);
+    }
+    for (const memory of memories) {
       if (memory.status !== "forgotten") this.syncMemory(memory);
     }
     for (const task of this.store.listTasks({ includeDeleted: false })) {
@@ -68,12 +77,26 @@ export class LibraryTreeService {
 
   syncMemory(memory: MemoryRecord): LibraryNode {
     const root = this.ensureRoot("memory", "记忆", "记忆");
+    const status = memoryStatusLabel(memory.status);
+    const statusFolder = this.ensureFolder(
+      root.id,
+      `hearth://folder/memory-status-${memory.status}`,
+      joinPath(root.path, status),
+      status
+    );
+    const kind = kindLabel(memory.kind);
+    const kindFolder = this.ensureFolder(
+      statusFolder.id,
+      `hearth://folder/memory-status-${memory.status}-kind-${memory.kind}`,
+      joinPath(statusFolder.path, kind),
+      kind
+    );
     const title = clipLine(memory.subjectKey || firstLine(memory.content) || kindLabel(memory.kind));
-    const path = joinPath(root.path, kindLabel(memory.kind), withSuffix(title, memory.id));
+    const path = joinPath(kindFolder.path, withSuffix(title, memory.id));
     return this.repository.upsertNode(this.node({
       kind: "memory",
       refId: memory.id,
-      parentId: root.id,
+      parentId: kindFolder.id,
       path,
       title,
       contentHash: memory.contentHash,
@@ -96,12 +119,19 @@ export class LibraryTreeService {
 
   syncTask(task: TaskRecord): LibraryNode {
     const root = this.ensureRoot("task", "任务", "任务");
+    const group = taskStatusGroup(task.status);
+    const groupFolder = this.ensureFolder(
+      root.id,
+      `hearth://folder/task-status-${group}`,
+      joinPath(root.path, group),
+      group
+    );
     const title = clipLine(task.title);
-    const path = joinPath(root.path, taskStatusGroup(task.status), withSuffix(title, task.id));
+    const path = joinPath(groupFolder.path, withSuffix(title, task.id));
     return this.repository.upsertNode(this.node({
       kind: "task",
       refId: task.id,
-      parentId: root.id,
+      parentId: groupFolder.id,
       path,
       title,
       projectId: task.projectId ?? null,
@@ -122,12 +152,18 @@ export class LibraryTreeService {
 
   syncSource(source: SourceConnection): LibraryNode {
     const root = this.ensureRoot("resource", "资料", "资料");
+    const sourcesFolder = this.ensureFolder(
+      root.id,
+      "hearth://folder/resources-sources",
+      joinPath(root.path, "来源"),
+      "来源"
+    );
     const title = clipLine(source.displayName);
-    const path = joinPath(root.path, "来源", withSuffix(title, source.id));
+    const path = joinPath(sourcesFolder.path, withSuffix(title, source.id));
     return this.repository.upsertNode(this.node({
       kind: "source",
       refId: source.id,
-      parentId: root.id,
+      parentId: sourcesFolder.id,
       path,
       title,
       contentHash: hash(`${source.provider}\n${source.displayName}\n${source.status}`),
@@ -173,10 +209,17 @@ export class LibraryTreeService {
   syncArtifact(artifact: ArtifactRecord): LibraryNode {
     const task = this.store.getTask(artifact.taskId);
     const taskTitle = task?.title ?? artifact.taskId;
+    const resourceRoot = this.ensureRoot("resource", "资料", "资料");
+    const artifactsFolder = this.ensureFolder(
+      resourceRoot.id,
+      "hearth://folder/resources-artifacts",
+      joinPath(resourceRoot.path, "产物"),
+      "产物"
+    );
     const folder = this.ensureFolder(
-      this.ensureRoot("resource", "资料", "资料").id,
+      artifactsFolder.id,
       `hearth://folder/artifacts-${artifact.taskId}`,
-      joinPath("资料", "产物", withSuffix(clipLine(taskTitle), artifact.taskId)),
+      joinPath(artifactsFolder.path, withSuffix(clipLine(taskTitle), artifact.taskId)),
       clipLine(taskTitle)
     );
     const title = clipLine(basename(artifact.relativePath));
@@ -464,7 +507,17 @@ export class LibraryTreeService {
 
   private ensureFolder(parentId: string, ref: string, path: string, title: string): LibraryNode {
     const existing = this.repository.getNodeByRef(ref);
-    if (existing) return existing;
+    if (existing) {
+      if (existing.parentId !== parentId || existing.path !== path || existing.title !== title) {
+        return this.repository.updateNode(existing.id, {
+          parentId,
+          path,
+          title,
+          updatedAt: new Date().toISOString()
+        }) ?? existing;
+      }
+      return existing;
+    }
     return this.repository.upsertNode({
       ...this.node({ kind: "folder", refId: ref.replace("hearth://folder/", ""), parentId, path, title, mimeType: "inode/directory" }),
       ref
@@ -503,6 +556,10 @@ function firstLine(value: string): string {
 
 function kindLabel(kind: string): string {
   return ({ fact: "事实", preference: "偏好", project: "项目", commitment: "承诺", experience: "经验", method: "方法" } as Record<string, string>)[kind] ?? kind;
+}
+
+function memoryStatusLabel(status: string): string {
+  return ({ candidate: "待确认", active: "已记住", conflict: "有冲突", superseded: "已替代", forgotten: "已遗忘" } as Record<string, string>)[status] ?? status;
 }
 
 function taskStatusGroup(status: string): string {

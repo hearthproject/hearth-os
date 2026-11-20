@@ -68,33 +68,73 @@ describe("LibraryTreeService", () => {
     expect(roots.map((node) => node.title)).toEqual(["记忆", "任务", "资料", "技能", "项目"]);
 
     const memory = tree.getNodeByRef("hearth://memory/mem-1");
-    expect(memory?.path).toContain("记忆/事实/");
+    expect(memory?.path).toContain("记忆/已记住/事实/");
     expect(memory?.metadata.memoryId).toBe("mem-1");
+    const memoryStatusFolder = tree.getNodeByRef("hearth://folder/memory-status-active");
+    const memoryKindFolder = tree.getNodeByRef("hearth://folder/memory-status-active-kind-fact");
+    expect(memory?.parentId).toBe(memoryKindFolder?.id);
+    expect(memoryKindFolder?.parentId).toBe(memoryStatusFolder?.id);
 
     const taskNode = tree.getNodeByRef("hearth://task/task-1");
     expect(taskNode?.path).toContain("任务/进行中/");
     expect(taskNode?.projectId).toBeNull();
+    expect(taskNode?.parentId).toBe(tree.getNodeByRef("hearth://folder/task-status-进行中")?.id);
 
     const sourceItem = tree.getNodeByRef("hearth://source/item-1");
     expect(sourceItem?.path).toContain("资料/来源/项目文档");
+    expect(tree.getNodeByRef("hearth://source/source-1")?.parentId)
+      .toBe(tree.getNodeByRef("hearth://folder/resources-sources")?.id);
 
     const artifact = tree.getNodeByRef("hearth://artifact/artifact-1");
     expect(artifact?.path).toContain("资料/产物/整理项目资料");
+    expect(artifact?.parentId).toBe(tree.getNodeByRef("hearth://folder/artifacts-task-1")?.id);
 
     const project = tree.getNodeByRef("hearth://project/project-1");
     expect(project?.path).toContain("项目/Hearth");
     store.close();
   });
 
-  it("returns child counts and one level of children", () => {
+  it("returns nested memory group folders and their children", () => {
     const store = new HearthStore(":memory:");
     seed(store);
     const tree = new LibraryTreeService(store);
     tree.syncAll();
     const memoryRoot = tree.buildTree(1).find((node) => node.title === "记忆");
     expect(memoryRoot?.childCount).toBe(1);
-    const withChildren = tree.buildTree(2).find((node) => node.title === "记忆");
-    expect(withChildren?.children?.[0]?.title).toContain("回答风格");
+    const withChildren = tree.buildTree(4).find((node) => node.title === "记忆");
+    expect(withChildren?.children?.[0]?.title).toBe("已记住");
+    expect(withChildren?.children?.[0]?.children?.[0]?.title).toBe("事实");
+    expect(withChildren?.children?.[0]?.children?.[0]?.children?.[0]?.title).toContain("回答风格");
+    store.close();
+  });
+
+  it("keeps node paths aligned with real parent folders and removes forgotten memory nodes", () => {
+    const store = new HearthStore(":memory:");
+    seed(store);
+    const tree = new LibraryTreeService(store);
+    tree.syncAll();
+
+    for (const ref of [
+      "hearth://memory/mem-1",
+      "hearth://task/task-1",
+      "hearth://source/source-1",
+      "hearth://source/item-1",
+      "hearth://artifact/artifact-1"
+    ]) {
+      const node = tree.getNodeByRef(ref);
+      expect(node).not.toBeNull();
+      const parent = node?.parentId ? tree.getNode(node.parentId) : null;
+      if (parent) expect(node?.path.startsWith(`${parent.path}/`)).toBe(true);
+    }
+
+    const memory = store.getMemory("mem-1");
+    expect(memory).not.toBeNull();
+    store.appendEvent({
+      type: "memory.updated",
+      payload: { ...memory!, status: "forgotten" as const, allowRecall: false }
+    });
+    tree.syncAll();
+    expect(tree.getNodeByRef("hearth://memory/mem-1")).toBeNull();
     store.close();
   });
 });
