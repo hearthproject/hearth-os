@@ -6,6 +6,7 @@ import { compactAgentMessages, compactAgentMessagesWithSummary, estimateMessageT
 import { createAgentState, progressSummary } from "./harness/file-state.ts";
 import { serializeAgentState } from "./harness/checkpoint-state.ts";
 import { markLostActiveWork } from "./harness/active-work.ts";
+import { storeOversizedToolResult } from "./harness/tool-output-store.ts";
 import { planModeAllowsCommand, planModeAllowsTool } from "./harness/plan.ts";
 import { buildPostCompactContext } from "./harness/post-compact.ts";
 import { todoReminder } from "./harness/todo.ts";
@@ -525,6 +526,17 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
           }
         }
         }
+      }
+
+      if (result.content.length > 16_000) {
+        const stored = storeOversizedToolResult(options.outDir, call.name, result.content);
+        result = {
+          ...result,
+          content: stored.content,
+          ...(stored.fullOutputPath
+            ? { metadata: { ...result.metadata, fullOutputPath: stored.fullOutputPath } }
+            : {})
+        };
       }
 
       const deniedPath = result.isError ? /路径不在授权范围内[：:]\s*(.+)/.exec(result.content)?.[1]?.trim() : undefined;
