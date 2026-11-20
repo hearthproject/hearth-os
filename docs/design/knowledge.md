@@ -17,20 +17,20 @@ Hearth（SQLite/事件账本，唯一权威）
 
 ## 产品入口
 
-- `/knowledge`（侧栏「知识库」）是知识库前台：OpenViking 连接与索引统计、记忆索引范围、自然语言搜索、记忆列表与纠错都在这一页完成。
+- `/knowledge`（侧栏「记忆」）是面向普通用户的记忆展示页：显示当前状态、已记住的内容摘要，并提供自然语言查找。页面不放置维护表单，也不需要用户日常操作。
 - `/memory` 是兼容旧链接的别名，指向同一个页面。
-- 设置 → 知识库连接负责安装/启动服务、服务地址、召回预算、写回范围与重建 cron；前台只保留日常使用需要的操作。
-- 前台始终区分两件事：记忆正文由 Hearth SQLite 持有；OpenViking 里只是可以随时删除、重建的语义索引。
+- 设置 → 记忆助手负责开启/暂停、服务地址、自动参考范围与整理计划；普通用户平时不需要进入。
+- 记忆正文由 Hearth SQLite 持有；OpenViking 里只是可以随时删除、重建的语义索引，展示页不直接暴露这层实现。
 
 ## 部署（本机）
 
 ### Hearth 内的一键安装
 
-OpenViking 不在 Hearth 安装包里。首次配置向导的“知识库（可选）”步骤和设置 → 知识库连接都提供同一个入口：
+OpenViking 不在 Hearth 安装包里。首次配置向导的“记忆助手（可选）”步骤和设置 → 记忆助手都提供同一个入口：
 
 1. 检测 `uv` 与 `openviking-server`。
 2. 一键执行 `uv tool install --python 3.13 "openviking[local-embed]" --upgrade`，安装日志实时回显。
-3. 安装完成后按需启动服务：首次进入知识库或第一个知识库请求时拉起，Hearth 退出时关闭。
+3. 安装完成后按需启动服务：首次进入记忆页或第一个记忆相关请求时拉起，Hearth 退出时关闭。
 4. 服务日志写入数据目录的 `logs/openviking.log`。
 
 不安装不影响聊天、任务、记忆等核心功能。
@@ -80,7 +80,7 @@ curl http://127.0.0.1:1933/health
 
 ## Hearth 配置
 
-设置 → 知识库连接：
+设置 → 记忆助手：
 
 - 启用开关
 - 服务地址（默认 `http://127.0.0.1:1933`）
@@ -115,8 +115,8 @@ viking://user/default/memories/<tier|preferences>/<slug>-<hash8>.md
 
 - 记忆：`status=active`、`allowRecall=true`、`sensitivity!=secret`、`taint=clean`、`originClass!=untrusted`。
 - `memories=curated` 只写 `instructions/curated`；`all` 写全部符合条件的记忆。
-- 前台的「记忆索引范围」直接映射 `write.memories`：`仅精选记忆=curated`、`全部干净记忆=all`、`不写入=off`；切换后会立即对账。
-- 评测与基准内容（`评测运行约束`、`eval-artifacts`、`EXP-YYYYMMDD`）始终不写入 OpenViking。前台默认隐藏这些经历，需要排查时再打开「显示评测经历」。
+- 设置里的「把记忆加入自动参考」直接映射 `write.memories`：`只加入精选内容=curated`、`加入全部可用内容=all`、`关闭=off`；切换后会立即对账。
+- 评测与基准内容（`评测运行约束`、`eval-artifacts`、`EXP-YYYYMMDD`）始终不写入 OpenViking。展示页始终隐藏这些经历，不需要提供排查开关。
 - 任务：只写 `status=completed`。
 - 来源：`status=ready` 且 `contentPath` 可读，正文上限 2MB。
 - 文本先做密钥脱敏；内容哈希用于幂等，重复触发不会重复写入。
