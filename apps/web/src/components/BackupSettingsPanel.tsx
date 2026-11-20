@@ -18,7 +18,7 @@ const ACTION_LABELS: Record<string, string> = {
   maintenanceRunsPruned: "修剪维护记录"
 };
 
-export function OperationsPage() {
+export function BackupSettingsPanel() {
   const queryClient = useQueryClient();
   const [backupPassphrase, setBackupPassphrase] = useState("");
   const [confirmPassphrase, setConfirmPassphrase] = useState("");
@@ -107,10 +107,10 @@ export function OperationsPage() {
   }
 
   return (
-    <div className="page operations-page">
+    <div className="operations-page">
       <div className="page-head">
         <div>
-          <h1>备份与运维</h1>
+          <h2>备份与运维</h2>
           <p className="page-meta">备份使用口令派生密钥加密；恢复前会在临时数据库执行 schema、完整性与投影校验。</p>
         </div>
         <button className="ghost-button" onClick={() => void backupsQuery.refetch()} disabled={backupsQuery.isFetching}>

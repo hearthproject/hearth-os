@@ -37,6 +37,8 @@ import type {
   WebSearchSettingsView
 } from "../lib/types.ts";
 import { ExecutorSettingsPanel } from "../components/ExecutorSettingsPanel.tsx";
+import { BackupSettingsPanel } from "../components/BackupSettingsPanel.tsx";
+import { SecuritySettingsPanel } from "../components/SecuritySettingsPanel.tsx";
 import { FeishuSettingsPanel } from "../components/FeishuSettingsPanel.tsx";
 import { KnowledgeSettingsPanel } from "../components/KnowledgeSettingsPanel.tsx";
 
@@ -60,7 +62,7 @@ const TABS: Array<{ id: SettingsTab; label: string }> = [
   { id: "projects", label: "项目" },
   { id: "extensions", label: "扩展" },
   { id: "automation", label: "记忆" },
-  { id: "knowledge", label: "知识库连接" },
+  { id: "knowledge", label: "记忆助手" },
   { id: "connections", label: "连接" },
   { id: "context", label: "上下文" },
   { id: "data", label: "数据" }
@@ -994,6 +996,8 @@ function DataTab() {
         </>
       )}
       <TrashPanel />
+      <BackupSettingsPanel />
+      <SecuritySettingsPanel />
     </section>
   );
 }

@@ -17,7 +17,7 @@ const AUDIT_LABELS: Record<string, string> = {
   "desktop.frozen": "终止桌面会话"
 };
 
-export function SecurityPage() {
+export function SecuritySettingsPanel() {
   const queryClient = useQueryClient();
   const [noticed, setNoticed] = useState<string | null>(null);
   const securityQuery = useQuery({ queryKey: ["security"], queryFn: api.security, refetchInterval: 20_000 });
@@ -49,10 +49,10 @@ export function SecurityPage() {
   });
 
   return (
-    <div className="page security-page">
+    <div className="security-page">
       <div className="page-head">
         <div>
-          <h1>安全与撤销</h1>
+          <h2>安全与撤销</h2>
           <p className="page-meta">全局停止会立即停下调度器、待处理审批和桌面会话；不会删除任务、记忆或产物。</p>
         </div>
         <Link className="ghost-button" to="/devices"><ShieldCheck size={14} /> 管理设备</Link>
@@ -83,8 +83,7 @@ export function SecurityPage() {
         <dl className="kv-grid security-boundaries">
           <div><dt>设备丢失</dt><dd>在设备页撤销后，令牌、能力和活动会话立即失效。需要重新配对。</dd></div>
           <div><dt>设备换密钥</dt><dd>在设备页轮换令牌后，旧令牌失效；新令牌只显示一次，需要交给桌面助手重新连接。</dd></div>
-          <div><dt>同步对端</dt><dd>在同步页撤销后，旧令牌不能继续读取事件；不会删除本机已有任务或记忆。</dd></div>
-          <div><dt>删除数据</dt><dd>全局停止不删除数据。备份、导出和忽略记忆分别有独立入口，不把“停止”伪装成删除。</dd></div>
+          <div><dt>删除数据</dt><dd>全局停止不删除数据。可在“数据”页恢复备份、导出或清理回收站，不把“停止”伪装成删除。</dd></div>
         </dl>
       </section>
 
