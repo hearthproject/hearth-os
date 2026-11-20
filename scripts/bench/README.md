@@ -41,3 +41,19 @@ The internal suite is the fast, deterministic gate. Public benchmarks are run th
 - Terminal-Bench 2.x: 89 terminal tasks through Harbor.
 
 Do not mix harness scores with model scores in one table. Record the model, commit, budget and context window with every run.
+
+### Generic suite runner
+
+`run-suite.ts` runs one agent per JSONL task in a disposable copy, executes an optional test command and records the diff. Convert the upstream dataset to this shape:
+
+```json
+{"id":"task-1","workspace":"/data/task-1","prompt":"Fix the failing test","testCommand":"pytest -q","testTimeoutSeconds":600}
+```
+
+```bash
+npm run bench:suite -- \
+  --suite tasks.jsonl --report aider.json \
+  --model example-model --base-url https://api.example.com/v1 --api-key "$HEARTH_MODEL_API_KEY"
+```
+
+For Aider, map each exercise directory and run its test script. For SWE-bench, use the checked-out issue workspace and the repository's test command. For Terminal-Bench, point `workspace` at the task container's mounted directory and use the task's verification command. Keep Docker/container orchestration outside the harness so the same agent runner is measured.
