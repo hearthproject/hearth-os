@@ -1656,6 +1656,7 @@ export class HearthScheduler {
           nativeSkillIndex = buildNativeSkillIndex(availableSkills);
         }
       }
+      let subagentManager: SubagentTaskManager | undefined;
       if (executorId === "native") {
         if (this.knowledge?.isEnabled() && this.knowledgeSettings) {
           extraNativeTools.push(...createKnowledgeTools({ settings: this.knowledgeSettings }));
@@ -1683,6 +1684,7 @@ export class HearthScheduler {
         if (remainingSubagents > 0) {
           const subagentTool = process.env.HEARTH_AGENT_TOOL === "0" ? createSubagentTool : createAgentTool;
           const manager = new SubagentTaskManager(remainingSubagents);
+          subagentManager = manager;
           if (subagentTool === createAgentTool) extraNativeTools.push(...createAgentLifecycleTools(manager));
           controller.signal.addEventListener("abort", () => manager.cancelAll(), { once: true });
           extraNativeTools.push(subagentTool({
@@ -1715,6 +1717,7 @@ export class HearthScheduler {
         budget,
         signal: controller.signal,
         fullPermission,
+        ...(subagentManager ? { steering: () => subagentManager?.takeNotifications() ?? [] } : {}),
         isFullPermission: () => this.service.approvalModeForTask(task) === "full",
         contextSettings: this.context.settings(),
         nativeSettings,

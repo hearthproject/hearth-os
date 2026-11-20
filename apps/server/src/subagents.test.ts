@@ -140,6 +140,9 @@ describe("native subagents", () => {
     expect(waited.content).toContain("status: completed");
     expect(waited.content).toContain("后台完成");
     expect((await statusTool.execute({}, context(parentWorktree.path))).content).toContain("completed");
+    const notifications = manager.takeNotifications();
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]?.content).toContain("<subagent_notification>");
   });
 
   it("creates an isolated child worktree from the parent HEAD and commits its changes", async () => {

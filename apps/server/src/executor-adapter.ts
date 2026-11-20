@@ -1,5 +1,6 @@
 import type {
   AgentCheckpoint,
+  AgentMessage,
   AgentResumeState,
   AgentTool,
   AgentToolAuthorization,
@@ -61,6 +62,7 @@ export interface ExecutorAttemptContext {
   activeThreadId?: string;
   extraNativeTools?: AgentTool[];
   nativeSkillIndex?: string;
+  steering?: (() => AgentMessage[]) | undefined;
   onProgress: (event: { kind: string; message: string; detail?: TaskProgressDetail }) => void;
   onNativeContextEvent: (event: RuntimeEvent) => void;
   onNativeCheckpoint: (checkpoint: AgentCheckpoint) => void | Promise<void>;
@@ -134,6 +136,7 @@ export class NativeExecutorAdapter implements ExecutorAdapter {
       ...(resumable ? { resume: resumable } : {}),
       ...(input.extraNativeTools?.length ? { extraTools: input.extraNativeTools } : {}),
       ...(input.nativeSkillIndex ? { skillIndex: input.nativeSkillIndex } : {}),
+      ...(input.steering ? { steering: input.steering } : {}),
       expectedOutputs: input.expectedOutputs,
       onProgress: input.onProgress,
       onContextEvent: input.onNativeContextEvent,

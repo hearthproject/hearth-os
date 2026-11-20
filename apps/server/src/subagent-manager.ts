@@ -1,4 +1,4 @@
-import type { AgentTool, AgentToolResult } from "@hearth/agent-runtime";
+import type { AgentMessage, AgentTool, AgentToolResult } from "@hearth/agent-runtime";
 
 export type ManagedAgentStatus = "running" | "completed" | "failed" | "cancelled";
 
@@ -28,8 +28,13 @@ export interface ManagedAgentView {
 
 export class SubagentTaskManager {
   private readonly jobs = new Map<string, ManagedAgent>();
+  private readonly notifications: AgentMessage[] = [];
 
   constructor(private readonly maxConcurrent = 4) {}
+
+  takeNotifications(): AgentMessage[] {
+    return this.notifications.splice(0, this.notifications.length);
+  }
 
   start(input: { id: string; type: string; title: string }, run: (signal: AbortSignal) => Promise<AgentToolResult>): ManagedAgent {
     const running = [...this.jobs.values()].filter((job) => job.status === "running").length;
@@ -53,11 +58,13 @@ export class SubagentTaskManager {
       .then((result) => {
         job.result = result;
         job.status = job.controller.signal.aborted ? "cancelled" : "completed";
+        this.notify(job);
         return result;
       })
       .catch((error) => {
         job.error = error instanceof Error ? error.message : String(error);
         job.status = job.controller.signal.aborted ? "cancelled" : "failed";
+        this.notify(job);
         throw error;
       })
       .finally(() => {
@@ -113,6 +120,15 @@ export class SubagentTaskManager {
       job.status = "cancelled";
       job.endedAt = new Date().toISOString();
     }
+  }
+
+  private notify(job: ManagedAgent): void {
+    if (job.status === "running") return;
+    const summary = job.result?.content.slice(0, 2_000) ?? job.error ?? "(no summary)";
+    this.notifications.push({
+      role: "user",
+      content: `<subagent_notification>\nagentId: ${job.id}\ntype: ${job.type}\nstatus: ${job.status}\nsummary: ${summary}\n</subagent_notification>`
+    });
   }
 }
 

@@ -62,6 +62,7 @@ export interface NativeRunOptions {
   isFullPermission?: () => boolean;
   extraTools?: AgentTool[];
   skillIndex?: string;
+  steering?: () => AgentMessage[];
   onContextSummary?: (messages: AgentMessage[], signal: AbortSignal) => Promise<ContextSummary>;
 }
 
@@ -178,6 +179,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     ...(coding ? { reminders: CODING_REMINDERS } : {}),
     signal: options.signal,
     ...(resume ? { resume } : {}),
+    ...(options.steering ? { steering: options.steering } : {}),
     contextWindowTokens: options.settings.contextWindowTokens,
     requireFinishTool: true,
     stopOnToolError: drafting,
