@@ -5,37 +5,13 @@ import { extractSourceBytes } from "@hearth/agent-runtime";
 import type { LibraryNode } from "@hearth/core";
 import type { HearthStore } from "@hearth/eventlog";
 import { redactSecrets } from "../context.ts";
+import { isSensitivePath } from "./paths.ts";
 import type { LibraryChunkInput, LibraryRepository } from "./repository.ts";
 import type { LibraryTreeService } from "./tree.ts";
 
 const DEFAULT_MAX_CHARS = 1_000;
 const DEFAULT_OVERLAP_CHARS = 150;
 const DEFAULT_MAX_FILE_BYTES = 8 * 1024 * 1024;
-
-const EXCLUDED_DIRECTORIES = new Set([
-  ".git",
-  ".venv",
-  "__pycache__",
-  "node_modules",
-  "dist",
-  "build"
-]);
-
-const EXCLUDED_FILE_PATTERNS = [
-  /^\.env(?:\.|$)/i,
-  /\.(?:pem|key|p12|pfx|kdbx)$/i,
-  /^id_(?:rsa|dsa|ecdsa|ed25519)$/i,
-  /^\.npmrc$/i,
-  /^\.pypirc$/i,
-  /^\.netrc$/i,
-  /^\.git-credentials$/i,
-  /^master\.key$/i,
-  /^credentials?(?:\.|$)/i,
-  /^secrets?(?:\.|$)/i,
-  /^cookies?(?:\.|$)/i,
-  /^auth\.json$/i,
-  /^wallet\.dat$/i
-];
 
 export interface LibraryChunkDraft {
   text: string;
@@ -263,14 +239,7 @@ export function chunkText(text: string, maxChars = DEFAULT_MAX_CHARS, overlapCha
   return chunks;
 }
 
-export function isSensitivePath(path: string): boolean {
-  const normalized = path.replace(/\\/g, "/");
-  const segments = normalized.toLowerCase().split("/").filter(Boolean);
-  if (segments.some((segment) => EXCLUDED_DIRECTORIES.has(segment))) return true;
-  if (segments.some((segment) => [".ssh", ".aws", ".azure", ".gnupg"].includes(segment))) return true;
-  const name = segments.at(-1) ?? "";
-  return EXCLUDED_FILE_PATTERNS.some((pattern) => pattern.test(name));
-}
+export { isSensitivePath } from "./paths.ts";
 
 function findBoundary(text: string, proposedEnd: number, minimum: number): number {
   const searchStart = Math.max(minimum, proposedEnd - 240);

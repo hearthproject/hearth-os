@@ -146,7 +146,7 @@ export interface RunAggregate {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 35;
+export const CURRENT_SCHEMA_VERSION = 36;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -961,6 +961,15 @@ CREATE TABLE IF NOT EXISTS library_trash (
   restored_at TEXT
 );
 CREATE INDEX IF NOT EXISTS library_trash_expiry_idx ON library_trash(restored_at, expires_at);
+
+CREATE TABLE IF NOT EXISTS library_hidden (
+  ref TEXT PRIMARY KEY,
+  path TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  reason TEXT,
+  hidden_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS library_hidden_path_idx ON library_hidden(path);
 
 CREATE TABLE IF NOT EXISTS library_jobs (
   id TEXT PRIMARY KEY,

@@ -1,9 +1,11 @@
-import { createHash } from "node:crypto";
-import { basename } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, readdirSync, statSync, type Stats } from "node:fs";
+import { basename, extname, join, relative, resolve } from "node:path";
 import type {
   ArtifactRecord,
   LibraryNode,
   LibraryNodeKind,
+  LibraryRoot,
   LibraryTreeNode,
   LocalProject,
   MemoryRecord,
@@ -13,7 +15,10 @@ import type {
   TaskRecord
 } from "@hearth/core";
 import type { HearthStore } from "@hearth/eventlog";
+import { isSensitivePath } from "./paths.ts";
 import { LibraryRepository } from "./repository.ts";
+
+const MAX_SCANNED_ENTRIES = 20_000;
 
 const ROOT_REFS = {
   memory: "hearth://root/memory",
@@ -47,6 +52,7 @@ export class LibraryTreeService {
     }
     for (const project of this.store.listLocalProjects()) this.syncProject(project);
     for (const skill of this.store.listSkills()) this.syncSkill(skill);
+    this.syncFileRoots();
     return { nodes: this.repository.countNodes() };
   }
 
@@ -262,6 +268,132 @@ export class LibraryTreeService {
     return this.repository.listChildren(id);
   }
 
+  listRoots(): LibraryRoot[] {
+    return this.repository.listRoots();
+  }
+
+  addRoot(path: string, options: { projectId?: string | null } = {}): LibraryRoot {
+    const absolute = resolve(path);
+    if (!existsSync(absolute)) throw new Error("这个文件夹不存在");
+    const stat = statSync(absolute);
+    const now = new Date().toISOString();
+    const existing = this.repository.listRoots().find((root) => resolve(root.path) === absolute);
+    const root: LibraryRoot = existing ?? {
+      id: randomUUID(),
+      path: absolute,
+      kind: stat.isDirectory() ? "folder" : "file",
+      projectId: options.projectId ?? null,
+      recursive: stat.isDirectory(),
+      includeGlobs: [],
+      excludeGlobs: [],
+      lastScanAt: null,
+      status: "ready",
+      error: null,
+      createdAt: now,
+      updatedAt: now
+    };
+    const saved = this.repository.upsertRoot({ ...root, status: "ready", error: null, updatedAt: now });
+    this.syncFileRoot(saved);
+    return saved;
+  }
+
+  removeRoot(id: string): boolean {
+    const root = this.repository.listRoots().find((candidate) => candidate.id === id);
+    if (!root) return false;
+    const node = this.repository.getNodeByRef(`hearth://folder/files-root-${id}`);
+    if (node) this.repository.hideNode(node, "folder_removed");
+    this.repository.deleteRoot(root.path);
+    return true;
+  }
+
+  syncFileRoots(): void {
+    for (const root of this.repository.listRoots()) this.syncFileRoot(root);
+  }
+
+  private syncFileRoot(root: LibraryRoot): void {
+    try {
+      if (!existsSync(root.path)) throw new Error("文件夹已不存在");
+      const resourceRoot = this.ensureRoot("resource", "资料", "资料");
+      const filesRoot = this.ensureFolder(resourceRoot.id, "hearth://folder/files", "资料/文件", "文件");
+      const title = clipLine(basename(root.path) || root.path);
+      const path = joinPath(filesRoot.path, withSuffix(title, root.id));
+      const stat = statSync(root.path);
+      if (root.kind === "file") {
+        this.syncFileEntry(root, filesRoot, root.path, title, path, stat);
+      } else {
+        const folder = this.ensureFolder(filesRoot.id, `hearth://folder/files-root-${root.id}`, path, title);
+        this.walkFileRoot(root, folder, root.path, "", { count: 0 });
+      }
+      this.repository.upsertRoot({ ...root, status: "ready", error: null, lastScanAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    } catch (error) {
+      this.repository.upsertRoot({
+        ...root,
+        status: "error",
+        error: error instanceof Error ? error.message : String(error),
+        updatedAt: new Date().toISOString()
+      });
+    }
+  }
+
+  private walkFileRoot(root: LibraryRoot, parent: LibraryNode, absoluteDir: string, relativeDir: string, state: { count: number }): void {
+    if (state.count >= MAX_SCANNED_ENTRIES) return;
+    const entries = readdirSync(absoluteDir, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name));
+    for (const entry of entries) {
+      if (state.count >= MAX_SCANNED_ENTRIES) return;
+      if (entry.isSymbolicLink()) continue;
+      const absolute = join(absoluteDir, entry.name);
+      if (isSensitivePath(absolute)) continue;
+      const rel = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;
+      const nodePath = joinPath(parent.path, clipLine(entry.name));
+      state.count += 1;
+      if (entry.isDirectory()) {
+        const folder = this.ensureFileNode(root, "folder", `dir:${rel}`, parent.id, nodePath, entry.name, absolute, rel, null);
+        this.walkFileRoot(root, folder, absolute, rel, state);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const stat = statSync(absolute);
+      this.syncFileEntry(root, parent, absolute, entry.name, nodePath, stat);
+    }
+  }
+
+  private syncFileEntry(root: LibraryRoot, parent: LibraryNode, absolute: string, title: string, path: string, stat: Stats): LibraryNode {
+    const rel = relative(root.path, absolute).replace(/\\/g, "/");
+    return this.ensureFileNode(root, "file", `file:${rel}`, parent.id, path, title, absolute, rel, stat);
+  }
+
+  private ensureFileNode(
+    root: LibraryRoot,
+    kind: "file" | "folder",
+    refId: string,
+    parentId: string,
+    path: string,
+    title: string,
+    absolute: string,
+    rel: string,
+    stat: Stats | null
+  ): LibraryNode {
+    const node = this.node({
+      kind,
+      refId: `${root.id}:${refId}`,
+      parentId,
+      path,
+      title: clipLine(title),
+      projectId: root.projectId,
+      mimeType: kind === "folder" ? "inode/directory" : mimeFor(title),
+      sizeBytes: stat?.isFile() ? stat.size : null,
+      contentHash: stat ? hash(`${stat.size}:${stat.mtimeMs}`) : null,
+      metadata: {
+        rootId: root.id,
+        absolutePath: absolute,
+        relativePath: rel,
+        extension: kind === "file" ? extname(title).toLowerCase() : null
+      },
+      updatedAt: stat ? new Date(stat.mtimeMs).toISOString() : new Date().toISOString()
+    });
+    return this.repository.upsertNode({ ...node, ref: `hearth://${kind}/${root.id}/${hash(refId).slice(0, 20)}` });
+  }
+
   treeNode(node: LibraryNode, remainingDepth: number): LibraryTreeNode {
     const children = remainingDepth > 1 ? this.repository.listChildren(node.id).map((child) => this.treeNode(child, remainingDepth - 1)) : undefined;
     const childCount = children?.length ?? this.repository.listChildren(node.id, { limit: 5_000 }).length;
@@ -368,6 +500,15 @@ function taskStatusGroup(status: string): string {
   if (status === "completed") return "已完成";
   if (status === "failed" || status === "recoverable") return "失败";
   return "其他";
+}
+
+function mimeFor(name: string): string | null {
+  return ({
+    ".md": "text/markdown", ".markdown": "text/markdown", ".txt": "text/plain",
+    ".json": "application/json", ".csv": "text/csv", ".html": "text/html", ".htm": "text/html",
+    ".pdf": "application/pdf", ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  } as Record<string, string>)[extname(name).toLowerCase()] ?? "application/octet-stream";
 }
 
 export { nodeId, refFor };

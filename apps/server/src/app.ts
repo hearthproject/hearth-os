@@ -67,6 +67,8 @@ import { KnowledgeClient } from "./knowledge/client.ts";
 import { KnowledgeSettingsError, KnowledgeSettingsStore, type KnowledgeSettingsPatch } from "./knowledge/settings.ts";
 import { KnowledgeSyncService } from "./knowledge/sync.ts";
 import { KnowledgeManagedService, KnowledgeSetupError } from "./knowledge/managed-service.ts";
+import { LibraryService } from "./library/service.ts";
+import { registerLibraryRoutes } from "./library/routes.ts";
 import { McpServerError, McpServerService } from "./mcp-servers.ts";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
@@ -684,6 +686,18 @@ export async function buildServer(options: BuildServerOptions = {}) {
     mail
   }));
   const memory = new MemoryService(service);
+  const library = new LibraryService(store, { memory });
+  service.bus.subscribe((event) => {
+    if (
+      event.type.startsWith("memory.")
+      || event.type.startsWith("task.")
+      || event.type === "source.item.updated"
+      || event.type === "artifact.published"
+      || event.type.startsWith("skill.")
+    ) {
+      library.markDirty();
+    }
+  });
   const projects = new ProjectService(store);
   const dossiers = new DossierStore(DOSSIER_DIR);
   const workstyle = new WorkstyleStore(WORKSTYLE_PATH);
@@ -950,7 +964,10 @@ export async function buildServer(options: BuildServerOptions = {}) {
     knowledge,
     personal: { ontology, mentions, broker: contextBroker, writer: ontologyWriter }
   });
+  registerLibraryRoutes(app, library);
+  library.start();
   app.addHook("onClose", async () => {
+    library.stop();
     knowledgeSync.stop();
     knowledgeManaged.stop();
     await feishu.stop();

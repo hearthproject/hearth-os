@@ -12,6 +12,13 @@ import type { HearthStore } from "@hearth/eventlog";
 
 type Row = Record<string, unknown>;
 
+const VISIBLE_NODE_SQL = `NOT EXISTS (
+  SELECT 1 FROM library_hidden h
+  WHERE h.ref = context_nodes.ref
+     OR context_nodes.path = h.path
+     OR substr(context_nodes.path, 1, length(h.path) + 1) = h.path || '/'
+)`;
+
 export interface LibraryJob {
   id: string;
   kind: string;
@@ -83,12 +90,12 @@ export class LibraryRepository {
   }
 
   getNode(id: string): LibraryNode | null {
-    const row = this.store.db.prepare("SELECT * FROM context_nodes WHERE id = ?").get(id) as Row | undefined;
+    const row = this.store.db.prepare(`SELECT * FROM context_nodes WHERE id = ? AND ${VISIBLE_NODE_SQL}`).get(id) as Row | undefined;
     return row ? nodeFromRow(row) : null;
   }
 
   getNodeByRef(ref: string): LibraryNode | null {
-    const row = this.store.db.prepare("SELECT * FROM context_nodes WHERE ref = ?").get(ref) as Row | undefined;
+    const row = this.store.db.prepare(`SELECT * FROM context_nodes WHERE ref = ? AND ${VISIBLE_NODE_SQL}`).get(ref) as Row | undefined;
     return row ? nodeFromRow(row) : null;
   }
 
@@ -96,8 +103,8 @@ export class LibraryRepository {
     const limit = Math.max(1, Math.min(5_000, options.limit ?? 2_000));
     const trashed = options.includeTrashed ? "" : " AND trashed_at IS NULL";
     const rows = parentId === null
-      ? this.store.db.prepare(`SELECT * FROM context_nodes WHERE parent_id IS NULL${trashed} ORDER BY title ASC LIMIT ?`).all(limit) as Row[]
-      : this.store.db.prepare(`SELECT * FROM context_nodes WHERE parent_id = ?${trashed} ORDER BY title ASC LIMIT ?`).all(parentId, limit) as Row[];
+      ? this.store.db.prepare(`SELECT * FROM context_nodes WHERE parent_id IS NULL${trashed} AND ${VISIBLE_NODE_SQL} ORDER BY title ASC LIMIT ?`).all(limit) as Row[]
+      : this.store.db.prepare(`SELECT * FROM context_nodes WHERE parent_id = ?${trashed} AND ${VISIBLE_NODE_SQL} ORDER BY title ASC LIMIT ?`).all(parentId, limit) as Row[];
     return rows.map(nodeFromRow);
   }
 
@@ -123,7 +130,8 @@ export class LibraryRepository {
       }
     }
     if (!options.includeTrashed) clauses.push("trashed_at IS NULL");
-    const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+    clauses.push(VISIBLE_NODE_SQL);
+    const where = `WHERE ${clauses.join(" AND ")}`;
     values.push(Math.max(1, Math.min(10_000, options.limit ?? 5_000)));
     const rows = this.store.db
       .prepare(`SELECT * FROM context_nodes ${where} ORDER BY kind ASC, title ASC LIMIT ?`)
@@ -149,9 +157,9 @@ export class LibraryRepository {
       node.projectId, node.mimeType, node.sizeBytes, node.contentHash, node.status,
       node.sensitivity, JSON.stringify(node.metadata), node.createdAt, node.updatedAt, node.trashedAt
     );
-    const saved = this.getNodeByRef(node.ref);
+    const saved = this.store.db.prepare("SELECT * FROM context_nodes WHERE ref = ?").get(node.ref) as Row | undefined;
     if (!saved) throw new Error(`failed to persist library node ${node.ref}`);
-    return saved;
+    return nodeFromRow(saved);
   }
 
   updateNode(id: string, patch: Partial<Pick<LibraryNode, "parentId" | "path" | "title" | "status" | "metadata" | "trashedAt" | "updatedAt" | "contentHash" | "sizeBytes" | "mimeType" | "sensitivity">>): LibraryNode | null {
@@ -222,7 +230,7 @@ export class LibraryRepository {
   }
 
   countNodes(): number {
-    return Number((this.store.db.prepare("SELECT COUNT(*) AS count FROM context_nodes WHERE trashed_at IS NULL").get() as Row).count ?? 0);
+    return Number((this.store.db.prepare(`SELECT COUNT(*) AS count FROM context_nodes WHERE trashed_at IS NULL AND ${VISIBLE_NODE_SQL}`).get() as Row).count ?? 0);
   }
 
   countChunks(): number {
@@ -395,6 +403,41 @@ export class LibraryRepository {
   getTrash(id: string): LibraryTrashEntry | null {
     const row = this.store.db.prepare("SELECT * FROM library_trash WHERE id = ?").get(id) as Row | undefined;
     return row ? trashFromRow(row) : null;
+  }
+
+  hideNode(node: LibraryNode, reason: string | null = null): void {
+    this.store.db.prepare(
+      `INSERT INTO library_hidden (ref, path, kind, reason, hidden_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(ref) DO UPDATE SET path=excluded.path, kind=excluded.kind, reason=excluded.reason, hidden_at=excluded.hidden_at`
+    ).run(node.ref, node.path, node.kind, reason, new Date().toISOString());
+  }
+
+  unhidePath(path: string): void {
+    this.store.db.prepare(
+      "DELETE FROM library_hidden WHERE path = ? OR substr(path, 1, length(?) + 1) = ? || '/'"
+    ).run(path, path, path);
+  }
+
+  isHidden(ref: string, path: string): boolean {
+    const row = this.store.db.prepare(
+      `SELECT 1 AS hidden FROM library_hidden
+       WHERE ref = ? OR path = ? OR substr(?, 1, length(path) + 1) = path || '/' LIMIT 1`
+    ).get(ref, path, path) as Row | undefined;
+    return Boolean(row);
+  }
+
+  deleteTrash(id: string): void {
+    this.store.db.prepare("DELETE FROM library_trash WHERE id = ?").run(id);
+  }
+
+  deleteNodesUnderPath(path: string): number {
+    const rows = this.store.db.prepare(
+      "SELECT id FROM context_nodes WHERE path = ? OR substr(path, 1, length(?) + 1) = ? || '/'"
+    ).all(path, path, path) as Row[];
+    for (const row of rows) this.deleteNode(String(row.id));
+    this.store.db.prepare("DELETE FROM library_hidden WHERE path = ? OR substr(path, 1, length(?) + 1) = ? || '/'")
+      .run(path, path, path);
+    return rows.length;
   }
 
   restoreTrash(id: string): LibraryTrashEntry | null {
