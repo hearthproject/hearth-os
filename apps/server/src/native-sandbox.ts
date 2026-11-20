@@ -148,7 +148,9 @@ export class WindowsAclSandboxProvider implements SandboxProvider {
       this.explicitRunnerPath,
       process.env.HEARTH_SANDBOX_RUNNER,
       join(dirname(process.execPath), "sandbox", "windows-acl", "runner.mjs"),
-      join(dirname(process.execPath), "sandbox", "windows-acl", "runner.js")
+      join(dirname(process.execPath), "sandbox", "windows-acl", "runner.js"),
+      join(dirname(process.execPath), "sandbox", "windows-acl", "lib", "runner.mjs"),
+      join(dirname(process.execPath), "sandbox", "windows-acl", "lib", "runner.js")
     ].filter((candidate): candidate is string => Boolean(candidate));
     for (const candidate of candidates) {
       if (existsSync(candidate)) {

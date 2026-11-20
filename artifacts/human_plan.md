@@ -1,6 +1,6 @@
 # Hearth Native Harness Sandbox — Engineering Plan
 
-Status: approved plan v2, P0 implementation in progress on `main`.
+Status: approved plan v2, P0 core implementation landed on `main`; shell git checkpoints remain deferred.
 Audience: Hearth server/runtime engineers.
 
 ## 1. Approved requirements
@@ -101,7 +101,7 @@ native-executor
 4. Confirm `TMP`/`TEMP` point into the private temp tree.
 5. Confirm `OPENAI_API_KEY` and `HEARTH_*` are absent from the child environment.
 6. Confirm task detail shows the sandbox badge and audit JSONL has `sandbox.selected`.
-7. Confirm a packaged build can resolve `resources/sandbox/windows-acl/runner.js` and pass probe.
+7. Confirm a packaged build can resolve `resources/sandbox/windows-acl/lib/runner.js` and pass probe.
 
 ### 3.3 Current verification record
 
