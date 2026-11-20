@@ -409,7 +409,7 @@ function KnowledgeSearchPanel({
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="例如：上次 PR 审查的结论 / 我的发布流程 / 写作偏好"
+            placeholder="上次 PR 审查的结论 / 我的发布流程 / 写作偏好"
             disabled={!connected}
           />
         </label>

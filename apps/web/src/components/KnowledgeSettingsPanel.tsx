@@ -21,6 +21,8 @@ export function KnowledgeSettingsPanel() {
 
   const status: KnowledgeStatusResponse | undefined = statusQuery.data;
   const setup = setupQuery.data;
+  const enabled = status?.settings.enabled ?? false;
+  const healthy = enabled && status?.health.ok === true;
 
   useEffect(() => {
     if (autoStartRef.current || !setup || !draft) return;
@@ -134,9 +136,9 @@ export function KnowledgeSettingsPanel() {
             <h3>记忆助手</h3>
             <p>开启后，聊天和任务会自动参考你记住的内容。关闭后不影响聊天、任务和已有记忆。</p>
           </div>
-          <span className={`status-chip ${status?.health.ok ? "ok" : "warn"}`}>
-            <span className={`status-dot ${status?.health.ok ? "online" : "offline"}`} />
-            {status?.health.ok ? `在线 · ${status.health.version ?? ""}` : "未连接"}
+          <span className={`status-chip ${healthy ? "ok" : "warn"}`}>
+            <span className={`status-dot ${healthy ? "online" : "offline"}`} />
+            {healthy ? "已开启" : enabled ? "未连接" : "未开启"}
           </span>
         </div>
 
@@ -254,6 +256,7 @@ export function KnowledgeSettingsPanel() {
               <option value="curated">只加入精选内容</option>
               <option value="all">加入全部可用内容</option>
             </select>
+            <span className="form-hint">希望自动记录的任务经历也能被参考时，选择“加入全部可用内容”。</span>
           </label>
           <label>
             <span>把已完成任务加入自动参考</span>
