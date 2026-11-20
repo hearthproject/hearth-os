@@ -8,6 +8,7 @@ import type {
 } from "@hearth/core";
 import type { HearthStore } from "@hearth/eventlog";
 import type { MemoryService } from "../memory.ts";
+import { embeddingToBuffer, type EmbeddingProvider } from "./embedding.ts";
 import { LibraryIndexer, type LibraryIndexResult } from "./indexer.ts";
 import { LibraryTreeService } from "./tree.ts";
 
@@ -28,6 +29,12 @@ export class LibraryError extends Error {
 export interface LibraryServiceOptions {
   memory?: MemoryService;
   indexer?: LibraryIndexer;
+  embeddingProvider?: EmbeddingProvider;
+}
+
+export interface LibraryReindexResult extends LibraryIndexResult {
+  embedded: number;
+  semanticError: string | null;
 }
 
 export class LibraryService {
@@ -35,14 +42,16 @@ export class LibraryService {
   readonly indexer: LibraryIndexer;
   private readonly store: HearthStore;
   private readonly memory: MemoryService | null;
+  private readonly embeddingProvider: EmbeddingProvider | null;
   private dirty = true;
-  private refresh: Promise<LibraryIndexResult> | null = null;
+  private refresh: Promise<LibraryReindexResult> | null = null;
   private timer: NodeJS.Timeout | null = null;
   private interval: NodeJS.Timeout | null = null;
 
   constructor(store: HearthStore, options: LibraryServiceOptions = {}) {
     this.store = store;
     this.memory = options.memory ?? null;
+    this.embeddingProvider = options.embeddingProvider ?? null;
     this.tree = new LibraryTreeService(store);
     this.indexer = options.indexer ?? new LibraryIndexer(store, this.tree);
   }
@@ -71,32 +80,70 @@ export class LibraryService {
 
   status(): LibraryStatus {
     const settings = this.tree.repository.getSettings();
+    const modelId = this.embeddingProvider?.modelId ?? settings.modelId;
     return {
       nodeCount: this.tree.repository.countNodes(),
       chunkCount: this.tree.repository.countChunks(),
       indexedCount: this.countDocuments(),
       pendingJobs: this.tree.repository.listJobs("pending", 10_000).length,
-      semanticReady: false,
+      semanticReady: this.embeddingProvider?.state === "ready"
+        && this.tree.repository.listChunksPendingEmbedding(modelId, 1).length === 0,
       semanticEnabled: settings.semanticEnabled,
-      modelId: settings.modelId,
-      modelState: "missing",
-      modelDownloadProgress: null,
+      modelId,
+      modelState: this.embeddingProvider?.state ?? "missing",
+      modelDownloadProgress: this.embeddingProvider?.progress ?? null,
       lastIndexAt: this.lastIndexedAt(),
       summaryTokensUsedToday: settings.summaryTokensUsedToday
     };
   }
 
-  async reindex(): Promise<LibraryIndexResult> {
+  async reindex(): Promise<LibraryReindexResult> {
     if (this.refresh) return this.refresh;
     this.refresh = this.indexer.indexAll()
-      .then((result) => {
+      .then(async (result) => {
+        const semantic = await this.embedPending();
         this.dirty = false;
-        return result;
+        return { ...result, ...semantic };
       })
       .finally(() => {
         this.refresh = null;
       });
     return this.refresh;
+  }
+
+  private async embedPending(): Promise<{ embedded: number; semanticError: string | null }> {
+    const provider = this.embeddingProvider;
+    if (!provider || !this.tree.repository.getSettings().semanticEnabled) return { embedded: 0, semanticError: null };
+    const pending = this.tree.repository.listChunksPendingEmbedding(provider.modelId, 5_000);
+    if (pending.length === 0) return { embedded: 0, semanticError: null };
+    try {
+      await provider.load();
+      let embedded = 0;
+      for (let offset = 0; offset < pending.length; offset += 32) {
+        const batch = pending.slice(offset, offset + 32);
+        const vectors = await provider.embed(batch.map((chunk) => chunk.text));
+        if (vectors.length !== batch.length) throw new Error("语义模型返回的向量数量不正确");
+        for (let index = 0; index < batch.length; index += 1) {
+          const vector = vectors[index];
+          if (!vector || vector.length !== provider.dimensions) {
+            throw new Error(`语义向量维度不正确：预期 ${provider.dimensions}`);
+          }
+          this.tree.repository.setChunkEmbedding(
+            batch[index]!.id,
+            embeddingToBuffer(vector),
+            provider.modelId,
+            provider.modelVersion
+          );
+          embedded += 1;
+        }
+      }
+      return { embedded, semanticError: null };
+    } catch (error) {
+      return {
+        embedded: 0,
+        semanticError: error instanceof Error ? error.message : String(error)
+      };
+    }
   }
 
   async search(query: string, limit = 20): Promise<LibrarySearchResult> {

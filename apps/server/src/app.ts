@@ -10,7 +10,7 @@ import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DELEGATION_WORKSPACE_POLICIES, DEVI
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { loadCodexProfile, runCodex } from "@hearth/codex-executor";
 import { z } from "zod";
-import { ARTIFACT_DIR, ATTACHMENT_DIR, BACKUP_DIR, BROWSER_SETTINGS_PATH, CODEX_HOME_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, DOSSIER_DIR, DSH_HOME_DIR, EXECUTOR_HOME_DIR, EXECUTOR_SETTINGS_PATH, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, SUPERVISION_PATH, WEB_DIST, WORKSPACE_DIR, WORKSTYLE_PATH } from "./config.ts";
+import { ARTIFACT_DIR, ATTACHMENT_DIR, BACKUP_DIR, BROWSER_SETTINGS_PATH, CODEX_HOME_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, DOSSIER_DIR, DSH_HOME_DIR, EXECUTOR_HOME_DIR, EXECUTOR_SETTINGS_PATH, LIBRARY_MODEL_DIR, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, SUPERVISION_PATH, WEB_DIST, WORKSPACE_DIR, WORKSTYLE_PATH } from "./config.ts";
 import { BrowserSettingsStore } from "./browser-settings.ts";
 import { registerChatRoutes } from "./chat-routes.ts";
 import { ReconcileError, ReconcileService } from "./reconcile.ts";
@@ -69,6 +69,7 @@ import { KnowledgeSyncService } from "./knowledge/sync.ts";
 import { KnowledgeManagedService, KnowledgeSetupError } from "./knowledge/managed-service.ts";
 import { LibraryService } from "./library/service.ts";
 import { registerLibraryRoutes } from "./library/routes.ts";
+import { LocalEmbeddingProvider } from "./library/embedding.ts";
 import { McpServerError, McpServerService } from "./mcp-servers.ts";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
@@ -686,7 +687,10 @@ export async function buildServer(options: BuildServerOptions = {}) {
     mail
   }));
   const memory = new MemoryService(service);
-  const library = new LibraryService(store, { memory });
+  const library = new LibraryService(store, {
+    memory,
+    embeddingProvider: new LocalEmbeddingProvider({ cacheDir: LIBRARY_MODEL_DIR })
+  });
   service.bus.subscribe((event) => {
     if (
       event.type.startsWith("memory.")

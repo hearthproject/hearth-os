@@ -301,6 +301,21 @@ export class LibraryRepository {
     return rows.map(chunkFromRow);
   }
 
+  listChunksPendingEmbedding(modelId: string, limit = 10_000): LibraryChunkRecord[] {
+    const rows = this.store.db.prepare(
+      `SELECT * FROM context_chunks
+       WHERE embedding IS NULL OR embedding_model IS NULL OR embedding_model <> ?
+       ORDER BY created_at ASC LIMIT ?`
+    ).all(modelId, limit) as Row[];
+    return rows.map(chunkFromRow);
+  }
+
+  countEmbeddedChunks(modelId: string): number {
+    return Number((this.store.db.prepare(
+      "SELECT COUNT(*) AS count FROM context_chunks WHERE embedding IS NOT NULL AND embedding_model = ?"
+    ).get(modelId) as Row).count ?? 0);
+  }
+
   setChunkEmbedding(chunkId: string, embedding: Buffer, modelId: string, modelVersion: string): void {
     this.store.db.prepare(
       "UPDATE context_chunks SET embedding = ?, embedding_model = ?, embedding_version = ? WHERE id = ?"
