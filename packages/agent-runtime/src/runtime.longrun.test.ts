@@ -364,6 +364,51 @@ describe("agent runtime long-run fixtures", () => {
     expect(fake.state.calls).toBe(1);
   });
 
+  it("continues truncated model output instead of treating it as missing finish", async () => {
+    const root = workspace(roots);
+    const fake = createFakeModel([
+      { content: "part one", toolCalls: [], finishReason: "length" },
+      { content: "part two", toolCalls: [], finishReason: "max_tokens" },
+      { content: "part three", toolCalls: [], finishReason: "length" },
+      { content: "", toolCalls: [fakeToolCall("finish_task", { summary: "done" })], finishReason: "tool_calls" }
+    ]);
+    const result = await runAgent({
+      model: fake.model,
+      tools: createBuiltinTools(),
+      goal: "long output",
+      systemPrompt: "system",
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      permissions: { tools: ["finish_task"], readRoots: [root], writeRoots: [root], networkHosts: [] },
+      budget: {},
+      requireFinishTool: true
+    });
+
+    expect(result.status).toBe("completed");
+    expect(fake.state.calls).toBe(4);
+    expect(result.messages.filter((message) => message.role === "user" && message.content.includes("被截断")).length).toBe(3);
+  });
+
+  it("fails explicitly after four truncated outputs", async () => {
+    const root = workspace(roots);
+    const fake = createFakeModel(Array.from({ length: 4 }, () => ({ content: "x", toolCalls: [], finishReason: "length" })));
+    const result = await runAgent({
+      model: fake.model,
+      tools: createBuiltinTools(),
+      goal: "truncated",
+      systemPrompt: "system",
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      permissions: { tools: ["finish_task"], readRoots: [root], writeRoots: [root], networkHosts: [] },
+      budget: {},
+      requireFinishTool: true
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.summary).toContain("长度上限");
+    expect(fake.state.calls).toBe(4);
+  });
+
   it("reports and clears a stale execution marker before starting", async () => {
     const root = workspace(roots);
     const outDir = join(root, "out");

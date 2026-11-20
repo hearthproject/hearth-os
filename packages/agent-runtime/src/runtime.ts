@@ -60,6 +60,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   let emptyTurns = 0;
   let missingFinishTurns = 0;
   let goalContinuations = 0;
+  let truncatedContinuations = 0;
   let finishRejections = 0;
   let sameProgressCount = 0;
   let lastProgressHash: string | null = null;
@@ -499,6 +500,20 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     messages.push({ role: "assistant", content: turn.content, toolCalls: turn.toolCalls });
     await checkpoint("turn");
 
+    if (turn.toolCalls.length === 0 && isTruncatedFinishReason(turn.finishReason)) {
+      truncatedContinuations += 1;
+      if (truncatedContinuations > 3) {
+        return finish("failed", `模型输出连续 ${truncatedContinuations} 次达到长度上限，仍未能完成；请缩短单次输出或提高输出上限。`);
+      }
+      emit({ type: "notice", message: `模型输出被长度限制截断，正在继续第 ${truncatedContinuations} 次` });
+      messages.push({
+        role: "user",
+        content: "你的上一条输出因长度限制被截断。请从中断处继续，不要重复已经输出的内容；完成后仍要调用 finish_task。"
+      });
+      await checkpoint("turn");
+      continue;
+    }
+
     if (turn.toolCalls.length === 0) {
       const goalPrompt = goalContinuationPrompt(options.workspaceRoot);
       if (goalPrompt && goalContinuations < 12 && runningActiveWork(state).length === 0) {
@@ -799,6 +814,16 @@ function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
   const record = value as Record<string, unknown>;
   return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
+}
+
+function isTruncatedFinishReason(reason: string | null): boolean {
+  if (!reason) return false;
+  const value = reason.toLowerCase();
+  return value === "length"
+    || value === "max_tokens"
+    || value === "max_output_tokens"
+    || value === "incomplete"
+    || value === "max_tokens_reached";
 }
 
 function isTransientModelError(error: unknown): boolean {
