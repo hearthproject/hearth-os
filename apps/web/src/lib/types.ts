@@ -3,7 +3,6 @@ import type {
   ApprovalListItem,
   ApprovalRecord,
   ApprovalStatus,
-  AttentionItem,
   ArtifactListItem,
   ChatAttachment,
   ChatMessageRecord,
@@ -67,11 +66,6 @@ import type {
   OutboxDraft,
   OutboxDraftStatus,
   PairingRequestStatus,
-  ProactiveBudget,
-  ProactiveMetrics,
-  ProactiveSettings,
-  ProactiveSnapshot,
-  ProactiveSuggestion,
   ReconcileItem,
   RunListItem,
   RunCheckpointRecord,
@@ -118,21 +112,15 @@ import type {
   EntityKind,
   EntityRecord,
   EntityStateRecord,
-  IntakeDecision,
-  IntakeDecisionRecord,
   LocalProject,
   LocalProjectView,
   McpServerView,
   TaskWorktreeView,
-  PreparedActionRecord,
-  ThreadSubscriptionRecord,
-  WatchdogEvent,
   WebSearchProvider,
   WebSearchSettingsView
 } from "@hearth/core";
 
 export type {
-  AttentionItem,
   ApprovalMode,
   ApprovalListItem,
   ApprovalRecord,
@@ -199,11 +187,6 @@ export type {
   OutboxDraft,
   OutboxDraftStatus,
   PairingRequestStatus,
-  ProactiveBudget,
-  ProactiveMetrics,
-  ProactiveSettings,
-  ProactiveSnapshot,
-  ProactiveSuggestion,
   ReconcileItem,
   RunListItem,
   RunCheckpointRecord,
@@ -250,15 +233,10 @@ export type {
   EntityKind,
   EntityRecord,
   EntityStateRecord,
-  IntakeDecision,
-  IntakeDecisionRecord,
   LocalProject,
   LocalProjectView,
   McpServerView,
   TaskWorktreeView,
-  PreparedActionRecord,
-  ThreadSubscriptionRecord,
-  WatchdogEvent,
   WebSearchProvider,
   WebSearchSettingsView
 };
@@ -726,36 +704,6 @@ export interface CorrectMemoryRequest {
 export interface OntologyEntityView extends EntityRecord {
   states: EntityStateRecord[];
   aliases: EntityAliasRecord[];
-}
-
-export interface WatchdogSettingsView {
-  enabled: boolean;
-  shadow: boolean;
-  stallMinutes: number;
-  maxRunMinutes: number;
-  repeatedFailureCount: number;
-  failureWindowMinutes: number;
-  dedupeMinutes: number;
-  intervalMs: number;
-  autoCancel: boolean;
-}
-
-export interface WatchdogSnapshot {
-  settings: WatchdogSettingsView;
-  events: WatchdogEvent[];
-}
-
-export interface ThreadDeliveryView {
-  subscriptionId: string;
-  seq: number;
-  type: string;
-  taskId: string | null;
-  runId: string | null;
-  recordedAt: string;
-}
-
-export interface IntakeRouteResult extends IntakeDecisionRecord {
-  signals: string[];
 }
 
 export interface KnowledgeRecallSettingsView {

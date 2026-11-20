@@ -8,7 +8,6 @@ export interface OnboardingDependencies {
   isChatModelConfigured: () => boolean;
   readyExecutorIds: () => ExecutorId[];
   memoryAutoCapture: () => OnboardingSnapshot["checks"]["memoryAutoCapture"];
-  proactiveEnabled: () => boolean;
   now?: () => Date;
 }
 
@@ -17,7 +16,6 @@ export class OnboardingService {
   private readonly isChatModelConfigured: () => boolean;
   private readonly readyExecutorIds: () => ExecutorId[];
   private readonly memoryAutoCapture: () => OnboardingSnapshot["checks"]["memoryAutoCapture"];
-  private readonly proactiveEnabled: () => boolean;
   private readonly now: () => Date;
 
   constructor(dependencies: OnboardingDependencies) {
@@ -25,7 +23,6 @@ export class OnboardingService {
     this.isChatModelConfigured = dependencies.isChatModelConfigured;
     this.readyExecutorIds = dependencies.readyExecutorIds;
     this.memoryAutoCapture = dependencies.memoryAutoCapture;
-    this.proactiveEnabled = dependencies.proactiveEnabled;
     this.now = dependencies.now ?? (() => new Date());
   }
 
@@ -38,8 +35,7 @@ export class OnboardingService {
       checks: {
         chatModelConfigured,
         readyExecutorIds: this.readyExecutorIds(),
-        memoryAutoCapture: this.memoryAutoCapture(),
-        proactiveEnabled: this.proactiveEnabled()
+        memoryAutoCapture: this.memoryAutoCapture()
       }
     };
   }

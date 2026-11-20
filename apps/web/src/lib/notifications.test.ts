@@ -40,21 +40,6 @@ describe("notificationForEvent", () => {
     }))).toBeNull();
   });
 
-  it("maps delivered suggestions to the chat workspace", () => {
-    const notification = notificationForEvent("suggestion.event", envelope("suggestion.event", {
-      suggestionId: "suggestion-1",
-      action: "delivered",
-      title: "任务临近截止",
-      whyNow: "还有 3 小时到期"
-    }));
-    expect(notification).toMatchObject({
-      tone: "suggestion",
-      title: "任务临近截止",
-      body: "还有 3 小时到期",
-      href: "/"
-    });
-  });
-
   it("only notifies waiting_input task updates", () => {
     expect(notificationForEvent("task.updated", envelope("task.updated", { status: "waiting_input" })))
       .toMatchObject({ tone: "task", href: "/tasks/task-1" });

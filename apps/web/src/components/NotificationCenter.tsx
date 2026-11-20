@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { BellRing, CheckCircle2, ShieldAlert, Sparkles, X } from "lucide-react";
+import { BellRing, CheckCircle2, ShieldAlert, X } from "lucide-react";
 import { subscribeToEvents } from "../lib/api.ts";
 import { desktopNotificationsEnabled, notificationForEvent, type AppNotification } from "../lib/notifications.ts";
 
 const ICONS = {
   approval: ShieldAlert,
-  suggestion: Sparkles,
   task: BellRing,
   effect: CheckCircle2
 } as const;

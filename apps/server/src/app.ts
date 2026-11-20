@@ -50,17 +50,10 @@ import { DesktopError, DesktopService } from "./desktop.ts";
 import { MemoryError, MemoryService } from "./memory.ts";
 import { ProjectError, ProjectService } from "./projects.ts";
 import { TaskWorktreeService, WorktreeError } from "./worktrees.ts";
-import { ProactiveError, ProactiveService } from "./proactive.ts";
-import { AttentionGovernor } from "./attention-governor.ts";
 import { BackgroundToolError, BackgroundToolService } from "./background-tools.ts";
-import { PreparedActionService } from "./prepared-actions.ts";
-import { ThreadSubscriptionService } from "./thread-subscriptions.ts";
-import { WatchdogService } from "./watchdog.ts";
-import { IntakeRouter } from "./intake-router.ts";
 import { WebSearchError, WebSearchService } from "./web-search.ts";
 import { isBackgroundToolReadOnly, requiresToolApproval, toolApprovalSummary } from "./tool-policy.ts";
 import { createBuiltinTools } from "@hearth/agent-runtime";
-import { StandingIntentError, StandingIntentService } from "./standing-intents.ts";
 import { SecretBox } from "./secrets.ts";
 import { KnowledgeRecallService } from "./knowledge/recall.ts";
 import { KnowledgeClient } from "./knowledge/client.ts";
@@ -487,77 +480,6 @@ const restoreStoredBackupSchema = z.object({
   passphrase: z.string().min(12).max(500)
 }).strict();
 
-const proactiveSettingsSchema = z.object({
-  enabled: z.boolean().optional(),
-  mode: z.enum(PROACTIVE_MODES).optional(),
-  dailyLimit: z.number().int().min(0).max(50).optional(),
-  quietStart: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
-  quietEnd: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
-  cooldownMinutes: z.number().int().min(0).max(10080).optional(),
-  aggregateWindowMinutes: z.number().int().min(0).max(1440).optional(),
-  pausedUntil: z.string().datetime().nullable().optional(),
-  triggers: z.record(
-    z.enum(TRIGGER_KINDS),
-    z.object({ enabled: z.boolean().optional(), autonomy: z.enum(AUTONOMY_LEVELS).optional() }).strict()
-  ).optional()
-}).strict().refine((value) => Object.keys(value).length > 0, { message: "至少需要修改一个设置" });
-
-const proactivePauseSchema = z.object({
-  minutes: z.number().int().min(1).max(10080).optional(),
-  off: z.boolean().optional(),
-  resume: z.boolean().optional()
-}).strict().refine((value) => value.minutes !== undefined || value.off === true || value.resume === true, { message: "暂停参数不完整" });
-
-const standingIntentEntrySchema = z.object({
-  terms: z.array(z.string().trim().min(1).max(64)).min(1).max(20),
-  mode: z.enum(["all", "any"])
-}).strict();
-
-const standingIntentSchema = z.object({
-  ownerId: z.string().trim().min(1).max(120).optional(),
-  description: z.string().trim().min(1).max(500),
-  triggerEntries: z.array(standingIntentEntrySchema).min(1).max(20),
-  scope: z.object({
-    channel: z.string().trim().min(1).max(120).nullable().optional(),
-    sender: z.string().trim().min(1).max(200).nullable().optional(),
-    taskId: z.string().trim().min(1).max(120).nullable().optional(),
-    goalId: z.string().trim().min(1).max(120).nullable().optional(),
-    anywhere: z.boolean().optional()
-  }).strict().optional(),
-  action: z.enum(["remind", "ask", "prepare_task", "notify"]).optional(),
-  cooldownSeconds: z.number().int().min(0).max(31_536_000).optional(),
-  maxFires: z.number().int().min(1).max(100).optional(),
-  expiresAt: z.string().datetime().optional(),
-  armed: z.boolean().optional()
-}).strict();
-
-const intentMatchSchema = z.object({
-  ownerId: z.string().trim().min(1).max(120).optional(),
-  text: z.string().min(1).max(200_000),
-  channel: z.string().trim().min(1).max(120).nullable().optional(),
-  sender: z.string().trim().min(1).max(200).nullable().optional(),
-  taskId: z.string().trim().min(1).max(120).nullable().optional(),
-  goalId: z.string().trim().min(1).max(120).nullable().optional()
-}).strict();
-
-const heartbeatRunSchema = intentMatchSchema.partial().extend({
-  since: z.string().datetime().optional()
-}).strict().refine((value) => value.text === undefined || value.text.length > 0, { message: "text 不能为空" });
-
-const attentionBudgetSchema = z.object({
-  dailyLimit: z.number().int().min(0).max(100).optional(),
-  quietStart: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
-  quietEnd: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
-  cooldownSeconds: z.number().int().min(0).max(604_800).optional(),
-  maxPerGoalPerDay: z.number().int().min(0).max(100).optional(),
-  maxHighPriorityPerDay: z.number().int().min(0).max(100).optional(),
-  ignoredPenalty: z.number().int().min(0).max(10).optional()
-}).strict().refine((value) => Object.keys(value).length > 0, { message: "至少需要修改一个设置" });
-
-const attentionSnoozeSchema = z.object({
-  minutes: z.number().int().min(1).max(10_080).optional()
-}).strict();
-
 const onboardingCompleteSchema = z.object({
   skipped: z.boolean().optional()
 }).strict();
@@ -720,8 +642,6 @@ export interface BuildServerOptions {
   serveWeb?: boolean;
   startScheduler?: boolean;
   startMaintenance?: boolean;
-  startProactive?: boolean;
-  startHeartbeat?: boolean;
   startMailSync?: boolean;
   feishuTransportFactory?: FeishuTransportFactory;
   feishuChatClient?: FeishuChatClient;
@@ -804,16 +724,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
     getArtifact: (id) => store.getArtifact(id),
     mail
   }));
-  const proactive = new ProactiveService(service);
-  const attentionGovernor = new AttentionGovernor(service);
-  const standingIntents = new StandingIntentService({
-    service,
-    deliveryGate: (run) => attentionGovernor.deliveryAllowed(run)
-  });
-  const preparedActions = new PreparedActionService(service);
-  const threadSubscriptions = new ThreadSubscriptionService(service);
-  const watchdog = new WatchdogService({ service, standingIntents });
-  const intake = new IntakeRouter(service);
   const memory = new MemoryService(service);
   const projects = new ProjectService(store);
   const security = new SecurityService(service);
@@ -965,8 +875,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
       return Boolean(settings && chatModelConfigured(settings));
     },
     readyExecutorIds: () => EXECUTORS.map((executor) => executor.id).filter((id) => executorHealth(id).canRun),
-    memoryAutoCapture: () => memory.settings().autoCapture,
-    proactiveEnabled: () => proactive.snapshot().settings.enabled
+    memoryAutoCapture: () => memory.settings().autoCapture
   });
   const scheduler = options.startScheduler
     ? new HearthScheduler({
@@ -1022,10 +931,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const diagnostics = new DiagnosticsService({ service, health, maintenance, webDist: WEB_DIST });
   if (options.startMaintenance ?? options.startScheduler) {
     maintenance.start();
-    watchdog.start();
   }
-  if (options.startProactive) proactive.start();
-  if (options.startHeartbeat) standingIntents.start();
   if (options.startMailSync) mail.start();
   const app = Fastify({
     logger: options.logger ?? false,
@@ -1087,10 +993,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
     knowledgeManaged.stop();
     await feishu.stop();
     mail.stop();
-    proactive.stop();
-    standingIntents.stop();
-    watchdog.stop();
-    threadSubscriptions.close();
     maintenance.stop();
     schedules.stop();
     await scheduler?.stop();
@@ -1734,435 +1636,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
     scheduler.start();
     return systemStatus();
-  });
-
-  app.get("/api/proactive", async (_request, reply) => {
-    reply.header("cache-control", "no-store");
-    return proactive.snapshot();
-  });
-
-  app.post("/api/proactive/scan", async (_request, reply) => {
-    reply.header("cache-control", "no-store");
-    return proactive.scan();
-  });
-
-  app.patch("/api/proactive/settings", async (request, reply) => {
-    const parsed = proactiveSettingsSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_PROACTIVE_SETTINGS", message: "主动设置参数不正确" });
-    try {
-      return proactive.updateSettings(definedObject(parsed.data) as Parameters<ProactiveService["updateSettings"]>[0]);
-    } catch (error) {
-      return sendProactiveError(reply, error);
-    }
-  });
-
-  app.post("/api/proactive/pause", async (request, reply) => {
-    const parsed = proactivePauseSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_PAUSE", message: "暂停参数不正确" });
-    try {
-      return proactive.pause(definedObject(parsed.data) as Parameters<ProactiveService["pause"]>[0]);
-    } catch (error) {
-      return sendProactiveError(reply, error);
-    }
-  });
-
-  for (const action of ["accept", "convert"] as const) {
-    app.post<{ Params: { id: string } }>("/api/suggestions/:id/" + action, async (request, reply) => {
-      const parsed = suggestionActionSchema.safeParse(request.body ?? {});
-      if (!parsed.success) return reply.code(400).send({ error: "INVALID_SUGGESTION_ACTION", message: "建议动作参数不正确" });
-      try {
-        const input: { title?: string; goal?: string; textInput?: string } = {};
-        if (parsed.data.title !== undefined) input.title = parsed.data.title;
-        if (parsed.data.goal !== undefined) input.goal = parsed.data.goal;
-        if (parsed.data.textInput !== undefined) input.textInput = parsed.data.textInput;
-        return action === "accept" ? proactive.accept(request.params.id) : proactive.convert(request.params.id, input);
-      } catch (error) {
-        return sendProactiveError(reply, error);
-      }
-    });
-  }
-
-  app.post<{ Params: { id: string } }>("/api/suggestions/:id/ignore", async (request, reply) => {
-    try {
-      return proactive.ignore(request.params.id);
-    } catch (error) {
-      return sendProactiveError(reply, error);
-    }
-  });
-
-  app.post<{ Params: { id: string } }>("/api/suggestions/:id/snooze", async (request, reply) => {
-    const parsed = suggestionSnoozeSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SNOOZE", message: "稍后提醒参数不正确" });
-    try {
-      return proactive.snooze(request.params.id, parsed.data.minutes);
-    } catch (error) {
-      return sendProactiveError(reply, error);
-    }
-  });
-
-  app.get("/api/intents", async (_request, reply) => {
-    reply.header("cache-control", "no-store");
-    return { intents: standingIntents.list(), budget: standingIntents.budget() };
-  });
-
-  app.post("/api/intents", async (request, reply) => {
-    const parsed = standingIntentSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_INTENT", message: "意图参数不正确" });
-    try {
-      return reply.code(201).send(standingIntents.create(definedObject(parsed.data) as unknown as Parameters<StandingIntentService["create"]>[0]));
-    } catch (error) {
-      return sendStandingIntentError(reply, error);
-    }
-  });
-
-  app.post("/api/intents/match", async (request, reply) => {
-    const parsed = intentMatchSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_INTENT_MATCH", message: "意图匹配参数不正确" });
-    try {
-      const matches = standingIntents.match(definedObject(parsed.data) as unknown as Parameters<StandingIntentService["match"]>[0]);
-      return { matches, intents: matches.map((match) => match.intent), attention: matches.map((match) => match.attention) };
-    } catch (error) {
-      return sendStandingIntentError(reply, error);
-    }
-  });
-
-  app.post<{ Params: { id: string } }>("/api/intents/:id/arm", async (request, reply) => {
-    try {
-      return standingIntents.arm(request.params.id);
-    } catch (error) {
-      return sendStandingIntentError(reply, error);
-    }
-  });
-
-  app.post<{ Params: { id: string } }>("/api/intents/:id/cancel", async (request, reply) => {
-    try {
-      return standingIntents.cancel(request.params.id);
-    } catch (error) {
-      return sendStandingIntentError(reply, error);
-    }
-  });
-
-  app.get("/api/attention", async (_request, reply) => {
-    reply.header("cache-control", "no-store");
-    return {
-      items: attentionGovernor.list(standingIntents.queue()),
-      budget: standingIntents.budget(),
-      governor: attentionGovernor.settings()
-    };
-  });
-
-  app.get<{ Params: { id: string } }>("/api/attention/:id/explain", async (request, reply) => {
-    const explanation = attentionGovernor.explain(request.params.id);
-    if (!explanation) return reply.code(404).send({ error: "ATTENTION_NOT_FOUND", message: "注意力事项不存在" });
-    return explanation;
-  });
-
-  app.post<{ Params: { id: string } }>("/api/attention/:id/feedback", async (request, reply) => {
-    const parsed = z.object({
-      action: z.enum(["accept", "ignore", "snooze", "resolve", "wrong"]),
-      channel: z.string().trim().max(80).optional(),
-      note: z.string().trim().max(500).optional()
-    }).strict().safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_ATTENTION_FEEDBACK", message: "反馈格式不正确" });
-    try {
-      return attentionGovernor.feedback(request.params.id, definedObject(parsed.data) as unknown as Parameters<AttentionGovernor["feedback"]>[1]);
-    } catch (error) {
-      if (error instanceof Error && error.message === "ATTENTION_NOT_FOUND") {
-        return reply.code(404).send({ error: "ATTENTION_NOT_FOUND", message: "注意力事项不存在" });
-      }
-      throw error;
-    }
-  });
-
-  app.patch("/api/attention/governor", async (request, reply) => {
-    const parsed = z.object({
-      shadowMode: z.boolean().optional(),
-      minFeedbackSamples: z.number().int().min(20).max(500).optional()
-    }).strict().safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_ATTENTION_GOVERNOR", message: "注意力治理设置不正确" });
-    return attentionGovernor.updateSettings(definedObject(parsed.data) as Parameters<AttentionGovernor["updateSettings"]>[0]);
-  });
-
-  app.patch("/api/attention/settings", async (request, reply) => {
-    const parsed = attentionBudgetSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_ATTENTION_BUDGET", message: "注意力预算设置不正确" });
-    try {
-      return standingIntents.updateBudget(definedObject(parsed.data) as unknown as Parameters<StandingIntentService["updateBudget"]>[0]);
-    } catch (error) {
-      return sendStandingIntentError(reply, error);
-    }
-  });
-
-  for (const action of ["ack", "ignore", "resolve"] as const) {
-    app.post<{ Params: { id: string } }>("/api/attention/:id/" + action, async (request, reply) => {
-      try {
-        if (action === "ack") return standingIntents.acknowledge(request.params.id);
-        if (action === "ignore") return standingIntents.ignore(request.params.id);
-        return standingIntents.resolve(request.params.id);
-      } catch (error) {
-        return sendStandingIntentError(reply, error);
-      }
-    });
-  }
-
-  app.post<{ Params: { id: string } }>("/api/attention/:id/snooze", async (request, reply) => {
-    const parsed = attentionSnoozeSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_ATTENTION_SNOOZE", message: "稍后提醒参数不正确" });
-    try {
-      return standingIntents.snooze(request.params.id, parsed.data.minutes);
-    } catch (error) {
-      return sendStandingIntentError(reply, error);
-    }
-  });
-
-  app.get<{ Querystring: { query?: string; kind?: string; limit?: string } }>("/api/ontology/entities", async (request) => {
-    const queryText = (request.query.query ?? "").trim().toLowerCase();
-    const kind = (request.query.kind ?? "").trim();
-    const limit = Math.max(1, Math.min(500, Number(request.query.limit ?? 100) || 100));
-    const entities = service.store.listEntities({ ...(kind ? { kind } : {}), status: "active", limit: 2000 })
-      .filter((entity) => !queryText || entity.canonicalName.toLowerCase().includes(queryText) || entity.id.toLowerCase().includes(queryText))
-      .slice(0, limit)
-      .map((entity) => ({
-        ...entity,
-        states: service.store.listEntityStates({ entityId: entity.id, activeOnly: true, limit: 30 }),
-        aliases: service.store.listEntityAliases(entity.id)
-      }));
-    return { entities };
-  });
-
-  app.get<{ Querystring: { status?: string; limit?: string } }>("/api/ontology/commitments", async (request) => {
-    const limit = Math.max(1, Math.min(500, Number(request.query.limit ?? 100) || 100));
-    return { commitments: service.store.listCommitments({ status: request.query.status ?? "open", limit }) };
-  });
-
-  app.get<{ Querystring: { status?: string; limit?: string } }>("/api/ontology/decisions", async (request) => {
-    const limit = Math.max(1, Math.min(500, Number(request.query.limit ?? 100) || 100));
-    return { decisions: service.store.listDecisions({ status: request.query.status ?? "active", limit }) };
-  });
-
-  app.post<{ Params: { id: string } }>("/api/ontology/entities/:id/correct", async (request, reply) => {
-    const parsed = z.object({
-      key: z.string().trim().min(1).max(120),
-      value: z.unknown(),
-      evidenceRef: z.string().trim().min(1).max(500).optional()
-    }).strict().safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_ONTOLOGY_CORRECTION", message: "纠正内容格式不正确" });
-    if (!service.store.getEntity(request.params.id)) return reply.code(404).send({ error: "ENTITY_NOT_FOUND", message: "实体不存在" });
-    return ontologyWriter.userCorrects({
-      entityId: request.params.id,
-      key: parsed.data.key,
-      value: parsed.data.value,
-      evidenceRef: parsed.data.evidenceRef ?? `user-correction:${request.params.id}:${Date.now()}`
-    });
-  });
-
-  app.post("/api/ontology/forget", async (request, reply) => {
-    const parsed = z.object({ evidenceRef: z.string().trim().min(1).max(500) }).strict().safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_ONTOLOGY_FORGET", message: "遗忘请求格式不正确" });
-    return ontologyWriter.forget(parsed.data.evidenceRef);
-  });
-
-  app.get("/api/heartbeat", async (request, reply) => {
-    reply.header("cache-control", "no-store");
-    const limit = Number((request.query as { limit?: string } | undefined)?.limit ?? 50);
-    return {
-      runs: standingIntents.listHeartbeatRuns(Number.isInteger(limit) ? Math.max(1, Math.min(limit, 500)) : 50),
-      last: standingIntents.latestHeartbeatRun()
-    };
-  });
-
-  app.post("/api/heartbeat/run", async (request, reply) => {
-    const parsed = heartbeatRunSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_HEARTBEAT", message: "心跳参数不正确" });
-    try {
-      return await standingIntents.heartbeat(definedObject(parsed.data) as unknown as Parameters<StandingIntentService["heartbeat"]>[0]);
-    } catch (error) {
-      return sendStandingIntentError(reply, error);
-    }
-  });
-
-  app.get("/api/prepared-actions", async (request) => {
-    const query = request.query as { taskId?: string; status?: string; limit?: string };
-    return {
-      actions: preparedActions.list({
-        ...(query.taskId ? { taskId: query.taskId } : {}),
-        ...(query.status ? { status: query.status } : {}),
-        limit: query.limit ? Number(query.limit) : 100
-      })
-    };
-  });
-
-  app.post("/api/prepared-actions", async (request, reply) => {
-    const body = definedObject((request.body ?? {}) as Record<string, unknown>);
-    const kinds = new Set(["draft_email", "calendar_check", "research", "test_run", "diff"]);
-    if (!kinds.has(String(body.kind))) {
-      return reply.code(400).send({ error: "INVALID_PREPARED_ACTION", message: "预备动作类型不正确" });
-    }
-    try {
-      return reply.code(201).send(preparedActions.prepare({
-        ...(typeof body.taskId === "string" ? { taskId: body.taskId } : {}),
-        ...(typeof body.goalId === "string" ? { goalId: body.goalId } : {}),
-        kind: String(body.kind) as Parameters<PreparedActionService["prepare"]>[0]["kind"],
-        preview: body.preview && typeof body.preview === "object" ? body.preview as Record<string, unknown> : {},
-        evidenceRefs: Array.isArray(body.evidenceRefs) ? body.evidenceRefs.filter((ref): ref is string => typeof ref === "string") : [],
-        ...(typeof body.expiresAt === "string" ? { expiresAt: body.expiresAt } : {})
-      }));
-    } catch (error) {
-      return reply.code((error as { statusCode?: number }).statusCode ?? 400).send({
-        error: (error as { code?: string }).code ?? "PREPARED_ACTION_FAILED",
-        message: error instanceof Error ? error.message : String(error)
-      });
-    }
-  });
-
-  app.post<{ Params: { id: string } }>("/api/prepared-actions/:id/commit", async (request, reply) => {
-    const body = definedObject((request.body ?? {}) as Record<string, unknown>);
-    try {
-      return preparedActions.commit(request.params.id, {
-        ...(typeof body.approvalRef === "string" ? { approvalRef: body.approvalRef } : {})
-      });
-    } catch (error) {
-      return reply.code((error as { statusCode?: number }).statusCode ?? 400).send({
-        error: (error as { code?: string }).code ?? "PREPARED_ACTION_FAILED",
-        message: error instanceof Error ? error.message : String(error)
-      });
-    }
-  });
-
-  app.post<{ Params: { id: string } }>("/api/prepared-actions/:id/discard", async (request, reply) => {
-    try {
-      return preparedActions.discard(request.params.id);
-    } catch (error) {
-      return reply.code((error as { statusCode?: number }).statusCode ?? 400).send({
-        error: (error as { code?: string }).code ?? "PREPARED_ACTION_FAILED",
-        message: error instanceof Error ? error.message : String(error)
-      });
-    }
-  });
-
-  app.get("/api/background-tools", async (request) => {
-    const query = request.query as { taskId?: string; status?: string; limit?: string };
-    return {
-      jobs: backgroundTools.list({
-        ...(query.taskId ? { taskId: query.taskId } : {}),
-        ...(query.status ? { status: query.status } : {}),
-        limit: query.limit ? Number(query.limit) : 100
-      })
-    };
-  });
-
-  app.post("/api/background-tools", async (request, reply) => {
-    const body = definedObject((request.body ?? {}) as Record<string, unknown>);
-    try {
-      return reply.code(202).send(await backgroundTools.start({
-        taskId: String(body.taskId ?? ""),
-        toolName: String(body.toolName ?? ""),
-        ...(typeof body.runId === "string" ? { runId: body.runId } : {}),
-        args: body.args && typeof body.args === "object" ? body.args as Record<string, unknown> : {},
-        ...(typeof body.timeoutMs === "number" ? { timeoutMs: body.timeoutMs } : {})
-      }));
-    } catch (error) {
-      return reply.code((error as { statusCode?: number }).statusCode ?? 400).send({
-        error: (error as { code?: string }).code ?? "BACKGROUND_TOOL_FAILED",
-        message: error instanceof Error ? error.message : String(error)
-      });
-    }
-  });
-
-  app.post<{ Params: { id: string } }>("/api/background-tools/:id/stop", async (request, reply) => {
-    const body = definedObject((request.body ?? {}) as Record<string, unknown>);
-    try {
-      return backgroundTools.stop(request.params.id, typeof body.reason === "string" ? body.reason : undefined);
-    } catch (error) {
-      return reply.code((error as { statusCode?: number }).statusCode ?? 400).send({
-        error: (error as { code?: string }).code ?? "BACKGROUND_TOOL_FAILED",
-        message: error instanceof Error ? error.message : String(error)
-      });
-    }
-  });
-
-  app.get("/api/thread-subscriptions/deliveries", async (request) => {
-    const query = request.query as { limit?: string };
-    return { deliveries: threadSubscriptions.recentDeliveries(query.limit ? Number(query.limit) : 50) };
-  });
-
-  app.get("/api/thread-subscriptions", async (request) => {
-    const query = request.query as { threadKey?: string; taskId?: string; status?: string };
-    return {
-      subscriptions: threadSubscriptions.list({
-        ...(query.threadKey ? { threadKey: query.threadKey } : {}),
-        ...(query.taskId ? { taskId: query.taskId } : {}),
-        ...(query.status ? { status: query.status } : {})
-      })
-    };
-  });
-
-  app.post("/api/thread-subscriptions", async (request, reply) => {
-    const body = definedObject((request.body ?? {}) as Record<string, unknown>);
-    try {
-      return reply.code(201).send(threadSubscriptions.subscribe({
-        threadKey: String(body.threadKey ?? ""),
-        taskId: String(body.taskId ?? ""),
-        ...(typeof body.runId === "string" ? { runId: body.runId } : {}),
-        filter: body.filter && typeof body.filter === "object" ? body.filter as Record<string, unknown> : {}
-      }));
-    } catch (error) {
-      return reply.code((error as { statusCode?: number }).statusCode ?? 400).send({
-        error: (error as { code?: string }).code ?? "THREAD_SUBSCRIPTION_FAILED",
-        message: error instanceof Error ? error.message : String(error)
-      });
-    }
-  });
-
-  for (const action of ["pause", "resume", "end"] as const) {
-    app.post<{ Params: { id: string } }>(`/api/thread-subscriptions/:id/${action}`, async (request, reply) => {
-      try {
-        return threadSubscriptions[action](request.params.id);
-      } catch (error) {
-        return reply.code((error as { statusCode?: number }).statusCode ?? 400).send({
-          error: (error as { code?: string }).code ?? "THREAD_SUBSCRIPTION_FAILED",
-          message: error instanceof Error ? error.message : String(error)
-        });
-      }
-    });
-  }
-
-  app.get("/api/watchdog", async (request) => {
-    const query = request.query as { limit?: string };
-    return {
-      settings: watchdog.settings(),
-      events: store.listWatchdogEvents({ limit: query.limit ? Number(query.limit) : 100 })
-    };
-  });
-
-  app.post("/api/watchdog/scan", async () => ({ events: watchdog.scan(), settings: watchdog.settings() }));
-
-  app.patch("/api/watchdog/settings", async (request, reply) => {
-    const body = definedObject((request.body ?? {}) as Record<string, unknown>);
-    try {
-      return watchdog.updateSettings(body as Parameters<WatchdogService["updateSettings"]>[0]);
-    } catch (error) {
-      return reply.code(400).send({ error: "INVALID_WATCHDOG_SETTINGS", message: error instanceof Error ? error.message : String(error) });
-    }
-  });
-
-  app.get("/api/intake/decisions", async (request) => {
-    const query = request.query as { limit?: string };
-    return { decisions: intake.list(query.limit ? Number(query.limit) : 100) };
-  });
-
-  app.post("/api/intake/route", async (request, reply) => {
-    const body = definedObject((request.body ?? {}) as Record<string, unknown>);
-    try {
-      return intake.route({
-        sourceRef: String(body.sourceRef ?? ""),
-        text: String(body.text ?? ""),
-        ...(typeof body.sender === "string" ? { sender: body.sender } : {}),
-        ...(typeof body.channel === "string" ? { channel: body.channel } : {})
-      });
-    } catch (error) {
-      return reply.code(400).send({ error: "INVALID_INTAKE_INPUT", message: error instanceof Error ? error.message : String(error) });
-    }
   });
 
   app.get("/api/memory", async (_request, reply) => {
@@ -3654,20 +3127,6 @@ function sendProjectError(reply: FastifyReply, error: unknown) {
 
 function sendWorktreeError(reply: FastifyReply, error: unknown) {
   if (error instanceof WorktreeError) {
-    return reply.code(error.statusCode).send({ error: error.code, message: error.message });
-  }
-  throw error;
-}
-
-function sendStandingIntentError(reply: FastifyReply, error: unknown) {
-  if (error instanceof StandingIntentError) {
-    return reply.code(error.statusCode).send({ error: error.code, message: error.message });
-  }
-  throw error;
-}
-
-function sendProactiveError(reply: FastifyReply, error: unknown) {
-  if (error instanceof ProactiveError) {
     return reply.code(error.statusCode).send({ error: error.code, message: error.message });
   }
   throw error;

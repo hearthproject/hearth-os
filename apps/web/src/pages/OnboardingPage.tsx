@@ -41,9 +41,7 @@ export function OnboardingPage() {
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState<ModelDraft>(EMPTY_DRAFT);
   const [draftReady, setDraftReady] = useState(false);
-  const [proactive, setProactive] = useState(true);
-  const [preferencesReady, setPreferencesReady] = useState(false);
-  const [busy, setBusy] = useState<"test" | "save" | "preferences" | "finish" | "skip" | null>(null);
+  const [busy, setBusy] = useState<"test" | "save" | "finish" | "skip" | null>(null);
   const [notice, setNotice] = useState<{ tone: "ok" | "error" | "info"; text: string } | null>(null);
 
   const onboardingQuery = useQuery({ queryKey: ["onboarding"], queryFn: api.onboarding });
@@ -75,12 +73,6 @@ export function OnboardingPage() {
     }
     setDraftReady(true);
   }, [draftReady, registryQuery.data]);
-
-  useEffect(() => {
-    if (preferencesReady || !onboardingQuery.data) return;
-    setProactive(onboardingQuery.data.state === null ? true : onboardingQuery.data.checks.proactiveEnabled);
-    setPreferencesReady(true);
-  }, [preferencesReady, onboardingQuery.data]);
 
   function choosePreset(preset: ModelProviderPreset) {
     setDraft((current) => presetDraft(preset, current.apiKey));
@@ -148,27 +140,6 @@ export function OnboardingPage() {
     }
   }
 
-  async function savePreferences() {
-    setBusy("preferences");
-    setNotice(null);
-    try {
-      await Promise.all([
-        api.updateMemorySettings({ autoCapture: "experience" }),
-        api.updateProactiveSettings({ enabled: proactive })
-      ]);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["memory"] }),
-        queryClient.invalidateQueries({ queryKey: ["proactive"] }),
-        queryClient.invalidateQueries({ queryKey: ["onboarding"] })
-      ]);
-      setStep(4);
-    } catch (error) {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "保存偏好失败" });
-    } finally {
-      setBusy(null);
-    }
-  }
-
   async function finish() {
     setBusy("finish");
     setNotice(null);
@@ -200,7 +171,6 @@ export function OnboardingPage() {
     if (step === 0) void saveModel();
     else if (step === 1) setStep(2);
     else if (step === 2) setStep(3);
-    else if (step === 3) void savePreferences();
     else void finish();
   }
 
@@ -378,28 +348,12 @@ export function OnboardingPage() {
 
           {step === 3 && (
             <section className="wizard-panel">
-              <h1>偏好</h1>
-
-              <div className="wizard-preferences">
-                <label className="wizard-toggle">
-                  <input type="checkbox" checked={proactive} onChange={(event) => setProactive(event.target.checked)} />
-                  <span>
-                    <strong>主动提醒</strong>
-                  </span>
-                </label>
-              </div>
-            </section>
-          )}
-
-          {step === 4 && (
-            <section className="wizard-panel">
               <h1>完成</h1>
 
               <div className="wizard-summary">
                 <SummaryRow ok={configured} label="聊天模型" value={configured ? `${draft.providerName} · ${draft.model}` : "尚未配置"} />
                 <SummaryRow ok={nativeReady} label="原生执行器" value={nativeReady ? "已就绪" : "未就绪"} />
                 <SummaryRow ok label="记忆与技能" value="后台自动运行" />
-                <SummaryRow ok label="主动提醒" value={proactive ? "已开启" : "保持关闭"} />
               </div>
 
               {!configured && (
@@ -417,9 +371,9 @@ export function OnboardingPage() {
           </button>
           <div className="wizard-footer-right">
             <button className="primary-button" onClick={next} disabled={busy !== null || (step === 0 && !modelReady)}>
-              {busy === "save" || busy === "preferences" || busy === "finish" ? <Loader2 size={15} className="spin" /> : null}
-              {step === 4 ? "完成" : step === 0 ? "保存并继续" : "继续"}
-              {step < 4 && <ArrowRight size={14} />}
+              {busy === "save" || busy === "finish" ? <Loader2 size={15} className="spin" /> : null}
+              {step === 3 ? "完成" : step === 0 ? "保存并继续" : "继续"}
+              {step < 3 && <ArrowRight size={14} />}
             </button>
           </div>
         </footer>

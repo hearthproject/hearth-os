@@ -21,7 +21,6 @@ describe("OnboardingService", () => {
       isChatModelConfigured: () => configured,
       readyExecutorIds: () => ["native"],
       memoryAutoCapture: () => "off",
-      proactiveEnabled: () => true,
       now: () => new Date("2026-11-08T00:00:00.000Z")
     });
   }
@@ -31,7 +30,7 @@ describe("OnboardingService", () => {
     expect(instance.snapshot()).toMatchObject({
       required: true,
       state: null,
-      checks: { chatModelConfigured: false, readyExecutorIds: ["native"], memoryAutoCapture: "off", proactiveEnabled: true }
+      checks: { chatModelConfigured: false, readyExecutorIds: ["native"], memoryAutoCapture: "off" }
     });
 
     expect(instance.complete()).toMatchObject({

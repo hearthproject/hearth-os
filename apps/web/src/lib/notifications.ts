@@ -1,6 +1,6 @@
 import type { EventEnvelope } from "./types.ts";
 
-export type NotificationTone = "approval" | "suggestion" | "task" | "effect";
+export type NotificationTone = "approval" | "task" | "effect";
 
 export interface AppNotification {
   key: string;
@@ -31,13 +31,6 @@ export function notificationForEvent(event: string, envelope?: EventEnvelope): A
       body: summary,
       href: taskId ? `/tasks/${encodeURIComponent(taskId)}` : "/"
     };
-  }
-
-  if (event === "suggestion.event") {
-    if (payload.action !== "delivered") return null;
-    const title = typeof payload.title === "string" ? payload.title : "有一条主动建议";
-    const whyNow = typeof payload.whyNow === "string" ? payload.whyNow : "打开对话查看建议和依据。";
-    return { key, tone: "suggestion", title, body: whyNow, href: "/" };
   }
 
   if (event === "task.updated") {

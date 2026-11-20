@@ -71,30 +71,16 @@ function EventBridge() {
         void queryClient.invalidateQueries({ queryKey: ["health"] });
         void queryClient.invalidateQueries({ queryKey: ["system"] });
         void queryClient.invalidateQueries({ queryKey: ["desktop"] });
-        void queryClient.invalidateQueries({ queryKey: ["proactive"] });
         void queryClient.invalidateQueries({ queryKey: ["memory"] });
         void queryClient.invalidateQueries({ queryKey: ["approvals"] });
         void queryClient.invalidateQueries({ queryKey: ["reconcile"] });
         void queryClient.invalidateQueries({ queryKey: ["outbox"] });
         void queryClient.invalidateQueries({ queryKey: ["sources"] });
-        if (event === "prepared-action.updated") {
-          void queryClient.invalidateQueries({ queryKey: ["prepared-actions"] });
-        }
         if (event === "tool.job.updated") {
           void queryClient.invalidateQueries({ queryKey: ["background-tools"] });
-          void queryClient.invalidateQueries({ queryKey: ["watchdog"] });
         }
         if (event === "artifact.published" || event.startsWith("task.")) {
           void queryClient.invalidateQueries({ queryKey: ["artifacts"] });
-        }
-        if (event === "thread-subscription.updated") {
-          void queryClient.invalidateQueries({ queryKey: ["thread-subscriptions"] });
-        }
-        if (event === "watchdog.recorded") {
-          void queryClient.invalidateQueries({ queryKey: ["watchdog"] });
-        }
-        if (event === "intake.recorded") {
-          void queryClient.invalidateQueries({ queryKey: ["intake"] });
         }
         if (event.startsWith("effect.")) {
           void queryClient.invalidateQueries({ queryKey: ["task"] });

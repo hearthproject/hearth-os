@@ -7,7 +7,7 @@ assertRootLayout({ requireWeb: process.env.HEARTH_DESKTOP === "1" });
 
 const dataLock = acquireDataDirLock(DATA_DIR, PORT);
 
-const app = await buildServer({ logger: true, startScheduler: true, startProactive: true, startHeartbeat: true, startMailSync: true })
+const app = await buildServer({ logger: true, startScheduler: true, startMailSync: true })
   .catch((error: unknown) => {
     dataLock.release();
     throw error;

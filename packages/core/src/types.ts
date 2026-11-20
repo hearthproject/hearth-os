@@ -1439,7 +1439,6 @@ export interface OnboardingChecks {
   chatModelConfigured: boolean;
   readyExecutorIds: ExecutorId[];
   memoryAutoCapture: MemorySettings["autoCapture"];
-  proactiveEnabled: boolean;
 }
 
 export interface OnboardingSnapshot {
