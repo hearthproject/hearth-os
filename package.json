@@ -29,13 +29,17 @@
     "screenshots:readme": "node scripts/readme-screenshots.mjs",
     "dogfood:report": "tsx scripts/dogfood-report.ts",
     "release:build": "node scripts/build-tauri.mjs",
-    "release:prepare": "node scripts/release.mjs"
+    "release:prepare": "node scripts/release.mjs",
+    "prepare": "husky"
   },
   "devDependencies": {
+    "@commitlint/cli": "^19.8.1",
+    "@commitlint/config-conventional": "^19.8.1",
     "@tauri-apps/cli": "^2.12.5",
     "@types/node": "^24.10.0",
     "concurrently": "^9.2.1",
     "esbuild": "^0.25.12",
+    "husky": "^9.1.7",
     "mermaid": "^11.4.1",
     "playwright": "^1.64.1",
     "png-to-ico": "^2.1.8",

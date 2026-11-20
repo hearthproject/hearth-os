@@ -40,3 +40,4 @@ eval/scenario-runs/
 .DS_Store
 Thumbs.db
 reports/
+.husky/_
