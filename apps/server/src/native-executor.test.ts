@@ -64,6 +64,13 @@ describe("native system prompt", () => {
     expect(prompt).toContain("任务授权的目录和域名");
     expect(prompt.length).toBeLessThan(1600);
   });
+
+  it("omits unavailable tools from the native prompt", () => {
+    const prompt = nativeSystemPrompt(baseTask, ["result.md"], undefined, ["read_file", "finish_task"]);
+    expect(prompt).toContain("finish_task");
+    expect(prompt).not.toContain("delegate_task");
+    expect(prompt).not.toContain("read_document");
+  });
 });
 
 describe("json deliverables", () => {

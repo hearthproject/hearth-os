@@ -27,6 +27,7 @@ import {
   type AgentTool,
   type AgentToolAuthorization,
   type AgentToolAuthorizationRequest,
+  type AgentToolContext,
   type RuntimeEvent
 } from "@hearth/agent-runtime";
 import { wantsCodeExecution, wantsGithubAccess, wantsScreenshot } from "./task-intent.ts";
@@ -117,6 +118,19 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
   }
 
   const drafting = !coding && isTextDraftTask({ ...options.task, expectedOutputs: options.expectedOutputs });
+  const draftTools = new Set(["read_file", "write_file", "finish_task", "ask_user"]);
+  const toolsForRun = [...createBuiltinTools(), ...(options.extraTools ?? [])]
+    .filter((tool) => !drafting || draftTools.has(tool.definition.name))
+    .map((tool) => !drafting || tool.definition.name !== "write_file" ? tool : {
+      ...tool,
+      execute: async (input: unknown, context: AgentToolContext) => {
+        const saved = await tool.execute(input, context);
+        if (saved.isError) return saved;
+        const content = (input as { content: string }).content;
+        return { ...saved, action: "finish" as const, summary: content, outputs: options.expectedOutputs };
+      }
+    });
+  const availableTools = toolsForRun.map((tool) => tool.definition.name);
   const systemPrompt = coding
     ? codingSystemPrompt({
         workspaceRoot: options.prepared.root,
@@ -124,31 +138,21 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
         permissions,
         ...(options.skillIndex ? { skillIndex: options.skillIndex } : {}),
         mode: "build",
+        availableTools,
         extraInstructions: [
           `Current task: ${options.task.title}`,
           `Expected outputs: ${options.expectedOutputs.join(", ") || "(no explicit file)"}`,
           `Task language: reply in the user's language; keep code, identifiers and commit messages in English.`
         ]
       })
-    : nativeSystemPrompt(options.task, options.expectedOutputs, options.skillIndex);
+    : nativeSystemPrompt(options.task, options.expectedOutputs, options.skillIndex, availableTools);
   const resume = options.resume ? refreshNativeResume(options.resume, systemPrompt, options.prompt, options.prepared.outDir) : undefined;
-  const draftTools = new Set(["read_file", "write_file", "finish_task", "ask_user"]);
   let budgetExhaustion: NativeRunResult["budgetExhaustion"];
   const state = createAgentState(options.prepared.root);
   //具体实现
   const result = await runAgent({
     model: drafting ? draftModelAdapter(options.settings, resolve(options.prepared.outDir, options.expectedOutputs[0] ?? "result.md")) : modelAdapter(options.settings),
-    tools: [...createBuiltinTools(), ...(options.extraTools ?? [])]
-      .filter((tool) => !drafting || draftTools.has(tool.definition.name))
-      .map((tool) => !drafting || tool.definition.name !== "write_file" ? tool : {
-        ...tool,
-        execute: async (input, context) => {
-          const saved = await tool.execute(input, context);
-          if (saved.isError) return saved;
-          const content = (input as { content: string }).content;
-          return { ...saved, action: "finish" as const, summary: content, outputs: options.expectedOutputs };
-        }
-      }),
+    tools: toolsForRun,
     goal: options.prompt,
     systemPrompt,
     budget: options.budget ?? (coding ? CODING_RUN_BUDGET : DEFAULT_RUN_BUDGET),
@@ -1132,18 +1136,23 @@ async function summarizeNativeContext(settings: ModelSettings, messages: AgentMe
   }
 }
 
-export function nativeSystemPrompt(task: TaskRecord, expectedOutputs: string[], skillIndex?: string): string {
+export function nativeSystemPrompt(task: TaskRecord, expectedOutputs: string[], skillIndex?: string, availableTools?: string[]): string {
   if (isTextDraftTask({ ...task, expectedOutputs })) return [DRAFT_INSTRUCTION, "仅将最终草稿写入本轮输出目录，已有草稿时只应用用户新增信息。写入成功后直接调用 finish_task，不反复润色，不读取无关文件。", `期望产物：${expectedOutputs.join("、")}`].join("\n");
+  const toolSet = availableTools ? new Set(availableTools) : null;
+  const hasTool = (name: string): boolean => toolSet === null || toolSet.has(name);
+  const hasAny = (...names: string[]): boolean => names.some(hasTool);
   return [
     "你是 Hearth 的原生 Agent 执行器，在自己的工作区里独立完成用户任务。",
     "你必须通过工具真正完成工作，不能只描述步骤或假装已经完成。",
     "可用的工具遵循最小权限：只能访问任务授权的目录和域名；没有授权就明确说明限制。",
-    "先用 list_files、glob、grep、read_file、read_document 了解已有资料，再生成结果。",
-    "PDF、Word、Excel、CSV 等文档优先调用 read_document；需要表格或 Word 产物时使用 write_spreadsheet 或 write_document。",
-    "边界清晰、可独立完成的子任务可以调用 delegate_task。只读子代理用于调查；隔离写子代理会在独立 Worktree 中工作并返回分支和提交，结果必须由你检查后手动处理，不会自动合并。",
+    ...(hasAny("list_files", "glob", "grep", "read_file") ? ["先用 list_files、glob、grep、read_file 了解已有资料，再生成结果。"] : []),
+    ...(hasAny("read_document") ? ["PDF、Word、Excel、CSV 等文档优先调用 read_document。"] : []),
+    ...(hasAny("write_spreadsheet", "write_document") ? ["需要表格或 Word 产物时使用 write_spreadsheet 或 write_document。"] : []),
+    ...(hasTool("delegate_task") ? ["边界清晰、可独立完成的子任务可以调用 delegate_task。只读子代理用于调查；隔离写子代理会在独立 Worktree 中工作并返回分支和提交，结果必须由你检查后手动处理，不会自动合并。"] : []),
+    ...(hasTool("agent") ? ["需要独立调查、方案设计或代码审查时，优先调用 agent 并选择 explore、plan 或 review；需要隔离实现时选择 general-purpose。"] : []),
     "用户需要的最终产物必须写入输出目录；不要生成中间 JSON、命令日志或调试文件作为交付物。",
     "小输入任务直接写最终产物，避免把输入全文、长篇推导和多层元数据复制进产物；一般单产物控制在 200 行或 20KB 内，只保留结论、关键证据、风险和待确认项；写入后最多回读一次。",
-    "任务完成后必须调用 finish_task，用中文简洁总结完成结果；如果确实缺少关键输入，才调用 ask_user。",
+    ...(hasTool("finish_task") ? ["任务完成后必须调用 finish_task，用中文简洁总结完成结果；如果确实缺少关键输入，才调用 ask_user。"] : []),
     "不要假设本地已经有仓库，也不要编造 PR 状态、评审意见或 rebase 结果；命令失败时读取错误并说明限制。",
     "回答使用简体中文，不要编造没有依据的事实。",
     ...nativeTaskInstructions(task, expectedOutputs),

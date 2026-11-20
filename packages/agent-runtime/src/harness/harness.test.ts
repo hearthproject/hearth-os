@@ -8,6 +8,7 @@ import { compactAgentMessagesWithSummary } from "../compaction.ts";
 import { searchFiles } from "./search.ts";
 import { todoReadTool, todoWriteTool, todoReminder } from "./todo.ts";
 import { commandPolicyIssue } from "./command-policy.ts";
+import { codingSystemPrompt } from "./prompt.ts";
 import { redactSecrets } from "./tool-output.ts";
 import { detectProjectProfile } from "./project-profile.ts";
 import { runShellSession, startShellSession, shellOutput, killShellSession } from "./shell-session.ts";
@@ -153,6 +154,24 @@ describe("todo and command policy", () => {
     expect(commandPolicyIssue("rm -rf build", { planMode: true })).toBeTruthy();
     expect(commandPolicyIssue("git push origin main", { planMode: true })).toBeTruthy();
     expect(commandPolicyIssue("echo x > file", { planMode: true })).toBeTruthy();
+  });
+});
+
+describe("prompt tool contract", () => {
+  it("lists only callable tools and omits unavailable ones", () => {
+    const root = workspace();
+    const prompt = codingSystemPrompt({
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      availableTools: ["read_file", "grep", "finish_task"]
+    });
+    expect(prompt).toContain("## Tools");
+    expect(prompt).toContain("- read_file:");
+    expect(prompt).toContain("- grep:");
+    expect(prompt).toContain("- finish_task:");
+    expect(prompt).not.toContain("read_image");
+    expect(prompt).not.toContain("load_skill");
+    expect(prompt).not.toContain("delegate_task");
   });
 });
 
