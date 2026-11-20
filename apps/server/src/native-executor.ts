@@ -114,6 +114,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
         "diagnostics",
         "submit_plan",
         "rewind",
+        "rewind_turn",
         "shell_output",
         "shell_wait",
         "shell_kill",

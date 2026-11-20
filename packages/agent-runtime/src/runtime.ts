@@ -288,6 +288,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     }
 
     turns += 1;
+    state.turn = turns;
     emit({ type: "turn.started", turn: turns });
 
     let turn;

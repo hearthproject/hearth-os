@@ -142,6 +142,7 @@ export interface AgentToolState {
   startedAt: number;
   snapshots: Map<string, string>;
   snapshotSeq: number;
+  turn?: number;
   planPath?: string;
   mode?: HarnessMode;
   activeSkills?: string[];
@@ -156,6 +157,7 @@ export interface SerializedAgentToolState {
   startedAt: number;
   snapshots: Array<{ id: string; path: string }>;
   snapshotSeq: number;
+  turn?: number;
   planPath?: string;
   mode?: HarnessMode;
   activeSkills?: string[];
