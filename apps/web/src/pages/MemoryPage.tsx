@@ -131,6 +131,7 @@ export function MemoryPage() {
   const setup = setupQuery.data;
   const enabled = status?.settings.enabled ?? false;
   const connected = enabled && status?.health.ok === true;
+  const memoryReferenceOff = status?.settings.write.memories === "off";
   const writeMode = status?.settings.write.memories ?? "curated";
   const allMemories = snapshot?.memories ?? [];
   const evaluationCount = allMemories.filter(isEvaluationMemory).length;
@@ -341,7 +342,9 @@ function KnowledgeOverview({
         ? "记忆助手未开启"
         : "记忆助手尚未安装";
   const copy = connected
-    ? "聊天和任务会自动参考下面这些内容。你不需要手动整理。"
+    ? memoryReferenceOff
+      ? "聊天和任务可以使用已完成任务和资料，但不会自动参考你的记忆。"
+      : "聊天和任务会自动参考下面这些内容。你不需要手动整理。"
     : enabled
       ? "本机记忆服务没有响应，聊天和任务暂时不会参考记忆。到设置里检查一下即可。"
       : installed
