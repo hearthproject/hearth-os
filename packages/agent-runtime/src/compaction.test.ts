@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compactAgentMessagesWithSummary, estimateMessageTokens, shouldCompactContext } from "./compaction.ts";
+import { compactAgentMessagesWithSummary, estimateMessageTokens, microcompactMessages, shouldCompactContext } from "./compaction.ts";
 import type { AgentMessage } from "./types.ts";
 
 const MESSAGES: AgentMessage[] = [
@@ -32,5 +32,19 @@ describe("provider usage anchored compaction", () => {
       outputTokens: 1_000,
       messageCount: 3
     }, 8_000)).toBe(true);
+  });
+
+  it("folds old tool results without touching the newest ones", () => {
+    const messages: AgentMessage[] = [
+      { role: "system", content: "system" },
+      { role: "tool", toolCallId: "1", name: "shell", content: "a".repeat(10_000) },
+      { role: "tool", toolCallId: "2", name: "shell", content: "b".repeat(10_000) }
+    ];
+    const result = microcompactMessages(messages, { maxToolChars: 1_000, keepRecentToolOutputs: 1 });
+
+    expect(result.changed).toBe(true);
+    expect(result.messages[1]?.role).toBe("tool");
+    expect((result.messages[1] as { content: string }).content.length).toBeLessThan(10_000);
+    expect((result.messages[2] as { content: string }).content).toBe("b".repeat(10_000));
   });
 });

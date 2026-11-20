@@ -277,6 +277,7 @@ export interface AgentRuntimeOptions {
   toolTimeoutMs?: number;
   maxParallelTools?: number;
   keepRecentToolOutputs?: number;
+  maxToolChars?: number;
   projectInstructions?: string;
   reminders?: AgentRuntimeReminders;
 }

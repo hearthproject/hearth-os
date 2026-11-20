@@ -14,6 +14,9 @@ export interface CompactResult {
   compacted: boolean;
   before: number;
   after: number;
+  summary?: string | null;
+  summarized?: boolean;
+  summaryFailed?: boolean;
   restoredContext?: string;
 }
 
@@ -22,6 +25,23 @@ export interface TokenCompactResult extends CompactResult {
   afterTokens: number;
   summary: string | null;
   summarized: boolean;
+  summaryFailed?: boolean;
+}
+
+export interface MicroCompactResult {
+  messages: AgentMessage[];
+  changed: boolean;
+}
+
+export function microcompactMessages(
+  messages: AgentMessage[],
+  options: { maxToolChars?: number; keepRecentToolOutputs?: number } = {}
+): MicroCompactResult {
+  const trimmed = trimToolOutputs(messages, options.maxToolChars ?? DEFAULTS.maxToolChars, options.keepRecentToolOutputs ?? 3);
+  return {
+    messages: trimmed,
+    changed: trimmed.some((message, index) => message.content !== messages[index]?.content)
+  };
 }
 
 export function estimateMessageTokens(messages: AgentMessage[], charsPerToken = 4): number {
@@ -65,12 +85,14 @@ export async function compactAgentMessagesWithSummary(
   const anchor = firstUser && !recentSet.has(firstUser) ? [firstUser] : [];
 
   let summaryText: string | null = null;
+  let summaryFailed = false;
   if (summarize && omitted.length > 0 && !options.signal?.aborted) {
     try {
       const summary = await summarize(cloneMessages(omitted), options.signal ?? new AbortController().signal);
       summaryText = summary?.trim() || null;
     } catch {
       summaryText = null;
+      summaryFailed = true;
     }
   }
 
@@ -101,6 +123,7 @@ export async function compactAgentMessagesWithSummary(
     afterTokens: estimateMessageTokens(result),
     summary: summaryText,
     summarized: Boolean(summaryText),
+    ...(summaryFailed ? { summaryFailed: true } : {}),
     ...(options.restoredContext?.trim() ? { restoredContext: options.restoredContext.trim() } : {})
   };
 }

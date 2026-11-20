@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { RunUsage } from "@hearth/core";
-import { compactAgentMessages, compactAgentMessagesWithSummary, estimateMessageTokens } from "./compaction.ts";
+import { compactAgentMessages, compactAgentMessagesWithSummary, estimateMessageTokens, microcompactMessages } from "./compaction.ts";
 import { createAgentState, progressSummary } from "./harness/file-state.ts";
 import { serializeAgentState } from "./harness/checkpoint-state.ts";
 import { markLostActiveWork } from "./harness/active-work.ts";
@@ -59,6 +59,10 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   let lastProgressHash: string | null = null;
   let budgetReminderSent = false;
   let compactions = 0;
+  let autoCompactPausedUntil = 0;
+  let autoCompactDisabled = false;
+  let summaryFailures = 0;
+  const compactionTurns: number[] = [];
   const deniedPaths = new Map<string, number>();
   const startedAt = Date.now();
   const signal = options.signal ?? new AbortController().signal;
@@ -182,6 +186,22 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     for (const read of state.readFiles.values()) delete read.ranges;
     compactions += 1;
     emit({ type: "compacted", before: compacted.before, after: compacted.after, reason: force ? "reactive" : "auto" });
+    if (compacted.summaryFailed) {
+      summaryFailures += 1;
+      if (summaryFailures >= 3 && !autoCompactDisabled) {
+        autoCompactDisabled = true;
+        emit({ type: "notice", message: "上下文摘要连续失败 3 次，已关闭自动压缩；仍会在模型上下文超限时做一次强制压缩。" });
+      }
+    } else if (compacted.summarized) {
+      summaryFailures = 0;
+    }
+    compactionTurns.push(turns);
+    while (compactionTurns.length > 0 && turns - compactionTurns[0]! > 3) compactionTurns.shift();
+    if (compactionTurns.length >= 3) {
+      autoCompactPausedUntil = turns + 5;
+      compactionTurns.length = 0;
+      emit({ type: "notice", message: "3 轮内压缩 3 次，自动压缩暂停 5 轮以避免抖动；原始工具输出仍会被折叠。" });
+    }
     emit({
       type: "context.watermark",
       estimatedTokens: Number("beforeTokens" in compacted ? compacted.beforeTokens : 0),
@@ -378,7 +398,16 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       });
       budgetReminderSent = true;
     }
-    await compactContext(false);
+    const micro = microcompactMessages(messages, {
+      ...(options.maxToolChars !== undefined ? { maxToolChars: options.maxToolChars } : {}),
+      keepRecentToolOutputs: options.keepRecentToolOutputs ?? 3
+    });
+    if (micro.changed) {
+      const beforeMicro = messages.length;
+      messages.splice(0, messages.length, ...micro.messages);
+      emit({ type: "compacted", before: beforeMicro, after: messages.length, reason: "microcompact" });
+    }
+    if (!autoCompactDisabled && turns >= autoCompactPausedUntil) await compactContext(false);
     if (tokenLimit !== null && totalTokens() >= tokenLimit) {
       emit({ type: "budget.exceeded", budget: "tokens", limit: tokenLimit });
       await checkpoint("budget");

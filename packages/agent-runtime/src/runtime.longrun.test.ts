@@ -244,6 +244,34 @@ describe("agent runtime long-run fixtures", () => {
     expect(events.some((event) => event.type === "notice" && event.message.includes("标记为 lost"))).toBe(true);
   });
 
+  it("pauses auto compaction after three compactions in three turns", async () => {
+    const root = workspace(roots);
+    const steps: FakeModelStep[] = [];
+    for (let i = 0; i < 4; i++) {
+      steps.push({ content: "", toolCalls: [fakeToolCall("echo", { value: `v${i}` })], finishReason: "tool_calls" });
+    }
+    steps.push({ content: "", toolCalls: [fakeToolCall("finish_task", { summary: "done" })], finishReason: "tool_calls" });
+    const fake = createFakeModel(steps);
+    const events: RuntimeEvent[] = [];
+    const result = await runAgent({
+      model: fake.model,
+      tools: [echoTool(), ...createBuiltinTools()],
+      goal: "breaker",
+      systemPrompt: "system",
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      permissions: { tools: ["echo", "finish_task"], readRoots: [root], writeRoots: [root], networkHosts: [] },
+      budget: {},
+      contextWindowTokens: 1,
+      contextReserveTokens: 0,
+      onEvent: (event) => { events.push(event); }
+    });
+
+    expect(result.status).toBe("completed");
+    expect(result.metrics?.compactions).toBeLessThanOrEqual(3);
+    expect(events.some((event) => event.type === "notice" && event.message.includes("暂停 5 轮"))).toBe(true);
+  });
+
   it("reports and clears a stale execution marker before starting", async () => {
     const root = workspace(roots);
     const outDir = join(root, "out");
