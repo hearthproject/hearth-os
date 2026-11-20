@@ -110,7 +110,16 @@ import type {
   DecisionRecord,
   OntologyEntityView
 } from "./types.ts";
-import type { WebSearchProvider, WebSearchSettingsView } from "@hearth/core";
+import type {
+  LibraryNode,
+  LibraryRoot,
+  LibrarySearchResult,
+  LibraryStatus,
+  LibraryTreeNode,
+  LibraryTrashEntry,
+  WebSearchProvider,
+  WebSearchSettingsView
+} from "@hearth/core";
 
 export interface ChatStreamBody {
   routeMode?: "auto" | "chat" | "task";
@@ -423,6 +432,30 @@ export const api = {
       body: JSON.stringify(input)
     }),
   exportMemories: () => { window.location.assign("/api/memory/export"); },
+  libraryStatus: () => request<LibraryStatus & { roots: LibraryRoot[]; trashCount: number }>("/api/library/status"),
+  libraryTree: (depth = 2, parentId?: string) =>
+    request<{ nodes: LibraryTreeNode[] }>(`/api/library/tree${query({ depth, parentId })}`),
+  librarySearch: (search: string, limit = 20) =>
+    request<LibrarySearchResult>(`/api/library/search${query({ q: search, limit })}`),
+  libraryNode: (id: string) => request<{
+    node: LibraryNode;
+    document: { content: string; extractor: string; language: string | null; charCount: number } | null;
+    chunkCount: number;
+    children: LibraryNode[];
+  }>(`/api/library/nodes/${encodeURIComponent(id)}`),
+  libraryReindex: () => request<{ result: { indexed: number; unchanged: number; skipped: number; failed: number; chunks: number } }>("/api/library/reindex", { method: "POST" }),
+  libraryDeleteNode: (id: string, reason?: string) => request<{ entry: LibraryTrashEntry }>(`/api/library/nodes/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    body: JSON.stringify(reason ? { reason } : {})
+  }),
+  libraryTrash: () => request<{ entries: LibraryTrashEntry[] }>("/api/library/trash"),
+  libraryRestoreTrash: (id: string) => request<{ entry: LibraryTrashEntry; restoredMemoryId: string | null }>(`/api/library/trash/${encodeURIComponent(id)}/restore`, { method: "POST" }),
+  libraryPurgeTrash: (id: string) => request<{ ok: boolean }>(`/api/library/trash/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  libraryAddRoot: (path: string) => request<{ root: LibraryRoot }>("/api/library/roots", {
+    method: "POST",
+    body: JSON.stringify({ path })
+  }),
+  libraryRemoveRoot: (id: string) => request<{ ok: boolean }>(`/api/library/roots/${encodeURIComponent(id)}`, { method: "DELETE" }),
   ontologyEntities: (search?: string, kind?: string) => request<{ entities: OntologyEntityView[] }>(
     "/api/ontology/entities" + query({ query: search, kind })
   ),

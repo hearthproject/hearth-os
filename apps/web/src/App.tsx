@@ -10,6 +10,7 @@ import { DevicesPage } from "./pages/DevicesPage.tsx";
 import { InboxPage } from "./pages/InboxPage.tsx";
 import { MailPage } from "./pages/MailPage.tsx";
 import { MemoryPage } from "./pages/MemoryPage.tsx";
+import { LibraryPage } from "./pages/LibraryPage.tsx";
 import { OnboardingPage } from "./pages/OnboardingPage.tsx";
 import { PersonalPage } from "./pages/PersonalPage.tsx";
 import { RuntimePage } from "./pages/RuntimePage.tsx";
@@ -34,6 +35,7 @@ export default function App() {
             <Route path="runtime" element={<RuntimePage />} />
             <Route path="knowledge" element={<MemoryPage />} />
             <Route path="memory" element={<MemoryPage />} />
+            <Route path="library" element={<LibraryPage />} />
             <Route path="dossier" element={<DossierPage />} />
             <Route path="mail" element={<MailPage />} />
             <Route path="schedules" element={<SchedulesPage />} />
@@ -75,6 +77,10 @@ function EventBridge() {
         void queryClient.invalidateQueries({ queryKey: ["system"] });
         void queryClient.invalidateQueries({ queryKey: ["desktop"] });
         void queryClient.invalidateQueries({ queryKey: ["memory"] });
+        void queryClient.invalidateQueries({ queryKey: ["library-status"] });
+        void queryClient.invalidateQueries({ queryKey: ["library-tree"] });
+        void queryClient.invalidateQueries({ queryKey: ["library-trash"] });
+        void queryClient.invalidateQueries({ queryKey: ["library-node"] });
         void queryClient.invalidateQueries({ queryKey: ["approvals"] });
         void queryClient.invalidateQueries({ queryKey: ["reconcile"] });
         void queryClient.invalidateQueries({ queryKey: ["outbox"] });
