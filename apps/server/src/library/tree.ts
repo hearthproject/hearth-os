@@ -240,6 +240,11 @@ export class LibraryTreeService {
     }));
   }
 
+  removeSkill(skillId: string): void {
+    const node = this.repository.getNodeByRef(`hearth://skill/${skillId}`);
+    if (node) this.repository.deleteNode(node.id);
+  }
+
   buildTree(depth = 1, parentId: string | null = null): LibraryTreeNode[] {
     this.ensureRoots();
     const nodes = this.repository.listChildren(parentId);

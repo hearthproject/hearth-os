@@ -30,6 +30,7 @@ export const DEVICE_FRAME_DIR = join(DATA_DIR, "device-frames");
 export const BACKUP_DIR = join(DATA_DIR, "backups");
 export const CONTEXT_BLOB_DIR = join(DATA_DIR, "context", "blobs");
 export const LIBRARY_MODEL_DIR = join(DATA_DIR, "models", "library");
+export const SKILL_DIR = join(DATA_DIR, "skills");
 export const EXECUTOR_HOME_DIR = join(DATA_DIR, "executors");
 export const CODEX_HOME_DIR = join(EXECUTOR_HOME_DIR, "codex");
 export const DSH_HOME_DIR = join(EXECUTOR_HOME_DIR, "deepseek-harness");

@@ -51,6 +51,7 @@ const chatSchema = z.object({
   conversationId: z.string().trim().min(1).max(80).optional(),
   projectId: z.string().trim().min(1).max(120).optional(),
   message: z.string().max(100_000).optional(),
+  skillId: z.string().trim().min(1).max(120).optional(),
   attachments: z.array(attachmentSchema).max(5).optional(),
   url: z.string().trim().max(2_048).optional(),
   settings: conversationSettingsSchema.optional()
@@ -96,6 +97,7 @@ const modelProbeSchema = z.object({
 }).strict();
 
 import type { LibraryService } from "./library/service.ts";
+import type { SkillService } from "./skills/service.ts";
 
 export interface ChatRouteOptions {
   service: HearthService;
@@ -112,6 +114,7 @@ export interface ChatRouteOptions {
   cancelTask?: ((taskId: string) => unknown) | undefined;
   memory?: MemoryService | undefined;
   library?: LibraryService | undefined;
+  skills?: SkillService | undefined;
   personal?: {
     ontology: OntologyService;
     mentions: MentionResolver;
@@ -453,6 +456,43 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       // Ontology writeback is best effort and never blocks the reply.
     }
 
+    const installSource = extractSkillInstallSource(message);
+    if (installSource && options.skills) {
+      const assistant = service.appendChatMessage({
+        id: randomUUID(),
+        conversationId: conversation.id,
+        role: "assistant",
+        content: `我找到了要安装的 Skill 来源：\n\n${installSource}\n\n为了安全，安装前需要你确认。确认后我会把它放进资料库的“技能”里，之后可以随时在输入框用 / 调用。`,
+        taskId: null,
+        attachments: [],
+        createdAt: new Date().toISOString()
+      });
+      send("skill_install", { source: installSource });
+      send("done", assistant);
+      finish(reply, send);
+      return reply;
+    }
+
+    let skillContext = "";
+    if (parsed.data.skillId && options.skills) {
+      try {
+        const used = options.skills.use(parsed.data.skillId, {
+          taskId: null,
+          runId: null,
+          note: `对话框使用：${message.slice(0, 120)}`
+        });
+        skillContext = used.prompt;
+        send("skill", { skill: used.skill });
+      } catch (error) {
+        send("error", {
+          code: "SKILL_NOT_AVAILABLE",
+          message: error instanceof Error ? error.message : "这个 Skill 暂时不能用"
+        });
+        finish(reply, send);
+        return reply;
+      }
+    }
+
     const settings = chatSettings();
     const plan = planExecution(userContent);
     const effectiveSettings = parsed.data.settings
@@ -563,7 +603,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
         const task = service.createTask({
           title: route.title || conversationTitle(userContent),
           goal: [message, detectedUrl ? `参考网址：${detectedUrl}` : ""].filter(Boolean).join("\n") || `处理附件：${storedFiles.map((file) => file.name).join("、")}`,
-          textInput: [message, taskChatContext(previousMessages)].filter(Boolean).join("\n\n"),
+          textInput: [message, skillContext, taskChatContext(previousMessages)].filter(Boolean).join("\n\n"),
           fileInputs: storedFiles.map((file) => ({ label: file.name, path: file.path })),
           ...(detectedUrl ? { url: detectedUrl } : {}),
           ...(boundProject ? { projectId: boundProject.id } : {}),
@@ -662,7 +702,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       }
     }
     const messages: ChatMessage[] = [
-      { role: "system", content: [chatSystemPrompt(), routeMode === "chat" ? "用户选择继续聊天：仅在对话中回答或修改内容，不派任务、不调用外部工具，不得声称已发送邮件、读取链接或执行外部操作。" : "", directDraft ? DRAFT_INSTRUCTION : "", personalContext, memoryContext, libraryContext].filter(Boolean).join("\n\n") },
+      { role: "system", content: [chatSystemPrompt(), routeMode === "chat" ? "用户选择继续聊天：仅在对话中回答或修改内容，不派任务、不调用外部工具，不得声称已发送邮件、读取链接或执行外部操作。" : "", directDraft ? DRAFT_INSTRUCTION : "", personalContext, memoryContext, libraryContext, skillContext].filter(Boolean).join("\n\n") },
       ...history
     ];
 
@@ -702,6 +742,16 @@ function extractUrl(message: string): string | null {
   const match = message.match(/https?:\/\/\S+/i);
   if (!match) return null;
   return match[0].replace(/[),.;，。；）]+$/, "");
+}
+
+export function extractSkillInstallSource(message: string): string | null {
+  if (!message) return null;
+  const asksInstall = /(安装|下载|添加|install|add|download)/i.test(message);
+  const mentionsSkill = /(skill|技能)/i.test(message);
+  if (!asksInstall || !mentionsSkill) return null;
+  const match = /https?:\/\/(?:www\.)?github\.com\/[^\s<>"']+/i.exec(message);
+  if (!match) return null;
+  return match[0].replace(/[)，。；;]+$/, "");
 }
 
 export function extractWorkspacePath(message: string): string | null {

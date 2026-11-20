@@ -3920,6 +3920,11 @@ export class HearthStore {
       case "method.evaluation.recorded": return insertMethodEvaluationRow(this.db, event.payload as MethodEvaluation);
       case "method.trial.recorded": return insertMethodTrialRow(this.db, event.payload as MethodTrial);
       case "skill.updated": return upsertSkillRow(this.db, event.payload as SkillRecord);
+      case "skill.deleted": {
+        const payload = event.payload as { id?: unknown } | null;
+        this.db.prepare("DELETE FROM skills WHERE id = ?").run(typeof payload?.id === "string" ? payload.id : "");
+        return;
+      }
       case "skill.version.recorded": return insertSkillVersionRow(this.db, event.payload as SkillVersion);
       case "skill.usage.recorded": return insertSkillUsageRow(this.db, event.payload as SkillUsageEvent);
       case "skill.curator.updated": return upsertSkillCuratorRunRow(this.db, event.payload as SkillCuratorRun);

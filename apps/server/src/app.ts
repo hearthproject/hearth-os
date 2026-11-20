@@ -10,7 +10,7 @@ import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DELEGATION_WORKSPACE_POLICIES, DEVI
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { loadCodexProfile, runCodex } from "@hearth/codex-executor";
 import { z } from "zod";
-import { ARTIFACT_DIR, ATTACHMENT_DIR, BACKUP_DIR, BROWSER_SETTINGS_PATH, CODEX_HOME_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, DOSSIER_DIR, DSH_HOME_DIR, EXECUTOR_HOME_DIR, EXECUTOR_SETTINGS_PATH, LIBRARY_MODEL_DIR, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, SUPERVISION_PATH, WEB_DIST, WORKSPACE_DIR, WORKSTYLE_PATH } from "./config.ts";
+import { ARTIFACT_DIR, ATTACHMENT_DIR, BACKUP_DIR, BROWSER_SETTINGS_PATH, CODEX_HOME_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, DOSSIER_DIR, DSH_HOME_DIR, EXECUTOR_HOME_DIR, EXECUTOR_SETTINGS_PATH, LIBRARY_MODEL_DIR, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, OUTBOX_DIR, REPO_ROOT, SKILL_DIR, SOURCE_CONTENT_DIR, SUPERVISION_PATH, WEB_DIST, WORKSPACE_DIR, WORKSTYLE_PATH } from "./config.ts";
 import { BrowserSettingsStore } from "./browser-settings.ts";
 import { registerChatRoutes } from "./chat-routes.ts";
 import { ReconcileError, ReconcileService } from "./reconcile.ts";
@@ -64,6 +64,8 @@ import { createBuiltinTools } from "@hearth/agent-runtime";
 import { SecretBox } from "./secrets.ts";
 import { LibraryService } from "./library/service.ts";
 import { registerLibraryRoutes } from "./library/routes.ts";
+import { SkillService } from "./skills/service.ts";
+import { registerSkillRoutes } from "./skills/routes.ts";
 import { LocalEmbeddingProvider, type EmbeddingProvider } from "./library/embedding.ts";
 import { createModelSummaryGenerator, type LibrarySummaryGenerator } from "./library/summary.ts";
 import { libraryMcpLaunch } from "./library/mcp-runtime.ts";
@@ -621,6 +623,7 @@ export interface BuildServerOptions {
   contextIndex?: ContextIndex;
   libraryEmbeddingProvider?: EmbeddingProvider | null;
   librarySummaryGenerator?: LibrarySummaryGenerator | null;
+  skillRoot?: string;
 }
 
 export async function buildServer(options: BuildServerOptions = {}) {
@@ -670,6 +673,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
       ? {}
       : { embeddingProvider: options.libraryEmbeddingProvider ?? new LocalEmbeddingProvider({ cacheDir: LIBRARY_MODEL_DIR }) })
   });
+  const skills = new SkillService({ store, root: options.skillRoot ?? SKILL_DIR, library });
   const libraryMcp = libraryMcpLaunch();
   service.bus.subscribe((event) => {
     if (
@@ -950,9 +954,11 @@ export async function buildServer(options: BuildServerOptions = {}) {
     cancelTask: scheduler ? (taskId: string) => scheduler.cancel(taskId) : undefined,
     memory,
     library,
+    skills,
     personal: { ontology, mentions, broker: contextBroker, writer: ontologyWriter }
   });
   registerLibraryRoutes(app, library);
+  registerSkillRoutes(app, skills, library);
   library.start();
   app.addHook("onClose", async () => {
     library.stop();
