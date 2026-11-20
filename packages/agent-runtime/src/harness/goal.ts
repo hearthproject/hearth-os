@@ -226,6 +226,7 @@ function formatGoal(goal: PersistedGoal): string {
     `successCriteria: ${goal.successCriteria.join(" | ") || "(none)"}`,
     `progress: ${goal.turnsUsed}/${goal.maxTurns} turns`,
     ...(goal.planPath ? [`planPath: ${goal.planPath}`] : []),
+    ...(goal.note ? [`note: ${goal.note}`] : []),
     `updatedAt: ${goal.updatedAt}`
   ].join("\n");
 }
