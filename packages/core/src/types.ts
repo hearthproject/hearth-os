@@ -730,7 +730,6 @@ export interface RunCheckpointRecord {
 }
 
 export interface RunCheckpointProof {
-  goalId: string | null;
   attemptId: string;
   identity: {
     executorId: string;
@@ -746,7 +745,6 @@ export interface RunCheckpointProof {
   effectReceipts: string[];
   preparedIntents: string[];
   permissionsDigest?: string;
-  goalRevision?: string;
   workspaceDigest?: string;
   createdAt: string;
 }

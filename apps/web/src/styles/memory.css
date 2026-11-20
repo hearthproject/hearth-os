@@ -71,6 +71,16 @@
   color: var(--ember);
 }
 
+.knowledge-mark.ok {
+  background: var(--ok-tint);
+  color: var(--ok);
+}
+
+.knowledge-mark.idle {
+  background: var(--surface-sunk);
+  color: var(--ink-tertiary);
+}
+
 .knowledge-overview-copy {
   flex: 1 1 auto;
   min-width: 0;
@@ -94,6 +104,31 @@
   color: var(--ink-secondary);
   font-size: var(--fs-12);
   line-height: 1.6;
+}
+
+.memory-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin-top: 10px;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+}
+
+.memory-summary strong {
+  margin-right: 3px;
+  color: var(--ink);
+  font-size: var(--fs-13);
+  font-weight: 600;
+}
+
+.memory-status-hint {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ok);
+  font-size: var(--fs-11);
+  white-space: nowrap;
 }
 
 .knowledge-facts {

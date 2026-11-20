@@ -7,7 +7,6 @@ import {
   AlertTriangle,
   ArrowLeft,
   CheckCircle2,
-  Circle,
   Download,
   Loader2,
   PanelRightClose,
@@ -102,9 +101,6 @@ export function ChatWorkspacePanel({
   const jobs = (backgroundQuery.data?.jobs ?? [])
     .filter((job) => taskIds.has(job.taskId))
     .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
-  const goal = taskQuery.data?.goal ?? null;
-  const completion = taskQuery.data?.completionReport ?? null;
-  const criteriaResults = new Map((completion?.criteria ?? []).map((item) => [item.criterionId, item.status]));
   const hasContent = openTasks.length > 0 || artifacts.length > 0 || attachments.length > 0 || jobs.length > 0;
 
   return (
@@ -130,7 +126,7 @@ export function ChatWorkspacePanel({
           {latestTask && (
             <section className="workspace-section">
               <h3>目标</h3>
-              <p className="workspace-goal">{goal?.objective ?? latestTask.goal}</p>
+              <p className="workspace-goal">{latestTask.goal}</p>
               <div className="workspace-goal-meta">
                 <span className={`workspace-task-status ${latestTask.status}`}>
                   <TaskStatusIcon status={latestTask.status} size={12} /> {TASK_STATUS_LABELS[latestTask.status]}
@@ -143,22 +139,11 @@ export function ChatWorkspacePanel({
           {latestTask && (
             <section className="workspace-section">
               <h3>工作进度</h3>
-              {taskQuery.isLoading && <p className="workspace-muted"><Loader2 size={13} className="spin" /> 正在读取进度</p>}
-              {!taskQuery.isLoading && goal && goal.successCriteria.length > 0 ? (
-                <ul className="workspace-criteria">
-                  {goal.successCriteria.map((criterion) => {
-                    const status = criteriaResults.get(criterion.id) ?? "not_run";
-                    return (
-                      <li key={criterion.id} className={status}>
-                        {status === "passed" ? <CheckCircle2 size={13} /> : status === "failed" ? <XCircle size={13} /> : <Circle size={13} />}
-                        <span>{criterion.description}</span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              ) : !taskQuery.isLoading ? (
+              {taskQuery.isLoading ? (
+                <p className="workspace-muted"><Loader2 size={13} className="spin" /> 正在读取进度</p>
+              ) : (
                 <p className="workspace-muted">{latestTask.summary.phase} · {TASK_STATUS_LABELS[latestTask.status]}</p>
-              ) : null}
+              )}
             </section>
           )}
 

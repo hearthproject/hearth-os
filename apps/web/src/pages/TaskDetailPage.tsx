@@ -35,7 +35,7 @@ import { TaskFollowUpPanel } from "../components/TaskFollowUpPanel.tsx";
 import { TaskGitPanel } from "../components/TaskGitPanel.tsx";
 import { TaskWorktreePanel } from "../components/TaskWorktreePanel.tsx";
 import { StatusPill } from "../components/StatusPill.tsx";
-import type { ArtifactRecord, ExecutorId, GoalCompletionReport, GoalContract, RunRecord, TaskDeliverable, TaskProgressDetail, TaskView } from "../lib/types.ts";
+import type { ArtifactRecord, ExecutorId, RunRecord, TaskDeliverable, TaskProgressDetail, TaskView } from "../lib/types.ts";
 
 export function TaskDetailPage() {
   const { id = "" } = useParams();
@@ -438,8 +438,6 @@ export function TaskDetailPage() {
 
       <TaskFollowUpPanel taskId={task.id} status={task.status} followUps={view.followUps} />
 
-      {view.goal && <GoalCompletionPanel goal={view.goal} report={view.completionReport} />}
-
       <TaskGitPanel taskId={task.id} />
       <TaskWorktreePanel taskId={task.id} />
 
@@ -517,77 +515,6 @@ export function TaskDetailPage() {
   );
 }
 
-function GoalCompletionPanel({ goal, report }: { goal: GoalContract; report: GoalCompletionReport | null }) {
-  const resultById = new Map((report?.criteria ?? []).map((criterion) => [criterion.criterionId, criterion]));
-  return (
-    <section className="panel goal-panel">
-      <details className="task-fold">
-        <summary className="task-fold-summary">
-          <span>目标与验收</span>
-          <span className={`goal-verdict ${report?.verdict ?? "pending"}`}>
-            {report ? completionVerdictLabel(report.verdict) : "尚未判定"}
-          </span>
-        </summary>
-      <div className="goal-body">
-        <div className="goal-summary">
-          <p>{goal.objective}</p>
-          <div className="goal-meta">
-            <span>{goalStateLabel(goal.currentState)}</span>
-            <span>{goal.successCriteria.filter((criterion) => criterion.required).length} 项必需验收</span>
-            {goal.deadline && <span>截止 {formatTime(goal.deadline)}</span>}
-          </div>
-        </div>
-        {goal.nextHandoff && (
-          <div className="goal-next">
-            <strong>下一步</strong>
-            <span>{goal.nextHandoff}</span>
-          </div>
-        )}
-        <ol className="goal-criteria">
-          {goal.successCriteria.map((criterion) => {
-            const result = resultById.get(criterion.id);
-            const status = result?.status ?? "not_run";
-            return (
-              <li key={criterion.id} className={`goal-criterion ${status}`}>
-                <span className="goal-criterion-state">{criterionResultLabel(status)}</span>
-                <div>
-                  <strong>{criterion.description}</strong>
-                  <small>{criterion.validator} · {criterion.required ? "必需" : "可选"}</small>
-                  {result?.detail && <p>{result.detail}</p>}
-                  {result && result.evidenceRefs.length > 0 && (
-                    <details className="goal-evidence">
-                      <summary>{result.evidenceRefs.length} 条证据</summary>
-                      <ul>{result.evidenceRefs.map((ref) => <li key={ref}>{ref}</li>)}</ul>
-                    </details>
-                  )}
-                </div>
-              </li>
-            );
-          })}
-        </ol>
-        {report && report.missingEvidence.length > 0 && (
-          <div className="goal-missing">
-            <strong>仍缺少证据</strong>
-            <ul>{report.missingEvidence.map((item) => <li key={item}>{item}</li>)}</ul>
-          </div>
-        )}
-        {report && report.forbiddenActions.length > 0 && (
-          <div className="goal-missing">
-            <strong>发生禁止动作</strong>
-            <ul>{report.forbiddenActions.map((item) => <li key={item}>{item}</li>)}</ul>
-          </div>
-        )}
-        {report ? (
-          <p className="goal-report-summary">{report.summary} · 判定于 {formatTime(report.checkedAt)}</p>
-        ) : (
-          <p className="goal-report-summary">任务结束后会按上述标准逐条核验，执行器自述不算完成。</p>
-        )}
-      </div>
-      </details>
-    </section>
-  );
-}
-
 function cleanSummary(value: string): string {
   return value
     .replace(/^#{1,6}\s*/gm, "")
@@ -596,31 +523,6 @@ function cleanSummary(value: string): string {
     .replace(/`/g, "")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function completionVerdictLabel(verdict: GoalCompletionReport["verdict"]): string {
-  if (verdict === "pass") return "已通过";
-  if (verdict === "fail") return "未通过";
-  if (verdict === "blocked") return "等待对账";
-  return "需要你确认";
-}
-
-function goalStateLabel(state: GoalContract["currentState"]): string {
-  if (state === "draft") return "草稿";
-  if (state === "active") return "进行中";
-  if (state === "blocked") return "受阻";
-  if (state === "awaiting_user") return "等待你";
-  if (state === "validating") return "正在验收";
-  if (state === "done") return "已完成";
-  if (state === "failed") return "失败";
-  return "已取消";
-}
-
-function criterionResultLabel(status: "passed" | "failed" | "not_run" | "not_required"): string {
-  if (status === "passed") return "已证明";
-  if (status === "failed") return "未通过";
-  if (status === "not_required") return "可选未跑";
-  return "未运行";
 }
 
 function visibleDeliverables(artifacts: ArtifactRecord[], expectedOutputs?: string[]): TaskDeliverable[] {

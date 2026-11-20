@@ -24,7 +24,6 @@ import { DelegationError, DelegationService } from "./delegation.ts";
 import type { BackgroundToolService } from "./background-tools.ts";
 import { diagnoseFailure } from "./context-diagnosis.ts";
 import { classifyFailure, decideFailure, evaluateHandoff, isExecutorFailureCause, type FailureDecision } from "./context-policy.ts";
-import { judgeCompletion, type GoalValidatorRunner } from "./completion-judge.ts";
 import { ContextProjector } from "./context-projector.ts";
 import { maybeModelSummary } from "./context-summary.ts";
 import { HandoffService } from "./handoff.ts";
@@ -81,16 +80,6 @@ interface AttemptResult {
   queuedFollowUp?: boolean;
 }
 
-interface GoalBoundaryStop {
-  code: "deadline_reached" | "budget_exhausted" | "effect_uncertain" | "declared_stop";
-  currentState: "blocked" | "awaiting_user";
-  message: string;
-  nextAction: string;
-  handoff: string;
-  failureClass: NonNullable<TaskError["failureClass"]>;
-  cause: NonNullable<TaskError["cause"]>;
-}
-
 export interface SchedulerOptions {
   mail?: EmailService;
   outbox?: OutboxService;
@@ -124,7 +113,6 @@ export interface SchedulerOptions {
   context?: ContextService | undefined;
   contextBlobRoot?: string | undefined;
   sandbox?: SandboxService | undefined;
-  completionValidators?: Record<string, GoalValidatorRunner> | undefined;
   contextBroker?: ContextBroker | undefined;
   knowledge?: KnowledgeRecallService | undefined;
   knowledgeSettings?: KnowledgeSettingsStore | undefined;
@@ -165,7 +153,6 @@ export class HearthScheduler {
   private readonly runtimePreparer: typeof prepareTaskRuntime;
   private readonly memory: MemoryService;
   private readonly sandbox: SandboxService;
-  private readonly completionValidators: Record<string, GoalValidatorRunner> | null;
   private readonly context: ContextService;
   private readonly contextBroker: ContextBroker | undefined;
   private readonly knowledge: KnowledgeRecallService | undefined;
@@ -230,7 +217,6 @@ export class HearthScheduler {
     this.sourceContentRoot = options.sourceContentRoot ?? SOURCE_CONTENT_DIR;
     this.runtimePreparer = options.runtimePreparer ?? prepareTaskRuntime;
     this.memory = new MemoryService(this.service);
-    this.completionValidators = options.completionValidators ?? null;
     this.context = options.context ?? new ContextService(this.service, options.contextBlobRoot ?? CONTEXT_BLOB_DIR);
     this.contextBroker = options.contextBroker;
     this.knowledge = options.knowledge;
@@ -576,7 +562,6 @@ export class HearthScheduler {
     const scheduledDelegationExecutors = new Set<ExecutorId>();
     for (const task of queued) {
       if (this.stopped) break;
-      if (this.enforceGoalBoundary(task)) continue;
       const executorId = resolveExecutorId(task);
       const delegationJob = this.service.store.getDelegationJobByChildTask(task.id);
       if (delegationJob) {
@@ -668,7 +653,6 @@ export class HearthScheduler {
     if (unresolved.length > 0) {
       throw new Error(`存在状态不确定的外部动作，必须先对账，不能从检查点自动恢复：${unresolved.map((effect) => effect.id).join("、")}`);
     }
-    const goal = task.goalId ? this.service.store.getGoal(task.goalId) : null;
     const permissionsDigest = task.permissions ? hashStable(task.permissions) : null;
     const runs = this.service.store.listRuns(taskId).filter((run) => run.status !== "running");
     for (let index = runs.length - 1; index >= 0; index -= 1) {
@@ -677,8 +661,6 @@ export class HearthScheduler {
       const checkpoint = this.service.store.latestRunCheckpoint(run.id);
       if (!checkpoint || checkpoint.kind === "final") continue;
       if (checkpoint.kind === "waiting_input" && !includeWaitingInput) continue;
-      if (checkpoint.proof?.goalId && checkpoint.proof.goalId !== (task.goalId ?? null)) continue;
-      if (checkpoint.proof?.goalRevision && goal && checkpoint.proof.goalRevision !== goal.updatedAt) continue;
       if (checkpoint.proof?.permissionsDigest && checkpoint.proof.permissionsDigest !== permissionsDigest) continue;
       try {
         if (run.workspace !== workspace && existsSync(run.workspace)) {
@@ -714,9 +696,7 @@ export class HearthScheduler {
     const createdAt = new Date().toISOString();
     const task = this.service.requireTask(taskId);
     const effects = this.service.store.listEffects(taskId);
-    const goal = task.goalId ? this.service.store.getGoal(task.goalId) : null;
     const proof: RunCheckpointProof = {
-      goalId: task.goalId ?? null,
       attemptId: runId,
       identity: { executorId: "native", runtimeVersion: "0.1.0" },
       phasePrefix: checkpoint.messages
@@ -731,7 +711,6 @@ export class HearthScheduler {
         .filter((effect) => ["prepared", "admitted", "executing", "uncertain"].includes(effect.status))
         .map((effect) => effect.id),
       ...(task.permissions ? { permissionsDigest: hashStable(task.permissions) } : {}),
-      ...(goal ? { goalRevision: goal.updatedAt } : {}),
       ...(existsSync(workspace) ? { workspaceDigest: digestWorkspace(workspace) } : {}),
       createdAt
     };
@@ -1064,7 +1043,6 @@ export class HearthScheduler {
       }
       for (;;) {
         const task = this.service.requireTask(taskId);
-        if (this.enforceGoalBoundary(task)) return;
         if (this.cancelled.has(taskId) || task.status === "cancelled") {
           if (handoff) this.context.updateHandoff(handoff.id, { status: "cancelled" });
           return;
@@ -1138,7 +1116,6 @@ export class HearthScheduler {
           this.refreshTaskSummary(taskId, { lastFailure: result.failure });
           return;
         }
-        if (result.status === "failed" && this.enforceGoalBoundary(this.service.requireTask(taskId), result.failure)) return;
         previousRun = result.run;
         if (handoff) {
           this.context.updateHandoff(handoff.id, { status: "failed", toRunId: runId });
@@ -1480,7 +1457,6 @@ export class HearthScheduler {
           const recalled = await this.knowledge.recall({
             query: task.goal,
             taskId,
-            goalId: task.goalId ?? null,
             conversationId: task.conversationId ?? null,
             executorId
           });
@@ -1511,7 +1487,6 @@ export class HearthScheduler {
           const pack = this.contextBroker.compile({
             scopeKind: "task",
             scopeId: task.id,
-            goalId: task.goalId ?? null,
             taskId: task.id,
             query: [task.goal, task.nextAction ?? ""].filter(Boolean).join("\n"),
             budgetTokens: Math.max(500, Math.floor(this.context.settings().projectionTokenBudget * 0.25)),
@@ -1730,60 +1705,6 @@ export class HearthScheduler {
         }, runId);
         this.refreshTaskSummary(taskId);
         return { status: "completed", run: { ...run, status: "completed", threadId: result.threadId, usage: this.usageWithMetrics(result.usage, result.turns, result.toolCalls) }, executorId, outDir, error: null, failure: null, aborted: controller.signal.aborted, leaseLost: false, cancelled: false, queuedFollowUp: true };
-      }
-      const goal = task.goalId ? this.service.store.getGoal(task.goalId) : null;
-      if (goal) {
-        const goalTasks = this.service.store.listTasks().filter((item) => item.goalId === goal.goalId);
-        const goalArtifacts = goalTasks.flatMap((item) => this.service.store.listArtifacts(item.id));
-        const goalEffects = goalTasks.flatMap((item) => this.service.store.listEffects(item.id));
-        this.service.updateGoal(goal.goalId, { currentState: "validating" });
-        const report = await judgeCompletion({
-          goal,
-          task: this.service.requireTask(taskId),
-          artifacts: goalArtifacts,
-          effects: goalEffects,
-          workspaceRoot: prepared.root,
-          sandbox: this.sandbox,
-          ...(this.completionValidators ? { validators: this.completionValidators } : {})
-        });
-        this.service.recordCompletionReport(report);
-        this.capture({
-          taskId, conversationId: task.conversationId ?? null, runId, executorId,
-          kind: "notice", role: "system", content: `完成判定 ${report.verdict}：${report.summary}`,
-          provenance: { source: "completion-judge", report }, executorEventId: `completion:${runId}`
-        });
-        if (report.verdict !== "pass") {
-          const blockedEffect = goalEffects.find((effect) => effect.status === "uncertain" || effect.status === "executing");
-          const failureClass = report.verdict === "blocked" ? "effect_unknown" : "validation_failed";
-          const disposition = report.verdict === "blocked"
-            ? { type: "reconcile" as const, effectId: blockedEffect?.id ?? "" }
-            : { type: "repair" as const, target: goal.successCriteria.map((criterion) => criterion.check).join(", ") || goal.objective, reason: report.summary };
-          const goalError: TaskError = {
-            kind: "completion_not_proven",
-            message: report.summary,
-            recoverable: true,
-            guidance: report.verdict === "blocked" ? "先完成 effect 对账，再重新判定完成" : "按失败项修复证据或请求人工确认",
-            cause: report.verdict === "blocked" ? "effect_uncertain" : "contract_failure",
-            failureClass,
-            disposition
-          };
-          if (report.verdict === "needs_human" || report.verdict === "blocked") {
-            this.service.updateGoal(goal.goalId, {
-              currentState: report.verdict === "blocked" ? "blocked" : "awaiting_user",
-              nextHandoff: report.summary
-            });
-            this.service.updateTask(taskId, {
-              status: "waiting_input", currentRunId: runId,
-              nextAction: report.verdict === "blocked" ? "外部动作结果未确定，请先对账" : "完成证据仍需人工确认",
-              error: goalError
-            }, runId);
-            this.refreshTaskSummary(taskId, { lastFailure: goalError });
-            return { status: "waiting_input", run: { ...run, status: "completed", threadId: result.threadId, usage: this.usageWithMetrics(result.usage, result.turns, result.toolCalls) }, executorId, outDir, error: null, failure: goalError, aborted: controller.signal.aborted, leaseLost: false, cancelled: false };
-          }
-          this.service.updateGoal(goal.goalId, { currentState: "active", nextHandoff: report.summary });
-          throw new Error(`完成判定失败：${report.summary}`);
-        }
-        this.service.updateGoal(goal.goalId, { currentState: "done", nextHandoff: "" });
       }
       this.service.updateTask(taskId, {
         status: "completed", currentRunId: runId, nextAction: "产物已保存",
@@ -2395,8 +2316,7 @@ export class HearthScheduler {
 
   private remainingBudget(taskId: string): RunBudget {
     const task = this.service.requireTask(taskId);
-    const goal = !task.budgetOverride && task.goalId ? this.service.store.getGoal(task.goalId) : null;
-    const runs = goal ? this.goalRuns(goal.goalId) : this.service.store.listRuns(taskId);
+    const runs = this.service.store.listRuns(taskId);
     const used = this.usageForRuns(runs);
     const effective = this.effectiveBudget(task);
     return {
@@ -2417,21 +2337,15 @@ export class HearthScheduler {
         maxDurationMs: Math.max(1, Math.floor(task.budgetOverride.maxDurationMs))
       };
     }
-    const goal = task.goalId ? this.service.store.getGoal(task.goalId) : null;
-    const goalBudget = goal?.budget ?? {};
     const modeBudget = task.executorId === "native" && task.executionMode
       ? EXECUTION_PROFILES[task.executionMode].budget
       : this.runBudget;
     return {
-      maxTurns: Math.min(goalBudget.maxTurns ?? this.runBudget.maxTurns, this.runBudget.maxTurns, modeBudget.maxTurns),
-      maxToolCalls: Math.min(goalBudget.maxToolCalls ?? this.runBudget.maxToolCalls, this.runBudget.maxToolCalls, modeBudget.maxToolCalls),
-      maxTokens: Math.min(goalBudget.maxTokens ?? this.runBudget.maxTokens, this.runBudget.maxTokens, modeBudget.maxTokens),
-      maxDurationMs: Math.min(goalBudget.maxDurationMs ?? this.runBudget.maxDurationMs, this.runBudget.maxDurationMs, modeBudget.maxDurationMs)
+      maxTurns: Math.min(this.runBudget.maxTurns, modeBudget.maxTurns),
+      maxToolCalls: Math.min(this.runBudget.maxToolCalls, modeBudget.maxToolCalls),
+      maxTokens: Math.min(this.runBudget.maxTokens, modeBudget.maxTokens),
+      maxDurationMs: Math.min(this.runBudget.maxDurationMs, modeBudget.maxDurationMs)
     };
-  }
-
-  private goalRuns(goalId: string): RunRecord[] {
-    return this.goalTasks(goalId).flatMap((task) => this.service.store.listRuns(task.id));
   }
 
   private usageForRuns(runs: RunRecord[]): { tokens: number; turns: number; toolCalls: number; durationMs: number } {
@@ -2449,114 +2363,6 @@ export class HearthScheduler {
         durationMs: usage.durationMs + durationMs
       };
     }, { tokens: 0, turns: 0, toolCalls: 0, durationMs: 0 });
-  }
-
-  private goalBoundaryStop(task: TaskRecord, failure: TaskError | null = null): GoalBoundaryStop | null {
-    if (!task.goalId) return null;
-    const goal = this.service.store.getGoal(task.goalId);
-    if (!goal || goal.currentState === "done" || goal.currentState === "cancelled") return null;
-    const runs = this.goalRuns(goal.goalId);
-    const used = this.usageForRuns(runs);
-    const deadline = goal.deadline ? Date.parse(goal.deadline) : Number.NaN;
-    if (Number.isFinite(deadline) && deadline <= Date.now()) {
-      return {
-        code: "deadline_reached",
-        currentState: "awaiting_user",
-        message: `Goal「${goal.title}」已超过截止时间 ${goal.deadline}，不能继续自动执行`,
-        nextAction: "Goal 已超过截止时间，等待调整期限或终止",
-        handoff: `截止时间已到（${goal.deadline}）。已完成 ${runs.length} 轮；下一步：请用户调整 deadline、缩小目标，或确认终止。`,
-        failureClass: "budget_exhausted",
-        cause: "budget"
-      };
-    }
-
-    const effective = this.effectiveBudget(task);
-    const exhausted = task.budgetOverride ? [] : [
-      used.turns >= effective.maxTurns ? `轮次 ${used.turns}/${effective.maxTurns}` : null,
-      used.toolCalls >= effective.maxToolCalls ? `工具调用 ${used.toolCalls}/${effective.maxToolCalls}` : null,
-      used.tokens >= effective.maxTokens ? `tokens ${used.tokens}/${effective.maxTokens}` : null,
-      used.durationMs >= effective.maxDurationMs ? `时长 ${Math.round(used.durationMs / 1000)}s/${Math.round(effective.maxDurationMs / 1000)}s` : null
-    ].filter((item): item is string => item !== null);
-    if (exhausted.length > 0) {
-      return {
-        code: "budget_exhausted",
-        currentState: "awaiting_user",
-        message: `Goal「${goal.title}」预算已耗尽：${exhausted.join("，")}`,
-        nextAction: "Goal 预算已耗尽，等待调整预算或人工接手",
-        handoff: `预算已耗尽（${exhausted.join("，")}）。已完成 ${runs.length} 轮；下一步：检查已证明阶段，调整 budget 后继续，或由用户接手。`,
-        failureClass: "budget_exhausted",
-        cause: "budget"
-      };
-    }
-
-    const goalEffects = this.goalTasks(goal.goalId).flatMap((item) => this.service.store.listEffects(item.id));
-    const unresolved = goalEffects.filter((effect) => effect.status === "executing" || effect.status === "uncertain");
-    if (unresolved.length > 0) {
-      return {
-        code: "effect_uncertain",
-        currentState: "blocked",
-        message: `Goal「${goal.title}」存在未结算外部动作：${unresolved.map((effect) => effect.id).join("、")}`,
-        nextAction: "外部动作结果未确定，请先完成对账",
-        handoff: `外部动作 ${unresolved.map((effect) => effect.id).join("、")} 状态未知；下一步：先完成 reconcile，确认 committed 或 absent 后再继续。`,
-        failureClass: "effect_unknown",
-        cause: "effect_uncertain"
-      };
-    }
-
-    const conditions = new Set(goal.stopConditions.map((condition) => condition.trim().toLowerCase()));
-    const taskFailure = failure ?? task.error;
-    if (conditions.has("task_failed") && taskFailure) {
-      return {
-        code: "declared_stop",
-        currentState: "awaiting_user",
-        message: `Goal「${goal.title}」命中停止条件 task_failed：${taskFailure.message}`,
-        nextAction: "Goal 命中停止条件，等待你决定是否继续",
-        handoff: `命中停止条件 task_failed。上一步失败：${taskFailure.message}；下一步：确认原因、补充授权或调整目标后再继续。`,
-        failureClass: "validation_failed",
-        cause: "unknown"
-      };
-    }
-    const latestApproval = this.service.store.listApprovals(task.id).at(-1);
-    if (conditions.has("approval_rejected") && latestApproval?.status === "rejected") {
-      return {
-        code: "declared_stop",
-        currentState: "awaiting_user",
-        message: `Goal「${goal.title}」命中停止条件 approval_rejected`,
-        nextAction: "审批已被拒绝，等待你调整方案或目标",
-        handoff: "命中停止条件 approval_rejected。下一步：不要重试同一动作，先由用户调整范围或授权。",
-        failureClass: "policy_denied",
-        cause: "permission"
-      };
-    }
-    return null;
-  }
-
-  private goalTasks(goalId: string): TaskRecord[] {
-    return this.service.store.listTasks().filter((task) => task.goalId === goalId);
-  }
-
-  private enforceGoalBoundary(task: TaskRecord, failure: TaskError | null = null): boolean {
-    const stop = this.goalBoundaryStop(task, failure);
-    const goal = task.goalId ? this.service.store.getGoal(task.goalId) : null;
-    if (!stop || !goal) return false;
-    const handoff = goal.nextHandoff?.trim() || stop.handoff;
-    this.service.updateGoal(goal.goalId, { currentState: stop.currentState, nextHandoff: handoff });
-    const error: TaskError = {
-      kind: `goal_${stop.code}`,
-      message: stop.message,
-      recoverable: true,
-      guidance: stop.code === "effect_uncertain" ? "先完成外部动作对账，再重新开始任务" : "调整 Goal 的预算或截止时间后重试",
-      cause: stop.cause,
-      failureClass: stop.failureClass,
-      disposition: { type: "handoff", note: handoff }
-    };
-    const status = task.status === "running" || task.status === "waiting_approval" ? "waiting_input" : "recoverable";
-    this.service.updateTask(task.id, {
-      status, currentRunId: task.currentRunId,
-      nextAction: stop.nextAction, error, resultSummary: stop.message
-    }, task.currentRunId ?? undefined);
-    this.refreshTaskSummary(task.id, { lastFailure: error });
-    return true;
   }
 
   private selectHandoffTarget(input: {

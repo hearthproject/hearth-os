@@ -9,7 +9,6 @@ import { defaultConversationSettings, EXECUTION_PROFILES } from "@hearth/core";
 import { createAgentState, serializeAgentState } from "@hearth/agent-runtime";
 import type { CodexRunner, ExecutorHealthProvider, NativeRunner } from "./scheduler.ts";
 import { ApprovalManager } from "./approvals.ts";
-import type { GoalValidatorRunner } from "./completion-judge.ts";
 import { HearthStore } from "@hearth/eventlog";
 import { HearthScheduler } from "./scheduler.ts";
 import { HearthService } from "./service.ts";
@@ -433,124 +432,6 @@ describe("Hearth scheduler", () => {
     expect(failed.error?.failureClass).toBe("validation_failed");
     expect(failed.error?.disposition).toMatchObject({ type: "repair", target: "meeting-notes.md" });
     expect(store?.listArtifacts(task.id)).toHaveLength(0);
-  });
-
-  it("requires a passing completion judge before marking a goal task completed", async () => {
-    const service = setup();
-    const goal = service.createGoal({
-      title: "研究摘要",
-      objective: "产出可核验摘要",
-      currentState: "active",
-      reviewPolicy: "auto",
-      successCriteria: [{ id: "summary", description: "摘要存在", validator: "file", check: "research-summary.json", required: true }],
-      evidenceRequirements: ["research-summary.json"]
-    });
-    const runner: CodexRunner = async (options) => {
-      writeFileSync(join(testOutDir(options), "research-summary.json"), JSON.stringify({ title: "周报", summary: "完成" }));
-      return FAKE_RESULT;
-    };
-    scheduler = makeScheduler(service, runner);
-    scheduler.start();
-
-    const task = service.createTask({ title: "本周摘要", goalId: goal.goalId, executorId: "codex", expectedOutputs: ["research-summary.json"] });
-    const completed = await waitForStatus(service, task.id, "completed");
-    expect(completed.goalId).toBe(goal.goalId);
-    expect(service.latestCompletionReport(goal.goalId)).toMatchObject({ verdict: "pass", taskId: task.id });
-    expect(service.getGoal(goal.goalId)?.currentState).toBe("done");
-  });
-
-  it("does not accept an executor claim when the goal validator fails", async () => {
-    const service = setup();
-    const goal = service.createGoal({
-      title: "研究摘要",
-      objective: "产出可核验摘要",
-      currentState: "active",
-      reviewPolicy: "auto",
-      successCriteria: [{ id: "schema", description: "字段完整", validator: "schema", check: "research-summary.json#title,summary", required: true }],
-      evidenceRequirements: ["research-summary.json"]
-    });
-    const runner: CodexRunner = async (options) => {
-      writeFileSync(join(testOutDir(options), "research-summary.json"), JSON.stringify({ title: "只有标题" }));
-      return FAKE_RESULT;
-    };
-    const executorHealth: ExecutorHealthProvider = (executorId) => executorId === "codex"
-      ? { canRun: true, issues: [] }
-      : { canRun: false, issues: ["未安装"] };
-    scheduler = makeScheduler(service, runner, { executorHealth });
-    scheduler.start();
-
-    const task = service.createTask({ title: "本周摘要", goalId: goal.goalId, executorId: "codex", expectedOutputs: ["research-summary.json"] });
-    const failed = await waitForStatus(service, task.id, "recoverable");
-    expect(failed.status).not.toBe("completed");
-    expect(failed.error?.failureClass).toBe("validation_failed");
-    expect(failed.error?.disposition).toMatchObject({ type: "repair" });
-    expect(service.latestCompletionReport(goal.goalId)).toMatchObject({ verdict: "fail", taskId: task.id });
-    expect(service.getGoal(goal.goalId)?.currentState).toBe("active");
-  });
-
-  it("uses scheduler-provided completion validators for manual goal criteria", async () => {
-    const service = setup();
-    const goal = service.createGoal({
-      title: "人工验收目标",
-      objective: "由外部验收器确认结果",
-      currentState: "active",
-      reviewPolicy: "auto",
-      successCriteria: [{ id: "review", description: "外部复核通过", validator: "manual", check: "确认结果", required: true }],
-      evidenceRequirements: []
-    });
-    let reviewedTaskId = "";
-    const completionValidators: Record<string, GoalValidatorRunner> = {
-      review: (context) => {
-        reviewedTaskId = context.task.id;
-        return { status: "passed", evidenceRefs: [`manual:${context.task.id}`], detail: "外部验收器已确认" };
-      }
-    };
-    const runner: CodexRunner = async (options) => {
-      writeFileSync(join(testOutDir(options), "result.md"), "# result\n");
-      return FAKE_RESULT;
-    };
-    scheduler = makeScheduler(service, runner, { completionValidators });
-    scheduler.start();
-
-    const task = service.createTask({ title: "等待复核", goalId: goal.goalId, executorId: "codex", expectedOutputs: ["result.md"] });
-    const completed = await waitForStatus(service, task.id, "completed");
-
-    expect(completed.goalId).toBe(goal.goalId);
-    expect(reviewedTaskId).toBe(task.id);
-    expect(service.latestCompletionReport(goal.goalId)).toMatchObject({
-      verdict: "pass",
-      taskId: task.id,
-      criteria: [{ criterionId: "review", status: "passed" }]
-    });
-    expect(service.getGoal(goal.goalId)?.currentState).toBe("done");
-  });
-
-  it("does not complete a manual goal criterion without an injected validator", async () => {
-    const service = setup();
-    const goal = service.createGoal({
-      title: "人工验收目标",
-      objective: "由外部验收器确认结果",
-      currentState: "active",
-      reviewPolicy: "auto",
-      successCriteria: [{ id: "review", description: "外部复核通过", validator: "manual", check: "确认结果", required: true }],
-      evidenceRequirements: []
-    });
-    const runner: CodexRunner = async (options) => {
-      writeFileSync(join(testOutDir(options), "result.md"), "# result\n");
-      return FAKE_RESULT;
-    };
-    scheduler = makeScheduler(service, runner);
-    scheduler.start();
-
-    const task = service.createTask({ title: "等待复核", goalId: goal.goalId, executorId: "codex", expectedOutputs: ["result.md"] });
-    const waiting = await waitForStatus(service, task.id, "waiting_input");
-
-    expect(waiting.error?.kind).toBe("completion_not_proven");
-    expect(service.latestCompletionReport(goal.goalId)).toMatchObject({
-      verdict: "needs_human",
-      criteria: [{ criterionId: "review", status: "not_run" }]
-    });
-    expect(service.getGoal(goal.goalId)?.currentState).toBe("awaiting_user");
   });
 
   it("runs up to three tasks in parallel for the same executor", async () => {
@@ -1111,134 +992,6 @@ describe("Hearth scheduler", () => {
     expect(store?.listContextItems(task.id, { limit: 200 }).items.some((item) => item.kind === "diagnosis")).toBe(true);
   });
 
-  it("keeps goal evidence from both executors across a handoff", async () => {
-    const service = setup();
-    const modelSettingsPath = configureModel();
-    const conversation = fullConversation();
-    const goal = service.createGoal({
-      title: "跨执行器交付",
-      objective: "前后两个执行器都留下可核验产物",
-      currentState: "active",
-      reviewPolicy: "auto",
-      successCriteria: [
-        { id: "partial", description: "前序产物存在", validator: "file", check: "partial.md", required: true },
-        { id: "result", description: "最终产物存在", validator: "file", check: "result.md", required: true }
-      ],
-      evidenceRequirements: ["partial.md", "result.md"]
-    });
-    const nativeRunner: NativeRunner = async (options) => {
-      writeFileSync(join(options.prepared.outDir, "partial.md"), "# partial\n\nfirst executor evidence\n");
-      throw new Error("工具连续失败，需要切换执行器");
-    };
-    const codexRunner: CodexRunner = async (options) => {
-      writeFileSync(join(testOutDir(options), "result.md"), "# result\n\nsecond executor evidence\n");
-      return FAKE_RESULT;
-    };
-    scheduler = makeScheduler(service, codexRunner, { nativeRunner, modelSettingsPath });
-    scheduler.start();
-
-    const task = service.createTask({
-      title: "跨执行器目标", goalId: goal.goalId, textInput: "从 native 开始",
-      executorId: "native", expectedOutputs: ["result.md"], conversationId: conversation.id
-    });
-    await waitForStatus(service, task.id, "completed");
-
-    const runs = store?.listRuns(task.id) ?? [];
-    expect(runs.map((run) => run.executorId)).toEqual(["native", "codex"]);
-    const report = service.latestCompletionReport(goal.goalId);
-    expect(report).toMatchObject({ verdict: "pass", taskId: task.id });
-    expect(report?.criteria.map((criterion) => criterion.status)).toEqual(["passed", "passed"]);
-    expect(report?.evidenceRefs).toEqual(expect.arrayContaining([
-      expect.stringContaining("partial.md#sha256="),
-      expect.stringContaining("result.md#sha256=")
-    ]));
-    expect(service.getGoal(goal.goalId)?.currentState).toBe("done");
-  });
-
-  it("does not start a task after its goal deadline and persists a handoff", async () => {
-    const service = setup();
-    let runnerCalls = 0;
-    scheduler = makeScheduler(service, async () => {
-      runnerCalls += 1;
-      return FAKE_RESULT;
-    }, {
-      executorHealth: (executorId: ExecutorId) => ({ canRun: executorId === "codex", issues: [] })
-    });
-    scheduler.start();
-    const goal = service.createGoal({
-      title: "已过期目标",
-      objective: "不应在截止时间后继续执行",
-      currentState: "active",
-      reviewPolicy: "auto",
-      deadline: new Date(Date.now() - 60_000).toISOString()
-    });
-    const task = service.createTask({
-      title: "不应启动", goalId: goal.goalId, textInput: "执行", executorId: "codex"
-    });
-
-    const blocked = await waitForStatus(service, task.id, "recoverable");
-    expect(runnerCalls).toBe(0);
-    expect(blocked.error?.kind).toBe("goal_deadline_reached");
-    expect(service.getGoal(goal.goalId)).toMatchObject({ currentState: "awaiting_user" });
-    expect(service.getGoal(goal.goalId)?.nextHandoff).toContain("截止时间已到");
-  });
-
-  it("stops a goal after its cumulative budget is exhausted", async () => {
-    const service = setup();
-    let runnerCalls = 0;
-    scheduler = makeScheduler(service, async () => {
-      runnerCalls += 1;
-      throw new Error("executor failed");
-    }, {
-      executorHealth: (executorId: ExecutorId) => ({ canRun: executorId === "codex", issues: [] })
-    });
-    scheduler.start();
-    const goal = service.createGoal({
-      title: "有限预算目标",
-      objective: "预算耗尽后必须停止",
-      currentState: "active",
-      reviewPolicy: "auto",
-      budget: { maxTurns: 1 },
-      stopConditions: ["budget_exhausted"]
-    });
-    const task = service.createTask({
-      title: "只允许一轮", goalId: goal.goalId, textInput: "执行", executorId: "codex"
-    });
-
-    const blocked = await waitForStatus(service, task.id, "waiting_input");
-    expect(runnerCalls).toBe(1);
-    expect(store?.listRuns(task.id)).toHaveLength(1);
-    expect(blocked.error?.kind).toBe("goal_budget_exhausted");
-    expect(service.getGoal(goal.goalId)?.nextHandoff).toContain("预算已耗尽");
-  });
-
-  it("honors a deterministic task_failed stop condition instead of retrying", async () => {
-    const service = setup();
-    let runnerCalls = 0;
-    scheduler = makeScheduler(service, async () => {
-      runnerCalls += 1;
-      throw new Error("executor failed");
-    }, {
-      executorHealth: (executorId: ExecutorId) => ({ canRun: executorId === "codex", issues: [] })
-    });
-    scheduler.start();
-    const goal = service.createGoal({
-      title: "失败即停",
-      objective: "任何失败都交给用户决定",
-      currentState: "active",
-      reviewPolicy: "auto",
-      stopConditions: ["task_failed"]
-    });
-    const task = service.createTask({
-      title: "失败后不重试", goalId: goal.goalId, textInput: "执行", executorId: "codex"
-    });
-
-    const blocked = await waitForStatus(service, task.id, "waiting_input");
-    expect(runnerCalls).toBe(1);
-    expect(blocked.error?.kind).toBe("goal_declared_stop");
-    expect(service.getGoal(goal.goalId)?.nextHandoff).toContain("task_failed");
-  });
-
   it("hands off a native runtime crash without spending a same-executor retry", async () => {
     const service = setup();
     const modelSettingsPath = configureModel();
@@ -1605,14 +1358,6 @@ describe("Hearth scheduler", () => {
   it("records what a native checkpoint proves and restores only after revalidation", async () => {
     const service = setup();
     const modelSettingsPath = configureModel();
-    const goal = service.createGoal({
-      title: "可恢复任务",
-      objective: "完成并保留检查点证明",
-      currentState: "active",
-      reviewPolicy: "auto",
-      successCriteria: [{ id: "result", description: "结果存在", validator: "file", check: "result.md", required: true }],
-      evidenceRequirements: ["result.md"]
-    });
     let calls = 0;
     const nativeRunner: NativeRunner = async (options) => {
       calls += 1;
@@ -1639,14 +1384,13 @@ describe("Hearth scheduler", () => {
     scheduler.start();
 
     const task = service.createTask({
-      title: "可恢复", goalId: goal.goalId, executorId: "native", expectedOutputs: ["result.md"]
+      title: "可恢复", executorId: "native", expectedOutputs: ["result.md"]
     });
     await waitForStatus(service, task.id, "completed");
     const runs = store?.listRuns(task.id) ?? [];
     expect(runs).toHaveLength(2);
     const checkpoint = runs[0] ? store?.latestRunCheckpoint(runs[0].id) : null;
     expect(checkpoint?.proof).toMatchObject({
-      goalId: goal.goalId,
       attemptId: runs[0]?.id,
       identity: { executorId: "native" },
       validation: { status: "not_required", evidenceRefs: [] }
@@ -2065,7 +1809,6 @@ describe("Hearth scheduler", () => {
       deepseekRunner?: (options: DeepSeekHarnessRunOptions) => Promise<DeepSeekHarnessRunResult>;
       modelSettingsForExecutor?: (executorId: ExecutorId) => ModelSettings | null;
       delegations?: DelegationService;
-      completionValidators?: Record<string, GoalValidatorRunner>;
       mcpServers?: McpServerService;
     } = {}
   ): HearthScheduler {
