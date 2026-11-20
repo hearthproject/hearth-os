@@ -38,9 +38,6 @@ import type {
   ExecutorModelBinding,
   GoalContract,
   GoalCompletionReport,
-  KnowledgeJobStatus,
-  KnowledgeMapEntry,
-  KnowledgeSyncJob,
   HandoffRecord,
   EntityAliasRecord,
   EntityRecord,
@@ -386,35 +383,6 @@ CREATE TABLE IF NOT EXISTS memory_consolidation_runs (
   skipped_json TEXT NOT NULL, error TEXT, report TEXT NOT NULL,
   started_at TEXT NOT NULL, completed_at TEXT
 );
-CREATE TABLE IF NOT EXISTS knowledge_sync_jobs (
-  id TEXT PRIMARY KEY,
-  kind TEXT NOT NULL,
-  ref TEXT NOT NULL,
-  uri TEXT NOT NULL,
-  op TEXT NOT NULL,
-  content_hash TEXT,
-  status TEXT NOT NULL,
-  attempts INTEGER NOT NULL DEFAULT 0,
-  next_attempt_at TEXT,
-  last_error TEXT,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  UNIQUE(kind, ref, uri, op)
-);
-CREATE TABLE IF NOT EXISTS knowledge_map (
-  hearth_id TEXT PRIMARY KEY,
-  uri TEXT NOT NULL,
-  kind TEXT NOT NULL,
-  content_hash TEXT,
-  updated_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS knowledge_state (
-  key TEXT PRIMARY KEY,
-  value TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_knowledge_jobs_status
-  ON knowledge_sync_jobs(status, next_attempt_at);
 CREATE TABLE IF NOT EXISTS context_items (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,
   id TEXT NOT NULL UNIQUE,
@@ -1765,136 +1733,6 @@ export class HearthStore {
     this.db.prepare(
       "INSERT INTO app_meta (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at"
     ).run(key, value, updatedAt);
-  }
-
-  upsertKnowledgeJob(job: KnowledgeSyncJob): void {
-    this.db.prepare(
-      `INSERT INTO knowledge_sync_jobs
-       (id, kind, ref, uri, op, content_hash, status, attempts, next_attempt_at, last_error, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(kind, ref, uri, op) DO UPDATE SET
-         content_hash=excluded.content_hash,
-         status=excluded.status,
-         next_attempt_at=excluded.next_attempt_at,
-         last_error=excluded.last_error,
-         updated_at=excluded.updated_at`
-    ).run(
-      job.id, job.kind, job.ref, job.uri, job.op, job.contentHash, job.status,
-      job.attempts, job.nextAttemptAt, job.lastError, job.createdAt, job.updatedAt
-    );
-  }
-
-  claimKnowledgeJobs(limit = 20, now = new Date().toISOString()): KnowledgeSyncJob[] {
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      const rows = this.db.prepare(
-        `SELECT * FROM knowledge_sync_jobs
-         WHERE status = 'pending' OR (status = 'failed' AND (next_attempt_at IS NULL OR next_attempt_at <= ?))
-         ORDER BY created_at ASC LIMIT ?`
-      ).all(now, Math.max(1, limit)) as DbRow[];
-      const update = this.db.prepare(
-        "UPDATE knowledge_sync_jobs SET status = 'running', updated_at = ? WHERE id = ? AND status IN ('pending', 'failed')"
-      );
-      for (const row of rows) update.run(now, String(row.id));
-      this.db.exec("COMMIT");
-      return rows.map((row) => ({ ...rowToKnowledgeJob(row), status: "running" as const }));
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
-  }
-
-  finishKnowledgeJob(
-    id: string,
-    patch: {
-      status: KnowledgeJobStatus;
-      lastError?: string | null;
-      attempts?: number;
-      nextAttemptAt?: string | null;
-    },
-    updatedAt = new Date().toISOString()
-  ): void {
-    const current = this.db.prepare("SELECT attempts FROM knowledge_sync_jobs WHERE id = ?").get(id) as DbRow | undefined;
-    if (!current) return;
-    this.db.prepare(
-      "UPDATE knowledge_sync_jobs SET status = ?, last_error = ?, attempts = ?, next_attempt_at = ?, updated_at = ? WHERE id = ?"
-    ).run(
-      patch.status,
-      patch.lastError ?? null,
-      patch.attempts ?? Number(current.attempts),
-      patch.nextAttemptAt ?? null,
-      updatedAt,
-      id
-    );
-  }
-
-  getKnowledgeJob(kind: string, ref: string, uri: string, op: "write" | "delete"): KnowledgeSyncJob | null {
-    const row = this.db.prepare(
-      "SELECT * FROM knowledge_sync_jobs WHERE kind = ? AND ref = ? AND uri = ? AND op = ?"
-    ).get(kind, ref, uri, op) as DbRow | undefined;
-    return row ? rowToKnowledgeJob(row) : null;
-  }
-
-  listKnowledgeJobs(options: { status?: KnowledgeJobStatus; limit?: number } = {}): KnowledgeSyncJob[] {    const rows = options.status
-      ? this.db.prepare("SELECT * FROM knowledge_sync_jobs WHERE status = ? ORDER BY created_at ASC LIMIT ?").all(options.status, options.limit ?? 100)
-      : this.db.prepare("SELECT * FROM knowledge_sync_jobs ORDER BY created_at ASC LIMIT ?").all(options.limit ?? 100);
-    return (rows as DbRow[]).map(rowToKnowledgeJob);
-  }
-
-  knowledgeMapUpsert(entry: KnowledgeMapEntry): void {
-    this.db.prepare(
-      `INSERT INTO knowledge_map (hearth_id, uri, kind, content_hash, updated_at)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(hearth_id) DO UPDATE SET
-         uri=excluded.uri, kind=excluded.kind, content_hash=excluded.content_hash, updated_at=excluded.updated_at`
-    ).run(entry.hearthId, entry.uri, entry.kind, entry.contentHash, entry.updatedAt);
-  }
-
-  knowledgeMapGet(hearthId: string): KnowledgeMapEntry | null {
-    const row = this.db.prepare("SELECT * FROM knowledge_map WHERE hearth_id = ?").get(hearthId) as DbRow | undefined;
-    return row ? rowToKnowledgeMap(row) : null;
-  }
-
-  knowledgeMapDelete(hearthId: string): void {
-    this.db.prepare("DELETE FROM knowledge_map WHERE hearth_id = ?").run(hearthId);
-  }
-
-  knowledgeMapStats(): {
-    memories: number;
-    tasks: number;
-    sources: number;
-    total: number;
-    lastIndexedAt: string | null;
-  } {
-    const rows = this.db.prepare(
-      "SELECT kind, COUNT(*) AS count FROM knowledge_map GROUP BY kind"
-    ).all() as DbRow[];
-    const stats = { memories: 0, tasks: 0, sources: 0, total: 0, lastIndexedAt: null as string | null };
-    for (const row of rows) {
-      const count = Number(row.count);
-      stats.total += count;
-      if (row.kind === "memory") stats.memories = count;
-      else if (row.kind === "task") stats.tasks = count;
-      else if (row.kind === "source") stats.sources = count;
-    }
-    const last = this.db.prepare("SELECT MAX(updated_at) AS last FROM knowledge_map").get() as DbRow | undefined;
-    stats.lastIndexedAt = last?.last ? String(last.last) : null;
-    return stats;
-  }
-
-  knowledgeStateGet(key: string): string | null {
-    const row = this.db.prepare("SELECT value FROM knowledge_state WHERE key = ?").get(key) as DbRow | undefined;
-    return row ? String(row.value) : null;
-  }
-
-  knowledgeStateSet(key: string, value: string, updatedAt = new Date().toISOString()): void {
-    this.db.prepare(
-      "INSERT INTO knowledge_state (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at"
-    ).run(key, value, updatedAt);
-  }
-
-  resetKnowledgeIndex(): void {
-    this.db.exec("DELETE FROM knowledge_sync_jobs; DELETE FROM knowledge_map; DELETE FROM knowledge_state;");
   }
 
   getAppSetting(key: string): string | null {
@@ -3826,7 +3664,7 @@ export class HearthStore {
   rebuildProjections(): void {
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      this.db.exec("DELETE FROM connection_outbox; DELETE FROM connection_sessions; DELETE FROM knowledge_sync_jobs; DELETE FROM knowledge_map; DELETE FROM knowledge_state; DELETE FROM backup_records; DELETE FROM maintenance_runs; DELETE FROM task_leases; DELETE FROM sync_conflicts; DELETE FROM sync_peers; DELETE FROM heartbeat_runs; DELETE FROM attention_items; DELETE FROM standing_intents; DELETE FROM skill_curator_runs; DELETE FROM skill_usage_events; DELETE FROM skill_versions; DELETE FROM skills; DELETE FROM method_trials; DELETE FROM method_evaluations; DELETE FROM method_candidates; DELETE FROM memory_consolidation_runs; DELETE FROM memory_forget_tombstones; DELETE FROM memory_forget_receipts; DELETE FROM memory_recalls; DELETE FROM memory_conflicts; DELETE FROM memory_versions; DELETE FROM memories; DELETE FROM memory_settings; DELETE FROM suggestion_events; DELETE FROM suggestions; DELETE FROM proactive_settings; DELETE FROM desktop_commands; DELETE FROM desktop_frames; DELETE FROM desktop_sessions; DELETE FROM pairing_requests; DELETE FROM devices; DELETE FROM outbox_drafts; DELETE FROM source_items; DELETE FROM sources; DELETE FROM artifacts; DELETE FROM effects; DELETE FROM approvals; DELETE FROM runs; DELETE FROM tasks;");
+      this.db.exec("DELETE FROM connection_outbox; DELETE FROM connection_sessions; DELETE FROM backup_records; DELETE FROM maintenance_runs; DELETE FROM task_leases; DELETE FROM sync_conflicts; DELETE FROM sync_peers; DELETE FROM heartbeat_runs; DELETE FROM attention_items; DELETE FROM standing_intents; DELETE FROM skill_curator_runs; DELETE FROM skill_usage_events; DELETE FROM skill_versions; DELETE FROM skills; DELETE FROM method_trials; DELETE FROM method_evaluations; DELETE FROM method_candidates; DELETE FROM memory_consolidation_runs; DELETE FROM memory_forget_tombstones; DELETE FROM memory_forget_receipts; DELETE FROM memory_recalls; DELETE FROM memory_conflicts; DELETE FROM memory_versions; DELETE FROM memories; DELETE FROM memory_settings; DELETE FROM suggestion_events; DELETE FROM suggestions; DELETE FROM proactive_settings; DELETE FROM desktop_commands; DELETE FROM desktop_frames; DELETE FROM desktop_sessions; DELETE FROM pairing_requests; DELETE FROM devices; DELETE FROM outbox_drafts; DELETE FROM source_items; DELETE FROM sources; DELETE FROM artifacts; DELETE FROM effects; DELETE FROM approvals; DELETE FROM runs; DELETE FROM tasks;");
       for (const event of this.listEvents()) this.applyEvent(event);
       this.db.exec("COMMIT");
     } catch (error) {
@@ -5778,33 +5616,6 @@ function upsertMemorySettings(db: DatabaseSync, settings: MemorySettings): void 
   db.prepare(
     "INSERT INTO memory_settings (id, auto_capture, max_items, max_chars, allow_sensitive, updated_at) VALUES (1, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET auto_capture=excluded.auto_capture, max_items=excluded.max_items, max_chars=excluded.max_chars, allow_sensitive=excluded.allow_sensitive, updated_at=excluded.updated_at"
   ).run(settings.autoCapture, settings.maxItems, settings.maxChars, settings.allowSensitive ? 1 : 0, settings.updatedAt);
-}
-
-function rowToKnowledgeJob(row: DbRow): KnowledgeSyncJob {
-  return {
-    id: String(row.id),
-    kind: String(row.kind) as KnowledgeSyncJob["kind"],
-    ref: String(row.ref),
-    uri: String(row.uri),
-    op: String(row.op) as KnowledgeSyncJob["op"],
-    contentHash: row.content_hash ? String(row.content_hash) : null,
-    status: String(row.status) as KnowledgeSyncJob["status"],
-    attempts: Number(row.attempts),
-    nextAttemptAt: row.next_attempt_at ? String(row.next_attempt_at) : null,
-    lastError: row.last_error ? String(row.last_error) : null,
-    createdAt: String(row.created_at),
-    updatedAt: String(row.updated_at)
-  };
-}
-
-function rowToKnowledgeMap(row: DbRow): KnowledgeMapEntry {
-  return {
-    hearthId: String(row.hearth_id),
-    uri: String(row.uri),
-    kind: String(row.kind),
-    contentHash: row.content_hash ? String(row.content_hash) : null,
-    updatedAt: String(row.updated_at)
-  };
 }
 
 function rowToMemory(row: DbRow): MemoryRecord {

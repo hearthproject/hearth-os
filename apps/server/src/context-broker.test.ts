@@ -97,16 +97,16 @@ describe("ContextBroker delegation scope", () => {
       scopeKind: "chat", scopeId: "knowledge-test", query: "部署回滚", budgetTokens: 1000,
       includeIdentity: false,
       externalItems: [{
-        packId: "pending", ref: "kn:viking://resources/hearth/p0/baseline.md", lane: "relevant",
-        sourceKind: "knowledge", sourceId: "viking://resources/hearth/p0/baseline.md",
+        packId: "pending", ref: "kn:hearth://library/p0/baseline.md", lane: "relevant",
+        sourceKind: "knowledge", sourceId: "hearth://library/p0/baseline.md",
         title: "baseline", summary: "先停止本地服务，再用快照恢复", confidence: "confirmed",
-        source: "OpenViking", reason: "语义检索命中", score: 0.77, tokens: 30, expandable: true,
+        source: "资料库", reason: "资料库检索命中", score: 0.77, tokens: 30, expandable: true,
         validUntil: null
       }]
     });
     const knowledge = pack.items.find((item) => item.sourceKind === "knowledge");
     expect(knowledge?.lane).toBe("relevant");
-    expect(knowledge?.sourceId).toContain("viking://resources/hearth");
+    expect(knowledge?.sourceId).toContain("hearth://library");
     expect(broker.render(pack)).toContain("baseline");
   });
 });
