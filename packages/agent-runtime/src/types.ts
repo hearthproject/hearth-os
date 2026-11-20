@@ -139,6 +139,20 @@ export interface AgentToolState {
   subagents?: AgentSubagentState[];
 }
 
+export interface SerializedAgentToolState {
+  workspaceRoot: string;
+  readFiles: Array<{ path: string; size: number; mtimeMs: number; hash: string; ranges?: Array<{ start: number; end: number }> }>;
+  todos: AgentTodo[];
+  progress: AgentProgress;
+  startedAt: number;
+  snapshots: Array<{ id: string; path: string }>;
+  snapshotSeq: number;
+  planPath?: string;
+  mode?: HarnessMode;
+  activeSkills?: string[];
+  subagents?: AgentSubagentState[];
+}
+
 export interface AgentTool {
   definition: AgentToolDefinition;
   execute(input: unknown, context: AgentToolContext): Promise<AgentToolResult>;
@@ -169,6 +183,8 @@ export interface AgentCheckpoint {
   turns: number;
   toolCalls: number;
   summary: string | null;
+  state?: SerializedAgentToolState;
+  mode?: HarnessMode;
 }
 
 export interface AgentResumeState {
@@ -176,6 +192,7 @@ export interface AgentResumeState {
   usage: RunUsage;
   turns: number;
   toolCalls: number;
+  state?: AgentToolState;
 }
 
 export interface AgentRuntimeOptions {

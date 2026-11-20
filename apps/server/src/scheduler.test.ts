@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DelegationJob, ExecutorHealth, ExecutorId, HandoffRecord, HandoffStatus, TaskRecord, TaskStatus } from "@hearth/core";
 import { defaultConversationSettings, EXECUTION_PROFILES } from "@hearth/core";
+import { createAgentState, serializeAgentState } from "@hearth/agent-runtime";
 import type { CodexRunner, ExecutorHealthProvider, NativeRunner } from "./scheduler.ts";
 import { ApprovalManager } from "./approvals.ts";
 import type { GoalValidatorRunner } from "./completion-judge.ts";
@@ -812,10 +813,13 @@ describe("Hearth scheduler", () => {
     let resumedTurns = -1;
     let resumedToolCalls = -1;
     let resumedTokens = -1;
+    let resumedTodo = "";
     const nativeRunner: NativeRunner = async (options) => {
       calls += 1;
       if (calls === 1) {
         const usage = { inputTokens: 700_000, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 300_000, reasoningOutputTokens: 0 };
+        const state = createAgentState("state-test");
+        state.todos.push({ id: "todo-1", content: "检查恢复状态", status: "in_progress" });
         await options.onCheckpoint?.({
           seq: 1,
           kind: "waiting_input",
@@ -828,7 +832,8 @@ describe("Hearth scheduler", () => {
           usage,
           turns: 60,
           toolCalls: 120,
-          summary: "继续吗？"
+          summary: "继续吗？",
+          state: serializeAgentState(state)
         });
         return {
           status: "waiting_input",
@@ -842,6 +847,7 @@ describe("Hearth scheduler", () => {
       }
       resumedTurns = options.resume?.turns ?? -1;
       resumedToolCalls = options.resume?.toolCalls ?? -1;
+      resumedTodo = options.resume?.state?.todos[0]?.content ?? "";
       const resumeUsage = options.resume?.usage;
       resumedTokens = (resumeUsage?.inputTokens ?? 0) + (resumeUsage?.outputTokens ?? 0);
       writeFileSync(join(options.prepared.outDir, "result.md"), "# 已完成\n");
@@ -867,6 +873,7 @@ describe("Hearth scheduler", () => {
     expect(resumedTurns).toBe(0);
     expect(resumedToolCalls).toBe(0);
     expect(resumedTokens).toBe(0);
+    expect(resumedTodo).toBe("检查恢复状态");
   });
 
   it("repairs missing native deliverables with the previous agent context", async () => {

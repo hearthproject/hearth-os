@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import type { RunUsage } from "@hearth/core";
 import { compactAgentMessages, compactAgentMessagesWithSummary } from "./compaction.ts";
 import { createAgentState, progressSummary } from "./harness/file-state.ts";
+import { serializeAgentState } from "./harness/checkpoint-state.ts";
 import { planModeAllowsCommand, planModeAllowsTool } from "./harness/plan.ts";
 import { buildPostCompactContext } from "./harness/post-compact.ts";
 import { todoReminder } from "./harness/todo.ts";
@@ -58,7 +59,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   const deniedPaths = new Map<string, number>();
   const startedAt = Date.now();
   const signal = options.signal ?? new AbortController().signal;
-  const state = options.state ?? createAgentState(options.workspaceRoot);
+  const state = options.state ?? options.resume?.state ?? createAgentState(options.workspaceRoot);
 
   const emit = (event: RuntimeEvent): void => options.onEvent?.(event);
   const aborted = (): boolean => signal.aborted;
@@ -131,7 +132,9 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       usage: { ...usage },
       turns,
       toolCalls,
-      summary
+      summary,
+      state: serializeAgentState(state),
+      mode: options.mode ?? state.mode ?? "build"
     };
     try {
       await options.onCheckpoint?.(checkpoint);

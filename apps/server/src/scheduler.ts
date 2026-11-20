@@ -10,6 +10,7 @@ import type {
   AgentToolAuthorizationRequest,
   RuntimeEvent
 } from "@hearth/agent-runtime";
+import { deserializeAgentState } from "@hearth/agent-runtime";
 import type { BudgetDimension, BudgetExhaustion, ContextItem, ContextSettings, DelegationJob, DelegationResult, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, MethodCandidate, MethodSelection, RunBudget, RunCheckpointProof, RunCheckpointRecord, RunRecord, TaskError, TaskFollowUpRecord, TaskLease, TaskProgressDetail, TaskRecord } from "@hearth/core";
 import { runCodex } from "@hearth/codex-executor";
 import { getTemplate } from "@hearth/templates";
@@ -699,13 +700,15 @@ export class HearthScheduler {
         if (!existsSync(path)) continue;
         const body = readFileSync(path, "utf8");
         if (createHash("sha256").update(body).digest("hex") !== checkpoint.sha256) continue;
-        const state = JSON.parse(body) as AgentCheckpoint;
-        if (!Array.isArray(state.messages) || !state.usage) continue;
+        const checkpointBody = JSON.parse(body) as AgentCheckpoint;
+        if (!Array.isArray(checkpointBody.messages) || !checkpointBody.usage) continue;
+        const restoredState = deserializeAgentState(checkpointBody.state);
         return {
-          messages: state.messages,
+          messages: checkpointBody.messages,
           usage: { inputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0 },
           turns: 0,
-          toolCalls: 0
+          toolCalls: 0,
+          ...(restoredState ? { state: restoredState } : {})
         };
       } catch {
         // A missing or unreadable checkpoint falls back to a fresh run.

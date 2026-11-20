@@ -148,7 +148,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     : nativeSystemPrompt(options.task, options.expectedOutputs, options.skillIndex, availableTools);
   const resume = options.resume ? refreshNativeResume(options.resume, systemPrompt, options.prompt, options.prepared.outDir) : undefined;
   let budgetExhaustion: NativeRunResult["budgetExhaustion"];
-  const state = createAgentState(options.prepared.root);
+  const state = options.resume?.state ?? createAgentState(options.prepared.root);
   //具体实现
   const result = await runAgent({
     model: drafting ? draftModelAdapter(options.settings, resolve(options.prepared.outDir, options.expectedOutputs[0] ?? "result.md")) : modelAdapter(options.settings),
