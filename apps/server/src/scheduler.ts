@@ -2989,11 +2989,12 @@ export function resolveToolAction(input: {
     };
   } else if (input.toolName === "shell" && typeof args.command === "string" && args.command.trim()) {
     const windows = process.platform === "win32";
+    const powershell = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
     proposal = {
       kind: "shell",
       summary: input.summary,
       command: {
-        executable: windows ? "powershell.exe" : "sh",
+        executable: windows ? (existsSync(powershell) ? powershell : "powershell.exe") : "sh",
         argv: windows ? ["-NoProfile", "-NonInteractive", "-Command", args.command] : ["-c", args.command],
         cwd: input.workspaceRoot,
         shell: windows ? "powershell" : "sh"

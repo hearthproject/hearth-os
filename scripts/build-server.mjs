@@ -39,6 +39,34 @@ for (const name of ["cmaps", "standard_fonts", "wasm"]) {
   cpSync(source, join(pdfjsAssets, name), { recursive: true });
 }
 
+const sandboxRoot = join(resourcesRoot, "sandbox", "windows-acl");
+const sandboxPackageRoot = join(repoRoot, "node_modules", "@deepseek-ai", "dsh-sandbox-windows-acl");
+if (existsSync(sandboxPackageRoot)) {
+  rmSync(sandboxRoot, { recursive: true, force: true });
+  copyPackageTree("@deepseek-ai/dsh-sandbox-windows-acl", sandboxRoot, new Set());
+} else {
+  console.warn(`windows ACL runner package is not installed; packaged shell tasks will fail closed (${sandboxPackageRoot})`);
+}
+
+function copyPackageTree(name, target, seen) {
+  const source = join(repoRoot, "node_modules", name);
+  if (!existsSync(source) || seen.has(name)) return;
+  seen.add(name);
+  mkdirSync(dirname(target), { recursive: true });
+  cpSync(source, target, { recursive: true });
+  const manifest = readJson(join(source, "package.json"));
+  const dependencies = {
+    ...(manifest?.dependencies ?? {}),
+    ...(manifest?.optionalDependencies ?? {}),
+    ...(manifest?.peerDependencies ?? {})
+  };
+  for (const dependency of Object.keys(dependencies)) {
+    if (dependency.startsWith("@hearth/") || dependency === "hearth") continue;
+    copyPackageTree(dependency, join(target, "node_modules", dependency), seen);
+  }
+  seen.delete(name);
+}
+
 function findPackageRoot(file) {
   let current = dirname(join(repoRoot, file));
   while (true) {

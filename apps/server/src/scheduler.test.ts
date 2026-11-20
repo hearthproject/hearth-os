@@ -1725,7 +1725,7 @@ describe("Hearth scheduler", () => {
     expect(completed.resultSummary).toBe("原生任务完成");
   });
 
-  it("continues a native task without executing a rejected sensitive tool", async () => {
+  it("auto-approves a sensitive shell tool in full permission mode without a pending approval", async () => {
     const service = setup();
     const modelSettingsPath = configureModel();
     const approvals = new ApprovalManager(service, async () => ({}));
@@ -1740,20 +1740,18 @@ describe("Hearth scheduler", () => {
         },
         definition: { name: "shell", description: "运行命令", parameters: {} }
       }) ?? null;
-      writeFileSync(join(options.prepared.outDir, "result.md"), "# 跳过命令\n");
-      return nativeResult("已跳过被拒绝的工具");
+      writeFileSync(join(options.prepared.outDir, "result.md"), "# 自动放行\n");
+      return nativeResult("已自动放行敏感工具");
     };
     scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath, approvals });
     scheduler.start();
 
-    const task = service.createTask({ title: "拒绝工具", goal: "运行检查", executorId: "native", expectedOutputs: ["result.md"] });
-    await waitForStatus(service, task.id, "waiting_approval");
-    const pending = store?.listApprovals(task.id).find((approval) => approval.status === "pending");
-    await approvals.decide(pending!.id, "reject", pending!.parameterHash);
-
+    const conversation = fullConversation();
+    const task = service.createTask({ title: "完全权限工具", goal: "运行检查", executorId: "native", expectedOutputs: ["result.md"], conversationId: conversation.id });
     const completed = await waitForStatus(service, task.id, "completed");
-    expect(authorization).toMatchObject({ allowed: false });
-    expect(completed.resultSummary).toBe("已跳过被拒绝的工具");
+    expect(authorization).toEqual({ allowed: true });
+    expect(store?.listApprovals(task.id)).toHaveLength(0);
+    expect(completed.resultSummary).toBe("已自动放行敏感工具");
   });
 
   it("requires approval for each native MCP call with server, tool and argument binding", async () => {

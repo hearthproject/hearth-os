@@ -2,7 +2,7 @@ import { isTextDraftTask, DRAFT_INSTRUCTION } from "./draft-intent.ts";
 import { nativeTaskInstructions } from "./native-task-instructions.ts";
 import type { BudgetDimension, RunBudget, RunUsage, TaskPermissions, TaskProgressDetail, TaskRecord } from "@hearth/core";
 import { EXECUTION_PROFILES, NATIVE_TOKEN_CEILING } from "@hearth/core";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import {
   CODING_RUN_BUDGET,
@@ -20,8 +20,13 @@ import {
   recordGoalTurns,
   instructionsBlock,
   resolveHarnessProfile,
+  resolveSandboxPolicy,
+  commonAncestor,
+  isFilesystemRoot,
+  pathWithin,
   runAgent,
   zeroUsage,
+  SandboxUnavailableError,
   type AgentCheckpoint,
   type ContextSummary,
   type AgentMessage,
@@ -34,11 +39,14 @@ import {
   type AgentToolAuthorizationRequest,
   type AgentToolContext,
   type HarnessMode,
-  type RuntimeEvent
+  type RuntimeEvent,
+  type SandboxRuntime
 } from "@hearth/agent-runtime";
 import { wantsCodeExecution, wantsGithubAccess, wantsScreenshot } from "./task-intent.ts";
 import { supportsToolCalling, streamAgentTurn } from "./model-agent.ts";
 import { completeChat } from "./model-client.ts";
+import { WindowsAclSandboxProvider } from "./native-sandbox.ts";
+import { HEARTH_ROOT } from "./config.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import type { PreparedWorkspace } from "./workspace.ts";
 
@@ -83,6 +91,7 @@ export interface NativeRunResult {
   outputs: string[];
   messages?: AgentMessage[];
   budgetExhaustion?: { dimension: BudgetDimension; limit: number };
+  sandboxFailure?: "denied" | "runner_failure";
 }
 
 //runNativeTask() 把模型、工具、提示词、预算、权限和回调装配起来
@@ -135,6 +144,8 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     ];
   }
 
+  const sandbox = await prepareNativeSandbox(options, permissions);
+
   const drafting = !coding && isTextDraftTask({ ...options.task, expectedOutputs: options.expectedOutputs });
   const draftTools = new Set(["read_file", "write_file", "finish_task", "ask_user"]);
   const toolsForRun = [...createBuiltinTools(), ...(options.extraTools ?? [])]
@@ -170,6 +181,8 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     : nativeSystemPrompt(options.task, options.expectedOutputs, options.skillIndex, availableTools);
   const resume = options.resume ? refreshNativeResume(options.resume, systemPrompt, options.prompt, options.prepared.outDir) : undefined;
   let budgetExhaustion: NativeRunResult["budgetExhaustion"];
+  let sandboxDenied = false;
+  let sandboxRunnerFailure = false;
   const state = options.resume?.state ?? createAgentState(options.prepared.root);
   //具体实现
   const result = await runAgent({
@@ -181,6 +194,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     permissions,
     workspaceRoot: options.prepared.root,
     outDir: options.prepared.outDir,
+    ...(sandbox ? { sandbox } : {}),
     state,
     profile,
     mode: options.mode ?? "build",
@@ -208,6 +222,30 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
       if (event.type === "budget.exceeded") {
         budgetExhaustion = { dimension: event.budget, limit: event.limit };
       }
+      if (event.type === "tool.finished" && event.result.metadata?.sandboxFailure) {
+        const failure = event.result.metadata.sandboxFailure;
+        if (failure === "denied") sandboxDenied = true;
+        if (failure === "runner_failure") sandboxRunnerFailure = true;
+        appendSandboxAudit(options.prepared, options.task.id, {
+          type: `sandbox.${failure}`,
+          backend: event.result.metadata.sandbox?.backend ?? "unknown",
+          mode: event.result.metadata.sandbox?.mode ?? "unknown",
+          tool: event.call.name
+        });
+        options.onProgress?.({
+          kind: "sandbox",
+          message: failure === "denied"
+            ? "沙箱拒绝了越界操作；不会转为审批"
+            : "沙箱 runner 失败；任务不能继续无约束执行",
+          detail: {
+            executorId: "native",
+            eventType: `sandbox.${failure}`,
+            status: "failed",
+            title: event.call.name,
+            ...(event.result.metadata.sandbox ? { sandbox: event.result.metadata.sandbox } : {})
+          }
+        });
+      }
       const progress = nativeProgressForEvent(event);
       if (progress) options.onProgress?.(progress);
     },
@@ -229,7 +267,8 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     question: result.question,
     outputs: result.outputs,
     messages: result.messages,
-    ...(budgetExhaustion ? { budgetExhaustion } : {})
+    ...(budgetExhaustion ? { budgetExhaustion } : {}),
+    ...(sandboxDenied ? { sandboxFailure: "denied" as const } : sandboxRunnerFailure ? { sandboxFailure: "runner_failure" as const } : {})
   };
 }
 
@@ -1124,6 +1163,113 @@ export function nativePermissionsFor(task: TaskRecord, prepared: PreparedWorkspa
       ...(screenshotTask ? ["capture_screen"] : [])
     ]
   });
+}
+
+let defaultWindowsSandbox: WindowsAclSandboxProvider | null = null;
+let warnedSandboxOff = false;
+
+function nativeSandboxRoot(prepared: PreparedWorkspace): string {
+  const common = commonAncestor(prepared.root, prepared.outDir);
+  if (!common || isFilesystemRoot(common)) return prepared.root;
+  return pathWithin(HEARTH_ROOT, common) ? common : prepared.root;
+}
+
+/**
+ * Resolve the native sandbox independently of tool approvals. `approvalMode=full`
+ * never reaches this function; it only controls whether tools need authorization.
+ */
+async function prepareNativeSandbox(options: NativeRunOptions, permissions: TaskPermissions): Promise<SandboxRuntime | undefined> {
+  const flag = process.env.HEARTH_NATIVE_SANDBOX?.trim()
+    || (process.platform === "win32" ? "enforce" : "off");
+  if (flag !== "enforce" && flag !== "off" && flag !== "danger-full-access") {
+    throw new SandboxUnavailableError(`未知 HEARTH_NATIVE_SANDBOX 值：${flag}`);
+  }
+  const needsShell = permissions.tools.some((tool) => tool === "shell" || tool === "run_tests" || tool === "diagnostics");
+  if (!needsShell) return undefined;
+  if (flag !== "enforce") {
+    permissions.sandboxMode = "danger-full-access";
+    appendSandboxAudit(options.prepared, options.task.id, {
+      type: "sandbox.unavailable",
+      backend: "none",
+      mode: "danger-full-access",
+      reason: `HEARTH_NATIVE_SANDBOX=${flag}`
+    });
+    if (!warnedSandboxOff) {
+      warnedSandboxOff = true;
+      console.warn(`[hearth] native sandbox disabled by HEARTH_NATIVE_SANDBOX=${flag}`);
+    }
+    options.onProgress?.({
+      kind: "sandbox",
+      message: `沙箱未启用（HEARTH_NATIVE_SANDBOX=${flag}），shell 将运行在完全权限下`,
+      detail: { executorId: "native", eventType: "sandbox.unavailable", status: "danger-full-access" }
+    });
+    return undefined;
+  }
+  if (process.platform !== "win32") {
+    appendSandboxAudit(options.prepared, options.task.id, { type: "sandbox.unavailable", backend: "none", mode: "enforce", reason: "platform" });
+    throw new SandboxUnavailableError("当前 native sandbox 只有 Windows ACL 后端；请设置 HEARTH_NATIVE_SANDBOX=off 作为显式降级");
+  }
+  const selection = resolveSandboxPolicy({
+    permissions,
+    workspaceRoot: nativeSandboxRoot(options.prepared),
+    outDir: options.prepared.outDir,
+    sessionId: options.task.id
+  });
+  if (!selection.policy) {
+    appendSandboxAudit(options.prepared, options.task.id, { type: "sandbox.unavailable", backend: "none", mode: "policy", reason: "no-policy" });
+    return undefined;
+  }
+  permissions.sandboxMode = selection.mode;
+  defaultWindowsSandbox ??= new WindowsAclSandboxProvider();
+  const provider = defaultWindowsSandbox;
+  try {
+    await provider.probe();
+  } catch (error) {
+    appendSandboxAudit(options.prepared, options.task.id, {
+      type: "sandbox.unavailable",
+      backend: provider.id,
+      mode: selection.mode,
+      reason: error instanceof Error ? error.message : String(error)
+    });
+    throw error;
+  }
+  const runtime: SandboxRuntime = { provider, policy: selection.policy };
+  appendSandboxAudit(options.prepared, options.task.id, {
+    type: "sandbox.selected",
+    backend: provider.id,
+    mode: selection.policy.mode,
+    enforcement: "partial",
+    networkEnforcement: "none",
+    workspaceRoot: selection.policy.workspaceRoot,
+    tempRoot: selection.policy.tempRoot,
+    warnings: selection.warnings
+  });
+  options.onProgress?.({
+    kind: "sandbox",
+    message: `Windows ACL 沙箱已启用（${selection.mode}，仅限制文件写入/删除）`,
+    detail: {
+      executorId: "native",
+      eventType: "sandbox.selected",
+      status: "partial",
+      sandbox: {
+        backend: provider.id,
+        mode: selection.policy.mode,
+        enforcement: "partial",
+        networkEnforcement: "none"
+      }
+    }
+  });
+  return runtime;
+}
+
+function appendSandboxAudit(prepared: PreparedWorkspace, taskId: string, payload: Record<string, unknown>): void {
+  try {
+    const dir = join(prepared.outDir, ".hearth", "sandbox");
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(join(dir, "audit.jsonl"), `${JSON.stringify({ at: new Date().toISOString(), taskId, ...payload })}\n`, "utf8");
+  } catch {
+    // Audit must not block execution; the same decision is surfaced as progress.
+  }
 }
 
 function modelAdapter(settings: ModelSettings): AgentModel {
