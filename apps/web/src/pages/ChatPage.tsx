@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
@@ -8,28 +8,24 @@ import remarkGfm from "remark-gfm";
 import {
   ArrowUp,
   Check,
-  CheckCircle2,
   Copy,
-  CornerDownRight,
   FileText,
   Folder,
   Loader2,
   Paperclip,
-  PauseCircle,
-  RotateCcw,
   Settings2,
   Sparkles,
   ShieldAlert,
-  SlidersHorizontal,
   X
 } from "lucide-react";
 import { ApiError, api, chatStream } from "../lib/api.ts";
 import { ChatWorkspacePanel } from "../components/ChatWorkspacePanel.tsx";
 import { ProjectDialog } from "../components/ProjectDialog.tsx";
+import { InlineRun, type RunInfo } from "../components/InlineRun.tsx";
 import { TaskStatusIcon } from "../components/TaskStatusIcon.tsx";
-import { formatBytes, formatDuration, formatTime, formatTokens } from "../lib/format.ts";
+import { formatBytes, formatTime } from "../lib/format.ts";
 import { getChatSelection, setChatBusy, syncChatSelection, useChatSelection } from "../lib/chat-selection.ts";
-import { executorLabel, taskKindLabel, TASK_STATUS_LABELS, approvalModeLabel } from "../lib/labels.ts";
+import { executorLabel, TASK_STATUS_LABELS, approvalModeLabel } from "../lib/labels.ts";
 import type {
   ChatAttachment,
   ChatMessageRecord,
@@ -38,10 +34,7 @@ import type {
   ConversationSettings,
   ConversationSettingsPatch,
   ExecutorId,
-  TaskFollowUpMode,
   TaskListItem,
-  TaskProposalRecord,
-  TaskTurn,
   SkillView
 } from "../lib/types.ts";
 
@@ -59,6 +52,20 @@ interface RoutingState {
   title: string;
 }
 
+interface TimelineMessage {
+  kind: "message";
+  key: string;
+  at: string;
+  message: ChatMessageRecord;
+}
+
+interface TimelineRun {
+  kind: "run";
+  key: string;
+  at: string;
+  task: RunInfo;
+}
+
 export function ChatPage() {
   const queryClient = useQueryClient();
   const location = useLocation();
@@ -68,6 +75,7 @@ export function ChatPage() {
     return returned ?? localStorage.getItem("hearth.conversation");
   });
   const [messages, setMessages] = useState<ChatMessageRecord[]>([]);
+  const [liveRuns, setLiveRuns] = useState<RunInfo[]>([]);
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -75,14 +83,8 @@ export function ChatPage() {
   const [streaming, setStreaming] = useState("");
   const [reasoning, setReasoning] = useState("");
   const [routing, setRouting] = useState<RoutingState | null>(null);
-  const [routeMode, setRouteMode] = useState<"auto" | "chat" | "task">("auto");
-  const [proposals, setProposals] = useState<TaskProposalRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [followUpTaskId, setFollowUpTaskId] = useState<string | null>(null);
-  const [followUpMode, setFollowUpMode] = useState<TaskFollowUpMode>("queue");
-  const [followUpNotice, setFollowUpNotice] = useState<string | null>(null);
   const [draftSettings, setDraftSettings] = useState<ConversationSettings | null>(null);
-  const [optionsOpen, setOptionsOpen] = useState(false);
   const [pendingProjectId, setPendingProjectId] = useState<string | null>(() => getChatSelection().pendingProjectId);
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
@@ -92,7 +94,6 @@ export function ChatPage() {
   const [skillNotice, setSkillNotice] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
-  const optionsRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const conversationIdRef = useRef<string | null>(conversationId);
@@ -141,6 +142,7 @@ export function ChatPage() {
     tasksByConversation.set(task.conversationId, list);
   }
   const conversationTasks = conversationId ? tasksByConversation.get(conversationId) ?? [] : [];
+  const latestTask = [...conversationTasks].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0] ?? null;
   const hasMessageAttachments = messages.some((message) => (message.attachments?.length ?? 0) > 0);
   const current = conversations.find((item) => item.id === conversationId) ?? null;
   const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: api.projects, refetchInterval: 30_000 });
@@ -151,12 +153,6 @@ export function ChatPage() {
     : pendingProjectId
       ? projectsById.get(pendingProjectId) ?? null
       : null;
-  const followUpTasks = conversationTasks
-    .filter((task) => !["completed", "cancelled"].includes(task.status))
-    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
-  const followUpTarget = followUpTasks.find((task) => task.id === followUpTaskId) ?? null;
-  const canSteerFollowUp = followUpTarget?.status === "running";
-  const followUpBlockedByAttachments = Boolean(followUpTarget && attachments.length > 0);
   const serverDefaults = conversationDefaultsQuery.data?.settings ?? null;
   const rawSettings = current?.settings
     ?? conversationQuery.data?.conversation.settings
@@ -168,11 +164,35 @@ export function ChatPage() {
     ? Boolean(current || conversationQuery.data)
     : Boolean(serverDefaults);
 
+  const visibleMessages = messages.filter((message) => !isTaskNoise(message));
+  const runs: RunInfo[] = [];
+  const seenRuns = new Set<string>();
+  for (const task of conversationTasks) {
+    if (seenRuns.has(task.id)) continue;
+    seenRuns.add(task.id);
+    runs.push({
+      id: task.id,
+      title: task.title,
+      status: task.status,
+      createdAt: task.createdAt,
+      updatedAt: task.updatedAt,
+      executorId: task.executorId ?? null
+    });
+  }
+  for (const task of liveRuns) {
+    if (seenRuns.has(task.id)) continue;
+    seenRuns.add(task.id);
+    runs.push(task);
+  }
+  const timeline: Array<TimelineMessage | TimelineRun> = [
+    ...visibleMessages.map((message): TimelineMessage => ({ kind: "message", key: `m:${message.id}`, at: message.createdAt, message })),
+    ...runs.map((task): TimelineRun => ({ kind: "run", key: `r:${task.id}`, at: task.createdAt, task }))
+  ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+
   useEffect(() => {
     if (!conversationQuery.data || sending) return;
     const nextMessages = conversationQuery.data.messages;
     setMessages((prev) => (nextMessages.length >= prev.length ? nextMessages : prev));
-    setProposals(conversationQuery.data.proposals.filter((proposal) => proposal.status === "pending"));
   }, [conversationQuery.data, sending]);
 
   useEffect(() => {
@@ -213,29 +233,6 @@ export function ChatPage() {
   }, [conversationId]);
 
   useEffect(() => {
-    if (!conversationId || panelOpen) return;
-    if (conversationTasks.length === 0 && attachments.length === 0 && !hasMessageAttachments) return;
-    try {
-      if (localStorage.getItem(`hearth.workspace.closed.${conversationId}`) === "1") return;
-    } catch {
-      // localStorage 不可用时允许自动展开
-    }
-    setPanelOpen(true);
-  }, [conversationId, panelOpen, conversationTasks.length, attachments.length, hasMessageAttachments]);
-
-  useEffect(() => {
-    if (!followUpTaskId) return;
-    const target = tasks.find((task) => task.id === followUpTaskId
-      && task.conversationId === conversationId
-      && !["completed", "cancelled"].includes(task.status));
-    if (!target) setFollowUpTaskId(null);
-  }, [conversationId, followUpTaskId, tasks]);
-
-  useEffect(() => {
-    if (!canSteerFollowUp && followUpMode === "steer") setFollowUpMode("queue");
-  }, [canSteerFollowUp, followUpMode]);
-
-  useEffect(() => {
     setSlashIndex(0);
   }, [input]);
 
@@ -254,62 +251,29 @@ export function ChatPage() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: sending ? "auto" : "smooth" });
-  }, [messages, streaming, sending]);
+  }, [messages, streaming, sending, runs.length]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  useEffect(() => {
-    if (!optionsOpen) return;
-    function onPointerDown(event: PointerEvent) {
-      if (!optionsRef.current?.contains(event.target as Node)) setOptionsOpen(false);
-    }
-    function onKeyDown(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") setOptionsOpen(false);
-    }
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [optionsOpen]);
-
   function resetConversationView(id: string | null) {
-    setRouteMode("auto");
     setConversationId(id);
     conversationIdRef.current = id;
     setMessages([]);
+    setLiveRuns([]);
     setStreaming("");
     setReasoning("");
     setRouting(null);
-    setProposals([]);
     setDraftSettings(null);
-    setFollowUpTaskId(null);
-    setFollowUpMode("queue");
-    setFollowUpNotice(null);
-    setOptionsOpen(false);
     if (id) localStorage.setItem("hearth.conversation", id);
     else localStorage.removeItem("hearth.conversation");
   }
 
   function openWorkspace() {
     setPanelOpen(true);
-    if (!conversationId) return;
-    try {
-      localStorage.removeItem(`hearth.workspace.closed.${conversationId}`);
-    } catch {
-      // localStorage 不可用时只影响下次自动展开
-    }
   }
 
   function closeWorkspace() {
     setPanelOpen(false);
-    if (!conversationId) return;
-    try {
-      localStorage.setItem(`hearth.workspace.closed.${conversationId}`, "1");
-    } catch {
-      // localStorage 不可用时只影响下次自动展开
-    }
   }
 
   function patchSettings(patch: ConversationSettingsPatch) {
@@ -389,38 +353,8 @@ export function ChatPage() {
   async function send() {
     const text = input.trim();
     if (sending || uploading || !settingsReady || (!text && attachments.length === 0)) return;
-    if (routeMode === "chat" && attachments.length > 0) {
-      setError("继续聊天模式暂不读取附件。请粘贴文字，或选择派为任务。");
-      return;
-    }
-    if (selectedExecutorUnavailable && routeMode !== "chat") {
+    if (selectedExecutorUnavailable) {
       setError(`${selectedExecutorName} 当前不可用，不会自动切换执行器。${selectedExecutor?.health.issues.join("；") ?? "请到设置中测试可用性。"}`);
-      return;
-    }
-    setOptionsOpen(false);
-    if (followUpTarget) {
-      if (!text) return;
-      if (attachments.length > 0) {
-        setError("补充到任务暂不支持附件，请先移除附件或取消任务补充模式");
-        return;
-      }
-      setSending(true);
-      setError(null);
-      setFollowUpNotice(null);
-      try {
-        await api.addFollowUp(followUpTarget.id, text, followUpMode);
-        setInput("");
-        setFollowUpNotice(followUpMode === "steer"
-          ? `已请求中止「${followUpTarget.title}」当前轮，并立即应用补充。`
-          : `已加入「${followUpTarget.title}」的队列，当前轮结束后继续。`);
-        void queryClient.invalidateQueries({ queryKey: ["task", followUpTarget.id] });
-        void queryClient.invalidateQueries({ queryKey: ["tasks"] });
-        if (conversationId) void queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
-      } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "补充指令发送失败");
-      } finally {
-        setSending(false);
-      }
       return;
     }
     const sentAttachments = attachments;
@@ -441,7 +375,7 @@ export function ChatPage() {
     try {
       await chatStream(
         {
-          routeMode,
+          routeMode: "auto",
           ...(conversationId ? { conversationId } : {}),
           ...(!conversationId && pendingProjectId ? { projectId: pendingProjectId } : {}),
           ...(text ? { message: text } : {}),
@@ -470,13 +404,23 @@ export function ChatPage() {
               reasoningText += (data as { text: string }).text;
               setReasoning(reasoningText);
             } else if (event === "task") {
-              const payload = data as { message: ChatMessageRecord };
-              setMessages((prev) => (prev.some((message) => message.id === payload.message.id) ? prev : [...prev, payload.message]));
+              const payload = data as { task: { id: string; title: string; status: RunInfo["status"]; createdAt: string; updatedAt: string; executorId?: string | null } };
+              const task = payload.task;
+              if (task?.id) {
+                setLiveRuns((prev) => [
+                  ...prev.filter((item) => item.id !== task.id),
+                  {
+                    id: task.id,
+                    title: task.title,
+                    status: task.status,
+                    createdAt: task.createdAt,
+                    updatedAt: task.updatedAt,
+                    executorId: task.executorId ?? null
+                  }
+                ]);
+              }
               void queryClient.invalidateQueries({ queryKey: ["tasks"] });
-            } else if (event === "proposal") {
-              const payload = data as { proposal: TaskProposalRecord; message: ChatMessageRecord };
-              setProposals((prev) => (prev.some((proposal) => proposal.id === payload.proposal.id) ? prev : [...prev, payload.proposal]));
-              setMessages((prev) => (prev.some((message) => message.id === payload.message.id) ? prev : [...prev, payload.message]));
+              void queryClient.invalidateQueries({ queryKey: ["conversations"] });
             } else if (event === "skill_install") {
               const payload = data as { source: string };
               setSkillInstallRequest({ source: payload.source });
@@ -485,7 +429,9 @@ export function ChatPage() {
               const message = data as ChatMessageRecord;
               setStreaming("");
               setReasoning("");
-              setMessages((prev) => (prev.some((item) => item.id === message.id) ? prev : [...prev, message]));
+              if (!isTaskNoise(message)) {
+                setMessages((prev) => (prev.some((item) => item.id === message.id) ? prev : [...prev, message]));
+              }
             } else if (event === "error") {
               setError((data as { message: string }).message);
             }
@@ -507,6 +453,7 @@ export function ChatPage() {
       setStreaming("");
       setReasoning("");
       void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
       const activeId = conversationIdRef.current;
       if (activeId) void queryClient.invalidateQueries({ queryKey: ["conversation", activeId] });
     }
@@ -551,7 +498,6 @@ export function ChatPage() {
     executorAvailability[id] = executorViews.find((executor) => executor.id === id)?.health.canRun ?? false;
   }
   const executorReady = EXECUTOR_ORDER.some((id) => executorAvailability[id] && conversationSettings.executorEnabled[id]);
-  const allExecutorsOff = !EXECUTOR_ORDER.some((id) => conversationSettings.executorEnabled[id]);
   const selectedExecutorId = conversationSettings.preferredExecutorId;
   const selectedExecutor = executorViews.find((executor) => executor.id === selectedExecutorId) ?? null;
   const selectedExecutorName = selectedExecutor?.name ?? (selectedExecutorId ? executorLabel(selectedExecutorId) : "");
@@ -563,13 +509,19 @@ export function ChatPage() {
       <section className="chat-main">
         <header className="chat-header">
           <h1>{current?.title ?? "新对话"}</h1>
+          {latestTask && (latestTask.status !== "completed" && latestTask.status !== "cancelled") && (
+            <span className={`chat-run-chip ${latestTask.status}`} title={latestTask.title}>
+              <TaskStatusIcon status={latestTask.status} size={12} />
+              {TASK_STATUS_LABELS[latestTask.status]}
+            </span>
+          )}
           {(current ? projectsById.get(current.projectId ?? "") : activeProject) && (
             <span className="chat-project-chip" title={current ? projectsById.get(current.projectId ?? "")?.path : activeProject?.path}>
               <Folder size={12} />
               {(current ? projectsById.get(current.projectId ?? "") : activeProject)?.name}
             </span>
           )}
-          <span className="chat-project-chip" title="工作区内文件读写自动执行；发邮件、访问新域名、操作桌面仍会审批。每个任务可以带自己的审批模式。">
+          <span className="chat-project-chip" title="工作区内文件读写自动执行；发邮件、访问新域名、操作桌面仍会审批。">
             <ShieldAlert size={12} />
             审批 · {approvalModeLabel(conversationSettings.approvalMode)}
           </span>
@@ -579,15 +531,15 @@ export function ChatPage() {
           <div className="message-list">
             {!configured && (
               <ChatNotice icon={<Settings2 size={15} />} tone="warn">
-                还没有接入聊天模型。普通问答需要先完成<Link to="/welcome">首次设置</Link>；执行类任务仍会尝试派出。
+                还没有接入聊天模型。普通问答需要先完成<Link to="/welcome">首次设置</Link>；执行请求仍会尝试运行。
               </ChatNotice>
             )}
             {!executorReady && (
               <ChatNotice icon={<Settings2 size={15} />} tone="warn">
-                当前没有可用的执行器，任务无法派出。到<Link to="/settings">设置</Link>查看连接诊断。
+                当前没有可用的执行器，无法执行。到<Link to="/settings">设置</Link>查看连接诊断。
               </ChatNotice>
             )}
-            {messages.length === 0 && proposals.length === 0 && !streaming && !sending && (
+            {visibleMessages.length === 0 && runs.length === 0 && !streaming && !sending && (
               <div className="chat-empty">
                 <div className="chat-empty-mark"><Sparkles size={20} /></div>
                 <h2>{activeProject ? `你想在 ${activeProject.name} 中构建什么？` : "你想让 Hearth 帮你完成什么？"}</h2>
@@ -598,25 +550,20 @@ export function ChatPage() {
                 </p>
               </div>
             )}
-            {messages.map((message, index) => <ChatBubble key={message.id} message={message} conversationId={conversationId} mailDraft={!message.taskId && isMailDraftReply(messages, index)} />)}
-            {proposals.map((proposal) => (
-              <ProposalCard
-                key={proposal.id}
-                proposal={proposal}
-                conversationId={conversationId}
-                onResolved={(id) => {
-                  setProposals((prev) => prev.filter((item) => item.id !== id));
-                  void queryClient.invalidateQueries({ queryKey: ["tasks"] });
-                  void queryClient.invalidateQueries({ queryKey: ["conversations"] });
-                  if (conversationId) void queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
-                }}
+            {timeline.map((item) => item.kind === "message" ? (
+              <ChatBubble
+                key={item.key}
+                message={item.message}
+                mailDraft={!item.message.taskId && isMailDraftReply(visibleMessages, visibleMessages.indexOf(item.message))}
               />
+            ) : (
+              <InlineRun key={item.key} task={item.task} />
             ))}
             {(streaming || reasoning) && <AssistantBubble content={streaming} reasoning={reasoning} streaming />}
             {sending && !streaming && !reasoning && (
               <div className="typing-row">
                 <Loader2 size={14} className="spin" />
-                <span>{routing?.action === "task" ? "正在派出任务…" : routing ? "正在回答…" : selectedExecutorId ? `正在交给 ${selectedExecutorName} 处理…` : "正在判断是回答还是执行…"}</span>
+                <span>{routing?.action === "task" ? "正在执行…" : routing ? "正在回答…" : selectedExecutorId ? `正在交给 ${selectedExecutorName} 处理…` : "正在判断是回答还是执行…"}</span>
               </div>
             )}
             <div ref={bottomRef} />
@@ -650,78 +597,27 @@ export function ChatPage() {
             </div>
           )}
           <div className="composer-tools">
-            <div className="composer-options-wrap" ref={optionsRef}>
-              <button
-                type="button"
-                className="composer-options-trigger"
-                onClick={() => setOptionsOpen((open) => !open)}
-                disabled={!settingsReady}
-                aria-expanded={optionsOpen}
-                aria-haspopup="dialog"
-                aria-label="会话选项"
+            <label className="composer-executor" title={selectedExecutorUnavailable ? selectedExecutor?.health.issues.join("；") : "锁定执行器后不会自动切换"}>
+              <select
+                value={selectedExecutorId ?? ""}
+                onChange={(event) => chooseExecutor(event.target.value as ExecutorId | "")}
+                disabled={!settingsReady || sending}
+                aria-label="选择执行器"
               >
-                <SlidersHorizontal size={15} />
-                <span>选项</span>
-              </button>
-              {optionsOpen && (
-                <div className="composer-options" role="dialog" aria-label="会话选项">
-                  <label className="composer-option">
-                    <span>处理方式</span>
-                    <select aria-label="消息处理方式" value={routeMode} disabled={sending} onChange={(event) => {
-                      setRouteMode(event.target.value as "auto" | "chat" | "task");
-                      setFollowUpTaskId(null);
-                    }}>
-                      <option value="auto">自动判断</option>
-                      <option value="chat">继续聊天</option>
-                      <option value="task">派为任务</option>
-                    </select>
-                  </label>
-                  <label className="composer-option">
-                    <span>执行器</span>
-                    <select
-                      value={selectedExecutorId ?? ""}
-                      onChange={(event) => chooseExecutor(event.target.value as ExecutorId | "")}
-                      disabled={!settingsReady}
-                      aria-label="锁定执行器"
-                    >
-                      <option value="">自动匹配</option>
-                      {visibleExecutorIds.map((id) => {
-                        const view = executorViews.find((executor) => executor.id === id);
-                        return (
-                          <option key={id} value={id}>
-                            {view?.name ?? executorLabel(id)}{executorAvailability[id] ? "" : " · 当前不可用"}
-                          </option>
-                        );
-                      })}
-                    </select>
-                  </label>
-                  <label className="composer-option">
-                    <span>深度</span>
-                    <select
-                      aria-label="原生执行深度"
-                      value={conversationSettings.executionMode ?? "standard"}
-                      disabled={!settingsReady}
-                      onChange={(event) => patchSettings({ executionMode: event.target.value as "quick" | "standard" | "deep" })}
-                    >
-                      <option value="quick">快速</option>
-                      <option value="standard">标准</option>
-                      <option value="deep">深入</option>
-                    </select>
-                  </label>
-                  {selectedExecutorUnavailable && (
-                    <p className="composer-options-note" title={selectedExecutor?.health.issues.join("；")}>
-                      {selectedExecutorName} 当前不可用：{selectedExecutor?.health.issues[0] ?? "请到设置中测试可用性"}。不会自动切换执行器
-                    </p>
-                  )}
-                  {allExecutorsOff && (
-                    <p className="composer-options-note">所有执行器都已关闭，请先选择一个可用执行器</p>
-                  )}
-                  {followUpBlockedByAttachments && (
-                    <p className="composer-options-note">补充到任务暂不支持附件</p>
-                  )}
-                </div>
-              )}
-            </div>
+                <option value="">执行器 · 自动匹配</option>
+                {visibleExecutorIds.map((id) => {
+                  const view = executorViews.find((executor) => executor.id === id);
+                  return (
+                    <option key={id} value={id}>
+                      {view?.name ?? executorLabel(id)}{executorAvailability[id] ? "" : " · 不可用"}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
+            {selectedExecutorUnavailable && (
+              <span className="composer-executor-warning">{selectedExecutorName} 当前不可用，不会自动切换</span>
+            )}
             {selectedSkill && (
               <span className="composer-skill-chip" title={selectedSkill.manifest.description}>
                 <Sparkles size={14} />
@@ -731,50 +627,7 @@ export function ChatPage() {
                 </button>
               </span>
             )}
-            {followUpTasks.length > 0 && (
-              <div className="composer-followup">
-                <label className={`followup-chip ${followUpTarget ? "active" : ""}`} title="把这条消息补充到已有任务，而不是新建任务">
-                  <CornerDownRight size={14} />
-                  <select
-                    value={followUpTarget?.id ?? ""}
-                    onChange={(event) => {
-                      setFollowUpTaskId(event.target.value || null);
-                      if (event.target.value) setRouteMode("task");
-                      setFollowUpMode("queue");
-                      setFollowUpNotice(null);
-                    }}
-                    aria-label="补充到任务"
-                  >
-                    <option value="">补充任务</option>
-                    {followUpTasks.map((task) => (
-                      <option key={task.id} value={task.id}>{task.title}</option>
-                    ))}
-                  </select>
-                </label>
-                {followUpTarget && (
-                  <button
-                    type="button"
-                    className={`followup-mode-toggle ${followUpMode}`}
-                    onClick={() => setFollowUpMode((current) => current === "queue" ? "steer" : "queue")}
-                    disabled={!canSteerFollowUp && followUpMode === "queue"}
-                    title={canSteerFollowUp
-                      ? (followUpMode === "queue" ? "当前轮结束后继续；点击改为中止当前轮" : "中止当前轮并立即应用；点击改为轮后继续")
-                      : "只有运行中的任务可以中止本轮，消息会在当前轮结束后继续"}
-                  >
-                    {followUpMode === "steer" ? <PauseCircle size={14} /> : <CornerDownRight size={14} />}
-                    <span>{followUpMode === "steer" ? "中止本轮" : "轮后继续"}</span>
-                  </button>
-                )}
-              </div>
-            )}
           </div>
-          {followUpNotice && (
-            <div className="composer-followup-notice">
-              <CornerDownRight size={14} />
-              <span>{followUpNotice}</span>
-              <button className="icon-button" onClick={() => setFollowUpNotice(null)} aria-label="关闭提示"><X size={13} /></button>
-            </div>
-          )}
           {skillNotice && (
             <div className="composer-skill-notice">
               <Sparkles size={14} />
@@ -867,11 +720,16 @@ export function ChatPage() {
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={onComposerKeyDown}
               aria-label="消息"
-              placeholder="向 Hearth 提问，或描述你要完成的任务…"
+              placeholder="向 Hearth 提问，或描述你要完成的事…"
               rows={1}
               disabled={sending}
             />
-            <button className="composer-send" onClick={() => void send()} disabled={sending || uploading || !settingsReady || (selectedExecutorUnavailable && routeMode !== "chat") || followUpBlockedByAttachments || (!input.trim() && attachments.length === 0)} title={selectedExecutorUnavailable && routeMode !== "chat" ? "当前锁定的执行器不可用" : followUpTarget ? "发送补充指令" : "发送"}>
+            <button
+              className="composer-send"
+              onClick={() => void send()}
+              disabled={sending || uploading || !settingsReady || selectedExecutorUnavailable || (!input.trim() && attachments.length === 0)}
+              title={selectedExecutorUnavailable ? "当前锁定的执行器不可用" : "发送"}
+            >
               {sending ? <Loader2 size={17} className="spin" /> : <ArrowUp size={18} />}
             </button>
           </div>
@@ -899,10 +757,13 @@ export function ChatPage() {
   );
 }
 
-function ChatBubble({ message, conversationId, mailDraft = false }: { message: ChatMessageRecord; conversationId: string | null; mailDraft?: boolean }) {
-  if (message.kind === "task_status") {
-    return <TaskStatusBubble message={message} conversationId={conversationId} />;
-  }
+function isTaskNoise(message: ChatMessageRecord): boolean {
+  if (message.kind === "task_status") return true;
+  if (message.role !== "assistant") return false;
+  return message.content.startsWith("已派出任务：") || message.content.startsWith("任务「");
+}
+
+function ChatBubble({ message, mailDraft = false }: { message: ChatMessageRecord; mailDraft?: boolean }) {
   if (message.role === "user") {
     return (
       <div className="message-row user">
@@ -929,180 +790,24 @@ function ChatBubble({ message, conversationId, mailDraft = false }: { message: C
       <AssistantBubble
         content={message.content}
         copyText={message.content}
-        taskId={message.taskId}
-        taskStatus={message.taskStatus}
         createdAt={message.createdAt}
-        conversationId={conversationId}
       />}
     </div>
   );
-}
-
-function TaskStatusBubble({ message, conversationId }: { message: ChatMessageRecord; conversationId: string | null }) {
-  const label = message.taskStatus ? TASK_STATUS_LABELS[message.taskStatus] : "任务状态";
-  return (
-    <div className="message-row assistant">
-      <div className={`message-bubble task-status-bubble ${message.taskStatus ?? "queued"}`}>
-        <CopyButton text={message.content} className="message-copy" />
-        <div className="task-status-head">
-          {message.taskStatus ? <TaskStatusIcon status={message.taskStatus} size={14} /> : <span className="task-status-dot" />}
-          <strong>{label}</strong>
-          <time>{formatTime(message.createdAt)}</time>
-        </div>
-        <p className="task-status-text">{message.content}</p>
-        {message.taskId && (
-          <Link
-            className="task-status-link"
-            to={`/tasks/${message.taskId}`}
-            state={{ fromChat: true, ...(conversationId ? { conversationId } : {}) }}
-          >
-            {message.taskStatus === "running" ? "查看任务与执行过程" : "查看任务"}
-          </Link>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function TaskLinkCard({
-  taskId,
-  taskStatus,
-  conversationId
-}: {
-  taskId: string;
-  taskStatus?: ChatMessageRecord["taskStatus"];
-  conversationId?: string | null;
-}) {
-  const queryClient = useQueryClient();
-  const [rewinding, setRewinding] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const taskQuery = useQuery({
-    queryKey: ["task", taskId],
-    queryFn: () => api.task(taskId),
-    enabled: Boolean(taskId),
-    staleTime: 10_000
-  });
-  const turnsQuery = useQuery({
-    queryKey: ["task-turns", taskId],
-    queryFn: () => api.taskTurns(taskId),
-    enabled: Boolean(taskQuery.data),
-    staleTime: 10_000
-  });
-  const view = taskQuery.data;
-  const task = view?.task;
-  const status = task?.status ?? taskStatus ?? "queued";
-  const latestRun = view?.runs && view.runs.length > 0 ? view.runs[view.runs.length - 1] : null;
-  const turns = turnsQuery.data?.turns ?? [];
-  const latestTurn = turns.length > 0 ? turns[turns.length - 1] : null;
-  const elapsed = latestRun?.startedAt && latestRun.endedAt
-    ? new Date(latestRun.endedAt).getTime() - new Date(latestRun.startedAt).getTime()
-    : null;
-  const verification = latestTurn ? turnVerificationLabel(latestTurn) : "";
-
-  async function rewindLatest(turn: TaskTurn, force = false): Promise<void> {
-    setRewinding(true);
-    setNotice(null);
-    setError(null);
-    try {
-      await api.rewindTask(taskId, { runId: turn.runId, turn: turn.turn, force });
-      setNotice(`已回退第 ${turn.turn} 轮`);
-      await queryClient.invalidateQueries({ queryKey: ["task-turns", taskId] });
-      await queryClient.invalidateQueries({ queryKey: ["task", taskId] });
-      await queryClient.invalidateQueries({ queryKey: ["tasks"] });
-    } catch (caught) {
-      if (!force && caught instanceof ApiError && caught.code === "HISTORY_DRIFT") {
-        if (window.confirm(`${caught.message}\n\n强制回退会覆盖后续改动，确定继续？`)) {
-          await rewindLatest(turn, true);
-          return;
-        }
-      }
-      setError(caught instanceof Error ? caught.message : "回退失败");
-    } finally {
-      setRewinding(false);
-    }
-  }
-
-  function requestRewind(turn: TaskTurn): void {
-    const confirmed = window.confirm(
-      `回退到第 ${turn.turn} 轮执行之前？\n\n会恢复本轮改过的文件，并删除本轮新建的文件。`
-    );
-    if (confirmed) void rewindLatest(turn);
-  }
-
-  return (
-    <div className="task-link-card">
-      <Link
-        className="task-link-main"
-        to={`/tasks/${taskId}`}
-        state={{ fromChat: true, ...(conversationId ? { conversationId } : {}) }}
-      >
-        <div className="task-link-head">
-          <TaskStatusIcon status={status} size={14} />
-          <strong>{TASK_STATUS_LABELS[status]}</strong>
-          <span className="task-link-title">{task?.title ?? "任务"}</span>
-        </div>
-        {view && (
-          <div className="task-link-meta">
-            <span>{view.artifacts.length} 个文件</span>
-            {latestTurn && <span>{latestTurn.files.length} 个改动</span>}
-            {verification && <span>{verification}</span>}
-            {turns.length > 0 && <span>{turns.length} 轮</span>}
-            <span>{formatDuration(elapsed)}</span>
-            {latestRun?.usage && <span>{formatTokens(latestRun.usage)} tokens</span>}
-          </div>
-        )}
-      </Link>
-      <div className="task-link-actions">
-        {latestTurn && (
-          <button className="task-link-rewind" onClick={() => requestRewind(latestTurn)} disabled={rewinding}>
-            {rewinding ? <Loader2 size={13} className="spin" /> : <RotateCcw size={13} />}
-            回退最近一轮
-          </button>
-        )}
-        <Link
-          className="task-link-open"
-          to={`/tasks/${taskId}`}
-          state={{ fromChat: true, ...(conversationId ? { conversationId } : {}) }}
-        >
-          打开 →
-        </Link>
-      </div>
-      {notice && <p className="task-link-note">{notice}</p>}
-      {error && <p className="task-link-error">{error}</p>}
-    </div>
-  );
-}
-
-function turnVerificationLabel(turn: TaskTurn): string {
-  const verification = turn.verification;
-  if (!verification) return "暂无验证记录";
-  if (verification.failedTests.length > 0) return `${verification.failedTests.length} 个测试失败`;
-  if (verification.browserAssertions.some((item) => !item.passed)) return "页面断言失败";
-  if (verification.diagnostics.length > 0) return `${verification.diagnostics.length} 条诊断`;
-  if (verification.toolCalls > 0 && verification.exitCodes.some((code) => code === 0)) return "测试通过";
-  if (verification.browserAssertions.length > 0) return "页面断言通过";
-  return "已执行验证";
 }
 
 function AssistantBubble({
   content,
   copyText,
   reasoning = "",
-  taskId,
-  taskStatus,
   createdAt,
-  streaming = false,
-  conversationId
+  streaming = false
 }: {
   content: string;
   copyText?: string;
   reasoning?: string;
-  taskId?: string | null;
-  taskStatus?: ChatMessageRecord["taskStatus"];
   createdAt?: string;
   streaming?: boolean;
-  conversationId?: string | null;
 }) {
   const reasoningRef = useRef<HTMLDivElement | null>(null);
 
@@ -1129,9 +834,6 @@ function AssistantBubble({
             {content}
           </ReactMarkdown>
         </div>
-      )}
-      {taskId && (
-        <TaskLinkCard taskId={taskId} taskStatus={taskStatus} conversationId={conversationId ?? null} />
       )}
       {createdAt && <time>{formatTime(createdAt)}</time>}
     </div>
@@ -1201,94 +903,4 @@ async function copyToClipboard(text: string): Promise<void> {
 
 function ChatNotice({ icon, tone, children }: { icon: React.ReactNode; tone: "warn" | "info"; children: React.ReactNode }) {
   return <div className={`chat-notice ${tone}`}>{icon}<span>{children}</span></div>;
-}
-
-function ProposalCard({
-  proposal,
-  conversationId,
-  onResolved
-}: {
-  proposal: TaskProposalRecord;
-  conversationId: string | null;
-  onResolved: (id: string) => void;
-}) {
-  const [busy, setBusy] = useState<"confirm" | "reject" | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [taskId, setTaskId] = useState<string | null>(null);
-  const [projectId, setProjectId] = useState("");
-  const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: api.projects });
-  const projects = projectsQuery.data?.projects.filter((project) => project.available) ?? [];
-
-  async function confirm() {
-    setBusy("confirm");
-    setError(null);
-    try {
-      const result = await api.confirmTaskProposal(proposal.id, projectId || undefined);
-      setTaskId(result.task.id);
-      onResolved(proposal.id);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "确认失败");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function reject() {
-    setBusy("reject");
-    setError(null);
-    try {
-      await api.rejectTaskProposal(proposal.id);
-      onResolved(proposal.id);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "取消失败");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  return (
-    <div className="proposal-card">
-      <div className="proposal-kicker"><ShieldAlert size={13} /> 待确认任务</div>
-      <h3>{proposal.title}</h3>
-      <p className="proposal-goal">{proposal.goal}</p>
-      <div className="proposal-meta">
-        <span>{executorLabel(proposal.executorId)}</span>
-        <span>{taskKindLabel(proposal.taskKind)}</span>
-        <span>产物 {proposal.expectedOutputs.join("、")}</span>
-      </div>
-      <p className="proposal-reason">{proposal.reason}</p>
-      {proposal.permissions.networkHosts.length > 0 && (
-        <p className="proposal-permission">联网：{proposal.permissions.networkHosts.join("、")}</p>
-      )}
-      {projects.length > 0 && (
-        <label className="proposal-project">
-          <span>在本地项目中执行（可选）</span>
-          <select value={projectId} onChange={(event) => setProjectId(event.target.value)} disabled={busy !== null}>
-            <option value="">不绑定项目</option>
-            {projects.map((project) => (
-              <option value={project.id} key={project.id}>{project.name} · {project.currentBranch ?? project.defaultBranch}</option>
-            ))}
-          </select>
-          {projectId && <small>将使用 native 执行器，并自动创建独立 Git Worktree。</small>}
-        </label>
-      )}
-      {error && <p className="form-error">{error}</p>}
-      {taskId ? (
-        <Link
-          className="task-link-card"
-          to={`/tasks/${taskId}`}
-          state={{ fromChat: true, ...(conversationId ? { conversationId } : {}) }}
-        >
-          <CheckCircle2 size={15} /> 已确认，查看任务进度
-        </Link>
-      ) : (
-        <div className="proposal-actions">
-          <button className="primary-button" onClick={() => void confirm()} disabled={busy !== null}>
-            {busy === "confirm" ? <Loader2 size={14} className="spin" /> : null} 确认并执行
-          </button>
-          <button className="ghost-button" onClick={() => void reject()} disabled={busy !== null}>取消</button>
-        </div>
-      )}
-    </div>
-  );
 }

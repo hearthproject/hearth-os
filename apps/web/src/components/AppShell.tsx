@@ -15,10 +15,8 @@ export function AppShell() {
   const [commandOpen, setCommandOpen] = useState(false);
   const moreActive = MORE_NAV.some((item) => pathname === item.path || pathname.startsWith(`${item.path}/`));
   const [moreOpen, setMoreOpen] = useState(() => moreActive || readMoreOpen());
-  const tasksQuery = useQuery({ queryKey: ["tasks"], queryFn: api.tasks, refetchInterval: 10_000 });
   const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 30_000 });
   const executorsQuery = useQuery({ queryKey: ["executors"], queryFn: api.executors, refetchInterval: 30_000 });
-  const tasks = tasksQuery.data?.tasks ?? [];
   const chatModel = healthQuery.data?.chatModel;
   const readyExecutors = (executorsQuery.data?.executors ?? []).filter((executor) => executor.health.canRun);
   const primaryExecutor = readyExecutors.find((executor) => executor.id === "native")
@@ -115,7 +113,7 @@ export function AppShell() {
           <Command size={19} /><span>更多</span>
         </button>
       </nav>
-      <CommandPalette open={commandOpen} tasks={tasks} onClose={() => setCommandOpen(false)} />
+      <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} />
     </div>
   );
 }

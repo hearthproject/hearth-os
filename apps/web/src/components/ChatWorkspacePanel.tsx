@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
-  AlertTriangle,
   ArrowLeft,
   CheckCircle2,
   Download,
@@ -14,11 +12,9 @@ import {
   XCircle
 } from "lucide-react";
 import { api } from "../lib/api.ts";
-import { formatBytes, isActive, needsAttention } from "../lib/format.ts";
+import { formatBytes } from "../lib/format.ts";
 import { fileExtension, previewKind, TEXT_PREVIEW_LIMIT } from "../lib/preview.ts";
-import { TASK_STATUS_LABELS } from "../lib/labels.ts";
 import type { ArtifactListItem, BackgroundToolJob, ChatAttachment, ChatMessageRecord, TaskListItem } from "../lib/types.ts";
-import { TaskStatusIcon } from "./TaskStatusIcon.tsx";
 
 interface PreviewTarget {
   name: string;
@@ -45,20 +41,6 @@ export function ChatWorkspacePanel({
 }) {
   const [preview, setPreview] = useState<PreviewTarget | null>(null);
   const taskIds = useMemo(() => new Set(tasks.map((task) => task.id)), [tasks]);
-  const openTasks = useMemo(
-    () => tasks
-      .filter((task) => !task.archivedAt)
-      .sort((a, b) => {
-        const weight = (task: TaskListItem) => (isActive(task.status) ? 0 : needsAttention(task.status) ? 1 : 2);
-        return weight(a) - weight(b) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt);
-      }),
-    [tasks]
-  );
-  const latestTask = useMemo(
-    () => openTasks[0] ?? null,
-    [openTasks]
-  );
-  const attention = openTasks.filter((task) => needsAttention(task.status)).length;
 
   const artifactsQuery = useQuery({
     queryKey: ["artifacts"],
@@ -72,23 +54,16 @@ export function ChatWorkspacePanel({
     enabled: open,
     refetchInterval: open ? 8_000 : false
   });
-  const taskQuery = useQuery({
-    queryKey: ["task", latestTask?.id ?? ""],
-    queryFn: () => api.task(latestTask?.id ?? ""),
-    enabled: open && Boolean(latestTask)
-  });
-
   useEffect(() => {
     setPreview(null);
   }, [conversationId]);
 
   if (!open) {
     return (
-      <aside className="workspace-rail" aria-label="对话摘要">
-        <button className="workspace-rail-button" onClick={onOpen} title="展开对话摘要" aria-label="展开对话摘要">
+      <aside className="workspace-rail" aria-label="对话产物">
+        <button className="workspace-rail-button" onClick={onOpen} title="展开对话产物" aria-label="展开对话产物">
           <PanelRightOpen size={16} />
-          <span className="workspace-rail-label">摘要</span>
-          {attention > 0 && <span className="workspace-rail-dot" title={`${attention} 个任务待处理`} />}
+          <span className="workspace-rail-label">产物</span>
         </button>
       </aside>
     );
@@ -101,20 +76,20 @@ export function ChatWorkspacePanel({
   const jobs = (backgroundQuery.data?.jobs ?? [])
     .filter((job) => taskIds.has(job.taskId))
     .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
-  const hasContent = openTasks.length > 0 || artifacts.length > 0 || attachments.length > 0 || jobs.length > 0;
+  const hasContent = artifacts.length > 0 || attachments.length > 0 || jobs.length > 0;
 
   return (
-    <aside className="workspace-panel" aria-label="对话摘要">
+    <aside className="workspace-panel" aria-label="对话产物">
       <header className="workspace-head">
         {preview ? (
-          <button className="icon-button" onClick={() => setPreview(null)} aria-label="返回摘要" title="返回摘要">
+          <button className="icon-button" onClick={() => setPreview(null)} aria-label="返回产物" title="返回产物">
             <ArrowLeft size={15} />
           </button>
         ) : (
           <PanelRightOpen size={15} className="workspace-head-mark" />
         )}
-        <h2 title={preview?.name ?? "对话摘要"}>{preview?.name ?? "对话摘要"}</h2>
-        <button className="icon-button" onClick={onClose} aria-label="收起对话摘要" title="收起">
+        <h2 title={preview?.name ?? "对话产物"}>{preview?.name ?? "对话产物"}</h2>
+        <button className="icon-button" onClick={onClose} aria-label="收起产物" title="收起">
           <PanelRightClose size={15} />
         </button>
       </header>
@@ -123,47 +98,6 @@ export function ChatWorkspacePanel({
         <PreviewBody preview={preview} onClose={() => setPreview(null)} />
       ) : (
         <div className="workspace-scroll">
-          {latestTask && (
-            <section className="workspace-section">
-              <h3>目标</h3>
-              <p className="workspace-goal">{latestTask.goal}</p>
-              <div className="workspace-goal-meta">
-                <span className={`workspace-task-status ${latestTask.status}`}>
-                  <TaskStatusIcon status={latestTask.status} size={12} /> {TASK_STATUS_LABELS[latestTask.status]}
-                </span>
-                <span>{latestTask.summary.phase}</span>
-              </div>
-            </section>
-          )}
-
-          {latestTask && (
-            <section className="workspace-section">
-              <h3>工作进度</h3>
-              {taskQuery.isLoading ? (
-                <p className="workspace-muted"><Loader2 size={13} className="spin" /> 正在读取进度</p>
-              ) : (
-                <p className="workspace-muted">{latestTask.summary.phase} · {TASK_STATUS_LABELS[latestTask.status]}</p>
-              )}
-            </section>
-          )}
-
-          {openTasks.length > 0 && (
-            <section className="workspace-section">
-              <h3>任务</h3>
-              <ul className="workspace-list">
-                {openTasks.slice(0, 6).map((task) => (
-                  <li key={task.id}>
-                    <Link className="workspace-row" to={`/tasks/${task.id}`} state={{ fromChat: true, conversationId }}>
-                      <TaskStatusIcon status={task.status} size={13} />
-                      <span className="workspace-row-title">{task.title}</span>
-                      {needsAttention(task.status) && <AlertTriangle size={12} className="workspace-warn" />}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-
           {artifacts.length > 0 && (
             <section className="workspace-section">
               <h3>对话产物<span>{artifacts.length}</span></h3>
@@ -200,15 +134,15 @@ export function ChatWorkspacePanel({
 
           {jobs.length > 0 && (
             <section className="workspace-section">
-              <h3>后台任务<span>{jobs.length}</span></h3>
+              <h3>后台命令<span>{jobs.length}</span></h3>
               <ul className="workspace-list">
                 {jobs.slice(0, 6).map((job) => (
                   <li key={job.id}>
-                    <Link className="workspace-row" to={`/tasks/${job.taskId}`} title={jobCommand(job)}>
+                    <div className="workspace-row" title={jobCommand(job)}>
                       <JobBadge job={job} />
                       <span className="workspace-row-title">{job.toolName}</span>
                       <span className={`workspace-row-meta job-${job.status}`}>{jobStatusLabel(job.status)}</span>
-                    </Link>
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -216,7 +150,7 @@ export function ChatWorkspacePanel({
           )}
 
           {!hasContent && (
-            <p className="workspace-empty">对话产生文件、产物或任务后，会显示在这里。</p>
+            <p className="workspace-empty">对话产生文件或产物后，会显示在这里。</p>
           )}
         </div>
       )}
@@ -261,9 +195,6 @@ function PreviewBody({ preview, onClose }: { preview: PreviewTarget; onClose: ()
       <div className="workspace-preview-bar">
         <span>{fileExtension(preview.name)} · {preview.bytes === null ? "—" : formatBytes(preview.bytes)}</span>
         <div>
-          {preview.taskId && (
-            <Link className="workspace-preview-link" to={`/tasks/${preview.taskId}`} onClick={onClose}>任务</Link>
-          )}
           <a className="workspace-preview-link" href={preview.url} download={preview.name} title="下载">
             <Download size={13} /> 下载
           </a>

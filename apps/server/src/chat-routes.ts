@@ -622,10 +622,12 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
           id: randomUUID(),
           conversationId: conversation.id,
           role: "assistant",
-          content: `已派出任务：${task.title}\n\n执行器：${executorText}。任务已出现在左侧对话目录，也可以到“任务”页查看进度和结果。${rerouteText}`,
+          content: `开始执行：${task.title}\n\n执行器：${executorText}。${rerouteText}`,
           taskId: task.id,
           attachments: [],
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
+          kind: "task_status",
+          taskStatus: task.status
         });
         send("task", { task, conversationId: conversation.id, message: assistant });
         send("done", assistant);

@@ -37,8 +37,9 @@
 .conversation-select {
   display: flex;
   flex: 1 1 auto;
-  flex-direction: column;
-  gap: 2px;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
   border: 0;
   background: transparent;
@@ -52,6 +53,28 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.conversation-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.conv-inline {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.conv-inline.running {
+  color: var(--accent);
+}
+
+.conv-inline.attention {
+  color: var(--risk);
 }
 
 .conversation-delete {

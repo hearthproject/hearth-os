@@ -4,6 +4,7 @@
 @import "./shell.css";
 @import "./chat-frame.css";
 @import "./chat.css";
+@import "./inline-run.css";
 @import "./workspace.css";
 @import "./tasks.css";
 @import "./task-detail.css";
@@ -24,4 +25,3 @@
 @import "./onboarding.css";
 @import "./approvals.css";
 @import "./overlays.css";
-@import "./inbox.css";

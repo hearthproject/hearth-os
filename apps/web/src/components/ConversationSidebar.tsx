@@ -1,13 +1,12 @@
 import { useState, type MouseEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useLocation, useNavigate } from "react-router-dom";
-import { AlertTriangle, Folder, FolderPlus, Loader2, Plus, Trash2 } from "lucide-react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { Folder, FolderPlus, Loader2, Plus, Trash2, TriangleAlert } from "lucide-react";
 import { api, ApiError } from "../lib/api.ts";
 import { useChatSelection, requestChat } from "../lib/chat-selection.ts";
 import { isActive, needsAttention } from "../lib/format.ts";
 import type { ConversationListItem, LocalProjectView, TaskListItem } from "../lib/types.ts";
 import { ProjectDialog } from "./ProjectDialog.tsx";
-import { TaskStatusIcon } from "./TaskStatusIcon.tsx";
 
 export function ConversationSidebar() {
   const navigate = useNavigate();
@@ -191,45 +190,18 @@ function ConversationItem({
   const open = tasks.filter((task) => !task.archivedAt);
   const running = open.filter((task) => isActive(task.status)).length;
   const attention = open.filter((task) => needsAttention(task.status)).length;
-  const ordered = [...open].sort((a, b) => {
-    const weight = (task: TaskListItem) => (isActive(task.status) ? 0 : needsAttention(task.status) ? 1 : 2);
-    return weight(a) - weight(b) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt);
-  });
-  const visible = ordered.slice(0, 3);
   return (
     <div className={`conversation-item ${active ? "active" : ""}`}>
       <div className="conversation-row">
-        <button className="conversation-select" onClick={onSelect} disabled={disabled}>
+        <button className="conversation-select" onClick={onSelect} disabled={disabled} title={conversation.preview || conversation.title}>
           <span className="conversation-title">{conversation.title}</span>
-          <span className="conversation-preview">{conversation.preview || "新对话"}</span>
-          {(running > 0 || attention > 0) && (
-            <span className="conversation-flags">
-              {running > 0 && <span className="conv-flag running"><Loader2 size={10} className="spin" /> {running} 运行中</span>}
-              {attention > 0 && <span className="conv-flag attention"><AlertTriangle size={10} /> {attention} 待处理</span>}
-            </span>
-          )}
+          {running > 0 && <span className="conv-inline running"><Loader2 size={10} className="spin" />运行中</span>}
+          {attention > 0 && running === 0 && <span className="conv-inline attention"><TriangleAlert size={10} />待处理</span>}
         </button>
         <button className="conversation-delete" onClick={onDelete} disabled={disabled} aria-label="删除对话">
           {deleting ? <Loader2 size={13} className="spin" /> : <Trash2 size={13} />}
         </button>
       </div>
-      {visible.length > 0 && (
-        <div className="conversation-tasks">
-          {visible.map((task) => (
-            <Link
-              key={task.id}
-              className="conversation-task"
-              to={`/tasks/${task.id}`}
-              state={{ fromChat: true, conversationId: conversation.id }}
-              title={`${task.title} · ${task.summary.phase}`}
-            >
-              <span className={`rail-task-icon ${task.status}`}><TaskStatusIcon status={task.status} size={12} /></span>
-              <span className="rail-task-title">{task.title}</span>
-            </Link>
-          ))}
-          {ordered.length > visible.length && <span className="conversation-more">另有 {ordered.length - visible.length} 个任务</span>}
-        </div>
-      )}
     </div>
   );
 }

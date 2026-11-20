@@ -17,7 +17,7 @@ function envelope(type: string, payload: unknown, taskId: string | null = "task-
 }
 
 describe("notificationForEvent", () => {
-  it("maps pending approvals to a task link", () => {
+  it("maps pending approvals to the conversation", () => {
     const notification = notificationForEvent("approval.created", envelope("approval.created", {
       id: "approval-1",
       taskId: "task-1",
@@ -28,7 +28,7 @@ describe("notificationForEvent", () => {
       tone: "approval",
       title: "有一项外部动作等你确认",
       body: "发送邮件给客户",
-      href: "/tasks/task-1"
+      href: "/"
     });
   });
 
@@ -40,28 +40,19 @@ describe("notificationForEvent", () => {
     }))).toBeNull();
   });
 
-  it("only notifies waiting_input task updates", () => {
-    expect(notificationForEvent("task.updated", envelope("task.updated", { status: "waiting_input" })))
-      .toMatchObject({ tone: "task", href: "/tasks/task-1" });
-    expect(notificationForEvent("task.updated", envelope("task.updated", { status: "running" }))).toBeNull();
+  it("does not surface task status as a notification", () => {
+    expect(notificationForEvent("task.updated", envelope("task.updated", { status: "waiting_input" }))).toBeNull();
+    expect(notificationForEvent("task.updated", envelope("task.updated", { status: "waiting_budget" }, "task-1", "run-1"))).toBeNull();
+    expect(notificationForEvent("task.budget.exhausted", envelope("task.budget.exhausted", { dimension: "tokens" }, "task-1", "run-1"))).toBeNull();
   });
 
-  it("maps uncertain effects to the task", () => {
+  it("maps uncertain effects to the conversation", () => {
     expect(notificationForEvent("effect.updated", envelope("effect.updated", { status: "uncertain" })))
-      .toMatchObject({ tone: "effect", href: "/tasks/task-1" });
+      .toMatchObject({ tone: "effect", href: "/" });
     expect(notificationForEvent("effect.updated", envelope("effect.updated", { status: "succeeded" }))).toBeNull();
   });
 
   it("returns null without an envelope", () => {
     expect(notificationForEvent("approval.created")).toBeNull();
-  });
-
-  it("merges the two budget-exhausted events of one run into a single notification", () => {
-    const updated = notificationForEvent("task.updated", envelope("task.updated", { status: "waiting_budget" }, "task-1", "run-1"));
-    const exhausted = notificationForEvent("task.budget.exhausted", envelope("task.budget.exhausted", { dimension: "tokens" }, "task-1", "run-1"));
-    expect(updated?.key).toBe("budget:task-1:run-1");
-    expect(exhausted?.key).toBe(updated?.key);
-    expect(notificationForEvent("task.updated", envelope("task.updated", { status: "waiting_budget" }, "task-1", "run-2"))?.key)
-      .toBe("budget:task-1:run-2");
   });
 });
