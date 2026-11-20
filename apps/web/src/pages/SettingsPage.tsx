@@ -4,9 +4,6 @@ import { useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
   CheckCircle2,
-  Cpu,
-  FolderGit2,
-  FolderTree,
   KeyRound,
   Loader2,
   Pencil,
@@ -19,12 +16,8 @@ import {
   Trash2
 } from "lucide-react";
 import { api } from "../lib/api.ts";
-import { formatDuration, formatNumber, relativeTime } from "../lib/format.ts";
-import { hasDesktopBridge, pickFolder } from "../lib/desktop.ts";
-import { TASK_STATUS_LABELS } from "../lib/labels.ts";
-import { isEvaluationMemory } from "../lib/memory.ts";
+import { formatNumber, relativeTime } from "../lib/format.ts";
 import type {
-  ContextSettings,
   ExecutorId,
   ExecutorModelBindingView,
   ExecutorView,
@@ -32,19 +25,14 @@ import type {
   ModelProfileView,
   ModelProtocol,
   ModelProviderPreset,
-  TrashItem,
-  TrashKind,
   WebSearchProvider,
   WebSearchSettingsView
 } from "../lib/types.ts";
 import { ExecutorSettingsPanel } from "../components/ExecutorSettingsPanel.tsx";
-import { BackupSettingsPanel } from "../components/BackupSettingsPanel.tsx";
-import { SecuritySettingsPanel } from "../components/SecuritySettingsPanel.tsx";
-import { FeishuSettingsPanel } from "../components/FeishuSettingsPanel.tsx";
+import { DataSettingsPanel } from "../components/DataSettingsPanel.tsx";
 import { BrowserSettingsPanel } from "../components/BrowserSettingsPanel.tsx";
-import { MemorySettingsForm } from "../components/MemorySettingsForm.tsx";
 
-type SettingsTab = "executors" | "models" | "projects" | "extensions" | "browser" | "automation" | "connections" | "context" | "data";
+type SettingsTab = "executors" | "models" | "extensions" | "browser" | "data";
 
 interface ProfileDraft {
   name: string;
@@ -61,12 +49,8 @@ interface ProfileDraft {
 const TABS: Array<{ id: SettingsTab; label: string }> = [
   { id: "executors", label: "执行器" },
   { id: "models", label: "模型" },
-  { id: "projects", label: "项目" },
   { id: "extensions", label: "扩展" },
   { id: "browser", label: "浏览器" },
-  { id: "automation", label: "记忆" },
-  { id: "connections", label: "连接" },
-  { id: "context", label: "上下文" },
   { id: "data", label: "数据" }
 ];
 
@@ -136,13 +120,9 @@ export function SettingsPage() {
         <div className="settings-content">
           {tab === "executors" && <ExecutorsTab />}
           {tab === "models" && <ModelsTab />}
-          {tab === "projects" && <ProjectsTab />}
           {tab === "extensions" && <ExtensionsTab />}
           {tab === "browser" && <BrowserSettingsPanel />}
-          {tab === "automation" && <AutomationTab />}
-          {tab === "connections" && <ConnectionsTab />}
-          {tab === "context" && <ContextTab />}
-          {tab === "data" && <DataTab />}
+          {tab === "data" && <DataSettingsPanel />}
         </div>
       </div>
     </div>
@@ -500,121 +480,6 @@ function ModelsTab() {
   );
 }
 
-function ProjectsTab() {
-  const queryClient = useQueryClient();
-  const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: api.projects });
-  const [path, setPath] = useState("");
-  const [name, setName] = useState("");
-  const [defaultBranch, setDefaultBranch] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<NoticeState>(null);
-  const [pickerUnavailable, setPickerUnavailable] = useState(() => !hasDesktopBridge());
-
-  async function addProject() {
-    setBusy(true);
-    setNotice(null);
-    try {
-      const result = await api.createProject({
-        path,
-        ...(name.trim() ? { name: name.trim() } : {}),
-        ...(defaultBranch.trim() ? { defaultBranch: defaultBranch.trim() } : {})
-      });
-      setPath("");
-      setName("");
-      setDefaultBranch("");
-      setNotice({ tone: "ok", text: `已注册项目：${result.project.name}` });
-      await queryClient.invalidateQueries({ queryKey: ["projects"] });
-    } catch (error) {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function browseProjectFolder() {
-    setNotice(null);
-    if (!hasDesktopBridge()) {
-      setPickerUnavailable(true);
-      setNotice({ tone: "error", text: "当前不在桌面版中，请直接粘贴完整的文件夹路径。" });
-      return;
-    }
-    try {
-      const picked = await pickFolder();
-      if (picked) setPath(picked);
-    } catch {
-      setPickerUnavailable(true);
-      setNotice({ tone: "error", text: "系统选择器不可用，请直接粘贴完整的文件夹路径。" });
-    }
-  }
-
-  async function removeProject(id: string, projectName: string) {
-    if (!window.confirm(`从 Hearth 移除项目“${projectName}”？不会删除本地文件。`)) return;
-    setBusy(true);
-    try {
-      await api.deleteProject(id);
-      setNotice({ tone: "info", text: `已移除项目：${projectName}` });
-      await queryClient.invalidateQueries({ queryKey: ["projects"] });
-    } catch (error) {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const projects = projectsQuery.data?.projects ?? [];
-  return (
-    <section className="settings-tab-panel">
-      <section className="panel settings-section">
-        <div className="settings-body">
-          <div className="section-heading"><div><h3>注册本地项目</h3><p>选择任意本地文件夹；Git 仓库与普通文件夹都支持。</p></div><FolderGit2 size={20} /></div>
-          <div className="form-grid">
-            <label className="span-2"><span>项目文件夹</span>
-              <div className="project-path-row">
-                <input value={path} onChange={(event) => setPath(event.target.value)} placeholder="D:\\code\\my-project" spellCheck={false} />
-                {!pickerUnavailable && <button type="button" className="ghost-button" onClick={() => void browseProjectFolder()}>浏览…</button>}
-              </div>
-            </label>
-            <label><span>显示名称（可选）</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="默认使用目录名" /></label>
-            <label><span>默认分支（仅 Git，可选）</span><input value={defaultBranch} onChange={(event) => setDefaultBranch(event.target.value)} placeholder="默认使用当前分支" spellCheck={false} /></label>
-          </div>
-          <div className="settings-actions">
-            <button className="primary-button" onClick={() => void addProject()} disabled={busy || !path.trim()}>{busy ? <Loader2 size={15} className="spin" /> : <Plus size={15} />} 注册项目</button>
-            <button className="ghost-button" onClick={() => void projectsQuery.refetch()} disabled={busy}><RefreshCw size={15} /> 刷新状态</button>
-          </div>
-          {notice && <Notice tone={notice.tone} text={notice.text} />}
-        </div>
-      </section>
-
-      <section className="panel settings-section">
-        <div className="settings-body">
-          <div className="section-heading"><div><h3>已注册项目</h3><p>状态实时读取本地目录；Git 项目额外展示分支和未提交改动。</p></div></div>
-          {projectsQuery.isLoading && <InlineLoading text="正在读取本地项目" />}
-          {projectsQuery.isError && <p className="form-error">{projectsQuery.error.message}</p>}
-          {!projectsQuery.isLoading && projects.length === 0 && <EmptyState text="还没有注册本地项目。" />}
-          <div className="data-table-list">
-            {projects.map((project) => (
-              <article key={project.id} className="migration-row">
-                <span className={`status-dot ${project.available ? "online" : "offline"}`} />
-                <div>
-                  <strong>{project.name}</strong>
-                  <small>
-                    <code>{project.path}</code>
-                    {project.kind === "git"
-                      ? ` · Git · 默认分支 ${project.defaultBranch} · 当前 ${project.currentBranch ?? "不可用"}${project.dirty ? " · 有未提交改动" : ""}`
-                      : " · 本地文件夹"}
-                  </small>
-                  {project.error && <p>{project.error}</p>}
-                </div>
-                <button className="ghost-button danger compact" onClick={() => void removeProject(project.id, project.name)} disabled={busy}><Trash2 size={14} /> 移除</button>
-              </article>
-            ))}
-          </div>
-        </div>
-      </section>
-    </section>
-  );
-}
-
 function ExtensionsTab() {
   const queryClient = useQueryClient();
   const mcpQuery = useQuery({ queryKey: ["mcpServers"], queryFn: api.mcpServers });
@@ -808,330 +673,6 @@ function parseEnvText(value: string): Record<string, string> {
   return env;
 }
 
-function ConnectionsTab() {
-  return (
-    <section className="settings-tab-panel">
-      <FeishuSettingsPanel />
-      <p className="settings-hint">下一步会加入邮件账户；当前邮件发送仍只写入本机发件箱。</p>
-    </section>
-  );
-}
-
-function ContextTab() {
-  const queryClient = useQueryClient();
-  const contextQuery = useQuery({ queryKey: ["contextSettings"], queryFn: api.contextSettings });
-  const metricsQuery = useQuery({ queryKey: ["contextMetrics"], queryFn: api.contextMetrics, refetchInterval: 30_000 });
-  const [form, setForm] = useState<ContextSettings | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<NoticeState>(null);
-  const [cleanupTaskId, setCleanupTaskId] = useState("");
-
-  useEffect(() => {
-    if (contextQuery.data?.settings && !form) setForm(contextQuery.data.settings);
-  }, [contextQuery.data, form]);
-
-  async function save() {
-    if (!form) return;
-    setBusy(true);
-    setNotice(null);
-    try {
-      const result = await api.saveContextSettings({
-        mode: form.mode,
-        maxHandoffs: form.maxHandoffs,
-        maxSameExecutorRetries: form.maxSameExecutorRetries,
-        retentionDays: form.retentionDays,
-        maxInlineBytes: form.maxInlineBytes,
-        projectionTokenBudget: form.projectionTokenBudget,
-        summarizeAfterTokens: form.summarizeAfterTokens,
-        autoHandoffRisk: form.autoHandoffRisk,
-        allowCodexNetwork: form.allowCodexNetwork
-      });
-      setForm(result.settings);
-      setNotice({ tone: "ok", text: "上下文设置已保存，对之后的运行生效。" });
-      await queryClient.invalidateQueries({ queryKey: ["contextSettings"] });
-    } catch (error) {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "保存失败" });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function cleanup() {
-    const taskId = cleanupTaskId.trim();
-    if (!taskId) return setNotice({ tone: "info", text: "请填写要清理的任务 ID。" });
-    if (!window.confirm("确定删除这个任务的上下文、摘要、接管记录和 blob？此操作不可撤销。")) return;
-    setBusy(true);
-    setNotice(null);
-    try {
-      const receipt = await api.deleteTaskContext(taskId);
-      setNotice({ tone: "ok", text: `已删除 ${receipt.deletedItems} 条上下文、${receipt.deletedHandoffs} 条接管记录和 ${receipt.deletedBlobs} 个 blob。` });
-      setCleanupTaskId("");
-      await queryClient.invalidateQueries({ queryKey: ["contextMetrics"] });
-    } catch (error) {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "清理失败" });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const metrics = metricsQuery.data;
-
-  return (
-    <section className="settings-tab-panel">
-      <div className="context-metrics settings-metric-grid">
-        <Metric label="上下文条目" value={metrics ? formatNumber(metrics.ledger.items) : "—"} />
-        <Metric label="自动接管" value={metrics ? formatNumber(metrics.handoffs.automatic) : "—"} />
-        <Metric label="接管成功率" value={metrics?.handoffs.successRate == null ? "—" : `${Math.round(metrics.handoffs.successRate * 100)}%`} />
-        <Metric label="模型诊断" value={metrics ? formatNumber(metrics.diagnosis.model) : "—"} />
-      </div>
-
-      <section className="panel settings-section">
-        <div className="settings-body">
-          <div className="section-heading"><div><h3>接管规则</h3><p>执行器故障会自动切换；非执行器错误直接说明原因。</p></div></div>
-          {!form && <InlineLoading text="正在读取上下文设置" />}
-          {form && (
-            <div className="form-grid context-form">
-              <label><span>上下文模式</span><select value={form.mode} onChange={(event) => setForm({ ...form, mode: event.target.value as ContextSettings["mode"] })}><option value="on">开启</option><option value="shadow">只诊断，不接管</option><option value="off">关闭</option></select></label>
-              <label><span>自动接管风险</span><select value={form.autoHandoffRisk} onChange={(event) => setForm({ ...form, autoHandoffRisk: event.target.value as ContextSettings["autoHandoffRisk"] })}><option value="low">低风险自动</option><option value="none">全部需要确认</option></select></label>
-              <label><span>最大接管次数</span><input type="number" min={0} max={5} value={form.maxHandoffs} onChange={(event) => setForm({ ...form, maxHandoffs: Number(event.target.value) })} /></label>
-              <label><span>同执行器重试</span><input type="number" min={0} max={3} value={form.maxSameExecutorRetries} onChange={(event) => setForm({ ...form, maxSameExecutorRetries: Number(event.target.value) })} /></label>
-              <label><span>保留天数</span><input type="number" min={1} max={3650} value={form.retentionDays} onChange={(event) => setForm({ ...form, retentionDays: Number(event.target.value) })} /></label>
-              <label><span>单条内联上限（字节）</span><input type="number" min={1024} max={1000000} step={1024} value={form.maxInlineBytes} onChange={(event) => setForm({ ...form, maxInlineBytes: Number(event.target.value) })} /></label>
-              <label><span>投影预算（tokens）</span><input type="number" min={1000} max={200000} step={1000} value={form.projectionTokenBudget} onChange={(event) => setForm({ ...form, projectionTokenBudget: Number(event.target.value) })} /></label>
-              <label><span>摘要阈值（tokens）</span><input type="number" min={1000} max={500000} step={1000} value={form.summarizeAfterTokens} onChange={(event) => setForm({ ...form, summarizeAfterTokens: Number(event.target.value) })} /></label>
-              <label className="checkbox-field span-2"><input type="checkbox" checked={form.allowCodexNetwork} onChange={(event) => setForm({ ...form, allowCodexNetwork: event.target.checked })} /><span>允许 Codex 网络访问（不开启时，需要网络的任务不会自动切换到 Codex）</span></label>
-            </div>
-          )}
-          <div className="settings-actions"><button className="primary-button" onClick={() => void save()} disabled={busy || !form}>{busy ? <Loader2 size={15} className="spin" /> : <Save size={15} />} 保存上下文设置</button></div>
-          {notice && <Notice tone={notice.tone} text={notice.text} />}
-        </div>
-      </section>
-
-      <section className="panel settings-section">
-        <div className="settings-body">
-          <div className="section-heading"><div><h3>清理任务上下文</h3><p>只删除上下文条目、摘要、接管记录和 blob，不删除任务本身。</p></div></div>
-          <div className="input-with-action"><input value={cleanupTaskId} onChange={(event) => setCleanupTaskId(event.target.value)} placeholder="任务 ID（任务详情 URL 最后一段）" spellCheck={false} /><button className="ghost-button danger" onClick={() => void cleanup()} disabled={busy}><Trash2 size={14} /> 删除上下文</button></div>
-        </div>
-      </section>
-
-      {metrics && (
-        <section className="panel settings-section">
-          <div className="settings-body">
-            <div className="section-heading"><div><h3>运行指标</h3><p>最近刷新：{new Date(metrics.generatedAt).toLocaleString()}</p></div><button className="ghost-button compact" onClick={() => void metricsQuery.refetch()}><RefreshCw size={14} /> 刷新</button></div>
-            <dl className="settings-kv">
-              <div><dt>接管</dt><dd>{metrics.handoffs.total} 次 · 待确认 {metrics.handoffs.pendingUser} · 完成 {metrics.handoffs.completed} · 失败 {metrics.handoffs.failed}</dd></div>
-              <div><dt>平均恢复</dt><dd>{metrics.handoffs.averageRecoveryMs == null ? "—" : formatDuration(metrics.handoffs.averageRecoveryMs)}</dd></div>
-              <div><dt>平均接管上下文</dt><dd>{metrics.handoffs.averageContextTokens == null ? "—" : `${formatNumber(metrics.handoffs.averageContextTokens)} tokens`}</dd></div>
-              <div><dt>诊断</dt><dd>{metrics.diagnosis.total} 次 · 模型 {metrics.diagnosis.model} · 规则 {metrics.diagnosis.rules}</dd></div>
-            </dl>
-          </div>
-        </section>
-      )}
-    </section>
-  );
-}
-
-function DataTab() {
-  const storageQuery = useQuery({ queryKey: ["settingsStorage"], queryFn: api.settingsStorage });
-  const storage = storageQuery.data;
-  return (
-    <section className="settings-tab-panel">
-      {storageQuery.isLoading && <InlineLoading text="正在读取存储信息" />}
-      {storage && (
-        <>
-          <section className="panel settings-section">
-            <div className="settings-body">
-              <div className="section-heading"><div><h3>目录结构</h3><p>所有运行时数据都在 <code>{storage.dataDir}</code> 下。</p></div><FolderTree size={20} /></div>
-              <dl className="settings-kv path-list">
-                <div><dt>SQLite 数据库</dt><dd><code>{storage.paths.database}</code></dd></div>
-                <div><dt>执行器运行时</dt><dd><code>{storage.paths.executors}</code><small>Codex 与 DeepSeek Harness 使用各自独立目录，避免污染全局登录。</small></dd></div>
-                <div><dt>上下文 blob</dt><dd><code>{storage.paths.contextBlobs}</code></dd></div>
-                <div><dt>加密备份</dt><dd><code>{storage.paths.backups}</code></dd></div>
-                <div><dt>附件</dt><dd><code>{storage.paths.attachments}</code></dd></div>
-              </dl>
-              <pre className="storage-tree">{`.hearth/
-├─ hearth.sqlite              # 设置、任务、事件、上下文索引
-├─ executors/
-│  ├─ codex/                  # 独立 CODEX_HOME
-│  └─ deepseek-harness/       # DSH 运行时 home
-├─ context/blobs/             # 大段上下文正文（内容寻址）
-├─ backups/legacy-dev/        # 旧 JSON 设置迁移备份
-├─ workspaces/                # 隔离任务工作区
-├─ artifacts/                 # 受管产物
-└─ outbox/                    # 本地发件箱`}</pre>
-            </div>
-          </section>
-
-          <section className="panel settings-section">
-            <div className="settings-body">
-              <div className="section-heading"><div><h3>SQLite 设置表</h3><p>运行时以 SQLite 为唯一事实来源；旧 JSON 只在迁移时读取。</p></div></div>
-              <div className="data-table-list">
-                <DataRow name="app_settings" text="聊天模型、界面级键值和注册表更新时间" />
-                <DataRow name="model_profiles" text="模型供应商、协议、地址、模型名和加密 API Key" />
-                <DataRow name="executor_model_bindings" text="执行器与模型档案的绑定、协议覆盖和模型覆盖" />
-                <DataRow name="settings_migrations" text="旧 JSON 迁移状态、源路径和备份路径" />
-                <DataRow name="context_items / context_summaries" text="统一上下文账本与任务摘要" />
-                <DataRow name="handoffs / diagnoses" text="执行器接管记录与模型诊断证据" />
-              </div>
-            </div>
-          </section>
-
-          <section className="panel settings-section">
-            <div className="settings-body">
-              <div className="section-heading"><div><h3>旧设置迁移</h3><p>启动时幂等迁移，失败回滚并保留原 JSON。</p></div></div>
-              <dl className="settings-kv">
-                <div><dt>旧模型设置</dt><dd><code>{storage.legacy.modelSettings}</code></dd></div>
-                <div><dt>旧执行器设置</dt><dd><code>{storage.legacy.executorSettings}</code></dd></div>
-              </dl>
-              <div className="migration-list">
-                {storage.migrations.length === 0 && <EmptyState text="没有迁移记录；这是干净的 SQLite 配置。" />}
-                {storage.migrations.map((migration) => (
-                  <article key={migration.id} className="migration-row">
-                    <span className={`status-dot ${migration.status === "completed" ? "online" : migration.status === "failed" ? "offline" : "idle"}`} />
-                    <div><strong>{migration.sourcePath}</strong><small>{migration.backupPath ?? "无备份路径"} · {new Date(migration.updatedAt).toLocaleString()}</small>{migration.error && <p>{migration.error}</p>}</div>
-                    <span className={`status-chip ${migration.status === "completed" ? "ok" : "warn"}`}>{migration.status}</span>
-                  </article>
-                ))}
-              </div>
-            </div>
-          </section>
-        </>
-      )}
-      <TrashPanel />
-      <BackupSettingsPanel />
-      <SecuritySettingsPanel />
-    </section>
-  );
-}
-
-function TrashPanel() {
-  const queryClient = useQueryClient();
-  const [olderThanDays, setOlderThanDays] = useState<7 | 15 | 30 | null>(null);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [notice, setNotice] = useState<NoticeState>(null);
-  const trashQuery = useQuery({
-    queryKey: ["trash", olderThanDays ?? "all"],
-    queryFn: () => api.trash(olderThanDays ? { olderThanDays } : {}),
-    refetchInterval: 30_000
-  });
-  const items = trashQuery.data?.items ?? [];
-  const selectedItems = items.filter((item) => selected.has(trashKey(item)));
-
-  function toggle(item: TrashItem) {
-    const key = trashKey(item);
-    setSelected((current) => {
-      const next = new Set(current);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }
-
-  async function restoreSelected() {
-    if (selectedItems.length === 0) return;
-    setNotice(null);
-    try {
-      await api.restoreTrash(selectedItems.map(({ kind, id }) => ({ kind, id })));
-      setSelected(new Set());
-      setNotice({ tone: "ok", text: `已恢复 ${selectedItems.length} 个项目` });
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["trash"] }),
-        queryClient.invalidateQueries({ queryKey: ["conversations"] }),
-        queryClient.invalidateQueries({ queryKey: ["tasks"] })
-      ]);
-    } catch (caught) {
-      setNotice({ tone: "error", text: caught instanceof Error ? caught.message : "恢复失败" });
-    }
-  }
-
-  async function purgeSelected() {
-    if (selectedItems.length === 0) return;
-    if (!window.confirm(`要彻底删除所选的 ${selectedItems.length} 个项目吗？此操作不能撤销。`)) return;
-    if (!window.confirm("再次确认：数据库记录、受管工作区和产物将被永久移除。")) return;
-    setNotice(null);
-    try {
-      const result = await api.purgeTrash(selectedItems.map(({ kind, id }) => ({ kind, id })));
-      setSelected(new Set());
-      setNotice({
-        tone: "ok",
-        text: `已彻底删除 ${result.purgedConversations} 个对话、${result.purgedTasks} 个任务，并清理 ${result.removedAttachments} 个孤立附件`
-      });
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["trash"] }),
-        queryClient.invalidateQueries({ queryKey: ["conversations"] }),
-        queryClient.invalidateQueries({ queryKey: ["tasks"] })
-      ]);
-    } catch (caught) {
-      setNotice({ tone: "error", text: caught instanceof Error ? caught.message : "彻底删除失败" });
-    }
-  }
-
-  return (
-    <details className="trash-disclosure">
-      <summary><Trash2 size={14} /> 回收站{items.length > 0 ? ` · ${items.length}` : ""}</summary>
-      <div className="trash-body">
-        <div className="trash-toolbar">
-          <label><span>删除时间</span><select value={olderThanDays ?? ""} onChange={(event) => { setSelected(new Set()); setOlderThanDays(event.target.value ? Number(event.target.value) as 7 | 15 | 30 : null); }}><option value="">全部</option><option value="7">7 天以前</option><option value="15">15 天以前</option><option value="30">30 天以前</option></select></label>
-          <div>
-            <button className="ghost-button compact" onClick={() => void restoreSelected()} disabled={selectedItems.length === 0}>恢复所选</button>
-            <button className="ghost-button compact danger" onClick={() => void purgeSelected()} disabled={selectedItems.length === 0}>彻底删除</button>
-          </div>
-        </div>
-        {trashQuery.isLoading && <InlineLoading text="正在读取回收站" />}
-        {!trashQuery.isLoading && items.length === 0 && <EmptyState text="回收站是空的。" />}
-        {items.length > 0 && (
-          <div className="trash-list">
-            {items.map((item) => (
-              <label key={trashKey(item)} className="trash-row">
-                <input type="checkbox" checked={selected.has(trashKey(item))} onChange={() => toggle(item)} />
-                <span className="trash-kind">{item.kind === "conversation" ? "对话" : "任务"}</span>
-                <span className="trash-title">{item.title}</span>
-                {item.status && <span className="trash-status">{TASK_STATUS_LABELS[item.status]}</span>}
-                <time>{relativeTime(item.deletedAt)}</time>
-              </label>
-            ))}
-          </div>
-        )}
-        {notice && <Notice tone={notice.tone} text={notice.text} />}
-        <p className="settings-hint">这里只恢复经 Hearth 删除的对话和任务；在文件系统中直接删除的文件不会进入回收站。</p>
-      </div>
-    </details>
-  );
-}
-
-function trashKey(item: { kind: TrashKind; id: string }): string {
-  return `${item.kind}:${item.id}`;
-}
-
-function AutomationTab() {
-  const memoryQuery = useQuery({ queryKey: ["memory"], queryFn: api.memory, refetchInterval: 30_000 });
-  const activeMemories = (memoryQuery.data?.memories ?? []).filter((memory) => memory.status === "active" && !isEvaluationMemory(memory));
-  const latestRecall = memoryQuery.data?.recalls[0] ?? null;
-
-  return (
-    <section className="settings-tab-panel">
-      <section className="panel settings-section">
-        <div className="settings-body">
-          <dl className="settings-kv">
-            <div>
-              <dt>自动记忆</dt>
-              <dd>
-                自动提炼并参与后续对话
-                <small>
-                  {memoryQuery.isLoading ? "正在读取…" : `${activeMemories.length} 条已记住`}
-                  {latestRecall ? ` · 最近参考于 ${relativeTime(latestRecall.createdAt)}` : ""}
-                </small>
-              </dd>
-            </div>
-          </dl>
-          {memoryQuery.data && <MemorySettingsForm key={memoryQuery.data.settings.updatedAt} settings={memoryQuery.data.settings} />}
-          <p className="settings-hint"><ShieldAlert size={13} /> Hearth 只会从已完成的任务里整理内容，不会改动原始记录；需要执行外部动作时仍会先征求你的同意。</p>
-        </div>
-      </section>
-    </section>
-  );
-}
-
 type NoticeState = { tone: "ok" | "error" | "info"; text: string } | null;
 
 function Notice({ tone, text }: { tone: "ok" | "error" | "info"; text: string }) {
@@ -1144,14 +685,6 @@ function InlineLoading({ text }: { text: string }) {
 
 function EmptyState({ text }: { text: string }) {
   return <p className="empty-state">{text}</p>;
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return <div><span>{label}</span><strong>{value}</strong></div>;
-}
-
-function DataRow({ name, text }: { name: string; text: string }) {
-  return <div className="data-row"><code>{name}</code><span>{text}</span></div>;
 }
 
 function protocolLabel(protocol: ModelProtocol): string {

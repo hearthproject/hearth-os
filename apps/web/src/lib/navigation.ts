@@ -1,4 +1,4 @@
-import { Activity, BellRing, BookMarked, CalendarClock, Library, Mail, MessageCircle, Monitor, Settings2, UserRound, type LucideIcon } from "lucide-react";
+import { BellRing, BookMarked, CalendarClock, Library, Link2, Mail, MessageCircle, Settings2, type LucideIcon } from "lucide-react";
 
 export type NavPlacement = "main" | "more" | "footer";
 
@@ -19,9 +19,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: "dossier", label: "档案", path: "/dossier", icon: BookMarked, placement: "more", keywords: ["档案", "项目", "工作方式", "dossier", "project", "workstyle"] },
   { id: "mail", label: "邮件", path: "/mail", icon: Mail, placement: "more", keywords: ["邮件", "邮箱", "mail"] },
   { id: "schedules", label: "定时任务", path: "/schedules", icon: CalendarClock, placement: "more", keywords: ["定时", "周期", "schedule"] },
-  { id: "devices", label: "设备", path: "/devices", icon: Monitor, placement: "more", keywords: ["设备", "桌面", "device", "desktop"] },
-  { id: "runtime", label: "运行", path: "/runtime", icon: Activity, placement: "more", keywords: ["运行", "后台", "runtime"] },
-  { id: "personal", label: "个人", path: "/personal", icon: UserRound, placement: "more", keywords: ["个人", "画像", "personal"] },
+  { id: "connections", label: "连接", path: "/connections", icon: Link2, placement: "more", keywords: ["连接", "飞书", "集成", "connection", "feishu"] },
   { id: "settings", label: "设置", path: "/settings", icon: Settings2, placement: "footer", keywords: ["设置", "配置", "settings"] }
 ];
 

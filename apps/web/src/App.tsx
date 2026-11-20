@@ -5,14 +5,12 @@ import { AppShell } from "./components/AppShell.tsx";
 import { NotificationCenter } from "./components/NotificationCenter.tsx";
 import { api, subscribeToEvents } from "./lib/api.ts";
 import { ChatPage } from "./pages/ChatPage.tsx";
+import { ConnectionsPage } from "./pages/ConnectionsPage.tsx";
 import { DossierPage } from "./pages/DossierPage.tsx";
-import { DevicesPage } from "./pages/DevicesPage.tsx";
 import { InboxPage } from "./pages/InboxPage.tsx";
 import { MailPage } from "./pages/MailPage.tsx";
 import { LibraryPage } from "./pages/LibraryPage.tsx";
 import { OnboardingPage } from "./pages/OnboardingPage.tsx";
-import { PersonalPage } from "./pages/PersonalPage.tsx";
-import { RuntimePage } from "./pages/RuntimePage.tsx";
 import { SettingsPage } from "./pages/SettingsPage.tsx";
 import { SchedulesPage } from "./pages/SchedulesPage.tsx";
 import { TaskDetailPage } from "./pages/TaskDetailPage.tsx";
@@ -30,15 +28,13 @@ export default function App() {
             <Route path="tasks" element={<Navigate to="/" replace />} />
             <Route path="tasks/:id" element={<TaskDetailPage />} />
             <Route path="inbox" element={<InboxPage />} />
-            <Route path="personal" element={<PersonalPage />} />
-            <Route path="runtime" element={<RuntimePage />} />
             <Route path="knowledge" element={<Navigate to="/library" replace />} />
             <Route path="memory" element={<Navigate to="/library" replace />} />
             <Route path="library" element={<LibraryPage />} />
             <Route path="dossier" element={<DossierPage />} />
             <Route path="mail" element={<MailPage />} />
             <Route path="schedules" element={<SchedulesPage />} />
-            <Route path="devices" element={<DevicesPage />} />
+            <Route path="connections" element={<ConnectionsPage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

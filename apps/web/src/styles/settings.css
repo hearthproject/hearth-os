@@ -142,6 +142,34 @@
   font-size: 10px;
 }
 
+.settings-content .section-heading > span {
+  flex: 0 0 auto;
+}
+
+/* Connection page reuses the settings column without its rail. */
+.connections-page {
+  max-width: 1000px;
+}
+
+.connections-content {
+  max-width: 760px;
+}
+
+.connections-page .settings-content .section-heading p {
+  display: block;
+  max-width: 62ch;
+  margin-top: 4px;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+  line-height: 1.5;
+}
+
+@media (max-width: 720px) {
+  .connections-content {
+    max-width: none;
+  }
+}
+
 .knowledge-setup {
   display: flex;
   flex-direction: column;

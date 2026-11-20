@@ -17,12 +17,9 @@
 @import "./settings-fields.css";
 @import "./settings-data.css";
 @import "./workbench.css";
-@import "./devices.css";
-@import "./personal.css";
 @import "./memory.css";
 @import "./library.css";
 @import "./schedules.css";
-@import "./runtime.css";
 @import "./mail.css";
 @import "./onboarding.css";
 @import "./approvals.css";
