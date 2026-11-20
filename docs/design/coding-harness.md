@@ -56,7 +56,7 @@ The coding profile uses `CODING_RUN_BUDGET` (300 turns, 2500 tool calls, the nat
 
 ## Prompt sections
 
-`codingPromptSections` returns stable, composable sections: `rules`, `tools`, `environment`, `instructions`, `mode`, `skills` and `extra`. `codingSystemPrompt` joins the non-empty sections, so callers can inspect or reuse a section without rebuilding the whole prompt. The plan-mode section is always present and is backed by a runtime gate, not only by prompt text.
+`codingPromptSections` returns stable, composable sections: `rules`, `tools`, `environment`, `memory`, `instructions`, `mode`, `skills` and `extra`. `codingSystemPrompt` joins the non-empty sections, so callers can inspect or reuse a section without rebuilding the whole prompt. The plan-mode section is always present and is backed by a runtime gate, not only by prompt text.
 
 ## Editing contract
 
@@ -113,10 +113,11 @@ Read state is cleared after compaction so the summary is not treated as the orig
 
 ## Long-horizon state
 
-- `shell_wait` waits for a background process to exit, match output or time out instead of polling.
-- Repository memory lives in `.hearth/memory` with a `MEMORY.md` index; `memory_read`, `memory_write` and `memory_search` expose it to coding and read-only profiles.
-- A long-running goal lives in `.hearth/goal.json`; `get_goal`, `create_goal` and `update_goal` persist title, objective, constraints, success criteria and status. Only one active goal is allowed.
-- Per-turn file history supports `rewind_turn`, and the older `rewind` remains available for a single snapshot.
+- `shell_wait` waits for a background process to exit, match output or time out instead of polling; the default wait is 60 seconds and the cap is 10 minutes. A timeout leaves the process running and returns its current output.
+- Repository memory lives in `.hearth/memory` with a `MEMORY.md` index; `memory_read`, `memory_write` and `memory_search` expose it to coding and read-only profiles. The index is bounded to 200 lines / 25 KB and is injected at prompt startup; topic bodies are loaded only on demand.
+- A long-running goal lives in `.hearth/goal.json`; `get_goal`, `create_goal` and `update_goal` persist title, objective, constraints, success criteria, plan path and a turn budget. Only one active goal is allowed. `finish_task` is rejected while a goal is active, turns are counted across runs, and a goal pauses at `maxTurns` instead of failing hard.
+- Per-turn file history lives in `.hearth/file-history/turn-N/manifest.json` with before/after hashes, line deltas and created-file markers. `rewind_turn` restores the previous completed turn or a named turn, removes files created by that turn, reports partial failures, and keeps the most recent 100 turn manifests.
+- The older `rewind` remains available for a single snapshot, and per-turn snapshots are still persisted through checkpoints.
 
 ## Benchmarks
 
