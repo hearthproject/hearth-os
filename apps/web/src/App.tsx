@@ -6,6 +6,7 @@ import { NotificationCenter } from "./components/NotificationCenter.tsx";
 import { api, subscribeToEvents } from "./lib/api.ts";
 import { ChatPage } from "./pages/ChatPage.tsx";
 import { ConnectionsPage } from "./pages/ConnectionsPage.tsx";
+import { ContextPage } from "./pages/ContextPage.tsx";
 import { MailPage } from "./pages/MailPage.tsx";
 import { LibraryPage } from "./pages/LibraryPage.tsx";
 import { OnboardingPage } from "./pages/OnboardingPage.tsx";
@@ -28,6 +29,7 @@ export default function App() {
             <Route path="knowledge" element={<Navigate to="/library" replace />} />
             <Route path="memory" element={<Navigate to="/library" replace />} />
             <Route path="library" element={<LibraryPage />} />
+            <Route path="context" element={<ContextPage />} />
             <Route path="dossier" element={<Navigate to="/settings?tab=dossier" replace />} />
             <Route path="mail" element={<MailPage />} />
             <Route path="schedules" element={<SchedulesPage />} />
