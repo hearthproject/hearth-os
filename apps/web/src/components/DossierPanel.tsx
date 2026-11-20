@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, FolderOpen, Loader2, RefreshCw, RotateCcw, Save } from "lucide-react";
+import { FolderOpen, Loader2, RefreshCw, RotateCcw, Save } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api.ts";
 import { relativeTime } from "../lib/format.ts";
@@ -16,8 +16,21 @@ const SECTION_LABELS: Array<[keyof DossierSectionsView, string]> = [
   ["evidence", "证据入口"]
 ];
 
-export function DossierPage() {
+export function DossierPanel() {
   const [tab, setTab] = useState<"dossier" | "workstyle">("dossier");
+
+  return (
+    <section className="dossier-panel">
+      <div className="dossier-tabs" role="tablist" aria-label="档案视图">
+        <button type="button" className={tab === "dossier" ? "active" : ""} onClick={() => setTab("dossier")}>项目档案</button>
+        <button type="button" className={tab === "workstyle" ? "active" : ""} onClick={() => setTab("workstyle")}>我的工作方式</button>
+      </div>
+      {tab === "dossier" ? <ProjectDossier /> : <WorkstyleEditor />}
+    </section>
+  );
+}
+
+function ProjectDossier() {
   const projects = useQuery({ queryKey: ["projects"], queryFn: api.projects });
   const [projectId, setProjectId] = useState("");
   const selected = projectId || projects.data?.projects[0]?.id || "";
@@ -37,64 +50,52 @@ export function DossierPage() {
   }, [projectId, projects.data]);
 
   return (
-    <section className="page dossier-page">
-      <header className="page-header">
-        <div>
-          <h2><BookOpen size={20} /> 项目档案</h2>
-          <p>每个项目的事实、决策、命令和坑，编译成给 coding 任务参考的上下文。档案可以随时重建，不会改动原始任务记录。</p>
+    <div className="dossier-body">
+      {(projects.data?.projects.length ?? 0) > 0 && (
+        <div className="dossier-toolbar">
+          <label>
+            <FolderOpen size={15} />
+            <select value={selected} onChange={(event) => setProjectId(event.target.value)} disabled={!projects.data?.projects.length}>
+              {(projects.data?.projects ?? []).map((project) => (
+                <option key={project.id} value={project.id}>{project.name}</option>
+              ))}
+            </select>
+          </label>
+          {selected && (
+            <button type="button" className="button" onClick={() => compile.mutate()} disabled={compile.isPending}>
+              {compile.isPending ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />} 重新编译
+            </button>
+          )}
         </div>
-        <div className="dossier-tabs" role="tablist">
-          <button type="button" className={tab === "dossier" ? "active" : ""} onClick={() => setTab("dossier")}>项目档案</button>
-          <button type="button" className={tab === "workstyle" ? "active" : ""} onClick={() => setTab("workstyle")}>我的工作方式</button>
-        </div>
-      </header>
-
-      {tab === "dossier" ? (
-        <div className="dossier-body">
-          <div className="dossier-toolbar">
-            <label>
-              <FolderOpen size={15} />
-              <select value={selected} onChange={(event) => setProjectId(event.target.value)} disabled={!projects.data?.projects.length}>
-                {(projects.data?.projects ?? []).map((project) => (
-                  <option key={project.id} value={project.id}>{project.name}</option>
-                ))}
-              </select>
-            </label>
-            {selected && (
-              <button type="button" className="button" onClick={() => compile.mutate()} disabled={compile.isPending}>
-                {compile.isPending ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />} 重新编译
-              </button>
-            )}
-          </div>
-          {!projects.data?.projects.length && <p className="empty-state">还没有注册项目。先在设置 → 项目里添加一个本地文件夹。</p>}
-          {compile.error && <p className="form-error">{compile.error.message}</p>}
-          {dossier.data?.dossier ? (
-            <>
-              <p className="dossier-meta">
-                编译于 {relativeTime(dossier.data.dossier.generatedAt)} · {dossier.data.dossier.projectPath}
-              </p>
-              <div className="dossier-sections">
-                {SECTION_LABELS.map(([key, label]) => (
-                  <section className="dossier-section" key={key}>
-                    <h3>{label}</h3>
-                    {dossier.data.dossier!.sections[key].length
-                      ? <ul>{dossier.data.dossier!.sections[key].map((item, index) => <li key={`${key}-${index}`}>{item}</li>)}</ul>
-                      : <p className="form-hint">（暂无）</p>}
-                  </section>
-                ))}
-              </div>
-            </>
-          ) : selected && !dossier.isLoading ? (
-            <div className="dossier-empty">
-              <p>这个项目还没有档案。点“重新编译”会读取项目结构、任务记录和约定文件，生成第一份档案。</p>
-              <button type="button" className="button primary" onClick={() => compile.mutate()}>生成档案</button>
-            </div>
-          ) : dossier.isLoading ? <p className="form-hint"><Loader2 className="spin" size={15} /> 正在读取档案…</p> : null}
-        </div>
-      ) : (
-        <WorkstyleEditor />
       )}
-    </section>
+      {!projects.data?.projects.length && <p className="empty-state">还没有注册项目。在左侧边栏点击“新建项目”，添加一个本地文件夹。</p>}
+      {compile.error && <p className="form-error">{compile.error.message}</p>}
+      {dossier.data?.dossier ? (
+        <>
+          <p className="dossier-meta">
+            编译于 {relativeTime(dossier.data.dossier.generatedAt)} · {dossier.data.dossier.projectPath}
+          </p>
+          <div className="dossier-sections">
+            {SECTION_LABELS.map(([key, label]) => {
+              const items = dossier.data!.dossier!.sections[key];
+              return (
+                <section className="dossier-section" key={key}>
+                  <h3>{label}</h3>
+                  {items.length > 0
+                    ? <ul>{items.map((item, index) => <li key={`${key}-${index}`}>{item}</li>)}</ul>
+                    : <p className="form-hint">（暂无）</p>}
+                </section>
+              );
+            })}
+          </div>
+        </>
+      ) : selected && !dossier.isLoading ? (
+        <div className="dossier-empty">
+          <p>这个项目还没有档案。点“重新编译”会读取项目结构、任务记录和约定文件，生成第一份档案。</p>
+          <button type="button" className="button primary" onClick={() => compile.mutate()}>生成档案</button>
+        </div>
+      ) : dossier.isLoading ? <p className="form-hint"><Loader2 className="spin" size={15} /> 正在读取档案…</p> : null}
+    </div>
   );
 }
 
