@@ -47,7 +47,6 @@ Hearth supports OpenAI Chat Completions, OpenAI Responses, Anthropic Messages, a
 | `write_spreadsheet`, `write_document` | Create XLSX/CSV and DOCX office files | Approved destinations only, with file-action approval |
 | `shell` | Run necessary checks | Workspace tasks only; full output is retained in task logs while only the tail is returned; timeout kills the process tree |
 | `fetch_url`, `web_search` | Fetch pages or search through Tavily/SearXNG | Network is off by default; research tasks receive an explicit public-network grant; fetches still require approval and check redirects, DNS, and private addresses |
-| `load_skill`, `read_skill_resource` | Load adopted skills and resources on demand | Prompts receive only an index; loading verifies content hash and task permissions; resource paths cannot leave the skill package |
 | `delegate_task` | Bounded read-only or isolated-write delegation | Fresh context, one layer, serial, at most two per task, no automatic merge |
 | `mcp__<serverId>__<toolName>` | Call a local stdio MCP tool | Only enabled, successfully probed servers; schema validation, bounded results, secret redaction, and per-call approval |
 | `ask_user` | Pause when critical information is missing | Enters `waiting_input` instead of guessing |
@@ -63,9 +62,7 @@ Compaction starts only at complete turn boundaries and never separates an assist
 
 Only 429, 5xx, and network failures receive two transient retries. 4xx, cancellation, and permission rejection are not retried. Context-overflow failures force compaction before retrying. Repeated tool calls with the same name and arguments are warned once and fail after the threshold instead of looping.
 
-## Skills, projects, and worktrees
-
-Adopted skills normally enter the prompt as an index only; the body is loaded through `load_skill`. Loading verifies the content hash, records an audit result, and checks task permission. A skill supplies method only and cannot expand paths, network, tools, or approval requirements. `read_skill_resource` is limited to declared relative resources inside the skill package.
+## Projects and worktrees
 
 A local project must be a Git root with an existing branch. Project tasks default to `native` and `workspace`, create an isolated worktree on `hearth/<task-id>`, and reuse it on resume. Branches and worktrees survive both success and failure and are removed only after an explicit user request and a clean-workspace check; dirty worktrees are refused. GitHub tasks continue to default to Codex and are never silently switched.
 
@@ -89,7 +86,7 @@ This assessment is based on public capabilities and code maturity, not a shared 
 
 | Dimension | Hearth native | Pi | DeerFlow | OpenCode |
 |---|---|---|---|---|
-| General coding surface | glob/grep, atomic edits, shell, office files, search, skills, subagents, local MCP, and worktrees | Mature core file tools and compact coding loop | More complete long-task middleware, sandbox, subagents, skills, memory, and lazy tools | Broadest public surface: rule-based tools, editing, shell, skills, subagents, MCP, compaction, and worktrees |
+| General coding surface | glob/grep, atomic edits, shell, office files, search, subagents, local MCP, and worktrees | Mature core file tools and compact coding loop | More complete long-task middleware, sandbox, subagents, memory, and lazy tools | Broadest public surface: rule-based tools, editing, shell, subagents, MCP, compaction, and worktrees |
 | Long-horizon orchestration | Budgets, checkpoints, recovery, goal acceptance, and approval governance | Primarily a compact loop | Stronger long-horizon orchestration | Strong execution, but not Hearth's task-ledger control model |
 | Context management | Token-window triggers, complete-turn compaction, summary fallback, checkpoint after compaction | Session tree and compaction | Complete context middleware | Mature compaction |
 | Delegation | One layer, serial, at most two, read-only or isolated write, no auto-merge | Not a first-version focus | Stronger subagents and staged orchestration | More mature and broader subagents |
@@ -97,7 +94,7 @@ This assessment is based on public capabilities and code maturity, not a shared 
 | Projects and worktrees | Local Git registry, isolated worktrees, manual cleanup | More focused on the compact coding loop | Stronger sandbox and orchestration | Most complete worktree coverage |
 | Control and evidence | Strongest approval, effect records, checkpoints, recovery, output verification, and task governance | Lighter control plane | Different governance model | Lighter control plane |
 
-The fair conclusion is: OpenCode has the most complete general execution surface, DeerFlow is stronger for long-horizon orchestration, and Pi is more mature within its compact coding scope. Hearth native has the strongest control plane and has closed enough of the execution gap for multi-file coding, research and office work, skill reuse, bounded delegation, local MCP, and local project worktrees, but remains behind on LSP, formatters, remote MCP, browser automation, visual understanding, and automatic merging.
+The fair conclusion is: OpenCode has the most complete general execution surface, DeerFlow is stronger for long-horizon orchestration, and Pi is more mature within its compact coding scope. Hearth native has the strongest control plane and has closed enough of the execution gap for multi-file coding, research and office work, bounded delegation, local MCP, and local project worktrees, but remains behind on LSP, formatters, remote MCP, browser automation, visual understanding, and automatic merging.
 
 ## Budgets, checkpoints, and recovery
 

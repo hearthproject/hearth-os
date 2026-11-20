@@ -3,7 +3,7 @@ layout: home
 hero:
   name: Hearth OS
   text: 把数字劳动变成可靠的任务
-  tagline: 单用户、自托管、长期驻留的个人 Agent OS。聊天优先地发起任务，交给七个执行器，在审批与回执约束下完成真实工作。
+  tagline: 单用户、自托管、长期驻留的个人 Agent OS。聊天优先地发起任务，交给三个内置执行器，在审批与回执约束下完成真实工作。
   image:
     src: /hero.svg
     alt: Hearth OS 任务系统

@@ -32,7 +32,7 @@ Hearth uses one path for every piece of work: an entrance receives the request, 
 | Executors and routing | Choosing the right capability, risk level, cost, and device | Expanding its own authority or bypassing approval |
 | Approval and external effects | Preview, authorization, idempotent execution, receipts, reconciliation, and takeover | Deciding whether the task is worth doing |
 | Runtime and safety | Workspaces, isolation, network, credentials, sensitive data, and device boundaries | Replacing product-level risk judgment |
-| Memory and evolution | Correctable context and reusable methods, promoted only after evaluation | Becoming the source of truth or self-expanding |
+| Memory | Correctable context with provenance, sensitivity, and forgetting rules | Becoming the source of truth or self-expanding |
 | Evaluation and cost | Real tasks, verifiers, baselines, and cost metrics | Replacing acceptance with a demo |
 
 Every fact is recorded first. Interfaces, notifications, and reports are rebuilt from that record. The early system uses one process, one writer, and a local database; it does not split into microservices for scale that does not exist yet. Work survives restarts, sleep, and network loss. One effective executor advances a work unit at a time, and late results cannot overwrite newer state.

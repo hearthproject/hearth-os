@@ -1,40 +1,31 @@
 ---
-title: 'Multi-device and Long-running Operation'
-description: 'How Hearth keeps tasks, authority, and data consistent across devices over time and handles backup, recovery, revocation, and upgrades.'
+title: 'Data, Backup, and Operations'
+description: 'How Hearth handles backup, restore, maintenance, diagnostics, and the global kill switch locally, and what each action does not cover.'
 outline: false
 ---
 
-# Multi-device and Long-running Operation
+# Data, Backup, and Operations
 
-<p class="lead">Multi-device does not mean opening the same web page in several places. It means letting a computer, phone, and other trusted devices work with one logical assistant while handling offline use, synchronization, revocation, backup, and long-term state drift.</p>
+<p class="lead">Hearth is a single-machine control plane: tasks, authority, and data stay local, with no assumption that a remote node or second device keeps state for you. The goal of operations is not more features, but the ability to see clearly, roll back, and stop.</p>
 
-## Design Goals
+## Design goals
 
-Users should see the same tasks, approvals, and artifacts on different devices and continue from where they stopped when switching devices. Devices can have different capabilities: a phone is better for approvals and takeover, a desktop can operate local software, and a home server can stay online. The system cannot assume every device is equal.
+Users should know where data lives, which actions modify it, and which actions only stop external effects. Backup, restore, maintenance, and diagnostics are four separate entries; stopping must not be disguised as deleting, and a database backup must not be described as a full migration.
 
-The connection runtime separates transport, subscription, data freshness, and execution ownership. Each device and user has an owner connection; reconnect advances the generation and rejects old-generation writes. Offline actions enter only the connection outbox, while cached projections expose `cached`, `asOf`, and cursor values so they cannot masquerade as live data. A remote action that disconnects becomes uncertain and requires explicit reconciliation. Real remote nodes, phone reconnect, and cross-node outbox reconciliation are still unaccepted, so a code loop is not a completed multi-device delivery.
+Long-running operation is about resources, not merely "it did not crash". Memory, disk, caches, logs, background tasks, and temporary files need limits and cleanup rules. Health checks, alerts, upgrades, and rollback cover the service, database, and desktop agent.
 
-Offline is a normal state. A disconnected device can still inspect existing tasks, record actions, and queue pending actions. When it reconnects, actions are submitted in order. A conflict preserves both sources and asks for confirmation; it is never silently overwritten. When a device is lost or revoked, other devices stop sending it sensitive data and withdraw capability and keys as soon as possible.
+## Trade-offs
 
-Long-running operation is about resources, not merely "it did not crash". Memory, disk, caches, logs, background tasks, connections, and temporary files need limits and cleanup rules. Health checks, anomaly alerts, upgrades, and rollback cover the service, database, device agents, and external connections.
-
-Backup, recovery, and migration must be tested on real data. Users can export tasks, artifacts, memory, and necessary configuration, restore them on another device, and confirm that sensitive data, authority, and deletion state remain correct. Version upgrades keep old data readable, and a failed migration can roll back.
-
-## Design Tradeoffs
-
-Hearth keeps one logical authoritative state while devices hold local projections and necessary offline queues. The user experiences one assistant, not several robots that disagree. Sync uses versions and deletion markers so an old device cannot resurrect content that was deleted.
-
-| Scenario | Hearth's handling | What must not happen |
+| Capability | What it does | What it does not do |
 |---|---|---|
-| Switching devices | Rebuild tasks and artifacts from the shared record and keep the last position | Treating one device's temporary interface state as fact |
-| Offline action | Queue locally, submit in order after reconnect, and validate versions | Silently choosing one side of a conflict |
-| Device revocation | Withdraw capability, stop sync, rotate keys, and clear sensitive copies | Assuming a lost device will leave on its own |
-| Backup and restore | Export with encryption and verify tasks, artifacts, memory, and authority | Backing up only the database while ignoring files and configuration |
-| Version upgrade | Back up before migration and verify and support rollback afterward | Changing data structures when rollback is impossible |
-| Long-running operation | Resource limits, health checks, cleanup, and anomaly alerts | Using "just restart it" to hide a leak or persistent drift |
+| Encrypted backup | Derives a key from a passphrase and packs SQLite plus necessary metadata | Does not include artifact bodies, workspaces, source bodies, or external attachments |
+| Restore | Runs schema, integrity, and projection checks in a temporary database; rolls back on failure | Does not undo external effects already released |
+| Maintenance | Clears expired approvals, leases, desktop commands, screenshots, pairings, and temporary files | Does not delete tasks, memory, or artifacts |
+| Diagnostics | Exports a redacted health snapshot and counts | Does not include keys, absolute paths, or environment secrets |
+| Global stop | Immediately halts the scheduler, pending approvals, and desktop sessions | Does not delete data; executors still need a manual start afterward |
 
-Devices are capability and trust boundaries, not just login terminals. Pairing declares what a device can do, which data it can access, and whether local confirmation is required. High-risk capability is available only on explicitly authorized devices. Tasks can queue while a device is offline, but work involving a real-time external action pauses or asks for help.
+Keep backup archives and passphrases apart. A forgotten passphrase makes the archive unrecoverable. Restore warns that current data will be replaced and asks for confirmation. Executors stay stopped after restore so old tasks cannot replay against the new data.
 
-Long-running tests last for weeks and observe memory, disk, task state, sync delay, permission drift, and external connections. If authority expands, state fails to converge, deleted content reappears, or external effects repeat, release stops and returns to the last stable version instead of adding more features.
+## Entry points
 
-The v1.0 standard is that a user can install, use, back up, migrate, and leave independently. The system does not need to cover every enterprise scenario, but a personal user must know where data lives, which devices are still valid, how to revoke authority, how to recover failed work, and how to continue without depending on the developers.
+Everything lives under **Settings → Data**: directory layout, SQLite settings tables, migration records, trash, encrypted backup, restore, maintenance, redacted diagnostics, and the global kill switch. Health, task counts, and disk usage are summarized there; there are no standalone operations or security pages.

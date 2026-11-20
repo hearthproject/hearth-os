@@ -3,7 +3,7 @@ layout: home
 hero:
   name: Hearth OS
   text: Turn digital labor into reliable tasks
-  tagline: A single-user, self-hosted, long-running personal Agent OS. Start from chat, hand work to seven executors, and finish real tasks under approvals and verifiable receipts.
+  tagline: A single-user, self-hosted, long-running personal Agent OS. Start from chat, hand work to three built-in executors, and finish real tasks under approvals and verifiable receipts.
   image:
     src: /hero.svg
     alt: Hearth OS task system
