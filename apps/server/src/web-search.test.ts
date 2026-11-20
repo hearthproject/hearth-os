@@ -30,7 +30,7 @@ describe("web search settings", () => {
   });
 
   it("serves masked settings through the local API", async () => {
-    const app = await buildServer({ store, serveWeb: false, syncSecretBox: secretBox });
+    const app = await buildServer({ store, serveWeb: false, secretBox: secretBox });
     const initial = await app.inject({ method: "GET", url: "/api/web-search/settings" });
     expect(initial.statusCode).toBe(200);
     expect(initial.json().enabled).toBe(false);

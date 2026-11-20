@@ -87,8 +87,6 @@ import type {
   SourceKind,
   SourceStatus,
   StatsSnapshot,
-  SyncConflict,
-  SyncPeer,
   TaskDeliverable,
   TaskFollowUpMode,
   TaskFollowUpRecord,
@@ -222,8 +220,6 @@ export type {
   SourceKind,
   SourceStatus,
   StatsSnapshot,
-  SyncConflict,
-  SyncPeer,
   TaskDeliverable,
   TaskFollowUpMode,
   TaskFollowUpRecord,
@@ -415,34 +411,6 @@ export interface BackupRestoreResult {
   masterKeyRestored: boolean;
   warnings: string[];
   schedulerStopped: boolean;
-}
-
-export type SyncPeerView = Omit<SyncPeer, "tokenHash">;
-
-export interface SyncSnapshot {
-  instanceId: string;
-  latestSeq: number;
-  peers: SyncPeerView[];
-  conflicts: SyncConflict[];
-}
-
-export interface CreateSyncPeerRequest {
-  name: string;
-  baseUrl: string;
-  token?: string;
-  lastPullSeq?: number;
-}
-
-export interface SyncPeerResult {
-  peer: SyncPeerView;
-  token: string;
-}
-
-export interface SyncPullResult {
-  imported: number;
-  skipped: number;
-  conflicts: number;
-  peer: SyncPeerView;
 }
 
 export interface SecurityState {

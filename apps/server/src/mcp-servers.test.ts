@@ -112,7 +112,7 @@ describe("local MCP server management", () => {
   }, 15_000);
 
   it("exposes create, list, probe and delete over the local API", async () => {
-    const app = await buildServer({ store, syncSecretBox: secretBox, serveWeb: false });
+    const app = await buildServer({ store, secretBox, serveWeb: false });
     try {
       const created = await app.inject({
         method: "POST",

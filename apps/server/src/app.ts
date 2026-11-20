@@ -48,7 +48,6 @@ import { OnboardingService } from "./onboarding.ts";
 import { FeishuError, FeishuService, type FeishuChatClient, type FeishuTransportFactory } from "./feishu.ts";
 import { EmailService, MailError, type MailImapFactory, type MailSmtpFactory } from "./email.ts";
 import { DesktopError, DesktopService } from "./desktop.ts";
-import { ConnectionError, ConnectionService } from "./connections.ts";
 import { MemoryError, MemoryService } from "./memory.ts";
 import { ProjectError, ProjectService } from "./projects.ts";
 import { TaskWorktreeService, WorktreeError } from "./worktrees.ts";
@@ -63,7 +62,6 @@ import { WebSearchError, WebSearchService } from "./web-search.ts";
 import { isBackgroundToolReadOnly, requiresToolApproval, toolApprovalSummary } from "./tool-policy.ts";
 import { createBuiltinTools } from "@hearth/agent-runtime";
 import { StandingIntentError, StandingIntentService } from "./standing-intents.ts";
-import { SyncError, SyncService } from "./sync.ts";
 import { SecretBox } from "./secrets.ts";
 import { KnowledgeRecallService } from "./knowledge/recall.ts";
 import { KnowledgeClient } from "./knowledge/client.ts";
@@ -437,54 +435,6 @@ const trashSelectionSchema = z.object({
   }).strict()).min(1).max(200)
 }).strict();
 
-const createSyncPeerSchema = z.object({
-  name: z.string().trim().min(1).max(120),
-  baseUrl: z.string().trim().url().max(2000),
-  token: z.string().trim().min(32).max(256).optional(),
-  lastPullSeq: z.number().int().min(0).optional()
-}).strict();
-
-const syncExportSchema = z.object({
-  after: z.coerce.number().int().min(0).default(0),
-  limit: z.coerce.number().int().min(1).max(500).default(200)
-});
-
-const syncConflictResolveSchema = z.object({ resolution: z.enum(["local", "remote"]) }).strict();
-
-const connectionScopeSchema = z.string().trim().min(1).max(80).regex(/^[a-zA-Z0-9*._:-]+$/);
-const createConnectionSchema = z.object({
-  deviceId: z.string().trim().min(1).max(120),
-  userId: z.string().trim().min(1).max(120),
-  scopes: z.array(connectionScopeSchema).max(20).optional()
-}).strict();
-const connectionGenerationSchema = z.object({ generation: z.number().int().min(1) }).strict();
-const disconnectConnectionSchema = z.object({
-  generation: z.number().int().min(1),
-  reason: z.string().trim().max(500).optional()
-}).strict();
-const reconnectConnectionSchema = z.object({
-  generation: z.number().int().min(1),
-  scopes: z.array(connectionScopeSchema).max(20).optional()
-}).strict();
-const connectionProjectionQuerySchema = z.object({
-  scope: z.string().trim().max(80).default("all"),
-  generation: z.coerce.number().int().min(1).optional()
-}).strict();
-const connectionOutboxSchema = z.object({
-  generation: z.number().int().min(1),
-  scope: z.string().trim().min(1).max(80),
-  kind: z.string().trim().min(1).max(80),
-  idempotencyKey: z.string().trim().min(8).max(200),
-  payload: z.record(z.string(), z.unknown()).default({})
-}).strict();
-const connectionOutboxResolveSchema = z.object({
-  generation: z.number().int().min(1),
-  status: z.enum(["committed", "rejected", "conflict"]),
-  result: z.record(z.string(), z.unknown()).optional(),
-  error: z.string().trim().max(2000).optional()
-}).strict();
-const connectionScopesSchema = z.object({ scopes: z.array(connectionScopeSchema).min(1).max(20) }).strict();
-
 const killSwitchSchema = z.object({
   enabled: z.boolean(),
   reason: z.string().trim().max(500).optional()
@@ -787,10 +737,8 @@ export interface BuildServerOptions {
   masterKeyPath?: string;
   dataDir?: string;
   dbPath?: string;
-  syncFetch?: typeof fetch;
-  syncSecretBox?: SecretBox;
-  modelSettingsPath?: string;
-  attachmentRoot?: string;
+  secretBox?: SecretBox;
+  modelSettingsPath?: string;  attachmentRoot?: string;
   executorSettingsPath?: string;
   contextBlobRoot?: string;
   contextIndex?: ContextIndex;
@@ -816,7 +764,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     if (context.settings().mode !== "off") context.recordChatMessage(message);
   });
 
-  const secretBox = options.syncSecretBox ?? SecretBox.fromKeyFile(options.masterKeyPath ?? MASTER_KEY_PATH);
+  const secretBox = options.secretBox ?? SecretBox.fromKeyFile(options.masterKeyPath ?? MASTER_KEY_PATH);
   const knowledgeSettings = new KnowledgeSettingsStore(store, secretBox);
   const knowledgeManaged = new KnowledgeManagedService({ settings: knowledgeSettings });
   const knowledge = new KnowledgeRecallService({ store, settings: knowledgeSettings, managed: knowledgeManaged });
@@ -870,11 +818,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const intake = new IntakeRouter(service);
   const memory = new MemoryService(service);
   const projects = new ProjectService(store);
-  const sync = new SyncService(service, {
-    ...(options.syncFetch ? { fetchImpl: options.syncFetch } : {}),
-    ...(options.syncSecretBox ? { secretBox: options.syncSecretBox } : {})
-  });
-  const connections = new ConnectionService({ service });
   const security = new SecurityService(service);
   const leases = new TaskLeaseService(service);
   const sandbox = new SandboxService();
@@ -1157,8 +1100,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
 
   app.addHook("onRequest", async (request, reply) => {
-    const inboundSync = request.url.startsWith("/api/sync/events");
-    if (!LOOPBACK_HOSTS.has(request.hostname) && !inboundSync) {
+    if (!LOOPBACK_HOSTS.has(request.hostname)) {
       return reply.code(403).send({ error: "LOCAL_ONLY", message: "Hearth 仅接受本机访问" });
     }
     const desktopShellNavigation =
@@ -2368,176 +2310,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
   });
 
-  app.get("/api/sync", async (_request, reply) => {
-    reply.header("cache-control", "no-store");
-    return sync.snapshot();
-  });
-
-  app.post("/api/sync/peers", async (request, reply) => {
-    const parsed = createSyncPeerSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SYNC_PEER", message: "同步对端参数不正确" });
-    try {
-      return reply.code(201).send(sync.createPeer(definedObject(parsed.data) as unknown as Parameters<SyncService["createPeer"]>[0]));
-    } catch (error) {
-      return sendSyncError(reply, error);
-    }
-  });
-
-  app.post<{ Params: { id: string } }>("/api/sync/peers/:id/pull", async (request, reply) => {
-    try {
-      return await sync.pull(request.params.id);
-    } catch (error) {
-      return sendSyncError(reply, error);
-    }
-  });
-
-  app.post<{ Params: { id: string } }>("/api/sync/peers/:id/rotate", async (request, reply) => {
-    try {
-      return sync.rotatePeerToken(request.params.id);
-    } catch (error) {
-      return sendSyncError(reply, error);
-    }
-  });
-
-  app.post<{ Params: { id: string } }>("/api/sync/peers/:id/revoke", async (request, reply) => {
-    try {
-      return sync.revokePeer(request.params.id);
-    } catch (error) {
-      return sendSyncError(reply, error);
-    }
-  });
-
-  app.post<{ Params: { id: string } }>("/api/sync/conflicts/:id/resolve", async (request, reply) => {
-    const parsed = syncConflictResolveSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SYNC_CONFLICT", message: "同步冲突处理参数不正确" });
-    try {
-      return sync.resolveConflict(request.params.id, parsed.data.resolution);
-    } catch (error) {
-      return sendSyncError(reply, error);
-    }
-  });
-
-  app.get<{ Querystring: Record<string, string> }>("/api/sync/events", async (request, reply) => {
-    const parsed = syncExportSchema.safeParse(request.query);
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SYNC_CURSOR", message: "同步 cursor 参数不正确" });
-    try {
-      sync.authenticateInbound(syncBearerToken(request.headers.authorization));
-      reply.header("cache-control", "no-store");
-      return sync.exportEvents(parsed.data.after, parsed.data.limit);
-    } catch (error) {
-      return sendSyncError(reply, error);
-    }
-  });
-
-  app.post("/api/connections", async (request, reply) => {
-    const parsed = createConnectionSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_CONNECTION", message: "连接参数不正确" });
-    try {
-      return reply.code(201).send(connections.connect(parsed.data));
-    } catch (error) {
-      return sendConnectionError(reply, error);
-    }
-  });
-
-  app.get<{ Params: { id: string } }>("/api/connections/:id/status", async (request, reply) => {
-    try {
-      reply.header("cache-control", "no-store");
-      return connections.status(request.params.id);
-    } catch (error) {
-      return sendConnectionError(reply, error);
-    }
-  });
-
-  app.post<{ Params: { id: string } }>("/api/connections/:id/heartbeat", async (request, reply) => {
-    const parsed = connectionGenerationSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_CONNECTION_GENERATION", message: "缺少有效的连接代次" });
-    try {
-      return connections.heartbeat(request.params.id, parsed.data.generation);
-    } catch (error) {
-      return sendConnectionError(reply, error);
-    }
-  });
-
-  app.post<{ Params: { id: string } }>("/api/connections/:id/disconnect", async (request, reply) => {
-    const parsed = disconnectConnectionSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_CONNECTION_GENERATION", message: "断开连接需要有效的连接代次" });
-    try {
-      return connections.disconnect(request.params.id, parsed.data.generation, parsed.data.reason);
-    } catch (error) {
-      return sendConnectionError(reply, error);
-    }
-  });
-
-  app.post<{ Params: { id: string } }>("/api/connections/:id/reconnect", async (request, reply) => {
-    const parsed = reconnectConnectionSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_CONNECTION_RECONNECT", message: "重连参数不正确" });
-    try {
-      return connections.reconnect(request.params.id, parsed.data);
-    } catch (error) {
-      return sendConnectionError(reply, error);
-    }
-  });
-
-  app.get<{ Params: { id: string }; Querystring: Record<string, string> }>("/api/connections/:id/projection", async (request, reply) => {
-    const parsed = connectionProjectionQuerySchema.safeParse(request.query);
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_PROJECTION", message: "离线投影参数不正确" });
-    try {
-      reply.header("cache-control", "no-store");
-      return connections.projection(request.params.id, parsed.data.scope, parsed.data.generation);
-    } catch (error) {
-      return sendConnectionError(reply, error);
-    }
-  });
-
-  app.get<{ Params: { id: string } }>("/api/connections/:id/outbox", async (request, reply) => {
-    try {
-      reply.header("cache-control", "no-store");
-      return { items: connections.listOutbox(request.params.id) };
-    } catch (error) {
-      return sendConnectionError(reply, error);
-    }
-  });
-
-  app.post<{ Params: { id: string } }>("/api/connections/:id/outbox", async (request, reply) => {
-    const parsed = connectionOutboxSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_CONNECTION_OUTBOX", message: "离线操作参数不正确" });
-    try {
-      return reply.code(201).send(connections.enqueue(request.params.id, parsed.data));
-    } catch (error) {
-      return sendConnectionError(reply, error);
-    }
-  });
-
-  app.post<{ Params: { id: string; itemId: string } }>("/api/connections/:id/outbox/:itemId/submit", async (request, reply) => {
-    const parsed = connectionGenerationSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_CONNECTION_GENERATION", message: "提交离线操作需要有效的连接代次" });
-    try {
-      return connections.submit(request.params.id, request.params.itemId, parsed.data.generation);
-    } catch (error) {
-      return sendConnectionError(reply, error);
-    }
-  });
-
-  app.post<{ Params: { id: string; itemId: string } }>("/api/connections/:id/outbox/:itemId/resolve", async (request, reply) => {
-    const parsed = connectionOutboxResolveSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_OUTBOX_RESOLUTION", message: "对账参数不正确" });
-    try {
-      return connections.resolveOutbox(request.params.id, request.params.itemId, parsed.data);
-    } catch (error) {
-      return sendConnectionError(reply, error);
-    }
-  });
-
-  app.post<{ Params: { id: string } }>("/api/connections/:id/scopes", async (request, reply) => {
-    const parsed = connectionScopesSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_CONNECTION_SCOPES", message: "能力扩权参数不正确" });
-    try {
-      return connections.approveScopes(request.params.id, parsed.data.scopes);
-    } catch (error) {
-      return sendConnectionError(reply, error);
-    }
-  });
-
   app.get("/api/templates", async () => ({ templates: service.listTemplates() }));
 
   app.get("/api/sources", async () => ({ sources: sources.list() }));
@@ -2915,7 +2687,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
     if (schedulerWasRunning) await scheduler?.stop();
     try {
       const result = operation();
-      sync.reloadSecrets();
       security.record(
         "backup.restored",
         null,
@@ -3896,19 +3667,6 @@ function sendWorktreeError(reply: FastifyReply, error: unknown) {
   throw error;
 }
 
-function sendSyncError(reply: FastifyReply, error: unknown) {
-  if (error instanceof SyncError) {
-    return reply.code(error.statusCode).send({ error: error.code, message: error.message });
-  }
-  throw error;
-}
-
-function syncBearerToken(value: string | string[] | undefined): string {
-  const header = headerValue(value);
-  if (!header.startsWith("Bearer ")) throw new SyncError("SYNC_UNAUTHORIZED", "缺少同步令牌", 401);
-  return header.slice(7).trim();
-}
-
 function sendStandingIntentError(reply: FastifyReply, error: unknown) {
   if (error instanceof StandingIntentError) {
     return reply.code(error.statusCode).send({ error: error.code, message: error.message });
@@ -3918,13 +3676,6 @@ function sendStandingIntentError(reply: FastifyReply, error: unknown) {
 
 function sendProactiveError(reply: FastifyReply, error: unknown) {
   if (error instanceof ProactiveError) {
-    return reply.code(error.statusCode).send({ error: error.code, message: error.message });
-  }
-  throw error;
-}
-
-function sendConnectionError(reply: FastifyReply, error: unknown) {
-  if (error instanceof ConnectionError) {
     return reply.code(error.statusCode).send({ error: error.code, message: error.message });
   }
   throw error;
