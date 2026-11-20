@@ -118,7 +118,10 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
         "shell_kill",
         "memory_read",
         "memory_write",
-        "memory_search"
+        "memory_search",
+        "get_goal",
+        "create_goal",
+        "update_goal"
       ])
     ];
   }

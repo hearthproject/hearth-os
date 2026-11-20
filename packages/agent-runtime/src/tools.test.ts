@@ -333,6 +333,23 @@ describe("builtin tools", () => {
     await expect(mapTools().read_file!.execute({ path: "out/real.txt" }, context)).rejects.toThrow(/是否想找.*real.md/);
   });
 
+  it("persists and updates a long-running goal", async () => {
+    const root = workspace(roots);
+    const out = join(root, "out");
+    mkdirSync(out, { recursive: true });
+    const context = contextFor(root, out);
+    context.permissions = { ...context.permissions, writeRoots: [root] };
+    const tools = mapTools();
+    const created = await tools.create_goal!.execute({ title: "Ship P2", objective: "Add durable memory", successCriteria: ["Tests pass"] }, context);
+    expect(created.content).toContain("status: active");
+    const read = await tools.get_goal!.execute({}, context);
+    expect(read.content).toContain("Ship P2");
+    await tools.update_goal!.execute({ status: "completed", note: "vitest passed" }, context);
+    const updated = await tools.get_goal!.execute({}, context);
+    expect(updated.content).toContain("status: completed");
+    expect(updated.content).toContain("vitest passed");
+  });
+
   it("writes, reads and searches repository memory", async () => {
     const root = workspace(roots);
     const out = join(root, "out");

@@ -11,6 +11,7 @@ import { fetchWebSnapshot } from "./web-fetch.ts";
 import { applyEdit, findEditMatch, normalizeFile, restoreFile } from "./harness/edit-match.ts";
 import { omissionPlaceholderError } from "./harness/omission.ts";
 import { createMemoryTools } from "./harness/memory.ts";
+import { createGoalTools } from "./harness/goal.ts";
 import { searchFiles } from "./harness/search.ts";
 import { fileReadState, hashContent, rangesCover, recordCommand, recordFileModified, recordFileRead, requireReadBeforeWrite } from "./harness/file-state.ts";
 import { rewindTool, snapshotBeforeMutation } from "./harness/snapshots.ts";
@@ -35,7 +36,7 @@ const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", "coverage", 
 
 //模型能使用的工具和实现
 export function createBuiltinTools(): AgentTool[] {
-  return [readFileTool, readDocumentTool, listFilesTool, searchTextTool, globTool, grepTool, writeFileTool, writeSpreadsheetTool, writeDocumentTool, editFileTool, applyPatchTool, shellTool, shellOutputTool, shellWaitTool, shellKillTool, todoWriteTool, todoReadTool, runTestsTool, diagnosticsTool, submitPlanTool, rewindTool, captureScreenTool, fetchUrlTool, askUserTool, finishTaskTool, ...createMemoryTools()];
+  return [readFileTool, readDocumentTool, listFilesTool, searchTextTool, globTool, grepTool, writeFileTool, writeSpreadsheetTool, writeDocumentTool, editFileTool, applyPatchTool, shellTool, shellOutputTool, shellWaitTool, shellKillTool, todoWriteTool, todoReadTool, runTestsTool, diagnosticsTool, submitPlanTool, rewindTool, captureScreenTool, fetchUrlTool, askUserTool, finishTaskTool, ...createMemoryTools(), ...createGoalTools()];
 }
 
 export function defaultTaskPermissions(options: {
