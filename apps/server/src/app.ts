@@ -52,6 +52,7 @@ import { DesktopError, DesktopService } from "./desktop.ts";
 import { MemoryError, MemoryService } from "./memory.ts";
 import { ProjectError, ProjectService } from "./projects.ts";
 import { DossierError, DossierStore } from "./dossier.ts";
+import { computeDogfood } from "./dogfood.ts";
 import { SupervisionService } from "./supervision.ts";
 import { verifyFirstTask } from "./onboarding-verify.ts";
 import { WorkstyleError, WorkstyleStore } from "./workstyle.ts";
@@ -1021,6 +1022,14 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
 
   app.get("/api/supervision", async () => supervision.tick(store.listTasks()));
+
+  app.get<{ Querystring: { days?: string; projectId?: string } }>("/api/dogfood", async (request, reply) => {
+    const days = Number(request.query.days ?? "7");
+    if (!Number.isFinite(days) || days < 1 || days > 90) {
+      return reply.code(400).send({ error: "INVALID_DOGFOOD_WINDOW", message: "统计窗口需要在 1 到 90 天之间。" });
+    }
+    return computeDogfood(store, { days, projectId: request.query.projectId ?? null });
+  });
 
   app.post<{ Params: { id: string } }>("/api/supervision/:id", async (request, reply) => {
     const parsed = z.object({

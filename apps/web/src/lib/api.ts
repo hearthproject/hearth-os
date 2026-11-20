@@ -71,6 +71,7 @@ import type {
   OnboardingVerificationView,
   SettingsStorageResponse,
   SupervisionSnapshotView,
+  DogfoodReportView,
   OutboxDraft,
   OutboxDraftListItem,
   OutboxDraftRequest,
@@ -334,6 +335,7 @@ export const api = {
   verifyOnboarding: () =>
     request<{ verification: OnboardingVerificationView; onboarding: OnboardingSnapshot }>("/api/onboarding/verify", { method: "POST" }),
   supervision: () => request<SupervisionSnapshotView>("/api/supervision"),
+  dogfood: (days = 7) => request<DogfoodReportView>(`/api/dogfood?days=${days}`),
   supervisionAction: (id: string, action: "read" | "dismiss" | "snooze", hours?: number) =>
     request<SupervisionSnapshotView>(`/api/supervision/${encodeURIComponent(id)}`, {
       method: "POST",

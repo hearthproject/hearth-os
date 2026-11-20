@@ -20,6 +20,7 @@ export function RuntimePage() {
   const queryClient = useQueryClient();
   const [notice, setNotice] = useState<Notice | null>(null);
   const toolsQuery = useQuery({ queryKey: ["background-tools"], queryFn: () => api.backgroundTools({ limit: 100 }), refetchInterval: 10_000 });
+  const dogfoodQuery = useQuery({ queryKey: ["dogfood", 7], queryFn: () => api.dogfood(7), refetchInterval: 60_000 });
 
   const refreshRuntime = () => {
     void queryClient.invalidateQueries({ queryKey: ["background-tools"] });
@@ -84,6 +85,23 @@ export function RuntimePage() {
           </table>
         )}
       </section>
+
+      {dogfoodQuery.data && (
+        <section className="inbox-digest runtime-dogfood">
+          <div className="inbox-digest-head">
+            <strong>最近 {dogfoodQuery.data.windowDays} 天自用数据</strong>
+            <small>只算本机事件账本，不是公开基准</small>
+          </div>
+          <div className="inbox-digest-numbers">
+            <span><strong>{dogfoodQuery.data.totals.tasks}</strong> 任务</span>
+            <span><strong>{dogfoodQuery.data.totals.completed}</strong> 完成</span>
+            <span><strong>{dogfoodQuery.data.totals.successRate === null ? "—" : `${Math.round(dogfoodQuery.data.totals.successRate * 100)}%`}</strong> 成功率</span>
+            <span><strong>{dogfoodQuery.data.totals.firstPassRate === null ? "—" : `${Math.round(dogfoodQuery.data.totals.firstPassRate * 100)}%`}</strong> 一次通过</span>
+            <span><strong>{dogfoodQuery.data.totals.approvals}</strong> 次审批</span>
+          </div>
+          <p className="page-meta">完整报告：<span className="mono">npm run dogfood:report</span></p>
+        </section>
+      )}
     </div>
   );
 }

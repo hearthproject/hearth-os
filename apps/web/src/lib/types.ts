@@ -431,6 +431,33 @@ export interface SupervisionSnapshotView {
   generatedAt: string;
 }
 
+export interface DogfoodReportView {
+  generatedAt: string;
+  windowDays: number;
+  projectId: string | null;
+  totals: {
+    tasks: number;
+    completed: number;
+    failed: number;
+    active: number;
+    successRate: number | null;
+    firstPassRate: number | null;
+    attempts: number;
+    turns: number;
+    toolCalls: number;
+    inputTokens: number;
+    cachedInputTokens: number;
+    outputTokens: number;
+    approvals: number;
+    approved: number;
+    rejected: number;
+  };
+  friction: {
+    topErrors: Array<{ message: string; count: number }>;
+    retriedTasks: Array<{ id: string; title: string; status: string; attempts: number; firstPass: boolean; updatedAt: string }>;
+  };
+}
+
 export interface TaskContextResponse extends ContextSnapshot {}
 
 export interface TaskHandoffsResponse {

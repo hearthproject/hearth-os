@@ -39,3 +39,4 @@ eval/scenario-runs/
 # OS files
 .DS_Store
 Thumbs.db
+reports/
