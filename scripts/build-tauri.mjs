@@ -182,6 +182,15 @@ async function main() {
     && process.env.HEARTH_UPDATER_PUBKEY
     && process.env.HEARTH_UPDATER_ENDPOINT
   );
+  const tauriVersion = JSON.parse(readFileSync(join(tauriRoot, "src-tauri", "tauri.conf.json"), "utf8")).version;
+  const targetRelease = process.env.CARGO_TARGET_DIR
+    ? join(process.env.CARGO_TARGET_DIR, "release")
+    : join(tauriRoot, "src-tauri", "target", "release");
+  const stagedResources = join(targetRelease, "resources");
+  if (existsSync(stagedResources)) {
+    rmSync(stagedResources, { recursive: true, force: true });
+    console.log("cleared stale staged resources");
+  }
   const tauriArgs = ["build"];
   if (updaterReady) {
     const overlayPath = join(tauriRoot, "src-tauri", "updater.build.json");
@@ -202,14 +211,11 @@ async function main() {
 
   await run(join(repoRoot, "node_modules", ".bin", "tauri.cmd"), tauriArgs, tauriRoot);
 
-  const targetRelease = process.env.CARGO_TARGET_DIR
-    ? join(process.env.CARGO_TARGET_DIR, "release")
-    : join(tauriRoot, "src-tauri", "target", "release");
   const bundleDir = join(targetRelease, "bundle", "nsis");
   if (existsSync(bundleDir)) {
     const releaseDir = join(repoRoot, "release");
     mkdirSync(releaseDir, { recursive: true });
-    for (const name of readdirSync(bundleDir).filter((entry) => entry.endsWith(".exe"))) {
+    for (const name of readdirSync(bundleDir).filter((entry) => entry === `Hearth_${tauriVersion}_x64-setup.exe`)) {
       copyFileSync(join(bundleDir, name), join(releaseDir, name));
       console.log(`installer: ${join(releaseDir, name)}`);
     }
