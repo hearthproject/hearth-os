@@ -92,10 +92,14 @@ function createDispatchTool(options: SubagentToolOptions, compatibility: boolean
           outDir: childOutDir,
           permissions: profile.isolation === "worktree" ? isolatedWritePermissions(options, childRoot, childOutDir) : readOnlyPermissions(options, profile.tools)
         });
+        const narrow = (base: number | undefined, cap: number | undefined): number | undefined =>
+          base === undefined ? cap : cap === undefined ? base : Math.min(base, cap);
         const budget = {
           ...profile.budget,
-          ...(parsed.maxTurns ? { maxTurns: Math.min(profile.budget.maxTurns, parsed.maxTurns) } : {}),
-          ...(options.budget ? { maxTokens: Math.min(profile.budget.maxTokens, options.budget.maxTokens) } : {})
+          ...(parsed.maxTurns ? { maxTurns: narrow(profile.budget.maxTurns, parsed.maxTurns) } : {}),
+          ...(options.budget?.maxTokens !== undefined
+            ? { maxTokens: narrow(profile.budget.maxTokens, options.budget.maxTokens) }
+            : {})
         };
         const result = await runner({
           task: childTask,

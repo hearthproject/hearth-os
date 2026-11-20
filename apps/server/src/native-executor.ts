@@ -1,7 +1,7 @@
 import { isTextDraftTask, DRAFT_INSTRUCTION } from "./draft-intent.ts";
 import { nativeTaskInstructions } from "./native-task-instructions.ts";
 import type { BudgetDimension, RunBudget, RunUsage, TaskPermissions, TaskProgressDetail, TaskRecord } from "@hearth/core";
-import { EXECUTION_PROFILES, NATIVE_TOKEN_CEILING } from "@hearth/core";
+import { EXECUTION_PROFILES } from "@hearth/core";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import {
@@ -52,12 +52,7 @@ import { WorkstyleStore, workstylePromptBlock } from "./workstyle.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import type { PreparedWorkspace } from "./workspace.ts";
 
-export const DEFAULT_RUN_BUDGET: RunBudget = {
-  maxTurns: 200,
-  maxToolCalls: 4_000,
-  maxTokens: NATIVE_TOKEN_CEILING,
-  maxDurationMs: 36_000_000
-};
+export const DEFAULT_RUN_BUDGET: RunBudget = {};
 
 export interface NativeRunOptions {
   task: TaskRecord;

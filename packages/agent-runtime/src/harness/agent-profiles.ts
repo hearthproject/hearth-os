@@ -1,5 +1,4 @@
 import type { RunBudget } from "@hearth/core";
-import { NATIVE_TOKEN_CEILING } from "@hearth/core";
 import type { HarnessMode } from "../types.ts";
 
 export type SubagentType = "explore" | "plan" | "review" | "general-purpose";
@@ -41,7 +40,7 @@ export const AGENT_PROFILES: Record<SubagentType, AgentProfile> = {
     tools: EXPLORE_TOOLS,
     mode: "plan",
     isolation: "readonly",
-    budget: { maxTurns: 40, maxToolCalls: 400, maxTokens: NATIVE_TOKEN_CEILING, maxDurationMs: 10 * 60_000 },
+    budget: {},
     outputContract: "Return a compact file list, key line numbers, conclusions and open questions. Do not edit."
   },
   plan: {
@@ -50,7 +49,7 @@ export const AGENT_PROFILES: Record<SubagentType, AgentProfile> = {
     tools: PLAN_TOOLS,
     mode: "plan",
     isolation: "readonly",
-    budget: { maxTurns: 40, maxToolCalls: 400, maxTokens: NATIVE_TOKEN_CEILING, maxDurationMs: 10 * 60_000 },
+    budget: {},
     outputContract: "Return ordered steps, 3-5 key files and concrete risks. Do not edit."
   },
   review: {
@@ -59,7 +58,7 @@ export const AGENT_PROFILES: Record<SubagentType, AgentProfile> = {
     tools: REVIEW_TOOLS,
     mode: "plan",
     isolation: "readonly",
-    budget: { maxTurns: 40, maxToolCalls: 400, maxTokens: NATIVE_TOKEN_CEILING, maxDurationMs: 10 * 60_000 },
+    budget: {},
     outputContract: "Return findings sorted by severity, each with file:line and a suggested fix. Do not edit."
   },
   "general-purpose": {
@@ -68,7 +67,7 @@ export const AGENT_PROFILES: Record<SubagentType, AgentProfile> = {
     tools: [],
     mode: "build",
     isolation: "worktree",
-    budget: { maxTurns: 80, maxToolCalls: 800, maxTokens: NATIVE_TOKEN_CEILING, maxDurationMs: 20 * 60_000 },
+    budget: {},
     outputContract: "Return a summary, changed files, test results and the commit SHA. Do not merge or push."
   }
 };

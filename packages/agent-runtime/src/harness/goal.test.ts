@@ -44,7 +44,7 @@ describe("persisted goal lifecycle", () => {
     expect(goalFinishIssue(root)).toBeNull();
   });
 
-  it("counts turns across runs and pauses at the safety limit", async () => {
+  it("counts turns across runs without pausing on an advisory limit", async () => {
     const root = mkdtempSync(join(tmpdir(), "hearth-goal-limit-"));
     roots.push(root);
     const context = contextFor(root, join(root, "out"));
@@ -52,11 +52,10 @@ describe("persisted goal lifecycle", () => {
     await create.execute({ title: "Long task", objective: "Keep going", maxTurns: 2 }, context);
 
     expect(recordGoalTurns(root, 1)).toMatchObject({ status: "active", turnsUsed: 1 });
-    const paused = recordGoalTurns(root, 1);
-    expect(paused).toMatchObject({ status: "paused", turnsUsed: 2 });
-    expect(paused?.note).toContain("maxTurns=2");
-    expect(readGoalByRoot(root)?.status).toBe("paused");
-    expect(goalFinishIssue(root)).toBeNull();
-    expect(goalContinuationPrompt(root)).toBeNull();
+    const continued = recordGoalTurns(root, 1);
+    expect(continued).toMatchObject({ status: "active", turnsUsed: 2 });
+    expect(readGoalByRoot(root)?.status).toBe("active");
+    expect(goalFinishIssue(root)).toContain("update_goal");
+    expect(goalContinuationPrompt(root)).toContain("Long task");
   });
 });

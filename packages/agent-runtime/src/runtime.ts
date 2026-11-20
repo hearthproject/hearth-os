@@ -64,6 +64,13 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   const emit = (event: RuntimeEvent): void => options.onEvent?.(event);
   const aborted = (): boolean => signal.aborted;
   const totalTokens = (): number => usage.inputTokens + usage.outputTokens;
+  // 预算字段缺省、非有限值或非正数都表示不设上限。
+  const limitOf = (value: number | undefined): number | null =>
+    typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+  const turnLimit = limitOf(options.budget.maxTurns);
+  const toolCallLimit = limitOf(options.budget.maxToolCalls);
+  const tokenLimit = limitOf(options.budget.maxTokens);
+  const durationLimit = limitOf(options.budget.maxDurationMs);
 
   async function compactContext(force: boolean): Promise<boolean> {
     const restoredContext = buildPostCompactContext(state, { mode: options.mode ?? state.mode ?? "build" });
@@ -191,7 +198,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     if (limit < 2 || calls.length < 2 || calls.length > limit) return null;
     const entries = calls.map((call) => ({ call, tool: toolMap.get(call.name) }));
     if (!entries.every((entry) => entry.tool?.definition.executionMode === "parallel")) return null;
-    if (toolCalls + calls.length > options.budget.maxToolCalls || aborted()) return null;
+    if ((toolCallLimit !== null && toolCalls + calls.length > toolCallLimit) || aborted()) return null;
 
     emit({ type: "tool.batch.started", turn: turns, calls, parallel: true });
     const started = Date.now();
@@ -244,8 +251,14 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     return results;
   }
 
-  while (turns < options.budget.maxTurns) {
+  while (true) {
     if (aborted()) return finish("cancelled", "任务已取消");
+
+    if (turnLimit !== null && turns >= turnLimit) {
+      emit({ type: "budget.exceeded", budget: "turns", limit: turnLimit });
+      await checkpoint("budget");
+      return finish("budget_exceeded", summary ?? "达到最大执行轮次，任务未完成");
+    }
 
     if (options.steering) {
       const pending = options.steering();
@@ -258,22 +271,22 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     }
 
     const elapsed = Date.now() - startedAt;
-    if (elapsed > options.budget.maxDurationMs) {
-      emit({ type: "budget.exceeded", budget: "duration", limit: options.budget.maxDurationMs });
+    if (durationLimit !== null && elapsed > durationLimit) {
+      emit({ type: "budget.exceeded", budget: "duration", limit: durationLimit });
       await checkpoint("budget");
       return finish("budget_exceeded", summary ?? "执行时间超过预算，已停止");
     }
-    if (totalTokens() > options.budget.maxTokens) {
-      emit({ type: "budget.exceeded", budget: "tokens", limit: options.budget.maxTokens });
+    if (tokenLimit !== null && totalTokens() > tokenLimit) {
+      emit({ type: "budget.exceeded", budget: "tokens", limit: tokenLimit });
       await checkpoint("budget");
       return finish("budget_exceeded", summary ?? "Token 用量超过预算，已停止");
     }
 
     if (!budgetReminderSent && (
-      options.budget.maxTurns - turns <= 2 ||
-      totalTokens() >= options.budget.maxTokens * 0.8 ||
-      toolCalls >= options.budget.maxToolCalls * 0.8 ||
-      elapsed >= options.budget.maxDurationMs * 0.8
+      (turnLimit !== null && turnLimit - turns <= 2) ||
+      (tokenLimit !== null && totalTokens() >= tokenLimit * 0.8) ||
+      (toolCallLimit !== null && toolCalls >= toolCallLimit * 0.8) ||
+      (durationLimit !== null && elapsed >= durationLimit * 0.8)
     )) {
       messages.push({
         role: "user",
@@ -282,8 +295,8 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       budgetReminderSent = true;
     }
     await compactContext(false);
-    if (totalTokens() >= options.budget.maxTokens) {
-      emit({ type: "budget.exceeded", budget: "tokens", limit: options.budget.maxTokens });
+    if (tokenLimit !== null && totalTokens() >= tokenLimit) {
+      emit({ type: "budget.exceeded", budget: "tokens", limit: tokenLimit });
       await checkpoint("budget");
       return finish("budget_exceeded", summary ?? "Token 用量达到预算，已停止");
     }
@@ -310,8 +323,8 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
           overflowRetried = true;
           emit({ type: "notice", message: "模型上下文超限，正在压缩历史后重试" });
           await compactContext(true);
-          if (totalTokens() >= options.budget.maxTokens) {
-            emit({ type: "budget.exceeded", budget: "tokens", limit: options.budget.maxTokens });
+          if (tokenLimit !== null && totalTokens() >= tokenLimit) {
+            emit({ type: "budget.exceeded", budget: "tokens", limit: tokenLimit });
             await checkpoint("budget");
             return finish("budget_exceeded", summary ?? "Token 用量达到预算，已停止");
           }
@@ -365,8 +378,8 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         if (results) for (const [id, value] of results) parallelResults.set(id, value);
       }
       if (aborted()) return finish("cancelled", "任务已取消");
-      if (toolCalls >= options.budget.maxToolCalls) {
-        emit({ type: "budget.exceeded", budget: "toolCalls", limit: options.budget.maxToolCalls });
+      if (toolCallLimit !== null && toolCalls >= toolCallLimit) {
+        emit({ type: "budget.exceeded", budget: "toolCalls", limit: toolCallLimit });
         await checkpoint("budget");
         return finish("budget_exceeded", summary ?? "工具调用次数超过预算，已停止");
       }
@@ -529,17 +542,13 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       }
 
       await checkpoint("tool");
-      if (totalTokens() > options.budget.maxTokens) {
-        emit({ type: "budget.exceeded", budget: "tokens", limit: options.budget.maxTokens });
+      if (tokenLimit !== null && totalTokens() > tokenLimit) {
+        emit({ type: "budget.exceeded", budget: "tokens", limit: tokenLimit });
         await checkpoint("budget");
         return finish("budget_exceeded", summary ?? "Token 用量超过预算，已停止");
       }
     }
   }
-
-  emit({ type: "budget.exceeded", budget: "turns", limit: options.budget.maxTurns });
-  await checkpoint("budget");
-  return finish("budget_exceeded", summary ?? "达到最大执行轮次，任务未完成");
 }
 
 function cloneMessages(messages: AgentMessage[]): AgentMessage[] {

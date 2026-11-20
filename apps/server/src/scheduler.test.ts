@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -69,6 +69,7 @@ describe("Hearth scheduler", () => {
     const service = setup();
     scheduler = makeScheduler(service, async () => FAKE_RESULT);
     const task = service.createTask({ title: "quick", goal: "test", executionMode: "quick" });
+    service.updateTask(task.id, { budgetOverride: { maxTurns: 12, maxToolCalls: 20, maxTokens: 600_000_000, maxDurationMs: 60_000 } });
     service.updateTask(task.id, { status: "running" });
     service.updateTask(task.id, { status: "waiting_budget" });
     expect(scheduler.extendBudget(task.id).executionMode).toBe("quick");
@@ -640,7 +641,7 @@ describe("Hearth scheduler", () => {
     const service = setup();
     const settingsPath = configureModel();
     let calls = 0;
-    const observedBudgets: Array<{ maxTurns: number; maxToolCalls: number; maxTokens: number }> = [];
+    const observedBudgets: Array<{ maxTurns: number | undefined; maxToolCalls: number | undefined; maxTokens: number | undefined }> = [];
     const resumedCounts: number[] = [];
     const nativeRunner: NativeRunner = async (options) => {
       calls += 1;
@@ -673,7 +674,7 @@ describe("Hearth scheduler", () => {
           toolCalls: 10,
           question: null,
           outputs: [],
-          budgetExhaustion: { dimension: "turns", limit: budget.maxTurns }
+          budgetExhaustion: { dimension: "turns", limit: budget.maxTurns ?? 0 }
         };
       }
       writeFileSync(join(options.prepared.outDir, "result.md"), "# 扩展后完成\n");
@@ -683,8 +684,9 @@ describe("Hearth scheduler", () => {
     scheduler.start();
 
     const task = service.createTask({ title: "长任务", goal: "完成一项长任务" });
+    service.updateTask(task.id, { budgetOverride: { maxTurns: 200, maxToolCalls: 4_000, maxTokens: 600_000_000, maxDurationMs: 36_000_000 } });
     const first = await waitForStatus(service, task.id, "waiting_budget");
-    expect(DEFAULT_RUN_BUDGET).toMatchObject({ maxTurns: 200, maxToolCalls: 4_000, maxTokens: 600_000_000, maxDurationMs: 36_000_000 });
+    expect(DEFAULT_RUN_BUDGET).toEqual({});
     expect(observedBudgets[0]).toMatchObject({ maxTurns: 200, maxToolCalls: 4_000, maxTokens: 600_000_000 });
     expect(first.error?.budgetExhaustion).toEqual({ dimension: "turns", used: 200, limit: 200 });
 
@@ -1397,6 +1399,43 @@ describe("Hearth scheduler", () => {
     });
     expect(checkpoint?.proof?.phasePrefix).toContain("tool:write_file");
     expect(checkpoint?.proof?.workspaceDigest).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("keeps only the newest checkpoint files during a long native run", async () => {
+    const service = setup();
+    const modelSettingsPath = configureModel();
+    let taskRoot = "";
+    const nativeRunner: NativeRunner = async (options) => {
+      taskRoot = options.prepared.root;
+      for (let seq = 1; seq <= 30; seq += 1) {
+        await options.onCheckpoint?.({
+          seq,
+          kind: "tool",
+          messages: [
+            { role: "system", content: "system" },
+            { role: "tool", toolCallId: `call-${seq}`, name: "read_file", content: "ok" }
+          ],
+          usage: TEST_USAGE,
+          turns: seq,
+          toolCalls: seq,
+          summary: null
+        });
+      }
+      writeFileSync(join(options.prepared.outDir, "result.md"), "# done\n");
+      return nativeResult("done");
+    };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath });
+    scheduler.start();
+
+    const task = service.createTask({ title: "长跑检查点", executorId: "native", goal: "完成长任务", expectedOutputs: ["result.md"] });
+    await waitForStatus(service, task.id, "completed");
+    const run = store?.listRuns(task.id)[0];
+    expect(run).toBeTruthy();
+    const files = readdirSync(join(taskRoot, ".hearth", "checkpoints", run!.id))
+      .filter((name) => name.endsWith(".json"));
+    expect(files).toHaveLength(20);
+    expect(files).toContain("0030-tool.json");
+    expect(files).not.toContain("0010-tool.json");
   });
 
   it("runs a native local write without waiting for approval", async () => {

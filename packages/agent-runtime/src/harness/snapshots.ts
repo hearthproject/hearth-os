@@ -5,6 +5,7 @@ import type { AgentTool, AgentToolContext, AgentToolResult } from "../types.ts";
 
 const MAX_SNAPSHOT_BYTES = 10 * 1024 * 1024;
 const MAX_TURN_MANIFESTS = 100;
+const MAX_SNAPSHOTS = 500;
 
 export interface FileHistoryEntry {
   path: string;
@@ -45,6 +46,12 @@ export function snapshotBeforeMutation(context: AgentToolContext, absPath: strin
     mkdirSync(dirname(target), { recursive: true });
     copyFileSync(absPath, target);
     state.snapshots.set(id, absPath);
+    while (state.snapshots.size > MAX_SNAPSHOTS) {
+      const oldest = state.snapshots.keys().next();
+      if (oldest.done) break;
+      state.snapshots.delete(oldest.value);
+      rmSync(join(context.outDir, ".hearth", "snapshots", oldest.value), { recursive: true, force: true });
+    }
     upsertManifestEntry(context, turn, {
       path: relativePath,
       snapshotId: id,
@@ -278,7 +285,16 @@ function pruneFileHistory(context: AgentToolContext): void {
     .sort((left, right) => left.turn - right.turn);
   while (turns.length > MAX_TURN_MANIFESTS) {
     const oldest = turns.shift();
-    if (oldest) rmSync(join(root, oldest.name), { recursive: true, force: true });
+    if (!oldest) continue;
+    rmSync(join(root, oldest.name), { recursive: true, force: true });
+    const snapshotRoot = join(context.outDir, ".hearth", "snapshots");
+    if (!existsSync(snapshotRoot)) continue;
+    const prefix = `snap_t${oldest.turn}_`;
+    for (const name of readdirSync(snapshotRoot)) {
+      if (!name.startsWith(prefix)) continue;
+      rmSync(join(snapshotRoot, name), { recursive: true, force: true });
+      context.state?.snapshots.delete(name);
+    }
   }
 }
 

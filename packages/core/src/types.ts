@@ -249,10 +249,10 @@ export interface TaskPermissions {
 }
 
 export interface RunBudget {
-  maxTurns: number;
-  maxToolCalls: number;
-  maxTokens: number;
-  maxDurationMs: number;
+  maxTurns?: number | undefined;
+  maxToolCalls?: number | undefined;
+  maxTokens?: number | undefined;
+  maxDurationMs?: number | undefined;
 }
 
 export type BudgetDimension = "turns" | "toolCalls" | "tokens" | "duration";

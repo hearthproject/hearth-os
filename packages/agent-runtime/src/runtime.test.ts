@@ -216,6 +216,35 @@ describe("agent runtime", () => {
     expect(result.turns).toBe(2);
   });
 
+  it("keeps running past the old default turn limit when no budget is set", async () => {
+    const root = workspace(roots);
+    const events: string[] = [];
+    let turns = 0;
+    const result = await runAgent({
+      model: async () => {
+        turns += 1;
+        if (turns < 210) return turn("", [call("noop", { index: turns })]);
+        return turn("", [call("finish_task", { summary: "完成" })]);
+      },
+      tools: [
+        { definition: { name: "noop", description: "noop", parameters: {} }, execute: async (input) => ({ content: JSON.stringify(input) }) },
+        { definition: { name: "finish_task", description: "finish", parameters: {} }, execute: async () => ({ content: "完成", action: "finish", summary: "完成" }) }
+      ],
+      goal: "持续执行",
+      systemPrompt: "system",
+      budget: {},
+      requireFinishTool: true,
+      permissions: { tools: ["noop", "finish_task"], readRoots: [root], writeRoots: [root], networkHosts: [] },
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      onEvent: (event) => { if (event.type === "budget.exceeded") events.push(event.budget); }
+    });
+
+    expect(result.status).toBe("completed");
+    expect(result.turns).toBe(210);
+    expect(events).toEqual([]);
+  });
+
   it("pauses when the agent asks the user", async () => {
     const root = workspace(roots);
     const result = await runAgent({

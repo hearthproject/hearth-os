@@ -21,7 +21,7 @@ export interface PersistedGoal {
 }
 
 const STATUSES: PersistedGoalStatus[] = ["active", "paused", "blocked", "completed"];
-const DEFAULT_GOAL_MAX_TURNS = 100;
+const DEFAULT_GOAL_MAX_TURNS = 0;
 
 export function createGoalTools(): AgentTool[] {
   return [getGoalTool, createGoalTool, updateGoalTool];
@@ -36,8 +36,8 @@ export function goalFinishIssue(workspaceRoot: string): string | null {
 export function goalContinuationPrompt(workspaceRoot: string): string | null {
   const goal = readGoalByRoot(workspaceRoot);
   if (!goal || goal.status !== "active") return null;
-  const ratio = goal.maxTurns > 0 ? goal.turnsUsed / goal.maxTurns : 0;
-  const cadence = ratio >= 0.8 ? "wrap-up" : ratio >= 0.5 ? "sparse" : "full";
+  const cadence = "full";
+  const progress = goal.maxTurns > 0 ? `${goal.turnsUsed}/${goal.maxTurns} turns` : `${goal.turnsUsed} turns (unlimited)`;
   return [
     "## Persisted goal",
     "An active goal survives this run. Continue from the current workspace state instead of restating the whole task.",
@@ -45,7 +45,7 @@ export function goalContinuationPrompt(workspaceRoot: string): string | null {
     `objective: ${goal.objective}`,
     `constraints: ${goal.constraints.join(" | ") || "(none)"}`,
     `successCriteria: ${goal.successCriteria.join(" | ") || "(none)"}`,
-    `progress: ${goal.turnsUsed}/${goal.maxTurns} turns (${cadence} cadence)`,
+    `progress: ${progress} (${cadence} cadence)`,
     ...(goal.planPath ? [`plan: ${goal.planPath}`] : []),
     ...(goal.note ? [`note: ${goal.note}`] : []),
     "Before finish_task, verify the success criteria and call update_goal(status=completed). If the goal cannot continue, call update_goal(status=paused|blocked, note=reason)."
@@ -56,14 +56,9 @@ export function recordGoalTurns(workspaceRoot: string, turns: number): Persisted
   const goal = readGoalByRoot(workspaceRoot);
   if (!goal || goal.status !== "active" || !Number.isFinite(turns) || turns <= 0) return goal;
   const turnsUsed = goal.turnsUsed + Math.max(0, Math.floor(turns));
-  const exhausted = goal.maxTurns > 0 && turnsUsed >= goal.maxTurns;
   const next: PersistedGoal = {
     ...goal,
     turnsUsed,
-    ...(exhausted ? {
-      status: "paused" as const,
-      note: `Stopped at maxTurns=${goal.maxTurns}; resume with update_goal(status=active) after reviewing progress.`
-    } : {}),
     updatedAt: new Date().toISOString()
   };
   writeGoalFile(workspaceRoot, next);
@@ -95,7 +90,7 @@ const createGoalTool: AgentTool = {
         objective: { type: "string", description: "Concrete end state" },
         constraints: { type: "array", items: { type: "string" }, description: "Hard constraints" },
         successCriteria: { type: "array", items: { type: "string" }, description: "Verifiable completion checks" },
-        maxTurns: { type: "number", description: "Turn budget across resumes; defaults to 100" },
+        maxTurns: { type: "number", description: "Optional advisory turn count; never pauses execution" },
         planPath: { type: "string", description: "Optional plan file path" }
       },
       required: ["title", "objective"],
@@ -213,7 +208,11 @@ function stringList(value: unknown): string[] {
 }
 
 function boundedMaxTurns(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) ? Math.min(500, Math.max(1, Math.floor(value))) : DEFAULT_GOAL_MAX_TURNS;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const turns = Math.floor(value);
+    return turns <= 0 ? 0 : Math.min(500, turns);
+  }
+  return DEFAULT_GOAL_MAX_TURNS;
 }
 
 function formatGoal(goal: PersistedGoal): string {
@@ -224,7 +223,7 @@ function formatGoal(goal: PersistedGoal): string {
     `objective: ${goal.objective}`,
     `constraints: ${goal.constraints.join(" | ") || "(none)"}`,
     `successCriteria: ${goal.successCriteria.join(" | ") || "(none)"}`,
-    `progress: ${goal.turnsUsed}/${goal.maxTurns} turns`,
+    `progress: ${goal.maxTurns > 0 ? `${goal.turnsUsed}/${goal.maxTurns} turns` : `${goal.turnsUsed} turns (unlimited)`}`,
     ...(goal.planPath ? [`planPath: ${goal.planPath}`] : []),
     ...(goal.note ? [`note: ${goal.note}`] : []),
     `updatedAt: ${goal.updatedAt}`

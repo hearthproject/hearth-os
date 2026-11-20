@@ -50,8 +50,8 @@ export interface DeepSeekHarnessRunOptions {
   outDir: string;
   prompt: string;
   mode: "necessary" | "full";
-  maxTurns: number;
-  runBudgetSeconds: number;
+  maxTurns?: number | undefined;
+  runBudgetSeconds?: number | undefined;
   resumeSessionId?: string | undefined;
   signal?: AbortSignal | undefined;
   onProgress?: ((event: { type: string; message: string; detail?: Record<string, unknown> }) => void) | undefined;
@@ -124,7 +124,9 @@ export async function runDeepSeekHarness(options: DeepSeekHarnessRunOptions): Pr
     model: options.settings.model,
     maxTokens: 32_768,
     approvalRequests: true,
-    requestTimeoutMs: Math.max(60_000, options.runBudgetSeconds * 1_000),
+    ...(options.runBudgetSeconds !== undefined
+      ? { requestTimeoutMs: Math.max(60_000, options.runBudgetSeconds * 1_000) }
+      : {}),
     env,
     onUserQuestion: async () => ({ cancelled: true })
   });

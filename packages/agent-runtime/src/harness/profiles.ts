@@ -1,17 +1,8 @@
-import { NATIVE_TOKEN_CEILING, type RunBudget, type TaskRecord } from "@hearth/core";
+import type { RunBudget, TaskRecord } from "@hearth/core";
 import type { HarnessProfile } from "../types.ts";
 
-/**
- * Coding tasks need a much larger turn budget than office drafts. The token
- * ceiling stays in place as a runaway guard; turns, tool calls and wall time
- * are the real constraints.
- */
-export const CODING_RUN_BUDGET: RunBudget = {
-  maxTurns: 300,
-  maxToolCalls: 2_500,
-  maxTokens: NATIVE_TOKEN_CEILING,
-  maxDurationMs: 8 * 60 * 60_000
-};
+// 默认不设置轮次、工具调用、Token 或时长上限；循环保护仍然生效。
+export const CODING_RUN_BUDGET: RunBudget = {};
 
 export function codingHarnessEnabled(): boolean {
   const value = process.env.HEARTH_CODING_HARNESS?.trim().toLowerCase();

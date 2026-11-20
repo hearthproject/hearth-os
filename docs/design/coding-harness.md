@@ -4,7 +4,7 @@ Hearth's native executor is a general-purpose agent runtime. This document descr
 
 ## Goals
 
-- One runtime, two profiles: `general` keeps office/document behaviour; `coding` activates repository-aware prompting, a larger budget, stronger edit/search/shell tools, plan/todo/verification loops and recovery snapshots.
+- One runtime, two profiles: `general` keeps office/document behaviour; `coding` activates repository-aware prompting, stronger edit/search/shell tools, plan/todo/verification loops and recovery snapshots. Neither profile has a default turn, tool-call, token or wall-clock budget.
 - Match pi's coding loop and exceed it on verification, planning, background processes and benchmarkability. Reach roughly 80% of opencode's core harness without its Effect runtime, plugin market, multi-client architecture, codemode or provider matrix.
 - Every capability must be testable without a model. Model quality is evaluated separately with public benchmarks.
 
@@ -52,7 +52,7 @@ Enabled by default; set `HEARTH_CODING_HARNESS=0` to force the general profile. 
 - the workspace contains `.git`
 - the task text mentions code execution or GitHub operations
 
-The coding profile uses `CODING_RUN_BUDGET` (300 turns, 2500 tool calls, the native token ceiling, 8 hours) and exposes the coding toolset dynamically. The prompt lists only tools that are actually callable for the current run. The set includes file ACI (`read_file`, `edit_file`, `apply_patch`), search, shell sessions (`shell`, `shell_output`, `shell_kill`, `shell_wait`), todo, tests, diagnostics, plan, snapshots (`rewind`, `rewind_turn`), typed subagents (`agent`, `agent_wait`, `agent_status`, `agent_kill`), repository memory and persisted goals.
+The coding profile uses `CODING_RUN_BUDGET`, which is empty by default: there is no turn, tool-call, token or wall-clock limit unless a caller passes an explicit budget. It exposes the coding toolset dynamically. The prompt lists only tools that are actually callable for the current run. The set includes file ACI (`read_file`, `edit_file`, `apply_patch`), search, shell sessions (`shell`, `shell_output`, `shell_kill`, `shell_wait`), todo, tests, diagnostics, plan, snapshots (`rewind`, `rewind_turn`), typed subagents (`agent`, `agent_wait`, `agent_status`, `agent_kill`), repository memory and persisted goals.
 
 ## Prompt sections
 
@@ -115,7 +115,7 @@ Read state is cleared after compaction so the summary is not treated as the orig
 
 - `shell_wait` waits for a background process to exit, match output or time out instead of polling; the default wait is 60 seconds and the cap is 10 minutes. A timeout leaves the process running and returns its current output.
 - Repository memory lives in `.hearth/memory` with a `MEMORY.md` index; `memory_read`, `memory_write` and `memory_search` expose it to coding and read-only profiles. The index is bounded to 200 lines / 25 KB and is injected at prompt startup; topic bodies are loaded only on demand.
-- A long-running goal lives in `.hearth/goal.json`; `get_goal`, `create_goal` and `update_goal` persist title, objective, constraints, success criteria, plan path and a turn budget. Only one active goal is allowed. `finish_task` is rejected while a goal is active, turns are counted across runs, and a goal pauses at `maxTurns` instead of failing hard.
+- A long-running goal lives in `.hearth/goal.json`; `get_goal`, `create_goal` and `update_goal` persist title, objective, constraints, success criteria and plan path. Only one active goal is allowed. `finish_task` is rejected while a goal is active and turns are counted across runs, but `maxTurns` is advisory and never pauses execution.
 - Per-turn file history lives in `.hearth/file-history/turn-N/manifest.json` with before/after hashes, line deltas and created-file markers. `rewind_turn` restores the previous completed turn or a named turn, removes files created by that turn, reports partial failures, and keeps the most recent 100 turn manifests.
 - The older `rewind` remains available for a single snapshot, and per-turn snapshots are still persisted through checkpoints.
 
@@ -164,7 +164,7 @@ npm run agent:run -- \
   --model example-model
 ```
 
-The runner uses the same coding prompt, tools, budget and finish gate as the server, so benchmark adapters can drive it without starting the desktop app.
+The runner uses the same coding prompt, tools, budget (unlimited by default) and finish gate as the server, so benchmark adapters can drive it without starting the desktop app.
 
 
 ## Commit policy

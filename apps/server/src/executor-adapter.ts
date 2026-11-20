@@ -247,8 +247,10 @@ export class DeepSeekHarnessExecutorAdapter implements ExecutorAdapter {
       outDir: input.prepared.outDir,
       prompt: input.prompt,
       mode: input.fullPermission ? "full" : "necessary",
-      maxTurns: input.budget.maxTurns,
-      runBudgetSeconds: Math.max(1, Math.round(input.budget.maxDurationMs / 1000)),
+      ...(input.budget.maxTurns !== undefined ? { maxTurns: input.budget.maxTurns } : {}),
+      ...(input.budget.maxDurationMs !== undefined
+        ? { runBudgetSeconds: Math.max(1, Math.ceil(input.budget.maxDurationMs / 1000)) }
+        : {}),
       ...(input.activeThreadId ? { resumeSessionId: input.activeThreadId } : {}),
       signal: input.signal,
       onProgress: (event) => input.onProgress({

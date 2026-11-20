@@ -3,6 +3,12 @@ import { statSync } from "node:fs";
 import { relative, resolve, sep } from "node:path";
 import type { AgentProgress, AgentReadFileState, AgentToolContext, AgentToolState } from "../types.ts";
 
+const MAX_READ_FILE_STATES = 2_000;
+const MAX_FILES_READ = 2_000;
+const MAX_FILES_MODIFIED = 1_000;
+const MAX_COMMANDS = 500;
+const MAX_TESTS = 200;
+
 export function createAgentState(workspaceRoot: string): AgentToolState {
   return {
     workspaceRoot,
@@ -37,7 +43,8 @@ export function recordFileRead(state: AgentToolState | undefined, absPath: strin
     ? mergeRanges([...(previous.ranges ?? []), ...(ranges ?? [])])
     : mergeRanges(ranges ?? []);
   state.readFiles.set(key, { size, mtimeMs, hash, ...(merged.length > 0 ? { ranges: merged } : {}) });
-  addUnique(state.progress.filesRead, relPath(state, absPath));
+  trimOldest(state.readFiles, MAX_READ_FILE_STATES);
+  addUnique(state.progress.filesRead, relPath(state, absPath), MAX_FILES_READ);
 }
 
 export function recordFileModified(state: AgentToolState | undefined, absPath: string, content: string): void {
@@ -55,7 +62,7 @@ export function recordFileModified(state: AgentToolState | undefined, absPath: s
     hash: hashContent(content),
     ranges: [{ start: 1, end: Math.max(1, lines) }]
   });
-  addUnique(state.progress.filesModified, relPath(state, absPath));
+  addUnique(state.progress.filesModified, relPath(state, absPath), MAX_FILES_MODIFIED);
 }
 
 export function rangesCover(ranges: Array<{ start: number; end: number }> | undefined, start: number, end: number): boolean {
@@ -122,7 +129,11 @@ export function fileReadState(context: AgentToolContext, absPath: string): Agent
 export function recordCommand(state: AgentToolState | undefined, command: string, exitCode: number | null, test: boolean): void {
   if (!state) return;
   state.progress.commands.push({ command, exitCode, test, at: Date.now() });
-  if (test) state.progress.tests.push({ command, passed: exitCode === 0 ? true : exitCode === null ? null : false, at: Date.now() });
+  if (state.progress.commands.length > MAX_COMMANDS) state.progress.commands.splice(0, state.progress.commands.length - MAX_COMMANDS);
+  if (test) {
+    state.progress.tests.push({ command, passed: exitCode === 0 ? true : exitCode === null ? null : false, at: Date.now() });
+    if (state.progress.tests.length > MAX_TESTS) state.progress.tests.splice(0, state.progress.tests.length - MAX_TESTS);
+  }
 }
 
 export function progressSummary(progress: AgentProgress | undefined): string {
@@ -141,8 +152,17 @@ function normalizeKey(path: string): string {
   return resolve(path).toLowerCase();
 }
 
-function addUnique(values: string[], value: string): void {
+function addUnique(values: string[], value: string, max: number): void {
   if (!values.includes(value)) values.push(value);
+  if (values.length > max) values.splice(0, values.length - max);
+}
+
+function trimOldest<K, V>(map: Map<K, V>, max: number): void {
+  while (map.size > max) {
+    const oldest = map.keys().next();
+    if (oldest.done) return;
+    map.delete(oldest.value);
+  }
 }
 
 export function relativeTo(root: string, absPath: string): string {

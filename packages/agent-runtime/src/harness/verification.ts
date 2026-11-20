@@ -144,6 +144,9 @@ async function runVerificationCommand(command: string, context: AgentToolContext
   const parsed = parseVerificationOutput(output, kind);
   if (kind === "check" && parsed.diagnostics.length > 0 && context.state) {
     context.state.progress.diagnostics.push(...parsed.diagnostics.map((item) => ({ ...item, at: Date.now() })));
+    if (context.state.progress.diagnostics.length > 200) {
+      context.state.progress.diagnostics.splice(0, context.state.progress.diagnostics.length - 200);
+    }
   }
   const status = run.running ? `still running (session ${run.sessionId})` : `exit ${run.exitCode ?? "unknown"}`;
   return {

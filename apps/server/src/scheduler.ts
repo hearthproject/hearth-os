@@ -1,7 +1,7 @@
 import { isTextDraftTask, DRAFT_INSTRUCTION } from "./draft-intent.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { EXECUTION_PROFILES, NATIVE_TOKEN_CEILING } from "@hearth/core";
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import type {
   AgentCheckpoint,
@@ -189,6 +189,7 @@ export class HearthScheduler {
   private loopPromise: Promise<void> | null = null;
   private wakeResolver: (() => void) | null = null;
   private stopped = true;
+  private lastWorkspaceDigest: { runId: string; at: number; digest: string } | null = null;
   private stopping = false;
 
   constructor(options: SchedulerOptions) {
@@ -532,14 +533,23 @@ export class HearthScheduler {
     const order = { quick: 0, standard: 1, deep: 2 };
     if (executionMode && order[executionMode] <= order[task.executionMode ?? "standard"]) throw new Error("请选择更高的执行模式");
     const target = executionMode ? EXECUTION_PROFILES[executionMode].budget : null;
+    const widen = (value: number | undefined, targetValue: number | undefined): number | undefined => {
+      if (target) return targetValue === undefined ? value : Math.max(value ?? 0, targetValue);
+      return value === undefined ? undefined : value * 2;
+    };
     const budgetOverride: RunBudget = {
-      maxTurns: target ? Math.max(current.maxTurns, target.maxTurns) : current.maxTurns * 2,
-      maxToolCalls: target ? Math.max(current.maxToolCalls, target.maxToolCalls) : current.maxToolCalls * 2,
-      maxTokens: target ? Math.max(current.maxTokens, target.maxTokens) : current.maxTokens * 2,
-      maxDurationMs: target ? Math.max(current.maxDurationMs, target.maxDurationMs) : current.maxDurationMs * 2
+      maxTurns: widen(current.maxTurns, target?.maxTurns),
+      maxToolCalls: widen(current.maxToolCalls, target?.maxToolCalls),
+      maxTokens: widen(current.maxTokens, target?.maxTokens),
+      maxDurationMs: widen(current.maxDurationMs, target?.maxDurationMs)
     };
     const used = this.usageForRuns(this.service.store.listRuns(taskId));
-    if (executionMode && (used.tokens >= budgetOverride.maxTokens || used.turns >= budgetOverride.maxTurns || used.toolCalls >= budgetOverride.maxToolCalls || used.durationMs >= budgetOverride.maxDurationMs)) throw new Error("目标模式额度已耗尽，请使用预算翻倍继续");
+    if (executionMode && (
+      (budgetOverride.maxTokens !== undefined && used.tokens >= budgetOverride.maxTokens) ||
+      (budgetOverride.maxTurns !== undefined && used.turns >= budgetOverride.maxTurns) ||
+      (budgetOverride.maxToolCalls !== undefined && used.toolCalls >= budgetOverride.maxToolCalls) ||
+      (budgetOverride.maxDurationMs !== undefined && used.durationMs >= budgetOverride.maxDurationMs)
+    )) throw new Error("目标模式额度已耗尽，请使用预算翻倍继续");
     const updated = this.service.updateTask(taskId, {
       ...(executionMode ? { executionMode } : {}),
       budgetOverride,
@@ -764,16 +774,21 @@ export class HearthScheduler {
     mkdirSync(directory, { recursive: true });
     const absolutePath = join(directory, `${String(checkpoint.seq).padStart(4, "0")}-${checkpoint.kind}.json`);
     const body = `${JSON.stringify(checkpoint, null, 2)}\n`;
-    writeFileSync(absolutePath, body, "utf8");
+    const tempPath = `${absolutePath}.tmp`;
+    writeFileSync(tempPath, body, "utf8");
+    renameSync(tempPath, absolutePath);
+    pruneRunCheckpointFiles(directory);
     const createdAt = new Date().toISOString();
     const task = this.service.requireTask(taskId);
     const effects = this.service.store.listEffects(taskId);
+    const workspaceDigest = this.workspaceDigestFor(runId, workspace, checkpoint.kind);
     const proof: RunCheckpointProof = {
       attemptId: runId,
       identity: { executorId: "native", runtimeVersion: "0.1.0" },
       phasePrefix: checkpoint.messages
         .filter((message) => message.role === "tool")
         .map((message) => `tool:${message.name}`)
+        .slice(-100)
         .concat(`checkpoint:${checkpoint.kind}:${checkpoint.seq}`),
       validation: { status: "not_required", evidenceRefs: [] },
       effectReceipts: effects
@@ -783,7 +798,7 @@ export class HearthScheduler {
         .filter((effect) => ["prepared", "admitted", "executing", "uncertain"].includes(effect.status))
         .map((effect) => effect.id),
       ...(task.permissions ? { permissionsDigest: hashStable(task.permissions) } : {}),
-      ...(existsSync(workspace) ? { workspaceDigest: digestWorkspace(workspace) } : {}),
+      ...(workspaceDigest ? { workspaceDigest } : {}),
       createdAt
     };
     const record: RunCheckpointRecord = {
@@ -803,6 +818,16 @@ export class HearthScheduler {
       checkpointSeq: checkpoint.seq,
       usage: this.usageWithMetrics(checkpoint.usage, checkpoint.turns, checkpoint.toolCalls)
     });
+  }
+
+  private workspaceDigestFor(runId: string, workspace: string, kind: AgentCheckpoint["kind"]): string | undefined {
+    if (!existsSync(workspace)) return undefined;
+    const now = Date.now();
+    const recent = this.lastWorkspaceDigest?.runId === runId && now - this.lastWorkspaceDigest.at < 30_000;
+    if (kind === "tool" && recent) return undefined;
+    const digest = digestWorkspace(workspace);
+    this.lastWorkspaceDigest = { runId, at: now, digest };
+    return digest;
   }
 
   private usageWithMetrics(
@@ -2005,7 +2030,7 @@ export class HearthScheduler {
     const exhaustion: BudgetExhaustion = {
       dimension,
       used: (dimension === "duration" ? previous.durationMs : previous[dimension]) + runValues[dimension],
-      limit: effective[this.budgetLimitKey(dimension)]
+      limit: effective[this.budgetLimitKey(dimension)] ?? 0
     };
     const message = `执行预算已触顶：${budgetDimensionLabel(dimension)} ${formatBudgetValue(dimension, exhaustion.used)} / ${formatBudgetValue(dimension, exhaustion.limit)}。`;
     const failure: TaskError = {
@@ -2057,11 +2082,13 @@ export class HearthScheduler {
     const turns = Math.max(0, result.turns ?? 0);
     const toolCalls = Math.max(0, result.toolCalls ?? 0);
     const tokens = (result.usage?.inputTokens ?? 0) + (result.usage?.outputTokens ?? 0);
+    const ratio = (used: number, limit: number | undefined): number =>
+      limit === undefined || limit <= 0 ? 0 : used / limit;
     const candidates: Array<{ dimension: BudgetDimension; ratio: number }> = [
-      { dimension: "turns", ratio: budget.maxTurns <= 0 ? 1 : turns / budget.maxTurns },
-      { dimension: "toolCalls", ratio: budget.maxToolCalls <= 0 ? 1 : toolCalls / budget.maxToolCalls },
-      { dimension: "tokens", ratio: budget.maxTokens <= 0 ? 1 : tokens / budget.maxTokens },
-      { dimension: "duration", ratio: result.status === "budget_exceeded" ? 0 : 0 }
+      { dimension: "turns", ratio: ratio(turns, budget.maxTurns) },
+      { dimension: "toolCalls", ratio: ratio(toolCalls, budget.maxToolCalls) },
+      { dimension: "tokens", ratio: ratio(tokens, budget.maxTokens) },
+      { dimension: "duration", ratio: 0 }
     ];
     return candidates.sort((left, right) => right.ratio - left.ratio)[0]?.dimension ?? "turns";
   }
@@ -2399,32 +2426,40 @@ export class HearthScheduler {
     const runs = this.service.store.listRuns(taskId);
     const used = this.usageForRuns(runs);
     const effective = this.effectiveBudget(task);
+    const left = (limit: number | undefined, consumed: number): number | undefined =>
+      limit === undefined ? undefined : Math.max(0, limit - consumed);
     return {
-      maxTurns: Math.max(0, effective.maxTurns - used.turns),
-      maxToolCalls: Math.max(0, effective.maxToolCalls - used.toolCalls),
-      maxTokens: Math.max(0, effective.maxTokens - used.tokens),
-      maxDurationMs: Math.max(0, effective.maxDurationMs - used.durationMs)
+      maxTurns: left(effective.maxTurns, used.turns),
+      maxToolCalls: left(effective.maxToolCalls, used.toolCalls),
+      maxTokens: left(effective.maxTokens, used.tokens),
+      maxDurationMs: left(effective.maxDurationMs, used.durationMs)
     };
   }
 
   private effectiveBudget(task: TaskRecord): RunBudget {
     const nativeTokenFloor = task.executorId === "native" ? NATIVE_TOKEN_CEILING : 0;
+    const minDefined = (...values: Array<number | undefined>): number | undefined => {
+      const limits = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0);
+      return limits.length > 0 ? Math.min(...limits) : undefined;
+    };
+    const floor = (value: number | undefined, minimum = 1): number | undefined =>
+      value === undefined ? undefined : Math.max(minimum, Math.floor(value));
     if (task.budgetOverride) {
       return {
-        maxTurns: Math.max(1, Math.floor(task.budgetOverride.maxTurns)),
-        maxToolCalls: Math.max(1, Math.floor(task.budgetOverride.maxToolCalls)),
-        maxTokens: Math.max(1, Math.floor(task.budgetOverride.maxTokens), nativeTokenFloor),
-        maxDurationMs: Math.max(1, Math.floor(task.budgetOverride.maxDurationMs))
+        maxTurns: floor(task.budgetOverride.maxTurns),
+        maxToolCalls: floor(task.budgetOverride.maxToolCalls),
+        maxTokens: floor(task.budgetOverride.maxTokens, Math.max(1, nativeTokenFloor)),
+        maxDurationMs: floor(task.budgetOverride.maxDurationMs)
       };
     }
     const modeBudget = task.executorId === "native" && task.executionMode
       ? EXECUTION_PROFILES[task.executionMode].budget
       : this.runBudget;
     return {
-      maxTurns: Math.min(this.runBudget.maxTurns, modeBudget.maxTurns),
-      maxToolCalls: Math.min(this.runBudget.maxToolCalls, modeBudget.maxToolCalls),
-      maxTokens: Math.min(this.runBudget.maxTokens, modeBudget.maxTokens),
-      maxDurationMs: Math.min(this.runBudget.maxDurationMs, modeBudget.maxDurationMs)
+      maxTurns: minDefined(this.runBudget.maxTurns, modeBudget.maxTurns),
+      maxToolCalls: minDefined(this.runBudget.maxToolCalls, modeBudget.maxToolCalls),
+      maxTokens: minDefined(this.runBudget.maxTokens, modeBudget.maxTokens),
+      maxDurationMs: minDefined(this.runBudget.maxDurationMs, modeBudget.maxDurationMs)
     };
   }
 
@@ -2668,6 +2703,21 @@ function stableJson(value: unknown): string {
     return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
   }
   return JSON.stringify(value);
+}
+
+const MAX_RUN_CHECKPOINT_FILES = 20;
+
+function pruneRunCheckpointFiles(directory: string): void {
+  const names = readdirSync(directory)
+    .filter((name) => /^\d+-(turn|tool|compaction|final|budget|waiting_input|plan)\.json$/.test(name))
+    .map((name) => ({ name, seq: Number(name.slice(0, name.indexOf("-"))) }))
+    .sort((left, right) => left.seq - right.seq);
+  for (const entry of names.slice(0, Math.max(0, names.length - MAX_RUN_CHECKPOINT_FILES))) {
+    unlinkSync(join(directory, entry.name));
+  }
+  for (const name of readdirSync(directory)) {
+    if (name.endsWith(".tmp")) unlinkSync(join(directory, name));
+  }
 }
 
 function digestWorkspace(root: string, limit = 5_000): string {
