@@ -665,7 +665,7 @@ describe("context compaction", () => {
       recentContextTokens: 400,
       summarizeContext: async () => "恢复摘要",
       onCheckpoint: (checkpoint) => { checkpoints.push(checkpoint); },
-      onEvent: (event) => { if (event.type === "compacted") events.push("compacted"); }
+      onEvent: (event) => { if (event.type === "compacted" && event.reason !== "microcompact") events.push("compacted"); }
     });
     expect(result.status).toBe("completed");
     expect(events).toEqual(["compacted"]);

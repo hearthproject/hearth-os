@@ -1478,7 +1478,7 @@ describe("Hearth scheduler", () => {
     expect(checkpoint?.proof?.workspaceDigest).toMatch(/^[a-f0-9]{64}$/);
   });
 
-  it("keeps only the newest checkpoint files during a long native run", async () => {
+  it("retains the configured checkpoint window during a long native run", async () => {
     const service = setup();
     const modelSettingsPath = configureModel();
     let taskRoot = "";
@@ -1510,9 +1510,9 @@ describe("Hearth scheduler", () => {
     expect(run).toBeTruthy();
     const files = readdirSync(join(taskRoot, ".hearth", "checkpoints", run!.id))
       .filter((name) => name.endsWith(".json"));
-    expect(files).toHaveLength(20);
+    expect(files).toHaveLength(30);
     expect(files).toContain("0030-tool.json");
-    expect(files).not.toContain("0010-tool.json");
+    expect(files).toContain("0010-tool.json");
   });
 
   it("runs a native local write without waiting for approval", async () => {
