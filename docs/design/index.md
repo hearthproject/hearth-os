@@ -78,7 +78,7 @@ TypeScript 是语言，Node.js 是运行时，两者不是同一层，也不是�
 | [存储与上下文架构](/design/storage) | 用 SQLite、内容 blob 和任务级上下文统一保存事实、模型绑定和交接水位 |
 | [个人上下文](/design/personal-context) | 用个人本体、Context Pack 和记忆召回决定 Agent 知道什么 |
 | [记忆](/design/memory) | 积累背景，但保持可纠正、可遗忘、可导出 |
-| [知识库接入](/design/knowledge) | 用 OpenViking 提供可重建的语义索引，Hearth 保持唯一写权威 |
+| [资料库与检索](/design/knowledge) | 用本地 SQLite 统一管理记忆、任务、来源、技能和文件，并把同一套检索工具交给三个执行器 |
 | [评估与成本](/design/evaluation) | 用真实任务证明可靠性和成本，而不是用演示证明能力 |
 | [数据、备份与运维](/design/operations) | 备份、恢复、维护、诊断和全局停止都收在本机控制面 |
 | [Agent 参考模式](/design/agent-reference-patterns) | 记录借鉴来源与取舍，避免把外部框架直接当成产品架构 |

@@ -68,11 +68,14 @@ try {
   await dismissNotifications(page);
   await page.screenshot({ path: join(outputDir, "inbox.png") });
 
-  await page.goto(`${baseUrl}/memory`, { waitUntil: "domcontentloaded" });
-  await page.locator(".memory-card").first().waitFor({ timeout: 20_000 });
-  await page.locator(".segmented button", { hasText: "全部" }).click();
-  await page.locator(".memory-card").nth(2).waitFor({ timeout: 10_000 });
-  await page.locator(".memory-card").first().scrollIntoViewIfNeeded();
+  await page.goto(`${baseUrl}/library`, { waitUntil: "domcontentloaded" });
+  await page.locator(".library-page").waitFor({ timeout: 20_000 });
+  const memoryRoot = page.locator(".library-tree-row", { hasText: "记忆" }).first();
+  await memoryRoot.waitFor({ timeout: 20_000 });
+  await memoryRoot.click();
+  await page.locator(".library-tree-row").nth(1).waitFor({ timeout: 10_000 });
+  await page.locator(".library-tree-row").nth(1).click();
+  await page.locator(".library-preview").waitFor({ timeout: 10_000 });
   await page.waitForTimeout(500);
   await dismissNotifications(page);
   await page.screenshot({ path: join(outputDir, "memory.png") });
