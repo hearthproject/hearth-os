@@ -6,10 +6,10 @@
 
 ## 运行形态
 
-- Tauri 主程序负责窗口、托盘、数据目录选择、环境体检和服务端生命周期，安装后约 6.5 MiB。
-- 服务端是原来的 Fastify 应用，由 esbuild 打成单个 `server.mjs`（约 10.3 MiB），作为 Tauri 的子进程运行，固定监听 `127.0.0.1:4317`。
+- Tauri 主程序负责窗口、托盘、数据目录选择、环境体检和服务端生命周期，安装后约 7.8 MiB。
+- 服务端是原来的 Fastify 应用，由 esbuild 打成单个 `server.mjs`（约 13.9 MiB），作为 Tauri 的子进程运行，固定监听 `127.0.0.1:4317`。
 - 内置官方 Node `22.23.2`（`node.exe`，83.0 MiB）和随附 npm `10.9.8`（裁剪后约 7.8 MiB）。托管安装、运行时 `npm` 命令都使用内置 npm。
-- 前端构建产物在 `resources/web`（约 0.8 MiB，默认不生成 source map）。PDF worker 与 cMaps / 标准字体 / wasm 在 `resources/server`（合计约 14.7 MiB）。
+- 前端构建产物在 `resources/web`（约 0.8 MiB，默认不生成 source map）。PDF worker 与 cMaps / 标准字体 / wasm 在 `resources/server`（合计约 4.5 MiB）。Windows ACL sandbox 及其依赖在 `resources/sandbox`（约 12.8 MiB）。
 - Codex 不内置约 479 MiB 的平台二进制：优先 `HEARTH_CODEX_PATH`，其次 `where codex.exe` 的第一个 `.exe`，最后已知 npm 全局路径。
 - 桌面版和开发服务器不能同时使用同一个 `.hearth`；数据目录锁会拒绝第二个实例。
 
@@ -24,8 +24,8 @@ npm run tauri:build
 
 产物：
 
-- `release/Hearth_0.1.0_x64-setup.exe`：NSIS 按用户安装，免 UAC，带开始菜单快捷方式。
-- 安装包约 27.7 MiB，安装后约 113–115 MiB。
+- `release/Hearth_0.2.0_x64-setup.exe`：NSIS 按用户安装，免 UAC，带开始菜单快捷方式。
+- 0.2.0 安装包 30.5 MiB，安装后约 131 MiB。
 - 安装目录：`%LOCALAPPDATA%\Programs\Hearth`，刻意与数据目录 `%LOCALAPPDATA%\Hearth` 分开。
 - WebView2 使用在线 bootstrapper；Windows 10/11 通常已自带运行时，不额外占安装体积。
 
@@ -36,17 +36,18 @@ npm run tauri:build
 | 组成 | 安装后 |
 |---|---:|
 | `node.exe`（官方 22.23.2） | 83.0 MiB |
-| server（单文件 + PDF worker + PDF 资源） | 14.7 MiB |
+| server（单文件 + PDF worker + PDF 资源） | 18.3 MiB |
+| Windows ACL sandbox | 12.8 MiB |
 | 内置 npm | 7.8 MiB |
 | web 静态资源 | 0.8 MiB |
-| Tauri 主程序 | 6.5 MiB |
+| Tauri 主程序 | 7.8 MiB |
 | helper / 许可证 / 第三方声明 | 0.5 MiB |
-| **合计** | **约 113.3 MiB** |
-| NSIS 安装包 | 27.7 MiB |
+| **合计** | **约 131 MiB** |
+| NSIS 安装包 | 30.5 MiB |
 
 不计入安装体积：`.hearth` 业务数据（当前约 1.03 GB）、系统共享的 WebView2 运行时、每应用 WebView2 缓存 `%LOCALAPPDATA%\ai.hearth.os`（约 80 MiB，可安全清理）。
 
-进一步压缩的边界：不修改官方 Node（不做 small-icu、UPX、按需下载），不删除 npm，不删除 PDF cMaps / 标准字体 / wasm。低于约 110 MiB 必须牺牲功能或更换 Node 运行时方案。
+进一步压缩的边界：不修改官方 Node（不做 small-icu、UPX、按需下载），不删除 npm，不删除 PDF cMaps / 标准字体 / wasm，也不把浏览器自动化或 Windows ACL sandbox 改成运行时下载。
 
 ## 数据目录
 

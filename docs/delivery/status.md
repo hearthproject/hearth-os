@@ -34,14 +34,15 @@ outline: [2, 3]
 | UI 端到端（离线） | `HEARTH_E2E_OFFLINE=1 npm run test:e2e` | 18 项通过，0 失败 |
 | Tauri updater 编译 | `cargo check --manifest-path apps/desktop-tauri/src-tauri/Cargo.toml --features updater` | 通过 |
 | Tauri 构建配置 | `npx tauri build --debug --no-bundle --features updater --config <overlay>` | 通过 |
-| 发布整理 | `npm run release:prepare -- --skip-build` | 生成 28.0 MiB 安装包、92.0 MiB 便携 zip、校验和 |
+| 0.2.0 安装包 | `npm run release:build` | NSIS 安装包 30.5 MiB，内置 server 启动并通过 `/api/ready` |
+| 发布整理 | `npm run release:prepare -- --skip-build` | 123.2 MiB 便携 zip、安装包、发布说明、SHA256 校验和 |
 
 ## 仍然明确留空
 
 - **真实模型首跑未验收：** 当前 `.hearth/model-settings.json` 的 key 调用 `deepseek-v4.1-flash-1017` 返回 `Access to model denied`。代码路径有 fake-runner 测试，但没有用可用模型完成一次真实首跑。这是外部凭据问题，不是测试通过就能替代的验收。
 - **日常 Chrome 扩展桥未实现：** 目前使用独立 Chrome profile，首次需要在该 profile 里登录站点；没有“直接接管已登录默认 Chrome”的 MV3 扩展。Chrome 136+ 默认 profile 禁止远程调试，因此没有走默认 profile 的捷径。
 - **签名更新未实际发布：** 仓库没有更新签名私钥、公钥和发布地址，自动更新只能在配置齐全的发布机器上启用；本机只验证了编译和禁用路径。
-- **安装包未做干净机安装/卸载：** 只验证了构建、配置 schema、便携包生成，未在全新 Windows 用户环境执行安装、启动、卸载和旧版本升级。
+- **安装包未做干净机安装/卸载：** 0.2.0 NSIS 安装包已在开发机构建成功，打包后的服务端也通过启动检查；但未在全新 Windows 用户环境执行安装、SmartScreen、启动、卸载和旧版本升级。
 - **真实账户未验收：** 飞书租户、SMTP/IMAP 账户、桌面设备仍只有代码和本地测试闭环，没有真实账户/设备的人工验收。
 - **Windows 代码签名证书未知：** 没有 Authenticode 证书，安装包会触发 SmartScreen；本轮未处理。
 

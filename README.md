@@ -35,7 +35,7 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
 
 模型可以更换，执行器可以替换，界面可以重写，但任务状态、授权范围、完成证据、产物摘要和外部回执必须留下来。Hearth 要回答的不是“模型能不能写出一段话”，而是“这件事有没有真正完成，失败后能不能接着做，外部动作能不能被核对”。
 
-> **当前状态（2026-11-20，v0.2.0）：** 可信执行、浏览器自动化、项目档案、首次真实任务验证、监督收件箱、自用报告、可选签名更新和发布脚本已进入 `main`。110 个测试文件、782 个用例、12 项浏览器 fixture 和 18 项离线 UI 端到端通过，Tauri updater 编译和文档构建通过。真实模型首跑被当前 key 的无权限错误阻塞；日常 Chrome 扩展桥、干净机安装、真实账户和已签名更新发布仍未验收。逐项证据见[2026-11 验收报告](https://hearthproject.github.io/hearth-os/delivery/acceptance-2026-11.html)。
+> **当前状态（2026-11-20，v0.2.0）：** 可信执行、浏览器自动化、项目档案、首次真实任务验证、监督收件箱、自用报告、可选签名更新和发布脚本已进入 `main`。110 个测试文件、782 个用例、12 项浏览器 fixture 和 18 项离线 UI 端到端通过，Tauri updater 编译、0.2.0 NSIS 安装包（30.5 MiB）和文档构建通过。真实模型首跑被当前 key 的无权限错误阻塞；日常 Chrome 扩展桥、干净机安装、真实账户和已签名更新发布仍未验收。逐项证据见[2026-11 验收报告](https://hearthproject.github.io/hearth-os/delivery/acceptance-2026-11.html)。
 
 ## 界面一览
 
@@ -220,9 +220,9 @@ npm run tauri:build
 
 生成 `release\Hearth_0.2.0_x64-setup.exe`（NSIS 按用户安装，免 UAC，安装到 `%LOCALAPPDATA%\Programs\Hearth`）。安装后双击开始菜单的 Hearth 即可；关窗会隐藏到托盘，托盘菜单负责退出、环境体检、桌面助手、数据目录和日志目录。首次启动会让你选择现有 `.hearth` 或新建数据目录。
 
-桌面版只保留 Tauri 实现：内置官方 Node 22.23.2、npm 10.9.8 和全部服务端功能，安装包约 27.7 MiB，安装后约 113 MiB。Codex 使用系统中的 `codex.exe`，不内置 479 MiB 平台二进制。
+桌面版只保留 Tauri 实现：内置官方 Node 22.23.2、npm 10.9.8 和全部服务端功能，0.2.0 安装包 30.5 MiB，安装后约 131 MiB。Codex 使用系统中的 `codex.exe`，不内置 479 MiB 平台二进制。
 
-构建、体积、数据目录、日志、托盘、环境体检和已知限制见 [docs/design/desktop.md](docs/design/desktop.md)；从 Electron 到 113 MiB 的完整压缩过程、体积去向和使用前提见 [docs/design/desktop-compression.md](docs/design/desktop-compression.md)。
+构建、体积、数据目录、日志、托盘、环境体检和已知限制见 [docs/design/desktop.md](docs/design/desktop.md)；从 Electron 到约 131 MiB 的完整压缩过程、体积去向和使用前提见 [docs/design/desktop-compression.md](docs/design/desktop-compression.md)。
 
 ### 接入模型
 
@@ -316,7 +316,7 @@ hearth-os/
 │   └── index.md                                      # 文档站首页
 ├── scripts/                                          # E2E 与 README 截图脚本
 ├── tools/windows-helper/                             # helper.mjs 与 windows.ps1 桌面助手
-├── assets/                                           # 架构图与流程图（3 张 PNG）
+├── assets/                                           # 架构图与流程图（3 张 SVG）
 ├── package.json / package-lock.json                  # npm workspaces 与 dev / build / test / docs 脚本
 ├── tsconfig*.json / vitest.config.ts                 # 类型检查与 Vitest（单测超时 20s）
 ├── .gitignore / .gitattributes                       # 忽略规则与文本换行约定
