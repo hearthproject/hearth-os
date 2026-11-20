@@ -252,6 +252,12 @@ export class LibraryRepository {
     ).run(input.nodeId, input.content, input.contentHash, input.extractor, input.language, input.charCount, input.updatedAt);
   }
 
+  deleteDocument(nodeId: string): void {
+    this.store.db.prepare("DELETE FROM context_chunks_fts WHERE node_id = ?").run(nodeId);
+    this.store.db.prepare("DELETE FROM context_chunks WHERE node_id = ?").run(nodeId);
+    this.store.db.prepare("DELETE FROM context_documents WHERE node_id = ?").run(nodeId);
+  }
+
   replaceChunks(nodeId: string, chunks: LibraryChunkInput[]): void {
     this.store.db.exec("BEGIN");
     try {
