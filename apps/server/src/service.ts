@@ -23,7 +23,6 @@ import type {
   RunBudget,
   RunCheckpointRecord,
   RunRecord,
-  StatsSnapshot,
   TaskDeliverable,
   TaskFollowUpRecord,
   TaskInput,
@@ -360,29 +359,6 @@ export class HearthService {
     };
   }
 
-  stats(): StatsSnapshot {
-    const taskCounts = this.store.countTasksByStatus();
-    const runCounts = this.store.countRunsByStatus();
-    const durations = this.store.runDurationTotals();
-    return {
-      tasks: {
-        total: TASK_STATUSES.reduce((sum, status) => sum + taskCounts[status], 0),
-        byStatus: taskCounts
-      },
-      runs: {
-        total: Object.values(runCounts).reduce((sum, count) => sum + count, 0),
-        byStatus: runCounts,
-        durationMs: durations.ms,
-        durationCounted: durations.counted,
-        durationUncounted: durations.uncounted,
-        usage: this.store.usageTotals()
-      },
-      approvals: { byStatus: this.store.countApprovalsByStatus() },
-      effects: { byStatus: this.store.countEffectsByStatus() },
-      artifacts: this.store.artifactTotals(),
-      events: { total: this.store.countEvents(), latestSeq: this.store.latestEventSeq() }
-    };
-  }
 
   taskTitles(): Map<string, string> {
     return new Map(this.store.listTasks().map((task) => [task.id, task.title]));

@@ -2384,11 +2384,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
   });
 
-  app.get("/api/stats", async (request, reply) => {
-    reply.header("cache-control", "no-store");
-    return service.stats();
-  });
-
   app.get<{ Params: { id: string }; Querystring: Record<string, string> }>("/api/tasks/:id/events", async (request, reply) => {
     const parsed = taskEventQuerySchema.safeParse(request.query ?? {});
     if (!parsed.success) return invalidQuery(reply);

@@ -42,21 +42,6 @@ export interface EventWindow {
   nextBefore: number | null;
 }
 
-export interface StatsSnapshot {
-  tasks: { total: number; byStatus: Record<TaskStatus, number> };
-  runs: {
-    total: number;
-    byStatus: Record<RunStatus, number>;
-    durationMs: number;
-    durationCounted: number;
-    durationUncounted: number;
-    usage: RunUsage | null;
-  };
-  approvals: { byStatus: Record<ApprovalStatus, number> };
-  effects: { byStatus: Record<EffectStatus, number> };
-  artifacts: { count: number; bytes: number };
-  events: { total: number; latestSeq: number };
-}
 
 export type WithTaskTitle<T> = T & { taskTitle: string };
 

@@ -83,7 +83,6 @@ import type {
   SourceKind,
   SourceReadResult,
   EffectListItem,
-  StatsSnapshot,
   SystemStatus,
   TaskContextResponse,
   TaskFollowUpMode,
@@ -477,7 +476,6 @@ export const api = {
     method: "PATCH",
     body: JSON.stringify(patch)
   }),
-  stats: () => request<StatsSnapshot>("/api/stats"),
   runs: (params: { taskId?: string; status?: string; limit?: number; offset?: number } = {}) =>
     request<{ runs: RunListItem[]; total: number }>(`/api/runs${query(params)}`),
   approvals: (params: { taskId?: string; status?: string; limit?: number; offset?: number; brief?: boolean } = {}) =>

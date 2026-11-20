@@ -676,20 +676,6 @@ describe("Hearth server", () => {
       approvalId: "approval-1"
     });
 
-    const stats = await app.inject({ method: "GET", url: "/api/stats" });
-    expect(stats.json()).toMatchObject({
-      tasks: { total: 1, byStatus: { queued: 1, completed: 0 } },
-      runs: {
-        total: 2, byStatus: { failed: 1, completed: 1 },
-        durationMs: 130_000, durationCounted: 2, durationUncounted: 0,
-        usage: { inputTokens: 1000, outputTokens: 200 }
-      },
-      approvals: { byStatus: { pending: 1, approved: 0 } },
-      effects: { byStatus: { uncertain: 1, succeeded: 0 } },
-      artifacts: { count: 1, bytes: 1024 },
-      events: { total: 6, latestSeq: 6 }
-    });
-
     const brief = await app.inject({ method: "GET", url: "/api/approvals?brief=1" });
     expect(brief.json().approvals[0].target.body).toBeUndefined();
     expect(brief.json().approvals[0].preview.body).toBeUndefined();
