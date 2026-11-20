@@ -1,13 +1,13 @@
 # Hearth 桌面版压缩实录（Tauri-only v0.1）
 
-本文记录从 Electron 迁移到 Tauri、并把安装后体积压到约 113 MiB 的完整过程、体积去向、复现命令、验收结果和使用前提。目标不是做一个“精简版”，而是在保留官方 Node、内置 npm、PDF 资源、托盘、桌面助手、环境体检、日志和数据连续性的前提下，只更换桌面外壳与打包方式。
+本文记录从 Electron 迁移到 Tauri、并把安装后体积压到约 115 MiB 的完整过程、体积去向、复现命令、验收结果和使用前提。目标不是做一个“精简版”，而是在保留官方 Node、内置 npm、PDF 资源、托盘、桌面助手、环境体检、日志和数据连续性的前提下，只更换桌面外壳与打包方式。
 
 ## 结论
 
 | 指标 | Electron 旧版 | 早期 Tauri 版 | 当前 Tauri-only |
 |---|---:|---:|---:|
-| NSIS 安装包 | 155.3 MiB | 40.6 MiB | **27.65 MiB** |
-| 安装后占用 | 558.1 MiB | 279.7 MiB | **113.20 MiB** |
+| NSIS 安装包 | 155.3 MiB | 40.6 MiB | **27.99 MiB** |
+| 安装后占用 | 558.1 MiB | 279.7 MiB | **114.82 MiB** |
 | 安装文件数 | — | — | **1,847** |
 | 运行时 `node_modules` | 有 | 有 | **无** |
 
@@ -148,7 +148,7 @@ opt-level = "s"
 strip = true
 ```
 
-Tauri 主程序从早期约 8.8 MiB 降到 **6.22 MiB**。同时只引入 `windows-sys` 的 `Win32_UI_WindowsAndMessaging`、`Win32_UI_Shell`、`Win32_Foundation`，用原生 `MessageBoxW` / `ShellExecuteW` 替代 rfd/dialog 插件。
+Tauri 主程序从早期约 8.8 MiB 降到 **6.22 MiB**。同时只引入 `windows-sys` 的 `Win32_UI_WindowsAndMessaging`、`Win32_UI_Shell`、`Win32_Foundation`，用原生 `MessageBoxW` / `ShellExecuteW` 替代 rfd/dialog 插件。后续为“选择本地文件夹”增加 `rfd` 原生文件选择器后，主程序变为 **7.76 MiB**，约增加 1.5 MiB，仍远低于 Electron 外壳。
 
 ## 8. Tauri 外壳对齐 Electron 行为
 
@@ -185,13 +185,13 @@ Tauri 主程序从早期约 8.8 MiB 降到 **6.22 MiB**。同时只引入 `windo
 | 组成 | 字节 | MiB | 占比 |
 |---|---:|---:|---:|
 | `resources\node.exe` | 86,997,320 | 82.967 | 73.3% |
-| `resources\server` | 15,446,086 | 14.731 | 13.0% |
+| `resources\server` | 15,502,698 | 14.785 | 12.9% |
 | `resources\node_modules`（npm） | 8,200,047 | 7.820 | 6.9% |
-| `hearth_desktop.exe` | 6,521,856 | 6.220 | 5.5% |
+| `hearth_desktop.exe` | 8,137,728 | 7.761 | 6.8% |
 | `resources\web` | 840,051 | 0.801 | 0.7% |
-| helper / licenses / notices / 卸载器 | 699,135 | 0.667 | 0.6% |
-| **安装目录合计** | **118,703,658** | **113.204** | **100%** |
-| **NSIS 安装包** | **28,998,148** | **27.655** | — |
+| helper / licenses / notices / 卸载器 | 698,304 | 0.666 | 0.6% |
+| **安装目录合计** | **120,393,027** | **114.816** | **100%** |
+| **NSIS 安装包** | **29,352,079** | **27.992** | — |
 
 安装目录共 **1,847** 个文件。
 
@@ -226,13 +226,13 @@ npm run tauri:build
 | `HEARTH_SOURCEMAP=1` | 仅为调试生成 web source map |
 | `CARGO_TARGET_DIR` | 可选，复用 Cargo 构建缓存 |
 
-冷构建约 4–5 分钟，热构建约 2–3 分钟。生成资源目录约 106.9 MiB，安装器压缩后约 27.65 MiB。
+冷构建约 4–5 分钟，热构建约 2–3 分钟。生成资源目录约 107.2 MiB，安装器压缩后约 27.99 MiB。
 
 ## 验收记录
 
 - `npm ci --dry-run` 通过，lock 中不再有 `electron`、`electron-builder`、`@hearth/desktop`。
 - `npm run typecheck` 通过。
-- `npm test`：115 个文件、843 项测试全部通过。
+- `npm test`：117 个文件、858 项测试全部通过。
 - `cargo test`：Rust 壳纯函数测试通过（日期换算、导航白名单、重启退避、体检报告、chunked 解码）。
 - staged server 冒烟：`/api/ready`、`/api/health`、`/api/executors`、`/` 均正常，HTML 响应带 CSP。
 - PDF：经 sources API 读取测试 PDF 成功；cMap、标准字体与 wasm 路径已指向安装目录。
@@ -259,6 +259,7 @@ npm run tauri:build
 | Codex CLI | 可选 | 没有 `codex.exe` 时 Codex 执行器不可用，但 native 执行器仍可用；可设置 `HEARTH_CODEX_PATH` |
 | Git | 可选但常用 | 克隆仓库、Worktree、代码任务需要 `git.exe` |
 | GitHub CLI | 可选 | 仅私有 GitHub 仓库操作需要 `gh` 并登录 |
+| 知识库（OpenViking） | 可选 | 不内置。首次配置向导或设置页可一键安装，需要 `uv`，会下载约 800 MiB 运行时与 embedding 模型；不安装不影响聊天、任务、记忆等核心功能 |
 
 因此，“下载就能打开”成立；“下载就能完成所有 AI/代码任务”不成立。后者还取决于模型 Key、Codex、Git 和网络环境。应用内的“环境体检”会逐项显示缺失项和处理建议。
 
@@ -269,16 +270,17 @@ npm run tauri:build
 3. 按用户安装，无需管理员权限。
 4. 启动 Hearth；首次弹出数据目录对话框时，新用户选“否”使用 `%LOCALAPPDATA%\Hearth`。
 5. 打开“环境体检”，按提示配置聊天模型；需要代码任务时安装 Git 与 Codex CLI。
-6. 托盘菜单可以打开数据目录、日志目录和桌面助手；关窗只会隐藏到托盘，退出请用托盘菜单。
+6. 需要知识库时，在向导的“知识库（可选）”步骤或设置页点“一键安装”；安装后可托管启动，退出 Hearth 时自动关闭。
+7. 托盘菜单可以打开数据目录、日志目录和桌面助手；关窗只会隐藏到托盘，退出请用托盘菜单。
 
 ## 进一步压缩的边界
 
-当前 113.2 MiB 已经接近不改运行时的硬下限：
+当前 114.8 MiB 已经接近不改运行时的硬下限：
 
 - `node.exe` 82.97 MiB 无法再压，除非改用 small-icu、UPX 或自编译 Node；这会改变官方运行时假设。
 - 删除 npm 可再省约 7.8 MiB，但托管安装和运行时 npm 会失效。
 - 删除 PDF cMaps / 标准字体 / wasm 可再省约 3.2 MiB，但中文 PDF 提取会退化。
-- 再往下低于约 110 MiB，必须牺牲上述功能或更换 Node 运行时方案。
+- 再往下低于约 110 MiB，必须牺牲上述功能或更换 Node 运行时方案；当前版本已包含项目文件夹选择器等新增能力，仍保持在 115 MiB 目标内。
 - 内置 WebView2 离线运行时会额外增加约 150 MiB，不适合当前目标。
 - 内置 Codex 平台二进制会增加约 479 MiB，因此继续外置。
 

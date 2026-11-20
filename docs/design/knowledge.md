@@ -17,6 +17,19 @@ Hearth（SQLite/事件账本，唯一权威）
 
 ## 部署（本机）
 
+### Hearth 内的一键安装
+
+OpenViking 不在 Hearth 安装包里。首次配置向导的“知识库（可选）”步骤和设置 → 知识库都提供同一个入口：
+
+1. 检测 `uv` 与 `openviking-server`。
+2. 一键执行 `uv tool install --python 3.13 "openviking[local-embed]" --upgrade`，安装日志实时回显。
+3. 安装完成后按需启动服务：首次进入知识库或第一个知识库请求时拉起，Hearth 退出时关闭。
+4. 服务日志写入数据目录的 `logs/openviking.log`。
+
+不安装不影响聊天、任务、记忆等核心功能。
+
+### 手动安装
+
 ```bash
 uv tool install --python 3.13 "openviking[local-embed]" --upgrade
 ```
