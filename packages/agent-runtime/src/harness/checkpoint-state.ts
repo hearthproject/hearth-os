@@ -35,7 +35,8 @@ export function serializeAgentState(state: AgentToolState): SerializedAgentToolS
     ...(state.planPath ? { planPath: state.planPath } : {}),
     ...(state.mode ? { mode: state.mode } : {}),
     ...(state.activeSkills ? { activeSkills: [...state.activeSkills] } : {}),
-    ...(state.subagents ? { subagents: state.subagents.map((subagent) => ({ ...subagent })) } : {})
+    ...(state.subagents ? { subagents: state.subagents.map((subagent) => ({ ...subagent })) } : {}),
+    ...(state.activeWork ? { activeWork: state.activeWork.map((work) => ({ ...work })) } : {})
   };
 }
 
@@ -68,6 +69,9 @@ export function deserializeAgentState(input: SerializedAgentToolState | undefine
   const subagents: AgentSubagentState[] | undefined = Array.isArray(input.subagents)
     ? input.subagents.filter((subagent) => subagent && typeof subagent.id === "string")
     : undefined;
+  const activeWork = Array.isArray(input.activeWork)
+    ? input.activeWork.filter((work) => work && typeof work.id === "string" && (work.kind === "shell" || work.kind === "subagent"))
+    : undefined;
   return {
     workspaceRoot: input.workspaceRoot,
     readFiles,
@@ -80,7 +84,8 @@ export function deserializeAgentState(input: SerializedAgentToolState | undefine
     ...(typeof input.planPath === "string" ? { planPath: input.planPath } : {}),
     ...(input.mode === "plan" || input.mode === "build" ? { mode: input.mode as HarnessMode } : {}),
     ...(Array.isArray(input.activeSkills) ? { activeSkills: input.activeSkills.filter((skill): skill is string => typeof skill === "string") } : {}),
-    ...(subagents ? { subagents } : {})
+    ...(subagents ? { subagents } : {}),
+    ...(activeWork ? { activeWork } : {})
   };
 }
 

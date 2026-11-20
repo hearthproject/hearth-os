@@ -4,7 +4,7 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import type { RunBudget, TaskPermissions, TaskRecord, TaskWorktree } from "@hearth/core";
-import { zeroUsage, agentProfile, type AgentTool, type AgentToolResult, type SubagentType } from "@hearth/agent-runtime";
+import { zeroUsage, agentProfile, finishActiveWork, startActiveWork, type AgentTool, type AgentToolResult, type SubagentType } from "@hearth/agent-runtime";
 import { runNativeTask, type NativeRunOptions, type NativeRunResult } from "./native-executor.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import type { PreparedWorkspace } from "./workspace.ts";
@@ -48,7 +48,7 @@ function createDispatchTool(options: SubagentToolOptions, compatibility: boolean
 
   return {
     definition: compatibility ? delegationDefinition() : agentDefinition(),
-    async execute(input): Promise<AgentToolResult> {
+    async execute(input, context): Promise<AgentToolResult> {
       if (depth > 0) throw new Error("子代理不能继续委派，只允许单层委派");
       const args = input && typeof input === "object" ? input as Record<string, unknown> : {};
       const parsed = compatibility ? parseDelegationArgs(args) : parseAgentArgs(args);
@@ -73,7 +73,7 @@ function createDispatchTool(options: SubagentToolOptions, compatibility: boolean
         prompt: parsed.objective
       });
 
-      const launch = async (signal: AbortSignal): Promise<AgentToolResult> => {
+      const runAgentJob = async (signal: AbortSignal): Promise<AgentToolResult> => {
         const worktree = profile.isolation === "worktree" ? createChildWorktree(childId, options) : null;
         options.onStarted?.({
           childId,
@@ -165,6 +165,18 @@ function createDispatchTool(options: SubagentToolOptions, compatibility: boolean
           usage,
           metadata: { agentId: childId, subagentType: profile.type, agentStatus: "completed", branch: worktree.branch, commitSha: commit, transcriptPath }
         };
+      };
+
+      const launch = async (signal: AbortSignal): Promise<AgentToolResult> => {
+        startActiveWork(context.state, { id: childId, kind: "subagent", label: childTitle });
+        try {
+          const result = await runAgentJob(signal);
+          finishActiveWork(context.state, childId, "completed");
+          return result;
+        } catch (error) {
+          finishActiveWork(context.state, childId, signal.aborted ? "cancelled" : "failed");
+          throw error;
+        }
       };
 
       if (parsed.runInBackground) {

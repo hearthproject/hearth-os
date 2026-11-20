@@ -44,6 +44,8 @@ export interface ShellSession {
   exitCode: number | null;
   running: boolean;
   sandbox: ShellSandboxRun | null;
+  onExit?: ((info: { sessionId: string; exitCode: number | null }) => void) | undefined;
+  exitNotified?: boolean;
 }
 
 export interface ShellStartResult {
@@ -77,6 +79,8 @@ export async function startShellSession(options: {
   sandbox?: ShellSandboxOptions;
   unsafeNoSandbox?: boolean;
   signal?: AbortSignal;
+  onExit?: ((info: { sessionId: string; exitCode: number | null }) => void) | undefined;
+  onStarted?: ((info: { sessionId: string; command: string }) => void) | undefined;
 }): Promise<ShellStartResult> {
   const shell = options.shell ?? detectShell();
   const id = `sh_${randomUUID().slice(0, 8)}`;
@@ -151,9 +155,11 @@ export async function startShellSession(options: {
     outputPath,
     exitCode: null,
     running: true,
-    sandbox
+    sandbox,
+    ...(options.onExit ? { onExit: options.onExit } : {})
   };
   sessions.set(id, session);
+  options.onStarted?.({ sessionId: id, command: options.command });
   try {
     writeFileSync(outputPath, `$ ${redactSecrets(options.command)}\n`, "utf8");
   } catch {
@@ -182,10 +188,12 @@ export async function startShellSession(options: {
     }
     session.running = false;
     session.exitCode = 1;
+    notifyExit(session);
   });
   child.on("exit", (code) => {
     session.running = false;
     session.exitCode = code;
+    notifyExit(session);
   });
   if (options.stdin !== undefined) {
     child.stdin.write(options.stdin);
@@ -224,6 +232,12 @@ export async function runShellSession(options: {
     sandbox: session.sandbox,
     sandboxFailure: classifySandboxFailure(session)
   };
+}
+
+function notifyExit(session: ShellSession): void {
+  if (session.exitNotified) return;
+  session.exitNotified = true;
+  session.onExit?.({ sessionId: session.id, exitCode: session.exitCode });
 }
 
 function classifySandboxFailure(session: ShellSession): ShellSandboxFailure | null {
@@ -312,6 +326,7 @@ export function killShellSession(sessionId: string): boolean {
       // Process may already be gone.
     }
   }
+  notifyExit(session);
   return true;
 }
 

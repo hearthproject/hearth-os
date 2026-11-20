@@ -21,6 +21,7 @@ import { commandPolicyIssue } from "./harness/command-policy.ts";
 import { todoReadTool, todoWriteTool } from "./harness/todo.ts";
 import { submitPlanTool } from "./harness/plan.ts";
 import { diagnosticsTool, runTestsTool } from "./harness/verification.ts";
+import { finishActiveWork, runningActiveWork, startActiveWork } from "./harness/active-work.ts";
 
 const MAX_READ_BYTES = 2 * 1024 * 1024;
 const MAX_LIST_ENTRIES = 500;
@@ -755,7 +756,13 @@ const shellTool: AgentTool = {
       ...(env ? { env } : {}),
       ...(stdin !== undefined ? { stdin } : {}),
       ...(sandbox ? { sandbox } : {}),
-      ...(unsafeNoSandbox ? { unsafeNoSandbox: true } : {})
+      ...(unsafeNoSandbox ? { unsafeNoSandbox: true } : {}),
+      onStarted: ({ sessionId }: { sessionId: string }) => {
+        startActiveWork(context.state, { id: sessionId, kind: "shell", label: command });
+      },
+      onExit: ({ sessionId, exitCode }: { sessionId: string; exitCode: number | null }) => {
+        finishActiveWork(context.state, sessionId, exitCode === 0 ? "completed" : "failed", exitCode);
+      }
     };
     if (args.background === true) {
       const started = await startShellSession(shellOptions);
@@ -978,7 +985,15 @@ const finishTaskTool: AgentTool = {
       additionalProperties: false
     }
   },
-  async execute(input) {
+  async execute(input, context) {
+    const active = runningActiveWork(context.state);
+    if (active.length > 0) {
+      throw new Error([
+        "还有后台工作未结束，不能调用 finish_task。",
+        ...active.map((work) => `- ${work.kind} ${work.id}${work.label ? `：${work.label}` : ""}`),
+        "请先用 shell_wait / shell_kill / agent_wait / agent_kill 处理，或等待它们结束。"
+      ].join("\n"));
+    }
     const args = objectArgs(input);
     const summary = stringArg(args, "summary");
     const outputs = Array.isArray(args.outputs) ? args.outputs.filter((item): item is string => typeof item === "string") : [];

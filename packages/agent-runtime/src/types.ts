@@ -141,6 +141,16 @@ export interface AgentSubagentState {
   endedAt?: number;
 }
 
+export interface AgentActiveWork {
+  id: string;
+  kind: "shell" | "subagent";
+  status: "running" | "completed" | "failed" | "lost" | "cancelled";
+  label?: string;
+  startedAt: number;
+  endedAt?: number;
+  exitCode?: number | null;
+}
+
 export interface AgentProgress {
   filesRead: string[];
   filesModified: string[];
@@ -162,6 +172,7 @@ export interface AgentToolState {
   mode?: HarnessMode;
   activeSkills?: string[];
   subagents?: AgentSubagentState[];
+  activeWork?: AgentActiveWork[];
 }
 
 export interface SerializedAgentToolState {
@@ -177,6 +188,7 @@ export interface SerializedAgentToolState {
   mode?: HarnessMode;
   activeSkills?: string[];
   subagents?: AgentSubagentState[];
+  activeWork?: AgentActiveWork[];
 }
 
 export interface AgentTool {

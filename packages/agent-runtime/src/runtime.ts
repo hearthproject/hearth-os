@@ -5,6 +5,7 @@ import type { RunUsage } from "@hearth/core";
 import { compactAgentMessages, compactAgentMessagesWithSummary, estimateMessageTokens } from "./compaction.ts";
 import { createAgentState, progressSummary } from "./harness/file-state.ts";
 import { serializeAgentState } from "./harness/checkpoint-state.ts";
+import { markLostActiveWork } from "./harness/active-work.ts";
 import { planModeAllowsCommand, planModeAllowsTool } from "./harness/plan.ts";
 import { buildPostCompactContext } from "./harness/post-compact.ts";
 import { todoReminder } from "./harness/todo.ts";
@@ -67,6 +68,13 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   let lastContextSource: "provider" | "estimate" = "estimate";
 
   const emit = (event: RuntimeEvent): void => options.onEvent?.(event);
+  const lostWork = options.resume ? markLostActiveWork(state) : [];
+  if (lostWork.length > 0) {
+    emit({
+      type: "notice",
+      message: `上一轮有 ${lostWork.length} 个后台工作没有确认结束，已标记为 lost；不要假设它们仍在运行，请先检查工作区或重新启动。`
+    });
+  }
   const aborted = (): boolean => signal.aborted;
   const totalTokens = (): number => usage.inputTokens + usage.outputTokens;
   const executingPath = join(options.outDir, ".hearth", "executing.json");

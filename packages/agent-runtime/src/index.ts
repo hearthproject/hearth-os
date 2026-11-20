@@ -21,6 +21,7 @@ export * from "./harness/snapshots.ts";
 export * from "./harness/command-policy.ts";
 export * from "./harness/sandbox.ts";
 export * from "./harness/checkpoint-state.ts";
+export * from "./harness/active-work.ts";
 export * from "./harness/agent-profiles.ts";
 export * from "./harness/goal.ts";
 export * from "./harness/memory.ts";

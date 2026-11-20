@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runAgent, zeroUsage } from "./runtime.ts";
+import { createAgentState } from "./harness/file-state.ts";
+import { finishActiveWork } from "./harness/active-work.ts";
 import { createBuiltinTools } from "./tools.ts";
 import { createFakeModel, fakeToolCall, fakeUsage, type FakeModelStep } from "./test-support/fake-model.ts";
 import type { AgentCheckpoint, AgentTool, RuntimeEvent } from "./types.ts";
@@ -174,6 +176,72 @@ describe("agent runtime long-run fixtures", () => {
     expect(result.status).toBe("completed");
     expect(sawMarker).toBe(true);
     expect(existsSync(marker)).toBe(false);
+  });
+
+  it("refuses to finish while background work is running", async () => {
+    const root = workspace(roots);
+    const outDir = join(root, "out");
+    const state = createAgentState(root);
+    state.activeWork = [{ id: "sh_test", kind: "shell", status: "running", label: "npm run dev", startedAt: Date.now() }];
+    const releaseTool: AgentTool = {
+      definition: { name: "release", description: "release", parameters: { type: "object", properties: {} } },
+      async execute(_input, context) {
+        finishActiveWork(context.state, "sh_test", "completed", 0);
+        return { content: "released" };
+      }
+    };
+    const fake = createFakeModel([
+      { content: "", toolCalls: [fakeToolCall("finish_task", { summary: "done" })], finishReason: "tool_calls" },
+      { content: "", toolCalls: [fakeToolCall("release", {})], finishReason: "tool_calls" },
+      { content: "", toolCalls: [fakeToolCall("finish_task", { summary: "done" })], finishReason: "tool_calls" }
+    ]);
+    const result = await runAgent({
+      model: fake.model,
+      tools: [releaseTool, ...createBuiltinTools()],
+      goal: "active work",
+      systemPrompt: "system",
+      workspaceRoot: root,
+      outDir,
+      permissions: { tools: ["release", "finish_task"], readRoots: [root], writeRoots: [root], networkHosts: [] },
+      budget: {},
+      state
+    });
+
+    expect(result.status).toBe("completed");
+    expect(result.messages.some((message) => message.role === "tool" && message.content.includes("后台工作未结束"))).toBe(true);
+    expect(state.activeWork?.[0]?.status).toBe("completed");
+  });
+
+  it("marks background work lost on resume and tells the model", async () => {
+    const root = workspace(roots);
+    const state = createAgentState(root);
+    state.activeWork = [{ id: "sh_test", kind: "shell", status: "running", label: "npm run dev", startedAt: Date.now() }];
+    const fake = createFakeModel([
+      { content: "", toolCalls: [fakeToolCall("finish_task", { summary: "done" })], finishReason: "tool_calls" }
+    ]);
+    const events: RuntimeEvent[] = [];
+    const result = await runAgent({
+      model: fake.model,
+      tools: createBuiltinTools(),
+      goal: "resume",
+      systemPrompt: "system",
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      permissions: { tools: ["finish_task"], readRoots: [root], writeRoots: [root], networkHosts: [] },
+      budget: {},
+      resume: {
+        messages: [{ role: "system", content: "system" }, { role: "user", content: "goal" }],
+        usage: zeroUsage(),
+        turns: 0,
+        toolCalls: 0,
+        state
+      },
+      onEvent: (event) => { events.push(event); }
+    });
+
+    expect(result.status).toBe("completed");
+    expect(state.activeWork?.[0]?.status).toBe("lost");
+    expect(events.some((event) => event.type === "notice" && event.message.includes("标记为 lost"))).toBe(true);
   });
 
   it("reports and clears a stale execution marker before starting", async () => {
