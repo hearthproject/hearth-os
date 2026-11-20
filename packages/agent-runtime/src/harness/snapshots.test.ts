@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -77,6 +77,34 @@ describe("per-turn snapshots", () => {
       expect(readFileSync(existing, "utf8")).toBe("two\n");
       expect(result.content).toContain("失败 existing.md");
       expect(result.metadata?.failures).toEqual([{ path: "existing.md", reason: "快照文件缺失" }]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps only the latest 100 turn manifests", async () => {
+    const root = mkdtempSync(join(tmpdir(), "hearth-turn-prune-"));
+    try {
+      const out = join(root, "out");
+      const history = join(out, ".hearth", "file-history");
+      mkdirSync(history, { recursive: true });
+      for (let turn = 1; turn <= 101; turn += 1) {
+        mkdirSync(join(history, `turn-${turn}`), { recursive: true });
+      }
+      const file = join(root, "note.md");
+      writeFileSync(file, "one\n", "utf8");
+      const state = createAgentState(root);
+      const context: AgentToolContext = {
+        workspaceRoot: root,
+        outDir: out,
+        state,
+        permissions: { readRoots: [root], writeRoots: [root, out], networkHosts: [], tools: [] },
+        signal: new AbortController().signal
+      };
+      state.turn = 101;
+      snapshotBeforeMutation(context, file);
+      expect(readdirSync(history).filter((name) => /^turn-\d+$/.test(name))).toHaveLength(100);
+      expect(existsSync(join(history, "turn-1"))).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
