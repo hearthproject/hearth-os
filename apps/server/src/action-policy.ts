@@ -1,4 +1,5 @@
 import type { ActionClass } from "@hearth/core";
+import { classifyShellCommand, shellScriptFromArgv } from "@hearth/agent-runtime";
 import type { ResolvedAction } from "./action-resolver.ts";
 
 export interface ActionPolicyClassification {
@@ -91,7 +92,21 @@ export function classifyApprovalKind(kind: string, action: ResolvedAction | null
 }
 
 export function classifyResolvedAction(action: ResolvedAction): ActionPolicyClassification {
-  if (action.kind === "shell") return classification("local_exec", "在本机运行命令。", false, false);
+  if (action.kind === "shell") {
+    const script = action.command ? shellScriptFromArgv(action.command.argv, action.command.shell) : null;
+    if (script) {
+      const shell = classifyShellCommand(script);
+      if (shell.kind === "destructive") {
+        return classification("local_delete", `破坏性命令需要确认：${shell.reason}`, true, false);
+      }
+      if (shell.kind === "unknown") {
+        return classification("unknown", `无法静态确认的命令需要确认：${shell.reason}`, true, false);
+      }
+      if (shell.kind === "read-only") return classification("local_read", `只读命令：${shell.reason}`, false, false);
+      return classification("local_exec", `会修改状态的命令：${shell.reason}`, false, false);
+    }
+    return classification("local_exec", "在本机运行命令。", false, false);
+  }
   if (action.kind === "file_write") return classification("local_write", "修改本机文件。", false, false);
   if (action.kind === "file_delete") return classification("local_delete", "删除本机文件。", false, false);
   if (action.kind === "desktop") return classification("desktop", "操作本机桌面。", false, false);

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { actionDigest, verifyResolvedAction } from "./action-resolver.ts";
+import { actionDigest, decideActionPolicy, verifyResolvedAction } from "./action-resolver.ts";
 import { resolveToolAction } from "./scheduler.ts";
 
 const roots: string[] = [];
@@ -75,6 +75,41 @@ describe("native tool action binding", () => {
       permissionMode: "guarded",
       context: "interactive"
     })).toThrow(/超出会话根目录/);
+  });
+
+  it("classifies shell tool commands by argv", () => {
+    const root = tempRoot();
+    const status = resolveToolAction({
+      toolName: "shell",
+      argumentsValue: { command: "git status --short" },
+      summary: "查看状态",
+      workspaceRoot: root,
+      permissionMode: "guarded",
+      context: "interactive"
+    });
+    expect(status?.kind).toBe("shell");
+    expect(decideActionPolicy(status!)).toMatchObject({ allowed: true, requiresApproval: false });
+
+    const destructive = resolveToolAction({
+      toolName: "shell",
+      argumentsValue: { command: "Remove-Item -Recurse -Force out" },
+      summary: "删除目录",
+      workspaceRoot: root,
+      permissionMode: "guarded",
+      context: "interactive"
+    });
+    expect(destructive?.kind).toBe("shell");
+    expect(decideActionPolicy(destructive!)).toMatchObject({ allowed: true, requiresApproval: true });
+
+    const unknown = resolveToolAction({
+      toolName: "shell",
+      argumentsValue: { command: "frobnicate --all" },
+      summary: "未知命令",
+      workspaceRoot: root,
+      permissionMode: "workspace",
+      context: "interactive"
+    });
+    expect(decideActionPolicy(unknown!)).toMatchObject({ allowed: true, requiresApproval: true });
   });
 
   it("binds an MCP tool call to its server, tool and full arguments", () => {

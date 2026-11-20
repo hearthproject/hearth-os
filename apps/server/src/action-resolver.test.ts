@@ -91,6 +91,34 @@ describe("action resolver", () => {
     expect(decideActionPolicy(readonly).allowed).toBe(false);
   });
 
+  it("classifies shell scripts by argv before approval", () => {
+    const root = tempRoot();
+    const readOnly = resolveAction({
+      proposal: { kind: "shell", summary: "status", command: { executable: process.execPath, cwd: root, argv: ["-c", "git status"], shell: "sh" } },
+      sessionRoot: root,
+      permissionMode: "guarded",
+      context: "interactive"
+    });
+    expect(decideActionPolicy(readOnly)).toMatchObject({ allowed: true, requiresApproval: false });
+
+    const destructive = resolveAction({
+      proposal: { kind: "shell", summary: "delete", command: { executable: process.execPath, cwd: root, argv: ["-c", "rm -rf build"], shell: "sh" } },
+      sessionRoot: root,
+      permissionMode: "guarded",
+      context: "interactive"
+    });
+    expect(decideActionPolicy(destructive)).toMatchObject({ allowed: true, requiresApproval: true });
+    expect(decideActionPolicy({ ...destructive, context: "scheduled" }, { preauthorized: false })).toMatchObject({ allowed: false, requiresApproval: false });
+
+    const unknown = resolveAction({
+      proposal: { kind: "shell", summary: "unknown", command: { executable: process.execPath, cwd: root, argv: ["-c", "frobnicate --all"], shell: "sh" } },
+      sessionRoot: root,
+      permissionMode: "workspace",
+      context: "interactive"
+    });
+    expect(decideActionPolicy(unknown)).toMatchObject({ allowed: true, requiresApproval: true });
+  });
+
   it("runs all local actions directly and only gates external writes", () => {
     const root = tempRoot();
     const file = join(root, "note.txt");
