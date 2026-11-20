@@ -90,6 +90,8 @@ native-executor
 - `apps/server/src/scheduler.test.ts`
   - full-permission sensitive shell call is auto-approved with zero pending approvals;
   - shell action binding finds the absolute Windows PowerShell path.
+- `apps/server/src/app.test.ts`
+  - task creation accepts `permissions.sandboxMode` and persists it.
 - Full gate: `npm run typecheck`; `npm test`.
 - Packaging gate: `node scripts/build-server.mjs` stages the runner and dependency closure.
 
@@ -106,6 +108,6 @@ native-executor
 ### 3.3 Current verification record
 
 - `npm run typecheck`: passed.
-- `npm test`: 124 test files, 895 tests, all passed.
+- `npm test`: 124 test files, 896 tests, all passed.
 - Windows ACL provider integration test: passed against the real runner.
 - `node scripts/build-server.mjs`: completed; runner and dependency closure staged.
