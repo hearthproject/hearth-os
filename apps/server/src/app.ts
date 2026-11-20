@@ -383,7 +383,7 @@ const optionalExecutorText = (max: number) =>
   );
 
 const executorSettingsSchema = z.object({
-  defaultApprovalMode: z.enum(["necessary", "full"]).optional(),
+  defaultApprovalMode: z.enum(["necessary", "workspace", "full"]).optional(),
   preferredExecutorId: z.enum(EXECUTOR_IDS).nullable().optional(),
   concurrency: z.partialRecord(z.enum(EXECUTOR_IDS), z.number().int().min(1).max(4)).optional(),
   executors: z.partialRecord(z.enum(EXECUTOR_IDS), z.object({
@@ -401,7 +401,7 @@ const scheduleSchema = z.object({
   cron: z.string().trim().min(1).max(200),
   timezone: z.string().trim().min(1).max(80).optional(),
   executorId: z.enum(EXECUTOR_IDS).optional(),
-  approvalMode: z.enum(["necessary", "full"]).optional(),
+  approvalMode: z.enum(["necessary", "workspace", "full"]).optional(),
   taskKind: z.enum(["delivery", "workspace", "general"]).optional(),
   enabled: z.boolean().optional(),
   catchUpPolicy: z.enum(["skip", "run_once", "run_all_bounded"]).optional(),
@@ -729,7 +729,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
           argumentsValue: job.args,
           summary,
           workspaceRoot: task.outputDir,
-          fullPermission: false,
+          permissionMode: service.permissionModeForTask(task),
           context: "interactive"
         });
       } catch (error) {

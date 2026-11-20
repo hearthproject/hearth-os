@@ -41,7 +41,7 @@ const attachmentSchema = z.object({
 
 const conversationSettingsSchema = z.object({
   executorEnabled: z.partialRecord(z.enum(EXECUTOR_IDS), z.boolean()).optional(),
-  approvalMode: z.enum(["necessary", "full"]).optional(),
+  approvalMode: z.enum(["necessary", "workspace", "full"]).optional(),
   executionMode: z.enum(["quick", "standard", "deep"]).optional(),
   preferredExecutorId: z.enum(EXECUTOR_IDS).nullable().optional()
 }).strict();

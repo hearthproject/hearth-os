@@ -11,11 +11,11 @@ import type {
   RuntimeEvent
 } from "@hearth/agent-runtime";
 import { deserializeAgentState } from "@hearth/agent-runtime";
-import type { BudgetDimension, BudgetExhaustion, ContextItem, ContextSettings, DelegationJob, DelegationResult, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, RunBudget, RunCheckpointProof, RunCheckpointRecord, RunRecord, TaskError, TaskFollowUpRecord, TaskLease, TaskProgressDetail, TaskRecord } from "@hearth/core";
+import type { ApprovalMode, BudgetDimension, BudgetExhaustion, ContextItem, ContextSettings, DelegationJob, DelegationResult, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, RunBudget, RunCheckpointProof, RunCheckpointRecord, RunRecord, TaskError, TaskFollowUpRecord, TaskLease, TaskProgressDetail, TaskRecord } from "@hearth/core";
 import { runCodex } from "@hearth/codex-executor";
 import type { DshApprovalOutcome, DshApprovalRequest, DshContextEvent } from "@hearth/deepseek-executor";
 import type { ApprovalRequest, ApprovalManager, PendingToolApproval, ToolApprovalDecision } from "./approvals.ts";
-import { actionDigest, resolveAction, type ActionFileTarget, type ActionProposal, type ResolvedAction } from "./action-resolver.ts";
+import { actionDigest, decideActionPolicy, resolveAction, type ActionFileTarget, type ActionProposal, type PermissionMode, type ResolvedAction } from "./action-resolver.ts";
 import { createFileArtifact, missingExpectedOutputs, publishArtifacts } from "./artifacts.ts";
 import { diffWorkspace, formatChangeManifest, snapshotWorkspace, type WorkspaceSnapshot } from "./change-manifest.ts";
 import { CONTEXT_BLOB_DIR, EXECUTOR_SETTINGS_PATH, GIT_CACHE_DIR, MODEL_SETTINGS_PATH, REPO_ROOT, SOURCE_CONTENT_DIR, WORKSPACE_DIR } from "./config.ts";
@@ -879,7 +879,7 @@ export class HearthScheduler {
         risk: "high",
         sideEffectClass: "external_irreversible"
       },
-      permissionMode: this.service.approvalModeForTask(task) === "full" ? "full" : "guarded",
+      permissionMode: this.service.permissionModeForTask(task),
       context: "interactive",
       sessionRoot: prepared.root
     });
@@ -1405,10 +1405,13 @@ export class HearthScheduler {
     try {
       this.recordRunInput(task, run, pendingInput);
       const expectedOutputs = expectedOutputsForTask(task);
-      const fullPermission = this.service.approvalModeForTask(task) === "full";
+      const approvalMode = this.service.approvalModeForTask(task);
+      const fullPermission = approvalMode === "full";
       const permissionNote = fullPermission
         ? "\n\n完全权限：当前对话已授权你自主决策。不要向用户提问或等待确认；遇到不确定项时选择最安全、可撤销的处理方式，并在最终结果中说明假设。"
-        : "";
+        : approvalMode === "workspace"
+          ? "\n\n工作区权限：当前任务在隔离工作区内运行，可以直接读写工作区文件，不必为文件改动反复等待确认；运行命令、访问网络、发邮件、操作桌面等仍会请求审批。遇到需要审批的动作时继续推进其他可做的部分。"
+          : "";
       const executorModelSettings = this.modelSettingsForExecutor(executorId);
       const nativeSettings = executorId === "native" ? executorModelSettings : null;
       const dshSettings = executorId === "deepseek-harness" ? executorModelSettings : null;
@@ -1748,7 +1751,8 @@ export class HearthScheduler {
     if (input.signal.aborted) return { allowed: false, reason: "任务已取消" };
     const argumentsValue = approvalArguments(input.request.call.arguments);
     const summary = toolApprovalSummary(toolName, input.request.call.arguments);
-    const fullPermission = this.service.approvalModeForTask(input.task) === "full";
+    const permissionMode = this.service.permissionModeForTask(input.task);
+    const context = this.service.store.listScheduleRunByTask(input.task.id) ? "scheduled" as const : "interactive" as const;
     let action: ResolvedAction;
     try {
       const resolved = resolveToolAction({
@@ -1757,8 +1761,8 @@ export class HearthScheduler {
         mcpArgumentsValue: input.request.call.arguments,
         summary,
         workspaceRoot: input.workspaceRoot,
-        fullPermission,
-        context: this.service.store.listScheduleRunByTask(input.task.id) ? "scheduled" : "interactive"
+        permissionMode,
+        context
       });
       if (!resolved) {
         return { allowed: false, reason: `敏感工具 ${toolName} 无法解析为可绑定动作，已拒绝执行` };
@@ -1767,19 +1771,27 @@ export class HearthScheduler {
     } catch (error) {
       return { allowed: false, reason: `敏感工具 ${toolName} 无法绑定到真实动作：${errorMessage(error)}` };
     }
-    if (fullPermission) {
-      this.recordAutoApprovedTool(input.task, input.run, {
-        toolName,
-        arguments: argumentsValue,
-        metadata: {
-          actionId: action.actionId,
-          actionDigest: action.actionDigest,
-          actionKind: action.kind,
-          permissionMode: action.permissionMode,
-          risk: action.risk
-        }
-      });
-      return { allowed: true };
+    if (permissionMode === "full" || permissionMode === "workspace") {
+      const policy = permissionMode === "full"
+        ? { allowed: true, requiresApproval: false, reason: "完全访问模式允许此动作" }
+        : decideActionPolicy(action, { permissionMode, context, preauthorized: false });
+      if (!policy.allowed) return { allowed: false, reason: policy.reason };
+      if (!policy.requiresApproval) {
+        this.recordAutoApprovedTool(input.task, input.run, {
+          toolName,
+          arguments: argumentsValue,
+          policy: permissionMode === "workspace" ? "workspace.reversible" : "conversation.full",
+          metadata: {
+            actionId: action.actionId,
+            actionDigest: action.actionDigest,
+            actionKind: action.kind,
+            permissionMode: action.permissionMode,
+            risk: action.risk,
+            policy: policy.reason
+          }
+        });
+        return { allowed: true };
+      }
     }
     const decision = await this.requestToolApproval({
       task: input.task,
@@ -1893,7 +1905,7 @@ export class HearthScheduler {
   private recordAutoApprovedTool(
     task: TaskRecord,
     run: RunRecord,
-    input: { toolName: string; arguments: unknown; metadata?: Record<string, unknown> }
+    input: { toolName: string; arguments: unknown; metadata?: Record<string, unknown>; policy?: string }
   ): void {
     try {
       const event = this.service.store.appendEvent({
@@ -1907,7 +1919,7 @@ export class HearthScheduler {
           arguments: input.arguments,
           ...(input.metadata ?? {}),
           conversationId: task.conversationId ?? null,
-          policy: "conversation.full",
+          policy: input.policy ?? "conversation.full",
           effectId: null
         }
       });
@@ -2062,7 +2074,7 @@ export class HearthScheduler {
     target: { targetExecutor: ExecutorId | null; highRisk: boolean; reason: string };
     diagnosis: FailureDiagnosis;
     settings: ContextSettings;
-    approvalMode: "necessary" | "full";
+    approvalMode: ApprovalMode;
     retriesUsed: number;
     handoffsUsed: number;
     attemptedExecutors: Set<ExecutorId>;
@@ -2652,13 +2664,13 @@ export function resolveToolAction(input: {
   mcpArgumentsValue?: unknown;
   summary: string;
   workspaceRoot: string;
-  fullPermission: boolean;
+  permissionMode: PermissionMode;
   context: "interactive" | "scheduled";
 }): ResolvedAction | null {
   const args = input.argumentsValue && typeof input.argumentsValue === "object"
     ? input.argumentsValue as Record<string, unknown>
     : {};
-  const permissionMode = input.fullPermission ? "full" as const : "guarded" as const;
+  const permissionMode = input.permissionMode;
   let proposal: ActionProposal | null = null;
   const mcp = parseMcpToolName(input.toolName);
   if (mcp) {

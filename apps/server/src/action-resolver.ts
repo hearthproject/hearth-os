@@ -286,6 +286,15 @@ export function decideActionPolicy(action: ResolvedAction, input: ActionPolicyIn
     }
     return { allowed: true, requiresApproval: true, reason: "工作区模式需要确认高风险动作" };
   }
+  if (permissionMode === "workspace") {
+    if (action.kind === "file_write" && action.sideEffectClass === "local_reversible") {
+      return { allowed: true, requiresApproval: false, reason: "工作区模式允许可逆的文件写入" };
+    }
+    if (!interactive && !input.preauthorized) {
+      return { allowed: false, requiresApproval: false, reason: "非交互上下文需要明确的预先授权" };
+    }
+    return { allowed: true, requiresApproval: true, reason: "工作区模式需要确认非写入动作" };
+  }
   return { allowed: true, requiresApproval: false, reason: "工作区模式允许低风险动作" };
 }
 

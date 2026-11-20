@@ -586,7 +586,7 @@ export class ApprovalManager {
   }
 
   private permissionModeForTask(task: TaskRecord): PermissionMode {
-    return this.service.approvalModeForTask(task) === "full" ? "full" : "guarded";
+    return this.service.permissionModeForTask(task);
   }
 
   private revalidateAction(approval: ApprovalRecord, options: ApprovalDecisionOptions): void {

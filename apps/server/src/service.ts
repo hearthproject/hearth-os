@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { resolve } from "node:path";
+import type { PermissionMode } from "./action-resolver.ts";
 import type {
   ApprovalListItem,
   ApprovalMode,
@@ -205,6 +206,21 @@ export class HearthService {
     const executorId = project ? "native" : input.executorId ?? "native";
     const taskKind = input.taskKind ?? (project || workspacePath ? "workspace" : "general");
     const expectedOutputs = input.expectedOutputs ?? ["result.md"];
+    const workspaceScoped = taskKind === "workspace" || Boolean(project);
+    const defaultRoot = workspacePath ?? (project ? resolve(project.path) : null);
+    let permissions = input.permissions ? { ...input.permissions } : undefined;
+    if (!permissions && (workspaceScoped || workspacePath)) {
+      permissions = {
+        readRoots: defaultRoot ? [defaultRoot] : [],
+        writeRoots: defaultRoot ? [defaultRoot] : [],
+        networkHosts,
+        tools: []
+      };
+    }
+    if (permissions && workspaceScoped) {
+      permissions.approvalMode ??= "workspace";
+      permissions.sandboxMode ??= "workspace-write";
+    }
     const task: TaskRecord = {
       id,
       ...(input.executionMode ? { executionMode: input.executionMode } : {}),
@@ -228,18 +244,7 @@ export class HearthService {
       executorId,
       taskKind,
       expectedOutputs,
-      ...(input.permissions
-        ? { permissions: input.permissions }
-        : workspacePath
-          ? {
-              permissions: {
-                readRoots: [realpathSync.native(workspacePath)],
-                writeRoots: [realpathSync.native(workspacePath)],
-                networkHosts,
-                tools: []
-              }
-            }
-          : {}),
+      ...(permissions ? { permissions } : {}),
       methodId: input.methodId ?? null,
       methodVersion: input.methodVersion ?? null,
       ...(project ? { projectId: project.id } : {})
@@ -399,6 +404,13 @@ export class HearthService {
     return task.permissions?.approvalMode
       ?? this.conversationSettings(task.conversationId)?.approvalMode
       ?? "necessary";
+  }
+
+  permissionModeForTask(task: TaskRecord): PermissionMode {
+    const mode = this.approvalModeForTask(task);
+    if (mode === "full") return "full";
+    if (mode === "workspace") return "workspace";
+    return "guarded";
   }
 
   appendChatMessage(message: ChatMessageRecord): ChatMessageRecord {

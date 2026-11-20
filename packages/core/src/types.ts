@@ -20,7 +20,7 @@ export type ExecutorId = (typeof EXECUTOR_IDS)[number];
 export const FIRST_CLASS_EXECUTOR_IDS = ["deepseek-harness", "codex", "native"] as const;
 export type FirstClassExecutorId = (typeof FIRST_CLASS_EXECUTOR_IDS)[number];
 
-export const APPROVAL_MODES = ["necessary", "full"] as const;
+export const APPROVAL_MODES = ["necessary", "workspace", "full"] as const;
 export type ApprovalMode = (typeof APPROVAL_MODES)[number];
 
 export const SANDBOX_MODES = ["read-only", "workspace-write", "danger-full-access"] as const;

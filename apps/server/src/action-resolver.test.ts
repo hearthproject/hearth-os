@@ -91,6 +91,53 @@ describe("action resolver", () => {
     expect(decideActionPolicy(readonly).allowed).toBe(false);
   });
 
+  it("auto-allows reversible workspace writes but still gates shell, deletes, MCP and external actions", () => {
+    const root = tempRoot();
+    const file = join(root, "note.txt");
+    writeFileSync(file, "hello", "utf8");
+    const write = resolveAction({
+      proposal: { kind: "file_write", summary: "replace note", files: [{ path: file, mode: "replace" }] },
+      sessionRoot: root,
+      permissionMode: "workspace"
+    });
+    expect(decideActionPolicy(write, { preauthorized: false })).toMatchObject({ allowed: true, requiresApproval: false });
+
+    const executable = tempExecutable(root);
+    const shell = resolveAction({
+      proposal: { kind: "shell", summary: "run", command: { executable, cwd: root } },
+      sessionRoot: root,
+      permissionMode: "workspace"
+    });
+    expect(decideActionPolicy(shell, { preauthorized: false })).toMatchObject({ allowed: true, requiresApproval: true });
+
+    const deletion = resolveAction({
+      proposal: { kind: "file_delete", summary: "delete note", files: [{ path: file, mode: "delete" }] },
+      sessionRoot: root,
+      permissionMode: "workspace"
+    });
+    expect(decideActionPolicy(deletion, { preauthorized: false })).toMatchObject({ allowed: true, requiresApproval: true });
+
+    const mcp = resolveAction({
+      proposal: {
+        kind: "mcp",
+        summary: "调用 MCP",
+        mcp: { serverId: "mcp_one", toolName: "send", argumentsDigest: actionDigest({ text: "one" }) }
+      },
+      sessionRoot: root,
+      permissionMode: "workspace"
+    });
+    expect(decideActionPolicy(mcp, { preauthorized: false })).toMatchObject({ allowed: true, requiresApproval: true });
+
+    const network = resolveAction({
+      proposal: { kind: "network", summary: "fetch", network: { host: "example.com", method: "GET" } },
+      sessionRoot: root,
+      permissionMode: "workspace",
+      context: "scheduled"
+    });
+    expect(decideActionPolicy(network, { preauthorized: false })).toMatchObject({ allowed: false, requiresApproval: false });
+    expect(decideActionPolicy(network, { preauthorized: true })).toMatchObject({ allowed: true, requiresApproval: true });
+  });
+
   it("produces the same digest regardless of environment key order", () => {
     const root = tempRoot();
     const executable = tempExecutable(root);

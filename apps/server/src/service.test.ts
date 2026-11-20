@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { HearthStore } from "@hearth/eventlog";
 import { HearthService } from "./service.ts";
 
@@ -10,7 +13,24 @@ describe("Hearth service agent metadata", () => {
     expect(task.executorId).toBe("native");
     expect(task.taskKind).toBe("general");
     expect(task.expectedOutputs).toEqual(["result.md"]);
+    expect(service.approvalModeForTask(task)).toBe("necessary");
     store.close();
+  });
+
+  it("defaults workspace tasks to workspace approval and workspace-write sandbox", () => {
+    const store = new HearthStore(":memory:");
+    const service = new HearthService(store);
+    const root = mkdtempSync(join(tmpdir(), "hearth-service-"));
+    try {
+      const task = service.createTask({ title: "改代码", goal: "修改 README", workspacePath: root });
+      expect(task.taskKind).toBe("workspace");
+      expect(task.permissions?.approvalMode).toBe("workspace");
+      expect(task.permissions?.sandboxMode).toBe("workspace-write");
+      expect(service.permissionModeForTask(task)).toBe("workspace");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      store.close();
+    }
   });
 
   it("lets task-scoped permissions override the conversation approval mode", () => {

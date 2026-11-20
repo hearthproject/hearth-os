@@ -20,7 +20,7 @@ describe("native tool action binding", () => {
         argumentsValue: { path: `${toolName}.out` },
         summary: "生成办公文件",
         workspaceRoot: root,
-        fullPermission: false,
+        permissionMode: "guarded",
         context: "interactive"
       });
       expect(action?.kind).toBe("file_write");
@@ -48,7 +48,7 @@ describe("native tool action binding", () => {
       argumentsValue: { patch },
       summary: "应用补丁修改工作区文件",
       workspaceRoot: root,
-      fullPermission: false,
+      permissionMode: "guarded",
       context: "interactive"
     });
 
@@ -72,7 +72,7 @@ describe("native tool action binding", () => {
       },
       summary: "越界补丁",
       workspaceRoot: root,
-      fullPermission: false,
+      permissionMode: "guarded",
       context: "interactive"
     })).toThrow(/超出会话根目录/);
   });
@@ -86,7 +86,7 @@ describe("native tool action binding", () => {
       mcpArgumentsValue: argumentsValue,
       summary: "调用 MCP 工具：mcp_one/echo",
       workspaceRoot: root,
-      fullPermission: false,
+      permissionMode: "guarded",
       context: "interactive"
     });
     expect(action?.kind).toBe("mcp");
@@ -105,7 +105,7 @@ describe("native tool action binding", () => {
       argumentsValue: { patch: "not a patch" },
       summary: "无效补丁",
       workspaceRoot: root,
-      fullPermission: false,
+      permissionMode: "guarded",
       context: "interactive"
     })).toBeNull();
   });

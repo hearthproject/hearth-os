@@ -397,7 +397,15 @@ export class ScheduleService {
         conversationId: schedule.conversationId,
         executorId: schedule.executorId,
         taskKind: schedule.taskKind,
-        expectedOutputs: ["result.md"]
+        expectedOutputs: ["result.md"],
+        permissions: {
+          readRoots: [],
+          writeRoots: [],
+          networkHosts: [],
+          tools: [],
+          approvalMode: schedule.approvalMode,
+          sandboxMode: schedule.approvalMode === "full" ? "danger-full-access" : "workspace-write"
+        }
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
