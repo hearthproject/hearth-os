@@ -723,6 +723,8 @@ export const api = {
     }),
   artifactUrl: (taskId: string, artifactId: string) =>
     `/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}`,
+  attachmentUrl: (attachmentId: string) =>
+    `/api/attachments/${encodeURIComponent(attachmentId)}`,
   downloadExport: () => {
     window.location.assign("/api/export");
   }

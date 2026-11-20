@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
@@ -13,22 +13,21 @@ import {
   CornerDownRight,
   FileText,
   Folder,
-  FolderPlus,
   Loader2,
   Paperclip,
   PauseCircle,
-  Plus,
   Settings2,
   Sparkles,
   ShieldAlert,
   SlidersHorizontal,
-  Trash2,
   X
 } from "lucide-react";
 import { ApiError, api, chatStream } from "../lib/api.ts";
+import { ChatWorkspacePanel } from "../components/ChatWorkspacePanel.tsx";
+import { ProjectDialog } from "../components/ProjectDialog.tsx";
 import { TaskStatusIcon } from "../components/TaskStatusIcon.tsx";
 import { formatBytes, formatTime } from "../lib/format.ts";
-import { hasDesktopBridge, pickFolder } from "../lib/desktop.ts";
+import { getChatSelection, setChatBusy, syncChatSelection, useChatSelection } from "../lib/chat-selection.ts";
 import { executorLabel, taskKindLabel, TASK_STATUS_LABELS } from "../lib/labels.ts";
 import type {
   ChatAttachment,
@@ -38,7 +37,6 @@ import type {
   ConversationSettings,
   ConversationSettingsPatch,
   ExecutorId,
-  LocalProjectView,
   TaskFollowUpMode,
   TaskListItem,
   TaskProposalRecord
@@ -61,6 +59,7 @@ interface RoutingState {
 export function ChatPage() {
   const queryClient = useQueryClient();
   const location = useLocation();
+  const selection = useChatSelection();
   const [conversationId, setConversationId] = useState<string | null>(() => {
     const returned = (location.state as { conversationId?: string } | null)?.conversationId;
     return returned ?? localStorage.getItem("hearth.conversation");
@@ -81,14 +80,17 @@ export function ChatPage() {
   const [followUpNotice, setFollowUpNotice] = useState<string | null>(null);
   const [draftSettings, setDraftSettings] = useState<ConversationSettings | null>(null);
   const [optionsOpen, setOptionsOpen] = useState(false);
-  const [pendingProjectId, setPendingProjectId] = useState<string | null>(null);
+  const [pendingProjectId, setPendingProjectId] = useState<string | null>(() => getChatSelection().pendingProjectId);
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const optionsRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const conversationIdRef = useRef<string | null>(conversationId);
+  const handledSelectionNonce = useRef(selection.nonce);
+  const panelConversationRef = useRef<string | null>(conversationId);
 
   const conversationsQuery = useQuery({ queryKey: ["conversations"], queryFn: api.conversations, refetchInterval: 15_000 });
   const tasksQuery = useQuery({ queryKey: ["tasks"], queryFn: api.tasks, refetchInterval: 8_000 });
@@ -110,27 +112,20 @@ export function ChatPage() {
     list.push(task);
     tasksByConversation.set(task.conversationId, list);
   }
+  const conversationTasks = conversationId ? tasksByConversation.get(conversationId) ?? [] : [];
+  const hasMessageAttachments = messages.some((message) => (message.attachments?.length ?? 0) > 0);
   const current = conversations.find((item) => item.id === conversationId) ?? null;
   const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: api.projects, refetchInterval: 30_000 });
   const projects = projectsQuery.data?.projects ?? [];
   const projectsById = new Map(projects.map((project) => [project.id, project]));
-  const projectGroups = projects.map((project) => ({
-    project,
-    conversations: conversations.filter((conversation) => conversation.projectId === project.id)
-  }));
-  const standaloneConversations = conversations.filter((conversation) =>
-    !conversation.projectId || !projectsById.has(conversation.projectId)
-  );
   const activeProject = current?.projectId
     ? projectsById.get(current.projectId) ?? null
     : pendingProjectId
       ? projectsById.get(pendingProjectId) ?? null
       : null;
-  const followUpTasks = conversationId
-    ? tasks
-      .filter((task) => task.conversationId === conversationId && !["completed", "cancelled"].includes(task.status))
-      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
-    : [];
+  const followUpTasks = conversationTasks
+    .filter((task) => !["completed", "cancelled"].includes(task.status))
+    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
   const followUpTarget = followUpTasks.find((task) => task.id === followUpTaskId) ?? null;
   const canSteerFollowUp = followUpTarget?.status === "running";
   const followUpBlockedByAttachments = Boolean(followUpTarget && attachments.length > 0);
@@ -172,6 +167,42 @@ export function ChatPage() {
   useEffect(() => {
     conversationIdRef.current = conversationId;
   }, [conversationId]);
+
+  useEffect(() => {
+    if (selection.nonce === handledSelectionNonce.current) return;
+    handledSelectionNonce.current = selection.nonce;
+    if (sending) return;
+    resetConversationView(selection.conversationId);
+    setPendingProjectId(selection.pendingProjectId);
+    setError(null);
+  }, [selection.nonce]);
+
+  useEffect(() => {
+    syncChatSelection(conversationId, pendingProjectId);
+  }, [conversationId, pendingProjectId]);
+
+  useEffect(() => {
+    setChatBusy(sending || uploading);
+  }, [sending, uploading]);
+
+  useEffect(() => () => setChatBusy(false), []);
+
+  useEffect(() => {
+    if (panelConversationRef.current === conversationId) return;
+    panelConversationRef.current = conversationId;
+    setPanelOpen(false);
+  }, [conversationId]);
+
+  useEffect(() => {
+    if (!conversationId || panelOpen) return;
+    if (conversationTasks.length === 0 && attachments.length === 0 && !hasMessageAttachments) return;
+    try {
+      if (localStorage.getItem(`hearth.workspace.closed.${conversationId}`) === "1") return;
+    } catch {
+      // localStorage 不可用时允许自动展开
+    }
+    setPanelOpen(true);
+  }, [conversationId, panelOpen, conversationTasks.length, attachments.length, hasMessageAttachments]);
 
   useEffect(() => {
     if (!followUpTaskId) return;
@@ -232,18 +263,24 @@ export function ChatPage() {
     else localStorage.removeItem("hearth.conversation");
   }
 
-  function selectConversation(id: string | null) {
-    if (sending) return;
-    resetConversationView(id);
-    setPendingProjectId(null);
-    setError(null);
+  function openWorkspace() {
+    setPanelOpen(true);
+    if (!conversationId) return;
+    try {
+      localStorage.removeItem(`hearth.workspace.closed.${conversationId}`);
+    } catch {
+      // localStorage 不可用时只影响下次自动展开
+    }
   }
 
-  function startNewChat(projectId: string | null) {
-    if (sending) return;
-    resetConversationView(null);
-    setPendingProjectId(projectId);
-    setError(null);
+  function closeWorkspace() {
+    setPanelOpen(false);
+    if (!conversationId) return;
+    try {
+      localStorage.setItem(`hearth.workspace.closed.${conversationId}`, "1");
+    } catch {
+      // localStorage 不可用时只影响下次自动展开
+    }
   }
 
   function patchSettings(patch: ConversationSettingsPatch) {
@@ -297,42 +334,6 @@ export function ChatPage() {
       preferredExecutorId: executorId,
       executorEnabled: { ...conversationSettings.executorEnabled, [executorId]: true }
     });
-  }
-
-  async function removeProject(event: MouseEvent, project: LocalProjectView) {
-    event.stopPropagation();
-    if (sending) return;
-    if (!window.confirm(`删除项目「${project.name}」？对话会保留为独立对话，本地文件不会被删除。`)) return;
-    try {
-      await api.deleteProject(project.id);
-      if (pendingProjectId === project.id) setPendingProjectId(null);
-      await queryClient.invalidateQueries({ queryKey: ["projects"] });
-      await queryClient.invalidateQueries({ queryKey: ["conversations"] });
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "删除项目失败");
-    }
-  }
-
-  async function removeConversation(event: MouseEvent, id: string) {
-    event.stopPropagation();
-    if (sending) return;
-    setError(null);
-    try {
-      await api.deleteConversation(id);
-    } catch (caught) {
-      if (caught instanceof ApiError && caught.code === "TASK_RUNNING") {
-        const confirmed = window.confirm("这个对话里还有任务正在运行。取消运行中的任务并把整个对话移入回收站吗？");
-        if (!confirmed) return;
-        await api.deleteConversation(id, true);
-      } else {
-        setError(caught instanceof Error ? caught.message : "删除对话失败");
-        return;
-      }
-    }
-    if (conversationId === id) selectConversation(null);
-    await queryClient.invalidateQueries({ queryKey: ["conversations"] });
-    await queryClient.invalidateQueries({ queryKey: ["tasks"] });
-    await queryClient.invalidateQueries({ queryKey: ["trash"] });
   }
 
   async function pickFiles(event: ChangeEvent<HTMLInputElement>) {
@@ -502,78 +503,6 @@ export function ChatPage() {
 
   return (
     <div className="chat-layout">
-      <aside className="conversation-rail">
-        <button className="new-chat-button" onClick={() => startNewChat(null)} disabled={sending}>
-          <Plus size={15} /> 新对话
-        </button>
-        <div className="conversation-list">
-          {conversations.length === 0 && projects.length === 0 && <p className="rail-empty">还没有对话</p>}
-          {projectGroups.length > 0 && <p className="rail-group-title">项目</p>}
-          {projectGroups.map(({ project, conversations: projectConversations }) => (
-            <div className="rail-project" key={project.id}>
-              <div className={`rail-project-head ${pendingProjectId === project.id ? "active" : ""}`} title={project.path}>
-                <button
-                  className="rail-project-name"
-                  onClick={() => startNewChat(project.id)}
-                  disabled={sending || !project.available}
-                >
-                  <Folder size={13} />
-                  <span>{project.name}</span>
-                </button>
-                <button
-                  className="rail-project-new"
-                  onClick={() => startNewChat(project.id)}
-                  disabled={sending || !project.available}
-                  title="在此项目中新建对话"
-                  aria-label={`在 ${project.name} 中新建对话`}
-                >
-                  <Plus size={12} />
-                </button>
-                <button
-                  className="rail-project-delete"
-                  onClick={(event) => void removeProject(event, project)}
-                  disabled={sending}
-                  title="删除项目"
-                  aria-label={`删除项目 ${project.name}`}
-                >
-                  <Trash2 size={12} />
-                </button>
-              </div>
-              {project.kind === "git" && (project.currentBranch || project.defaultBranch) && (
-                <span className="rail-project-branch">{project.currentBranch ?? project.defaultBranch}</span>
-              )}
-              {!project.available && <span className="rail-project-error">{project.error ?? "项目不可用"}</span>}
-              {projectConversations.map((conversation) => (
-                <ConversationItem
-                  key={conversation.id}
-                  conversation={conversation}
-                  tasks={tasksByConversation.get(conversation.id) ?? []}
-                  active={conversation.id === conversationId}
-                  disabled={sending}
-                  onSelect={() => selectConversation(conversation.id)}
-                  onDelete={(event) => void removeConversation(event, conversation.id)}
-                />
-              ))}
-            </div>
-          ))}
-          {(standaloneConversations.length > 0 || projects.length > 0) && <p className="rail-group-title">最近</p>}
-          {standaloneConversations.map((conversation) => (
-            <ConversationItem
-              key={conversation.id}
-              conversation={conversation}
-              tasks={tasksByConversation.get(conversation.id) ?? []}
-              active={conversation.id === conversationId}
-              disabled={sending}
-              onSelect={() => selectConversation(conversation.id)}
-              onDelete={(event) => void removeConversation(event, conversation.id)}
-            />
-          ))}
-        </div>
-        <button className="rail-footer-button" onClick={() => setProjectDialogOpen(true)} disabled={sending}>
-          <FolderPlus size={14} /> 新建项目
-        </button>
-      </aside>
-
       <section className="chat-main">
         <header className="chat-header">
           <h1>{current?.title ?? "新对话"}</h1>
@@ -826,6 +755,14 @@ export function ChatPage() {
           </div>
         </div>
       </section>
+      <ChatWorkspacePanel
+        open={panelOpen}
+        conversationId={conversationId}
+        messages={messages}
+        tasks={conversationTasks}
+        onOpen={openWorkspace}
+        onClose={closeWorkspace}
+      />
       {projectDialogOpen && (
         <ProjectDialog
           onClose={() => setProjectDialogOpen(false)}
@@ -835,52 +772,6 @@ export function ChatPage() {
             setPendingProjectId(project.id);
           }}
         />
-      )}
-    </div>
-  );
-}
-
-function ConversationItem({
-  conversation,
-  tasks,
-  active,
-  disabled,
-  onSelect,
-  onDelete
-}: {
-  conversation: ConversationListItem;
-  tasks: TaskListItem[];
-  active: boolean;
-  disabled: boolean;
-  onSelect: () => void;
-  onDelete: (event: MouseEvent) => void;
-}) {
-  return (
-    <div className={`conversation-item ${active ? "active" : ""}`}>
-      <div className="conversation-row">
-        <button className="conversation-select" onClick={onSelect} disabled={disabled}>
-          <span className="conversation-title">{conversation.title}</span>
-          <span className="conversation-preview">{conversation.preview || "新对话"}</span>
-        </button>
-        <button className="conversation-delete" onClick={onDelete} disabled={disabled} aria-label="删除对话">
-          <Trash2 size={13} />
-        </button>
-      </div>
-      {tasks.length > 0 && (
-        <div className="conversation-tasks">
-          {tasks.map((task) => (
-            <Link
-              key={task.id}
-              className="conversation-task"
-              to={`/tasks/${task.id}`}
-              state={{ fromChat: true, conversationId: conversation.id }}
-              title={`${task.title} · ${task.summary.phase}`}
-            >
-              <span className={`rail-task-icon ${task.status}`}><TaskStatusIcon status={task.status} size={12} /></span>
-              <span className="rail-task-title">{task.title}</span>
-            </Link>
-          ))}
-        </div>
       )}
     </div>
   );
@@ -1162,100 +1053,6 @@ function ProposalCard({
           <button className="ghost-button" onClick={() => void reject()} disabled={busy !== null}>取消</button>
         </div>
       )}
-    </div>
-  );
-}
-
-function normalizeFolderPath(input: string): string | null {
-  const trimmed = input.trim().replace(/^["']|["']$/g, "").trim();
-  if (!trimmed) return null;
-  if (/^[A-Za-z]:[\\/]/.test(trimmed) || trimmed.startsWith("\\\\")) return trimmed;
-  return null;
-}
-
-function ProjectDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (project: LocalProjectView) => void }) {
-  const [name, setName] = useState("");
-  const [path, setPath] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [pickerUnavailable, setPickerUnavailable] = useState(() => !hasDesktopBridge());
-  const pathRef = useRef<HTMLInputElement | null>(null);
-
-  async function browse() {
-    setError(null);
-    if (!hasDesktopBridge()) {
-      setPickerUnavailable(true);
-      setError("当前不在桌面版中，请直接粘贴完整的文件夹路径。");
-      pathRef.current?.focus();
-      return;
-    }
-    try {
-      const picked = await pickFolder();
-      if (picked) setPath(picked);
-    } catch {
-      setPickerUnavailable(true);
-      setError("系统选择器不可用，请直接粘贴完整的文件夹路径。");
-      pathRef.current?.focus();
-    }
-  }
-
-  async function create() {
-    const normalized = normalizeFolderPath(path);
-    if (!normalized) {
-      setError("请填写完整的文件夹路径，例如 D:\\Projects\\my-app");
-      pathRef.current?.focus();
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      const trimmedName = name.trim();
-      const result = await api.createProject({
-        path: normalized,
-        ...(trimmedName ? { name: trimmedName } : {})
-      });
-      onCreated(result.project);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "创建项目失败");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="modal-backdrop" role="presentation" onClick={onClose}>
-      <div className="project-dialog" role="dialog" aria-modal="true" aria-label="创建项目" onClick={(event) => event.stopPropagation()}>
-        <div className="project-dialog-head">
-          <h2>创建项目</h2>
-          <button className="icon-button" onClick={onClose} aria-label="关闭"><X size={14} /></button>
-        </div>
-        <label className="project-field">
-          <span>项目名称</span>
-          <input
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="留空则使用文件夹名"
-            autoFocus
-          />
-        </label>
-        <label className="project-field">
-          <span>源文件夹</span>
-          <div className="project-path-row">
-            <input ref={pathRef} value={path} onChange={(event) => setPath(event.target.value)} placeholder="D:\Projects\my-app" spellCheck={false} />
-            {!pickerUnavailable && (
-              <button type="button" className="ghost-button" onClick={() => void browse()} disabled={busy}>浏览…</button>
-            )}
-          </div>
-        </label>
-        <p className="project-dialog-note">支持 Git 仓库或任意本地文件夹。</p>
-        {error && <p className="form-error">{error}</p>}
-        <div className="project-dialog-actions">
-          <button className="ghost-button" onClick={onClose} disabled={busy}>取消</button>
-          <button className="primary-button" onClick={() => void create()} disabled={busy || !path.trim()}>
-            {busy ? <Loader2 size={14} className="spin" /> : null} 创建项目
-          </button>
-        </div>
-      </div>
     </div>
   );
 }

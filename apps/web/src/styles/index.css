@@ -4,6 +4,7 @@
 @import "./shell.css";
 @import "./chat-frame.css";
 @import "./chat.css";
+@import "./workspace.css";
 @import "./tasks.css";
 @import "./task-detail.css";
 @import "./task-process.css";
@@ -12,7 +13,6 @@
 @import "./settings.css";
 @import "./settings-fields.css";
 @import "./settings-data.css";
-@import "./inbox.css";
 @import "./workbench.css";
 @import "./devices.css";
 @import "./personal.css";

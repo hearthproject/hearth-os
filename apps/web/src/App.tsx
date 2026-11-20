@@ -6,7 +6,6 @@ import { NotificationCenter } from "./components/NotificationCenter.tsx";
 import { api, subscribeToEvents } from "./lib/api.ts";
 import { ChatPage } from "./pages/ChatPage.tsx";
 import { DevicesPage } from "./pages/DevicesPage.tsx";
-import { InboxPage } from "./pages/InboxPage.tsx";
 import { MailPage } from "./pages/MailPage.tsx";
 import { MemoryPage } from "./pages/MemoryPage.tsx";
 import { OnboardingPage } from "./pages/OnboardingPage.tsx";
@@ -15,7 +14,6 @@ import { RuntimePage } from "./pages/RuntimePage.tsx";
 import { SettingsPage } from "./pages/SettingsPage.tsx";
 import { SchedulesPage } from "./pages/SchedulesPage.tsx";
 import { TaskDetailPage } from "./pages/TaskDetailPage.tsx";
-import { TasksPage } from "./pages/TasksPage.tsx";
 
 export default function App() {
   return (
@@ -27,9 +25,9 @@ export default function App() {
           <Route path="welcome" element={<OnboardingPage />} />
           <Route element={<AppShell />}>
             <Route index element={<ChatPage />} />
-            <Route path="tasks" element={<TasksPage />} />
+            <Route path="tasks" element={<Navigate to="/" replace />} />
             <Route path="tasks/:id" element={<TaskDetailPage />} />
-            <Route path="inbox" element={<InboxPage />} />
+            <Route path="inbox" element={<Navigate to="/" replace />} />
             <Route path="personal" element={<PersonalPage />} />
             <Route path="runtime" element={<RuntimePage />} />
             <Route path="memory" element={<MemoryPage />} />
@@ -86,6 +84,9 @@ function EventBridge() {
         if (event === "tool.job.updated") {
           void queryClient.invalidateQueries({ queryKey: ["background-tools"] });
           void queryClient.invalidateQueries({ queryKey: ["watchdog"] });
+        }
+        if (event === "artifact.published" || event.startsWith("task.")) {
+          void queryClient.invalidateQueries({ queryKey: ["artifacts"] });
         }
         if (event === "thread-subscription.updated") {
           void queryClient.invalidateQueries({ queryKey: ["thread-subscriptions"] });

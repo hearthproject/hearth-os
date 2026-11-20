@@ -1,13 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, Command, MoreHorizontal } from "lucide-react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { useEffect, useState } from "react";
 import { api } from "../lib/api.ts";
-import { isActive, needsAttention } from "../lib/format.ts";
-import { isTaskUnread, useTaskReadState } from "../lib/task-read-state.ts";
-import { FOOTER_NAV, MAIN_NAV, MORE_NAV, type NavBadge, type NavItem } from "../lib/navigation.ts";
+import { FOOTER_NAV, MAIN_NAV, MORE_NAV, type NavItem } from "../lib/navigation.ts";
 import { HearthMark } from "./HearthMark.tsx";
 import { CommandPalette } from "./CommandPalette.tsx";
-import { useEffect, useState } from "react";
+import { ConversationSidebar } from "./ConversationSidebar.tsx";
 
 const MORE_STORAGE_KEY = "hearth.nav-more";
 
@@ -19,20 +18,7 @@ export function AppShell() {
   const tasksQuery = useQuery({ queryKey: ["tasks"], queryFn: api.tasks, refetchInterval: 10_000 });
   const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 30_000 });
   const executorsQuery = useQuery({ queryKey: ["executors"], queryFn: api.executors, refetchInterval: 30_000 });
-  const proactiveQuery = useQuery({ queryKey: ["proactive"], queryFn: api.proactive, refetchInterval: 15_000 });
-  const attentionQuery = useQuery({ queryKey: ["attention"], queryFn: api.attention, refetchInterval: 15_000 });
-  const reconcileQuery = useQuery({ queryKey: ["reconcile"], queryFn: () => api.reconcile(), refetchInterval: 15_000 });
   const tasks = tasksQuery.data?.tasks ?? [];
-  const seenTasks = useTaskReadState();
-  const activeCount = tasks.filter((task) => !task.archivedAt && (isActive(task.status) || needsAttention(task.status)) && isTaskUnread(task, seenTasks)).length;
-  const reconcileCount = (reconcileQuery.data?.items ?? [])
-    .filter((item) => ["open", "checking", "needs_human", "conflicting"].includes(item.status)).length;
-  const attentionCount = (attentionQuery.data?.items ?? []).filter((item) => item.waitingOn === "user").length;
-  const needsYouCount = Math.max(
-    attentionCount,
-    (proactiveQuery.data?.suggestions ?? []).filter((suggestion) => ["new", "snoozed", "accepted"].includes(suggestion.status)).length + reconcileCount
-  );
-  const badges: Record<NavBadge, number> = { tasks: activeCount, needsYou: needsYouCount };
   const chatModel = healthQuery.data?.chatModel;
   const readyExecutors = (executorsQuery.data?.executors ?? []).filter((executor) => executor.health.canRun);
   const primaryExecutor = readyExecutors.find((executor) => executor.id === "native")
@@ -83,7 +69,7 @@ export function AppShell() {
         </button>
 
         <nav className="nav" aria-label="主导航">
-          {MAIN_NAV.map((item) => <NavRow key={item.id} item={item} badge={badgeFor(item, badges)} />)}
+          {MAIN_NAV.map((item) => <NavRow key={item.id} item={item} />)}
           <button
             className={`nav-item nav-more-toggle${moreOpen ? " open" : ""}`}
             onClick={toggleMore}
@@ -96,14 +82,14 @@ export function AppShell() {
           </button>
           {moreOpen && (
             <div className="nav-more" id="nav-more">
-              {MORE_NAV.map((item) => <NavRow key={item.id} item={item} badge={badgeFor(item, badges)} />)}
+              {MORE_NAV.map((item) => <NavRow key={item.id} item={item} />)}
             </div>
           )}
         </nav>
 
-        <div className="sidebar-spacer" />
+        <ConversationSidebar />
 
-        <NavRow item={SETTINGS_ITEM} badge={0} />
+        <NavRow item={SETTINGS_ITEM} />
 
         {connectionIssue && (
           <NavLink
@@ -124,7 +110,7 @@ export function AppShell() {
       </main>
 
       <nav className="mobile-nav" aria-label="移动端导航">
-        {MAIN_NAV.map((item) => <NavRow key={item.id} item={item} badge={badgeFor(item, badges)} mobile />)}
+        {MAIN_NAV.map((item) => <NavRow key={item.id} item={item} mobile />)}
         <button className="mobile-nav-item" onClick={() => setCommandOpen(true)}>
           <Command size={19} /><span>更多</span>
         </button>
@@ -134,7 +120,7 @@ export function AppShell() {
   );
 }
 
-function NavRow({ item, badge, mobile = false }: { item: NavItem; badge: number; mobile?: boolean }) {
+function NavRow({ item, mobile = false }: { item: NavItem; mobile?: boolean }) {
   const Icon = item.icon;
   const base = mobile ? "mobile-nav-item" : "nav-item";
   return (
@@ -145,13 +131,8 @@ function NavRow({ item, badge, mobile = false }: { item: NavItem; badge: number;
     >
       <Icon size={mobile ? 19 : 18} />
       <span className={mobile ? undefined : "nav-label"}>{item.label}</span>
-      {badge > 0 && <span className={mobile ? "mobile-nav-badge" : "nav-badge"}>{badge}</span>}
     </NavLink>
   );
-}
-
-function badgeFor(item: NavItem, badges: Record<NavBadge, number>): number {
-  return item.badge ? badges[item.badge] : 0;
 }
 
 const SETTINGS_ITEM = FOOTER_NAV[0]!;

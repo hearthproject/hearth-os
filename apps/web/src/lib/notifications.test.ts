@@ -40,7 +40,7 @@ describe("notificationForEvent", () => {
     }))).toBeNull();
   });
 
-  it("maps delivered suggestions to the inbox", () => {
+  it("maps delivered suggestions to the chat workspace", () => {
     const notification = notificationForEvent("suggestion.event", envelope("suggestion.event", {
       suggestionId: "suggestion-1",
       action: "delivered",
@@ -51,7 +51,7 @@ describe("notificationForEvent", () => {
       tone: "suggestion",
       title: "任务临近截止",
       body: "还有 3 小时到期",
-      href: "/inbox"
+      href: "/"
     });
   });
 

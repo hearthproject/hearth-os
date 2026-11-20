@@ -43,8 +43,8 @@ export function TaskDetailPage() {
   const navigate = useNavigate();
   const navState = location.state as { fromChat?: boolean; conversationId?: string } | null;
   const fromChat = Boolean(navState?.fromChat);
-  const backTo = fromChat ? "/" : "/tasks";
-  const backLabel = fromChat ? "返回对话" : "返回任务";
+  const backTo = "/";
+  const backLabel = "返回对话";
   const backState = fromChat && navState?.conversationId ? { conversationId: navState.conversationId } : undefined;
   const queryClient = useQueryClient();
   const taskQuery = useQuery({ queryKey: ["task", id], queryFn: () => api.task(id), enabled: Boolean(id), refetchInterval: 4_000 });
@@ -187,7 +187,7 @@ export function TaskDetailPage() {
     }
     await queryClient.invalidateQueries({ queryKey: ["tasks"] });
     await queryClient.invalidateQueries({ queryKey: ["trash"] });
-    navigate("/tasks");
+    navigate("/");
   }
 
   return (

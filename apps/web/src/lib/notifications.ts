@@ -29,15 +29,15 @@ export function notificationForEvent(event: string, envelope?: EventEnvelope): A
       tone: "approval",
       title: "有一项外部动作等你确认",
       body: summary,
-      href: taskId ? `/tasks/${encodeURIComponent(taskId)}` : "/tasks"
+      href: taskId ? `/tasks/${encodeURIComponent(taskId)}` : "/"
     };
   }
 
   if (event === "suggestion.event") {
     if (payload.action !== "delivered") return null;
     const title = typeof payload.title === "string" ? payload.title : "有一条主动建议";
-    const whyNow = typeof payload.whyNow === "string" ? payload.whyNow : "打开“需要你”查看建议和依据。";
-    return { key, tone: "suggestion", title, body: whyNow, href: "/inbox" };
+    const whyNow = typeof payload.whyNow === "string" ? payload.whyNow : "打开对话查看建议和依据。";
+    return { key, tone: "suggestion", title, body: whyNow, href: "/" };
   }
 
   if (event === "task.updated") {
@@ -47,7 +47,7 @@ export function notificationForEvent(event: string, envelope?: EventEnvelope): A
         tone: "task",
         title: "任务预算已触顶",
         body: "可以扩展一倍预算并从检查点继续。",
-        href: taskId ? `/tasks/${encodeURIComponent(taskId)}` : "/tasks"
+        href: taskId ? `/tasks/${encodeURIComponent(taskId)}` : "/"
       };
     }
     if (payload.status !== "waiting_input") return null;
@@ -56,7 +56,7 @@ export function notificationForEvent(event: string, envelope?: EventEnvelope): A
       tone: "task",
       title: "任务需要你补充信息",
       body: "执行器停在一个需要判断的位置，打开任务继续。",
-      href: taskId ? `/tasks/${encodeURIComponent(taskId)}` : "/tasks"
+      href: taskId ? `/tasks/${encodeURIComponent(taskId)}` : "/"
     };
   }
 
@@ -67,7 +67,7 @@ export function notificationForEvent(event: string, envelope?: EventEnvelope): A
       tone: "task",
       title: "任务预算已触顶",
       body: `${dimension} 已达到上限，打开任务可扩展一倍并继续。`,
-      href: taskId ? `/tasks/${encodeURIComponent(taskId)}` : "/tasks"
+      href: taskId ? `/tasks/${encodeURIComponent(taskId)}` : "/"
     };
   }
 
@@ -78,7 +78,7 @@ export function notificationForEvent(event: string, envelope?: EventEnvelope): A
       tone: "effect",
       title: "外部动作结果不确定",
       body: "先核对目标系统是否已经生效，再决定是否重试。",
-      href: taskId ? `/tasks/${encodeURIComponent(taskId)}` : "/tasks"
+      href: taskId ? `/tasks/${encodeURIComponent(taskId)}` : "/"
     };
   }
 

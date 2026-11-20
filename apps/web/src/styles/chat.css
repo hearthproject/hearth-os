@@ -1,7 +1,7 @@
 /* Chat: one document column, no bubbles, no onboarding copy. */
 
 .chat-layout {
-  grid-template-columns: 232px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .conversation-rail {
@@ -16,6 +16,8 @@
 }
 
 .new-chat-button {
+  display: flex;
+  width: 100%;
   justify-content: flex-start;
   height: var(--row-h);
   padding: 0 8px;
@@ -56,6 +58,36 @@
 
 .conversation-item.active .conversation-preview {
   color: var(--ink-secondary);
+}
+
+.conversation-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--ink-tertiary);
+}
+
+.conv-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.conv-flag.running {
+  color: var(--accent);
+}
+
+.conv-flag.attention {
+  color: var(--risk);
+}
+
+.conversation-more {
+  display: block;
+  padding: 2px 8px;
+  color: var(--ink-tertiary);
+  font-size: 10px;
 }
 
 .conversation-tasks {
