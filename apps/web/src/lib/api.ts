@@ -68,6 +68,7 @@ import type {
   ModelSettingsResponse,
   ModelTestResponse,
   OnboardingSnapshot,
+  OnboardingVerificationView,
   SettingsStorageResponse,
   OutboxDraft,
   OutboxDraftListItem,
@@ -329,6 +330,8 @@ export const api = {
     body: JSON.stringify({ skipped })
   }),
   resetOnboarding: () => request<OnboardingSnapshot>("/api/onboarding/reset", { method: "POST" }),
+  verifyOnboarding: () =>
+    request<{ verification: OnboardingVerificationView; onboarding: OnboardingSnapshot }>("/api/onboarding/verify", { method: "POST" }),
   feishu: () => request<FeishuIntegrationResponse>("/api/integrations/feishu"),
   saveFeishu: (input: {
     enabled?: boolean;

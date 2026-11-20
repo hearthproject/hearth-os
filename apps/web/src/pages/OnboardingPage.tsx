@@ -12,10 +12,10 @@ import {
   X
 } from "lucide-react";
 import { api } from "../lib/api.ts";
-import type { ModelProtocol, ModelProviderPreset } from "../lib/types.ts";
+import type { ModelProtocol, ModelProviderPreset, OnboardingVerificationView } from "../lib/types.ts";
 import { HearthMark } from "../components/HearthMark.tsx";
 
-const STEPS = ["模型", "执行器", "记忆助手", "偏好", "完成"];
+const STEPS = ["模型", "执行器", "记忆助手", "偏好", "验证"];
 
 interface ModelDraft {
   providerId: string;
@@ -41,8 +41,10 @@ export function OnboardingPage() {
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState<ModelDraft>(EMPTY_DRAFT);
   const [draftReady, setDraftReady] = useState(false);
-  const [busy, setBusy] = useState<"test" | "save" | "finish" | "skip" | null>(null);
+  const [busy, setBusy] = useState<"test" | "save" | "finish" | "skip" | "verify" | null>(null);
   const [notice, setNotice] = useState<{ tone: "ok" | "error" | "info"; text: string } | null>(null);
+  const [verification, setVerification] = useState<OnboardingVerificationView | null>(null);
+  const [skipVerification, setSkipVerification] = useState(false);
 
   const onboardingQuery = useQuery({ queryKey: ["onboarding"], queryFn: api.onboarding });
   const registryQuery = useQuery({ queryKey: ["modelRegistry"], queryFn: api.modelRegistry });
@@ -135,6 +137,23 @@ export function OnboardingPage() {
       setStep(1);
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "保存模型失败" });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function verify() {
+    setBusy("verify");
+    setNotice(null);
+    try {
+      const result = await api.verifyOnboarding();
+      setVerification(result.verification);
+      setNotice(result.verification.ok
+        ? { tone: "ok", text: "示例任务已跑通：模型写入了文件，并跑过了真实测试。" }
+        : { tone: "error", text: result.verification.summary });
+      await queryClient.invalidateQueries({ queryKey: ["onboarding"] });
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "示例任务失败" });
     } finally {
       setBusy(null);
     }
@@ -348,17 +367,44 @@ export function OnboardingPage() {
 
           {step === 3 && (
             <section className="wizard-panel">
-              <h1>完成</h1>
+              <h1>先跑一个真实任务</h1>
+              <p className="wizard-note">
+                这一步会用你刚配置的模型，在一个临时文件夹里读写文件并运行测试。跑通才说明聊天、工具和测试链路真的可用；不会碰你的项目。
+              </p>
 
               <div className="wizard-summary">
                 <SummaryRow ok={configured} label="聊天模型" value={configured ? `${draft.providerName} · ${draft.model}` : "尚未配置"} />
                 <SummaryRow ok={nativeReady} label="原生执行器" value={nativeReady ? "已就绪" : "未就绪"} />
-                <SummaryRow ok label="记忆与技能" value="后台自动运行" />
+                <SummaryRow ok={Boolean(verification?.ok)} label="首次示例" value={verification?.ok ? "已跑通" : skipVerification ? "已跳过" : "未运行"} />
               </div>
 
               {!configured && (
                 <p className="wizard-note warn"><X size={14} /> 还没有可用的聊天模型，可以先跳过，在设置里补上。</p>
               )}
+
+              <div className="wizard-verify">
+                <button type="button" className="button" onClick={() => void verify()} disabled={!configured || busy !== null}>
+                  {busy === "verify" ? <Loader2 size={15} className="spin" /> : <Sparkles size={15} />}
+                  {verification ? "重新跑一次" : "跑一个真实示例"}
+                </button>
+                {verification && (
+                  <div className="wizard-verify-result">
+                    {verification.checks.map((check) => (
+                      <div key={check.name} className={check.passed ? "summary-ok" : "summary-warn"}>
+                        {check.passed ? <CheckCircle2 size={15} /> : <X size={15} />}
+                        <strong>{check.name}</strong>
+                        <span>{check.detail}</span>
+                      </div>
+                    ))}
+                    {verification.filesChanged.length > 0 && <p className="form-hint">改动文件：{verification.filesChanged.join("、")}</p>}
+                  </div>
+                )}
+                {!verification?.ok && !skipVerification && configured && (
+                  <button type="button" className="ghost-button" onClick={() => { setSkipVerification(true); setNotice({ tone: "info", text: "已跳过示例。首次真实任务失败时，先检查模型、执行器和测试命令。" }); }}>
+                    跳过验证，直接完成
+                  </button>
+                )}
+              </div>
             </section>
           )}
 
@@ -370,9 +416,9 @@ export function OnboardingPage() {
             <ArrowLeft size={14} /> 上一步
           </button>
           <div className="wizard-footer-right">
-            <button className="primary-button" onClick={next} disabled={busy !== null || (step === 0 && !modelReady)}>
+            <button className="primary-button" onClick={next} disabled={busy !== null || (step === 0 && !modelReady) || (step === 3 && !verification?.ok && !skipVerification)}>
               {busy === "save" || busy === "finish" ? <Loader2 size={15} className="spin" /> : null}
-              {step === 3 ? "完成" : step === 0 ? "保存并继续" : "继续"}
+              {step === 3 ? "进入 Hearth" : step === 0 ? "保存并继续" : "继续"}
               {step < 3 && <ArrowRight size={14} />}
             </button>
           </div>

@@ -394,6 +394,14 @@ export interface WorkstyleView {
   isDefault: boolean;
 }
 
+export interface OnboardingVerificationView {
+  ok: boolean;
+  status: "passed" | "failed";
+  summary: string;
+  filesChanged: string[];
+  checks: Array<{ name: string; passed: boolean; detail: string }>;
+}
+
 export interface TaskContextResponse extends ContextSnapshot {}
 
 export interface TaskHandoffsResponse {
