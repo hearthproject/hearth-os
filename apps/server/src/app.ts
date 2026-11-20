@@ -52,6 +52,7 @@ import { DesktopError, DesktopService } from "./desktop.ts";
 import { MemoryError, MemoryService } from "./memory.ts";
 import { ProjectError, ProjectService } from "./projects.ts";
 import { DossierError, DossierStore } from "./dossier.ts";
+import { verifyFirstTask } from "./onboarding-verify.ts";
 import { WorkstyleError, WorkstyleStore } from "./workstyle.ts";
 import { TaskWorktreeService, WorktreeError } from "./worktrees.ts";
 import { BackgroundToolError, BackgroundToolService } from "./background-tools.ts";
@@ -1006,6 +1007,16 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
 
   app.post("/api/onboarding/reset", async () => onboarding.reset());
+
+  app.post("/api/onboarding/verify", async (_request, reply) => {
+    if (!onboarding.snapshot().checks.chatModelConfigured) {
+      return reply.code(409).send({ error: "CHAT_MODEL_MISSING", message: "先配置聊天模型，再跑首次示例。" });
+    }
+    const settings = modelRegistry.chatSettings() ?? loadModelSettings(modelSettingsPath);
+    const verification = await verifyFirstTask(settings);
+    if (verification.ok) onboarding.complete();
+    return { verification, onboarding: onboarding.snapshot() };
+  });
 
   app.get("/api/integrations/feishu", async () => ({
     settings: feishu.view(),
