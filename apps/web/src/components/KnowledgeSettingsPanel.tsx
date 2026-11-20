@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, Save } from "lucide-react";
 import { api } from "../lib/api.ts";
@@ -7,6 +7,9 @@ import type { KnowledgeSettingsPatch, KnowledgeSettingsView, KnowledgeStatusResp
 export function KnowledgeSettingsPanel() {
   const queryClient = useQueryClient();
   const statusQuery = useQuery({ queryKey: ["knowledge"], queryFn: api.knowledgeStatus, refetchInterval: 20_000 });
+  const setupQuery = useQuery({ queryKey: ["knowledgeSetup"], queryFn: api.knowledgeSetup, refetchInterval: 5_000 });
+  const autoStartRef = useRef(false);
+  const [setupBusy, setSetupBusy] = useState<"install" | "start" | "stop" | null>(null);
   const [draft, setDraft] = useState<KnowledgeSettingsView | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [busy, setBusy] = useState<"save" | "test" | "sync" | "reconcile" | "reindex" | null>(null);
@@ -17,6 +20,42 @@ export function KnowledgeSettingsPanel() {
   }, [draft, statusQuery.data]);
 
   const status: KnowledgeStatusResponse | undefined = statusQuery.data;
+  const setup = setupQuery.data;
+
+  useEffect(() => {
+    if (autoStartRef.current || !setup || !draft) return;
+    if (!draft.enabled || !draft.manageProcess || !setup.installed || setup.running) return;
+    autoStartRef.current = true;
+    setSetupBusy("start");
+    void api.startKnowledgeService()
+      .catch(() => undefined)
+      .finally(() => {
+        setSetupBusy(null);
+        void setupQuery.refetch();
+      });
+  }, [setup, draft, setupQuery]);
+
+  async function runSetup(action: "install" | "start" | "stop") {
+    setSetupBusy(action);
+    setNotice(null);
+    try {
+      if (action === "install") {
+        await api.installKnowledge();
+        setNotice({ tone: "info", text: "已开始安装 OpenViking，日志会实时显示在下方。" });
+      } else if (action === "start") {
+        const result = await api.startKnowledgeService();
+        setNotice({ tone: result.setup.running ? "ok" : "error", text: result.setup.running ? "OpenViking 服务已启动。" : "服务仍未就绪，请查看日志。" });
+      } else {
+        await api.stopKnowledgeService();
+        setNotice({ tone: "info", text: "已请求停止 OpenViking 服务。" });
+      }
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "操作失败" });
+    } finally {
+      setSetupBusy(null);
+      void setupQuery.refetch();
+    }
+  }
 
   async function refresh() {
     await queryClient.invalidateQueries({ queryKey: ["knowledge"] });
@@ -100,6 +139,65 @@ export function KnowledgeSettingsPanel() {
             {status?.health.ok ? `在线 · ${status.health.version ?? ""}` : "未连接"}
           </span>
         </div>
+
+        {setup && (
+          <div className="knowledge-setup">
+            <div className="knowledge-setup-head">
+              <strong>
+                {setup.installed
+                  ? setup.running ? "OpenViking 已安装并在运行" : "OpenViking 已安装，服务未运行"
+                  : "尚未安装 OpenViking"}
+              </strong>
+              <span className={`status-chip ${setup.running ? "ok" : "warn"}`}>
+                <span className={`status-dot ${setup.running ? "online" : "offline"}`} />
+                {setup.running ? "运行中" : setup.message ?? "未就绪"}
+              </span>
+            </div>
+            {!setup.installed && (
+              <p className="form-hint">
+                知识库是可选项，不安装也能使用聊天、任务和记忆。安装会通过 uv 下载 OpenViking 与本地嵌入模型，首次约占用 0.8–1 GiB 磁盘。
+              </p>
+            )}
+            {!setup.installed && <p className="form-hint">安装命令：<code>{setup.installCommand}</code></p>}
+            {!setup.installed && !setup.uv && (
+              <p className="form-error">没有检测到 uv，请先安装 uv（https://docs.astral.sh/uv/）后重新检测。</p>
+            )}
+            <div className="settings-actions">
+              {!setup.installed && (
+                <button
+                  type="button"
+                  className="button primary"
+                  onClick={() => void runSetup("install")}
+                  disabled={setupBusy !== null || !setup.uv || setup.install.status === "running"}
+                >
+                  {setupBusy === "install" || setup.install.status === "running" ? <Loader2 size={15} className="spin" /> : null}
+                  安装 OpenViking
+                </button>
+              )}
+              {setup.installed && !setup.running && (
+                <button type="button" className="button primary" onClick={() => void runSetup("start")} disabled={setupBusy !== null}>
+                  {setupBusy === "start" ? <Loader2 size={15} className="spin" /> : null} 启动服务
+                </button>
+              )}
+              {setup.running && setup.managed && (
+                <button type="button" className="button" onClick={() => void runSetup("stop")} disabled={setupBusy !== null}>
+                  停止服务
+                </button>
+              )}
+              <button type="button" className="button" onClick={() => void setupQuery.refetch()} disabled={setupQuery.isFetching}>
+                <RefreshCw size={15} /> 重新检测
+              </button>
+            </div>
+            {setup.install.status !== "idle" && (
+              <details className="knowledge-log">
+                <summary>
+                  安装日志 · {setup.install.status === "running" ? "进行中" : setup.install.status === "succeeded" ? "成功" : "失败"}
+                </summary>
+                <pre>{setup.install.log.slice(-8000) || "（暂无输出）"}</pre>
+              </details>
+            )}
+          </div>
+        )}
 
         {statusQuery.isError && <p className="form-error">{statusQuery.error.message}</p>}
         {notice && (

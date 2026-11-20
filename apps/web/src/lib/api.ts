@@ -47,6 +47,7 @@ import type {
   MailTestResult,
   HealthResponse,
   KnowledgeSettingsPatch,
+  KnowledgeSetupState,
   KnowledgeStatusResponse,
   HermesProbeResponse,
   LocalProjectView,
@@ -126,6 +127,7 @@ import type { WebSearchProvider, WebSearchSettingsView } from "@hearth/core";
 export interface ChatStreamBody {
   routeMode?: "auto" | "chat" | "task";
   conversationId?: string;
+  projectId?: string;
   message?: string;
   attachments?: ChatAttachment[];
   url?: string;
@@ -279,6 +281,10 @@ export const api = {
   probeCodex: () => request<CodexProbeResponse>("/api/codex/probe", { method: "POST" }),
   executorSettings: () => request<ExecutorSettingsResponse>("/api/executor-settings"),
   knowledgeStatus: () => request<KnowledgeStatusResponse>("/api/knowledge/status"),
+  knowledgeSetup: () => request<KnowledgeSetupState>("/api/knowledge/setup"),
+  installKnowledge: () => request<{ install: KnowledgeSetupState["install"] & { started: boolean } }>("/api/knowledge/setup/install", { method: "POST" }),
+  startKnowledgeService: () => request<{ ok: boolean; setup: KnowledgeSetupState }>("/api/knowledge/service/start", { method: "POST" }),
+  stopKnowledgeService: () => request<{ ok: boolean; setup: KnowledgeSetupState }>("/api/knowledge/service/stop", { method: "POST" }),
   saveKnowledgeSettings: (input: KnowledgeSettingsPatch) => request<{ settings: KnowledgeStatusResponse["settings"] }>("/api/knowledge/settings", {
     method: "PATCH",
     body: JSON.stringify(input)

@@ -25,6 +25,7 @@ export interface KnowledgeRecallDeps {
   store: HearthStore;
   settings: KnowledgeSettingsStore;
   clientFactory?: (settings: KnowledgeSettings, actorPeerId: string | null) => KnowledgeClient;
+  managed?: { ensureStarted(): Promise<void> } | undefined;
   clock?: () => Date;
 }
 
@@ -42,11 +43,13 @@ export class KnowledgeRecallService {
   private readonly store: HearthStore;
   private readonly settings: KnowledgeSettingsStore;
   private readonly clientFactory: (settings: KnowledgeSettings, actorPeerId: string | null) => KnowledgeClient;
+  private readonly managed: { ensureStarted(): Promise<void> } | null;
   private readonly clock: () => Date;
 
   constructor(deps: KnowledgeRecallDeps) {
     this.store = deps.store;
     this.settings = deps.settings;
+    this.managed = deps.managed ?? null;
     this.clock = deps.clock ?? (() => new Date());
     this.clientFactory =
       deps.clientFactory ??
@@ -61,6 +64,13 @@ export class KnowledgeRecallService {
   async recall(input: KnowledgeRecallInput): Promise<KnowledgeRecallResult> {
     const settings = this.settings.get();
     if (!settings.enabled) return { ...EMPTY_RESULT };
+    if (settings.manageProcess && this.managed) {
+      try {
+        await this.managed.ensureStarted();
+      } catch {
+        // Managed startup is best effort; recall still degrades gracefully.
+      }
+    }
     const query = buildQuery(input, this.store.getTask(input.taskId ?? ""));
     if (!query) return { ...EMPTY_RESULT, reason: "empty-query" };
 

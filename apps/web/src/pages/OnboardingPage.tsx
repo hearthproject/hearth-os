@@ -15,7 +15,7 @@ import { api } from "../lib/api.ts";
 import type { ModelProtocol, ModelProviderPreset } from "../lib/types.ts";
 import { HearthMark } from "../components/HearthMark.tsx";
 
-const STEPS = ["模型", "执行器", "偏好", "完成"];
+const STEPS = ["模型", "执行器", "知识库", "偏好", "完成"];
 
 interface ModelDraft {
   providerId: string;
@@ -49,6 +49,8 @@ export function OnboardingPage() {
   const onboardingQuery = useQuery({ queryKey: ["onboarding"], queryFn: api.onboarding });
   const registryQuery = useQuery({ queryKey: ["modelRegistry"], queryFn: api.modelRegistry });
   const executorsQuery = useQuery({ queryKey: ["executors"], queryFn: api.executors, refetchInterval: 10_000 });
+  const setupQuery = useQuery({ queryKey: ["knowledgeSetup"], queryFn: api.knowledgeSetup, refetchInterval: 4_000 });
+  const [knowledgeBusy, setKnowledgeBusy] = useState<"install" | "start" | null>(null);
 
   const configured = Boolean(registryQuery.data?.chatConfigured);
   const nativeExecutor = (executorsQuery.data?.executors ?? []).find((executor) => executor.id === "native");
@@ -159,7 +161,7 @@ export function OnboardingPage() {
         queryClient.invalidateQueries({ queryKey: ["proactive"] }),
         queryClient.invalidateQueries({ queryKey: ["onboarding"] })
       ]);
-      setStep(3);
+      setStep(4);
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "保存偏好失败" });
     } finally {
@@ -197,8 +199,33 @@ export function OnboardingPage() {
     setNotice(null);
     if (step === 0) void saveModel();
     else if (step === 1) setStep(2);
-    else if (step === 2) void savePreferences();
+    else if (step === 2) setStep(3);
+    else if (step === 3) void savePreferences();
     else void finish();
+  }
+
+  async function handleKnowledge(action: "install" | "start") {
+    setKnowledgeBusy(action);
+    setNotice(null);
+    try {
+      if (action === "install") {
+        await api.installKnowledge();
+        setNotice({ tone: "info", text: "已开始安装 OpenViking，完成后可以直接进入下一步。" });
+      } else {
+        const result = await api.startKnowledgeService();
+        if (result.setup.running) {
+          await api.saveKnowledgeSettings({ enabled: true, manageProcess: true });
+          setNotice({ tone: "ok", text: "知识库已启动并启用。" });
+        } else {
+          setNotice({ tone: "error", text: "服务尚未就绪，可以稍后在设置里重试。" });
+        }
+      }
+      await setupQuery.refetch();
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "操作失败" });
+    } finally {
+      setKnowledgeBusy(null);
+    }
   }
 
   const skipButton = (
@@ -303,6 +330,54 @@ export function OnboardingPage() {
 
           {step === 2 && (
             <section className="wizard-panel">
+              <h1>知识库（可选）</h1>
+              <p className="wizard-note">
+                OpenViking 是本机语义索引服务，不安装也能正常聊天、执行任务和使用记忆。需要时可以在设置里随时补装。
+              </p>
+              {setupQuery.data && (
+                <div className="wizard-knowledge">
+                  <div className="wizard-knowledge-status">
+                    <span className={`status-dot ${setupQuery.data.running ? "online" : "offline"}`} />
+                    <strong>
+                      {setupQuery.data.installed
+                        ? setupQuery.data.running ? "已安装并在运行" : "已安装，服务未运行"
+                        : "尚未安装"}
+                    </strong>
+                  </div>
+                  <p className="wizard-note">
+                    安装使用 uv 下载 OpenViking 与本地嵌入模型，首次约占用 0.8–1 GiB 磁盘，并需要联网。
+                  </p>
+                  <div className="wizard-inline-actions">
+                    {!setupQuery.data.installed && (
+                      <button
+                        className="primary-button"
+                        onClick={() => void handleKnowledge("install")}
+                        disabled={knowledgeBusy !== null || !setupQuery.data.uv || setupQuery.data.install.status === "running"}
+                      >
+                        {knowledgeBusy === "install" || setupQuery.data.install.status === "running" ? <Loader2 size={14} className="spin" /> : null}
+                        安装 OpenViking
+                      </button>
+                    )}
+                    {setupQuery.data.installed && !setupQuery.data.running && (
+                      <button className="primary-button" onClick={() => void handleKnowledge("start")} disabled={knowledgeBusy !== null}>
+                        {knowledgeBusy === "start" ? <Loader2 size={14} className="spin" /> : null} 启动并启用
+                      </button>
+                    )}
+                    {setupQuery.data.running && <span className="status-chip ok"><CheckCircle2 size={13} /> 已就绪</span>}
+                  </div>
+                  {!setupQuery.data.uv && !setupQuery.data.installed && (
+                    <p className="wizard-note warn"><X size={14} /> 没有检测到 uv，可以先跳过，之后安装 uv 再回来设置。</p>
+                  )}
+                  {setupQuery.data.install.status === "running" && (
+                    <pre className="wizard-install-log">{setupQuery.data.install.log.slice(-2000)}</pre>
+                  )}
+                </div>
+              )}
+            </section>
+          )}
+
+          {step === 3 && (
+            <section className="wizard-panel">
               <h1>偏好</h1>
 
               <div className="wizard-preferences">
@@ -316,7 +391,7 @@ export function OnboardingPage() {
             </section>
           )}
 
-          {step === 3 && (
+          {step === 4 && (
             <section className="wizard-panel">
               <h1>完成</h1>
 
@@ -343,8 +418,8 @@ export function OnboardingPage() {
           <div className="wizard-footer-right">
             <button className="primary-button" onClick={next} disabled={busy !== null || (step === 0 && !modelReady)}>
               {busy === "save" || busy === "preferences" || busy === "finish" ? <Loader2 size={15} className="spin" /> : null}
-              {step === 3 ? "完成" : step === 0 ? "保存并继续" : "继续"}
-              {step < 3 && <ArrowRight size={14} />}
+              {step === 4 ? "完成" : step === 0 ? "保存并继续" : "继续"}
+              {step < 4 && <ArrowRight size={14} />}
             </button>
           </div>
         </footer>

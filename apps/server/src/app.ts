@@ -76,6 +76,7 @@ import { KnowledgeRecallService } from "./knowledge/recall.ts";
 import { KnowledgeClient } from "./knowledge/client.ts";
 import { KnowledgeSettingsError, KnowledgeSettingsStore, type KnowledgeSettingsPatch } from "./knowledge/settings.ts";
 import { KnowledgeSyncService } from "./knowledge/sync.ts";
+import { KnowledgeManagedService, KnowledgeSetupError } from "./knowledge/managed-service.ts";
 import { McpServerError, McpServerService } from "./mcp-servers.ts";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
@@ -887,7 +888,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
 
   const secretBox = options.syncSecretBox ?? SecretBox.fromKeyFile(options.masterKeyPath ?? MASTER_KEY_PATH);
   const knowledgeSettings = new KnowledgeSettingsStore(store, secretBox);
-  const knowledge = new KnowledgeRecallService({ store, settings: knowledgeSettings });
+  const knowledgeManaged = new KnowledgeManagedService({ settings: knowledgeSettings });
+  const knowledge = new KnowledgeRecallService({ store, settings: knowledgeSettings, managed: knowledgeManaged });
   const knowledgeSync = new KnowledgeSyncService({ store, settings: knowledgeSettings });
   knowledgeSync.start();
   service.bus.subscribe((event) => {
@@ -1175,7 +1177,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob:",
       "font-src 'self' data:",
-      "connect-src 'self'",
+      "connect-src 'self' http://ipc.localhost ipc:",
       "media-src 'self' blob:",
       "object-src 'none'",
       "base-uri 'none'",
@@ -1229,6 +1231,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
 
   app.addHook("onClose", async () => {
     knowledgeSync.stop();
+    knowledgeManaged.stop();
     await feishu.stop();
     mail.stop();
     proactive.stop();
@@ -1652,6 +1655,36 @@ export async function buildServer(options: BuildServerOptions = {}) {
       lastReconcileAt: store.knowledgeStateGet("last_full_reconcile_at"),
       lastReindexDate: store.knowledgeStateGet("last_reindex_date")
     };
+  });
+
+  app.get("/api/knowledge/setup", async () => knowledgeManaged.status());
+
+  app.post("/api/knowledge/setup/install", async (_request, reply) => {
+    try {
+      return { install: knowledgeManaged.install() };
+    } catch (error) {
+      if (error instanceof KnowledgeSetupError) {
+        return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+      }
+      throw error;
+    }
+  });
+
+  app.post("/api/knowledge/service/start", async (_request, reply) => {
+    try {
+      await knowledgeManaged.start();
+      return { ok: true, setup: await knowledgeManaged.status() };
+    } catch (error) {
+      if (error instanceof KnowledgeSetupError) {
+        return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+      }
+      throw error;
+    }
+  });
+
+  app.post("/api/knowledge/service/stop", async () => {
+    knowledgeManaged.stop();
+    return { ok: true, setup: await knowledgeManaged.status() };
   });
 
   app.patch("/api/knowledge/settings", async (request, reply) => {

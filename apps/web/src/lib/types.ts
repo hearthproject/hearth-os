@@ -885,6 +885,24 @@ export interface KnowledgeSettingsView {
   updatedAt: string | null;
 }
 
+export interface KnowledgeSetupState {
+  installed: boolean;
+  serverPath: string | null;
+  uv: boolean;
+  uvPath: string | null;
+  running: boolean;
+  managed: boolean;
+  install: {
+    status: "idle" | "running" | "succeeded" | "failed";
+    log: string;
+    startedAt: string | null;
+    finishedAt: string | null;
+    error: string | null;
+  };
+  installCommand: string;
+  message: string | null;
+}
+
 export interface KnowledgeStatusResponse {
   settings: KnowledgeSettingsView;
   health: { ok: boolean; latencyMs: number; version: string | null; authMode: string | null; detail: string | null };
