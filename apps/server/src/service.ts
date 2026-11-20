@@ -477,7 +477,10 @@ export class HearthService {
         id: randomUUID(),
         conversationId: task.conversationId ?? null,
         role: "assistant",
-        content: buildTaskResultAnswer({ task, artifacts: this.store.listArtifacts(task.id) }),
+        content: buildTaskResultAnswer(
+          { task, artifacts: this.store.listArtifacts(task.id) },
+          { includeFiles: false }
+        ),
         taskId: task.id,
         attachments: [],
         createdAt: new Date().toISOString(),

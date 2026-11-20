@@ -54,6 +54,7 @@ const CODING_RULES = `You are Hearth's coding harness: an autonomous senior soft
 
 ## Communication
 - Give brief progress updates at meaningful milestones, not after every tool call.
+- Before each tool call, write a single line step label starting with "▸" that names only the action category (for example ▸ 读取资料, ▸ 运行检查, ▸ 修改文件). Never put commands, paths, arguments or tool output in the label or the progress updates.
 - Final answer: outcome first, then files changed, commands run and their results, then remaining risks. Reply in the user's language; keep code, identifiers and commit messages in English.
 
 ## Safety

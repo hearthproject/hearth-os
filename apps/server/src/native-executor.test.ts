@@ -1095,6 +1095,11 @@ describe("native execution progress", () => {
       detail: { eventType: "turn.started" }
     });
 
+    expect(nativeProgressForEvent({ type: "assistant.message", turn: 2, text: "▸ 读取资料\n先看现有实现。" })).toMatchObject({
+      kind: "narration",
+      detail: { eventType: "assistant.message", text: "▸ 读取资料\n先看现有实现。" }
+    });
+
     const call = { id: "call-1", name: "shell", arguments: { command: "git status" }, rawArguments: "{}" };
     expect(nativeProgressForEvent({ type: "tool.started", turn: 2, call })).toMatchObject({
       kind: "tool",

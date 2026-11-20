@@ -712,10 +712,21 @@ export class HearthScheduler {
       && !this.activeByExecutor.get(resolveExecutorId(task))?.has(task.id)
     );
     queued.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+    // A chat conversation is a single timeline: never run two of its tasks at
+    // the same time, even when a different executor or a higher concurrency
+    // limit would otherwise allow it.
+    const activeConversations = new Set<string>();
+    for (const taskIds of this.activeByExecutor.values()) {
+      for (const taskId of taskIds) {
+        const conversationId = this.service.store.getTask(taskId)?.conversationId;
+        if (conversationId) activeConversations.add(conversationId);
+      }
+    }
     let started = 0;
     const scheduledDelegationExecutors = new Set<ExecutorId>();
     for (const task of queued) {
       if (this.stopped) break;
+      if (task.conversationId && activeConversations.has(task.conversationId)) continue;
       const executorId = resolveExecutorId(task);
       const delegationJob = this.service.store.getDelegationJobByChildTask(task.id);
       if (delegationJob) {
@@ -749,6 +760,7 @@ export class HearthScheduler {
       if (delegationJob) scheduledDelegationExecutors.add(delegationJob.targetExecutor);
       active.add(task.id);
       this.activeByExecutor.set(executorId, active);
+      if (task.conversationId) activeConversations.add(task.conversationId);
       const promise = this.runTask(task)
         .catch(() => undefined)
         .finally(() => {
