@@ -1,7 +1,7 @@
 .inline-run {
   align-self: stretch;
   max-width: 760px;
-  margin: 2px auto 10px;
+  margin: 0 auto 2px;
   padding: 0 24px;
   color: var(--ink-secondary);
   font-size: var(--fs-12);
@@ -13,7 +13,7 @@
   gap: 6px;
   width: 100%;
   min-width: 0;
-  padding: 5px 6px;
+  padding: 3px 6px;
   border: 0;
   border-radius: var(--radius);
   background: transparent;
@@ -27,51 +27,42 @@
   background: var(--surface-sunk);
 }
 
-.inline-run-status {
+.inline-run-head-icon {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 4px;
-  color: var(--ink-secondary);
+  justify-content: center;
+  width: 13px;
+  color: var(--ink-tertiary);
 }
 
-.inline-run.running .inline-run-status,
-.inline-run.queued .inline-run-status {
+.inline-run.running .inline-run-head-icon,
+.inline-run.queued .inline-run-head-icon {
   color: var(--accent);
 }
 
-.inline-run.recoverable .inline-run-status,
-.inline-run.failed .inline-run-status,
-.inline-run.waiting_approval .inline-run-status,
-.inline-run.waiting_input .inline-run-status {
+.inline-run.failed .inline-run-head-icon,
+.inline-run.recoverable .inline-run-head-icon,
+.inline-run.waiting_approval .inline-run-head-icon,
+.inline-run.waiting_input .inline-run-head-icon,
+.inline-run.waiting_budget .inline-run-head-icon {
   color: var(--risk);
 }
 
-.inline-run.completed .inline-run-status {
-  color: var(--ok);
+.inline-run.completed .inline-run-head-icon {
+  color: var(--ink-tertiary);
 }
 
-.inline-run-title {
-  flex: 1 1 auto;
+.inline-run-headline {
   min-width: 0;
   overflow: hidden;
-  color: var(--ink-secondary);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.inline-run-meta {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 8px;
-  color: var(--ink-tertiary);
-  font-size: var(--fs-10);
-}
-
 .inline-run-body {
-  margin: 2px 0 0 15px;
-  padding: 2px 0 4px 12px;
+  margin: 1px 0 0 15px;
+  padding: 3px 0 5px 12px;
   border-left: 1px solid var(--line);
 }
 
@@ -79,54 +70,163 @@
   margin: 6px 0;
 }
 
-.inline-run-steps {
+.inline-run-trail {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  margin: 2px 0;
-  padding: 0;
-  list-style: none;
+  gap: 3px;
+  padding: 2px 0;
 }
 
-.inline-run-steps li {
-  display: flex;
-  align-items: flex-start;
-  gap: 7px;
-  padding: 3px 0;
+.inline-run-narration {
+  margin: 4px 0 2px;
+  color: var(--ink-secondary);
+  font-size: var(--fs-13);
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.inline-run-system {
+  margin: 2px 0;
   color: var(--ink-tertiary);
+  font-size: var(--fs-11);
   line-height: 1.5;
 }
 
-.inline-run-steps li.running {
+.inline-run-step {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.inline-run-label {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 1px 4px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--ink-tertiary);
+  text-align: left;
+  font: inherit;
+  font-size: var(--fs-11);
+  line-height: 1.5;
+  cursor: default;
+}
+
+.inline-run-label.expandable {
+  cursor: pointer;
+}
+
+.inline-run-label.expandable:hover {
+  background: var(--surface-sunk);
   color: var(--ink-secondary);
 }
 
-.inline-run-dot {
-  display: inline-flex;
-  flex: 0 0 12px;
-  align-items: center;
-  justify-content: center;
-  width: 12px;
-  height: 18px;
+.inline-run-label-mark {
+  flex: 0 0 auto;
+  color: var(--stone);
+  font-size: 10px;
 }
 
-.inline-run-check {
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: var(--stone);
-}
-
-.inline-run-step-text {
+.inline-run-label-text {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.inline-run-steps li.running .inline-run-step-text {
-  overflow: visible;
-  white-space: normal;
+.inline-run-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 2px 0 5px 12px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  background: var(--surface-sunk);
+}
+
+.inline-run-tool {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.inline-run-tool-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-10);
+}
+
+.inline-run-tool-head .failed {
+  color: var(--risk);
+}
+
+.inline-run-command,
+.inline-run-output {
+  max-height: 180px;
+  margin: 0;
+  overflow: auto;
+  color: var(--ink-secondary);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.inline-run-command {
+  color: var(--ink);
+}
+
+.inline-run-question {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0;
+  padding: 7px 9px;
+  border-radius: var(--radius);
+  background: var(--surface-sunk);
+  color: var(--ink-secondary);
+  font-size: var(--fs-12);
+  line-height: 1.55;
+}
+
+.inline-run-question p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.inline-run-question form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inline-run-question input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--fs-12);
+}
+
+.inline-run-check {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--stone);
 }
 
 .inline-run-muted {
@@ -155,30 +255,6 @@
 .inline-run-error svg {
   flex: 0 0 auto;
   color: var(--risk);
-}
-
-.inline-run-artifacts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 6px;
-}
-
-.inline-run-artifacts a {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 7px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  color: var(--ink-secondary);
-  font-size: var(--fs-10);
-  text-decoration: none;
-}
-
-.inline-run-artifacts a:hover {
-  border-color: var(--line-strong);
-  color: var(--ink);
 }
 
 .ghost-button.small {

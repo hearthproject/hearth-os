@@ -8,6 +8,9 @@ import remarkGfm from "remark-gfm";
 import {
   ArrowUp,
   Check,
+  ChevronDown,
+  ChevronRight,
+  Clock,
   Copy,
   FileText,
   Folder,
@@ -22,10 +25,9 @@ import { ApiError, api, chatStream } from "../lib/api.ts";
 import { ChatWorkspacePanel } from "../components/ChatWorkspacePanel.tsx";
 import { ProjectDialog } from "../components/ProjectDialog.tsx";
 import { InlineRun, type RunInfo } from "../components/InlineRun.tsx";
-import { TaskStatusIcon } from "../components/TaskStatusIcon.tsx";
-import { formatBytes, formatTime } from "../lib/format.ts";
+import { formatBytes, formatDuration, formatTime } from "../lib/format.ts";
 import { getChatSelection, setChatBusy, syncChatSelection, useChatSelection } from "../lib/chat-selection.ts";
-import { executorLabel, TASK_STATUS_LABELS, approvalModeLabel } from "../lib/labels.ts";
+import { executorLabel, approvalModeLabel } from "../lib/labels.ts";
 import type {
   ChatAttachment,
   ChatMessageRecord,
@@ -46,12 +48,6 @@ const PENDING_SETTINGS: ConversationSettings = {
 
 const EXECUTOR_ORDER: ExecutorId[] = ["deepseek-harness", "codex", "native"];
 
-interface RoutingState {
-  action: "chat" | "task";
-  reason: string;
-  title: string;
-}
-
 interface TimelineMessage {
   kind: "message";
   key: string;
@@ -64,6 +60,17 @@ interface TimelineRun {
   key: string;
   at: string;
   task: RunInfo;
+}
+
+interface OutgoingMessage {
+  text: string;
+  attachments: ChatAttachment[];
+  skillId: string | null;
+}
+
+interface ChatExecution {
+  reasoning: string;
+  durationMs: number;
 }
 
 export function ChatPage() {
@@ -82,7 +89,8 @@ export function ChatPage() {
   const [sending, setSending] = useState(false);
   const [streaming, setStreaming] = useState("");
   const [reasoning, setReasoning] = useState("");
-  const [routing, setRouting] = useState<RoutingState | null>(null);
+  const [queue, setQueue] = useState<OutgoingMessage[]>([]);
+  const [chatExecutions, setChatExecutions] = useState<Record<string, ChatExecution>>({});
   const [error, setError] = useState<string | null>(null);
   const [draftSettings, setDraftSettings] = useState<ConversationSettings | null>(null);
   const [pendingProjectId, setPendingProjectId] = useState<string | null>(() => getChatSelection().pendingProjectId);
@@ -99,6 +107,7 @@ export function ChatPage() {
   const conversationIdRef = useRef<string | null>(conversationId);
   const handledSelectionNonce = useRef(selection.nonce);
   const panelConversationRef = useRef<string | null>(conversationId);
+  const queuedDispatchRef = useRef(false);
 
   const conversationsQuery = useQuery({ queryKey: ["conversations"], queryFn: api.conversations, refetchInterval: 15_000 });
   const tasksQuery = useQuery({ queryKey: ["tasks"], queryFn: api.tasks, refetchInterval: 8_000 });
@@ -142,7 +151,6 @@ export function ChatPage() {
     tasksByConversation.set(task.conversationId, list);
   }
   const conversationTasks = conversationId ? tasksByConversation.get(conversationId) ?? [] : [];
-  const latestTask = [...conversationTasks].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0] ?? null;
   const hasMessageAttachments = messages.some((message) => (message.attachments?.length ?? 0) > 0);
   const current = conversations.find((item) => item.id === conversationId) ?? null;
   const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: api.projects, refetchInterval: 30_000 });
@@ -184,6 +192,7 @@ export function ChatPage() {
     seenRuns.add(task.id);
     runs.push(task);
   }
+  const hasRunningTask = runs.some((task) => task.status === "running" || task.status === "queued");
   const timeline: Array<TimelineMessage | TimelineRun> = [
     ...visibleMessages.map((message): TimelineMessage => ({ kind: "message", key: `m:${message.id}`, at: message.createdAt, message })),
     ...runs.map((task): TimelineRun => ({ kind: "run", key: `r:${task.id}`, at: task.createdAt, task }))
@@ -253,6 +262,18 @@ export function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: sending ? "auto" : "smooth" });
   }, [messages, streaming, sending, runs.length]);
 
+  useEffect(() => {
+    if (sending || queuedDispatchRef.current || queue.length === 0) return;
+    if (hasRunningTask) return;
+    const [next, ...rest] = queue;
+    if (!next) return;
+    queuedDispatchRef.current = true;
+    setQueue(rest);
+    void dispatch(next).finally(() => {
+      queuedDispatchRef.current = false;
+    });
+  }, [queue, sending, hasRunningTask]);
+
   useEffect(() => () => abortRef.current?.abort(), []);
 
   function resetConversationView(id: string | null) {
@@ -262,7 +283,6 @@ export function ChatPage() {
     setLiveRuns([]);
     setStreaming("");
     setReasoning("");
-    setRouting(null);
     setDraftSettings(null);
     if (id) localStorage.setItem("hearth.conversation", id);
     else localStorage.removeItem("hearth.conversation");
@@ -357,15 +377,23 @@ export function ChatPage() {
       setError(`${selectedExecutorName} 当前不可用，不会自动切换执行器。${selectedExecutor?.health.issues.join("；") ?? "请到设置中测试可用性。"}`);
       return;
     }
-    const sentAttachments = attachments;
-    const sentSkillId = selectedSkillId;
+    const outgoing: OutgoingMessage = { text, attachments, skillId: selectedSkillId };
     setInput("");
     setAttachments([]);
-    if (sentSkillId) setSelectedSkillId(null);
+    if (selectedSkillId) setSelectedSkillId(null);
+    setError(null);
+    if (hasRunningTask) {
+      setQueue((prev) => [...prev, outgoing]);
+      return;
+    }
+    await dispatch(outgoing);
+  }
+
+  async function dispatch(outgoing: OutgoingMessage) {
+    const { text, attachments: sentAttachments, skillId: sentSkillId } = outgoing;
+    const startedAt = Date.now();
     setStreaming("");
     setReasoning("");
-    setRouting(null);
-    setError(null);
     setSending(true);
     const controller = new AbortController();
     abortRef.current = controller;
@@ -395,8 +423,6 @@ export function ChatPage() {
               localStorage.setItem("hearth.conversation", conversation.id);
             } else if (event === "user") {
               setMessages((prev) => [...prev, data as ChatMessageRecord]);
-            } else if (event === "routing") {
-              setRouting(data as RoutingState);
             } else if (event === "delta") {
               answer += (data as { text: string }).text;
               setStreaming(answer);
@@ -431,6 +457,12 @@ export function ChatPage() {
               setReasoning("");
               if (!isTaskNoise(message)) {
                 setMessages((prev) => (prev.some((item) => item.id === message.id) ? prev : [...prev, message]));
+              }
+              if (!message.taskId && reasoningText.trim()) {
+                setChatExecutions((prev) => ({
+                  ...prev,
+                  [message.id]: { reasoning: reasoningText, durationMs: Date.now() - startedAt }
+                }));
               }
             } else if (event === "error") {
               setError((data as { message: string }).message);
@@ -510,12 +542,6 @@ export function ChatPage() {
         <header className="chat-header">
           <div className="chat-title-group">
             <h1>{current?.title ?? "新对话"}</h1>
-            {latestTask && (latestTask.status !== "completed" && latestTask.status !== "cancelled") && (
-              <span className={`chat-run-chip ${latestTask.status}`} title={latestTask.title}>
-                <TaskStatusIcon status={latestTask.status} size={12} />
-                {TASK_STATUS_LABELS[latestTask.status]}
-              </span>
-            )}
             {(current ? projectsById.get(current.projectId ?? "") : activeProject) && (
               <span className="chat-project-chip" title={current ? projectsById.get(current.projectId ?? "")?.path : activeProject?.path}>
                 <Folder size={12} />
@@ -557,6 +583,7 @@ export function ChatPage() {
                 key={item.key}
                 message={item.message}
                 mailDraft={!item.message.taskId && isMailDraftReply(visibleMessages, visibleMessages.indexOf(item.message))}
+                execution={chatExecutions[item.message.id]}
               />
             ) : (
               <InlineRun key={item.key} task={item.task} />
@@ -565,7 +592,6 @@ export function ChatPage() {
             {sending && !streaming && !reasoning && (
               <div className="typing-row">
                 <Loader2 size={14} className="spin" />
-                <span>{routing?.action === "task" ? "正在执行…" : routing ? "正在回答…" : selectedExecutorId ? `正在交给 ${selectedExecutorName} 处理…` : "正在判断是回答还是执行…"}</span>
               </div>
             )}
             <div ref={bottomRef} />
@@ -657,6 +683,23 @@ export function ChatPage() {
                   确认安装
                 </button>
               </div>
+            </div>
+          )}
+          {queue.length > 0 && (
+            <div className="composer-queue" aria-live="polite">
+              <span className="composer-queue-label"><Clock size={12} />排队中 · {queue.length}</span>
+              {queue.map((item, index) => (
+                <span key={`${index}:${item.text}`} className="composer-queue-chip" title={item.text}>
+                  <span>{item.text || `${item.attachments.length} 个附件`}</span>
+                  <button
+                    type="button"
+                    onClick={() => setQueue((prev) => prev.filter((_, current) => current !== index))}
+                    aria-label="取消排队"
+                  >
+                    <X size={11} />
+                  </button>
+                </span>
+              ))}
             </div>
           )}
           {error && (
@@ -762,10 +805,10 @@ export function ChatPage() {
 function isTaskNoise(message: ChatMessageRecord): boolean {
   if (message.kind === "task_status") return true;
   if (message.role !== "assistant") return false;
-  return message.content.startsWith("已派出任务：") || message.content.startsWith("任务「");
+  return message.content.startsWith("已派出任务：");
 }
 
-function ChatBubble({ message, mailDraft = false }: { message: ChatMessageRecord; mailDraft?: boolean }) {
+function ChatBubble({ message, mailDraft = false, execution }: { message: ChatMessageRecord; mailDraft?: boolean; execution?: ChatExecution | undefined }) {
   if (message.role === "user") {
     return (
       <div className="message-row user">
@@ -788,12 +831,49 @@ function ChatBubble({ message, mailDraft = false }: { message: ChatMessageRecord
   }
   return (
     <div className="message-row assistant">
+      {execution && <ChatExecutionSummary execution={execution} />}
       {mailDraft ? <ChatMailDraft content={message.content} /> :
       <AssistantBubble
-        content={message.content}
+        content={message.taskId ? stripDeliverySection(message.content) : message.content}
         copyText={message.content}
         createdAt={message.createdAt}
       />}
+      {message.taskId && message.kind !== "task_status" && <TaskAnswerFiles taskId={message.taskId} />}
+    </div>
+  );
+}
+
+function ChatExecutionSummary({ execution }: { execution: ChatExecution }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="chat-execution">
+      <button type="button" className="chat-execution-head" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        <span>共用时 {formatDuration(execution.durationMs)}</span>
+      </button>
+      {open && <p className="chat-execution-reasoning">{execution.reasoning}</p>}
+    </div>
+  );
+}
+
+function TaskAnswerFiles({ taskId }: { taskId: string }) {
+  const taskQuery = useQuery({
+    queryKey: ["task", taskId],
+    queryFn: () => api.task(taskId),
+    staleTime: 30_000
+  });
+  const task = taskQuery.data?.task;
+  const files = deliverableFiles(task, taskQuery.data?.artifacts ?? []);
+  if (files.length === 0) return null;
+  return (
+    <div className="answer-files">
+      {files.map((file) => (
+        <a key={file.id} href={api.artifactUrl(taskId, file.id)} target="_blank" rel="noreferrer" title={file.relativePath}>
+          <FileText size={12} />
+          {fileName(file.relativePath)}
+          <small>{formatBytes(file.bytes)}</small>
+        </a>
+      ))}
     </div>
   );
 }
@@ -901,6 +981,42 @@ async function copyToClipboard(text: string): Promise<void> {
     document.body.removeChild(area);
   }
   if (!copied) throw new Error("copy failed");
+}
+
+const INTERNAL_ARTIFACT_NAMES = new Set(["run-manifest.json", "pr-preview.json"]);
+
+function deliverableFiles(
+  task: { expectedOutputs?: string[] } | undefined,
+  artifacts: Array<{ id: string; relativePath: string; bytes: number }>
+): Array<{ id: string; relativePath: string; bytes: number }> {
+  return artifacts.filter((artifact) => {
+    const path = artifact.relativePath.replace(/\\/g, "/");
+    const name = path.split("/").pop() ?? path;
+    if (INTERNAL_ARTIFACT_NAMES.has(name)) return false;
+    if (path.startsWith("inputs/") || path.startsWith("runtime/") || path.startsWith(".hearth/")) return false;
+    if (path.toLowerCase().endsWith(".json") && !isExpectedPath(path, task?.expectedOutputs)) return false;
+    return true;
+  }).slice(0, 6);
+}
+
+function isExpectedPath(path: string, expectedOutputs: string[] | undefined): boolean {
+  if (!expectedOutputs) return true;
+  return expectedOutputs.some((expected) => {
+    const normalized = expected.replace(/\\/g, "/").replace(/\/+$/, "");
+    return path === normalized || path.startsWith(`${normalized}/`);
+  });
+}
+
+function fileName(path: string): string {
+  const parts = path.replace(/\\/g, "/").split("/");
+  return parts[parts.length - 1] || path;
+}
+
+function stripDeliverySection(content: string): string {
+  // Older answers embedded the file list in markdown; files are chips now.
+  const marker = "\n\n**交付文件**";
+  const index = content.indexOf(marker);
+  return index === -1 ? content : content.slice(0, index);
 }
 
 function ChatNotice({ icon, tone, children }: { icon: React.ReactNode; tone: "warn" | "info"; children: React.ReactNode }) {

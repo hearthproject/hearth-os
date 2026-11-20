@@ -1082,6 +1082,16 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 export function nativeProgressForEvent(event: RuntimeEvent): { kind: string; message: string; detail?: TaskProgressDetail } | null {
+  if (event.type === "assistant.message") {
+    // The model writes its own short progress narration between tool calls.
+    // Keep it separate from tool rows so the chat can render it as the
+    // Codex-style execution timeline instead of a task log.
+    return {
+      kind: "narration",
+      message: event.text,
+      detail: { executorId: "native", eventType: "assistant.message", text: event.text }
+    };
+  }
   if (event.type === "turn.started") {
     return {
       kind: "turn",

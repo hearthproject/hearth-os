@@ -91,7 +91,10 @@ export interface TaskResultAnswerInput {
  * Chat-facing answer for a completed task. The status bubble only reports the
  * state; this message carries the actual result and the files it produced.
  */
-export function buildTaskResultAnswer(input: TaskResultAnswerInput): string {
+export function buildTaskResultAnswer(
+  input: TaskResultAnswerInput,
+  options: { includeFiles?: boolean } = {}
+): string {
   const title = input.task.title || "未命名任务";
   const body = clip(input.task.resultSummary?.trim() ?? "", ANSWER_BODY_LIMIT);
   const files = deliverableArtifacts(input.task, input.artifacts);
@@ -100,12 +103,15 @@ export function buildTaskResultAnswer(input: TaskResultAnswerInput): string {
   }
   const sections: string[] = [];
   if (body) sections.push(body);
-  if (files.length > 0) {
+  if (files.length > 0 && options.includeFiles !== false) {
     const links = files.map((file) => {
       const url = `/api/tasks/${encodeURIComponent(input.task.id)}/artifacts/${encodeURIComponent(file.id)}`;
       return `- [${file.name}](${url}) · ${formatBytes(file.bytes)}`;
     });
     sections.push(["**交付文件**", "", ...links].join("\n"));
+  }
+  if (files.length > 0 && options.includeFiles === false && !body) {
+    sections.push("任务已完成，交付文件见下方。");
   }
   return sections.join("\n\n");
 }

@@ -69,6 +69,15 @@ describe("task result answers", () => {
     expect(answer).not.toContain("report-6.md");
   });
 
+  it("can leave files to the chat chips below the answer", () => {
+    const answer = buildTaskResultAnswer({
+      task: task(),
+      artifacts: [{ id: "artifact-1", relativePath: "result.md", bytes: 31_000 }]
+    }, { includeFiles: false });
+    expect(answer).toBe("共 165 条已合并 PR，分布在 24 个仓库。");
+    expect(answer).not.toContain("交付文件");
+  });
+
   it("explains an empty completion instead of returning a blank message", () => {
     const answer = buildTaskResultAnswer({ task: task({ resultSummary: null }), artifacts: [] });
     expect(answer).toBe("任务「列出已合并 PR」已完成，但没有返回文字结果或交付文件。");

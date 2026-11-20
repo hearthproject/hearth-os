@@ -1254,7 +1254,8 @@ describe("Hearth scheduler", () => {
     expect(messages.some((message) =>
       message.kind === "text" && message.role === "assistant" && message.content.includes("最终结果已生成")
     )).toBe(true);
-    expect(messages.some((message) => message.kind === "text" && message.content.includes("result.md"))).toBe(true);
+    // Deliverable files are rendered as chips under the answer, not in its body.
+    expect(messages.some((message) => message.kind === "text" && message.content.includes("result.md"))).toBe(false);
   });
 
   it("blocks handoff while an external effect needs reconciliation", async () => {
