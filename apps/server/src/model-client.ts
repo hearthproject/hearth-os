@@ -9,12 +9,14 @@ export interface ChatMessage {
 export class ModelClientError extends Error {
   readonly code: string;
   readonly status: number | null;
+  readonly retryAfterMs: number | null;
 
-  constructor(code: string, message: string, status: number | null = null) {
+  constructor(code: string, message: string, status: number | null = null, retryAfterMs: number | null = null) {
     super(message);
     this.name = "ModelClientError";
     this.code = code;
     this.status = status;
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -40,7 +42,7 @@ export interface CompleteResult {
 export type StreamDeltaKind = "content" | "reasoning";
 export type StreamDeltaHandler = (text: string, kind: StreamDeltaKind) => void;
 
-const MODEL_RETRY_ATTEMPTS = 3;
+const MODEL_RETRY_ATTEMPTS = 5;
 const MODEL_RETRY_BASE_DELAY_MS = 400;
 const RETRYABLE_HTTP_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 const RETRYABLE_PROVIDER_ERROR = /workspace_billing_scope_unavailable|database_unavailable|context deadline exceeded|deadline exceeded|rate.?limit|too many requests|overloaded|temporarily unavailable|service unavailable|bad gateway|gateway timeout|upstream|econnreset|econnrefused|eai_again|etimedout|socket hang up|fetch failed|network error|connection reset/i;
@@ -103,7 +105,7 @@ async function streamChatOnce(
   }
 }
 
-async function withModelRetry<T>(
+export async function withModelRetry<T>(
   attempt: () => Promise<T>,
   signal: AbortSignal | undefined,
   allowRetry: () => boolean = () => true
@@ -117,7 +119,11 @@ async function withModelRetry<T>(
         && allowRetry()
         && isRetryableModelError(error);
       if (!canRetry) throw error;
-      await retryDelay(MODEL_RETRY_BASE_DELAY_MS * 2 ** index, signal);
+      const baseDelay = error instanceof ModelClientError && error.retryAfterMs !== null
+        ? error.retryAfterMs
+        : MODEL_RETRY_BASE_DELAY_MS * 2 ** index;
+      const jittered = baseDelay * (0.75 + Math.random() * 0.5);
+      await retryDelay(jittered, signal);
     }
   }
   throw new ModelClientError("MODEL_REQUEST_FAILED", "模型请求重试失败");
@@ -202,7 +208,7 @@ async function completeOpenAiChat(
     signal: withTimeout(options.signal, options.timeoutMs ?? 60_000)
   });
   const payload = await readJson(response);
-  if (!response.ok) throw apiError(response.status, payload);
+  if (!response.ok) throw apiError(response.status, payload, response.headers.get("retry-after"));
   const content = String(payload?.choices?.[0]?.message?.content ?? "");
   const choice = payload?.choices?.[0];
   const reasoning = choice?.message?.reasoning_content ?? choice?.message?.reasoning;
@@ -235,13 +241,13 @@ async function streamOpenAiChat(
     }),
     signal: withTimeout(options.signal, options.timeoutMs ?? 180_000)
   });
-  if (!response.ok) throw apiError(response.status, await readJson(response));
+  if (!response.ok) throw apiError(response.status, await readJson(response), response.headers.get("retry-after"));
   if (!response.body) throw new ModelClientError("EMPTY_RESPONSE", "模型服务没有返回内容");
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.includes("text/event-stream")) {
     const payload = await readJsonFromText(await response.text());
     const content = String(payload?.choices?.[0]?.message?.content ?? "");
-    if (!content) throw apiError(response.status, payload);
+    if (!content) throw apiError(response.status, payload, response.headers.get("retry-after"));
     onDelta(content, "content");
     return { content, usage: readUsage(payload?.usage) };
   }
@@ -290,7 +296,7 @@ async function completeOpenAiResponses(
     signal: withTimeout(options.signal, options.timeoutMs ?? 60_000)
   });
   const payload = await readJson(response);
-  if (!response.ok) throw apiError(response.status, payload);
+  if (!response.ok) throw apiError(response.status, payload, response.headers.get("retry-after"));
   return { content: responsesText(payload), usage: readUsage(payload?.usage) };
 }
 
@@ -306,7 +312,7 @@ async function streamOpenAiResponses(
     body: JSON.stringify({ ...responsesBody(messages), model: settings.model, stream: true }),
     signal: withTimeout(options.signal, options.timeoutMs ?? 180_000)
   });
-  if (!response.ok) throw apiError(response.status, await readJson(response));
+  if (!response.ok) throw apiError(response.status, await readJson(response), response.headers.get("retry-after"));
 
   let content = "";
   let usage: CompleteResult["usage"] = null;
@@ -349,7 +355,7 @@ async function completeAnthropic(
     signal: withTimeout(options.signal, options.timeoutMs ?? 60_000)
   });
   const payload = await readJson(response);
-  if (!response.ok) throw apiError(response.status, payload);
+  if (!response.ok) throw apiError(response.status, payload, response.headers.get("retry-after"));
   return { content: anthropicText(payload), usage: readAnthropicUsage(payload?.usage) };
 }
 
@@ -365,7 +371,7 @@ async function streamAnthropic(
     body: JSON.stringify({ model: settings.model, max_tokens: options.maxTokens ?? 4_096, ...anthropicPayload(messages), stream: true }),
     signal: withTimeout(options.signal, options.timeoutMs ?? 180_000)
   });
-  if (!response.ok) throw apiError(response.status, await readJson(response));
+  if (!response.ok) throw apiError(response.status, await readJson(response), response.headers.get("retry-after"));
 
   let content = "";
   let usage: CompleteResult["usage"] = null;
@@ -409,7 +415,7 @@ async function completeGemini(
     signal: withTimeout(options.signal, options.timeoutMs ?? 60_000)
   });
   const payload = await readJson(response);
-  if (!response.ok) throw apiError(response.status, payload);
+  if (!response.ok) throw apiError(response.status, payload, response.headers.get("retry-after"));
   return { content: geminiText(payload), usage: readGeminiUsage(payload?.usageMetadata) };
 }
 
@@ -425,7 +431,7 @@ async function streamGemini(
     body: JSON.stringify(geminiBody(messages, options)),
     signal: withTimeout(options.signal, options.timeoutMs ?? 180_000)
   });
-  if (!response.ok) throw apiError(response.status, await readJson(response));
+  if (!response.ok) throw apiError(response.status, await readJson(response), response.headers.get("retry-after"));
 
   let content = "";
   let usage: CompleteResult["usage"] = null;
@@ -450,7 +456,7 @@ async function listOpenAiModels(settings: ModelSettings, timeoutMs: number): Pro
     signal: withTimeout(undefined, timeoutMs)
   });
   const payload = await readJson(response);
-  if (!response.ok) throw apiError(response.status, payload);
+  if (!response.ok) throw apiError(response.status, payload, response.headers.get("retry-after"));
   const list = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload?.models) ? payload.models : [];
   return normalizeModelIds(list);
 }
@@ -462,7 +468,7 @@ async function listAnthropicModels(settings: ModelSettings, timeoutMs: number): 
     signal: withTimeout(undefined, timeoutMs)
   });
   const payload = await readJson(response);
-  if (!response.ok) throw apiError(response.status, payload);
+  if (!response.ok) throw apiError(response.status, payload, response.headers.get("retry-after"));
   const list = Array.isArray(payload?.data) ? payload.data : [];
   return normalizeModelIds(list);
 }
@@ -474,7 +480,7 @@ async function listGeminiModels(settings: ModelSettings, timeoutMs: number): Pro
     signal: withTimeout(undefined, timeoutMs)
   });
   const payload = await readJson(response);
-  if (!response.ok) throw apiError(response.status, payload);
+  if (!response.ok) throw apiError(response.status, payload, response.headers.get("retry-after"));
   const list = Array.isArray(payload?.models) ? payload.models : [];
   return list
     .filter((item: unknown) => {
@@ -686,12 +692,21 @@ export function safeJson(text: string): Record<string, any> | null {
   }
 }
 
-export function apiError(status: number, payload: Record<string, any> | null): ModelClientError {
+export function apiError(status: number, payload: Record<string, any> | null, retryAfter: string | null = null): ModelClientError {
   const detail = payload?.error?.message ?? payload?.error?.error?.message ?? payload?.message ?? payload?.error;
   const message = typeof detail === "string" && detail.trim()
     ? detail
     : `模型服务返回了 ${status}`;
-  return new ModelClientError("MODEL_REQUEST_FAILED", message, status);
+  return new ModelClientError("MODEL_REQUEST_FAILED", message, status, parseRetryAfterMs(retryAfter));
+}
+
+export function parseRetryAfterMs(value: string | null): number | null {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.max(0, Math.round(seconds * 1_000));
+  const date = Date.parse(value);
+  if (Number.isFinite(date)) return Math.max(0, date - Date.now());
+  return null;
 }
 
 // input/output are totals; cache and reasoning fields are breakdowns, not additions.
