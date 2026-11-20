@@ -10,6 +10,7 @@ import { EffectStatusTag } from "./StatusPill.tsx";
 export function ApprovalCard({ approval, effect }: { approval: ApprovalRecord; effect?: EffectRecord | undefined }) {
   const queryClient = useQueryClient();
   const [confirming, setConfirming] = useState(false);
+  const [alwaysAllow, setAlwaysAllow] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const preview = approval.preview;
   const target = approval.target;
@@ -28,7 +29,6 @@ export function ApprovalCard({ approval, effect }: { approval: ApprovalRecord; e
   const toolArguments = isTool ? target.arguments ?? preview.arguments : null;
   const browserPreview = isBrowserPreview(preview.browser) ? preview.browser : null;
   const isBrowserAction = Boolean(browserPreview) || toolName?.startsWith("browser_");
-  const isBrowserOpen = toolName === "browser_open";
   const account = text(target.account) ?? text(preview.account) ?? text(target.accountId);
   const from = text(target.from) ?? text(preview.from);
   const recipients = stringArray(target.to ?? preview.to);
@@ -38,6 +38,7 @@ export function ApprovalCard({ approval, effect }: { approval: ApprovalRecord; e
   const impact = text(preview.impact);
   const undo = text(preview.undo);
   const isPending = approval.status === "pending";
+  const canAlwaysAllow = preview.canAlwaysAllow === true;
 
   const decide = useMutation({
     mutationFn: (decision: "approve" | "reject" | "approve_always") => api.decideApproval(approval.id, decision, approval.parameterHash),
@@ -63,7 +64,7 @@ export function ApprovalCard({ approval, effect }: { approval: ApprovalRecord; e
       {isPending && (
         <p className="approval-scope">
           {isTool
-            ? "工具调用。只允许本次调用；拒绝后 Agent 会跳过它并继续尝试完成任务。"
+            ? "外部工具调用。拒绝后 Agent 会跳过它并继续尝试完成任务。"
             : isOutbox
             ? "本地写入。确认后只把邮件包写入本机发件箱，不会发送给收件人。"
             : isSmtp
@@ -75,7 +76,10 @@ export function ApprovalCard({ approval, effect }: { approval: ApprovalRecord; e
       {isTool ? (
         <dl className="kv-grid">
           <div><dt>工具</dt><dd className="mono select-all">{toolName}</dd></div>
-          <div><dt>批准范围</dt><dd>仅本次工具调用；不会自动放行后续调用。</dd></div>
+          <div>
+            <dt>批准范围</dt>
+            <dd>{canAlwaysAllow ? "默认只允许这一次；你也可以选择以后自动执行同类操作。" : "仅本次调用；无法自动放行。"}</dd>
+          </div>
           <div><dt>确认截止到</dt><dd className="mono">{formatTime(approval.expiresAt)}</dd></div>
         </dl>
       ) : isMail ? (
@@ -149,18 +153,24 @@ export function ApprovalCard({ approval, effect }: { approval: ApprovalRecord; e
             <span>
               <AlertTriangle size={15} /> {isTool ? "仅批准这次工具调用。拒绝后 Agent 会继续执行。" : isOutbox ? "只写入本机发件箱，不会发送；可删除文件撤销。" : isSmtp ? "立即通过 SMTP 发送，不能撤回。" : "立即执行，不能撤销。"}
             </span>
+            {canAlwaysAllow && (
+              <label className="approval-always">
+                <input
+                  type="checkbox"
+                  checked={alwaysAllow}
+                  onChange={(event) => setAlwaysAllow(event.target.checked)}
+                  disabled={decide.isPending}
+                />
+                以后遇到同类外部操作都直接执行（可在“安全与撤销”里取消）
+              </label>
+            )}
             <div>
               <button className="ghost-button" onClick={() => setConfirming(false)} disabled={decide.isPending}>返回检查</button>
-              <button className="primary-button" onClick={() => decide.mutate("approve")} disabled={decide.isPending}>
+              <button className="primary-button" onClick={() => decide.mutate(alwaysAllow ? "approve_always" : "approve")} disabled={decide.isPending}>
                 {decide.isPending
                   ? <><Loader2 className="spin" size={15} /> 正在执行</>
-                  : <><CheckCircle2 size={15} /> {isTool ? "允许本次工具" : isOutbox ? "确认写入本地" : isSmtp ? "确认并发送" : "确认执行"}</>}
+                  : <><CheckCircle2 size={15} /> {alwaysAllow ? "确认并记住" : isTool ? "允许本次工具" : isOutbox ? "确认写入本地" : isSmtp ? "确认并发送" : "确认执行"}</>}
               </button>
-              {isBrowserOpen && (
-                <button className="ghost-button" onClick={() => decide.mutate("approve_always")} disabled={decide.isPending}>
-                  该域名始终允许（30 天）
-                </button>
-              )}
             </div>
           </div>
         ) : (

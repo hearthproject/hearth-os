@@ -117,6 +117,20 @@
   gap: 8px;
 }
 
+.approval-always {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  color: var(--ink-secondary);
+  line-height: 1.45;
+  cursor: pointer;
+}
+
+.approval-always input {
+  margin-top: 2px;
+}
+
 .approval-result {
   display: flex;
   align-items: center;

@@ -1,4 +1,5 @@
 import type {
+  ApprovalGrant,
   ApprovalDecisionResult,
   ApprovalListItem,
   AttachmentUploadResult,
@@ -557,6 +558,9 @@ export const api = {
     request<{ runs: RunListItem[]; total: number }>(`/api/runs${query(params)}`),
   approvals: (params: { taskId?: string; status?: string; limit?: number; offset?: number; brief?: boolean } = {}) =>
     request<{ approvals: ApprovalListItem[]; total: number }>(`/api/approvals${query(params)}`),
+  approvalGrants: () => request<{ grants: ApprovalGrant[] }>("/api/approval-grants"),
+  revokeApprovalGrant: (id: string) =>
+    request<{ ok: boolean }>(`/api/approval-grants/${encodeURIComponent(id)}`, { method: "DELETE" }),
   effects: (params: { taskId?: string; status?: string; limit?: number; offset?: number } = {}) =>
     request<{ effects: EffectListItem[]; total: number }>(`/api/effects${query(params)}`),
   reconcile: (params: { status?: string } = {}) =>

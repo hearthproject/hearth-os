@@ -1,5 +1,6 @@
 import type {
   ApprovalMode,
+  ApprovalGrant,
   ApprovalListItem,
   ApprovalRecord,
   ApprovalStatus,
@@ -120,6 +121,7 @@ import type {
 
 export type {
   ApprovalMode,
+  ApprovalGrant,
   ApprovalListItem,
   ApprovalRecord,
   ApprovalStatus,

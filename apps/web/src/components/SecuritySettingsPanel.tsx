@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api.ts";
 import { formatDate, relativeTime } from "../lib/format.ts";
-import type { SecurityAudit } from "../lib/types.ts";
+import type { ApprovalGrant, SecurityAudit } from "../lib/types.ts";
 
 const AUDIT_LABELS: Record<string, string> = {
   "security.kill-switch.enabled": "启用全局停止",
@@ -21,8 +21,18 @@ export function SecuritySettingsPanel() {
   const queryClient = useQueryClient();
   const [noticed, setNoticed] = useState<string | null>(null);
   const securityQuery = useQuery({ queryKey: ["security"], queryFn: api.security, refetchInterval: 20_000 });
+  const grantsQuery = useQuery({ queryKey: ["approval-grants"], queryFn: api.approvalGrants });
   const snapshot = securityQuery.data;
   const active = snapshot?.state.killSwitch ?? false;
+
+  const revokeGrant = useMutation({
+    mutationFn: (id: string) => api.revokeApprovalGrant(id),
+    onSuccess: () => {
+      setNoticed("已取消这条自动执行规则，下一次同类操作会重新确认。");
+      void queryClient.invalidateQueries({ queryKey: ["approval-grants"] });
+    },
+    onError: (error: Error) => setNoticed(error.message)
+  });
 
   const toggleMutation = useMutation({
     mutationFn: async () => {
@@ -78,6 +88,32 @@ export function SecuritySettingsPanel() {
         )}
       </section>
 
+      <section className="panel table-panel">
+        <div className="panel-head">
+          <h2>自动执行规则</h2>
+          <span className="panel-meta">只影响你主动勾选过的同类外部操作</span>
+        </div>
+        {grantsQuery.isLoading ? (
+          <p className="section-empty">正在读取自动执行规则…</p>
+        ) : (grantsQuery.data?.grants.length ?? 0) === 0 ? (
+          <p className="section-empty">还没有自动执行规则。外部操作第一次确认时，可以勾选“以后遇到同类外部操作都直接执行”。</p>
+        ) : (
+          <table className="data-table security-audit-table">
+            <thead><tr><th>操作</th><th>最近执行</th><th>创建时间</th><th /></tr></thead>
+            <tbody>
+              {grantsQuery.data?.grants.map((grant) => (
+                <GrantRow
+                  key={grant.id}
+                  grant={grant}
+                  pending={revokeGrant.isPending}
+                  onRevoke={() => revokeGrant.mutate(grant.id)}
+                />
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
       <section className="panel">
         <div className="panel-head"><h2>删除与撤销</h2><span className="panel-meta">本机安全边界</span></div>
         <dl className="kv-grid security-boundaries">
@@ -106,6 +142,39 @@ export function SecuritySettingsPanel() {
       <p className="security-footnote"><LockKeyhole size={13} /> 安全事件保存在本机事件日志中，不同步到其他实例；设备与服务端令牌都不会进入浏览器列表。</p>
     </div>
   );
+}
+
+function GrantRow({ grant, pending, onRevoke }: { grant: ApprovalGrant; pending: boolean; onRevoke: () => void }) {
+  return (
+    <tr>
+      <td><span className="tag">{grantActionLabel(grant.action)}</span></td>
+      <td>{grant.lastUsedAt ? relativeTime(grant.lastUsedAt) : "还没有自动执行过"}</td>
+      <td title={formatDate(grant.createdAt)}>{relativeTime(grant.createdAt)}</td>
+      <td>
+        <button className="ghost-button danger" disabled={pending} onClick={onRevoke}>取消自动执行</button>
+      </td>
+    </tr>
+  );
+}
+
+function grantActionLabel(action: string): string {
+  const labels: Record<string, string> = {
+    browser_submit: "网页提交",
+    browser_upload: "网页上传",
+    browser_download: "网页下载",
+    browser_recipe: "网页连续操作",
+    send_email: "发送邮件",
+    "email.smtp-send": "发送邮件",
+    send_message: "发送消息",
+    "github.publish-pr": "创建 PR",
+    "github.comment": "在 GitHub 留言",
+    publish: "发布内容",
+    post: "发布内容",
+    comment: "发表评论"
+  };
+  if (labels[action]) return labels[action];
+  if (action.startsWith("mcp__")) return `外部工具 ${action.split("__").slice(2).join("__")}`;
+  return action;
 }
 
 function AuditRow({ audit }: { audit: SecurityAudit }) {
