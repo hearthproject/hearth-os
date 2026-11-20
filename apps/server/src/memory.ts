@@ -162,7 +162,7 @@ export class MemoryService {
   settings(): MemorySettings {
     const stored = this.service.store.getMemorySettings();
     if (!stored) return structuredClone(DEFAULT_MEMORY_SETTINGS);
-    if (stored.autoCapture === "experience") return stored;
+    if (stored.autoCapture === "experience" || stored.autoCapture === "off") return stored;
     const next: MemorySettings = { ...stored, autoCapture: "experience", updatedAt: this.nowIso() };
     this.emit("memory.settings.updated", next);
     return next;
@@ -171,10 +171,10 @@ export class MemoryService {
   updateSettings(patch: MemorySettingsPatch): MemorySettings {
     const next = this.settings();
     if (patch.autoCapture !== undefined) {
-      if (patch.autoCapture !== "experience") {
+      if (patch.autoCapture !== "experience" && patch.autoCapture !== "off") {
         throw new MemoryError("INVALID_AUTO_CAPTURE", "自动捕获模式不正确");
       }
-      next.autoCapture = "experience";
+      next.autoCapture = patch.autoCapture;
     }
     if (patch.maxItems !== undefined) {
       if (!Number.isInteger(patch.maxItems) || patch.maxItems < 1 || patch.maxItems > 50) {

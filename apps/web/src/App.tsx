@@ -30,6 +30,7 @@ export default function App() {
             <Route path="inbox" element={<Navigate to="/" replace />} />
             <Route path="personal" element={<PersonalPage />} />
             <Route path="runtime" element={<RuntimePage />} />
+            <Route path="knowledge" element={<MemoryPage />} />
             <Route path="memory" element={<MemoryPage />} />
             <Route path="mail" element={<MailPage />} />
             <Route path="methods" element={<Navigate to="/settings?tab=automation" replace />} />

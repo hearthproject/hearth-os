@@ -485,6 +485,13 @@ describe("MemoryService", () => {
     expect(store.listMemories({ kind: "experience" })).toHaveLength(1);
   });
 
+  it("can turn automatic experience capture off", () => {
+    expect(memory.updateSettings({ autoCapture: "off" }).autoCapture).toBe("off");
+    const task = createTask();
+    store.appendEvent({ type: "task.updated", taskId: task.id, payload: { status: "completed", resultSummary: "周报已生成" } });
+    expect(memory.captureExperience(task.id)).toBeNull();
+  });
+
   it("exports source, versions, conflicts, and recall audit", () => {
     const created = createMemory();
     memory.confirm(created.id);

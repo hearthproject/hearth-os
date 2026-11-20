@@ -63,7 +63,7 @@ const TABS: Array<{ id: SettingsTab; label: string }> = [
   { id: "extensions", label: "扩展" },
   { id: "proactive", label: "主动" },
   { id: "automation", label: "记忆与技能" },
-  { id: "knowledge", label: "知识库" },
+  { id: "knowledge", label: "知识库连接" },
   { id: "connections", label: "连接" },
   { id: "context", label: "上下文" },
   { id: "data", label: "数据" }

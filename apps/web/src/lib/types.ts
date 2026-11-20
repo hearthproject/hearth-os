@@ -907,8 +907,18 @@ export interface KnowledgeStatusResponse {
   settings: KnowledgeSettingsView;
   health: { ok: boolean; latencyMs: number; version: string | null; authMode: string | null; detail: string | null };
   jobs: { pending: number; running: number; failed: number; dead: number };
+  index: { memories: number; tasks: number; sources: number; total: number; lastIndexedAt: string | null };
   lastReconcileAt: string | null;
   lastReindexDate: string | null;
+}
+
+export interface KnowledgeHit {
+  uri: string;
+  contextType: "memory" | "resource" | "skill" | "unknown";
+  level: number | null;
+  score: number | null;
+  abstract: string | null;
+  tags: string[];
 }
 
 export interface KnowledgeSettingsPatch {

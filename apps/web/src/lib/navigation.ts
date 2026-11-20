@@ -14,7 +14,7 @@ export interface NavItem {
 
 export const NAV_ITEMS: NavItem[] = [
   { id: "chat", label: "聊天", path: "/", icon: MessageCircle, placement: "main", end: true, keywords: ["聊天", "对话", "chat", "conversation"] },
-  { id: "memory", label: "记忆", path: "/memory", icon: BookOpen, placement: "main", keywords: ["记忆", "知识", "memory"] },
+  { id: "knowledge", label: "知识库", path: "/knowledge", icon: BookOpen, placement: "main", keywords: ["知识库", "记忆", "语义检索", "openviking", "memory", "knowledge"] },
   { id: "mail", label: "邮件", path: "/mail", icon: Mail, placement: "more", keywords: ["邮件", "邮箱", "mail"] },
   { id: "schedules", label: "定时任务", path: "/schedules", icon: CalendarClock, placement: "more", keywords: ["定时", "周期", "schedule"] },
   { id: "devices", label: "设备", path: "/devices", icon: Monitor, placement: "more", keywords: ["设备", "桌面", "device", "desktop"] },

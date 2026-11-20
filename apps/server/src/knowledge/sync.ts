@@ -3,6 +3,7 @@ import { readFileSync, statSync } from "node:fs";
 import type { MemoryRecord, SourceItem, TaskRecord } from "@hearth/core";
 import type { HearthStore } from "@hearth/eventlog";
 import { redactSecrets } from "../context.ts";
+import { isEvaluationMemory } from "../draft-intent.ts";
 import { KnowledgeClient, type KnowledgeWriteInput } from "./client.ts";
 import type { KnowledgeSettings, KnowledgeSettingsStore } from "./settings.ts";
 
@@ -59,6 +60,7 @@ export class KnowledgeSyncService {
     const settings = this.settings.get();
     if (!settings.enabled || settings.write.tasks === "off") return false;
     if (task.status !== "completed") return false;
+    if (isEvaluationMemory([task.title, task.goal, task.resultSummary ?? "", task.nextAction ?? ""].join("\n"))) return false;
     const document = taskDocument(task);
     return this.enqueue({ kind: "task", ref: task.id, document });
   }
@@ -67,6 +69,7 @@ export class KnowledgeSyncService {
     const settings = this.settings.get();
     if (!settings.enabled || !settings.write.sources) return false;
     if (item.status !== "ready" || !item.contentPath) return false;
+    if (isEvaluationMemory([item.title, item.locator, item.contentPath].join("\n"))) return false;
     try {
       if (statSync(item.contentPath).size > MAX_SOURCE_BYTES) return false;
     } catch {
@@ -394,10 +397,12 @@ function fieldMatches(field: string, value: number): boolean {
   return false;
 }
 
-function isMemoryWritable(memory: MemoryRecord, mode: "curated" | "all"): boolean {  if (memory.status !== "active" || !memory.allowRecall) return false;
+function isMemoryWritable(memory: MemoryRecord, mode: "curated" | "all"): boolean {
+  if (memory.status !== "active" || !memory.allowRecall) return false;
   if (memory.sensitivity === "secret") return false;
   if (memory.taint !== "clean") return false;
   if (memory.originClass === "untrusted") return false;
+  if (isEvaluationMemory(memory.content) || isEvaluationMemory(memory.subjectKey)) return false;
   if (mode === "curated" && !["instructions", "curated"].includes(memory.tier)) return false;
   return true;
 }

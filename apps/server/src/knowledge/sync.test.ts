@@ -116,6 +116,13 @@ describe("KnowledgeSyncService", () => {
     expect(sync.enqueueMemory(memory({ originClass: "untrusted" }))).toBe(false);
   });
 
+  it("skips evaluation memories and tasks", async () => {
+    settings.update({ enabled: true, write: { memories: "all" } });
+    const sync = service();
+    expect(sync.enqueueMemory(memory({ content: "结果。评测运行约束：不得访问网络。" }))).toBe(false);
+    expect(sync.enqueueTask({ ...completedTask(), goal: "按评测运行约束写入 .hearth/eval-artifacts/EXP-20261119000000/result.md" })).toBe(false);
+  });
+
   it("writes completed tasks with an acceptance and result section", async () => {
     settings.update({ enabled: true });
     const task = completedTask();

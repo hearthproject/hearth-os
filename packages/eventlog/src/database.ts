@@ -1688,6 +1688,29 @@ export class HearthStore {
     this.db.prepare("DELETE FROM knowledge_map WHERE hearth_id = ?").run(hearthId);
   }
 
+  knowledgeMapStats(): {
+    memories: number;
+    tasks: number;
+    sources: number;
+    total: number;
+    lastIndexedAt: string | null;
+  } {
+    const rows = this.db.prepare(
+      "SELECT kind, COUNT(*) AS count FROM knowledge_map GROUP BY kind"
+    ).all() as DbRow[];
+    const stats = { memories: 0, tasks: 0, sources: 0, total: 0, lastIndexedAt: null as string | null };
+    for (const row of rows) {
+      const count = Number(row.count);
+      stats.total += count;
+      if (row.kind === "memory") stats.memories = count;
+      else if (row.kind === "task") stats.tasks = count;
+      else if (row.kind === "source") stats.sources = count;
+    }
+    const last = this.db.prepare("SELECT MAX(updated_at) AS last FROM knowledge_map").get() as DbRow | undefined;
+    stats.lastIndexedAt = last?.last ? String(last.last) : null;
+    return stats;
+  }
+
   knowledgeStateGet(key: string): string | null {
     const row = this.db.prepare("SELECT value FROM knowledge_state WHERE key = ?").get(key) as DbRow | undefined;
     return row ? String(row.value) : null;

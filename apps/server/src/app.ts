@@ -1653,6 +1653,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
       settings: view,
       health,
       jobs,
+      index: store.knowledgeMapStats(),
       lastReconcileAt: store.knowledgeStateGet("last_full_reconcile_at"),
       lastReindexDate: store.knowledgeStateGet("last_reindex_date")
     };

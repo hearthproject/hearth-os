@@ -48,6 +48,7 @@ import type {
   HealthResponse,
   KnowledgeSettingsPatch,
   KnowledgeSetupState,
+  KnowledgeHit,
   KnowledgeStatusResponse,
   HermesProbeResponse,
   LocalProjectView,
@@ -290,6 +291,11 @@ export const api = {
     body: JSON.stringify(input)
   }),
   testKnowledge: () => request<{ health: KnowledgeStatusResponse["health"]; hits: number }>("/api/knowledge/test", { method: "POST" }),
+  knowledgeSearch: (query: string, uri?: string) => {
+    const params = new URLSearchParams({ q: query });
+    if (uri) params.set("uri", uri);
+    return request<{ hits: KnowledgeHit[] }>("/api/knowledge/search?" + params.toString());
+  },
   syncKnowledge: () => request<{ result: { written: number; failed: number; skipped: number } }>("/api/knowledge/sync", { method: "POST" }),
   reconcileKnowledge: () => request<{ result: { memories: number; tasks: number; sources: number } }>("/api/knowledge/reconcile", { method: "POST" }),
   reindexKnowledge: () => request<{ ok: boolean }>("/api/knowledge/reindex", { method: "POST" }),
