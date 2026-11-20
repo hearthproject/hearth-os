@@ -39,6 +39,7 @@ import type {
   FeishuDomain,
   FeishuIntegrationResponse,
   FeishuTestResponse,
+  FolderBrowseResult,
   GitDiffScope,
   GitDiffView,
   GitFileView,
@@ -213,6 +214,7 @@ export const api = {
   }),
   modelSettings: () => request<ModelSettingsResponse>("/api/model-settings"),
   projects: () => request<{ projects: LocalProjectView[] }>("/api/projects"),
+  browseFolders: (path?: string) => request<{ folders: FolderBrowseResult }>(`/api/projects/folders${query({ path })}`),
   createProject: (input: { name?: string; path: string; defaultBranch?: string }) => request<{ project: LocalProjectView }>("/api/projects", {
     method: "POST",
     body: JSON.stringify(input)

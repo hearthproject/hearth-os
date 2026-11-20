@@ -1,5 +1,6 @@
-import { useRef, useState } from "react";
-import { Loader2, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { ArrowUp, ChevronRight, Folder, HardDrive, Loader2, X } from "lucide-react";
 import { api } from "../lib/api.ts";
 import { hasDesktopBridge, pickFolder } from "../lib/desktop.ts";
 import type { LocalProjectView } from "../lib/types.ts";
@@ -7,7 +8,7 @@ import type { LocalProjectView } from "../lib/types.ts";
 export function normalizeFolderPath(input: string): string | null {
   const trimmed = input.trim().replace(/^["']|["']$/g, "").trim();
   if (!trimmed) return null;
-  if (/^[A-Za-z]:[\\/]/.test(trimmed) || trimmed.startsWith("\\\\")) return trimmed;
+  if (/^[A-Za-z]:[\\/]/.test(trimmed) || trimmed.startsWith("\\\\") || trimmed.startsWith("/")) return trimmed;
   return null;
 }
 
@@ -16,25 +17,23 @@ export function ProjectDialog({ onClose, onCreated }: { onClose: () => void; onC
   const [path, setPath] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [pickerUnavailable, setPickerUnavailable] = useState(() => !hasDesktopBridge());
+  const [browserOpen, setBrowserOpen] = useState(false);
   const pathRef = useRef<HTMLInputElement | null>(null);
 
   async function browse() {
     setError(null);
-    if (!hasDesktopBridge()) {
-      setPickerUnavailable(true);
-      setError("当前不在桌面版中，请直接粘贴完整的文件夹路径。");
-      pathRef.current?.focus();
-      return;
+    if (hasDesktopBridge()) {
+      try {
+        const picked = await pickFolder();
+        if (picked) {
+          setPath(picked);
+          return;
+        }
+      } catch {
+        // Fall through to the server-side browser.
+      }
     }
-    try {
-      const picked = await pickFolder();
-      if (picked) setPath(picked);
-    } catch {
-      setPickerUnavailable(true);
-      setError("系统选择器不可用，请直接粘贴完整的文件夹路径。");
-      pathRef.current?.focus();
-    }
+    setBrowserOpen(true);
   }
 
   async function create() {
@@ -80,9 +79,7 @@ export function ProjectDialog({ onClose, onCreated }: { onClose: () => void; onC
           <span>源文件夹</span>
           <div className="project-path-row">
             <input ref={pathRef} value={path} onChange={(event) => setPath(event.target.value)} placeholder="D:\Projects\my-app" spellCheck={false} />
-            {!pickerUnavailable && (
-              <button type="button" className="ghost-button" onClick={() => void browse()} disabled={busy}>浏览…</button>
-            )}
+            <button type="button" className="ghost-button" onClick={() => void browse()} disabled={busy}>浏览…</button>
           </div>
         </label>
         <p className="project-dialog-note">支持 Git 仓库或任意本地文件夹。</p>
@@ -92,6 +89,127 @@ export function ProjectDialog({ onClose, onCreated }: { onClose: () => void; onC
           <button className="primary-button" onClick={() => void create()} disabled={busy || !path.trim()}>
             {busy ? <Loader2 size={14} className="spin" /> : null} 创建项目
           </button>
+        </div>
+        {browserOpen && (
+          <FolderPicker
+            initialPath={path}
+            onClose={() => setBrowserOpen(false)}
+            onPick={(picked) => {
+              setPath(picked);
+              setBrowserOpen(false);
+            }}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FolderPicker({
+  initialPath,
+  onPick,
+  onClose
+}: {
+  initialPath: string;
+  onPick: (path: string) => void;
+  onClose: () => void;
+}) {
+  const initial = normalizeFolderPath(initialPath) ?? "";
+  const [location, setLocation] = useState(initial);
+  const [inputPath, setInputPath] = useState(initial);
+  const foldersQuery = useQuery({
+    queryKey: ["project-folders", location],
+    queryFn: () => api.browseFolders(location || undefined),
+    retry: false,
+    staleTime: 5_000
+  });
+  const rootsFallbackQuery = useQuery({
+    queryKey: ["project-folders", ""],
+    queryFn: () => api.browseFolders(),
+    enabled: foldersQuery.isError,
+    staleTime: 60_000
+  });
+  const folders = foldersQuery.data?.folders;
+  const roots = folders?.roots ?? rootsFallbackQuery.data?.folders.roots ?? [];
+
+  useEffect(() => {
+    if (!folders?.path) return;
+    setLocation(folders.path);
+    setInputPath(folders.path);
+  }, [folders?.path]);
+
+  function go(path: string) {
+    const clean = path.trim();
+    setLocation(clean);
+    setInputPath(clean);
+  }
+
+  return (
+    <div className="folder-picker-backdrop" role="presentation" onClick={(event) => {
+      event.stopPropagation();
+      onClose();
+    }}>
+      <div className="folder-picker" role="dialog" aria-modal="true" aria-label="选择文件夹" onClick={(event) => event.stopPropagation()}>
+        <div className="folder-picker-head">
+          <h3><Folder size={15} /> 选择文件夹</h3>
+          <button className="icon-button" onClick={onClose} aria-label="关闭"><X size={14} /></button>
+        </div>
+
+        <div className="folder-picker-path">
+          <button
+            type="button"
+            className="icon-button"
+            onClick={() => folders?.parent && go(folders.parent)}
+            disabled={!folders?.parent}
+            title="上一级"
+            aria-label="上一级"
+          >
+            <ArrowUp size={14} />
+          </button>
+          <input
+            value={inputPath}
+            onChange={(event) => setInputPath(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                go(inputPath);
+              }
+            }}
+            placeholder="输入文件夹路径后回车"
+            spellCheck={false}
+          />
+          <button type="button" className="ghost-button" onClick={() => go(inputPath)} disabled={!inputPath.trim()}>打开</button>
+        </div>
+
+        <div className="folder-picker-roots">
+          {roots.map((root) => (
+            <button key={root.path} type="button" className={`folder-root-chip${root.path === folders?.path ? " active" : ""}`} onClick={() => go(root.path)}>
+              <HardDrive size={12} /> {root.name}
+            </button>
+          ))}
+        </div>
+
+        <div className="folder-picker-list">
+          {foldersQuery.isLoading && <p className="folder-picker-note"><Loader2 size={13} className="spin" /> 正在读取…</p>}
+          {foldersQuery.isError && <p className="form-error">{foldersQuery.error instanceof Error ? foldersQuery.error.message : "无法读取这个文件夹"}</p>}
+          {!foldersQuery.isLoading && !foldersQuery.isError && folders?.entries.length === 0 && (
+            <p className="folder-picker-note">这个文件夹里没有子文件夹，可以直接选择它。</p>
+          )}
+          {folders?.entries.map((entry) => (
+            <button key={entry.path} type="button" className="folder-picker-row" onClick={() => go(entry.path)}>
+              <Folder size={14} />
+              <span>{entry.name}</span>
+              <ChevronRight size={13} />
+            </button>
+          ))}
+        </div>
+
+        <div className="folder-picker-foot">
+          <span title={folders?.path ?? undefined}>{folders?.path ?? "还没有选择文件夹"}</span>
+          <div>
+            <button className="ghost-button" onClick={onClose}>取消</button>
+            <button className="primary-button" onClick={() => onPick(folders?.path ?? "")} disabled={!folders?.path}>选择此文件夹</button>
+          </div>
         </div>
       </div>
     </div>

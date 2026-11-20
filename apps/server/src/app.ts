@@ -1204,6 +1204,14 @@ export async function buildServer(options: BuildServerOptions = {}) {
 
   app.get("/api/projects", async () => ({ projects: projects.list() }));
 
+  app.get<{ Querystring: { path?: string } }>("/api/projects/folders", async (request, reply) => {
+    try {
+      return { folders: projects.listFolders(request.query.path) };
+    } catch (error) {
+      return sendProjectError(reply, error);
+    }
+  });
+
   app.post("/api/projects", async (request, reply) => {
     const parsed = createProjectSchema.safeParse(request.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: "INVALID_PROJECT", message: "项目设置格式不正确" });

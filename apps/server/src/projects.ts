@@ -1,10 +1,23 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import type { LocalProject, LocalProjectView } from "@hearth/core";
 import type { HearthStore } from "@hearth/eventlog";
+
+export interface FolderBrowseEntry {
+  name: string;
+  path: string;
+}
+
+export interface FolderBrowseResult {
+  path: string | null;
+  parent: string | null;
+  roots: FolderBrowseEntry[];
+  entries: FolderBrowseEntry[];
+  separator: string;
+}
 
 export class ProjectError extends Error {
   readonly code: string;
@@ -33,6 +46,41 @@ export class ProjectService {
 
   list(): LocalProjectView[] {
     return this.store.listLocalProjects().map((project) => this.inspect(project));
+  }
+
+  listFolders(input?: string | null): FolderBrowseResult {
+    const roots = browseRoots();
+    const trimmed = input?.trim() ?? "";
+    if (!trimmed) {
+      return { path: null, parent: null, roots, entries: [], separator: "\\" };
+    }
+    const expanded = trimmed === "~"
+      ? homedir()
+      : trimmed.startsWith("~/") || trimmed.startsWith("~\\")
+        ? resolve(homedir(), trimmed.slice(2))
+        : trimmed;
+    const absolute = resolve(expandEnvironment(expanded));
+    if (!existsSync(absolute)) throw new ProjectError("FOLDER_NOT_FOUND", "文件夹不存在", 404);
+    if (!statSync(absolute).isDirectory()) throw new ProjectError("FOLDER_NOT_DIRECTORY", "路径不是文件夹");
+    const real = realpathSync.native(absolute);
+    let entries: FolderBrowseEntry[] = [];
+    try {
+      entries = readdirSync(real, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => ({ name: entry.name, path: resolve(real, entry.name) }))
+        .sort((left, right) => left.name.localeCompare(right.name, "zh-CN"))
+        .slice(0, 500);
+    } catch {
+      throw new ProjectError("FOLDER_NOT_READABLE", "无法读取这个文件夹", 403);
+    }
+    const parent = dirname(real);
+    return {
+      path: real,
+      parent: parent === real ? null : parent,
+      roots,
+      entries,
+      separator: "\\"
+    };
   }
 
   get(id: string): LocalProjectView {
@@ -164,6 +212,23 @@ function cleanName(value: string | undefined, root: string): string {
 
 function samePath(left: string, right: string): boolean {
   return resolve(left).replace(/\\/g, "/").toLowerCase() === resolve(right).replace(/\\/g, "/").toLowerCase();
+}
+
+function browseRoots(): FolderBrowseEntry[] {
+  if (process.platform === "win32") {
+    const drives: FolderBrowseEntry[] = [];
+    for (let code = 65; code <= 90; code += 1) {
+      const letter = String.fromCharCode(code);
+      const path = `${letter}:\\`;
+      if (existsSync(path)) drives.push({ name: `${letter}:`, path });
+    }
+    return drives;
+  }
+  return [{ name: "主目录", path: homedir() }];
+}
+
+function expandEnvironment(value: string): string {
+  return value.replace(/%([^%]+)%/g, (match, name: string) => process.env[name] ?? match);
 }
 
 function git(args: string[]): { ok: boolean; stdout: string; stderr: string } {

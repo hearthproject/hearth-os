@@ -106,6 +106,18 @@ describe("local projects", () => {
     expect(removed.statusCode).toBe(204);
     const missing = await app.inject({ method: "GET", url: `/api/projects/${projectId}` });
     expect(missing.statusCode).toBe(404);
+
+    mkdirSync(join(root, "child"));
+    const folders = await app.inject({ method: "GET", url: `/api/projects/folders?path=${encodeURIComponent(root)}` });
+    expect(folders.statusCode).toBe(200);
+    expect(folders.json().folders).toMatchObject({ path: root });
+    expect(folders.json().folders.entries).toContainEqual(expect.objectContaining({ name: "child" }));
+    const folderRoots = await app.inject({ method: "GET", url: "/api/projects/folders" });
+    expect(folderRoots.statusCode).toBe(200);
+    expect(folderRoots.json().folders).toMatchObject({ path: null });
+    expect(folderRoots.json().folders.roots.length).toBeGreaterThan(0);
+    const badFolder = await app.inject({ method: "GET", url: "/api/projects/folders?path=Z%3A%5Cdefinitely-missing" });
+    expect(badFolder.statusCode).toBe(404);
   });
 });
 

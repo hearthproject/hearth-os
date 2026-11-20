@@ -589,6 +589,19 @@ export interface SecuritySnapshot {
   audits: SecurityAudit[];
 }
 
+export interface FolderBrowseEntry {
+  name: string;
+  path: string;
+}
+
+export interface FolderBrowseResult {
+  path: string | null;
+  parent: string | null;
+  roots: FolderBrowseEntry[];
+  entries: FolderBrowseEntry[];
+  separator: string;
+}
+
 export interface ConversationListItem extends ConversationRecord {
   messageCount: number;
   preview: string;
