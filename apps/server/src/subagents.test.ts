@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -106,6 +106,11 @@ describe("native subagents", () => {
     expect(captured[0]?.mode).toBe("plan");
     expect(captured[0]?.task.goal).toBe("找到入口文档并返回行号");
     expect(captured[0]?.prompt).toContain("输出契约");
+    const transcriptPath = output.metadata?.transcriptPath;
+    expect(transcriptPath && existsSync(transcriptPath)).toBe(true);
+    const lines = transcriptPath ? readFileSync(transcriptPath, "utf8").trim().split("\n").map((line) => JSON.parse(line)) : [];
+    expect(lines[0]).toMatchObject({ event: "started", type: "explore", title: "定位 README" });
+    expect(lines[1]).toMatchObject({ event: "completed", type: "explore", summary: "找到 README.md:1" });
   });
 
   it("starts background agents and exposes wait/status/kill", async () => {

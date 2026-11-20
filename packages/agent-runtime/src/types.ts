@@ -85,6 +85,7 @@ export interface AgentToolMetadata {
   agentStatus?: "running" | "completed" | "failed" | "cancelled";
   branch?: string;
   commitSha?: string;
+  transcriptPath?: string;
 }
 
 export interface AgentToolResult {

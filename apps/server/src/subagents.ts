@@ -1,6 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { appendFileSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
 import type { RunBudget, TaskPermissions, TaskRecord, TaskWorktree } from "@hearth/core";
 import { zeroUsage, agentProfile, type AgentTool, type AgentToolResult, type SubagentType } from "@hearth/agent-runtime";
 import { runNativeTask, type NativeRunOptions, type NativeRunResult } from "./native-executor.ts";
@@ -61,6 +63,15 @@ function createDispatchTool(options: SubagentToolOptions, compatibility: boolean
       const childId = subagentTaskId(options.task.id, profile.type);
       const childTitle = parsed.title || `${profile.type} ${started}`;
       if (profile.isolation === "worktree" && !options.task.projectId) throw new Error("general-purpose 子代理只能用于本地项目任务");
+      const transcriptPath = join(tmpdir(), "hearth-subagents", options.task.id.replace(/[^A-Za-z0-9._-]/g, "-"), `${childId}.jsonl`);
+      appendTranscript(transcriptPath, {
+        at: new Date().toISOString(),
+        event: "started",
+        agentId: childId,
+        type: profile.type,
+        title: childTitle,
+        prompt: parsed.objective
+      });
 
       const launch = async (signal: AbortSignal): Promise<AgentToolResult> => {
         const worktree = profile.isolation === "worktree" ? createChildWorktree(childId, options) : null;
@@ -107,14 +118,34 @@ function createDispatchTool(options: SubagentToolOptions, compatibility: boolean
         const usage = result.usage ?? zeroUsage();
         const summary = result.finalResponse || "未返回总结";
         if (!worktree) {
-          return {
-            content: `agentId: ${childId}\nstatus: completed\ntype: ${profile.type}\nsummary: ${summary}`,
+          appendTranscript(transcriptPath, {
+            at: new Date().toISOString(),
+            event: "completed",
+            agentId: childId,
+            type: profile.type,
+            summary,
             usage,
-            metadata: { agentId: childId, subagentType: profile.type, agentStatus: "completed" }
+            messages: result.messages ?? []
+          });
+          return {
+            content: `agentId: ${childId}\nstatus: completed\ntype: ${profile.type}\nsummary: ${summary}\ntranscript: ${transcriptPath}`,
+            usage,
+            metadata: { agentId: childId, subagentType: profile.type, agentStatus: "completed", transcriptPath }
           };
         }
 
         const commit = commitChildWorktree(worktree.path, options.task.id, childTitle);
+        appendTranscript(transcriptPath, {
+          at: new Date().toISOString(),
+          event: "completed",
+          agentId: childId,
+          type: profile.type,
+          summary,
+          usage,
+          branch: worktree.branch,
+          commit,
+          messages: result.messages ?? []
+        });
         return {
           content: [
             `agentId: ${childId}`,
@@ -123,10 +154,11 @@ function createDispatchTool(options: SubagentToolOptions, compatibility: boolean
             `summary: ${summary}`,
             `branch: ${worktree.branch}`,
             `commit: ${commit}`,
+            `transcript: ${transcriptPath}`,
             "结果尚未合并。请检查该分支和提交后，由父任务手动 cherry-pick。"
           ].join("\n"),
           usage,
-          metadata: { agentId: childId, subagentType: profile.type, agentStatus: "completed", branch: worktree.branch, commitSha: commit }
+          metadata: { agentId: childId, subagentType: profile.type, agentStatus: "completed", branch: worktree.branch, commitSha: commit, transcriptPath }
         };
       };
 
@@ -134,8 +166,8 @@ function createDispatchTool(options: SubagentToolOptions, compatibility: boolean
         if (!options.manager) throw new Error("后台子代理需要 manager 支持");
         const job = options.manager.start({ id: childId, type: profile.type, title: childTitle }, launch);
         return {
-          content: `agentId: ${job.id}\nstatus: running\ntype: ${profile.type}\n请用 agent_wait 等待结果，或继续其他工作；agent_status 可查看状态，agent_kill 可取消。`,
-          metadata: { agentId: job.id, subagentType: profile.type, agentStatus: "running" }
+          content: `agentId: ${job.id}\nstatus: running\ntype: ${profile.type}\ntranscript: ${transcriptPath}\n请用 agent_wait 等待结果，或继续其他工作；agent_status 可查看状态，agent_kill 可取消。`,
+          metadata: { agentId: job.id, subagentType: profile.type, agentStatus: "running", transcriptPath }
         };
       }
 
@@ -273,6 +305,15 @@ function agentPrompt(type: string, objective: string, parent: TaskRecord, output
     "上下文是隔离的：不要假设父代理知道你的中间过程，结论必须自带文件路径、行号和证据。",
     "不要做超出目标的扩展，不要请求用户确认，不要委派其他子代理。"
   ].join("\n");
+}
+
+function appendTranscript(path: string, record: Record<string, unknown>): void {
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    appendFileSync(path, `${JSON.stringify(record)}\n`, "utf8");
+  } catch {
+    // Transcripts are diagnostic; a read-only outDir must not fail the child.
+  }
 }
 
 function subagentTaskId(parentId: string, type: string): string {
