@@ -430,6 +430,40 @@ describe("chat-first API", () => {
     await app.close();
   });
 
+  it("serves uploaded attachments inline for preview without executing markup", async () => {
+    const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
+    const textForm = new FormData();
+    textForm.append("file", new Blob(["会议记录正文"], { type: "text/plain" }), "notes.txt");
+    const textRequest = new Request("http://localhost/api/attachments", { method: "POST", body: textForm });
+    const uploaded = await app.inject({
+      method: "POST",
+      url: "/api/attachments",
+      headers: { "content-type": textRequest.headers.get("content-type") ?? "" },
+      payload: Buffer.from(await textRequest.arrayBuffer())
+    });
+    const attachment = uploaded.json().attachments[0];
+    const preview = await app.inject({ method: "GET", url: `/api/attachments/${attachment.id}` });
+    expect(preview.statusCode).toBe(200);
+    expect(preview.headers["content-type"]).toContain("text/plain");
+    expect(preview.headers["content-disposition"]).toContain("inline");
+    expect(preview.body).toBe("会议记录正文");
+
+    const htmlForm = new FormData();
+    htmlForm.append("file", new Blob(["<script>alert(1)</script>"], { type: "text/html" }), "page.html");
+    const htmlRequest = new Request("http://localhost/api/attachments", { method: "POST", body: htmlForm });
+    const htmlUpload = await app.inject({
+      method: "POST",
+      url: "/api/attachments",
+      headers: { "content-type": htmlRequest.headers.get("content-type") ?? "" },
+      payload: Buffer.from(await htmlRequest.arrayBuffer())
+    });
+    const htmlPreview = await app.inject({ method: "GET", url: `/api/attachments/${htmlUpload.json().attachments[0].id}` });
+    expect(htmlPreview.headers["content-type"]).toContain("text/plain");
+
+    const missing = await app.inject({ method: "GET", url: "/api/attachments/not-a-uuid" });
+    expect(missing.statusCode).toBe(404);
+    await app.close();
+  });
   it("routes an attachment-only message into a task instead of asking for a chat model", async () => {
     const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
     const form = new FormData();

@@ -1,7 +1,7 @@
 import { isSimpleDraft, isDraftRevision, DRAFT_INSTRUCTION } from "./draft-intent.ts";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
-import { dirname, extname, join } from "node:path";
+import { createReadStream, existsSync, mkdirSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { basename, dirname, extname, join } from "node:path";
 import multipart from "@fastify/multipart";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
@@ -364,6 +364,20 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     }
     if (files.length === 0) return reply.code(400).send({ error: "NO_FILE", message: "没有收到文件" });
     return { attachments: files };
+  });
+
+  app.get<{ Params: { id: string } }>("/api/attachments/:id", async (request, reply) => {
+    const path = findAttachmentPath(attachmentRoot, request.params.id);
+    if (!path) return reply.code(404).send({ error: "ATTACHMENT_NOT_FOUND", message: "附件不存在" });
+    try {
+      if (!statSync(path).isFile()) throw new Error("not a file");
+    } catch {
+      return reply.code(404).send({ error: "ATTACHMENT_NOT_FOUND", message: "附件不存在" });
+    }
+    reply.header("content-type", attachmentMimeType(path));
+    reply.header("content-disposition", `inline; filename*=UTF-8''${encodeURIComponent(basename(path))}`);
+    reply.header("x-content-type-options", "nosniff");
+    return reply.send(createReadStream(path));
   });
 
   app.post("/api/chat", async (request, reply) => {
@@ -754,6 +768,52 @@ function findAttachmentPath(root: string, id: string): string | null {
     return null;
   }
   return null;
+}
+
+const ATTACHMENT_MIME: Record<string, string> = {
+  ".txt": "text/plain; charset=utf-8",
+  ".text": "text/plain; charset=utf-8",
+  ".md": "text/plain; charset=utf-8",
+  ".markdown": "text/plain; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".jsonl": "text/plain; charset=utf-8",
+  ".csv": "text/csv; charset=utf-8",
+  ".tsv": "text/tab-separated-values; charset=utf-8",
+  ".log": "text/plain; charset=utf-8",
+  ".yml": "text/plain; charset=utf-8",
+  ".yaml": "text/plain; charset=utf-8",
+  ".ts": "text/plain; charset=utf-8",
+  ".tsx": "text/plain; charset=utf-8",
+  ".js": "text/plain; charset=utf-8",
+  ".jsx": "text/plain; charset=utf-8",
+  ".mjs": "text/plain; charset=utf-8",
+  ".cjs": "text/plain; charset=utf-8",
+  ".css": "text/plain; charset=utf-8",
+  ".py": "text/plain; charset=utf-8",
+  ".ps1": "text/plain; charset=utf-8",
+  ".sh": "text/plain; charset=utf-8",
+  ".html": "text/plain; charset=utf-8",
+  ".htm": "text/plain; charset=utf-8",
+  ".xml": "text/plain; charset=utf-8",
+  ".svg": "text/plain; charset=utf-8",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".bmp": "image/bmp",
+  ".ico": "image/x-icon",
+  ".avif": "image/avif",
+  ".pdf": "application/pdf",
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".mp3": "audio/mpeg",
+  ".wav": "audio/wav",
+  ".m4a": "audio/mp4"
+};
+
+function attachmentMimeType(path: string): string {
+  return ATTACHMENT_MIME[extname(path).toLowerCase()] ?? "application/octet-stream";
 }
 
 function safeExtension(name: string): string {
