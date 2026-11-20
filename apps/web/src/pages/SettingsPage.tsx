@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { api } from "../lib/api.ts";
 import { formatDuration, formatNumber, relativeTime } from "../lib/format.ts";
+import { hasDesktopBridge, pickFolder } from "../lib/desktop.ts";
 import { TASK_STATUS_LABELS } from "../lib/labels.ts";
 import type {
   ContextSettings,
@@ -533,6 +534,20 @@ function ProjectsTab() {
     }
   }
 
+  async function browseProjectFolder() {
+    setNotice(null);
+    if (!hasDesktopBridge()) {
+      setNotice({ tone: "error", text: "当前不在桌面版中，请直接粘贴文件夹路径。" });
+      return;
+    }
+    try {
+      const picked = await pickFolder();
+      if (picked) setPath(picked);
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "打开文件夹选择器失败" });
+    }
+  }
+
   async function removeProject(id: string, projectName: string) {
     if (!window.confirm(`从 Hearth 移除项目“${projectName}”？不会删除本地文件。`)) return;
     setBusy(true);
@@ -552,11 +567,16 @@ function ProjectsTab() {
     <section className="settings-tab-panel">
       <section className="panel settings-section">
         <div className="settings-body">
-          <div className="section-heading"><div><h3>注册 Git 项目</h3><p>必须选择包含 <code>.git</code> 的仓库根目录；默认分支在当前仓库和 Worktree 中都必须存在。</p></div><FolderGit2 size={20} /></div>
+          <div className="section-heading"><div><h3>注册本地项目</h3><p>选择任意本地文件夹。Git 仓库会自动使用分支与独立 Worktree；普通文件夹原地执行，并在任务结束后给出改动清单。</p></div><FolderGit2 size={20} /></div>
           <div className="form-grid">
-            <label className="span-2"><span>仓库根目录</span><input value={path} onChange={(event) => setPath(event.target.value)} placeholder="D:\\code\\my-project" spellCheck={false} /></label>
+            <label className="span-2"><span>项目文件夹</span>
+              <div className="project-path-row">
+                <input value={path} onChange={(event) => setPath(event.target.value)} placeholder="D:\\code\\my-project" spellCheck={false} />
+                <button type="button" className="ghost-button" onClick={() => void browseProjectFolder()}>浏览…</button>
+              </div>
+            </label>
             <label><span>显示名称（可选）</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="默认使用目录名" /></label>
-            <label><span>默认分支（可选）</span><input value={defaultBranch} onChange={(event) => setDefaultBranch(event.target.value)} placeholder="默认使用当前分支" spellCheck={false} /></label>
+            <label><span>默认分支（仅 Git，可选）</span><input value={defaultBranch} onChange={(event) => setDefaultBranch(event.target.value)} placeholder="默认使用当前分支" spellCheck={false} /></label>
           </div>
           <div className="settings-actions">
             <button className="primary-button" onClick={() => void addProject()} disabled={busy || !path.trim()}>{busy ? <Loader2 size={15} className="spin" /> : <Plus size={15} />} 注册项目</button>
@@ -568,17 +588,22 @@ function ProjectsTab() {
 
       <section className="panel settings-section">
         <div className="settings-body">
-          <div className="section-heading"><div><h3>已注册项目</h3><p>状态直接读取本地 Git，不缓存分支或脏工作区信息。</p></div></div>
+          <div className="section-heading"><div><h3>已注册项目</h3><p>状态实时读取本地目录；Git 项目额外展示分支和未提交改动。</p></div></div>
           {projectsQuery.isLoading && <InlineLoading text="正在读取本地项目" />}
           {projectsQuery.isError && <p className="form-error">{projectsQuery.error.message}</p>}
-          {!projectsQuery.isLoading && projects.length === 0 && <EmptyState text="还没有注册本地 Git 项目。" />}
+          {!projectsQuery.isLoading && projects.length === 0 && <EmptyState text="还没有注册本地项目。" />}
           <div className="data-table-list">
             {projects.map((project) => (
               <article key={project.id} className="migration-row">
                 <span className={`status-dot ${project.available ? "online" : "offline"}`} />
                 <div>
                   <strong>{project.name}</strong>
-                  <small><code>{project.path}</code> · 默认分支 {project.defaultBranch} · 当前 {project.currentBranch ?? "不可用"}{project.dirty ? " · 有未提交改动" : ""}</small>
+                  <small>
+                    <code>{project.path}</code>
+                    {project.kind === "git"
+                      ? ` · Git · 默认分支 ${project.defaultBranch} · 当前 ${project.currentBranch ?? "不可用"}${project.dirty ? " · 有未提交改动" : ""}`
+                      : " · 本地文件夹"}
+                  </small>
                   {project.error && <p>{project.error}</p>}
                 </div>
                 <button className="ghost-button danger compact" onClick={() => void removeProject(project.id, project.name)} disabled={busy}><Trash2 size={14} /> 移除</button>

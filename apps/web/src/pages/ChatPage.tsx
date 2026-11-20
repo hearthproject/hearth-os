@@ -12,11 +12,14 @@ import {
   Copy,
   CornerDownRight,
   FileText,
+  Folder,
+  FolderPlus,
   Loader2,
   Paperclip,
   PauseCircle,
   Plus,
   Settings2,
+  Sparkles,
   ShieldAlert,
   ShieldCheck,
   SlidersHorizontal,
@@ -26,6 +29,7 @@ import {
 import { ApiError, api, chatStream } from "../lib/api.ts";
 import { TaskStatusIcon } from "../components/TaskStatusIcon.tsx";
 import { formatBytes, formatTime } from "../lib/format.ts";
+import { hasDesktopBridge, pickFolder } from "../lib/desktop.ts";
 import { executorLabel, taskKindLabel, TASK_STATUS_LABELS } from "../lib/labels.ts";
 import type {
   ChatAttachment,
@@ -35,6 +39,7 @@ import type {
   ConversationSettings,
   ConversationSettingsPatch,
   ExecutorId,
+  LocalProjectView,
   TaskFollowUpMode,
   TaskListItem,
   TaskProposalRecord
@@ -77,6 +82,8 @@ export function ChatPage() {
   const [followUpNotice, setFollowUpNotice] = useState<string | null>(null);
   const [draftSettings, setDraftSettings] = useState<ConversationSettings | null>(null);
   const [optionsOpen, setOptionsOpen] = useState(false);
+  const [pendingProjectId, setPendingProjectId] = useState<string | null>(null);
+  const [projectDialogOpen, setProjectDialogOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const optionsRef = useRef<HTMLDivElement | null>(null);
@@ -105,6 +112,21 @@ export function ChatPage() {
     tasksByConversation.set(task.conversationId, list);
   }
   const current = conversations.find((item) => item.id === conversationId) ?? null;
+  const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: api.projects, refetchInterval: 30_000 });
+  const projects = projectsQuery.data?.projects ?? [];
+  const projectsById = new Map(projects.map((project) => [project.id, project]));
+  const projectGroups = projects.map((project) => ({
+    project,
+    conversations: conversations.filter((conversation) => conversation.projectId === project.id)
+  }));
+  const standaloneConversations = conversations.filter((conversation) =>
+    !conversation.projectId || !projectsById.has(conversation.projectId)
+  );
+  const activeProject = current?.projectId
+    ? projectsById.get(current.projectId) ?? null
+    : pendingProjectId
+      ? projectsById.get(pendingProjectId) ?? null
+      : null;
   const followUpTasks = conversationId
     ? tasks
       .filter((task) => task.conversationId === conversationId && !["completed", "cancelled"].includes(task.status))
@@ -204,6 +226,14 @@ export function ChatPage() {
   function selectConversation(id: string | null) {
     if (sending) return;
     resetConversationView(id);
+    setPendingProjectId(null);
+    setError(null);
+  }
+
+  function startNewChat(projectId: string | null) {
+    if (sending) return;
+    resetConversationView(null);
+    setPendingProjectId(projectId);
     setError(null);
   }
 
@@ -366,6 +396,7 @@ export function ChatPage() {
         {
           routeMode,
           ...(conversationId ? { conversationId } : {}),
+          ...(!conversationId && pendingProjectId ? { projectId: pendingProjectId } : {}),
           ...(text ? { message: text } : {}),
           ...(sentAttachments.length > 0 ? { attachments: sentAttachments } : {}),
           ...(!conversationId ? { settings: conversationSettings } : {})
@@ -374,10 +405,11 @@ export function ChatPage() {
           signal: controller.signal,
           onEvent: (event, data) => {
             if (event === "conversation") {
-              const conversation = data as { id: string; settings?: ConversationSettings };
+              const conversation = data as { id: string; settings?: ConversationSettings; projectId?: string | null };
               setConversationId(conversation.id);
               conversationIdRef.current = conversation.id;
               if (conversation.settings) setDraftSettings(conversation.settings);
+              setPendingProjectId(null);
               localStorage.setItem("hearth.conversation", conversation.id);
             } else if (event === "user") {
               setMessages((prev) => [...prev, data as ChatMessageRecord]);
@@ -452,12 +484,52 @@ export function ChatPage() {
   return (
     <div className="chat-layout">
       <aside className="conversation-rail">
-        <button className="new-chat-button" onClick={() => selectConversation(null)} disabled={sending}>
+        <button className="new-chat-button" onClick={() => startNewChat(null)} disabled={sending}>
           <Plus size={15} /> 新对话
         </button>
         <div className="conversation-list">
-          {conversations.length === 0 && <p className="rail-empty">还没有对话</p>}
-          {conversations.map((conversation) => (
+          {conversations.length === 0 && projects.length === 0 && <p className="rail-empty">还没有对话</p>}
+          {projectGroups.length > 0 && <p className="rail-group-title">项目</p>}
+          {projectGroups.map(({ project, conversations: projectConversations }) => (
+            <div className="rail-project" key={project.id}>
+              <div className={`rail-project-head ${pendingProjectId === project.id ? "active" : ""}`} title={project.path}>
+                <button
+                  className="rail-project-name"
+                  onClick={() => startNewChat(project.id)}
+                  disabled={sending || !project.available}
+                >
+                  <Folder size={13} />
+                  <span>{project.name}</span>
+                </button>
+                <button
+                  className="rail-project-new"
+                  onClick={() => startNewChat(project.id)}
+                  disabled={sending || !project.available}
+                  title="在此项目中新建对话"
+                  aria-label={`在 ${project.name} 中新建对话`}
+                >
+                  <Plus size={12} />
+                </button>
+              </div>
+              {project.kind === "git" && (project.currentBranch || project.defaultBranch) && (
+                <span className="rail-project-branch">{project.currentBranch ?? project.defaultBranch}</span>
+              )}
+              {!project.available && <span className="rail-project-error">{project.error ?? "项目不可用"}</span>}
+              {projectConversations.map((conversation) => (
+                <ConversationItem
+                  key={conversation.id}
+                  conversation={conversation}
+                  tasks={tasksByConversation.get(conversation.id) ?? []}
+                  active={conversation.id === conversationId}
+                  disabled={sending}
+                  onSelect={() => selectConversation(conversation.id)}
+                  onDelete={(event) => void removeConversation(event, conversation.id)}
+                />
+              ))}
+            </div>
+          ))}
+          {(standaloneConversations.length > 0 || projects.length > 0) && <p className="rail-group-title">最近</p>}
+          {standaloneConversations.map((conversation) => (
             <ConversationItem
               key={conversation.id}
               conversation={conversation}
@@ -469,11 +541,20 @@ export function ChatPage() {
             />
           ))}
         </div>
+        <button className="rail-footer-button" onClick={() => setProjectDialogOpen(true)} disabled={sending}>
+          <FolderPlus size={14} /> 新建项目
+        </button>
       </aside>
 
       <section className="chat-main">
         <header className="chat-header">
           <h1>{current?.title ?? "新对话"}</h1>
+          {(current ? projectsById.get(current.projectId ?? "") : activeProject) && (
+            <span className="chat-project-chip" title={current ? projectsById.get(current.projectId ?? "")?.path : activeProject?.path}>
+              <Folder size={12} />
+              {(current ? projectsById.get(current.projectId ?? "") : activeProject)?.name}
+            </span>
+          )}
         </header>
 
         <div className="chat-scroll">
@@ -487,6 +568,17 @@ export function ChatPage() {
               <ChatNotice icon={<Settings2 size={15} />} tone="warn">
                 当前没有可用的执行器，任务无法派出。到<Link to="/settings">设置</Link>查看连接诊断。
               </ChatNotice>
+            )}
+            {messages.length === 0 && proposals.length === 0 && !streaming && !sending && (
+              <div className="chat-empty">
+                <div className="chat-empty-mark"><Sparkles size={20} /></div>
+                <h2>{activeProject ? `你想在 ${activeProject.name} 中构建什么？` : "你想让 Hearth 帮你完成什么？"}</h2>
+                <p>
+                  {activeProject
+                    ? "描述目标、贴一段报错，或让我先看看现有代码。"
+                    : "直接提问；如果要把文件夹交给 Hearth，把完整路径贴在消息里即可。"}
+                </p>
+              </div>
             )}
             {messages.map((message, index) => <ChatBubble key={message.id} message={message} conversationId={conversationId} mailDraft={!message.taskId && isMailDraftReply(messages, index)} />)}
             {proposals.map((proposal) => (
@@ -514,6 +606,31 @@ export function ChatPage() {
         </div>
 
         <div className="composer-wrap">
+          {!conversationId && (
+            <div className="composer-project-row">
+              <label className="composer-project">
+                <Folder size={13} />
+                <select
+                  value={pendingProjectId ?? ""}
+                  onChange={(event) => setPendingProjectId(event.target.value || null)}
+                  disabled={sending}
+                  aria-label="选择项目"
+                >
+                  <option value="">不绑定项目</option>
+                  {projects.map((project) => (
+                    <option key={project.id} value={project.id} disabled={!project.available}>
+                      {project.name}{project.kind === "git" ? ` · ${project.currentBranch ?? project.defaultBranch}` : " · 文件夹"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {projects.length === 0 && (
+                <button type="button" className="link-button" onClick={() => setProjectDialogOpen(true)}>
+                  新建项目
+                </button>
+              )}
+            </div>
+          )}
           <div className="composer-tools">
             <div className="composer-options-wrap" ref={optionsRef}>
               <button
@@ -695,6 +812,16 @@ export function ChatPage() {
           </div>
         </div>
       </section>
+      {projectDialogOpen && (
+        <ProjectDialog
+          onClose={() => setProjectDialogOpen(false)}
+          onCreated={(project) => {
+            setProjectDialogOpen(false);
+            void queryClient.invalidateQueries({ queryKey: ["projects"] });
+            setPendingProjectId(project.id);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -1021,6 +1148,85 @@ function ProposalCard({
           <button className="ghost-button" onClick={() => void reject()} disabled={busy !== null}>取消</button>
         </div>
       )}
+    </div>
+  );
+}
+
+function ProjectDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (project: LocalProjectView) => void }) {
+  const [name, setName] = useState("");
+  const [path, setPath] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function browse() {
+    setError(null);
+    if (!hasDesktopBridge()) {
+      setError("当前不在桌面版中，请直接粘贴文件夹路径。");
+      return;
+    }
+    try {
+      const picked = await pickFolder();
+      if (picked) setPath(picked);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "打开文件夹选择器失败");
+    }
+  }
+
+  async function create() {
+    if (!path.trim()) {
+      setError("请选择或填写文件夹路径");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const trimmedName = name.trim();
+      const result = await api.createProject({
+        path: path.trim(),
+        ...(trimmedName ? { name: trimmedName } : {})
+      });
+      onCreated(result.project);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "创建项目失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <div className="project-dialog" role="dialog" aria-modal="true" aria-label="创建项目" onClick={(event) => event.stopPropagation()}>
+        <div className="project-dialog-head">
+          <h2>创建项目</h2>
+          <button className="icon-button" onClick={onClose} aria-label="关闭"><X size={14} /></button>
+        </div>
+        <label className="project-field">
+          <span>项目名称</span>
+          <input
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="留空则使用文件夹名"
+            autoFocus
+          />
+        </label>
+        <label className="project-field">
+          <span>源文件夹</span>
+          <div className="project-path-row">
+            <input value={path} onChange={(event) => setPath(event.target.value)} placeholder="D:\Projects\my-app" />
+            <button type="button" className="ghost-button" onClick={() => void browse()} disabled={busy}>浏览…</button>
+          </div>
+        </label>
+        <p className="project-dialog-note">
+          Git 仓库会自动使用分支和独立工作树；普通文件夹会原地执行，任务结束后给出改动清单。
+        </p>
+        {error && <p className="form-error">{error}</p>}
+        <div className="project-dialog-actions">
+          <button className="ghost-button" onClick={onClose} disabled={busy}>取消</button>
+          <button className="primary-button" onClick={() => void create()} disabled={busy || !path.trim()}>
+            {busy ? <Loader2 size={14} className="spin" /> : null} 创建项目
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

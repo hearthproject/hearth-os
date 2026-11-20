@@ -113,6 +113,17 @@ export async function prepareWorkspace(options: {
       continue;
     }
 
+    if (input.kind === "workspace") {
+      prepared.push({
+        label: input.label,
+        kind: input.kind,
+        source: input.value,
+        localPath: input.value,
+        sha256: ""
+      });
+      continue;
+    }
+
     if (input.kind === "text") {
       const localPath = join(inputsDir, `${prefix}.txt`);
       writeFileSync(localPath, input.value, "utf8");

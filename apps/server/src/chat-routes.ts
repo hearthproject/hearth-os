@@ -1,7 +1,7 @@
 import { isSimpleDraft, isDraftRevision, DRAFT_INSTRUCTION } from "./draft-intent.ts";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
-import { extname, join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { dirname, extname, join } from "node:path";
 import multipart from "@fastify/multipart";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
@@ -49,6 +49,7 @@ const conversationSettingsSchema = z.object({
 const chatSchema = z.object({
   routeMode: z.enum(["auto", "chat", "task"]).optional(),
   conversationId: z.string().trim().min(1).max(80).optional(),
+  projectId: z.string().trim().min(1).max(120).optional(),
   message: z.string().max(100_000).optional(),
   attachments: z.array(attachmentSchema).max(5).optional(),
   url: z.string().trim().max(2_048).optional(),
@@ -57,6 +58,7 @@ const chatSchema = z.object({
 
 const conversationSchema = z.object({
   title: z.string().trim().min(1).max(80).optional(),
+  projectId: z.string().trim().min(1).max(120).optional(),
   settings: conversationSettingsSchema.optional()
 }).strict();
 
@@ -263,7 +265,13 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     const settings = parsed.data.settings
       ? mergeConversationSettings(defaultSettings(), parsed.data.settings)
       : defaultSettings();
-    const conversation = store.createConversation(parsed.data.title ?? "新对话", settings);
+    const projectId = parsed.data.projectId && store.getLocalProject(parsed.data.projectId)
+      ? parsed.data.projectId
+      : null;
+    if (parsed.data.projectId && !projectId) {
+      return reply.code(404).send({ error: "PROJECT_NOT_FOUND", message: "选择的项目不存在" });
+    }
+    const conversation = store.createConversation(parsed.data.title ?? "新对话", settings, projectId);
     return reply.code(201).send(conversation);
   });
 
@@ -387,7 +395,14 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       const settings = parsed.data.settings
         ? mergeConversationSettings(defaultSettings(), parsed.data.settings)
         : defaultSettings();
-      conversation = store.createConversation(conversationTitle(message || detectedUrl || "处理上传文件"), settings);
+      const projectId = parsed.data.projectId && store.getLocalProject(parsed.data.projectId)
+        ? parsed.data.projectId
+        : null;
+      conversation = store.createConversation(
+        conversationTitle(message || detectedUrl || "处理上传文件"),
+        settings,
+        projectId
+      );
     }
 
     const userContent = message || (detectedUrl ? `请处理这个网址：${detectedUrl}` : `请处理附件：${storedFiles.map((file) => file.name).join("、")}`);
@@ -534,12 +549,16 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
           finish(reply, send);
           return reply;
         }
+        const boundProject = conversation.projectId ? store.getLocalProject(conversation.projectId) : null;
+        const workspacePath = boundProject ? null : extractWorkspacePath(message);
         const task = service.createTask({
           title: route.title || conversationTitle(userContent),
           goal: [message, detectedUrl ? `参考网址：${detectedUrl}` : ""].filter(Boolean).join("\n") || `处理附件：${storedFiles.map((file) => file.name).join("、")}`,
           textInput: [message, taskChatContext(previousMessages)].filter(Boolean).join("\n\n"),
           fileInputs: storedFiles.map((file) => ({ label: file.name, path: file.path })),
           ...(detectedUrl ? { url: detectedUrl } : {}),
+          ...(boundProject ? { projectId: boundProject.id } : {}),
+          ...(workspacePath ? { workspacePath } : {}),
           conversationId: conversation.id,
           executorId: resolution.executorId,
           ...(resolution.executorId === "native" ? { executionMode: effectiveSettings.executionMode ?? "standard" } : {}),
@@ -674,6 +693,27 @@ function extractUrl(message: string): string | null {
   const match = message.match(/https?:\/\/\S+/i);
   if (!match) return null;
   return match[0].replace(/[),.;，。；）]+$/, "");
+}
+
+export function extractWorkspacePath(message: string): string | null {
+  if (!message) return null;
+  const candidates = [
+    ...(message.match(/[A-Za-z]:\\[^\s"'`<>|?*]+/g) ?? []),
+    ...(message.match(/\\\\[^\s"'`<>|?*]+/g) ?? [])
+  ];
+  for (const raw of candidates) {
+    let candidate = raw.replace(/[.,;:!?，。；！？]+$/, "");
+    try {
+      if (!existsSync(candidate)) continue;
+      const stats = statSync(candidate);
+      if (stats.isFile()) candidate = dirname(candidate);
+      else if (!stats.isDirectory()) continue;
+      return realpathSync.native(candidate);
+    } catch {
+      continue;
+    }
+  }
+  return null;
 }
 
 export function taskChatContext(messages: Array<{ role: string; content: string; taskId?: string | null }>): string {

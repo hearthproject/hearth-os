@@ -187,6 +187,7 @@ export interface LocalProject {
 }
 
 export interface LocalProjectView extends LocalProject {
+  kind: "git" | "folder";
   available: boolean;
   currentBranch: string | null;
   dirty: boolean;
@@ -280,7 +281,7 @@ export const RUN_STATUSES = [
 export type RunStatus = (typeof RUN_STATUSES)[number];
 
 export interface TaskInput {
-  kind: "file" | "url" | "github" | "text" | "source";
+  kind: "file" | "url" | "github" | "text" | "source" | "workspace";
   label: string;
   value: string;
   sha256?: string;
@@ -458,6 +459,7 @@ export interface ConversationRecord {
   createdAt: string;
   updatedAt: string;
   settings: ConversationSettings;
+  projectId?: string | null;
   deletedAt?: string | null;
   trashBatchId?: string | null;
 }

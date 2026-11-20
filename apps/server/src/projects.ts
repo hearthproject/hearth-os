@@ -41,18 +41,18 @@ export class ProjectService {
 
   create(input: { name?: string | undefined; path: string; defaultBranch?: string | undefined }): LocalProjectView {
     const path = normalizeProjectPath(input.path);
-    const root = gitRoot(path);
-    if (!samePath(path, root)) {
-      throw new ProjectError("PROJECT_PATH_NOT_ROOT", `请选择 Git 仓库根目录：${root}`, 409);
-    }
-    const duplicate = this.store.listLocalProjects().find((project) => samePath(project.path, root));
-    if (duplicate) throw new ProjectError("PROJECT_ALREADY_EXISTS", "这个 Git 项目已经注册", 409);
-    const defaultBranch = validateBranch(root, input.defaultBranch?.trim() || currentBranch(root));
+    const root = gitRootOrNull(path);
+    const isGit = root !== null && samePath(path, root);
+    const duplicate = this.store.listLocalProjects().find((project) => samePath(project.path, path));
+    if (duplicate) throw new ProjectError("PROJECT_ALREADY_EXISTS", "这个文件夹已经注册为项目", 409);
+    const defaultBranch = isGit
+      ? validateBranch(root, input.defaultBranch?.trim() || currentBranch(root))
+      : "";
     const now = this.clock().toISOString();
     const project: LocalProject = {
       id: `project_${randomUUID()}`,
-      name: cleanName(input.name, root),
-      path: realpathSync.native(root),
+      name: cleanName(input.name, path),
+      path: realpathSync.native(path),
       defaultBranch,
       createdAt: now,
       updatedAt: now
@@ -62,7 +62,7 @@ export class ProjectService {
 
   update(id: string, input: { name?: string | undefined; defaultBranch?: string | undefined }): LocalProjectView {
     const project = this.require(id);
-    const defaultBranch = input.defaultBranch !== undefined
+    const defaultBranch = input.defaultBranch !== undefined && project.defaultBranch
       ? validateBranch(project.path, input.defaultBranch)
       : project.defaultBranch;
     const next: LocalProject = {
@@ -86,17 +86,28 @@ export class ProjectService {
   }
 
   private inspect(project: LocalProject): LocalProjectView {
+    const isGit = Boolean(project.defaultBranch);
     if (!existsSync(project.path) || !statSync(project.path).isDirectory()) {
-      return { ...project, available: false, currentBranch: null, dirty: false, error: "项目目录不存在" };
+      return {
+        ...project, kind: isGit ? "git" : "folder", available: false,
+        currentBranch: null, dirty: false, error: "项目目录不存在"
+      };
+    }
+    if (!isGit) {
+      return { ...project, kind: "folder", available: true, currentBranch: null, dirty: false, error: null };
     }
     const root = git(["-C", project.path, "rev-parse", "--show-toplevel"]);
     if (!root.ok) {
-      return { ...project, available: false, currentBranch: null, dirty: false, error: "项目不再是 Git 仓库" };
+      return {
+        ...project, kind: "git", available: false, currentBranch: null, dirty: false,
+        error: "项目不再是 Git 仓库"
+      };
     }
     const branch = git(["-C", project.path, "rev-parse", "--abbrev-ref", "HEAD"]);
     const status = git(["-C", project.path, "status", "--porcelain"]);
     return {
       ...project,
+      kind: "git",
       available: status.ok,
       currentBranch: branch.ok && branch.stdout.trim() !== "HEAD" ? branch.stdout.trim() : null,
       dirty: status.ok && status.stdout.trim().length > 0,
@@ -119,11 +130,9 @@ function normalizeProjectPath(input: string): string {
   return realpathSync.native(absolute);
 }
 
-function gitRoot(path: string): string {
+function gitRootOrNull(path: string): string | null {
   const result = git(["-C", path, "rev-parse", "--show-toplevel"]);
-  if (!result.ok || !result.stdout.trim()) {
-    throw new ProjectError("PROJECT_NOT_GIT", "项目路径不是 Git 仓库", 409);
-  }
+  if (!result.ok || !result.stdout.trim()) return null;
   return realpathSync.native(resolve(result.stdout.trim()));
 }
 

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync, statSync } from "node:fs";
+import { resolve } from "node:path";
 import type {
   ApprovalListItem,
   ApprovalMode,
@@ -68,6 +69,7 @@ export interface CreateTaskInput {
   methodVersion?: number;
   goalId?: string;
   projectId?: string;
+  workspacePath?: string;
 }
 
 export interface CreateGoalInput {
@@ -223,9 +225,16 @@ export class HearthService {
       }
     }
     if (input.textInput) inputs.push({ kind: "text", label: "用户请求", value: input.textInput });
+    const workspacePath = input.workspacePath ? resolve(input.workspacePath) : null;
+    if (workspacePath) {
+      if (!existsSync(workspacePath) || !statSync(workspacePath).isDirectory()) {
+        throw new TaskInputSelectionError("WORKSPACE_NOT_FOUND", "指定的工作目录不存在", 404);
+      }
+      inputs.push({ kind: "workspace", label: "工作目录", value: realpathSync.native(workspacePath) });
+    }
     const executorId = project ? "native" : input.executorId ?? (template ? "codex" : "native");
     if (input.goalId && !this.store.getGoal(input.goalId)) throw new Error(`Unknown goal: ${input.goalId}`);
-    const taskKind = input.taskKind ?? (template?.github || project ? "workspace" : "general");
+    const taskKind = input.taskKind ?? (template?.github || project || workspacePath ? "workspace" : "general");
     const expectedOutputs = input.expectedOutputs ?? template?.expectedOutputs ?? ["result.md"];
     const task: TaskRecord = {
       id,
@@ -250,7 +259,18 @@ export class HearthService {
       executorId,
       taskKind,
       expectedOutputs,
-      ...(input.permissions ? { permissions: input.permissions } : {}),
+      ...(input.permissions
+        ? { permissions: input.permissions }
+        : workspacePath
+          ? {
+              permissions: {
+                readRoots: [realpathSync.native(workspacePath)],
+                writeRoots: [realpathSync.native(workspacePath)],
+                networkHosts,
+                tools: []
+              }
+            }
+          : {}),
       methodId: input.methodId ?? null,
       methodVersion: input.methodVersion ?? null,
       ...(project ? { projectId: project.id } : {})
@@ -727,7 +747,9 @@ export class HearthService {
     }
     const executorId: ExecutorId = resolution.executorId;
     const reroutedFrom = resolution.reroutedFrom;
-    const projectId = options.projectId?.trim() || null;
+    const projectId = options.projectId?.trim()
+      || this.store.getConversation(proposal.conversationId)?.projectId
+      || null;
     if (projectId && executorId !== "native") {
       throw new Error("本地项目任务当前仅支持 native 执行器，请先切换到 native 再确认");
     }

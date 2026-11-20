@@ -193,7 +193,7 @@ CREATE TABLE IF NOT EXISTS goal_completion_reports (
 );
 CREATE TABLE IF NOT EXISTS conversations (
   id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-  settings_json TEXT, deleted_at TEXT, trash_batch_id TEXT
+  settings_json TEXT, project_id TEXT, deleted_at TEXT, trash_batch_id TEXT
 );
 CREATE TABLE IF NOT EXISTS chat_messages (
   id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, role TEXT NOT NULL,
@@ -894,6 +894,7 @@ export class HearthStore {
   }
 
   deleteLocalProject(id: string): void {
+    this.db.prepare("UPDATE conversations SET project_id = NULL WHERE project_id = ?").run(id);
     this.db.prepare("DELETE FROM local_projects WHERE id = ?").run(id);
   }
 
@@ -1417,6 +1418,7 @@ export class HearthStore {
   }
 
   private migrate(): void {
+    ensureColumn(this.db, "conversations", "project_id", "TEXT");
     ensureColumn(this.db, "events", "origin_instance_id", "TEXT");
     ensureColumn(this.db, "events", "origin_seq", "INTEGER");
     ensureColumn(this.db, "runs", "lease_epoch", "INTEGER");
@@ -2032,17 +2034,22 @@ export class HearthStore {
       .all(goalId) as DbRow[]).map(rowToGoalCompletionReport);
   }
 
-  createConversation(title: string, settings: ConversationSettings = defaultConversationSettings()): ConversationRecord {
+  createConversation(
+    title: string,
+    settings: ConversationSettings = defaultConversationSettings(),
+    projectId: string | null = null
+  ): ConversationRecord {
     const now = new Date().toISOString();
     const conversation: ConversationRecord = {
       id: randomUUID(), title: title.trim() || "新对话", createdAt: now, updatedAt: now,
-      settings: mergeConversationSettings(defaultConversationSettings(), settings)
+      settings: mergeConversationSettings(defaultConversationSettings(), settings),
+      projectId: projectId ?? null
     };
     this.db.prepare(
-      "INSERT INTO conversations (id, title, created_at, updated_at, settings_json) VALUES (?, ?, ?, ?, ?)"
+      "INSERT INTO conversations (id, title, created_at, updated_at, settings_json, project_id) VALUES (?, ?, ?, ?, ?, ?)"
     ).run(
       conversation.id, conversation.title, conversation.createdAt, conversation.updatedAt,
-      JSON.stringify(conversation.settings)
+      JSON.stringify(conversation.settings), conversation.projectId ?? null
     );
     return conversation;
   }
@@ -4898,6 +4905,7 @@ function rowToConversation(row: DbRow): ConversationRecord {
     settings: row.settings_json == null
       ? defaultConversationSettings()
       : mergeConversationSettings(defaultConversationSettings(), JSON.parse(String(row.settings_json))),
+    projectId: row.project_id == null ? null : String(row.project_id),
     deletedAt: row.deleted_at == null ? null : String(row.deleted_at),
     trashBatchId: row.trash_batch_id == null ? null : String(row.trash_batch_id)
   };

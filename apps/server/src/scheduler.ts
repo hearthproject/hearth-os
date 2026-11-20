@@ -17,6 +17,7 @@ import type { DshApprovalOutcome, DshApprovalRequest, DshContextEvent } from "@h
 import type { ApprovalRequest, ApprovalManager, PendingToolApproval, ToolApprovalDecision } from "./approvals.ts";
 import { actionDigest, resolveAction, type ActionFileTarget, type ActionProposal, type ResolvedAction } from "./action-resolver.ts";
 import { createFileArtifact, missingExpectedOutputs, publishArtifacts } from "./artifacts.ts";
+import { diffWorkspace, formatChangeManifest, snapshotWorkspace, type WorkspaceSnapshot } from "./change-manifest.ts";
 import { CONTEXT_BLOB_DIR, EXECUTOR_SETTINGS_PATH, GIT_CACHE_DIR, MODEL_SETTINGS_PATH, REPO_ROOT, SOURCE_CONTENT_DIR, WORKSPACE_DIR } from "./config.ts";
 import { ContextService, estimateTokens } from "./context.ts";
 import { DelegationError, DelegationService } from "./delegation.ts";
@@ -1133,7 +1134,10 @@ export class HearthScheduler {
           nextAction: handoff ? `${executorId} 接管执行中` : "正在执行",
           error: null, pendingInput: null
         }, runId);
+        const manifestRoot = this.inPlaceWorkspace(task);
+        const manifestBefore = manifestRoot ? snapshotWorkspace(manifestRoot) : null;
         const result = await this.runAttempt({ task, run, executorId, taskRoot, outDir, handoff, pendingInput, resumePrompt, previousRun, controller, budget: remainingBudget, methodPlan });
+        if (manifestRoot && manifestBefore) this.recordInPlaceChanges(task, manifestRoot, manifestBefore);
         if (result.status === "failed" || this.service.requireTask(taskId).status !== "completed") {
           this.assertLease(taskId, leaseEpoch, leaseLost);
         }
@@ -1368,6 +1372,34 @@ export class HearthScheduler {
     }
   }
 
+  private inPlaceWorkspace(task: TaskRecord): string | null {
+    const project = task.projectId ? this.service.store.getLocalProject(task.projectId) : null;
+    if (project) return project.defaultBranch ? null : project.path;
+    return task.inputs.find((input) => input.kind === "workspace")?.value ?? null;
+  }
+
+  private recordInPlaceChanges(task: TaskRecord, root: string, before: WorkspaceSnapshot): void {
+    try {
+      const changes = diffWorkspace(before, snapshotWorkspace(root));
+      if (changes.length === 0) return;
+      const current = this.service.store.getTask(task.id);
+      if (!current?.conversationId) return;
+      this.service.store.createChatMessage({
+        id: randomUUID(),
+        conversationId: current.conversationId,
+        role: "assistant",
+        content: formatChangeManifest(root, changes),
+        taskId: task.id,
+        attachments: [],
+        createdAt: new Date().toISOString(),
+        kind: "task_status",
+        taskStatus: current.status
+      });
+    } catch {
+      // The change manifest is informational and never changes the task outcome.
+    }
+  }
+
   private finalizeDelegation(taskId: string, jobId: string | null, owner: string | null): void {
     if (!jobId || !owner) return;
     try {
@@ -1461,13 +1493,17 @@ export class HearthScheduler {
         throw new Error("还没有配置聊天模型。请到“设置”里选择服务商并填入 API Key，然后重试。");
       }
       const resumeState = executorId === "native" && !handoff ? this.restoreResumeState(taskId, taskRoot, Boolean(pendingInput)) : undefined;
-      const worktree = task.projectId && !task.inputs.some((input) => input.kind === "github")
+      const project = task.projectId ? this.service.store.getLocalProject(task.projectId) : null;
+      const worktree = task.projectId && project?.defaultBranch && !task.inputs.some((input) => input.kind === "github")
         ? this.worktrees.ensure(task)
         : null;
+      const workspaceInput = task.inputs.find((input) => input.kind === "workspace");
+      const executionRoot = worktree?.path
+        ?? (project && !project.defaultBranch ? project.path : workspaceInput?.value);
       const prepared = await prepareWorkspace({
         repoRoot: this.repoRoot,
         workspaceDir: taskRoot,
-        ...(worktree ? { executionRoot: worktree.path } : {}),
+        ...(executionRoot ? { executionRoot } : {}),
         outDir,
         task,
         githubCacheRoot: this.githubCacheRoot,

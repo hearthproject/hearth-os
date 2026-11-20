@@ -43,12 +43,19 @@ describe("local projects", () => {
       .toThrowError(expect.objectContaining({ code: "PROJECT_ALREADY_EXISTS" }));
   });
 
-  it("rejects non-Git folders and branches that do not exist", () => {
+  it("accepts plain folders and rejects branches that do not exist", () => {
     const projects = new ProjectService(store);
     const plain = join(root, "plain");
     mkdirSync(plain);
-    expect(() => projects.create({ path: plain }))
-      .toThrowError(expect.objectContaining({ code: "PROJECT_NOT_GIT" }));
+    const folder = projects.create({ path: plain });
+    expect(folder).toMatchObject({
+      kind: "folder",
+      defaultBranch: "",
+      currentBranch: null,
+      available: true,
+      error: null
+    });
+    expect(projects.update(folder.id, { name: "Notes" })).toMatchObject({ name: "Notes", kind: "folder" });
     expect(() => projects.create({ path: repo, defaultBranch: "missing" }))
       .toThrowError(expect.objectContaining({ code: "PROJECT_BRANCH_NOT_FOUND" }));
 
@@ -58,6 +65,15 @@ describe("local projects", () => {
       name: "Hearth",
       defaultBranch: "main"
     });
+  });
+
+  it("keeps conversations when a project is deleted", () => {
+    const projects = new ProjectService(store);
+    const project = projects.create({ path: repo });
+    const conversation = store.createConversation("固定项目", undefined, project.id);
+    expect(conversation.projectId).toBe(project.id);
+    projects.delete(project.id);
+    expect(store.getConversation(conversation.id)?.projectId).toBeNull();
   });
 
   it("provides CRUD endpoints with validation errors", async () => {
@@ -82,9 +98,9 @@ describe("local projects", () => {
     expect(updated.statusCode).toBe(200);
     expect(updated.json().project.name).toBe("Core 2");
 
-    const invalid = await app.inject({ method: "POST", url: "/api/projects", payload: { path: root } });
-    expect(invalid.statusCode).toBe(409);
-    expect(invalid.json().error).toBe("PROJECT_NOT_GIT");
+    const plain = await app.inject({ method: "POST", url: "/api/projects", payload: { path: root, name: "Plain" } });
+    expect(plain.statusCode).toBe(201);
+    expect(plain.json().project).toMatchObject({ name: "Plain", kind: "folder", defaultBranch: "" });
 
     const removed = await app.inject({ method: "DELETE", url: `/api/projects/${projectId}` });
     expect(removed.statusCode).toBe(204);
