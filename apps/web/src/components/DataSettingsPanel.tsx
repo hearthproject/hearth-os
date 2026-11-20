@@ -607,41 +607,51 @@ function TrashSection() {
         <span className="muted-count">{items.length} 项</span>
       </div>
 
-      <div className="data-toolbar">
-        <label className="data-field compact">
-          <span>删除时间</span>
-          <select
-            value={olderThanDays ?? ""}
-            onChange={(event) => {
-              setSelected(new Set());
-              setOlderThanDays(event.target.value ? Number(event.target.value) as 7 | 15 | 30 : null);
-            }}
-          >
-            <option value="">全部</option>
-            <option value="7">7 天以前</option>
-            <option value="15">15 天以前</option>
-            <option value="30">30 天以前</option>
-          </select>
-        </label>
-        <div className="data-toolbar-actions">
-          <button className="ghost-button compact" type="button" onClick={() => void restoreSelected()} disabled={selectedItems.length === 0}>恢复所选</button>
-          <button className="ghost-button compact danger" type="button" onClick={() => void purgeSelected()} disabled={selectedItems.length === 0}>彻底删除</button>
-        </div>
-      </div>
-
       {trashQuery.isLoading && <p className="data-note"><Loader2 size={13} className="spin" /> 正在读取回收站</p>}
       {!trashQuery.isLoading && items.length === 0 && <p className="data-empty">回收站是空的。</p>}
       {items.length > 0 && (
-        <div className="data-trash-list">
-          {items.map((item) => (
-            <label key={trashKey(item)} className="data-trash-row">
-              <input type="checkbox" checked={selected.has(trashKey(item))} onChange={() => toggle(item)} />
-              <span className="data-trash-kind">{item.kind === "conversation" ? "对话" : "任务"}</span>
-              <span className="data-trash-title">{item.title}</span>
-              <time>{relativeTime(item.deletedAt)}</time>
-            </label>
-          ))}
-        </div>
+        <details className="data-disclosure data-trash-disclosure">
+          <summary>
+            查看可恢复项目
+            <span className="data-disclosure-meta">
+              {selectedItems.length > 0 ? `已选 ${selectedItems.length} 项` : `共 ${items.length} 项`}
+            </span>
+          </summary>
+          <div className="data-disclosure-body">
+            <div className="data-toolbar">
+              <label className="data-field compact">
+                <span>删除时间</span>
+                <select
+                  value={olderThanDays ?? ""}
+                  onChange={(event) => {
+                    setSelected(new Set());
+                    setOlderThanDays(event.target.value ? Number(event.target.value) as 7 | 15 | 30 : null);
+                  }}
+                >
+                  <option value="">全部</option>
+                  <option value="7">7 天以前</option>
+                  <option value="15">15 天以前</option>
+                  <option value="30">30 天以前</option>
+                </select>
+              </label>
+              <div className="data-toolbar-actions">
+                <button className="ghost-button compact" type="button" onClick={() => void restoreSelected()} disabled={selectedItems.length === 0}>恢复所选</button>
+                <button className="ghost-button compact danger" type="button" onClick={() => void purgeSelected()} disabled={selectedItems.length === 0}>彻底删除</button>
+              </div>
+            </div>
+
+            <div className="data-trash-list">
+              {items.map((item) => (
+                <label key={trashKey(item)} className="data-trash-row">
+                  <input type="checkbox" checked={selected.has(trashKey(item))} onChange={() => toggle(item)} />
+                  <span className="data-trash-kind">{item.kind === "conversation" ? "对话" : "任务"}</span>
+                  <span className="data-trash-title">{item.title}</span>
+                  <time>{relativeTime(item.deletedAt)}</time>
+                </label>
+              ))}
+            </div>
+          </div>
+        </details>
       )}
 
       <DataNotice notice={notice} />
