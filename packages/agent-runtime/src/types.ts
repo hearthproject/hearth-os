@@ -95,6 +95,7 @@ export interface AgentToolMetadata {
   insertions?: number;
   deletions?: number;
   failures?: Array<{ path: string; reason: string }>;
+  browserAssertions?: Array<{ kind: string; expected: string; passed: boolean; actual?: string }>;
 }
 
 export interface AgentToolResult {

@@ -1435,6 +1435,8 @@ export class HearthScheduler {
         ...(this.attachmentRoot ? { attachmentRoot: this.attachmentRoot } : {}),
         ...(this.githubRun ? { githubRun: this.githubRun } : {})
       });
+      mkdirSync(join(outDir, ".hearth"), { recursive: true });
+      writeFileSync(join(outDir, ".hearth", "workspace-root"), `${prepared.root}\n`, "utf8");
       this.assertLease(taskId, run.leaseEpoch ?? 0, controller.signal.aborted && this.stopping);
       let runtime: RuntimePreparation | null = null;
       const drafting = isTextDraftTask(task);
@@ -2222,7 +2224,24 @@ export class HearthScheduler {
       return;
     }
     if (event.type === "tool.finished") {
-      this.capture({ ...base, kind: "tool_result", role: "tool", content: event.result.content, provenance: { source: "native", turn: event.turn, toolCallId: event.call.id, tool: event.call.name, isError: Boolean(event.result.isError), durationMs: event.durationMs }, executorEventId: `native:tool:${event.call.id}:finished` });
+      const metadata = event.result.metadata;
+      const provenance = {
+        source: "native",
+        turn: event.turn,
+        toolCallId: event.call.id,
+        tool: event.call.name,
+        isError: Boolean(event.result.isError),
+        durationMs: event.durationMs,
+        ...(metadata?.failedTests ? { failedTests: metadata.failedTests } : {}),
+        ...(metadata?.diagnostics ? { diagnostics: metadata.diagnostics } : {}),
+        ...(metadata?.exitCode !== undefined ? { exitCode: metadata.exitCode } : {}),
+        ...(metadata?.filesChanged ? { filesChanged: metadata.filesChanged } : {}),
+        ...(metadata?.insertions !== undefined ? { insertions: metadata.insertions } : {}),
+        ...(metadata?.deletions !== undefined ? { deletions: metadata.deletions } : {}),
+        ...(metadata?.snapshotIds ? { snapshotIds: metadata.snapshotIds } : {}),
+        ...(metadata?.browserAssertions ? { browserAssertions: metadata.browserAssertions } : {})
+      };
+      this.capture({ ...base, kind: "tool_result", role: "tool", content: event.result.content, provenance, executorEventId: `native:tool:${event.call.id}:finished` });
       return;
     }
     if (event.type === "checkpoint.created") {
