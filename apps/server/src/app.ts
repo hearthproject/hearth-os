@@ -69,7 +69,7 @@ import { KnowledgeSyncService } from "./knowledge/sync.ts";
 import { KnowledgeManagedService, KnowledgeSetupError } from "./knowledge/managed-service.ts";
 import { LibraryService } from "./library/service.ts";
 import { registerLibraryRoutes } from "./library/routes.ts";
-import { LocalEmbeddingProvider } from "./library/embedding.ts";
+import { LocalEmbeddingProvider, type EmbeddingProvider } from "./library/embedding.ts";
 import { McpServerError, McpServerService } from "./mcp-servers.ts";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
@@ -622,6 +622,7 @@ export interface BuildServerOptions {
   executorSettingsPath?: string;
   contextBlobRoot?: string;
   contextIndex?: ContextIndex;
+  libraryEmbeddingProvider?: EmbeddingProvider | null;
 }
 
 export async function buildServer(options: BuildServerOptions = {}) {
@@ -689,7 +690,9 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const memory = new MemoryService(service);
   const library = new LibraryService(store, {
     memory,
-    embeddingProvider: new LocalEmbeddingProvider({ cacheDir: LIBRARY_MODEL_DIR })
+    ...(options.libraryEmbeddingProvider === null
+      ? {}
+      : { embeddingProvider: options.libraryEmbeddingProvider ?? new LocalEmbeddingProvider({ cacheDir: LIBRARY_MODEL_DIR }) })
   });
   service.bus.subscribe((event) => {
     if (

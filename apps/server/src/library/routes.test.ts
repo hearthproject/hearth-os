@@ -25,7 +25,7 @@ describe("library routes", () => {
   });
 
   it("serves tree, status, search, preview and trash over HTTP", async () => {
-    const app = await buildServer({ store, serveWeb: false });
+    const app = await buildServer({ store, serveWeb: false, libraryEmbeddingProvider: null });
 
     const status = await app.inject({ method: "GET", url: "/api/library/status" });
     expect(status.statusCode).toBe(200);

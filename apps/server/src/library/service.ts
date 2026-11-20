@@ -8,7 +8,7 @@ import type {
 } from "@hearth/core";
 import type { HearthStore } from "@hearth/eventlog";
 import type { MemoryService } from "../memory.ts";
-import { embeddingToBuffer, type EmbeddingProvider } from "./embedding.ts";
+import { bufferToEmbedding, cosineSimilarity, embeddingToBuffer, type EmbeddingProvider } from "./embedding.ts";
 import { LibraryIndexer, type LibraryIndexResult } from "./indexer.ts";
 import { LibraryTreeService } from "./tree.ts";
 
@@ -151,28 +151,76 @@ export class LibraryService {
     const clean = query.trim();
     if (!clean) return { query: clean, hits: [], total: 0, semanticUsed: false, tookMs: 0 };
     if (this.tree.repository.countChunks() === 0 || this.dirty) await this.reindex();
-    const raw = this.tree.repository.searchFts(clean, Math.max(50, limit * 5));
-    const deduped = new Map<string, LibrarySearchHit>();
-    for (const hit of raw) {
-      const node = this.tree.repository.getNode(hit.nodeId);
-      if (!node || this.tree.repository.isHidden(node.ref, node.path)) continue;
-      const previous = deduped.get(node.id);
-      const score = hit.score > 0 ? hit.score : 1;
-      if (!previous || score > previous.score) {
-        deduped.set(node.id, {
-          node,
-          score,
-          snippet: makeSnippet(hit.text, clean),
-          matchedBy: [...clean].length < 3 ? "like" : "fts"
-        });
+    const candidateLimit = Math.max(50, limit * 5);
+    const raw = this.tree.repository.searchFts(clean, candidateLimit);
+    const merged = new Map<string, { nodeId: string; text: string; ftsRank: number | null; vectorRank: number | null }>();
+    raw.forEach((hit, index) => {
+      const previous = merged.get(hit.nodeId);
+      if (previous) {
+        previous.ftsRank = Math.min(previous.ftsRank ?? Number.POSITIVE_INFINITY, index + 1);
+      } else {
+        merged.set(hit.nodeId, { nodeId: hit.nodeId, text: hit.text, ftsRank: index + 1, vectorRank: null });
+      }
+    });
+
+    let semanticUsed = false;
+    const settings = this.tree.repository.getSettings();
+    if (settings.semanticEnabled && this.embeddingProvider) {
+      try {
+        const chunks = this.tree.repository.listChunksWithEmbedding(this.embeddingProvider.modelId, 20_000);
+        if (chunks.length > 0) {
+          const [queryVector] = await this.embeddingProvider.embed([clean]);
+          if (queryVector && queryVector.length === this.embeddingProvider.dimensions) {
+            const vectorHits = chunks.flatMap((chunk) => {
+              if (!chunk.embedding) return [];
+              return [{ chunk, score: cosineSimilarity(queryVector, bufferToEmbedding(chunk.embedding)) }];
+            }).sort((left, right) => right.score - left.score).slice(0, candidateLimit);
+            vectorHits.forEach((hit, index) => {
+              const previous = merged.get(hit.chunk.nodeId);
+              if (previous) {
+                previous.vectorRank = index + 1;
+                if (!previous.ftsRank) previous.text = hit.chunk.text;
+              } else {
+                merged.set(hit.chunk.nodeId, {
+                  nodeId: hit.chunk.nodeId,
+                  text: hit.chunk.text,
+                  ftsRank: null,
+                  vectorRank: index + 1
+                });
+              }
+            });
+            semanticUsed = true;
+          }
+        }
+      } catch {
+        semanticUsed = false;
       }
     }
-    const hits = [...deduped.values()].sort((left, right) => right.score - left.score).slice(0, limit);
+
+    const hits: LibrarySearchHit[] = [];
+    for (const candidate of merged.values()) {
+      const node = this.tree.repository.getNode(candidate.nodeId);
+      if (!node || this.tree.repository.isHidden(node.ref, node.path)) continue;
+      const lexical = candidate.ftsRank ? 1 / (60 + candidate.ftsRank) : 0;
+      const semantic = candidate.vectorRank ? 1 / (60 + candidate.vectorRank) : 0;
+      const matchedBy = candidate.ftsRank && candidate.vectorRank
+        ? "hybrid"
+        : candidate.vectorRank
+          ? "vector"
+          : [...clean].length < 3 ? "like" : "fts";
+      hits.push({
+        node,
+        score: lexical + semantic,
+        snippet: makeSnippet(candidate.text, clean),
+        matchedBy
+      });
+    }
+    hits.sort((left, right) => right.score - left.score);
     return {
       query: clean,
-      hits,
-      total: deduped.size,
-      semanticUsed: false,
+      hits: hits.slice(0, limit),
+      total: hits.length,
+      semanticUsed,
       tookMs: Math.round(performance.now() - started)
     };
   }
