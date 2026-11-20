@@ -11,13 +11,14 @@ describe("persisted goal lifecycle", () => {
     for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   });
 
-  function contextFor(root: string, out: string): AgentToolContext {
+  function contextFor(root: string, out: string, verify?: AgentToolContext["verifyGoalCompletion"]): AgentToolContext {
     mkdirSync(out, { recursive: true });
     return {
       workspaceRoot: root,
       outDir: out,
       permissions: { readRoots: [root], writeRoots: [root, out], networkHosts: [], tools: ["create_goal", "get_goal", "update_goal"] },
-      signal: new AbortController().signal
+      signal: new AbortController().signal,
+      ...(verify ? { verifyGoalCompletion: verify } : {})
     };
   }
 
@@ -57,5 +58,38 @@ describe("persisted goal lifecycle", () => {
     expect(readGoalByRoot(root)?.status).toBe("active");
     expect(goalFinishIssue(root)).toContain("update_goal");
     expect(goalContinuationPrompt(root)).toContain("Long task");
+  });
+
+  it("refuses completion when the independent goal verifier says no", async () => {
+    const root = mkdtempSync(join(tmpdir(), "hearth-goal-verify-"));
+    roots.push(root);
+    const context = contextFor(root, join(root, "out"), async () => ({ ok: false, reason: "tests were never run" }));
+    const tools = createGoalTools();
+    await tools.find((tool) => tool.definition.name === "create_goal")!.execute({
+      title: "Verify",
+      objective: "Ship it",
+      successCriteria: ["tests pass"]
+    }, context);
+
+    await expect(tools.find((tool) => tool.definition.name === "update_goal")!.execute({
+      status: "completed",
+      note: "done"
+    }, context)).rejects.toThrow("tests were never run");
+    expect(readGoalByRoot(root)?.status).toBe("active");
+  });
+
+  it("accepts completion when the independent goal verifier passes", async () => {
+    const root = mkdtempSync(join(tmpdir(), "hearth-goal-verify-ok-"));
+    roots.push(root);
+    const context = contextFor(root, join(root, "out"), async () => ({ ok: true }));
+    const tools = createGoalTools();
+    await tools.find((tool) => tool.definition.name === "create_goal")!.execute({
+      title: "Verify",
+      objective: "Ship it",
+      successCriteria: ["tests pass"]
+    }, context);
+
+    await tools.find((tool) => tool.definition.name === "update_goal")!.execute({ status: "completed" }, context);
+    expect(readGoalByRoot(root)?.status).toBe("completed");
   });
 });

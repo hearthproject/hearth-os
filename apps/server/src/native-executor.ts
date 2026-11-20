@@ -214,6 +214,26 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     modelId: options.settings.model,
     requireFinishTool: true,
     stopOnToolError: drafting,
+    verifyGoalCompletion: async (goal) => {
+      try {
+        const response = await completeChat(options.settings, [
+          {
+            role: "system",
+            content: [
+              "You are an independent goal verifier. Judge whether the persisted goal is truly complete.",
+              "Be strict: success criteria must be evidenced by the objective and note, not merely asserted.",
+              "Reply on the first line with PASS or FAIL, then a concise reason and the missing evidence."
+            ].join("\n")
+          },
+          { role: "user", content: JSON.stringify(goal, null, 2) }
+        ], { temperature: 0.1, maxTokens: 800, timeoutMs: 60_000, signal: options.signal });
+        const text = response.content.trim();
+        if (/^PASS\b/i.test(text)) return { ok: true };
+        return { ok: false, reason: text.slice(0, 2_000) || "校验器没有返回 PASS" };
+      } catch (error) {
+        throw new Error(`独立目标校验失败：${error instanceof Error ? error.message : String(error)}`);
+      }
+    },
     validateFinish: (result, context) => {
       const goalIssue = coding && !options.isSubagent ? goalFinishIssue(options.prepared.root) : null;
       if (goalIssue) return goalIssue;

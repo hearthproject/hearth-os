@@ -353,7 +353,8 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
           state,
           fullAccess: options.isFullPermission?.() === true,
           mode: options.mode ?? "build",
-          ...(options.sandbox ? { sandbox: options.sandbox } : {})
+          ...(options.sandbox ? { sandbox: options.sandbox } : {}),
+          ...(options.verifyGoalCompletion ? { verifyGoalCompletion: options.verifyGoalCompletion } : {})
         }, options.toolTimeoutMs ?? 120_000, signal);
       } catch (error) {
         result = { content: `工具执行失败：${errorMessage(error)}`, isError: true };
@@ -581,7 +582,8 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
               state,
               fullAccess: options.isFullPermission?.() === true,
               mode: options.mode ?? "build",
-              ...(options.sandbox ? { sandbox: options.sandbox } : {})
+              ...(options.sandbox ? { sandbox: options.sandbox } : {}),
+              ...(options.verifyGoalCompletion ? { verifyGoalCompletion: options.verifyGoalCompletion } : {})
             }, options.toolTimeoutMs ?? 120_000, signal);
           } catch (error) {
             result = { content: `工具执行失败：${errorMessage(error)}`, isError: true };

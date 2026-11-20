@@ -147,6 +147,17 @@ const updateGoalTool: AgentTool = {
     if (status && !STATUSES.includes(status)) throw new Error("status 必须是 active、paused、blocked 或 completed");
     const note = typeof args.note === "string" ? args.note.trim().slice(0, 5_000) : null;
     if (!status && !note) throw new Error("update_goal 至少需要 status 或 note");
+    if (status === "completed" && context.verifyGoalCompletion) {
+      let verification: { ok: boolean; reason?: string };
+      try {
+        verification = await context.verifyGoalCompletion(goal);
+      } catch (error) {
+        throw new Error(`目标完成校验器失败，已保持 active：${error instanceof Error ? error.message : String(error)}`);
+      }
+      if (!verification.ok) {
+        throw new Error(`目标完成校验未通过：${verification.reason?.trim() || "成功标准尚未满足"}。请继续执行或更新 note 说明阻塞原因。`);
+      }
+    }
     const next: PersistedGoal = {
       ...goal,
       ...(status ? { status } : {}),

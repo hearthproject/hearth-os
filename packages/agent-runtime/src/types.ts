@@ -64,6 +64,14 @@ export interface AgentToolContext {
   fullAccess?: boolean;
   mode?: HarnessMode;
   sandbox?: SandboxRuntime;
+  verifyGoalCompletion?: (goal: {
+    goalId: string;
+    title: string;
+    objective: string;
+    constraints: string[];
+    successCriteria: string[];
+    note: string | null;
+  }) => Promise<{ ok: boolean; reason?: string }>;
 }
 
 export type AgentToolAction = "finish" | "ask_user" | "plan";
@@ -264,6 +272,7 @@ export interface AgentRuntimeOptions {
   afterEdit?: (event: AgentPostEditEvent) => void | Promise<void>;
   authorizeTool?: (request: AgentToolAuthorizationRequest) => Promise<AgentToolAuthorization>;
   validateFinish?: (result: AgentToolResult, context: AgentToolContext) => string | null | Promise<string | null>;
+  verifyGoalCompletion?: AgentToolContext["verifyGoalCompletion"];
   isFullPermission?: () => boolean;
   contextWindowTokens?: number;
   contextReserveTokens?: number;
