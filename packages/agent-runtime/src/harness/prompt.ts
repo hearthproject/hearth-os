@@ -71,9 +71,10 @@ const TOOL_GUIDANCE: Record<string, string> = {
   write_file: "- write_file: create or overwrite a file. Prefer edit_file for existing code.",
   edit_file: "- edit_file: exact or fuzzy multi-edit, atomic. Prefer it for targeted changes.",
   apply_patch: "- apply_patch: multi-file V4A patch for coordinated changes.",
-  shell: "- shell: run commands. Use background=true for servers and long builds; then shell_output and shell_kill. Do not busy-poll.",
+  shell: "- shell: run commands. Use background=true for servers and long builds; then use shell_wait to wait for readiness or exit. Do not sleep or busy-poll.",
   shell_output: "- shell_output: inspect a background shell session.",
   shell_kill: "- shell_kill: stop a background shell session.",
+  shell_wait: "- shell_wait: wait for a background process to match output, exit or time out (default 60s, max 600s). Prefer it to sleep or polling.",
   todo_write: "- todo_write: maintain a short progress list for multi-step work.",
   todo_read: "- todo_read: inspect the current todo list.",
   run_tests: "- run_tests: run the project's configured test command on changed files or the repository.",
@@ -98,7 +99,6 @@ const TOOL_GUIDANCE: Record<string, string> = {
   get_goal: "- get_goal: read the persisted coding goal.",
   create_goal: "- create_goal: persist a long-running coding goal.",
   update_goal: "- update_goal: complete, pause or block a persisted goal.",
-  shell_wait: "- shell_wait: wait for a background process to match output, exit or time out.",
   rewind_turn: "- rewind_turn: restore the files changed in a previous turn."
 };
 

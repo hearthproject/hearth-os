@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createBuiltinTools, defaultTaskPermissions } from "./tools.ts";
 import { createAgentState } from "./harness/file-state.ts";
@@ -10,9 +11,9 @@ import type { AgentToolContext } from "./types.ts";
 describe("builtin tools", () => {
   const roots: string[] = [];
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.restoreAllMocks();
-    for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+    for (const root of roots.splice(0)) await removeWorkspace(root);
   });
 
   it("finds files with glob while skipping dependencies and hidden directories", async () => {
@@ -381,6 +382,28 @@ describe("builtin tools", () => {
     expect(waited.content).toContain("wait-done");
   });
 
+  it("returns on output match and times out without killing the process", async () => {
+    const root = workspace(roots);
+    const out = join(root, "out");
+    mkdirSync(out, { recursive: true });
+    const context = contextFor(root, out);
+    const tools = mapTools();
+
+    const matchedSession = (await tools.shell!.execute({ command: `Set-Location $env:TEMP; node -e "console.log('ready'); setInterval(() => {}, 1000)"`, background: true }, context)).metadata?.sessionId;
+    const matched = await tools.shell_wait!.execute({ sessionId: matchedSession, match: "ready", timeoutSeconds: 5 }, context);
+    expect(matched.metadata?.matched).toBe(true);
+    expect(matched.metadata?.timedOut).toBe(false);
+    expect(matched.content).toContain("match found");
+    await tools.shell_kill!.execute({ sessionId: matchedSession }, context);
+
+    const idleSession = (await tools.shell!.execute({ command: `Set-Location $env:TEMP; node -e "setInterval(() => {}, 1000)"`, background: true }, context)).metadata?.sessionId;
+    const timedOut = await tools.shell_wait!.execute({ sessionId: idleSession, timeoutSeconds: 1 }, context);
+    expect(timedOut.metadata?.timedOut).toBe(true);
+    expect(timedOut.metadata?.background).toBe(true);
+    expect(timedOut.content).toContain("timeout");
+    await tools.shell_kill!.execute({ sessionId: idleSession }, context);
+  });
+
   it("stores full shell output in the task log and returns only the tail", async () => {
     const root = workspace(roots);
     const out = join(root, "out");
@@ -451,4 +474,16 @@ function workspace(roots: string[]): string {
   const root = mkdtempSync(join(tmpdir(), "hearth-tools-"));
   roots.push(root);
   return root;
+}
+
+async function removeWorkspace(root: string): Promise<void> {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      rmSync(root, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EBUSY" || attempt === 9) throw error;
+      await delay(200);
+    }
+  }
 }

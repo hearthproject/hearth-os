@@ -155,7 +155,7 @@ export async function waitShellSession(sessionId: string, options: { timeoutMs?:
 } | null> {
   const session = sessions.get(sessionId);
   if (!session) return null;
-  const timeoutMs = Math.min(10 * 60_000, Math.max(100, options.timeoutMs ?? 30_000));
+  const timeoutMs = Math.min(10 * 60_000, Math.max(100, options.timeoutMs ?? 60_000));
   const matcher = options.match ? compileMatcher(options.match) : null;
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
