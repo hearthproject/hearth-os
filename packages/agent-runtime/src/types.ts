@@ -96,6 +96,13 @@ export interface AgentToolMetadata {
   deletions?: number;
   failures?: Array<{ path: string; reason: string }>;
   browserAssertions?: Array<{ kind: string; expected: string; passed: boolean; actual?: string }>;
+  browserUrl?: string;
+  browserPageDigest?: string;
+  browserTabs?: Array<{ id: string; url: string }>;
+  browserTabId?: string;
+  browserScreenshot?: string;
+  browserDownload?: string;
+  browserEvidence?: Record<string, string | null>;
 }
 
 export interface AgentToolResult {

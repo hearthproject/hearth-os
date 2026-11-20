@@ -35,6 +35,14 @@ export const DSH_HOME_DIR = join(EXECUTOR_HOME_DIR, "deepseek-harness");
 export const MODEL_SETTINGS_PATH = join(DATA_DIR, "model-settings.json");
 export const EXECUTOR_SETTINGS_PATH = join(DATA_DIR, "executor-settings.json");
 export const ATTACHMENT_DIR = join(DATA_DIR, "attachments");
+export const BROWSER_DIR = join(DATA_DIR, "browser");
+export const BROWSER_PROFILE_DIR = join(BROWSER_DIR, "profile");
+export const BROWSER_EVIDENCE_DIR = join(BROWSER_DIR, "evidence");
+export const BROWSER_RECIPE_DIR = join(BROWSER_DIR, "recipes");
+export const BROWSER_SETTINGS_PATH = join(BROWSER_DIR, "settings.json");
+export const BROWSER_BRIDGE_PORT = Number(process.env.HEARTH_BROWSER_BRIDGE_PORT ?? 4318);
+export const BROWSER_ENABLED = (process.env.HEARTH_BROWSER ?? "1") !== "0";
+export const BROWSER_BRIDGE_ENABLED = (process.env.HEARTH_BROWSER_BRIDGE ?? "1") === "1";
 export const WEB_DIST = resolve(process.env.HEARTH_WEB_DIST ?? join(HEARTH_ROOT, "apps", "web", "dist"));
 export const MASTER_KEY_PATH = join(DATA_DIR, "master.key");
 
