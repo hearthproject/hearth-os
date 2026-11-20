@@ -35,7 +35,7 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
 
 模型可以更换，执行器可以替换，界面可以重写，但任务状态、授权范围、完成证据、产物摘要和外部回执必须留下来。Hearth 要回答的不是“模型能不能写出一段话”，而是“这件事有没有真正完成，失败后能不能接着做，外部动作能不能被核对”。
 
-> **当前状态（2026-11-14）：** 第一阶段 MVP 已验收；第二阶段至第六阶段已形成可运行的代码闭环和自动测试。Native 30 题的历史最好完整单轮为 18/30，累计定向确认 19/30；当前代码尚待完整 30 题复测。11 月 14 日补齐 Native 工具审批撤销后的等待解除，106 项相关回归测试通过，动作绑定场景定向运行 3/3 通过。真实账户、真实设备、真实长期使用和 v1.0 整体验收仍未完成。
+> **当前状态（2026-11-20，v0.2.0）：** 可信执行、浏览器自动化、项目档案、首次真实任务验证、监督收件箱、自用报告、可选签名更新和发布脚本已进入 `main`。110 个测试文件、782 个用例、12 项浏览器 fixture 和 18 项离线 UI 端到端通过，Tauri updater 编译和文档构建通过。真实模型首跑被当前 key 的无权限错误阻塞；日常 Chrome 扩展桥、干净机安装、真实账户和已签名更新发布仍未验收。逐项证据见[2026-11 验收报告](https://hearthproject.github.io/hearth-os/delivery/acceptance-2026-11.html)。
 
 ## 界面一览
 
@@ -69,6 +69,11 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
 | 能力 | 当前实现 |
 |---|---|
 | **聊天优先的控制面** | React + Vite 单页应用，对话常驻左侧，运行中与待处理状态直接标在对话条目；右侧按需展开目标、进度、产物、附件和后台任务，并支持文本、Markdown、代码、JSON/CSV、图片与 PDF 预览；任务详情可继续查看完整执行记录 |
+| **浏览器自动化** | 独立 Chrome profile、多标签页、页面元素快照与稳定 ID、16 个浏览器工具；提交/上传/下载逐次审批，动作前后截图和页面摘要进入证据目录；完成前必须有通过的页面断言。不读取 cookie 或密码 |
+| **逐轮时间线与回退** | 任务详情显示每轮改了哪些文件、增删行数、测试与诊断；一键回退前校验文件哈希，用户手改默认拒绝，`force` 才覆盖 |
+| **审批模式** | `necessary`、`workspace`、`full` 三档；工作区内可逆文件写入自动执行，shell、删除、邮件、桌面、陌生域名和支付类动作仍需审批 |
+| **项目档案与工作方式** | 每个项目编译 `PROJECT.md`（栈、命令、约定、决策、未完成任务、坑）；`WORKSTYLE.md` 记录沟通、提交、验证和工具偏好；只注入 coding 任务 |
+| **监督与自用报告** | “需要你”收件箱只放长任务、等待审批、预算停止和失败；每天 08:00 后生成回顾；`npm run dogfood:report` 汇总完成率、一次通过率、审批、轮次和 token |
 | **原生 Agent Runtime** | 自研通用执行内核，支持 OpenAI Chat、OpenAI Responses、Anthropic Messages、Gemini 四种协议；读取、文档、glob/grep、写入、原子编辑、补丁、命令、联网搜索、委派、本地 MCP、询问用户和完成工具共享同一条预算、检查点、审批与恢复链路 |
 | **项目、子代理与 MCP** | 项目可以是任意本地文件夹：Git 仓库自动使用独立 `hearth/<task-id>` Worktree，普通文件夹原地执行并在任务结束后给出改动清单；子代理使用新上下文、只读或隔离写、单层串行且最多两个；本地 stdio MCP 服务器支持启动探测、工具发现、JSON Schema 校验、逐次审批、超时和崩溃隔离 |
 | **项目会话与独立对话** | 侧边栏按“项目 / 最近”分组，项目下可以直接开新对话，会话创建后固定归属；独立对话默认没有文件权限，只有消息里出现完整路径时才把该文件夹作为本次任务的工作目录 |
@@ -79,7 +84,8 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
 | **委派、交接与沙箱** | 单层持久委派任务通过调度器推进，保留预算、工作区策略、租约和失败状态；执行器交接包带目标、下一步、验收项、证据、权限子集和上下文水位；沙箱检查路径、网络、进程和凭据边界 |
 | **审批与回执** | 外部动作先生成预览，一次性审批绑定动作参数指纹；批准后由效果账本执行并留下回执；拒绝、过期、复用和参数变化都会失效；不确定效果进入显式对账队列 |
 | **个人上下文** | 实体、别名、关系、状态、决定和承诺组成个人本体；Context Broker 按 `must_know`、`relevant`、`recallable`、`omitted` 组装上下文 |
-| **首次运行与导航** | 全新实例三步向导：服务商、执行器、完成；知识库不内置，可一键安装 OpenViking 并托管启动；主导航保留聊天、知识库、邮件、定时任务、设备、运行时和设置 |
+| **首次运行、更新与发版** | 全新实例完成服务商、执行器、偏好后可跑一个真实工具任务；通过才标记完成，跳过保留警告。Tauri updater 三项签名变量齐全才启用；发布脚本生成安装包、便携 zip、发布说明和 SHA256 |
+| **主导航** | 聊天、需要你、记忆三个主入口；档案、邮件、定时任务、设备、运行、个人收在“更多”；设置固定在底部 |
 | **飞书消息入口** | 企业自建应用长连接、open_id 白名单、文本/图片/文件消息、任务状态、审批摘要与 `/approve`、`/reject` 文本命令；入站消息带幂等记录，不需要公网回调 |
 | **邮件工作台** | SMTP 发送复用审批与效果账本，批准后发送并保存回执；IMAP 只读同步最近邮件到来源，不标记已读；账户和口令加密保存 |
 | **定时任务** | 有界补跑、失败冷却、定时触发；任务直接使用自定义输入与产物约定，不再依赖模板包 |
@@ -92,18 +98,18 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
 
 ## 当前进度
 
-Hearth 已经越过**第一阶段（MVP）**的硬门槛：15 个跨行业真实任务全部执行，13 个通过验收。阶段二至六已经形成可运行的代码闭环与自动测试，但**尚未完成真实用户、真实设备和长期运行验收**，因此不宣称整体交付。
+2026-11 这一版不再扩展新概念，而是把已有能力收拢成可日常使用、可回退、可核对的闭环：
 
-| 阶段 | 状态 | 已经跑通 | 仍然留空 |
+| 领域 | 状态 | 证据 | 留空 |
 |---|---|---|---|
-| 一 · 最小完整 MVP | **已验收** | 15 项任务、13 项通过；任务、审批、产物、恢复、备份闭环 | T07 未交付 PR；T08 外部评论等待用户批准 |
-| 二 · 日常内容工作 | 部分完成 | 来源、提取、草稿、审批、本地发件箱；SMTP 真实发送与 IMAP 只读同步代码闭环 | 真实邮件账户、退信与垃圾邮件语义未验收；日历账户未接入；邮件附件 UI 未实现 |
-| 三 · 桌面操作 | 部分完成 | Windows 配对、观察、接管、低风险输入、UIA 动作、动作绑定当前观察帧 | 敏感区域遮罩、隔离桌面、高风险补偿未实现 |
-| 四 · 主动服务与手机 | 范围收缩 | 飞书长连接、文本审批、应用内通知、可安装 PWA 壳和移动底部导航 | 主动触发器与收件箱已移除；真实飞书租户、iOS/Android 真机安装、手机配对、系统推送、远程接管未验收 |
-| 五 · 记忆与进化 | 范围收缩 | 记忆来源/可信度/合并/遗忘传播/导出；持久委派、可审阅交接与沙箱边界代码闭环 | 方法学习与技能包已移除；真实长期使用和错误记忆演练未完成 |
-| 六 · 多设备与长期运行 | 范围收缩 | 租约、设备撤销、令牌轮换、加密备份、健康维护 | 多设备同步与外部连接已移除；真实远程节点、断网恢复、设备丢失演练、数周运行未完成 |
+| 可信执行 | 完成 | 逐轮时间线、回退漂移保护、审批模式、782 个测试 | 真实用户长期回退演练 |
+| 浏览器 | 代码闭环 | 16 个工具、12 项 fixture、18 个证据文件、Chrome 真实启动 | 日常 Chrome 扩展桥、验证码/风控站点 |
+| 记忆与档案 | 完成 | 项目档案、工作方式、7 项档案测试、注入边界测试 | 真实长期写作/编码使用 |
+| 首跑与更新 | 代码闭环 | fake-runner 测试、Tauri updater 编译、发布脚本 | 真实模型首跑、签名更新发布、干净机安装 |
+| 监督与自用报告 | 完成 | 4 项监督测试、1 项报告测试、收件箱 E2E | 真实一周 dogfood 复盘 |
+| 工程门禁 | 完成 | CI、commitlint、husky、PR 模板、文档构建 | 分支保护与远端 CI 实际运行记录 |
 
-逐项能力矩阵、验证证据和未完成验收见[阶段二至六交付状态](https://hearthproject.github.io/hearth-os/delivery/status.html)。
+历史阶段一至六的路线和 Native 30 题评测保留在文档站，但部分描述已被当前范围收缩取代。逐项能力矩阵、验证证据和未完成验收见[当前交付状态](https://hearthproject.github.io/hearth-os/delivery/status.html)与[2026-11 验收报告](https://hearthproject.github.io/hearth-os/delivery/acceptance-2026-11.html)。
 
 ## 评测结果
 
@@ -212,7 +218,7 @@ npm ci
 npm run tauri:build
 ```
 
-生成 `release\Hearth_0.1.0_x64-setup.exe`（NSIS 按用户安装，免 UAC，安装到 `%LOCALAPPDATA%\Programs\Hearth`）。安装后双击开始菜单的 Hearth 即可；关窗会隐藏到托盘，托盘菜单负责退出、环境体检、桌面助手、数据目录和日志目录。首次启动会让你选择现有 `.hearth` 或新建数据目录。
+生成 `release\Hearth_0.2.0_x64-setup.exe`（NSIS 按用户安装，免 UAC，安装到 `%LOCALAPPDATA%\Programs\Hearth`）。安装后双击开始菜单的 Hearth 即可；关窗会隐藏到托盘，托盘菜单负责退出、环境体检、桌面助手、数据目录和日志目录。首次启动会让你选择现有 `.hearth` 或新建数据目录。
 
 桌面版只保留 Tauri 实现：内置官方 Node 22.23.2、npm 10.9.8 和全部服务端功能，安装包约 27.7 MiB，安装后约 113 MiB。Codex 使用系统中的 `codex.exe`，不内置 479 MiB 平台二进制。
 
@@ -326,10 +332,14 @@ hearth-os/
 - [代码架构](https://hearthproject.github.io/hearth-os/architecture/) — 完全依据源码整理的架构说明，覆盖服务组装、调度、执行器、上下文、存储、前端与渠道接入。
 - [产品设计](https://hearthproject.github.io/hearth-os/design/) — 产品定位、任务链路、技术选型与模块边界。
 - [委派、交接与沙箱](https://hearthproject.github.io/hearth-os/design/delegation-and-sandbox.html) — 单层持久委派、交接包、租约、路径/网络/凭据边界。
+- [浏览器自动化](https://hearthproject.github.io/hearth-os/design/browser.html) — 独立 profile、页面快照、16 个工具、审批、证据和完成断言。
 - [个人上下文](https://hearthproject.github.io/hearth-os/design/personal-context.html) — 个人本体、Context Pack 与记忆召回。
 - [存储与上下文](https://hearthproject.github.io/hearth-os/design/storage.html) — SQLite 数据域、上下文生命周期、备份与恢复边界。
-- [交付与进度](https://hearthproject.github.io/hearth-os/delivery/) — 已验收能力、明确留空项与剩余路线。
-- [阶段二至六状态](https://hearthproject.github.io/hearth-os/delivery/status.html) — 当前能力矩阵、验证证据与未完成验收。
+- [日常使用与自用报告](https://hearthproject.github.io/hearth-os/reference/daily-use.html) — 需要你收件箱、昨日回顾与 dogfood 报告。
+- [构建、签名与发版](https://hearthproject.github.io/hearth-os/reference/releasing.html) — Tauri 构建、更新签名和发布产物。
+- [交付与进度](https://hearthproject.github.io/hearth-os/delivery/) — 历史路线与当前范围。
+- [当前交付状态](https://hearthproject.github.io/hearth-os/delivery/status.html) — 当前能力矩阵、验证证据与未完成验收。
+- [2026-11 验收报告](https://hearthproject.github.io/hearth-os/delivery/acceptance-2026-11.html) — 测试矩阵、手动检查、留空项和回退。
 - [评测与结果](https://hearthproject.github.io/hearth-os/evaluation/) — native 30 题基线、最终报告与评测边界。
 - [开发日志](https://hearthproject.github.io/hearth-os/log/day-08.html) — 通用执行内核升级、评测拆分与 native 30 题结果。
 - [评测 Agent（独立仓库）](https://hearthproject.github.io/hearth-eval/) — 场景、case、独立控制台、全周期轨迹、评分、复核与对比。
@@ -339,37 +349,33 @@ hearth-os/
 
 - 邮件默认写本机发件箱；配置 SMTP 账户后可提交真实发送审批，但真实账户、退信和垃圾邮件语义尚未人工验收。日历账户未接入，邮件附件 UI 未实现。
 - Windows 助手只支持同机、前台聚焦操作；敏感区域遮挡、隔离桌面和高风险动作补偿尚未实现。当前本地沙箱是路径、网络和进程策略检查，不是强隔离容器或虚拟机。
+- 浏览器使用独立 Chrome profile，首次需要在该 profile 内登录站点；没有直接接管默认 Chrome 的 MV3 扩展桥。Chrome 136+ 默认 profile 禁止远程调试。
 - 飞书长连接提供手机消息与文本审批，但不是手机 PWA、系统级推送或完整远程接管；页面关闭后不会推送。
 - PWA 壳、移动底部导航和离线应用壳已存在，但手机配对、iOS/Android 真机安装、系统推送和远程接管未验收。
 - 所有数据、设备与令牌边界都在本机；不提供多设备事件同步或远程节点连接。
-- 主导航暴露聊天、知识库、定时任务、邮件、设备、运行时和设置；任务状态在聊天侧栏内联展示，不再保留独立任务列表和“需要你”列表。备份、恢复、维护和全局停止统一收在设置的数据页。
+- 主导航暴露聊天、需要你、记忆三个主入口；档案、邮件、定时任务、设备、运行和个人收在“更多”；设置固定在底部。
+- 当前模型 key 调用 `deepseek-v4.1-flash-1017` 返回 `Access to model denied`，真实模型首跑未验收。安装包未做干净机安装/卸载，已签名自动更新未发布，也没有 Windows Authenticode 证书。
 - 评测 case、场景和实验已迁到独立仓库；主仓库不再注册评测桥接，测试不代表真实评测实验已经运行。native 30 题的最终提交 `eb32ad5` 尚未完成连续复测，18/30 与累计 19/30 都不是最终官方单轮成绩。
-- 原生运行时仍不支持远程 MCP、OAuth、浏览器自动化搜索、图片/扫描件视觉理解、PPTX、LSP、格式化器、Shell 后台会话或自动 cherry-pick。
-- 这是一个阶段一已验收、阶段二至六部分完成的工作版本，不是 v1.0 正式发布。
+- 原生运行时仍不支持远程 MCP、OAuth、图片/扫描件视觉理解、PPTX、LSP、格式化器或自动 cherry-pick。
+- 这是 `0.2.0` 工作版本，不是 v1.0 正式发布。
 
 ## 验证
 
-2026-11-14 定向回归验证通过，可在 Hearth OS 根目录复现：
+2026-11-20 的当前结果：
 
 ```bash
-npx vitest run apps/server/src/approvals.test.ts apps/server/src/approval-ticket.test.ts apps/server/src/action-resolver.test.ts apps/server/src/scheduler.test.ts packages/agent-runtime/src/runtime.test.ts
-# 5 个测试文件、106 个测试通过
+npm run typecheck     # 0 error
+npm test              # 110 个测试文件、782 个测试通过
+npm run build         # Web 构建通过
+npm run docs:build    # 文档构建通过，无死链
+HEARTH_E2E_OFFLINE=1 npm run test:e2e
+                      # 12 项浏览器 fixture + 18 项 UI 检查通过
+cargo check --manifest-path apps/desktop-tauri/src-tauri/Cargo.toml --features updater
 ```
 
-本轮完整类型检查仍报告 MCP 回调参数隐式 `any` 和 `pdfjs-dist/legacy/build/pdf.mjs` 缺少类型声明。全仓测试数量与以下命令记录对应 2026-11-12 的历史验证：
+E2E 会在随机本地端口启动服务，并使用临时 `HEARTH_DATA_DIR`，不会触碰真实 `.hearth` 数据。可用 `HEARTH_E2E_MODEL_SETTINGS` 指定其他模型配置；`HEARTH_E2E_OFFLINE=1` 跳过在线聊天；`HEARTH_E2E_KEEP=1` 保留临时数据用于排查。
 
-```bash
-npm test              # 100 个测试文件、725 个测试全部通过
-npm run typecheck     # TypeScript 类型检查
-npm run build         # 构建 Web 控制面
-npm run docs:build    # 构建 VitePress 文档站
-npm run test:e2e      # 浏览器 E2E；使用隔离数据目录
-npm run screenshots:readme  # 重新生成 README 与文档站截图
-```
-
-E2E 会在随机本地端口启动服务，并使用临时 `HEARTH_DATA_DIR`，不会触碰真实 `.hearth` 数据。可用 `HEARTH_E2E_MODEL_SETTINGS` 指定其他模型配置，`HEARTH_E2E_OFFLINE=1` 跳过在线聊天，`HEARTH_E2E_KEEP=1` 保留临时数据用于排查。
-
-`vitest.config.ts` 将单个测试的超时设为 20 秒，避免 Windows 上 Git、Worktree 和 MCP 探测测试被默认 5 秒超时误判。测试覆盖服务层、API、模型协议、原生工具循环、glob/grep、原子补丁、Shell 进程树超时、办公文件读写、上下文压缩、瞬态重试、循环检测、显式完成、项目与 Worktree、子代理边界、MCP 管理/调用/审批、搜索适配器、预算、权限、检查点、审批参数绑定、效果对账、执行器交接、委派、沙箱、记忆治理、个人本体、Context Broker、标准意图、桌面边界与备份。测试通过不等于真实验收完成；阶段一逐项证据见 [hearth-eval 的第一阶段验收报告](https://github.com/hearthproject/hearth-eval/blob/main/eval/phase-1-acceptance.md)。
+`vitest.config.ts` 将单个测试的超时设为 20 秒，避免 Windows 上 Git、Worktree 和 MCP 探测测试被默认 5 秒超时误判。测试通过不等于真实验收完成；逐项证据和留空项见[2026-11 验收报告](https://hearthproject.github.io/hearth-os/delivery/acceptance-2026-11.html)。
 
 独立评测仓库在 2026-11-14 完成自检服务与 API 的 9 项定向测试，`npm run typecheck` 和 `npm run build` 通过。`npm run typecheck:scenarios` 仍受 Hearth OS 的 PDF 模块类型声明问题影响；完整 30 题实验待后续复测。
 

@@ -46,6 +46,7 @@ const zhDesignSidebar = [
       { text: '存储与上下文架构', link: '/design/storage' },
       { text: '个人上下文', link: '/design/personal-context' },
       { text: '记忆', link: '/design/memory' },
+      { text: '浏览器自动化', link: '/design/browser' },
       { text: '评估与成本', link: '/design/evaluation' },
       { text: '数据、备份与运维', link: '/design/operations' },
       { text: 'Agent 参考模式', link: '/design/agent-reference-patterns' }
@@ -143,7 +144,8 @@ const zhSidebar = {
       text: '交付路线',
       items: [
         { text: '交付路线与实施计划', link: '/delivery/' },
-        { text: '阶段二至六交付状态', link: '/delivery/status' }
+        { text: '当前交付状态', link: '/delivery/status' },
+        { text: '2026-11 验收报告', link: '/delivery/acceptance-2026-11' }
       ]
     },
     ...zhDeliveryStages
