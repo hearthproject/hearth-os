@@ -114,7 +114,8 @@ import type {
   McpServerView,
   TaskWorktreeView,
   WebSearchProvider,
-  WebSearchSettingsView
+  WebSearchSettingsView,
+  SkillView
 } from "@hearth/core";
 
 export type {
@@ -232,7 +233,8 @@ export type {
   McpServerView,
   TaskWorktreeView,
   WebSearchProvider,
-  WebSearchSettingsView
+  WebSearchSettingsView,
+  SkillView
 };
 
 export interface ModelRegistryResponse extends ModelRegistryView {

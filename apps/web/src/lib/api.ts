@@ -113,6 +113,7 @@ import type {
   LibraryStatus,
   LibraryTreeNode,
   LibraryTrashEntry,
+  SkillView,
   WebSearchProvider,
   WebSearchSettingsView
 } from "@hearth/core";
@@ -122,6 +123,7 @@ export interface ChatStreamBody {
   conversationId?: string;
   projectId?: string;
   message?: string;
+  skillId?: string;
   attachments?: ChatAttachment[];
   url?: string;
   settings?: ConversationSettingsPatch;
@@ -440,6 +442,18 @@ export const api = {
     body: JSON.stringify({ path })
   }),
   libraryRemoveRoot: (id: string) => request<{ ok: boolean }>(`/api/library/roots/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  skills: () => request<{ skills: SkillView[] }>("/api/skills"),
+  skill: (id: string) => request<{ skill: SkillView }>(`/api/skills/${encodeURIComponent(id)}`),
+  installSkill: (source: string) => request<{ skill: SkillView; changed: boolean; replacedFiles: number }>("/api/skills/install", {
+    method: "POST",
+    body: JSON.stringify({ source, confirmed: true })
+  }),
+  updateSkill: (id: string) => request<{ skill: SkillView; changed: boolean; replacedFiles: number }>(`/api/skills/${encodeURIComponent(id)}/update`, { method: "POST" }),
+  deleteSkill: (id: string) => request<{ skill: SkillView; removedFiles: boolean }>(`/api/skills/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  useSkill: (id: string) => request<{ skill: SkillView; prompt: string }>(`/api/skills/${encodeURIComponent(id)}/use`, {
+    method: "POST",
+    body: JSON.stringify({})
+  }),
   ontologyEntities: (search?: string, kind?: string) => request<{ entities: OntologyEntityView[] }>(
     "/api/ontology/entities" + query({ query: search, kind })
   ),

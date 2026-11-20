@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent, type ReactNode } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import { ChatMailDraft } from "../components/ChatMailDraft.tsx";
@@ -41,7 +41,8 @@ import type {
   TaskFollowUpMode,
   TaskListItem,
   TaskProposalRecord,
-  TaskTurn
+  TaskTurn,
+  SkillView
 } from "../lib/types.ts";
 
 const PENDING_SETTINGS: ConversationSettings = {
@@ -85,6 +86,10 @@ export function ChatPage() {
   const [pendingProjectId, setPendingProjectId] = useState<string | null>(() => getChatSelection().pendingProjectId);
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [selectedSkillId, setSelectedSkillId] = useState<string | null>(() => new URLSearchParams(location.search).get("skill"));
+  const [slashIndex, setSlashIndex] = useState(0);
+  const [skillInstallRequest, setSkillInstallRequest] = useState<{ source: string } | null>(null);
+  const [skillNotice, setSkillNotice] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const optionsRef = useRef<HTMLDivElement | null>(null);
@@ -103,9 +108,30 @@ export function ChatPage() {
     retry: false
   });
   const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health });
+  const skillsQuery = useQuery({ queryKey: ["skills"], queryFn: api.skills, staleTime: 30_000 });
   const executorsQuery = useQuery({ queryKey: ["executors"], queryFn: api.executors, refetchInterval: 20_000 });
   const conversationDefaultsQuery = useQuery({ queryKey: ["conversationDefaults"], queryFn: api.conversationDefaults, staleTime: Infinity });
   const conversations = conversationsQuery.data?.conversations ?? [];
+  const skills = skillsQuery.data?.skills ?? [];
+  const selectedSkill = skills.find((skill) => skill.id === selectedSkillId) ?? null;
+  const slashTerm = input.startsWith("/") && !input.startsWith("//") ? input.slice(1).trim().toLocaleLowerCase() : null;
+  const slashMatches = slashTerm === null ? [] : skills.filter((skill) => {
+    if (!slashTerm) return true;
+    return `${skill.name} ${skill.manifest.description} ${skill.id}`.toLocaleLowerCase().includes(slashTerm);
+  }).slice(0, 8);
+  const slashOpen = slashTerm !== null && !selectedSkill && !sending;
+
+  const installSkillMutation = useMutation({
+    mutationFn: api.installSkill,
+    onSuccess: (result) => {
+      setSkillInstallRequest(null);
+      setSkillNotice(`已安装「${result.skill.name}」。输入 / 就可以使用。`);
+      void queryClient.invalidateQueries({ queryKey: ["skills"] });
+      void queryClient.invalidateQueries({ queryKey: ["library-tree"] });
+      void queryClient.invalidateQueries({ queryKey: ["library-status"] });
+    },
+    onError: (error) => setSkillNotice(error instanceof Error ? error.message : "安装失败")
+  });
   const tasks = tasksQuery.data?.tasks ?? [];
   const tasksByConversation = new Map<string, TaskListItem[]>();
   for (const task of tasks) {
@@ -208,6 +234,16 @@ export function ChatPage() {
   useEffect(() => {
     if (!canSteerFollowUp && followUpMode === "steer") setFollowUpMode("queue");
   }, [canSteerFollowUp, followUpMode]);
+
+  useEffect(() => {
+    setSlashIndex(0);
+  }, [input]);
+
+  useEffect(() => {
+    if (!selectedSkillId) return;
+    if (skillsQuery.isLoading) return;
+    if (!skills.some((skill) => skill.id === selectedSkillId)) setSelectedSkillId(null);
+  }, [selectedSkillId, skills, skillsQuery.isLoading]);
 
   useEffect(() => {
     const element = composerRef.current;
@@ -388,8 +424,10 @@ export function ChatPage() {
       return;
     }
     const sentAttachments = attachments;
+    const sentSkillId = selectedSkillId;
     setInput("");
     setAttachments([]);
+    if (sentSkillId) setSelectedSkillId(null);
     setStreaming("");
     setReasoning("");
     setRouting(null);
@@ -407,6 +445,7 @@ export function ChatPage() {
           ...(conversationId ? { conversationId } : {}),
           ...(!conversationId && pendingProjectId ? { projectId: pendingProjectId } : {}),
           ...(text ? { message: text } : {}),
+          ...(sentSkillId ? { skillId: sentSkillId } : {}),
           ...(sentAttachments.length > 0 ? { attachments: sentAttachments } : {}),
           ...(!conversationId ? { settings: conversationSettings } : {})
         },
@@ -438,6 +477,10 @@ export function ChatPage() {
               const payload = data as { proposal: TaskProposalRecord; message: ChatMessageRecord };
               setProposals((prev) => (prev.some((proposal) => proposal.id === payload.proposal.id) ? prev : [...prev, payload.proposal]));
               setMessages((prev) => (prev.some((message) => message.id === payload.message.id) ? prev : [...prev, payload.message]));
+            } else if (event === "skill_install") {
+              const payload = data as { source: string };
+              setSkillInstallRequest({ source: payload.source });
+              setSkillNotice(null);
             } else if (event === "done") {
               const message = data as ChatMessageRecord;
               setStreaming("");
@@ -453,6 +496,7 @@ export function ChatPage() {
       if (sendError instanceof ApiError && sendError.status === 404) {
         resetConversationView(null);
         setInput(text);
+        if (sentSkillId) setSelectedSkillId(sentSkillId);
         setError("原对话已失效，已为你开始新对话，请重新发送。");
       } else if (!controller.signal.aborted) {
         setError(sendError instanceof Error ? sendError.message : "发送失败");
@@ -471,9 +515,33 @@ export function ChatPage() {
   function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+      if (slashOpen && slashMatches.length > 0) {
+        event.preventDefault();
+        const match = slashMatches[Math.min(slashIndex, slashMatches.length - 1)];
+        if (match) chooseSkill(match.id);
+        return;
+      }
       event.preventDefault();
       void send();
+      return;
     }
+    if (slashOpen && (event.key === "ArrowDown" || event.key === "ArrowUp") && slashMatches.length > 0) {
+      event.preventDefault();
+      const offset = event.key === "ArrowDown" ? 1 : -1;
+      setSlashIndex((current) => (current + offset + slashMatches.length) % slashMatches.length);
+      return;
+    }
+    if (slashOpen && event.key === "Escape") {
+      event.preventDefault();
+      setInput("");
+    }
+  }
+
+  function chooseSkill(id: string) {
+    setSelectedSkillId(id);
+    setInput("");
+    setSlashIndex(0);
+    requestAnimationFrame(() => composerRef.current?.focus());
   }
 
   const configured = healthQuery.data?.chatModel.configured ?? true;
@@ -654,6 +722,15 @@ export function ChatPage() {
                 </div>
               )}
             </div>
+            {selectedSkill && (
+              <span className="composer-skill-chip" title={selectedSkill.manifest.description}>
+                <Sparkles size={14} />
+                <span>使用技能：{selectedSkill.name}</span>
+                <button type="button" onClick={() => setSelectedSkillId(null)} aria-label="取消使用技能">
+                  <X size={12} />
+                </button>
+              </span>
+            )}
             {followUpTasks.length > 0 && (
               <div className="composer-followup">
                 <label className={`followup-chip ${followUpTarget ? "active" : ""}`} title="把这条消息补充到已有任务，而不是新建任务">
@@ -698,6 +775,35 @@ export function ChatPage() {
               <button className="icon-button" onClick={() => setFollowUpNotice(null)} aria-label="关闭提示"><X size={13} /></button>
             </div>
           )}
+          {skillNotice && (
+            <div className="composer-skill-notice">
+              <Sparkles size={14} />
+              <span>{skillNotice}</span>
+              <button className="icon-button" onClick={() => setSkillNotice(null)} aria-label="关闭提示"><X size={13} /></button>
+            </div>
+          )}
+          {skillInstallRequest && (
+            <div className="composer-skill-install">
+              <div>
+                <strong>安装这个技能？</strong>
+                <span title={skillInstallRequest.source}>{skillInstallRequest.source}</span>
+              </div>
+              <div className="composer-skill-install-actions">
+                <button type="button" className="ghost-button" onClick={() => setSkillInstallRequest(null)} disabled={installSkillMutation.isPending}>
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => installSkillMutation.mutate(skillInstallRequest.source)}
+                  disabled={installSkillMutation.isPending}
+                >
+                  {installSkillMutation.isPending ? <Loader2 size={14} className="spin" /> : <Check size={14} />}
+                  确认安装
+                </button>
+              </div>
+            </div>
+          )}
           {error && (
             <div className="composer-error">
               <span>{error}</span>
@@ -719,6 +825,29 @@ export function ChatPage() {
                     <X size={12} />
                   </button>
                 </span>
+              ))}
+            </div>
+          )}
+          {slashOpen && (
+            <div className="composer-slash-menu" role="listbox" aria-label="选择技能">
+              {slashMatches.length === 0 ? (
+                <p className="composer-slash-empty">还没有匹配的技能。可以到资料库安装。</p>
+              ) : slashMatches.map((skill, index) => (
+                <button
+                  key={skill.id}
+                  type="button"
+                  role="option"
+                  aria-selected={index === Math.min(slashIndex, slashMatches.length - 1)}
+                  className={`composer-slash-item ${index === Math.min(slashIndex, slashMatches.length - 1) ? "active" : ""}`}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => chooseSkill(skill.id)}
+                >
+                  <Sparkles size={15} />
+                  <span>
+                    <strong>{skill.name}</strong>
+                    <small>{skill.manifest.description || "已安装的技能"}</small>
+                  </span>
+                </button>
               ))}
             </div>
           )}

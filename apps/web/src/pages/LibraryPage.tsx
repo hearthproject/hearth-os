@@ -19,7 +19,8 @@ import {
   X
 } from "lucide-react";
 import { useState, type FormEvent, type ReactNode } from "react";
-import type { LibraryNode, LibrarySearchHit, LibraryTreeNode } from "@hearth/core";
+import { useNavigate } from "react-router-dom";
+import type { LibraryNode, LibrarySearchHit, LibraryTreeNode, SkillView } from "@hearth/core";
 import { api } from "../lib/api.ts";
 
 const KIND_LABELS: Record<LibraryNode["kind"], string> = {
@@ -36,10 +37,12 @@ const KIND_LABELS: Record<LibraryNode["kind"], string> = {
 
 export function LibraryPage() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [trashOpen, setTrashOpen] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const statusQuery = useQuery({ queryKey: ["library-status"], queryFn: api.libraryStatus, refetchInterval: 30_000 });
   const treeQuery = useQuery({ queryKey: ["library-tree"], queryFn: () => api.libraryTree(2) });
@@ -49,6 +52,15 @@ export function LibraryPage() {
     enabled: Boolean(selectedId)
   });
   const trashQuery = useQuery({ queryKey: ["library-trash"], queryFn: api.libraryTrash, enabled: trashOpen });
+  const details = detailsQuery.data;
+  const selectedSkillId = details?.node.kind === "skill" && typeof details.node.metadata.skillId === "string"
+    ? details.node.metadata.skillId
+    : null;
+  const skillQuery = useQuery({
+    queryKey: ["skill", selectedSkillId],
+    queryFn: () => api.skill(selectedSkillId!),
+    enabled: Boolean(selectedSkillId)
+  });
 
   const searchMutation = useMutation({
     mutationFn: (value: string) => api.librarySearch(value),
@@ -73,6 +85,35 @@ export function LibraryPage() {
     onSuccess: () => invalidateLibrary(queryClient)
   });
 
+  const installSkillMutation = useMutation({
+    mutationFn: api.installSkill,
+    onSuccess: (result) => {
+      setNotice(`已安装「${result.skill.name}」`);
+      invalidateLibrary(queryClient);
+      void queryClient.invalidateQueries({ queryKey: ["skills"] });
+    }
+  });
+
+  const updateSkillMutation = useMutation({
+    mutationFn: api.updateSkill,
+    onSuccess: (result) => {
+      setNotice(result.changed ? `已更新「${result.skill.name}」` : `「${result.skill.name}」已经是最新版本`);
+      invalidateLibrary(queryClient);
+      void queryClient.invalidateQueries({ queryKey: ["skills"] });
+      void queryClient.invalidateQueries({ queryKey: ["skill", result.skill.id] });
+    }
+  });
+
+  const deleteSkillMutation = useMutation({
+    mutationFn: api.deleteSkill,
+    onSuccess: (result) => {
+      setSelectedId(null);
+      setNotice(`已删除「${result.skill.name}」`);
+      invalidateLibrary(queryClient);
+      void queryClient.invalidateQueries({ queryKey: ["skills"] });
+    }
+  });
+
   function submitSearch(event: FormEvent) {
     event.preventDefault();
     const clean = query.trim();
@@ -95,7 +136,22 @@ export function LibraryPage() {
     if (path?.trim()) addRootMutation.mutate(path.trim());
   }
 
+  function installSkill() {
+    const source = window.prompt("粘贴 GitHub 技能地址，或输入本地文件夹路径：");
+    const clean = source?.trim();
+    if (!clean) return;
+    if (window.confirm(`安装“${clean}”？\n\n安装后会复制到 Hearth 的技能目录，之后可在这里查看和手动更新。`)) {
+      installSkillMutation.mutate(clean);
+    }
+  }
+
   function removeNode(node: LibraryNode) {
+    if (node.kind === "skill" && typeof node.metadata.skillId === "string") {
+      if (window.confirm("删除这个技能？Hearth 复制到本机的技能文件也会一起删除。")) {
+        deleteSkillMutation.mutate(node.metadata.skillId);
+      }
+      return;
+    }
     const message = node.kind === "memory"
       ? "移到回收站后，Hearth 将不再参考这条记忆。30 天内可以恢复，确定吗？"
       : "移到回收站？原文件不会被删除，30 天内可以恢复。";
@@ -103,7 +159,6 @@ export function LibraryPage() {
   }
 
   const results = searchMutation.data?.hits ?? null;
-  const details = detailsQuery.data;
   const rootNodes = treeQuery.data?.nodes ?? [];
   const total = statusQuery.data?.nodeCount ?? 0;
 
@@ -118,6 +173,9 @@ export function LibraryPage() {
           <span className="library-total">{total > 0 ? `${total} 份资料` : "还没有资料"}</span>
           <button className="ghost-button" onClick={addFolder} disabled={addRootMutation.isPending}>
             {addRootMutation.isPending ? <Loader2 size={15} className="spin" /> : <Plus size={15} />} 添加文件夹
+          </button>
+          <button className="ghost-button" onClick={installSkill} disabled={installSkillMutation.isPending}>
+            {installSkillMutation.isPending ? <Loader2 size={15} className="spin" /> : <Sparkles size={15} />} 安装技能
           </button>
           <button className="ghost-button" onClick={() => refreshMutation.mutate()} disabled={refreshMutation.isPending}>
             {refreshMutation.isPending ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />} 刷新资料
@@ -143,6 +201,15 @@ export function LibraryPage() {
       {addRootMutation.isError && <p className="form-error">{addRootMutation.error.message}</p>}
       {deleteMutation.isError && <p className="form-error">{deleteMutation.error.message}</p>}
       {refreshMutation.isError && <p className="form-error">{refreshMutation.error.message}</p>}
+      {installSkillMutation.isError && <p className="form-error">{installSkillMutation.error.message}</p>}
+      {updateSkillMutation.isError && <p className="form-error">{updateSkillMutation.error.message}</p>}
+      {deleteSkillMutation.isError && <p className="form-error">{deleteSkillMutation.error.message}</p>}
+      {notice && (
+        <div className="library-notice">
+          <span>{notice}</span>
+          <button className="icon-button" onClick={() => setNotice(null)} aria-label="关闭"><X size={13} /></button>
+        </div>
+      )}
 
       <div className="library-layout">
         <aside className="library-pane library-browser">
@@ -209,9 +276,14 @@ export function LibraryPage() {
               node={details.node}
               content={details.document?.content ?? null}
               children={details.children}
-              deleting={deleteMutation.isPending}
+              deleting={deleteMutation.isPending || deleteSkillMutation.isPending}
+              skill={skillQuery.data?.skill ?? null}
+              skillLoading={skillQuery.isLoading}
+              updatingSkill={updateSkillMutation.isPending}
               onSelect={setSelectedId}
               onDelete={() => removeNode(details.node)}
+              onUpdateSkill={(skillId) => updateSkillMutation.mutate(skillId)}
+              onUseSkill={(skillId) => navigate(`/chat?skill=${encodeURIComponent(skillId)}`)}
             />
           )}
         </section>
@@ -351,17 +423,33 @@ function NodePreview({
   content,
   children,
   deleting,
+  skill,
+  skillLoading,
+  updatingSkill,
   onSelect,
-  onDelete
+  onDelete,
+  onUpdateSkill,
+  onUseSkill
 }: {
   node: LibraryNode;
   content: string | null;
   children: LibraryNode[];
   deleting: boolean;
+  skill: SkillView | null;
+  skillLoading: boolean;
+  updatingSkill: boolean;
   onSelect: (id: string) => void;
   onDelete: () => void;
+  onUpdateSkill: (id: string) => void;
+  onUseSkill: (id: string) => void;
 }) {
   const Icon = iconFor(node.kind);
+  const summaryQuery = useQuery({
+    queryKey: ["library-summary", node.id],
+    queryFn: () => api.librarySummarizeNode(node.id),
+    enabled: node.kind === "root" || node.kind === "folder",
+    staleTime: 60_000
+  });
   return (
     <div className="library-document">
       <div className="library-document-head">
@@ -393,12 +481,71 @@ function NodePreview({
         </div>
       )}
 
+      {(node.kind === "root" || node.kind === "folder") && (
+        <section className="library-summary">
+          <strong>摘要</strong>
+          {summaryQuery.isLoading ? (
+            <span>正在整理…</span>
+          ) : summaryQuery.isError ? (
+            <span>暂时无法生成摘要。</span>
+          ) : (
+            <p>{summaryQuery.data?.summary.content}</p>
+          )}
+        </section>
+      )}
+
+      {node.kind === "skill" && (
+        <SkillDetails
+          skill={skill}
+          loading={skillLoading}
+          updating={updatingSkill}
+          onUpdate={onUpdateSkill}
+          onUse={onUseSkill}
+        />
+      )}
+
       {content ? (
         <article className="library-document-body">{content}</article>
       ) : children.length === 0 ? (
         <div className="library-centered small"><FileText size={24} /><span>这份资料暂时没有可预览的文字。</span></div>
       ) : null}
     </div>
+  );
+}
+
+function SkillDetails({
+  skill,
+  loading,
+  updating,
+  onUpdate,
+  onUse
+}: {
+  skill: SkillView | null;
+  loading: boolean;
+  updating: boolean;
+  onUpdate: (id: string) => void;
+  onUse: (id: string) => void;
+}) {
+  if (loading) return <div className="library-skill-card"><Loader2 size={16} className="spin" /><span>正在打开技能…</span></div>;
+  if (!skill) return <div className="library-skill-card"><span>这个技能暂时无法打开。</span></div>;
+  return (
+    <section className="library-skill-card">
+      <div>
+        <strong>{skill.name}</strong>
+        <span>{skill.manifest.description}</span>
+      </div>
+      <dl className="library-skill-meta">
+        <div><dt>版本</dt><dd>{skill.version}</dd></div>
+        <div><dt>更新时间</dt><dd>{new Date(skill.updatedAt).toLocaleDateString("zh-CN")}</dd></div>
+        <div><dt>位置</dt><dd>{skill.path}</dd></div>
+      </dl>
+      <div className="library-skill-actions">
+        <button className="primary-button" onClick={() => onUse(skill.id)}><Sparkles size={15} /> 在对话中使用</button>
+        <button className="ghost-button" onClick={() => onUpdate(skill.id)} disabled={updating}>
+          {updating ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />} 手动更新
+        </button>
+      </div>
+    </section>
   );
 }
 
