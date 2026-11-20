@@ -46,7 +46,9 @@ import { wantsCodeExecution, wantsGithubAccess, wantsScreenshot } from "./task-i
 import { supportsToolCalling, streamAgentTurn } from "./model-agent.ts";
 import { completeChat } from "./model-client.ts";
 import { WindowsAclSandboxProvider } from "./native-sandbox.ts";
-import { HEARTH_ROOT } from "./config.ts";
+import { DOSSIER_DIR, HEARTH_ROOT, WORKSTYLE_PATH } from "./config.ts";
+import { DossierStore, dossierPromptBlock } from "./dossier.ts";
+import { WorkstyleStore, workstylePromptBlock } from "./workstyle.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import type { PreparedWorkspace } from "./workspace.ts";
 
@@ -161,12 +163,20 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
   const availableTools = toolsForRun.map((tool) => tool.definition.name);
   const goalBlock = coding && !options.isSubagent ? goalContinuationPrompt(options.prepared.root) : null;
   const memoryIndex = coding ? memoryIndexBlock(options.prepared.root) : null;
+  const projectDossier = coding && !options.isSubagent && options.task.projectId
+    ? dossierPromptBlock(new DossierStore(DOSSIER_DIR).read(options.task.projectId))
+    : null;
+  const workstyleBlock = coding && !options.isSubagent
+    ? workstylePromptBlock(new WorkstyleStore(WORKSTYLE_PATH).read())
+    : null;
   const systemPrompt = coding
     ? codingSystemPrompt({
         workspaceRoot: options.prepared.root,
         outDir: options.prepared.outDir,
         permissions,
         ...(memoryIndex ? { memoryIndex } : {}),
+        ...(projectDossier ? { dossier: projectDossier } : {}),
+        ...(workstyleBlock ? { workstyle: workstyleBlock } : {}),
         mode: options.mode ?? "build",
         availableTools,
         extraInstructions: [

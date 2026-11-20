@@ -40,6 +40,8 @@ export const BROWSER_PROFILE_DIR = join(BROWSER_DIR, "profile");
 export const BROWSER_EVIDENCE_DIR = join(BROWSER_DIR, "evidence");
 export const BROWSER_RECIPE_DIR = join(BROWSER_DIR, "recipes");
 export const BROWSER_SETTINGS_PATH = join(BROWSER_DIR, "settings.json");
+export const DOSSIER_DIR = join(DATA_DIR, "dossiers");
+export const WORKSTYLE_PATH = join(DATA_DIR, "profile", "WORKSTYLE.md");
 export const BROWSER_BRIDGE_PORT = Number(process.env.HEARTH_BROWSER_BRIDGE_PORT ?? 4318);
 export const BROWSER_ENABLED = (process.env.HEARTH_BROWSER ?? "1") !== "0";
 export const BROWSER_BRIDGE_ENABLED = (process.env.HEARTH_BROWSER_BRIDGE ?? "1") === "1";

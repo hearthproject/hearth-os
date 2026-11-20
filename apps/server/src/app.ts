@@ -10,7 +10,7 @@ import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DELEGATION_WORKSPACE_POLICIES, DEVI
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { loadCodexProfile, runCodex } from "@hearth/codex-executor";
 import { z } from "zod";
-import { ARTIFACT_DIR, ATTACHMENT_DIR, BACKUP_DIR, BROWSER_SETTINGS_PATH, CODEX_HOME_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, DSH_HOME_DIR, EXECUTOR_HOME_DIR, EXECUTOR_SETTINGS_PATH, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST, WORKSPACE_DIR } from "./config.ts";
+import { ARTIFACT_DIR, ATTACHMENT_DIR, BACKUP_DIR, BROWSER_SETTINGS_PATH, CODEX_HOME_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, DOSSIER_DIR, DSH_HOME_DIR, EXECUTOR_HOME_DIR, EXECUTOR_SETTINGS_PATH, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST, WORKSPACE_DIR, WORKSTYLE_PATH } from "./config.ts";
 import { BrowserSettingsStore } from "./browser-settings.ts";
 import { registerChatRoutes } from "./chat-routes.ts";
 import { ReconcileError, ReconcileService } from "./reconcile.ts";
@@ -51,6 +51,8 @@ import { EmailService, MailError, type MailImapFactory, type MailSmtpFactory } f
 import { DesktopError, DesktopService } from "./desktop.ts";
 import { MemoryError, MemoryService } from "./memory.ts";
 import { ProjectError, ProjectService } from "./projects.ts";
+import { DossierError, DossierStore } from "./dossier.ts";
+import { WorkstyleError, WorkstyleStore } from "./workstyle.ts";
 import { TaskWorktreeService, WorktreeError } from "./worktrees.ts";
 import { BackgroundToolError, BackgroundToolService } from "./background-tools.ts";
 import { WebSearchError, WebSearchService } from "./web-search.ts";
@@ -680,6 +682,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
   }));
   const memory = new MemoryService(service);
   const projects = new ProjectService(store);
+  const dossiers = new DossierStore(DOSSIER_DIR);
+  const workstyle = new WorkstyleStore(WORKSTYLE_PATH);
   const security = new SecurityService(service);
   const leases = new TaskLeaseService(service);
   const sandbox = new SandboxService();
@@ -1182,6 +1186,45 @@ export async function buildServer(options: BuildServerOptions = {}) {
       return sendProjectError(reply, error);
     }
   });
+
+  app.get<{ Params: { id: string } }>("/api/projects/:id/dossier", async (request, reply) => {
+    try {
+      projects.get(request.params.id);
+      return { dossier: dossiers.read(request.params.id) };
+    } catch (error) {
+      return sendProjectError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/projects/:id/dossier/compile", async (request, reply) => {
+    try {
+      const project = projects.get(request.params.id);
+      const tasks = store.listTasks().filter((task) => task.projectId === project.id);
+      return { dossier: dossiers.compile({ projectId: project.id, projectName: project.name, projectPath: project.path, tasks }) };
+    } catch (error) {
+      if (error instanceof DossierError) {
+        return reply.code(400).send({ error: error.code, message: error.message });
+      }
+      return sendProjectError(reply, error);
+    }
+  });
+
+  app.get("/api/profile/workstyle", async () => ({ workstyle: workstyle.read() }));
+
+  app.put("/api/profile/workstyle", async (request, reply) => {
+    const parsed = z.object({ content: z.string().min(1).max(20_000) }).safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_WORKSTYLE", message: "工作方式内容不正确" });
+    try {
+      return { workstyle: workstyle.write(parsed.data.content) };
+    } catch (error) {
+      if (error instanceof WorkstyleError) {
+        return reply.code(400).send({ error: error.code, message: error.message });
+      }
+      throw error;
+    }
+  });
+
+  app.post("/api/profile/workstyle/reset", async () => ({ workstyle: workstyle.reset() }));
 
   app.patch("/api/web-search/settings", async (request, reply) => {
     const parsed = z.object({

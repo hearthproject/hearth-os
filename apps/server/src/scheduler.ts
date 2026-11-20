@@ -18,7 +18,8 @@ import type { ApprovalRequest, ApprovalManager, PendingToolApproval, ToolApprova
 import { actionDigest, decideActionPolicy, resolveAction, type ActionFileTarget, type ActionProposal, type PermissionMode, type ResolvedAction } from "./action-resolver.ts";
 import { createFileArtifact, missingExpectedOutputs, publishArtifacts } from "./artifacts.ts";
 import { diffWorkspace, formatChangeManifest, snapshotWorkspace, type WorkspaceSnapshot } from "./change-manifest.ts";
-import { BROWSER_ENABLED, BROWSER_EVIDENCE_DIR, BROWSER_PROFILE_DIR, BROWSER_RECIPE_DIR, BROWSER_SETTINGS_PATH, CONTEXT_BLOB_DIR, EXECUTOR_SETTINGS_PATH, GIT_CACHE_DIR, MODEL_SETTINGS_PATH, REPO_ROOT, SOURCE_CONTENT_DIR, WORKSPACE_DIR } from "./config.ts";
+import { BROWSER_ENABLED, BROWSER_EVIDENCE_DIR, BROWSER_PROFILE_DIR, BROWSER_RECIPE_DIR, BROWSER_SETTINGS_PATH, CONTEXT_BLOB_DIR, DOSSIER_DIR, EXECUTOR_SETTINGS_PATH, GIT_CACHE_DIR, MODEL_SETTINGS_PATH, REPO_ROOT, SOURCE_CONTENT_DIR, WORKSPACE_DIR } from "./config.ts";
+import { DossierStore } from "./dossier.ts";
 import { BrowserEvidenceStore } from "./browser-evidence.ts";
 import { BrowserService } from "./browser-service.ts";
 import { BrowserSessionManager } from "./browser-session.ts";
@@ -1178,6 +1179,7 @@ export class HearthScheduler {
         if (result.status !== "failed") {
           if (handoff && result.status !== "cancelled" && result.status !== "waiting_input") this.context.updateHandoff(handoff.id, { status: "completed", toRunId: runId });
           this.refreshTaskSummary(taskId);
+          if (result.status === "completed") this.refreshProjectDossier(taskId);
           if (result.status === "completed" && result.queuedFollowUp) {
             previousRun = result.run;
             pendingInput = "";
@@ -2678,6 +2680,23 @@ export class HearthScheduler {
       });
     } catch {
       // Chat notice is best effort.
+    }
+  }
+
+  private refreshProjectDossier(taskId: string): void {
+    const task = this.service.store.getTask(taskId);
+    if (!task?.projectId) return;
+    const project = this.service.store.getLocalProject(task.projectId);
+    if (!project) return;
+    try {
+      new DossierStore(DOSSIER_DIR).compile({
+        projectId: project.id,
+        projectName: project.name,
+        projectPath: project.path,
+        tasks: this.service.store.listTasks().filter((item) => item.projectId === project.id)
+      });
+    } catch {
+      // Dossier refresh is best effort and must never change the task outcome.
     }
   }
 

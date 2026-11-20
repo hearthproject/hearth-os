@@ -11,7 +11,7 @@ export const CODING_REMINDERS: AgentRuntimeReminders = {
 };
 
 export interface CodingPromptSection {
-  id: "rules" | "tools" | "environment" | "memory" | "instructions" | "mode" | "skills" | "extra";
+  id: "rules" | "tools" | "environment" | "memory" | "dossier" | "workstyle" | "instructions" | "mode" | "skills" | "extra";
   content: string;
 }
 
@@ -20,6 +20,8 @@ export interface CodingPromptOptions {
   outDir: string;
   permissions?: TaskPermissions;
   memoryIndex?: string;
+  dossier?: string;
+  workstyle?: string;
   mode?: "build" | "plan";
   extraInstructions?: string[];
   availableTools?: string[];
@@ -132,6 +134,8 @@ export function codingPromptSections(options: CodingPromptOptions): CodingPrompt
     { id: "environment", content: env }
   ];
   if (options.memoryIndex?.trim()) sections.push({ id: "memory", content: `## Repository memory\n${options.memoryIndex.trim()}` });
+  if (options.dossier?.trim()) sections.push({ id: "dossier", content: options.dossier.trim() });
+  if (options.workstyle?.trim()) sections.push({ id: "workstyle", content: options.workstyle.trim() });
   sections.push(
     { id: "instructions", content: instructionsBlock(instructions) },
     {
