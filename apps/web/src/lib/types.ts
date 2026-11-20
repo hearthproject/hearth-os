@@ -54,14 +54,6 @@ import type {
   MemorySensitivity,
   MemorySettings,
   MemoryVersion,
-  MethodApplication,
-  MethodCandidate,
-  MethodEvaluation,
-  MethodMetrics,
-  MethodSettings,
-  MethodStatus,
-  MethodTrial,
-  MethodVerdict,
   ModelProviderPreset,
   ModelProfilePatch,
   ModelProfileView,
@@ -197,14 +189,6 @@ export type {
   MemorySensitivity,
   MemorySettings,
   MemoryVersion,
-  MethodApplication,
-  MethodCandidate,
-  MethodEvaluation,
-  MethodMetrics,
-  MethodSettings,
-  MethodStatus,
-  MethodTrial,
-  MethodVerdict,
   ModelProviderPreset,
   ModelProfilePatch,
   ModelProfileView,
@@ -774,26 +758,6 @@ export interface CorrectMemoryRequest {
   validUntil?: string | null;
   reason: string;
 }
-
-export interface MethodSnapshot {
-  methods: MethodCandidate[];
-  evaluations: MethodEvaluation[];
-  trials: MethodTrial[];
-  applications: MethodApplication[];
-  settings: MethodSettings;
-}
-
-export interface CreateMethodRequest {
-  name: string;
-  summary: string;
-  applicability: string;
-  steps: string[];
-  sourceTaskIds: string[];
-  templateId?: string | null;
-  allowedCapabilities?: string[];
-  guardrails?: string[];
-}
-
 
 export interface OntologyEntityView extends EntityRecord {
   states: EntityStateRecord[];

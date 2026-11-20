@@ -15,7 +15,6 @@ import { HearthScheduler } from "./scheduler.ts";
 import { HearthService } from "./service.ts";
 import { DelegationService } from "./delegation.ts";
 import { MemoryService } from "./memory.ts";
-import { MethodService } from "./methods.ts";
 import { TaskLeaseService } from "./leases.ts";
 import { SandboxService } from "./sandbox.ts";
 import type { ModelSettings } from "./model-settings.ts";
@@ -949,64 +948,6 @@ describe("Hearth scheduler", () => {
     expect(recovered.error?.kind).toBe("interrupted");
     expect(store?.getRun(runId)?.status).toBe("failed");
     expect(store?.getRun(runId)?.failure?.recoverable).toBe(true);
-  });
-
-  it("injects a pinned method and records its application", async () => {
-    const service = setup();
-    const source = service.createTask({ templateId: "T01" });
-    service.updateTask(source.id, { status: "running", nextAction: "执行中" });
-    service.updateTask(source.id, { status: "completed", nextAction: "完成" });
-    const methods = new MethodService(service);
-    const candidate = methods.generateFromTask(source.id);
-    const modelSettingsPath = configureModel();
-    let prompt = "";
-    const nativeRunner: NativeRunner = async (options) => {
-      prompt = options.prompt;
-      writeFileSync(join(options.prepared.outDir, "meeting-notes.md"), "# 方法结果\n");
-      return nativeResult("方法执行完成");
-    };
-    scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath });
-    scheduler.start();
-
-    const task = service.createTask({
-      templateId: "T01",
-      methodId: candidate.id,
-      methodVersion: candidate.version,
-      executorId: "native",
-      expectedOutputs: ["meeting-notes.md"]
-    });
-    await waitForStatus(service, task.id, "completed");
-    await delay(50);
-
-    expect(prompt).toContain("可复用方法（不可信流程建议）");
-    expect(prompt).toContain(candidate.name);
-    expect(store?.listMethodApplications({ taskId: task.id })).toHaveLength(1);
-    expect(store?.listContextItems(task.id, { limit: 50 }).items.some((item) => item.kind === "method")).toBe(true);
-    expect(store?.listMethodTrials(candidate.id)).toHaveLength(1);
-  });
-
-  it("learns a new candidate from a completed task when auto-learn is enabled", async () => {
-    const service = setup();
-    const modelSettingsPath = configureModel();
-    const nativeRunner: NativeRunner = async (options) => {
-      writeFileSync(join(options.prepared.outDir, "result.md"), "# 学习结果\n");
-      return nativeResult("学习执行完成");
-    };
-    scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath, autoLearn: true });
-    scheduler.start();
-
-    const task = service.createTask({
-      title: "自动学习任务",
-      goal: "完成并沉淀经验",
-      executorId: "native",
-      expectedOutputs: ["result.md"]
-    });
-    await waitForStatus(service, task.id, "completed");
-
-    const deadline = Date.now() + 2_000;
-    while (Date.now() < deadline && (store?.listMethodCandidates().length ?? 0) === 0) await delay(20);
-    expect(store?.listMethodCandidates().length).toBeGreaterThan(0);
-    expect(store?.listMethodCandidates()[0]?.sourceTaskIds).toEqual([task.id]);
   });
 
   it("stops at a pending approval before any GitHub write", async () => {
@@ -2100,7 +2041,6 @@ describe("Hearth scheduler", () => {
       executorHealth?: ExecutorHealthProvider;
       deepseekRunner?: (options: DeepSeekHarnessRunOptions) => Promise<DeepSeekHarnessRunResult>;
       modelSettingsForExecutor?: (executorId: ExecutorId) => ModelSettings | null;
-      autoLearn?: boolean;
       delegations?: DelegationService;
       completionValidators?: Record<string, GoalValidatorRunner>;
       mcpServers?: McpServerService;

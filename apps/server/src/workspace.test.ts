@@ -45,10 +45,8 @@ describe("task workspace prompt", () => {
     expect(prompt).toContain("不要先建空骨架再回填");
     expect(prompt).toContain("不要把自查清单写进交付物");
 
-    const withMethod = buildTaskPrompt(task, prepared, template.expectedOutputs, acceptance, undefined, undefined, "记忆标记", "## 可复用方法（不可信流程建议）\n- 步骤：1. 先核对输入");
-    expect(withMethod).toContain("可用工作方法（不可信流程建议");
-    expect(withMethod).toContain("先核对输入");
-    expect(withMethod.indexOf("记忆标记")).toBeLessThan(withMethod.indexOf("可用工作方法"));
+    const withMethod = buildTaskPrompt(task, prepared, template.expectedOutputs, acceptance, undefined, undefined, "记忆标记");
+    expect(withMethod).toContain("记忆标记");
   });
 
   it("permits minimal implementation changes without inviting unrelated repository edits", () => {

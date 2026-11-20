@@ -53,10 +53,8 @@ import type {
   McpServerView,
   MaintenanceSnapshot,
   CreateMemoryRequest,
-  CreateMethodRequest,
   CreateSyncPeerRequest,
   CorrectMemoryRequest,
-  MethodSnapshot,
   MemorySnapshot,
   ModelListResponse,
   ModelProfilePatch,
@@ -416,44 +414,6 @@ export const api = {
       body: JSON.stringify(input)
     }),
   exportMemories: () => { window.location.assign("/api/memory/export"); },
-  methods: () => request<MethodSnapshot>("/api/methods"),
-  generateMethod: (input: { taskId: string; name?: string; summary?: string }) => request<MethodSnapshot["methods"][number]>("/api/methods/generate", {
-    method: "POST",
-    body: JSON.stringify(input)
-  }),
-  createMethod: (input: CreateMethodRequest) => request<MethodSnapshot["methods"][number]>("/api/methods", {
-    method: "POST",
-    body: JSON.stringify(input)
-  }),
-  recordMethodTrial: (id: string, taskId: string) => request<MethodSnapshot["methods"][number]>("/api/methods/" + encodeURIComponent(id) + "/trials", {
-    method: "POST",
-    body: JSON.stringify({ taskId })
-  }),
-  evaluateMethod: (id: string, input: { baselineTaskIds: string[]; trialTaskIds: string[]; notes?: string }) => request<MethodSnapshot["evaluations"][number]>("/api/methods/" + encodeURIComponent(id) + "/evaluate", {
-    method: "POST",
-    body: JSON.stringify(input)
-  }),
-  promoteMethod: (id: string) => request<MethodSnapshot["methods"][number]>("/api/methods/" + encodeURIComponent(id) + "/promote", { method: "POST" }),
-  rollbackMethod: (id: string, reason: string) => request<MethodSnapshot["methods"][number]>("/api/methods/" + encodeURIComponent(id) + "/rollback", {
-    method: "POST",
-    body: JSON.stringify({ reason })
-  }),
-  rejectMethod: (id: string, reason?: string) => request<MethodSnapshot["methods"][number]>("/api/methods/" + encodeURIComponent(id) + "/reject", {
-    method: "POST",
-    body: JSON.stringify(reason === undefined ? {} : { reason })
-  }),
-  methodSettings: () => request<{ settings: MethodSnapshot["settings"] }>("/api/methods/settings"),
-  saveMethodSettings: (patch: { autoLearn?: boolean }) => request<{ settings: MethodSnapshot["settings"] }>("/api/methods/settings", {
-    method: "PATCH",
-    body: JSON.stringify(patch)
-  }),
-  methodPairing: (id: string) => request<{ baselineTaskIds: string[]; trialTaskIds: string[]; notes: string[] }>(
-    "/api/methods/" + encodeURIComponent(id) + "/pairing"
-  ),
-  assignTaskMethod: (taskId: string, methodId: string | null) => request<TaskRecord>(
-    `/api/tasks/${encodeURIComponent(taskId)}/method`,
-    { method: "PATCH", body: JSON.stringify({ methodId }) }
-  ),
   sync: () => request<SyncSnapshot>("/api/sync"),
   createSyncPeer: (input: CreateSyncPeerRequest) => request<SyncPeerResult>("/api/sync/peers", {
     method: "POST",

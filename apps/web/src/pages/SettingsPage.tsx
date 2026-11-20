@@ -62,7 +62,7 @@ const TABS: Array<{ id: SettingsTab; label: string }> = [
   { id: "projects", label: "项目" },
   { id: "extensions", label: "扩展" },
   { id: "proactive", label: "主动" },
-  { id: "automation", label: "记忆与技能" },
+  { id: "automation", label: "记忆" },
   { id: "knowledge", label: "知识库连接" },
   { id: "connections", label: "连接" },
   { id: "context", label: "上下文" },
@@ -1157,11 +1157,8 @@ function trashKey(item: { kind: TrashKind; id: string }): string {
 
 function AutomationTab() {
   const memoryQuery = useQuery({ queryKey: ["memory"], queryFn: api.memory, refetchInterval: 30_000 });
-  const methodsQuery = useQuery({ queryKey: ["methods"], queryFn: api.methods, refetchInterval: 30_000 });
   const activeMemories = (memoryQuery.data?.memories ?? []).filter((memory) => memory.status === "active");
-  const adoptedMethods = (methodsQuery.data?.methods ?? []).filter((method) => method.status === "adopted");
   const latestRecall = memoryQuery.data?.recalls[0] ?? null;
-  const latestApplication = methodsQuery.data?.applications[0] ?? null;
 
   return (
     <section className="settings-tab-panel">
@@ -1178,18 +1175,8 @@ function AutomationTab() {
                 </small>
               </dd>
             </div>
-            <div>
-              <dt>自动技能</dt>
-              <dd>
-                成功任务自动学习并用于同模板任务
-                <small>
-                  {methodsQuery.isLoading ? "正在读取…" : `${adoptedMethods.length} 个技能生效中`}
-                  {latestApplication ? ` · 最近复用于 ${relativeTime(latestApplication.createdAt)}` : ""}
-                </small>
-              </dd>
-            </div>
           </dl>
-          <p className="settings-hint"><ShieldAlert size={13} /> 自动化只复用已有任务的成功路径，并继承或收窄原任务权限；外部动作仍按原有审批边界执行。</p>
+          <p className="settings-hint"><ShieldAlert size={13} /> 自动记忆只提炼已有任务事实，并继承或收窄原任务权限；外部动作仍按原有审批边界执行。</p>
         </div>
       </section>
     </section>

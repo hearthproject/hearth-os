@@ -78,7 +78,6 @@ export function TaskDetailPage() {
   const [resumeInput, setResumeInput] = useState("");
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const contextQuery = useQuery({ queryKey: ["task-context", id], queryFn: () => api.taskContext(id, { limit: 1 }), enabled: Boolean(id), refetchInterval: 4_000 });
-  const methodsQuery = useQuery({ queryKey: ["methods"], queryFn: api.methods, refetchInterval: 30_000 });
   const pendingHandoff = contextQuery.data?.handoffs.find((item) => item.status === "pending_user") ?? null;
 
   const retry = useMutation({
@@ -128,9 +127,6 @@ export function TaskDetailPage() {
 
   const view = taskQuery.data;
   const task = view.task;
-  const boundMethod = task.methodId
-    ? methodsQuery.data?.methods.find((method) => method.id === task.methodId) ?? null
-    : null;
   const deliverables = visibleDeliverables(view.artifacts, task.expectedOutputs);
   const progress = progressEvents(view);
   const { visible: visibleProgress, technical: technicalProgress } = splitProgress(progress);
@@ -258,7 +254,6 @@ export function TaskDetailPage() {
         {task.pinnedAt && <span><Pin size={13} /> 已置顶</span>}
         {task.archivedAt && <span><Archive size={13} /> 已归档</span>}
         {view.knowledge && <span title={view.knowledge.uri}><Database size={13} /> 已入知识库</span>}
-        {boundMethod && <span>方法 {boundMethod.name} · v{boundMethod.version}</span>}
         <span><Clock3 size={13} /> {formatDuration(lastDuration(view.runs))}</span>
         <span>Token <TaskTokens usage={lastUsage(view.runs)} /></span>
         <span>更新于 {relativeTime(task.updatedAt)}</span>

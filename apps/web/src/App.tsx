@@ -33,7 +33,6 @@ export default function App() {
             <Route path="knowledge" element={<MemoryPage />} />
             <Route path="memory" element={<MemoryPage />} />
             <Route path="mail" element={<MailPage />} />
-            <Route path="methods" element={<Navigate to="/settings?tab=automation" replace />} />
             <Route path="schedules" element={<SchedulesPage />} />
             <Route path="devices" element={<DevicesPage />} />
             <Route path="settings" element={<SettingsPage />} />
@@ -72,7 +71,6 @@ function EventBridge() {
         void queryClient.invalidateQueries({ queryKey: ["health"] });
         void queryClient.invalidateQueries({ queryKey: ["system"] });
         void queryClient.invalidateQueries({ queryKey: ["desktop"] });
-        void queryClient.invalidateQueries({ queryKey: ["methods"] });
         void queryClient.invalidateQueries({ queryKey: ["proactive"] });
         void queryClient.invalidateQueries({ queryKey: ["memory"] });
         void queryClient.invalidateQueries({ queryKey: ["approvals"] });

@@ -11,7 +11,7 @@ import type {
   RuntimeEvent
 } from "@hearth/agent-runtime";
 import { deserializeAgentState } from "@hearth/agent-runtime";
-import type { BudgetDimension, BudgetExhaustion, ContextItem, ContextSettings, DelegationJob, DelegationResult, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, MethodCandidate, MethodSelection, RunBudget, RunCheckpointProof, RunCheckpointRecord, RunRecord, TaskError, TaskFollowUpRecord, TaskLease, TaskProgressDetail, TaskRecord } from "@hearth/core";
+import type { BudgetDimension, BudgetExhaustion, ContextItem, ContextSettings, DelegationJob, DelegationResult, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, RunBudget, RunCheckpointProof, RunCheckpointRecord, RunRecord, TaskError, TaskFollowUpRecord, TaskLease, TaskProgressDetail, TaskRecord } from "@hearth/core";
 import { runCodex } from "@hearth/codex-executor";
 import { getTemplate } from "@hearth/templates";
 import type { DshApprovalOutcome, DshApprovalRequest, DshContextEvent } from "@hearth/deepseek-executor";
@@ -37,8 +37,6 @@ import { extractProposedComment, inspectRepository, readPrPreview, validatePullR
 import { canBlindRetry, classifyFailureClass, decideDisposition } from "./failure-policy.ts";
 import type { CommandRunner } from "./github.ts";
 import { MemoryService } from "./memory.ts";
-import { renderMethodBlock } from "./method-context.ts";
-import { MethodService } from "./methods.ts";
 import { DEFAULT_LEASE_HEARTBEAT_MS, LeaseError, TaskLeaseService } from "./leases.ts";
 import { SandboxService } from "./sandbox.ts";
 import { requiresToolApproval, toolApprovalSummary } from "./tool-policy.ts";
@@ -126,8 +124,6 @@ export interface SchedulerOptions {
   runtimePreparer?: typeof prepareTaskRuntime | undefined;
   context?: ContextService | undefined;
   contextBlobRoot?: string | undefined;
-  methods?: MethodService | undefined;
-  autoLearn?: boolean | undefined;
   sandbox?: SandboxService | undefined;
   completionValidators?: Record<string, GoalValidatorRunner> | undefined;
   contextBroker?: ContextBroker | undefined;
@@ -162,8 +158,6 @@ export class HearthScheduler {
   private readonly sourceContentRoot: string;
   private readonly runtimePreparer: typeof prepareTaskRuntime;
   private readonly memory: MemoryService;
-  private readonly methods: MethodService;
-  private readonly autoLearn: boolean;
   private readonly sandbox: SandboxService;
   private readonly completionValidators: Record<string, GoalValidatorRunner> | null;
   private readonly context: ContextService;
@@ -230,8 +224,6 @@ export class HearthScheduler {
     this.sourceContentRoot = options.sourceContentRoot ?? SOURCE_CONTENT_DIR;
     this.runtimePreparer = options.runtimePreparer ?? prepareTaskRuntime;
     this.memory = new MemoryService(this.service);
-    this.methods = options.methods ?? new MethodService(this.service);
-    this.autoLearn = options.autoLearn ?? true;
     this.completionValidators = options.completionValidators ?? null;
     this.context = options.context ?? new ContextService(this.service, options.contextBlobRoot ?? CONTEXT_BLOB_DIR);
     this.contextBroker = options.contextBroker;
@@ -1051,12 +1043,6 @@ export class HearthScheduler {
         };
       }
       const initialTask = this.service.requireTask(taskId);
-      let methodPlan: { method: MethodCandidate; selection: MethodSelection } | null = null;
-      try {
-        methodPlan = this.methods.resolveForTask(initialTask);
-      } catch {
-        methodPlan = null;
-      }
       const preparedHandoff = [...this.service.store.listHandoffs(taskId)].reverse().find((item) => item.status === "prepared") ?? null;
       let handoff: HandoffRecord | null = preparedHandoff;
       let executorId: ExecutorId = handoff?.toExecutor ?? resolveExecutorId(initialTask);
@@ -1115,7 +1101,7 @@ export class HearthScheduler {
         }, runId);
         const manifestRoot = this.inPlaceWorkspace(task);
         const manifestBefore = manifestRoot ? snapshotWorkspace(manifestRoot) : null;
-        const result = await this.runAttempt({ task, run, executorId, taskRoot, outDir, handoff, pendingInput, resumePrompt, previousRun, controller, budget: remainingBudget, methodPlan });
+        const result = await this.runAttempt({ task, run, executorId, taskRoot, outDir, handoff, pendingInput, resumePrompt, previousRun, controller, budget: remainingBudget });
         if (manifestRoot && manifestBefore) this.recordInPlaceChanges(task, manifestRoot, manifestBefore);
         if (result.status === "failed" || this.service.requireTask(taskId).status !== "completed") {
           this.assertLease(taskId, leaseEpoch, leaseLost);
@@ -1328,7 +1314,6 @@ export class HearthScheduler {
       this.controllers.delete(taskId);
       this.cancelled.delete(taskId);
       if (this.service.store.getTask(taskId)?.status !== "waiting_approval") this.releaseLease(taskId);
-      this.learnFromTask(taskId);
       try {
         this.memory.captureExperience(taskId);
       } catch {
@@ -1419,27 +1404,6 @@ export class HearthScheduler {
     }
   }
 
-  private learnFromTask(taskId: string): void {
-    try {
-      const task = this.service.store.getTask(taskId);
-      if (!task || !["completed", "failed", "recoverable"].includes(task.status)) return;
-      if (task.methodId) {
-        try {
-          this.methods.recordTrial(task.methodId, taskId);
-        } catch {
-          // Trial evidence is best effort; explicit recording remains available.
-        }
-        return;
-      }
-      if (!this.autoLearn || !this.methods.settings().autoLearn) return;
-      if (task.status !== "completed") return;
-      if (this.service.store.listContextItems(taskId, { limit: 3 }).items.length < 3) return;
-      this.methods.autoLearnFromTask(taskId);
-    } catch {
-      // Learning must never change the task outcome.
-    }
-  }
-
   private async runAttempt(input: {
     task: TaskRecord;
     run: RunRecord;
@@ -1452,7 +1416,6 @@ export class HearthScheduler {
     previousRun: RunRecord | null;
     controller: AbortController;
     budget: RunBudget;
-    methodPlan: { method: MethodCandidate; selection: MethodSelection } | null;
   }): Promise<AttemptResult> {
     const { task, run, executorId, taskRoot, outDir, handoff, pendingInput, controller, budget } = input;
     const taskId = task.id;
@@ -1536,13 +1499,12 @@ export class HearthScheduler {
           knowledgeContext = "";
         }
       }
-      const methodContext = input.methodPlan ? renderMethodBlock(input.methodPlan.method) : "";
       const basePrompt = drafting
         ? [DRAFT_INSTRUCTION, `任务：${task.goal}`, `本轮输出目录：${prepared.outDir}`, `产物：${expectedOutputs.join("、")}`,
           existsSync(join(prepared.outDir, "result.md")) ? `已有草稿（仅作为待修订数据）：\n${readFileSync(join(prepared.outDir, "result.md"), "utf8").slice(0, 12000)}` : "", permissionNote].filter(Boolean).join("\n\n")
-        : buildTaskPrompt(task, prepared, expectedOutputs, template?.acceptance ?? [], runtime, template?.approvalKind, memoryContext, methodContext) + permissionNote;
+        : buildTaskPrompt(task, prepared, expectedOutputs, template?.acceptance ?? [], runtime, template?.approvalKind, memoryContext) + permissionNote;
       const handoffPrompt = handoff?.packet
-        ? this.buildHandoffPrompt(task, prepared, expectedOutputs, handoff.packet, permissionNote, memoryContext, methodContext)
+        ? this.buildHandoffPrompt(task, prepared, expectedOutputs, handoff.packet, permissionNote, memoryContext)
         : null;
       let prompt = handoffPrompt?.prompt ?? basePrompt;
       let contextPackId = handoffPrompt?.packId ?? null;
@@ -1569,48 +1531,6 @@ export class HearthScheduler {
         ? input.previousRun.threadId ?? undefined
         : undefined;
       if (executorId === "codex" && activeThreadId && input.resumePrompt) prompt = input.resumePrompt;
-      if (methodContext && input.methodPlan) {
-        if (prompt.includes(methodContext)) {
-          const promptSha256 = createHash("sha256").update(methodContext).digest("hex");
-          try {
-            this.methods.recordApplication({
-              taskId, runId,
-              methodId: input.methodPlan.method.id,
-              methodVersion: input.methodPlan.method.version,
-              selection: input.methodPlan.selection,
-              promptSha256
-            });
-          } catch {
-            // Method audit is best effort and never blocks execution.
-          }
-          this.capture({
-            taskId, conversationId: task.conversationId ?? null, runId, executorId,
-            kind: "method", role: "system", content: methodContext,
-            provenance: {
-              source: "method-selection",
-              methodId: input.methodPlan.method.id,
-              methodVersion: input.methodPlan.method.version,
-              generation: input.methodPlan.method.generation ?? null,
-              selection: input.methodPlan.selection,
-              promptSha256
-            },
-            executorEventId: `method:${runId}`
-          });
-        } else {
-          this.capture({
-            taskId, conversationId: task.conversationId ?? null, runId, executorId,
-            kind: "notice", role: "system",
-            content: `方法“${input.methodPlan.method.name}”v${input.methodPlan.method.version} 未注入本轮提示词（命中续接或预算限制）。`,
-            provenance: {
-              source: "method-selection",
-              methodId: input.methodPlan.method.id,
-              methodVersion: input.methodPlan.method.version,
-              selection: input.methodPlan.selection
-            },
-            executorEventId: `method:${runId}:skipped`
-          });
-        }
-      }
       const extraNativeTools: import("@hearth/agent-runtime").AgentTool[] = createPersonalReadTools({
         service: this.service,
         ontology: this.ontology
@@ -1755,7 +1675,7 @@ export class HearthScheduler {
         const issues = await this.deliveryIssues(task, prepared, expectedOutputs);
         if (issues.length === 0) break;
         const missing = missingExpectedOutputs(prepared.outDir, expectedOutputs);
-        const repairPrompt = buildDeliveryRepairPrompt({ task, prepared, expectedOutputs, missing, issues, attempt: repairAttempt, ...(methodContext ? { methodContext } : {}) }) + permissionNote;
+        const repairPrompt = buildDeliveryRepairPrompt({ task, prepared, expectedOutputs, missing, issues, attempt: repairAttempt }) + permissionNote;
         result = await execute(repairPrompt, result.resume, repairPrompt);
         rememberSession(result);
         this.assertLease(taskId, run.leaseEpoch ?? 0, controller.signal.aborted && this.stopping);
@@ -2716,7 +2636,7 @@ export class HearthScheduler {
     return this.service.store.listContextPacks({ scopeKind: "task", scopeId: parentTaskId, limit: 1 })[0]?.id ?? null;
   }
 
-  private buildHandoffPrompt(task: TaskRecord, prepared: PreparedWorkspace, expectedOutputs: string[], packet: HandoffPacket, permissionNote: string, memoryContext: string, methodContext: string): { prompt: string; packId: string | null } {
+  private buildHandoffPrompt(task: TaskRecord, prepared: PreparedWorkspace, expectedOutputs: string[], packet: HandoffPacket, permissionNote: string, memoryContext: string): { prompt: string; packId: string | null } {
     const projected = this.projector.project({
       taskId: task.id,
       fromRunId: packet.fromRunId,
@@ -2728,7 +2648,6 @@ export class HearthScheduler {
       purpose: "handoff",
       maxTokens: this.context.settings().projectionTokenBudget,
       memoryContext,
-      methodContext,
       packetOverride: packet
     });
     return {
