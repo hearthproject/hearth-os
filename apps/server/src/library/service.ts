@@ -288,6 +288,13 @@ export class LibraryService {
     return this.tree.getNode(id);
   }
 
+  resolveNode(selector: string): LibraryNode | null {
+    const clean = selector.trim();
+    if (!clean) return null;
+    if (clean.startsWith("hearth://")) return this.tree.getNodeByRef(clean);
+    return this.tree.getNode(clean) ?? this.tree.getNodeByPath(clean);
+  }
+
   getNodeDetails(id: string): {
     node: LibraryNode;
     document: { content: string; extractor: string; language: string | null; charCount: number } | null;

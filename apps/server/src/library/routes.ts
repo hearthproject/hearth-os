@@ -25,6 +25,10 @@ const summarySchema = z.object({
   force: z.boolean().optional()
 }).strict();
 
+const resolveQuerySchema = z.object({
+  node: z.string().trim().min(1).max(4_096)
+}).strict();
+
 export function registerLibraryRoutes(app: FastifyInstance, library: LibraryService): void {
   app.get("/api/library/status", async () => {
     library.tree.ensureRoots();
@@ -48,6 +52,14 @@ export function registerLibraryRoutes(app: FastifyInstance, library: LibraryServ
   });
 
   app.post("/api/library/reindex", async () => ({ result: await library.reindex() }));
+
+  app.get("/api/library/resolve", async (request, reply) => {
+    const parsed = resolveQuerySchema.safeParse(request.query ?? {});
+    if (!parsed.success) return invalid(reply);
+    const node = library.resolveNode(parsed.data.node);
+    if (!node) return reply.code(404).send({ error: "NODE_NOT_FOUND", message: "没有找到这份资料" });
+    return { node };
+  });
 
   app.get<{ Params: { id: string } }>("/api/library/nodes/:id", async (request, reply) => {
     try {
