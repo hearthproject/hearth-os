@@ -7,6 +7,7 @@ import { api, subscribeToEvents } from "./lib/api.ts";
 import { ChatPage } from "./pages/ChatPage.tsx";
 import { DossierPage } from "./pages/DossierPage.tsx";
 import { DevicesPage } from "./pages/DevicesPage.tsx";
+import { InboxPage } from "./pages/InboxPage.tsx";
 import { MailPage } from "./pages/MailPage.tsx";
 import { MemoryPage } from "./pages/MemoryPage.tsx";
 import { OnboardingPage } from "./pages/OnboardingPage.tsx";
@@ -28,7 +29,7 @@ export default function App() {
             <Route index element={<ChatPage />} />
             <Route path="tasks" element={<Navigate to="/" replace />} />
             <Route path="tasks/:id" element={<TaskDetailPage />} />
-            <Route path="inbox" element={<Navigate to="/" replace />} />
+            <Route path="inbox" element={<InboxPage />} />
             <Route path="personal" element={<PersonalPage />} />
             <Route path="runtime" element={<RuntimePage />} />
             <Route path="knowledge" element={<MemoryPage />} />

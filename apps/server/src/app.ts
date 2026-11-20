@@ -10,7 +10,7 @@ import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DELEGATION_WORKSPACE_POLICIES, DEVI
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { loadCodexProfile, runCodex } from "@hearth/codex-executor";
 import { z } from "zod";
-import { ARTIFACT_DIR, ATTACHMENT_DIR, BACKUP_DIR, BROWSER_SETTINGS_PATH, CODEX_HOME_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, DOSSIER_DIR, DSH_HOME_DIR, EXECUTOR_HOME_DIR, EXECUTOR_SETTINGS_PATH, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST, WORKSPACE_DIR, WORKSTYLE_PATH } from "./config.ts";
+import { ARTIFACT_DIR, ATTACHMENT_DIR, BACKUP_DIR, BROWSER_SETTINGS_PATH, CODEX_HOME_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, DOSSIER_DIR, DSH_HOME_DIR, EXECUTOR_HOME_DIR, EXECUTOR_SETTINGS_PATH, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, SUPERVISION_PATH, WEB_DIST, WORKSPACE_DIR, WORKSTYLE_PATH } from "./config.ts";
 import { BrowserSettingsStore } from "./browser-settings.ts";
 import { registerChatRoutes } from "./chat-routes.ts";
 import { ReconcileError, ReconcileService } from "./reconcile.ts";
@@ -52,6 +52,7 @@ import { DesktopError, DesktopService } from "./desktop.ts";
 import { MemoryError, MemoryService } from "./memory.ts";
 import { ProjectError, ProjectService } from "./projects.ts";
 import { DossierError, DossierStore } from "./dossier.ts";
+import { SupervisionService } from "./supervision.ts";
 import { verifyFirstTask } from "./onboarding-verify.ts";
 import { WorkstyleError, WorkstyleStore } from "./workstyle.ts";
 import { TaskWorktreeService, WorktreeError } from "./worktrees.ts";
@@ -685,6 +686,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const projects = new ProjectService(store);
   const dossiers = new DossierStore(DOSSIER_DIR);
   const workstyle = new WorkstyleStore(WORKSTYLE_PATH);
+  const supervision = new SupervisionService(SUPERVISION_PATH);
   const security = new SecurityService(service);
   const leases = new TaskLeaseService(service);
   const sandbox = new SandboxService();
@@ -1017,6 +1019,27 @@ export async function buildServer(options: BuildServerOptions = {}) {
     if (verification.ok) onboarding.complete();
     return { verification, onboarding: onboarding.snapshot() };
   });
+
+  app.get("/api/supervision", async () => supervision.tick(store.listTasks()));
+
+  app.post<{ Params: { id: string } }>("/api/supervision/:id", async (request, reply) => {
+    const parsed = z.object({
+      action: z.enum(["read", "dismiss", "snooze"]),
+      hours: z.number().min(1).max(168).optional()
+    }).safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SUPERVISION_ACTION", message: "通知操作不正确" });
+    return supervision.mark(request.params.id, parsed.data.action, parsed.data.hours);
+  });
+
+  const supervisionTimer = setInterval(() => {
+    try {
+      supervision.tick(store.listTasks());
+    } catch {
+      // Supervision never blocks the server.
+    }
+  }, 60_000);
+  supervisionTimer.unref?.();
+  app.addHook("onClose", async () => clearInterval(supervisionTimer));
 
   app.get("/api/integrations/feishu", async () => ({
     settings: feishu.view(),

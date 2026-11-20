@@ -70,6 +70,7 @@ import type {
   OnboardingSnapshot,
   OnboardingVerificationView,
   SettingsStorageResponse,
+  SupervisionSnapshotView,
   OutboxDraft,
   OutboxDraftListItem,
   OutboxDraftRequest,
@@ -332,6 +333,12 @@ export const api = {
   resetOnboarding: () => request<OnboardingSnapshot>("/api/onboarding/reset", { method: "POST" }),
   verifyOnboarding: () =>
     request<{ verification: OnboardingVerificationView; onboarding: OnboardingSnapshot }>("/api/onboarding/verify", { method: "POST" }),
+  supervision: () => request<SupervisionSnapshotView>("/api/supervision"),
+  supervisionAction: (id: string, action: "read" | "dismiss" | "snooze", hours?: number) =>
+    request<SupervisionSnapshotView>(`/api/supervision/${encodeURIComponent(id)}`, {
+      method: "POST",
+      body: JSON.stringify({ action, ...(hours ? { hours } : {}) })
+    }),
   feishu: () => request<FeishuIntegrationResponse>("/api/integrations/feishu"),
   saveFeishu: (input: {
     enabled?: boolean;

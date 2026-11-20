@@ -402,6 +402,35 @@ export interface OnboardingVerificationView {
   checks: Array<{ name: string; passed: boolean; detail: string }>;
 }
 
+export type SupervisionKindView = "long_running" | "budget_near_limit" | "waiting_approval" | "failed";
+
+export interface SupervisionItemView {
+  id: string;
+  kind: SupervisionKindView;
+  taskId: string;
+  title: string;
+  body: string;
+  createdAt: string;
+  status: "unread" | "read" | "dismissed" | "snoozed";
+  snoozeUntil: string | null;
+}
+
+export interface DailyDigestView {
+  date: string;
+  generatedAt: string;
+  completed: number;
+  open: number;
+  waitingApproval: number;
+  failed: number;
+  suggestions: string[];
+}
+
+export interface SupervisionSnapshotView {
+  items: SupervisionItemView[];
+  digest: DailyDigestView | null;
+  generatedAt: string;
+}
+
 export interface TaskContextResponse extends ContextSnapshot {}
 
 export interface TaskHandoffsResponse {
