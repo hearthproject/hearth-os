@@ -149,7 +149,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
 
   const drafting = !coding && isTextDraftTask({ ...options.task, expectedOutputs: options.expectedOutputs });
   const draftTools = new Set(["read_file", "write_file", "finish_task", "ask_user"]);
-  const toolsForRun = [...createBuiltinTools(), ...(options.extraTools ?? [])]
+  const toolsForRun = dedupeTools([...createBuiltinTools(), ...(options.extraTools ?? [])])
     .filter((tool) => !drafting || draftTools.has(tool.definition.name))
     .map((tool) => !drafting || tool.definition.name !== "write_file" ? tool : {
       ...tool,
@@ -1362,6 +1362,15 @@ export function nativeSystemPrompt(task: TaskRecord, expectedOutputs: string[], 
       ? ["这是截图类任务：必须调用 capture_screen 生成真实图片产物，不要用文本或占位文件代替。"]
       : [])
   ].join("\n");
+}
+
+export function dedupeTools(tools: AgentTool[]): AgentTool[] {
+  const seen = new Set<string>();
+  return tools.filter((tool) => {
+    if (seen.has(tool.definition.name)) return false;
+    seen.add(tool.definition.name);
+    return true;
+  });
 }
 
 function describeToolStart(name: string, args: unknown): string {

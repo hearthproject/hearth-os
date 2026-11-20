@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { TaskRecord } from "@hearth/core";
-import { refreshNativeResume, jsonDeliverableIssue, nativeProgressForEvent, nativeSystemPrompt, normalizeJsonDeliverables } from "./native-executor.ts";
+import type { AgentTool } from "@hearth/agent-runtime";
+import { dedupeTools, refreshNativeResume, jsonDeliverableIssue, nativeProgressForEvent, nativeSystemPrompt, normalizeJsonDeliverables } from "./native-executor.ts";
 
 const baseTask = {
   id: "task-1",
@@ -21,6 +22,21 @@ const baseTask = {
   nextAction: null,
   error: null
 } as TaskRecord;
+
+describe("native tool assembly", () => {
+  it("dedupes tool definitions so upstream providers never receive duplicate finish_task entries", () => {
+    const tool = {
+      definition: {
+        name: "finish_task",
+        description: "finish",
+        parameters: { type: "object", properties: {}, additionalProperties: false }
+      },
+      execute: async () => ({ content: "done", isError: false })
+    } as unknown as AgentTool;
+    expect(dedupeTools([tool, tool, { ...tool, definition: { ...tool.definition, name: "browser_open" } }]))
+      .toHaveLength(2);
+  });
+});
 
 describe("native system prompt", () => {
   it("asks for machine-readable enum and boolean values", () => {

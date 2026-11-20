@@ -129,8 +129,7 @@ export function createBrowserTools(options: BrowserToolsOptions): AgentTool[] {
       },
       required: ["action"],
       additionalProperties: false
-    }, async (args) => toolkit.recipe(args)),
-    toolkit.finishTool()
+    }, async (args) => toolkit.recipe(args))
   ];
 }
 
@@ -164,49 +163,6 @@ class BrowserToolkit {
         } catch (error) {
           return failure(error);
         }
-      }
-    };
-  }
-
-  finishTool(): AgentTool {
-    return {
-      definition: {
-        name: "finish_task",
-        description: "任务真正完成时调用。summary 写给用户看的中文结果，outputs 列出已生成的产物相对路径。浏览器任务结束前必须至少有一条通过的页面断言。",
-        parameters: {
-          type: "object",
-          properties: {
-            summary: { type: "string", description: "面向用户的完成结果" },
-            outputs: { type: "array", items: { type: "string" }, description: "产物文件路径列表" }
-          },
-          required: ["summary"],
-          additionalProperties: false
-        }
-      },
-      execute: async (input) => {
-        const session = this.options.sessions.state(this.options.taskId);
-        if (this.active && session) {
-          const last = session.assertions[session.assertions.length - 1];
-          if (!last) {
-            return {
-              content: "浏览器任务还不能结束：至少要用 browser_assert 验证一次页面状态，例如确认结果页出现“提交成功”。",
-              isError: true
-            };
-          }
-          if (!last.passed) {
-            return {
-              content: `浏览器任务还不能结束：最后一次页面断言失败（${last.kind}=${last.expected}）。请修复后重新验证。`,
-              isError: true,
-              metadata: { browserAssertions: session.assertions }
-            };
-          }
-        }
-        const args = asRecord(input);
-        const summary = stringValue(args.summary) ?? "任务完成";
-        const outputs = Array.isArray(args.outputs)
-          ? args.outputs.filter((item): item is string => typeof item === "string")
-          : [];
-        return { content: summary, action: "finish", summary, outputs };
       }
     };
   }
