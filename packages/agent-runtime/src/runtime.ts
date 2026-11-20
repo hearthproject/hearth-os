@@ -6,6 +6,8 @@ import { compactAgentMessages, compactAgentMessagesWithSummary, estimateMessageT
 import { createAgentState, progressSummary } from "./harness/file-state.ts";
 import { serializeAgentState } from "./harness/checkpoint-state.ts";
 import { markLostActiveWork } from "./harness/active-work.ts";
+import { runningActiveWork } from "./harness/active-work.ts";
+import { goalContinuationPrompt, readGoalByRoot } from "./harness/goal.ts";
 import { storeOversizedToolResult } from "./harness/tool-output-store.ts";
 import { planModeAllowsCommand, planModeAllowsTool } from "./harness/plan.ts";
 import { buildPostCompactContext } from "./harness/post-compact.ts";
@@ -57,6 +59,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   let summary: string | null = null;
   let emptyTurns = 0;
   let missingFinishTurns = 0;
+  let goalContinuations = 0;
   let finishRejections = 0;
   let sameProgressCount = 0;
   let lastProgressHash: string | null = null;
@@ -371,6 +374,13 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       return finish("budget_exceeded", summary ?? "达到最大执行轮次，任务未完成");
     }
 
+    const activeGoal = readGoalByRoot(options.workspaceRoot);
+    if (activeGoal && activeGoal.status === "active" && activeGoal.maxTurns > 0 && turns >= activeGoal.maxTurns) {
+      const message = `持久目标「${activeGoal.title}」已达到 ${activeGoal.maxTurns} 轮上限，暂停等待确认。`;
+      await checkpoint("waiting_input");
+      return finish("waiting_input", message, [], message);
+    }
+
     if (options.steering) {
       const pending = options.steering();
       for (const message of pending) messages.push(message);
@@ -489,6 +499,14 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     await checkpoint("turn");
 
     if (turn.toolCalls.length === 0) {
+      const goalPrompt = goalContinuationPrompt(options.workspaceRoot);
+      if (goalPrompt && goalContinuations < 12 && runningActiveWork(state).length === 0) {
+        goalContinuations += 1;
+        emit({ type: "notice", message: "检测到进行中的持久目标，继续执行而不是结束这一轮。" });
+        messages.push({ role: "user", content: `${goalPrompt}\n\n继续执行下一步；只有成功标准全部满足后才调用 finish_task。` });
+        await checkpoint("turn");
+        continue;
+      }
       if (turn.content.trim() && !options.requireFinishTool) return finish("completed", turn.content.trim());
       if (turn.content.trim()) {
         missingFinishTurns += 1;

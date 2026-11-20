@@ -90,7 +90,7 @@ const createGoalTool: AgentTool = {
         objective: { type: "string", description: "Concrete end state" },
         constraints: { type: "array", items: { type: "string" }, description: "Hard constraints" },
         successCriteria: { type: "array", items: { type: "string" }, description: "Verifiable completion checks" },
-        maxTurns: { type: "number", description: "Optional advisory turn count; never pauses execution" },
+        maxTurns: { type: "number", description: "Optional turn cap; reaching it pauses the goal for confirmation" },
         planPath: { type: "string", description: "Optional plan file path" }
       },
       required: ["title", "objective"],

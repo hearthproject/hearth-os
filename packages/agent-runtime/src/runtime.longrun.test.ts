@@ -316,6 +316,54 @@ describe("agent runtime long-run fixtures", () => {
     expect(events.some((event) => event.type === "notice" && event.message.includes("系统提示或工具定义"))).toBe(true);
   });
 
+  it("continues an active goal when the model stops without tools", async () => {
+    const root = workspace(roots);
+    writeGoal(root, { maxTurns: 0 });
+    const fake = createFakeModel([
+      { content: "阶段一完成", toolCalls: [], finishReason: "stop" },
+      { content: "阶段二完成", toolCalls: [], finishReason: "stop" },
+      { content: "阶段三完成", toolCalls: [], finishReason: "stop" },
+      { content: "", toolCalls: [fakeToolCall("finish_task", { summary: "done" })], finishReason: "tool_calls" }
+    ]);
+    const result = await runAgent({
+      model: fake.model,
+      tools: createBuiltinTools(),
+      goal: "goal",
+      systemPrompt: "system",
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      permissions: { tools: ["finish_task"], readRoots: [root], writeRoots: [root], networkHosts: [] },
+      budget: {}
+    });
+
+    expect(result.status).toBe("completed");
+    expect(fake.state.calls).toBe(4);
+    expect(result.messages.some((message) => message.role === "user" && message.content.includes("Persisted goal"))).toBe(true);
+  });
+
+  it("returns waiting_input when an active goal reaches maxTurns", async () => {
+    const root = workspace(roots);
+    writeGoal(root, { maxTurns: 1 });
+    const fake = createFakeModel([
+      { content: "one", toolCalls: [], finishReason: "stop" },
+      { content: "two", toolCalls: [], finishReason: "stop" }
+    ]);
+    const result = await runAgent({
+      model: fake.model,
+      tools: createBuiltinTools(),
+      goal: "goal",
+      systemPrompt: "system",
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      permissions: { tools: ["finish_task"], readRoots: [root], writeRoots: [root], networkHosts: [] },
+      budget: {}
+    });
+
+    expect(result.status).toBe("waiting_input");
+    expect(result.summary).toContain("轮上限");
+    expect(fake.state.calls).toBe(1);
+  });
+
   it("reports and clears a stale execution marker before starting", async () => {
     const root = workspace(roots);
     const outDir = join(root, "out");
@@ -351,6 +399,24 @@ function echoTool(): AgentTool {
       return { content: String((input as { value?: unknown }).value ?? "") };
     }
   };
+}
+
+function writeGoal(root: string, options: { maxTurns: number }): void {
+  mkdirSync(join(root, ".hearth"), { recursive: true });
+  writeFileSync(join(root, ".hearth", "goal.json"), JSON.stringify({
+    goalId: "goal_test",
+    title: "Long goal",
+    objective: "finish the work",
+    constraints: [],
+    successCriteria: ["done"],
+    status: "active",
+    note: null,
+    maxTurns: options.maxTurns,
+    turnsUsed: 0,
+    planPath: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  }, null, 2), "utf8");
 }
 
 function workspace(roots: string[]): string {
