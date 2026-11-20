@@ -16,6 +16,7 @@ import {
   Loader2,
   Paperclip,
   PauseCircle,
+  RotateCcw,
   Settings2,
   Sparkles,
   ShieldAlert,
@@ -26,7 +27,7 @@ import { ApiError, api, chatStream } from "../lib/api.ts";
 import { ChatWorkspacePanel } from "../components/ChatWorkspacePanel.tsx";
 import { ProjectDialog } from "../components/ProjectDialog.tsx";
 import { TaskStatusIcon } from "../components/TaskStatusIcon.tsx";
-import { formatBytes, formatTime } from "../lib/format.ts";
+import { formatBytes, formatDuration, formatTime, formatTokens } from "../lib/format.ts";
 import { getChatSelection, setChatBusy, syncChatSelection, useChatSelection } from "../lib/chat-selection.ts";
 import { executorLabel, taskKindLabel, TASK_STATUS_LABELS } from "../lib/labels.ts";
 import type {
@@ -39,7 +40,8 @@ import type {
   ExecutorId,
   TaskFollowUpMode,
   TaskListItem,
-  TaskProposalRecord
+  TaskProposalRecord,
+  TaskTurn
 } from "../lib/types.ts";
 
 const PENDING_SETTINGS: ConversationSettings = {
@@ -838,6 +840,127 @@ function TaskStatusBubble({ message, conversationId }: { message: ChatMessageRec
   );
 }
 
+function TaskLinkCard({
+  taskId,
+  taskStatus,
+  conversationId
+}: {
+  taskId: string;
+  taskStatus?: ChatMessageRecord["taskStatus"];
+  conversationId?: string | null;
+}) {
+  const queryClient = useQueryClient();
+  const [rewinding, setRewinding] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const taskQuery = useQuery({
+    queryKey: ["task", taskId],
+    queryFn: () => api.task(taskId),
+    enabled: Boolean(taskId),
+    staleTime: 10_000
+  });
+  const turnsQuery = useQuery({
+    queryKey: ["task-turns", taskId],
+    queryFn: () => api.taskTurns(taskId),
+    enabled: Boolean(taskQuery.data),
+    staleTime: 10_000
+  });
+  const view = taskQuery.data;
+  const task = view?.task;
+  const status = task?.status ?? taskStatus ?? "queued";
+  const latestRun = view?.runs && view.runs.length > 0 ? view.runs[view.runs.length - 1] : null;
+  const turns = turnsQuery.data?.turns ?? [];
+  const latestTurn = turns.length > 0 ? turns[turns.length - 1] : null;
+  const elapsed = latestRun?.startedAt && latestRun.endedAt
+    ? new Date(latestRun.endedAt).getTime() - new Date(latestRun.startedAt).getTime()
+    : null;
+  const verification = latestTurn ? turnVerificationLabel(latestTurn) : "";
+
+  async function rewindLatest(turn: TaskTurn, force = false): Promise<void> {
+    setRewinding(true);
+    setNotice(null);
+    setError(null);
+    try {
+      await api.rewindTask(taskId, { runId: turn.runId, turn: turn.turn, force });
+      setNotice(`已回退第 ${turn.turn} 轮`);
+      await queryClient.invalidateQueries({ queryKey: ["task-turns", taskId] });
+      await queryClient.invalidateQueries({ queryKey: ["task", taskId] });
+      await queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    } catch (caught) {
+      if (!force && caught instanceof ApiError && caught.code === "HISTORY_DRIFT") {
+        if (window.confirm(`${caught.message}\n\n强制回退会覆盖后续改动，确定继续？`)) {
+          await rewindLatest(turn, true);
+          return;
+        }
+      }
+      setError(caught instanceof Error ? caught.message : "回退失败");
+    } finally {
+      setRewinding(false);
+    }
+  }
+
+  function requestRewind(turn: TaskTurn): void {
+    const confirmed = window.confirm(
+      `回退到第 ${turn.turn} 轮执行之前？\n\n会恢复本轮改过的文件，并删除本轮新建的文件。`
+    );
+    if (confirmed) void rewindLatest(turn);
+  }
+
+  return (
+    <div className="task-link-card">
+      <Link
+        className="task-link-main"
+        to={`/tasks/${taskId}`}
+        state={{ fromChat: true, ...(conversationId ? { conversationId } : {}) }}
+      >
+        <div className="task-link-head">
+          <TaskStatusIcon status={status} size={14} />
+          <strong>{TASK_STATUS_LABELS[status]}</strong>
+          <span className="task-link-title">{task?.title ?? "任务"}</span>
+        </div>
+        {view && (
+          <div className="task-link-meta">
+            <span>{view.artifacts.length} 个文件</span>
+            {latestTurn && <span>{latestTurn.files.length} 个改动</span>}
+            {verification && <span>{verification}</span>}
+            {turns.length > 0 && <span>{turns.length} 轮</span>}
+            <span>{formatDuration(elapsed)}</span>
+            {latestRun?.usage && <span>{formatTokens(latestRun.usage)} tokens</span>}
+          </div>
+        )}
+      </Link>
+      <div className="task-link-actions">
+        {latestTurn && (
+          <button className="task-link-rewind" onClick={() => requestRewind(latestTurn)} disabled={rewinding}>
+            {rewinding ? <Loader2 size={13} className="spin" /> : <RotateCcw size={13} />}
+            回退最近一轮
+          </button>
+        )}
+        <Link
+          className="task-link-open"
+          to={`/tasks/${taskId}`}
+          state={{ fromChat: true, ...(conversationId ? { conversationId } : {}) }}
+        >
+          打开 →
+        </Link>
+      </div>
+      {notice && <p className="task-link-note">{notice}</p>}
+      {error && <p className="task-link-error">{error}</p>}
+    </div>
+  );
+}
+
+function turnVerificationLabel(turn: TaskTurn): string {
+  const verification = turn.verification;
+  if (!verification) return "暂无验证记录";
+  if (verification.failedTests.length > 0) return `${verification.failedTests.length} 个测试失败`;
+  if (verification.browserAssertions.some((item) => !item.passed)) return "页面断言失败";
+  if (verification.diagnostics.length > 0) return `${verification.diagnostics.length} 条诊断`;
+  if (verification.toolCalls > 0 && verification.exitCodes.some((code) => code === 0)) return "测试通过";
+  if (verification.browserAssertions.length > 0) return "页面断言通过";
+  return "已执行验证";
+}
+
 function AssistantBubble({
   content,
   copyText,
@@ -884,14 +1007,7 @@ function AssistantBubble({
         </div>
       )}
       {taskId && (
-        <Link
-          className="task-link-card"
-          to={`/tasks/${taskId}`}
-          state={{ fromChat: true, ...(conversationId ? { conversationId } : {}) }}
-        >
-          <CheckCircle2 size={15} />
-          <span>{taskStatus === "completed" ? "查看任务详情与产物" : "任务已派出，查看进度和结果"}</span>
-        </Link>
+        <TaskLinkCard taskId={taskId} taskStatus={taskStatus} conversationId={conversationId ?? null} />
       )}
       {createdAt && <time>{formatTime(createdAt)}</time>}
     </div>
