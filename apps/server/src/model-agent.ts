@@ -1,4 +1,5 @@
 import type { ModelProtocol } from "@hearth/core";
+import { appendFileSync } from "node:fs";
 import {
   ModelClientError,
   anthropicHeaders,
@@ -81,17 +82,21 @@ async function streamOpenAiChatTurn(
   onDelta: (text: string) => void,
   options: AgentTurnOptions
 ): Promise<AgentTurnResult> {
+  const requestBody = JSON.stringify({
+    model: settings.model,
+    messages: openAiAgentMessages(messages),
+    ...(tools.length > 0 ? { tools: tools.map(openAiTool), tool_choice: options.toolChoice ?? "auto" } : {}),
+    stream: true,
+    temperature: options.temperature ?? 0.2,
+    ...(options.maxTokens ? { max_tokens: options.maxTokens } : {})
+  });
+  if (process.env.HEARTH_MODEL_DEBUG_PATH) {
+    appendFileSync(process.env.HEARTH_MODEL_DEBUG_PATH, `${JSON.stringify({ at: new Date().toISOString(), protocol: "openai-chat", url: openAiChatUrl(settings.baseUrl), body: requestBody })}\n`, "utf8");
+  }
   const response = await fetch(openAiChatUrl(settings.baseUrl), {
     method: "POST",
     headers: bearerHeaders(settings),
-    body: JSON.stringify({
-      model: settings.model,
-      messages: openAiAgentMessages(messages),
-      ...(tools.length > 0 ? { tools: tools.map(openAiTool), tool_choice: options.toolChoice ?? "auto" } : {}),
-      stream: true,
-      temperature: options.temperature ?? 0.2,
-      ...(options.maxTokens ? { max_tokens: options.maxTokens } : {})
-    }),
+    body: requestBody,
     signal: withTimeout(options.signal, options.timeoutMs ?? 180_000)
   });
   if (!response.ok) throw apiError(response.status, await readJson(response));
