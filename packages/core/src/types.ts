@@ -1709,6 +1709,12 @@ export interface SkillRecord {
   archivedAt: string | null;
   archiveReason: string | null;
   previousStatus: SkillStatus | null;
+  sourceUrl: string | null;
+  sourceRef: string | null;
+  readOnly: boolean;
+  permissions: SkillPermissions;
+  actions: SkillActionDefinition[];
+  lastCheckedAt: string | null;
 }
 
 export interface SkillVersion {

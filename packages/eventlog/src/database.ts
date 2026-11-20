@@ -4522,7 +4522,13 @@ function rowToSkill(row: DbRow): SkillRecord {
     lastUsedAt: row.last_used_at == null ? null : String(row.last_used_at),
     archivedAt: row.archived_at == null ? null : String(row.archived_at),
     archiveReason: row.archive_reason == null ? null : String(row.archive_reason),
-    previousStatus: row.previous_status == null ? null : String(row.previous_status) as SkillRecord["previousStatus"]
+    previousStatus: row.previous_status == null ? null : String(row.previous_status) as SkillRecord["previousStatus"],
+    sourceUrl: row.source_url == null ? null : String(row.source_url),
+    sourceRef: row.source_ref == null ? null : String(row.source_ref),
+    readOnly: Number(row.read_only ?? 0) === 1,
+    permissions: parseSkillPermissions(row.permissions_json),
+    actions: parseSkillActions(row.actions_json),
+    lastCheckedAt: row.last_checked_at == null ? null : String(row.last_checked_at)
   };
 }
 
@@ -4531,8 +4537,9 @@ function upsertSkillRow(db: DatabaseSync, skill: SkillRecord): void {
     `INSERT INTO skills
      (id, method_id, method_version, name, version, status, pinned, path, content_hash, manifest_json, origin,
       source_task_ids_json, trial_task_ids_json, previous_version_id, change_report, created_at, updated_at, adopted_at,
-      last_used_at, archived_at, archive_reason, previous_status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      last_used_at, archived_at, archive_reason, previous_status, source_url, source_ref, read_only,
+      permissions_json, actions_json, last_checked_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET method_id=excluded.method_id, method_version=excluded.method_version, name=excluded.name,
       version=excluded.version, status=excluded.status, pinned=excluded.pinned, path=excluded.path,
       content_hash=excluded.content_hash, manifest_json=excluded.manifest_json, origin=excluded.origin,
@@ -4540,14 +4547,42 @@ function upsertSkillRow(db: DatabaseSync, skill: SkillRecord): void {
       previous_version_id=excluded.previous_version_id,
       change_report=excluded.change_report, updated_at=excluded.updated_at, adopted_at=excluded.adopted_at,
       last_used_at=excluded.last_used_at, archived_at=excluded.archived_at,
-      archive_reason=excluded.archive_reason, previous_status=excluded.previous_status`
+      archive_reason=excluded.archive_reason, previous_status=excluded.previous_status,
+      source_url=excluded.source_url, source_ref=excluded.source_ref, read_only=excluded.read_only,
+      permissions_json=excluded.permissions_json, actions_json=excluded.actions_json,
+      last_checked_at=excluded.last_checked_at`
   ).run(
     skill.id, skill.methodId, skill.methodVersion, skill.name, skill.version, skill.status, skill.pinned ? 1 : 0,
     skill.path, skill.contentHash, JSON.stringify(skill.manifest), skill.origin,
     JSON.stringify(skill.sourceTaskIds), JSON.stringify(skill.trialTaskIds), skill.previousVersionId, skill.changeReport,
     skill.createdAt, skill.updatedAt, skill.adoptedAt, skill.lastUsedAt, skill.archivedAt,
-    skill.archiveReason, skill.previousStatus
+    skill.archiveReason, skill.previousStatus, skill.sourceUrl, skill.sourceRef, skill.readOnly ? 1 : 0,
+    JSON.stringify(skill.permissions), JSON.stringify(skill.actions), skill.lastCheckedAt
   );
+}
+
+function parseSkillPermissions(value: unknown): SkillRecord["permissions"] {
+  if (typeof value !== "string" || !value.trim()) return { readRoots: [], writeRoots: [], networkHosts: [] };
+  try {
+    const parsed = JSON.parse(value) as Partial<SkillRecord["permissions"]>;
+    return {
+      readRoots: Array.isArray(parsed.readRoots) ? parsed.readRoots.filter((item): item is string => typeof item === "string") : [],
+      writeRoots: Array.isArray(parsed.writeRoots) ? parsed.writeRoots.filter((item): item is string => typeof item === "string") : [],
+      networkHosts: Array.isArray(parsed.networkHosts) ? parsed.networkHosts.filter((item): item is string => typeof item === "string") : []
+    };
+  } catch {
+    return { readRoots: [], writeRoots: [], networkHosts: [] };
+  }
+}
+
+function parseSkillActions(value: unknown): SkillRecord["actions"] {
+  if (typeof value !== "string" || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed as SkillRecord["actions"] : [];
+  } catch {
+    return [];
+  }
 }
 
 function rowToSkillVersion(row: DbRow): SkillVersion {
