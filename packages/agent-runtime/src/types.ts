@@ -2,6 +2,7 @@
 
 import type { RunBudget, RunUsage, TaskPermissions } from "@hearth/core";
 import type { SandboxRuntime } from "./harness/sandbox.ts";
+import type { AgentHookDefinition } from "./harness/hooks.ts";
 
 export type HarnessProfile = "general" | "coding";
 export type HarnessMode = "build" | "plan";
@@ -297,6 +298,8 @@ export interface AgentRuntimeOptions {
   maxToolChars?: number;
   /** Above this count, only core tools are sent directly and tool_search is added. */
   maxDirectTools?: number;
+  hooks?: AgentHookDefinition[];
+  hookTimeoutMs?: number;
   projectInstructions?: string;
   reminders?: AgentRuntimeReminders;
 }

@@ -10,6 +10,7 @@ import { runningActiveWork } from "./harness/active-work.ts";
 import { goalContinuationPrompt, readGoalByRoot } from "./harness/goal.ts";
 import { storeOversizedToolResult } from "./harness/tool-output-store.ts";
 import { ToolCatalog, TOOL_CALL_NAME, TOOL_SEARCH_NAME, toolCallDefinition, toolSearchDefinition } from "./harness/tool-catalog.ts";
+import { HookRunner, type HookEvent, type HookRunResult } from "./harness/hooks.ts";
 import { planModeAllowsCommand, planModeAllowsTool } from "./harness/plan.ts";
 import { buildPostCompactContext } from "./harness/post-compact.ts";
 import { todoReminder } from "./harness/todo.ts";
@@ -61,6 +62,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   let goalContinuations = 0;
   let truncatedContinuations = 0;
   let finishRejections = 0;
+  let stopRejections = 0;
   let sameProgressCount = 0;
   let lastProgressHash: string | null = null;
   let budgetReminderSent = false;
@@ -77,6 +79,10 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   const catalog = new ToolCatalog(tools, {
     ...(options.maxDirectTools !== undefined ? { maxDirectTools: options.maxDirectTools } : {}),
     ...(state.exposedTools ? { exposed: state.exposedTools } : {})
+  });
+  const hookRunner = new HookRunner(options.hooks ?? [], {
+    workspaceRoot: options.workspaceRoot,
+    ...(options.hookTimeoutMs !== undefined ? { timeoutMs: options.hookTimeoutMs } : {})
   });
   const hiddenToolCount = tools.filter((tool) => !catalog.isDirect(tool.definition.name)).length;
   const toolSearchTool: AgentTool = {
@@ -112,6 +118,13 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       ? [...definitions, ...syntheticTools.map((tool) => tool.definition)]
       : definitions;
   };
+  async function runHooks(event: HookEvent, payload: Record<string, unknown>): Promise<HookRunResult> {
+    if (hookRunner.size === 0) return { blocked: false, reason: null, contexts: [], failures: [], executed: 0 };
+    const result = await hookRunner.run(event, payload);
+    for (const context of result.contexts) messages.push({ role: "user", content: `<hook_context event="${event}">\n${context}\n</hook_context>` });
+    for (const failure of result.failures) emit({ type: "notice", message: `Hook 执行失败：${failure}` });
+    return result;
+  }
   const deferredCall = (call: AgentToolCall): { tool: AgentTool; call: AgentToolCall } | { error: string } => {
     const args = call.arguments && typeof call.arguments === "object" && !Array.isArray(call.arguments)
       ? call.arguments as Record<string, unknown>
@@ -143,6 +156,12 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   }
   if (options.resume?.promptHash && options.resume.promptHash !== systemPromptHash) {
     emit({ type: "notice", message: "系统提示或工具定义在恢复后已变化；检查点中的旧上下文可能不再适用，请谨慎继续。" });
+  }
+  if (hookRunner.size > 0) {
+    const session = await runHooks("SessionStart", { workspaceRoot: options.workspaceRoot, modelId, resumed: Boolean(options.resume) });
+    if (session.blocked) return finish("failed", session.reason ?? "SessionStart hook 拒绝了本次运行");
+    const prompt = await runHooks("UserPromptSubmit", { workspaceRoot: options.workspaceRoot, prompt: options.goal });
+    if (prompt.blocked) return finish("waiting_input", prompt.reason ?? "UserPromptSubmit hook 暂停了本次运行", [], prompt.reason);
   }
   const aborted = (): boolean => signal.aborted;
   const totalTokens = (): number => usage.inputTokens + usage.outputTokens;
@@ -211,6 +230,11 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   const durationLimit = limitOf(options.budget.maxDurationMs);
 
   async function compactContext(force: boolean): Promise<boolean> {
+    const preCompact = await runHooks("PreCompact", { workspaceRoot: options.workspaceRoot, force, messageCount: messages.length });
+    if (preCompact.blocked) {
+      emit({ type: "notice", message: `PreCompact hook 拒绝了压缩：${preCompact.reason ?? "未说明原因"}` });
+      if (!force) return false;
+    }
     const restoredContext = buildPostCompactContext(state, { mode: options.mode ?? state.mode ?? "build" });
     const compacted = options.contextWindowTokens
       ? await compactAgentMessagesWithSummary(messages, {
@@ -274,6 +298,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     });
     if ("summary" in compacted && typeof compacted.summary === "string") summary = compacted.summary;
     await checkpoint("compaction");
+    await runHooks("PostCompact", { workspaceRoot: options.workspaceRoot, force, messageCount: messages.length, compactions });
     return true;
   }
 
@@ -634,7 +659,16 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       const signature = toolSignature(effectiveCall);
 
       let result: AgentToolResult = { content: resolutionError ?? `未知或未授权工具：${call.name}`, isError: true };
-      if (tool) {
+      const preTool = await runHooks("PreToolUse", {
+        workspaceRoot: options.workspaceRoot,
+        toolName: effectiveCall.name,
+        toolCallId: call.id,
+        arguments: effectiveCall.arguments
+      });
+      if (preTool.blocked) {
+        result = { content: `Hook 拒绝了工具 ${effectiveCall.name}：${preTool.reason ?? "未说明原因"}`, isError: true };
+      }
+      if (tool && !preTool.blocked) {
         const modeError = modeIssue(effectiveCall);
         if (modeError) {
           result = { content: modeError, isError: true };
@@ -643,6 +677,15 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         } else {
         let authorized = true;
         if (options.authorizeTool) {
+          const permission = await runHooks("PermissionRequest", {
+            workspaceRoot: options.workspaceRoot,
+            toolName: effectiveCall.name,
+            arguments: effectiveCall.arguments
+          });
+          if (permission.blocked) {
+            authorized = false;
+            result = { content: `Hook 拒绝了工具审批：${permission.reason ?? "未说明原因"}`, isError: true };
+          } else {
           try {
             const authorization = await options.authorizeTool({ call: effectiveCall, definition: tool.definition });
             authorized = authorization.allowed;
@@ -652,6 +695,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
           } catch (error) {
             authorized = false;
             result = { content: `工具审批失败，已跳过：${errorMessage(error)}`, isError: true };
+          }
           }
         }
         if (authorized) {
@@ -696,6 +740,14 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         result = { ...result, content: `${result.content}\n当前产物输出目录：${options.outDir}。请使用当前目录；更换工具或路径分隔符不会扩大权限。` };
       }
       emit({ type: "tool.finished", turn: turns, call, result, durationMs: precomputed?.durationMs ?? (Date.now() - toolStartedAt) });
+      await runHooks(result.isError ? "PostToolUseFailure" : "PostToolUse", {
+        workspaceRoot: options.workspaceRoot,
+        toolName: effectiveCall.name,
+        toolCallId: call.id,
+        isError: result.isError === true,
+        content: result.content.slice(0, 16_000),
+        metadata: result.metadata ?? {}
+      });
       const changedFiles = result.isError ? [] : result.metadata?.filesChanged?.filter((file) => typeof file === "string" && file.length > 0) ?? [];
       if (changedFiles.length > 0 && options.afterEdit) {
         try {
@@ -747,6 +799,22 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       }
 
       if (result.action === "finish") {
+        const stop = await runHooks("Stop", {
+          workspaceRoot: options.workspaceRoot,
+          toolName: effectiveCall.name,
+          summary: result.summary ?? result.content
+        });
+        if (stop.blocked && stopRejections < 2) {
+          stopRejections += 1;
+          emit({ type: "notice", message: `Stop hook 拒绝了完成：${stop.reason ?? "未说明原因"}` });
+          messages.push({
+            role: "user",
+            content: `Stop hook 拒绝了本次完成：${stop.reason ?? "未说明原因"}\n请先修正未满足的要求，然后重新调用 finish_task。`
+          });
+          await checkpoint("tool");
+          clearExecuting();
+          continue;
+        }
         if (options.validateFinish && finishRejections < 2) {
           let issue: string | null = null;
           try {

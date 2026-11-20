@@ -16,6 +16,7 @@ import {
   discoverInstructions,
   goalContinuationPrompt,
   goalFinishIssue,
+  loadWorkspaceHooks,
   memoryIndexBlock,
   recordGoalTurns,
   instructionsBlock,
@@ -187,6 +188,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
   let sandboxDenied = false;
   let sandboxRunnerFailure = false;
   const state = options.resume?.state ?? createAgentState(options.prepared.root);
+  const workspaceHooks = loadWorkspaceHooks(options.prepared.root, process.env.HEARTH_TRUST_WORKSPACE_HOOKS === "1");
   //具体实现
   const result = await runAgent({
     model: drafting ? draftModelAdapter(options.settings, resolve(options.prepared.outDir, options.expectedOutputs[0] ?? "result.md")) : modelAdapter(options.settings),
@@ -211,6 +213,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     ...(options.steering ? { steering: options.steering } : {}),
     contextWindowTokens: options.settings.contextWindowTokens,
     maxOutputTokens: options.settings.maxOutputTokens,
+    ...(workspaceHooks.hooks.length > 0 ? { hooks: workspaceHooks.hooks, hookTimeoutMs: 10_000 } : {}),
     modelId: options.settings.model,
     requireFinishTool: true,
     stopOnToolError: drafting,
