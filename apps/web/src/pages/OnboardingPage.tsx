@@ -15,7 +15,7 @@ import { api } from "../lib/api.ts";
 import type { ModelProtocol, ModelProviderPreset, OnboardingVerificationView } from "../lib/types.ts";
 import { HearthMark } from "../components/HearthMark.tsx";
 
-const STEPS = ["模型", "执行器", "偏好", "验证"];
+const STEPS = ["模型", "执行器", "验证"];
 
 interface ModelDraft {
   providerId: string;
