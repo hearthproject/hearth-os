@@ -28,6 +28,7 @@ import {
   type AgentToolAuthorization,
   type AgentToolAuthorizationRequest,
   type AgentToolContext,
+  type HarnessMode,
   type RuntimeEvent
 } from "@hearth/agent-runtime";
 import { wantsCodeExecution, wantsGithubAccess, wantsScreenshot } from "./task-intent.ts";
@@ -51,6 +52,7 @@ export interface NativeRunOptions {
   permissions?: TaskPermissions;
   budget?: RunBudget;
   signal: AbortSignal;
+  mode?: HarnessMode;
   resume?: AgentResumeState;
   expectedOutputs: string[];
   onProgress?: (event: { kind: string; message: string; detail?: TaskProgressDetail }) => void;
@@ -137,7 +139,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
         outDir: options.prepared.outDir,
         permissions,
         ...(options.skillIndex ? { skillIndex: options.skillIndex } : {}),
-        mode: "build",
+        mode: options.mode ?? "build",
         availableTools,
         extraInstructions: [
           `Current task: ${options.task.title}`,
@@ -161,7 +163,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     outDir: options.prepared.outDir,
     state,
     profile,
-    mode: "build",
+    mode: options.mode ?? "build",
     toolTimeoutMs: coding ? 10 * 60_000 : 120_000,
     maxParallelTools: coding ? 4 : 1,
     ...(coding ? { keepRecentToolOutputs: 3 } : {}),

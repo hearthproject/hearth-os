@@ -80,6 +80,11 @@ export interface AgentToolMetadata {
   snapshotId?: string;
   snapshotIds?: string[];
   unchanged?: boolean;
+  agentId?: string;
+  subagentType?: string;
+  agentStatus?: "running" | "completed" | "failed" | "cancelled";
+  branch?: string;
+  commitSha?: string;
 }
 
 export interface AgentToolResult {

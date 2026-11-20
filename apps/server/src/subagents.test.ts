@@ -8,7 +8,7 @@ import type { TaskPermissions, TaskRecord } from "@hearth/core";
 import type { NativeRunOptions, NativeRunResult } from "./native-executor.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import { ProjectService } from "./projects.ts";
-import { createSubagentTool } from "./subagents.ts";
+import { createAgentTool, createSubagentTool } from "./subagents.ts";
 import { TaskWorktreeService } from "./worktrees.ts";
 
 describe("native subagents", () => {
@@ -74,9 +74,37 @@ describe("native subagents", () => {
     expect(options?.task.goal).toBe("检查 README 并给出结论");
     expect(options?.permissions?.writeRoots).toEqual([]);
     expect(options?.permissions?.tools).not.toContain("write_file");
-    expect(options?.permissions?.tools).not.toContain("shell");
+    expect(options?.permissions?.tools).toContain("shell");
+    expect(options?.mode).toBe("plan");
     expect(options?.extraTools).toBeUndefined();
     expect(output.usage).toMatchObject({ inputTokens: 31, outputTokens: 12 });
+  });
+
+  it("dispatches a typed explore agent with a plan-mode tool boundary", async () => {
+    const captured: NativeRunOptions[] = [];
+    const parentWorktree = worktrees.ensure(task);
+    const tool = createAgentTool({
+      task,
+      prepared: { root: parentWorktree.path, outDir: join(parentWorktree.path, "out"), inputs: [] },
+      settings: settings(),
+      permissions,
+      signal: new AbortController().signal,
+      worktrees,
+      parentWorktree,
+      runner: async (options) => {
+        captured.push(options);
+        return result("找到 README.md:1");
+      }
+    });
+
+    const output = await tool.execute({ subagent_type: "explore", description: "定位 README", prompt: "找到入口文档并返回行号" }, context(parentWorktree.path));
+
+    expect(output.content).toContain("agentId:");
+    expect(output.content).toContain("type: explore");
+    expect(output.metadata).toMatchObject({ subagentType: "explore", agentStatus: "completed" });
+    expect(captured[0]?.mode).toBe("plan");
+    expect(captured[0]?.task.goal).toBe("找到入口文档并返回行号");
+    expect(captured[0]?.prompt).toContain("输出契约");
   });
 
   it("creates an isolated child worktree from the parent HEAD and commits its changes", async () => {
@@ -110,8 +138,10 @@ describe("native subagents", () => {
     expect(existsSync(join(childRoot, "child.txt"))).toBe(true);
     expect(gitOutput(parentWorktree.path, ["status", "--porcelain"])).toBe(parentStatus);
     expect(gitOutput(parentWorktree.path, ["show", "HEAD:README.md"])).toBe("base\n");
-    expect(output.content).toContain("子代理（隔离写）完成");
-    expect(output.content).toContain("分支：hearth/");
+    expect(output.content).toContain("agentId:");
+    expect(output.content).toContain("type: general-purpose");
+    expect(output.content).toContain("branch: hearth/");
+    expect(output.content).toContain("commit:");
     const recorded = store.listTaskWorktrees(projectId).find((item) => item.path === childRoot);
     expect(recorded?.baseSha).toBe(parentHead);
     expect(gitOutput(childRoot, ["rev-parse", "HEAD"])).not.toBe(parentHead);
@@ -129,6 +159,7 @@ describe("native subagents", () => {
       signal: new AbortController().signal,
       worktrees,
       parentWorktree,
+      maxSubagents: 2,
       runner: async () => {
         calls += 1;
         return result("完成");
@@ -138,7 +169,7 @@ describe("native subagents", () => {
     await tool.execute({ objective: "第一项", mode: "read-only" }, context(parentWorktree.path));
     await tool.execute({ objective: "第二项", mode: "read-only" }, context(parentWorktree.path));
     await expect(tool.execute({ objective: "第三项", mode: "read-only" }, context(parentWorktree.path)))
-      .rejects.toThrow("最多委派 2 个");
+      .rejects.toThrow("最多启动 2 个");
     expect(calls).toBe(2);
 
     const nested = createSubagentTool({

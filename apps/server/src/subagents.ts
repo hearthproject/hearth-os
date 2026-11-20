@@ -1,32 +1,14 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import type { RunBudget, RunUsage, TaskPermissions, TaskRecord, TaskWorktree } from "@hearth/core";
-import { NATIVE_TOKEN_CEILING } from "@hearth/core";
-import { zeroUsage, type AgentTool, type AgentToolResult } from "@hearth/agent-runtime";
+import type { RunBudget, TaskPermissions, TaskRecord, TaskWorktree } from "@hearth/core";
+import { zeroUsage, agentProfile, type AgentTool, type AgentToolResult, type SubagentType } from "@hearth/agent-runtime";
 import { runNativeTask, type NativeRunOptions, type NativeRunResult } from "./native-executor.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import type { PreparedWorkspace } from "./workspace.ts";
 import type { TaskWorktreeService } from "./worktrees.ts";
 
-const MAX_SUBAGENTS = 2;
-const READ_ONLY_TOOLS = new Set([
-  "read_file",
-  "read_document",
-  "list_files",
-  "search_text",
-  "glob",
-  "grep",
-  "fetch_url",
-  "ask_user",
-  "finish_task"
-]);
-const SUBAGENT_BUDGET: RunBudget = {
-  maxTurns: 40,
-  maxToolCalls: 400,
-  maxTokens: NATIVE_TOKEN_CEILING,
-  maxDurationMs: 10 * 60_000
-};
+const MAX_SUBAGENTS = 4;
 
 export type SubagentRunner = (options: NativeRunOptions) => Promise<NativeRunResult>;
 
@@ -42,65 +24,72 @@ export interface SubagentToolOptions {
   budget?: RunBudget | undefined;
   maxSubagents?: number | undefined;
   depth?: number | undefined;
-  onStarted?: ((info: { childId: string; mode: "read-only" | "isolated-write"; title: string }) => void) | undefined;
+  compatibility?: boolean | undefined;
+  onStarted?: ((info: { childId: string; mode: "read-only" | "isolated-write"; title: string; type: SubagentType }) => void) | undefined;
+}
+
+export function createAgentTool(options: SubagentToolOptions): AgentTool {
+  return createDispatchTool(options, false);
 }
 
 export function createSubagentTool(options: SubagentToolOptions): AgentTool {
+  return createDispatchTool(options, true);
+}
+
+function createDispatchTool(options: SubagentToolOptions, compatibility: boolean): AgentTool {
   const runner = options.runner ?? runNativeTask;
   const maxSubagents = Math.max(1, Math.min(MAX_SUBAGENTS, options.maxSubagents ?? MAX_SUBAGENTS));
   const depth = options.depth ?? 0;
   let started = 0;
 
   return {
-    definition: {
-      name: "delegate_task",
-      description: "把一段边界清晰的子任务交给独立上下文的子代理。只读模式不能写入；隔离写模式会从父任务当前提交创建独立 Worktree，返回分支与提交，供你检查后手动合并。每次任务最多委派两次，不能嵌套委派，也不会自动合并。",
-      parameters: {
-        type: "object",
-        properties: {
-          objective: { type: "string", description: "子任务目标、边界和期望输出" },
-          mode: { type: "string", enum: ["read-only", "isolated-write"], description: "只读，或从父任务当前提交创建独立 Worktree 写入" },
-          title: { type: "string", description: "便于识别的子任务名称" }
-        },
-        required: ["objective", "mode"],
-        additionalProperties: false
-      }
-    },
+    definition: compatibility ? delegationDefinition() : agentDefinition(),
     async execute(input): Promise<AgentToolResult> {
       if (depth > 0) throw new Error("子代理不能继续委派，只允许单层委派");
       const args = input && typeof input === "object" ? input as Record<string, unknown> : {};
-      const objective = typeof args.objective === "string" ? args.objective.trim() : "";
-      const mode = args.mode === "isolated-write" ? "isolated-write" : args.mode === "read-only" ? "read-only" : null;
-      const title = typeof args.title === "string" ? args.title.trim().slice(0, 120) : "";
-      if (!objective) throw new Error("请提供子任务目标");
-      if (objective.length > 20_000) throw new Error("子任务目标过长");
-      if (!mode) throw new Error("mode 必须是 read-only 或 isolated-write");
-      if (started >= maxSubagents) throw new Error(`每个任务最多委派 ${maxSubagents} 个子代理`);
+      const parsed = compatibility ? parseDelegationArgs(args) : parseAgentArgs(args);
+      if (!parsed.objective) throw new Error(compatibility ? "请提供子任务目标" : "请提供 prompt");
+      if (parsed.objective.length > 20_000) throw new Error("子任务目标过长");
+      const profile = agentProfile(parsed.type);
+      if (!profile) throw new Error(`未知子代理类型：${parsed.type}`);
+      if (started >= maxSubagents) throw new Error(`每个任务最多启动 ${maxSubagents} 个子代理`);
       if (options.signal.aborted) throw new Error("任务已取消");
 
       started += 1;
-      const childId = subagentTaskId(options.task.id);
-      const childTitle = title || `子任务 ${started}`;
-      const worktree = mode === "isolated-write" ? createChildWorktree(childId, options) : null;
-      options.onStarted?.({ childId, mode, title: childTitle });
+      const childId = subagentTaskId(options.task.id, profile.type);
+      const childTitle = parsed.title || `${profile.type} ${started}`;
+      if (profile.isolation === "worktree" && !options.task.projectId) throw new Error("general-purpose 子代理只能用于本地项目任务");
+      const worktree = profile.isolation === "worktree" ? createChildWorktree(childId, options) : null;
+      options.onStarted?.({
+        childId,
+        mode: profile.isolation === "worktree" ? "isolated-write" : "read-only",
+        title: childTitle,
+        type: profile.type
+      });
       const childRoot = worktree?.path ?? options.prepared.root;
       const childOutDir = worktree ? join(worktree.path, ".hearth", "subagent-out") : options.prepared.outDir;
       const childTask = childTaskRecord({
         id: childId,
         title: childTitle,
-        objective,
+        objective: parsed.objective,
         task: options.task,
         root: childRoot,
         outDir: childOutDir,
-        permissions: mode === "read-only" ? readOnlyPermissions(options) : isolatedWritePermissions(options, childRoot, childOutDir)
+        permissions: profile.isolation === "worktree" ? isolatedWritePermissions(options, childRoot, childOutDir) : readOnlyPermissions(options, profile.tools)
       });
+      const budget = {
+        ...profile.budget,
+        ...(parsed.maxTurns ? { maxTurns: Math.min(profile.budget.maxTurns, parsed.maxTurns) } : {}),
+        ...(options.budget ? { maxTokens: Math.min(profile.budget.maxTokens, options.budget.maxTokens) } : {})
+      };
       const result = await runner({
         task: childTask,
         prepared: { root: childRoot, outDir: childOutDir, inputs: [] },
         settings: options.settings,
-        prompt: subagentPrompt(objective, mode, options.task),
-        permissions: childTask.permissions ?? readOnlyPermissions(options),
-        budget: options.budget ?? SUBAGENT_BUDGET,
+        prompt: agentPrompt(profile.type, parsed.objective, options.task, profile.outputContract),
+        permissions: childTask.permissions ?? readOnlyPermissions(options, profile.tools),
+        budget,
+        mode: profile.mode,
         signal: options.signal,
         expectedOutputs: []
       });
@@ -112,22 +101,28 @@ export function createSubagentTool(options: SubagentToolOptions): AgentTool {
       }
 
       const usage = result.usage ?? zeroUsage();
+      const summary = result.finalResponse || "未返回总结";
       if (!worktree) {
         return {
-          content: `子代理（只读）完成：${result.finalResponse || "未返回总结"}`,
-          usage
+          content: `agentId: ${childId}\nstatus: completed\ntype: ${profile.type}\nsummary: ${summary}`,
+          usage,
+          metadata: { agentId: childId, subagentType: profile.type, agentStatus: "completed" }
         };
       }
 
       const commit = commitChildWorktree(worktree.path, options.task.id, childTitle);
       return {
         content: [
-          `子代理（隔离写）完成：${result.finalResponse || "未返回总结"}`,
-          `分支：${worktree.branch}`,
-          `提交：${commit}`,
+          `agentId: ${childId}`,
+          "status: completed",
+          `type: ${profile.type}`,
+          `summary: ${summary}`,
+          `branch: ${worktree.branch}`,
+          `commit: ${commit}`,
           "结果尚未合并。请检查该分支和提交后，由父任务手动 cherry-pick。"
         ].join("\n"),
-        usage
+        usage,
+        metadata: { agentId: childId, subagentType: profile.type, agentStatus: "completed", branch: worktree.branch, commitSha: commit }
       };
     }
   };
@@ -176,17 +171,72 @@ function childTaskRecord(input: {
   };
 }
 
-function readOnlyPermissions(options: SubagentToolOptions): TaskPermissions {
+function agentDefinition(): AgentTool["definition"] {
+  return {
+    name: "agent",
+    description: "Start a typed subagent with its own context. explore/plan/review are read-only; general-purpose writes in an isolated worktree. Subagents cannot delegate further.",
+    parameters: {
+      type: "object",
+      properties: {
+        subagent_type: { type: "string", enum: ["explore", "plan", "review", "general-purpose"], description: "explore locates code, plan designs steps, review checks a diff, general-purpose implements in a worktree" },
+        description: { type: "string", description: "3-8 word label shown to the parent and UI" },
+        prompt: { type: "string", description: "Self-contained task; the child cannot see the parent conversation" },
+        run_in_background: { type: "boolean", description: "Return immediately and continue in the background" },
+        maxTurns: { type: "number", description: "Optional turn cap for this child, bounded by the profile default" }
+      },
+      required: ["subagent_type", "description", "prompt"],
+      additionalProperties: false
+    }
+  };
+}
+
+function delegationDefinition(): AgentTool["definition"] {
+  return {
+    name: "delegate_task",
+    description: "Compatibility alias for agent. read-only maps to explore; isolated-write maps to general-purpose in a worktree.",
+    parameters: {
+      type: "object",
+      properties: {
+        objective: { type: "string", description: "子任务目标、边界和期望输出" },
+        mode: { type: "string", enum: ["read-only", "isolated-write"], description: "只读，或从父任务当前提交创建独立 Worktree 写入" },
+        title: { type: "string", description: "便于识别的子任务名称" }
+      },
+      required: ["objective", "mode"],
+      additionalProperties: false
+    }
+  };
+}
+
+function parseAgentArgs(args: Record<string, unknown>): { type: string; objective: string; title: string; maxTurns?: number } {
+  const type = typeof args.subagent_type === "string" ? args.subagent_type : "";
+  const objective = typeof args.prompt === "string" ? args.prompt.trim() : "";
+  const title = typeof args.description === "string" ? args.description.trim().slice(0, 120) : "";
+  const maxTurns = Number.isFinite(args.maxTurns) ? Math.max(1, Math.floor(Number(args.maxTurns))) : undefined;
+  if (args.run_in_background === true) throw new Error("后台子代理尚未启用；请先使用前台 agent 调用");
+  return { type, objective, title, ...(maxTurns ? { maxTurns } : {}) };
+}
+
+function parseDelegationArgs(args: Record<string, unknown>): { type: string; objective: string; title: string; maxTurns?: number } {
+  const objective = typeof args.objective === "string" ? args.objective.trim() : "";
+  const title = typeof args.title === "string" ? args.title.trim().slice(0, 120) : "";
+  const mode = args.mode === "isolated-write" ? "general-purpose" : args.mode === "read-only" ? "explore" : "";
+  if (!mode) throw new Error("mode 必须是 read-only 或 isolated-write");
+  return { type: mode, objective, title };
+}
+
+function readOnlyPermissions(options: SubagentToolOptions, allowed: readonly string[]): TaskPermissions {
+  const allow = new Set(allowed);
   return {
     readRoots: [options.prepared.root],
     writeRoots: [],
     networkHosts: [...options.permissions.networkHosts],
-    tools: [...new Set(["finish_task", ...options.permissions.tools.filter((tool) => READ_ONLY_TOOLS.has(tool))])]
+    tools: [...new Set(["finish_task", ...options.permissions.tools.filter((tool) => allow.has(tool))])]
   };
 }
 
 function isolatedWritePermissions(options: SubagentToolOptions, root: string, outDir: string): TaskPermissions {
-  const tools = options.permissions.tools.filter((tool) => tool !== "delegate_task" && !tool.startsWith("mcp__"));
+  const blocked = new Set(["delegate_task", "agent", "agent_wait", "agent_status", "agent_kill"]);
+  const tools = options.permissions.tools.filter((tool) => !blocked.has(tool) && !tool.startsWith("mcp__"));
   if (!tools.includes("finish_task")) tools.push("finish_task");
   if (!tools.some((tool) => ["write_file", "write_spreadsheet", "write_document", "edit_file", "apply_patch", "shell"].includes(tool))) {
     throw new Error("父任务没有授予任何写入能力，不能启动隔离写子代理");
@@ -199,20 +249,20 @@ function isolatedWritePermissions(options: SubagentToolOptions, root: string, ou
   };
 }
 
-function subagentPrompt(objective: string, mode: "read-only" | "isolated-write", parent: TaskRecord): string {
+function agentPrompt(type: string, objective: string, parent: TaskRecord, outputContract: string): string {
   return [
-    `你是一个独立子代理，只负责下面这段子任务。父任务：${parent.title}`,
+    `你是一个 ${type} 子代理，只负责下面这段子任务。父任务：${parent.title}`,
     `目标：${objective}`,
-    mode === "read-only"
-      ? "你处于只读模式：不要尝试写入、删除、移动文件或执行 shell。请调查、分析并返回带证据的结论。"
-      : "你处于隔离写模式：只能修改当前 Worktree。完成后必须调用 finish_task；不要尝试合并、推送或操作父工作区。",
+    `输出契约：${outputContract}`,
+    "上下文是隔离的：不要假设父代理知道你的中间过程，结论必须自带文件路径、行号和证据。",
     "不要做超出目标的扩展，不要请求用户确认，不要委派其他子代理。"
   ].join("\n");
 }
 
-function subagentTaskId(parentId: string): string {
+function subagentTaskId(parentId: string, type: string): string {
   const safeParent = parentId.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 80) || "task";
-  return `${safeParent}-sub-${randomUUID().slice(0, 8)}`;
+  const safeType = type.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 16) || "agent";
+  return `${safeParent}-${safeType}-${randomUUID().slice(0, 8)}`;
 }
 
 function commitChildWorktree(path: string, parentId: string, title: string): string {
