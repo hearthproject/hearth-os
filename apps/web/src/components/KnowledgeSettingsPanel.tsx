@@ -147,22 +147,25 @@ export function KnowledgeSettingsPanel() {
             <div className="knowledge-setup-head">
               <strong>
                 {setup.installed
-                  ? setup.running ? "记忆服务已安装并在运行" : "记忆服务已安装，但未运行"
-                  : "尚未安装记忆服务"}
+                  ? enabled
+                    ? setup.running ? "记忆助手已开启" : "记忆助手暂时不可用"
+                    : "记忆助手已安装，尚未开启"
+                  : "记忆助手尚未安装"}
               </strong>
-              <span className={`status-chip ${setup.running ? "ok" : "warn"}`}>
-                <span className={`status-dot ${setup.running ? "online" : "offline"}`} />
-                {setup.running ? "运行中" : setup.message ?? "未就绪"}
-              </span>
             </div>
             {!setup.installed && (
               <p className="form-hint">
-                记忆助手是可选项，不安装也能使用聊天、任务和手动记录的记忆。安装会通过 uv 下载本地记忆服务，首次约占用 0.8–1 GiB 磁盘。
+                记忆助手是可选项，不开启也能正常聊天和完成任务。首次准备会下载所需组件，约占 0.8–1 GiB 磁盘空间。
               </p>
             )}
-            {!setup.installed && <p className="form-hint">安装命令：<code>{setup.installCommand}</code></p>}
+            {!setup.installed && (
+              <details className="knowledge-log">
+                <summary>高级信息</summary>
+                <p className="form-hint">准备命令：<code>{setup.installCommand}</code></p>
+              </details>
+            )}
             {!setup.installed && !setup.uv && (
-              <p className="form-error">没有检测到 uv，请先安装 uv（https://docs.astral.sh/uv/）后重新检测。</p>
+              <p className="form-error">缺少准备组件，请先安装 uv（https://docs.astral.sh/uv/）后重新检测。</p>
             )}
             <div className="settings-actions">
               {!setup.installed && (
@@ -173,17 +176,17 @@ export function KnowledgeSettingsPanel() {
                   disabled={setupBusy !== null || !setup.uv || setup.install.status === "running"}
                 >
                   {setupBusy === "install" || setup.install.status === "running" ? <Loader2 size={15} className="spin" /> : null}
-                  安装记忆服务
+                  开启记忆助手
                 </button>
               )}
               {setup.installed && !setup.running && (
                 <button type="button" className="button primary" onClick={() => void runSetup("start")} disabled={setupBusy !== null}>
-                  {setupBusy === "start" ? <Loader2 size={15} className="spin" /> : null} 启动服务
+                  {setupBusy === "start" ? <Loader2 size={15} className="spin" /> : null} 开启
                 </button>
               )}
               {setup.running && setup.managed && (
                 <button type="button" className="button" onClick={() => void runSetup("stop")} disabled={setupBusy !== null}>
-                  停止服务
+                  暂停
                 </button>
               )}
               <button type="button" className="button" onClick={() => void setupQuery.refetch()} disabled={setupQuery.isFetching}>
@@ -193,7 +196,7 @@ export function KnowledgeSettingsPanel() {
             {setup.install.status !== "idle" && (
               <details className="knowledge-log">
                 <summary>
-                  安装日志 · {setup.install.status === "running" ? "进行中" : setup.install.status === "succeeded" ? "成功" : "失败"}
+                  准备日志 · {setup.install.status === "running" ? "进行中" : setup.install.status === "succeeded" ? "成功" : "失败"}
                 </summary>
                 <pre>{setup.install.log.slice(-8000) || "（暂无输出）"}</pre>
               </details>
@@ -211,43 +214,7 @@ export function KnowledgeSettingsPanel() {
         <div className="form-grid">
           <label className="checkbox-field span-2">
             <input type="checkbox" checked={draft.enabled} onChange={(event) => patchDraft({ enabled: event.target.checked })} />
-            <span>让聊天和任务自动参考记忆（需要本机记忆服务）</span>
-          </label>
-          <label>
-            <span>服务地址（一般不用改）</span>
-            <input value={draft.baseUrl} onChange={(event) => patchDraft({ baseUrl: event.target.value })} spellCheck={false} />
-          </label>
-          <label>
-            <span>API Key（可选）</span>
-            <input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={draft.apiKeyMasked ?? "开发模式无需填写"} autoComplete="off" />
-          </label>
-          <label>
-            <span>每次最多参考几条</span>
-            <input type="number" min={1} max={20} value={draft.recall.maxItems} onChange={(event) => patchDraft({ recall: { ...draft.recall, maxItems: Number(event.target.value) } })} />
-          </label>
-          <label>
-            <span>参考内容长度上限</span>
-            <input type="number" min={200} max={4000} value={draft.recall.maxTokens} onChange={(event) => patchDraft({ recall: { ...draft.recall, maxTokens: Number(event.target.value) } })} />
-          </label>
-          <label>
-            <span>等待时间（毫秒）</span>
-            <input type="number" min={500} max={10000} value={draft.recall.timeoutMs} onChange={(event) => patchDraft({ recall: { ...draft.recall, timeoutMs: Number(event.target.value) } })} />
-          </label>
-          <label>
-            <span>只参考足够相关的内容（0–1，留空不限）</span>
-            <input
-              type="number" min={0} max={1} step={0.01}
-              value={draft.recall.minScore ?? ""}
-              onChange={(event) => patchDraft({ recall: { ...draft.recall, minScore: event.target.value === "" ? null : Number(event.target.value) } })}
-            />
-          </label>
-          <label className="checkbox-field">
-            <input type="checkbox" checked={draft.recall.includeResources} onChange={(event) => patchDraft({ recall: { ...draft.recall, includeResources: event.target.checked } })} />
-            <span>参考已完成任务和资料</span>
-          </label>
-          <label className="checkbox-field">
-            <input type="checkbox" checked={draft.recall.includeMemories} onChange={(event) => patchDraft({ recall: { ...draft.recall, includeMemories: event.target.checked } })} />
-            <span>参考记忆</span>
+            <span>让聊天和任务自动参考记忆</span>
           </label>
           <label>
             <span>把记忆加入自动参考</span>
@@ -267,37 +234,84 @@ export function KnowledgeSettingsPanel() {
             </select>
           </label>
           <label className="checkbox-field">
+            <input type="checkbox" checked={draft.recall.includeResources} onChange={(event) => patchDraft({ recall: { ...draft.recall, includeResources: event.target.checked } })} />
+            <span>参考已完成任务和资料</span>
+          </label>
+          <label className="checkbox-field">
+            <input type="checkbox" checked={draft.recall.includeMemories} onChange={(event) => patchDraft({ recall: { ...draft.recall, includeMemories: event.target.checked } })} />
+            <span>参考记忆</span>
+          </label>
+          <label className="checkbox-field">
             <input type="checkbox" checked={draft.write.sources} onChange={(event) => patchDraft({ write: { ...draft.write, sources: event.target.checked } })} />
             <span>把资料正文加入自动参考</span>
           </label>
-          <label>
-            <span>每晚自动整理（cron）</span>
-            <input value={draft.write.reindexCron} onChange={(event) => patchDraft({ write: { ...draft.write, reindexCron: event.target.value } })} spellCheck={false} />
-          </label>
         </div>
+
+        <details className="knowledge-advanced">
+          <summary>高级设置</summary>
+          <div className="form-grid">
+            <label>
+              <span>服务地址（一般不用改）</span>
+              <input value={draft.baseUrl} onChange={(event) => patchDraft({ baseUrl: event.target.value })} spellCheck={false} />
+            </label>
+            <label>
+              <span>API Key（可选）</span>
+              <input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={draft.apiKeyMasked ?? "开发模式无需填写"} autoComplete="off" />
+            </label>
+            <label>
+              <span>每次最多参考几条</span>
+              <input type="number" min={1} max={20} value={draft.recall.maxItems} onChange={(event) => patchDraft({ recall: { ...draft.recall, maxItems: Number(event.target.value) } })} />
+            </label>
+            <label>
+              <span>参考内容长度上限</span>
+              <input type="number" min={200} max={4000} value={draft.recall.maxTokens} onChange={(event) => patchDraft({ recall: { ...draft.recall, maxTokens: Number(event.target.value) } })} />
+            </label>
+            <label>
+              <span>最长等待时间（毫秒）</span>
+              <input type="number" min={500} max={10000} value={draft.recall.timeoutMs} onChange={(event) => patchDraft({ recall: { ...draft.recall, timeoutMs: Number(event.target.value) } })} />
+            </label>
+            <label>
+              <span>只使用更相关的内容（0–1，留空不限）</span>
+              <input
+                type="number" min={0} max={1} step={0.01}
+                value={draft.recall.minScore ?? ""}
+                onChange={(event) => patchDraft({ recall: { ...draft.recall, minScore: event.target.value === "" ? null : Number(event.target.value) } })}
+              />
+            </label>
+            <label>
+              <span>每晚自动整理</span>
+              <input value={draft.write.reindexCron} onChange={(event) => patchDraft({ write: { ...draft.write, reindexCron: event.target.value } })} spellCheck={false} />
+            </label>
+          </div>
+        </details>
 
         <div className="settings-actions">
           <button type="button" className="button primary" onClick={() => void save()} disabled={busy !== null}>
             {busy === "save" ? <Loader2 size={15} className="spin" /> : <Save size={15} />} 保存
           </button>
-          <button type="button" className="button" onClick={() => void run("test")} disabled={busy !== null}>
-            {busy === "test" ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />} 测试连接
-          </button>
-          <button type="button" className="button" onClick={() => void run("sync")} disabled={busy !== null}>立即整理</button>
-          <button type="button" className="button" onClick={() => void run("reconcile")} disabled={busy !== null}>重新整理全部</button>
-          <button type="button" className="button" onClick={() => void run("reindex")} disabled={busy !== null}>重建搜索数据</button>
         </div>
 
-        <div className="metric-grid">
-          <Metric label="等待整理" value={status?.jobs.pending ?? 0} />
-          <Metric label="正在整理" value={status?.jobs.running ?? 0} />
-          <Metric label="稍后重试" value={status?.jobs.failed ?? 0} />
-          <Metric label="多次失败" value={status?.jobs.dead ?? 0} {...(status?.jobs.dead ? { tone: "warn" as const } : {})} />
-        </div>
-        <p className="form-hint">
-          上次整理：{status?.lastReconcileAt ?? "未执行"} ｜ 上次重建：{status?.lastReindexDate ?? "未执行"}
-          {status?.health.detail ? ` ｜ ${status.health.detail}` : ""}
-        </p>
+        <details className="knowledge-advanced">
+          <summary>检查与维护</summary>
+          <div className="settings-actions">
+            <button type="button" className="button" onClick={() => void run("test")} disabled={busy !== null}>
+              {busy === "test" ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />} 检查记忆助手
+            </button>
+            <button type="button" className="button" onClick={() => void run("sync")} disabled={busy !== null}>整理新内容</button>
+            <button type="button" className="button" onClick={() => void run("reconcile")} disabled={busy !== null}>全部重新整理</button>
+            <button type="button" className="button" onClick={() => void run("reindex")} disabled={busy !== null}>重新整理查找内容</button>
+          </div>
+          <div className="metric-grid">
+            <Metric label="等待整理" value={status?.jobs.pending ?? 0} />
+            <Metric label="正在整理" value={status?.jobs.running ?? 0} />
+            <Metric label="稍后重试" value={status?.jobs.failed ?? 0} />
+            <Metric label="多次失败" value={status?.jobs.dead ?? 0} {...(status?.jobs.dead ? { tone: "warn" as const } : {})} />
+          </div>
+          <p className="form-hint">
+            上次整理：{status?.lastReconcileAt ?? "未执行"} ｜ 上次重建：{status?.lastReindexDate ?? "未执行"}
+            {status?.health.detail ? ` ｜ ${status.health.detail}` : ""}
+          </p>
+        </details>
       </div>
     </section>
   );

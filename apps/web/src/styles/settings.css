@@ -166,6 +166,40 @@
   font-size: var(--fs-11);
 }
 
+.knowledge-advanced {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-subtle);
+}
+
+.knowledge-advanced > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-secondary);
+  font-size: var(--fs-12);
+  list-style: none;
+  cursor: pointer;
+}
+
+.knowledge-advanced > summary::before {
+  width: 10px;
+  color: var(--ink-tertiary);
+  content: "+";
+}
+
+.knowledge-advanced[open] > summary::before {
+  content: "−";
+}
+
+.knowledge-advanced .form-grid {
+  margin-top: 12px;
+}
+
+.knowledge-advanced .settings-actions {
+  margin-top: 12px;
+}
+
 .knowledge-log pre,
 .wizard-install-log {
   max-height: 220px;

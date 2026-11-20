@@ -15,7 +15,7 @@ import { api } from "../lib/api.ts";
 import type { ModelProtocol, ModelProviderPreset } from "../lib/types.ts";
 import { HearthMark } from "../components/HearthMark.tsx";
 
-const STEPS = ["模型", "执行器", "知识库", "偏好", "完成"];
+const STEPS = ["模型", "执行器", "记忆助手", "偏好", "完成"];
 
 interface ModelDraft {
   providerId: string;
@@ -180,12 +180,12 @@ export function OnboardingPage() {
     try {
       if (action === "install") {
         await api.installKnowledge();
-        setNotice({ tone: "info", text: "已开始安装 OpenViking，完成后可以直接进入下一步。" });
+        setNotice({ tone: "info", text: "已开始准备记忆助手，完成后可以直接进入下一步。" });
       } else {
         const result = await api.startKnowledgeService();
         if (result.setup.running) {
           await api.saveKnowledgeSettings({ enabled: true, manageProcess: true });
-          setNotice({ tone: "ok", text: "知识库已启动并启用。" });
+          setNotice({ tone: "ok", text: "记忆助手已开启。" });
         } else {
           setNotice({ tone: "error", text: "服务尚未就绪，可以稍后在设置里重试。" });
         }
@@ -300,9 +300,9 @@ export function OnboardingPage() {
 
           {step === 2 && (
             <section className="wizard-panel">
-              <h1>知识库（可选）</h1>
+              <h1>记忆助手（可选）</h1>
               <p className="wizard-note">
-                OpenViking 是本机语义索引服务，不安装也能正常聊天、执行任务和使用记忆。需要时可以在设置里随时补装。
+                Hearth 可以把做过的事和你的偏好整理成可查找的记忆。不开启也能正常聊天和完成任务，之后可以在设置里随时补上。
               </p>
               {setupQuery.data && (
                 <div className="wizard-knowledge">
@@ -310,12 +310,12 @@ export function OnboardingPage() {
                     <span className={`status-dot ${setupQuery.data.running ? "online" : "offline"}`} />
                     <strong>
                       {setupQuery.data.installed
-                        ? setupQuery.data.running ? "已安装并在运行" : "已安装，服务未运行"
-                        : "尚未安装"}
+                        ? setupQuery.data.running ? "已开启" : "已安装，尚未开启"
+                        : "尚未开启"}
                     </strong>
                   </div>
                   <p className="wizard-note">
-                    安装使用 uv 下载 OpenViking 与本地嵌入模型，首次约占用 0.8–1 GiB 磁盘，并需要联网。
+                    首次准备会下载所需组件，约占 0.8–1 GiB 磁盘空间，并需要联网。
                   </p>
                   <div className="wizard-inline-actions">
                     {!setupQuery.data.installed && (
@@ -325,12 +325,12 @@ export function OnboardingPage() {
                         disabled={knowledgeBusy !== null || !setupQuery.data.uv || setupQuery.data.install.status === "running"}
                       >
                         {knowledgeBusy === "install" || setupQuery.data.install.status === "running" ? <Loader2 size={14} className="spin" /> : null}
-                        安装 OpenViking
+                        开启记忆助手
                       </button>
                     )}
                     {setupQuery.data.installed && !setupQuery.data.running && (
                       <button className="primary-button" onClick={() => void handleKnowledge("start")} disabled={knowledgeBusy !== null}>
-                        {knowledgeBusy === "start" ? <Loader2 size={14} className="spin" /> : null} 启动并启用
+                        {knowledgeBusy === "start" ? <Loader2 size={14} className="spin" /> : null} 开启
                       </button>
                     )}
                     {setupQuery.data.running && <span className="status-chip ok"><CheckCircle2 size={13} /> 已就绪</span>}

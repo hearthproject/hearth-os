@@ -255,13 +255,11 @@
   border-bottom: 0;
 }
 
-.workbench-page .memory-list,
 .workbench-page .schedule-list {
   display: block;
   border-top: 1px solid var(--line);
 }
 
-.workbench-page .memory-card,
 .workbench-page .schedule-card {
   margin: 0;
   padding: 14px 0;

@@ -22,6 +22,7 @@ import { api } from "../lib/api.ts";
 import { formatDuration, formatNumber, relativeTime } from "../lib/format.ts";
 import { hasDesktopBridge, pickFolder } from "../lib/desktop.ts";
 import { TASK_STATUS_LABELS } from "../lib/labels.ts";
+import { isEvaluationMemory } from "../lib/memory.ts";
 import type {
   ContextSettings,
   ExecutorId,
@@ -42,6 +43,7 @@ import { SecuritySettingsPanel } from "../components/SecuritySettingsPanel.tsx";
 import { FeishuSettingsPanel } from "../components/FeishuSettingsPanel.tsx";
 import { KnowledgeSettingsPanel } from "../components/KnowledgeSettingsPanel.tsx";
 import { BrowserSettingsPanel } from "../components/BrowserSettingsPanel.tsx";
+import { MemorySettingsForm } from "../components/MemorySettingsForm.tsx";
 
 type SettingsTab = "executors" | "models" | "projects" | "extensions" | "browser" | "automation" | "knowledge" | "connections" | "context" | "data";
 
@@ -1106,7 +1108,7 @@ function trashKey(item: { kind: TrashKind; id: string }): string {
 
 function AutomationTab() {
   const memoryQuery = useQuery({ queryKey: ["memory"], queryFn: api.memory, refetchInterval: 30_000 });
-  const activeMemories = (memoryQuery.data?.memories ?? []).filter((memory) => memory.status === "active");
+  const activeMemories = (memoryQuery.data?.memories ?? []).filter((memory) => memory.status === "active" && !isEvaluationMemory(memory));
   const latestRecall = memoryQuery.data?.recalls[0] ?? null;
 
   return (
@@ -1119,13 +1121,14 @@ function AutomationTab() {
               <dd>
                 自动提炼并参与后续对话
                 <small>
-                  {memoryQuery.isLoading ? "正在读取…" : `${activeMemories.length} 条已启用`}
-                  {latestRecall ? ` · 最近召回于 ${relativeTime(latestRecall.createdAt)}` : ""}
+                  {memoryQuery.isLoading ? "正在读取…" : `${activeMemories.length} 条已记住`}
+                  {latestRecall ? ` · 最近参考于 ${relativeTime(latestRecall.createdAt)}` : ""}
                 </small>
               </dd>
             </div>
           </dl>
-          <p className="settings-hint"><ShieldAlert size={13} /> 自动记忆只提炼已有任务事实，并继承或收窄原任务权限；外部动作仍按原有审批边界执行。</p>
+          {memoryQuery.data && <MemorySettingsForm key={memoryQuery.data.settings.updatedAt} settings={memoryQuery.data.settings} />}
+          <p className="settings-hint"><ShieldAlert size={13} /> Hearth 只会从已完成的任务里整理内容，不会改动原始记录；需要执行外部动作时仍会先征求你的同意。</p>
         </div>
       </section>
     </section>
