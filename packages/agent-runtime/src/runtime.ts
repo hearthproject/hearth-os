@@ -317,7 +317,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
           }
           continue;
         }
-        if (isTransientModelError(error) && transientRetries < 2) {
+        if (isTransientModelError(error) && transientRetries < 3) {
           transientRetries += 1;
           emit({ type: "notice", message: `模型暂时不可用，正在进行第 ${transientRetries} 次重试` });
           const delay = (options.retryDelayMs ?? 1_000) * transientRetries;
@@ -605,11 +605,12 @@ function stableJson(value: unknown): string {
 function isTransientModelError(error: unknown): boolean {
   const record = error && typeof error === "object" ? error as Record<string, unknown> : {};
   const status = typeof record.status === "number" ? record.status : null;
-  if (status === 429 || (status !== null && status >= 500 && status <= 599)) return true;
+  if (status === 408 || status === 429 || (status !== null && status >= 500 && status <= 599)) return true;
   const code = typeof record.code === "string" ? record.code : "";
   if (/^(ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|UND_ERR_|ENOTFOUND)/.test(code)) return true;
+  if (/^(upstream_error|upstream_unavailable|bad_gateway|gateway_timeout)$/i.test(code)) return true;
   const message = errorMessage(error);
-  return /(fetch failed|network error|socket hang up|connection reset|temporarily unavailable|rate limit|too many requests)/i.test(message);
+  return /(fetch failed|network error|socket hang up|connection reset|temporarily unavailable|rate limit|too many requests|upstream_error|upstream error|could not be completed|bad gateway|gateway timeout|service unavailable|overloaded)/i.test(message);
 }
 
 function isContextOverflow(error: unknown): boolean {

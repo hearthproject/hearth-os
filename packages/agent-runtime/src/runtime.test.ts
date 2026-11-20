@@ -320,13 +320,14 @@ describe("agent runtime", () => {
     expect(result.summary).toContain("finish_task");
   });
 
-  it("retries 429 and 5xx model failures twice", async () => {
+  it("retries 429, 5xx and upstream_error model failures three times", async () => {
     const root = workspace(roots);
     let attempts = 0;
     const model: AgentModel = async () => {
       attempts += 1;
       if (attempts === 1) throw Object.assign(new Error("rate limited"), { status: 429 });
       if (attempts === 2) throw Object.assign(new Error("upstream failed"), { status: 503 });
+      if (attempts === 3) throw Object.assign(new Error("[code=upstream_error] The request could not be completed."), { status: 400 });
       return turn("", [call("finish_task", { summary: "重试后完成" })]);
     };
     const result = await runAgent({
@@ -341,7 +342,7 @@ describe("agent runtime", () => {
       retryDelayMs: 0
     });
     expect(result.status).toBe("completed");
-    expect(attempts).toBe(3);
+    expect(attempts).toBe(4);
   });
 
   it("does not retry ordinary 4xx model errors", async () => {

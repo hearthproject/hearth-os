@@ -35,6 +35,7 @@ export function classifyFailureClass(input: FailureClassificationInput): Failure
   if (/凭据|credential|api.?key|token.*expired|登录失效|EAUTH|401/i.test(message) || code === "EAUTH") return "auth";
   if (/429|rate limit|too many requests|限流/i.test(message)) return "rate_limit";
   if (/overload|capacity|quota|配额|过载|503/i.test(message)) return "capacity";
+  if (/upstream_error|upstream error|could not be completed|bad gateway|gateway timeout|service unavailable/i.test(message) || code === "upstream_error") return "transport";
   if (/ETIMEDOUT|timed? ?out|timeout|超时/i.test(message)) return "timeout";
   if (/验证失败|validator|schema|期望产物|产物缺失|deliverable|expected output|contract/i.test(message)) return "validation_failed";
   if (/ECONNREFUSED|ECONNRESET|ENOTFOUND|EDNS|socket|network|网络|断连/i.test(message)) return "transport";

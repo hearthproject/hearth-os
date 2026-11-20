@@ -23,6 +23,8 @@ describe("failure policy", () => {
     expect(classifyFailureClass({ message: "overloaded 503" })).toBe("capacity");
     expect(classifyFailureClass({ message: "ETIMEDOUT" })).toBe("timeout");
     expect(classifyFailureClass({ message: "ECONNRESET network" })).toBe("transport");
+    expect(classifyFailureClass({ message: "[code=upstream_error] The request could not be completed." })).toBe("transport");
+    expect(classifyFailureClass({ message: "gateway failed", code: "upstream_error" })).toBe("transport");
     expect(classifyFailureClass({ message: "maxTurns budget exceeded" })).toBe("budget_exhausted");
     expect(classifyFailureClass({ message: "unexpected null" })).toBe("internal");
   });
