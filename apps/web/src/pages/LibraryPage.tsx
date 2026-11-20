@@ -158,8 +158,8 @@ export function LibraryPage() {
     if (window.confirm(message)) deleteMutation.mutate(node);
   }
 
-  const results = searchMutation.data?.hits ?? null;
-  const rootNodes = treeQuery.data?.nodes ?? [];
+  const results = (searchMutation.data?.hits ?? []).filter((hit) => !isTaskNode(hit.node));
+  const rootNodes = (treeQuery.data?.nodes ?? []).filter((node) => !isTaskNode(node));
   const total = statusQuery.data?.nodeCount ?? 0;
 
   return (
@@ -167,7 +167,7 @@ export function LibraryPage() {
       <div className="page-head library-page-head">
         <div>
           <h1>资料库</h1>
-          <p className="page-meta">你的文件、记忆、任务资料和技能，都在一个地方。</p>
+          <p className="page-meta">你的文件、记忆、资料和技能，都在一个地方。</p>
         </div>
         <div className="library-head-actions">
           <span className="library-total">{total > 0 ? `${total} 份资料` : "还没有资料"}</span>
@@ -189,7 +189,7 @@ export function LibraryPage() {
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜文件、记忆、任务或技能"
+            placeholder="搜文件、记忆、资料或技能"
           />
         </label>
         <button className="primary-button" type="submit" disabled={searchMutation.isPending}>
@@ -303,7 +303,7 @@ function TreeNodeRow({
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
-  const [open, setOpen] = useState(depth === 0 && node.childCount > 0);
+  const [open, setOpen] = useState(false);
   const childrenQuery = useQuery({
     queryKey: ["library-tree", node.id],
     queryFn: () => api.libraryTree(2, node.id),
@@ -416,6 +416,10 @@ function TrashList({
       ))}
     </div>
   );
+}
+
+function isTaskNode(node: LibraryNode): boolean {
+  return node.kind === "task" || node.refId === "task" || node.metadata.rootKind === "task";
 }
 
 function NodePreview({
