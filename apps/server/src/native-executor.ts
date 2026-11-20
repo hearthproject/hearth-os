@@ -16,6 +16,7 @@ import {
   discoverInstructions,
   goalContinuationPrompt,
   goalFinishIssue,
+  memoryIndexBlock,
   recordGoalTurns,
   instructionsBlock,
   resolveHarnessProfile,
@@ -149,12 +150,14 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     });
   const availableTools = toolsForRun.map((tool) => tool.definition.name);
   const goalBlock = coding && !options.isSubagent ? goalContinuationPrompt(options.prepared.root) : null;
+  const memoryIndex = coding ? memoryIndexBlock(options.prepared.root) : null;
   const systemPrompt = coding
     ? codingSystemPrompt({
         workspaceRoot: options.prepared.root,
         outDir: options.prepared.outDir,
         permissions,
         ...(options.skillIndex ? { skillIndex: options.skillIndex } : {}),
+        ...(memoryIndex ? { memoryIndex } : {}),
         mode: options.mode ?? "build",
         availableTools,
         extraInstructions: [

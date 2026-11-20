@@ -3,6 +3,21 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import type { AgentTool, AgentToolContext } from "../types.ts";
 
 const MAX_MEMORY_BYTES = 100_000;
+const MAX_INDEX_LINES = 200;
+const MAX_INDEX_BYTES = 25 * 1024;
+
+export function memoryIndexBlock(workspaceRoot: string): string | null {
+  const index = join(resolve(workspaceRoot, ".hearth", "memory"), "MEMORY.md");
+  if (!existsSync(index)) return null;
+  try {
+    return [
+      "Memory may be stale; verify file paths and symbols before relying on it.",
+      boundedIndex(readFileSync(index, "utf8"))
+    ].join("\n");
+  } catch {
+    return null;
+  }
+}
 
 export function createMemoryTools(): AgentTool[] {
   return [memoryReadTool, memoryWriteTool, memorySearchTool];
@@ -28,7 +43,7 @@ const memoryReadTool: AgentTool = {
       if (!existsSync(path)) throw new Error(`记忆条目不存在：${name}`);
       return { content: readFileSync(path, "utf8") };
     }
-    const index = existsSync(join(root, "MEMORY.md")) ? readFileSync(join(root, "MEMORY.md"), "utf8") : "";
+    const index = existsSync(join(root, "MEMORY.md")) ? boundedIndex(readFileSync(join(root, "MEMORY.md"), "utf8")) : "";
     const entries = existsSync(root) ? readdirSync(root).filter((file) => file.endsWith(".md") && file !== "MEMORY.md") : [];
     return { content: [index.trim() || "(empty memory)", "", "entries:", ...entries.map((file) => `- ${file.slice(0, -3)}`)].join("\n") };
   }
@@ -44,7 +59,8 @@ const memoryWriteTool: AgentTool = {
       properties: {
         name: { type: "string", description: "Short stable name, e.g. build-commands or auth-flow" },
         content: { type: "string", description: "Durable fact, decision or command; do not store transient guesses" },
-        description: { type: "string", description: "One-line index description" }
+        description: { type: "string", description: "One-line index description" },
+        type: { type: "string", description: "Optional category, e.g. convention, command or architecture" }
       },
       required: ["name", "content"],
       additionalProperties: false
@@ -55,18 +71,31 @@ const memoryWriteTool: AgentTool = {
     const name = typeof args.name === "string" ? args.name.trim() : "";
     const content = typeof args.content === "string" ? args.content.trim() : "";
     const description = typeof args.description === "string" ? args.description.trim().replace(/\s+/g, " ").slice(0, 200) : "";
+    const type = typeof args.type === "string" ? args.type.trim().replace(/\s+/g, "-").slice(0, 40) : "note";
     if (!name || !content) throw new Error("memory_write 需要 name 和 content");
     if (Buffer.byteLength(content, "utf8") > MAX_MEMORY_BYTES) throw new Error("记忆条目过大");
     const root = memoryRoot(context);
     assertWritable(root, context);
     const path = entryPath(root, name);
     mkdirSync(root, { recursive: true });
-    writeFileSync(path, `# ${name}\n\n${content}\n`, "utf8");
+    writeFileSync(path, [
+      "---",
+      `name: ${name}`,
+      `description: ${description || "(none)"}`,
+      `type: ${type || "note"}`,
+      `updated: ${new Date().toISOString()}`,
+      "---",
+      "",
+      `# ${name}`,
+      "",
+      content,
+      ""
+    ].join("\n"), "utf8");
     const index = join(root, "MEMORY.md");
     const slug = relative(root, path).replace(/\\/g, "/");
     const line = `- [${name}](${slug})${description ? ` — ${description}` : ""}`;
     const existing = existsSync(index) ? readFileSync(index, "utf8") : "# Repository Memory\n";
-    if (!existing.includes(`](${slug})`)) writeFileSync(index, `${existing.trimEnd()}\n${line}\n`, "utf8");
+    if (!existing.includes(`](${slug})`)) writeFileSync(index, boundedIndex(`${existing.trimEnd()}\n${line}\n`), "utf8");
     return { content: `已写入记忆：${slug}` };
   }
 };
@@ -110,6 +139,24 @@ const memorySearchTool: AgentTool = {
 
 function memoryRoot(context: AgentToolContext): string {
   return resolve(context.workspaceRoot, ".hearth", "memory");
+}
+
+function boundedIndex(content: string): string {
+  const lines = content.replace(/\r\n/g, "\n").split("\n");
+  let bounded = lines.slice(0, MAX_INDEX_LINES).join("\n");
+  if (lines.length > MAX_INDEX_LINES) bounded += "\n[memory index truncated: line limit reached; use memory_search]";
+  if (Buffer.byteLength(bounded, "utf8") > MAX_INDEX_BYTES) {
+    let bytes = 0;
+    const kept: string[] = [];
+    for (const line of bounded.split("\n")) {
+      const next = Buffer.byteLength(line, "utf8") + (kept.length > 0 ? 1 : 0);
+      if (bytes + next > MAX_INDEX_BYTES) break;
+      bytes += next;
+      kept.push(line);
+    }
+    bounded = `${kept.join("\n")}\n[memory index truncated: byte limit reached; use memory_search]`;
+  }
+  return bounded.trimEnd();
 }
 
 function entryPath(root: string, name: string): string {
