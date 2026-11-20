@@ -501,4 +501,33 @@ describe("HearthStore", () => {
     expect(store.knowledgeStateGet("index_ready")).toBe("true");
     store.close();
   });
+
+  it("creates the library schema and skill install columns", () => {
+    const store = new HearthStore(":memory:");
+    const tables = new Set(
+      (store.db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table','view')").all() as Array<{ name: string }>)
+        .map((row) => row.name)
+    );
+    for (const table of [
+      "context_nodes",
+      "context_documents",
+      "context_chunks",
+      "context_chunks_fts",
+      "context_summaries",
+      "library_roots",
+      "library_trash",
+      "library_jobs",
+      "library_settings",
+      "approval_grants"
+    ]) {
+      expect(tables.has(table)).toBe(true);
+    }
+    const skillColumns = new Set(
+      (store.db.prepare("PRAGMA table_info(skills)").all() as Array<{ name: string }>).map((row) => row.name)
+    );
+    for (const column of ["source_url", "source_ref", "read_only", "permissions_json", "actions_json", "last_checked_at"]) {
+      expect(skillColumns.has(column)).toBe(true);
+    }
+    store.close();
+  });
 });

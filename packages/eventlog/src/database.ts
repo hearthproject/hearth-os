@@ -146,7 +146,7 @@ export interface RunAggregate {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 34;
+export const CURRENT_SCHEMA_VERSION = 35;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -607,7 +607,10 @@ CREATE TABLE IF NOT EXISTS skills (
   trial_task_ids_json TEXT NOT NULL DEFAULT '[]',
   previous_version_id TEXT, change_report TEXT NOT NULL, created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL, adopted_at TEXT, last_used_at TEXT, archived_at TEXT,
-  archive_reason TEXT, previous_status TEXT
+  archive_reason TEXT, previous_status TEXT,
+  source_url TEXT, source_ref TEXT, read_only INTEGER NOT NULL DEFAULT 0,
+  permissions_json TEXT NOT NULL DEFAULT '{}', actions_json TEXT NOT NULL DEFAULT '[]',
+  last_checked_at TEXT
 );
 CREATE TABLE IF NOT EXISTS skill_versions (
   id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, version TEXT NOT NULL,
@@ -856,6 +859,149 @@ CREATE INDEX IF NOT EXISTS thread_subscriptions_thread_idx ON thread_subscriptio
 CREATE INDEX IF NOT EXISTS background_tool_jobs_status_idx ON background_tool_jobs(status, updated_at);
 CREATE INDEX IF NOT EXISTS watchdog_events_created_idx ON watchdog_events(created_at);
 CREATE INDEX IF NOT EXISTS attention_feedback_kind_idx ON attention_feedback(kind, time_of_day, created_at);
+
+CREATE TABLE IF NOT EXISTS context_nodes (
+  id TEXT PRIMARY KEY,
+  ref TEXT NOT NULL UNIQUE,
+  kind TEXT NOT NULL,
+  ref_id TEXT NOT NULL,
+  parent_id TEXT,
+  path TEXT NOT NULL,
+  title TEXT NOT NULL,
+  project_id TEXT,
+  mime_type TEXT,
+  size_bytes INTEGER,
+  content_hash TEXT,
+  status TEXT NOT NULL DEFAULT 'ready',
+  sensitivity TEXT NOT NULL DEFAULT 'normal',
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  trashed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS context_nodes_parent_idx ON context_nodes(parent_id, title);
+CREATE INDEX IF NOT EXISTS context_nodes_path_idx ON context_nodes(path);
+CREATE INDEX IF NOT EXISTS context_nodes_kind_idx ON context_nodes(kind, updated_at);
+CREATE INDEX IF NOT EXISTS context_nodes_project_idx ON context_nodes(project_id, updated_at);
+CREATE INDEX IF NOT EXISTS context_nodes_ref_idx ON context_nodes(kind, ref_id);
+
+CREATE TABLE IF NOT EXISTS context_documents (
+  node_id TEXT PRIMARY KEY,
+  content TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  extractor TEXT NOT NULL,
+  language TEXT,
+  char_count INTEGER NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS context_chunks (
+  id TEXT PRIMARY KEY,
+  node_id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL,
+  text TEXT NOT NULL,
+  start_offset INTEGER,
+  end_offset INTEGER,
+  token_count INTEGER NOT NULL,
+  content_hash TEXT NOT NULL,
+  embedding BLOB,
+  embedding_model TEXT,
+  embedding_version TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE(node_id, ordinal)
+);
+CREATE INDEX IF NOT EXISTS context_chunks_node_idx ON context_chunks(node_id, ordinal);
+CREATE INDEX IF NOT EXISTS context_chunks_hash_idx ON context_chunks(content_hash);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS context_chunks_fts USING fts5(
+  text,
+  node_id UNINDEXED,
+  chunk_id UNINDEXED,
+  tokenize = 'trigram'
+);
+
+CREATE TABLE IF NOT EXISTS context_summaries (
+  node_id TEXT NOT NULL,
+  level INTEGER NOT NULL,
+  content TEXT NOT NULL,
+  source_hash TEXT NOT NULL,
+  model TEXT,
+  token_count INTEGER NOT NULL,
+  stale INTEGER NOT NULL DEFAULT 0,
+  generated_at TEXT NOT NULL,
+  PRIMARY KEY (node_id, level)
+);
+CREATE INDEX IF NOT EXISTS context_summaries_stale_idx ON context_summaries(stale, generated_at);
+
+CREATE TABLE IF NOT EXISTS library_roots (
+  id TEXT PRIMARY KEY,
+  path TEXT NOT NULL UNIQUE,
+  kind TEXT NOT NULL,
+  project_id TEXT,
+  recursive INTEGER NOT NULL DEFAULT 1,
+  include_globs_json TEXT NOT NULL DEFAULT '[]',
+  exclude_globs_json TEXT NOT NULL DEFAULT '[]',
+  last_scan_at TEXT,
+  status TEXT NOT NULL DEFAULT 'ready',
+  error TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS library_trash (
+  id TEXT PRIMARY KEY,
+  node_id TEXT NOT NULL,
+  ref TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  title TEXT NOT NULL,
+  path TEXT NOT NULL,
+  snapshot_json TEXT,
+  deleted_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  restored_at TEXT
+);
+CREATE INDEX IF NOT EXISTS library_trash_expiry_idx ON library_trash(restored_at, expires_at);
+
+CREATE TABLE IF NOT EXISTS library_jobs (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  ref TEXT NOT NULL,
+  status TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TEXT,
+  last_error TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(kind, ref)
+);
+CREATE INDEX IF NOT EXISTS library_jobs_status_idx ON library_jobs(status, next_attempt_at);
+
+CREATE TABLE IF NOT EXISTS library_settings (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  semantic_enabled INTEGER NOT NULL DEFAULT 1,
+  model_id TEXT NOT NULL DEFAULT 'Xenova/bge-small-zh-v1.5',
+  model_version TEXT NOT NULL DEFAULT 'v1',
+  daily_summary_tokens INTEGER NOT NULL DEFAULT 200000,
+  summary_tokens_used_today INTEGER NOT NULL DEFAULT 0,
+  summary_usage_date TEXT NOT NULL DEFAULT '',
+  max_file_bytes INTEGER NOT NULL DEFAULT 2097152,
+  max_chunks_per_node INTEGER NOT NULL DEFAULT 500,
+  include_globs_json TEXT NOT NULL DEFAULT '[]',
+  exclude_globs_json TEXT NOT NULL DEFAULT '[]',
+  updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS approval_grants (
+  id TEXT PRIMARY KEY,
+  service TEXT NOT NULL,
+  action TEXT NOT NULL,
+  scope_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  last_used_at TEXT,
+  revoked_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS approval_grants_service_action_idx
+  ON approval_grants(service, action, scope_json) WHERE revoked_at IS NULL;
 `;
 
 export class HearthStore {
@@ -1453,6 +1599,12 @@ export class HearthStore {
     ensureColumn(this.db, "model_profiles", "context_window_tokens", "INTEGER NOT NULL DEFAULT 128000");
     ensureColumn(this.db, "model_profiles", "max_output_tokens", "INTEGER NOT NULL DEFAULT 8000");
     ensureColumn(this.db, "skills", "trial_task_ids_json", "TEXT NOT NULL DEFAULT '[]'");
+    ensureColumn(this.db, "skills", "source_url", "TEXT");
+    ensureColumn(this.db, "skills", "source_ref", "TEXT");
+    ensureColumn(this.db, "skills", "read_only", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn(this.db, "skills", "permissions_json", "TEXT NOT NULL DEFAULT '{}'");
+    ensureColumn(this.db, "skills", "actions_json", "TEXT NOT NULL DEFAULT '[]'");
+    ensureColumn(this.db, "skills", "last_checked_at", "TEXT");
     ensureColumn(this.db, "task_proposals", "inputs_json", "TEXT");
     ensureColumn(this.db, "runs", "executor_id", "TEXT");
     ensureColumn(this.db, "runs", "checkpoint_seq", "INTEGER");
