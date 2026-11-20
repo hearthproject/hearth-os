@@ -65,6 +65,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   const modelId = options.modelId ?? null;
   const contextPeaks: number[] = [];
   let lastRequestUsage: AgentUsage | null = null;
+  let lastContextAnchor: { inputTokens: number; outputTokens: number; messageCount: number } | null = null;
   let lastContextSource: "provider" | "estimate" = "estimate";
 
   const emit = (event: RuntimeEvent): void => options.onEvent?.(event);
@@ -147,6 +148,8 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       ? await compactAgentMessagesWithSummary(messages, {
           contextWindowTokens: force ? 1 : options.contextWindowTokens,
           reserveTokens: force ? 0 : options.contextReserveTokens ?? Math.max(16_000, Math.floor(options.contextWindowTokens * 0.15)),
+          ...(options.maxOutputTokens !== undefined ? { maxOutputTokens: options.maxOutputTokens } : {}),
+          ...(lastContextAnchor ? { usageAnchor: lastContextAnchor } : {}),
           ...(options.recentContextTokens !== undefined ? { recentTokens: options.recentContextTokens } : {}),
           keepRecentToolOutputs: options.keepRecentToolOutputs ?? 0,
           stateSummary: progressSummary(state.progress),
@@ -392,12 +395,20 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     try {
       while (true) {
       try {
+        const requestMessageCount = messages.length;
         turn = await options.model(
           cloneMessages(messages),
           definitions,
           (text) => emit({ type: "assistant.delta", turn: turns, text }),
           signal
         );
+        if (turn.usage) {
+          lastContextAnchor = {
+            inputTokens: turn.usage.inputTokens,
+            outputTokens: turn.usage.outputTokens ?? 0,
+            messageCount: requestMessageCount
+          };
+        }
         break;
       } catch (error) {
         if (aborted()) return finish("cancelled", "任务已取消");

@@ -264,6 +264,7 @@ export interface AgentRuntimeOptions {
   isFullPermission?: () => boolean;
   contextWindowTokens?: number;
   contextReserveTokens?: number;
+  maxOutputTokens?: number;
   recentContextTokens?: number;
   summarizeContext?: (messages: AgentMessage[], signal: AbortSignal) => Promise<ContextSummary>;
   requireFinishTool?: boolean;
@@ -307,6 +308,12 @@ export interface AgentRunResult {
   metrics?: AgentRunMetrics;
 }
 
+export interface ContextUsageAnchor {
+  inputTokens: number;
+  outputTokens: number;
+  messageCount: number;
+}
+
 export interface CompactOptions {
   keepRecent?: number;
   maxChars?: number;
@@ -314,6 +321,8 @@ export interface CompactOptions {
   keepRecentToolOutputs?: number;
   contextWindowTokens?: number;
   reserveTokens?: number;
+  maxOutputTokens?: number;
+  usageAnchor?: ContextUsageAnchor;
   recentTokens?: number;
   stateSummary?: string;
   projectInstructions?: string;

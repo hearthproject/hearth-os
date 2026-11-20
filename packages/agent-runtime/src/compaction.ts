@@ -1,11 +1,12 @@
-import type { AgentMessage, CompactOptions } from "./types.ts";
+import type { AgentMessage, CompactOptions, ContextUsageAnchor } from "./types.ts";
 
 const DEFAULTS = {
   keepRecent: 30,
   maxChars: 120_000,
   maxToolChars: 8_000,
   reserveTokens: 16_000,
-  recentTokens: 20_000
+  recentTokens: 20_000,
+  contextBufferTokens: 16_000
 };
 
 export interface CompactResult {
@@ -23,12 +24,22 @@ export interface TokenCompactResult extends CompactResult {
   summarized: boolean;
 }
 
-export function estimateMessageTokens(messages: AgentMessage[]): number {
-  return Math.ceil(messageChars(messages) / 4);
+export function estimateMessageTokens(messages: AgentMessage[], charsPerToken = 4): number {
+  return Math.ceil(messageChars(messages) / charsPerToken);
 }
 
-export function shouldCompactContext(messages: AgentMessage[], contextWindowTokens: number, reserveTokens = DEFAULTS.reserveTokens): boolean {
-  return estimateMessageTokens(messages) > Math.max(1, contextWindowTokens - reserveTokens);
+export function shouldCompactContext(
+  messages: AgentMessage[],
+  contextWindowTokens: number,
+  reserveTokens = DEFAULTS.reserveTokens,
+  usageAnchor?: ContextUsageAnchor,
+  maxOutputTokens?: number
+): boolean {
+  const threshold = Math.max(1, contextWindowTokens - Math.max(reserveTokens, maxOutputTokens ?? 0) - DEFAULTS.contextBufferTokens);
+  if (!usageAnchor) return estimateMessageTokens(messages) > threshold;
+  const tail = messages.slice(Math.max(0, usageAnchor.messageCount));
+  const estimated = usageAnchor.inputTokens + usageAnchor.outputTokens + estimateMessageTokens(tail, 3);
+  return estimated > threshold;
 }
 
 export async function compactAgentMessagesWithSummary(
@@ -41,7 +52,7 @@ export async function compactAgentMessagesWithSummary(
   const trimmed = trimToolOutputs(messages, options.maxToolChars ?? DEFAULTS.maxToolChars, options.keepRecentToolOutputs ?? 3);
   const contextWindowTokens = options.contextWindowTokens ?? 128_000;
   const reserveTokens = options.reserveTokens ?? Math.max(DEFAULTS.reserveTokens, Math.floor(contextWindowTokens * 0.15));
-  if (!options.contextWindowTokens || !shouldCompactContext(trimmed, contextWindowTokens, reserveTokens)) {
+  if (!options.contextWindowTokens || !shouldCompactContext(trimmed, contextWindowTokens, reserveTokens, options.usageAnchor, options.maxOutputTokens)) {
     return { messages: trimmed, compacted: false, before, after: trimmed.length, beforeTokens, afterTokens: estimateMessageTokens(trimmed), summary: null, summarized: false };
   }
 
