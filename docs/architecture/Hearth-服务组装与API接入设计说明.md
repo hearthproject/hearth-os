@@ -153,4 +153,3 @@
 | 进程内事件总线 | `apps/server/src/events.ts` |
 | 事件门面（追加与读视图见存储文档） | `apps/server/src/service.ts` |
 | 聊天流与附件上传 | `apps/server/src/chat-routes.ts` |
-| 评测接口 | `apps/server/src/eval-routes.ts` |
