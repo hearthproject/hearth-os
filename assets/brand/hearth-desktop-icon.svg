@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="hearth-desktop-icon-title hearth-desktop-icon-desc">
+  <title id="hearth-desktop-icon-title">Hearth desktop app icon</title>
+  <desc id="hearth-desktop-icon-desc">The Hearth arch and ember mark in cream on a warm ember-gradient squircle tile.</desc>
+
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#FFB479"/>
+      <stop offset="0.4" stop-color="#FF7A3E"/>
+      <stop offset="1" stop-color="#DB3D11"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="0.55">
+      <stop offset="0" stop-color="#FFF6EA" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#FFF6EA" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="sidelight" cx="0.22" cy="0.14" r="0.6">
+      <stop offset="0" stop-color="#FFF9F1" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#FFF9F1" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="emberglow" cx="0.5" cy="0.56" r="0.42">
+      <stop offset="0" stop-color="#FFE2C2" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#FFE2C2" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="base" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0.55" stop-color="#8C2408" stop-opacity="0"/>
+      <stop offset="1" stop-color="#8C2408" stop-opacity="0.22"/>
+    </linearGradient>
+    <clipPath id="tileclip">
+      <rect x="32" y="32" width="960" height="960" rx="214"/>
+    </clipPath>
+  </defs>
+
+  <!-- tile -->
+  <rect x="32" y="32" width="960" height="960" rx="214" fill="url(#tile)"/>
+  <g clip-path="url(#tileclip)">
+    <rect x="32" y="32" width="960" height="960" fill="url(#sidelight)"/>
+    <rect x="32" y="32" width="960" height="960" fill="url(#sheen)"/>
+    <rect x="32" y="32" width="960" height="960" fill="url(#emberglow)"/>
+    <rect x="32" y="32" width="960" height="960" fill="url(#base)"/>
+    <rect x="33" y="33" width="958" height="958" rx="213" fill="none" stroke="#FFF6EA" stroke-width="3" stroke-opacity="0.24"/>
+  </g>
+
+  <!-- mark: hearth arch + ember -->
+  <g transform="translate(158.7 138) scale(2.76)">
+    <path d="M62 206V126a66 66 0 0 1 132 0v80" fill="none" stroke="#FFF9F2" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M128 92c15 21 30 40 30 60 0 19-13 32-30 32s-30-13-30-32c0-16 10-31 23-48 1 13 6 22 15 27 2-13-1-26-8-39Z" fill="#FFEFDF"/>
+  </g>
+</svg>
