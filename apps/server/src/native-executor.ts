@@ -14,6 +14,9 @@ import {
   createBuiltinTools,
   defaultTaskPermissions,
   discoverInstructions,
+  goalContinuationPrompt,
+  goalFinishIssue,
+  recordGoalTurns,
   instructionsBlock,
   resolveHarnessProfile,
   runAgent,
@@ -55,6 +58,7 @@ export interface NativeRunOptions {
   signal: AbortSignal;
   mode?: HarnessMode;
   resume?: AgentResumeState;
+  isSubagent?: boolean;
   expectedOutputs: string[];
   onProgress?: (event: { kind: string; message: string; detail?: TaskProgressDetail }) => void;
   onContextEvent?: (event: RuntimeEvent) => void;
@@ -144,6 +148,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
       }
     });
   const availableTools = toolsForRun.map((tool) => tool.definition.name);
+  const goalBlock = coding && !options.isSubagent ? goalContinuationPrompt(options.prepared.root) : null;
   const systemPrompt = coding
     ? codingSystemPrompt({
         workspaceRoot: options.prepared.root,
@@ -155,7 +160,8 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
         extraInstructions: [
           `Current task: ${options.task.title}`,
           `Expected outputs: ${options.expectedOutputs.join(", ") || "(no explicit file)"}`,
-          `Task language: reply in the user's language; keep code, identifiers and commit messages in English.`
+          `Task language: reply in the user's language; keep code, identifiers and commit messages in English.`,
+          ...(goalBlock ? [goalBlock] : [])
         ]
       })
     : nativeSystemPrompt(options.task, options.expectedOutputs, options.skillIndex, availableTools);
@@ -187,6 +193,8 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     requireFinishTool: true,
     stopOnToolError: drafting,
     validateFinish: (result, context) => {
+      const goalIssue = coding && !options.isSubagent ? goalFinishIssue(options.prepared.root) : null;
+      if (goalIssue) return goalIssue;
       const jsonIssue = jsonDeliverableIssue(options.prepared.outDir, options.expectedOutputs);
       if (jsonIssue) return jsonIssue;
       return coding ? codingFinishIssue(context, result) : null;
@@ -207,6 +215,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
   });
 
   normalizeJsonDeliverables(options.prepared.outDir, options.expectedOutputs);
+  if (coding && !options.isSubagent) recordGoalTurns(options.prepared.root, result.turns);
 
   return {
     status: result.status,

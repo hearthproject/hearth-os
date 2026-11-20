@@ -13,14 +13,61 @@ export interface PersistedGoal {
   successCriteria: string[];
   status: PersistedGoalStatus;
   note: string | null;
+  maxTurns: number;
+  turnsUsed: number;
+  planPath: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
 const STATUSES: PersistedGoalStatus[] = ["active", "paused", "blocked", "completed"];
+const DEFAULT_GOAL_MAX_TURNS = 100;
 
 export function createGoalTools(): AgentTool[] {
   return [getGoalTool, createGoalTool, updateGoalTool];
+}
+
+export function goalFinishIssue(workspaceRoot: string): string | null {
+  const goal = readGoalByRoot(workspaceRoot);
+  if (!goal || goal.status !== "active") return null;
+  return `存在进行中的持久目标「${goal.title}」。继续执行目标，验证成功标准后先调用 update_goal(status=completed)；如果被阻塞或需要暂停，调用 update_goal(status=blocked|paused, note=原因)，然后才能 finish_task。`;
+}
+
+export function goalContinuationPrompt(workspaceRoot: string): string | null {
+  const goal = readGoalByRoot(workspaceRoot);
+  if (!goal || goal.status !== "active") return null;
+  const ratio = goal.maxTurns > 0 ? goal.turnsUsed / goal.maxTurns : 0;
+  const cadence = ratio >= 0.8 ? "wrap-up" : ratio >= 0.5 ? "sparse" : "full";
+  return [
+    "## Persisted goal",
+    "An active goal survives this run. Continue from the current workspace state instead of restating the whole task.",
+    `title: ${goal.title}`,
+    `objective: ${goal.objective}`,
+    `constraints: ${goal.constraints.join(" | ") || "(none)"}`,
+    `successCriteria: ${goal.successCriteria.join(" | ") || "(none)"}`,
+    `progress: ${goal.turnsUsed}/${goal.maxTurns} turns (${cadence} cadence)`,
+    ...(goal.planPath ? [`plan: ${goal.planPath}`] : []),
+    ...(goal.note ? [`note: ${goal.note}`] : []),
+    "Before finish_task, verify the success criteria and call update_goal(status=completed). If the goal cannot continue, call update_goal(status=paused|blocked, note=reason)."
+  ].join("\n");
+}
+
+export function recordGoalTurns(workspaceRoot: string, turns: number): PersistedGoal | null {
+  const goal = readGoalByRoot(workspaceRoot);
+  if (!goal || goal.status !== "active" || !Number.isFinite(turns) || turns <= 0) return goal;
+  const turnsUsed = goal.turnsUsed + Math.max(0, Math.floor(turns));
+  const exhausted = goal.maxTurns > 0 && turnsUsed >= goal.maxTurns;
+  const next: PersistedGoal = {
+    ...goal,
+    turnsUsed,
+    ...(exhausted ? {
+      status: "paused" as const,
+      note: `Stopped at maxTurns=${goal.maxTurns}; resume with update_goal(status=active) after reviewing progress.`
+    } : {}),
+    updatedAt: new Date().toISOString()
+  };
+  writeGoalFile(workspaceRoot, next);
+  return next;
 }
 
 const getGoalTool: AgentTool = {
@@ -47,7 +94,9 @@ const createGoalTool: AgentTool = {
         title: { type: "string", description: "Short goal title" },
         objective: { type: "string", description: "Concrete end state" },
         constraints: { type: "array", items: { type: "string" }, description: "Hard constraints" },
-        successCriteria: { type: "array", items: { type: "string" }, description: "Verifiable completion checks" }
+        successCriteria: { type: "array", items: { type: "string" }, description: "Verifiable completion checks" },
+        maxTurns: { type: "number", description: "Turn budget across resumes; defaults to 100" },
+        planPath: { type: "string", description: "Optional plan file path" }
       },
       required: ["title", "objective"],
       additionalProperties: false
@@ -70,6 +119,9 @@ const createGoalTool: AgentTool = {
       successCriteria: stringList(args.successCriteria).slice(0, 20),
       status: "active",
       note: null,
+      maxTurns: boundedMaxTurns(args.maxTurns),
+      turnsUsed: 0,
+      planPath: typeof args.planPath === "string" && args.planPath.trim() ? args.planPath.trim().slice(0, 500) : null,
       createdAt: now,
       updatedAt: now
     };
@@ -112,7 +164,11 @@ const updateGoalTool: AgentTool = {
 };
 
 function readGoal(context: AgentToolContext): PersistedGoal | null {
-  const path = goalPath(context);
+  return readGoalByRoot(context.workspaceRoot);
+}
+
+export function readGoalByRoot(workspaceRoot: string): PersistedGoal | null {
+  const path = goalPath(workspaceRoot);
   if (!existsSync(path)) return null;
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<PersistedGoal>;
@@ -125,6 +181,9 @@ function readGoal(context: AgentToolContext): PersistedGoal | null {
       successCriteria: stringList(parsed.successCriteria),
       status: STATUSES.includes(parsed.status as PersistedGoalStatus) ? parsed.status as PersistedGoalStatus : "active",
       note: typeof parsed.note === "string" ? parsed.note : null,
+      maxTurns: typeof parsed.maxTurns === "number" ? boundedMaxTurns(parsed.maxTurns) : DEFAULT_GOAL_MAX_TURNS,
+      turnsUsed: typeof parsed.turnsUsed === "number" && parsed.turnsUsed >= 0 ? Math.floor(parsed.turnsUsed) : 0,
+      planPath: typeof parsed.planPath === "string" ? parsed.planPath : null,
       createdAt: parsed.createdAt ?? new Date().toISOString(),
       updatedAt: parsed.updatedAt ?? new Date().toISOString()
     };
@@ -134,18 +193,27 @@ function readGoal(context: AgentToolContext): PersistedGoal | null {
 }
 
 function writeGoal(context: AgentToolContext, goal: PersistedGoal): void {
-  const path = goalPath(context);
+  const path = goalPath(context.workspaceRoot);
   assertWritable(path, context);
   mkdirSync(resolve(context.workspaceRoot, ".hearth"), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(goal, null, 2)}\n`, "utf8");
+  writeGoalFile(context.workspaceRoot, goal);
 }
 
-function goalPath(context: AgentToolContext): string {
-  return resolve(context.workspaceRoot, ".hearth", "goal.json");
+function writeGoalFile(workspaceRoot: string, goal: PersistedGoal): void {
+  mkdirSync(resolve(workspaceRoot, ".hearth"), { recursive: true });
+  writeFileSync(goalPath(workspaceRoot), `${JSON.stringify(goal, null, 2)}\n`, "utf8");
+}
+
+function goalPath(workspaceRoot: string): string {
+  return resolve(workspaceRoot, ".hearth", "goal.json");
 }
 
 function stringList(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim()) : [];
+}
+
+function boundedMaxTurns(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.min(500, Math.max(1, Math.floor(value))) : DEFAULT_GOAL_MAX_TURNS;
 }
 
 function formatGoal(goal: PersistedGoal): string {
@@ -156,7 +224,8 @@ function formatGoal(goal: PersistedGoal): string {
     `objective: ${goal.objective}`,
     `constraints: ${goal.constraints.join(" | ") || "(none)"}`,
     `successCriteria: ${goal.successCriteria.join(" | ") || "(none)"}`,
-    ...(goal.note ? [`note: ${goal.note}`] : []),
+    `progress: ${goal.turnsUsed}/${goal.maxTurns} turns`,
+    ...(goal.planPath ? [`planPath: ${goal.planPath}`] : []),
     `updatedAt: ${goal.updatedAt}`
   ].join("\n");
 }

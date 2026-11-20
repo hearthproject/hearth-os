@@ -105,6 +105,7 @@ function createDispatchTool(options: SubagentToolOptions, compatibility: boolean
           permissions: childTask.permissions ?? readOnlyPermissions(options, profile.tools),
           budget,
           mode: profile.mode,
+          isSubagent: true,
           signal: AbortSignal.any([options.signal, signal]),
           expectedOutputs: []
         });
