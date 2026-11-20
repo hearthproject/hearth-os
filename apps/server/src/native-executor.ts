@@ -1133,7 +1133,23 @@ async function summarizeNativeContext(settings: ModelSettings, messages: AgentMe
   }).join("\n\n").slice(0, 80_000);
   try {
     const result = await completeChat(settings, [
-      { role: "system", content: "压缩执行上下文。保留目标、已完成工作、关键证据、失败原因、产物路径和剩余事项；不要编造，输出简洁中文摘要。" },
+      {
+        role: "system",
+        content: [
+          "压缩执行上下文，输出结构化交接摘要，供后续继续工作。",
+          "必须严格使用以下 9 个二级标题，每节简洁但保留可执行细节：",
+          "## 1. 主要请求与意图",
+          "## 2. 关键技术概念",
+          "## 3. 文件与代码段",
+          "## 4. 错误与修复",
+          "## 5. 问题解决过程",
+          "## 6. 所有用户消息",
+          "## 7. 待办事项",
+          "## 8. 当前工作",
+          "## 9. 建议的下一步",
+          "文件必须带路径和行号；命令与测试结果只写真实执行过的；用户消息逐条保留原意，不要编造或省略约束。"
+        ].join("\n")
+      },
       { role: "user", content: transcript }
     ], { maxTokens: 2_000, temperature: 0.1, timeoutMs: 60_000, signal });
     return { summary: result.content.trim() || null, usage: result.usage };
