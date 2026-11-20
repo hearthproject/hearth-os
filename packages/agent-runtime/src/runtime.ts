@@ -195,7 +195,11 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       await options.onCheckpoint?.(checkpoint);
       emit({ type: "checkpoint.created", seq, kind });
     } catch (error) {
-      emit({ type: "checkpoint.failed", seq, kind, message: errorMessage(error) });
+      const message = errorMessage(error);
+      emit({ type: "checkpoint.failed", seq, kind, message });
+      if ((options.checkpointFailurePolicy ?? "stop") === "stop") {
+        throw new CheckpointPersistenceError(`检查点保存失败，已停止以避免不可恢复的执行：${message}`);
+      }
     }
   }
 
@@ -354,7 +358,8 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     let transientRetries = 0;
     let overflowRetried = false;
     emitContextSnapshot(turns);
-    while (true) {
+    try {
+      while (true) {
       try {
         turn = await options.model(
           cloneMessages(messages),
@@ -595,6 +600,10 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         return finish("budget_exceeded", summary ?? "Token 用量超过预算，已停止");
       }
     }
+    } catch (error) {
+      if (error instanceof CheckpointPersistenceError) return finish("failed", error.message);
+      throw error;
+    }
   }
 }
 
@@ -609,6 +618,13 @@ function cloneMessages(messages: AgentMessage[]): AgentMessage[] {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+class CheckpointPersistenceError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CheckpointPersistenceError";
+  }
 }
 
 function addUsage(target: RunUsage, value: AgentUsage): void {

@@ -52,7 +52,7 @@ describe("agent runtime long-run fixtures", () => {
     expect(fake.state.requests.at(-1)?.tools.some((tool) => tool.name === "echo")).toBe(true);
   });
 
-  it("records checkpoint failures without losing the run", async () => {
+  it("stops the run when a checkpoint cannot be persisted", async () => {
     const root = workspace(roots);
     const fake = createFakeModel([
       { content: "", toolCalls: [fakeToolCall("echo", { value: "a" })], finishReason: "tool_calls" },
@@ -76,9 +76,38 @@ describe("agent runtime long-run fixtures", () => {
       }
     });
 
+    expect(result.status).toBe("failed");
+    expect(result.summary).toContain("检查点保存失败");
     expect(events.filter((event) => event.type === "checkpoint.failed").length).toBe(1);
-    expect(fake.state.calls).toBe(2);
+    expect(fake.state.calls).toBe(1);
     expect(result.messages.some((message) => message.role === "tool")).toBe(true);
+  });
+
+  it("continues after checkpoint failure when the policy is warn", async () => {
+    const root = workspace(roots);
+    const fake = createFakeModel([
+      { content: "", toolCalls: [fakeToolCall("echo", { value: "a" })], finishReason: "tool_calls" },
+      { content: "", toolCalls: [fakeToolCall("finish_task", { summary: "done" })], finishReason: "tool_calls" }
+    ]);
+    let checkpointCalls = 0;
+    const result = await runAgent({
+      model: fake.model,
+      tools: [echoTool(), ...createBuiltinTools()],
+      goal: "checkpoint warn",
+      systemPrompt: "system",
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      permissions: { tools: ["echo", "finish_task"], readRoots: [root], writeRoots: [root], networkHosts: [] },
+      budget: {},
+      checkpointFailurePolicy: "warn",
+      onCheckpoint: () => {
+        checkpointCalls += 1;
+        if (checkpointCalls === 2) throw new Error("disk full");
+      }
+    });
+
+    expect(result.status).toBe("completed");
+    expect(fake.state.calls).toBe(2);
   });
 
   it("keeps the full request history available to fixtures", async () => {

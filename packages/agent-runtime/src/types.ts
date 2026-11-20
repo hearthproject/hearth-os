@@ -244,6 +244,8 @@ export interface AgentRuntimeOptions {
   resume?: AgentResumeState;
   onEvent?: (event: RuntimeEvent) => void;
   onCheckpoint?: (checkpoint: AgentCheckpoint) => void | Promise<void>;
+  /** Stop the run when a checkpoint cannot be persisted. Defaults to stop. */
+  checkpointFailurePolicy?: "stop" | "warn";
   afterEdit?: (event: AgentPostEditEvent) => void | Promise<void>;
   authorizeTool?: (request: AgentToolAuthorizationRequest) => Promise<AgentToolAuthorization>;
   validateFinish?: (result: AgentToolResult, context: AgentToolContext) => string | null | Promise<string | null>;
