@@ -508,19 +508,21 @@ export function ChatPage() {
     <div className="chat-layout">
       <section className="chat-main">
         <header className="chat-header">
-          <h1>{current?.title ?? "新对话"}</h1>
-          {latestTask && (latestTask.status !== "completed" && latestTask.status !== "cancelled") && (
-            <span className={`chat-run-chip ${latestTask.status}`} title={latestTask.title}>
-              <TaskStatusIcon status={latestTask.status} size={12} />
-              {TASK_STATUS_LABELS[latestTask.status]}
-            </span>
-          )}
-          {(current ? projectsById.get(current.projectId ?? "") : activeProject) && (
-            <span className="chat-project-chip" title={current ? projectsById.get(current.projectId ?? "")?.path : activeProject?.path}>
-              <Folder size={12} />
-              {(current ? projectsById.get(current.projectId ?? "") : activeProject)?.name}
-            </span>
-          )}
+          <div className="chat-title-group">
+            <h1>{current?.title ?? "新对话"}</h1>
+            {latestTask && (latestTask.status !== "completed" && latestTask.status !== "cancelled") && (
+              <span className={`chat-run-chip ${latestTask.status}`} title={latestTask.title}>
+                <TaskStatusIcon status={latestTask.status} size={12} />
+                {TASK_STATUS_LABELS[latestTask.status]}
+              </span>
+            )}
+            {(current ? projectsById.get(current.projectId ?? "") : activeProject) && (
+              <span className="chat-project-chip" title={current ? projectsById.get(current.projectId ?? "")?.path : activeProject?.path}>
+                <Folder size={12} />
+                {(current ? projectsById.get(current.projectId ?? "") : activeProject)?.name}
+              </span>
+            )}
+          </div>
           <span className="chat-project-chip" title="工作区内文件读写自动执行；发邮件、访问新域名、操作桌面仍会审批。">
             <ShieldAlert size={12} />
             审批 · {approvalModeLabel(conversationSettings.approvalMode)}

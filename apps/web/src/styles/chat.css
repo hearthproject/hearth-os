@@ -67,6 +67,23 @@
   font-size: var(--fs-15);
   font-weight: 600;
   letter-spacing: -0.01em;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-title-group {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chat-title-group .chat-run-chip,
+.chat-title-group .chat-project-chip {
+  flex: 0 0 auto;
 }
 
 .chat-scroll {
