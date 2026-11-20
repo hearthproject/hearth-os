@@ -96,6 +96,7 @@ export interface AgentToolMetadata {
   branch?: string;
   commitSha?: string;
   transcriptPath?: string;
+  exposedTools?: string[];
   matched?: boolean;
   timedOut?: boolean;
   sandbox?: { backend: string; enforcement: string; networkEnforcement: string; mode: string };
@@ -181,6 +182,8 @@ export interface AgentToolState {
   activeSkills?: string[];
   subagents?: AgentSubagentState[];
   activeWork?: AgentActiveWork[];
+  /** Names discovered through tool_search and callable on later turns. */
+  exposedTools?: string[];
 }
 
 export interface SerializedAgentToolState {
@@ -197,6 +200,8 @@ export interface SerializedAgentToolState {
   activeSkills?: string[];
   subagents?: AgentSubagentState[];
   activeWork?: AgentActiveWork[];
+  /** Names discovered through tool_search and callable on later turns. */
+  exposedTools?: string[];
 }
 
 export interface AgentTool {
@@ -290,6 +295,8 @@ export interface AgentRuntimeOptions {
   maxParallelTools?: number;
   keepRecentToolOutputs?: number;
   maxToolChars?: number;
+  /** Above this count, only core tools are sent directly and tool_search is added. */
+  maxDirectTools?: number;
   projectInstructions?: string;
   reminders?: AgentRuntimeReminders;
 }

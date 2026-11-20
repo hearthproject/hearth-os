@@ -9,6 +9,7 @@ import { markLostActiveWork } from "./harness/active-work.ts";
 import { runningActiveWork } from "./harness/active-work.ts";
 import { goalContinuationPrompt, readGoalByRoot } from "./harness/goal.ts";
 import { storeOversizedToolResult } from "./harness/tool-output-store.ts";
+import { ToolCatalog, TOOL_SEARCH_NAME, toolSearchDefinition } from "./harness/tool-catalog.ts";
 import { planModeAllowsCommand, planModeAllowsTool } from "./harness/plan.ts";
 import { buildPostCompactContext } from "./harness/post-compact.ts";
 import { todoReminder } from "./harness/todo.ts";
@@ -22,6 +23,7 @@ import type {
   AgentTool,
   AgentToolCall,
   AgentToolContext,
+  AgentToolDefinition,
   AgentToolResult,
   RuntimeEvent
 } from "./types.ts";
@@ -41,11 +43,8 @@ export function zeroUsage(): RunUsage {
 export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunResult> {
   const allowed = new Set(options.permissions.tools);
   const tools = options.tools.filter((tool) => allowed.has(tool.definition.name));
-  const toolMap = new Map(tools.map((tool) => [tool.definition.name, tool]));
-  const definitions = tools.map((tool) => tool.definition);
   const digestText = (text: string): string => createHash("sha256").update(text).digest("hex").slice(0, 16);
   const systemPromptHash = digestText(options.systemPrompt);
-  const toolSchemaHash = digestText(JSON.stringify(definitions));
   const messages: AgentMessage[] = options.resume
     ? cloneMessages(options.resume.messages)
     : [
@@ -75,6 +74,38 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   const signal = options.signal ?? new AbortController().signal;
   const state = options.state ?? options.resume?.state ?? createAgentState(options.workspaceRoot);
   const modelId = options.modelId ?? null;
+  const catalog = new ToolCatalog(tools, {
+    ...(options.maxDirectTools !== undefined ? { maxDirectTools: options.maxDirectTools } : {}),
+    ...(state.exposedTools ? { exposed: state.exposedTools } : {})
+  });
+  const hiddenToolCount = tools.filter((tool) => !catalog.isDirect(tool.definition.name)).length;
+  const toolSearchTool: AgentTool = {
+    definition: toolSearchDefinition(hiddenToolCount),
+    async execute(input): Promise<AgentToolResult> {
+      const args = input && typeof input === "object" ? input as Record<string, unknown> : {};
+      const query = typeof args.query === "string" ? args.query.trim() : "";
+      if (!query) throw new Error("请提供 search query");
+      const limit = Math.max(1, Math.min(10, Number(args.limit) || 5));
+      const matches = catalog.search(query, limit);
+      if (matches.length === 0) {
+        const names = catalog.definitions().map((definition) => definition.name).slice(0, 40).join(", ");
+        return { content: `没有匹配的工具。当前可直连：${names}`, isError: false };
+      }
+      catalog.expose(matches.map((match) => match.name));
+      state.exposedTools = catalog.exposed();
+      return {
+        content: JSON.stringify({ query, results: matches.map(({ name, description, parameters }) => ({ name, description, parameters })) }, null, 2),
+        metadata: { exposedTools: matches.map((match) => match.name) }
+      };
+    }
+  };
+  const syntheticTools = catalog.deferred ? [toolSearchTool] : [];
+  const currentDefinitions = (): AgentToolDefinition[] => {
+    const definitions = catalog.definitions();
+    return syntheticTools.length > 0
+      ? [...definitions, ...syntheticTools.map((tool) => tool.definition)]
+      : definitions;
+  };
   const contextPeaks: number[] = [];
   let lastRequestUsage: AgentUsage | null = null;
   let lastContextAnchor: { inputTokens: number; outputTokens: number; messageCount: number } | null = null;
@@ -116,7 +147,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     clearExecuting();
   }
   const emitContextSnapshot = (turn: number): void => {
-    const systemChars = messages
+    const definitions = currentDefinitions();    const systemChars = messages
       .filter((message) => message.role === "system")
       .reduce((sum, message) => sum + message.content.length, 0);
     const toolResultChars = messages
@@ -289,7 +320,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     const parallelLimit = Math.max(1, options.maxParallelTools ?? 1);
     let parallelChunk: AgentToolCall[] = [];
     for (const call of calls) {
-      const executionMode = toolMap.get(call.name)?.definition.executionMode;
+      const executionMode = catalog.resolve(call.name)?.definition.executionMode;
       if (executionMode === "parallel") {
         parallelChunk.push(call);
         if (parallelChunk.length >= parallelLimit) {
@@ -311,7 +342,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   async function executeParallelBatch(calls: AgentToolCall[]): Promise<Map<string, { result: AgentToolResult; durationMs: number }> | null> {
     const limit = options.maxParallelTools ?? 1;
     if (limit < 2 || calls.length < 2 || calls.length > limit) return null;
-    const entries = calls.map((call) => ({ call, tool: toolMap.get(call.name) }));
+    const entries = calls.map((call) => ({ call, tool: catalog.resolve(call.name) }));
     if (!entries.every((entry) => entry.tool?.definition.executionMode === "parallel")) return null;
     if ((toolCallLimit !== null && toolCalls + calls.length > toolCallLimit) || aborted()) return null;
 
@@ -441,11 +472,13 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     let transientRetries = 0;
     let overflowRetried = false;
     emitContextSnapshot(turns);
+    const requestDefinitions = currentDefinitions();
+    const requestSchemaHash = digestText(JSON.stringify(requestDefinitions));
     emit({
       type: "prompt.snapshot",
       turn: turns,
       systemPromptHash,
-      toolSchemaHash,
+      toolSchemaHash: requestSchemaHash,
       messageStart: 0,
       messageEnd: messages.length
     });
@@ -455,7 +488,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         const requestMessageCount = messages.length;
         turn = await options.model(
           cloneMessages(messages),
-          definitions,
+          requestDefinitions,
           (text) => emit({ type: "assistant.delta", turn: turns, text }),
           signal
         );
@@ -559,7 +592,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       }
 
       toolCalls += 1;
-      const tool = toolMap.get(call.name);
+      const tool = call.name === TOOL_SEARCH_NAME && catalog.deferred ? toolSearchTool : catalog.resolve(call.name);
       const precomputed = parallelResults.get(call.id);
       const toolStartedAt = Date.now();
       emit({ type: "tool.started", turn: turns, call });

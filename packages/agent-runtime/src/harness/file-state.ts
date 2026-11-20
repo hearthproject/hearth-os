@@ -17,7 +17,8 @@ export function createAgentState(workspaceRoot: string): AgentToolState {
     progress: { filesRead: [], filesModified: [], commands: [], tests: [], diagnostics: [] },
     startedAt: Date.now(),
     snapshots: new Map(),
-    snapshotSeq: 0
+    snapshotSeq: 0,
+    exposedTools: []
   };
 }
 
