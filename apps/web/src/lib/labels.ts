@@ -162,11 +162,7 @@ export const CATEGORY_LABELS: Record<string, string> = {
 export const EXECUTOR_LABELS: Record<string, string> = {
   native: "Hearth 原生",
   codex: "Codex",
-  "deepseek-harness": "DeepSeek Harness",
-  hermes: "Hermes",
-  qoder: "Qoder",
-  workbuddy: "WorkBuddy",
-  kimi: "Kimi Code"
+  "deepseek-harness": "DeepSeek Harness"
 };
 
 export const TASK_KIND_LABELS: Record<string, string> = {

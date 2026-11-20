@@ -34,8 +34,6 @@ import type {
   EventEnvelope,
   EventWindow,
   ExecutorId,
-  ExecutorInstallInfo,
-  ExecutorInstallJob,
   ExecutorModelBindingPatch,
   ExecutorModelBindingView,
   ExecutorProbeResult,
@@ -45,7 +43,6 @@ import type {
   ExecutorSettingsView,
   ExecutorView,
   HealthSnapshot,
-  HermesHealth,
   MaintenanceRun,
   MemoryConflict,
   MemoryConfidence,
@@ -181,8 +178,6 @@ export type {
   EventEnvelope,
   EventWindow,
   ExecutorId,
-  ExecutorInstallInfo,
-  ExecutorInstallJob,
   ExecutorModelBindingPatch,
   ExecutorModelBindingView,
   ExecutorProbeResult,
@@ -192,7 +187,6 @@ export type {
   ExecutorSettingsView,
   ExecutorView,
   HealthSnapshot,
-  HermesHealth,
   MaintenanceRun,
   MemoryConflict,
   MemoryConfidence,
@@ -594,28 +588,12 @@ export interface MailSyncResult {
 
 export interface ExecutorSettingsResponse {
   settings: ExecutorSettingsView;
-  hermes: HermesHealth;
 }
 
 export interface ExecutorListResponse {
   executors: ExecutorView[];
   preferredExecutorId: ExecutorId | null;
   updatedAt: string | null;
-}
-
-export interface ExecutorInstallResponse {
-  job: ExecutorInstallJob | null;
-  install: ExecutorInstallInfo;
-  health: ExecutorView["health"];
-}
-
-export interface HermesProbeResponse {
-  ok: boolean;
-  command: string;
-  version: string | null;
-  error: string | null;
-  elapsedMs: number;
-  health: HermesHealth;
 }
 
 export interface ScheduleSnapshot {

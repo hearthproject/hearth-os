@@ -9,7 +9,6 @@ import type {
 } from "@hearth/core";
 import { isAbsolute, relative, resolve } from "node:path";
 import { getTemplate } from "@hearth/templates";
-import { HermesApprovalRequiredError, HermesStartupError } from "./hermes-executor.ts";
 import { LeaseError } from "./leases.ts";
 import { wantsScreenshot } from "./task-intent.ts";
 import { UnsupportedInputError } from "./workspace.ts";
@@ -43,8 +42,6 @@ export function classifyFailure(input: {
   const message = error instanceof Error ? error.message : String(error);
   const effects = service.store.listEffects(task.id);
   if (effects.some((effect) => effect.status === "uncertain" || effect.status === "executing")) return "effect_uncertain";
-  if (error instanceof HermesApprovalRequiredError) return "permission";
-  if (error instanceof HermesStartupError) return "runtime_fault";
   if (error instanceof LeaseError) return "interrupted";
   if (aborted && stopping) return "interrupted";
   if (/spawn\s+.*\bENOENT\b|process\s+(?:crashed|exited)|进程.*(?:崩溃|退出)|执行器.*不可用|executor.*unavailable/i.test(message)) return "runtime_fault";

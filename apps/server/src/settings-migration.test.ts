@@ -52,8 +52,7 @@ describe("legacy settings migration", () => {
     writeFileSync(input.executorSettingsPath, JSON.stringify({
       defaultApprovalMode: "full",
       preferredExecutorId: "native",
-      concurrency: { native: 2 },
-      hermesCommand: "hermes-test"
+      concurrency: { native: 2 }
     }), "utf8");
 
     const summary = migrateLegacySettings(input);
@@ -62,7 +61,7 @@ describe("legacy settings migration", () => {
     expect(input.registry.chatSettings()).toMatchObject({ model: "deepseek-v4", protocol: "openai-responses" });
     expect(input.registry.settingsForExecutor("native")).toMatchObject({ model: "deepseek-v4" });
     expect(input.registry.settingsForExecutor("codex")).toMatchObject({ model: "deepseek-v4" });
-    expect(input.executorSettings.load()).toMatchObject({ defaultApprovalMode: "full", hermesCommand: "hermes-test" });
+    expect(input.executorSettings.load()).toMatchObject({ defaultApprovalMode: "full", preferredExecutorId: "native" });
     expect(readdirSync(join(input.backupRoot, "legacy-dev"))).toHaveLength(2);
     expect(input.store.listSettingsMigrations().every((record) => record.status === "completed")).toBe(true);
     input.store.close();

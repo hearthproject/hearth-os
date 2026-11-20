@@ -64,13 +64,11 @@ const EMPTY_DRAFT: ScheduleDraft = {
 export function SchedulesPage() {
   const queryClient = useQueryClient();
   const schedulesQuery = useQuery({ queryKey: ["schedules"], queryFn: api.schedules, refetchInterval: 15_000 });
-  const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 30_000 });
   const [draft, setDraft] = useState<ScheduleDraft | null>(null);
   const [historyId, setHistoryId] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const schedules = schedulesQuery.data?.schedules ?? [];
-  const hermes = healthQuery.data?.hermes;
 
   useEffect(() => {
     const stale = schedules.filter((schedule) => schedule.approvalMode !== "full");
@@ -223,14 +221,7 @@ export function SchedulesPage() {
                 <option value="native">Hearth 原生</option>
                 <option value="codex">Codex</option>
                 <option value="deepseek-harness">DeepSeek Harness</option>
-                <option value="hermes">Hermes</option>
-                <option value="qoder">Qoder</option>
-                <option value="workbuddy">WorkBuddy</option>
-                <option value="kimi">Kimi Code</option>
               </select>
-              {draft.executorId === "hermes" && hermes && !hermes.canRun && (
-                <small className="field-warning"><TriangleAlert size={12} /> Hermes 当前未配置，触发时会跳过并记录原因。</small>
-              )}
             </label>
             <label className="span-2">
               <span>固定提示词</span>

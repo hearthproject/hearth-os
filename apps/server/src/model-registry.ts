@@ -26,11 +26,7 @@ const ALL_PROTOCOLS: ModelProtocol[] = ["openai-chat", "openai-responses", "anth
 export const EXECUTOR_MODEL_PROTOCOLS: Record<ExecutorId, ModelProtocol[]> = {
   native: ALL_PROTOCOLS,
   codex: ["openai-responses"],
-  "deepseek-harness": ["openai-chat", "openai-responses", "anthropic-messages"],
-  hermes: ["openai-chat", "openai-responses", "anthropic-messages"],
-  qoder: ["openai-chat", "openai-responses", "anthropic-messages"],
-  workbuddy: ["openai-chat", "openai-responses", "anthropic-messages"],
-  kimi: ["openai-chat", "openai-responses", "anthropic-messages"]
+  "deepseek-harness": ["openai-chat", "openai-responses", "anthropic-messages"]
 };
 
 export class ModelRegistryError extends Error {

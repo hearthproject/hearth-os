@@ -26,7 +26,6 @@ import type {
   DeviceView,
   ExecutorId,
   ExecutorModelBindingPatch,
-  ExecutorInstallResponse,
   ExecutorModelBindingView,
   ExecutorListResponse,
   ExecutorProbeResult,
@@ -50,7 +49,6 @@ import type {
   KnowledgeSetupState,
   KnowledgeHit,
   KnowledgeStatusResponse,
-  HermesProbeResponse,
   LocalProjectView,
   McpServerView,
   MaintenanceSnapshot,
@@ -305,9 +303,6 @@ export const api = {
     body: JSON.stringify(input)
   }),
   probeExecutor: (id: ExecutorId) => request<ExecutorProbeResult>(`/api/executors/${encodeURIComponent(id)}/probe`, { method: "POST" }),
-  installExecutor: (id: ExecutorId) => request<ExecutorInstallResponse>(`/api/executors/${encodeURIComponent(id)}/install`, { method: "POST" }),
-  executorInstall: (id: ExecutorId) => request<ExecutorInstallResponse>(`/api/executors/${encodeURIComponent(id)}/install`),
-  probeHermes: () => request<HermesProbeResponse>("/api/hermes/probe", { method: "POST" }),
   schedules: () => request<ScheduleSnapshot>("/api/schedules"),
   createSchedule: (input: ScheduleInput) => request<ScheduleRecord>("/api/schedules", {
     method: "POST",

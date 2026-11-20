@@ -15,10 +15,8 @@ import { ARTIFACT_DIR, ATTACHMENT_DIR, BACKUP_DIR, CODEX_HOME_DIR, CONTEXT_BLOB_
 import { registerChatRoutes } from "./chat-routes.ts";
 import { ReconcileError, ReconcileService } from "./reconcile.ts";
 import { ExecutorSettingsStore } from "./executor-settings.ts";
-import { clearHermesHealthCache } from "./hermes-health.ts";
 import { clearExecutorHealthCache, executorHealth as readExecutorHealth, executorRuntimeSettings, probeExecutor } from "./executor-runtime.ts";
 import { applyExecutorModelReadiness } from "./executor-readiness.ts";
-import { ExecutorInstallError, ExecutorInstaller } from "./executor-install.ts";
 import { EXECUTORS } from "./executors.ts";
 import { ScheduleError, ScheduleService } from "./schedules.ts";
 import { chatModelConfigured, loadModelSettings, viewModelSettings } from "./model-settings.ts";
@@ -573,8 +571,7 @@ const executorSettingsSchema = z.object({
     installMode: z.enum(["managed", "existing", "detected"]).optional(),
     authMode: z.enum(["local", "pat", "env"]).optional(),
     version: z.string().max(200).nullable().optional()
-  }).strict()).optional(),
-  hermesCommand: optionalExecutorText(500)
+  }).strict()).optional()
 }).strict().refine((value) => Object.keys(value).length > 0, { message: "至少需要修改一个设置" });
 
 const scheduleSchema = z.object({
@@ -860,7 +857,6 @@ export interface BuildServerOptions {
   modelSettingsPath?: string;
   attachmentRoot?: string;
   executorSettingsPath?: string;
-  executorInstaller?: ExecutorInstaller;
   contextBlobRoot?: string;
   contextIndex?: ContextIndex;
   skillRoot?: string;
@@ -1079,7 +1075,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
     ...(options.feishuTransportFactory ? { transportFactory: options.feishuTransportFactory } : {}),
     ...(options.feishuChatClient ? { chatClient: options.feishuChatClient } : {})
   });
-  const executorInstaller = options.executorInstaller ?? new ExecutorInstaller();
   const executorHealth = (executorId: ExecutorId): ExecutorHealth => {
     const health = readExecutorHealth(executorId, executorSettingsStore.load(), executorSettingsPath);
     const binding = modelRegistry.bindingViews().find((item) => item.executorId === executorId);
@@ -1569,21 +1564,17 @@ export async function buildServer(options: BuildServerOptions = {}) {
 
   app.get("/api/executor-settings", async () => {
     const settings = executorSettingsStore.view();
-    return { settings, hermes: executorHealth("hermes") };
+    return { settings };
   });
 
   app.put("/api/executor-settings", async (request, reply) => {
     const parsed = executorSettingsSchema.safeParse(request.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: "INVALID_EXECUTOR_SETTINGS", message: "执行器设置格式不正确" });
     const settings = executorSettingsStore.save(parsed.data);
-    if (parsed.data.hermesCommand !== undefined || parsed.data.executors?.hermes !== undefined) {
-      clearHermesHealthCache();
-      clearExecutorHealthCache("hermes");
-    }
     for (const id of Object.keys(parsed.data.executors ?? {}) as ExecutorId[]) {
-      if (id !== "hermes") clearExecutorHealthCache(id);
+      clearExecutorHealthCache(id);
     }
-    return { settings, hermes: executorHealth("hermes") };
+    return { settings };
   });
 
   app.get("/api/knowledge/status", async () => {
@@ -1712,21 +1703,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
   });
 
-  app.post("/api/hermes/probe", async () => {    const settings = executorSettingsStore.load();
-    clearHermesHealthCache(executorRuntimeSettings(settings, "hermes").command?.trim() || settings.hermesCommand);
-    clearExecutorHealthCache("hermes");
-    const binding = modelRegistry.bindingViews().find((item) => item.executorId === "hermes");
-    const result = await probeExecutor("hermes", settings, executorSettingsPath, 60_000, {
-      modelSettings: modelRegistry.settingsForExecutorOrChat("hermes"),
-      binding: binding?.profileId ? { explicit: true, available: binding.available, issue: binding.issue } : null
-    });
-    return {
-      ...result,
-      code: result.health.lastProbe?.code ?? null,
-      health: executorHealth("hermes")
-    };
-  });
-
   app.get("/api/executors", async () => {
     const settings = executorSettingsStore.load();
     const modelBindings = modelRegistry.bindingViews();
@@ -1735,7 +1711,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
       runtime: executorRuntimeSettings(settings, descriptor.id),
       concurrency: settings.concurrency[descriptor.id],
       health: executorHealth(descriptor.id),
-      install: executorInstaller.info(descriptor.id, executorSettingsPath),
       modelBinding: modelBindings.find((binding) => binding.executorId === descriptor.id)
     }));
     return {
@@ -1751,7 +1726,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
       return reply.code(404).send({ error: "EXECUTOR_NOT_FOUND", message: "执行器不存在" });
     }
     const settings = executorSettingsStore.load();
-    if (id === "hermes") clearHermesHealthCache(settings.hermesCommand);
     const executorId = id as ExecutorId;
     const binding = modelRegistry.bindingViews().find((item) => item.executorId === executorId);
     const result = await probeExecutor(executorId, settings, executorSettingsPath, 60_000, {
@@ -1761,38 +1735,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
       codexEnv: codexEnv()
     });
     return { ...result, health: executorHealth(executorId) };
-  });
-
-  app.post<{ Params: { id: string } }>("/api/executors/:id/install", async (request, reply) => {
-    const id = request.params.id;
-    if (!(EXECUTOR_IDS as readonly string[]).includes(id)) {
-      return reply.code(404).send({ error: "EXECUTOR_NOT_FOUND", message: "执行器不存在" });
-    }
-    try {
-      const job = executorInstaller.start(id as ExecutorId, executorSettingsPath);
-      return reply.code(202).send({
-        job,
-        install: executorInstaller.info(id as ExecutorId, executorSettingsPath),
-        health: executorHealth(id as ExecutorId)
-      });
-    } catch (error) {
-      if (error instanceof ExecutorInstallError) {
-        return reply.code(400).send({ error: error.code, message: error.message });
-      }
-      throw error;
-    }
-  });
-
-  app.get<{ Params: { id: string } }>("/api/executors/:id/install", async (request, reply) => {
-    const id = request.params.id;
-    if (!(EXECUTOR_IDS as readonly string[]).includes(id)) {
-      return reply.code(404).send({ error: "EXECUTOR_NOT_FOUND", message: "执行器不存在" });
-    }
-    return {
-      job: executorInstaller.status(id as ExecutorId, executorSettingsPath),
-      install: executorInstaller.info(id as ExecutorId, executorSettingsPath),
-      health: executorHealth(id as ExecutorId)
-    };
   });
 
   app.get("/api/schedules", async () => ({ schedules: schedules.list() }));

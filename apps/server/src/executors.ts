@@ -1,4 +1,4 @@
-import { EXECUTOR_IDS, type ExecutorId, type ExecutorTier, type TaskRecord } from "@hearth/core";
+import { EXECUTOR_IDS, type ExecutorId, type TaskRecord } from "@hearth/core";
 import type { ExecutionCapability } from "./chat.ts";
 
 export interface ExecutorDescriptor {
@@ -6,7 +6,6 @@ export interface ExecutorDescriptor {
   name: string;
   description: string;
   capabilities: string[];
-  tier: ExecutorTier;
   provider?: string;
   experimental?: boolean;
   supportsResume?: boolean;
@@ -17,15 +16,13 @@ export const EXECUTORS: ExecutorDescriptor[] = [
     id: "native",
     name: "Hearth 原生执行器",
     description: "使用当前配置的模型和任务授权工具直接完成工作；工作区或仓库任务会自动启用编码 profile，支持仓库分析、编辑、测试、计划和验证闭环。",
-    capabilities: ["文件", "搜索", "网页", "通用交付", "代码", "仓库", "测试", "计划"],
-    tier: "first-class"
+    capabilities: ["文件", "搜索", "网页", "通用交付", "代码", "仓库", "测试", "计划"]
   },
   {
     id: "codex",
     name: "Codex 执行器",
     description: "在隔离仓库中改代码、运行测试和构建，适合工程任务。",
-    capabilities: ["代码", "仓库", "测试", "GitHub"],
-    tier: "first-class"
+    capabilities: ["代码", "仓库", "测试", "GitHub"]
   },
   {
     id: "deepseek-harness",
@@ -33,43 +30,7 @@ export const EXECUTORS: ExecutorDescriptor[] = [
     description: "通过官方 SDK/JSON-RPC 驱动完整 DeepSeek Harness 运行时，支持原生工具、会话恢复和完整事件流。",
     capabilities: ["代码", "仓库", "测试", "工具", "会话恢复", "GitHub"],
     provider: "DeepSeek",
-    supportsResume: true,
-    tier: "first-class"
-  },
-  {
-    id: "hermes",
-    name: "Hermes 执行器",
-    description: "通过本机 Hermes CLI 执行通用代理任务，适合多步研究、工具调用和自动化流程。",
-    capabilities: ["通用代理", "工具调用", "多步任务", "流式执行", "会话恢复"],
-    supportsResume: true,
-    tier: "external"
-  },
-  {
-    id: "qoder",
-    name: "Qoder",
-    description: "Use Qoder's official agent SDK with a local qodercli login for general coding tasks.",
-    capabilities: ["Code", "Workspace", "Resume"],
-    provider: "Qoder",
-    supportsResume: true,
-    tier: "external"
-  },
-  {
-    id: "workbuddy",
-    name: "WorkBuddy",
-    description: "Use the official CodeBuddy CLI that powers WorkBuddy, reusing its local login.",
-    capabilities: ["Code", "Workspace", "Resume"],
-    provider: "Tencent WorkBuddy",
-    supportsResume: true,
-    tier: "external"
-  },
-  {
-    id: "kimi",
-    name: "Kimi Code",
-    description: "Use the official Kimi Code CLI in non-interactive stream-json mode.",
-    capabilities: ["Code", "Workspace", "Resume"],
-    provider: "Moonshot AI",
-    supportsResume: true,
-    tier: "external"
+    supportsResume: true
   }
 ];
 
@@ -84,18 +45,14 @@ export function executorName(id: ExecutorId): string {
 }
 
 const CAPABILITY_SUPPORT: Record<ExecutionCapability, ExecutorId[]> = {
-  github: ["native", "codex", "deepseek-harness", "hermes", "qoder", "workbuddy", "kimi"],
+  github: ["native", "codex", "deepseek-harness"],
   "desktop-capture": ["native"]
 };
 
 export const EXECUTOR_FALLBACK_ORDER: ExecutorId[] = [
   "deepseek-harness",
   "codex",
-  "native",
-  "hermes",
-  "qoder",
-  "workbuddy",
-  "kimi"
+  "native"
 ];
 
 export function executorSupportsCapability(id: ExecutorId, capability?: ExecutionCapability): boolean {
@@ -160,3 +117,4 @@ function defaultExecutorAvailability(): Record<ExecutorId, boolean> {
   for (const id of EXECUTOR_IDS) available[id] = id === "native";
   return available;
 }
+

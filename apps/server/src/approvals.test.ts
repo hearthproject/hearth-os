@@ -154,7 +154,7 @@ describe("approval manager", () => {
 
   it("auto-approves pending tool approvals when the conversation switches to full", async () => {
     const conversation = store.createConversation("切换权限", {
-      executorEnabled: { native: true, codex: true, "deepseek-harness": false, hermes: false, qoder: false, workbuddy: false, kimi: false },
+      executorEnabled: { native: true, codex: true, "deepseek-harness": false },
       approvalMode: "necessary",
       preferredExecutorId: null
     });
@@ -249,7 +249,7 @@ describe("approval manager", () => {
 
   it("auto-approves full-permission conversation effects and writes an audit event", async () => {
     const conversation = store.createConversation("完全权限对话", {
-      executorEnabled: { native: true, codex: true, "deepseek-harness": false, hermes: true, qoder: false, workbuddy: false, kimi: false },
+      executorEnabled: { native: true, codex: true, "deepseek-harness": false },
       approvalMode: "full",
       preferredExecutorId: null
     });
@@ -361,3 +361,4 @@ describe("approval manager", () => {
     return { task: service.requireTask(task.id), runId };
   }
 });
+

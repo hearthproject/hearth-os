@@ -23,8 +23,7 @@ export function defaultExecutorSettings(): ExecutorSettings {
     defaultApprovalMode: "necessary",
     preferredExecutorId: null,
     concurrency,
-    executors: {},
-    hermesCommand: "hermes"
+    executors: {}
   };
 }
 
@@ -45,7 +44,6 @@ export function saveExecutorSettings(
     preferredExecutorId?: ExecutorId | null | undefined;
     concurrency?: Partial<Record<ExecutorId, number | undefined>> | undefined;
     executors?: Partial<Record<ExecutorId, ExecutorRuntimeSettings>> | undefined;
-    hermesCommand?: string | undefined;
   }
 ): ExecutorSettingsView {
   const current = loadExecutorSettings(path);
@@ -53,8 +51,7 @@ export function saveExecutorSettings(
     defaultApprovalMode: patch.defaultApprovalMode ?? current.defaultApprovalMode,
     preferredExecutorId: patch.preferredExecutorId !== undefined ? patch.preferredExecutorId : current.preferredExecutorId,
     concurrency: { ...current.concurrency, ...(patch.concurrency ?? {}) },
-    executors: mergeExecutorRuntimeSettings(current.executors, patch.executors),
-    hermesCommand: patch.hermesCommand ?? current.hermesCommand
+    executors: mergeExecutorRuntimeSettings(current.executors, patch.executors)
   });
   const updatedAt = new Date().toISOString();
   mkdirSync(dirname(path), { recursive: true });
@@ -121,15 +118,13 @@ export class ExecutorSettingsStore {
     preferredExecutorId?: ExecutorId | null | undefined;
     concurrency?: Partial<Record<ExecutorId, number | undefined>> | undefined;
     executors?: Partial<Record<ExecutorId, ExecutorRuntimeSettings>> | undefined;
-    hermesCommand?: string | undefined;
   }): ExecutorSettingsView {
     const current = this.load();
     const next = normalizeExecutorSettings({
       defaultApprovalMode: patch.defaultApprovalMode ?? current.defaultApprovalMode,
       preferredExecutorId: patch.preferredExecutorId !== undefined ? patch.preferredExecutorId : current.preferredExecutorId,
       concurrency: { ...current.concurrency, ...(patch.concurrency ?? {}) },
-      executors: mergeExecutorRuntimeSettings(current.executors, patch.executors),
-      hermesCommand: patch.hermesCommand ?? current.hermesCommand
+      executors: mergeExecutorRuntimeSettings(current.executors, patch.executors)
     });
     const updatedAt = new Date().toISOString();
     this.store.setAppSetting(SETTINGS_KEY, JSON.stringify({ ...next, updatedAt }));
@@ -162,7 +157,6 @@ export function normalizeExecutorSettings(input: {
   preferredExecutorId?: ExecutorId | null | undefined;
   concurrency?: Partial<Record<ExecutorId, number | undefined>> | undefined;
   executors?: Partial<Record<ExecutorId, ExecutorRuntimeSettings>> | undefined;
-  hermesCommand?: string | undefined;
 }): ExecutorSettings {
   const defaults = defaultExecutorSettings();
   const concurrency = {} as Record<ExecutorId, number>;
@@ -170,16 +164,11 @@ export function normalizeExecutorSettings(input: {
     concurrency[id] = normalizeConcurrency(input.concurrency?.[id], defaults.concurrency[id]);
   }
   const executors = normalizeExecutors(input.executors);
-  const configuredHermesCommand = typeof input.hermesCommand === "string" && input.hermesCommand.trim()
-    ? input.hermesCommand.trim()
-    : executors.hermes?.command?.trim() || defaults.hermesCommand;
-  executors.hermes = { ...executors.hermes, command: configuredHermesCommand };
   return {
     defaultApprovalMode: normalizeApprovalMode(input.defaultApprovalMode),
     preferredExecutorId: normalizeExecutorId(input.preferredExecutorId),
     concurrency,
-    executors,
-    hermesCommand: configuredHermesCommand
+    executors
   };
 }
 

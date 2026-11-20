@@ -75,7 +75,7 @@ describe("schedule service", () => {
 
   it("records a skipped run when the executor is unavailable", async () => {
     const state = setup(false);
-    const schedule = state.schedules.create({ name: "Hermes 计划", prompt: "执行", cron: "0 * * * *", executorId: "hermes" });
+    const schedule = state.schedules.create({ name: "Codex 计划", prompt: "执行", cron: "0 * * * *", executorId: "codex" });
     state.setNow(new Date("2026-01-01T01:00:00.000Z"));
     await state.schedules.tick();
     const runs = store?.listScheduleRuns(schedule.id) ?? [];
@@ -137,8 +137,8 @@ describe("schedule service", () => {
   });
 
   it("puts a failed schedule into cooldown without blocking other schedules", async () => {
-    const state = setup((executorId) => executorId !== "hermes", { failureCooldownMs: 5 * 60_000 });
-    const failing = state.schedules.create({ name: "失败计划", prompt: "执行", cron: "* * * * *", executorId: "hermes" });
+    const state = setup((executorId) => executorId !== "codex", { failureCooldownMs: 5 * 60_000 });
+    const failing = state.schedules.create({ name: "失败计划", prompt: "执行", cron: "* * * * *", executorId: "codex" });
     const healthy = state.schedules.create({ name: "健康计划", prompt: "执行", cron: "* * * * *", executorId: "native" });
     state.setNow(new Date("2026-01-01T00:01:00.000Z"));
 
@@ -233,7 +233,7 @@ describe("schedule service", () => {
 
   it("auto-pauses after consecutive failures and raises one attention item", async () => {
     const state = setup(false, { failureCooldownMs: 60_000, maxConsecutiveFailures: 3 });
-    const schedule = state.schedules.create({ name: "持续失败", prompt: "执行", cron: "* * * * *", executorId: "hermes" });
+    const schedule = state.schedules.create({ name: "持续失败", prompt: "执行", cron: "* * * * *", executorId: "codex" });
 
     state.setNow(new Date("2026-01-01T00:01:00.000Z"));
     await state.schedules.tick();
@@ -345,3 +345,4 @@ describe("schedule service", () => {
     };
   }
 });
+

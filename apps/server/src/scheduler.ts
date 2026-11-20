@@ -30,8 +30,6 @@ import { ContextProjector } from "./context-projector.ts";
 import { maybeModelSummary } from "./context-summary.ts";
 import { HandoffService } from "./handoff.ts";
 import { loadExecutorSettings } from "./executor-settings.ts";
-import { HermesApprovalRequiredError, HermesStartupError } from "./hermes-executor.ts";
-import type { ExternalContextItem } from "./external-executor.ts";
 import { executorHealth as readExecutorHealth } from "./executor-runtime.ts";
 import { sanitizeProgressDetail } from "./progress-detail.ts";
 import { EXECUTOR_FALLBACK_ORDER, executorName, resolveExecutorId } from "./executors.ts";
@@ -70,7 +68,7 @@ import { wantsPublicWebResearch, wantsScreenshot } from "./task-intent.ts";
 import type { WebSearchService } from "./web-search.ts";
 import { TaskWorktreeService } from "./worktrees.ts";
 
-import { createExecutorAdapters, type CodexContextItem, type CodexRunner, type DshRunner, type ExecutionOutcome, type ExecutorAdapter, type ExecutorAttemptContext, type ExternalRunner, type NativeRunner } from "./executor-adapter.ts";
+import { createExecutorAdapters, type CodexContextItem, type CodexRunner, type DshRunner, type ExecutionOutcome, type ExecutorAdapter, type ExecutorAttemptContext, type NativeRunner } from "./executor-adapter.ts";
 export type { CodexRunner, NativeRunner } from "./executor-adapter.ts";
 export type ExecutorHealthProvider = (executorId: ExecutorId, settings: ExecutorSettings) => { canRun: boolean; issues: string[] };
 
@@ -109,7 +107,6 @@ export interface SchedulerOptions {
   codexRunner?: CodexRunner;
   nativeRunner?: NativeRunner;
   deepseekRunner?: DshRunner;
-  externalRunner?: ExternalRunner;
   executorHealth?: ExecutorHealthProvider;
   executorSettingsPath?: string;
   executorSettings?: ExecutorSettings;
@@ -221,8 +218,7 @@ export class HearthScheduler {
       codex: this.codexRunner,
       native: this.nativeRunner,
       ...(this.deepseekRunner ? { deepseek: this.deepseekRunner } : {}),
-      settingsPath: this.executorSettingsPath,
-      ...(options.externalRunner ? { external: options.externalRunner } : {})
+      settingsPath: this.executorSettingsPath
     });
     this.executorHealth = options.executorHealth
       ?? ((executorId, settings) => readExecutorHealth(executorId, settings, this.executorSettingsPath));
@@ -635,7 +631,7 @@ export class HearthScheduler {
   }
 
   private markExecutorUnavailable(task: TaskRecord, executorId: ExecutorId, issues: string[]): void {
-    const message = `${executorId === "hermes" ? "Hermes" : executorId} 执行器当前不可用：${issues.join("；") || "未检测到可用配置"}`;
+    const message = `${executorId} 执行器当前不可用：${issues.join("；") || "未检测到可用配置"}`;
     this.service.updateTask(task.id, {
       status: "recoverable",
       currentRunId: task.currentRunId,
@@ -644,9 +640,7 @@ export class HearthScheduler {
         kind: "executor_unavailable",
         message,
         recoverable: true,
-        guidance: executorId === "hermes"
-          ? "到设置里检查 Hermes 命令路径并点击检测，确认 hermes --version 可用后重试"
-          : "检查执行器配置后重试"
+        guidance: "检查执行器配置后重试"
       }
     }, task.currentRunId ?? undefined);
   }
@@ -965,21 +959,7 @@ export class HearthScheduler {
       return;
     }
 
-    const failure = error instanceof HermesApprovalRequiredError
-      ? {
-          kind: "executor_approval_required",
-          message,
-          recoverable: true,
-          guidance: "在设置里完成 Hermes 授权，或把当前对话切换为完全权限后重试"
-        }
-      : error instanceof HermesStartupError
-        ? {
-            kind: "executor_unavailable",
-            message,
-            recoverable: true,
-            guidance: "到设置里检查 Hermes 命令路径并点击检测"
-          }
-      : aborted && this.stopping
+    const failure = aborted && this.stopping
       ? {
           kind: "interrupted",
           message: "Hearth 关闭时中止了这一轮执行",
@@ -1751,7 +1731,6 @@ export class HearthScheduler {
               })
             }
           : {}),
-        onExternalContextItem: (event) => this.captureExternalContextEvent(task, run, event),
         onDshContextItem: (event) => this.captureDshContextEvent(task, run, event),
         onCodexContextItem: (item) => this.captureCodexItem(task, run, item),
         onCodexThreadStarted: (threadId) => {
@@ -2238,12 +2217,6 @@ export class HearthScheduler {
 
   private taskErrorFor(error: unknown, aborted: boolean): TaskError {
     const message = error instanceof Error ? error.message : String(error);
-    if (error instanceof HermesApprovalRequiredError) {
-      return { kind: "executor_approval_required", message, recoverable: true, guidance: "在设置里完成 Hermes 授权，或把当前对话切换为完全权限后重试" };
-    }
-    if (error instanceof HermesStartupError) {
-      return { kind: "executor_unavailable", message, recoverable: true, guidance: "到设置里检查 Hermes 命令路径并点击检测" };
-    }
     if (aborted && this.stopping) {
       return { kind: "interrupted", message: "Hearth 关闭时中止了这一轮执行", recoverable: true, guidance: "重新启动后点击重试" };
     }
@@ -2484,25 +2457,6 @@ export class HearthScheduler {
     if (item.type === "error") {
       this.capture({ ...base, kind: "notice", role: "system", content: item.message, provenance: { source: "codex", itemType: item.type }, executorEventId: `codex:${item.id}` });
     }
-  }
-
-  private captureExternalContextEvent(task: TaskRecord, run: RunRecord, event: ExternalContextItem): void {
-    const kind = event.type.includes("tool")
-      ? event.type.includes("result") ? "tool_result" as const : "tool_call" as const
-      : event.type === "system" ? "notice" as const
-        : event.type === "error" ? "notice" as const
-          : "assistant_message" as const;
-    this.capture({
-      taskId: task.id,
-      conversationId: task.conversationId ?? null,
-      runId: run.id,
-      executorId: run.executorId ?? task.executorId ?? "native",
-      kind,
-      role: event.role,
-      content: event.content,
-      provenance: { source: "external-executor", eventType: event.type },
-      executorEventId: event.executorEventId
-    });
   }
 
   private latestRun(taskId: string, preferredId: string | null): RunRecord | null {

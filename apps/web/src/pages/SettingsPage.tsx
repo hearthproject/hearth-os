@@ -95,11 +95,7 @@ const EMPTY_DRAFT: ProfileDraft = {
 const EXECUTOR_LABELS: Record<ExecutorId, string> = {
   native: "Hearth 原生",
   codex: "Codex",
-  "deepseek-harness": "DeepSeek Harness",
-  hermes: "Hermes",
-  qoder: "Qoder",
-  workbuddy: "WorkBuddy",
-  kimi: "Kimi Code"
+  "deepseek-harness": "DeepSeek Harness"
 };
 
 export function SettingsPage() {

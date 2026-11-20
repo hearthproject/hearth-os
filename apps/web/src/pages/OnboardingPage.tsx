@@ -300,7 +300,7 @@ export function OnboardingPage() {
               <h1>执行器</h1>
 
               <div className="wizard-executor-list">
-                {(["native", "codex", "hermes"] as const).map((id) => {
+                {(["native", "codex", "deepseek-harness"] as const).map((id) => {
                   const executor = (executorsQuery.data?.executors ?? []).find((item) => item.id === id);
                   if (!executor) return null;
                   const healthy = executor.health.canRun;

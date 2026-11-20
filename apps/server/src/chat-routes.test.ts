@@ -241,31 +241,31 @@ describe("chat-first API", () => {
     const concurrency = await app.inject({
       method: "PUT",
       url: "/api/executor-settings",
-      payload: { concurrency: { qoder: 2 } }
+      payload: { concurrency: { codex: 2 } }
     });
     expect(concurrency.statusCode).toBe(200);
     expect(concurrency.json().settings.concurrency).toEqual(
-      expect.objectContaining({ native: 3, codex: 3, hermes: 3, qoder: 2, kimi: 3 })
+      expect.objectContaining({ native: 3, codex: 2, "deepseek-harness": 3 })
     );
 
     const command = await app.inject({
       method: "PUT",
       url: "/api/executor-settings",
-      payload: { executors: { qoder: { command: "qodercli" } } }
+      payload: { executors: { codex: { command: "codex-custom" } } }
     });
     expect(command.statusCode).toBe(200);
 
     const auth = await app.inject({
       method: "PUT",
       url: "/api/executor-settings",
-      payload: { executors: { qoder: { authMode: "pat" } }, preferredExecutorId: "kimi" }
+      payload: { executors: { codex: { authMode: "pat" } }, preferredExecutorId: "codex" }
     });
     expect(auth.statusCode).toBe(200);
-    expect(auth.json().settings.preferredExecutorId).toBe("kimi");
+    expect(auth.json().settings.preferredExecutorId).toBe("codex");
 
     const view = await app.inject({ method: "GET", url: "/api/executor-settings" });
-    expect(view.json().settings.executors.qoder).toEqual({ command: "qodercli", authMode: "pat" });
-    expect(view.json().settings.concurrency.qoder).toBe(2);
+    expect(view.json().settings.executors.codex).toEqual({ command: "codex-custom", authMode: "pat" });
+    expect(view.json().settings.concurrency.codex).toBe(2);
     await app.close();
   }, 30_000);
 
@@ -281,7 +281,7 @@ describe("chat-first API", () => {
     const seeded = await app.inject({
       method: "PUT",
       url: "/api/executor-settings",
-      payload: { executors: { qoder: { command: "qodercli" } } }
+      payload: { executors: { codex: { command: "codex-custom" } } }
     });
     expect(seeded.statusCode).toBe(200);
 
@@ -291,14 +291,13 @@ describe("chat-first API", () => {
       payload: {
         defaultApprovalMode: "full",
         preferredExecutorId: "native",
-        executors: { qoder: { command: "", executablePath: "  " }, hermes: { command: "" } },
-        hermesCommand: " "
+        executors: { codex: { command: "", executablePath: "  " } }
       }
     });
     expect(empty.statusCode, empty.body).toBe(200);
 
     const view = await app.inject({ method: "GET", url: "/api/executor-settings" });
-    expect(view.json().settings.executors.qoder).toEqual({ command: "qodercli" });
+    expect(view.json().settings.executors.codex).toEqual({ command: "codex-custom" });
     expect(view.json().settings.defaultApprovalMode).toBe("full");
 
     const defaults = await app.inject({ method: "GET", url: "/api/conversation-defaults" });
@@ -322,7 +321,7 @@ describe("chat-first API", () => {
       const listed = await app.inject({ method: "GET", url: "/api/executors" });
       expect(listed.statusCode).toBe(200);
       expect(listed.json().executors.map((executor: { id: string }) => executor.id)).toEqual([
-        "native", "codex", "deepseek-harness", "hermes", "qoder", "workbuddy", "kimi"
+        "native", "codex", "deepseek-harness"
       ]);
       expect(listed.json().executors.every((executor: { health: unknown }) => Boolean(executor.health))).toBe(true);
       expect(listed.json().preferredExecutorId).toBeNull();
@@ -726,44 +725,6 @@ describe("chat-first API", () => {
     await app.close();
   });
 
-  it("does not fall back when the locked external executor is unavailable", async () => {
-    const previous = process.env.HEARTH_EXECUTOR_DETECT;
-    process.env.HEARTH_EXECUTOR_DETECT = "off";
-    try {
-      const app = await buildServer({
-        store,
-        serveWeb: false,
-        modelSettingsPath: join(root, "settings.json"),
-        attachmentRoot: join(root, "files"),
-        executorSettingsPath: join(root, "executor-settings.json")
-      });
-      const conversation = await app.inject({
-        method: "POST",
-        url: "/api/conversations",
-        payload: {
-          title: "Qoder 优先",
-          settings: { preferredExecutorId: "qoder", executorEnabled: { qoder: true } }
-        }
-      });
-      const response = await app.inject({
-        method: "POST",
-        url: "/api/chat",
-        payload: { conversationId: conversation.json().id, message: "帮我修复项目里的 TypeScript 错误" }
-      });
-      const events = parseSse(response.body);
-      const routing = events.find((event) => event.event === "routing")?.data;
-      expect(routing.preferredExecutorId).toBe("qoder");
-      expect(routing.lockedExecutorId).toBe("qoder");
-      expect(routing.reroutedFrom).toBeUndefined();
-      expect(events.some((event) => event.event === "task")).toBe(false);
-      expect(events.find((event) => event.event === "done")?.data.content).toContain("已锁定 Qoder");
-      await app.close();
-    } finally {
-      if (previous === undefined) delete process.env.HEARTH_EXECUTOR_DETECT;
-      else process.env.HEARTH_EXECUTOR_DETECT = previous;
-    }
-  });
-
   it("uses the explicitly selected executor when the router misclassifies GitHub PR work as chat", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
       choices: [{ message: { content: '{"action":"chat","title":"","reason":"误判为问答"}' } }]
@@ -822,7 +783,7 @@ describe("chat-first API", () => {
     const conversation = await app.inject({
       method: "POST",
       url: "/api/conversations",
-      payload: { title: "全关", settings: { executorEnabled: { native: false, codex: false, hermes: false } } }
+      payload: { title: "全关", settings: { executorEnabled: { native: false, codex: false } } }
     });
     const conversationId = conversation.json().id as string;
 

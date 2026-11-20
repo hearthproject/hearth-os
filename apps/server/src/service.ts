@@ -1031,7 +1031,7 @@ export function visibleDeliverables(artifacts: ArtifactRecord[], expectedOutputs
 function defaultExecutorAvailability(): Record<ExecutorId, boolean> {
   const available = {} as Record<ExecutorId, boolean>;
   for (const id of EXECUTOR_IDS) {
-    available[id] = id === "native" || id === "codex" || id === "hermes";
+    available[id] = id === "native" || id === "codex";
   }
   return available;
 }

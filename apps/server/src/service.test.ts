@@ -126,7 +126,7 @@ describe("Hearth service agent metadata", () => {
     const store = new HearthStore(":memory:");
     const service = new HearthService(store);
     const conversation = store.createConversation("改派对话", {
-      executorEnabled: { native: false, codex: true, "deepseek-harness": false, hermes: true, qoder: false, workbuddy: false, kimi: false },
+      executorEnabled: { native: false, codex: true, "deepseek-harness": false },
       approvalMode: "necessary",
       preferredExecutorId: null
     });
@@ -150,7 +150,7 @@ describe("Hearth service agent metadata", () => {
     const store = new HearthStore(":memory:");
     const service = new HearthService(store);
     const conversation = store.createConversation("锁定对话", {
-      executorEnabled: { native: true, codex: true, "deepseek-harness": false, hermes: true, qoder: false, workbuddy: false, kimi: false },
+      executorEnabled: { native: true, codex: true, "deepseek-harness": false },
       approvalMode: "necessary",
       preferredExecutorId: "native"
     });
@@ -174,7 +174,7 @@ describe("Hearth service agent metadata", () => {
     const store = new HearthStore(":memory:");
     const service = new HearthService(store);
     const conversation = store.createConversation("全关对话", {
-      executorEnabled: { native: false, codex: false, "deepseek-harness": false, hermes: false, qoder: false, workbuddy: false, kimi: false },
+      executorEnabled: { native: false, codex: false, "deepseek-harness": false },
       approvalMode: "necessary",
       preferredExecutorId: null
     });
@@ -196,7 +196,7 @@ describe("Hearth service agent metadata", () => {
     const store = new HearthStore(":memory:");
     const service = new HearthService(store);
     const conversation = store.createConversation("完全权限对话", {
-      executorEnabled: { native: true, codex: true, "deepseek-harness": false, hermes: true, qoder: false, workbuddy: false, kimi: false },
+      executorEnabled: { native: true, codex: true, "deepseek-harness": false },
       approvalMode: "full",
       preferredExecutorId: null
     });
@@ -246,3 +246,4 @@ describe("Hearth service agent metadata", () => {
     store.close();
   });
 });
+

@@ -3,8 +3,6 @@ import type { HealthSnapshot } from "@hearth/core";
 import type { ExecutorSettings } from "@hearth/core";
 import { CURRENT_SCHEMA_VERSION } from "@hearth/eventlog";
 import { loadCodexProfile, type CodexProfile } from "@hearth/codex-executor";
-import { loadExecutorSettings } from "./executor-settings.ts";
-import { hermesHealth } from "./hermes-health.ts";
 import type { HearthService } from "./service.ts";
 
 const LOW_DISK_BYTES = 256 * 1024 * 1024;
@@ -50,8 +48,6 @@ export class HealthService {
   snapshot(): HealthSnapshot {
     const now = this.clock();
     const profile = this.codexProfile?.() ?? loadCodexProfile();
-    const executorSettings = this.executorSettingsProvider?.() ?? loadExecutorSettings(this.executorSettingsPath);
-    const hermes = hermesHealth(executorSettings.hermesCommand);
     const memory = process.memoryUsage();
     const taskCounts = this.service.store.countTasksByStatus();
     const latestMaintenance = this.service.store.latestMaintenanceRun();
@@ -113,8 +109,7 @@ export class HealthService {
         authSource: profile.authSource,
         envKeySource: profile.envKeySource,
         issues: profile.issues
-      },
-      hermes
+      }
     };
   }
 }

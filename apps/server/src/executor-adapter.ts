@@ -20,8 +20,7 @@ import type {
 } from "@hearth/core";
 import type { CodexRunOptions, CodexRunResult } from "@hearth/codex-executor";
 import { runDeepSeekHarness, type DeepSeekHarnessRunOptions, type DeepSeekHarnessRunResult, type DshApprovalOutcome, type DshApprovalRequest, type DshContextEvent } from "@hearth/deepseek-executor";
-import { runExternalExecutor, type ExternalContextItem, type ExternalRunOptions, type ExternalRunResult } from "./external-executor.ts";
-import { executorHome, resolveExecutorLaunch } from "./executor-runtime.ts";
+import { executorHome } from "./executor-runtime.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import { nativePermissionsFor, withExtraToolPermissions, type NativeRunOptions, type NativeRunResult } from "./native-executor.ts";
 import type { PreparedWorkspace } from "./workspace.ts";
@@ -29,7 +28,6 @@ import { wantsScreenshot } from "./task-intent.ts";
 
 export type CodexRunner = (options: CodexRunOptions) => Promise<CodexRunResult>;
 export type NativeRunner = (options: NativeRunOptions) => Promise<NativeRunResult>;
-export type ExternalRunner = (options: ExternalRunOptions) => Promise<ExternalRunResult>;
 export type DshRunner = (options: DeepSeekHarnessRunOptions) => Promise<DeepSeekHarnessRunResult>;
 export type CodexContextItem = Parameters<NonNullable<CodexRunOptions["onContextItem"]>>[0];
 
@@ -68,7 +66,6 @@ export interface ExecutorAttemptContext {
   onNativeCheckpoint: (checkpoint: AgentCheckpoint) => void | Promise<void>;
   onAuthorizeTool?: (request: AgentToolAuthorizationRequest) => Promise<AgentToolAuthorization>;
   onDshApprovalRequest?: (request: DshApprovalRequest) => Promise<DshApprovalOutcome>;
-  onExternalContextItem: (event: ExternalContextItem) => void;
   onDshContextItem: (event: DshContextEvent) => void;
   onCodexContextItem: (item: CodexContextItem) => void;
   onCodexThreadStarted: (threadId: string) => void;
@@ -277,87 +274,17 @@ export class DeepSeekHarnessExecutorAdapter implements ExecutorAdapter {
   }
 }
 
-const EXTERNAL_EXECUTOR_NAMES: Record<"hermes" | "qoder" | "workbuddy" | "kimi", string> = {
-  hermes: "Hermes",
-  qoder: "Qoder",
-  workbuddy: "WorkBuddy",
-  kimi: "Kimi Code"
-};
-
-export class ExternalExecutorAdapter implements ExecutorAdapter {
-  readonly supportsResume = true;
-
-  constructor(
-    readonly id: "hermes" | "qoder" | "workbuddy" | "kimi",
-    private readonly settingsPath: string,
-    private readonly runner: ExternalRunner
-  ) {}
-
-  canRun(input: ExecutorAvailabilityInput): ExecutorAvailability {
-    if (wantsScreenshot(`${input.task.title}\n${input.task.goal}`) || input.task.permissions?.tools.includes("capture_screen")) {
-      return { ok: false, reason: `${EXTERNAL_EXECUTOR_NAMES[this.id]} 不支持桌面截图任务` };
-    }
-    const launch = resolveExecutorLaunch(this.id, input.executorSettings, this.settingsPath);
-    if (!launch) {
-      return { ok: false, reason: `未检测到 ${EXTERNAL_EXECUTOR_NAMES[this.id]}，请在设置中安装或配置命令路径` };
-    }
-    return { ok: true };
-  }
-
-  async execute(input: ExecutorInvocation): Promise<ExecutionOutcome> {
-    const launch = resolveExecutorLaunch(this.id, input.executorSettings, this.settingsPath);
-    if (!launch) {
-      throw new Error(`未检测到 ${EXTERNAL_EXECUTOR_NAMES[this.id]}，请在设置中安装或配置命令路径`);
-    }
-    const result = await this.runner({
-      id: this.id,
-      launch,
-      workingDirectory: input.prepared.root,
-      prompt: input.prompt,
-      mode: input.fullPermission ? "full" : "necessary",
-      maxTurns: input.budget.maxTurns,
-      runBudgetSeconds: Math.max(1, Math.round(input.budget.maxDurationMs / 1000)),
-      ...(input.activeThreadId ? { resumeSessionId: input.activeThreadId } : {}),
-      signal: input.signal,
-      onProgress: (event) => input.onProgress({
-        kind: event.type,
-        message: event.message,
-        ...(event.detail ? { detail: event.detail } : {})
-      }),
-      onContextItem: input.onExternalContextItem
-    });
-    const name = EXTERNAL_EXECUTOR_NAMES[this.id];
-    return {
-      status: "completed",
-      finalResponse: result.finalResponse,
-      usage: result.usage,
-      threadId: result.sessionId,
-      label: `${name} / ${result.sessionId ?? "session"}`,
-      question: null
-    };
-  }
-
-  resume(input: ExecutorInvocation & { resume: AgentResumeState }): Promise<ExecutionOutcome> {
-    return this.execute(input);
-  }
-}
 
 export function createExecutorAdapters(input: {
   native: NativeRunner;
   codex: CodexRunner;
   deepseek?: DshRunner;
   settingsPath: string;
-  external?: ExternalRunner;
 }): Record<ExecutorId, ExecutorAdapter> {
-  const external = input.external ?? runExternalExecutor;
   const deepseek = input.deepseek ?? runDeepSeekHarness;
   return {
     native: new NativeExecutorAdapter(input.native),
     codex: new CodexExecutorAdapter(input.codex),
-    "deepseek-harness": new DeepSeekHarnessExecutorAdapter(deepseek, input.settingsPath),
-    hermes: new ExternalExecutorAdapter("hermes", input.settingsPath, external),
-    qoder: new ExternalExecutorAdapter("qoder", input.settingsPath, external),
-    workbuddy: new ExternalExecutorAdapter("workbuddy", input.settingsPath, external),
-    kimi: new ExternalExecutorAdapter("kimi", input.settingsPath, external)
+    "deepseek-harness": new DeepSeekHarnessExecutorAdapter(deepseek, input.settingsPath)
   };
 }

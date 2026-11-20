@@ -118,9 +118,4 @@ describe("executor model readiness", () => {
     expect(applyExecutorModelReadiness("deepseek-harness", base, settings({ baseUrl: "" })).canRun).toBe(false);
     expect(applyExecutorModelReadiness("deepseek-harness", base, settings({ protocol: "gemini" })).issues.join(" ")).toContain("Gemini");
   });
-
-  it("leaves external executors unchanged", () => {
-    const base = health("hermes");
-    expect(applyExecutorModelReadiness("hermes", base, null)).toEqual(base);
-  });
 });

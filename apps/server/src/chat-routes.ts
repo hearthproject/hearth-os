@@ -10,7 +10,7 @@ import { defaultConversationSettings, EXECUTOR_IDS, mergeConversationSettings } 
 import { loadCodexProfile, probeCodex, type CodexProfile } from "@hearth/codex-executor";
 import { loadExecutorSettings, type ExecutorSettingsStore } from "./executor-settings.ts";
 import { EXECUTOR_FALLBACK_ORDER, executorName, resolveExecutorFromEnabled, resolveExecutorLocked } from "./executors.ts";
-import { executorHealth, isExecutorManagedInstalled } from "./executor-runtime.ts";
+import { executorHealth } from "./executor-runtime.ts";
 import type { ApprovalManager } from "./approvals.ts";
 import type { HearthService } from "./service.ts";
 import type { MemoryService } from "./memory.ts";
@@ -138,13 +138,8 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
   };
   const defaultSettings = () => {
     const settings = executorSettings();
-    const enabled: Partial<Record<ExecutorId, boolean>> = { native: true, codex: true, hermes: true };
+    const enabled: Partial<Record<ExecutorId, boolean>> = { native: true, codex: true };
     if (options.registry?.settingsForExecutorOrChat("deepseek-harness")) enabled["deepseek-harness"] = true;
-    for (const id of ["qoder", "workbuddy", "kimi"] as const) {
-      const runtime = settings.executors[id];
-      enabled[id] = isExecutorManagedInstalled(id, executorSettingsPath)
-        || Boolean(runtime?.executablePath || runtime?.command || runtime?.installMode);
-    }
     return {
       ...defaultConversationSettings(settings.defaultApprovalMode, enabled),
       preferredExecutorId: settings.preferredExecutorId
@@ -548,7 +543,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
           const lockedText = lockedExecutorId
             ? `已锁定 ${executorName(lockedExecutorId)}，但${resolution.reason ?? "当前无法执行"}${lockedIssue ? `：${lockedIssue}` : ""}。任务没有派出；请检查该执行器设置，或切回“自动匹配（按任务）”后重试。`
             : plan.capability
-              ? `${resolution.reason ?? "没有可用的执行器"}，暂时不能派出任务。请在输入框上方启用${plan.capability === "github" ? " Codex、Hermes 或 Native" : " Native"}后重试。`
+              ? `${resolution.reason ?? "没有可用的执行器"}，暂时不能派出任务。请在输入框上方启用${plan.capability === "github" ? " Codex 或 Native" : " Native"}后重试。`
               : "所有执行器都已关闭或不可用，暂时不能派出任务。请在输入框上方的执行器选择器中选择一个可用执行器，然后再发送。";
           const assistant = service.appendChatMessage({
             id: randomUUID(),

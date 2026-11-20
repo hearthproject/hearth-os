@@ -14,11 +14,8 @@ export const TASK_STATUSES = [
 
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
-export const EXECUTOR_IDS = ["native", "codex", "deepseek-harness", "hermes", "qoder", "workbuddy", "kimi"] as const;
+export const EXECUTOR_IDS = ["native", "codex", "deepseek-harness"] as const;
 export type ExecutorId = (typeof EXECUTOR_IDS)[number];
-
-export const EXECUTOR_TIERS = ["first-class", "external"] as const;
-export type ExecutorTier = (typeof EXECUTOR_TIERS)[number];
 
 export const FIRST_CLASS_EXECUTOR_IDS = ["deepseek-harness", "codex", "native"] as const;
 export type FirstClassExecutorId = (typeof FIRST_CLASS_EXECUTOR_IDS)[number];
@@ -45,7 +42,7 @@ export interface ConversationSettingsPatch {
 
 export function defaultConversationSettings(
   approvalMode: ApprovalMode = "necessary",
-  enabled: Partial<Record<ExecutorId, boolean | undefined>> = { native: true, codex: true, hermes: true }
+  enabled: Partial<Record<ExecutorId, boolean | undefined>> = { native: true, codex: true }
 ): ConversationSettings {
   const executorEnabled = {} as Record<ExecutorId, boolean>;
   for (const id of EXECUTOR_IDS) executorEnabled[id] = enabled[id] ?? false;
@@ -113,38 +110,17 @@ export interface ExecutorProbeResult {
   health: ExecutorHealth;
 }
 
-export type ExecutorInstallStatus = "running" | "succeeded" | "failed";
-
-export interface ExecutorInstallJob {
-  id: ExecutorId;
-  status: ExecutorInstallStatus;
-  packageSpec: string;
-  startedAt: string;
-  finishedAt: string | null;
-  log: string;
-  error: string | null;
-}
-
-export interface ExecutorInstallInfo {
-  supported: boolean;
-  packageSpec: string | null;
-  hint: string | null;
-  job: ExecutorInstallJob | null;
-}
-
 export interface ExecutorView {
   id: ExecutorId;
   name: string;
   description: string;
   capabilities: string[];
-  tier: ExecutorTier;
   provider?: string | undefined;
   experimental?: boolean | undefined;
   supportsResume?: boolean | undefined;
   runtime: ExecutorRuntimeSettings;
   concurrency: number;
   health: ExecutorHealth;
-  install: ExecutorInstallInfo;
   modelBinding?: ExecutorModelBindingView | undefined;
 }
 
@@ -153,7 +129,6 @@ export interface ExecutorSettings {
   preferredExecutorId: ExecutorId | null;
   concurrency: Record<ExecutorId, number>;
   executors: Partial<Record<ExecutorId, ExecutorRuntimeSettings>>;
-  hermesCommand: string;
 }
 
 export interface ExecutorSettingsPatch {
@@ -161,20 +136,10 @@ export interface ExecutorSettingsPatch {
   preferredExecutorId?: ExecutorId | null | undefined;
   concurrency?: Partial<Record<ExecutorId, number>> | undefined;
   executors?: Partial<Record<ExecutorId, ExecutorRuntimeSettings>> | undefined;
-  hermesCommand?: string | undefined;
 }
 
 export interface ExecutorSettingsView extends ExecutorSettings {
   updatedAt: string | null;
-}
-
-export interface HermesHealth {
-  canRun: boolean;
-  command: string;
-  version: string | null;
-  issues: string[];
-  configured?: boolean | undefined;
-  configPath?: string | null | undefined;
 }
 
 export const TASK_KINDS = ["delivery", "workspace", "general"] as const;
@@ -2132,7 +2097,6 @@ export interface HealthSnapshot {
     envKeySource: "process" | "windows-user" | "missing" | "none";
     issues: string[];
   };
-  hermes: HermesHealth;
 }
 
 export const CONTEXT_ITEM_KINDS = [
