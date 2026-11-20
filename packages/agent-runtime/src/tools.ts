@@ -11,7 +11,7 @@ import { fetchWebSnapshot } from "./web-fetch.ts";
 import { applyEdit, findEditMatch, normalizeFile, restoreFile } from "./harness/edit-match.ts";
 import { omissionPlaceholderError } from "./harness/omission.ts";
 import { searchFiles } from "./harness/search.ts";
-import { hashContent, recordCommand, recordFileModified, recordFileRead, requireReadBeforeWrite } from "./harness/file-state.ts";
+import { fileReadState, hashContent, rangesCover, recordCommand, recordFileModified, recordFileRead, requireReadBeforeWrite } from "./harness/file-state.ts";
 import { rewindTool, snapshotBeforeMutation } from "./harness/snapshots.ts";
 import { killShellSession, runShellSession, shellOutput, shellSessionInfo, startShellSession } from "./harness/shell-session.ts";
 import { truncateToolOutput, writeFullToolOutput } from "./harness/tool-output.ts";
@@ -79,7 +79,8 @@ const readFileTool: AgentTool = {
       properties: {
         path: { type: "string", description: "文件路径，相对于工作区根目录" },
         offset: { type: "number", description: "起始行，从 1 开始" },
-        limit: { type: "number", description: "最多读取多少行，默认 400" }
+        limit: { type: "number", description: "最多读取多少行，默认 400" },
+        force: { type: "boolean", description: "即使与上次读取内容相同也重新返回正文" }
       },
       required: ["path"],
       additionalProperties: false
@@ -90,18 +91,28 @@ const readFileTool: AgentTool = {
     const path = stringArg(args, "path");
     const target = resolveSafe(path, context.workspaceRoot, context.permissions.readRoots);
     assertReadable(target, context.permissions.readRoots);
-    if (!existsSync(target)) throw new Error(`文件不存在：${path}`);
+    if (!existsSync(target)) throw new Error(missingPathError(path, target, context.workspaceRoot));
     const stat = lstatSync(target);
     if (!stat.isFile()) throw new Error(`不是普通文件：${path}`);
     if (stat.size > MAX_READ_BYTES) throw new Error(`文件过大，请先用 search_text 定位：${path}`);
-    const content = readFileSync(target, "utf8");
-    recordFileRead(context.state, target, content);
+    const buffer = readFileSync(target);
+    if (looksBinary(buffer)) throw new Error(`文件疑似二进制内容，read_file 只返回文本：${path}。如需解析文档请用 read_document，或先用 list_files 确认路径。`);
+    const content = buffer.toString("utf8");
     const lines = content.replace(/\uFEFF/, "").split(/\r?\n/);
     const offset = Math.max(1, intArg(args, "offset", 1));
     const limit = Math.min(2_000, Math.max(1, intArg(args, "limit", 400)));
     const selected = lines.slice(offset - 1, offset - 1 + limit);
+    const endLine = offset + selected.length - 1;
+    const previous = fileReadState(context, target);
+    if (args.force !== true && selected.length > 0 && previous?.hash === hashContent(content) && rangesCover(previous.ranges, offset, endLine)) {
+      return {
+        content: `${path} 自上次读取后未变化，第 ${offset}-${endLine} 行已在上下文中。如需重新查看正文，请传 force=true；如需其他片段，请调整 offset/limit。`,
+        metadata: { unchanged: true }
+      };
+    }
+    recordFileRead(context.state, target, content, selected.length > 0 ? [{ start: offset, end: endLine }] : []);
     const body = selected.map((line, index) => `${offset + index}: ${line}`).join("\n");
-    const more = offset - 1 + limit < lines.length ? `\n... 共 ${lines.length} 行，继续读取请调大 offset` : "";
+    const more = endLine < lines.length ? `\n... 共 ${lines.length} 行，继续读取请调大 offset` : "";
     return { content: body + more, ...(more ? { metadata: { truncated: true } } : {}) };
   }
 };
@@ -538,6 +549,59 @@ function editRequests(args: Record<string, unknown>): Array<{ oldText: string; n
 function editFailure(content: string, oldText: string): string {
   const match = findEditMatch(content, oldText);
   return "start" in match ? "没有唯一匹配" : match.error;
+}
+
+function missingPathError(path: string, target: string, workspaceRoot: string): string {
+  const suggestions: string[] = [];
+  try {
+    const directory = dirname(target);
+    const wanted = basename(target).toLowerCase();
+    const wantedStem = basename(target, extname(target)).toLowerCase();
+    for (const name of readdirSync(directory)) {
+      const candidate = name.toLowerCase();
+      const stem = basename(name, extname(name)).toLowerCase();
+      if (candidate === wanted || editDistance(wanted, candidate) <= 2 || (wantedStem.length >= 3 && stem === wantedStem)) {
+        suggestions.push(relative(workspaceRoot, join(directory, name)).replace(/\\/g, "/"));
+      }
+    }
+  } catch {
+    // The parent may not exist; fall through to the generic hint.
+  }
+  if (suggestions.length > 0) {
+    return `文件不存在：${path}。是否想找：${[...new Set(suggestions)].slice(0, 5).join("、")}？`;
+  }
+  return `文件不存在：${path}。请先用 list_files 或 glob 确认工作区内的真实路径，不要猜测文件名。`;
+}
+
+function editDistance(left: string, right: string): number {
+  if (left === right) return 0;
+  if (left.length === 0) return right.length;
+  if (right.length === 0) return left.length;
+  let previous = Array.from({ length: right.length + 1 }, (_value, index) => index);
+  for (let row = 1; row <= left.length; row += 1) {
+    const current = [row];
+    for (let column = 1; column <= right.length; column += 1) {
+      const cost = left[row - 1] === right[column - 1] ? 0 : 1;
+      current[column] = Math.min(
+        (current[column - 1] ?? 0) + 1,
+        (previous[column] ?? 0) + 1,
+        (previous[column - 1] ?? 0) + cost
+      );
+    }
+    previous = current;
+  }
+  return previous[right.length] ?? 0;
+}
+
+function looksBinary(buffer: Buffer): boolean {
+  const sample = buffer.subarray(0, 4_096);
+  if (sample.length === 0) return false;
+  if (sample.includes(0)) return true;
+  let control = 0;
+  for (const byte of sample) {
+    if (byte < 7 || (byte > 13 && byte < 32)) control += 1;
+  }
+  return control / sample.length > 0.3;
 }
 
 const applyPatchTool: AgentTool = {

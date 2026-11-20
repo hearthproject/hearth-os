@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createBuiltinTools, defaultTaskPermissions } from "./tools.ts";
+import { createAgentState } from "./harness/file-state.ts";
 import { killShellSession } from "./harness/shell-session.ts";
 import type { AgentToolContext } from "./types.ts";
 
@@ -301,6 +302,35 @@ describe("builtin tools", () => {
       permissions,
       signal: new AbortController().signal
     })).rejects.toThrow("没有网络权限");
+  });
+
+  it("deduplicates unchanged reads unless force is set", async () => {
+    const root = workspace(roots);
+    const out = join(root, "out");
+    mkdirSync(out, { recursive: true });
+    writeFileSync(join(out, "note.md"), "alpha\nbeta\n");
+    const state = createAgentState(root);
+    const context = { ...contextFor(root, out), state };
+    const tools = mapTools();
+    const first = await tools.read_file!.execute({ path: "out/note.md" }, context);
+    expect(first.content).toContain("1: alpha");
+    const second = await tools.read_file!.execute({ path: "out/note.md" }, context);
+    expect(second.content).toContain("未变化");
+    expect(second.metadata?.unchanged).toBe(true);
+    expect(second.content).not.toContain("1: alpha");
+    const forced = await tools.read_file!.execute({ path: "out/note.md", force: true }, context);
+    expect(forced.content).toContain("1: alpha");
+  });
+
+  it("rejects binary reads and suggests a nearby path", async () => {
+    const root = workspace(roots);
+    const out = join(root, "out");
+    mkdirSync(out, { recursive: true });
+    writeFileSync(join(out, "real.md"), "text\n");
+    writeFileSync(join(out, "binary.bin"), Buffer.from([0, 1, 2, 3, 255]));
+    const context = contextFor(root, out);
+    await expect(mapTools().read_file!.execute({ path: "out/binary.bin" }, context)).rejects.toThrow("二进制");
+    await expect(mapTools().read_file!.execute({ path: "out/real.txt" }, context)).rejects.toThrow(/是否想找.*real.md/);
   });
 
   it("stores full shell output in the task log and returns only the tail", async () => {

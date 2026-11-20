@@ -19,7 +19,7 @@ export function hashContent(content: string | Uint8Array): string {
   return createHash("sha256").update(content).digest("hex").slice(0, 16);
 }
 
-export function recordFileRead(state: AgentToolState | undefined, absPath: string, content: string): void {
+export function recordFileRead(state: AgentToolState | undefined, absPath: string, content: string, ranges?: Array<{ start: number; end: number }>): void {
   if (!state) return;
   let size = content.length;
   let mtimeMs = 0;
@@ -30,7 +30,13 @@ export function recordFileRead(state: AgentToolState | undefined, absPath: strin
   } catch {
     // Keep content-derived size when the file disappears between read and stat.
   }
-  state.readFiles.set(normalizeKey(absPath), { size, mtimeMs, hash: hashContent(content) });
+  const key = normalizeKey(absPath);
+  const hash = hashContent(content);
+  const previous = state.readFiles.get(key);
+  const merged = previous?.hash === hash
+    ? mergeRanges([...(previous.ranges ?? []), ...(ranges ?? [])])
+    : mergeRanges(ranges ?? []);
+  state.readFiles.set(key, { size, mtimeMs, hash, ...(merged.length > 0 ? { ranges: merged } : {}) });
   addUnique(state.progress.filesRead, relPath(state, absPath));
 }
 
@@ -42,8 +48,44 @@ export function recordFileModified(state: AgentToolState | undefined, absPath: s
   } catch {
     // Ignore missing stats after a rollback.
   }
-  state.readFiles.set(normalizeKey(absPath), { size: content.length, mtimeMs, hash: hashContent(content) });
+  const lines = content.replace(/\r\n/g, "\n").split("\n").length;
+  state.readFiles.set(normalizeKey(absPath), {
+    size: content.length,
+    mtimeMs,
+    hash: hashContent(content),
+    ranges: [{ start: 1, end: Math.max(1, lines) }]
+  });
   addUnique(state.progress.filesModified, relPath(state, absPath));
+}
+
+export function rangesCover(ranges: Array<{ start: number; end: number }> | undefined, start: number, end: number): boolean {
+  if (!ranges || ranges.length === 0 || end < start) return false;
+  const sorted = [...ranges].sort((left, right) => left.start - right.start);
+  let coveredThrough = start - 1;
+  for (const range of sorted) {
+    if (range.end < coveredThrough + 1) continue;
+    if (range.start > coveredThrough + 1) break;
+    coveredThrough = Math.max(coveredThrough, range.end);
+    if (coveredThrough >= end) return true;
+  }
+  return coveredThrough >= end;
+}
+
+function mergeRanges(ranges: Array<{ start: number; end: number }>): Array<{ start: number; end: number }> {
+  const sorted = ranges
+    .filter((range) => Number.isFinite(range.start) && Number.isFinite(range.end) && range.start <= range.end)
+    .map((range) => ({ start: Math.max(1, Math.floor(range.start)), end: Math.max(1, Math.floor(range.end)) }))
+    .sort((left, right) => left.start - right.start || left.end - right.end);
+  const merged: Array<{ start: number; end: number }> = [];
+  for (const range of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && range.start <= last.end + 1) {
+      last.end = Math.max(last.end, range.end);
+      continue;
+    }
+    merged.push(range);
+  }
+  return merged;
 }
 
 export function requireReadBeforeWrite(context: AgentToolContext, absPath: string, options: { allowCreate?: boolean } = {}): string | null {

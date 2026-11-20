@@ -79,6 +79,7 @@ export interface AgentToolMetadata {
   background?: boolean;
   snapshotId?: string;
   snapshotIds?: string[];
+  unchanged?: boolean;
 }
 
 export interface AgentToolResult {

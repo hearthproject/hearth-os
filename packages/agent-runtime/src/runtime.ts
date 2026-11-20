@@ -97,6 +97,9 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     // Output trimming applies even when history summarization is unnecessary.
     messages.splice(0, messages.length, ...compacted.messages);
     if (!compacted.compacted) return false;
+    // The summary replaces the raw tool output, so a later read must return the
+    // actual file body instead of deduplicating against a stale range.
+    for (const read of state.readFiles.values()) delete read.ranges;
     compactions += 1;
     emit({ type: "compacted", before: compacted.before, after: compacted.after });
     emit({
