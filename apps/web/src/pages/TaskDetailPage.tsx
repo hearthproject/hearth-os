@@ -33,6 +33,7 @@ import { executorLabel, executionModeLabel, taskKindLabel } from "../lib/labels.
 import { ApprovalCard } from "../components/ApprovalCard.tsx";
 import { TaskFollowUpPanel } from "../components/TaskFollowUpPanel.tsx";
 import { TaskGitPanel } from "../components/TaskGitPanel.tsx";
+import { TaskTurnTimeline } from "../components/TaskTurnTimeline.tsx";
 import { TaskWorktreePanel } from "../components/TaskWorktreePanel.tsx";
 import { StatusPill } from "../components/StatusPill.tsx";
 import type { ArtifactRecord, ExecutorId, RunRecord, TaskDeliverable, TaskProgressDetail, TaskView } from "../lib/types.ts";
@@ -430,6 +431,8 @@ export function TaskDetailPage() {
           )}
         </div>
       </section>
+
+      <TaskTurnTimeline taskId={task.id} />
 
       <details className="task-original-request">
         <summary>原始需求</summary>

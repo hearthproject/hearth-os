@@ -1,0 +1,241 @@
+/* Per-turn execution timeline and guarded rewind. */
+
+.turn-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.turn-subtitle {
+  margin: 4px 0 0;
+  color: var(--ink-tertiary);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.turn-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.turn-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  color: var(--ink-tertiary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.turn-empty.turn-error {
+  color: var(--risk);
+  border-color: color-mix(in srgb, var(--risk) 30%, transparent);
+  background: var(--risk-tint);
+}
+
+.turn-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.turn-item {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 12px;
+  position: relative;
+  padding-bottom: 18px;
+}
+
+.turn-item:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 18px;
+  bottom: 0;
+  width: 1px;
+  background: var(--line);
+}
+
+.turn-marker {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  position: relative;
+  padding-left: 18px;
+}
+
+.turn-marker::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 6px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 2px solid var(--surface);
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+
+.turn-number {
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.turn-marker time {
+  color: var(--ink-tertiary);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.turn-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.turn-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.turn-summary strong {
+  font-weight: 620;
+}
+
+.turn-summary small {
+  color: var(--ink-tertiary);
+  font-size: 11.5px;
+}
+
+.turn-files {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.turn-files li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--ink-secondary);
+  font-size: 12px;
+}
+
+.turn-files code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11.5px;
+  color: var(--ink);
+}
+
+.turn-files small {
+  flex: none;
+  color: var(--ink-tertiary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.turn-tag {
+  flex: none;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface-sunk);
+  color: var(--ink-tertiary);
+  font-size: 10.5px;
+}
+
+.turn-tag-warn {
+  background: var(--risk-tint);
+  color: var(--risk);
+}
+
+.turn-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  color: var(--risk);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.turn-verification {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  color: var(--ok);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.turn-verification-bad {
+  color: var(--risk);
+}
+
+.turn-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.turn-actions .ghost-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+}
+
+.turn-actions .ghost-button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.turn-notice {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--ok-tint);
+  color: var(--ok);
+  font-size: 12.5px;
+}
+
+@media (max-width: 640px) {
+  .turn-item {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .turn-item:not(:last-child)::before {
+    display: none;
+  }
+
+  .turn-marker {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+  }
+}

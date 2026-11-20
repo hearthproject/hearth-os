@@ -91,6 +91,8 @@ import type {
   TaskListItem,
   TaskProposalRecord,
   TaskRecord,
+  TaskRewindResponse,
+  TaskTurnsResponse,
   TaskWorktreeView,
   TrashItem,
   TrashKind,
@@ -443,6 +445,12 @@ export const api = {
   tasks: () => request<{ tasks: TaskListItem[] }>("/api/tasks"),
   artifacts: () => request<{ artifacts: ArtifactListItem[] }>("/api/artifacts"),
   task: (id: string) => request<TaskView>(`/api/tasks/${encodeURIComponent(id)}`),
+  taskTurns: (id: string) => request<TaskTurnsResponse>(`/api/tasks/${encodeURIComponent(id)}/turns`),
+  rewindTask: (id: string, input: { runId: string; turn: number; force?: boolean }) =>
+    request<TaskRewindResponse>(`/api/tasks/${encodeURIComponent(id)}/rewind`, {
+      method: "POST",
+      body: JSON.stringify(input)
+    }),
   followUps: (id: string) => request<{ followUps: TaskFollowUpRecord[] }>(`/api/tasks/${encodeURIComponent(id)}/follow-ups`),
   addFollowUp: (id: string, content: string, mode: TaskFollowUpMode) =>
     request<TaskFollowUpRecord>(`/api/tasks/${encodeURIComponent(id)}/follow-ups`, {

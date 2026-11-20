@@ -273,6 +273,64 @@ export interface TaskView {
   knowledge?: { uri: string; syncedAt: string; contentHash: string | null } | null;
 }
 
+export interface TaskTurnFile {
+  path: string;
+  created: boolean;
+  insertions: number | null;
+  deletions: number | null;
+  beforeHash: string | null;
+  afterHash: string | null;
+  snapshotId: string | null;
+  snapshotPath: string | null;
+  snapshotAvailable: boolean;
+}
+
+export interface TaskTurnVerification {
+  toolCalls: number;
+  failedTests: string[];
+  diagnostics: Array<{ file: string; line?: number; code?: string; message: string }>;
+  exitCodes: Array<number | null>;
+  filesChanged: string[];
+  insertions: number;
+  deletions: number;
+  browserAssertions: Array<{ kind: string; expected: string; passed: boolean; actual?: string }>;
+}
+
+export interface TaskTurn {
+  runId: string;
+  attempt: number;
+  turn: number;
+  createdAt: string;
+  files: TaskTurnFile[];
+  failed: Array<{ path: string; reason: string }>;
+  verification?: TaskTurnVerification;
+}
+
+export interface TaskTurnsResponse {
+  runs: Array<{
+    id: string;
+    attempt: number;
+    status: string;
+    startedAt: string | null;
+    endedAt: string | null;
+  }>;
+  turns: TaskTurn[];
+}
+
+export interface TaskRewindReport {
+  runId: string;
+  turn: number;
+  restored: string[];
+  removed: string[];
+  failed: Array<{ path: string; reason: string }>;
+  force: boolean;
+}
+
+export interface TaskRewindResponse {
+  report: TaskRewindReport;
+  turn: TaskTurn | null;
+}
+
 export interface TaskContextResponse extends ContextSnapshot {}
 
 export interface TaskHandoffsResponse {
