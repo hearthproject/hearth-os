@@ -9,6 +9,7 @@ import type { NativeRunOptions, NativeRunResult } from "./native-executor.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import { ProjectService } from "./projects.ts";
 import { createAgentTool, createSubagentTool } from "./subagents.ts";
+import { createAgentLifecycleTools, SubagentTaskManager } from "./subagent-manager.ts";
 import { TaskWorktreeService } from "./worktrees.ts";
 
 describe("native subagents", () => {
@@ -105,6 +106,35 @@ describe("native subagents", () => {
     expect(captured[0]?.mode).toBe("plan");
     expect(captured[0]?.task.goal).toBe("找到入口文档并返回行号");
     expect(captured[0]?.prompt).toContain("输出契约");
+  });
+
+  it("starts background agents and exposes wait/status/kill", async () => {
+    const parentWorktree = worktrees.ensure(task);
+    const manager = new SubagentTaskManager(2);
+    const tool = createAgentTool({
+      task,
+      prepared: { root: parentWorktree.path, outDir: join(parentWorktree.path, "out"), inputs: [] },
+      settings: settings(),
+      permissions,
+      signal: new AbortController().signal,
+      worktrees,
+      parentWorktree,
+      manager,
+      runner: async () => {
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 30));
+        return result("后台完成");
+      }
+    });
+    const lifecycle = createAgentLifecycleTools(manager);
+    const waitTool = lifecycle.find((item) => item.definition.name === "agent_wait")!;
+    const statusTool = lifecycle.find((item) => item.definition.name === "agent_status")!;
+
+    const started = await tool.execute({ subagent_type: "explore", description: "后台调查", prompt: "调查", run_in_background: true }, context(parentWorktree.path));
+    expect(started.content).toContain("status: running");
+    const waited = await waitTool.execute({ agent_id: started.metadata?.agentId, timeout_seconds: 1 }, context(parentWorktree.path));
+    expect(waited.content).toContain("status: completed");
+    expect(waited.content).toContain("后台完成");
+    expect((await statusTool.execute({}, context(parentWorktree.path))).content).toContain("completed");
   });
 
   it("creates an isolated child worktree from the parent HEAD and commits its changes", async () => {

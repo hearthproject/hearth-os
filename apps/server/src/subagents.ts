@@ -7,6 +7,7 @@ import { runNativeTask, type NativeRunOptions, type NativeRunResult } from "./na
 import type { ModelSettings } from "./model-settings.ts";
 import type { PreparedWorkspace } from "./workspace.ts";
 import type { TaskWorktreeService } from "./worktrees.ts";
+import type { SubagentTaskManager } from "./subagent-manager.ts";
 
 const MAX_SUBAGENTS = 4;
 
@@ -25,6 +26,7 @@ export interface SubagentToolOptions {
   maxSubagents?: number | undefined;
   depth?: number | undefined;
   compatibility?: boolean | undefined;
+  manager?: SubagentTaskManager | undefined;
   onStarted?: ((info: { childId: string; mode: "read-only" | "isolated-write"; title: string; type: SubagentType }) => void) | undefined;
 }
 
@@ -59,71 +61,85 @@ function createDispatchTool(options: SubagentToolOptions, compatibility: boolean
       const childId = subagentTaskId(options.task.id, profile.type);
       const childTitle = parsed.title || `${profile.type} ${started}`;
       if (profile.isolation === "worktree" && !options.task.projectId) throw new Error("general-purpose 子代理只能用于本地项目任务");
-      const worktree = profile.isolation === "worktree" ? createChildWorktree(childId, options) : null;
-      options.onStarted?.({
-        childId,
-        mode: profile.isolation === "worktree" ? "isolated-write" : "read-only",
-        title: childTitle,
-        type: profile.type
-      });
-      const childRoot = worktree?.path ?? options.prepared.root;
-      const childOutDir = worktree ? join(worktree.path, ".hearth", "subagent-out") : options.prepared.outDir;
-      const childTask = childTaskRecord({
-        id: childId,
-        title: childTitle,
-        objective: parsed.objective,
-        task: options.task,
-        root: childRoot,
-        outDir: childOutDir,
-        permissions: profile.isolation === "worktree" ? isolatedWritePermissions(options, childRoot, childOutDir) : readOnlyPermissions(options, profile.tools)
-      });
-      const budget = {
-        ...profile.budget,
-        ...(parsed.maxTurns ? { maxTurns: Math.min(profile.budget.maxTurns, parsed.maxTurns) } : {}),
-        ...(options.budget ? { maxTokens: Math.min(profile.budget.maxTokens, options.budget.maxTokens) } : {})
-      };
-      const result = await runner({
-        task: childTask,
-        prepared: { root: childRoot, outDir: childOutDir, inputs: [] },
-        settings: options.settings,
-        prompt: agentPrompt(profile.type, parsed.objective, options.task, profile.outputContract),
-        permissions: childTask.permissions ?? readOnlyPermissions(options, profile.tools),
-        budget,
-        mode: profile.mode,
-        signal: options.signal,
-        expectedOutputs: []
-      });
-      if (result.status !== "completed") {
-        const details = result.status === "waiting_input"
-          ? `需要补充信息：${result.question ?? result.finalResponse}`
-          : result.finalResponse || result.status;
-        throw new Error(`子代理未完成（${result.status}）：${details}${worktree ? `；已保留 Worktree ${worktree.path}（${worktree.branch}）` : ""}`);
-      }
 
-      const usage = result.usage ?? zeroUsage();
-      const summary = result.finalResponse || "未返回总结";
-      if (!worktree) {
+      const launch = async (signal: AbortSignal): Promise<AgentToolResult> => {
+        const worktree = profile.isolation === "worktree" ? createChildWorktree(childId, options) : null;
+        options.onStarted?.({
+          childId,
+          mode: profile.isolation === "worktree" ? "isolated-write" : "read-only",
+          title: childTitle,
+          type: profile.type
+        });
+        const childRoot = worktree?.path ?? options.prepared.root;
+        const childOutDir = worktree ? join(worktree.path, ".hearth", "subagent-out") : options.prepared.outDir;
+        const childTask = childTaskRecord({
+          id: childId,
+          title: childTitle,
+          objective: parsed.objective,
+          task: options.task,
+          root: childRoot,
+          outDir: childOutDir,
+          permissions: profile.isolation === "worktree" ? isolatedWritePermissions(options, childRoot, childOutDir) : readOnlyPermissions(options, profile.tools)
+        });
+        const budget = {
+          ...profile.budget,
+          ...(parsed.maxTurns ? { maxTurns: Math.min(profile.budget.maxTurns, parsed.maxTurns) } : {}),
+          ...(options.budget ? { maxTokens: Math.min(profile.budget.maxTokens, options.budget.maxTokens) } : {})
+        };
+        const result = await runner({
+          task: childTask,
+          prepared: { root: childRoot, outDir: childOutDir, inputs: [] },
+          settings: options.settings,
+          prompt: agentPrompt(profile.type, parsed.objective, options.task, profile.outputContract),
+          permissions: childTask.permissions ?? readOnlyPermissions(options, profile.tools),
+          budget,
+          mode: profile.mode,
+          signal: AbortSignal.any([options.signal, signal]),
+          expectedOutputs: []
+        });
+        if (result.status !== "completed") {
+          const details = result.status === "waiting_input"
+            ? `需要补充信息：${result.question ?? result.finalResponse}`
+            : result.finalResponse || result.status;
+          throw new Error(`子代理未完成（${result.status}）：${details}${worktree ? `；已保留 Worktree ${worktree.path}（${worktree.branch}）` : ""}`);
+        }
+
+        const usage = result.usage ?? zeroUsage();
+        const summary = result.finalResponse || "未返回总结";
+        if (!worktree) {
+          return {
+            content: `agentId: ${childId}\nstatus: completed\ntype: ${profile.type}\nsummary: ${summary}`,
+            usage,
+            metadata: { agentId: childId, subagentType: profile.type, agentStatus: "completed" }
+          };
+        }
+
+        const commit = commitChildWorktree(worktree.path, options.task.id, childTitle);
         return {
-          content: `agentId: ${childId}\nstatus: completed\ntype: ${profile.type}\nsummary: ${summary}`,
+          content: [
+            `agentId: ${childId}`,
+            "status: completed",
+            `type: ${profile.type}`,
+            `summary: ${summary}`,
+            `branch: ${worktree.branch}`,
+            `commit: ${commit}`,
+            "结果尚未合并。请检查该分支和提交后，由父任务手动 cherry-pick。"
+          ].join("\n"),
           usage,
-          metadata: { agentId: childId, subagentType: profile.type, agentStatus: "completed" }
+          metadata: { agentId: childId, subagentType: profile.type, agentStatus: "completed", branch: worktree.branch, commitSha: commit }
+        };
+      };
+
+      if (parsed.runInBackground) {
+        if (!options.manager) throw new Error("后台子代理需要 manager 支持");
+        const job = options.manager.start({ id: childId, type: profile.type, title: childTitle }, launch);
+        return {
+          content: `agentId: ${job.id}\nstatus: running\ntype: ${profile.type}\n请用 agent_wait 等待结果，或继续其他工作；agent_status 可查看状态，agent_kill 可取消。`,
+          metadata: { agentId: job.id, subagentType: profile.type, agentStatus: "running" }
         };
       }
 
-      const commit = commitChildWorktree(worktree.path, options.task.id, childTitle);
-      return {
-        content: [
-          `agentId: ${childId}`,
-          "status: completed",
-          `type: ${profile.type}`,
-          `summary: ${summary}`,
-          `branch: ${worktree.branch}`,
-          `commit: ${commit}`,
-          "结果尚未合并。请检查该分支和提交后，由父任务手动 cherry-pick。"
-        ].join("\n"),
-        usage,
-        metadata: { agentId: childId, subagentType: profile.type, agentStatus: "completed", branch: worktree.branch, commitSha: commit }
-      };
+      return launch(options.signal);
     }
   };
 }
@@ -207,16 +223,16 @@ function delegationDefinition(): AgentTool["definition"] {
   };
 }
 
-function parseAgentArgs(args: Record<string, unknown>): { type: string; objective: string; title: string; maxTurns?: number } {
+function parseAgentArgs(args: Record<string, unknown>): { type: string; objective: string; title: string; maxTurns?: number; runInBackground?: boolean } {
   const type = typeof args.subagent_type === "string" ? args.subagent_type : "";
   const objective = typeof args.prompt === "string" ? args.prompt.trim() : "";
   const title = typeof args.description === "string" ? args.description.trim().slice(0, 120) : "";
   const maxTurns = Number.isFinite(args.maxTurns) ? Math.max(1, Math.floor(Number(args.maxTurns))) : undefined;
-  if (args.run_in_background === true) throw new Error("后台子代理尚未启用；请先使用前台 agent 调用");
-  return { type, objective, title, ...(maxTurns ? { maxTurns } : {}) };
+  const runInBackground = args.run_in_background === true;
+  return { type, objective, title, ...(maxTurns ? { maxTurns } : {}), ...(runInBackground ? { runInBackground: true } : {}) };
 }
 
-function parseDelegationArgs(args: Record<string, unknown>): { type: string; objective: string; title: string; maxTurns?: number } {
+function parseDelegationArgs(args: Record<string, unknown>): { type: string; objective: string; title: string; maxTurns?: number; runInBackground?: boolean } {
   const objective = typeof args.objective === "string" ? args.objective.trim() : "";
   const title = typeof args.title === "string" ? args.title.trim().slice(0, 120) : "";
   const mode = args.mode === "isolated-write" ? "general-purpose" : args.mode === "read-only" ? "explore" : "";

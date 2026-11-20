@@ -59,6 +59,7 @@ import type { EmailService } from "./email.ts";
 import type { OutboxService } from "./outbox.ts";
 import { buildNativeSkillIndex, createSkillTools } from "./skill-tools.ts";
 import { createAgentTool, createSubagentTool } from "./subagents.ts";
+import { createAgentLifecycleTools, SubagentTaskManager } from "./subagent-manager.ts";
 import type { SkillPackageService } from "./skills.ts";
 import { OntologyWriter } from "./ontology-writer.ts";
 import { chatModelConfigured, loadModelSettings, type ModelSettings } from "./model-settings.ts";
@@ -1681,6 +1682,9 @@ export class HearthScheduler {
         const remainingSubagents = 4 - usedSubagents;
         if (remainingSubagents > 0) {
           const subagentTool = process.env.HEARTH_AGENT_TOOL === "0" ? createSubagentTool : createAgentTool;
+          const manager = new SubagentTaskManager(remainingSubagents);
+          if (subagentTool === createAgentTool) extraNativeTools.push(...createAgentLifecycleTools(manager));
+          controller.signal.addEventListener("abort", () => manager.cancelAll(), { once: true });
           extraNativeTools.push(subagentTool({
             task,
             prepared,
@@ -1690,6 +1694,7 @@ export class HearthScheduler {
             worktrees: this.worktrees,
             parentWorktree: worktree,
             maxSubagents: remainingSubagents,
+            manager,
             onStarted: (info) => {
               const event = this.service.store.appendEvent({
                 type: "subagent.delegated",
