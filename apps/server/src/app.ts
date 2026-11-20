@@ -28,6 +28,7 @@ import { executeEffect } from "./effects.ts";
 import { HearthScheduler, resolveToolAction } from "./scheduler.ts";
 import { GitViewError, TaskGitService } from "./task-git.ts";
 import { TaskLeaseService } from "./leases.ts";
+import { attachVerification, readTaskTurns, rewindTaskTurn, TaskRewindError } from "./task-history.ts";
 import { SandboxError, SandboxService } from "./sandbox.ts";
 import { SecurityError, SecurityService } from "./security.ts";
 import { ContextService } from "./context.ts";
@@ -158,6 +159,12 @@ const taskFollowUpSchema = z.object({
 
 const taskFollowUpPatchSchema = z.object({
   content: z.string().trim().min(1).max(20_000)
+}).strict();
+
+const rewindTaskSchema = z.object({
+  runId: z.string().trim().min(1).max(120),
+  turn: z.number().int().min(1).max(10_000),
+  force: z.boolean().optional()
 }).strict();
 
 const contextQuerySchema = z.object({
@@ -2398,6 +2405,59 @@ export async function buildServer(options: BuildServerOptions = {}) {
       taskId: request.params.id,
       type: parsed.data.type
     });
+  });
+
+  app.get<{ Params: { id: string } }>("/api/tasks/:id/turns", async (request, reply) => {
+    if (!store.getTask(request.params.id)) {
+      return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    }
+    const runs = store.listRuns(request.params.id);
+    const view = readTaskTurns(request.params.id, runs, WORKSPACE_DIR);
+    const items = store.listContextItems(request.params.id, { limit: 1000 }).items.reverse();
+    reply.header("cache-control", "no-store");
+    return attachVerification(view, items);
+  });
+
+  app.post<{ Params: { id: string } }>("/api/tasks/:id/rewind", async (request, reply) => {
+    const task = store.getTask(request.params.id);
+    if (!task) {
+      return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    }
+    const parsed = rewindTaskSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "INVALID_REWIND", message: "回退参数不正确" });
+    }
+    const run = store.listRuns(task.id).find((item) => item.id === parsed.data.runId);
+    if (!run) {
+      return reply.code(404).send({ error: "RUN_NOT_FOUND", message: "运行不存在" });
+    }
+    try {
+      const report = rewindTaskTurn({
+        taskId: task.id,
+        run,
+        turn: parsed.data.turn,
+        force: parsed.data.force === true,
+        workspaceRoot: WORKSPACE_DIR
+      });
+      const event = store.appendEvent({
+        type: "task.turn.rewound",
+        taskId: task.id,
+        runId: run.id,
+        payload: report
+      });
+      service.bus.publish(event);
+      const view = attachVerification(
+        readTaskTurns(task.id, store.listRuns(task.id), WORKSPACE_DIR),
+        store.listContextItems(task.id, { limit: 1000 }).items.reverse()
+      );
+      const turn = view.turns.find((item) => item.runId === run.id && item.turn === parsed.data.turn) ?? null;
+      return { report, turn };
+    } catch (error) {
+      if (error instanceof TaskRewindError) {
+        return reply.code(error.code === "TURN_NOT_FOUND" ? 404 : 409).send({ error: error.code, message: error.message });
+      }
+      throw error;
+    }
   });
 
   app.get<{ Querystring: Record<string, string> }>("/api/events/history", async (request, reply) => {

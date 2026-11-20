@@ -1,9 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { RunRecord } from "@hearth/core";
-import { readTaskTurns, workspaceRootForRun } from "./task-history.ts";
+import type { ContextItem, RunRecord } from "@hearth/core";
+import { attachVerification, readTaskTurns, rewindTaskTurn, TaskRewindError, workspaceRootForRun } from "./task-history.ts";
 
 const roots: string[] = [];
 
@@ -44,6 +45,10 @@ function writeManifest(root: string, runId: string, turn: number, body: Record<s
   const dir = join(root, "tasks", "task-1", "out", runId, ".hearth", "file-history", `turn-${turn}`);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "manifest.json"), `${JSON.stringify({ turn, createdAt: "2026-11-20T05:01:00.000Z", files: [], ...body }, null, 2)}\n`, "utf8");
+}
+
+function hashContent(value: string): string {
+  return createHash("sha256").update(value).digest("hex").slice(0, 16);
 }
 
 describe("task turn history", () => {
@@ -134,5 +139,171 @@ describe("task turn history", () => {
     writeFileSync(join(markerDir, "workspace-root"), join(root, "project-worktree"), "utf8");
 
     expect(workspaceRootForRun(join(root, "tasks", "task-1"), run)).toBe(join(root, "project-worktree"));
+  });
+
+  it("rewinds a modified file from its turn snapshot", () => {
+    const root = makeRoot();
+    const run = makeRun(root);
+    const workspace = join(root, "tasks", "task-1");
+    const target = join(workspace, "src", "app.ts");
+    mkdirSync(join(target, ".."), { recursive: true });
+    writeFileSync(target, "before", "utf8");
+    const snapshot = join(root, "tasks", "task-1", "out", run.id, ".hearth", "snapshots", "snap_t1_1", "src", "app.ts");
+    mkdirSync(join(snapshot, ".."), { recursive: true });
+    writeFileSync(snapshot, "before", "utf8");
+    writeManifest(root, run.id, 1, {
+      files: [{
+        path: "src/app.ts",
+        snapshotId: "snap_t1_1",
+        snapshotPath: ".hearth/snapshots/snap_t1_1/src/app.ts",
+        beforeHash: "before-hash",
+        afterHash: hashContent("after"),
+        insertions: 2,
+        deletions: 0,
+        created: false
+      }]
+    });
+    writeFileSync(target, "after", "utf8");
+
+    const report = rewindTaskTurn({ taskId: "task-1", run, turn: 1, workspaceRoot: root });
+    expect(report.restored).toEqual(["src/app.ts"]);
+    expect(report.failed).toEqual([]);
+    expect(readFileSync(target, "utf8")).toBe("before");
+  });
+
+  it("refuses to overwrite a file that drifted after the manifest hash", () => {
+    const root = makeRoot();
+    const run = makeRun(root);
+    const workspace = join(root, "tasks", "task-1");
+    const target = join(workspace, "src", "app.ts");
+    mkdirSync(join(target, ".."), { recursive: true });
+    writeFileSync(target, "before", "utf8");
+    const snapshot = join(root, "tasks", "task-1", "out", run.id, ".hearth", "snapshots", "snap_t1_1", "src", "app.ts");
+    mkdirSync(join(snapshot, ".."), { recursive: true });
+    writeFileSync(snapshot, "before", "utf8");
+    writeManifest(root, run.id, 1, {
+      files: [{
+        path: "src/app.ts",
+        snapshotId: "snap_t1_1",
+        snapshotPath: ".hearth/snapshots/snap_t1_1/src/app.ts",
+        beforeHash: "before-hash",
+        afterHash: hashContent("after"),
+        insertions: 1,
+        deletions: 0,
+        created: false
+      }]
+    });
+    writeFileSync(target, "user edit", "utf8");
+
+    expect(() => rewindTaskTurn({ taskId: "task-1", run, turn: 1, workspaceRoot: root }))
+      .toThrowError(TaskRewindError);
+    try {
+      rewindTaskTurn({ taskId: "task-1", run, turn: 1, workspaceRoot: root });
+    } catch (error) {
+      expect((error as TaskRewindError).code).toBe("HISTORY_DRIFT");
+    }
+    expect(readFileSync(target, "utf8")).toBe("user edit");
+  });
+
+  it("force-rewinds a drifted file and removes a created file", () => {
+    const root = makeRoot();
+    const run = makeRun(root);
+    const workspace = join(root, "tasks", "task-1");
+    const target = join(workspace, "src", "app.ts");
+    const created = join(workspace, "src", "new.ts");
+    mkdirSync(join(target, ".."), { recursive: true });
+    writeFileSync(target, "after", "utf8");
+    writeFileSync(created, "new", "utf8");
+    const snapshot = join(root, "tasks", "task-1", "out", run.id, ".hearth", "snapshots", "snap_t1_1", "src", "app.ts");
+    mkdirSync(join(snapshot, ".."), { recursive: true });
+    writeFileSync(snapshot, "before", "utf8");
+    writeManifest(root, run.id, 1, {
+      files: [
+        {
+          path: "src/app.ts",
+          snapshotId: "snap_t1_1",
+          snapshotPath: ".hearth/snapshots/snap_t1_1/src/app.ts",
+          beforeHash: "before-hash",
+          afterHash: hashContent("after"),
+          insertions: 1,
+          deletions: 0,
+          created: false
+        },
+        {
+          path: "src/new.ts",
+          snapshotId: null,
+          snapshotPath: null,
+          beforeHash: null,
+          afterHash: hashContent("new"),
+          insertions: null,
+          deletions: null,
+          created: true
+        }
+      ]
+    });
+
+    const report = rewindTaskTurn({ taskId: "task-1", run, turn: 1, force: true, workspaceRoot: root });
+    expect(report.force).toBe(true);
+    expect(report.restored).toEqual(["src/app.ts"]);
+    expect(report.removed).toEqual(["src/new.ts"]);
+    expect(readFileSync(target, "utf8")).toBe("before");
+    expect(existsSync(created)).toBe(false);
+  });
+
+  it("reports a missing snapshot instead of silently skipping it", () => {
+    const root = makeRoot();
+    const run = makeRun(root);
+    writeManifest(root, run.id, 1, {
+      files: [{
+        path: "src/app.ts",
+        snapshotId: "snap_t1_1",
+        snapshotPath: ".hearth/snapshots/snap_t1_1/src/app.ts",
+        beforeHash: "before-hash",
+        afterHash: null,
+        insertions: 0,
+        deletions: 0,
+        created: false
+      }]
+    });
+
+    try {
+      rewindTaskTurn({ taskId: "task-1", run, turn: 1, workspaceRoot: root });
+      throw new Error("expected rewind to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(TaskRewindError);
+      expect((error as TaskRewindError).code).toBe("SNAPSHOT_MISSING");
+    }
+  });
+
+  it("attaches verification metadata from native tool results", () => {
+    const root = makeRoot();
+    const run = makeRun(root);
+    writeManifest(root, run.id, 1, { files: [] });
+    const item = {
+      id: "item-1",
+      kind: "tool_result",
+      runId: run.id,
+      taskId: "task-1",
+      provenance: {
+        turn: 1,
+        failedTests: ["src/app.test.ts"],
+        diagnostics: [{ file: "src/app.ts", line: 4, message: "bad" }],
+        exitCode: 1,
+        filesChanged: ["src/app.ts"],
+        insertions: 3,
+        deletions: 1,
+        browserAssertions: [{ kind: "text", expected: "ok", passed: true }]
+      }
+    } as unknown as ContextItem;
+
+    const view = attachVerification(readTaskTurns("task-1", [run], root), [item]);
+    expect(view.turns[0]?.verification).toMatchObject({
+      toolCalls: 1,
+      failedTests: ["src/app.test.ts"],
+      exitCodes: [1],
+      filesChanged: ["src/app.ts"],
+      insertions: 3,
+      deletions: 1
+    });
   });
 });
