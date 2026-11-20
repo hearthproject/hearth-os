@@ -35,4 +35,4 @@ Forgetting must reach caches, the semantic index, and derived summaries. Caches 
 
 ## Relationship to the knowledge base
 
-Hearth is the sole write authority for memory; OpenViking stores only a rebuildable semantic index. Index scope, connection state, and retry failures are visible in settings. Disabling the index does not delete memory in Hearth, and rebuilding the index does not change memory provenance or forgetting state. See [Knowledge Base](/en/design/knowledge) for the full boundary.
+Hearth is the sole write authority for memory; OpenViking stores only a rebuildable semantic index. Index scope, connection state, and retry failures are visible in settings. Disabling the index does not delete memory in Hearth, and rebuilding the index does not change memory provenance or forgetting state.

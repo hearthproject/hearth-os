@@ -184,6 +184,7 @@ const zhSidebar = {
       text: '附录',
       items: [
         { text: '附录总览', link: '/reference/' },
+        { text: '日常使用与自用报告', link: '/reference/daily-use' },
         { text: '工程实施', link: '/reference/engineering' },
         { text: '评测 Agent（独立）', link: 'https://hearthproject.github.io/hearth-eval/' },
         { text: '风险与停止条件', link: '/reference/risks' },
@@ -256,6 +257,7 @@ const enSidebar = {
       text: 'Appendix',
       items: [
         { text: 'Appendix Overview', link: '/en/reference/' },
+        { text: 'Daily Use and Self-Report', link: '/en/reference/daily-use' },
         { text: 'Engineering', link: '/en/reference/engineering' },
         { text: 'Evaluation Agent (Standalone)', link: 'https://hearthproject.github.io/hearth-eval/' },
         { text: 'Risks and Stop Conditions', link: '/en/reference/risks' },
