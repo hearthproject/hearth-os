@@ -29,7 +29,7 @@ import {
 } from "lucide-react";
 import { ApiError, api } from "../lib/api.ts";
 import { formatBytes, formatDuration, formatTime, formatTokens, relativeTime } from "../lib/format.ts";
-import { executorLabel, executionModeLabel, taskKindLabel } from "../lib/labels.ts";
+import { executorLabel, executionModeLabel, approvalModeLabel, taskKindLabel } from "../lib/labels.ts";
 import { ApprovalCard } from "../components/ApprovalCard.tsx";
 import { TaskFollowUpPanel } from "../components/TaskFollowUpPanel.tsx";
 import { TaskGitPanel } from "../components/TaskGitPanel.tsx";
@@ -247,6 +247,7 @@ export function TaskDetailPage() {
       <div className="task-meta-row">
         <StatusPill status={task.status} />
         <span className="executor-tag">{executorLabel(task.executorId)}</span>
+        <span className="executor-tag" title="工作区内文件读写自动执行；运行命令、发邮件、访问新域名、操作桌面仍会审批">审批 · {approvalModeLabel(task.permissions?.approvalMode)}</span>
         {task.permissions?.sandboxMode === "workspace-write" && <span className="executor-tag" title="Windows ACL 仅限制 shell 的文件写入/删除">沙箱 · 工作区写</span>}
         {task.permissions?.sandboxMode === "read-only" && <span className="executor-tag" title="Windows ACL 禁止 shell 写入/删除">沙箱 · 只读</span>}
         {task.permissions?.sandboxMode === "danger-full-access" && <span className="executor-tag" title="shell 未隔离">完全权限</span>}

@@ -29,7 +29,7 @@ import { ProjectDialog } from "../components/ProjectDialog.tsx";
 import { TaskStatusIcon } from "../components/TaskStatusIcon.tsx";
 import { formatBytes, formatDuration, formatTime, formatTokens } from "../lib/format.ts";
 import { getChatSelection, setChatBusy, syncChatSelection, useChatSelection } from "../lib/chat-selection.ts";
-import { executorLabel, taskKindLabel, TASK_STATUS_LABELS } from "../lib/labels.ts";
+import { executorLabel, taskKindLabel, TASK_STATUS_LABELS, approvalModeLabel } from "../lib/labels.ts";
 import type {
   ChatAttachment,
   ChatMessageRecord,
@@ -46,7 +46,7 @@ import type {
 
 const PENDING_SETTINGS: ConversationSettings = {
   executorEnabled: { native: false, codex: false, "deepseek-harness": false },
-  approvalMode: "full",
+  approvalMode: "necessary",
   preferredExecutorId: null
 };
 
@@ -137,19 +137,10 @@ export function ChatPage() {
     ?? draftSettings
     ?? serverDefaults
     ?? PENDING_SETTINGS;
-  const conversationSettings: ConversationSettings = { ...rawSettings, approvalMode: "full" };
+  const conversationSettings: ConversationSettings = rawSettings;
   const settingsReady = conversationId
     ? Boolean(current || conversationQuery.data)
     : Boolean(serverDefaults);
-
-  useEffect(() => {
-    if (!conversationId) return;
-    const loaded = current?.settings ?? conversationQuery.data?.conversation.settings;
-    if (!loaded || loaded.approvalMode === "full") return;
-    void api.updateConversationSettings(conversationId, { approvalMode: "full" })
-      .then(() => queryClient.invalidateQueries({ queryKey: ["conversations"] }))
-      .catch(() => undefined);
-  }, [conversationId, current?.settings, conversationQuery.data?.conversation.settings, queryClient]);
 
   useEffect(() => {
     if (!conversationQuery.data || sending) return;
@@ -510,6 +501,10 @@ export function ChatPage() {
               {(current ? projectsById.get(current.projectId ?? "") : activeProject)?.name}
             </span>
           )}
+          <span className="chat-project-chip" title="工作区内文件读写自动执行；发邮件、访问新域名、操作桌面仍会审批。每个任务可以带自己的审批模式。">
+            <ShieldAlert size={12} />
+            审批 · {approvalModeLabel(conversationSettings.approvalMode)}
+          </span>
         </header>
 
         <div className="chat-scroll">

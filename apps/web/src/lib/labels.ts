@@ -15,6 +15,7 @@ import type {
   TaskRecord,
   TaskStatus
 } from "./types.ts";
+import type { ApprovalMode, SandboxMode } from "@hearth/core";
 
 export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   queued: "排队中",
@@ -170,6 +171,26 @@ export const TASK_KIND_LABELS: Record<string, string> = {
   workspace: "工作区任务",
   general: "通用任务"
 };
+
+export const APPROVAL_MODE_LABELS: Record<ApprovalMode, string> = {
+  necessary: "必要",
+  workspace: "工作区自动",
+  full: "完全"
+};
+
+export const SANDBOX_MODE_LABELS: Record<SandboxMode, string> = {
+  "read-only": "只读",
+  "workspace-write": "工作区可写",
+  "danger-full-access": "完全访问"
+};
+
+export function approvalModeLabel(mode: ApprovalMode | null | undefined): string {
+  return mode ? APPROVAL_MODE_LABELS[mode] : "必要";
+}
+
+export function sandboxModeLabel(mode: SandboxMode | null | undefined): string {
+  return mode ? SANDBOX_MODE_LABELS[mode] : "工作区可写";
+}
 
 export function executorLabel(id: string | null | undefined): string {
   return id ? EXECUTOR_LABELS[id] ?? id : "自动选择";

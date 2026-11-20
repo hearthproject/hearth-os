@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
@@ -56,7 +56,7 @@ const EMPTY_DRAFT: ScheduleDraft = {
   cron: "0 9 * * *",
   timezone: "Asia/Shanghai",
   executorId: "native",
-  approvalMode: "full",
+  approvalMode: "necessary",
   taskKind: "general",
   enabled: true
 };
@@ -69,14 +69,6 @@ export function SchedulesPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const schedules = schedulesQuery.data?.schedules ?? [];
-
-  useEffect(() => {
-    const stale = schedules.filter((schedule) => schedule.approvalMode !== "full");
-    if (stale.length === 0) return;
-    void Promise.all(stale.map((schedule) => api.updateSchedule(schedule.id, { approvalMode: "full" })))
-      .then(() => queryClient.invalidateQueries({ queryKey: ["schedules"] }))
-      .catch(() => undefined);
-  }, [schedules, queryClient]);
 
   function startCreate() {
     setDraft({ ...EMPTY_DRAFT });
@@ -91,7 +83,7 @@ export function SchedulesPage() {
       cron: schedule.cron,
       timezone: schedule.timezone,
       executorId: schedule.executorId,
-      approvalMode: "full",
+      approvalMode: schedule.approvalMode,
       taskKind: schedule.taskKind,
       enabled: schedule.enabled
     });
@@ -117,7 +109,7 @@ export function SchedulesPage() {
         cron: draft.cron.trim(),
         timezone: draft.timezone.trim() || "Asia/Shanghai",
         executorId: draft.executorId,
-        approvalMode: "full" as const,
+        approvalMode: draft.approvalMode,
         taskKind: draft.taskKind,
         enabled: draft.enabled
       };
