@@ -27,7 +27,9 @@
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",
     "screenshots:readme": "node scripts/readme-screenshots.mjs",
-    "dogfood:report": "tsx scripts/dogfood-report.ts"
+    "dogfood:report": "tsx scripts/dogfood-report.ts",
+    "release:build": "node scripts/build-tauri.mjs",
+    "release:prepare": "node scripts/release.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.12.5",
