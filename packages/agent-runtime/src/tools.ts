@@ -14,7 +14,7 @@ import { createMemoryTools } from "./harness/memory.ts";
 import { createGoalTools } from "./harness/goal.ts";
 import { searchFiles } from "./harness/search.ts";
 import { fileReadState, hashContent, rangesCover, recordCommand, recordFileModified, recordFileRead, requireReadBeforeWrite } from "./harness/file-state.ts";
-import { rewindTool, rewindTurnTool, snapshotBeforeMutation } from "./harness/snapshots.ts";
+import { recordCreatedFile, recordSnapshotAfterMutation, rewindTool, rewindTurnTool, snapshotBeforeMutation } from "./harness/snapshots.ts";
 import { killShellSession, runShellSession, shellOutput, shellSessionInfo, startShellSession, waitShellSession } from "./harness/shell-session.ts";
 import { truncateToolOutput, writeFullToolOutput } from "./harness/tool-output.ts";
 import { commandPolicyIssue } from "./harness/command-policy.ts";
@@ -359,6 +359,8 @@ const writeFileTool: AgentTool = {
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, content, "utf8");
     recordFileModified(context.state, target, content);
+    if (snapshotId) recordSnapshotAfterMutation(context, target, snapshotId);
+    else recordCreatedFile(context, target, !existed);
     return {
       content: `已写入 ${relative(context.workspaceRoot, target).replace(/\\/g, "/")}（${Buffer.byteLength(content)} 字节）`,
       metadata: { filesChanged: [relative(context.workspaceRoot, target).replace(/\\/g, "/")], ...(snapshotId ? { snapshotId } : {}) }
@@ -519,6 +521,7 @@ const editFileTool: AgentTool = {
     const snapshotId = snapshotBeforeMutation(context, target);
     writeFileAtomic(target, nextRaw);
     recordFileModified(context.state, target, nextRaw);
+    if (snapshotId) recordSnapshotAfterMutation(context, target, snapshotId);
     const relativePath = relative(context.workspaceRoot, target).replace(/\\/g, "/");
     return {
       content: `已更新 ${relativePath}（${applied} 处）\n${diff}`,
@@ -683,15 +686,22 @@ const applyPatchTool: AgentTool = {
     if (changes.length === 0) return { content: "补丁没有产生文件变化" };
     if (args.dryRun === true) return { content: `差异预览（未写入，${changes.length} 个文件）：\n${preview}` };
     const snapshotIds: string[] = [];
+    const snapshotByTarget = new Map<string, string>();
     for (const change of changes) {
       if (change.previous !== null) {
         const snapshotId = snapshotBeforeMutation(context, change.target);
-        if (snapshotId) snapshotIds.push(snapshotId);
+        if (snapshotId) {
+          snapshotIds.push(snapshotId);
+          snapshotByTarget.set(change.target, snapshotId);
+        }
       }
     }
     commitFileChanges(changes);
     for (const change of changes) {
       recordFileModified(context.state, change.target, change.content ?? "");
+      const snapshotId = snapshotByTarget.get(change.target);
+      if (snapshotId) recordSnapshotAfterMutation(context, change.target, snapshotId);
+      else recordCreatedFile(context, change.target, change.previous === null);
     }
     return {
       content: `补丁已应用，修改 ${changes.length} 个文件\n${preview}`,

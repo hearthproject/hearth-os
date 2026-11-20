@@ -88,6 +88,9 @@ export interface AgentToolMetadata {
   transcriptPath?: string;
   matched?: boolean;
   timedOut?: boolean;
+  insertions?: number;
+  deletions?: number;
+  failures?: Array<{ path: string; reason: string }>;
 }
 
 export interface AgentToolResult {
