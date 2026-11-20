@@ -61,6 +61,7 @@ export interface AgentToolContext {
   signal: AbortSignal;
   state?: AgentToolState;
   fullAccess?: boolean;
+  mode?: HarnessMode;
 }
 
 export type AgentToolAction = "finish" | "ask_user" | "plan";

@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import type { RunUsage } from "@hearth/core";
 import { compactAgentMessages, compactAgentMessagesWithSummary } from "./compaction.ts";
 import { createAgentState, progressSummary } from "./harness/file-state.ts";
+import { planModeAllowsCommand, planModeAllowsTool } from "./harness/plan.ts";
 import { todoReminder } from "./harness/todo.ts";
 import type {
   AgentCheckpoint,
@@ -136,6 +137,21 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     }
   }
 
+  function modeIssue(call: AgentToolCall): string | null {
+    if (options.mode !== "plan") return null;
+    if (!planModeAllowsTool(call.name)) {
+      return `plan mode 不允许调用工具 ${call.name}。当前阶段只能读取和调查；请调用 submit_plan 提交方案，等待用户批准后再执行修改。`;
+    }
+    if (call.name === "shell") {
+      const args = call.arguments && typeof call.arguments === "object" ? call.arguments as Record<string, unknown> : {};
+      const command = typeof args.command === "string" ? args.command.trim() : "";
+      if (!command || !planModeAllowsCommand(command)) {
+        return `plan mode 只允许只读命令：${command || "（空命令）"}。请使用 git status/diff/log、rg、ls 等只读命令，或提交计划等待批准。`;
+      }
+    }
+    return null;
+  }
+
   async function executeParallelBatch(calls: AgentToolCall[]): Promise<Map<string, { result: AgentToolResult; durationMs: number }> | null> {
     const limit = options.maxParallelTools ?? 1;
     if (limit < 2 || calls.length < 2 || calls.length > limit) return null;
@@ -149,6 +165,11 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     const runnable: Array<{ call: AgentToolCall; tool: AgentTool }> = [];
     for (const entry of entries) {
       if (!entry.tool) continue;
+      const modeError = modeIssue(entry.call);
+      if (modeError) {
+        results.set(entry.call.id, { result: { content: modeError, isError: true }, durationMs: 0 });
+        continue;
+      }
       let authorized = true;
       if (options.authorizeTool) {
         try {
@@ -175,7 +196,8 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
           permissions: options.permissions,
           signal,
           state,
-          fullAccess: options.isFullPermission?.() === true
+          fullAccess: options.isFullPermission?.() === true,
+          mode: options.mode ?? "build"
         }, options.toolTimeoutMs ?? 120_000, signal);
       } catch (error) {
         result = { content: `工具执行失败：${errorMessage(error)}`, isError: true };
@@ -314,7 +336,10 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
 
       let result: AgentToolResult = { content: `未知或未授权工具：${call.name}`, isError: true };
       if (tool) {
-        if (precomputed) {
+        const modeError = modeIssue(call);
+        if (modeError) {
+          result = { content: modeError, isError: true };
+        } else if (precomputed) {
           result = precomputed.result;
         } else {
         let authorized = true;
@@ -338,7 +363,8 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
               permissions: options.permissions,
               signal,
               state,
-              fullAccess: options.isFullPermission?.() === true
+              fullAccess: options.isFullPermission?.() === true,
+              mode: options.mode ?? "build"
             }, options.toolTimeoutMs ?? 120_000, signal);
           } catch (error) {
             result = { content: `工具执行失败：${errorMessage(error)}`, isError: true };

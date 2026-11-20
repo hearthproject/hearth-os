@@ -10,7 +10,7 @@ const READ_ONLY_TOOLS = new Set([
   "search_text",
   "glob",
   "grep",
-  "read_image",
+  "shell",
   "todo_read",
   "todo_write",
   "shell_output",

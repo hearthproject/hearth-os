@@ -627,6 +627,48 @@ describe("context compaction", () => {
     });
     expect(usageEvents).toEqual([31]);
   });
+  it("blocks workspace writes and non-read-only shell commands in plan mode", async () => {
+    const root = workspace(roots);
+    let wrote = false;
+    const ran: string[] = [];
+    const tools: AgentTool[] = [
+      {
+        definition: { name: "write_file", description: "write", parameters: { type: "object" } },
+        async execute() {
+          wrote = true;
+          return { content: "written" };
+        }
+      },
+      {
+        definition: { name: "shell", description: "shell", parameters: { type: "object" } },
+        async execute(input) {
+          const args = input as Record<string, unknown>;
+          ran.push(String(args.command));
+          return { content: "ok" };
+        }
+      }
+    ];
+    const result = await runAgent({
+      model: fakeModel([
+        turn("", [
+          call("write_file", { path: "src.ts", content: "next" }),
+          call("shell", { command: "git status --short" }),
+          call("shell", { command: "rm -rf build" })
+        ])
+      ]),
+      tools,
+      goal: "plan",
+      systemPrompt: "system",
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      permissions: { tools: ["write_file", "shell"], readRoots: [root], writeRoots: [root], networkHosts: [] },
+      budget: { maxTurns: 1, maxToolCalls: 4, maxTokens: 10_000, maxDurationMs: 30_000 },
+      mode: "plan"
+    });
+    expect(wrote).toBe(false);
+    expect(ran).toEqual(["git status --short"]);
+    expect(result.status).toBe("budget_exceeded");
+  });
 });
 
 function toolPairsComplete(messages: Array<{ role: string; content: string; toolCalls?: Array<{ id: string }>; toolCallId?: string }>): boolean {

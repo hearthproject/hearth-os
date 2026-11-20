@@ -660,7 +660,7 @@ const shellTool: AgentTool = {
     const args = objectArgs(input);
     const command = stringArg(args, "command");
     assertSafeCommand(command, context.permissions.networkHosts.length > 0);
-    const policy = commandPolicyIssue(command, { fullAccess: context.fullAccess === true });
+    const policy = commandPolicyIssue(command, { fullAccess: context.fullAccess === true, planMode: context.mode === "plan" });
     if (policy) throw new Error(policy);
     const cwd = resolveSafe(optionalStringArg(args, "cwd") ?? ".", context.workspaceRoot, context.permissions.readRoots);
     assertReadable(cwd, context.permissions.readRoots);

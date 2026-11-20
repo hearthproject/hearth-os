@@ -145,6 +145,15 @@ describe("todo and command policy", () => {
     expect(commandPolicyIssue("git push --force origin main")).toBeTruthy();
     expect(commandPolicyIssue("git status --short")).toBeNull();
   });
+
+  it("allows only read-only commands in plan mode", () => {
+    expect(commandPolicyIssue("git status --short", { planMode: true })).toBeNull();
+    expect(commandPolicyIssue("rg TODO src", { planMode: true })).toBeNull();
+    expect(commandPolicyIssue("npm test", { planMode: true })).toBeNull();
+    expect(commandPolicyIssue("rm -rf build", { planMode: true })).toBeTruthy();
+    expect(commandPolicyIssue("git push origin main", { planMode: true })).toBeTruthy();
+    expect(commandPolicyIssue("echo x > file", { planMode: true })).toBeTruthy();
+  });
 });
 
 describe("tool output", () => {

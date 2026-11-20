@@ -1,3 +1,5 @@
+import { planModeAllowsCommand } from "./plan.ts";
+
 const DESTRUCTIVE = [
   /\brm\s+-[a-z]*r[a-z]*f?[a-z]*\s+(?:--\S+\s+)*(?:\/|~|\*)(?:\s|$)/i,
   /\bgit\s+reset\s+--hard\b/i,
@@ -30,7 +32,10 @@ export function commandPolicyIssue(command: string, options: { fullAccess?: bool
     if (pattern.test(trimmed)) return `拒绝执行破坏性命令：${trimmed.slice(0, 120)}。如确需执行，请由用户在审批中明确允许。`;
   }
   if (options.planMode) {
-    return "plan mode 只允许只读命令；请先 submit_plan 并等待用户批准后再执行修改命令。";
+    if (!planModeAllowsCommand(trimmed)) {
+      return "plan mode 只允许只读命令；请先 submit_plan 并等待用户批准后再执行修改命令。";
+    }
+    return null;
   }
   if (!options.fullAccess) {
     for (const pattern of SENSITIVE) {
