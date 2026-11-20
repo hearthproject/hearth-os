@@ -816,7 +816,7 @@ export function ChatPage() {
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={onComposerKeyDown}
               aria-label="消息"
-              placeholder="输入问题或任务，可直接粘贴文件夹路径…"
+              placeholder="向 Hearth 提问，或描述你要完成的任务…"
               rows={1}
               disabled={sending}
             />
