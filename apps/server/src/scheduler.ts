@@ -568,22 +568,94 @@ export class HearthScheduler {
     return updated;
   }
 
+  private autoResumeIssue(task: TaskRecord, run: RunRecord): string | null {
+    if (resolveExecutorId(task) !== "native") return "只有 native 执行器支持自动恢复";
+    const startedAt = run.startedAt ? Date.parse(run.startedAt) : Number.NaN;
+    if (Number.isFinite(startedAt) && Date.now() - startedAt > 12 * 60 * 60 * 1000) {
+      return "运行已超过 12 小时，等待用户确认";
+    }
+    const interrupted = this.service.store.listRuns(task.id)
+      .filter((item) => item.failure?.kind === "interrupted").length;
+    if (interrupted >= 2) return "自动恢复次数已达上限";
+    const unresolved = this.service.store.listEffects(task.id)
+      .filter((effect) => ["prepared", "admitted", "executing", "uncertain"].includes(effect.status));
+    if (unresolved.length > 0) return "存在状态不确定的外部动作，必须先对账";
+    const outDir = this.outDirForRun(task.id, run);
+    if (existsSync(join(outDir, ".hearth", "executing.json"))) {
+      return "上一轮工具执行未确认完成，工作区可能已有部分改动";
+    }
+    const checkpoint = this.service.store.latestRunCheckpoint(run.id);
+    if (!checkpoint) return "没有可用检查点";
+    if (checkpoint.kind === "final" || checkpoint.kind === "waiting_input") return "检查点不是可继续状态";
+    const permissionsDigest = task.permissions ? hashStable(task.permissions) : null;
+    if (checkpoint.proof?.permissionsDigest && checkpoint.proof.permissionsDigest !== permissionsDigest) {
+      return "权限已变化，等待用户确认";
+    }
+    const path = isAbsolute(checkpoint.path) ? checkpoint.path : join(this.workspaceRoot, checkpoint.path);
+    if (!existsSync(path)) return "检查点文件不存在";
+    const body = readFileSync(path, "utf8");
+    if (createHash("sha256").update(body).digest("hex") !== checkpoint.sha256) return "检查点校验失败";
+    try {
+      const parsed = JSON.parse(body) as AgentCheckpoint;
+      if (!Array.isArray(parsed.messages) || !parsed.usage) return "检查点内容不完整";
+    } catch {
+      return "检查点无法解析";
+    }
+    return null;
+  }
+
   private recoverInterruptedTasks(): void {
     const now = new Date().toISOString();
     for (const task of this.service.store.listTasks()) {
       if (task.status !== "running") continue;
-      for (const run of this.service.store.listRuns(task.id)) {
-        if (run.status !== "running") continue;
+      const runningRuns = this.service.store.listRuns(task.id).filter((run) => run.status === "running");
+      let autoRun: RunRecord | null = null;
+      for (const run of runningRuns) {
+        if (!autoRun && this.autoResumeIssue(task, run) === null) autoRun = run;
+      }
+      for (const run of runningRuns) {
+        const auto = autoRun?.id === run.id;
         this.service.updateRun(run.id, task.id, {
           status: "failed",
           endedAt: now,
           failure: {
             kind: "interrupted",
-            message: "服务重启时任务仍在执行，已中止上一轮运行",
+            message: auto
+              ? "服务重启时任务仍在执行，将从最近检查点自动恢复"
+              : "服务重启时任务仍在执行，已中止上一轮运行",
             recoverable: true,
-            guidance: "确认工作区后点击重试"
+            guidance: auto ? "正在自动恢复，无需手动重试" : "确认工作区后点击重试"
           }
         });
+      }
+      if (autoRun) {
+        this.service.updateTask(task.id, {
+          status: "recoverable",
+          currentRunId: task.currentRunId,
+          nextAction: "服务重启后自动恢复",
+          error: null
+        }, task.currentRunId ?? undefined);
+        this.service.updateTask(task.id, {
+          status: "queued",
+          nextAction: "服务重启后自动恢复",
+          error: null
+        }, task.currentRunId ?? undefined);
+        this.capture({
+          taskId: task.id,
+          conversationId: task.conversationId ?? null,
+          runId: autoRun.id,
+          executorId: "native",
+          kind: "decision",
+          role: "system",
+          content: "auto_resume：服务重启后从最近检查点自动恢复",
+          provenance: { source: "scheduler-recovery", decision: "auto_resume", runId: autoRun.id },
+          executorEventId: `recovery:${autoRun.id}`
+        });
+        for (const followUp of this.service.store.listTaskFollowUps(task.id, "steering")) {
+          this.service.updateTaskFollowUp(followUp.id, { status: "cancelled", error: "服务重启中断了这一轮补充" });
+        }
+        this.wake();
+        continue;
       }
       this.service.updateTask(task.id, {
         status: "recoverable",

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { resolve } from "node:path";
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import type { RunUsage } from "@hearth/core";
 import { compactAgentMessages, compactAgentMessagesWithSummary, estimateMessageTokens } from "./compaction.ts";
 import { createAgentState, progressSummary } from "./harness/file-state.ts";
@@ -68,6 +69,28 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   const emit = (event: RuntimeEvent): void => options.onEvent?.(event);
   const aborted = (): boolean => signal.aborted;
   const totalTokens = (): number => usage.inputTokens + usage.outputTokens;
+  const executingPath = join(options.outDir, ".hearth", "executing.json");
+  const markExecuting = (call: AgentToolCall): void => {
+    try {
+      mkdirSync(join(options.outDir, ".hearth"), { recursive: true });
+      const temp = `${executingPath}.tmp`;
+      writeFileSync(temp, JSON.stringify({ tool: call.name, callId: call.id, startedAt: new Date().toISOString() }), "utf8");
+      renameSync(temp, executingPath);
+    } catch (error) {
+      emit({ type: "notice", message: `无法写入工具执行标记，自动恢复会保持保守：${errorMessage(error)}` });
+    }
+  };
+  const clearExecuting = (): void => {
+    try {
+      rmSync(executingPath, { force: true });
+    } catch {
+      // The marker is best-effort; a stale marker only makes recovery more conservative.
+    }
+  };
+  if (existsSync(executingPath)) {
+    emit({ type: "notice", message: "检测到上一轮工具执行未确认完成，工作区可能已有部分改动；请先核对再继续。" });
+    clearExecuting();
+  }
   const emitContextSnapshot = (turn: number): void => {
     const systemChars = messages
       .filter((message) => message.role === "system")
@@ -466,6 +489,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
           }
         }
         if (authorized) {
+          markExecuting(call);
           try {
             result = await executeToolWithTimeout(tool, call, {
               workspaceRoot: options.workspaceRoot,
@@ -534,11 +558,13 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
 
       if (options.stopOnToolError && result.isError) {
         await checkpoint("tool");
+        clearExecuting();
         return finish("failed", result.content);
       }
 
       if (repeatedDenial) {
         await checkpoint("tool");
+        clearExecuting();
         return finish("failed", `同一路径连续被权限边界拒绝，已停止重复尝试。当前产物输出目录：${options.outDir}`);
       }
 
@@ -564,17 +590,20 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
               content: `交付物自检未通过：${issue}\n请先修正产物，然后重新调用 finish_task。`
             });
             await checkpoint("tool");
+            clearExecuting();
             continue;
           }
         }
         summary = (result.summary ?? result.content).trim() || "任务完成";
         await checkpoint("final");
+        clearExecuting();
         return finish("completed", summary, result.outputs ?? []);
       }
       if (result.action === "plan") {
         const plan = (result.summary ?? result.question ?? result.content).trim() || "计划已生成，等待确认";
         summary = plan;
         await checkpoint("plan");
+        clearExecuting();
         return finish("waiting_input", plan, result.outputs ?? [], plan);
       }
       if (result.action === "ask_user") {
@@ -585,15 +614,18 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
             content: "当前对话已切换为完全权限。请自行决策并继续完成剩余工作，不要再询问用户；在最终结果中说明关键假设。"
           });
           await checkpoint("tool");
+          clearExecuting();
           continue;
         }
         const question = (result.question ?? result.content).trim() || "需要你补充信息后才能继续";
         summary = question;
         await checkpoint("waiting_input");
+        clearExecuting();
         return finish("waiting_input", question, [], question);
       }
 
       await checkpoint("tool");
+      clearExecuting();
       if (tokenLimit !== null && totalTokens() > tokenLimit) {
         emit({ type: "budget.exceeded", budget: "tokens", limit: tokenLimit });
         await checkpoint("budget");

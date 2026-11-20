@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -141,6 +141,66 @@ describe("agent runtime long-run fixtures", () => {
     expect(snapshots[1]).toMatchObject({ turn: 2, source: "provider", providerInputTokens: 100, providerOutputTokens: 5 });
     expect(result.metrics).toMatchObject({ contextSource: "provider", compactions: 0, modelId: "fake-model" });
     expect(result.metrics?.contextPeaks).toHaveLength(3);
+  });
+
+  it("journals in-flight tool execution and clears it after checkpoint", async () => {
+    const root = workspace(roots);
+    const outDir = join(root, "out");
+    const marker = join(outDir, ".hearth", "executing.json");
+    mkdirSync(join(outDir, ".hearth"), { recursive: true });
+    let sawMarker = false;
+    const slowTool: AgentTool = {
+      definition: { name: "slow", description: "slow", parameters: { type: "object", properties: {} }, executionMode: "sequential" },
+      async execute() {
+        sawMarker = existsSync(marker);
+        return { content: "ok" };
+      }
+    };
+    const fake = createFakeModel([
+      { content: "", toolCalls: [fakeToolCall("slow", {})], finishReason: "tool_calls" },
+      { content: "", toolCalls: [fakeToolCall("finish_task", { summary: "done" })], finishReason: "tool_calls" }
+    ]);
+    const result = await runAgent({
+      model: fake.model,
+      tools: [slowTool, ...createBuiltinTools()],
+      goal: "journal",
+      systemPrompt: "system",
+      workspaceRoot: root,
+      outDir,
+      permissions: { tools: ["slow", "finish_task"], readRoots: [root], writeRoots: [root], networkHosts: [] },
+      budget: {}
+    });
+
+    expect(result.status).toBe("completed");
+    expect(sawMarker).toBe(true);
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  it("reports and clears a stale execution marker before starting", async () => {
+    const root = workspace(roots);
+    const outDir = join(root, "out");
+    const marker = join(outDir, ".hearth", "executing.json");
+    mkdirSync(join(outDir, ".hearth"), { recursive: true });
+    writeFileSync(marker, JSON.stringify({ tool: "write_file", callId: "stale", startedAt: "2026-01-01T00:00:00.000Z" }), "utf8");
+    const fake = createFakeModel([
+      { content: "", toolCalls: [fakeToolCall("finish_task", { summary: "done" })], finishReason: "tool_calls" }
+    ]);
+    const events: RuntimeEvent[] = [];
+    const result = await runAgent({
+      model: fake.model,
+      tools: createBuiltinTools(),
+      goal: "stale marker",
+      systemPrompt: "system",
+      workspaceRoot: root,
+      outDir,
+      permissions: { tools: ["finish_task"], readRoots: [root], writeRoots: [root], networkHosts: [] },
+      budget: {},
+      onEvent: (event) => { events.push(event); }
+    });
+
+    expect(result.status).toBe("completed");
+    expect(existsSync(marker)).toBe(false);
+    expect(events.some((event) => event.type === "notice" && event.message.includes("上一轮工具执行未确认完成"))).toBe(true);
   });
 });
 

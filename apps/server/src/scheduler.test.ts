@@ -1,7 +1,7 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DelegationJob, ExecutorHealth, ExecutorId, HandoffRecord, HandoffStatus, TaskRecord, TaskStatus } from "@hearth/core";
@@ -849,6 +849,82 @@ describe("Hearth scheduler", () => {
     expect(store?.getRun(runId)?.failure?.recoverable).toBe(true);
   });
 
+  it("auto-resumes a native run from a verified checkpoint after restart", async () => {
+    const service = setup();
+    const modelSettingsPath = configureModel();
+    const task = service.createTask({ title: "自动恢复", goal: "从检查点继续", executorId: "native", expectedOutputs: ["result.md"] });
+    const now = new Date().toISOString();
+    const runId = randomUUID();
+    const workspaceRoot = join(requireTemp(), "workspaces");
+    const taskRoot = join(workspaceRoot, "tasks", task.id);
+    service.createRun({
+      id: runId,
+      taskId: task.id,
+      attempt: 1,
+      status: "running",
+      threadId: null,
+      workspace: taskRoot,
+      startedAt: now,
+      endedAt: null,
+      failure: null,
+      usage: null,
+      leaseEpoch: null,
+      createdAt: now
+    });
+    service.updateTask(task.id, { status: "running", currentRunId: runId, nextAction: "正在执行" }, runId);
+
+    const checkpointDirectory = join(taskRoot, ".hearth", "checkpoints", runId);
+    mkdirSync(checkpointDirectory, { recursive: true });
+    const checkpointPath = join(checkpointDirectory, "0001-tool.json");
+    const checkpoint = {
+      messages: [
+        { role: "system", content: "system" },
+        { role: "user", content: "goal" },
+        { role: "tool", toolCallId: "call-1", name: "write_file", content: "ok" }
+      ],
+      usage: TEST_USAGE,
+      turns: 1,
+      toolCalls: 1,
+      summary: null
+    };
+    const body = `${JSON.stringify(checkpoint, null, 2)}\n`;
+    writeFileSync(checkpointPath, body, "utf8");
+    service.createRunCheckpoint({
+      id: randomUUID(),
+      runId,
+      taskId: task.id,
+      seq: 1,
+      kind: "tool",
+      path: relative(workspaceRoot, checkpointPath).replaceAll("\\", "/"),
+      sha256: createHash("sha256").update(body).digest("hex"),
+      usage: TEST_USAGE,
+      createdAt: now,
+      proof: {
+        attemptId: runId,
+        identity: { executorId: "native", runtimeVersion: "test" },
+        phasePrefix: ["tool:write_file"],
+        validation: { status: "not_required", evidenceRefs: [] },
+        effectReceipts: [],
+        preparedIntents: [],
+        createdAt: now
+      }
+    });
+
+    let resumedMessages = 0;
+    const nativeRunner: NativeRunner = async (options) => {
+      resumedMessages = options.resume?.messages.length ?? 0;
+      writeFileSync(join(options.prepared.outDir, "result.md"), "# resumed\n");
+      return nativeResult("auto resumed");
+    };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath });
+    scheduler.start();
+
+    const completed = await waitForStatus(service, task.id, "completed");
+    expect(completed.status).toBe("completed");
+    expect(resumedMessages).toBe(3);
+    expect(store?.getRun(runId)?.failure?.kind).toBe("interrupted");
+  });
+
   it("stops at a pending approval before any GitHub write", async () => {
     const service = setup();
     const memory = new MemoryService(service);
@@ -1254,7 +1330,8 @@ describe("Hearth scheduler", () => {
     expect(messages.some((message) =>
       message.kind === "text" && message.role === "assistant" && message.content.includes("最终结果已生成")
     )).toBe(true);
-    expect(messages.some((message) => message.kind === "text" && message.content.includes("result.md"))).toBe(true);
+    // Deliverable files are rendered as chips under the answer, not in its body.
+    expect(messages.some((message) => message.kind === "text" && message.content.includes("result.md"))).toBe(false);
   });
 
   it("blocks handoff while an external effect needs reconciliation", async () => {
