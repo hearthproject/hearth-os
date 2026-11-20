@@ -70,7 +70,18 @@ export async function captureBrowserSnapshot(page: Page): Promise<BrowserSnapsho
       }
       const tag = node.tagName.toLowerCase();
       const type = node.getAttribute("type");
-      const role = node.getAttribute("role") || inferRole(node, tag, type);
+      const role = node.getAttribute("role") || (
+        tag === "a" ? "link"
+          : tag === "button" || tag === "summary" ? "button"
+            : tag === "select" ? "combobox"
+              : tag === "textarea" ? "textbox"
+                : tag === "input"
+                  ? type === "checkbox" ? "checkbox"
+                    : type === "radio" ? "radio"
+                      : type === "submit" || type === "button" ? "button"
+                        : "textbox"
+                  : node.getAttribute("contenteditable") === "true" ? "textbox" : "element"
+      );
       const name = (
         node.getAttribute("aria-label")
         || node.getAttribute("aria-placeholder")
@@ -154,20 +165,6 @@ export async function captureBrowserSnapshot(page: Page): Promise<BrowserSnapsho
     truncated,
     capturedAt: new Date().toISOString()
   };
-}
-
-function inferRole(node: HTMLElement, tag: string, type: string | null): string {
-  if (tag === "a") return "link";
-  if (tag === "button" || tag === "summary") return "button";
-  if (tag === "select") return "combobox";
-  if (tag === "textarea") return "textbox";
-  if (tag === "input") {
-    if (type === "checkbox") return "checkbox";
-    if (type === "radio") return "radio";
-    if (type === "submit" || type === "button") return "button";
-    return "textbox";
-  }
-  return node.getAttribute("contenteditable") === "true" ? "textbox" : "element";
 }
 
 function clip(value: string, max: number): string {

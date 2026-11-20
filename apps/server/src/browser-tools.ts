@@ -20,7 +20,7 @@ export interface BrowserToolsOptions {
 
 const MAX_READ_CHARS = 12_000;
 const DEFAULT_TIMEOUT_MS = 30_000;
-const DANGEROUS_ACTIONS = /(^|\b)(submit|send|pay|purchase|delete|remove|confirm|提交|发送|支付|付款|购买|删除|确认|下单)(\b|$)/i;
+const DANGEROUS_ACTIONS = /(?:^|\b)(?:submit|send|pay|purchase|delete|remove|confirm)\b|提交|发送|支付|付款|购买|删除|确认|下单/i;
 
 export function createBrowserTools(options: BrowserToolsOptions): AgentTool[] {
   const toolkit = new BrowserToolkit(options);
