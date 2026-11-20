@@ -31,6 +31,7 @@ export const CORE_TOOL_NAMES = [
 ];
 
 export const TOOL_SEARCH_NAME = "tool_search";
+export const TOOL_CALL_NAME = "tool_call";
 export const DEFAULT_MAX_DIRECT_TOOLS = 32;
 
 export interface ToolCatalogOptions {
@@ -57,6 +58,22 @@ export function toolSearchDefinition(hiddenCount: number): AgentToolDefinition {
         limit: { type: "number", description: "Maximum results, default 5, max 10" }
       },
       required: ["query"],
+      additionalProperties: false
+    }
+  };
+}
+
+export function toolCallDefinition(): AgentToolDefinition {
+  return {
+    name: TOOL_CALL_NAME,
+    description: "Invoke a deferred tool by exact name, with its arguments object. Use tool_search first to discover the name and schema.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Exact tool name returned by tool_search" },
+        arguments: { type: "object", description: "Arguments matching that tool's schema", additionalProperties: true }
+      },
+      required: ["name"],
       additionalProperties: false
     }
   };

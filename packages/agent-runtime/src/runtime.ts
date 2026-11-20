@@ -9,7 +9,7 @@ import { markLostActiveWork } from "./harness/active-work.ts";
 import { runningActiveWork } from "./harness/active-work.ts";
 import { goalContinuationPrompt, readGoalByRoot } from "./harness/goal.ts";
 import { storeOversizedToolResult } from "./harness/tool-output-store.ts";
-import { ToolCatalog, TOOL_SEARCH_NAME, toolSearchDefinition } from "./harness/tool-catalog.ts";
+import { ToolCatalog, TOOL_CALL_NAME, TOOL_SEARCH_NAME, toolCallDefinition, toolSearchDefinition } from "./harness/tool-catalog.ts";
 import { planModeAllowsCommand, planModeAllowsTool } from "./harness/plan.ts";
 import { buildPostCompactContext } from "./harness/post-compact.ts";
 import { todoReminder } from "./harness/todo.ts";
@@ -99,12 +99,34 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       };
     }
   };
-  const syntheticTools = catalog.deferred ? [toolSearchTool] : [];
+  const toolCallTool: AgentTool = {
+    definition: toolCallDefinition(),
+    async execute(): Promise<AgentToolResult> {
+      throw new Error("tool_call must be dispatched by the runtime, not executed directly");
+    }
+  };
+  const syntheticTools = catalog.deferred ? [toolSearchTool, toolCallTool] : [];
   const currentDefinitions = (): AgentToolDefinition[] => {
     const definitions = catalog.definitions();
     return syntheticTools.length > 0
       ? [...definitions, ...syntheticTools.map((tool) => tool.definition)]
       : definitions;
+  };
+  const deferredCall = (call: AgentToolCall): { tool: AgentTool; call: AgentToolCall } | { error: string } => {
+    const args = call.arguments && typeof call.arguments === "object" && !Array.isArray(call.arguments)
+      ? call.arguments as Record<string, unknown>
+      : {};
+    const name = typeof args.name === "string" ? args.name.trim() : "";
+    if (!name) return { error: "tool_call 需要提供 name" };
+    const tool = catalog.resolve(name);
+    if (!tool) return { error: `工具 ${name} 尚未发现或未授权；请先调用 tool_search。` };
+    const targetArgs = args.arguments && typeof args.arguments === "object" && !Array.isArray(args.arguments)
+      ? args.arguments as Record<string, unknown>
+      : {};
+    return {
+      tool,
+      call: { id: call.id, name: tool.definition.name, arguments: targetArgs, rawArguments: JSON.stringify(targetArgs) }
+    };
   };
   const contextPeaks: number[] = [];
   let lastRequestUsage: AgentUsage | null = null;
@@ -592,16 +614,28 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       }
 
       toolCalls += 1;
-      const tool = call.name === TOOL_SEARCH_NAME && catalog.deferred ? toolSearchTool : catalog.resolve(call.name);
+      let effectiveCall = call;
+      let tool: AgentTool | undefined;
+      let resolutionError: string | null = null;
+      if (call.name === TOOL_CALL_NAME && catalog.deferred) {
+        const resolved = deferredCall(call);
+        if ("error" in resolved) resolutionError = resolved.error;
+        else {
+          tool = resolved.tool;
+          effectiveCall = resolved.call;
+        }
+      } else {
+        tool = call.name === TOOL_SEARCH_NAME && catalog.deferred ? toolSearchTool : catalog.resolve(call.name);
+      }
       const precomputed = parallelResults.get(call.id);
       const toolStartedAt = Date.now();
       emit({ type: "tool.started", turn: turns, call });
 
-      const signature = toolSignature(call);
+      const signature = toolSignature(effectiveCall);
 
-      let result: AgentToolResult = { content: `未知或未授权工具：${call.name}`, isError: true };
+      let result: AgentToolResult = { content: resolutionError ?? `未知或未授权工具：${call.name}`, isError: true };
       if (tool) {
-        const modeError = modeIssue(call);
+        const modeError = modeIssue(effectiveCall);
         if (modeError) {
           result = { content: modeError, isError: true };
         } else if (precomputed) {
@@ -610,7 +644,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         let authorized = true;
         if (options.authorizeTool) {
           try {
-            const authorization = await options.authorizeTool({ call, definition: tool.definition });
+            const authorization = await options.authorizeTool({ call: effectiveCall, definition: tool.definition });
             authorized = authorization.allowed;
             if (!authorization.allowed) {
               result = { content: `用户尚未允许这个工具：${authorization.reason}`, isError: true };
@@ -621,9 +655,9 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
           }
         }
         if (authorized) {
-          markExecuting(call);
+          markExecuting(effectiveCall);
           try {
-            result = await executeToolWithTimeout(tool, call, {
+            result = await executeToolWithTimeout(tool, effectiveCall, {
               workspaceRoot: options.workspaceRoot,
               outDir: options.outDir,
               permissions: options.permissions,
