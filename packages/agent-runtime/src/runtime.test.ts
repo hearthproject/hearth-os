@@ -726,6 +726,37 @@ describe("context compaction", () => {
     expect(ran).toEqual(["git status --short"]);
     expect(result.status).toBe("budget_exceeded");
   });
+
+  it("runs the post-edit hook with changed files and ignores failed edits", async () => {
+    const root = workspace(roots);
+    const seen: Array<{ tool: string; files: string[]; turn: number }> = [];
+    const edit: AgentTool = {
+      definition: { name: "edit_file", description: "edit", parameters: { type: "object" } },
+      async execute(input) {
+        const fail = (input as { fail?: boolean }).fail === true;
+        return fail
+          ? { content: "cannot edit", isError: true }
+          : { content: "edited", metadata: { filesChanged: ["src/a.ts"] } };
+      }
+    };
+    const finish = createBuiltinTools().find((tool) => tool.definition.name === "finish_task")!;
+    const result = await runAgent({
+      model: fakeModel([
+        turn("", [call("edit_file", { fail: true }), call("edit_file", {})]),
+        turn("", [call("finish_task", { summary: "done" })])
+      ]),
+      tools: [edit, finish],
+      goal: "post-edit hook",
+      systemPrompt: "system",
+      budget: { maxTurns: 3, maxToolCalls: 10, maxTokens: 10_000, maxDurationMs: 30_000 },
+      permissions: { tools: ["edit_file", "finish_task"], readRoots: [root], writeRoots: [root], networkHosts: [] },
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      afterEdit: (event) => { seen.push({ tool: event.tool, files: event.files, turn: event.turn }); }
+    });
+    expect(result.status).toBe("completed");
+    expect(seen).toEqual([{ tool: "edit_file", files: ["src/a.ts"], turn: 1 }]);
+  });
 });
 
 function toolPairsComplete(messages: Array<{ role: string; content: string; toolCalls?: Array<{ id: string }>; toolCallId?: string }>): boolean {

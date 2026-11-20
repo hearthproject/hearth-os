@@ -427,6 +427,14 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         result = { ...result, content: `${result.content}\n当前产物输出目录：${options.outDir}。请使用当前目录；更换工具或路径分隔符不会扩大权限。` };
       }
       emit({ type: "tool.finished", turn: turns, call, result, durationMs: precomputed?.durationMs ?? (Date.now() - toolStartedAt) });
+      const changedFiles = result.isError ? [] : result.metadata?.filesChanged?.filter((file) => typeof file === "string" && file.length > 0) ?? [];
+      if (changedFiles.length > 0 && options.afterEdit) {
+        try {
+          await options.afterEdit({ turn: turns, tool: call.name, files: changedFiles, result });
+        } catch (error) {
+          emit({ type: "notice", message: `Post-edit hook failed: ${errorMessage(error)}` });
+        }
+      }
       const progressHash = `${signature}|${result.isError === true}|${createHash("sha1").update(result.content).digest("hex")}`;
       sameProgressCount = progressHash === lastProgressHash ? sameProgressCount + 1 : 0;
       lastProgressHash = progressHash;

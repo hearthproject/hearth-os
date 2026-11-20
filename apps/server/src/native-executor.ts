@@ -24,6 +24,7 @@ import {
   type AgentModel,
   type AgentResumeState,
   type AgentRunResult,
+  type AgentPostEditEvent,
   type AgentTool,
   type AgentToolAuthorization,
   type AgentToolAuthorizationRequest,
@@ -58,6 +59,7 @@ export interface NativeRunOptions {
   onProgress?: (event: { kind: string; message: string; detail?: TaskProgressDetail }) => void;
   onContextEvent?: (event: RuntimeEvent) => void;
   onCheckpoint?: (checkpoint: AgentCheckpoint) => void | Promise<void>;
+  afterEdit?: (event: AgentPostEditEvent) => void | Promise<void>;
   onAuthorizeTool?: (request: AgentToolAuthorizationRequest) => Promise<AgentToolAuthorization>;
   isFullPermission?: () => boolean;
   extraTools?: AgentTool[];
@@ -199,6 +201,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
       if (progress) options.onProgress?.(progress);
     },
     ...(options.onCheckpoint ? { onCheckpoint: options.onCheckpoint } : {}),
+    ...(options.afterEdit ? { afterEdit: options.afterEdit } : {}),
     ...(options.onAuthorizeTool ? { authorizeTool: options.onAuthorizeTool } : {}),
     ...(options.isFullPermission ? { isFullPermission: options.isFullPermission } : {})
   });

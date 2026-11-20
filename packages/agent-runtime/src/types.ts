@@ -206,6 +206,13 @@ export interface AgentResumeState {
   state?: AgentToolState;
 }
 
+export interface AgentPostEditEvent {
+  turn: number;
+  tool: string;
+  files: string[];
+  result: AgentToolResult;
+}
+
 export interface AgentRuntimeOptions {
   model: AgentModel;
   tools: AgentTool[];
@@ -219,6 +226,7 @@ export interface AgentRuntimeOptions {
   resume?: AgentResumeState;
   onEvent?: (event: RuntimeEvent) => void;
   onCheckpoint?: (checkpoint: AgentCheckpoint) => void | Promise<void>;
+  afterEdit?: (event: AgentPostEditEvent) => void | Promise<void>;
   authorizeTool?: (request: AgentToolAuthorizationRequest) => Promise<AgentToolAuthorization>;
   validateFinish?: (result: AgentToolResult, context: AgentToolContext) => string | null | Promise<string | null>;
   isFullPermission?: () => boolean;
