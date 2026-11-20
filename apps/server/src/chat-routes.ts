@@ -95,7 +95,7 @@ const modelProbeSchema = z.object({
   apiKey: z.string().max(500).optional()
 }).strict();
 
-import type { KnowledgeRecallService } from "./knowledge/recall.ts";
+import type { LibraryService } from "./library/service.ts";
 
 export interface ChatRouteOptions {
   service: HearthService;
@@ -111,7 +111,7 @@ export interface ChatRouteOptions {
   approvals?: ApprovalManager | undefined;
   cancelTask?: ((taskId: string) => unknown) | undefined;
   memory?: MemoryService | undefined;
-  knowledge?: KnowledgeRecallService | undefined;
+  library?: LibraryService | undefined;
   personal?: {
     ontology: OntologyService;
     mentions: MentionResolver;
@@ -629,19 +629,19 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
         // Memory recall is best effort and never blocks the answer.
       }
     }
-    let knowledgeContext = "";
-    if (options.knowledge?.isEnabled() && !directDraft) {
+    let libraryContext = "";
+    if (options.library && !directDraft) {
       try {
-        const recalled = await options.knowledge.recall({
-          query: userContent,
-          conversationId: conversation.id
-        });
-        if (recalled.block) {
-          knowledgeContext = recalled.block;
-          send("knowledge", { count: recalled.hits.length });
+        const recalled = await options.library.search(userContent, 6);
+        if (recalled.hits.length > 0) {
+          libraryContext = [
+            "## 相关资料",
+            ...recalled.hits.map((hit) => `### ${hit.node.title} [${hit.node.kind}]\n引用：${hit.node.ref}\n${hit.snippet}`)
+          ].join("\n\n");
+          send("library", { count: recalled.hits.length });
         }
       } catch {
-        // Knowledge recall is best effort and never blocks the answer.
+        // Library recall is best effort and never blocks the answer.
       }
     }
     let personalContext = "";
@@ -662,7 +662,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       }
     }
     const messages: ChatMessage[] = [
-      { role: "system", content: [chatSystemPrompt(), routeMode === "chat" ? "用户选择继续聊天：仅在对话中回答或修改内容，不派任务、不调用外部工具，不得声称已发送邮件、读取链接或执行外部操作。" : "", directDraft ? DRAFT_INSTRUCTION : "", personalContext, memoryContext, knowledgeContext].filter(Boolean).join("\n\n") },
+      { role: "system", content: [chatSystemPrompt(), routeMode === "chat" ? "用户选择继续聊天：仅在对话中回答或修改内容，不派任务、不调用外部工具，不得声称已发送邮件、读取链接或执行外部操作。" : "", directDraft ? DRAFT_INSTRUCTION : "", personalContext, memoryContext, libraryContext].filter(Boolean).join("\n\n") },
       ...history
     ];
 

@@ -2110,7 +2110,6 @@ export const CONTEXT_ITEM_KINDS = [
   "decision",
   "summary",
   "memory_recall",
-  "knowledge_recall",
   "library_recall",
   "method",
   "usage",
@@ -2257,7 +2256,7 @@ export interface HandoffPacket {
   omittedHistory: string[];
   redaction: HandoffRedaction;
   verification: HandoffVerification;
-  vikingRefs?: string[];
+  libraryRefs?: string[];
 }
 
 export interface HandoffRedaction {

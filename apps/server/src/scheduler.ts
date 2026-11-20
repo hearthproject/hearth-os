@@ -48,10 +48,6 @@ import { createMcpTools, parseMcpToolName } from "./mcp-tools.ts";
 import type { McpServerService } from "./mcp-servers.ts";
 import { DEFAULT_RUN_BUDGET, nativePermissionsFor, runNativeTask } from "./native-executor.ts";
 import { ContextBroker } from "./context-broker.ts";
-import type { KnowledgeRecallService } from "./knowledge/recall.ts";
-import type { KnowledgeSettingsStore } from "./knowledge/settings.ts";
-import type { KnowledgeSyncService } from "./knowledge/sync.ts";
-import { createKnowledgeTools } from "./knowledge/tools.ts";
 import type { LibraryService } from "./library/service.ts";
 import { createLibraryTools } from "./library/tools.ts";
 import type { LibraryMcpLaunch } from "./library/mcp-runtime.ts";
@@ -123,9 +119,6 @@ export interface SchedulerOptions {
   contextBlobRoot?: string | undefined;
   sandbox?: SandboxService | undefined;
   contextBroker?: ContextBroker | undefined;
-  knowledge?: KnowledgeRecallService | undefined;
-  knowledgeSettings?: KnowledgeSettingsStore | undefined;
-  knowledgeSync?: KnowledgeSyncService | undefined;
   library?: LibraryService | undefined;
   libraryMcp?: LibraryMcpLaunch | undefined;
   ontologyWriter?: OntologyWriter | undefined;
@@ -166,9 +159,6 @@ export class HearthScheduler {
   private readonly sandbox: SandboxService;
   private readonly context: ContextService;
   private readonly contextBroker: ContextBroker | undefined;
-  private readonly knowledge: KnowledgeRecallService | undefined;
-  private readonly knowledgeSettings: KnowledgeSettingsStore | undefined;
-  private readonly knowledgeSync: KnowledgeSyncService | undefined;
   private readonly library: LibraryService | undefined;
   private readonly libraryMcp: LibraryMcpLaunch | undefined;
   private readonly ontology: OntologyService;
@@ -236,9 +226,6 @@ export class HearthScheduler {
     this.memory = new MemoryService(this.service);
     this.context = options.context ?? new ContextService(this.service, options.contextBlobRoot ?? CONTEXT_BLOB_DIR);
     this.contextBroker = options.contextBroker;
-    this.knowledge = options.knowledge;
-    this.knowledgeSettings = options.knowledgeSettings;
-    this.knowledgeSync = options.knowledgeSync;
     this.library = options.library;
     this.libraryMcp = options.libraryMcp;
     this.ontology = new OntologyService(this.service);
@@ -1389,12 +1376,6 @@ export class HearthScheduler {
       }
       try {
         const finalTask = this.service.store.getTask(taskId);
-        if (finalTask) this.knowledgeSync?.enqueueTask(finalTask);
-      } catch {
-        // Knowledge writeback is best effort and never changes the task outcome.
-      }
-      try {
-        const finalTask = this.service.store.getTask(taskId);
         if (finalTask && ["completed", "failed", "recoverable", "cancelled"].includes(finalTask.status)) {
           this.ontologyWriter.captureTaskOutcome(taskId);
         }
@@ -1627,9 +1608,6 @@ export class HearthScheduler {
       let subagentManager: SubagentTaskManager | undefined;
       if (this.library) extraNativeTools.push(...createLibraryTools(this.library));
       if (executorId === "native") {
-        if (this.knowledge?.isEnabled() && this.knowledgeSettings) {
-          extraNativeTools.push(...createKnowledgeTools({ settings: this.knowledgeSettings }));
-        }
         if (this.mcpServers) {
           try {
             extraNativeTools.push(...createMcpTools(this.mcpServers));
@@ -2627,8 +2605,8 @@ export class HearthScheduler {
       `- 任务：${task.title}`,
       "",
       "请先核对工作区和产物哈希，再从“下一步”继续执行；不要重复已经产生外部副作用的动作。" + permissionNote,
-      ...(packet.vikingRefs && packet.vikingRefs.length > 0
-        ? ["", "## 可读取的知识库资料", ...packet.vikingRefs.map((uri) => `- ${uri}`)]
+      ...(packet.libraryRefs && packet.libraryRefs.length > 0
+        ? ["", "## 相关资料引用", ...packet.libraryRefs.map((ref) => `- ${ref}`)]
         : [])
       ].join("\n")
     };

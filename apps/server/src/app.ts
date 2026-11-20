@@ -62,11 +62,6 @@ import { WebSearchError, WebSearchService } from "./web-search.ts";
 import { isBackgroundToolReadOnly, requiresToolApproval, toolApprovalSummary } from "./tool-policy.ts";
 import { createBuiltinTools } from "@hearth/agent-runtime";
 import { SecretBox } from "./secrets.ts";
-import { KnowledgeRecallService } from "./knowledge/recall.ts";
-import { KnowledgeClient } from "./knowledge/client.ts";
-import { KnowledgeSettingsError, KnowledgeSettingsStore, type KnowledgeSettingsPatch } from "./knowledge/settings.ts";
-import { KnowledgeSyncService } from "./knowledge/sync.ts";
-import { KnowledgeManagedService, KnowledgeSetupError } from "./knowledge/managed-service.ts";
 import { LibraryService } from "./library/service.ts";
 import { registerLibraryRoutes } from "./library/routes.ts";
 import { LocalEmbeddingProvider, type EmbeddingProvider } from "./library/embedding.ts";
@@ -649,32 +644,10 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
 
   const secretBox = options.secretBox ?? SecretBox.fromKeyFile(options.masterKeyPath ?? MASTER_KEY_PATH);
-  const knowledgeSettings = new KnowledgeSettingsStore(store, secretBox);
-  const knowledgeManaged = new KnowledgeManagedService({ settings: knowledgeSettings });
-  const knowledge = new KnowledgeRecallService({ store, settings: knowledgeSettings, managed: knowledgeManaged });
-  const knowledgeSync = new KnowledgeSyncService({ store, settings: knowledgeSettings });
-  knowledgeSync.start();
-  service.bus.subscribe((event) => {
-    if (event.type === "memory.forgotten") {
-      const affected = (event.payload as { affectedMemoryIds?: string[] } | null)?.affectedMemoryIds ?? [];
-      for (const memoryId of affected) knowledgeSync.enqueueDelete("memory", memoryId);
-      return;
-    }
-    if (event.type !== "memory.created" && event.type !== "memory.updated") return;
-    const memoryId = (event.payload as { id?: string } | null)?.id;
-    if (!memoryId) return;
-    const memory = store.getMemory(memoryId);
-    if (memory?.status === "forgotten") {
-      knowledgeSync.enqueueDelete("memory", memoryId);
-    } else if (memory) {
-      knowledgeSync.enqueueMemory(memory);
-    }
-  });
   const sources = new SourceRegistry(service, {
     contentRoot: options.sourceContentRoot ?? SOURCE_CONTENT_DIR,
     onItemReady: (item) => {
       ontologyWriter.captureSourceItem(item);
-      knowledgeSync.enqueueSource(item);
     }
   });
   const mcpServers = new McpServerService({ store, secretBox });
@@ -883,9 +856,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
         outbox,
         mcpServers,
         worktrees,
-        knowledge,
-        knowledgeSettings,
-        knowledgeSync,
         library,
         libraryMcp,
         attachmentRoot,
@@ -979,15 +949,13 @@ export async function buildServer(options: BuildServerOptions = {}) {
     approvals,
     cancelTask: scheduler ? (taskId: string) => scheduler.cancel(taskId) : undefined,
     memory,
-    knowledge,
+    library,
     personal: { ontology, mentions, broker: contextBroker, writer: ontologyWriter }
   });
   registerLibraryRoutes(app, library);
   library.start();
   app.addHook("onClose", async () => {
     library.stop();
-    knowledgeSync.stop();
-    knowledgeManaged.stop();
     await feishu.stop();
     mail.stop();
     maintenance.stop();
@@ -1418,132 +1386,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
     return { settings };
   });
 
-  app.get("/api/knowledge/status", async () => {
-    const view = knowledgeSettings.view();
-    const settings = knowledgeSettings.get();
-    const jobs = {
-      pending: store.listKnowledgeJobs({ status: "pending", limit: 1000 }).length,
-      running: store.listKnowledgeJobs({ status: "running", limit: 1000 }).length,
-      failed: store.listKnowledgeJobs({ status: "failed", limit: 1000 }).length,
-      dead: store.listKnowledgeJobs({ status: "dead", limit: 1000 }).length
-    };
-    let health: { ok: boolean; latencyMs: number; version: string | null; authMode: string | null; detail: string | null };
-    if (settings.enabled) {
-      try {
-        health = await new KnowledgeClient(settings).health();
-      } catch (error) {
-        health = {
-          ok: false, latencyMs: 0, version: null, authMode: null,
-          detail: error instanceof Error ? error.message : String(error)
-        };
-      }
-    } else {
-      health = { ok: false, latencyMs: 0, version: null, authMode: null, detail: "未启用" };
-    }
-    return {
-      settings: view,
-      health,
-      jobs,
-      index: store.knowledgeMapStats(),
-      lastReconcileAt: store.knowledgeStateGet("last_full_reconcile_at"),
-      lastReindexDate: store.knowledgeStateGet("last_reindex_date")
-    };
-  });
-
-  app.get("/api/knowledge/setup", async () => knowledgeManaged.status());
-
-  app.post("/api/knowledge/setup/install", async (_request, reply) => {
-    try {
-      return { install: knowledgeManaged.install() };
-    } catch (error) {
-      if (error instanceof KnowledgeSetupError) {
-        return reply.code(error.statusCode).send({ error: error.code, message: error.message });
-      }
-      throw error;
-    }
-  });
-
-  app.post("/api/knowledge/service/start", async (_request, reply) => {
-    try {
-      await knowledgeManaged.start();
-      return { ok: true, setup: await knowledgeManaged.status() };
-    } catch (error) {
-      if (error instanceof KnowledgeSetupError) {
-        return reply.code(error.statusCode).send({ error: error.code, message: error.message });
-      }
-      throw error;
-    }
-  });
-
-  app.post("/api/knowledge/service/stop", async () => {
-    knowledgeManaged.stop();
-    return { ok: true, setup: await knowledgeManaged.status() };
-  });
-
-  app.patch("/api/knowledge/settings", async (request, reply) => {
-    try {
-      return { settings: knowledgeSettings.update((request.body ?? {}) as KnowledgeSettingsPatch) };
-    } catch (error) {
-      if (error instanceof KnowledgeSettingsError) {
-        return reply.code(error.statusCode).send({ error: error.code, message: error.message });
-      }
-      throw error;
-    }
-  });
-
-  app.post("/api/knowledge/test", async () => {
-    const settings = knowledgeSettings.get();
-    try {
-      const client = new KnowledgeClient(settings);
-      const health = await client.health();
-      const hits = health.ok
-        ? await client.find({ query: "Hearth", limit: 3, timeoutMs: settings.recall.timeoutMs, targetUri: "viking://resources/hearth" })
-        : [];
-      return { health, hits: hits.length };
-    } catch (error) {
-      return { health: { ok: false, latencyMs: 0, version: null, authMode: null, detail: error instanceof Error ? error.message : String(error) }, hits: 0 };
-    }
-  });
-
-  app.post("/api/knowledge/sync", async () => ({ result: await knowledgeSync.flush(50) }));
-
-  app.post("/api/knowledge/reconcile", async () => ({ result: await knowledgeSync.reconcile() }));
-
-  app.post("/api/knowledge/reindex", async () => ({ ok: await knowledgeSync.reindexNow() }));
-
-  app.get("/api/knowledge/search", async (request, reply) => {
-    const query = request.query as { q?: string; uri?: string };
-    if (!query.q?.trim()) return reply.code(400).send({ error: "INVALID_QUERY", message: "缺少 q 参数" });
-    try {
-      const hits = await new KnowledgeClient(knowledgeSettings.get()).find({
-        query: query.q,
-        limit: 10,
-        timeoutMs: 5000,
-        ...(query.uri ? { targetUri: query.uri } : {})
-      });
-      return { hits };
-    } catch (error) {
-      return reply.code(502).send({ error: "KNOWLEDGE_SEARCH_FAILED", message: error instanceof Error ? error.message : String(error) });
-    }
-  });
-
-  app.delete("/api/knowledge/index", async (request, reply) => {
-    const body = (request.body ?? {}) as { confirm?: string };
-    if (body.confirm !== "DELETE") {
-      return reply.code(400).send({ error: "CONFIRM_REQUIRED", message: "危险操作，请在请求体传 confirm=DELETE" });
-    }
-    const settings = knowledgeSettings.get();
-    try {
-      const client = new KnowledgeClient(settings);
-      await client.remove("viking://resources/hearth", { recursive: true });
-      await client.remove("viking://user/default", { recursive: true });
-      store.resetKnowledgeIndex();
-      return { ok: true };
-    } catch (error) {
-      return reply.code(502).send({ error: "KNOWLEDGE_CLEAR_FAILED", message: error instanceof Error ? error.message : String(error) });
-    }
-  });
-
   app.get("/api/executors", async () => {
     const settings = executorSettingsStore.load();
     const modelBindings = modelRegistry.bindingViews();
@@ -1716,13 +1558,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   app.get("/api/memory", async (_request, reply) => {
     reply.header("cache-control", "no-store");
     const snapshot = memory.snapshot();
-    return {
-      ...snapshot,
-      memories: snapshot.memories.map((record) => {
-        const mapping = store.knowledgeMapGet(record.id);
-        return mapping ? { ...record, knowledge: { uri: mapping.uri, syncedAt: mapping.updatedAt } } : record;
-      })
-    };
+    return snapshot;
   });
 
   app.patch("/api/memory/settings", async (request, reply) => {
@@ -2423,7 +2259,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
     for (const taskId of taskIds) {
       if (store.purgeTask(taskId)) purgedTaskIds.add(taskId);
     }
-    for (const taskId of purgedTaskIds) knowledgeSync.enqueueDelete("task", taskId);
     for (const task of taskRecords.values()) removeManagedTaskPaths(task, options.dataDir ?? DATA_DIR);
 
     const inUse = new Set(store.listAttachmentIdsInUse());
@@ -2856,11 +2691,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   app.get<{ Params: { id: string } }>("/api/tasks/:id", async (request, reply) => {
     const view = service.view(request.params.id);
     if (!view) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
-    const mapping = store.knowledgeMapGet(request.params.id);
-    return {
-      ...view,
-      knowledge: mapping ? { uri: mapping.uri, syncedAt: mapping.updatedAt, contentHash: mapping.contentHash } : null
-    };
+    return view;
   });
 
   app.delete<{ Params: { id: string }; Body: unknown }>("/api/tasks/:id", async (request, reply) => {
