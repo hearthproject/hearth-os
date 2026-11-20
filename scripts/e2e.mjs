@@ -285,31 +285,76 @@ async function main() {
     }
   });
 
-  await runTest(page, "keeps five primary destinations and discloses the rest", async () => {
+  await runTest(page, "keeps primary destinations and discloses the rest", async () => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     const nav = page.locator(".nav");
-    for (const label of ["聊天", "任务", "需要你", "记忆"]) {
+    for (const label of ["聊天", "需要你", "记忆"]) {
       assert.equal(await nav.getByRole("link", { name: label, exact: true }).count(), 1, `${label} should be a primary link`);
     }
     assert.equal(await page.getByRole("link", { name: "设置", exact: true }).count(), 1, "settings should stay reachable");
     if (await page.locator("#nav-more").count() === 0) {
       await page.locator(".nav-more-toggle").click();
     }
-    for (const label of ["邮件", "定时任务", "设备", "运行", "个人"]) {
+    for (const label of ["邮件", "定时任务", "设备", "运行", "个人", "档案"]) {
       assert.equal(await page.locator("#nav-more").getByRole("link", { name: label, exact: true }).count(), 1, `${label} should be a secondary link`);
     }
     await page.getByRole("link", { name: "记忆", exact: true }).click();
-    await page.waitForURL("**/memory", { timeout: 15_000 });
+    await page.waitForURL("**/knowledge", { timeout: 15_000 });
     await page.locator(".memory-page").waitFor({ timeout: 15_000 });
 
     await page.keyboard.press("Control+k");
     await page.locator(".command-dialog").waitFor({ timeout: 15_000 });
-    for (const label of ["聊天", "任务", "需要你", "记忆", "邮件", "定时任务", "设备", "运行", "个人", "设置"]) {
+    for (const label of ["聊天", "需要你", "记忆", "档案", "邮件", "定时任务", "设备", "运行", "个人", "设置"]) {
       assert.equal(await page.locator(".command-group").getByRole("button", { name: label, exact: true }).count(), 1, `${label} should be searchable`);
     }
     await page.keyboard.press("Escape");
     await page.goto(baseUrl, { waitUntil: "networkidle" });
   });
+
+  await runTest(page, "renders the needs-you inbox and its supervision shape", async () => {
+    const snapshot = await api(baseUrl, "/api/supervision");
+    assert.equal(snapshot.status, 200, snapshot.text);
+    assert.ok(Array.isArray(snapshot.body.items), "items should be an array");
+    assert.ok("digest" in snapshot.body, "digest should be present");
+    await page.goto(`${baseUrl}/inbox`, { waitUntil: "networkidle" });
+    await page.locator(".inbox-page").waitFor({ timeout: 15_000 });
+    assert.match(await page.locator(".page-header h2").innerText(), /需要你/);
+  });
+
+  await runTest(page, "returns empty task turns and a safe rewind error", async () => {
+    const created = await api(baseUrl, "/api/tasks", {
+      method: "POST",
+      body: JSON.stringify({
+        title: "E2E turns",
+        goal: "验证逐轮接口的空状态与错误",
+        executorId: "native",
+        taskKind: "general",
+        expectedOutputs: ["result.md"]
+      })
+    });
+    assert.equal(created.status, 201, created.text);
+    const taskId = created.body.id;
+    const turns = await api(baseUrl, `/api/tasks/${encodeURIComponent(taskId)}/turns`);
+    assert.equal(turns.status, 200, turns.text);
+    assert.deepEqual(turns.body.turns, []);
+    const rewind = await api(baseUrl, `/api/tasks/${encodeURIComponent(taskId)}/rewind`, {
+      method: "POST",
+      body: JSON.stringify({ runId: "missing-run", turn: 1 })
+    });
+    assert.equal(rewind.status, 404, rewind.text);
+    assert.equal(rewind.body.error, "RUN_NOT_FOUND");
+    await cancelTask(baseUrl, taskId);
+  });
+
+  if (!health.chatModel?.configured) {
+    await runTest(page, "reports a missing chat model before the first real task", async () => {
+      const verify = await api(baseUrl, "/api/onboarding/verify", { method: "POST" });
+      assert.equal(verify.status, 409, verify.text);
+      assert.equal(verify.body.error, "CHAT_MODEL_MISSING");
+    });
+  } else {
+    skipTest("missing chat model first-task guard", "live model settings are configured");
+  }
 
   await runTest(page, "ignores Enter while the IME is composing", async () => {
     await newChat(page, baseUrl);
@@ -412,6 +457,7 @@ async function main() {
     await page.waitForFunction(() => document.querySelector(".chat-header h1")?.textContent === "E2E 对话 A");
     await itemB.locator(".conversation-select").click();
     await page.waitForFunction(() => document.querySelector(".chat-header h1")?.textContent === "E2E 对话 B");
+    page.once("dialog", (dialog) => void dialog.accept());
     await itemB.locator(".conversation-delete").click();
     await itemB.waitFor({ state: "detached", timeout: 15_000 });
 
@@ -423,26 +469,22 @@ async function main() {
     assert.match(await page.locator(".composer-error").innerText(), /失效/);
   });
 
-  await runTest(page, "saves executor settings without resetting approval mode", async () => {
+  await runTest(page, "saves the preferred executor without forcing an approval mode", async () => {
     await page.goto(`${baseUrl}/settings`, { waitUntil: "networkidle" });
     await page.locator(".settings-tabs").waitFor();
     await page.locator("summary").filter({ hasText: "执行器管理" }).click();
     await page.locator(".executor-card").first().waitFor({ timeout: 15_000 });
-    const approval = page.locator("label").filter({ hasText: "新对话默认权限" }).locator("select");
-    await approval.selectOption("full");
     await page.locator("label").filter({ hasText: "全局优先执行器" }).locator("select").selectOption("native");
     await page.getByRole("button", { name: "保存执行器设置" }).click();
     await page.locator(".settings-notice.ok").waitFor({ timeout: 15_000 });
     assert.match(await page.locator(".settings-notice.ok").innerText(), /已保存/);
 
     const saved = await api(baseUrl, "/api/executor-settings");
-    assert.equal(saved.body.settings.defaultApprovalMode, "full");
     assert.equal(saved.body.settings.preferredExecutorId, "native");
 
     await page.reload({ waitUntil: "networkidle" });
     await page.locator("summary").filter({ hasText: "执行器管理" }).click();
     await page.locator(".executor-card").first().waitFor({ timeout: 15_000 });
-    assert.equal(await page.locator("label").filter({ hasText: "新对话默认权限" }).locator("select").inputValue(), "full");
     assert.equal(await page.locator("label").filter({ hasText: "全局优先执行器" }).locator("select").inputValue(), "native");
   });
 
