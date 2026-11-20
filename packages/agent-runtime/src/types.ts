@@ -194,8 +194,9 @@ export type RuntimeEvent =
   | { type: "tool.batch.finished"; turn: number; calls: AgentToolCall[]; parallel: boolean; durationMs: number }
   | { type: "checkpoint.created"; seq: number; kind: string }
   | { type: "checkpoint.failed"; seq: number; kind: string; message: string }
-  | { type: "compacted"; before: number; after: number }
-  | { type: "context.watermark"; estimatedTokens: number; usedTokens: number; compactions: number }
+  | { type: "compacted"; before: number; after: number; reason?: "microcompact" | "auto" | "reactive" | "forced" }
+  | { type: "context.snapshot"; turn: number; modelId: string | null; messageCount: number; toolCount: number; systemChars: number; toolSchemaChars: number; historyChars: number; toolResultChars: number; estimatedTokens: number; providerInputTokens: number | null; providerOutputTokens: number | null; source: "provider" | "estimate" }
+  | { type: "context.watermark"; estimatedTokens: number; usedTokens: number; compactions: number; source?: "provider" | "estimate" }
   | { type: "progress.updated"; filesRead: number; filesModified: number; commands: number; tests: number; todosOpen?: number }
   | { type: "usage"; usage: RunUsage }
   | { type: "budget.exceeded"; budget: "turns" | "toolCalls" | "tokens" | "duration"; limit: number }
@@ -230,6 +231,7 @@ export interface AgentPostEditEvent {
 
 export interface AgentRuntimeOptions {
   model: AgentModel;
+  modelId?: string;
   tools: AgentTool[];
   goal: string;
   systemPrompt: string;
@@ -272,6 +274,13 @@ export interface AgentRuntimeReminders {
 
 export type AgentRunStatus = "completed" | "waiting_input" | "failed" | "cancelled" | "budget_exceeded";
 
+export interface AgentRunMetrics {
+  contextPeaks: number[];
+  contextSource: "provider" | "estimate";
+  compactions: number;
+  modelId: string | null;
+}
+
 export interface AgentRunResult {
   status: AgentRunStatus;
   summary: string;
@@ -281,6 +290,7 @@ export interface AgentRunResult {
   toolCalls: number;
   outputs: string[];
   question: string | null;
+  metrics?: AgentRunMetrics;
 }
 
 export interface CompactOptions {

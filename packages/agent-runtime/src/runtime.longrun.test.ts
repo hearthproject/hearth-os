@@ -83,6 +83,7 @@ describe("agent runtime long-run fixtures", () => {
 
   it("keeps the full request history available to fixtures", async () => {
     const root = workspace(roots);
+    const events: RuntimeEvent[] = [];
     const fake = createFakeModel([
       { content: "", toolCalls: [fakeToolCall("echo", { value: "a" })], usage: fakeUsage(100, 5), finishReason: "tool_calls" },
       { content: "", toolCalls: [fakeToolCall("echo", { value: "b" })], usage: fakeUsage(120, 6), finishReason: "tool_calls" },
@@ -90,19 +91,27 @@ describe("agent runtime long-run fixtures", () => {
     ]);
     const result = await runAgent({
       model: fake.model,
+      modelId: "fake-model",
       tools: [echoTool(), ...createBuiltinTools()],
       goal: "history",
       systemPrompt: "system",
       workspaceRoot: root,
       outDir: join(root, "out"),
       permissions: { tools: ["echo", "finish_task"], readRoots: [root], writeRoots: [root], networkHosts: [] },
-      budget: {}
+      budget: {},
+      onEvent: (event) => { events.push(event); }
     });
 
     expect(result.status).toBe("completed");
     expect(fake.state.requests).toHaveLength(3);
     expect(fake.state.requests[0]?.messages.length).toBeLessThan(fake.state.requests[2]?.messages.length ?? 0);
     expect(fake.state.requests[2]?.messages.some((message) => message.role === "tool")).toBe(true);
+    const snapshots = events.filter((event) => event.type === "context.snapshot");
+    expect(snapshots).toHaveLength(3);
+    expect(snapshots[0]).toMatchObject({ turn: 1, modelId: "fake-model", source: "estimate", providerInputTokens: null, toolCount: 2 });
+    expect(snapshots[1]).toMatchObject({ turn: 2, source: "provider", providerInputTokens: 100, providerOutputTokens: 5 });
+    expect(result.metrics).toMatchObject({ contextSource: "provider", compactions: 0, modelId: "fake-model" });
+    expect(result.metrics?.contextPeaks).toHaveLength(3);
   });
 });
 

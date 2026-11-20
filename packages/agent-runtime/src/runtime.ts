@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import type { RunUsage } from "@hearth/core";
-import { compactAgentMessages, compactAgentMessagesWithSummary } from "./compaction.ts";
+import { compactAgentMessages, compactAgentMessagesWithSummary, estimateMessageTokens } from "./compaction.ts";
 import { createAgentState, progressSummary } from "./harness/file-state.ts";
 import { serializeAgentState } from "./harness/checkpoint-state.ts";
 import { planModeAllowsCommand, planModeAllowsTool } from "./harness/plan.ts";
@@ -60,10 +60,48 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   const startedAt = Date.now();
   const signal = options.signal ?? new AbortController().signal;
   const state = options.state ?? options.resume?.state ?? createAgentState(options.workspaceRoot);
+  const modelId = options.modelId ?? null;
+  const contextPeaks: number[] = [];
+  let lastRequestUsage: AgentUsage | null = null;
+  let lastContextSource: "provider" | "estimate" = "estimate";
 
   const emit = (event: RuntimeEvent): void => options.onEvent?.(event);
   const aborted = (): boolean => signal.aborted;
   const totalTokens = (): number => usage.inputTokens + usage.outputTokens;
+  const emitContextSnapshot = (turn: number): void => {
+    const systemChars = messages
+      .filter((message) => message.role === "system")
+      .reduce((sum, message) => sum + message.content.length, 0);
+    const toolResultChars = messages
+      .filter((message) => message.role === "tool")
+      .reduce((sum, message) => sum + message.content.length, 0);
+    const historyChars = messages
+      .filter((message) => message.role !== "system" && message.role !== "tool")
+      .reduce((sum, message) => sum + message.content.length, 0);
+    const toolSchemaChars = JSON.stringify(definitions).length;
+    const providerInputTokens = lastRequestUsage?.inputTokens && lastRequestUsage.inputTokens > 0
+      ? lastRequestUsage.inputTokens
+      : null;
+    const source: "provider" | "estimate" = providerInputTokens !== null ? "provider" : "estimate";
+    const estimatedTokens = estimateMessageTokens(messages) + Math.ceil(toolSchemaChars / 4);
+    lastContextSource = source;
+    contextPeaks.push(estimatedTokens);
+    emit({
+      type: "context.snapshot",
+      turn,
+      modelId,
+      messageCount: messages.length,
+      toolCount: definitions.length,
+      systemChars,
+      toolSchemaChars,
+      historyChars,
+      toolResultChars,
+      estimatedTokens,
+      providerInputTokens,
+      providerOutputTokens: lastRequestUsage?.outputTokens ?? null,
+      source
+    });
+  };
   // 预算字段缺省、非有限值或非正数都表示不设上限。
   const limitOf = (value: number | undefined): number | null =>
     typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
@@ -108,12 +146,13 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     // actual file body instead of deduplicating against a stale range.
     for (const read of state.readFiles.values()) delete read.ranges;
     compactions += 1;
-    emit({ type: "compacted", before: compacted.before, after: compacted.after });
+    emit({ type: "compacted", before: compacted.before, after: compacted.after, reason: force ? "reactive" : "auto" });
     emit({
       type: "context.watermark",
       estimatedTokens: Number("beforeTokens" in compacted ? compacted.beforeTokens : 0),
       usedTokens: totalTokens(),
-      compactions
+      compactions,
+      source: lastContextSource
     });
     if ("summary" in compacted && typeof compacted.summary === "string") summary = compacted.summary;
     await checkpoint("compaction");
@@ -129,7 +168,13 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       turns,
       toolCalls,
       outputs,
-      question
+      question,
+      metrics: {
+        contextPeaks: [...contextPeaks],
+        contextSource: lastContextSource,
+        compactions,
+        modelId
+      }
     };
   }
 
@@ -308,6 +353,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     let turn;
     let transientRetries = 0;
     let overflowRetried = false;
+    emitContextSnapshot(turns);
     while (true) {
       try {
         turn = await options.model(
@@ -341,6 +387,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       }
     }
 
+    if (turn.usage) lastRequestUsage = turn.usage;
     if (turn.usage) {
       addUsage(usage, turn.usage);
       emit({ type: "usage", usage: { ...usage } });

@@ -210,6 +210,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     ...(resume ? { resume } : {}),
     ...(options.steering ? { steering: options.steering } : {}),
     contextWindowTokens: options.settings.contextWindowTokens,
+    modelId: options.settings.model,
     requireFinishTool: true,
     stopOnToolError: drafting,
     validateFinish: (result, context) => {
