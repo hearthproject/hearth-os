@@ -354,9 +354,6 @@ export const api = {
     request<FeishuTestResponse>("/api/integrations/feishu/test", { method: "POST", body: JSON.stringify(input) }),
   reconnectFeishu: () => request<FeishuIntegrationResponse>("/api/integrations/feishu/reconnect", { method: "POST" }),
   mailAccounts: () => request<{ accounts: MailAccountView[] }>("/api/mail/accounts"),
-  gmailSettings: () => request<{ clientId: string; hasClientSecret: boolean; redirectUri: string }>("/api/mail/gmail/settings"),
-  saveGmailSettings: (input: { clientId: string; clientSecret?: string; redirectUri: string }) => request("/api/mail/gmail/settings", { method: "PUT", body: JSON.stringify(input) }),
-  connectGmail: () => request<{ url: string }>("/api/mail/gmail/connect", { method: "POST", body: JSON.stringify({ returnOrigin: window.location.origin }) }),
   createMailAccount: (input: MailAccountInput) => request<{ account: MailAccountView }>("/api/mail/accounts", {
     method: "POST",
     body: JSON.stringify(input)

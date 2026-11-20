@@ -45,7 +45,7 @@ export function ChatMailDraft({ content }: { content: string }) {
         {!accounts.data?.accounts.length && <option value="">尚未连接邮箱</option>}
         {accounts.data?.accounts.map((item) => <option key={item.id} value={item.id}>{item.fromAddress}</option>)}
       </select></label>
-      {!selectedId && <Link to="/mail">连接 Gmail 或其他邮箱</Link>}
+      {!selectedId && <Link to="/mail">连接邮箱</Link>}
       <label>收件人<input aria-label="收件人邮箱" value={to} disabled={locked || busy} onChange={(event) => setTo(event.target.value)} placeholder="老师的邮箱地址" /></label>
       <label>主题<input aria-label="邮件主题" value={subject} disabled={locked || busy} onChange={(event) => setSubject(event.target.value)} /></label>
       <textarea aria-label="信件正文" rows={12} value={body} disabled={locked || busy} onChange={(event) => setBody(event.target.value)} />

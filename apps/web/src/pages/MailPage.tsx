@@ -16,7 +16,6 @@ import {
   X
 } from "lucide-react";
 import { api } from "../lib/api.ts";
-import { GmailConnect } from "../components/GmailConnect.tsx";
 import { formatDate } from "../lib/format.ts";
 import type { MailAccountInput, MailAccountView, SourceItem } from "../lib/types.ts";
 
@@ -35,8 +34,8 @@ const EMPTY_ACCOUNT: MailAccountInput = {
 export function MailPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const [tab, setTab] = useState<MailTab>(() => new URLSearchParams(window.location.search).has("gmail") ? "accounts" : "inbox");
-  const [notice, setNotice] = useState<{ tone: "ok" | "error" | "info"; text: string } | null>(() => new URLSearchParams(window.location.search).get("gmail") === "connected" ? { tone: "ok", text: "Google 授权已完成。回到聊天信件卡片，选择新连接的 Gmail 账户即可准备发送。" } : null);
+  const [tab, setTab] = useState<MailTab>("inbox");
+  const [notice, setNotice] = useState<{ tone: "ok" | "error" | "info"; text: string } | null>(null);
 
   const accountsQuery = useQuery({ queryKey: ["mailAccounts"], queryFn: api.mailAccounts, refetchInterval: 30_000 });
   const sourcesQuery = useQuery({ queryKey: ["sources"], queryFn: api.sources, refetchInterval: 20_000 });
@@ -366,7 +365,7 @@ function MailAccounts({
       const result = await api.testMailAccount(account.id);
       onNotice({
         tone: result.ok ? "ok" : "error",
-        text: account.authType === "google-oauth" ? (result.ok ? "Google 授权有效，可发送邮件；未申请读取收件箱权限。" : result.smtp.error ?? "授权不可用，请重新连接 Google。") : `SMTP：${result.smtp.ok ? "可用" : result.smtp.error}；IMAP：${result.imap.ok ? "可用" : result.imap.error}`
+        text: `SMTP：${result.smtp.ok ? "可用" : result.smtp.error}；IMAP：${result.imap.ok ? "可用" : result.imap.error}`
       });
     } catch (error) {
       onNotice({ tone: "error", text: error instanceof Error ? error.message : "测试失败" });
@@ -405,7 +404,6 @@ function MailAccounts({
 
   return (
     <section className="mail-accounts-layout">
-      <GmailConnect />
       <div className="panel mail-account-list">
         <div className="panel-head"><h2>邮件账户</h2><span className="panel-meta">{loading ? "读取中" : `${accounts.length} 个`}</span></div>
         {accounts.length === 0 && <p className="section-empty">还没有账户。</p>}
@@ -415,15 +413,15 @@ function MailAccounts({
               <div><strong>{account.name}</strong><small>{account.fromName} · {account.fromAddress}</small></div>
               <span className="status-chip ok">确认后发送</span>
             </div>
-            {account.authType === "google-oauth" ? <p>Google OAuth · Gmail API · 仅发送</p> : <dl className="mail-account-meta">
+            <dl className="mail-account-meta">
               <div><dt>SMTP</dt><dd>{account.smtp.host}:{account.smtp.port}{account.smtp.secure ? " · TLS" : ""}</dd></div>
               <div><dt>IMAP</dt><dd>{account.imap.host}:{account.imap.port}{account.imap.secure ? " · TLS" : ""}</dd></div>
               <div><dt>密钥</dt><dd>{account.smtp.hasPassword ? account.smtp.passwordMasked : "未设置"}</dd></div>
-            </dl>}
+            </dl>
             <div className="mail-account-actions">
               <button className="ghost-button compact" onClick={() => void test(account)} disabled={busy !== null}>{busy === account.id ? <Loader2 size={13} className="spin" /> : <CheckCircle2 size={13} />} 测试</button>
-              {account.authType !== "google-oauth" && <><button className="ghost-button compact" onClick={() => void sync(account)} disabled={busy !== null}>{busy === account.id ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} />} 同步</button>
-              <button className="ghost-button compact" onClick={() => edit(account)}>编辑</button></>}
+              <button className="ghost-button compact" onClick={() => void sync(account)} disabled={busy !== null}>{busy === account.id ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} />} 同步</button>
+              <button className="ghost-button compact" onClick={() => edit(account)}>编辑</button>
               <button className="ghost-button compact danger" onClick={() => void remove(account)} disabled={busy !== null}><Trash2 size={13} /> 删除</button>
             </div>
           </article>

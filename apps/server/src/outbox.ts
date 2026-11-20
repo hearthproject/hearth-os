@@ -136,7 +136,7 @@ export class OutboxService {
             network: {
               host: smtpAccount.smtp.host,
               ...(smtpAccount.smtp.port ? { port: smtpAccount.smtp.port } : {}),
-              method: smtpAccount.authType === "google-oauth" ? "POST" : "SMTP"
+              method: "SMTP"
             },
             targetRevision: `draft-sha256:${createHash("sha256").update(JSON.stringify({
               draftId: draft.id,
@@ -222,7 +222,7 @@ export class OutboxService {
               cc: draft.cc,
               bcc: draft.bcc,
               attachments: draft.attachments,
-              impact: `会通过 ${smtpAccount.authType === "google-oauth" ? "Gmail API" : "SMTP"} 真实发送给收件人，发送后无法撤回。`,
+              impact: "会通过 SMTP 真实发送给收件人，发送后无法撤回。",
               reversible: false,
               undo: "发送后无法撤回；请在批准前核对收件人和正文。"
             },

@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import nodemailer from "nodemailer";
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
-import { GmailService } from "./gmail.ts";
 import type { HearthStore } from "@hearth/eventlog";
 import type { SecretBox } from "./secrets.ts";
 import type { SourceRegistry } from "./sources.ts";
@@ -59,7 +58,6 @@ export interface MailServerView {
 }
 
 export interface MailAccountView {
-  authType?: "google-oauth";
   id: string;
   name: string;
   fromName: string;
@@ -247,7 +245,6 @@ export class MailAccountStore {
 }
 
 export class EmailService {
-  readonly gmail: GmailService;
   readonly accounts: MailAccountStore;
   private readonly smtpFactory: MailSmtpFactory;
   private readonly imapFactory: MailImapFactory;
@@ -264,7 +261,6 @@ export class EmailService {
     sources?: SourceRegistry;
     now?: () => Date;
   }) {
-    this.gmail = new GmailService(options.store, options.secretBox);
     this.accounts = new MailAccountStore(options.store, options.secretBox);
     this.smtpFactory = options.smtpFactory ?? defaultSmtpFactory;
     this.imapFactory = options.imapFactory ?? defaultImapFactory;
@@ -294,7 +290,6 @@ export class EmailService {
   }
 
   async syncInbox(id: string, limit = 20): Promise<MailSyncResult> {
-    if (id.startsWith("gmail:")) throw new MailError("GMAIL_SEND_ONLY", "Google 连接仅授予发送权限，不读取收件箱。");
     if (!this.sources) throw new MailError("MAIL_SOURCES_UNAVAILABLE", "来源服务尚未启动", 503);
     const account = this.accounts.runtime(id);
     const transport = this.imapFactory(account);
@@ -338,7 +333,7 @@ export class EmailService {
   }
 
   list(): MailAccountView[] {
-    return [...this.gmail.list(), ...this.accounts.views()];
+    return this.accounts.views();
   }
 
   deliveryAccount(id: string): MailAccountView {
@@ -352,25 +347,14 @@ export class EmailService {
   }
 
   update(id: string, input: MailAccountInput): MailAccountView {
-    if (id.startsWith("gmail:")) throw new MailError("GMAIL_RECONNECT_REQUIRED", "Google 账户请使用重新连接更新授权。");
     return viewAccount(this.accounts.update(id, input));
   }
 
   remove(id: string): void {
-    if (id.startsWith("gmail:")) { this.gmail.remove(id); return; }
     this.accounts.remove(id);
   }
 
   async test(id: string): Promise<MailTestResult> {
-    if (id.startsWith("gmail:")) {
-      const started = Date.now();
-      try {
-        await this.gmail.test(id);
-        return { ok: true, smtp: { ok: true, error: null, elapsedMs: Date.now() - started }, imap: { ok: false, error: "未申请收件箱权限", elapsedMs: 0 } };
-      } catch (error) {
-        return { ok: false, smtp: { ok: false, error: error instanceof Error ? error.message : "Google 授权测试失败", elapsedMs: Date.now() - started }, imap: { ok: false, error: "未申请收件箱权限", elapsedMs: 0 } };
-      }
-    }
     const account = this.accounts.runtime(id);
     return this.testRuntime(account);
   }
@@ -382,7 +366,6 @@ export class EmailService {
   }
 
   async send(accountId: string, message: Omit<MailMessage, "from">): Promise<MailSendResult> {
-    if (accountId.startsWith("gmail:")) return this.gmail.send(accountId, message);
     const account = this.accounts.runtime(accountId);
     const transport = this.smtpFactory(account);
     try {

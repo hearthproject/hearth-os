@@ -257,26 +257,6 @@ describe("Mail API", () => {
     }
   });
 
-  it("binds Google callback to a browser cookie and only exempts the exact callback from cross-site blocking", async () => {
-    const server = await app();
-    try {
-      const configured = await server.inject({ method: "PUT", url: "/api/mail/gmail/settings", payload: {
-        clientId: "test.apps.googleusercontent.com", clientSecret: "private-client-secret", redirectUri: "http://127.0.0.1:4317/api/mail/gmail/callback"
-      } });
-      expect(configured.statusCode).toBe(200);
-      expect(configured.body).not.toContain("private-client-secret");
-      const started = await server.inject({ method: "POST", url: "/api/mail/gmail/connect", payload: { returnOrigin: "http://127.0.0.1:5173" } });
-      expect(started.statusCode).toBe(200);
-      expect(started.headers["set-cookie"]).toContain("HttpOnly");
-      const state = new URL(started.json().url).searchParams.get("state");
-      const callback = await server.inject({ method: "GET", url: `/api/mail/gmail/callback?state=${state}&error=access_denied`, headers: { "sec-fetch-site": "cross-site" } });
-      expect(callback.statusCode).toBe(400);
-      expect(callback.body).toContain("会话不匹配");
-      const blocked = await server.inject({ method: "POST", url: "/api/mail/gmail/connect", headers: { "sec-fetch-site": "cross-site" }, payload: { returnOrigin: "http://127.0.0.1:5173" } });
-      expect(blocked.statusCode).toBe(403);
-    } finally { await server.close(); }
-  });
-
   it("rejects incomplete accounts", async () => {
     const server = await app();
     try {
