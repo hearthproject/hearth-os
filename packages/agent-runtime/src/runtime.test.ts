@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { compactAgentMessages, compactAgentMessagesWithSummary } from "./compaction.ts";
 import { runAgent, zeroUsage } from "./runtime.ts";
 import { createBuiltinTools, defaultTaskPermissions } from "./tools.ts";
-import type { AgentCheckpoint, AgentModel, AgentModelTurn, AgentTool, AgentToolCall } from "./types.ts";
+import type { AgentCheckpoint, AgentModel, AgentModelTurn, AgentTool, AgentToolCall, RuntimeEvent } from "./types.ts";
 
 describe("agent runtime", () => {
   const roots: string[] = [];
@@ -372,6 +372,32 @@ describe("agent runtime", () => {
     });
     expect(result.status).toBe("completed");
     expect(attempts).toBe(4);
+  });
+
+  it("returns failed instead of throwing after five transient retries", async () => {
+    const root = workspace(roots);
+    let attempts = 0;
+    const model: AgentModel = async () => {
+      attempts += 1;
+      throw Object.assign(new Error("service unavailable"), { status: 503 });
+    };
+    const events: RuntimeEvent[] = [];
+    const result = await runAgent({
+      model,
+      tools: [],
+      goal: "retry exhaustion",
+      systemPrompt: "system",
+      budget: {},
+      permissions: { tools: [], readRoots: [root], writeRoots: [root], networkHosts: [] },
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      retryDelayMs: 0,
+      onEvent: (event) => { events.push(event); }
+    });
+    expect(result.status).toBe("failed");
+    expect(result.summary).toContain("暂时不可用");
+    expect(attempts).toBe(6);
+    expect(events.some((event) => event.type === "notice" && event.message.includes("连续 5 次"))).toBe(true);
   });
 
   it("does not retry ordinary 4xx model errors", async () => {

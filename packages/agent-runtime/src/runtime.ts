@@ -560,13 +560,17 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
           }
           continue;
         }
-        if (isTransientModelError(error) && transientRetries < 5) {
-          transientRetries += 1;
-          emit({ type: "notice", message: `模型暂时不可用，正在进行第 ${transientRetries} 次重试` });
-          const baseDelay = (options.retryDelayMs ?? 1_000) * 2 ** (transientRetries - 1);
-          const delay = baseDelay * (0.75 + Math.random() * 0.5);
-          if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
-          continue;
+        if (isTransientModelError(error)) {
+          if (transientRetries < 5) {
+            transientRetries += 1;
+            emit({ type: "notice", message: `模型暂时不可用，正在进行第 ${transientRetries} 次重试` });
+            const baseDelay = (options.retryDelayMs ?? 1_000) * 2 ** (transientRetries - 1);
+            const delay = baseDelay * (0.75 + Math.random() * 0.5);
+            if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+            continue;
+          }
+          emit({ type: "notice", message: "模型连续 5 次返回暂时性错误，已停止本次运行。" });
+          return finish("failed", `模型连续多次暂时不可用：${errorMessage(error)}`);
         }
         throw error;
       }
