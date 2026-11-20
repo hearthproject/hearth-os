@@ -390,6 +390,7 @@ export class BackupService {
       live.prepare(
         "INSERT INTO app_meta (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at"
       ).run("schemaVersion", String(CURRENT_SCHEMA_VERSION), this.clock().toISOString());
+      rebuildDerivedIndexes(live);
       live.exec(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION}`);
       live.exec("COMMIT");
     } catch (error) {
@@ -510,8 +511,17 @@ function assertIntegrity(db: DatabaseSync): void {
 }
 
 function listTables(db: DatabaseSync): string[] {
-  return (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+  return (db.prepare("SELECT name FROM pragma_table_list WHERE schema = 'main' AND type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
     .all() as Array<{ name: string }>).map((row) => String(row.name));
+}
+
+function rebuildDerivedIndexes(db: DatabaseSync): void {
+  const hasChunkIndex = db.prepare(
+    "SELECT 1 FROM pragma_table_list WHERE schema = 'main' AND type = 'virtual' AND name = 'context_chunks_fts'"
+  ).get();
+  if (!hasChunkIndex) return;
+  db.exec("DELETE FROM context_chunks_fts");
+  db.exec("INSERT INTO context_chunks_fts (text, node_id, chunk_id) SELECT text, node_id, id FROM context_chunks");
 }
 
 function assertSameColumns(source: DatabaseSync, target: DatabaseSync, table: string): void {
