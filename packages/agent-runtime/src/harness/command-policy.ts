@@ -2,14 +2,20 @@ import { planModeAllowsCommand } from "./plan.ts";
 
 const DESTRUCTIVE = [
   /\brm\s+-[a-z]*r[a-z]*f?[a-z]*\s+(?:--\S+\s+)*(?:\/|~|\*)(?:\s|$)/i,
+  /\bremove-item\b[\s\S]*(?:-recurse|-force)\b/i,
+  /\b(?:rd|rmdir)\s+\/[sq]\b/i,
+  /\bdel\s+\/[a-z]*[fsq][a-z]*\b/i,
+  /\bclear-content\b/i,
   /\bgit\s+reset\s+--hard\b/i,
   /\bgit\s+clean\s+-[a-z]*f[a-z]*d?x?[a-z]*\b/i,
   /\bgit\s+push\b.*--force\b/i,
   /\bmkfs(\.|\s)/i,
   /\bdd\s+if=/i,
-  /\bshutdown\b|\breboot\b/i,
-  /\bformat\s+[a-z]:/i,
-  /\bdiskpart\b/i
+  /\bshutdown\b|\breboot\b|\bstop-computer\b|\brestart-computer\b/i,
+  /\bformat\s+[a-z]:|\bformat-volume\b/i,
+  /\bdiskpart\b|\bclear-disk\b|\binitialize-disk\b|\bremove-partition\b/i,
+  /\bbcdedit\b|\bvssadmin\s+delete\b|\btakeown\b|\bicacls\b|\breg\s+delete\b|\bschtasks\s+\/delete\b/i,
+  /\btaskkill\b[\s\S]*\/f\b[\s\S]*\/im\b/i
 ];
 
 const SENSITIVE = [
@@ -29,7 +35,7 @@ export function commandPolicyIssue(command: string, options: { fullAccess?: bool
   const trimmed = command.trim();
   if (!trimmed) return "命令为空。";
   for (const pattern of DESTRUCTIVE) {
-    if (pattern.test(trimmed)) return `拒绝执行破坏性命令：${trimmed.slice(0, 120)}。如确需执行，请由用户在审批中明确允许。`;
+    if (pattern.test(trimmed)) return `拒绝执行破坏性命令：${trimmed.slice(0, 120)}。如确需执行，请调整任务范围或项目配置。`;
   }
   if (options.planMode) {
     if (!planModeAllowsCommand(trimmed)) {
@@ -39,7 +45,7 @@ export function commandPolicyIssue(command: string, options: { fullAccess?: bool
   }
   if (!options.fullAccess) {
     for (const pattern of SENSITIVE) {
-      if (pattern.test(trimmed)) return `命令需要用户明确批准：${trimmed.slice(0, 120)}。当前模式不允许自动执行。`;
+      if (pattern.test(trimmed)) return `当前模式不允许自动执行敏感命令：${trimmed.slice(0, 120)}。请调整任务范围或项目配置。`;
     }
   }
   const pipedShell = /\b(curl|wget)\b[^|]*\|\s*(sh|bash|zsh|pwsh|powershell)\b/i.exec(trimmed);

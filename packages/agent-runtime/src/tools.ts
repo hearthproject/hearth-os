@@ -745,33 +745,53 @@ const shellTool: AgentTool = {
     assertReadable(cwd, context.permissions.readRoots);
     const env = stringRecord(args.env);
     const stdin = optionalStringArg(args, "stdin");
+    const sandbox = context.sandbox;
+    const unsafeNoSandbox = !sandbox && context.permissions.sandboxMode === "danger-full-access";
+    if (!sandbox && !unsafeNoSandbox) throw new Error("native shell 缺少沙箱配置；请检查任务执行策略");
+    const shellOptions = {
+      command,
+      cwd,
+      outDir: context.outDir,
+      ...(env ? { env } : {}),
+      ...(stdin !== undefined ? { stdin } : {}),
+      ...(sandbox ? { sandbox } : {}),
+      ...(unsafeNoSandbox ? { unsafeNoSandbox: true } : {})
+    };
     if (args.background === true) {
-      const started = startShellSession({ command, cwd, outDir: context.outDir, ...(env ? { env } : {}), ...(stdin !== undefined ? { stdin } : {}) });
+      const started = await startShellSession(shellOptions);
       recordCommand(context.state, command, null, isTestCommand(command));
       return {
-        content: `已在后台启动：${command}\nsessionId=${started.sessionId}\noutput=${started.outputPath}`,
-        metadata: { sessionId: started.sessionId, background: true, fullOutputPath: started.outputPath }
+        content: `已在后台启动：${command}\nsessionId=${started.sessionId}\noutput=${started.outputPath}${started.sandbox ? `\nsandbox=${started.sandbox.backend}/${started.sandbox.enforcement}` : ""}`,
+        metadata: { sessionId: started.sessionId, background: true, fullOutputPath: started.outputPath, ...(started.sandbox ? { sandbox: started.sandbox } : {}) }
       };
     }
     const timeoutMs = Math.min(10 * 60_000, Math.max(1_000, intArg(args, "timeoutMs", 120_000)));
     const yieldMs = Math.min(timeoutMs, Math.max(0, intArg(args, "yieldMs", timeoutMs)));
-    const result = await runShellSession({ command, cwd, outDir: context.outDir, timeoutMs: yieldMs, ...(env ? { env } : {}), ...(stdin !== undefined ? { stdin } : {}) });
+    const result = await runShellSession({ ...shellOptions, timeoutMs: yieldMs });
     recordCommand(context.state, command, result.exitCode, isTestCommand(command));
     const truncated = truncateToolOutput(result.output, { maxChars: MAX_SHELL_OUTPUT_CHARS, maxLines: 240, label: "use shell_output or a narrower command" });
     const fullPath = truncated.truncated ? result.outputPath : undefined;
     const status = result.running
       ? `still running in background (session ${result.sessionId}); use shell_output to inspect, shell_kill to stop`
       : `exit ${result.exitCode ?? "unknown"}`;
+    const sandboxFailure = result.sandboxFailure;
+    const failureNote = sandboxFailure === "denied"
+      ? "\n\n[SANDBOX_DENIED] 路径不在任务写入范围；请调整项目/任务范围后重新发起任务，不要重试该命令。"
+      : sandboxFailure === "runner_failure"
+        ? "\n\n[SANDBOX_UNAVAILABLE] Windows ACL runner 失败；任务需要重新发起或检查打包资源。"
+        : "";
     return {
-      content: `$ ${command}\n${status} (${result.durationMs}ms)\n\n${truncated.content}${fullPath ? `\n\n[full output: ${fullPath.replace(/\\/g, "/")}]` : ""}`,
-      isError: result.running ? false : result.exitCode !== 0,
+      content: `$ ${command}\n${status} (${result.durationMs}ms)\n\n${truncated.content}${failureNote}${fullPath ? `\n\n[full output: ${fullPath.replace(/\\/g, "/")}]` : ""}`,
+      isError: result.running ? false : result.exitCode !== 0 || sandboxFailure !== null,
       metadata: {
         exitCode: result.exitCode,
         durationMs: result.durationMs,
         sessionId: result.sessionId,
         background: result.running,
         truncated: truncated.truncated,
-        ...(fullPath ? { fullOutputPath: fullPath } : {})
+        ...(fullPath ? { fullOutputPath: fullPath } : {}),
+        ...(result.sandbox ? { sandbox: result.sandbox } : {}),
+        ...(sandboxFailure ? { sandboxFailure } : {})
       }
     };
   }
@@ -832,9 +852,15 @@ const shellWaitTool: AgentTool = {
       ? result.matched ? "running (match found)" : `running (timeout after ${timeoutSeconds}s)`
       : `exit ${result.exitCode ?? "unknown"}`;
     const truncated = truncateToolOutput(result.output, { maxChars: MAX_SHELL_OUTPUT_CHARS, maxLines: 240, label: "use shell_output for the full buffer" });
+    const failureNote = result.sandboxFailure === "denied"
+      ? "\n\n[SANDBOX_DENIED] 路径不在任务写入范围；不要重试该命令。"
+      : result.sandboxFailure === "runner_failure"
+        ? "\n\n[SANDBOX_UNAVAILABLE] Windows ACL runner 失败。"
+        : "";
     return {
-      content: `session ${sessionId}: ${status}\n\n${truncated.content}`,
-      metadata: { sessionId, background: result.running, exitCode: result.exitCode, truncated: truncated.truncated, matched: result.matched, timedOut: result.timedOut, ...(result.outputPath ? { fullOutputPath: result.outputPath } : {}) }
+      content: `session ${sessionId}: ${status}\n\n${truncated.content}${failureNote}`,
+      isError: result.sandboxFailure !== null || (!result.running && result.exitCode !== 0),
+      metadata: { sessionId, background: result.running, exitCode: result.exitCode, truncated: truncated.truncated, matched: result.matched, timedOut: result.timedOut, ...(result.sandbox ? { sandbox: result.sandbox } : {}), ...(result.sandboxFailure ? { sandboxFailure: result.sandboxFailure } : {}), ...(result.outputPath ? { fullOutputPath: result.outputPath } : {}) }
     };
   }
 };

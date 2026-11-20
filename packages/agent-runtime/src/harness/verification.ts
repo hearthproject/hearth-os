@@ -130,7 +130,14 @@ export function gitChangedFiles(root: string): { isRepository: boolean; files: s
 }
 
 async function runVerificationCommand(command: string, context: AgentToolContext, timeoutMs: number, kind: "test" | "check", label?: string): Promise<AgentToolResult> {
-  const run = await runShellSession({ command, cwd: context.workspaceRoot, outDir: context.outDir, timeoutMs });
+  const run = await runShellSession({
+    command,
+    cwd: context.workspaceRoot,
+    outDir: context.outDir,
+    timeoutMs,
+    ...(context.sandbox ? { sandbox: context.sandbox } : {}),
+    ...(!context.sandbox && context.permissions.sandboxMode === "danger-full-access" ? { unsafeNoSandbox: true } : {})
+  });
   const output = run.output.trim();
   const failed = run.running || run.exitCode !== 0;
   recordCommand(context.state, command, run.exitCode, kind === "test");

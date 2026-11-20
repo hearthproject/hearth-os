@@ -19,6 +19,7 @@ export * from "./harness/verification.ts";
 export * from "./harness/plan.ts";
 export * from "./harness/snapshots.ts";
 export * from "./harness/command-policy.ts";
+export * from "./harness/sandbox.ts";
 export * from "./harness/checkpoint-state.ts";
 export * from "./harness/agent-profiles.ts";
 export * from "./harness/goal.ts";
