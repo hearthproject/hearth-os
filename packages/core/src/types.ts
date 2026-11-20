@@ -2474,3 +2474,240 @@ export interface ContextDeleteReceipt {
   deletedHandoffs: number;
   createdAt: string;
 }
+
+// Library //////////////////////////////////////////////////////////////////
+
+export const LIBRARY_NODE_KINDS = [
+  "root",
+  "memory",
+  "task",
+  "source",
+  "artifact",
+  "file",
+  "folder",
+  "skill",
+  "project"
+] as const;
+export type LibraryNodeKind = (typeof LIBRARY_NODE_KINDS)[number];
+
+export const LIBRARY_NODE_STATUSES = ["ready", "indexing", "stale", "error", "trashed", "blocked"] as const;
+export type LibraryNodeStatus = (typeof LIBRARY_NODE_STATUSES)[number];
+
+export interface LibraryNode {
+  id: string;
+  ref: string;
+  kind: LibraryNodeKind;
+  refId: string;
+  parentId: string | null;
+  path: string;
+  title: string;
+  projectId: string | null;
+  mimeType: string | null;
+  sizeBytes: number | null;
+  contentHash: string | null;
+  status: LibraryNodeStatus;
+  sensitivity: ContextSensitivity;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  trashedAt: string | null;
+}
+
+export interface LibraryTreeNode extends LibraryNode {
+  childCount: number;
+  summary: string | null;
+  children?: LibraryTreeNode[];
+}
+
+export interface LibrarySearchHit {
+  node: LibraryNode;
+  score: number;
+  snippet: string;
+  matchedBy: "like" | "fts" | "vector" | "hybrid";
+}
+
+export interface LibrarySearchResult {
+  query: string;
+  hits: LibrarySearchHit[];
+  total: number;
+  semanticUsed: boolean;
+  tookMs: number;
+}
+
+export interface LibraryRoot {
+  id: string;
+  path: string;
+  kind: "file" | "folder";
+  projectId: string | null;
+  recursive: boolean;
+  includeGlobs: string[];
+  excludeGlobs: string[];
+  lastScanAt: string | null;
+  status: "ready" | "scanning" | "error";
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LibraryTrashEntry {
+  id: string;
+  nodeId: string;
+  ref: string;
+  kind: LibraryNodeKind;
+  title: string;
+  path: string;
+  snapshot: Record<string, unknown> | null;
+  deletedAt: string;
+  expiresAt: string;
+  restoredAt: string | null;
+}
+
+export interface LibrarySettings {
+  semanticEnabled: boolean;
+  modelId: string;
+  modelVersion: string;
+  dailySummaryTokens: number;
+  summaryTokensUsedToday: number;
+  maxFileBytes: number;
+  maxChunksPerNode: number;
+  includeGlobs: string[];
+  excludeGlobs: string[];
+  updatedAt: string | null;
+}
+
+export interface LibrarySettingsPatch {
+  semanticEnabled?: boolean | undefined;
+  modelId?: string | undefined;
+  modelVersion?: string | undefined;
+  dailySummaryTokens?: number | undefined;
+  maxFileBytes?: number | undefined;
+  maxChunksPerNode?: number | undefined;
+  includeGlobs?: string[] | undefined;
+  excludeGlobs?: string[] | undefined;
+}
+
+export interface LibraryStatus {
+  nodeCount: number;
+  chunkCount: number;
+  indexedCount: number;
+  pendingJobs: number;
+  semanticReady: boolean;
+  semanticEnabled: boolean;
+  modelId: string;
+  modelState: "missing" | "downloading" | "ready" | "error";
+  modelDownloadProgress: number | null;
+  lastIndexAt: string | null;
+  summaryTokensUsedToday: number;
+}
+
+export interface LibraryNodeInput {
+  path: string;
+  kind: "file" | "folder";
+  projectId?: string | null;
+  recursive?: boolean;
+  includeGlobs?: string[];
+  excludeGlobs?: string[];
+}
+
+// Skill ////////////////////////////////////////////////////////////////////
+
+export interface SkillActionPermission {
+  network: boolean;
+  readRoots: string[];
+  writeRoots: string[];
+  env: string[];
+  timeoutMs: number;
+}
+
+export interface SkillActionDefinition {
+  name: string;
+  description: string;
+  runtime: "python" | "node" | "shell";
+  command: string[];
+  inputSchema: Record<string, unknown>;
+  outputSchema: Record<string, unknown> | null;
+  permissions: SkillActionPermission;
+}
+
+export interface HearthSkillManifest {
+  schemaVersion: 1;
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  entry: string | null;
+  runtime: "python" | "node" | "shell" | null;
+  actions: SkillActionDefinition[];
+  dependencies: {
+    python: string[];
+    node: string[];
+  };
+}
+
+export interface SkillInstallSource {
+  kind: "github" | "local";
+  url: string | null;
+  path: string | null;
+  ref: string | null;
+}
+
+export interface SkillView extends SkillRecord {
+  readOnly: boolean;
+  sourceUrl: string | null;
+  sourceRef: string | null;
+  actions: SkillActionDefinition[];
+}
+
+export interface SkillRunInput {
+  skillId: string;
+  action: string;
+  input: Record<string, unknown>;
+  taskId: string | null;
+  runId: string | null;
+}
+
+export interface SkillRunResult {
+  skillId: string;
+  action: string;
+  status: "completed" | "failed";
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  structured: unknown | null;
+  durationMs: number;
+}
+
+// Approval /////////////////////////////////////////////////////////////////
+
+export const ACTION_CLASSES = [
+  "local_read",
+  "local_write",
+  "local_delete",
+  "local_exec",
+  "browser_read",
+  "desktop",
+  "external_read",
+  "external_write",
+  "skill_install",
+  "skill_update",
+  "unknown"
+] as const;
+export type ActionClass = (typeof ACTION_CLASSES)[number];
+
+export interface ActionClassification {
+  actionClass: ActionClass;
+  service: string;
+  action: string;
+  summary: string;
+  requiresApproval: boolean;
+}
+
+export interface ApprovalGrant {
+  id: string;
+  service: string;
+  action: string;
+  scope: Record<string, unknown>;
+  createdAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+}
