@@ -44,29 +44,46 @@ export interface GitEnvironment {
   branch: string | null;
   dirty: boolean;
   changedFiles: number;
+  headSha?: string | null;
+  headSubject?: string | null;
+  defaultBranch?: string | null;
+  recentCommits?: string[];
+  userName?: string | null;
 }
 
 export function readGitEnvironment(cwd: string): GitEnvironment {
+  const root = gitOutput(cwd, ["rev-parse", "--show-toplevel"]);
+  if (!root) return { isRepository: false, root: null, branch: null, dirty: false, changedFiles: 0 };
+  const branch = gitOutput(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
+  const status = gitOutput(cwd, ["status", "--porcelain", "--untracked-files=no"]) ?? "";
+  const changedFiles = status.split(/\r?\n/).filter(Boolean).length;
+  const log = gitOutput(cwd, ["log", "-5", "--format=%h%x09%s"]) ?? "";
+  const recentCommits = log.split(/\r?\n/).filter(Boolean);
+  const head = recentCommits[0]?.split("\t") ?? [];
+  const remoteHead = gitOutput(cwd, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
+  return {
+    isRepository: true,
+    root,
+    branch: branch || null,
+    dirty: changedFiles > 0,
+    changedFiles,
+    headSha: head[0] ?? null,
+    headSubject: head.slice(1).join("\t") || null,
+    defaultBranch: remoteHead ? remoteHead.replace(/^origin\//, "") : null,
+    recentCommits,
+    userName: gitOutput(cwd, ["config", "user.name"])
+  };
+}
+
+function gitOutput(cwd: string, args: string[]): string | null {
   try {
-    const root = execFileSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], {
+    return execFileSync("git", ["-C", cwd, ...args], {
       encoding: "utf8",
       timeout: 2_000,
       stdio: ["ignore", "pipe", "ignore"]
-    }).trim();
-    const branch = execFileSync("git", ["-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"], {
-      encoding: "utf8",
-      timeout: 2_000,
-      stdio: ["ignore", "pipe", "ignore"]
-    }).trim();
-    const status = execFileSync("git", ["-C", cwd, "status", "--porcelain", "--untracked-files=no"], {
-      encoding: "utf8",
-      timeout: 2_000,
-      stdio: ["ignore", "pipe", "ignore"]
-    });
-    const changedFiles = status.split(/\r?\n/).filter(Boolean).length;
-    return { isRepository: true, root, branch: branch || null, dirty: changedFiles > 0, changedFiles };
+    }).trim() || null;
   } catch {
-    return { isRepository: false, root: null, branch: null, dirty: false, changedFiles: 0 };
+    return null;
   }
 }
 
@@ -91,6 +108,16 @@ export function environmentBlock(input: {
     `profile: ${input.profile}`,
     `mode: ${input.mode}`,
     `git: ${git.isRepository ? `branch=${git.branch ?? "detached"}, dirty=${git.dirty}, changed_files=${git.changedFiles}` : "not_a_repository"}`,
+    ...(git.isRepository && git.headSha
+      ? [
+          `git_head: ${git.headSha}${git.headSubject ? ` ${git.headSubject}` : ""}`,
+          ...(git.defaultBranch ? [`git_default_branch: ${git.defaultBranch}`] : []),
+          ...(git.userName ? [`git_user: ${git.userName}`] : []),
+          ...(git.recentCommits && git.recentCommits.length > 0
+            ? ["git_recent:", ...git.recentCommits.map((commit) => `- ${commit}`)]
+            : [])
+        ]
+      : []),
     ...(input.project ? [`project: ${input.project}`] : []),
     ...(input.permissions
       ? [`network: ${input.permissions.network.length ? input.permissions.network.join(",") : "disabled"}`, `write_roots: ${input.permissions.writeRoots.join(", ")}`]

@@ -12,6 +12,7 @@ import { commandPolicyIssue } from "./command-policy.ts";
 import { codingSystemPrompt } from "./prompt.ts";
 import { redactSecrets } from "./tool-output.ts";
 import { detectProjectProfile } from "./project-profile.ts";
+import { environmentBlock } from "./environment.ts";
 import { runShellSession, startShellSession, shellOutput, killShellSession } from "./shell-session.ts";
 import { defaultTaskPermissions } from "../tools.ts";
 import type { AgentMessage, AgentToolContext } from "../types.ts";
@@ -178,6 +179,33 @@ describe("todo and command policy", () => {
 });
 
 describe("prompt tool contract", () => {
+  it("includes repository head, default branch, user and recent commits", () => {
+    const block = environmentBlock({
+      cwd: "D:/work",
+      outDir: "D:/work/out",
+      profile: "coding",
+      mode: "build",
+      git: {
+        isRepository: true,
+        root: "D:/work",
+        branch: "feature/runtime",
+        dirty: true,
+        changedFiles: 3,
+        headSha: "abc1234",
+        headSubject: "feat(runtime): add checkpoint state",
+        defaultBranch: "main",
+        recentCommits: ["abc1234 feat(runtime): add checkpoint state", "def5678 docs: update plan"],
+        userName: "Jason"
+      }
+    });
+    expect(block).toContain("git: branch=feature/runtime, dirty=true, changed_files=3");
+    expect(block).toContain("git_head: abc1234 feat(runtime): add checkpoint state");
+    expect(block).toContain("git_default_branch: main");
+    expect(block).toContain("git_user: Jason");
+    expect(block).toContain("git_recent:");
+    expect(block).toContain("- def5678 docs: update plan");
+  });
+
   it("lists only callable tools and omits unavailable ones", () => {
     const root = workspace();
     const prompt = codingSystemPrompt({
