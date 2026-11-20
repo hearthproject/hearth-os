@@ -64,6 +64,7 @@ import { createBuiltinTools } from "@hearth/agent-runtime";
 import { SecretBox } from "./secrets.ts";
 import { LibraryService } from "./library/service.ts";
 import { registerLibraryRoutes } from "./library/routes.ts";
+import { registerApprovalGrantRoutes } from "./approval-grant-routes.ts";
 import { SkillService } from "./skills/service.ts";
 import { registerSkillRoutes } from "./skills/routes.ts";
 import { LocalEmbeddingProvider, type EmbeddingProvider } from "./library/embedding.ts";
@@ -959,6 +960,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
   registerLibraryRoutes(app, library);
   registerSkillRoutes(app, skills, library);
+  registerApprovalGrantRoutes(app, approvals.grants);
   library.start();
   app.addHook("onClose", async () => {
     library.stop();

@@ -58,11 +58,13 @@ describe("native MCP tools", () => {
     expect(() => createMcpTools(fakeProvider([duplicate, duplicate]))).toThrow(/名称冲突/);
   });
 
-  it("parses names containing underscores and marks MCP calls for approval", () => {
+  it("parses names containing underscores and only gates unknown or write-like MCP calls", () => {
     expect(mcpToolName("mcp_one", "read__thing")).toBe("mcp__mcp_one__read__thing");
     expect(parseMcpToolName("mcp__mcp_one__read__thing")).toEqual({ serverId: "mcp_one", toolName: "read__thing" });
     expect(parseMcpToolName("mcp__broken")).toBeNull();
-    expect(requiresToolApproval("mcp__mcp_one__read__thing")).toBe(true);
+    expect(requiresToolApproval("mcp__mcp_one__read__thing")).toBe(false);
+    expect(requiresToolApproval("mcp__mcp_one__send__thing")).toBe(true);
+    expect(requiresToolApproval("mcp__hearth__library_search")).toBe(false);
     expect(toolApprovalSummary("mcp__mcp_one__read__thing", {})).toContain("mcp_one/read__thing");
   });
 });

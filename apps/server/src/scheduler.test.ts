@@ -1399,7 +1399,7 @@ describe("Hearth scheduler", () => {
     expect(checkpoint?.proof?.workspaceDigest).toMatch(/^[a-f0-9]{64}$/);
   });
 
-  it("pauses a native task for sensitive tool approval and continues after approval", async () => {
+  it("runs a native local write without waiting for approval", async () => {
     const service = setup();
     const modelSettingsPath = configureModel();
     const approvals = new ApprovalManager(service, async () => ({}));
@@ -1420,20 +1420,14 @@ describe("Hearth scheduler", () => {
     scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath, approvals });
     scheduler.start();
 
-    const task = service.createTask({ title: "工具审批", goal: "写入结果", executorId: "native", expectedOutputs: ["result.md"] });
-    await waitForStatus(service, task.id, "waiting_approval");
-    const pending = store?.listApprovals(task.id).find((approval) => approval.status === "pending");
-    expect(pending?.kind).toBe("tool.write_file");
-    expect(pending?.actionDigest).toMatch(/^[a-f0-9]{64}$/);
-    expect(pending?.action).toMatchObject({ resolvedAction: { kind: "file_write", permissionMode: "guarded" } });
-
-    await approvals.decide(pending!.id, "approve", pending!.parameterHash);
+    const task = service.createTask({ title: "本地写入", goal: "写入结果", executorId: "native", expectedOutputs: ["result.md"] });
     const completed = await waitForStatus(service, task.id, "completed");
     expect(authorization).toEqual({ allowed: true });
+    expect(store?.listApprovals(task.id)).toHaveLength(0);
     expect(completed.resultSummary).toBe("原生任务完成");
   });
 
-  it("auto-approves a sensitive shell tool in full permission mode without a pending approval", async () => {
+  it("runs a native shell tool without a pending approval", async () => {
     const service = setup();
     const modelSettingsPath = configureModel();
     const approvals = new ApprovalManager(service, async () => ({}));
@@ -1454,8 +1448,7 @@ describe("Hearth scheduler", () => {
     scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath, approvals });
     scheduler.start();
 
-    const conversation = fullConversation();
-    const task = service.createTask({ title: "完全权限工具", goal: "运行检查", executorId: "native", expectedOutputs: ["result.md"], conversationId: conversation.id });
+    const task = service.createTask({ title: "本地命令", goal: "运行检查", executorId: "native", expectedOutputs: ["result.md"] });
     const completed = await waitForStatus(service, task.id, "completed");
     expect(authorization).toEqual({ allowed: true });
     expect(store?.listApprovals(task.id)).toHaveLength(0);
@@ -1531,10 +1524,11 @@ describe("Hearth scheduler", () => {
     expect(seen.join("\n")).toContain("echo:two");
   }, 20_000);
 
-  it("auto-approves MCP calls only in full permission mode and audits the action", async () => {
+  it("still asks before an unknown MCP tool in full permission mode", async () => {
     const service = setup();
     const modelSettingsPath = configureModel();
     const conversation = fullConversation();
+    const approvals = new ApprovalManager(service, async () => ({}));
     const secretBox = new SecretBox(randomBytes(32));
     const mcpServers = new McpServerService({ store: store as HearthStore, secretBox, timeoutMs: 3_000 });
     const mcp = await mcpServers.create({ name: "Full Mock", command: process.execPath, args: [MOCK_MCP_SERVER] });
@@ -1562,7 +1556,7 @@ describe("Hearth scheduler", () => {
       writeFileSync(join(options.prepared.outDir, "result.md"), "# 完全权限 MCP\n");
       return nativeResult("完全权限 MCP 完成");
     };
-    scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath, mcpServers });
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath, mcpServers, approvals });
     scheduler.start();
 
     const task = service.createTask({
@@ -1572,19 +1566,17 @@ describe("Hearth scheduler", () => {
       expectedOutputs: ["result.md"],
       conversationId: conversation.id
     });
+    await waitForStatus(service, task.id, "waiting_approval");
+    const pending = store?.listApprovals(task.id).find((approval) => approval.status === "pending");
+    expect(pending?.kind).toBe(`tool.mcp__${mcp.id}__echo`);
+    await approvals.decide(pending!.id, "approve", pending!.parameterHash);
     await waitForStatus(service, task.id, "completed");
     expect(authorization).toEqual({ allowed: true });
     expect(output).toContain("echo:full");
-    expect(store?.listApprovals(task.id)).toHaveLength(0);
-    const audit = store?.listEvents(0, task.id).find((event) => event.type === "approval.auto_approved");
-    expect(audit?.payload).toMatchObject({
-      toolName: `mcp__${mcp.id}__echo`,
-      actionKind: "mcp",
-      permissionMode: "full"
-    });
+    expect(store?.listApprovals(task.id).filter((approval) => approval.status === "pending")).toHaveLength(0);
   }, 20_000);
 
-  it("bridges a DeepSeek Harness approval request and resumes with allowed-once", async () => {
+  it("allows a local DeepSeek Harness tool without approval", async () => {
     const service = setup();
     const approvals = new ApprovalManager(service, async () => ({}));
     let outcome: DshApprovalOutcome | null = null;
@@ -1609,20 +1601,10 @@ describe("Hearth scheduler", () => {
     });
     scheduler.start();
 
-    const task = service.createTask({ title: "DSH 工具审批", goal: "运行测试", executorId: "deepseek-harness", expectedOutputs: ["result.md"] });
-    await waitForStatus(service, task.id, "waiting_approval");
-    const pending = store?.listApprovals(task.id).find((approval) => approval.status === "pending");
-    expect(pending?.kind).toBe("tool.shell");
-    expect(pending?.target).toMatchObject({
-      provider: "deepseek-harness",
-      sessionId: "dsh-session",
-      toolName: "shell",
-      callId: "call-dsh-shell"
-    });
-
-    await approvals.decide(pending!.id, "approve", pending!.parameterHash);
+    const task = service.createTask({ title: "DSH 本地工具", goal: "运行测试", executorId: "deepseek-harness", expectedOutputs: ["result.md"] });
     const completed = await waitForStatus(service, task.id, "completed");
     expect(outcome).toBe("allowed-once");
+    expect(store?.listApprovals(task.id)).toHaveLength(0);
     expect(completed.resultSummary).toBe("DeepSeek Harness 任务完成");
   });
 
@@ -1633,7 +1615,7 @@ describe("Hearth scheduler", () => {
     const deepseekRunner = async (options: DeepSeekHarnessRunOptions): Promise<DeepSeekHarnessRunResult> => {
       outcome = await options.onApprovalRequest?.({
         sessionId: "dsh-session",
-        toolName: "write_file",
+        toolName: "browser_submit",
         callId: "call-dsh-write"
       }) ?? null;
       writeFileSync(join(options.outDir, "result.md"), "# 跳过写入\n");
@@ -1671,7 +1653,7 @@ describe("Hearth scheduler", () => {
     const deepseekRunner = async (options: DeepSeekHarnessRunOptions): Promise<DeepSeekHarnessRunResult> => {
       outcome = await options.onApprovalRequest?.({
         sessionId: "dsh-session",
-        toolName: "shell",
+        toolName: "browser_submit",
         callId: "call-dsh-cancel"
       }) ?? null;
       if (outcome === "cancelled") resolveCancelled?.();

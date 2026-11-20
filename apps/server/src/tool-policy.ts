@@ -1,17 +1,4 @@
-export const TOOL_APPROVAL_REQUIRED = new Set([
-  "write_file",
-  "write_spreadsheet",
-  "write_document",
-  "edit_file",
-  "apply_patch",
-  "shell",
-  "fetch_url",
-  "capture_screen",
-  "browser_open",
-  "browser_submit",
-  "browser_upload",
-  "browser_recipe"
-]);
+import { classifyTool } from "./action-policy.ts";
 
 export const BACKGROUND_READ_ONLY_TOOLS = new Set([
   "read_file",
@@ -20,7 +7,7 @@ export const BACKGROUND_READ_ONLY_TOOLS = new Set([
 ]);
 
 export function requiresToolApproval(toolName: string): boolean {
-  return TOOL_APPROVAL_REQUIRED.has(toolName) || toolName.startsWith("mcp__");
+  return classifyTool(toolName).requiresApproval;
 }
 
 export function isBackgroundToolReadOnly(toolName: string): boolean {
@@ -43,6 +30,7 @@ export function toolApprovalSummary(toolName: string, value: unknown): string {
   if (toolName === "browser_open") return `打开网页：${clipText(url ?? "未指定网址", 200)}`;
   if (toolName === "browser_submit") return `提交网页表单：${clipText(url ?? "当前页面", 200)}`;
   if (toolName === "browser_upload") return `上传文件到网页：${clipText(url ?? "当前页面", 200)}`;
+  if (toolName === "browser_download") return `从网页下载文件：${clipText(url ?? "当前页面", 200)}`;
   if (toolName === "browser_recipe") return `回放网页流程：${clipText(url ?? "已记录站点", 200)}`;
   if (toolName === "capture_screen") return `截取桌面画面：${path ?? "desktop.png"}`;
   if (mcp) return `调用 MCP 工具：${mcp.serverId}/${mcp.toolName}`;

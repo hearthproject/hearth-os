@@ -297,7 +297,6 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     if (parsed.data.title) conversation = store.renameConversation(request.params.id, parsed.data.title) ?? conversation;
     if (parsed.data.settings) conversation = store.updateConversationSettings(request.params.id, parsed.data.settings) ?? conversation;
     if (parsed.data.settings?.approvalMode === "full") {
-      await options.approvals?.approvePendingForConversation(request.params.id);
       const resumable = store.listTasks().filter((task) =>
         task.conversationId === request.params.id
         && task.status === "waiting_input"

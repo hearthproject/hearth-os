@@ -268,7 +268,8 @@ export class OutboxService {
         submittedAt: now,
         updatedAt: now
       });
-      return { draft: submitted, approval, task: this.service.requireTask(task.id) };
+      const reconciled = approval.status === "pending" ? submitted : this.reconcileApproval(approval.id) ?? submitted;
+      return { draft: reconciled, approval, task: this.service.requireTask(task.id) };
     } catch (error) {
       const latestTask = this.service.store.getTask(task.id);
       if (latestTask && latestTask.status !== "cancelled" && latestTask.status !== "completed") {

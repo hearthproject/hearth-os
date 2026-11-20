@@ -36,7 +36,7 @@ describe("outbox service", () => {
     expect(() => outbox.update(draft.id, { body: "Nope" })).toThrowError(expect.objectContaining({ code: "OUTBOX_DRAFT_LOCKED" }));
   });
 
-  it("creates one short-lived approval and a cancelled integrity task on rejection", async () => {
+  it("writes a local outbox draft immediately without asking for approval", async () => {
     const draft = outbox.create({
       account: "local-test",
       to: ["reviewer@example.test"],
@@ -45,24 +45,19 @@ describe("outbox service", () => {
     });
 
     const submitted = await outbox.submit(draft.id);
-    expect(submitted.draft.status).toBe("pending_approval");
+    expect(submitted.draft.status).toBe("stored");
     expect(submitted.approval.kind).toBe("outbox.local-write");
+    expect(submitted.approval.status).toBe("consumed");
     expect(submitted.approval.target.draftId).toBe(draft.id);
     expect(submitted.approval.preview.delivery).toBeUndefined();
     expect(submitted.approval.preview.impact).toContain("不会发送");
     const ttl = Date.parse(submitted.approval.expiresAt) - Date.now();
     expect(ttl).toBeGreaterThan(0);
     expect(ttl).toBeLessThanOrEqual(10 * 60 * 1000);
-    expect(service.requireTask(submitted.task.id).status).toBe("waiting_approval");
-
-    const decision = await approvals.decide(submitted.approval.id, "reject", submitted.approval.parameterHash);
-    const reconciled = outbox.reconcileApproval(decision.approval.id);
-    expect(reconciled?.status).toBe("rejected");
-    expect(decision.effect).toBeNull();
-
-    const editable = outbox.update(draft.id, { body: "A revised draft" });
-    expect(editable.status).toBe("draft");
-    expect(editable.approvalId).toBeNull();
+    expect(service.requireTask(submitted.task.id).status).toBe("completed");
+    expect(outbox.reconcileApproval(submitted.approval.id)?.status).toBe("stored");
+    expect(() => outbox.update(draft.id, { body: "A revised draft" }))
+      .toThrowError(expect.objectContaining({ code: "OUTBOX_DRAFT_LOCKED" }));
   });
 
 

@@ -4007,6 +4007,7 @@ export class HearthStore {
       case "task.budget.extended":
       case "approval.expired":
       case "approval.auto_approved":
+      case "approval.grant.created":
       case "approval.rejected":
       case "approval.policy_denied":
       case "approval.revalidation_failed":

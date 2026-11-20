@@ -91,22 +91,14 @@ describe("approval ticket v2", () => {
       sessionRoot: root
     });
     const task = service.createTask({ title: "Publish PR", goal: "Publish a reviewed pull request" });
-    const runId = createRun(service, task.id, "running");
+    const runId = createRun(service, task.id);
     const manager = new ApprovalManager(service, async () => ({}));
-    const pending = await manager.requestTool({
-      taskId: task.id,
-      runId,
-      toolName: "shell",
-      summary: action.summary,
-      target: { tool: "shell" },
-      preview: { command: action.preview },
-      action
-    });
+    const pending = createPendingActionApproval(service, task.id, runId, action, "shell");
 
     writeFileSync(executable, `${process.platform === "win32" ? "@echo off\r\n" : "#!/bin/sh\n"}echo changed\n`, "utf8");
-    await expect(manager.decide(pending.approval.id, "approve", pending.approval.parameterHash))
+    await expect(manager.decide(pending.id, "approve", pending.parameterHash))
       .rejects.toMatchObject({ code: "ACTION_CHANGED" });
-    expect(store.getApproval(pending.approval.id)?.status).toBe("revoked");
+    expect(store.getApproval(pending.id)?.status).toBe("revoked");
     expect(store.listEvents().some((event) => event.type === "approval.revalidation_failed")).toBe(true);
   });
 
@@ -149,10 +141,10 @@ describe("approval ticket v2", () => {
       const pending = await manager.requestTool({
         taskId: task.id,
         runId,
-        toolName: "shell",
-        summary: "运行命令",
-        target: { tool: "shell" },
-        preview: { command: "echo late" }
+        toolName: "browser_submit",
+        summary: "提交网页表单",
+        target: { tool: "browser_submit" },
+        preview: { form: "late" }
       });
       vi.setSystemTime(new Date("2026-11-12T00:00:00.000Z"));
 
@@ -173,10 +165,10 @@ describe("approval ticket v2", () => {
     const pending = await manager.requestTool({
       taskId: task.id,
       runId,
-      toolName: "shell",
-      summary: "运行一次命令",
-      target: { tool: "shell" },
-      preview: { command: "echo once" }
+      toolName: "browser_submit",
+      summary: "提交一次网页表单",
+      target: { tool: "browser_submit" },
+      preview: { form: "once" }
     });
 
     const first = await manager.decide(pending.approval.id, "approve", pending.approval.parameterHash);
@@ -207,24 +199,16 @@ describe("approval ticket v2", () => {
       sessionRoot: root
     });
     const task = service.createTask({ title: "Publish PR", goal: "Publish a reviewed pull request" });
-    const runId = createRun(service, task.id, "running");
+    const runId = createRun(service, task.id);
     const manager = new ApprovalManager(service, async () => ({}));
-    const pending = await manager.requestTool({
-      taskId: task.id,
-      runId,
-      toolName: "shell",
-      summary: action.summary,
-      target: { tool: "shell" },
-      preview: { command: action.preview },
-      action
-    });
+    const pending = createPendingActionApproval(service, task.id, runId, action, "shell");
 
     rmSync(workA, { recursive: true, force: true });
     symlinkSync(workB, workA, process.platform === "win32" ? "junction" : "dir");
 
-    await expect(manager.decide(pending.approval.id, "approve", pending.approval.parameterHash))
+    await expect(manager.decide(pending.id, "approve", pending.parameterHash))
       .rejects.toMatchObject({ code: "ACTION_CHANGED" });
-    expect(store.getApproval(pending.approval.id)?.status).toBe("revoked");
+    expect(store.getApproval(pending.id)?.status).toBe("revoked");
   });
 
   it("rejects execution when a target file revision changed after approval", async () => {
@@ -242,23 +226,15 @@ describe("approval ticket v2", () => {
       sessionRoot: root
     });
     const task = service.createTask({ title: "Publish PR", goal: "Publish a reviewed pull request" });
-    const runId = createRun(service, task.id, "running");
+    const runId = createRun(service, task.id);
     const manager = new ApprovalManager(service, async () => ({}));
-    const pending = await manager.requestTool({
-      taskId: task.id,
-      runId,
-      toolName: "write_file",
-      summary: action.summary,
-      target: { tool: "write_file", path: target },
-      preview: { path: target },
-      action
-    });
+    const pending = createPendingActionApproval(service, task.id, runId, action, "write_file");
 
     writeFileSync(target, "changed after approval", "utf8");
 
-    await expect(manager.decide(pending.approval.id, "approve", pending.approval.parameterHash))
+    await expect(manager.decide(pending.id, "approve", pending.parameterHash))
       .rejects.toMatchObject({ code: "ACTION_CHANGED" });
-    expect(store.getApproval(pending.approval.id)?.status).toBe("revoked");
+    expect(store.getApproval(pending.id)?.status).toBe("revoked");
   });
 
   it("escalates after three consecutive rejections", async () => {
@@ -269,10 +245,10 @@ describe("approval ticket v2", () => {
       const pending = await manager.requestTool({
         taskId: task.id,
         runId,
-        toolName: "shell",
+        toolName: "browser_submit",
         summary: `运行命令 ${index + 1}`,
-        target: { tool: "shell", index },
-        preview: { command: `echo ${index + 1}` }
+        target: { tool: "browser_submit", index },
+        preview: { form: `publish-${index + 1}` }
       });
       await manager.decide(pending.approval.id, "reject", pending.approval.parameterHash);
     }
@@ -310,5 +286,43 @@ function createRun(service: HearthService, taskId: string, status: "running" | "
     service.updateTask(taskId, { status: "waiting_approval", currentRunId: runId }, runId);
   }
   return runId;
+}
+
+function createPendingActionApproval(
+  service: HearthService,
+  taskId: string,
+  runId: string,
+  action: ReturnType<typeof resolveAction>,
+  toolName: string
+): ApprovalRecord {
+  const now = new Date().toISOString();
+  const approval: ApprovalRecord = {
+    id: randomUUID(),
+    taskId,
+    runId,
+    kind: `tool.${toolName}`,
+    summary: action.summary,
+    target: { tool: toolName },
+    preview: {},
+    parameterHash: randomUUID().replaceAll("-", "").padEnd(64, "0").slice(0, 64),
+    status: "pending",
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    decidedAt: null,
+    effectId: null,
+    createdAt: now,
+    goalId: null,
+    actionDigest: action.actionDigest,
+    permissionMode: action.permissionMode,
+    context: action.context,
+    maxUses: 1,
+    usedCount: 0,
+    approvedBy: null,
+    issuedAt: now,
+    revokedAt: null,
+    action: { resolvedAction: action as unknown as Record<string, unknown>, preauthorized: false },
+    rejectionCount: 0
+  };
+  service.createApproval(approval);
+  return approval;
 }
 

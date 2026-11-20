@@ -13,6 +13,12 @@ import {
   verifyResolvedAction,
   type ResolvedAction
 } from "./action-resolver.ts";
+import {
+  approvalGrantAction,
+  classifyApprovalKind,
+  type ActionPolicyClassification
+} from "./action-policy.ts";
+import { ApprovalGrantRepository } from "./approval-grants.ts";
 import type { HearthService } from "./service.ts";
 
 export type ApprovalDecision = "approve" | "reject" | "approve_always";
@@ -74,6 +80,7 @@ export interface ApprovalManagerOptions {
   guard?: (taskId: string) => void;
   onUncertain?: (effect: EffectRecord, reason: string) => void;
   onDecided?: (approval: ApprovalRecord) => void;
+  grants?: ApprovalGrantRepository;
 }
 
 export class ApprovalError extends Error {
@@ -101,6 +108,7 @@ export class ApprovalManager {
   private readonly guard: ((taskId: string) => void) | undefined;
   private readonly onUncertain: ((effect: EffectRecord, reason: string) => void) | undefined;
   private readonly onDecided: ((approval: ApprovalRecord) => void) | undefined;
+  readonly grants: ApprovalGrantRepository;
   private readonly inFlight = new Set<string>();
   private readonly toolWaiters = new Map<string, (decision: ToolApprovalDecision) => void>();
 
@@ -110,6 +118,7 @@ export class ApprovalManager {
     this.guard = options.guard;
     this.onUncertain = options.onUncertain;
     this.onDecided = options.onDecided;
+    this.grants = options.grants ?? new ApprovalGrantRepository(service.store);
   }
 
   async request(input: ApprovalRequest): Promise<ApprovalRecord> {
@@ -136,9 +145,12 @@ export class ApprovalManager {
         throw new ApprovalError("POLICY_DENIED", policy.reason);
       }
     }
+    const classification = classifyApprovalKind(input.kind, input.action ?? null);
+    const preview = withClassificationPreview(input.preview, classification);
+    const grant = this.alwaysGrantFor(input.kind, classification);
 
     const createdAt = new Date().toISOString();
-    const parameterHash = hashApprovalParameters(input.kind, input.summary, input.target, input.preview);
+    const parameterHash = hashApprovalParameters(input.kind, input.summary, input.target, preview);
     const approval: ApprovalRecord = {
       id: randomUUID(),
       taskId: input.taskId,
@@ -146,7 +158,7 @@ export class ApprovalManager {
       kind: input.kind,
       summary: input.summary,
       target: input.target,
-      preview: input.preview,
+      preview,
       parameterHash,
       status: "pending",
       expiresAt: new Date(Date.now() + (input.ttlMs ?? DEFAULT_APPROVAL_TTL_MS)).toISOString(),
@@ -175,7 +187,8 @@ export class ApprovalManager {
       nextAction: "等待你确认外部动作",
       error: null
     }, input.runId);
-    if (this.service.approvalModeForTask(task) === "full") {
+    if (!classification.requiresApproval || grant) {
+      if (grant) this.grants.touch(grant.id);
       const result = await this.decide(created.id, "approve", created.parameterHash, { decider: "policy" });
       const event = this.service.store.appendEvent({
         type: "approval.auto_approved",
@@ -185,7 +198,8 @@ export class ApprovalManager {
           approvalId: created.id,
           kind: created.kind,
           conversationId: task.conversationId ?? null,
-          policy: "conversation.full",
+          policy: grant ? "external-write.grant" : "local.direct",
+          actionClass: classification.actionClass,
           effectId: result.effect?.id ?? null
         }
       });
@@ -196,6 +210,7 @@ export class ApprovalManager {
   }
 
   async requestTool(input: ToolApprovalRequest): Promise<PendingToolApproval> {
+    const kind = `tool.${input.toolName}`;
     const task = this.service.requireTask(input.taskId);
     const run = this.service.store.getRun(input.runId);
     if (!run || run.taskId !== task.id) throw new ApprovalError("RUN_NOT_FOUND", "审批关联的运行不存在");
@@ -218,11 +233,55 @@ export class ApprovalManager {
         throw new ApprovalError("POLICY_DENIED", policy.reason);
       }
     }
+    const classification = classifyApprovalKind(kind, input.action ?? null);
+    const preview = withClassificationPreview(input.preview, classification);
+    const grant = this.alwaysGrantFor(kind, classification);
     this.guard?.(task.id);
 
-    const kind = `tool.${input.toolName}`;
     const createdAt = new Date().toISOString();
-    const parameterHash = hashApprovalParameters(kind, input.summary, input.target, input.preview);
+    const parameterHash = hashApprovalParameters(kind, input.summary, input.target, preview);
+    if (!classification.requiresApproval || grant) {
+      const decidedAt = new Date().toISOString();
+      const approvedBy = "policy";
+      const consumed = this.service.createApproval({
+        id: randomUUID(),
+        taskId: task.id,
+        runId: input.runId,
+        kind,
+        summary: input.summary,
+        target: input.target,
+        preview,
+        parameterHash,
+        status: "consumed",
+        expiresAt: new Date(Date.now() + (input.ttlMs ?? DEFAULT_APPROVAL_TTL_MS)).toISOString(),
+        decidedAt,
+        effectId: null,
+        createdAt,
+        goalId: input.goalId ?? null,
+        actionDigest: input.action?.actionDigest ?? null,
+        permissionMode,
+        context,
+        maxUses: 1,
+        usedCount: 1,
+        approvedBy,
+        issuedAt: createdAt,
+        revokedAt: null,
+        action: input.action ? {
+          resolvedAction: input.action as unknown as Record<string, unknown>,
+          preauthorized: input.preauthorized ?? false
+        } : null,
+        rejectionCount: 0
+      });
+      if (grant) this.grants.touch(grant.id);
+      this.recordAutoApprovedTool(consumed, task, grant ? "external-write.grant" : "local.direct");
+      return {
+        approval: consumed,
+        decision: Promise.resolve({
+          allowed: true,
+          reason: grant ? "已按自动执行规则放行" : "无需确认"
+        })
+      };
+    }
     const approval: ApprovalRecord = {
       id: randomUUID(),
       taskId: task.id,
@@ -230,7 +289,7 @@ export class ApprovalManager {
       kind,
       summary: input.summary,
       target: input.target,
-      preview: input.preview,
+      preview,
       parameterHash,
       status: "pending",
       expiresAt: new Date(Date.now() + (input.ttlMs ?? DEFAULT_APPROVAL_TTL_MS)).toISOString(),
@@ -273,36 +332,6 @@ export class ApprovalManager {
       if (isToolApproval(approval)) this.resolveTool(approval.id, false, "任务已取消");
     }
     return pending.length;
-  }
-
-  async approvePendingForConversation(conversationId: string): Promise<number> {
-    const tasks = this.service.store.listTasks().filter((task) => task.conversationId === conversationId);
-    let approved = 0;
-    for (const task of tasks) {
-      const pending = this.service.store.listApprovals(task.id).filter((approval) => approval.status === "pending");
-      for (const approval of pending) {
-        try {
-          const result = await this.decide(approval.id, "approve", approval.parameterHash, { decider: "policy" });
-          const event = this.service.store.appendEvent({
-            type: "approval.auto_approved",
-            taskId: approval.taskId,
-            runId: approval.runId,
-            payload: {
-              approvalId: approval.id,
-              kind: approval.kind,
-              conversationId,
-              policy: "conversation.full",
-              effectId: result.effect?.id ?? null
-            }
-          });
-          this.service.bus.publish(event);
-          approved += 1;
-        } catch {
-          // One stale approval must not block the remaining conversation tasks.
-        }
-      }
-    }
-    return approved;
   }
 
   expirePastDue(): { approvals: number; tasks: number } {
@@ -413,18 +442,7 @@ export class ApprovalManager {
       }
       this.guard?.(task.id);
       const now = new Date().toISOString();
-      if (decision === "approve_always" && approval.kind === "tool.browser_open") {
-        const domain = browserDomainForApproval(approval);
-        if (domain) {
-          this.service.store.createBrowserGrant({
-            taskId: task.id,
-            domain,
-            scope: "open",
-            expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60_000).toISOString(),
-            maxUses: null
-          });
-        }
-      }
+      if (decision === "approve_always") this.rememberAlwaysAllow(task, approval);
       const updated = this.service.updateApproval(approval.id, {
         status: "consumed",
         decidedAt: now,
@@ -467,6 +485,7 @@ export class ApprovalManager {
     const existing = this.service.store.listEffects(task.id).find((effect) => effect.approvalId === approval.id);
     if (existing) return { approval, task, effect: existing };
     this.guard?.(task.id);
+    if (decision === "approve_always") this.rememberAlwaysAllow(task, approval);
     if (this.inFlight.has(approval.id)) throw new ApprovalError("EFFECT_IN_PROGRESS", "这个外部动作正在执行，请稍后刷新");
     this.inFlight.add(approval.id);
 
@@ -599,6 +618,48 @@ export class ApprovalManager {
 
   private permissionModeForTask(task: TaskRecord): PermissionMode {
     return this.service.permissionModeForTask(task);
+  }
+
+  private alwaysGrantFor(kind: string, classification: ActionPolicyClassification) {
+    if (!classification.canAlwaysAllow) return null;
+    return this.grants.find("external-write", approvalGrantAction(kind));
+  }
+
+  private rememberAlwaysAllow(task: TaskRecord, approval: ApprovalRecord): void {
+    const action = resolvedActionFromApproval(approval);
+    const classification = classifyApprovalKind(approval.kind, action);
+    if (!classification.canAlwaysAllow) return;
+    const grant = this.grants.create("external-write", approvalGrantAction(approval.kind));
+    const event = this.service.store.appendEvent({
+      type: "approval.grant.created",
+      taskId: task.id,
+      runId: approval.runId,
+      payload: {
+        grantId: grant.id,
+        kind: approval.kind,
+        actionClass: classification.actionClass,
+        service: grant.service,
+        action: grant.action
+      }
+    });
+    this.service.bus.publish(event);
+  }
+
+  private recordAutoApprovedTool(approval: ApprovalRecord, task: TaskRecord, policy: string): void {
+    const event = this.service.store.appendEvent({
+      type: "approval.auto_approved",
+      taskId: task.id,
+      runId: approval.runId,
+      payload: {
+        approvalId: approval.id,
+        kind: approval.kind,
+        conversationId: task.conversationId ?? null,
+        policy,
+        actionClass: approval.preview.actionClass ?? null,
+        effectId: null
+      }
+    });
+    this.service.bus.publish(event);
   }
 
   private revalidateAction(approval: ApprovalRecord, options: ApprovalDecisionOptions): void {
@@ -766,27 +827,21 @@ function replayPolicyForKind(kind: string): EffectReplayPolicy {
   return "never_replay";
 }
 
-function browserDomainForApproval(approval: ApprovalRecord): string | null {
-  const targetUrl = approval.target.url;
-  if (typeof targetUrl === "string") return safeHost(targetUrl);
-  const argumentsValue = approval.target.arguments;
-  if (argumentsValue && typeof argumentsValue === "object" && !Array.isArray(argumentsValue)) {
-    const url = (argumentsValue as Record<string, unknown>).url;
-    if (typeof url === "string") return safeHost(url);
-  }
-  const action = approval.action;
-  const browser = action && typeof action === "object" ? (action as Record<string, unknown>).browser : null;
-  const nested = browser && typeof browser === "object" ? (browser as Record<string, unknown>).url : null;
-  return typeof nested === "string" ? safeHost(nested) : null;
+function withClassificationPreview(
+  preview: Record<string, unknown>,
+  classification: ActionPolicyClassification
+): Record<string, unknown> {
+  return {
+    ...preview,
+    actionClass: classification.actionClass,
+    canAlwaysAllow: classification.canAlwaysAllow
+  };
 }
 
-function safeHost(value: string): string | null {
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:" ? url.hostname.toLowerCase() : null;
-  } catch {
-    return null;
-  }
+function resolvedActionFromApproval(approval: ApprovalRecord): ResolvedAction | null {
+  if (!approval.action) return null;
+  const wrapper = approval.action as { resolvedAction?: unknown };
+  return isResolvedAction(wrapper.resolvedAction) ? wrapper.resolvedAction : null;
 }
 
 export function hashApprovalParameters(

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveAction } from "./action-resolver.ts";
-import type { RunRecord } from "@hearth/core";
+import type { ApprovalRecord, RunRecord } from "@hearth/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HearthStore } from "@hearth/eventlog";
 import { ApprovalManager, EffectUncertainError, hashApprovalParameters } from "./approvals.ts";
@@ -101,20 +101,20 @@ describe("approval manager", () => {
     expect(store.getApproval(approval.id)?.status).toBe("expired");
   });
 
-  it("pauses a running task for tool approval and resumes after approval", async () => {
+  it("pauses a running task for an external write and resumes after approval", async () => {
     const manager = new ApprovalManager(service, async () => ({}));
     const { task, runId } = runningTask(service);
     const pending = await manager.requestTool({
       taskId: task.id,
       runId,
-      toolName: "shell",
-      summary: "运行命令：npm test",
-      target: { tool: "shell", arguments: { command: "npm test" } },
-      preview: { arguments: { command: "npm test" } }
+      toolName: "browser_submit",
+      summary: "提交网页表单",
+      target: { tool: "browser_submit", arguments: { form: "publish" } },
+      preview: { arguments: { form: "publish" } }
     });
 
     expect(service.requireTask(task.id).status).toBe("waiting_approval");
-    expect(store.getApproval(pending.approval.id)?.kind).toBe("tool.shell");
+    expect(store.getApproval(pending.approval.id)?.kind).toBe("tool.browser_submit");
 
     const result = await manager.decide(pending.approval.id, "approve", pending.approval.parameterHash);
     await expect(pending.decision).resolves.toEqual({ allowed: true, reason: "已批准" });
@@ -123,7 +123,7 @@ describe("approval manager", () => {
     expect(service.requireTask(task.id).status).toBe("running");
   });
 
-  it("releases a native tool waiter when executable revalidation revokes approval", async ({ onTestFinished }) => {
+  it("revokes a pending action approval when executable revalidation fails", async ({ onTestFinished }) => {
     const root = mkdtempSync(join(tmpdir(), "hearth-tool-tamper-"));
     onTestFinished(() => rmSync(root, { recursive: true, force: true }));
     const executable = join(root, "tool.exe");
@@ -134,49 +134,49 @@ describe("approval manager", () => {
       context: "interactive",
       sessionRoot: root
     });
-    const manager = new ApprovalManager(service, async () => ({}));
     const { task, runId } = runningTask(service);
-    const pending = await manager.requestTool({
-      taskId: task.id, runId, toolName: "shell", summary: "运行工具",
-      target: { tool: "shell", executable }, preview: {}, action
-    });
-    const decisions: Array<{ allowed: boolean; reason: string }> = [];
-    void pending.decision.then((decision) => decisions.push(decision));
+    service.updateTask(task.id, { status: "waiting_approval" }, runId);
+    const now = new Date().toISOString();
+    const approval: ApprovalRecord = {
+      id: randomUUID(),
+      taskId: task.id,
+      runId,
+      kind: "tool.shell",
+      summary: "运行工具",
+      target: { tool: "shell", executable },
+      preview: {},
+      parameterHash: "c".repeat(64),
+      status: "pending",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      decidedAt: null,
+      effectId: null,
+      createdAt: now,
+      goalId: null,
+      actionDigest: action.actionDigest,
+      permissionMode: "guarded",
+      context: "interactive",
+      maxUses: 1,
+      usedCount: 0,
+      approvedBy: null,
+      issuedAt: now,
+      revokedAt: null,
+      action: { resolvedAction: action as unknown as Record<string, unknown>, preauthorized: false },
+      rejectionCount: 0
+    };
+    service.createApproval(approval);
+    const manager = new ApprovalManager(service, async () => ({}));
     writeFileSync(executable, "replaced");
 
-    await expect(manager.decide(pending.approval.id, "approve", pending.approval.parameterHash))
+    await expect(manager.decide(approval.id, "approve", approval.parameterHash))
       .rejects.toMatchObject({ code: "ACTION_CHANGED" });
-    expect(store.getApproval(pending.approval.id)?.status).toBe("revoked");
-    expect(decisions).toEqual([{ allowed: false, reason: expect.stringContaining("变化") }]);
-    expect(service.requireTask(task.id).status).toBe("running");
+    expect(store.getApproval(approval.id)?.status).toBe("revoked");
+    expect(service.requireTask(task.id).status).toBe("recoverable");
     expect(store.listEffects(task.id)).toHaveLength(0);
   });
 
-  it("auto-approves pending tool approvals when the conversation switches to full", async () => {
-    const conversation = store.createConversation("切换权限", {
-      executorEnabled: { native: true, codex: true, "deepseek-harness": false },
-      approvalMode: "necessary",
-      preferredExecutorId: null
-    });
+  it("executes local tools immediately and records the policy decision", async () => {
     const manager = new ApprovalManager(service, async () => ({}));
-    const task = service.createTask({ title: "Publish PR", goal: "Publish a reviewed pull request", conversationId: conversation.id });
-    const now = new Date().toISOString();
-    const runId = randomUUID();
-    service.createRun({
-      id: runId,
-      taskId: task.id,
-      attempt: 1,
-      status: "running",
-      threadId: "thread-switch",
-      workspace: "C:/tmp/switch",
-      startedAt: now,
-      endedAt: null,
-      failure: null,
-      usage: null,
-      leaseEpoch: null,
-      createdAt: now
-    });
-    service.updateTask(task.id, { status: "running", currentRunId: runId }, runId);
+    const { task, runId } = runningTask(service);
     const pending = await manager.requestTool({
       taskId: task.id,
       runId,
@@ -185,15 +185,15 @@ describe("approval manager", () => {
       target: { tool: "shell", arguments: { command: "npm test" } },
       preview: { arguments: { command: "npm test" } }
     });
-    store.updateConversationSettings(conversation.id, { approvalMode: "full" });
 
-    expect(await manager.approvePendingForConversation(conversation.id)).toBe(1);
-    await expect(pending.decision).resolves.toEqual({ allowed: true, reason: "已批准" });
+    expect(pending.approval.status).toBe("consumed");
+    await expect(pending.decision).resolves.toEqual({ allowed: true, reason: "无需确认" });
     expect(store.getApproval(pending.approval.id)?.status).toBe("consumed");
     expect(service.requireTask(task.id).status).toBe("running");
     expect(store.listEvents().some((event) =>
       event.type === "approval.auto_approved"
       && (event.payload as { approvalId?: string }).approvalId === pending.approval.id
+      && (event.payload as { policy?: string }).policy === "local.direct"
     )).toBe(true);
   });
 
@@ -203,10 +203,10 @@ describe("approval manager", () => {
     const pending = await manager.requestTool({
       taskId: task.id,
       runId,
-      toolName: "write_file",
-      summary: "写入工作区文件：result.md",
-      target: { tool: "write_file", arguments: { path: "result.md", content: "x" } },
-      preview: { arguments: { path: "result.md", content: "x" } }
+      toolName: "browser_submit",
+      summary: "提交网页表单",
+      target: { tool: "browser_submit", arguments: { form: "publish" } },
+      preview: { arguments: { form: "publish" } }
     });
 
     const result = await manager.decide(pending.approval.id, "reject", pending.approval.parameterHash);
@@ -222,10 +222,10 @@ describe("approval manager", () => {
     const pending = await manager.requestTool({
       taskId: task.id,
       runId,
-      toolName: "fetch_url",
-      summary: "读取网址：https://example.test",
-      target: { tool: "fetch_url", arguments: { url: "https://example.test" } },
-      preview: { arguments: { url: "https://example.test" } }
+      toolName: "browser_submit",
+      summary: "提交网页表单",
+      target: { tool: "browser_submit", arguments: { form: "publish" } },
+      preview: { arguments: { form: "publish" } }
     });
 
     expect(manager.cancelToolApproval(pending.approval.id, "任务已取消")).toBe(true);
@@ -247,7 +247,7 @@ describe("approval manager", () => {
     expect(service.requireTask(task.id).status).toBe("recoverable");
   });
 
-  it("auto-approves full-permission conversation effects and writes an audit event", async () => {
+  it("still confirms external effects in full mode and remembers approve-always grants", async () => {
     const conversation = store.createConversation("完全权限对话", {
       executorEnabled: { native: true, codex: true, "deepseek-harness": false },
       approvalMode: "full",
@@ -287,17 +287,46 @@ describe("approval manager", () => {
       preview: { title: "Full permission", body: "Auto-approved effect" }
     });
 
-    expect(approval.status).toBe("consumed");
+    expect(approval.status).toBe("pending");
+    expect(calls).toBe(0);
+    const decided = await manager.decide(approval.id, "approve_always", approval.parameterHash);
+    expect(decided.effect?.status).toBe("succeeded");
     expect(calls).toBe(1);
     expect(service.requireTask(task.id).status).toBe("completed");
-    const audit = store.listEvents().find((event) => event.type === "approval.auto_approved");
-    expect(audit?.payload).toMatchObject({
-      approvalId: approval.id,
-      conversationId: conversation.id,
-      kind: "github.publish-pr",
-      policy: "conversation.full"
+    expect(manager.grants.find("external-write", "github.publish-pr")).toBeTruthy();
+    expect(store.listEvents().some((event) => event.type === "approval.grant.created")).toBe(true);
+
+    const second = service.createTask({ title: "Publish again", goal: "Publish another pull request", conversationId: conversation.id });
+    const secondRunId = randomUUID();
+    service.createRun({
+      id: secondRunId,
+      taskId: second.id,
+      attempt: 1,
+      status: "running",
+      threadId: "thread-full-2",
+      workspace: "C:/tmp/full-2",
+      startedAt: now,
+      endedAt: null,
+      failure: null,
+      usage: null,
+      leaseEpoch: null,
+      createdAt: now
     });
-    expect((audit?.payload as { effectId?: string }).effectId).toBeTruthy();
+    service.updateTask(second.id, { status: "running", currentRunId: secondRunId }, secondRunId);
+    service.updateTask(second.id, { status: "waiting_approval", currentRunId: secondRunId }, secondRunId);
+    const auto = await manager.request({
+      taskId: second.id,
+      runId: secondRunId,
+      kind: "github.publish-pr",
+      summary: "推送分支并创建 PR",
+      target: { repo: "example/repo", branch: "hearth/full-2", base: "main" },
+      preview: { title: "Second", body: "Reuses the grant" }
+    });
+    expect(auto.status).toBe("consumed");
+    expect(calls).toBe(2);
+    const audit = store.listEvents().find((event) => event.type === "approval.auto_approved"
+      && (event.payload as { approvalId?: string }).approvalId === auto.id);
+    expect(audit?.payload).toMatchObject({ policy: "external-write.grant", actionClass: "external_write" });
   });
 
   async function waitingTask(service: HearthService) {
@@ -334,7 +363,7 @@ describe("approval manager", () => {
       "github.publish-pr",
       "推送分支并创建 PR",
       { repo: "JasonBuildAI/GoldMind", branch: "hearth/test", base: "main" },
-      { title: "Fix issue 16", body: "Test PR body" }
+      { title: "Fix issue 16", body: "Test PR body", actionClass: "external_write", canAlwaysAllow: true }
     ));
     return { task: service.requireTask(task.id), approval };
   }

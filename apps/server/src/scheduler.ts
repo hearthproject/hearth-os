@@ -43,7 +43,8 @@ import type { CommandRunner } from "./github.ts";
 import { MemoryService } from "./memory.ts";
 import { DEFAULT_LEASE_HEARTBEAT_MS, LeaseError, TaskLeaseService } from "./leases.ts";
 import { SandboxService } from "./sandbox.ts";
-import { requiresToolApproval, toolApprovalSummary } from "./tool-policy.ts";
+import { toolApprovalSummary } from "./tool-policy.ts";
+import { classifyTool } from "./action-policy.ts";
 import { createMcpTools, parseMcpToolName } from "./mcp-tools.ts";
 import type { McpServerService } from "./mcp-servers.ts";
 import { DEFAULT_RUN_BUDGET, nativePermissionsFor, runNativeTask } from "./native-executor.ts";
@@ -1830,13 +1831,13 @@ export class HearthScheduler {
     signal: AbortSignal;
   }): Promise<AgentToolAuthorization> {
     const toolName = input.request.call.name;
-    if (!requiresToolApproval(toolName)) return { allowed: true };
+    const classification = classifyTool(toolName);
     if (input.signal.aborted) return { allowed: false, reason: "任务已取消" };
     const argumentsValue = approvalArguments(input.request.call.arguments);
     const summary = toolApprovalSummary(toolName, input.request.call.arguments);
     const permissionMode = this.service.permissionModeForTask(input.task);
     const context = this.service.store.listScheduleRunByTask(input.task.id) ? "scheduled" as const : "interactive" as const;
-    let action: ResolvedAction;
+    let action: ResolvedAction | null;
     try {
       const resolved = resolveToolAction({
         toolName,
@@ -1848,48 +1849,19 @@ export class HearthScheduler {
         context,
         browserUrl: this.browserSessions?.activeTab(input.task.id)?.page.url() ?? null
       });
-      if (!resolved) {
-        return { allowed: false, reason: `敏感工具 ${toolName} 无法解析为可绑定动作，已拒绝执行` };
-      }
       action = resolved;
     } catch (error) {
-      return { allowed: false, reason: `敏感工具 ${toolName} 无法绑定到真实动作：${errorMessage(error)}` };
+      return { allowed: false, reason: `工具 ${toolName} 无法绑定到真实动作：${errorMessage(error)}` };
     }
-    if (permissionMode === "full" || permissionMode === "workspace") {
-      const policy = permissionMode === "full"
-        ? { allowed: true, requiresApproval: false, reason: "完全访问模式允许此动作" }
-        : decideActionPolicy(action, { permissionMode, context, preauthorized: false });
-      if (!policy.allowed) return { allowed: false, reason: policy.reason };
-      if (!policy.requiresApproval) {
-        this.recordAutoApprovedTool(input.task, input.run, {
-          toolName,
-          arguments: argumentsValue,
-          policy: permissionMode === "workspace" ? "workspace.reversible" : "conversation.full",
-          metadata: {
-            actionId: action.actionId,
-            actionDigest: action.actionDigest,
-            actionKind: action.kind,
-            permissionMode: action.permissionMode,
-            risk: action.risk,
-            policy: policy.reason
-          }
-        });
-        return { allowed: true };
-      }
+    if (!action) {
+      return classification.requiresApproval
+        ? { allowed: false, reason: `工具 ${toolName} 无法确认外部影响，已拒绝执行` }
+        : { allowed: true };
     }
-    if (toolName === "browser_open") {
-      const args = argumentsValue && typeof argumentsValue === "object" ? argumentsValue as Record<string, unknown> : {};
-      const host = typeof args.url === "string" ? safeHttpHost(args.url) : null;
-      const grantId = host ? this.service.store.findActiveBrowserGrant(input.task.id, host) : null;
-      if (grantId && this.service.store.consumeBrowserGrant(grantId)) {
-        this.recordAutoApprovedTool(input.task, input.run, {
-          toolName,
-          arguments: argumentsValue,
-          policy: "browser.domain-grant",
-          metadata: { domain: host }
-        });
-        return { allowed: true };
-      }
+    const policy = decideActionPolicy(action, { permissionMode, context, preauthorized: false });
+    if (!policy.allowed) return { allowed: false, reason: policy.reason };
+    if (!policy.requiresApproval) {
+      return { allowed: true };
     }
     const decision = await this.requestToolApproval({
       task: input.task,
@@ -1932,12 +1904,8 @@ export class HearthScheduler {
   }): Promise<DshApprovalOutcome> {
     if (input.signal.aborted) return "cancelled";
     const metadata = dshApprovalMetadata(input.request);
-    if (this.service.approvalModeForTask(input.task) === "full") {
-      this.recordAutoApprovedTool(input.task, input.run, {
-        toolName: input.request.toolName,
-        arguments: null,
-        metadata
-      });
+    const classification = classifyTool(input.request.toolName);
+    if (!classification.requiresApproval) {
       return "allowed-once";
     }
     const decision = await this.requestToolApproval({
@@ -2008,33 +1976,6 @@ export class HearthScheduler {
       }
       pending.decision.then(finish, (error) => finish({ allowed: false, reason: errorMessage(error) }));
     });
-  }
-
-  private recordAutoApprovedTool(
-    task: TaskRecord,
-    run: RunRecord,
-    input: { toolName: string; arguments: unknown; metadata?: Record<string, unknown>; policy?: string }
-  ): void {
-    try {
-      const event = this.service.store.appendEvent({
-        type: "approval.auto_approved",
-        taskId: task.id,
-        runId: run.id,
-        payload: {
-          approvalId: null,
-          kind: `tool.${input.toolName}`,
-          toolName: input.toolName,
-          arguments: input.arguments,
-          ...(input.metadata ?? {}),
-          conversationId: task.conversationId ?? null,
-          policy: input.policy ?? "conversation.full",
-          effectId: null
-        }
-      });
-      this.service.bus.publish(event);
-    } catch {
-      // Full-permission execution must not fail because an audit event could not be written.
-    }
   }
 
   private finishWaitingInput(taskId: string, run: RunRecord, result: ExecutionOutcome): AttemptResult {
@@ -2781,15 +2722,6 @@ function errorCode(error: unknown): string | null {
   if (!error || typeof error !== "object" || !("code" in error)) return null;
   const code = (error as { code?: unknown }).code;
   return typeof code === "string" ? code : null;
-}
-
-function safeHttpHost(value: string): string | null {
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:" ? url.hostname.toLowerCase() : null;
-  } catch {
-    return null;
-  }
 }
 
 export function resolveToolAction(input: {

@@ -74,7 +74,7 @@ describe("action resolver", () => {
     expect(verifyResolvedAction(resolved).ok).toBe(false);
   });
 
-  it("applies permission modes and non-interactive denial", () => {
+  it("runs local commands without approval and keeps read-only as a hard stop", () => {
     const root = tempRoot();
     const executable = tempExecutable(root);
     const shell = resolveAction({
@@ -83,15 +83,15 @@ describe("action resolver", () => {
       permissionMode: "guarded",
       context: "interactive"
     });
-    expect(decideActionPolicy(shell, { preauthorized: false })).toMatchObject({ allowed: true, requiresApproval: true });
+    expect(decideActionPolicy(shell, { preauthorized: false })).toMatchObject({ allowed: true, requiresApproval: false });
     const scheduled = { ...shell, context: "scheduled" as const };
-    expect(decideActionPolicy(scheduled, { preauthorized: false })).toMatchObject({ allowed: false, requiresApproval: false });
-    expect(decideActionPolicy(scheduled, { preauthorized: true })).toMatchObject({ allowed: true, requiresApproval: true });
+    expect(decideActionPolicy(scheduled, { preauthorized: false })).toMatchObject({ allowed: true, requiresApproval: false });
+    expect(decideActionPolicy(scheduled, { preauthorized: true })).toMatchObject({ allowed: true, requiresApproval: false });
     const readonly = { ...shell, permissionMode: "read-only" as const };
     expect(decideActionPolicy(readonly).allowed).toBe(false);
   });
 
-  it("auto-allows reversible workspace writes but still gates shell, deletes, MCP and external actions", () => {
+  it("runs all local actions directly and only gates external writes", () => {
     const root = tempRoot();
     const file = join(root, "note.txt");
     writeFileSync(file, "hello", "utf8");
@@ -108,14 +108,14 @@ describe("action resolver", () => {
       sessionRoot: root,
       permissionMode: "workspace"
     });
-    expect(decideActionPolicy(shell, { preauthorized: false })).toMatchObject({ allowed: true, requiresApproval: true });
+    expect(decideActionPolicy(shell, { preauthorized: false })).toMatchObject({ allowed: true, requiresApproval: false });
 
     const deletion = resolveAction({
       proposal: { kind: "file_delete", summary: "delete note", files: [{ path: file, mode: "delete" }] },
       sessionRoot: root,
       permissionMode: "workspace"
     });
-    expect(decideActionPolicy(deletion, { preauthorized: false })).toMatchObject({ allowed: true, requiresApproval: true });
+    expect(decideActionPolicy(deletion, { preauthorized: false })).toMatchObject({ allowed: true, requiresApproval: false });
 
     const mcp = resolveAction({
       proposal: {
@@ -134,8 +134,17 @@ describe("action resolver", () => {
       permissionMode: "workspace",
       context: "scheduled"
     });
-    expect(decideActionPolicy(network, { preauthorized: false })).toMatchObject({ allowed: false, requiresApproval: false });
-    expect(decideActionPolicy(network, { preauthorized: true })).toMatchObject({ allowed: true, requiresApproval: true });
+    expect(decideActionPolicy(network, { preauthorized: false })).toMatchObject({ allowed: true, requiresApproval: false });
+    expect(decideActionPolicy(network, { preauthorized: true })).toMatchObject({ allowed: true, requiresApproval: false });
+
+    const externalWrite = resolveAction({
+      proposal: { kind: "network", summary: "publish", network: { host: "api.example.com", method: "POST" } },
+      sessionRoot: root,
+      permissionMode: "workspace",
+      context: "scheduled"
+    });
+    expect(decideActionPolicy(externalWrite, { preauthorized: false })).toMatchObject({ allowed: false, requiresApproval: false });
+    expect(decideActionPolicy(externalWrite, { preauthorized: true })).toMatchObject({ allowed: true, requiresApproval: true });
   });
 
   it("produces the same digest regardless of environment key order", () => {

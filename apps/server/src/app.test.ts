@@ -119,7 +119,7 @@ describe("Hearth server", () => {
     await app.close();
   });
 
-  it("keeps outbox drafts separate from approval until the user submits them", async () => {
+  it("keeps outbox drafts editable until they are submitted", async () => {
     const app = await buildServer({ store, serveWeb: false });
     const created = await app.inject({
       method: "POST",
@@ -140,23 +140,16 @@ describe("Hearth server", () => {
     expect(submitted.statusCode).toBe(200);
     const approval = submitted.json().approval;
     expect(approval.kind).toBe("outbox.local-write");
+    expect(approval.status).toBe("consumed");
     expect(approval.target).toMatchObject({ draftId: draft.id, account: "local-test" });
     expect(approval.preview.impact).toContain("不会发送");
 
-    const rejected = await app.inject({
-      method: "POST",
-      url: `/api/approvals/${approval.id}/decide`,
-      payload: { decision: "reject", parameterHash: approval.parameterHash }
-    });
-    expect(rejected.statusCode).toBe(200);
-    expect(rejected.json().effect).toBeNull();
-
     const drafts = await app.inject({ method: "GET", url: "/api/outbox" });
-    expect(drafts.json().drafts[0]).toMatchObject({ id: draft.id, status: "rejected" });
+    expect(drafts.json().drafts[0]).toMatchObject({ id: draft.id, status: "stored" });
     await app.close();
   });
 
-  it("writes an approved outbox draft locally without claiming delivery", async () => {
+  it("writes a local outbox draft without claiming delivery", async () => {
     const outboxRoot = mkdtempSync(join(tmpdir(), "hearth-app-outbox-"));
     const app = await buildServer({ store, serveWeb: false, outboxRoot });
     try {
@@ -172,63 +165,23 @@ describe("Hearth server", () => {
       });
       const draft = created.json();
       const submitted = await app.inject({ method: "POST", url: `/api/outbox/${draft.id}/submit` });
-      const approval = submitted.json().approval;
-      const approved = await app.inject({
-        method: "POST",
-        url: `/api/approvals/${approval.id}/decide`,
-        payload: { decision: "approve", parameterHash: approval.parameterHash }
-      });
-      expect(approved.statusCode).toBe(200);
-      expect(approved.json().effect).toMatchObject({
+      expect(submitted.statusCode).toBe(200);
+      expect(submitted.json().draft).toMatchObject({ id: draft.id, status: "stored" });
+
+      const drafts = await app.inject({ method: "GET", url: "/api/outbox" });
+      const stored = drafts.json().drafts[0];
+      expect(stored.effect).toMatchObject({
         status: "succeeded",
         receipt: { transport: "local-outbox", delivery: "not_sent" }
       });
 
-      const effectId = approved.json().effect.id as string;
+      const effectId = stored.effectId as string;
       expect(existsSync(join(outboxRoot, effectId, "message.eml"))).toBe(true);
-      const drafts = await app.inject({ method: "GET", url: "/api/outbox" });
-      expect(drafts.json().drafts[0]).toMatchObject({
+      expect(stored).toMatchObject({
         id: draft.id,
         status: "stored",
         effectId,
         effect: { status: "succeeded", receipt: { transport: "local-outbox", delivery: "not_sent" } }
-      });
-    } finally {
-      await app.close();
-      rmSync(outboxRoot, { recursive: true, force: true });
-    }
-  });
-
-  it("returns an outbox draft to editable state when its task is cancelled", async () => {
-    const outboxRoot = mkdtempSync(join(tmpdir(), "hearth-app-outbox-"));
-    const app = await buildServer({ store, serveWeb: false, startScheduler: true, outboxRoot });
-    try {
-      const created = await app.inject({
-        method: "POST",
-        url: "/api/outbox",
-        payload: {
-          account: "local-test",
-          to: ["reviewer@example.test"],
-          subject: "Cancel me",
-          body: "No write should happen."
-        }
-      });
-      const draft = created.json();
-      const submitted = await app.inject({ method: "POST", url: `/api/outbox/${draft.id}/submit` });
-      const taskId = submitted.json().task.id as string;
-
-      const cancelled = await app.inject({ method: "POST", url: `/api/tasks/${taskId}/cancel` });
-      expect(cancelled.statusCode).toBe(200);
-      expect(cancelled.json().status).toBe("cancelled");
-
-      const drafts = await app.inject({ method: "GET", url: "/api/outbox" });
-      expect(drafts.json().drafts[0]).toMatchObject({
-        id: draft.id,
-        status: "draft",
-        taskId: null,
-        approvalId: null,
-        effectId: null,
-        submittedAt: null
       });
     } finally {
       await app.close();

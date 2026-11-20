@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, delimiter, isAbsolute, join, relative, resolve } from "node:path";
+import { classifyResolvedAction } from "./action-policy.ts";
 
 export const ACTION_RESOLVER_VERSION = "hearth-action-v1";
 
@@ -273,8 +274,12 @@ export function decideActionPolicy(action: ResolvedAction, input: ActionPolicyIn
   const permissionMode = input.permissionMode ?? action.permissionMode;
   const context = input.context ?? action.context;
   const interactive = context === "interactive";
+  const classification = classifyResolvedAction(action);
+  const readOnlyAllowed = classification.actionClass === "local_read"
+    || classification.actionClass === "browser_read"
+    || classification.actionClass === "external_read";
   if (permissionMode === "read-only") {
-    return { allowed: false, requiresApproval: false, reason: "只读模式不允许执行写入或外部动作" };
+    if (!readOnlyAllowed) return { allowed: false, requiresApproval: false, reason: "只读模式不允许执行写入或外部动作" };
   }
   if (action.files.some((file) => !isInsideRoot(action.sessionRoot, file.pathRealPath))) {
     return { allowed: false, requiresApproval: false, reason: "动作目标超出会话根目录" };
@@ -282,40 +287,13 @@ export function decideActionPolicy(action: ResolvedAction, input: ActionPolicyIn
   if (action.command && !isInsideRoot(action.sessionRoot, action.command.cwdRealPath)) {
     return { allowed: false, requiresApproval: false, reason: "命令工作目录超出会话根目录" };
   }
-  const highRisk = action.risk === "high" || action.risk === "critical";
-  const external = ["email", "calendar", "desktop", "network"].includes(action.kind);
-  const shell = action.kind === "shell";
-  if (permissionMode === "full") {
-    if (highRisk && !interactive && !input.preauthorized) {
-      return { allowed: false, requiresApproval: false, reason: "非交互上下文不能自动执行高风险动作" };
-    }
-    return { allowed: true, requiresApproval: false, reason: "完全访问模式允许此动作" };
-  }
-  if (permissionMode === "guarded") {
-    if (shell || external || highRisk) {
-      if (!interactive && !input.preauthorized) {
-        return { allowed: false, requiresApproval: false, reason: "非交互上下文需要明确的预先授权" };
-      }
-      return { allowed: true, requiresApproval: true, reason: "高风险动作需要人工确认" };
-    }
-    return { allowed: true, requiresApproval: false, reason: "会话根目录内的可逆写入" };
-  }
-  if (highRisk || external) {
-    if (!interactive && !input.preauthorized) {
-      return { allowed: false, requiresApproval: false, reason: "非交互上下文不能自动执行高风险动作" };
-    }
-    return { allowed: true, requiresApproval: true, reason: "工作区模式需要确认高风险动作" };
-  }
-  if (permissionMode === "workspace") {
-    if (action.kind === "file_write" && action.sideEffectClass === "local_reversible") {
-      return { allowed: true, requiresApproval: false, reason: "工作区模式允许可逆的文件写入" };
-    }
+  if (classification.requiresApproval) {
     if (!interactive && !input.preauthorized) {
       return { allowed: false, requiresApproval: false, reason: "非交互上下文需要明确的预先授权" };
     }
-    return { allowed: true, requiresApproval: true, reason: "工作区模式需要确认非写入动作" };
+    return { allowed: true, requiresApproval: true, reason: classification.summary };
   }
-  return { allowed: true, requiresApproval: false, reason: "工作区模式允许低风险动作" };
+  return { allowed: true, requiresApproval: false, reason: classification.summary };
 }
 
 export function actionDigest(value: unknown): string {
