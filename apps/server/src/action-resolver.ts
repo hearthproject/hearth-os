@@ -10,7 +10,7 @@ export type PermissionMode = (typeof PERMISSION_MODES)[number];
 export const APPROVAL_CONTEXTS = ["interactive", "scheduled", "webhook", "remote", "delegated"] as const;
 export type ApprovalContext = (typeof APPROVAL_CONTEXTS)[number];
 
-export const ACTION_KINDS = ["shell", "file_write", "file_delete", "network", "email", "calendar", "desktop", "mcp"] as const;
+export const ACTION_KINDS = ["shell", "file_write", "file_delete", "network", "email", "calendar", "desktop", "browser", "mcp"] as const;
 export type ActionKind = (typeof ACTION_KINDS)[number];
 
 export const ACTION_RISKS = ["low", "medium", "high", "critical"] as const;
@@ -66,6 +66,21 @@ export interface ActionMcpTarget {
   argumentsDigest: string;
 }
 
+export interface ActionBrowserTarget {
+  url: string;
+  tabId?: string | undefined;
+  elementRef?: string | undefined;
+  action: string;
+  inputDigest?: string | undefined;
+  pageDigest?: string | undefined;
+  screenshotDigest?: string | undefined;
+}
+
+export interface ResolvedBrowserTarget extends ActionBrowserTarget {
+  host: string;
+  scheme: "http" | "https";
+}
+
 export interface ActionProposal {
   kind: ActionKind;
   summary: string;
@@ -73,6 +88,7 @@ export interface ActionProposal {
   files?: ActionFileTarget[] | undefined;
   network?: ActionNetworkTarget | undefined;
   desktop?: ActionDesktopTarget | undefined;
+  browser?: ActionBrowserTarget | undefined;
   mcp?: ActionMcpTarget | undefined;
   targetRevision?: string | undefined;
   risk?: ActionRisk | undefined;
@@ -106,6 +122,7 @@ export interface ResolvedAction {
   files: ResolvedFile[];
   network: ActionNetworkTarget | null;
   desktop: ResolvedDesktopTarget | null;
+  browser: ResolvedBrowserTarget | null;
   mcp: ActionMcpTarget | null;
   targetRevision: string | null;
   risk: ActionRisk;
@@ -164,13 +181,14 @@ export function resolveAction(input: ResolveActionInput): ResolvedAction {
   const files = (proposal.files ?? []).map((file) => resolveFile(file, sessionRoot, permissionMode));
   const network = proposal.network ? normalizeNetwork(proposal.network) : null;
   const desktop = proposal.desktop ? resolveDesktopTarget(proposal.desktop) : null;
+  const browser = proposal.browser ? resolveBrowserTarget(proposal.browser) : null;
   const mcp = proposal.mcp ? resolveMcpTarget(proposal.mcp) : null;
-  if (!command && files.length === 0 && !network && !desktop && !mcp) {
-    throw new ActionResolutionError("ACTION_TARGET_REQUIRED", "动作缺少可解析的命令、文件、网络、桌面或 MCP 目标");
+  if (!command && files.length === 0 && !network && !desktop && !browser && !mcp) {
+    throw new ActionResolutionError("ACTION_TARGET_REQUIRED", "动作缺少可解析的命令、文件、网络、桌面、浏览器或 MCP 目标");
   }
   const risk = proposal.risk ?? defaultRisk(proposal);
   const sideEffectClass = proposal.sideEffectClass ?? defaultSideEffectClass(proposal);
-  const preview = buildPreview(proposal, command, files, network, desktop, mcp);
+  const preview = buildPreview(proposal, command, files, network, desktop, browser, mcp);
   const digestInput = {
     kind: proposal.kind,
     summary: proposal.summary,
@@ -181,6 +199,7 @@ export function resolveAction(input: ResolveActionInput): ResolvedAction {
     files,
     network,
     desktop,
+    browser,
     mcp,
     targetRevision: proposal.targetRevision ?? null,
     risk,
@@ -198,6 +217,7 @@ export function resolveAction(input: ResolveActionInput): ResolvedAction {
     files,
     network,
     desktop,
+    browser,
     mcp,
     targetRevision: proposal.targetRevision ?? null,
     risk,
@@ -326,6 +346,7 @@ function normalizeProposal(input: ActionProposal): ActionProposal {
       ...input.desktop,
       payload: cloneRecord(input.desktop.payload)
     } : undefined,
+    browser: input.browser ? { ...input.browser } : undefined,
     mcp: input.mcp ? { ...input.mcp } : undefined
   };
 }
@@ -429,8 +450,33 @@ function resolveDesktopTarget(input: ActionDesktopTarget): ResolvedDesktopTarget
   };
 }
 
-function resolveMcpTarget(input: ActionMcpTarget): ActionMcpTarget {
-  const serverId = input.serverId.trim();
+function resolveBrowserTarget(input: ActionBrowserTarget): ResolvedBrowserTarget {
+  if (typeof input.url !== "string" || !input.url.trim()) {
+    throw new ActionResolutionError("BROWSER_URL_REQUIRED", "浏览器动作缺少网址");
+  }
+  let url: URL;
+  try {
+    url = new URL(input.url.trim());
+  } catch {
+    throw new ActionResolutionError("BROWSER_URL_INVALID", "浏览器动作的网址格式不正确");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new ActionResolutionError("BROWSER_SCHEME_DENIED", "浏览器只允许 http 或 https 网址");
+  }
+  const action = typeof input.action === "string" ? input.action.trim().toLowerCase() : "";
+  if (!action || action.length > 40 || !/^[a-z][a-z0-9_-]*$/.test(action)) {
+    throw new ActionResolutionError("BROWSER_ACTION_INVALID", "浏览器动作名称不正确");
+  }
+  return {
+    ...input,
+    url: url.toString(),
+    host: url.hostname.toLowerCase(),
+    scheme: url.protocol === "https:" ? "https" : "http",
+    action
+  };
+}
+
+function resolveMcpTarget(input: ActionMcpTarget): ActionMcpTarget {  const serverId = input.serverId.trim();
   const toolName = input.toolName.trim();
   if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(serverId)) {
     throw new ActionResolutionError("MCP_SERVER_ID_INVALID", "MCP 服务器 id 不合法");
@@ -446,6 +492,12 @@ function resolveMcpTarget(input: ActionMcpTarget): ActionMcpTarget {
 
 function defaultRisk(proposal: ActionProposal): ActionRisk {
   if (proposal.kind === "file_write" || proposal.kind === "file_delete" || proposal.kind === "mcp") return "medium";
+  if (proposal.kind === "browser") {
+    const action = proposal.browser?.action ?? "";
+    if (action === "read" || action === "assert" || action === "screenshot") return "low";
+    if (action === "submit" || action === "upload" || action === "download") return "high";
+    return "medium";
+  }
   if (proposal.kind === "network" || proposal.kind === "email" || proposal.kind === "calendar") return "high";
   if (proposal.kind === "desktop" || proposal.kind === "shell") return "high";
   return "high";
@@ -454,6 +506,12 @@ function defaultRisk(proposal: ActionProposal): ActionRisk {
 function defaultSideEffectClass(proposal: ActionProposal): SideEffectClass {
   if (proposal.kind === "file_write") return "local_reversible";
   if (proposal.kind === "file_delete") return "local_irreversible";
+  if (proposal.kind === "browser") {
+    const action = proposal.browser?.action ?? "";
+    if (action === "read" || action === "assert" || action === "screenshot") return "none";
+    if (action === "submit" || action === "upload") return "external_irreversible";
+    return "external_reversible";
+  }
   if (proposal.kind === "email" || proposal.kind === "calendar") return "external_irreversible";
   if (proposal.kind === "network" || proposal.kind === "desktop" || proposal.kind === "shell") return "external_irreversible";
   return "none";
@@ -465,6 +523,7 @@ function buildPreview(
   files: ResolvedFile[],
   network: ActionNetworkTarget | null,
   desktop: ResolvedDesktopTarget | null,
+  browser: ResolvedBrowserTarget | null,
   mcp: ActionMcpTarget | null
 ): string {
   if (command) {
@@ -473,6 +532,7 @@ function buildPreview(
   if (files.length > 0) {
     return files.map((file) => `${file.mode} ${file.pathRealPath}`).join("\n");
   }
+  if (browser) return `浏览器 ${browser.action} ${browser.url}${browser.elementRef ? ` @ ${browser.elementRef}` : ""}`;
   if (network) return `${network.method ?? "CONNECT"} ${network.host}${network.port ? `:${network.port}` : ""}`;
   if (desktop) return `${desktop.action} ${desktop.activeApp} frame ${desktop.frameId}`;
   if (mcp) return `MCP ${mcp.serverId}/${mcp.toolName} args ${mcp.argumentsDigest.slice(0, 12)}`;

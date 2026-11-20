@@ -146,7 +146,7 @@ export interface RunAggregate {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 33;
+export const CURRENT_SCHEMA_VERSION = 34;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -230,6 +230,11 @@ CREATE TABLE IF NOT EXISTS approvals (
   goal_id TEXT, action_digest TEXT, permission_mode TEXT, context TEXT,
   max_uses INTEGER, used_count INTEGER, approved_by TEXT, issued_at TEXT,
   revoked_at TEXT, action_json TEXT, rejection_count INTEGER
+);
+CREATE TABLE IF NOT EXISTS browser_grants (
+  id TEXT PRIMARY KEY, task_id TEXT NOT NULL, domain TEXT NOT NULL, scope TEXT NOT NULL,
+  created_at TEXT NOT NULL, expires_at TEXT, max_uses INTEGER, used_count INTEGER NOT NULL DEFAULT 0,
+  revoked_at TEXT
 );
 CREATE TABLE IF NOT EXISTS effects (
   id TEXT PRIMARY KEY, task_id TEXT NOT NULL, approval_id TEXT NOT NULL, kind TEXT NOT NULL,
@@ -1418,6 +1423,11 @@ export class HearthStore {
   }
 
   private migrate(): void {
+    this.db.exec(`CREATE TABLE IF NOT EXISTS browser_grants (
+      id TEXT PRIMARY KEY, task_id TEXT NOT NULL, domain TEXT NOT NULL, scope TEXT NOT NULL,
+      created_at TEXT NOT NULL, expires_at TEXT, max_uses INTEGER, used_count INTEGER NOT NULL DEFAULT 0,
+      revoked_at TEXT
+    );`);
     ensureColumn(this.db, "conversations", "project_id", "TEXT");
     ensureColumn(this.db, "events", "origin_instance_id", "TEXT");
     ensureColumn(this.db, "events", "origin_seq", "INTEGER");
@@ -2997,6 +3007,59 @@ export class HearthStore {
 
   listApprovals(taskId: string): ApprovalRecord[] {
     return (this.db.prepare("SELECT * FROM approvals WHERE task_id = ? ORDER BY created_at ASC").all(taskId) as DbRow[]).map(rowToApproval);
+  }
+
+  createBrowserGrant(input: {
+    taskId: string;
+    domain: string;
+    scope?: string;
+    expiresAt?: string | null;
+    maxUses?: number | null;
+  }): string {
+    const id = `BGR-${randomUUID()}`;
+    const now = new Date().toISOString();
+    this.db.prepare(
+      "INSERT INTO browser_grants (id, task_id, domain, scope, created_at, expires_at, max_uses, used_count) VALUES (?, ?, ?, ?, ?, ?, ?, 0)"
+    ).run(id, input.taskId, input.domain.toLowerCase(), input.scope ?? "open", now, input.expiresAt ?? null, input.maxUses ?? null);
+    return id;
+  }
+
+  findActiveBrowserGrant(taskId: string, domain: string, scope = "open", now = new Date().toISOString()): string | null {
+    const row = this.db.prepare(
+      `SELECT id FROM browser_grants
+       WHERE task_id = ? AND domain = ? AND scope = ? AND revoked_at IS NULL
+         AND (expires_at IS NULL OR expires_at > ?)
+         AND (max_uses IS NULL OR used_count < max_uses)
+       ORDER BY created_at DESC LIMIT 1`
+    ).get(taskId, domain.toLowerCase(), scope, now) as DbRow | undefined;
+    return row ? String(row.id) : null;
+  }
+
+  consumeBrowserGrant(id: string): boolean {
+    const result = this.db.prepare(
+      "UPDATE browser_grants SET used_count = used_count + 1 WHERE id = ? AND revoked_at IS NULL AND (max_uses IS NULL OR used_count < max_uses)"
+    ).run(id);
+    return Number(result.changes) > 0;
+  }
+
+  revokeBrowserGrants(taskId: string, domain?: string): number {
+    const now = new Date().toISOString();
+    const result = domain
+      ? this.db.prepare("UPDATE browser_grants SET revoked_at = ? WHERE task_id = ? AND domain = ? AND revoked_at IS NULL").run(now, taskId, domain.toLowerCase())
+      : this.db.prepare("UPDATE browser_grants SET revoked_at = ? WHERE task_id = ? AND revoked_at IS NULL").run(now, taskId);
+    return Number(result.changes);
+  }
+
+  listBrowserGrants(taskId: string): Array<{ id: string; domain: string; scope: string; expiresAt: string | null; maxUses: number | null; usedCount: number; revokedAt: string | null }> {
+    return (this.db.prepare("SELECT * FROM browser_grants WHERE task_id = ? ORDER BY created_at DESC").all(taskId) as DbRow[]).map((row) => ({
+      id: String(row.id),
+      domain: String(row.domain),
+      scope: String(row.scope),
+      expiresAt: row.expires_at == null ? null : String(row.expires_at),
+      maxUses: row.max_uses == null ? null : Number(row.max_uses),
+      usedCount: Number(row.used_count),
+      revokedAt: row.revoked_at == null ? null : String(row.revoked_at)
+    }));
   }
 
   getEffect(id: string): EffectRecord | null {

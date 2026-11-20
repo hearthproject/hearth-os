@@ -18,7 +18,12 @@ import type { ApprovalRequest, ApprovalManager, PendingToolApproval, ToolApprova
 import { actionDigest, decideActionPolicy, resolveAction, type ActionFileTarget, type ActionProposal, type PermissionMode, type ResolvedAction } from "./action-resolver.ts";
 import { createFileArtifact, missingExpectedOutputs, publishArtifacts } from "./artifacts.ts";
 import { diffWorkspace, formatChangeManifest, snapshotWorkspace, type WorkspaceSnapshot } from "./change-manifest.ts";
-import { CONTEXT_BLOB_DIR, EXECUTOR_SETTINGS_PATH, GIT_CACHE_DIR, MODEL_SETTINGS_PATH, REPO_ROOT, SOURCE_CONTENT_DIR, WORKSPACE_DIR } from "./config.ts";
+import { BROWSER_ENABLED, BROWSER_EVIDENCE_DIR, BROWSER_PROFILE_DIR, BROWSER_RECIPE_DIR, BROWSER_SETTINGS_PATH, CONTEXT_BLOB_DIR, EXECUTOR_SETTINGS_PATH, GIT_CACHE_DIR, MODEL_SETTINGS_PATH, REPO_ROOT, SOURCE_CONTENT_DIR, WORKSPACE_DIR } from "./config.ts";
+import { BrowserEvidenceStore } from "./browser-evidence.ts";
+import { BrowserService } from "./browser-service.ts";
+import { BrowserSessionManager } from "./browser-session.ts";
+import { BrowserSettingsStore } from "./browser-settings.ts";
+import { createBrowserTools } from "./browser-tools.ts";
 import { ContextService, estimateTokens } from "./context.ts";
 import { DelegationError, DelegationService } from "./delegation.ts";
 import type { BackgroundToolService } from "./background-tools.ts";
@@ -169,6 +174,10 @@ export class HearthScheduler {
   private readonly backgroundTools: BackgroundToolService | undefined;
   private readonly webSearch: WebSearchService | undefined;
   private readonly mcpServers: McpServerService | undefined;
+  private readonly browserSettings: BrowserSettingsStore;
+  private readonly browserService: BrowserService;
+  private readonly browserSessions: BrowserSessionManager;
+  private readonly browserEvidence: BrowserEvidenceStore;
   private readonly worktrees: TaskWorktreeService;
   private readonly leaseHeartbeatMs: number;
   private readonly leaseHeartbeats = new Map<string, { epoch: number; timer: ReturnType<typeof setInterval> }>();
@@ -234,6 +243,10 @@ export class HearthScheduler {
     this.backgroundTools = options.backgroundTools;
     this.webSearch = options.webSearch;
     this.mcpServers = options.mcpServers;
+    this.browserSettings = new BrowserSettingsStore(BROWSER_SETTINGS_PATH);
+    this.browserService = new BrowserService({ profileDir: BROWSER_PROFILE_DIR });
+    this.browserSessions = new BrowserSessionManager(this.browserService);
+    this.browserEvidence = new BrowserEvidenceStore(BROWSER_EVIDENCE_DIR);
     this.worktrees = options.worktrees ?? new TaskWorktreeService(this.service.store, { workspaceRoot: this.workspaceRoot });
     this.delegations = options.delegations ?? new DelegationService({
       service: this.service,
@@ -277,12 +290,72 @@ export class HearthScheduler {
     await Promise.allSettled(Array.from(this.runPromises));
     for (const controller of this.summaryControllers.values()) controller.abort();
     await Promise.allSettled(Array.from(this.summaryTasks));
+    this.browserSessions.stop();
+    await this.browserSessions.releaseAll();
+    await this.browserService.close();
     this.unsubscribe?.();
     this.unsubscribe = null;
   }
 
   kick(): void {
     this.wake();
+  }
+
+  async browserStatus(taskId: string): Promise<{
+    running: boolean;
+    paused: boolean;
+    backend: string | null;
+    profileDir: string;
+    pages: number;
+    tabs: Array<{ id: string; url: string; title: string; active: boolean }>;
+  }> {
+    const status = await this.browserService.status();
+    const session = this.browserSessions.state(taskId);
+    return {
+      running: status.running,
+      paused: session?.paused ?? false,
+      backend: status.backend,
+      profileDir: status.profileDir,
+      pages: status.pages,
+      tabs: session
+        ? session.tabs.map((tab) => ({
+            id: tab.id,
+            url: tab.page.url(),
+            title: tab.title,
+            active: tab.id === session.activeTabId
+          }))
+        : []
+    };
+  }
+
+  pauseBrowser(taskId: string): boolean {
+    return this.browserSessions.pause(taskId);
+  }
+
+  resumeBrowser(taskId: string): boolean {
+    return this.browserSessions.resume(taskId);
+  }
+
+  async closeBrowser(taskId: string): Promise<void> {
+    await this.browserSessions.release(taskId);
+  }
+
+  browserEvidencePath(taskId: string, name: string): string | null {
+    return this.browserEvidence.filePath(taskId, name);
+  }
+
+  async browserScreenshot(taskId: string): Promise<Buffer | null> {
+    const tab = this.browserSessions.activeTab(taskId);
+    if (!tab) return null;
+    try {
+      return await tab.page.screenshot({ type: "png", fullPage: false });
+    } catch {
+      return null;
+    }
+  }
+
+  browserEvidenceList(taskId: string) {
+    return this.browserEvidence.list(taskId);
   }
 
   addFollowUp(taskId: string, content: string, mode: "queue" | "steer"): TaskFollowUpRecord {
@@ -408,6 +481,7 @@ export class HearthScheduler {
       error: null
     }, task.currentRunId ?? undefined);
     this.releaseLease(taskId);
+    void this.browserSessions.release(taskId);
     return this.service.requireTask(taskId);
   }
 
@@ -1085,6 +1159,7 @@ export class HearthScheduler {
         const manifestRoot = this.inPlaceWorkspace(task);
         const manifestBefore = manifestRoot ? snapshotWorkspace(manifestRoot) : null;
         const result = await this.runAttempt({ task, run, executorId, taskRoot, outDir, handoff, pendingInput, resumePrompt, previousRun, controller, budget: remainingBudget });
+        if (result.status !== "waiting_approval") await this.browserSessions.release(taskId);
         if (manifestRoot && manifestBefore) this.recordInPlaceChanges(task, manifestRoot, manifestBefore);
         if (result.status === "failed" || this.service.requireTask(taskId).status !== "completed") {
           this.assertLease(taskId, leaseEpoch, leaseLost);
@@ -1521,6 +1596,20 @@ export class HearthScheduler {
       if (this.webSearch && (wantsPublicWebResearch(`${task.title}\n${task.goal}`) || task.networkHosts.includes("*"))) {
         extraNativeTools.push(this.webSearch.tool());
       }
+      if (BROWSER_ENABLED && this.browserSettings.get().enabled) {
+        extraNativeTools.push(...createBrowserTools({
+          taskId,
+          runId,
+          sessions: this.browserSessions,
+          evidence: this.browserEvidence,
+          settings: this.browserSettings.get(),
+          recipesDir: BROWSER_RECIPE_DIR,
+          onEvent: (type, payload) => {
+            const event = this.service.store.appendEvent({ type, taskId, runId, payload });
+            this.service.bus.publish(event);
+          }
+        }));
+      }
       let subagentManager: SubagentTaskManager | undefined;
       if (executorId === "native") {
         if (this.knowledge?.isEnabled() && this.knowledgeSettings) {
@@ -1762,7 +1851,8 @@ export class HearthScheduler {
         summary,
         workspaceRoot: input.workspaceRoot,
         permissionMode,
-        context
+        context,
+        browserUrl: this.browserSessions?.activeTab(input.task.id)?.page.url() ?? null
       });
       if (!resolved) {
         return { allowed: false, reason: `敏感工具 ${toolName} 无法解析为可绑定动作，已拒绝执行` };
@@ -1793,6 +1883,20 @@ export class HearthScheduler {
         return { allowed: true };
       }
     }
+    if (toolName === "browser_open") {
+      const args = argumentsValue && typeof argumentsValue === "object" ? argumentsValue as Record<string, unknown> : {};
+      const host = typeof args.url === "string" ? safeHttpHost(args.url) : null;
+      const grantId = host ? this.service.store.findActiveBrowserGrant(input.task.id, host) : null;
+      if (grantId && this.service.store.consumeBrowserGrant(grantId)) {
+        this.recordAutoApprovedTool(input.task, input.run, {
+          toolName,
+          arguments: argumentsValue,
+          policy: "browser.domain-grant",
+          metadata: { domain: host }
+        });
+        return { allowed: true };
+      }
+    }
     const decision = await this.requestToolApproval({
       task: input.task,
       run: input.run,
@@ -1807,7 +1911,17 @@ export class HearthScheduler {
             arguments: argumentsValue
           }
         : { tool: toolName, arguments: argumentsValue },
-      preview: { arguments: argumentsValue },
+      preview: action.kind === "browser" && action.browser
+        ? {
+            arguments: argumentsValue,
+            browser: {
+              url: action.browser.url,
+              action: action.browser.action,
+              elementRef: action.browser.elementRef ?? null,
+              risk: action.risk
+            }
+          }
+        : { arguments: argumentsValue },
       action,
       signal: input.signal
     });
@@ -2658,6 +2772,15 @@ function errorCode(error: unknown): string | null {
   return typeof code === "string" ? code : null;
 }
 
+function safeHttpHost(value: string): string | null {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.hostname.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
 export function resolveToolAction(input: {
   toolName: string;
   argumentsValue: unknown;
@@ -2666,6 +2789,7 @@ export function resolveToolAction(input: {
   workspaceRoot: string;
   permissionMode: PermissionMode;
   context: "interactive" | "scheduled";
+  browserUrl?: string | null;
 }): ResolvedAction | null {
   const args = input.argumentsValue && typeof input.argumentsValue === "object"
     ? input.argumentsValue as Record<string, unknown>
@@ -2713,6 +2837,24 @@ export function resolveToolAction(input: {
         summary: input.summary,
         files,
         targetRevision: `patch-sha256:${createHash("sha256").update(args.patch).digest("hex")}`
+      };
+    }
+  } else if (input.toolName.startsWith("browser_") && input.toolName !== "browser_read" && input.toolName !== "browser_screenshot" && input.toolName !== "browser_assert") {
+    const url = typeof args.url === "string" && args.url.trim()
+      ? args.url.trim()
+      : input.browserUrl ?? "";
+    if (url) {
+      proposal = {
+        kind: "browser",
+        summary: input.summary,
+        browser: {
+          url,
+          action: input.toolName.slice("browser_".length),
+          ...(typeof args.tabId === "string" ? { tabId: args.tabId } : {}),
+          ...(typeof args.ref === "string" ? { elementRef: args.ref } : {}),
+          ...(typeof args.text === "string" ? { inputDigest: actionDigest(args.text) } : {}),
+          ...(typeof args.pageDigest === "string" ? { pageDigest: args.pageDigest } : {})
+        }
       };
     }
   } else if (input.toolName === "fetch_url" && typeof args.url === "string") {

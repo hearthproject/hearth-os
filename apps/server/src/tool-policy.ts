@@ -6,7 +6,11 @@ export const TOOL_APPROVAL_REQUIRED = new Set([
   "apply_patch",
   "shell",
   "fetch_url",
-  "capture_screen"
+  "capture_screen",
+  "browser_open",
+  "browser_submit",
+  "browser_upload",
+  "browser_recipe"
 ]);
 
 export const BACKGROUND_READ_ONLY_TOOLS = new Set([
@@ -36,6 +40,10 @@ export function toolApprovalSummary(toolName: string, value: unknown): string {
   if (toolName === "apply_patch") return "应用补丁修改工作区文件";
   if (toolName === "shell") return `运行命令：${clipText(command ?? "未指定命令", 160)}`;
   if (toolName === "fetch_url") return `读取网址：${clipText(url ?? "未指定网址", 200)}`;
+  if (toolName === "browser_open") return `打开网页：${clipText(url ?? "未指定网址", 200)}`;
+  if (toolName === "browser_submit") return `提交网页表单：${clipText(url ?? "当前页面", 200)}`;
+  if (toolName === "browser_upload") return `上传文件到网页：${clipText(url ?? "当前页面", 200)}`;
+  if (toolName === "browser_recipe") return `回放网页流程：${clipText(url ?? "已记录站点", 200)}`;
   if (toolName === "capture_screen") return `截取桌面画面：${path ?? "desktop.png"}`;
   if (mcp) return `调用 MCP 工具：${mcp.serverId}/${mcp.toolName}`;
   return `执行敏感工具：${toolName}`;

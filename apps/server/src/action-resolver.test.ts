@@ -220,4 +220,33 @@ describe("action resolver", () => {
     expect(first.actionDigest).not.toBe(second.actionDigest);
     expect(verifyResolvedAction(first).ok).toBe(true);
   });
+
+  it("binds browser actions to http(s) targets and risk levels", () => {
+    const root = tempRoot();
+    const submit = resolveAction({
+      proposal: {
+        kind: "browser",
+        summary: "提交订单",
+        browser: { url: "https://Example.com/pay", action: "submit", elementRef: "e9", pageDigest: "abc" }
+      },
+      sessionRoot: root
+    });
+    expect(submit.browser).toMatchObject({ host: "example.com", scheme: "https", action: "submit" });
+    expect(submit.risk).toBe("high");
+    expect(submit.preview).toContain("浏览器 submit");
+    const repeat = resolveAction({
+      proposal: {
+        kind: "browser",
+        summary: "提交订单",
+        browser: { url: "https://example.com/pay", action: "submit", elementRef: "e9", pageDigest: "abc" }
+      },
+      sessionRoot: root
+    });
+    expect(repeat.actionDigest).toBe(submit.actionDigest);
+
+    expect(() => resolveAction({
+      proposal: { kind: "browser", summary: "本地文件", browser: { url: "file:///etc/passwd", action: "read" } },
+      sessionRoot: root
+    })).toThrow(ActionResolutionError);
+  });
 });

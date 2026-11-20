@@ -15,7 +15,7 @@ import {
 } from "./action-resolver.ts";
 import type { HearthService } from "./service.ts";
 
-export type ApprovalDecision = "approve" | "reject";
+export type ApprovalDecision = "approve" | "reject" | "approve_always";
 
 export interface ApprovalRequest {
   taskId: string;
@@ -413,6 +413,18 @@ export class ApprovalManager {
       }
       this.guard?.(task.id);
       const now = new Date().toISOString();
+      if (decision === "approve_always" && approval.kind === "tool.browser_open") {
+        const domain = browserDomainForApproval(approval);
+        if (domain) {
+          this.service.store.createBrowserGrant({
+            taskId: task.id,
+            domain,
+            scope: "open",
+            expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60_000).toISOString(),
+            maxUses: null
+          });
+        }
+      }
       const updated = this.service.updateApproval(approval.id, {
         status: "consumed",
         decidedAt: now,
@@ -752,6 +764,29 @@ function isResolvedAction(value: unknown): value is ResolvedAction {
 function replayPolicyForKind(kind: string): EffectReplayPolicy {
   if (kind.startsWith("tool.")) return "process_bound";
   return "never_replay";
+}
+
+function browserDomainForApproval(approval: ApprovalRecord): string | null {
+  const targetUrl = approval.target.url;
+  if (typeof targetUrl === "string") return safeHost(targetUrl);
+  const argumentsValue = approval.target.arguments;
+  if (argumentsValue && typeof argumentsValue === "object" && !Array.isArray(argumentsValue)) {
+    const url = (argumentsValue as Record<string, unknown>).url;
+    if (typeof url === "string") return safeHost(url);
+  }
+  const action = approval.action;
+  const browser = action && typeof action === "object" ? (action as Record<string, unknown>).browser : null;
+  const nested = browser && typeof browser === "object" ? (browser as Record<string, unknown>).url : null;
+  return typeof nested === "string" ? safeHost(nested) : null;
+}
+
+function safeHost(value: string): string | null {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.hostname.toLowerCase() : null;
+  } catch {
+    return null;
+  }
 }
 
 export function hashApprovalParameters(

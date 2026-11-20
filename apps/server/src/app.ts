@@ -10,7 +10,8 @@ import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DELEGATION_WORKSPACE_POLICIES, DEVI
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { loadCodexProfile, runCodex } from "@hearth/codex-executor";
 import { z } from "zod";
-import { ARTIFACT_DIR, ATTACHMENT_DIR, BACKUP_DIR, CODEX_HOME_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, DSH_HOME_DIR, EXECUTOR_HOME_DIR, EXECUTOR_SETTINGS_PATH, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST, WORKSPACE_DIR } from "./config.ts";
+import { ARTIFACT_DIR, ATTACHMENT_DIR, BACKUP_DIR, BROWSER_SETTINGS_PATH, CODEX_HOME_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, DSH_HOME_DIR, EXECUTOR_HOME_DIR, EXECUTOR_SETTINGS_PATH, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST, WORKSPACE_DIR } from "./config.ts";
+import { BrowserSettingsStore } from "./browser-settings.ts";
 import { registerChatRoutes } from "./chat-routes.ts";
 import { ReconcileError, ReconcileService } from "./reconcile.ts";
 import { ExecutorSettingsStore } from "./executor-settings.ts";
@@ -472,8 +473,16 @@ const suggestionSnoozeSchema = z.object({
 }).strict();
 
 const decideApprovalSchema = z.object({
-  decision: z.enum(["approve", "reject"]),
+  decision: z.enum(["approve", "reject", "approve_always"]),
   parameterHash: z.string().regex(/^[a-f0-9]{64}$/)
+}).strict();
+
+const browserSettingsSchema = z.object({
+  enabled: z.boolean().optional(),
+  allowedDomains: z.array(z.string().trim().min(1).max(253)).max(200).optional(),
+  readOnlyDomains: z.array(z.string().trim().min(1).max(253)).max(200).optional(),
+  highRiskDomains: z.array(z.string().trim().min(1).max(253)).max(200).optional(),
+  maxSessions: z.number().int().min(1).max(8).optional()
 }).strict();
 
 const createSourceSchema = z.object({
@@ -2458,6 +2467,71 @@ export async function buildServer(options: BuildServerOptions = {}) {
       }
       throw error;
     }
+  });
+
+  app.get("/api/browser/settings", async (_request, reply) => {
+    reply.header("cache-control", "no-store");
+    return { settings: new BrowserSettingsStore(BROWSER_SETTINGS_PATH).get() };
+  });
+
+  app.patch("/api/browser/settings", async (request, reply) => {
+    const parsed = browserSettingsSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_BROWSER_SETTINGS", message: "浏览器设置格式不正确" });
+    return { settings: new BrowserSettingsStore(BROWSER_SETTINGS_PATH).update(parsed.data) };
+  });
+
+  app.get<{ Params: { id: string } }>("/api/tasks/:id/browser", async (request, reply) => {
+    if (!store.getTask(request.params.id)) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFFLINE", message: "调度器未启动" });
+    reply.header("cache-control", "no-store");
+    return scheduler.browserStatus(request.params.id);
+  });
+
+  app.post<{ Params: { id: string } }>("/api/tasks/:id/browser/pause", async (request, reply) => {
+    if (!store.getTask(request.params.id)) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFFLINE", message: "调度器未启动" });
+    const paused = scheduler.pauseBrowser(request.params.id);
+    return { paused, message: paused ? "已暂停，你可以直接在浏览器窗口里接管" : "当前任务没有打开浏览器" };
+  });
+
+  app.post<{ Params: { id: string } }>("/api/tasks/:id/browser/resume", async (request, reply) => {
+    if (!store.getTask(request.params.id)) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFFLINE", message: "调度器未启动" });
+    const resumed = scheduler.resumeBrowser(request.params.id);
+    return { resumed, message: resumed ? "已恢复自动执行" : "当前任务没有可恢复的浏览器会话" };
+  });
+
+  app.post<{ Params: { id: string } }>("/api/tasks/:id/browser/close", async (request, reply) => {
+    if (!store.getTask(request.params.id)) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFFLINE", message: "调度器未启动" });
+    await scheduler.closeBrowser(request.params.id);
+    return { closed: true };
+  });
+
+  app.get<{ Params: { id: string } }>("/api/tasks/:id/browser/screenshot", async (request, reply) => {
+    if (!store.getTask(request.params.id)) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFFLINE", message: "调度器未启动" });
+    const screenshot = await scheduler.browserScreenshot(request.params.id);
+    if (!screenshot) return reply.code(404).send({ error: "BROWSER_NOT_OPEN", message: "当前任务没有打开的浏览器页面" });
+    reply.header("cache-control", "no-store");
+    reply.type("image/png");
+    return screenshot;
+  });
+
+  app.get<{ Params: { id: string } }>("/api/tasks/:id/browser/evidence", async (request, reply) => {
+    if (!store.getTask(request.params.id)) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFFLINE", message: "调度器未启动" });
+    return { evidence: scheduler.browserEvidenceList(request.params.id) };
+  });
+
+  app.get<{ Params: { id: string; name: string } }>("/api/tasks/:id/browser/evidence/:name", async (request, reply) => {
+    if (!store.getTask(request.params.id)) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFFLINE", message: "调度器未启动" });
+    const path = scheduler.browserEvidencePath(request.params.id, request.params.name);
+    if (!path) return reply.code(404).send({ error: "EVIDENCE_NOT_FOUND", message: "证据不存在或已过期" });
+    reply.header("cache-control", "private, max-age=3600");
+    reply.type(path.endsWith(".png") ? "image/png" : "application/json");
+    return readFileSync(path);
   });
 
   app.get<{ Querystring: Record<string, string> }>("/api/events/history", async (request, reply) => {
