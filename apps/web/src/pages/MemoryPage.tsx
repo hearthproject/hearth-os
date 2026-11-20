@@ -73,14 +73,13 @@ const FORGET_TARGET_LABELS = {
   projection: "当前记录",
   versions: "历史版本",
   "event-log": "事件日志",
-  "recall-audit": "召回审计",
+  "recall-audit": "参考记录",
   devices: "设备副本",
   derivations: "派生记忆",
   consolidation: "巩固报告"
 } as const;
 
 type MemoryFilter = "active" | "candidate" | "all";
-type MemoryWriteMode = "off" | "curated" | "all";
 type Notice = { tone: "ok" | "error" | "info"; text: string };
 
 export function MemoryPage() {
@@ -91,7 +90,6 @@ export function MemoryPage() {
   const [searchText, setSearchText] = useState("");
   const [searchResults, setSearchResults] = useState<KnowledgeHit[] | null>(null);
   const [showEvaluation, setShowEvaluation] = useState(false);
-  const [knowledgeBusy, setKnowledgeBusy] = useState<"enable" | "start" | "test" | "sync" | "write" | null>(null);
 
   const snapshotQuery = useQuery({ queryKey: ["memory"], queryFn: api.memory, refetchInterval: 20_000 });
   const knowledgeQuery = useQuery({ queryKey: ["knowledge"], queryFn: api.knowledgeStatus, refetchInterval: 20_000 });
@@ -133,15 +131,10 @@ export function MemoryPage() {
   const setup = setupQuery.data;
   const enabled = status?.settings.enabled ?? false;
   const connected = enabled && status?.health.ok === true;
-  const writeMode: MemoryWriteMode = status?.settings.write.memories ?? "curated";
+  const writeMode = status?.settings.write.memories ?? "curated";
   const allMemories = snapshot?.memories ?? [];
   const evaluationCount = allMemories.filter(isEvaluationMemory).length;
   const visibleMemories = showEvaluation ? allMemories : allMemories.filter((memory) => !isEvaluationMemory(memory));
-  const indexable = allMemories.filter(isIndexable);
-  const eligible = {
-    curated: indexable.filter((memory) => ["instructions", "curated"].includes(memory.tier)).length,
-    all: indexable.length
-  };
   const counts = {
     active: visibleMemories.filter((memory) => memory.status === "active").length,
     candidate: visibleMemories.filter((memory) => memory.status === "candidate").length,
@@ -149,109 +142,11 @@ export function MemoryPage() {
   };
   const memories = visibleMemories.filter((memory) => filter === "all" || memory.status === filter);
   const pendingConflicts = snapshot?.conflicts.filter((item) => item.status === "pending") ?? [];
-  function runKnowledgeAction(action: "test" | "sync") {
-    setKnowledgeBusy(action);
-    setNotice(null);
-    const task = action === "test"
-      ? api.testKnowledge()
-      : api.reconcileKnowledge().then(async (reconciled) => ({
-          result: reconciled.result,
-          flushed: (await api.syncKnowledge()).result
-        }));
-    task
-      .then((result) => {
-        if (action === "test") {
-          const tested = result as Awaited<ReturnType<typeof api.testKnowledge>>;
-          setNotice({
-            tone: tested.health.ok ? "ok" : "error",
-            text: tested.health.ok
-              ? `OpenViking 连接正常 · ${tested.health.latencyMs}ms · 命中 ${tested.hits} 条`
-              : tested.health.detail ?? "连接失败"
-          });
-        } else {
-          const synced = result as Awaited<ReturnType<typeof api.reconcileKnowledge>> & {
-            flushed: Awaited<ReturnType<typeof api.syncKnowledge>>["result"];
-          };
-          setNotice({
-            tone: "ok",
-            text: `同步完成：对账记忆 ${synced.result.memories} 条、任务 ${synced.result.tasks} 条、来源 ${synced.result.sources} 条；写入 ${synced.flushed.written}，失败 ${synced.flushed.failed}，跳过 ${synced.flushed.skipped}`
-          });
-        }
-        refreshAll();
-      })
-      .catch((error: Error) => setNotice({ tone: "error", text: error.message }))
-      .finally(() => setKnowledgeBusy(null));
-  }
-
-  function enableKnowledge() {
-    setKnowledgeBusy("enable");
-    setNotice(null);
-    if (setup && !setup.installed) {
-      setNotice({ tone: "info", text: "还没有检测到 OpenViking。请先在 设置 → 知识库连接 中安装。" });
-      setKnowledgeBusy(null);
-      return;
-    }
-    api
-      .saveKnowledgeSettings({ enabled: true })
-      .then(async () => {
-        if (setup?.installed && !setup.running) await api.startKnowledgeService();
-        const reconciled = await api.reconcileKnowledge();
-        setNotice({
-          tone: "ok",
-          text: writeMode === "all"
-            ? `OpenViking 已启用，已对账 ${reconciled.result.memories} 条记忆；评测经历已排除。`
-            : eligible.curated === 0 && eligible.all > 0
-              ? `OpenViking 已启用。精选范围目前 0 条；把上方范围改为“全部干净记忆”，即可索引 ${eligible.all} 条任务经历。`
-              : `OpenViking 已启用，已对账 ${reconciled.result.memories} 条精选记忆。`
-        });
-        refreshAll();
-      })
-      .catch((error: Error) => setNotice({ tone: "error", text: error.message }))
-      .finally(() => setKnowledgeBusy(null));
-  }
-
-  function startKnowledge() {
-    setKnowledgeBusy("start");
-    setNotice(null);
-    api
-      .startKnowledgeService()
-      .then((result) => {
-        setNotice({
-          tone: result.setup.running ? "ok" : "error",
-          text: result.setup.running ? "OpenViking 服务已启动。" : "服务仍未就绪，请查看设置中的安装日志。"
-        });
-        refreshAll();
-      })
-      .catch((error: Error) => setNotice({ tone: "error", text: error.message }))
-      .finally(() => setKnowledgeBusy(null));
-  }
-
-  function setMemoryWriteMode(mode: MemoryWriteMode) {
-    setKnowledgeBusy("write");
-    setNotice(null);
-    api
-      .saveKnowledgeSettings({ write: { memories: mode } })
-      .then(async () => {
-        if (mode === "off") {
-          setNotice({ tone: "info", text: "已停止写入新记忆；OpenViking 中已有的索引不会自动删除。" });
-        } else {
-          const result = await api.reconcileKnowledge();
-          setNotice({
-            tone: "ok",
-            text: `索引范围已更新；对账记忆 ${result.result.memories} 条、任务 ${result.result.tasks} 条、来源 ${result.result.sources} 条。`
-          });
-        }
-        refreshAll();
-      })
-      .catch((error: Error) => setNotice({ tone: "error", text: error.message }))
-      .finally(() => setKnowledgeBusy(null));
-  }
-
   function createMemory(input: CreateMemoryRequest) {
     api
       .createMemory(input)
       .then(() => {
-        setNotice({ tone: "ok", text: "已加入待确认。确认后才会被召回和写入索引。" });
+        setNotice({ tone: "ok", text: "已添加，确认后会出现在记忆里。" });
         setCreating(false);
         refreshAll();
       })
@@ -284,11 +179,11 @@ export function MemoryPage() {
       <div className="page-head memory-page-head">
         <div>
           <h1>知识库</h1>
-          <p className="page-meta">Hearth 决定记住什么，OpenViking 把这些内容变成可搜索的语义索引。</p>
+          <p className="page-meta">Hearth 记住你的偏好、项目背景和做过的事，需要时自动参考。</p>
         </div>
         <div className="page-actions">
           <button className="ghost-button" onClick={api.exportMemories}><Download size={15} /> 导出</button>
-          <Link className="ghost-button" to="/settings?tab=knowledge"><Settings2 size={15} /> 连接设置</Link>
+          <Link className="ghost-button" to="/settings?tab=knowledge"><Settings2 size={15} /> 设置</Link>
         </div>
       </div>
 
@@ -306,13 +201,7 @@ export function MemoryPage() {
       <KnowledgeOverview
         status={status}
         setup={setup}
-        eligible={eligible}
-        busy={knowledgeBusy}
-        onEnable={enableKnowledge}
-        onStart={startKnowledge}
-        onTest={() => runKnowledgeAction("test")}
-        onSync={() => runKnowledgeAction("sync")}
-        onMemoryWriteMode={setMemoryWriteMode}
+        summary={{ active: counts.active, candidate: counts.candidate, evaluation: evaluationCount }}
       />
 
       <KnowledgeSearchPanel
@@ -343,13 +232,12 @@ export function MemoryPage() {
         <section className="memory-section">
           <div className="memory-section-head">
             <div>
-              <h2><BookOpen size={16} /> 记忆</h2>
-              <p>自动记录的任务经历，以及你手动添加的长期背景。</p>
+              <h2><BookOpen size={16} /> Hearth 记住的内容</h2>
+              <p>这些内容会在聊天和任务中自动参考；你可以随时纠正或遗忘。</p>
             </div>
             <div className="memory-section-actions">
-              <span className="page-meta">召回 {snapshot.settings.maxItems} 条 / {formatNumber(snapshot.settings.maxChars)} 字符</span>
               <button type="button" className="ghost-button compact" onClick={() => setCreating((current) => !current)}>
-                <Plus size={15} /> 手动添加
+                <Plus size={15} /> 添加记忆
               </button>
             </div>
           </div>
@@ -358,14 +246,14 @@ export function MemoryPage() {
 
           <div className="inbox-toolbar memory-toolbar">
             <div className="segmented">
-              <button className={filter === "active" ? "active" : ""} onClick={() => setFilter("active")}>已启用 {formatNumber(counts.active)}</button>
+              <button className={filter === "active" ? "active" : ""} onClick={() => setFilter("active")}>已记住 {formatNumber(counts.active)}</button>
               <button className={filter === "candidate" ? "active" : ""} onClick={() => setFilter("candidate")}>待确认 {formatNumber(counts.candidate)}</button>
               <button className={filter === "all" ? "active" : ""} onClick={() => setFilter("all")}>全部 {formatNumber(counts.all)}</button>
             </div>
             {evaluationCount > 0 && (
               <label className="memory-check">
                 <input type="checkbox" checked={showEvaluation} onChange={(event) => setShowEvaluation(event.target.checked)} />
-                显示评测经历 {formatNumber(evaluationCount)}
+                显示测试记录 {formatNumber(evaluationCount)}
               </label>
             )}
           </div>
@@ -373,7 +261,7 @@ export function MemoryPage() {
           {actionMutation.error && <p className="form-error">{actionMutation.error.message}</p>}
 
           {memories.length === 0 ? (
-            <p className="section-empty">{filter === "candidate" ? "没有待确认的记忆。" : filter === "active" ? "还没有已启用的真实工作记忆。" : "这里还没有记忆。"}{!showEvaluation && evaluationCount > 0 ? " 评测经历默认隐藏，可勾选右上角查看。" : ""}</p>
+            <p className="section-empty">{filter === "candidate" ? "没有待确认的内容。" : filter === "active" ? "还没有记住的内容。完成一次任务后，Hearth 会自动记录有用的经历。" : "这里还没有内容。"}{!showEvaluation && evaluationCount > 0 ? " 测试记录默认隐藏，可勾选右上角查看。" : ""}</p>
           ) : (
             <div className="memory-list">
               {memories.map((memory) => (
@@ -381,8 +269,7 @@ export function MemoryPage() {
                   key={memory.id}
                   memory={memory}
                   busy={actionMutation.isPending}
-                  knowledgeEnabled={enabled}
-                  writeMode={writeMode}
+                  searchable={connected && isIndexable(memory) && (writeMode === "all" || ["instructions", "curated"].includes(memory.tier))}
                   onAction={(action, payload) => actionMutation.mutate({ action, id: memory.id, payload })}
                 />
               ))}
@@ -390,12 +277,12 @@ export function MemoryPage() {
           )}
 
           <details className="memory-fold">
-            <summary>自动记录与召回预算</summary>
+            <summary>自动记录设置</summary>
             <MemorySettingsPanel key={snapshot.settings.updatedAt} settings={snapshot.settings} onSave={saveMemorySettings} />
           </details>
 
           <details className="memory-fold">
-            <summary>最近召回记录</summary>
+            <summary>最近被参考的记录</summary>
             {(snapshot.recalls ?? []).slice(0, 8).map((recall) => {
               const memory = snapshot.memories.find((item) => item.id === recall.memoryId);
               const chatRecall = recall.taskId.startsWith("chat:");
@@ -406,11 +293,11 @@ export function MemoryPage() {
                 </div>
               );
             })}
-            {(snapshot.recalls ?? []).length === 0 && <p className="section-empty">还没有召回记录。</p>}
+            {(snapshot.recalls ?? []).length === 0 && <p className="section-empty">还没有被参考过的记录。</p>}
           </details>
 
           <details className="memory-fold">
-            <summary>遗忘回执</summary>
+            <summary>已遗忘的内容</summary>
             {(snapshot.forgets ?? []).slice(0, 8).map((receipt) => (
               <div className="memory-forget-row" key={receipt.id}>
                 <div>
@@ -437,139 +324,55 @@ export function MemoryPage() {
 function KnowledgeOverview({
   status,
   setup,
-  eligible,
-  busy,
-  onEnable,
-  onStart,
-  onTest,
-  onSync,
-  onMemoryWriteMode
+  summary
 }: {
   status: KnowledgeStatusResponse | undefined;
   setup: KnowledgeSetupState | undefined;
-  eligible: { curated: number; all: number };
-  busy: "enable" | "start" | "test" | "sync" | "write" | null;
-  onEnable: () => void;
-  onStart: () => void;
-  onTest: () => void;
-  onSync: () => void;
-  onMemoryWriteMode: (mode: MemoryWriteMode) => void;
+  summary: { active: number; candidate: number; evaluation: number };
 }) {
-  const settings = status?.settings;
-  const enabled = settings?.enabled ?? false;
+  const enabled = status?.settings.enabled ?? false;
   const connected = enabled && status?.health.ok === true;
-  const index = status?.index;
-  const pending = (status?.jobs.pending ?? 0) + (status?.jobs.running ?? 0);
-  const writeMode = settings?.write.memories ?? "curated";
+  const installed = setup?.installed ?? true;
+  const title = connected
+    ? "记忆助手已开启"
+    : enabled
+      ? "记忆助手暂时不可用"
+      : installed
+        ? "记忆助手未开启"
+        : "记忆助手尚未安装";
+  const copy = connected
+    ? "聊天和任务会自动参考下面这些内容。你不需要手动整理。"
+    : enabled
+      ? "本机记忆服务没有响应，聊天和任务暂时不会参考记忆。到设置里检查一下即可。"
+      : installed
+        ? "你现在仍然可以查看已有内容；开启后，聊天和任务才会自动参考。"
+        : "安装并开启后，聊天和任务才会自动参考你的记忆。";
 
   return (
-    <section className="knowledge-overview">
+    <section className="knowledge-overview memory-status">
       <div className="knowledge-overview-head">
-        <span className="knowledge-mark"><Database size={20} /></span>
+        <span className={`knowledge-mark ${connected ? "ok" : "idle"}`}><Database size={20} /></span>
         <div className="knowledge-overview-copy">
           <div className="knowledge-title-row">
-            <h2>OpenViking 语义索引</h2>
-            <span className={`status-chip ${connected ? "ok" : enabled ? "warn" : ""}`}>
-              <span className={`status-dot ${connected ? "online" : "idle"}`} />
-              {connected ? "已连接" : enabled ? "已启用 · 未连接" : "未启用"}
-            </span>
+            <h2>{title}</h2>
           </div>
-          <p>
-            {connected
-              ? "任务和对话会检索这里的记忆、已完成任务与来源；索引可以随时重建。"
-              : "启用后，Hearth 会把符合条件的记忆写入本地 OpenViking，供任务和对话做语义检索。"}
-          </p>
-          <div className="knowledge-facts">
-            <span>{settings?.baseUrl ?? "http://127.0.0.1:1933"}</span>
-            {status?.health.version && <span>v{status.health.version}</span>}
-            {connected && <span>{status.health.latencyMs}ms</span>}
-            <span>{serviceLabel(setup, enabled, connected)}</span>
-            {index?.lastIndexedAt && <span>最近写入 {relativeTime(index.lastIndexedAt)}</span>}
+          <p>{copy}</p>
+          <div className="memory-summary">
+            <span><strong>{formatNumber(summary.active)}</strong> 条已记住</span>
+            <span><strong>{formatNumber(summary.candidate)}</strong> 条待确认</span>
+            {summary.evaluation > 0 && <span><strong>{formatNumber(summary.evaluation)}</strong> 条测试记录已隐藏</span>}
           </div>
         </div>
         <div className="knowledge-actions">
-          {!enabled && setup?.installed && (
-            <button type="button" className="primary-button" onClick={onEnable} disabled={busy !== null}>
-              {busy === "enable" ? <Loader2 size={15} className="spin" /> : <Database size={15} />} 启用索引
-            </button>
-          )}
-          {!enabled && setup && !setup.installed && (
-            <Link className="primary-button" to="/settings?tab=knowledge">安装 OpenViking</Link>
-          )}
-          {!enabled && !setup && (
-            <button type="button" className="primary-button" onClick={onEnable} disabled={busy !== null}>启用索引</button>
-          )}
-          {enabled && !connected && setup?.installed && (
-            <button type="button" className="primary-button" onClick={onStart} disabled={busy !== null}>
-              {busy === "start" ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />} 启动服务
-            </button>
-          )}
-          {enabled && !connected && setup && !setup.installed && (
-            <Link className="primary-button" to="/settings?tab=knowledge">安装 OpenViking</Link>
-          )}
-          {enabled && (
-            <button type="button" className="ghost-button" onClick={onTest} disabled={busy !== null}>
-              {busy === "test" ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />} 测试连接
-            </button>
-          )}
-          <Link className="ghost-button" to="/settings?tab=knowledge"><Settings2 size={15} /> 连接设置</Link>
+          {connected
+            ? <span className="memory-status-hint"><CheckCircle2 size={14} /> 无需手动操作</span>
+            : <Link className="ghost-button" to="/settings?tab=knowledge"><Settings2 size={15} /> 去设置</Link>}
         </div>
       </div>
-
-      <div className="knowledge-stats">
-        <KnowledgeStat label="已索引记忆" value={index?.memories ?? 0} />
-        <KnowledgeStat label="已索引任务" value={index?.tasks ?? 0} />
-        <KnowledgeStat label="已索引来源" value={index?.sources ?? 0} />
-        <KnowledgeStat label="待同步" value={pending} tone={pending > 0 ? "warn" : undefined} />
-      </div>
-
-      <div className="knowledge-write-row">
-        <label>
-          <span>记忆索引范围</span>
-          <select
-            value={writeMode}
-            onChange={(event) => onMemoryWriteMode(event.target.value as MemoryWriteMode)}
-            disabled={busy !== null || !enabled}
-          >
-            <option value="curated">仅精选记忆</option>
-            <option value="all">全部干净记忆</option>
-            <option value="off">不写入</option>
-          </select>
-        </label>
-        <span className="knowledge-write-note">
-          {writeMode === "curated"
-            ? eligible.all === 0
-              ? "当前没有可索引的真实工作记忆。"
-              : eligible.curated === 0
-                ? `精选范围目前 0 条；你还有 ${eligible.all} 条真实任务经历，改为“全部干净记忆”即可写入。`
-                : `精选范围 ${eligible.curated} 条；另有 ${eligible.all - eligible.curated} 条任务经历不会写入。`
-            : writeMode === "all"
-              ? `将写入 ${eligible.all} 条真实工作记忆；评测与基准经历始终排除。`
-              : "只保留已有索引，不再写入新记忆。"}
-        </span>
-        {connected && (
-          <button type="button" className="ghost-button compact" onClick={onSync} disabled={busy !== null}>
-            {busy === "sync" ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />} 立即同步{pending > 0 ? ` ${pending}` : ""}
-          </button>
-        )}
-      </div>
-
       {setup?.install.status === "running" && (
-        <p className="knowledge-progress"><Loader2 size={15} className="spin" /> 正在安装 OpenViking，日志可在设置中查看。</p>
-      )}
-      {enabled && !connected && status?.health.detail && (
-        <p className="knowledge-error" title={status.health.detail}>连接失败：{status.health.detail}</p>
+        <p className="knowledge-progress"><Loader2 size={15} className="spin" /> 正在准备记忆服务，完成前不影响查看已有内容。</p>
       )}
     </section>
-  );
-}
-
-function KnowledgeStat({ label, value, tone }: { label: string; value: number; tone?: "warn" | undefined }) {
-  return (
-    <div className={`knowledge-stat${tone === "warn" ? " warn" : ""}`}>
-      <span>{label}</span>
-      <strong>{formatNumber(value)}</strong>
-    </div>
   );
 }
 
@@ -592,10 +395,10 @@ function KnowledgeSearchPanel({
     <section className="knowledge-search">
       <div className="knowledge-search-head">
         <div>
-          <h2>搜索知识</h2>
-          <p>用自然语言搜索记忆、已完成任务和来源正文。</p>
+          <h2>搜索记忆</h2>
+          <p>用一句话找以前的经历、任务或资料。</p>
         </div>
-        {!connected && <span className="page-meta">OpenViking 连接后可用</span>}
+        {!connected && <span className="page-meta">开启记忆助手后可用</span>}
       </div>
       <form className="knowledge-search-form" onSubmit={(event) => { event.preventDefault(); onSearch(); }}>
         <label className="knowledge-search-input">
@@ -608,11 +411,11 @@ function KnowledgeSearchPanel({
           />
         </label>
         <button className="primary-button" type="submit" disabled={!connected || !query.trim() || pending}>
-          {pending ? <Loader2 size={15} className="spin" /> : <Search size={15} />} 搜索
+          {pending ? <Loader2 size={15} className="spin" /> : <Search size={15} />} 查找
         </button>
       </form>
-      {pending && <p className="section-empty">正在检索 OpenViking…</p>}
-      {!pending && results && results.length === 0 && <p className="section-empty">没有命中。换一个更具体的说法，或先同步索引。</p>}
+      {pending && <p className="section-empty">正在查找…</p>}
+      {!pending && results && results.length === 0 && <p className="section-empty">没有找到。换一种说法试试。</p>}
       {!pending && results && results.length > 0 && (
         <div className="knowledge-results">
           {results.map((hit) => <KnowledgeHitRow key={hit.uri} hit={hit} />)}
@@ -628,10 +431,8 @@ function KnowledgeHitRow({ hit }: { hit: KnowledgeHit }) {
       <div className="knowledge-hit-head">
         <span className="tag">{CONTEXT_LABELS[hit.contextType]}</span>
         <strong title={hit.uri}>{hitTitle(hit)}</strong>
-        <span className="knowledge-score">{scoreLabel(hit.score)}</span>
       </div>
-      <p>{hit.abstract || "OpenViking 没有返回摘要，可到设置中按 URI 读取原文。"}</p>
-      <code>{hit.uri}</code>
+      <p>{hit.abstract || "这条内容暂时没有摘要。"}</p>
     </article>
   );
 }
@@ -659,20 +460,20 @@ function MemoryCreateForm({ onCreate, onCancel }: { onCreate: (input: CreateMemo
   return (
     <form className="memory-create-form" onSubmit={submit}>
       <div className="memory-create-grid">
-        <label>类型<select name="kind" defaultValue="preference">{Object.entries(KIND_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-        <label>适用范围<input name="scope" defaultValue="global" placeholder="global 或项目名" maxLength={120} /></label>
+        <label>这是哪类内容<select name="kind" defaultValue="preference">{Object.entries(KIND_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        <label>用于哪个项目<input name="scope" placeholder="留空表示所有对话和任务" maxLength={120} /></label>
       </div>
-      <label className="memory-content-field">想让它记住什么<textarea name="content" required maxLength={8000} rows={3} placeholder="用一句完整的话写清楚，例如：我偏好先给结论，再给依据。" /></label>
+      <label className="memory-content-field">要记住什么<textarea name="content" required maxLength={8000} rows={3} placeholder="用一句完整的话写清楚，例如：我偏好先给结论，再给依据。" /></label>
       <details className="memory-create-advanced">
-        <summary>高级：主题键</summary>
-        <label>主题键<input name="subjectKey" placeholder="preference.output-style（留空会自动生成）" maxLength={200} /></label>
-        <p className="form-hint">同一主题的新内容会提示冲突，便于你选择保留哪一条。</p>
+        <summary>高级选项</summary>
+        <label>关联主题<input name="subjectKey" placeholder="例如：写作偏好（留空会自动生成）" maxLength={200} /></label>
+        <p className="form-hint">同一主题下出现不同说法时，Hearth 会提醒你选择保留哪一条。</p>
       </details>
       <div className="proactive-form-foot">
-        <span className="form-hint">创建后先进入“待确认”，确认后才会被召回和写入索引。</span>
+        <span className="form-hint">添加后先进入“待确认”，确认后才会出现在记忆里。</span>
         <div className="memory-form-actions">
           <button type="button" className="ghost-button" onClick={onCancel}>取消</button>
-          <button type="submit" className="primary-button"><Check size={15} /> 加入待确认</button>
+          <button type="submit" className="primary-button"><Check size={15} /> 添加，等待确认</button>
         </div>
       </div>
     </form>
@@ -695,15 +496,15 @@ function MemorySettingsPanel({ settings, onSave }: { settings: MemorySnapshot["s
   return (
     <form className="memory-settings-form" onSubmit={submit}>
       <div className="proactive-number-grid">
-        <label>自动记录<select name="autoCapture" defaultValue={settings.autoCapture}><option value="experience">记录任务经历</option><option value="off">关闭</option></select></label>
-        <label>最多召回条数<input name="maxItems" type="number" min="1" max="50" defaultValue={settings.maxItems} /></label>
-        <label>最多注入字符<input name="maxChars" type="number" min="200" max="100000" defaultValue={settings.maxChars} /></label>
+        <label>自动记录<select name="autoCapture" defaultValue={settings.autoCapture}><option value="experience">记录做过的事</option><option value="off">关闭</option></select></label>
+        <label>每次最多参考几条<input name="maxItems" type="number" min="1" max="50" defaultValue={settings.maxItems} /></label>
+        <label>每次最多参考多少字<input name="maxChars" type="number" min="200" max="100000" defaultValue={settings.maxChars} /></label>
       </div>
       <div className="proactive-form-foot">
-        <label className="memory-check"><input name="allowSensitive" type="checkbox" defaultChecked={settings.allowSensitive} /> 允许敏感记忆参与召回（机密始终排除）</label>
+        <label className="memory-check"><input name="allowSensitive" type="checkbox" defaultChecked={settings.allowSensitive} /> 允许敏感内容被自动参考（机密始终排除）</label>
         <button className="button" type="submit" disabled={saving}><Save size={15} /> 保存</button>
       </div>
-      <p className="form-hint">这里控制 Hearth 的召回预算；OpenViking 是否写入由上方“记忆索引范围”决定。</p>
+      <p className="form-hint">这些设置只影响聊天和任务自动参考的范围，不会删除已经记住的内容。</p>
     </form>
   );
 }
@@ -711,14 +512,12 @@ function MemorySettingsPanel({ settings, onSave }: { settings: MemorySnapshot["s
 function MemoryCard({
   memory,
   busy,
-  knowledgeEnabled,
-  writeMode,
+  searchable,
   onAction
 }: {
-  memory: MemoryRecord & { knowledge?: { uri: string; syncedAt: string } };
+  memory: MemoryRecord;
   busy: boolean;
-  knowledgeEnabled: boolean;
-  writeMode: MemoryWriteMode;
+  searchable: boolean;
   onAction: (action: string, payload?: unknown) => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -727,7 +526,6 @@ function MemoryCard({
   const [reason, setReason] = useState("");
   const body = memoryBody(memory);
   const long = body.length > 240;
-  const index = indexState(memory, knowledgeEnabled, writeMode);
   function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     onAction("correct", { content, reason });
@@ -740,7 +538,6 @@ function MemoryCard({
           <span className="memory-kind">{KIND_LABELS[memory.kind]}</span>
           <strong title={memory.content}>{memoryTitle(memory)}</strong>
         </div>
-        <span className={`memory-index ${index.tone}`} title={index.title}>{index.label}</span>
       </div>
       {editing ? (
         <form className="memory-edit-form" onSubmit={submit}>
@@ -756,35 +553,34 @@ function MemoryCard({
       )}
       <div className="memory-meta">
         <span>{relativeTime(memory.updatedAt)}</span>
-        <span>召回 {memory.recallCount} 次</span>
+        {memory.recallCount > 0 && <span>被参考 {memory.recallCount} 次</span>}
         <span>{memory.source.label}</span>
         {memory.status === "candidate" && <span className="memory-pending">待确认</span>}
       </div>
       {!editing && (
         <div className="memory-card-actions">
-          {memory.status === "candidate" && <button className="primary-button compact" onClick={() => onAction("confirm")} disabled={busy}><Check size={15} /> 确认启用</button>}
+          {memory.status === "candidate" && <button className="primary-button compact" onClick={() => onAction("confirm")} disabled={busy}><Check size={15} /> 确认记住</button>}
           {memory.status !== "forgotten" && <button className="ghost-button compact" onClick={() => setEditing(true)} disabled={busy}><Pencil size={15} /> 纠正</button>}
         </div>
       )}
       <details className="memory-technical">
-        <summary>更多设置与技术信息</summary>
+        <summary>详情与更多操作</summary>
         <div className="memory-technical-actions">
           {memory.status !== "forgotten" && (memory.sensitivity === "normal"
-            ? <button className="ghost-button compact" onClick={() => onAction("sensitive")} disabled={busy}><ShieldAlert size={15} /> 设为敏感</button>
-            : <button className="ghost-button compact" onClick={() => onAction("unsensitive")} disabled={busy}><EyeOff size={15} /> 取消敏感</button>)}
+            ? <button className="ghost-button compact" onClick={() => onAction("sensitive")} disabled={busy}><ShieldAlert size={15} /> 不再自动参考</button>
+            : <button className="ghost-button compact" onClick={() => onAction("unsensitive")} disabled={busy}><EyeOff size={15} /> 恢复自动参考</button>)}
           {memory.status !== "forgotten" && (
-            <button className="ghost-button compact danger" onClick={() => { if (window.confirm("确认遗忘这条记忆？内容会替换为墓碑，并从召回中移除。")) onAction("forget"); }} disabled={busy}>
+            <button className="ghost-button compact danger" onClick={() => { if (window.confirm("确认遗忘这条内容？遗忘后不会出现在聊天、任务和搜索结果中。")) onAction("forget"); }} disabled={busy}>
               <Trash2 size={15} /> 遗忘
             </button>
           )}
         </div>
         <dl>
           <div><dt>状态</dt><dd>{STATUS_LABELS[memory.status]}</dd></div>
-          <div><dt>范围</dt><dd>{memory.scope}</dd></div>
-          <div><dt>主题键</dt><dd>{memory.subjectKey}</dd></div>
-          <div><dt>置信度</dt><dd>{CONFIDENCE_LABELS[memory.confidence]}</dd></div>
+          <div><dt>适用范围</dt><dd>{memory.scope === "global" ? "所有对话和任务" : memory.scope}</dd></div>
+          <div><dt>自动参考</dt><dd>{searchable ? "会" : "暂不会"}</dd></div>
           <div><dt>敏感度</dt><dd>{SENSITIVITY_LABELS[memory.sensitivity]}</dd></div>
-          <div><dt>OpenViking</dt><dd>{memory.knowledge?.uri ?? "未写入索引"}</dd></div>
+          <div><dt>保存在</dt><dd>这台电脑</dd></div>
         </dl>
       </details>
     </article>
@@ -849,36 +645,11 @@ function memoryBody(memory: MemoryRecord): string {
   return stripped || memory.content;
 }
 
-function indexState(memory: MemoryRecord & { knowledge?: { uri: string } }, enabled: boolean, writeMode: MemoryWriteMode): { label: string; tone: string; title: string } {
-  if (memory.knowledge) return { label: "已写入 OpenViking", tone: "indexed", title: memory.knowledge.uri };
-  if (memory.status !== "active") return { label: "确认后索引", tone: "pending", title: "确认启用后才会参与召回和写入索引。" };
-  if (!enabled) return { label: "仅保存在 Hearth", tone: "local", title: "OpenViking 未启用。" };
-  if (!memory.allowRecall) return { label: "不参与索引", tone: "local", title: "这条记忆已关闭召回。" };
-  if (writeMode === "off") return { label: "不写入索引", tone: "local", title: "当前记忆索引范围设置为不写入。" };
-  if (writeMode === "curated" && !["instructions", "curated"].includes(memory.tier)) {
-    return { label: "未达索引范围", tone: "pending", title: "当前只索引精选记忆；可在上方改为全部干净记忆。" };
-  }
-  return { label: "待写入索引", tone: "pending", title: "下次同步时会写入 OpenViking。" };
-}
-
 function hitTitle(hit: KnowledgeHit): string {
   const line = hit.abstract?.split(/\r?\n/).map((item) => item.trim()).find(Boolean);
   if (line) return truncate(line.replace(/^#+\s*/, ""), 72);
   const file = hit.uri.split("/").pop() ?? hit.uri;
   return truncate(safeDecode(file).replace(/\.md$/i, ""), 72);
-}
-
-function scoreLabel(score: number | null): string {
-  if (score === null) return "未评分";
-  return score <= 1 ? `${Math.round(score * 100)}%` : score.toFixed(2);
-}
-
-function serviceLabel(setup: KnowledgeSetupState | undefined, enabled: boolean, connected: boolean): string {
-  if (connected) return "服务运行中";
-  if (!setup) return "正在检查服务";
-  if (setup.running) return "服务运行中";
-  if (setup.installed) return enabled ? "服务未就绪" : "服务已安装";
-  return "服务未安装";
 }
 
 function safeDecode(value: string): string {
@@ -890,12 +661,12 @@ function safeDecode(value: string): string {
 }
 
 function actionNotice(action: string): string {
-  if (action === "confirm") return "记忆已启用。";
-  if (action === "forget") return "记忆已遗忘；正文已从当前记录、历史版本、事件和导出中脱敏。";
-  if (action === "correct") return "已创建记忆新版本。";
-  if (action === "sensitive") return "已标记为敏感并停止自动召回。";
-  if (action === "unsensitive") return "已恢复普通敏感度。";
-  return "记忆冲突已解决。";
+  if (action === "confirm") return "已确认记住。";
+  if (action === "forget") return "已遗忘。这条内容不会再出现在聊天、任务和搜索结果中。";
+  if (action === "correct") return "已保存修改。";
+  if (action === "sensitive") return "已关闭自动参考；你仍然可以在这里查看。";
+  if (action === "unsensitive") return "已恢复自动参考。";
+  return "已处理这条内容冲突。";
 }
 
 function truncate(value: string, length: number): string {
