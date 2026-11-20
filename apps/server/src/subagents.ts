@@ -73,7 +73,8 @@ function createDispatchTool(options: SubagentToolOptions, compatibility: boolean
         prompt: parsed.objective
       });
 
-      const runAgentJob = async (signal: AbortSignal): Promise<AgentToolResult> => {
+      const runAgentJob = async (signal: AbortSignal, extra?: string): Promise<AgentToolResult> => {
+        const objective = extra ? `${parsed.objective}\n\n## Follow-up instruction\n${extra}` : parsed.objective;
         const worktree = profile.isolation === "worktree" ? createChildWorktree(childId, options) : null;
         options.onStarted?.({
           childId,
@@ -86,7 +87,7 @@ function createDispatchTool(options: SubagentToolOptions, compatibility: boolean
         const childTask = childTaskRecord({
           id: childId,
           title: childTitle,
-          objective: parsed.objective,
+          objective,
           task: options.task,
           root: childRoot,
           outDir: childOutDir,
@@ -105,13 +106,14 @@ function createDispatchTool(options: SubagentToolOptions, compatibility: boolean
           task: childTask,
           prepared: { root: childRoot, outDir: childOutDir, inputs: [] },
           settings: options.settings,
-          prompt: agentPrompt(profile.type, parsed.objective, options.task, profile.outputContract),
+          prompt: agentPrompt(profile.type, objective, options.task, profile.outputContract),
           permissions: childTask.permissions ?? readOnlyPermissions(options, profile.tools),
           budget,
           mode: profile.mode,
           isSubagent: true,
           signal: AbortSignal.any([options.signal, signal]),
-          expectedOutputs: []
+          expectedOutputs: [],
+          ...(options.manager ? { onProgress: () => options.manager!.progress(childId) } : {})
         });
         if (result.status !== "completed") {
           const details = result.status === "waiting_input"
@@ -167,10 +169,10 @@ function createDispatchTool(options: SubagentToolOptions, compatibility: boolean
         };
       };
 
-      const launch = async (signal: AbortSignal): Promise<AgentToolResult> => {
+      const launch = async (signal: AbortSignal, extra?: string): Promise<AgentToolResult> => {
         startActiveWork(context.state, { id: childId, kind: "subagent", label: childTitle });
         try {
-          const result = await runAgentJob(signal);
+          const result = await runAgentJob(signal, extra);
           finishActiveWork(context.state, childId, "completed");
           return result;
         } catch (error) {
@@ -181,7 +183,11 @@ function createDispatchTool(options: SubagentToolOptions, compatibility: boolean
 
       if (parsed.runInBackground) {
         if (!options.manager) throw new Error("后台子代理需要 manager 支持");
-        const job = options.manager.start({ id: childId, type: profile.type, title: childTitle }, launch);
+        const job = options.manager.start(
+          { id: childId, type: profile.type, title: childTitle, transcriptPath },
+          launch,
+          (message, signal) => launch(signal, message)
+        );
         return {
           content: `agentId: ${job.id}\nstatus: running\ntype: ${profile.type}\ntranscript: ${transcriptPath}\n请用 agent_wait 等待结果，或继续其他工作；agent_status 可查看状态，agent_kill 可取消。`,
           metadata: { agentId: job.id, subagentType: profile.type, agentStatus: "running", transcriptPath }

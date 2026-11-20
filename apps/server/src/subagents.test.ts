@@ -145,6 +145,47 @@ describe("native subagents", () => {
     expect(notifications[0]?.content).toContain("<subagent_notification>");
   });
 
+  it("persists sessions, reports stalls, and resumes a killed child", async () => {
+    const parentWorktree = worktrees.ensure(task);
+    const sessionPath = join(root, "subagents", "session.json");
+    let calls = 0;
+    const manager = new SubagentTaskManager(2, sessionPath);
+    const tool = createAgentTool({
+      task,
+      prepared: { root: parentWorktree.path, outDir: join(parentWorktree.path, "out"), inputs: [] },
+      settings: settings(),
+      permissions,
+      signal: new AbortController().signal,
+      worktrees,
+      parentWorktree,
+      manager,
+      runner: async () => {
+        calls += 1;
+        return result(calls === 1 ? "第一轮" : "续跑完成");
+      }
+    });
+
+    const started = await tool.execute({ subagent_type: "explore", description: "持久化", prompt: "调查", run_in_background: true }, context(parentWorktree.path));
+    const id = String(started.metadata?.agentId);
+    await manager.wait(id, 100);
+    expect(manager.get(id)?.status).toBe("completed");
+    expect(existsSync(sessionPath)).toBe(true);
+
+    const reloaded = new SubagentTaskManager(2, sessionPath);
+    expect(reloaded.get(id)?.status).toBe("completed");
+    expect(manager.sendMessage(id, "继续补充")).toMatchObject({ status: "running" });
+    const resumed = await manager.wait(id, 100);
+    expect(resumed.status).toBe("completed");
+    expect(resumed.summary).toContain("续跑完成");
+    expect(calls).toBe(2);
+
+    const stalled = new SubagentTaskManager(2, join(root, "subagents", "stalled.json"));
+    stalled.start({ id: "stalled", type: "explore", title: "stalled" }, () => new Promise(() => undefined));
+    const notices = stalled.stallNotices(Date.now() + 16 * 60_000);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.content).toContain("stall");
+  });
+
   it("creates an isolated child worktree from the parent HEAD and commits its changes", async () => {
     const parentWorktree = worktrees.ensure(task);
     writeFileSync(join(parentWorktree.path, "parent.txt"), "parent commit\n", "utf8");

@@ -1,6 +1,8 @@
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import type { AgentMessage, AgentTool, AgentToolResult } from "@hearth/agent-runtime";
 
-export type ManagedAgentStatus = "running" | "completed" | "failed" | "cancelled";
+export type ManagedAgentStatus = "running" | "completed" | "failed" | "cancelled" | "lost";
 
 export interface ManagedAgent {
   id: string;
@@ -9,10 +11,15 @@ export interface ManagedAgent {
   status: ManagedAgentStatus;
   startedAt: string;
   endedAt: string | null;
+  lastProgressAt: string;
+  transcriptPath: string | null;
+  sessionId: string;
   controller: AbortController;
   promise: Promise<AgentToolResult> | null;
   result: AgentToolResult | null;
   error: string | null;
+  resume?: ((message: string, signal: AbortSignal) => Promise<AgentToolResult>) | undefined;
+  stallNotices?: Set<number> | undefined;
 }
 
 export interface ManagedAgentView {
@@ -22,56 +29,123 @@ export interface ManagedAgentView {
   status: ManagedAgentStatus;
   startedAt: string;
   endedAt: string | null;
+  lastProgressAt: string;
   summary: string | null;
   error: string | null;
 }
 
+const STALL_THRESHOLDS_MS = [15 * 60_000, 30 * 60_000, 60 * 60_000, 4 * 60 * 60_000];
+
 export class SubagentTaskManager {
   private readonly jobs = new Map<string, ManagedAgent>();
   private readonly notifications: AgentMessage[] = [];
+  private readonly sessionPath: string | null;
 
-  constructor(private readonly maxConcurrent = 4) {}
+  constructor(private readonly maxConcurrent = 4, sessionPath: string | null = null) {
+    this.sessionPath = sessionPath;
+    this.load();
+  }
 
   takeNotifications(): AgentMessage[] {
     return this.notifications.splice(0, this.notifications.length);
   }
 
-  start(input: { id: string; type: string; title: string }, run: (signal: AbortSignal) => Promise<AgentToolResult>): ManagedAgent {
+  start(
+    input: { id: string; type: string; title: string; transcriptPath?: string | null },
+    run: (signal: AbortSignal) => Promise<AgentToolResult>,
+    resume?: (message: string, signal: AbortSignal) => Promise<AgentToolResult>
+  ): ManagedAgent {
     const running = [...this.jobs.values()].filter((job) => job.status === "running").length;
     if (running >= this.maxConcurrent) throw new Error(`同时最多运行 ${this.maxConcurrent} 个子代理`);
     const id = input.id;
     if (this.jobs.has(id)) throw new Error(`子代理 ID 已存在：${id}`);
+    const now = new Date().toISOString();
     const job: ManagedAgent = {
       id,
       type: input.type,
       title: input.title,
       status: "running",
-      startedAt: new Date().toISOString(),
+      startedAt: now,
       endedAt: null,
+      lastProgressAt: now,
+      transcriptPath: input.transcriptPath ?? null,
+      sessionId: id,
       controller: new AbortController(),
       promise: null,
       result: null,
-      error: null
+      error: null,
+      ...(resume ? { resume } : {}),
+      stallNotices: new Set()
     };
     this.jobs.set(id, job);
-    job.promise = run(job.controller.signal)
+    job.promise = this.attach(job, run(job.controller.signal));
+    job.promise.catch(() => undefined);
+    this.persist();
+    return job;
+  }
+
+  progress(id: string): void {
+    const job = this.jobs.get(id);
+    if (!job || job.status !== "running") return;
+    job.lastProgressAt = new Date().toISOString();
+    this.persist();
+  }
+
+  sendMessage(id: string, text: string): ManagedAgentView | null {
+    const job = this.jobs.get(id);
+    if (!job) return null;
+    if (job.status === "running") throw new Error(`子代理仍在运行，不能追加消息：${id}`);
+    if (!job.resume) throw new Error(`子代理没有可恢复的会话：${id}`);
+    const now = new Date().toISOString();
+    job.controller = new AbortController();
+    job.status = "running";
+    job.endedAt = null;
+    job.lastProgressAt = now;
+    job.error = null;
+    job.result = null;
+    job.stallNotices = new Set();
+    job.promise = this.attach(job, job.resume(text, job.controller.signal));
+    job.promise.catch(() => undefined);
+    this.persist();
+    return this.status().find((item) => item.id === id) ?? null;
+  }
+
+  stallNotices(now = Date.now()): AgentMessage[] {
+    for (const job of this.jobs.values()) {
+      if (job.status !== "running") continue;
+      const elapsed = now - Date.parse(job.lastProgressAt);
+      for (const threshold of STALL_THRESHOLDS_MS) {
+        if (elapsed < threshold || job.stallNotices?.has(threshold)) continue;
+        job.stallNotices?.add(threshold);
+        this.notifications.push({
+          role: "user",
+          content: `<subagent_notification>\nagentId: ${job.id}\ntype: ${job.type}\nstatus: running\nstall: ${Math.round(elapsed / 60_000)} minutes without progress\nsummary: 子代理可能停滞；可用 agent_status 检查，或 agent_kill 后通过 sendMessage 续跑。\n</subagent_notification>`
+        });
+      }
+    }
+    return this.takeNotifications();
+  }
+
+  private attach(job: ManagedAgent, promise: Promise<AgentToolResult>): Promise<AgentToolResult> {
+    return promise
       .then((result) => {
         job.result = result;
         job.status = job.controller.signal.aborted ? "cancelled" : "completed";
+        job.lastProgressAt = new Date().toISOString();
         this.notify(job);
         return result;
       })
       .catch((error) => {
         job.error = error instanceof Error ? error.message : String(error);
         job.status = job.controller.signal.aborted ? "cancelled" : "failed";
+        job.lastProgressAt = new Date().toISOString();
         this.notify(job);
         throw error;
       })
       .finally(() => {
         job.endedAt = new Date().toISOString();
+        this.persist();
       });
-    job.promise.catch(() => undefined);
-    return job;
   }
 
   get(id: string): ManagedAgent | null {
@@ -86,6 +160,7 @@ export class SubagentTaskManager {
       status: job.status,
       startedAt: job.startedAt,
       endedAt: job.endedAt,
+      lastProgressAt: job.lastProgressAt,
       summary: job.result?.content.slice(0, 2_000) ?? null,
       error: job.error
     }));
@@ -110,6 +185,8 @@ export class SubagentTaskManager {
     job.controller.abort();
     job.status = "cancelled";
     job.endedAt = new Date().toISOString();
+    job.lastProgressAt = job.endedAt;
+    this.persist();
     return true;
   }
 
@@ -119,6 +196,62 @@ export class SubagentTaskManager {
       job.controller.abort();
       job.status = "cancelled";
       job.endedAt = new Date().toISOString();
+      job.lastProgressAt = job.endedAt;
+    }
+    this.persist();
+  }
+
+  private persist(): void {
+    if (!this.sessionPath) return;
+    try {
+      mkdirSync(dirname(this.sessionPath), { recursive: true });
+      const sessions = [...this.jobs.values()].map((job) => ({
+        id: job.id,
+        type: job.type,
+        title: job.title,
+        status: job.status,
+        startedAt: job.startedAt,
+        endedAt: job.endedAt,
+        lastProgressAt: job.lastProgressAt,
+        transcriptPath: job.transcriptPath,
+        sessionId: job.sessionId,
+        error: job.error
+      }));
+      const temp = `${this.sessionPath}.tmp`;
+      writeFileSync(temp, `${JSON.stringify({ sessions }, null, 2)}\n`, "utf8");
+      renameSync(temp, this.sessionPath);
+    } catch {
+      // Session persistence is best-effort; an in-memory job still works.
+    }
+  }
+
+  private load(): void {
+    if (!this.sessionPath || !existsSync(this.sessionPath)) return;
+    try {
+      const parsed = JSON.parse(readFileSync(this.sessionPath, "utf8")) as { sessions?: Array<Partial<ManagedAgent>> };
+      for (const entry of Array.isArray(parsed.sessions) ? parsed.sessions : []) {
+        if (!entry || typeof entry.id !== "string") continue;
+        const status = entry.status === "running" ? "lost" : entry.status;
+        const job: ManagedAgent = {
+          id: entry.id,
+          type: typeof entry.type === "string" ? entry.type : "general-purpose",
+          title: typeof entry.title === "string" ? entry.title : entry.id,
+          status: status === "completed" || status === "failed" || status === "cancelled" || status === "lost" ? status : "lost",
+          startedAt: typeof entry.startedAt === "string" ? entry.startedAt : new Date().toISOString(),
+          endedAt: typeof entry.endedAt === "string" ? entry.endedAt : new Date().toISOString(),
+          lastProgressAt: typeof entry.lastProgressAt === "string" ? entry.lastProgressAt : new Date().toISOString(),
+          transcriptPath: typeof entry.transcriptPath === "string" ? entry.transcriptPath : null,
+          sessionId: typeof entry.sessionId === "string" ? entry.sessionId : entry.id,
+          controller: new AbortController(),
+          promise: null,
+          result: null,
+          error: typeof entry.error === "string" ? entry.error : "服务重启后子代理会话已丢失",
+          stallNotices: new Set()
+        };
+        this.jobs.set(job.id, job);
+      }
+    } catch {
+      // Corrupt session files fall back to an empty in-memory manager.
     }
   }
 
@@ -184,6 +317,28 @@ export function createAgentLifecycleTools(manager: SubagentTaskManager): AgentTo
         const id = typeof args.agent_id === "string" ? args.agent_id : "";
         if (!id) throw new Error("请提供 agent_id");
         return { content: manager.kill(id) ? `已取消 ${id}` : `没有可取消的运行中子代理：${id}` };
+      }
+    },
+    {
+      definition: {
+        name: "agent_send",
+        description: "Send a follow-up message to a completed or lost child agent and resume it.",
+        parameters: {
+          type: "object",
+          properties: {
+            agent_id: { type: "string", description: "ID returned by agent" },
+            message: { type: "string", description: "Follow-up instruction for the child" }
+          },
+          required: ["agent_id", "message"],
+          additionalProperties: false
+        }
+      },
+      async execute(input): Promise<AgentToolResult> {
+        const args = input && typeof input === "object" ? input as Record<string, unknown> : {};
+        const id = typeof args.agent_id === "string" ? args.agent_id : "";
+        const message = typeof args.message === "string" ? args.message.trim() : "";
+        if (!id || !message) throw new Error("请提供 agent_id 和 message");
+        return { content: formatAgent(manager.sendMessage(id, message)!) };
       }
     }
   ];

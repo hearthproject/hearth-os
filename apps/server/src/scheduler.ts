@@ -1741,7 +1741,7 @@ export class HearthScheduler {
         const remainingSubagents = 4 - usedSubagents;
         if (remainingSubagents > 0) {
           const subagentTool = process.env.HEARTH_AGENT_TOOL === "0" ? createSubagentTool : createAgentTool;
-          const manager = new SubagentTaskManager(remainingSubagents);
+          const manager = new SubagentTaskManager(remainingSubagents, join(taskRoot, ".hearth", "subagents", `${runId}.json`));
           subagentManager = manager;
           if (subagentTool === createAgentTool) extraNativeTools.push(...createAgentLifecycleTools(manager));
           controller.signal.addEventListener("abort", () => manager.cancelAll(), { once: true });
@@ -1775,7 +1775,7 @@ export class HearthScheduler {
         budget,
         signal: controller.signal,
         fullPermission,
-        ...(subagentManager ? { steering: () => subagentManager?.takeNotifications() ?? [] } : {}),
+        ...(subagentManager ? { steering: () => subagentManager?.stallNotices() ?? [] } : {}),
         isFullPermission: () => this.service.approvalModeForTask(task) === "full",
         contextSettings: this.context.settings(),
         nativeSettings,
