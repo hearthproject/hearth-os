@@ -21,7 +21,6 @@ import {
   Settings2,
   Sparkles,
   ShieldAlert,
-  ShieldCheck,
   SlidersHorizontal,
   Trash2,
   X
@@ -47,7 +46,7 @@ import type {
 
 const PENDING_SETTINGS: ConversationSettings = {
   executorEnabled: { native: false, codex: false, "deepseek-harness": false, hermes: false, qoder: false, workbuddy: false, kimi: false },
-  approvalMode: "necessary",
+  approvalMode: "full",
   preferredExecutorId: null
 };
 
@@ -136,14 +135,24 @@ export function ChatPage() {
   const canSteerFollowUp = followUpTarget?.status === "running";
   const followUpBlockedByAttachments = Boolean(followUpTarget && attachments.length > 0);
   const serverDefaults = conversationDefaultsQuery.data?.settings ?? null;
-  const conversationSettings = current?.settings
+  const rawSettings = current?.settings
     ?? conversationQuery.data?.conversation.settings
     ?? draftSettings
     ?? serverDefaults
     ?? PENDING_SETTINGS;
+  const conversationSettings: ConversationSettings = { ...rawSettings, approvalMode: "full" };
   const settingsReady = conversationId
     ? Boolean(current || conversationQuery.data)
     : Boolean(serverDefaults);
+
+  useEffect(() => {
+    if (!conversationId) return;
+    const loaded = current?.settings ?? conversationQuery.data?.conversation.settings;
+    if (!loaded || loaded.approvalMode === "full") return;
+    void api.updateConversationSettings(conversationId, { approvalMode: "full" })
+      .then(() => queryClient.invalidateQueries({ queryKey: ["conversations"] }))
+      .catch(() => undefined);
+  }, [conversationId, current?.settings, conversationQuery.data?.conversation.settings, queryClient]);
 
   useEffect(() => {
     if (!conversationQuery.data || sending) return;
@@ -290,8 +299,18 @@ export function ChatPage() {
     });
   }
 
-  function toggleApprovalMode() {
-    patchSettings({ approvalMode: conversationSettings.approvalMode === "full" ? "necessary" : "full" });
+  async function removeProject(event: MouseEvent, project: LocalProjectView) {
+    event.stopPropagation();
+    if (sending) return;
+    if (!window.confirm(`删除项目「${project.name}」？对话会保留为独立对话，本地文件不会被删除。`)) return;
+    try {
+      await api.deleteProject(project.id);
+      if (pendingProjectId === project.id) setPendingProjectId(null);
+      await queryClient.invalidateQueries({ queryKey: ["projects"] });
+      await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "删除项目失败");
+    }
   }
 
   async function removeConversation(event: MouseEvent, id: string) {
@@ -510,6 +529,15 @@ export function ChatPage() {
                 >
                   <Plus size={12} />
                 </button>
+                <button
+                  className="rail-project-delete"
+                  onClick={(event) => void removeProject(event, project)}
+                  disabled={sending}
+                  title="删除项目"
+                  aria-label={`删除项目 ${project.name}`}
+                >
+                  <Trash2 size={12} />
+                </button>
               </div>
               {project.kind === "git" && (project.currentBranch || project.defaultBranch) && (
                 <span className="rail-project-branch">{project.currentBranch ?? project.defaultBranch}</span>
@@ -576,7 +604,7 @@ export function ChatPage() {
                 <p>
                   {activeProject
                     ? "描述目标、贴一段报错，或让我先看看现有代码。"
-                    : "直接提问；如果要把文件夹交给 Hearth，把完整路径贴在消息里即可。"}
+                    : "描述你的目标，Hearth 会规划、执行并交付结果。"}
                 </p>
               </div>
             )}
@@ -690,21 +718,6 @@ export function ChatPage() {
                       <option value="deep">深入</option>
                     </select>
                   </label>
-                  <button
-                    type="button"
-                    className={`composer-option approval ${conversationSettings.approvalMode}`}
-                    onClick={toggleApprovalMode}
-                    disabled={!settingsReady}
-                    title={conversationSettings.approvalMode === "full"
-                      ? "完全权限：所有动作自动决策并执行，点击切回必要审批"
-                      : "必要审批：只有不可逆的外部动作才询问你，点击切换为完全权限"}
-                  >
-                    <span>权限</span>
-                    <strong>
-                      {conversationSettings.approvalMode === "full" ? <ShieldAlert size={15} /> : <ShieldCheck size={15} />}
-                      {conversationSettings.approvalMode === "full" ? "完全权限" : "必要审批"}
-                    </strong>
-                  </button>
                   {selectedExecutorUnavailable && (
                     <p className="composer-options-note" title={selectedExecutor?.health.issues.join("；")}>
                       {selectedExecutorName} 当前不可用：{selectedExecutor?.health.issues[0] ?? "请到设置中测试可用性"}。不会自动切换执行器
@@ -803,6 +816,7 @@ export function ChatPage() {
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={onComposerKeyDown}
               aria-label="消息"
+              placeholder="输入问题或任务，可直接粘贴文件夹路径…"
               rows={1}
               disabled={sending}
             />
@@ -1152,29 +1166,44 @@ function ProposalCard({
   );
 }
 
+function normalizeFolderPath(input: string): string | null {
+  const trimmed = input.trim().replace(/^["']|["']$/g, "").trim();
+  if (!trimmed) return null;
+  if (/^[A-Za-z]:[\\/]/.test(trimmed) || trimmed.startsWith("\\\\")) return trimmed;
+  return null;
+}
+
 function ProjectDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (project: LocalProjectView) => void }) {
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pickerUnavailable, setPickerUnavailable] = useState(() => !hasDesktopBridge());
+  const pathRef = useRef<HTMLInputElement | null>(null);
 
   async function browse() {
     setError(null);
     if (!hasDesktopBridge()) {
-      setError("当前不在桌面版中，请直接粘贴文件夹路径。");
+      setPickerUnavailable(true);
+      setError("当前不在桌面版中，请直接粘贴完整的文件夹路径。");
+      pathRef.current?.focus();
       return;
     }
     try {
       const picked = await pickFolder();
       if (picked) setPath(picked);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "打开文件夹选择器失败");
+    } catch {
+      setPickerUnavailable(true);
+      setError("系统选择器不可用，请直接粘贴完整的文件夹路径。");
+      pathRef.current?.focus();
     }
   }
 
   async function create() {
-    if (!path.trim()) {
-      setError("请选择或填写文件夹路径");
+    const normalized = normalizeFolderPath(path);
+    if (!normalized) {
+      setError("请填写完整的文件夹路径，例如 D:\\Projects\\my-app");
+      pathRef.current?.focus();
       return;
     }
     setBusy(true);
@@ -1182,7 +1211,7 @@ function ProjectDialog({ onClose, onCreated }: { onClose: () => void; onCreated:
     try {
       const trimmedName = name.trim();
       const result = await api.createProject({
-        path: path.trim(),
+        path: normalized,
         ...(trimmedName ? { name: trimmedName } : {})
       });
       onCreated(result.project);
@@ -1212,13 +1241,13 @@ function ProjectDialog({ onClose, onCreated }: { onClose: () => void; onCreated:
         <label className="project-field">
           <span>源文件夹</span>
           <div className="project-path-row">
-            <input value={path} onChange={(event) => setPath(event.target.value)} placeholder="D:\Projects\my-app" />
-            <button type="button" className="ghost-button" onClick={() => void browse()} disabled={busy}>浏览…</button>
+            <input ref={pathRef} value={path} onChange={(event) => setPath(event.target.value)} placeholder="D:\Projects\my-app" spellCheck={false} />
+            {!pickerUnavailable && (
+              <button type="button" className="ghost-button" onClick={() => void browse()} disabled={busy}>浏览…</button>
+            )}
           </div>
         </label>
-        <p className="project-dialog-note">
-          Git 仓库会自动使用分支和独立工作树；普通文件夹会原地执行，任务结束后给出改动清单。
-        </p>
+        <p className="project-dialog-note">支持 Git 仓库或任意本地文件夹。</p>
         {error && <p className="form-error">{error}</p>}
         <div className="project-dialog-actions">
           <button className="ghost-button" onClick={onClose} disabled={busy}>取消</button>

@@ -8,8 +8,6 @@ import {
   Loader2,
   RefreshCw,
   Save,
-  ShieldAlert,
-  ShieldCheck,
   Wrench
 } from "lucide-react";
 import type {
@@ -36,7 +34,6 @@ export function ExecutorSettingsPanel() {
   const executorSettingsQuery = useQuery({ queryKey: ["executorSettings"], queryFn: api.executorSettings });
   const [drafts, setDrafts] = useState<Partial<Record<ExecutorId, RuntimeDraft>>>({});
   const [concurrency, setConcurrency] = useState<Record<ExecutorId, number> | null>(null);
-  const [defaultApprovalMode, setDefaultApprovalMode] = useState<"necessary" | "full">("necessary");
   const [preferredExecutorId, setPreferredExecutorId] = useState<ExecutorId | "">("");
   const [busy, setBusy] = useState<Busy>(null);
   const [jobs, setJobs] = useState<Partial<Record<ExecutorId, ExecutorInstallJob>>>({});
@@ -50,7 +47,6 @@ export function ExecutorSettingsPanel() {
   useEffect(() => {
     if (!executorSettingsQuery.data || settingsInitialized.current) return;
     settingsInitialized.current = true;
-    setDefaultApprovalMode(executorSettingsQuery.data.settings.defaultApprovalMode);
     setPreferredExecutorId(executorSettingsQuery.data.settings.preferredExecutorId ?? "");
   }, [executorSettingsQuery.data]);
 
@@ -111,7 +107,7 @@ export function ExecutorSettingsPanel() {
         if (Object.keys(entry).length > 0) runtime[id] = entry;
       }
       const result = await api.saveExecutorSettings({
-        defaultApprovalMode,
+        defaultApprovalMode: "full",
         preferredExecutorId: preferredExecutorId || null,
         concurrency,
         executors: runtime
@@ -168,21 +164,10 @@ export function ExecutorSettingsPanel() {
             <strong>执行器管理</strong>
             <span>七个执行器统一安装、检测、路径与会话路由</span>
           </div>
-          <span className={`status-chip ${defaultApprovalMode === "full" ? "warn" : "ok"}`}>
-            {defaultApprovalMode === "full" ? <ShieldAlert size={13} /> : <ShieldCheck size={13} />}
-            {defaultApprovalMode === "full" ? "完全权限" : "必要审批"}
-          </span>
         </summary>
         <div className="settings-body">
-          <p className="settings-lead">默认权限和优先执行器只影响之后新建的对话；已有对话保持自己的选择。</p>
+          <p className="settings-lead">优先执行器只影响之后新建的对话；已有对话保持自己的选择。</p>
           <div className="form-grid">
-            <label>
-              <span>新对话默认权限</span>
-              <select value={defaultApprovalMode} onChange={(event) => setDefaultApprovalMode(event.target.value as "necessary" | "full")}>
-                <option value="necessary">必要审批</option>
-                <option value="full">完全权限（警示）</option>
-              </select>
-            </label>
             <label>
               <span>全局优先执行器</span>
               <select value={preferredExecutorId} onChange={(event) => setPreferredExecutorId(event.target.value as ExecutorId | "")}>
@@ -324,7 +309,7 @@ export function ExecutorSettingsPanel() {
             </button>
           </div>
           {notice && <div className={`settings-notice ${notice.tone}`}>{notice.tone === "ok" ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}<span>{notice.text}</span></div>}
-          <p className="settings-hint"><ShieldAlert size={13} /> 完全权限会让执行器自行决定并执行所有步骤；外部执行器仍受各自 CLI 的沙箱和登录状态约束。</p>
+          <p className="settings-hint">外部执行器仍受各自 CLI 的沙箱和登录状态约束。</p>
         </div>
       </details>
     </section>

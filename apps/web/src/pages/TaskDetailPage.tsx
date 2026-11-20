@@ -160,13 +160,13 @@ export function TaskDetailPage() {
   }
 
   async function deleteCurrentTask() {
-    if (!window.confirm("将任务移入回收站？可以从回收站恢复。")) return;
+    if (!window.confirm(`永久删除「${task.title}」？删除后无法恢复。`)) return;
     setDeleteError(null);
     try {
       await api.deleteTask(task.id);
     } catch (caught) {
       if (caught instanceof ApiError && caught.code === "TASK_RUNNING") {
-        const confirmed = window.confirm("任务正在运行。取消当前运行并把任务移入回收站吗？");
+        const confirmed = window.confirm("任务正在运行。取消当前运行并永久删除？");
         if (!confirmed) return;
         try {
           await api.deleteTask(task.id, true);
@@ -178,6 +178,12 @@ export function TaskDetailPage() {
         setDeleteError(caught instanceof Error ? caught.message : "删除任务失败");
         return;
       }
+    }
+    try {
+      await api.purgeTrash([{ kind: "task", id: task.id }]);
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "删除任务失败");
+      return;
     }
     await queryClient.invalidateQueries({ queryKey: ["tasks"] });
     await queryClient.invalidateQueries({ queryKey: ["trash"] });
@@ -233,7 +239,7 @@ export function TaskDetailPage() {
                   </button>
                 )}
                 <button type="button" role="menuitem" className="danger" onClick={() => { setMenuOpen(false); void deleteCurrentTask(); }}>
-                  <Trash2 size={13} /> 移入回收站
+                  <Trash2 size={13} /> 删除
                 </button>
               </div>
             )}

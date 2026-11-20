@@ -5,6 +5,14 @@
   display: inline-flex;
 }
 
+.task-quick-actions {
+  gap: 2px;
+}
+
+.task-quick-actions .icon-button.danger:hover {
+  color: var(--danger, #b4452f);
+}
+
 .task-actions-menu {
   position: fixed;
   z-index: 70;

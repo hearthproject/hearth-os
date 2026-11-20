@@ -235,7 +235,7 @@ function ExecutorsTab() {
             </div>
           )}
           {notice && <Notice tone={notice.tone} text={notice.text} />}
-          <p className="settings-hint"><ShieldAlert size={13} /> 完全权限只影响执行过程中的审批；切换执行器仍受上下文开关、风险策略和最大接管次数约束。</p>
+          <p className="settings-hint"><ShieldAlert size={13} /> 执行器切换仍受上下文开关、风险策略和最大接管次数约束。</p>
         </div>
       </section>
     </section>
@@ -512,6 +512,7 @@ function ProjectsTab() {
   const [defaultBranch, setDefaultBranch] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<NoticeState>(null);
+  const [pickerUnavailable, setPickerUnavailable] = useState(() => !hasDesktopBridge());
 
   async function addProject() {
     setBusy(true);
@@ -537,14 +538,16 @@ function ProjectsTab() {
   async function browseProjectFolder() {
     setNotice(null);
     if (!hasDesktopBridge()) {
-      setNotice({ tone: "error", text: "当前不在桌面版中，请直接粘贴文件夹路径。" });
+      setPickerUnavailable(true);
+      setNotice({ tone: "error", text: "当前不在桌面版中，请直接粘贴完整的文件夹路径。" });
       return;
     }
     try {
       const picked = await pickFolder();
       if (picked) setPath(picked);
-    } catch (error) {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "打开文件夹选择器失败" });
+    } catch {
+      setPickerUnavailable(true);
+      setNotice({ tone: "error", text: "系统选择器不可用，请直接粘贴完整的文件夹路径。" });
     }
   }
 
@@ -567,12 +570,12 @@ function ProjectsTab() {
     <section className="settings-tab-panel">
       <section className="panel settings-section">
         <div className="settings-body">
-          <div className="section-heading"><div><h3>注册本地项目</h3><p>选择任意本地文件夹。Git 仓库会自动使用分支与独立 Worktree；普通文件夹原地执行，并在任务结束后给出改动清单。</p></div><FolderGit2 size={20} /></div>
+          <div className="section-heading"><div><h3>注册本地项目</h3><p>选择任意本地文件夹；Git 仓库与普通文件夹都支持。</p></div><FolderGit2 size={20} /></div>
           <div className="form-grid">
             <label className="span-2"><span>项目文件夹</span>
               <div className="project-path-row">
                 <input value={path} onChange={(event) => setPath(event.target.value)} placeholder="D:\\code\\my-project" spellCheck={false} />
-                <button type="button" className="ghost-button" onClick={() => void browseProjectFolder()}>浏览…</button>
+                {!pickerUnavailable && <button type="button" className="ghost-button" onClick={() => void browseProjectFolder()}>浏览…</button>}
               </div>
             </label>
             <label><span>显示名称（可选）</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="默认使用目录名" /></label>
@@ -942,7 +945,7 @@ function ContextTab() {
 
       <section className="panel settings-section">
         <div className="settings-body">
-          <div className="section-heading"><div><h3>接管规则</h3><p>完全权限下执行器故障会自动切换；必要审批下只询问“是否切换执行器”。非执行器错误直接说明原因。</p></div></div>
+          <div className="section-heading"><div><h3>接管规则</h3><p>执行器故障会自动切换；非执行器错误直接说明原因。</p></div></div>
           {!form && <InlineLoading text="正在读取上下文设置" />}
           {form && (
             <div className="form-grid context-form">

@@ -96,7 +96,11 @@
 .task-table th:nth-child(5) { width: 7%; }
 
 .task-table th.task-row-actions-head {
-  width: 56px;
+  width: 118px;
+}
+
+.task-table .task-row-actions {
+  white-space: nowrap;
 }
 
 .task-table td {

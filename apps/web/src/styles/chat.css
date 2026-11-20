@@ -629,13 +629,13 @@
   background: var(--surface-sunk);
 }
 
-.rail-project-new {
+.rail-project-new,
+.rail-project-delete {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 24px;
   height: 24px;
-  margin-right: 4px;
   border: 0;
   border-radius: var(--radius);
   background: transparent;
@@ -643,13 +643,23 @@
   opacity: 0;
 }
 
-.rail-project-head:hover .rail-project-new {
+.rail-project-delete {
+  margin-right: 4px;
+}
+
+.rail-project-head:hover .rail-project-new,
+.rail-project-head:hover .rail-project-delete {
   opacity: 1;
 }
 
 .rail-project-new:hover:not(:disabled) {
   background: var(--line);
   color: var(--ink);
+}
+
+.rail-project-delete:hover:not(:disabled) {
+  background: var(--line);
+  color: var(--danger, #b4452f);
 }
 
 .rail-project-branch {

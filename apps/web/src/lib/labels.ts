@@ -193,7 +193,7 @@ export const EVENT_LABELS: Record<string, string> = {
   "run.updated": "执行记录更新",
   "approval.created": "等待你确认",
   "approval.updated": "确认结果已记录",
-  "approval.auto_approved": "完全权限自动放行",
+  "approval.auto_approved": "自动放行",
   "artifact.published": "产物已保存",
   "effect.created": "外部动作已开始",
   "effect.updated": "外部动作已更新",

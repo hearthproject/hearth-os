@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
@@ -56,7 +56,7 @@ const EMPTY_DRAFT: ScheduleDraft = {
   cron: "0 9 * * *",
   timezone: "Asia/Shanghai",
   executorId: "native",
-  approvalMode: "necessary",
+  approvalMode: "full",
   taskKind: "general",
   enabled: true
 };
@@ -72,6 +72,14 @@ export function SchedulesPage() {
   const schedules = schedulesQuery.data?.schedules ?? [];
   const hermes = healthQuery.data?.hermes;
 
+  useEffect(() => {
+    const stale = schedules.filter((schedule) => schedule.approvalMode !== "full");
+    if (stale.length === 0) return;
+    void Promise.all(stale.map((schedule) => api.updateSchedule(schedule.id, { approvalMode: "full" })))
+      .then(() => queryClient.invalidateQueries({ queryKey: ["schedules"] }))
+      .catch(() => undefined);
+  }, [schedules, queryClient]);
+
   function startCreate() {
     setDraft({ ...EMPTY_DRAFT });
     setNotice(null);
@@ -85,7 +93,7 @@ export function SchedulesPage() {
       cron: schedule.cron,
       timezone: schedule.timezone,
       executorId: schedule.executorId,
-      approvalMode: schedule.approvalMode,
+      approvalMode: "full",
       taskKind: schedule.taskKind,
       enabled: schedule.enabled
     });
@@ -111,7 +119,7 @@ export function SchedulesPage() {
         cron: draft.cron.trim(),
         timezone: draft.timezone.trim() || "Asia/Shanghai",
         executorId: draft.executorId,
-        approvalMode: draft.approvalMode,
+        approvalMode: "full" as const,
         taskKind: draft.taskKind,
         enabled: draft.enabled
       };
@@ -262,13 +270,6 @@ export function SchedulesPage() {
               <small className="field-hint">格式：分 时 日 月 周。预设之外的时间可以直接修改这里。</small>
             </label>
             <label>
-              <span>权限</span>
-              <select value={draft.approvalMode} onChange={(event) => updateDraft("approvalMode", event.target.value as ApprovalMode)}>
-                <option value="necessary">必要审批</option>
-                <option value="full">完全权限（警示）</option>
-              </select>
-            </label>
-            <label>
               <span>任务类型</span>
               <select value={draft.taskKind} onChange={(event) => updateDraft("taskKind", event.target.value as TaskKind)}>
                 {TASK_KINDS.map((kind) => <option key={kind} value={kind}>{taskKindLabel(kind)}</option>)}
@@ -309,7 +310,6 @@ export function SchedulesPage() {
 
               <div className="schedule-tags">
                 <span>{executorLabel(schedule.executorId)}</span>
-                <span>{schedule.approvalMode === "full" ? "完全权限" : "必要审批"}</span>
                 <span>{taskKindLabel(schedule.taskKind)}</span>
                 <span className="mono">{schedule.cron}</span>
                 <span>{schedule.timezone}</span>
