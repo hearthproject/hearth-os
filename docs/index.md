@@ -50,30 +50,16 @@ hero:
     <img src="/screenshots/chat.png" alt="Hearth 聊天工作台">
     <figcaption>
       <strong>聊天工作台</strong>
-      <span>一句意图推进任务；进度、结果与产物就地出现。</span>
+      <span>对话常驻左侧；目标、进度、产物与附件在右侧按需展开并可直接预览。</span>
     </figcaption>
   </figure>
 
   <div class="screenshot-gallery">
     <figure class="screenshot-card">
-      <img src="/screenshots/tasks.png" alt="任务列表">
-      <figcaption>
-        <strong>任务列表</strong>
-        <span>运行中、等待确认与已完成的任务一行读完。</span>
-      </figcaption>
-    </figure>
-    <figure class="screenshot-card">
       <img src="/screenshots/task-detail.png" alt="任务详情">
       <figcaption>
         <strong>任务详情</strong>
         <span>结果在前，原始需求、执行过程与交付文件按需展开。</span>
-      </figcaption>
-    </figure>
-    <figure class="screenshot-card">
-      <img src="/screenshots/inbox.png" alt="主动收件箱">
-      <figcaption>
-        <strong>需要你</strong>
-        <span>每条建议一行；展开后才是证据与操作。</span>
       </figcaption>
     </figure>
     <figure class="screenshot-card">
