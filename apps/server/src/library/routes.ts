@@ -21,6 +21,10 @@ const addRootSchema = z.object({
   projectId: z.string().trim().min(1).max(120).nullable().optional()
 }).strict();
 
+const summarySchema = z.object({
+  force: z.boolean().optional()
+}).strict();
+
 export function registerLibraryRoutes(app: FastifyInstance, library: LibraryService): void {
   app.get("/api/library/status", async () => {
     library.tree.ensureRoots();
@@ -48,6 +52,16 @@ export function registerLibraryRoutes(app: FastifyInstance, library: LibraryServ
   app.get<{ Params: { id: string } }>("/api/library/nodes/:id", async (request, reply) => {
     try {
       return library.getNodeDetails(request.params.id);
+    } catch (error) {
+      return libraryFailure(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/library/nodes/:id/summary", async (request, reply) => {
+    const parsed = summarySchema.safeParse(request.body ?? {});
+    if (!parsed.success) return invalid(reply);
+    try {
+      return { summary: await library.summarizeNode(request.params.id, parsed.data.force ?? false) };
     } catch (error) {
       return libraryFailure(reply, error);
     }

@@ -35,6 +35,11 @@ describe("library routes", () => {
     expect(tree.statusCode).toBe(200);
     expect(tree.json().nodes.map((node: { title: string }) => node.title)).toEqual(["记忆", "任务", "资料", "技能", "项目"]);
 
+    const memoryRoot = tree.json().nodes.find((node: { title: string }) => node.title === "记忆");
+    const summary = await app.inject({ method: "POST", url: `/api/library/nodes/${memoryRoot.id}/summary`, payload: {} });
+    expect(summary.statusCode).toBe(200);
+    expect(summary.json().summary.content).toContain("记忆");
+
     const search = await app.inject({ method: "GET", url: "/api/library/search?q=" + encodeURIComponent("资料库搜索") });
     expect(search.statusCode).toBe(200);
     const hit = search.json().hits[0];

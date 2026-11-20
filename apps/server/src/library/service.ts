@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
   LibraryNode,
   LibrarySearchHit,
@@ -10,6 +11,7 @@ import type { HearthStore } from "@hearth/eventlog";
 import type { MemoryService } from "../memory.ts";
 import { bufferToEmbedding, cosineSimilarity, embeddingToBuffer, type EmbeddingProvider } from "./embedding.ts";
 import { LibraryIndexer, type LibraryIndexResult } from "./indexer.ts";
+import { localSummary, type LibrarySummaryGenerator, type LibrarySummarySource } from "./summary.ts";
 import { LibraryTreeService } from "./tree.ts";
 
 const TRASH_DAYS = 30;
@@ -30,11 +32,20 @@ export interface LibraryServiceOptions {
   memory?: MemoryService;
   indexer?: LibraryIndexer;
   embeddingProvider?: EmbeddingProvider;
+  summaryGenerator?: LibrarySummaryGenerator;
 }
 
 export interface LibraryReindexResult extends LibraryIndexResult {
   embedded: number;
   semanticError: string | null;
+}
+
+export interface LibrarySummaryResult {
+  nodeId: string;
+  content: string;
+  stale: false;
+  generated: boolean;
+  model: string | null;
 }
 
 export class LibraryService {
@@ -43,6 +54,7 @@ export class LibraryService {
   private readonly store: HearthStore;
   private readonly memory: MemoryService | null;
   private readonly embeddingProvider: EmbeddingProvider | null;
+  private summaryGenerator: LibrarySummaryGenerator | null;
   private dirty = true;
   private refresh: Promise<LibraryReindexResult> | null = null;
   private timer: NodeJS.Timeout | null = null;
@@ -52,6 +64,7 @@ export class LibraryService {
     this.store = store;
     this.memory = options.memory ?? null;
     this.embeddingProvider = options.embeddingProvider ?? null;
+    this.summaryGenerator = options.summaryGenerator ?? null;
     this.tree = new LibraryTreeService(store);
     this.indexer = options.indexer ?? new LibraryIndexer(store, this.tree);
   }
@@ -76,9 +89,15 @@ export class LibraryService {
 
   markDirty(): void {
     this.dirty = true;
+    this.tree.repository.markAllSummariesStale();
+  }
+
+  setSummaryGenerator(generator: LibrarySummaryGenerator | null): void {
+    this.summaryGenerator = generator;
   }
 
   status(): LibraryStatus {
+    this.tree.repository.resetSummaryUsageIfNeeded();
     const settings = this.tree.repository.getSettings();
     const modelId = this.embeddingProvider?.modelId ?? settings.modelId;
     return {
@@ -95,6 +114,46 @@ export class LibraryService {
       lastIndexAt: this.lastIndexedAt(),
       summaryTokensUsedToday: settings.summaryTokensUsedToday
     };
+  }
+
+  async summarizeNode(id: string, force = false): Promise<LibrarySummaryResult> {
+    const node = this.tree.getNode(id);
+    if (!node) throw new LibraryError("NODE_NOT_FOUND", "没有找到这个资料", 404);
+    const children = this.tree.repository.listChildren(id, { limit: 200 });
+    const source: LibrarySummarySource = {
+      node,
+      children: children.map((child) => ({
+        id: child.id,
+        title: child.title,
+        kind: child.kind,
+        excerpt: this.tree.repository.listChunks(child.id)[0]?.text ?? null,
+        summary: this.tree.repository.getSummary(child.id, 1)?.content ?? null,
+        updatedAt: child.updatedAt
+      }))
+    };
+    const sourceHash = createHash("sha256")
+      .update(JSON.stringify(source.children.map((child) => [child.id, child.title, child.kind, child.updatedAt, child.summary, child.excerpt])))
+      .digest("hex");
+    const previous = this.tree.repository.getSummary(id, 1);
+    if (!force && previous && !previous.stale && previous.sourceHash === sourceHash) {
+      return { nodeId: id, content: previous.content, stale: false, generated: false, model: null };
+    }
+
+    this.tree.repository.resetSummaryUsageIfNeeded();
+    const settings = this.tree.repository.getSettings();
+    const withinBudget = settings.summaryTokensUsedToday < settings.dailySummaryTokens;
+    let value = this.summaryGenerator && withinBudget ? await this.summaryGenerator(source).catch(() => null) : null;
+    value ??= localSummary(source);
+    this.tree.repository.upsertSummary({
+      nodeId: id,
+      level: 1,
+      content: value.content,
+      sourceHash,
+      model: value.model,
+      tokenCount: value.tokenCount
+    });
+    if (value.tokenCount > 0) this.tree.repository.addSummaryUsage(value.tokenCount);
+    return { nodeId: id, content: value.content, stale: false, generated: true, model: value.model };
   }
 
   async reindex(): Promise<LibraryReindexResult> {

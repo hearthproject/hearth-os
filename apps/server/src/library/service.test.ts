@@ -75,6 +75,31 @@ describe("LibraryService", () => {
     library.stop();
     store.close();
   });
+
+  it("generates a directory summary lazily and reuses it until the folder changes", async () => {
+    const store = new HearthStore(":memory:");
+    seedMemory(store, "mem-summary", "目录摘要只在需要时生成。");
+    const library = new LibraryService(store);
+    await library.reindex();
+    const memoryRoot = library.tree.buildTree(1).find((node) => node.title === "记忆")!;
+
+    const first = await library.summarizeNode(memoryRoot.id);
+    expect(first.generated).toBe(true);
+    expect(first.content).toContain("共有 1 项");
+    expect(library.tree.buildTree(1).find((node) => node.id === memoryRoot.id)?.summary).toBe(first.content);
+
+    const cached = await library.summarizeNode(memoryRoot.id);
+    expect(cached.generated).toBe(false);
+
+    seedMemory(store, "mem-summary-2", "新增一条记忆后摘要会更新。");
+    library.markDirty();
+    await library.reindex();
+    const refreshed = await library.summarizeNode(memoryRoot.id);
+    expect(refreshed.generated).toBe(true);
+    expect(refreshed.content).toContain("共有 2 项");
+    library.stop();
+    store.close();
+  });
 });
 
 function embeddedRoot(library: LibraryService, dir: string): void {

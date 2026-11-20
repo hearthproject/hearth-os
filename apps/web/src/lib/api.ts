@@ -443,6 +443,12 @@ export const api = {
     chunkCount: number;
     children: LibraryNode[];
   }>(`/api/library/nodes/${encodeURIComponent(id)}`),
+  librarySummarizeNode: (id: string, force = false) => request<{
+    summary: { nodeId: string; content: string; stale: false; generated: boolean; model: string | null };
+  }>(`/api/library/nodes/${encodeURIComponent(id)}/summary`, {
+    method: "POST",
+    body: JSON.stringify({ force })
+  }),
   libraryReindex: () => request<{ result: { indexed: number; unchanged: number; skipped: number; failed: number; chunks: number; embedded: number; semanticError: string | null } }>("/api/library/reindex", { method: "POST" }),
   libraryDeleteNode: (id: string, reason?: string) => request<{ entry: LibraryTrashEntry }>(`/api/library/nodes/${encodeURIComponent(id)}`, {
     method: "DELETE",

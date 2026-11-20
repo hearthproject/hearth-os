@@ -397,7 +397,13 @@ export class LibraryTreeService {
   treeNode(node: LibraryNode, remainingDepth: number): LibraryTreeNode {
     const children = remainingDepth > 1 ? this.repository.listChildren(node.id).map((child) => this.treeNode(child, remainingDepth - 1)) : undefined;
     const childCount = children?.length ?? this.repository.listChildren(node.id, { limit: 5_000 }).length;
-    return { ...node, childCount, summary: this.repository.getSummary(node.id, 1)?.content ?? null, ...(children ? { children } : {}) };
+    const summary = this.repository.getSummary(node.id, 1);
+    return {
+      ...node,
+      childCount,
+      summary: summary && !summary.stale ? summary.content : null,
+      ...(children ? { children } : {})
+    };
   }
 
   private node(input: {

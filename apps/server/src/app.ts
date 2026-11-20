@@ -70,6 +70,7 @@ import { KnowledgeManagedService, KnowledgeSetupError } from "./knowledge/manage
 import { LibraryService } from "./library/service.ts";
 import { registerLibraryRoutes } from "./library/routes.ts";
 import { LocalEmbeddingProvider, type EmbeddingProvider } from "./library/embedding.ts";
+import { createModelSummaryGenerator, type LibrarySummaryGenerator } from "./library/summary.ts";
 import { McpServerError, McpServerService } from "./mcp-servers.ts";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
@@ -623,6 +624,7 @@ export interface BuildServerOptions {
   contextBlobRoot?: string;
   contextIndex?: ContextIndex;
   libraryEmbeddingProvider?: EmbeddingProvider | null;
+  librarySummaryGenerator?: LibrarySummaryGenerator | null;
 }
 
 export async function buildServer(options: BuildServerOptions = {}) {
@@ -815,6 +817,11 @@ export async function buildServer(options: BuildServerOptions = {}) {
     backupRoot: options.backupRoot ?? BACKUP_DIR
   });
   const modelSettingsForExecutor = (executorId: ExecutorId) => modelRegistry.settingsForExecutorOrChat(executorId);
+  if (options.librarySummaryGenerator !== null) {
+    library.setSummaryGenerator(
+      options.librarySummaryGenerator ?? createModelSummaryGenerator(() => modelSettingsForExecutor("native"))
+    );
+  }
   const codexProfile = () => {
     const binding = modelRegistry.bindingViews().find((item) => item.executorId === "codex");
     if (binding?.profileId && !binding.available) {
