@@ -16,6 +16,7 @@
     "test:watch": "vitest",
     "test:browser": "tsx scripts/browser-e2e.ts",
     "test:e2e": "npm run test:browser && node scripts/e2e.mjs",
+    "test:longrun": "vitest run --config vitest.longrun.config.ts",
     "bench:aci": "tsx scripts/bench/aci-bench.ts post-change.json",
     "bench:legacy": "tsx scripts/bench/legacy-aci.ts pre-change.json",
     "bench:suite": "tsx scripts/bench/run-suite.ts",
