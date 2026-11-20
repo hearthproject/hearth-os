@@ -177,7 +177,30 @@ async function main() {
   console.log(`node ${node.version}; npm ${npmVersion}`);
   console.log(`resources: ${(sizeOf(resources) / 1048576).toFixed(1)} MiB`);
 
-  await run(join(repoRoot, "node_modules", ".bin", "tauri.cmd"), ["build"], tauriRoot);
+  const updaterReady = Boolean(
+    process.env.TAURI_SIGNING_PRIVATE_KEY
+    && process.env.HEARTH_UPDATER_PUBKEY
+    && process.env.HEARTH_UPDATER_ENDPOINT
+  );
+  const tauriArgs = ["build"];
+  if (updaterReady) {
+    const overlayPath = join(tauriRoot, "src-tauri", "updater.build.json");
+    writeFileSync(overlayPath, JSON.stringify({
+      bundle: { createUpdaterArtifacts: true },
+      plugins: {
+        updater: {
+          pubkey: process.env.HEARTH_UPDATER_PUBKEY,
+          endpoints: [process.env.HEARTH_UPDATER_ENDPOINT]
+        }
+      }
+    }, null, 2), "utf8");
+    tauriArgs.push("--config", overlayPath, "--features", "updater");
+    console.log("updater: signed build enabled");
+  } else {
+    console.warn("updater: disabled because TAURI_SIGNING_PRIVATE_KEY, HEARTH_UPDATER_PUBKEY or HEARTH_UPDATER_ENDPOINT is missing");
+  }
+
+  await run(join(repoRoot, "node_modules", ".bin", "tauri.cmd"), tauriArgs, tauriRoot);
 
   const targetRelease = process.env.CARGO_TARGET_DIR
     ? join(process.env.CARGO_TARGET_DIR, "release")

@@ -1419,10 +1419,15 @@ fn pick_folder() -> Option<String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let app = tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             show_main(app);
-        }))
+        }));
+    #[cfg(feature = "updater")]
+    {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+    let app = builder
         .invoke_handler(tauri::generate_handler![pick_folder])
         .setup(|app| setup_app(app))
         .on_window_event(|window, event| {
