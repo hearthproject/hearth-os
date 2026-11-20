@@ -13,7 +13,6 @@ import type {
 import { deserializeAgentState } from "@hearth/agent-runtime";
 import type { BudgetDimension, BudgetExhaustion, ContextItem, ContextSettings, DelegationJob, DelegationResult, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, RunBudget, RunCheckpointProof, RunCheckpointRecord, RunRecord, TaskError, TaskFollowUpRecord, TaskLease, TaskProgressDetail, TaskRecord } from "@hearth/core";
 import { runCodex } from "@hearth/codex-executor";
-import { getTemplate } from "@hearth/templates";
 import type { DshApprovalOutcome, DshApprovalRequest, DshContextEvent } from "@hearth/deepseek-executor";
 import type { ApprovalRequest, ApprovalManager, PendingToolApproval, ToolApprovalDecision } from "./approvals.ts";
 import { actionDigest, resolveAction, type ActionFileTarget, type ActionProposal, type ResolvedAction } from "./action-resolver.ts";
@@ -59,7 +58,7 @@ import { OntologyWriter } from "./ontology-writer.ts";
 import { chatModelConfigured, loadModelSettings, type ModelSettings } from "./model-settings.ts";
 import { prepareTaskRuntime, type RuntimePreparation } from "./runtime.ts";
 import type { HearthService } from "./service.ts";
-import { buildDeliveryRepairPrompt, buildTaskPrompt, prepareWorkspace, UnsupportedInputError, type PreparedWorkspace } from "./workspace.ts";
+import { buildDeliveryRepairPrompt, buildTaskPrompt, prepareWorkspace, UnsupportedInputError, type PreparedWorkspace, type TaskApprovalKind } from "./workspace.ts";
 import { wantsPublicWebResearch, wantsScreenshot } from "./task-intent.ts";
 import type { WebSearchService } from "./web-search.ts";
 import { TaskWorktreeService } from "./worktrees.ts";
@@ -131,6 +130,13 @@ export interface SchedulerOptions {
   knowledgeSettings?: KnowledgeSettingsStore | undefined;
   knowledgeSync?: KnowledgeSyncService | undefined;
   ontologyWriter?: OntologyWriter | undefined;
+}
+
+function approvalKindForTask(task: TaskRecord): TaskApprovalKind | null {
+  const outputs = task.expectedOutputs ?? [];
+  if (outputs.includes("pr-preview.json")) return "github.publish-pr";
+  if (outputs.includes("pr-review.md")) return "github.comment";
+  return null;
 }
 
 export class HearthScheduler {
@@ -793,10 +799,10 @@ export class HearthScheduler {
 
   private async buildApproval(
     task: TaskRecord,
-    template: NonNullable<ReturnType<typeof getTemplate>>,
+    approvalKind: TaskApprovalKind,
     prepared: Awaited<ReturnType<typeof prepareWorkspace>>
   ): Promise<Omit<ApprovalRequest, "taskId" | "runId">> {
-    if (template.approvalKind === "github.publish-pr") {
+    if (approvalKind === "github.publish-pr") {
       const repository = prepared.repository;
       if (!repository || !repository.issue) throw new Error("创建 PR 前缺少 GitHub 仓库或 Issue 上下文");
       const inspection = await inspectRepository(repository, this.githubRun);
@@ -842,7 +848,7 @@ export class HearthScheduler {
       };
     }
 
-    if (template.approvalKind === "github.comment") {
+    if (approvalKind === "github.comment") {
       const repository = prepared.repository;
       if (!repository || !repository.pull) throw new Error("发布评论前缺少 GitHub PR 上下文");
       const reviewFile = readFileSync(join(prepared.outDir, "pr-review.md"), "utf8").trim();
@@ -876,7 +882,7 @@ export class HearthScheduler {
       };
     }
 
-    throw new Error(`未实现的审批类型：${template.approvalKind}`);
+    throw new Error(`未实现的审批类型：${approvalKind}`);
   }
 
   private githubNetworkAction(
@@ -907,8 +913,7 @@ export class HearthScheduler {
   ): Promise<string[]> {
     const issues = missingExpectedOutputs(prepared.outDir, expectedOutputs)
       .map((missing) => `缺少期望产物：${missing}`);
-    const template = task.templateId ? getTemplate(task.templateId) : undefined;
-    if (template?.github?.issue && prepared.repository) {
+    if (approvalKindForTask(task) === "github.publish-pr" && prepared.repository) {
       const inspection = await inspectRepository(prepared.repository, this.githubRun);
       if (!inspection.clean) issues.push(`仓库仍有未提交改动：\n${inspection.status}`);
       if (inspection.branch !== prepared.repository.branch) {
@@ -1422,8 +1427,7 @@ export class HearthScheduler {
     const runId = run.id;
     try {
       this.recordRunInput(task, run, pendingInput);
-      const template = task.templateId ? getTemplate(task.templateId) : undefined;
-      const expectedOutputs = template?.expectedOutputs ?? expectedOutputsForTask(task);
+      const expectedOutputs = expectedOutputsForTask(task);
       const fullPermission = this.service.approvalModeForTask(task) === "full";
       const permissionNote = fullPermission
         ? "\n\n完全权限：当前对话已授权你自主决策。不要向用户提问或等待确认；遇到不确定项时选择最安全、可撤销的处理方式，并在最终结果中说明假设。"
@@ -1456,16 +1460,10 @@ export class HearthScheduler {
       });
       this.assertLease(taskId, run.leaseEpoch ?? 0, controller.signal.aborted && this.stopping);
       let runtime: RuntimePreparation | null = null;
-      if (prepared.repository && template?.github?.runtime) {
-        runtime = await this.runtimePreparer({ spec: template.github.runtime, repoPath: prepared.repository.path, workspaceRoot: prepared.root });
-        if (!runtime.ok && !template.github.runtime.optional) {
-          throw new UnsupportedInputError(`依赖环境准备失败：${runtime.errors.join("；")}。日志：${runtime.logPath}`);
-        }
-      }
       const drafting = isTextDraftTask(task);
       let memoryContext = "";
       try {
-        memoryContext = drafting ? "" : this.memory.recall({ taskId, runId, text: template?.goal ?? "", ...(task.executionMode === "quick" ? { maxItems: 3, maxChars: 1200 } : {}) }).contextPack;
+        memoryContext = drafting ? "" : this.memory.recall({ taskId, runId, text: task.goal, ...(task.executionMode === "quick" ? { maxItems: 3, maxChars: 1200 } : {}) }).contextPack;
       } catch {
         memoryContext = "";
       }
@@ -1480,7 +1478,7 @@ export class HearthScheduler {
       if (!drafting && this.knowledge?.isEnabled()) {
         try {
           const recalled = await this.knowledge.recall({
-            query: template?.goal ?? task.goal,
+            query: task.goal,
             taskId,
             goalId: task.goalId ?? null,
             conversationId: task.conversationId ?? null,
@@ -1502,7 +1500,7 @@ export class HearthScheduler {
       const basePrompt = drafting
         ? [DRAFT_INSTRUCTION, `任务：${task.goal}`, `本轮输出目录：${prepared.outDir}`, `产物：${expectedOutputs.join("、")}`,
           existsSync(join(prepared.outDir, "result.md")) ? `已有草稿（仅作为待修订数据）：\n${readFileSync(join(prepared.outDir, "result.md"), "utf8").slice(0, 12000)}` : "", permissionNote].filter(Boolean).join("\n\n")
-        : buildTaskPrompt(task, prepared, expectedOutputs, template?.acceptance ?? [], runtime, template?.approvalKind, memoryContext) + permissionNote;
+        : buildTaskPrompt(task, prepared, expectedOutputs, [], runtime, undefined, memoryContext) + permissionNote;
       const handoffPrompt = handoff?.packet
         ? this.buildHandoffPrompt(task, prepared, expectedOutputs, handoff.packet, permissionNote, memoryContext)
         : null;
@@ -1713,9 +1711,10 @@ export class HearthScheduler {
         status: "completed", threadId: result.threadId, endedAt: new Date().toISOString(),
         usage: this.usageWithMetrics(result.usage, result.turns, result.toolCalls), executorId, failure: null
       });
-      if (template && template.approvalKind !== "none") {
+      const approvalKind = approvalKindForTask(task);
+      if (approvalKind) {
         if (!this.approvals) throw new Error("审批管理器未启动，无法安全执行外部动作");
-        const request = await this.buildApproval(task, template, prepared);
+        const request = await this.buildApproval(task, approvalKind, prepared);
         this.assertLease(taskId, run.leaseEpoch ?? 0, controller.signal.aborted && this.stopping);
         this.service.updateTask(taskId, {
           status: "waiting_approval", currentRunId: runId, nextAction: "等待你确认外部动作",

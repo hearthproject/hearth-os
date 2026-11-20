@@ -84,7 +84,6 @@ export function publishArtifacts(options: PublishArtifactsOptions): ArtifactReco
   const manifest = {
     schemaVersion: 1,
     taskId: options.task.id,
-    templateId: options.task.templateId,
     title: options.task.title,
     runId: options.run.id,
     attempt: options.run.attempt,

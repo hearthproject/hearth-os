@@ -10,7 +10,6 @@ import type {
   TaskPermissions,
   TaskRecord
 } from "@hearth/core";
-import { getTemplate } from "@hearth/templates";
 import type { AgentMessage } from "@hearth/agent-runtime";
 import { estimateTokens, type ContextService } from "./context.ts";
 import { ContextBroker } from "./context-broker.ts";
@@ -56,7 +55,6 @@ export class ContextProjector {
   buildPacket(input: BuildPacketInput): HandoffPacket {
     const task = this.service.requireTask(input.taskId);
     const state = this.context.getState(input.taskId) ?? this.context.refreshSummary(input.taskId);
-    const template = task.templateId ? getTemplate(task.templateId) : undefined;
     const artifactMap = new Map<string, { path: string; sha256: string; bytes: number; mimeType: string }>();
     for (const artifact of state.artifacts) {
       if (artifact.path.startsWith("handoffs/")) continue;
@@ -90,7 +88,7 @@ export class ContextProjector {
       sourceCursor: state.summarySeq,
       createdAt: now,
       goal: task.goal,
-      acceptance: template?.acceptance ?? task.expectedOutputs ?? [],
+      acceptance: task.expectedOutputs ?? [],
       permissions,
       remainingBudget: input.remainingBudget,
       summary: input.diagnosisSummary || state.summary,

@@ -81,17 +81,6 @@ describe("context fallback policy", () => {
     expect(write.reason).toContain("写权限");
   });
 
-  it("marks approval templates as high risk", () => {
-    const service = setup();
-    const task = service.createTask({ templateId: "T08", executorId: "native" });
-    const evaluation = evaluateHandoff({
-      service, task, targetExecutor: "codex", targetAvailable: true,
-      settings: DEFAULT_CONTEXT_SETTINGS, taskWorkspace: join(root ?? "", "task")
-    });
-    expect(evaluation.eligible).toBe(true);
-    expect(evaluation.highRisk).toBe(true);
-  });
-
   it("applies retry, handoff limits and user confirmation", () => {
     const evaluation = { targetAvailable: true, eligible: true, highRisk: false, reason: "low risk" };
     expect(decideFailure({

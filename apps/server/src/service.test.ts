@@ -33,12 +33,12 @@ describe("Hearth service agent metadata", () => {
     store.close();
   });
 
-  it("keeps template tasks on the codex executor", () => {
+  it("creates custom tasks on the native executor", () => {
     const store = new HearthStore(":memory:");
     const service = new HearthService(store);
-    const task = service.createTask({ templateId: "T01" });
-    expect(task.executorId).toBe("codex");
-    expect(task.expectedOutputs).toContain("meeting-notes.md");
+    const task = service.createTask({ title: "会议纪要", goal: "根据会议原始记录生成行动纪要" });
+    expect(task.executorId).toBe("native");
+    expect(task.expectedOutputs).toEqual(["result.md"]);
     store.close();
   });
 
@@ -246,4 +246,5 @@ describe("Hearth service agent metadata", () => {
     store.close();
   });
 });
+
 

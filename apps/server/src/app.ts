@@ -8,7 +8,6 @@ import Fastify, { type FastifyReply } from "fastify";
 import type { EventEnvelope, ExecutorHealth, ExecutorId, ExecutorView, GoalBudget, TaskRecord } from "@hearth/core";
 import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DELEGATION_WORKSPACE_POLICIES, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, EXECUTOR_IDS, GOAL_REVIEW_POLICIES, GOAL_STATES, GOAL_VALIDATORS, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_ORIGINS, MEMORY_RETENTIONS, MEMORY_SENSITIVITIES, MEMORY_TAINT_STATES, MEMORY_TIERS, MEMORY_TRUST_LEVELS, PROACTIVE_MODES, RECONCILE_STATUSES, RUN_STATUSES, SANDBOX_MODES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
-import { getTemplate } from "@hearth/templates";
 import { loadCodexProfile, runCodex } from "@hearth/codex-executor";
 import { z } from "zod";
 import { ARTIFACT_DIR, ATTACHMENT_DIR, BACKUP_DIR, CODEX_HOME_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, DSH_HOME_DIR, EXECUTOR_HOME_DIR, EXECUTOR_SETTINGS_PATH, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, OUTBOX_DIR, REPO_ROOT, SOURCE_CONTENT_DIR, WEB_DIST, WORKSPACE_DIR } from "./config.ts";
@@ -106,7 +105,6 @@ function awaitToolDecision(
 }
 
 const createTaskSchema = z.object({
-  templateId: z.string().trim().min(1).max(20).optional(),
   title: z.string().trim().min(1).max(120).optional(),
   goal: z.string().trim().min(1).max(4000).optional(),
   textInput: z.string().max(100_000).optional(),
@@ -2310,8 +2308,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
   });
 
-  app.get("/api/templates", async () => ({ templates: service.listTemplates() }));
-
   app.get("/api/sources", async () => ({ sources: sources.list() }));
 
   app.post("/api/sources", async (request, reply) => {
@@ -2817,7 +2813,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
 
     const input: CreateTaskInput = {};
-    if (parsed.data.templateId !== undefined) input.templateId = parsed.data.templateId;
     if (parsed.data.title !== undefined) input.title = parsed.data.title;
     if (parsed.data.goal !== undefined) input.goal = parsed.data.goal;
     if (parsed.data.textInput !== undefined) input.textInput = parsed.data.textInput;
@@ -2828,9 +2823,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
     if (parsed.data.permissions !== undefined) input.permissions = parsed.data.permissions;
     if (parsed.data.goalId !== undefined) input.goalId = parsed.data.goalId;
     if (parsed.data.projectId !== undefined) input.projectId = parsed.data.projectId;
-    if (input.templateId && !getTemplate(input.templateId)) {
-      return reply.code(400).send({ error: "UNKNOWN_TEMPLATE", message: `没有找到任务模板 ${input.templateId}` });
-    }
     if (input.goalId && !service.getGoal(input.goalId)) {
       return reply.code(400).send({ error: "UNKNOWN_GOAL", message: `没有找到目标 ${input.goalId}` });
     }

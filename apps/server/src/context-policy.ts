@@ -8,7 +8,6 @@ import type {
   TaskRecord
 } from "@hearth/core";
 import { isAbsolute, relative, resolve } from "node:path";
-import { getTemplate } from "@hearth/templates";
 import { LeaseError } from "./leases.ts";
 import { wantsScreenshot } from "./task-intent.ts";
 import { UnsupportedInputError } from "./workspace.ts";
@@ -81,12 +80,10 @@ export function evaluateHandoff(input: {
   if (settings.mode === "shadow") {
     return { targetAvailable, eligible: true, highRisk: true, reason: "当前是 shadow 模式，只记录诊断，不自动接管" };
   }
-  const template = task.templateId ? getTemplate(task.templateId) : undefined;
   const approvals = service.store.listApprovals(task.id).filter((approval) => approval.status === "pending");
   const effects = service.store.listEffects(task.id).filter((effect) => ["pending", "executing", "uncertain"].includes(effect.status));
   const outbox = service.store.listOutboxDrafts().filter((draft) => draft.taskId === task.id && ["pending_approval", "stored", "uncertain"].includes(draft.status));
   const riskyEffects = approvals.length > 0 || effects.length > 0 || outbox.length > 0;
-  const riskyTemplate = Boolean(template && template.approvalKind !== "none");
   const networkBlocked = targetExecutor === "codex" && task.networkHosts.length > 0 && !settings.allowCodexNetwork;
   const writesOutsideWorkspace = Boolean(input.taskWorkspace && task.permissions?.writeRoots.some((root) => {
     if (!root.trim()) return false;
@@ -95,9 +92,6 @@ export function evaluateHandoff(input: {
   }));
   if (riskyEffects) {
     return { targetAvailable, eligible: true, highRisk: true, reason: "任务存在待审批或状态不确定的外部动作，需要用户确认后才能接管" };
-  }
-  if (riskyTemplate) {
-    return { targetAvailable, eligible: true, highRisk: true, reason: "任务包含外部发布或评论动作，需要用户确认后才能接管" };
   }
   if (networkBlocked) {
     return { targetAvailable, eligible: true, highRisk: true, reason: "Codex 网络访问未开启，接管会改变任务权限边界" };

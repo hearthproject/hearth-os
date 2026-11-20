@@ -375,14 +375,6 @@ describe("Hearth server", () => {
     }
   });
 
-  it("lists the fifteen evaluation templates", async () => {
-    const app = await buildServer({ store, serveWeb: false });
-    const response = await app.inject({ method: "GET", url: "/api/templates" });
-    expect(response.statusCode).toBe(200);
-    expect(response.json().templates).toHaveLength(15);
-    await app.close();
-  });
-
   it("attaches ready source items to a task and rejects stale selections", async () => {
     const item = seedSourceItem(store);
     const app = await buildServer({ store, serveWeb: false });
@@ -465,7 +457,7 @@ describe("Hearth server", () => {
 
   it("exports task records and refuses the legacy plaintext backup", async () => {
     const app = await buildServer({ store, serveWeb: false });
-    const created = await app.inject({ method: "POST", url: "/api/tasks", payload: { templateId: "T04" } });
+    const created = await app.inject({ method: "POST", url: "/api/tasks", payload: { title: "归档网页", goal: "把指定网页归档为 Markdown" } });
     expect(created.statusCode).toBe(201);
 
     const exported = await app.inject({ method: "GET", url: "/api/export" });
@@ -484,13 +476,13 @@ describe("Hearth server", () => {
     const response = await app.inject({
       method: "POST",
       url: "/api/tasks",
-      payload: { templateId: "T01" }
+      payload: { title: "会议纪要", goal: "根据会议原始记录生成行动纪要" }
     });
     expect(response.statusCode).toBe(201);
     const task = response.json();
-    expect(task.templateId).toBe("T01");
+    expect(task.templateId).toBeNull();
     expect(task.status).toBe("queued");
-    expect(task.outputDir).toBe(".hearth/artifacts/T01");
+    expect(task.outputDir).toBe(`.hearth/artifacts/${task.id}`);
 
     const detail = await app.inject({ method: "GET", url: `/api/tasks/${task.id}` });
     expect(detail.statusCode).toBe(200);
@@ -509,7 +501,8 @@ describe("Hearth server", () => {
       method: "POST",
       url: "/api/tasks",
       payload: {
-        templateId: "T01",
+        title: "会议纪要",
+        goal: "根据会议原始记录生成行动纪要",
         permissions: { readRoots: [], writeRoots: [], networkHosts: [], tools: ["shell"], sandboxMode: "read-only" }
       }
     });
@@ -520,7 +513,7 @@ describe("Hearth server", () => {
 
   it("pins and archives tasks without changing task status", async () => {
     const app = await buildServer({ store, serveWeb: false });
-    const created = await app.inject({ method: "POST", url: "/api/tasks", payload: { templateId: "T01" } });
+    const created = await app.inject({ method: "POST", url: "/api/tasks", payload: { title: "会议纪要", goal: "根据会议原始记录生成行动纪要" } });
     const taskId = created.json().id as string;
 
     const pinned = await app.inject({
@@ -606,21 +599,13 @@ describe("Hearth server", () => {
     }
   });
 
-  it("rejects unknown templates and cross-site writes", async () => {
+  it("rejects cross-site writes", async () => {
     const app = await buildServer({ store, serveWeb: false });
-    const unknown = await app.inject({
-      method: "POST",
-      url: "/api/tasks",
-      payload: { templateId: "T99" }
-    });
-    expect(unknown.statusCode).toBe(400);
-    expect(unknown.json().error).toBe("UNKNOWN_TEMPLATE");
-
     const crossSite = await app.inject({
       method: "POST",
       url: "/api/tasks",
       headers: { origin: "https://example.com", "sec-fetch-site": "cross-site" },
-      payload: { templateId: "T01" }
+      payload: { title: "会议纪要", goal: "根据会议原始记录生成行动纪要" }
     });
     expect(crossSite.statusCode).toBe(403);
     await app.close();
@@ -628,7 +613,7 @@ describe("Hearth server", () => {
 
   it("pages the audit lists and reports honest totals", async () => {
     const app = await buildServer({ store, serveWeb: false });
-    const created = await app.inject({ method: "POST", url: "/api/tasks", payload: { templateId: "T01" } });
+    const created = await app.inject({ method: "POST", url: "/api/tasks", payload: { title: "会议纪要", goal: "根据会议原始记录生成行动纪要" } });
     const taskId = created.json().id as string;
     seedAuditFixtures(store, taskId);
 
@@ -675,7 +660,7 @@ describe("Hearth server", () => {
 
   it("aggregates stats and summaries without inventing numbers", async () => {
     const app = await buildServer({ store, serveWeb: false });
-    const created = await app.inject({ method: "POST", url: "/api/tasks", payload: { templateId: "T08" } });
+    const created = await app.inject({ method: "POST", url: "/api/tasks", payload: { title: "评审 PR", goal: "对 Pull Request 做证据化评审" } });
     const taskId = created.json().id as string;
     seedAuditFixtures(store, taskId);
 
@@ -786,7 +771,7 @@ describe("Hearth server", () => {
       const created = await fetch(`http://127.0.0.1:${address.port}/api/tasks`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ templateId: "T04" }),
+        body: JSON.stringify({ title: "归档网页", goal: "把指定网页归档为 Markdown" }),
         signal: controller.signal
       });
       expect(created.status).toBe(201);
@@ -799,7 +784,7 @@ describe("Hearth server", () => {
         received += decoder.decode(chunk.value, { stream: true });
       }
       expect(received).toContain("event: task.created");
-      expect(received).toContain('"templateId":"T04"');
+      expect(received).toContain('"title":"归档网页"');
       await reader.cancel();
     } finally {
       clearTimeout(timeout);
@@ -826,7 +811,7 @@ describe("Hearth server", () => {
       const created = await fetch(`http://127.0.0.1:${address.port}/api/tasks`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ templateId: "T04" }),
+        body: JSON.stringify({ title: "归档网页", goal: "把指定网页归档为 Markdown" }),
         signal: controller.signal
       });
       expect(created.status).toBe(201);
@@ -838,7 +823,7 @@ describe("Hearth server", () => {
         if (chunk.done) break;
         received += decoder.decode(chunk.value, { stream: true });
       }
-      expect(received).toContain('"templateId":"T04"');
+      expect(received).toContain('"title":"归档网页"');
       expect(received).not.toContain("历史回放不应该出现");
       await reader.cancel();
     } finally {
@@ -850,7 +835,7 @@ describe("Hearth server", () => {
 
   it("replays context events after a reconnect cursor", async () => {
     const app = await buildServer({ store, serveWeb: false });
-    const created = await app.inject({ method: "POST", url: "/api/tasks", payload: { templateId: "T04" } });
+    const created = await app.inject({ method: "POST", url: "/api/tasks", payload: { title: "归档网页", goal: "把指定网页归档为 Markdown" } });
     expect(created.statusCode).toBe(201);
     const taskId = created.json().id as string;
     const cursor = store.latestEventSeq();
@@ -887,3 +872,4 @@ describe("Hearth server", () => {
     }
   });
 });
+

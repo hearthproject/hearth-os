@@ -1,15 +1,17 @@
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
-import type { SourceItem, TaskRecord } from "@hearth/core";
-import { getTemplate, type TaskTemplate } from "@hearth/templates";
+import type { SourceItem, TaskRecord, TaskInput } from "@hearth/core";
 import {
   prepareGitHubWorkspace,
   type CommandRunner,
+  type GitHubTaskSpec,
   type RepositoryContext
 } from "./github.ts";
 import { fetchWebSnapshot, WebInputError, type WebSnapshot } from "./web-fetch.ts";
 import type { RuntimePreparation } from "./runtime.ts";
+
+export type TaskApprovalKind = "github.publish-pr" | "github.comment";
 
 export interface PreparedInput {
   label: string;
@@ -232,12 +234,10 @@ export async function prepareWorkspace(options: {
 
     if (input.kind === "github") {
       if (repository) throw new UnsupportedInputError("一个任务只能包含一个 GitHub 仓库输入");
-      const template = options.task.templateId ? getTemplate(options.task.templateId) : undefined;
-      if (!template?.github) throw new UnsupportedInputError(`模板 ${options.task.templateId ?? "自定义"} 缺少 GitHub 仓库配置`);
       let preparedGitHub;
       try {
         preparedGitHub = await prepareGitHubWorkspace({
-          spec: template.github,
+          spec: parseGitHubInput(input),
           taskId: options.task.id,
           workspaceRoot: taskRoot,
           run: options.githubRun,
@@ -310,7 +310,7 @@ export function buildTaskPrompt(
   expectedOutputs: string[],
   acceptance: string[] = [],
   runtime?: RuntimePreparation | null,
-  approvalKind?: TaskTemplate["approvalKind"],
+  approvalKind?: TaskApprovalKind,
   memoryContext?: string
 ): string {
   const inputLines = workspace.inputs.map((input) => {
@@ -493,4 +493,12 @@ export function resolveInside(root: string, candidate: string): string {
 
 function slug(value: string): string {
   return value.replace(/[\\/:*?"<>|\s]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "input";
+}
+
+function parseGitHubInput(input: TaskInput): GitHubTaskSpec {
+  const match = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/(issues|pull)\/(\d+)(?:[/?#]|$)/i.exec(input.value.trim());
+  if (!match) throw new UnsupportedInputError(`GitHub 输入地址无法解析：${input.value}`);
+  const repo = `${match[1] ?? ""}/${match[2] ?? ""}`;
+  const number = Number(match[4]);
+  return (match[3] ?? "").toLowerCase() === "issues" ? { repo, issue: number } : { repo, pull: number };
 }

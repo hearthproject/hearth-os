@@ -114,7 +114,7 @@ function createEffect(
   createdAt = new Date().toISOString(),
   taskId?: string
 ): EffectRecord {
-  const resolvedTaskId = taskId ?? service.createTask({ templateId: "T07" }).id;
+  const resolvedTaskId = taskId ?? service.createTask({ title: "Publish PR", goal: "Publish a reviewed pull request" }).id;
   const effect: EffectRecord = {
     id: randomUUID(),
     taskId: resolvedTaskId,
@@ -136,3 +136,4 @@ function createEffect(
   service.createEffect(effect);
   return effect;
 }
+

@@ -39,7 +39,6 @@ import type {
 } from "@hearth/core";
 import { assertTransition, defaultConversationSettings, EXECUTOR_IDS, TASK_STATUS_LABELS, TASK_STATUSES } from "@hearth/core";
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
-import { getTemplate, TEMPLATES } from "@hearth/templates";
 import { resolveRepoPath } from "./config.ts";
 import { EventBus } from "./events.ts";
 import { executorName, resolveExecutorFromEnabled, resolveExecutorLocked } from "./executors.ts";
@@ -50,7 +49,6 @@ export interface CreateTaskInput {
   executionMode?: TaskRecord["executionMode"];
   externalRef?: string;
   requestHash?: string;
-  templateId?: string;
   title?: string;
   goal?: string;
   textInput?: string;
@@ -153,20 +151,15 @@ export class HearthService {
 
   createTask(input: CreateTaskInput): TaskRecord {
     const now = new Date().toISOString();
-    const template = input.templateId ? getTemplate(input.templateId) : undefined;
-    if (input.templateId && !template) throw new Error(`Unknown template: ${input.templateId}`);
     const project = input.projectId ? this.store.getLocalProject(input.projectId) : null;
     if (input.projectId && !project) {
       throw new TaskInputSelectionError("PROJECT_NOT_FOUND", "选择的本地项目不存在", 404);
     }
-    if (project && template?.github) {
-      throw new TaskInputSelectionError("PROJECT_GITHUB_CONFLICT", "本地项目任务不能同时使用 GitHub 仓库模板", 409);
-    }
     if (project && input.executorId && input.executorId !== "native") {
       throw new TaskInputSelectionError("PROJECT_EXECUTOR_UNSUPPORTED", "本地项目任务当前仅支持 native 执行器", 409);
     }
-    const id = `${template?.id ?? "CUSTOM"}-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
-    const inputs = template ? [...template.inputs] : [];
+    const id = `CUSTOM-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
+    const inputs: TaskInput[] = [];
     if (input.inputs) inputs.push(...input.inputs);
     if (project && inputs.some((item) => item.kind === "github")) {
       throw new TaskInputSelectionError("PROJECT_GITHUB_CONFLICT", "本地项目任务不能同时包含 GitHub 仓库输入", 409);
@@ -208,8 +201,8 @@ export class HearthService {
     for (const file of input.fileInputs ?? []) {
       inputs.push({ kind: "file", label: file.label, value: file.path });
     }
-    let networkHosts = template?.networkHosts ?? input.networkHosts ?? [];
-    if (template?.github || wantsGithubAccess([input.title, input.goal, input.textInput].filter(Boolean).join("\n"))) {
+    let networkHosts = input.networkHosts ?? [];
+    if (wantsGithubAccess([input.title, input.goal, input.textInput].filter(Boolean).join("\n"))) {
       networkHosts = [...new Set([...networkHosts, ...GITHUB_NETWORK_HOSTS])];
     }
     if (wantsPublicWebResearch([input.title, input.goal, input.textInput].filter(Boolean).join("\n"))) {
@@ -232,25 +225,25 @@ export class HearthService {
       }
       inputs.push({ kind: "workspace", label: "工作目录", value: realpathSync.native(workspacePath) });
     }
-    const executorId = project ? "native" : input.executorId ?? (template ? "codex" : "native");
+    const executorId = project ? "native" : input.executorId ?? "native";
     if (input.goalId && !this.store.getGoal(input.goalId)) throw new Error(`Unknown goal: ${input.goalId}`);
-    const taskKind = input.taskKind ?? (template?.github || project || workspacePath ? "workspace" : "general");
-    const expectedOutputs = input.expectedOutputs ?? template?.expectedOutputs ?? ["result.md"];
+    const taskKind = input.taskKind ?? (project || workspacePath ? "workspace" : "general");
+    const expectedOutputs = input.expectedOutputs ?? ["result.md"];
     const task: TaskRecord = {
       id,
       ...(input.executionMode ? { executionMode: input.executionMode } : {}),
       goalId: input.goalId ?? null,
       ...(input.externalRef ? { externalRef: input.externalRef, requestHash: input.requestHash ?? null } : {}),
-      templateId: template?.id ?? null,
-      title: input.title?.trim() || template?.title || "未命名任务",
-      goal: input.goal?.trim() || template?.goal || input.textInput?.trim() || "完成用户描述的任务",
+      templateId: null,
+      title: input.title?.trim() || "未命名任务",
+      goal: input.goal?.trim() || input.textInput?.trim() || "完成用户描述的任务",
       status: "queued",
       createdAt: now,
       updatedAt: now,
       deadline: null,
       inputs,
       networkHosts,
-      outputDir: input.outputDir ?? template?.outputDir ?? `.hearth/artifacts/${id}`,
+      outputDir: input.outputDir ?? `.hearth/artifacts/${id}`,
       currentRunId: null,
       nextAction: "等待执行",
       error: null,
@@ -278,10 +271,6 @@ export class HearthService {
     const event = this.store.appendEvent({ type: "task.created", taskId: id, payload: task });
     this.bus.publish(event);
     return task;
-  }
-
-  listTemplates(): typeof TEMPLATES {
-    return TEMPLATES;
   }
 
   listTasks(): TaskRecord[] {

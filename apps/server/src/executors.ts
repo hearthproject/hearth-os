@@ -35,9 +35,7 @@ export const EXECUTORS: ExecutorDescriptor[] = [
 ];
 
 export function resolveExecutorId(task: TaskRecord): ExecutorId {
-  if (task.executorId) return task.executorId;
-  if (task.templateId) return "codex";
-  return "native";
+  return task.executorId ?? "native";
 }
 
 export function executorName(id: ExecutorId): string {

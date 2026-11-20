@@ -159,7 +159,7 @@ describe("approval manager", () => {
       preferredExecutorId: null
     });
     const manager = new ApprovalManager(service, async () => ({}));
-    const task = service.createTask({ templateId: "T07", conversationId: conversation.id });
+    const task = service.createTask({ title: "Publish PR", goal: "Publish a reviewed pull request", conversationId: conversation.id });
     const now = new Date().toISOString();
     const runId = randomUUID();
     service.createRun({
@@ -253,7 +253,7 @@ describe("approval manager", () => {
       approvalMode: "full",
       preferredExecutorId: null
     });
-    const task = service.createTask({ templateId: "T07", conversationId: conversation.id });
+    const task = service.createTask({ title: "Publish PR", goal: "Publish a reviewed pull request", conversationId: conversation.id });
     const now = new Date().toISOString();
     const runId = randomUUID();
     service.createRun({
@@ -301,7 +301,7 @@ describe("approval manager", () => {
   });
 
   async function waitingTask(service: HearthService) {
-    const task = service.createTask({ templateId: "T07" });
+    const task = service.createTask({ title: "Publish PR", goal: "Publish a reviewed pull request" });
     const now = new Date().toISOString();
     const runId = randomUUID();
     const run: RunRecord = {
@@ -340,7 +340,7 @@ describe("approval manager", () => {
   }
 
   function runningTask(service: HearthService) {
-    const task = service.createTask({ templateId: "T07" });
+    const task = service.createTask({ title: "Publish PR", goal: "Publish a reviewed pull request" });
     const now = new Date().toISOString();
     const runId = randomUUID();
     service.createRun({
@@ -361,4 +361,5 @@ describe("approval manager", () => {
     return { task: service.requireTask(task.id), runId };
   }
 });
+
 

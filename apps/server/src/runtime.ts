@@ -1,7 +1,19 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import type { TaskRuntimeSpec } from "@hearth/templates";
 import { runCommand, type CommandRunner } from "./github.ts";
+
+export interface TaskRuntimeSpec {
+  python?: {
+    version: string;
+    workingDirectory: string;
+    requirements: string[];
+  };
+  node?: {
+    workingDirectory: string;
+    install: "ci" | "install";
+  };
+  optional?: boolean;
+}
 
 const INSTALL_TIMEOUT_MS = 20 * 60 * 1000;
 const MAX_LOG_CHARS = 200_000;

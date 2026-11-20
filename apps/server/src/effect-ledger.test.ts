@@ -16,7 +16,7 @@ describe("effect ledger v2", () => {
   afterEach(() => store.close());
 
   it("persists replay policy, leases, and reconcile metadata", () => {
-    const task = service.createTask({ templateId: "T07" });
+    const task = service.createTask({ title: "Publish PR", goal: "Publish a reviewed pull request" });
     const now = new Date().toISOString();
     const effect: EffectRecord = {
       id: randomUUID(),
@@ -74,3 +74,4 @@ describe("effect ledger v2", () => {
     });
   });
 });
+

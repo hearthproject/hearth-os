@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { SourceItem, TaskRecord } from "@hearth/core";
-import { getTemplate } from "@hearth/templates";
 import { WebInputError } from "./web-fetch.ts";
 import { buildTaskPrompt, prepareWorkspace } from "./workspace.ts";
 
@@ -18,34 +17,32 @@ describe("task workspace prompt", () => {
   it("includes task acceptance criteria in the Codex prompt", async () => {
     tempDir = mkdtempSync(join(tmpdir(), "hearth-prompt-"));
     const repoRoot = join(tempDir, "repo");
-    const template = getTemplate("T01");
-    if (!template) throw new Error("Missing T01 template");
     const task: TaskRecord = {
       id: "T01-test",
-      templateId: "T01",
-      title: template.title,
-      goal: template.goal,
+      templateId: null,
+      title: "会议转写转行动纪要",
+      goal: "根据会议原始记录生成可直接发送的行动纪要，保留来源索引，不编造未讨论的信息。",
       status: "queued",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       deadline: null,
       inputs: [{ kind: "text", label: "测试", value: "测试输入" }],
       networkHosts: [],
-      outputDir: template.outputDir,
+      outputDir: ".hearth/artifacts/T01-test",
       currentRunId: null,
       nextAction: null,
       error: null
     };
     const prepared = await prepareWorkspace({ repoRoot, workspaceDir: join(tempDir, "workspace"), task });
     const acceptance = ["口头约定，需确认", "截止日期为 2026-11-11"];
-    const prompt = buildTaskPrompt(task, prepared, template.expectedOutputs, acceptance);
+    const prompt = buildTaskPrompt(task, prepared, ["meeting-notes.md"], acceptance);
     expect(prompt).toContain("专项验收标准");
     expect(prompt).toContain("口头约定，需确认");
     expect(prompt).toContain("2026-11-11");
     expect(prompt).toContain("不要先建空骨架再回填");
     expect(prompt).toContain("不要把自查清单写进交付物");
 
-    const withMethod = buildTaskPrompt(task, prepared, template.expectedOutputs, acceptance, undefined, undefined, "记忆标记");
+    const withMethod = buildTaskPrompt(task, prepared, ["meeting-notes.md"], acceptance, undefined, undefined, "记忆标记");
     expect(withMethod).toContain("记忆标记");
   });
 

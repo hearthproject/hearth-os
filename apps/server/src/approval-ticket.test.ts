@@ -25,7 +25,7 @@ describe("approval ticket v2", () => {
   });
 
   it("persists action binding, context, and one-use counters", () => {
-    const task = service.createTask({ templateId: "T07" });
+    const task = service.createTask({ title: "Publish PR", goal: "Publish a reviewed pull request" });
     const runId = createRun(service, task.id);
     const now = new Date().toISOString();
     const approval: ApprovalRecord = {
@@ -90,7 +90,7 @@ describe("approval ticket v2", () => {
       context: "interactive",
       sessionRoot: root
     });
-    const task = service.createTask({ templateId: "T07" });
+    const task = service.createTask({ title: "Publish PR", goal: "Publish a reviewed pull request" });
     const runId = createRun(service, task.id, "running");
     const manager = new ApprovalManager(service, async () => ({}));
     const pending = await manager.requestTool({
@@ -122,7 +122,7 @@ describe("approval ticket v2", () => {
       context: "scheduled",
       sessionRoot: root
     });
-    const task = service.createTask({ templateId: "T07" });
+    const task = service.createTask({ title: "Publish PR", goal: "Publish a reviewed pull request" });
     const runId = createRun(service, task.id, "running");
     const manager = new ApprovalManager(service, async () => ({}));
 
@@ -143,7 +143,7 @@ describe("approval ticket v2", () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date("2026-11-10T00:00:00.000Z"));
-      const task = service.createTask({ templateId: "T07" });
+      const task = service.createTask({ title: "Publish PR", goal: "Publish a reviewed pull request" });
       const runId = createRun(service, task.id, "running");
       const manager = new ApprovalManager(service, async () => ({}));
       const pending = await manager.requestTool({
@@ -167,7 +167,7 @@ describe("approval ticket v2", () => {
   });
 
   it("does not execute a consumed approval ticket twice", async () => {
-    const task = service.createTask({ templateId: "T07" });
+    const task = service.createTask({ title: "Publish PR", goal: "Publish a reviewed pull request" });
     const runId = createRun(service, task.id, "running");
     const manager = new ApprovalManager(service, async () => ({}));
     const pending = await manager.requestTool({
@@ -206,7 +206,7 @@ describe("approval ticket v2", () => {
       context: "interactive",
       sessionRoot: root
     });
-    const task = service.createTask({ templateId: "T07" });
+    const task = service.createTask({ title: "Publish PR", goal: "Publish a reviewed pull request" });
     const runId = createRun(service, task.id, "running");
     const manager = new ApprovalManager(service, async () => ({}));
     const pending = await manager.requestTool({
@@ -241,7 +241,7 @@ describe("approval ticket v2", () => {
       context: "interactive",
       sessionRoot: root
     });
-    const task = service.createTask({ templateId: "T07" });
+    const task = service.createTask({ title: "Publish PR", goal: "Publish a reviewed pull request" });
     const runId = createRun(service, task.id, "running");
     const manager = new ApprovalManager(service, async () => ({}));
     const pending = await manager.requestTool({
@@ -262,7 +262,7 @@ describe("approval ticket v2", () => {
   });
 
   it("escalates after three consecutive rejections", async () => {
-    const task = service.createTask({ templateId: "T07" });
+    const task = service.createTask({ title: "Publish PR", goal: "Publish a reviewed pull request" });
     const runId = createRun(service, task.id, "running");
     const manager = new ApprovalManager(service, async () => ({}));
     for (let index = 0; index < 3; index += 1) {
@@ -311,3 +311,4 @@ function createRun(service: HearthService, taskId: string, status: "running" | "
   }
   return runId;
 }
+

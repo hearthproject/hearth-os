@@ -99,7 +99,6 @@ import type {
   TaskWorktreeView,
   TrashItem,
   TrashKind,
-  TaskTemplate,
   TaskView,
   BackgroundToolJob,
   CommitmentRecord,
@@ -508,7 +507,6 @@ export const api = {
     method: "POST",
     body: JSON.stringify({ minutes })
   }),
-  templates: () => request<{ templates: TaskTemplate[] }>("/api/templates"),
   sources: () => request<{ sources: SourceConnection[] }>("/api/sources"),
   readySourceItems: (limit = 100) => request<{ items: SourceItem[] }>(`/api/source-items${query({ limit })}`),
   sourceItems: (id: string) => request<{ items: SourceItem[] }>(`/api/sources/${encodeURIComponent(id)}/items`),

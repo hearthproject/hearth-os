@@ -130,7 +130,6 @@ import type {
   WebSearchProvider,
   WebSearchSettingsView
 } from "@hearth/core";
-import type { TaskTemplate } from "@hearth/templates";
 
 export type {
   AttentionItem,
@@ -261,8 +260,7 @@ export type {
   ThreadSubscriptionRecord,
   WatchdogEvent,
   WebSearchProvider,
-  WebSearchSettingsView,
-  TaskTemplate
+  WebSearchSettingsView
 };
 
 export interface ModelRegistryResponse extends ModelRegistryView {
@@ -603,7 +601,6 @@ export interface CodexProbeResponse {
 export type PreviewableArtifact = Pick<ArtifactRecord, "id" | "taskId" | "relativePath" | "mimeType" | "bytes">;
 
 export interface CreateTaskRequest {
-  templateId?: string;
   title?: string;
   goal?: string;
   textInput?: string;
@@ -647,7 +644,6 @@ export interface OutboxDraftListItem extends OutboxDraft {
 export interface RunManifest {
   schemaVersion: number;
   taskId: string;
-  templateId: string | null;
   title: string;
   runId: string;
   attempt: number;

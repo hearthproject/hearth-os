@@ -393,7 +393,7 @@ export class MemoryService {
       auditTaskId: task.id,
       queryText: [task.title, task.goal, input.text ?? ""].join("\n"),
       runId: input.runId ?? null,
-      scope: input.scope ?? task.templateId ?? "task",
+      scope: input.scope ?? task.taskKind ?? "task",
       ...(input.maxItems !== undefined ? { maxItems: input.maxItems } : {}),
       ...(input.maxChars !== undefined ? { maxChars: input.maxChars } : {})
     });
@@ -557,8 +557,8 @@ export class MemoryService {
       kind: "experience",
       content: summarizeTask(task, outcome),
       subjectKey: "experience:" + task.id,
-      scope: task.templateId ?? "task",
-      tags: [task.status, task.templateId ?? "custom"],
+      scope: task.taskKind ?? "task",
+      tags: [task.status, task.taskKind ?? "custom"],
       source: {
         type: "task",
         id: task.id,

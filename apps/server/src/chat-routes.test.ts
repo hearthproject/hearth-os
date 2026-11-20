@@ -213,7 +213,7 @@ describe("chat-first API", () => {
     const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
     const service = new HearthService(store);
     const conversation = store.createConversation("自动继续", defaultConversationSettings());
-    const task = service.createTask({ templateId: "T07", conversationId: conversation.id });
+    const task = service.createTask({ title: "Publish PR", goal: "Publish a reviewed pull request", conversationId: conversation.id });
     service.updateTask(task.id, { status: "running" });
     service.updateTask(task.id, { status: "waiting_input", nextAction: "等待你补充信息", error: null });
 
@@ -956,3 +956,4 @@ function parseSse(body: string): { event: string; data: any }[] {
       return { event, data: JSON.parse(lines.join("\n") || "{}") };
     });
 }
+
