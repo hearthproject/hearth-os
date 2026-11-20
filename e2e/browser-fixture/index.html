@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>Hearth Browser Fixture</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 40px; max-width: 640px; }
+    form { display: grid; gap: 12px; margin: 20px 0; }
+    label { display: grid; gap: 4px; }
+    input, textarea, button { font: inherit; padding: 8px; }
+  </style>
+</head>
+<body>
+  <h1>浏览器测试站</h1>
+  <p>这个页面只用来验证 Hearth 的浏览器工具，不连接外网。</p>
+  <form action="/success.html" method="get">
+    <label>姓名 <input name="name" aria-label="姓名" autocomplete="off" /></label>
+    <label>备注 <textarea name="note" aria-label="备注"></textarea></label>
+    <label>上传附件 <input type="file" name="attachment" aria-label="上传附件" /></label>
+    <button type="submit">提交</button>
+  </form>
+  <button id="danger" onclick="document.querySelector('h1').textContent='已删除'">删除全部</button>
+  <p><a href="/report.txt" download="report.txt" aria-label="下载报告">下载报告</a></p>
+  <p><a href="/second.html" target="_blank" aria-label="打开第二页">打开第二页</a></p>
+</body>
+</html>
