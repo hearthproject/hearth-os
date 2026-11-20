@@ -272,6 +272,50 @@ describe("agent runtime long-run fixtures", () => {
     expect(events.some((event) => event.type === "notice" && event.message.includes("暂停 5 轮"))).toBe(true);
   });
 
+  it("records prompt snapshots and warns when a resume prompt changed", async () => {
+    const root = workspace(roots);
+    const fake = createFakeModel([
+      { content: "", toolCalls: [fakeToolCall("finish_task", { summary: "done" })], finishReason: "tool_calls" }
+    ]);
+    const checkpoints: AgentCheckpoint[] = [];
+    await runAgent({
+      model: fake.model,
+      tools: createBuiltinTools(),
+      goal: "prompt",
+      systemPrompt: "version-a",
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      permissions: { tools: ["finish_task"], readRoots: [root], writeRoots: [root], networkHosts: [] },
+      budget: {},
+      onCheckpoint: (checkpoint) => { checkpoints.push(checkpoint); }
+    });
+    expect(checkpoints.at(-1)?.promptHash).toBeTruthy();
+
+    const events: RuntimeEvent[] = [];
+    await runAgent({
+      model: createFakeModel([
+        { content: "", toolCalls: [fakeToolCall("finish_task", { summary: "done" })], finishReason: "tool_calls" }
+      ]).model,
+      tools: createBuiltinTools(),
+      goal: "prompt",
+      systemPrompt: "version-b",
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      permissions: { tools: ["finish_task"], readRoots: [root], writeRoots: [root], networkHosts: [] },
+      budget: {},
+      resume: {
+        messages: [{ role: "system", content: "version-a" }, { role: "user", content: "goal" }],
+        usage: zeroUsage(),
+        turns: 0,
+        toolCalls: 0,
+        promptHash: "different"
+      },
+      onEvent: (event) => { events.push(event); }
+    });
+
+    expect(events.some((event) => event.type === "notice" && event.message.includes("系统提示或工具定义"))).toBe(true);
+  });
+
   it("reports and clears a stale execution marker before starting", async () => {
     const root = workspace(roots);
     const outDir = join(root, "out");

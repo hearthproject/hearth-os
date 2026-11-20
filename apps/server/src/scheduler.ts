@@ -844,7 +844,8 @@ export class HearthScheduler {
           usage: { inputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0 },
           turns: 0,
           toolCalls: 0,
-          ...(restoredState ? { state: restoredState } : {})
+          ...(restoredState ? { state: restoredState } : {}),
+          ...(checkpointBody.promptHash ? { promptHash: checkpointBody.promptHash } : {})
         };
       } catch {
         // A missing or unreadable checkpoint falls back to a fresh run.

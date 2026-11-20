@@ -208,6 +208,7 @@ export type RuntimeEvent =
   | { type: "checkpoint.failed"; seq: number; kind: string; message: string }
   | { type: "compacted"; before: number; after: number; reason?: "microcompact" | "auto" | "reactive" | "forced" }
   | { type: "context.snapshot"; turn: number; modelId: string | null; messageCount: number; toolCount: number; systemChars: number; toolSchemaChars: number; historyChars: number; toolResultChars: number; estimatedTokens: number; providerInputTokens: number | null; providerOutputTokens: number | null; source: "provider" | "estimate" }
+  | { type: "prompt.snapshot"; turn: number; systemPromptHash: string; toolSchemaHash: string; messageStart: number; messageEnd: number }
   | { type: "context.watermark"; estimatedTokens: number; usedTokens: number; compactions: number; source?: "provider" | "estimate" }
   | { type: "progress.updated"; filesRead: number; filesModified: number; commands: number; tests: number; todosOpen?: number }
   | { type: "usage"; usage: RunUsage }
@@ -224,6 +225,7 @@ export interface AgentCheckpoint {
   summary: string | null;
   state?: SerializedAgentToolState;
   mode?: HarnessMode;
+  promptHash?: string;
 }
 
 export interface AgentResumeState {
@@ -232,6 +234,7 @@ export interface AgentResumeState {
   turns: number;
   toolCalls: number;
   state?: AgentToolState;
+  promptHash?: string;
 }
 
 export interface AgentPostEditEvent {

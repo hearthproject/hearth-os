@@ -41,6 +41,9 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   const tools = options.tools.filter((tool) => allowed.has(tool.definition.name));
   const toolMap = new Map(tools.map((tool) => [tool.definition.name, tool]));
   const definitions = tools.map((tool) => tool.definition);
+  const digestText = (text: string): string => createHash("sha256").update(text).digest("hex").slice(0, 16);
+  const systemPromptHash = digestText(options.systemPrompt);
+  const toolSchemaHash = digestText(JSON.stringify(definitions));
   const messages: AgentMessage[] = options.resume
     ? cloneMessages(options.resume.messages)
     : [
@@ -80,6 +83,9 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       type: "notice",
       message: `上一轮有 ${lostWork.length} 个后台工作没有确认结束，已标记为 lost；不要假设它们仍在运行，请先检查工作区或重新启动。`
     });
+  }
+  if (options.resume?.promptHash && options.resume.promptHash !== systemPromptHash) {
+    emit({ type: "notice", message: "系统提示或工具定义在恢复后已变化；检查点中的旧上下文可能不再适用，请谨慎继续。" });
   }
   const aborted = (): boolean => signal.aborted;
   const totalTokens = (): number => usage.inputTokens + usage.outputTokens;
@@ -244,7 +250,8 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       toolCalls,
       summary,
       state: serializeAgentState(state),
-      mode: options.mode ?? state.mode ?? "build"
+      mode: options.mode ?? state.mode ?? "build",
+      promptHash: systemPromptHash
     };
     try {
       await options.onCheckpoint?.(checkpoint);
@@ -422,6 +429,14 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     let transientRetries = 0;
     let overflowRetried = false;
     emitContextSnapshot(turns);
+    emit({
+      type: "prompt.snapshot",
+      turn: turns,
+      systemPromptHash,
+      toolSchemaHash,
+      messageStart: 0,
+      messageEnd: messages.length
+    });
     try {
       while (true) {
       try {
