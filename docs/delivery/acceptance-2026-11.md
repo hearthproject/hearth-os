@@ -25,15 +25,15 @@ outline: [2, 3]
 | Tauri updater 编译 | `cargo check --manifest-path apps/desktop-tauri/src-tauri/Cargo.toml --features updater` | 通过 |
 | Tauri 配置构建 | `npx tauri build --debug --no-bundle --features updater --config <overlay>` | 通过 |
 | 0.2.0 安装包 | `npm run release:build` | 通过；NSIS 安装包 30.5 MiB，内置 `server.mjs` 启动后 `/api/ready` 返回 200 |
-| 发布整理 | `npm run release:prepare -- --skip-build` | 通过；安装包、123.2 MiB 便携 zip、发布说明和 SHA256 校验和 |
+| 发布整理 | `npm run release:prepare -- --skip-build` | 通过；安装包、47.1 MiB 便携 zip（3,450 个文件）、发布说明和 SHA256 校验和 |
 
 UI 端到端覆盖：首次向导跳过、聊天壳、会话操作、连接状态、导航、需要你收件箱、逐轮接口空状态与 rewind 错误、缺失模型首跑保护、IME、会话切换/删除、执行器设置、模型密钥遮罩、任务详情标签、窄视口和浏览器控制台错误。浏览器 fixture 覆盖打开/读取/输入/上传/危险点击拒绝/断言/配方/提交/下载/双标签/暂停恢复/完成门禁/证据文件。
 
 ## 手动检查
 
 - **Chrome 真实启动：** 使用 `C:\Users\Jason\AppData\Local\Google\Chrome\Application\chrome.exe`，独立 profile 启动成功，标题 `Hearth smoke`，引擎 `chrome`。
-- **发布产物：** `release/0.2.0/` 生成 30.5 MiB NSIS 安装包、123.2 MiB 便携 zip、`RELEASE_NOTES.md` 和 `SHA256SUMS.txt`；便携 zip 内保持 `Hearth.exe` 与 `resources/` 同级。用打包后的 `resources/server/server.mjs` 启动独立服务，`/api/ready` 返回 `{"ok":true,"name":"Hearth"}`；打包后的 ACL sandbox 包可以正常导入。
-- **构建修复：** Playwright 的未声明 BiDi 依赖在打包时被替换为惰性桩，不影响 Chromium CDP 路径；sandbox 依赖改为扁平 `node_modules`，最长路径从 300+ 字符降到 167 字符，满足 makensis 限制。
+- **发布产物：** `release/0.2.0/` 生成 30.5 MiB NSIS 安装包、47.1 MiB 便携 zip（3,450 个文件）、`RELEASE_NOTES.md` 和 `SHA256SUMS.txt`；便携 zip 内保持 `Hearth.exe` 与 `resources/` 同级。用打包后的 `resources/server/server.mjs` 启动独立服务，`/api/ready` 返回 `{"ok":true,"name":"Hearth"}`；打包后的 ACL sandbox 包可以正常导入。
+- **构建修复：** Playwright 的未声明 BiDi 依赖在打包时被替换为惰性桩，不影响 Chromium CDP 路径；sandbox 依赖改为扁平 `node_modules`，最长路径从 300+ 字符降到 167 字符，满足 makensis 限制。Tauri 构建前会清空 `target/release/resources`，避免旧的 `server/node_modules` 残留进入安装包（清理前暂存目录为 391 MiB / 29,695 文件）。
 - **自用报告：** 本机 30 天事件账本汇总 341 个任务、290 个完成、24 个失败或可恢复，成功率 92.4%，一次通过率与 token 汇总同时生成。该数据包含历史任务，只说明本机使用，不作为 v0.2 质量证明。
 - **Tauri 签名禁用路径：** 三项签名变量不全时构建脚本打印警告并继续普通构建，不生成 `.sig` 或 `latest.json`。
 

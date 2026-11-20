@@ -27,7 +27,7 @@
 - Tauri updater 作为可选 feature；签名变量不全时禁用，不产出坏包。
 - 发布脚本生成安装包、便携 zip、发布说明、SHA256 校验和和可选 `latest.json`。
 - 0.2.0 NSIS 安装包构建通过（30.5 MiB），打包后的服务端通过 `/api/ready` 启动检查。
-- 修复打包：Playwright 未声明的 BiDi 依赖改为惰性桩；sandbox 依赖树改为扁平布局，避开 Windows 路径长度限制。
+- 修复打包：Playwright 未声明的 BiDi 依赖改为惰性桩；sandbox 依赖树改为扁平布局，避开 Windows 路径长度限制；构建前清理 Tauri 暂存资源，避免旧的 `server/node_modules` 进入安装包。
 - 文档重写、架构图重绘、CI、commitlint、husky 和 PR 模板。
 
 ### 已知限制

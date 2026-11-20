@@ -35,7 +35,7 @@ outline: [2, 3]
 | Tauri updater 编译 | `cargo check --manifest-path apps/desktop-tauri/src-tauri/Cargo.toml --features updater` | 通过 |
 | Tauri 构建配置 | `npx tauri build --debug --no-bundle --features updater --config <overlay>` | 通过 |
 | 0.2.0 安装包 | `npm run release:build` | NSIS 安装包 30.5 MiB，内置 server 启动并通过 `/api/ready` |
-| 发布整理 | `npm run release:prepare -- --skip-build` | 123.2 MiB 便携 zip、安装包、发布说明、SHA256 校验和 |
+| 发布整理 | `npm run release:prepare -- --skip-build` | 47.1 MiB 便携 zip（3,450 个文件）、安装包、发布说明、SHA256 校验和 |
 
 ## 仍然明确留空
 
