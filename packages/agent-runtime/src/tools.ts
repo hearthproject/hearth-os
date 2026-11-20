@@ -13,7 +13,7 @@ import { omissionPlaceholderError } from "./harness/omission.ts";
 import { searchFiles } from "./harness/search.ts";
 import { fileReadState, hashContent, rangesCover, recordCommand, recordFileModified, recordFileRead, requireReadBeforeWrite } from "./harness/file-state.ts";
 import { rewindTool, snapshotBeforeMutation } from "./harness/snapshots.ts";
-import { killShellSession, runShellSession, shellOutput, shellSessionInfo, startShellSession } from "./harness/shell-session.ts";
+import { killShellSession, runShellSession, shellOutput, shellSessionInfo, startShellSession, waitShellSession } from "./harness/shell-session.ts";
 import { truncateToolOutput, writeFullToolOutput } from "./harness/tool-output.ts";
 import { commandPolicyIssue } from "./harness/command-policy.ts";
 import { todoReadTool, todoWriteTool } from "./harness/todo.ts";
@@ -34,7 +34,7 @@ const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", "coverage", 
 
 //模型能使用的工具和实现
 export function createBuiltinTools(): AgentTool[] {
-  return [readFileTool, readDocumentTool, listFilesTool, searchTextTool, globTool, grepTool, writeFileTool, writeSpreadsheetTool, writeDocumentTool, editFileTool, applyPatchTool, shellTool, shellOutputTool, shellKillTool, todoWriteTool, todoReadTool, runTestsTool, diagnosticsTool, submitPlanTool, rewindTool, captureScreenTool, fetchUrlTool, askUserTool, finishTaskTool];
+  return [readFileTool, readDocumentTool, listFilesTool, searchTextTool, globTool, grepTool, writeFileTool, writeSpreadsheetTool, writeDocumentTool, editFileTool, applyPatchTool, shellTool, shellOutputTool, shellWaitTool, shellKillTool, todoWriteTool, todoReadTool, runTestsTool, diagnosticsTool, submitPlanTool, rewindTool, captureScreenTool, fetchUrlTool, askUserTool, finishTaskTool];
 }
 
 export function defaultTaskPermissions(options: {
@@ -789,6 +789,40 @@ const shellOutputTool: AgentTool = {
     return {
       content: `session ${sessionId}: ${output.running ? "running" : `exit ${output.exitCode ?? "unknown"}`}\n\n${truncated.content}`,
       metadata: { sessionId, background: output.running, exitCode: output.exitCode, truncated: truncated.truncated, ...(output.outputPath ? { fullOutputPath: output.outputPath } : {}) }
+    };
+  }
+};
+
+const shellWaitTool: AgentTool = {
+  definition: {
+    name: "shell_wait",
+    description: "Wait for a background shell to exit, match output, or time out instead of busy-polling.",
+    executionMode: "sequential",
+    parameters: {
+      type: "object",
+      properties: {
+        sessionId: { type: "string", description: "shell 返回的 sessionId" },
+        timeoutSeconds: { type: "number", description: "最长等待秒数，默认 30，最大 600" },
+        match: { type: "string", description: "可选的正则或字面文本；出现即提前返回" }
+      },
+      required: ["sessionId"],
+      additionalProperties: false
+    }
+  },
+  async execute(input) {
+    const args = objectArgs(input);
+    const sessionId = stringArg(args, "sessionId");
+    const timeoutSeconds = Math.min(600, Math.max(1, intArg(args, "timeoutSeconds", 30)));
+    const match = typeof args.match === "string" && args.match.length > 0 ? args.match : undefined;
+    const result = await waitShellSession(sessionId, { timeoutMs: timeoutSeconds * 1_000, ...(match ? { match } : {}) });
+    if (!result) throw new Error(`找不到 shell session：${sessionId}`);
+    const status = result.running
+      ? result.matched ? "running (match found)" : `running (timeout after ${timeoutSeconds}s)`
+      : `exit ${result.exitCode ?? "unknown"}`;
+    const truncated = truncateToolOutput(result.output, { maxChars: MAX_SHELL_OUTPUT_CHARS, maxLines: 240, label: "use shell_output for the full buffer" });
+    return {
+      content: `session ${sessionId}: ${status}\n\n${truncated.content}`,
+      metadata: { sessionId, background: result.running, exitCode: result.exitCode, truncated: truncated.truncated, matched: result.matched, timedOut: result.timedOut, ...(result.outputPath ? { fullOutputPath: result.outputPath } : {}) }
     };
   }
 };

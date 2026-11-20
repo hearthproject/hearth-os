@@ -333,6 +333,20 @@ describe("builtin tools", () => {
     await expect(mapTools().read_file!.execute({ path: "out/real.txt" }, context)).rejects.toThrow(/是否想找.*real.md/);
   });
 
+  it("waits for a background shell instead of busy-polling", async () => {
+    const root = workspace(roots);
+    const out = join(root, "out");
+    mkdirSync(out, { recursive: true });
+    const context = contextFor(root, out);
+    const tools = mapTools();
+    const started = await tools.shell!.execute({ command: "echo wait-done", background: true }, context);
+    const sessionId = started.metadata?.sessionId;
+    expect(sessionId).toBeTruthy();
+    const waited = await tools.shell_wait!.execute({ sessionId, timeoutSeconds: 5 }, context);
+    expect(waited.metadata?.exitCode).toBe(0);
+    expect(waited.content).toContain("wait-done");
+  });
+
   it("stores full shell output in the task log and returns only the tail", async () => {
     const root = workspace(roots);
     const out = join(root, "out");

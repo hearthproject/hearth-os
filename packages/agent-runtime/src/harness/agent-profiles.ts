@@ -23,6 +23,8 @@ const READ_TOOLS = [
   "grep",
   "todo_read",
   "shell",
+  "shell_output",
+  "shell_wait",
   "finish_task"
 ];
 

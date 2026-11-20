@@ -144,6 +144,44 @@ export function shellSessionInfo(sessionId: string): { running: boolean; exitCod
   return { running: session.running, exitCode: session.exitCode, command: session.command, outputPath: session.outputPath };
 }
 
+export async function waitShellSession(sessionId: string, options: { timeoutMs?: number; match?: string } = {}): Promise<{
+  sessionId: string;
+  output: string;
+  running: boolean;
+  exitCode: number | null;
+  matched: boolean;
+  timedOut: boolean;
+  outputPath: string;
+} | null> {
+  const session = sessions.get(sessionId);
+  if (!session) return null;
+  const timeoutMs = Math.min(10 * 60_000, Math.max(100, options.timeoutMs ?? 30_000));
+  const matcher = options.match ? compileMatcher(options.match) : null;
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (!session.running) break;
+    if (matcher && matcher.test(session.output)) break;
+    await delay(100);
+  }
+  return {
+    sessionId,
+    output: session.output.slice(-8_000),
+    running: session.running,
+    exitCode: session.exitCode,
+    matched: matcher ? matcher.test(session.output) : false,
+    timedOut: session.running && !(matcher?.test(session.output) ?? false),
+    outputPath: session.outputPath
+  };
+}
+
+function compileMatcher(pattern: string): RegExp {
+  try {
+    return new RegExp(pattern, "i");
+  } catch {
+    return new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+  }
+}
+
 export function killShellSession(sessionId: string): boolean {
   const session = sessions.get(sessionId);
   if (!session) return false;

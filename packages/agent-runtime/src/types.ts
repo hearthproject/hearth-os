@@ -86,6 +86,8 @@ export interface AgentToolMetadata {
   branch?: string;
   commitSha?: string;
   transcriptPath?: string;
+  matched?: boolean;
+  timedOut?: boolean;
 }
 
 export interface AgentToolResult {
