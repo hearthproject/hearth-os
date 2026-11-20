@@ -101,8 +101,8 @@ Hearth is not another chat shell, and it is not an agent that only serves code. 
   {
     no: '01',
     title: 'Tasks first, not messages first',
-    text: 'Every run has a goal contract, acceptance criteria, budget, checkpoints, and evidence. Failures can be recovered, and completion cannot rely on model self-assessment.',
-    link: '/en/design/goals-and-evidence',
+    text: 'Every run has a budget, checkpoints, a recovery path, and artifact records. Failures can be retried, and a result counts only after it is written.',
+    link: '/en/design/tasks',
     meta: 'Durable execution'
   },
   {
@@ -115,9 +115,9 @@ Hearth is not another chat shell, and it is not an agent that only serves code. 
   {
     no: '03',
     title: 'Swap executors without losing the record',
-    text: 'The native runtime, Codex, DeepSeek Harness, and external executors share a registry, routing, and run manifest.',
+    text: 'The native runtime, Codex, and DeepSeek Harness share a registry, routing, and run manifest.',
     link: '/en/design/executors',
-    meta: 'Seven executors'
+    meta: 'Three executors'
   }
 ]" />
 

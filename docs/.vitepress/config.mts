@@ -26,8 +26,7 @@ const zhDesignSidebar = [
     items: [
       { text: '总体设计', link: '/design/' },
       { text: '入口与交互', link: '/design/experience' },
-      { text: '任务与持久执行', link: '/design/tasks' },
-      { text: '目标、完成判定与证据', link: '/design/goals-and-evidence' }
+      { text: '任务与持久执行', link: '/design/tasks' }
     ]
   },
   {
@@ -45,10 +44,10 @@ const zhDesignSidebar = [
     text: '上下文与长期运行',
     items: [
       { text: '存储与上下文架构', link: '/design/storage' },
-      { text: '个人上下文与注意力', link: '/design/personal-context' },
-      { text: '记忆与能力进化', link: '/design/memory' },
+      { text: '个人上下文', link: '/design/personal-context' },
+      { text: '记忆', link: '/design/memory' },
       { text: '评估与成本', link: '/design/evaluation' },
-      { text: '多设备与长期运行', link: '/design/operations' },
+      { text: '数据、备份与运维', link: '/design/operations' },
       { text: 'Agent 参考模式', link: '/design/agent-reference-patterns' }
     ]
   }
@@ -60,8 +59,7 @@ const enDesignSidebar = [
     items: [
       { text: 'Overall Design', link: '/en/design/' },
       { text: 'Entrances and Experience', link: '/en/design/experience' },
-      { text: 'Tasks and Durable Execution', link: '/en/design/tasks' },
-      { text: 'Goals, Completion, and Evidence', link: '/en/design/goals-and-evidence' }
+      { text: 'Tasks and Durable Execution', link: '/en/design/tasks' }
     ]
   },
   {
@@ -79,10 +77,10 @@ const enDesignSidebar = [
     text: 'Context and Long-running Operation',
     items: [
       { text: 'Storage and Context Architecture', link: '/en/design/storage' },
-      { text: 'Personal Context and Attention', link: '/en/design/personal-context' },
-      { text: 'Memory and Capability Evolution', link: '/en/design/memory' },
+      { text: 'Personal Context', link: '/en/design/personal-context' },
+      { text: 'Memory', link: '/en/design/memory' },
       { text: 'Evaluation and Cost', link: '/en/design/evaluation' },
-      { text: 'Multi-device and Long-running Operation', link: '/en/design/operations' },
+      { text: 'Data, Backup, and Operations', link: '/en/design/operations' },
       { text: 'Agent Reference Patterns', link: '/en/design/agent-reference-patterns' }
     ]
   }
@@ -118,7 +116,6 @@ const zhArchitectureSidebar = [
     items: [
       { text: '上下文管理', link: '/architecture/hearth-os-上下文管理设计' },
       { text: '知识本体与指代消解', link: '/architecture/Hearth-知识本体与指代消解设计说明' },
-      { text: '技能与方法资产', link: '/architecture/Hearth-自进化机制设计说明' },
       { text: '数据源与联网', link: '/architecture/Hearth-数据源与联网设计说明' }
     ]
   },
@@ -126,8 +123,7 @@ const zhArchitectureSidebar = [
     text: '接入与治理',
     items: [
       { text: '服务组装与 API 接入', link: '/architecture/Hearth-服务组装与API接入设计说明' },
-      { text: '判定、审批与安全', link: '/architecture/判定审批机制说明' },
-      { text: '主动式引擎与注意力', link: '/architecture/Hearth-主动式引擎设计说明' }
+      { text: '判定、审批与安全', link: '/architecture/判定审批机制说明' }
     ]
   },
   {
@@ -189,7 +185,7 @@ const zhSidebar = {
       items: [
         { text: '附录总览', link: '/reference/' },
         { text: '工程实施', link: '/reference/engineering' },
-        { text: '评测 Agent（独立）', link: '/reference/evaluation-agent' },
+        { text: '评测 Agent（独立）', link: 'https://hearthproject.github.io/hearth-eval/' },
         { text: '风险与停止条件', link: '/reference/risks' },
         { text: '关键决策', link: '/reference/decisions' },
         { text: '自研与集成', link: '/reference/build-vs-integrate' },
@@ -261,7 +257,7 @@ const enSidebar = {
       items: [
         { text: 'Appendix Overview', link: '/en/reference/' },
         { text: 'Engineering', link: '/en/reference/engineering' },
-        { text: 'Evaluation Agent (Standalone)', link: '/en/reference/evaluation-agent' },
+        { text: 'Evaluation Agent (Standalone)', link: 'https://hearthproject.github.io/hearth-eval/' },
         { text: 'Risks and Stop Conditions', link: '/en/reference/risks' },
         { text: 'Key Decisions', link: '/en/reference/decisions' },
         { text: 'Build vs. Integrate', link: '/en/reference/build-vs-integrate' },

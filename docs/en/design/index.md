@@ -63,24 +63,23 @@ The frontend uses React and Vite without a second server-rendered runtime. Task 
 
 ## Module Map and Key Boundaries
 
-The fifteen modules below are parallel design notes. Together they cover the product from the first entrance to long-running operation, without following a code directory layout.
+The fourteen modules below are parallel design notes. Together they cover the product from the first entrance to long-running operation, without following a code directory layout.
 
 | Module | What it solves first |
 |---|---|
 | [Entrances and Experience](/en/design/experience) | Let the user know what the system is doing, when attention is needed, and where results live |
-| [Tasks and Durable Execution](/en/design/tasks) | Keep work alive across restarts, sleep, and failure, with evidence and recovery |
-| [Goals, Completion, and Evidence](/en/design/goals-and-evidence) | Turn goals into acceptance contracts and decide completion from evidence rather than model self-assessment |
+| [Tasks and Durable Execution](/en/design/tasks) | Keep work alive across restarts, sleep, and failure, with recovery |
 | [Control and Authority](/en/design/control) | Decide when to observe, suggest, execute, or stop, within explicit authority |
 | [Executors and Routing](/en/design/executors) | Use specialized capabilities instead of one universal model |
-| [Native Agent Runtime](/en/design/native-agent-runtime) | A self-built general execution kernel that unifies model protocols, tools, compaction, skills, delegation, worktrees, MCP, budgets, and checkpoints |
+| [Native Agent Runtime](/en/design/native-agent-runtime) | A self-built general execution kernel that unifies model protocols, tools, compaction, delegation, worktrees, MCP, budgets, and checkpoints |
 | [Delegation, Handoff, and Sandboxing](/en/design/delegation-and-sandbox) | Delegate bounded work, continue with handoff packets, and enforce path, network, and credential boundaries |
 | [Approvals, Takeover, and External Effects](/en/design/effects) | Make sends, writes, deletes, and publishes previewable, authorized, and reconcilable |
 | [Runtime and Safety](/en/design/safety) | Limit real-world impact with isolation, least privilege, and credential boundaries |
 | [Storage and Context Architecture](/en/design/storage) | Unify facts, model bindings, and handoff watermarks with SQLite, content blobs, and task context |
-| [Personal Context and Attention](/en/design/personal-context) | Use a personal ontology, context packs, memory recall, and interruption budgets to decide what the agent knows and when to speak |
-| [Memory and Capability Evolution](/en/design/memory) | Accumulate context and methods while staying correctable, forgettable, and reversible |
+| [Personal Context](/en/design/personal-context) | Use a personal ontology, context packs, and memory recall to decide what the agent knows |
+| [Memory](/en/design/memory) | Accumulate context while staying correctable, forgettable, and exportable |
 | [Evaluation and Cost](/en/design/evaluation) | Prove reliability and cost with real tasks instead of demos |
-| [Multi-device and Long-running Operation](/en/design/operations) | Keep one set of tasks, authority, and data consistent across devices over time |
+| [Data, Backup, and Operations](/en/design/operations) | Keep backup, restore, maintenance, diagnostics, and the kill switch inside the local control plane |
 | [Agent Reference Patterns](/en/design/agent-reference-patterns) | Record borrowed patterns and trade-offs instead of treating an external framework as the product architecture |
 
-The non-negotiable boundaries are: every interface is rebuilt from a record; each state has one write authority; goal-backed tasks require acceptance criteria and a completion verdict; external actions have approval or an explicit exemption plus a reconcilable receipt; executors never see long-lived raw credentials; handoffs can narrow authority but never expand it; every task has a budget, deadline, and cancellation path; memory has provenance, sensitivity, and forgetting rules; method changes require evaluation, canary, promotion, and rollback.
+The non-negotiable boundaries are: every interface is rebuilt from a record; each state has one write authority; external actions have approval or an explicit exemption plus a reconcilable receipt; executors never see long-lived raw credentials; handoffs can narrow authority but never expand it; every task has a budget, deadline, and cancellation path; memory has provenance, sensitivity, and forgetting rules.

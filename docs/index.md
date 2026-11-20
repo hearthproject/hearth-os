@@ -87,8 +87,8 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
   {
     no: '01',
     title: '任务优先，而不是消息优先',
-    text: '每次执行都有目标契约、验收条件、预算、检查点和证据。失败可以恢复，完成不能只凭模型自评。',
-    link: '/design/goals-and-evidence',
+    text: '每次执行都有预算、检查点、恢复路径和产物记录。失败可以重试，结果落盘后才算完成。',
+    link: '/design/tasks',
     meta: 'Durable execution'
   },
   {
@@ -101,9 +101,9 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
   {
     no: '03',
     title: '执行器可替换，记录不丢失',
-    text: '原生运行时、Codex、DeepSeek Harness 与外部执行器共享注册表、路由和运行清单。',
+    text: '原生运行时、Codex 与 DeepSeek Harness 共享注册表、路由和运行清单。',
     link: '/design/executors',
-    meta: 'Seven executors'
+    meta: 'Three executors'
   }
 ]" />
 

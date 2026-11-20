@@ -59,9 +59,8 @@ Each executor binds a model profile in Settings instead of keeping a private con
 | `native` | OpenAI Chat, OpenAI Responses, Anthropic Messages, Gemini |
 | `codex` | OpenAI Responses only |
 | `deepseek-harness` | OpenAI Chat, OpenAI Responses, Anthropic Messages |
-| `hermes`, `qoder`, `workbuddy`, `kimi` | OpenAI Chat, OpenAI Responses, Anthropic Messages |
 
-The current Hearth chat model is `app_settings.model.chatProfileId`; it serves chat, the native executor, and failure diagnosis. An external executor uses its own profile only when its binding is valid. A Codex binding generates `.hearth/executors/codex/config.toml` and injects the key through the environment; DeepSeek Harness writes the protocol mapping into its provider configuration. Local models are excluded from the unified registry so a local port is not mistaken for a cloud service. See [Storage and Context Architecture](/en/design/storage) for the full boundary.
+The current Hearth chat model is `app_settings.model.chatProfileId`; it serves chat, the native executor, and failure diagnosis. A Codex binding generates `.hearth/executors/codex/config.toml` and injects the key through the environment; DeepSeek Harness writes the protocol mapping into its provider configuration. Local models are excluded from the unified registry so a local port is not mistaken for a cloud service. See [Storage and Context Architecture](/en/design/storage) for the full boundary.
 
 ## Failure Diagnosis and Handoff
 
@@ -73,11 +72,11 @@ Failure handling classifies the cause before deciding whether to change executor
 4. Under necessary approval, Hearth asks only “Switch to `target executor` and continue?” and starts a new run with the same task, remaining budget, and context watermark after confirmation.
 5. When the cause is not the executor, Hearth reports the reason directly without switching.
 
-The fallback order is `deepseek-harness → codex → native → hermes → qoder → workbuddy → kimi`. Attempted executors are not selected again, and the default limit is two handoffs. A handoff packet carries the diagnosis summary, completed and failed work, artifacts, open questions, remaining budget, and `context_watermark_seq`; the target continues from the same watermark. Every handoff is written to `handoffs` and produces `HANDOFF.md`. The host validates the target, acceptance, permissions, cursor, and artifact hashes before switching; a failed validation blocks the switch. `HANDOFF.md` is published as a real artifact with an `artifactRef`. Run records retain both source and target executors, stale-generation tool writes are rejected, and the failed run's own diagnosis and decision evidence remains available.
+The fallback order is `deepseek-harness → codex → native`. Attempted executors are not selected again, and the default limit is two handoffs. A handoff packet carries the diagnosis summary, completed and failed work, artifacts, open questions, remaining budget, and `context_watermark_seq`; the target continues from the same watermark. Every handoff is written to `handoffs` and produces `HANDOFF.md`. The host validates the target, acceptance, permissions, cursor, and artifact hashes before switching; a failed validation blocks the switch. `HANDOFF.md` is published as a real artifact with an `artifactRef`. Run records retain both source and target executors, stale-generation tool writes are rejected, and the failed run's own diagnosis and decision evidence remains available.
 
 ## Shared Context
 
-Every executor adapts to Hearth task-level context instead of maintaining a separate chat history. Assistant messages, tool calls, tool results, checkpoints, and notices from the native runtime, Codex, DeepSeek Harness, and external CLIs all flow through unified callbacks into `context_items`. `executor_event_id` prevents duplicate events within a run; oversized bodies go to `.hearth/context/blobs/`; the task summary lives in `task_context_state`; startup and handoff generate a budgeted context projection.
+Every executor adapts to Hearth task-level context instead of maintaining a separate chat history. Assistant messages, tool calls, tool results, checkpoints, and notices from the native runtime, Codex, and DeepSeek Harness all flow through unified callbacks into `context_items`. `executor_event_id` prevents duplicate events within a run; oversized bodies go to `.hearth/context/blobs/`; the task summary lives in `task_context_state`; startup and handoff generate a budgeted context projection.
 
 A CLI `sessionId` is only an optimization for resume, not a source of truth. Even when session resume fails, Hearth can rebuild the task projection from shared context. Deletion, retention, and handoff limits are managed in the Context section of Settings. See [Storage and Context Architecture](/en/design/storage) for the lifecycle.
 
