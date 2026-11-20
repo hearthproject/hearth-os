@@ -28,15 +28,18 @@ apps/server/src/native-executor.ts
   profile selection -> coding prompt / budget / permissions
         |
 packages/agent-runtime/src/runtime.ts
-  scheduler, per-tool timeout, no-progress detector, steering, checkpoints
+  scheduler, tool batch partition, plan gate, per-tool timeout,
+  no-progress detector, steering, checkpoints, post-edit hook
         |
 packages/agent-runtime/src/tools.ts
-  read/write/edit/patch, shell sessions, todo, tests, diagnostics, plan, rewind
+  read/write/edit/patch, shell sessions, todo, tests, diagnostics,
+  plan, snapshots, memory, goals, shell_wait
         |
 packages/agent-runtime/src/harness/*
-  profiles, environment, instructions, project profile, prompt,
-  file state, edit matching, output truncation, shell sessions, search,
-  todo, verification, plan, snapshots, command policy
+  profiles, agent profiles, environment, instructions, project profile,
+  prompt sections, file state, edit matching, omission detection, output
+  truncation, shell sessions, search, todo, verification, plan, snapshots,
+  checkpoint state, post-compact restoration, command policy, memory, goal
 ```
 
 `harness/*` modules are pure functions or small state objects. They do not import the server and can be unit tested directly.
@@ -49,15 +52,22 @@ Enabled by default; set `HEARTH_CODING_HARNESS=0` to force the general profile. 
 - the workspace contains `.git`
 - the task text mentions code execution or GitHub operations
 
-The coding profile uses `CODING_RUN_BUDGET` (300 turns, 2500 tool calls, the native token ceiling, 8 hours) and adds the following tools: `todo_write`, `todo_read`, `run_tests`, `diagnostics`, `submit_plan`, `rewind`, `shell_output`, `shell_kill`.
+The coding profile uses `CODING_RUN_BUDGET` (300 turns, 2500 tool calls, the native token ceiling, 8 hours) and exposes the coding toolset dynamically. The prompt lists only tools that are actually callable for the current run. The set includes file ACI (`read_file`, `edit_file`, `apply_patch`), search, shell sessions (`shell`, `shell_output`, `shell_kill`, `shell_wait`), todo, tests, diagnostics, plan, snapshots (`rewind`, `rewind_turn`), typed subagents (`agent`, `agent_wait`, `agent_status`, `agent_kill`), repository memory and persisted goals.
+
+## Prompt sections
+
+`codingPromptSections` returns stable, composable sections: `rules`, `tools`, `environment`, `instructions`, `mode`, `skills` and `extra`. `codingSystemPrompt` joins the non-empty sections, so callers can inspect or reuse a section without rebuilding the whole prompt. The plan-mode section is always present and is backed by a runtime gate, not only by prompt text.
 
 ## Editing contract
 
 1. The file must be read before it is edited, unless `write_file` is called with `overwrite=true`.
 2. Content is normalized to LF and BOM is stripped for matching, then restored on write.
-3. Six matching tiers: exact, line trim, whitespace normalization, indentation, block anchor, similarity. Each tier must produce a unique match.
-4. Multi-edit is atomic: one failed edit leaves the file untouched.
-5. Every mutation snapshots the previous file under the task output directory and returns a snapshot id for `rewind`.
+3. Matching tiers: exact, line trim, whitespace normalization, indentation, block anchor, similarity and Unicode normalization. Each tier must produce a unique match. Unicode matching decodes `\uXXXX` and `\xNN` escapes and folds curly quotes and zero-width characters while preserving original file offsets.
+4. Omission placeholders (`...`, `// ... existing code ...`, `// 其余不变`) are rejected in both `edit_file` and `apply_patch` instead of being written as real code.
+5. Multi-edit is atomic: one failed edit leaves the file untouched.
+6. Every mutation snapshots the previous file under the task output directory and returns a snapshot id. Snapshots are grouped per turn; `rewind_turn` restores the previous completed turn or a named turn.
+7. Repeated reads of an unchanged range return a short unchanged notice unless `force=true`. Binary files and missing paths return actionable errors, including similar filename suggestions.
+8. A successful file-changing tool can trigger the optional `afterEdit` hook with the changed paths; hook failures are reported as notices and never abort the run.
 
 ## Verification contract
 
@@ -73,20 +83,51 @@ The coding profile uses `CODING_RUN_BUDGET` (300 turns, 2500 tool calls, the nat
 
 ## Loop contract
 
-- Consecutive read-only tools may run in parallel up to `maxParallelTools`.
+- Consecutive read-only tools may run in parallel up to `maxParallelTools`. Mixed batches are partitioned around sequential write tools: reads before and after a write keep their original order, and authorization and budget accounting still apply per call.
+- Plan mode is enforced at the tool boundary. Non-whitelisted tools are rejected before execution, and `shell` is limited to approved read-only commands.
 - Each tool has a timeout. A timed-out shell command is migrated to a background session instead of killing the process tree.
 - Repeated identical calls are allowed to a point; five identical call/result pairs stop the run with an explicit no-progress message.
-- Steering messages are drained at turn boundaries.
+- Steering messages are drained at turn boundaries. Background subagent completion notices arrive through this channel.
 - Compaction keeps complete assistant/tool pairs, keeps the most recent tool outputs intact, prunes older output with head+tail, and injects a progress ledger plus project instructions.
+- After compaction, a `<post_compact_context>` block restores mode, recently read files with hashes and ranges, unfinished todos, the active plan, active skills and subagents.
+- Native checkpoints persist tool state and mode. Resume restores tool state only; historical usage stays deducted by the scheduler, so per-attempt counters start at zero and are not double-counted.
+
+## Context continuity
+
+The compaction summary is a nine-section structured report: primary request and intent, key technical concepts, files and code sections, errors and fixes, problem solving, all user messages, pending tasks, current work and suggested next steps. It must cite real paths, line numbers and commands; invented progress is rejected by review.
+
+Read state is cleared after compaction so the summary is not treated as the original tool output, and `ranges` prevents duplicate reads only while the file content hash still matches.
+
+## Agent orchestration
+
+`agent` is the typed entry point. Profiles are:
+
+| Profile | Mode | Isolation | Purpose |
+| --- | --- | --- | --- |
+| `explore` | plan | read-only | Locate code and answer questions |
+| `plan` | plan | read-only | Produce an implementation plan |
+| `review` | plan | read-only | Inspect a diff for defects |
+| `general-purpose` | build | worktree | Independent implementation |
+
+`delegate_task` remains a compatibility alias. Background agents return an id immediately and are managed by `agent_wait`, `agent_status` and `agent_kill`; parent cancellation propagates to children. Each child writes a JSONL transcript with prompt, summary, usage, messages, branch and commit. Completion notices are injected into the parent as steering messages rather than rewriting parent history.
+
+## Long-horizon state
+
+- `shell_wait` waits for a background process to exit, match output or time out instead of polling.
+- Repository memory lives in `.hearth/memory` with a `MEMORY.md` index; `memory_read`, `memory_write` and `memory_search` expose it to coding and read-only profiles.
+- A long-running goal lives in `.hearth/goal.json`; `get_goal`, `create_goal` and `update_goal` persist title, objective, constraints, success criteria and status. Only one active goal is allowed.
+- Per-turn file history supports `rewind_turn`, and the older `rewind` remains available for a single snapshot.
 
 ## Benchmarks
 
 | Benchmark | What it measures | Adapter |
 | --- | --- | --- |
 | Internal `hearth-coding` suite | Repository navigation, editing, tests, multi-file changes | `scripts/bench/aci-bench.ts` |
-| Aider Polyglot | 225 exercises, 6 languages, pass@2 and format errors | `hearth-eval` Aider adapter |
-| SWE-bench Verified | 500 Python issues, easy/hard split | Docker + patch adapter |
-| Terminal-Bench 2.x | 89 terminal tasks, 16 categories | Harbor adapter |
+| Aider Polyglot | 225 exercises, 6 languages, pass@2 and format errors | `scripts/bench/run-suite.ts` + upstream dataset conversion |
+| SWE-bench Verified | 500 Python issues, easy/hard split | `scripts/bench/run-suite.ts` + Docker patch adapter |
+| Terminal-Bench 2.x | 89 terminal tasks, 16 categories | `scripts/bench/run-suite.ts` + Harbor container |
+
+The public adapter is a generic JSONL suite runner: each task names a workspace, prompt and optional test command. The runner copies the workspace, invokes the same `run-agent` entry point as the server, executes the test command, captures `git diff --binary` and writes a report with `agentStatus`, `testExitCode`, `passed`, duration and patch. Container orchestration stays outside the harness so results remain comparable across benchmarks.
 
 The first milestone is harness-only: all unit tests green and the internal suite improves over the recorded baseline for the same model. Public benchmark runs require Docker/Linux and are tracked separately.
 
@@ -127,7 +168,7 @@ The runner uses the same coding prompt, tools, budget and finish gate as the ser
 
 ## Commit policy
 
-- Work happens on `feat/coding-harness`.
+- Work happens directly on `main`; no feature branch and no merge commits.
 - One logical change per commit.
 - Subject and body are English. Body uses `Why / What / Test`.
 - Generated assets, logs and personal files are never committed.
