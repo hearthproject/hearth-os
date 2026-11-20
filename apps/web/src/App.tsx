@@ -9,7 +9,6 @@ import { DossierPage } from "./pages/DossierPage.tsx";
 import { DevicesPage } from "./pages/DevicesPage.tsx";
 import { InboxPage } from "./pages/InboxPage.tsx";
 import { MailPage } from "./pages/MailPage.tsx";
-import { MemoryPage } from "./pages/MemoryPage.tsx";
 import { LibraryPage } from "./pages/LibraryPage.tsx";
 import { OnboardingPage } from "./pages/OnboardingPage.tsx";
 import { PersonalPage } from "./pages/PersonalPage.tsx";
@@ -33,8 +32,8 @@ export default function App() {
             <Route path="inbox" element={<InboxPage />} />
             <Route path="personal" element={<PersonalPage />} />
             <Route path="runtime" element={<RuntimePage />} />
-            <Route path="knowledge" element={<MemoryPage />} />
-            <Route path="memory" element={<MemoryPage />} />
+            <Route path="knowledge" element={<Navigate to="/library" replace />} />
+            <Route path="memory" element={<Navigate to="/library" replace />} />
             <Route path="library" element={<LibraryPage />} />
             <Route path="dossier" element={<DossierPage />} />
             <Route path="mail" element={<MailPage />} />

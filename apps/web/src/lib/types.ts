@@ -270,7 +270,6 @@ export interface TaskView {
   events: EventEnvelope[];
   eventTotal: number;
   followUps: TaskFollowUpRecord[];
-  knowledge?: { uri: string; syncedAt: string; contentHash: string | null } | null;
 }
 
 export interface TaskTurnFile {
@@ -846,7 +845,7 @@ export type DesktopActionRequest =
 
 export interface MemorySnapshot {
   settings: MemorySettings;
-  memories: Array<MemoryRecord & { knowledge?: { uri: string; syncedAt: string } }>;
+  memories: MemoryRecord[];
   conflicts: MemoryConflict[];
   recalls: MemoryRecall[];
   forgets: MemoryForgetReceipt[];
@@ -883,82 +882,3 @@ export interface OntologyEntityView extends EntityRecord {
   aliases: EntityAliasRecord[];
 }
 
-export interface KnowledgeRecallSettingsView {
-  maxItems: number;
-  maxTokens: number;
-  timeoutMs: number;
-  minScore: number | null;
-  includeResources: boolean;
-  includeMemories: boolean;
-  includeSkills: boolean;
-  peerScope: "actor" | "all";
-}
-
-export interface KnowledgeWriteSettingsView {
-  memories: "off" | "curated" | "all";
-  tasks: "off" | "completed" | "all";
-  sources: boolean;
-  projects: boolean;
-  reindexCron: string;
-}
-
-export interface KnowledgeSettingsView {
-  enabled: boolean;
-  baseUrl: string;
-  apiKeyMasked: string | null;
-  manageProcess: boolean;
-  serverCommand: string;
-  serverArgs: string[];
-  recall: KnowledgeRecallSettingsView;
-  write: KnowledgeWriteSettingsView;
-  peers: Record<string, string>;
-  updatedAt: string | null;
-}
-
-export interface KnowledgeSetupState {
-  installed: boolean;
-  serverPath: string | null;
-  uv: boolean;
-  uvPath: string | null;
-  running: boolean;
-  managed: boolean;
-  install: {
-    status: "idle" | "running" | "succeeded" | "failed";
-    log: string;
-    startedAt: string | null;
-    finishedAt: string | null;
-    error: string | null;
-  };
-  installCommand: string;
-  message: string | null;
-}
-
-export interface KnowledgeStatusResponse {
-  settings: KnowledgeSettingsView;
-  health: { ok: boolean; latencyMs: number; version: string | null; authMode: string | null; detail: string | null };
-  jobs: { pending: number; running: number; failed: number; dead: number };
-  index: { memories: number; tasks: number; sources: number; total: number; lastIndexedAt: string | null };
-  lastReconcileAt: string | null;
-  lastReindexDate: string | null;
-}
-
-export interface KnowledgeHit {
-  uri: string;
-  contextType: "memory" | "resource" | "skill" | "unknown";
-  level: number | null;
-  score: number | null;
-  abstract: string | null;
-  tags: string[];
-}
-
-export interface KnowledgeSettingsPatch {
-  enabled?: boolean;
-  baseUrl?: string;
-  apiKey?: string;
-  manageProcess?: boolean;
-  serverCommand?: string;
-  serverArgs?: string[];
-  recall?: Partial<KnowledgeRecallSettingsView>;
-  write?: Partial<KnowledgeWriteSettingsView>;
-  peers?: Record<string, string>;
-}

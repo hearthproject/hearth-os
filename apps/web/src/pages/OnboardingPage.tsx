@@ -15,7 +15,7 @@ import { api } from "../lib/api.ts";
 import type { ModelProtocol, ModelProviderPreset, OnboardingVerificationView } from "../lib/types.ts";
 import { HearthMark } from "../components/HearthMark.tsx";
 
-const STEPS = ["模型", "执行器", "记忆助手", "偏好", "验证"];
+const STEPS = ["模型", "执行器", "偏好", "验证"];
 
 interface ModelDraft {
   providerId: string;
@@ -49,8 +49,6 @@ export function OnboardingPage() {
   const onboardingQuery = useQuery({ queryKey: ["onboarding"], queryFn: api.onboarding });
   const registryQuery = useQuery({ queryKey: ["modelRegistry"], queryFn: api.modelRegistry });
   const executorsQuery = useQuery({ queryKey: ["executors"], queryFn: api.executors, refetchInterval: 10_000 });
-  const setupQuery = useQuery({ queryKey: ["knowledgeSetup"], queryFn: api.knowledgeSetup, refetchInterval: 4_000 });
-  const [knowledgeBusy, setKnowledgeBusy] = useState<"install" | "start" | null>(null);
 
   const configured = Boolean(registryQuery.data?.chatConfigured);
   const nativeExecutor = (executorsQuery.data?.executors ?? []).find((executor) => executor.id === "native");
@@ -189,32 +187,7 @@ export function OnboardingPage() {
     setNotice(null);
     if (step === 0) void saveModel();
     else if (step === 1) setStep(2);
-    else if (step === 2) setStep(3);
     else void finish();
-  }
-
-  async function handleKnowledge(action: "install" | "start") {
-    setKnowledgeBusy(action);
-    setNotice(null);
-    try {
-      if (action === "install") {
-        await api.installKnowledge();
-        setNotice({ tone: "info", text: "已开始准备记忆助手，完成后可以直接进入下一步。" });
-      } else {
-        const result = await api.startKnowledgeService();
-        if (result.setup.running) {
-          await api.saveKnowledgeSettings({ enabled: true, manageProcess: true });
-          setNotice({ tone: "ok", text: "记忆助手已开启。" });
-        } else {
-          setNotice({ tone: "error", text: "服务尚未就绪，可以稍后在设置里重试。" });
-        }
-      }
-      await setupQuery.refetch();
-    } catch (error) {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "操作失败" });
-    } finally {
-      setKnowledgeBusy(null);
-    }
   }
 
   const skipButton = (
@@ -319,54 +292,6 @@ export function OnboardingPage() {
 
           {step === 2 && (
             <section className="wizard-panel">
-              <h1>记忆助手（可选）</h1>
-              <p className="wizard-note">
-                Hearth 可以把做过的事和你的偏好整理成可查找的记忆。不开启也能正常聊天和完成任务，之后可以在设置里随时补上。
-              </p>
-              {setupQuery.data && (
-                <div className="wizard-knowledge">
-                  <div className="wizard-knowledge-status">
-                    <span className={`status-dot ${setupQuery.data.running ? "online" : "offline"}`} />
-                    <strong>
-                      {setupQuery.data.installed
-                        ? setupQuery.data.running ? "已开启" : "已安装，尚未开启"
-                        : "尚未开启"}
-                    </strong>
-                  </div>
-                  <p className="wizard-note">
-                    首次准备会下载所需组件，约占 0.8–1 GiB 磁盘空间，并需要联网。
-                  </p>
-                  <div className="wizard-inline-actions">
-                    {!setupQuery.data.installed && (
-                      <button
-                        className="primary-button"
-                        onClick={() => void handleKnowledge("install")}
-                        disabled={knowledgeBusy !== null || !setupQuery.data.uv || setupQuery.data.install.status === "running"}
-                      >
-                        {knowledgeBusy === "install" || setupQuery.data.install.status === "running" ? <Loader2 size={14} className="spin" /> : null}
-                        开启记忆助手
-                      </button>
-                    )}
-                    {setupQuery.data.installed && !setupQuery.data.running && (
-                      <button className="primary-button" onClick={() => void handleKnowledge("start")} disabled={knowledgeBusy !== null}>
-                        {knowledgeBusy === "start" ? <Loader2 size={14} className="spin" /> : null} 开启
-                      </button>
-                    )}
-                    {setupQuery.data.running && <span className="status-chip ok"><CheckCircle2 size={13} /> 已就绪</span>}
-                  </div>
-                  {!setupQuery.data.uv && !setupQuery.data.installed && (
-                    <p className="wizard-note warn"><X size={14} /> 没有检测到 uv，可以先跳过，之后安装 uv 再回来设置。</p>
-                  )}
-                  {setupQuery.data.install.status === "running" && (
-                    <pre className="wizard-install-log">{setupQuery.data.install.log.slice(-2000)}</pre>
-                  )}
-                </div>
-              )}
-            </section>
-          )}
-
-          {step === 3 && (
-            <section className="wizard-panel">
               <h1>先跑一个真实任务</h1>
               <p className="wizard-note">
                 这一步会用你刚配置的模型，在一个临时文件夹里读写文件并运行测试。跑通才说明聊天、工具和测试链路真的可用；不会碰你的项目。
@@ -416,10 +341,10 @@ export function OnboardingPage() {
             <ArrowLeft size={14} /> 上一步
           </button>
           <div className="wizard-footer-right">
-            <button className="primary-button" onClick={next} disabled={busy !== null || (step === 0 && !modelReady) || (step === 3 && !verification?.ok && !skipVerification)}>
+            <button className="primary-button" onClick={next} disabled={busy !== null || (step === 0 && !modelReady) || (step === 2 && !verification?.ok && !skipVerification)}>
               {busy === "save" || busy === "finish" ? <Loader2 size={15} className="spin" /> : null}
-              {step === 3 ? "进入 Hearth" : step === 0 ? "保存并继续" : "继续"}
-              {step < 3 && <ArrowRight size={14} />}
+              {step === 2 ? "进入 Hearth" : step === 0 ? "保存并继续" : "继续"}
+              {step < 2 && <ArrowRight size={14} />}
             </button>
           </div>
         </footer>

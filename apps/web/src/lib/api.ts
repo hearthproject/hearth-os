@@ -47,10 +47,6 @@ import type {
   MailSyncResult,
   MailTestResult,
   HealthResponse,
-  KnowledgeSettingsPatch,
-  KnowledgeSetupState,
-  KnowledgeHit,
-  KnowledgeStatusResponse,
   LocalProjectView,
   ProjectDossierView,
   WorkstyleView,
@@ -286,24 +282,6 @@ export const api = {
     request<ModelTestResponse>("/api/model-settings/test", { method: "POST", body: JSON.stringify(input) }),
   probeCodex: () => request<CodexProbeResponse>("/api/codex/probe", { method: "POST" }),
   executorSettings: () => request<ExecutorSettingsResponse>("/api/executor-settings"),
-  knowledgeStatus: () => request<KnowledgeStatusResponse>("/api/knowledge/status"),
-  knowledgeSetup: () => request<KnowledgeSetupState>("/api/knowledge/setup"),
-  installKnowledge: () => request<{ install: KnowledgeSetupState["install"] & { started: boolean } }>("/api/knowledge/setup/install", { method: "POST" }),
-  startKnowledgeService: () => request<{ ok: boolean; setup: KnowledgeSetupState }>("/api/knowledge/service/start", { method: "POST" }),
-  stopKnowledgeService: () => request<{ ok: boolean; setup: KnowledgeSetupState }>("/api/knowledge/service/stop", { method: "POST" }),
-  saveKnowledgeSettings: (input: KnowledgeSettingsPatch) => request<{ settings: KnowledgeStatusResponse["settings"] }>("/api/knowledge/settings", {
-    method: "PATCH",
-    body: JSON.stringify(input)
-  }),
-  testKnowledge: () => request<{ health: KnowledgeStatusResponse["health"]; hits: number }>("/api/knowledge/test", { method: "POST" }),
-  knowledgeSearch: (query: string, uri?: string) => {
-    const params = new URLSearchParams({ q: query });
-    if (uri) params.set("uri", uri);
-    return request<{ hits: KnowledgeHit[] }>("/api/knowledge/search?" + params.toString());
-  },
-  syncKnowledge: () => request<{ result: { written: number; failed: number; skipped: number } }>("/api/knowledge/sync", { method: "POST" }),
-  reconcileKnowledge: () => request<{ result: { memories: number; tasks: number; sources: number } }>("/api/knowledge/reconcile", { method: "POST" }),
-  reindexKnowledge: () => request<{ ok: boolean }>("/api/knowledge/reindex", { method: "POST" }),
   executors: () => request<ExecutorListResponse>("/api/executors"),
   saveExecutorSettings: (input: ExecutorSettingsPatch) => request<ExecutorSettingsResponse>("/api/executor-settings", {
     method: "PUT",

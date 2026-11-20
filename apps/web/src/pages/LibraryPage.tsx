@@ -120,7 +120,7 @@ export function LibraryPage() {
             {addRootMutation.isPending ? <Loader2 size={15} className="spin" /> : <Plus size={15} />} 添加文件夹
           </button>
           <button className="ghost-button" onClick={() => refreshMutation.mutate()} disabled={refreshMutation.isPending}>
-            {refreshMutation.isPending ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />} 更新
+            {refreshMutation.isPending ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />} 刷新资料
           </button>
         </div>
       </div>
