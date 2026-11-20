@@ -10,6 +10,11 @@ export const CODING_REMINDERS: AgentRuntimeReminders = {
   repeated: "The same tool call returned the same result repeatedly. Stop retrying, read the error again, and change approach; if the environment blocks you, call finish_task with the blocker."
 };
 
+export interface CodingPromptSection {
+  id: "rules" | "tools" | "environment" | "instructions" | "mode" | "skills" | "extra";
+  content: string;
+}
+
 export interface CodingPromptOptions {
   workspaceRoot: string;
   outDir: string;
@@ -105,7 +110,7 @@ function toolGuidanceBlock(names: string[]): string {
   ].join("\n");
 }
 
-export function codingSystemPrompt(options: CodingPromptOptions): string {
+export function codingPromptSections(options: CodingPromptOptions): CodingPromptSection[] {
   const mode = options.mode ?? "build";
   const git = readGitEnvironment(options.workspaceRoot);
   const project = detectProjectProfile(options.workspaceRoot);
@@ -121,16 +126,23 @@ export function codingSystemPrompt(options: CodingPromptOptions): string {
       ? { permissions: { network: options.permissions.networkHosts, writeRoots: options.permissions.writeRoots } }
       : {})
   });
-  const parts = [
-    CODING_RULES,
-    toolGuidanceBlock(options.availableTools ?? []),
-    env,
-    instructionsBlock(instructions),
-    "## Plan mode\nWhen mode=plan, you may only read, search and inspect. Do not edit, write, patch, run mutating shell commands, or call finish_task. Produce a concrete plan with file paths, commands, risks and open questions, then call submit_plan.",
-    options.skillIndex?.trim() ? `## Skills\n${options.skillIndex.trim()}` : "",
-    ...(options.extraInstructions ?? [])
-  ].filter(Boolean);
-  return parts.join("\n\n");
+  const sections: CodingPromptSection[] = [
+    { id: "rules", content: CODING_RULES },
+    { id: "tools", content: toolGuidanceBlock(options.availableTools ?? []) },
+    { id: "environment", content: env },
+    { id: "instructions", content: instructionsBlock(instructions) },
+    {
+      id: "mode",
+      content: "## Plan mode\nWhen mode=plan, you may only read, search and inspect. Do not edit, write, patch, run mutating shell commands, or call finish_task. Produce a concrete plan with file paths, commands, risks and open questions, then call submit_plan."
+    }
+  ];
+  if (options.skillIndex?.trim()) sections.push({ id: "skills", content: `## Skills\n${options.skillIndex.trim()}` });
+  if (options.extraInstructions?.length) sections.push({ id: "extra", content: options.extraInstructions.filter(Boolean).join("\n\n") });
+  return sections.filter((section) => section.content.trim().length > 0);
+}
+
+export function codingSystemPrompt(options: CodingPromptOptions): string {
+  return codingPromptSections(options).map((section) => section.content).join("\n\n");
 }
 
 export function codingCompletionReminder(): string {

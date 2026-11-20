@@ -9,7 +9,7 @@ import { compactAgentMessagesWithSummary } from "../compaction.ts";
 import { searchFiles } from "./search.ts";
 import { todoReadTool, todoWriteTool, todoReminder } from "./todo.ts";
 import { commandPolicyIssue } from "./command-policy.ts";
-import { codingSystemPrompt } from "./prompt.ts";
+import { codingPromptSections, codingSystemPrompt } from "./prompt.ts";
 import { redactSecrets } from "./tool-output.ts";
 import { detectProjectProfile } from "./project-profile.ts";
 import { environmentBlock } from "./environment.ts";
@@ -220,6 +220,14 @@ describe("prompt tool contract", () => {
     expect(prompt).not.toContain("read_image");
     expect(prompt).not.toContain("load_skill");
     expect(prompt).not.toContain("delegate_task");
+  });
+
+  it("exposes stable prompt sections and omits empty optional ones", () => {
+    const root = workspace();
+    const base = codingPromptSections({ workspaceRoot: root, outDir: join(root, "out") });
+    expect(base.map((section) => section.id)).toEqual(["rules", "tools", "environment", "mode"]);
+    const withSkills = codingPromptSections({ workspaceRoot: root, outDir: join(root, "out"), skillIndex: "use bench skill" });
+    expect(withSkills.at(-1)).toMatchObject({ id: "skills" });
   });
 });
 
