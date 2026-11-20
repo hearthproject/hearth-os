@@ -41,8 +41,9 @@ import { BackupSettingsPanel } from "../components/BackupSettingsPanel.tsx";
 import { SecuritySettingsPanel } from "../components/SecuritySettingsPanel.tsx";
 import { FeishuSettingsPanel } from "../components/FeishuSettingsPanel.tsx";
 import { KnowledgeSettingsPanel } from "../components/KnowledgeSettingsPanel.tsx";
+import { BrowserSettingsPanel } from "../components/BrowserSettingsPanel.tsx";
 
-type SettingsTab = "executors" | "models" | "projects" | "extensions" | "automation" | "knowledge" | "connections" | "context" | "data";
+type SettingsTab = "executors" | "models" | "projects" | "extensions" | "browser" | "automation" | "knowledge" | "connections" | "context" | "data";
 
 interface ProfileDraft {
   name: string;
@@ -61,6 +62,7 @@ const TABS: Array<{ id: SettingsTab; label: string }> = [
   { id: "models", label: "模型" },
   { id: "projects", label: "项目" },
   { id: "extensions", label: "扩展" },
+  { id: "browser", label: "浏览器" },
   { id: "automation", label: "记忆" },
   { id: "knowledge", label: "记忆助手" },
   { id: "connections", label: "连接" },
@@ -136,6 +138,7 @@ export function SettingsPage() {
           {tab === "models" && <ModelsTab />}
           {tab === "projects" && <ProjectsTab />}
           {tab === "extensions" && <ExtensionsTab />}
+          {tab === "browser" && <BrowserSettingsPanel />}
           {tab === "automation" && <AutomationTab />}
           {tab === "knowledge" && <KnowledgeSettingsPanel />}
           {tab === "connections" && <ConnectionsTab />}

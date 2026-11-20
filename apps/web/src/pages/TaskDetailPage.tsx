@@ -31,6 +31,7 @@ import { ApiError, api } from "../lib/api.ts";
 import { formatBytes, formatDuration, formatTime, formatTokens, relativeTime } from "../lib/format.ts";
 import { executorLabel, executionModeLabel, approvalModeLabel, taskKindLabel } from "../lib/labels.ts";
 import { ApprovalCard } from "../components/ApprovalCard.tsx";
+import { BrowserPanel } from "../components/BrowserPanel.tsx";
 import { TaskFollowUpPanel } from "../components/TaskFollowUpPanel.tsx";
 import { TaskGitPanel } from "../components/TaskGitPanel.tsx";
 import { TaskTurnTimeline } from "../components/TaskTurnTimeline.tsx";
@@ -434,6 +435,8 @@ export function TaskDetailPage() {
       </section>
 
       <TaskTurnTimeline taskId={task.id} />
+
+      <BrowserPanel taskId={task.id} />
 
       <details className="task-original-request">
         <summary>原始需求</summary>

@@ -26,6 +26,9 @@ export function ApprovalCard({ approval, effect }: { approval: ApprovalRecord; e
   const isTool = isToolApproval(approval);
   const toolName = isTool ? approval.kind.slice("tool.".length) : null;
   const toolArguments = isTool ? target.arguments ?? preview.arguments : null;
+  const browserPreview = isBrowserPreview(preview.browser) ? preview.browser : null;
+  const isBrowserAction = Boolean(browserPreview) || toolName?.startsWith("browser_");
+  const isBrowserOpen = toolName === "browser_open";
   const account = text(target.account) ?? text(preview.account) ?? text(target.accountId);
   const from = text(target.from) ?? text(preview.from);
   const recipients = stringArray(target.to ?? preview.to);
@@ -37,7 +40,7 @@ export function ApprovalCard({ approval, effect }: { approval: ApprovalRecord; e
   const isPending = approval.status === "pending";
 
   const decide = useMutation({
-    mutationFn: (decision: "approve" | "reject") => api.decideApproval(approval.id, decision, approval.parameterHash),
+    mutationFn: (decision: "approve" | "reject" | "approve_always") => api.decideApproval(approval.id, decision, approval.parameterHash),
     onSuccess: () => {
       setError(null);
       setConfirming(false);
@@ -121,6 +124,23 @@ export function ApprovalCard({ approval, effect }: { approval: ApprovalRecord; e
         </div>
       )}
 
+      {isBrowserAction && (
+        <div className="approval-browser">
+          <strong>网页现场</strong>
+          <img
+            src={`/api/tasks/${encodeURIComponent(approval.taskId)}/browser/screenshot?t=${encodeURIComponent(approval.createdAt)}`}
+            alt="浏览器审批截图"
+          />
+          <dl className="kv-grid">
+            {browserPreview && <div><dt>网址</dt><dd className="mono select-all">{browserPreview.url}</dd></div>}
+            {browserPreview && <div><dt>动作</dt><dd className="mono">{browserPreview.action}</dd></div>}
+            {browserPreview?.elementRef && <div><dt>目标元素</dt><dd className="mono">{browserPreview.elementRef}</dd></div>}
+            {browserPreview && <div><dt>风险</dt><dd>{browserPreview.risk}</dd></div>}
+            <div><dt>截图</dt><dd>只有当前网页画面，不包含 Cookie、密码或本地文件。</dd></div>
+          </dl>
+        </div>
+      )}
+
       {error && <p className="form-error">{error}</p>}
 
       {isPending ? (
@@ -136,6 +156,11 @@ export function ApprovalCard({ approval, effect }: { approval: ApprovalRecord; e
                   ? <><Loader2 className="spin" size={15} /> 正在执行</>
                   : <><CheckCircle2 size={15} /> {isTool ? "允许本次工具" : isOutbox ? "确认写入本地" : isSmtp ? "确认并发送" : "确认执行"}</>}
               </button>
+              {isBrowserOpen && (
+                <button className="ghost-button" onClick={() => decide.mutate("approve_always")} disabled={decide.isPending}>
+                  该域名始终允许（30 天）
+                </button>
+              )}
             </div>
           </div>
         ) : (
@@ -188,6 +213,12 @@ export function ApprovalCard({ approval, effect }: { approval: ApprovalRecord; e
 
 function text(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
+}
+
+function isBrowserPreview(value: unknown): value is { url: string; action: string; elementRef: string | null; risk: string } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.url === "string" && typeof record.action === "string" && typeof record.risk === "string";
 }
 
 function stringArray(value: unknown): string[] {

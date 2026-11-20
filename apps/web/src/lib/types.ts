@@ -331,6 +331,43 @@ export interface TaskRewindResponse {
   turn: TaskTurn | null;
 }
 
+export interface BrowserTabView {
+  id: string;
+  url: string;
+  title: string;
+  active: boolean;
+}
+
+export interface BrowserStatusView {
+  running: boolean;
+  paused: boolean;
+  backend: string | null;
+  profileDir: string;
+  pages: number;
+  tabs: BrowserTabView[];
+}
+
+export interface BrowserEvidenceView {
+  taskId: string;
+  runId: string | null;
+  kind: string;
+  url: string;
+  title: string;
+  pageDigest: string;
+  actionDigest: string;
+  screenshotBefore: string | null;
+  screenshotAfter: string | null;
+  createdAt: string;
+}
+
+export interface BrowserSettingsView {
+  enabled: boolean;
+  allowedDomains: string[];
+  readOnlyDomains: string[];
+  highRiskDomains: string[];
+  maxSessions: number;
+}
+
 export interface TaskContextResponse extends ContextSnapshot {}
 
 export interface TaskHandoffsResponse {

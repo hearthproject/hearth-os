@@ -62,6 +62,35 @@
   overflow-wrap: anywhere;
 }
 
+.approval-browser {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-sunk);
+}
+
+.approval-browser > strong {
+  font-size: var(--fs-12);
+}
+
+.approval-browser img {
+  width: 100%;
+  max-height: 300px;
+  object-fit: cover;
+  object-position: top;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+}
+
+.approval-browser .kv-grid {
+  margin: 0;
+}
+
 .approval-actions,
 .approval-confirm {
   display: flex;

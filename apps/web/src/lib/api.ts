@@ -16,6 +16,9 @@ import type {
   ArtifactListItem,
   BackupRestoreResult,
   BackupSnapshot,
+  BrowserEvidenceView,
+  BrowserSettingsView,
+  BrowserStatusView,
   CreateTaskRequest,
   DesktopActionRequest,
   DesktopCommandView,
@@ -451,6 +454,18 @@ export const api = {
       method: "POST",
       body: JSON.stringify(input)
     }),
+  browserStatus: (id: string) => request<BrowserStatusView>(`/api/tasks/${encodeURIComponent(id)}/browser`),
+  pauseBrowser: (id: string) =>
+    request<{ paused: boolean; message: string }>(`/api/tasks/${encodeURIComponent(id)}/browser/pause`, { method: "POST" }),
+  resumeBrowser: (id: string) =>
+    request<{ resumed: boolean; message: string }>(`/api/tasks/${encodeURIComponent(id)}/browser/resume`, { method: "POST" }),
+  closeBrowser: (id: string) =>
+    request<{ closed: boolean }>(`/api/tasks/${encodeURIComponent(id)}/browser/close`, { method: "POST" }),
+  browserEvidence: (id: string) =>
+    request<{ evidence: BrowserEvidenceView[] }>(`/api/tasks/${encodeURIComponent(id)}/browser/evidence`),
+  browserSettings: () => request<{ settings: BrowserSettingsView }>("/api/browser/settings"),
+  updateBrowserSettings: (input: Partial<BrowserSettingsView>) =>
+    request<{ settings: BrowserSettingsView }>("/api/browser/settings", { method: "PATCH", body: JSON.stringify(input) }),
   followUps: (id: string) => request<{ followUps: TaskFollowUpRecord[] }>(`/api/tasks/${encodeURIComponent(id)}/follow-ups`),
   addFollowUp: (id: string, content: string, mode: TaskFollowUpMode) =>
     request<TaskFollowUpRecord>(`/api/tasks/${encodeURIComponent(id)}/follow-ups`, {
@@ -573,7 +588,7 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(patch)
     }),
-  decideApproval: (id: string, decision: "approve" | "reject", parameterHash: string) =>
+  decideApproval: (id: string, decision: "approve" | "reject" | "approve_always", parameterHash: string) =>
     request<ApprovalDecisionResult>(`/api/approvals/${encodeURIComponent(id)}/decide`, {
       method: "POST",
       body: JSON.stringify({ decision, parameterHash })
