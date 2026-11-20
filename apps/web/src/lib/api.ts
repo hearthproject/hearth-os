@@ -52,6 +52,8 @@ import type {
   KnowledgeHit,
   KnowledgeStatusResponse,
   LocalProjectView,
+  ProjectDossierView,
+  WorkstyleView,
   McpServerView,
   MaintenanceSnapshot,
   CreateMemoryRequest,
@@ -209,6 +211,15 @@ export const api = {
     body: JSON.stringify(input)
   }),
   deleteProject: (id: string) => request<void>(`/api/projects/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  projectDossier: (id: string) =>
+    request<{ dossier: ProjectDossierView | null }>(`/api/projects/${encodeURIComponent(id)}/dossier`),
+  compileProjectDossier: (id: string) =>
+    request<{ dossier: ProjectDossierView }>(`/api/projects/${encodeURIComponent(id)}/dossier/compile`, { method: "POST" }),
+  workstyle: () => request<{ workstyle: WorkstyleView }>("/api/profile/workstyle"),
+  updateWorkstyle: (content: string) =>
+    request<{ workstyle: WorkstyleView }>("/api/profile/workstyle", { method: "PUT", body: JSON.stringify({ content }) }),
+  resetWorkstyle: () =>
+    request<{ workstyle: WorkstyleView }>("/api/profile/workstyle/reset", { method: "POST" }),
   taskWorktree: (id: string) => request<{ worktree: TaskWorktreeView | null }>(`/api/tasks/${encodeURIComponent(id)}/worktree`),
   cleanupTaskWorktree: (id: string) => request<{ removed: boolean; branchKept: boolean }>(`/api/tasks/${encodeURIComponent(id)}/worktree`, { method: "DELETE" }),
   mcpServers: () => request<{ servers: McpServerView[] }>("/api/mcp/servers"),

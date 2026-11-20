@@ -368,6 +368,32 @@ export interface BrowserSettingsView {
   maxSessions: number;
 }
 
+export interface DossierSectionsView {
+  overview: string[];
+  stack: string[];
+  commands: string[];
+  conventions: string[];
+  decisions: string[];
+  openTasks: string[];
+  pitfalls: string[];
+  evidence: string[];
+}
+
+export interface ProjectDossierView {
+  projectId: string;
+  projectName: string;
+  projectPath: string;
+  generatedAt: string;
+  sections: DossierSectionsView;
+  markdown: string;
+}
+
+export interface WorkstyleView {
+  content: string;
+  updatedAt: string;
+  isDefault: boolean;
+}
+
 export interface TaskContextResponse extends ContextSnapshot {}
 
 export interface TaskHandoffsResponse {

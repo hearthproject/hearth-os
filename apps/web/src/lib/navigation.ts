@@ -1,4 +1,4 @@
-import { Activity, Brain, CalendarClock, Mail, MessageCircle, Monitor, Settings2, UserRound, type LucideIcon } from "lucide-react";
+import { Activity, BookMarked, Brain, CalendarClock, Mail, MessageCircle, Monitor, Settings2, UserRound, type LucideIcon } from "lucide-react";
 
 export type NavPlacement = "main" | "more" | "footer";
 
@@ -15,6 +15,7 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { id: "chat", label: "聊天", path: "/", icon: MessageCircle, placement: "main", end: true, keywords: ["聊天", "对话", "chat", "conversation"] },
   { id: "knowledge", label: "记忆", path: "/knowledge", icon: Brain, placement: "main", keywords: ["记忆", "知识库", "经验", "openviking", "memory", "knowledge"] },
+  { id: "dossier", label: "档案", path: "/dossier", icon: BookMarked, placement: "more", keywords: ["档案", "项目", "工作方式", "dossier", "project", "workstyle"] },
   { id: "mail", label: "邮件", path: "/mail", icon: Mail, placement: "more", keywords: ["邮件", "邮箱", "mail"] },
   { id: "schedules", label: "定时任务", path: "/schedules", icon: CalendarClock, placement: "more", keywords: ["定时", "周期", "schedule"] },
   { id: "devices", label: "设备", path: "/devices", icon: Monitor, placement: "more", keywords: ["设备", "桌面", "device", "desktop"] },

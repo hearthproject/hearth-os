@@ -5,6 +5,7 @@ import { AppShell } from "./components/AppShell.tsx";
 import { NotificationCenter } from "./components/NotificationCenter.tsx";
 import { api, subscribeToEvents } from "./lib/api.ts";
 import { ChatPage } from "./pages/ChatPage.tsx";
+import { DossierPage } from "./pages/DossierPage.tsx";
 import { DevicesPage } from "./pages/DevicesPage.tsx";
 import { MailPage } from "./pages/MailPage.tsx";
 import { MemoryPage } from "./pages/MemoryPage.tsx";
@@ -32,6 +33,7 @@ export default function App() {
             <Route path="runtime" element={<RuntimePage />} />
             <Route path="knowledge" element={<MemoryPage />} />
             <Route path="memory" element={<MemoryPage />} />
+            <Route path="dossier" element={<DossierPage />} />
             <Route path="mail" element={<MailPage />} />
             <Route path="schedules" element={<SchedulesPage />} />
             <Route path="devices" element={<DevicesPage />} />
