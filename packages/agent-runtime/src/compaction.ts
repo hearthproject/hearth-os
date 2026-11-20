@@ -13,6 +13,7 @@ export interface CompactResult {
   compacted: boolean;
   before: number;
   after: number;
+  restoredContext?: string;
 }
 
 export interface TokenCompactResult extends CompactResult {
@@ -76,6 +77,9 @@ export async function compactAgentMessagesWithSummary(
   if (options.projectInstructions?.trim()) {
     summaryMessage.push({ role: "user", content: `<project_instructions>\n${options.projectInstructions.trim()}\n</project_instructions>` });
   }
+  if (options.restoredContext?.trim()) {
+    summaryMessage.push({ role: "user", content: options.restoredContext.trim() });
+  }
   const result = [...system, ...anchor, ...summaryMessage, ...completeRecent(recent)];
   return {
     messages: result,
@@ -85,7 +89,8 @@ export async function compactAgentMessagesWithSummary(
     beforeTokens,
     afterTokens: estimateMessageTokens(result),
     summary: summaryText,
-    summarized: Boolean(summaryText)
+    summarized: Boolean(summaryText),
+    ...(options.restoredContext?.trim() ? { restoredContext: options.restoredContext.trim() } : {})
   };
 }
 
@@ -106,9 +111,16 @@ export function compactAgentMessages(messages: AgentMessage[], options: CompactO
   const recent = result.slice(-keepRecent);
   while (recent.length > 0 && recent[0]?.role === "tool") recent.shift();
   const anchor = firstUser && !recent.includes(firstUser) ? [firstUser] : [];
-  result = [...system, ...anchor, ...recent];
+  const restored = options.restoredContext?.trim();
+  result = [...system, ...anchor, ...(restored ? [{ role: "user" as const, content: restored }] : []), ...recent];
 
-  return { messages: result, compacted: true, before, after: result.length };
+  return {
+    messages: result,
+    compacted: true,
+    before,
+    after: result.length,
+    ...(restored ? { restoredContext: restored } : {})
+  };
 }
 
 function trimToolOutputs(messages: AgentMessage[], maxToolChars: number, keepRecentToolOutputs: number): AgentMessage[] {

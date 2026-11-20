@@ -60,6 +60,10 @@ export const submitPlanTool: AgentTool = {
     const title = typeof record.title === "string" && record.title.trim() ? record.title.trim() : "implementation-plan";
     const path = join(directory, `${title.replace(/[^a-zA-Z0-9._-]+/g, "-").slice(0, 60)}-${randomUUID().slice(0, 8)}.md`);
     writeFileSync(path, plan, "utf8");
+    if (context.state) {
+      context.state.planPath = path;
+      context.state.mode = "plan";
+    }
     return {
       content: `计划已写入 ${path}。\n\n${plan}`,
       action: "plan",

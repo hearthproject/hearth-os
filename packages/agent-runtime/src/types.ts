@@ -104,6 +104,17 @@ export interface AgentReadFileState {
   size: number;
   mtimeMs: number;
   hash: string;
+  ranges?: Array<{ start: number; end: number }>;
+}
+
+export interface AgentSubagentState {
+  id: string;
+  type: "explore" | "plan" | "review" | "general-purpose";
+  status: "running" | "completed" | "failed" | "cancelled";
+  title?: string;
+  transcriptPath?: string;
+  startedAt?: number;
+  endedAt?: number;
 }
 
 export interface AgentProgress {
@@ -122,6 +133,10 @@ export interface AgentToolState {
   startedAt: number;
   snapshots: Map<string, string>;
   snapshotSeq: number;
+  planPath?: string;
+  mode?: HarnessMode;
+  activeSkills?: string[];
+  subagents?: AgentSubagentState[];
 }
 
 export interface AgentTool {
@@ -226,5 +241,6 @@ export interface CompactOptions {
   recentTokens?: number;
   stateSummary?: string;
   projectInstructions?: string;
+  restoredContext?: string;
   signal?: AbortSignal;
 }

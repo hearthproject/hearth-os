@@ -4,6 +4,7 @@ import type { RunUsage } from "@hearth/core";
 import { compactAgentMessages, compactAgentMessagesWithSummary } from "./compaction.ts";
 import { createAgentState, progressSummary } from "./harness/file-state.ts";
 import { planModeAllowsCommand, planModeAllowsTool } from "./harness/plan.ts";
+import { buildPostCompactContext } from "./harness/post-compact.ts";
 import { todoReminder } from "./harness/todo.ts";
 import type {
   AgentCheckpoint,
@@ -64,6 +65,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   const totalTokens = (): number => usage.inputTokens + usage.outputTokens;
 
   async function compactContext(force: boolean): Promise<boolean> {
+    const restoredContext = buildPostCompactContext(state, { mode: options.mode ?? state.mode ?? "build" });
     const compacted = options.contextWindowTokens
       ? await compactAgentMessagesWithSummary(messages, {
           contextWindowTokens: force ? 1 : options.contextWindowTokens,
@@ -72,6 +74,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
           keepRecentToolOutputs: options.keepRecentToolOutputs ?? 0,
           stateSummary: progressSummary(state.progress),
           ...(options.projectInstructions ? { projectInstructions: options.projectInstructions } : {}),
+          restoredContext,
           signal
         }, options.summarizeContext ? async (omitted, signal) => {
           const result = await options.summarizeContext!(omitted, signal);
@@ -87,7 +90,8 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       : compactAgentMessages(messages, {
           keepRecentToolOutputs: options.keepRecentToolOutputs ?? 0,
           stateSummary: progressSummary(state.progress),
-          ...(options.projectInstructions ? { projectInstructions: options.projectInstructions } : {})
+          ...(options.projectInstructions ? { projectInstructions: options.projectInstructions } : {}),
+          restoredContext
         });
     // Output trimming applies even when history summarization is unnecessary.
     messages.splice(0, messages.length, ...compacted.messages);
