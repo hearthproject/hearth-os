@@ -1,5 +1,6 @@
 import { build } from "esbuild";
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,11 +22,36 @@ const result = await build({
   external: ["@openai/codex-win32-x64"],
   legalComments: "none",
   metafile: true,
+  plugins: [stubBidiOnlyModules()],
   banner: {
     js: 'import { createRequire as __hearthCreateRequire } from "node:module"; const require = __hearthCreateRequire(import.meta.url);'
   },
   logLevel: "info"
 });
+
+// playwright-core ships an internal coreBundle that statically requires its
+// optional WebDriver BiDi mapper. Hearth only speaks CDP to Chromium, and
+// playwright-core does not declare chromium-bidi as a dependency, so bundling
+// fails on a clean install. Resolve those two unused modules to inert stubs.
+function stubBidiOnlyModules() {
+  const modules = new Set([
+    "chromium-bidi/lib/cjs/bidiMapper/BidiMapper",
+    "chromium-bidi/lib/cjs/cdp/CdpConnection"
+  ]);
+  return {
+    name: "stub-unused-playwright-bidi",
+    setup(build) {
+      build.onResolve({ filter: /^chromium-bidi\// }, (args) => {
+        if (!modules.has(args.path)) return null;
+        return { path: args.path, namespace: "hearth-bidi-stub" };
+      });
+      build.onLoad({ filter: /.*/, namespace: "hearth-bidi-stub" }, () => ({
+        contents: "export const BidiMapper = class {}; export const CdpConnection = class {};",
+        loader: "js"
+      }));
+    }
+  };
+}
 
 const pdfjsRoot = join(repoRoot, "node_modules", "pdfjs-dist");
 const workerSource = join(pdfjsRoot, "legacy", "build", "pdf.worker.min.mjs");
@@ -41,30 +67,57 @@ for (const name of ["cmaps", "standard_fonts", "wasm"]) {
 
 const sandboxRoot = join(resourcesRoot, "sandbox", "windows-acl");
 const sandboxPackageRoot = join(repoRoot, "node_modules", "@deepseek-ai", "dsh-sandbox-windows-acl");
+const copiedPackages = new Set();
 if (existsSync(sandboxPackageRoot)) {
   rmSync(sandboxRoot, { recursive: true, force: true });
-  copyPackageTree("@deepseek-ai/dsh-sandbox-windows-acl", sandboxRoot, new Set());
+  copyPackageTree("@deepseek-ai/dsh-sandbox-windows-acl");
 } else {
   console.warn(`windows ACL runner package is not installed; packaged shell tasks will fail closed (${sandboxPackageRoot})`);
 }
 
-function copyPackageTree(name, target, seen) {
-  const source = join(repoRoot, "node_modules", name);
-  if (!existsSync(source) || seen.has(name)) return;
-  seen.add(name);
-  mkdirSync(dirname(target), { recursive: true });
-  cpSync(source, target, { recursive: true });
-  const manifest = readJson(join(source, "package.json"));
-  const dependencies = {
-    ...(manifest?.dependencies ?? {}),
-    ...(manifest?.optionalDependencies ?? {}),
-    ...(manifest?.peerDependencies ?? {})
-  };
-  for (const dependency of Object.keys(dependencies)) {
-    if (dependency.startsWith("@hearth/") || dependency === "hearth") continue;
-    copyPackageTree(dependency, join(target, "node_modules", dependency), seen);
+// Copy the package and its dependency closure into one flat node_modules.
+// The previous implementation nested every dependency under its parent, which
+// produced 300+ character paths that makensis cannot open on Windows.
+
+function copyPackageTree(name, from = repoRoot, optional = false) {
+  if (copiedPackages.has(name)) return;
+  const source = resolvePackageRoot(name, from);
+  if (!source) {
+    if (!optional) console.warn(`sandbox dependency is not installed: ${name}`);
+    return;
   }
-  seen.delete(name);
+  copiedPackages.add(name);
+  const target = name === "@deepseek-ai/dsh-sandbox-windows-acl"
+    ? sandboxRoot
+    : join(sandboxRoot, "node_modules", name);
+  mkdirSync(dirname(target), { recursive: true });
+  cpSync(source, target, {
+    recursive: true,
+    filter: (path) => path !== join(source, "node_modules") && !path.startsWith(`${join(source, "node_modules")}${sep}`)
+  });
+  const manifest = readJson(join(source, "package.json"));
+  const required = {
+    ...(manifest?.peerDependencies ?? {}),
+    ...(manifest?.dependencies ?? {})
+  };
+  for (const dependency of Object.keys(required)) {
+    if (dependency.startsWith("@hearth/") || dependency === "hearth") continue;
+    copyPackageTree(dependency, source);
+  }
+  for (const dependency of Object.keys(manifest?.optionalDependencies ?? {})) {
+    if (dependency.startsWith("@hearth/") || dependency === "hearth") continue;
+    copyPackageTree(dependency, source, true);
+  }
+}
+
+function resolvePackageRoot(name, from) {
+  try {
+    const manifestPath = createRequire(join(from, "package.json")).resolve(`${name}/package.json`);
+    return dirname(manifestPath);
+  } catch {
+    const direct = join(repoRoot, "node_modules", name);
+    return existsSync(join(direct, "package.json")) ? direct : null;
+  }
 }
 
 function findPackageRoot(file) {
