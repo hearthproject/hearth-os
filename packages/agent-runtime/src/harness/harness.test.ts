@@ -226,8 +226,6 @@ describe("prompt tool contract", () => {
     const root = workspace();
     const base = codingPromptSections({ workspaceRoot: root, outDir: join(root, "out") });
     expect(base.map((section) => section.id)).toEqual(["rules", "tools", "environment", "mode"]);
-    const withSkills = codingPromptSections({ workspaceRoot: root, outDir: join(root, "out"), skillIndex: "use bench skill" });
-    expect(withSkills.at(-1)).toMatchObject({ id: "skills" });
   });
 });
 

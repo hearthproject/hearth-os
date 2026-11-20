@@ -59,7 +59,6 @@ export interface ExecutorAttemptContext {
   expectedOutputs: string[];
   activeThreadId?: string;
   extraNativeTools?: AgentTool[];
-  nativeSkillIndex?: string;
   steering?: (() => AgentMessage[]) | undefined;
   onProgress: (event: { kind: string; message: string; detail?: TaskProgressDetail }) => void;
   onNativeContextEvent: (event: RuntimeEvent) => void;
@@ -132,7 +131,6 @@ export class NativeExecutorAdapter implements ExecutorAdapter {
       signal: input.signal,
       ...(resumable ? { resume: resumable } : {}),
       ...(input.extraNativeTools?.length ? { extraTools: input.extraNativeTools } : {}),
-      ...(input.nativeSkillIndex ? { skillIndex: input.nativeSkillIndex } : {}),
       ...(input.steering ? { steering: input.steering } : {}),
       expectedOutputs: input.expectedOutputs,
       onProgress: input.onProgress,

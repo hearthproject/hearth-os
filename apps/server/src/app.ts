@@ -6,7 +6,7 @@ import { basename, join, resolve } from "node:path";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyReply } from "fastify";
 import type { EventEnvelope, ExecutorHealth, ExecutorId, ExecutorView, GoalBudget, TaskRecord } from "@hearth/core";
-import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DELEGATION_WORKSPACE_POLICIES, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, EXECUTOR_IDS, GOAL_REVIEW_POLICIES, GOAL_STATES, GOAL_VALIDATORS, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_ORIGINS, MEMORY_RETENTIONS, MEMORY_SENSITIVITIES, MEMORY_TAINT_STATES, MEMORY_TIERS, MEMORY_TRUST_LEVELS, PROACTIVE_MODES, RECONCILE_STATUSES, RUN_STATUSES, SANDBOX_MODES, SKILL_STATUSES, SKILL_USAGE_SOURCES, SKILL_USAGE_STATUSES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
+import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DELEGATION_WORKSPACE_POLICIES, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, EXECUTOR_IDS, GOAL_REVIEW_POLICIES, GOAL_STATES, GOAL_VALIDATORS, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_ORIGINS, MEMORY_RETENTIONS, MEMORY_SENSITIVITIES, MEMORY_TAINT_STATES, MEMORY_TIERS, MEMORY_TRUST_LEVELS, PROACTIVE_MODES, RECONCILE_STATUSES, RUN_STATUSES, SANDBOX_MODES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { getTemplate } from "@hearth/templates";
 import { loadCodexProfile, runCodex } from "@hearth/codex-executor";
@@ -51,9 +51,6 @@ import { DesktopError, DesktopService } from "./desktop.ts";
 import { ConnectionError, ConnectionService } from "./connections.ts";
 import { MemoryError, MemoryService } from "./memory.ts";
 import { MethodError, MethodService } from "./methods.ts";
-import { SkillPackageError } from "./skill-package.ts";
-import { SkillPackageService } from "./skills.ts";
-import { SkillCuratorService } from "./skill-curator.ts";
 import { ProjectError, ProjectService } from "./projects.ts";
 import { TaskWorktreeService, WorktreeError } from "./worktrees.ts";
 import { ProactiveError, ProactiveService } from "./proactive.ts";
@@ -445,38 +442,6 @@ const evaluateMethodSchema = z.object({
 const methodTrialSchema = z.object({ taskId: z.string().trim().min(1).max(100) }).strict();
 const methodRollbackSchema = z.object({ reason: z.string().trim().min(1).max(1000) }).strict();
 const methodRejectSchema = z.object({ reason: z.string().trim().max(1000).optional() }).strict();
-const skillExportSchema = z.object({ methodId: z.string().trim().min(1).max(100) }).strict();
-const skillImportSchema = z.object({
-  content: z.string().min(1).max(200_000),
-  origin: z.enum(["imported", "user"]).optional()
-}).strict();
-const skillTrialSchema = z.object({
-  taskIds: z.array(z.string().trim().min(1).max(100)).min(1).max(50)
-}).strict();
-const skillCheckSchema = z.object({
-  taskId: z.string().trim().min(1).max(100),
-  readPaths: z.array(z.string().trim().min(1).max(2000)).max(100).optional(),
-  writePaths: z.array(z.string().trim().min(1).max(2000)).max(100).optional(),
-  networkHosts: z.array(z.string().trim().min(1).max(300)).max(100).optional(),
-  tools: z.array(z.string().trim().min(1).max(200)).max(100).optional(),
-  allowImported: z.boolean().optional()
-}).strict();
-const skillPermissionQuerySchema = z.object({ taskId: z.string().trim().min(1).max(100) }).strict();
-const skillPinSchema = z.object({ pinned: z.boolean() }).strict();
-const skillArchiveSchema = z.object({ reason: z.string().trim().max(1000).optional() }).strict();
-const skillTransitionSchema = z.object({
-  status: z.enum(SKILL_STATUSES),
-  reason: z.string().trim().max(1000).optional()
-}).strict();
-const skillUsageSchema = z.object({
-  taskId: z.string().trim().min(1).max(100).nullable().optional(),
-  runId: z.string().trim().min(1).max(100).nullable().optional(),
-  status: z.enum(SKILL_USAGE_STATUSES),
-  source: z.enum(SKILL_USAGE_SOURCES).optional(),
-  note: z.string().trim().max(1000).optional()
-}).strict();
-const skillCuratorRunSchema = z.object({ dryRun: z.boolean().optional() }).strict();
-const skillCuratorRollbackSchema = z.object({ runId: z.string().trim().min(1).max(100) }).strict();
 const assignTaskMethodSchema = z.object({ methodId: z.string().trim().min(1).max(100).nullable() }).strict();
 const taskOrganizationSchema = z.object({
   pinned: z.boolean().optional(),
@@ -859,7 +824,6 @@ export interface BuildServerOptions {
   executorSettingsPath?: string;
   contextBlobRoot?: string;
   contextIndex?: ContextIndex;
-  skillRoot?: string;
 }
 
 export async function buildServer(options: BuildServerOptions = {}) {
@@ -936,11 +900,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const intake = new IntakeRouter(service);
   const memory = new MemoryService(service);
   const methods = new MethodService(service);
-  const skills = new SkillPackageService(service, methods, {
-    rootDir: options.skillRoot ?? join(options.dataDir ?? DATA_DIR, "skills")
-  });
   const projects = new ProjectService(store);
-  const skillCurator = new SkillCuratorService({ service, skills });
   const sync = new SyncService(service, {
     ...(options.syncFetch ? { fetchImpl: options.syncFetch } : {}),
     ...(options.syncSecretBox ? { secretBox: options.syncSecretBox } : {})
@@ -1113,7 +1073,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
         mail,
         outbox,
         mcpServers,
-        skills,
         worktrees,
         knowledge,
         knowledgeSettings,
@@ -1155,7 +1114,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const diagnostics = new DiagnosticsService({ service, health, maintenance, webDist: WEB_DIST });
   if (options.startMaintenance ?? options.startScheduler) {
     maintenance.start();
-    skillCurator.start();
     watchdog.start();
   }
   if (options.startProactive) proactive.start();
@@ -1226,7 +1184,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
     watchdog.stop();
     threadSubscriptions.close();
     maintenance.stop();
-    skillCurator.stop();
     schedules.stop();
     await scheduler?.stop();
     if (ownsStore) store.close();
@@ -2539,206 +2496,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
       return methods.reject(request.params.id, parsed.data.reason);
     } catch (error) {
       return sendMethodError(reply, error);
-    }
-  });
-
-  app.get("/api/skills", async (_request, reply) => {
-    reply.header("cache-control", "no-store");
-    return skills.snapshot();
-  });
-
-  app.post("/api/skills/export", async (request, reply) => {
-    const parsed = skillExportSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_EXPORT", message: "技能导出参数不正确" });
-    try {
-      const exported = skills.exportMethod(parsed.data.methodId);
-      return reply.code(201).send({ package: exported, skill: skills.getSkill(exported.id) });
-    } catch (error) {
-      return sendSkillError(reply, error);
-    }
-  });
-
-  app.post("/api/skills/import", async (request, reply) => {
-    const parsed = skillImportSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_IMPORT", message: "技能导入参数不正确" });
-    try {
-      const imported = skills.importPackage(parsed.data.content, parsed.data.origin ?? "imported");
-      return reply.code(201).send(imported);
-    } catch (error) {
-      return sendSkillError(reply, error);
-    }
-  });
-
-  app.get<{ Params: { id: string } }>("/api/skills/:id/permissions", async (request, reply) => {
-    const parsed = skillPermissionQuerySchema.safeParse(request.query ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_PERMISSION_QUERY", message: "技能权限查询参数不正确" });
-    try {
-      return {
-        effective: skills.effectivePermissions(request.params.id, parsed.data.taskId),
-        changes: skills.permissionChanges(request.params.id)
-      };
-    } catch (error) {
-      return sendSkillError(reply, error);
-    }
-  });
-
-  app.post<{ Params: { id: string } }>("/api/skills/:id/trials", async (request, reply) => {
-    const parsed = skillTrialSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_TRIAL", message: "技能试跑参数不正确" });
-    try {
-      return skills.setTrialTasks(request.params.id, parsed.data.taskIds);
-    } catch (error) {
-      return sendSkillError(reply, error);
-    }
-  });
-
-  app.post<{ Params: { id: string } }>("/api/skills/:id/check", async (request, reply) => {
-    const parsed = skillCheckSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_CHECK", message: "技能执行检查参数不正确" });
-    try {
-      const permissionRequest = {
-        ...(parsed.data.readPaths ? { readPaths: parsed.data.readPaths } : {}),
-        ...(parsed.data.writePaths ? { writePaths: parsed.data.writePaths } : {}),
-        ...(parsed.data.networkHosts ? { networkHosts: parsed.data.networkHosts } : {}),
-        ...(parsed.data.tools ? { tools: parsed.data.tools } : {})
-      };
-      return skills.checkExecution(request.params.id, parsed.data.taskId, permissionRequest, {
-        allowImported: parsed.data.allowImported === true
-      });
-    } catch (error) {
-      return sendSkillError(reply, error);
-    }
-  });
-
-  app.post<{ Params: { id: string } }>("/api/skills/:id/authorize", async (request, reply) => {
-    const parsed = skillCheckSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_AUTHORIZE", message: "技能授权参数不正确" });
-    try {
-      const permissionRequest = {
-        ...(parsed.data.readPaths ? { readPaths: parsed.data.readPaths } : {}),
-        ...(parsed.data.writePaths ? { writePaths: parsed.data.writePaths } : {}),
-        ...(parsed.data.networkHosts ? { networkHosts: parsed.data.networkHosts } : {}),
-        ...(parsed.data.tools ? { tools: parsed.data.tools } : {})
-      };
-      return skills.assertExecution(request.params.id, parsed.data.taskId, permissionRequest, {
-        allowImported: parsed.data.allowImported === true
-      });
-    } catch (error) {
-      return sendSkillError(reply, error);
-    }
-  });
-
-  app.get("/api/skills/usage", async (request, reply) => {
-    reply.header("cache-control", "no-store");
-    const skillId = typeof (request.query as { skillId?: unknown } | undefined)?.skillId === "string"
-      ? String((request.query as { skillId: string }).skillId)
-      : undefined;
-    return { usage: skills.snapshot().skills.length ? store.listSkillUsage(skillId, 200) : [] };
-  });
-
-  app.get("/api/skills/curator", async (_request, reply) => {
-    reply.header("cache-control", "no-store");
-    return skillCurator.snapshot();
-  });
-
-  app.post("/api/skills/curator/run", async (request, reply) => {
-    const parsed = skillCuratorRunSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_CURATOR_RUN", message: "Curator 参数不正确" });
-    return skillCurator.run({ dryRun: parsed.data.dryRun === true });
-  });
-
-  app.post("/api/skills/curator/rollback", async (request, reply) => {
-    const parsed = skillCuratorRollbackSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_CURATOR_ROLLBACK", message: "Curator 回滚参数不正确" });
-    try {
-      return skillCurator.rollback(parsed.data.runId);
-    } catch (error) {
-      return reply.code(409).send({ error: "SKILL_CURATOR_ROLLBACK_FAILED", message: error instanceof Error ? error.message : String(error) });
-    }
-  });
-
-  app.post<{ Params: { id: string } }>("/api/skills/:id/usage", async (request, reply) => {
-    const parsed = skillUsageSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_USAGE", message: "技能使用记录参数不正确" });
-    try {
-      return skills.recordUsage({
-        skillId: request.params.id,
-        taskId: parsed.data.taskId ?? null,
-        runId: parsed.data.runId ?? null,
-        status: parsed.data.status,
-        ...(parsed.data.source ? { source: parsed.data.source } : {}),
-        ...(parsed.data.note ? { note: parsed.data.note } : {})
-      });
-    } catch (error) {
-      return sendSkillError(reply, error);
-    }
-  });
-
-  app.get<{ Params: { id: string } }>("/api/skills/:id", async (request, reply) => {
-    reply.header("cache-control", "no-store");
-    try {
-      const skill = skills.getSkill(request.params.id);
-      if (!skill) return reply.code(404).send({ error: "SKILL_NOT_FOUND", message: "技能不存在" });
-      return {
-        skill,
-        document: skills.readDocument(request.params.id),
-        resources: skills.readResources(request.params.id),
-        versions: skills.versions(request.params.id)
-      };
-    } catch (error) {
-      return sendSkillError(reply, error);
-    }
-  });
-
-  app.post<{ Params: { id: string } }>("/api/skills/:id/pin", async (request, reply) => {
-    const parsed = skillPinSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_PIN", message: "技能固定参数不正确" });
-    try {
-      return skills.pin(request.params.id, parsed.data.pinned);
-    } catch (error) {
-      return sendSkillError(reply, error);
-    }
-  });
-
-  app.post<{ Params: { id: string } }>("/api/skills/:id/archive", async (request, reply) => {
-    const parsed = skillArchiveSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_ARCHIVE", message: "技能归档参数不正确" });
-    try {
-      return skills.archive(request.params.id, parsed.data.reason ?? "用户归档");
-    } catch (error) {
-      return sendSkillError(reply, error);
-    }
-  });
-
-  app.post<{ Params: { id: string } }>("/api/skills/:id/restore", async (request, reply) => {
-    try {
-      return skills.restore(request.params.id);
-    } catch (error) {
-      return sendSkillError(reply, error);
-    }
-  });
-
-  app.post<{ Params: { id: string } }>("/api/skills/:id/status", async (request, reply) => {
-    const parsed = skillTransitionSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_STATUS", message: "技能状态参数不正确" });
-    try {
-      return skills.transition(request.params.id, parsed.data.status, parsed.data.reason ?? "");
-    } catch (error) {
-      return sendSkillError(reply, error);
-    }
-  });
-
-  app.post<{ Params: { id: string } }>("/api/skills/:id/used", async (request, reply) => {
-    try {
-      const parsed = skillUsageSchema.partial().safeParse(request.body ?? {});
-      if (!parsed.success) return reply.code(400).send({ error: "INVALID_SKILL_USAGE", message: "技能使用记录参数不正确" });
-      return skills.markUsed(request.params.id, {
-        taskId: parsed.data.taskId ?? null,
-        runId: parsed.data.runId ?? null,
-        ...(parsed.data.source ? { source: parsed.data.source } : {})
-      });
-    } catch (error) {
-      return sendSkillError(reply, error);
     }
   });
 
@@ -4285,13 +4042,6 @@ function sendMemoryError(reply: FastifyReply, error: unknown) {
 
 function sendMethodError(reply: FastifyReply, error: unknown) {
   if (error instanceof MethodError) {
-    return reply.code(error.statusCode).send({ error: error.code, message: error.message });
-  }
-  throw error;
-}
-
-function sendSkillError(reply: FastifyReply, error: unknown) {
-  if (error instanceof SkillPackageError) {
     return reply.code(error.statusCode).send({ error: error.code, message: error.message });
   }
   throw error;

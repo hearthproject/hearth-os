@@ -66,7 +66,7 @@ describe("native system prompt", () => {
   });
 
   it("omits unavailable tools from the native prompt", () => {
-    const prompt = nativeSystemPrompt(baseTask, ["result.md"], undefined, ["read_file", "finish_task"]);
+    const prompt = nativeSystemPrompt(baseTask, ["result.md"], ["read_file", "finish_task"]);
     expect(prompt).toContain("finish_task");
     expect(prompt).not.toContain("delegate_task");
     expect(prompt).not.toContain("read_document");

@@ -19,7 +19,6 @@ export interface CodingPromptOptions {
   workspaceRoot: string;
   outDir: string;
   permissions?: TaskPermissions;
-  skillIndex?: string;
   memoryIndex?: string;
   mode?: "build" | "plan";
   extraInstructions?: string[];
@@ -140,7 +139,6 @@ export function codingPromptSections(options: CodingPromptOptions): CodingPrompt
       content: "## Plan mode\nWhen mode=plan, you may only read, search and inspect. Do not edit, write, patch, run mutating shell commands, or call finish_task. Produce a concrete plan with file paths, commands, risks and open questions, then call submit_plan."
     }
   );
-  if (options.skillIndex?.trim()) sections.push({ id: "skills", content: `## Skills\n${options.skillIndex.trim()}` });
   if (options.extraInstructions?.length) sections.push({ id: "extra", content: options.extraInstructions.filter(Boolean).join("\n\n") });
   return sections.filter((section) => section.content.trim().length > 0);
 }

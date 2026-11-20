@@ -76,7 +76,6 @@ export interface NativeRunOptions {
   onAuthorizeTool?: (request: AgentToolAuthorizationRequest) => Promise<AgentToolAuthorization>;
   isFullPermission?: () => boolean;
   extraTools?: AgentTool[];
-  skillIndex?: string;
   steering?: () => AgentMessage[];
   onContextSummary?: (messages: AgentMessage[], signal: AbortSignal) => Promise<ContextSummary>;
 }
@@ -167,7 +166,6 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
         workspaceRoot: options.prepared.root,
         outDir: options.prepared.outDir,
         permissions,
-        ...(options.skillIndex ? { skillIndex: options.skillIndex } : {}),
         ...(memoryIndex ? { memoryIndex } : {}),
         mode: options.mode ?? "build",
         availableTools,
@@ -178,7 +176,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
           ...(goalBlock ? [goalBlock] : [])
         ]
       })
-    : nativeSystemPrompt(options.task, options.expectedOutputs, options.skillIndex, availableTools);
+    : nativeSystemPrompt(options.task, options.expectedOutputs, availableTools);
   const resume = options.resume ? refreshNativeResume(options.resume, systemPrompt, options.prompt, options.prepared.outDir) : undefined;
   let budgetExhaustion: NativeRunResult["budgetExhaustion"];
   let sandboxDenied = false;
@@ -1325,7 +1323,7 @@ async function summarizeNativeContext(settings: ModelSettings, messages: AgentMe
   }
 }
 
-export function nativeSystemPrompt(task: TaskRecord, expectedOutputs: string[], skillIndex?: string, availableTools?: string[]): string {
+export function nativeSystemPrompt(task: TaskRecord, expectedOutputs: string[], availableTools?: string[]): string {
   if (isTextDraftTask({ ...task, expectedOutputs })) return [DRAFT_INSTRUCTION, "仅将最终草稿写入本轮输出目录，已有草稿时只应用用户新增信息。写入成功后直接调用 finish_task，不反复润色，不读取无关文件。", `期望产物：${expectedOutputs.join("、")}`].join("\n");
   const toolSet = availableTools ? new Set(availableTools) : null;
   const hasTool = (name: string): boolean => toolSet === null || toolSet.has(name);
@@ -1350,7 +1348,6 @@ export function nativeSystemPrompt(task: TaskRecord, expectedOutputs: string[], 
       `执行模式：${EXECUTION_PROFILES[task.executionMode].label}。${EXECUTION_PROFILES[task.executionMode].instruction}`
     ] : []),
     `期望产物：${expectedOutputs.join("、")}`,
-    ...(skillIndex?.trim() ? [skillIndex.trim()] : []),
     ...(expectedOutputs.some((output) => /\.(png|jpe?g|webp)$/i.test(output))
       ? ["这是截图类任务：必须调用 capture_screen 生成真实图片产物，不要用文本或占位文件代替。"]
       : [])

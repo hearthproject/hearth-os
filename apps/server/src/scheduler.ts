@@ -55,10 +55,8 @@ import { createPersonalReadTools } from "./personal-tools.ts";
 import { createMailTools } from "./mail-tools.ts";
 import type { EmailService } from "./email.ts";
 import type { OutboxService } from "./outbox.ts";
-import { buildNativeSkillIndex, createSkillTools } from "./skill-tools.ts";
 import { createAgentTool, createSubagentTool } from "./subagents.ts";
 import { createAgentLifecycleTools, SubagentTaskManager } from "./subagent-manager.ts";
-import type { SkillPackageService } from "./skills.ts";
 import { OntologyWriter } from "./ontology-writer.ts";
 import { chatModelConfigured, loadModelSettings, type ModelSettings } from "./model-settings.ts";
 import { prepareTaskRuntime, type RuntimePreparation } from "./runtime.ts";
@@ -120,7 +118,6 @@ export interface SchedulerOptions {
   backgroundTools?: BackgroundToolService;
   webSearch?: WebSearchService;
   mcpServers?: McpServerService;
-  skills?: SkillPackageService;
   worktrees?: TaskWorktreeService;
   leaseHeartbeatMs?: number;
   githubRun?: CommandRunner | undefined;
@@ -185,7 +182,6 @@ export class HearthScheduler {
   private readonly backgroundTools: BackgroundToolService | undefined;
   private readonly webSearch: WebSearchService | undefined;
   private readonly mcpServers: McpServerService | undefined;
-  private readonly skills: SkillPackageService | undefined;
   private readonly worktrees: TaskWorktreeService;
   private readonly leaseHeartbeatMs: number;
   private readonly leaseHeartbeats = new Map<string, { epoch: number; timer: ReturnType<typeof setInterval> }>();
@@ -254,7 +250,6 @@ export class HearthScheduler {
     this.backgroundTools = options.backgroundTools;
     this.webSearch = options.webSearch;
     this.mcpServers = options.mcpServers;
-    this.skills = options.skills;
     this.worktrees = options.worktrees ?? new TaskWorktreeService(this.service.store, { workspaceRoot: this.workspaceRoot });
     this.delegations = options.delegations ?? new DelegationService({
       service: this.service,
@@ -1628,14 +1623,6 @@ export class HearthScheduler {
       if (this.webSearch && (wantsPublicWebResearch(`${task.title}\n${task.goal}`) || task.networkHosts.includes("*"))) {
         extraNativeTools.push(this.webSearch.tool());
       }
-      let nativeSkillIndex: string | undefined;
-      if (this.skills) {
-        const availableSkills = this.skills.agentSkills(task.id);
-        if (availableSkills.length > 0) {
-          extraNativeTools.push(...createSkillTools({ skills: this.skills, taskId: task.id, runId }));
-          nativeSkillIndex = buildNativeSkillIndex(availableSkills);
-        }
-      }
       let subagentManager: SubagentTaskManager | undefined;
       if (executorId === "native") {
         if (this.knowledge?.isEnabled() && this.knowledgeSettings) {
@@ -1705,7 +1692,6 @@ export class HearthScheduler {
         executorSettings: this.executorSettings(),
         expectedOutputs,
         ...(extraNativeTools.length > 0 ? { extraNativeTools } : {}),
-        ...(nativeSkillIndex ? { nativeSkillIndex } : {}),
         ...(activeThreadId ? { activeThreadId } : {}),
         onProgress: (event) => this.publishProgress(taskId, runId, event.kind, event.message, event.detail),
         onNativeContextEvent: (event) => this.captureNativeEvent(task, run, event),
