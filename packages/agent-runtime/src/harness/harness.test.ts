@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { applyEdit, findEditMatch, normalizeFile, restoreFile } from "./edit-match.ts";
+import { findOmissionPlaceholder, omissionPlaceholderError } from "./omission.ts";
 import { createAgentState, recordFileRead, requireReadBeforeWrite } from "./file-state.ts";
 import { compactAgentMessagesWithSummary } from "../compaction.ts";
 import { searchFiles } from "./search.ts";
@@ -53,6 +54,25 @@ describe("edit matching", () => {
   it("refuses ambiguous matches instead of guessing", () => {
     const result = findEditMatch("a\nb\na\nb\n", "a\nb");
     expect("start" in result).toBe(false);
+  });
+
+  it("matches curly quotes and unicode escapes without changing offsets", () => {
+    const content = 'const message = "It’s fine";\nconst next = 1;\n';
+    const quoteMatch = findEditMatch(content, 'const message = "It\'s fine";');
+    expect("start" in quoteMatch && quoteMatch.tier).toBe("unicode");
+    if (!("start" in quoteMatch)) return;
+    expect(content.slice(quoteMatch.start, quoteMatch.end)).toBe('const message = "It’s fine";');
+
+    const escapeMatch = findEditMatch(content, 'const message = "It\\u2019s fine";');
+    expect("start" in escapeMatch).toBe(true);
+  });
+
+  it("rejects omission placeholders in edit text", () => {
+    expect(findOmissionPlaceholder("a\n// ... existing code ...\nb")).toMatchObject({ line: 2 });
+    expect(findOmissionPlaceholder("a\n...\nb")).toMatchObject({ line: 2 });
+    expect(findOmissionPlaceholder("a\n// 其余不变\nb")).toMatchObject({ line: 2 });
+    expect(findOmissionPlaceholder("const text = '...';\nconst dots = ['a', 'b'];")).toBeNull();
+    expect(omissionPlaceholderError("a\n...\nb")).toContain("省略占位符");
   });
 });
 

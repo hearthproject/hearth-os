@@ -1,4 +1,4 @@
-export type EditMatchTier = "exact" | "line-trim" | "whitespace" | "indent" | "block-anchor" | "similarity";
+export type EditMatchTier = "exact" | "line-trim" | "whitespace" | "indent" | "unicode" | "block-anchor" | "similarity";
 
 export interface EditMatch {
   start: number;
@@ -45,6 +45,9 @@ export function findEditMatch(content: string, oldText: string): EditMatch | Edi
 
   const indent = matchByLineTransform(content, needle, (line) => line.replace(/^[ \t]+/, ""), "indent");
   if (indent) return indent;
+
+  const unicode = matchByLineTransform(content, needle, normalizeUnicode, "unicode");
+  if (unicode) return unicode;
 
   const anchor = matchByAnchor(content, needle);
   if (anchor) return anchor;
@@ -191,3 +194,15 @@ function nearestSnippet(content: string, needle: string): string {
   const end = Math.min(lines.length, bestIndex + 4);
   return lines.slice(start, end).map((line, offset) => `${start + offset + 1}\t${line}`).join("\n");
 }
+
+function normalizeUnicode(line: string): string {
+  return line
+    .replace(/\\u\{([0-9a-f]{1,6})\}/gi, (_match, hex: string) => String.fromCodePoint(Number.parseInt(hex, 16)))
+    .replace(/\\u([0-9a-f]{4})/gi, (_match, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)))
+    .replace(/\\x([0-9a-f]{2})/gi, (_match, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)))
+    .replace(/[\u2018\u2019\u201a\u201b]/g, "'")
+    .replace(/[\u201c\u201d\u201e\u201f]/g, '"')
+    .replace(/[\u200b-\u200d\ufeff]/g, "")
+    .normalize("NFKC");
+}
+

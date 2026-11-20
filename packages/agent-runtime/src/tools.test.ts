@@ -193,6 +193,20 @@ describe("builtin tools", () => {
     expect(readFileSync(join(out, "note.md"), "utf8")).toBe("alpha\nbeta\n");
   });
 
+  it("rejects omission placeholders before attempting an edit", async () => {
+    const root = workspace(roots);
+    const out = join(root, "out");
+    mkdirSync(out, { recursive: true });
+    writeFileSync(join(out, "note.md"), "alpha\nbeta\ngamma\n");
+    const permissions = defaultTaskPermissions({ workspaceRoot: root, outDir: out, networkHosts: [] });
+    await expect(mapTools().edit_file!.execute({
+      path: "out/note.md",
+      oldText: "alpha\n// ... existing code ...\ngamma",
+      newText: "alpha\ngamma"
+    }, { workspaceRoot: root, outDir: out, permissions, signal: new AbortController().signal })).rejects.toThrow("省略占位符");
+    expect(readFileSync(join(out, "note.md"), "utf8")).toBe("alpha\nbeta\ngamma\n");
+  });
+
   it("moves and deletes files with an apply_patch", async () => {
     const root = workspace(roots);
     const out = join(root, "out");

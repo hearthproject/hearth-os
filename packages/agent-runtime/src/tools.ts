@@ -9,6 +9,7 @@ import type { DocumentBlockInput, SpreadsheetSheetInput } from "./documents.ts";
 import type { AgentTool, AgentToolContext, AgentToolResult } from "./types.ts";
 import { fetchWebSnapshot } from "./web-fetch.ts";
 import { applyEdit, findEditMatch, normalizeFile, restoreFile } from "./harness/edit-match.ts";
+import { omissionPlaceholderError } from "./harness/omission.ts";
 import { searchFiles } from "./harness/search.ts";
 import { hashContent, recordCommand, recordFileModified, recordFileRead, requireReadBeforeWrite } from "./harness/file-state.ts";
 import { rewindTool, snapshotBeforeMutation } from "./harness/snapshots.ts";
@@ -485,6 +486,8 @@ const editFileTool: AgentTool = {
     let next = normalized.text;
     let applied = 0;
     for (const edit of edits) {
+      const placeholderIssue = omissionPlaceholderError(edit.oldText);
+      if (placeholderIssue) throw new Error(placeholderIssue);
       if (edit.replaceAll) {
         const count = countOccurrences(next, edit.oldText);
         if (count === 0) throw new Error(editFailure(next, edit.oldText));
@@ -1135,6 +1138,8 @@ function applyHunk(content: string, hunk: string[]): string {
     const appended = `${normalized}${newText}`;
     return hadCrlf ? appended.replace(/\n/g, "\r\n") : appended;
   }
+  const placeholderIssue = omissionPlaceholderError(oldText, "补丁片段");
+  if (placeholderIssue) throw new Error(placeholderIssue);
   const match = findEditMatch(normalized, oldText);
   if (!("start" in match)) throw new Error(`补丁片段未匹配：${match.error}`);
   const result = applyEdit(normalized, match, newText);
