@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="980" viewBox="0 0 1600 980" font-family="'Microsoft YaHei UI','Microsoft YaHei','PingFang SC','Noto Sans SC','Segoe UI',sans-serif">
+<rect width="1600" height="980" fill="#F4F7FB"/>
+<rect x="0" y="0" width="1600" height="7" fill="#2563EB"/>
+<text x="64" y="72" font-size="30" font-weight="700" fill="#172033">Hearth 架构</text>
+<text x="64" y="104" font-size="15" fill="#74829A">单用户、本地优先、可审批、可回放的个人代理操作系统</text>
+<rect x="44" y="150" width="1512" height="118" rx="18" fill="#FFFFFF" stroke="#DDE5F0" stroke-width="1.2"/>
+<text x="66" y="178" font-size="12" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A">入口 / apps/web</text>
+<rect x="64" y="194" width="250" height="60" rx="14" fill="#EAF1FE" stroke="#2563EB" stroke-width="1.4"/>
+<text x="82" y="224" font-size="15" font-weight="700" fill="#172033">聊天工作台</text>
+<text x="300" y="218" font-size="10.5" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A" text-anchor="end">01</text>
+<text x="82" y="256" font-size="12.5" fill="#42506A">目标、对话、任务卡</text>
+<rect x="326" y="194" width="250" height="60" rx="14" fill="#FCF0DF" stroke="#B4680B" stroke-width="1.4"/>
+<text x="344" y="224" font-size="15" font-weight="700" fill="#172033">需要你</text>
+<text x="562" y="218" font-size="10.5" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A" text-anchor="end">02</text>
+<text x="344" y="256" font-size="12.5" fill="#42506A">长任务 / 审批 / 失败</text>
+<rect x="588" y="194" width="250" height="60" rx="14" fill="#F0EDFC" stroke="#6C5BD4" stroke-width="1.4"/>
+<text x="606" y="224" font-size="15" font-weight="700" fill="#172033">任务详情</text>
+<text x="824" y="218" font-size="10.5" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A" text-anchor="end">03</text>
+<text x="606" y="256" font-size="12.5" fill="#42506A">逐轮时间线 / 回退</text>
+<rect x="850" y="194" width="250" height="60" rx="14" fill="#E4F5F4" stroke="#0E8587" stroke-width="1.4"/>
+<text x="868" y="224" font-size="15" font-weight="700" fill="#172033">浏览器面板</text>
+<text x="1086" y="218" font-size="10.5" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A" text-anchor="end">04</text>
+<text x="868" y="256" font-size="12.5" fill="#42506A">标签页 / 截图 / 接管</text>
+<rect x="1112" y="194" width="250" height="60" rx="14" fill="#E6F4EC" stroke="#18794E" stroke-width="1.4"/>
+<text x="1130" y="224" font-size="15" font-weight="700" fill="#172033">档案与设置</text>
+<text x="1348" y="218" font-size="10.5" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A" text-anchor="end">05</text>
+<text x="1130" y="256" font-size="12.5" fill="#42506A">项目档案 / 工作方式</text>
+<rect x="44" y="292" width="1512" height="150" rx="18" fill="#FFFFFF" stroke="#DDE5F0" stroke-width="1.2"/>
+<text x="66" y="320" font-size="12" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A">Hearth Server / apps/server</text>
+<rect x="64" y="336" width="250" height="92" rx="14" fill="#EAF1FE" stroke="#2563EB" stroke-width="1.4"/>
+<text x="82" y="366" font-size="15" font-weight="700" fill="#172033">Fastify API</text>
+<text x="300" y="360" font-size="10.5" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A" text-anchor="end">01</text>
+<text x="82" y="398" font-size="12.5" fill="#42506A">事件推送 / SSE</text>
+<rect x="326" y="336" width="250" height="92" rx="14" fill="#F0EDFC" stroke="#6C5BD4" stroke-width="1.4"/>
+<text x="344" y="366" font-size="15" font-weight="700" fill="#172033">Scheduler</text>
+<text x="562" y="360" font-size="10.5" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A" text-anchor="end">02</text>
+<text x="344" y="398" font-size="12.5" fill="#42506A">租约 / 预算 / 重试</text>
+<rect x="588" y="336" width="250" height="92" rx="14" fill="#FCF0DF" stroke="#B4680B" stroke-width="1.4"/>
+<text x="606" y="366" font-size="15" font-weight="700" fill="#172033">审批与动作解析</text>
+<text x="824" y="360" font-size="10.5" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A" text-anchor="end">03</text>
+<text x="606" y="398" font-size="12.5" fill="#42506A">参数指纹 / 风险 / 回执</text>
+<rect x="850" y="336" width="250" height="92" rx="14" fill="#E6F4EC" stroke="#18794E" stroke-width="1.4"/>
+<text x="868" y="366" font-size="15" font-weight="700" fill="#172033">效果账本</text>
+<text x="1086" y="360" font-size="10.5" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A" text-anchor="end">04</text>
+<text x="868" y="398" font-size="12.5" fill="#42506A">执行 / 对账 / 回退</text>
+<rect x="1112" y="336" width="250" height="92" rx="14" fill="#E4F5F4" stroke="#0E8587" stroke-width="1.4"/>
+<text x="1130" y="366" font-size="15" font-weight="700" fill="#172033">监督与档案</text>
+<text x="1348" y="360" font-size="10.5" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A" text-anchor="end">05</text>
+<text x="1130" y="398" font-size="12.5" fill="#42506A">收件箱 / 日报 / 项目页</text>
+<rect x="44" y="466" width="1512" height="160" rx="18" fill="#FFFFFF" stroke="#DDE5F0" stroke-width="1.2"/>
+<text x="66" y="494" font-size="12" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A">执行层 / packages/agent-runtime</text>
+<rect x="64" y="510" width="250" height="102" rx="14" fill="#EAF1FE" stroke="#2563EB" stroke-width="1.4"/>
+<text x="82" y="540" font-size="15" font-weight="700" fill="#172033">Native Runtime</text>
+<text x="300" y="534" font-size="10.5" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A" text-anchor="end">01</text>
+<text x="82" y="572" font-size="12.5" fill="#42506A">general / coding</text>
+<text x="82" y="593" font-size="12.5" fill="#42506A">工具、子代理、上下文压缩</text>
+<rect x="326" y="510" width="250" height="102" rx="14" fill="#F0EDFC" stroke="#6C5BD4" stroke-width="1.4"/>
+<text x="344" y="540" font-size="15" font-weight="700" fill="#172033">Coding Harness</text>
+<text x="562" y="534" font-size="10.5" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A" text-anchor="end">02</text>
+<text x="344" y="572" font-size="12.5" fill="#42506A">workspace-write</text>
+<text x="344" y="593" font-size="12.5" fill="#42506A">测试 / 诊断 / 逐轮快照</text>
+<rect x="588" y="510" width="250" height="102" rx="14" fill="#E4F5F4" stroke="#0E8587" stroke-width="1.4"/>
+<text x="606" y="540" font-size="15" font-weight="700" fill="#172033">Browser</text>
+<text x="824" y="534" font-size="10.5" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A" text-anchor="end">03</text>
+<text x="606" y="572" font-size="12.5" fill="#42506A">独立 Chrome profile</text>
+<text x="606" y="593" font-size="12.5" fill="#42506A">快照 / 断言 / 证据</text>
+<rect x="850" y="510" width="250" height="102" rx="14" fill="#FCF0DF" stroke="#B4680B" stroke-width="1.4"/>
+<text x="868" y="540" font-size="15" font-weight="700" fill="#172033">桌面与外部</text>
+<text x="1086" y="534" font-size="10.5" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A" text-anchor="end">04</text>
+<text x="868" y="572" font-size="12.5" fill="#42506A">桌面控制 / MCP</text>
+<rect x="1112" y="510" width="250" height="102" rx="14" fill="#E6F4EC" stroke="#18794E" stroke-width="1.4"/>
+<text x="1130" y="540" font-size="15" font-weight="700" fill="#172033">邮件与飞书</text>
+<text x="1348" y="534" font-size="10.5" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A" text-anchor="end">05</text>
+<text x="1130" y="572" font-size="12.5" fill="#42506A">读取 / 草稿 / 发送审批</text>
+<rect x="44" y="654" width="1512" height="150" rx="18" fill="#FFFFFF" stroke="#DDE5F0" stroke-width="1.2"/>
+<text x="66" y="682" font-size="12" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A">存储 / 本地优先</text>
+<rect x="64" y="698" width="250" height="92" rx="14" fill="#FCF0DF" stroke="#B4680B" stroke-width="1.4"/>
+<text x="82" y="728" font-size="15" font-weight="700" fill="#172033">SQLite 事件账本</text>
+<text x="300" y="722" font-size="10.5" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A" text-anchor="end">01</text>
+<text x="82" y="760" font-size="12.5" fill="#42506A">任务 / 运行 / 审批 / 事件</text>
+<rect x="326" y="698" width="250" height="92" rx="14" fill="#EAF1FE" stroke="#2563EB" stroke-width="1.4"/>
+<text x="344" y="728" font-size="15" font-weight="700" fill="#172033">文件系统</text>
+<text x="562" y="722" font-size="10.5" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A" text-anchor="end">02</text>
+<text x="344" y="760" font-size="12.5" fill="#42506A">out / 快照 / 记忆 / 档案</text>
+<rect x="588" y="698" width="250" height="92" rx="14" fill="#E6F4EC" stroke="#18794E" stroke-width="1.4"/>
+<text x="606" y="728" font-size="15" font-weight="700" fill="#172033">加密备份</text>
+<text x="824" y="722" font-size="10.5" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A" text-anchor="end">03</text>
+<text x="606" y="760" font-size="12.5" fill="#42506A">主密钥 / 恢复校验</text>
+<rect x="850" y="698" width="250" height="92" rx="14" fill="#F0EDFC" stroke="#6C5BD4" stroke-width="1.4"/>
+<text x="868" y="728" font-size="15" font-weight="700" fill="#172033">设置与密钥</text>
+<text x="1086" y="722" font-size="10.5" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A" text-anchor="end">04</text>
+<text x="868" y="760" font-size="12.5" fill="#42506A">模型 / 浏览器 / 执行器</text>
+<rect x="1112" y="698" width="250" height="92" rx="14" fill="#E4F5F4" stroke="#0E8587" stroke-width="1.4"/>
+<text x="1130" y="728" font-size="15" font-weight="700" fill="#172033">公开基准</text>
+<text x="1348" y="722" font-size="10.5" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A" text-anchor="end">05</text>
+<text x="1130" y="760" font-size="12.5" fill="#42506A">固定模型 / 预算 / 报告</text>
+<line x1="800" y1="272" x2="800" y2="296" stroke="#2563EB" stroke-width="2"/>
+<polyline points="795,289 800,296 805,289" fill="none" stroke="#2563EB" stroke-width="2"/>
+<line x1="800" y1="446" x2="800" y2="470" stroke="#2563EB" stroke-width="2"/>
+<polyline points="795,463 800,470 805,463" fill="none" stroke="#2563EB" stroke-width="2"/>
+<line x1="800" y1="630" x2="800" y2="654" stroke="#2563EB" stroke-width="2"/>
+<polyline points="795,647 800,654 805,647" fill="none" stroke="#2563EB" stroke-width="2"/>
+<text x="1536" y="86" font-size="13" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A" text-anchor="end">v0.2 · 2026-11</text>
+<text x="64" y="946" font-size="11" fill="#74829A">没有远程推理集群，没有多设备同步；所有状态落在本机，所有外部动作可追溯到审批指纹。</text>
+</svg>

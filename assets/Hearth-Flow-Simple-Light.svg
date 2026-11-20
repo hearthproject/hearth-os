@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="620" viewBox="0 0 1500 620" font-family="'Microsoft YaHei UI','Microsoft YaHei','PingFang SC','Noto Sans SC','Segoe UI',sans-serif">
+<rect width="1500" height="620" fill="#F4F7FB"/>
+<rect x="0" y="0" width="1500" height="7" fill="#2563EB"/>
+<text x="64" y="72" font-size="30" font-weight="700" fill="#172033">Hearth 怎么做事</text>
+<text x="64" y="104" font-size="15" fill="#74829A">四步，结果可核对</text>
+<rect x="64" y="210" width="320" height="190" rx="14" fill="#EAF1FE" stroke="#2563EB" stroke-width="1.4"/>
+<text x="82" y="240" font-size="15" font-weight="700" fill="#172033">说清楚要什么</text>
+<text x="370" y="234" font-size="10.5" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A" text-anchor="end">01</text>
+<text x="82" y="272" font-size="12.5" fill="#42506A">目标 + 验收标准</text>
+<line x1="384" y1="306" x2="424" y2="306" stroke="#74829A" stroke-width="1.6"/>
+<polyline points="417,301 424,306 417,311" fill="none" stroke="#74829A" stroke-width="1.6"/>
+<rect x="424" y="210" width="320" height="190" rx="14" fill="#E4F5F4" stroke="#0E8587" stroke-width="1.4"/>
+<text x="442" y="240" font-size="15" font-weight="700" fill="#172033">在安全范围内动手</text>
+<text x="730" y="234" font-size="10.5" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A" text-anchor="end">02</text>
+<text x="442" y="272" font-size="12.5" fill="#42506A">工作区可逆写入</text>
+<text x="442" y="293" font-size="12.5" fill="#42506A">外部动作先问</text>
+<line x1="744" y1="306" x2="784" y2="306" stroke="#74829A" stroke-width="1.6"/>
+<polyline points="777,301 784,306 777,311" fill="none" stroke="#74829A" stroke-width="1.6"/>
+<rect x="784" y="210" width="320" height="190" rx="14" fill="#E6F4EC" stroke="#18794E" stroke-width="1.4"/>
+<text x="802" y="240" font-size="15" font-weight="700" fill="#172033">自己验证</text>
+<text x="1090" y="234" font-size="10.5" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A" text-anchor="end">03</text>
+<text x="802" y="272" font-size="12.5" fill="#42506A">跑测试 / 查页面</text>
+<text x="802" y="293" font-size="12.5" fill="#42506A">拿证据而不是猜</text>
+<line x1="1104" y1="306" x2="1144" y2="306" stroke="#74829A" stroke-width="1.6"/>
+<polyline points="1137,301 1144,306 1137,311" fill="none" stroke="#74829A" stroke-width="1.6"/>
+<rect x="1144" y="210" width="320" height="190" rx="14" fill="#FCF0DF" stroke="#B4680B" stroke-width="1.4"/>
+<text x="1162" y="240" font-size="15" font-weight="700" fill="#172033">交给你决定</text>
+<text x="1450" y="234" font-size="10.5" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A" text-anchor="end">04</text>
+<text x="1162" y="272" font-size="12.5" fill="#42506A">结果 / 证据 / 回退</text>
+<rect x="64" y="454" width="1372" height="72" rx="14" fill="#EAF1FE" stroke="#2563EB" stroke-width="1.2"/>
+<text x="86" y="485" font-size="13" font-weight="700" fill="#172033">你能看到的东西</text>
+<text x="86" y="510" font-size="12.5" fill="#42506A">每次改了什么文件、增删多少行、跑了什么测试、哪个页面断言通过、失败原因是什么、能不能一键退回去。</text>
+<text x="64" y="586" font-size="11" fill="#74829A">不承诺“全自动”；承诺“做完有证据，做错能回退”。</text>
+</svg>

@@ -137,23 +137,23 @@ Hearth 已经越过**第一阶段（MVP）**的硬门槛：15 个跨行业真实
 
 ## 架构图
 
-[![Hearth 本地代理操作系统架构](https://media.githubusercontent.com/media/hearthproject/hearth-os/main/assets/Hearth-Architecture-Light.png)](https://media.githubusercontent.com/media/hearthproject/hearth-os/main/assets/Hearth-Architecture-Light.png)
+[![Hearth 本地代理操作系统架构](https://media.githubusercontent.com/media/hearthproject/hearth-os/main/assets/Hearth-Architecture-Light.svg)](https://media.githubusercontent.com/media/hearthproject/hearth-os/main/assets/Hearth-Architecture-Light.svg)
 
-<sub>当前架构：单进程 Fastify 控制平面 + SQLite 事件账本 + 可插拔执行器；覆盖触点与入口、本地控制平面、执行平面、事实层及边界约束。点击图片可查看原图。</sub>
+<sub>当前架构：Web 工作台 + 单进程 Fastify 控制平面 + Native Runtime/coding harness + 浏览器与外部工具 + SQLite 事件账本和本地文件。审批、效果账本和逐轮快照位于执行与外部动作之间。点击图片可查看原图。</sub>
 
 ### 运行时数据流
 
 简化版：
 
-[![Hearth 任务流程图 · 简化版](https://media.githubusercontent.com/media/hearthproject/hearth-os/main/assets/Hearth-Flow-Simple-Light.png)](https://media.githubusercontent.com/media/hearthproject/hearth-os/main/assets/Hearth-Flow-Simple-Light.png)
+[![Hearth 任务流程图 · 简化版](https://media.githubusercontent.com/media/hearthproject/hearth-os/main/assets/Hearth-Flow-Simple-Light.svg)](https://media.githubusercontent.com/media/hearthproject/hearth-os/main/assets/Hearth-Flow-Simple-Light.svg)
 
-<sub>简化版：从输入到结果压缩为 4 步主链（分流 → 任务落账 → 调度执行 → 结果判定）、4 类去向和 3 类外部副作用；底部统一说明事件账本、SSE 与界面刷新。点击图片可查看原图。</sub>
+<sub>简化版：说清目标、在安全范围内动手、自己验证、交给你决定；结果里能看到文件改动、测试、页面断言和回退入口。点击图片可查看原图。</sub>
 
 详细版：
 
-[![Hearth 端到端任务流程](https://media.githubusercontent.com/media/hearthproject/hearth-os/main/assets/Hearth-Flow-Light.png)](https://media.githubusercontent.com/media/hearthproject/hearth-os/main/assets/Hearth-Flow-Light.png)
+[![Hearth 端到端任务流程](https://media.githubusercontent.com/media/hearthproject/hearth-os/main/assets/Hearth-Flow-Light.svg)](https://media.githubusercontent.com/media/hearthproject/hearth-os/main/assets/Hearth-Flow-Light.svg)
 
-<sub>详细版：一条请求从聊天、飞书、定时任务或邮件进入，经 planExecution 与 decideRoute 分流；任务以 lease + epoch 调度，执行中可等待输入或审批，外部副作用只在审批后发生，最终经 SQLite 事件账本、SSE 与前端缓存投影回界面。点击图片可查看原图。</sub>
+<sub>详细版：目标契约 → 执行器与权限 → 审批 → 工具执行 → 测试/页面断言 → 证据与回退。失败保留原因并进入可恢复状态，不覆盖历史。点击图片可查看原图。</sub>
 
 同一流程的 Mermaid 版本：
 
