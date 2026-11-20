@@ -25,6 +25,8 @@ const READ_TOOLS = [
   "shell",
   "shell_output",
   "shell_wait",
+  "memory_read",
+  "memory_search",
   "finish_task"
 ];
 

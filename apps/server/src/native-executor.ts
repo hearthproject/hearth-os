@@ -115,7 +115,10 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
         "rewind",
         "shell_output",
         "shell_wait",
-        "shell_kill"
+        "shell_kill",
+        "memory_read",
+        "memory_write",
+        "memory_search"
       ])
     ];
   }

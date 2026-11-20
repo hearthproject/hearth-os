@@ -333,6 +333,23 @@ describe("builtin tools", () => {
     await expect(mapTools().read_file!.execute({ path: "out/real.txt" }, context)).rejects.toThrow(/是否想找.*real.md/);
   });
 
+  it("writes, reads and searches repository memory", async () => {
+    const root = workspace(roots);
+    const out = join(root, "out");
+    mkdirSync(out, { recursive: true });
+    const context = contextFor(root, out);
+    context.permissions = { ...context.permissions, writeRoots: [root] };
+    const tools = mapTools();
+    const written = await tools.memory_write!.execute({ name: "Build Commands", content: "Use pnpm test.", description: "repo test command" }, context);
+    expect(written.content).toContain("Build-Commands.md");
+    const index = await tools.memory_read!.execute({}, context);
+    expect(index.content).toContain("Build Commands");
+    const entry = await tools.memory_read!.execute({ name: "Build Commands" }, context);
+    expect(entry.content).toContain("Use pnpm test.");
+    const found = await tools.memory_search!.execute({ query: "pnpm" }, context);
+    expect(found.content).toContain("Build-Commands");
+  });
+
   it("waits for a background shell instead of busy-polling", async () => {
     const root = workspace(roots);
     const out = join(root, "out");
