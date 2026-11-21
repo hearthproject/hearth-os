@@ -869,7 +869,9 @@ export class HearthScheduler {
         if (!Array.isArray(checkpointBody.messages) || !checkpointBody.usage) continue;
         const restoredState = deserializeAgentState(checkpointBody.state);
         const journalSeq = checkpointBody.journalSeq ?? checkpoint.proof?.journalSeq;
-        const journalPath = journalPathFor(workspace, run.id);
+        const journalPath = checkpoint.proof?.journalPath
+          ? join(workspace, checkpoint.proof.journalPath)
+          : journalPathFor(workspace, run.id);
         return {
           messages: checkpointBody.messages,
           usage: { inputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0 },
@@ -917,6 +919,9 @@ export class HearthScheduler {
       ...(task.permissions ? { permissionsDigest: hashStable(task.permissions) } : {}),
       ...(workspaceDigest ? { workspaceDigest } : {}),
       ...(checkpoint.journalSeq !== undefined ? { journalSeq: checkpoint.journalSeq } : {}),
+      ...(checkpoint.journalSeq !== undefined
+        ? { journalPath: relative(workspace, journalPathFor(workspace, runId)).replace(/\\/g, "/") }
+        : {}),
       createdAt
     };
     const record: RunCheckpointRecord = {

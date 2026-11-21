@@ -720,6 +720,7 @@ export interface RunCheckpointProof {
   permissionsDigest?: string;
   workspaceDigest?: string;
   journalSeq?: number;
+  journalPath?: string;
   createdAt: string;
 }
 
