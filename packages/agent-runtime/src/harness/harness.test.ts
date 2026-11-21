@@ -1,10 +1,12 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { applyEdit, findEditMatch, normalizeFile, restoreFile } from "./edit-match.ts";
 import { findOmissionPlaceholder, omissionPlaceholderError } from "./omission.ts";
-import { createAgentState, recordFileRead, requireReadBeforeWrite } from "./file-state.ts";
+import { createAgentState, recordFileModified, recordFileRead, requireReadBeforeWrite } from "./file-state.ts";
+import { codingFinishIssue } from "./verification.ts";
 import { compactAgentMessagesWithSummary } from "../compaction.ts";
 import { searchFiles } from "./search.ts";
 import { todoReadTool, todoWriteTool, todoReminder } from "./todo.ts";
@@ -237,6 +239,27 @@ describe("tool output", () => {
     expect(redactSecrets(`api_key=${key}`)).toContain("[REDACTED_API_KEY]");
     expect(redactSecrets("Authorization: Bearer abcdefghijklmnopqrstuvwxyz")).toContain("Bearer [REDACTED]");
     expect(redactSecrets("password=hunter2hunter2")).toContain("password=[REDACTED]");
+  });
+});
+
+describe("coding completion", () => {
+  it("ignores changes that existed before the task and only gates agent edits on tests", () => {
+    const root = workspace();
+    const source = join(root, "src", "app.ts");
+    mkdirSync(join(root, "src"), { recursive: true });
+    writeFileSync(source, "export const value = 1;\n");
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: root });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: root });
+    execFileSync("git", ["add", "."], { cwd: root });
+    execFileSync("git", ["commit", "-qm", "initial"], { cwd: root });
+    writeFileSync(source, "export const value = 2;\n");
+
+    const ctx = context(root);
+    expect(codingFinishIssue(ctx)).toBeNull();
+
+    recordFileModified(ctx.state, source, "export const value = 3;\n");
+    expect(codingFinishIssue(ctx)).toContain("还没有运行过测试");
   });
 });
 
