@@ -872,3 +872,58 @@ function fakeModel(turns: AgentModelTurn[]): AgentModel {
   let index = 0;
   return async () => turns[Math.min(index++, turns.length - 1)] ?? { content: "", toolCalls: [], usage: null, finishReason: "stop" };
 }
+
+it("retries a tool that fails with TOOL_TIMEOUT before succeeding", async () => {
+  let attempts = 0;
+  const model = fakeModel([
+    turn("", [call("flaky", {})]),
+    turn("完成了", [])
+  ]);
+  const result = await runAgent({
+    model,
+    tools: [{
+      definition: { name: "flaky", description: "flaky tool", parameters: {} },
+      execute: async () => {
+        attempts++;
+        if (attempts < 3) {
+          const err: any = new Error("tool timed out");
+          err.code = "TOOL_TIMEOUT";
+          err.retryable = true;
+          throw err;
+        }
+        return { content: "ok" };
+      }
+    }],
+    goal: "test", systemPrompt: "system", workspaceRoot: ".", outDir: ".",
+    permissions: { tools: ["flaky"], readRoots: [], writeRoots: [], networkHosts: [] },
+    budget: { maxTurns: 5, maxToolCalls: 5, maxTokens: 100_000, maxDurationMs: 30_000 },
+  });
+  expect(result.status).toBe("completed");
+  expect(attempts).toBe(3);
+});
+
+it("stops retrying a tool after maxRetries and returns the failure", async () => {
+  let attempts = 0;
+  const model = fakeModel([
+    turn("", [call("flaky", {})]),
+    turn("done", [])
+  ]);
+  const result = await runAgent({
+    model,
+    tools: [{
+      definition: { name: "flaky", description: "flaky tool", parameters: {} },
+      execute: async () => {
+        attempts++;
+        const err: any = new Error("tool timed out");
+        err.code = "TOOL_TIMEOUT";
+        err.retryable = true;
+        throw err;
+      }
+    }],
+    goal: "test", systemPrompt: "system", workspaceRoot: ".", outDir: ".",
+    permissions: { tools: ["flaky"], readRoots: [], writeRoots: [], networkHosts: [] },
+    budget: { maxTurns: 5, maxToolCalls: 5, maxTokens: 100_000, maxDurationMs: 30_000 },
+  });
+  expect(result.status).toBe("completed");
+  expect(attempts).toBe(4);
+});

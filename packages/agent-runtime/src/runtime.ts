@@ -635,7 +635,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       });
       let result: AgentToolResult;
       try {
-        result = await executeToolWithTimeout(tool, call, {
+        result = await executeToolWithRetry(tool, call, {
           workspaceRoot: options.workspaceRoot,
           outDir: options.outDir,
           permissions: options.permissions,
@@ -646,7 +646,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
           mode: options.mode ?? "build",
           ...(options.sandbox ? { sandbox: options.sandbox } : {}),
           ...(options.verifyGoalCompletion ? { verifyGoalCompletion: options.verifyGoalCompletion } : {})
-        }, options.toolTimeoutMs ?? 120_000, signal);
+        }, options.toolTimeoutMs ?? 120_000, signal, DEFAULT_TOOL_RETRY_POLICY);
       } catch (error) {
         const failure = normalizeToolFailure(error, "TOOL_EXEC_FAILED");
         result = { content: `工具执行失败：${failure.message}`, isError: true, error: failure };
@@ -980,7 +980,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
           });
           markExecuting(effectiveCall);
           try {
-            result = await executeToolWithTimeout(tool, effectiveCall, {
+            result = await executeToolWithRetry(tool, effectiveCall, {
               workspaceRoot: options.workspaceRoot,
               outDir: options.outDir,
               permissions: options.permissions,
@@ -991,7 +991,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
               mode: options.mode ?? "build",
               ...(options.sandbox ? { sandbox: options.sandbox } : {}),
               ...(options.verifyGoalCompletion ? { verifyGoalCompletion: options.verifyGoalCompletion } : {})
-            }, options.toolTimeoutMs ?? 120_000, signal);
+            }, options.toolTimeoutMs ?? 120_000, signal, DEFAULT_TOOL_RETRY_POLICY);
           } catch (error) {
             const failure = normalizeToolFailure(error, "TOOL_EXEC_FAILED");
             result = { content: `工具执行失败：${failure.message}`, isError: true, error: failure };
@@ -1303,6 +1303,72 @@ const TOOL_TIMEOUT_DEFAULTS: Record<string, number> = {
 
 function toolTimeoutFor(toolName: string, fallback: number): number {
   return TOOL_TIMEOUT_DEFAULTS[toolName] ?? fallback;
+}
+
+const DEFAULT_TOOL_RETRY_POLICY: {
+  maxRetries: number;
+  baseDelayMs: number;
+  maxDelayMs: number;
+  jitter: number;
+  retryableCodes: string[];
+} = {
+  maxRetries: 3,
+  baseDelayMs: 1_000,
+  maxDelayMs: 30_000,
+  jitter: 0.25,
+  retryableCodes: ["TOOL_TIMEOUT", "TOOL_ORPHANED", "TOOL_EXEC_FAILED"]
+};
+
+async function sleepInterruptible(ms: number, signal: AbortSignal): Promise<void> {
+  if (ms <= 0 || signal.aborted) return;
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(new Error("aborted"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      reject(new Error("aborted"));
+    }
+  });
+}
+
+async function executeToolWithRetry(
+  tool: AgentTool,
+  call: AgentToolCall,
+  context: AgentToolContext,
+  fallbackTimeoutMs: number,
+  parentSignal: AbortSignal,
+  policy: typeof DEFAULT_TOOL_RETRY_POLICY
+): Promise<AgentToolResult> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= policy.maxRetries; attempt++) {
+    try {
+      return await executeToolWithTimeout(tool, call, context, fallbackTimeoutMs, parentSignal);
+    } catch (error) {
+      lastError = error;
+      if (attempt >= policy.maxRetries) break;
+      const failure = normalizeToolFailure(error, "TOOL_EXEC_FAILED");
+      if (!policy.retryableCodes.includes(failure.code)) break;
+      if (!failure.retryable) break;
+      const delay = policy.baseDelayMs * 2 ** attempt;
+      const jittered = delay + delay * policy.jitter * (Math.random() * 2 - 1);
+      const waitMs = Math.max(0, Math.min(policy.maxDelayMs, jittered));
+      if (waitMs > 0) {
+        try {
+          await sleepInterruptible(waitMs, parentSignal);
+        } catch {
+          break;
+        }
+      }
+      if (parentSignal.aborted) break;
+    }
+  }
+  throw lastError;
 }
 
 async function executeToolWithTimeout(
