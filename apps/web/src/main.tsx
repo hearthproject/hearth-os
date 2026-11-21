@@ -10,7 +10,9 @@ const queryClient = new QueryClient({
     queries: {
       staleTime: 5_000,
       retry: 1,
-      refetchOnWindowFocus: true
+      // Restoring the window from the tray should not refetch every active
+      // query at once; live data already arrives through the event bridge.
+      refetchOnWindowFocus: false
     }
   }
 });

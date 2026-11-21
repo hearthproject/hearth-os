@@ -399,6 +399,24 @@ export function ChatPage() {
     abortRef.current = controller;
     let answer = "";
     let reasoningText = "";
+    // Streaming deltas arrive per token. Re-parsing the whole markdown answer
+    // on every token is O(n²) and makes long replies stutter, so coalesce UI
+    // updates into ~20fps frames while keeping the buffer authoritative.
+    let streamTimer: number | null = null;
+    const flushStream = () => {
+      streamTimer = null;
+      setStreaming(answer);
+      setReasoning(reasoningText);
+    };
+    const scheduleStream = () => {
+      if (streamTimer !== null) return;
+      streamTimer = window.setTimeout(flushStream, 50);
+    };
+    const stopStreamTimer = () => {
+      if (streamTimer === null) return;
+      window.clearTimeout(streamTimer);
+      streamTimer = null;
+    };
 
     try {
       await chatStream(
@@ -425,10 +443,10 @@ export function ChatPage() {
               setMessages((prev) => [...prev, data as ChatMessageRecord]);
             } else if (event === "delta") {
               answer += (data as { text: string }).text;
-              setStreaming(answer);
+              scheduleStream();
             } else if (event === "reasoning") {
               reasoningText += (data as { text: string }).text;
-              setReasoning(reasoningText);
+              scheduleStream();
             } else if (event === "task") {
               const payload = data as { task: { id: string; title: string; status: RunInfo["status"]; createdAt: string; updatedAt: string; executorId?: string | null } };
               const task = payload.task;
@@ -453,6 +471,7 @@ export function ChatPage() {
               setSkillNotice(null);
             } else if (event === "done") {
               const message = data as ChatMessageRecord;
+              stopStreamTimer();
               setStreaming("");
               setReasoning("");
               if (!isTaskNoise(message)) {
@@ -480,6 +499,7 @@ export function ChatPage() {
         setError(sendError instanceof Error ? sendError.message : "发送失败");
       }
     } finally {
+      stopStreamTimer();
       abortRef.current = null;
       setSending(false);
       setStreaming("");
