@@ -27,15 +27,15 @@ const RUN_LABELS: Record<TaskStatus, string> = {
   running: "执行中",
   waiting_input: "需要补充信息",
   waiting_approval: "等待你确认",
-  waiting_budget: "等待继续",
+  waiting_budget: "已暂停",
   completed: "已完成",
   failed: "执行失败",
   recoverable: "执行中断",
   cancelled: "已取消"
 };
 
-const ACTIVE_STATUSES: TaskStatus[] = ["queued", "running", "waiting_input", "waiting_approval", "waiting_budget"];
-const ATTENTION_STATUSES: TaskStatus[] = ["failed", "recoverable", "waiting_input", "waiting_approval", "waiting_budget"];
+const ACTIVE_STATUSES: TaskStatus[] = ["queued", "running", "waiting_input", "waiting_approval"];
+const ATTENTION_STATUSES: TaskStatus[] = ["failed", "recoverable", "waiting_input", "waiting_approval"];
 const FINISHED_STATUSES: TaskStatus[] = ["completed", "cancelled"];
 
 interface ToolDetail {
@@ -81,6 +81,7 @@ export function InlineRun({ task }: { task: RunInfo }) {
   const active = ACTIVE_STATUSES.includes(status);
   const attention = ATTENTION_STATUSES.includes(status);
   const error = view?.task.error ?? null;
+  const visibleError = error && !isRetiredTaskNotice(error.message) ? error : null;
   const entries = useMemo(() => collectEntries(view?.events ?? []), [view?.events]);
   const pendingApprovals = (view?.approvals ?? []).filter((approval) => approval.status === "pending");
   const duration = runDuration(view?.runs ?? []);
@@ -224,12 +225,12 @@ export function InlineRun({ task }: { task: RunInfo }) {
             </div>
           )}
 
-          {error && (
+          {visibleError && (
             <div className="inline-run-error">
               <TriangleAlert size={13} />
-              <span>{error.message}</span>
-              {error.guidance && <span>{error.guidance}</span>}
-              {error.recoverable && (
+              <span>{visibleError.message}</span>
+              {visibleError.guidance && <span>{visibleError.guidance}</span>}
+              {visibleError.recoverable && (
                 <button className="ghost-button small" onClick={() => retryMutation.mutate()} disabled={retryMutation.isPending}>
                   {retryMutation.isPending ? <Loader2 size={12} className="spin" /> : <RotateCcw size={12} />} 重试
                 </button>
@@ -258,6 +259,10 @@ function runDuration(runs: TaskView["runs"]): number | null {
     seen = true;
   }
   return seen ? total : null;
+}
+
+function isRetiredTaskNotice(text: string): boolean {
+  return /执行预算|本轮执行预算|预算已触顶|budgetExhaustion|Unknown event type:\s*job\.|未知事件类型[：:]\s*job\./i.test(text);
 }
 
 function collectEntries(events: TaskView["events"]): Entry[] {
@@ -293,6 +298,7 @@ function collectEntries(events: TaskView["events"]): Entry[] {
     const message = typeof payload.message === "string" ? payload.message.trim() : "";
 
     const narration = narrationText(kind, detail, message);
+    if (isRetiredTaskNotice(narration ?? message)) continue;
     if (narration) {
       pushNarration(narration, event.id);
       continue;
