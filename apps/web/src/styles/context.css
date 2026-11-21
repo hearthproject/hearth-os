@@ -1,0 +1,37 @@
+.page.context-page { display: flex; flex-direction: column; gap: clamp(24px, 4vw, 48px); }
+.context-page > section { display: grid; gap: 16px; min-width: 0; }
+.context-page > section > :is(h2, p, dl) { margin: 0; }
+.context-field { display: grid; gap: 8px; max-width: 42rem; }
+.context-field :is(select, input) { width: 100%; min-width: 0; padding: 10px 12px; }
+.context-page dl { display: grid; gap: 18px; }
+.context-page dd { margin: 5px 0 0; line-height: 1.75; }
+.context-page article {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center; column-gap: 12px; padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.context-page article > button { justify-self: start; text-align: start; white-space: normal; }
+.context-page article > button svg { flex-shrink: 0; transition: transform 200ms ease; }
+.context-page article > button[aria-expanded="true"] svg { transform: rotate(90deg); }
+.context-page .primary-button { justify-self: start; }
+.context-reveal { grid-column: 1 / -1; display: grid; grid-template-rows: 0fr; opacity: 0;
+  transition: grid-template-rows 240ms ease, opacity 200ms ease; }
+.context-reveal[data-open="true"] { grid-template-rows: 1fr; opacity: 1; }
+.context-reveal > div { min-height: 0; overflow: hidden; }
+.context-reveal p { margin: 14px 0 8px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+@supports (appearance: base-select) {
+  .context-field select, .context-field select::picker(select) { appearance: base-select; }
+  .context-field select::picker(select) {
+    max-height: 40vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--surface); opacity: 0; transform: translateY(-5px);
+    transition: opacity 180ms ease, transform 180ms ease, display 180ms allow-discrete, overlay 180ms allow-discrete;
+  }
+  .context-field select:open::picker(select) { opacity: 1; transform: translateY(0); }
+  @starting-style { .context-field select:open::picker(select) { opacity: 0; transform: translateY(-5px); } }
+  .context-field option { padding: 8px 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .context-reveal, .context-page article > button svg { transition: none; }
+  .context-field select::picker(select) { transition: none; }
+}
