@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { ModelProtocol, ModelProviderPreset, ModelSettingsView } from "@hearth/core";
+import type { RetryPolicy } from "@hearth/agent-runtime";
 
 export interface ModelSettings {
   providerId: string;
@@ -11,6 +12,7 @@ export interface ModelSettings {
   contextWindowTokens: number;
   maxOutputTokens: number;
   apiKey: string;
+  retry?: Partial<RetryPolicy>;
   updatedAt: string | null;
 }
 
@@ -123,6 +125,7 @@ export function loadModelSettings(path: string): ModelSettings {
       contextWindowTokens: tokenLimit(parsed.contextWindowTokens, DEFAULT_CONTEXT_WINDOW_TOKENS, 4_096, 10_000_000),
       maxOutputTokens: tokenLimit(parsed.maxOutputTokens, DEFAULT_MAX_OUTPUT_TOKENS, 256, 1_000_000),
       apiKey: text(parsed.apiKey, ""),
+      ...(parsed.retry && typeof parsed.retry === "object" ? { retry: parsed.retry } : {}),
       updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : null
     };
   } catch {
@@ -139,6 +142,7 @@ export type ModelSettingsPatch = {
   contextWindowTokens?: number | undefined;
   maxOutputTokens?: number | undefined;
   apiKey?: string | undefined;
+  retry?: Partial<RetryPolicy> | undefined;
 };
 
 export function saveModelSettings(path: string, patch: ModelSettingsPatch): ModelSettings {
@@ -156,6 +160,7 @@ export function saveModelSettings(path: string, patch: ModelSettingsPatch): Mode
       ? tokenLimit(patch.maxOutputTokens, current.maxOutputTokens, 256, 1_000_000)
       : current.maxOutputTokens,
     apiKey: patch.apiKey !== undefined ? patch.apiKey.trim() : current.apiKey,
+    ...(patch.retry !== undefined ? { retry: patch.retry } : current.retry ? { retry: current.retry } : {}),
     updatedAt: new Date().toISOString()
   };
   if (!next.providerName) next.providerName = presetName(next.providerId) ?? "自定义服务";

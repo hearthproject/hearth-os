@@ -25,10 +25,13 @@ import {
   commonAncestor,
   isFilesystemRoot,
   pathWithin,
+  resolveRetryPolicy,
+  resolveTaskProfile,
   runAgent,
   zeroUsage,
   SandboxUnavailableError,
   type AgentCheckpoint,
+  type AgentFailure,
   type ContextSummary,
   type AgentMessage,
   type AgentModel,
@@ -40,10 +43,11 @@ import {
   type AgentToolAuthorizationRequest,
   type AgentToolContext,
   type HarnessMode,
+  type RetryPolicy,
   type RuntimeEvent,
   type SandboxRuntime
 } from "@hearth/agent-runtime";
-import { wantsCodeExecution, wantsGithubAccess, wantsScreenshot } from "./task-intent.ts";
+import { wantsCodeExecution, wantsGithubAccess, wantsPublicWebResearch, wantsScreenshot } from "./task-intent.ts";
 import { supportsToolCalling, streamAgentTurn } from "./model-agent.ts";
 import { completeChat } from "./model-client.ts";
 import { WindowsAclSandboxProvider } from "./native-sandbox.ts";
@@ -63,6 +67,13 @@ export interface NativeRunOptions {
   permissions?: TaskPermissions;
   budget?: RunBudget;
   signal: AbortSignal;
+  runId?: string;
+  journalPath?: string;
+  goalRoot?: string;
+  maxGoalRounds?: number;
+  retryPolicy?: RetryPolicy;
+  stallPolicy?: { warnMs?: number; abortMs?: number };
+  checkpointPolicy?: { everyTurns?: number; everyToolCalls?: number; maxSnapshots?: number };
   mode?: HarnessMode;
   resume?: AgentResumeState;
   isSubagent?: boolean;
@@ -87,6 +98,7 @@ export interface NativeRunResult {
   question: string | null;
   outputs: string[];
   messages?: AgentMessage[];
+  failure?: AgentFailure;
   budgetExhaustion?: { dimension: BudgetDimension; limit: number };
   sandboxFailure?: "denied" | "runner_failure";
 }
@@ -99,6 +111,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
   const screenshotTask = wantsScreenshot(`${options.task.title}\n${options.task.goal}`);
   const githubTask = wantsGithubAccess(`${options.task.title}\n${options.task.goal}`);
   const codeTask = wantsCodeExecution(`${options.task.title}\n${options.task.goal}`);
+  const researchTask = wantsPublicWebResearch(`${options.task.title}\n${options.task.goal}`);
   const profile = codingHarnessEnabled()
     ? resolveHarnessProfile({
         taskKind: options.task.taskKind,
@@ -107,6 +120,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
       })
     : "general";
   const coding = profile === "coding";
+  const taskProfile = resolveTaskProfile({ task: options.task, coding, screenshot: screenshotTask, research: researchTask });
   const permissions = options.permissions ?? defaultTaskPermissions({
     workspaceRoot: options.prepared.root,
     outDir: options.prepared.outDir,
@@ -139,6 +153,8 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
         "update_goal"
       ])
     ];
+  } else if (!options.isSubagent) {
+    permissions.tools = [...new Set([...permissions.tools, "get_goal", "create_goal", "update_goal"])];
   }
 
   const sandbox = await prepareNativeSandbox(options, permissions);
@@ -157,7 +173,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
       }
     });
   const availableTools = toolsForRun.map((tool) => tool.definition.name);
-  const goalBlock = coding && !options.isSubagent ? goalContinuationPrompt(options.prepared.root) : null;
+  const goalBlock = !options.isSubagent ? goalContinuationPrompt(options.prepared.root) : null;
   const memoryIndex = coding ? memoryIndexBlock(options.prepared.root) : null;
   const projectDossier = coding && !options.isSubagent && options.task.projectId
     ? dossierPromptBlock(new DossierStore(DOSSIER_DIR).read(options.task.projectId))
@@ -179,10 +195,15 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
           `Current task: ${options.task.title}`,
           `Expected outputs: ${options.expectedOutputs.join(", ") || "(no explicit file)"}`,
           `Task language: reply in the user's language; keep code, identifiers and commit messages in English.`,
+          ...(taskProfile.hints.length > 0 ? [`## ${taskProfile.label} profile\n${taskProfile.hints.map((hint) => `- ${hint}`).join("\n")}`] : []),
           ...(goalBlock ? [goalBlock] : [])
         ]
       })
-    : nativeSystemPrompt(options.task, options.expectedOutputs, availableTools);
+    : [
+        nativeSystemPrompt(options.task, options.expectedOutputs, availableTools),
+        ...(taskProfile.hints.length > 0 ? [`## ${taskProfile.label} profile\n${taskProfile.hints.map((hint) => `- ${hint}`).join("\n")}`] : []),
+        ...(goalBlock ? [goalBlock] : [])
+      ].join("\n\n");
   const resume = options.resume ? refreshNativeResume(options.resume, systemPrompt, options.prompt, options.prepared.outDir) : undefined;
   let budgetExhaustion: NativeRunResult["budgetExhaustion"];
   let sandboxDenied = false;
@@ -203,12 +224,20 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     state,
     profile,
     mode: options.mode ?? "build",
-    toolTimeoutMs: coding ? 10 * 60_000 : 120_000,
-    maxParallelTools: coding ? 4 : 1,
-    ...(coding ? { keepRecentToolOutputs: 3 } : {}),
+    toolTimeoutMs: taskProfile.toolTimeoutMs,
+    maxParallelTools: taskProfile.maxParallelTools,
+    keepRecentToolOutputs: taskProfile.keepRecentToolOutputs,
+    maxGoalRounds: options.maxGoalRounds ?? taskProfile.maxGoalRounds,
     ...(coding ? { projectInstructions: instructionsBlock(discoverInstructions(options.prepared.root)) } : {}),
     ...(coding ? { reminders: CODING_REMINDERS } : {}),
     signal: options.signal,
+    ...(options.runId ? { runId: options.runId } : {}),
+    ...(options.journalPath ? { journal: { path: options.journalPath } } : {}),
+    ...(options.goalRoot ? { goalRoot: options.goalRoot } : {}),
+    ...(options.maxGoalRounds !== undefined ? { maxGoalRounds: options.maxGoalRounds } : {}),
+    ...(options.retryPolicy ? { retryPolicy: options.retryPolicy } : { retryPolicy: nativeRetryPolicy(options.settings) }),
+    ...(options.stallPolicy ? { stallPolicy: options.stallPolicy } : { stallPolicy: { warnMs: 10 * 60_000, abortMs: 30 * 60_000 } }),
+    ...(options.checkpointPolicy ? { checkpointPolicy: options.checkpointPolicy } : {}),
     ...(resume ? { resume } : {}),
     ...(options.steering ? { steering: options.steering } : {}),
     contextWindowTokens: options.settings.contextWindowTokens,
@@ -238,7 +267,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
       }
     },
     validateFinish: (result, context) => {
-      const goalIssue = coding && !options.isSubagent ? goalFinishIssue(options.prepared.root) : null;
+      const goalIssue = !options.isSubagent ? goalFinishIssue(options.prepared.root) : null;
       if (goalIssue) return goalIssue;
       const jsonIssue = jsonDeliverableIssue(options.prepared.outDir, options.expectedOutputs);
       if (jsonIssue) return jsonIssue;
@@ -284,7 +313,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
   });
 
   normalizeJsonDeliverables(options.prepared.outDir, options.expectedOutputs);
-  if (coding && !options.isSubagent) recordGoalTurns(options.prepared.root, result.turns);
+  if (!options.isSubagent) recordGoalTurns(options.prepared.root, result.turns);
 
   return {
     status: result.status,
@@ -295,6 +324,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     question: result.question,
     outputs: result.outputs,
     messages: result.messages,
+    ...(result.failure ? { failure: result.failure } : {}),
     ...(budgetExhaustion ? { budgetExhaustion } : {}),
     ...(sandboxDenied ? { sandboxFailure: "denied" as const } : sandboxRunnerFailure ? { sandboxFailure: "runner_failure" as const } : {})
   };
@@ -1308,6 +1338,19 @@ function appendSandboxAudit(prepared: PreparedWorkspace, taskId: string, payload
   } catch {
     // Audit must not block execution; the same decision is surfaced as progress.
   }
+}
+
+function nativeRetryPolicy(settings: ModelSettings): RetryPolicy {
+  return resolveRetryPolicy({
+    mode: "normal",
+    maxRetries: 8,
+    baseDelayMs: 1_000,
+    maxDelayMs: 300_000,
+    jitter: 0.25,
+    honorRetryAfter: true,
+    deadlineMs: 6 * 60 * 60_000,
+    ...settings.retry
+  });
 }
 
 function modelAdapter(settings: ModelSettings): AgentModel {

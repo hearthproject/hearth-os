@@ -19,6 +19,7 @@ export interface DispositionInput {
   maxAttempts?: number;
   effectId?: string | null;
   reason?: string;
+  retryAfterMs?: number | undefined;
   repairTarget?: string;
   now?: Date;
 }
@@ -28,6 +29,8 @@ export function classifyFailureClass(input: FailureClassificationInput): Failure
   if (input.aborted && input.stopping) return "user_cancelled";
   if (input.budgetExhausted) return "budget_exhausted";
   if (input.validatorFailed) return "validation_failed";
+  const mapped = failureClassForCode(input.code);
+  if (mapped) return mapped;
   const message = input.message;
   const code = input.code ?? "";
   if (/取消|cancel|user.*stop|停止/i.test(message)) return "user_cancelled";
@@ -42,6 +45,41 @@ export function classifyFailureClass(input: FailureClassificationInput): Failure
   if (/预算|budget|maxTurns|maxToolCalls|maxDuration|token.*limit/i.test(message)) return "budget_exhausted";
   if (/权限|unauthorized|403/i.test(message)) return "policy_denied";
   return "internal";
+}
+
+export function failureClassForCode(code: string | null | undefined): FailureClass | null {
+  switch (code) {
+    case "MODEL_RATE_LIMIT":
+      return "rate_limit";
+    case "MODEL_CAPACITY":
+    case "MODEL_CONTEXT_OVERFLOW":
+      return "capacity";
+    case "MODEL_TIMEOUT":
+    case "TOOL_TIMEOUT":
+    case "STALLED":
+    case "INTERRUPTED":
+      return "timeout";
+    case "MODEL_TRANSPORT":
+      return "transport";
+    case "MODEL_AUTH":
+      return "auth";
+    case "MODEL_BAD_REQUEST":
+    case "TOOL_EXEC_FAILED":
+    case "TOOL_ORPHANED":
+    case "SANDBOX_RUNNER_FAILURE":
+    case "CHECKPOINT_FAILED":
+    case "JOURNAL_FAILED":
+    case "INTERNAL":
+      return "internal";
+    case "TOOL_ABORTED":
+      return "user_cancelled";
+    case "SANDBOX_DENIED":
+      return "policy_denied";
+    case "VALIDATION_FAILED":
+      return "validation_failed";
+    default:
+      return null;
+  }
 }
 
 export function decideDisposition(input: DispositionInput): FailureDisposition {
@@ -75,7 +113,7 @@ export function decideDisposition(input: DispositionInput): FailureDisposition {
   }
   return {
     type: "retry",
-    afterMs: retryDelayMs(attempt, input.failure),
+    afterMs: Math.min(MAX_RETRY_DELAY_MS, Math.max(retryDelayMs(attempt, input.failure), Math.max(0, input.retryAfterMs ?? 0))),
     attempt: attempt + 1
   };
 }

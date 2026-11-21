@@ -226,7 +226,7 @@ const cancelDelegationSchema = z.object({
 const contextSettingsPatchSchema = z.object({
   mode: z.enum(["off", "shadow", "on"]).optional(),
   maxHandoffs: z.number().int().min(0).max(5).optional(),
-  maxSameExecutorRetries: z.number().int().min(0).max(3).optional(),
+  maxSameExecutorRetries: z.number().int().min(0).max(10).optional(),
   retentionDays: z.number().int().min(1).max(3650).optional(),
   maxInlineBytes: z.number().int().min(1024).max(1_000_000).optional(),
   projectionTokenBudget: z.number().int().min(1000).max(200_000).optional(),

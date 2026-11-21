@@ -51,7 +51,7 @@ describe("context and handoff API", () => {
     expect(defaults.json().settings).toMatchObject({
       mode: "on",
       maxHandoffs: 2,
-      maxSameExecutorRetries: 1,
+      maxSameExecutorRetries: 5,
       retentionDays: 30,
       maxInlineBytes: 16_384,
       projectionTokenBudget: 12_000,

@@ -232,6 +232,8 @@ export interface TaskError {
   message: string;
   recoverable: boolean;
   guidance: string;
+  code?: string;
+  retryAfterMs?: number;
   cause?: FailureCause;
   diagnosisId?: string;
   failureClass?: FailureClass;
@@ -717,6 +719,7 @@ export interface RunCheckpointProof {
   preparedIntents: string[];
   permissionsDigest?: string;
   workspaceDigest?: string;
+  journalSeq?: number;
   createdAt: string;
 }
 
@@ -2421,7 +2424,7 @@ export interface ContextSettingsPatch {
 export const DEFAULT_CONTEXT_SETTINGS: ContextSettings = {
   mode: "on",
   maxHandoffs: 2,
-  maxSameExecutorRetries: 1,
+  maxSameExecutorRetries: 5,
   retentionDays: 30,
   maxInlineBytes: 16_384,
   projectionTokenBudget: 12_000,

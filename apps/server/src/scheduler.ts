@@ -5,12 +5,13 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, s
 import { isAbsolute, join, relative, resolve } from "node:path";
 import type {
   AgentCheckpoint,
+  AgentFailure,
   AgentResumeState,
   AgentToolAuthorization,
   AgentToolAuthorizationRequest,
   RuntimeEvent
 } from "@hearth/agent-runtime";
-import { deserializeAgentState } from "@hearth/agent-runtime";
+import { deserializeAgentState, inspectJournal, journalPathFor } from "@hearth/agent-runtime";
 import type { ApprovalMode, BudgetDimension, BudgetExhaustion, ContextItem, ContextSettings, DelegationJob, DelegationResult, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, RunBudget, RunCheckpointProof, RunCheckpointRecord, RunRecord, TaskError, TaskFollowUpRecord, TaskLease, TaskProgressDetail, TaskRecord } from "@hearth/core";
 import { runCodex } from "@hearth/codex-executor";
 import type { DshApprovalOutcome, DshApprovalRequest, DshContextEvent } from "@hearth/deepseek-executor";
@@ -133,6 +134,27 @@ function approvalKindForTask(task: TaskRecord): TaskApprovalKind | null {
   if (outputs.includes("pr-preview.json")) return "github.publish-pr";
   if (outputs.includes("pr-review.md")) return "github.comment";
   return null;
+}
+
+function throwExecutionFailure(message: string, failure: AgentFailure | undefined): never {
+  const error = new Error(message) as Error & { agentFailure?: AgentFailure };
+  if (failure) error.agentFailure = failure;
+  throw error;
+}
+
+function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted || ms <= 0) {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+    signal.addEventListener("abort", () => {
+      clearTimeout(timer);
+      resolve();
+    }, { once: true });
+  });
 }
 
 export class HearthScheduler {
@@ -576,18 +598,20 @@ export class HearthScheduler {
   private autoResumeIssue(task: TaskRecord, run: RunRecord): string | null {
     if (resolveExecutorId(task) !== "native") return "只有 native 执行器支持自动恢复";
     const startedAt = run.startedAt ? Date.parse(run.startedAt) : Number.NaN;
-    if (Number.isFinite(startedAt) && Date.now() - startedAt > 12 * 60 * 60 * 1000) {
-      return "运行已超过 12 小时，等待用户确认";
+    if (Number.isFinite(startedAt) && Date.now() - startedAt > 72 * 60 * 60 * 1000) {
+      return "运行已超过 72 小时，等待用户确认";
     }
     const interrupted = this.service.store.listRuns(task.id)
       .filter((item) => item.failure?.kind === "interrupted").length;
-    if (interrupted >= 2) return "自动恢复次数已达上限";
+    if (interrupted >= 5) return "自动恢复次数已达上限";
     const unresolved = this.service.store.listEffects(task.id)
       .filter((effect) => ["prepared", "admitted", "executing", "uncertain"].includes(effect.status));
     if (unresolved.length > 0) return "存在状态不确定的外部动作，必须先对账";
     const outDir = this.outDirForRun(task.id, run);
     if (existsSync(join(outDir, ".hearth", "executing.json"))) {
-      return "上一轮工具执行未确认完成，工作区可能已有部分改动";
+      const journalPath = journalPathFor(run.workspace, run.id);
+      const journal = existsSync(journalPath) ? inspectJournal(journalPath) : null;
+      if (!journal) return "上一轮工具执行未确认完成，工作区可能已有部分改动，且没有可回放的运行日志";
     }
     const checkpoint = this.service.store.latestRunCheckpoint(run.id);
     if (!checkpoint) return "没有可用检查点";
@@ -812,9 +836,9 @@ export class HearthScheduler {
     if (result.status === "waiting_input") return;
     if (result.status === "cancelled") throw new Error("任务已取消");
     if (result.status === "budget_exceeded") {
-      throw new Error(result.finalResponse.trim() || "达到执行预算，任务未完成。可以调整或重试。");
+      throwExecutionFailure(result.finalResponse.trim() || "达到执行预算，任务未完成。可以调整或重试。", result.failure);
     }
-    throw new Error(result.finalResponse.trim() || "执行器没有完成当前任务");
+    throwExecutionFailure(result.finalResponse.trim() || "执行器没有完成当前任务", result.failure);
   }
 
   private restoreResumeState(taskId: string, workspace: string, includeWaitingInput = false): AgentResumeState | undefined {
@@ -844,13 +868,16 @@ export class HearthScheduler {
         const checkpointBody = JSON.parse(body) as AgentCheckpoint;
         if (!Array.isArray(checkpointBody.messages) || !checkpointBody.usage) continue;
         const restoredState = deserializeAgentState(checkpointBody.state);
+        const journalSeq = checkpointBody.journalSeq ?? checkpoint.proof?.journalSeq;
+        const journalPath = journalPathFor(workspace, run.id);
         return {
           messages: checkpointBody.messages,
           usage: { inputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0 },
           turns: 0,
           toolCalls: 0,
           ...(restoredState ? { state: restoredState } : {}),
-          ...(checkpointBody.promptHash ? { promptHash: checkpointBody.promptHash } : {})
+          ...(checkpointBody.promptHash ? { promptHash: checkpointBody.promptHash } : {}),
+          ...(journalSeq !== undefined && existsSync(journalPath) ? { journal: { path: journalPath, seq: journalSeq } } : {})
         };
       } catch {
         // A missing or unreadable checkpoint falls back to a fresh run.
@@ -889,6 +916,7 @@ export class HearthScheduler {
         .map((effect) => effect.id),
       ...(task.permissions ? { permissionsDigest: hashStable(task.permissions) } : {}),
       ...(workspaceDigest ? { workspaceDigest } : {}),
+      ...(checkpoint.journalSeq !== undefined ? { journalSeq: checkpoint.journalSeq } : {}),
       createdAt
     };
     const record: RunCheckpointRecord = {
@@ -1316,7 +1344,7 @@ export class HearthScheduler {
           .find((effect) => effect.status === "uncertain" || effect.status === "executing");
         const failureClass = classifyFailureClass({
           message: result.failure?.message ?? (result.error instanceof Error ? result.error.message : String(result.error)),
-          code: errorCode(result.error),
+          code: result.failure?.code ?? errorCode(result.error),
           aborted: result.aborted,
           stopping: this.stopping,
           effectUncertain: Boolean(uncertainEffect),
@@ -1329,6 +1357,7 @@ export class HearthScheduler {
           attempt: (retriesByExecutor.get(executorId) ?? 0) + 1,
           maxAttempts: settings.maxSameExecutorRetries + 1,
           effectId: uncertainEffect?.id ?? null,
+          retryAfterMs: result.failure?.retryAfterMs,
           repairTarget: (failureTask.expectedOutputs ?? []).join(", ") || "deliverable"
         });
         const target = this.selectHandoffTarget({ task: failureTask, cause, settings, attemptedExecutors, handoffsUsed, taskRoot });
@@ -1362,6 +1391,27 @@ export class HearthScheduler {
         });
         if (decision.action === "retry_same") {
           retriesByExecutor.set(executorId, (retriesByExecutor.get(executorId) ?? 0) + 1);
+          const delayMs = disposition.type === "retry" ? disposition.afterMs : 0;
+          if (delayMs > 0) {
+            this.capture({
+              taskId, conversationId: failureTask.conversationId ?? null, runId: result.run.id, executorId,
+              kind: "notice", role: "system",
+              content: `任务将在 ${Math.ceil(delayMs / 1000)} 秒后重试（${failureClass}，第 ${disposition.type === "retry" ? disposition.attempt : "?"} 次）`,
+              provenance: { source: "fallback-policy", eventType: "task.retry.scheduled", failureClass, delayMs, disposition },
+              executorEventId: `retry:${result.run.id}:scheduled`
+            });
+            await abortableSleep(delayMs, controller.signal);
+            if (controller.signal.aborted) {
+              this.refreshTaskSummary(taskId, { lastFailure: result.failure });
+              return;
+            }
+            this.capture({
+              taskId, conversationId: failureTask.conversationId ?? null, runId: result.run.id, executorId,
+              kind: "notice", role: "system", content: "重试等待结束，继续执行",
+              provenance: { source: "fallback-policy", eventType: "task.retry.started", failureClass, disposition },
+              executorEventId: `retry:${result.run.id}:started`
+            });
+          }
           resumePrompt = `上一轮执行未完成：${clipText(result.failure?.message ?? String(result.error), 1800)}。请从当前工作区继续，不要重复已经完成的步骤。`;
           continue;
         }
@@ -2224,12 +2274,14 @@ export class HearthScheduler {
 
   private taskErrorFor(error: unknown, aborted: boolean): TaskError {
     const message = error instanceof Error ? error.message : String(error);
+    const agentFailure = error instanceof Error ? (error as Error & { agentFailure?: AgentFailure }).agentFailure : undefined;
     if (aborted && this.stopping) {
       return { kind: "interrupted", message: "Hearth 关闭时中止了这一轮执行", recoverable: true, guidance: "重新启动后点击重试" };
     }
     return {
       kind: error instanceof UnsupportedInputError ? "input_unavailable" : "execution_failed",
       message, recoverable: true,
+      ...(agentFailure ? { code: agentFailure.code, ...(agentFailure.retryAfterMs !== undefined ? { retryAfterMs: agentFailure.retryAfterMs } : {}) } : {}),
       guidance: error instanceof UnsupportedInputError ? "接入对应的抓取能力后重试" : "查看运行记录后重试"
     };
   }
@@ -2247,7 +2299,10 @@ export class HearthScheduler {
     attemptedExecutors: Set<ExecutorId>;
     taskRoot: string;
   }): FailureDecision {
-    const canRetry = input.retriesUsed < input.settings.maxSameExecutorRetries;
+    const retryDeadlineMs = 6 * 60 * 60 * 1000;
+    const taskStartedAt = Date.parse(input.task.createdAt);
+    const retryWindowOpen = !Number.isFinite(taskStartedAt) || Date.now() - taskStartedAt < retryDeadlineMs;
+    const canRetry = input.retriesUsed < input.settings.maxSameExecutorRetries && retryWindowOpen;
     if (input.cause === "transient" && canRetry) {
       return { cause: input.cause, action: "retry_same", targetExecutor: null, autoAllowed: true, highRisk: false, reason: "临时故障，先重试同一执行器" };
     }
@@ -2423,6 +2478,33 @@ export class HearthScheduler {
       this.capture({ ...base, kind: "tool_result", role: "tool", content: event.result.content, provenance, executorEventId: `native:tool:${event.call.id}:finished` });
       return;
     }
+    if (event.type === "tool.orphaned") {
+      this.recordWatchdog(task, run, "tool_orphaned", `${event.name} 在超时后仍未响应中止，可能仍在后台执行`, "warn");
+      this.capture({ ...base, kind: "notice", content: `工具孤儿：${event.name} ${event.message}`, provenance: { source: "native", toolCallId: event.callId, tool: event.name }, executorEventId: `native:tool-orphaned:${event.callId}` });
+      return;
+    }
+    if (event.type === "retry.scheduled") {
+      this.capture({ ...base, kind: "notice", content: `模型暂时不可用（${event.code}），第 ${event.attempt} 次重试将在 ${Math.ceil(event.delayMs / 1000)} 秒后开始`, provenance: { source: "native", attempt: event.attempt, delayMs: event.delayMs, code: event.code }, executorEventId: `native:retry:${event.attempt}:scheduled` });
+      return;
+    }
+    if (event.type === "retry.started") {
+      this.capture({ ...base, kind: "notice", content: `第 ${event.attempt} 次模型重试开始`, provenance: { source: "native", attempt: event.attempt }, executorEventId: `native:retry:${event.attempt}:started` });
+      return;
+    }
+    if (event.type === "stall.warned") {
+      this.recordWatchdog(task, run, "run_stalled_warning", `主运行已 ${Math.round(event.idleMs / 60000)} 分钟没有进展`, "warn");
+      this.capture({ ...base, kind: "notice", content: `主运行可能停滞：${Math.round(event.idleMs / 60000)} 分钟无进展`, provenance: { source: "native", idleMs: event.idleMs }, executorEventId: `native:stall:warned:${event.idleMs}` });
+      return;
+    }
+    if (event.type === "stall.detected") {
+      this.recordWatchdog(task, run, "run_stalled", `主运行已 ${Math.round(event.idleMs / 60000)} 分钟没有进展，已中止`, "pause");
+      this.capture({ ...base, kind: "notice", content: `主运行停滞，已中止：${Math.round(event.idleMs / 60000)} 分钟无进展`, provenance: { source: "native", idleMs: event.idleMs }, executorEventId: `native:stall:detected:${event.idleMs}` });
+      return;
+    }
+    if (event.type === "journal.failed") {
+      this.capture({ ...base, kind: "notice", content: `运行日志写入失败：${event.message}`, provenance: { source: "native" }, executorEventId: "native:journal-failed" });
+      return;
+    }
     if (event.type === "checkpoint.created") {
       this.capture({ ...base, kind: "checkpoint", content: `${event.kind} checkpoint #${event.seq}`, provenance: { source: "native", seq: event.seq, checkpointKind: event.kind }, executorEventId: `native:checkpoint:${event.seq}:${event.kind}` });
       return;
@@ -2441,6 +2523,23 @@ export class HearthScheduler {
     }
     if (event.type === "notice") {
       this.capture({ ...base, kind: "notice", content: event.message, provenance: { source: "native" }, executorEventId: `native:notice:${createHash("sha256").update(event.message).digest("hex").slice(0, 16)}` });
+    }
+  }
+
+  private recordWatchdog(task: TaskRecord, run: RunRecord, reason: string, detail: string, action: "warn" | "pause" | "cancel" | "handoff"): void {
+    try {
+      this.service.store.recordWatchdogEvent({
+        id: `watchdog-${randomUUID()}`,
+        taskId: task.id,
+        runId: run.id,
+        reason,
+        detail,
+        action,
+        evidenceRefs: [],
+        createdAt: new Date().toISOString()
+      });
+    } catch {
+      // Watchdog persistence is best effort; the same signal is captured in context.
     }
   }
 

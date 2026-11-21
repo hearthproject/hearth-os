@@ -138,7 +138,31 @@ HTML 转 Markdown 时会删掉脚本、样式、导航、页脚、表单等噪�
 
 ---
 
-## 9. 与其它模块的分界
+## 9. 长跑与恢复（2026-11-21 新增）
+
+长任务不再只依赖「最后一份全量检查点」，而是有三层底座：
+
+| 层 | 位置 | 作用 |
+|---|---|---|
+| 追加日志 | `.hearth/journals/<runId>/events.jsonl` | 每轮消息、工具调用/结果、压缩、重试、停滞与目标轮次都按 `seq` 追加；默认 32 MB 分段，启动时自动截掉崩溃留下的半行 |
+| 检查点 | `.hearth/checkpoints/<runId>/` | 周期性全量快照；有 journal 时默认每 5 轮或 20 次工具调用写一次，压缩/结束/预算/等待输入等关键节点强制写 |
+| 检查点证明 | `run_checkpoints.proof` | 记录权限摘要、工作区摘要、未完成 effect，以及对应的 `journalSeq`，恢复前逐项校验 |
+
+恢复顺序是：先校验最新检查点的 SHA-256 与权限摘要，再从 `journalSeq` 之后回放消息和工具结果。回放发现未完成工具时：
+
+- `read`：合成一条「结果未知，需要时重试」的工具消息。
+- `local_write`：额外注入 `<resume_reconciliation>`，要求先核对工作区再决定是否重试。
+- `external_write` / `destructive` / `unknown`：直接拒绝自动恢复，要求先对账，避免重复扣款、重复发消息或重复删除。
+
+模型失败使用 provider 级重试策略：按 HTTP 状态与错误码分类，指数退避叠加 `Retry-After`，每次等待先写 `retry.scheduled` 事件；默认 8 次，重试窗口 6 小时。工具超时改为协作式取消：先 abort，再给 5 秒收尾；仍不返回则返回 `TOOL_TIMEOUT` 并标记 orphan，调度器写入 `watchdog_events`。主运行另有 10 分钟告警 / 30 分钟中止的停滞看门狗。
+
+任务级还有两个正交机制：`goal.json` 的持久目标会驱动 goal round（默认最多 256 轮，有工具进展时重置连续无工具计数）；原生执行器按代码、研究、文档、桌面、通用五种 TaskProfile 选择工具超时、并行度与提示词，不再把所有任务都按代码任务跑。
+
+排障时先看 journal 的 `run.end` 与最后一个 `tool.call`，再看检查点 proof 的 `journalSeq`，最后看 `watchdog_events` 和 `task.retry.scheduled` 事件。不要手工删除 journal 目录来「修复」无法恢复的任务；这会让本地写入的中间状态失去唯一证据。
+
+---
+
+## 10. 与其它模块的分界
 
 | 方向 | 内容 |
 |---|---|

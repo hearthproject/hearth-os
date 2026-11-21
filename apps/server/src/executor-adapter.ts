@@ -1,5 +1,6 @@
 import type {
   AgentCheckpoint,
+  AgentFailure,
   AgentMessage,
   AgentResumeState,
   AgentTool,
@@ -21,6 +22,7 @@ import type {
 import type { CodexRunOptions, CodexRunResult } from "@hearth/codex-executor";
 import { runDeepSeekHarness, type DeepSeekHarnessRunOptions, type DeepSeekHarnessRunResult, type DshApprovalOutcome, type DshApprovalRequest, type DshContextEvent } from "@hearth/deepseek-executor";
 import { executorHome } from "./executor-runtime.ts";
+import { journalPathFor } from "@hearth/agent-runtime";
 import type { ModelSettings } from "./model-settings.ts";
 import { nativePermissionsFor, withExtraToolPermissions, type NativeRunOptions, type NativeRunResult } from "./native-executor.ts";
 import type { PreparedWorkspace } from "./workspace.ts";
@@ -41,6 +43,7 @@ export interface ExecutionOutcome {
   label: string;
   question: string | null;
   resume?: AgentResumeState;
+  failure?: AgentFailure;
   budgetExhaustion?: Pick<BudgetExhaustion, "dimension" | "limit">;
 }
 
@@ -130,6 +133,10 @@ export class NativeExecutorAdapter implements ExecutorAdapter {
       permissions,
       budget: input.budget,
       signal: input.signal,
+      runId: input.run.id,
+      journalPath: journalPathFor(input.prepared.root, input.run.id),
+      goalRoot: input.prepared.root,
+      checkpointPolicy: { everyTurns: 5, everyToolCalls: 20, maxSnapshots: 40 },
       ...(resumable ? { resume: resumable } : {}),
       ...(input.extraNativeTools?.length ? { extraTools: input.extraNativeTools } : {}),
       ...(input.steering ? { steering: input.steering } : {}),
@@ -149,6 +156,7 @@ export class NativeExecutorAdapter implements ExecutorAdapter {
       threadId: null,
       label: `native / ${input.nativeSettings.model}`,
       question: outcome.question,
+      ...(outcome.failure ? { failure: outcome.failure } : {}),
       ...(outcome.budgetExhaustion ? { budgetExhaustion: outcome.budgetExhaustion } : {}),
       ...(outcome.messages
         ? { resume: { messages: outcome.messages, usage: outcome.usage, turns: outcome.turns, toolCalls: outcome.toolCalls } }

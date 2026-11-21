@@ -99,7 +99,7 @@ async function streamOpenAiChatTurn(
     body: requestBody,
     signal: withTimeout(options.signal, options.timeoutMs ?? 180_000)
   });
-  if (!response.ok) throw apiError(response.status, await readJson(response));
+  if (!response.ok) throw apiError(response.status, await readJson(response), response.headers.get("retry-after"));
   if (!response.body) throw new ModelClientError("EMPTY_RESPONSE", "模型服务没有返回内容");
 
   const contentType = response.headers.get("content-type") ?? "";
@@ -218,7 +218,7 @@ async function streamResponsesTurn(
     }),
     signal: withTimeout(options.signal, options.timeoutMs ?? 180_000)
   });
-  if (!response.ok) throw apiError(response.status, await readJson(response));
+  if (!response.ok) throw apiError(response.status, await readJson(response), response.headers.get("retry-after"));
 
   let content = "";
   let usage: CompleteResult["usage"] = null;
@@ -313,7 +313,7 @@ async function streamAnthropicTurn(
     }),
     signal: withTimeout(options.signal, options.timeoutMs ?? 180_000)
   });
-  if (!response.ok) throw apiError(response.status, await readJson(response));
+  if (!response.ok) throw apiError(response.status, await readJson(response), response.headers.get("retry-after"));
 
   let content = "";
   let usage: CompleteResult["usage"] = null;
@@ -405,7 +405,7 @@ async function streamGeminiTurn(
     body: JSON.stringify(body),
     signal: withTimeout(options.signal, options.timeoutMs ?? 180_000)
   });
-  if (!response.ok) throw apiError(response.status, await readJson(response));
+  if (!response.ok) throw apiError(response.status, await readJson(response), response.headers.get("retry-after"));
 
   let content = "";
   let usage: CompleteResult["usage"] = null;

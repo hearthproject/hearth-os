@@ -29,6 +29,21 @@ describe("failure policy", () => {
     expect(classifyFailureClass({ message: "unexpected null" })).toBe("internal");
   });
 
+  it("maps structured runtime codes before message heuristics", () => {
+    expect(classifyFailureClass({ message: "opaque provider body", code: "MODEL_RATE_LIMIT" })).toBe("rate_limit");
+    expect(classifyFailureClass({ message: "opaque", code: "MODEL_TIMEOUT" })).toBe("timeout");
+    expect(classifyFailureClass({ message: "opaque", code: "STALLED" })).toBe("timeout");
+    expect(classifyFailureClass({ message: "opaque", code: "SANDBOX_DENIED" })).toBe("policy_denied");
+    expect(classifyFailureClass({ message: "opaque", code: "MODEL_AUTH" })).toBe("auth");
+  });
+
+  it("takes the larger of backoff and Retry-After", () => {
+    const disposition = decideDisposition({ failure: "rate_limit", attempt: 1, maxAttempts: 3, retryAfterMs: 90_000 });
+    expect(disposition).toMatchObject({ type: "retry", afterMs: 90_000, attempt: 2 });
+    expect(decideDisposition({ failure: "timeout", attempt: 1, maxAttempts: 3, retryAfterMs: 1_000 }))
+      .toMatchObject({ type: "retry", afterMs: 1_000 });
+  });
+
   it("stops user cancellation and asks for policy or auth intervention", () => {
     expect(decideDisposition({ failure: "user_cancelled", attempt: 1 })).toMatchObject({ type: "stop" });
     expect(decideDisposition({ failure: "policy_denied", attempt: 1 })).toMatchObject({ type: "ask_user" });
