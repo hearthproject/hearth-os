@@ -85,6 +85,22 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     ...(options.retryDelayMs !== undefined ? { baseDelayMs: options.retryDelayMs } : {}),
     ...(options.retryPolicy ?? {})
   });
+  const toolRetryInput = options.toolRetryPolicy ?? {};
+  const maxRetries = toolRetryInput.maxRetries ?? DEFAULT_TOOL_RETRY_POLICY.maxRetries;
+  const baseDelayMs = toolRetryInput.baseDelayMs ?? DEFAULT_TOOL_RETRY_POLICY.baseDelayMs;
+  const maxDelayMs = toolRetryInput.maxDelayMs ?? DEFAULT_TOOL_RETRY_POLICY.maxDelayMs;
+  const jitter = toolRetryInput.jitter ?? DEFAULT_TOOL_RETRY_POLICY.jitter;
+  const toolRetryPolicy = {
+    maxRetries: Number.isFinite(maxRetries) ? Math.max(0, Math.min(20, Math.floor(maxRetries))) : DEFAULT_TOOL_RETRY_POLICY.maxRetries,
+    baseDelayMs: Number.isFinite(baseDelayMs) ? Math.max(0, Math.min(10_000, Math.floor(baseDelayMs))) : DEFAULT_TOOL_RETRY_POLICY.baseDelayMs,
+    maxDelayMs: Number.isFinite(maxDelayMs) ? Math.max(1_000, Math.min(600_000, Math.floor(maxDelayMs))) : DEFAULT_TOOL_RETRY_POLICY.maxDelayMs,
+    jitter: Math.max(0, Math.min(1, Number.isFinite(jitter) ? jitter : DEFAULT_TOOL_RETRY_POLICY.jitter)),
+    retryableCodes: Array.isArray(toolRetryInput.retryableCodes) && toolRetryInput.retryableCodes.length > 0
+      ? [...toolRetryInput.retryableCodes]
+      : [...DEFAULT_TOOL_RETRY_POLICY.retryableCodes]
+  };
+  const circuitBreakerInput = options.toolCircuitBreaker?.maxConsecutiveFailures ?? 5;
+  const circuitBreakerThreshold = Math.max(1, Math.min(50, Number.isFinite(circuitBreakerInput) ? Math.floor(circuitBreakerInput) : 5));
   const runController = new AbortController();
   const externalSignal = options.signal;
   if (externalSignal) {
@@ -648,7 +664,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         mode: options.mode ?? "build",
         ...(options.sandbox ? { sandbox: options.sandbox } : {}),
         ...(options.verifyGoalCompletion ? { verifyGoalCompletion: options.verifyGoalCompletion } : {})
-      }, options.toolTimeoutMs ?? 120_000, signal, DEFAULT_TOOL_RETRY_POLICY);
+        }, options.toolTimeoutMs ?? 120_000, signal, toolRetryPolicy);
       result = outcome.result;
       toolRetries = outcome.retries;
       toolTotalDurationMs = outcome.totalDurationMs;
@@ -997,7 +1013,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
             mode: options.mode ?? "build",
             ...(options.sandbox ? { sandbox: options.sandbox } : {}),
             ...(options.verifyGoalCompletion ? { verifyGoalCompletion: options.verifyGoalCompletion } : {})
-          }, options.toolTimeoutMs ?? 120_000, signal, DEFAULT_TOOL_RETRY_POLICY);
+          }, options.toolTimeoutMs ?? 120_000, signal, toolRetryPolicy);
           result = outcome.result ?? { content: "工具执行未返回结果", isError: true };
           toolRetries = outcome.retries;
           toolTotalDurationMs = outcome.totalDurationMs;
@@ -1083,7 +1099,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       }
       if (result.isError) {
         consecutiveToolFailures += 1;
-        if (consecutiveToolFailures >= 5) {
+        if (consecutiveToolFailures >= circuitBreakerThreshold) {
           emit({ type: "notice", message: "连续 5 次工具调用失败，已触发熔断器，停止执行以避免浪费预算。" });
           await checkpoint("tool");
           const checkpointFailure = currentCheckpointFailure();

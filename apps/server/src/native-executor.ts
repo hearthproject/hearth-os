@@ -87,6 +87,16 @@ export interface NativeRunOptions {
   extraTools?: AgentTool[];
   steering?: () => AgentMessage[];
   onContextSummary?: (messages: AgentMessage[], signal: AbortSignal) => Promise<ContextSummary>;
+  toolRetryPolicy?: {
+    maxRetries?: number;
+    baseDelayMs?: number;
+    maxDelayMs?: number;
+    jitter?: number;
+    retryableCodes?: string[];
+  };
+  toolCircuitBreaker?: {
+    maxConsecutiveFailures?: number;
+  };
 }
 
 export interface NativeRunResult {
@@ -234,6 +244,8 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     maxParallelTools: taskProfile.maxParallelTools,
     keepRecentToolOutputs: taskProfile.keepRecentToolOutputs,
     maxGoalRounds: options.maxGoalRounds ?? taskProfile.maxGoalRounds,
+    ...(options.toolRetryPolicy ? { toolRetryPolicy: options.toolRetryPolicy } : {}),
+    ...(options.toolCircuitBreaker ? { toolCircuitBreaker: options.toolCircuitBreaker } : {}),
     ...(coding ? { projectInstructions: instructionsBlock(discoverInstructions(options.prepared.root)) } : {}),
     ...(coding ? { reminders: CODING_REMINDERS } : {}),
     signal: options.signal,

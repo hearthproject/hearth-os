@@ -345,6 +345,18 @@ export interface AgentRuntimeOptions {
   maxToolChars?: number;
   /** Above this count, only core tools are sent directly and tool_search is added. */
   maxDirectTools?: number;
+  /** Per-tool retry policy. Defaults to 3 retries with exponential backoff for transient tool failures. */
+  toolRetryPolicy?: {
+    maxRetries?: number;
+    baseDelayMs?: number;
+    maxDelayMs?: number;
+    jitter?: number;
+    retryableCodes?: string[];
+  };
+  /** Circuit breaker for consecutive tool failures. Defaults to 5 consecutive failures before stopping the run. */
+  toolCircuitBreaker?: {
+    maxConsecutiveFailures?: number;
+  };
   hooks?: AgentHookDefinition[];
   hookTimeoutMs?: number;
   projectInstructions?: string;
