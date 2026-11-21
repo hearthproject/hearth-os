@@ -540,7 +540,8 @@ async function removeWorkspace(root: string): Promise<void> {
       rmSync(root, { recursive: true, force: true });
       return;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EBUSY" || attempt === 24) throw error;
+      const code = (error as NodeJS.ErrnoException).code;
+      if (!["EBUSY", "ENOTEMPTY", "EPERM", "EACCES"].includes(code ?? "") || attempt === 24) throw error;
       await delay(250);
     }
   }
