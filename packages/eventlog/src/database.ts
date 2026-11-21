@@ -991,7 +991,23 @@ export class HearthStore {
     this.db.exec("PRAGMA journal_mode = WAL;");
     this.db.exec("PRAGMA foreign_keys = ON;");
     this.db.exec("PRAGMA busy_timeout = 5000;");
-    this.db.exec(SCHEMA);
+    // `SCHEMA` is a few dozen CREATE TABLE/INDEX statements. Re-running it on
+    // every boot costs parsing time and, on a fresh database, hundreds of
+    // milliseconds of fsyncs. Build it only when the database is behind (or
+    // new), and wrap that one-time build in a transaction.
+    const schemaVersion = Number(
+      (this.db.prepare("PRAGMA user_version").get() as { user_version?: number } | undefined)?.user_version ?? 0
+    );
+    if (schemaVersion < CURRENT_SCHEMA_VERSION) {
+      this.db.exec("BEGIN");
+      try {
+        this.db.exec(SCHEMA);
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
     this.migrate();
     this.instanceId = this.ensureInstanceId();
   }

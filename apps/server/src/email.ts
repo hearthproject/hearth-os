@@ -1,7 +1,4 @@
 import { randomUUID } from "node:crypto";
-import nodemailer from "nodemailer";
-import { ImapFlow } from "imapflow";
-import { simpleParser } from "mailparser";
 import type { HearthStore } from "@hearth/eventlog";
 import type { SecretBox } from "./secrets.ts";
 import type { SourceRegistry } from "./sources.ts";
@@ -119,8 +116,8 @@ export interface MailSyncResult {
   changed: number;
 }
 
-export type MailSmtpFactory = (account: MailAccountRuntime) => MailSmtpTransport;
-export type MailImapFactory = (account: MailAccountRuntime) => MailImapTransport;
+export type MailSmtpFactory = (account: MailAccountRuntime) => MailSmtpTransport | Promise<MailSmtpTransport>;
+export type MailImapFactory = (account: MailAccountRuntime) => MailImapTransport | Promise<MailImapTransport>;
 
 export interface MailTestResult {
   ok: boolean;
@@ -292,7 +289,7 @@ export class EmailService {
   async syncInbox(id: string, limit = 20): Promise<MailSyncResult> {
     if (!this.sources) throw new MailError("MAIL_SOURCES_UNAVAILABLE", "来源服务尚未启动", 503);
     const account = this.accounts.runtime(id);
-    const transport = this.imapFactory(account);
+    const transport = await this.imapFactory(account);
     let messages: MailImapMessage[] = [];
     try {
       await transport.connect();
@@ -367,7 +364,7 @@ export class EmailService {
 
   async send(accountId: string, message: Omit<MailMessage, "from">): Promise<MailSendResult> {
     const account = this.accounts.runtime(accountId);
-    const transport = this.smtpFactory(account);
+    const transport = await this.smtpFactory(account);
     try {
       const result = await transport.sendMail({ ...message, from: account.fromName ? `${account.fromName} <${account.fromAddress}>` : account.fromAddress });
       return {
@@ -389,7 +386,7 @@ export class EmailService {
     const started = Date.now();
     let transport: MailSmtpTransport | null = null;
     try {
-      transport = this.smtpFactory(account);
+      transport = await this.smtpFactory(account);
       await transport.verify();
       return { ok: true, error: null, elapsedMs: Date.now() - started };
     } catch (error) {
@@ -407,7 +404,7 @@ export class EmailService {
     const started = Date.now();
     let transport: MailImapTransport | null = null;
     try {
-      transport = this.imapFactory(account);
+      transport = await this.imapFactory(account);
       await transport.connect();
       return { ok: true, error: null, elapsedMs: Date.now() - started };
     } catch (error) {
@@ -422,7 +419,8 @@ export class EmailService {
   }
 }
 
-function defaultSmtpFactory(account: MailAccountRuntime): MailSmtpTransport {
+async function defaultSmtpFactory(account: MailAccountRuntime): Promise<MailSmtpTransport> {
+  const { default: nodemailer } = await import("nodemailer");
   const transport = nodemailer.createTransport({
     host: account.smtp.host,
     port: account.smtp.port,
@@ -441,7 +439,8 @@ function defaultSmtpFactory(account: MailAccountRuntime): MailSmtpTransport {
   };
 }
 
-function defaultImapFactory(account: MailAccountRuntime): MailImapTransport {
+async function defaultImapFactory(account: MailAccountRuntime): Promise<MailImapTransport> {
+  const [{ ImapFlow }, { simpleParser }] = await Promise.all([import("imapflow"), import("mailparser")]);
   const client = new ImapFlow({
     host: account.imap.host,
     port: account.imap.port,

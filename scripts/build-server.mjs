@@ -1,5 +1,5 @@
 import { build } from "esbuild";
-import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,18 +24,43 @@ const result = await build({
   format: "esm",
   target: "node22",
   minify: true,
+  // Split the graph into lazy chunks. playwright-core, the Feishu SDK, the
+  // transformers runtime and the document extractors are only reached through
+  // dynamic imports, so keeping them out of the startup module removes ~10 MiB
+  // from the eager parse path.
+  splitting: true,
+  chunkNames: "chunk-[hash]",
   external: ["@openai/codex-win32-x64"],
   legalComments: "none",
   metafile: true,
   plugins: [stubBidiOnlyModules()],
-  banner: {
-    js: 'import { createRequire as __hearthCreateRequire } from "node:module"; const require = __hearthCreateRequire(import.meta.url);'
-  },
   logLevel: "info"
 });
 
 renameSync(join(outputRoot, "index.mjs"), join(outputRoot, "server.mjs"));
 renameSync(join(outputRoot, "mcp-main.mjs"), join(outputRoot, "library-mcp.mjs"));
+
+// With `splitting: true`, esbuild hoists CJS interop into shared chunks. Only
+// the entry used to receive the banner-provided `require`, so every chunk that
+// touches a CJS dependency failed with "Dynamic require of ... is not
+// supported". Give each emitted module its own module-scoped createRequire.
+const REQUIRE_SHIM =
+  'import{createRequire as __hearthCreateRequire}from"node:module";const require=__hearthCreateRequire(import.meta.url);\n';
+
+function addRequireShim() {
+  let patched = 0;
+  for (const name of readdirSync(outputRoot)) {
+    if (!name.endsWith(".mjs") || name === "pdf.worker.mjs") continue;
+    const file = join(outputRoot, name);
+    const source = readFileSync(file, "utf8");
+    if (source.startsWith(REQUIRE_SHIM)) continue;
+    writeFileSync(file, REQUIRE_SHIM + source, "utf8");
+    patched += 1;
+  }
+  return patched;
+}
+
+const shimmed = addRequireShim();
 
 // playwright-core ships an internal coreBundle that statically requires its
 // optional WebDriver BiDi mapper. Hearth only speaks CDP to Chromium, and

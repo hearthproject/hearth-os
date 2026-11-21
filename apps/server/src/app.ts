@@ -4,7 +4,7 @@ import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import fastifyStatic from "@fastify/static";
-import Fastify, { type FastifyReply } from "fastify";
+import Fastify, { LogController, type FastifyReply } from "fastify";
 import type { EventEnvelope, ExecutorHealth, ExecutorId, ExecutorView, TaskRecord } from "@hearth/core";
 import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DELEGATION_WORKSPACE_POLICIES, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, EXECUTOR_IDS, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_ORIGINS, MEMORY_RETENTIONS, MEMORY_SENSITIVITIES, MEMORY_TAINT_STATES, MEMORY_TIERS, MEMORY_TRUST_LEVELS, RECONCILE_STATUSES, RUN_STATUSES, SANDBOX_MODES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
@@ -903,11 +903,17 @@ export async function buildServer(options: BuildServerOptions = {}) {
     maintenance.start();
   }
   if (options.startMailSync) mail.start();
+  const desktopMode = process.env.HEARTH_DESKTOP === "1";
   const app = Fastify({
-    logger: options.logger ?? false,
+    // Desktop builds still get diagnostic logs, but per-request info lines are
+    // piped to the rotating file logger and cost real I/O on every call.
+    logger: options.logger ? { level: process.env.HEARTH_LOG_LEVEL ?? "info" } : false,
+    ...(desktopMode
+      ? { logController: new LogController({ disableRequestLogging: true }) }
+      : {}),
     bodyLimit: 8_000_000
   });
-  if (process.env.HEARTH_DESKTOP === "1") {
+  if (desktopMode) {
     const desktopCsp = [
       "default-src 'self'",
       "script-src 'self'",

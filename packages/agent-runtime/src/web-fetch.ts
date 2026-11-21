@@ -78,7 +78,7 @@ export async function fetchWebSnapshot(rawUrl: string, options: FetchWebOptions)
     if (isChallengePage(html)) {
       throw new WebInputError("access_challenge", `网页要求登录、验证码或浏览器验证：${current.href}`, { status: response.status, finalUrl: current.href });
     }
-    const extracted = extractMarkdown(html, current.href);
+    const extracted = await extractMarkdown(html, current.href);
     if (!extracted.markdown) throw new WebInputError("empty_content", `网页没有可提取的正文：${current.href}`);
     return {
       requestedUrl: rawUrl,

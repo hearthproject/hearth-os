@@ -1,21 +1,22 @@
 import { existsSync } from "node:fs";
 import { extname, join } from "node:path";
-import * as cheerio from "cheerio";
-import {
-  AlignmentType,
-  Document,
-  HeadingLevel,
-  LevelFormat,
-  Packer,
-  Paragraph,
-  TextRun,
-  type IParagraphOptions
-} from "docx";
-import ExcelJS from "exceljs";
-import mammoth from "mammoth";
-import TurndownService from "turndown";
-import { gfm } from "turndown-plugin-gfm";
+import type { IParagraphOptions } from "docx";
 import type { SourceCoverage } from "@hearth/core";
+
+// Document tooling is only needed when a task actually reads or writes a
+// spreadsheet, docx or HTML page. Keeping these behind dynamic imports removes
+// several megabytes from the server's eager startup module.
+const loadCheerio = () => import("cheerio");
+const loadExcelJs = () => import("exceljs").then((module) => module.default);
+const loadMammoth = () => import("mammoth").then((module) => module.default);
+const loadDocx = () => import("docx");
+const loadTurndown = async () => {
+  const [{ default: TurndownService }, { gfm }] = await Promise.all([
+    import("turndown"),
+    import("turndown-plugin-gfm")
+  ]);
+  return { TurndownService, gfm };
+};
 
 const MAX_EXTRACTED_BYTES = 5 * 1024 * 1024;
 const MAX_SHEET_ROWS = 5_000;
@@ -65,6 +66,7 @@ export async function extractSourceBytes(bytes: Uint8Array, fileName: string): P
 export async function writeSpreadsheetBytes(sheets: SpreadsheetSheetInput[]): Promise<Uint8Array> {
   if (sheets.length === 0) throw new Error("至少需要一个工作表");
   if (sheets.length > 50) throw new Error("工作表数量不能超过 50");
+  const ExcelJS = await loadExcelJs();
   const workbook = new ExcelJS.Workbook();
   const names = new Set<string>();
   for (const input of sheets) {
@@ -86,7 +88,16 @@ export async function writeSpreadsheetBytes(sheets: SpreadsheetSheetInput[]): Pr
 
 export async function writeDocumentBytes(title: string | null, blocks: DocumentBlockInput[]): Promise<Uint8Array> {
   if (blocks.length > 5_000) throw new Error("文档段落数量不能超过 5000");
-  const paragraphs: Paragraph[] = [];
+  const { AlignmentType, Document, HeadingLevel, LevelFormat, Packer, Paragraph, TextRun } = await loadDocx();
+  const headingLevel = (level = 1) => {
+    if (level <= 1) return HeadingLevel.HEADING_1;
+    if (level === 2) return HeadingLevel.HEADING_2;
+    if (level === 3) return HeadingLevel.HEADING_3;
+    if (level === 4) return HeadingLevel.HEADING_4;
+    if (level === 5) return HeadingLevel.HEADING_5;
+    return HeadingLevel.HEADING_6;
+  };
+  const paragraphs: InstanceType<typeof Paragraph>[] = [];
   if (title?.trim()) {
     paragraphs.push(new Paragraph({ heading: HeadingLevel.TITLE, children: [new TextRun(title.trim())] }));
   }
@@ -119,15 +130,6 @@ export async function writeDocumentBytes(title: string | null, blocks: DocumentB
   return new Uint8Array(await Packer.toBuffer(document));
 }
 
-function headingLevel(level = 1): (typeof HeadingLevel)[keyof typeof HeadingLevel] {
-  if (level <= 1) return HeadingLevel.HEADING_1;
-  if (level === 2) return HeadingLevel.HEADING_2;
-  if (level === 3) return HeadingLevel.HEADING_3;
-  if (level === 4) return HeadingLevel.HEADING_4;
-  if (level === 5) return HeadingLevel.HEADING_5;
-  return HeadingLevel.HEADING_6;
-}
-
 function extractText(text: string): ExtractionResult {
   const normalized = text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").trimEnd();
   if (!normalized.trim()) throw new Error("来源文件没有可提取的正文");
@@ -145,8 +147,8 @@ function extractJson(text: string, fileName: string): ExtractionResult {
   return finish(markdown, fileName.replace(/\.[^.]+$/, ""), []);
 }
 
-function extractHtml(text: string, fileName: string): ExtractionResult {
-  const extracted = extractMarkdown(text, "https://local.invalid/");
+async function extractHtml(text: string, fileName: string): Promise<ExtractionResult> {
+  const extracted = await extractMarkdown(text, "https://local.invalid/");
   if (!extracted.markdown.trim()) throw new Error("HTML 来源没有可提取的正文");
   return finish(extracted.markdown, extracted.title === "未命名网页" ? fileName.replace(/\.[^.]+$/, "") : extracted.title, []);
 }
@@ -223,18 +225,20 @@ async function extractPdf(bytes: Uint8Array, fileName: string): Promise<Extracti
 }
 
 async function extractDocx(bytes: Uint8Array, fileName: string): Promise<ExtractionResult> {
+  const mammoth = await loadMammoth();
   const result = await mammoth.convertToHtml(
     { buffer: Buffer.from(bytes) },
     { convertImage: mammoth.images.imgElement(async () => ({ src: "" })) }
   );
   const html = result.value.replace(/<img\b[^>]*>/gi, "");
-  const extracted = extractMarkdown(html, "https://local.invalid/");
+  const extracted = await extractMarkdown(html, "https://local.invalid/");
   if (!extracted.markdown.trim()) throw new Error("DOCX 来源没有可提取的正文");
   const gaps = result.messages.filter((message) => message.type === "warning" || message.type === "error").map((message) => message.message);
   return finish(extracted.markdown, extracted.title === "未命名网页" ? fileName.replace(/\.[^.]+$/, "") : extracted.title, gaps);
 }
 
 async function extractXlsx(bytes: Uint8Array, fileName: string): Promise<ExtractionResult> {
+  const ExcelJS = await loadExcelJs();
   const workbook = new ExcelJS.Workbook();
   const workbookBytes = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
   await workbook.xlsx.load(workbookBytes);
@@ -363,7 +367,8 @@ function decodeText(bytes: Uint8Array): string {
   }
 }
 
-export function extractMarkdown(html: string, baseUrl: string): { title: string; markdown: string } {
+export async function extractMarkdown(html: string, baseUrl: string): Promise<{ title: string; markdown: string }> {
+  const cheerio = await loadCheerio();
   const $ = cheerio.load(html);
   const title = ($("meta[property='og:title']").attr("content") || $("title").first().text() || $("h1").first().text() || "")
     .replace(/\s+/g, " ")
@@ -390,6 +395,7 @@ export function extractMarkdown(html: string, baseUrl: string): { title: string;
   const candidates = ["main", "article", "[role='main']", "#main-content", ".markdown-body", ".content", "body"];
   const selected = candidates.map((selector) => $(selector).first()).find((element) => element.length > 0);
   const body = selected?.html() ?? $.root().html() ?? "";
+  const { TurndownService, gfm } = await loadTurndown();
   const turndown = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced", bulletListMarker: "-" });
   turndown.use(gfm);
   turndown.remove(["script", "style", "noscript"]);
