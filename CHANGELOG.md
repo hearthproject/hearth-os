@@ -30,7 +30,8 @@
 ### Windows 原生沙箱
 
 - 新增 `hearth-native.exe`（C# 编译，无第三方运行时）：AppContainer package SID、workspace/temp ACL 白名单、kill-on-close Job Object、父进程 watchdog。
-- `WindowsNativeSandboxProvider` 取代 ACL runner：默认网络拒绝，子进程只能读写工作区与私有 temp；helper 缺失时 fail-closed。
+- `WindowsNativeSandboxProvider` 取代 ACL runner：默认网络拒绝，子进程只能读写工作区与私有 temp；声明 `networkHosts` 时 fail-closed，helper 缺失时同样 fail-closed。
+- 移除服务端旧 `windows-acl` runner 与测试；新增 `npm run test:sandbox` 与 Windows CI 门禁。
 - 打包脚本把 helper 复制到桌面资源目录；新增 8 项 Windows 沙箱测试，覆盖越界写、只读、junction 逃逸、密钥过滤、网络拒绝和 Job 关闭杀子进程。
 
 ## 0.3.2 - 2026-11-21

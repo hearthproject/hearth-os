@@ -1314,6 +1314,17 @@ async function prepareNativeSandbox(options: NativeRunOptions, permissions: Task
     appendSandboxAudit(options.prepared, options.task.id, { type: "sandbox.unavailable", backend: "none", mode: "policy", reason: "no-policy" });
     return undefined;
   }
+  if (selection.policy.networkHosts.length > 0) {
+    appendSandboxAudit(options.prepared, options.task.id, {
+      type: "sandbox.unavailable",
+      backend: "windows-native",
+      mode: selection.mode,
+      reason: "net-allowlist-unimplemented"
+    });
+    throw new SandboxUnavailableError(
+      "Windows native sandbox 尚未实现 net-allowlist；请移除此任务的 networkHosts，或显式关闭沙箱作为降级"
+    );
+  }
   permissions.sandboxMode = selection.mode;
   defaultWindowsSandbox ??= new WindowsNativeSandboxProvider();
   const provider = defaultWindowsSandbox;
@@ -1329,13 +1340,12 @@ async function prepareNativeSandbox(options: NativeRunOptions, permissions: Task
     throw error;
   }
   const runtime: SandboxRuntime = { provider, policy: selection.policy };
-  const networkEnforcement = selection.policy.networkHosts.length === 0 ? "full" : "none";
   appendSandboxAudit(options.prepared, options.task.id, {
     type: "sandbox.selected",
     backend: provider.id,
     mode: selection.policy.mode,
     enforcement: "full",
-    networkEnforcement,
+    networkEnforcement: "full",
     workspaceRoot: selection.policy.workspaceRoot,
     tempRoot: selection.policy.tempRoot,
     warnings: selection.warnings
@@ -1351,7 +1361,7 @@ async function prepareNativeSandbox(options: NativeRunOptions, permissions: Task
         backend: provider.id,
         mode: selection.policy.mode,
         enforcement: "full",
-        networkEnforcement
+        networkEnforcement: "full"
       }
     }
   });

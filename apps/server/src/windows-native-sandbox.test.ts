@@ -60,6 +60,16 @@ describe("WindowsNativeSandboxProvider", () => {
     expect(confined.networkEnforcement).toBe("full");
   });
 
+  it("refuses net-allowlist instead of silently removing network access", async () => {
+    const provider = new WindowsNativeSandboxProvider({ helperPath: process.execPath, probe: false });
+    const policy = {
+      ...policyFor("C:\\work", "C:\\temp"),
+      networkHosts: ["example.com"]
+    };
+    await expect(provider.confine({ argv: ["C:\\Windows\\System32\\cmd.exe", "/c", "exit 0"], cwd: policy.workspaceRoot, policy }))
+      .rejects.toThrow(/net-allowlist/);
+  });
+
   it.runIf(hasHelper)("allows a workspace write in workspace-write mode", async () => {
     const root = mkdtempSync(join(tmpdir(), "hearth-native-test-"));
     const workspace = join(root, "ws");

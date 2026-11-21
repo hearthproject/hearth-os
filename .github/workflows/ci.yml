@@ -73,6 +73,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Build native Windows helper
+        run: npm run build:native
+
+      - name: Native sandbox tests
+        shell: pwsh
+        run: |
+          npm run test:sandbox 2>&1 | Tee-Object -FilePath sandbox.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Long-run acceptance matrix
         shell: pwsh
         run: |
@@ -86,6 +95,7 @@ jobs:
           name: longrun-report
           path: |
             longrun.log
+            sandbox.log
             docs/evaluation/harness-longrun-*.md
           if-no-files-found: ignore
           retention-days: 7

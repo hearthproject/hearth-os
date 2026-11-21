@@ -45,6 +45,11 @@ export class WindowsNativeSandboxProvider implements SandboxProvider {
     if (this.shouldProbe) await this.probe();
     const helper = this.resolveHelper();
     const policy = request.policy;
+    if (policy.networkHosts.length > 0) {
+      throw new SandboxUnavailableError(
+        "Windows native sandbox 尚未实现 net-allowlist；请移除 networkHosts，或显式关闭沙箱作为降级"
+      );
+    }
     const readRoots = new Set<string>(policy.readRoots);
     const writeRoots = policy.writableRoots.filter((root) => root !== policy.workspaceRoot);
     const executableRoot = request.argv[0] ? dirname(request.argv[0]) : null;
@@ -74,7 +79,7 @@ export class WindowsNativeSandboxProvider implements SandboxProvider {
       env: policy.env,
       backend: "windows-acl",
       enforcement: "full",
-      networkEnforcement: policy.networkHosts.length === 0 ? "full" : "none",
+      networkEnforcement: "full",
       denialSignatures: [
         "Access is denied",
         "拒绝访问",

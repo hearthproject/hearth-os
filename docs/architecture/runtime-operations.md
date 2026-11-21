@@ -65,6 +65,6 @@ Windows 单机执行器不再依赖 Node ACL runner。`apps/native/hearth-native
 - `process-info --pid`：返回 PID 与进程创建时间，供宿主租约判断 PID 复用。
 - `sandbox`：创建或复用 AppContainer package SID；只给 workspace、私有 temp、显式 `--read` / `--write` 根授权；用 `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES` 在 AppContainer 中启动子进程；子进程加入 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 的 Job Object；父进程 watchdog 每 500ms 检查 `--parent-pid`，父死即 `TerminateJobObject`。
 
-`WindowsNativeSandboxProvider` 只构造 argv 契约，不复制 Win32 代码。`workspace-write` 给 workspace `(OI)(CI)M`，`read-only` 给 `(OI)(CI)RX`；temp 始终可写；额外写根通过 `--write`，读根通过 `--read`。网络默认拒绝：AppContainer 不申请 `internetClient` capability，因此子进程没有网络身份。helper 缺失、AppContainer 创建失败或 ACL 授权失败都会 fail-closed，不会静默退回完全权限。
+`WindowsNativeSandboxProvider` 只构造 argv 契约，不复制 Win32 代码。`workspace-write` 给 workspace `(OI)(CI)M`，`read-only` 给 `(OI)(CI)RX`；temp 始终可写；额外写根通过 `--write`，读根通过 `--read`。网络默认拒绝：AppContainer 不申请 `internetClient` capability，因此子进程没有网络身份。`net-allowlist` 还没有无管理员权限的可靠实现：任务声明 `networkHosts` 时 provider 直接 fail-closed，不会悄悄给一个“没有网络”的沙箱。helper 缺失、AppContainer 创建失败或 ACL 授权失败同样 fail-closed，不会静默退回完全权限。
 
 沙箱边界是“文件系统 + 进程 + 网络”三层，而不是只限制 shell 命令字符串。junction/symlink 指向工作区外时，目标没有 AppContainer ACE，读写仍会被拒绝。
