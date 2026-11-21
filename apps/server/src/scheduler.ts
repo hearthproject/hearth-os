@@ -9,7 +9,8 @@ import type {
   AgentResumeState,
   AgentToolAuthorization,
   AgentToolAuthorizationRequest,
-  RuntimeEvent
+  RuntimeEvent,
+  SubagentType
 } from "@hearth/agent-runtime";
 import { deserializeAgentState, inspectJournal, journalPathFor } from "@hearth/agent-runtime";
 import type { ApprovalMode, BudgetDimension, BudgetExhaustion, ContextItem, ContextSettings, DelegationJob, DelegationResult, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, RunBudget, RunCheckpointProof, RunCheckpointRecord, RunRecord, TaskError, TaskFollowUpRecord, TaskLease, TaskProgressDetail, TaskRecord } from "@hearth/core";
@@ -58,7 +59,7 @@ import { createPersonalReadTools } from "./personal-tools.ts";
 import { createMailTools } from "./mail-tools.ts";
 import type { EmailService } from "./email.ts";
 import type { OutboxService } from "./outbox.ts";
-import { createAgentTool, createSubagentTool } from "./subagents.ts";
+import { createAgentTool, createSubagentResumeHandler, createSubagentTool } from "./subagents.ts";
 import { createAgentLifecycleTools, SubagentTaskManager } from "./subagent-manager.ts";
 import { createJobTools } from "./job-tools.ts";
 import { OntologyWriter } from "./ontology-writer.ts";
@@ -1801,33 +1802,34 @@ export class HearthScheduler {
         const usedSubagents = this.service.store.listEvents(0, task.id)
           .filter((event) => event.type === "subagent.delegated").length;
         const remainingSubagents = 4 - usedSubagents;
-        if (remainingSubagents > 0) {
-          const subagentTool = process.env.HEARTH_AGENT_TOOL === "0" ? createSubagentTool : createAgentTool;
-          const manager = new SubagentTaskManager(remainingSubagents, join(taskRoot, ".hearth", "subagents", `${runId}.json`));
-          subagentManager = manager;
-          if (subagentTool === createAgentTool) extraNativeTools.push(...createAgentLifecycleTools(manager));
-          controller.signal.addEventListener("abort", () => manager.cancelAll(), { once: true });
-          extraNativeTools.push(subagentTool({
-            task,
-            prepared,
-            settings: nativeSettings!,
-            permissions: nativePermissionsFor(task, prepared),
-            signal: controller.signal,
-            worktrees: this.worktrees,
-            parentWorktree: worktree,
-            maxSubagents: remainingSubagents,
-            manager,
-            onStarted: (info) => {
-              const event = this.service.store.appendEvent({
-                type: "subagent.delegated",
-                taskId,
-                runId,
-                payload: { ...info, at: new Date().toISOString() }
-              });
-              this.service.bus.publish(event);
-            }
-          }));
-        }
+        const subagentTool = process.env.HEARTH_AGENT_TOOL === "0" ? createSubagentTool : createAgentTool;
+        const safeTaskId = task.id.replace(/[^A-Za-z0-9._-]/g, "-") || "task";
+        const manager = new SubagentTaskManager(Math.max(1, remainingSubagents), join(taskRoot, ".hearth", "subagents", `${safeTaskId}.json`));
+        subagentManager = manager;
+        if (subagentTool === createAgentTool) extraNativeTools.push(...createAgentLifecycleTools(manager));
+        controller.signal.addEventListener("abort", () => manager.cancelAll(), { once: true });
+        const subagentOptions = {
+          task,
+          prepared,
+          settings: nativeSettings!,
+          permissions: nativePermissionsFor(task, prepared),
+          signal: controller.signal,
+          worktrees: this.worktrees,
+          parentWorktree: worktree,
+          maxSubagents: remainingSubagents,
+          manager,
+          onStarted: (info: { childId: string; mode: "read-only" | "isolated-write"; title: string; type: SubagentType }) => {
+            const event = this.service.store.appendEvent({
+              type: "subagent.delegated",
+              taskId,
+              runId,
+              payload: { ...info, at: new Date().toISOString() }
+            });
+            this.service.bus.publish(event);
+          }
+        };
+        manager.setResumeHandler(createSubagentResumeHandler(subagentOptions));
+        if (remainingSubagents > 0) extraNativeTools.push(subagentTool(subagentOptions));
       }
       if (executorId === "native" && (this.backgroundTools || subagentManager)) {
         extraNativeTools.push(...createJobTools({

@@ -8,7 +8,7 @@ import type { TaskPermissions, TaskRecord } from "@hearth/core";
 import type { NativeRunOptions, NativeRunResult } from "./native-executor.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import { ProjectService } from "./projects.ts";
-import { createAgentTool, createSubagentTool } from "./subagents.ts";
+import { createAgentTool, createSubagentResumeHandler, createSubagentTool } from "./subagents.ts";
 import { createAgentLifecycleTools, SubagentTaskManager } from "./subagent-manager.ts";
 import { TaskWorktreeService } from "./worktrees.ts";
 
@@ -77,7 +77,7 @@ describe("native subagents", () => {
     expect(options?.permissions?.tools).not.toContain("write_file");
     expect(options?.permissions?.tools).toContain("shell");
     expect(options?.mode).toBe("plan");
-    expect(options?.extraTools).toBeUndefined();
+    expect(options?.extraTools?.some((tool) => tool.definition.name === "delegate_task")).toBe(true);
     expect(output.usage).toMatchObject({ inputTokens: 31, outputTokens: 12 });
   });
 
@@ -105,6 +105,8 @@ describe("native subagents", () => {
     expect(output.metadata).toMatchObject({ subagentType: "explore", agentStatus: "completed" });
     expect(captured[0]?.mode).toBe("plan");
     expect(captured[0]?.task.goal).toBe("找到入口文档并返回行号");
+    expect(captured[0]?.permissions?.tools).toContain("agent");
+    expect(captured[0]?.extraTools?.some((tool) => tool.definition.name === "agent")).toBe(true);
     expect(captured[0]?.prompt).toContain("输出契约");
     const transcriptPath = output.metadata?.transcriptPath;
     expect(transcriptPath && existsSync(transcriptPath)).toBe(true);
@@ -227,6 +229,78 @@ describe("native subagents", () => {
     expect(gitOutput(childRoot, ["log", "-1", "--format=%s"])).toContain("hearth subagent");
   });
 
+  it("validates a child output schema before marking it completed", async () => {
+    const parentWorktree = worktrees.ensure(task);
+    let answer = '{"files":["README.md"],"risk":"low"}';
+    const tool = createAgentTool({
+      task,
+      prepared: { root: parentWorktree.path, outDir: join(parentWorktree.path, "out"), inputs: [] },
+      settings: settings(),
+      permissions,
+      signal: new AbortController().signal,
+      worktrees,
+      parentWorktree,
+      runner: async () => result(answer)
+    });
+    const outputSchema = {
+      type: "object",
+      required: ["files", "risk"],
+      properties: { files: { type: "array", items: { type: "string" } }, risk: { type: "string", enum: ["low", "high"] } },
+      additionalProperties: false
+    };
+
+    const output = await tool.execute({ subagent_type: "explore", description: "结构化输出", prompt: "检查 README", output_schema: outputSchema }, context(parentWorktree.path));
+    expect(output.content).toContain('structured_output: {"files":["README.md"],"risk":"low"}');
+
+    answer = '{"files":"README.md","risk":"low"}';
+    await expect(tool.execute({ subagent_type: "explore", description: "结构化输出", prompt: "检查 README", output_schema: outputSchema }, context(parentWorktree.path)))
+      .rejects.toThrow("SUBAGENT_SCHEMA_FAILED");
+  });
+
+  it("resumes a completed child from persisted session and checkpoint after a restart", async () => {
+    const parentWorktree = worktrees.ensure(task);
+    const sessionPath = join(root, "subagents", "cold-session.json");
+    let resumedFromCheckpoint = false;
+    const options = {
+      task,
+      prepared: { root: parentWorktree.path, outDir: join(parentWorktree.path, "out"), inputs: [] },
+      settings: settings(),
+      permissions,
+      signal: new AbortController().signal,
+      worktrees,
+      parentWorktree,
+      runner: async (input: NativeRunOptions) => {
+        expect(input.onCheckpoint).toBeTypeOf("function");
+        resumedFromCheckpoint = Boolean(input.resume);
+        await input.onCheckpoint?.({
+          seq: 1,
+          kind: "turn",
+          messages: [{ role: "system", content: "system" }, { role: "user", content: "检查 README" }, { role: "assistant", content: "已有进度", toolCalls: [] }],
+          usage: usage(1),
+          turns: 1,
+          toolCalls: 0,
+          summary: "已有进度"
+        });
+        return result(resumedFromCheckpoint ? "冷恢复完成" : "首次完成");
+      }
+    };
+    const manager = new SubagentTaskManager(2, sessionPath);
+    const tool = createAgentTool({ ...options, manager });
+    const started = await tool.execute({ subagent_type: "explore", description: "冷恢复", prompt: "检查 README", run_in_background: true }, context(parentWorktree.path));
+    const id = String(started.metadata?.agentId);
+    await manager.wait(id, 100);
+
+    const reloaded = new SubagentTaskManager(2, sessionPath);
+    reloaded.setResumeHandler(createSubagentResumeHandler(options));
+    expect(reloaded.get(id)?.status).toBe("completed");
+    expect(reloaded.get(id)?.session).toBeDefined();
+    reloaded.sendMessage(id, "继续补充结论");
+    const resumed = await reloaded.wait(id, 100);
+    expect(resumed.status).toBe("completed");
+    expect(resumed.summary).toContain("冷恢复完成");
+    expect(resumedFromCheckpoint).toBe(true);
+  });
+
   it("enforces the two-subagent limit and rejects nested delegation", async () => {
     const parentWorktree = worktrees.ensure(task);
     let calls = 0;
@@ -259,11 +333,11 @@ describe("native subagents", () => {
       signal: new AbortController().signal,
       worktrees,
       parentWorktree,
-      depth: 1,
+      depth: 3,
       runner: async () => result("不应运行")
     });
     await expect(nested.execute({ objective: "嵌套", mode: "read-only" }, context(parentWorktree.path)))
-      .rejects.toThrow("不能继续委派");
+      .rejects.toThrow("最多委派 2 层");
   });
 });
 

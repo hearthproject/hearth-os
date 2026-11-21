@@ -156,7 +156,13 @@ HTML 转 Markdown 时会删掉脚本、样式、导航、页脚、表单等噪�
 
 模型失败使用 provider 级重试策略：按 HTTP 状态与错误码分类，指数退避叠加 `Retry-After`，每次等待先写 `retry.scheduled` 事件；默认 8 次，重试窗口 6 小时。工具超时改为协作式取消：先 abort，再给 5 秒收尾；仍不返回则返回 `TOOL_TIMEOUT` 并标记 orphan，调度器写入 `watchdog_events`。主运行另有 10 分钟告警 / 30 分钟中止的停滞看门狗。
 
-超长工具输出按 4k token 预算保留头尾，全文落到 `.hearth/tool-results`，模型可用 `read_tool_output(callId/path, offset, limit)` 分段回读。后台工具、子代理和 shell 会话通过 `job_list` / `job_status` / `job_wait` / `job_stop` 统一查看与等待；原有 `start_background_tool`、`check_background_tool`、`shell_wait`、`agent_status` 继续保留为兼容入口。
+超长工具输出按 4k token 预算保留头尾，全文落到 `.hearth/tool-results`，模型可用 `read_tool_output(callId/path, offset, limit)` 分段回读。压缩时再按 `AgentToolState.toolOutputs` 做 token 级清理：最近 3 条工具结果保留全文，更早的替换为带 `path`、`tokens`、`callId` 的占位符；只有真正触发压缩时才改写，避免无事件的内容变化。
+
+后台工具、子代理和 shell 会话通过 `job_list` / `job_status` / `job_wait` / `job_stop` 统一查看与等待；原有 `start_background_tool`、`check_background_tool`、`shell_wait`、`agent_status` 继续保留为兼容入口。每次 job 首次出现会写 `job.registered`，进入终态再写 `job.settled`；两个事件同时进入 journal 与任务事件流，重启后可以从事件账本还原 job 生命周期。
+
+子代理支持冷恢复：`ManagedAgent` 持久化 objective、子任务、权限、预算、Worktree、checkpoint 与 journal 路径；`agent_resume` 在服务重启后用检查点重建 runner，不需要父代理重新描述任务。`agent` 支持可选 `output_schema`，最终回答必须是合法 JSON 并通过 Ajv 校验，否则返回 `SUBAGENT_SCHEMA_FAILED`。委派深度上限为 2，每层最多 4 个、单任务累计最多 8 个。
+
+`workflow` 是默认可关闭的受限批量读取工具：只允许 `read_file`、`list_files`、`search_text`、`glob`、`grep`、`read_document`、`read_tool_output`，最多 16 步，可按 4 步一批并行；总超时默认 120 秒。代码、研究、文档 profile 开启，桌面与通用 profile 不开启；步骤失败写 `WORKFLOW_STEP_FAILED`，整体超时写 `WORKFLOW_TIMEOUT`。
 
 任务级还有两个正交机制：`goal.json` 的持久目标会驱动 goal round（默认最多 256 轮，有工具进展时重置连续无工具计数）；原生执行器按代码、研究、文档、桌面、通用五种 TaskProfile 选择工具超时、并行度与提示词，不再把所有任务都按代码任务跑。
 

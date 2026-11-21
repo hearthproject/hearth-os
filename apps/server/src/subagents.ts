@@ -1,17 +1,32 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
+import { Ajv } from "ajv";
 import type { RunBudget, TaskPermissions, TaskRecord, TaskWorktree } from "@hearth/core";
-import { zeroUsage, agentProfile, finishActiveWork, startActiveWork, type AgentTool, type AgentToolResult, type SubagentType } from "@hearth/agent-runtime";
+import {
+  zeroUsage,
+  agentProfile,
+  finishActiveWork,
+  startActiveWork,
+  deserializeAgentState,
+  type AgentCheckpoint,
+  type AgentResumeState,
+  type AgentTool,
+  type AgentToolResult,
+  type HarnessMode,
+  type SubagentType
+} from "@hearth/agent-runtime";
 import { runNativeTask, type NativeRunOptions, type NativeRunResult } from "./native-executor.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import type { PreparedWorkspace } from "./workspace.ts";
 import type { TaskWorktreeService } from "./worktrees.ts";
-import type { SubagentTaskManager } from "./subagent-manager.ts";
+import type { ManagedAgent, ManagedAgentSession, SubagentTaskManager } from "./subagent-manager.ts";
 
 const MAX_SUBAGENTS = 4;
+const MAX_AGENT_DEPTH = 2;
+const MAX_TOTAL_SUBAGENTS = 8;
 
 export type SubagentRunner = (options: NativeRunOptions) => Promise<NativeRunResult>;
 
@@ -33,11 +48,19 @@ export interface SubagentToolOptions {
 }
 
 export function createAgentTool(options: SubagentToolOptions): AgentTool {
-  return createDispatchTool(options, false);
+  return createDispatchTool({ ...options, compatibility: false }, false);
 }
 
 export function createSubagentTool(options: SubagentToolOptions): AgentTool {
-  return createDispatchTool(options, true);
+  return createDispatchTool({ ...options, compatibility: true }, true);
+}
+
+export function createSubagentResumeHandler(options: SubagentToolOptions) {
+  const runner = options.runner ?? runNativeTask;
+  return async (job: ManagedAgent, message: string, signal: AbortSignal): Promise<AgentToolResult> => {
+    if (!job.session) throw new Error(`子代理没有可恢复的持久会话：${job.id}`);
+    return executeAgentJob({ runner, options, session: job.session, signal, extra: message });
+  };
 }
 
 function createDispatchTool(options: SubagentToolOptions, compatibility: boolean): AgentTool {
@@ -49,7 +72,7 @@ function createDispatchTool(options: SubagentToolOptions, compatibility: boolean
   return {
     definition: compatibility ? delegationDefinition() : agentDefinition(),
     async execute(input, context): Promise<AgentToolResult> {
-      if (depth > 0) throw new Error("子代理不能继续委派，只允许单层委派");
+      if (depth > MAX_AGENT_DEPTH) throw new Error(`子代理最多委派 ${MAX_AGENT_DEPTH} 层`);
       const args = input && typeof input === "object" ? input as Record<string, unknown> : {};
       const parsed = compatibility ? parseDelegationArgs(args) : parseAgentArgs(args);
       if (!parsed.objective) throw new Error(compatibility ? "请提供子任务目标" : "请提供 prompt");
@@ -73,21 +96,18 @@ function createDispatchTool(options: SubagentToolOptions, compatibility: boolean
         prompt: parsed.objective
       });
 
-      const runAgentJob = async (signal: AbortSignal, extra?: string): Promise<AgentToolResult> => {
-        const objective = extra ? `${parsed.objective}\n\n## Follow-up instruction\n${extra}` : parsed.objective;
+      const safeParent = options.task.id.replace(/[^A-Za-z0-9._-]/g, "-") || "task";
+      const checkpointPath = join(tmpdir(), "hearth-subagents", safeParent, `${childId}.checkpoint.json`);
+      const journalPath = join(tmpdir(), "hearth-subagents", safeParent, `${childId}.journal.jsonl`);
+
+      const buildSession = (): ManagedAgentSession => {
         const worktree = profile.isolation === "worktree" ? createChildWorktree(childId, options) : null;
-        options.onStarted?.({
-          childId,
-          mode: profile.isolation === "worktree" ? "isolated-write" : "read-only",
-          title: childTitle,
-          type: profile.type
-        });
         const childRoot = worktree?.path ?? options.prepared.root;
         const childOutDir = worktree ? join(worktree.path, ".hearth", "subagent-out") : options.prepared.outDir;
         const childTask = childTaskRecord({
           id: childId,
           title: childTitle,
-          objective,
+          objective: parsed.objective,
           task: options.task,
           root: childRoot,
           outDir: childOutDir,
@@ -102,72 +122,41 @@ function createDispatchTool(options: SubagentToolOptions, compatibility: boolean
             ? { maxTokens: narrow(profile.budget.maxTokens, options.budget.maxTokens) }
             : {})
         };
-        const result = await runner({
-          task: childTask,
-          prepared: { root: childRoot, outDir: childOutDir, inputs: [] },
-          settings: options.settings,
-          prompt: agentPrompt(profile.type, objective, options.task, profile.outputContract),
-          permissions: childTask.permissions ?? readOnlyPermissions(options, profile.tools),
+        const prompt = agentPrompt(profile.type, parsed.objective, options.task, profile.outputContract, parsed.outputSchema);
+        const permissions = childTask.permissions ?? readOnlyPermissions(options, profile.tools);
+        const delegationTool = compatibility ? "delegate_task" : "agent";
+        if (depth < MAX_AGENT_DEPTH && !permissions.tools.includes(delegationTool)) {
+          permissions.tools = [...permissions.tools, delegationTool];
+        }
+        return {
+          childId,
+          childTitle,
+          type: profile.type,
+          objective: parsed.objective,
+          childTask,
+          prepared: { root: childRoot, outDir: childOutDir },
+          permissions,
           budget,
           mode: profile.mode,
-          isSubagent: true,
-          signal: AbortSignal.any([options.signal, signal]),
-          expectedOutputs: [],
-          ...(options.manager ? { onProgress: () => options.manager!.progress(childId) } : {})
-        });
-        if (result.status !== "completed") {
-          const details = result.status === "waiting_input"
-            ? `需要补充信息：${result.question ?? result.finalResponse}`
-            : result.finalResponse || result.status;
-          throw new Error(`子代理未完成（${result.status}）：${details}${worktree ? `；已保留 Worktree ${worktree.path}（${worktree.branch}）` : ""}`);
-        }
-
-        const usage = result.usage ?? zeroUsage();
-        const summary = result.finalResponse || "未返回总结";
-        if (!worktree) {
-          appendTranscript(transcriptPath, {
-            at: new Date().toISOString(),
-            event: "completed",
-            agentId: childId,
-            type: profile.type,
-            summary,
-            usage,
-            messages: result.messages ?? []
-          });
-          return {
-            content: `agentId: ${childId}\nstatus: completed\ntype: ${profile.type}\nsummary: ${summary}\ntranscript: ${transcriptPath}`,
-            usage,
-            metadata: { agentId: childId, subagentType: profile.type, agentStatus: "completed", transcriptPath }
-          };
-        }
-
-        const commit = commitChildWorktree(worktree.path, options.task.id, childTitle);
-        appendTranscript(transcriptPath, {
-          at: new Date().toISOString(),
-          event: "completed",
-          agentId: childId,
-          type: profile.type,
-          summary,
-          usage,
-          branch: worktree.branch,
-          commit,
-          messages: result.messages ?? []
-        });
-        return {
-          content: [
-            `agentId: ${childId}`,
-            "status: completed",
-            `type: ${profile.type}`,
-            `summary: ${summary}`,
-            `branch: ${worktree.branch}`,
-            `commit: ${commit}`,
-            `transcript: ${transcriptPath}`,
-            "结果尚未合并。请检查该分支和提交后，由父任务手动 cherry-pick。"
-          ].join("\n"),
-          usage,
-          metadata: { agentId: childId, subagentType: profile.type, agentStatus: "completed", branch: worktree.branch, commitSha: commit, transcriptPath }
+          prompt,
+          checkpointPath,
+          journalPath,
+          transcriptPath,
+          ...(parsed.outputSchema ? { outputSchema: parsed.outputSchema } : {}),
+          ...(worktree ? { worktree } : {})
         };
       };
+
+      const session = buildSession();
+      options.onStarted?.({
+        childId,
+        mode: profile.isolation === "worktree" ? "isolated-write" : "read-only",
+        title: childTitle,
+        type: profile.type
+      });
+
+      const runAgentJob = async (signal: AbortSignal, extra?: string): Promise<AgentToolResult> =>
+        executeAgentJob({ runner, options, session, signal, ...(extra ? { extra } : {}) });
 
       const launch = async (signal: AbortSignal, extra?: string): Promise<AgentToolResult> => {
         startActiveWork(context.state, { id: childId, kind: "subagent", label: childTitle });
@@ -184,7 +173,7 @@ function createDispatchTool(options: SubagentToolOptions, compatibility: boolean
       if (parsed.runInBackground) {
         if (!options.manager) throw new Error("后台子代理需要 manager 支持");
         const job = options.manager.start(
-          { id: childId, type: profile.type, title: childTitle, transcriptPath },
+          { id: childId, type: profile.type, title: childTitle, transcriptPath, session, checkpointPath, journalPath },
           launch,
           (message, signal) => launch(signal, message)
         );
@@ -198,6 +187,179 @@ function createDispatchTool(options: SubagentToolOptions, compatibility: boolean
     }
   };
 }
+
+async function executeAgentJob(input: {
+  runner: SubagentRunner;
+  options: SubagentToolOptions;
+  session: ManagedAgentSession;
+  signal: AbortSignal;
+  extra?: string;
+}): Promise<AgentToolResult> {
+  const { runner, options, session, signal, extra } = input;
+  const objective = extra ? `${session.objective}\n\n## Follow-up instruction\n${extra}` : session.objective;
+  const profile = agentProfile(session.type);
+  if (!profile) throw new Error(`未知子代理类型：${session.type}`);
+  const prompt = agentPrompt(session.type, objective, options.task, profile.outputContract, session.outputSchema);
+  const resume = loadAgentResume(session);
+  const childDepth = options.depth ?? 0;
+  const childDelegation = childDepth < MAX_AGENT_DEPTH
+    ? [createDispatchTool({
+        ...options,
+        depth: childDepth + 1,
+        maxSubagents: MAX_SUBAGENTS,
+        ...(session.worktree ? { parentWorktree: session.worktree } : {})
+      }, options.compatibility ?? false)]
+    : [];
+  const result = await runner({
+    task: { ...session.childTask, goal: objective, updatedAt: new Date().toISOString() },
+    prepared: { root: session.prepared.root, outDir: session.prepared.outDir, inputs: [] },
+    settings: options.settings,
+    prompt,
+    permissions: session.permissions,
+    budget: session.budget,
+    mode: session.mode,
+    isSubagent: true,
+    signal: AbortSignal.any([options.signal, signal]),
+    expectedOutputs: [],
+    journalPath: session.journalPath,
+    ...(childDelegation.length > 0 ? { extraTools: childDelegation } : {}),
+    ...(resume ? { resume } : {}),
+    ...(options.manager ? { onProgress: () => options.manager!.progress(session.childId) } : {}),
+    onCheckpoint: (checkpoint) => saveAgentCheckpoint(session.checkpointPath, checkpoint)
+  });
+  if (result.status !== "completed") {
+    const details = result.status === "waiting_input"
+      ? `需要补充信息：${result.question ?? result.finalResponse}`
+      : result.finalResponse || result.status;
+    throw new Error(`子代理未完成（${result.status}）：${details}${session.worktree ? `；已保留 Worktree ${session.worktree.path}（${session.worktree.branch}）` : ""}`);
+  }
+
+  const usage = result.usage ?? zeroUsage();
+  const summary = result.finalResponse || "未返回总结";
+  const structured = session.outputSchema ? parseStructuredOutput(session.outputSchema, summary) : undefined;
+  const structuredLine = structured === undefined ? [] : [`structured_output: ${JSON.stringify(structured)}`];
+
+  if (!session.worktree) {
+    appendTranscript(session.transcriptPath, {
+      at: new Date().toISOString(),
+      event: "completed",
+      agentId: session.childId,
+      type: session.type,
+      summary,
+      usage,
+      ...(structured === undefined ? {} : { structured }),
+      messages: result.messages ?? []
+    });
+    return {
+      content: [
+        `agentId: ${session.childId}`,
+        "status: completed",
+        `type: ${session.type}`,
+        `summary: ${summary}`,
+        ...structuredLine,
+        `transcript: ${session.transcriptPath}`,
+        `checkpoint: ${session.checkpointPath}`
+      ].join("\n"),
+      usage,
+      metadata: { agentId: session.childId, subagentType: session.type, agentStatus: "completed", transcriptPath: session.transcriptPath }
+    };
+  }
+
+  const commit = commitChildWorktree(session.worktree.path, options.task.id, session.childTitle);
+  appendTranscript(session.transcriptPath, {
+    at: new Date().toISOString(),
+    event: "completed",
+    agentId: session.childId,
+    type: session.type,
+    summary,
+    usage,
+    ...(structured === undefined ? {} : { structured }),
+    branch: session.worktree.branch,
+    commit,
+    messages: result.messages ?? []
+  });
+  return {
+    content: [
+      `agentId: ${session.childId}`,
+      "status: completed",
+      `type: ${session.type}`,
+      `summary: ${summary}`,
+      ...structuredLine,
+      `branch: ${session.worktree.branch}`,
+      `commit: ${commit}`,
+      `transcript: ${session.transcriptPath}`,
+      "结果尚未合并。请检查该分支和提交后，由父任务手动 cherry-pick。"
+    ].join("\n"),
+    usage,
+    metadata: { agentId: session.childId, subagentType: session.type, agentStatus: "completed", branch: session.worktree.branch, commitSha: commit, transcriptPath: session.transcriptPath }
+  };
+}
+
+function loadAgentResume(session: ManagedAgentSession): AgentResumeState | undefined {
+  if (!existsSync(session.checkpointPath)) return undefined;
+  try {
+    const checkpoint = JSON.parse(readFileSync(session.checkpointPath, "utf8")) as Partial<AgentCheckpoint>;
+    if (!Array.isArray(checkpoint.messages)) return undefined;
+    const state = checkpoint.state ? deserializeAgentState(checkpoint.state) : undefined;
+    return {
+      messages: checkpoint.messages,
+      usage: checkpoint.usage ?? zeroUsage(),
+      turns: Number(checkpoint.turns) || 0,
+      toolCalls: Number(checkpoint.toolCalls) || 0,
+      ...(state ? { state } : {}),
+      ...(checkpoint.promptHash ? { promptHash: checkpoint.promptHash } : {}),
+      ...(Number.isFinite(checkpoint.journalSeq) ? { journal: { path: session.journalPath, seq: Number(checkpoint.journalSeq) } } : {})
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function saveAgentCheckpoint(path: string, checkpoint: AgentCheckpoint): void {
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    const temp = `${path}.tmp`;
+    writeFileSync(temp, `${JSON.stringify(checkpoint)}\n`, "utf8");
+    renameSync(temp, path);
+  } catch {
+    // Checkpoints are best-effort; the child can still finish in this process.
+  }
+}
+
+function parseStructuredOutput(schema: Record<string, unknown>, summary: string): unknown {
+  const candidate = extractJson(summary);
+  let value: unknown;
+  try {
+    value = JSON.parse(candidate);
+  } catch {
+    throw schemaFailure("子代理输出不是合法 JSON");
+  }
+  const ajv = new Ajv({ allErrors: true, strict: false });
+  let validate;
+  try {
+    validate = ajv.compile(schema);
+  } catch (error) {
+    throw schemaFailure(`输出 Schema 无法编译：${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!validate(value)) {
+    const detail = validate.errors?.map((item) => `${item.instancePath || "/"} ${item.message ?? ""}`.trim()).join("; ") || "不符合 Schema";
+    throw schemaFailure(detail);
+  }
+  return value;
+}
+
+function schemaFailure(message: string): Error {
+  return Object.assign(new Error(`SUBAGENT_SCHEMA_FAILED: ${message}`), { code: "SUBAGENT_SCHEMA_FAILED", retryable: false });
+}
+
+function extractJson(text: string): string {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const body = (fenced?.[1] ?? text).trim();
+  const start = body.search(/[[{]/);
+  const end = Math.max(body.lastIndexOf("}"), body.lastIndexOf("]"));
+  return start >= 0 && end > start ? body.slice(start, end + 1) : body;
+}
+
 
 function createChildWorktree(childId: string, options: SubagentToolOptions): TaskWorktree {
   if (!options.task.projectId) throw new Error("隔离写子代理只能用于本地项目任务");
@@ -253,7 +415,8 @@ function agentDefinition(): AgentTool["definition"] {
         description: { type: "string", description: "3-8 word label shown to the parent and UI" },
         prompt: { type: "string", description: "Self-contained task; the child cannot see the parent conversation" },
         run_in_background: { type: "boolean", description: "Return immediately and continue in the background" },
-        maxTurns: { type: "number", description: "Optional turn cap for this child, bounded by the profile default" }
+        maxTurns: { type: "number", description: "Optional turn cap for this child, bounded by the profile default" },
+        output_schema: { type: "object", description: "Optional JSON Schema the child's final answer must satisfy; validated before the child is marked completed" }
       },
       required: ["subagent_type", "description", "prompt"],
       additionalProperties: false
@@ -278,16 +441,19 @@ function delegationDefinition(): AgentTool["definition"] {
   };
 }
 
-function parseAgentArgs(args: Record<string, unknown>): { type: string; objective: string; title: string; maxTurns?: number; runInBackground?: boolean } {
+function parseAgentArgs(args: Record<string, unknown>): { type: string; objective: string; title: string; maxTurns?: number; runInBackground?: boolean; outputSchema?: Record<string, unknown> } {
   const type = typeof args.subagent_type === "string" ? args.subagent_type : "";
   const objective = typeof args.prompt === "string" ? args.prompt.trim() : "";
   const title = typeof args.description === "string" ? args.description.trim().slice(0, 120) : "";
   const maxTurns = Number.isFinite(args.maxTurns) ? Math.max(1, Math.floor(Number(args.maxTurns))) : undefined;
   const runInBackground = args.run_in_background === true;
-  return { type, objective, title, ...(maxTurns ? { maxTurns } : {}), ...(runInBackground ? { runInBackground: true } : {}) };
+  const outputSchema = args.output_schema && typeof args.output_schema === "object" && !Array.isArray(args.output_schema)
+    ? args.output_schema as Record<string, unknown>
+    : undefined;
+  return { type, objective, title, ...(maxTurns ? { maxTurns } : {}), ...(runInBackground ? { runInBackground: true } : {}), ...(outputSchema ? { outputSchema } : {}) };
 }
 
-function parseDelegationArgs(args: Record<string, unknown>): { type: string; objective: string; title: string; maxTurns?: number; runInBackground?: boolean } {
+function parseDelegationArgs(args: Record<string, unknown>): { type: string; objective: string; title: string; maxTurns?: number; runInBackground?: boolean; outputSchema?: Record<string, unknown> } {
   const objective = typeof args.objective === "string" ? args.objective.trim() : "";
   const title = typeof args.title === "string" ? args.title.trim().slice(0, 120) : "";
   const mode = args.mode === "isolated-write" ? "general-purpose" : args.mode === "read-only" ? "explore" : "";
@@ -320,11 +486,12 @@ function isolatedWritePermissions(options: SubagentToolOptions, root: string, ou
   };
 }
 
-function agentPrompt(type: string, objective: string, parent: TaskRecord, outputContract: string): string {
+function agentPrompt(type: string, objective: string, parent: TaskRecord, outputContract: string, outputSchema?: Record<string, unknown>): string {
   return [
     `你是一个 ${type} 子代理，只负责下面这段子任务。父任务：${parent.title}`,
     `目标：${objective}`,
     `输出契约：${outputContract}`,
+    ...(outputSchema ? [`最终回答必须是一个 JSON 值，严格满足以下 JSON Schema，不要包裹额外说明：\n${JSON.stringify(outputSchema)}`] : []),
     "上下文是隔离的：不要假设父代理知道你的中间过程，结论必须自带文件路径、行号和证据。",
     "不要做超出目标的扩展，不要请求用户确认，不要委派其他子代理。"
   ].join("\n");
