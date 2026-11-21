@@ -1804,7 +1804,7 @@ export class HearthScheduler {
         const remainingSubagents = 4 - usedSubagents;
         const subagentTool = process.env.HEARTH_AGENT_TOOL === "0" ? createSubagentTool : createAgentTool;
         const safeTaskId = task.id.replace(/[^A-Za-z0-9._-]/g, "-") || "task";
-        const manager = new SubagentTaskManager(Math.max(1, remainingSubagents), join(taskRoot, ".hearth", "subagents", `${safeTaskId}.json`));
+        const manager = new SubagentTaskManager(4, join(taskRoot, ".hearth", "subagents", `${safeTaskId}.json`));
         subagentManager = manager;
         if (subagentTool === createAgentTool) extraNativeTools.push(...createAgentLifecycleTools(manager));
         controller.signal.addEventListener("abort", () => manager.cancelAll(), { once: true });
