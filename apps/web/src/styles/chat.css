@@ -99,9 +99,8 @@
   gap: 22px;
 }
 
-.message-row.user,
-.message-row.assistant {
-  justify-content: flex-start;
+.message-row.user {
+  justify-content: flex-end;
 }
 
 .message-row.assistant {
@@ -121,11 +120,14 @@
 }
 
 .user-bubble {
-  padding: 10px 12px;
-  border-radius: var(--radius);
+  max-width: min(760px, 78%);
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
   background: var(--surface-sunk);
   color: var(--ink);
-  box-shadow: inset 2px 0 0 var(--line-strong);
+  box-shadow: none;
+  text-align: left;
 }
 
 .user-bubble time {
@@ -285,11 +287,14 @@
 }
 
 .composer-wrap {
+  display: flex;
+  flex-direction: column;
   padding: 12px 24px 16px;
   background: var(--bg);
 }
 
 .composer {
+  order: 1;
   max-width: 1120px;
   padding: 3px;
   border-radius: 6px;
@@ -315,13 +320,31 @@
 }
 
 .composer-tools {
+  order: 2;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-start;
-  gap: 6px;
+  gap: 8px;
+  width: 100%;
   max-width: 1120px;
-  margin: 0 auto 6px;
+  margin: 6px auto 0;
+}
+
+.composer-access {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-secondary);
+  font-size: var(--fs-11);
+  white-space: nowrap;
+}
+
+.composer-access svg {
+  color: var(--accent-strong);
 }
 
 .composer-model-wrap {
@@ -330,6 +353,13 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
+  order: 2;
+  margin-left: 0;
+}
+
+.composer-executor {
+  order: 1;
+  margin-left: auto;
 }
 
 .composer-model {

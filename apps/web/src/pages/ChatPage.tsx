@@ -19,6 +19,7 @@ import {
   Loader2,
   Paperclip,
   Settings2,
+  ShieldCheck,
   Sparkles,
   X
 } from "lucide-react";
@@ -688,6 +689,10 @@ export function ChatPage() {
             </div>
           )}
           <div className="composer-tools">
+            <span className="composer-access" title="所有工具、外部命令与网络访问均无需审批">
+              <ShieldCheck size={13} />
+              完全权限
+            </span>
             <div className="composer-model-wrap">
               <button
                 type="button"
