@@ -16,6 +16,7 @@ internal static class HearthNative
     private const uint INFINITE = 0xFFFFFFFF;
     private const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
     private const uint PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES = 0x00020009;
+    private const uint PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = 0x00020016;
     private const uint FILE_GENERIC_READ = 0x00120089;
     private const uint FILE_GENERIC_WRITE = 0x00120116;
     private const uint FILE_GENERIC_EXECUTE = 0x001200A0;
@@ -57,6 +58,21 @@ internal static class HearthNative
         public IntPtr Capabilities;
         public uint CapabilityCount;
         public uint Reserved;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SECURITY_ATTRIBUTES
+    {
+        public int nLength;
+        public IntPtr lpSecurityDescriptor;
+        public bool bInheritHandle;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct COORD
+    {
+        public short X;
+        public short Y;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -134,6 +150,18 @@ internal static class HearthNative
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern void DeleteProcThreadAttributeList(IntPtr lpAttributeList);
     [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CreatePipe(out IntPtr hReadPipe, out IntPtr hWritePipe, ref SECURITY_ATTRIBUTES lpPipeAttributes, uint nSize);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool ReadFile(IntPtr hFile, byte[] lpBuffer, uint nNumberOfBytesToRead, out uint lpNumberOfBytesRead, IntPtr lpOverlapped);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool WriteFile(IntPtr hFile, byte[] lpBuffer, uint nNumberOfBytesToWrite, out uint lpNumberOfBytesWritten, IntPtr lpOverlapped);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern int CreatePseudoConsole(COORD size, IntPtr hInput, IntPtr hOutput, uint flags, out IntPtr phPC);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern int ResizePseudoConsole(IntPtr hPC, COORD size);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern void ClosePseudoConsole(IntPtr hPC);
+    [DllImport("kernel32.dll", SetLastError = true)]
     private static extern IntPtr GetCurrentProcess();
 
     [DllImport("userenv.dll", CharSet = CharSet.Unicode)]
@@ -155,6 +183,7 @@ internal static class HearthNative
             case "lease": return Lease(args);
             case "process-info": return ProcessInfo(args);
             case "sandbox": return Sandbox(args);
+            case "pty": return Pty(args);
             case "version": Console.WriteLine("hearth-native 0.4.0"); return 0;
             default: return Usage();
         }
@@ -162,7 +191,7 @@ internal static class HearthNative
 
     private static int Usage()
     {
-        Console.Error.WriteLine("hearth-native lease|process-info|sandbox|version");
+        Console.Error.WriteLine("hearth-native lease|process-info|sandbox|pty|version");
         return 2;
     }
 
@@ -225,6 +254,20 @@ internal static class HearthNative
 
     private static int Sandbox(string[] args)
     {
+        return RunSandbox(args, false);
+    }
+
+    private static int Pty(string[] args)
+    {
+        return RunSandbox(args, true);
+    }
+
+    private static int RunSandbox(string[] args, bool usePty)
+    {
+        if (usePty)
+        {
+            try { Console.InputEncoding = Encoding.UTF8; } catch { }
+        }
         string workspace = Arg(args, "--workspace");
         string temp = Arg(args, "--temp");
         string mode = Arg(args, "--mode");
@@ -295,12 +338,56 @@ internal static class HearthNative
         if (parentPid > 0) StartParentWatchdog(parentPid, job);
 
         IntPtr attrList = IntPtr.Zero;
+        IntPtr pseudoConsole = IntPtr.Zero;
+        IntPtr ptyInput = IntPtr.Zero;
+        IntPtr ptyOutput = IntPtr.Zero;
+        IntPtr ptyInputRead = IntPtr.Zero;
+        int attributeCount = usePty ? 2 : 1;
         var startup = new STARTUPINFOEX();
         startup.StartupInfo.cb = Marshal.SizeOf(typeof(STARTUPINFOEX));
-        startup.StartupInfo.dwFlags = (int)STARTF_USESTDHANDLES;
-        startup.StartupInfo.hStdInput = GetStdHandle(-10);
-        startup.StartupInfo.hStdOutput = GetStdHandle(-11);
-        startup.StartupInfo.hStdError = GetStdHandle(-12);
+        if (usePty)
+        {
+            int cols = 120;
+            int rows = 30;
+            int.TryParse(Arg(args, "--cols"), out cols);
+            int.TryParse(Arg(args, "--rows"), out rows);
+            var attributes = new SECURITY_ATTRIBUTES();
+            attributes.nLength = Marshal.SizeOf(typeof(SECURITY_ATTRIBUTES));
+            attributes.bInheritHandle = false;
+            IntPtr inputRead, inputWrite, outputRead, outputWrite;
+            if (!CreatePipe(out inputRead, out inputWrite, ref attributes, 0) ||
+                !CreatePipe(out outputRead, out outputWrite, ref attributes, 0))
+            {
+                Console.Error.WriteLine("sandbox-error: CreatePipe failed " + Marshal.GetLastWin32Error());
+                CloseHandle(job);
+                return 127;
+            }
+            var consoleSize = new COORD { X = (short)Math.Max(20, cols), Y = (short)Math.Max(5, rows) };
+            int hr = CreatePseudoConsole(consoleSize, inputRead, outputWrite, 0, out pseudoConsole);
+            CloseHandle(outputWrite);
+            if (hr < 0)
+            {
+                Console.Error.WriteLine("sandbox-error: CreatePseudoConsole failed 0x" + hr.ToString("X8"));
+                CloseHandle(inputWrite);
+                CloseHandle(outputRead);
+                CloseHandle(job);
+                return 127;
+            }
+            ptyInputRead = inputRead;
+            ptyInput = inputWrite;
+            ptyOutput = outputRead;
+            startup.StartupInfo.dwFlags = (int)STARTF_USESTDHANDLES;
+            startup.StartupInfo.hStdInput = new IntPtr(-1);
+            startup.StartupInfo.hStdOutput = new IntPtr(-1);
+            startup.StartupInfo.hStdError = new IntPtr(-1);
+        }
+        else
+        {
+            startup.StartupInfo.dwFlags = (int)STARTF_USESTDHANDLES;
+            startup.StartupInfo.hStdInput = GetStdHandle(-10);
+            startup.StartupInfo.hStdOutput = GetStdHandle(-11);
+            startup.StartupInfo.hStdError = GetStdHandle(-12);
+        }
 
         var capabilities = new SECURITY_CAPABILITIES();
         capabilities.AppContainerSid = packageSid;
@@ -310,12 +397,13 @@ internal static class HearthNative
         Marshal.StructureToPtr(capabilities, capPtr, false);
 
         IntPtr size = IntPtr.Zero;
-        InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref size);
+        InitializeProcThreadAttributeList(IntPtr.Zero, attributeCount, 0, ref size);
         attrList = Marshal.AllocHGlobal(size);
-        if (!InitializeProcThreadAttributeList(attrList, 1, 0, ref size))
+        if (!InitializeProcThreadAttributeList(attrList, attributeCount, 0, ref size))
         {
             Console.Error.WriteLine("sandbox-error: InitializeProcThreadAttributeList failed " + Marshal.GetLastWin32Error());
             Marshal.FreeHGlobal(capPtr);
+            if (pseudoConsole != IntPtr.Zero) ClosePseudoConsole(pseudoConsole);
             CloseHandle(job);
             return 127;
         }
@@ -325,6 +413,17 @@ internal static class HearthNative
             DeleteProcThreadAttributeList(attrList);
             Marshal.FreeHGlobal(attrList);
             Marshal.FreeHGlobal(capPtr);
+            if (pseudoConsole != IntPtr.Zero) ClosePseudoConsole(pseudoConsole);
+            CloseHandle(job);
+            return 127;
+        }
+        if (usePty && !UpdateProcThreadAttribute(attrList, 0, (IntPtr)PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, pseudoConsole, (IntPtr)IntPtr.Size, IntPtr.Zero, IntPtr.Zero))
+        {
+            Console.Error.WriteLine("sandbox-error: UpdateProcThreadAttribute(pty) failed " + Marshal.GetLastWin32Error());
+            DeleteProcThreadAttributeList(attrList);
+            Marshal.FreeHGlobal(attrList);
+            Marshal.FreeHGlobal(capPtr);
+            ClosePseudoConsole(pseudoConsole);
             CloseHandle(job);
             return 127;
         }
@@ -333,17 +432,25 @@ internal static class HearthNative
         IntPtr environment = BuildEnvironment(temp);
         var info = new PROCESS_INFORMATION();
         bool created = CreateProcess(
-            null, command, IntPtr.Zero, IntPtr.Zero, true,
+            null, command, IntPtr.Zero, IntPtr.Zero, !usePty,
             EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED,
             environment, workspace, ref startup, out info);
         int createError = Marshal.GetLastWin32Error();
         Marshal.FreeHGlobal(environment);
+        if (ptyInputRead != IntPtr.Zero)
+        {
+            CloseHandle(ptyInputRead);
+            ptyInputRead = IntPtr.Zero;
+        }
         DeleteProcThreadAttributeList(attrList);
         Marshal.FreeHGlobal(attrList);
         Marshal.FreeHGlobal(capPtr);
         if (!created)
         {
             Console.Error.WriteLine("sandbox-error: CreateProcess failed " + createError);
+            if (pseudoConsole != IntPtr.Zero) ClosePseudoConsole(pseudoConsole);
+            if (ptyInput != IntPtr.Zero) CloseHandle(ptyInput);
+            if (ptyOutput != IntPtr.Zero) CloseHandle(ptyOutput);
             CloseHandle(job);
             return 127;
         }
@@ -353,18 +460,94 @@ internal static class HearthNative
             TerminateJobObject(job, 127);
             CloseHandle(info.hThread);
             CloseHandle(info.hProcess);
+            if (pseudoConsole != IntPtr.Zero) ClosePseudoConsole(pseudoConsole);
+            if (ptyInput != IntPtr.Zero) CloseHandle(ptyInput);
+            if (ptyOutput != IntPtr.Zero) CloseHandle(ptyOutput);
             CloseHandle(job);
             return 127;
         }
         ResumeThread(info.hThread);
         CloseHandle(info.hThread);
 
+        if (usePty)
+        {
+            StartPtyOutput(ptyOutput);
+            StartPtyInput(ptyInput, pseudoConsole);
+        }
+
         WaitForSingleObject(info.hProcess, INFINITE);
         uint exitCode = 1;
         GetExitCodeProcess(info.hProcess, out exitCode);
         CloseHandle(info.hProcess);
+        if (pseudoConsole != IntPtr.Zero)
+        {
+            ClosePseudoConsole(pseudoConsole);
+            CloseHandle(ptyInput);
+            CloseHandle(ptyOutput);
+        }
         CloseHandle(job);
         return unchecked((int)exitCode);
+    }
+
+    private static void StartPtyOutput(IntPtr outputRead)
+    {
+        var thread = new Thread(() =>
+        {
+            byte[] buffer = new byte[8192];
+            var stdout = Console.OpenStandardOutput();
+            while (true)
+            {
+                uint read;
+                if (!ReadFile(outputRead, buffer, (uint)buffer.Length, out read, IntPtr.Zero) || read == 0) break;
+                try { stdout.Write(buffer, 0, (int)read); }
+                catch { break; }
+            }
+        });
+        thread.IsBackground = true;
+        thread.Start();
+    }
+
+    private static void StartPtyInput(IntPtr inputWrite, IntPtr pseudoConsole)
+    {
+        var thread = new Thread(() =>
+        {
+            byte[] buffer = new byte[4096];
+            var stdin = Console.OpenStandardInput();
+            while (true)
+            {
+                int read;
+                try { read = stdin.Read(buffer, 0, buffer.Length); }
+                catch { break; }
+                if (read <= 0) break;
+                if (TryResizeBytes(buffer, read, pseudoConsole)) continue;
+                uint written;
+                if (!WriteFile(inputWrite, buffer, (uint)read, out written, IntPtr.Zero)) break;
+            }
+            CloseHandle(inputWrite);
+        });
+        thread.IsBackground = true;
+        thread.Start();
+    }
+
+    private static bool TryResizeBytes(byte[] buffer, int length, IntPtr pseudoConsole)
+    {
+        const string prefix = "\u001bHEARTH_RESIZE:";
+        if (length < prefix.Length) return false;
+        for (int i = 0; i < prefix.Length; i++)
+        {
+            if (buffer[i] != (byte)prefix[i]) return false;
+        }
+        int end = Array.IndexOf(buffer, (byte)'\n', prefix.Length, length - prefix.Length);
+        if (end < 0) return false;
+        string payload = Encoding.ASCII.GetString(buffer, prefix.Length, end - prefix.Length);
+        string[] parts = payload.Split(',');
+        int cols, rows;
+        if (parts.Length == 2 && int.TryParse(parts[0], out cols) && int.TryParse(parts[1], out rows))
+        {
+            var size = new COORD { X = (short)Math.Max(20, cols), Y = (short)Math.Max(5, rows) };
+            ResizePseudoConsole(pseudoConsole, size);
+        }
+        return true;
     }
 
     private static IntPtr EnsureAppContainer(string name)

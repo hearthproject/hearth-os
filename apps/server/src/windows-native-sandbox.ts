@@ -58,7 +58,7 @@ export class WindowsNativeSandboxProvider implements SandboxProvider {
     if (!isSystemRoot(nodeRoot)) readRoots.add(nodeRoot);
     const args = [
       helper,
-      "sandbox",
+      request.pty ? "pty" : "sandbox",
       "--workspace",
       policy.workspaceRoot,
       "--temp",
@@ -70,6 +70,9 @@ export class WindowsNativeSandboxProvider implements SandboxProvider {
       "--parent-pid",
       String(process.pid)
     ];
+    if (request.pty) {
+      args.push("--cols", String(request.pty.cols), "--rows", String(request.pty.rows));
+    }
     for (const root of writeRoots) args.push("--write", root);
     for (const root of readRoots) args.push("--read", root);
     args.push("--", ...request.argv);

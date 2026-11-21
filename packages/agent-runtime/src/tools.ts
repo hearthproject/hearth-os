@@ -15,7 +15,7 @@ import { createGoalTools } from "./harness/goal.ts";
 import { searchFiles } from "./harness/search.ts";
 import { fileReadState, hashContent, rangesCover, recordCommand, recordFileModified, recordFileRead, requireReadBeforeWrite } from "./harness/file-state.ts";
 import { recordCreatedFile, recordSnapshotAfterMutation, rewindTool, rewindTurnTool, snapshotBeforeMutation } from "./harness/snapshots.ts";
-import { killShellSession, runShellSession, shellOutput, shellSessionInfo, startShellSession, waitShellSession } from "./harness/shell-session.ts";
+import { killShellSession, resizeShellSession, runShellSession, shellOutput, shellSessionInfo, startShellSession, waitShellSession, writeShellInput } from "./harness/shell-session.ts";
 import { truncateToolOutput, writeFullToolOutput } from "./harness/tool-output.ts";
 import { commandPolicyIssue } from "./harness/command-policy.ts";
 import { todoReadTool, todoWriteTool } from "./harness/todo.ts";
@@ -37,7 +37,7 @@ const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", "coverage", 
 
 //模型能使用的工具和实现
 export function createBuiltinTools(): AgentTool[] {
-  const tools = [readFileTool, readToolOutputTool, readDocumentTool, listFilesTool, searchTextTool, globTool, grepTool, writeFileTool, writeSpreadsheetTool, writeDocumentTool, editFileTool, applyPatchTool, shellTool, shellOutputTool, shellWaitTool, shellKillTool, todoWriteTool, todoReadTool, runTestsTool, diagnosticsTool, submitPlanTool, rewindTool, rewindTurnTool, captureScreenTool, fetchUrlTool, askUserTool, finishTaskTool, ...createMemoryTools(), ...createGoalTools()];
+  const tools = [readFileTool, readToolOutputTool, readDocumentTool, listFilesTool, searchTextTool, globTool, grepTool, writeFileTool, writeSpreadsheetTool, writeDocumentTool, editFileTool, applyPatchTool, shellTool, shellInputTool, shellResizeTool, shellOutputTool, shellWaitTool, shellKillTool, todoWriteTool, todoReadTool, runTestsTool, diagnosticsTool, submitPlanTool, rewindTool, rewindTurnTool, captureScreenTool, fetchUrlTool, askUserTool, finishTaskTool, ...createMemoryTools(), ...createGoalTools()];
   return [...tools, createWorkflowTool(tools)];
 }
 
@@ -874,7 +874,10 @@ const shellTool: AgentTool = {
         yieldMs: { type: "number", description: "前台等待多少毫秒后返回增量输出，默认等待到退出或超时" },
         background: { type: "boolean", description: "立即后台启动，返回 sessionId" },
         env: { type: "object", description: "附加环境变量", additionalProperties: { type: "string" } },
-        stdin: { type: "string", description: "写入 stdin 后关闭（用于交互式命令）" }
+        stdin: { type: "string", description: "写入 stdin（PTY 会话保持打开，可用 shell_input 继续输入）" },
+        pty: { type: "boolean", description: "分配交互式 ConPTY 控制台；适合 REPL、需要按键/回显的交互命令" },
+        cols: { type: "number", description: "PTY 列数，默认 120，范围 20-400" },
+        rows: { type: "number", description: "PTY 行数，默认 30，范围 5-200" }
       },
       required: ["command"],
       additionalProperties: false
@@ -890,6 +893,9 @@ const shellTool: AgentTool = {
     assertReadable(cwd, context.permissions.readRoots, context.permissions.fullAccess ?? false);
     const env = stringRecord(args.env);
     const stdin = optionalStringArg(args, "stdin");
+    const pty = args.pty === true
+      ? { cols: intArg(args, "cols", 120), rows: intArg(args, "rows", 30) }
+      : undefined;
     const sandbox = context.sandbox;
     const unsafeNoSandbox = !sandbox && context.permissions.sandboxMode === "danger-full-access";
     if (!sandbox && !unsafeNoSandbox) throw new Error("native shell 缺少沙箱配置；请检查任务执行策略");
@@ -899,6 +905,7 @@ const shellTool: AgentTool = {
       outDir: context.outDir,
       ...(env ? { env } : {}),
       ...(stdin !== undefined ? { stdin } : {}),
+      ...(pty ? { pty } : {}),
       ...(sandbox ? { sandbox } : {}),
       ...(unsafeNoSandbox ? { unsafeNoSandbox: true } : {}),
       onStarted: ({ sessionId }: { sessionId: string }) => {
@@ -947,6 +954,66 @@ const shellTool: AgentTool = {
         ...(result.sandbox ? { sandbox: result.sandbox } : {}),
         ...(sandboxFailure ? { sandboxFailure } : {})
       }
+    };
+  }
+};
+
+const shellInputTool: AgentTool = {
+  definition: {
+    name: "shell_input",
+    description: "Type into a running shell session. For PTY sessions this sends keystrokes to the console; appendNewline=false sends raw control characters.",
+    executionMode: "sequential",
+    parameters: {
+      type: "object",
+      properties: {
+        sessionId: { type: "string", description: "shell 返回的 sessionId" },
+        input: { type: "string", description: "要写入的文本；可用 \\r 表示回车，\\u0003 表示 Ctrl+C" },
+        appendNewline: { type: "boolean", description: "是否在末尾追加回车，默认 true（PTY 发送 \\r）" }
+      },
+      required: ["sessionId", "input"],
+      additionalProperties: false
+    }
+  },
+  async execute(input) {
+    const args = objectArgs(input);
+    const sessionId = stringArg(args, "sessionId");
+    const text = stringArg(args, "input");
+    const appendNewline = args.appendNewline !== false;
+    const payload = `${text}${appendNewline ? "\r" : ""}`;
+    const result = writeShellInput(sessionId, payload);
+    if (!result) throw new Error(`找不到 shell session：${sessionId}`);
+    return {
+      content: `session ${sessionId}: ${result.written > 0 ? `已写入 ${result.written} 字符` : "会话已退出，未写入"}${result.pty ? "（PTY）" : ""}`,
+      isError: result.written === 0,
+      metadata: { sessionId, written: result.written, running: result.running, pty: result.pty }
+    };
+  }
+};
+
+const shellResizeTool: AgentTool = {
+  definition: {
+    name: "shell_resize",
+    description: "Resize the console of a running PTY shell session. Plain-pipe sessions are unaffected.",
+    executionMode: "parallel",
+    parameters: {
+      type: "object",
+      properties: {
+        sessionId: { type: "string", description: "shell 返回的 sessionId" },
+        cols: { type: "number", description: "列数，20-400" },
+        rows: { type: "number", description: "行数，5-200" }
+      },
+      required: ["sessionId", "cols", "rows"],
+      additionalProperties: false
+    }
+  },
+  async execute(input) {
+    const args = objectArgs(input);
+    const sessionId = stringArg(args, "sessionId");
+    const result = resizeShellSession(sessionId, intArg(args, "cols", 120), intArg(args, "rows", 30));
+    if (!result) throw new Error(`找不到 shell session：${sessionId}`);
+    return {
+      content: `session ${sessionId}: ${result.pty ? `已调整到 ${result.cols}x${result.rows}` : "不是 PTY 会话，忽略 resize"}`,
+      metadata: { sessionId, cols: result.cols, rows: result.rows, pty: result.pty }
     };
   }
 };

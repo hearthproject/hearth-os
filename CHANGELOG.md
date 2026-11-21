@@ -34,6 +34,14 @@
 - 移除服务端旧 `windows-acl` runner 与测试；新增 `npm run test:sandbox` 与 Windows CI 门禁。
 - 打包脚本把 helper 复制到桌面资源目录；新增 8 项 Windows 沙箱测试，覆盖越界写、只读、junction 逃逸、密钥过滤、网络拒绝和 Job 关闭杀子进程。
 
+### ConPTY 交互式 shell
+
+- `hearth-native.exe` 新增 `pty` 子命令：在 AppContainer 内用 `CreatePseudoConsole` 启动子进程，保留 Job Object 与父进程 watchdog。
+- `shell` 支持 `pty: true`、`cols` / `rows`；新增 `shell_input` 与 `shell_resize`，可向运行中的交互式命令输入、回车和调整控制台尺寸。
+- 修复 ConPTY 输入抢占：子进程使用 `STARTF_USESTDHANDLES` + `INVALID_HANDLE_VALUE` 且不继承句柄，整行命令和逐字符输入均可靠。
+- 新增 2 项 Windows 测试：PTY argv 契约与 AppContainer 内交互式命令执行。
+
+
 ## 0.3.2 - 2026-11-21
 
 ### 会话布局

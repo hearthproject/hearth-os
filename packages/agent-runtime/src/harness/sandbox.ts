@@ -42,6 +42,8 @@ export interface SandboxRequest {
   cwd: string;
   policy: SandboxPolicy;
   signal?: AbortSignal;
+  /** Allocate a ConPTY-backed console for the child instead of plain pipes. */
+  pty?: { cols: number; rows: number };
 }
 
 export interface RunnerFailureRule {

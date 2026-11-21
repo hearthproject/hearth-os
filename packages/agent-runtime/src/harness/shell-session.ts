@@ -43,6 +43,7 @@ export interface ShellSession {
   outputPath: string;
   exitCode: number | null;
   running: boolean;
+  pty: boolean;
   sandbox: ShellSandboxRun | null;
   onExit?: ((info: { sessionId: string; exitCode: number | null }) => void) | undefined;
   exitNotified?: boolean;
@@ -77,6 +78,7 @@ export async function startShellSession(options: {
   env?: Record<string, string>;
   shell?: ShellSpec;
   stdin?: string;
+  pty?: { cols?: number; rows?: number };
   sandbox?: ShellSandboxOptions;
   unsafeNoSandbox?: boolean;
   signal?: AbortSignal;
@@ -94,6 +96,15 @@ export async function startShellSession(options: {
   let spawnCwd = options.cwd;
   let spawnEnv: Record<string, string>;
   let sandbox: ShellSandboxRun | null = null;
+  const pty = options.pty
+    ? {
+        cols: Math.min(400, Math.max(20, Math.trunc(options.pty.cols ?? 120))),
+        rows: Math.min(200, Math.max(5, Math.trunc(options.pty.rows ?? 30)))
+      }
+    : null;
+  if (pty && !options.sandbox) {
+    throw new SandboxUnavailableError("PTY shell 必须通过 Windows AppContainer helper 启动；不能直接 spawn");
+  }
 
   if (options.sandbox) {
     ensureSandboxTemp(options.sandbox.policy);
@@ -112,6 +123,7 @@ export async function startShellSession(options: {
       argv,
       cwd: options.cwd,
       policy,
+      ...(pty ? { pty } : {}),
       ...(options.signal ? { signal: options.signal } : {})
     });
     spawnArgv = confined.argv;
@@ -156,6 +168,7 @@ export async function startShellSession(options: {
     outputPath,
     exitCode: null,
     running: true,
+    pty: pty !== null,
     sandbox,
     ...(options.onExit ? { onExit: options.onExit } : {})
   };
@@ -198,7 +211,7 @@ export async function startShellSession(options: {
   });
   if (options.stdin !== undefined) {
     child.stdin.write(options.stdin);
-    child.stdin.end();
+    if (!pty) child.stdin.end();
   }
   return { sessionId: id, pid: child.pid ?? null, outputPath, sandbox };
 }
@@ -211,6 +224,7 @@ export async function runShellSession(options: {
   env?: Record<string, string>;
   shell?: ShellSpec;
   stdin?: string;
+  pty?: { cols?: number; rows?: number };
   sandbox?: ShellSandboxOptions;
   unsafeNoSandbox?: boolean;
   signal?: AbortSignal;
@@ -267,10 +281,39 @@ export function shellOutput(sessionId: string, offset = 0): { output: string; ru
   return { output: session.output.slice(safeOffset), running: session.running, exitCode: session.exitCode, outputPath: session.outputPath };
 }
 
-export function shellSessionInfo(sessionId: string): { running: boolean; exitCode: number | null; command: string; outputPath: string; sandbox: ShellSandboxRun | null } | null {
+export function shellSessionInfo(sessionId: string): { running: boolean; exitCode: number | null; command: string; outputPath: string; pty: boolean; sandbox: ShellSandboxRun | null } | null {
   const session = sessions.get(sessionId);
   if (!session) return null;
-  return { running: session.running, exitCode: session.exitCode, command: session.command, outputPath: session.outputPath, sandbox: session.sandbox };
+  return { running: session.running, exitCode: session.exitCode, command: session.command, outputPath: session.outputPath, pty: session.pty, sandbox: session.sandbox };
+}
+
+/** Write raw bytes to the session's stdin. For PTY sessions this types into the console. */
+export function writeShellInput(sessionId: string, data: string): { sessionId: string; written: number; running: boolean; pty: boolean } | null {
+  const session = sessions.get(sessionId);
+  if (!session) return null;
+  if (!session.running) return { sessionId, written: 0, running: false, pty: session.pty };
+  try {
+    session.child.stdin.write(data);
+    return { sessionId, written: data.length, running: session.running, pty: session.pty };
+  } catch {
+    return { sessionId, written: 0, running: session.running, pty: session.pty };
+  }
+}
+
+/** Resize a PTY session; plain-pipe sessions ignore this. */
+export function resizeShellSession(sessionId: string, cols: number, rows: number): { sessionId: string; cols: number; rows: number; pty: boolean } | null {
+  const session = sessions.get(sessionId);
+  if (!session) return null;
+  const safeCols = Math.min(400, Math.max(20, Math.trunc(cols)));
+  const safeRows = Math.min(200, Math.max(5, Math.trunc(rows)));
+  if (session.pty && session.running) {
+    try {
+      session.child.stdin.write(`\u001bHEARTH_RESIZE:${safeCols},${safeRows}\n`);
+    } catch {
+      // The session is already gone; callers can observe running=false.
+    }
+  }
+  return { sessionId, cols: safeCols, rows: safeRows, pty: session.pty };
 }
 
 export async function waitShellSession(sessionId: string, options: { timeoutMs?: number; match?: string } = {}): Promise<{

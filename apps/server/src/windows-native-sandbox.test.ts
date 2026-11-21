@@ -60,6 +60,75 @@ describe("WindowsNativeSandboxProvider", () => {
     expect(confined.networkEnforcement).toBe("full");
   });
 
+  it("builds a pty helper argv with console dimensions", async () => {
+    const provider = new WindowsNativeSandboxProvider({ helperPath: process.execPath, probe: false });
+    const workspace = "C:\\work";
+    const temp = "C:\\temp";
+    const policy = policyFor(workspace, temp);
+    const confined = await provider.confine({
+      argv: ["C:\\Windows\\System32\\cmd.exe"],
+      cwd: workspace,
+      policy,
+      pty: { cols: 100, rows: 40 }
+    });
+    expect(confined.argv).toContain("pty");
+    expect(confined.argv).toContain("--cols");
+    expect(confined.argv).toContain("100");
+    expect(confined.argv).toContain("--rows");
+    expect(confined.argv).toContain("40");
+    expect(confined.argv).not.toContain("sandbox");
+  });
+
+  it.runIf(hasHelper)("runs an interactive command through ConPTY", async () => {
+    const root = mkdtempSync(join(tmpdir(), "hearth-native-test-"));
+    const workspace = join(root, "ws");
+    const temp = join(root, "tmp");
+    mkdirSync(workspace);
+    mkdirSync(temp);
+    try {
+      const provider = new WindowsNativeSandboxProvider({ helperPath, probe: false });
+      const policy = policyFor(workspace, temp);
+      const confined = await provider.confine({
+        argv: [process.env.ComSpec ?? "C:\\Windows\\System32\\cmd.exe"],
+        cwd: workspace,
+        policy,
+        pty: { cols: 100, rows: 40 }
+      });
+      const output = await new Promise<string>((resolvePromise, reject) => {
+        const child = spawn(confined.argv[0]!, confined.argv.slice(1), {
+          cwd: confined.cwd,
+          env: confined.env,
+          windowsHide: true,
+          stdio: ["pipe", "pipe", "pipe"]
+        });
+        let text = "";
+        const timer = setTimeout(() => {
+          child.kill();
+          reject(new Error(`PTY output timeout: ${text.slice(-500)}`));
+        }, 12_000);
+        child.stdout.on("data", (chunk: Buffer) => {
+          text += chunk.toString("utf8");
+          if (text.includes("pty-ok")) {
+            child.stdin.write("exit\r\n");
+          }
+        });
+        child.once("error", (error) => {
+          clearTimeout(timer);
+          reject(error);
+        });
+        child.once("close", (code) => {
+          clearTimeout(timer);
+          if (code !== 0) reject(new Error(`PTY exit ${code}: ${text.slice(-500)}`));
+          else resolvePromise(text);
+        });
+        child.stdin.write("echo pty-ok\r\n");
+      });
+      expect(output).toContain("pty-ok");
+    } finally {
+      rmSync(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  }, 20_000);
+
   it("refuses net-allowlist instead of silently removing network access", async () => {
     const provider = new WindowsNativeSandboxProvider({ helperPath: process.execPath, probe: false });
     const policy = {
