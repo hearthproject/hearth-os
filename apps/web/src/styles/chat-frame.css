@@ -355,7 +355,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
-  max-width: 1120px;
+  max-width: 1280px;
   margin: 0 auto 7px;
   padding: 7px 10px;
   border-radius: var(--radius);
@@ -368,7 +368,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  max-width: 1120px;
+  max-width: 1280px;
   margin: 0 auto 7px;
 }
 

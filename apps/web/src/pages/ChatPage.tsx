@@ -17,6 +17,7 @@ import {
   Folder,
   Gauge,
   Loader2,
+  PanelRightOpen,
   Paperclip,
   Settings2,
   ShieldCheck,
@@ -606,7 +607,7 @@ export function ChatPage() {
   const modelName = modelSettings?.model?.trim() || "未配置模型";
   const providerName = modelSettings?.providerName ?? "";
   const reasoningEffort: ReasoningEffort = reasoningDraft ?? modelSettings?.reasoningEffort ?? "max";
-  const contextWindowTokens = modelSettings?.contextWindowTokens ?? 128_000;
+  const contextWindowTokens = modelSettings?.contextWindowTokens ?? 328_000;
   const usedTokens = (contextUsage?.inputTokens ?? 0) + (contextUsage?.outputTokens ?? 0);
   const contextPercent = contextWindowTokens > 0 ? Math.min(100, Math.round((usedTokens / contextWindowTokens) * 100)) : 0;
 
@@ -615,6 +616,7 @@ export function ChatPage() {
       <section className="chat-main">
         <header className="chat-header">
           <div className="chat-title-group">
+            <span className="chat-header-mark" aria-hidden="true"><Folder size={16} /></span>
             <h1>{current?.title ?? "新对话"}</h1>
             {(current ? projectsById.get(current.projectId ?? "") : activeProject) && (
               <span className="chat-project-chip" title={current ? projectsById.get(current.projectId ?? "")?.path : activeProject?.path}>
@@ -623,6 +625,15 @@ export function ChatPage() {
               </span>
             )}
           </div>
+          <button
+            type="button"
+            className="icon-button chat-artifacts-button"
+            onClick={openWorkspace}
+            title="查看对话产物"
+            aria-label="查看对话产物"
+          >
+            <PanelRightOpen size={16} />
+          </button>
         </header>
 
         <div className="chat-scroll">
@@ -956,7 +967,6 @@ function ChatBubble({ message, mailDraft = false, execution }: { message: ChatMe
               ))}
             </div>
           )}
-          <time>{formatTime(message.createdAt)}</time>
         </div>
       </div>
     );
