@@ -127,6 +127,7 @@ export function ChatPage() {
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [savingEffort, setSavingEffort] = useState(false);
   const [reasoningDraft, setReasoningDraft] = useState<ReasoningEffort | null>(null);
+  const [isCancelling, setIsCancelling] = useState(false);
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
   const [skillInstallRequest, setSkillInstallRequest] = useState<{ source: string } | null>(null);
   const [skillNotice, setSkillNotice] = useState<string | null>(null);
@@ -222,6 +223,9 @@ export function ChatPage() {
     return next;
   }, [conversationTasks, liveRuns]);
   const hasRunningTask = runs.some((task) => task.status === "running" || task.status === "queued");
+  useEffect(() => {
+    if (!hasRunningTask) setIsCancelling(false);
+  }, [hasRunningTask]);
   const timeline = useMemo<Array<TimelineMessage | TimelineRun>>(() => [
     ...visibleMessages.map((message): TimelineMessage => ({ kind: "message", key: `m:${message.id}`, at: message.createdAt, message })),
     ...runs.map((task): TimelineRun => ({ kind: "run", key: `r:${task.id}`, at: task.createdAt, task }))
@@ -533,6 +537,7 @@ export function ChatPage() {
   async function stopRunningTask() {
     const task = stoppableTask;
     if (!task) return;
+    setIsCancelling(true);
     try {
       await api.cancel(task.id);
     } catch {
@@ -818,6 +823,12 @@ export function ChatPage() {
 
         <div className="chat-scroll">
           <div className="message-list">
+            {isCancelling && (
+              <div className="chat-stopping">
+                <Loader2 size={16} className="spin" />
+                <span>正在停止任务，请稍候……</span>
+              </div>
+            )}
             {!configured && (
               <ChatNotice icon={<Settings2 size={15} />} tone="warn">
                 还没有接入聊天模型。普通问答需要先完成<Link to="/welcome">首次设置</Link>；执行请求仍会尝试运行。
