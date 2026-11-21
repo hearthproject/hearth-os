@@ -1275,6 +1275,36 @@ const LOCAL_WRITE_TOOL_NAMES = new Set([
 
 const TERMINAL_JOB_STATUSES = new Set(["settled", "completed", "finished", "failed", "stopped", "cancelled", "lost"]);
 
+const TOOL_TIMEOUT_DEFAULTS: Record<string, number> = {
+  shell: 300_000,
+  shell_wait: 300_000,
+  run_tests: 1_200_000,
+  diagnostics: 900_000,
+  workflow: 120_000,
+  fetch_url: 60_000,
+  capture_screen: 60_000,
+  read_file: 30_000,
+  read_document: 60_000,
+  read_tool_output: 30_000,
+  list_files: 30_000,
+  search_text: 30_000,
+  glob: 30_000,
+  grep: 30_000,
+  write_file: 60_000,
+  write_spreadsheet: 60_000,
+  write_document: 60_000,
+  edit_file: 60_000,
+  apply_patch: 60_000,
+  shell_output: 15_000,
+  shell_kill: 15_000,
+  ask_user: 0,
+  finish_task: 0,
+};
+
+function toolTimeoutFor(toolName: string, fallback: number): number {
+  return TOOL_TIMEOUT_DEFAULTS[toolName] ?? fallback;
+}
+
 async function executeToolWithTimeout(
   tool: AgentTool,
   call: AgentToolCall,
@@ -1282,7 +1312,7 @@ async function executeToolWithTimeout(
   fallbackTimeoutMs: number,
   parentSignal: AbortSignal
 ): Promise<AgentToolResult> {
-  const timeoutMs = tool.definition.timeoutMs ?? fallbackTimeoutMs;
+  const timeoutMs = tool.definition.timeoutMs ?? toolTimeoutFor(call.name, fallbackTimeoutMs);
   if (!timeoutMs || timeoutMs <= 0) return tool.execute(call.arguments, context);
   const controller = new AbortController();
   const onAbort = (): void => controller.abort();
