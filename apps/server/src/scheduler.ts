@@ -591,7 +591,8 @@ export class HearthScheduler {
       (
         task.error?.budgetExhaustion !== undefined ||
         task.error?.message.includes("预算") === true ||
-        task.error?.message.includes("Unknown event type: job.") === true
+        task.error?.message.includes("Unknown event type:") === true ||
+        task.error?.message.includes("未知事件类型") === true
       )
     );
     for (const task of legacyFailures) {
@@ -3185,7 +3186,7 @@ function errorMessage(error: unknown): string {
 }
 
 function expectedOutputsForTask(task: TaskRecord): string[] {
-  const declared = task.expectedOutputs ?? ["result.md"];
+  const declared = task.expectedOutputs?.length ? task.expectedOutputs : ["result.md"];
   const hasImage = declared.some((output) => /\.(png|jpe?g|webp)$/i.test(output));
   if (!hasImage && wantsScreenshot(task.title + " " + task.goal)) return ["desktop.png"];
   return declared;
