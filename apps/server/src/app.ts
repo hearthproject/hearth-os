@@ -8,6 +8,7 @@ import Fastify, { LogController, type FastifyReply } from "fastify";
 import type { EventEnvelope, ExecutorHealth, ExecutorId, ExecutorView, TaskRecord } from "@hearth/core";
 import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DELEGATION_WORKSPACE_POLICIES, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, EXECUTOR_IDS, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_ORIGINS, MEMORY_RETENTIONS, MEMORY_SENSITIVITIES, MEMORY_TAINT_STATES, MEMORY_TIERS, MEMORY_TRUST_LEVELS, RECONCILE_STATUSES, RUN_STATUSES, SANDBOX_MODES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
+import { installBackgroundTaskRegistry } from "./background-tasks.ts";
 import { loadCodexProfile, runCodex } from "@hearth/codex-executor";
 import { z } from "zod";
 import { ARTIFACT_DIR, ATTACHMENT_DIR, BACKUP_DIR, BROWSER_SETTINGS_PATH, CODEX_HOME_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, DOSSIER_DIR, DSH_HOME_DIR, EXECUTOR_HOME_DIR, EXECUTOR_SETTINGS_PATH, LIBRARY_MODEL_DIR, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, OUTBOX_DIR, REPO_ROOT, SKILL_DIR, SOURCE_CONTENT_DIR, SUPERVISION_PATH, WEB_DIST, WORKSPACE_DIR, WORKSTYLE_PATH } from "./config.ts";
@@ -633,6 +634,8 @@ export interface BuildServerOptions {
 export async function buildServer(options: BuildServerOptions = {}) {
   const ownsStore = !options.store;
   const store = options.store ?? new HearthStore(DB_PATH);
+  const backgroundTasks = installBackgroundTaskRegistry(store);
+  backgroundTasks.recoverLost();
   const serverStartedAt = new Date().toISOString();
   const service = new HearthService(store);
   const worktrees = new TaskWorktreeService(store, { workspaceRoot: WORKSPACE_DIR });

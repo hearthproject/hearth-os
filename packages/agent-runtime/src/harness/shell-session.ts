@@ -1,8 +1,9 @@
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { detectShell, type ShellSpec } from "./environment.ts";
+import { type BackgroundTaskRecord, type BackgroundTaskRegistry, type BackgroundTaskStatus } from "./background-tasks.ts";
 import {
   buildChildEnv,
   ensureSandboxTemp,
@@ -45,6 +46,7 @@ export interface ShellSession {
   running: boolean;
   pty: boolean;
   sandbox: ShellSandboxRun | null;
+  backgroundTasks?: BackgroundTaskRegistry;
   onExit?: ((info: { sessionId: string; exitCode: number | null }) => void) | undefined;
   exitNotified?: boolean;
 }
@@ -79,6 +81,9 @@ export async function startShellSession(options: {
   shell?: ShellSpec;
   stdin?: string;
   pty?: { cols?: number; rows?: number };
+  backgroundTasks?: BackgroundTaskRegistry;
+  taskId?: string;
+  runId?: string;
   sandbox?: ShellSandboxOptions;
   unsafeNoSandbox?: boolean;
   signal?: AbortSignal;
@@ -170,6 +175,7 @@ export async function startShellSession(options: {
     running: true,
     pty: pty !== null,
     sandbox,
+    ...(options.backgroundTasks ? { backgroundTasks: options.backgroundTasks } : {}),
     ...(options.onExit ? { onExit: options.onExit } : {})
   };
   sessions.set(id, session);
@@ -178,6 +184,25 @@ export async function startShellSession(options: {
     writeFileSync(outputPath, `$ ${redactSecrets(options.command)}\n`, "utf8");
   } catch {
     // The in-memory buffer still works when the log cannot be created.
+  }
+  try {
+    const now = new Date(session.startedAt).toISOString();
+    options.backgroundTasks?.start({
+      sessionId: id,
+      taskId: options.taskId ?? null,
+      runId: options.runId ?? null,
+      pid: child.pid ?? null,
+      startTime: now,
+      command: options.command,
+      outputPath,
+      pty: pty !== null,
+      status: "running",
+      exitCode: null,
+      createdAt: now,
+      updatedAt: now
+    });
+  } catch {
+    // A registry write failure must not prevent the shell from running.
   }
 
   const onChunk = (chunk: Buffer): void => {
@@ -202,11 +227,13 @@ export async function startShellSession(options: {
     }
     session.running = false;
     session.exitCode = 1;
+    finishBackgroundTask(session, "exited");
     notifyExit(session);
   });
   child.on("exit", (code) => {
     session.running = false;
     session.exitCode = code;
+    finishBackgroundTask(session, "exited");
     notifyExit(session);
   });
   if (options.stdin !== undefined) {
@@ -225,6 +252,9 @@ export async function runShellSession(options: {
   shell?: ShellSpec;
   stdin?: string;
   pty?: { cols?: number; rows?: number };
+  backgroundTasks?: BackgroundTaskRegistry;
+  taskId?: string;
+  runId?: string;
   sandbox?: ShellSandboxOptions;
   unsafeNoSandbox?: boolean;
   signal?: AbortSignal;
@@ -267,6 +297,14 @@ function notifyExit(session: ShellSession): void {
   session.onExit?.({ sessionId: session.id, exitCode: session.exitCode });
 }
 
+function finishBackgroundTask(session: ShellSession, status: Exclude<BackgroundTaskStatus, "running">): void {
+  try {
+    session.backgroundTasks?.finish(session.id, session.exitCode, status);
+  } catch {
+    // The shell lifecycle continues even if the durable record cannot update.
+  }
+}
+
 function classifySandboxFailure(session: ShellSession): ShellSandboxFailure | null {
   if (!session.sandbox || session.exitCode === null) return null;
   if (runnerFailed(session.output, session.exitCode, session.sandbox.runnerFailureRules)) return "runner_failure";
@@ -274,16 +312,40 @@ function classifySandboxFailure(session: ShellSession): ShellSandboxFailure | nu
   return null;
 }
 
-export function shellOutput(sessionId: string, offset = 0): { output: string; running: boolean; exitCode: number | null; outputPath: string | null } | null {
+export function shellOutput(sessionId: string, offset = 0, backgroundTasks?: BackgroundTaskRegistry): { output: string; running: boolean; exitCode: number | null; outputPath: string | null; status?: BackgroundTaskStatus } | null {
   const session = sessions.get(sessionId);
-  if (!session) return null;
+  if (!session) {
+    const record = backgroundTasks?.get(sessionId);
+    if (!record) return null;
+    const text = readBackgroundOutput(record.outputPath);
+    const safeOffset = Math.max(0, Math.min(offset, text.length));
+    return {
+      output: text.slice(safeOffset),
+      running: false,
+      exitCode: record.exitCode,
+      outputPath: record.outputPath,
+      status: record.status
+    };
+  }
   const safeOffset = Math.max(0, Math.min(offset, session.output.length));
   return { output: session.output.slice(safeOffset), running: session.running, exitCode: session.exitCode, outputPath: session.outputPath };
 }
 
-export function shellSessionInfo(sessionId: string): { running: boolean; exitCode: number | null; command: string; outputPath: string; pty: boolean; sandbox: ShellSandboxRun | null } | null {
+export function shellSessionInfo(sessionId: string, backgroundTasks?: BackgroundTaskRegistry): { running: boolean; exitCode: number | null; command: string; outputPath: string; pty: boolean; sandbox: ShellSandboxRun | null; status?: BackgroundTaskStatus } | null {
   const session = sessions.get(sessionId);
-  if (!session) return null;
+  if (!session) {
+    const record = backgroundTasks?.get(sessionId);
+    if (!record) return null;
+    return {
+      running: false,
+      exitCode: record.exitCode,
+      command: record.command,
+      outputPath: record.outputPath,
+      pty: record.pty,
+      sandbox: null,
+      status: record.status
+    };
+  }
   return { running: session.running, exitCode: session.exitCode, command: session.command, outputPath: session.outputPath, pty: session.pty, sandbox: session.sandbox };
 }
 
@@ -316,7 +378,7 @@ export function resizeShellSession(sessionId: string, cols: number, rows: number
   return { sessionId, cols: safeCols, rows: safeRows, pty: session.pty };
 }
 
-export async function waitShellSession(sessionId: string, options: { timeoutMs?: number; match?: string } = {}): Promise<{
+export async function waitShellSession(sessionId: string, options: { timeoutMs?: number; match?: string } = {}, backgroundTasks?: BackgroundTaskRegistry): Promise<{
   sessionId: string;
   output: string;
   running: boolean;
@@ -326,9 +388,27 @@ export async function waitShellSession(sessionId: string, options: { timeoutMs?:
   outputPath: string;
   sandbox: ShellSandboxRun | null;
   sandboxFailure: ShellSandboxFailure | null;
+  status?: BackgroundTaskStatus;
 } | null> {
   const session = sessions.get(sessionId);
-  if (!session) return null;
+  if (!session) {
+    const record = backgroundTasks?.get(sessionId);
+    if (!record) return null;
+    const output = readBackgroundOutput(record.outputPath);
+    const matcher = options.match ? compileMatcher(options.match) : null;
+    return {
+      sessionId,
+      output: output.slice(-8_000),
+      running: false,
+      exitCode: record.exitCode,
+      matched: matcher ? matcher.test(output) : false,
+      timedOut: false,
+      outputPath: record.outputPath,
+      sandbox: null,
+      sandboxFailure: null,
+      status: record.status
+    };
+  }
   const timeoutMs = Math.min(10 * 60_000, Math.max(100, options.timeoutMs ?? 60_000));
   const matcher = options.match ? compileMatcher(options.match) : null;
   const started = Date.now();
@@ -358,9 +438,12 @@ function compileMatcher(pattern: string): RegExp {
   }
 }
 
-export function killShellSession(sessionId: string): boolean {
+export function killShellSession(sessionId: string, backgroundTasks?: BackgroundTaskRegistry): boolean {
   const session = sessions.get(sessionId);
-  if (!session) return false;
+  if (!session) {
+    const record = backgroundTasks?.get(sessionId);
+    return Boolean(record && record.status !== "running");
+  }
   if (!session.running) return true;
   session.running = false;
   session.exitCode = null;
@@ -382,6 +465,7 @@ export function killShellSession(sessionId: string): boolean {
       // Process may already be gone.
     }
   }
+  finishBackgroundTask(session, "killed");
   notifyExit(session);
   return true;
 }
@@ -392,7 +476,7 @@ export function killShellSession(sessionId: string): boolean {
  * first, then kill children bottom-up so a just-spawned grandchild cannot
  * survive as an orphan.
  */
-function killWindowsProcessTree(pid: number): void {
+export function killWindowsProcessTree(pid: number): void {
   const script = [
     "$all = Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId;",
     "$children = @{};",
@@ -443,6 +527,15 @@ function delay(ms: number): Promise<void> {
 
 function stripAnsi(text: string): string {
   return text.replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, "");
+}
+
+function readBackgroundOutput(path: string): string {
+  try {
+    const text = redactSecrets(stripAnsi(readFileSync(path, "utf8")));
+    return text.length > MAX_BUFFER ? text.slice(-MAX_BUFFER) : text;
+  } catch {
+    return "";
+  }
 }
 
 process.once("exit", cleanupShellSessions);

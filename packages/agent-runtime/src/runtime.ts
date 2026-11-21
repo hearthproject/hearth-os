@@ -744,6 +744,9 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         signal,
         state,
         ...(options.goalRoot ? { goalRoot: options.goalRoot } : {}),
+        ...(options.backgroundTasks ? { backgroundTasks: options.backgroundTasks } : {}),
+        ...(options.taskId ? { taskId: options.taskId } : {}),
+        ...(options.runId ? { runId: options.runId } : {}),
         fullAccess: options.isFullPermission?.() === true,
         mode: options.mode ?? "build",
         ...(options.sandbox ? { sandbox: options.sandbox } : {}),
@@ -1107,6 +1110,9 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
               signal,
               state,
               ...(options.goalRoot ? { goalRoot: options.goalRoot } : {}),
+              ...(options.backgroundTasks ? { backgroundTasks: options.backgroundTasks } : {}),
+              ...(options.taskId ? { taskId: options.taskId } : {}),
+              ...(options.runId ? { runId: options.runId } : {}),
               fullAccess: options.isFullPermission?.() === true,
               mode: options.mode ?? "build",
               ...(options.sandbox ? { sandbox: options.sandbox } : {}),
@@ -1290,7 +1296,10 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
               permissions: options.permissions,
               signal,
               state,
-              ...(options.goalRoot ? { goalRoot: options.goalRoot } : {})
+              ...(options.goalRoot ? { goalRoot: options.goalRoot } : {}),
+              ...(options.backgroundTasks ? { backgroundTasks: options.backgroundTasks } : {}),
+              ...(options.taskId ? { taskId: options.taskId } : {}),
+              ...(options.runId ? { runId: options.runId } : {})
             });
           } catch (error) {
             issue = `交付物自检失败：${errorMessage(error)}`;

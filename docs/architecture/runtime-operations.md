@@ -80,3 +80,14 @@ Windows 单机执行器不再依赖 Node ACL runner。`apps/native/hearth-native
 - ConPTY 子进程使用 `STARTF_USESTDHANDLES` + `INVALID_HANDLE_VALUE`，并禁止句柄继承。否则 helper 的输入线程与子进程会抢同一个 stdin，表现为整行命令不执行或随机丢字符。
 - PTY 会话不跨宿主重启恢复；重启时由后台任务注册表标记 `lost`，不会假装进程仍在运行。
 
+## 持久后台任务（M4）
+
+每个 shell 会话在启动时写入 SQLite `background_processes`（`session_id`、`pid`、`start_time`、`command`、`output_path`、`task_id`、`run_id`、`status`、`exit_code`）。表由 `SqliteBackgroundTaskRegistry` 在同一个 `HearthStore` 连接上创建，保持单 SQLite 写者。
+
+- `pid` 是 helper 进程；`start_time` 通过 helper 的 `process-info` 读取真实进程创建时间，不用 Node 的启动时间近似。
+- 正常退出写 `exited`，主动停止写 `killed`。
+- 宿主启动时 `recoverLost()` 扫描 `running` 记录：PID + 创建时间都匹配才认定是同一进程，先杀进程树再标记 `lost`；创建时间不匹配视为 PID 复用，只标记 `lost`，不误杀。
+- 内存 Map 仍是运行中会话的输出来源；`shell_output` / `shell_wait` / `shell_kill` 在 Map 找不到时回退到注册表与日志文件，并向模型明确返回 `lost`。
+- PTY 会话同样写入注册表，但重启后不尝试恢复终端状态，只做 `lost` 标记和孤儿清理。
+
+

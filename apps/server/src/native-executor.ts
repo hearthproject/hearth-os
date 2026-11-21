@@ -55,6 +55,7 @@ import { wantsCodeExecution, wantsGithubAccess, wantsPublicWebResearch, wantsScr
 import { supportsToolCalling, streamAgentTurn } from "./model-agent.ts";
 import { completeChat } from "./model-client.ts";
 import { WindowsNativeSandboxProvider } from "./windows-native-sandbox.ts";
+import { getBackgroundTaskRegistry } from "./background-tasks.ts";
 import { DOSSIER_DIR, HEARTH_ROOT, WORKSTYLE_PATH } from "./config.ts";
 import { DossierStore, dossierPromptBlock } from "./dossier.ts";
 import { WorkstyleStore, workstylePromptBlock } from "./workstyle.ts";
@@ -224,6 +225,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
   const state = options.resume?.state ?? createAgentState(options.prepared.root);
   const workspaceHooks = loadWorkspaceHooks(options.prepared.root, process.env.HEARTH_TRUST_WORKSPACE_HOOKS === "1");
   //具体实现
+  const backgroundTasks = getBackgroundTaskRegistry();
   const result = await runAgent({
     model: drafting ? draftModelAdapter(options.settings, resolve(options.prepared.outDir, options.expectedOutputs[0] ?? "result.md")) : modelAdapter(options.settings),
     tools: toolsForRun,
@@ -247,6 +249,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     ...(options.runId ? { runId: options.runId } : {}),
     ...(options.taskId ? { taskId: options.taskId } : {}),
     ...(options.operationLedger ? { operationLedger: options.operationLedger } : {}),
+    ...(backgroundTasks ? { backgroundTasks } : {}),
     ...(options.journalSink
       ? { journal: { sink: options.journalSink } }
       : options.journalPath

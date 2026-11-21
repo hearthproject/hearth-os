@@ -2,6 +2,7 @@
 
 import type { RunBudget, RunUsage, TaskPermissions } from "@hearth/core";
 import type { SandboxRuntime } from "./harness/sandbox.ts";
+import type { BackgroundTaskRegistry } from "./harness/background-tasks.ts";
 import type { AgentHookDefinition } from "./harness/hooks.ts";
 import type { AgentFailure, AgentToolError } from "./errors.ts";
 import type { RetryPolicy } from "./retry-policy.ts";
@@ -79,6 +80,9 @@ export interface AgentToolContext {
   /** Task-scoped root for goal/plan files. Defaults to workspaceRoot. */
   goalRoot?: string;
   sandbox?: SandboxRuntime;
+  backgroundTasks?: BackgroundTaskRegistry;
+  taskId?: string;
+  runId?: string;
   verifyGoalCompletion?: (goal: {
     goalId: string;
     title: string;
@@ -318,6 +322,7 @@ export interface AgentRuntimeOptions {
   workspaceRoot: string;
   outDir: string;
   sandbox?: SandboxRuntime;
+  backgroundTasks?: BackgroundTaskRegistry;
   signal?: AbortSignal;
   resume?: AgentResumeState;
   onEvent?: (event: RuntimeEvent) => void;

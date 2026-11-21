@@ -906,6 +906,9 @@ const shellTool: AgentTool = {
       ...(env ? { env } : {}),
       ...(stdin !== undefined ? { stdin } : {}),
       ...(pty ? { pty } : {}),
+      ...(context.backgroundTasks ? { backgroundTasks: context.backgroundTasks } : {}),
+      ...(context.taskId ? { taskId: context.taskId } : {}),
+      ...(context.runId ? { runId: context.runId } : {}),
       ...(sandbox ? { sandbox } : {}),
       ...(unsafeNoSandbox ? { unsafeNoSandbox: true } : {}),
       onStarted: ({ sessionId }: { sessionId: string }) => {
@@ -1033,12 +1036,19 @@ const shellOutputTool: AgentTool = {
       additionalProperties: false
     }
   },
-  async execute(input) {
+  async execute(input, context) {
     const args = objectArgs(input);
     const sessionId = stringArg(args, "sessionId");
-    const output = shellOutput(sessionId, intArg(args, "offset", 0));
+    const output = shellOutput(sessionId, intArg(args, "offset", 0), context.backgroundTasks);
     if (!output) throw new Error(`找不到 shell session：${sessionId}`);
     const truncated = truncateToolOutput(output.output, { maxChars: MAX_SHELL_OUTPUT_CHARS, maxLines: 240, label: "read with a larger offset or narrower output" });
+    if (output.status === "lost") {
+      return {
+        content: `session ${sessionId}: lost（宿主重启时进程已丢失，没有继续运行）\n\n${truncated.content}`,
+        isError: true,
+        metadata: { sessionId, background: false, exitCode: output.exitCode, lost: true, truncated: truncated.truncated, ...(output.outputPath ? { fullOutputPath: output.outputPath } : {}) }
+      };
+    }
     return {
       content: `session ${sessionId}: ${output.running ? "running" : `exit ${output.exitCode ?? "unknown"}`}\n\n${truncated.content}`,
       metadata: { sessionId, background: output.running, exitCode: output.exitCode, truncated: truncated.truncated, ...(output.outputPath ? { fullOutputPath: output.outputPath } : {}) }
@@ -1062,13 +1072,21 @@ const shellWaitTool: AgentTool = {
       additionalProperties: false
     }
   },
-  async execute(input) {
+  async execute(input, context) {
     const args = objectArgs(input);
     const sessionId = stringArg(args, "sessionId");
     const timeoutSeconds = Math.min(600, Math.max(1, intArg(args, "timeoutSeconds", 30)));
     const match = typeof args.match === "string" && args.match.length > 0 ? args.match : undefined;
-    const result = await waitShellSession(sessionId, { timeoutMs: timeoutSeconds * 1_000, ...(match ? { match } : {}) });
+    const result = await waitShellSession(sessionId, { timeoutMs: timeoutSeconds * 1_000, ...(match ? { match } : {}) }, context.backgroundTasks);
     if (!result) throw new Error(`找不到 shell session：${sessionId}`);
+    if (result.status === "lost") {
+      const truncated = truncateToolOutput(result.output, { maxChars: MAX_SHELL_OUTPUT_CHARS, maxLines: 240, label: "use shell_output for the full buffer" });
+      return {
+        content: `session ${sessionId}: lost（宿主重启时进程已丢失，没有继续运行）\n\n${truncated.content}`,
+        isError: true,
+        metadata: { sessionId, background: false, exitCode: result.exitCode, lost: true, truncated: truncated.truncated, ...(result.outputPath ? { fullOutputPath: result.outputPath } : {}) }
+      };
+    }
     const status = result.running
       ? result.matched ? "running (match found)" : `running (timeout after ${timeoutSeconds}s)`
       : `exit ${result.exitCode ?? "unknown"}`;
@@ -1098,12 +1116,18 @@ const shellKillTool: AgentTool = {
       additionalProperties: false
     }
   },
-  async execute(input) {
+  async execute(input, context) {
     const args = objectArgs(input);
     const sessionId = stringArg(args, "sessionId");
-    const info = shellSessionInfo(sessionId);
+    const info = shellSessionInfo(sessionId, context.backgroundTasks);
     if (!info) throw new Error(`找不到 shell session：${sessionId}`);
-    killShellSession(sessionId);
+    if (info.status === "lost") {
+      return {
+        content: `session ${sessionId} 已在前一次宿主重启时丢失，没有可停止的进程。`,
+        metadata: { sessionId, lost: true }
+      };
+    }
+    killShellSession(sessionId, context.backgroundTasks);
     return { content: `已停止 session ${sessionId}（${info.command}）。`, metadata: { sessionId } };
   }
 };

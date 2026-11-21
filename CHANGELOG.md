@@ -41,6 +41,14 @@
 - 修复 ConPTY 输入抢占：子进程使用 `STARTF_USESTDHANDLES` + `INVALID_HANDLE_VALUE` 且不继承句柄，整行命令和逐字符输入均可靠。
 - 新增 2 项 Windows 测试：PTY argv 契约与 AppContainer 内交互式命令执行。
 
+### 持久后台任务
+
+- 新增 SQLite `background_processes`：记录 session、PID、真实进程创建时间、命令、日志路径、task/run、状态与退出码。
+- 宿主启动时扫描 `running` 记录：PID + 创建时间匹配才杀进程树，否则按 PID 复用处理；全部标记 `lost`，不留下幽灵后台任务。
+- `shell_output` / `shell_wait` / `shell_kill` 在内存会话不存在时回退到持久注册表与日志文件，并向模型明确报告 `lost`。
+- 新增 3 项注册表测试：持久化/结算、死 PID 标记、匹配 PID 的进程树清理。
+
+
 
 ## 0.3.2 - 2026-11-21
 

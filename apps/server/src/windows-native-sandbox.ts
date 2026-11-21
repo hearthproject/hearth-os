@@ -172,8 +172,14 @@ export class WindowsNativeSandboxProvider implements SandboxProvider {
 
   private resolveHelper(): string {
     if (this.helperPath) return this.helperPath;
+    this.helperPath = resolveNativeHelperPath(this.explicitHelperPath);
+    return this.helperPath;
+  }
+}
+
+export function resolveNativeHelperPath(explicitHelperPath?: string): string {
     const candidates = [
-      this.explicitHelperPath,
+      explicitHelperPath,
       process.env.HEARTH_NATIVE_HELPER,
       join(dirname(process.execPath), "hearth-native.exe"),
       join(dirname(process.execPath), "native", "hearth-native.exe"),
@@ -182,15 +188,11 @@ export class WindowsNativeSandboxProvider implements SandboxProvider {
       join(process.cwd(), "apps", "native", "bin", "hearth-native.exe")
     ].filter((candidate): candidate is string => Boolean(candidate));
     for (const candidate of candidates) {
-      if (existsSync(candidate)) {
-        this.helperPath = candidate;
-        return candidate;
-      }
+      if (existsSync(candidate)) return candidate;
     }
     throw new SandboxUnavailableError(
       "找不到 hearth-native.exe。请运行 npm run build:native，或设置 HEARTH_NATIVE_HELPER 指向 helper"
     );
-  }
 }
 
 export function windowsNativeProviderAvailable(): boolean {

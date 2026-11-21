@@ -21,6 +21,7 @@ export * from "./harness/file-state.ts";
 export * from "./harness/edit-match.ts";
 export * from "./harness/tool-output.ts";
 export * from "./harness/shell-session.ts";
+export * from "./harness/background-tasks.ts";
 export * from "./harness/search.ts";
 export * from "./harness/todo.ts";
 export * from "./harness/verification.ts";
