@@ -182,7 +182,9 @@ async function main() {
     && process.env.HEARTH_UPDATER_PUBKEY
     && process.env.HEARTH_UPDATER_ENDPOINT
   );
-  const tauriVersion = JSON.parse(readFileSync(join(tauriRoot, "src-tauri", "tauri.conf.json"), "utf8")).version;
+  const versionOverride = process.env.HEARTH_BUILD_VERSION?.trim();
+  const tauriConfig = JSON.parse(readFileSync(join(tauriRoot, "src-tauri", "tauri.conf.json"), "utf8"));
+  const tauriVersion = versionOverride || tauriConfig.version;
   const targetRelease = process.env.CARGO_TARGET_DIR
     ? join(process.env.CARGO_TARGET_DIR, "release")
     : join(tauriRoot, "src-tauri", "target", "release");
@@ -192,22 +194,27 @@ async function main() {
     console.log("cleared stale staged resources");
   }
   const tauriArgs = ["build"];
+  const overlay = {};
+  if (versionOverride) overlay.version = versionOverride;
   if (updaterReady) {
-    const overlayPath = join(tauriRoot, "src-tauri", "updater.build.json");
-    writeFileSync(overlayPath, JSON.stringify({
-      bundle: { createUpdaterArtifacts: true },
-      plugins: {
-        updater: {
-          pubkey: process.env.HEARTH_UPDATER_PUBKEY,
-          endpoints: [process.env.HEARTH_UPDATER_ENDPOINT]
-        }
+    overlay.bundle = { createUpdaterArtifacts: true };
+    overlay.plugins = {
+      updater: {
+        pubkey: process.env.HEARTH_UPDATER_PUBKEY,
+        endpoints: [process.env.HEARTH_UPDATER_ENDPOINT]
       }
-    }, null, 2), "utf8");
-    tauriArgs.push("--config", overlayPath, "--features", "updater");
+    };
     console.log("updater: signed build enabled");
   } else {
     console.warn("updater: disabled because TAURI_SIGNING_PRIVATE_KEY, HEARTH_UPDATER_PUBKEY or HEARTH_UPDATER_ENDPOINT is missing");
   }
+  if (Object.keys(overlay).length > 0) {
+    const overlayPath = join(tauriRoot, "src-tauri", "build-overrides.json");
+    writeFileSync(overlayPath, JSON.stringify(overlay, null, 2), "utf8");
+    tauriArgs.push("--config", overlayPath);
+    if (updaterReady) tauriArgs.push("--features", "updater");
+  }
+  if (versionOverride) console.log(`version override: ${tauriVersion}`);
 
   await run(join(repoRoot, "node_modules", ".bin", "tauri.cmd"), tauriArgs, tauriRoot);
 

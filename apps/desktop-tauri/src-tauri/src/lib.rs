@@ -6,7 +6,7 @@ use std::{
     net::TcpStream,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -47,7 +47,9 @@ struct ServerConfig {
     web: PathBuf,
     node: PathBuf,
     resources: PathBuf,
-    codex: Option<PathBuf>,
+    /// Resolved lazily: `where.exe codex.exe` costs ~130ms and must not run
+    /// before the splash window is on screen.
+    codex: OnceLock<Option<PathBuf>>,
     port: u16,
 }
 
@@ -574,10 +576,20 @@ fn parse_http_response(raw: &[u8]) -> Option<HttpResponse> {
 }
 
 fn http_request(port: u16, method: &str, path: &str, body: Option<&str>) -> Option<HttpResponse> {
+    http_request_with_timeout(port, method, path, body, Duration::from_millis(400))
+}
+
+fn http_request_with_timeout(
+    port: u16,
+    method: &str,
+    path: &str,
+    body: Option<&str>,
+    connect_timeout: Duration,
+) -> Option<HttpResponse> {
     let address = format!("127.0.0.1:{port}");
     let mut stream = TcpStream::connect_timeout(
         &address.parse().ok()?,
-        Duration::from_millis(400),
+        connect_timeout,
     )
     .ok()?;
     let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
@@ -594,9 +606,18 @@ fn http_request(port: u16, method: &str, path: &str, body: Option<&str>) -> Opti
 }
 
 fn ready_probe(port: u16) -> bool {
-    http_request(port, "GET", "/api/ready", None)
-        .map(|response| response.status == 200 && response.body.contains("Hearth"))
-        .unwrap_or(false)
+    // Windows loopback connect attempts to a closed port can hang until the
+    // timeout expires (security software filters the RST), so keep this probe
+    // short: a listening server accepts instantly.
+    http_request_with_timeout(
+        port,
+        "GET",
+        "/api/ready",
+        None,
+        Duration::from_millis(50),
+    )
+    .map(|response| response.status == 200 && response.body.contains("Hearth"))
+    .unwrap_or(false)
 }
 
 fn wait_ready(port: u16, timeout: Duration) -> bool {
@@ -605,19 +626,25 @@ fn wait_ready(port: u16, timeout: Duration) -> bool {
         if ready_probe(port) {
             return true;
         }
-        thread::sleep(Duration::from_millis(250));
+        thread::sleep(Duration::from_millis(50));
     }
     false
 }
 
 fn port_status(port: u16) -> PortStatus {
     let address = format!("127.0.0.1:{port}");
-    if TcpStream::connect_timeout(&address.parse().expect("loopback address"), Duration::from_millis(250))
+    if TcpStream::connect_timeout(&address.parse().expect("loopback address"), Duration::from_millis(50))
         .is_err()
     {
         return PortStatus::Free;
     }
-    match http_request(port, "GET", "/api/ready", None) {
+    match http_request_with_timeout(
+        port,
+        "GET",
+        "/api/ready",
+        None,
+        Duration::from_millis(50),
+    ) {
         Some(response) if response.status == 200 && response.body.contains("Hearth") => {
             PortStatus::Hearth
         }
@@ -660,7 +687,7 @@ fn spawn_server(config: &Arc<ServerConfig>, logs: &Arc<DesktopLogs>) -> Result<C
             command.env("HEARTH_PDF_ASSETS", path);
         }
     }
-    if let Some(codex) = &config.codex {
+    if let Some(codex) = config.codex.get_or_init(resolve_codex) {
         command.env("HEARTH_CODEX_PATH", codex);
     }
 
@@ -1035,13 +1062,14 @@ fn check_environment(config: &ServerConfig) -> EnvironmentReport {
     items.push(EnvironmentItem {
         id: "codex",
         label: "Codex 执行器",
-        status: if config.codex.is_some() {
+        status: if config.codex.get_or_init(resolve_codex).is_some() {
             EnvironmentStatus::Ok
         } else {
             EnvironmentStatus::Warn
         },
         detail: config
             .codex
+            .get_or_init(resolve_codex)
             .as_ref()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "未找到 codex.exe；native 执行器仍可用".to_string()),
@@ -1194,6 +1222,17 @@ fn navigation_allowed(url: &tauri::Url) -> bool {
         && url.port() == Some(PORT)
 }
 
+fn wait_for_main_window(app: &tauri::AppHandle, timeout: Duration) -> Option<WebviewWindow> {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if let Some(window) = app.get_webview_window("main") {
+            return Some(window);
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    None
+}
+
 fn build_window(app: &tauri::AppHandle) -> Result<WebviewWindow, String> {
     WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title("Hearth")
@@ -1343,25 +1382,75 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         web,
         node,
         resources,
-        codex: resolve_codex(),
+        codex: OnceLock::new(),
         port: PORT,
     });
     logs.main.write(&format!(
-        "server={} node={} codex={}",
+        "server={} node={}",
         server.display(),
-        config.node.display(),
-        config
-            .codex
-            .as_ref()
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|| "none".to_string())
+        config.node.display()
     ));
 
-    let window = build_window(app.handle())?;
+    let boot = Instant::now();
     let supervisor = Supervisor::new(config, logs.clone());
     app.manage(supervisor.clone());
+
+    // Kick off Node before the WebView finishes initialising: module parsing
+    // and WebView2 setup then overlap instead of running back to back.
+    let handle = app.handle().clone();
+    let startup = supervisor.clone();
+    thread::spawn(move || {
+        if let Err(message) = startup.start() {
+            startup.logs.main.write(&message);
+            message_box("Hearth 启动失败", &message, MB_OK | MB_ICONWARNING);
+            if let Some(window) = handle.get_webview_window("main") {
+                let script = format!(
+                    "window.hearthSplash?.fail({});",
+                    serde_json::to_string(&message).unwrap_or_else(|_| "\"启动失败\"".to_string())
+                );
+                let _ = window.eval(&script);
+            }
+            handle.exit(0);
+            return;
+        }
+        startup
+            .logs
+            .main
+            .write(&format!("server ready in {}ms", boot.elapsed().as_millis()));
+        let Some(window) = wait_for_main_window(&handle, Duration::from_secs(15)) else {
+            startup.logs.main.write("main window missing after server start");
+            handle.exit(0);
+            return;
+        };
+        let url = format!("http://127.0.0.1:{}", startup.config.port);
+        let script = format!(
+            "window.location.replace({});",
+            serde_json::to_string(&url).unwrap_or_default()
+        );
+        if let Err(error) = window.eval(&script) {
+            startup.logs.main.write(&format!("navigate failed: {error}"));
+        }
+        let _ = window.show();
+        let _ = window.set_focus();
+        startup
+            .logs
+            .main
+            .write(&format!("navigated in {}ms", boot.elapsed().as_millis()));
+        let intro = startup.clone();
+        thread::spawn(move || {
+            // `check_environment` spawns git, gh and npm. Let the web UI paint
+            // first so those processes do not compete with the first render.
+            thread::sleep(Duration::from_millis(1200));
+            maybe_show_environment_intro(&intro.config);
+        });
+    });
+
+    build_window(app.handle())?;
+    logs.main
+        .write(&format!("window ready in {}ms", boot.elapsed().as_millis()));
     create_tray(app.handle())?;
-    logs.main.write("tray created");
+    logs.main
+        .write(&format!("tray ready in {}ms", boot.elapsed().as_millis()));
 
     if let Some(milliseconds) = env::var("HEARTH_DESKTOP_AUTO_QUIT_MS")
         .ok()
@@ -1380,33 +1469,6 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    let handle = app.handle().clone();
-    let startup = supervisor.clone();
-    thread::spawn(move || {
-        if let Err(message) = startup.start() {
-            startup.logs.main.write(&message);
-            message_box("Hearth 启动失败", &message, MB_OK | MB_ICONWARNING);
-            let script = format!(
-                "window.hearthSplash?.fail({});",
-                serde_json::to_string(&message).unwrap_or_else(|_| "\"启动失败\"".to_string())
-            );
-            let _ = window.eval(&script);
-            handle.exit(0);
-            return;
-        }
-        let url = format!("http://127.0.0.1:{}", startup.config.port);
-        let script = format!(
-            "window.location.replace({});",
-            serde_json::to_string(&url).unwrap_or_default()
-        );
-        if let Err(error) = window.eval(&script) {
-            startup.logs.main.write(&format!("navigate failed: {error}"));
-        }
-        let _ = window.show();
-        let _ = window.set_focus();
-        maybe_show_environment_intro(&startup.config);
-    });
-
     Ok(())
 }
 
@@ -1419,14 +1481,12 @@ fn pick_folder() -> Option<String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let mut builder = tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             show_main(app);
         }));
     #[cfg(feature = "updater")]
-    {
-        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
-    }
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     let app = builder
         .invoke_handler(tauri::generate_handler![pick_folder])
         .setup(|app| setup_app(app))
