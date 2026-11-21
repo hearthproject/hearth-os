@@ -990,6 +990,12 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
 
       if (result.content.length > 16_000) {
         const stored = storeOversizedToolResult(options.outDir, call.name, result.content);
+        if (stored.fullOutputPath) {
+          state.toolOutputs = {
+            ...(state.toolOutputs ?? {}),
+            [call.id]: { path: stored.fullOutputPath, bytes: stored.bytes, tokens: stored.tokens }
+          };
+        }
         result = {
           ...result,
           content: stored.content,

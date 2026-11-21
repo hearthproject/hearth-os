@@ -103,6 +103,10 @@ export interface AgentToolMetadata {
   snapshotId?: string;
   snapshotIds?: string[];
   unchanged?: boolean;
+  offset?: number;
+  end?: number;
+  totalChars?: number;
+  eof?: boolean;
   agentId?: string;
   subagentType?: string;
   agentStatus?: "running" | "completed" | "failed" | "cancelled";
@@ -201,6 +205,8 @@ export interface AgentToolState {
   activeWork?: AgentActiveWork[];
   /** Names discovered through tool_search and callable on later turns. */
   exposedTools?: string[];
+  /** Full output paths for oversized tool results, keyed by tool call ID. */
+  toolOutputs?: Record<string, { path: string; bytes: number; tokens: number }>;
 }
 
 export interface SerializedAgentToolState {
@@ -219,6 +225,8 @@ export interface SerializedAgentToolState {
   activeWork?: AgentActiveWork[];
   /** Names discovered through tool_search and callable on later turns. */
   exposedTools?: string[];
+  /** Full output paths for oversized tool results, keyed by tool call ID. */
+  toolOutputs?: Record<string, { path: string; bytes: number; tokens: number }>;
 }
 
 export interface AgentTool {

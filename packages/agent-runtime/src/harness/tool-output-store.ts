@@ -11,10 +11,12 @@ const TAIL_CHARS = 6_000;
 export interface StoredToolResult {
   content: string;
   fullOutputPath: string | null;
+  bytes: number;
+  tokens: number;
 }
 
 export function storeOversizedToolResult(outDir: string, name: string, content: string): StoredToolResult {
-  if (content.length <= MAX_INLINE_CHARS) return { content, fullOutputPath: null };
+  if (content.length <= MAX_INLINE_CHARS) return { content, fullOutputPath: null, bytes: content.length, tokens: Math.ceil(content.length / 4) };
   const normalized = content.replace(/\r\n/g, "\n");
   const digest = createHash("sha256").update(normalized).digest("hex").slice(0, 16);
   const directory = join(outDir, ".hearth", "tool-results");
@@ -32,6 +34,8 @@ export function storeOversizedToolResult(outDir: string, name: string, content: 
       `\n\n[... ${omitted} chars omitted from ${name}; full output: ${path.replace(/\\/g, "/")} ...]\n\n`,
       normalized.slice(-TAIL_CHARS)
     ].join(""),
-    fullOutputPath: path
+    fullOutputPath: path,
+    bytes: normalized.length,
+    tokens: Math.ceil(normalized.length / 4)
   };
 }

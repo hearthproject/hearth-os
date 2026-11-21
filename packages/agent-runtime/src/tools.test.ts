@@ -426,6 +426,22 @@ describe("builtin tools", () => {
     expect(fullLog).toContain("$ node");
   });
 
+  it("reads oversized tool output by call id and rejects path traversal", async () => {
+    const root = workspace(roots);
+    const out = join(root, "out");
+    const path = join(out, ".hearth", "tool-results", "full.txt");
+    mkdirSync(join(out, ".hearth", "tool-results"), { recursive: true });
+    writeFileSync(path, "abcdefghijklmnopqrstuvwxyz");
+    const state = createAgentState(root);
+    state.toolOutputs = { "call-1": { path, bytes: 26, tokens: 7 } };
+    const context = { ...contextFor(root, out), state };
+    const chunk = await mapTools().read_tool_output!.execute({ callId: "call-1", offset: 10, limit: 5 }, context);
+    expect(chunk.content).toContain("klmno");
+    expect(chunk.metadata).toMatchObject({ offset: 10, end: 15, totalChars: 26 });
+    await expect(mapTools().read_tool_output!.execute({ path: join(root, "secret.txt") }, context))
+      .rejects.toThrow("只能读取");
+  });
+
   it("migrates a timed-out command to a killable background session", async () => {
     const root = workspace(roots);
     const out = join(root, "out");

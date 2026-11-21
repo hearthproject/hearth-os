@@ -37,7 +37,8 @@ export function serializeAgentState(state: AgentToolState): SerializedAgentToolS
     ...(state.activeSkills ? { activeSkills: [...state.activeSkills] } : {}),
     ...(state.subagents ? { subagents: state.subagents.map((subagent) => ({ ...subagent })) } : {}),
     ...(state.activeWork ? { activeWork: state.activeWork.map((work) => ({ ...work })) } : {}),
-    ...(state.exposedTools ? { exposedTools: [...state.exposedTools] } : {})
+    ...(state.exposedTools ? { exposedTools: [...state.exposedTools] } : {}),
+    ...(state.toolOutputs ? { toolOutputs: { ...state.toolOutputs } } : {})
   };
 }
 
@@ -87,7 +88,8 @@ export function deserializeAgentState(input: SerializedAgentToolState | undefine
     ...(Array.isArray(input.activeSkills) ? { activeSkills: input.activeSkills.filter((skill): skill is string => typeof skill === "string") } : {}),
     ...(subagents ? { subagents } : {}),
     ...(activeWork ? { activeWork } : {}),
-    ...(Array.isArray(input.exposedTools) ? { exposedTools: input.exposedTools.filter((name): name is string => typeof name === "string") } : {})
+    ...(Array.isArray(input.exposedTools) ? { exposedTools: input.exposedTools.filter((name): name is string => typeof name === "string") } : {}),
+    ...(input.toolOutputs && typeof input.toolOutputs === "object" ? { toolOutputs: input.toolOutputs } : {})
   };
 }
 

@@ -37,7 +37,7 @@ const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", "coverage", 
 
 //模型能使用的工具和实现
 export function createBuiltinTools(): AgentTool[] {
-  return [readFileTool, readDocumentTool, listFilesTool, searchTextTool, globTool, grepTool, writeFileTool, writeSpreadsheetTool, writeDocumentTool, editFileTool, applyPatchTool, shellTool, shellOutputTool, shellWaitTool, shellKillTool, todoWriteTool, todoReadTool, runTestsTool, diagnosticsTool, submitPlanTool, rewindTool, rewindTurnTool, captureScreenTool, fetchUrlTool, askUserTool, finishTaskTool, ...createMemoryTools(), ...createGoalTools()];
+  return [readFileTool, readToolOutputTool, readDocumentTool, listFilesTool, searchTextTool, globTool, grepTool, writeFileTool, writeSpreadsheetTool, writeDocumentTool, editFileTool, applyPatchTool, shellTool, shellOutputTool, shellWaitTool, shellKillTool, todoWriteTool, todoReadTool, runTestsTool, diagnosticsTool, submitPlanTool, rewindTool, rewindTurnTool, captureScreenTool, fetchUrlTool, askUserTool, finishTaskTool, ...createMemoryTools(), ...createGoalTools()];
 }
 
 export function defaultTaskPermissions(options: {
@@ -77,6 +77,7 @@ const readFileTool: AgentTool = {
     name: "read_file",
     description: "读取工作区内一个文本文件的内容。返回带行号的文本，适合查看输入材料、代码和已有产物。",
     executionMode: "parallel",
+    effect: "read",
     parameters: {
       type: "object",
       properties: {
@@ -117,6 +118,51 @@ const readFileTool: AgentTool = {
     const body = selected.map((line, index) => `${offset + index}: ${line}`).join("\n");
     const more = endLine < lines.length ? `\n... 共 ${lines.length} 行，继续读取请调大 offset` : "";
     return { content: body + more, ...(more ? { metadata: { truncated: true } } : {}) };
+  }
+};
+
+const readToolOutputTool: AgentTool = {
+  definition: {
+    name: "read_tool_output",
+    description: "分段读取被截断的工具完整输出。可传 callId 或 tool-results 目录下的 path；每次最多返回 8000 字符。",
+    executionMode: "parallel",
+    effect: "read",
+    parameters: {
+      type: "object",
+      properties: {
+        callId: { type: "string", description: "产生该输出的 tool call ID" },
+        path: { type: "string", description: "完整输出路径，通常由工具结果中的 full output 提示给出" },
+        offset: { type: "number", description: "从第几个字符开始，默认 0" },
+        limit: { type: "number", description: "最多读取多少字符，默认 8000，上限 16000" }
+      },
+      additionalProperties: false
+    }
+  },
+  async execute(input, context) {
+    const args = objectArgs(input);
+    const callId = typeof args.callId === "string" ? args.callId.trim() : "";
+    const explicitPath = typeof args.path === "string" ? args.path.trim() : "";
+    const tracked = callId ? context.state?.toolOutputs?.[callId]?.path : undefined;
+    const path = explicitPath || tracked;
+    if (!path) throw new Error("read_tool_output 需要 path 或已知的 callId");
+    const root = resolve(context.outDir, ".hearth", "tool-results");
+    const target = isAbsolute(path) ? resolve(path) : resolve(context.outDir, path);
+    const rootKey = root.toLowerCase();
+    const targetKey = target.toLowerCase();
+    if (targetKey !== rootKey && !targetKey.startsWith(`${rootKey}${sep}`)) {
+      throw new Error(`read_tool_output 只能读取 ${root} 下的工具输出`);
+    }
+    if (!existsSync(target)) throw new Error(`工具输出不存在或已被清理：${path}`);
+    const content = readFileSync(target, "utf8");
+    const offset = Math.max(0, intArg(args, "offset", 0));
+    const limit = Math.min(16_000, Math.max(1, intArg(args, "limit", 8_000)));
+    if (offset >= content.length) return { content: `offset ${offset} 已超过总长度 ${content.length}`, metadata: { eof: true, totalChars: content.length } };
+    const end = Math.min(content.length, offset + limit);
+    const body = content.slice(offset, end);
+    return {
+      content: `${body}${end < content.length ? `\n... 已读取 ${offset}-${end} / ${content.length} 字符，继续时 offset=${end}` : ""}`,
+      metadata: { offset, end, totalChars: content.length, ...(end < content.length ? { truncated: true } : {}) }
+    };
   }
 };
 
