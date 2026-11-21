@@ -634,22 +634,26 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         effect: effectForTool(tool, call),
         startedAt: new Date().toISOString()
       });
-      let result: AgentToolResult;
-      try {
-        result = await executeToolWithRetry(tool, call, {
-          workspaceRoot: options.workspaceRoot,
-          outDir: options.outDir,
-          permissions: options.permissions,
-          signal,
-          state,
-          ...(options.goalRoot ? { goalRoot: options.goalRoot } : {}),
-          fullAccess: options.isFullPermission?.() === true,
-          mode: options.mode ?? "build",
-          ...(options.sandbox ? { sandbox: options.sandbox } : {}),
-          ...(options.verifyGoalCompletion ? { verifyGoalCompletion: options.verifyGoalCompletion } : {})
-        }, options.toolTimeoutMs ?? 120_000, signal, DEFAULT_TOOL_RETRY_POLICY);
-      } catch (error) {
-        const failure = normalizeToolFailure(error, "TOOL_EXEC_FAILED");
+      let result: AgentToolResult | null = null;
+      let toolRetries = 0;
+      let toolTotalDurationMs = 0;
+      const outcome = await executeToolWithRetry(tool, call, {
+        workspaceRoot: options.workspaceRoot,
+        outDir: options.outDir,
+        permissions: options.permissions,
+        signal,
+        state,
+        ...(options.goalRoot ? { goalRoot: options.goalRoot } : {}),
+        fullAccess: options.isFullPermission?.() === true,
+        mode: options.mode ?? "build",
+        ...(options.sandbox ? { sandbox: options.sandbox } : {}),
+        ...(options.verifyGoalCompletion ? { verifyGoalCompletion: options.verifyGoalCompletion } : {})
+      }, options.toolTimeoutMs ?? 120_000, signal, DEFAULT_TOOL_RETRY_POLICY);
+      result = outcome.result;
+      toolRetries = outcome.retries;
+      toolTotalDurationMs = outcome.totalDurationMs;
+      if (!result) {
+        const failure = normalizeToolFailure(outcome.lastError, "TOOL_EXEC_FAILED");
         result = { content: `工具执行失败：${failure.message}`, isError: true, error: failure };
       }
       journalAppend({
@@ -664,10 +668,10 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
           content: result.content,
           ...(result.isError ? { isError: true } : {})
         },
-        durationMs: Date.now() - entryStarted,
+        durationMs: toolTotalDurationMs,
         ...(result.error ? { errorCode: result.error.code } : {})
       });
-      results.set(call.id, { result, durationMs: Date.now() - entryStarted });
+      results.set(call.id, { result, durationMs: toolTotalDurationMs });
     }));
 
     emit({ type: "tool.batch.finished", turn: turns, calls, parallel: true, durationMs: Date.now() - started });
@@ -939,6 +943,8 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       if (preTool.blocked) {
         result = { content: `Hook 拒绝了工具 ${effectiveCall.name}：${preTool.reason ?? "未说明原因"}`, isError: true };
       }
+      let toolRetries = 0;
+      let toolTotalDurationMs = 0;
       if (tool && !preTool.blocked) {
         const modeError = modeIssue(effectiveCall);
         if (modeError) {
@@ -980,21 +986,23 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
             startedAt: new Date().toISOString()
           });
           markExecuting(effectiveCall);
-          try {
-            result = await executeToolWithRetry(tool, effectiveCall, {
-              workspaceRoot: options.workspaceRoot,
-              outDir: options.outDir,
-              permissions: options.permissions,
-              signal,
-              state,
-              ...(options.goalRoot ? { goalRoot: options.goalRoot } : {}),
-              fullAccess: options.isFullPermission?.() === true,
-              mode: options.mode ?? "build",
-              ...(options.sandbox ? { sandbox: options.sandbox } : {}),
-              ...(options.verifyGoalCompletion ? { verifyGoalCompletion: options.verifyGoalCompletion } : {})
-            }, options.toolTimeoutMs ?? 120_000, signal, DEFAULT_TOOL_RETRY_POLICY);
-          } catch (error) {
-            const failure = normalizeToolFailure(error, "TOOL_EXEC_FAILED");
+          const outcome = await executeToolWithRetry(tool, effectiveCall, {
+            workspaceRoot: options.workspaceRoot,
+            outDir: options.outDir,
+            permissions: options.permissions,
+            signal,
+            state,
+            ...(options.goalRoot ? { goalRoot: options.goalRoot } : {}),
+            fullAccess: options.isFullPermission?.() === true,
+            mode: options.mode ?? "build",
+            ...(options.sandbox ? { sandbox: options.sandbox } : {}),
+            ...(options.verifyGoalCompletion ? { verifyGoalCompletion: options.verifyGoalCompletion } : {})
+          }, options.toolTimeoutMs ?? 120_000, signal, DEFAULT_TOOL_RETRY_POLICY);
+          result = outcome.result ?? { content: "工具执行未返回结果", isError: true };
+          toolRetries = outcome.retries;
+          toolTotalDurationMs = outcome.totalDurationMs;
+          if (!result) {
+            const failure = normalizeToolFailure(outcome.lastError, "TOOL_EXEC_FAILED");
             result = { content: `工具执行失败：${failure.message}`, isError: true, error: failure };
           }
         }
@@ -1035,7 +1043,9 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
           name: effectiveCall.name,
           code: result.error.code,
           retryable: result.error.retryable ?? false,
-          message: result.content
+          message: result.content,
+          retries: 0,
+          totalDurationMs: 0
         });
       }
       if (result.metadata?.orphaned) {
@@ -1043,8 +1053,8 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         journalAppend({ type: "tool.orphaned", callId: call.id, name: effectiveCall.name, reason: result.content });
       }
       emitJobEvents(effectiveCall.name, result);
-      const durationMs = precomputed?.durationMs ?? (Date.now() - toolStartedAt);
-      emit({ type: "tool.finished", turn: turns, call, result, durationMs });
+      const durationMs = precomputed?.durationMs ?? toolTotalDurationMs;
+      emit({ type: "tool.finished", turn: turns, call, result, durationMs, retries: toolRetries, totalDurationMs: toolTotalDurationMs });
       await runHooks(result.isError ? "PostToolUseFailure" : "PostToolUse", {
         workspaceRoot: options.workspaceRoot,
         toolName: effectiveCall.name,
@@ -1351,6 +1361,13 @@ async function sleepInterruptible(ms: number, signal: AbortSignal): Promise<void
   });
 }
 
+interface ToolExecutionOutcome {
+  result: AgentToolResult | null;
+  retries: number;
+  totalDurationMs: number;
+  lastError: unknown;
+}
+
 async function executeToolWithRetry(
   tool: AgentTool,
   call: AgentToolCall,
@@ -1358,11 +1375,13 @@ async function executeToolWithRetry(
   fallbackTimeoutMs: number,
   parentSignal: AbortSignal,
   policy: typeof DEFAULT_TOOL_RETRY_POLICY
-): Promise<AgentToolResult> {
+): Promise<ToolExecutionOutcome> {
+  const startedAt = Date.now();
   let lastError: unknown;
   for (let attempt = 0; attempt <= policy.maxRetries; attempt++) {
     try {
-      return await executeToolWithTimeout(tool, call, context, fallbackTimeoutMs, parentSignal);
+      const result = await executeToolWithTimeout(tool, call, context, fallbackTimeoutMs, parentSignal);
+      return { result, retries: attempt, totalDurationMs: Date.now() - startedAt, lastError: null };
     } catch (error) {
       lastError = error;
       if (attempt >= policy.maxRetries) break;
@@ -1382,7 +1401,7 @@ async function executeToolWithRetry(
       if (parentSignal.aborted) break;
     }
   }
-  throw lastError;
+  return { result: null, retries: policy.maxRetries, totalDurationMs: Date.now() - startedAt, lastError };
 }
 
 async function executeToolWithTimeout(

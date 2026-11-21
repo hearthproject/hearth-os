@@ -242,8 +242,8 @@ export type RuntimeEvent =
   | { type: "assistant.delta"; turn: number; text: string }
   | { type: "assistant.message"; turn: number; text: string }
   | { type: "tool.started"; turn: number; call: AgentToolCall }
-  | { type: "tool.finished"; turn: number; call: AgentToolCall; result: AgentToolResult; durationMs: number }
-  | { type: "tool.failed"; turn: number; callId: string; name: string; code: string; retryable: boolean; message: string }
+  | { type: "tool.finished"; turn: number; call: AgentToolCall; result: AgentToolResult; durationMs: number; retries?: number; totalDurationMs?: number }
+  | { type: "tool.failed"; turn: number; callId: string; name: string; code: string; retryable: boolean; message: string; retries?: number; totalDurationMs?: number }
   | { type: "tool.orphaned"; turn: number; callId: string; name: string; message: string }
   | { type: "tool.batch.started"; turn: number; calls: AgentToolCall[]; parallel: boolean }
   | { type: "tool.batch.finished"; turn: number; calls: AgentToolCall[]; parallel: boolean; durationMs: number }

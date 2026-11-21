@@ -974,3 +974,34 @@ it("resets circuit breaker after a successful tool call", async () => {
   });
   expect(result.status).toBe("completed");
 });
+
+it("reports retries and total duration in tool.finished event", async () => {
+  let attempts = 0;
+  const events: RuntimeEvent[] = [];
+  const result = await runAgent({
+    model: fakeModel([turn("", [call("flaky", {})]), turn("done", [])]),
+    tools: [{
+      definition: { name: "flaky", description: "flaky tool", parameters: {} },
+      execute: async () => {
+        attempts++;
+        if (attempts < 3) {
+          const err: any = new Error("tool timed out");
+          err.code = "TOOL_TIMEOUT";
+          err.retryable = true;
+          throw err;
+        }
+        return { content: "ok" };
+      }
+    }],
+    goal: "test", systemPrompt: "system", workspaceRoot: ".", outDir: ".",
+    permissions: { tools: ["flaky"], readRoots: [], writeRoots: [], networkHosts: [] },
+    budget: { maxTurns: 5, maxToolCalls: 5, maxTokens: 100_000, maxDurationMs: 30_000 },
+    onEvent: (event) => events.push(event)
+  });
+  expect(result.status).toBe("completed");
+  const finished = events.filter((e): e is Extract<RuntimeEvent, { type: "tool.finished" }> => e.type === "tool.finished");
+  expect(finished.length).toBeGreaterThan(0);
+  expect(finished[0]!.retries).toBe(2);
+  expect(typeof finished[0]!.totalDurationMs).toBe("number");
+  expect(finished[0]!.totalDurationMs).toBeGreaterThan(0);
+});
