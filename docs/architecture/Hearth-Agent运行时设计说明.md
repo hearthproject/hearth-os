@@ -156,6 +156,8 @@ HTML 转 Markdown 时会删掉脚本、样式、导航、页脚、表单等噪�
 
 模型失败使用 provider 级重试策略：按 HTTP 状态与错误码分类，指数退避叠加 `Retry-After`，每次等待先写 `retry.scheduled` 事件；默认 8 次，重试窗口 6 小时。工具超时改为协作式取消：先 abort，再给 5 秒收尾；仍不返回则返回 `TOOL_TIMEOUT` 并标记 orphan，调度器写入 `watchdog_events`。主运行另有 10 分钟告警 / 30 分钟中止的停滞看门狗。
 
+超长工具输出按 4k token 预算保留头尾，全文落到 `.hearth/tool-results`，模型可用 `read_tool_output(callId/path, offset, limit)` 分段回读。后台工具、子代理和 shell 会话通过 `job_list` / `job_status` / `job_wait` / `job_stop` 统一查看与等待；原有 `start_background_tool`、`check_background_tool`、`shell_wait`、`agent_status` 继续保留为兼容入口。
+
 任务级还有两个正交机制：`goal.json` 的持久目标会驱动 goal round（默认最多 256 轮，有工具进展时重置连续无工具计数）；原生执行器按代码、研究、文档、桌面、通用五种 TaskProfile 选择工具超时、并行度与提示词，不再把所有任务都按代码任务跑。
 
 排障时先看 journal 的 `run.end` 与最后一个 `tool.call`，再看检查点 proof 的 `journalSeq`，最后看 `watchdog_events` 和 `task.retry.scheduled` 事件。不要手工删除 journal 目录来「修复」无法恢复的任务；这会让本地写入的中间状态失去唯一证据。
