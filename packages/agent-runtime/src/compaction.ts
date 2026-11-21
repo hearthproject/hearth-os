@@ -69,11 +69,14 @@ export async function compactAgentMessagesWithSummary(
 ): Promise<TokenCompactResult> {
   const before = messages.length;
   const beforeTokens = estimateMessageTokens(messages);
-  const trimmed = trimToolOutputs(messages, options.maxToolChars ?? DEFAULTS.maxToolChars, options.keepRecentToolOutputs ?? 3);
+  let trimmed = trimToolOutputs(messages, options.maxToolChars ?? DEFAULTS.maxToolChars, options.keepRecentToolOutputs ?? 3);
   const contextWindowTokens = options.contextWindowTokens ?? 128_000;
   const reserveTokens = options.reserveTokens ?? Math.max(DEFAULTS.reserveTokens, Math.floor(contextWindowTokens * 0.15));
   if (!options.contextWindowTokens || !shouldCompactContext(trimmed, contextWindowTokens, reserveTokens, options.usageAnchor, options.maxOutputTokens)) {
     return { messages: trimmed, compacted: false, before, after: trimmed.length, beforeTokens, afterTokens: estimateMessageTokens(trimmed), summary: null, summarized: false };
+  }
+  if (options.toolOutputs) {
+    trimmed = pruneOldToolOutputs(trimmed, options.toolOutputs, options.keepRecentToolOutputs ?? 3);
   }
 
   const system = trimmed.filter((message) => message.role === "system");
@@ -139,6 +142,9 @@ export function compactAgentMessages(messages: AgentMessage[], options: CompactO
   if (result.length <= keepRecent + 6 && messageChars(result) <= maxChars) {
     return { messages: result, compacted: false, before, after: result.length };
   }
+  if (options.toolOutputs) {
+    result = pruneOldToolOutputs(result, options.toolOutputs, options.keepRecentToolOutputs ?? 3);
+  }
 
   const system = result.filter((message) => message.role === "system");
   const firstUser = result.find((message) => message.role === "user");
@@ -172,6 +178,30 @@ function trimToolOutputs(messages: AgentMessage[], maxToolChars: number, keepRec
       content: `${message.content.slice(0, head)}\n\n[... ${omitted} chars omitted from older tool output; rerun the command or read the file again if needed ...]\n\n${message.content.slice(-tail)}`
     };
   }).reverse();
+}
+
+const PRUNED_TOOL_PLACEHOLDER = (path: string, tokens: number, callId: string): string =>
+  `[tool result pruned to save context; ${tokens} tokens stored at ${path}; callId: ${callId}. Use read_tool_output with callId or path if the full result is needed.]`;
+
+function pruneOldToolOutputs(
+  messages: AgentMessage[],
+  outputs: Record<string, { path: string; bytes: number; tokens: number }>,
+  keepRecent: number
+): AgentMessage[] {
+  let kept = 0;
+  return messages
+    .slice()
+    .reverse()
+    .map((message) => {
+      if (message.role !== "tool") return message;
+      const output = outputs[message.toolCallId];
+      if (!output) return message;
+      const keep = kept < keepRecent;
+      kept += 1;
+      if (keep || message.content.startsWith("[tool result pruned")) return message;
+      return { ...message, content: PRUNED_TOOL_PLACEHOLDER(output.path, output.tokens, message.toolCallId) };
+    })
+    .reverse();
 }
 
 function findRecentBoundary(messages: AgentMessage[], recentTokens: number): number {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compactAgentMessagesWithSummary, estimateMessageTokens, microcompactMessages, shouldCompactContext } from "./compaction.ts";
+import { compactAgentMessages, compactAgentMessagesWithSummary, estimateMessageTokens, microcompactMessages, shouldCompactContext } from "./compaction.ts";
 import type { AgentMessage } from "./types.ts";
 
 const MESSAGES: AgentMessage[] = [
@@ -46,6 +46,24 @@ describe("provider usage anchored compaction", () => {
     expect(result.messages[1]?.role).toBe("tool");
     expect((result.messages[1] as { content: string }).content.length).toBeLessThan(10_000);
     expect((result.messages[2] as { content: string }).content).toBe("b".repeat(10_000));
+  });
+
+  it("replaces old stored tool outputs with a path placeholder and keeps the newest output", () => {
+    const messages: AgentMessage[] = [
+      { role: "system", content: "system" },
+      { role: "user", content: "goal" },
+      { role: "assistant", content: "", toolCalls: ["1", "2", "3", "4"].map((id) => ({ id, name: "shell", arguments: {}, rawArguments: "{}" })) },
+      ...["1", "2", "3", "4"].map((id) => ({ role: "tool" as const, toolCallId: id, name: "shell", content: `${id}:${"x".repeat(5_000)}` }))
+    ];
+    const toolOutputs = Object.fromEntries(["1", "2", "3", "4"].map((id) => [id, { path: `C:/tmp/${id}.txt`, bytes: 5_001, tokens: 1_250 }]));
+    const result = compactAgentMessages(messages, { maxChars: 10_000, keepRecent: 30, keepRecentToolOutputs: 1, toolOutputs });
+    expect(result.compacted).toBe(true);
+    const tools = result.messages.filter((message) => message.role === "tool") as Array<{ toolCallId: string; content: string }>;
+    expect(tools[0]?.content).toContain("tool result pruned");
+    expect(tools[0]?.content).toContain("C:/tmp/1.txt");
+    expect(tools[0]?.content).toContain("callId: 1");
+    expect(tools[1]?.content).toContain("C:/tmp/2.txt");
+    expect(tools[3]?.content).toBe("4:" + "x".repeat(5_000));
   });
 
   it("drops orphan tool results left behind by summarized turns", async () => {
