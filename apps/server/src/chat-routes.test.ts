@@ -1,4 +1,4 @@
-import fs, { mkdtempSync, rmSync } from "node:fs";
+import fs, { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
@@ -597,6 +597,7 @@ describe("chat-first API", () => {
     expect(events.find((event) => event.event === "routing")?.data.action).toBe("chat");
     expect(events.some((event) => event.event === "task")).toBe(false);
     expect(events.find((event) => event.event === "error")?.data.code).toBe("MODEL_NOT_CONFIGURED");
+    expect(events.find((event) => event.event === "done")?.data.content).toContain("还没有配置聊天模型");
     await app.close();
   });
 
@@ -899,12 +900,40 @@ describe("chat-first API", () => {
     await app.close();
   });
 
-  it("explains missing chat model configuration instead of hanging", async () => {
+  it("persists a visible assistant message when the chat model is not configured", async () => {
     const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
     const response = await app.inject({ method: "POST", url: "/api/chat", payload: { message: "你好" } });
     const events = parseSse(response.body);
     const error = events.find((event) => event.event === "error");
     expect(error?.data.code).toBe("MODEL_NOT_CONFIGURED");
+    const done = events.find((event) => event.event === "done")?.data;
+    expect(done.content).toContain("还没有配置聊天模型");
+    const conversationId = events.find((event) => event.event === "conversation")?.data.id;
+    const stored = await app.inject({ method: "GET", url: `/api/conversations/${conversationId}` });
+    expect(stored.json().messages.map((message: { role: string }) => message.role)).toEqual(["user", "assistant"]);
+    expect(stored.json().messages[1].content).toContain("还没有配置聊天模型");
+    await app.close();
+  });
+
+  it("routes an existing local file reference into a task that receives the file", async () => {
+    const file = join(root, "handbook.txt");
+    writeFileSync(file, "这是本地文件内容", "utf8");
+    const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
+    await bindProfile(app, "native", await createTestProfile(app));
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/chat",
+      payload: { message: `${file}这个文件主要讲了什么` }
+    });
+    const events = parseSse(response.body);
+    expect(events.find((event) => event.event === "routing")?.data.action).toBe("task");
+    const task = events.find((event) => event.event === "task")?.data.task;
+    expect(task).toBeTruthy();
+    expect(task.inputs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "file", value: file }),
+      expect.objectContaining({ kind: "workspace" })
+    ]));
+    expect(events.find((event) => event.event === "done")?.data.taskId).toBe(task.id);
     await app.close();
   });
 

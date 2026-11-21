@@ -112,6 +112,7 @@ export function ChatPage() {
   const [uploading, setUploading] = useState(false);
   const [sending, setSending] = useState(false);
   const [streaming, setStreaming] = useState("");
+  const [streamingStatus, setStreamingStatus] = useState("");
   const [reasoning, setReasoning] = useState("");
   const [queue, setQueue] = useState<OutgoingMessage[]>([]);
   const [chatExecutions, setChatExecutions] = useState<Record<string, ChatExecution>>({});
@@ -238,8 +239,7 @@ export function ChatPage() {
   useEffect(() => {
     if (!conversationQuery.isError) return;
     if (conversationQuery.error instanceof ApiError && conversationQuery.error.status === 404) {
-      resetConversationView(null);
-      setError("原对话已失效，已为你开始新对话。");
+      recoverMissingConversation();
     }
   }, [conversationQuery.isError, conversationQuery.error]);
 
@@ -323,6 +323,7 @@ export function ChatPage() {
     setMessages([]);
     setLiveRuns([]);
     setStreaming("");
+    setStreamingStatus("");
     setReasoning("");
     setDraftSettings(null);
     setContextUsage(null);
@@ -332,6 +333,18 @@ export function ChatPage() {
     setModelMenuOpen(false);
     if (id) localStorage.setItem("hearth.conversation", id);
     else localStorage.removeItem("hearth.conversation");
+  }
+
+  function recoverMissingConversation() {
+    const staleId = conversationIdRef.current;
+    if (staleId) {
+      void queryClient.cancelQueries({ queryKey: ["conversation", staleId], exact: true });
+      queryClient.removeQueries({ queryKey: ["conversation", staleId], exact: true });
+    }
+    resetConversationView(null);
+    setPendingProjectId(null);
+    syncChatSelection(null, null);
+    setError("原对话已失效，已为你开始新对话。");
   }
 
   function openWorkspace() {
@@ -522,6 +535,7 @@ export function ChatPage() {
     const startedAt = Date.now();
     setStreaming("");
     setReasoning("");
+    setStreamingStatus("正在理解你的问题…");
     setSending(true);
     const historyTokens = estimateTokensFast(visibleMessages.map((message) => message.content).join("\n"));
     const userTokens = estimateTokensFast(text);
@@ -582,10 +596,16 @@ export function ChatPage() {
               localStorage.setItem("hearth.conversation", conversation.id);
             } else if (event === "user") {
               setMessages((prev) => [...prev, data as ChatMessageRecord]);
+            } else if (event === "routing") {
+              const routing = data as { action?: "chat" | "task" };
+              setStreamingStatus(routing.action === "task" ? "正在派发任务…" : "正在准备回答…");
             } else if (event === "delta") {
+              const firstContent = !answer;
               answer += (data as { text: string }).text;
+              if (firstContent) setStreamingStatus("正在生成回答…");
               scheduleStream();
             } else if (event === "reasoning") {
+              if (!reasoningText) setStreamingStatus("正在思考…");
               reasoningText += (data as { text: string }).text;
               scheduleStream();
             } else if (event === "usage") {
@@ -603,6 +623,7 @@ export function ChatPage() {
               const payload = data as { task: { id: string; title: string; status: RunInfo["status"]; createdAt: string; updatedAt: string; executorId?: string | null } };
               const task = payload.task;
               if (task?.id) {
+                setStreamingStatus("任务已派出，正在执行…");
                 setLiveRuns((prev) => [
                   ...prev.filter((item) => item.id !== task.id),
                   {
@@ -643,7 +664,7 @@ export function ChatPage() {
       );
     } catch (sendError) {
       if (sendError instanceof ApiError && sendError.status === 404) {
-        resetConversationView(null);
+        recoverMissingConversation();
         setInput(text);
         if (sentSkillId) setSelectedSkillId(sentSkillId);
         setError("原对话已失效，已为你开始新对话，请重新发送。");
@@ -655,6 +676,7 @@ export function ChatPage() {
       abortRef.current = null;
       setSending(false);
       setStreaming("");
+      setStreamingStatus("");
       setReasoning("");
       void queryClient.invalidateQueries({ queryKey: ["conversations"] });
       void queryClient.invalidateQueries({ queryKey: ["tasks"] });
@@ -815,8 +837,9 @@ export function ChatPage() {
             ))}
             {(streaming || reasoning) && <AssistantBubble content={streaming} reasoning={reasoning} streaming />}
             {sending && !streaming && !reasoning && (
-              <div className="typing-row">
+              <div className="typing-row" role="status" aria-live="polite">
                 <Loader2 size={14} className="spin" />
+                <span>{streamingStatus || "正在处理…"}</span>
               </div>
             )}
             <div ref={bottomRef} />

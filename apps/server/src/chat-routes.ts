@@ -450,6 +450,20 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       closed = true;
       controller.abort();
     });
+    const sendPersistedError = (code: string, text: string) => {
+      const content = text.trim() || "处理消息时发生错误，请重试。";
+      const assistant = service.appendChatMessage({
+        id: randomUUID(),
+        conversationId: conversation.id,
+        role: "assistant",
+        content,
+        taskId: null,
+        attachments: [],
+        createdAt: new Date().toISOString()
+      });
+      send("error", { code, message: content });
+      send("done", assistant);
+    };
 
     send("conversation", conversation);
     send("user", userRecord);
@@ -487,10 +501,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
         skillContext = used.prompt;
         send("skill", { skill: used.skill });
       } catch (error) {
-        send("error", {
-          code: "SKILL_NOT_AVAILABLE",
-          message: error instanceof Error ? error.message : "这个 Skill 暂时不能用"
-        });
+        sendPersistedError("SKILL_NOT_AVAILABLE", error instanceof Error ? error.message : "这个 Skill 暂时不能用");
         finish(reply, send);
         return reply;
       }
@@ -508,19 +519,23 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     const preferredExecutorId = lockedExecutorId;
     const executorEnabled = { ...effectiveSettings.executorEnabled, [lockedExecutorId]: true };
     const previousMessages = store.listChatMessages(conversation.id).filter((item) => item.id !== userRecord.id);
+    const referencedFile = extractLocalFilePath(userContent);
     const recentDraft = previousMessages.slice(-8).some((item) =>
       (item.role === "user" && isSimpleDraft(item.content)) ||
       (item.role === "assistant" && /^\s*(?:\*\*)?(?:主题|Subject)\s*[:：]/i.test(item.content)));
     const directDraft = storedFiles.length === 0 && !detectedUrl && (isSimpleDraft(userContent) || (recentDraft && isDraftRevision(userContent)));
     const routeMode = parsed.data.routeMode ?? "auto";
     if (routeMode === "chat" && storedFiles.length > 0) {
-      send("error", { code: "CHAT_ATTACHMENTS_UNSUPPORTED", message: "继续聊天模式暂不读取附件。请粘贴需要处理的文字，或选择派为任务。" });
+      sendPersistedError("CHAT_ATTACHMENTS_UNSUPPORTED", "继续聊天模式暂不读取附件。请粘贴需要处理的文字，或选择派为任务。");
       finish(reply, send);
       return reply;
     }
+    const localFileRoute = referencedFile
+      ? { action: "task" as const, title: conversationTitle(userContent), goal: userContent, reason: "消息引用了本地文件，需要执行器读取文件内容" }
+      : null;
     const route = routeMode !== "auto"
       ? { action: routeMode, title: "", goal: userContent, reason: routeMode === "chat" ? "你选择了继续聊天，不派任务" : "你选择了派为任务" }
-      : directDraft ? { action: "chat" as const, title: "", goal: userContent, reason: "直接拟稿或修订现有草稿" } : await decideRoute(userContent, storedFiles.length > 0, detectedUrl, settings, {
+      : directDraft ? { action: "chat" as const, title: "", goal: userContent, reason: "直接拟稿或修订现有草稿" } : localFileRoute ?? await decideRoute(userContent, storedFiles.length > 0, detectedUrl, settings, {
       preferredExecutorId: lockedExecutorId
     });
     const available = executorAvailability();
@@ -619,12 +634,14 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
           return reply;
         }
         const boundProject = conversation.projectId ? store.getLocalProject(conversation.projectId) : null;
-        const workspacePath = boundProject ? null : extractWorkspacePath(message);
+        const workspacePath = boundProject ? null : referencedFile ? dirname(referencedFile) : extractWorkspacePath(message);
+        const fileInputs = storedFiles.map((file) => ({ label: file.name, path: file.path }));
+        if (referencedFile) fileInputs.push({ label: basename(referencedFile), path: referencedFile });
         const task = service.createTask({
           title: route.title || conversationTitle(userContent),
           goal: [message, detectedUrl ? `参考网址：${detectedUrl}` : ""].filter(Boolean).join("\n") || `处理附件：${storedFiles.map((file) => file.name).join("、")}`,
           textInput: [message, skillContext, delegatedChatContext].filter(Boolean).join("\n\n"),
-          fileInputs: storedFiles.map((file) => ({ label: file.name, path: file.path })),
+          fileInputs,
           ...(detectedUrl ? { url: detectedUrl } : {}),
           ...(boundProject ? { projectId: boundProject.id } : {}),
           ...(workspacePath ? { workspacePath } : {}),
@@ -653,8 +670,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
         send("task", { task, conversationId: conversation.id, message: assistant });
         send("done", assistant);
       } catch (error) {
-        const messageText = error instanceof Error ? error.message : String(error);
-        send("error", { message: messageText, code: "TASK_CREATE_FAILED" });
+        sendPersistedError("TASK_CREATE_FAILED", error instanceof Error ? error.message : String(error));
       } finally {
         finish(reply, send);
       }
@@ -662,10 +678,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     }
 
     if (!chatConfigured()) {
-      send("error", {
-        message: "还没有配置聊天模型。请到“设置”里选择服务商并填入 API Key，然后重新发送。",
-        code: "MODEL_NOT_CONFIGURED"
-      });
+      sendPersistedError("MODEL_NOT_CONFIGURED", "还没有配置聊天模型。请到“设置”里选择服务商并填入 API Key，然后重新发送。");
       finish(reply, send);
       return reply;
     }
@@ -786,10 +799,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       });
       send("done", assistant);
     } catch (error) {
-      send("error", {
-        message: errorMessage(error),
-        code: errorCode(error)
-      });
+      sendPersistedError(errorCode(error), errorMessage(error));
     } finally {
       finish(reply, send);
     }
@@ -813,25 +823,42 @@ export function extractSkillInstallSource(message: string): string | null {
   return match[0].replace(/[)，。；;]+$/, "");
 }
 
-export function extractWorkspacePath(message: string): string | null {
-  if (!message) return null;
-  const candidates = [
-    ...(message.match(/[A-Za-z]:\\[^\s"'`<>|?*]+/g) ?? []),
-    ...(message.match(/\\\\[^\s"'`<>|?*]+/g) ?? [])
-  ];
-  for (const raw of candidates) {
-    let candidate = raw.replace(/[.,;:!?，。；！？]+$/, "");
-    try {
-      if (!existsSync(candidate)) continue;
-      const stats = statSync(candidate);
-      if (stats.isFile()) candidate = dirname(candidate);
-      else if (!stats.isDirectory()) continue;
-      return realpathSync.native(candidate);
-    } catch {
-      continue;
+function localPathCandidates(message: string): string[] {
+  if (!message) return [];
+  return [
+    ...(message.match(/[A-Za-z]:\\[^\s"'\`<>|?*]+/g) ?? []),
+    ...(message.match(/\\\\[^\s"'\`<>|?*]+/g) ?? [])
+  ].map((raw) => raw.replace(/[.,;:!?，。；！？]+$/, ""));
+}
+
+function findExistingLocalPath(message: string): { path: string; isFile: boolean } | null {
+  for (const raw of localPathCandidates(message)) {
+    // A path followed immediately by prose (for example "...pdf这个文件")
+    // shares the same token. Walk back to the longest existing filesystem
+    // prefix so the prose suffix does not hide a real file.
+    for (let end = raw.length; end >= 3; end -= 1) {
+      const candidate = raw.slice(0, end);
+      try {
+        const stats = statSync(candidate);
+        if (stats.isFile() || stats.isDirectory()) {
+          return { path: realpathSync.native(candidate), isFile: stats.isFile() };
+        }
+      } catch {
+        continue;
+      }
     }
   }
   return null;
+}
+
+export function extractLocalFilePath(message: string): string | null {
+  const found = findExistingLocalPath(message);
+  return found?.isFile ? found.path : null;
+}
+
+export function extractWorkspacePath(message: string): string | null {
+  const found = findExistingLocalPath(message);
+  return found ? (found.isFile ? dirname(found.path) : found.path) : null;
 }
 
 export function taskChatContext(messages: Array<{ role: string; content: string; taskId?: string | null }>): string {

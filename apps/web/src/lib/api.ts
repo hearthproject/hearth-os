@@ -706,24 +706,40 @@ export async function chatStream(body: ChatStreamBody, handlers: ChatStreamHandl
     const contentType = response.headers.get("content-type") ?? "";
     const payload = contentType.includes("application/json") ? await response.json() : await response.text();
     const message = typeof payload === "object" && payload && "message" in payload ? String(payload.message) : `发送失败（${response.status}）`;
-    throw new Error(message);
+    const code = typeof payload === "object" && payload && "error" in payload ? String(payload.error) : null;
+    throw new ApiError(message, response.status, code);
   }
   if (!response.body) throw new Error("服务没有返回聊天内容");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let terminal = false;
+  const emit = (event: string, data: unknown) => {
+    if (event === "done" || event === "error" || event === "end") terminal = true;
+    handlers.onEvent(event, data);
+  };
+  const dispatchBlocks = (flush = false) => {
+    if (flush) buffer += decoder.decode();
+    let match = buffer.match(/\r?\n\r?\n/);
+    while (match?.index !== undefined) {
+      const block = buffer.slice(0, match.index);
+      buffer = buffer.slice(match.index + match[0].length);
+      dispatchSseBlock(block, emit);
+      match = buffer.match(/\r?\n\r?\n/);
+    }
+    if (flush && buffer.trim()) {
+      dispatchSseBlock(buffer, emit);
+      buffer = "";
+    }
+  };
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
-    let boundary = buffer.indexOf("\n\n");
-    while (boundary >= 0) {
-      const block = buffer.slice(0, boundary);
-      buffer = buffer.slice(boundary + 2);
-      dispatchSseBlock(block, handlers.onEvent);
-      boundary = buffer.indexOf("\n\n");
-    }
+    dispatchBlocks();
   }
+  dispatchBlocks(true);
+  if (!terminal) throw new Error("聊天连接提前结束，请重试。");
 }
 
 function dispatchSseBlock(block: string, onEvent: (event: string, data: unknown) => void): void {
