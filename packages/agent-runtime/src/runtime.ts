@@ -78,6 +78,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   let summaryFailures = 0;
   const compactionTurns: number[] = [];
   const deniedPaths = new Map<string, number>();
+  const registeredJobs = new Set<string>();
   const startedAt = Date.now();
   const retryPolicy = resolveRetryPolicy({
     ...(options.retryDelayMs !== undefined ? { baseDelayMs: options.retryDelayMs } : {}),
@@ -358,7 +359,8 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
           ...(options.maxOutputTokens !== undefined ? { maxOutputTokens: options.maxOutputTokens } : {}),
           ...(lastContextAnchor ? { usageAnchor: lastContextAnchor } : {}),
           ...(options.recentContextTokens !== undefined ? { recentTokens: options.recentContextTokens } : {}),
-          keepRecentToolOutputs: options.keepRecentToolOutputs ?? 0,
+          keepRecentToolOutputs: options.keepRecentToolOutputs ?? 3,
+          ...(state.toolOutputs ? { toolOutputs: state.toolOutputs } : {}),
           stateSummary: progressSummary(state.progress),
           ...(options.projectInstructions ? { projectInstructions: options.projectInstructions } : {}),
           restoredContext,
@@ -375,7 +377,8 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
           return result;
         } : undefined)
       : compactAgentMessages(messages, {
-          keepRecentToolOutputs: options.keepRecentToolOutputs ?? 0,
+          keepRecentToolOutputs: options.keepRecentToolOutputs ?? 3,
+          ...(state.toolOutputs ? { toolOutputs: state.toolOutputs } : {}),
           stateSummary: progressSummary(state.progress),
           ...(options.projectInstructions ? { projectInstructions: options.projectInstructions } : {}),
           restoredContext
@@ -508,6 +511,24 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
 
   function currentCheckpointFailure(): AgentFailure | null {
     return fatalCheckpointFailure;
+  }
+
+  function emitJobEvents(toolName: string, result: AgentToolResult): void {
+    const meta = result.metadata;
+    const kind = meta?.jobKind
+      ?? (toolName.startsWith("agent") ? "subagent" : meta?.background || toolName.startsWith("shell") ? "shell" : null);
+    const jobId = meta?.jobId ?? meta?.agentId ?? meta?.sessionId;
+    if (!kind || !jobId) return;
+    const status = meta?.jobStatus ?? meta?.agentStatus ?? (meta?.exitCode === undefined || meta?.exitCode === null ? "running" : meta.exitCode === 0 ? "settled" : "failed");
+    if (!registeredJobs.has(jobId)) {
+      registeredJobs.add(jobId);
+      emit({ type: "job.registered", jobId, kind, status: "running" });
+      journalAppend({ type: "job.registered", jobId, kind, status: "running" });
+    }
+    if (TERMINAL_JOB_STATUSES.has(status)) {
+      emit({ type: "job.settled", jobId, kind, status });
+      journalAppend({ type: "job.settled", jobId, kind, status });
+    }
   }
 
   function modeIssue(call: AgentToolCall): string | null {
@@ -1029,6 +1050,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         emit({ type: "tool.orphaned", turn: turns, callId: call.id, name: effectiveCall.name, message: result.content });
         journalAppend({ type: "tool.orphaned", callId: call.id, name: effectiveCall.name, reason: result.content });
       }
+      emitJobEvents(effectiveCall.name, result);
       const durationMs = precomputed?.durationMs ?? (Date.now() - toolStartedAt);
       emit({ type: "tool.finished", turn: turns, call, result, durationMs });
       await runHooks(result.isError ? "PostToolUseFailure" : "PostToolUse", {
@@ -1259,6 +1281,8 @@ const READ_ONLY_TOOL_NAMES = new Set([
 const LOCAL_WRITE_TOOL_NAMES = new Set([
   "write_file", "write_spreadsheet", "write_document", "edit_file", "apply_patch", "delete_file", "remove_file", "delete_path"
 ]);
+
+const TERMINAL_JOB_STATUSES = new Set(["settled", "completed", "finished", "failed", "stopped", "cancelled", "lost"]);
 
 async function executeToolWithTimeout(
   tool: AgentTool,

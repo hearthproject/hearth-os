@@ -2491,6 +2491,17 @@ export class HearthScheduler {
       this.capture({ ...base, kind: "tool_result", role: "tool", content: event.result.content, provenance, executorEventId: `native:tool:${event.call.id}:finished` });
       return;
     }
+    if (event.type === "job.registered" || event.type === "job.settled") {
+      const persisted = this.service.store.appendEvent({
+        type: event.type,
+        taskId: task.id,
+        runId: run.id,
+        payload: { jobId: event.jobId, kind: event.kind, status: event.status, at: new Date().toISOString() }
+      });
+      this.service.bus.publish(persisted);
+      this.capture({ ...base, kind: "notice", content: `${event.type === "job.registered" ? "Job 已登记" : "Job 已收口"}：${event.kind} ${event.jobId} (${event.status})`, provenance: { source: "native", jobId: event.jobId, jobKind: event.kind }, executorEventId: `native:${event.type}:${event.jobId}:${event.status}` });
+      return;
+    }
     if (event.type === "tool.orphaned") {
       this.recordWatchdog(task, run, "tool_orphaned", `${event.name} 在超时后仍未响应中止，可能仍在后台执行`, "warn");
       this.capture({ ...base, kind: "notice", content: `工具孤儿：${event.name} ${event.message}`, provenance: { source: "native", toolCallId: event.callId, tool: event.name }, executorEventId: `native:tool-orphaned:${event.callId}` });

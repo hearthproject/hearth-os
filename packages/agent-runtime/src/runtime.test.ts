@@ -29,11 +29,40 @@ describe("agent runtime", () => {
       tools: [{ definition: { name: "large", description: "large output", parameters: {} }, execute: async () => ({ content: "x".repeat(30_000) }) }],
       goal: "test", systemPrompt: "system", workspaceRoot: ".", outDir: ".",
       permissions: { tools: ["large"], readRoots: [], writeRoots: [], networkHosts: [] },
+      keepRecentToolOutputs: 0,
       budget: { maxTurns: 5, maxToolCalls: 5, maxTokens: 100_000, maxDurationMs: 30_000 },
       ...(contextWindowTokens ? { contextWindowTokens } : {})
     });
     expect(result.status).toBe("completed");
     expect(result.usage).toMatchObject({ cachedInputTokens: 10, cacheWriteInputTokens: 2, reasoningOutputTokens: 3 });
+  });
+
+  it("registers and settles jobs in runtime events and the run journal", async () => {
+    const root = workspace(roots);
+    const journalPath = join(root, "run.jsonl");
+    const events: RuntimeEvent[] = [];
+    let calls = 0;
+    const result = await runAgent({
+      model: async () => {
+        calls += 1;
+        return calls === 1 ? turn("start job", [call("job_tool", {})]) : turn("done", []);
+      },
+      tools: [{
+        definition: { name: "job_tool", description: "job", parameters: {} },
+        execute: async () => ({ content: "job result", metadata: { jobId: "job-1", jobKind: "background_tool", jobStatus: "completed" } })
+      }],
+      goal: "test", systemPrompt: "system", workspaceRoot: root, outDir: root,
+      permissions: { tools: ["job_tool"], readRoots: [root], writeRoots: [], networkHosts: [] },
+      budget: { maxTurns: 5, maxToolCalls: 5, maxTokens: 100_000, maxDurationMs: 30_000 },
+      journal: { path: journalPath },
+      onEvent: (event) => events.push(event)
+    });
+    expect(result.status).toBe("completed");
+    expect(events.filter((event) => event.type === "job.registered")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "job.settled")).toHaveLength(1);
+    const journal = readFileSync(journalPath, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    expect(journal.filter((entry) => entry.type === "job.registered")).toHaveLength(1);
+    expect(journal.filter((entry) => entry.type === "job.settled")).toHaveLength(1);
   });
 
   it("charges summary usage and stops before another model call when it exhausts the budget", async () => {

@@ -178,7 +178,7 @@ export class BackgroundToolService {
           const toolName = String(args.toolName ?? "");
           const toolArgs = args.args && typeof args.args === "object" ? args.args as Record<string, unknown> : {};
           const job = await this.start({ taskId: task.id, runId: task.currentRunId, toolName, args: toolArgs });
-          return { content: `后台工具已启动：${job.id}（${job.toolName}）。可用 check_background_tool 查询结果。` };
+          return { content: `后台工具已启动：${job.id}（${job.toolName}）。可用 check_background_tool 查询结果。`, metadata: { jobId: job.id, jobKind: "background_tool", jobStatus: "running" } };
         }
       },
       {
@@ -197,6 +197,7 @@ export class BackgroundToolService {
           const job = this.require(String(args.jobId ?? ""));
           return {
             content: `状态：${job.status}\n${job.output || job.stopReason || "（暂无输出）"}`,
+            metadata: { jobId: job.id, jobKind: "background_tool", jobStatus: job.status },
             ...(job.status === "failed" ? { isError: true } : {})
           };
         }

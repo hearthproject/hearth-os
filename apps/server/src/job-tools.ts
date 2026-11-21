@@ -102,7 +102,7 @@ export function createJobTools(registry: JobToolRegistry): AgentTool[] {
       const id = stringArg(input, "id");
       const job = listJobs(context).find((item) => item.id === id);
       if (!job) throw new Error(`没有找到 job：${id}`);
-      return { content: JSON.stringify(job, null, 2), metadata: { totalChars: 0 } };
+      return { content: JSON.stringify(job, null, 2), metadata: { jobId: job.id, jobKind: job.kind, jobStatus: job.status } };
     }
   };
 
@@ -127,17 +127,17 @@ export function createJobTools(registry: JobToolRegistry): AgentTool[] {
       const timeoutMs = Math.min(300_000, Math.max(1_000, numberArg(input, "timeoutMs", 30_000)));
       if (registry.background?.get(id)) {
         const job = await registry.background.waitFor(id, timeoutMs);
-        return { content: `${job.id} ${job.status}${job.output ? `\n${job.output.slice(-2_000)}` : ""}` };
+        return { content: `${job.id} ${job.status}${job.output ? `\n${job.output.slice(-2_000)}` : ""}`, metadata: { jobId: job.id, jobKind: "background_tool", jobStatus: job.status } };
       }
       if (registry.subagents?.get(id)) {
         const job = await registry.subagents.wait(id, timeoutMs);
         if (job.status === "running") throw jobTimeout(id, timeoutMs);
-        return { content: `${job.id} ${job.status}${job.summary ? `\n${job.summary}` : ""}` };
+        return { content: `${job.id} ${job.status}${job.summary ? `\n${job.summary}` : ""}`, metadata: { jobId: job.id, jobKind: "subagent", jobStatus: job.status } };
       }
       const shell = context.state?.activeWork?.find((work) => work.id === id);
       if (shell) {
         if (shell.status === "running") throw jobTimeout(id, timeoutMs);
-        return { content: `${shell.id} ${shell.status}${shell.exitCode === undefined || shell.exitCode === null ? "" : ` exit=${shell.exitCode}`}` };
+        return { content: `${shell.id} ${shell.status}${shell.exitCode === undefined || shell.exitCode === null ? "" : ` exit=${shell.exitCode}`}`, metadata: { jobId: shell.id, jobKind: "shell", jobStatus: shell.status } };
       }
       throw new Error(`没有找到 job：${id}`);
     }
@@ -163,14 +163,19 @@ export function createJobTools(registry: JobToolRegistry): AgentTool[] {
       const reason = typeof (input as { reason?: unknown }).reason === "string" ? String((input as { reason?: unknown }).reason) : "用户停止";
       if (registry.background?.get(id)) {
         const job = registry.background.stop(id, reason);
-        return { content: `${job.id} ${job.status}` };
+        return { content: `${job.id} ${job.status}`, metadata: { jobId: job.id, jobKind: "background_tool", jobStatus: job.status } };
       }
       if (registry.subagents?.get(id)) {
-        return { content: `${id} ${registry.subagents.kill(id) ? "stopped" : "not_running"}` };
+        const killed = registry.subagents.kill(id);
+        return killed
+          ? { content: `${id} stopped`, metadata: { jobId: id, jobKind: "subagent", jobStatus: "stopped" } }
+          : { content: `${id} not_running` };
       }
       if (context.state?.activeWork?.some((work) => work.id === id)) {
         const killed = killShellSession(id);
-        return { content: `${id} ${killed ? "stopped" : "not_running"}` };
+        return killed
+          ? { content: `${id} stopped`, metadata: { jobId: id, jobKind: "shell", jobStatus: "stopped" } }
+          : { content: `${id} not_running` };
       }
       throw new Error(`没有找到 job：${id}`);
     }

@@ -17,6 +17,8 @@ export type JournalEventType =
   | "stall.warned"
   | "stall.detected"
   | "goal.round"
+  | "job.registered"
+  | "job.settled"
   | "checkpoint"
   | "run.end";
 

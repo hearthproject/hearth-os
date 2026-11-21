@@ -100,6 +100,9 @@ export interface AgentToolMetadata {
   diagnostics?: Array<{ file: string; line?: number; code?: string; message: string }>;
   sessionId?: string;
   background?: boolean;
+  jobId?: string;
+  jobKind?: "shell" | "background_tool" | "subagent";
+  jobStatus?: string;
   snapshotId?: string;
   snapshotIds?: string[];
   unchanged?: boolean;
@@ -257,6 +260,8 @@ export type RuntimeEvent =
   | { type: "stall.warned"; idleMs: number }
   | { type: "stall.detected"; idleMs: number }
   | { type: "goal.round"; round: number; maxRounds: number; goalId: string }
+  | { type: "job.registered"; jobId: string; kind: "shell" | "background_tool" | "subagent"; status: string }
+  | { type: "job.settled"; jobId: string; kind: "shell" | "background_tool" | "subagent"; status: string }
   | { type: "journal.failed"; message: string }
   | { type: "budget.exceeded"; budget: "turns" | "toolCalls" | "tokens" | "duration"; limit: number }
   | { type: "notice"; message: string };
@@ -391,6 +396,7 @@ export interface CompactOptions {
   maxChars?: number;
   maxToolChars?: number;
   keepRecentToolOutputs?: number;
+  toolOutputs?: Record<string, { path: string; bytes: number; tokens: number }>;
   contextWindowTokens?: number;
   reserveTokens?: number;
   maxOutputTokens?: number;
