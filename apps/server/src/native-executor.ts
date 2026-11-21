@@ -45,6 +45,7 @@ import {
   type AgentToolAuthorizationRequest,
   type AgentToolContext,
   type HarnessMode,
+  type JournalSink,
   type OperationLedger,
   type RetryPolicy,
   type RuntimeEvent,
@@ -74,6 +75,7 @@ export interface NativeRunOptions {
   taskId?: string;
   operationLedger?: OperationLedger;
   journalPath?: string;
+  journalSink?: JournalSink;
   goalRoot?: string;
   maxGoalRounds?: number;
   retryPolicy?: RetryPolicy;
@@ -245,7 +247,11 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     ...(options.runId ? { runId: options.runId } : {}),
     ...(options.taskId ? { taskId: options.taskId } : {}),
     ...(options.operationLedger ? { operationLedger: options.operationLedger } : {}),
-    ...(options.journalPath ? { journal: { path: options.journalPath } } : {}),
+    ...(options.journalSink
+      ? { journal: { sink: options.journalSink } }
+      : options.journalPath
+        ? { journal: { path: options.journalPath } }
+        : {}),
     ...(options.goalRoot ? { goalRoot: options.goalRoot } : {}),
     ...(options.maxGoalRounds !== undefined ? { maxGoalRounds: options.maxGoalRounds } : {}),
     ...(options.retryPolicy ? { retryPolicy: options.retryPolicy } : { retryPolicy: nativeRetryPolicy(options.settings) }),

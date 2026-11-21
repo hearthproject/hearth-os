@@ -195,7 +195,7 @@ export interface SettleRunOperationInput {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 37;
+export const CURRENT_SCHEMA_VERSION = 38;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -269,7 +269,7 @@ CREATE TABLE IF NOT EXISTS task_follow_ups (
 CREATE TABLE IF NOT EXISTS run_checkpoints (
   id TEXT PRIMARY KEY, run_id TEXT NOT NULL, task_id TEXT NOT NULL, seq INTEGER NOT NULL,
   kind TEXT NOT NULL, path TEXT NOT NULL, sha256 TEXT NOT NULL, usage_json TEXT,
-  created_at TEXT NOT NULL, proof_json TEXT, UNIQUE(run_id, seq)
+  created_at TEXT NOT NULL, proof_json TEXT, event_seq INTEGER, UNIQUE(run_id, seq)
 );
 CREATE TABLE IF NOT EXISTS run_operations (
   operation_id TEXT PRIMARY KEY,
@@ -1687,6 +1687,7 @@ export class HearthStore {
     ensureColumn(this.db, "tasks", "archived_at", "TEXT");
     ensureColumn(this.db, "tasks", "goal_id", "TEXT");
     ensureColumn(this.db, "run_checkpoints", "proof_json", "TEXT");
+    ensureColumn(this.db, "run_checkpoints", "event_seq", "INTEGER");
     ensureColumn(this.db, "tasks", "external_ref", "TEXT");
     ensureColumn(this.db, "tasks", "request_hash", "TEXT");
     ensureColumn(this.db, "method_candidates", "generation", "INTEGER");
@@ -2008,6 +2009,18 @@ export class HearthStore {
       : this.db.prepare("SELECT * FROM events WHERE seq > ? ORDER BY seq ASC");
     const rows = (taskId ? statement.all(afterSeq, taskId) : statement.all(afterSeq)) as DbRow[];
     return rows.map(rowToEvent);
+  }
+
+  listEventsForRun(runId: string, afterSeq = 0): EventEnvelope[] {
+    const rows = this.db.prepare(
+      "SELECT * FROM events WHERE run_id = ? AND seq > ? ORDER BY seq ASC"
+    ).all(runId, afterSeq) as DbRow[];
+    return rows.map(rowToEvent);
+  }
+
+  getEventBySeq(seq: number): EventEnvelope | null {
+    const row = this.db.prepare("SELECT * FROM events WHERE seq = ?").get(seq) as DbRow | undefined;
+    return row ? rowToEvent(row) : null;
   }
 
   getEventById(id: string): EventEnvelope | null {
@@ -3941,6 +3954,9 @@ export class HearthStore {
   }
 
   private applyEvent(event: EventEnvelope): void {
+    // Runtime facts are recovered from the event stream directly; they do not
+    // mutate any projection table.
+    if (event.type.startsWith("runtime.")) return;
     switch (event.type) {
       case "task.created": return upsertTask(this.db, event.payload as TaskRecord);
       case "task.updated": return updateTask(this.db, event.taskId, event.payload as Record<string, unknown>);
@@ -4274,13 +4290,14 @@ function upsertTaskFollowUp(db: DatabaseSync, followUp: TaskFollowUpRecord): voi
 
 function insertRunCheckpoint(db: DatabaseSync, checkpoint: RunCheckpointRecord): void {
   db.prepare(
-    `INSERT INTO run_checkpoints (id, run_id, task_id, seq, kind, path, sha256, usage_json, created_at, proof_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(run_id, seq) DO UPDATE SET kind=excluded.kind, path=excluded.path, sha256=excluded.sha256, usage_json=excluded.usage_json, proof_json=excluded.proof_json`
+    `INSERT INTO run_checkpoints (id, run_id, task_id, seq, kind, path, sha256, usage_json, created_at, proof_json, event_seq)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(run_id, seq) DO UPDATE SET kind=excluded.kind, path=excluded.path, sha256=excluded.sha256, usage_json=excluded.usage_json, proof_json=excluded.proof_json, event_seq=excluded.event_seq`
   ).run(
     checkpoint.id, checkpoint.runId, checkpoint.taskId, checkpoint.seq, checkpoint.kind,
     checkpoint.path, checkpoint.sha256, checkpoint.usage ? JSON.stringify(checkpoint.usage) : null,
-    checkpoint.createdAt, checkpoint.proof ? JSON.stringify(checkpoint.proof) : null
+    checkpoint.createdAt, checkpoint.proof ? JSON.stringify(checkpoint.proof) : null,
+    checkpoint.eventSeq ?? null
   );
 }
 
@@ -5385,6 +5402,7 @@ function rowToRunCheckpoint(row: DbRow): RunCheckpointRecord {
     sha256: String(row.sha256),
     usage: row.usage_json == null ? null : JSON.parse(String(row.usage_json)),
     createdAt: String(row.created_at),
+    ...(row.event_seq == null ? {} : { eventSeq: Number(row.event_seq) }),
     ...(row.proof_json == null ? {} : { proof: JSON.parse(String(row.proof_json)) })
   };
 }

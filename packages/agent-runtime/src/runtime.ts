@@ -16,7 +16,7 @@ import { buildPostCompactContext } from "./harness/post-compact.ts";
 import { todoReminder } from "./harness/todo.ts";
 import { normalizeModelFailure, normalizeToolFailure, type AgentFailure } from "./errors.ts";
 import { resolveRetryPolicy, retryDelayFor, retryWindowExceeded, shouldRetryFailure } from "./retry-policy.ts";
-import { RunJournal, replayJournalMessages } from "./journal.ts";
+import { RunJournal, replayJournalEvents, replayJournalMessages } from "./journal.ts";
 import { digestBeforeEffect, hashJson, resultDigest as digestToolResult } from "./operations/digest.ts";
 import { ToolExecutionHandle, type ToolExecutionOutcome } from "./operations/execution.ts";
 import { operationIdFor } from "./operations/types.ts";
@@ -199,7 +199,9 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   if (options.journal) {
     try {
       journal = new RunJournal({
-        path: options.journal.path,
+        ...(options.journal.path ? { path: options.journal.path } : {}),
+        ...(options.journal.sink ? { sink: options.journal.sink } : {}),
+        ...(options.journal.startSeq !== undefined ? { startSeq: options.journal.startSeq } : {}),
         fsync: options.journal.fsync !== false,
         ...(options.journal.rotateBytes !== undefined ? { rotateBytes: options.journal.rotateBytes } : {})
       });
@@ -211,7 +213,12 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         budget: options.budget
       });
       if (options.resume?.journal) {
-        const replay = replayJournalMessages(messages, options.resume.journal.path, options.resume.journal.seq);
+        const replay = options.resume.journal.events
+          ? replayJournalEvents(messages, options.resume.journal.events, options.resume.journal.seq)
+          : options.resume.journal.path
+            ? replayJournalMessages(messages, options.resume.journal.path, options.resume.journal.seq)
+            : null;
+        if (!replay) throw new Error("resume journal has no events or path");
         messages.splice(0, messages.length, ...replay.messages);
         if (Object.keys(replay.addedUsage).length > 0) addUsage(usage, replay.addedUsage as AgentUsage);
         if (replay.inFlight) {

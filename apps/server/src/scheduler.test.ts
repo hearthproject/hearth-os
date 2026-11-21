@@ -1481,6 +1481,8 @@ describe("Hearth scheduler", () => {
     });
     expect(checkpoint?.proof?.phasePrefix).toContain("tool:write_file");
     expect(checkpoint?.proof?.workspaceDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(checkpoint?.eventSeq).toBeGreaterThan(0);
+    expect(store?.getEventBySeq(checkpoint!.eventSeq!)?.type).toBe("runtime.checkpoint.snapshot");
   });
 
   it("retains the configured checkpoint window during a long native run", async () => {

@@ -29,10 +29,19 @@ export interface JournalEvent {
   [key: string]: unknown;
 }
 
+export interface JournalSink {
+  append(event: JournalEvent): number;
+  close?(): void;
+}
+
 export interface JournalOptions {
-  path: string;
+  path?: string;
   fsync?: boolean;
   rotateBytes?: number;
+  /** Durable sink owned by the host. When set, no JSONL file is opened. */
+  sink?: JournalSink;
+  /** Last sequence already durable in the sink. */
+  startSeq?: number;
 }
 
 export interface InFlightTool {
@@ -53,15 +62,21 @@ export class RunJournal {
   private readonly basePath: string;
   private readonly fsyncEnabled: boolean;
   private readonly rotateBytes: number;
+  private readonly sink: JournalSink | null;
   private segment = 1;
   private fd: number | null = null;
   private size = 0;
   private lastSeq = 0;
 
   constructor(options: JournalOptions) {
-    this.basePath = options.path;
+    this.sink = options.sink ?? null;
+    this.basePath = options.path ?? "<host-journal>";
     this.fsyncEnabled = options.fsync === true;
     this.rotateBytes = Math.max(1_000_000, options.rotateBytes ?? 32 * 1024 * 1024);
+    if (this.sink) {
+      this.lastSeq = Math.max(0, options.startSeq ?? 0);
+      return;
+    }
     mkdirSync(dirname(this.basePath), { recursive: true });
     this.repairTornTail();
     const existing = segmentFiles(this.basePath);
@@ -71,17 +86,23 @@ export class RunJournal {
   }
 
   get path(): string {
+    if (this.sink) return this.basePath;
     return this.segment === 1 ? this.basePath : segmentPath(this.basePath, this.segment);
   }
 
   append(event: Omit<JournalEvent, "seq" | "at"> & { at?: string }): number {
-    this.lastSeq += 1;
     const entry: JournalEvent = {
-      seq: this.lastSeq,
+      seq: this.lastSeq + 1,
       at: event.at ?? new Date().toISOString(),
       ...event,
       type: event.type
     } as JournalEvent;
+    if (this.sink) {
+      const durableSeq = this.sink.append(entry);
+      this.lastSeq = durableSeq > 0 ? durableSeq : entry.seq;
+      return this.lastSeq;
+    }
+    this.lastSeq = entry.seq;
     const line = `${JSON.stringify(entry)}\n`;
     if (this.fd === null || this.size + line.length > this.rotateBytes) {
       this.rotate();
@@ -98,6 +119,10 @@ export class RunJournal {
   }
 
   close(): void {
+    if (this.sink) {
+      this.sink.close?.();
+      return;
+    }
     if (this.fd !== null) {
       try {
         fsyncSync(this.fd);
@@ -191,9 +216,18 @@ export function replayJournalMessages(
   afterSeq = 0
 ): { messages: AgentMessage[]; lastSeq: number; addedUsage: Partial<RunUsage>; inFlight: InFlightTool | null } {
   const result = readJournal(path);
+  return replayJournalEvents(base, result.events, afterSeq, result.lastSeq);
+}
+
+export function replayJournalEvents(
+  base: AgentMessage[],
+  events: JournalEvent[],
+  afterSeq = 0,
+  lastSeq = events.at(-1)?.seq ?? 0
+): { messages: AgentMessage[]; lastSeq: number; addedUsage: Partial<RunUsage>; inFlight: InFlightTool | null } {
   const messages = base.map((message) => ({ ...message })) as AgentMessage[];
   let addedUsage: Partial<RunUsage> = {};
-  for (const event of result.events) {
+  for (const event of events) {
     if (event.seq <= afterSeq) continue;
     if (event.type === "message" && isAgentMessage(event.message)) {
       const message = event.message;
@@ -203,7 +237,12 @@ export function replayJournalMessages(
       messages.push(event.message);
     }
   }
-  return { messages, lastSeq: result.lastSeq, addedUsage, inFlight: result.inFlight };
+  return {
+    messages,
+    lastSeq: Math.max(lastSeq, events.at(-1)?.seq ?? 0),
+    addedUsage,
+    inFlight: findInFlight(events.filter((event) => event.seq > afterSeq))
+  };
 }
 
 export function journalPathFor(root: string, runId: string): string {

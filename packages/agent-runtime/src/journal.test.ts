@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { RunJournal, journalPathFor, readJournal, replayJournalMessages } from "./journal.ts";
+import { RunJournal, journalPathFor, readJournal, replayJournalEvents, replayJournalMessages, type JournalEvent } from "./journal.ts";
 
 const roots: string[] = [];
 
@@ -55,5 +55,35 @@ describe("run journal", () => {
     const replay = replayJournalMessages([{ role: "system", content: "s" }, { role: "user", content: "g" }], path, 0);
     expect(replay.inFlight?.callId).toBe("call-1");
     expect(replay.messages).toHaveLength(2);
+  });
+
+  it("delegates durability to a host sink and resumes from returned sequences", () => {
+    const events: JournalEvent[] = [];
+    let durableSeq = 100;
+    const journal = new RunJournal({
+      startSeq: 100,
+      sink: {
+        append(event) {
+          durableSeq += 1;
+          events.push({ ...event, seq: durableSeq });
+          return durableSeq;
+        }
+      }
+    });
+    expect(journal.append({ type: "run.start", runId: "run-4", goal: "g", systemPromptHash: "h", budget: {} })).toBe(101);
+    expect(journal.append({
+      type: "message",
+      message: { role: "assistant", content: "host message", toolCalls: [] },
+      usage: { outputTokens: 5 }
+    })).toBe(102);
+    journal.close();
+
+    const replay = replayJournalEvents(
+      [{ role: "system", content: "s" }, { role: "user", content: "g" }],
+      events,
+      101
+    );
+    expect(replay.messages.at(-1)).toMatchObject({ role: "assistant", content: "host message" });
+    expect(replay.addedUsage.outputTokens).toBe(5);
   });
 });

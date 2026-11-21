@@ -12,9 +12,15 @@
 ### 持久操作账本
 
 - 工具调用增加 T1/T2 持久操作合同：`prepare → dispatch → settle`，未结算的操作在下一进程拒绝自动重放。
-- 服务端使用 SQLite `run_operations`（schema 38）作为操作事实源；standalone/评测使用 JSONL ledger。
+- 服务端使用 SQLite `run_operations`（schema 37）作为操作事实源；standalone/评测使用 JSONL ledger。
 - 工具超时或任务中止会先触发取消；Windows shell 先枚举并终止子进程树，再返回 `unknown`，避免幽灵副作用。
 - 本地写记录执行前文件摘要；外部写必须带回执，缺回执按未知处理并停止 run，等待人工核对。
+
+### 单一事件日志
+
+- 服务端 runtime 不再写 JSONL journal；消息、工具结算、checkpoint 和 run 边界统一写入 SQLite `events`（schema 38）。
+- checkpoint 文件降级为物化视图：先写 `runtime.checkpoint.snapshot` 事件，`run_checkpoints.event_seq` 记录快照位置；文件损坏时从事件日志重建。
+- 恢复时从 checkpoint 的 `event_seq` 之后回放 runtime 消息，旧版 JSONL checkpoint 仍按原路径兼容。
 
 ## 0.3.2 - 2026-11-21
 

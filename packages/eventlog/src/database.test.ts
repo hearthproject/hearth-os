@@ -551,6 +551,33 @@ describe("HearthStore", () => {
     store.close();
   });
 
+  it("records checkpoint event sequences and queries runtime events per run", () => {
+    const store = new HearthStore(":memory:");
+    const start = store.appendEvent({
+      type: "runtime.run.started",
+      taskId: "task-1",
+      runId: "run-1",
+      payload: { type: "run.start", runId: "run-1", goal: "g" }
+    });
+    const checkpoint: RunCheckpointRecord = {
+      id: "checkpoint-event-1", runId: "run-1", taskId: "task-1", seq: 1, kind: "turn",
+      path: ".hearth/checkpoints/run-1/0001-turn.json", sha256: "d".repeat(64), usage: null,
+      eventSeq: start.seq, createdAt: "2026-11-21T10:00:00.000Z"
+    };
+    store.createRunCheckpoint(checkpoint);
+    const message = store.appendEvent({
+      type: "runtime.message",
+      taskId: "task-1",
+      runId: "run-1",
+      payload: { type: "message", message: { role: "assistant", content: "after checkpoint" } }
+    });
+    expect(store.latestRunCheckpoint("run-1")?.eventSeq).toBe(start.seq);
+    expect(store.getEventBySeq(start.seq)?.type).toBe("runtime.run.started");
+    expect(store.listEventsForRun("run-1", start.seq).map((event) => event.seq)).toEqual([message.seq]);
+    expect(store.listEventsForRun("run-2")).toHaveLength(0);
+    store.close();
+  });
+
   it("reopens dispatched operations as unsettled", () => {
     const path = tempDb();
     const store = new HearthStore(path);

@@ -17,7 +17,7 @@ M1 引入 T1/T2 操作合同：
 
 ## 存储
 
-- 服务端：SQLite `run_operations`，schema 版本 38，和其余 run 数据在同一个库、同一个 writer 下。
+- 服务端：SQLite `run_operations`，M1 schema 37；M2 将运行时 journal 并入 `events` 后为 38。
 - standalone / 评测：`JsonlOperationLedger`，每次状态转换追加一行并 `fsync`；重启时回放，损坏的尾行忽略。
 - runtime 只依赖 `OperationLedger` 接口，不直接依赖 `node:sqlite`；server 通过 `SqliteOperationLedger` 注入。
 
@@ -39,3 +39,12 @@ M1 引入 T1/T2 操作合同：
 ## Windows 进程树
 
 Windows 下 `taskkill /T` 在“父进程刚创建子进程”的窗口里可能返回“operation not supported”，留下孤儿。`killShellSession` 先枚举 `Win32_Process` 的父子关系，从叶子向根 `Stop-Process`，再执行 `taskkill /T /F` 兜底。
+
+## 单一持久事实源（M2）
+
+服务端不再写 `.hearth/journals/<run>/events.jsonl`。`SqliteRuntimeJournal` 把 runtime 的 `run.start`、`message`、`tool.dispatched`、`tool.settled`、`checkpoint`、`run.end` 等事实写入 SQLite `events`；JSONL journal 只保留给 standalone / 评测模式。
+
+- 事件类型：`runtime.run.started`、`runtime.message`、`runtime.tool.dispatched`、`runtime.tool.settled`、`runtime.checkpoint`、`runtime.run.ended`，其余用 `runtime.event` 保留原始类型。
+- checkpoint 文件是物化视图。写入文件前先追加 `runtime.checkpoint.snapshot` 事件，事件 payload 带完整 `AgentCheckpoint`；`run_checkpoints.event_seq` 指向该事件。
+- 恢复时先校验 checkpoint 文件的 sha256；文件缺失或损坏时回退到 `runtime.checkpoint.snapshot` 事件，再从 `event_seq` 之后回放 `runtime.message` / `runtime.tool.settled`，补齐检查点后的消息。
+- 旧版本没有 `event_seq` 的 checkpoint 仍可按原有 JSONL journal 路径恢复，迁移期不丢历史任务。

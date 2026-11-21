@@ -12,7 +12,8 @@ import type {
   RuntimeEvent,
   SubagentType
 } from "@hearth/agent-runtime";
-import { deserializeAgentState, inspectJournal, journalPathFor, CODING_RUN_BUDGET } from "@hearth/agent-runtime";
+import { deserializeAgentState, journalPathFor, CODING_RUN_BUDGET } from "@hearth/agent-runtime";
+import { checkpointSnapshotFromEvent, RUNTIME_CHECKPOINT_EVENT, runtimeJournalEvents, SqliteRuntimeJournal } from "./sqlite-runtime-journal.ts";
 import type { ApprovalMode, BudgetDimension, BudgetExhaustion, ContextItem, ContextSettings, DelegationJob, DelegationResult, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, RunBudget, RunCheckpointProof, RunCheckpointRecord, RunRecord, TaskError, TaskFollowUpRecord, TaskLease, TaskProgressDetail, TaskRecord } from "@hearth/core";
 import { runCodex } from "@hearth/codex-executor";
 import type { DshApprovalOutcome, DshApprovalRequest, DshContextEvent } from "@hearth/deepseek-executor";
@@ -666,9 +667,11 @@ export class HearthScheduler {
     if (unresolved.length > 0) return "存在状态不确定的外部动作，必须先对账";
     const outDir = this.outDirForRun(task.id, run);
     if (existsSync(join(outDir, ".hearth", "executing.json"))) {
-      const journalPath = journalPathFor(run.workspace, run.id);
-      const journal = existsSync(journalPath) ? inspectJournal(journalPath) : null;
-      if (!journal) return "上一轮工具执行未确认完成，工作区可能已有部分改动，且没有可回放的运行日志";
+      const unsettled = this.service.store.listUnsettledRunOperations(run.id);
+      const runtimeEvents = runtimeJournalEvents(this.service.store, run.id);
+      if (unsettled.length === 0 && runtimeEvents.length === 0) {
+        return "上一轮工具执行未确认完成，工作区可能已有部分改动，且没有可回放的运行日志";
+      }
     }
     const checkpoint = this.service.store.latestRunCheckpoint(run.id);
     if (!checkpoint) return "没有可用检查点";
@@ -677,16 +680,7 @@ export class HearthScheduler {
     if (checkpoint.proof?.permissionsDigest && checkpoint.proof.permissionsDigest !== permissionsDigest) {
       return "权限已变化，等待用户确认";
     }
-    const path = isAbsolute(checkpoint.path) ? checkpoint.path : join(this.workspaceRoot, checkpoint.path);
-    if (!existsSync(path)) return "检查点文件不存在";
-    const body = readFileSync(path, "utf8");
-    if (createHash("sha256").update(body).digest("hex") !== checkpoint.sha256) return "检查点校验失败";
-    try {
-      const parsed = JSON.parse(body) as AgentCheckpoint;
-      if (!Array.isArray(parsed.messages) || !parsed.usage) return "检查点内容不完整";
-    } catch {
-      return "检查点无法解析";
-    }
+    if (!this.readCheckpointBody(run.id, checkpoint)) return "检查点文件缺失且事件日志中没有快照";
     return null;
   }
 
@@ -918,17 +912,26 @@ export class HearthScheduler {
         if (run.workspace !== workspace && existsSync(run.workspace)) {
           cpSync(run.workspace, workspace, { recursive: true, force: false });
         }
-        const path = isAbsolute(checkpoint.path) ? checkpoint.path : join(this.workspaceRoot, checkpoint.path);
-        if (!existsSync(path)) continue;
-        const body = readFileSync(path, "utf8");
-        if (createHash("sha256").update(body).digest("hex") !== checkpoint.sha256) continue;
-        const checkpointBody = JSON.parse(body) as AgentCheckpoint;
+        const loaded = this.readCheckpointBody(run.id, checkpoint);
+        if (!loaded) continue;
+        const checkpointBody = loaded.body;
         if (!Array.isArray(checkpointBody.messages) || !checkpointBody.usage) continue;
         const restoredState = deserializeAgentState(checkpointBody.state);
-        const journalSeq = checkpointBody.journalSeq ?? checkpoint.proof?.journalSeq;
-        const journalPath = checkpoint.proof?.journalPath
-          ? join(workspace, checkpoint.proof.journalPath)
-          : journalPathFor(workspace, run.id);
+        let journal: NonNullable<AgentResumeState["journal"]> | undefined;
+        if (loaded.eventSeq !== undefined) {
+          journal = {
+            seq: loaded.eventSeq,
+            events: runtimeJournalEvents(this.service.store, run.id, loaded.eventSeq)
+          };
+        } else {
+          const journalSeq = checkpointBody.journalSeq ?? checkpoint.proof?.journalSeq;
+          const journalPath = checkpoint.proof?.journalPath
+            ? join(workspace, checkpoint.proof.journalPath)
+            : journalPathFor(workspace, run.id);
+          if (journalSeq !== undefined && existsSync(journalPath)) {
+            journal = { path: journalPath, seq: journalSeq };
+          }
+        }
         return {
           messages: checkpointBody.messages,
           usage: { inputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0 },
@@ -936,13 +939,46 @@ export class HearthScheduler {
           toolCalls: 0,
           ...(restoredState ? { state: restoredState } : {}),
           ...(checkpointBody.promptHash ? { promptHash: checkpointBody.promptHash } : {}),
-          ...(journalSeq !== undefined && existsSync(journalPath) ? { journal: { path: journalPath, seq: journalSeq } } : {})
+          ...(journal ? { journal } : {})
         };
       } catch {
         // A missing or unreadable checkpoint falls back to a fresh run.
       }
     }
     return undefined;
+  }
+
+  /**
+   * Checkpoint files are a materialized view. Prefer a valid file, then fall
+   * back to the durable checkpoint event written before the file.
+   */
+  private readCheckpointBody(runId: string, checkpoint: RunCheckpointRecord): { body: AgentCheckpoint; eventSeq?: number } | null {
+    const path = isAbsolute(checkpoint.path) ? checkpoint.path : join(this.workspaceRoot, checkpoint.path);
+    if (existsSync(path)) {
+      const body = readFileSync(path, "utf8");
+      if (createHash("sha256").update(body).digest("hex") === checkpoint.sha256) {
+        try {
+          const parsed = JSON.parse(body) as AgentCheckpoint;
+          if (Array.isArray(parsed.messages) && parsed.usage) {
+            return {
+              body: parsed,
+              ...(checkpoint.eventSeq !== undefined ? { eventSeq: checkpoint.eventSeq } : {})
+            };
+          }
+        } catch {
+          // Fall through to the event snapshot.
+        }
+      }
+    }
+    if (checkpoint.eventSeq !== undefined) {
+      const snapshot = checkpointSnapshotFromEvent(this.service.store.getEventBySeq(checkpoint.eventSeq));
+      if (snapshot) return { body: snapshot, eventSeq: checkpoint.eventSeq };
+    }
+    for (const event of this.service.store.listEventsForRun(runId).filter((item) => item.type === RUNTIME_CHECKPOINT_EVENT).reverse()) {
+      const snapshot = checkpointSnapshotFromEvent(event);
+      if (snapshot?.seq === checkpoint.seq) return { body: snapshot, eventSeq: event.seq };
+    }
+    return null;
   }
 
   private persistNativeCheckpoint(taskId: string, runId: string, workspace: string, checkpoint: AgentCheckpoint): void {
@@ -955,6 +991,13 @@ export class HearthScheduler {
     renameSync(tempPath, absolutePath);
     pruneRunCheckpointFiles(directory);
     const createdAt = new Date().toISOString();
+    const snapshotEvent = this.service.store.appendEvent({
+      type: RUNTIME_CHECKPOINT_EVENT,
+      taskId,
+      runId,
+      payload: { checkpoint },
+      createdAt
+    });
     const task = this.service.requireTask(taskId);
     const effects = this.service.store.listEffects(taskId);
     const workspaceDigest = this.workspaceDigestFor(runId, workspace, checkpoint.kind);
@@ -976,9 +1019,6 @@ export class HearthScheduler {
       ...(task.permissions ? { permissionsDigest: hashStable(task.permissions) } : {}),
       ...(workspaceDigest ? { workspaceDigest } : {}),
       ...(checkpoint.journalSeq !== undefined ? { journalSeq: checkpoint.journalSeq } : {}),
-      ...(checkpoint.journalSeq !== undefined
-        ? { journalPath: relative(workspace, journalPathFor(workspace, runId)).replace(/\\/g, "/") }
-        : {}),
       createdAt
     };
     const record: RunCheckpointRecord = {
@@ -990,6 +1030,7 @@ export class HearthScheduler {
       path: relative(this.workspaceRoot, absolutePath).replace(/\\/g, "/"),
       sha256: createHash("sha256").update(body).digest("hex"),
       usage: checkpoint.usage,
+      eventSeq: snapshotEvent.seq,
       createdAt,
       proof
     };
@@ -1911,6 +1952,7 @@ export class HearthScheduler {
         signal: controller.signal,
         fullPermission,
         operationLedger: this.operationLedger,
+        runtimeJournal: new SqliteRuntimeJournal(this.service.store, taskId, runId),
         ...(subagentManager ? { steering: () => subagentManager?.stallNotices() ?? [] } : {}),
         isFullPermission: () => this.service.approvalModeForTask(task) === "full",
         contextSettings: this.context.settings(),

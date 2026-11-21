@@ -6,6 +6,7 @@ import type { AgentHookDefinition } from "./harness/hooks.ts";
 import type { AgentFailure, AgentToolError } from "./errors.ts";
 import type { RetryPolicy } from "./retry-policy.ts";
 import type { OperationLedger, OperationPhase } from "./operations/types.ts";
+import type { JournalEvent, JournalSink } from "./journal.ts";
 
 export type HarnessProfile = "general" | "coding";
 export type HarnessMode = "build" | "plan";
@@ -296,7 +297,7 @@ export interface AgentResumeState {
   toolCalls: number;
   state?: AgentToolState;
   promptHash?: string;
-  journal?: { path: string; seq: number };
+  journal?: { path?: string; seq: number; events?: JournalEvent[] };
 }
 
 export interface AgentPostEditEvent {
@@ -378,9 +379,12 @@ export interface AgentRunMetrics {
 }
 
 export interface AgentJournalOptions {
-  path: string;
+  path?: string;
   fsync?: boolean;
   rotateBytes?: number;
+  /** Host-owned durable sink. When set, the runtime does not open a JSONL file. */
+  sink?: JournalSink;
+  startSeq?: number;
 }
 
 export interface AgentRunResult {

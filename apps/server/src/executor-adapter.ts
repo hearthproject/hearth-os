@@ -6,6 +6,7 @@ import type {
   AgentTool,
   AgentToolAuthorization,
   AgentToolAuthorizationRequest,
+  JournalSink,
   OperationLedger,
   RuntimeEvent
 } from "@hearth/agent-runtime";
@@ -23,7 +24,6 @@ import type {
 import type { CodexRunOptions, CodexRunResult } from "@hearth/codex-executor";
 import { runDeepSeekHarness, type DeepSeekHarnessRunOptions, type DeepSeekHarnessRunResult, type DshApprovalOutcome, type DshApprovalRequest, type DshContextEvent } from "@hearth/deepseek-executor";
 import { executorHome } from "./executor-runtime.ts";
-import { journalPathFor } from "@hearth/agent-runtime";
 import type { ModelSettings } from "./model-settings.ts";
 import { nativePermissionsFor, withExtraToolPermissions, type NativeRunOptions, type NativeRunResult } from "./native-executor.ts";
 import type { PreparedWorkspace } from "./workspace.ts";
@@ -56,6 +56,7 @@ export interface ExecutorAttemptContext {
   signal: AbortSignal;
   fullPermission: boolean;
   operationLedger?: OperationLedger;
+  runtimeJournal?: JournalSink;
   isFullPermission?: (() => boolean) | undefined;
   contextSettings: ContextSettings;
   nativeSettings: ModelSettings | null;
@@ -138,7 +139,7 @@ export class NativeExecutorAdapter implements ExecutorAdapter {
       runId: input.run.id,
       taskId: input.task.id,
       ...(input.operationLedger ? { operationLedger: input.operationLedger } : {}),
-      journalPath: journalPathFor(input.prepared.root, input.run.id),
+      ...(input.runtimeJournal ? { journalSink: input.runtimeJournal } : {}),
       goalRoot: input.prepared.root,
       checkpointPolicy: { everyTurns: 5, everyToolCalls: 20, maxSnapshots: 40 },
       ...(resumable ? { resume: resumable } : {}),

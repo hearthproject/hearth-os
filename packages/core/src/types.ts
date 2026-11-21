@@ -706,6 +706,8 @@ export interface RunCheckpointRecord {
   path: string;
   sha256: string;
   usage: RunUsage | null;
+  /** Event-log sequence of the durable checkpoint snapshot. */
+  eventSeq?: number;
   createdAt: string;
   proof?: RunCheckpointProof;
 }
