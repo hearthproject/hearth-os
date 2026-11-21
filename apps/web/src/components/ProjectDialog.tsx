@@ -22,16 +22,22 @@ export function ProjectDialog({ onClose, onCreated }: { onClose: () => void; onC
 
   async function browse() {
     setError(null);
+    // Desktop builds must always use the OS folder dialog. Cancelling the
+    // native dialog returns to the form instead of opening an in-app browser.
     if (hasDesktopBridge()) {
       try {
         const picked = await pickFolder();
         if (picked) {
           setPath(picked);
-          return;
+          if (!name.trim()) {
+            const base = picked.split(/[\\/]/).filter(Boolean).pop() ?? "";
+            if (base) setName(base);
+          }
         }
-      } catch {
-        // Fall through to the server-side browser.
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "无法打开系统文件夹选择器");
       }
+      return;
     }
     setBrowserOpen(true);
   }
@@ -79,7 +85,7 @@ export function ProjectDialog({ onClose, onCreated }: { onClose: () => void; onC
           <span>源文件夹</span>
           <div className="project-path-row">
             <input ref={pathRef} value={path} onChange={(event) => setPath(event.target.value)} placeholder="D:\Projects\my-app" spellCheck={false} />
-            <button type="button" className="ghost-button" onClick={() => void browse()} disabled={busy}>浏览…</button>
+            <button type="button" className="ghost-button" onClick={() => void browse()} disabled={busy}>选择文件夹</button>
           </div>
         </label>
         <p className="project-dialog-note">支持 Git 仓库或任意本地文件夹。</p>
