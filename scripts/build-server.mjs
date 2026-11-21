@@ -98,6 +98,15 @@ for (const name of ["cmaps", "standard_fonts", "wasm"]) {
   cpSync(source, join(pdfjsAssets, name), { recursive: true });
 }
 
+const nativeRoot = join(resourcesRoot, "native");
+const nativeHelper = join(repoRoot, "apps", "native", "bin", "hearth-native.exe");
+if (existsSync(nativeHelper)) {
+  mkdirSync(nativeRoot, { recursive: true });
+  cpSync(nativeHelper, join(nativeRoot, "hearth-native.exe"));
+} else {
+  throw new Error(`missing Windows native helper: ${nativeHelper}; run npm run build:native first`);
+}
+
 const sandboxRoot = join(resourcesRoot, "sandbox", "windows-acl");
 const sandboxPackageRoot = join(repoRoot, "node_modules", "@deepseek-ai", "dsh-sandbox-windows-acl");
 const copiedPackages = new Set();

@@ -11,6 +11,7 @@
   "scripts": {
     "dev": "concurrently -k -n server,web -c yellow,cyan \"npm run dev -w @hearth/server\" \"npm run dev -w @hearth/web\"",
     "build": "npm run build -w @hearth/web",
+    "build:native": "node scripts/build-native.mjs",
     "start": "npm run start -w @hearth/server",
     "test": "vitest run",
     "test:watch": "vitest",

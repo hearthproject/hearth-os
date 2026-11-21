@@ -54,7 +54,7 @@ import {
 import { wantsCodeExecution, wantsGithubAccess, wantsPublicWebResearch, wantsScreenshot } from "./task-intent.ts";
 import { supportsToolCalling, streamAgentTurn } from "./model-agent.ts";
 import { completeChat } from "./model-client.ts";
-import { WindowsAclSandboxProvider } from "./native-sandbox.ts";
+import { WindowsNativeSandboxProvider } from "./windows-native-sandbox.ts";
 import { DOSSIER_DIR, HEARTH_ROOT, WORKSTYLE_PATH } from "./config.ts";
 import { DossierStore, dossierPromptBlock } from "./dossier.ts";
 import { WorkstyleStore, workstylePromptBlock } from "./workstyle.ts";
@@ -1260,7 +1260,7 @@ export function nativePermissionsFor(task: TaskRecord, prepared: PreparedWorkspa
   };
 }
 
-let defaultWindowsSandbox: WindowsAclSandboxProvider | null = null;
+let defaultWindowsSandbox: WindowsNativeSandboxProvider | null = null;
 let warnedSandboxOff = false;
 
 function nativeSandboxRoot(prepared: PreparedWorkspace): string {
@@ -1302,7 +1302,7 @@ async function prepareNativeSandbox(options: NativeRunOptions, permissions: Task
   }
   if (process.platform !== "win32") {
     appendSandboxAudit(options.prepared, options.task.id, { type: "sandbox.unavailable", backend: "none", mode: "enforce", reason: "platform" });
-    throw new SandboxUnavailableError("当前 native sandbox 只有 Windows ACL 后端；请设置 HEARTH_NATIVE_SANDBOX=off 作为显式降级");
+    throw new SandboxUnavailableError("当前 native sandbox 只有 Windows AppContainer 后端；请设置 HEARTH_NATIVE_SANDBOX=off 作为显式降级");
   }
   const selection = resolveSandboxPolicy({
     permissions,
@@ -1315,7 +1315,7 @@ async function prepareNativeSandbox(options: NativeRunOptions, permissions: Task
     return undefined;
   }
   permissions.sandboxMode = selection.mode;
-  defaultWindowsSandbox ??= new WindowsAclSandboxProvider();
+  defaultWindowsSandbox ??= new WindowsNativeSandboxProvider();
   const provider = defaultWindowsSandbox;
   try {
     await provider.probe();
@@ -1329,28 +1329,29 @@ async function prepareNativeSandbox(options: NativeRunOptions, permissions: Task
     throw error;
   }
   const runtime: SandboxRuntime = { provider, policy: selection.policy };
+  const networkEnforcement = selection.policy.networkHosts.length === 0 ? "full" : "none";
   appendSandboxAudit(options.prepared, options.task.id, {
     type: "sandbox.selected",
     backend: provider.id,
     mode: selection.policy.mode,
-    enforcement: "partial",
-    networkEnforcement: "none",
+    enforcement: "full",
+    networkEnforcement,
     workspaceRoot: selection.policy.workspaceRoot,
     tempRoot: selection.policy.tempRoot,
     warnings: selection.warnings
   });
   options.onProgress?.({
     kind: "sandbox",
-    message: `Windows ACL 沙箱已启用（${selection.mode}，仅限制文件写入/删除）`,
+    message: `Windows AppContainer 沙箱已启用（${selection.mode}，文件/进程/网络隔离）`,
     detail: {
       executorId: "native",
       eventType: "sandbox.selected",
-      status: "partial",
+      status: "full",
       sandbox: {
         backend: provider.id,
         mode: selection.policy.mode,
-        enforcement: "partial",
-        networkEnforcement: "none"
+        enforcement: "full",
+        networkEnforcement
       }
     }
   });

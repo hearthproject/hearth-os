@@ -25,9 +25,11 @@ apps/desktop-tauri/.cache/
 apps/desktop-tauri/src-tauri/resources/server/
 apps/desktop-tauri/src-tauri/resources/web/
 apps/desktop-tauri/src-tauri/resources/node.exe
+apps/native/bin/
 apps/desktop-tauri/src-tauri/resources/node_modules/
 apps/desktop-tauri/src-tauri/resources/npm.cmd
 apps/desktop-tauri/src-tauri/resources/helper/
+apps/desktop-tauri/src-tauri/resources/native/
 apps/desktop-tauri/src-tauri/resources/licenses/
 apps/desktop-tauri/src-tauri/resources/sandbox/
 apps/desktop-tauri/src-tauri/resources/THIRD_PARTY_NOTICES.txt

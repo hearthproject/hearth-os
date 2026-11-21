@@ -56,3 +56,15 @@ Windows 下 `taskkill /T` 在“父进程刚创建子进程”的窗口里可能
 - 租约文件为 `hearth.host.lock`，同时记录 PID 和进程创建时间。PID 被系统复用时，创建时间不匹配会被判为陈旧锁；进程正常退出会删除锁文件。原生 named mutex 辅助程序将在 Windows 沙箱里程碑接入，当前使用等价的文件租约。
 - `HostKernel.stop()` 先把状态切到 `draining`，由调度器停止接收新任务、取消在跑 run、释放任务租约，最后释放宿主租约。
 - `/api/health` 返回 `host` 快照：`phase`、`step`、`readyAt`、`error` 和租约信息，桌面 supervisor 与诊断页可直接观察卡在哪个阶段。
+
+## Windows 原生沙箱（M3）
+
+Windows 单机执行器不再依赖 Node ACL runner。`apps/native/hearth-native.cs` 由系统自带 `csc.exe` 编译成 `hearth-native.exe`，提供三个子命令：
+
+- `lease --name`：`Global\Hearth.Host.<name>` named mutex，stdin 收到 `release` 或 EOF 后退出。
+- `process-info --pid`：返回 PID 与进程创建时间，供宿主租约判断 PID 复用。
+- `sandbox`：创建或复用 AppContainer package SID；只给 workspace、私有 temp、显式 `--read` / `--write` 根授权；用 `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES` 在 AppContainer 中启动子进程；子进程加入 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 的 Job Object；父进程 watchdog 每 500ms 检查 `--parent-pid`，父死即 `TerminateJobObject`。
+
+`WindowsNativeSandboxProvider` 只构造 argv 契约，不复制 Win32 代码。`workspace-write` 给 workspace `(OI)(CI)M`，`read-only` 给 `(OI)(CI)RX`；temp 始终可写；额外写根通过 `--write`，读根通过 `--read`。网络默认拒绝：AppContainer 不申请 `internetClient` capability，因此子进程没有网络身份。helper 缺失、AppContainer 创建失败或 ACL 授权失败都会 fail-closed，不会静默退回完全权限。
+
+沙箱边界是“文件系统 + 进程 + 网络”三层，而不是只限制 shell 命令字符串。junction/symlink 指向工作区外时，目标没有 AppContainer ACE，读写仍会被拒绝。
