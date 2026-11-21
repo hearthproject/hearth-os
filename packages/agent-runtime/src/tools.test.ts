@@ -493,13 +493,13 @@ function workspace(roots: string[]): string {
 }
 
 async function removeWorkspace(root: string): Promise<void> {
-  for (let attempt = 0; attempt < 10; attempt += 1) {
+  for (let attempt = 0; attempt < 25; attempt += 1) {
     try {
       rmSync(root, { recursive: true, force: true });
       return;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EBUSY" || attempt === 9) throw error;
-      await delay(200);
+      if ((error as NodeJS.ErrnoException).code !== "EBUSY" || attempt === 24) throw error;
+      await delay(250);
     }
   }
 }
