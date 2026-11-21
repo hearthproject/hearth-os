@@ -214,24 +214,20 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         if (Object.keys(replay.addedUsage).length > 0) addUsage(usage, replay.addedUsage as AgentUsage);
         if (replay.inFlight) {
           const effect = replay.inFlight.effect;
-          if (effect === "external_write" || effect === "destructive" || effect === "unknown") {
-            return finish("failed", `上一轮工具 ${replay.inFlight.name} 的外部副作用状态未知，需要先对账。`, [], null, {
-              code: "INTERRUPTED",
-              message: "外部副作用状态未知，不能自动继续",
-              retryable: false
-            });
-          }
+          // A crash in the middle of a tool call must never brick the task.
+          // Tell the model the outcome is unknown and let it verify before
+          // deciding whether to retry; the run continues either way.
           messages.push({
             role: "tool",
             toolCallId: replay.inFlight.callId,
             name: replay.inFlight.name,
-            content: `工具 ${replay.inFlight.name} 在上一进程中断；结果未知，` + (effect === "read" ? "需要时请重试。" : "工作区可能已部分修改，请先核对后再重试。"),
+            content: `工具 ${replay.inFlight.name} 在上一进程中断；结果未知，` + (effect === "read" ? "需要时请重试。" : "工作区或外部状态可能已部分改变，请先核对后再决定下一步。"),
             isError: true
           });
-          if (effect === "local_write") {
+          if (effect !== "read") {
             messages.push({
               role: "user",
-              content: `<resume_reconciliation>\n工具 ${replay.inFlight.name}（${replay.inFlight.callId}）在崩溃时可能已经修改了工作区。不要直接重试；先用 read_file/search_text 核对目标，再决定下一步。\n</resume_reconciliation>`
+              content: `<resume_reconciliation>\n工具 ${replay.inFlight.name}（${replay.inFlight.callId}）在上一进程中断，执行结果未知。不要假设成功或失败；先用只读方式核对当前状态，再决定是否重试或换一种做法，然后继续完成目标。\n</resume_reconciliation>`
             });
           }
         }
@@ -335,9 +331,9 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       source
     });
   };
-  // 预算字段缺省、非有限值或非正数都表示不设上限。
-  const limitOf = (value: number | undefined): number | null =>
-    typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+  // Hearth no longer enforces turn/tool/token/time budgets. Unlimited work is
+  // the product default; only explicit cancellation stops a run.
+  const limitOf = (_value: number | undefined): number | null => null;
   const turnLimit = limitOf(options.budget.maxTurns);
   const toolCallLimit = limitOf(options.budget.maxToolCalls);
   const tokenLimit = limitOf(options.budget.maxTokens);
@@ -692,11 +688,6 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
 
     const goalRoot = options.goalRoot ?? options.workspaceRoot;
     const activeGoal = readGoalByRoot(goalRoot);
-    if (activeGoal && activeGoal.status === "active" && activeGoal.maxTurns > 0 && turns >= activeGoal.maxTurns) {
-      const message = `持久目标「${activeGoal.title}」已达到 ${activeGoal.maxTurns} 轮上限，暂停等待确认。`;
-      await checkpoint("waiting_input", true);
-      return finish("waiting_input", message, [], message);
-    }
 
     if (options.steering) {
       const pending = options.steering();

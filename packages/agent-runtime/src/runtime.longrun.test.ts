@@ -375,12 +375,13 @@ describe("agent runtime long-run fixtures", () => {
     expect(result.messages.some((message) => message.role === "user" && message.content.includes("Persisted goal"))).toBe(true);
   });
 
-  it("returns waiting_input when an active goal reaches maxTurns", async () => {
+  it("does not stop an active goal at its legacy maxTurns", async () => {
     const root = workspace(roots);
     writeGoal(root, { maxTurns: 1 });
     const fake = createFakeModel([
       { content: "one", toolCalls: [], finishReason: "stop" },
-      { content: "two", toolCalls: [], finishReason: "stop" }
+      { content: "two", toolCalls: [], finishReason: "stop" },
+      { content: "", toolCalls: [fakeToolCall("finish_task", { summary: "done" })], finishReason: "tool_calls" }
     ]);
     const result = await runAgent({
       model: fake.model,
@@ -393,9 +394,8 @@ describe("agent runtime long-run fixtures", () => {
       budget: {}
     });
 
-    expect(result.status).toBe("waiting_input");
-    expect(result.summary).toContain("轮上限");
-    expect(fake.state.calls).toBe(1);
+    expect(result.status).toBe("completed");
+    expect(fake.state.calls).toBe(3);
   });
 
   it("continues truncated model output instead of treating it as missing finish", async () => {
