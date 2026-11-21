@@ -7,7 +7,7 @@
 ## 运行形态
 
 - Tauri 主程序负责窗口、托盘、数据目录选择、环境体检和服务端生命周期，安装后约 7.8 MiB。
-- 服务端是原来的 Fastify 应用，由 esbuild 打成单个 `server.mjs`（约 13.9 MiB），作为 Tauri 的子进程运行，固定监听 `127.0.0.1:4317`。
+- 服务端是原来的 Fastify 应用，由 esbuild 打成 `server.mjs` 入口（约 2.1 MiB）和按需加载的 `chunk-*.mjs`，作为 Tauri 的子进程运行，固定监听 `127.0.0.1:4317`。邮件 SDK、文档解析、PDF、浏览器自动化等重依赖只在首次用到时加载。
 - 内置官方 Node `22.23.2`（`node.exe`，83.0 MiB）和随附 npm `10.9.8`（裁剪后约 7.8 MiB）。托管安装、运行时 `npm` 命令都使用内置 npm。
 - 前端构建产物在 `resources/web`（约 0.8 MiB，默认不生成 source map）。PDF worker 与 cMaps / 标准字体 / wasm 在 `resources/server`（合计约 4.5 MiB）。Windows ACL sandbox 及其依赖在 `resources/sandbox`（约 12.8 MiB）。
 - Codex 不内置约 479 MiB 的平台二进制：优先 `HEARTH_CODEX_PATH`，其次 `where codex.exe` 的第一个 `.exe`，最后已知 npm 全局路径。
@@ -20,7 +20,7 @@ npm ci
 npm run tauri:build
 ```
 
-流程：web build → server 单文件 bundle → 复制 web → 下载并校验官方 Node 22.23.2 → 复制/裁剪 npm → 生成 `npm.cmd` 与 helper 启动脚本 → `tauri build`。
+流程：web build → server 分包 bundle → 复制 web → 下载并校验官方 Node 22.23.2 → 复制/裁剪 npm → 生成 `npm.cmd` 与 helper 启动脚本 → `tauri build`。
 
 产物：
 

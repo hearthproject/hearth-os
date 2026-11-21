@@ -38,6 +38,8 @@ Electron 原有的窗口、托盘、单实例、端口探测、服务端监管�
 
 ## 2. 服务端打成单文件
 
+> 2026-11 启动优化后，本节记录的单文件方案已演进为 esbuild 分包：`splitting: true`，入口 `server.mjs` 约 2.1 MiB，其余 30 个 `chunk-*.mjs` 按需加载（总计约 16.0 MiB）。邮件、文档解析、PDF、浏览器自动化等依赖改为动态 `import()`；每个输出文件前置换算过的 `createRequire` shim，解决分包后 CJS 动态 `require` 缺失。安装包约 30.7 MiB。
+
 ### esbuild 配置
 
 `scripts/build-server.mjs` 使用全量 bundle：
