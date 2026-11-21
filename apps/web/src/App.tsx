@@ -4,6 +4,7 @@ import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AppShell } from "./components/AppShell.tsx";
 import { NotificationCenter } from "./components/NotificationCenter.tsx";
 import { api, subscribeToEvents } from "./lib/api.ts";
+import type { EventEnvelope, TaskView } from "./lib/types.ts";
 import { ChatPage } from "./pages/ChatPage.tsx";
 import { ConnectionsPage } from "./pages/ConnectionsPage.tsx";
 import { ContextPage } from "./pages/ContextPage.tsx";
@@ -59,61 +60,145 @@ function FirstRunGate({ children }: { children: ReactNode }) {
 function EventBridge() {
   const queryClient = useQueryClient();
   const { pathname } = useLocation();
-  const taskId = pathname.startsWith("/tasks/") ? decodeURIComponent(pathname.slice("/tasks/".length)) : null;
+  const routedTaskId = pathname.startsWith("/tasks/") ? decodeURIComponent(pathname.slice("/tasks/".length)) : null;
 
   useEffect(() => {
-    let refreshTimer: number | undefined;
-    const unsubscribe = subscribeToEvents((event) => {
-      window.clearTimeout(refreshTimer);
-      refreshTimer = window.setTimeout(() => {
+    const taskRefreshTimers = new Map<string, number>();
+    const pendingTaskProgress = new Map<string, EventEnvelope[]>();
+    const taskProgressTimers = new Map<string, number>();
+    const flushTaskProgress = (taskId: string) => {
+      taskProgressTimers.delete(taskId);
+      const pending = pendingTaskProgress.get(taskId) ?? [];
+      pendingTaskProgress.delete(taskId);
+      if (pending.length === 0) return;
+      queryClient.setQueryData<TaskView>(["task", taskId], (current) => {
+        if (!current) return current;
+        const known = new Set(current.events.map((item) => item.id));
+        const additions = pending.filter((item) => !known.has(item.id));
+        if (additions.length === 0) return current;
+        return {
+          ...current,
+          events: [...current.events, ...additions].slice(-200),
+          eventTotal: current.eventTotal + additions.length
+        };
+      });
+    };
+    const appendTaskProgress = (envelope: EventEnvelope | undefined) => {
+      if (!envelope?.taskId || envelope.type !== "task.progress") return;
+      const pending = pendingTaskProgress.get(envelope.taskId) ?? [];
+      if (pending.some((item) => item.id === envelope.id)) return;
+      pending.push(envelope);
+      pendingTaskProgress.set(envelope.taskId, pending);
+      if (taskProgressTimers.has(envelope.taskId)) return;
+      // Progress events can arrive in bursts. Render one coalesced update per
+      // animation-sized interval instead of causing a React tree update per line.
+      taskProgressTimers.set(envelope.taskId, window.setTimeout(() => {
+        flushTaskProgress(envelope.taskId as string);
+      }, 96));
+    };
+    const scheduleTaskRefresh = (taskId: string | null, delay = 160) => {
+      if (!taskId) return;
+      const current = taskRefreshTimers.get(taskId);
+      if (current !== undefined) window.clearTimeout(current);
+      taskRefreshTimers.set(taskId, window.setTimeout(() => {
+        taskRefreshTimers.delete(taskId);
+        void queryClient.invalidateQueries({ queryKey: ["task", taskId] });
+      }, delay));
+    };
+    const invalidateTask = (taskId: string | null, immediate = false) => {
+      if (!taskId) return;
+      if (immediate) {
+        void queryClient.invalidateQueries({ queryKey: ["task", taskId] });
+      } else {
+        scheduleTaskRefresh(taskId);
+      }
+    };
+
+    const unsubscribe = subscribeToEvents((event, envelope) => {
+      const eventTaskId = envelope?.taskId ?? routedTaskId;
+      appendTaskProgress(envelope);
+
+      if (event === "task.progress") return;
+
+      if (event === "task.created" || event === "task.updated") {
+        invalidateTask(eventTaskId, true);
         void queryClient.invalidateQueries({ queryKey: ["tasks"] });
-        void queryClient.invalidateQueries({ queryKey: ["health"] });
-        void queryClient.invalidateQueries({ queryKey: ["system"] });
-        void queryClient.invalidateQueries({ queryKey: ["desktop"] });
+        void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        void queryClient.invalidateQueries({ queryKey: ["conversation"] });
+        void queryClient.invalidateQueries({ queryKey: ["artifacts"] });
+        return;
+      }
+      if (event === "task.follow-up.created" || event === "task.follow-up.updated" || event === "run.created" || event === "run.updated") {
+        invalidateTask(eventTaskId);
+        return;
+      }
+      if (event === "approval.created" || event === "approval.updated") {
+        invalidateTask(eventTaskId);
+        void queryClient.invalidateQueries({ queryKey: ["approvals"] });
+        void queryClient.invalidateQueries({ queryKey: ["outbox"] });
+        return;
+      }
+      if (event === "artifact.published" || event.startsWith("effect.")) {
+        invalidateTask(eventTaskId);
+        if (event === "artifact.published") {
+          void queryClient.invalidateQueries({ queryKey: ["artifacts"] });
+          void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+        }
+        return;
+      }
+      if (["chat.message.created", "chat.message.updated", "message"].includes(event)) {
+        void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        void queryClient.invalidateQueries({ queryKey: ["conversation"] });
+        return;
+      }
+      if (event === "tool.job.updated") {
+        void queryClient.invalidateQueries({ queryKey: ["background-tools"] });
+        invalidateTask(eventTaskId);
+        return;
+      }
+      if (event.startsWith("source.")) {
+        void queryClient.invalidateQueries({ queryKey: ["sources"] });
+        void queryClient.invalidateQueries({ queryKey: ["outbox"] });
+        return;
+      }
+      if (event.startsWith("memory.") || event === "context.item.appended" || event === "context.summary.updated" || event === "context.settings.updated" || event === "context.task.deleted") {
         void queryClient.invalidateQueries({ queryKey: ["memory"] });
+        void queryClient.invalidateQueries({ queryKey: ["context"] });
         void queryClient.invalidateQueries({ queryKey: ["library-status"] });
         void queryClient.invalidateQueries({ queryKey: ["library-tree"] });
-        void queryClient.invalidateQueries({ queryKey: ["library-trash"] });
-        void queryClient.invalidateQueries({ queryKey: ["library-node"] });
+        return;
+      }
+      if (event === "schedule.created" || event === "schedule.updated" || event === "schedule.run.created" || event === "schedule.run.updated") {
+        void queryClient.invalidateQueries({ queryKey: ["schedules"] });
+        void queryClient.invalidateQueries({ queryKey: ["scheduleRuns"] });
+        void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+        return;
+      }
+      if (event === "security.kill-switch.updated" || event === "security.audit") {
+        void queryClient.invalidateQueries({ queryKey: ["security"] });
+        void queryClient.invalidateQueries({ queryKey: ["system"] });
         void queryClient.invalidateQueries({ queryKey: ["approvals"] });
-        void queryClient.invalidateQueries({ queryKey: ["reconcile"] });
-        void queryClient.invalidateQueries({ queryKey: ["outbox"] });
-        void queryClient.invalidateQueries({ queryKey: ["sources"] });
-        if (event === "tool.job.updated") {
-          void queryClient.invalidateQueries({ queryKey: ["background-tools"] });
-        }
-        if (event === "artifact.published" || event.startsWith("task.")) {
-          void queryClient.invalidateQueries({ queryKey: ["artifacts"] });
-        }
-        if (event.startsWith("effect.")) {
-          void queryClient.invalidateQueries({ queryKey: ["task"] });
-        }
-        if (["task.created", "task.updated", "task.follow-up.created", "task.follow-up.updated", "chat.message.created", "chat.message.updated", "message"].includes(event)) {
-          void queryClient.invalidateQueries({ queryKey: ["conversations"] });
-          void queryClient.invalidateQueries({ queryKey: ["conversation"] });
-        }
-        if (event === "schedule.created" || event === "schedule.updated" || event === "schedule.run.created" || event === "schedule.run.updated") {
-          void queryClient.invalidateQueries({ queryKey: ["schedules"] });
-          void queryClient.invalidateQueries({ queryKey: ["scheduleRuns"] });
-          void queryClient.invalidateQueries({ queryKey: ["conversations"] });
-          void queryClient.invalidateQueries({ queryKey: ["conversation"] });
-        }
-        if (taskId) {
-          void queryClient.invalidateQueries({ queryKey: ["task", taskId] });
-          void queryClient.invalidateQueries({ queryKey: ["task-context", taskId] });
-          void queryClient.invalidateQueries({ queryKey: ["taskEvents", taskId] });
-          void queryClient.invalidateQueries({ queryKey: ["task-follow-ups", taskId] });
-          void queryClient.invalidateQueries({ queryKey: ["task-git", taskId] });
-          void queryClient.invalidateQueries({ queryKey: ["task-git-diff", taskId] });
-          void queryClient.invalidateQueries({ queryKey: ["task-git-file", taskId] });
-        }
-      }, 250);
+        return;
+      }
+      if (event.startsWith("device.") || event.startsWith("desktop.")) {
+        void queryClient.invalidateQueries({ queryKey: ["devices"] });
+        void queryClient.invalidateQueries({ queryKey: ["desktop"] });
+        return;
+      }
+      if (event.startsWith("execution.")) {
+        invalidateTask(eventTaskId);
+        void queryClient.invalidateQueries({ queryKey: ["diagnostics"] });
+      }
     });
     return () => {
-      window.clearTimeout(refreshTimer);
+      for (const timer of taskRefreshTimers.values()) window.clearTimeout(timer);
+      for (const timer of taskProgressTimers.values()) window.clearTimeout(timer);
+      taskRefreshTimers.clear();
+      taskProgressTimers.clear();
+      pendingTaskProgress.clear();
       unsubscribe();
     };
-  }, [queryClient, taskId]);
+  }, [queryClient, routedTaskId]);
 
   return null;
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
@@ -25,7 +25,7 @@ import {
   X
 } from "lucide-react";
 import { ApiError, api, chatStream } from "../lib/api.ts";
-import { ChatWorkspacePanel } from "../components/ChatWorkspacePanel.tsx";
+import { attachmentPreviewTarget, artifactPreviewTarget, ChatWorkspacePanel, type PreviewTarget } from "../components/ChatWorkspacePanel.tsx";
 import { InlineRun, type RunInfo } from "../components/InlineRun.tsx";
 import { formatBytes, formatDuration, formatTime } from "../lib/format.ts";
 import { getChatSelection, setChatBusy, syncChatSelection, useChatSelection } from "../lib/chat-selection.ts";
@@ -39,7 +39,6 @@ import type {
   ConversationSettingsPatch,
   ExecutorId,
   ReasoningEffort,
-  TaskListItem,
   SkillView
 } from "../lib/types.ts";
 
@@ -76,6 +75,28 @@ interface ChatExecution {
   durationMs: number;
 }
 
+interface ContextBreakdown {
+  system?: number;
+  history?: number;
+  personal?: number;
+  memory?: number;
+  library?: number;
+  skill?: number;
+  attachments?: number;
+  user?: number;
+  task?: number;
+}
+
+interface ContextUsage {
+  inputTokens: number;
+  outputTokens: number;
+  contextWindowTokens?: number;
+  source?: "estimated" | "measured";
+  model?: string;
+  reasoningEffort?: ReasoningEffort;
+  breakdown?: ContextBreakdown;
+}
+
 export function ChatPage() {
   const queryClient = useQueryClient();
   const location = useLocation();
@@ -98,12 +119,14 @@ export function ChatPage() {
   const [draftSettings, setDraftSettings] = useState<ConversationSettings | null>(null);
   const [pendingProjectId, setPendingProjectId] = useState<string | null>(() => getChatSelection().pendingProjectId);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [workspacePreview, setWorkspacePreview] = useState<PreviewTarget | null>(null);
+  const [draggingFiles, setDraggingFiles] = useState(false);
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(() => new URLSearchParams(location.search).get("skill"));
   const [slashIndex, setSlashIndex] = useState(0);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [savingEffort, setSavingEffort] = useState(false);
   const [reasoningDraft, setReasoningDraft] = useState<ReasoningEffort | null>(null);
-  const [contextUsage, setContextUsage] = useState<{ inputTokens: number; outputTokens: number } | null>(null);
+  const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
   const [skillInstallRequest, setSkillInstallRequest] = useState<{ source: string } | null>(null);
   const [skillNotice, setSkillNotice] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -114,9 +137,10 @@ export function ChatPage() {
   const handledSelectionNonce = useRef(selection.nonce);
   const panelConversationRef = useRef<string | null>(conversationId);
   const queuedDispatchRef = useRef(false);
+  const dragDepthRef = useRef(0);
 
-  const conversationsQuery = useQuery({ queryKey: ["conversations"], queryFn: api.conversations, refetchInterval: 15_000 });
-  const tasksQuery = useQuery({ queryKey: ["tasks"], queryFn: api.tasks, refetchInterval: 8_000 });
+  const conversationsQuery = useQuery({ queryKey: ["conversations"], queryFn: api.conversations, refetchInterval: 30_000 });
+  const tasksQuery = useQuery({ queryKey: ["tasks"], queryFn: api.tasks, refetchInterval: 30_000 });
   const conversationQuery = useQuery({
     queryKey: ["conversation", conversationId],
     queryFn: () => api.conversation(conversationId as string),
@@ -129,12 +153,12 @@ export function ChatPage() {
   const conversationDefaultsQuery = useQuery({ queryKey: ["conversationDefaults"], queryFn: api.conversationDefaults, staleTime: Infinity });
   const conversations = conversationsQuery.data?.conversations ?? [];
   const skills = skillsQuery.data?.skills ?? [];
-  const selectedSkill = skills.find((skill) => skill.id === selectedSkillId) ?? null;
+  const selectedSkill = useMemo(() => skills.find((skill) => skill.id === selectedSkillId) ?? null, [skills, selectedSkillId]);
   const slashTerm = input.startsWith("/") && !input.startsWith("//") ? input.slice(1).trim().toLocaleLowerCase() : null;
-  const slashMatches = slashTerm === null ? [] : skills.filter((skill) => {
+  const slashMatches = useMemo(() => slashTerm === null ? [] : skills.filter((skill) => {
     if (!slashTerm) return true;
     return `${skill.name} ${skill.manifest.description} ${skill.id}`.toLocaleLowerCase().includes(slashTerm);
-  }).slice(0, 8);
+  }).slice(0, 8), [slashTerm, skills]);
   const slashOpen = slashTerm !== null && !selectedSkill && !sending;
 
   const installSkillMutation = useMutation({
@@ -149,19 +173,14 @@ export function ChatPage() {
     onError: (error) => setSkillNotice(error instanceof Error ? error.message : "安装失败")
   });
   const tasks = tasksQuery.data?.tasks ?? [];
-  const tasksByConversation = new Map<string, TaskListItem[]>();
-  for (const task of tasks) {
-    if (!task.conversationId) continue;
-    const list = tasksByConversation.get(task.conversationId) ?? [];
-    list.push(task);
-    tasksByConversation.set(task.conversationId, list);
-  }
-  const conversationTasks = conversationId ? tasksByConversation.get(conversationId) ?? [] : [];
-  const hasMessageAttachments = messages.some((message) => (message.attachments?.length ?? 0) > 0);
-  const current = conversations.find((item) => item.id === conversationId) ?? null;
+  const conversationTasks = useMemo(
+    () => conversationId ? tasks.filter((task) => task.conversationId === conversationId) : [],
+    [tasks, conversationId]
+  );
+  const current = useMemo(() => conversations.find((item) => item.id === conversationId) ?? null, [conversations, conversationId]);
   const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: api.projects, refetchInterval: 30_000 });
   const projects = projectsQuery.data?.projects ?? [];
-  const projectsById = new Map(projects.map((project) => [project.id, project]));
+  const projectsById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
   const activeProject = current?.projectId
     ? projectsById.get(current.projectId) ?? null
     : pendingProjectId
@@ -178,31 +197,37 @@ export function ChatPage() {
     ? Boolean(current || conversationQuery.data)
     : Boolean(serverDefaults);
 
-  const visibleMessages = messages.filter((message) => !isTaskNoise(message));
-  const runs: RunInfo[] = [];
-  const seenRuns = new Set<string>();
-  for (const task of conversationTasks) {
-    if (seenRuns.has(task.id)) continue;
-    seenRuns.add(task.id);
-    runs.push({
-      id: task.id,
-      title: task.title,
-      status: task.status,
-      createdAt: task.createdAt,
-      updatedAt: task.updatedAt,
-      executorId: task.executorId ?? null
-    });
-  }
-  for (const task of liveRuns) {
-    if (seenRuns.has(task.id)) continue;
-    seenRuns.add(task.id);
-    runs.push(task);
-  }
+  const visibleMessages = useMemo(() => messages.filter((message) => !isTaskNoise(message)), [messages]);
+  const runs = useMemo(() => {
+    const next: RunInfo[] = [];
+    const seen = new Set<string>();
+    for (const task of conversationTasks) {
+      if (seen.has(task.id)) continue;
+      seen.add(task.id);
+      next.push({
+        id: task.id,
+        title: task.title,
+        status: task.status,
+        createdAt: task.createdAt,
+        updatedAt: task.updatedAt,
+        executorId: task.executorId ?? null
+      });
+    }
+    for (const task of liveRuns) {
+      if (seen.has(task.id)) continue;
+      seen.add(task.id);
+      next.push(task);
+    }
+    return next;
+  }, [conversationTasks, liveRuns]);
   const hasRunningTask = runs.some((task) => task.status === "running" || task.status === "queued");
-  const timeline: Array<TimelineMessage | TimelineRun> = [
+  const timeline = useMemo<Array<TimelineMessage | TimelineRun>>(() => [
     ...visibleMessages.map((message): TimelineMessage => ({ kind: "message", key: `m:${message.id}`, at: message.createdAt, message })),
     ...runs.map((task): TimelineRun => ({ kind: "run", key: `r:${task.id}`, at: task.createdAt, task }))
-  ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at)), [visibleMessages, runs]);
+  const mailDraftIds = useMemo(() => new Set(visibleMessages.flatMap((message, index) =>
+    !message.taskId && isMailDraftReply(visibleMessages, index) ? [message.id] : []
+  )), [visibleMessages]);
 
   useEffect(() => {
     if (!conversationQuery.data || sending) return;
@@ -251,6 +276,7 @@ export function ChatPage() {
     if (panelConversationRef.current === conversationId) return;
     panelConversationRef.current = conversationId;
     setPanelOpen(false);
+    setWorkspacePreview(null);
   }, [conversationId]);
 
   useEffect(() => {
@@ -271,14 +297,11 @@ export function ChatPage() {
   }, [input]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: sending ? "auto" : "smooth" });
-  }, [messages, streaming, sending, runs.length]);
-
-  useEffect(() => {
-    if (contextUsage || messages.length === 0) return;
-    const chars = messages.reduce((total, message) => total + message.content.length, 0);
-    setContextUsage({ inputTokens: Math.max(1, Math.round(chars / 4)), outputTokens: 0 });
-  }, [conversationId, messages, contextUsage]);
+    const frame = window.requestAnimationFrame(() => {
+      bottomRef.current?.scrollIntoView({ behavior: sending || streaming ? "auto" : "smooth", block: "end" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [messages.length, streaming, sending, runs.length]);
 
   useEffect(() => {
     if (sending || queuedDispatchRef.current || queue.length === 0) return;
@@ -303,6 +326,9 @@ export function ChatPage() {
     setReasoning("");
     setDraftSettings(null);
     setContextUsage(null);
+    setWorkspacePreview(null);
+    setDraggingFiles(false);
+    dragDepthRef.current = 0;
     setModelMenuOpen(false);
     if (id) localStorage.setItem("hearth.conversation", id);
     else localStorage.removeItem("hearth.conversation");
@@ -315,6 +341,11 @@ export function ChatPage() {
   function closeWorkspace() {
     setPanelOpen(false);
   }
+
+  const openPreview = useCallback((preview: PreviewTarget) => {
+    setWorkspacePreview(preview);
+    setPanelOpen(true);
+  }, []);
 
   function patchSettings(patch: ConversationSettingsPatch) {
     const next: ConversationSettings = {
@@ -390,13 +421,15 @@ export function ChatPage() {
       .finally(() => setSavingEffort(false));
   }
 
-  async function pickFiles(event: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(event.target.files ?? []);
-    event.target.value = "";
+  async function uploadFiles(files: File[]) {
     if (files.length === 0) return;
+    if (uploading) {
+      setError("附件正在上传，请稍候再添加");
+      return;
+    }
     setError(null);
     if (attachments.length + files.length > 5) {
-      setError("每条消息最多 5 个附件");
+      setError(`每条消息最多 5 个附件，还可以添加 ${Math.max(0, 5 - attachments.length)} 个`);
       return;
     }
     const oversized = files.find((file) => file.size > 25 * 1024 * 1024);
@@ -415,9 +448,59 @@ export function ChatPage() {
     }
   }
 
+  function pickFiles(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    void uploadFiles(files);
+  }
+
+  function onComposerPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const files = Array.from(event.clipboardData.items)
+      .filter((item) => item.kind === "file")
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => Boolean(file))
+      .map((file, index) => clipboardFile(file, index));
+    if (files.length === 0) return;
+    event.preventDefault();
+    void uploadFiles(files);
+  }
+
+  function hasFiles(event: DragEvent<HTMLElement>): boolean {
+    return Array.from(event.dataTransfer.types).includes("Files");
+  }
+
+  function onComposerDragEnter(event: DragEvent<HTMLElement>) {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    dragDepthRef.current += 1;
+    setDraggingFiles(true);
+  }
+
+  function onComposerDragOver(event: DragEvent<HTMLElement>) {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    if (!draggingFiles) setDraggingFiles(true);
+  }
+
+  function onComposerDragLeave(event: DragEvent<HTMLElement>) {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setDraggingFiles(false);
+  }
+
+  function onComposerDrop(event: DragEvent<HTMLElement>) {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    dragDepthRef.current = 0;
+    setDraggingFiles(false);
+    void uploadFiles(Array.from(event.dataTransfer.files));
+  }
+
   async function send() {
     const text = input.trim();
-    if (sending || uploading || !settingsReady || (!text && attachments.length === 0)) return;
+    if (uploading || !settingsReady || (!text && attachments.length === 0)) return;
     if (selectedExecutorUnavailable) {
       setError(`${selectedExecutorName} 当前不可用，不会自动切换执行器。${selectedExecutor?.health.issues.join("；") ?? "请到设置中测试可用性。"}`);
       return;
@@ -427,7 +510,7 @@ export function ChatPage() {
     setAttachments([]);
     if (selectedSkillId) setSelectedSkillId(null);
     setError(null);
-    if (hasRunningTask) {
+    if (sending || hasRunningTask) {
       setQueue((prev) => [...prev, outgoing]);
       return;
     }
@@ -440,13 +523,26 @@ export function ChatPage() {
     setStreaming("");
     setReasoning("");
     setSending(true);
+    const historyTokens = estimateTokensFast(visibleMessages.map((message) => message.content).join("\n"));
+    const userTokens = estimateTokensFast(text);
+    const attachmentTokens = estimateAttachmentTokens(sentAttachments);
+    setContextUsage({
+      inputTokens: Math.max(0, historyTokens + userTokens + attachmentTokens),
+      outputTokens: 0,
+      source: "estimated",
+      breakdown: {
+        ...(historyTokens ? { history: historyTokens } : {}),
+        ...(userTokens ? { user: userTokens } : {}),
+        ...(attachmentTokens ? { attachments: attachmentTokens } : {})
+      }
+    });
     const controller = new AbortController();
     abortRef.current = controller;
     let answer = "";
     let reasoningText = "";
     // Streaming deltas arrive per token. Re-parsing the whole markdown answer
     // on every token is O(n²) and makes long replies stutter, so coalesce UI
-    // updates into ~20fps frames while keeping the buffer authoritative.
+    // updates into ~15fps frames while keeping the buffer authoritative.
     let streamTimer: number | null = null;
     const flushStream = () => {
       streamTimer = null;
@@ -455,7 +551,7 @@ export function ChatPage() {
     };
     const scheduleStream = () => {
       if (streamTimer !== null) return;
-      streamTimer = window.setTimeout(flushStream, 50);
+      streamTimer = window.setTimeout(flushStream, 66);
     };
     const stopStreamTimer = () => {
       if (streamTimer === null) return;
@@ -493,8 +589,16 @@ export function ChatPage() {
               reasoningText += (data as { text: string }).text;
               scheduleStream();
             } else if (event === "usage") {
-              const usage = data as { inputTokens: number; outputTokens: number };
-              setContextUsage({ inputTokens: Math.max(0, usage.inputTokens ?? 0), outputTokens: Math.max(0, usage.outputTokens ?? 0) });
+              const usage = data as Partial<ContextUsage>;
+              setContextUsage({
+                inputTokens: Math.max(0, usage.inputTokens ?? 0),
+                outputTokens: Math.max(0, usage.outputTokens ?? 0),
+                ...(usage.contextWindowTokens ? { contextWindowTokens: usage.contextWindowTokens } : {}),
+                ...(usage.source ? { source: usage.source } : {}),
+                ...(usage.model ? { model: usage.model } : {}),
+                ...(usage.reasoningEffort ? { reasoningEffort: usage.reasoningEffort } : {}),
+                ...(usage.breakdown ? { breakdown: usage.breakdown } : {})
+              });
             } else if (event === "task") {
               const payload = data as { task: { id: string; title: string; status: RunInfo["status"]; createdAt: string; updatedAt: string; executorId?: string | null } };
               const task = payload.task;
@@ -593,26 +697,65 @@ export function ChatPage() {
 
   const configured = healthQuery.data?.chatModel.configured ?? true;
   const executorViews = executorsQuery.data?.executors ?? [];
-  const executorAvailability = {} as Record<ExecutorId, boolean>;
-  for (const id of EXECUTOR_ORDER) {
-    executorAvailability[id] = executorViews.find((executor) => executor.id === id)?.health.canRun ?? false;
-  }
+  const executorAvailability = useMemo(() => {
+    const availability = {} as Record<ExecutorId, boolean>;
+    for (const id of EXECUTOR_ORDER) {
+      availability[id] = executorViews.find((executor) => executor.id === id)?.health.canRun ?? false;
+    }
+    return availability;
+  }, [executorViews]);
   const executorReady = EXECUTOR_ORDER.some((id) => executorAvailability[id] && conversationSettings.executorEnabled[id]);
   const selectedExecutorId = serverDefaults?.preferredExecutorId ?? conversationSettings.preferredExecutorId ?? "native";
   const selectedExecutor = executorViews.find((executor) => executor.id === selectedExecutorId) ?? null;
   const selectedExecutorName = selectedExecutor?.name ?? (selectedExecutorId ? executorLabel(selectedExecutorId) : "");
   const selectedExecutorUnavailable = Boolean(selectedExecutorId && !executorAvailability[selectedExecutorId]);
   const visibleExecutorIds = EXECUTOR_ORDER.filter((id) => executorAvailability[id] || id === selectedExecutorId);
+  const isWorking = sending || hasRunningTask;
+  const hasDraft = Boolean(input.trim() || attachments.length > 0);
+  const canSubmit = !uploading && settingsReady && !selectedExecutorUnavailable && hasDraft;
   const modelSettings = healthQuery.data?.chatModel.settings;
   const modelName = modelSettings?.model?.trim() || "未配置模型";
   const providerName = modelSettings?.providerName ?? "";
   const reasoningEffort: ReasoningEffort = reasoningDraft ?? modelSettings?.reasoningEffort ?? "max";
-  const contextWindowTokens = modelSettings?.contextWindowTokens ?? 328_000;
-  const usedTokens = (contextUsage?.inputTokens ?? 0) + (contextUsage?.outputTokens ?? 0);
+  const contextWindowTokens = contextUsage?.contextWindowTokens ?? modelSettings?.contextWindowTokens ?? 328_000;
+  const fallbackHistoryTokens = useMemo(
+    () => estimateTokensFast(visibleMessages.map((message) => message.content).join("\n")),
+    [visibleMessages]
+  );
+  const fallbackAttachmentTokens = useMemo(
+    () => estimateAttachmentTokens(visibleMessages.flatMap((message) => message.attachments ?? [])),
+    [visibleMessages]
+  );
+  const contextBreakdown = contextUsage?.breakdown ?? {};
+  const measuredTokens = Math.max(
+    fallbackHistoryTokens + fallbackAttachmentTokens,
+    (contextUsage?.inputTokens ?? 0) + (contextUsage?.outputTokens ?? 0)
+  );
+  // A task run reports tokens consumed by that executor, which is a lifetime
+  // processing count. It is not another copy of the active conversation
+  // context. Mixing both inflated the gauge and made task-heavy chats look
+  // nearly full even when the next model request was small.
+  const usedTokens = measuredTokens;
   const contextPercent = contextWindowTokens > 0 ? Math.min(100, Math.round((usedTokens / contextWindowTokens) * 100)) : 0;
+  const contextBreakdownRows = ([
+    ["系统", contextBreakdown.system ?? 0],
+    ["对话历史", contextBreakdown.history ?? fallbackHistoryTokens],
+    ["个人上下文", contextBreakdown.personal ?? 0],
+    ["记忆", contextBreakdown.memory ?? 0],
+    ["资料库", contextBreakdown.library ?? 0],
+    ["技能", contextBreakdown.skill ?? 0],
+    ["附件", contextBreakdown.attachments ?? fallbackAttachmentTokens],
+    ["本轮输入", contextBreakdown.user ?? 0]
+  ] satisfies Array<[string, number]>).filter(([, tokens]) => tokens > 0);
+  const contextUsageLabel = contextUsage?.source === "measured" ? "模型实测" : "估算";
+  const contextTitle = [
+    `上下文窗口：已用 ${formatTokens(usedTokens)} / ${formatTokens(contextWindowTokens)}（${contextPercent}%）`,
+    ...contextBreakdownRows.map(([label, tokens]) => `${label} ${formatTokens(tokens)}`),
+    `统计口径：${contextUsageLabel}`
+  ].join("\n");
 
   return (
-    <div className="chat-layout">
+    <div className={`chat-layout ${panelOpen ? "with-workspace" : ""}`}>
       <section className="chat-main">
         <header className="chat-header">
           <div className="chat-title-group">
@@ -663,8 +806,9 @@ export function ChatPage() {
               <ChatBubble
                 key={item.key}
                 message={item.message}
-                mailDraft={!item.message.taskId && isMailDraftReply(visibleMessages, visibleMessages.indexOf(item.message))}
+                mailDraft={mailDraftIds.has(item.message.id)}
                 execution={chatExecutions[item.message.id]}
+                onPreview={openPreview}
               />
             ) : (
               <InlineRun key={item.key} task={item.task} />
@@ -679,7 +823,20 @@ export function ChatPage() {
           </div>
         </div>
 
-        <div className="composer-wrap">
+        <div
+          className={`composer-wrap ${draggingFiles ? "drag-active" : ""}`}
+          onDragEnter={onComposerDragEnter}
+          onDragOver={onComposerDragOver}
+          onDragLeave={onComposerDragLeave}
+          onDrop={onComposerDrop}
+        >
+          {draggingFiles && (
+            <div className="composer-drop-overlay" role="status" aria-live="polite">
+              <Paperclip size={20} />
+              <strong>松开即可添加附件</strong>
+              <span>支持图片、文档和任意文件，单文件不超过 25 MB</span>
+            </div>
+          )}
           {!conversationId && projects.length > 0 && (
             <div className="composer-project-row">
               <label className="composer-project">
@@ -717,13 +874,16 @@ export function ChatPage() {
                 <span className="composer-effort">{reasoningEffortLabel(reasoningEffort)}</span>
                 {savingEffort ? <Loader2 size={11} className="spin" /> : <ChevronDown size={12} />}
               </button>
-              <span
+              <button
+                type="button"
                 className="composer-context"
-                title={`上下文窗口：已用 ${formatTokens(usedTokens)} / ${formatTokens(contextWindowTokens)}（${contextPercent}%）`}
+                onClick={() => setModelMenuOpen(true)}
+                title={contextTitle}
+                aria-label={contextTitle}
               >
                 <Gauge size={12} />
                 {contextPercent}% · {formatTokens(usedTokens)}/{formatTokens(contextWindowTokens)}
-              </span>
+              </button>
               {modelMenuOpen && (
                 <>
                   <button type="button" className="composer-model-backdrop" aria-label="关闭模型设置" onClick={() => setModelMenuOpen(false)} />
@@ -759,6 +919,22 @@ export function ChatPage() {
                     <div className="model-popover-context">
                       <span>上下文窗口</span>
                       <strong>{formatTokens(contextWindowTokens)}</strong>
+                    </div>
+                    <div className="model-context-usage">
+                      <div className="model-context-usage-head">
+                        <span>已用 {formatTokens(usedTokens)}</span>
+                        <strong>{contextPercent}%</strong>
+                      </div>
+                      <div className="model-context-bar" aria-hidden="true">
+                        <span style={{ width: `${contextPercent}%` }} />
+                      </div>
+                      {contextBreakdownRows.map(([label, tokens]) => (
+                        <div key={label} className="model-context-row">
+                          <span>{label}</span>
+                          <strong>{formatTokens(tokens)}</strong>
+                        </div>
+                      ))}
+                      <p>{contextUsageLabel}。包含系统提示、对话历史、个人上下文、记忆、资料库、技能和附件。</p>
                     </div>
                     <p className="model-popover-note">调整会立即生效，并在所有对话中保持。思考默认开启。</p>
                   </div>
@@ -824,9 +1000,16 @@ export function ChatPage() {
               </div>
             </div>
           )}
+          {isWorking && (
+            <div className={`composer-working ${sending ? "dispatching" : "running"}`} role="status" aria-live="polite">
+              <span className="composer-working-dot" aria-hidden="true" />
+              <span>{sending ? "Hearth 正在处理这条消息" : "Hearth 正在执行任务"}</span>
+              <strong>{hasDraft ? "发送后会加入队列" : "可继续输入并排队"}</strong>
+            </div>
+          )}
           {queue.length > 0 && (
             <div className="composer-queue" aria-live="polite">
-              <span className="composer-queue-label"><Clock size={12} />排队中 · {queue.length}</span>
+              <span className="composer-queue-label"><Clock size={12} />待发送 · {queue.length}</span>
               {queue.map((item, index) => (
                 <span key={`${index}:${item.text}`} className="composer-queue-chip" title={item.text}>
                   <span>{item.text || `${item.attachments.length} 个附件`}</span>
@@ -851,10 +1034,13 @@ export function ChatPage() {
             <div className="attachment-row">
               {attachments.map((attachment) => (
                 <span key={attachment.id} className="attachment-chip">
-                  <FileText size={13} />
-                  <span>{attachment.name}</span>
-                  <small>{formatBytes(attachment.bytes)}</small>
+                  <button type="button" className="attachment-open" onClick={() => openPreview(attachmentPreviewTarget(attachment))} title="在侧边栏预览">
+                    <FileText size={13} />
+                    <span>{attachment.name}</span>
+                    <small>{formatBytes(attachment.bytes)}</small>
+                  </button>
                   <button
+                    type="button"
                     className="chip-remove"
                     onClick={() => setAttachments((prev) => prev.filter((item) => item.id !== attachment.id))}
                     aria-label={`移除 ${attachment.name}`}
@@ -892,38 +1078,41 @@ export function ChatPage() {
             <button
               className="composer-icon"
               onClick={() => fileInputRef.current?.click()}
-              disabled={sending || uploading}
-              title="添加附件（单文件不超过 25 MB）"
+              disabled={uploading}
+              title="添加附件，也可以直接粘贴或拖入文件（单文件不超过 25 MB）"
             >
               {uploading ? <Loader2 size={18} className="spin" /> : <Paperclip size={18} />}
             </button>
-            <input ref={fileInputRef} type="file" multiple hidden onChange={(event) => void pickFiles(event)} />
+            <input ref={fileInputRef} type="file" multiple hidden onChange={pickFiles} />
             <textarea
               ref={composerRef}
               value={input}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={onComposerKeyDown}
+              onPaste={onComposerPaste}
               aria-label="消息"
-              placeholder="向 Hearth 提问，或描述你要完成的事…"
+              placeholder={isWorking ? "继续输入，发送后会加入队列…" : "向 Hearth 提问，或描述你要完成的事…"}
               rows={1}
-              disabled={sending}
             />
             <button
-              className="composer-send"
+              type="button"
+              className={`composer-send ${isWorking ? "working" : ""}`}
               onClick={() => void send()}
-              disabled={sending || uploading || !settingsReady || selectedExecutorUnavailable || (!input.trim() && attachments.length === 0)}
-              title={selectedExecutorUnavailable ? "当前锁定的执行器不可用" : "发送"}
+              disabled={!canSubmit}
+              aria-busy={isWorking}
+              title={selectedExecutorUnavailable ? "当前锁定的执行器不可用" : isWorking ? "加入队列" : "发送"}
             >
-              {sending ? <Loader2 size={17} className="spin" /> : <ArrowUp size={18} />}
+              {uploading || (isWorking && !hasDraft) ? <Loader2 size={17} className="spin" /> : <ArrowUp size={18} />}
             </button>
           </div>
         </div>
       </section>
       <ChatWorkspacePanel
         open={panelOpen}
-        conversationId={conversationId}
         messages={messages}
         tasks={conversationTasks}
+        preview={workspacePreview}
+        onPreviewChange={setWorkspacePreview}
         onOpen={openWorkspace}
         onClose={closeWorkspace}
       />
@@ -945,13 +1134,43 @@ function formatTokens(value: number): string {
   return String(Math.max(0, Math.round(value)));
 }
 
+function estimateTokensFast(text: string): number {
+  return text ? Math.max(1, Math.ceil(text.length / 4)) : 0;
+}
+
+function estimateAttachmentTokens(attachments: Array<Pick<ChatAttachment, "bytes" | "mimeType">>): number {
+  return attachments.reduce((total, attachment) => {
+    if (attachment.mimeType.startsWith("image/")) return total + 1_000;
+    return total + Math.min(32_000, Math.max(1, Math.ceil(attachment.bytes / 4)));
+  }, 0);
+}
+
+function clipboardFile(file: File, index: number): File {
+  if (file.name && file.name !== "image.png") return file;
+  const extension = file.type.startsWith("image/") ? file.type.slice("image/".length).replace("jpeg", "jpg") : "bin";
+  return new File([file], `pasted-${Date.now()}-${index + 1}.${extension}`, {
+    type: file.type || "application/octet-stream",
+    lastModified: file.lastModified
+  });
+}
+
 function isTaskNoise(message: ChatMessageRecord): boolean {
   if (message.kind === "task_status") return true;
   if (message.role !== "assistant") return false;
   return message.content.startsWith("已派出任务：");
 }
 
-function ChatBubble({ message, mailDraft = false, execution }: { message: ChatMessageRecord; mailDraft?: boolean; execution?: ChatExecution | undefined }) {
+const ChatBubble = memo(function ChatBubble({
+  message,
+  mailDraft = false,
+  execution,
+  onPreview
+}: {
+  message: ChatMessageRecord;
+  mailDraft?: boolean;
+  execution?: ChatExecution | undefined;
+  onPreview: (preview: PreviewTarget) => void;
+}) {
   if (message.role === "user") {
     return (
       <div className="message-row user">
@@ -961,9 +1180,15 @@ function ChatBubble({ message, mailDraft = false, execution }: { message: ChatMe
           {message.attachments.length > 0 && (
             <div className="message-attachments">
               {message.attachments.map((attachment) => (
-                <span key={attachment.id} className="message-attachment">
+                <button
+                  key={attachment.id}
+                  type="button"
+                  className="message-attachment"
+                  onClick={() => onPreview(attachmentPreviewTarget(attachment))}
+                  title="在侧边栏预览"
+                >
                   <FileText size={12} /> {attachment.name}
-                </span>
+                </button>
               ))}
             </div>
           )}
@@ -980,10 +1205,10 @@ function ChatBubble({ message, mailDraft = false, execution }: { message: ChatMe
         copyText={message.content}
         createdAt={message.createdAt}
       />}
-      {message.taskId && message.kind !== "task_status" && <TaskAnswerFiles taskId={message.taskId} />}
+      {message.taskId && message.kind !== "task_status" && <TaskAnswerFiles taskId={message.taskId} onPreview={onPreview} />}
     </div>
   );
-}
+});
 
 function ChatExecutionSummary({ execution }: { execution: ChatExecution }) {
   const [open, setOpen] = useState(false);
@@ -998,7 +1223,7 @@ function ChatExecutionSummary({ execution }: { execution: ChatExecution }) {
   );
 }
 
-function TaskAnswerFiles({ taskId }: { taskId: string }) {
+const TaskAnswerFiles = memo(function TaskAnswerFiles({ taskId, onPreview }: { taskId: string; onPreview: (preview: PreviewTarget) => void }) {
   const taskQuery = useQuery({
     queryKey: ["task", taskId],
     queryFn: () => api.task(taskId),
@@ -1010,17 +1235,17 @@ function TaskAnswerFiles({ taskId }: { taskId: string }) {
   return (
     <div className="answer-files">
       {files.map((file) => (
-        <a key={file.id} href={api.artifactUrl(taskId, file.id)} target="_blank" rel="noreferrer" title={file.relativePath}>
+        <button key={file.id} type="button" onClick={() => onPreview(artifactPreviewTarget(file))} title={`${file.relativePath}\n点击在侧边栏预览`}>
           <FileText size={12} />
           {fileName(file.relativePath)}
           <small>{formatBytes(file.bytes)}</small>
-        </a>
+        </button>
       ))}
     </div>
   );
-}
+});
 
-function AssistantBubble({
+const AssistantBubble = memo(function AssistantBubble({
   content,
   copyText,
   reasoning = "",
@@ -1062,7 +1287,7 @@ function AssistantBubble({
       {createdAt && <time>{formatTime(createdAt)}</time>}
     </div>
   );
-}
+});
 
 function CopyButton({ text, className = "" }: { text: string; className?: string }) {
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
@@ -1129,8 +1354,8 @@ const INTERNAL_ARTIFACT_NAMES = new Set(["run-manifest.json", "pr-preview.json"]
 
 function deliverableFiles(
   task: { expectedOutputs?: string[] } | undefined,
-  artifacts: Array<{ id: string; relativePath: string; bytes: number }>
-): Array<{ id: string; relativePath: string; bytes: number }> {
+  artifacts: Array<{ id: string; taskId: string; relativePath: string; mimeType: string; bytes: number }>
+): Array<{ id: string; taskId: string; relativePath: string; mimeType: string; bytes: number }> {
   return artifacts.filter((artifact) => {
     const path = artifact.relativePath.replace(/\\/g, "/");
     const name = path.split("/").pop() ?? path;

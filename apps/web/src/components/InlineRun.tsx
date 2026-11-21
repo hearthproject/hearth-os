@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronDown,
@@ -57,11 +57,12 @@ type Entry =
 const DETAIL_OUTPUT_LIMIT = 4_000;
 const LABEL_LIMIT = 28;
 
-export function InlineRun({ task }: { task: RunInfo }) {
+export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(() => !FINISHED_STATUSES.includes(task.status));
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
   const [reply, setReply] = useState("");
+  const [clock, setClock] = useState(() => Date.now());
   const statusRef = useRef(task.status);
 
   const taskQuery = useQuery({
@@ -70,9 +71,9 @@ export function InlineRun({ task }: { task: RunInfo }) {
     enabled: Boolean(task.id),
     refetchInterval: (query) => {
       const current = query.state.data?.task.status ?? task.status;
-      // Keep polling until the task view itself reports a terminal state; the
-      // list status can lag behind the completion message by one poll.
-      return ACTIVE_STATUSES.includes(current) ? 1_500 : false;
+      // SSE appends progress immediately. Poll less often as a recovery path
+      // for a missed event or a reconnecting EventSource.
+      return ACTIVE_STATUSES.includes(current) ? 5_000 : false;
     },
     staleTime: 1_000
   });
@@ -84,7 +85,21 @@ export function InlineRun({ task }: { task: RunInfo }) {
   const visibleError = error && !isRetiredTaskNotice(error.message) ? error : null;
   const entries = useMemo(() => collectEntries(view?.events ?? []), [view?.events]);
   const pendingApprovals = (view?.approvals ?? []).filter((approval) => approval.status === "pending");
-  const duration = runDuration(view?.runs ?? []);
+  const duration = useMemo(
+    () => runDuration(view?.runs ?? [], clock) ?? (active ? elapsedSince(task.createdAt, clock) : null),
+    [view?.runs, clock, active, task.createdAt]
+  );
+
+  useEffect(() => {
+    if (!active) {
+      setClock(Date.now());
+      return;
+    }
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") setClock(Date.now());
+    }, 1_000);
+    return () => window.clearInterval(timer);
+  }, [active]);
 
   useEffect(() => {
     const previous = statusRef.current;
@@ -245,20 +260,25 @@ export function InlineRun({ task }: { task: RunInfo }) {
       )}
     </div>
   );
-}
+});
 
-function runDuration(runs: TaskView["runs"]): number | null {
+function runDuration(runs: TaskView["runs"], now: number): number | null {
   let total = 0;
   let seen = false;
   for (const run of runs) {
     if (!run.startedAt) continue;
     const start = Date.parse(run.startedAt);
-    const end = run.endedAt ? Date.parse(run.endedAt) : Date.now();
+    const end = run.endedAt ? Date.parse(run.endedAt) : now;
     if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
     total += Math.max(0, end - start);
     seen = true;
   }
   return seen ? total : null;
+}
+
+function elapsedSince(startedAt: string, now: number): number | null {
+  const start = Date.parse(startedAt);
+  return Number.isFinite(start) ? Math.max(0, now - start) : null;
 }
 
 function isRetiredTaskNotice(text: string): boolean {
