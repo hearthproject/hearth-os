@@ -918,13 +918,15 @@ const shellTool: AgentTool = {
     }
     const timeoutMs = Math.min(10 * 60_000, Math.max(1_000, intArg(args, "timeoutMs", 120_000)));
     const yieldMs = Math.min(timeoutMs, Math.max(0, intArg(args, "yieldMs", timeoutMs)));
-    const result = await runShellSession({ ...shellOptions, timeoutMs: yieldMs });
+    const result = await runShellSession({ ...shellOptions, timeoutMs: yieldMs, signal: context.signal });
     recordCommand(context.state, command, result.exitCode, isTestCommand(command));
     const truncated = truncateToolOutput(result.output, { maxChars: MAX_SHELL_OUTPUT_CHARS, maxLines: 240, label: "use shell_output or a narrower command" });
     const fullPath = truncated.truncated ? result.outputPath : undefined;
-    const status = result.running
-      ? `still running in background (session ${result.sessionId}); use shell_output to inspect, shell_kill to stop`
-      : `exit ${result.exitCode ?? "unknown"}`;
+    const status = result.aborted
+      ? "aborted by the run"
+      : result.running
+        ? `still running in background (session ${result.sessionId}); use shell_output to inspect, shell_kill to stop`
+        : `exit ${result.exitCode ?? "unknown"}`;
     const sandboxFailure = result.sandboxFailure;
     const failureNote = sandboxFailure === "denied"
       ? "\n\n[SANDBOX_DENIED] 路径不在任务写入范围；请调整项目/任务范围后重新发起任务，不要重试该命令。"
@@ -933,12 +935,13 @@ const shellTool: AgentTool = {
         : "";
     return {
       content: `$ ${command}\n${status} (${result.durationMs}ms)\n\n${truncated.content}${failureNote}${fullPath ? `\n\n[full output: ${fullPath.replace(/\\/g, "/")}]` : ""}`,
-      isError: result.running ? false : result.exitCode !== 0 || sandboxFailure !== null,
+      isError: result.aborted || (!result.running && (result.exitCode !== 0 || sandboxFailure !== null)),
       metadata: {
         exitCode: result.exitCode,
         durationMs: result.durationMs,
         sessionId: result.sessionId,
         background: result.running,
+        ...(result.aborted ? { aborted: true } : {}),
         truncated: truncated.truncated,
         ...(fullPath ? { fullOutputPath: fullPath } : {}),
         ...(result.sandbox ? { sandbox: result.sandbox } : {}),

@@ -45,6 +45,7 @@ import {
   type AgentToolAuthorizationRequest,
   type AgentToolContext,
   type HarnessMode,
+  type OperationLedger,
   type RetryPolicy,
   type RuntimeEvent,
   type SandboxRuntime
@@ -70,6 +71,8 @@ export interface NativeRunOptions {
   budget?: RunBudget;
   signal: AbortSignal;
   runId?: string;
+  taskId?: string;
+  operationLedger?: OperationLedger;
   journalPath?: string;
   goalRoot?: string;
   maxGoalRounds?: number;
@@ -240,6 +243,8 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     ...(coding ? { reminders: CODING_REMINDERS } : {}),
     signal: options.signal,
     ...(options.runId ? { runId: options.runId } : {}),
+    ...(options.taskId ? { taskId: options.taskId } : {}),
+    ...(options.operationLedger ? { operationLedger: options.operationLedger } : {}),
     ...(options.journalPath ? { journal: { path: options.journalPath } } : {}),
     ...(options.goalRoot ? { goalRoot: options.goalRoot } : {}),
     ...(options.maxGoalRounds !== undefined ? { maxGoalRounds: options.maxGoalRounds } : {}),

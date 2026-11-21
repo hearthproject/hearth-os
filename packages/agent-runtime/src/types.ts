@@ -5,6 +5,7 @@ import type { SandboxRuntime } from "./harness/sandbox.ts";
 import type { AgentHookDefinition } from "./harness/hooks.ts";
 import type { AgentFailure, AgentToolError } from "./errors.ts";
 import type { RetryPolicy } from "./retry-policy.ts";
+import type { OperationLedger, OperationPhase } from "./operations/types.ts";
 
 export type HarnessProfile = "general" | "coding";
 export type HarnessMode = "build" | "plan";
@@ -119,6 +120,7 @@ export interface AgentToolMetadata {
   exposedTools?: string[];
   matched?: boolean;
   timedOut?: boolean;
+  aborted?: boolean;
   orphaned?: boolean;
   cooperative?: boolean;
   sandbox?: { backend: string; enforcement: string; networkEnforcement: string; mode: string };
@@ -134,6 +136,12 @@ export interface AgentToolMetadata {
   browserScreenshot?: string;
   browserDownload?: string;
   browserEvidence?: Record<string, string | null>;
+  operationId?: string;
+  operationPhase?: OperationPhase;
+  operationUnsettled?: boolean;
+  requiresReconciliation?: boolean;
+  effectRef?: string;
+  receipt?: unknown;
 }
 
 export interface AgentToolResult {
@@ -335,6 +343,9 @@ export interface AgentRuntimeOptions {
   goalRoot?: string;
   maxGoalRounds?: number;
   runId?: string;
+  taskId?: string;
+  /** Durable T1/T2 operation ledger. Server mode injects the SQLite implementation. */
+  operationLedger?: OperationLedger;
   profile?: HarnessProfile;
   mode?: HarnessMode;
   state?: AgentToolState;

@@ -76,7 +76,9 @@ describe("Codex profile", () => {
       expect(env.UNRELATED_HOST_TOKEN).toBeUndefined();
       expect(env.UNRELATED_API_KEY).toBeUndefined();
       expect(env.CUSTOM_API_KEY).toBe("trusted");
-      expect(env.PATH).toBe(previousPath);
+      expect(env.PATH).toContain(previousPath ?? "");
+      expect(env.PATH).not.toContain("C:\\untrusted");
+      expect(env.PATH).toContain(join(process.env.SystemRoot ?? "C:\\Windows", "System32"));
       expect(env.TEMP).not.toBe("C:\\untrusted-temp");
       expect(env.NODE_OPTIONS).toBeUndefined();
     } finally {

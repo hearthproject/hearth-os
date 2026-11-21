@@ -71,6 +71,7 @@ import { wantsPublicWebResearch, wantsScreenshot } from "./task-intent.ts";
 import type { WebSearchService } from "./web-search.ts";
 import type { SkillService } from "./skills/service.ts";
 import { createSkillTools } from "./skill-tools.ts";
+import { SqliteOperationLedger } from "./sqlite-operation-ledger.ts";
 import { TaskWorktreeService } from "./worktrees.ts";
 
 import { createExecutorAdapters, type CodexContextItem, type CodexRunner, type DshRunner, type ExecutionOutcome, type ExecutorAdapter, type ExecutorAttemptContext, type NativeRunner } from "./executor-adapter.ts";
@@ -207,6 +208,7 @@ export class HearthScheduler {
   private readonly browserSessions: BrowserSessionManager;
   private readonly browserEvidence: BrowserEvidenceStore;
   private readonly worktrees: TaskWorktreeService;
+  private readonly operationLedger: SqliteOperationLedger;
   private readonly leaseHeartbeatMs: number;
   private readonly deferStartup: boolean;
   private readonly leaseHeartbeats = new Map<string, { epoch: number; timer: ReturnType<typeof setInterval> }>();
@@ -231,6 +233,7 @@ export class HearthScheduler {
     this.workspaceRoot = options.workspaceRoot ?? WORKSPACE_DIR;
     this.artifactBase = options.artifactBase ?? REPO_ROOT;
     this.attachmentRoot = options.attachmentRoot;
+    this.operationLedger = new SqliteOperationLedger(this.service.store);
     this.codexRunner = options.codexRunner ?? runCodex;
     this.nativeRunner = options.nativeRunner ?? runNativeTask;
     this.deepseekRunner = options.deepseekRunner;
@@ -1907,6 +1910,7 @@ export class HearthScheduler {
         budget,
         signal: controller.signal,
         fullPermission,
+        operationLedger: this.operationLedger,
         ...(subagentManager ? { steering: () => subagentManager?.stallNotices() ?? [] } : {}),
         isFullPermission: () => this.service.approvalModeForTask(task) === "full",
         contextSettings: this.context.settings(),

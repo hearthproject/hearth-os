@@ -64,6 +64,7 @@ export interface ShellRunResult {
   outputPath: string;
   sandbox: ShellSandboxRun | null;
   sandboxFailure: ShellSandboxFailure | null;
+  aborted: boolean;
 }
 
 const sessions = new Map<string, ShellSession>();
@@ -218,9 +219,20 @@ export async function runShellSession(options: {
   const session = sessions.get(started.sessionId)!;
   const timeoutMs = options.timeoutMs ?? 120_000;
   const deadline = Date.now() + timeoutMs;
-  while (session.running && Date.now() < deadline) {
-    await delay(Math.min(200, Math.max(1, deadline - Date.now())));
-    if (options.timeoutMs === 0) break;
+  let aborted = false;
+  const onAbort = (): void => {
+    aborted = true;
+    killShellSession(started.sessionId);
+  };
+  if (options.signal?.aborted) onAbort();
+  else options.signal?.addEventListener("abort", onAbort, { once: true });
+  try {
+    while (session.running && Date.now() < deadline) {
+      await delay(Math.min(200, Math.max(1, deadline - Date.now())));
+      if (options.timeoutMs === 0) break;
+    }
+  } finally {
+    options.signal?.removeEventListener("abort", onAbort);
   }
   return {
     sessionId: session.id,
@@ -230,7 +242,8 @@ export async function runShellSession(options: {
     durationMs: Date.now() - session.startedAt,
     outputPath: session.outputPath,
     sandbox: session.sandbox,
-    sandboxFailure: classifySandboxFailure(session)
+    sandboxFailure: classifySandboxFailure(session),
+    aborted
   };
 }
 
@@ -311,7 +324,7 @@ export function killShellSession(sessionId: string): boolean {
   try {
     if (process.platform === "win32") {
       if (session.child.pid) {
-        spawnSync(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe"), ["/pid", String(session.child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore", timeout: 5_000 });
+        killWindowsProcessTree(session.child.pid);
       }
       session.child.kill("SIGKILL");
     } else if (session.child.pid) {
@@ -328,6 +341,50 @@ export function killShellSession(sessionId: string): boolean {
   }
   notifyExit(session);
   return true;
+}
+
+/**
+ * taskkill /T can fail with "operation not supported" for a child that was
+ * created in the same instant as the parent kill. Enumerate the live tree
+ * first, then kill children bottom-up so a just-spawned grandchild cannot
+ * survive as an orphan.
+ */
+function killWindowsProcessTree(pid: number): void {
+  const script = [
+    "$all = Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId;",
+    "$children = @{};",
+    "foreach ($row in $all) {",
+    "  $parent = [int]$row.ParentProcessId;",
+    "  if (-not $children.ContainsKey($parent)) { $children[$parent] = @() }",
+    "  $children[$parent] += [int]$row.ProcessId;",
+    "}",
+    "function Kill-Tree([int]$p) {",
+    "  if ($children.ContainsKey($p)) { foreach ($child in $children[$p]) { Kill-Tree $child } }",
+    "  Stop-Process -Id $p -Force -ErrorAction SilentlyContinue;",
+    "}",
+    `Kill-Tree ${pid};`
+  ].join("\n");
+  const powershell = join(
+    process.env.SystemRoot ?? "C:\\Windows",
+    "System32",
+    "WindowsPowerShell",
+    "v1.0",
+    "powershell.exe"
+  );
+  spawnSync(powershell, ["-NoProfile", "-NonInteractive", "-Command", script], {
+    windowsHide: true,
+    stdio: "ignore",
+    timeout: 5_000
+  });
+  try {
+    spawnSync(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe"), ["/pid", String(pid), "/T", "/F"], {
+      windowsHide: true,
+      stdio: "ignore",
+      timeout: 5_000
+    });
+  } catch {
+    // Best effort; the child.kill below is the last resort.
+  }
 }
 
 export function cleanupShellSessions(): void {

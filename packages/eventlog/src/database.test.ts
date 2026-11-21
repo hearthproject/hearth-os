@@ -489,7 +489,8 @@ describe("HearthStore", () => {
       "library_trash",
       "library_jobs",
       "library_settings",
-      "approval_grants"
+      "approval_grants",
+      "run_operations"
     ]) {
       expect(tables.has(table)).toBe(true);
     }
@@ -500,5 +501,74 @@ describe("HearthStore", () => {
       expect(skillColumns.has(column)).toBe(true);
     }
     store.close();
+  });
+
+  it("persists T1/T2 operations and rejects replay", () => {
+    const store = new HearthStore(":memory:");
+    const input = {
+      operationId: "run-1:call-1",
+      runId: "run-1",
+      taskId: "task-1",
+      toolCallId: "call-1",
+      toolName: "write_file",
+      argsHash: "args-1",
+      effect: "local_write",
+      beforeDigest: "before-1",
+      permissionsDigest: "permissions-1"
+    } as const;
+    const prepared = store.prepareRunOperation(input);
+    expect(prepared.phase).toBe("prepared");
+    expect(store.prepareRunOperation(input).operationId).toBe(prepared.operationId);
+
+    const dispatched = store.dispatchRunOperation(prepared.operationId, "2026-11-21T10:00:00.000Z");
+    expect(dispatched.phase).toBe("dispatched");
+    expect(dispatched.dispatchedAt).toBe("2026-11-21T10:00:00.000Z");
+    expect(() => store.dispatchRunOperation(prepared.operationId)).toThrow(/already dispatched/);
+
+    const settled = store.settleRunOperation({
+      operationId: prepared.operationId,
+      phase: "settled",
+      resultDigest: "result-1",
+      outputRef: "out/result.md",
+      effectRef: "effect-1",
+      receipt: { ok: true },
+      settledAt: "2026-11-21T10:00:01.000Z"
+    });
+    expect(settled.phase).toBe("settled");
+    expect(settled.receipt).toEqual({ ok: true });
+    expect(store.settleRunOperation({
+      operationId: prepared.operationId,
+      phase: "settled",
+      resultDigest: "result-1",
+      settledAt: "2026-11-21T10:00:01.000Z"
+    }).phase).toBe("settled");
+    expect(() => store.settleRunOperation({
+      operationId: prepared.operationId,
+      phase: "settled",
+      resultDigest: "different"
+    })).toThrow(/different outcome/);
+    expect(store.listUnsettledRunOperations("run-1")).toHaveLength(0);
+    store.close();
+  });
+
+  it("reopens dispatched operations as unsettled", () => {
+    const path = tempDb();
+    const store = new HearthStore(path);
+    const prepared = store.prepareRunOperation({
+      operationId: "run-2:call-2",
+      runId: "run-2",
+      taskId: "task-2",
+      toolCallId: "call-2",
+      toolName: "shell",
+      argsHash: "args-2",
+      effect: "local_write"
+    });
+    store.dispatchRunOperation(prepared.operationId);
+    store.close();
+
+    const reopened = new HearthStore(path);
+    expect(reopened.getRunOperation(prepared.operationId)?.phase).toBe("dispatched");
+    expect(reopened.listUnsettledRunOperations("run-2")).toHaveLength(1);
+    reopened.close();
   });
 });

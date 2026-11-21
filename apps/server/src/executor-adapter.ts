@@ -6,6 +6,7 @@ import type {
   AgentTool,
   AgentToolAuthorization,
   AgentToolAuthorizationRequest,
+  OperationLedger,
   RuntimeEvent
 } from "@hearth/agent-runtime";
 import type {
@@ -54,6 +55,7 @@ export interface ExecutorAttemptContext {
   budget: RunBudget;
   signal: AbortSignal;
   fullPermission: boolean;
+  operationLedger?: OperationLedger;
   isFullPermission?: (() => boolean) | undefined;
   contextSettings: ContextSettings;
   nativeSettings: ModelSettings | null;
@@ -134,6 +136,8 @@ export class NativeExecutorAdapter implements ExecutorAdapter {
       budget: input.budget,
       signal: input.signal,
       runId: input.run.id,
+      taskId: input.task.id,
+      ...(input.operationLedger ? { operationLedger: input.operationLedger } : {}),
       journalPath: journalPathFor(input.prepared.root, input.run.id),
       goalRoot: input.prepared.root,
       checkpointPolicy: { everyTurns: 5, everyToolCalls: 20, maxSnapshots: 40 },

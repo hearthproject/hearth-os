@@ -141,9 +141,61 @@ export interface RunAggregate {
   lastUsage: RunUsage | null;
 }
 
+export interface NewRunOperation {
+  operationId: string;
+  runId: string;
+  taskId: string;
+  toolCallId: string;
+  toolName: string;
+  argsHash: string;
+  effect: string;
+  phase?: string;
+  attempt?: number;
+  beforeDigest?: string | null;
+  workspaceDigest?: string | null;
+  permissionsDigest?: string | null;
+  startedAt?: string;
+  updatedAt?: string;
+}
+
+export interface RunOperationRecord {
+  operationId: string;
+  runId: string;
+  taskId: string;
+  toolCallId: string;
+  toolName: string;
+  argsHash: string;
+  effect: string;
+  phase: string;
+  attempt: number;
+  beforeDigest: string | null;
+  workspaceDigest: string | null;
+  permissionsDigest: string | null;
+  startedAt: string;
+  dispatchedAt: string | null;
+  settledAt: string | null;
+  resultDigest: string | null;
+  outputRef: string | null;
+  errorCode: string | null;
+  effectRef: string | null;
+  receipt: unknown;
+  updatedAt: string;
+}
+
+export interface SettleRunOperationInput {
+  operationId: string;
+  phase: "settled" | "unknown";
+  resultDigest?: string | null;
+  outputRef?: string | null;
+  errorCode?: string | null;
+  effectRef?: string | null;
+  receipt?: unknown;
+  settledAt?: string;
+}
+
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 36;
+export const CURRENT_SCHEMA_VERSION = 37;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -218,6 +270,30 @@ CREATE TABLE IF NOT EXISTS run_checkpoints (
   id TEXT PRIMARY KEY, run_id TEXT NOT NULL, task_id TEXT NOT NULL, seq INTEGER NOT NULL,
   kind TEXT NOT NULL, path TEXT NOT NULL, sha256 TEXT NOT NULL, usage_json TEXT,
   created_at TEXT NOT NULL, proof_json TEXT, UNIQUE(run_id, seq)
+);
+CREATE TABLE IF NOT EXISTS run_operations (
+  operation_id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  tool_call_id TEXT NOT NULL,
+  tool_name TEXT NOT NULL,
+  args_hash TEXT NOT NULL,
+  effect TEXT NOT NULL,
+  phase TEXT NOT NULL,
+  attempt INTEGER NOT NULL DEFAULT 1,
+  before_digest TEXT,
+  workspace_digest TEXT,
+  permissions_digest TEXT,
+  started_at TEXT NOT NULL,
+  dispatched_at TEXT,
+  settled_at TEXT,
+  result_digest TEXT,
+  output_ref TEXT,
+  error_code TEXT,
+  effect_ref TEXT,
+  receipt_json TEXT,
+  updated_at TEXT NOT NULL,
+  UNIQUE(run_id, tool_call_id)
 );
 CREATE TABLE IF NOT EXISTS approvals (
   id TEXT PRIMARY KEY, task_id TEXT NOT NULL, run_id TEXT NOT NULL, kind TEXT NOT NULL,
@@ -808,6 +884,7 @@ CREATE INDEX IF NOT EXISTS task_proposals_status_idx ON task_proposals(status, e
 CREATE INDEX IF NOT EXISTS task_follow_ups_task_idx ON task_follow_ups(task_id, created_at);
 CREATE INDEX IF NOT EXISTS task_follow_ups_status_idx ON task_follow_ups(task_id, status, created_at);
 CREATE INDEX IF NOT EXISTS run_checkpoints_run_idx ON run_checkpoints(run_id, seq);
+CREATE INDEX IF NOT EXISTS run_operations_run_phase_idx ON run_operations(run_id, phase, started_at);
 CREATE INDEX IF NOT EXISTS scheduled_jobs_due_idx ON scheduled_jobs(enabled, next_run_at);
 CREATE INDEX IF NOT EXISTS scheduled_job_runs_schedule_idx ON scheduled_job_runs(schedule_id, scheduled_for);
 CREATE INDEX IF NOT EXISTS connection_sessions_status_idx ON connection_sessions(status, updated_at);
@@ -1566,7 +1643,32 @@ export class HearthStore {
       id TEXT PRIMARY KEY, task_id TEXT NOT NULL, domain TEXT NOT NULL, scope TEXT NOT NULL,
       created_at TEXT NOT NULL, expires_at TEXT, max_uses INTEGER, used_count INTEGER NOT NULL DEFAULT 0,
       revoked_at TEXT
-    );`);
+    );
+    CREATE TABLE IF NOT EXISTS run_operations (
+      operation_id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      task_id TEXT NOT NULL,
+      tool_call_id TEXT NOT NULL,
+      tool_name TEXT NOT NULL,
+      args_hash TEXT NOT NULL,
+      effect TEXT NOT NULL,
+      phase TEXT NOT NULL,
+      attempt INTEGER NOT NULL DEFAULT 1,
+      before_digest TEXT,
+      workspace_digest TEXT,
+      permissions_digest TEXT,
+      started_at TEXT NOT NULL,
+      dispatched_at TEXT,
+      settled_at TEXT,
+      result_digest TEXT,
+      output_ref TEXT,
+      error_code TEXT,
+      effect_ref TEXT,
+      receipt_json TEXT,
+      updated_at TEXT NOT NULL,
+      UNIQUE(run_id, tool_call_id)
+    );
+    CREATE INDEX IF NOT EXISTS run_operations_run_phase_idx ON run_operations(run_id, phase, started_at);`);
     ensureColumn(this.db, "conversations", "project_id", "TEXT");
     ensureColumn(this.db, "events", "origin_instance_id", "TEXT");
     ensureColumn(this.db, "events", "origin_seq", "INTEGER");
@@ -2581,6 +2683,123 @@ export class HearthStore {
   latestRunCheckpoint(runId: string): RunCheckpointRecord | null {
     const row = this.db.prepare("SELECT * FROM run_checkpoints WHERE run_id = ? ORDER BY seq DESC LIMIT 1").get(runId) as DbRow | undefined;
     return row ? rowToRunCheckpoint(row) : null;
+  }
+
+  prepareRunOperation(input: NewRunOperation): RunOperationRecord {
+    const existing = this.getRunOperation(input.operationId);
+    if (existing) {
+      if (existing.argsHash !== input.argsHash) {
+        throw operationError("OPERATION_ARGS_MISMATCH", `operation ${input.operationId} was prepared with different arguments`);
+      }
+      return existing;
+    }
+    const now = input.startedAt ?? new Date().toISOString();
+    try {
+      this.db.prepare(
+        `INSERT INTO run_operations
+         (operation_id, run_id, task_id, tool_call_id, tool_name, args_hash, effect, phase,
+          attempt, before_digest, workspace_digest, permissions_digest, started_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'prepared', ?, ?, ?, ?, ?, ?)`
+      ).run(
+        input.operationId,
+        input.runId,
+        input.taskId,
+        input.toolCallId,
+        input.toolName,
+        input.argsHash,
+        input.effect,
+        input.attempt ?? 1,
+        input.beforeDigest ?? null,
+        input.workspaceDigest ?? null,
+        input.permissionsDigest ?? null,
+        now,
+        input.updatedAt ?? now
+      );
+    } catch (error) {
+      const raced = this.getRunOperation(input.operationId);
+      if (raced) {
+        if (raced.argsHash !== input.argsHash) {
+          throw operationError("OPERATION_ARGS_MISMATCH", `operation ${input.operationId} was prepared with different arguments`);
+        }
+        return raced;
+      }
+      throw error;
+    }
+    const created = this.getRunOperation(input.operationId);
+    if (!created) throw new Error("run operation insert failed");
+    return created;
+  }
+
+  dispatchRunOperation(operationId: string, dispatchedAt = new Date().toISOString()): RunOperationRecord {
+    const existing = this.getRunOperation(operationId);
+    if (!existing) throw operationError("OPERATION_NOT_PREPARED", `operation ${operationId} was not prepared`);
+    const update = this.db.prepare(
+      "UPDATE run_operations SET phase = 'dispatched', dispatched_at = ?, updated_at = ? WHERE operation_id = ? AND phase = 'prepared'"
+    ).run(dispatchedAt, dispatchedAt, operationId);
+    if (Number(update.changes) === 0) {
+      const current = this.getRunOperation(operationId);
+      if (current?.phase === "dispatched") {
+        throw operationError("OPERATION_ALREADY_DISPATCHED", `operation ${operationId} is already dispatched`);
+      }
+      if (current?.phase === "settled" || current?.phase === "unknown") {
+        throw operationError("OPERATION_ALREADY_SETTLED", `operation ${operationId} is already ${current.phase}`);
+      }
+      throw operationError("OPERATION_NOT_PREPARED", `operation ${operationId} was not prepared`);
+    }
+    return this.getRunOperation(operationId)!;
+  }
+
+  settleRunOperation(input: SettleRunOperationInput): RunOperationRecord {
+    const existing = this.getRunOperation(input.operationId);
+    if (!existing) throw operationError("OPERATION_NOT_PREPARED", `operation ${input.operationId} was not prepared`);
+    if (existing.phase === "settled" || existing.phase === "unknown") {
+      if (existing.phase === input.phase
+        && existing.resultDigest === (input.resultDigest ?? null)
+        && existing.errorCode === (input.errorCode ?? null)) {
+        return existing;
+      }
+      throw operationError("OPERATION_SETTLE_MISMATCH", `operation ${input.operationId} is already ${existing.phase} with a different outcome`);
+    }
+    if (existing.phase === "prepared") {
+      throw operationError("OPERATION_NOT_DISPATCHED", `operation ${input.operationId} cannot settle before dispatch`);
+    }
+    const now = input.settledAt ?? new Date().toISOString();
+    const update = this.db.prepare(
+      `UPDATE run_operations
+       SET phase = ?, settled_at = ?, result_digest = ?, output_ref = ?, error_code = ?,
+           effect_ref = ?, receipt_json = ?, updated_at = ?
+       WHERE operation_id = ? AND phase = 'dispatched'`
+    ).run(
+      input.phase,
+      now,
+      input.resultDigest ?? null,
+      input.outputRef ?? null,
+      input.errorCode ?? null,
+      input.effectRef ?? null,
+      input.receipt === undefined ? null : JSON.stringify(input.receipt),
+      now,
+      input.operationId
+    );
+    if (Number(update.changes) === 0) {
+      throw operationError("OPERATION_NOT_DISPATCHED", `operation ${input.operationId} is not dispatched`);
+    }
+    return this.getRunOperation(input.operationId)!;
+  }
+
+  getRunOperation(operationId: string): RunOperationRecord | null {
+    const row = this.db.prepare("SELECT * FROM run_operations WHERE operation_id = ?").get(operationId) as DbRow | undefined;
+    return row ? rowToRunOperation(row) : null;
+  }
+
+  listRunOperations(runId: string): RunOperationRecord[] {
+    return (this.db.prepare("SELECT * FROM run_operations WHERE run_id = ? ORDER BY started_at ASC").all(runId) as DbRow[])
+      .map(rowToRunOperation);
+  }
+
+  listUnsettledRunOperations(runId: string): RunOperationRecord[] {
+    return (this.db.prepare(
+      "SELECT * FROM run_operations WHERE run_id = ? AND phase != 'settled' ORDER BY started_at ASC"
+    ).all(runId) as DbRow[]).map(rowToRunOperation);
   }
 
   appendContextItem(item: ContextItem): ContextItem {
@@ -5168,6 +5387,44 @@ function rowToRunCheckpoint(row: DbRow): RunCheckpointRecord {
     createdAt: String(row.created_at),
     ...(row.proof_json == null ? {} : { proof: JSON.parse(String(row.proof_json)) })
   };
+}
+
+function rowToRunOperation(row: DbRow): RunOperationRecord {
+  let receipt: unknown = null;
+  if (row.receipt_json != null) {
+    try {
+      receipt = JSON.parse(String(row.receipt_json));
+    } catch {
+      receipt = String(row.receipt_json);
+    }
+  }
+  return {
+    operationId: String(row.operation_id),
+    runId: String(row.run_id),
+    taskId: String(row.task_id),
+    toolCallId: String(row.tool_call_id),
+    toolName: String(row.tool_name),
+    argsHash: String(row.args_hash),
+    effect: String(row.effect),
+    phase: String(row.phase),
+    attempt: Number(row.attempt),
+    beforeDigest: row.before_digest == null ? null : String(row.before_digest),
+    workspaceDigest: row.workspace_digest == null ? null : String(row.workspace_digest),
+    permissionsDigest: row.permissions_digest == null ? null : String(row.permissions_digest),
+    startedAt: String(row.started_at),
+    dispatchedAt: row.dispatched_at == null ? null : String(row.dispatched_at),
+    settledAt: row.settled_at == null ? null : String(row.settled_at),
+    resultDigest: row.result_digest == null ? null : String(row.result_digest),
+    outputRef: row.output_ref == null ? null : String(row.output_ref),
+    errorCode: row.error_code == null ? null : String(row.error_code),
+    effectRef: row.effect_ref == null ? null : String(row.effect_ref),
+    receipt,
+    updatedAt: String(row.updated_at)
+  };
+}
+
+function operationError(code: string, message: string): Error {
+  return Object.assign(new Error(message), { code });
 }
 
 function rowToContextItem(row: DbRow): ContextItem {

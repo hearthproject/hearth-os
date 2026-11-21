@@ -9,6 +9,13 @@
 - 修复 Codex 子进程环境过滤：只有当前 provider 的密钥可以跨边界，其他 `*_API_KEY` / `*_TOKEN` 不再泄漏。
 - 长跑矩阵恢复为 12/12；Windows CI 增加长跑门禁。
 
+### 持久操作账本
+
+- 工具调用增加 T1/T2 持久操作合同：`prepare → dispatch → settle`，未结算的操作在下一进程拒绝自动重放。
+- 服务端使用 SQLite `run_operations`（schema 38）作为操作事实源；standalone/评测使用 JSONL ledger。
+- 工具超时或任务中止会先触发取消；Windows shell 先枚举并终止子进程树，再返回 `unknown`，避免幽灵副作用。
+- 本地写记录执行前文件摘要；外部写必须带回执，缺回执按未知处理并停止 run，等待人工核对。
+
 ## 0.3.2 - 2026-11-21
 
 ### 会话布局

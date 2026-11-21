@@ -17,6 +17,9 @@ import { todoReminder } from "./harness/todo.ts";
 import { normalizeModelFailure, normalizeToolFailure, type AgentFailure } from "./errors.ts";
 import { resolveRetryPolicy, retryDelayFor, retryWindowExceeded, shouldRetryFailure } from "./retry-policy.ts";
 import { RunJournal, replayJournalMessages } from "./journal.ts";
+import { digestBeforeEffect, hashJson, resultDigest as digestToolResult } from "./operations/digest.ts";
+import { ToolExecutionHandle, type ToolExecutionOutcome } from "./operations/execution.ts";
+import { operationIdFor } from "./operations/types.ts";
 import type {
   AgentCheckpoint,
   AgentUsage,
@@ -26,7 +29,6 @@ import type {
   AgentRuntimeOptions,
   AgentTool,
   AgentToolCall,
-  AgentToolContext,
   AgentToolDefinition,
   AgentToolEffect,
   AgentToolResult,
@@ -566,6 +568,85 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     return tool.definition.executionMode === "parallel" && effectForTool(tool, call) === "read";
   }
 
+  const operationRunId = options.runId ?? "unknown";
+  const operationTaskId = options.taskId ?? "unknown";
+  const operationPermissionsDigest = hashJson(options.permissions);
+
+  type OperationBegin =
+    | { ok: true; operationId: string | null }
+    | { ok: false; operationId: string; result: AgentToolResult };
+
+  async function beginOperation(
+    call: AgentToolCall,
+    effect: AgentToolEffect,
+    startedAt: string
+  ): Promise<OperationBegin> {
+    const ledger = options.operationLedger;
+    if (!ledger) return { ok: true, operationId: null };
+    const operationId = operationIdFor(operationRunId, call.id);
+    try {
+      const fact = await ledger.prepare({
+        operationId,
+        runId: operationRunId,
+        taskId: operationTaskId,
+        toolCallId: call.id,
+        toolName: call.name,
+        argsHash: hashJson({ name: call.name, arguments: call.arguments }),
+        effect,
+        beforeDigest: digestBeforeEffect(effect, call.arguments, options.workspaceRoot),
+        permissionsDigest: operationPermissionsDigest,
+        startedAt
+      });
+      if (fact.phase === "dispatched") {
+        return { ok: false, operationId, result: operationStopResult(operationId, call, "dispatched") };
+      }
+      if (fact.phase === "settled" || fact.phase === "unknown") {
+        return { ok: false, operationId, result: operationStopResult(operationId, call, fact.phase) };
+      }
+      await ledger.dispatch({ operationId });
+      return { ok: true, operationId };
+    } catch (error) {
+      return {
+        ok: false,
+        operationId,
+        result: operationFailureResult(operationId, call, error)
+      };
+    }
+  }
+
+  async function settleOperation(
+    operationId: string | null,
+    outcome: ToolExecutionOutcome,
+    result: AgentToolResult,
+    forceUnknown = false
+  ): Promise<{ phase: "settled" | "unknown"; result: AgentToolResult }> {
+    const ledger = options.operationLedger;
+    if (!ledger || !operationId) {
+      return { phase: forceUnknown || outcome.status !== "completed" ? "unknown" : "settled", result };
+    }
+    const phase: "settled" | "unknown" = forceUnknown || outcome.status !== "completed" ? "unknown" : "settled";
+    const errorCode = result.error?.code
+      ?? (outcome.error instanceof Error ? "TOOL_EXEC_FAILED" : null);
+    try {
+      await ledger.settle({
+        operationId,
+        phase,
+        resultDigest: digestToolResult(result),
+        outputRef: result.metadata?.fullOutputPath ?? null,
+        errorCode,
+        effectRef: result.metadata?.effectRef ?? null,
+        receipt: result.metadata?.receipt ?? null
+      });
+      return { phase, result: attachOperationMetadata(result, operationId, phase) };
+    } catch (error) {
+      emit({ type: "notice", message: `操作账本结算失败，结果按未知处理：${errorMessage(error)}` });
+      return {
+        phase: "unknown",
+        result: attachOperationMetadata(result, operationId, "unknown", true)
+      };
+    }
+  }
+
   function partitionToolCalls(calls: AgentToolCall[]): AgentToolCall[][] {
     const chunks: AgentToolCall[][] = [];
     const parallelLimit = Math.max(1, options.maxParallelTools ?? 1);
@@ -625,33 +706,52 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
 
     await Promise.all(runnable.map(async ({ call, tool }) => {
       const entryStarted = Date.now();
+      const effect = effectForTool(tool, call);
+      const operation = await beginOperation(call, effect, new Date(entryStarted).toISOString());
+      if (!operation.ok) {
+        emit({
+          type: "tool.failed",
+          turn: turns,
+          callId: call.id,
+          name: call.name,
+          code: "INTERNAL",
+          retryable: false,
+          message: operation.result.content
+        });
+        results.set(call.id, { result: operation.result, durationMs: Date.now() - entryStarted });
+        return;
+      }
       journalAppend({
         type: "tool.call",
         turn: turns,
         callId: call.id,
         name: call.name,
         args: call.arguments,
-        effect: effectForTool(tool, call),
+        effect,
         startedAt: new Date().toISOString()
       });
-      let result: AgentToolResult;
-      try {
-        result = await executeToolWithTimeout(tool, call, {
-          workspaceRoot: options.workspaceRoot,
-          outDir: options.outDir,
-          permissions: options.permissions,
-          signal,
-          state,
-          ...(options.goalRoot ? { goalRoot: options.goalRoot } : {}),
-          fullAccess: options.isFullPermission?.() === true,
-          mode: options.mode ?? "build",
-          ...(options.sandbox ? { sandbox: options.sandbox } : {}),
-          ...(options.verifyGoalCompletion ? { verifyGoalCompletion: options.verifyGoalCompletion } : {})
-        }, options.toolTimeoutMs ?? 120_000, signal);
-      } catch (error) {
-        const failure = normalizeToolFailure(error, "TOOL_EXEC_FAILED");
+      const handle = ToolExecutionHandle.start(tool, call, {
+        workspaceRoot: options.workspaceRoot,
+        outDir: options.outDir,
+        permissions: options.permissions,
+        signal,
+        state,
+        ...(options.goalRoot ? { goalRoot: options.goalRoot } : {}),
+        fullAccess: options.isFullPermission?.() === true,
+        mode: options.mode ?? "build",
+        ...(options.sandbox ? { sandbox: options.sandbox } : {}),
+        ...(options.verifyGoalCompletion ? { verifyGoalCompletion: options.verifyGoalCompletion } : {})
+      }, options.toolTimeoutMs ?? 120_000, signal);
+      const outcome = await handle.wait();
+      let result = outcome.result;
+      if (!result) {
+        const failure = normalizeToolFailure(outcome.error, "TOOL_EXEC_FAILED");
         result = { content: `工具执行失败：${failure.message}`, isError: true, error: failure };
       }
+      const missingReceipt = missingExternalWriteReceipt(effect, result);
+      if (missingReceipt) result = parkExternalWrite(result);
+      const settled = await settleOperation(operation.operationId, outcome, result, missingReceipt);
+      result = settled.result;
       journalAppend({
         type: "tool.result",
         turn: turns,
@@ -978,18 +1078,22 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
           }
         }
         if (authorized) {
-          journalAppend({
-            type: "tool.call",
-            turn: turns,
-            callId: call.id,
-            name: effectiveCall.name,
-            args: effectiveCall.arguments,
-            effect: effectForTool(tool, effectiveCall),
-            startedAt: new Date().toISOString()
-          });
-          markExecuting(effectiveCall);
-          try {
-            result = await executeToolWithTimeout(tool, effectiveCall, {
+          const effect = effectForTool(tool, effectiveCall);
+          const operation = await beginOperation(effectiveCall, effect, new Date().toISOString());
+          if (!operation.ok) {
+            result = operation.result;
+          } else {
+            journalAppend({
+              type: "tool.call",
+              turn: turns,
+              callId: call.id,
+              name: effectiveCall.name,
+              args: effectiveCall.arguments,
+              effect,
+              startedAt: new Date().toISOString()
+            });
+            markExecuting(effectiveCall);
+            const handle = ToolExecutionHandle.start(tool, effectiveCall, {
               workspaceRoot: options.workspaceRoot,
               outDir: options.outDir,
               permissions: options.permissions,
@@ -1001,9 +1105,16 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
               ...(options.sandbox ? { sandbox: options.sandbox } : {}),
               ...(options.verifyGoalCompletion ? { verifyGoalCompletion: options.verifyGoalCompletion } : {})
             }, options.toolTimeoutMs ?? 120_000, signal);
-          } catch (error) {
-            const failure = normalizeToolFailure(error, "TOOL_EXEC_FAILED");
-            result = { content: `工具执行失败：${failure.message}`, isError: true, error: failure };
+            const outcome = await handle.wait();
+            let executionResult = outcome.result;
+            if (!executionResult) {
+              const failure = normalizeToolFailure(outcome.error, "TOOL_EXEC_FAILED");
+              executionResult = { content: `工具执行失败：${failure.message}`, isError: true, error: failure };
+            }
+            const missingReceipt = missingExternalWriteReceipt(effect, executionResult);
+            if (missingReceipt) executionResult = parkExternalWrite(executionResult);
+            const settled = await settleOperation(operation.operationId, outcome, executionResult, missingReceipt);
+            result = settled.result;
           }
         }
         }
@@ -1113,6 +1224,18 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
           },
           durationMs,
           ...(result.error ? { errorCode: result.error.code } : {})
+        });
+      }
+
+      if (result.metadata?.requiresReconciliation) {
+        await checkpoint("tool");
+        const checkpointFailure = currentCheckpointFailure();
+        if (checkpointFailure) return finish("failed", `检查点保存失败，已停止以避免不可恢复的执行：${checkpointFailure.message}`, [], null, checkpointFailure);
+        clearExecuting();
+        return finish("failed", "外部写操作没有返回回执，结果按未知处理。请先核对外部系统状态，确认后再继续。", [], null, {
+          code: "INTERNAL",
+          message: "external write missing receipt",
+          retryable: false
         });
       }
 
@@ -1284,70 +1407,77 @@ const LOCAL_WRITE_TOOL_NAMES = new Set([
 
 const TERMINAL_JOB_STATUSES = new Set(["settled", "completed", "finished", "failed", "stopped", "cancelled", "lost"]);
 
-async function executeToolWithTimeout(
-  tool: AgentTool,
+function operationStopResult(
+  operationId: string,
   call: AgentToolCall,
-  context: AgentToolContext,
-  fallbackTimeoutMs: number,
-  parentSignal: AbortSignal
-): Promise<AgentToolResult> {
-  const timeoutMs = tool.definition.timeoutMs ?? fallbackTimeoutMs;
-  if (!timeoutMs || timeoutMs <= 0) return tool.execute(call.arguments, context);
-  const controller = new AbortController();
-  const onAbort = (): void => controller.abort();
-  if (parentSignal.aborted) controller.abort();
-  else parentSignal.addEventListener("abort", onAbort, { once: true });
-
-  const execution = Promise.resolve()
-    .then(() => tool.execute(call.arguments, { ...context, signal: controller.signal }))
-    .then((result) => ({ kind: "result" as const, result }))
-    .catch((error: unknown) => ({ kind: "error" as const, error }));
-
-  let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
-  const timeout = new Promise<{ kind: "timeout" }>((resolve) => {
-    timeoutTimer = setTimeout(() => resolve({ kind: "timeout" }), timeoutMs);
-    timeoutTimer.unref?.();
-  });  let parentAbortResolve: (() => void) | null = null;
-  const parentAbort = new Promise<{ kind: "parent-abort" }>((resolve) => {
-    parentAbortResolve = () => resolve({ kind: "parent-abort" });
-    if (parentSignal.aborted) parentAbortResolve();
-    else parentSignal.addEventListener("abort", parentAbortResolve, { once: true });
-  });
-
-  let first: { kind: "result"; result: AgentToolResult } | { kind: "error"; error: unknown } | { kind: "timeout" } | { kind: "parent-abort" };
-  try {
-    first = await Promise.race([execution, timeout, parentAbort]);
-  } finally {
-    if (timeoutTimer) clearTimeout(timeoutTimer);    parentSignal.removeEventListener("abort", onAbort);
-    if (parentAbortResolve) parentSignal.removeEventListener("abort", parentAbortResolve);
-  }
-
-  if (first.kind === "parent-abort") {
-    controller.abort();
-    return {
-      content: `工具 ${call.name} 因任务中止而取消。`,
-      isError: true,
-      error: { code: "TOOL_ABORTED", retryable: true }
-    };
-  }
-  if (first.kind === "result") return first.result;
-  if (first.kind === "error") throw first.error;
-
-  controller.abort();
-  const grace = await Promise.race([
-    execution,
-    new Promise<{ kind: "grace-timeout" }>((resolve) => {
-      const timer = setTimeout(() => resolve({ kind: "grace-timeout" }), 5_000);
-      timer.unref?.();
-    })
-  ]);
-  if (grace.kind === "result") return grace.result;
-  if (grace.kind === "error") throw grace.error;
+  phase: "dispatched" | "settled" | "unknown"
+): AgentToolResult {
+  const reason = phase === "dispatched"
+    ? "上一进程已经派发但未结算，结果可能已经发生"
+    : `持久操作已经进入 ${phase} 状态`;
   return {
-    content: `工具 ${call.name} 执行超时（${timeoutMs}ms），且未在 5s 内响应中止；后台可能仍在执行，请先核对工作区或外部状态。`,
+    content: `工具 ${call.name} 的持久操作 ${operationId} 不能在本进程自动重试：${reason}。请先核对工作区或外部状态，确认后再决定下一步。`,
     isError: true,
-    error: { code: "TOOL_TIMEOUT", retryable: true },
-    metadata: { timedOut: true, orphaned: true, cooperative: false }
+    error: { code: "INTERNAL", retryable: false },
+    metadata: {
+      operationId,
+      operationPhase: phase,
+      operationUnsettled: phase !== "settled"
+    }
+  };
+}
+
+function operationFailureResult(
+  operationId: string,
+  call: AgentToolCall,
+  error: unknown
+): AgentToolResult {
+  return {
+    content: `工具 ${call.name} 的持久操作准备失败，已阻止执行：${errorMessage(error)}`,
+    isError: true,
+    error: { code: "INTERNAL", retryable: false },
+    metadata: {
+      operationId,
+      operationPhase: "unknown",
+      operationUnsettled: true
+    }
+  };
+}
+
+function attachOperationMetadata(
+  result: AgentToolResult,
+  operationId: string,
+  phase: "settled" | "unknown",
+  unsettled = false
+): AgentToolResult {
+  return {
+    ...result,
+    metadata: {
+      ...result.metadata,
+      operationId,
+      operationPhase: phase,
+      ...(unsettled || phase === "unknown" ? { operationUnsettled: true } : {})
+    }
+  };
+}
+
+function missingExternalWriteReceipt(effect: AgentToolEffect, result: AgentToolResult): boolean {
+  return effect === "external_write"
+    && result.isError !== true
+    && (result.metadata?.receipt == null || result.metadata.receipt === "");
+}
+
+function parkExternalWrite(result: AgentToolResult): AgentToolResult {
+  return {
+    ...result,
+    content: `${result.content}\n\n[外部写操作没有返回回执，结果按未知处理。本 run 将停止；请先核对外部系统状态，确认后再继续。]`,
+    isError: true,
+    error: { code: "INTERNAL", retryable: false },
+    metadata: {
+      ...result.metadata,
+      operationUnsettled: true,
+      requiresReconciliation: true
+    }
   };
 }
 
