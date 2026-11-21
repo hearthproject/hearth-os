@@ -331,9 +331,10 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       source
     });
   };
-  // Hearth no longer enforces turn/tool/token/time budgets. Unlimited work is
-  // the product default; only explicit cancellation stops a run.
-  const limitOf = (_value: number | undefined): number | null => null;
+  // Explicit budgets are enforced; an omitted dimension means no limit for
+  // that dimension. Product profiles supply their own bounded defaults.
+  const limitOf = (value: number | undefined): number | null =>
+    typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : null;
   const turnLimit = limitOf(options.budget.maxTurns);
   const toolCallLimit = limitOf(options.budget.maxToolCalls);
   const tokenLimit = limitOf(options.budget.maxTokens);
@@ -688,6 +689,14 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
 
     const goalRoot = options.goalRoot ?? options.workspaceRoot;
     const activeGoal = readGoalByRoot(goalRoot);
+    if (activeGoal?.status === "active" && options.maxGoalRounds !== undefined) {
+      const maxGoalRounds = Math.max(1, options.maxGoalRounds);
+      if (turns >= maxGoalRounds) {
+        const question = `持久目标「${activeGoal.title}」已达到 ${maxGoalRounds} 轮上限，是否继续执行？`;
+        await checkpoint("turn", true);
+        return finish("waiting_input", `目标已达到 ${maxGoalRounds} 轮上限，请确认是否继续。`, [], question);
+      }
+    }
 
     if (options.steering) {
       const pending = options.steering();

@@ -12,7 +12,7 @@ import type {
   RuntimeEvent,
   SubagentType
 } from "@hearth/agent-runtime";
-import { deserializeAgentState, inspectJournal, journalPathFor } from "@hearth/agent-runtime";
+import { deserializeAgentState, inspectJournal, journalPathFor, CODING_RUN_BUDGET } from "@hearth/agent-runtime";
 import type { ApprovalMode, BudgetDimension, BudgetExhaustion, ContextItem, ContextSettings, DelegationJob, DelegationResult, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, RunBudget, RunCheckpointProof, RunCheckpointRecord, RunRecord, TaskError, TaskFollowUpRecord, TaskLease, TaskProgressDetail, TaskRecord } from "@hearth/core";
 import { runCodex } from "@hearth/codex-executor";
 import type { DshApprovalOutcome, DshApprovalRequest, DshContextEvent } from "@hearth/deepseek-executor";
@@ -2716,10 +2716,19 @@ export class HearthScheduler {
     };
   }
 
-  private effectiveBudget(_task: TaskRecord): RunBudget {
-    // Budgets are removed from the product: no stored override, execution
-    // profile, token ceiling or wall-clock limit can stop a task.
-    return {};
+  private effectiveBudget(task: TaskRecord): RunBudget {
+    const base = task.taskKind === "workspace"
+      ? CODING_RUN_BUDGET
+      : task.executionMode
+        ? EXECUTION_PROFILES[task.executionMode].budget
+        : this.runBudget;
+    const override = task.budgetOverride ?? {};
+    return {
+      maxTurns: override.maxTurns ?? base.maxTurns,
+      maxToolCalls: override.maxToolCalls ?? base.maxToolCalls,
+      maxTokens: override.maxTokens ?? base.maxTokens,
+      maxDurationMs: override.maxDurationMs ?? base.maxDurationMs
+    };
   }
 
   private usageForRuns(runs: RunRecord[]): { tokens: number; turns: number; toolCalls: number; durationMs: number } {

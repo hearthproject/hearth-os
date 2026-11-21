@@ -686,7 +686,12 @@ describe("Hearth scheduler", () => {
     const task = service.createTask({ title: "长任务", goal: "完成一项长任务" });
     service.updateTask(task.id, { budgetOverride: { maxTurns: 200, maxToolCalls: 4_000, maxTokens: 600_000_000, maxDurationMs: 36_000_000 } });
     const first = await waitForStatus(service, task.id, "waiting_budget");
-    expect(DEFAULT_RUN_BUDGET).toEqual({});
+    expect(DEFAULT_RUN_BUDGET).toEqual({
+      maxTurns: 200,
+      maxToolCalls: 300,
+      maxTokens: 3_000_000,
+      maxDurationMs: 14_400_000
+    });
     expect(observedBudgets[0]).toMatchObject({ maxTurns: 200, maxToolCalls: 4_000, maxTokens: 600_000_000 });
     expect(first.error?.budgetExhaustion).toEqual({ dimension: "turns", used: 200, limit: 200 });
 

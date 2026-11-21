@@ -247,7 +247,7 @@ describe("long-run acceptance matrix", () => {
     });
   });
 
-  it("runs a 20-turn active goal until maxTurns instead of failing", async () => {
+  it("pauses a 20-turn active goal at its maxGoalRounds", async () => {
     await runCase("goal 20 turns", async () => {
       const root = workspace();
       writeGoal(root, 20);
@@ -258,7 +258,7 @@ describe("long-run acceptance matrix", () => {
       const result = await runAgent({
         model: fake.model, tools: [echoTool()], goal: "goal", systemPrompt: "system", workspaceRoot: root,
         outDir: join(root, "out"), permissions: { tools: ["echo"], readRoots: [root], writeRoots: [root], networkHosts: [] },
-        budget: {}
+        budget: {}, maxGoalRounds: 20
       });
       expect(result.status).toBe("waiting_input");
       expect(result.turns).toBe(20);

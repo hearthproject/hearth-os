@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### 执行稳定性
+
+- 恢复轮次、工具调用、Token、时长预算：默认按执行模式设上限，显式传入的预算仍优先；`unlimited` 不再作为产品默认。
+- 持久目标的 `maxGoalRounds` 到顶后进入 `waiting_input`，不再静默继续或直接失败。
+- 修复 Codex 子进程环境过滤：只有当前 provider 的密钥可以跨边界，其他 `*_API_KEY` / `*_TOKEN` 不再泄漏。
+- 长跑矩阵恢复为 12/12；Windows CI 增加长跑门禁。
+
 ## 0.3.2 - 2026-11-21
 
 ### 会话布局

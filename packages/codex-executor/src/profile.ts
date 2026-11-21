@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { parse } from "smol-toml";
+import { buildExecutorEnv } from "@hearth/core";
 
 export type CodexEnvKeySource = "process" | "windows-user" | "missing" | "none";
 
@@ -97,17 +98,23 @@ export function loadCodexProfile(options: { codexHome?: string; env?: NodeJS.Pro
   };
 }
 
-export function buildCodexEnv(profile: CodexProfile): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (typeof value === "string") env[key] = value;
+export function buildCodexEnv(
+  profile: CodexProfile,
+  trustedEnv: Record<string, string | null | undefined> = {}
+): Record<string, string> {
+  const trusted: Record<string, string | null | undefined> = {
+    CODEX_HOME: profile.codexHome
+  };
+  const secretKey = /(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|PRIVATE[_-]?KEY|ACCESS[_-]?KEY|SESSION|COOKIE|BEARER|AUTH)/i;
+  for (const [key, value] of Object.entries(trustedEnv)) {
+    // Only the selected provider key may cross the executor boundary; other
+    // provider credentials must not leak into the Codex child process.
+    if (key === profile.envKey || !secretKey.test(key)) trusted[key] = value;
   }
-  env.CODEX_HOME = profile.codexHome;
-  if (profile.envKey) {
-    const value = env[profile.envKey] ?? readWindowsUserEnv(profile.envKey);
-    if (value) env[profile.envKey] = value;
+  if (profile.envKey && trusted[profile.envKey] == null) {
+    trusted[profile.envKey] = process.env[profile.envKey] ?? readWindowsUserEnv(profile.envKey);
   }
-  return env;
+  return buildExecutorEnv({ trusted });
 }
 
 export function readWindowsUserEnv(name: string): string | null {

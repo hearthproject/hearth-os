@@ -6,6 +6,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } fr
 import { isAbsolute, join, resolve, sep } from "node:path";
 import {
   CODING_RUN_BUDGET,
+  GENERAL_RUN_BUDGET,
+  withBudgetDefaults,
   CODING_REMINDERS,
   codingFinishIssue,
   codingHarnessEnabled,
@@ -57,7 +59,7 @@ import { WorkstyleStore, workstylePromptBlock } from "./workstyle.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import type { PreparedWorkspace } from "./workspace.ts";
 
-export const DEFAULT_RUN_BUDGET: RunBudget = {};
+export const DEFAULT_RUN_BUDGET: RunBudget = { ...GENERAL_RUN_BUDGET };
 
 export interface NativeRunOptions {
   task: TaskRecord;
@@ -222,7 +224,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     tools: toolsForRun,
     goal: options.prompt,
     systemPrompt,
-    budget: options.budget ?? (coding ? CODING_RUN_BUDGET : DEFAULT_RUN_BUDGET),
+    budget: withBudgetDefaults(options.budget, coding ? CODING_RUN_BUDGET : DEFAULT_RUN_BUDGET),
     permissions,
     workspaceRoot: options.prepared.root,
     outDir: options.prepared.outDir,

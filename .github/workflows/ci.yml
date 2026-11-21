@@ -55,3 +55,37 @@ jobs:
           path: "*.log"
           if-no-files-found: ignore
           retention-days: 7
+
+  longrun-windows:
+    name: Windows long-run matrix
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Long-run acceptance matrix
+        shell: pwsh
+        run: |
+          npm run test:longrun 2>&1 | Tee-Object -FilePath longrun.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload long-run report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: longrun-report
+          path: |
+            longrun.log
+            docs/evaluation/harness-longrun-*.md
+          if-no-files-found: ignore
+          retention-days: 7
