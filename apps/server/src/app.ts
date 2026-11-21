@@ -875,6 +875,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
         executorHealth,
         modelSettingsPath,
         modelSettingsForExecutor,
+        deferStartup: true,
         codexRunner: (runOptions) => runCodex({
           ...runOptions,
           profile: codexProfile(),

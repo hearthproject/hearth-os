@@ -129,6 +129,7 @@ export interface SchedulerOptions {
   libraryMcp?: LibraryMcpLaunch | undefined;
   skills?: SkillService | undefined;
   ontologyWriter?: OntologyWriter | undefined;
+  deferStartup?: boolean | undefined;
 }
 
 function approvalKindForTask(task: TaskRecord): TaskApprovalKind | null {
@@ -207,6 +208,7 @@ export class HearthScheduler {
   private readonly browserEvidence: BrowserEvidenceStore;
   private readonly worktrees: TaskWorktreeService;
   private readonly leaseHeartbeatMs: number;
+  private readonly deferStartup: boolean;
   private readonly leaseHeartbeats = new Map<string, { epoch: number; timer: ReturnType<typeof setInterval> }>();
   private readonly controllers = new Map<string, AbortController>();
   private readonly steering = new Map<string, string>();
@@ -215,6 +217,7 @@ export class HearthScheduler {
   private readonly runPromises = new Set<Promise<void>>();
   private unsubscribe: (() => void) | null = null;
   private loopPromise: Promise<void> | null = null;
+  private startupTimer: NodeJS.Timeout | null = null;
   private wakeResolver: (() => void) | null = null;
   private stopped = true;
   private lastWorkspaceDigest: { runId: string; at: number; digest: string } | null = null;
@@ -281,6 +284,7 @@ export class HearthScheduler {
       sandbox: this.sandbox
     });
     this.leaseHeartbeatMs = Math.max(50, options.leaseHeartbeatMs ?? DEFAULT_LEASE_HEARTBEAT_MS);
+    this.deferStartup = options.deferStartup ?? false;
   }
 
   get running(): boolean {
@@ -291,23 +295,39 @@ export class HearthScheduler {
     if (!this.stopped) return;
     this.stopped = false;
     this.stopping = false;
-    this.delegations.recoverOrphans();
-    this.requeueLegacyGates();
-    this.recoverInterruptedTasks();
-    this.resumeWaitingApprovalLeases();
     this.unsubscribe = this.service.bus.subscribe((event) => {
       if (event.type === "task.created" || event.type === "task.updated") this.wake();
       if (event.type === "task.updated" && event.taskId && isTerminalStatus(this.service.store.getTask(event.taskId)?.status)) {
         this.releaseLease(event.taskId);
       }
     });
-    this.loopPromise = this.loop();
+    // Let the HTTP listener come up before the scheduler performs its first
+    // full task scan. Large databases otherwise make /api/health miss the
+    // desktop startup window even though the process is healthy.
+    const boot = () => {
+      this.startupTimer = null;
+      if (this.stopped) return;
+      this.delegations.recoverOrphans();
+      this.requeueLegacyGates();
+      this.recoverInterruptedTasks();
+      this.resumeWaitingApprovalLeases();
+      this.loopPromise = this.loop();
+    };
+    if (this.deferStartup) {
+      this.startupTimer = setTimeout(boot, 150);
+    } else {
+      boot();
+    }
   }
 
   async stop(): Promise<void> {
     if (this.stopped) return;
     this.stopped = true;
     this.stopping = true;
+    if (this.startupTimer) {
+      clearTimeout(this.startupTimer);
+      this.startupTimer = null;
+    }
     for (const controller of this.controllers.values()) controller.abort();
     for (const [taskId, heartbeat] of this.leaseHeartbeats) {
       clearInterval(heartbeat.timer);
