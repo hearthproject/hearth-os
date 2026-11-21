@@ -113,7 +113,7 @@ export async function compactAgentMessagesWithSummary(
   if (options.restoredContext?.trim()) {
     summaryMessage.push({ role: "user", content: options.restoredContext.trim() });
   }
-  const result = [...system, ...anchor, ...summaryMessage, ...completeRecent(recent)];
+  const result = sanitizeToolPairs([...system, ...anchor, ...summaryMessage, ...completeRecent(recent)]);
   return {
     messages: result,
     compacted: true,
@@ -146,7 +146,7 @@ export function compactAgentMessages(messages: AgentMessage[], options: CompactO
   while (recent.length > 0 && recent[0]?.role === "tool") recent.shift();
   const anchor = firstUser && !recent.includes(firstUser) ? [firstUser] : [];
   const restored = options.restoredContext?.trim();
-  result = [...system, ...anchor, ...(restored ? [{ role: "user" as const, content: restored }] : []), ...recent];
+  result = sanitizeToolPairs([...system, ...anchor, ...(restored ? [{ role: "user" as const, content: restored }] : []), ...recent]);
 
   return {
     messages: result,
@@ -192,6 +192,36 @@ function completeRecent(messages: AgentMessage[]): AgentMessage[] {
   let start = 0;
   while (start < messages.length && messages[start]?.role === "tool") start += 1;
   return messages.slice(start);
+}
+
+function sanitizeToolPairs(messages: AgentMessage[]): AgentMessage[] {
+  const knownCalls = new Set<string>();
+  const resolvedCalls = new Set<string>();
+  for (const message of messages) {
+    if (message.role === "assistant") {
+      for (const call of message.toolCalls) knownCalls.add(call.id);
+    } else if (message.role === "tool" && knownCalls.has(message.toolCallId)) {
+      resolvedCalls.add(message.toolCallId);
+    }
+  }
+  const result: AgentMessage[] = [];
+  const emittedCalls = new Set<string>();
+  for (const message of messages) {
+    if (message.role === "tool") {
+      if (!knownCalls.has(message.toolCallId)) continue;
+      result.push(message);
+      continue;
+    }
+    if (message.role !== "assistant") {
+      result.push(message);
+      continue;
+    }
+    const toolCalls = message.toolCalls.filter((call) => resolvedCalls.has(call.id) && !emittedCalls.has(call.id));
+    for (const call of toolCalls) emittedCalls.add(call.id);
+    if (toolCalls.length === 0 && !message.content.trim()) continue;
+    result.push({ ...message, toolCalls });
+  }
+  return result;
 }
 
 function messageChars(messages: AgentMessage[]): number {

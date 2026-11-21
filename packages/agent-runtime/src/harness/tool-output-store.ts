@@ -2,9 +2,11 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+// 16k chars is roughly a 4k-token inline budget. Keep 60% of the head and 40% of the tail
+// so the model sees both the opening context and the final errors/summary.
 const MAX_INLINE_CHARS = 16_000;
-const HEAD_CHARS = 8_000;
-const TAIL_CHARS = 4_000;
+const HEAD_CHARS = 9_000;
+const TAIL_CHARS = 6_000;
 
 export interface StoredToolResult {
   content: string;

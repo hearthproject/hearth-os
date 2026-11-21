@@ -47,4 +47,23 @@ describe("provider usage anchored compaction", () => {
     expect((result.messages[1] as { content: string }).content.length).toBeLessThan(10_000);
     expect((result.messages[2] as { content: string }).content).toBe("b".repeat(10_000));
   });
+
+  it("drops orphan tool results left behind by summarized turns", async () => {
+    const messages: AgentMessage[] = [
+      { role: "system", content: "system" },
+      { role: "user", content: "goal" },
+      { role: "assistant", content: "", toolCalls: [{ id: "old-call", name: "read_file", arguments: {}, rawArguments: "{}" }] },
+      { role: "tool", toolCallId: "old-call", name: "read_file", content: "old result".repeat(3_000) },
+      { role: "user", content: "continue ".repeat(2_000) },
+      { role: "tool", toolCallId: "orphan-call", name: "shell", content: "orphan" }
+    ];
+    const compacted = await compactAgentMessagesWithSummary(messages, {
+      contextWindowTokens: 4_096,
+      reserveTokens: 512,
+      recentTokens: 1
+    });
+    expect(compacted.compacted).toBe(true);
+    const toolIds = compacted.messages.filter((message) => message.role === "tool").map((message) => message.toolCallId);
+    expect(toolIds).not.toContain("orphan-call");
+  });
 });

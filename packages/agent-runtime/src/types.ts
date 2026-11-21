@@ -3,6 +3,8 @@
 import type { RunBudget, RunUsage, TaskPermissions } from "@hearth/core";
 import type { SandboxRuntime } from "./harness/sandbox.ts";
 import type { AgentHookDefinition } from "./harness/hooks.ts";
+import type { AgentFailure, AgentToolError } from "./errors.ts";
+import type { RetryPolicy } from "./retry-policy.ts";
 
 export type HarnessProfile = "general" | "coding";
 export type HarnessMode = "build" | "plan";
@@ -15,7 +17,15 @@ export interface AgentToolDefinition {
   executionMode?: "parallel" | "sequential";
   /** Per-tool timeout. Defaults to 120s, shell tools may override. */
   timeoutMs?: number;
+  /** Fail-closed dynamic concurrency check; unknown/absent tools stay exclusive. */
+  isConcurrencySafe?: (args: unknown) => boolean;
+  /** Recovery effect class used by the run journal. */
+  effect?: AgentToolEffect;
+  /** Dynamic effect override for argument-dependent tools such as shell. */
+  effectForArgs?: (args: unknown) => AgentToolEffect;
 }
+
+export type AgentToolEffect = "read" | "local_write" | "external_write" | "destructive" | "unknown";
 
 export interface AgentToolCall {
   id: string;
@@ -64,6 +74,8 @@ export interface AgentToolContext {
   state?: AgentToolState;
   fullAccess?: boolean;
   mode?: HarnessMode;
+  /** Task-scoped root for goal/plan files. Defaults to workspaceRoot. */
+  goalRoot?: string;
   sandbox?: SandboxRuntime;
   verifyGoalCompletion?: (goal: {
     goalId: string;
@@ -100,6 +112,8 @@ export interface AgentToolMetadata {
   exposedTools?: string[];
   matched?: boolean;
   timedOut?: boolean;
+  orphaned?: boolean;
+  cooperative?: boolean;
   sandbox?: { backend: string; enforcement: string; networkEnforcement: string; mode: string };
   sandboxFailure?: "denied" | "runner_failure";
   insertions?: number;
@@ -118,6 +132,8 @@ export interface AgentToolMetadata {
 export interface AgentToolResult {
   content: string;
   isError?: boolean;
+  /** Structured failure for scheduler routing; content stays model-readable. */
+  error?: AgentToolError;
   action?: AgentToolAction;
   summary?: string;
   outputs?: string[];
@@ -216,9 +232,11 @@ export type RuntimeEvent =
   | { type: "assistant.message"; turn: number; text: string }
   | { type: "tool.started"; turn: number; call: AgentToolCall }
   | { type: "tool.finished"; turn: number; call: AgentToolCall; result: AgentToolResult; durationMs: number }
+  | { type: "tool.failed"; turn: number; callId: string; name: string; code: string; retryable: boolean; message: string }
+  | { type: "tool.orphaned"; turn: number; callId: string; name: string; message: string }
   | { type: "tool.batch.started"; turn: number; calls: AgentToolCall[]; parallel: boolean }
   | { type: "tool.batch.finished"; turn: number; calls: AgentToolCall[]; parallel: boolean; durationMs: number }
-  | { type: "checkpoint.created"; seq: number; kind: string }
+  | { type: "checkpoint.created"; seq: number; kind: string; journalSeq?: number }
   | { type: "checkpoint.failed"; seq: number; kind: string; message: string }
   | { type: "compacted"; before: number; after: number; reason?: "microcompact" | "auto" | "reactive" | "forced" }
   | { type: "context.snapshot"; turn: number; modelId: string | null; messageCount: number; toolCount: number; systemChars: number; toolSchemaChars: number; historyChars: number; toolResultChars: number; estimatedTokens: number; providerInputTokens: number | null; providerOutputTokens: number | null; source: "provider" | "estimate" }
@@ -226,6 +244,12 @@ export type RuntimeEvent =
   | { type: "context.watermark"; estimatedTokens: number; usedTokens: number; compactions: number; source?: "provider" | "estimate" }
   | { type: "progress.updated"; filesRead: number; filesModified: number; commands: number; tests: number; todosOpen?: number }
   | { type: "usage"; usage: RunUsage }
+  | { type: "retry.scheduled"; attempt: number; delayMs: number; code: string }
+  | { type: "retry.started"; attempt: number }
+  | { type: "stall.warned"; idleMs: number }
+  | { type: "stall.detected"; idleMs: number }
+  | { type: "goal.round"; round: number; maxRounds: number; goalId: string }
+  | { type: "journal.failed"; message: string }
   | { type: "budget.exceeded"; budget: "turns" | "toolCalls" | "tokens" | "duration"; limit: number }
   | { type: "notice"; message: string };
 
@@ -240,6 +264,8 @@ export interface AgentCheckpoint {
   state?: SerializedAgentToolState;
   mode?: HarnessMode;
   promptHash?: string;
+  /** Last journal event covered by this snapshot. */
+  journalSeq?: number;
 }
 
 export interface AgentResumeState {
@@ -249,6 +275,7 @@ export interface AgentResumeState {
   toolCalls: number;
   state?: AgentToolState;
   promptHash?: string;
+  journal?: { path: string; seq: number };
 }
 
 export interface AgentPostEditEvent {
@@ -288,6 +315,13 @@ export interface AgentRuntimeOptions {
   requireFinishTool?: boolean;
   stopOnToolError?: boolean;
   retryDelayMs?: number;
+  retryPolicy?: Partial<RetryPolicy>;
+  stallPolicy?: { warnMs?: number; abortMs?: number };
+  journal?: AgentJournalOptions;
+  checkpointPolicy?: { everyTurns?: number; everyToolCalls?: number; maxSnapshots?: number };
+  goalRoot?: string;
+  maxGoalRounds?: number;
+  runId?: string;
   profile?: HarnessProfile;
   mode?: HarnessMode;
   state?: AgentToolState;
@@ -319,6 +353,12 @@ export interface AgentRunMetrics {
   modelId: string | null;
 }
 
+export interface AgentJournalOptions {
+  path: string;
+  fsync?: boolean;
+  rotateBytes?: number;
+}
+
 export interface AgentRunResult {
   status: AgentRunStatus;
   summary: string;
@@ -329,6 +369,7 @@ export interface AgentRunResult {
   outputs: string[];
   question: string | null;
   metrics?: AgentRunMetrics;
+  failure?: AgentFailure;
 }
 
 export interface ContextUsageAnchor {

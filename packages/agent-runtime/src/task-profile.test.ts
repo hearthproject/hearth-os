@@ -1,0 +1,41 @@
+import { describe, expect, it } from "vitest";
+import { TASK_PROFILES, resolveTaskProfile } from "./harness/task-profile.ts";
+import type { TaskRecord } from "@hearth/core";
+
+function task(title: string, goal = ""): TaskRecord {
+  return {
+    id: "task-1",
+    templateId: null,
+    title,
+    goal,
+    status: "queued",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    deadline: null,
+    inputs: [],
+    networkHosts: [],
+    outputDir: "out",
+    currentRunId: null,
+    nextAction: null,
+    error: null
+  };
+}
+
+describe("task profiles", () => {
+  it("selects coding before every other profile", () => {
+    expect(resolveTaskProfile({ task: task("实现网页"), coding: true, screenshot: true, research: true }).id).toBe("coding");
+  });
+
+  it("routes research, office and desktop work to different budgets", () => {
+    expect(resolveTaskProfile({ task: task("调研 AI 芯片市场"), coding: false, screenshot: false, research: true }).id).toBe("research");
+    expect(resolveTaskProfile({ task: task("整理成 Excel 并输出 Word 报告"), coding: false, screenshot: false, research: false }).id).toBe("office");
+    expect(resolveTaskProfile({ task: task("打开浏览器截图"), coding: false, screenshot: false, research: false }).id).toBe("desktop");
+    expect(resolveTaskProfile({ task: task("普通问答"), coding: false, screenshot: false, research: false }).id).toBe("general");
+  });
+
+  it("uses bounded timeouts and parallelism per profile", () => {
+    expect(TASK_PROFILES.coding).toMatchObject({ toolTimeoutMs: 600_000, maxParallelTools: 4 });
+    expect(TASK_PROFILES.research).toMatchObject({ toolTimeoutMs: 300_000, maxParallelTools: 4 });
+    expect(TASK_PROFILES.general).toMatchObject({ toolTimeoutMs: 120_000, maxParallelTools: 1 });
+  });
+});

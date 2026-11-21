@@ -14,6 +14,9 @@ import { HookRunner, type HookEvent, type HookRunResult } from "./harness/hooks.
 import { planModeAllowsCommand, planModeAllowsTool } from "./harness/plan.ts";
 import { buildPostCompactContext } from "./harness/post-compact.ts";
 import { todoReminder } from "./harness/todo.ts";
+import { normalizeModelFailure, normalizeToolFailure, type AgentFailure } from "./errors.ts";
+import { resolveRetryPolicy, retryDelayFor, retryWindowExceeded, shouldRetryFailure } from "./retry-policy.ts";
+import { RunJournal, replayJournalMessages } from "./journal.ts";
 import type {
   AgentCheckpoint,
   AgentUsage,
@@ -25,6 +28,7 @@ import type {
   AgentToolCall,
   AgentToolContext,
   AgentToolDefinition,
+  AgentToolEffect,
   AgentToolResult,
   RuntimeEvent
 } from "./types.ts";
@@ -56,6 +60,8 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   let turns = options.resume?.turns ?? 0;
   let toolCalls = options.resume?.toolCalls ?? 0;
   let seq = 0;
+  let lastTurnSnapshot = Number.NEGATIVE_INFINITY;
+  let lastToolSnapshot = Number.NEGATIVE_INFINITY;
   let summary: string | null = null;
   let emptyTurns = 0;
   let missingFinishTurns = 0;
@@ -73,7 +79,24 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   const compactionTurns: number[] = [];
   const deniedPaths = new Map<string, number>();
   const startedAt = Date.now();
-  const signal = options.signal ?? new AbortController().signal;
+  const retryPolicy = resolveRetryPolicy({
+    ...(options.retryDelayMs !== undefined ? { baseDelayMs: options.retryDelayMs } : {}),
+    ...(options.retryPolicy ?? {})
+  });
+  const runController = new AbortController();
+  const externalSignal = options.signal;
+  if (externalSignal) {
+    if (externalSignal.aborted) runController.abort();
+    else externalSignal.addEventListener("abort", () => runController.abort(), { once: true });
+  }
+  const signal = runController.signal;
+  let stalled = false;
+  let lastActivity = Date.now();
+  let journal: RunJournal | null = null;
+  let journalSeq = 0;
+  let journalClosed = false;
+  let stallTimer: ReturnType<typeof setInterval> | null = null;
+  let fatalCheckpointFailure: AgentFailure | null = null;
   const state = options.state ?? options.resume?.state ?? createAgentState(options.workspaceRoot);
   const modelId = options.modelId ?? null;
   const catalog = new ToolCatalog(tools, {
@@ -146,7 +169,97 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   let lastContextAnchor: { inputTokens: number; outputTokens: number; messageCount: number } | null = null;
   let lastContextSource: "provider" | "estimate" = "estimate";
 
-  const emit = (event: RuntimeEvent): void => options.onEvent?.(event);
+  const emit = (event: RuntimeEvent): void => {
+    lastActivity = Date.now();
+    options.onEvent?.(event);
+  };
+  const journalAppend = (event: Parameters<RunJournal["append"]>[0]): number => {
+    if (!journal) return 0;
+    try {
+      const next = journal.append(event);
+      journalSeq = next;
+      return next;
+    } catch (error) {
+      emit({ type: "journal.failed", message: errorMessage(error) });
+      return 0;
+    }
+  };
+  const closeJournal = (): void => {
+    if (!journal || journalClosed) return;
+    journalClosed = true;
+    try {
+      journal.close();
+    } catch {
+      // journal close is best effort
+    }
+  };
+  if (options.journal) {
+    try {
+      journal = new RunJournal({
+        path: options.journal.path,
+        fsync: options.journal.fsync !== false,
+        ...(options.journal.rotateBytes !== undefined ? { rotateBytes: options.journal.rotateBytes } : {})
+      });
+      journalAppend({
+        type: "run.start",
+        runId: options.runId ?? "unknown",
+        goal: options.goal,
+        systemPromptHash,
+        budget: options.budget
+      });
+      if (options.resume?.journal) {
+        const replay = replayJournalMessages(messages, options.resume.journal.path, options.resume.journal.seq);
+        messages.splice(0, messages.length, ...replay.messages);
+        if (Object.keys(replay.addedUsage).length > 0) addUsage(usage, replay.addedUsage as AgentUsage);
+        if (replay.inFlight) {
+          const effect = replay.inFlight.effect;
+          if (effect === "external_write" || effect === "destructive" || effect === "unknown") {
+            return finish("failed", `上一轮工具 ${replay.inFlight.name} 的外部副作用状态未知，需要先对账。`, [], null, {
+              code: "INTERRUPTED",
+              message: "外部副作用状态未知，不能自动继续",
+              retryable: false
+            });
+          }
+          messages.push({
+            role: "tool",
+            toolCallId: replay.inFlight.callId,
+            name: replay.inFlight.name,
+            content: `工具 ${replay.inFlight.name} 在上一进程中断；结果未知，` + (effect === "read" ? "需要时请重试。" : "工作区可能已部分修改，请先核对后再重试。"),
+            isError: true
+          });
+          if (effect === "local_write") {
+            messages.push({
+              role: "user",
+              content: `<resume_reconciliation>\n工具 ${replay.inFlight.name}（${replay.inFlight.callId}）在崩溃时可能已经修改了工作区。不要直接重试；先用 read_file/search_text 核对目标，再决定下一步。\n</resume_reconciliation>`
+            });
+          }
+        }
+      }
+    } catch (error) {
+      journal = null;
+      emit({ type: "journal.failed", message: `journal 初始化失败，降级到 checkpoint：${errorMessage(error)}` });
+    }
+  }
+  const stallPolicy = {
+    warnMs: Math.max(60_000, options.stallPolicy?.warnMs ?? 10 * 60_000),
+    abortMs: Math.max(120_000, options.stallPolicy?.abortMs ?? 30 * 60_000)
+  };
+  let stallWarned = false;
+  stallTimer = setInterval(() => {
+    const idleMs = Date.now() - lastActivity;
+    if (!stallWarned && idleMs >= stallPolicy.warnMs) {
+      stallWarned = true;
+      emit({ type: "stall.warned", idleMs });
+    }
+    if (idleMs >= stallPolicy.abortMs && !stalled) {
+      stalled = true;
+      emit({ type: "stall.detected", idleMs });
+      runController.abort();
+    }
+  }, 15_000);
+  stallTimer.unref?.();
+  if (options.journal) await checkpoint("turn", true);
+
   const lostWork = options.resume ? markLostActiveWork(state) : [];
   if (lostWork.length > 0) {
     emit({
@@ -235,6 +348,8 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       emit({ type: "notice", message: `PreCompact hook 拒绝了压缩：${preCompact.reason ?? "未说明原因"}` });
       if (!force) return false;
     }
+    if (journal) await checkpoint("compaction", true);
+    journalAppend({ type: "compaction", phase: "start", before: messages.length, reason: force ? "reactive" : "auto" });
     const restoredContext = buildPostCompactContext(state, { mode: options.mode ?? state.mode ?? "build" });
     const compacted = options.contextWindowTokens
       ? await compactAgentMessagesWithSummary(messages, {
@@ -267,7 +382,10 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         });
     // Output trimming applies even when history summarization is unnecessary.
     messages.splice(0, messages.length, ...compacted.messages);
-    if (!compacted.compacted) return false;
+    if (!compacted.compacted) {
+      journalAppend({ type: "compaction", phase: "end", before: compacted.before, after: compacted.after, compacted: false });
+      return false;
+    }
     // The summary replaces the raw tool output, so a later read must return the
     // actual file body instead of deduplicating against a stale range.
     for (const read of state.readFiles.values()) delete read.ranges;
@@ -297,21 +415,48 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       source: lastContextSource
     });
     if ("summary" in compacted && typeof compacted.summary === "string") summary = compacted.summary;
-    await checkpoint("compaction");
+    journalAppend({
+      type: "compaction",
+      phase: "end",
+      before: compacted.before,
+      after: compacted.after,
+      compacted: true,
+      summaryFailed: compacted.summaryFailed === true
+    });
+    await checkpoint("compaction", true);
     await runHooks("PostCompact", { workspaceRoot: options.workspaceRoot, force, messageCount: messages.length, compactions });
     return true;
   }
 
-  function finish(status: AgentRunStatus, resultSummary: string, outputs: string[] = [], question: string | null = null): AgentRunResult {
+  function finish(status: AgentRunStatus, resultSummary: string, outputs: string[] = [], question: string | null = null, failure?: AgentFailure): AgentRunResult {
+    if (stallTimer) {
+      clearInterval(stallTimer);
+      stallTimer = null;
+    }
+    const effectiveFailure = failure ?? fatalCheckpointFailure ?? undefined;
+    const effectiveStatus: AgentRunStatus = fatalCheckpointFailure && status === "completed" ? "failed" : status;
+    const effectiveSummary = fatalCheckpointFailure && status === "completed"
+      ? `检查点保存失败，已停止以避免不可恢复的执行：${fatalCheckpointFailure.message}`
+      : resultSummary;
+    journalAppend({
+      type: "run.end",
+      status: effectiveStatus,
+      summary: effectiveSummary,
+      usage: { ...usage },
+      turns,
+      toolCalls
+    });
+    closeJournal();
     return {
-      status,
-      summary: resultSummary,
+      status: effectiveStatus,
+      summary: effectiveSummary,
       messages: cloneMessages(messages),
       usage: { ...usage },
       turns,
       toolCalls,
       outputs,
       question,
+      ...(effectiveFailure ? { failure: effectiveFailure } : {}),
       metrics: {
         contextPeaks: [...contextPeaks],
         contextSource: lastContextSource,
@@ -321,8 +466,13 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     };
   }
 
-  async function checkpoint(kind: AgentCheckpoint["kind"]): Promise<void> {
+  async function checkpoint(kind: AgentCheckpoint["kind"], force = false): Promise<void> {
+    const everyTurns = Math.max(1, options.checkpointPolicy?.everyTurns ?? (journal ? 5 : 1));
+    const everyToolCalls = Math.max(1, options.checkpointPolicy?.everyToolCalls ?? (journal ? 20 : 1));
+    if (!force && kind === "turn" && turns - lastTurnSnapshot < everyTurns) return;
+    if (!force && kind === "tool" && toolCalls - lastToolSnapshot < everyToolCalls) return;
     seq += 1;
+    const snapshotJournalSeq = journalSeq;
     const checkpoint: AgentCheckpoint = {
       seq,
       kind,
@@ -333,18 +483,31 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       summary,
       state: serializeAgentState(state),
       mode: options.mode ?? state.mode ?? "build",
-      promptHash: systemPromptHash
+      promptHash: systemPromptHash,
+      ...(snapshotJournalSeq > 0 ? { journalSeq: snapshotJournalSeq } : {})
     };
     try {
       await options.onCheckpoint?.(checkpoint);
-      emit({ type: "checkpoint.created", seq, kind });
+      lastTurnSnapshot = turns;
+      lastToolSnapshot = toolCalls;
+      journalAppend({ type: "checkpoint", checkpointSeq: seq, checkpointKind: kind, journalSeq: snapshotJournalSeq });
+      emit({ type: "checkpoint.created", seq, kind, ...(snapshotJournalSeq > 0 ? { journalSeq: snapshotJournalSeq } : {}) });
     } catch (error) {
       const message = errorMessage(error);
       emit({ type: "checkpoint.failed", seq, kind, message });
-      if ((options.checkpointFailurePolicy ?? "stop") === "stop") {
-        throw new CheckpointPersistenceError(`检查点保存失败，已停止以避免不可恢复的执行：${message}`);
+      const policy = options.checkpointFailurePolicy ?? (journal ? "warn" : "stop");
+      if (policy === "stop") {
+        fatalCheckpointFailure = {
+          code: "CHECKPOINT_FAILED",
+          message,
+          retryable: true
+        };
       }
     }
+  }
+
+  function currentCheckpointFailure(): AgentFailure | null {
+    return fatalCheckpointFailure;
   }
 
   function modeIssue(call: AgentToolCall): string | null {
@@ -362,13 +525,35 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     return null;
   }
 
+  function effectForTool(tool: AgentTool | undefined, call: AgentToolCall): AgentToolEffect {
+    if (!tool) return "unknown";
+    try {
+      const declared = tool.definition.effectForArgs?.(call.arguments) ?? tool.definition.effect;
+      if (declared) return declared;
+    } catch {
+      return "unknown";
+    }
+    if (READ_ONLY_TOOL_NAMES.has(call.name)) return "read";
+    if (LOCAL_WRITE_TOOL_NAMES.has(call.name)) return "local_write";
+    return "unknown";
+  }
+
+  function isConcurrencySafe(tool: AgentTool | undefined, call: AgentToolCall): boolean {
+    if (!tool) return false;
+    try {
+      if (tool.definition.isConcurrencySafe) return tool.definition.isConcurrencySafe(call.arguments) === true;
+    } catch {
+      return false;
+    }
+    return tool.definition.executionMode === "parallel" && effectForTool(tool, call) === "read";
+  }
+
   function partitionToolCalls(calls: AgentToolCall[]): AgentToolCall[][] {
     const chunks: AgentToolCall[][] = [];
     const parallelLimit = Math.max(1, options.maxParallelTools ?? 1);
     let parallelChunk: AgentToolCall[] = [];
     for (const call of calls) {
-      const executionMode = catalog.resolve(call.name)?.definition.executionMode;
-      if (executionMode === "parallel") {
+      if (isConcurrencySafe(catalog.resolve(call.name), call)) {
         parallelChunk.push(call);
         if (parallelChunk.length >= parallelLimit) {
           chunks.push(parallelChunk);
@@ -390,7 +575,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     const limit = options.maxParallelTools ?? 1;
     if (limit < 2 || calls.length < 2 || calls.length > limit) return null;
     const entries = calls.map((call) => ({ call, tool: catalog.resolve(call.name) }));
-    if (!entries.every((entry) => entry.tool?.definition.executionMode === "parallel")) return null;
+    if (!entries.every((entry) => isConcurrencySafe(entry.tool, entry.call))) return null;
     if ((toolCallLimit !== null && toolCalls + calls.length > toolCallLimit) || aborted()) return null;
 
     emit({ type: "tool.batch.started", turn: turns, calls, parallel: true });
@@ -422,6 +607,15 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
 
     await Promise.all(runnable.map(async ({ call, tool }) => {
       const entryStarted = Date.now();
+      journalAppend({
+        type: "tool.call",
+        turn: turns,
+        callId: call.id,
+        name: call.name,
+        args: call.arguments,
+        effect: effectForTool(tool, call),
+        startedAt: new Date().toISOString()
+      });
       let result: AgentToolResult;
       try {
         result = await executeToolWithTimeout(tool, call, {
@@ -430,14 +624,31 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
           permissions: options.permissions,
           signal,
           state,
+          ...(options.goalRoot ? { goalRoot: options.goalRoot } : {}),
           fullAccess: options.isFullPermission?.() === true,
           mode: options.mode ?? "build",
           ...(options.sandbox ? { sandbox: options.sandbox } : {}),
           ...(options.verifyGoalCompletion ? { verifyGoalCompletion: options.verifyGoalCompletion } : {})
         }, options.toolTimeoutMs ?? 120_000, signal);
       } catch (error) {
-        result = { content: `工具执行失败：${errorMessage(error)}`, isError: true };
+        const failure = normalizeToolFailure(error, "TOOL_EXEC_FAILED");
+        result = { content: `工具执行失败：${failure.message}`, isError: true, error: failure };
       }
+      journalAppend({
+        type: "tool.result",
+        turn: turns,
+        callId: call.id,
+        name: call.name,
+        message: {
+          role: "tool",
+          toolCallId: call.id,
+          name: call.name,
+          content: result.content,
+          ...(result.isError ? { isError: true } : {})
+        },
+        durationMs: Date.now() - entryStarted,
+        ...(result.error ? { errorCode: result.error.code } : {})
+      });
       results.set(call.id, { result, durationMs: Date.now() - entryStarted });
     }));
 
@@ -446,18 +657,23 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   }
 
   while (true) {
+    const checkpointFailure = currentCheckpointFailure();
+    if (checkpointFailure) {
+      return finish("failed", `检查点保存失败，已停止以避免不可恢复的执行：${checkpointFailure.message}`, [], null, checkpointFailure);
+    }
     if (aborted()) return finish("cancelled", "任务已取消");
 
     if (turnLimit !== null && turns >= turnLimit) {
       emit({ type: "budget.exceeded", budget: "turns", limit: turnLimit });
-      await checkpoint("budget");
+      await checkpoint("budget", true);
       return finish("budget_exceeded", summary ?? "达到最大执行轮次，任务未完成");
     }
 
-    const activeGoal = readGoalByRoot(options.workspaceRoot);
+    const goalRoot = options.goalRoot ?? options.workspaceRoot;
+    const activeGoal = readGoalByRoot(goalRoot);
     if (activeGoal && activeGoal.status === "active" && activeGoal.maxTurns > 0 && turns >= activeGoal.maxTurns) {
       const message = `持久目标「${activeGoal.title}」已达到 ${activeGoal.maxTurns} 轮上限，暂停等待确认。`;
-      await checkpoint("waiting_input");
+      await checkpoint("waiting_input", true);
       return finish("waiting_input", message, [], message);
     }
 
@@ -474,12 +690,12 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     const elapsed = Date.now() - startedAt;
     if (durationLimit !== null && elapsed > durationLimit) {
       emit({ type: "budget.exceeded", budget: "duration", limit: durationLimit });
-      await checkpoint("budget");
+      await checkpoint("budget", true);
       return finish("budget_exceeded", summary ?? "执行时间超过预算，已停止");
     }
     if (tokenLimit !== null && totalTokens() > tokenLimit) {
       emit({ type: "budget.exceeded", budget: "tokens", limit: tokenLimit });
-      await checkpoint("budget");
+      await checkpoint("budget", true);
       return finish("budget_exceeded", summary ?? "Token 用量超过预算，已停止");
     }
 
@@ -504,10 +720,13 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       messages.splice(0, messages.length, ...micro.messages);
       emit({ type: "compacted", before: beforeMicro, after: messages.length, reason: "microcompact" });
     }
-    if (!autoCompactDisabled && turns >= autoCompactPausedUntil) await compactContext(false);
+    if (!autoCompactDisabled && turns >= autoCompactPausedUntil) {
+      await compactContext(false);
+      const checkpointFailure = currentCheckpointFailure(); if (checkpointFailure) return finish("failed", `检查点保存失败，已停止以避免不可恢复的执行：${checkpointFailure.message}`, [], null, checkpointFailure);
+    }
     if (tokenLimit !== null && totalTokens() >= tokenLimit) {
       emit({ type: "budget.exceeded", budget: "tokens", limit: tokenLimit });
-      await checkpoint("budget");
+      await checkpoint("budget", true);
       return finish("budget_exceeded", summary ?? "Token 用量达到预算，已停止");
     }
 
@@ -548,31 +767,48 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         }
         break;
       } catch (error) {
-        if (aborted()) return finish("cancelled", "任务已取消");
+        if (aborted()) {
+          return stalled
+            ? finish("failed", "运行停滞，已中止", [], null, { code: "STALLED", message: "运行停滞", retryable: true })
+            : finish("cancelled", "任务已取消");
+        }
         if (isContextOverflow(error) && !overflowRetried && options.contextWindowTokens) {
           overflowRetried = true;
           emit({ type: "notice", message: "模型上下文超限，正在压缩历史后重试" });
           await compactContext(true);
+          const checkpointFailure = currentCheckpointFailure(); if (checkpointFailure) return finish("failed", `检查点保存失败，已停止以避免不可恢复的执行：${checkpointFailure.message}`, [], null, checkpointFailure);
           if (tokenLimit !== null && totalTokens() >= tokenLimit) {
             emit({ type: "budget.exceeded", budget: "tokens", limit: tokenLimit });
-            await checkpoint("budget");
+            await checkpoint("budget", true);
             return finish("budget_exceeded", summary ?? "Token 用量达到预算，已停止");
           }
           continue;
         }
-        if (isTransientModelError(error)) {
-          if (transientRetries < 5) {
-            transientRetries += 1;
-            emit({ type: "notice", message: `模型暂时不可用，正在进行第 ${transientRetries} 次重试` });
-            const baseDelay = (options.retryDelayMs ?? 1_000) * 2 ** (transientRetries - 1);
-            const delay = baseDelay * (0.75 + Math.random() * 0.5);
-            if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
-            continue;
+        const failure = normalizeModelFailure(error);
+        if (shouldRetryFailure(retryPolicy, failure, transientRetries + 1) && !retryWindowExceeded(retryPolicy, startedAt)) {
+          transientRetries += 1;
+          const delay = retryDelayFor(retryPolicy, transientRetries, failure);
+          emit({ type: "retry.scheduled", attempt: transientRetries, delayMs: delay, code: failure.code });
+          journalAppend({ type: "retry.scheduled", attempt: transientRetries, delayMs: delay, code: failure.code });
+          if (delay > 0) await abortableSleep(delay, signal);
+          if (aborted()) {
+            return stalled
+              ? finish("failed", "运行停滞，已中止", [], null, { code: "STALLED", message: "运行停滞", retryable: true })
+              : finish("cancelled", "任务已取消");
           }
-          emit({ type: "notice", message: "模型连续 5 次返回暂时性错误，已停止本次运行。" });
-          return finish("failed", `模型连续多次暂时不可用：${errorMessage(error)}`);
+          emit({ type: "retry.started", attempt: transientRetries });
+          journalAppend({ type: "retry.started", attempt: transientRetries });
+          continue;
         }
-        throw error;
+        if (!failure.retryable) {
+          throw Object.assign(new Error(failure.message), {
+            code: failure.code,
+            retryable: false,
+            ...(failure.retryAfterMs !== undefined ? { retryAfterMs: failure.retryAfterMs } : {})
+          });
+        }
+        emit({ type: "notice", message: `模型连续 ${retryPolicy.maxRetries} 次返回暂时性错误，已停止本次运行。` });
+        return finish("failed", `模型连续多次暂时不可用：${failure.message}`, [], null, failure);
       }
     }
 
@@ -582,8 +818,21 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       emit({ type: "usage", usage: { ...usage } });
     }
     if (turn.content.trim()) emit({ type: "assistant.message", turn: turns, text: turn.content });
-    messages.push({ role: "assistant", content: turn.content, toolCalls: turn.toolCalls });
+    const assistantMessage: AgentMessage = { role: "assistant", content: turn.content, toolCalls: turn.toolCalls };
+    messages.push(assistantMessage);
+    journalAppend({
+      type: "message",
+      turn: turns,
+      message: assistantMessage,
+      ...(turn.usage ? { usage: turn.usage } : {})
+    });
     await checkpoint("turn");
+    {
+      const checkpointFailure = currentCheckpointFailure();
+      if (checkpointFailure) {
+        return finish("failed", `检查点保存失败，已停止以避免不可恢复的执行：${checkpointFailure.message}`, [], null, checkpointFailure);
+      }
+    }
 
     if (turn.toolCalls.length === 0 && isTruncatedFinishReason(turn.finishReason)) {
       truncatedContinuations += 1;
@@ -600,10 +849,14 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     }
 
     if (turn.toolCalls.length === 0) {
-      const goalPrompt = goalContinuationPrompt(options.workspaceRoot);
-      if (goalPrompt && goalContinuations < 12 && runningActiveWork(state).length === 0) {
+      const goalPrompt = goalContinuationPrompt(goalRoot);
+      const maxGoalRounds = Math.max(1, options.maxGoalRounds ?? 256);
+      const runningSubagents = runningActiveWork(state).filter((work) => work.kind === "subagent" && work.status === "running");
+      if (goalPrompt && goalContinuations < maxGoalRounds && runningSubagents.length === 0) {
         goalContinuations += 1;
         emit({ type: "notice", message: "检测到进行中的持久目标，继续执行而不是结束这一轮。" });
+        emit({ type: "goal.round", round: goalContinuations, maxRounds: maxGoalRounds, goalId: activeGoal?.goalId ?? "unknown" });
+        journalAppend({ type: "goal.round", round: goalContinuations, maxRounds: maxGoalRounds, goalId: activeGoal?.goalId ?? "unknown" });
         messages.push({ role: "user", content: `${goalPrompt}\n\n继续执行下一步；只有成功标准全部满足后才调用 finish_task。` });
         await checkpoint("turn");
         continue;
@@ -623,6 +876,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     }
     emptyTurns = 0;
     missingFinishTurns = 0;
+    goalContinuations = 0;
     const parallelChunks = new Map<string, AgentToolCall[]>();
     for (const chunk of partitionToolCalls(turn.toolCalls)) {
       if (chunk.length > 1 && chunk[0]) parallelChunks.set(chunk[0].id, chunk);
@@ -638,7 +892,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       if (aborted()) return finish("cancelled", "任务已取消");
       if (toolCallLimit !== null && toolCalls >= toolCallLimit) {
         emit({ type: "budget.exceeded", budget: "toolCalls", limit: toolCallLimit });
-        await checkpoint("budget");
+        await checkpoint("budget", true);
         return finish("budget_exceeded", summary ?? "工具调用次数超过预算，已停止");
       }
 
@@ -703,6 +957,15 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
           }
         }
         if (authorized) {
+          journalAppend({
+            type: "tool.call",
+            turn: turns,
+            callId: call.id,
+            name: effectiveCall.name,
+            args: effectiveCall.arguments,
+            effect: effectForTool(tool, effectiveCall),
+            startedAt: new Date().toISOString()
+          });
           markExecuting(effectiveCall);
           try {
             result = await executeToolWithTimeout(tool, effectiveCall, {
@@ -711,13 +974,15 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
               permissions: options.permissions,
               signal,
               state,
+              ...(options.goalRoot ? { goalRoot: options.goalRoot } : {}),
               fullAccess: options.isFullPermission?.() === true,
               mode: options.mode ?? "build",
               ...(options.sandbox ? { sandbox: options.sandbox } : {}),
               ...(options.verifyGoalCompletion ? { verifyGoalCompletion: options.verifyGoalCompletion } : {})
             }, options.toolTimeoutMs ?? 120_000, signal);
           } catch (error) {
-            result = { content: `工具执行失败：${errorMessage(error)}`, isError: true };
+            const failure = normalizeToolFailure(error, "TOOL_EXEC_FAILED");
+            result = { content: `工具执行失败：${failure.message}`, isError: true, error: failure };
           }
         }
         }
@@ -743,7 +1008,23 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         repeatedDenial = count >= 2;
         result = { ...result, content: `${result.content}\n当前产物输出目录：${options.outDir}。请使用当前目录；更换工具或路径分隔符不会扩大权限。` };
       }
-      emit({ type: "tool.finished", turn: turns, call, result, durationMs: precomputed?.durationMs ?? (Date.now() - toolStartedAt) });
+      if (result.error) {
+        emit({
+          type: "tool.failed",
+          turn: turns,
+          callId: call.id,
+          name: effectiveCall.name,
+          code: result.error.code,
+          retryable: result.error.retryable ?? false,
+          message: result.content
+        });
+      }
+      if (result.metadata?.orphaned) {
+        emit({ type: "tool.orphaned", turn: turns, callId: call.id, name: effectiveCall.name, message: result.content });
+        journalAppend({ type: "tool.orphaned", callId: call.id, name: effectiveCall.name, reason: result.content });
+      }
+      const durationMs = precomputed?.durationMs ?? (Date.now() - toolStartedAt);
+      emit({ type: "tool.finished", turn: turns, call, result, durationMs });
       await runHooks(result.isError ? "PostToolUseFailure" : "PostToolUse", {
         workspaceRoot: options.workspaceRoot,
         toolName: effectiveCall.name,
@@ -789,15 +1070,34 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         content: result.content,
         ...(result.isError ? { isError: true } : {})
       });
+      if (!precomputed) {
+        journalAppend({
+          type: "tool.result",
+          turn: turns,
+          callId: call.id,
+          name: effectiveCall.name,
+          message: {
+            role: "tool",
+            toolCallId: call.id,
+            name: call.name,
+            content: result.content,
+            ...(result.isError ? { isError: true } : {})
+          },
+          durationMs,
+          ...(result.error ? { errorCode: result.error.code } : {})
+        });
+      }
 
       if (options.stopOnToolError && result.isError) {
         await checkpoint("tool");
+      const checkpointFailure = currentCheckpointFailure(); if (checkpointFailure) return finish("failed", `检查点保存失败，已停止以避免不可恢复的执行：${checkpointFailure.message}`, [], null, checkpointFailure);
         clearExecuting();
         return finish("failed", result.content);
       }
 
       if (repeatedDenial) {
         await checkpoint("tool");
+      const checkpointFailure = currentCheckpointFailure(); if (checkpointFailure) return finish("failed", `检查点保存失败，已停止以避免不可恢复的执行：${checkpointFailure.message}`, [], null, checkpointFailure);
         clearExecuting();
         return finish("failed", `同一路径连续被权限边界拒绝，已停止重复尝试。当前产物输出目录：${options.outDir}`);
       }
@@ -816,6 +1116,10 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
             content: `Stop hook 拒绝了本次完成：${stop.reason ?? "未说明原因"}\n请先修正未满足的要求，然后重新调用 finish_task。`
           });
           await checkpoint("tool");
+          {
+            const checkpointFailure = currentCheckpointFailure();
+            if (checkpointFailure) return finish("failed", `检查点保存失败，已停止以避免不可恢复的执行：${checkpointFailure.message}`, [], null, checkpointFailure);
+          }
           clearExecuting();
           continue;
         }
@@ -827,7 +1131,8 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
               outDir: options.outDir,
               permissions: options.permissions,
               signal,
-              state
+              state,
+              ...(options.goalRoot ? { goalRoot: options.goalRoot } : {})
             });
           } catch (error) {
             issue = `交付物自检失败：${errorMessage(error)}`;
@@ -840,19 +1145,20 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
               content: `交付物自检未通过：${issue}\n请先修正产物，然后重新调用 finish_task。`
             });
             await checkpoint("tool");
+      const checkpointFailure = currentCheckpointFailure(); if (checkpointFailure) return finish("failed", `检查点保存失败，已停止以避免不可恢复的执行：${checkpointFailure.message}`, [], null, checkpointFailure);
             clearExecuting();
             continue;
           }
         }
         summary = (result.summary ?? result.content).trim() || "任务完成";
-        await checkpoint("final");
+        await checkpoint("final", true);
         clearExecuting();
         return finish("completed", summary, result.outputs ?? []);
       }
       if (result.action === "plan") {
         const plan = (result.summary ?? result.question ?? result.content).trim() || "计划已生成，等待确认";
         summary = plan;
-        await checkpoint("plan");
+        await checkpoint("plan", true);
         clearExecuting();
         return finish("waiting_input", plan, result.outputs ?? [], plan);
       }
@@ -864,26 +1170,35 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
             content: "当前对话已切换为完全权限。请自行决策并继续完成剩余工作，不要再询问用户；在最终结果中说明关键假设。"
           });
           await checkpoint("tool");
+          {
+            const checkpointFailure = currentCheckpointFailure();
+            if (checkpointFailure) return finish("failed", `检查点保存失败，已停止以避免不可恢复的执行：${checkpointFailure.message}`, [], null, checkpointFailure);
+          }
           clearExecuting();
           continue;
         }
         const question = (result.question ?? result.content).trim() || "需要你补充信息后才能继续";
         summary = question;
-        await checkpoint("waiting_input");
+        await checkpoint("waiting_input", true);
         clearExecuting();
         return finish("waiting_input", question, [], question);
       }
 
       await checkpoint("tool");
+      const checkpointFailure = currentCheckpointFailure(); if (checkpointFailure) return finish("failed", `检查点保存失败，已停止以避免不可恢复的执行：${checkpointFailure.message}`, [], null, checkpointFailure);
       clearExecuting();
       if (tokenLimit !== null && totalTokens() > tokenLimit) {
         emit({ type: "budget.exceeded", budget: "tokens", limit: tokenLimit });
-        await checkpoint("budget");
+        await checkpoint("budget", true);
         return finish("budget_exceeded", summary ?? "Token 用量超过预算，已停止");
       }
     }
     } catch (error) {
-      if (error instanceof CheckpointPersistenceError) return finish("failed", error.message);
+      if (error instanceof CheckpointPersistenceError) {
+        return finish("failed", error.message, [], null, { code: "CHECKPOINT_FAILED", message: error.message, retryable: true });
+      }
+      if (stallTimer) clearInterval(stallTimer);
+      closeJournal();
       throw error;
     }
   }
@@ -902,6 +1217,20 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+async function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
+  if (ms <= 0 || signal.aborted) return;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    setTimeout(() => signal.removeEventListener("abort", onAbort), ms + 10).unref?.();
+  });
+}
+
 class CheckpointPersistenceError extends Error {
   constructor(message: string) {
     super(message);
@@ -917,6 +1246,14 @@ function addUsage(target: RunUsage, value: AgentUsage): void {
   target.reasoningOutputTokens += (Number.isFinite(value.reasoningOutputTokens) ? Math.max(0, value.reasoningOutputTokens ?? 0) : 0);
 }
 
+const READ_ONLY_TOOL_NAMES = new Set([
+  "read_file", "list_files", "search_text", "glob", "grep", "read_document", "fetch_url", "capture_screen", "stat_file", "read_tool_output"
+]);
+
+const LOCAL_WRITE_TOOL_NAMES = new Set([
+  "write_file", "write_spreadsheet", "write_document", "edit_file", "apply_patch", "delete_file", "remove_file", "delete_path"
+]);
+
 async function executeToolWithTimeout(
   tool: AgentTool,
   call: AgentToolCall,
@@ -930,19 +1267,58 @@ async function executeToolWithTimeout(
   const onAbort = (): void => controller.abort();
   if (parentSignal.aborted) controller.abort();
   else parentSignal.addEventListener("abort", onAbort, { once: true });
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => {
-      controller.abort();
-      reject(new Error(`工具 ${call.name} 执行超时（${timeoutMs}ms）`));
-    }, timeoutMs);
+
+  const execution = Promise.resolve()
+    .then(() => tool.execute(call.arguments, { ...context, signal: controller.signal }))
+    .then((result) => ({ kind: "result" as const, result }))
+    .catch((error: unknown) => ({ kind: "error" as const, error }));
+
+  let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<{ kind: "timeout" }>((resolve) => {
+    timeoutTimer = setTimeout(() => resolve({ kind: "timeout" }), timeoutMs);
+    timeoutTimer.unref?.();
+  });  let parentAbortResolve: (() => void) | null = null;
+  const parentAbort = new Promise<{ kind: "parent-abort" }>((resolve) => {
+    parentAbortResolve = () => resolve({ kind: "parent-abort" });
+    if (parentSignal.aborted) parentAbortResolve();
+    else parentSignal.addEventListener("abort", parentAbortResolve, { once: true });
   });
+
+  let first: { kind: "result"; result: AgentToolResult } | { kind: "error"; error: unknown } | { kind: "timeout" } | { kind: "parent-abort" };
   try {
-    return await Promise.race([tool.execute(call.arguments, { ...context, signal: controller.signal }), timeout]);
+    first = await Promise.race([execution, timeout, parentAbort]);
   } finally {
-    if (timer) clearTimeout(timer);
-    parentSignal.removeEventListener("abort", onAbort);
+    if (timeoutTimer) clearTimeout(timeoutTimer);    parentSignal.removeEventListener("abort", onAbort);
+    if (parentAbortResolve) parentSignal.removeEventListener("abort", parentAbortResolve);
   }
+
+  if (first.kind === "parent-abort") {
+    controller.abort();
+    return {
+      content: `工具 ${call.name} 因任务中止而取消。`,
+      isError: true,
+      error: { code: "TOOL_ABORTED", retryable: true }
+    };
+  }
+  if (first.kind === "result") return first.result;
+  if (first.kind === "error") throw first.error;
+
+  controller.abort();
+  const grace = await Promise.race([
+    execution,
+    new Promise<{ kind: "grace-timeout" }>((resolve) => {
+      const timer = setTimeout(() => resolve({ kind: "grace-timeout" }), 5_000);
+      timer.unref?.();
+    })
+  ]);
+  if (grace.kind === "result") return grace.result;
+  if (grace.kind === "error") throw grace.error;
+  return {
+    content: `工具 ${call.name} 执行超时（${timeoutMs}ms），且未在 5s 内响应中止；后台可能仍在执行，请先核对工作区或外部状态。`,
+    isError: true,
+    error: { code: "TOOL_TIMEOUT", retryable: true },
+    metadata: { timedOut: true, orphaned: true, cooperative: false }
+  };
 }
 
 function toolSignature(call: AgentToolCall): string {
@@ -964,17 +1340,6 @@ function isTruncatedFinishReason(reason: string | null): boolean {
     || value === "max_output_tokens"
     || value === "incomplete"
     || value === "max_tokens_reached";
-}
-
-function isTransientModelError(error: unknown): boolean {
-  const record = error && typeof error === "object" ? error as Record<string, unknown> : {};
-  const status = typeof record.status === "number" ? record.status : null;
-  if (status === 408 || status === 429 || (status !== null && status >= 500 && status <= 599)) return true;
-  const code = typeof record.code === "string" ? record.code : "";
-  if (/^(ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|UND_ERR_|ENOTFOUND)/.test(code)) return true;
-  if (/^(upstream_error|upstream_unavailable|bad_gateway|gateway_timeout)$/i.test(code)) return true;
-  const message = errorMessage(error);
-  return /(fetch failed|network error|socket hang up|connection reset|temporarily unavailable|rate limit|too many requests|upstream_error|upstream error|could not be completed|bad gateway|gateway timeout|service unavailable|overloaded)/i.test(message);
 }
 
 function isContextOverflow(error: unknown): boolean {

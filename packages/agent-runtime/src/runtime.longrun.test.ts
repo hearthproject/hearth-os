@@ -85,6 +85,40 @@ describe("agent runtime long-run fixtures", () => {
     expect(result.messages.some((message) => message.role === "tool")).toBe(true);
   });
 
+  it("returns a structured timeout and orphan marker when a tool ignores abort", async () => {
+    const root = workspace(roots);
+    let started = false;
+    const stubborn: AgentTool = {
+      definition: { name: "stubborn", description: "ignores abort", parameters: {}, executionMode: "sequential", timeoutMs: 50 },
+      async execute() {
+        started = true;
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 6_000));
+        return { content: "late result" };
+      }
+    };
+    const fake = createFakeModel([
+      { content: "", toolCalls: [fakeToolCall("stubborn", {})], finishReason: "tool_calls" },
+      { content: "", toolCalls: [fakeToolCall("finish_task", { summary: "done" })], finishReason: "tool_calls" }
+    ]);
+    const events: RuntimeEvent[] = [];
+    const result = await runAgent({
+      model: fake.model,
+      tools: [stubborn, ...createBuiltinTools()],
+      goal: "tool timeout",
+      systemPrompt: "system",
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      permissions: { tools: ["stubborn", "finish_task"], readRoots: [root], writeRoots: [root], networkHosts: [] },
+      budget: {},
+      onEvent: (event) => { events.push(event); }
+    });
+
+    expect(started).toBe(true);
+    expect(result.status).toBe("completed");
+    expect(events.some((event) => event.type === "tool.failed" && event.code === "TOOL_TIMEOUT")).toBe(true);
+    expect(events.some((event) => event.type === "tool.orphaned")).toBe(true);
+  }, 20_000);
+
   it("continues after checkpoint failure when the policy is warn", async () => {
     const root = workspace(roots);
     const fake = createFakeModel([

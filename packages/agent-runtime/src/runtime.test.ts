@@ -468,7 +468,7 @@ describe("agent runtime", () => {
     let active = 0;
     let maxActive = 0;
     const parallelTool = (name: string): AgentTool => ({
-      definition: { name, description: name, parameters: {}, executionMode: "parallel" },
+      definition: { name, description: name, parameters: {}, executionMode: "parallel", effect: "read" },
       execute: async () => {
         active += 1;
         maxActive = Math.max(maxActive, active);
@@ -504,7 +504,7 @@ describe("agent runtime", () => {
     let maxActiveReads = 0;
     let writeDone = false;
     const readTool = (name: string): AgentTool => ({
-      definition: { name, description: name, parameters: {}, executionMode: "parallel" },
+      definition: { name, description: name, parameters: {}, executionMode: "parallel", effect: "read" },
       execute: async () => {
         const startedAfterWrite = writeDone;
         events.push(`${name}:start:${startedAfterWrite}`);
