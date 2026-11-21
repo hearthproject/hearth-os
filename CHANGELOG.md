@@ -22,6 +22,11 @@
 - checkpoint 文件降级为物化视图：先写 `runtime.checkpoint.snapshot` 事件，`run_checkpoints.event_seq` 记录快照位置；文件损坏时从事件日志重建。
 - 恢复时从 checkpoint 的 `event_seq` 之后回放 runtime 消息，旧版 JSONL checkpoint 仍按原路径兼容。
 
+### 宿主生命周期
+
+- 新增 `HostKernel`：宿主租约、`recovering` 阶段和 `draining` 关闭顺序统一管理；恢复完成前 `/api/ready` 返回 503，任务写路由返回 `HOST_NOT_READY`。
+- 宿主租约记录 PID 与进程创建时间，避免 PID 复用导致旧锁误判；`/api/health` 暴露当前启动阶段和租约信息。
+
 ## 0.3.2 - 2026-11-21
 
 ### 会话布局

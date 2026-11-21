@@ -1,16 +1,17 @@
 import { loadCodexProfile, describeCodexProfile } from "@hearth/codex-executor";
 import { buildServer } from "./app.ts";
 import { assertRootLayout, DATA_DIR, HOST, PORT } from "./config.ts";
-import { acquireDataDirLock } from "./data-lock.ts";
+import { HostKernel } from "./host-kernel.ts";
 
 assertRootLayout({ requireWeb: process.env.HEARTH_DESKTOP === "1" });
 
 const bootStartedAt = performance.now();
-const dataLock = acquireDataDirLock(DATA_DIR, PORT);
+const host = new HostKernel({ dataDir: DATA_DIR, port: PORT });
+host.start();
 
-const app = await buildServer({ logger: true, startScheduler: true, startMailSync: true })
+const app = await buildServer({ logger: true, startScheduler: true, startMailSync: true, hostKernel: host })
   .catch((error: unknown) => {
-    dataLock.release();
+    host.stop();
     throw error;
   });
 const buildMs = Math.round(performance.now() - bootStartedAt);
@@ -26,7 +27,7 @@ try {
   if (!profile.canRun) console.warn(`Codex 当前不可用：${profile.issues.join("；")}`);
 } catch (error) {
   app.log.error(error);
-  dataLock.release();
+  host.stop();
   process.exitCode = 1;
 }
 
@@ -38,7 +39,7 @@ async function shutdown(signal: string): Promise<void> {
   try {
     await app.close();
   } finally {
-    dataLock.release();
+    host.stop();
   }
 }
 

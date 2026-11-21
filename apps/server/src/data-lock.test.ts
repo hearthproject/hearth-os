@@ -7,7 +7,8 @@ import {
   DataDirLockError,
   dataDirLockExists,
   readDataDirLock,
-  releaseDataDirLock
+  releaseDataDirLock,
+  sameProcessIdentity
 } from "./data-lock.ts";
 
 const dirs: string[] = [];
@@ -79,5 +80,25 @@ describe("data directory lock", () => {
 
     releaseDataDirLock(join(dir, "hearth.lock"));
     expect(readDataDirLock(dir)?.pid).toBe(999_999);
+  });
+
+  it("rejects a recycled PID whose creation time differs", () => {
+    expect(sameProcessIdentity(
+      { pid: process.pid, processStartedAt: "2026-11-21T09:00:00.000Z" },
+      "2026-11-21T10:00:00.000Z"
+    )).toBe(false);
+    expect(sameProcessIdentity(
+      { pid: process.pid, processStartedAt: "2026-11-21T10:00:00.000Z" },
+      "2026-11-21T10:00:01.000Z"
+    )).toBe(true);
+    expect(sameProcessIdentity({ pid: process.pid }, null)).toBe(true);
+  });
+
+  it("supports a custom lock file for the host lease", () => {
+    const dir = makeDir();
+    const lock = acquireDataDirLock(dir, 4317, { name: "hearth.host.lock" });
+    expect(readDataDirLock(dir)).toBeNull();
+    expect(() => acquireDataDirLock(dir, 4318, { name: "hearth.host.lock" })).toThrow(DataDirLockError);
+    lock.release();
   });
 });

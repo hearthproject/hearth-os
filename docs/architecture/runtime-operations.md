@@ -48,3 +48,11 @@ Windows 下 `taskkill /T` 在“父进程刚创建子进程”的窗口里可能
 - checkpoint 文件是物化视图。写入文件前先追加 `runtime.checkpoint.snapshot` 事件，事件 payload 带完整 `AgentCheckpoint`；`run_checkpoints.event_seq` 指向该事件。
 - 恢复时先校验 checkpoint 文件的 sha256；文件缺失或损坏时回退到 `runtime.checkpoint.snapshot` 事件，再从 `event_seq` 之后回放 `runtime.message` / `runtime.tool.settled`，补齐检查点后的消息。
 - 旧版本没有 `event_seq` 的 checkpoint 仍可按原有 JSONL journal 路径恢复，迁移期不丢历史任务。
+
+## 宿主租约与阶段化恢复（M2）
+
+`HostKernel` 持有数据目录的唯一宿主租约，并在调度器恢复完成前保持 `/api/ready` 为 503。启动阶段按 `lease → store → operations → runs → tasks → background → ready` 推进；`recovering` 和 `draining` 期间，创建任务和继续对话的写路由返回 `HOST_NOT_READY`。
+
+- 租约文件为 `hearth.host.lock`，同时记录 PID 和进程创建时间。PID 被系统复用时，创建时间不匹配会被判为陈旧锁；进程正常退出会删除锁文件。原生 named mutex 辅助程序将在 Windows 沙箱里程碑接入，当前使用等价的文件租约。
+- `HostKernel.stop()` 先把状态切到 `draining`，由调度器停止接收新任务、取消在跑 run、释放任务租约，最后释放宿主租约。
+- `/api/health` 返回 `host` 快照：`phase`、`step`、`readyAt`、`error` 和租约信息，桌面 supervisor 与诊断页可直接观察卡在哪个阶段。

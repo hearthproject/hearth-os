@@ -27,6 +27,7 @@ import { BackupError, BackupService } from "./backups.ts";
 import { DelegationError, DelegationService, type CreateDelegationInput } from "./delegation.ts";
 import { executeEffect } from "./effects.ts";
 import { HearthScheduler, resolveToolAction } from "./scheduler.ts";
+import type { HostKernel } from "./host-kernel.ts";
 import { GitViewError, TaskGitService } from "./task-git.ts";
 import { TaskLeaseService } from "./leases.ts";
 import { attachVerification, readTaskTurns, rewindTaskTurn, TaskRewindError } from "./task-history.ts";
@@ -601,6 +602,7 @@ const DEFAULT_EVENT_LIMIT = 100;
 
 export interface BuildServerOptions {
   store?: HearthStore;
+  hostKernel?: HostKernel;
   logger?: boolean;
   serveWeb?: boolean;
   startScheduler?: boolean;
@@ -855,6 +857,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const scheduler = options.startScheduler
     ? new HearthScheduler({
         service,
+        ...(options.hostKernel ? { host: options.hostKernel } : {}),
         approvals,
         context,
         contextBroker,
@@ -940,7 +943,20 @@ export async function buildServer(options: BuildServerOptions = {}) {
       return payload;
     });
   }
-  app.get("/api/ready", async () => ({ ok: true, name: "Hearth" }));
+  app.get("/api/ready", async (_request, reply) => {
+    const host = options.hostKernel?.snapshot();
+    if (!host) return { ok: true, name: "Hearth" };
+    if (host.phase !== "ready") {
+      return reply.code(503).send({
+        ok: false,
+        name: "Hearth",
+        phase: host.phase,
+        step: host.step,
+        error: host.error
+      });
+    }
+    return { ok: true, name: "Hearth", phase: host.phase, step: host.step };
+  });
   app.post("/api/desktop/shutdown", async (request, reply) => {
     if (!LOOPBACK_HOSTS.has(request.hostname)) {
       return reply.code(403).send({ error: "LOCAL_ONLY", message: "Hearth 仅接受本机访问" });
@@ -981,7 +997,9 @@ export async function buildServer(options: BuildServerOptions = {}) {
     mail.stop();
     maintenance.stop();
     schedules.stop();
+    options.hostKernel?.beginDrain();
     await scheduler?.stop();
+    options.hostKernel?.stop();
     if (ownsStore) store.close();
   });
 
@@ -1003,6 +1021,19 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
   });
 
+  app.addHook("onRequest", async (request, reply) => {
+    const host = options.hostKernel;
+    if (!host || host.canAcceptWrites()) return;
+    if (!["POST", "PUT", "PATCH", "DELETE"].includes(request.method)) return;
+    const path = request.url.split("?")[0] ?? "";
+    if (!path.startsWith("/api/task") && !path.startsWith("/api/chat")) return;
+    return reply.code(503).send({
+      error: "HOST_NOT_READY",
+      message: "Hearth 正在恢复上次运行，暂时不接受新任务",
+      phase: host.snapshot().phase
+    });
+  });
+
   app.get("/api/health", async () => {
     const snapshot = health.snapshot();
     const profile = codexProfile();
@@ -1010,6 +1041,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     const modelSettings = { ...loaded, reasoningEffort: executorSettingsStore.load().reasoningEffort ?? "max" as const };
     return {
       ...snapshot,
+      host: options.hostKernel?.snapshot() ?? null,
       chatModel: {
         configured: Boolean(modelSettings && chatModelConfigured(modelSettings)),
         settings: viewModelSettings(modelSettings)
@@ -2999,7 +3031,13 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const hasWeb = options.serveWeb !== false && existsSync(join(WEB_DIST, "index.html"));
   if (hasWeb) await app.register(fastifyStatic, { root: WEB_DIST });
 
-  if (!security.state().killSwitch) scheduler?.start();
+  if (options.startScheduler) {
+    if (!security.state().killSwitch && scheduler) {
+      scheduler.start();
+    } else {
+      options.hostKernel?.ready();
+    }
+  }
 
   app.setNotFoundHandler((request, reply) => {
     if (hasWeb && request.method === "GET" && !request.url.startsWith("/api/")) {

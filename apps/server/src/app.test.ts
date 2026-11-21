@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { ApprovalRecord, ArtifactRecord, EffectRecord, RunRecord, SourceConnection, SourceItem } from "@hearth/core";
 import { HearthStore } from "@hearth/eventlog";
 import { buildServer } from "./app.ts";
+import { HostKernel } from "./host-kernel.ts";
 
 const HASH = "a".repeat(64);
 
@@ -117,6 +118,28 @@ describe("Hearth server", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ ok: true, name: "Hearth" });
     await app.close();
+  });
+
+  it("reports recovering as 503 and rejects task writes until ready", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-host-"));
+    const host = new HostKernel({ dataDir: dir, port: 0 });
+    const app = await buildServer({ store, hostKernel: host, serveWeb: false });
+    const ready = await app.inject({ method: "GET", url: "/api/ready" });
+    expect(ready.statusCode).toBe(503);
+    expect(ready.json()).toMatchObject({ ok: false, phase: "starting" });
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: { title: "blocked", goal: "should not start" }
+    });
+    expect(created.statusCode).toBe(503);
+    expect(created.json().error).toBe("HOST_NOT_READY");
+    host.ready();
+    const after = await app.inject({ method: "GET", url: "/api/ready" });
+    expect(after.statusCode).toBe(200);
+    expect(after.json()).toMatchObject({ ok: true, phase: "ready" });
+    await app.close();
+    rmSync(dir, { recursive: true, force: true });
   });
 
   it("keeps outbox drafts editable until they are submitted", async () => {

@@ -18,6 +18,7 @@ import type { ApprovalMode, BudgetDimension, BudgetExhaustion, ContextItem, Cont
 import { runCodex } from "@hearth/codex-executor";
 import type { DshApprovalOutcome, DshApprovalRequest, DshContextEvent } from "@hearth/deepseek-executor";
 import type { ApprovalRequest, ApprovalManager, PendingToolApproval, ToolApprovalDecision } from "./approvals.ts";
+import type { HostKernel } from "./host-kernel.ts";
 import { actionDigest, decideActionPolicy, resolveAction, type ActionFileTarget, type ActionProposal, type PermissionMode, type ResolvedAction } from "./action-resolver.ts";
 import { createFileArtifact, missingExpectedOutputs, publishArtifacts } from "./artifacts.ts";
 import { diffWorkspace, formatChangeManifest, snapshotWorkspace, type WorkspaceSnapshot } from "./change-manifest.ts";
@@ -94,6 +95,7 @@ interface AttemptResult {
 }
 
 export interface SchedulerOptions {
+  host?: HostKernel;
   mail?: EmailService;
   outbox?: OutboxService;
   service: HearthService;
@@ -212,6 +214,7 @@ export class HearthScheduler {
   private readonly operationLedger: SqliteOperationLedger;
   private readonly leaseHeartbeatMs: number;
   private readonly deferStartup: boolean;
+  private readonly host: HostKernel | undefined;
   private readonly leaseHeartbeats = new Map<string, { epoch: number; timer: ReturnType<typeof setInterval> }>();
   private readonly controllers = new Map<string, AbortController>();
   private readonly steering = new Map<string, string>();
@@ -289,6 +292,7 @@ export class HearthScheduler {
     });
     this.leaseHeartbeatMs = Math.max(50, options.leaseHeartbeatMs ?? DEFAULT_LEASE_HEARTBEAT_MS);
     this.deferStartup = options.deferStartup ?? false;
+    this.host = options.host;
   }
 
   get running(): boolean {
@@ -311,10 +315,22 @@ export class HearthScheduler {
     const boot = () => {
       this.startupTimer = null;
       if (this.stopped) return;
-      this.delegations.recoverOrphans();
-      this.requeueLegacyGates();
-      this.recoverInterruptedTasks();
-      this.resumeWaitingApprovalLeases();
+      this.host?.recovering();
+      try {
+        this.host?.advance("operations");
+        this.host?.advance("runs");
+        this.delegations.recoverOrphans();
+        this.host?.advance("tasks");
+        this.requeueLegacyGates();
+        this.recoverInterruptedTasks();
+        this.host?.advance("background");
+        this.resumeWaitingApprovalLeases();
+        this.host?.ready();
+      } catch (error) {
+        this.host?.fail(error);
+        console.error("Hearth 恢复阶段失败：", error instanceof Error ? error.message : String(error));
+        return;
+      }
       this.loopPromise = this.loop();
     };
     if (this.deferStartup) {
