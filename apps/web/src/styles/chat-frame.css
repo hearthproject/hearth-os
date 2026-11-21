@@ -348,6 +348,15 @@
 .composer-icon:hover:not(:disabled) { background: var(--surface-sunk); }
 .composer-send { background: var(--ember-fill); color: var(--ember-on-ink); }
 .composer-send:hover:not(:disabled) { background: var(--ember-fill-hover); }
+.composer-send.stopping { background: var(--risk); color: #fff; }
+.composer-send.stopping:hover:not(:disabled) { opacity: 0.9; }
+.stop-icon {
+  width: 11px;
+  height: 11px;
+  background: currentColor;
+  display: inline-block;
+  border-radius: 1px;
+}
 .composer-send:disabled,
 .composer-icon:disabled { opacity: 0.45; cursor: default; }
 

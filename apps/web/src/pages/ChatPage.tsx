@@ -530,6 +530,16 @@ export function ChatPage() {
     await dispatch(outgoing);
   }
 
+  async function stopRunningTask() {
+    const task = stoppableTask;
+    if (!task) return;
+    try {
+      await api.cancel(task.id);
+    } catch {
+      // 取消请求失败也没关系，任务状态会通过查询/事件流更新
+    }
+  }
+
   async function dispatch(outgoing: OutgoingMessage) {
     const { text, attachments: sentAttachments, skillId: sentSkillId } = outgoing;
     const startedAt = Date.now();
@@ -733,6 +743,10 @@ export function ChatPage() {
   const selectedExecutorUnavailable = Boolean(selectedExecutorId && !executorAvailability[selectedExecutorId]);
   const visibleExecutorIds = EXECUTOR_ORDER.filter((id) => executorAvailability[id] || id === selectedExecutorId);
   const isWorking = sending || hasRunningTask;
+  const stoppableTask = useMemo(
+    () => conversationTasks.find((task) => task.status === "running" || task.status === "queued"),
+    [conversationTasks]
+  );
   const hasDraft = Boolean(input.trim() || attachments.length > 0);
   const canSubmit = !uploading && settingsReady && !selectedExecutorUnavailable && hasDraft;
   const modelSettings = healthQuery.data?.chatModel.settings;
@@ -1119,13 +1133,25 @@ export function ChatPage() {
             />
             <button
               type="button"
-              className={`composer-send ${isWorking ? "working" : ""}`}
-              onClick={() => void send()}
-              disabled={!canSubmit}
+              className={`composer-send ${isWorking ? "working" : ""} ${stoppableTask ? "stopping" : ""}`}
+              onClick={() => (stoppableTask ? void stopRunningTask() : void send())}
+              disabled={!canSubmit && !stoppableTask}
               aria-busy={isWorking}
-              title={selectedExecutorUnavailable ? "当前锁定的执行器不可用" : isWorking ? "加入队列" : "发送"}
+              title={stoppableTask
+                ? `停止任务：${stoppableTask.title}`
+                : selectedExecutorUnavailable
+                  ? "当前锁定的执行器不可用"
+                  : isWorking
+                    ? "加入队列"
+                    : "发送"}
             >
-              {uploading || (isWorking && !hasDraft) ? <Loader2 size={17} className="spin" /> : <ArrowUp size={18} />}
+              {uploading
+                ? <Loader2 size={17} className="spin" />
+                : stoppableTask
+                  ? <span className="stop-icon" />
+                  : isWorking && !hasDraft
+                    ? <Loader2 size={17} className="spin" />
+                    : <ArrowUp size={18} />}
             </button>
           </div>
         </div>
