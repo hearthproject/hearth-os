@@ -60,6 +60,7 @@ import type { EmailService } from "./email.ts";
 import type { OutboxService } from "./outbox.ts";
 import { createAgentTool, createSubagentTool } from "./subagents.ts";
 import { createAgentLifecycleTools, SubagentTaskManager } from "./subagent-manager.ts";
+import { createJobTools } from "./job-tools.ts";
 import { OntologyWriter } from "./ontology-writer.ts";
 import { chatModelConfigured, loadModelSettings, type ModelSettings } from "./model-settings.ts";
 import { prepareTaskRuntime, type RuntimePreparation } from "./runtime.ts";
@@ -1827,6 +1828,13 @@ export class HearthScheduler {
             }
           }));
         }
+      }
+      if (executorId === "native" && (this.backgroundTools || subagentManager)) {
+        extraNativeTools.push(...createJobTools({
+          owner: { taskId, runId },
+          background: this.backgroundTools ?? null,
+          subagents: subagentManager ?? null
+        }));
       }
       const adapter = this.adapters[executorId];
       const attemptContext: ExecutorAttemptContext = {
