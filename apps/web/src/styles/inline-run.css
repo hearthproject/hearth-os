@@ -57,8 +57,23 @@
 .inline-run-headline {
   min-width: 0;
   overflow: hidden;
+  color: var(--ink-secondary);
+  font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.inline-run.running .inline-run-headline,
+.inline-run.queued .inline-run-headline {
+  color: var(--ink);
+}
+
+.inline-run.running .inline-run-head {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 7%, transparent), transparent 72%);
+}
+
+.inline-run.running .inline-run-head-icon {
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--accent) 45%, transparent));
 }
 
 .inline-run-body {

@@ -16,7 +16,7 @@ import { formatBytes } from "../lib/format.ts";
 import { fileExtension, previewKind, TEXT_PREVIEW_LIMIT } from "../lib/preview.ts";
 import type { ArtifactListItem, BackgroundToolJob, ChatAttachment, ChatMessageRecord, TaskListItem } from "../lib/types.ts";
 
-interface PreviewTarget {
+export interface PreviewTarget {
   name: string;
   url: string;
   mimeType: string;
@@ -26,20 +26,21 @@ interface PreviewTarget {
 
 export function ChatWorkspacePanel({
   open,
-  conversationId,
   messages,
   tasks,
+  preview,
+  onPreviewChange,
   onOpen,
   onClose
 }: {
   open: boolean;
-  conversationId: string | null;
   messages: ChatMessageRecord[];
   tasks: TaskListItem[];
+  preview: PreviewTarget | null;
+  onPreviewChange: (preview: PreviewTarget | null) => void;
   onOpen: () => void;
   onClose: () => void;
 }) {
-  const [preview, setPreview] = useState<PreviewTarget | null>(null);
   const taskIds = useMemo(() => new Set(tasks.map((task) => task.id)), [tasks]);
 
   const artifactsQuery = useQuery({
@@ -54,10 +55,6 @@ export function ChatWorkspacePanel({
     enabled: open,
     refetchInterval: open ? 8_000 : false
   });
-  useEffect(() => {
-    setPreview(null);
-  }, [conversationId]);
-
   if (!open) {
     return (
       <aside className="workspace-rail" aria-label="对话产物">
@@ -82,7 +79,7 @@ export function ChatWorkspacePanel({
     <aside className="workspace-panel" aria-label="对话产物">
       <header className="workspace-head">
         {preview ? (
-          <button className="icon-button" onClick={() => setPreview(null)} aria-label="返回产物" title="返回产物">
+          <button className="icon-button" onClick={() => onPreviewChange(null)} aria-label="返回产物" title="返回产物">
             <ArrowLeft size={15} />
           </button>
         ) : (
@@ -95,7 +92,7 @@ export function ChatWorkspacePanel({
       </header>
 
       {preview ? (
-        <PreviewBody preview={preview} onClose={() => setPreview(null)} />
+        <PreviewBody preview={preview} />
       ) : (
         <div className="workspace-scroll">
           {artifacts.length > 0 && (
@@ -104,7 +101,7 @@ export function ChatWorkspacePanel({
               <ul className="workspace-list">
                 {artifacts.map((artifact) => (
                   <li key={artifact.id}>
-                    <button className="workspace-row" onClick={() => setPreview(artifactTarget(artifact))}>
+                    <button className="workspace-row" onClick={() => onPreviewChange(artifactPreviewTarget(artifact))}>
                       <FileBadge name={artifact.relativePath} />
                       <span className="workspace-row-title">{fileName(artifact.relativePath)}</span>
                       <span className="workspace-row-meta">{formatBytes(artifact.bytes)}</span>
@@ -121,7 +118,7 @@ export function ChatWorkspacePanel({
               <ul className="workspace-list">
                 {attachments.map((attachment) => (
                   <li key={attachment.id}>
-                    <button className="workspace-row" onClick={() => setPreview(attachmentTarget(attachment))}>
+                    <button className="workspace-row" onClick={() => onPreviewChange(attachmentPreviewTarget(attachment))}>
                       <FileBadge name={attachment.name} />
                       <span className="workspace-row-title">{attachment.name}</span>
                       <span className="workspace-row-meta">{formatBytes(attachment.bytes)}</span>
@@ -158,7 +155,7 @@ export function ChatWorkspacePanel({
   );
 }
 
-function PreviewBody({ preview, onClose }: { preview: PreviewTarget; onClose: () => void }) {
+function PreviewBody({ preview }: { preview: PreviewTarget }) {
   const kind = previewKind(preview.name, preview.mimeType);
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -237,7 +234,7 @@ function JobBadge({ job }: { job: BackgroundToolJob }) {
   return <CheckCircle2 size={13} className="workspace-ok" />;
 }
 
-function artifactTarget(artifact: ArtifactListItem): PreviewTarget {
+export function artifactPreviewTarget(artifact: Pick<ArtifactListItem, "id" | "taskId" | "relativePath" | "mimeType" | "bytes">): PreviewTarget {
   return {
     name: fileName(artifact.relativePath),
     url: api.artifactUrl(artifact.taskId, artifact.id),
@@ -247,7 +244,7 @@ function artifactTarget(artifact: ArtifactListItem): PreviewTarget {
   };
 }
 
-function attachmentTarget(attachment: ChatAttachment): PreviewTarget {
+export function attachmentPreviewTarget(attachment: ChatAttachment): PreviewTarget {
   return {
     name: attachment.name,
     url: api.attachmentUrl(attachment.id),

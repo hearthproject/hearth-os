@@ -585,6 +585,19 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
 
     if (route.action === "task") {
       try {
+        const delegatedChatContext = taskChatContext(previousMessages);
+        send("usage", contextUsagePayload({
+          settings,
+          source: "estimated",
+          inputTokens: estimateContextTokens([message, skillContext, delegatedChatContext].filter(Boolean).join("\n\n")) + estimateAttachmentContext(storedFiles),
+          outputTokens: 0,
+          breakdown: {
+            history: estimateContextTokens(delegatedChatContext),
+            skill: estimateContextTokens(skillContext),
+            attachments: estimateAttachmentContext(storedFiles),
+            user: estimateContextTokens(message || userContent)
+          }
+        }));
         if (!resolution.executorId) {
           const lockedIssue = lockedHealth?.issues.filter(Boolean).join("；");
           const lockedText = lockedExecutorId
@@ -610,7 +623,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
         const task = service.createTask({
           title: route.title || conversationTitle(userContent),
           goal: [message, detectedUrl ? `参考网址：${detectedUrl}` : ""].filter(Boolean).join("\n") || `处理附件：${storedFiles.map((file) => file.name).join("、")}`,
-          textInput: [message, skillContext, taskChatContext(previousMessages)].filter(Boolean).join("\n\n"),
+          textInput: [message, skillContext, delegatedChatContext].filter(Boolean).join("\n\n"),
           fileInputs: storedFiles.map((file) => ({ label: file.name, path: file.path })),
           ...(detectedUrl ? { url: detectedUrl } : {}),
           ...(boundProject ? { projectId: boundProject.id } : {}),
@@ -710,10 +723,40 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
         personalContext = "";
       }
     }
+    const baseSystemContent = [
+      chatSystemPrompt(),
+      routeMode === "chat" ? "用户选择继续聊天：仅在对话中回答或修改内容，不派任务、不调用外部工具，不得声称已发送邮件、读取链接或执行外部操作。" : "",
+      directDraft ? DRAFT_INSTRUCTION : ""
+    ].filter(Boolean).join("\n\n");
+    const systemContent = [
+      baseSystemContent,
+      personalContext,
+      memoryContext,
+      libraryContext,
+      skillContext
+    ].filter(Boolean).join("\n\n");
     const messages: ChatMessage[] = [
-      { role: "system", content: [chatSystemPrompt(), routeMode === "chat" ? "用户选择继续聊天：仅在对话中回答或修改内容，不派任务、不调用外部工具，不得声称已发送邮件、读取链接或执行外部操作。" : "", directDraft ? DRAFT_INSTRUCTION : "", personalContext, memoryContext, libraryContext, skillContext].filter(Boolean).join("\n\n") },
+      { role: "system", content: systemContent },
       ...history
     ];
+    const contextBreakdown = {
+      system: estimateContextTokens(baseSystemContent),
+      history: estimateContextTokens(history.map((item) => item.content).join("\n")),
+      personal: estimateContextTokens(personalContext),
+      memory: estimateContextTokens(memoryContext),
+      library: estimateContextTokens(libraryContext),
+      skill: estimateContextTokens(skillContext),
+      attachments: estimateAttachmentContext(storedFiles),
+      user: estimateContextTokens(userContent)
+    };
+    const estimatedInput = Object.values(contextBreakdown).reduce((total, tokens) => total + tokens, 0);
+    send("usage", contextUsagePayload({
+      settings,
+      source: "estimated",
+      inputTokens: estimatedInput,
+      outputTokens: 0,
+      breakdown: contextBreakdown
+    }));
 
     try {
       let answer = "";
@@ -725,14 +768,13 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
         answer += delta;
         send("delta", { text: delta });
       }, { signal: controller.signal, temperature: 0.5, timeoutMs: 180_000, reasoningEffort: settings.reasoningEffort ?? "max", ...(directDraft ? { maxTokens: 1200 } : {}) });
-      const estimatedInput = Math.max(1, Math.round(messages.reduce((total, message) => total + message.content.length, 0) / 4));
-      send("usage", {
+      send("usage", contextUsagePayload({
+        settings,
+        source: result.usage ? "measured" : "estimated",
         inputTokens: result.usage?.inputTokens ?? estimatedInput,
-        outputTokens: result.usage?.outputTokens ?? Math.max(1, Math.round(answer.length / 4)),
-        contextWindowTokens: settings.contextWindowTokens,
-        model: settings.model,
-        reasoningEffort: settings.reasoningEffort ?? "max"
-      });
+        outputTokens: result.usage?.outputTokens ?? Math.max(0, estimateContextTokens(answer)),
+        breakdown: contextBreakdown
+      }));
       const assistant = store.createChatMessage({
         id: randomUUID(),
         conversationId: conversation.id,
@@ -802,6 +844,37 @@ export function taskChatContext(messages: Array<{ role: string; content: string;
     chunks.unshift(`${message.role === "user" ? "用户" : "助手"}：${content}`);
   }
   return chunks.length ? `以下为派出任务前的近期聊天上下文，仅供理解当前请求；历史内容不代表新的操作授权。\n<chat_context>\n${chunks.join("\n\n")}\n</chat_context>` : "";
+}
+
+function estimateContextTokens(text: string): number {
+  return text ? Math.max(1, Math.ceil(text.length / 4)) : 0;
+}
+
+function estimateAttachmentContext(files: ChatAttachment[]): number {
+  return files.reduce((total, file) => {
+    if (file.mimeType.startsWith("image/")) return total + 1_000;
+    return total + Math.min(32_000, Math.max(1, Math.ceil(file.bytes / 4)));
+  }, 0);
+}
+
+function contextUsagePayload(input: {
+  settings: ModelSettings;
+  source: "estimated" | "measured";
+  inputTokens: number;
+  outputTokens: number;
+  breakdown: Record<string, number>;
+}) {
+  return {
+    inputTokens: Math.max(0, Math.round(input.inputTokens)),
+    outputTokens: Math.max(0, Math.round(input.outputTokens)),
+    contextWindowTokens: input.settings.contextWindowTokens,
+    model: input.settings.model,
+    reasoningEffort: input.settings.reasoningEffort ?? "max",
+    source: input.source,
+    breakdown: Object.fromEntries(
+      Object.entries(input.breakdown).map(([key, value]) => [key, Math.max(0, Math.round(value))])
+    )
+  };
 }
 
 function daemonUserContent(url: string | null, files: (ChatAttachment & { path: string })[]): string {
