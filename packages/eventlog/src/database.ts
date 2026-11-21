@@ -3856,6 +3856,8 @@ export class HearthStore {
       case "schedule.updated":
       case "schedule.run.created":
       case "schedule.run.updated":
+      case "job.registered":
+      case "job.settled":
       case "task.progress":
       case "task.budget.exhausted":
       case "task.budget.extended":

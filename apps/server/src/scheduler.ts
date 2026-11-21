@@ -566,7 +566,22 @@ export class HearthScheduler {
         error: null
       }, task.currentRunId ?? undefined);
     }
-    if (gated.length > 0) this.wake();
+    const legacyFailures = this.service.store.listTasks().filter((task) =>
+      (task.status === "recoverable" || task.status === "failed") &&
+      (
+        task.error?.budgetExhaustion !== undefined ||
+        task.error?.message.includes("预算") === true ||
+        task.error?.message.includes("Unknown event type: job.") === true
+      )
+    );
+    for (const task of legacyFailures) {
+      this.service.updateTask(task.id, {
+        status: "queued",
+        nextAction: "已移除旧的预算与 Job 事件限制，自动继续",
+        error: null
+      }, task.currentRunId ?? undefined);
+    }
+    if (gated.length > 0 || legacyFailures.length > 0) this.wake();
   }
 
   extendBudget(taskId: string, executionMode?: "standard" | "deep"): TaskRecord {
@@ -1265,7 +1280,16 @@ export class HearthScheduler {
         };
       }
       const initialTask = this.service.requireTask(taskId);
-      const preparedHandoff = [...this.service.store.listHandoffs(taskId)].reverse().find((item) => item.status === "prepared") ?? null;
+      // Automatic executor handoff is disabled. Cancel handoffs prepared by
+      // older builds and only honor a handoff the user explicitly confirmed.
+      const autoHandoffs = this.service.store.listHandoffs(taskId)
+        .filter((item) => (item.status === "prepared" || item.status === "pending_user") && item.initiatedBy === "auto");
+      for (const stale of autoHandoffs) {
+        this.context.updateHandoff(stale.id, { status: "cancelled" });
+      }
+      const preparedHandoff = [...this.service.store.listHandoffs(taskId)]
+        .reverse()
+        .find((item) => item.status === "prepared" && item.initiatedBy !== "auto") ?? null;
       let handoff: HandoffRecord | null = preparedHandoff;
       let executorId: ExecutorId = handoff?.toExecutor ?? resolveExecutorId(initialTask);
       let pendingInput = initialTask.pendingInput?.trim() ?? "";
@@ -2379,16 +2403,17 @@ export class HearthScheduler {
       cause: input.effectiveCause, settings: input.settings, evaluation, targetExecutor,
       retriesUsed: input.retriesUsed, handoffsUsed: input.handoffsUsed, attemptedExecutors: [...input.attemptedExecutors]
     });
-    if (decision.action !== "handoff") return decision;
-    const autoAllowed = input.approvalMode === "full" && input.settings.mode === "on" && input.settings.autoHandoffRisk === "low";
-    return {
-      ...decision,
-      autoAllowed,
-      highRisk: input.target.highRisk,
-      reason: autoAllowed
-        ? `执行器故障：${input.diagnosis.summary}，自动切换到 ${executorName(targetExecutor)} 继续`
-        : `执行器故障：${input.diagnosis.summary}。是否切换到 ${executorName(targetExecutor)} 继续？`
-    };
+    if (decision.action === "handoff") {
+      return {
+        ...decision,
+        action: "ask_user",
+        autoAllowed: false,
+        highRisk: false,
+        targetExecutor: null,
+        reason: "自动执行器切换已关闭；请在输入框左上角手动选择执行器后重试"
+      };
+    }
+    return decision;
   }
 
   private async diagnoseFailure(taskId: string, task: TaskRecord, run: RunRecord, error: unknown, cause: FailureCause, targetExecutor: ExecutorId | null): Promise<FailureDiagnosis> {
