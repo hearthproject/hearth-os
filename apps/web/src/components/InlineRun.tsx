@@ -302,11 +302,7 @@ function collectEntries(events: TaskView["events"]): Entry[] {
       pushSystem(entries, event.id, "整理执行上下文，继续推进");
       continue;
     }
-    if (kind === "budget") {
-      if (message) pushSystem(entries, event.id, message);
-      continue;
-    }
-    if (kind === "turn" || kind === "dsh.start" || kind === "dsh.done" || kind === "dsh.resume" || kind === "dsh.assistant.attempt") {
+    if (kind === "budget" || kind === "turn" || kind === "dsh.start" || kind === "dsh.done" || kind === "dsh.resume" || kind === "dsh.assistant.attempt") {
       continue;
     }
 
