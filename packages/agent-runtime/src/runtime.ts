@@ -71,6 +71,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   let stopRejections = 0;
   let sameProgressCount = 0;
   let lastProgressHash: string | null = null;
+  let consecutiveToolFailures = 0;
   let budgetReminderSent = false;
   let compactions = 0;
   let autoCompactPausedUntil = 0;
@@ -1069,6 +1070,19 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       }
       if (sameProgressCount >= 5) {
         return finish("failed", "模型连续多次产生重复相同工具调用和结果，已停止以避免死循环");
+      }
+      if (result.isError) {
+        consecutiveToolFailures += 1;
+        if (consecutiveToolFailures >= 5) {
+          emit({ type: "notice", message: "连续 5 次工具调用失败，已触发熔断器，停止执行以避免浪费预算。" });
+          await checkpoint("tool");
+          const checkpointFailure = currentCheckpointFailure();
+          if (checkpointFailure) return finish("failed", `检查点保存失败，已停止以避免不可恢复的执行：${checkpointFailure.message}`, [], null, checkpointFailure);
+          clearExecuting();
+          return finish("failed", "连续多次工具调用失败，已触发熔断器停止执行");
+        }
+      } else {
+        consecutiveToolFailures = 0;
       }
       emit({
         type: "progress.updated",

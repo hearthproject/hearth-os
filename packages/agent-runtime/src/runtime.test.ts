@@ -927,3 +927,50 @@ it("stops retrying a tool after maxRetries and returns the failure", async () =>
   expect(result.status).toBe("completed");
   expect(attempts).toBe(4);
 });
+
+it("trips circuit breaker after 5 consecutive tool failures", async () => {
+  let toolCallCount = 0;
+  const model: AgentModel = async () => turn("", [call("flaky", {})]);
+  const result = await runAgent({
+    model,
+    tools: [{
+      definition: { name: "flaky", description: "flaky tool", parameters: {} },
+      execute: async () => {
+        toolCallCount++;
+        return { content: "failed", isError: true, error: { code: "TOOL_TIMEOUT", retryable: true } };
+      }
+    }],
+    goal: "test", systemPrompt: "system", workspaceRoot: ".", outDir: ".",
+    permissions: { tools: ["flaky"], readRoots: [], writeRoots: [], networkHosts: [] },
+    budget: { maxTurns: 20, maxToolCalls: 20, maxTokens: 100_000, maxDurationMs: 30_000 },
+  });
+  expect(result.status).toBe("failed");
+  expect(result.summary).toContain("熔断器");
+});
+
+it("resets circuit breaker after a successful tool call", async () => {
+  let modelCallCount = 0;
+  let toolExecCount = 0;
+  const model: AgentModel = async () => {
+    modelCallCount++;
+    if (modelCallCount <= 5) return turn("", [call("flaky", {})]);
+    return turn("done", []);
+  };
+  const result = await runAgent({
+    model,
+    tools: [{
+      definition: { name: "flaky", description: "flaky tool", parameters: {} },
+      execute: async () => {
+        toolExecCount++;
+        if (toolExecCount <= 2 || toolExecCount === 4) {
+          return { content: "failed", isError: true, error: { code: "TOOL_TIMEOUT", retryable: true } };
+        }
+        return { content: "ok" };
+      }
+    }],
+    goal: "test", systemPrompt: "system", workspaceRoot: ".", outDir: ".",
+    permissions: { tools: ["flaky"], readRoots: [], writeRoots: [], networkHosts: [] },
+    budget: { maxTurns: 20, maxToolCalls: 20, maxTokens: 100_000, maxDurationMs: 30_000 },
+  });
+  expect(result.status).toBe("completed");
+});
