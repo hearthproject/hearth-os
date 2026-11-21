@@ -9,6 +9,8 @@ export interface TaskProfile {
   maxParallelTools: number;
   keepRecentToolOutputs: number;
   maxGoalRounds: number;
+  /** Expose the bounded read-only workflow tool. */
+  workflow: boolean;
   hints: string[];
 }
 
@@ -20,6 +22,7 @@ export const TASK_PROFILES: Record<TaskProfileId, TaskProfile> = {
     maxParallelTools: 4,
     keepRecentToolOutputs: 3,
     maxGoalRounds: 256,
+    workflow: true,
     hints: []
   },
   research: {
@@ -29,6 +32,7 @@ export const TASK_PROFILES: Record<TaskProfileId, TaskProfile> = {
     maxParallelTools: 4,
     keepRecentToolOutputs: 3,
     maxGoalRounds: 256,
+    workflow: true,
     hints: [
       "先建立来源清单，再交叉验证关键事实；引用要保留 URL、标题和发布时间。",
       "抓取失败时先用缓存、站内检索或替代来源，不要反复请求同一地址。"
@@ -41,6 +45,7 @@ export const TASK_PROFILES: Record<TaskProfileId, TaskProfile> = {
     maxParallelTools: 2,
     keepRecentToolOutputs: 3,
     maxGoalRounds: 256,
+    workflow: true,
     hints: [
       "先确认输入资料和目标格式，再生成文件；不要用纯文本假装已经生成文档。",
       "交付前重新打开产物检查标题、表格、页数和关键数字。"
@@ -53,6 +58,7 @@ export const TASK_PROFILES: Record<TaskProfileId, TaskProfile> = {
     maxParallelTools: 2,
     keepRecentToolOutputs: 3,
     maxGoalRounds: 256,
+    workflow: false,
     hints: [
       "每一步操作后先观察屏幕或页面状态，再决定下一步；不要闭着眼睛连续点击。",
       "登录、验证码和支付需要用户接管时，立即调用 ask_user 说明原因。"
@@ -65,6 +71,7 @@ export const TASK_PROFILES: Record<TaskProfileId, TaskProfile> = {
     maxParallelTools: 1,
     keepRecentToolOutputs: 3,
     maxGoalRounds: 256,
+    workflow: false,
     hints: []
   }
 };

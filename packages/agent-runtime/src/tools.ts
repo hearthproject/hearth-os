@@ -37,7 +37,105 @@ const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", "coverage", 
 
 //模型能使用的工具和实现
 export function createBuiltinTools(): AgentTool[] {
-  return [readFileTool, readToolOutputTool, readDocumentTool, listFilesTool, searchTextTool, globTool, grepTool, writeFileTool, writeSpreadsheetTool, writeDocumentTool, editFileTool, applyPatchTool, shellTool, shellOutputTool, shellWaitTool, shellKillTool, todoWriteTool, todoReadTool, runTestsTool, diagnosticsTool, submitPlanTool, rewindTool, rewindTurnTool, captureScreenTool, fetchUrlTool, askUserTool, finishTaskTool, ...createMemoryTools(), ...createGoalTools()];
+  const tools = [readFileTool, readToolOutputTool, readDocumentTool, listFilesTool, searchTextTool, globTool, grepTool, writeFileTool, writeSpreadsheetTool, writeDocumentTool, editFileTool, applyPatchTool, shellTool, shellOutputTool, shellWaitTool, shellKillTool, todoWriteTool, todoReadTool, runTestsTool, diagnosticsTool, submitPlanTool, rewindTool, rewindTurnTool, captureScreenTool, fetchUrlTool, askUserTool, finishTaskTool, ...createMemoryTools(), ...createGoalTools()];
+  return [...tools, createWorkflowTool(tools)];
+}
+
+const WORKFLOW_TOOLS = new Set(["read_file", "read_tool_output", "read_document", "list_files", "search_text", "glob", "grep"]);
+
+function createWorkflowTool(tools: AgentTool[]): AgentTool {
+  const registry = new Map(tools.filter((tool) => WORKFLOW_TOOLS.has(tool.definition.name)).map((tool) => [tool.definition.name, tool]));
+  return {
+    definition: {
+      name: "workflow",
+      description: "Run a bounded read-only JSON workflow: 1-16 steps over read_file/list_files/search_text/glob/grep/read_document/read_tool_output. Use it for repetitive multi-file inspection instead of many separate turns. Workflow steps cannot write, run shell commands, or delegate.",
+      executionMode: "sequential",
+      effect: "read",
+      timeoutMs: 120_000,
+      parameters: {
+        type: "object",
+        properties: {
+          steps: {
+            type: "array",
+            minItems: 1,
+            maxItems: 16,
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string", description: "Short label for this step" },
+                tool: { type: "string", enum: [...WORKFLOW_TOOLS], description: "Read-only tool to call" },
+                arguments: { type: "object", description: "Arguments passed to that tool" }
+              },
+              required: ["tool"],
+              additionalProperties: false
+            }
+          },
+          parallel: { type: "boolean", description: "Run steps concurrently in batches of 4; only use when steps are independent" },
+          timeout_seconds: { type: "number", description: "Total workflow timeout, default 120 seconds, max 600" }
+        },
+        required: ["steps"],
+        additionalProperties: false
+      }
+    },
+    async execute(input, context): Promise<AgentToolResult> {
+      const args = input && typeof input === "object" ? input as Record<string, unknown> : {};
+      const rawSteps = Array.isArray(args.steps) ? args.steps : [];
+      if (rawSteps.length === 0 || rawSteps.length > 16) {
+        return { content: "workflow 需要 1-16 个 steps", isError: true, error: { code: "WORKFLOW_STEP_FAILED", detail: { reason: "invalid_steps" } } };
+      }
+      const steps = rawSteps.map((step, index) => {
+        const record = step && typeof step === "object" ? step as Record<string, unknown> : {};
+        return {
+          id: typeof record.id === "string" && record.id.trim() ? record.id.trim().slice(0, 80) : `step-${index + 1}`,
+          tool: typeof record.tool === "string" ? record.tool : "",
+          arguments: record.arguments && typeof record.arguments === "object" ? record.arguments : {}
+        };
+      });
+      const invalid = steps.find((step) => !registry.has(step.tool));
+      if (invalid) {
+        return { content: `workflow 不允许工具：${invalid.tool}`, isError: true, error: { code: "WORKFLOW_STEP_FAILED", detail: { stepId: invalid.id, tool: invalid.tool } } };
+      }
+      const timeoutMs = Math.min(600_000, Math.max(10_000, Number(args.timeout_seconds) > 0 ? Number(args.timeout_seconds) * 1_000 : 120_000));
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const signal = AbortSignal.any([context.signal, controller.signal]);
+      const stepContext = { ...context, signal };
+      const runStep = async (step: { id: string; tool: string; arguments: unknown }): Promise<{ ok: boolean; text: string }> => {
+        if (signal.aborted) throw new Error("workflow 已超时或被取消");
+        const tool = registry.get(step.tool)!;
+        const result = await tool.execute(step.arguments, stepContext);
+        const body = result.content.length > 2_000 ? `${result.content.slice(0, 2_000)}\n... [workflow step output truncated]` : result.content;
+        return { ok: !result.isError, text: `## ${step.id} (${step.tool})\n${body}` };
+      };
+      try {
+        const outputs: string[] = [];
+        const parallel = args.parallel === true;
+        if (parallel) {
+          for (let index = 0; index < steps.length; index += 4) {
+            const batch = steps.slice(index, index + 4);
+            const results = await Promise.all(batch.map((step) => runStep(step)));
+            outputs.push(...results.map((result) => result.text));
+            const failed = results.find((result) => !result.ok);
+            if (failed) return { content: outputs.join("\n\n"), isError: true, error: { code: "WORKFLOW_STEP_FAILED" } };
+          }
+        } else {
+          for (const step of steps) {
+            const result = await runStep(step);
+            outputs.push(result.text);
+            if (!result.ok) return { content: outputs.join("\n\n"), isError: true, error: { code: "WORKFLOW_STEP_FAILED", detail: { stepId: step.id, tool: step.tool } } };
+          }
+        }
+        return { content: `workflow completed: ${steps.length} step(s)\n\n${outputs.join("\n\n")}`, metadata: { durationMs: 0 } };
+      } catch (error) {
+        if (signal.aborted) {
+          return { content: `workflow 超时（${Math.round(timeoutMs / 1_000)}s）或被取消`, isError: true, error: { code: "WORKFLOW_TIMEOUT" } };
+        }
+        return { content: `workflow 步骤失败：${error instanceof Error ? error.message : String(error)}`, isError: true, error: { code: "WORKFLOW_STEP_FAILED" } };
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  };
 }
 
 export function defaultTaskPermissions(options: {

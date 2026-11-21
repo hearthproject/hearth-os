@@ -56,6 +56,7 @@ export function failureClassForCode(code: string | null | undefined): FailureCla
       return "capacity";
     case "MODEL_TIMEOUT":
     case "TOOL_TIMEOUT":
+    case "WORKFLOW_TIMEOUT":
     case "STALLED":
     case "INTERRUPTED":
       return "timeout";
@@ -65,6 +66,7 @@ export function failureClassForCode(code: string | null | undefined): FailureCla
       return "auth";
     case "MODEL_BAD_REQUEST":
     case "TOOL_EXEC_FAILED":
+    case "WORKFLOW_STEP_FAILED":
     case "TOOL_ORPHANED":
     case "SANDBOX_RUNNER_FAILURE":
     case "CHECKPOINT_FAILED":
@@ -76,6 +78,7 @@ export function failureClassForCode(code: string | null | undefined): FailureCla
     case "SANDBOX_DENIED":
       return "policy_denied";
     case "VALIDATION_FAILED":
+    case "SUBAGENT_SCHEMA_FAILED":
       return "validation_failed";
     default:
       return null;

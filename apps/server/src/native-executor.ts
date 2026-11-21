@@ -157,6 +157,10 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     permissions.tools = [...new Set([...permissions.tools, "get_goal", "create_goal", "update_goal"])];
   }
 
+  if (taskProfile.workflow && !permissions.tools.includes("workflow")) permissions.tools.push("workflow");
+  for (const tool of options.extraTools ?? []) {
+    if (!permissions.tools.includes(tool.definition.name)) permissions.tools.push(tool.definition.name);
+  }
   const sandbox = await prepareNativeSandbox(options, permissions);
 
   const drafting = !coding && isTextDraftTask({ ...options.task, expectedOutputs: options.expectedOutputs });

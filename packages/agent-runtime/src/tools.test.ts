@@ -471,6 +471,31 @@ describe("builtin tools", () => {
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_500));
     expect(existsSync(marker)).toBe(false);
   }, 10_000);
+
+  it("runs a bounded read-only workflow and rejects write steps", async () => {
+    const root = workspace(roots);
+    const out = join(root, "out");
+    mkdirSync(out, { recursive: true });
+    writeFileSync(join(root, "a.txt"), "alpha\n", "utf8");
+    writeFileSync(join(root, "b.txt"), "beta\n", "utf8");
+    const workflow = mapTools().workflow!;
+
+    const result = await workflow.execute({
+      parallel: true,
+      steps: [
+        { id: "a", tool: "read_file", arguments: { path: "a.txt" } },
+        { id: "b", tool: "read_file", arguments: { path: "b.txt" } }
+      ]
+    }, contextFor(root, out));
+    expect(result.isError).toBeFalsy();
+    expect(result.content).toContain("alpha");
+    expect(result.content).toContain("beta");
+    expect(result.content).toContain("workflow completed: 2 step(s)");
+
+    const denied = await workflow.execute({ steps: [{ tool: "write_file", arguments: { path: "x.txt", content: "x" } }] }, contextFor(root, out));
+    expect(denied.isError).toBe(true);
+    expect(denied.error?.code).toBe("WORKFLOW_STEP_FAILED");
+  });
 });
 
 function mapTools(): Record<string, ReturnType<typeof createBuiltinTools>[number]> {
