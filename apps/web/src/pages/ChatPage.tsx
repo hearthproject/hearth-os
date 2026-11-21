@@ -538,6 +538,7 @@ export function ChatPage() {
     } catch {
       // 取消请求失败也没关系，任务状态会通过查询/事件流更新
     }
+    void queryClient.invalidateQueries({ queryKey: ["tasks"] });
   }
 
   async function dispatch(outgoing: OutgoingMessage) {

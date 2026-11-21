@@ -1352,11 +1352,11 @@ const DEFAULT_TOOL_RETRY_POLICY: {
   jitter: number;
   retryableCodes: string[];
 } = {
-  maxRetries: 3,
+  maxRetries: 1,
   baseDelayMs: 1_000,
   maxDelayMs: 30_000,
   jitter: 0.25,
-  retryableCodes: ["TOOL_TIMEOUT", "TOOL_ORPHANED", "TOOL_EXEC_FAILED"]
+  retryableCodes: ["TOOL_TIMEOUT", "TOOL_ORPHANED"]
 };
 
 async function sleepInterruptible(ms: number, signal: AbortSignal): Promise<void> {

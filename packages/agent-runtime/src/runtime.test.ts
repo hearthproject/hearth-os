@@ -885,7 +885,7 @@ it("retries a tool that fails with TOOL_TIMEOUT before succeeding", async () => 
       definition: { name: "flaky", description: "flaky tool", parameters: {} },
       execute: async () => {
         attempts++;
-        if (attempts < 3) {
+        if (attempts < 2) {
           const err: any = new Error("tool timed out");
           err.code = "TOOL_TIMEOUT";
           err.retryable = true;
@@ -899,7 +899,7 @@ it("retries a tool that fails with TOOL_TIMEOUT before succeeding", async () => 
     budget: { maxTurns: 5, maxToolCalls: 5, maxTokens: 100_000, maxDurationMs: 30_000 },
   });
   expect(result.status).toBe("completed");
-  expect(attempts).toBe(3);
+  expect(attempts).toBe(2);
 });
 
 it("stops retrying a tool after maxRetries and returns the failure", async () => {
@@ -925,7 +925,7 @@ it("stops retrying a tool after maxRetries and returns the failure", async () =>
     budget: { maxTurns: 5, maxToolCalls: 5, maxTokens: 100_000, maxDurationMs: 30_000 },
   });
   expect(result.status).toBe("completed");
-  expect(attempts).toBe(4);
+  expect(attempts).toBe(2);
 });
 
 it("trips circuit breaker after 5 consecutive tool failures", async () => {
@@ -1001,7 +1001,7 @@ it("reports retries and total duration in tool.finished event", async () => {
   expect(result.status).toBe("completed");
   const finished = events.filter((e): e is Extract<RuntimeEvent, { type: "tool.finished" }> => e.type === "tool.finished");
   expect(finished.length).toBeGreaterThan(0);
-  expect(finished[0]!.retries).toBe(2);
+  expect(finished[0]!.retries).toBe(1);
   expect(typeof finished[0]!.totalDurationMs).toBe("number");
   expect(finished[0]!.totalDurationMs).toBeGreaterThan(0);
 });
