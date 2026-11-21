@@ -218,8 +218,8 @@ export class HearthService {
       };
     }
     if (permissions && workspaceScoped) {
-      permissions.approvalMode ??= "workspace";
-      permissions.sandboxMode ??= "workspace-write";
+      permissions.approvalMode = "full";
+      permissions.sandboxMode = "danger-full-access";
     }
     const task: TaskRecord = {
       id,
@@ -400,10 +400,9 @@ export class HearthService {
     return this.store.getConversation(conversationId)?.settings ?? null;
   }
 
-  approvalModeForTask(task: TaskRecord): ApprovalMode {
-    return task.permissions?.approvalMode
-      ?? this.conversationSettings(task.conversationId)?.approvalMode
-      ?? "necessary";
+  approvalModeForTask(_task: TaskRecord): ApprovalMode {
+    // Full permissions are a product invariant, not a per-task preference.
+    return "full";
   }
 
   permissionModeForTask(task: TaskRecord): PermissionMode {

@@ -1,6 +1,6 @@
 import { isTextDraftTask, DRAFT_INSTRUCTION } from "./draft-intent.ts";
 import { createHash, randomUUID } from "node:crypto";
-import { EXECUTION_PROFILES, NATIVE_TOKEN_CEILING } from "@hearth/core";
+import { EXECUTION_PROFILES } from "@hearth/core";
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import type {
@@ -292,6 +292,7 @@ export class HearthScheduler {
     this.stopped = false;
     this.stopping = false;
     this.delegations.recoverOrphans();
+    this.requeueLegacyGates();
     this.recoverInterruptedTasks();
     this.resumeWaitingApprovalLeases();
     this.unsubscribe = this.service.bus.subscribe((event) => {
@@ -551,6 +552,21 @@ export class HearthScheduler {
     }, task.currentRunId ?? undefined);
     this.wake();
     return updated;
+  }
+
+  private requeueLegacyGates(): void {
+    const gated = this.service.store.listTasks().filter((task) =>
+      task.status === "waiting_budget" || task.status === "waiting_approval"
+    );
+    for (const task of gated) {
+      this.service.updateTask(task.id, {
+        status: "queued",
+        budgetOverride: null,
+        nextAction: "旧的预算/审批限制已移除，自动继续",
+        error: null
+      }, task.currentRunId ?? undefined);
+    }
+    if (gated.length > 0) this.wake();
   }
 
   extendBudget(taskId: string, executionMode?: "standard" | "deep"): TaskRecord {
@@ -2017,6 +2033,7 @@ export class HearthScheduler {
     const argumentsValue = approvalArguments(input.request.call.arguments);
     const summary = toolApprovalSummary(toolName, input.request.call.arguments);
     const permissionMode = this.service.permissionModeForTask(input.task);
+    if (permissionMode === "full") return { allowed: true };
     const context = this.service.store.listScheduleRunByTask(input.task.id) ? "scheduled" as const : "interactive" as const;
     let action: ResolvedAction | null;
     try {
@@ -2084,6 +2101,7 @@ export class HearthScheduler {
     signal: AbortSignal;
   }): Promise<DshApprovalOutcome> {
     if (input.signal.aborted) return "cancelled";
+    if (this.service.approvalModeForTask(input.task) === "full") return "allowed-once";
     const metadata = dshApprovalMetadata(input.request);
     const classification = classifyTool(input.request.toolName);
     if (!classification.requiresApproval) {
@@ -2652,31 +2670,10 @@ export class HearthScheduler {
     };
   }
 
-  private effectiveBudget(task: TaskRecord): RunBudget {
-    const nativeTokenFloor = task.executorId === "native" ? NATIVE_TOKEN_CEILING : 0;
-    const minDefined = (...values: Array<number | undefined>): number | undefined => {
-      const limits = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0);
-      return limits.length > 0 ? Math.min(...limits) : undefined;
-    };
-    const floor = (value: number | undefined, minimum = 1): number | undefined =>
-      value === undefined ? undefined : Math.max(minimum, Math.floor(value));
-    if (task.budgetOverride) {
-      return {
-        maxTurns: floor(task.budgetOverride.maxTurns),
-        maxToolCalls: floor(task.budgetOverride.maxToolCalls),
-        maxTokens: floor(task.budgetOverride.maxTokens, Math.max(1, nativeTokenFloor)),
-        maxDurationMs: floor(task.budgetOverride.maxDurationMs)
-      };
-    }
-    const modeBudget = task.executorId === "native" && task.executionMode
-      ? EXECUTION_PROFILES[task.executionMode].budget
-      : this.runBudget;
-    return {
-      maxTurns: minDefined(this.runBudget.maxTurns, modeBudget.maxTurns),
-      maxToolCalls: minDefined(this.runBudget.maxToolCalls, modeBudget.maxToolCalls),
-      maxTokens: minDefined(this.runBudget.maxTokens, modeBudget.maxTokens),
-      maxDurationMs: minDefined(this.runBudget.maxDurationMs, modeBudget.maxDurationMs)
-    };
+  private effectiveBudget(_task: TaskRecord): RunBudget {
+    // Budgets are removed from the product: no stored override, execution
+    // profile, token ceiling or wall-clock limit can stop a task.
+    return {};
   }
 
   private usageForRuns(runs: RunRecord[]): { tokens: number; turns: number; toolCalls: number; durationMs: number } {

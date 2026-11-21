@@ -41,12 +41,12 @@ export interface ConversationSettingsPatch {
 }
 
 export function defaultConversationSettings(
-  approvalMode: ApprovalMode = "necessary",
+  approvalMode: ApprovalMode = "full",
   enabled: Partial<Record<ExecutorId, boolean | undefined>> = { native: true, codex: true }
 ): ConversationSettings {
   const executorEnabled = {} as Record<ExecutorId, boolean>;
   for (const id of EXECUTOR_IDS) executorEnabled[id] = enabled[id] ?? false;
-  return { executorEnabled, approvalMode, preferredExecutorId: null, executionMode: "standard" };
+  return { executorEnabled, approvalMode, preferredExecutorId: "native", executionMode: "standard" };
 }
 
 export function mergeConversationSettings(
@@ -61,10 +61,12 @@ export function mergeConversationSettings(
   return {
     executorEnabled,
     executionMode: patch?.executionMode ?? base.executionMode ?? "standard",
-    approvalMode: patch?.approvalMode ?? base.approvalMode,
+    // Hearth always runs with full permissions: no approval gate can be
+    // reintroduced through a conversation patch or an old saved setting.
+    approvalMode: "full",
     preferredExecutorId: patch?.preferredExecutorId !== undefined
       ? patch.preferredExecutorId
-      : base.preferredExecutorId ?? null
+      : base.preferredExecutorId ?? "native"
   };
 }
 
@@ -124,9 +126,12 @@ export interface ExecutorView {
   modelBinding?: ExecutorModelBindingView | undefined;
 }
 
+export type ReasoningEffort = "low" | "high" | "max";
+
 export interface ExecutorSettings {
   defaultApprovalMode: ApprovalMode;
   preferredExecutorId: ExecutorId | null;
+  reasoningEffort?: ReasoningEffort;
   concurrency: Record<ExecutorId, number>;
   executors: Partial<Record<ExecutorId, ExecutorRuntimeSettings>>;
 }
@@ -134,6 +139,7 @@ export interface ExecutorSettings {
 export interface ExecutorSettingsPatch {
   defaultApprovalMode?: ApprovalMode | undefined;
   preferredExecutorId?: ExecutorId | null | undefined;
+  reasoningEffort?: ReasoningEffort | undefined;
   concurrency?: Partial<Record<ExecutorId, number>> | undefined;
   executors?: Partial<Record<ExecutorId, ExecutorRuntimeSettings>> | undefined;
 }
@@ -246,6 +252,7 @@ export interface TaskPermissions {
   writeRoots: string[];
   networkHosts: string[];
   tools: string[];
+  fullAccess?: boolean | undefined;
   approvalMode?: ApprovalMode | undefined;
   sandboxMode?: SandboxMode | undefined;
 }
@@ -474,6 +481,7 @@ export interface ModelSettingsView {
   model: string;
   contextWindowTokens: number;
   maxOutputTokens: number;
+  reasoningEffort?: ReasoningEffort;
   hasApiKey: boolean;
   apiKeyMasked: string | null;
   updatedAt: string | null;

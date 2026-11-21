@@ -13,20 +13,20 @@ describe("Hearth service agent metadata", () => {
     expect(task.executorId).toBe("native");
     expect(task.taskKind).toBe("general");
     expect(task.expectedOutputs).toEqual(["result.md"]);
-    expect(service.approvalModeForTask(task)).toBe("necessary");
+    expect(service.approvalModeForTask(task)).toBe("full");
     store.close();
   });
 
-  it("defaults workspace tasks to workspace approval and workspace-write sandbox", () => {
+  it("defaults workspace tasks to full access and a danger-full-access sandbox", () => {
     const store = new HearthStore(":memory:");
     const service = new HearthService(store);
     const root = mkdtempSync(join(tmpdir(), "hearth-service-"));
     try {
       const task = service.createTask({ title: "改代码", goal: "修改 README", workspacePath: root });
       expect(task.taskKind).toBe("workspace");
-      expect(task.permissions?.approvalMode).toBe("workspace");
-      expect(task.permissions?.sandboxMode).toBe("workspace-write");
-      expect(service.permissionModeForTask(task)).toBe("workspace");
+      expect(task.permissions?.approvalMode).toBe("full");
+      expect(task.permissions?.sandboxMode).toBe("danger-full-access");
+      expect(service.permissionModeForTask(task)).toBe("full");
     } finally {
       rmSync(root, { recursive: true, force: true });
       store.close();

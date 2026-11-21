@@ -191,8 +191,8 @@ const readFileTool: AgentTool = {
   async execute(input, context) {
     const args = objectArgs(input);
     const path = stringArg(args, "path");
-    const target = resolveSafe(path, context.workspaceRoot, context.permissions.readRoots);
-    assertReadable(target, context.permissions.readRoots);
+    const target = resolveSafe(path, context.workspaceRoot, context.permissions.readRoots, context.permissions.fullAccess ?? false);
+    assertReadable(target, context.permissions.readRoots, context.permissions.fullAccess ?? false);
     if (!existsSync(target)) throw new Error(missingPathError(path, target, context.workspaceRoot));
     const stat = lstatSync(target);
     if (!stat.isFile()) throw new Error(`不是普通文件：${path}`);
@@ -282,8 +282,8 @@ const readDocumentTool: AgentTool = {
   async execute(input, context) {
     const args = objectArgs(input);
     const path = stringArg(args, "path");
-    const target = resolveSafe(path, context.workspaceRoot, context.permissions.readRoots);
-    assertReadable(target, context.permissions.readRoots);
+    const target = resolveSafe(path, context.workspaceRoot, context.permissions.readRoots, context.permissions.fullAccess ?? false);
+    assertReadable(target, context.permissions.readRoots, context.permissions.fullAccess ?? false);
     if (!existsSync(target)) throw new Error(`文件不存在：${path}`);
     const stat = lstatSync(target);
     if (!stat.isFile()) throw new Error(`不是普通文件：${path}`);
@@ -316,8 +316,8 @@ const listFilesTool: AgentTool = {
   async execute(input, context) {
     const args = objectArgs(input);
     const path = optionalStringArg(args, "path") ?? ".";
-    const target = resolveSafe(path, context.workspaceRoot, context.permissions.readRoots);
-    assertReadable(target, context.permissions.readRoots);
+    const target = resolveSafe(path, context.workspaceRoot, context.permissions.readRoots, context.permissions.fullAccess ?? false);
+    assertReadable(target, context.permissions.readRoots, context.permissions.fullAccess ?? false);
     if (!existsSync(target)) throw new Error(`目录不存在：${path}`);
     const depth = Math.min(6, Math.max(1, intArg(args, "depth", 3)));
     const entries: string[] = [];
@@ -346,8 +346,8 @@ const searchTextTool: AgentTool = {
     const args = objectArgs(input);
     const query = stringArg(args, "query").toLowerCase();
     const path = optionalStringArg(args, "path") ?? ".";
-    const target = resolveSafe(path, context.workspaceRoot, context.permissions.readRoots);
-    assertReadable(target, context.permissions.readRoots);
+    const target = resolveSafe(path, context.workspaceRoot, context.permissions.readRoots, context.permissions.fullAccess ?? false);
+    assertReadable(target, context.permissions.readRoots, context.permissions.fullAccess ?? false);
     const maxResults = Math.min(MAX_SEARCH_RESULTS, Math.max(1, intArg(args, "maxResults", 50)));
     try {
       const result = searchFiles({
@@ -392,8 +392,8 @@ const globTool: AgentTool = {
     const pattern = stringArg(args, "pattern");
     if (pattern.length > MAX_GREP_PATTERN_LENGTH) throw new Error(`glob 模式过长，最多 ${MAX_GREP_PATTERN_LENGTH} 个字符`);
     const path = optionalStringArg(args, "path") ?? ".";
-    const target = resolveSafe(path, context.workspaceRoot, context.permissions.readRoots);
-    assertReadable(target, context.permissions.readRoots);
+    const target = resolveSafe(path, context.workspaceRoot, context.permissions.readRoots, context.permissions.fullAccess ?? false);
+    assertReadable(target, context.permissions.readRoots, context.permissions.fullAccess ?? false);
     if (!existsSync(target)) throw new Error(`路径不存在：${path}`);
     const stat = lstatSync(target);
     if (!stat.isFile() && !stat.isDirectory()) throw new Error(`不是普通文件或目录：${path}`);
@@ -441,8 +441,8 @@ const grepTool: AgentTool = {
     const mode = optionalStringArg(args, "mode") ?? "regex";
     if (mode !== "regex" && mode !== "literal") throw new Error(`不支持的匹配模式：${mode}`);
     const path = optionalStringArg(args, "path") ?? ".";
-    const target = resolveSafe(path, context.workspaceRoot, context.permissions.readRoots);
-    assertReadable(target, context.permissions.readRoots);
+    const target = resolveSafe(path, context.workspaceRoot, context.permissions.readRoots, context.permissions.fullAccess ?? false);
+    assertReadable(target, context.permissions.readRoots, context.permissions.fullAccess ?? false);
     if (!existsSync(target)) throw new Error(`路径不存在：${path}`);
     const stat = lstatSync(target);
     if (!stat.isFile() && !stat.isDirectory()) throw new Error(`不是普通文件或目录：${path}`);
@@ -493,8 +493,8 @@ const writeFileTool: AgentTool = {
     const args = objectArgs(input);
     const path = stringArg(args, "path");
     const content = stringArg(args, "content", true);
-    const target = resolveSafe(path, context.workspaceRoot, context.permissions.writeRoots);
-    assertWritable(target, context.permissions.writeRoots);
+    const target = resolveSafe(path, context.workspaceRoot, context.permissions.writeRoots, context.permissions.fullAccess ?? false);
+    assertWritable(target, context.permissions.writeRoots, context.permissions.fullAccess ?? false);
     const existed = existsSync(target);
     if (existed && args.overwrite !== true) {
       const issue = requireReadBeforeWrite(context, target);
@@ -546,8 +546,8 @@ const writeSpreadsheetTool: AgentTool = {
     const args = objectArgs(input);
     const path = stringArg(args, "path");
     if (!path.toLowerCase().endsWith(".xlsx")) throw new Error("表格输出必须使用 .xlsx 扩展名");
-    const target = resolveSafe(path, context.workspaceRoot, context.permissions.writeRoots);
-    assertWritable(target, context.permissions.writeRoots);
+    const target = resolveSafe(path, context.workspaceRoot, context.permissions.writeRoots, context.permissions.fullAccess ?? false);
+    assertWritable(target, context.permissions.writeRoots, context.permissions.fullAccess ?? false);
     const { writeSpreadsheetBytes } = await import("./documents.ts");
     const bytes = await writeSpreadsheetBytes(spreadsheetSheetsArg(args.sheets));
     writeFileAtomic(target, bytes);
@@ -587,8 +587,8 @@ const writeDocumentTool: AgentTool = {
     const args = objectArgs(input);
     const path = stringArg(args, "path");
     if (!path.toLowerCase().endsWith(".docx")) throw new Error("文档输出必须使用 .docx 扩展名");
-    const target = resolveSafe(path, context.workspaceRoot, context.permissions.writeRoots);
-    assertWritable(target, context.permissions.writeRoots);
+    const target = resolveSafe(path, context.workspaceRoot, context.permissions.writeRoots, context.permissions.fullAccess ?? false);
+    assertWritable(target, context.permissions.writeRoots, context.permissions.fullAccess ?? false);
     const { writeDocumentBytes } = await import("./documents.ts");
     const bytes = await writeDocumentBytes(optionalStringArg(args, "title") ?? null, documentBlocksArg(args.blocks));
     writeFileAtomic(target, bytes);
@@ -631,8 +631,8 @@ const editFileTool: AgentTool = {
   async execute(input, context) {
     const args = objectArgs(input);
     const path = stringArg(args, "path");
-    const target = resolveSafe(path, context.workspaceRoot, context.permissions.writeRoots);
-    assertWritable(target, context.permissions.writeRoots);
+    const target = resolveSafe(path, context.workspaceRoot, context.permissions.writeRoots, context.permissions.fullAccess ?? false);
+    assertWritable(target, context.permissions.writeRoots, context.permissions.fullAccess ?? false);
     if (!existsSync(target)) throw new Error(`文件不存在：${path}`);
     const issue = requireReadBeforeWrite(context, target);
     if (issue) throw new Error(issue);
@@ -793,8 +793,8 @@ const applyPatchTool: AgentTool = {
       current.set(target, content);
     };
     for (const operation of operations) {
-      const target = resolveSafe(operation.path, context.workspaceRoot, context.permissions.writeRoots);
-      assertWritable(target, context.permissions.writeRoots);
+      const target = resolveSafe(operation.path, context.workspaceRoot, context.permissions.writeRoots, context.permissions.fullAccess ?? false);
+      assertWritable(target, context.permissions.writeRoots, context.permissions.fullAccess ?? false);
       if (operation.type === "add") {
         if (readState(target, operation.path) !== null) throw new Error(`文件已存在，不能重复添加：${operation.path}`);
         writeState(target, operation.content);
@@ -812,8 +812,8 @@ const applyPatchTool: AgentTool = {
       let content = original;
       for (const hunk of operation.hunks) content = applyHunk(content, hunk);
       if (operation.moveTo) {
-        const destination = resolveSafe(operation.moveTo, context.workspaceRoot, context.permissions.writeRoots);
-        assertWritable(destination, context.permissions.writeRoots);
+        const destination = resolveSafe(operation.moveTo, context.workspaceRoot, context.permissions.writeRoots, context.permissions.fullAccess ?? false);
+        assertWritable(destination, context.permissions.writeRoots, context.permissions.fullAccess ?? false);
         if (readState(destination, operation.moveTo) !== null) throw new Error(`移动目标已存在：${operation.moveTo}`);
         writeState(destination, content);
         current.set(target, null);
@@ -886,8 +886,8 @@ const shellTool: AgentTool = {
     assertSafeCommand(command, context.permissions.networkHosts.length > 0);
     const policy = commandPolicyIssue(command, { fullAccess: context.fullAccess === true, planMode: context.mode === "plan" });
     if (policy) throw new Error(policy);
-    const cwd = resolveSafe(optionalStringArg(args, "cwd") ?? ".", context.workspaceRoot, context.permissions.readRoots);
-    assertReadable(cwd, context.permissions.readRoots);
+    const cwd = resolveSafe(optionalStringArg(args, "cwd") ?? ".", context.workspaceRoot, context.permissions.readRoots, context.permissions.fullAccess ?? false);
+    assertReadable(cwd, context.permissions.readRoots, context.permissions.fullAccess ?? false);
     const env = stringRecord(args.env);
     const stdin = optionalStringArg(args, "stdin");
     const sandbox = context.sandbox;
@@ -1055,8 +1055,8 @@ const captureScreenTool: AgentTool = {
     const args = objectArgs(input);
     const fileName = optionalStringArg(args, "fileName") ?? "desktop.png";
     if (!fileName.toLowerCase().endsWith(".png")) throw new Error("截图文件名必须以 .png 结尾");
-    const target = resolveSafe(fileName, context.outDir, context.permissions.writeRoots);
-    assertWritable(target, context.permissions.writeRoots);
+    const target = resolveSafe(fileName, context.outDir, context.permissions.writeRoots, context.permissions.fullAccess ?? false);
+    assertWritable(target, context.permissions.writeRoots, context.permissions.fullAccess ?? false);
     mkdirSync(dirname(target), { recursive: true });
     await captureWindowsScreen(target, context.signal);
     const saved = relative(context.outDir, target).replace(/\\/g, "/");
@@ -1145,8 +1145,9 @@ const finishTaskTool: AgentTool = {
   }
 };
 
-function resolveSafe(candidate: string, base: string, roots: string[]): string {
+function resolveSafe(candidate: string, base: string, roots: string[], fullAccess = false): string {
   const target = isAbsolute(candidate) ? resolve(candidate) : resolve(base, candidate);
+  if (fullAccess) return target;
   for (const root of roots) {
     const resolvedRoot = resolve(root);
     if (target === resolvedRoot || target.startsWith(resolvedRoot + sep)) return target;
@@ -1154,7 +1155,8 @@ function resolveSafe(candidate: string, base: string, roots: string[]): string {
   throw new Error(`路径不在授权范围内：${candidate}`);
 }
 
-function assertReadable(target: string, roots: string[]): void {
+function assertReadable(target: string, roots: string[], fullAccess = false): void {
+  if (fullAccess) return;
   if (!roots.length) throw new Error("没有读取权限");
   const root = roots.find((item) => target === resolve(item) || target.startsWith(resolve(item) + sep));
   if (!root) throw new Error(`路径不在读取范围内：${target}`);
@@ -1163,7 +1165,8 @@ function assertReadable(target: string, roots: string[]): void {
   if (realTarget !== realRoot && !realTarget.startsWith(realRoot + sep)) throw new Error(`路径通过符号链接越界：${target}`);
 }
 
-function assertWritable(target: string, roots: string[]): void {
+function assertWritable(target: string, roots: string[], fullAccess = false): void {
+  if (fullAccess) return;
   if (!roots.length) throw new Error("没有写入权限");
   const root = roots.find((item) => target === resolve(item) || target.startsWith(resolve(item) + sep));
   if (!root) throw new Error(`路径不在写入范围内：${target}`);

@@ -147,7 +147,7 @@ export class ScheduleService {
     const prompt = cleanPrompt(input.prompt);
     const timezone = cleanTimezone(input.timezone);
     const cron = cleanCron(input.cron, timezone);
-    const approvalMode = input.approvalMode ?? "necessary";
+    const approvalMode = "full" as const;
     const executorId = input.executorId ?? "native";
     const taskKind = input.taskKind ?? "general";
     const enabled = input.enabled ?? true;

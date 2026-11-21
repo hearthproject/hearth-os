@@ -42,7 +42,7 @@ export function ExecutorSettingsPanel() {
       nextConcurrency[executor.id] = executor.concurrency;
     }
     setConcurrency(nextConcurrency);
-    setPreferredExecutorId(executorsQuery.data.preferredExecutorId ?? "");
+    setPreferredExecutorId(executorsQuery.data.preferredExecutorId ?? "native");
   }, [executorsQuery.data]);
 
   async function save() {
@@ -52,7 +52,7 @@ export function ExecutorSettingsPanel() {
     try {
       const result = await api.saveExecutorSettings({
         defaultApprovalMode: "full",
-        preferredExecutorId: preferredExecutorId || null,
+        preferredExecutorId: preferredExecutorId || "native",
         concurrency
       });
       setNotice({ tone: "ok", text: `执行器设置已保存${result.settings.updatedAt ? `，更新时间 ${new Date(result.settings.updatedAt).toLocaleTimeString()}` : ""}。` });
@@ -94,12 +94,11 @@ export function ExecutorSettingsPanel() {
           </div>
         </summary>
         <div className="settings-body">
-          <p className="settings-lead">优先执行器只影响之后新建的对话；已有对话保持自己的选择。</p>
+          <p className="settings-lead">默认使用原生执行器；手动切换后会立即应用到所有对话，不会自动匹配。</p>
           <div className="form-grid">
             <label>
               <span>全局优先执行器</span>
-              <select value={preferredExecutorId} onChange={(event) => setPreferredExecutorId(event.target.value as ExecutorId | "")}>
-                <option value="">按任务自动选择</option>
+              <select value={preferredExecutorId} onChange={(event) => setPreferredExecutorId(event.target.value as ExecutorId)}>
                 {executors.map((executor) => (
                   <option key={executor.id} value={executor.id}>{executor.name}{executor.health.canRun ? "" : "（当前不可用）"}</option>
                 ))}

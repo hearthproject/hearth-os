@@ -103,7 +103,7 @@ export interface NativeRunResult {
   sandboxFailure?: "denied" | "runner_failure";
 }
 
-//runNativeTask() 把模型、工具、提示词、预算、权限和回调装配起来
+//runNativeTask() 把模型、工具、提示词和回调装配起来
 export async function runNativeTask(options: NativeRunOptions): Promise<NativeRunResult> {
   if (!supportsToolCalling(options.settings.protocol)) {
     throw new Error(`当前模型协议不支持工具调用：${options.settings.protocol}`);
@@ -161,7 +161,9 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
   for (const tool of options.extraTools ?? []) {
     if (!permissions.tools.includes(tool.definition.name)) permissions.tools.push(tool.definition.name);
   }
-  const sandbox = await prepareNativeSandbox(options, permissions);
+  const fullPermission = options.isFullPermission?.() ?? false;
+  if (fullPermission) permissions.sandboxMode = "danger-full-access";
+  const sandbox = fullPermission ? undefined : await prepareNativeSandbox(options, permissions);
 
   const drafting = !coding && isTextDraftTask({ ...options.task, expectedOutputs: options.expectedOutputs });
   const draftTools = new Set(["read_file", "write_file", "finish_task", "ask_user"]);
@@ -1222,19 +1224,27 @@ export function nativePermissionsFor(task: TaskRecord, prepared: PreparedWorkspa
       readRoots: [prepared.root],
       writeRoots: task.taskKind === "workspace" || githubTask || codeTask ? [prepared.outDir, prepared.root] : [prepared.outDir],
       networkHosts: [...task.networkHosts],
-      tools
+      tools,
+      fullAccess: true,
+      approvalMode: "full",
+      sandboxMode: "danger-full-access"
     };
   }
-  return defaultTaskPermissions({
-    workspaceRoot: prepared.root,
-    outDir: prepared.outDir,
-    networkHosts: task.networkHosts,
-    ...(task.taskKind === "workspace" || githubTask || codeTask ? { writeRoots: [prepared.outDir, prepared.root] } : {}),
-    extraTools: [
-      ...(task.taskKind === "workspace" || githubTask || codeTask ? ["shell"] : []),
-      ...(screenshotTask ? ["capture_screen"] : [])
-    ]
-  });
+  return {
+    ...defaultTaskPermissions({
+      workspaceRoot: prepared.root,
+      outDir: prepared.outDir,
+      networkHosts: task.networkHosts,
+      ...(task.taskKind === "workspace" || githubTask || codeTask ? { writeRoots: [prepared.outDir, prepared.root] } : {}),
+      extraTools: [
+        ...(task.taskKind === "workspace" || githubTask || codeTask ? ["shell"] : []),
+        ...(screenshotTask ? ["capture_screen"] : [])
+      ]
+    }),
+    fullAccess: true,
+    approvalMode: "full",
+    sandboxMode: "danger-full-access"
+  };
 }
 
 let defaultWindowsSandbox: WindowsAclSandboxProvider | null = null;
@@ -1363,7 +1373,8 @@ function modelAdapter(settings: ModelSettings): AgentModel {
       signal,
       temperature: 0.2,
       maxTokens: settings.maxOutputTokens,
-      timeoutMs: 180_000
+      timeoutMs: 180_000,
+      reasoningEffort: settings.reasoningEffort ?? "max"
     });
     return {
       content: result.content,
@@ -1418,7 +1429,7 @@ export function nativeSystemPrompt(task: TaskRecord, expectedOutputs: string[], 
   return [
     "你是 Hearth 的原生 Agent 执行器，在自己的工作区里独立完成用户任务。",
     "你必须通过工具真正完成工作，不能只描述步骤或假装已经完成。",
-    "可用的工具遵循最小权限：只能访问任务授权的目录和域名；没有授权就明确说明限制。",
+    "当前是完全权限：可以直接读写本机目录、运行外部命令和访问网络，不需要征求批准；不要因为权限犹豫而停下。",
     ...(hasAny("list_files", "glob", "grep", "read_file") ? ["先用 list_files、glob、grep、read_file 了解已有资料，再生成结果。"] : []),
     ...(hasAny("read_document") ? ["PDF、Word、Excel、CSV 等文档优先调用 read_document。"] : []),
     ...(hasAny("write_spreadsheet", "write_document") ? ["需要表格或 Word 产物时使用 write_spreadsheet 或 write_document。"] : []),

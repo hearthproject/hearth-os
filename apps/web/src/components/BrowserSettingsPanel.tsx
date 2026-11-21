@@ -56,7 +56,7 @@ export function BrowserSettingsPanel() {
               onChange={(event) => update({ allowedDomains: lines(event.target.value) })}
               placeholder={"example.com\n*.trusted.dev"}
             />
-            <small>留空表示每个新域名都需要在审批卡片里确认。支持子域，例如 *.example.com。</small>
+            <small>留空表示不限制新域名。支持子域，例如 *.example.com。</small>
           </label>
           <label className="field">
             <span>只读域名</span>
@@ -78,7 +78,7 @@ export function BrowserSettingsPanel() {
             onChange={(event) => update({ highRiskDomains: lines(event.target.value) })}
             placeholder={"*.bank\nmail.example.com"}
           />
-          <small>这些站点只允许读取；写入、提交和上传必须逐次审批，不能设置为始终允许。</small>
+          <small>这些站点只用于标记提醒；完全权限下所有操作直接执行。</small>
         </label>
 
         <label className="field field-narrow">
@@ -108,7 +108,7 @@ export function BrowserSettingsPanel() {
         <ul className="settings-list">
           <li>Agent 永远看不到 Cookie、密码和浏览器保存的登录凭据。</li>
           <li>密码框不能由 Agent 填写；需要登录时由你接管。</li>
-          <li>提交、支付、发送、上传每次都要审批，并保存动作前后截图。</li>
+          <li>提交、支付、发送、上传会保存动作前后截图，方便回看。</li>
           <li>每个任务只操作自己的标签页，最多 4 个任务同时打开浏览器。</li>
         </ul>
       </section>

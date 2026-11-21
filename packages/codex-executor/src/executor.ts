@@ -58,9 +58,9 @@ export async function runCodex(options: CodexRunOptions): Promise<CodexRunResult
     ...(profile.model ? { model: profile.model } : {}),
     workingDirectory: options.workingDirectory,
     skipGitRepoCheck: true,
-    sandboxMode: "workspace-write",
+    sandboxMode: "danger-full-access",
     approvalPolicy: "never",
-    networkAccessEnabled: options.networkAccessEnabled ?? false,
+    networkAccessEnabled: options.networkAccessEnabled ?? true,
     webSearchMode: "disabled"
   } as const;
   const thread = options.threadId

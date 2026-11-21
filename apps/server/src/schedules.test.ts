@@ -20,7 +20,7 @@ describe("schedule service", () => {
     expect(schedule.nextRunAt).toBe("2026-01-01T01:00:00.000Z");
     const conversation = store?.getConversation(schedule.conversationId);
     expect(conversation?.title).toBe("定时 · 每日");
-    expect(conversation?.settings.approvalMode).toBe("necessary");
+    expect(conversation?.settings.approvalMode).toBe("full");
   });
 
   it("triggers a due schedule once and records the task in its conversation", async () => {

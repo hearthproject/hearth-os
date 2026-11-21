@@ -77,7 +77,7 @@ describe("native system prompt", () => {
     expect(prompt).not.toContain("财务复核");
     expect(prompt).not.toContain("契约测试用 Node");
     expect(prompt).toContain("finish_task");
-    expect(prompt).toContain("任务授权的目录和域名");
+    expect(prompt).toContain("当前是完全权限");
     expect(prompt.length).toBeLessThan(1600);
   });
 

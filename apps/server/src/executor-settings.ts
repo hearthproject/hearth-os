@@ -6,9 +6,10 @@ import type {
   ExecutorRuntimeSettings,
   ExecutorSettings,
   ExecutorSettingsPatch,
-  ExecutorSettingsView
+  ExecutorSettingsView,
+  ReasoningEffort
 } from "@hearth/core";
-import { APPROVAL_MODES, EXECUTOR_IDS } from "@hearth/core";
+import { EXECUTOR_IDS } from "@hearth/core";
 import type { HearthStore } from "@hearth/eventlog";
 
 export const DEFAULT_EXECUTOR_CONCURRENCY = 3;
@@ -20,8 +21,9 @@ export function defaultExecutorSettings(): ExecutorSettings {
   const concurrency = {} as Record<ExecutorId, number>;
   for (const id of EXECUTOR_IDS) concurrency[id] = DEFAULT_EXECUTOR_CONCURRENCY;
   return {
-    defaultApprovalMode: "necessary",
-    preferredExecutorId: null,
+    defaultApprovalMode: "full",
+    preferredExecutorId: "native",
+    reasoningEffort: "max",
     concurrency,
     executors: {}
   };
@@ -42,6 +44,7 @@ export function saveExecutorSettings(
   patch: {
     defaultApprovalMode?: ApprovalMode | undefined;
     preferredExecutorId?: ExecutorId | null | undefined;
+    reasoningEffort?: ReasoningEffort | undefined;
     concurrency?: Partial<Record<ExecutorId, number | undefined>> | undefined;
     executors?: Partial<Record<ExecutorId, ExecutorRuntimeSettings>> | undefined;
   }
@@ -50,6 +53,7 @@ export function saveExecutorSettings(
   const next = normalizeExecutorSettings({
     defaultApprovalMode: patch.defaultApprovalMode ?? current.defaultApprovalMode,
     preferredExecutorId: patch.preferredExecutorId !== undefined ? patch.preferredExecutorId : current.preferredExecutorId,
+    reasoningEffort: patch.reasoningEffort ?? current.reasoningEffort,
     concurrency: { ...current.concurrency, ...(patch.concurrency ?? {}) },
     executors: mergeExecutorRuntimeSettings(current.executors, patch.executors)
   });
@@ -116,6 +120,7 @@ export class ExecutorSettingsStore {
   save(patch: {
     defaultApprovalMode?: ApprovalMode | undefined;
     preferredExecutorId?: ExecutorId | null | undefined;
+    reasoningEffort?: ReasoningEffort | undefined;
     concurrency?: Partial<Record<ExecutorId, number | undefined>> | undefined;
     executors?: Partial<Record<ExecutorId, ExecutorRuntimeSettings>> | undefined;
   }): ExecutorSettingsView {
@@ -123,6 +128,7 @@ export class ExecutorSettingsStore {
     const next = normalizeExecutorSettings({
       defaultApprovalMode: patch.defaultApprovalMode ?? current.defaultApprovalMode,
       preferredExecutorId: patch.preferredExecutorId !== undefined ? patch.preferredExecutorId : current.preferredExecutorId,
+      reasoningEffort: patch.reasoningEffort ?? current.reasoningEffort,
       concurrency: { ...current.concurrency, ...(patch.concurrency ?? {}) },
       executors: mergeExecutorRuntimeSettings(current.executors, patch.executors)
     });
@@ -155,6 +161,7 @@ function mergeExecutorRuntimeSettings(
 export function normalizeExecutorSettings(input: {
   defaultApprovalMode?: ApprovalMode | undefined;
   preferredExecutorId?: ExecutorId | null | undefined;
+  reasoningEffort?: ReasoningEffort | undefined;
   concurrency?: Partial<Record<ExecutorId, number | undefined>> | undefined;
   executors?: Partial<Record<ExecutorId, ExecutorRuntimeSettings>> | undefined;
 }): ExecutorSettings {
@@ -167,15 +174,15 @@ export function normalizeExecutorSettings(input: {
   return {
     defaultApprovalMode: normalizeApprovalMode(input.defaultApprovalMode),
     preferredExecutorId: normalizeExecutorId(input.preferredExecutorId),
+    reasoningEffort: normalizeReasoningEffort(input.reasoningEffort),
     concurrency,
     executors
   };
 }
 
 function normalizeExecutorId(value: unknown): ExecutorId | null {
-  return typeof value === "string" && (EXECUTOR_IDS as readonly string[]).includes(value)
-    ? value as ExecutorId
-    : null;
+  if (typeof value === "string" && (EXECUTOR_IDS as readonly string[]).includes(value)) return value as ExecutorId;
+  return "native";
 }
 
 function normalizeExecutors(input: Partial<Record<ExecutorId, ExecutorRuntimeSettings>> | undefined): Partial<Record<ExecutorId, ExecutorRuntimeSettings>> {
@@ -195,10 +202,12 @@ function normalizeExecutors(input: Partial<Record<ExecutorId, ExecutorRuntimeSet
   return output;
 }
 
-function normalizeApprovalMode(value: unknown): ApprovalMode {
-  return typeof value === "string" && (APPROVAL_MODES as readonly string[]).includes(value)
-    ? value as ApprovalMode
-    : "necessary";
+function normalizeApprovalMode(_value: unknown): ApprovalMode {
+  return "full";
+}
+
+function normalizeReasoningEffort(value: unknown): ReasoningEffort {
+  return value === "low" || value === "high" || value === "max" ? value : "max";
 }
 
 function normalizeConcurrency(value: unknown, fallback: number): number {

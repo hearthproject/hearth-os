@@ -275,6 +275,9 @@ export function decideActionPolicy(action: ResolvedAction, input: ActionPolicyIn
   const context = input.context ?? action.context;
   const interactive = context === "interactive";
   const classification = classifyResolvedAction(action);
+  if (permissionMode === "full") {
+    return { allowed: true, requiresApproval: false, reason: "完全权限：动作直接执行" };
+  }
   const readOnlyAllowed = classification.actionClass === "local_read"
     || classification.actionClass === "browser_read"
     || classification.actionClass === "external_read";

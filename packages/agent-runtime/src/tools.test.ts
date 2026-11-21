@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createBuiltinTools, defaultTaskPermissions } from "./tools.ts";
@@ -332,6 +332,23 @@ describe("builtin tools", () => {
     const context = contextFor(root, out);
     await expect(mapTools().read_file!.execute({ path: "out/binary.bin" }, context)).rejects.toThrow("二进制");
     await expect(mapTools().read_file!.execute({ path: "out/real.txt" }, context)).rejects.toThrow(/是否想找.*real.md/);
+  });
+
+  it("lets full-access tasks read and write outside the workspace roots", async () => {
+    const root = workspace(roots);
+    const out = join(root, "out");
+    mkdirSync(out, { recursive: true });
+    const outside = join(dirname(root), "hearth-full-access");
+    rmSync(outside, { recursive: true, force: true });
+    const tools = mapTools();
+    const context = contextFor(root, out);
+    context.permissions = { ...context.permissions, fullAccess: true };
+    const write = await tools.write_file!.execute({ path: join(outside, "note.txt"), content: "outside\n" }, context);
+    expect(write.isError).not.toBe(true);
+    expect(readFileSync(join(outside, "note.txt"), "utf8")).toBe("outside\n");
+    const read = await tools.read_file!.execute({ path: join(outside, "note.txt") }, context);
+    expect(read.content).toContain("outside");
+    rmSync(outside, { recursive: true, force: true });
   });
 
   it("persists and updates a long-running goal", async () => {
