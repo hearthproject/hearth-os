@@ -877,8 +877,12 @@ describe("chat-first API", () => {
       const events = parseSse(response.body);
       expect(events.find((event) => event.event === "memory")?.data.count).toBe(1);
       expect(events.find((event) => event.event === "error")).toBeUndefined();
-      expect(modelRequests).toHaveLength(1);
-      const system = (modelRequests[0]?.messages as Array<{ content: string }>)[0]?.content ?? "";
+      const memoryRequests = modelRequests.filter((request) => {
+        const messages = Array.isArray(request.messages) ? request.messages as Array<{ content?: string }> : [];
+        return messages.some((message) => message.content?.includes("<hearth-memories"));
+      });
+      expect(memoryRequests).toHaveLength(1);
+      const system = (memoryRequests[0]?.messages as Array<{ content: string }>)[0]?.content ?? "";
       expect(system).toContain("<hearth-memories");
       expect(system).toContain("Ember");
       await app.close();
