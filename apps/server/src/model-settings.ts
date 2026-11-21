@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import type { ModelProtocol, ModelProviderPreset, ModelSettingsView } from "@hearth/core";
+import type { ModelProtocol, ModelProviderPreset, ModelSettingsView, ReasoningEffort } from "@hearth/core";
 import type { RetryPolicy } from "@hearth/agent-runtime";
 
 export interface ModelSettings {
@@ -11,6 +11,7 @@ export interface ModelSettings {
   model: string;
   contextWindowTokens: number;
   maxOutputTokens: number;
+  reasoningEffort?: ReasoningEffort;
   apiKey: string;
   retry?: Partial<RetryPolicy>;
   updatedAt: string | null;
@@ -18,7 +19,9 @@ export interface ModelSettings {
 
 const PROTOCOLS: ModelProtocol[] = ["openai-chat", "openai-responses", "anthropic-messages", "gemini"];
 
-export const DEFAULT_CONTEXT_WINDOW_TOKENS = 128_000;
+// Default to the largest context window Hearth ships with so new conversations
+// never start artificially small; profiles can still lower it explicitly.
+export const DEFAULT_CONTEXT_WINDOW_TOKENS = 328_000;
 export const DEFAULT_MAX_OUTPUT_TOKENS = 8_000;
 
 export const MODEL_PRESETS: ModelProviderPreset[] = [
@@ -104,12 +107,17 @@ const EMPTY: ModelSettings = {
   model: "",
   contextWindowTokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
   maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+  reasoningEffort: "max",
   apiKey: "",
   updatedAt: null
 };
 
 export function normalizeProtocol(value: unknown): ModelProtocol {
   return typeof value === "string" && (PROTOCOLS as string[]).includes(value) ? value as ModelProtocol : "openai-chat";
+}
+
+function normalizeReasoningEffort(value: unknown): ReasoningEffort {
+  return value === "low" || value === "high" || value === "max" ? value : "max";
 }
 
 export function loadModelSettings(path: string): ModelSettings {
@@ -124,6 +132,7 @@ export function loadModelSettings(path: string): ModelSettings {
       model: text(parsed.model, ""),
       contextWindowTokens: tokenLimit(parsed.contextWindowTokens, DEFAULT_CONTEXT_WINDOW_TOKENS, 4_096, 10_000_000),
       maxOutputTokens: tokenLimit(parsed.maxOutputTokens, DEFAULT_MAX_OUTPUT_TOKENS, 256, 1_000_000),
+      reasoningEffort: normalizeReasoningEffort(parsed.reasoningEffort),
       apiKey: text(parsed.apiKey, ""),
       ...(parsed.retry && typeof parsed.retry === "object" ? { retry: parsed.retry } : {}),
       updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : null
@@ -141,6 +150,7 @@ export type ModelSettingsPatch = {
   model?: string | undefined;
   contextWindowTokens?: number | undefined;
   maxOutputTokens?: number | undefined;
+  reasoningEffort?: ReasoningEffort | undefined;
   apiKey?: string | undefined;
   retry?: Partial<RetryPolicy> | undefined;
 };
@@ -159,6 +169,9 @@ export function saveModelSettings(path: string, patch: ModelSettingsPatch): Mode
     maxOutputTokens: patch.maxOutputTokens !== undefined
       ? tokenLimit(patch.maxOutputTokens, current.maxOutputTokens, 256, 1_000_000)
       : current.maxOutputTokens,
+    reasoningEffort: patch.reasoningEffort !== undefined
+      ? normalizeReasoningEffort(patch.reasoningEffort)
+      : current.reasoningEffort ?? "max",
     apiKey: patch.apiKey !== undefined ? patch.apiKey.trim() : current.apiKey,
     ...(patch.retry !== undefined ? { retry: patch.retry } : current.retry ? { retry: current.retry } : {}),
     updatedAt: new Date().toISOString()
@@ -185,6 +198,7 @@ export function viewModelSettings(settings: ModelSettings): ModelSettingsView {
     model: settings.model,
     contextWindowTokens: settings.contextWindowTokens,
     maxOutputTokens: settings.maxOutputTokens,
+    reasoningEffort: settings.reasoningEffort ?? "max",
     hasApiKey: settings.apiKey.length > 0,
     apiKeyMasked: maskKey(settings.apiKey),
     updatedAt: settings.updatedAt

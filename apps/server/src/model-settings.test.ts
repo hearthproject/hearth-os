@@ -23,7 +23,7 @@ describe("model context settings", () => {
     const settings = loadModelSettings(path);
     expect(settings.contextWindowTokens).toBe(DEFAULT_CONTEXT_WINDOW_TOKENS);
     expect(settings.maxOutputTokens).toBe(DEFAULT_MAX_OUTPUT_TOKENS);
-    expect(viewModelSettings(settings)).toMatchObject({ contextWindowTokens: 128_000, maxOutputTokens: 8_000 });
+    expect(viewModelSettings(settings)).toMatchObject({ contextWindowTokens: DEFAULT_CONTEXT_WINDOW_TOKENS, maxOutputTokens: 8_000 });
   });
 
   it("persists edited token limits and clamps invalid values", () => {

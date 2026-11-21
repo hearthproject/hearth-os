@@ -182,7 +182,7 @@ describe("chat-first API", () => {
     await app.close();
   });
 
-  it("applies the global approval default only to new conversations", async () => {
+  it("forces full permission on every conversation regardless of saved defaults", async () => {
     const app = await buildServer({
       store,
       serveWeb: false,
@@ -191,7 +191,7 @@ describe("chat-first API", () => {
       executorSettingsPath: join(root, "executor-settings.json")
     });
     const oldConversation = await app.inject({ method: "POST", url: "/api/conversations", payload: { title: "旧对话" } });
-    expect(oldConversation.json().settings.approvalMode).toBe("necessary");
+    expect(oldConversation.json().settings.approvalMode).toBe("full");
 
     const saved = await app.inject({
       method: "PUT",
@@ -205,7 +205,7 @@ describe("chat-first API", () => {
     expect(newConversation.json().settings.approvalMode).toBe("full");
 
     const oldDetail = await app.inject({ method: "GET", url: `/api/conversations/${oldConversation.json().id}` });
-    expect(oldDetail.json().conversation.settings.approvalMode).toBe("necessary");
+    expect(oldDetail.json().conversation.settings.approvalMode).toBe("full");
     await app.close();
   });
 
@@ -324,7 +324,7 @@ describe("chat-first API", () => {
         "native", "codex", "deepseek-harness"
       ]);
       expect(listed.json().executors.every((executor: { health: unknown }) => Boolean(executor.health))).toBe(true);
-      expect(listed.json().preferredExecutorId).toBeNull();
+      expect(listed.json().preferredExecutorId).toBe("native");
       const native = listed.json().executors.find((executor: { id: string }) => executor.id === "native");
       expect(native.health.canRun).toBe(false);
       expect(native.health.issues.join(" ")).toContain("聊天模型");
@@ -382,8 +382,9 @@ describe("chat-first API", () => {
     await app.close();
   });
 
-  it("dispatches engineering work to codex without a pre-execution proposal", async () => {
+  it("dispatches engineering work to the native executor without a pre-execution proposal", async () => {
     const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
+    await bindProfile(app, "native", await createTestProfile(app));
     const response = await app.inject({
       method: "POST",
       url: "/api/chat",
@@ -393,7 +394,7 @@ describe("chat-first API", () => {
     expect(events.some((event) => event.event === "proposal")).toBe(false);
     const taskEvent = events.find((event) => event.event === "task");
     const task = taskEvent?.data.task;
-    expect(task.executorId).toBe("codex");
+    expect(task.executorId).toBe("native");
     expect(task.taskKind).toBe("workspace");
     expect(task.inputs.some((input: { kind: string }) => input.kind === "text")).toBe(true);
 
@@ -405,6 +406,7 @@ describe("chat-first API", () => {
 
   it("uploads an attachment and routes it into a task input", async () => {
     const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
+    await bindProfile(app, "native", await createTestProfile(app));
     const form = new FormData();
     form.append("file", new Blob(["会议记录正文"], { type: "text/plain" }), "notes.txt");
     const request = new Request("http://localhost/api/attachments", { method: "POST", body: form });
@@ -465,6 +467,7 @@ describe("chat-first API", () => {
   });
   it("routes an attachment-only message into a task instead of asking for a chat model", async () => {
     const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
+    await bindProfile(app, "native", await createTestProfile(app));
     const form = new FormData();
     form.append("file", new Blob(["附件正文"], { type: "text/plain" }), "notes.txt");
     const request = new Request("http://localhost/api/attachments", { method: "POST", body: form });
@@ -506,6 +509,7 @@ describe("chat-first API", () => {
     });
     expect(created.statusCode, created.body).toBe(201);
     await bindProfile(app, "codex", created.json().profile.id);
+    await app.inject({ method: "PUT", url: "/api/executor-settings", payload: { preferredExecutorId: "codex" } });
 
     const conversation = await app.inject({
       method: "POST",
@@ -618,12 +622,13 @@ describe("chat-first API", () => {
     expect(task.executorId).toBe("native");
 
     const stored = await app.inject({ method: "GET", url: `/api/conversations/${conversation.id}` });
-    expect(stored.json().conversation.settings.preferredExecutorId).toBeNull();
+    expect(stored.json().conversation.settings.preferredExecutorId).toBe("native");
     await app.close();
   });
 
   it("keeps a pasted URL in the directly dispatched task", async () => {
     const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
+    await bindProfile(app, "native", await createTestProfile(app));
     const response = await app.inject({
       method: "POST",
       url: "/api/chat",
@@ -637,7 +642,7 @@ describe("chat-first API", () => {
     await app.close();
   });
 
-  it("reroutes a disabled executor to the other enabled executor", async () => {
+  it("keeps the selected executor instead of rerouting when another executor is disabled", async () => {
     const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
     await bindProfile(app, "native", await createTestProfile(app));
     const conversation = await app.inject({
@@ -651,10 +656,9 @@ describe("chat-first API", () => {
       payload: { conversationId: conversation.json().id, message: "帮我修复项目里的 TypeScript 错误" }
     });
     const events = parseSse(response.body);
-    expect(events.find((event) => event.event === "routing")?.data.reroutedFrom).toBe("codex");
+    expect(events.find((event) => event.event === "routing")?.data.reroutedFrom).toBeUndefined();
     const taskEvent = events.find((event) => event.event === "task");
     expect(taskEvent?.data.task.executorId).toBe("native");
-    expect(taskEvent?.data.message.content).toContain("已自动改由");
     await app.close();
   });
 
@@ -688,7 +692,7 @@ describe("chat-first API", () => {
     await app.close();
   });
 
-  it("lets a conversation override the global preference and keeps the locked executor", async () => {
+  it("uses the global preference even when an old conversation saved another executor", async () => {
     const executorSettingsPath = join(root, "executor-settings.json");
     const app = await buildServer({
       store,
@@ -698,15 +702,10 @@ describe("chat-first API", () => {
       executorSettingsPath
     });
     await bindProfile(app, "native", await createTestProfile(app));
-    await app.inject({
-      method: "PUT",
-      url: "/api/executor-settings",
-      payload: { preferredExecutorId: "codex" }
-    });
     const conversation = await app.inject({
       method: "POST",
       url: "/api/conversations",
-      payload: { title: "Native 优先", settings: { preferredExecutorId: "native" } }
+      payload: { title: "旧选择 Codex", settings: { preferredExecutorId: "codex" } }
     });
     const response = await app.inject({
       method: "POST",
@@ -751,6 +750,7 @@ describe("chat-first API", () => {
       expect(saved.statusCode, saved.body).toBe(200);
       const registry = await app.inject({ method: "GET", url: "/api/model-registry" });
       await bindProfile(app, "deepseek-harness", registry.json().chatProfileId);
+      await app.inject({ method: "PUT", url: "/api/executor-settings", payload: { preferredExecutorId: "deepseek-harness" } });
       const conversation = await app.inject({
         method: "POST",
         url: "/api/conversations",
@@ -795,7 +795,7 @@ describe("chat-first API", () => {
     const taskEvents = parseSse(taskResponse.body);
     expect(taskEvents.some((event) => event.event === "task")).toBe(false);
     const done = taskEvents.find((event) => event.event === "done")?.data;
-    expect(done.content).toContain("所有执行器都已关闭或不可用");
+    expect(done.content).toContain("已锁定 Hearth 原生执行器");
     expect((await app.inject({ method: "GET", url: "/api/tasks" })).json().tasks).toHaveLength(0);
 
     const chatResponse = await app.inject({

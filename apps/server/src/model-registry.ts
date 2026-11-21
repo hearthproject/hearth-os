@@ -13,6 +13,7 @@ import type {
   ModelRegistryView
 } from "@hearth/core";
 import { EXECUTOR_IDS } from "@hearth/core";
+import { DEFAULT_CONTEXT_WINDOW_TOKENS } from "./model-settings.ts";
 import type { CodexProfile } from "@hearth/codex-executor";
 import type { HearthStore } from "@hearth/eventlog";
 import type { ModelSettings } from "./model-settings.ts";
@@ -114,7 +115,7 @@ export class ModelRegistry {
       protocol: patch.protocol ?? "openai-chat",
       baseUrl: patch.baseUrl ?? "",
       model: patch.model ?? "",
-      contextWindowTokens: patch.contextWindowTokens ?? 128_000,
+      contextWindowTokens: patch.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS,
       maxOutputTokens: patch.maxOutputTokens ?? 8_000,
       apiKeyCipher: patch.apiKey ? this.secretBox.encrypt(patch.apiKey) : null,
       isLocal: false,
@@ -374,7 +375,7 @@ export class ModelRegistry {
       protocol: normalizeProtocol(record.protocol),
       baseUrl: normalizeBaseUrl(record.baseUrl),
       model: record.model.trim(),
-      contextWindowTokens: tokenLimit(record.contextWindowTokens, 128_000, 4_096, 10_000_000),
+      contextWindowTokens: tokenLimit(record.contextWindowTokens, DEFAULT_CONTEXT_WINDOW_TOKENS, 4_096, 10_000_000),
       maxOutputTokens: tokenLimit(record.maxOutputTokens, 8_000, 256, 1_000_000),
       isLocal: false
     };

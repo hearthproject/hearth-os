@@ -394,6 +394,7 @@ const optionalExecutorText = (max: number) =>
 const executorSettingsSchema = z.object({
   defaultApprovalMode: z.enum(["necessary", "workspace", "full"]).optional(),
   preferredExecutorId: z.enum(EXECUTOR_IDS).nullable().optional(),
+  reasoningEffort: z.enum(["low", "high", "max"]).optional(),
   concurrency: z.partialRecord(z.enum(EXECUTOR_IDS), z.number().int().min(1).max(4)).optional(),
   executors: z.partialRecord(z.enum(EXECUTOR_IDS), z.object({
     command: optionalExecutorText(1000),
@@ -796,7 +797,11 @@ export async function buildServer(options: BuildServerOptions = {}) {
     executorSettingsPath,
     backupRoot: options.backupRoot ?? BACKUP_DIR
   });
-  const modelSettingsForExecutor = (executorId: ExecutorId) => modelRegistry.settingsForExecutorOrChat(executorId);
+  const modelSettingsForExecutor = (executorId: ExecutorId) => {
+    const settings = modelRegistry.settingsForExecutorOrChat(executorId);
+    if (!settings) return null;
+    return { ...settings, reasoningEffort: executorSettingsStore.load().reasoningEffort ?? "max" as const };
+  };
   if (options.librarySummaryGenerator !== null) {
     library.setSummaryGenerator(
       options.librarySummaryGenerator ?? createModelSummaryGenerator(() => modelSettingsForExecutor("native"))
@@ -1000,7 +1005,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
   app.get("/api/health", async () => {
     const snapshot = health.snapshot();
     const profile = codexProfile();
-    const modelSettings = modelRegistry.chatSettings() ?? loadModelSettings(modelSettingsPath);
+    const loaded = modelRegistry.chatSettings() ?? loadModelSettings(modelSettingsPath);
+    const modelSettings = { ...loaded, reasoningEffort: executorSettingsStore.load().reasoningEffort ?? "max" as const };
     return {
       ...snapshot,
       chatModel: {

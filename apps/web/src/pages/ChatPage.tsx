@@ -7,6 +7,7 @@ import { isMailDraftReply } from "../lib/mail-draft.ts";
 import remarkGfm from "remark-gfm";
 import {
   ArrowUp,
+  Brain,
   Check,
   ChevronDown,
   ChevronRight,
@@ -14,20 +15,19 @@ import {
   Copy,
   FileText,
   Folder,
+  Gauge,
   Loader2,
   Paperclip,
   Settings2,
   Sparkles,
-  ShieldAlert,
   X
 } from "lucide-react";
 import { ApiError, api, chatStream } from "../lib/api.ts";
 import { ChatWorkspacePanel } from "../components/ChatWorkspacePanel.tsx";
-import { ProjectDialog } from "../components/ProjectDialog.tsx";
 import { InlineRun, type RunInfo } from "../components/InlineRun.tsx";
 import { formatBytes, formatDuration, formatTime } from "../lib/format.ts";
 import { getChatSelection, setChatBusy, syncChatSelection, useChatSelection } from "../lib/chat-selection.ts";
-import { executorLabel, approvalModeLabel } from "../lib/labels.ts";
+import { executorLabel } from "../lib/labels.ts";
 import type {
   ChatAttachment,
   ChatMessageRecord,
@@ -36,14 +36,15 @@ import type {
   ConversationSettings,
   ConversationSettingsPatch,
   ExecutorId,
+  ReasoningEffort,
   TaskListItem,
   SkillView
 } from "../lib/types.ts";
 
 const PENDING_SETTINGS: ConversationSettings = {
-  executorEnabled: { native: false, codex: false, "deepseek-harness": false },
-  approvalMode: "necessary",
-  preferredExecutorId: null
+  executorEnabled: { native: true, codex: false, "deepseek-harness": false },
+  approvalMode: "full",
+  preferredExecutorId: "native"
 };
 
 const EXECUTOR_ORDER: ExecutorId[] = ["deepseek-harness", "codex", "native"];
@@ -94,10 +95,13 @@ export function ChatPage() {
   const [error, setError] = useState<string | null>(null);
   const [draftSettings, setDraftSettings] = useState<ConversationSettings | null>(null);
   const [pendingProjectId, setPendingProjectId] = useState<string | null>(() => getChatSelection().pendingProjectId);
-  const [projectDialogOpen, setProjectDialogOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(() => new URLSearchParams(location.search).get("skill"));
   const [slashIndex, setSlashIndex] = useState(0);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [savingEffort, setSavingEffort] = useState(false);
+  const [reasoningDraft, setReasoningDraft] = useState<ReasoningEffort | null>(null);
+  const [contextUsage, setContextUsage] = useState<{ inputTokens: number; outputTokens: number } | null>(null);
   const [skillInstallRequest, setSkillInstallRequest] = useState<{ source: string } | null>(null);
   const [skillNotice, setSkillNotice] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -230,6 +234,12 @@ export function ChatPage() {
   }, [conversationId, pendingProjectId]);
 
   useEffect(() => {
+    if (conversationId || pendingProjectId || projects.length === 0) return;
+    const firstAvailable = projects.find((project) => project.available) ?? projects[0];
+    if (firstAvailable) setPendingProjectId(firstAvailable.id);
+  }, [conversationId, pendingProjectId, projects]);
+
+  useEffect(() => {
     setChatBusy(sending || uploading);
   }, [sending, uploading]);
 
@@ -263,6 +273,12 @@ export function ChatPage() {
   }, [messages, streaming, sending, runs.length]);
 
   useEffect(() => {
+    if (contextUsage || messages.length === 0) return;
+    const chars = messages.reduce((total, message) => total + message.content.length, 0);
+    setContextUsage({ inputTokens: Math.max(1, Math.round(chars / 4)), outputTokens: 0 });
+  }, [conversationId, messages, contextUsage]);
+
+  useEffect(() => {
     if (sending || queuedDispatchRef.current || queue.length === 0) return;
     if (hasRunningTask) return;
     const [next, ...rest] = queue;
@@ -284,6 +300,8 @@ export function ChatPage() {
     setStreaming("");
     setReasoning("");
     setDraftSettings(null);
+    setContextUsage(null);
+    setModelMenuOpen(false);
     if (id) localStorage.setItem("hearth.conversation", id);
     else localStorage.removeItem("hearth.conversation");
   }
@@ -303,7 +321,7 @@ export function ChatPage() {
         codex: patch.executorEnabled?.codex ?? conversationSettings.executorEnabled.codex,
         "deepseek-harness": patch.executorEnabled?.["deepseek-harness"] ?? conversationSettings.executorEnabled["deepseek-harness"]
       },
-      approvalMode: patch.approvalMode ?? conversationSettings.approvalMode,
+      approvalMode: "full",
       executionMode: patch.executionMode ?? conversationSettings.executionMode ?? "standard",
       preferredExecutorId: patch.preferredExecutorId !== undefined
         ? patch.preferredExecutorId
@@ -335,14 +353,39 @@ export function ChatPage() {
   }
 
   function chooseExecutor(executorId: ExecutorId | "") {
-    if (!executorId) {
-      patchSettings({ preferredExecutorId: null });
-      return;
-    }
+    if (!executorId) return;
+    // Persist globally: the next conversation must keep the same executor.
+    void api.saveExecutorSettings({ preferredExecutorId: executorId })
+      .then(() => {
+        queryClient.setQueryData<{ settings: ConversationSettings }>(["conversationDefaults"], (old) =>
+          old ? { ...old, settings: { ...old.settings, preferredExecutorId: executorId } } : old
+        );
+        return Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["conversationDefaults"] }),
+          queryClient.invalidateQueries({ queryKey: ["executorSettings"] }),
+          queryClient.invalidateQueries({ queryKey: ["executors"] })
+        ]);
+      })
+      .catch((caught) => setError(caught instanceof Error ? caught.message : "保存执行器失败"));
     patchSettings({
       preferredExecutorId: executorId,
       executorEnabled: { ...conversationSettings.executorEnabled, [executorId]: true }
     });
+  }
+
+  function changeReasoningEffort(effort: ReasoningEffort) {
+    setReasoningDraft(effort);
+    setSavingEffort(true);
+    void api.saveExecutorSettings({ reasoningEffort: effort })
+      .then(() => Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["health"] }),
+        queryClient.invalidateQueries({ queryKey: ["executorSettings"] })
+      ]))
+      .catch((caught) => {
+        setReasoningDraft(null);
+        setError(caught instanceof Error ? caught.message : "保存推理强度失败");
+      })
+      .finally(() => setSavingEffort(false));
   }
 
   async function pickFiles(event: ChangeEvent<HTMLInputElement>) {
@@ -447,6 +490,9 @@ export function ChatPage() {
             } else if (event === "reasoning") {
               reasoningText += (data as { text: string }).text;
               scheduleStream();
+            } else if (event === "usage") {
+              const usage = data as { inputTokens: number; outputTokens: number };
+              setContextUsage({ inputTokens: Math.max(0, usage.inputTokens ?? 0), outputTokens: Math.max(0, usage.outputTokens ?? 0) });
             } else if (event === "task") {
               const payload = data as { task: { id: string; title: string; status: RunInfo["status"]; createdAt: string; updatedAt: string; executorId?: string | null } };
               const task = payload.task;
@@ -550,11 +596,18 @@ export function ChatPage() {
     executorAvailability[id] = executorViews.find((executor) => executor.id === id)?.health.canRun ?? false;
   }
   const executorReady = EXECUTOR_ORDER.some((id) => executorAvailability[id] && conversationSettings.executorEnabled[id]);
-  const selectedExecutorId = conversationSettings.preferredExecutorId;
+  const selectedExecutorId = serverDefaults?.preferredExecutorId ?? conversationSettings.preferredExecutorId ?? "native";
   const selectedExecutor = executorViews.find((executor) => executor.id === selectedExecutorId) ?? null;
   const selectedExecutorName = selectedExecutor?.name ?? (selectedExecutorId ? executorLabel(selectedExecutorId) : "");
   const selectedExecutorUnavailable = Boolean(selectedExecutorId && !executorAvailability[selectedExecutorId]);
   const visibleExecutorIds = EXECUTOR_ORDER.filter((id) => executorAvailability[id] || id === selectedExecutorId);
+  const modelSettings = healthQuery.data?.chatModel.settings;
+  const modelName = modelSettings?.model?.trim() || "未配置模型";
+  const providerName = modelSettings?.providerName ?? "";
+  const reasoningEffort: ReasoningEffort = reasoningDraft ?? modelSettings?.reasoningEffort ?? "max";
+  const contextWindowTokens = modelSettings?.contextWindowTokens ?? 128_000;
+  const usedTokens = (contextUsage?.inputTokens ?? 0) + (contextUsage?.outputTokens ?? 0);
+  const contextPercent = contextWindowTokens > 0 ? Math.min(100, Math.round((usedTokens / contextWindowTokens) * 100)) : 0;
 
   return (
     <div className="chat-layout">
@@ -569,10 +622,6 @@ export function ChatPage() {
               </span>
             )}
           </div>
-          <span className="chat-project-chip" title="工作区内文件读写自动执行；发邮件、访问新域名、操作桌面仍会审批。">
-            <ShieldAlert size={12} />
-            审批 · {approvalModeLabel(conversationSettings.approvalMode)}
-          </span>
         </header>
 
         <div className="chat-scroll">
@@ -619,17 +668,16 @@ export function ChatPage() {
         </div>
 
         <div className="composer-wrap">
-          {!conversationId && (
+          {!conversationId && projects.length > 0 && (
             <div className="composer-project-row">
               <label className="composer-project">
                 <Folder size={13} />
                 <select
                   value={pendingProjectId ?? ""}
-                  onChange={(event) => setPendingProjectId(event.target.value || null)}
+                  onChange={(event) => setPendingProjectId(event.target.value)}
                   disabled={sending}
                   aria-label="选择项目"
                 >
-                  <option value="">不绑定项目</option>
                   {projects.map((project) => (
                     <option key={project.id} value={project.id} disabled={!project.available}>
                       {project.name}{project.kind === "git" ? ` · ${project.currentBranch ?? project.defaultBranch}` : " · 文件夹"}
@@ -637,14 +685,70 @@ export function ChatPage() {
                   ))}
                 </select>
               </label>
-              {projects.length === 0 && (
-                <button type="button" className="link-button" onClick={() => setProjectDialogOpen(true)}>
-                  新建项目
-                </button>
-              )}
             </div>
           )}
           <div className="composer-tools">
+            <div className="composer-model-wrap">
+              <button
+                type="button"
+                className="composer-model"
+                onClick={() => setModelMenuOpen((open) => !open)}
+                aria-expanded={modelMenuOpen}
+                title={`${modelName} · 推理强度 ${reasoningEffortLabel(reasoningEffort)}`}
+              >
+                <Brain size={13} />
+                <span className="composer-model-name">{modelName}</span>
+                <span className="composer-effort">{reasoningEffortLabel(reasoningEffort)}</span>
+                {savingEffort ? <Loader2 size={11} className="spin" /> : <ChevronDown size={12} />}
+              </button>
+              <span
+                className="composer-context"
+                title={`上下文窗口：已用 ${formatTokens(usedTokens)} / ${formatTokens(contextWindowTokens)}（${contextPercent}%）`}
+              >
+                <Gauge size={12} />
+                {contextPercent}% · {formatTokens(usedTokens)}/{formatTokens(contextWindowTokens)}
+              </span>
+              {modelMenuOpen && (
+                <>
+                  <button type="button" className="composer-model-backdrop" aria-label="关闭模型设置" onClick={() => setModelMenuOpen(false)} />
+                  <div className="composer-model-popover" role="dialog" aria-label="模型与推理强度">
+                    <div className="model-popover-head">
+                      <Brain size={14} />
+                      <span>模型与推理</span>
+                    </div>
+                    <div className="model-popover-identity">
+                      <strong>{modelName}</strong>
+                      <span>{providerName || "当前对话模型"}</span>
+                    </div>
+                    <div className="model-popover-row">
+                      <span>推理强度</span>
+                      <strong>{reasoningEffortLabel(reasoningEffort)}</strong>
+                    </div>
+                    <input
+                      className="model-effort-slider"
+                      type="range"
+                      min={0}
+                      max={2}
+                      step={1}
+                      value={EFFORT_ORDER.indexOf(reasoningEffort)}
+                      disabled={savingEffort || !configured}
+                      onChange={(event) => changeReasoningEffort(EFFORT_ORDER[Number(event.target.value)] ?? "max")}
+                      aria-label="选择推理强度"
+                    />
+                    <div className="model-effort-scale">
+                      <span>低</span>
+                      <span>高</span>
+                      <span>极高</span>
+                    </div>
+                    <div className="model-popover-context">
+                      <span>上下文窗口</span>
+                      <strong>{formatTokens(contextWindowTokens)}</strong>
+                    </div>
+                    <p className="model-popover-note">调整会立即生效，并在所有对话中保持。思考默认开启。</p>
+                  </div>
+                </>
+              )}
+            </div>
             <label className="composer-executor" title={selectedExecutorUnavailable ? selectedExecutor?.health.issues.join("；") : "锁定执行器后不会自动切换"}>
               <select
                 value={selectedExecutorId ?? ""}
@@ -652,7 +756,6 @@ export function ChatPage() {
                 disabled={!settingsReady || sending}
                 aria-label="选择执行器"
               >
-                <option value="">执行器 · 自动匹配</option>
                 {visibleExecutorIds.map((id) => {
                   const view = executorViews.find((executor) => executor.id === id);
                   return (
@@ -808,18 +911,22 @@ export function ChatPage() {
         onOpen={openWorkspace}
         onClose={closeWorkspace}
       />
-      {projectDialogOpen && (
-        <ProjectDialog
-          onClose={() => setProjectDialogOpen(false)}
-          onCreated={(project) => {
-            setProjectDialogOpen(false);
-            void queryClient.invalidateQueries({ queryKey: ["projects"] });
-            setPendingProjectId(project.id);
-          }}
-        />
-      )}
     </div>
   );
+}
+
+const EFFORT_ORDER: ReasoningEffort[] = ["low", "high", "max"];
+
+function reasoningEffortLabel(effort: ReasoningEffort): string {
+  if (effort === "low") return "低";
+  if (effort === "high") return "高";
+  return "极高";
+}
+
+function formatTokens(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 10_000 ? 0 : 1).replace(/\.0$/, "")}k`;
+  return String(Math.max(0, Math.round(value)));
 }
 
 function isTaskNoise(message: ChatMessageRecord): boolean {

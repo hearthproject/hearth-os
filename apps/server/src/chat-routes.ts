@@ -82,6 +82,7 @@ const modelSettingsSchema = z.object({
   model: z.string().trim().max(200).optional(),
   contextWindowTokens: z.number().int().min(4096).max(10_000_000).optional(),
   maxOutputTokens: z.number().int().min(256).max(1_000_000).optional(),
+  reasoningEffort: z.enum(["low", "high", "max"]).optional(),
   apiKey: z.string().max(500).optional()
 }).strict();
 
@@ -127,7 +128,10 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
   const { service, modelSettingsPath, attachmentRoot, executorSettingsPath } = options;
   const store = service.store;
   const executorSettings = (): ReturnType<typeof loadExecutorSettings> => options.executorSettingsStore?.load() ?? loadExecutorSettings(executorSettingsPath);
-  const chatSettings = (): ModelSettings => options.registry?.chatSettings() ?? loadModelSettings(modelSettingsPath);
+  const chatSettings = (): ModelSettings => {
+    const base = options.registry?.chatSettings() ?? loadModelSettings(modelSettingsPath);
+    return { ...base, reasoningEffort: executorSettings().reasoningEffort ?? "max" };
+  };
   const chatConfigured = (): boolean => chatModelConfigured(chatSettings());
   const executorAvailability = (): Record<ExecutorId, boolean> => {
     const settings = executorSettings();
@@ -144,8 +148,8 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     const enabled: Partial<Record<ExecutorId, boolean>> = { native: true, codex: true };
     if (options.registry?.settingsForExecutorOrChat("deepseek-harness")) enabled["deepseek-harness"] = true;
     return {
-      ...defaultConversationSettings(settings.defaultApprovalMode, enabled),
-      preferredExecutorId: settings.preferredExecutorId
+      ...defaultConversationSettings("full", enabled),
+      preferredExecutorId: settings.preferredExecutorId ?? "native"
     };
   };
   mkdirSync(attachmentRoot, { recursive: true });
@@ -497,8 +501,12 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     const effectiveSettings = parsed.data.settings
       ? mergeConversationSettings(conversation.settings, parsed.data.settings)
       : conversation.settings;
-    const lockedExecutorId = effectiveSettings.preferredExecutorId;
-    const preferredExecutorId = lockedExecutorId ?? plan.executorId;
+    // The executor choice is a global, always-native-by-default preference.
+    // Switching it once must follow the user into every conversation; there is
+    // no automatic task-based matching anymore.
+    const lockedExecutorId = executorSettings().preferredExecutorId ?? "native";
+    const preferredExecutorId = lockedExecutorId;
+    const executorEnabled = { ...effectiveSettings.executorEnabled, [lockedExecutorId]: true };
     const previousMessages = store.listChatMessages(conversation.id).filter((item) => item.id !== userRecord.id);
     const recentDraft = previousMessages.slice(-8).some((item) =>
       (item.role === "user" && isSimpleDraft(item.content)) ||
@@ -522,10 +530,10 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
         : executorHealth(lockedExecutorId, executorSettings(), executorSettingsPath)
       : null;
     const resolution = lockedExecutorId
-      ? resolveExecutorLocked(lockedExecutorId, effectiveSettings.executorEnabled, available, plan.capability)
+      ? resolveExecutorLocked(lockedExecutorId, executorEnabled, available, plan.capability)
       : resolveExecutorFromEnabled(
           preferredExecutorId,
-          effectiveSettings.executorEnabled,
+          executorEnabled,
           available,
           plan.capability,
           preferredExecutorId === plan.executorId
@@ -709,14 +717,22 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
 
     try {
       let answer = "";
-      await streamChat(settings, messages, (delta, kind) => {
+      const result = await streamChat(settings, messages, (delta, kind) => {
         if (kind === "reasoning") {
           send("reasoning", { text: delta });
           return;
         }
         answer += delta;
         send("delta", { text: delta });
-      }, { signal: controller.signal, temperature: 0.5, timeoutMs: 180_000, ...(directDraft ? { maxTokens: 1200 } : {}) });
+      }, { signal: controller.signal, temperature: 0.5, timeoutMs: 180_000, reasoningEffort: settings.reasoningEffort ?? "max", ...(directDraft ? { maxTokens: 1200 } : {}) });
+      const estimatedInput = Math.max(1, Math.round(messages.reduce((total, message) => total + message.content.length, 0) / 4));
+      send("usage", {
+        inputTokens: result.usage?.inputTokens ?? estimatedInput,
+        outputTokens: result.usage?.outputTokens ?? Math.max(1, Math.round(answer.length / 4)),
+        contextWindowTokens: settings.contextWindowTokens,
+        model: settings.model,
+        reasoningEffort: settings.reasoningEffort ?? "max"
+      });
       const assistant = store.createChatMessage({
         id: randomUUID(),
         conversationId: conversation.id,

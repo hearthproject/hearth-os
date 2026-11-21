@@ -88,7 +88,8 @@ async function streamOpenAiChatTurn(
     ...(tools.length > 0 ? { tools: tools.map(openAiTool), tool_choice: options.toolChoice ?? "auto" } : {}),
     stream: true,
     temperature: options.temperature ?? 0.2,
-    ...(options.maxTokens ? { max_tokens: options.maxTokens } : {})
+    ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
+    ...(options.reasoningEffort ? { reasoning_effort: options.reasoningEffort } : {})
   });
   if (process.env.HEARTH_MODEL_DEBUG_PATH) {
     appendFileSync(process.env.HEARTH_MODEL_DEBUG_PATH, `${JSON.stringify({ at: new Date().toISOString(), protocol: "openai-chat", url: openAiChatUrl(settings.baseUrl), body: requestBody })}\n`, "utf8");
@@ -214,7 +215,8 @@ async function streamResponsesTurn(
       } : {}),
       stream: true,
       ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
-      ...(options.maxTokens ? { max_output_tokens: options.maxTokens } : {})
+      ...(options.maxTokens ? { max_output_tokens: options.maxTokens } : {}),
+      ...(options.reasoningEffort ? { reasoning: { effort: options.reasoningEffort } } : {})
     }),
     signal: withTimeout(options.signal, options.timeoutMs ?? 180_000)
   });

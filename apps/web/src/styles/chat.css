@@ -93,7 +93,7 @@
 .message-list {
   display: flex;
   flex-direction: column;
-  max-width: 760px;
+  max-width: 1120px;
   min-height: 100%;
   margin: 0 auto;
   gap: 22px;
@@ -290,7 +290,7 @@
 }
 
 .composer {
-  max-width: 760px;
+  max-width: 1120px;
   padding: 3px;
   border-radius: 6px;
   box-shadow: none;
@@ -318,10 +318,161 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 6px;
-  max-width: 760px;
+  max-width: 1120px;
   margin: 0 auto 6px;
+}
+
+.composer-model-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.composer-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  max-width: 320px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink-secondary);
+  font: inherit;
+  font-size: var(--fs-11);
+  cursor: pointer;
+}
+
+.composer-model:hover {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.composer-model-name {
+  overflow: hidden;
+  max-width: 190px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-effort {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface-sunk);
+  color: var(--ink);
+  font-size: var(--fs-10);
+}
+
+.composer-context {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-10);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.composer-model-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  border: 0;
+  background: transparent;
+  cursor: default;
+}
+
+.composer-model-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 40;
+  width: 280px;
+  padding: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.18);
+  color: var(--ink);
+  font-size: var(--fs-11);
+}
+
+.model-popover-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  color: var(--ink-secondary);
+  font-size: var(--fs-10);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.model-popover-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.model-popover-identity strong {
+  overflow: hidden;
+  font-size: var(--fs-12);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-popover-identity span {
+  color: var(--ink-tertiary);
+  font-size: var(--fs-10);
+}
+
+.model-popover-row,
+.model-popover-context {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+  color: var(--ink-secondary);
+}
+
+.model-popover-row strong,
+.model-popover-context strong {
+  color: var(--ink);
+  font-size: var(--fs-12);
+}
+
+.model-effort-slider {
+  width: 100%;
+  margin: 8px 0 2px;
+  accent-color: var(--ink);
+  cursor: pointer;
+}
+
+.model-effort-slider:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.model-effort-scale {
+  display: flex;
+  justify-content: space-between;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-10);
+}
+
+.model-popover-note {
+  margin: 10px 0 0;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-10);
+  line-height: 1.5;
 }
 
 .composer-options-wrap {
@@ -591,7 +742,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  max-width: 760px;
+  max-width: 1120px;
   margin: 0 auto;
   padding: 6px 2px;
   color: var(--ink-secondary);
@@ -608,7 +759,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  max-width: 760px;
+  max-width: 1120px;
   margin: 0 auto 6px;
   padding: 9px 10px;
   border: 1px solid var(--line-strong);
@@ -646,7 +797,7 @@
 .composer-slash-menu {
   display: grid;
   gap: 2px;
-  max-width: 760px;
+  max-width: 1120px;
   max-height: 238px;
   margin: 0 auto 6px;
   padding: 5px;
@@ -1172,7 +1323,7 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-width: 760px;
+  max-width: 1120px;
 }
 
 .chat-execution-head {

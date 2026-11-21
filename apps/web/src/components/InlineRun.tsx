@@ -27,7 +27,7 @@ const RUN_LABELS: Record<TaskStatus, string> = {
   running: "执行中",
   waiting_input: "需要补充信息",
   waiting_approval: "等待你确认",
-  waiting_budget: "预算触顶",
+  waiting_budget: "等待继续",
   completed: "已完成",
   failed: "执行失败",
   recoverable: "执行中断",
