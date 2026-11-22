@@ -53,7 +53,7 @@ npm run tauri:build
 
 首次启动会弹出原生 Windows 对话框三选一：
 
-- 使用现有数据：默认 `D:\App\hearth-os`（可用 `HEARTH_EXISTING_ROOT` 覆盖）。
+- 使用现有数据：设置 `HEARTH_EXISTING_ROOT` 指向数据根目录（其下应有 `.hearth\hearth.sqlite`）；未设置时会打开原生文件夹选择框，浏览选择已有数据根目录。
 - 新建数据目录：`%LOCALAPPDATA%\Hearth`。
 - 退出。
 

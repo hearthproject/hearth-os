@@ -37,8 +37,6 @@ const LOG_LIMIT: u64 = 5 * 1024 * 1024;
 const LOG_KEEP: usize = 3;
 const MB_DEFBUTTON1: u32 = 0x0000_0000;
 const MB_DEFBUTTON2: u32 = 0x0000_0100;
-const EXISTING_DATA_ROOT: &str = "D:\\App\\hearth-os";
-const DEFAULT_CODEX_PATH: &str = "D:\\npm-global\\node_modules\\@openai\\codex\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe";
 
 struct ServerConfig {
     root: PathBuf,
@@ -414,8 +412,7 @@ fn resolve_codex() -> Option<PathBuf> {
             }
         }
     }
-    let fallback = PathBuf::from(DEFAULT_CODEX_PATH);
-    fallback.exists().then_some(fallback)
+    None
 }
 
 fn data_dir_for(root: &Path) -> PathBuf {
@@ -466,59 +463,94 @@ fn choose_data_root() -> Option<PathBuf> {
         }
     }
 
-    let existing_root = env::var("HEARTH_EXISTING_ROOT")
+    let fresh_root = hearth_home();
+    let env_existing = env::var("HEARTH_EXISTING_ROOT")
         .ok()
         .filter(|value| !value.trim().is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(EXISTING_DATA_ROOT));
-    let fresh_root = hearth_home();
-    let existing_database = has_database(&existing_root);
+        .map(PathBuf::from);
 
-    let mut text = String::from(if existing_database {
-        "检测到现有 Hearth 数据。"
-    } else {
-        "没有检测到现有 Hearth 数据库。"
-    });
-    if let Some(saved) = &saved {
-        if !has_database(saved) {
-            text.push_str(&format!(
-                "\n\n之前选择的数据目录没有找到 hearth.sqlite：{}",
-                data_dir_for(saved).display()
-            ));
-        }
-    }
-    text.push_str(&format!(
-        "\n\n现有数据：{}{}",
-        data_dir_for(&existing_root).display(),
-        if existing_database {
-            "（推荐）"
+    let root = if let Some(existing_root) = env_existing {
+        // 显式指定了现有数据根目录（HEARTH_EXISTING_ROOT）时，展示“现有 / 新建”三选一。
+        let existing_database = has_database(&existing_root);
+        let mut text = String::from(if existing_database {
+            "检测到现有 Hearth 数据。"
         } else {
-            "（尚未初始化）"
+            "没有检测到现有 Hearth 数据库。"
+        });
+        if let Some(saved) = &saved {
+            if !has_database(saved) {
+                text.push_str(&format!(
+                    "\n\n之前选择的数据目录没有找到 hearth.sqlite：{}",
+                    data_dir_for(saved).display()
+                ));
+            }
         }
-    ));
-    text.push_str(&format!(
-        "\n新数据目录：{}",
-        data_dir_for(&fresh_root).display()
-    ));
-    text.push_str("\n\n“是”使用现有数据；“否”新建数据目录；“取消”退出。");
+        text.push_str(&format!(
+            "\n\n现有数据：{}{}",
+            data_dir_for(&existing_root).display(),
+            if existing_database {
+                "（推荐）"
+            } else {
+                "（尚未初始化）"
+            }
+        ));
+        text.push_str(&format!(
+            "\n新数据目录：{}",
+            data_dir_for(&fresh_root).display()
+        ));
+        text.push_str("\n\n“是”使用现有数据；“否”新建数据目录；“取消”退出。");
 
-    let default = if existing_database {
-        MB_DEFBUTTON1
+        let default = if existing_database {
+            MB_DEFBUTTON1
+        } else {
+            MB_DEFBUTTON2
+        };
+        let choice = message_box(
+            "选择 Hearth 数据目录",
+            &text,
+            MB_YESNOCANCEL | MB_ICONWARNING | default,
+        );
+        if choice == IDYES {
+            Some(existing_root)
+        } else if choice == IDNO {
+            Some(fresh_root)
+        } else {
+            None
+        }
     } else {
-        MB_DEFBUTTON2
+        // 没有显式指定现有目录时，不假设任何具体路径：
+        // 让用户浏览选择已有数据根目录，或直接在默认目录新建。
+        let mut text = String::from("没有检测到现有 Hearth 数据。");
+        if let Some(saved) = &saved {
+            if !has_database(saved) {
+                text.push_str(&format!(
+                    "\n\n之前选择的数据目录没有找到 hearth.sqlite：{}",
+                    data_dir_for(saved).display()
+                ));
+            }
+        }
+        text.push_str(&format!(
+            "\n\n默认数据目录：{}",
+            data_dir_for(&fresh_root).display()
+        ));
+        text.push_str("\n\n“是”浏览选择已有的数据根目录；“否”使用默认目录新建；“取消”退出。");
+        let choice = message_box(
+            "选择 Hearth 数据目录",
+            &text,
+            MB_YESNOCANCEL | MB_ICONWARNING | MB_DEFBUTTON2,
+        );
+        if choice == IDYES {
+            rfd::FileDialog::new()
+                .set_title("选择数据根目录（其下应有 .hearth\\hearth.sqlite）")
+                .pick_folder()
+        } else if choice == IDNO {
+            Some(fresh_root)
+        } else {
+            None
+        }
     };
-    let choice = message_box(
-        "选择 Hearth 数据目录",
-        &text,
-        MB_YESNOCANCEL | MB_ICONWARNING | default,
-    );
-    let root = if choice == IDYES {
-        existing_root
-    } else if choice == IDNO {
-        fresh_root
-    } else {
-        return None;
-    };
+
+    let root = root?;
     write_desktop_config(&root);
     Some(root)
 }

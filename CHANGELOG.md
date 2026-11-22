@@ -27,6 +27,11 @@
 - 新增单一版本真源脚本 `npm run version:sync`，workspace、Cargo、Tauri 与 lockfile 版本自动对齐。
 - 0.3.3 起以 GitHub Pre-release 形式发布安装包、便携包与 SHA256 校验和。
 
+### 桌面版首启
+
+- 移除首启数据目录对话框里写死的开发者私有路径；未设置 `HEARTH_EXISTING_ROOT` 时改为原生文件夹选择框，可浏览选择已有数据根目录，或用默认目录新建。
+- 移除 Codex 探测的开发机兜底路径；探测顺序为 `HEARTH_CODEX_PATH` → 系统 PATH。
+
 ## 0.3.2 - 2026-11-21
 
 ### 会话布局
