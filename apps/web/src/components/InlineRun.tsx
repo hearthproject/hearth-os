@@ -38,7 +38,7 @@ const ACTIVE_STATUSES: TaskStatus[] = ["queued", "running", "waiting_input", "wa
 const ATTENTION_STATUSES: TaskStatus[] = ["failed", "recoverable", "waiting_input", "waiting_approval"];
 const FINISHED_STATUSES: TaskStatus[] = ["completed", "cancelled"];
 
-interface ToolDetail {
+export interface ToolDetail {
   key: string;
   title: string;
   command?: string;
@@ -47,9 +47,15 @@ interface ToolDetail {
   durationMs?: number;
   exitCode?: number;
   paths?: string[];
+  /** 写入的文件路径（write_file / apply_patch） */
+  file?: string;
+  /** write_file 的完整正文 / apply_patch 的补丁正文 */
+  content?: string;
+  /** 本任务里第一次写这个交付物：默认展开完整内容 */
+  autoExpand?: boolean;
 }
 
-type Entry =
+export type Entry =
   | { type: "narration"; key: string; text: string }
   | { type: "label"; key: string; text: string; tools: ToolDetail[] }
   | { type: "system"; key: string; text: string };
@@ -83,7 +89,11 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
   const attention = ATTENTION_STATUSES.includes(status);
   const error = view?.task.error ?? null;
   const visibleError = error && !isRetiredTaskNotice(error.message) ? error : null;
-  const entries = useMemo(() => collectEntries(view?.events ?? []), [view?.events]);
+  const expectedOutputs = view?.task.expectedOutputs;
+  const entries = useMemo(
+    () => collectEntries(view?.events ?? [], expectedOutputs),
+    [view?.events, expectedOutputs]
+  );
   const pendingApprovals = (view?.approvals ?? []).filter((approval) => approval.status === "pending");
   const duration = useMemo(
     () => runDuration(view?.runs ?? [], clock) ?? (active ? elapsedSince(task.createdAt, clock) : null),
@@ -183,14 +193,14 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
                   <button
                     type="button"
                     className={`inline-run-label ${entry.tools.length > 0 ? "expandable" : ""}`}
-                    onClick={() => entry.tools.length > 0 && setExpandedTools((prev) => ({ ...prev, [entry.key]: !prev[entry.key] }))}
-                    aria-expanded={entry.tools.length > 0 ? Boolean(expandedTools[entry.key]) : undefined}
+                    onClick={() => entry.tools.length > 0 && setExpandedTools((prev) => ({ ...prev, [entry.key]: !isEntryExpanded(entry, expandedTools) }))}
+                    aria-expanded={entry.tools.length > 0 ? isEntryExpanded(entry, expandedTools) : undefined}
                   >
                     <span className="inline-run-label-mark" aria-hidden="true">▸</span>
                     <span className="inline-run-label-text">{entry.text}</span>
-                    {entry.tools.length > 0 && (expandedTools[entry.key] ? <ChevronDown size={11} /> : <ChevronRight size={11} />)}
+                    {entry.tools.length > 0 && (isEntryExpanded(entry, expandedTools) ? <ChevronDown size={11} /> : <ChevronRight size={11} />)}
                   </button>
-                  {expandedTools[entry.key] && entry.tools.length > 0 && (
+                  {isEntryExpanded(entry, expandedTools) && entry.tools.length > 0 && (
                     <div className="inline-run-detail">
                       {entry.tools.map((tool) => (
                         <div key={tool.key} className="inline-run-tool">
@@ -204,7 +214,9 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
                           {tool.paths && tool.paths.length > 0 && (
                             <pre className="inline-run-command">{tool.paths.join("\n")}</pre>
                           )}
-                          {tool.output && <pre className="inline-run-output">{clipOutput(tool.output)}</pre>}
+                          {tool.content !== undefined
+                            ? <pre className="inline-run-output inline-run-output-full">{tool.content}</pre>
+                            : tool.output && <pre className="inline-run-output">{clipOutput(tool.output)}</pre>}
                         </div>
                       ))}
                     </div>
@@ -262,6 +274,11 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
   );
 });
 
+export function isEntryExpanded(entry: Extract<Entry, { type: "label" }>, expandedTools: Record<string, boolean>): boolean {
+  // 用户手动展开/折叠优先；否则交付物第一次写入时自动展开完整正文。
+  return expandedTools[entry.key] ?? entry.tools.some((tool) => tool.autoExpand);
+}
+
 function runDuration(runs: TaskView["runs"], now: number): number | null {
   let total = 0;
   let seen = false;
@@ -285,9 +302,11 @@ function isRetiredTaskNotice(text: string): boolean {
   return /执行预算|本轮执行预算|预算已触顶|budgetExhaustion|Unknown event type:\s*job\.|未知事件类型[：:]\s*job\./i.test(text);
 }
 
-function collectEntries(events: TaskView["events"]): Entry[] {
+export function collectEntries(events: TaskView["events"], expectedOutputs: readonly string[] = []): Entry[] {
   const entries: Entry[] = [];
   const pendingTools = new Map<string, ToolDetail[]>();
+  // 每个交付物只完整展示一次，之后的写入默认折叠。
+  const shownFiles = new Set<string>();
   let lastLabel: Extract<Entry, { type: "label" }> | null = null;
 
   const pushNarration = (text: string, eventId: string) => {
@@ -332,7 +351,7 @@ function collectEntries(events: TaskView["events"]): Entry[] {
       continue;
     }
 
-    const progress = toolFromProgress(kind, detail, message, event.id);
+    const progress = toolFromProgress(kind, detail, message, event.id, shownFiles, expectedOutputs);
     if (!progress) continue;
     if (progress.phase === "start") {
       const list = pendingTools.get(progress.pairKey) ?? [];
@@ -385,17 +404,23 @@ function toolFromProgress(
   kind: string,
   detail: TaskProgressDetail | undefined,
   message: string,
-  eventId: string
+  eventId: string,
+  shownFiles: Set<string>,
+  expectedOutputs: readonly string[]
 ): { phase: "start" | "done" | "single"; pairKey: string; tool: ToolDetail } | null {
   if (detail?.eventType === "tool.started") {
     const command = commandFromInput(detail.input);
+    const write = writePreview(detail.input, shownFiles, expectedOutputs);
     return {
       phase: "start",
       pairKey: detail.title ?? message,
       tool: {
         key: eventId,
-        title: humanToolTitle(detail.title, message),
-        ...(command ? { command } : {})
+        title: humanToolTitle(detail.title, message, write.file),
+        ...(command ? { command } : {}),
+        ...(write.file ? { file: write.file } : {}),
+        ...(write.content !== undefined ? { content: write.content } : {}),
+        ...(write.autoExpand ? { autoExpand: true } : {})
       }
     };
   }
@@ -450,12 +475,70 @@ function toolFromProgress(
   return null;
 }
 
-function humanToolTitle(title: string | undefined, message: string): string {
-  const raw = message || title || "执行一步";
+function humanToolTitle(title: string | undefined, message: string, file?: string): string {
+  const raw = file ? `写入 ${fileBaseName(file)}` : message || title || "执行一步";
   // Keep the row to an action category; paths, queries and command text stay
   // inside the expandable detail.
   const text = raw.split("：")[0]?.trim() || raw;
   return text.length > LABEL_LIMIT ? `${text.slice(0, LABEL_LIMIT)}…` : text;
+}
+
+interface WritePreview {
+  file?: string;
+  content?: string;
+  autoExpand?: boolean;
+}
+
+/**
+ * `write_file` 的入参里带着完整正文，`apply_patch` 带着补丁正文。
+ * 交付物（result.md 或 expectedOutputs 里的文件）第一次出现时标记为自动展开，
+ * 同一任务里后续写入只保留正文、默认折叠。
+ */
+function writePreview(
+  input: unknown,
+  shownFiles: Set<string>,
+  expectedOutputs: readonly string[]
+): WritePreview {
+  if (!input || typeof input !== "object") return {};
+  const record = input as Record<string, unknown>;
+  const patch = typeof record.patch === "string" ? record.patch : null;
+  const file = typeof record.path === "string" ? record.path : patchTargetPath(patch);
+  const content = typeof record.content === "string" ? record.content : patch ?? undefined;
+  if (content === undefined) return {};
+  const preview: WritePreview = { content };
+  if (!file) return preview;
+  preview.file = file;
+  if (!isDeliverablePath(file, expectedOutputs)) return preview;
+  const key = normalizePathKey(file);
+  if (shownFiles.has(key)) return preview;
+  shownFiles.add(key);
+  preview.autoExpand = true;
+  return preview;
+}
+
+function patchTargetPath(patch: string | null): string | undefined {
+  if (!patch) return undefined;
+  const match = /^\*\*\*\s+(?:Update|Add) File:\s*(.+)$/m.exec(patch);
+  return match?.[1]?.trim() || undefined;
+}
+
+function isDeliverablePath(file: string, expectedOutputs: readonly string[]): boolean {
+  const normalized = normalizePathKey(file);
+  const base = fileBaseName(normalized);
+  if (base === "result.md") return true;
+  return expectedOutputs.some((item) => {
+    const want = normalizePathKey(item);
+    return want === normalized || want === base;
+  });
+}
+
+function normalizePathKey(path: string): string {
+  return path.replace(/\\/g, "/").toLowerCase();
+}
+
+function fileBaseName(path: string): string {
+  const normalized = path.replace(/\\/g, "/");
+  return normalized.slice(normalized.lastIndexOf("/") + 1);
 }
 
 function commandFromInput(input: unknown): string | undefined {
