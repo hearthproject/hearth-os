@@ -6,12 +6,14 @@ import {
   ArrowLeft,
   CheckCircle2,
   Download,
+  FolderDown,
   Loader2,
   PanelRightClose,
   PanelRightOpen,
   XCircle
 } from "lucide-react";
 import { api } from "../lib/api.ts";
+import { hasDesktopBridge, pickFolder } from "../lib/desktop.ts";
 import { formatBytes } from "../lib/format.ts";
 import { fileExtension, previewKind, TEXT_PREVIEW_LIMIT } from "../lib/preview.ts";
 import type { ArtifactListItem, BackgroundToolJob, ChatAttachment, ChatMessageRecord, TaskListItem } from "../lib/types.ts";
@@ -22,6 +24,7 @@ export interface PreviewTarget {
   mimeType: string;
   bytes: number | null;
   taskId?: string;
+  artifactId?: string;
 }
 
 export function ChatWorkspacePanel({
@@ -159,11 +162,14 @@ function PreviewBody({ preview }: { preview: PreviewTarget }) {
   const kind = previewKind(preview.name, preview.mimeType);
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportMessage, setExportMessage] = useState<string | null>(null);
   const tooLarge = preview.bytes !== null && preview.bytes > TEXT_PREVIEW_LIMIT;
 
   useEffect(() => {
     setContent(null);
     setError(null);
+    setExportMessage(null);
     if (kind !== "text" && kind !== "markdown") return;
     if (tooLarge) return;
     const controller = new AbortController();
@@ -187,16 +193,44 @@ function PreviewBody({ preview }: { preview: PreviewTarget }) {
     };
   }, [preview.url, kind, tooLarge]);
 
+  async function handleExport() {
+    if (!preview.taskId || !preview.artifactId || exporting) return;
+    setExporting(true);
+    setExportMessage(null);
+    try {
+      const folder = await pickFolder();
+      if (!folder) return;
+      const result = await api.exportArtifact(preview.taskId, preview.artifactId, folder);
+      setExportMessage(`已保存到 ${result.path}`);
+    } catch (caught) {
+      setExportMessage(caught instanceof Error ? `保存失败：${caught.message}` : "保存失败");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <>
       <div className="workspace-preview-bar">
         <span>{fileExtension(preview.name)} · {preview.bytes === null ? "—" : formatBytes(preview.bytes)}</span>
         <div>
+          {preview.artifactId && hasDesktopBridge() && (
+            <button
+              type="button"
+              className="workspace-preview-link"
+              onClick={handleExport}
+              disabled={exporting}
+              title="另存到文件夹"
+            >
+              <FolderDown size={13} /> {exporting ? "保存中…" : "另存到"}
+            </button>
+          )}
           <a className="workspace-preview-link" href={preview.url} download={preview.name} title="下载">
             <Download size={13} /> 下载
           </a>
         </div>
       </div>
+      {exportMessage && <p className="workspace-muted">{exportMessage}</p>}
       <div className={`workspace-preview-body kind-${kind}`}>
         {kind === "image" && <img src={preview.url} alt={preview.name} />}
         {kind === "pdf" && <iframe src={preview.url} title={preview.name} />}
@@ -240,7 +274,8 @@ export function artifactPreviewTarget(artifact: Pick<ArtifactListItem, "id" | "t
     url: api.artifactUrl(artifact.taskId, artifact.id),
     mimeType: artifact.mimeType,
     bytes: artifact.bytes,
-    taskId: artifact.taskId
+    taskId: artifact.taskId,
+    artifactId: artifact.id
   };
 }
 

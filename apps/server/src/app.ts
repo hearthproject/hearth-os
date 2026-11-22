@@ -1,8 +1,9 @@
 import { TaskOverviewService } from "./task-overview.ts";
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import fastifyStatic from "@fastify/static";
 import Fastify, { LogController, type FastifyReply } from "fastify";
 import type { EventEnvelope, ExecutorHealth, ExecutorId, ExecutorView, TaskRecord } from "@hearth/core";
@@ -2934,6 +2935,37 @@ export async function buildServer(options: BuildServerOptions = {}) {
     reply.header("content-disposition", `inline; filename*=UTF-8''${encodeURIComponent(basename(artifact.absolutePath))}`);
     return reply.send(readFileSync(artifact.absolutePath));
   });
+
+  // 另存到：把任务产物复制到用户选择的本地目录（桌面/任意位置）。
+  // 执行器写入仍被限制在任务工作区，这是用户主动导出文件的正规通道。
+  app.post<{ Params: { id: string; artifactId: string }; Body: { destination?: string } }>(
+    "/api/tasks/:id/artifacts/:artifactId/export",
+    async (request, reply) => {
+      const artifact = store.getArtifact(request.params.artifactId);
+      if (!artifact || artifact.taskId !== request.params.id) {
+        return reply.code(404).send({ error: "ARTIFACT_NOT_FOUND", message: "产物不存在" });
+      }
+      if (!isPathInside(REPO_ROOT, artifact.absolutePath) || !existsSync(artifact.absolutePath)) {
+        return reply.code(410).send({ error: "ARTIFACT_UNAVAILABLE", message: "产物文件已不可用" });
+      }
+      const destination = typeof request.body?.destination === "string" ? request.body.destination.trim() : "";
+      if (!destination) {
+        return reply.code(400).send({ error: "EXPORT_DESTINATION_REQUIRED", message: "请选择保存位置" });
+      }
+      const targetDir = resolve(destination);
+      if (!isAbsolute(targetDir)) {
+        return reply.code(400).send({ error: "EXPORT_DESTINATION_INVALID", message: "保存位置必须是绝对路径" });
+      }
+      const serverDir = dirname(fileURLToPath(import.meta.url));
+      if (isPathInside(serverDir, targetDir)) {
+        return reply.code(400).send({ error: "EXPORT_DESTINATION_INVALID", message: "不能保存到应用运行目录" });
+      }
+      mkdirSync(targetDir, { recursive: true });
+      const target = join(targetDir, basename(artifact.absolutePath));
+      copyFileSync(artifact.absolutePath, target);
+      return { path: target, bytes: artifact.bytes };
+    }
+  );
 
   app.get<{ Querystring: { after?: string; taskId?: string } }>("/api/events", async (request, reply) => {
     // 默认只推送连接之后的新事件，避免每次打开应用都把全部历史重放一遍（旧库已有十几万条事件）。

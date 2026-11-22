@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ApprovalRecord, ArtifactRecord, EffectRecord, RunRecord, SourceConnection, SourceItem } from "@hearth/core";
 import { HearthStore } from "@hearth/eventlog";
 import { buildServer } from "./app.ts";
+import { REPO_ROOT } from "./config.ts";
 
 const HASH = "a".repeat(64);
 
@@ -641,6 +642,51 @@ describe("Hearth server", () => {
     const artifacts = await app.inject({ method: "GET", url: "/api/artifacts" });
     expect(JSON.stringify(artifacts.json())).not.toContain("D:/secret/path");
     expect(artifacts.json().artifacts[0].sha256).toBe(HASH);
+    await app.close();
+  });
+
+  it("exports a task artifact to a user-chosen folder", async () => {
+    const app = await buildServer({ store, serveWeb: false });
+    const created = await app.inject({ method: "POST", url: "/api/tasks", payload: { title: "导出产物", goal: "把 CSV 另存到指定目录" } });
+    const taskId = created.json().id as string;
+    const root = mkdtempSync(join(REPO_ROOT, "hearth-export-test-"));
+    try {
+      const artifactPath = join(root, "sales_new.csv");
+      writeFileSync(artifactPath, "a,b\n1,2\n", "utf8");
+      const artifact: ArtifactRecord = {
+        id: "artifact-export-1", taskId, runId: "run-1", relativePath: "sales_new.csv",
+        absolutePath: artifactPath, mimeType: "text/csv; charset=utf-8",
+        sha256: "b".repeat(64), bytes: 8, createdAt: "2026-11-22T01:00:00.000Z"
+      };
+      store.appendEvent({ type: "artifact.published", taskId, runId: "run-1", payload: artifact });
+
+      const outDir = join(root, "out");
+      const exported = await app.inject({
+        method: "POST",
+        url: `/api/tasks/${taskId}/artifacts/artifact-export-1/export`,
+        payload: { destination: outDir }
+      });
+      expect(exported.statusCode).toBe(200);
+      expect(exported.json()).toMatchObject({ path: join(outDir, "sales_new.csv"), bytes: 8 });
+      expect(readFileSync(join(outDir, "sales_new.csv"), "utf8")).toBe("a,b\n1,2\n");
+
+      const missingDestination = await app.inject({
+        method: "POST",
+        url: `/api/tasks/${taskId}/artifacts/artifact-export-1/export`,
+        payload: {}
+      });
+      expect(missingDestination.statusCode).toBe(400);
+      expect(missingDestination.json().error).toBe("EXPORT_DESTINATION_REQUIRED");
+
+      const unknownArtifact = await app.inject({
+        method: "POST",
+        url: `/api/tasks/${taskId}/artifacts/nope/export`,
+        payload: { destination: outDir }
+      });
+      expect(unknownArtifact.statusCode).toBe(404);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
     await app.close();
   });
 
