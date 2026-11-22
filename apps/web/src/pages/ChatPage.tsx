@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import { ChatMailDraft } from "../components/ChatMailDraft.tsx";
+import { ApprovalCard } from "../components/ApprovalCard.tsx";
 import { isMailDraftReply } from "../lib/mail-draft.ts";
 import remarkGfm from "remark-gfm";
 import {
@@ -223,6 +224,18 @@ export function ChatPage() {
     return next;
   }, [conversationTasks, liveRuns]);
   const hasRunningTask = runs.some((task) => task.status === "running" || task.status === "queued");
+  const pendingApprovalsQuery = useQuery({
+    queryKey: ["approvals", "pending"],
+    queryFn: () => api.approvals({ status: "pending", limit: 50 }),
+    enabled: Boolean(conversationId),
+    refetchInterval: 5_000,
+    staleTime: 1_000
+  });
+  const pinnedApprovals = useMemo(() => {
+    const taskIds = new Set(conversationTasks.map((task) => task.id));
+    if (taskIds.size === 0) return [];
+    return (pendingApprovalsQuery.data?.approvals ?? []).filter((approval) => taskIds.has(approval.taskId));
+  }, [pendingApprovalsQuery.data, conversationTasks]);
   useEffect(() => {
     if (!hasRunningTask) setIsCancelling(false);
   }, [hasRunningTask]);
@@ -886,6 +899,17 @@ export function ChatPage() {
           onDragLeave={onComposerDragLeave}
           onDrop={onComposerDrop}
         >
+          {pinnedApprovals.length > 0 && (
+            <div className="composer-approvals" role="region" aria-label="待确认的操作">
+              <div className="composer-approvals-head">
+                <ShieldCheck size={14} />
+                <span>需要你确认后才能继续</span>
+              </div>
+              {pinnedApprovals.map((approval) => (
+                <ApprovalCard key={approval.id} approval={approval} />
+              ))}
+            </div>
+          )}
           {draggingFiles && (
             <div className="composer-drop-overlay" role="status" aria-live="polite">
               <Paperclip size={20} />

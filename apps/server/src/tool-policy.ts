@@ -33,6 +33,7 @@ export function toolApprovalSummary(toolName: string, value: unknown): string {
   if (toolName === "browser_download") return `从网页下载文件：${clipText(url ?? "当前页面", 200)}`;
   if (toolName === "browser_recipe") return `回放网页流程：${clipText(url ?? "已记录站点", 200)}`;
   if (toolName === "capture_screen") return `截取桌面画面：${path ?? "desktop.png"}`;
+  if (toolName === "read_desktop_file") return `读取桌面文件：${path ?? "未指定路径"}`;
   if (mcp) return `调用 MCP 工具：${mcp.serverId}/${mcp.toolName}`;
   return `执行敏感工具：${toolName}`;
 }

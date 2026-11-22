@@ -133,6 +133,54 @@ describe("native tool action binding", () => {
     expect(verifyResolvedAction(action!).ok).toBe(true);
   });
 
+  it("binds desktop file reads to an approval-gated host file action", () => {
+    const root = tempRoot();
+    const desktop = tempRoot();
+    const file = join(desktop, "项目介绍.md");
+    writeFileSync(file, "# 桌面文件\n", "utf8");
+    const previous = process.env.HEARTH_DESKTOP_DIR;
+    process.env.HEARTH_DESKTOP_DIR = desktop;
+    try {
+      for (const permissionMode of ["guarded", "full"] as const) {
+        const action = resolveToolAction({
+          toolName: "read_desktop_file",
+          argumentsValue: { path: file },
+          summary: "读取桌面文件",
+          workspaceRoot: root,
+          permissionMode,
+          context: "interactive"
+        });
+        expect(action?.kind).toBe("host_file");
+        expect(action?.hostFile?.pathRealPath).toBeTruthy();
+        expect(decideActionPolicy(action!, { permissionMode, context: "interactive", preauthorized: false }))
+          .toMatchObject({ allowed: true, requiresApproval: true });
+      }
+    } finally {
+      if (previous === undefined) delete process.env.HEARTH_DESKTOP_DIR;
+      else process.env.HEARTH_DESKTOP_DIR = previous;
+    }
+  });
+
+  it("fails closed when a desktop file read points at a missing file", () => {
+    const root = tempRoot();
+    const desktop = tempRoot();
+    const previous = process.env.HEARTH_DESKTOP_DIR;
+    process.env.HEARTH_DESKTOP_DIR = desktop;
+    try {
+      expect(() => resolveToolAction({
+        toolName: "read_desktop_file",
+        argumentsValue: { path: join(desktop, "missing.md") },
+        summary: "读取桌面文件",
+        workspaceRoot: root,
+        permissionMode: "guarded",
+        context: "interactive"
+      })).toThrow(/文件不存在/);
+    } finally {
+      if (previous === undefined) delete process.env.HEARTH_DESKTOP_DIR;
+      else process.env.HEARTH_DESKTOP_DIR = previous;
+    }
+  });
+
   it("does not invent an action for an unrecognized sensitive tool call", () => {
     const root = tempRoot();
     expect(resolveToolAction({

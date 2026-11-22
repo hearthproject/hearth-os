@@ -41,6 +41,9 @@ const EXTERNAL_WRITE_TOOLS = new Set([
   "comment"
 ]);
 const DESKTOP_TOOLS = new Set(["capture_screen", "desktop_click", "desktop_type", "desktop_press", "desktop_focus"]);
+// Reading a file outside the task sandbox (for example the user's Desktop) always
+// needs an explicit decision: the path is not covered by the task's read roots.
+const HOST_READ_TOOLS = new Set(["read_desktop_file"]);
 
 const READ_MCP_TOOLS = new Set([
   "library_search",
@@ -66,6 +69,7 @@ export function classifyTool(toolName: string, action: ResolvedAction | null = n
     return classification("unknown", "无法识别的 MCP 工具需要你先确认。", true, false);
   }
   if (LOCAL_READ_TOOLS.has(toolName)) return classification("local_read", "读取本机资料。", false, false);
+  if (HOST_READ_TOOLS.has(toolName)) return classification("host_read", "读取工作区之外的文件，需要你确认。", true, false);
   if (LOCAL_WRITE_TOOLS.has(toolName)) return classification("local_write", "修改本机文件。", false, false);
   if (LOCAL_DELETE_TOOLS.has(toolName)) return classification("local_delete", "删除本机文件。", false, false);
   if (LOCAL_EXEC_TOOLS.has(toolName)) return classification("local_exec", "在本机运行命令。", false, false);
@@ -109,6 +113,7 @@ export function classifyResolvedAction(action: ResolvedAction): ActionPolicyClas
   }
   if (action.kind === "file_write") return classification("local_write", "修改本机文件。", false, false);
   if (action.kind === "file_delete") return classification("local_delete", "删除本机文件。", false, false);
+  if (action.kind === "host_file") return classification("host_read", "读取工作区之外的文件，需要你确认。", true, false);
   if (action.kind === "desktop") return classification("desktop", "操作本机桌面。", false, false);
   if (action.kind === "browser") {
     const verb = action.browser?.action ?? "";

@@ -12,7 +12,7 @@ import type {
   RuntimeEvent,
   SubagentType
 } from "@hearth/agent-runtime";
-import { deserializeAgentState, inspectJournal, journalPathFor } from "@hearth/agent-runtime";
+import { deserializeAgentState, inspectJournal, journalPathFor, resolveDesktopFilePath } from "@hearth/agent-runtime";
 import type { ApprovalMode, BudgetDimension, BudgetExhaustion, ContextItem, ContextSettings, DelegationJob, DelegationResult, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, RunBudget, RunCheckpointProof, RunCheckpointRecord, RunRecord, TaskError, TaskFollowUpRecord, TaskLease, TaskProgressDetail, TaskRecord } from "@hearth/core";
 import { runCodex } from "@hearth/codex-executor";
 import type { DshApprovalOutcome, DshApprovalRequest, DshContextEvent } from "@hearth/deepseek-executor";
@@ -2079,7 +2079,7 @@ export class HearthScheduler {
     const argumentsValue = approvalArguments(input.request.call.arguments);
     const summary = toolApprovalSummary(toolName, input.request.call.arguments);
     const permissionMode = this.service.permissionModeForTask(input.task);
-    if (permissionMode === "full") return { allowed: true };
+    if (permissionMode === "full" && classification.actionClass !== "host_read") return { allowed: true };
     const context = this.service.store.listScheduleRunByTask(input.task.id) ? "scheduled" as const : "interactive" as const;
     let action: ResolvedAction | null;
     try {
@@ -3114,6 +3114,15 @@ export function resolveToolAction(input: {
         summary: input.summary,
         files,
         targetRevision: `patch-sha256:${createHash("sha256").update(args.patch).digest("hex")}`
+      };
+    }
+  } else if (input.toolName === "read_desktop_file") {
+    const path = typeof args.path === "string" && args.path.trim() ? args.path : null;
+    if (path) {
+      proposal = {
+        kind: "host_file",
+        summary: input.summary,
+        hostFile: { path: resolveDesktopFilePath(path), mode: "read" }
       };
     }
   } else if (input.toolName.startsWith("browser_") && input.toolName !== "browser_read" && input.toolName !== "browser_screenshot" && input.toolName !== "browser_assert") {

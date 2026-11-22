@@ -11,7 +11,7 @@ export type PermissionMode = (typeof PERMISSION_MODES)[number];
 export const APPROVAL_CONTEXTS = ["interactive", "scheduled", "webhook", "remote", "delegated"] as const;
 export type ApprovalContext = (typeof APPROVAL_CONTEXTS)[number];
 
-export const ACTION_KINDS = ["shell", "file_write", "file_delete", "network", "email", "calendar", "desktop", "browser", "mcp"] as const;
+export const ACTION_KINDS = ["shell", "file_write", "file_delete", "network", "email", "calendar", "desktop", "browser", "host_file", "mcp"] as const;
 export type ActionKind = (typeof ACTION_KINDS)[number];
 
 export const ACTION_RISKS = ["low", "medium", "high", "critical"] as const;
@@ -67,6 +67,16 @@ export interface ActionMcpTarget {
   argumentsDigest: string;
 }
 
+/**
+ * A read of a file that lives outside the task workspace (for example a file on
+ * the user's Desktop). It is always gated by an approval because the path is not
+ * covered by the task's read roots.
+ */
+export interface ActionHostFileTarget {
+  path: string;
+  mode: "read";
+}
+
 export interface ActionBrowserTarget {
   url: string;
   tabId?: string | undefined;
@@ -90,6 +100,7 @@ export interface ActionProposal {
   network?: ActionNetworkTarget | undefined;
   desktop?: ActionDesktopTarget | undefined;
   browser?: ActionBrowserTarget | undefined;
+  hostFile?: ActionHostFileTarget | undefined;
   mcp?: ActionMcpTarget | undefined;
   targetRevision?: string | undefined;
   risk?: ActionRisk | undefined;
@@ -112,6 +123,14 @@ export interface ResolvedFile {
   mode: ActionFileTarget["mode"];
 }
 
+export interface ResolvedHostFile {
+  pathRealPath: string;
+  exists: boolean;
+  sha256: string | null;
+  size: number;
+  mode: ActionHostFileTarget["mode"];
+}
+
 export interface ResolvedAction {
   actionId: string;
   kind: ActionKind;
@@ -124,6 +143,7 @@ export interface ResolvedAction {
   network: ActionNetworkTarget | null;
   desktop: ResolvedDesktopTarget | null;
   browser: ResolvedBrowserTarget | null;
+  hostFile: ResolvedHostFile | null;
   mcp: ActionMcpTarget | null;
   targetRevision: string | null;
   risk: ActionRisk;
@@ -183,13 +203,14 @@ export function resolveAction(input: ResolveActionInput): ResolvedAction {
   const network = proposal.network ? normalizeNetwork(proposal.network) : null;
   const desktop = proposal.desktop ? resolveDesktopTarget(proposal.desktop) : null;
   const browser = proposal.browser ? resolveBrowserTarget(proposal.browser) : null;
+  const hostFile = proposal.hostFile ? resolveHostFile(proposal.hostFile) : null;
   const mcp = proposal.mcp ? resolveMcpTarget(proposal.mcp) : null;
-  if (!command && files.length === 0 && !network && !desktop && !browser && !mcp) {
-    throw new ActionResolutionError("ACTION_TARGET_REQUIRED", "动作缺少可解析的命令、文件、网络、桌面、浏览器或 MCP 目标");
+  if (!command && files.length === 0 && !network && !desktop && !browser && !hostFile && !mcp) {
+    throw new ActionResolutionError("ACTION_TARGET_REQUIRED", "动作缺少可解析的命令、文件、网络、桌面、浏览器、本机文件或 MCP 目标");
   }
   const risk = proposal.risk ?? defaultRisk(proposal);
   const sideEffectClass = proposal.sideEffectClass ?? defaultSideEffectClass(proposal);
-  const preview = buildPreview(proposal, command, files, network, desktop, browser, mcp);
+  const preview = buildPreview(proposal, command, files, network, desktop, browser, hostFile, mcp);
   const digestInput = {
     kind: proposal.kind,
     summary: proposal.summary,
@@ -201,6 +222,7 @@ export function resolveAction(input: ResolveActionInput): ResolvedAction {
     network,
     desktop,
     browser,
+    hostFile,
     mcp,
     targetRevision: proposal.targetRevision ?? null,
     risk,
@@ -219,6 +241,7 @@ export function resolveAction(input: ResolveActionInput): ResolvedAction {
     network,
     desktop,
     browser,
+    hostFile,
     mcp,
     targetRevision: proposal.targetRevision ?? null,
     risk,
@@ -276,10 +299,16 @@ export function decideActionPolicy(action: ResolvedAction, input: ActionPolicyIn
   const interactive = context === "interactive";
   const classification = classifyResolvedAction(action);
   if (permissionMode === "full") {
+    // Host file reads sit outside the task sandbox, so they always ask even in
+    // full permission mode; the approval record is the only guard for them.
+    if (classification.actionClass === "host_read") {
+      return { allowed: true, requiresApproval: true, reason: classification.summary };
+    }
     return { allowed: true, requiresApproval: false, reason: "完全权限：动作直接执行" };
   }
   const readOnlyAllowed = classification.actionClass === "local_read"
     || classification.actionClass === "browser_read"
+    || classification.actionClass === "host_read"
     || classification.actionClass === "external_read";
   if (permissionMode === "read-only") {
     if (!readOnlyAllowed) return { allowed: false, requiresApproval: false, reason: "只读模式不允许执行写入或外部动作" };
@@ -328,6 +357,7 @@ function normalizeProposal(input: ActionProposal): ActionProposal {
       payload: cloneRecord(input.desktop.payload)
     } : undefined,
     browser: input.browser ? { ...input.browser } : undefined,
+    hostFile: input.hostFile ? { ...input.hostFile } : undefined,
     mcp: input.mcp ? { ...input.mcp } : undefined
   };
 }
@@ -397,6 +427,30 @@ function resolveFile(file: ActionFileTarget, sessionRoot: string, permissionMode
     throw new ActionResolutionError("FILE_REVISION_CHANGED", "文件内容与审批时的版本不一致");
   }
   return { pathRealPath: realPath, exists, sha256, mode: file.mode };
+}
+
+/**
+ * Resolve a host file read. Unlike `resolveFile` this deliberately does not
+ * enforce the session root: the whole point is to read a file the task sandbox
+ * does not cover. The approval gate in `decideActionPolicy` is what protects it.
+ */
+function resolveHostFile(target: ActionHostFileTarget): ResolvedHostFile {
+  if (!target || typeof target.path !== "string" || !target.path.trim()) {
+    throw new ActionResolutionError("HOST_FILE_PATH_REQUIRED", "本机文件动作缺少路径");
+  }
+  const path = resolve(target.path);
+  if (!existsSync(path)) {
+    throw new ActionResolutionError("HOST_FILE_NOT_FOUND", `文件不存在：${basename(path)}`);
+  }
+  if (!statSync(path).isFile()) throw new ActionResolutionError("HOST_FILE_NOT_REGULAR", "目标不是普通文件");
+  const realPath = realpathSync.native(path);
+  return {
+    pathRealPath: realPath,
+    exists: true,
+    sha256: fileSha256(realPath),
+    size: statSync(realPath).size,
+    mode: "read"
+  };
 }
 
 function normalizeNetwork(input: ActionNetworkTarget): ActionNetworkTarget {
@@ -473,6 +527,7 @@ function resolveMcpTarget(input: ActionMcpTarget): ActionMcpTarget {  const serv
 
 function defaultRisk(proposal: ActionProposal): ActionRisk {
   if (proposal.kind === "file_write" || proposal.kind === "file_delete" || proposal.kind === "mcp") return "medium";
+  if (proposal.kind === "host_file") return "medium";
   if (proposal.kind === "browser") {
     const action = proposal.browser?.action ?? "";
     if (action === "read" || action === "assert" || action === "screenshot") return "low";
@@ -487,6 +542,7 @@ function defaultRisk(proposal: ActionProposal): ActionRisk {
 function defaultSideEffectClass(proposal: ActionProposal): SideEffectClass {
   if (proposal.kind === "file_write") return "local_reversible";
   if (proposal.kind === "file_delete") return "local_irreversible";
+  if (proposal.kind === "host_file") return "none";
   if (proposal.kind === "browser") {
     const action = proposal.browser?.action ?? "";
     if (action === "read" || action === "assert" || action === "screenshot") return "none";
@@ -505,6 +561,7 @@ function buildPreview(
   network: ActionNetworkTarget | null,
   desktop: ResolvedDesktopTarget | null,
   browser: ResolvedBrowserTarget | null,
+  hostFile: ResolvedHostFile | null,
   mcp: ActionMcpTarget | null
 ): string {
   if (command) {
@@ -516,6 +573,7 @@ function buildPreview(
   if (browser) return `浏览器 ${browser.action} ${browser.url}${browser.elementRef ? ` @ ${browser.elementRef}` : ""}`;
   if (network) return `${network.method ?? "CONNECT"} ${network.host}${network.port ? `:${network.port}` : ""}`;
   if (desktop) return `${desktop.action} ${desktop.activeApp} frame ${desktop.frameId}`;
+  if (hostFile) return `read ${hostFile.pathRealPath}`;
   if (mcp) return `MCP ${mcp.serverId}/${mcp.toolName} args ${mcp.argumentsDigest.slice(0, 12)}`;
   return proposal.summary;
 }

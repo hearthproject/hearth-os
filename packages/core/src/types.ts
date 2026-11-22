@@ -2675,6 +2675,7 @@ export const ACTION_CLASSES = [
   "local_exec",
   "browser_read",
   "desktop",
+  "host_read",
   "external_read",
   "external_write",
   "skill_install",

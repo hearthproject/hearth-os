@@ -33,10 +33,13 @@ export class MentionResolver {
     const surfaces = this.detectSurfaces(context.text);
     const mentions = surfaces.map((surface) => this.resolveSurface(surface, context));
     const ambiguous = mentions.filter((mention) => mention.resolution !== "resolved");
+    // An explicit absolute path in the message is the user pointing at one real
+    // file; entity ambiguity must not block the action it belongs to.
+    const explicitPath = hasExplicitPath(context.text);
     return {
       mentions,
       needsClarification: ambiguous.length > 0,
-      blocksAction: Boolean(context.irreversible && ambiguous.length > 0),
+      blocksAction: Boolean(context.irreversible && ambiguous.length > 0 && !explicitPath),
       question: ambiguous.length > 0 ? this.clarificationQuestion(ambiguous[0]!) : null
     };
   }
@@ -46,7 +49,10 @@ export class MentionResolver {
     const candidates = this.candidates(surface, normalized, context);
     const top1 = candidates[0];
     const top2 = candidates[1];
-    const resolved = Boolean(top1 && top1.score >= 0.75 && (!top2 || top1.score - top2.score >= 0.15));
+    // A single exact alias match is unambiguous even when its weighted score is
+    // low (recency and scope affinity contribute nothing on a cold entity).
+    const uniqueExact = candidates.length === 1 && candidates[0]!.reason === "别名精确匹配";
+    const resolved = Boolean(top1 && (uniqueExact || (top1.score >= 0.75 && (!top2 || top1.score - top2.score >= 0.15))));
     const mention: MentionRecord = {
       id: `mention:${randomUUID()}`,
       surface,
@@ -65,6 +71,7 @@ export class MentionResolver {
 
   clarificationQuestion(mention: MentionRecord): string {
     if (mention.candidates.length === 0) return `你说的“${mention.surface}”我还没有对应到具体对象，能否补充全名或来源？`;
+    if (mention.candidates.length === 1) return `你说的“${mention.surface}”是指${mention.candidates[0]!.label}吗？`;
     const choices = mention.candidates.slice(0, 3).map((candidate) => candidate.label).join("、");
     return `你说的“${mention.surface}”是指${choices}中的哪一个？`;
   }
@@ -140,6 +147,13 @@ export class MentionResolver {
     });
     return scored.sort((a, b) => b.score - a.score);
   }
+}
+
+const EXPLICIT_PATH_PATTERN = /(?:[A-Za-z]:[\\/]|\\\\)[^\s"'`]+/;
+
+/** True when the message contains an absolute path, e.g. C:\Users\me\Desktop\a.md. */
+function hasExplicitPath(text: string): boolean {
+  return EXPLICIT_PATH_PATTERN.test(text);
 }
 
 function typeCompatibilityFor(surface: string, kind: EntityKind): number {

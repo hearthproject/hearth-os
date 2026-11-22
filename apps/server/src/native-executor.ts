@@ -179,7 +179,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
   const drafting = !coding && isTextDraftTask({ ...options.task, expectedOutputs: options.expectedOutputs });
   const draftTools = new Set(["read_file", "write_file", "finish_task", "ask_user"]);
   const toolsForRun = dedupeTools([...createBuiltinTools(), ...(options.extraTools ?? [])])
-    .filter((tool) => !directRead || ["read_file", "read_document", "finish_task"].includes(tool.definition.name))
+    .filter((tool) => !directRead || ["read_file", "read_desktop_file", "read_document", "finish_task"].includes(tool.definition.name))
     .filter((tool) => !drafting || draftTools.has(tool.definition.name))
     .map((tool) => directRead && tool.definition.name === "read_file" ? directReadTool(tool) : tool)
     .map((tool) => !drafting || tool.definition.name !== "write_file" ? tool : {
@@ -1244,7 +1244,8 @@ export function nativePermissionsFor(task: TaskRecord, prepared: PreparedWorkspa
     const tools = [
       ...base,
       ...((githubTask || codeTask) && !base.includes("shell") ? ["shell"] : []),
-      ...(screenshotTask && !base.includes("capture_screen") ? ["capture_screen"] : [])
+      ...(screenshotTask && !base.includes("capture_screen") ? ["capture_screen"] : []),
+      ...(!base.includes("read_desktop_file") ? ["read_desktop_file"] : [])
     ];
     return {
       ...task.permissions,
@@ -1449,7 +1450,7 @@ async function summarizeNativeContext(settings: ModelSettings, messages: AgentMe
 }
 
 export function nativeSystemPrompt(task: TaskRecord, expectedOutputs: string[], availableTools?: string[]): string {
-  if (wantsDirectFileRead(task.goal) && expectedOutputs.length === 0) return "直接读取用户指定的文件，不要先列目录、搜索替代文件、委派或建立目标。文件不存在时立即如实告知并结束，不重试、不创建文件。读取成功后用 finish_task 在对话中返回结果，outputs 留空，不生成 Markdown 报告。";
+  if (wantsDirectFileRead(task.goal) && expectedOutputs.length === 0) return "直接读取用户指定的文件，不要先列目录、搜索替代文件、委派或建立目标。用户指定的是桌面等工作区之外的文件时，必须用 read_desktop_file 读取，它会请求用户批准；read_file 只能读工作区内的文件。文件不存在时立即如实告知并结束，不重试、不创建文件。读取成功后用 finish_task 在对话中返回结果，outputs 留空，不生成 Markdown 报告。";
   if (isTextDraftTask({ ...task, expectedOutputs })) return [DRAFT_INSTRUCTION, "仅将最终草稿写入本轮输出目录，已有草稿时只应用用户新增信息。写入成功后直接调用 finish_task，不反复润色，不读取无关文件。", `期望产物：${expectedOutputs.join("、")}`].join("\n");
   const toolSet = availableTools ? new Set(availableTools) : null;
   const hasTool = (name: string): boolean => toolSet === null || toolSet.has(name);
@@ -1459,6 +1460,7 @@ export function nativeSystemPrompt(task: TaskRecord, expectedOutputs: string[], 
     "你必须通过工具真正完成工作，不能只描述步骤或假装已经完成。",
     "当前是完全权限：可以直接读写本机目录、运行外部命令和访问网络，不需要征求批准；不要因为权限犹豫而停下。",
     ...(hasAny("list_files", "glob", "grep", "read_file") ? ["先用 list_files、glob、grep、read_file 了解已有资料，再生成结果。"] : []),
+    ...(hasTool("read_desktop_file") ? ["读取工作区之外的文件（例如用户桌面）必须用 read_desktop_file；read_file 只能读工作区内的文件。read_desktop_file 需要用户批准，被拒绝时不要重试同一路径。"] : []),
     ...(hasAny("read_document") ? ["PDF、Word、Excel、CSV 等文档优先调用 read_document。"] : []),
     ...(hasAny("write_spreadsheet", "write_document") ? ["需要表格或 Word 产物时使用 write_spreadsheet 或 write_document。"] : []),
     ...(hasTool("delegate_task") ? ["边界清晰、可独立完成的子任务可以调用 delegate_task。只读子代理用于调查；隔离写子代理会在独立 Worktree 中工作并返回分支和提交，结果必须由你检查后手动处理，不会自动合并。"] : []),
