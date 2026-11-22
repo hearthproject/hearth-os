@@ -35,7 +35,7 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
 
 模型可以更换，执行器可以替换，界面可以重写，但任务状态、授权范围、完成证据、产物摘要和外部回执必须留下来。Hearth 要回答的不是“模型能不能写出一段话”，而是“这件事有没有真正完成，失败后能不能接着做，外部动作能不能被核对”。
 
-> **当前状态（2026-11-20，v0.2.0）：** 可信执行、浏览器自动化、项目档案、首次真实任务验证、监督收件箱、自用报告、可选签名更新和发布脚本已进入 `main`。110 个测试文件、782 个用例、12 项浏览器 fixture 和 18 项离线 UI 端到端通过，Tauri updater 编译、0.2.0 NSIS 安装包（30.5 MiB）和文档构建通过。真实模型首跑被当前 key 的无权限错误阻塞；日常 Chrome 扩展桥、干净机安装、真实账户和已签名更新发布仍未验收。逐项证据见[2026-11 验收报告](https://hearthproject.github.io/hearth-os/delivery/acceptance-2026-11.html)。
+> **当前状态（2026-11-21，v0.3.2）：** 可信执行、浏览器自动化、项目档案、首次真实任务验证、监督收件箱、自用报告、可选签名更新和发布脚本已进入 `main`。129 个测试文件、864 个用例、12 项浏览器 fixture 和 18 项离线 UI 端到端通过，Tauri updater 编译、0.3.2 NSIS 安装包（30.5 MiB）和文档构建通过。真实模型首跑被当前 key 的无权限错误阻塞；日常 Chrome 扩展桥、干净机安装、真实账户和已签名更新发布仍未验收。逐项证据见[2026-11 验收报告](https://hearthproject.github.io/hearth-os/delivery/acceptance-2026-11.html)。
 
 ## 界面一览
 
@@ -102,7 +102,7 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
 
 | 领域 | 状态 | 证据 | 留空 |
 |---|---|---|---|
-| 可信执行 | 完成 | 逐轮时间线、回退漂移保护、审批模式、782 个测试 | 真实用户长期回退演练 |
+| 可信执行 | 完成 | 逐轮时间线、回退漂移保护、审批模式、864 个用例 | 真实用户长期回退演练 |
 | 浏览器 | 代码闭环 | 16 个工具、12 项 fixture、18 个证据文件、Chrome 真实启动 | 日常 Chrome 扩展桥、验证码/风控站点 |
 | 记忆与档案 | 完成 | 项目档案、工作方式、7 项档案测试、注入边界测试 | 真实长期写作/编码使用 |
 | 首跑与更新 | 代码闭环 | fake-runner 测试、Tauri updater 编译、发布脚本 | 真实模型首跑、签名更新发布、干净机安装 |
@@ -218,9 +218,9 @@ npm ci
 npm run tauri:build
 ```
 
-生成 `release\Hearth_0.2.0_x64-setup.exe`（NSIS 按用户安装，免 UAC，安装到 `%LOCALAPPDATA%\Programs\Hearth`）。安装后双击开始菜单的 Hearth 即可；关窗会隐藏到托盘，托盘菜单负责退出、环境体检、桌面助手、数据目录和日志目录。首次启动会让你选择现有 `.hearth` 或新建数据目录。
+生成 `release\Hearth_0.3.2_x64-setup.exe`（NSIS 按用户安装，免 UAC，安装到 `%LOCALAPPDATA%\Programs\Hearth`）。安装后双击开始菜单的 Hearth 即可；关窗会隐藏到托盘，托盘菜单负责退出、环境体检、桌面助手、数据目录和日志目录。首次启动会让你选择现有 `.hearth` 或新建数据目录。
 
-桌面版只保留 Tauri 实现：内置官方 Node 22.23.2、npm 10.9.8 和全部服务端功能，0.2.0 安装包 30.5 MiB，安装后约 131 MiB。Codex 使用系统中的 `codex.exe`，不内置 479 MiB 平台二进制。
+桌面版只保留 Tauri 实现：内置官方 Node 22.23.2、npm 10.9.8 和全部服务端功能，0.3.2 安装包 30.5 MiB，安装后约 131 MiB。Codex 使用系统中的 `codex.exe`，不内置 479 MiB 平台二进制。
 
 构建、体积、数据目录、日志、托盘、环境体检和已知限制见 [docs/design/desktop.md](docs/design/desktop.md)；从 Electron 到约 131 MiB 的完整压缩过程、体积去向和使用前提见 [docs/design/desktop-compression.md](docs/design/desktop-compression.md)。
 
@@ -357,15 +357,15 @@ hearth-os/
 - 当前模型 key 调用 `deepseek-v4.1-flash-1017` 返回 `Access to model denied`，真实模型首跑未验收。安装包未做干净机安装/卸载，已签名自动更新未发布，也没有 Windows Authenticode 证书。
 - 评测 case、场景和实验已迁到独立仓库；主仓库不再注册评测桥接，测试不代表真实评测实验已经运行。native 30 题的最终提交 `eb32ad5` 尚未完成连续复测，18/30 与累计 19/30 都不是最终官方单轮成绩。
 - 原生运行时仍不支持远程 MCP、OAuth、图片/扫描件视觉理解、PPTX、LSP、格式化器或自动 cherry-pick。
-- 这是 `0.2.0` 工作版本，不是 v1.0 正式发布。
+- 这是 `0.3.2` 工作版本，不是 v1.0 正式发布。
 
 ## 验证
 
-2026-11-20 的当前结果：
+2026-11-21 的当前结果：
 
 ```bash
 npm run typecheck     # 0 error
-npm test              # 110 个测试文件、782 个测试通过
+npm test              # 129 个测试文件、864 个用例通过
 npm run build         # Web 构建通过
 npm run docs:build    # 文档构建通过，无死链
 HEARTH_E2E_OFFLINE=1 npm run test:e2e
@@ -375,7 +375,7 @@ cargo check --manifest-path apps/desktop-tauri/src-tauri/Cargo.toml --features u
 
 E2E 会在随机本地端口启动服务，并使用临时 `HEARTH_DATA_DIR`，不会触碰真实 `.hearth` 数据。可用 `HEARTH_E2E_MODEL_SETTINGS` 指定其他模型配置；`HEARTH_E2E_OFFLINE=1` 跳过在线聊天；`HEARTH_E2E_KEEP=1` 保留临时数据用于排查。
 
-`vitest.config.ts` 将单个测试的超时设为 20 秒，避免 Windows 上 Git、Worktree 和 MCP 探测测试被默认 5 秒超时误判。测试通过不等于真实验收完成；逐项证据和留空项见[2026-11 验收报告](https://hearthproject.github.io/hearth-os/delivery/acceptance-2026-11.html)。
+`vitest.config.ts` 将单个测试超时设为 20 秒、hook 超时设为 30 秒，避免 Windows 上 Git、Worktree 和 MCP 探测测试被默认 5/10 秒超时误判。测试通过不等于真实验收完成；逐项证据和留空项见[2026-11 验收报告](https://hearthproject.github.io/hearth-os/delivery/acceptance-2026-11.html)。
 
 独立评测仓库在 2026-11-14 完成自检服务与 API 的 9 项定向测试，`npm run typecheck` 和 `npm run build` 通过。`npm run typecheck:scenarios` 仍受 Hearth OS 的 PDF 模块类型声明问题影响；完整 30 题实验待后续复测。
 
