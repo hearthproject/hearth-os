@@ -1014,13 +1014,14 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
             ...(options.sandbox ? { sandbox: options.sandbox } : {}),
             ...(options.verifyGoalCompletion ? { verifyGoalCompletion: options.verifyGoalCompletion } : {})
           }, options.toolTimeoutMs ?? 120_000, signal, toolRetryPolicy);
-          result = outcome.result ?? { content: "工具执行未返回结果", isError: true };
-          toolRetries = outcome.retries;
-          toolTotalDurationMs = outcome.totalDurationMs;
-          if (!result) {
+          if (outcome.result) {
+            result = outcome.result;
+          } else {
             const failure = normalizeToolFailure(outcome.lastError, "TOOL_EXEC_FAILED");
             result = { content: `工具执行失败：${failure.message}`, isError: true, error: failure };
           }
+          toolRetries = outcome.retries;
+          toolTotalDurationMs = outcome.totalDurationMs;
         }
         }
       }
