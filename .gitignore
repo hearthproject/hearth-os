@@ -9,6 +9,9 @@ coverage/
 __pycache__/
 work/screenshots/
 
+# Local logs
+*.log
+
 # Local configuration and secrets
 .env
 .env.*
