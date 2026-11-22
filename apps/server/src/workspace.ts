@@ -319,6 +319,12 @@ export function buildTaskPrompt(
     return `- ${input.label}：${input.localPath}${source}${untrusted}`;
   });
   const outputLines = expectedOutputs.map((output) => `- ${output}`);
+  if (expectedOutputs.length === 0) return [
+    `任务：${task.goal}`,
+    `工作目录：${workspace.root}`,
+    ...inputLines,
+    "直接读取指定文件并在对话中返回结果，不生成交付文件。确认文件不存在时立即说明并结束，不搜索替代文件，不创建报告。"
+  ].join("\n");
   const acceptanceLines = acceptance.map((criterion, index) => `${index + 1}. ${criterion}`);
   const repositoryLines = workspace.repository ? [
     "",

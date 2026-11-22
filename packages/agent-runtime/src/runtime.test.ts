@@ -8,6 +8,25 @@ import { createBuiltinTools, defaultTaskPermissions } from "./tools.ts";
 import type { AgentCheckpoint, AgentModel, AgentModelTurn, AgentTool, AgentToolCall, RuntimeEvent } from "./types.ts";
 
 describe("agent runtime", () => {
+  it("cancels promptly even when a model ignores the abort signal", async () => {
+    const controller = new AbortController();
+    let started!: () => void;
+    const ready = new Promise<void>((resolve) => { started = resolve; });
+    let complete!: (value: AgentModelTurn) => void;
+    const running = runAgent({
+      model: async () => { started(); return new Promise<AgentModelTurn>((resolve) => { complete = resolve; }); },
+      tools: [], goal: "read a file", systemPrompt: "system", workspaceRoot: ".", outDir: ".",
+      permissions: { tools: [], readRoots: [], writeRoots: [], networkHosts: [] },
+      signal: controller.signal, budget: {}
+    });
+    await ready;
+    controller.abort();
+    try {
+      expect((await running).status).toBe("cancelled");
+    } finally {
+      complete(turn("late answer", []));
+    }
+  }, 2000);
   const roots: string[] = [];
 
   afterEach(() => {
@@ -591,6 +610,7 @@ describe("agent runtime", () => {
       model,
       tools: createBuiltinTools(),
       goal: "不要重复",
+      toolCircuitBreaker: { threshold: 10 },
       systemPrompt: "system",
       budget: { maxTurns: 10, maxToolCalls: 10, maxTokens: 10_000, maxDurationMs: 30_000 },
       permissions: defaultTaskPermissions({ workspaceRoot: root, outDir: join(root, "out"), networkHosts: [] }),

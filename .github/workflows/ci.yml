@@ -13,6 +13,10 @@ concurrency:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 env:
   CI: "true"
   NODE_OPTIONS: "--max-old-space-size=4096"
@@ -39,7 +43,8 @@ jobs:
         run: npm run typecheck 2>&1 | tee typecheck.log
 
       - name: Test
-        run: npm test 2>&1 | tee test.log
+        timeout-minutes: 10
+        run: npm test -- --reporter=verbose 2>&1 | tee test.log
 
       - name: Build web
         run: npm run build 2>&1 | tee build.log
@@ -48,7 +53,7 @@ jobs:
         run: npm run docs:build 2>&1 | tee docs-build.log
 
       - name: Upload failure logs
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v4
         with:
           name: ci-logs

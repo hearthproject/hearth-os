@@ -348,9 +348,9 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       source
     });
   };
-  // Hearth no longer enforces turn/tool/token/time budgets. Unlimited work is
-  // the product default; only explicit cancellation stops a run.
-  const limitOf = (_value: number | undefined): number | null => null;
+  // Missing, non-finite, or non-positive limits mean unlimited; explicit limits apply.
+  const limitOf = (value: number | undefined): number | null =>
+    typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
   const turnLimit = limitOf(options.budget.maxTurns);
   const toolCallLimit = limitOf(options.budget.maxToolCalls);
   const tokenLimit = limitOf(options.budget.maxTokens);
@@ -785,12 +785,12 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       while (true) {
       try {
         const requestMessageCount = messages.length;
-        turn = await options.model(
+        turn = await withAbort(options.model(
           cloneMessages(messages),
           requestDefinitions,
-          (text) => emit({ type: "assistant.delta", turn: turns, text }),
+          (text) => { if (!signal.aborted) emit({ type: "assistant.delta", turn: turns, text }); },
           signal
-        );
+        ), signal);
         if (turn.usage) {
           lastContextAnchor = {
             inputTokens: turn.usage.inputTokens,
@@ -1274,6 +1274,18 @@ function cloneMessages(messages: AgentMessage[]): AgentMessage[] {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+async function withAbort<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener("abort", onAbort);
+      reject(new Error("任务已取消"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+    pending.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
 }
 
 async function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {

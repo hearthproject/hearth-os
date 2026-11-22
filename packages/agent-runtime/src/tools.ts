@@ -193,7 +193,7 @@ const readFileTool: AgentTool = {
     const path = stringArg(args, "path");
     const target = resolveSafe(path, context.workspaceRoot, context.permissions.readRoots, context.permissions.fullAccess ?? false);
     assertReadable(target, context.permissions.readRoots, context.permissions.fullAccess ?? false);
-    if (!existsSync(target)) throw new Error(missingPathError(path, target, context.workspaceRoot));
+    if (!existsSync(target)) throw Object.assign(new Error(missingPathError(path, target, context.workspaceRoot)), { code: "ENOENT", path });
     const stat = lstatSync(target);
     if (!stat.isFile()) throw new Error(`不是普通文件：${path}`);
     if (stat.size > MAX_READ_BYTES) throw new Error(`文件过大，请先用 search_text 定位：${path}`);

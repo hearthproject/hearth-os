@@ -67,7 +67,7 @@ import { chatModelConfigured, loadModelSettings, type ModelSettings } from "./mo
 import { prepareTaskRuntime, type RuntimePreparation } from "./runtime.ts";
 import type { HearthService } from "./service.ts";
 import { buildDeliveryRepairPrompt, buildTaskPrompt, prepareWorkspace, UnsupportedInputError, type PreparedWorkspace, type TaskApprovalKind } from "./workspace.ts";
-import { wantsPublicWebResearch, wantsScreenshot } from "./task-intent.ts";
+import { wantsDirectFileRead, wantsPublicWebResearch, wantsScreenshot } from "./task-intent.ts";
 import type { WebSearchService } from "./web-search.ts";
 import type { SkillService } from "./skills/service.ts";
 import { createSkillTools } from "./skill-tools.ts";
@@ -514,6 +514,7 @@ export class HearthScheduler {
       return task;
     }
     this.cancelled.add(taskId);
+    this.controllers.get(taskId)?.abort();
     this.cancelDelegationJobs(taskId);
     this.steering.delete(taskId);
     for (const followUp of this.service.store.listTaskFollowUps(taskId)) {
@@ -1991,7 +1992,7 @@ export class HearthScheduler {
       if (remainingIssues.length > 0) throw new Error(remainingIssues.join("\n"));
       if (!result.finalResponse.trim()) throw new Error("执行器没有返回最终总结");
       this.assertLease(taskId, run.leaseEpoch ?? 0, controller.signal.aborted && this.stopping);
-      const artifacts = publishArtifacts({
+      const artifacts = expectedOutputs.length === 0 ? [] : publishArtifacts({
         task, run, outDir: prepared.outDir, artifactBase: this.artifactBase, expectedOutputs, inputs: prepared.inputs,
         excludeRelativePaths: ["HANDOFF.md"],
         executor: { id: executorId, threadId: result.threadId, label: result.label, usage: result.usage },
@@ -3186,6 +3187,7 @@ function errorMessage(error: unknown): string {
 }
 
 function expectedOutputsForTask(task: TaskRecord): string[] {
+  if (wantsDirectFileRead(task.goal) && !(task.expectedOutputs ?? []).some((output) => output !== "result.md")) return [];
   const declared = task.expectedOutputs?.length ? task.expectedOutputs : ["result.md"];
   const hasImage = declared.some((output) => /\.(png|jpe?g|webp)$/i.test(output));
   if (!hasImage && wantsScreenshot(task.title + " " + task.goal)) return ["desktop.png"];

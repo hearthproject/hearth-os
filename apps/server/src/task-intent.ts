@@ -21,6 +21,13 @@ export function wantsCodeExecution(text: string): boolean {
   return CODE_EXECUTION_HINTS.test(text);
 }
 
+// Plain file inspection needs an answer, not a generated report or repair loop.
+export function wantsDirectFileRead(text: string): boolean {
+  return /读取|读一下|读一读|查看|看看|\bread\b|\bshow\b/i.test(text)
+    && /文件|file|[\\/]|\.[a-z0-9]{1,8}\b/i.test(text)
+    && !/生成|创建|新建|写入|保存|另存|输出到|报告|修改|修复|删除|发送|提交|运行|执行|截图|搜索|查找|批量|所有|多个|分别|然后|如果.*(?:则|就)|\b(?:write|save|create|generate|report|fix|delete|send|submit|run|execute|search|find|all|multiple|then|and)\b/i.test(text);
+}
+
 const PR_ACTION_HINTS = /(审核|评审|review|列出|处理|回复|修改|rebase|关闭|合并|merge)/i;
 
 export function needsGithubRepository(text: string): boolean {

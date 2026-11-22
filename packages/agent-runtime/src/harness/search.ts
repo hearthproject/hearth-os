@@ -110,8 +110,8 @@ function searchWithJavaScript(options: SearchOptions): SearchResult {
     if (!stat.isFile() || stat.size > TEXT_MAX_BYTES) return;
     const relativePath = relative(root, path).split(sep).join("/");
     if (ignored(relativePath)) return;
-    if (include.length > 0 && !include.some((glob) => picomatch(glob)(relativePath))) return;
-    if (exclude.some((glob) => picomatch(glob)(relativePath))) return;
+    if (include.length > 0 && !include.some((glob) => picomatch(glob, { basename: true })(relativePath))) return;
+    if (exclude.some((glob) => picomatch(glob, { basename: true })(relativePath))) return;
     let buffer: Buffer;
     try {
       buffer = readFileSync(path);

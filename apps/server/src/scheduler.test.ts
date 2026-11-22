@@ -52,6 +52,25 @@ function nativeResult(text: string) {
 }
 
 describe("Hearth scheduler", () => {
+  it("finishes a direct file read without report repair passes", async () => {
+    const service = setup();
+    let calls = 0;
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, {
+      modelSettingsForExecutor: () => chatSettings(),
+      nativeRunner: async (options) => {
+        calls++;
+        expect(options.expectedOutputs).toEqual([]);
+        expect(options.prompt).not.toContain("缺失产物不算完成");
+        return { ...nativeResult("文件不存在：missing.txt。"), outputs: [] };
+      }
+    });
+    scheduler.start();
+    const task = service.createTask({ title: "读文件", goal: "读取 missing.txt", executorId: "native" });
+    const completed = await waitForStatus(service, task.id, "completed");
+    expect(completed.resultSummary).toBe("文件不存在：missing.txt。");
+    expect(calls).toBe(1);
+    expect(store?.listArtifacts(task.id).some((artifact) => artifact.relativePath.endsWith(".md"))).toBe(false);
+  });
   let store: HearthStore | null = null;
   let scheduler: HearthScheduler | null = null;
   let tempDir: string | null = null;
@@ -1913,6 +1932,11 @@ describe("Hearth scheduler", () => {
     return new HearthScheduler({
       service,
       codexRunner,
+      // These tests inject runners; they must not depend on the developer's Codex login.
+      executorHealth: (executorId) => ({
+        canRun: executorId === "codex" || (executorId === "native" && Boolean(extra.nativeRunner)) || (executorId === "deepseek-harness" && Boolean(extra.deepseekRunner)),
+        issues: []
+      }),
       ...(extra.nativeRunner ? { nativeRunner: extra.nativeRunner } : {}),
       modelSettingsPath: extra.modelSettingsPath ?? join(requireTemp(), "model-settings.json"),
       workspaceRoot: join(requireTemp(), "workspaces"),

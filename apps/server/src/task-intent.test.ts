@@ -4,6 +4,10 @@ import { resolveExecutorFromEnabled, resolveExecutorLocked } from "./executors.t
 import { needsGithubRepository, wantsCodeExecution, wantsGithubAccess, wantsPublicWebResearch, wantsScreenshot } from "./task-intent.ts";
 
 describe("task intent", () => {
+  it("does not require a report for a direct file read", () => {
+    expect(planExecution("读取 E:/data/missing.txt")).toMatchObject({ executorId: "native", expectedOutputs: [] });
+    expect(planExecution("读取文件并保存报告").expectedOutputs).toEqual(["result.md"]);
+  });
   it("recognizes desktop screenshot requests", () => {
     expect(wantsScreenshot("截一张我电脑桌面的图发给我")).toBe(true);
     expect(planExecution("截一张我电脑桌面的图发给我")).toMatchObject({

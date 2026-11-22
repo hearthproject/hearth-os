@@ -536,14 +536,21 @@ export function ChatPage() {
 
   async function stopRunningTask() {
     const task = stoppableTask;
+    if (isCancelling) return;
+    setQueue([]);
+    abortRef.current?.abort();
     if (!task) return;
     setIsCancelling(true);
     try {
       await api.cancel(task.id);
-    } catch {
-      // 取消请求失败也没关系，任务状态会通过查询/事件流更新
+      setLiveRuns((prev) => prev.map((run) => run.id === task.id ? { ...run, status: "cancelled" } : run));
+    } catch (caught) {
+      setError(caught instanceof Error ? `停止失败：${caught.message}` : "停止失败，请重试");
+    } finally {
+      setIsCancelling(false);
     }
     void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    void queryClient.invalidateQueries({ queryKey: ["conversation"] });
   }
 
   async function dispatch(outgoing: OutgoingMessage) {
@@ -750,8 +757,8 @@ export function ChatPage() {
   const visibleExecutorIds = EXECUTOR_ORDER.filter((id) => executorAvailability[id] || id === selectedExecutorId);
   const isWorking = sending || hasRunningTask;
   const stoppableTask = useMemo(
-    () => conversationTasks.find((task) => task.status === "running" || task.status === "queued"),
-    [conversationTasks]
+    () => runs.find((task) => task.status === "running" || task.status === "queued"),
+    [runs]
   );
   const hasDraft = Boolean(input.trim() || attachments.length > 0);
   const canSubmit = !uploading && settingsReady && !selectedExecutorUnavailable && hasDraft;
@@ -1146,12 +1153,12 @@ export function ChatPage() {
             <button
               type="button"
               className={`composer-send ${isWorking ? "working" : ""} ${stoppableTask ? "stopping" : ""}`}
-              onClick={() => (stoppableTask ? void stopRunningTask() : void send())}
-              disabled={!canSubmit && !stoppableTask}
+              onClick={() => (stoppableTask || sending ? void stopRunningTask() : void send())}
+              disabled={isCancelling || (!canSubmit && !stoppableTask && !sending)}
               aria-busy={isWorking}
               title={stoppableTask
                 ? `停止任务：${stoppableTask.title}`
-                : selectedExecutorUnavailable
+                : sending ? "停止回复" : selectedExecutorUnavailable
                   ? "当前锁定的执行器不可用"
                   : isWorking
                     ? "加入队列"
@@ -1159,7 +1166,7 @@ export function ChatPage() {
             >
               {uploading
                 ? <Loader2 size={17} className="spin" />
-                : stoppableTask
+                : stoppableTask || sending
                   ? <span className="stop-icon" />
                   : isWorking && !hasDraft
                     ? <Loader2 size={17} className="spin" />

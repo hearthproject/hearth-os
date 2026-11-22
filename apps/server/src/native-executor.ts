@@ -47,7 +47,7 @@ import {
   type RuntimeEvent,
   type SandboxRuntime
 } from "@hearth/agent-runtime";
-import { wantsCodeExecution, wantsGithubAccess, wantsPublicWebResearch, wantsScreenshot } from "./task-intent.ts";
+import { wantsDirectFileRead, wantsCodeExecution, wantsGithubAccess, wantsPublicWebResearch, wantsScreenshot } from "./task-intent.ts";
 import { supportsToolCalling, streamAgentTurn } from "./model-agent.ts";
 import { completeChat } from "./model-client.ts";
 import { WindowsAclSandboxProvider } from "./native-sandbox.ts";
@@ -122,7 +122,8 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
   const githubTask = wantsGithubAccess(`${options.task.title}\n${options.task.goal}`);
   const codeTask = wantsCodeExecution(`${options.task.title}\n${options.task.goal}`);
   const researchTask = wantsPublicWebResearch(`${options.task.title}\n${options.task.goal}`);
-  const profile = codingHarnessEnabled()
+  const directRead = wantsDirectFileRead(options.task.goal) && options.expectedOutputs.length === 0;
+  const profile = !directRead && codingHarnessEnabled()
     ? resolveHarnessProfile({
         taskKind: options.task.taskKind,
         hasRepository: existsSync(join(options.prepared.root, ".git")),
@@ -178,7 +179,9 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
   const drafting = !coding && isTextDraftTask({ ...options.task, expectedOutputs: options.expectedOutputs });
   const draftTools = new Set(["read_file", "write_file", "finish_task", "ask_user"]);
   const toolsForRun = dedupeTools([...createBuiltinTools(), ...(options.extraTools ?? [])])
+    .filter((tool) => !directRead || ["read_file", "read_document", "finish_task"].includes(tool.definition.name))
     .filter((tool) => !drafting || draftTools.has(tool.definition.name))
+    .map((tool) => directRead && tool.definition.name === "read_file" ? directReadTool(tool) : tool)
     .map((tool) => !drafting || tool.definition.name !== "write_file" ? tool : {
       ...tool,
       execute: async (input: unknown, context: AgentToolContext) => {
@@ -189,7 +192,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
       }
     });
   const availableTools = toolsForRun.map((tool) => tool.definition.name);
-  const goalBlock = !options.isSubagent ? goalContinuationPrompt(options.prepared.root) : null;
+  const goalBlock = !directRead && !options.isSubagent ? goalContinuationPrompt(options.prepared.root) : null;
   const memoryIndex = coding ? memoryIndexBlock(options.prepared.root) : null;
   const projectDossier = coding && !options.isSubagent && options.task.projectId
     ? dossierPromptBlock(new DossierStore(DOSSIER_DIR).read(options.task.projectId))
@@ -285,7 +288,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
       }
     },
     validateFinish: (result, context) => {
-      const goalIssue = !options.isSubagent ? goalFinishIssue(options.prepared.root) : null;
+      const goalIssue = !directRead && !options.isSubagent ? goalFinishIssue(options.prepared.root) : null;
       if (goalIssue) return goalIssue;
       const jsonIssue = jsonDeliverableIssue(options.prepared.outDir, options.expectedOutputs);
       if (jsonIssue) return jsonIssue;
@@ -1434,6 +1437,7 @@ async function summarizeNativeContext(settings: ModelSettings, messages: AgentMe
 }
 
 export function nativeSystemPrompt(task: TaskRecord, expectedOutputs: string[], availableTools?: string[]): string {
+  if (wantsDirectFileRead(task.goal) && expectedOutputs.length === 0) return "直接读取用户指定的文件，不要先列目录、搜索替代文件、委派或建立目标。文件不存在时立即如实告知并结束，不重试、不创建文件。读取成功后用 finish_task 在对话中返回结果，outputs 留空，不生成 Markdown 报告。";
   if (isTextDraftTask({ ...task, expectedOutputs })) return [DRAFT_INSTRUCTION, "仅将最终草稿写入本轮输出目录，已有草稿时只应用用户新增信息。写入成功后直接调用 finish_task，不反复润色，不读取无关文件。", `期望产物：${expectedOutputs.join("、")}`].join("\n");
   const toolSet = availableTools ? new Set(availableTools) : null;
   const hasTool = (name: string): boolean => toolSet === null || toolSet.has(name);
@@ -1462,6 +1466,19 @@ export function nativeSystemPrompt(task: TaskRecord, expectedOutputs: string[], 
       ? ["这是截图类任务：必须调用 capture_screen 生成真实图片产物，不要用文本或占位文件代替。"]
       : [])
   ].join("\n");
+}
+
+export function directReadTool(tool: AgentTool): AgentTool {
+  return { ...tool, execute: async (input, context) => {
+    try {
+      return await tool.execute(input, context);
+    } catch (error) {
+      if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") throw error;
+      const path = (input as { path?: string }).path ?? "指定文件";
+      const summary = `文件不存在：${path}。`;
+      return { content: summary, summary, action: "finish", outputs: [] };
+    }
+  } };
 }
 
 export function dedupeTools(tools: AgentTool[]): AgentTool[] {
