@@ -1,6 +1,6 @@
 {
   "name": "hearth",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "private": true,
   "type": "module",
   "description": "Hearth local-first personal agent OS",
@@ -31,6 +31,7 @@
     "docs:preview": "vitepress preview docs",
     "screenshots:readme": "node scripts/readme-screenshots.mjs",
     "dogfood:report": "tsx scripts/dogfood-report.ts",
+    "first:run": "node scripts/first-run.mjs",
     "release:build": "node scripts/build-tauri.mjs",
     "release:prepare": "node scripts/release.mjs",
     "prepare": "husky"

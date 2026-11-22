@@ -24,8 +24,8 @@ npm run tauri:build
 
 产物：
 
-- `release/Hearth_0.3.2_x64-setup.exe`：NSIS 按用户安装，免 UAC，带开始菜单快捷方式。
-- 0.3.2 安装包 30.5 MiB，安装后约 131 MiB。
+- `release/Hearth_0.3.3_x64-setup.exe`：NSIS 按用户安装，免 UAC，带开始菜单快捷方式。
+- 0.3.3 安装包与便携 zip 同步发布到 [GitHub Releases](https://github.com/hearthproject/hearth-os/releases)（Pre-release），附 SHA256 校验和。
 - 安装目录：`%LOCALAPPDATA%\Programs\Hearth`，刻意与数据目录 `%LOCALAPPDATA%\Hearth` 分开。
 - WebView2 使用在线 bootstrapper；Windows 10/11 通常已自带运行时，不额外占安装体积。
 

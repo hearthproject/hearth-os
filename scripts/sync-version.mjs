@@ -93,6 +93,7 @@ const diff = (file, label, actual, expected) => {
   diff(TAURI_REL, "version", tauri.version, rootVersion);
 
   const lock = readJson(lockPath);
+  diff("package-lock.json", 'version (top level)', lock.version, rootVersion);
   diff("package-lock.json", 'packages[""].version', lock.packages?.[""]?.version, rootVersion);
   for (const ws of workspaces) {
     const key = `${ws.base}/${ws.name}`;
@@ -175,6 +176,10 @@ for (const ws of workspaces) {
 {
   const lock = readJson(lockPath);
   let touched = false;
+  if (lock.version !== rootVersion) {
+    lock.version = rootVersion;
+    touched = true;
+  }
   if (lock.packages?.[""] && lock.packages[""].version !== rootVersion) {
     lock.packages[""].version = rootVersion;
     touched = true;

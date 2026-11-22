@@ -1,7 +1,7 @@
 {
   "$schema": "../../../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Hearth",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "identifier": "ai.hearth.os",
   "build": {
     "frontendDist": "../splash",
@@ -16,7 +16,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -24,7 +26,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": ["resources"],
+    "resources": [
+      "resources"
+    ],
     "createUpdaterArtifacts": false,
     "windows": {
       "webviewInstallMode": {

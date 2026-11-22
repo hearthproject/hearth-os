@@ -27,15 +27,15 @@ outline: [2, 3]
 | 项目 | 命令 | 结果 |
 |---|---|---|
 | 类型检查 | `npm run typecheck` | 通过 |
-| 单元/集成测试 | `npm test` | 129 个文件、864 个用例全部通过 |
+| 单元/集成测试 | `npm test` | 130 个文件、876 个用例（861 通过、15 跳过；7 个超时项单独复跑通过） |
 | Web 构建 | `npm run build` | 通过（JS 723.79 kB / CSS 130.23 kB） |
 | 文档构建 | `npm run docs:build` | 通过，无死链 |
 | 浏览器 fixture | `npm run test:browser` | 12 项检查通过，18 个证据文件 |
 | UI 端到端（离线） | `HEARTH_E2E_OFFLINE=1 npm run test:e2e` | 18 项通过，0 失败 |
 | Tauri updater 编译 | `cargo check --manifest-path apps/desktop-tauri/src-tauri/Cargo.toml --features updater` | 通过 |
 | Tauri 构建配置 | `npx tauri build --debug --no-bundle --features updater --config <overlay>` | 通过 |
-| 0.3.2 安装包 | `npm run release:build` | NSIS 安装包 30.5 MiB，内置 server 启动并通过 `/api/ready` |
-| 发布整理 | `npm run release:prepare -- --skip-build` | 47.1 MiB 便携 zip（3,450 个文件）、安装包、发布说明、SHA256 校验和 |
+| 0.3.3 安装包 | `npm run release:build` | NSIS 安装包，内置 server 启动并通过 `/api/ready`；以 GitHub Pre-release 发布 |
+| 发布整理 | `npm run release:prepare -- --skip-build` | 便携 zip、安装包、发布说明、SHA256 校验和 |
 
 > 说明：Windows 本地跑 `npm test` 时，worktrees/subagents 等真实 git 测试较慢，曾触发默认 10 秒 hook 超时；已将 `vitest.config.ts` 的 `hookTimeout` 调到 30 秒。上表为 CI 与本地一致口径。`0.2.0` 验收快照仍保留在 [2026-11 验收报告](/delivery/acceptance-2026-11)，作为历史记录不再改写。
 

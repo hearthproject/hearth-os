@@ -23,7 +23,7 @@
 
 <p align="center">
   <img alt="Phase 1 MVP accepted" src="https://img.shields.io/badge/phase%201-MVP%20accepted-b8471d">
-  <img alt="106 targeted tests passing on 2026-11-14" src="https://img.shields.io/badge/targeted%20tests-106%20passing-2f7d4f">
+  <img alt="861 tests passing on 2026-11-22" src="https://img.shields.io/badge/tests-861%20passing-2f7d4f">
   <img alt="Node.js 22.13+" src="https://img.shields.io/badge/node-22.13%2B-3c8773">
   <img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-1b1815">
   <img alt="Local first" src="https://img.shields.io/badge/local--first-yes-8d3412">
@@ -35,7 +35,7 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
 
 模型可以更换，执行器可以替换，界面可以重写，但任务状态、授权范围、完成证据、产物摘要和外部回执必须留下来。Hearth 要回答的不是“模型能不能写出一段话”，而是“这件事有没有真正完成，失败后能不能接着做，外部动作能不能被核对”。
 
-> **当前状态（2026-11-21，v0.3.2）：** 可信执行、浏览器自动化、项目档案、首次真实任务验证、监督收件箱、自用报告、可选签名更新和发布脚本已进入 `main`。129 个测试文件、864 个用例、12 项浏览器 fixture 和 18 项离线 UI 端到端通过，Tauri updater 编译、0.3.2 NSIS 安装包（30.5 MiB）和文档构建通过。真实模型首跑被当前 key 的无权限错误阻塞；日常 Chrome 扩展桥、干净机安装、真实账户和已签名更新发布仍未验收。逐项证据见[2026-11 验收报告](https://hearthproject.github.io/hearth-os/delivery/acceptance-2026-11.html)。
+> **当前状态（2026-11-22，v0.3.3）：** 可信执行、浏览器自动化、项目档案、监督收件箱、自用报告和可选签名更新已进入 `main`。本版新增：原生运行时逐工具超时、指数退避自动重试与连续失败熔断；停止任务即时生效并显示"停止中"；命令行首跑验证 `npm run first:run`；经审批读取工作区外文件；CI 分层与单一版本真源。2026-11-22 验证：typecheck 0 错误、130 个测试文件 876 个用例（861 通过、15 跳过、7 个超时项单独复跑全部通过）、文档构建通过；0.3.3 NSIS 安装包与便携 zip 以 [GitHub Pre-release](https://github.com/hearthproject/hearth-os/releases) 发布并附 SHA256 校验和。真实模型首跑仍被当前 key 的无权限错误阻塞；日常 Chrome 扩展桥、干净机安装、真实账户和已签名更新发布仍未验收。逐项证据见[2026-11 验收报告](https://hearthproject.github.io/hearth-os/delivery/acceptance-2026-11.html)。
 
 ## 界面一览
 
@@ -84,7 +84,7 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
 | **委派、交接与沙箱** | 单层持久委派任务通过调度器推进，保留可选预算、工作区策略、租约和失败状态；执行器交接包带目标、下一步、验收项、证据、权限子集和上下文水位；沙箱检查路径、网络、进程和凭据边界 |
 | **审批与回执** | 外部动作先生成预览，一次性审批绑定动作参数指纹；批准后由效果账本执行并留下回执；拒绝、过期、复用和参数变化都会失效；不确定效果进入显式对账队列 |
 | **个人上下文** | 实体、别名、关系、状态、决定和承诺组成个人本体；Context Broker 按 `must_know`、`relevant`、`recallable`、`omitted` 组装上下文 |
-| **首次运行、更新与发版** | 全新实例完成服务商、执行器、偏好后可跑一个真实工具任务；通过才标记完成，跳过保留警告。Tauri updater 三项签名变量齐全才启用；发布脚本生成安装包、便携 zip、发布说明和 SHA256 |
+| **首次运行、更新与发版** | 全新实例完成服务商、执行器、偏好后可跑一个真实工具任务；通过才标记完成，跳过保留警告；`npm run first:run` 可随时在命令行复跑同一验证，`--fake` 提供离线自检。Tauri updater 三项签名变量齐全才启用；发布脚本生成安装包、便携 zip、发布说明和 SHA256，并发布到 GitHub Pre-release |
 | **主导航** | 聊天、需要你、记忆三个主入口；档案、邮件、定时任务、设备、运行、个人收在“更多”；设置固定在底部 |
 | **飞书消息入口** | 企业自建应用长连接、open_id 白名单、文本/图片/文件消息、任务状态、审批摘要与 `/approve`、`/reject` 文本命令；入站消息带幂等记录，不需要公网回调 |
 | **邮件工作台** | SMTP 发送复用审批与效果账本，批准后发送并保存回执；IMAP 只读同步最近邮件到来源，不标记已读；账户和口令加密保存 |
@@ -102,10 +102,10 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
 
 | 领域 | 状态 | 证据 | 留空 |
 |---|---|---|---|
-| 可信执行 | 完成 | 逐轮时间线、回退漂移保护、审批模式、864 个用例 | 真实用户长期回退演练 |
+| 可信执行 | 完成 | 逐轮时间线、回退漂移保护、审批模式、876 个用例 | 真实用户长期回退演练 |
 | 浏览器 | 代码闭环 | 16 个工具、12 项 fixture、18 个证据文件、Chrome 真实启动 | 日常 Chrome 扩展桥、验证码/风控站点 |
 | 记忆与档案 | 完成 | 项目档案、工作方式、7 项档案测试、注入边界测试 | 真实长期写作/编码使用 |
-| 首跑与更新 | 代码闭环 | fake-runner 测试、Tauri updater 编译、发布脚本 | 真实模型首跑、签名更新发布、干净机安装 |
+| 首跑与更新 | 代码闭环 | fake-runner 测试、首跑 CLI、Tauri updater 编译、发布脚本、0.3.3 Pre-release | 真实模型首跑、签名更新发布、干净机安装 |
 | 监督与自用报告 | 完成 | 4 项监督测试、1 项报告测试、收件箱 E2E | 真实一周 dogfood 复盘 |
 | 工程门禁 | 完成 | CI、commitlint、husky、PR 模板、文档构建 | 分支保护与远端 CI 实际运行记录 |
 
@@ -218,15 +218,26 @@ npm ci
 npm run tauri:build
 ```
 
-生成 `release\Hearth_0.3.2_x64-setup.exe`（NSIS 按用户安装，免 UAC，安装到 `%LOCALAPPDATA%\Programs\Hearth`）。安装后双击开始菜单的 Hearth 即可；关窗会隐藏到托盘，托盘菜单负责退出、环境体检、桌面助手、数据目录和日志目录。首次启动会让你选择现有 `.hearth` 或新建数据目录。
+生成 `release\Hearth_0.3.3_x64-setup.exe`（NSIS 按用户安装，免 UAC，安装到 `%LOCALAPPDATA%\Programs\Hearth`）。安装后双击开始菜单的 Hearth 即可；关窗会隐藏到托盘，托盘菜单负责退出、环境体检、桌面助手、数据目录和日志目录。首次启动会让你选择现有 `.hearth` 或新建数据目录。也可以直接从 [GitHub Releases](https://github.com/hearthproject/hearth-os/releases) 下载同一个安装包或便携 zip，下载后用 `SHA256SUMS.txt` 核对。
 
-桌面版只保留 Tauri 实现：内置官方 Node 22.23.2、npm 10.9.8 和全部服务端功能，0.3.2 安装包 30.5 MiB，安装后约 131 MiB。Codex 使用系统中的 `codex.exe`，不内置 479 MiB 平台二进制。
+桌面版只保留 Tauri 实现：内置官方 Node 22.23.2、npm 10.9.8 和全部服务端功能，0.3.3 安装包 30.5 MiB，安装后约 131 MiB。Codex 使用系统中的 `codex.exe`，不内置 479 MiB 平台二进制。
 
 构建、体积、数据目录、日志、托盘、环境体检和已知限制见 [docs/design/desktop.md](docs/design/desktop.md)；从 Electron 到约 131 MiB 的完整压缩过程、体积去向和使用前提见 [docs/design/desktop-compression.md](docs/design/desktop-compression.md)。
 
 ### 接入模型
 
 在 **设置 → 模型** 中创建模型档案：选择预设服务商（DeepSeek、阿里云百炼、智谱、Kimi、火山方舟、OpenAI、Anthropic、Gemini）或自定义服务，然后在 **设置 → 执行器** 中把档案绑定到执行器。档案保存在 `.hearth/hearth.sqlite`，API Key 通过本机 `.hearth/master.key` 以 AES-256-GCM 加密，设置页只显示掩码。本地模型地址不进入统一管理。
+
+### 验证首跑
+
+模型配置完成后，跑一次最小真实任务确认整条链路可用：
+
+```bash
+npm run first:run            # 用你配置的模型：读文件 → 写答案 → 跑测试
+npm run first:run -- --fake  # 离线自检脚本自身，不涉及模型
+```
+
+退出码 `0` 通过、`1` 任务失败、`2` 环境问题（服务未启动、模型未配置等）。详见[首次运行验证](https://hearthproject.github.io/hearth-os/reference/first-run.html)。
 
 ### 使用 Codex
 
@@ -336,6 +347,7 @@ hearth-os/
 - [个人上下文](https://hearthproject.github.io/hearth-os/design/personal-context.html) — 个人本体、Context Pack 与记忆召回。
 - [存储与上下文](https://hearthproject.github.io/hearth-os/design/storage.html) — SQLite 数据域、上下文生命周期、备份与恢复边界。
 - [日常使用与自用报告](https://hearthproject.github.io/hearth-os/reference/daily-use.html) — 需要你收件箱、昨日回顾与 dogfood 报告。
+- [首次运行验证](https://hearthproject.github.io/hearth-os/reference/first-run.html) — 用自己的模型跑一次真实的"读文件 → 跑测试"最小任务。
 - [构建、签名与发版](https://hearthproject.github.io/hearth-os/reference/releasing.html) — Tauri 构建、更新签名和发布产物。
 - [交付与进度](https://hearthproject.github.io/hearth-os/delivery/) — 历史路线与当前范围。
 - [当前交付状态](https://hearthproject.github.io/hearth-os/delivery/status.html) — 当前能力矩阵、验证证据与未完成验收。
@@ -354,22 +366,24 @@ hearth-os/
 - PWA 壳、移动底部导航和离线应用壳已存在，但手机配对、iOS/Android 真机安装、系统推送和远程接管未验收。
 - 所有数据、设备与令牌边界都在本机；不提供多设备事件同步或远程节点连接。
 - 主导航暴露聊天、需要你、记忆三个主入口；档案、邮件、定时任务、设备、运行和个人收在“更多”；设置固定在底部。
-- 当前模型 key 调用 `deepseek-v4.1-flash-1017` 返回 `Access to model denied`，真实模型首跑未验收。安装包未做干净机安装/卸载，已签名自动更新未发布，也没有 Windows Authenticode 证书。
+- 当前模型 key 调用 `deepseek-v4.1-flash-1017` 返回 `Access to model denied`，真实模型首跑未验收。0.3.3 Pre-release 安装包未做干净机安装/卸载，未包含自动更新签名（下载后请核对 `SHA256SUMS.txt`），也没有 Windows Authenticode 证书，首次运行可能触发 SmartScreen 提示。
 - 评测 case、场景和实验已迁到独立仓库；主仓库不再注册评测桥接，测试不代表真实评测实验已经运行。native 30 题的最终提交 `eb32ad5` 尚未完成连续复测，18/30 与累计 19/30 都不是最终官方单轮成绩。
 - 原生运行时仍不支持远程 MCP、OAuth、图片/扫描件视觉理解、PPTX、LSP、格式化器或自动 cherry-pick。
-- 这是 `0.3.2` 工作版本，不是 v1.0 正式发布。
+- 这是 `0.3.3` 工作版本，以 [GitHub Pre-release](https://github.com/hearthproject/hearth-os/releases) 形式发布，不是 v1.0 正式发布。
 
 ## 验证
 
-2026-11-21 的当前结果：
+2026-11-22 的当前结果：
 
 ```bash
-npm run typecheck     # 0 error
-npm test              # 129 个测试文件、864 个用例通过
-npm run build         # Web 构建通过
-npm run docs:build    # 文档构建通过，无死链
+npm run version:check   # 版本一致：7 个 workspace + Cargo + Tauri + lockfile
+npm run typecheck       # 0 error
+npm test                # 130 个测试文件、876 个用例（861 通过、15 跳过）
+npm run build           # Web 构建通过
+npm run docs:build      # 文档构建通过，无死链
+npm run first:run -- --fake  # 首跑脚本离线自检
 HEARTH_E2E_OFFLINE=1 npm run test:e2e
-                      # 12 项浏览器 fixture + 18 项 UI 检查通过
+                       # 12 项浏览器 fixture + 18 项 UI 检查通过（0.3.2 验收）
 cargo check --manifest-path apps/desktop-tauri/src-tauri/Cargo.toml --features updater
 ```
 
