@@ -355,6 +355,7 @@ export interface AgentRuntimeOptions {
   };
   /** Circuit breaker for consecutive tool failures. Defaults to 5 consecutive failures before stopping the run. */
   toolCircuitBreaker?: {
+    threshold?: number;
     maxConsecutiveFailures?: number;
   };
   hooks?: AgentHookDefinition[];

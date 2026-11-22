@@ -99,7 +99,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       ? [...toolRetryInput.retryableCodes]
       : [...DEFAULT_TOOL_RETRY_POLICY.retryableCodes]
   };
-  const circuitBreakerInput = options.toolCircuitBreaker?.maxConsecutiveFailures ?? 5;
+  const circuitBreakerInput = options.toolCircuitBreaker?.threshold ?? options.toolCircuitBreaker?.maxConsecutiveFailures ?? 5;
   const circuitBreakerThreshold = Math.max(1, Math.min(50, Number.isFinite(circuitBreakerInput) ? Math.floor(circuitBreakerInput) : 5));
   const runController = new AbortController();
   const externalSignal = options.signal;
