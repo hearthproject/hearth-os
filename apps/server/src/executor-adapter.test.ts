@@ -91,4 +91,34 @@ describe("executor adapters", () => {
     expect(permissions.tools).toContain("shell");
     expect(permissions.networkHosts).toEqual(expect.arrayContaining(["github.com", "api.github.com"]));
   });
+
+  it("falls back to builtin tools when the task carries an empty tool list", () => {
+    const root = tempRoot();
+    const task = {
+      ...invocation(defaultExecutorSettings(), root).task,
+      taskKind: "general",
+      networkHosts: [],
+      permissions: { readRoots: [root], writeRoots: [root], networkHosts: [], tools: [] }
+    } as TaskRecord;
+    const permissions = nativePermissionsFor(task, { root, outDir: join(root, "out") } as PreparedWorkspace);
+    expect(permissions.tools).toContain("read_file");
+    expect(permissions.tools).toContain("write_file");
+    expect(permissions.tools).toContain("finish_task");
+    expect(permissions.tools).toContain("ask_user");
+    expect(permissions.tools).toContain("read_desktop_file");
+  });
+
+  it("keeps an explicit tool restriction instead of adding builtin tools", () => {
+    const root = tempRoot();
+    const task = {
+      ...invocation(defaultExecutorSettings(), root).task,
+      taskKind: "general",
+      networkHosts: [],
+      permissions: { readRoots: [root], writeRoots: [root], networkHosts: [], tools: ["shell"] }
+    } as TaskRecord;
+    const permissions = nativePermissionsFor(task, { root, outDir: join(root, "out") } as PreparedWorkspace);
+    expect(permissions.tools).toContain("shell");
+    expect(permissions.tools).not.toContain("read_file");
+    expect(permissions.tools).not.toContain("finish_task");
+  });
 });

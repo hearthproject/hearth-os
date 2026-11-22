@@ -1229,17 +1229,29 @@ export function nativePermissionsFor(task: TaskRecord, prepared: PreparedWorkspa
   const githubTask = wantsGithubAccess(`${task.title}\n${task.goal}`);
   const codeTask = wantsCodeExecution(`${task.title}\n${task.goal}`);
   if (task.permissions) {
+    // `tools: []` 表示创建方没有显式限制工具（工作区/聊天任务创建时就是这个默认值），
+    // 此时必须沿用内置默认工具，否则模型拿不到 read_file / finish_task，
+    // 只能输出纯文本并被判定为"没有匹配的工具"。
+    const declared = task.permissions.tools;
+    const base = declared.length > 0
+      ? declared
+      : defaultTaskPermissions({
+          workspaceRoot: prepared.root,
+          outDir: prepared.outDir,
+          networkHosts: task.networkHosts,
+          ...(task.taskKind === "workspace" || githubTask || codeTask ? { writeRoots: [prepared.outDir, prepared.root] } : {})
+        }).tools;
     const tools = [
-      ...task.permissions.tools,
-      ...((githubTask || codeTask) && !task.permissions.tools.includes("shell") ? ["shell"] : []),
-      ...(screenshotTask && !task.permissions.tools.includes("capture_screen") ? ["capture_screen"] : [])
+      ...base,
+      ...((githubTask || codeTask) && !base.includes("shell") ? ["shell"] : []),
+      ...(screenshotTask && !base.includes("capture_screen") ? ["capture_screen"] : [])
     ];
     return {
       ...task.permissions,
       readRoots: [prepared.root],
       writeRoots: task.taskKind === "workspace" || githubTask || codeTask ? [prepared.outDir, prepared.root] : [prepared.outDir],
       networkHosts: [...task.networkHosts],
-      tools,
+      tools: [...new Set(tools)],
       fullAccess: true,
       approvalMode: "full",
       sandboxMode: "danger-full-access"
