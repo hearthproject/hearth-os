@@ -42,7 +42,7 @@ import { OntologyService } from "./ontology.ts";
 import { OntologyWriter } from "./ontology-writer.ts";
 import type { ContextIndex } from "./context-index.ts";
 import { contextMetrics } from "./context-metrics.ts";
-import { HearthService, TaskInputSelectionError, TaskNotFoundError, type CreateTaskInput } from "./service.ts";
+import { HearthService, TaskInputSelectionError, TaskNotFoundError, TaskProposalNotFoundError, type CreateTaskInput } from "./service.ts";
 import { HealthService } from "./health.ts";
 import { MaintenanceError, MaintenanceService } from "./maintenance.ts";
 import { DiagnosticsService } from "./diagnostics.ts";
@@ -2924,6 +2924,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
       scheduler?.kick();
       return result;
     } catch (error) {
+      if (error instanceof TaskProposalNotFoundError) return reply.code(404).send({ error: "PROPOSAL_NOT_FOUND", message: error.message });
       return reply.code(409).send({ error: "PROPOSAL_NOT_CONFIRMABLE", message: error instanceof Error ? error.message : String(error) });
     }
   });
@@ -2932,6 +2933,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     try {
       return service.rejectTaskProposal(request.params.id);
     } catch (error) {
+      if (error instanceof TaskProposalNotFoundError) return reply.code(404).send({ error: "PROPOSAL_NOT_FOUND", message: error.message });
       return reply.code(409).send({ error: "PROPOSAL_NOT_REJECTABLE", message: error instanceof Error ? error.message : String(error) });
     }
   });

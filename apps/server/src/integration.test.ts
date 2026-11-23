@@ -385,6 +385,15 @@ describe("cross-module integration", () => {
     }
   });
 
+  it("reports a missing proposal as 404 on confirm and reject", async () => {
+    for (const path of ["/api/task-proposals/PRP-missing/confirm", "/api/task-proposals/PRP-missing/reject"]) {
+      const response = await app.inject({ method: "POST", url: path, payload: {} });
+      expect(response.statusCode, path).toBe(404);
+      expect(response.json().error, path).toBe("PROPOSAL_NOT_FOUND");
+      expect(response.json().message, path).toContain("任务提案不存在");
+    }
+  });
+
   describe("api robustness", () => {
     it("answers malformed requests with client errors instead of crashing", async () => {
       const cases: Array<{ method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE"; url: string; payload?: Record<string, unknown> }> = [

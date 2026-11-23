@@ -88,6 +88,13 @@ export class TaskNotFoundError extends Error {
   }
 }
 
+export class TaskProposalNotFoundError extends Error {
+  constructor(proposalId: string) {
+    super(`任务提案不存在：${proposalId}`);
+    this.name = "TaskProposalNotFoundError";
+  }
+}
+
 export interface TaskView {
   task: TaskRecord;
   runs: ReturnType<HearthStore["listRuns"]>;
@@ -588,7 +595,7 @@ export class HearthService {
 
   updateTaskProposal(id: string, patch: Partial<Pick<TaskProposalRecord, "status" | "decidedAt">>): TaskProposalRecord {
     const updated = this.store.updateTaskProposal(id, patch);
-    if (!updated) throw new Error(`Task proposal not found: ${id}`);
+    if (!updated) throw new TaskProposalNotFoundError(id);
     const event = this.store.appendEvent({ type: "task.proposal.updated", payload: updated });
     this.bus.publish(event);
     return updated;
@@ -712,7 +719,7 @@ export class HearthService {
 
   requireProposal(id: string): TaskProposalRecord {
     const proposal = this.store.getTaskProposal(id);
-    if (!proposal) throw new Error(`Task proposal not found: ${id}`);
+    if (!proposal) throw new TaskProposalNotFoundError(id);
     return proposal;
   }
 
