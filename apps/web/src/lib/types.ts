@@ -91,7 +91,9 @@ import type {
   TaskListItem,
   TaskKind,
   TaskProgressDetail,
+  TaskPauseResult,
   TaskProposalRecord,
+  TaskResumeReference,
   TaskRecord,
   TaskStatus,
   TrashItem,
@@ -128,7 +130,6 @@ export type {
   ApprovalGrant,
   ApprovalListItem,
   ApprovalRecord,
-  ApprovalView,
   ApprovalStatus,
   ArtifactListItem,
   ArtifactRecord,
@@ -214,7 +215,9 @@ export type {
   TaskListItem,
   TaskKind,
   TaskProgressDetail,
+  TaskPauseResult,
   TaskProposalRecord,
+  TaskResumeReference,
   TaskRecord,
   TaskStatus,
   TrashItem,
@@ -280,6 +283,7 @@ export interface TaskView {
   task: TaskRecord;
   runs: RunRecord[];
   approvals: ApprovalView[];
+  resume: TaskResumeReference | null;
   artifacts: ArtifactRecord[];
   effects: EffectRecord[];
   checkpoints: RunCheckpointRecord[];

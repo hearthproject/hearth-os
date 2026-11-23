@@ -165,6 +165,15 @@ const retryTaskSchema = z.object({
   message: z.string().trim().max(20_000).optional()
 }).strict();
 
+const resumeTaskSchema = z.object({
+  resume: z.object({
+    taskId: z.string().trim().min(1).max(100),
+    runId: z.string().trim().min(1).max(100),
+    checkpointSeq: z.number().int().min(1),
+    checkpointKind: z.string().trim().min(1).max(40)
+  }).strict()
+}).strict();
+
 const taskFollowUpSchema = z.object({
   content: z.string().trim().min(1).max(20_000),
   mode: z.enum(["queue", "steer"]).default("queue")
@@ -2906,6 +2915,28 @@ export async function buildServer(options: BuildServerOptions = {}) {
       return task;
     } catch (error) {
       return reply.code(404).send({ error: "TASK_NOT_FOUND", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/tasks/:id/pause", async (request, reply) => {
+    if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFF", message: "执行器未启动" });
+    try {
+      return await scheduler.pause(request.params.id);
+    } catch (error) {
+      return reply.code(409).send({ error: "PAUSE_NOT_ALLOWED", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/tasks/:id/resume", async (request, reply) => {
+    if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFF", message: "执行器未启动" });
+    const parsed = resumeTaskSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "INVALID_RESUME_REFERENCE", message: "继续任务需要有效的检查点引用" });
+    }
+    try {
+      return scheduler.resumePaused(request.params.id, parsed.data.resume);
+    } catch (error) {
+      return reply.code(409).send({ error: "RESUME_NOT_ALLOWED", message: error instanceof Error ? error.message : String(error) });
     }
   });
 

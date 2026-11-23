@@ -576,6 +576,71 @@ describe("Hearth scheduler", () => {
     expect(manifest.executor.id).toBe("native");
   });
 
+  it("returns a durable resume reference when pausing and resumes from that checkpoint", async () => {
+    const service = setup();
+    let announceStarted!: () => void;
+    const started = new Promise<void>((resolve) => { announceStarted = resolve; });
+    let calls = 0;
+    let resumedFromCheckpoint = false;
+    const nativeRunner: NativeRunner = async (options) => {
+      calls += 1;
+      if (calls === 1) {
+        await options.onCheckpoint?.({
+          seq: 1,
+          kind: "turn",
+          messages: [{ role: "user", content: "继续处理这个任务" }],
+          usage: TEST_USAGE,
+          turns: 1,
+          toolCalls: 0,
+          summary: null
+        });
+        announceStarted();
+        await new Promise<void>((resolve) => {
+          if (options.signal?.aborted) {
+            resolve();
+            return;
+          }
+          options.signal?.addEventListener("abort", () => resolve(), { once: true });
+        });
+        return {
+          status: "cancelled",
+          finalResponse: "任务已取消",
+          usage: TEST_USAGE,
+          turns: 1,
+          toolCalls: 0,
+          question: null,
+          outputs: []
+        };
+      }
+      resumedFromCheckpoint = options.resume !== undefined;
+      writeFileSync(join(options.prepared.outDir, "result.md"), "# 完成\n");
+      return nativeResult("已从检查点继续完成");
+    };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, {
+      nativeRunner,
+      modelSettingsForExecutor: () => chatSettings()
+    });
+    scheduler.start();
+
+    const task = service.createTask({ title: "可暂停任务", goal: "从检查点继续", executorId: "native" });
+    await started;
+    const paused = await scheduler.pause(task.id);
+
+    expect(paused.task.status).toBe("paused");
+    expect(paused.resume).toMatchObject({
+      taskId: task.id,
+      runId: paused.task.currentRunId,
+      checkpointSeq: 1,
+      checkpointKind: "turn"
+    });
+    expect(service.view(task.id)?.resume).toEqual(paused.resume);
+
+    scheduler.resumePaused(task.id, paused.resume!);
+    const completed = await waitForStatus(service, task.id, "completed");
+    expect(completed.resultSummary).toBe("已从检查点继续完成");
+    expect(resumedFromCheckpoint).toBe(true);
+  });
+
   it("resumes a waiting native task with the user's answer", async () => {
     const service = setup();
     const settingsPath = join(requireTemp(), "model-settings.json");

@@ -1,11 +1,12 @@
 import type { TaskStatus } from "./types.ts";
 
 const TRANSITIONS: Record<TaskStatus, readonly TaskStatus[]> = {
-  queued: ["running", "recoverable", "cancelled"],
-  running: ["waiting_input", "waiting_approval", "waiting_budget", "completed", "failed", "recoverable", "cancelled"],
+  queued: ["running", "paused", "recoverable", "cancelled"],
+  running: ["waiting_input", "waiting_approval", "waiting_budget", "paused", "completed", "failed", "recoverable", "cancelled"],
   waiting_input: ["queued", "running", "recoverable", "cancelled"],
   waiting_approval: ["running", "recoverable", "cancelled"],
   waiting_budget: ["queued", "running", "recoverable", "cancelled"],
+  paused: ["queued", "cancelled"],
   completed: [],
   failed: ["queued", "cancelled"],
   recoverable: ["queued", "running", "cancelled"],
@@ -26,6 +27,7 @@ export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   waiting_input: "需要补充信息",
   waiting_approval: "等你确认",
   waiting_budget: "预算已触顶",
+  paused: "已暂停",
   completed: "已完成",
   failed: "失败",
   recoverable: "可以继续",

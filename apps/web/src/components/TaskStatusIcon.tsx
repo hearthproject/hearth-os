@@ -4,6 +4,7 @@ import {
   Clock3,
   Loader2,
   MessageCircleQuestion,
+  Pause,
   ShieldQuestion,
   TriangleAlert,
   XCircle
@@ -16,6 +17,7 @@ const ICONS = {
   waiting_input: MessageCircleQuestion,
   waiting_approval: ShieldQuestion,
   waiting_budget: Clock3,
+  paused: Pause,
   completed: CheckCircle2,
   failed: XCircle,
   recoverable: TriangleAlert,

@@ -14,6 +14,13 @@ describe("task state machine", () => {
     expect(() => assertTransition("queued", "recoverable")).not.toThrow();
   });
 
+  it("pauses a running task and allows it to resume or be cancelled", () => {
+    expect(canTransition("running", "paused")).toBe(true);
+    expect(canTransition("paused", "queued")).toBe(true);
+    expect(canTransition("paused", "cancelled")).toBe(true);
+    expect(isTerminal("paused")).toBe(false);
+  });
+
   it("rejects transitions out of terminal states", () => {
     expect(canTransition("completed", "running")).toBe(false);
     expect(canTransition("cancelled", "queued")).toBe(false);

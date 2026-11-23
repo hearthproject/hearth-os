@@ -31,6 +31,7 @@ import type {
   TaskKind,
   TaskListItem,
   TaskPermissions,
+  TaskResumeReference,
   TaskProposalRecord,
   TaskRecord,
   TaskStatus
@@ -101,6 +102,7 @@ export interface TaskView {
   task: TaskRecord;
   runs: ReturnType<HearthStore["listRuns"]>;
   approvals: ApprovalView[];
+  resume: TaskResumeReference | null;
   artifacts: ReturnType<HearthStore["listArtifacts"]>;
   effects: ReturnType<HearthStore["listEffects"]>;
   followUps: TaskFollowUpRecord[];
@@ -318,10 +320,20 @@ export class HearthService {
     if (!task) return null;
     const events = this.store.listEvents(0, taskId);
     const runs = this.store.listRuns(taskId);
+    const checkpoint = task.status === "paused" && task.currentRunId
+      ? this.store.latestRunCheckpoint(task.currentRunId)
+      : null;
+    const resumableCheckpoint = checkpoint?.kind === "final" ? null : checkpoint;
     return {
       task,
       runs,
       approvals: this.store.listApprovals(taskId).map(approvalView),
+      resume: resumableCheckpoint ? {
+        taskId,
+        runId: resumableCheckpoint.runId,
+        checkpointSeq: resumableCheckpoint.seq,
+        checkpointKind: resumableCheckpoint.kind
+      } : null,
       artifacts: this.store.listArtifacts(taskId),
       effects: this.store.listEffects(taskId),
       followUps: this.store.listTaskFollowUps(taskId),

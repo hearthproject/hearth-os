@@ -60,6 +60,8 @@ import type {
   TaskFollowUpMode,
   TaskFollowUpRecord,
   TaskListItem,
+  TaskPauseResult,
+  TaskResumeReference,
   TaskRecord,
   TrashItem,
   TrashKind,
@@ -381,6 +383,11 @@ export const api = {
     ...(message ? { body: JSON.stringify({ message }) } : {})
   }),
   cancel: (id: string) => request<TaskRecord>(`/api/tasks/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
+  pause: (id: string) => request<TaskPauseResult>(`/api/tasks/${encodeURIComponent(id)}/pause`, { method: "POST" }),
+  resume: (id: string, reference: TaskResumeReference) => request<TaskRecord>(`/api/tasks/${encodeURIComponent(id)}/resume`, {
+    method: "POST",
+    body: JSON.stringify({ resume: reference })
+  }),
   decideApproval: (id: string, decision: "approve" | "reject" | "approve_always", parameterHash: string) =>
     request<ApprovalDecisionResult>(`/api/approvals/${encodeURIComponent(id)}/decide`, {
       method: "POST",

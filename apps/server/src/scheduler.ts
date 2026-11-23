@@ -14,7 +14,7 @@ import type {
 } from "@hearth/agent-runtime";
 import { deserializeAgentState, inspectJournal, journalPathFor, killWindowsProcessTree, resolveDesktopFilePath, CODING_RUN_BUDGET } from "@hearth/agent-runtime";
 import { checkpointSnapshotFromEvent, RUNTIME_CHECKPOINT_EVENT, runtimeJournalEvents, SqliteRuntimeJournal } from "./sqlite-runtime-journal.ts";
-import type { ApprovalMode, BudgetDimension, BudgetExhaustion, ContextItem, ContextSettings, DelegationJob, DelegationResult, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, RunBudget, RunCheckpointProof, RunCheckpointRecord, RunRecord, TaskError, TaskFollowUpRecord, TaskLease, TaskProgressDetail, TaskRecord } from "@hearth/core";
+import type { ApprovalMode, BudgetDimension, BudgetExhaustion, ContextItem, ContextSettings, DelegationJob, DelegationResult, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, RunBudget, RunCheckpointProof, RunCheckpointRecord, RunRecord, TaskError, TaskFollowUpRecord, TaskLease, TaskPauseResult, TaskProgressDetail, TaskRecord, TaskResumeReference } from "@hearth/core";
 import { runCodex } from "@hearth/codex-executor";
 import type { DshApprovalOutcome, DshApprovalRequest, DshContextEvent } from "@hearth/deepseek-executor";
 import type { ApprovalRequest, ApprovalManager, PendingToolApproval, ToolApprovalDecision } from "./approvals.ts";
@@ -84,7 +84,7 @@ export type { CodexRunner, NativeRunner } from "./executor-adapter.ts";
 export type ExecutorHealthProvider = (executorId: ExecutorId, settings: ExecutorSettings) => { canRun: boolean; issues: string[] };
 
 interface AttemptResult {
-  status: "completed" | "waiting_input" | "waiting_approval" | "waiting_budget" | "failed" | "cancelled";
+  status: "completed" | "waiting_input" | "waiting_approval" | "waiting_budget" | "paused" | "failed" | "cancelled";
   run: RunRecord;
   executorId: ExecutorId;
   outDir: string;
@@ -222,6 +222,8 @@ export class HearthScheduler {
   private readonly controllers = new Map<string, AbortController>();
   private readonly steering = new Map<string, string>();
   private readonly cancelled = new Set<string>();
+  private readonly pauseRequested = new Set<string>();
+  private readonly pauseWaiters = new Map<string, (result: TaskPauseResult) => void>();
   private readonly activeByExecutor = new Map<ExecutorId, Set<string>>();
   private readonly runPromises = new Set<Promise<void>>();
   private unsubscribe: (() => void) | null = null;
@@ -528,6 +530,68 @@ export class HearthScheduler {
     return updated;
   }
 
+  async pause(taskId: string): Promise<TaskPauseResult> {
+    const task = this.service.requireTask(taskId);
+    if (task.status === "paused") {
+      return { task, resume: this.resumeReference(task) };
+    }
+    if (task.status !== "running") {
+      throw new Error(`当前状态不能暂停：${task.status}`);
+    }
+    if (this.pauseRequested.has(taskId)) {
+      throw new Error("任务正在暂停，请稍候");
+    }
+    const controller = this.controllers.get(taskId);
+    if (!controller) throw new Error("当前运行没有可中断的执行器");
+
+    this.pauseRequested.add(taskId);
+    this.service.updateTask(taskId, {
+      nextAction: "正在保存检查点并暂停"
+    }, task.currentRunId ?? undefined);
+    const result = new Promise<TaskPauseResult>((resolve) => {
+      this.pauseWaiters.set(taskId, resolve);
+    });
+    controller.abort();
+    return result;
+  }
+
+  resumePaused(taskId: string, reference: TaskResumeReference): TaskRecord {
+    const task = this.service.requireTask(taskId);
+    if (task.status !== "paused") throw new Error(`当前状态不能继续：${task.status}`);
+    if (reference.taskId !== taskId || reference.runId !== task.currentRunId) {
+      throw new Error("恢复令牌与当前任务不匹配");
+    }
+    const checkpoint = this.service.store.latestRunCheckpoint(reference.runId);
+    if (
+      !checkpoint ||
+      checkpoint.seq !== reference.checkpointSeq ||
+      checkpoint.kind !== reference.checkpointKind ||
+      checkpoint.kind === "final"
+    ) {
+      throw new Error("恢复检查点已失效，请重新检查任务状态");
+    }
+    const permissionsDigest = task.permissions ? hashStable(task.permissions) : null;
+    if (
+      checkpoint.proof?.permissionsDigest &&
+      permissionsDigest &&
+      checkpoint.proof.permissionsDigest !== permissionsDigest
+    ) {
+      throw new Error("任务权限已变化，不能从旧检查点自动继续");
+    }
+    const unresolvedEffects = this.service.store.listEffects(taskId)
+      .filter((effect) => ["prepared", "admitted", "executing", "uncertain"].includes(effect.status));
+    if (unresolvedEffects.length > 0) {
+      throw new Error("存在结果不确定的外部动作，必须先对账后才能继续");
+    }
+    const updated = this.service.updateTask(taskId, {
+      status: "queued",
+      nextAction: "准备从最近检查点继续",
+      error: null
+    }, task.currentRunId ?? undefined);
+    this.wake();
+    return updated;
+  }
+
   cancel(taskId: string): TaskRecord {
     const task = this.service.requireTask(taskId);
     if (task.status === "completed") return task;
@@ -537,6 +601,7 @@ export class HearthScheduler {
       return task;
     }
     this.cancelled.add(taskId);
+    this.pauseRequested.delete(taskId);
     this.controllers.get(taskId)?.abort();
     this.cancelDelegationJobs(taskId);
     this.steering.delete(taskId);
@@ -547,16 +612,36 @@ export class HearthScheduler {
     }
     this.controllers.get(taskId)?.abort();
     this.approvals?.expireForTask(taskId);
-    this.service.updateTask(taskId, {
+    const cancelledTask = this.service.updateTask(taskId, {
       status: "cancelled",
       currentRunId: task.currentRunId,
       nextAction: null,
       error: null
     }, task.currentRunId ?? undefined);
+    this.resolvePauseWaiter(taskId, { task: cancelledTask, resume: null });
     if (task.currentRunId) this.writeRunEvidence(taskId, task.currentRunId);
     this.releaseLease(taskId);
     void this.browserSessions.release(taskId);
     return this.service.requireTask(taskId);
+  }
+
+  private resumeReference(task: TaskRecord): TaskResumeReference | null {
+    if (!task.currentRunId) return null;
+    const checkpoint = this.service.store.latestRunCheckpoint(task.currentRunId);
+    if (!checkpoint || checkpoint.kind === "final") return null;
+    return {
+      taskId: task.id,
+      runId: checkpoint.runId,
+      checkpointSeq: checkpoint.seq,
+      checkpointKind: checkpoint.kind
+    };
+  }
+
+  private resolvePauseWaiter(taskId: string, result: TaskPauseResult): void {
+    const resolve = this.pauseWaiters.get(taskId);
+    if (!resolve) return;
+    this.pauseWaiters.delete(taskId);
+    resolve(result);
   }
 
   private cancelDelegationJobs(taskId: string): void {
@@ -1622,6 +1707,10 @@ export class HearthScheduler {
         this.reconcileTaskCleanup(taskId);
         if (result.status !== "waiting_approval") await this.browserSessions.release(taskId);
         if (manifestRoot && manifestBefore) this.recordInPlaceChanges(task, manifestRoot, manifestBefore);
+        if (result.status === "paused") {
+          this.refreshTaskSummary(taskId);
+          return;
+        }
         if (result.status === "failed" || this.service.requireTask(taskId).status !== "completed") {
           this.assertLease(taskId, leaseEpoch, leaseLost);
         }
@@ -1854,6 +1943,17 @@ export class HearthScheduler {
       this.finalizeDelegation(taskId, delegationJobId, delegationOwner);
       this.controllers.delete(taskId);
       this.cancelled.delete(taskId);
+      this.pauseRequested.delete(taskId);
+      const pendingPause = this.pauseWaiters.get(taskId);
+      if (pendingPause) {
+        const currentTask = this.service.store.getTask(taskId);
+        if (currentTask) {
+          this.resolvePauseWaiter(taskId, {
+            task: currentTask,
+            resume: currentTask.status === "paused" ? this.resumeReference(currentTask) : null
+          });
+        }
+      }
       if (this.service.store.getTask(taskId)?.status !== "waiting_approval") this.releaseLease(taskId);
       try {
         this.memory.captureExperience(taskId);
@@ -2318,6 +2418,41 @@ export class HearthScheduler {
           status: "cancelled", run: { ...run, status: "cancelled" }, executorId, outDir,
           error, failure: null, aborted: true, leaseLost: false, cancelled: false, steered: true
         };
+      }
+      if (this.pauseRequested.has(taskId) && controller.signal.aborted && !this.cancelled.has(taskId)) {
+        const endedAt = new Date().toISOString();
+        const pausedRun: RunRecord = {
+          ...run,
+          status: "cancelled",
+          endedAt,
+          failure: null
+        };
+        this.service.updateRun(runId, taskId, {
+          status: "cancelled",
+          endedAt,
+          failure: null
+        });
+        const pausedTask = this.service.updateTask(taskId, {
+          status: "paused",
+          currentRunId: runId,
+          nextAction: "已暂停，继续时会从最近检查点恢复",
+          error: null
+        }, runId);
+        const resume = this.resumeReference(pausedTask);
+        const result: AttemptResult = {
+          status: "paused",
+          run: pausedRun,
+          executorId,
+          outDir,
+          error: null,
+          failure: null,
+          aborted: true,
+          leaseLost: false,
+          cancelled: false
+        };
+        this.writeRunEvidence(taskId, runId);
+        this.resolvePauseWaiter(taskId, { task: pausedTask, resume });
+        return result;
       }
       const failure = this.markRunFailed(taskId, runId, error, controller.signal.aborted, run.leaseEpoch ?? 0);
       this.refreshTaskSummary(taskId, { lastFailure: failure.failure });

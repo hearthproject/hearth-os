@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronRight,
   Loader2,
+  Play,
   RotateCcw,
   TriangleAlert
 } from "lucide-react";
@@ -28,6 +29,7 @@ const RUN_LABELS: Record<TaskStatus, string> = {
   waiting_input: "需要补充信息",
   waiting_approval: "等待你确认",
   waiting_budget: "已暂停",
+  paused: "已暂停",
   completed: "已完成",
   failed: "执行失败",
   recoverable: "执行中断",
@@ -35,7 +37,7 @@ const RUN_LABELS: Record<TaskStatus, string> = {
 };
 
 const ACTIVE_STATUSES: TaskStatus[] = ["queued", "running", "waiting_input", "waiting_approval"];
-const ATTENTION_STATUSES: TaskStatus[] = ["failed", "recoverable", "waiting_input", "waiting_approval"];
+const ATTENTION_STATUSES: TaskStatus[] = ["failed", "recoverable", "waiting_input", "waiting_approval", "paused"];
 const FINISHED_STATUSES: TaskStatus[] = ["completed", "cancelled"];
 
 export interface ToolDetail {
@@ -124,6 +126,18 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
 
   const retryMutation = useMutation({
     mutationFn: () => api.retry(task.id),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["task", task.id] });
+      await queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    }
+  });
+
+  const resumeMutation = useMutation({
+    mutationFn: () => {
+      if (!view?.resume) throw new Error("没有可用的检查点，无法继续");
+      return api.resume(task.id, view.resume);
+    },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["task", task.id] });
       await queryClient.invalidateQueries({ queryKey: ["tasks"] });
@@ -247,6 +261,27 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
               </form>
               {replyMutation.isError && (
                 <p className="inline-run-error">{replyMutation.error instanceof Error ? replyMutation.error.message : "提交失败"}</p>
+              )}
+            </div>
+          )}
+
+          {status === "paused" && (
+            <div className="inline-run-question">
+              <p>{view?.task.nextAction || "已保存最近检查点，可以继续执行。"}</p>
+              {view?.resume ? (
+                <button
+                  className="ghost-button small"
+                  onClick={() => resumeMutation.mutate()}
+                  disabled={resumeMutation.isPending}
+                >
+                  {resumeMutation.isPending ? <Loader2 size={12} className="spin" /> : <Play size={12} />}
+                  继续
+                </button>
+              ) : (
+                <p className="inline-run-error">没有可用的检查点，不能从暂停位置继续。</p>
+              )}
+              {resumeMutation.isError && (
+                <p className="inline-run-error">{resumeMutation.error instanceof Error ? resumeMutation.error.message : "继续失败"}</p>
               )}
             </div>
           )}

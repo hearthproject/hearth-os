@@ -85,6 +85,7 @@ export class HealthService {
         total: Object.values(taskCounts).reduce((sum, count) => sum + count, 0),
         queued: taskCounts.queued,
         running: taskCounts.running,
+        paused: taskCounts.paused,
         recoverable: taskCounts.recoverable,
         waitingApproval: taskCounts.waiting_approval
       },

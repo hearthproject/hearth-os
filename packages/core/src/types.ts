@@ -6,6 +6,7 @@ export const TASK_STATUSES = [
   "waiting_input",
   "waiting_approval",
   "waiting_budget",
+  "paused",
   "completed",
   "failed",
   "recoverable",
@@ -2077,7 +2078,7 @@ export interface HealthSnapshot {
   instanceId: string;
   memory: { rssBytes: number; heapUsedBytes: number; heapTotalBytes: number };
   disk: { freeBytes: number | null; dataBytes: number; walBytes: number };
-  tasks: { total: number; queued: number; running: number; recoverable: number; waitingApproval: number };
+  tasks: { total: number; queued: number; running: number; paused: number; recoverable: number; waitingApproval: number };
   maintenance: { lastRunAt: string | null; lastStatus: MaintenanceStatus | null; lastError: string | null };
   scheduler: { enabled: boolean; running: boolean };
   security: { killSwitch: boolean };

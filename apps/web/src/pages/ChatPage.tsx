@@ -18,6 +18,7 @@ import {
   Loader2,
   PanelRightOpen,
   Paperclip,
+  Pause,
   Settings2,
   ShieldCheck,
   Sparkles,
@@ -129,6 +130,7 @@ export function ChatPage() {
   const [savingEffort, setSavingEffort] = useState(false);
   const [reasoningDraft, setReasoningDraft] = useState<ReasoningEffort | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [isPausing, setIsPausing] = useState(false);
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
   const [skillInstallRequest, setSkillInstallRequest] = useState<{ source: string } | null>(null);
   const [skillNotice, setSkillNotice] = useState<string | null>(null);
@@ -564,6 +566,25 @@ export function ChatPage() {
     }
     void queryClient.invalidateQueries({ queryKey: ["tasks"] });
     void queryClient.invalidateQueries({ queryKey: ["conversation"] });
+  }
+
+  async function pauseRunningTask() {
+    const task = stoppableTask;
+    if (!task || task.status !== "running" || isPausing || isCancelling) return;
+    setIsPausing(true);
+    try {
+      const result = await api.pause(task.id);
+      setLiveRuns((prev) => prev.map((run) => run.id === task.id
+        ? { ...run, status: result.task.status }
+        : run));
+      await queryClient.invalidateQueries({ queryKey: ["task", task.id] });
+      await queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      await queryClient.invalidateQueries({ queryKey: ["conversation"] });
+    } catch (caught) {
+      setError(caught instanceof Error ? `暂停失败：${caught.message}` : "暂停失败，请重试");
+    } finally {
+      setIsPausing(false);
+    }
   }
 
   async function dispatch(outgoing: OutgoingMessage) {
@@ -1172,11 +1193,23 @@ export function ChatPage() {
               placeholder={isWorking ? "继续输入，发送后会加入队列…" : "向 Hearth 提问，或描述你要完成的事…"}
               rows={1}
             />
+            {stoppableTask?.status === "running" && (
+              <button
+                type="button"
+                className="composer-icon composer-pause"
+                onClick={() => void pauseRunningTask()}
+                disabled={isPausing || isCancelling}
+                title={`暂停任务：${stoppableTask.title}`}
+                aria-label={`暂停任务：${stoppableTask.title}`}
+              >
+                {isPausing ? <Loader2 size={17} className="spin" /> : <Pause size={17} />}
+              </button>
+            )}
             <button
               type="button"
               className={`composer-send ${isWorking ? "working" : ""} ${stoppableTask ? "stopping" : ""}`}
               onClick={() => (stoppableTask || sending ? void stopRunningTask() : void send())}
-              disabled={isCancelling || (!canSubmit && !stoppableTask && !sending)}
+              disabled={isCancelling || isPausing || (!canSubmit && !stoppableTask && !sending)}
               aria-busy={isWorking}
               title={stoppableTask
                 ? `停止任务：${stoppableTask.title}`

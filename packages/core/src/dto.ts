@@ -30,6 +30,18 @@ export interface ApprovalDisplay {
 /** API projection for approval UIs; the persisted ApprovalRecord stays unchanged. */
 export type ApprovalView = ApprovalRecord & { display: ApprovalDisplay | null };
 
+export interface TaskResumeReference {
+  taskId: string;
+  runId: string;
+  checkpointSeq: number;
+  checkpointKind: string;
+}
+
+export interface TaskPauseResult {
+  task: TaskRecord;
+  resume: TaskResumeReference | null;
+}
+
 export interface TaskSummary {
   runs: number;
   lastDurationMs: number | null;
