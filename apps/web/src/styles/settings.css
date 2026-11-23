@@ -22,6 +22,100 @@
   align-items: start;
 }
 
+.appearance-panel {
+  max-width: 720px;
+}
+
+.settings-section-head {
+  margin-bottom: 20px;
+}
+
+.settings-section-head h2 {
+  margin: 0 0 6px;
+  font-size: var(--fs-20);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.settings-section-head p,
+.appearance-current {
+  margin: 0;
+  color: var(--ink-secondary);
+  font-size: var(--fs-13);
+}
+
+.appearance-options {
+  display: grid;
+  gap: 10px;
+}
+
+.appearance-option {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 15px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.appearance-option:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-raised);
+}
+
+.appearance-option.active {
+  border-color: var(--ember);
+  background: var(--ember-tint);
+}
+
+.appearance-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--surface-sunk);
+  color: var(--ink-secondary);
+}
+
+.appearance-option.active .appearance-icon {
+  background: var(--surface);
+  color: var(--ember);
+}
+
+.appearance-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.appearance-copy strong {
+  font-size: var(--fs-14);
+  font-weight: 600;
+}
+
+.appearance-copy small {
+  color: var(--ink-tertiary);
+  font-size: var(--fs-12);
+}
+
+.appearance-check {
+  margin-left: auto;
+  color: var(--ember);
+}
+
+.appearance-current {
+  margin-top: 14px;
+}
+
 .settings-tabs {
   position: sticky;
   top: 0;

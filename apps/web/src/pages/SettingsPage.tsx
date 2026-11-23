@@ -32,8 +32,9 @@ import { ExecutorSettingsPanel } from "../components/ExecutorSettingsPanel.tsx";
 import { DataSettingsPanel } from "../components/DataSettingsPanel.tsx";
 import { DossierPanel } from "../components/DossierPanel.tsx";
 import { BrowserSettingsPanel } from "../components/BrowserSettingsPanel.tsx";
+import { AppearanceSettingsPanel } from "../components/AppearanceSettingsPanel.tsx";
 
-type SettingsTab = "executors" | "models" | "dossier" | "extensions" | "browser" | "data";
+type SettingsTab = "appearance" | "executors" | "models" | "dossier" | "extensions" | "browser" | "data";
 
 interface ProfileDraft {
   name: string;
@@ -48,6 +49,7 @@ interface ProfileDraft {
 }
 
 const TABS: Array<{ id: SettingsTab; label: string }> = [
+  { id: "appearance", label: "外观" },
   { id: "executors", label: "执行器" },
   { id: "models", label: "模型" },
   { id: "dossier", label: "档案" },
@@ -120,6 +122,7 @@ export function SettingsPage() {
         </nav>
 
         <div className="settings-content">
+          {tab === "appearance" && <AppearanceSettingsPanel />}
           {tab === "executors" && <ExecutorsTab />}
           {tab === "models" && <ModelsTab />}
           {tab === "dossier" && <DossierPanel />}
