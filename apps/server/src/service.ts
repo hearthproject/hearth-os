@@ -214,7 +214,9 @@ export class HearthService {
         readRoots: defaultRoot ? [defaultRoot] : [],
         writeRoots: defaultRoot ? [defaultRoot] : [],
         networkHosts,
-        networkMode: "deny",
+        // The sandbox cannot enforce per-host allowlists; "*" already means
+        // arbitrary public web, so it must be paired with the open switch.
+        networkMode: networkHosts.includes("*") ? "open" : "deny",
         tools: []
       };
     }
