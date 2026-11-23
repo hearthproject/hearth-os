@@ -4,6 +4,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api.ts";
 import { FOOTER_NAV, MAIN_NAV, MORE_NAV, type NavItem } from "../lib/navigation.ts";
+import { prefetchRoute } from "../lib/route-loaders.ts";
 import { HearthMark } from "./HearthMark.tsx";
 import { CommandPalette } from "./CommandPalette.tsx";
 import { ConversationSidebar } from "./ConversationSidebar.tsx";
@@ -125,6 +126,8 @@ function NavRow({ item, mobile = false }: { item: NavItem; mobile?: boolean }) {
     <NavLink
       to={item.path}
       end={item.end === true}
+      onMouseEnter={() => prefetchRoute(item.path)}
+      onFocus={() => prefetchRoute(item.path)}
       className={({ isActive: active }) => (active ? `${base} active` : base)}
     >
       <Icon size={mobile ? 19 : 18} />

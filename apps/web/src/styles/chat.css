@@ -441,23 +441,6 @@
   background: var(--surface);
 }
 
-.composer-access {
-  display: inline-flex;
-  order: 0;
-  align-items: center;
-  gap: 5px;
-  padding: 2px 4px;
-  border: 0;
-  border-radius: 0;
-  color: var(--ink-secondary);
-  font-size: var(--fs-11);
-  white-space: nowrap;
-}
-
-.composer-access svg {
-  color: var(--accent-strong);
-}
-
 .composer-model-wrap {
   position: relative;
   display: inline-flex;
@@ -542,10 +525,10 @@
 
 .composer-model-popover {
   position: absolute;
+  right: 0;
   bottom: calc(100% + 8px);
-  left: 0;
   z-index: 40;
-  width: 280px;
+  width: 288px;
   padding: 12px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
@@ -587,7 +570,6 @@
   font-size: var(--fs-10);
 }
 
-.model-popover-row,
 .model-popover-context {
   display: flex;
   align-items: center;
@@ -596,29 +578,60 @@
   color: var(--ink-secondary);
 }
 
-.model-popover-row strong,
 .model-popover-context strong {
   color: var(--ink);
   font-size: var(--fs-12);
 }
 
-.model-effort-slider {
-  width: 100%;
-  margin: 8px 0 2px;
-  accent-color: var(--ink);
-  cursor: pointer;
+.model-effort-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 3px;
+  margin-top: 10px;
+  padding: 3px;
+  border-radius: 9px;
+  background: var(--surface-sunk);
 }
 
-.model-effort-slider:disabled {
+.model-effort-option {
+  height: 27px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-tertiary);
+  font: inherit;
+  font-size: var(--fs-10);
+  cursor: pointer;
+  transition: background 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.model-effort-option:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.model-effort-option.active {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.12);
+  font-weight: 600;
+}
+
+.model-effort-option:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.model-effort-option:disabled {
   opacity: 0.45;
   cursor: default;
 }
 
-.model-effort-scale {
-  display: flex;
-  justify-content: space-between;
+.model-effort-hint {
+  min-height: 15px;
+  margin: 7px 0 0;
   color: var(--ink-tertiary);
   font-size: var(--fs-10);
+  line-height: 1.45;
 }
 
 .model-popover-note {

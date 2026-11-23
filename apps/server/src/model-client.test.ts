@@ -93,6 +93,21 @@ describe("OpenAI-compatible model client", () => {
     expect(result.content).toBe("你好");
   });
 
+  it("forwards reasoning effort while streaming", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(
+      'data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n',
+      { status: 200, headers: { "content-type": "text/event-stream" } }
+    ));
+    try {
+      await streamChat(settings(), [{ role: "user", content: "hi" }], () => undefined, { reasoningEffort: "medium" });
+      expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+        stream: true, reasoning_effort: "medium"
+      });
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
   it("streams reasoning separately from answer content", async () => {
     const reasoningServer = createServer(async (request, response) => {
       for await (const _chunk of request) {

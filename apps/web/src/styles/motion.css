@@ -1,0 +1,143 @@
+/* Motion: entrance, popover, panel and loading states. */
+
+@keyframes hearth-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes hearth-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes hearth-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes hearth-breathe {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.92);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes hearth-shimmer {
+  0% {
+    background-position: 180% 0;
+  }
+  100% {
+    background-position: -80% 0;
+  }
+}
+
+.message-row {
+  animation: hearth-fade-up 220ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.composer-model-popover {
+  animation: hearth-pop-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  transform-origin: bottom right;
+}
+
+.workspace-panel {
+  animation: hearth-slide-in 200ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.page-loading {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  min-height: 320px;
+  height: 100%;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-12);
+}
+
+.page-loading-mark {
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--surface-sunk);
+  animation: hearth-breathe 1.5s ease-in-out infinite;
+}
+
+.chat-streaming-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.inline-run-placeholder {
+  display: block;
+  height: 46px;
+  margin: 6px 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background:
+    linear-gradient(100deg, transparent 20%, rgb(255 255 255 / 0.35) 40%, transparent 60%) 0 0 / 220% 100%,
+    var(--surface);
+  animation: hearth-shimmer 1.6s ease-in-out infinite;
+}
+
+.composer-send {
+  transition: transform 150ms ease, background 150ms ease, opacity 150ms ease;
+}
+
+.composer-send:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+.primary-button,
+.ghost-button {
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease, transform 150ms ease;
+}
+
+.primary-button:active:not(:disabled),
+.ghost-button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.nav-item,
+.settings-tab {
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.nav-item:active,
+.settings-tab:active {
+  transform: scale(0.985);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message-row,
+  .composer-model-popover,
+  .workspace-panel,
+  .page-loading-mark,
+  .inline-run-placeholder {
+    animation: none !important;
+  }
+}

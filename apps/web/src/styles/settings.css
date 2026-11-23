@@ -228,6 +228,42 @@
   margin-top: 12px;
 }
 
+.form-advanced {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-subtle);
+}
+
+.form-advanced > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-secondary);
+  font-size: var(--fs-12);
+  list-style: none;
+  cursor: pointer;
+}
+
+.form-advanced > summary::before {
+  width: 10px;
+  color: var(--ink-tertiary);
+  content: "+";
+}
+
+.form-advanced[open] > summary::before {
+  content: "−";
+}
+
+.form-advanced > summary > span {
+  margin-left: auto;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-10);
+}
+
+.form-advanced .form-grid {
+  margin-top: 12px;
+}
+
 .knowledge-log pre,
 .wizard-install-log {
   max-height: 220px;

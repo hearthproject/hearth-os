@@ -1,11 +1,9 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router-dom";
-import ReactMarkdown from "react-markdown";
 import { ChatMailDraft } from "../components/ChatMailDraft.tsx";
 import { ApprovalCard } from "../components/ApprovalCard.tsx";
 import { isMailDraftReply } from "../lib/mail-draft.ts";
-import remarkGfm from "remark-gfm";
 import {
   ArrowUp,
   Brain,
@@ -26,8 +24,11 @@ import {
   X
 } from "lucide-react";
 import { ApiError, api, chatStream } from "../lib/api.ts";
-import { attachmentPreviewTarget, artifactPreviewTarget, ChatWorkspacePanel, type PreviewTarget } from "../components/ChatWorkspacePanel.tsx";
-import { InlineRun, type RunInfo } from "../components/InlineRun.tsx";
+import { attachmentPreviewTarget, artifactPreviewTarget, type PreviewTarget } from "../lib/workspace-preview.ts";
+import type { RunInfo } from "../components/InlineRun.tsx";
+const InlineRun = lazy(() => import("../components/InlineRun.tsx").then((module) => ({ default: module.InlineRun })));
+const ChatWorkspacePanel = lazy(() => import("../components/ChatWorkspacePanel.tsx").then((module) => ({ default: module.ChatWorkspacePanel })));
+const Markdown = lazy(() => import("../components/Markdown.tsx").then((module) => ({ default: module.Markdown })));
 import { formatBytes, formatDuration, formatTime } from "../lib/format.ts";
 import { getChatSelection, setChatBusy, syncChatSelection, useChatSelection } from "../lib/chat-selection.ts";
 import { executorLabel } from "../lib/labels.ts";
@@ -878,7 +879,9 @@ export function ChatPage() {
                 onPreview={openPreview}
               />
             ) : (
-              <InlineRun key={item.key} task={item.task} />
+              <Suspense key={item.key} fallback={<span className="inline-run-placeholder" aria-hidden="true" />}>
+                <InlineRun task={item.task} />
+              </Suspense>
             ))}
             {(streaming || reasoning) && <AssistantBubble content={streaming} reasoning={reasoning} streaming />}
             {sending && !streaming && !reasoning && (
@@ -936,10 +939,6 @@ export function ChatPage() {
             </div>
           )}
           <div className="composer-tools">
-            <span className="composer-access" title="所有工具、外部命令与网络访问均无需审批">
-              <ShieldCheck size={13} />
-              完全权限
-            </span>
             <div className="composer-model-wrap">
               <button
                 type="button"
@@ -953,16 +952,18 @@ export function ChatPage() {
                 <span className="composer-effort">{reasoningEffortLabel(reasoningEffort)}</span>
                 {savingEffort ? <Loader2 size={11} className="spin" /> : <ChevronDown size={12} />}
               </button>
-              <button
-                type="button"
-                className="composer-context"
-                onClick={() => setModelMenuOpen(true)}
-                title={contextTitle}
-                aria-label={contextTitle}
-              >
-                <Gauge size={12} />
-                {contextPercent}% · {formatTokens(usedTokens)}/{formatTokens(contextWindowTokens)}
-              </button>
+              {contextPercent > 0 && (
+                <button
+                  type="button"
+                  className="composer-context"
+                  onClick={() => setModelMenuOpen(true)}
+                  title={contextTitle}
+                  aria-label={contextTitle}
+                >
+                  <Gauge size={12} />
+                  {contextPercent}%
+                </button>
+              )}
               {modelMenuOpen && (
                 <>
                   <button type="button" className="composer-model-backdrop" aria-label="关闭模型设置" onClick={() => setModelMenuOpen(false)} />
@@ -975,26 +976,24 @@ export function ChatPage() {
                       <strong>{modelName}</strong>
                       <span>{providerName || "当前对话模型"}</span>
                     </div>
-                    <div className="model-popover-row">
-                      <span>推理强度</span>
-                      <strong>{reasoningEffortLabel(reasoningEffort)}</strong>
+                    <div className="model-effort-grid" role="group" aria-label="推理强度">
+                      {EFFORT_ORDER.map((effort) => (
+                        <button
+                          key={effort}
+                          type="button"
+                          className={`model-effort-option${effort === reasoningEffort ? " active" : ""}`}
+                          aria-pressed={effort === reasoningEffort}
+                          title={EFFORT_META[effort].description}
+                          disabled={savingEffort || !configured}
+                          onClick={() => changeReasoningEffort(effort)}
+                        >
+                          {EFFORT_META[effort].label}
+                        </button>
+                      ))}
                     </div>
-                    <input
-                      className="model-effort-slider"
-                      type="range"
-                      min={0}
-                      max={2}
-                      step={1}
-                      value={EFFORT_ORDER.indexOf(reasoningEffort)}
-                      disabled={savingEffort || !configured}
-                      onChange={(event) => changeReasoningEffort(EFFORT_ORDER[Number(event.target.value)] ?? "max")}
-                      aria-label="选择推理强度"
-                    />
-                    <div className="model-effort-scale">
-                      <span>低</span>
-                      <span>高</span>
-                      <span>极高</span>
-                    </div>
+                    <p className="model-effort-hint">
+                      {EFFORT_META[reasoningEffort].description}{savingEffort ? " · 保存中" : ""}
+                    </p>
                     <div className="model-popover-context">
                       <span>上下文窗口</span>
                       <strong>{formatTokens(contextWindowTokens)}</strong>
@@ -1015,7 +1014,7 @@ export function ChatPage() {
                       ))}
                       <p>{contextUsageLabel}。包含系统提示、对话历史、个人上下文、记忆、资料库、技能和附件。</p>
                     </div>
-                    <p className="model-popover-note">调整会立即生效，并在所有对话中保持。思考默认开启。</p>
+                    <p className="model-popover-note">调整会立即生效，并在所有对话中保持。</p>
                   </div>
                 </>
               )}
@@ -1198,25 +1197,35 @@ export function ChatPage() {
           </div>
         </div>
       </section>
-      <ChatWorkspacePanel
-        open={panelOpen}
-        messages={messages}
-        tasks={conversationTasks}
-        preview={workspacePreview}
-        onPreviewChange={setWorkspacePreview}
-        onOpen={openWorkspace}
-        onClose={closeWorkspace}
-      />
+      {panelOpen && (
+        <Suspense fallback={null}>
+          <ChatWorkspacePanel
+            open
+            messages={messages}
+            tasks={conversationTasks}
+            preview={workspacePreview}
+            onPreviewChange={setWorkspacePreview}
+            onOpen={openWorkspace}
+            onClose={closeWorkspace}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }
 
-const EFFORT_ORDER: ReasoningEffort[] = ["low", "high", "max"];
+const EFFORT_ORDER: ReasoningEffort[] = ["minimal", "low", "medium", "high", "max"];
+
+const EFFORT_META: Record<ReasoningEffort, { label: string; description: string }> = {
+  minimal: { label: "极简", description: "几乎不思考，响应最快，适合闲聊与简单改写。" },
+  low: { label: "低", description: "轻量思考，速度优先。" },
+  medium: { label: "中", description: "速度与质量平衡，适合大多数对话。" },
+  high: { label: "高", description: "更深推理，适合代码、分析与长任务。" },
+  max: { label: "极高", description: "最深推理，最慢但复杂任务最稳。" }
+};
 
 function reasoningEffortLabel(effort: ReasoningEffort): string {
-  if (effort === "low") return "低";
-  if (effort === "high") return "高";
-  return "极高";
+  return EFFORT_META[effort].label;
 }
 
 function formatTokens(value: number): string {
@@ -1365,16 +1374,13 @@ const AssistantBubble = memo(function AssistantBubble({
           <div className="reasoning-text" ref={reasoningRef}>{reasoning}</div>
         </div>
       )}
-      {content && (
-        <div className="chat-markdown">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={{ a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" /> }}
-          >
-            {content}
-          </ReactMarkdown>
-        </div>
-      )}
+      {content && (streaming ? (
+        <div className="chat-markdown chat-streaming-text">{content}</div>
+      ) : (
+        <Suspense fallback={<div className="chat-markdown chat-streaming-text">{content}</div>}>
+          <Markdown className="chat-markdown">{content}</Markdown>
+        </Suspense>
+      ))}
       {createdAt && <time>{formatTime(createdAt)}</time>}
     </div>
   );

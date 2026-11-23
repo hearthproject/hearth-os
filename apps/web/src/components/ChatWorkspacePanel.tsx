@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -13,19 +11,14 @@ import {
   XCircle
 } from "lucide-react";
 import { api } from "../lib/api.ts";
+import { Markdown } from "./Markdown.tsx";
 import { desktopErrorMessage, hasDesktopBridge, pickFolder } from "../lib/desktop.ts";
 import { formatBytes } from "../lib/format.ts";
 import { fileExtension, previewKind, TEXT_PREVIEW_LIMIT } from "../lib/preview.ts";
-import type { ArtifactListItem, BackgroundToolJob, ChatAttachment, ChatMessageRecord, TaskListItem } from "../lib/types.ts";
+import { artifactPreviewTarget, attachmentPreviewTarget, fileName, type PreviewTarget } from "../lib/workspace-preview.ts";
+import type { BackgroundToolJob, ChatAttachment, ChatMessageRecord, TaskListItem } from "../lib/types.ts";
 
-export interface PreviewTarget {
-  name: string;
-  url: string;
-  mimeType: string;
-  bytes: number | null;
-  taskId?: string;
-  artifactId?: string;
-}
+export type { PreviewTarget } from "../lib/workspace-preview.ts";
 
 export function ChatWorkspacePanel({
   open,
@@ -240,9 +233,7 @@ function PreviewBody({ preview }: { preview: PreviewTarget }) {
             {error && <p className="form-error">{error}</p>}
             {content === null && !error && !tooLarge && <p className="workspace-muted"><Loader2 size={13} className="spin" /> 正在读取</p>}
             {content !== null && kind === "markdown" && (
-              <div className="chat-markdown result-markdown">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-              </div>
+              <Markdown className="chat-markdown result-markdown">{content}</Markdown>
             )}
             {content !== null && kind === "text" && <pre className="workspace-text">{content}</pre>}
           </>
@@ -268,26 +259,6 @@ function JobBadge({ job }: { job: BackgroundToolJob }) {
   return <CheckCircle2 size={13} className="workspace-ok" />;
 }
 
-export function artifactPreviewTarget(artifact: Pick<ArtifactListItem, "id" | "taskId" | "relativePath" | "mimeType" | "bytes">): PreviewTarget {
-  return {
-    name: fileName(artifact.relativePath),
-    url: api.artifactUrl(artifact.taskId, artifact.id),
-    mimeType: artifact.mimeType,
-    bytes: artifact.bytes,
-    taskId: artifact.taskId,
-    artifactId: artifact.id
-  };
-}
-
-export function attachmentPreviewTarget(attachment: ChatAttachment): PreviewTarget {
-  return {
-    name: attachment.name,
-    url: api.attachmentUrl(attachment.id),
-    mimeType: attachment.mimeType,
-    bytes: attachment.bytes
-  };
-}
-
 function collectAttachments(messages: ChatMessageRecord[]): ChatAttachment[] {
   const seen = new Set<string>();
   const result: ChatAttachment[] = [];
@@ -299,11 +270,6 @@ function collectAttachments(messages: ChatMessageRecord[]): ChatAttachment[] {
     }
   }
   return result.reverse();
-}
-
-function fileName(path: string): string {
-  const parts = path.split(/[\\/]/);
-  return parts[parts.length - 1] || path;
 }
 
 function jobStatusLabel(status: BackgroundToolJob["status"]): string {

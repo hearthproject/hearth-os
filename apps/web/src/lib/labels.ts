@@ -52,7 +52,7 @@ export const APPROVAL_STATUS_LABELS: Record<ApprovalRecord["status"], string> = 
   expired: "已过期"
 };
 
-export const APPROVAL_KIND_LABELS: Record<string, string> = {
+const APPROVAL_KIND_LABELS: Record<string, string> = {
   "github.publish-pr": "创建 GitHub PR",
   "github.comment": "发布 GitHub 评论",
   "outbox.local-write": "写入本地发件箱",
@@ -71,7 +71,7 @@ export const EXECUTOR_LABELS: Record<string, string> = {
   "deepseek-harness": "DeepSeek Harness"
 };
 
-export const TASK_KIND_LABELS: Record<string, string> = {
+const TASK_KIND_LABELS: Record<string, string> = {
   delivery: "交付文件",
   workspace: "工作区任务",
   general: "通用任务"
@@ -85,7 +85,7 @@ export function taskKindLabel(kind: string | null | undefined): string {
   return kind ? TASK_KIND_LABELS[kind] ?? kind : "通用任务";
 }
 
-export const EVENT_LABELS: Record<string, string> = {
+const EVENT_LABELS: Record<string, string> = {
   "task.created": "任务已创建",
   "task.updated": "状态更新",
   "task.progress": "执行进展",
@@ -171,8 +171,4 @@ export function externalEffectSummary(approvals: ApprovalRecord[], effects: Effe
   if (approvals.some((approval) => approval.status === "expired")) return "确认已过期，没有执行外部动作。";
   if (approvals.length > 0) return `已记录 ${approvals.length} 次确认，没有外部动作。`;
   return "没有外部动作。";
-}
-
-export function executionModeLabel(mode: TaskRecord["executionMode"]): string {
-  return mode === "quick" ? "快速" : mode === "deep" ? "深入" : "标准";
 }

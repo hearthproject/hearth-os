@@ -1,18 +1,20 @@
-import { useEffect, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AppShell } from "./components/AppShell.tsx";
 import { NotificationCenter } from "./components/NotificationCenter.tsx";
 import { api, subscribeToEvents } from "./lib/api.ts";
+import { pageLoaders } from "./lib/route-loaders.ts";
 import type { EventEnvelope, TaskView } from "./lib/types.ts";
 import { ChatPage } from "./pages/ChatPage.tsx";
-import { ConnectionsPage } from "./pages/ConnectionsPage.tsx";
-import { ContextPage } from "./pages/ContextPage.tsx";
-import { MailPage } from "./pages/MailPage.tsx";
-import { LibraryPage } from "./pages/LibraryPage.tsx";
-import { OnboardingPage } from "./pages/OnboardingPage.tsx";
-import { SettingsPage } from "./pages/SettingsPage.tsx";
-import { SchedulesPage } from "./pages/SchedulesPage.tsx";
+
+const ConnectionsPage = lazy(() => pageLoaders.connections().then((module) => ({ default: module.ConnectionsPage })));
+const ContextPage = lazy(() => pageLoaders.context().then((module) => ({ default: module.ContextPage })));
+const MailPage = lazy(() => pageLoaders.mail().then((module) => ({ default: module.MailPage })));
+const LibraryPage = lazy(() => pageLoaders.library().then((module) => ({ default: module.LibraryPage })));
+const OnboardingPage = lazy(() => pageLoaders.onboarding().then((module) => ({ default: module.OnboardingPage })));
+const SettingsPage = lazy(() => pageLoaders.settings().then((module) => ({ default: module.SettingsPage })));
+const SchedulesPage = lazy(() => pageLoaders.schedules().then((module) => ({ default: module.SchedulesPage })));
 
 export default function App() {
   return (
@@ -21,7 +23,7 @@ export default function App() {
       <NotificationCenter />
       <FirstRunGate>
         <Routes>
-          <Route path="welcome" element={<OnboardingPage />} />
+          <Route path="welcome" element={<Suspended><OnboardingPage /></Suspended>} />
           <Route element={<AppShell />}>
             <Route index element={<ChatPage />} />
             <Route path="tasks" element={<Navigate to="/" replace />} />
@@ -29,18 +31,31 @@ export default function App() {
             <Route path="inbox" element={<Navigate to="/" replace />} />
             <Route path="knowledge" element={<Navigate to="/library" replace />} />
             <Route path="memory" element={<Navigate to="/library" replace />} />
-            <Route path="library" element={<LibraryPage />} />
-            <Route path="context" element={<ContextPage />} />
+            <Route path="library" element={<Suspended><LibraryPage /></Suspended>} />
+            <Route path="context" element={<Suspended><ContextPage /></Suspended>} />
             <Route path="dossier" element={<Navigate to="/settings?tab=dossier" replace />} />
-            <Route path="mail" element={<MailPage />} />
-            <Route path="schedules" element={<SchedulesPage />} />
-            <Route path="connections" element={<ConnectionsPage />} />
-            <Route path="settings" element={<SettingsPage />} />
+            <Route path="mail" element={<Suspended><MailPage /></Suspended>} />
+            <Route path="schedules" element={<Suspended><SchedulesPage /></Suspended>} />
+            <Route path="connections" element={<Suspended><ConnectionsPage /></Suspended>} />
+            <Route path="settings" element={<Suspended><SettingsPage /></Suspended>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
       </FirstRunGate>
     </>
+  );
+}
+
+function Suspended({ children }: { children: ReactNode }) {
+  return <Suspense fallback={<PageLoading />}>{children}</Suspense>;
+}
+
+function PageLoading() {
+  return (
+    <div className="page-loading" role="status" aria-live="polite">
+      <span className="page-loading-mark" aria-hidden="true" />
+      <span>正在打开…</span>
+    </div>
   );
 }
 

@@ -23,7 +23,7 @@ export class ModelClientError extends Error {
 export interface CompleteOptions {
   maxTokens?: number;
   responseFormat?: { type: "json_object" };
-  reasoningEffort?: "low" | "high" | "max";
+  reasoningEffort?: "minimal" | "low" | "medium" | "high" | "max";
   temperature?: number;
   signal?: AbortSignal;
   timeoutMs?: number;
@@ -237,7 +237,8 @@ async function streamOpenAiChat(
       messages,
       stream: true,
       ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
-      temperature: options.temperature ?? 0.5
+      temperature: options.temperature ?? 0.5,
+      ...(options.reasoningEffort ? { reasoning_effort: options.reasoningEffort } : {})
     }),
     signal: withTimeout(options.signal, options.timeoutMs ?? 180_000)
   });
@@ -291,7 +292,8 @@ async function completeOpenAiResponses(
       model: settings.model,
       stream: false,
       temperature: options.temperature ?? 0.2,
-      max_output_tokens: options.maxTokens ?? 1_200
+      max_output_tokens: options.maxTokens ?? 1_200,
+      ...(options.reasoningEffort ? { reasoning: { effort: options.reasoningEffort } } : {})
     }),
     signal: withTimeout(options.signal, options.timeoutMs ?? 60_000)
   });
@@ -309,7 +311,12 @@ async function streamOpenAiResponses(
   const response = await fetch(openAiResponsesUrl(settings.baseUrl), {
     method: "POST",
     headers: bearerHeaders(settings),
-    body: JSON.stringify({ ...responsesBody(messages), model: settings.model, stream: true }),
+    body: JSON.stringify({
+      ...responsesBody(messages),
+      model: settings.model,
+      stream: true,
+      ...(options.reasoningEffort ? { reasoning: { effort: options.reasoningEffort } } : {})
+    }),
     signal: withTimeout(options.signal, options.timeoutMs ?? 180_000)
   });
   if (!response.ok) throw apiError(response.status, await readJson(response), response.headers.get("retry-after"));

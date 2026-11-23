@@ -122,28 +122,33 @@ function StorageSection() {
             <span className="data-path-meta">schema v{storage.schemaVersion}</span>
           </div>
 
-          <dl className="data-locations">
-            <div>
-              <dt>SQLite 数据库 <small>设置、任务与事件索引</small></dt>
-              <dd><code>{relativeTo(storage.dataDir, storage.paths.database)}</code></dd>
+          <details className="data-disclosure">
+            <summary><FolderTree size={13} /> 存储位置明细</summary>
+            <div className="data-disclosure-body">
+              <dl className="data-locations">
+                <div>
+                  <dt>SQLite 数据库 <small>设置、任务与事件索引</small></dt>
+                  <dd><code>{relativeTo(storage.dataDir, storage.paths.database)}</code></dd>
+                </div>
+                <div>
+                  <dt>执行器运行时 <small>Codex 与 DeepSeek Harness 独立 home</small></dt>
+                  <dd><code>{relativeTo(storage.dataDir, storage.paths.executors)}</code></dd>
+                </div>
+                <div>
+                  <dt>上下文 Blob <small>大段正文，内容寻址</small></dt>
+                  <dd><code>{relativeTo(storage.dataDir, storage.paths.contextBlobs)}</code></dd>
+                </div>
+                <div>
+                  <dt>加密备份 <small>口令派生密钥的本机归档</small></dt>
+                  <dd><code>{relativeTo(storage.dataDir, storage.paths.backups)}</code></dd>
+                </div>
+                <div>
+                  <dt>附件 <small>聊天与任务附件</small></dt>
+                  <dd><code>{relativeTo(storage.dataDir, storage.paths.attachments)}</code></dd>
+                </div>
+              </dl>
             </div>
-            <div>
-              <dt>执行器运行时 <small>Codex 与 DeepSeek Harness 独立 home</small></dt>
-              <dd><code>{relativeTo(storage.dataDir, storage.paths.executors)}</code></dd>
-            </div>
-            <div>
-              <dt>上下文 Blob <small>大段正文，内容寻址</small></dt>
-              <dd><code>{relativeTo(storage.dataDir, storage.paths.contextBlobs)}</code></dd>
-            </div>
-            <div>
-              <dt>加密备份 <small>口令派生密钥的本机归档</small></dt>
-              <dd><code>{relativeTo(storage.dataDir, storage.paths.backups)}</code></dd>
-            </div>
-            <div>
-              <dt>附件 <small>聊天与任务附件</small></dt>
-              <dd><code>{relativeTo(storage.dataDir, storage.paths.attachments)}</code></dd>
-            </div>
-          </dl>
+          </details>
 
           {storage.lastPrune && (
             <details className="data-disclosure">
