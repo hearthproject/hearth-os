@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
+import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DelegationJob, ExecutorHealth, ExecutorId, HandoffRecord, HandoffStatus, TaskRecord, TaskStatus } from "@hearth/core";
@@ -21,6 +22,8 @@ import type { DeepSeekHarnessRunOptions, DeepSeekHarnessRunResult, DshApprovalOu
 import { DEFAULT_RUN_BUDGET } from "./native-executor.ts";
 import { McpServerService } from "./mcp-servers.ts";
 import { SecretBox } from "./secrets.ts";
+import { installBackgroundTaskRegistry, resetBackgroundTaskRegistry } from "./background-tasks.ts";
+import { SqliteOperationLedger } from "./sqlite-operation-ledger.ts";
 
 const MOCK_MCP_SERVER = fileURLToPath(new URL("./test-fixtures/mock-mcp-server.mjs", import.meta.url));
 
@@ -1953,6 +1956,48 @@ describe("Hearth scheduler", () => {
     expect(store?.listRuns(task.id).map((run) => run.status)).toEqual(["cancelled", "completed"]);
     const followUps = store?.listTaskFollowUps(task.id) ?? [];
     expect(followUps[0]?.status).toBe("applied");
+  });
+
+  it("confirms a pending shell process cleanup before writing evidence", async () => {
+    const service = setup();
+    const scheduler = makeScheduler(service, async () => FAKE_RESULT);
+    const task = service.createTask({ title: "清理", goal: "执行后台命令", executorId: "native", expectedOutputs: [] });
+    const now = new Date().toISOString();
+    const runId = randomUUID();
+    service.createRun({
+      id: runId, taskId: task.id, attempt: 1, status: "failed", threadId: null,
+      workspace: join(requireTemp(), "workspaces", "tasks", task.id), startedAt: now, endedAt: now,
+      failure: null, usage: null, leaseEpoch: null, createdAt: now
+    });
+    const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60_000)"], { stdio: "ignore", windowsHide: true });
+    const registry = installBackgroundTaskRegistry(store as HearthStore);
+    registry.start({
+      sessionId: "shell-cleanup", taskId: task.id, runId, pid: child.pid ?? null,
+      startTime: now, command: "node", outputPath: join(requireTemp(), "shell.log"), pty: false,
+      status: "running", exitCode: null, createdAt: now, updatedAt: now
+    });
+    const ledger = new SqliteOperationLedger(store as HearthStore);
+    await ledger.prepare({
+      operationId: `${runId}:call-1`, runId, taskId: task.id, toolCallId: "call-1",
+      toolName: "shell", argsHash: "a".repeat(64), effect: "external_write"
+    });
+    await ledger.dispatch({ operationId: `${runId}:call-1` });
+    await ledger.settle({
+      operationId: `${runId}:call-1`, phase: "settled",
+      resources: [{ kind: "process", id: "shell-cleanup", meta: { tool: "shell" } }]
+    });
+    expect((await ledger.get(`${runId}:call-1`))?.cleanupState).toBe("pending");
+
+    (scheduler as unknown as { settlePendingCleanups(runId: string): void }).settlePendingCleanups(runId);
+
+    const fact = await ledger.get(`${runId}:call-1`);
+    expect(fact?.cleanupState).toBe("confirmed");
+    expect(fact?.cleanupAttempts).toBe(2);
+    expect(registry.get("shell-cleanup")?.status).toBe("killed");
+    resetBackgroundTaskRegistry();
+    if (child.pid) {
+      try { process.kill(child.pid, "SIGKILL"); } catch { /* already dead */ }
+    }
   });
 
   function setup(): HearthService {
