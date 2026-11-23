@@ -105,6 +105,30 @@ describe("JsonlOperationLedger", () => {
     expect(raw.every((line) => JSON.parse(line).version === 1)).toBe(true);
   });
 
+  it("keeps a confirmed cleanup monotonic across a restart", async () => {
+    const path = tempPath();
+    const ledger = new JsonlOperationLedger({ path });
+    const prepared = await ledger.prepare(prepareInput({ operationId: "run-1:call-5", toolCallId: "call-5" }));
+    await ledger.dispatch({ operationId: prepared.operationId });
+    const settled = await ledger.settle({
+      operationId: prepared.operationId,
+      phase: "settled",
+      resources: [{ kind: "process", id: "4242" }]
+    });
+    expect(settled.cleanupState).toBe("pending");
+    await ledger.settleCleanup({ operationId: prepared.operationId, state: "confirmed" });
+    ledger.close();
+
+    const reopened = new JsonlOperationLedger({ path });
+    ledgers.push(reopened);
+    const fact = await reopened.get(prepared.operationId);
+    expect(fact?.cleanupState).toBe("confirmed");
+    expect(fact?.cleanupAttempts).toBe(2);
+    const again = await reopened.settleCleanup({ operationId: prepared.operationId, state: "confirmed" });
+    expect(again.cleanupState).toBe("confirmed");
+    expect(again.cleanupAttempts).toBe(2);
+  });
+
   it("ignores a torn tail instead of treating it as committed", async () => {
     const path = tempPath();
     const ledger = new JsonlOperationLedger({ path });

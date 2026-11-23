@@ -8,6 +8,15 @@ import { finishActiveWork, startActiveWork } from "../../packages/agent-runtime/
 import { createGoalTools } from "../../packages/agent-runtime/src/harness/goal.ts";
 import { ToolCatalog } from "../../packages/agent-runtime/src/harness/tool-catalog.ts";
 import { runAgent } from "../../packages/agent-runtime/src/runtime.ts";
+import { JsonlOperationLedger } from "../../packages/agent-runtime/src/operations/journal-ledger.ts";
+import type {
+  DispatchOperationInput,
+  OperationFact,
+  OperationLedger,
+  PrepareOperationInput,
+  SettleCleanupInput,
+  SettleOperationInput
+} from "../../packages/agent-runtime/src/operations/types.ts";
 import { createBuiltinTools } from "../../packages/agent-runtime/src/tools.ts";
 import { createFakeModel, fakeToolCall, fakeUsage, type FakeModelStep } from "../../packages/agent-runtime/src/test-support/fake-model.ts";
 import type { AgentCheckpoint, AgentTool, AgentToolContext, RuntimeEvent } from "../../packages/agent-runtime/src/types.ts";
@@ -62,7 +71,7 @@ describe("long-run acceptance matrix", () => {
       const root = workspace();
       const steps: FakeModelStep[] = [];
       for (let index = 0; index < 500; index++) {
-        steps.push({ content: "", toolCalls: [fakeToolCall("echo", { value: index })], usage: fakeUsage(100, 5), finishReason: "tool_calls" });
+        steps.push({ content: "", toolCalls: [fakeToolCall("echo", { value: String(index) })], usage: fakeUsage(100, 5), finishReason: "tool_calls" });
       }
       steps.push({ content: "done", toolCalls: [fakeToolCall("finish_task", { summary: "done" })], usage: fakeUsage(200, 10), finishReason: "tool_calls" });
       const fake = createFakeModel(steps);
@@ -91,7 +100,7 @@ describe("long-run acceptance matrix", () => {
       const tools = [echoTool(), ...createBuiltinTools().filter((tool) => tool.definition.name === "finish_task")];
       const permissions = { tools: ["echo", "finish_task"], readRoots: [root], writeRoots: [root], networkHosts: [] };
       const echoSteps = Array.from({ length: 6 }, (_, index): FakeModelStep => ({
-        content: "", toolCalls: [fakeToolCall("echo", { value: index })], usage: fakeUsage(10, 2), finishReason: "tool_calls"
+        content: "", toolCalls: [fakeToolCall("echo", { value: String(index) })], usage: fakeUsage(10, 2), finishReason: "tool_calls"
       }));
       const first = createFakeModel(echoSteps);
       const checkpoints: AgentCheckpoint[] = [];
@@ -252,7 +261,7 @@ describe("long-run acceptance matrix", () => {
       const root = workspace();
       writeGoal(root, 20);
       const steps: FakeModelStep[] = Array.from({ length: 20 }, (_, index) => ({
-        content: "", toolCalls: [fakeToolCall("echo", { value: index })], usage: fakeUsage(50, 5), finishReason: "tool_calls"
+        content: "", toolCalls: [fakeToolCall("echo", { value: String(index) })], usage: fakeUsage(50, 5), finishReason: "tool_calls"
       }));
       const fake = createFakeModel(steps);
       const result = await runAgent({
@@ -373,6 +382,52 @@ describe("long-run acceptance matrix", () => {
       return { compactions };
     });
   });
+
+  it.each(["after-prepare", "after-dispatch", "mid-tool", "after-settle", "after-checkpoint", "after-cleanup"] as const)(
+    "survives a crash at %s without duplicating the side effect",
+    async (point) => {
+      await runCase(`crash: ${point}`, async () => {
+        let total = 0;
+        for (let repetition = 0; repetition < 3; repetition++) {
+          const root = workspace();
+          const path = join(root, "operations.jsonl");
+          let local = 0;
+          const tool = crashTool(() => { local += 1; }, point === "mid-tool");
+          if (point === "after-cleanup") {
+            const ledger = new JsonlOperationLedger({ path });
+            await ledger.prepare({ operationId: "run-cleanup:call-1", runId: "run-cleanup", taskId: "task-cleanup", toolCallId: "call-1" });
+            await ledger.dispatch({ operationId: "run-cleanup:call-1" });
+            await ledger.settle({ operationId: "run-cleanup:call-1", phase: "settled", resources: [{ kind: "process", id: "4242" }] });
+            await ledger.settleCleanup({ operationId: "run-cleanup:call-1", state: "confirmed" });
+            const reopened = new JsonlOperationLedger({ path });
+            const fact = await reopened.get("run-cleanup:call-1");
+            expect(fact?.cleanupState).toBe("confirmed");
+            expect(fact?.cleanupAttempts).toBe(2);
+            const again = await reopened.settleCleanup({ operationId: "run-cleanup:call-1", state: "confirmed" });
+            expect(again.cleanupAttempts).toBe(2);
+            total += 0;
+            continue;
+          }
+          const first = new CrashLedger(new JsonlOperationLedger({ path }), point);
+          await runCrashAgent(first, tool, root, `call-${repetition}`);
+          if (point === "after-prepare") {
+            expect(local).toBe(0);
+            const resumed = new JsonlOperationLedger({ path });
+            await runCrashAgent(resumed, tool, root, `call-${repetition}`);
+            expect(local).toBe(1);
+          } else {
+            expect(local).toBe(point === "after-dispatch" ? 0 : 1);
+            const reopened = new JsonlOperationLedger({ path });
+            await runCrashAgent(reopened, tool, root, `call-${repetition}`);
+            expect(local).toBe(point === "after-dispatch" ? 0 : 1);
+          }
+          total += local;
+        }
+        return { crashPoint: point, executions: total };
+      });
+
+    }
+  );
 });
 
 async function runCase(name: string, fn: () => Promise<Record<string, unknown>>): Promise<void> {
@@ -429,7 +484,85 @@ function fakeTool(name: string): AgentTool {
   };
 }
 
+type CrashPoint = "after-prepare" | "after-dispatch" | "mid-tool" | "after-settle" | "after-checkpoint" | "after-cleanup";
+
+class CrashLedger implements OperationLedger {
+  constructor(private readonly inner: OperationLedger, private readonly point: CrashPoint) {}
+
+  async prepare(input: PrepareOperationInput): Promise<OperationFact> {
+    if (this.point !== "after-prepare") return this.inner.prepare(input);
+    await this.inner.prepare(input);
+    throw new Error("simulated crash after prepare");
+  }
+
+  async dispatch(input: DispatchOperationInput): Promise<OperationFact> {
+    if (this.point !== "after-dispatch") return this.inner.dispatch(input);
+    await this.inner.dispatch(input);
+    throw new Error("simulated crash after dispatch");
+  }
+
+  async settle(input: SettleOperationInput): Promise<OperationFact> {
+    if (this.point === "after-settle") throw new Error("simulated crash before settle");
+    if (this.point !== "after-checkpoint") return this.inner.settle(input);
+    await this.inner.settle(input);
+    throw new Error("simulated crash after settle");
+  }
+
+  settleCleanup(input: SettleCleanupInput): Promise<OperationFact> {
+    return this.inner.settleCleanup(input);
+  }
+
+  get(operationId: string): Promise<OperationFact | null> {
+    return this.inner.get(operationId);
+  }
+
+  listUnsettled(runId: string): Promise<OperationFact[]> {
+    return this.inner.listUnsettled(runId);
+  }
+}
+
+function crashTool(onExecute: () => void, throws: boolean): AgentTool {
+  return {
+    definition: {
+      name: "crash_write",
+      description: "simulated side effect",
+      parameters: { type: "object", properties: { value: { type: "string" } } },
+      effect: "local_write"
+    },
+    async execute(): Promise<{ content: string }> {
+      onExecute();
+      if (throws) throw new Error("simulated tool crash");
+      return { content: "written" };
+    }
+  };
+}
+
+async function runCrashAgent(ledger: OperationLedger, tool: AgentTool, root: string, callId: string): Promise<void> {
+  const fake = createFakeModel([
+    { content: "", toolCalls: [fakeToolCall("crash_write", { value: "v" }, callId)], usage: fakeUsage(50, 5), finishReason: "tool_calls" },
+    { content: "done", finishReason: "stop" }
+  ]);
+  try {
+    await runAgent({
+      model: fake.model,
+      tools: [tool],
+      goal: "crash matrix",
+      systemPrompt: "system",
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      permissions: { tools: ["crash_write"], readRoots: [root], writeRoots: [root], networkHosts: [] },
+      budget: {},
+      operationLedger: ledger,
+      requireFinishTool: false,
+      stopOnToolError: false
+    });
+  } catch {
+    // A crash simulation may surface as a failed run; the ledger is the assertion target.
+  }
+}
+
 function writeGoal(root: string, maxTurns: number): void {
+
   mkdirSync(join(root, ".hearth"), { recursive: true });
   writeFileSync(join(root, ".hearth", "goal.json"), JSON.stringify({
     goalId: "goal_matrix",

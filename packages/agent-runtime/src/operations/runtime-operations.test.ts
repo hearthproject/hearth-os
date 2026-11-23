@@ -86,7 +86,7 @@ async function runOne(
 class FaultLedger implements OperationLedger {
   constructor(
     private readonly inner: OperationLedger,
-    private readonly fault: "prepare" | "dispatch-before" | "dispatch-after" | "settle"
+    private readonly fault: "prepare" | "dispatch-before" | "dispatch-after" | "settle-before" | "settle-after"
   ) {}
 
   async prepare(input: PrepareOperationInput): Promise<OperationFact> {
@@ -102,8 +102,10 @@ class FaultLedger implements OperationLedger {
   }
 
   async settle(input: SettleOperationInput): Promise<OperationFact> {
-    if (this.fault === "settle") throw new Error("injected settle failure");
-    return this.inner.settle(input);
+    if (this.fault === "settle-before") throw new Error("injected settle failure");
+    const fact = await this.inner.settle(input);
+    if (this.fault === "settle-after") throw new Error("injected post-settle crash");
+    return fact;
   }
 
   async settleCleanup(input: SettleCleanupInput): Promise<OperationFact> {
@@ -191,13 +193,47 @@ describe("runtime T1/T2 operation ledger", () => {
       writeFileSync(file, String((args as { text?: string }).text ?? "one"));
       return { content: "written" };
     });
-    await runOne(new FaultLedger(ledger, "settle"), tool, "call-settle", "run-settle", { path: "edited.txt", text: "one" }, root);
+    await runOne(new FaultLedger(ledger, "settle-before"), tool, "call-settle", "run-settle", { path: "edited.txt", text: "one" }, root);
     expect(executions).toBe(1);
     expect(readFileSync(file, "utf8")).toBe("one");
     expect((await ledger.get("run-settle:call-settle"))?.phase).toBe("dispatched");
     await runOne(ledger, tool, "call-settle", "run-settle", { path: "edited.txt", text: "two" }, root);
     expect(executions).toBe(1);
     expect(readFileSync(file, "utf8")).toBe("one");
+  });
+
+  it("does not replay a write after a crash that happened after the result was settled", async () => {
+    const ledger = new JsonlOperationLedger();
+    ledgers.push(ledger);
+    const root = workspace();
+    let executions = 0;
+    const tool = makeTool("write_thing", "local_write", async () => {
+      executions += 1;
+      return { content: "written" };
+    });
+    await runOne(new FaultLedger(ledger, "settle-after"), tool, "call-settled", "run-settled", {}, root);
+    expect(executions).toBe(1);
+    expect((await ledger.get("run-settled:call-settled"))?.phase).toBe("settled");
+    await runOne(ledger, tool, "call-settled", "run-settled", {}, root);
+    expect(executions).toBe(1);
+  });
+
+  it("does not replay after a settled operation survives a process restart", async () => {
+    const root = workspace();
+    const path = join(root.root, "operations.jsonl");
+    const first = new JsonlOperationLedger({ path });
+    let executions = 0;
+    const tool = makeTool("write_thing", "local_write", async () => {
+      executions += 1;
+      return { content: "written" };
+    });
+    await runOne(first, tool, "call-restart", "run-restart", {}, root);
+    first.close();
+    const reopened = new JsonlOperationLedger({ path });
+    ledgers.push(reopened);
+    expect((await reopened.get("run-restart:call-restart"))?.phase).toBe("settled");
+    await runOne(reopened, tool, "call-restart", "run-restart", {}, root);
+    expect(executions).toBe(1);
   });
 
   it("cancels a timed-out local write, records unknown, and never duplicates it", async () => {
