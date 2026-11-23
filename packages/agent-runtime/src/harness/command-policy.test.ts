@@ -14,6 +14,20 @@ describe("shell command classifier", () => {
     expect(classifyShellCommand("New-Item -ItemType File out.txt").kind).toBe("mutating");
   });
 
+  it("distinguishes read-only gh queries from remote mutations", () => {
+    expect(classifyShellCommand("gh --version").kind).toBe("read-only");
+    expect(classifyShellCommand("gh auth status").kind).toBe("read-only");
+    expect(classifyShellCommand("gh pr list --limit 20").kind).toBe("read-only");
+    expect(classifyShellCommand("gh pr view 42 -R owner/repo").kind).toBe("read-only");
+    expect(classifyShellCommand("gh api repos/owner/repo/pulls").kind).toBe("read-only");
+    expect(classifyShellCommand("gh api --method GET repos/owner/repo/pulls").kind).toBe("read-only");
+    expect(classifyShellCommand("gh api --method POST repos/owner/repo/pulls").kind).toBe("mutating");
+    expect(classifyShellCommand("gh search prs --author me").kind).toBe("read-only");
+    expect(classifyShellCommand("gh pr create --title fix").kind).toBe("mutating");
+    expect(classifyShellCommand("gh api -X POST /repos/owner/repo/pulls").kind).toBe("mutating");
+    expect(classifyShellCommand("gh repo clone owner/repo").kind).toBe("mutating");
+  });
+
   it("flags destructive commands", () => {
     expect(classifyShellCommand("rm -rf build").kind).toBe("destructive");
     expect(classifyShellCommand("Remove-Item -Recurse -Force C:\\tmp\\x").kind).toBe("destructive");

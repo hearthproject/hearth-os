@@ -311,6 +311,10 @@ describe("builtin tools", () => {
     expect(effect({ command: "echo hello" })).toBe("read");
     expect(effect({ command: "rm -rf /" })).toBe("destructive");
     expect(effect({ command: "git push origin main" })).toBe("external_write");
+    expect(effect({ command: "git push --dry-run origin main" })).toBe("local_write");
+    expect(effect({ command: "gh auth status" })).toBe("read");
+    expect(effect({ command: "gh pr list --limit 20" })).toBe("read");
+    expect(effect({ command: "gh pr create --title fix" })).toBe("external_write");
     expect(effect({ command: "curl -X POST https://example.com/hook" })).toBe("external_write");
     expect(effect({ command: "Invoke-RestMethod -Method Delete https://example.com/item" })).toBe("external_write");
     expect(effect({ command: "npm install" })).toBe("local_write");

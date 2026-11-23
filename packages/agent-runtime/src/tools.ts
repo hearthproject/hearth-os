@@ -981,6 +981,7 @@ const shellTool: AgentTool = {
   async execute(input, context) {
     const args = objectArgs(input);
     const command = stringArg(args, "command");
+    const declaredEffect = shellEffectForArgs(input);
     assertSafeCommand(command, context.permissions.networkHosts.length > 0);
     const policy = commandPolicyIssue(command, { fullAccess: context.fullAccess === true, planMode: context.mode === "plan" });
     if (policy) throw new Error(policy);
@@ -1033,6 +1034,12 @@ const shellTool: AgentTool = {
         ? `still running in background (session ${result.sessionId}); use shell_output to inspect, shell_kill to stop`
         : `exit ${result.exitCode ?? "unknown"}`;
     const sandboxFailure = result.sandboxFailure;
+    // A process that exited cleanly is the receipt for a shell-driven external
+    // write (`git push`, `gh pr create`, ...). Without it the ledger can never
+    // settle such operations and every successful push would park the run.
+    const receipt = declaredEffect === "external_write" && !result.aborted && !result.running && result.exitCode === 0
+      ? { kind: "process_exit", exitCode: 0, command, completedAt: new Date().toISOString() }
+      : null;
     const failureNote = sandboxFailure === "denied"
       ? "\n\n[SANDBOX_DENIED] 路径不在任务写入范围；请调整项目/任务范围后重新发起任务，不要重试该命令。"
       : sandboxFailure === "runner_failure"
@@ -1048,6 +1055,7 @@ const shellTool: AgentTool = {
         background: result.running,
         ...(result.aborted ? { aborted: true } : {}),
         truncated: truncated.truncated,
+        ...(receipt ? { receipt } : {}),
         ...(fullPath ? { fullOutputPath: fullPath } : {}),
         ...(result.sandbox ? { sandbox: result.sandbox } : {}),
         ...(sandboxFailure ? { sandboxFailure } : {})
@@ -1400,7 +1408,9 @@ function shellEffectForArgs(input: unknown): "read" | "local_write" | "external_
  * workspace and therefore must be reconciled rather than replayed.
  */
 function externalShellSideEffect(command: string): boolean {
-  if (/\b(git\s+push|gh|npm\s+publish|pnpm\s+publish|yarn\s+publish|docker\s+push|scp)\b/i.test(command)) return true;
+  if (/\bgit\s+push\b/i.test(command) && !/\s--dry-run\b/i.test(command)) return true;
+  if (/\bgh\b/i.test(command)) return true;
+  if (/\b(npm\s+publish|pnpm\s+publish|yarn\s+publish|docker\s+push|scp)\b/i.test(command)) return true;
   if (/\bcurl\b.*(-X\s*(POST|PUT|PATCH|DELETE)|--data|--upload-file|-d\s|-F\s)/i.test(command)) return true;
   if (/\b(invoke-restmethod|irm)\b.*-method\s*(post|put|patch|delete)/i.test(command)) return true;
   return false;

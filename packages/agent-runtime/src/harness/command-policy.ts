@@ -64,6 +64,26 @@ const DESTRUCTIVE_COMMANDS = new Set([
 
 const READ_ONLY_GIT = new Set(["status", "diff", "log", "show", "blame", "rev-parse", "ls-files", "shortlog", "describe"]);
 const MUTATING_GIT = new Set(["add", "commit", "checkout", "switch", "merge", "rebase", "cherry-pick", "revert", "tag", "stash", "fetch", "pull", "push", "init", "clone", "mv", "rm", "restore", "apply"]);
+const GH_READ_ONLY_GROUPS: Record<string, Set<string>> = {
+  auth: new Set(["status"]),
+  pr: new Set(["list", "view", "diff", "checks", "status"]),
+  issue: new Set(["list", "view", "status"]),
+  repo: new Set(["list", "view"]),
+  release: new Set(["list", "view"]),
+  run: new Set(["list", "view", "watch"]),
+  workflow: new Set(["list", "view"]),
+  label: new Set(["list"]),
+  gist: new Set(["list", "view"]),
+  config: new Set(["get", "list"]),
+  alias: new Set(["list"]),
+  extension: new Set(["list"]),
+  secret: new Set(["list"]),
+  variable: new Set(["list"]),
+  cache: new Set(["list"]),
+  ruleset: new Set(["list", "view", "check"]),
+  search: new Set(["repos", "issues", "prs", "code", "commits", "users"])
+};
+const GH_VALUE_FLAGS = new Set(["-r", "--repo", "--hostname", "--git-dir", "--config-dir", "--browser"]);
 const SCRIPT_FLAGS = new Set(["-c", "-command", "/c", "--command"]);
 
 export function classifyShellCommand(command: string): ShellClassification {
@@ -106,6 +126,7 @@ function classifySegment(segment: string): ShellClassification {
     return { kind: "destructive", reason: `${command} 属于破坏性命令`, command: segment };
   }
   if (command === "git") return classifyGit(args, segment);
+  if (command === "gh") return classifyGh(args, segment);
   if (command === "npm" || command === "pnpm" || command === "yarn") {
     const verb = lowerArgs[0];
     if (verb === "test" || verb === "run" || verb === "install" || verb === "ci" || verb === "exec") {
@@ -161,6 +182,73 @@ function classifyGit(args: string[], segment: string): ShellClassification {
   }
   if (MUTATING_GIT.has(sub)) return { kind: "mutating", reason: `git ${sub} 会修改状态`, command: segment };
   return { kind: "unknown", reason: `git ${sub} 无法确认`, command: segment };
+}
+
+function classifyGh(args: string[], segment: string): ShellClassification {
+  const lowerArgs = args.map((arg) => arg.toLowerCase());
+  const group = ghGroup(lowerArgs);
+  if (!group) {
+    // `gh` with only global flags prints help; it never reaches the API.
+    return { kind: "read-only", reason: "gh 只输出版本或帮助", command: segment };
+  }
+  if (group === "version" || group === "help" || group === "--version" || group === "--help") {
+    return { kind: "read-only", reason: `gh ${group} 只输出版本或帮助`, command: segment };
+  }
+  if (group === "status") {
+    return { kind: "read-only", reason: "gh status 只读", command: segment };
+  }
+  if (group === "api") {
+    const methodIndex = lowerArgs.findIndex((arg) => arg === "-x" || arg === "--method");
+    const method = methodIndex >= 0 ? lowerArgs[methodIndex + 1] : undefined;
+    const inlineMethod = lowerArgs.find((arg) => arg.startsWith("--method="))?.slice("--method=".length);
+    const writeMethod = [method, inlineMethod].some((value) => value !== undefined && !["get", "head", "options"].includes(value));
+    const writes = writeMethod || lowerArgs.some((arg) =>
+      ["-f", "--field", "-F", "--raw-field", "--input", "--body", "--body-file"].includes(arg)
+    );
+    if (!writes) return { kind: "read-only", reason: "gh api 默认 GET 只读", command: segment };
+    return { kind: "mutating", reason: "gh api 带写入参数", command: segment };
+  }
+  const allowed = GH_READ_ONLY_GROUPS[group];
+  if (allowed && allowed.has(subcommandFor(lowerArgs))) {
+    return { kind: "read-only", reason: `gh ${group} ${subcommandFor(lowerArgs)} 只读`, command: segment };
+  }
+  if (allowed) return { kind: "mutating", reason: `gh ${group} ${subcommandFor(lowerArgs) || "未知子命令"} 会修改远端状态`, command: segment };
+  return { kind: "unknown", reason: `gh ${group} 无法确认`, command: segment };
+}
+
+/** First non-flag token after `gh`, skipping global options that take a value. */
+function ghGroup(lowerArgs: string[]): string | undefined {
+  let index = 0;
+  while (index < lowerArgs.length) {
+    const arg = lowerArgs[index]!;
+    if (GH_VALUE_FLAGS.has(arg)) {
+      index += 2;
+      continue;
+    }
+    if (arg.startsWith("-")) {
+      index += 1;
+      continue;
+    }
+    return arg;
+  }
+  return undefined;
+}
+
+/** The verb following the group, skipping flags (and their values) in between. */
+function subcommandFor(lowerArgs: string[]): string {
+  const group = ghGroup(lowerArgs);
+  if (!group) return "";
+  let index = lowerArgs.indexOf(group) + 1;
+  const valueFlags = new Set(["--jq", "--template", "--limit", "-l", "--state", "-s", "--author", "-a", "--label", "--base", "-b", "--head", "-H", "--sort", "--order", "--format"]);
+  while (index < lowerArgs.length) {
+    const arg = lowerArgs[index]!;
+    if (arg.startsWith("-")) {
+      index += valueFlags.has(arg) ? 2 : 1;
+      continue;
+    }
+    return arg;
+  }
+  return "";
 }
 
 function splitShellSegments(command: string): string[] {
