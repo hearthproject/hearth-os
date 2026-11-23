@@ -1,172 +1,59 @@
 ---
-title: "Phase 2–6 Delivery Status"
-description: "Verified capabilities, evidence, local substitutes, and deliberately unfinished work."
+title: "Current Delivery Status"
+description: "Code, automated tests, builds, and deliberately unfinished work as of 2026-11-23."
 outline: [2, 3]
 ---
 
-# Phase 2–6 Delivery Status
+# Current Delivery Status
 
-Checked on 2026-11-12. This page records only what the current code and real runs can prove; a page existing is not treated as a completed loop.
+Checked on 2026-11-23 against `main`, target version `0.3.4`. This page records only what current code and local runs can prove; a page existing is not a closed loop, and an old plan is not current status.
 
-## Phase result
+> Phase 2–6 pages are historical plans; parts of them are superseded by the current scope. Use this page for current facts. The Chinese page is canonical and includes the full 2026-11 acceptance report.
 
-- **Phase 2: partially complete.** Local files, knowledge bases, public web, document and spreadsheet extraction, task source references, and the draft → approval → local outbox write → receipt loop are usable. IMAP read-only sync and SMTP sending form code loops, but require a real account and manual acceptance. Calendar accounts and real-provider bounce/spam semantics are still unverified, so Phase 2 is not accepted as a whole.
-- **Phase 3: partially complete.** A same-machine Windows device can pair, approve capabilities individually, observe, pause, resume, take over, hand back, terminate, and run low-risk click, type, key, and UI Automation actions against an explicitly approved target app. Sensitive-area masking, isolated desktops, high-risk actions, snapshots, and compensation are not implemented, so Phase 3 is not accepted as a whole.
-- **Phase 4: partially complete.** Proactive suggestions, the proactive inbox, accept/ignore/snooze/convert actions, the attention budget, pause controls, in-app notifications, and Feishu long-connection approvals form code loops. The web app also ships an installable PWA shell, offline app shell, and mobile bottom navigation. Phone pairing, system push, remote takeover, and real iOS/Android installation acceptance remain incomplete, so Phase 4 is not complete.
-- **Phase 5: partially complete.** Memory candidates, recall, correction, conflicts, consolidation, forget propagation, tombstones, and export, plus method generation, trial evidence, evaluation, promotion, rejection, and rollback, form a code loop. Scoped skill permissions, lifecycle, stale cleanup, and rollback, plus durable single-layer delegation, handoffs, and sandbox boundaries, also form code loops. Real long-term memory use, production before/after method comparisons, real multi-executor stress, and full 5.4 acceptance are still missing.
-- **Phase 6: partially complete.** Incremental event sync, peer authentication, conflict handling, task leases with epoch fencing, device revocation and token rotation, the kill switch, encrypted database backup and restore, health checks, maintenance, and redacted diagnostics form a code loop. The connection runtime separates transport, subscription, data freshness, and execution ownership, with generation isolation, an offline outbox, and cached projections. Real remote nodes and phones, real offline reconnect and cross-node outbox reconciliation, two-device switching, a lost-device drill, complete migration, weeks of continuous operation, and v1.0 release acceptance are still missing.
+## What changed in this version
 
-## Experience completion (2026-11-08)
+- **Runtime stability:** Tool side effects split into business settlement and physical cleanup. `settled` no longer means "cleaned"; terminal runs really terminate registered shell processes and write `confirmed / failed` back to `run_operations`. The recovery gate walks the parent run chain and refuses to replay unknown side effects.
+- **Single source of truth:** The server no longer writes JSONL journals. Messages, tool settlements, checkpoints, and run boundaries go to SQLite `events` (schema v40); checkpoint files are materialized views rebuilt from `event_seq`.
+- **Host lifecycle:** `HostKernel` owns the single data-directory lease and advances through `lease → store → operations → runs → tasks → background → ready`. `/api/ready` returns 503 and write routes return `HOST_NOT_READY` until recovery completes.
+- **Windows native sandbox:** `hearth-native.exe` starts children with an AppContainer package SID, workspace/temp ACLs, a kill-on-close Job Object, and a parent watchdog. Network is `deny | open`; declared host allowlists or a missing helper fail closed.
+- **PTY and background processes:** `shell` supports `pty: true` with `cols` / `rows`; `shell_input` and `shell_resize` operate the ConPTY session. Every session is recorded in `background_processes`; restart kills matching process trees and marks reused PIDs `lost`.
+- **Evidence and pruning:** Every terminal run writes `run-evidence.json`; the long-run matrix grew from 12 to 18 crash points; `npm run storage:prune` previews and reclaims old runs and unreferenced tool output.
+- **UI contraction:** Task list, task detail, and the "Needs you" inbox pages are gone. Runs render inline in chat; primary navigation is Chat, Library, and Context, with Mail / Schedules / Connections under More.
 
-This round closes user-visible entrances and the last mile without changing existing task, approval, or recovery boundaries:
+## Automated verification
 
-- **First run:** A fresh instance enters the four-step `/welcome` wizard for provider selection, connection test, chat-model save, native-executor binding, and memory/proactive preferences. The gate fails open and never blocks other routes.
-- **Memory and proactive:** The primary navigation exposes "Needs you" and "Memory". The wizard opts into terminal-task experience candidates; direct chat recalls confirmed memories and shows the count; completed, failed, and recoverable terminal tasks all attempt experience capture.
-- **Notifications:** Proactive service scans once after startup, then every five minutes, and reacts to task, approval, effect, and source events. In-app toasts and optional desktop notifications only surface attention; delivery after the page closes is not promised.
-- **Feishu:** A self-built app long connection, open_id allowlist, text/image/file messages, task status forwarding, approval summaries, and `/approve` and `/reject` text commands form a code loop. Interactive card callbacks are not supported over the long connection and are not implemented in this version.
-- **Mail:** SMTP sending reuses the effect ledger; approval previews state that delivery is real and irreversible. IMAP read-only sync writes recent mail into Sources without marking messages read. The mail workspace has Accounts, Inbox, and Compose; attachment selection is not in the first version.
-- **Still unverified:** a real Feishu tenant, real SMTP/IMAP accounts, bounce and spam semantics, push after the page closes, mail attachment UI, and long-term real-user use.
+| Item | Command | Result |
+|---|---|---|
+| Version consistency | `npm run version:check` | 0.3.4 across 7 workspaces, Cargo, Tauri, and the lockfile |
+| Typecheck | `npm run typecheck` | 0 errors |
+| Unit/integration | `npm test` | 140 files, 946 cases (931 passed, 15 skipped, 0 failed) |
+| Long-run matrix | `npm run test:longrun` | 18/18 passed |
+| Web build | `npm run build` | Passed (JS 643.06 kB / CSS 158.97 kB) |
+| Docs build | `npm run docs:build` | Passed, no broken links |
+| Offline first run | `npm run first:run -- --fake` | Passed (script and task chain only; not a real model) |
+| 0.3.4 installer | `npm run release:build` | NSIS 30.5 MiB, portable zip 47.2 MiB; published as a GitHub Pre-release |
+| Windows sandbox | `npm run test:sandbox` | 12 real tests: escape write, read-only, junction escape, secret filtering, network deny, PTY, and Job close |
 
-## T3 Code gap closure (2026-11-09)
+> Real process tests (worktrees, subagents, sandbox) are slow on Windows; Vitest uses a 20-second test timeout and 30-second hook timeout. Results above were re-run on `main` on 2026-11-23. The 0.2.0 and 0.3.3 snapshots remain historical records in the Chinese acceptance report.
 
-This round prioritizes entrances tied to Hearth's task ownership, approval ledger, and daily use. It does not turn Hearth into an IDE:
+## Still deliberately open
 
-- **Interaction granularity:** A running task accepts a queued follow-up or a steer that aborts the current turn and restarts with the added instruction. `queue` does not interrupt the current turn. `steer` preserves the task and artifacts, then reruns; it does not inject tokens into an active model stream.
-- **Tool approval:** Before executing a sensitive tool, `@hearth/agent-runtime` calls the scheduler approval bridge. File writes/edits, patch application, shell commands, web fetches, and desktop capture enter `waiting_approval` under necessary approval. Approval continues; rejection returns a tool error to the model and the task continues. DeepSeek Harness `approval/request` calls enter the same approval record and map to `allowed-once`, `rejected`, or `cancelled`. Native full permission does not interrupt but records an `approval.auto_approved` audit event; DeepSeek Harness auto-allows and audits when it receives an approval request under full permission. External effects still use the existing parameter hash, effect ledger, and receipt; the two approval layers remain separate.
-- **Git workbench:** Task details show working-tree and base-branch file diffs, additions/deletions, commits, source preview, pull-request state, and CI checks. Branch-relative changes remain visible even when the worktree is dirty.
-- **Fast entry and mobile shell:** `Ctrl/Command + K` jumps to pages and tasks. The web app ships a PWA manifest, icons, offline app shell, and mobile bottom navigation.
-- **Task organization:** The task list supports pinning, archiving, and restoring. Archived tasks are hidden from All, Active, Done, and Needs attention by default and can be found through the Archived filter; pinned tasks sort first. Organization is stored in separate `pinnedAt`/`archivedAt` fields and does not change task status, approvals, leases, or execution results.
+- **Updater signing is not shipped:** no private key, public key, or update endpoint; 0.3.4 has no updater artifacts.
+- **No Windows Authenticode:** the installer may trigger SmartScreen.
+- **Clean-machine install/uninstall is unverified:** the installer was freshly installed and launched on the development machine, but not on a clean Windows user environment, upgrade path, or enterprise policy.
+- **Real-model first run is unverified:** it still depends on local model configuration and provider permissions; without a working key only `first:run --fake` is available.
+- **No everyday Chrome extension bridge:** the product uses a dedicated Chrome profile; sites must be logged in there. Chrome 136+ blocks remote debugging on the default profile.
+- **Real accounts are unverified:** Feishu tenant, SMTP/IMAP accounts, and desktop devices have code and local tests only.
+- **No weeks-long crash-recovery drill:** 18 crash points are covered by automation, not by real power loss, blue screens, or forced kills over time.
+- **Cleanup coverage is partial:** registered shell processes are really terminated; resources without a cleanup handler (subagents, worktrees, browser sessions) are recorded as `failed` with a reason.
 
-**Still deliberately open in that round (see “General execution kernel upgrade” for later status):** Codex, Hermes, Qoder, WorkBuddy, and Kimi do not yet normalize provider-native per-tool approval events into Hearth approvals. At that time there was no arbitrary project/worktree management, hidden-ref file restore, PR review decision/auto-merge/revert, subagent, MCP server, or provider-native skills/commands. The 2026-11-11 work added local project worktrees, bounded subagents, local stdio MCP, and on-demand skills; hidden-ref file restore, PR review decision/auto-merge/revert, remote MCP, and provider-native skills/commands remain unimplemented. The PWA still lacks real iOS/Android installation acceptance, system push, phone pairing, and remote takeover.
+## Moved out of scope
 
-## Agent runtime loop
+- Task list, task detail, and the "Needs you" inbox;
+- task templates;
+- proactive service, attention budgets, standing intents, and suggestion clusters;
+- goal contracts and automatic completion judgment;
+- method learning bound to tasks;
+- multi-device sync, remote nodes, and an executor plugin marketplace.
 
-- **Implemented:** `native` and `codex` executors are peers; executor identity is recorded in runs and artifact manifests. General tasks default to native, GitHub code/engineering tasks use Codex, and a user-selected local project runs native in an isolated worktree. Failures do not silently switch executors.
-- **Implemented:** Four model protocols (OpenAI Chat, OpenAI Responses, Anthropic Messages, Gemini) with normalized streaming text and tool calls. Model profiles expose documented context-window and maximum-output budgets, and providers can be selected or customized in settings.
-- **Implemented:** A `@hearth/agent-runtime` general execution kernel covering read, document, glob/grep, write, atomic edit, patch, shell, web search, skills, delegation, local MCP, ask-user, and finish tools, with task-scoped roots, hosts, and tool allowlists.
-- **Implemented:** Turn, tool-call, token, and duration budgets; checkpoints after model turns and tool steps; token-aware compaction, transient retries, and repeated-tool-call detection; recovery with user follow-up; and up to two repair rounds with prior agent context when declared deliverables are missing.
-- **Implemented:** Tasks requiring network access or engineering workspace writes create a chat proposal and enter the queue only after confirmation. Ordinary general tasks dispatch directly.
-- **UI contract:** The task list shows executor, phase, tokens, duration, and result. Details show the final summary and declared artifacts first; intermediate JSON, command logs, and checkpoints remain folded technical details.
-
-This is a code-and-test loop, not evidence of long-running acceptance with real users.
-
-## General execution kernel upgrade (2026-11-11)
-
-This round upgraded native from a compact coding loop into a general execution kernel across 16 planned items: items 1–15 are code and test delivery, and the final item is this status page and the capability matrix. The evidence proves code and automated-test closures only. It is not a shared benchmark against Pi, DeerFlow, or OpenCode and does not support a numeric superiority claim.
-
-- **Files and commands:** Added glob/grep, document reading, and XLSX/CSV/DOCX generation. `edit_file` previews diffs; patches validate every target before one atomic write and support moves and real deletion. Shell keeps full output in task-local `.hearth/shell` logs, returns only the tail, and kills the whole process tree on timeout.
-- **Context and stability:** Model windows default to 128K and maximum output to 8K. Compaction reserves `max(16K, 15%)`, keeps roughly 20K recent tokens, starts only at complete turn boundaries, never splits a tool call from its result, and falls back to safe truncation if summarization fails. It writes a checkpoint after compacting. Plain text no longer completes a task; repeated failure to call `finish_task` fails explicitly. Only 429/5xx/network failures retry twice, and repeated identical tool calls are reported and suppressed.
-- **Skills and delegation:** Prompts receive only a skill index. `load_skill` verifies the content hash, task permissions, and audit before returning content; `read_skill_resource` stays inside the skill package. `delegate_task` uses fresh context, permits only read-only or isolated writes, is single-layer and serial, caps at two children per parent, forbids MCP and automatic merging, and rolls child usage into the parent.
-- **Projects and worktrees:** Added local Git project registration, path/Git-root/branch validation, and the settings project list. Project tasks use an isolated `hearth/<task-id>` worktree, reuse it on resume, retain it after success or failure, and delete it only on explicit cleanup when the worktree is clean. GitHub tasks still use Codex.
-- **Local MCP:** Only stdio is supported. The settings page manages the command, arguments, and encrypted environment values; startup probing, tool discovery, timeout, and crash isolation form a code loop. Tools use `mcp__<serverId>__<toolName>`, `ajv` validates the JSON Schema before invocation, result size is bounded, output/errors/stderr are redacted, and cross-server or built-in name conflicts are rejected.
-- **MCP approval and boundaries:** Every MCP call uses the existing per-call tool approval and binds the server, tool, and argument digest. Only full-permission mode auto-approves, with an audit event. MCP calls are not automatically retried and exactly-once is not promised. Search is off by default and supports only Tavily and SearXNG; public-network grants still enforce DNS, redirect, and private-address checks, and every fetch still requires approval.
-
-This round still has no remote MCP, OAuth, browser-automation search, image/scan visual understanding, PPTX, LSP, formatter, background shell session, or automatic cherry-pick. More tools do not prove that execution quality has passed real-user acceptance.
-
-## Native 30-case evaluation results (2026-11-12)
-
-The standalone `hearthproject/hearth-eval` repository ran 30 offline cases (evenly sampled from eight task families) with the `native` executor only, one repetition, auto-scoring and auto-retry enabled, and concurrency 4:
-
-| Metric | Result |
-|---|---:|
-| Best complete run | **18/30 passed (60%)**, average 88.89, experiment `EXP-20261111145332-7a95ea` |
-| Cumulative targeted confirmation | **19/30** cases reached 100 at least once, not one continuous experiment |
-| Most recent complete run | 12/30 passed (40%), average 73.33, experiment `EXP-20261112003215-b1172b` |
-| Final fix commit | `eb32ad5`, not yet retested in one uninterrupted 30-case run |
-
-The initial baseline passed 0/30 because evaluation-bridge tasks carried an empty `permissions.tools`; after restoring the allowlist, the first complete run reached 15/30. The most recent complete run was affected by slow provider responses, truncated scoring JSON, and task timeouts, and it predates the final four normalization fixes, so it cannot be attributed directly to final code capability. CAL01 and WEB01 still have semantic ambiguity between input and rubric; T02, T11, and WEB03 were marked `sampled` and were not counted as formal passes.
-
-See [Evaluation and Results](/en/evaluation/) for the reports, experiment IDs, per-task results, fix list, and retest guidance.
-
-## Phase 2 capabilities
-
-| Step | Status | Implemented | Deliberately unfinished |
-|---|---|---|---|
-| 2.1 Read-only sources | Partial | Local file, knowledge, and public web sources; host allowlists; source status, read time, errors, incremental reads, deduplication, disconnect, reconnect, and clear; IMAP read-only sync of the latest 20–50 messages into Sources | Calendar only shows “needs configuration”; real mail accounts, permissions, and throttling are not manually accepted |
-| 2.2 Documents, tables, and web material | Basic loop complete | TXT, Markdown, CSV, JSON, HTML, PDF, DOCX, and XLSX extraction; page, paragraph, sheet, range, and gap metadata; web snapshots and source items can be reviewed | Complex layouts, OCR for scans, page-level citation navigation, and spreadsheet formula fidelity are not implemented |
-| 2.3 Draft, approval, and external write | Partial | Editable, savable, and discardable drafts; one-time short-lived approval; local outbox by default; selecting `smtp:<accountId>` creates a real-send approval, sends through SMTP after approval, and stores a receipt; rejection and expiry update the draft | Local outbox remains the default; real SMTP accounts, bounce semantics, and calendar writes are not accepted; the first mail UI does not select attachments |
-| 2.4 Everyday-content acceptance | Not complete | Automated tests and isolated-instance checks cover local sources, extraction, and the outbox loop | No 10–15 real everyday tasks, time, accuracy, recovery, or willingness-to-reuse acceptance |
-
-The local outbox is not presented as a fake success: the UI states that it only writes locally and does not send to recipients. It must not be described as sent before a real mail account is connected.
-
-## Phase 3 capabilities
-
-| Step | Status | Implemented | Deliberately unfinished |
-|---|---|---|---|
-| 3.1 Connect and inspect a device | Partial | Six-digit pairing code, device token, pairing approval separate from capability approval, per-capability grants, app allowlist, online state, and device revocation | No tray or always-visible global “auto control” indicator; Windows same-machine helper only |
-| 3.2 Observe and take over | Partial | Session-bound screenshots; pause, resume, takeover, hand back, and terminate; takeover cancels queued input and advances the control epoch; user-idle check; two-minute screenshot expiry | Sensitive-area masking, long recordings, and complete desktop snapshots are absent |
-| 3.3 Tiered desktop actions | Partial | Target-app binding and focus revalidation; click, short text, Enter/Tab/Escape/Ctrl+S; allowlisted UIA invoke/setvalue; UWP host windows mapped to an approved app through their UIA child process; command status and result records; structured rejection | High-risk preview and confirmation, isolated desktop, snapshots, compensation, and real UIA setvalue acceptance are not complete |
-| 3.4 Desktop acceptance | Not complete | Isolated-port checks cover pairing, capability approval, observation, pause, resume, takeover, hand back, and the pro view | No five real desktop tasks, success-rate, takeover-count, and failure-drill acceptance |
-
-The Windows helper currently focuses the server-approved target app before capture or input; it does not claim reliable background input. For UWP apps hosted by `ApplicationFrameHost`, the helper reads the window's UIA subtree and permits focus or capture only when a child process can be resolved to the approved app. For example, `CalculatorApp` maps to the approved name `calculator`. If ownership is ambiguous or the child process cannot be read, the helper fails closed instead of treating the host window as the target. Real UIA invocation was verified in Calculator: invoking “2” returned `InvokePattern` and changed the display from `7` to `72`. The same path also completed observe → UIA action → automatic observation through an isolated paired device, with both command results and frame uploads succeeding.
-
-## Phase 4 capabilities
-
-| Step | Status | Implemented | Deliberately unfinished |
-|---|---|---|---|
-| 4.1 Triggers and proactive suggestions | Code loop complete | Six trigger families: a task entering the 24-hour deadline window, a failed or recoverable task, an uncertain external effect, an approval pending for more than two hours, new source items in the last 24 hours, and queue backlog or long-running tasks; suggestions include source, why-now, suggested action, expected impact, estimated cost, risk, approval requirement, and priority; one deduplicated row accumulates repeated occurrences | Email and calendar triggers are disabled placeholders without account reads; proactive mode only produces suggestions and does not execute high-risk actions |
-| 4.2 Proactive inbox | Code loop complete | A dedicated priority-ordered inbox supports accept, ignore, snooze, and convert-to-task; accept and convert are separate; in-app toasts, optional desktop notifications, and the Feishu long connection can surface approvals and suggestions; an ignored event is not rephrased and pushed again | No system push after the page closes; mobile inbox and remote takeover remain absent |
-| 4.3 Phone viewing, approval, and takeover | Partial | The Feishu long connection supports phone text/image/file messages, task status, and one-time approval text commands; the open_id allowlist restricts access; the web PWA provides a manifest, app icons, offline app shell, and mobile bottom navigation | No real iOS/Android installation acceptance, phone pairing, system push, card buttons, or complete remote takeover |
-| 4.4 Attention budget and proactive acceptance | Partial | Daily limit 0–50, quiet hours, cooldown, aggregation window, temporary pause and resume; the budget snapshot shows used-today, limit, quiet/paused state, and next-allowed time; the last seven days count deliveries, accepts, ignores, conversions, and completed tasks; the “Needs You” page collects pending approvals | No 5–10 real proactive tasks proving at most one interruption per task on average; no push delivery metrics or long-term user-feel record |
-
-The key Phase 4 boundary is that a suggestion is not an execution. `accept` only changes the suggestion state. Only `convert` creates a new queued task, and that task still follows the normal executor, approval, and effect-ledger rules. A high-risk action does not bypass approval because it arrived as a proactive suggestion.
-
-## Phase 5 capabilities
-
-| Step | Status | Implemented | Deliberately unfinished |
-|---|---|---|---|
-| 5.1 Visible memory | Code loop complete | Memory first enters candidate state and participates in recall only after confirmation; records include kind, subject key, scope, tags, source, confidence, sensitivity, validity, and version; recall scores task relevance and records reasons and usage audits; injected context is marked `trusted="false"` and cannot expand authority; recall has item and character budgets | Auto-capture is off by default and only captures an “experience” memory from a terminal task; no automatic extraction of user facts from email, web pages, or arbitrary documents |
-| 5.2 Correct, forget, and export | Code loop complete | Corrections create a new version and retain history; a same-subject conflict is not silently overwritten and requires left, right, or merge resolution; forgetting turns the current record into a tombstone and redacts historical versions, related events, and matching terms in recall audits; export excludes forgotten content; sensitive memory is not recalled by default and `secret` memory is never recalled | Cross-device forgetting relies on sync filtering and the local-replica boundary; there is no remote erasure of old copies already exported outside Hearth |
-| 5.3 Summarize and evaluate reusable methods | Code loop complete | Candidates are generated from terminal task traces; capabilities are the intersection of source-task capabilities and cannot expand; baseline/trial metrics record success rate, duration, tokens, and approvals; evaluation distinguishes improved, flat, regressed, and insufficient; only candidates with improvement evidence and trial samples can be promoted; rejection and rollback retain reasons and audit | A “trial” only rereads existing terminal traces as evidence and does not execute a task again for evaluation, so it is not a live shadow executor; no long-term production comparison of an adopted method |
-| 5.4 Memory and evolution acceptance | Not complete | API, service, and page-loop tests cover create, confirm, recall, correct, conflict, forget, export, trial, promote, and rollback | No real-user wrong-memory or wrong-method drills, no before/after success-rate, human-time, and cost comparison, and no full production “propose—evaluate—trial—adopt—revert” acceptance |
-| 5.12 Durable delegation, handoff, sandbox, and channel boundaries | Code loop complete | A single-layer delegation job supports an idempotency key, lease, heartbeat, cancel propagation, parent acceptance, and orphan recovery; child scope must be a subset of parent scope, and a parent with no declared capability grants no tools by default. A handoff persists the target, acceptance, permissions, budget, evidence, and next step; the host validates them before publishing a real `HANDOFF.md` artifact and recording its `artifactRef`. Generation fencing rejects stale tool writes while retaining the failed run's own diagnosis and decision evidence. The sandbox returns explicit failure classes for path escape, network overreach, tool/process overreach, and expired credentials. Feishu ingress uses persistent external-id idempotency, ack/fail, retryable failure, and upstream cursor handling. | Single-layer delegation only; Docker, SSH, VM, and remote-worker backends are absent; no real multi-executor concurrency stress, real Feishu tenant reconnect/rate-limit acceptance, real cross-provider long-task handoff, or credential rotation drill |
-| 5.13 Personal ontology, context continuity, and attention governance | Code loop complete | SQLite schema v28 adds entities, aliases, relations, states, decisions, commitments, mentions, Context Packs, memory-entity links, task edges, prepared actions, background tool jobs, thread subscriptions, watchdog events, and intake decisions. Chat, task, approval, and source writes update personal state; entities and states use four confidence levels, conflict attention, user correction, and evidence-based forgetting. The Context Broker provides four lanes, stable refs, budgets, sensitivity, taint, trust, expiry, `expand_ref`, and parent-pack inheritance for delegation. The mention resolver asks about ambiguous references and blocks irreversible actions. The attention governor unifies candidates, budgets, explanations, and feedback, and the inbox is centered on attention items. The native executor adds five read-only ontology tools. Task DAGs support depth, child tasks, parallel limits, `all`/`any`/`n_of_m` joins, and cancel propagation. Prepared actions, background tools, thread subscriptions, watchdog, and intake have APIs and a `/runtime` surface; `/personal` exposes entity, commitment, decision, correction, and forgetting operations. | Scenarios and isolated local data prove mechanisms, not long-term value for real users; entity resolution was checked only against single-scenario ground truth; `human_minutes_saved` is an explicit modeled value; production thresholds still need a two-week dogfooding baseline |
-
-The shared boundary is “candidate before confirmation; evidence before promotion.” A candidate method does not go live automatically, and memory content cannot act as an instruction that directly expands tools, network, or approval authority.
-
-## Phase 6 capabilities
-
-| Step | Status | Implemented | Deliberately unfinished |
-|---|---|---|---|
-| 6.1 Multi-device sync and switching | Partial | Each instance has its own `instanceId`; a sync peer token is shown once and stored as a hash plus an encrypted copy; event pages are pulled incrementally by sequence and deduplicated; imported events can rebuild projections; newer local task, memory, or method state is not silently overwritten, and conflicts preserve both sides for a local/remote choice; the sync UI shows peers, cursors, errors, and conflicts | Only filtered event projections are synchronized; approvals, sources, outbox, devices, desktop, security, sync events, and sensitive/secret memories are not copied; artifact bodies, workspaces, and local absolute paths are not synchronized; no two-real-device switch or offline recovery acceptance |
-| 6.2 Device revocation and safe migration | Partial | Task leases carry a TTL, owner, and epoch; after expiry another instance can take over and advance the epoch, and the old owner's commits and results are rejected; device capabilities can be revoked, device tokens rotated, and devices re-paired; sync peers can rotate tokens or be revoked; the global kill switch blocks approvals and scheduler restart and records a security audit; the security page shows state and audits | No dedicated cross-device artifact/workspace migration; no real lost-device drill proving a revoked old device cannot approve, take over, or read; clearing the global stop does not auto-restart the executor and requires an explicit user start |
-| 6.3 Backup, restore, and upgrade | Partial | Creates a `*.hearth-backup` encrypted archive; the passphrase is derived with scrypt (N=32768, r=8, p=1), encrypted with AES-256-GCM, minimum 12 characters; the archive contains a SQLite snapshot, required settings/audit/event metadata, and the encrypted local `master.key`; restore writes a temporary SQLite database, checks `user_version`, schema, and `integrity_check`, rebuilds projections, then copies in a transaction with rollback on failure; preserves the current `instanceId`, `createdAt`, and global-stop state while clearing old leases, pairings, and desktop-session temporary records; legacy `/api/backup` returns `410` and requires encrypted backup | Excludes artifact bodies, task workspaces, source bodies, outbox attachments, screenshots/desktop temporary files, and external service data, so it is not a complete migratable backup; no application-version upgrade pipeline or failed-upgrade rollback release flow; incompatible schemas are rejected, but no real cross-version fixture drill exists |
-| 6.4 Long-running operation and v1.0 acceptance | Partial | Health includes uptime, memory, disk, schema, task counts, scheduler, approvals, kill switch, and the latest maintenance run; maintenance expires stale approvals, recovers interrupted tasks, removes expired leases/desktop commands/screenshots/pairings and temporary files, and does not delete tasks, memories, or artifacts; maintenance runs automatically every six hours after startup and can be triggered manually; a failed maintenance run is recorded and marks health degraded; diagnostics export health, maintenance, counts, and event types without paths, keys, or environment secrets; the operations page shows health, maintenance, and backup boundaries | No multi-week continuous run, resource-drift data, real v1.0 install/upgrade/migration/exit acceptance, or complete all-task-type regression matrix |
-| 6.5 Connection runtime and offline projections | Code loop complete | Each device and user has an owner connection; transport, subscription, data freshness, and execution ownership are returned separately; reconnect advances the generation and rejects stale writes; projections expose `cached`, `asOf`, `sourceCursor`, and `latestCursor`; offline actions enter only the connection outbox; a remote action that disconnects becomes `uncertain` and requires explicit reconciliation; capability expansion needs fresh approval; revocation immediately rejects reads and execution | No real remote node or phone; the connection API is still local-access-only and has no device bearer token; no real reconnect, long offline cache, cross-node outbox reconciliation, or client UI acceptance |
-
-The backup boundary must remain visible in the UI: a recoverable database is not a migrated set of artifact files. After restore, tasks may return, but artifact bodies, task workspaces, or external attachments still require separate backup and verification.
-
-## Borrowed patterns and tradeoffs
-
-- **OpenClaw:** pairing is separate from capability approval; commands are declared per device and approved individually; an observation frame is the basis for actions; takeover cancels queued input and advances the control epoch; unsupported actions fail closed. Hearth adopts these boundaries.
-- **Hermes:** explicit capability manifests, target revalidation before execution, and session isolation. Hearth adopts app allowlists and target/epoch checks. It does not claim background focus-free input because the current Windows layer cannot reliably prove input still lands in the approved window.
-- **OpenClaw proactive-service pattern:** suggestions are separate from execution, and a suggested action returns to the normal approval chain. Hearth adopts this and has not turned proactive suggestions into an auto-executor.
-- **Hermes health-check pattern:** expose drivers, permissions, runtime state, and the latest maintenance result explicitly. Hearth uses health snapshots, maintenance records, and redacted diagnostics for this boundary.
-- **DeerFlow:** task decomposition, method candidates, layered evaluation, long-horizon middleware, sandboxes, and subagent boundaries are design references. Hearth does not integrate DeerFlow or adopt its multi-agent runtime; native still trails DeerFlow in long-horizon orchestration, sandboxes, subagents, skills, memory, and lazy tools.
-- **OpenCode:** only the public execution-surface shape is studied, not its code or runtime. Hearth added glob/grep, atomic edits, shell, office artifacts, search, on-demand skills, bounded subagents, local stdio MCP, compaction, and project worktrees, but LSP, formatters, remote MCP, browser automation, visual understanding, automatic merging, and a more complete worktree experience remain unsupported.
-- **MCP approval:** local stdio, independent startup probing, and per-call approval binding are used without remote transport or an exactly-once promise. Server environment values are encrypted with `SecretBox` and inherit neither Hearth model keys nor arbitrary parent-process secrets.
-- **LoopX:** only small-loop commits, status evidence, and acceptance boundaries are used as delivery-method references; LoopX is not a runtime dependency.
-
-## Verification evidence
-
-On 2026-11-12, `npm test` on the current branch passed all 100 test files and 725 tests; `npm run typecheck`, `npm run build`, and `npm run docs:build` also pass. These checks cover service, API, model-protocol, native tool-loop, glob/grep, atomic patches, shell process-tree timeout, office-file reads and writes, context compaction, transient retries, loop detection, explicit completion, skill loading, projects and worktrees, subagent boundaries, MCP management/calls/approval, search adapters, budgets, permissions, checkpoints, proposal confirmation, memory/skill governance, proactive reminders, scheduling, connection runtime, durable delegation, handoff artifacts, sandbox classification, channel idempotency, personal ontology, Context Broker, task graphs, and read-only ontology tools. They do not replace real-user, real-device, or long-running acceptance.
-
-This round did not establish a shared external capability benchmark against Pi, DeerFlow, or OpenCode, nor did it run a quantitative evaluation that could support a claim of being stronger than them. Only public capability, code maturity, and boundary differences are supported, not an overall performance ranking.
-
-The 60-case corpus, white-box scenarios, evaluation console, scoring, review, comparison, and experiment evidence now live in the standalone [hearth-eval](https://github.com/hearthproject/hearth-eval) repository. The main repository retains only the controlled evaluation-task and judge bridge. The native 30-case experiment ran in the standalone repository, but the final commit has not been retested continuously; passing tests and scenarios still do not replace real-user, real-device, or long-running acceptance.
-
-The README and documentation home screenshots were refreshed on the same day. `npm run screenshots:readme` starts an isolated instance on a random port, seeds demo tasks, approval suggestions, and memory through a temporary `HEARTH_DATA_DIR`, and captures the Chinese light-theme UI with Playwright; it never reads or modifies real `.hearth` data.
-
-## Remaining real acceptance
-
-1. Real SMTP/IMAP accounts, real send receipts, bounce and spam semantics; calendar accounts remain unconnected.
-2. Acceptance records for 10–15 everyday content tasks and at least five desktop tasks.
-3. Sensitive-area masking, isolated desktops, snapshots, compensation, and high-risk actions.
-4. Real UIA setvalue acceptance and failure drills for lost windows, permission changes, and user takeover.
-5. A real Feishu tenant, reconnect and rate-limit behavior, and a later card-button option; phone PWA, pairing, system push, and remote takeover; interruption acceptance across 5–10 real proactive tasks.
-6. Phase 5 wrong-memory/wrong-method drills, complete export verification, and real production comparisons before and after method adoption.
-7. Phase 6 real two-device sync, offline recovery, lost-device revocation, token rotation, backup restore, and migration verification.
-8. At least several weeks of continuous operation, resource and state-drift checks, an upgrade/rollback pipeline, and overall v1.0 acceptance.
-9. Real acceptance for local project worktrees, isolated subagent writes, Tavily/SearXNG, and local MCP server installation, crashes, and approvals. Completion rate, tokens, latency, and human attention for the new tools in real multi-file and research/office tasks still require usage records; test count is not a substitute.
-
-These gaps are intentionally left open rather than replaced with simulated data or UI that only looks complete.
+Reintroducing these requires separate design and acceptance; old documents do not make them available.

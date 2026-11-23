@@ -4,46 +4,24 @@
 
 ### 运行时稳定
 
+- 恢复轮次、工具调用、Token、时长预算：默认按执行模式设上限，显式传入的预算仍优先；`unlimited` 不再作为产品默认。
+- 持久目标的 `maxGoalRounds` 到顶后进入 `waiting_input`，不再静默继续或直接失败。
+- 修复 Codex 子进程环境过滤：只有当前 provider 的密钥可以跨边界，其他 `*_API_KEY` / `*_TOKEN` 不再泄漏。
 - 工具副作用拆成业务结果与物理清理两条账：`settled` 不再等于“已经清干净”，终态 run 会真正终止已登记的 shell 进程并把结果写回 `run_operations`。
 - 恢复闸门会沿父 run 链检查 prepared/dispatched 操作、运行中后台进程和 checkpoint proof；未知副作用不再自动重放。
 - 模型响应被截断且携带工具调用时，整批工具调用丢弃，连续 3 次失败；工具入参按 JSON Schema 校验，非法参数只产生 `tool.rejected`，不写操作账本。
 - checkpoint proof 增加 `toolsDigest`，工具集变化在恢复时可见。
 
-### 网络与存储
-
-- 网络权限改为显式 `deny | open`：`deny` 默认拒绝；`open` 在 Windows AppContainer 中加入 `internetClient` capability，并写审计事件与 proof。移除了只会失败的 `--network allow` 死参数。
-- 重试不再复制整个 `.hearth`，只继承已发布产物与 checkpoint 引用的 tool-results。
-- 新增 `npm run storage:prune`：默认预演，按保留期、活跃 run、未结算操作、checkpoint 引用等 pin 规则回收旧 run 和未引用工具输出；设置页可查看最近一次回收路径。
-
-### 证据与评测
-
-- 每个终态 run 输出 `run-evidence.json`，包含 task/run/usage、checkpoint 引用、恢复决策、operations/cleanup、artifacts 和 run 链。
-- 长跑矩阵从 12 扩到 18：新增 after-prepare、after-dispatch、mid-tool、after-settle、after-checkpoint、after-cleanup 六个崩溃点，各重复 3 次。
-- `background_processes` 收进 schema v40，迁移与备份不再漏表。
-
-### 工程
-
-- 版本统一为 0.3.4；新增跨进程 operations、cleanup 单调性和 Windows 沙箱清理稳定性测试。
-
-## Unreleased
-
-### 执行稳定性
-
-- 恢复轮次、工具调用、Token、时长预算：默认按执行模式设上限，显式传入的预算仍优先；`unlimited` 不再作为产品默认。
-- 持久目标的 `maxGoalRounds` 到顶后进入 `waiting_input`，不再静默继续或直接失败。
-- 修复 Codex 子进程环境过滤：只有当前 provider 的密钥可以跨边界，其他 `*_API_KEY` / `*_TOKEN` 不再泄漏。
-- 长跑矩阵恢复为 12/12；Windows CI 增加长跑门禁。
-
 ### 持久操作账本
 
 - 工具调用增加 T1/T2 持久操作合同：`prepare → dispatch → settle`，未结算的操作在下一进程拒绝自动重放。
-- 服务端使用 SQLite `run_operations`（schema 37）作为操作事实源；standalone/评测使用 JSONL ledger。
+- 服务端使用 SQLite `run_operations`（最终 schema v40）作为操作事实源；standalone/评测使用 JSONL ledger。
 - 工具超时或任务中止会先触发取消；Windows shell 先枚举并终止子进程树，再返回 `unknown`，避免幽灵副作用。
 - 本地写记录执行前文件摘要；外部写必须带回执，缺回执按未知处理并停止 run，等待人工核对。
 
 ### 单一事件日志
 
-- 服务端 runtime 不再写 JSONL journal；消息、工具结算、checkpoint 和 run 边界统一写入 SQLite `events`（schema 38）。
+- 服务端 runtime 不再写 JSONL journal；消息、工具结算、checkpoint 和 run 边界统一写入 SQLite `events`（最终 schema v40）。
 - checkpoint 文件降级为物化视图：先写 `runtime.checkpoint.snapshot` 事件，`run_checkpoints.event_seq` 记录快照位置；文件损坏时从事件日志重建。
 - 恢复时从 checkpoint 的 `event_seq` 之后回放 runtime 消息，旧版 JSONL checkpoint 仍按原路径兼容。
 
@@ -57,22 +35,37 @@
 - 新增 `hearth-native.exe`（C# 编译，无第三方运行时）：AppContainer package SID、workspace/temp ACL 白名单、kill-on-close Job Object、父进程 watchdog。
 - `WindowsNativeSandboxProvider` 取代 ACL runner：默认网络拒绝，子进程只能读写工作区与私有 temp；声明 `networkHosts` 时 fail-closed，helper 缺失时同样 fail-closed。
 - 移除服务端旧 `windows-acl` runner 与测试；新增 `npm run test:sandbox` 与 Windows CI 门禁。
-- 打包脚本把 helper 复制到桌面资源目录；新增 8 项 Windows 沙箱测试，覆盖越界写、只读、junction 逃逸、密钥过滤、网络拒绝和 Job 关闭杀子进程。
+- 打包脚本把 helper 复制到桌面资源目录；Windows 沙箱测试最终扩到 12 项，覆盖越界写、只读、junction 逃逸、密钥过滤、网络拒绝、Job 关闭杀子进程和 PTY。
 
 ### ConPTY 交互式 shell
 
 - `hearth-native.exe` 新增 `pty` 子命令：在 AppContainer 内用 `CreatePseudoConsole` 启动子进程，保留 Job Object 与父进程 watchdog。
 - `shell` 支持 `pty: true`、`cols` / `rows`；新增 `shell_input` 与 `shell_resize`，可向运行中的交互式命令输入、回车和调整控制台尺寸。
 - 修复 ConPTY 输入抢占：子进程使用 `STARTF_USESTDHANDLES` + `INVALID_HANDLE_VALUE` 且不继承句柄，整行命令和逐字符输入均可靠。
-- 新增 2 项 Windows 测试：PTY argv 契约与 AppContainer 内交互式命令执行。
 
 ### 持久后台任务
 
 - 新增 SQLite `background_processes`：记录 session、PID、真实进程创建时间、命令、日志路径、task/run、状态与退出码。
 - 宿主启动时扫描 `running` 记录：PID + 创建时间匹配才杀进程树，否则按 PID 复用处理；全部标记 `lost`，不留下幽灵后台任务。
 - `shell_output` / `shell_wait` / `shell_kill` 在内存会话不存在时回退到持久注册表与日志文件，并向模型明确报告 `lost`。
-- 新增 3 项注册表测试：持久化/结算、死 PID 标记、匹配 PID 的进程树清理。
 
+### 网络与存储
+
+- 网络权限改为显式 `deny | open`：`deny` 默认拒绝；`open` 在 Windows AppContainer 中加入 `internetClient` capability，并写审计事件与 proof。移除了只会失败的 `--network allow` 死参数。
+- 重试不再复制整个 `.hearth`，只继承已发布产物与 checkpoint 引用的 tool-results。
+- 新增 `npm run storage:prune`：默认预演，按保留期、活跃 run、未结算操作、checkpoint 引用等 pin 规则回收旧 run 和未引用工具输出；设置页可查看最近一次回收路径。
+- `background_processes` 收进 schema v40，迁移与备份不再漏表。
+
+### 证据与评测
+
+- 每个终态 run 输出 `run-evidence.json`，包含 task/run/usage、checkpoint 引用、恢复决策、operations/cleanup、artifacts 和 run 链。
+- 长跑矩阵从 12 扩到 18：新增 after-prepare、after-dispatch、mid-tool、after-settle、after-checkpoint、after-cleanup 六个崩溃点，各重复 3 次。
+- Windows CI 增加长跑门禁。
+
+### 工程
+
+- 版本统一为 0.3.4；新增跨进程 operations、cleanup 单调性和 Windows 沙箱清理稳定性测试。
+- 任务列表、任务详情和“需要你”收件箱页面下线，执行轨迹改为对话内联运行卡；主导航收缩为聊天、资料库、Context。
 ## 0.3.3 - 2026-11-22
 
 ### 执行稳定性
@@ -191,3 +184,4 @@
 ## 0.1.0
 
 首个本地优先 MVP：聊天工作台、任务、审批与效果账本、原生/codex/deepseek-harness 执行器、记忆、邮件、飞书、桌面、定时任务、备份和加密恢复。
+

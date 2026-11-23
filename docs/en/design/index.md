@@ -63,7 +63,7 @@ The frontend uses React and Vite without a second server-rendered runtime. Task 
 
 ## Module Map and Key Boundaries
 
-The fourteen modules below are parallel design notes. Together they cover the product from the first entrance to long-running operation, without following a code directory layout.
+The translated module map below is a subset of the 21 design notes. The [Chinese design index](/design/) is canonical and includes Windows sandbox, coding harness, projects, browser, desktop, and operations. These pages describe the design rationale; the [Chinese architecture section](/architecture/) describes what the code actually does today.
 
 | Module | What it solves first |
 |---|---|

@@ -68,38 +68,45 @@ function footer(width, height, text) {
 
 function architecture() {
   const W = 1600;
-  const H = 980;
+  const H = 1160;
   const rows = [
-    { y: 150, h: 118, label: "入口 / apps/web", cards: [
-      [64, "聊天工作台", ["目标、对话、任务卡"], "blue"],
-      [326, "需要你", ["长任务 / 审批 / 失败"], "amber"],
-      [588, "任务详情", ["逐轮时间线 / 回退"], "violet"],
-      [850, "浏览器面板", ["标签页 / 截图 / 接管"], "teal"],
-      [1112, "档案与设置", ["项目档案 / 工作方式"], "green"]
+    { y: 150, h: 160, label: "入口 / apps/web", cards: [
+      [64, "聊天工作台", ["内联执行轨迹", "右侧产物与预览"], "blue"],
+      [326, "资料库", ["文件 / 记忆 / 技能", "检索、预览与回收站"], "violet"],
+      [588, "Context", ["接手摘要", "多账号共享与导出"], "teal"],
+      [850, "邮件与定时任务", ["草稿 / 发送审批", "Cron、补跑与冷却"], "amber"],
+      [1112, "连接与设置", ["飞书 / 浏览器", "模型、执行器与数据"], "green"]
     ]},
-    { y: 292, h: 150, label: "Hearth Server / apps/server", cards: [
-      [64, "Fastify API", ["事件推送 / SSE"], "blue"],
-      [326, "Scheduler", ["租约 / 预算 / 重试"], "violet"],
-      [588, "审批与动作解析", ["参数指纹 / 风险 / 回执"], "amber"],
-      [850, "效果账本", ["执行 / 对账 / 回退"], "green"],
-      [1112, "监督与档案", ["收件箱 / 日报 / 项目页"], "teal"]
+    { y: 334, h: 160, label: "控制面 / apps/server", cards: [
+      [64, "HostKernel", ["单实例宿主租约", "recovering → ready"], "violet"],
+      [326, "Fastify API", ["REST + SSE", "就绪前拒绝写请求"], "blue"],
+      [588, "Scheduler", ["任务状态机", "租约 / 预算 / 重试"], "amber"],
+      [850, "恢复闸门", ["沿父 run 链检查", "未知副作用不重放"], "green"],
+      [1112, "审批与效果账本", ["参数指纹与预览", "回执 / 对账"], "teal"]
     ]},
-    { y: 466, h: 160, label: "执行层 / packages/agent-runtime", cards: [
-      [64, "Native Runtime", ["general / coding", "工具、子代理、上下文压缩"], "blue"],
-      [326, "Coding Harness", ["workspace-write", "测试 / 诊断 / 逐轮快照"], "violet"],
-      [588, "Browser", ["独立 Chrome profile", "快照 / 断言 / 证据"], "teal"],
-      [850, "桌面与外部", ["桌面控制 / MCP"], "amber"],
-      [1112, "邮件与飞书", ["读取 / 草稿 / 发送审批"], "green"]
+    { y: 518, h: 170, label: "执行内核 / packages/agent-runtime", cards: [
+      [64, "Native Runtime", ["4 种模型协议", "工具循环 / 压缩 / 预算"], "blue"],
+      [326, "操作账本", ["prepare → dispatch", "settle / unknown"], "violet"],
+      [588, "Windows 沙箱", ["AppContainer + Job", "网络 deny / open"], "teal"],
+      [850, "PTY 与后台进程", ["ConPTY 交互会话", "PID 注册表恢复"], "amber"],
+      [1112, "子代理 / MCP / Worktree", ["单层串行、逐次审批", "隔离分支与产物"], "green"]
     ]},
-    { y: 654, h: 150, label: "存储 / 本地优先", cards: [
-      [64, "SQLite 事件账本", ["任务 / 运行 / 审批 / 事件"], "amber"],
-      [326, "文件系统", ["out / 快照 / 记忆 / 档案"], "blue"],
-      [588, "加密备份", ["主密钥 / 恢复校验"], "green"],
-      [850, "设置与密钥", ["模型 / 浏览器 / 执行器"], "violet"],
-      [1112, "公开基准", ["固定模型 / 预算 / 报告"], "teal"]
+    { y: 712, h: 160, label: "执行器与外部边界", cards: [
+      [64, "Native（默认）", ["通用 + coding", "当前聊天模型"], "blue"],
+      [326, "Codex", ["OpenAI Responses", "系统 codex.exe"], "violet"],
+      [588, "DeepSeek Harness", ["官方 SDK / JSON-RPC", "会话与事件恢复"], "teal"],
+      [850, "外部动作", ["邮件 / 桌面 / 浏览器", "执行前逐次审批"], "amber"],
+      [1112, "结果与回收", ["run-evidence.json", "cleanup / storage:prune"], "green"]
+    ]},
+    { y: 896, h: 160, label: "存储 / 本地优先", cards: [
+      [64, "单一事件日志", ["SQLite events", "schema v40"], "amber"],
+      [326, "运行账本", ["run_operations", "background_processes"], "blue"],
+      [588, "检查点", ["物化视图 + event_seq", "损坏时从事件重建"], "violet"],
+      [850, "产物与回执", ["artifacts / outbox", "SHA-256 引用"], "teal"],
+      [1112, "备份与诊断", ["AES-256-GCM", "脱敏健康快照"], "green"]
     ]}
   ];
-  const parts = [header("Hearth 架构", "单用户、本地优先、可审批、可回放的个人代理操作系统", W, H)];
+  const parts = [header("Hearth 架构", "单用户、本地优先、可审批、可恢复的个人 Agent OS", W, H)];
   for (const row of rows) {
     parts.push(band(44, row.y, W - 88, row.h, row.label));
     row.cards.forEach(([x, title, lines, tone], index) => {
@@ -110,22 +117,22 @@ function architecture() {
     const y = rows[i].y + rows[i].h + 4;
     parts.push(downArrow(W / 2, y, 24));
   }
-  parts.push(`<text x="${W - 64}" y="86" font-size="13" font-family="${MONO}" fill="${COLORS.muted}" text-anchor="end">v0.2 · 2026-11</text>`);
-  parts.push(footer(W, H, "没有远程推理集群，没有多设备同步；所有状态落在本机，所有外部动作可追溯到审批指纹。"));
+  parts.push(`<text x="${W - 64}" y="86" font-size="13" font-family="${MONO}" fill="${COLORS.muted}" text-anchor="end">v0.3.4 · 2026-11</text>`);
+  parts.push(footer(W, H, "界面状态来自可重建的记录；每个状态只有一个写权威；外部副作用必须经过审批或显式豁免，并留下可核对回执。"));
   return parts.join("\n");
 }
 
 function flow() {
   const W = 1700;
-  const H = 760;
+  const H = 780;
   const stages = [
-    ["1 说目标", ["自然语言或附件"], "blue"],
-    ["2 定边界", ["目标契约 / 完成判定"], "violet"],
-    ["3 选执行", ["general / coding / browser"], "teal"],
-    ["4 审批", ["workspace 自动可逆", "外部动作逐次确认"], "amber"],
-    ["5 动手", ["工具 / 子代理 / 测试"], "blue"],
-    ["6 验证", ["测试 / 断言 / diff"], "green"],
-    ["7 报告", ["证据 / 回执 / 可回退"], "violet"]
+    ["1 说目标", ["对话或附件", "路径即工作目录"], "blue"],
+    ["2 定任务", ["执行器与产物契约", "权限与网络范围"], "violet"],
+    ["3 进沙箱", ["AppContainer", "网络 deny / open"], "teal"],
+    ["4 记操作", ["prepare / dispatch", "外部动作先审批"], "amber"],
+    ["5 动手", ["工具 / 子代理 / PTY", "测试与页面断言"], "blue"],
+    ["6 结算", ["settle / cleanup", "未知则停车核对"], "green"],
+    ["7 交证据", ["产物 / run-evidence", "回执与回退"], "violet"]
   ];
   const parts = [header("一次任务的完整路径", "从一句目标到可核对的完成证据", W, H)];
   parts.push(band(44, 150, W - 88, 190, "request path"));
@@ -136,18 +143,18 @@ function flow() {
   });
   parts.push(band(44, 370, W - 88, 190, "trust boundary"));
   const trust = [
-    ["页面快照", ["稳定元素 ID", "密码值不返回"], "teal"],
-    ["动作审批", ["风险等级", "参数指纹 / 域名授权"], "amber"],
-    ["效果账本", ["执行前记录", "执行后对账"], "green"],
-    ["逐轮历史", ["文件快照", "回退漂移保护"], "blue"]
+    ["宿主租约", ["单实例写入", "恢复完成才就绪"], "teal"],
+    ["操作账本", ["未结算不重放", "外部写要回执"], "amber"],
+    ["沙箱与审批", ["文件 / 进程 / 网络", "参数指纹与预览"], "green"],
+    ["证据与回退", ["checkpoint proof", "文件哈希与漂移保护"], "blue"]
   ];
   trust.forEach(([title, lines, tone], index) => {
     const x = 64 + index * 410;
     parts.push(card(x, 414, 370, 128, title, lines, tone));
     if (index < trust.length - 1) parts.push(rightArrow(x + 370, 478, 40, COLORS.muted));
   });
-  parts.push(`<text x="64" y="630" font-size="13" fill="${COLORS.body}">失败时：保留失败原因和证据，任务进入 recoverable；修复后重试，不覆盖历史。</text>`);
-  parts.push(footer(W, H, "执行层可替换，审批与证据层不能绕过。"));
+  parts.push(`<text x="64" y="630" font-size="13" fill="${COLORS.body}">失败时：保留失败原因和证据，任务进入可恢复状态；未知副作用停车等待人工核对，不覆盖历史。</text>`);
+  parts.push(footer(W, H, "执行器可替换，审批、操作账本与证据层不能绕过。"));
   return parts.join("\n");
 }
 
@@ -155,10 +162,10 @@ function simple() {
   const W = 1500;
   const H = 620;
   const steps = [
-    ["说清楚要什么", ["目标 + 验收标准"], "blue"],
-    ["在安全范围内动手", ["工作区可逆写入", "外部动作先问"], "teal"],
+    ["说清楚要什么", ["目标 + 验收标准", "需要的文件和路径"], "blue"],
+    ["在边界内动手", ["工作区可写、外部先问", "沙箱限制文件与网络"], "teal"],
     ["自己验证", ["跑测试 / 查页面", "拿证据而不是猜"], "green"],
-    ["交给你决定", ["结果 / 证据 / 回退"], "amber"]
+    ["交给你决定", ["结果 / 证据 / 回退", "回执与不确定项"], "amber"]
   ];
   const parts = [header("Hearth 怎么做事", "四步，结果可核对", W, H)];
   steps.forEach(([title, lines, tone], index) => {
@@ -168,7 +175,7 @@ function simple() {
   });
   parts.push(`<rect x="64" y="454" width="1372" height="72" rx="14" fill="${COLORS.blueSoft}" stroke="${COLORS.blue}" stroke-width="1.2"/>`);
   parts.push(`<text x="86" y="485" font-size="13" font-weight="700" fill="${COLORS.ink}">你能看到的东西</text>`);
-  parts.push(`<text x="86" y="510" font-size="12.5" fill="${COLORS.body}">每次改了什么文件、增删多少行、跑了什么测试、哪个页面断言通过、失败原因是什么、能不能一键退回去。</text>`);
+  parts.push(`<text x="86" y="510" font-size="12.5" fill="${COLORS.body}">每次改了什么文件、跑了什么测试、哪个页面断言通过、哪个操作还没结算、能不能一键退回去。</text>`);
   parts.push(footer(W, H, "不承诺“全自动”；承诺“做完有证据，做错能回退”。"));
   return parts.join("\n");
 }

@@ -21,7 +21,7 @@
 - [一、整体分层](#一整体分层)
 - [二、数据落在哪里](#二数据落在哪里)
 - [三、核心机制：事件日志 + 读模型投影](#三核心机制事件日志--读模型投影)
-- [四、85 张表的职责地图](#四85-张表的职责地图)
+- [四、98 张表的职责地图](#四85-张表的职责地图)
 - [五、数据库与文件系统如何分工](#五数据库与文件系统如何分工)
 - [六、一致性与数据生命周期](#六一致性与数据生命周期)
 - [七、加密、备份与恢复](#七加密备份与恢复)
@@ -37,7 +37,7 @@
 flowchart TB
   A["Web 前端<br/>只经 REST 读写，localStorage 仅存界面偏好"] --> B["HearthService 业务编排"]
   B --> C["HearthStore<br/>统一数据库门面"]
-  C --> D[("hearth.sqlite<br/>WAL 模式 · 85 张表 · schema 33")]
+  C --> D[("hearth.sqlite<br/>WAL 模式 · 98 张表 · schema 40")]
   C --> E["文件系统<br/>产物 / 工作区 / 上下文 blob / 附件 / 备份"]
   C --> F["master.key<br/>32 字节本机主密钥"]
   D --> D1["events 事件日志<br/>唯一真源 · 只追加"]
@@ -75,7 +75,7 @@ flowchart TB
 | `.hearth/master.key` | 32 字节主密钥，权限仅本机可读 |
 | `model-settings.json` / `executor-settings.json` | 早期遗留配置；已有迁移器把内容搬进数据库，并备份原文件、记录迁移状态 |
 
-主库当前观测值：约 600 MB，85 张表、92 个索引，schema 版本 33。启动时开启 WAL、外键约束与 5 秒忙等待。
+主库随使用增长；本机开发库约 1 GB 量级，98 张表、106 个索引，schema 版本 40。启动时开启 WAL、外键约束与 5 秒忙等待。
 
 ---
 
@@ -133,7 +133,7 @@ flowchart LR
 
 ---
 
-## 四、85 张表的职责地图
+## 四、98 张表的职责地图
 
 | 分组 | 主要存什么 |
 |---|---|
@@ -263,3 +263,4 @@ flowchart LR
 | 定时维护 | `apps/server/src/maintenance.ts` |
 | 遗留配置迁移 | `apps/server/src/settings-migration.ts` |
 | 记忆分层、遗忘与脱敏 | `apps/server/src/memory.ts` |
+

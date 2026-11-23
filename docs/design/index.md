@@ -51,7 +51,7 @@ Hearth 把一次工作拆成同一条链路：入口接收请求，控制层判�
 | Web 界面 | React、Vite | 适合任务卡、审批、产物和实时状态；PWA 壳与移动导航已存在，手机配对、系统推送和远程接管仍未验收 |
 | 实时更新 | Server-Sent Events | 比双向长连接更简单，适合服务端把状态变化推送到界面 |
 | 文档与数据 | 服务端 TypeScript | `cheerio`、`pdfjs-dist`、`mammoth`、`exceljs`、`docx` 在本进程完成 HTML、PDF、DOCX、XLSX、CSV 提取与 XLSX/CSV/DOCX 生成，不引入第二套业务协议 |
-| 原生边界 | PowerShell + Node 桥接 | Windows 助手负责窗口观察、UIA 与输入；只有确实需要单二进制或更强隔离时才引入 Rust |
+| 原生边界 | C# helper + PowerShell 桥接 | `hearth-native.exe` 负责 AppContainer、ACL、Job Object 与 ConPTY；Windows 助手负责窗口观察、UIA 与输入；只有确实需要单二进制或更强隔离时才扩大 Rust 范围 |
 
 TypeScript 是语言，Node.js 是运行时，两者不是同一层，也不是二选一。TypeScript 提供开发期的类型约束，Node.js 提供文件、网络、进程和定时能力；外部输入和持久化数据仍然需要运行时校验。
 
@@ -63,7 +63,7 @@ TypeScript 是语言，Node.js 是运行时，两者不是同一层，也不是�
 
 ## 模块地图与关键边界
 
-下面十四个模块是并列阅读的设计取舍说明。它们共同覆盖从用户入口到长期运行的全部产品判断，不按代码目录组织。
+下面二十一个模块是并列阅读的设计取舍说明。它们共同覆盖从用户入口到长期运行的全部产品判断，不按代码目录组织。想知道“代码现在实际怎么拼起来”，请转到[代码架构说明](/architecture/)；设计页回答“为什么这样设计”，架构页回答“当前实现是什么”。
 
 | 模块 | 先解决什么 |
 |---|---|
@@ -72,15 +72,21 @@ TypeScript 是语言，Node.js 是运行时，两者不是同一层，也不是�
 | [控制面与授权](/design/control) | 判断什么时候观察、建议、执行或停下，并把权限收在明确范围内 |
 | [执行器与路由](/design/executors) | 用不同专长完成不同工作，而不是把所有事情交给一个万能模型 |
 | [原生 Agent Runtime](/design/native-agent-runtime) | 自建通用执行内核，统一模型协议、工具面、压缩、委派、Worktree、MCP、预算和检查点 |
+| [Windows 原生沙箱](/design/sandbox) | 用 AppContainer、ACL、Job Object 与网络 deny/open 限制 shell 的真实影响 |
+| [编码 Harness](/design/coding-harness) | 让编码任务有命令策略、逐轮快照、hooks 和可核对的完成断言 |
+| [项目与工作区](/design/projects) | 把任意本地文件夹变成项目：Git 用隔离 Worktree，非 Git 原地执行并给出改动清单 |
 | [委派、交接与沙箱](/design/delegation-and-sandbox) | 把有界工作交给子任务，用交接包继续，并守住路径、网络和凭据边界 |
 | [审批、接管与外部副作用](/design/effects) | 让发送、写入、删除、发布等动作可预览、可授权、可对账 |
 | [运行环境与安全](/design/safety) | 用隔离、最小权限和凭据代理限制真实世界的影响 |
-| [存储与上下文架构](/design/storage) | 用 SQLite、内容 blob 和任务级上下文统一保存事实、模型绑定和交接水位 |
+| [存储与上下文架构](/design/storage) | 用 SQLite 事件日志、内容 blob 和任务级上下文统一保存事实、模型绑定和交接水位 |
 | [个人上下文](/design/personal-context) | 用个人本体、Context Pack 和记忆召回决定 Agent 知道什么 |
 | [记忆](/design/memory) | 积累背景，但保持可纠正、可遗忘、可导出 |
 | [资料库与检索](/design/knowledge) | 用本地 SQLite 统一管理记忆、任务、来源、技能和文件，并把同一套检索工具交给三个执行器 |
+| [浏览器自动化](/design/browser) | 用独立 Chrome profile、页面断言和证据目录操作真实网站，而不是靠截图猜 |
 | [评估与成本](/design/evaluation) | 用真实任务证明可靠性和成本，而不是用演示证明能力 |
-| [数据、备份与运维](/design/operations) | 备份、恢复、维护、诊断和全局停止都收在本机控制面 |
+| [数据、备份与运维](/design/operations) | 备份、恢复、维护、存储回收、诊断和全局停止都收在本机控制面 |
+| [Windows 桌面版](/design/desktop) | 把完整应用装进 Tauri 壳，处理内置 Node、托盘、数据目录与首次启动 |
+| [桌面版压缩实录](/design/desktop-compression) | 记录从 Electron 到约 131 MiB 的每一步体积变化、取舍与使用前提 |
 | [Agent 参考模式](/design/agent-reference-patterns) | 记录借鉴来源与取舍，避免把外部框架直接当成产品架构 |
 
 Hearth 不改动的底线包括：所有界面状态都来自可重建的记录；每个状态只有一个写权威；外部动作必须有审批或明确豁免，以及可核对的回执；执行器看不到长期原始凭据；交接只能缩小权限，不能扩大；每个任务都有预算、截止时间和取消路径；记忆有来源、敏感度和遗忘规则。

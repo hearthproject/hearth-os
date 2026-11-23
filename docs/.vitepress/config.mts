@@ -35,6 +35,9 @@ const zhDesignSidebar = [
       { text: '控制面与授权', link: '/design/control' },
       { text: '执行器与路由', link: '/design/executors' },
       { text: '原生 Agent Runtime', link: '/design/native-agent-runtime' },
+      { text: 'Windows 原生沙箱', link: '/design/sandbox' },
+      { text: '编码 Harness', link: '/design/coding-harness' },
+      { text: '项目与工作区', link: '/design/projects' },
       { text: '委派、交接与沙箱', link: '/design/delegation-and-sandbox' },
       { text: '审批、接管与外部副作用', link: '/design/effects' },
       { text: '运行环境与安全', link: '/design/safety' }
@@ -49,6 +52,8 @@ const zhDesignSidebar = [
       { text: '浏览器自动化', link: '/design/browser' },
       { text: '评估与成本', link: '/design/evaluation' },
       { text: '数据、备份与运维', link: '/design/operations' },
+      { text: 'Windows 桌面版', link: '/design/desktop' },
+      { text: '桌面版压缩实录', link: '/design/desktop-compression' },
       { text: 'Agent 参考模式', link: '/design/agent-reference-patterns' }
     ]
   }
@@ -98,7 +103,8 @@ const zhArchitectureSidebar = [
       { text: '领域契约与状态机', link: '/architecture/Hearth-领域契约与状态机设计说明' },
       { text: '事件溯源与存储管理', link: '/architecture/Hearth-存储设计说明' },
       { text: '定时任务与后台周期', link: '/architecture/定时任务设计说明' },
-      { text: '可观测性与首次引导', link: '/architecture/Hearth-可观测性与首次引导设计说明' }
+      { text: '可观测性与首次引导', link: '/architecture/Hearth-可观测性与首次引导设计说明' },
+      { text: '运行时操作账本与宿主生命周期', link: '/architecture/runtime-operations' }
     ]
   },
   {

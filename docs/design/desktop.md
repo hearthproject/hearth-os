@@ -1,4 +1,4 @@
-# Hearth Windows 桌面版 v0.1（Tauri）
+# Hearth Windows 桌面版 v0.3.4（Tauri）
 
 桌面版只有一套实现：Tauri 2 外壳 + 官方 Node 运行时 + 原来的 Fastify / React / SQLite 应用。目标是把仓库里的完整应用打成可双击运行的程序，同时继续使用现有数据，不牺牲任何已有功能。
 
@@ -9,7 +9,8 @@
 - Tauri 主程序负责窗口、托盘、数据目录选择、环境体检和服务端生命周期，安装后约 7.8 MiB。
 - 服务端是原来的 Fastify 应用，由 esbuild 打成 `server.mjs` 入口（约 2.1 MiB）和按需加载的 `chunk-*.mjs`，作为 Tauri 的子进程运行，固定监听 `127.0.0.1:4317`。邮件 SDK、文档解析、PDF、浏览器自动化等重依赖只在首次用到时加载。
 - 内置官方 Node `22.23.2`（`node.exe`，83.0 MiB）和随附 npm `10.9.8`（裁剪后约 7.8 MiB）。托管安装、运行时 `npm` 命令都使用内置 npm。
-- 前端构建产物在 `resources/web`（约 0.8 MiB，默认不生成 source map）。PDF worker 与 cMaps / 标准字体 / wasm 在 `resources/server`（合计约 4.5 MiB）。Windows ACL sandbox 及其依赖在 `resources/sandbox`（约 12.8 MiB）。
+- 前端构建产物在 `resources/web`（约 0.8 MiB，默认不生成 source map）。PDF worker 与 cMaps / 标准字体 / wasm 在 `resources/server`（合计约 4.5 MiB）。
+- 原生沙箱 helper 是 `resources/native/hearth-native.exe`（约 21 KiB，由 `scripts/build-native.mjs` 调用系统 `csc.exe` 编译），负责 AppContainer、ACL、Job Object 与 ConPTY；`resources/sandbox` 里的旧 `@deepseek-ai/dsh-sandbox-windows-acl`（约 12.8 MiB）仍随包携带，但当前 native 沙箱不再使用，属于待清理体积。
 - Codex 不内置约 479 MiB 的平台二进制：优先 `HEARTH_CODEX_PATH`，其次 `where codex.exe` 的第一个 `.exe`，最后已知 npm 全局路径。
 - 桌面版和开发服务器不能同时使用同一个 `.hearth`；数据目录锁会拒绝第二个实例。
 
@@ -20,12 +21,12 @@ npm ci
 npm run tauri:build
 ```
 
-流程：web build → server 分包 bundle → 复制 web → 下载并校验官方 Node 22.23.2 → 复制/裁剪 npm → 生成 `npm.cmd` 与 helper 启动脚本 → `tauri build`。
+流程：web build → server 分包 bundle → 编译 `resources/native/hearth-native.exe` → 复制 web → 下载并校验官方 Node 22.23.2 → 复制/裁剪 npm → 生成 `npm.cmd` 与 helper 启动脚本 → `tauri build`。
 
 产物：
 
-- `release/Hearth_0.3.3_x64-setup.exe`：NSIS 按用户安装，免 UAC，带开始菜单快捷方式。
-- 0.3.3 安装包与便携 zip 同步发布到 [GitHub Releases](https://github.com/hearthproject/hearth-os/releases)（Pre-release），附 SHA256 校验和。
+- `release/Hearth_0.3.4_x64-setup.exe`：NSIS 按用户安装，免 UAC，带开始菜单快捷方式。
+- 0.3.4 安装包与便携 zip 同步发布到 [GitHub Releases](https://github.com/hearthproject/hearth-os/releases)（Pre-release），附 SHA256 校验和。
 - 安装目录：`%LOCALAPPDATA%\Programs\Hearth`，刻意与数据目录 `%LOCALAPPDATA%\Hearth` 分开。
 - WebView2 使用在线 bootstrapper；Windows 10/11 通常已自带运行时，不额外占安装体积。
 
@@ -36,12 +37,12 @@ npm run tauri:build
 | 组成 | 安装后 |
 |---|---:|
 | `node.exe`（官方 22.23.2） | 83.0 MiB |
-| server（单文件 + PDF worker + PDF 资源） | 18.3 MiB |
-| Windows ACL sandbox | 12.8 MiB |
+| server（单文件 + PDF worker + PDF 资源） | 18.6 MiB |
+| `resources/sandbox`（旧 dsh ACL runner，当前未使用） | 12.8 MiB |
 | 内置 npm | 7.8 MiB |
 | web 静态资源 | 0.8 MiB |
 | Tauri 主程序 | 7.8 MiB |
-| helper / 许可证 / 第三方声明 | 0.5 MiB |
+| `hearth-native.exe` / helper / 许可证 / 第三方声明 | 0.3 MiB |
 | **合计** | **约 131 MiB** |
 | NSIS 安装包 | 30.5 MiB |
 
@@ -113,5 +114,7 @@ apps\desktop-tauri\src-tauri\resources\node.exe apps\desktop-tauri\src-tauri\res
 - 仅 Windows x64；不做代码签名、自动更新、便携版、macOS、Linux、多用户。
 - 安装包没有签名，公开下载会触发 SmartScreen；当前只自己用。
 - Codex 使用系统或 `HEARTH_CODEX_PATH` 指向的 `codex.exe`；DeepSeek SDK 已直接打入 server 单文件，缺失外部运行时不影响 native / Codex。
+- `resources/sandbox` 里的旧 dsh ACL runner 仍被 `scripts/build-server.mjs` 复制进安装包，但当前 native 沙箱只调用 `hearth-native.exe`；这是待清理的 12.8 MiB 体积。
 - Gmail OAuth 回调仍固定 `127.0.0.1:4317`，不要改成动态端口。
 - 卸载不会删除 `%LOCALAPPDATA%\Hearth` 数据目录，这是刻意的。
+

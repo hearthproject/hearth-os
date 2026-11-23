@@ -45,40 +45,41 @@ try {
   await page.evaluate((id) => localStorage.setItem("hearth.conversation", id), "readme-weekly-conversation");
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.locator(".message-list").waitFor({ timeout: 20_000 });
-  await page.locator(".task-status-bubble").waitFor({ timeout: 20_000 });
+  await page.locator(".inline-run").first().waitFor({ timeout: 20_000 });
+  await page.waitForTimeout(700);
+  await page.locator(".inline-run-head").first().click();
+  await page.locator(".inline-run-trail").waitFor({ timeout: 20_000 });
+  await page.waitForTimeout(500);
+  await page.locator(".chat-artifacts-button").click();
+  await page.locator(".workspace-panel").waitFor({ timeout: 20_000 });
   await page.waitForTimeout(700);
   await dismissNotifications(page);
   await page.screenshot({ path: join(outputDir, "chat.png") });
-
-  await page.goto(`${baseUrl}/tasks`, { waitUntil: "domcontentloaded" });
-  await page.locator(".task-table").waitFor({ timeout: 20_000 });
-  await page.waitForTimeout(500);
-  await dismissNotifications(page);
-  await page.screenshot({ path: join(outputDir, "tasks.png") });
-
-  await page.goto(`${baseUrl}/tasks/readme-weekly`, { waitUntil: "domcontentloaded" });
-  await page.locator(".task-detail-page .result-panel").waitFor({ timeout: 20_000 });
-  await page.waitForTimeout(600);
-  await dismissNotifications(page);
-  await page.screenshot({ path: join(outputDir, "task-detail.png") });
-
-  await page.goto(`${baseUrl}/inbox`, { waitUntil: "domcontentloaded" });
-  await page.locator(".triage-row").first().waitFor({ timeout: 20_000 });
-  await page.waitForTimeout(500);
-  await dismissNotifications(page);
-  await page.screenshot({ path: join(outputDir, "inbox.png") });
 
   await page.goto(`${baseUrl}/library`, { waitUntil: "domcontentloaded" });
   await page.locator(".library-page").waitFor({ timeout: 20_000 });
   const memoryRoot = page.locator(".library-tree-row", { hasText: "记忆" }).first();
   await memoryRoot.waitFor({ timeout: 20_000 });
   await memoryRoot.click();
-  await page.locator(".library-tree-row").nth(1).waitFor({ timeout: 10_000 });
-  await page.locator(".library-tree-row").nth(1).click();
-  await page.locator(".library-preview").waitFor({ timeout: 10_000 });
-  await page.waitForTimeout(500);
+  const remembered = page.locator(".library-tree-row", { hasText: "已记住" }).first();
+  await remembered.waitFor({ timeout: 10_000 });
+  await remembered.click();
+  const preferenceRow = page.locator(".library-tree-row", { hasText: "偏好" }).first();
+  await preferenceRow.waitFor({ timeout: 10_000 });
+  await preferenceRow.click();
+  const memoryRow = page.locator(".library-tree-row", { hasText: "user.communication" }).first();
+  await memoryRow.waitFor({ timeout: 10_000 });
+  await memoryRow.click();
+  await page.locator(".library-preview h2").waitFor({ timeout: 10_000 });
+  await page.waitForTimeout(1200);
   await dismissNotifications(page);
-  await page.screenshot({ path: join(outputDir, "memory.png") });
+  await page.screenshot({ path: join(outputDir, "library.png") });
+
+  await page.goto(`${baseUrl}/context`, { waitUntil: "domcontentloaded" });
+  await page.locator(".context-page").waitFor({ timeout: 20_000 });
+  await page.waitForTimeout(600);
+  await dismissNotifications(page);
+  await page.screenshot({ path: join(outputDir, "context.png") });
 
   await page.goto(`${baseUrl}/settings`, { waitUntil: "domcontentloaded" });
   await page.locator(".settings-page").waitFor({ timeout: 20_000 });
@@ -398,6 +399,16 @@ function seedShowcaseData() {
         insertCheckpoint.run("readme-checkpoint-1", runId, task.id, 1, join(dataDir, "workspaces", runId, "checkpoint-1.json"), createHash("sha256").update("checkpoint").digest("hex"), JSON.stringify(task.usage), iso(task.updatedOffset));
       }
 
+      if (task.id === "readme-weekly") {
+        insertEvent.run("readme-weekly-event-1", task.id, runId, JSON.stringify({ kind: "progress", detail: { eventType: "item.completed", itemType: "agent_message", text: "先汇总项目看板的已完成项和本周会议纪要。" } }), iso(180));
+        insertEvent.run("readme-weekly-event-2", task.id, runId, JSON.stringify({ kind: "progress", detail: { eventType: "tool.started", title: "读取文件", input: { path: "project-board.md" } } }), iso(178));
+        insertEvent.run("readme-weekly-event-3", task.id, runId, JSON.stringify({ kind: "progress", detail: { eventType: "tool.finished", title: "读取文件", output: "读取 42 行：3 项已完成、1 项进行中、2 个阻塞。", status: "ok", durationMs: 820 } }), iso(177));
+        insertEvent.run("readme-weekly-event-4", task.id, runId, JSON.stringify({ kind: "progress", detail: { eventType: "item.completed", itemType: "agent_message", text: "把风险与下周计划整理成一页，并写成 Markdown。" } }), iso(172));
+        insertEvent.run("readme-weekly-event-5", task.id, runId, JSON.stringify({ kind: "progress", detail: { eventType: "tool.started", title: "写入文件", input: { path: "weekly-report.md", content: "# 本周工作周报\n\n## 本周完成\n- 完成 Q4 客户访谈归纳\n- 同步周会行动项\n- 打通邮件发送审批\n\n## 风险\n- 知识库同步中断一次\n" } } }), iso(168));
+        insertEvent.run("readme-weekly-event-6", task.id, runId, JSON.stringify({ kind: "progress", detail: { eventType: "tool.finished", title: "写入文件", output: "已写入 weekly-report.md（843 B）", status: "ok", durationMs: 310 } }), iso(167));
+        insertEvent.run("readme-weekly-event-7", task.id, runId, JSON.stringify({ kind: "progress", detail: { eventType: "item.completed", itemType: "agent_message", text: "周报已生成，并核对了产物大小与章节。" } }), iso(155));
+      }
+
       if (task.id === "readme-interview") {
         insertEvent.run("readme-event-1", task.id, runId, JSON.stringify({ kind: "thread.started", message: "已读取 3 份访谈记录", at: iso(26) }), iso(26));
         insertEvent.run("readme-event-2", task.id, runId, JSON.stringify({ kind: "item.completed", message: "正在识别跨访谈共性", at: iso(12) }), iso(12));
@@ -440,7 +451,7 @@ function seedShowcaseData() {
       "readme-message-assistant",
       "readme-weekly-conversation",
       "assistant",
-      "已派出任务：**整理本周工作周报**\n\n执行器：Native。它会先汇总项目看板和会议记录，再核对风险与下周计划，最后生成 `weekly-report.md`。",
+      "周报已经整理好了：本周 3 项关键工作完成、2 个风险需要跟进，`weekly-report.md` 也已保存，可以直接发给项目组。",
       "readme-weekly",
       iso(182),
       null,
@@ -547,7 +558,7 @@ function seedShowcaseData() {
       "readme-memory-project",
       "project",
       "active",
-      "Ember 项目计划在 11 月 20 日发布，当前阻塞是内容渠道负责人确认。",
+      "任务「Ember 11 月发布」\n目标：确认 Ember 项目 11 月 20 日按计划发布。\n结果：内容渠道负责人尚未确认，发布时间保持不变。\n下一步：周三前补齐渠道确认并在发布清单上勾选。",
       "project.ember.release",
       "project",
       JSON.stringify(["Ember", "发布"]),

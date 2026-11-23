@@ -1,6 +1,6 @@
 ---
 title: '附录'
-description: 'Hearth 的工程实施、风险、决策、自研边界、术语和文档维护参考。'
+description: 'Hearth 的工程实施、风险、决策、自研边界、术语、日常使用和文档维护参考。'
 outline: false
 ---
 
@@ -16,9 +16,12 @@ outline: false
   { no: '05', title: '自研与集成', text: 'Hearth 自己做哪一层，哪些成熟能力直接使用。', link: '/reference/build-vs-integrate' },
   { no: '06', title: '术语表', text: '统一任务、授权、执行、回执、记忆和评估等概念。', link: '/reference/glossary' },
   { no: '07', title: '默认清单', text: '审批前和标记完成前必须检查的事项。', link: '/reference/checklists' },
-  { no: '08', title: '常见问题', text: '与 Coding Agent、Codex、联网、多用户和手机端的关系。', link: '/reference/faq' },
-  { no: '09', title: '参与贡献', text: '本地运行、写作约定、提交检查和文档事实源。', link: '/reference/contributing' },
-  { no: '10', title: '文档地图', text: '整站结构、推荐阅读顺序和维护规则。', link: '/reference/source-map' }
+  { no: '08', title: '日常使用', text: '聊天、资料库、Context、邮件、定时任务与自用报告。', link: '/reference/daily-use' },
+  { no: '09', title: '首次运行验证', text: '用自己的模型跑一次真实的读文件、写答案、跑测试最小任务。', link: '/reference/first-run' },
+  { no: '10', title: '常见问题', text: '与 Coding Agent、Codex、联网、沙箱、多用户和手机端的关系。', link: '/reference/faq' },
+  { no: '11', title: '参与贡献', text: '本地运行、写作约定、提交检查和文档事实源。', link: '/reference/contributing' },
+  { no: '12', title: '构建、签名与发版', text: 'Tauri 构建、原生 helper、更新签名和发布产物。', link: '/reference/releasing' },
+  { no: '13', title: '文档地图', text: '整站结构、推荐阅读顺序和维护规则。', link: '/reference/source-map' }
 ]" />
 
 第一次阅读时，建议先看[产品设计](/design/)和[交付路线](/delivery/)；遇到实现、评审或维护问题，再回到这里查对应条目。附录记录当前已经实现的工程事实、已知风险和仍需复核的清单，它不替代交付路线中的验收证据。

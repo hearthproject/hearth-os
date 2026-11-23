@@ -1,14 +1,34 @@
 ---
 title: "2026-11 验收报告"
-description: "Hearth 0.2.0 的测试矩阵、手动检查、未完成项和回退说明。"
+description: "2026-11 的测试矩阵、手动检查、未完成项和回退说明；含 0.2.0 历史快照与 0.3.4 验证补充。"
 outline: [2, 3]
 ---
 
 # 2026-11 验收报告
 
-日期：2026-11-20。目标版本：`0.2.0`。范围：把 Hearth 推进到可日常使用、可回退、可对外证明，并用自动测试和真实构建验证。
+日期：2026-11-23（0.3.4 补充）；原报告日期 2026-11-20，目标版本 `0.2.0`。范围：把 Hearth 推进到可日常使用、可回退、可对外证明，并用自动测试和真实构建验证。
 
-## 结论
+## 0.3.4 补充（2026-11-23）
+
+**结论：** 代码与自动验证通过，0.3.4 安装包与便携包已发布；真实账户、自动更新签名与干净机卸载重装仍未验收。
+
+| 项目 | 命令 | 结果 |
+|---|---|---|
+| 版本一致 | `npm run version:check` | 0.3.4：7 个 workspace + Cargo + Tauri + lockfile |
+| 类型检查 | `npm run typecheck` | 0 错误 |
+| 单元/集成 | `npm test` | 140 个文件、946 个用例（931 通过、15 跳过） |
+| 长跑矩阵 | `npm run test:longrun` | 18/18 通过 |
+| Web 构建 | `npm run build` | 通过（JS 643.06 kB / CSS 158.97 kB） |
+| 文档构建 | `npm run docs:build` | 通过，无死链 |
+| 首跑离线自检 | `npm run first:run -- --fake` | 通过 |
+| Windows 沙箱 | `npm run test:sandbox` | 12 项真实测试通过 |
+| 0.3.4 安装包 | `npm run release:build` | NSIS 30.5 MiB、便携 zip 47.2 MiB，已发布 Pre-release |
+
+本版新增的验证重点是崩溃恢复而不是新功能：`after-prepare`、`after-dispatch`、`mid-tool`、`after-settle`、`after-checkpoint`、`after-cleanup` 六个崩溃点各重复 3 次；每个终态 run 输出 `run-evidence.json`，包含 checkpoint 引用、恢复决策、operations/cleanup、artifacts 和 run 链。
+
+仍未验收：自动更新签名、Windows Authenticode、干净机安装/卸载与升级、真实飞书/SMTP/IMAP 账户、真实模型首跑，以及数周真实使用中的断电/蓝屏恢复演练。0.2.0 及其后续 0.3.3 的下列内容保留为历史记录，不再改写。
+
+## 结论（0.2.0 历史快照）
 
 **代码与自动验证完成；真实用户验收未全部完成。** 本轮新增的可信执行、浏览器、项目档案、首次任务验证、监督收件箱、自用报告、自动更新和发布脚本均已进入 `main`，782 个自动测试和 18 项离线 UI 端到端通过。真实模型首跑因当前 key 无权限失败，已签名更新和干净机安装未执行，因此不能宣称“装完就能用”已经对真实用户验收。
 

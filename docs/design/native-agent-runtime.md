@@ -63,7 +63,7 @@ Hearth 因此保留两层执行能力：
 | `glob`、`grep` | 按模式定位文件，用 RE2 兼容正则搜索 include/exclude 范围 | 有结果数、文件大小、扫描时长预算；拒绝路径逃逸 |
 | `write_file`、`edit_file`、`apply_patch` | 生成、预览修改、原子应用补丁、移动和删除文件 | `edit_file` 支持 dry-run 差异预览；补丁先全量预校验，再一次性写入，避免部分成功 |
 | `write_spreadsheet`、`write_document` | 生成 XLSX/CSV 和 DOCX 办公文件 | 只能写入授权目录，并经过文件动作审批 |
-| `shell` | 运行必要检查命令 | 只在工作区任务中授权；保存完整输出到任务日志，只回填尾部；超时杀死整个进程树 |
+| `shell` | 运行必要检查命令 | 只在工作区任务中授权；默认进入 AppContainer 沙箱（`read-only` / `workspace-write`），网络 `deny` / `open` 显式选择；完整输出写入任务日志、只回填尾部；超时杀死整个进程树；支持 `pty` 交互会话与 `shell_output` / `shell_input` / `shell_resize` / `shell_wait` / `shell_kill` |
 | `fetch_url`、`web_search` | 读取网页或执行 Tavily/SearXNG 搜索 | 网络默认关闭；研究任务显式授予公共网络能力；每次抓取仍审批，并检查重定向、DNS 和私网地址 |
 | `delegate_task` | 有界委派只读或隔离写子任务 | 新上下文、单层、串行、每任务最多两个；不自动合并 |
 | `mcp__<serverId>__<toolName>` | 调用本地 stdio MCP 工具 | 只注入已启用且探测成功的服务器；Schema 校验、结果限长、密钥脱敏和逐次审批 |
@@ -122,16 +122,17 @@ MCP 调用默认逐次进入现有工具审批，审批绑定服务器、工具�
 
 主模型、上下文摘要和委派工具返回的用量统一累计到运行用量与检查点。`inputTokens`、`outputTokens` 是总量，缓存读取、缓存写入和推理 Token 是其中的明细，不再次叠加到预算。摘要后立即检查 Token 预算，达到上限便停止下一次模型调用；兼容只返回字符串的旧摘要回调，但这种回调无法提供摘要用量。
 
-每次原生运行都有四类预算：最大轮次、最大工具调用次数、最大 Token 和最大时长。超过预算会停止并返回可解释的结果，不继续消耗。
+每次原生运行都有四类预算：最大轮次、最大工具调用次数、最大 Token 和最大时长。默认预算按执行模式（快速 / 标准 / 深入）设定，显式传入的预算优先；`unlimited` 不再作为产品默认。
 
-Runtime 在每个模型回合、每个工具步骤、等待输入和最终完成时写入检查点。检查点包含消息、用量、轮次和工具调用计数。恢复时：
+Runtime 在每个模型回合、每个工具步骤、等待输入和最终完成时写入检查点。检查点包含消息、用量、轮次和工具调用计数。0.3.4 起，服务端 checkpoint 是 SQLite `events` 的物化视图：写文件前先追加 `runtime.checkpoint.snapshot`，`run_checkpoints.event_seq` 记录快照位置；文件缺失或损坏时从事件按 `event_seq` 回放重建。恢复时：
 
-1. 找到最近一次可恢复的检查点，复制当时的工作区。
-2. 恢复消息与预算计数，必要时把用户补充作为新的 `user` 消息追加。
-3. 从暂停位置继续，而不是从头重跑。
-4. 最终产物缺失时，带着上一轮 Agent 上下文补交，最多两轮；仍不满足则明确失败。
+1. 宿主 `HostKernel` 先完成 `lease → store → operations → runs → tasks → background → ready` 阶段，恢复完成前 `/api/ready` 保持 503。
+2. 找到最近一次可恢复的检查点，复制当时的工作区；恢复闸门沿父 run 链检查 prepared/dispatched 操作、运行中后台进程和 checkpoint proof，未知副作用不自动重放。
+3. 恢复消息与预算计数，必要时把用户补充作为新的 `user` 消息追加。
+4. 从暂停位置继续，而不是从头重跑。
+5. 最终产物缺失时，带着上一轮 Agent 上下文补交，最多两轮；仍不满足则明确失败。
 
-检查点存放在隔离工作区的 `.hearth/checkpoints/` 下，任务详情只展示数量和折叠的技术信息，不把中间 JSON 当作用户产物。
+检查点存放在隔离工作区的 `.hearth/checkpoints/` 下，对话运行卡只展示数量和折叠的技术信息，不把中间 JSON 当作用户产物。
 
 ## 完成契约
 
@@ -139,7 +140,7 @@ Runtime 在每个模型回合、每个工具步骤、等待输入和最终完成
 - 工作区任务必须给出最终总结，并保留代码改动和测试证据。
 - 中间 JSON、命令日志、检查点和运行时文件不进入用户产物列表。
 - 声明的产物为空、执行器没有返回总结或预算耗尽，都不能标记为完成。
-- 用户需要的最终结果出现在任务详情顶部；执行命令、检查点和内部事件收进折叠区域。
+- 用户需要的最终结果出现在对话运行卡和产物面板；执行命令、检查点和内部事件收进折叠区域。
 
 ## 任务提案
 
@@ -147,12 +148,23 @@ Runtime 在每个模型回合、每个工具步骤、等待输入和最终完成
 
 普通通用任务可以直接派出。这样既保持“说一句话就开始”的简单交互，又让高权限动作有明确的用户授权点。
 
+## 运行时账本与后台进程
+
+工具调用不再只靠内存里的 Promise。审批通过后先写 `prepare`（意图、参数摘要、`beforeDigest`），再写 `dispatch`，工具返回后才 `settle`；超时、中止或外部写缺回执记为 `unknown`，下一进程拒绝自动重放，并把未结算结果交给模型先核对。
+
+- 服务端 `SqliteOperationLedger` 写入 `run_operations`；standalone / 评测使用 JSONL 账本。
+- 服务端 runtime journal 并入 SQLite `events`（schema v40）；消息、工具结算、检查点和 run 边界是同一份事实。
+- 后台 shell 写入 `background_processes`（session、PID、真实创建时间、命令、日志路径、task/run、状态与退出码）；宿主重启时按 PID + 创建时间判定，活的杀进程树、复用的只标 `lost`。
+- 终态 run 输出 `run-evidence.json`，并执行物理 cleanup；已登记 shell 进程会被真正终止，`confirmed / failed` 写回操作账本。
+
 ## 当前边界
 
 - 子代理只支持单层、串行、最多两个；不做并行团队、递归委派或自动合并。
 - MCP 只支持本地 stdio；不支持远程 HTTP、OAuth、托管多租户或工具级 exactly-once。
 - 搜索默认关闭；公共网络能力不会绕过私网拦截和逐次抓取审批。
-- 不支持浏览器自动化搜索、图片/扫描件视觉理解、PPTX、LSP、格式化器、Shell 后台会话和自动 cherry-pick。
+- 不支持远程 MCP、图片/扫描件视觉理解、PPTX、LSP、格式化器或自动 cherry-pick。
+- PTY / 后台 shell 不跨宿主重启恢复终端状态，重启只做 `lost` 标记与孤儿清理。
+- Windows 沙箱只有 `deny | open` 两种网络模式；域级 allowlist 会 fail-closed。
 - 执行使用当前聊天模型，不内置第二套“执行模型”；工作区任务优先在本地 Worktree 中执行。
 - 不把中间步骤、内部 JSON 或终端输出当作交付结果。
 - 没有共享基准，不声称已量化超过 Pi、DeerFlow 或 OpenCode；只按公开能力说明差距和已补齐范围。

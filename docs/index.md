@@ -3,7 +3,7 @@ layout: home
 hero:
   name: Hearth OS
   text: 把数字劳动变成可靠的任务
-  tagline: 单用户、自托管、长期驻留的个人 Agent OS。聊天优先地发起任务，交给三个内置执行器，在审批与回执约束下完成真实工作。
+  tagline: 单用户、自托管、长期驻留的个人 Agent OS。聊天优先地发起任务，交给三个内置执行器，在审批、操作账本与回执约束下完成真实工作。
   image:
     src: /hero.svg
     alt: Hearth OS 任务系统
@@ -19,11 +19,11 @@ hero:
 <nav class="home-quicklinks" aria-label="文档入口">
   <a href="#产品界面">
     <span class="home-quicklinks__label">产品界面</span>
-    <span class="home-quicklinks__meta">聊天、任务、收件箱、记忆与执行器</span>
+    <span class="home-quicklinks__meta">聊天、资料库、Context 与执行器</span>
   </a>
-  <a href="/hearth-os/design/">
-    <span class="home-quicklinks__label">设计说明</span>
-    <span class="home-quicklinks__meta">项目定位、十五个设计模块与当前边界</span>
+  <a href="/hearth-os/architecture/">
+    <span class="home-quicklinks__label">代码架构</span>
+    <span class="home-quicklinks__meta">服务组装、运行时账本、沙箱与前端</span>
   </a>
   <a href="/hearth-os/delivery/">
     <span class="home-quicklinks__label">交付路线</span>
@@ -42,7 +42,7 @@ hero:
 ## 产品界面
 
 <p class="home-section-lead">
-  不是把聊天记录换个皮肤，而是把一次真实工作拆成可追踪的任务：目标、执行器、预算、审批、产物和回执，全部留在同一个控制面里。
+  不是把聊天记录换个皮肤，而是把一次真实工作拆成可追踪的任务：目标、执行器、权限、审批、产物、结算与回执，全部留在同一个控制面里。
 </p>
 
 <section class="home-showcase" aria-label="Hearth 界面截图">
@@ -50,30 +50,30 @@ hero:
     <img src="/screenshots/chat.png" alt="Hearth 聊天工作台">
     <figcaption>
       <strong>聊天工作台</strong>
-      <span>对话常驻左侧；目标、进度、产物与附件在右侧按需展开并可直接预览。</span>
+      <span>执行轨迹内联在对话时间线；右侧“对话产物”按需展开文件、后台任务和预览。</span>
     </figcaption>
   </figure>
 
   <div class="screenshot-gallery">
     <figure class="screenshot-card">
-      <img src="/screenshots/task-detail.png" alt="任务详情">
+      <img src="/screenshots/library.png" alt="资料库">
       <figcaption>
-        <strong>任务详情</strong>
-        <span>结果在前，原始需求、执行过程与交付文件按需展开。</span>
+        <strong>资料库</strong>
+        <span>文件、记忆、资料与技能在一个树里；检索、预览和回收站同页完成。</span>
       </figcaption>
     </figure>
     <figure class="screenshot-card">
-      <img src="/screenshots/memory.png" alt="记忆管理">
+      <img src="/screenshots/context.png" alt="Context 交接">
       <figcaption>
-        <strong>记忆</strong>
-        <span>新增、预算、待确认与最近召回都在同一页。</span>
+        <strong>Context 交接</strong>
+        <span>从活跃记忆生成接手摘要、原记录与导出包，交给下一个执行者或账号。</span>
       </figcaption>
     </figure>
     <figure class="screenshot-card screenshot-card--wide">
       <img src="/screenshots/settings.png" alt="设置与执行器">
       <figcaption>
         <strong>设置与执行器</strong>
-        <span>左侧只做分区；模型绑定、健康状态与配置都在右侧一栏。</span>
+        <span>左侧只做分区；执行器健康、模型绑定、浏览器、扩展和数据页都在右侧一栏。</span>
       </figcaption>
     </figure>
   </div>
@@ -94,16 +94,16 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
   {
     no: '02',
     title: '外部动作先审批，再留下回执',
-    text: '发送邮件、操作桌面、提交评论等副作用先生成预览，一次性审批绑定参数指纹。',
+    text: '发送邮件、操作桌面、提交页面等副作用先生成预览，一次性审批绑定参数指纹与操作账本。',
     link: '/design/effects',
     meta: 'Approval & effects'
   },
   {
     no: '03',
-    title: '执行器可替换，记录不丢失',
-    text: '原生运行时、Codex 与 DeepSeek Harness 共享注册表、路由和运行清单。',
-    link: '/design/executors',
-    meta: 'Three executors'
+    title: '崩溃后可恢复，完成有证据',
+    text: 'HostKernel 阶段化恢复、未结算操作不重放、终态 run 输出 run-evidence；沙箱限制文件、进程与网络。',
+    link: '/architecture/runtime-operations',
+    meta: 'Recovery & evidence'
   }
 ]" />
 
@@ -112,26 +112,26 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
 <DocCardGrid :columns="2" :items="[
   {
     title: '交付与进度',
-    text: '第一阶段 MVP 已验收；阶段二至六已形成代码闭环，真实用户与长期运行验收仍在进行。',
+    text: '第一阶段 MVP 已验收；0.3.4 把运行时、沙箱与恢复链收紧成可核对的闭环，真实用户与长期运行验收仍在进行。',
     link: '/delivery/status',
     meta: 'Current status'
   },
   {
     title: '存储与备份边界',
-    text: 'SQLite 数据域、上下文生命周期、加密备份，以及数据库可恢复不等于产物可迁移的边界。',
+    text: 'SQLite 单一事件日志、操作账本、上下文生命周期、加密备份，以及数据库可恢复不等于产物可迁移的边界。',
     link: '/design/storage',
     meta: 'Data & backup'
   },
   {
-    title: '委派、交接与沙箱',
-    text: '单层持久委派、可审阅交接包、租约与代次，以及路径、网络、进程和凭据边界。',
-    link: '/design/delegation-and-sandbox',
-    meta: 'Delegation & sandbox'
+    title: '运行时账本与宿主生命周期',
+    text: 'T1/T2 操作合同、HostKernel 租约、单一事件日志、AppContainer、ConPTY 与持久后台进程。',
+    link: '/architecture/runtime-operations',
+    meta: 'Runtime operations'
   },
   {
-    title: '个人上下文与注意力',
-    text: '个人本体、Context Pack、记忆召回、标准意图和打扰预算如何共同决定 Agent 能看到什么、何时提醒。',
-    link: '/design/personal-context',
-    meta: 'Context & attention'
+    title: 'Native Harness 沙箱',
+    text: 'Windows AppContainer 的文件、进程与网络边界，fail-closed 规则，以及它明确不承诺的部分。',
+    link: '/design/sandbox',
+    meta: 'Sandbox boundary'
   }
 ]" />

@@ -71,14 +71,13 @@ Codex 的档案还会生成一份 TOML 配置并注入专用环境变量；解�
 
 一次执行的结论统一为五种：完成、等待补充、失败、取消、预算耗尽。调度器只看这五种，不关心背后是哪个 CLI。
 
-四类适配器：
+三类适配器：
 
 | 适配器 | 覆盖的执行器 | 特点 |
 |---|---|---|
-| 原生 | 原生 | 走本项目的 Agent 运行时与统一模型客户端 |
-| Codex | Codex | 走官方 SDK，读本地配置档 |
-| DeepSeek Harness | DeepSeek Harness | 走厂商 SDK，写供应商补丁配置 |
-| 外部通用 | Hermes / Qoder / WorkBuddy / Kimi | 拼命令行参数或直接调 SDK，解析流式 JSON 输出 |
+| 原生 | native | 走本项目的 Agent 运行时与统一模型客户端 |
+| Codex | codex | 走官方 `codex.exe`，读本地配置档或统一 Responses 绑定 |
+| DeepSeek Harness | deepseek-harness | 走厂商 SDK，写供应商补丁配置 |
 
 ---
 
@@ -86,14 +85,12 @@ Codex 的档案还会生成一份 TOML 配置并注入专用环境变量；解�
 
 启动来源有五种：内建、用户配置、托管安装、全局探测、显式路径。解析顺序是「用户配置 → 托管 → 探测 → 路径」，只有未显式关闭探测时才去扫全局安装。
 
-启动形态有四类：内建代码、直接命令、Node 脚本、SDK 异步迭代。几个值得注意的差异：
+启动形态有三类：内建代码、直接命令、SDK 异步迭代。几个值得注意的差异：
 
-- 多数 CLI 用「打印模式 + 流式 JSON 输出」启动，参数里带轮数与预算限制。
-- 「完全权限」模式在各家**并不统一**：有的加一个免确认开关，有的加另一个名字的开关，有的通过 SDK 的权限模式参数表达；其中一个执行器的参数里未见对应开关。
+- Codex 用系统 `codex.exe`，参数里带轮数与预算限制；不内置 479 MiB 平台二进制。
+- 「完全权限」在各执行器并不统一：native 直接切到 `danger-full-access`，Codex 通过 CLI 开关表达，DeepSeek Harness 通过 SDK 权限参数表达。
 - 取消进程在 Windows 用任务树强杀，在非 Windows 用进程组信号，避免留下孙进程。
 - 临时提示词文件用完会清理，但清理失败被静默吞掉（提供进程在 Windows 上常占用目录），因此临时目录可能残留。
-
-Qoder 走 SDK 的异步迭代，权限模式在「放宽」与「仅接受编辑」两档之间切换；Hermes 单独有一层流解析与「需要审批 / 启动失败」两类专属错误。
 
 ---
 
@@ -101,11 +98,10 @@ Qoder 走 SDK 的异步迭代，权限模式在「放宽」与「仅接受编辑
 
 | 环节 | 规则 |
 |---|---|
-| 托管安装 | 只托管三个外部 SDK 包，版本固定；单次安装超时 15 分钟，日志最多保留 8 千字符，结果写进安装记录文件 |
+| 托管安装 | 只托管执行器运行所需的 SDK 包，版本固定；单次安装超时 15 分钟，日志最多保留 8 千字符，结果写进安装记录文件 |
 | 设置 | 安装方式分托管 / 已有 / 探测，鉴权方式分本地 / 令牌 / 环境变量；默认审批模式为「必要时」 |
 | 健康缓存 | 通用缓存 30 秒，「已验证」缓存 24 小时；版本探测 6 秒超时，真实探测 60 秒超时并要求约定回显文本 |
-| Hermes 额外探测 | 另有 30 秒缓存，探测版本 4 秒超时；会从若干候选主目录里找配置与鉴权文件 |
-| 就绪检查 | 只判三个一等执行器：Codex 必须有密钥，DeepSeek Harness 不接受 Gemini 协议 |
+| 就绪检查 | 只判三个一等执行器：Codex 必须有可用绑定或密钥，DeepSeek Harness 不接受 Gemini 协议 |
 
 「健康」与「就绪」是两件事：前者回答进程能不能起来，后者回答配置够不够跑。
 
@@ -134,7 +130,7 @@ Qoder 走 SDK 的异步迭代，权限模式在「放宽」与「仅接受编辑
 1. Gemini 协议只有原生执行器可用；Codex 只认 OpenAI Responses。
 2. 「重试 3 次」是总尝试次数，且只对指定状态码生效，流式调用也走同一套重试。
 3. 健康探测的成功判据是一段约定的回显文本，不是 HTTP 200。
-4. 外部执行器的「完全权限」开关名字各不相同，没有统一抽象。
+4. 「完全权限」的执行路径不统一：native 跳过沙箱，Codex 用 CLI 开关，DeepSeek Harness 用 SDK 权限参数；没有统一抽象。
 5. 临时目录清理失败会被吞掉，Windows 上可能残留。
 6. DeepSeek Harness 的提问回调恒为取消，设计中就不支持运行中交互。
 
@@ -160,7 +156,7 @@ Qoder 走 SDK 的异步迭代，权限模式在「放宽」与「仅接受编辑
 | 厂商预设与设置文件 | `apps/server/src/model-settings.ts` |
 | 遗留设置迁移 | `apps/server/src/settings-migration.ts` |
 | 执行器清单与统一接口 | `apps/server/src/executors.ts`、`executor-adapter.ts` |
-| 四类适配器实现 | `native-executor.ts`、`external-executor.ts`、`hermes-executor.ts` |
-| 启动来源、安装、健康、就绪、设置 | `executor-runtime.ts`、`executor-install.ts`、`executor-readiness.ts`、`executor-settings.ts`、`hermes-health.ts` |
+| 三类适配器实现 | `native-executor.ts`、`executor-adapter.ts`、`packages/codex-executor`、`packages/deepseek-executor` |
+| 启动来源、安装、健康、就绪、设置 | `executor-runtime.ts`、`executor-readiness.ts`、`executor-settings.ts`、`executors.ts` |
 | 临时目录清理 | `apps/server/src/temp-cleanup.ts` |
 | 两个 SDK 包 | `packages/codex-executor/src/`、`packages/deepseek-executor/src/` |

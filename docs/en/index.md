@@ -19,7 +19,7 @@ hero:
 <nav class="home-quicklinks" aria-label="Documentation">
   <a href="#product">
     <span class="home-quicklinks__label">Product</span>
-    <span class="home-quicklinks__meta">Chat, tasks, inbox, memory, and executors</span>
+    <span class="home-quicklinks__meta">Chat, Library, Context, and executors</span>
   </a>
   <a href="/hearth-os/en/design/">
     <span class="home-quicklinks__label">Design</span>
@@ -50,44 +50,30 @@ hero:
     <img src="/screenshots/chat.png" alt="Hearth chat workspace">
     <figcaption>
       <strong>Chat workspace</strong>
-      <span>One intent moves work forward; progress, results, and artifacts appear in place.</span>
+      <span>Run cards stay inline in the conversation; the right-side artifacts panel opens on demand with files, background jobs, and preview.</span>
     </figcaption>
   </figure>
 
   <div class="screenshot-gallery">
     <figure class="screenshot-card">
-      <img src="/screenshots/tasks.png" alt="Task list">
+      <img src="/screenshots/library.png" alt="Library">
       <figcaption>
-        <strong>Task list</strong>
-        <span>Running, waiting for confirmation, and completed work read in one line.</span>
+        <strong>Library</strong>
+        <span>Files, memories, sources, and skills in one tree; search, preview, and trash on the same page.</span>
       </figcaption>
     </figure>
     <figure class="screenshot-card">
-      <img src="/screenshots/task-detail.png" alt="Task detail">
+      <img src="/screenshots/context.png" alt="Context handoff">
       <figcaption>
-        <strong>Task detail</strong>
-        <span>Result first; original request, execution trace, and deliverables open on demand.</span>
-      </figcaption>
-    </figure>
-    <figure class="screenshot-card">
-      <img src="/screenshots/inbox.png" alt="Proactive inbox">
-      <figcaption>
-        <strong>Needs you</strong>
-        <span>One line per suggestion; evidence and actions appear when expanded.</span>
-      </figcaption>
-    </figure>
-    <figure class="screenshot-card">
-      <img src="/screenshots/memory.png" alt="Memory management">
-      <figcaption>
-        <strong>Memory</strong>
-        <span>Capture, budget, pending candidates, and recent recall on one page.</span>
+        <strong>Context handoff</strong>
+        <span>Build a handoff brief, original records, and an export bundle from active memories.</span>
       </figcaption>
     </figure>
     <figure class="screenshot-card screenshot-card--wide">
       <img src="/screenshots/settings.png" alt="Settings and executors">
       <figcaption>
         <strong>Settings and executors</strong>
-        <span>Navigation on the left; model bindings, health, and configuration in one right column.</span>
+        <span>Navigation on the left; executor health, model bindings, browser, extensions, and data in one right column.</span>
       </figcaption>
     </figure>
   </div>

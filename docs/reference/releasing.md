@@ -1,6 +1,6 @@
 # 构建、签名与发版
 
-桌面版是 Tauri 应用，服务端和 Web 产物随安装包一起分发。发布分三步：构建、签名、整理产物。
+桌面版是 Tauri 应用，服务端、Web 产物和原生沙箱 helper 随安装包一起分发。发布分三步：构建、签名、整理产物。当前 0.3.4 只完成构建与整理，自动更新签名仍未配置。
 
 ## 1. 构建
 
@@ -8,9 +8,11 @@
 npm run release:build
 ```
 
-`scripts/build-tauri.mjs` 会准备内置 Node、服务端 bundle 和 Web 产物，再调用 `tauri build`，最终把 NSIS 安装包复制到仓库根目录的 `release/`。
+`scripts/build-tauri.mjs` 会编译 `apps/native/hearth-native.cs`（调用系统 `csc.exe`），准备内置 Node、服务端 bundle 和 Web 产物，再调用 `tauri build`，最终把 NSIS 安装包复制到仓库根目录的 `release/`。
 
 没有签名环境变量时，脚本会打印一条警告并生成**不带自动更新**的普通安装包。它不会生成一个签名无效、装上就无法更新的坏包。
+
+0.3.4 的实际产物：`Hearth_0.3.4_x64-setup.exe` 30.5 MiB、`Hearth-0.3.4-portable.zip` 47.2 MiB，已作为 GitHub Pre-release 发布并附 SHA256 校验和。
 
 ## 2. 自动更新签名
 
@@ -46,10 +48,16 @@ npm run release:prepare -- --skip-build
 
 ## 发布前检查
 
-- `npm run typecheck && npm test && npm run build && npm run docs:build`
+- `npm run version:check && npm run typecheck && npm test && npm run test:longrun && npm run build && npm run docs:build`
+- `npm run test:sandbox`（Windows 真实 AppContainer 测试）
+- `npm run first:run -- --fake`（离线自检任务链路）
 - `cargo check --manifest-path apps/desktop-tauri/src-tauri/Cargo.toml --features updater`
 - 安装包在干净机器上安装、启动、卸载各一次；
 - 下载后核对 `SHA256SUMS.txt`；
 - 至少在一台旧版本机器上验证一次自动更新。
 
 发布脚本不会自动打 tag、推远端或上传文件。这些步骤需要人确认后执行。
+
+## 当前缺口
+
+0.3.4 没有 `TAURI_SIGNING_PRIVATE_KEY`、`HEARTH_UPDATER_PUBKEY` 和 `HEARTH_UPDATER_ENDPOINT`，所以不会生成 `.sig` 或 `latest.json`，客户端也没有可用的更新源。Windows Authenticode、干净机卸载重装和企业策略检查同样未验收；发布前检查中的后三项仍是人工留空项。

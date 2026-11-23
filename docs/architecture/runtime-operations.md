@@ -1,4 +1,10 @@
-# Runtime 持久操作账本（M1）
+---
+title: '运行时操作账本与宿主生命周期'
+description: 'T1/T2 操作合同、单一事件日志、HostKernel 阶段化恢复、Windows AppContainer、ConPTY 与持久后台进程。'
+outline: [2, 3]
+---
+
+# 运行时操作账本与宿主生命周期
 
 ## 目的
 
@@ -17,7 +23,7 @@ M1 引入 T1/T2 操作合同：
 
 ## 存储
 
-- 服务端：SQLite `run_operations`，M1 schema 37；M2 将运行时 journal 并入 `events` 后为 38。
+- 服务端：SQLite `run_operations`；与 runtime journal、背景进程注册表一起进入 schema v40。
 - standalone / 评测：`JsonlOperationLedger`，每次状态转换追加一行并 `fsync`；重启时回放，损坏的尾行忽略。
 - runtime 只依赖 `OperationLedger` 接口，不直接依赖 `node:sqlite`；server 通过 `SqliteOperationLedger` 注入。
 
@@ -40,7 +46,7 @@ M1 引入 T1/T2 操作合同：
 
 Windows 下 `taskkill /T` 在“父进程刚创建子进程”的窗口里可能返回“operation not supported”，留下孤儿。`killShellSession` 先枚举 `Win32_Process` 的父子关系，从叶子向根 `Stop-Process`，再执行 `taskkill /T /F` 兜底。
 
-## 单一持久事实源（M2）
+## 单一持久事实源
 
 服务端不再写 `.hearth/journals/<run>/events.jsonl`。`SqliteRuntimeJournal` 把 runtime 的 `run.start`、`message`、`tool.dispatched`、`tool.settled`、`checkpoint`、`run.end` 等事实写入 SQLite `events`；JSONL journal 只保留给 standalone / 评测模式。
 
@@ -49,7 +55,7 @@ Windows 下 `taskkill /T` 在“父进程刚创建子进程”的窗口里可能
 - 恢复时先校验 checkpoint 文件的 sha256；文件缺失或损坏时回退到 `runtime.checkpoint.snapshot` 事件，再从 `event_seq` 之后回放 `runtime.message` / `runtime.tool.settled`，补齐检查点后的消息。
 - 旧版本没有 `event_seq` 的 checkpoint 仍可按原有 JSONL journal 路径恢复，迁移期不丢历史任务。
 
-## 宿主租约与阶段化恢复（M2）
+## 宿主租约与阶段化恢复
 
 `HostKernel` 持有数据目录的唯一宿主租约，并在调度器恢复完成前保持 `/api/ready` 为 503。启动阶段按 `lease → store → operations → runs → tasks → background → ready` 推进；`recovering` 和 `draining` 期间，创建任务和继续对话的写路由返回 `HOST_NOT_READY`。
 
@@ -57,7 +63,7 @@ Windows 下 `taskkill /T` 在“父进程刚创建子进程”的窗口里可能
 - `HostKernel.stop()` 先把状态切到 `draining`，由调度器停止接收新任务、取消在跑 run、释放任务租约，最后释放宿主租约。
 - `/api/health` 返回 `host` 快照：`phase`、`step`、`readyAt`、`error` 和租约信息，桌面 supervisor 与诊断页可直接观察卡在哪个阶段。
 
-## Windows 原生沙箱（M3）
+## Windows 原生沙箱
 
 Windows 单机执行器不再依赖 Node ACL runner。`apps/native/hearth-native.cs` 由系统自带 `csc.exe` 编译成 `hearth-native.exe`，提供四个子命令：
 
@@ -70,7 +76,7 @@ Windows 单机执行器不再依赖 Node ACL runner。`apps/native/hearth-native
 
 沙箱边界是“文件系统 + 进程 + 网络”三层，而不是只限制 shell 命令字符串。junction/symlink 指向工作区外时，目标没有 AppContainer ACE，读写仍会被拒绝。
 
-## ConPTY 交互式会话（M4）
+## ConPTY 交互式会话
 
 `shell` 工具增加 `pty: true` 与 `cols` / `rows`。PTY 会话仍由 `WindowsNativeSandboxProvider` 构造 argv，helper 走 `pty` 子命令：AppContainer、Job Object、父进程 watchdog 与普通 sandbox 完全相同，只把管道换成 `CreatePseudoConsole`。
 
@@ -80,7 +86,7 @@ Windows 单机执行器不再依赖 Node ACL runner。`apps/native/hearth-native
 - ConPTY 子进程使用 `STARTF_USESTDHANDLES` + `INVALID_HANDLE_VALUE`，并禁止句柄继承。否则 helper 的输入线程与子进程会抢同一个 stdin，表现为整行命令不执行或随机丢字符。
 - PTY 会话不跨宿主重启恢复；重启时由后台任务注册表标记 `lost`，不会假装进程仍在运行。
 
-## 持久后台任务（M4）
+## 持久后台任务
 
 每个 shell 会话在启动时写入 SQLite `background_processes`（`session_id`、`pid`、`start_time`、`command`、`output_path`、`task_id`、`run_id`、`status`、`exit_code`）。表由 `SqliteBackgroundTaskRegistry` 在同一个 `HearthStore` 连接上创建，保持单 SQLite 写者。
 
@@ -89,5 +95,15 @@ Windows 单机执行器不再依赖 Node ACL runner。`apps/native/hearth-native
 - 宿主启动时 `recoverLost()` 扫描 `running` 记录：PID + 创建时间都匹配才认定是同一进程，先杀进程树再标记 `lost`；创建时间不匹配视为 PID 复用，只标记 `lost`，不误杀。
 - 内存 Map 仍是运行中会话的输出来源；`shell_output` / `shell_wait` / `shell_kill` 在 Map 找不到时回退到注册表与日志文件，并向模型明确返回 `lost`。
 - PTY 会话同样写入注册表，但重启后不尝试恢复终端状态，只做 `lost` 标记和孤儿清理。
+
+## 物理清理与终态证据
+
+0.3.4 把“业务结算”和“物理清理”拆成两条账：工具 `settle` 只代表结果已知，终态 run 还要执行 cleanup，才能真正结束已登记的 shell 进程，并把 `confirmed / failed` 写回 `run_operations`。没有 cleanup handler 的资源会明确记 `failed` 并留下原因，而不是假装清干净。
+
+- 每个终态 run 输出 `run-evidence.json`：task/run/usage、checkpoint 引用、恢复决策、operations/cleanup、artifacts 与 run 链。
+- 恢复闸门沿父 run 链检查 prepared/dispatched 操作、运行中后台进程和 checkpoint proof；checkpoint proof 增加 `toolsDigest`，工具集变化在恢复时可见。
+- 模型响应被截断且携带工具调用时，整批调用丢弃，连续 3 次失败；非法工具入参只产生 `tool.rejected`，不写操作账本。
+- 重试不再复制整个 `.hearth`，只继承已发布产物与 checkpoint 引用的 tool-results；`storage:prune` 按保留期、活跃 run、未结算操作和 checkpoint 引用回收旧 run 与未引用输出。
+
 
 
