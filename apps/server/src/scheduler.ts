@@ -12,7 +12,7 @@ import type {
   RuntimeEvent,
   SubagentType
 } from "@hearth/agent-runtime";
-import { deserializeAgentState, inspectJournal, journalPathFor, resolveDesktopFilePath, CODING_RUN_BUDGET } from "@hearth/agent-runtime";
+import { deserializeAgentState, inspectJournal, journalPathFor, killWindowsProcessTree, resolveDesktopFilePath, CODING_RUN_BUDGET } from "@hearth/agent-runtime";
 import { checkpointSnapshotFromEvent, RUNTIME_CHECKPOINT_EVENT, runtimeJournalEvents, SqliteRuntimeJournal } from "./sqlite-runtime-journal.ts";
 import type { ApprovalMode, BudgetDimension, BudgetExhaustion, ContextItem, ContextSettings, DelegationJob, DelegationResult, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, RunBudget, RunCheckpointProof, RunCheckpointRecord, RunRecord, TaskError, TaskFollowUpRecord, TaskLease, TaskProgressDetail, TaskRecord } from "@hearth/core";
 import { runCodex } from "@hearth/codex-executor";
@@ -1381,12 +1381,56 @@ export class HearthScheduler {
   }
 
   /**
+   * Terminal runs must not leave a settled operation with an unconfirmed
+   * physical cleanup. Kill registered shell processes and record the result
+   * before evidence is written; unknown resource kinds fail loudly instead of
+   * pretending the cleanup happened.
+   */
+  private settlePendingCleanups(runId: string): void {
+    const registry = getBackgroundTaskRegistry();
+    const operations = this.service.store.listRunOperations(runId).filter((operation) => operation.cleanupState === "pending");
+    for (const operation of operations) {
+      let failure: string | null = null;
+      for (const resource of operation.resources) {
+        if (resource.kind !== "process") {
+          failure = `no cleanup handler for ${resource.kind}:${resource.id}`;
+          continue;
+        }
+        const record = registry?.get(resource.id) ?? null;
+        if (!record) continue;
+        if (record.status !== "running") continue;
+        if (!record.pid) {
+          failure = `process ${resource.id} has no pid`;
+          continue;
+        }
+        try {
+          killWindowsProcessTree(record.pid);
+          registry?.finish(resource.id, null, "killed");
+        } catch (error) {
+          failure = error instanceof Error ? error.message : String(error);
+        }
+      }
+      try {
+        this.service.store.settleRunOperationCleanup({
+          operationId: operation.operationId,
+          state: failure ? "failed" : "confirmed",
+          ...(failure ? { error: failure } : {})
+        });
+      } catch {
+        // The operation ledger is authoritative; a rejected transition is
+        // already visible in evidence and must not mask the run outcome.
+      }
+    }
+  }
+
+  /**
    * Terminal runs leave a single self-contained evidence file next to their
    * artifacts. It is both the bug-report attachment and the eval input, so a
    * failed run can be diagnosed without replaying the whole event log.
    */
   private writeRunEvidence(taskId: string, runId: string): void {
     try {
+      this.settlePendingCleanups(runId);
       const task = this.service.requireTask(taskId);
       const runs = this.service.store.listRuns(taskId);
       const run = runs.find((candidate) => candidate.id === runId);
