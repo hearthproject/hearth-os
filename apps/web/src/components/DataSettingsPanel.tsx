@@ -145,6 +145,32 @@ function StorageSection() {
             </div>
           </dl>
 
+          {storage.lastPrune && (
+            <details className="data-disclosure">
+              <summary>
+                <Trash2 size={13} /> 最近一次存储回收
+                <span className="data-disclosure-meta">{relativeTime(storage.lastPrune.at)} · {formatBytes(storage.lastPrune.bytes)}</span>
+              </summary>
+              <div className="data-disclosure-body">
+                <p className="data-note">
+                  保留期 {storage.lastPrune.olderThanDays} 天；下列路径已从磁盘删除，仍被检查点或活跃运行引用的证据不会出现在这里。
+                </p>
+                {storage.lastPrune.entries.length === 0 ? (
+                  <p className="data-empty">最近一次回收没有删除文件。</p>
+                ) : (
+                  <div className="data-row-list">
+                    {storage.lastPrune.entries.map((entry) => (
+                      <div className="data-row" key={entry.path}>
+                        <code>{entry.path}</code>
+                        <span>{formatBytes(entry.bytes)} · 已回收</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </details>
+          )}
+
           <details className="data-disclosure">
             <summary><Database size={13} /> 数据库表与旧设置迁移</summary>
             <div className="data-disclosure-body">

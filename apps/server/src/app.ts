@@ -1373,7 +1373,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
       executorSettings: executorSettingsPath
     },
     migrations: store.listSettingsMigrations(),
-    startupMigrations: settingsMigrations
+    startupMigrations: settingsMigrations,
+    lastPrune: readStoragePruneReport()
   }));
 
   app.post("/api/model-profiles", async (request, reply) => {
@@ -3269,4 +3270,14 @@ function removeManagedTaskPaths(task: TaskRecord, dataDir: string): void {
     rmSync(root, { recursive: true, force: true });
   }
   if (managedArtifactRoots.has(outputRoot)) rmSync(outputRoot, { recursive: true, force: true });
+}
+
+function readStoragePruneReport(): unknown {
+  const path = join(DATA_DIR, "storage-prune.json");
+  if (!existsSync(path)) return null;
+  try {
+    return JSON.parse(readFileSync(path, "utf8")) as unknown;
+  } catch {
+    return null;
+  }
 }

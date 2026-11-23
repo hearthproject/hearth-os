@@ -264,6 +264,12 @@ export interface SettingsStorageResponse {
   };
   migrations: SettingsMigrationRecord[];
   startupMigrations: SettingsMigrationRecord[];
+  lastPrune?: {
+    at: string;
+    olderThanDays: number;
+    bytes: number;
+    entries: Array<{ path: string; bytes: number }>;
+  } | null;
 }
 
 export interface TaskView {

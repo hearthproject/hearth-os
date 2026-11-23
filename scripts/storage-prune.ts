@@ -1,7 +1,7 @@
-import { existsSync, rmSync } from "node:fs";
-import { relative, resolve } from "node:path";
+import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { relative, resolve, join } from "node:path";
 import { HearthStore } from "@hearth/eventlog";
-import { DB_PATH, WORKSPACE_DIR } from "../apps/server/src/config.ts";
+import { DATA_DIR, DB_PATH, WORKSPACE_DIR } from "../apps/server/src/config.ts";
 import { planStoragePrune } from "../apps/server/src/storage-prune.ts";
 
 const args = process.argv.slice(2);
@@ -40,16 +40,25 @@ try {
   }
   if (apply) {
     let reclaimed = 0;
+    const removed: Array<{ path: string; bytes: number }> = [];
     for (const candidate of plan.candidates) {
       if (!withinRoot(candidate.path)) throw new Error(`拒绝删除工作区外的路径：${candidate.path}`);
       rmSync(candidate.path, { recursive: true, force: true });
       reclaimed += candidate.bytes;
+      removed.push({ path: relative(WORKSPACE_DIR, candidate.path), bytes: candidate.bytes });
     }
     for (const file of plan.files) {
       if (!withinRoot(file.path)) throw new Error(`拒绝删除工作区外的路径：${file.path}`);
       rmSync(file.path, { force: true });
       reclaimed += file.bytes;
+      removed.push({ path: relative(WORKSPACE_DIR, file.path), bytes: file.bytes });
     }
+    writeFileSync(join(DATA_DIR, "storage-prune.json"), `${JSON.stringify({
+      at: new Date().toISOString(),
+      olderThanDays: plan.olderThanDays,
+      bytes: reclaimed,
+      entries: removed
+    }, null, 2)}\n`, "utf8");
     console.log(`已回收 ${formatBytes(reclaimed)}`);
   } else {
     console.log("这是预演；加 --apply 才会删除。");
