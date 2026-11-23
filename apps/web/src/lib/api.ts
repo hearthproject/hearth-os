@@ -140,6 +140,10 @@ export const api = {
   conversationDefaults: () => request<{ settings: ConversationSettings }>("/api/conversation-defaults"),
   conversations: () => request<{ conversations: ConversationListItem[] }>("/api/conversations"),
   conversation: (id: string) => request<ConversationDetail>(`/api/conversations/${encodeURIComponent(id)}`),
+  createConversation: (title?: string, settings?: ConversationSettingsPatch) => request<ConversationRecord>("/api/conversations", {
+    method: "POST",
+    body: JSON.stringify({ ...(title ? { title } : {}), ...(settings ? { settings } : {}) })
+  }),
   updateConversationSettings: (id: string, settings: ConversationSettingsPatch) =>
     request<ConversationRecord>(`/api/conversations/${encodeURIComponent(id)}`, {
       method: "PATCH",

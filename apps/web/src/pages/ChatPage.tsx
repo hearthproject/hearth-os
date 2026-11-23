@@ -31,7 +31,7 @@ const InlineRun = lazy(() => import("../components/InlineRun.tsx").then((module)
 const ChatWorkspacePanel = lazy(() => import("../components/ChatWorkspacePanel.tsx").then((module) => ({ default: module.ChatWorkspacePanel })));
 const Markdown = lazy(() => import("../components/Markdown.tsx").then((module) => ({ default: module.Markdown })));
 import { formatBytes, formatDuration, formatTime } from "../lib/format.ts";
-import { getChatSelection, setChatBusy, syncChatSelection, useChatSelection } from "../lib/chat-selection.ts";
+import { getChatSelection, requestChat, setChatBusy, syncChatSelection, useChatSelection } from "../lib/chat-selection.ts";
 import { executorLabel } from "../lib/labels.ts";
 import type {
   ChatAttachment,
@@ -131,6 +131,7 @@ export function ChatPage() {
   const [reasoningDraft, setReasoningDraft] = useState<ReasoningEffort | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
   const [isPausing, setIsPausing] = useState(false);
+  const [isLeavingProject, setIsLeavingProject] = useState(false);
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
   const [skillInstallRequest, setSkillInstallRequest] = useState<{ source: string } | null>(null);
   const [skillNotice, setSkillNotice] = useState<string | null>(null);
@@ -587,6 +588,23 @@ export function ChatPage() {
     }
   }
 
+  async function leaveProjectConversation() {
+    if (!(current?.projectId || pendingProjectId) || selection.busy || isLeavingProject) return;
+    setIsLeavingProject(true);
+    setError(null);
+    try {
+      // Keep the current project conversation and its history; switch to a
+      // fresh standalone conversation instead of unbinding or deleting it.
+      const conversation = await api.createConversation();
+      await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      requestChat(conversation.id);
+    } catch (caught) {
+      setError(caught instanceof Error ? `退出项目失败：${caught.message}` : "退出项目失败，请重试");
+    } finally {
+      setIsLeavingProject(false);
+    }
+  }
+
   async function dispatch(outgoing: OutgoingMessage) {
     const { text, attachments: sentAttachments, skillId: sentSkillId } = outgoing;
     const startedAt = Date.now();
@@ -845,10 +863,24 @@ export function ChatPage() {
             <span className="chat-header-mark" aria-hidden="true"><Folder size={16} /></span>
             <h1>{current?.title ?? "新对话"}</h1>
             {(current ? projectsById.get(current.projectId ?? "") : activeProject) && (
-              <span className="chat-project-chip" title={current ? projectsById.get(current.projectId ?? "")?.path : activeProject?.path}>
-                <Folder size={12} />
-                {(current ? projectsById.get(current.projectId ?? "") : activeProject)?.name}
-              </span>
+              <>
+                <span className="chat-project-chip" title={current ? projectsById.get(current.projectId ?? "")?.path : activeProject?.path}>
+                  <Folder size={12} />
+                  {(current ? projectsById.get(current.projectId ?? "") : activeProject)?.name}
+                </span>
+                {(current?.projectId || pendingProjectId) && (
+                  <button
+                    type="button"
+                    className="chat-project-exit"
+                    onClick={() => void leaveProjectConversation()}
+                    disabled={selection.busy || isLeavingProject}
+                    title="退出项目并打开普通对话"
+                    aria-label="退出项目并打开普通对话"
+                  >
+                    {isLeavingProject ? <Loader2 size={12} className="spin" /> : <X size={12} />}
+                  </button>
+                )}
+              </>
             )}
           </div>
           <button

@@ -1287,6 +1287,30 @@
   white-space: nowrap;
 }
 
+.chat-project-exit {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-tertiary);
+  cursor: pointer;
+}
+
+.chat-project-exit:hover:not(:disabled) {
+  background: var(--surface-sunk);
+  color: var(--ink);
+}
+
+.chat-project-exit:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .chat-empty {
   display: flex;
   flex-direction: column;
