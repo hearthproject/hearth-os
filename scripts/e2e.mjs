@@ -334,6 +334,40 @@ async function main() {
     assert.equal((await page.locator(".context-page .page-head h1").innerText()).trim(), "Context");
   });
 
+  await runTest(page, "renders the library browser and its category roots", async () => {
+    const tree = await api(baseUrl, "/api/library/tree?depth=1");
+    assert.equal(tree.status, 200, tree.text);
+    await page.goto(`${baseUrl}/library`, { waitUntil: "networkidle" });
+    await page.locator(".library-page").waitFor({ timeout: 15_000 });
+    assert.equal(await page.locator(".library-layout").count(), 1);
+    const pane = page.locator(".library-pane.library-browser");
+    assert.ok(await pane.isVisible(), "the browser pane should be visible");
+    for (const root of ["记忆", "资料", "技能", "项目"]) {
+      assert.match(await pane.innerText(), new RegExp(root), `the tree should expose the ${root} root`);
+    }
+    assert.ok(!/任务/.test(await pane.innerText()), "task nodes stay out of the library surface");
+    assert.equal((await page.locator(".library-total").innerText()).trim(), "还没有资料");
+  });
+
+  await runTest(page, "lists and deletes a schedule from the schedules page", async () => {
+    const created = await api(baseUrl, "/api/schedules", {
+      method: "POST",
+      body: JSON.stringify({ name: "E2E 定时计划", prompt: "检查工作区并汇报", cron: "0 9 * * *" })
+    });
+    assert.equal(created.status, 201, created.text);
+    await page.goto(`${baseUrl}/schedules`, { waitUntil: "networkidle" });
+    await page.locator(".schedules-page").waitFor({ timeout: 15_000 });
+    const card = page.locator(".schedule-card").filter({ hasText: "E2E 定时计划" });
+    await card.waitFor({ timeout: 15_000 });
+    assert.equal(await page.locator(".empty-panel").count(), 0, "a created schedule should replace the empty state");
+    assert.equal(await card.locator(".schedule-state-dot.online").count(), 1, "enabled schedules should look online");
+    page.once("dialog", (dialog) => void dialog.accept());
+    await card.getByRole("button", { name: "删除" }).click();
+    await card.waitFor({ state: "detached", timeout: 15_000 });
+    const remaining = await api(baseUrl, "/api/schedules");
+    assert.equal(remaining.body.schedules.length, 0);
+  });
+
   await runTest(page, "returns empty task turns and a safe rewind error", async () => {
     const created = await api(baseUrl, "/api/tasks", {
       method: "POST",
