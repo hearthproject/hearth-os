@@ -1462,8 +1462,10 @@ describe("Hearth scheduler", () => {
     const service = setup();
     const modelSettingsPath = configureModel();
     let calls = 0;
+    let lastOutDir = "";
     const nativeRunner: NativeRunner = async (options) => {
       calls += 1;
+      lastOutDir = options.prepared.outDir;
       if (calls === 1) {
         await options.onCheckpoint?.({
           seq: 1,
@@ -1503,6 +1505,12 @@ describe("Hearth scheduler", () => {
     expect(checkpoint?.proof?.workspaceDigest).toMatch(/^[a-f0-9]{64}$/);
     expect(checkpoint?.eventSeq).toBeGreaterThan(0);
     expect(store?.getEventBySeq(checkpoint!.eventSeq!)?.type).toBe("runtime.checkpoint.snapshot");
+    const evidence = JSON.parse(readFileSync(join(lastOutDir, "run-evidence.json"), "utf8")) as {
+      format?: string; checkpoint?: { seq?: number } | null; run?: { status?: string };
+    };
+    expect(evidence.format).toBe("hearth-run-evidence");
+    expect(evidence.run?.status).toBe("completed");
+    if (evidence.checkpoint) expect(evidence.checkpoint.seq ?? 0).toBeGreaterThan(0);
   });
 
   it("retains the configured checkpoint window during a long native run", async () => {

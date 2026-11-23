@@ -40,6 +40,7 @@ import { HandoffService } from "./handoff.ts";
 import { loadExecutorSettings } from "./executor-settings.ts";
 import { executorHealth as readExecutorHealth } from "./executor-runtime.ts";
 import { sanitizeProgressDetail } from "./progress-detail.ts";
+import { buildRunEvidence, type RunEvidenceOperation } from "./run-evidence.ts";
 import { EXECUTOR_FALLBACK_ORDER, executorName, resolveExecutorId } from "./executors.ts";
 import { extractProposedComment, inspectRepository, readPrPreview, validatePullRequestPreview } from "./github.ts";
 import { canBlindRetry, classifyFailureClass, decideDisposition } from "./failure-policy.ts";
@@ -552,6 +553,7 @@ export class HearthScheduler {
       nextAction: null,
       error: null
     }, task.currentRunId ?? undefined);
+    if (task.currentRunId) this.writeRunEvidence(taskId, task.currentRunId);
     this.releaseLease(taskId);
     void this.browserSessions.release(taskId);
     return this.service.requireTask(taskId);
@@ -1337,6 +1339,7 @@ export class HearthScheduler {
 
     if (userCancelled) {
       this.service.updateRun(runId, taskId, { status: "cancelled", endedAt });
+      this.writeRunEvidence(taskId, runId);
       return;
     }
 
@@ -1363,6 +1366,7 @@ export class HearthScheduler {
         error: failure
       }, runId);
     }
+    this.writeRunEvidence(taskId, runId);
   }
 
   private publishProgress(taskId: string, runId: string, kind: string, message: string, detail?: TaskProgressDetail): void {
@@ -1374,6 +1378,46 @@ export class HearthScheduler {
       payload: { kind, message, at: new Date().toISOString(), ...(sanitized ? { detail: sanitized } : {}) }
     });
     this.service.bus.publish(event);
+  }
+
+  /**
+   * Terminal runs leave a single self-contained evidence file next to their
+   * artifacts. It is both the bug-report attachment and the eval input, so a
+   * failed run can be diagnosed without replaying the whole event log.
+   */
+  private writeRunEvidence(taskId: string, runId: string): void {
+    try {
+      const task = this.service.requireTask(taskId);
+      const runs = this.service.store.listRuns(taskId);
+      const run = runs.find((candidate) => candidate.id === runId);
+      if (!run) return;
+      const outDir = this.outDirForRun(taskId, run);
+      const operations: RunEvidenceOperation[] = this.service.store.listRunOperationsByTask(taskId).map((operation) => ({
+        operationId: operation.operationId,
+        runId: operation.runId,
+        toolName: operation.toolName,
+        effect: operation.effect,
+        phase: operation.phase,
+        cleanupState: operation.cleanupState,
+        cleanupAttempts: operation.cleanupAttempts,
+        resources: operation.resources,
+        cleanupError: operation.cleanupError,
+        settledAt: operation.settledAt
+      }));
+      const evidence = buildRunEvidence({
+        task,
+        run,
+        runs,
+        checkpoint: this.service.store.latestRunCheckpoint(runId),
+        operations,
+        artifacts: this.service.store.listArtifacts(taskId),
+        recovery: this.service.store.listContextItems(taskId, { limit: 100 }).items
+      });
+      mkdirSync(outDir, { recursive: true });
+      writeFileSync(join(outDir, "run-evidence.json"), `${JSON.stringify(evidence, null, 2)}\n`, "utf8");
+    } catch {
+      // Evidence is diagnostic; a write failure must never mask the real outcome.
+    }
   }
   private async runTask(startingTask: TaskRecord): Promise<void> {
     const taskId = startingTask.id;
@@ -2208,6 +2252,7 @@ export class HearthScheduler {
         error: null, resultSummary: result.finalResponse
       }, runId);
       this.refreshTaskSummary(taskId);
+      this.writeRunEvidence(taskId, runId);
       return { status: "completed", run: { ...run, status: "completed", threadId: result.threadId, usage: this.usageWithMetrics(result.usage, result.turns, result.toolCalls) }, executorId, outDir, error: null, failure: null, aborted: controller.signal.aborted, leaseLost: false, cancelled: false };
     } catch (error) {
       if (controller.signal.aborted && this.steering.has(taskId)) {
