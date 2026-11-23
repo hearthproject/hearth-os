@@ -286,7 +286,15 @@ describe("WindowsNativeSandboxProvider", () => {
       await new Promise((resolve) => setTimeout(resolve, 1_000));
       expect(() => process.kill(childPid, 0)).toThrow();
     } finally {
-      rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+      for (let attempt = 0; attempt < 20; attempt++) {
+        try {
+          rmSync(root, { recursive: true, force: true });
+          break;
+        } catch (error) {
+          if (attempt === 19) throw error;
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+      }
     }
-  }, 15_000);
+  }, 30_000);
 });
