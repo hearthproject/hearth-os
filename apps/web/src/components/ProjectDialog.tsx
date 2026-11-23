@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowUp, ChevronRight, Folder, HardDrive, Loader2, X } from "lucide-react";
 import { api } from "../lib/api.ts";
-import { hasDesktopBridge, pickFolder } from "../lib/desktop.ts";
+import { desktopErrorMessage, hasDesktopBridge, pickFolder } from "../lib/desktop.ts";
 import type { LocalProjectView } from "../lib/types.ts";
 
 export function normalizeFolderPath(input: string): string | null {
@@ -22,8 +22,9 @@ export function ProjectDialog({ onClose, onCreated }: { onClose: () => void; onC
 
   async function browse() {
     setError(null);
-    // Desktop builds must always use the OS folder dialog. Cancelling the
-    // native dialog returns to the form instead of opening an in-app browser.
+    // Desktop builds prefer the OS folder dialog. If the native picker is
+    // unavailable (e.g. its IPC permission is missing), fall back to the
+    // in-app browser instead of leaving the user with a dead-end error.
     if (hasDesktopBridge()) {
       try {
         const picked = await pickFolder();
@@ -35,7 +36,8 @@ export function ProjectDialog({ onClose, onCreated }: { onClose: () => void; onC
           }
         }
       } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "无法打开系统文件夹选择器");
+        setError(`${desktopErrorMessage(caught, "无法打开系统文件夹选择器")}。已切换到内置文件夹浏览器。`);
+        setBrowserOpen(true);
       }
       return;
     }

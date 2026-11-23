@@ -13,7 +13,7 @@ import {
   XCircle
 } from "lucide-react";
 import { api } from "../lib/api.ts";
-import { hasDesktopBridge, pickFolder } from "../lib/desktop.ts";
+import { desktopErrorMessage, hasDesktopBridge, pickFolder } from "../lib/desktop.ts";
 import { formatBytes } from "../lib/format.ts";
 import { fileExtension, previewKind, TEXT_PREVIEW_LIMIT } from "../lib/preview.ts";
 import type { ArtifactListItem, BackgroundToolJob, ChatAttachment, ChatMessageRecord, TaskListItem } from "../lib/types.ts";
@@ -203,7 +203,7 @@ function PreviewBody({ preview }: { preview: PreviewTarget }) {
       const result = await api.exportArtifact(preview.taskId, preview.artifactId, folder);
       setExportMessage(`已保存到 ${result.path}`);
     } catch (caught) {
-      setExportMessage(caught instanceof Error ? `保存失败：${caught.message}` : "保存失败");
+      setExportMessage(`保存失败：${desktopErrorMessage(caught, "未知错误")}`);
     } finally {
       setExporting(false);
     }
