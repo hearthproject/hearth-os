@@ -1,10 +1,11 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { buildChildEnv, type SandboxPolicy } from "@hearth/agent-runtime";
+import { removeTempDirectory } from "./temp-cleanup.ts";
 import { WindowsNativeSandboxProvider } from "./windows-native-sandbox.ts";
 
 const helperPath = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "native", "bin", "hearth-native.exe");
@@ -126,7 +127,7 @@ describe("WindowsNativeSandboxProvider", () => {
       });
       expect(output).toContain("pty-ok");
     } finally {
-      rmSync(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      removeTempDirectory(root);
     }
   }, 20_000);
 
@@ -165,7 +166,7 @@ describe("WindowsNativeSandboxProvider", () => {
       expect(result.code).toBe(0);
       expect(readFileSync(join(workspace, "ok.txt"), "utf8").trim()).toBe("ok");
     } finally {
-      rmSync(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      removeTempDirectory(root);
     }
   });
 
@@ -181,7 +182,7 @@ describe("WindowsNativeSandboxProvider", () => {
       expect(result.code).not.toBe(0);
       expect(existsSync(join(workspace, "blocked.txt"))).toBe(false);
     } finally {
-      rmSync(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      removeTempDirectory(root);
     }
   });
 
@@ -198,7 +199,7 @@ describe("WindowsNativeSandboxProvider", () => {
       expect(result.code).not.toBe(0);
       expect(existsSync(outside)).toBe(false);
     } finally {
-      rmSync(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      removeTempDirectory(root);
     }
   });
 
@@ -221,7 +222,7 @@ describe("WindowsNativeSandboxProvider", () => {
         else process.env.TEST_API_KEY = previous;
       }
     } finally {
-      rmSync(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      removeTempDirectory(root);
     }
   });
 
@@ -236,7 +237,7 @@ describe("WindowsNativeSandboxProvider", () => {
       const result = await run(provider, policyFor(workspace, temp), ["C:\\Windows\\System32\\ping.exe", "-n", "1", "8.8.8.8"]);
       expect(result.code).not.toBe(0);
     } finally {
-      rmSync(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      removeTempDirectory(root);
     }
   }, 15_000);
 
@@ -256,7 +257,7 @@ describe("WindowsNativeSandboxProvider", () => {
       const result = await run(provider, policyFor(workspace, temp), [process.env.ComSpec ?? "C:\\Windows\\System32\\cmd.exe", "/c", `type "${join(link, "secret.txt")}"`]);
       expect(result.code).not.toBe(0);
     } finally {
-      rmSync(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      removeTempDirectory(root);
     }
   });
 
@@ -288,7 +289,7 @@ describe("WindowsNativeSandboxProvider", () => {
     } finally {
       for (let attempt = 0; attempt < 20; attempt++) {
         try {
-          rmSync(root, { recursive: true, force: true });
+          removeTempDirectory(root);
           break;
         } catch (error) {
           if (attempt === 19) throw error;
