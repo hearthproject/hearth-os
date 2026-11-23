@@ -15,6 +15,7 @@ import {
   FileText,
   Folder,
   Gauge,
+  GitBranch,
   Loader2,
   PanelRightOpen,
   Paperclip,
@@ -32,6 +33,7 @@ const ChatWorkspacePanel = lazy(() => import("../components/ChatWorkspacePanel.t
 const Markdown = lazy(() => import("../components/Markdown.tsx").then((module) => ({ default: module.Markdown })));
 import { formatBytes, formatDuration, formatTime } from "../lib/format.ts";
 import { getChatSelection, requestChat, setChatBusy, syncChatSelection, useChatSelection } from "../lib/chat-selection.ts";
+import { copyToClipboard } from "../lib/clipboard.ts";
 import { executorLabel } from "../lib/labels.ts";
 import type {
   ChatAttachment,
@@ -192,6 +194,7 @@ export function ChatPage() {
     : pendingProjectId
       ? projectsById.get(pendingProjectId) ?? null
       : null;
+  const currentProject = current?.projectId ? projectsById.get(current.projectId) ?? null : null;
   const serverDefaults = conversationDefaultsQuery.data?.settings ?? null;
   const rawSettings = current?.settings
     ?? conversationQuery.data?.conversation.settings
@@ -281,12 +284,6 @@ export function ChatPage() {
   }, [conversationId, pendingProjectId]);
 
   useEffect(() => {
-    if (conversationId || pendingProjectId || projects.length === 0) return;
-    const firstAvailable = projects.find((project) => project.available) ?? projects[0];
-    if (firstAvailable) setPendingProjectId(firstAvailable.id);
-  }, [conversationId, pendingProjectId, projects]);
-
-  useEffect(() => {
     setChatBusy(sending || uploading);
   }, [sending, uploading]);
 
@@ -313,7 +310,7 @@ export function ChatPage() {
     const element = composerRef.current;
     if (!element) return;
     element.style.height = "auto";
-    element.style.height = `${Math.min(element.scrollHeight, 160)}px`;
+    element.style.height = `${Math.min(element.scrollHeight, 132)}px`;
   }, [input]);
 
   useEffect(() => {
@@ -868,6 +865,12 @@ export function ChatPage() {
                   <Folder size={12} />
                   {(current ? projectsById.get(current.projectId ?? "") : activeProject)?.name}
                 </span>
+                {currentProject?.kind === "git" && (currentProject.currentBranch || currentProject.defaultBranch) && (
+                  <span className="chat-branch-chip" title={currentProject.currentBranch ?? currentProject.defaultBranch ?? ""}>
+                    <GitBranch size={12} />
+                    <span>{currentProject.currentBranch ?? currentProject.defaultBranch}</span>
+                  </span>
+                )}
                 {(current?.projectId || pendingProjectId) && (
                   <button
                     type="button"
@@ -978,13 +981,14 @@ export function ChatPage() {
                 <Folder size={13} />
                 <select
                   value={pendingProjectId ?? ""}
-                  onChange={(event) => setPendingProjectId(event.target.value)}
+                  onChange={(event) => setPendingProjectId(event.target.value || null)}
                   disabled={sending}
                   aria-label="选择项目"
                 >
+                  <option value="">不绑定项目</option>
                   {projects.map((project) => (
                     <option key={project.id} value={project.id} disabled={!project.available}>
-                      {project.name}{project.kind === "git" ? ` · ${project.currentBranch ?? project.defaultBranch}` : " · 文件夹"}
+                      {project.name}{project.kind === "git" ? "" : " · 文件夹"}
                     </option>
                   ))}
                 </select>
@@ -1483,33 +1487,6 @@ function CopyButton({ text, className = "" }: { text: string; className?: string
       {state === "copied" ? <Check size={13} /> : state === "failed" ? <X size={13} /> : <Copy size={13} />}
     </button>
   );
-}
-
-async function copyToClipboard(text: string): Promise<void> {
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return;
-    } catch {
-      // Fall through to the legacy path for browsers that block the async API.
-    }
-  }
-  const area = document.createElement("textarea");
-  area.value = text;
-  area.setAttribute("readonly", "");
-  area.style.position = "fixed";
-  area.style.opacity = "0";
-  area.style.pointerEvents = "none";
-  document.body.appendChild(area);
-  area.focus();
-  area.select();
-  let copied = false;
-  try {
-    copied = document.execCommand("copy");
-  } finally {
-    document.body.removeChild(area);
-  }
-  if (!copied) throw new Error("copy failed");
 }
 
 const INTERNAL_ARTIFACT_NAMES = new Set(["run-manifest.json", "pr-preview.json"]);

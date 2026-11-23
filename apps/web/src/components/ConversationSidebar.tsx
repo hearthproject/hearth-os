@@ -15,6 +15,7 @@ export function ConversationSidebar() {
   const selection = useChatSelection();
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [creatingChat, setCreatingChat] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const conversationsQuery = useQuery({ queryKey: ["conversations"], queryFn: api.conversations, refetchInterval: 30_000 });
@@ -44,6 +45,26 @@ export function ConversationSidebar() {
     if (conversationId === selection.conversationId && projectId === selection.pendingProjectId && pathname === "/") return;
     requestChat(conversationId, projectId);
     if (pathname !== "/") navigate("/");
+  }
+
+  async function startNewChat() {
+    if (!canSwitch || creatingChat) return;
+    const reusable = standalone.find((conversation) => conversation.messageCount === 0 && conversation.title === "新对话");
+    if (reusable) {
+      openChat(reusable.id);
+      return;
+    }
+    setCreatingChat(true);
+    setError(null);
+    try {
+      const conversation = await api.createConversation();
+      await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      openChat(conversation.id);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "新建对话失败");
+    } finally {
+      setCreatingChat(false);
+    }
   }
 
   async function removeConversation(event: MouseEvent, conversation: ConversationListItem) {
@@ -106,8 +127,8 @@ export function ConversationSidebar() {
 
   return (
     <section className="sidebar-conversations" aria-label="对话">
-      <button className="new-chat-button" onClick={() => openChat(null)} disabled={!canSwitch}>
-        <Plus size={15} /> 新对话
+      <button className="new-chat-button" onClick={() => void startNewChat()} disabled={!canSwitch || creatingChat}>
+        {creatingChat ? <Loader2 size={15} className="spin" /> : <Plus size={15} />} 新对话
       </button>
       <div className="conversation-list">
         {conversations.length === 0 && projects.length === 0 && <p className="rail-empty">还没有对话</p>}
@@ -142,9 +163,6 @@ export function ConversationSidebar() {
                 <Trash2 size={12} />
               </button>
             </div>
-            {project.kind === "git" && (project.currentBranch || project.defaultBranch) && (
-              <span className="rail-project-branch">{project.currentBranch ?? project.defaultBranch}</span>
-            )}
             {!project.available && <span className="rail-project-error">{project.error ?? "项目不可用"}</span>}
             {projectConversations.map(renderConversation)}
           </div>

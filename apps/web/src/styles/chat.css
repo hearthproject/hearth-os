@@ -150,7 +150,7 @@
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-width: 1280px;
+  max-width: var(--chat-content);
   min-height: 100%;
   margin: 0 auto;
   gap: 22px;
@@ -389,15 +389,15 @@
 .composer {
   order: 1;
   width: 100%;
-  max-width: 1280px;
-  min-height: 74px;
+  max-width: var(--chat-content);
+  min-height: 48px;
   margin: 0 auto;
-  padding: 6px 6px 3px 8px;
+  padding: 5px 5px 3px 8px;
   border: 1px solid var(--line-strong);
   border-bottom: 0;
   border-radius: 14px 14px 0 0;
   background: var(--surface);
-  box-shadow: 0 1px 0 rgb(255 255 255 / 0.6) inset;
+  box-shadow: 0 1px 0 var(--inset-highlight) inset;
 }
 
 .composer:focus-within {
@@ -405,18 +405,19 @@
 }
 
 .composer textarea {
-  min-height: 56px;
-  padding: 10px 6px;
+  min-height: 34px;
+  max-height: 132px;
+  padding: 6px 6px;
   font-size: 14px;
   line-height: 1.5;
 }
 
 .composer-icon,
 .composer-send {
-  width: 32px;
-  height: 32px;
-  flex-basis: 32px;
-  margin-bottom: 2px;
+  width: 30px;
+  height: 30px;
+  flex-basis: 30px;
+  margin-bottom: 1px;
   border-radius: 8px;
 }
 
@@ -432,9 +433,9 @@
   justify-content: flex-start;
   gap: 6px;
   width: 100%;
-  max-width: 1280px;
+  max-width: var(--chat-content);
   margin: 0 auto;
-  padding: 7px 10px 9px;
+  padding: 5px 9px 7px;
   border: 1px solid var(--line-strong);
   border-top: 0;
   border-radius: 0 0 14px 14px;
@@ -1241,12 +1242,6 @@
   color: var(--danger, #b4452f);
 }
 
-.rail-project-branch {
-  margin: -2px 0 2px 27px;
-  color: var(--ink-tertiary);
-  font-size: var(--fs-11);
-}
-
 .rail-project-error {
   margin: 0 0 2px 27px;
   color: var(--danger, #c4564a);
@@ -1285,6 +1280,23 @@
   color: var(--ink-tertiary);
   font-size: var(--fs-11);
   white-space: nowrap;
+}
+
+.chat-branch-chip {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 220px;
+  align-items: center;
+  gap: 4px;
+  color: var(--ink-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  white-space: nowrap;
+}
+
+.chat-branch-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .chat-project-exit {
