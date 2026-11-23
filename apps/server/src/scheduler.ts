@@ -1503,7 +1503,12 @@ export class HearthScheduler {
         const outDir = join(taskRoot, "out", runId);
         mkdirSync(join(taskRoot, "out"), { recursive: true });
         const previousOutDir = previousRun ? this.outDirForRun(taskId, previousRun) : null;
-        if (previousOutDir && existsSync(previousOutDir)) cpSync(previousOutDir, outDir, { recursive: true, force: true });
+        const previousCheckpoint = previousRun ? this.service.store.latestRunCheckpoint(previousRun.id) : null;
+        let previousCheckpointBody: unknown;
+        if (previousRun && previousCheckpoint) {
+          try { previousCheckpointBody = this.readCheckpointBody(previousRun.id, previousCheckpoint)?.body; } catch { /* unreadable snapshots are not inherited */ }
+        }
+        if (previousOutDir && existsSync(previousOutDir)) inheritPreviousOutput(previousOutDir, outDir, previousCheckpointBody);
         const remainingBudget = this.remainingBudget(taskId);
         const now = new Date().toISOString();
         const run: RunRecord = {
@@ -3399,4 +3404,31 @@ function budgetDimensionLabel(dimension: BudgetDimension): string {
 function formatBudgetValue(dimension: BudgetDimension, value: number): string {
   if (dimension === "duration") return `${Math.round(value / 1000)} 秒`;
   return new Intl.NumberFormat("zh-CN").format(Math.max(0, Math.round(value)));
+}
+
+/**
+ * A retry inherits published files but not the previous run's bookkeeping.
+ * Journals, checkpoints and caches would otherwise grow exponentially per
+ * attempt, while tool outputs referenced by a snapshot stay readable.
+ */
+export function inheritPreviousOutput(previousOutDir: string, outDir: string, checkpointBody: unknown): void {
+  cpSync(previousOutDir, outDir, {
+    recursive: true,
+    force: true,
+    filter: (source) => {
+      const first = relative(previousOutDir, source).split(/[\\/]/)[0];
+      return first !== ".hearth";
+    }
+  });
+  const references = new Set<string>();
+  for (const match of JSON.stringify(checkpointBody ?? {}).matchAll(/\.hearth[\\/]+tool-results[\\/]+([a-f0-9]{16}\.txt)/g)) {
+    if (match[1]) references.add(match[1]);
+  }
+  if (references.size === 0) return;
+  const directory = join(outDir, ".hearth", "tool-results");
+  mkdirSync(directory, { recursive: true });
+  for (const name of references) {
+    const source = join(previousOutDir, ".hearth", "tool-results", name);
+    if (existsSync(source)) cpSync(source, join(directory, name), { force: true });
+  }
 }
