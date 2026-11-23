@@ -1025,3 +1025,79 @@ it("reports retries and total duration in tool.finished event", async () => {
   expect(typeof finished[0]!.totalDurationMs).toBe("number");
   expect(finished[0]!.totalDurationMs).toBeGreaterThan(0);
 });
+
+it("drops truncated tool calls instead of executing half-built arguments", async () => {
+  const executed: string[] = [];
+  const events: RuntimeEvent[] = [];
+  const truncated: AgentModelTurn = { content: "partial plan", toolCalls: [call("record", { value: "x" })], usage: null, finishReason: "length" };
+  const result = await runAgent({
+    model: fakeModel([truncated, turn("done", [])]),
+    tools: [{
+      definition: { name: "record", description: "record", parameters: { type: "object", properties: { value: { type: "string" } } } },
+      execute: async () => { executed.push("record"); return { content: "ok" }; }
+    }],
+    goal: "test", systemPrompt: "system", workspaceRoot: ".", outDir: ".",
+    permissions: { tools: ["record"], readRoots: [], writeRoots: [], networkHosts: [] },
+    budget: { maxTurns: 5, maxToolCalls: 5, maxTokens: 100_000, maxDurationMs: 30_000 },
+    onEvent: (event) => events.push(event)
+  });
+  expect(result.status).toBe("completed");
+  expect(executed).toEqual([]);
+  expect(result.messages.some((message) => message.role === "assistant" && message.content === "partial plan" && message.toolCalls.length === 0)).toBe(true);
+  const notices = events.filter((event): event is Extract<RuntimeEvent, { type: "notice" }> => event.type === "notice");
+  expect(notices.some((notice) => notice.message.includes("未执行"))).toBe(true);
+});
+
+it("rejects tool arguments that violate the declared schema", async () => {
+  let executed = 0;
+  const events: RuntimeEvent[] = [];
+  const result = await runAgent({
+    model: fakeModel([turn("", [call("strict", {})]), turn("done", [])]),
+    tools: [{
+      definition: {
+        name: "strict",
+        description: "strict",
+        parameters: {
+          type: "object",
+          required: ["path"],
+          properties: { path: { type: "string" } },
+          additionalProperties: false
+        }
+      },
+      execute: async () => { executed += 1; return { content: "ok" }; }
+    }],
+    goal: "test", systemPrompt: "system", workspaceRoot: ".", outDir: ".",
+    permissions: { tools: ["strict"], readRoots: [], writeRoots: [], networkHosts: [] },
+    budget: { maxTurns: 5, maxToolCalls: 5, maxTokens: 100_000, maxDurationMs: 30_000 },
+    onEvent: (event) => events.push(event)
+  });
+  expect(result.status).toBe("completed");
+  expect(executed).toBe(0);
+  const rejected = events.filter((event): event is Extract<RuntimeEvent, { type: "tool.rejected" }> => event.type === "tool.rejected");
+  expect(rejected).toHaveLength(1);
+  expect(rejected[0]!.issues.some((issue) => issue.message.includes("required"))).toBe(true);
+  const toolMessage = result.messages.find((message) => message.role === "tool");
+  expect(toolMessage?.content).toContain("参数不合法");
+});
+
+it("notices when resuming with different tool definitions", async () => {
+  const events: RuntimeEvent[] = [];
+  const result = await runAgent({
+    model: async () => turn("done", []),
+    tools: [],
+    goal: "test", systemPrompt: "system", workspaceRoot: ".", outDir: ".",
+    permissions: { tools: [], readRoots: [], writeRoots: [], networkHosts: [] },
+    budget: { maxTurns: 5, maxToolCalls: 5, maxTokens: 100_000, maxDurationMs: 30_000 },
+    resume: {
+      messages: [{ role: "system", content: "system" }, { role: "user", content: "goal" }],
+      usage: zeroUsage(),
+      turns: 0,
+      toolCalls: 0,
+      toolsDigest: "0000000000000000"
+    },
+    onEvent: (event) => events.push(event)
+  });
+  expect(result.status).toBe("completed");
+  const notices = events.filter((event): event is Extract<RuntimeEvent, { type: "notice" }> => event.type === "notice");
+  expect(notices.some((notice) => notice.message.includes("工具定义"))).toBe(true);
+});

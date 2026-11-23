@@ -10,6 +10,7 @@ import { runningActiveWork } from "./harness/active-work.ts";
 import { goalContinuationPrompt, readGoalByRoot } from "./harness/goal.ts";
 import { storeOversizedToolResult } from "./harness/tool-output-store.ts";
 import { ToolCatalog, TOOL_CALL_NAME, TOOL_SEARCH_NAME, toolCallDefinition, toolSearchDefinition } from "./harness/tool-catalog.ts";
+import { formatToolArgumentIssues, validateToolArguments } from "./harness/tool-schema.ts";
 import { HookRunner, type HookEvent, type HookRunResult } from "./harness/hooks.ts";
 import { planModeAllowsCommand, planModeAllowsTool } from "./harness/plan.ts";
 import { buildPostCompactContext } from "./harness/post-compact.ts";
@@ -54,6 +55,11 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   const tools = options.tools.filter((tool) => allowed.has(tool.definition.name));
   const digestText = (text: string): string => createHash("sha256").update(text).digest("hex").slice(0, 16);
   const systemPromptHash = digestText(options.systemPrompt);
+  const toolsDigest = digestText(stableJson(tools.map((tool) => ({
+    name: tool.definition.name,
+    description: tool.definition.description,
+    parameters: tool.definition.parameters
+  }))));
   const messages: AgentMessage[] = options.resume
     ? cloneMessages(options.resume.messages)
     : [
@@ -315,6 +321,9 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   if (options.resume?.promptHash && options.resume.promptHash !== systemPromptHash) {
     emit({ type: "notice", message: "系统提示或工具定义在恢复后已变化；检查点中的旧上下文可能不再适用，请谨慎继续。" });
   }
+  if (options.resume?.toolsDigest && options.resume.toolsDigest !== toolsDigest) {
+    emit({ type: "notice", message: "工具定义在恢复后已变化；上一轮的工具调用可能引用了已不存在的工具或参数，请谨慎继续。" });
+  }
   if (hookRunner.size > 0) {
     const session = await runHooks("SessionStart", { workspaceRoot: options.workspaceRoot, modelId, resumed: Boolean(options.resume) });
     if (session.blocked) return finish("failed", session.reason ?? "SessionStart hook 拒绝了本次运行");
@@ -532,6 +541,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       state: serializeAgentState(state),
       mode: options.mode ?? state.mode ?? "build",
       promptHash: systemPromptHash,
+      toolsDigest,
       ...(snapshotJournalSeq > 0 ? { journalSeq: snapshotJournalSeq } : {})
     };
     try {
@@ -574,6 +584,13 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       emit({ type: "job.settled", jobId, kind, status });
       journalAppend({ type: "job.settled", jobId, kind, status });
     }
+  }
+
+  function rejectInvalidArguments(tool: AgentTool, call: AgentToolCall): string | null {
+    const issues = validateToolArguments(tool.definition.parameters, call.arguments);
+    if (issues.length === 0) return null;
+    emit({ type: "tool.rejected", turn: turns, callId: call.id, name: call.name, issues });
+    return `工具 ${call.name} 的参数不合法：${formatToolArgumentIssues(issues)}。请按工具定义修正参数后重试。`;
   }
 
   function modeIssue(call: AgentToolCall): string | null {
@@ -731,6 +748,11 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     const runnable: Array<{ call: AgentToolCall; tool: AgentTool }> = [];
     for (const entry of entries) {
       if (!entry.tool) continue;
+      const invalid = rejectInvalidArguments(entry.tool, entry.call);
+      if (invalid) {
+        results.set(entry.call.id, { result: { content: invalid, isError: true }, durationMs: 0 });
+        continue;
+      }
       const modeError = modeIssue(entry.call);
       if (modeError) {
         results.set(entry.call.id, { result: { content: modeError, isError: true }, durationMs: 0 });
@@ -989,6 +1011,38 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       emit({ type: "usage", usage: { ...usage } });
     }
     if (turn.content.trim()) emit({ type: "assistant.message", turn: turns, text: turn.content });
+    const truncated = isTruncatedFinishReason(turn.finishReason);
+    if (truncated && turn.toolCalls.length > 0) {
+      // A truncated response can contain half-built tool arguments. Executing
+      // any of them would turn a provider length limit into a side effect.
+      truncatedContinuations += 1;
+      if (truncatedContinuations > 3) {
+        return finish("failed", `模型输出连续 ${truncatedContinuations} 次达到长度上限，仍未能完成；请缩短单次输出或提高输出上限。`);
+      }
+      const dropped = turn.toolCalls.length;
+      emit({
+        type: "notice",
+        message: `模型输出被长度限制截断，${dropped} 个工具调用未执行；正在继续第 ${truncatedContinuations} 次`
+      });
+      const truncatedMessage: AgentMessage = { role: "assistant", content: turn.content, toolCalls: [] };
+      messages.push(truncatedMessage);
+      journalAppend({
+        type: "message",
+        turn: turns,
+        message: truncatedMessage,
+        ...(turn.usage ? { usage: turn.usage } : {})
+      });
+      messages.push({
+        role: "user",
+        content: "你的上一条输出因长度限制被截断，其中的工具调用没有执行。请把操作拆小、缩短单次输出后重试；完成后仍要调用 finish_task。"
+      });
+      await checkpoint("turn");
+      const checkpointFailure = currentCheckpointFailure();
+      if (checkpointFailure) {
+        return finish("failed", `检查点保存失败，已停止以避免不可恢复的执行：${checkpointFailure.message}`, [], null, checkpointFailure);
+      }
+      continue;
+    }
     const assistantMessage: AgentMessage = { role: "assistant", content: turn.content, toolCalls: turn.toolCalls };
     messages.push(assistantMessage);
     journalAppend({
@@ -1005,7 +1059,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       }
     }
 
-    if (turn.toolCalls.length === 0 && isTruncatedFinishReason(turn.finishReason)) {
+    if (truncated) {
       truncatedContinuations += 1;
       if (truncatedContinuations > 3) {
         return finish("failed", `模型输出连续 ${truncatedContinuations} 次达到长度上限，仍未能完成；请缩短单次输出或提高输出上限。`);
@@ -1086,8 +1140,11 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       emit({ type: "tool.started", turn: turns, call });
 
       const signature = toolSignature(effectiveCall);
+      const argumentError = tool ? rejectInvalidArguments(tool, effectiveCall) : null;
 
-      let result: AgentToolResult = { content: resolutionError ?? `未知或未授权工具：${call.name}`, isError: true };
+      let result: AgentToolResult = argumentError
+        ? { content: argumentError, isError: true }
+        : { content: resolutionError ?? `未知或未授权工具：${call.name}`, isError: true };
       const preTool = await runHooks("PreToolUse", {
         workspaceRoot: options.workspaceRoot,
         toolName: effectiveCall.name,
@@ -1099,7 +1156,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       }
       let toolRetries = 0;
       let toolTotalDurationMs = 0;
-      if (tool && !preTool.blocked) {
+      if (tool && !preTool.blocked && !argumentError) {
         const modeError = modeIssue(effectiveCall);
         if (modeError) {
           result = { content: modeError, isError: true };

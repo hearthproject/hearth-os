@@ -257,6 +257,7 @@ export type RuntimeEvent =
   | { type: "tool.started"; turn: number; call: AgentToolCall }
   | { type: "tool.finished"; turn: number; call: AgentToolCall; result: AgentToolResult; durationMs: number; retries?: number; totalDurationMs?: number }
   | { type: "tool.failed"; turn: number; callId: string; name: string; code: string; retryable: boolean; message: string; retries?: number; totalDurationMs?: number }
+  | { type: "tool.rejected"; turn: number; callId: string; name: string; issues: Array<{ path: string; message: string }> }
   | { type: "tool.orphaned"; turn: number; callId: string; name: string; message: string }
   | { type: "tool.batch.started"; turn: number; calls: AgentToolCall[]; parallel: boolean }
   | { type: "tool.batch.finished"; turn: number; calls: AgentToolCall[]; parallel: boolean; durationMs: number }
@@ -290,6 +291,8 @@ export interface AgentCheckpoint {
   state?: SerializedAgentToolState;
   mode?: HarnessMode;
   promptHash?: string;
+  /** Digest of the tool definitions the model saw. */
+  toolsDigest?: string;
   /** Last journal event covered by this snapshot. */
   journalSeq?: number;
 }
@@ -301,6 +304,7 @@ export interface AgentResumeState {
   toolCalls: number;
   state?: AgentToolState;
   promptHash?: string;
+  toolsDigest?: string;
   journal?: { path?: string; seq: number; events?: JournalEvent[] };
 }
 

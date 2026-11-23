@@ -1029,6 +1029,7 @@ export class HearthScheduler {
           toolCalls: 0,
           ...(restoredState ? { state: restoredState } : {}),
           ...(checkpointBody.promptHash ? { promptHash: checkpointBody.promptHash } : {}),
+          ...(typeof checkpointBody.toolsDigest === "string" ? { toolsDigest: checkpointBody.toolsDigest } : {}),
           ...(journal ? { journal } : {})
         };
       } catch {

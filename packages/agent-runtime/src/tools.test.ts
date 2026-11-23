@@ -305,6 +305,18 @@ describe("builtin tools", () => {
     })).rejects.toThrow("没有网络权限");
   });
 
+  it("classifies shell effects so the operation ledger can reconcile them", () => {
+    const effect = mapTools().shell!.definition.effectForArgs!;
+    expect(effect({ command: "ls -la" })).toBe("read");
+    expect(effect({ command: "echo hello" })).toBe("read");
+    expect(effect({ command: "rm -rf /" })).toBe("destructive");
+    expect(effect({ command: "git push origin main" })).toBe("external_write");
+    expect(effect({ command: "curl -X POST https://example.com/hook" })).toBe("external_write");
+    expect(effect({ command: "Invoke-RestMethod -Method Delete https://example.com/item" })).toBe("external_write");
+    expect(effect({ command: "npm install" })).toBe("local_write");
+    expect(effect({ command: "unknown-binary --do-things" })).toBe("unknown");
+  });
+
   it("deduplicates unchanged reads unless force is set", async () => {
     const root = workspace(roots);
     const out = join(root, "out");

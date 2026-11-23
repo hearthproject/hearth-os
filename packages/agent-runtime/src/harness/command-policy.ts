@@ -120,7 +120,7 @@ function classifySegment(segment: string): ShellClassification {
     return { kind: "read-only", reason: "find 只读查找", command: segment };
   }
   if (command === "curl" || command === "wget") {
-    const writes = lowerArgs.some((arg) => ["-o", "-O", "--output", "-d", "--data", "-F", "--form", "-T", "--upload-file", "-X"].includes(arg) || arg.startsWith("--data"));
+    const writes = args.some((arg) => ["-o", "-O", "--output", "-d", "-D", "--data", "-F", "--form", "-T", "--upload-file", "-X"].includes(arg) || arg.toLowerCase().startsWith("--data"));
     return writes
       ? { kind: "mutating", reason: "网络命令带写入参数", command: segment }
       : { kind: "read-only", reason: "网络读取", command: segment };

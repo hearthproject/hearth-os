@@ -18,7 +18,7 @@ import { fileReadState, hashContent, rangesCover, recordCommand, recordFileModif
 import { recordCreatedFile, recordSnapshotAfterMutation, rewindTool, rewindTurnTool, snapshotBeforeMutation } from "./harness/snapshots.ts";
 import { killShellSession, resizeShellSession, runShellSession, shellOutput, shellSessionInfo, startShellSession, waitShellSession, writeShellInput } from "./harness/shell-session.ts";
 import { truncateToolOutput, writeFullToolOutput } from "./harness/tool-output.ts";
-import { commandPolicyIssue } from "./harness/command-policy.ts";
+import { classifyShellCommand, commandPolicyIssue } from "./harness/command-policy.ts";
 import { todoReadTool, todoWriteTool } from "./harness/todo.ts";
 import { submitPlanTool } from "./harness/plan.ts";
 import { diagnosticsTool, runTestsTool } from "./harness/verification.ts";
@@ -955,6 +955,7 @@ const shellTool: AgentTool = {
   definition: {
     name: "shell",
     description: "Run a shell command in the workspace. Use background=true for servers, watchers and long builds; use shell_output to inspect and shell_kill to stop. Foreground timeouts are migrated to a background session instead of being killed.",
+    effectForArgs: (args) => shellEffectForArgs(args),
     executionMode: "sequential",
     timeoutMs: 10 * 60_000,
     parameters: {
@@ -1372,6 +1373,35 @@ function canonicalPath(path: string): string {
   }
   const real = existsSync(probe) ? realpathSync(probe) : probe;
   return resolve(real, ...tail);
+}
+
+function shellEffectForArgs(input: unknown): "read" | "local_write" | "external_write" | "destructive" | "unknown" {
+  let command = "";
+  try {
+    const args = objectArgs(input);
+    command = typeof args.command === "string" ? args.command.trim() : "";
+  } catch {
+    return "unknown";
+  }
+  if (!command) return "unknown";
+  const kind = classifyShellCommand(command).kind;
+  if (kind === "read-only") return "read";
+  if (kind === "destructive") return "destructive";
+  if (externalShellSideEffect(command)) return "external_write";
+  if (kind === "mutating") return "local_write";
+  return "unknown";
+}
+
+/**
+ * `classifyShellCommand` knows local mutation but not remote ownership. These
+ * patterns are the conservative subset that can change state outside the
+ * workspace and therefore must be reconciled rather than replayed.
+ */
+function externalShellSideEffect(command: string): boolean {
+  if (/\b(git\s+push|gh|npm\s+publish|pnpm\s+publish|yarn\s+publish|docker\s+push|scp)\b/i.test(command)) return true;
+  if (/\bcurl\b.*(-X\s*(POST|PUT|PATCH|DELETE)|--data|--upload-file|-d\s|-F\s)/i.test(command)) return true;
+  if (/\b(invoke-restmethod|irm)\b.*-method\s*(post|put|patch|delete)/i.test(command)) return true;
+  return false;
 }
 
 function objectArgs(input: unknown): Record<string, unknown> {
