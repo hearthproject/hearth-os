@@ -29,7 +29,7 @@ outline: [2, 3]
 | 单元/集成测试 | `npm test` | 140 个文件、946 个用例（931 通过、15 跳过、0 失败） |
 | 长跑矩阵 | `npm run test:longrun` | 18/18 通过 |
 | Web 构建 | `npm run build` | 通过（JS 643.06 kB / CSS 158.97 kB） |
-| 文档构建 | `npm run docs:build` | 通过，无死链 |
+| 文档构建 | `npm run docs:build` | 通过 |
 | 首跑离线自检 | `npm run first:run -- --fake` | 通过（只验证脚本与任务链路，不代表模型可用） |
 | 0.3.4 安装包 | `npm run release:build` | NSIS 安装包 30.5 MiB、便携 zip 47.2 MiB；以 GitHub Pre-release 发布 |
 | Windows 沙箱 | `npm run test:sandbox` | 12 项真实测试：越界写、只读、junction 逃逸、密钥过滤、网络拒绝、PTY 与 Job 关闭 |
@@ -57,3 +57,4 @@ outline: [2, 3]
 - 多设备同步、远程节点和执行器插件市场。
 
 这些能力如重新引入，需要单独设计和验收，不能从历史文档直接推断为“已可用”。
+

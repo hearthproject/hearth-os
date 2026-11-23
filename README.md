@@ -378,7 +378,7 @@ npm run typecheck       # 0 error
 npm test                # 140 个测试文件、946 个用例（931 通过、15 跳过）
 npm run test:longrun    # 18/18 崩溃点与恢复矩阵
 npm run build           # Web 构建通过（JS 643.06 kB / CSS 158.97 kB）
-npm run docs:build      # 文档构建通过，无死链
+npm run docs:build      # 文档构建通过
 npm run first:run -- --fake  # 首跑脚本离线自检
 npm run storage:prune   # 默认预演（需已有 .hearth 数据目录）
 ```
@@ -390,3 +390,4 @@ E2E 会在随机本地端口启动服务，并使用临时 `HEARTH_DATA_DIR`，�
 ## 许可
 
 Apache-2.0。见 [LICENSE](LICENSE)。
+

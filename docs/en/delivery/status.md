@@ -29,7 +29,7 @@ Checked on 2026-11-23 against `main`, target version `0.3.4`. This page records 
 | Unit/integration | `npm test` | 140 files, 946 cases (931 passed, 15 skipped, 0 failed) |
 | Long-run matrix | `npm run test:longrun` | 18/18 passed |
 | Web build | `npm run build` | Passed (JS 643.06 kB / CSS 158.97 kB) |
-| Docs build | `npm run docs:build` | Passed, no broken links |
+| Docs build | `npm run docs:build` | Passed |
 | Offline first run | `npm run first:run -- --fake` | Passed (script and task chain only; not a real model) |
 | 0.3.4 installer | `npm run release:build` | NSIS 30.5 MiB, portable zip 47.2 MiB; published as a GitHub Pre-release |
 | Windows sandbox | `npm run test:sandbox` | 12 real tests: escape write, read-only, junction escape, secret filtering, network deny, PTY, and Job close |
@@ -57,3 +57,4 @@ Checked on 2026-11-23 against `main`, target version `0.3.4`. This page records 
 - multi-device sync, remote nodes, and an executor plugin marketplace.
 
 Reintroducing these requires separate design and acceptance; old documents do not make them available.
+
