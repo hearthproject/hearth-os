@@ -851,7 +851,7 @@ export function ChatPage() {
             )}
             {!configured && (
               <ChatNotice icon={<Settings2 size={15} />} tone="warn">
-                还没有接入聊天模型。普通问答需要先完成<Link to="/welcome">首次设置</Link>；执行请求仍会尝试运行。
+                还没有接入聊天模型。普通问答需要先完成<Link to="/welcome">首次设置</Link>；需要派任务时请选择可用的执行器。
               </ChatNotice>
             )}
             {!executorReady && (

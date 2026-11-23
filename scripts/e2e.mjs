@@ -281,6 +281,11 @@ async function main() {
     } else {
       assert.equal(await page.locator('[data-connection-state="degraded"]').count(), 0);
     }
+    if (!modelReady) {
+      const notice = await page.locator(".chat-notice.warn").first().innerText();
+      assert.match(notice, /首次设置/, "the offline notice should explain the setup path");
+      assert.match(notice, /可用的执行器/, "the notice must not promise execution the composer blocks");
+    }
   });
 
   await runTest(page, "keeps primary destinations and discloses the rest", async () => {
