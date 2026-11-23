@@ -132,7 +132,7 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
 
 ## 架构图
 
-[![Hearth 本地代理操作系统架构](https://media.githubusercontent.com/media/hearthproject/hearth-os/main/assets/Hearth-Architecture-Light.svg)](https://media.githubusercontent.com/media/hearthproject/hearth-os/main/assets/Hearth-Architecture-Light.svg)
+[![Hearth 本地代理操作系统架构](assets/Hearth-Architecture-Light.svg)](https://github.com/hearthproject/hearth-os/blob/main/assets/Hearth-Architecture-Light.svg)
 
 <sub>当前架构：Web 工作台 + HostKernel/Fastify 控制面 + Native Runtime 与三种执行器 + AppContainer 沙箱、ConPTY 后台进程、审批与操作账本 + SQLite 单一事件日志和本地文件。点击图片可查看原图。</sub>
 
@@ -140,13 +140,13 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
 
 简化版：
 
-[![Hearth 任务流程图 · 简化版](https://media.githubusercontent.com/media/hearthproject/hearth-os/main/assets/Hearth-Flow-Simple-Light.svg)](https://media.githubusercontent.com/media/hearthproject/hearth-os/main/assets/Hearth-Flow-Simple-Light.svg)
+[![Hearth 任务流程图 · 简化版](assets/Hearth-Flow-Simple-Light.svg)](https://github.com/hearthproject/hearth-os/blob/main/assets/Hearth-Flow-Simple-Light.svg)
 
 <sub>简化版：说清目标、在安全范围内动手、自己验证、交给你决定；结果里能看到文件改动、测试、页面断言、结算状态和回退入口。点击图片可查看原图。</sub>
 
 详细版：
 
-[![Hearth 端到端任务流程](https://media.githubusercontent.com/media/hearthproject/hearth-os/main/assets/Hearth-Flow-Light.svg)](https://media.githubusercontent.com/media/hearthproject/hearth-os/main/assets/Hearth-Flow-Light.svg)
+[![Hearth 端到端任务流程](assets/Hearth-Flow-Light.svg)](https://github.com/hearthproject/hearth-os/blob/main/assets/Hearth-Flow-Light.svg)
 
 <sub>详细版：目标契约 → 执行器与权限 → AppContainer 沙箱 → 操作账本 → 工具执行 → 测试/页面断言 → 结算与清理 → run-evidence。失败保留原因并进入可恢复状态，不覆盖历史。点击图片可查看原图。</sub>
 
