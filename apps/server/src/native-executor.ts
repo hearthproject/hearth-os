@@ -1,4 +1,5 @@
 import { isTextDraftTask, DRAFT_INSTRUCTION } from "./draft-intent.ts";
+import { localTimeLine } from "./local-time.ts";
 import { nativeTaskInstructions } from "./native-task-instructions.ts";
 import type { BudgetDimension, RunBudget, RunUsage, TaskPermissions, TaskProgressDetail, TaskRecord } from "@hearth/core";
 import { EXECUTION_PROFILES } from "@hearth/core";
@@ -1495,8 +1496,11 @@ export function nativeSystemPrompt(task: TaskRecord, expectedOutputs: string[], 
   const hasAny = (...names: string[]): boolean => names.some(hasTool);
   return [
     "你是 Hearth 的原生 Agent 执行器，在自己的工作区里独立完成用户任务。",
+    localTimeLine(),
     "你必须通过工具真正完成工作，不能只描述步骤或假装已经完成。",
-    "当前是完全权限：可以直接读写本机目录、运行外部命令和访问网络，不需要征求批准；不要因为权限犹豫而停下。",
+    task.networkHosts.length > 0
+      ? "当前是完全权限：可以直接读写本机目录、运行外部命令并访问任务授权的网络，不需要征求批准；不要因为权限犹豫而停下。"
+      : "当前是完全权限：可以直接读写本机目录、运行外部命令，但任务没有授权联网，不要尝试访问网络。",
     ...(hasAny("list_files", "glob", "grep", "read_file") ? ["先用 list_files、glob、grep、read_file 了解已有资料，再生成结果。"] : []),
     ...(hasTool("read_desktop_file") ? ["读取工作区之外的文件（例如用户桌面）必须用 read_desktop_file；read_file 只能读工作区内的文件。read_desktop_file 需要用户批准，被拒绝时不要重试同一路径。"] : []),
     ...(hasAny("read_document") ? ["PDF、Word、Excel、CSV 等文档优先调用 read_document。"] : []),

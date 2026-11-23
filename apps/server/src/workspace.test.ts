@@ -46,6 +46,35 @@ describe("task workspace prompt", () => {
     expect(withMethod).toContain("记忆标记");
   });
 
+  it("grants public web research only when the task authorized hosts", () => {
+    const base: TaskRecord = {
+      id: "T-news-test",
+      templateId: null,
+      title: "今天的每日新闻简报",
+      goal: "整理一份今天的每日新闻简报",
+      status: "queued",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      deadline: null,
+      inputs: [],
+      networkHosts: ["*"],
+      outputDir: ".hearth/artifacts/T-news-test",
+      currentRunId: null,
+      nextAction: null,
+      error: null
+    };
+    const prepared = { root: "C:/workspace", outDir: "C:/workspace/out", inputs: [] };
+    const allowed = buildTaskPrompt(base, prepared, ["result.md"]);
+    expect(allowed).toContain("网络权限：允许访问任意公开网页");
+    expect(allowed).toContain("3. 可以联网检索公开资料");
+    expect(allowed).not.toContain("3. 不得联网");
+    expect(allowed).toContain("当前本地时间：");
+
+    const denied = buildTaskPrompt({ ...base, networkHosts: [] }, prepared, ["result.md"]);
+    expect(denied).toContain("3. 不得联网");
+    expect(denied).not.toContain("网络权限：允许访问");
+  });
+
   it("permits minimal implementation changes without inviting unrelated repository edits", () => {
     const task: TaskRecord = {
       id: "T07-test",

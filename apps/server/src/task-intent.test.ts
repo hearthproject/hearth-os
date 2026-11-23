@@ -21,6 +21,8 @@ describe("task intent", () => {
   it("recognizes public web research without granting it to ordinary tasks", () => {
     expect(wantsPublicWebResearch("调研 2026 年本地优先 Agent 的最新进展")).toBe(true);
     expect(wantsPublicWebResearch("搜索公开资料并整理引用")).toBe(true);
+    expect(wantsPublicWebResearch("给我整理出一份今天的每日新闻简报")).toBe(true);
+    expect(wantsPublicWebResearch("整理今天的科技资讯并列出热点")).toBe(true);
     expect(wantsPublicWebResearch("把这份会议记录整理成周报")).toBe(false);
   });
 
