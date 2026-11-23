@@ -1268,6 +1268,7 @@ export function nativePermissionsFor(task: TaskRecord, prepared: PreparedWorkspa
       readRoots: [prepared.root],
       writeRoots: task.taskKind === "workspace" || githubTask || codeTask ? [prepared.outDir, prepared.root] : [prepared.outDir],
       networkHosts: [...task.networkHosts],
+      networkMode: task.permissions.networkMode ?? "deny",
       tools: [...new Set(tools)],
       fullAccess: true,
       approvalMode: "full",
@@ -1279,6 +1280,7 @@ export function nativePermissionsFor(task: TaskRecord, prepared: PreparedWorkspa
       workspaceRoot: prepared.root,
       outDir: prepared.outDir,
       networkHosts: task.networkHosts,
+      networkMode: "deny",
       ...(task.taskKind === "workspace" || githubTask || codeTask ? { writeRoots: [prepared.outDir, prepared.root] } : {}),
       extraTools: [
         ...(task.taskKind === "workspace" || githubTask || codeTask ? ["shell"] : []),
@@ -1345,7 +1347,7 @@ async function prepareNativeSandbox(options: NativeRunOptions, permissions: Task
     appendSandboxAudit(options.prepared, options.task.id, { type: "sandbox.unavailable", backend: "none", mode: "policy", reason: "no-policy" });
     return undefined;
   }
-  if (selection.policy.networkHosts.length > 0) {
+  if (selection.policy.networkHosts.length > 0 && selection.policy.networkMode !== "open") {
     appendSandboxAudit(options.prepared, options.task.id, {
       type: "sandbox.unavailable",
       backend: "windows-native",
@@ -1353,7 +1355,7 @@ async function prepareNativeSandbox(options: NativeRunOptions, permissions: Task
       reason: "net-allowlist-unimplemented"
     });
     throw new SandboxUnavailableError(
-      "Windows native sandbox 尚未实现 net-allowlist；请移除此任务的 networkHosts，或显式关闭沙箱作为降级"
+      "Windows native sandbox 不支持域级网络白名单；请把任务的 networkMode 设为 open（允许任意出网），或移除 networkHosts"
     );
   }
   permissions.sandboxMode = selection.mode;
@@ -1371,28 +1373,37 @@ async function prepareNativeSandbox(options: NativeRunOptions, permissions: Task
     throw error;
   }
   const runtime: SandboxRuntime = { provider, policy: selection.policy };
+  const networkOpen = selection.policy.networkMode === "open";
+  const networkEnforcement = networkOpen ? "none" : "full";
+  const sandboxWarnings = networkOpen
+    ? [...selection.warnings, "networkMode=open：允许任意出网，networkHosts 白名单不会逐域执行"]
+    : selection.warnings;
   appendSandboxAudit(options.prepared, options.task.id, {
-    type: "sandbox.selected",
+    type: networkOpen ? "sandbox.network.open" : "sandbox.selected",
     backend: provider.id,
     mode: selection.policy.mode,
     enforcement: "full",
-    networkEnforcement: "full",
+    networkEnforcement,
+    networkMode: selection.policy.networkMode,
     workspaceRoot: selection.policy.workspaceRoot,
     tempRoot: selection.policy.tempRoot,
-    warnings: selection.warnings
+    warnings: sandboxWarnings
   });
   options.onProgress?.({
     kind: "sandbox",
-    message: `Windows AppContainer 沙箱已启用（${selection.mode}，文件/进程/网络隔离）`,
+    message: networkOpen
+      ? `Windows AppContainer 沙箱已启用（${selection.mode}，文件/进程隔离；网络 open，无域名白名单）`
+      : `Windows AppContainer 沙箱已启用（${selection.mode}，文件/进程隔离，网络全部拒绝）`,
     detail: {
       executorId: "native",
-      eventType: "sandbox.selected",
+      eventType: networkOpen ? "sandbox.network.open" : "sandbox.selected",
       status: "full",
       sandbox: {
         backend: provider.id,
         mode: selection.policy.mode,
         enforcement: "full",
-        networkEnforcement: "full"
+        networkEnforcement,
+        networkMode: selection.policy.networkMode
       }
     }
   });

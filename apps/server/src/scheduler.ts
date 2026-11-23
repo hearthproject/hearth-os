@@ -1108,6 +1108,7 @@ export class HearthScheduler {
         .filter((effect) => ["prepared", "admitted", "executing", "uncertain"].includes(effect.status))
         .map((effect) => effect.id),
       ...(task.permissions ? { permissionsDigest: hashStable(task.permissions) } : {}),
+      networkMode: task.permissions?.networkMode ?? "deny",
       ...(workspaceDigest ? { workspaceDigest } : {}),
       ...(checkpoint.journalSeq !== undefined ? { journalSeq: checkpoint.journalSeq } : {}),
       createdAt

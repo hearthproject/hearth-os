@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, dirname, join, relative, resolve, sep } from "node:path";
-import { SANDBOX_MODES, type SandboxMode, type TaskPermissions } from "@hearth/core";
+import { SANDBOX_MODES, type SandboxMode, type TaskNetworkMode, type TaskPermissions } from "@hearth/core";
 
 export type ConfinedSandboxMode = Exclude<SandboxMode, "danger-full-access">;
 export type SandboxEnforcement = "full" | "partial" | "none";
@@ -17,13 +17,15 @@ export interface SandboxPolicy {
   writableRoots: readonly string[];
   readRoots: readonly string[];
   networkHosts: readonly string[];
+  /** `deny` blocks all outbound traffic; `open` allows it without host filtering. */
+  networkMode: TaskNetworkMode;
   tempRoot: string;
   sessionId: string;
   env: Readonly<Record<string, string>>;
 }
 
 export interface SandboxResolveInput {
-  permissions: Pick<TaskPermissions, "readRoots" | "writeRoots" | "networkHosts" | "sandboxMode">;
+  permissions: Pick<TaskPermissions, "readRoots" | "writeRoots" | "networkHosts" | "networkMode" | "sandboxMode">;
   workspaceRoot: string;
   outDir: string;
   sessionId: string;
@@ -219,6 +221,7 @@ export function resolveSandboxPolicy(input: SandboxResolveInput): SandboxSelecti
       writableRoots: acceptedRoots,
       readRoots: uniquePaths(input.permissions.readRoots),
       networkHosts: [...input.permissions.networkHosts],
+      networkMode: input.permissions.networkMode ?? "deny",
       tempRoot,
       sessionId: input.sessionId,
       env

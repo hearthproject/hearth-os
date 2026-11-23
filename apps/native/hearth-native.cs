@@ -61,6 +61,13 @@ internal static class HearthNative
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    private struct SID_AND_ATTRIBUTES
+    {
+        public IntPtr Sid;
+        public uint Attributes;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     private struct SECURITY_ATTRIBUTES
     {
         public int nLength;
@@ -393,6 +400,24 @@ internal static class HearthNative
         capabilities.AppContainerSid = packageSid;
         capabilities.CapabilityCount = 0;
         capabilities.Capabilities = IntPtr.Zero;
+        IntPtr capabilitySid = IntPtr.Zero;
+        IntPtr capabilityArray = IntPtr.Zero;
+        if (network == "allow")
+        {
+            if (!ConvertStringSidToSid("S-1-15-3-1", out capabilitySid))
+            {
+                Console.Error.WriteLine("sandbox-error: ConvertStringSidToSid(internetClient) failed " + Marshal.GetLastWin32Error());
+                CloseHandle(job);
+                return 127;
+            }
+            capabilityArray = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(SID_AND_ATTRIBUTES)));
+            var entry = new SID_AND_ATTRIBUTES();
+            entry.Sid = capabilitySid;
+            entry.Attributes = 4; // SE_GROUP_ENABLED
+            Marshal.StructureToPtr(entry, capabilityArray, false);
+            capabilities.Capabilities = capabilityArray;
+            capabilities.CapabilityCount = 1;
+        }
         IntPtr capPtr = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(SECURITY_CAPABILITIES)));
         Marshal.StructureToPtr(capabilities, capPtr, false);
 
@@ -403,6 +428,8 @@ internal static class HearthNative
         {
             Console.Error.WriteLine("sandbox-error: InitializeProcThreadAttributeList failed " + Marshal.GetLastWin32Error());
             Marshal.FreeHGlobal(capPtr);
+            if (capabilityArray != IntPtr.Zero) Marshal.FreeHGlobal(capabilityArray);
+            if (capabilitySid != IntPtr.Zero) LocalFree(capabilitySid);
             if (pseudoConsole != IntPtr.Zero) ClosePseudoConsole(pseudoConsole);
             CloseHandle(job);
             return 127;
@@ -413,6 +440,8 @@ internal static class HearthNative
             DeleteProcThreadAttributeList(attrList);
             Marshal.FreeHGlobal(attrList);
             Marshal.FreeHGlobal(capPtr);
+            if (capabilityArray != IntPtr.Zero) Marshal.FreeHGlobal(capabilityArray);
+            if (capabilitySid != IntPtr.Zero) LocalFree(capabilitySid);
             if (pseudoConsole != IntPtr.Zero) ClosePseudoConsole(pseudoConsole);
             CloseHandle(job);
             return 127;
@@ -423,6 +452,8 @@ internal static class HearthNative
             DeleteProcThreadAttributeList(attrList);
             Marshal.FreeHGlobal(attrList);
             Marshal.FreeHGlobal(capPtr);
+            if (capabilityArray != IntPtr.Zero) Marshal.FreeHGlobal(capabilityArray);
+            if (capabilitySid != IntPtr.Zero) LocalFree(capabilitySid);
             ClosePseudoConsole(pseudoConsole);
             CloseHandle(job);
             return 127;
@@ -445,6 +476,8 @@ internal static class HearthNative
         DeleteProcThreadAttributeList(attrList);
         Marshal.FreeHGlobal(attrList);
         Marshal.FreeHGlobal(capPtr);
+        if (capabilityArray != IntPtr.Zero) Marshal.FreeHGlobal(capabilityArray);
+        if (capabilitySid != IntPtr.Zero) LocalFree(capabilitySid);
         if (!created)
         {
             Console.Error.WriteLine("sandbox-error: CreateProcess failed " + createError);

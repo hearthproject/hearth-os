@@ -45,11 +45,12 @@ export class WindowsNativeSandboxProvider implements SandboxProvider {
     if (this.shouldProbe) await this.probe();
     const helper = this.resolveHelper();
     const policy = request.policy;
-    if (policy.networkHosts.length > 0) {
+    if (policy.networkHosts.length > 0 && policy.networkMode !== "open") {
       throw new SandboxUnavailableError(
-        "Windows native sandbox 尚未实现 net-allowlist；请移除 networkHosts，或显式关闭沙箱作为降级"
+        "Windows native sandbox 不支持域级网络白名单；请将任务的 networkMode 设为 open（允许任意出网）或移除 networkHosts"
       );
     }
+    const networkArg = policy.networkMode === "open" ? "allow" : "deny";
     const readRoots = new Set<string>(policy.readRoots);
     const writeRoots = policy.writableRoots.filter((root) => root !== policy.workspaceRoot);
     const executableRoot = request.argv[0] ? dirname(request.argv[0]) : null;
@@ -66,7 +67,7 @@ export class WindowsNativeSandboxProvider implements SandboxProvider {
       "--mode",
       policy.mode,
       "--network",
-      "deny",
+      networkArg,
       "--parent-pid",
       String(process.pid)
     ];
@@ -82,7 +83,7 @@ export class WindowsNativeSandboxProvider implements SandboxProvider {
       env: policy.env,
       backend: "windows-acl",
       enforcement: "full",
-      networkEnforcement: "full",
+      networkEnforcement: networkArg === "allow" ? "none" : "full",
       denialSignatures: [
         "Access is denied",
         "拒绝访问",

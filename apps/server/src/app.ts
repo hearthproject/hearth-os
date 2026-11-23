@@ -123,6 +123,7 @@ const createTaskSchema = z.object({
     readRoots: z.array(z.string().trim().min(1).max(1000)).max(20),
     writeRoots: z.array(z.string().trim().min(1).max(1000)).max(20),
     networkHosts: z.array(z.string().trim().min(1).max(255)).max(20),
+    networkMode: z.enum(["deny", "open"]).optional(),
     tools: z.array(z.string().trim().min(1).max(80)).max(40),
     sandboxMode: z.enum(SANDBOX_MODES).optional()
   }).optional()
@@ -192,6 +193,7 @@ const delegationPermissionsSchema = z.object({
   readRoots: z.array(z.string().trim().min(1).max(1000)).max(20),
   writeRoots: z.array(z.string().trim().min(1).max(1000)).max(20),
   networkHosts: z.array(z.string().trim().min(1).max(255)).max(20),
+  networkMode: z.enum(["deny", "open"]).optional(),
   tools: z.array(z.string().trim().min(1).max(80)).max(40)
 }).strict();
 

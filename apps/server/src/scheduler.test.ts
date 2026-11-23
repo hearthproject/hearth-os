@@ -1496,6 +1496,7 @@ describe("Hearth scheduler", () => {
     expect(checkpoint?.proof).toMatchObject({
       attemptId: runs[0]?.id,
       identity: { executorId: "native" },
+      networkMode: "deny",
       validation: { status: "not_required", evidenceRefs: [] }
     });
     expect(checkpoint?.proof?.phasePrefix).toContain("tool:write_file");

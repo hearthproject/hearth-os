@@ -18,6 +18,7 @@ function policyFor(workspaceRoot: string, tempRoot: string, mode: SandboxPolicy[
     writableRoots: [workspaceRoot],
     readRoots: [],
     networkHosts: [],
+    networkMode: "deny",
     tempRoot,
     sessionId: "native-sandbox-test",
     env: buildChildEnv({ base: process.env, tempRoot, workspaceRoot })
@@ -136,7 +137,20 @@ describe("WindowsNativeSandboxProvider", () => {
       networkHosts: ["example.com"]
     };
     await expect(provider.confine({ argv: ["C:\\Windows\\System32\\cmd.exe", "/c", "exit 0"], cwd: policy.workspaceRoot, policy }))
-      .rejects.toThrow(/net-allowlist/);
+      .rejects.toThrow(/白名单/);
+  });
+
+  it("passes --network allow when the task explicitly opts into open networking", async () => {
+    const provider = new WindowsNativeSandboxProvider({ helperPath: process.execPath, probe: false });
+    const policy = {
+      ...policyFor("C:\\work", "C:\\temp"),
+      networkHosts: ["example.com"],
+      networkMode: "open" as const
+    };
+    const confined = await provider.confine({ argv: ["C:\\Windows\\System32\\cmd.exe", "/c", "exit 0"], cwd: policy.workspaceRoot, policy });
+    const networkIndex = confined.argv.indexOf("--network");
+    expect(confined.argv[networkIndex + 1]).toBe("allow");
+    expect(confined.networkEnforcement).toBe("none");
   });
 
   it.runIf(hasHelper)("allows a workspace write in workspace-write mode", async () => {

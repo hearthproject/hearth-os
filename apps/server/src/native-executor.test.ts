@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { TaskRecord } from "@hearth/core";
 import type { AgentTool } from "@hearth/agent-runtime";
-import { directReadTool, dedupeTools, refreshNativeResume, jsonDeliverableIssue, nativeProgressForEvent, nativeSystemPrompt, normalizeJsonDeliverables } from "./native-executor.ts";
+import { directReadTool, dedupeTools, refreshNativeResume, jsonDeliverableIssue, nativePermissionsFor, nativeProgressForEvent, nativeSystemPrompt, normalizeJsonDeliverables } from "./native-executor.ts";
 import { createBuiltinTools, defaultTaskPermissions, runAgent } from "@hearth/agent-runtime";
 import { wantsDirectFileRead } from "./task-intent.ts";
 
@@ -53,6 +53,18 @@ describe("native tool assembly", () => {
       expect(wantsDirectFileRead(goal)).toBe(false);
     }
   });
+  it("keeps networkMode in native permissions and defaults to deny", () => {
+    const prepared = { root: "/tmp/ws", outDir: "/tmp/out", inputs: [] };
+    const deny = nativePermissionsFor(baseTask, prepared);
+    expect(deny.networkMode).toBe("deny");
+    const open = nativePermissionsFor({
+      ...baseTask,
+      networkHosts: ["example.com"],
+      permissions: { readRoots: ["/tmp/ws"], writeRoots: ["/tmp/out"], networkHosts: ["example.com"], networkMode: "open", tools: [] }
+    }, prepared);
+    expect(open.networkMode).toBe("open");
+  });
+
   it("dedupes tool definitions so upstream providers never receive duplicate finish_task entries", () => {
     const tool = {
       definition: {

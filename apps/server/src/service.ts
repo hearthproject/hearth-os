@@ -214,6 +214,7 @@ export class HearthService {
         readRoots: defaultRoot ? [defaultRoot] : [],
         writeRoots: defaultRoot ? [defaultRoot] : [],
         networkHosts,
+        networkMode: "deny",
         tools: []
       };
     }

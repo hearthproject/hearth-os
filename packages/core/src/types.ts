@@ -247,10 +247,14 @@ export interface TaskError {
   budgetExhaustion?: BudgetExhaustion;
 }
 
+export type TaskNetworkMode = "deny" | "open";
+
 export interface TaskPermissions {
   readRoots: string[];
   writeRoots: string[];
   networkHosts: string[];
+  /** Hard switch the sandbox honours. `open` never implies a working allowlist. */
+  networkMode?: TaskNetworkMode | undefined;
   tools: string[];
   fullAccess?: boolean | undefined;
   approvalMode?: ApprovalMode | undefined;
@@ -459,6 +463,7 @@ export interface TaskProgressDetail {
     mode: string;
     enforcement: string;
     networkEnforcement: string;
+    networkMode?: TaskNetworkMode;
   };
 }
 
@@ -728,6 +733,7 @@ export interface RunCheckpointProof {
   effectReceipts: string[];
   preparedIntents: string[];
   permissionsDigest?: string;
+  networkMode?: TaskNetworkMode;
   workspaceDigest?: string;
   journalSeq?: number;
   journalPath?: string;

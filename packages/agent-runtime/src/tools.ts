@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { basename, delimiter, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import picomatch from "picomatch";
 import { RE2JS } from "re2js";
-import type { TaskPermissions } from "@hearth/core";
+import type { TaskNetworkMode, TaskPermissions } from "@hearth/core";
 import type { DocumentBlockInput, SpreadsheetSheetInput } from "./documents.ts";
 import type { AgentTool, AgentToolContext, AgentToolResult } from "./types.ts";
 import { fetchWebSnapshot } from "./web-fetch.ts";
@@ -143,6 +143,7 @@ export function defaultTaskPermissions(options: {
   workspaceRoot: string;
   outDir: string;
   networkHosts: string[];
+  networkMode?: TaskNetworkMode;
   extraTools?: string[];
   writeRoots?: string[];
 }): TaskPermissions {
@@ -168,6 +169,7 @@ export function defaultTaskPermissions(options: {
     readRoots: [options.workspaceRoot],
     writeRoots: options.writeRoots ?? [options.outDir],
     networkHosts: [...options.networkHosts],
+    networkMode: options.networkMode ?? "deny",
     tools: [...new Set(tools)]
   };
 }
