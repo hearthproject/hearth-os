@@ -129,6 +129,8 @@ try {
   const success = await call("browser_read", {});
   check("submit reaches success", success.content.includes("提交成功"));
   await call("browser_assert", { kind: "url", value: "/success.html" });
+  const missing = await callRaw("browser_assert", { kind: "element", value: "e999", timeoutSec: 1 });
+  check("assert fails for an unknown element", Boolean(missing.isError));
   await call("browser_assert", { kind: "text", value: "提交成功" });
 
   const downloaded = await call("browser_download", { ref: refFor(success.content, "下载报告"), fileName: "report.txt" });
@@ -151,8 +153,12 @@ try {
   sessions.resume(taskId);
   await call("browser_read", {});
 
-  const finished = await call("finish_task", { summary: "fixture browser flow complete", outputs: [] });
-  check("finish requires a passing assertion", finished.action === "finish");
+  // The browser toolset must not register a second `finish_task`; duplicate
+  // definitions make upstream providers reject the whole tool list.
+  check("browser toolset registers no finish_task", tools.every((item) => item.definition.name !== "finish_task"));
+  const assertions = sessions.state(taskId)!.assertions;
+  check("flow records a passing assertion", assertions.some((item) => item.passed));
+  check("flow records the failed assertion", assertions.some((item) => !item.passed));
 
   const evidenceFiles = readdirSync(join(evidenceDir, taskId)).filter((name) => name.endsWith(".png") || name.endsWith(".json"));
   check("evidence files exist", evidenceFiles.length >= 6);
