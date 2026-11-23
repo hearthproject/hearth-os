@@ -1315,7 +1315,7 @@ const askUserTool: AgentTool = {
 const finishTaskTool: AgentTool = {
   definition: {
     name: "finish_task",
-    description: "任务真正完成时调用。summary 写给用户看的中文结果，outputs 列出已生成的产物相对路径。",
+    description: "任务真正完成时调用。summary 是写给用户看的 Markdown 结果：先结论，再用短标题、列表或表格组织，避免整段连续文字；outputs 列出已生成的产物相对路径。",
     parameters: {
       type: "object",
       properties: {
