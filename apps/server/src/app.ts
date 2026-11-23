@@ -42,7 +42,7 @@ import { OntologyService } from "./ontology.ts";
 import { OntologyWriter } from "./ontology-writer.ts";
 import type { ContextIndex } from "./context-index.ts";
 import { contextMetrics } from "./context-metrics.ts";
-import { HearthService, TaskInputSelectionError, type CreateTaskInput } from "./service.ts";
+import { HearthService, TaskInputSelectionError, TaskNotFoundError, type CreateTaskInput } from "./service.ts";
 import { HealthService } from "./health.ts";
 import { MaintenanceError, MaintenanceService } from "./maintenance.ts";
 import { DiagnosticsService } from "./diagnostics.ts";
@@ -2871,28 +2871,33 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
 
   app.post<{ Params: { id: string }; Body: { message?: string } | undefined }>("/api/tasks/:id/retry", async (request, reply) => {
+    if (!service.store.getTask(request.params.id)) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
     if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFF", message: "执行器未启动" });
     const parsed = retryTaskSchema.safeParse(request.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: "INVALID_INPUT", message: "补充说明格式不正确" });
     try {
       return scheduler.retry(request.params.id, parsed.data.message);
     } catch (error) {
+      if (error instanceof TaskNotFoundError) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: error.message });
       return reply.code(409).send({ error: "RETRY_NOT_ALLOWED", message: error instanceof Error ? error.message : String(error) });
     }
   });
 
   app.post<{ Params: { id: string }; Body: unknown }>("/api/tasks/:id/budget/extend", async (request, reply) => {
+    if (!service.store.getTask(request.params.id)) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
     if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFF", message: "执行器未启动" });
     try {
       const parsed = z.object({ executionMode: z.enum(["standard", "deep"]).optional() }).strict().safeParse(request.body ?? {});
       if (!parsed.success) return reply.code(400).send({ error: "INVALID_BUDGET_REQUEST", message: "预算操作参数不正确" });
       return scheduler.extendBudget(request.params.id, parsed.data.executionMode);
     } catch (error) {
+      if (error instanceof TaskNotFoundError) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: error.message });
       return reply.code(409).send({ error: "BUDGET_EXTEND_NOT_ALLOWED", message: error instanceof Error ? error.message : String(error) });
     }
   });
 
   app.post<{ Params: { id: string } }>("/api/tasks/:id/cancel", async (request, reply) => {
+    if (!service.store.getTask(request.params.id)) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
     if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFF", message: "执行器未启动" });
     try {
       const task = scheduler.cancel(request.params.id);

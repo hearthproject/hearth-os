@@ -376,6 +376,15 @@ describe("cross-module integration", () => {
     });
   });
 
+  it("reports a missing task as 404 on retry, cancel, and budget actions", async () => {
+    for (const path of ["/api/tasks/TASK-missing/retry", "/api/tasks/TASK-missing/cancel", "/api/tasks/TASK-missing/budget/extend"]) {
+      const response = await app.inject({ method: "POST", url: path, payload: {} });
+      expect(response.statusCode, path).toBe(404);
+      expect(response.json().error, path).toBe("TASK_NOT_FOUND");
+      expect(response.json().message, path).toContain("任务不存在");
+    }
+  });
+
   describe("api robustness", () => {
     it("answers malformed requests with client errors instead of crashing", async () => {
       const cases: Array<{ method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE"; url: string; payload?: Record<string, unknown> }> = [

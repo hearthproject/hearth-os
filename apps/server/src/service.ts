@@ -78,6 +78,16 @@ export class TaskInputSelectionError extends Error {
   }
 }
 
+export class TaskNotFoundError extends Error {
+  readonly taskId: string;
+
+  constructor(taskId: string) {
+    super(`任务不存在：${taskId}`);
+    this.name = "TaskNotFoundError";
+    this.taskId = taskId;
+  }
+}
+
 export interface TaskView {
   task: TaskRecord;
   runs: ReturnType<HearthStore["listRuns"]>;
@@ -896,7 +906,7 @@ export class HearthService {
 
   requireTask(taskId: string): TaskRecord {
     const task = this.store.getTask(taskId);
-    if (!task) throw new Error(`Task not found: ${taskId}`);
+    if (!task) throw new TaskNotFoundError(taskId);
     return task;
   }
 
