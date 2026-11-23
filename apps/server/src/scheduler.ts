@@ -45,7 +45,7 @@ import { EXECUTOR_FALLBACK_ORDER, executorName, resolveExecutorId } from "./exec
 import { extractProposedComment, inspectRepository, readPrPreview, validatePullRequestPreview } from "./github.ts";
 import { canBlindRetry, classifyFailureClass, decideDisposition } from "./failure-policy.ts";
 import type { CommandRunner } from "./github.ts";
-import { MemoryService } from "./memory.ts";
+import { MemoryService, projectMemoryScope } from "./memory.ts";
 import { DEFAULT_LEASE_HEARTBEAT_MS, LeaseError, TaskLeaseService } from "./leases.ts";
 import { SandboxService } from "./sandbox.ts";
 import { toolApprovalSummary } from "./tool-policy.ts";
@@ -1998,7 +1998,13 @@ export class HearthScheduler {
       const drafting = isTextDraftTask(task);
       let memoryContext = "";
       try {
-        memoryContext = drafting ? "" : this.memory.recall({ taskId, runId, text: task.goal, ...(task.executionMode === "quick" ? { maxItems: 3, maxChars: 1200 } : {}) }).contextPack;
+        memoryContext = drafting ? "" : this.memory.recall({
+          taskId,
+          runId,
+          text: task.goal,
+          ...(task.projectId ? { scopes: [projectMemoryScope(task.projectId)] } : {}),
+          ...(task.executionMode === "quick" ? { maxItems: 3, maxChars: 1200 } : {})
+        }).contextPack;
       } catch {
         memoryContext = "";
       }

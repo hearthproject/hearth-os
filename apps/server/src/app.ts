@@ -337,6 +337,7 @@ const memoryRecallSchema = z.object({
   runId: z.string().trim().max(100).optional(),
   text: z.string().max(20000).optional(),
   scope: z.string().trim().min(1).max(120).optional(),
+  scopes: z.array(z.string().trim().min(1).max(120)).max(10).optional(),
   maxItems: z.number().int().min(1).max(50).optional(),
   maxChars: z.number().int().min(200).max(100000).optional()
 }).strict();

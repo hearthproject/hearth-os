@@ -79,6 +79,83 @@ describe("chat-first API", () => {
     } finally { await app.close(); vi.unstubAllGlobals(); }
   });
 
+  it("recalls project-scoped memory in project conversations but not unrelated sessions", async () => {
+    const requests: any[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: unknown, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)));
+      return new Response('data: {"choices":[{"delta":{"content":"已了解项目背景。"}}]}\n\ndata: [DONE]\n\n', { headers: { "content-type": "text/event-stream" } });
+    }));
+    const app = await buildServer({
+      store,
+      serveWeb: false,
+      masterKeyPath: join(root, "master.key"),
+      modelSettingsPath: join(root, "settings.json"),
+      attachmentRoot: join(root, "files")
+    });
+    try {
+      await app.inject({
+        method: "PUT",
+        url: "/api/model-settings",
+        payload: {
+          providerId: "custom",
+          providerName: "Test",
+          baseUrl: "https://models.example.com/v1",
+          model: "test-model",
+          apiKey: "test-key"
+        }
+      });
+      const created = await app.inject({
+        method: "POST",
+        url: "/api/projects",
+        payload: { name: "Ember", path: root }
+      });
+      expect(created.statusCode, created.body).toBe(201);
+      const projectId = created.json().project.id as string;
+      const memory = await app.inject({
+        method: "POST",
+        url: "/api/memory",
+        payload: {
+          kind: "project",
+          content: "Ember private project memory marker",
+          subjectKey: `project.${projectId}.test`,
+          scope: `project:${projectId}`,
+          source: { type: "user", id: projectId, label: "Ember project note", excerpt: null },
+          confidence: "high",
+          tier: "curated",
+          originClass: "user",
+          trust: "high"
+        }
+      });
+      expect(memory.statusCode, memory.body).toBe(201);
+      await app.inject({
+        method: "POST",
+        url: `/api/memory/${memory.json().id}/confirm`
+      });
+      const projectConversation = store.createConversation("Ember session", defaultConversationSettings(), projectId);
+      const unrelatedConversation = store.createConversation("Other session", defaultConversationSettings());
+
+      const projectChat = await app.inject({
+        method: "POST",
+        url: "/api/chat",
+        payload: { conversationId: projectConversation.id, routeMode: "chat", message: "What should I remember?" }
+      });
+      expect(projectChat.statusCode).toBe(200);
+      expect(JSON.stringify(requests[0]?.messages)).toContain("Ember private project memory marker");
+
+      const unrelatedChat = await app.inject({
+        method: "POST",
+        url: "/api/chat",
+        payload: { conversationId: unrelatedConversation.id, routeMode: "chat", message: "What should I remember?" }
+      });
+      expect(unrelatedChat.statusCode).toBe(200);
+      const unrelatedSystem = requests[1]?.messages.find((message: { role: string }) => message.role === "system")?.content as string;
+      expect(unrelatedSystem).not.toContain("Ember private project memory marker");
+    } finally {
+      await app.close();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("saves model settings and never returns the raw key", async () => {
     const app = await buildServer({
       store,

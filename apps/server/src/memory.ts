@@ -91,6 +91,7 @@ export interface RecallInput {
   runId?: string | null;
   text?: string;
   scope?: string;
+  scopes?: string[];
   maxItems?: number;
   maxChars?: number;
 }
@@ -99,8 +100,14 @@ export interface RecallConversationInput {
   conversationId: string;
   text?: string;
   scope?: string;
+  scopes?: string[];
   maxItems?: number;
   maxChars?: number;
+}
+
+/** Stable, project-id-based namespace for memories shared by project sessions. */
+export function projectMemoryScope(projectId: string): string {
+  return `project:${projectId}`;
 }
 
 export interface RecallResult {
@@ -394,6 +401,7 @@ export class MemoryService {
       queryText: [task.title, task.goal, input.text ?? ""].join("\n"),
       runId: input.runId ?? null,
       scope: input.scope ?? task.taskKind ?? "task",
+      scopes: input.scopes ?? [],
       ...(input.maxItems !== undefined ? { maxItems: input.maxItems } : {}),
       ...(input.maxChars !== undefined ? { maxChars: input.maxChars } : {})
     });
@@ -407,6 +415,7 @@ export class MemoryService {
       queryText: [conversation.title, input.text ?? ""].join("\n"),
       runId: null,
       scope: input.scope ?? "chat",
+      scopes: input.scopes ?? [],
       ...(input.maxItems !== undefined ? { maxItems: input.maxItems } : {}),
       ...(input.maxChars !== undefined ? { maxChars: input.maxChars } : {})
     });
@@ -435,6 +444,7 @@ export class MemoryService {
     queryText: string;
     runId: string | null;
     scope: string;
+    scopes: string[];
     maxItems?: number | undefined;
     maxChars?: number | undefined;
   }): RecallResult {
@@ -442,6 +452,7 @@ export class MemoryService {
     const maxItems = clamp(input.maxItems ?? settings.maxItems, 1, 50);
     const maxChars = clamp(input.maxChars ?? settings.maxChars, 200, 100_000);
     const queryText = input.queryText;
+    const scopes = [...new Set([input.scope, ...input.scopes].map((scope) => scope.trim()).filter(Boolean))];
     const terms = termsOf(queryText);
     const now = this.clock().getTime();
     const candidates = this.service.store.listMemories({ status: "active", limit: 1000 })
@@ -470,7 +481,7 @@ export class MemoryService {
     const alwaysOn = candidates
       .filter((memory) => memory.tier === "instructions" || memory.tier === "curated")
       .filter((memory) => memory.trust === "high" || memory.trust === "medium")
-      .filter((memory) => memory.scope === "global" || memoryScopeAllowed(memory, input.scope, queryText))
+      .filter((memory) => memory.scope === "global" || memoryScopeAllowed(memory, scopes, queryText))
       .sort((left, right) => tierRank(left.tier) - tierRank(right.tier)
         || right.importance - left.importance
         || right.updatedAt.localeCompare(left.updatedAt));
@@ -495,7 +506,7 @@ export class MemoryService {
       .filter((memory) => !pickedIds.has(memory.id))
       .filter((memory) => memory.tier === "episodic" || memory.tier === "prospective")
       .map((memory) => scoreMemory(memory, queryText, terms, {
-        scope: input.scope,
+        scopes,
         now,
         entityIds: entityIdSet,
         memoryEntityIds: linksByMemory.get(memory.id) ?? []
@@ -557,7 +568,9 @@ export class MemoryService {
       kind: "experience",
       content: summarizeTask(task, outcome),
       subjectKey: "experience:" + task.id,
-      scope: task.taskKind ?? "task",
+      scope: task.projectId
+        ? projectMemoryScope(task.projectId)
+        : task.taskKind ?? "task",
       tags: [task.status, task.taskKind ?? "custom"],
       source: {
         type: "task",
@@ -1003,11 +1016,16 @@ function recallSensitivityAllowed(memory: MemoryRecord, settings: MemorySettings
   return true;
 }
 
-function memoryScopeAllowed(memory: MemoryRecord, scope: string, queryText: string): boolean {
+function memoryScopeAllowed(memory: MemoryRecord, scope: string | string[], queryText: string): boolean {
   if (memory.scope === "global") return true;
-  const target = normalize(scope);
   const memoryScope = normalize(memory.scope);
-  return memoryScope === target || normalize(queryText).includes(memoryScope);
+  const targets = Array.isArray(scope) ? scope : [scope];
+  return targets.some((target) => memoryScope === normalize(target))
+    || normalize(queryText).includes(memoryScope);
+}
+
+function isProjectMemoryScope(scope: string): boolean {
+  return /^project[.:]/i.test(scope);
 }
 
 function tierRank(tier: MemoryRecord["tier"]): number {
@@ -1053,16 +1071,16 @@ function scoreMemory(
   memory: MemoryRecord,
   queryText: string,
   terms: string[],
-  context?: { scope: string; now: number; entityIds: Set<string>; memoryEntityIds: string[] }
+  context?: { scopes: string[]; now: number; entityIds: Set<string>; memoryEntityIds: string[] }
 ): { memory: MemoryRecord; score: number; reason: string } {
   let score = CONFIDENCE_BONUS[memory.confidence];
   const reasons: string[] = [];
   const subject = normalize(memory.subjectKey);
   const content = normalize(memory.content);
   const query = normalize(queryText);
-  const scopeMatches = memory.scope === "global" || !context || memoryScopeAllowed(memory, context.scope, queryText);
+  const scopeMatches = memory.scope === "global" || !context || memoryScopeAllowed(memory, context.scopes, queryText);
   const entityMatches = Boolean(context && context.memoryEntityIds.some((id) => context.entityIds.has(id)));
-  if (!scopeMatches && !entityMatches) {
+  if (!scopeMatches && (isProjectMemoryScope(memory.scope) || !entityMatches)) {
     return { memory, score: 0, reason: "范围不匹配且没有实体图关联" };
   }
   if (query.includes(subject)) {
@@ -1086,7 +1104,7 @@ function scoreMemory(
   if (memory.scope !== "global" && query.includes(normalize(memory.scope))) {
     score += 2;
     reasons.push("范围匹配");
-  } else if (memory.scope !== "global" && context && normalize(context.scope) === normalize(memory.scope)) {
+  } else if (memory.scope !== "global" && context && context.scopes.some((scope) => normalize(scope) === normalize(memory.scope))) {
     score += 2;
     reasons.push("同一范围");
   }

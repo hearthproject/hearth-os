@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { defaultConversationSettings } from "@hearth/core";
 import { HearthStore } from "@hearth/eventlog";
 import { BackupService } from "./backups.ts";
-import { MemoryService } from "./memory.ts";
+import { MemoryService, projectMemoryScope } from "./memory.ts";
 import { HearthService } from "./service.ts";
 
 describe("MemoryService", () => {
@@ -182,6 +182,42 @@ describe("MemoryService", () => {
 
     const inside = memory.recall({ taskId: task.id, scope: "project.ember", text: "发布检查" });
     expect(inside.memories.map((item) => item.id)).toContain(scoped.id);
+  });
+
+  it("recalls project memory alongside the existing task scope and isolates other projects", () => {
+    const projectMemory = createMemory({
+      content: "Ember 项目部署前必须跑完整测试。",
+      subjectKey: "project.ember.deploy",
+      scope: projectMemoryScope("project_ember"),
+      tier: "curated"
+    });
+    const taskMemory = createMemory({
+      content: "工作区任务默认先检查 git status。",
+      subjectKey: "workspace.git.status",
+      scope: "workspace",
+      tier: "curated"
+    });
+    memory.confirm(projectMemory.id);
+    memory.confirm(taskMemory.id);
+    const task = createTask("部署 Ember", "准备 Ember 部署");
+
+    const sameProject = memory.recall({
+      taskId: task.id,
+      scope: "workspace",
+      scopes: [projectMemoryScope("project_ember")],
+      text: "部署前检查"
+    });
+    expect(sameProject.memories.map((item) => item.id)).toContain(projectMemory.id);
+    expect(sameProject.memories.map((item) => item.id)).toContain(taskMemory.id);
+
+    const otherProject = memory.recall({
+      taskId: task.id,
+      scope: "workspace",
+      scopes: [projectMemoryScope("project_garden")],
+      text: "部署前检查"
+    });
+    expect(otherProject.memories.map((item) => item.id)).not.toContain(projectMemory.id);
+    expect(otherProject.memories.map((item) => item.id)).toContain(taskMemory.id);
   });
 
   it("explains why a memory is or is not eligible for injection", () => {
@@ -483,6 +519,38 @@ describe("MemoryService", () => {
     expect(captured?.status).toBe("active");
     expect(memory.captureExperience(task.id)?.id).toBe(captured?.id);
     expect(store.listMemories({ kind: "experience" })).toHaveLength(1);
+  });
+
+  it("stores captured experience in the project scope for reuse by later sessions", () => {
+    const timestamp = now.toISOString();
+    store.upsertLocalProject({
+      id: "project_ember",
+      name: "Ember",
+      path: "D:/Projects/Ember",
+      defaultBranch: "main",
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
+    const task = service.createTask({
+      title: "Ember 发布",
+      goal: "准备 Ember 发布",
+      projectId: "project_ember"
+    });
+    store.appendEvent({
+      type: "task.updated",
+      taskId: task.id,
+      payload: { status: "completed", resultSummary: "发布前完整测试通过" }
+    });
+
+    const captured = memory.captureExperience(task.id);
+    expect(captured?.scope).toBe(projectMemoryScope("project_ember"));
+    const laterTask = createTask("Ember 后续维护", "检查 Ember 发布流程");
+    const recalled = memory.recall({
+      taskId: laterTask.id,
+      scopes: [projectMemoryScope("project_ember")],
+      text: "发布流程"
+    });
+    expect(recalled.memories.map((item) => item.id)).toContain(captured?.id);
   });
 
   it("can turn automatic experience capture off", () => {

@@ -13,7 +13,7 @@ import { EXECUTOR_FALLBACK_ORDER, executorName, resolveExecutorFromEnabled, reso
 import { executorHealth } from "./executor-runtime.ts";
 import type { ApprovalManager } from "./approvals.ts";
 import type { HearthService } from "./service.ts";
-import type { MemoryService } from "./memory.ts";
+import { projectMemoryScope, type MemoryService } from "./memory.ts";
 import type { ContextBroker } from "./context-broker.ts";
 import type { MentionResolver } from "./mentions.ts";
 import type { OntologyService } from "./ontology.ts";
@@ -692,7 +692,8 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       try {
         const recalled = options.memory.recallForConversation({
           conversationId: conversation.id,
-          text: userContent
+          text: userContent,
+          ...(conversation.projectId ? { scopes: [projectMemoryScope(conversation.projectId)] } : {})
         });
         if (recalled.memories.length > 0) {
           memoryContext = recalled.contextPack;
