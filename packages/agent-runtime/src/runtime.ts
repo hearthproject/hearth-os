@@ -83,6 +83,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   let sameProgressCount = 0;
   let lastProgressHash: string | null = null;
   let consecutiveToolFailures = 0;
+  let failureCountedThisTurn = false;
   let budgetReminderSent = false;
   let compactions = 0;
   let autoCompactPausedUntil = 0;
@@ -924,6 +925,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     }
 
     turns += 1;
+    failureCountedThisTurn = false;
     state.turn = turns;
     emit({ type: "turn.started", turn: turns });
 
@@ -1305,14 +1307,17 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         return finish("failed", "模型连续多次产生重复相同工具调用和结果，已停止以避免死循环");
       }
       if (result.isError) {
-        consecutiveToolFailures += 1;
+        if (!failureCountedThisTurn) {
+          consecutiveToolFailures += 1;
+          failureCountedThisTurn = true;
+        }
         if (consecutiveToolFailures >= circuitBreakerThreshold) {
-          emit({ type: "notice", message: "连续 5 次工具调用失败，已触发熔断器，停止执行以避免浪费预算。" });
+          emit({ type: "notice", message: `连续 ${circuitBreakerThreshold} 轮工具调用失败，已触发熔断器，停止执行以避免浪费预算。` });
           await checkpoint("tool");
           const checkpointFailure = currentCheckpointFailure();
           if (checkpointFailure) return finish("failed", `检查点保存失败，已停止以避免不可恢复的执行：${checkpointFailure.message}`, [], null, checkpointFailure);
           clearExecuting();
-          return finish("failed", "连续多次工具调用失败，已触发熔断器停止执行");
+          return finish("failed", "连续多轮工具调用失败，已触发熔断器停止执行");
         }
       } else {
         consecutiveToolFailures = 0;

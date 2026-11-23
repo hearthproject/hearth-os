@@ -10,12 +10,30 @@ const loadCheerio = () => import("cheerio");
 const loadExcelJs = () => import("exceljs").then((module) => module.default);
 const loadMammoth = () => import("mammoth").then((module) => module.default);
 const loadDocx = () => import("docx");
+type TurndownPlugin = (service: object) => void;
+
+function resolveGfmPlugin(module: unknown): TurndownPlugin | null {
+  if (typeof module === "function") return module as TurndownPlugin;
+  if (!module || typeof module !== "object") return null;
+  const record = module as { gfm?: unknown; default?: unknown };
+  const candidate = typeof record.gfm === "function" ? record.gfm : record.default;
+  if (typeof candidate === "function") return candidate as TurndownPlugin;
+  if (candidate && typeof candidate === "object") {
+    const nested = candidate as { gfm?: unknown };
+    if (typeof nested.gfm === "function") return nested.gfm as TurndownPlugin;
+  }
+  return null;
+}
+
 const loadTurndown = async () => {
-  const [{ default: TurndownService }, { gfm }] = await Promise.all([
+  const [turndownModule, pluginModule] = await Promise.all([
     import("turndown"),
     import("turndown-plugin-gfm")
   ]);
-  return { TurndownService, gfm };
+  return {
+    TurndownService: turndownModule.default,
+    gfm: resolveGfmPlugin(pluginModule)
+  };
 };
 
 const MAX_EXTRACTED_BYTES = 5 * 1024 * 1024;
@@ -397,7 +415,14 @@ export async function extractMarkdown(html: string, baseUrl: string): Promise<{ 
   const body = selected?.html() ?? $.root().html() ?? "";
   const { TurndownService, gfm } = await loadTurndown();
   const turndown = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced", bulletListMarker: "-" });
-  turndown.use(gfm);
+  if (gfm) {
+    try {
+      turndown.use(gfm as unknown as Parameters<typeof turndown.use>[0]);
+    } catch {
+      // GFM tables are a nice-to-have. A broken optional plugin must never
+      // make a normal web page unreadable.
+    }
+  }
   turndown.remove(["script", "style", "noscript"]);
   const markdown = turndown.turndown(body).replace(/\n{3,}/g, "\n\n").replace(/[ \t]+\n/g, "\n").trim();
   return { title: title || "未命名网页", markdown };

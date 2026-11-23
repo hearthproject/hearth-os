@@ -2180,7 +2180,7 @@ export class HearthScheduler {
         extraNativeTools.push(...createMailTools(this.mail, this.outbox));
       }
       if (this.backgroundTools) extraNativeTools.push(...this.backgroundTools.toolsFor(task));
-      if (this.webSearch && (wantsPublicWebResearch(`${task.title}\n${task.goal}`) || task.networkHosts.includes("*"))) {
+      if (this.webSearch && this.webSearch.view().enabled && (wantsPublicWebResearch(`${task.title}\n${task.goal}`) || task.networkHosts.includes("*"))) {
         extraNativeTools.push(this.webSearch.tool());
       }
       if (BROWSER_ENABLED && this.browserSettings.get().enabled) {

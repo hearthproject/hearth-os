@@ -44,6 +44,30 @@ describe("safe web input", () => {
     expect(snapshot.sha256).toMatch(/^[a-f0-9]{64}$/);
   });
 
+  it("fetches JSON APIs and returns a readable fenced block", async () => {
+    const { origin } = await startServer();
+    const snapshot = await fetchWebSnapshot(`${origin}/data.json`, {
+      allowedHosts: ["127.0.0.1"],
+      allowPrivate: true
+    });
+
+    expect(snapshot.contentType).toContain("application/json");
+    expect(snapshot.markdown).toContain("```json");
+    expect(snapshot.markdown).toContain('"name": "Hearth"');
+    expect(snapshot.markdown).toContain('"stars": 42');
+  });
+
+  it("returns plain Markdown files without running them through the HTML converter", async () => {
+    const { origin } = await startServer();
+    const snapshot = await fetchWebSnapshot(`${origin}/SKILL.md`, {
+      allowedHosts: ["127.0.0.1"],
+      allowPrivate: true
+    });
+
+    expect(snapshot.title).toBe("# Grill Me");
+    expect(snapshot.markdown).toBe("# Grill Me\n\nAsk one question at a time.");
+  });
+
   it("blocks a redirect that leaves the allowlist", async () => {
     const { origin } = await startServer();
     await expect(fetchWebSnapshot(`${origin}/escape`, {
@@ -62,6 +86,16 @@ describe("safe web input", () => {
       if (request.url === "/escape") {
         response.writeHead(302, { location: "http://localhost/private" });
         response.end();
+        return;
+      }
+      if (request.url === "/data.json") {
+        response.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ name: "Hearth", stars: 42, topics: ["agent", "runtime"] }));
+        return;
+      }
+      if (request.url === "/SKILL.md") {
+        response.writeHead(200, { "content-type": "text/markdown; charset=utf-8" });
+        response.end("# Grill Me\n\nAsk one question at a time.");
         return;
       }
       response.writeHead(200, { "content-type": "text/html; charset=utf-8" });

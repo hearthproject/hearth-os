@@ -968,6 +968,33 @@ it("trips circuit breaker after 5 consecutive tool failures", async () => {
   expect(result.summary).toContain("熔断器");
 });
 
+it("does not trip circuit breaker when one turn contains several failed tool calls", async () => {
+  let toolCallCount = 0;
+  let modelCallCount = 0;
+  const model: AgentModel = async () => {
+    modelCallCount++;
+    if (modelCallCount === 1) {
+      return turn("", [0, 1, 2, 3, 4].map((n) => call("flaky", { n })));
+    }
+    return turn("done", []);
+  };
+  const result = await runAgent({
+    model,
+    tools: [{
+      definition: { name: "flaky", description: "flaky tool", parameters: {} },
+      execute: async () => {
+        toolCallCount++;
+        return { content: "failed", isError: true, error: { code: "TOOL_TIMEOUT", retryable: true } };
+      }
+    }],
+    goal: "test", systemPrompt: "system", workspaceRoot: ".", outDir: ".",
+    permissions: { tools: ["flaky"], readRoots: [], writeRoots: [], networkHosts: [] },
+    budget: { maxTurns: 20, maxToolCalls: 20, maxTokens: 100_000, maxDurationMs: 30_000 },
+  });
+  expect(result.status).toBe("completed");
+  expect(toolCallCount).toBe(5);
+});
+
 it("resets circuit breaker after a successful tool call", async () => {
   let modelCallCount = 0;
   let toolExecCount = 0;

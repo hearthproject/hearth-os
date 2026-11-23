@@ -87,7 +87,7 @@ export class WebSearchService {
 
   async search(query: string, options: { maxResults?: number; signal?: AbortSignal } = {}): Promise<WebSearchResponse> {
     const settings = this.stored();
-    if (!settings.enabled) throw new WebSearchError("WEB_SEARCH_DISABLED", "网页搜索尚未启用，请先在设置中配置", 409);
+    if (!settings.enabled) throw new WebSearchError("WEB_SEARCH_DISABLED", "网页搜索尚未启用；可直接用 fetch_url 打开已知公开来源，或提示用户到设置中配置搜索", 409);
     const normalizedQuery = query.trim();
     if (!normalizedQuery) throw new WebSearchError("SEARCH_QUERY_REQUIRED", "搜索内容不能为空");
     if (normalizedQuery.length > 500) throw new WebSearchError("SEARCH_QUERY_TOO_LONG", "搜索内容不能超过 500 个字符");

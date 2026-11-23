@@ -1264,7 +1264,7 @@ const captureScreenTool: AgentTool = {
 const fetchUrlTool: AgentTool = {
   definition: {
     name: "fetch_url",
-    description: "读取一个已授权域名下的网页并返回 Markdown。服务端会校验重定向、DNS 和内网地址；网络默认关闭。",
+    description: "读取一个已授权域名下的网页、文本、RSS 或 JSON API 并返回 Markdown。服务端会校验重定向、DNS 和内网地址；网络默认关闭。",
     executionMode: "parallel",
     parameters: {
       type: "object",

@@ -6,6 +6,12 @@ import { extractMarkdown } from "./documents.ts";
 const MAX_REDIRECTS = 5;
 const DEFAULT_TIMEOUT_MS = 20_000;
 const DEFAULT_MAX_BYTES = 5 * 1024 * 1024;
+const MAX_MARKDOWN_CHARS = 200_000;
+
+const HTML_CONTENT_TYPE = /^(text\/html|application\/xhtml\+xml)(;|$)/i;
+const JSON_CONTENT_TYPE = /^(application\/json|application\/[^;]+\+json)(;|$)/i;
+const TEXT_CONTENT_TYPE = /^(text\/plain|text\/markdown)(;|$)/i;
+const XML_CONTENT_TYPE = /^(application\/xml|text\/xml|application\/(?:rss|atom)\+xml)(;|$)/i;
 
 export interface WebSnapshot {
   requestedUrl: string;
@@ -69,25 +75,46 @@ export async function fetchWebSnapshot(rawUrl: string, options: FetchWebOptions)
       throw new WebInputError("http_error", `网页返回 HTTP ${response.status}：${current.href}`, { status: response.status, finalUrl: current.href });
     }
     const contentType = response.headers.get("content-type") ?? "";
-    if (contentType && !/^(text\/html|application\/xhtml\+xml|text\/plain)(;|$)/i.test(contentType)) {
+    const isHtml = !contentType || HTML_CONTENT_TYPE.test(contentType);
+    const isJson = JSON_CONTENT_TYPE.test(contentType);
+    const isText = TEXT_CONTENT_TYPE.test(contentType);
+    const isXml = XML_CONTENT_TYPE.test(contentType);
+    if (!isHtml && !isJson && !isText && !isXml) {
       await response.body?.cancel();
       throw new WebInputError("unsupported_content_type", `网页内容类型不支持：${contentType || "未知"}`);
     }
     const bytes = await readLimited(response, options.maxBytes ?? DEFAULT_MAX_BYTES);
-    const html = decodeBody(bytes, contentType);
-    if (isChallengePage(html)) {
-      throw new WebInputError("access_challenge", `网页要求登录、验证码或浏览器验证：${current.href}`, { status: response.status, finalUrl: current.href });
+    const body = decodeBody(bytes, contentType);
+    const jsonBody = isJson || (!contentType && /^[\[{]/.test(body.trimStart()));
+    let title: string;
+    let markdown: string;
+    if (jsonBody) {
+      title = `JSON 数据：${current.hostname}${current.pathname}`;
+      markdown = formatJsonMarkdown(body);
+    } else if (isText) {
+      title = textTitle(body, current);
+      markdown = body;
+    } else if (isXml) {
+      title = xmlTitle(body, current);
+      markdown = fencedBlock(body, "xml");
+    } else {
+      if (isChallengePage(body)) {
+        throw new WebInputError("access_challenge", `网页要求登录、验证码或浏览器验证：${current.href}`, { status: response.status, finalUrl: current.href });
+      }
+      const extracted = await extractMarkdown(body, current.href);
+      title = extracted.title;
+      markdown = extracted.markdown;
     }
-    const extracted = await extractMarkdown(html, current.href);
-    if (!extracted.markdown) throw new WebInputError("empty_content", `网页没有可提取的正文：${current.href}`);
+    markdown = truncateMarkdown(markdown);
+    if (!markdown) throw new WebInputError("empty_content", `网页没有可提取的正文：${current.href}`);
     return {
       requestedUrl: rawUrl,
       finalUrl: current.href,
       fetchedAt: new Date().toISOString(),
       status: response.status,
       contentType: contentType || "text/html",
-      title: extracted.title,
-      markdown: extracted.markdown,
+      title,
+      markdown,
       bytes: bytes.byteLength,
       sha256: createHash("sha256").update(bytes).digest("hex")
     };
@@ -162,7 +189,7 @@ async function fetchWithTimeout(fetchImpl: typeof fetch, url: URL, timeoutMs: nu
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       headers: {
         "user-agent": "Hearth/0.1 (+local task runner)",
-        accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1"
+        accept: "text/html,application/xhtml+xml,application/json,application/*+json,text/plain,text/markdown,application/xml,application/rss+xml,application/atom+xml;q=0.9,*/*;q=0.1"
       }
     });
   } catch (error) {
@@ -205,6 +232,38 @@ function decodeBody(bytes: Uint8Array, contentType: string): string {
   } catch {
     return new TextDecoder("utf-8").decode(bytes);
   }
+}
+
+function formatJsonMarkdown(text: string): string {
+  let formatted = text.trim();
+  try {
+    formatted = JSON.stringify(JSON.parse(formatted), null, 2);
+  } catch {
+    return `${fencedBlock(formatted, "text")}\n\n> 响应声明为 JSON，但正文不是合法 JSON，已按原文返回。`;
+  }
+  return fencedBlock(formatted, "json");
+}
+
+function fencedBlock(text: string, language: string): string {
+  const longestRun = Math.max(0, ...Array.from(text.matchAll(/`+/g), (match) => match[0].length));
+  const fence = "`".repeat(Math.max(3, longestRun + 1));
+  return `${fence}${language}\n${text}\n${fence}`;
+}
+
+function truncateMarkdown(markdown: string): string {
+  if (markdown.length <= MAX_MARKDOWN_CHARS) return markdown;
+  return `${markdown.slice(0, MAX_MARKDOWN_CHARS)}\n\n[内容过长，已截断：原始 ${markdown.length} 字符]`;
+}
+
+function textTitle(text: string, url: URL): string {
+  const firstLine = text.split(/\r?\n/).map((line) => line.trim()).find(Boolean)?.slice(0, 200);
+  return firstLine || `${url.hostname}${url.pathname}`;
+}
+
+function xmlTitle(text: string, url: URL): string {
+  const match = /<title[^>]*>([\s\S]{0,500})<\/title>/i.exec(text.slice(0, 20_000));
+  const title = match?.[1]?.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  return title || `${url.hostname}${url.pathname}`;
 }
 
 function isRedirect(status: number): boolean {
