@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { BrowserSessionManager } from "./browser-session.ts";
+import { BrowserSessionManager, browserFinishIssue } from "./browser-session.ts";
 import type { BrowserService } from "./browser-service.ts";
 
 function fakeService() {
@@ -76,5 +76,39 @@ describe("BrowserSessionManager", () => {
       manager.stop();
       await manager.releaseAll();
     }
+  });
+});
+
+describe("browserFinishIssue", () => {
+  it("does not gate a task that never touched the browser", () => {
+    expect(browserFinishIssue(undefined)).toBeNull();
+    expect(browserFinishIssue({ assertions: [], steps: [] } as never)).toBeNull();
+  });
+
+  it("requires at least one assertion after browser work", () => {
+    const state = {
+      steps: [{ tool: "browser_open", url: "https://example.com" }],
+      assertions: []
+    };
+    expect(browserFinishIssue(state as never)).toMatch(/browser_assert/);
+  });
+
+  it("blocks completion on a failing assertion and reports what was expected", () => {
+    const issue = browserFinishIssue({
+      steps: [{ tool: "browser_open", url: "https://example.com" }],
+      assertions: [{ kind: "text", expected: "提交成功", passed: false, actual: "提交失败" }]
+    } as never);
+    expect(issue).toContain("提交成功");
+    expect(issue).toContain("提交失败");
+  });
+
+  it("allows completion once the last assertion passes", () => {
+    expect(browserFinishIssue({
+      steps: [{ tool: "browser_open", url: "https://example.com" }],
+      assertions: [
+        { kind: "text", expected: "旧文案", passed: false },
+        { kind: "text", expected: "提交成功", passed: true }
+      ]
+    } as never)).toBeNull();
   });
 });

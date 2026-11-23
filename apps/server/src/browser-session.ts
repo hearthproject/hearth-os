@@ -178,3 +178,21 @@ export class BrowserSessionManager {
     clearInterval(this.idleTimer);
   }
 }
+
+/**
+ * The browser toolset no longer registers its own `finish_task` (a duplicate
+ * definition makes providers reject the whole tool list), so the completion
+ * gate lives here and runs from the shared finish validation.
+ */
+export function browserFinishIssue(state: BrowserSessionState | null | undefined): string | null {
+  if (!state || state.steps.length === 0) return null;
+  const last = state.assertions[state.assertions.length - 1];
+  if (!last) {
+    return "浏览器任务还不能结束：至少用 browser_assert 验证一次页面状态，确认页面确实符合目标。";
+  }
+  if (!last.passed) {
+    const actual = last.actual ? `，实际为「${last.actual}」` : "";
+    return `浏览器任务还不能结束：最后一次断言未通过（${last.kind} = 「${last.expected}」${actual}）。修正页面或改写断言后再结束。`;
+  }
+  return null;
+}

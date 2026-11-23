@@ -94,6 +94,8 @@ export interface NativeRunOptions {
   onAuthorizeTool?: (request: AgentToolAuthorizationRequest) => Promise<AgentToolAuthorization>;
   isFullPermission?: () => boolean;
   extraTools?: AgentTool[];
+  /** Extra finish gates (for example: a browser task must have a passing assertion). */
+  finishGuards?: Array<() => string | null>;
   steering?: () => AgentMessage[];
   onContextSummary?: (messages: AgentMessage[], signal: AbortSignal) => Promise<ContextSummary>;
   toolRetryPolicy?: {
@@ -309,6 +311,10 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
       if (goalIssue) return goalIssue;
       const jsonIssue = jsonDeliverableIssue(options.prepared.outDir, options.expectedOutputs);
       if (jsonIssue) return jsonIssue;
+      for (const guard of options.finishGuards ?? []) {
+        const issue = guard();
+        if (issue) return issue;
+      }
       return coding ? codingFinishIssue(context, result) : null;
     },
     summarizeContext: options.onContextSummary ?? ((messages, signal) => summarizeNativeContext(options.settings, messages, signal)),

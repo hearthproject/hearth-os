@@ -26,7 +26,7 @@ import { BROWSER_ENABLED, BROWSER_EVIDENCE_DIR, BROWSER_PROFILE_DIR, BROWSER_REC
 import { DossierStore } from "./dossier.ts";
 import { BrowserEvidenceStore } from "./browser-evidence.ts";
 import { BrowserService } from "./browser-service.ts";
-import { BrowserSessionManager } from "./browser-session.ts";
+import { BrowserSessionManager, browserFinishIssue } from "./browser-session.ts";
 import { BrowserSettingsStore } from "./browser-settings.ts";
 import { createBrowserTools } from "./browser-tools.ts";
 import { ContextService, estimateTokens } from "./context.ts";
@@ -2091,6 +2091,9 @@ export class HearthScheduler {
           }
         }));
       }
+      const browserFinishGuard = BROWSER_ENABLED && this.browserSettings.get().enabled
+        ? () => browserFinishIssue(this.browserSessions.state(taskId))
+        : null;
       let subagentManager: SubagentTaskManager | undefined;
       if (this.library) extraNativeTools.push(...createLibraryTools(this.library));
       if (this.skills) extraNativeTools.push(...createSkillTools({ skills: this.skills, taskId, runId }));
@@ -2169,6 +2172,7 @@ export class HearthScheduler {
         executorSettings: this.executorSettings(),
         expectedOutputs,
         ...(extraNativeTools.length > 0 ? { extraNativeTools } : {}),
+        ...(browserFinishGuard ? { finishGuards: [browserFinishGuard] } : {}),
         ...(this.libraryMcp ? { mcpServers: { hearth: this.libraryMcp } } : {}),
         ...(activeThreadId ? { activeThreadId } : {}),
         onProgress: (event) => this.publishProgress(taskId, runId, event.kind, event.message, event.detail),

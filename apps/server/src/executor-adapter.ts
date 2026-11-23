@@ -65,6 +65,7 @@ export interface ExecutorAttemptContext {
   expectedOutputs: string[];
   activeThreadId?: string;
   extraNativeTools?: AgentTool[];
+  finishGuards?: Array<() => string | null>;
   mcpServers?: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
   steering?: (() => AgentMessage[]) | undefined;
   onProgress: (event: { kind: string; message: string; detail?: TaskProgressDetail }) => void;
@@ -144,6 +145,7 @@ export class NativeExecutorAdapter implements ExecutorAdapter {
       checkpointPolicy: { everyTurns: 5, everyToolCalls: 20, maxSnapshots: 40 },
       ...(resumable ? { resume: resumable } : {}),
       ...(input.extraNativeTools?.length ? { extraTools: input.extraNativeTools } : {}),
+      ...(input.finishGuards?.length ? { finishGuards: input.finishGuards } : {}),
       ...(input.steering ? { steering: input.steering } : {}),
       expectedOutputs: input.expectedOutputs,
       onProgress: input.onProgress,
