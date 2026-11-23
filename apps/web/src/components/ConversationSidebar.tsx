@@ -17,9 +17,9 @@ export function ConversationSidebar() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const conversationsQuery = useQuery({ queryKey: ["conversations"], queryFn: api.conversations, refetchInterval: 15_000 });
-  const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: api.projects, refetchInterval: 30_000 });
-  const tasksQuery = useQuery({ queryKey: ["tasks"], queryFn: api.tasks, refetchInterval: 8_000 });
+  const conversationsQuery = useQuery({ queryKey: ["conversations"], queryFn: api.conversations, refetchInterval: 30_000 });
+  const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: api.projects, refetchInterval: 60_000 });
+  const tasksQuery = useQuery({ queryKey: ["tasks"], queryFn: api.tasks, refetchInterval: 30_000 });
 
   const conversations = conversationsQuery.data?.conversations ?? [];
   const projects = projectsQuery.data?.projects ?? [];

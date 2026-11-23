@@ -1,11 +1,10 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, ExternalLink, Loader2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleDashed, CircleSlash, ExternalLink, Loader2 } from "lucide-react";
 import { api } from "../lib/api.ts";
 import { abbreviateHash, formatBytes, formatDate, formatTime } from "../lib/format.ts";
-import { APPROVAL_STATUS_LABELS, approvalKindLabel, isToolApproval } from "../lib/labels.ts";
+import { APPROVAL_STATUS_LABELS, EFFECT_STATUS_LABELS, approvalKindLabel, isToolApproval } from "../lib/labels.ts";
 import type { ApprovalRecord, EffectRecord } from "../lib/types.ts";
-import { EffectStatusTag } from "./StatusPill.tsx";
 
 export function ApprovalCard({ approval, effect }: { approval: ApprovalRecord; effect?: EffectRecord | undefined }) {
   const queryClient = useQueryClient();
@@ -266,4 +265,29 @@ function approvalResultLabel(status: ApprovalRecord["status"], effect?: EffectRe
   if (effect?.status === "uncertain") return "结果不确定：可能已部分生效。先到目标核对，再决定是否重试。";
   if (effect?.status === "failed") return `执行失败：${effect.error ?? "未知原因"}`;
   return "审批已记录。";
+}
+
+const EFFECT_TONE: Record<EffectRecord["status"], "neutral" | "active" | "risk" | "done"> = {
+  pending: "neutral",
+  prepared: "neutral",
+  admitted: "active",
+  executing: "active",
+  committed: "done",
+  succeeded: "done",
+  failed: "risk",
+  uncertain: "risk",
+  reconciled_committed: "done",
+  reconciled_absent: "neutral",
+  abandoned: "neutral"
+};
+
+function EffectStatusTag({ status }: { status: EffectRecord["status"] }) {
+  const Icon = status === "uncertain" ? AlertTriangle : status === "succeeded" ? CheckCircle2 : status === "failed" ? CircleSlash : CircleDashed;
+  return (
+    <span className={`status-pill tone-${EFFECT_TONE[status]}`}>
+      <Icon size={13} />
+      {status === "uncertain" && <Icon size={13} className="glyph-offset" />}
+      {EFFECT_STATUS_LABELS[status]}
+    </span>
+  );
 }
