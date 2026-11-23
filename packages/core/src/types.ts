@@ -2585,6 +2585,7 @@ export interface LibrarySettingsPatch {
 
 export interface LibraryStatus {
   nodeCount: number;
+  itemCount: number;
   chunkCount: number;
   indexedCount: number;
   pendingJobs: number;

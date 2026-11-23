@@ -233,6 +233,16 @@ export class LibraryRepository {
     return Number((this.store.db.prepare(`SELECT COUNT(*) AS count FROM context_nodes WHERE trashed_at IS NULL AND ${VISIBLE_NODE_SQL}`).get() as Row).count ?? 0);
   }
 
+  /** Leaf entries a person can open, excluding structural folders, roots and the hidden task tree. */
+  countItems(): number {
+    return Number((this.store.db.prepare(
+      `SELECT COUNT(*) AS count FROM context_nodes
+       WHERE trashed_at IS NULL
+         AND kind NOT IN ('root', 'folder', 'task')
+         AND ${VISIBLE_NODE_SQL}`
+    ).get() as Row).count ?? 0);
+  }
+
   countChunks(): number {
     return Number((this.store.db.prepare("SELECT COUNT(*) AS count FROM context_chunks").get() as Row).count ?? 0);
   }

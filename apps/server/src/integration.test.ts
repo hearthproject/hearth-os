@@ -95,6 +95,10 @@ describe("cross-module integration", () => {
       const tree = await app.inject({ method: "GET", url: "/api/library/tree?depth=6" });
       expect(tree.statusCode).toBe(200);
       const nodes = flatten(tree.json().nodes as TreeNode[]);
+      const status = await app.inject({ method: "GET", url: "/api/library/status" });
+      expect(status.statusCode).toBe(200);
+      expect(status.json().itemCount).toBe(2);
+      expect(status.json().nodeCount).toBeGreaterThan(status.json().itemCount);
       const titles = nodes.map((node) => node.title);
       expect(titles).toContain("notes.md");
       expect(titles).toContain("data.csv");

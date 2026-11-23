@@ -102,6 +102,7 @@ export class LibraryService {
     const modelId = this.embeddingProvider?.modelId ?? settings.modelId;
     return {
       nodeCount: this.tree.repository.countNodes(),
+      itemCount: this.tree.repository.countItems(),
       chunkCount: this.tree.repository.countChunks(),
       indexedCount: this.countDocuments(),
       pendingJobs: this.tree.repository.listJobs("pending", 10_000).length,

@@ -160,7 +160,7 @@ export function LibraryPage() {
 
   const results = (searchMutation.data?.hits ?? []).filter((hit) => !isTaskNode(hit.node));
   const rootNodes = (treeQuery.data?.nodes ?? []).filter((node) => !isTaskNode(node));
-  const total = statusQuery.data?.nodeCount ?? 0;
+  const total = statusQuery.data?.itemCount ?? 0;
 
   return (
     <div className="page workbench-page library-page">
