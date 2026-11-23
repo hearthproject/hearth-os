@@ -13,8 +13,16 @@ export interface StoragePruneCandidate {
   endedAt: string | null;
 }
 
+export interface StoragePruneFile {
+  taskId: string;
+  runId: string;
+  path: string;
+  bytes: number;
+}
+
 export interface StoragePrunePlan {
   candidates: StoragePruneCandidate[];
+  files: StoragePruneFile[];
   pinned: Array<{ taskId: string; runId: string; reason: string }>;
   totalBytes: number;
   olderThanDays: number;
@@ -39,12 +47,14 @@ export function planStoragePrune(input: StoragePruneInput): StoragePrunePlan {
   const now = input.now ?? new Date();
   const cutoff = now.getTime() - olderThanDays * 24 * 60 * 60 * 1000;
   const candidates: StoragePruneCandidate[] = [];
+  const files: StoragePruneFile[] = [];
   const pinned: StoragePrunePlan["pinned"] = [];
 
   for (const task of input.store.listTasks()) {
     const runs = [...input.store.listRuns(task.id)].sort((a, b) => a.attempt - b.attempt);
-    if (runs.length <= 1) continue;
+    if (runs.length === 0) continue;
     const latest = runs[runs.length - 1];
+    if (!latest) continue;
     if (!TERMINAL_TASK_STATUSES.has(task.status)) {
       pinned.push({ taskId: task.id, runId: latest?.id ?? "none", reason: `任务仍未结束（${task.status}）` });
       continue;
@@ -70,7 +80,7 @@ export function planStoragePrune(input: StoragePruneInput): StoragePrunePlan {
         pinned.push({ taskId: task.id, runId: run.id, reason: "存在未结算或待清理的操作" });
         continue;
       }
-      const path = run.workspace === taskRoot ? join(taskRoot, "out", run.id) : join(run.workspace, "out");
+      const path = runOutDir(run, taskRoot);
       const endedAt = run.endedAt ?? run.startedAt ?? new Date(0).toISOString();
       if (new Date(endedAt).getTime() > cutoff) {
         pinned.push({ taskId: task.id, runId: run.id, reason: `未超过保留期 ${olderThanDays} 天` });
@@ -91,13 +101,62 @@ export function planStoragePrune(input: StoragePruneInput): StoragePrunePlan {
         endedAt: run.endedAt
       });
     }
+
+    // The surviving latest run may still hold tool outputs that its own
+    // checkpoint does not point at. Only those are pruned; referenced blobs
+    // stay readable through read_tool_output.
+    const latestPath = runOutDir(latest, taskRoot);
+    const latestCheckpoint = checkpointText(latest, input);
+    if (latestCheckpoint !== null && existsSync(latestPath)) {
+      const referenced = toolResultReferences(latestCheckpoint);
+      const directory = join(latestPath, ".hearth", "tool-results");
+      if (existsSync(directory)) {
+        for (const entry of readdirSync(directory, { withFileTypes: true })) {
+          if (!entry.isFile() || !/^[a-f0-9]{16}\.txt$/.test(entry.name) || referenced.has(entry.name)) continue;
+          const path = join(directory, entry.name);
+          try {
+            const stat = statSync(path);
+            if (stat.mtimeMs > cutoff) continue;
+            files.push({ taskId: task.id, runId: latest.id, path, bytes: stat.size });
+          } catch {
+            // raced with a running writer
+          }
+        }
+      }
+    }
   }
   return {
     candidates,
+    files,
     pinned,
-    totalBytes: candidates.reduce((sum, candidate) => sum + candidate.bytes, 0),
+    totalBytes: candidates.reduce((sum, candidate) => sum + candidate.bytes, 0)
+      + files.reduce((sum, file) => sum + file.bytes, 0),
     olderThanDays
   };
+}
+
+function runOutDir(run: RunRecord, taskRoot: string): string {
+  return run.workspace === taskRoot ? join(taskRoot, "out", run.id) : join(run.workspace, "out");
+}
+
+function checkpointText(run: RunRecord, input: StoragePruneInput): string | null {
+  const checkpoint = input.store.latestRunCheckpoint(run.id);
+  if (!checkpoint) return null;
+  const path = isAbsolute(checkpoint.path) ? checkpoint.path : join(input.workspaceRoot, checkpoint.path);
+  if (!existsSync(path)) return null;
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+function toolResultReferences(body: string): Set<string> {
+  const references = new Set<string>();
+  for (const match of body.matchAll(/tool-results[\\/]+([a-f0-9]{16}\.txt)/g)) {
+    if (match[1]) references.add(match[1]);
+  }
+  return references;
 }
 
 function checkpointPins(path: string, run: RunRecord, input: StoragePruneInput): boolean {

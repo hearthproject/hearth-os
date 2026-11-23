@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -98,6 +98,26 @@ describe("storage prune planning", () => {
     const plan = planStoragePrune({ store, workspaceRoot: root, olderThanDays: 7, now: new Date("2026-11-23T00:00:00.000Z") });
     expect(plan.candidates).toHaveLength(0);
     expect(plan.pinned.some((entry) => entry.reason.includes("检查点"))).toBe(true);
+  });
+  it("prunes unreferenced tool outputs inside the surviving latest run", () => {
+    const root = tempRoot();
+    const taskRoot = join(root, "tasks", "task-1");
+    const out = join(taskRoot, "out", "run-1");
+    mkdirSync(join(out, ".hearth", "tool-results"), { recursive: true });
+    const stale = join(out, ".hearth", "tool-results", "aaaaaaaaaaaaaaaa.txt");
+    writeFileSync(stale, "unreferenced", "utf8");
+    utimesSync(stale, new Date("2025-01-01T00:00:00.000Z"), new Date("2025-01-01T00:00:00.000Z"));
+    const checkpointPath = join(taskRoot, "checkpoint.json");
+    writeFileSync(checkpointPath, JSON.stringify({ messages: [] }), "utf8");
+    const store = stubStore(
+      [taskRecord("task-1", "completed")],
+      [runRecord("task-1", "run-1", 1, "completed", taskRoot)],
+      [],
+      { id: "cp-1", path: checkpointPath, sha256: "a".repeat(64) }
+    );
+    const plan = planStoragePrune({ store, workspaceRoot: root, olderThanDays: 7, now: new Date("2026-11-23T00:00:00.000Z") });
+    expect(plan.candidates).toHaveLength(0);
+    expect(plan.files.map((file) => file.path)).toEqual([stale]);
   });
 });
 
