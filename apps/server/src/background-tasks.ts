@@ -13,25 +13,7 @@ import { resolveNativeHelperPath } from "./windows-native-sandbox.ts";
  * connection as every other write, so there is still one SQLite writer.
  */
 export class SqliteBackgroundTaskRegistry implements BackgroundTaskRegistry {
-  constructor(private readonly store: HearthStore) {
-    store.db.exec(`
-      CREATE TABLE IF NOT EXISTS background_processes (
-        session_id TEXT PRIMARY KEY,
-        task_id TEXT,
-        run_id TEXT,
-        pid INTEGER,
-        start_time TEXT,
-        command TEXT NOT NULL,
-        output_path TEXT NOT NULL,
-        pty INTEGER NOT NULL,
-        status TEXT NOT NULL,
-        exit_code INTEGER,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS background_processes_status_idx ON background_processes(status);
-    `);
-  }
+  constructor(private readonly store: HearthStore) {}
 
   start(record: BackgroundTaskRecord): void {
     const actualStart = record.pid ? windowsProcessStartTime(record.pid) : null;

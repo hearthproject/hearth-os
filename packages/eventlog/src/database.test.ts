@@ -75,6 +75,23 @@ describe("HearthStore", () => {
     reopened.close();
   });
 
+  it("adds the background_processes table when upgrading a v39 database", () => {
+    const path = tempDb();
+    const store = new HearthStore(path);
+    store.close();
+
+    const legacy = new DatabaseSync(path);
+    legacy.exec("DROP TABLE IF EXISTS background_processes; PRAGMA user_version = 39;");
+    legacy.close();
+
+    const migrated = new HearthStore(path);
+    const row = migrated.db.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'background_processes'"
+    ).get() as { name?: string } | undefined;
+    expect(row?.name).toBe("background_processes");
+    migrated.close();
+  });
+
   it("migrates a schema v8 database without losing tasks, runs, or checkpoints", () => {
     const path = tempDb();
     const createdAt = "2026-11-05T00:00:00.000Z";

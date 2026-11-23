@@ -214,7 +214,7 @@ export interface SettleRunOperationCleanupInput {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 39;
+export const CURRENT_SCHEMA_VERSION = 40;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -319,6 +319,21 @@ CREATE TABLE IF NOT EXISTS run_operations (
   updated_at TEXT NOT NULL,
   UNIQUE(run_id, tool_call_id)
 );
+CREATE TABLE IF NOT EXISTS background_processes (
+  session_id TEXT PRIMARY KEY,
+  task_id TEXT,
+  run_id TEXT,
+  pid INTEGER,
+  start_time TEXT,
+  command TEXT NOT NULL,
+  output_path TEXT NOT NULL,
+  pty INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  exit_code INTEGER,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS background_processes_status_idx ON background_processes(status);
 CREATE TABLE IF NOT EXISTS approvals (
   id TEXT PRIMARY KEY, task_id TEXT NOT NULL, run_id TEXT NOT NULL, kind TEXT NOT NULL,
   summary TEXT NOT NULL, target_json TEXT NOT NULL, preview_json TEXT NOT NULL,
@@ -1698,6 +1713,21 @@ export class HearthStore {
       UNIQUE(run_id, tool_call_id)
     );
     CREATE INDEX IF NOT EXISTS run_operations_run_phase_idx ON run_operations(run_id, phase, started_at);`);
+    this.db.exec(`CREATE TABLE IF NOT EXISTS background_processes (
+      session_id TEXT PRIMARY KEY,
+      task_id TEXT,
+      run_id TEXT,
+      pid INTEGER,
+      start_time TEXT,
+      command TEXT NOT NULL,
+      output_path TEXT NOT NULL,
+      pty INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      exit_code INTEGER,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS background_processes_status_idx ON background_processes(status);`);
     ensureColumn(this.db, "run_operations", "cleanup_state", "TEXT NOT NULL DEFAULT 'none'");
     ensureColumn(this.db, "run_operations", "cleanup_attempts", "INTEGER NOT NULL DEFAULT 0");
     ensureColumn(this.db, "run_operations", "resources_json", "TEXT");
