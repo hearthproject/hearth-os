@@ -4,9 +4,11 @@ import { AlertTriangle, CheckCircle2, CircleDashed, CircleSlash, ExternalLink, L
 import { api } from "../lib/api.ts";
 import { abbreviateHash, formatBytes, formatDate, formatTime } from "../lib/format.ts";
 import { APPROVAL_STATUS_LABELS, EFFECT_STATUS_LABELS, approvalKindLabel, isToolApproval } from "../lib/labels.ts";
-import type { ApprovalRecord, EffectRecord } from "../lib/types.ts";
+import type { ApprovalDisplay, ApprovalRecord, EffectRecord } from "../lib/types.ts";
 
-export function ApprovalCard({ approval, effect }: { approval: ApprovalRecord; effect?: EffectRecord | undefined }) {
+type ApprovalWithDisplay = ApprovalRecord & { display?: ApprovalDisplay | null };
+
+export function ApprovalCard({ approval, effect }: { approval: ApprovalWithDisplay; effect?: EffectRecord | undefined }) {
   const queryClient = useQueryClient();
   const [confirming, setConfirming] = useState(false);
   const [alwaysAllow, setAlwaysAllow] = useState(false);
@@ -24,7 +26,7 @@ export function ApprovalCard({ approval, effect }: { approval: ApprovalRecord; e
   const isSmtp = approval.kind === "email.smtp-send";
   const isMail = isOutbox || isSmtp;
   const isTool = isToolApproval(approval);
-  const toolName = isTool ? approval.kind.slice("tool.".length) : null;
+  const toolName = isTool ? approval.display?.toolName ?? approval.kind.slice("tool.".length) : null;
   const toolArguments = isTool ? target.arguments ?? preview.arguments : null;
   const browserPreview = isBrowserPreview(preview.browser) ? preview.browser : null;
   const isBrowserAction = Boolean(browserPreview) || toolName?.startsWith("browser_");
@@ -123,7 +125,18 @@ export function ApprovalCard({ approval, effect }: { approval: ApprovalRecord; e
       {isTool && (
         <div className="approval-preview">
           <strong>本次工具参数</strong>
-          <pre>{formatToolArguments(toolArguments)}</pre>
+          {approval.display?.kind === "tool" ? (
+            <dl className="kv-grid approval-tool-fields">
+              {approval.display.fields.map((field, index) => (
+                <div key={`${field.label}-${index}`}>
+                  <dt>{field.label}</dt>
+                  <dd className="mono select-all">{field.value}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : (
+            <pre>{formatToolArguments(toolArguments)}</pre>
+          )}
         </div>
       )}
 

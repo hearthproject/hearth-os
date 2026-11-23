@@ -6,6 +6,7 @@ import type {
   ApprovalListItem,
   ApprovalMode,
   ApprovalRecord,
+  ApprovalView,
   ArtifactRecord,
   ChatMessageRecord,
   ConversationSettings,
@@ -41,6 +42,7 @@ import { EventBus } from "./events.ts";
 import { executorName, resolveExecutorFromEnabled, resolveExecutorLocked } from "./executors.ts";
 import { buildTaskResultAnswer, buildTaskStatusMessage } from "./task-status-messages.ts";
 import { GITHUB_NETWORK_HOSTS, wantsGithubAccess, wantsPublicWebResearch } from "./task-intent.ts";
+import { approvalView } from "./approval-display.ts";
 
 export interface CreateTaskInput {
   executionMode?: TaskRecord["executionMode"];
@@ -98,7 +100,7 @@ export class TaskProposalNotFoundError extends Error {
 export interface TaskView {
   task: TaskRecord;
   runs: ReturnType<HearthStore["listRuns"]>;
-  approvals: ReturnType<HearthStore["listApprovals"]>;
+  approvals: ApprovalView[];
   artifacts: ReturnType<HearthStore["listArtifacts"]>;
   effects: ReturnType<HearthStore["listEffects"]>;
   followUps: TaskFollowUpRecord[];
@@ -319,7 +321,7 @@ export class HearthService {
     return {
       task,
       runs,
-      approvals: this.store.listApprovals(taskId),
+      approvals: this.store.listApprovals(taskId).map(approvalView),
       artifacts: this.store.listArtifacts(taskId),
       effects: this.store.listEffects(taskId),
       followUps: this.store.listTaskFollowUps(taskId),
@@ -366,12 +368,19 @@ export class HearthService {
     const page = this.store.listApprovalsPage(opts);
     return {
       approvals: page.approvals.map((approval) => {
-        const item = { ...approval, taskTitle: titles.get(approval.taskId) ?? "未命名任务" };
+        let projected = approval;
         if (opts.brief) {
-          item.target = omitKey(approval.target, "body");
-          item.preview = omitKey(approval.preview, "body");
+          projected = {
+            ...approval,
+            target: omitKey(approval.target, "body"),
+            preview: omitKey(approval.preview, "body")
+          };
         }
-        return item;
+        return {
+          ...approvalView(projected),
+          ...(opts.brief ? { display: null } : {}),
+          taskTitle: titles.get(approval.taskId) ?? "未命名任务"
+        };
       }),
       total: page.total
     };

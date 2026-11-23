@@ -14,6 +14,22 @@ import type {
   TaskStatus
 } from "./types.ts";
 
+export interface ApprovalDisplayField {
+  label: string;
+  value: string;
+  redacted?: boolean;
+  truncated?: boolean;
+}
+
+export interface ApprovalDisplay {
+  kind: "tool";
+  toolName: string;
+  fields: ApprovalDisplayField[];
+}
+
+/** API projection for approval UIs; the persisted ApprovalRecord stays unchanged. */
+export type ApprovalView = ApprovalRecord & { display: ApprovalDisplay | null };
+
 export interface TaskSummary {
   runs: number;
   lastDurationMs: number | null;
@@ -49,7 +65,7 @@ export type ArtifactListItem = WithTaskTitle<Omit<ArtifactRecord, "absolutePath"
 
 export type RunListItem = WithTaskTitle<RunRecord>;
 
-export type ApprovalListItem = WithTaskTitle<ApprovalRecord>;
+export type ApprovalListItem = WithTaskTitle<ApprovalView>;
 
 export type EffectListItem = WithTaskTitle<EffectRecord>;
 

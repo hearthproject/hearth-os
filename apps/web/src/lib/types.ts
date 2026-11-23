@@ -1,8 +1,10 @@
 import type {
+  ApprovalDisplay,
   ApprovalMode,
   ApprovalGrant,
   ApprovalListItem,
   ApprovalRecord,
+  ApprovalView,
   ApprovalStatus,
   ArtifactListItem,
   ChatAttachment,
@@ -121,10 +123,12 @@ import type {
 } from "@hearth/core";
 
 export type {
+  ApprovalDisplay,
   ApprovalMode,
   ApprovalGrant,
   ApprovalListItem,
   ApprovalRecord,
+  ApprovalView,
   ApprovalStatus,
   ArtifactListItem,
   ArtifactRecord,
@@ -275,7 +279,7 @@ export interface SettingsStorageResponse {
 export interface TaskView {
   task: TaskRecord;
   runs: RunRecord[];
-  approvals: ApprovalRecord[];
+  approvals: ApprovalView[];
   artifacts: ArtifactRecord[];
   effects: EffectRecord[];
   checkpoints: RunCheckpointRecord[];

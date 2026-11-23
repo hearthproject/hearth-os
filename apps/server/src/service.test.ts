@@ -62,6 +62,35 @@ describe("Hearth service agent metadata", () => {
     store.close();
   });
 
+  it("projects tool arguments for task approval views without changing stored approvals", () => {
+    const store = new HearthStore(":memory:");
+    const service = new HearthService(store);
+    const task = service.createTask({ title: "运行检查", goal: "运行 npm test" });
+    service.createApproval({
+      id: "approval-display",
+      taskId: task.id,
+      runId: "run-display",
+      kind: "tool.shell",
+      summary: "运行测试",
+      target: { arguments: { command: "npm test", cwd: "D:/repo" } },
+      preview: {},
+      parameterHash: "display-hash",
+      status: "pending",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      decidedAt: null,
+      effectId: null,
+      createdAt: new Date().toISOString()
+    });
+
+    const approval = service.view(task.id)?.approvals[0];
+    expect(approval?.display?.fields).toEqual([
+      { label: "命令", value: "npm test" },
+      { label: "工作目录", value: "D:/repo" }
+    ]);
+    expect(store.listApprovals(task.id)[0]).not.toHaveProperty("display");
+    store.close();
+  });
+
   it("confirms a pending proposal into a real task", () => {
     const store = new HearthStore(":memory:");
     const service = new HearthService(store);
