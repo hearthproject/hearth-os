@@ -1,10 +1,10 @@
 {
   "name": "@hearth/eventlog",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "private": true,
   "type": "module",
   "dependencies": {
-    "@hearth/core": "0.3.3"
+    "@hearth/core": "0.3.4"
   },
   "exports": {
     ".": "./src/index.ts"

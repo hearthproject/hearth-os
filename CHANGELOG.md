@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.3.4 - 2026-11-23
+
+### 运行时稳定
+
+- 工具副作用拆成业务结果与物理清理两条账：`settled` 不再等于“已经清干净”，终态 run 会真正终止已登记的 shell 进程并把结果写回 `run_operations`。
+- 恢复闸门会沿父 run 链检查 prepared/dispatched 操作、运行中后台进程和 checkpoint proof；未知副作用不再自动重放。
+- 模型响应被截断且携带工具调用时，整批工具调用丢弃，连续 3 次失败；工具入参按 JSON Schema 校验，非法参数只产生 `tool.rejected`，不写操作账本。
+- checkpoint proof 增加 `toolsDigest`，工具集变化在恢复时可见。
+
+### 网络与存储
+
+- 网络权限改为显式 `deny | open`：`deny` 默认拒绝；`open` 在 Windows AppContainer 中加入 `internetClient` capability，并写审计事件与 proof。移除了只会失败的 `--network allow` 死参数。
+- 重试不再复制整个 `.hearth`，只继承已发布产物与 checkpoint 引用的 tool-results。
+- 新增 `npm run storage:prune`：默认预演，按保留期、活跃 run、未结算操作、checkpoint 引用等 pin 规则回收旧 run 和未引用工具输出；设置页可查看最近一次回收路径。
+
+### 证据与评测
+
+- 每个终态 run 输出 `run-evidence.json`，包含 task/run/usage、checkpoint 引用、恢复决策、operations/cleanup、artifacts 和 run 链。
+- 长跑矩阵从 12 扩到 18：新增 after-prepare、after-dispatch、mid-tool、after-settle、after-checkpoint、after-cleanup 六个崩溃点，各重复 3 次。
+- `background_processes` 收进 schema v40，迁移与备份不再漏表。
+
+### 工程
+
+- 版本统一为 0.3.4；新增跨进程 operations、cleanup 单调性和 Windows 沙箱清理稳定性测试。
+
 ## Unreleased
 
 ### 执行稳定性
