@@ -12,6 +12,23 @@ export type OperationPhase = "prepared" | "dispatched" | "settled" | "unknown";
 
 export type OperationFinalPhase = Extract<OperationPhase, "settled" | "unknown">;
 
+/**
+ * Physical cleanup is a separate axis from the business outcome.
+ *
+ * none      — the operation owns no physical resource.
+ * pending   — the operation registered a resource (process, browser lease, ...)
+ *             and it has not been confirmed gone yet.
+ * confirmed — the resource is verifiably cleaned up.
+ * failed    — cleanup was attempted and could not be confirmed.
+ */
+export type OperationCleanupState = "none" | "pending" | "confirmed" | "failed";
+
+export interface OperationResourceRef {
+  kind: "process" | "browser" | "worktree" | "subagent";
+  id: string;
+  meta?: Record<string, unknown>;
+}
+
 export interface OperationFact {
   operationId: string;
   runId: string;
@@ -33,6 +50,11 @@ export interface OperationFact {
   errorCode: string | null;
   effectRef: string | null;
   receipt: unknown;
+  cleanupState: OperationCleanupState;
+  cleanupAttempts: number;
+  resources: OperationResourceRef[];
+  cleanupError: string | null;
+  cleanupAt: string | null;
   updatedAt: string;
 }
 
@@ -64,13 +86,22 @@ export interface SettleOperationInput {
   errorCode?: string | null;
   effectRef?: string | null;
   receipt?: unknown;
+  resources?: OperationResourceRef[];
   settledAt?: string;
+}
+
+export interface SettleCleanupInput {
+  operationId: string;
+  state: Exclude<OperationCleanupState, "none" | "pending">;
+  error?: string | null;
+  at?: string;
 }
 
 export interface OperationLedger {
   prepare(input: PrepareOperationInput): Promise<OperationFact>;
   dispatch(input: DispatchOperationInput): Promise<OperationFact>;
   settle(input: SettleOperationInput): Promise<OperationFact>;
+  settleCleanup(input: SettleCleanupInput): Promise<OperationFact>;
   get(operationId: string): Promise<OperationFact | null>;
   listUnsettled(runId: string): Promise<OperationFact[]>;
 }
@@ -81,7 +112,8 @@ export type OperationLedgerErrorCode =
   | "OPERATION_ALREADY_DISPATCHED"
   | "OPERATION_ALREADY_SETTLED"
   | "OPERATION_ARGS_MISMATCH"
-  | "OPERATION_SETTLE_MISMATCH";
+  | "OPERATION_SETTLE_MISMATCH"
+  | "OPERATION_CLEANUP_SETTLED";
 
 export class OperationLedgerError extends Error {
   readonly code: OperationLedgerErrorCode;

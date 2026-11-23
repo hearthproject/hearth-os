@@ -75,6 +75,8 @@ import type { SkillService } from "./skills/service.ts";
 import { createSkillTools } from "./skill-tools.ts";
 import { SqliteOperationLedger } from "./sqlite-operation-ledger.ts";
 import { TaskWorktreeService } from "./worktrees.ts";
+import { getBackgroundTaskRegistry } from "./background-tasks.ts";
+import { evaluateRunRecovery, runChainFor, type RecoveryDecision, type RecoveryView } from "./run-recovery.ts";
 
 import { createExecutorAdapters, type CodexContextItem, type CodexRunner, type DshRunner, type ExecutionOutcome, type ExecutorAdapter, type ExecutorAttemptContext, type NativeRunner } from "./executor-adapter.ts";
 export type { CodexRunner, NativeRunner } from "./executor-adapter.ts";
@@ -670,41 +672,112 @@ export class HearthScheduler {
     return updated;
   }
 
-  private autoResumeIssue(task: TaskRecord, run: RunRecord): string | null {
-    if (resolveExecutorId(task) !== "native") return "只有 native 执行器支持自动恢复";
-    const startedAt = run.startedAt ? Date.parse(run.startedAt) : Number.NaN;
-    if (Number.isFinite(startedAt) && Date.now() - startedAt > 72 * 60 * 60 * 1000) {
-      return "运行已超过 72 小时，等待用户确认";
-    }
-    const interrupted = this.service.store.listRuns(task.id)
-      .filter((item) => item.failure?.kind === "interrupted").length;
-    if (interrupted >= 5) return "自动恢复次数已达上限";
-    const unresolved = this.service.store.listEffects(task.id)
-      .filter((effect) => ["prepared", "admitted", "executing", "uncertain"].includes(effect.status));
-    if (unresolved.length > 0) return "存在状态不确定的外部动作，必须先对账";
-    const outDir = this.outDirForRun(task.id, run);
-    if (existsSync(join(outDir, ".hearth", "executing.json"))) {
-      const unsettled = this.service.store.listUnsettledRunOperations(run.id);
-      const runtimeEvents = runtimeJournalEvents(this.service.store, run.id);
-      if (unsettled.length === 0 && runtimeEvents.length === 0) {
-        return "上一轮工具执行未确认完成，工作区可能已有部分改动，且没有可回放的运行日志";
+  private buildRecoveryView(task: TaskRecord, run: RunRecord): RecoveryView {
+    const runs = this.service.store.listRuns(task.id);
+    const chain = runChainFor(runs, run.id);
+    const checkpoint = this.service.store.latestRunCheckpoint(run.id);
+    return {
+      task: {
+        id: task.id,
+        executorId: task.executorId ?? null,
+        permissions: task.permissions
+      },
+      run: {
+        id: run.id,
+        attempt: run.attempt,
+        status: run.status,
+        executorId: run.executorId ?? null,
+        startedAt: run.startedAt ?? run.createdAt,
+        parentRunId: run.parentRunId ?? null
+      },
+      runChain: chain,
+      operations: chain.flatMap((item) => this.service.store.listRunOperations(item.id)),
+      effects: this.service.store.listEffects(task.id),
+      checkpoint,
+      checkpointReadable: checkpoint ? this.readCheckpointBody(run.id, checkpoint) !== null : false,
+      interruptedCount: runs.filter((item) => item.failure?.kind === "interrupted").length
+    };
+  }
+
+  private decideRecovery(task: TaskRecord, run: RunRecord): RecoveryDecision {
+    return evaluateRunRecovery(this.buildRecoveryView(task, run));
+  }
+
+  private recordRecoveryDecision(task: TaskRecord, run: RunRecord, decision: RecoveryDecision, phase: string): void {
+    const blocking = decision.reasons.filter((reason) => reason.severity === "blocking");
+    this.capture({
+      taskId: task.id,
+      conversationId: task.conversationId ?? null,
+      runId: run.id,
+      executorId: run.executorId ?? "native",
+      kind: "decision",
+      role: "system",
+      content: `recovery:${decision.kind}${blocking.length > 0 ? `：${blocking.map((reason) => reason.message).join("；")}` : ""}`,
+      provenance: {
+        source: "scheduler-recovery",
+        phase,
+        decision: decision.kind,
+        reasons: decision.reasons
+      },
+      executorEventId: `recovery:${run.id}:${phase}:${decision.kind}`
+    });
+  }
+
+  /**
+   * Mark pending physical resources as confirmed when they are provably gone.
+   * Never kills a live background job here: a dev server may intentionally
+   * outlive the attempt that started it.
+   */
+  private reconcileTaskCleanup(taskId: string): void {
+    const registry = getBackgroundTaskRegistry();
+    for (const operation of this.service.store.listCleanupPendingRunOperations(taskId)) {
+      let failure: string | null = null;
+      let stillRunning = false;
+      for (const resource of operation.resources) {
+        if (resource.kind === "process") {
+          const record = registry?.get(resource.id) ?? null;
+          if (!record) {
+            failure = `找不到进程记录 ${resource.id}`;
+            continue;
+          }
+          if (record.status === "running") {
+            stillRunning = true;
+            continue;
+          }
+        } else if (resource.kind === "subagent") {
+          // Subagents live inside the attempt process; an attempt that ended
+          // cannot still own one.
+          continue;
+        } else {
+          failure = `不支持的资源类型 ${resource.kind}`;
+        }
+      }
+      if (stillRunning && !failure) continue;
+      try {
+        this.service.store.settleRunOperationCleanup({
+          operationId: operation.operationId,
+          state: failure ? "failed" : "confirmed",
+          error: failure
+        });
+      } catch {
+        // Cleanup reconciliation is advisory; an already-settled row is fine.
       }
     }
-    const checkpoint = this.service.store.latestRunCheckpoint(run.id);
-    if (!checkpoint) return "没有可用检查点";
-    if (checkpoint.kind === "final" || checkpoint.kind === "waiting_input") return "检查点不是可继续状态";
-    const permissionsDigest = task.permissions ? hashStable(task.permissions) : null;
-    if (checkpoint.proof?.permissionsDigest && checkpoint.proof.permissionsDigest !== permissionsDigest) {
-      return "权限已变化，等待用户确认";
-    }
-    if (!this.readCheckpointBody(run.id, checkpoint)) return "检查点文件缺失且事件日志中没有快照";
-    return null;
+  }
+
+  private autoResumeIssue(task: TaskRecord, run: RunRecord): string | null {
+    const decision = this.decideRecovery(task, run);
+    this.recordRecoveryDecision(task, run, decision, "auto_resume_check");
+    if (decision.kind === "resume") return null;
+    const blocking = decision.reasons.find((reason) => reason.severity === "blocking");
+    return blocking?.message ?? "运行状态不允许自动恢复";
   }
 
   private recoverInterruptedTasks(): void {
     const now = new Date().toISOString();
     for (const task of this.service.store.listTasks()) {
       if (task.status !== "running") continue;
+      this.reconcileTaskCleanup(task.id);
       const runningRuns = this.service.store.listRuns(task.id).filter((run) => run.status === "running");
       let autoRun: RunRecord | null = null;
       for (const run of runningRuns) {
@@ -1400,6 +1473,28 @@ export class HearthScheduler {
             this.steering.delete(taskId);
           }
         }
+        if (previousRun && executorId === "native" && previousRun.status === "failed") {
+          const decision = this.decideRecovery(task, previousRun);
+          if (decision.kind === "reconcile") {
+            this.recordRecoveryDecision(task, previousRun, decision, "retry_gate");
+            const reason = decision.reasons.find((item) => item.severity === "blocking")?.message
+              ?? "运行状态需要人工确认";
+            const error: TaskError = {
+              kind: "effect_unknown",
+              message: reason,
+              recoverable: true,
+              guidance: "先核对工作区或外部状态，再点击重试"
+            };
+            this.service.updateTask(taskId, {
+              status: "recoverable",
+              currentRunId: previousRun.id,
+              nextAction: "等待对账后重试",
+              error
+            }, previousRun.id);
+            this.refreshTaskSummary(taskId, { lastFailure: error });
+            return;
+          }
+        }
         const attempt = this.service.store.listRuns(taskId).length + 1;
         const runId = randomUUID();
         const taskRoot = this.taskRoot(taskId);
@@ -1429,6 +1524,7 @@ export class HearthScheduler {
         const manifestRoot = this.inPlaceWorkspace(task);
         const manifestBefore = manifestRoot ? snapshotWorkspace(manifestRoot) : null;
         const result = await this.runAttempt({ task, run, executorId, taskRoot, outDir, handoff, pendingInput, resumePrompt, previousRun, controller, budget: remainingBudget });
+        this.reconcileTaskCleanup(taskId);
         if (result.status !== "waiting_approval") await this.browserSessions.release(taskId);
         if (manifestRoot && manifestBefore) this.recordInPlaceChanges(task, manifestRoot, manifestBefore);
         if (result.status === "failed" || this.service.requireTask(taskId).status !== "completed") {

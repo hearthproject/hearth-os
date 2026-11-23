@@ -158,6 +158,12 @@ export interface NewRunOperation {
   updatedAt?: string;
 }
 
+export interface RunOperationResource {
+  kind: string;
+  id: string;
+  meta?: Record<string, unknown>;
+}
+
 export interface RunOperationRecord {
   operationId: string;
   runId: string;
@@ -179,6 +185,11 @@ export interface RunOperationRecord {
   errorCode: string | null;
   effectRef: string | null;
   receipt: unknown;
+  cleanupState: "none" | "pending" | "confirmed" | "failed";
+  cleanupAttempts: number;
+  resources: RunOperationResource[];
+  cleanupError: string | null;
+  cleanupAt: string | null;
   updatedAt: string;
 }
 
@@ -190,12 +201,20 @@ export interface SettleRunOperationInput {
   errorCode?: string | null;
   effectRef?: string | null;
   receipt?: unknown;
+  resources?: RunOperationResource[];
   settledAt?: string;
+}
+
+export interface SettleRunOperationCleanupInput {
+  operationId: string;
+  state: "confirmed" | "failed";
+  error?: string | null;
+  at?: string;
 }
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 38;
+export const CURRENT_SCHEMA_VERSION = 39;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -292,6 +311,11 @@ CREATE TABLE IF NOT EXISTS run_operations (
   error_code TEXT,
   effect_ref TEXT,
   receipt_json TEXT,
+  cleanup_state TEXT NOT NULL DEFAULT 'none',
+  cleanup_attempts INTEGER NOT NULL DEFAULT 0,
+  resources_json TEXT,
+  cleanup_error TEXT,
+  cleanup_at TEXT,
   updated_at TEXT NOT NULL,
   UNIQUE(run_id, tool_call_id)
 );
@@ -1665,10 +1689,20 @@ export class HearthStore {
       error_code TEXT,
       effect_ref TEXT,
       receipt_json TEXT,
+      cleanup_state TEXT NOT NULL DEFAULT 'none',
+      cleanup_attempts INTEGER NOT NULL DEFAULT 0,
+      resources_json TEXT,
+      cleanup_error TEXT,
+      cleanup_at TEXT,
       updated_at TEXT NOT NULL,
       UNIQUE(run_id, tool_call_id)
     );
     CREATE INDEX IF NOT EXISTS run_operations_run_phase_idx ON run_operations(run_id, phase, started_at);`);
+    ensureColumn(this.db, "run_operations", "cleanup_state", "TEXT NOT NULL DEFAULT 'none'");
+    ensureColumn(this.db, "run_operations", "cleanup_attempts", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn(this.db, "run_operations", "resources_json", "TEXT");
+    ensureColumn(this.db, "run_operations", "cleanup_error", "TEXT");
+    ensureColumn(this.db, "run_operations", "cleanup_at", "TEXT");
     ensureColumn(this.db, "conversations", "project_id", "TEXT");
     ensureColumn(this.db, "events", "origin_instance_id", "TEXT");
     ensureColumn(this.db, "events", "origin_seq", "INTEGER");
@@ -2777,10 +2811,12 @@ export class HearthStore {
       throw operationError("OPERATION_NOT_DISPATCHED", `operation ${input.operationId} cannot settle before dispatch`);
     }
     const now = input.settledAt ?? new Date().toISOString();
+    const resources = input.resources ?? [];
     const update = this.db.prepare(
       `UPDATE run_operations
        SET phase = ?, settled_at = ?, result_digest = ?, output_ref = ?, error_code = ?,
-           effect_ref = ?, receipt_json = ?, updated_at = ?
+           effect_ref = ?, receipt_json = ?, cleanup_state = ?, cleanup_attempts = ?,
+           resources_json = ?, updated_at = ?
        WHERE operation_id = ? AND phase = 'dispatched'`
     ).run(
       input.phase,
@@ -2790,11 +2826,40 @@ export class HearthStore {
       input.errorCode ?? null,
       input.effectRef ?? null,
       input.receipt === undefined ? null : JSON.stringify(input.receipt),
+      resources.length > 0 ? "pending" : "none",
+      resources.length > 0 ? (existing.cleanupAttempts || 0) + 1 : 0,
+      resources.length > 0 ? JSON.stringify(resources) : null,
       now,
       input.operationId
     );
     if (Number(update.changes) === 0) {
       throw operationError("OPERATION_NOT_DISPATCHED", `operation ${input.operationId} is not dispatched`);
+    }
+    return this.getRunOperation(input.operationId)!;
+  }
+
+  settleRunOperationCleanup(input: SettleRunOperationCleanupInput): RunOperationRecord {
+    const existing = this.getRunOperation(input.operationId);
+    if (!existing) throw operationError("OPERATION_NOT_PREPARED", `operation ${input.operationId} was not prepared`);
+    if (existing.cleanupState === "confirmed" || existing.cleanupState === "failed") {
+      if (existing.cleanupState === input.state) return existing;
+      throw operationError(
+        "OPERATION_CLEANUP_SETTLED",
+        `operation ${input.operationId} cleanup is already ${existing.cleanupState}`
+      );
+    }
+    const now = input.at ?? new Date().toISOString();
+    const update = this.db.prepare(
+      `UPDATE run_operations
+       SET cleanup_state = ?, cleanup_attempts = cleanup_attempts + 1,
+           cleanup_error = ?, cleanup_at = ?, updated_at = ?
+       WHERE operation_id = ? AND cleanup_state IN ('none', 'pending')`
+    ).run(input.state, input.error ?? null, now, now, input.operationId);
+    if (Number(update.changes) === 0) {
+      throw operationError(
+        "OPERATION_CLEANUP_SETTLED",
+        `operation ${input.operationId} cleanup is already settled`
+      );
     }
     return this.getRunOperation(input.operationId)!;
   }
@@ -2813,6 +2878,18 @@ export class HearthStore {
     return (this.db.prepare(
       "SELECT * FROM run_operations WHERE run_id = ? AND phase != 'settled' ORDER BY started_at ASC"
     ).all(runId) as DbRow[]).map(rowToRunOperation);
+  }
+
+  listRunOperationsByTask(taskId: string): RunOperationRecord[] {
+    return (this.db.prepare(
+      "SELECT * FROM run_operations WHERE task_id = ? ORDER BY started_at ASC"
+    ).all(taskId) as DbRow[]).map(rowToRunOperation);
+  }
+
+  listCleanupPendingRunOperations(taskId: string): RunOperationRecord[] {
+    return (this.db.prepare(
+      "SELECT * FROM run_operations WHERE task_id = ? AND cleanup_state = 'pending' ORDER BY started_at ASC"
+    ).all(taskId) as DbRow[]).map(rowToRunOperation);
   }
 
   appendContextItem(item: ContextItem): ContextItem {
@@ -5416,6 +5493,16 @@ function rowToRunOperation(row: DbRow): RunOperationRecord {
       receipt = String(row.receipt_json);
     }
   }
+  let resources: RunOperationResource[] = [];
+  if (row.resources_json != null) {
+    try {
+      const parsed = JSON.parse(String(row.resources_json));
+      if (Array.isArray(parsed)) resources = parsed as RunOperationResource[];
+    } catch {
+      resources = [];
+    }
+  }
+  const cleanupState = String(row.cleanup_state ?? "none");
   return {
     operationId: String(row.operation_id),
     runId: String(row.run_id),
@@ -5437,6 +5524,13 @@ function rowToRunOperation(row: DbRow): RunOperationRecord {
     errorCode: row.error_code == null ? null : String(row.error_code),
     effectRef: row.effect_ref == null ? null : String(row.effect_ref),
     receipt,
+    cleanupState: cleanupState === "pending" || cleanupState === "confirmed" || cleanupState === "failed"
+      ? cleanupState
+      : "none",
+    cleanupAttempts: Number(row.cleanup_attempts ?? 0),
+    resources,
+    cleanupError: row.cleanup_error == null ? null : String(row.cleanup_error),
+    cleanupAt: row.cleanup_at == null ? null : String(row.cleanup_at),
     updatedAt: String(row.updated_at)
   };
 }

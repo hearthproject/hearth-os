@@ -20,6 +20,7 @@ import { RunJournal, replayJournalEvents, replayJournalMessages } from "./journa
 import { digestBeforeEffect, hashJson, resultDigest as digestToolResult } from "./operations/digest.ts";
 import { ToolExecutionHandle, type ToolExecutionOutcome } from "./operations/execution.ts";
 import { operationIdFor } from "./operations/types.ts";
+import type { OperationResourceRef } from "./operations/types.ts";
 import type {
   AgentCheckpoint,
   AgentUsage,
@@ -70,6 +71,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   let missingFinishTurns = 0;
   let goalContinuations = 0;
   let truncatedContinuations = 0;
+  let resumeUnsafeEffect: { toolName: string; callId: string; effect: AgentToolEffect } | null = null;
   let finishRejections = 0;
   let stopRejections = 0;
   let sameProgressCount = 0;
@@ -240,7 +242,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         messages.splice(0, messages.length, ...replay.messages);
         if (Object.keys(replay.addedUsage).length > 0) addUsage(usage, replay.addedUsage as AgentUsage);
         if (replay.inFlight) {
-          const effect = replay.inFlight.effect;
+          const effect = replay.inFlight.effect as AgentToolEffect;
           // A crash in the middle of a tool call must never brick the task.
           // Tell the model the outcome is unknown and let it verify before
           // deciding whether to retry; the run continues either way.
@@ -256,6 +258,16 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
               role: "user",
               content: `<resume_reconciliation>\n工具 ${replay.inFlight.name}（${replay.inFlight.callId}）在上一进程中断，执行结果未知。不要假设成功或失败；先用只读方式核对当前状态，再决定是否重试或换一种做法，然后继续完成目标。\n</resume_reconciliation>`
             });
+          }
+          // Business outcomes and physical cleanup differ, but an unverified
+          // external/destructive/unknown effect is not something a new attempt
+          // may silently replay. Stop and let the host reconcile.
+          if (effect !== "read" && effect !== "local_write") {
+            resumeUnsafeEffect = {
+              toolName: replay.inFlight.name,
+              callId: replay.inFlight.callId,
+              effect
+            };
           }
         }
       }
@@ -283,6 +295,15 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   }, 15_000);
   stallTimer.unref?.();
   if (options.journal) await checkpoint("turn", true);
+
+  if (resumeUnsafeEffect) {
+    return finish(
+      "waiting_input",
+      `上一轮 ${resumeUnsafeEffect.toolName}（${resumeUnsafeEffect.callId}）结果未知（${resumeUnsafeEffect.effect}），需要先核对工作区或外部状态再继续。`,
+      [],
+      "核对完成后继续"
+    );
+  }
 
   const lostWork = options.resume ? markLostActiveWork(state) : [];
   if (lostWork.length > 0) {
@@ -643,7 +664,8 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     operationId: string | null,
     outcome: ToolExecutionOutcome,
     result: AgentToolResult,
-    forceUnknown = false
+    forceUnknown = false,
+    resources: OperationResourceRef[] = []
   ): Promise<{ phase: "settled" | "unknown"; result: AgentToolResult }> {
     const ledger = options.operationLedger;
     if (!ledger || !operationId) {
@@ -660,7 +682,8 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         outputRef: result.metadata?.fullOutputPath ?? null,
         errorCode,
         effectRef: result.metadata?.effectRef ?? null,
-        receipt: result.metadata?.receipt ?? null
+        receipt: result.metadata?.receipt ?? null,
+        ...(resources.length > 0 ? { resources } : {})
       });
       return { phase, result: attachOperationMetadata(result, operationId, phase) };
     } catch (error) {
@@ -777,7 +800,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       }
       const missingReceipt = missingExternalWriteReceipt(effect, result);
       if (missingReceipt) result = parkExternalWrite(result);
-      const settled = await settleOperation(operation.operationId, outcome, result, missingReceipt);
+      const settled = await settleOperation(operation.operationId, outcome, result, missingReceipt, operationResources(call, result));
       result = settled.result;
       journalAppend({
         type: "tool.result",
@@ -1144,7 +1167,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
             }
             const missingReceipt = missingExternalWriteReceipt(effect, executionResult);
             if (missingReceipt) executionResult = parkExternalWrite(executionResult);
-            const settled = await settleOperation(operation.operationId, outcome, executionResult, missingReceipt);
+            const settled = await settleOperation(operation.operationId, outcome, executionResult, missingReceipt, operationResources(effectiveCall, executionResult));
             result = settled.result;
             toolRetries = outcome.retries;
             toolTotalDurationMs = outcome.totalDurationMs;
@@ -1457,6 +1480,26 @@ function addUsage(target: RunUsage, value: AgentUsage): void {
   target.cacheWriteInputTokens += (Number.isFinite(value.cacheWriteInputTokens) ? Math.max(0, value.cacheWriteInputTokens ?? 0) : 0);
   target.outputTokens += (Number.isFinite(value.outputTokens) ? Math.max(0, value.outputTokens ?? 0) : 0);
   target.reasoningOutputTokens += (Number.isFinite(value.reasoningOutputTokens) ? Math.max(0, value.reasoningOutputTokens ?? 0) : 0);
+}
+
+function operationResources(call: AgentToolCall, result: AgentToolResult): OperationResourceRef[] {
+  const meta = result.metadata;
+  if (!meta) return [];
+  const resources: OperationResourceRef[] = [];
+  // Only long-lived shell sessions own an OS process. A foreground command that
+  // already exited needs no cleanup confirmation.
+  const stillRunning = meta.exitCode === undefined || meta.exitCode === null;
+  if (call.name === "shell" && meta.sessionId && (meta.background === true || stillRunning)) {
+    resources.push({
+      kind: "process",
+      id: meta.sessionId,
+      meta: { tool: "shell", background: meta.background === true }
+    });
+  }
+  if (meta.agentId && meta.agentStatus === "running") {
+    resources.push({ kind: "subagent", id: meta.agentId });
+  }
+  return resources;
 }
 
 const READ_ONLY_TOOL_NAMES = new Set([

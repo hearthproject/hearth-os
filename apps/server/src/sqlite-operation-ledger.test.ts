@@ -40,4 +40,37 @@ describe("SqliteOperationLedger", () => {
     expect(await ledger.listUnsettled("run-1")).toHaveLength(0);
     store.close();
   });
+
+  it("records physical cleanup separately from the business outcome", async () => {
+    const store = new HearthStore(":memory:");
+    const ledger = new SqliteOperationLedger(store);
+    const operationId = "run-2:call-2";
+    await ledger.prepare({
+      operationId,
+      runId: "run-2",
+      taskId: "task-2",
+      toolCallId: "call-2",
+      toolName: "shell",
+      argsHash: "args-2",
+      effect: "local_write"
+    });
+    await ledger.dispatch({ operationId });
+    const settled = await ledger.settle({
+      operationId,
+      phase: "settled",
+      resultDigest: "result-2",
+      resources: [{ kind: "process", id: "session-1", meta: { background: true } }]
+    });
+    expect(settled.cleanupState).toBe("pending");
+    expect(settled.resources).toEqual([{ kind: "process", id: "session-1", meta: { background: true } }]);
+    expect(store.listCleanupPendingRunOperations("task-2")).toHaveLength(1);
+
+    const cleaned = await ledger.settleCleanup({ operationId, state: "confirmed" });
+    expect(cleaned.cleanupState).toBe("confirmed");
+    expect(cleaned.cleanupAttempts).toBeGreaterThan(0);
+    expect(store.listCleanupPendingRunOperations("task-2")).toHaveLength(0);
+    await expect(ledger.settleCleanup({ operationId, state: "failed" }))
+      .rejects.toMatchObject({ code: "OPERATION_CLEANUP_SETTLED" });
+    store.close();
+  });
 });

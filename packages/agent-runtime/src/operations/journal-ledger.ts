@@ -7,6 +7,7 @@ import {
   type OperationFact,
   type OperationLedger,
   type PrepareOperationInput,
+  type SettleCleanupInput,
   type SettleOperationInput
 } from "./types.ts";
 
@@ -78,6 +79,11 @@ export class JsonlOperationLedger implements OperationLedger {
       errorCode: null,
       effectRef: null,
       receipt: null,
+      cleanupState: "none",
+      cleanupAttempts: 0,
+      resources: [],
+      cleanupError: null,
+      cleanupAt: null,
       updatedAt: now
     };
     this.commit(fact);
@@ -129,6 +135,7 @@ export class JsonlOperationLedger implements OperationLedger {
       );
     }
     const now = input.settledAt ?? new Date().toISOString();
+    const resources = [...(input.resources ?? [])];
     const fact: OperationFact = {
       ...existing,
       phase: input.phase,
@@ -138,6 +145,33 @@ export class JsonlOperationLedger implements OperationLedger {
       errorCode: input.errorCode ?? null,
       effectRef: input.effectRef ?? null,
       receipt: input.receipt ?? null,
+      cleanupState: resources.length > 0 ? "pending" : "none",
+      cleanupAttempts: resources.length > 0 ? 1 : 0,
+      resources,
+      cleanupError: null,
+      cleanupAt: null,
+      updatedAt: now
+    };
+    this.commit(fact);
+    return cloneFact(fact);
+  }
+
+  async settleCleanup(input: SettleCleanupInput): Promise<OperationFact> {
+    const existing = this.require(input.operationId);
+    if (existing.cleanupState === "confirmed" || existing.cleanupState === "failed") {
+      if (existing.cleanupState === input.state) return cloneFact(existing);
+      throw new OperationLedgerError(
+        "OPERATION_CLEANUP_SETTLED",
+        `operation ${input.operationId} cleanup is already ${existing.cleanupState}`
+      );
+    }
+    const now = input.at ?? new Date().toISOString();
+    const fact: OperationFact = {
+      ...existing,
+      cleanupState: input.state,
+      cleanupAttempts: existing.cleanupAttempts + 1,
+      cleanupError: input.error ?? null,
+      cleanupAt: now,
       updatedAt: now
     };
     this.commit(fact);
@@ -214,6 +248,10 @@ export class JsonlOperationLedger implements OperationLedger {
 function cloneFact(fact: OperationFact): OperationFact {
   return {
     ...fact,
-    receipt: fact.receipt == null ? null : structuredClone(fact.receipt)
+    receipt: fact.receipt == null ? null : structuredClone(fact.receipt),
+    resources: fact.resources.map((resource) => ({
+      ...resource,
+      ...(resource.meta ? { meta: structuredClone(resource.meta) } : {})
+    }))
   };
 }

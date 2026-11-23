@@ -10,6 +10,7 @@ import type {
   OperationFact,
   OperationLedger,
   PrepareOperationInput,
+  SettleCleanupInput,
   SettleOperationInput
 } from "./types.ts";
 import { runAgent } from "../runtime.ts";
@@ -103,6 +104,10 @@ class FaultLedger implements OperationLedger {
   async settle(input: SettleOperationInput): Promise<OperationFact> {
     if (this.fault === "settle") throw new Error("injected settle failure");
     return this.inner.settle(input);
+  }
+
+  async settleCleanup(input: SettleCleanupInput): Promise<OperationFact> {
+    return this.inner.settleCleanup(input);
   }
 
   get(operationId: string): Promise<OperationFact | null> {

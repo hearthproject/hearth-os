@@ -4,7 +4,9 @@ import type {
   OperationFact,
   OperationLedger,
   OperationPhase,
+  OperationResourceRef,
   PrepareOperationInput,
+  SettleCleanupInput,
   SettleOperationInput
 } from "@hearth/agent-runtime";
 import type { HearthStore, RunOperationRecord } from "@hearth/eventlog";
@@ -48,7 +50,17 @@ export class SqliteOperationLedger implements OperationLedger {
       errorCode: input.errorCode ?? null,
       effectRef: input.effectRef ?? null,
       ...(input.receipt === undefined ? {} : { receipt: input.receipt }),
+      ...(input.resources ? { resources: input.resources as OperationResourceRef[] } : {}),
       ...(input.settledAt ? { settledAt: input.settledAt } : {})
+    }));
+  }
+
+  async settleCleanup(input: SettleCleanupInput): Promise<OperationFact> {
+    return toFact(this.store.settleRunOperationCleanup({
+      operationId: input.operationId,
+      state: input.state,
+      error: input.error ?? null,
+      ...(input.at ? { at: input.at } : {})
     }));
   }
 
@@ -84,6 +96,11 @@ function toFact(row: RunOperationRecord): OperationFact {
     errorCode: row.errorCode,
     effectRef: row.effectRef,
     receipt: row.receipt,
+    cleanupState: row.cleanupState,
+    cleanupAttempts: row.cleanupAttempts,
+    resources: row.resources as OperationResourceRef[],
+    cleanupError: row.cleanupError,
+    cleanupAt: row.cleanupAt,
     updatedAt: row.updatedAt
   };
 }
