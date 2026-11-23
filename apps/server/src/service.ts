@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, realpathSync, statSync } from "node:fs";
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import type { PermissionMode } from "./action-resolver.ts";
 import type {
   ApprovalListItem,
@@ -206,6 +206,22 @@ export class HearthService {
     const executorId = project ? "native" : input.executorId ?? "native";
     const taskKind = input.taskKind ?? (project || workspacePath ? "workspace" : "general");
     const expectedOutputs = input.expectedOutputs ?? ["result.md"];
+    for (const output of expectedOutputs) {
+      const clean = output.replace(/\\/g, "/").replace(/[\\/]+$/, "");
+      if (
+        isAbsolute(output)
+        || /^[a-zA-Z]:/.test(output)
+        || clean.split("/").some((segment) => segment === "..")
+        || clean.length === 0
+        || clean === "."
+      ) {
+        throw new TaskInputSelectionError(
+          "INVALID_EXPECTED_OUTPUT",
+          `期望产物必须是任务目录内的相对路径：${output}`,
+          400
+        );
+      }
+    }
     const workspaceScoped = taskKind === "workspace" || Boolean(project);
     const defaultRoot = workspacePath ?? (project ? resolve(project.path) : null);
     let permissions = input.permissions ? { ...input.permissions } : undefined;

@@ -340,6 +340,38 @@ describe("cross-module integration", () => {
     });
   });
 
+  describe("task input guards", () => {
+    it("rejects expected outputs that escape the task directory before a run starts", async () => {
+      for (const bad of ["../escape.md", "..\\escape.md", "C:\\temp\\x.md", "/etc/passwd", "docs/../../x.md", "."]) {
+        const response = await app.inject({
+          method: "POST",
+          url: "/api/tasks",
+          payload: { title: "越界产物", goal: "验证路径校验", expectedOutputs: [bad] }
+        });
+        expect(response.statusCode, bad).toBe(400);
+        expect(response.json().error, bad).toBe("INVALID_EXPECTED_OUTPUT");
+      }
+    });
+
+    it("accepts nested relative outputs and rejects a project that does not exist", async () => {
+      const ok = await app.inject({
+        method: "POST",
+        url: "/api/tasks",
+        payload: { title: "嵌套产物", goal: "生成文档", expectedOutputs: ["docs/result.md"] }
+      });
+      expect(ok.statusCode).toBe(201);
+      expect(ok.json().expectedOutputs).toEqual(["docs/result.md"]);
+
+      const missing = await app.inject({
+        method: "POST",
+        url: "/api/tasks",
+        payload: { title: "缺少项目", goal: "生成文档", expectedOutputs: ["result.md"], projectId: "PRJ-missing" }
+      });
+      expect(missing.statusCode).toBe(404);
+      expect(missing.json().error).toBe("PROJECT_NOT_FOUND");
+    });
+  });
+
   describe("api robustness", () => {
     it("answers malformed requests with client errors instead of crashing", async () => {
       const cases: Array<{ method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE"; url: string; payload?: Record<string, unknown> }> = [
