@@ -6,6 +6,7 @@ import { sha256File, type PreparedInput, resolveInside } from "./workspace.ts";
 
 const MAX_FILES = 1_000;
 const MAX_TOTAL_BYTES = 100 * 1024 * 1024;
+const INTERNAL_DIRECTORIES = new Set([".hearth", ".git"]);
 
 export interface PublishArtifactsOptions {
   task: TaskRecord;
@@ -162,6 +163,7 @@ function walkDirectory(root: string, directory: string, result: WalkedFile[]): v
     const absolutePath = join(directory, entry.name);
     if (entry.isSymbolicLink()) throw new Error(`产物目录不允许符号链接：${absolutePath}`);
     if (entry.isDirectory()) {
+      if (INTERNAL_DIRECTORIES.has(entry.name)) continue;
       walkDirectory(root, absolutePath, result);
     } else if (entry.isFile()) {
       const stat = statSync(absolutePath);
