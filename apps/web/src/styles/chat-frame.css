@@ -207,23 +207,107 @@
   font-size: var(--fs-11);
 }
 
-.chat-markdown { overflow-wrap: anywhere; }
+.chat-markdown {
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: var(--fs-14);
+  line-height: 1.72;
+}
+
 .chat-markdown > *:first-child { margin-top: 0; }
 .chat-markdown > *:last-child { margin-bottom: 0; }
-.chat-markdown p { margin: 0 0 8px; }
+
+.chat-markdown p { margin: 0 0 10px; }
+.chat-markdown p:last-child { margin-bottom: 0; }
+
 .chat-markdown h1,
 .chat-markdown h2,
-.chat-markdown h3 { margin: 14px 0 6px; font-size: var(--fs-15); }
+.chat-markdown h3 {
+  margin: 20px 0 8px;
+  color: var(--ink);
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+.chat-markdown h1 { font-size: 20px; }
+.chat-markdown h2 { font-size: 17px; }
+.chat-markdown h3 { font-size: 15px; }
+.chat-markdown h4 { margin: 16px 0 6px; font-size: 14px; font-weight: 650; }
+
 .chat-markdown ul,
-.chat-markdown ol { margin: 6px 0 10px; padding-left: 22px; }
-.chat-markdown li { margin: 2px 0; }
+.chat-markdown ol { margin: 8px 0 12px; padding-left: 20px; }
+.chat-markdown li { margin: 4px 0; }
+.chat-markdown li::marker { color: var(--ink-tertiary); }
+
+.chat-markdown strong { font-weight: 650; }
 
 .chat-markdown code {
   padding: 1px 5px;
-  border-radius: 4px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 5px;
   background: var(--surface-sunk);
   font-family: var(--font-mono);
-  font-size: 0.9em;
+  font-size: 12px;
+}
+
+.code-block {
+  margin: 12px 0 14px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--code-bg);
+}
+
+.code-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--code-ink) 12%, transparent);
+  background: var(--code-head);
+  color: var(--code-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.code-block-head button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--code-muted);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.code-block-head button:hover {
+  background: color-mix(in srgb, var(--code-ink) 10%, transparent);
+  color: var(--code-ink);
+}
+
+.code-block pre {
+  overflow-x: auto;
+  margin: 0;
+  padding: 12px 14px;
+  background: transparent;
+  color: var(--code-ink);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.code-block pre code {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
 }
 
 .chat-markdown pre {
@@ -231,8 +315,8 @@
   margin: 8px 0 12px;
   padding: 10px 12px;
   border-radius: var(--radius);
-  background: #23201c;
-  color: #f6eee5;
+  background: var(--code-bg);
+  color: var(--code-ink);
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.55;
@@ -240,25 +324,67 @@
 
 .chat-markdown pre code {
   padding: 0;
+  border: 0;
   background: transparent;
   color: inherit;
 }
 
+.chat-markdown .table-wrap {
+  margin: 12px 0 14px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
 .chat-markdown table {
   width: 100%;
-  margin: 8px 0 12px;
+  margin: 0;
   border-collapse: collapse;
   font-size: var(--fs-12);
 }
 
 .chat-markdown th,
 .chat-markdown td {
-  padding: 5px 8px;
-  border: 1px solid var(--line);
+  padding: 6px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
   text-align: left;
+  vertical-align: top;
 }
 
-.chat-markdown a { color: var(--risk); }
+.chat-markdown th:not(:last-child),
+.chat-markdown td:not(:last-child) { border-right: 1px solid var(--line); }
+.chat-markdown tbody tr:last-child td { border-bottom: 0; }
+.chat-markdown th {
+  background: var(--surface-sunk);
+  color: var(--ink);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.chat-markdown blockquote {
+  margin: 12px 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--ember);
+  background: var(--ember-tint);
+  color: var(--ink-secondary);
+}
+
+.chat-markdown hr {
+  height: 1px;
+  margin: 18px 0;
+  border: 0;
+  background: var(--line);
+}
+
+.chat-markdown a {
+  color: var(--ember);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--ember) 55%, transparent);
+  text-underline-offset: 2px;
+}
+
+.chat-markdown a:hover { text-decoration-color: var(--ember); }
 
 .task-status-head,
 .task-status-text,
@@ -316,10 +442,10 @@
 
 .composer textarea {
   flex: 1 1 auto;
-  min-height: 36px;
-  max-height: 160px;
+  min-height: 34px;
+  max-height: 132px;
   overflow-y: auto;
-  padding: 8px 4px;
+  padding: 6px 4px;
   border: 0;
   outline: none;
   resize: none;
@@ -327,7 +453,7 @@
   color: var(--ink);
   font-family: var(--font-ui);
   font-size: var(--fs-14);
-  line-height: 1.45;
+  line-height: 1.5;
 }
 
 .composer textarea:focus {
