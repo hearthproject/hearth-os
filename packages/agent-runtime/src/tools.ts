@@ -1,7 +1,8 @@
 import { exec as execCallback, spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createWriteStream, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { homedir } from "node:os";
+import { basename, delimiter, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import picomatch from "picomatch";
 import { RE2JS } from "re2js";
 import type { TaskPermissions } from "@hearth/core";
@@ -37,7 +38,7 @@ const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", "coverage", 
 
 //模型能使用的工具和实现
 export function createBuiltinTools(): AgentTool[] {
-  const tools = [readFileTool, readToolOutputTool, readDocumentTool, listFilesTool, searchTextTool, globTool, grepTool, writeFileTool, writeSpreadsheetTool, writeDocumentTool, editFileTool, applyPatchTool, shellTool, shellInputTool, shellResizeTool, shellOutputTool, shellWaitTool, shellKillTool, todoWriteTool, todoReadTool, runTestsTool, diagnosticsTool, submitPlanTool, rewindTool, rewindTurnTool, captureScreenTool, fetchUrlTool, askUserTool, finishTaskTool, ...createMemoryTools(), ...createGoalTools()];
+  const tools = [readFileTool, readDesktopFileTool, readToolOutputTool, readDocumentTool, listFilesTool, searchTextTool, globTool, grepTool, writeFileTool, writeSpreadsheetTool, writeDocumentTool, editFileTool, applyPatchTool, shellTool, shellInputTool, shellResizeTool, shellOutputTool, shellWaitTool, shellKillTool, todoWriteTool, todoReadTool, runTestsTool, diagnosticsTool, submitPlanTool, rewindTool, rewindTurnTool, captureScreenTool, fetchUrlTool, askUserTool, finishTaskTool, ...createMemoryTools(), ...createGoalTools()];
   return [...tools, createWorkflowTool(tools)];
 }
 
@@ -147,6 +148,7 @@ export function defaultTaskPermissions(options: {
 }): TaskPermissions {
   const tools = [
     "read_file",
+    "read_desktop_file",
     "read_document",
     "list_files",
     "search_text",
@@ -193,7 +195,7 @@ const readFileTool: AgentTool = {
     const path = stringArg(args, "path");
     const target = resolveSafe(path, context.workspaceRoot, context.permissions.readRoots, context.permissions.fullAccess ?? false);
     assertReadable(target, context.permissions.readRoots, context.permissions.fullAccess ?? false);
-    if (!existsSync(target)) throw new Error(missingPathError(path, target, context.workspaceRoot));
+    if (!existsSync(target)) throw Object.assign(new Error(missingPathError(path, target, context.workspaceRoot)), { code: "ENOENT", path });
     const stat = lstatSync(target);
     if (!stat.isFile()) throw new Error(`不是普通文件：${path}`);
     if (stat.size > MAX_READ_BYTES) throw new Error(`文件过大，请先用 search_text 定位：${path}`);
@@ -216,6 +218,96 @@ const readFileTool: AgentTool = {
     const body = selected.map((line, index) => `${offset + index}: ${line}`).join("\n");
     const more = endLine < lines.length ? `\n... 共 ${lines.length} 行，继续读取请调大 offset` : "";
     return { content: body + more, ...(more ? { metadata: { truncated: true } } : {}) };
+  }
+};
+
+const DESKTOP_ROOT_ENV = "HEARTH_DESKTOP_DIR";
+
+/**
+ * Directories the desktop file tool is allowed to read. Defaults to the current
+ * user's Desktop (including OneDrive-redirected ones); HEARTH_DESKTOP_DIR may
+ * add more roots as a path list.
+ */
+export function desktopRoots(): string[] {
+  const configured = (process.env[DESKTOP_ROOT_ENV] ?? "")
+    .split(delimiter)
+    .map((entry) => entry.trim().replace(/^"(.*)"$/, "$1"))
+    .filter(Boolean);
+  if (configured.length > 0) return configured.map((root) => resolve(root));
+  const candidates = [
+    join(homedir(), "Desktop"),
+    join(homedir(), "OneDrive", "Desktop"),
+    join(homedir(), "OneDrive", "桌面")
+  ];
+  const existing = candidates.filter((candidate) => existsSync(candidate));
+  return (existing.length > 0 ? existing : [candidates[0]!]).map((root) => resolve(root));
+}
+
+/** Resolve a desktop file argument: absolute paths stay, relative ones anchor at the first root. */
+export function resolveDesktopFilePath(input: string): string {
+  const raw = input.trim().replace(/^"(.*)"$/, "$1");
+  const roots = desktopRoots();
+  if (isAbsolute(raw)) return resolve(raw);
+  return resolve(roots[0] ?? process.cwd(), raw);
+}
+
+function samePathOnHost(left: string, right: string): boolean {
+  return process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
+}
+
+function insideHostRoot(root: string, target: string): boolean {
+  if (samePathOnHost(root, target)) return true;
+  const prefix = process.platform === "win32" ? `${root.toLowerCase()}${sep}` : `${root}${sep}`;
+  const candidate = process.platform === "win32" ? target.toLowerCase() : target;
+  return candidate.startsWith(prefix);
+}
+
+/**
+ * Read a file that lives outside the task sandbox (for example on the user's
+ * Desktop). The tool is intentionally not bound to `permissions.readRoots`: the
+ * server gates it through the approval flow instead.
+ */
+const readDesktopFileTool: AgentTool = {
+  definition: {
+    name: "read_desktop_file",
+    description: "读取用户桌面上的文件（任务工作区之外）。只能读取桌面目录内的文件；每次调用都需要用户在对话里批准，被拒绝时不要重试同一路径，请改用用户提供的其他输入或让用户把文件放进工作区。",
+    executionMode: "parallel",
+    effect: "read",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "桌面文件的绝对路径，或相对桌面根目录的路径" },
+        offset: { type: "number", description: "起始行，从 1 开始" },
+        limit: { type: "number", description: "最多读取多少行，默认 400，上限 2000" }
+      },
+      required: ["path"],
+      additionalProperties: false
+    }
+  },
+  async execute(input) {
+    const args = objectArgs(input);
+    const path = stringArg(args, "path");
+    const target = resolveDesktopFilePath(path);
+    const roots = desktopRoots();
+    const realRoots = roots.map((root) => canonicalPath(root));
+    const realTarget = canonicalPath(target);
+    if (!realRoots.some((root) => insideHostRoot(root, realTarget))) {
+      throw new Error(`read_desktop_file 只能读取桌面目录（${roots.join("、")}）下的文件：${target}`);
+    }
+    const stat = statSync(realTarget);
+    if (!stat.isFile()) throw new Error(`不是普通文件：${path}`);
+    if (stat.size > MAX_READ_BYTES) throw new Error(`文件过大，请改用更小的文件或只读取片段：${path}`);
+    const buffer = readFileSync(realTarget);
+    if (looksBinary(buffer)) throw new Error(`文件疑似二进制内容，read_desktop_file 只返回文本：${path}`);
+    const content = buffer.toString("utf8");
+    const lines = content.replace(/^\uFEFF/, "").split(/\r?\n/);
+    const offset = Math.max(1, intArg(args, "offset", 1));
+    const limit = Math.min(2_000, Math.max(1, intArg(args, "limit", 400)));
+    const selected = lines.slice(offset - 1, offset - 1 + limit);
+    const endLine = offset + selected.length - 1;
+    const body = selected.map((line, index) => `${offset + index}: ${line}`).join("\n");
+    const more = endLine < lines.length ? `\n... 共 ${lines.length} 行，继续读取请调大 offset` : "";
+    return { content: `${realTarget}\n${body}${more}`, ...(more ? { metadata: { truncated: true } } : {}) };
   }
 };
 

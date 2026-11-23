@@ -52,6 +52,25 @@ function nativeResult(text: string) {
 }
 
 describe("Hearth scheduler", () => {
+  it("finishes a direct file read without report repair passes", async () => {
+    const service = setup();
+    let calls = 0;
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, {
+      modelSettingsForExecutor: () => chatSettings(),
+      nativeRunner: async (options) => {
+        calls++;
+        expect(options.expectedOutputs).toEqual([]);
+        expect(options.prompt).not.toContain("缺失产物不算完成");
+        return { ...nativeResult("文件不存在：missing.txt。"), outputs: [] };
+      }
+    });
+    scheduler.start();
+    const task = service.createTask({ title: "读文件", goal: "读取 missing.txt", executorId: "native" });
+    const completed = await waitForStatus(service, task.id, "completed");
+    expect(completed.resultSummary).toBe("文件不存在：missing.txt。");
+    expect(calls).toBe(1);
+    expect(store?.listArtifacts(task.id).some((artifact) => artifact.relativePath.endsWith(".md"))).toBe(false);
+  });
   let store: HearthStore | null = null;
   let scheduler: HearthScheduler | null = null;
   let tempDir: string | null = null;
@@ -1550,6 +1569,47 @@ describe("Hearth scheduler", () => {
     expect(completed.resultSummary).toBe("原生任务完成");
   });
 
+  it("asks for approval before reading a file outside the workspace", async () => {
+    const service = setup();
+    const modelSettingsPath = configureModel();
+    const approvals = new ApprovalManager(service, async () => ({}));
+    const desktop = mkdtempSync(join(tmpdir(), "hearth-desktop-"));
+    const desktopFile = join(desktop, "note.md");
+    writeFileSync(desktopFile, "桌面内容\n", "utf8");
+    const previous = process.env.HEARTH_DESKTOP_DIR;
+    process.env.HEARTH_DESKTOP_DIR = desktop;
+    let authorization: { allowed: boolean; reason?: string } | null = null;
+    const nativeRunner: NativeRunner = async (options) => {
+      authorization = await options.onAuthorizeTool?.({
+        call: {
+          id: "call-desktop",
+          name: "read_desktop_file",
+          arguments: { path: desktopFile },
+          rawArguments: JSON.stringify({ path: desktopFile })
+        },
+        definition: { name: "read_desktop_file", description: "读取桌面文件", parameters: {} }
+      }) ?? null;
+      return nativeResult("已读取桌面文件");
+    };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath, approvals });
+    scheduler.start();
+
+    try {
+      const task = service.createTask({ title: "读取桌面文件", goal: "读取桌面文件", executorId: "native" });
+      await waitForStatus(service, task.id, "waiting_approval");
+      const pending = (store as HearthStore).listApprovals(task.id).find((approval) => approval.status === "pending");
+      expect(pending?.kind).toBe("tool.read_desktop_file");
+      await approvals.decide(pending!.id, "approve", pending!.parameterHash);
+      const completed = await waitForStatus(service, task.id, "completed");
+      expect(authorization).toEqual({ allowed: true });
+      expect(completed.resultSummary).toBe("已读取桌面文件");
+    } finally {
+      if (previous === undefined) delete process.env.HEARTH_DESKTOP_DIR;
+      else process.env.HEARTH_DESKTOP_DIR = previous;
+      rmSync(desktop, { recursive: true, force: true });
+    }
+  });
+
   it("runs a native shell tool without a pending approval", async () => {
     const service = setup();
     const modelSettingsPath = configureModel();
@@ -1920,6 +1980,11 @@ describe("Hearth scheduler", () => {
     return new HearthScheduler({
       service,
       codexRunner,
+      // These tests inject runners; they must not depend on the developer's Codex login.
+      executorHealth: (executorId) => ({
+        canRun: executorId === "codex" || (executorId === "native" && Boolean(extra.nativeRunner)) || (executorId === "deepseek-harness" && Boolean(extra.deepseekRunner)),
+        issues: []
+      }),
       ...(extra.nativeRunner ? { nativeRunner: extra.nativeRunner } : {}),
       modelSettingsPath: extra.modelSettingsPath ?? join(requireTemp(), "model-settings.json"),
       workspaceRoot: join(requireTemp(), "workspaces"),

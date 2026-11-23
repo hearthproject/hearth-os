@@ -1,6 +1,6 @@
 [package]
 name = "hearth_desktop"
-version = "0.3.2"
+version = "0.3.3"
 description = "Hearth desktop shell"
 authors = ["Hearth"]
 license = ""

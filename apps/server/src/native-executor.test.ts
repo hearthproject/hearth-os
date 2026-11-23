@@ -4,7 +4,9 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { TaskRecord } from "@hearth/core";
 import type { AgentTool } from "@hearth/agent-runtime";
-import { dedupeTools, refreshNativeResume, jsonDeliverableIssue, nativeProgressForEvent, nativeSystemPrompt, normalizeJsonDeliverables } from "./native-executor.ts";
+import { directReadTool, dedupeTools, refreshNativeResume, jsonDeliverableIssue, nativeProgressForEvent, nativeSystemPrompt, normalizeJsonDeliverables } from "./native-executor.ts";
+import { createBuiltinTools, defaultTaskPermissions, runAgent } from "@hearth/agent-runtime";
+import { wantsDirectFileRead } from "./task-intent.ts";
 
 const baseTask = {
   id: "task-1",
@@ -24,6 +26,33 @@ const baseTask = {
 } as TaskRecord;
 
 describe("native tool assembly", () => {
+  it("returns a missing file in one model turn without creating a report", async () => {
+    const root = mkdtempSync(join(tmpdir(), "hearth-missing-"));
+    let turns = 0;
+    try {
+      const read = directReadTool(createBuiltinTools().find((tool) => tool.definition.name === "read_file")!);
+      const result = await runAgent({
+        model: async () => {
+          if (++turns > 1) throw new Error("Unexpected extra model turn");
+          return { content: "", toolCalls: [{ id: "read", name: "read_file", arguments: { path: "missing.txt" }, rawArguments: '{"path":"missing.txt"}' }], usage: null, finishReason: null };
+        },
+        tools: [read], goal: "读取 missing.txt", systemPrompt: "Read directly",
+        workspaceRoot: root, outDir: root, budget: {},
+        permissions: defaultTaskPermissions({ workspaceRoot: root, outDir: root, networkHosts: [] })
+      });
+      expect(result.status).toBe("completed");
+      expect(result.summary).toBe("文件不存在：missing.txt。");
+      expect(result.outputs).toEqual([]);
+      expect(turns).toBe(1);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it("limits the direct read path to inspection, not creation or multi-file work", () => {
+    expect(wantsDirectFileRead("读取 E:/data/missing.txt")).toBe(true);
+    for (const goal of ["读取文件并保存报告", "读取所有文件", "读取文件并修复代码", "读取 missing.txt，如果不存在就创建"]) {
+      expect(wantsDirectFileRead(goal)).toBe(false);
+    }
+  });
   it("dedupes tool definitions so upstream providers never receive duplicate finish_task entries", () => {
     const tool = {
       definition: {

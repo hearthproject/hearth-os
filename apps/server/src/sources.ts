@@ -284,7 +284,7 @@ export class SourceRegistry {
     for (const entry of entries) {
       const now = this.timestamp();
       if (entry.kind === "symlink") {
-        const item = this.failedItem(source, entry.relativePath, entry.absolutePath, "symlink_rejected", "来源目录中的符号链接不会被跟随", now);
+        const item = this.failedItem(source, entry.relativePath, entry.relativePath, "symlink_rejected", "来源目录中的符号链接不会被跟随", now);
         this.publishItem(item);
         changed += item.status === "failed" ? 1 : 0;
         continue;
@@ -304,13 +304,13 @@ export class SourceRegistry {
     try {
       const actual = realpathSync(entry.absolutePath);
       if (!isPathInside(root, actual)) {
-        this.publishItem(this.failedItem(source, entry.relativePath, entry.absolutePath, "path_escape", "文件真实路径越过来源根目录", now));
+        this.publishItem(this.failedItem(source, entry.relativePath, entry.relativePath, "path_escape", "文件真实路径越过来源根目录", now));
         return { changed: true };
       }
       const stat = statSync(actual);
       if (!stat.isFile()) throw new SourceRegistryError("UNSUPPORTED_SOURCE_ENTRY", "来源条目不是文件");
       if (stat.size > MAX_FILE_BYTES) {
-        this.publishItem(this.failedItem(source, entry.relativePath, entry.absolutePath, "too_large", `文件超过 ${MAX_FILE_BYTES} bytes`, now));
+        this.publishItem(this.failedItem(source, entry.relativePath, entry.relativePath, "too_large", `文件超过 ${MAX_FILE_BYTES} bytes`, now));
         return { changed: true };
       }
       const bytes = readFileSync(actual);
@@ -341,7 +341,7 @@ export class SourceRegistry {
       return { changed: true };
     } catch (error) {
       const sourceError = toSourceError(error, now);
-      this.publishItem(this.failedItem(source, entry.relativePath, entry.absolutePath, sourceError.code, sourceError.message, now));
+      this.publishItem(this.failedItem(source, entry.relativePath, entry.relativePath, sourceError.code, sourceError.message, now));
       return { changed: true };
     }
   }

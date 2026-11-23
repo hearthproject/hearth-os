@@ -201,6 +201,11 @@
   color: var(--ink);
 }
 
+.inline-run-output-full {
+  max-height: 420px;
+  color: var(--ink-secondary);
+}
+
 .inline-run-question {
   display: flex;
   flex-direction: column;

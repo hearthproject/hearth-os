@@ -1,12 +1,12 @@
 ---
 title: "当前交付状态"
-description: "2026-11-20 的代码、自动测试、构建和明确留空项。"
+description: "2026-11-21 的代码、自动测试、构建和明确留空项。"
 outline: [2, 3]
 ---
 
 # 当前交付状态
 
-核对日期：2026-11-20。本文只写当前 `main` 代码和本机能复现的事实，不把页面存在当成闭环，也不把历史计划当成现状。
+核对日期：2026-11-21。本文只写当前 `main` 代码和本机能复现的事实，不把页面存在当成闭环，也不把历史计划当成现状。
 
 > 阶段二至六的路线页是历史计划，部分描述已被当前范围收缩取代。当前范围以本文和[2026-11 验收报告](/delivery/acceptance-2026-11)为准。
 
@@ -27,22 +27,24 @@ outline: [2, 3]
 | 项目 | 命令 | 结果 |
 |---|---|---|
 | 类型检查 | `npm run typecheck` | 通过 |
-| 单元/集成测试 | `npm test` | 110 个文件、782 个用例全部通过 |
+| 单元/集成测试 | `npm test` | 130 个文件、876 个用例（861 通过、15 跳过；7 个超时项单独复跑通过） |
 | Web 构建 | `npm run build` | 通过（JS 723.79 kB / CSS 130.23 kB） |
 | 文档构建 | `npm run docs:build` | 通过，无死链 |
 | 浏览器 fixture | `npm run test:browser` | 12 项检查通过，18 个证据文件 |
 | UI 端到端（离线） | `HEARTH_E2E_OFFLINE=1 npm run test:e2e` | 18 项通过，0 失败 |
 | Tauri updater 编译 | `cargo check --manifest-path apps/desktop-tauri/src-tauri/Cargo.toml --features updater` | 通过 |
 | Tauri 构建配置 | `npx tauri build --debug --no-bundle --features updater --config <overlay>` | 通过 |
-| 0.2.0 安装包 | `npm run release:build` | NSIS 安装包 30.5 MiB，内置 server 启动并通过 `/api/ready` |
-| 发布整理 | `npm run release:prepare -- --skip-build` | 47.1 MiB 便携 zip（3,450 个文件）、安装包、发布说明、SHA256 校验和 |
+| 0.3.3 安装包 | `npm run release:build` | NSIS 安装包，内置 server 启动并通过 `/api/ready`；以 GitHub Pre-release 发布 |
+| 发布整理 | `npm run release:prepare -- --skip-build` | 便携 zip、安装包、发布说明、SHA256 校验和 |
+
+> 说明：Windows 本地跑 `npm test` 时，worktrees/subagents 等真实 git 测试较慢，曾触发默认 10 秒 hook 超时；已将 `vitest.config.ts` 的 `hookTimeout` 调到 30 秒。上表为 CI 与本地一致口径。`0.2.0` 验收快照仍保留在 [2026-11 验收报告](/delivery/acceptance-2026-11)，作为历史记录不再改写。
 
 ## 仍然明确留空
 
 - **真实模型首跑未验收：** 当前 `.hearth/model-settings.json` 的 key 调用 `deepseek-v4.1-flash-1017` 返回 `Access to model denied`。代码路径有 fake-runner 测试，但没有用可用模型完成一次真实首跑。这是外部凭据问题，不是测试通过就能替代的验收。
 - **日常 Chrome 扩展桥未实现：** 目前使用独立 Chrome profile，首次需要在该 profile 里登录站点；没有“直接接管已登录默认 Chrome”的 MV3 扩展。Chrome 136+ 默认 profile 禁止远程调试，因此没有走默认 profile 的捷径。
 - **签名更新未实际发布：** 仓库没有更新签名私钥、公钥和发布地址，自动更新只能在配置齐全的发布机器上启用；本机只验证了编译和禁用路径。
-- **安装包未做干净机安装/卸载：** 0.2.0 NSIS 安装包已在开发机构建成功，打包后的服务端也通过启动检查；但未在全新 Windows 用户环境执行安装、SmartScreen、启动、卸载和旧版本升级。
+- **安装包未做干净机安装/卸载：** 0.3.2 NSIS 安装包已在开发机构建成功，打包后的服务端也通过启动检查；但未在全新 Windows 用户环境执行安装、SmartScreen、启动、卸载和旧版本升级。
 - **真实账户未验收：** 飞书租户、SMTP/IMAP 账户、桌面设备仍只有代码和本地测试闭环，没有真实账户/设备的人工验收。
 - **Windows 代码签名证书未知：** 没有 Authenticode 证书，安装包会触发 SmartScreen；本轮未处理。
 

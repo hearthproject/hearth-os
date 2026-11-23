@@ -8,7 +8,7 @@ import { defaultConversationSettings, mergeConversationSettings } from "@hearth/
 import { buildServer } from "./app.ts";
 import { HearthService, visibleDeliverables } from "./service.ts";
 
-async function createTestProfile(app: FastifyInstance, name = "Test model"): Promise<string> {
+async function createTestProfile(app: FastifyInstance, name = "Test model", protocol = "openai-chat"): Promise<string> {
   const created = await app.inject({
     method: "POST",
     url: "/api/model-profiles",
@@ -16,7 +16,7 @@ async function createTestProfile(app: FastifyInstance, name = "Test model"): Pro
       name,
       providerId: "custom",
       providerName: "Test provider",
-      protocol: "openai-chat",
+      protocol,
       baseUrl: "https://models.example.com/v1",
       model: "test-model",
       apiKey: "test-key"
@@ -673,6 +673,7 @@ describe("chat-first API", () => {
       executorSettingsPath
     });
     await bindProfile(app, "native", await createTestProfile(app));
+    await bindProfile(app, "codex", await createTestProfile(app, "Codex test", "openai-responses"));
     const saved = await app.inject({
       method: "PUT",
       url: "/api/executor-settings",
@@ -816,6 +817,10 @@ describe("chat-first API", () => {
     vi.stubGlobal("fetch", vi.fn(async (_url: unknown, init?: RequestInit) => {
       const body = typeof init?.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : {};
       const messages = Array.isArray(body.messages) ? body.messages as Array<{ content?: string }> : [];
+      // Background model discovery is not a chat completion request.
+      if (!Array.isArray(body.messages)) return new Response(JSON.stringify({ data: [] }), {
+        headers: { "content-type": "application/json" }
+      });
       if (messages.some((message) => message.content?.includes("意图路由器"))) {
         return new Response(JSON.stringify({
           choices: [{ message: { content: '{"action":"chat","title":"","reason":"普通问答"}' } }]

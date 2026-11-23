@@ -655,6 +655,11 @@ export const api = {
     }),
   artifactUrl: (taskId: string, artifactId: string) =>
     `/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}`,
+  exportArtifact: (taskId: string, artifactId: string, destination: string) =>
+    request<{ path: string; bytes: number }>(
+      `/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}/export`,
+      { method: "POST", body: JSON.stringify({ destination }) }
+    ),
   attachmentUrl: (attachmentId: string) =>
     `/api/attachments/${encodeURIComponent(attachmentId)}`,
   downloadExport: () => {

@@ -637,6 +637,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
         const workspacePath = boundProject ? null : referencedFile ? dirname(referencedFile) : extractWorkspacePath(message);
         const fileInputs = storedFiles.map((file) => ({ label: file.name, path: file.path }));
         if (referencedFile) fileInputs.push({ label: basename(referencedFile), path: referencedFile });
+        if (controller.signal.aborted) return reply;
         const task = service.createTask({
           title: route.title || conversationTitle(userContent),
           goal: [message, detectedUrl ? `参考网址：${detectedUrl}` : ""].filter(Boolean).join("\n") || `处理附件：${storedFiles.map((file) => file.name).join("、")}`,
@@ -826,8 +827,9 @@ export function extractSkillInstallSource(message: string): string | null {
 function localPathCandidates(message: string): string[] {
   if (!message) return [];
   return [
-    ...(message.match(/[A-Za-z]:\\[^\s"'\`<>|?*]+/g) ?? []),
-    ...(message.match(/\\\\[^\s"'\`<>|?*]+/g) ?? [])
+    ...(message.match(/[A-Za-z]:[\\/][^\s"'\`<>|?*]+/g) ?? []),
+    ...(message.match(/\\\\[^\s"'\`<>|?*]+/g) ?? []),
+    ...Array.from(message.matchAll(/(?:^|[\s"'`(])(\/[^\s"'`<>|?*]+)/g), (match) => match[1]!)
   ].map((raw) => raw.replace(/[.,;:!?，。；！？]+$/, ""));
 }
 

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import { ChatMailDraft } from "../components/ChatMailDraft.tsx";
+import { ApprovalCard } from "../components/ApprovalCard.tsx";
 import { isMailDraftReply } from "../lib/mail-draft.ts";
 import remarkGfm from "remark-gfm";
 import {
@@ -127,6 +128,7 @@ export function ChatPage() {
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [savingEffort, setSavingEffort] = useState(false);
   const [reasoningDraft, setReasoningDraft] = useState<ReasoningEffort | null>(null);
+  const [isCancelling, setIsCancelling] = useState(false);
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
   const [skillInstallRequest, setSkillInstallRequest] = useState<{ source: string } | null>(null);
   const [skillNotice, setSkillNotice] = useState<string | null>(null);
@@ -222,6 +224,21 @@ export function ChatPage() {
     return next;
   }, [conversationTasks, liveRuns]);
   const hasRunningTask = runs.some((task) => task.status === "running" || task.status === "queued");
+  const pendingApprovalsQuery = useQuery({
+    queryKey: ["approvals", "pending"],
+    queryFn: () => api.approvals({ status: "pending", limit: 50 }),
+    enabled: Boolean(conversationId),
+    refetchInterval: 5_000,
+    staleTime: 1_000
+  });
+  const pinnedApprovals = useMemo(() => {
+    const taskIds = new Set(conversationTasks.map((task) => task.id));
+    if (taskIds.size === 0) return [];
+    return (pendingApprovalsQuery.data?.approvals ?? []).filter((approval) => taskIds.has(approval.taskId));
+  }, [pendingApprovalsQuery.data, conversationTasks]);
+  useEffect(() => {
+    if (!hasRunningTask) setIsCancelling(false);
+  }, [hasRunningTask]);
   const timeline = useMemo<Array<TimelineMessage | TimelineRun>>(() => [
     ...visibleMessages.map((message): TimelineMessage => ({ kind: "message", key: `m:${message.id}`, at: message.createdAt, message })),
     ...runs.map((task): TimelineRun => ({ kind: "run", key: `r:${task.id}`, at: task.createdAt, task }))
@@ -530,6 +547,25 @@ export function ChatPage() {
     await dispatch(outgoing);
   }
 
+  async function stopRunningTask() {
+    const task = stoppableTask;
+    if (isCancelling) return;
+    setQueue([]);
+    abortRef.current?.abort();
+    if (!task) return;
+    setIsCancelling(true);
+    try {
+      await api.cancel(task.id);
+      setLiveRuns((prev) => prev.map((run) => run.id === task.id ? { ...run, status: "cancelled" } : run));
+    } catch (caught) {
+      setError(caught instanceof Error ? `停止失败：${caught.message}` : "停止失败，请重试");
+    } finally {
+      setIsCancelling(false);
+    }
+    void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    void queryClient.invalidateQueries({ queryKey: ["conversation"] });
+  }
+
   async function dispatch(outgoing: OutgoingMessage) {
     const { text, attachments: sentAttachments, skillId: sentSkillId } = outgoing;
     const startedAt = Date.now();
@@ -733,6 +769,10 @@ export function ChatPage() {
   const selectedExecutorUnavailable = Boolean(selectedExecutorId && !executorAvailability[selectedExecutorId]);
   const visibleExecutorIds = EXECUTOR_ORDER.filter((id) => executorAvailability[id] || id === selectedExecutorId);
   const isWorking = sending || hasRunningTask;
+  const stoppableTask = useMemo(
+    () => runs.find((task) => task.status === "running" || task.status === "queued"),
+    [runs]
+  );
   const hasDraft = Boolean(input.trim() || attachments.length > 0);
   const canSubmit = !uploading && settingsReady && !selectedExecutorUnavailable && hasDraft;
   const modelSettings = healthQuery.data?.chatModel.settings;
@@ -803,6 +843,12 @@ export function ChatPage() {
 
         <div className="chat-scroll">
           <div className="message-list">
+            {isCancelling && (
+              <div className="chat-stopping">
+                <Loader2 size={16} className="spin" />
+                <span>正在停止任务，请稍候……</span>
+              </div>
+            )}
             {!configured && (
               <ChatNotice icon={<Settings2 size={15} />} tone="warn">
                 还没有接入聊天模型。普通问答需要先完成<Link to="/welcome">首次设置</Link>；执行请求仍会尝试运行。
@@ -853,6 +899,17 @@ export function ChatPage() {
           onDragLeave={onComposerDragLeave}
           onDrop={onComposerDrop}
         >
+          {pinnedApprovals.length > 0 && (
+            <div className="composer-approvals" role="region" aria-label="待确认的操作">
+              <div className="composer-approvals-head">
+                <ShieldCheck size={14} />
+                <span>需要你确认后才能继续</span>
+              </div>
+              {pinnedApprovals.map((approval) => (
+                <ApprovalCard key={approval.id} approval={approval} />
+              ))}
+            </div>
+          )}
           {draggingFiles && (
             <div className="composer-drop-overlay" role="status" aria-live="polite">
               <Paperclip size={20} />
@@ -1119,13 +1176,25 @@ export function ChatPage() {
             />
             <button
               type="button"
-              className={`composer-send ${isWorking ? "working" : ""}`}
-              onClick={() => void send()}
-              disabled={!canSubmit}
+              className={`composer-send ${isWorking ? "working" : ""} ${stoppableTask ? "stopping" : ""}`}
+              onClick={() => (stoppableTask || sending ? void stopRunningTask() : void send())}
+              disabled={isCancelling || (!canSubmit && !stoppableTask && !sending)}
               aria-busy={isWorking}
-              title={selectedExecutorUnavailable ? "当前锁定的执行器不可用" : isWorking ? "加入队列" : "发送"}
+              title={stoppableTask
+                ? `停止任务：${stoppableTask.title}`
+                : sending ? "停止回复" : selectedExecutorUnavailable
+                  ? "当前锁定的执行器不可用"
+                  : isWorking
+                    ? "加入队列"
+                    : "发送"}
             >
-              {uploading || (isWorking && !hasDraft) ? <Loader2 size={17} className="spin" /> : <ArrowUp size={18} />}
+              {uploading
+                ? <Loader2 size={17} className="spin" />
+                : stoppableTask || sending
+                  ? <span className="stop-icon" />
+                  : isWorking && !hasDraft
+                    ? <Loader2 size={17} className="spin" />
+                    : <ArrowUp size={18} />}
             </button>
           </div>
         </div>

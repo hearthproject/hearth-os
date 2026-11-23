@@ -22,11 +22,8 @@ function run(command, args, cwd = repoRoot) {
       shell: process.platform === "win32",
       env: {
         ...process.env,
-        CARGO_HOME: process.env.CARGO_HOME ?? "D:\\DevTools\\.cargo",
-        RUSTUP_HOME: process.env.RUSTUP_HOME ?? "D:\\DevTools\\.rustup",
         PATH: [
-          "D:\\DevTools\\.cargo\\bin",
-          process.env.HEARTH_MSVC_BIN ?? "C:\\Program Files (x86)\\Microsoft Visual Studio\\18\\BuildTools\\VC\\Tools\\MSVC\\14.51.36231\\bin\\Hostx64\\x64",
+          "C:\\Users\\15221\\.cargo\\bin",
           process.env.PATH ?? ""
         ].join(";")
       }

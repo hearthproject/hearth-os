@@ -12,7 +12,7 @@ import type {
   RuntimeEvent,
   SubagentType
 } from "@hearth/agent-runtime";
-import { deserializeAgentState, journalPathFor, CODING_RUN_BUDGET } from "@hearth/agent-runtime";
+import { deserializeAgentState, inspectJournal, journalPathFor, resolveDesktopFilePath, CODING_RUN_BUDGET } from "@hearth/agent-runtime";
 import { checkpointSnapshotFromEvent, RUNTIME_CHECKPOINT_EVENT, runtimeJournalEvents, SqliteRuntimeJournal } from "./sqlite-runtime-journal.ts";
 import type { ApprovalMode, BudgetDimension, BudgetExhaustion, ContextItem, ContextSettings, DelegationJob, DelegationResult, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, RunBudget, RunCheckpointProof, RunCheckpointRecord, RunRecord, TaskError, TaskFollowUpRecord, TaskLease, TaskProgressDetail, TaskRecord } from "@hearth/core";
 import { runCodex } from "@hearth/codex-executor";
@@ -69,7 +69,7 @@ import { chatModelConfigured, loadModelSettings, type ModelSettings } from "./mo
 import { prepareTaskRuntime, type RuntimePreparation } from "./runtime.ts";
 import type { HearthService } from "./service.ts";
 import { buildDeliveryRepairPrompt, buildTaskPrompt, prepareWorkspace, UnsupportedInputError, type PreparedWorkspace, type TaskApprovalKind } from "./workspace.ts";
-import { wantsPublicWebResearch, wantsScreenshot } from "./task-intent.ts";
+import { wantsDirectFileRead, wantsPublicWebResearch, wantsScreenshot } from "./task-intent.ts";
 import type { WebSearchService } from "./web-search.ts";
 import type { SkillService } from "./skills/service.ts";
 import { createSkillTools } from "./skill-tools.ts";
@@ -534,6 +534,7 @@ export class HearthScheduler {
       return task;
     }
     this.cancelled.add(taskId);
+    this.controllers.get(taskId)?.abort();
     this.cancelDelegationJobs(taskId);
     this.steering.delete(taskId);
     for (const followUp of this.service.store.listTaskFollowUps(taskId)) {
@@ -2053,7 +2054,7 @@ export class HearthScheduler {
       if (remainingIssues.length > 0) throw new Error(remainingIssues.join("\n"));
       if (!result.finalResponse.trim()) throw new Error("执行器没有返回最终总结");
       this.assertLease(taskId, run.leaseEpoch ?? 0, controller.signal.aborted && this.stopping);
-      const artifacts = publishArtifacts({
+      const artifacts = expectedOutputs.length === 0 ? [] : publishArtifacts({
         task, run, outDir: prepared.outDir, artifactBase: this.artifactBase, expectedOutputs, inputs: prepared.inputs,
         excludeRelativePaths: ["HANDOFF.md"],
         executor: { id: executorId, threadId: result.threadId, label: result.label, usage: result.usage },
@@ -2140,7 +2141,7 @@ export class HearthScheduler {
     const argumentsValue = approvalArguments(input.request.call.arguments);
     const summary = toolApprovalSummary(toolName, input.request.call.arguments);
     const permissionMode = this.service.permissionModeForTask(input.task);
-    if (permissionMode === "full") return { allowed: true };
+    if (permissionMode === "full" && classification.actionClass !== "host_read") return { allowed: true };
     const context = this.service.store.listScheduleRunByTask(input.task.id) ? "scheduled" as const : "interactive" as const;
     let action: ResolvedAction | null;
     try {
@@ -3186,6 +3187,15 @@ export function resolveToolAction(input: {
         targetRevision: `patch-sha256:${createHash("sha256").update(args.patch).digest("hex")}`
       };
     }
+  } else if (input.toolName === "read_desktop_file") {
+    const path = typeof args.path === "string" && args.path.trim() ? args.path : null;
+    if (path) {
+      proposal = {
+        kind: "host_file",
+        summary: input.summary,
+        hostFile: { path: resolveDesktopFilePath(path), mode: "read" }
+      };
+    }
   } else if (input.toolName.startsWith("browser_") && input.toolName !== "browser_read" && input.toolName !== "browser_screenshot" && input.toolName !== "browser_assert") {
     const url = typeof args.url === "string" && args.url.trim()
       ? args.url.trim()
@@ -3257,6 +3267,7 @@ function errorMessage(error: unknown): string {
 }
 
 function expectedOutputsForTask(task: TaskRecord): string[] {
+  if (wantsDirectFileRead(task.goal) && !(task.expectedOutputs ?? []).some((output) => output !== "result.md")) return [];
   const declared = task.expectedOutputs?.length ? task.expectedOutputs : ["result.md"];
   const hasImage = declared.some((output) => /\.(png|jpe?g|webp)$/i.test(output));
   if (!hasImage && wantsScreenshot(task.title + " " + task.goal)) return ["desktop.png"];

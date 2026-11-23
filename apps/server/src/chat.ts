@@ -1,7 +1,7 @@
 import { isSimpleDraft } from "./draft-intent.ts";
 import { completeChat, type ChatMessage } from "./model-client.ts";
 import type { ModelSettings } from "./model-settings.ts";
-import { GITHUB_NETWORK_HOSTS, needsGithubRepository, wantsGithubAccess, wantsScreenshot } from "./task-intent.ts";
+import { GITHUB_NETWORK_HOSTS, needsGithubRepository, wantsDirectFileRead, wantsGithubAccess, wantsScreenshot } from "./task-intent.ts";
 import type { ExecutorId } from "@hearth/core";
 
 export type ChatAction = "chat" | "task";
@@ -26,6 +26,7 @@ export interface ExecutionPlan {
 const CODE_HINTS = /(代码|仓库|项目里|这个项目|工程|git|commit|分支|测试|编译|构建|部署|重构|修复|bug|issue|pull request|typescript|javascript|python|npm|pnpm|依赖|数据库迁移|脚本)/i;
 
 export function planExecution(message: string): ExecutionPlan {
+  if (wantsDirectFileRead(message)) return { executorId: "native", taskKind: "general", expectedOutputs: [] };
   if (wantsScreenshot(message)) {
     return {
       executorId: "native",

@@ -187,6 +187,7 @@ const zhSidebar = {
       items: [
         { text: '附录总览', link: '/reference/' },
         { text: '日常使用与自用报告', link: '/reference/daily-use' },
+        { text: '首次运行验证', link: '/reference/first-run' },
         { text: '构建、签名与发版', link: '/reference/releasing' },
         { text: '工程实施', link: '/reference/engineering' },
         { text: '评测 Agent（独立）', link: 'https://hearthproject.github.io/hearth-eval/' },

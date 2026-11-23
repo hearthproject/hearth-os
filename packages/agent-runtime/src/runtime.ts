@@ -29,6 +29,7 @@ import type {
   AgentRuntimeOptions,
   AgentTool,
   AgentToolCall,
+  AgentToolContext,
   AgentToolDefinition,
   AgentToolEffect,
   AgentToolResult,
@@ -73,6 +74,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   let stopRejections = 0;
   let sameProgressCount = 0;
   let lastProgressHash: string | null = null;
+  let consecutiveToolFailures = 0;
   let budgetReminderSent = false;
   let compactions = 0;
   let autoCompactPausedUntil = 0;
@@ -86,6 +88,22 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     ...(options.retryDelayMs !== undefined ? { baseDelayMs: options.retryDelayMs } : {}),
     ...(options.retryPolicy ?? {})
   });
+  const toolRetryInput = options.toolRetryPolicy ?? {};
+  const maxRetries = toolRetryInput.maxRetries ?? DEFAULT_TOOL_RETRY_POLICY.maxRetries;
+  const baseDelayMs = toolRetryInput.baseDelayMs ?? DEFAULT_TOOL_RETRY_POLICY.baseDelayMs;
+  const maxDelayMs = toolRetryInput.maxDelayMs ?? DEFAULT_TOOL_RETRY_POLICY.maxDelayMs;
+  const jitter = toolRetryInput.jitter ?? DEFAULT_TOOL_RETRY_POLICY.jitter;
+  const toolRetryPolicy = {
+    maxRetries: Number.isFinite(maxRetries) ? Math.max(0, Math.min(20, Math.floor(maxRetries))) : DEFAULT_TOOL_RETRY_POLICY.maxRetries,
+    baseDelayMs: Number.isFinite(baseDelayMs) ? Math.max(0, Math.min(10_000, Math.floor(baseDelayMs))) : DEFAULT_TOOL_RETRY_POLICY.baseDelayMs,
+    maxDelayMs: Number.isFinite(maxDelayMs) ? Math.max(1_000, Math.min(600_000, Math.floor(maxDelayMs))) : DEFAULT_TOOL_RETRY_POLICY.maxDelayMs,
+    jitter: Math.max(0, Math.min(1, Number.isFinite(jitter) ? jitter : DEFAULT_TOOL_RETRY_POLICY.jitter)),
+    retryableCodes: Array.isArray(toolRetryInput.retryableCodes) && toolRetryInput.retryableCodes.length > 0
+      ? [...toolRetryInput.retryableCodes]
+      : [...DEFAULT_TOOL_RETRY_POLICY.retryableCodes]
+  };
+  const circuitBreakerInput = options.toolCircuitBreaker?.threshold ?? options.toolCircuitBreaker?.maxConsecutiveFailures ?? 5;
+  const circuitBreakerThreshold = Math.max(1, Math.min(50, Number.isFinite(circuitBreakerInput) ? Math.floor(circuitBreakerInput) : 5));
   const runController = new AbortController();
   const externalSignal = options.signal;
   if (externalSignal) {
@@ -737,7 +755,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         effect,
         startedAt: new Date().toISOString()
       });
-      const handle = ToolExecutionHandle.start(tool, call, {
+      const outcome = await executeToolWithDurableHandle(tool, call, {
         workspaceRoot: options.workspaceRoot,
         outDir: options.outDir,
         permissions: options.permissions,
@@ -751,8 +769,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         mode: options.mode ?? "build",
         ...(options.sandbox ? { sandbox: options.sandbox } : {}),
         ...(options.verifyGoalCompletion ? { verifyGoalCompletion: options.verifyGoalCompletion } : {})
-      }, options.toolTimeoutMs ?? 120_000, signal);
-      const outcome = await handle.wait();
+      }, options.toolTimeoutMs ?? 120_000, signal, toolRetryPolicy, !options.operationLedger);
       let result = outcome.result;
       if (!result) {
         const failure = normalizeToolFailure(outcome.error, "TOOL_EXEC_FAILED");
@@ -774,10 +791,10 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
           content: result.content,
           ...(result.isError ? { isError: true } : {})
         },
-        durationMs: Date.now() - entryStarted,
+        durationMs: outcome.totalDurationMs,
         ...(result.error ? { errorCode: result.error.code } : {})
       });
-      results.set(call.id, { result, durationMs: Date.now() - entryStarted });
+      results.set(call.id, { result, durationMs: outcome.totalDurationMs });
     }));
 
     emit({ type: "tool.batch.finished", turn: turns, calls, parallel: true, durationMs: Date.now() - started });
@@ -883,12 +900,12 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       while (true) {
       try {
         const requestMessageCount = messages.length;
-        turn = await options.model(
+        turn = await withAbort(options.model(
           cloneMessages(messages),
           requestDefinitions,
-          (text) => emit({ type: "assistant.delta", turn: turns, text }),
+          (text) => { if (!signal.aborted) emit({ type: "assistant.delta", turn: turns, text }); },
           signal
-        );
+        ), signal);
         if (turn.usage) {
           lastContextAnchor = {
             inputTokens: turn.usage.inputTokens,
@@ -1057,6 +1074,8 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       if (preTool.blocked) {
         result = { content: `Hook 拒绝了工具 ${effectiveCall.name}：${preTool.reason ?? "未说明原因"}`, isError: true };
       }
+      let toolRetries = 0;
+      let toolTotalDurationMs = 0;
       if (tool && !preTool.blocked) {
         const modeError = modeIssue(effectiveCall);
         if (modeError) {
@@ -1103,7 +1122,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
               startedAt: new Date().toISOString()
             });
             markExecuting(effectiveCall);
-            const handle = ToolExecutionHandle.start(tool, effectiveCall, {
+            const outcome = await executeToolWithDurableHandle(tool, effectiveCall, {
               workspaceRoot: options.workspaceRoot,
               outDir: options.outDir,
               permissions: options.permissions,
@@ -1117,8 +1136,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
               mode: options.mode ?? "build",
               ...(options.sandbox ? { sandbox: options.sandbox } : {}),
               ...(options.verifyGoalCompletion ? { verifyGoalCompletion: options.verifyGoalCompletion } : {})
-            }, options.toolTimeoutMs ?? 120_000, signal);
-            const outcome = await handle.wait();
+            }, options.toolTimeoutMs ?? 120_000, signal, toolRetryPolicy, !options.operationLedger);
             let executionResult = outcome.result;
             if (!executionResult) {
               const failure = normalizeToolFailure(outcome.error, "TOOL_EXEC_FAILED");
@@ -1128,11 +1146,12 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
             if (missingReceipt) executionResult = parkExternalWrite(executionResult);
             const settled = await settleOperation(operation.operationId, outcome, executionResult, missingReceipt);
             result = settled.result;
+            toolRetries = outcome.retries;
+            toolTotalDurationMs = outcome.totalDurationMs;
           }
         }
         }
       }
-
       if (result.content.length > 16_000) {
         const stored = storeOversizedToolResult(options.outDir, call.name, result.content);
         if (stored.fullOutputPath) {
@@ -1167,7 +1186,9 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
           name: effectiveCall.name,
           code: result.error.code,
           retryable: result.error.retryable ?? false,
-          message: result.content
+          message: result.content,
+          retries: 0,
+          totalDurationMs: 0
         });
       }
       if (result.metadata?.orphaned) {
@@ -1175,8 +1196,8 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         journalAppend({ type: "tool.orphaned", callId: call.id, name: effectiveCall.name, reason: result.content });
       }
       emitJobEvents(effectiveCall.name, result);
-      const durationMs = precomputed?.durationMs ?? (Date.now() - toolStartedAt);
-      emit({ type: "tool.finished", turn: turns, call, result, durationMs });
+      const durationMs = precomputed?.durationMs ?? toolTotalDurationMs;
+      emit({ type: "tool.finished", turn: turns, call, result, durationMs, retries: toolRetries, totalDurationMs: toolTotalDurationMs });
       await runHooks(result.isError ? "PostToolUseFailure" : "PostToolUse", {
         workspaceRoot: options.workspaceRoot,
         toolName: effectiveCall.name,
@@ -1202,6 +1223,19 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       }
       if (sameProgressCount >= 5) {
         return finish("failed", "模型连续多次产生重复相同工具调用和结果，已停止以避免死循环");
+      }
+      if (result.isError) {
+        consecutiveToolFailures += 1;
+        if (consecutiveToolFailures >= circuitBreakerThreshold) {
+          emit({ type: "notice", message: "连续 5 次工具调用失败，已触发熔断器，停止执行以避免浪费预算。" });
+          await checkpoint("tool");
+          const checkpointFailure = currentCheckpointFailure();
+          if (checkpointFailure) return finish("failed", `检查点保存失败，已停止以避免不可恢复的执行：${checkpointFailure.message}`, [], null, checkpointFailure);
+          clearExecuting();
+          return finish("failed", "连续多次工具调用失败，已触发熔断器停止执行");
+        }
+      } else {
+        consecutiveToolFailures = 0;
       }
       emit({
         type: "progress.updated",
@@ -1384,6 +1418,18 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+async function withAbort<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener("abort", onAbort);
+      reject(new Error("任务已取消"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+    pending.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
+}
+
 async function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
   if (ms <= 0 || signal.aborted) return;
   await new Promise<void>((resolve) => {
@@ -1422,6 +1468,93 @@ const LOCAL_WRITE_TOOL_NAMES = new Set([
 ]);
 
 const TERMINAL_JOB_STATUSES = new Set(["settled", "completed", "finished", "failed", "stopped", "cancelled", "lost"]);
+
+const TOOL_TIMEOUT_DEFAULTS: Record<string, number> = {
+  shell: 300_000,
+  shell_wait: 300_000,
+  run_tests: 1_200_000,
+  diagnostics: 900_000,
+  workflow: 120_000,
+  fetch_url: 60_000,
+  capture_screen: 60_000,
+  read_file: 30_000,
+  read_document: 60_000,
+  read_tool_output: 30_000,
+  list_files: 30_000,
+  search_text: 30_000,
+  glob: 30_000,
+  grep: 30_000,
+  write_file: 60_000,
+  write_spreadsheet: 60_000,
+  write_document: 60_000,
+  edit_file: 60_000,
+  apply_patch: 60_000,
+  shell_output: 15_000,
+  shell_kill: 15_000,
+  ask_user: 0,
+  finish_task: 0,
+};
+
+function toolTimeoutFor(toolName: string, fallback: number): number {
+  return TOOL_TIMEOUT_DEFAULTS[toolName] ?? fallback;
+}
+
+const DEFAULT_TOOL_RETRY_POLICY: {
+  maxRetries: number;
+  baseDelayMs: number;
+  maxDelayMs: number;
+  jitter: number;
+  retryableCodes: string[];
+} = {
+  maxRetries: 1,
+  baseDelayMs: 1_000,
+  maxDelayMs: 30_000,
+  jitter: 0.25,
+  retryableCodes: ["TOOL_TIMEOUT", "TOOL_ORPHANED"]
+};
+
+interface DurableToolOutcome extends ToolExecutionOutcome {
+  retries: number;
+  totalDurationMs: number;
+}
+
+/**
+ * Durable execution and retries are deliberately mutually exclusive: once an
+ * operation has been dispatched to the ledger, replaying it could duplicate a
+ * side effect. Ledger-less callers keep the transient tool retry policy.
+ */
+async function executeToolWithDurableHandle(
+  tool: AgentTool,
+  call: AgentToolCall,
+  context: AgentToolContext,
+  fallbackTimeoutMs: number,
+  parentSignal: AbortSignal,
+  policy: typeof DEFAULT_TOOL_RETRY_POLICY,
+  allowRetry: boolean
+): Promise<DurableToolOutcome> {
+  const startedAt = Date.now();
+  let retries = 0;
+  while (true) {
+    const handle = ToolExecutionHandle.start(tool, call, context, toolTimeoutFor(call.name, fallbackTimeoutMs), parentSignal);
+    const outcome = await handle.wait();
+    const totalDurationMs = Date.now() - startedAt;
+    const canRetry = allowRetry
+      && !parentSignal.aborted
+      && retries < policy.maxRetries
+      && outcome.status !== "completed";
+    if (!canRetry) return { ...outcome, retries, totalDurationMs };
+    const failure = normalizeToolFailure(outcome.error, "TOOL_EXEC_FAILED");
+    if (!policy.retryableCodes.includes(failure.code) || !failure.retryable) {
+      return { ...outcome, retries, totalDurationMs };
+    }
+    const delay = policy.baseDelayMs * 2 ** retries;
+    const jittered = delay + delay * policy.jitter * (Math.random() * 2 - 1);
+    const waitMs = Math.max(0, Math.min(policy.maxDelayMs, jittered));
+    if (waitMs > 0) await abortableSleep(waitMs, parentSignal);
+    if (parentSignal.aborted) return { ...outcome, retries, totalDurationMs: Date.now() - startedAt };
+    retries += 1;
+  }
+}
 
 function operationStopResult(
   operationId: string,

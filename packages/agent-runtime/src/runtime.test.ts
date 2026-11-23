@@ -8,6 +8,25 @@ import { createBuiltinTools, defaultTaskPermissions } from "./tools.ts";
 import type { AgentCheckpoint, AgentModel, AgentModelTurn, AgentTool, AgentToolCall, RuntimeEvent } from "./types.ts";
 
 describe("agent runtime", () => {
+  it("cancels promptly even when a model ignores the abort signal", async () => {
+    const controller = new AbortController();
+    let started!: () => void;
+    const ready = new Promise<void>((resolve) => { started = resolve; });
+    let complete!: (value: AgentModelTurn) => void;
+    const running = runAgent({
+      model: async () => { started(); return new Promise<AgentModelTurn>((resolve) => { complete = resolve; }); },
+      tools: [], goal: "read a file", systemPrompt: "system", workspaceRoot: ".", outDir: ".",
+      permissions: { tools: [], readRoots: [], writeRoots: [], networkHosts: [] },
+      signal: controller.signal, budget: {}
+    });
+    await ready;
+    controller.abort();
+    try {
+      expect((await running).status).toBe("cancelled");
+    } finally {
+      complete(turn("late answer", []));
+    }
+  }, 2000);
   const roots: string[] = [];
 
   afterEach(() => {
@@ -591,6 +610,7 @@ describe("agent runtime", () => {
       model,
       tools: createBuiltinTools(),
       goal: "不要重复",
+      toolCircuitBreaker: { threshold: 10 },
       systemPrompt: "system",
       budget: { maxTurns: 10, maxToolCalls: 10, maxTokens: 10_000, maxDurationMs: 30_000 },
       permissions: defaultTaskPermissions({ workspaceRoot: root, outDir: join(root, "out"), networkHosts: [] }),
@@ -872,3 +892,136 @@ function fakeModel(turns: AgentModelTurn[]): AgentModel {
   let index = 0;
   return async () => turns[Math.min(index++, turns.length - 1)] ?? { content: "", toolCalls: [], usage: null, finishReason: "stop" };
 }
+
+it("retries a tool that fails with TOOL_TIMEOUT before succeeding", async () => {
+  let attempts = 0;
+  const model = fakeModel([
+    turn("", [call("flaky", {})]),
+    turn("完成了", [])
+  ]);
+  const result = await runAgent({
+    model,
+    tools: [{
+      definition: { name: "flaky", description: "flaky tool", parameters: {} },
+      execute: async () => {
+        attempts++;
+        if (attempts < 2) {
+          const err: any = new Error("tool timed out");
+          err.code = "TOOL_TIMEOUT";
+          err.retryable = true;
+          throw err;
+        }
+        return { content: "ok" };
+      }
+    }],
+    goal: "test", systemPrompt: "system", workspaceRoot: ".", outDir: ".",
+    permissions: { tools: ["flaky"], readRoots: [], writeRoots: [], networkHosts: [] },
+    budget: { maxTurns: 5, maxToolCalls: 5, maxTokens: 100_000, maxDurationMs: 30_000 },
+  });
+  expect(result.status).toBe("completed");
+  expect(attempts).toBe(2);
+});
+
+it("stops retrying a tool after maxRetries and returns the failure", async () => {
+  let attempts = 0;
+  const model = fakeModel([
+    turn("", [call("flaky", {})]),
+    turn("done", [])
+  ]);
+  const result = await runAgent({
+    model,
+    tools: [{
+      definition: { name: "flaky", description: "flaky tool", parameters: {} },
+      execute: async () => {
+        attempts++;
+        const err: any = new Error("tool timed out");
+        err.code = "TOOL_TIMEOUT";
+        err.retryable = true;
+        throw err;
+      }
+    }],
+    goal: "test", systemPrompt: "system", workspaceRoot: ".", outDir: ".",
+    permissions: { tools: ["flaky"], readRoots: [], writeRoots: [], networkHosts: [] },
+    budget: { maxTurns: 5, maxToolCalls: 5, maxTokens: 100_000, maxDurationMs: 30_000 },
+  });
+  expect(result.status).toBe("completed");
+  expect(attempts).toBe(2);
+});
+
+it("trips circuit breaker after 5 consecutive tool failures", async () => {
+  let toolCallCount = 0;
+  const model: AgentModel = async () => turn("", [call("flaky", {})]);
+  const result = await runAgent({
+    model,
+    tools: [{
+      definition: { name: "flaky", description: "flaky tool", parameters: {} },
+      execute: async () => {
+        toolCallCount++;
+        return { content: "failed", isError: true, error: { code: "TOOL_TIMEOUT", retryable: true } };
+      }
+    }],
+    goal: "test", systemPrompt: "system", workspaceRoot: ".", outDir: ".",
+    permissions: { tools: ["flaky"], readRoots: [], writeRoots: [], networkHosts: [] },
+    budget: { maxTurns: 20, maxToolCalls: 20, maxTokens: 100_000, maxDurationMs: 30_000 },
+  });
+  expect(result.status).toBe("failed");
+  expect(result.summary).toContain("熔断器");
+});
+
+it("resets circuit breaker after a successful tool call", async () => {
+  let modelCallCount = 0;
+  let toolExecCount = 0;
+  const model: AgentModel = async () => {
+    modelCallCount++;
+    if (modelCallCount <= 5) return turn("", [call("flaky", {})]);
+    return turn("done", []);
+  };
+  const result = await runAgent({
+    model,
+    tools: [{
+      definition: { name: "flaky", description: "flaky tool", parameters: {} },
+      execute: async () => {
+        toolExecCount++;
+        if (toolExecCount <= 2 || toolExecCount === 4) {
+          return { content: "failed", isError: true, error: { code: "TOOL_TIMEOUT", retryable: true } };
+        }
+        return { content: "ok" };
+      }
+    }],
+    goal: "test", systemPrompt: "system", workspaceRoot: ".", outDir: ".",
+    permissions: { tools: ["flaky"], readRoots: [], writeRoots: [], networkHosts: [] },
+    budget: { maxTurns: 20, maxToolCalls: 20, maxTokens: 100_000, maxDurationMs: 30_000 },
+  });
+  expect(result.status).toBe("completed");
+});
+
+it("reports retries and total duration in tool.finished event", async () => {
+  let attempts = 0;
+  const events: RuntimeEvent[] = [];
+  const result = await runAgent({
+    model: fakeModel([turn("", [call("flaky", {})]), turn("done", [])]),
+    tools: [{
+      definition: { name: "flaky", description: "flaky tool", parameters: {} },
+      execute: async () => {
+        attempts++;
+        if (attempts < 3) {
+          const err: any = new Error("tool timed out");
+          err.code = "TOOL_TIMEOUT";
+          err.retryable = true;
+          throw err;
+        }
+        return { content: "ok" };
+      }
+    }],
+    goal: "test", systemPrompt: "system", workspaceRoot: ".", outDir: ".",
+    permissions: { tools: ["flaky"], readRoots: [], writeRoots: [], networkHosts: [] },
+    budget: { maxTurns: 5, maxToolCalls: 5, maxTokens: 100_000, maxDurationMs: 30_000 },
+    onEvent: (event) => events.push(event)
+  });
+  expect(result.status).toBe("completed");
+  const finished = events.filter((e): e is Extract<RuntimeEvent, { type: "tool.finished" }> => e.type === "tool.finished");
+  expect(finished.length).toBeGreaterThan(0);
+  expect(finished[0]!.retries).toBe(1);
+  expect(typeof finished[0]!.totalDurationMs).toBe("number");
+  expect(finished[0]!.totalDurationMs).toBeGreaterThan(0);
+});

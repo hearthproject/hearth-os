@@ -255,8 +255,8 @@ export type RuntimeEvent =
   | { type: "assistant.delta"; turn: number; text: string }
   | { type: "assistant.message"; turn: number; text: string }
   | { type: "tool.started"; turn: number; call: AgentToolCall }
-  | { type: "tool.finished"; turn: number; call: AgentToolCall; result: AgentToolResult; durationMs: number }
-  | { type: "tool.failed"; turn: number; callId: string; name: string; code: string; retryable: boolean; message: string }
+  | { type: "tool.finished"; turn: number; call: AgentToolCall; result: AgentToolResult; durationMs: number; retries?: number; totalDurationMs?: number }
+  | { type: "tool.failed"; turn: number; callId: string; name: string; code: string; retryable: boolean; message: string; retries?: number; totalDurationMs?: number }
   | { type: "tool.orphaned"; turn: number; callId: string; name: string; message: string }
   | { type: "tool.batch.started"; turn: number; calls: AgentToolCall[]; parallel: boolean }
   | { type: "tool.batch.finished"; turn: number; calls: AgentToolCall[]; parallel: boolean; durationMs: number }
@@ -362,6 +362,19 @@ export interface AgentRuntimeOptions {
   maxToolChars?: number;
   /** Above this count, only core tools are sent directly and tool_search is added. */
   maxDirectTools?: number;
+  /** Per-tool retry policy. Defaults to 3 retries with exponential backoff for transient tool failures. */
+  toolRetryPolicy?: {
+    maxRetries?: number;
+    baseDelayMs?: number;
+    maxDelayMs?: number;
+    jitter?: number;
+    retryableCodes?: string[];
+  };
+  /** Circuit breaker for consecutive tool failures. Defaults to 5 consecutive failures before stopping the run. */
+  toolCircuitBreaker?: {
+    threshold?: number;
+    maxConsecutiveFailures?: number;
+  };
   hooks?: AgentHookDefinition[];
   hookTimeoutMs?: number;
   projectInstructions?: string;

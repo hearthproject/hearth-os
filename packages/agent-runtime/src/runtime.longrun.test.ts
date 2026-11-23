@@ -88,11 +88,13 @@ describe("agent runtime long-run fixtures", () => {
   it("returns a structured timeout and orphan marker when a tool ignores abort", async () => {
     const root = workspace(roots);
     let started = false;
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
     const stubborn: AgentTool = {
       definition: { name: "stubborn", description: "ignores abort", parameters: {}, executionMode: "sequential", timeoutMs: 50 },
       async execute() {
         started = true;
-        await new Promise((resolvePromise) => setTimeout(resolvePromise, 6_000));
+        await pending;
         return { content: "late result" };
       }
     };
@@ -113,6 +115,7 @@ describe("agent runtime long-run fixtures", () => {
       onEvent: (event) => { events.push(event); }
     });
 
+    release();
     expect(started).toBe(true);
     expect(result.status).toBe("completed");
     expect(events.some((event) => event.type === "tool.failed" && event.code === "TOOL_TIMEOUT")).toBe(true);

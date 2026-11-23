@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  schedule:
+    # 每天 03:17 UTC 跑重活（长稳测试 / Windows 编译），不占用 PR 快门禁
+    - cron: "17 3 * * *"
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -18,10 +21,14 @@ env:
   NODE_OPTIONS: "--max-old-space-size=4096"
 
 jobs:
+  # 快速门禁：每个 PR / push 都跑，目标 10 分钟内
   verify:
     name: Typecheck, test, build and docs
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,11 +42,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Version consistency
+        run: npm run version:check
+
       - name: Typecheck
         run: npm run typecheck 2>&1 | tee typecheck.log
 
       - name: Test
-        run: npm test 2>&1 | tee test.log
+        timeout-minutes: 10
+        run: npm test -- --reporter=verbose 2>&1 | tee test.log
 
       - name: Build web
         run: npm run build 2>&1 | tee build.log
@@ -48,7 +59,7 @@ jobs:
         run: npm run docs:build 2>&1 | tee docs-build.log
 
       - name: Upload failure logs
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v4
         with:
           name: ci-logs
@@ -56,10 +67,63 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # 平台门禁：Windows 是 Tauri 桌面产品的目标平台，单独跑 Rust 编译与类型检查。
+  # 默认只在 push(main) / 手动 / 定时触发时跑，避免拖慢每个 PR；需要时可挪到 pull_request。
+  windows:
+    name: Windows (typecheck + tauri cargo check)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop-tauri/src-tauri
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Version consistency
+        run: npm run version:check
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Cargo check (updater feature)
+        run: cargo check --manifest-path apps/desktop-tauri/src-tauri/Cargo.toml --features updater
+
+      - name: Upload failure logs
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-logs
+          path: "*.log"
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Windows 原生沙箱与长跑矩阵：依赖本机 helper，放夜间/手动执行。
   longrun-windows:
     name: Windows long-run matrix
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -77,13 +141,11 @@ jobs:
         run: npm run build:native
 
       - name: Native sandbox tests
-        shell: pwsh
         run: |
           npm run test:sandbox 2>&1 | Tee-Object -FilePath sandbox.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Long-run acceptance matrix
-        shell: pwsh
         run: |
           npm run test:longrun 2>&1 | Tee-Object -FilePath longrun.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -97,5 +159,39 @@ jobs:
             longrun.log
             sandbox.log
             docs/evaluation/harness-longrun-*.md
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # 重活门禁：长稳测试等耗时项放夜间，不进 PR。
+  nightly:
+    name: Long-run tests
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Long-run test suite
+        run: npm run test:longrun 2>&1 | tee longrun.log
+
+      - name: Upload failure logs
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-logs
+          path: "*.log"
           if-no-files-found: ignore
           retention-days: 7

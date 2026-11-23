@@ -351,6 +351,30 @@ describe("builtin tools", () => {
     rmSync(outside, { recursive: true, force: true });
   });
 
+  it("reads a file under the configured desktop root and refuses paths outside it", async () => {
+    const root = workspace(roots);
+    const out = join(root, "out");
+    mkdirSync(out, { recursive: true });
+    const desktop = workspace(roots);
+    writeFileSync(join(desktop, "项目介绍.md"), "# 桌面文件\n正文\n", "utf8");
+    const previous = process.env.HEARTH_DESKTOP_DIR;
+    process.env.HEARTH_DESKTOP_DIR = desktop;
+    try {
+      const tools = mapTools();
+      const context = contextFor(root, out);
+      const read = await tools.read_desktop_file!.execute({ path: "项目介绍.md" }, context);
+      expect(read.isError).not.toBe(true);
+      expect(read.content).toContain("桌面文件");
+      const outside = workspace(roots);
+      writeFileSync(join(outside, "secret.txt"), "nope\n", "utf8");
+      await expect(tools.read_desktop_file!.execute({ path: join(outside, "secret.txt") }, context))
+        .rejects.toThrow("只能读取桌面目录");
+    } finally {
+      if (previous === undefined) delete process.env.HEARTH_DESKTOP_DIR;
+      else process.env.HEARTH_DESKTOP_DIR = previous;
+    }
+  });
+
   it("persists and updates a long-running goal", async () => {
     const root = workspace(roots);
     const out = join(root, "out");

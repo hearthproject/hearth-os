@@ -71,7 +71,7 @@ export function retryWindowExceeded(policy: RetryPolicy, startedAt: number, now 
   return now - startedAt >= policy.deadlineMs;
 }
 
-function clampInt(value: number, min: number, max: number, fallback: number): number {
+export function clampInt(value: number, min: number, max: number, fallback: number): number {
   if (!Number.isFinite(value)) return fallback;
   return Math.max(min, Math.min(max, Math.floor(value)));
 }
