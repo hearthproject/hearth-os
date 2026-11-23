@@ -99,11 +99,9 @@ async function runTest(page, name, fn) {
 }
 
 async function waitForComposerReady(page) {
-  await page.locator(".composer-options-trigger").waitFor({ state: "visible", timeout: 15_000 });
-  await page.waitForFunction(() => {
-    const button = document.querySelector(".composer-options-trigger");
-    return button instanceof HTMLButtonElement && !button.disabled;
-  }, null, { timeout: 15_000 });
+  const composer = page.locator('textarea[aria-label="消息"]');
+  await composer.waitFor({ state: "visible", timeout: 15_000 });
+  await page.locator(".composer-send").waitFor({ state: "attached", timeout: 15_000 });
 }
 
 async function openNewChat(page, baseUrl) {
@@ -140,8 +138,9 @@ async function waitForAssistantDone(page, timeout = 180_000) {
   }
 }
 
-async function waitForTaskBubble(page, timeout = 60_000) {
-  await page.locator(".task-status-bubble").last().waitFor({ timeout });
+async function waitForInlineRun(page, timeout = 60_000) {
+  await page.locator(".inline-run").last().waitFor({ timeout });
+  await page.locator(".inline-run-headline").last().waitFor({ timeout });
 }
 
 async function conversationTasks(baseUrl, page) {
@@ -240,23 +239,22 @@ async function main() {
     assert.match(await page.title(), /Hearth/);
     assert.equal(await page.locator(".message-list").count(), 1, "chat canvas should render");
     assert.ok(await page.locator('textarea[aria-label="消息"]').isVisible(), "composer should be ready");
+    assert.equal(await page.locator(".composer-send").count(), 1, "send control should exist");
+    assert.equal(await page.locator(".composer-executor select").count(), 1, "executor select should live in the composer");
+    assert.equal(await page.locator(".composer-options-trigger").count(), 0, "the retired options panel must stay gone");
   });
 
-  await runTest(page, "opens and closes conversation options", async () => {
+  await runTest(page, "opens and closes the model popover", async () => {
     await openNewChat(page, baseUrl);
-    const trigger = page.locator(".composer-options-trigger");
-    const panel = page.locator(".composer-options");
+    const trigger = page.locator(".composer-model");
     await trigger.click();
-    await panel.waitFor({ timeout: 15_000 });
+    await page.locator(".composer-model-popover").waitFor({ timeout: 15_000 });
     assert.equal(await trigger.getAttribute("aria-expanded"), "true");
-    assert.equal(await panel.getByRole("combobox").count(), 3, "route, executor and depth should live in the panel");
-    await page.keyboard.press("Escape");
-    await panel.waitFor({ state: "hidden", timeout: 15_000 });
+    assert.equal(await page.locator('.composer-model-popover input[aria-label="选择推理强度"]').count(), 1, "reasoning slider should be inside the popover");
+    assert.equal(await page.locator(".model-context-usage").count(), 1, "context usage should be visible");
+    await page.locator(".composer-model-backdrop").click();
+    await page.locator(".composer-model-popover").waitFor({ state: "hidden", timeout: 15_000 });
     assert.equal(await trigger.getAttribute("aria-expanded"), "false");
-    await trigger.click();
-    await panel.waitFor({ timeout: 15_000 });
-    await page.locator(".chat-header").click();
-    await panel.waitFor({ state: "hidden", timeout: 15_000 });
   });
 
   await runTest(page, "shows a connection warning only when something is unavailable", async () => {
@@ -264,12 +262,12 @@ async function main() {
     assert.equal(executors.status, 200, executors.text);
     const defaults = await api(baseUrl, "/api/conversation-defaults");
     assert.equal(defaults.status, 200, defaults.text);
-    const health = await api(baseUrl, "/api/health");
-    assert.equal(health.status, 200, health.text);
+    const healthResponse = await api(baseUrl, "/api/health");
+    assert.equal(healthResponse.status, 200, healthResponse.text);
     const anyReadyEnabled = executors.body.executors.some(
       (executor) => executor.health.canRun && defaults.body.settings.executorEnabled[executor.id]
     );
-    const modelReady = Boolean(health.body.chatModel?.configured);
+    const modelReady = Boolean(healthResponse.body.chatModel?.configured);
     const degraded = !modelReady || !anyReadyEnabled;
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await page.waitForFunction(
@@ -287,38 +285,48 @@ async function main() {
 
   await runTest(page, "keeps primary destinations and discloses the rest", async () => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    const nav = page.locator(".nav");
-    for (const label of ["聊天", "需要你", "资料库"]) {
+    const nav = page.locator(".nav").first();
+    for (const label of ["聊天", "资料库", "Context"]) {
       assert.equal(await nav.getByRole("link", { name: label, exact: true }).count(), 1, `${label} should be a primary link`);
     }
     assert.equal(await page.getByRole("link", { name: "设置", exact: true }).count(), 1, "settings should stay reachable");
     if (await page.locator("#nav-more").count() === 0) {
       await page.locator(".nav-more-toggle").click();
     }
-    for (const label of ["邮件", "定时任务", "设备", "运行", "个人", "档案"]) {
+    await page.locator("#nav-more").waitFor({ timeout: 15_000 });
+    for (const label of ["邮件", "定时任务", "连接"]) {
       assert.equal(await page.locator("#nav-more").getByRole("link", { name: label, exact: true }).count(), 1, `${label} should be a secondary link`);
     }
-    await page.getByRole("link", { name: "资料库", exact: true }).click();
-    await page.waitForURL("**/library", { timeout: 15_000 });
-    await page.locator(".library-page").waitFor({ timeout: 15_000 });
 
     await page.keyboard.press("Control+k");
     await page.locator(".command-dialog").waitFor({ timeout: 15_000 });
-    for (const label of ["聊天", "需要你", "资料库", "档案", "邮件", "定时任务", "设备", "运行", "个人", "设置"]) {
+    for (const label of ["聊天", "资料库", "Context", "邮件", "定时任务", "连接", "设置"]) {
       assert.equal(await page.locator(".command-group").getByRole("button", { name: label, exact: true }).count(), 1, `${label} should be searchable`);
     }
     await page.keyboard.press("Escape");
-    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator(".command-dialog").waitFor({ state: "hidden", timeout: 15_000 });
+
+    for (const legacy of ["/inbox", "/tasks", "/tasks/missing"]) {
+      await page.goto(`${baseUrl}${legacy}`, { waitUntil: "networkidle" });
+      assert.equal(new URL(page.url()).pathname, "/", `${legacy} should redirect to the chat surface`);
+      await page.locator(".chat-main").waitFor({ timeout: 15_000 });
+    }
+    for (const legacy of ["/knowledge", "/memory"]) {
+      await page.goto(`${baseUrl}${legacy}`, { waitUntil: "networkidle" });
+      assert.equal(new URL(page.url()).pathname, "/library", `${legacy} should redirect to the library`);
+      await page.locator(".library-page").waitFor({ timeout: 15_000 });
+    }
+    await page.goto(`${baseUrl}/dossier`, { waitUntil: "networkidle" });
+    assert.equal(new URL(page.url()).pathname, "/settings", "/dossier should redirect into settings");
+    assert.equal(new URL(page.url()).searchParams.get("tab"), "dossier");
   });
 
-  await runTest(page, "renders the needs-you inbox and its supervision shape", async () => {
-    const snapshot = await api(baseUrl, "/api/supervision");
-    assert.equal(snapshot.status, 200, snapshot.text);
-    assert.ok(Array.isArray(snapshot.body.items), "items should be an array");
-    assert.ok("digest" in snapshot.body, "digest should be present");
-    await page.goto(`${baseUrl}/inbox`, { waitUntil: "networkidle" });
-    await page.locator(".inbox-page").waitFor({ timeout: 15_000 });
-    assert.match(await page.locator(".page-header h2").innerText(), /需要你/);
+  await runTest(page, "renders the Context page", async () => {
+    const memory = await api(baseUrl, "/api/memory");
+    assert.equal(memory.status, 200, memory.text);
+    await page.goto(`${baseUrl}/context`, { waitUntil: "networkidle" });
+    await page.locator(".context-page").waitFor({ timeout: 15_000 });
+    assert.equal((await page.locator(".context-page .page-head h1").innerText()).trim(), "Context");
   });
 
   await runTest(page, "returns empty task turns and a safe rewind error", async () => {
@@ -380,42 +388,38 @@ async function main() {
       await newChat(page, baseUrl);
       await sendMessage(page, "你好，请用一句话介绍你自己。");
       await waitForAssistantDone(page);
-      assert.equal(await page.locator(".task-status-bubble").count(), 0, "a greeting should not create a task");
+      assert.equal(await page.locator(".inline-run").count(), 0, "a greeting should not create a task");
       const text = await page.locator(".assistant-bubble:not(.streaming)").last().innerText();
       assert.ok(text.trim().length > 0);
       await page.reload({ waitUntil: "networkidle" });
       await page.locator(".assistant-bubble:not(.streaming)").last().waitFor({ timeout: 20_000 });
       assert.ok((await page.locator(".message-bubble").count()) >= 2);
     });
+
+    await runTest(page, "keeps a method question out of the task executor", async () => {
+      await newChat(page, baseUrl);
+      await sendMessage(page, "怎么测试这个函数？");
+      await waitForAssistantDone(page);
+      assert.equal(await page.locator(".inline-run").count(), 0, "method questions must stay in chat");
+    });
   } else {
-    log("  skip - live model reply (no chat model configured)");
+    skipTest("live model reply", "no chat model configured");
+    skipTest("method question stays in chat", "no chat model configured");
   }
 
-  await runTest(page, "keeps a method question out of the task executor", async () => {
-    await newChat(page, baseUrl);
-    await sendMessage(page, "怎么测试这个函数？");
-    if (live) {
-      await waitForAssistantDone(page);
-    } else {
-      await page.locator(".composer-error").waitFor({ timeout: 20_000 });
-    }
-    assert.equal(await page.locator(".task-status-bubble").count(), 0, "method questions must stay in chat");
-  });
-
   if (live && canCreateTasks) {
-    await runTest(page, "creates a task, opens its detail, and shows the executor", async () => {
+    await runTest(page, "creates an inline run, shows its trail, and cancels it", async () => {
       await newChat(page, baseUrl);
       await sendMessage(page, "帮我生成本周工作周报，并保存为 weekly.md");
-      await waitForTaskBubble(page);
+      await waitForInlineRun(page);
       const tasks = await conversationTasks(baseUrl, page);
       assert.ok(tasks.length >= 1, "conversation should contain a task");
       const task = tasks.at(-1);
+      const headline = await page.locator(".inline-run-headline").last().innerText();
+      assert.ok(headline.trim().length > 0, "the inline run should show a status headline");
+      await page.locator(".inline-run-head").last().click();
+      assert.equal(await page.locator(".inline-run").last().getAttribute("class"), `inline-run ${task.status}`);
       await cancelTask(baseUrl, task.id);
-      await page.goto(`${baseUrl}/tasks/${encodeURIComponent(task.id)}`, { waitUntil: "networkidle" });
-      await page.locator(".executor-tag").first().waitFor({ timeout: 15_000 });
-      const label = await page.locator(".executor-tag").first().innerText();
-      assert.ok(label.trim().length > 0, "task detail should show an executor label");
-      assert.ok(await page.locator(".status-pill").count() > 0);
     });
 
     await runTest(page, "turns an attachment-only message into a task", async () => {
@@ -427,14 +431,14 @@ async function main() {
       });
       await page.locator(".attachment-chip").waitFor({ timeout: 15_000 });
       await page.locator(".composer-send").click();
-      await waitForTaskBubble(page);
+      await waitForInlineRun(page);
       assert.equal(await page.locator(".composer-error").count(), 0, "attachment-only messages must not ask for a chat model");
       const tasks = await conversationTasks(baseUrl, page);
       assert.ok(tasks.length >= 1);
       await cancelTask(baseUrl, tasks.at(-1).id);
     });
   } else {
-    skipTest("task creation and attachment routing", "live model or task executor is unavailable");
+    skipTest("inline run creation and attachment routing", "live model or task executor is unavailable");
   }
 
   await runTest(page, "switches and deletes conversations, and recovers a stale selection", async () => {
@@ -450,8 +454,8 @@ async function main() {
     assert.equal(second.status, 201, second.text);
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await page.reload({ waitUntil: "networkidle" });
-    const itemA = page.locator(".conversation-item").filter({ hasText: "E2E 对话 A" });
-    const itemB = page.locator(".conversation-item").filter({ hasText: "E2E 对话 B" });
+    const itemA = page.locator(".conversation-row").filter({ hasText: "E2E 对话 A" });
+    const itemB = page.locator(".conversation-row").filter({ hasText: "E2E 对话 B" });
     await itemA.waitFor({ timeout: 15_000 });
     await itemA.locator(".conversation-select").click();
     await page.waitForFunction(() => document.querySelector(".chat-header h1")?.textContent === "E2E 对话 A");
@@ -490,9 +494,7 @@ async function main() {
 
   await runTest(page, "uses the global preferred executor for a new chat", async () => {
     await newChat(page, baseUrl);
-    await page.locator(".composer-options-trigger").click();
-    await page.locator(".composer-options").waitFor({ timeout: 15_000 });
-    assert.equal(await page.locator('select[aria-label="锁定执行器"]').inputValue(), "native");
+    assert.equal(await page.locator('select[aria-label="选择执行器"]').inputValue(), "native");
     const defaults = await api(baseUrl, "/api/conversation-defaults");
     assert.equal(defaults.body.settings.preferredExecutorId, "native");
   });
@@ -567,7 +569,7 @@ async function main() {
     assert.equal(response.body.error, "LOCAL_MODEL_NOT_MANAGED");
   });
 
-  await runTest(page, "shows the DeepSeek Harness label on task detail", async () => {
+  await runTest(page, "persists the DeepSeek Harness executor and retires task deep links", async () => {
     const created = await api(baseUrl, "/api/tasks", {
       method: "POST",
       body: JSON.stringify({
@@ -580,9 +582,13 @@ async function main() {
     });
     assert.equal(created.status, 201, created.text);
     const taskId = created.body.id;
+    const detail = await api(baseUrl, `/api/tasks/${encodeURIComponent(taskId)}`);
+    assert.equal(detail.status, 200, detail.text);
+    assert.equal(detail.body.task.executorId, "deepseek-harness");
+
     await page.goto(`${baseUrl}/tasks/${encodeURIComponent(taskId)}`, { waitUntil: "networkidle" });
-    await page.locator(".executor-tag").first().waitFor({ timeout: 15_000 });
-    assert.equal((await page.locator(".executor-tag").first().innerText()).trim(), "DeepSeek Harness");
+    assert.equal(new URL(page.url()).pathname, "/", "task detail must redirect to the chat surface");
+    await page.locator(".chat-main").waitFor({ timeout: 15_000 });
     await cancelTask(baseUrl, taskId);
   });
 
@@ -600,11 +606,12 @@ async function main() {
 
   await runTest(page, "records no unexpected browser console errors", async () => {
     const offlineExpected = [
-      /503 .*\/api\/tasks\/[^/]+\/overview/ // overview needs a chat model; offline mode intentionally has none
+      /503 .*\/api\/tasks\/[^/]+\/overview/, // overview needs a chat model; offline mode intentionally has none
+      /503 .*\/api\/tasks\/[^/]+$/ // task reads can race the host gate during teardown
     ];
     const unexpected = consoleErrors.filter((text) => {
       if (/Failed to load resource.*404/i.test(text) || /CONVERSATION_NOT_FOUND/.test(text)) return false;
-      if (process.env.HEARTH_E2E_OFFLINE === "1" && offlineExpected.some((pattern) => pattern.test(text))) return false;
+      if (!live && offlineExpected.some((pattern) => pattern.test(text))) return false;
       return true;
     });
     assert.deepEqual(unexpected, []);
