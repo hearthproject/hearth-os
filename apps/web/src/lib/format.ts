@@ -1,4 +1,4 @@
-import type { RunUsage, TaskStatus } from "./types.ts";
+import type { TaskStatus } from "./types.ts";
 
 export function needsAttention(status: TaskStatus): boolean {
   return status === "waiting_approval" || status === "waiting_input" || status === "recoverable" || status === "failed";
@@ -41,10 +41,6 @@ export function formatNumber(value: number): string {
   return value.toLocaleString("zh-CN");
 }
 
-export function countTotal(counts: Record<string, number>): number {
-  return Object.values(counts).reduce((sum, count) => sum + count, 0);
-}
-
 export function formatDuration(ms: number | null): string {
   if (ms === null || !Number.isFinite(ms) || ms < 0) return "未记录";
   if (ms < 1000) return `${ms} 毫秒`;
@@ -52,11 +48,6 @@ export function formatDuration(ms: number | null): string {
   const seconds = Math.floor((ms % 60_000) / 1000);
   if (minutes < 60) return seconds > 0 ? `${minutes} 分 ${seconds} 秒` : `${minutes} 分`;
   return `${Math.floor(minutes / 60)} 时 ${minutes % 60} 分`;
-}
-
-export function formatTokens(usage: RunUsage | null): string {
-  if (!usage) return "未记录";
-  return `${compactNumber(usage.inputTokens)} / ${compactNumber(usage.outputTokens)}`;
 }
 
 export function abbreviateHash(value: string, head = 8, tail = 4): string {
@@ -75,16 +66,3 @@ export function relativeTime(value: string): string {
   return `${days} 天前`;
 }
 
-export function todayLabel(): string {
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "long",
-    day: "numeric",
-    weekday: "long"
-  }).format(new Date());
-}
-
-function compactNumber(value: number): string {
-  if (value < 1_000) return String(value);
-  if (value < 1_000_000) return `${(value / 1_000).toFixed(value < 10_000 ? 1 : 0)}K`;
-  return `${(value / 1_000_000).toFixed(1)}M`;
-}

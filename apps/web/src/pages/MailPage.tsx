@@ -43,7 +43,6 @@ export function MailPage() {
   const emailSources = (sourcesQuery.data?.sources ?? []).filter((source) => source.kind === "email");
   const [sourceId, setSourceId] = useState("");
   const activeSourceId = emailSources.some((source) => source.id === sourceId) ? sourceId : emailSources[0]?.id ?? "";
-  const activeSource = emailSources.find((source) => source.id === activeSourceId) ?? null;
   const itemsQuery = useQuery({
     queryKey: ["sourceItems", activeSourceId],
     queryFn: () => api.sourceItems(activeSourceId),

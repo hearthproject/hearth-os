@@ -12,6 +12,14 @@ export interface AppNotification {
 
 const DESKTOP_KEY = "hearth.notifications.desktop";
 
+export function desktopNotificationsEnabled(): boolean {
+  try {
+    return localStorage.getItem(DESKTOP_KEY) === "on";
+  } catch {
+    return false;
+  }
+}
+
 export function notificationForEvent(event: string, envelope?: EventEnvelope): AppNotification | null {
   if (!envelope) return null;
   const payload = (envelope.payload ?? {}) as Record<string, unknown>;
@@ -43,25 +51,3 @@ export function notificationForEvent(event: string, envelope?: EventEnvelope): A
   return null;
 }
 
-export function desktopNotificationsEnabled(): boolean {
-  try {
-    return localStorage.getItem(DESKTOP_KEY) === "on";
-  } catch {
-    return false;
-  }
-}
-
-export function setDesktopNotificationsEnabled(enabled: boolean): void {
-  try {
-    if (enabled) localStorage.setItem(DESKTOP_KEY, "on");
-    else localStorage.removeItem(DESKTOP_KEY);
-  } catch {
-    // Storage may be unavailable in private browsing.
-  }
-}
-
-export async function requestDesktopPermission(): Promise<NotificationPermission> {
-  if (typeof window === "undefined" || !("Notification" in window)) return "denied";
-  if (Notification.permission !== "default") return Notification.permission;
-  return Notification.requestPermission();
-}

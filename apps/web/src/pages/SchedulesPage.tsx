@@ -12,7 +12,6 @@ import {
   RefreshCw,
   Save,
   Trash2,
-  TriangleAlert,
   X
 } from "lucide-react";
 import { api } from "../lib/api.ts";
@@ -22,7 +21,6 @@ import type {
   ApprovalMode,
   ExecutorId,
   ScheduleRecord,
-  ScheduleRunRecord,
   ScheduleRunStatus,
   TaskKind
 } from "../lib/types.ts";

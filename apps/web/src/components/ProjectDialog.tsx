@@ -5,7 +5,7 @@ import { api } from "../lib/api.ts";
 import { desktopErrorMessage, hasDesktopBridge, pickFolder } from "../lib/desktop.ts";
 import type { LocalProjectView } from "../lib/types.ts";
 
-export function normalizeFolderPath(input: string): string | null {
+function normalizeFolderPath(input: string): string | null {
   const trimmed = input.trim().replace(/^["']|["']$/g, "").trim();
   if (!trimmed) return null;
   if (/^[A-Za-z]:[\\/]/.test(trimmed) || trimmed.startsWith("\\\\") || trimmed.startsWith("/")) return trimmed;

@@ -39,8 +39,7 @@ import type {
   ConversationSettings,
   ConversationSettingsPatch,
   ExecutorId,
-  ReasoningEffort,
-  SkillView
+  ReasoningEffort
 } from "../lib/types.ts";
 
 const PENDING_SETTINGS: ConversationSettings = {

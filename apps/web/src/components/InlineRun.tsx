@@ -86,7 +86,6 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
   const view = taskQuery.data;
   const status = view?.task.status ?? task.status;
   const active = ACTIVE_STATUSES.includes(status);
-  const attention = ATTENTION_STATUSES.includes(status);
   const error = view?.task.error ?? null;
   const visibleError = error && !isRetiredTaskNotice(error.message) ? error : null;
   const expectedOutputs = view?.task.expectedOutputs;

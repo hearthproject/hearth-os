@@ -1,21 +1,11 @@
 import type {
   ApprovalRecord,
-  DesktopCommandStatus,
-  DesktopSessionStatus,
-  DeviceCapabilityKind,
-  DeviceCapabilityStatus,
   EffectRecord,
   EventEnvelope,
-  OutboxDraftStatus,
-  PairingRequestStatus,
   RunStatus,
-  SourceConnection,
-  SourceItem,
-  SourceKind,
   TaskRecord,
   TaskStatus
 } from "./types.ts";
-import type { ApprovalMode, SandboxMode } from "@hearth/core";
 
 export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   queued: "排队中",
@@ -75,91 +65,6 @@ export const APPROVAL_KIND_LABELS: Record<string, string> = {
   "tool.capture_screen": "截取桌面画面"
 };
 
-export const OUTBOX_STATUS_LABELS: Record<OutboxDraftStatus, string> = {
-  draft: "草稿",
-  pending_approval: "等你确认",
-  stored: "已写入本机",
-  sent: "已发送",
-  rejected: "已拒绝",
-  failed: "写入失败",
-  uncertain: "结果不确定",
-  discarded: "已丢弃"
-};
-
-export const AUTH_SOURCE_LABELS: Record<string, string> = {
-  "provider-env": "自定义 Provider 的环境变量",
-  "openai-login": "OpenAI 登录",
-  missing: "未检测到可用认证",
-  unknown: "未知"
-};
-
-export const SOURCE_KIND_LABELS: Record<SourceKind, string> = {
-  file: "本地文件",
-  knowledge: "知识库",
-  web: "公开网页",
-  email: "邮件",
-  calendar: "日历"
-};
-
-export const SOURCE_STATUS_LABELS: Record<SourceConnection["status"], string> = {
-  connected: "已连接",
-  reading: "正在读取",
-  needs_user: "需要你处理",
-  error: "读取失败",
-  disconnected: "已断开"
-};
-
-export const SOURCE_ITEM_STATUS_LABELS: Record<SourceItem["status"], string> = {
-  ready: "已读取",
-  failed: "读取失败",
-  cleared: "已清除"
-};
-
-export const DEVICE_CAPABILITY_LABELS: Record<DeviceCapabilityKind, string> = {
-  observe: "观察桌面",
-  "desktop.control": "控制桌面",
-  "ui.automation": "界面自动化"
-};
-
-export const DEVICE_CAPABILITY_STATUS_LABELS: Record<DeviceCapabilityStatus, string> = {
-  pending: "待你批准",
-  approved: "已批准",
-  revoked: "已撤销"
-};
-
-export const PAIRING_STATUS_LABELS: Record<PairingRequestStatus, string> = {
-  pending: "等待配对",
-  approved: "已配对",
-  rejected: "已拒绝",
-  expired: "已过期",
-  redeemed: "助手已连接"
-};
-
-export const DESKTOP_SESSION_STATUS_LABELS: Record<DesktopSessionStatus, string> = {
-  active: "自动操作中",
-  paused: "已暂停",
-  taken_over: "你已接管",
-  terminated: "已终止"
-};
-
-export const DESKTOP_COMMAND_STATUS_LABELS: Record<DesktopCommandStatus, string> = {
-  queued: "等待助手",
-  claimed: "正在执行",
-  succeeded: "已完成",
-  failed: "失败",
-  cancelled: "已取消",
-  expired: "已过期"
-};
-
-export const CATEGORY_LABELS: Record<string, string> = {
-  document: "文档",
-  web: "网页",
-  code: "代码",
-  data: "数据",
-  people: "人事",
-  marketing: "营销"
-};
-
 export const EXECUTOR_LABELS: Record<string, string> = {
   native: "Hearth 原生",
   codex: "Codex",
@@ -171,26 +76,6 @@ export const TASK_KIND_LABELS: Record<string, string> = {
   workspace: "工作区任务",
   general: "通用任务"
 };
-
-export const APPROVAL_MODE_LABELS: Record<ApprovalMode, string> = {
-  necessary: "必要",
-  workspace: "工作区自动",
-  full: "完全"
-};
-
-export const SANDBOX_MODE_LABELS: Record<SandboxMode, string> = {
-  "read-only": "只读",
-  "workspace-write": "工作区可写",
-  "danger-full-access": "完全访问"
-};
-
-export function approvalModeLabel(mode: ApprovalMode | null | undefined): string {
-  return mode ? APPROVAL_MODE_LABELS[mode] : "必要";
-}
-
-export function sandboxModeLabel(mode: SandboxMode | null | undefined): string {
-  return mode ? SANDBOX_MODE_LABELS[mode] : "工作区可写";
-}
 
 export function executorLabel(id: string | null | undefined): string {
   return id ? EXECUTOR_LABELS[id] ?? id : "自动选择";

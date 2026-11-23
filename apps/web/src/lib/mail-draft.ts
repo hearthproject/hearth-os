@@ -12,7 +12,7 @@ export function isMailDraftReply(messages: Array<{ role: string; content: string
   return false;
 }
 
-export function hasMailDraftContent(content: string): boolean {
+function hasMailDraftContent(content: string): boolean {
   if (!/^\s*(?:\*\*)?(?:主题|Subject)\s*[:：]/i.test(content.trim())) return false;
   const draft = parseMailDraft(content);
   return Boolean(draft.subject && draft.body);

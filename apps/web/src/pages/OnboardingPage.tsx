@@ -46,7 +46,6 @@ export function OnboardingPage() {
   const [verification, setVerification] = useState<OnboardingVerificationView | null>(null);
   const [skipVerification, setSkipVerification] = useState(false);
 
-  const onboardingQuery = useQuery({ queryKey: ["onboarding"], queryFn: api.onboarding });
   const registryQuery = useQuery({ queryKey: ["modelRegistry"], queryFn: api.modelRegistry });
   const executorsQuery = useQuery({ queryKey: ["executors"], queryFn: api.executors, refetchInterval: 10_000 });
 

@@ -26,16 +26,6 @@ export function previewKind(name: string, mimeType: string): FilePreviewKind {
   return "binary";
 }
 
-export function previewKindLabel(kind: FilePreviewKind): string {
-  switch (kind) {
-    case "markdown": return "Markdown";
-    case "image": return "图片";
-    case "pdf": return "PDF";
-    case "text": return "文本";
-    default: return "文件";
-  }
-}
-
 export function fileExtension(name: string): string {
   const match = /\.([a-z0-9]{1,8})$/i.exec(name);
   return match?.[1]?.toUpperCase() ?? "FILE";

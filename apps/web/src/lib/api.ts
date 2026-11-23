@@ -1,14 +1,8 @@
 import type {
-  ApprovalGrant,
   ApprovalDecisionResult,
   ApprovalListItem,
   AttachmentUploadResult,
   ChatAttachment,
-  CodexProbeResponse,
-  ConfirmHandoffResponse,
-  ContextMetricsResponse,
-  ContextSettingsPatch,
-  ContextSettingsResponse,
   ConversationDetail,
   ConversationListItem,
   ConversationRecord,
@@ -17,16 +11,7 @@ import type {
   ArtifactListItem,
   BackupRestoreResult,
   BackupSnapshot,
-  BrowserEvidenceView,
   BrowserSettingsView,
-  BrowserStatusView,
-  CreateTaskRequest,
-  DesktopActionRequest,
-  DesktopCommandView,
-  DesktopDashboard,
-  DesktopSessionView,
-  DeviceCapabilityKind,
-  DeviceView,
   ExecutorId,
   ExecutorModelBindingPatch,
   ExecutorModelBindingView,
@@ -34,16 +19,11 @@ import type {
   ExecutorProbeResult,
   ExecutorSettingsPatch,
   ExecutorSettingsResponse,
-  EventWindow,
   EventEnvelope,
   FeishuDomain,
   FeishuIntegrationResponse,
   FeishuTestResponse,
   FolderBrowseResult,
-  GitDiffScope,
-  GitDiffView,
-  GitFileView,
-  GitRepositoryView,
   MailAccountInput,
   MailAccountView,
   MailSyncResult,
@@ -54,8 +34,6 @@ import type {
   WorkstyleView,
   McpServerView,
   MaintenanceSnapshot,
-  CreateMemoryRequest,
-  CorrectMemoryRequest,
   MemorySnapshot,
   ModelListResponse,
   ModelProfilePatch,
@@ -68,16 +46,9 @@ import type {
   OnboardingSnapshot,
   OnboardingVerificationView,
   SettingsStorageResponse,
-  SupervisionSnapshotView,
-  DogfoodReportView,
   OutboxDraft,
-  OutboxDraftListItem,
   OutboxDraftRequest,
   OutboxSubmitResult,
-  PairingRequestView,
-  ReconcileItem,
-  RunListItem,
-  RunManifest,
   ScheduleInput,
   ScheduleRecord,
   ScheduleRunRecord,
@@ -86,27 +57,14 @@ import type {
   SecuritySnapshot,
   SourceConnection,
   SourceItem,
-  SourceKind,
-  SourceReadResult,
-  EffectListItem,
-  SystemStatus,
-  TaskContextResponse,
   TaskFollowUpMode,
   TaskFollowUpRecord,
-  TaskHandoffsResponse,
   TaskListItem,
-  TaskProposalRecord,
   TaskRecord,
-  TaskRewindResponse,
-  TaskTurnsResponse,
-  TaskWorktreeView,
   TrashItem,
   TrashKind,
   TaskView,
-  BackgroundToolJob,
-  CommitmentRecord,
-  DecisionRecord,
-  OntologyEntityView
+  BackgroundToolJob
 } from "./types.ts";
 import type {
   LibraryNode,
@@ -180,25 +138,12 @@ export const api = {
   conversationDefaults: () => request<{ settings: ConversationSettings }>("/api/conversation-defaults"),
   conversations: () => request<{ conversations: ConversationListItem[] }>("/api/conversations"),
   conversation: (id: string) => request<ConversationDetail>(`/api/conversations/${encodeURIComponent(id)}`),
-  createConversation: (title?: string, settings?: ConversationSettingsPatch) => request<ConversationRecord>("/api/conversations", {
-    method: "POST",
-    body: JSON.stringify({ ...(title ? { title } : {}), ...(settings ? { settings } : {}) })
-  }),
-  renameConversation: (id: string, title: string) => request<ConversationRecord>(`/api/conversations/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    body: JSON.stringify({ title })
-  }),
   updateConversationSettings: (id: string, settings: ConversationSettingsPatch) =>
     request<ConversationRecord>(`/api/conversations/${encodeURIComponent(id)}`, {
       method: "PATCH",
       body: JSON.stringify({ settings })
     }),
   deleteConversation: (id: string, cancelRunning = false) => request<void>(`/api/conversations/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-    ...(cancelRunning ? { body: JSON.stringify({ cancelRunning: true }) } : {})
-  }),
-  taskOverview: (id: string) => request<{ summary: string }>(`/api/tasks/${encodeURIComponent(id)}/overview`, { method: "POST" }),
-  deleteTask: (id: string, cancelRunning = false) => request<void>(`/api/tasks/${encodeURIComponent(id)}`, {
     method: "DELETE",
     ...(cancelRunning ? { body: JSON.stringify({ cancelRunning: true }) } : {})
   }),
@@ -212,15 +157,10 @@ export const api = {
     method: "POST",
     body: JSON.stringify({ items })
   }),
-  modelSettings: () => request<ModelSettingsResponse>("/api/model-settings"),
   projects: () => request<{ projects: LocalProjectView[] }>("/api/projects"),
   browseFolders: (path?: string) => request<{ folders: FolderBrowseResult }>(`/api/projects/folders${query({ path })}`),
   createProject: (input: { name?: string; path: string; defaultBranch?: string }) => request<{ project: LocalProjectView }>("/api/projects", {
     method: "POST",
-    body: JSON.stringify(input)
-  }),
-  updateProject: (id: string, input: { name?: string; defaultBranch?: string }) => request<{ project: LocalProjectView }>(`/api/projects/${encodeURIComponent(id)}`, {
-    method: "PATCH",
     body: JSON.stringify(input)
   }),
   deleteProject: (id: string) => request<void>(`/api/projects/${encodeURIComponent(id)}`, { method: "DELETE" }),
@@ -233,8 +173,6 @@ export const api = {
     request<{ workstyle: WorkstyleView }>("/api/profile/workstyle", { method: "PUT", body: JSON.stringify({ content }) }),
   resetWorkstyle: () =>
     request<{ workstyle: WorkstyleView }>("/api/profile/workstyle/reset", { method: "POST" }),
-  taskWorktree: (id: string) => request<{ worktree: TaskWorktreeView | null }>(`/api/tasks/${encodeURIComponent(id)}/worktree`),
-  cleanupTaskWorktree: (id: string) => request<{ removed: boolean; branchKept: boolean }>(`/api/tasks/${encodeURIComponent(id)}/worktree`, { method: "DELETE" }),
   mcpServers: () => request<{ servers: McpServerView[] }>("/api/mcp/servers"),
   createMcpServer: (input: { name: string; command: string; args?: string[]; env?: Record<string, string>; enabled?: boolean }) => request<{ server: McpServerView }>("/api/mcp/servers", {
     method: "POST",
@@ -285,7 +223,6 @@ export const api = {
     request<ModelListResponse>("/api/model-settings/models", { method: "POST", body: JSON.stringify(input) }),
   testModel: (input: { providerId?: string; providerName?: string; protocol?: ModelProtocol; baseUrl?: string; model?: string; apiKey?: string }) =>
     request<ModelTestResponse>("/api/model-settings/test", { method: "POST", body: JSON.stringify(input) }),
-  probeCodex: () => request<CodexProbeResponse>("/api/codex/probe", { method: "POST" }),
   executorSettings: () => request<ExecutorSettingsResponse>("/api/executor-settings"),
   executors: () => request<ExecutorListResponse>("/api/executors"),
   saveExecutorSettings: (input: ExecutorSettingsPatch) => request<ExecutorSettingsResponse>("/api/executor-settings", {
@@ -323,16 +260,8 @@ export const api = {
     method: "POST",
     body: JSON.stringify({ skipped })
   }),
-  resetOnboarding: () => request<OnboardingSnapshot>("/api/onboarding/reset", { method: "POST" }),
   verifyOnboarding: () =>
     request<{ verification: OnboardingVerificationView; onboarding: OnboardingSnapshot }>("/api/onboarding/verify", { method: "POST" }),
-  supervision: () => request<SupervisionSnapshotView>("/api/supervision"),
-  dogfood: (days = 7) => request<DogfoodReportView>(`/api/dogfood?days=${days}`),
-  supervisionAction: (id: string, action: "read" | "dismiss" | "snooze", hours?: number) =>
-    request<SupervisionSnapshotView>(`/api/supervision/${encodeURIComponent(id)}`, {
-      method: "POST",
-      body: JSON.stringify({ action, ...(hours ? { hours } : {}) })
-    }),
   feishu: () => request<FeishuIntegrationResponse>("/api/integrations/feishu"),
   saveFeishu: (input: {
     enabled?: boolean;
@@ -359,9 +288,6 @@ export const api = {
   deleteMailAccount: (id: string) => request<void>(`/api/mail/accounts/${encodeURIComponent(id)}`, { method: "DELETE" }),
   testMailAccount: (id: string) => request<MailTestResult>(`/api/mail/accounts/${encodeURIComponent(id)}/test`, { method: "POST" }),
   syncMailAccount: (id: string) => request<MailSyncResult>(`/api/mail/accounts/${encodeURIComponent(id)}/sync`, { method: "POST" }),
-  system: () => request<SystemStatus>("/api/system"),
-  stopSystem: () => request<SystemStatus>("/api/system/stop", { method: "POST" }),
-  startSystem: () => request<SystemStatus>("/api/system/start", { method: "POST" }),
   security: () => request<SecuritySnapshot>("/api/security"),
   setKillSwitch: (enabled: boolean, reason?: string) => request<SecuritySnapshot>("/api/security/kill-switch", {
     method: "POST",
@@ -385,36 +311,6 @@ export const api = {
   runMaintenance: () => request<MaintenanceSnapshot["latest"]>("/api/maintenance/run", { method: "POST" }),
   diagnosticsUrl: "/api/diagnostics",
   memory: () => request<MemorySnapshot>("/api/memory"),
-  createMemory: (input: CreateMemoryRequest) => request<MemorySnapshot["memories"][number]>("/api/memory", {
-    method: "POST",
-    body: JSON.stringify(input)
-  }),
-  updateMemorySettings: (input: Partial<MemorySnapshot["settings"]>) => request<MemorySnapshot["settings"]>("/api/memory/settings", {
-    method: "PATCH",
-    body: JSON.stringify(input)
-  }),
-  confirmMemory: (id: string) => request<MemorySnapshot["memories"][number]>("/api/memory/" + encodeURIComponent(id) + "/confirm", { method: "POST" }),
-  correctMemory: (id: string, input: CorrectMemoryRequest) => request<MemorySnapshot["memories"][number]>("/api/memory/" + encodeURIComponent(id), {
-    method: "PATCH",
-    body: JSON.stringify(input)
-  }),
-  forgetMemory: (id: string) => request<MemorySnapshot["memories"][number]>("/api/memory/" + encodeURIComponent(id) + "/forget", { method: "POST" }),
-  markMemorySensitive: (id: string, sensitivity: MemorySnapshot["memories"][number]["sensitivity"], allowRecall?: boolean) =>
-    request<MemorySnapshot["memories"][number]>("/api/memory/" + encodeURIComponent(id) + "/sensitive", {
-      method: "POST",
-      body: JSON.stringify({ sensitivity, ...(allowRecall === undefined ? {} : { allowRecall }) })
-    }),
-  resolveMemoryConflict: (id: string, input: { resolution: "keep_left" | "keep_right" | "merged"; note?: string; content?: string }) =>
-    request<MemorySnapshot["conflicts"][number]>("/api/memory/conflicts/" + encodeURIComponent(id) + "/resolve", {
-      method: "POST",
-      body: JSON.stringify(input)
-    }),
-  recallMemory: (input: { taskId: string; runId?: string; text?: string; maxItems?: number; maxChars?: number }) =>
-    request<{ memories: MemorySnapshot["memories"]; recalls: MemorySnapshot["recalls"]; contextPack: string; usedChars: number; budget: { maxItems: number; maxChars: number } }>("/api/memory/recall", {
-      method: "POST",
-      body: JSON.stringify(input)
-    }),
-  exportMemories: () => { window.location.assign("/api/memory/export"); },
   libraryStatus: () => request<LibraryStatus & { roots: LibraryRoot[]; trashCount: number }>("/api/library/status"),
   libraryTree: (depth = 2, parentId?: string) =>
     request<{ nodes: LibraryTreeNode[] }>(`/api/library/tree${query({ depth, parentId })}`),
@@ -444,7 +340,6 @@ export const api = {
     method: "POST",
     body: JSON.stringify({ path })
   }),
-  libraryRemoveRoot: (id: string) => request<{ ok: boolean }>(`/api/library/roots/${encodeURIComponent(id)}`, { method: "DELETE" }),
   skills: () => request<{ skills: SkillView[] }>("/api/skills"),
   skill: (id: string) => request<{ skill: SkillView }>(`/api/skills/${encodeURIComponent(id)}`),
   installSkill: (source: string) => request<{ skill: SkillView; changed: boolean; replacedFiles: number }>("/api/skills/install", {
@@ -453,134 +348,25 @@ export const api = {
   }),
   updateSkill: (id: string) => request<{ skill: SkillView; changed: boolean; replacedFiles: number }>(`/api/skills/${encodeURIComponent(id)}/update`, { method: "POST" }),
   deleteSkill: (id: string) => request<{ skill: SkillView; removedFiles: boolean }>(`/api/skills/${encodeURIComponent(id)}`, { method: "DELETE" }),
-  useSkill: (id: string) => request<{ skill: SkillView; prompt: string }>(`/api/skills/${encodeURIComponent(id)}/use`, {
-    method: "POST",
-    body: JSON.stringify({})
-  }),
-  ontologyEntities: (search?: string, kind?: string) => request<{ entities: OntologyEntityView[] }>(
-    "/api/ontology/entities" + query({ query: search, kind })
-  ),
-  ontologyCommitments: (status?: string) => request<{ commitments: CommitmentRecord[] }>(
-    "/api/ontology/commitments" + query({ status })
-  ),
-  ontologyDecisions: (status?: string) => request<{ decisions: DecisionRecord[] }>(
-    "/api/ontology/decisions" + query({ status })
-  ),
-  correctEntity: (id: string, input: { key: string; value: unknown; evidenceRef?: string }) =>
-    request<Record<string, unknown>>("/api/ontology/entities/" + encodeURIComponent(id) + "/correct", {
-      method: "POST",
-      body: JSON.stringify(input)
-    }),
-  forgetOntologyEvidence: (evidenceRef: string) =>
-    request<Record<string, unknown>>("/api/ontology/forget", { method: "POST", body: JSON.stringify({ evidenceRef }) }),
   backgroundTools: (params: { taskId?: string; status?: string; limit?: number } = {}) =>
     request<{ jobs: BackgroundToolJob[] }>("/api/background-tools" + query(params)),
-  stopBackgroundTool: (id: string, reason?: string) =>
-    request<BackgroundToolJob>("/api/background-tools/" + encodeURIComponent(id) + "/stop", {
-      method: "POST",
-      body: JSON.stringify(reason ? { reason } : {})
-    }),
   sources: () => request<{ sources: SourceConnection[] }>("/api/sources"),
-  readySourceItems: (limit = 100) => request<{ items: SourceItem[] }>(`/api/source-items${query({ limit })}`),
   sourceItems: (id: string) => request<{ items: SourceItem[] }>(`/api/sources/${encodeURIComponent(id)}/items`),
-  createSource: (input: {
-    kind: SourceKind;
-    displayName?: string;
-    rootPath?: string;
-    allowedHosts?: string[];
-    account?: string;
-  }) => request<SourceConnection>("/api/sources", {
-    method: "POST",
-    body: JSON.stringify(input)
-  }),
-  readSource: (id: string, url?: string) => request<SourceReadResult>(`/api/sources/${encodeURIComponent(id)}/read`, {
-    method: "POST",
-    body: JSON.stringify(url ? { url } : {})
-  }),
-  disconnectSource: (id: string) => request<SourceConnection>(`/api/sources/${encodeURIComponent(id)}/disconnect`, { method: "POST" }),
-  reconnectSource: (id: string) => request<SourceConnection>(`/api/sources/${encodeURIComponent(id)}/reconnect`, { method: "POST" }),
-  clearSource: (id: string) => request<SourceConnection>(`/api/sources/${encodeURIComponent(id)}/clear`, { method: "POST" }),
   sourceContentUrl: (sourceId: string, itemId: string) =>
     `/api/sources/${encodeURIComponent(sourceId)}/items/${encodeURIComponent(itemId)}/content`,
   tasks: () => request<{ tasks: TaskListItem[] }>("/api/tasks"),
   artifacts: () => request<{ artifacts: ArtifactListItem[] }>("/api/artifacts"),
   task: (id: string) => request<TaskView>(`/api/tasks/${encodeURIComponent(id)}`),
-  taskTurns: (id: string) => request<TaskTurnsResponse>(`/api/tasks/${encodeURIComponent(id)}/turns`),
-  rewindTask: (id: string, input: { runId: string; turn: number; force?: boolean }) =>
-    request<TaskRewindResponse>(`/api/tasks/${encodeURIComponent(id)}/rewind`, {
-      method: "POST",
-      body: JSON.stringify(input)
-    }),
-  browserStatus: (id: string) => request<BrowserStatusView>(`/api/tasks/${encodeURIComponent(id)}/browser`),
-  pauseBrowser: (id: string) =>
-    request<{ paused: boolean; message: string }>(`/api/tasks/${encodeURIComponent(id)}/browser/pause`, { method: "POST" }),
-  resumeBrowser: (id: string) =>
-    request<{ resumed: boolean; message: string }>(`/api/tasks/${encodeURIComponent(id)}/browser/resume`, { method: "POST" }),
-  closeBrowser: (id: string) =>
-    request<{ closed: boolean }>(`/api/tasks/${encodeURIComponent(id)}/browser/close`, { method: "POST" }),
-  browserEvidence: (id: string) =>
-    request<{ evidence: BrowserEvidenceView[] }>(`/api/tasks/${encodeURIComponent(id)}/browser/evidence`),
   browserSettings: () => request<{ settings: BrowserSettingsView }>("/api/browser/settings"),
   updateBrowserSettings: (input: Partial<BrowserSettingsView>) =>
     request<{ settings: BrowserSettingsView }>("/api/browser/settings", { method: "PATCH", body: JSON.stringify(input) }),
-  followUps: (id: string) => request<{ followUps: TaskFollowUpRecord[] }>(`/api/tasks/${encodeURIComponent(id)}/follow-ups`),
   addFollowUp: (id: string, content: string, mode: TaskFollowUpMode) =>
     request<TaskFollowUpRecord>(`/api/tasks/${encodeURIComponent(id)}/follow-ups`, {
       method: "POST",
       body: JSON.stringify({ content, mode })
     }),
-  updateFollowUp: (id: string, followUpId: string, content: string) =>
-    request<TaskFollowUpRecord>(`/api/tasks/${encodeURIComponent(id)}/follow-ups/${encodeURIComponent(followUpId)}`, {
-      method: "PATCH",
-      body: JSON.stringify({ content })
-    }),
-  deleteFollowUp: (id: string, followUpId: string) =>
-    request<TaskFollowUpRecord>(`/api/tasks/${encodeURIComponent(id)}/follow-ups/${encodeURIComponent(followUpId)}`, { method: "DELETE" }),
-  gitView: (id: string) => request<GitRepositoryView>(`/api/tasks/${encodeURIComponent(id)}/git`),
-  gitDiff: (id: string, scope: GitDiffScope, path?: string) =>
-    request<GitDiffView>(`/api/tasks/${encodeURIComponent(id)}/git/diff${query({ scope, path })}`),
-  gitFile: (id: string, path: string, fromHead = false) =>
-    request<GitFileView>(`/api/tasks/${encodeURIComponent(id)}/git/file${query({ path, fromHead })}`),
-  taskContext: (id: string, params: { limit?: number; before?: number } = {}) =>
-    request<TaskContextResponse>(`/api/tasks/${encodeURIComponent(id)}/context${query(params)}`),
-  taskHandoffs: (id: string) => request<TaskHandoffsResponse>(`/api/tasks/${encodeURIComponent(id)}/handoffs`),
-  confirmHandoff: (id: string, executorId: ExecutorId) =>
-    request<ConfirmHandoffResponse>(`/api/tasks/${encodeURIComponent(id)}/handoff`, {
-      method: "POST",
-      body: JSON.stringify({ executorId })
-    }),
-  deleteTaskContext: (id: string) => request<{ taskId: string; deletedItems: number; deletedBlobs: number; deletedHandoffs: number; createdAt: string }>(`/api/tasks/${encodeURIComponent(id)}/context`, { method: "DELETE" }),
-  contextSettings: () => request<ContextSettingsResponse>("/api/context/settings"),
-  contextMetrics: () => request<ContextMetricsResponse>("/api/context/metrics"),
-  saveContextSettings: (patch: ContextSettingsPatch) => request<ContextSettingsResponse>("/api/context/settings", {
-    method: "PATCH",
-    body: JSON.stringify(patch)
-  }),
-  runs: (params: { taskId?: string; status?: string; limit?: number; offset?: number } = {}) =>
-    request<{ runs: RunListItem[]; total: number }>(`/api/runs${query(params)}`),
   approvals: (params: { taskId?: string; status?: string; limit?: number; offset?: number; brief?: boolean } = {}) =>
     request<{ approvals: ApprovalListItem[]; total: number }>(`/api/approvals${query(params)}`),
-  approvalGrants: () => request<{ grants: ApprovalGrant[] }>("/api/approval-grants"),
-  revokeApprovalGrant: (id: string) =>
-    request<{ ok: boolean }>(`/api/approval-grants/${encodeURIComponent(id)}`, { method: "DELETE" }),
-  effects: (params: { taskId?: string; status?: string; limit?: number; offset?: number } = {}) =>
-    request<{ effects: EffectListItem[]; total: number }>(`/api/effects${query(params)}`),
-  reconcile: (params: { status?: string } = {}) =>
-    request<{ items: ReconcileItem[]; total: number }>(`/api/reconcile${query(params)}`),
-  checkReconcile: (id: string) =>
-    request<ReconcileItem>(`/api/reconcile/${encodeURIComponent(id)}/check`, { method: "POST" }),
-  resolveReconcile: (id: string, resolution: "committed" | "absent" | "abandoned", note: string) =>
-    request<ReconcileItem>(`/api/reconcile/${encodeURIComponent(id)}/resolve`, {
-      method: "POST",
-      body: JSON.stringify({ resolution, note })
-    }),
-  createReconcileTask: (id: string, note?: string) =>
-    request<TaskRecord>(`/api/reconcile/${encodeURIComponent(id)}/task`, {
-      method: "POST",
-      body: JSON.stringify({ ...(note ? { note } : {}) })
-    }),
-  outbox: () => request<{ drafts: OutboxDraftListItem[] }>("/api/outbox"),
-  outboxDraft: (id: string) => request<OutboxDraftListItem>(`/api/outbox/${encodeURIComponent(id)}`),
   createOutboxDraft: (input: OutboxDraftRequest) => request<OutboxDraft>("/api/outbox", {
     method: "POST",
     body: JSON.stringify(input)
@@ -589,65 +375,12 @@ export const api = {
     method: "PATCH",
     body: JSON.stringify(input)
   }),
-  discardOutboxDraft: (id: string) => request<OutboxDraft>(`/api/outbox/${encodeURIComponent(id)}/discard`, { method: "POST" }),
   submitOutboxDraft: (id: string) => request<OutboxSubmitResult>(`/api/outbox/${encodeURIComponent(id)}/submit`, { method: "POST" }),
-  desktop: () => request<DesktopDashboard>("/api/desktop"),
-  desktopSession: (id: string) => request<DesktopSessionView>(`/api/desktop/sessions/${encodeURIComponent(id)}`),
-  createDesktopSession: (deviceId: string, targetApp?: string) => request<DesktopSessionView>("/api/desktop/sessions", {
-    method: "POST",
-    body: JSON.stringify({ deviceId, ...(targetApp ? { targetApp } : {}) })
-  }),
-  observeDesktop: (sessionId: string, targetApp?: string) => request<DesktopSessionView>(`/api/desktop/sessions/${encodeURIComponent(sessionId)}/observe`, {
-    method: "POST",
-    body: JSON.stringify(targetApp ? { targetApp } : {})
-  }),
-  pauseDesktop: (sessionId: string) => request<DesktopSessionView>(`/api/desktop/sessions/${encodeURIComponent(sessionId)}/pause`, { method: "POST" }),
-  resumeDesktop: (sessionId: string) => request<DesktopSessionView>(`/api/desktop/sessions/${encodeURIComponent(sessionId)}/resume`, { method: "POST" }),
-  takeOverDesktop: (sessionId: string) => request<DesktopSessionView>(`/api/desktop/sessions/${encodeURIComponent(sessionId)}/takeover`, { method: "POST" }),
-  releaseDesktop: (sessionId: string) => request<DesktopSessionView>(`/api/desktop/sessions/${encodeURIComponent(sessionId)}/release`, { method: "POST" }),
-  terminateDesktop: (sessionId: string) => request<DesktopSessionView>(`/api/desktop/sessions/${encodeURIComponent(sessionId)}/terminate`, { method: "POST" }),
-  desktopAction: (sessionId: string, input: DesktopActionRequest) => request<DesktopCommandView>(`/api/desktop/sessions/${encodeURIComponent(sessionId)}/actions`, {
-    method: "POST",
-    body: JSON.stringify(input)
-  }),
-  approvePairing: (id: string) => request<DeviceView>(`/api/devices/pairing-requests/${encodeURIComponent(id)}/approve`, { method: "POST" }),
-  rejectPairing: (id: string) => request<PairingRequestView>(`/api/devices/pairing-requests/${encodeURIComponent(id)}/reject`, { method: "POST" }),
-  approveDeviceCapability: (deviceId: string, kind: DeviceCapabilityKind, apps: string[]) =>
-    request<DeviceView>(`/api/devices/${encodeURIComponent(deviceId)}/capabilities/${encodeURIComponent(kind)}/approve`, {
-      method: "POST",
-      body: JSON.stringify({ apps })
-    }),
-  revokeDeviceCapability: (deviceId: string, kind: DeviceCapabilityKind) =>
-    request<DeviceView>(`/api/devices/${encodeURIComponent(deviceId)}/capabilities/${encodeURIComponent(kind)}/revoke`, { method: "POST" }),
-  revokeDevice: (deviceId: string) => request<DeviceView>(`/api/devices/${encodeURIComponent(deviceId)}/revoke`, { method: "POST" }),
-  rotateDeviceToken: (deviceId: string) => request<{ device: DeviceView; token: string }>(`/api/devices/${encodeURIComponent(deviceId)}/rotate-token`, { method: "POST" }),
-  taskEvents: (id: string, params: { after?: number; before?: number; limit?: number; type?: string } = {}) =>
-    request<EventWindow>(`/api/tasks/${encodeURIComponent(id)}/events${query(params)}`),
-  manifest: (taskId: string, artifactId: string) =>
-    request<RunManifest>(`/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}`),
-  createTask: (input: CreateTaskRequest) => request<TaskRecord>("/api/tasks", {
-    method: "POST",
-    body: JSON.stringify(input)
-  }),
   retry: (id: string, message?: string) => request<TaskRecord>(`/api/tasks/${encodeURIComponent(id)}/retry`, {
     method: "POST",
     ...(message ? { body: JSON.stringify({ message }) } : {})
   }),
-  extendBudget: (id: string, executionMode?: "standard" | "deep") => request<TaskRecord>(`/api/tasks/${encodeURIComponent(id)}/budget/extend`, { method: "POST", body: JSON.stringify(executionMode ? { executionMode } : {}) }),
-  confirmTaskProposal: (id: string, projectId?: string) => request<{ proposal: TaskProposalRecord; task: TaskRecord }>(
-    `/api/task-proposals/${encodeURIComponent(id)}/confirm`,
-    { method: "POST", ...(projectId ? { body: JSON.stringify({ projectId }) } : {}) }
-  ),
-  rejectTaskProposal: (id: string) => request<TaskProposalRecord>(
-    `/api/task-proposals/${encodeURIComponent(id)}/reject`,
-    { method: "POST" }
-  ),
   cancel: (id: string) => request<TaskRecord>(`/api/tasks/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
-  setTaskOrganization: (id: string, patch: { pinned?: boolean; archived?: boolean }) =>
-    request<TaskRecord>(`/api/tasks/${encodeURIComponent(id)}/organization`, {
-      method: "PATCH",
-      body: JSON.stringify(patch)
-    }),
   decideApproval: (id: string, decision: "approve" | "reject" | "approve_always", parameterHash: string) =>
     request<ApprovalDecisionResult>(`/api/approvals/${encodeURIComponent(id)}/decide`, {
       method: "POST",
@@ -661,10 +394,7 @@ export const api = {
       { method: "POST", body: JSON.stringify({ destination }) }
     ),
   attachmentUrl: (attachmentId: string) =>
-    `/api/attachments/${encodeURIComponent(attachmentId)}`,
-  downloadExport: () => {
-    window.location.assign("/api/export");
-  }
+    `/api/attachments/${encodeURIComponent(attachmentId)}`
 };
 
 export function subscribeToEvents(onEvent: (event: string, envelope?: EventEnvelope) => void): () => void {

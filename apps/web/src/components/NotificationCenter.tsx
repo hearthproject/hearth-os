@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { CheckCircle2, ShieldAlert, X } from "lucide-react";import { subscribeToEvents } from "../lib/api.ts";
+import { CheckCircle2, ShieldAlert, X } from "lucide-react";
+import { subscribeToEvents } from "../lib/api.ts";
 import { desktopNotificationsEnabled, notificationForEvent, type AppNotification } from "../lib/notifications.ts";
 
 const ICONS = {

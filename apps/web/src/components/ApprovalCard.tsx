@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, ExternalLink, Loader2, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ExternalLink, Loader2 } from "lucide-react";
 import { api } from "../lib/api.ts";
 import { abbreviateHash, formatBytes, formatDate, formatTime } from "../lib/format.ts";
 import { APPROVAL_STATUS_LABELS, approvalKindLabel, isToolApproval } from "../lib/labels.ts";

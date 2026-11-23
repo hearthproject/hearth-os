@@ -43,7 +43,7 @@ export function getChatSelection(): ChatSelectionState {
   return state;
 }
 
-export function subscribeChatSelection(listener: () => void): () => void {
+function subscribeChatSelection(listener: () => void): () => void {
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
