@@ -77,7 +77,14 @@ describe("SqliteBackgroundTaskRegistry", () => {
         expect(saved?.startTime).not.toBe(saved?.createdAt);
         expect(registry.recoverLost()).toBe(1);
         expect(registry.get("sh_live")?.status).toBe("lost");
-        await new Promise((resolve) => setTimeout(resolve, 1_000));
+        for (let attempt = 0; attempt < 50; attempt += 1) {
+          try {
+            process.kill(child.pid!, 0);
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          } catch {
+            break;
+          }
+        }
         expect(() => process.kill(child.pid!, 0)).toThrow();
       } finally {
         store.close();
