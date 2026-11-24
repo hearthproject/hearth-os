@@ -217,7 +217,7 @@ export interface SettleRunOperationCleanupInput {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 42;
+export const CURRENT_SCHEMA_VERSION = 43;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (

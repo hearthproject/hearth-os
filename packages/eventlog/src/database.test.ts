@@ -93,6 +93,30 @@ describe("HearthStore", () => {
     migrated.close();
   });
 
+  it("adds conversation context tables when upgrading a v42 database", () => {
+    const path = tempDb();
+    const store = new HearthStore(path);
+    store.close();
+
+    const legacy = new DatabaseSync(path);
+    legacy.exec(`
+      DROP TABLE IF EXISTS conversation_compactions;
+      DROP TABLE IF EXISTS conversation_context_state;
+      PRAGMA user_version = 42;
+    `);
+    legacy.close();
+
+    const migrated = new HearthStore(path);
+    const tables = migrated.db.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('conversation_context_state', 'conversation_compactions')"
+    ).all() as Array<{ name: string }>;
+    expect(tables.map((row) => row.name).sort()).toEqual([
+      "conversation_compactions",
+      "conversation_context_state"
+    ]);
+    migrated.close();
+  });
+
   it("migrates a schema v8 database without losing tasks, runs, or checkpoints", () => {
     const path = tempDb();
     const createdAt = "2026-11-05T00:00:00.000Z";
