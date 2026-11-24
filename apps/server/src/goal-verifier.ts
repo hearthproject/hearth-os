@@ -7,8 +7,11 @@ import type {
   GoalCompletionReport,
   GoalContract,
   GoalCriterion,
-  GoalCriterionResult
+  GoalCriterionResult,
+  GoalEvidenceRef,
+  GoalRoundRecord
 } from "@hearth/core";
+import { goalEvidenceKey } from "@hearth/core";
 import { parseCommandCheck, type GoalCommandResult } from "./goal-command.ts";
 
 export interface GoalObservedAction {
@@ -25,6 +28,10 @@ export interface GoalVerifierInput {
   /** Per-run output directory holding goal-intent.json and run evidence. */
   outDir: string;
   artifacts: ArtifactRecord[];
+  /** Evidence submitted by the current round's goal-intent.json. */
+  intentEvidence?: GoalEvidenceRef[];
+  /** Recent immutable rounds provide continuity without trusting the model's self-report. */
+  previousRounds?: GoalRoundRecord[];
   actions: GoalObservedAction[];
   review: ((prompt: string) => Promise<string | null>) | null;
   runCommand?: (argv: string[], cwd: string) => Promise<GoalCommandResult>;
@@ -46,6 +53,7 @@ export async function verifyGoalCompletion(input: GoalVerifierInput): Promise<Go
   const evidenceRefs = [
     ...artifactPaths,
     ...artifactPaths.map((path) => `artifact:${path}`),
+    ...(input.intentEvidence ?? []).map(goalEvidenceKey),
     "run-evidence.json",
     `run:${input.roundRunId}`
   ];
@@ -62,7 +70,7 @@ export async function verifyGoalCompletion(input: GoalVerifierInput): Promise<Go
     evidenceRefs.push(...result.evidenceRefs);
   }
 
-  const missingEvidence = findMissingEvidence(goal.evidenceRequirements, artifactPaths, input.outDir);
+  const missingEvidence = findMissingEvidence(goal.evidenceRequirements, artifactPaths, input.outDir, input.intentEvidence ?? []);
   const forbiddenActions = findForbiddenActions(goal.forbiddenActions, input.actions);
   const requiredResults = results.filter((result) => {
     const criterion = criteria.find((item) => item.id === result.criterionId);
@@ -261,6 +269,9 @@ async function verifyReview(criterion: GoalCriterion, input: CriterionContext): 
 }
 
 function summarizeEvidence(input: CriterionContext): string {
+  const recentRounds = (input.previousRounds ?? []).slice(-4).map((round) =>
+    `第 ${round.index} 轮 ${round.status}: ${summarizeText(round.summary ?? "无摘要")}${round.verifier ? ` | 验收 ${round.verifier.verdict}: ${round.verifier.summary}` : ""}`
+  );
   const lines = [
     `任务：${input.taskId}`,
     `运行：${input.roundRunId}`,
@@ -268,6 +279,10 @@ function summarizeEvidence(input: CriterionContext): string {
     `产物：${input.artifactPaths.join(", ") || "无"}`,
     `产物哈希：${input.artifactHashes.join(", ") || "无"}`,
     `意图：${input.outDir}/goal-intent.json`,
+    `意图证据：${(input.intentEvidence ?? []).map(goalEvidenceKey).join(", ") || "无"}`,
+    `最近轮次：${recentRounds.join(" || ") || "无"}`,
+    `原始目标：${input.goal.originalObjective ?? input.goal.objective}`,
+    `契约修订：${input.goal.contractRevision ?? 0}`,
     `禁止动作：${input.goal.forbiddenActions.join(", ") || "无"}`,
     `证据要求：${input.goal.evidenceRequirements.join(", ") || "无"}`
   ];
@@ -292,11 +307,17 @@ function parseReviewAnswer(answer: string): { verdict: "pass" | "fail"; reason: 
   return null;
 }
 
-function findMissingEvidence(requirements: string[], artifactPaths: string[], outDir: string): string[] {
+function findMissingEvidence(
+  requirements: string[],
+  artifactPaths: string[],
+  outDir: string,
+  intentEvidence: GoalEvidenceRef[]
+): string[] {
   if (requirements.length === 0) return [];
   const observed = new Set([
     ...artifactPaths,
     ...artifactPaths.map((path) => path.replace(/\\/g, "/")),
+    ...intentEvidence.map(goalEvidenceKey),
     "run-evidence.json",
     "goal-intent.json",
     existsSync(resolve(outDir, "run-evidence.json")) ? "run-evidence.json" : "",

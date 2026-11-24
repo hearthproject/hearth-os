@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ContextSettings, ExecutorSettings, RunBudget, TaskRecord } from "@hearth/core";
-import { NativeExecutorAdapter } from "./executor-adapter.ts";
+import type { CodexRunOptions } from "@hearth/codex-executor";
+import type { DeepSeekHarnessRunOptions } from "@hearth/deepseek-executor";
+import { CodexExecutorAdapter, DeepSeekHarnessExecutorAdapter, NativeExecutorAdapter } from "./executor-adapter.ts";
 import type { ExecutorInvocation } from "./executor-adapter.ts";
 import type { PreparedWorkspace } from "./workspace.ts";
 import { defaultExecutorSettings } from "./executor-settings.ts";
@@ -147,5 +149,60 @@ describe("executor adapters", () => {
     expect(permissions.tools).toContain("shell");
     expect(permissions.tools).not.toContain("read_file");
     expect(permissions.tools).not.toContain("finish_task");
+  });
+
+  it("runs Codex planning in a fresh read-only sandbox and returns plan markdown", async () => {
+    const root = tempRoot();
+    const captured: { value: CodexRunOptions | null } = { value: null };
+    const adapter = new CodexExecutorAdapter(async (options) => {
+      captured.value = options;
+      return { threadId: "plan-thread", finalResponse: "## 调查结论\n\n- read only", usage: null, profileLabel: "codex-plan" };
+    });
+    const outcome = await adapter.execute({
+      ...invocation(defaultExecutorSettings(), root),
+      mode: "plan",
+      prompt: "inspect only",
+      contextSettings: { allowCodexNetwork: true } as ContextSettings
+    });
+    expect(captured.value).toMatchObject({
+      sandboxMode: "read-only",
+      approvalPolicy: "never",
+      networkAccessEnabled: false
+    });
+    expect(captured.value?.threadId).toBeUndefined();
+    expect(outcome.planMarkdown).toContain("调查结论");
+  });
+
+  it("runs DSH planning with read-only permissions, no session resume, and captured plan markdown", async () => {
+    const root = tempRoot();
+    const captured: { value: DeepSeekHarnessRunOptions | null } = { value: null };
+    const adapter = new DeepSeekHarnessExecutorAdapter(async (options) => {
+      captured.value = options;
+      return {
+        finalResponse: "",
+        planMarkdown: "## 执行步骤\n\n1. inspect",
+        sessionId: "dsh-plan-session",
+        usage: null,
+        finishReason: "completed"
+      };
+    }, root);
+    const outcome = await adapter.execute({
+      ...invocation(defaultExecutorSettings(), root),
+      mode: "plan",
+      prompt: "inspect only",
+      dshSettings: {
+        protocol: "openai-chat",
+        baseUrl: "http://127.0.0.1:1",
+        model: "test-model",
+        apiKey: "test-key"
+      } as ExecutorInvocation["dshSettings"]
+    });
+    expect(captured.value).toMatchObject({
+      planMode: true,
+      permissionMode: "read-only",
+      mode: "necessary"
+    });
+    expect(captured.value?.resumeSessionId).toBeUndefined();
+    expect(outcome.planMarkdown).toContain("执行步骤");
   });
 });

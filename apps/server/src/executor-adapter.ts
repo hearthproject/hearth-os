@@ -44,6 +44,7 @@ export interface ExecutionOutcome {
   label: string;
   question: string | null;
   planPath?: string | null;
+  planMarkdown?: string | null;
   resume?: AgentResumeState;
   failure?: AgentFailure;
   budgetExhaustion?: Pick<BudgetExhaustion, "dimension" | "limit">;
@@ -168,6 +169,9 @@ export class NativeExecutorAdapter implements ExecutorAdapter {
       label: `native / ${input.nativeSettings.model}`,
       question: outcome.question,
       ...(outcome.planPath ? { planPath: outcome.planPath } : {}),
+      ...(input.mode === "plan" && (outcome.question || outcome.finalResponse)
+        ? { planMarkdown: outcome.question || outcome.finalResponse }
+        : {}),
       ...(outcome.failure ? { failure: outcome.failure } : {}),
       ...(outcome.budgetExhaustion ? { budgetExhaustion: outcome.budgetExhaustion } : {}),
       ...(outcome.messages
@@ -195,14 +199,18 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
   }
 
   async execute(input: ExecutorInvocation): Promise<ExecutionOutcome> {
+    const planMode = input.mode === "plan";
+    const resumeThreadId = planMode ? undefined : input.activeThreadId;
     const result = await this.runner({
       workingDirectory: input.prepared.root,
       outDir: input.prepared.outDir,
       prompt: input.prompt,
       signal: input.signal,
-      networkAccessEnabled: input.fullPermission || input.contextSettings.allowCodexNetwork,
+      networkAccessEnabled: planMode ? false : input.fullPermission || input.contextSettings.allowCodexNetwork,
+      sandboxMode: planMode ? "read-only" : "danger-full-access",
+      approvalPolicy: "never",
       ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
-      ...(input.activeThreadId ? { threadId: input.activeThreadId } : {}),
+      ...(resumeThreadId ? { threadId: resumeThreadId } : {}),
       onEvent: (event) => input.onProgress({
         kind: event.type,
         message: event.message,
@@ -218,7 +226,8 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
       usage: result.usage,
       threadId: result.threadId,
       label: result.profileLabel,
-      question: null
+      question: null,
+      ...(planMode ? { planMarkdown: result.finalResponse } : {})
     };
   }
 
@@ -255,6 +264,7 @@ export class DeepSeekHarnessExecutorAdapter implements ExecutorAdapter {
     const settings = input.dshSettings;
     if (!settings) throw new Error("DeepSeek Harness 还没有绑定模型，请到设置中选择模型档案");
     if (settings.protocol === "gemini") throw new Error("DeepSeek Harness 不支持 Gemini 协议");
+    const planMode = input.mode === "plan";
     const result = await this.runner({
       settings: {
         protocol: settings.protocol,
@@ -268,12 +278,14 @@ export class DeepSeekHarnessExecutorAdapter implements ExecutorAdapter {
       workingDirectory: input.prepared.root,
       outDir: input.prepared.outDir,
       prompt: input.prompt,
-      mode: input.fullPermission ? "full" : "necessary",
+      mode: planMode ? "necessary" : input.fullPermission ? "full" : "necessary",
+      planMode,
+      permissionMode: planMode ? "read-only" : input.fullPermission ? "danger-full-access" : "workspace-write",
       ...(input.budget.maxTurns !== undefined ? { maxTurns: input.budget.maxTurns } : {}),
       ...(input.budget.maxDurationMs !== undefined
         ? { runBudgetSeconds: Math.max(1, Math.ceil(input.budget.maxDurationMs / 1000)) }
         : {}),
-      ...(input.activeThreadId ? { resumeSessionId: input.activeThreadId } : {}),
+      ...(!planMode && input.activeThreadId ? { resumeSessionId: input.activeThreadId } : {}),
       signal: input.signal,
       onProgress: (event) => input.onProgress({
         kind: event.type,
@@ -290,7 +302,8 @@ export class DeepSeekHarnessExecutorAdapter implements ExecutorAdapter {
       usage: result.usage,
       threadId: result.sessionId,
       label: `deepseek-harness / ${result.sessionId}`,
-      question: null
+      question: null,
+      ...(planMode ? { planMarkdown: result.planMarkdown ?? result.finalResponse } : {})
     };
   }
 

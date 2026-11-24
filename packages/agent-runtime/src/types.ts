@@ -96,6 +96,7 @@ export interface AgentToolContext {
 export type AgentToolAction = "finish" | "ask_user" | "plan";
 
 export interface AgentToolMetadata {
+  title?: string;
   truncated?: boolean;
   fullOutputPath?: string;
   exitCode?: number | null;

@@ -3,6 +3,7 @@ import type {
   GoalContract,
   GoalEligibility,
   GoalEligibilityReason,
+  GoalEvidenceRef,
   GoalState,
   TaskStatus
 } from "./types.ts";
@@ -18,7 +19,7 @@ const TRANSITIONS: Record<GoalState, readonly GoalState[]> = {
   active: ["paused", "awaiting_user", "validating", "blocked", "cancelled"],
   paused: ["active", "validating", "cancelled"],
   awaiting_user: ["active", "validating", "blocked", "cancelled"],
-  validating: ["done", "active", "awaiting_user", "blocked", "cancelled"],
+  validating: ["done", "active", "awaiting_user", "paused", "blocked", "cancelled"],
   blocked: ["active", "cancelled"],
   done: [],
   failed: [],
@@ -26,7 +27,14 @@ const TRANSITIONS: Record<GoalState, readonly GoalState[]> = {
 };
 
 export class GoalStateError extends Error {
-  readonly code: "GOAL_STATE_INVALID" | "GOAL_ROUND_LIMIT" | "GOAL_REVISION_CONFLICT" | "GOAL_ALREADY_ACTIVE" | "GOAL_VERIFIER_UNAVAILABLE";
+  readonly code:
+    | "GOAL_STATE_INVALID"
+    | "GOAL_ROUND_LIMIT"
+    | "GOAL_REVISION_CONFLICT"
+    | "GOAL_ALREADY_ACTIVE"
+    | "GOAL_VERIFIER_UNAVAILABLE"
+    | "GOAL_EXECUTION_CONFLICT"
+    | "GOAL_CONTRACT_INVALID";
 
   constructor(code: GoalStateError["code"], message: string) {
     super(message);
@@ -42,12 +50,18 @@ export function isGoalTerminal(state: GoalState): boolean {
 export function normalizeGoal(goal: GoalContract): GoalContract {
   return {
     ...goal,
+    originalObjective: goal.originalObjective ?? goal.objective,
+    contractRevision: Math.max(0, goal.contractRevision ?? 0),
+    executionRevision: Math.max(0, goal.executionRevision ?? 0),
+    amendments: goal.amendments ?? [],
     armed: goal.armed ?? false,
     roundCount: Math.max(0, goal.roundCount ?? 0),
     noProgressCount: Math.max(0, goal.noProgressCount ?? 0),
     lastProgressDigest: goal.lastProgressDigest ?? null,
     nextWakeAt: goal.nextWakeAt ?? null,
     stopReason: goal.stopReason ?? null,
+    pauseReference: goal.pauseReference ?? null,
+    commandsApprovedAt: goal.commandsApprovedAt ?? null,
     revision: Math.max(0, goal.revision ?? 0)
   };
 }
@@ -66,6 +80,10 @@ export function assertGoalTransition(from: GoalState, to: GoalState): void {
 
 export function assertGoalAction(goal: GoalContract, action: GoalAction): void {
   const state = goal.currentState;
+  if (action === "switch_executor" || action === "amend_contract") {
+    if (isGoalTerminal(state)) throw new GoalStateError("GOAL_STATE_INVALID", "目标已经结束，不能再修改运行契约");
+    return;
+  }
   if (action === "stop") {
     if (isGoalTerminal(state)) throw new GoalStateError("GOAL_STATE_INVALID", "目标已经结束，不能停止");
     return;
@@ -161,11 +179,11 @@ export function evaluateGoalEligibility(input: GoalEligibilityInput): GoalEligib
 export function goalProgressDigest(parts: {
   artifactHashes: string[];
   summary: string;
-  intentEvidence: string[];
+  intentEvidence: GoalEvidenceRef[];
 }): string {
   const structural = [
     ...parts.artifactHashes.map((value) => value.trim()).sort(),
-    ...parts.intentEvidence.map((value) => value.trim()).sort()
+    ...parts.intentEvidence.map(goalEvidenceKey).sort()
   ];
   // Once a round leaves artifacts or evidence, prose changes alone are not progress.
   // With no structural output, fall back to the normalized summary so text-only work
@@ -180,6 +198,16 @@ export function goalProgressDigest(parts: {
     hash = (hash * prime) & 0xffffffffffffffffn;
   }
   return hash.toString(16).padStart(16, "0");
+}
+
+export function goalEvidenceKey(evidence: GoalEvidenceRef): string {
+  if (typeof evidence === "string") return evidence.trim();
+  return [
+    evidence.kind ?? "note",
+    evidence.ref.trim(),
+    evidence.sha256 ?? "",
+    evidence.runId ?? ""
+  ].join(":");
 }
 
 export function goalRoundLimitReached(_goal: GoalContract): boolean {

@@ -1,5 +1,6 @@
 import { Check, ChevronRight, ClipboardList, Loader2, RefreshCw, Square } from "lucide-react";
 import type { PlanActionName, PlanStage, PlanView } from "@hearth/core";
+import { executorLabel } from "../lib/labels.ts";
 
 const STAGE_LABELS: Record<PlanStage, string> = {
   planning: "规划中",
@@ -26,6 +27,15 @@ export function PlanBar({
   const canReplan = stage === "awaiting_approval" || stage === "failed";
   const canCancel = !["completed", "cancelled"].includes(stage);
   const canRetry = stage === "failed" && Boolean(view.planMarkdown?.trim());
+  const executorText = executorLabel(view.execution?.executorId);
+  const attempt = Math.max(1, view.planningAttempt ?? 1);
+  const summary = stage === "planning"
+    ? `${executorText} 只读调查中，第 ${attempt} 次规划`
+    : stage === "awaiting_approval"
+      ? `${executorText} 已完成只读规划，等待你批准`
+      : stage === "executing"
+        ? `${executorText} 正在执行已批准计划`
+        : view.objective;
 
   return (
     <section className={`goal-bar plan-bar ${stage}`} aria-label="当前计划">
@@ -37,9 +47,11 @@ export function PlanBar({
           <strong>{view.title}</strong>
           <span className="goal-state-pill">{STAGE_LABELS[stage]}</span>
           <span className="goal-round-pill">v{view.revision + 1}</span>
+          <span className="goal-round-pill">{executorText}</span>
+          {view.planningAttempt ? <span className="goal-round-pill">第 {attempt} 次规划</span> : null}
         </div>
         <span className="goal-bar-next">
-          {stage === "planning" && !view.planMarkdown ? "只读调查中，完成后给出可批准方案" : view.objective}
+          {summary}
         </span>
         <ChevronRight size={13} className="plan-bar-chevron" />
       </button>

@@ -17,6 +17,9 @@ export interface CodexRunOptions {
   codexPathOverride?: string;
   threadId?: string;
   networkAccessEnabled?: boolean;
+  /** Planning uses read-only; build keeps the caller's existing permission profile. */
+  sandboxMode?: "read-only" | "workspace-write" | "danger-full-access";
+  approvalPolicy?: "never" | "on-request" | "on-failure" | "untrusted";
   env?: Record<string, string>;
   mcpServers?: Record<string, CodexMcpServer>;
 }
@@ -58,8 +61,8 @@ export async function runCodex(options: CodexRunOptions): Promise<CodexRunResult
     ...(profile.model ? { model: profile.model } : {}),
     workingDirectory: options.workingDirectory,
     skipGitRepoCheck: true,
-    sandboxMode: "danger-full-access",
-    approvalPolicy: "never",
+    sandboxMode: options.sandboxMode ?? "danger-full-access",
+    approvalPolicy: options.approvalPolicy ?? "never",
     networkAccessEnabled: options.networkAccessEnabled ?? true,
     webSearchMode: "disabled"
   } as const;

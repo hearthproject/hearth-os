@@ -102,16 +102,20 @@ describe("task worktrees", () => {
     });
   });
 
-  it("defaults project tasks to native workspaces and rejects unsupported executors", () => {
+  it("defaults project tasks to native workspaces and preserves a selected executor", () => {
     const service = new HearthService(store);
     const task = service.createTask({ title: "Project task", goal: "Change code", projectId });
     expect(task).toMatchObject({ projectId, executorId: "native", taskKind: "workspace" });
-    expect(() => service.createTask({
-      title: "Wrong executor",
-      goal: "Change code",
-      projectId,
-      executorId: "codex"
-    })).toThrowError(expect.objectContaining({ code: "PROJECT_EXECUTOR_UNSUPPORTED" }));
+
+    for (const executorId of ["codex", "deepseek-harness"] as const) {
+      const selected = service.createTask({
+        title: `${executorId} project task`,
+        goal: "Change code",
+        projectId,
+        executorId
+      });
+      expect(selected).toMatchObject({ projectId, executorId, taskKind: "workspace" });
+    }
   });
 });
 

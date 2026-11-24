@@ -61,6 +61,54 @@ describe("describeItem", () => {
       codexPathOverride: "C:\\missing\\codex.exe"
     })).rejects.toThrow("Codex 可执行文件不存在");
   });
+
+  it("passes the planning sandbox and no session identity into the SDK thread", async () => {
+    const profile: CodexProfile = {
+      codexHome: "C:\\codex",
+      configPath: "C:\\codex\\config.toml",
+      model: "test-model",
+      providerId: "openai",
+      providerName: "OpenAI",
+      baseUrl: null,
+      wireApi: null,
+      envKey: null,
+      envKeyPresent: false,
+      envKeySource: "none",
+      authSource: "openai-login",
+      canRun: true,
+      issues: []
+    };
+    let threadOptions: Record<string, unknown> | null = null;
+    const codex = {
+      startThread(options: Record<string, unknown>) {
+        threadOptions = options;
+        return {
+          id: "plan-thread",
+          runStreamed() {
+            return { events: (async function* () {})() };
+          }
+        };
+      },
+      resumeThread() {
+        throw new Error("planning must not resume an old thread");
+      }
+    };
+    await runCodex({
+      profile,
+      codex: codex as never,
+      workingDirectory: "C:\\repo",
+      prompt: "inspect",
+      sandboxMode: "read-only",
+      approvalPolicy: "never",
+      networkAccessEnabled: false
+    });
+    expect(threadOptions).toMatchObject({
+      sandboxMode: "read-only",
+      approvalPolicy: "never",
+      networkAccessEnabled: false,
+      webSearchMode: "disabled"
+    });
+  });
 });
 
 describe("codexMcpConfig", () => {

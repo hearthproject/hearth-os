@@ -155,9 +155,6 @@ export class HearthService {
     if (input.projectId && !project) {
       throw new TaskInputSelectionError("PROJECT_NOT_FOUND", "选择的本地项目不存在", 404);
     }
-    if (project && input.executorId && input.executorId !== "native") {
-      throw new TaskInputSelectionError("PROJECT_EXECUTOR_UNSUPPORTED", "本地项目任务当前仅支持 native 执行器", 409);
-    }
     const id = `CUSTOM-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
     const inputs: TaskInput[] = [];
     if (input.inputs) inputs.push(...input.inputs);
@@ -225,7 +222,7 @@ export class HearthService {
       }
       inputs.push({ kind: "workspace", label: "工作目录", value: realpathSync.native(workspacePath) });
     }
-    const executorId = project ? "native" : input.executorId ?? "native";
+    const executorId = input.executorId ?? "native";
     const taskKind = input.taskKind ?? (project || workspacePath ? "workspace" : "general");
     const expectedOutputs = input.expectedOutputs ?? [];
     for (const output of expectedOutputs) {
@@ -425,7 +422,7 @@ export class HearthService {
     return new Map(this.store.listTasks().map((task) => [task.id, task.title]));
   }
 
-  updateTask(taskId: string, patch: Partial<Pick<TaskRecord, "status" | "title" | "goal" | "goalId" | "planId" | "mode" | "currentRunId" | "nextAction" | "error" | "resultSummary" | "conversationId" | "executorId" | "taskKind" | "expectedOutputs" | "permissions" | "pendingInput" | "methodId" | "methodVersion" | "pinnedAt" | "archivedAt" | "budgetOverride" | "executionMode">>, runId?: string): TaskRecord {
+  updateTask(taskId: string, patch: Partial<Pick<TaskRecord, "status" | "title" | "goal" | "goalId" | "planId" | "mode" | "currentRunId" | "nextAction" | "error" | "resultSummary" | "conversationId" | "executorId" | "taskKind" | "expectedOutputs" | "permissions" | "pendingInput" | "methodId" | "methodVersion" | "projectId" | "networkHosts" | "inputs" | "outputDir" | "pinnedAt" | "archivedAt" | "budgetOverride" | "executionMode">>, runId?: string): TaskRecord {
     const task = this.requireTask(taskId);
     if (patch.status && patch.status !== task.status) assertTransition(task.status, patch.status);
     const previousStatus = task.status;
@@ -713,9 +710,6 @@ export class HearthService {
     const projectId = options.projectId?.trim()
       || this.store.getConversation(proposal.conversationId)?.projectId
       || null;
-    if (projectId && executorId !== "native") {
-      throw new Error("本地项目任务当前仅支持 native 执行器，请先切换到 native 再确认");
-    }
     const task = this.createTask({
       title: proposal.title,
       goal: proposal.goal,

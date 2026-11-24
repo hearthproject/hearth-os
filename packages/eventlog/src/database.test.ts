@@ -13,6 +13,7 @@ import type {
   DeviceRecord,
   GoalContract,
   GoalRoundRecord,
+  PlanRecord,
   RunCheckpointRecord,
   RunRecord,
   TaskRecord
@@ -114,6 +115,114 @@ describe("HearthStore", () => {
       "conversation_compactions",
       "conversation_context_state"
     ]);
+    migrated.close();
+  });
+
+  it("migrates v43 goal, round, and plan rows without losing readable state", () => {
+    const path = tempDb();
+    const store = new HearthStore(path);
+    const legacyGoal: GoalContract = {
+      goalId: "goal-v43",
+      title: "Legacy goal",
+      objective: "Preserve the original request",
+      originalObjective: "Preserve the original request",
+      constraints: [],
+      forbiddenActions: [],
+      authoritySources: [{ kind: "user", ref: "conversation-v43" }],
+      successCriteria: [],
+      evidenceRequirements: [],
+      budget: {},
+      stopConditions: [],
+      reviewPolicy: "human_on_risk",
+      currentState: "active",
+      createdAt: "2026-11-23T00:00:00.000Z",
+      updatedAt: "2026-11-23T00:00:00.000Z",
+      conversationId: "conversation-v43",
+      taskId: "task-v43",
+      armed: true,
+      roundCount: 1,
+      revision: 3,
+      contractRevision: 0,
+      executionRevision: 0,
+      amendments: [],
+      execution: { executorId: "native", taskKind: "general", expectedOutputs: [], networkHosts: [] }
+    };
+    store.appendEvent({ type: "goal.created", taskId: "task-v43", payload: legacyGoal });
+    const round: GoalRoundRecord = {
+      id: "round-v43",
+      goalId: "goal-v43",
+      taskId: "task-v43",
+      index: 1,
+      runIds: ["run-v43"],
+      status: "completed",
+      startedAt: "2026-11-23T00:00:00.000Z",
+      endedAt: "2026-11-23T00:01:00.000Z",
+      summary: "legacy round",
+      intent: null,
+      artifactRefs: [],
+      evidenceRefs: ["run:run-v43"],
+      usage: null,
+      progressDigest: "legacy-digest",
+      verifier: null,
+      workspaceRoot: "C:/legacy/workspace",
+      outDir: "C:/legacy/out",
+      executionFence: null
+    };
+    store.appendEvent({ type: "goal.round.settled", taskId: "task-v43", runId: "run-v43", payload: round });
+    const plan: PlanRecord = {
+      id: "plan-v43",
+      conversationId: "conversation-v43",
+      projectId: null,
+      title: "Legacy plan",
+      objective: "Keep old plans readable",
+      stage: "awaiting_approval",
+      planningTaskId: "task-plan-v43",
+      executionTaskId: null,
+      planMarkdown: "## Legacy plan\n\n- preserved",
+      planPath: "C:/legacy/plan.md",
+      planSha256: null,
+      planningAttempt: 0,
+      planningRunId: null,
+      revision: 1,
+      createdAt: "2026-11-23T00:00:00.000Z",
+      updatedAt: "2026-11-23T00:01:00.000Z",
+      approvedAt: null,
+      completedAt: null,
+      error: null
+    };
+    store.appendEvent({ type: "plan.created", taskId: "task-plan-v43", payload: plan });
+    store.close();
+
+    const legacy = new DatabaseSync(path);
+    legacy.exec(`
+      ALTER TABLE goals DROP COLUMN original_objective;
+      ALTER TABLE goals DROP COLUMN contract_revision;
+      ALTER TABLE goals DROP COLUMN execution_revision;
+      ALTER TABLE goals DROP COLUMN amendments_json;
+      ALTER TABLE goal_rounds DROP COLUMN execution_fence_json;
+      ALTER TABLE plans DROP COLUMN plan_sha256;
+      ALTER TABLE plans DROP COLUMN planning_attempt;
+      ALTER TABLE plans DROP COLUMN planning_run_id;
+      PRAGMA user_version = 43;
+    `);
+    legacy.close();
+
+    const migrated = new HearthStore(path);
+    const loadedGoal = migrated.getGoal("goal-v43");
+    expect(loadedGoal).toMatchObject({
+      objective: "Preserve the original request",
+      originalObjective: "Preserve the original request",
+      contractRevision: 0,
+      executionRevision: 0,
+      amendments: []
+    });
+    expect(migrated.latestGoalRound("goal-v43")).toMatchObject({ status: "completed", executionFence: null });
+    expect(migrated.getPlan("plan-v43")).toMatchObject({
+      planMarkdown: "## Legacy plan\n\n- preserved",
+      planSha256: null,
+      planningAttempt: 0,
+      planningRunId: null
+    });
     migrated.close();
   });
 

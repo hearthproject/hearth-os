@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { buildDshPatch, runDeepSeekHarness, type DeepSeekHarnessRunOptions } from "./index.ts";
+import {
+  buildDshPatch,
+  dshPermissionMode,
+  planReviewMarkdown,
+  promptForRun,
+  runDeepSeekHarness,
+  type DeepSeekHarnessRunOptions
+} from "./index.ts";
 
 function options(overrides: Partial<DeepSeekHarnessRunOptions["settings"]> = {}): DeepSeekHarnessRunOptions {
   return {
@@ -42,5 +49,27 @@ describe("buildDshPatch", () => {
     expect(patch).toContain("serverName: \"hearth\"");
     expect(patch).toContain("command: \"node.exe\"");
     expect(patch).toContain("HEARTH_BASE_URL: \"http://127.0.0.1:4317\"");
+  });
+});
+
+describe("DSH plan mode", () => {
+  it("enters /plan with a hard read-only permission that cannot be widened", () => {
+    const planOptions = {
+      ...options(),
+      planMode: true,
+      mode: "full" as const,
+      permissionMode: "danger-full-access" as const,
+      prompt: "inspect the repository"
+    };
+    expect(dshPermissionMode(planOptions)).toBe("read-only");
+    expect(promptForRun(planOptions)).toBe("/plan inspect the repository");
+  });
+
+  it("captures only the full plan-review detail and ignores ordinary questions", () => {
+    expect(planReviewMarkdown([
+      { intent: { kind: "clarify" }, detail: "Which branch?" },
+      { intent: { kind: "plan-review" }, detail: "## 调查结论\n\n- inspected" },
+      { intent: { kind: "plan-review" }, detail: "## 执行步骤\n\n1. implement" }
+    ])).toBe("## 调查结论\n\n- inspected\n\n## 执行步骤\n\n1. implement");
   });
 });

@@ -217,7 +217,7 @@ export interface SettleRunOperationCleanupInput {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 43;
+export const CURRENT_SCHEMA_VERSION = 44;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -250,7 +250,7 @@ CREATE TABLE IF NOT EXISTS task_worktrees (
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS goals (
-  id TEXT PRIMARY KEY, title TEXT NOT NULL, objective TEXT NOT NULL,
+  id TEXT PRIMARY KEY, title TEXT NOT NULL, objective TEXT NOT NULL, original_objective TEXT,
   constraints_json TEXT NOT NULL, forbidden_actions_json TEXT NOT NULL,
   authority_sources_json TEXT NOT NULL, success_criteria_json TEXT NOT NULL,
   evidence_requirements_json TEXT NOT NULL, budget_json TEXT NOT NULL,
@@ -260,7 +260,9 @@ CREATE TABLE IF NOT EXISTS goals (
   round_count INTEGER NOT NULL DEFAULT 0, max_rounds INTEGER NOT NULL DEFAULT 24,
   no_progress_count INTEGER NOT NULL DEFAULT 0, last_progress_digest TEXT,
   next_wake_at TEXT, stop_reason TEXT, revision INTEGER NOT NULL DEFAULT 0,
-  execution_json TEXT, pause_reference_json TEXT, commands_approved_at TEXT
+  contract_revision INTEGER NOT NULL DEFAULT 0, execution_revision INTEGER NOT NULL DEFAULT 0,
+  amendments_json TEXT NOT NULL DEFAULT '[]', execution_json TEXT,
+  pause_reference_json TEXT, commands_approved_at TEXT
 );
 CREATE TABLE IF NOT EXISTS goal_rounds (
   id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, task_id TEXT NOT NULL,
@@ -268,7 +270,7 @@ CREATE TABLE IF NOT EXISTS goal_rounds (
   started_at TEXT NOT NULL, ended_at TEXT, summary TEXT, intent_json TEXT,
   artifact_refs_json TEXT NOT NULL, evidence_refs_json TEXT NOT NULL,
   usage_json TEXT, progress_digest TEXT, verifier_json TEXT,
-  workspace_root TEXT, out_dir TEXT,
+  workspace_root TEXT, out_dir TEXT, execution_fence_json TEXT,
   UNIQUE(goal_id, round_index)
 );
 CREATE TABLE IF NOT EXISTS goal_completion_reports (
@@ -282,7 +284,8 @@ CREATE TABLE IF NOT EXISTS plans (
   title TEXT NOT NULL, objective TEXT NOT NULL, stage TEXT NOT NULL,
   planning_task_id TEXT, execution_task_id TEXT,
   plan_markdown TEXT, plan_path TEXT, revision INTEGER NOT NULL DEFAULT 0,
-  execution_json TEXT,
+  plan_sha256 TEXT, planning_attempt INTEGER NOT NULL DEFAULT 0,
+  planning_run_id TEXT, execution_json TEXT,
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
   approved_at TEXT, completed_at TEXT, error TEXT
 );
@@ -1822,14 +1825,22 @@ export class HearthStore {
     ensureColumn(this.db, "goals", "next_wake_at", "TEXT");
     ensureColumn(this.db, "goals", "stop_reason", "TEXT");
     ensureColumn(this.db, "goals", "revision", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn(this.db, "goals", "original_objective", "TEXT");
+    ensureColumn(this.db, "goals", "contract_revision", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn(this.db, "goals", "execution_revision", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn(this.db, "goals", "amendments_json", "TEXT NOT NULL DEFAULT '[]'");
     ensureColumn(this.db, "goals", "execution_json", "TEXT");
     ensureColumn(this.db, "goals", "pause_reference_json", "TEXT");
     ensureColumn(this.db, "goals", "commands_approved_at", "TEXT");
     ensureColumn(this.db, "goal_rounds", "workspace_root", "TEXT");
     ensureColumn(this.db, "goal_rounds", "out_dir", "TEXT");
+    ensureColumn(this.db, "goal_rounds", "execution_fence_json", "TEXT");
     ensureColumn(this.db, "tasks", "mode", "TEXT NOT NULL DEFAULT 'build'");
     ensureColumn(this.db, "tasks", "plan_id", "TEXT");
     ensureColumn(this.db, "plans", "execution_json", "TEXT");
+    ensureColumn(this.db, "plans", "plan_sha256", "TEXT");
+    ensureColumn(this.db, "plans", "planning_attempt", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn(this.db, "plans", "planning_run_id", "TEXT");
     this.db.exec(`CREATE TABLE IF NOT EXISTS plans (
       id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, project_id TEXT,
       title TEXT NOT NULL, objective TEXT NOT NULL, stage TEXT NOT NULL,
@@ -4332,6 +4343,7 @@ export class HearthStore {
       case "goal.round.started":
       case "goal.round.settled": return upsertGoalRoundRow(this.db, event.payload as GoalRoundRecord);
       case "goal.completion.recorded": return insertGoalCompletionReport(this.db, event.payload as GoalCompletionReport);
+      case "goal.result.rejected": return;
       case "plan.created":
       case "plan.updated": return upsertPlanRow(this.db, event.payload as PlanRecord);
       case "task.proposal.created":
@@ -4529,11 +4541,12 @@ function upsertTask(db: DatabaseSync, task: TaskRecord): void {
 
 function upsertGoal(db: DatabaseSync, goal: GoalContract): void {
   db.prepare(
-    `INSERT INTO goals (id, title, objective, constraints_json, forbidden_actions_json, authority_sources_json, success_criteria_json, evidence_requirements_json, budget_json, deadline, stop_conditions_json, review_policy, current_state, next_handoff, created_at, updated_at,
-      project_id, conversation_id, task_id, armed, round_count, max_rounds, no_progress_count, last_progress_digest, next_wake_at, stop_reason, revision, execution_json, pause_reference_json, commands_approved_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO goals (id, title, objective, original_objective, constraints_json, forbidden_actions_json, authority_sources_json, success_criteria_json, evidence_requirements_json, budget_json, deadline, stop_conditions_json, review_policy, current_state, next_handoff, created_at, updated_at,
+      project_id, conversation_id, task_id, armed, round_count, max_rounds, no_progress_count, last_progress_digest, next_wake_at, stop_reason, revision, contract_revision, execution_revision, amendments_json, execution_json, pause_reference_json, commands_approved_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
-       title=excluded.title, objective=excluded.objective, constraints_json=excluded.constraints_json,
+       title=excluded.title, objective=excluded.objective, original_objective=excluded.original_objective,
+       constraints_json=excluded.constraints_json,
        forbidden_actions_json=excluded.forbidden_actions_json, authority_sources_json=excluded.authority_sources_json,
        success_criteria_json=excluded.success_criteria_json, evidence_requirements_json=excluded.evidence_requirements_json,
        budget_json=excluded.budget_json, deadline=excluded.deadline, stop_conditions_json=excluded.stop_conditions_json,
@@ -4542,10 +4555,12 @@ function upsertGoal(db: DatabaseSync, goal: GoalContract): void {
        task_id=excluded.task_id, armed=excluded.armed, round_count=excluded.round_count, max_rounds=excluded.max_rounds,
        no_progress_count=excluded.no_progress_count, last_progress_digest=excluded.last_progress_digest,
        next_wake_at=excluded.next_wake_at, stop_reason=excluded.stop_reason, revision=excluded.revision,
+       contract_revision=excluded.contract_revision, execution_revision=excluded.execution_revision,
+       amendments_json=excluded.amendments_json,
        execution_json=excluded.execution_json, pause_reference_json=excluded.pause_reference_json,
        commands_approved_at=excluded.commands_approved_at`
   ).run(
-    goal.goalId, goal.title, goal.objective, JSON.stringify(goal.constraints),
+    goal.goalId, goal.title, goal.objective, goal.originalObjective ?? goal.objective, JSON.stringify(goal.constraints),
     JSON.stringify(goal.forbiddenActions), JSON.stringify(goal.authoritySources),
     JSON.stringify(goal.successCriteria), JSON.stringify(goal.evidenceRequirements),
     JSON.stringify(goal.budget), goal.deadline ?? null, JSON.stringify(goal.stopConditions),
@@ -4554,6 +4569,7 @@ function upsertGoal(db: DatabaseSync, goal: GoalContract): void {
     goal.armed ? 1 : 0, goal.roundCount ?? 0, goal.maxRounds ?? 24,
     goal.noProgressCount ?? 0, goal.lastProgressDigest ?? null, goal.nextWakeAt ?? null,
     goal.stopReason ?? null, goal.revision ?? 0,
+    goal.contractRevision ?? 0, goal.executionRevision ?? 0, JSON.stringify(goal.amendments ?? []),
     goal.execution ? JSON.stringify(goal.execution) : null,
     goal.pauseReference ? JSON.stringify(goal.pauseReference) : null,
     goal.commandsApprovedAt ?? null
@@ -4562,20 +4578,23 @@ function upsertGoal(db: DatabaseSync, goal: GoalContract): void {
 
 function upsertPlanRow(db: DatabaseSync, plan: PlanRecord): void {
   db.prepare(
-    `INSERT INTO plans (id, conversation_id, project_id, title, objective, stage, planning_task_id, execution_task_id, plan_markdown, plan_path, revision, execution_json, created_at, updated_at, approved_at, completed_at, error)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO plans (id, conversation_id, project_id, title, objective, stage, planning_task_id, execution_task_id, plan_markdown, plan_path, plan_sha256, planning_attempt, planning_run_id, revision, execution_json, created_at, updated_at, approved_at, completed_at, error)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        conversation_id=excluded.conversation_id, project_id=excluded.project_id,
        title=excluded.title, objective=excluded.objective, stage=excluded.stage,
        planning_task_id=excluded.planning_task_id, execution_task_id=excluded.execution_task_id,
        plan_markdown=excluded.plan_markdown, plan_path=excluded.plan_path,
+       plan_sha256=excluded.plan_sha256, planning_attempt=excluded.planning_attempt,
+       planning_run_id=excluded.planning_run_id,
        revision=excluded.revision, updated_at=excluded.updated_at,
        execution_json=excluded.execution_json,
        approved_at=excluded.approved_at, completed_at=excluded.completed_at, error=excluded.error`
   ).run(
     plan.id, plan.conversationId, plan.projectId ?? null, plan.title, plan.objective, plan.stage,
     plan.planningTaskId ?? null, plan.executionTaskId ?? null,
-    plan.planMarkdown ?? null, plan.planPath ?? null, plan.revision ?? 0,
+    plan.planMarkdown ?? null, plan.planPath ?? null, plan.planSha256 ?? null,
+    plan.planningAttempt ?? 0, plan.planningRunId ?? null, plan.revision ?? 0,
     plan.execution ? JSON.stringify(plan.execution) : null,
     plan.createdAt, plan.updatedAt, plan.approvedAt ?? null, plan.completedAt ?? null, plan.error ?? null
   );
@@ -4583,14 +4602,15 @@ function upsertPlanRow(db: DatabaseSync, plan: PlanRecord): void {
 
 function upsertGoalRoundRow(db: DatabaseSync, round: GoalRoundRecord): void {
   db.prepare(
-    `INSERT INTO goal_rounds (id, goal_id, task_id, round_index, run_ids_json, status, started_at, ended_at, summary, intent_json, artifact_refs_json, evidence_refs_json, usage_json, progress_digest, verifier_json, workspace_root, out_dir)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO goal_rounds (id, goal_id, task_id, round_index, run_ids_json, status, started_at, ended_at, summary, intent_json, artifact_refs_json, evidence_refs_json, usage_json, progress_digest, verifier_json, workspace_root, out_dir, execution_fence_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(goal_id, round_index) DO UPDATE SET
        id=excluded.id, task_id=excluded.task_id, run_ids_json=excluded.run_ids_json, status=excluded.status,
        ended_at=excluded.ended_at, summary=excluded.summary, intent_json=excluded.intent_json,
        artifact_refs_json=excluded.artifact_refs_json, evidence_refs_json=excluded.evidence_refs_json,
        usage_json=excluded.usage_json, progress_digest=excluded.progress_digest, verifier_json=excluded.verifier_json,
-       workspace_root=excluded.workspace_root, out_dir=excluded.out_dir`
+       workspace_root=excluded.workspace_root, out_dir=excluded.out_dir,
+       execution_fence_json=excluded.execution_fence_json`
   ).run(
     round.id, round.goalId, round.taskId, round.index, JSON.stringify(round.runIds), round.status,
     round.startedAt, round.endedAt, round.summary ?? null,
@@ -4599,7 +4619,8 @@ function upsertGoalRoundRow(db: DatabaseSync, round: GoalRoundRecord): void {
     round.usage ? JSON.stringify(round.usage) : null,
     round.progressDigest ?? null,
     round.verifier ? JSON.stringify(round.verifier) : null,
-    round.workspaceRoot, round.outDir
+    round.workspaceRoot, round.outDir,
+    round.executionFence ? JSON.stringify(round.executionFence) : null
   );
 }
 
@@ -4625,6 +4646,7 @@ function updateTask(db: DatabaseSync, taskId: string | null, patch: Record<strin
     deadline: "deadline", currentRunId: "current_run_id", nextAction: "next_action",
     resultSummary: "result_summary", conversationId: "conversation_id",
     pendingInput: "pending_input", executorId: "executor_id", taskKind: "task_kind", executionMode: "execution_mode",
+    projectId: "project_id", outputDir: "output_dir",
     methodId: "method_id", methodVersion: "method_version",
     pinnedAt: "pinned_at", archivedAt: "archived_at", goalId: "goal_id",
     deletedAt: "deleted_at", trashBatchId: "trash_batch_id"
@@ -4639,6 +4661,14 @@ function updateTask(db: DatabaseSync, taskId: string | null, patch: Record<strin
   if ("expectedOutputs" in patch) {
     db.prepare("UPDATE tasks SET expected_outputs_json = ? WHERE id = ?")
       .run(JSON.stringify(patch.expectedOutputs ?? []), taskId);
+  }
+  if ("inputs" in patch) {
+    db.prepare("UPDATE tasks SET inputs_json = ? WHERE id = ?")
+      .run(JSON.stringify(patch.inputs ?? []), taskId);
+  }
+  if ("networkHosts" in patch) {
+    db.prepare("UPDATE tasks SET network_hosts_json = ? WHERE id = ?")
+      .run(JSON.stringify(patch.networkHosts ?? []), taskId);
   }
   if ("permissions" in patch) {
     db.prepare("UPDATE tasks SET permissions_json = ? WHERE id = ?")
@@ -5650,6 +5680,9 @@ function rowToPlan(row: DbRow): PlanRecord {
     executionTaskId: row.execution_task_id == null ? null : String(row.execution_task_id),
     planMarkdown: row.plan_markdown == null ? null : String(row.plan_markdown),
     planPath: row.plan_path == null ? null : String(row.plan_path),
+    planSha256: row.plan_sha256 == null ? null : String(row.plan_sha256),
+    planningAttempt: row.planning_attempt == null ? 0 : Number(row.planning_attempt),
+    planningRunId: row.planning_run_id == null ? null : String(row.planning_run_id),
     ...(row.execution_json == null ? {} : { execution: JSON.parse(String(row.execution_json)) }),
     revision: row.revision == null ? 0 : Number(row.revision),
     createdAt: String(row.created_at),
@@ -5665,6 +5698,7 @@ function rowToGoal(row: DbRow): GoalContract {
     goalId: String(row.id),
     title: String(row.title),
     objective: String(row.objective),
+    originalObjective: row.original_objective == null ? String(row.objective) : String(row.original_objective),
     constraints: JSON.parse(String(row.constraints_json)),
     forbiddenActions: JSON.parse(String(row.forbidden_actions_json)),
     authoritySources: JSON.parse(String(row.authority_sources_json)),
@@ -5689,6 +5723,9 @@ function rowToGoal(row: DbRow): GoalContract {
     ...(row.next_wake_at == null ? {} : { nextWakeAt: String(row.next_wake_at) }),
     ...(row.stop_reason == null ? {} : { stopReason: String(row.stop_reason) as NonNullable<GoalContract["stopReason"]> }),
     ...(row.revision == null ? {} : { revision: Number(row.revision) }),
+    ...(row.contract_revision == null ? {} : { contractRevision: Number(row.contract_revision) }),
+    ...(row.execution_revision == null ? {} : { executionRevision: Number(row.execution_revision) }),
+    ...(row.amendments_json == null ? {} : { amendments: JSON.parse(String(row.amendments_json)) }),
     ...(row.execution_json == null ? {} : { execution: JSON.parse(String(row.execution_json)) }),
     ...(row.pause_reference_json == null ? {} : { pauseReference: JSON.parse(String(row.pause_reference_json)) }),
     ...(row.commands_approved_at == null ? {} : { commandsApprovedAt: String(row.commands_approved_at) })
@@ -5713,7 +5750,8 @@ function rowToGoalRound(row: DbRow): GoalRoundRecord {
     progressDigest: row.progress_digest == null ? null : String(row.progress_digest),
     verifier: row.verifier_json == null ? null : JSON.parse(String(row.verifier_json)),
     workspaceRoot: row.workspace_root == null ? null : String(row.workspace_root),
-    outDir: row.out_dir == null ? null : String(row.out_dir)
+    outDir: row.out_dir == null ? null : String(row.out_dir),
+    executionFence: row.execution_fence_json == null ? null : JSON.parse(String(row.execution_fence_json))
   };
 }
 

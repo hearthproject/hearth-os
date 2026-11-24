@@ -1536,6 +1536,44 @@ describe("Hearth scheduler", () => {
     expect(store?.listHandoffs(task.id)).toHaveLength(0);
   });
 
+  it("does not resume a provider thread after the current session binding is cleared", async () => {
+    const service = setup();
+    const threadIds: Array<string | undefined> = [];
+    const codexRunner: CodexRunner = async (options) => {
+      threadIds.push(options.threadId);
+      writeFileSync(join(testOutDir(options), "result.md"), "# fresh session\n");
+      return FAKE_RESULT;
+    };
+    scheduler = makeScheduler(service, codexRunner);
+    const task = service.createTask({
+      title: "session boundary",
+      goal: "start a fresh provider session",
+      executorId: "codex"
+    });
+    const now = new Date().toISOString();
+    service.createRun({
+      id: randomUUID(),
+      taskId: task.id,
+      attempt: 1,
+      status: "completed",
+      threadId: "pre-switch-thread",
+      workspace: join(requireTemp(), "pre-switch"),
+      startedAt: now,
+      endedAt: now,
+      failure: null,
+      usage: null,
+      leaseEpoch: null,
+      createdAt: now,
+      executorId: "codex"
+    });
+    service.updateTask(task.id, { currentRunId: null });
+
+    scheduler.start();
+    await waitForStatus(service, task.id, "completed");
+
+    expect(threadIds).toEqual([undefined]);
+  });
+
   it("resumes a native checkpoint after a transient failure", async () => {
     const service = setup();
     const modelSettingsPath = configureModel();
@@ -1891,7 +1929,7 @@ describe("Hearth scheduler", () => {
         reason: "需要运行测试验证结果"
       }) ?? null;
       writeFileSync(join(options.outDir, "result.md"), "# DSH 结果\n");
-      return { finalResponse: "DeepSeek Harness 任务完成", sessionId: "dsh-session", usage: null, finishReason: "completed" };
+      return { finalResponse: "DeepSeek Harness 任务完成", planMarkdown: null, sessionId: "dsh-session", usage: null, finishReason: "completed" };
     };
     const executorHealth: ExecutorHealthProvider = (executorId) => executorId === "deepseek-harness"
       ? { canRun: true, issues: [] }
@@ -1922,7 +1960,7 @@ describe("Hearth scheduler", () => {
         callId: "call-dsh-write"
       }) ?? null;
       writeFileSync(join(options.outDir, "result.md"), "# 跳过写入\n");
-      return { finalResponse: "已跳过被拒绝的工具", sessionId: "dsh-session", usage: null, finishReason: "completed" };
+      return { finalResponse: "已跳过被拒绝的工具", planMarkdown: null, sessionId: "dsh-session", usage: null, finishReason: "completed" };
     };
     const executorHealth: ExecutorHealthProvider = (executorId) => executorId === "deepseek-harness"
       ? { canRun: true, issues: [] }
@@ -1960,7 +1998,7 @@ describe("Hearth scheduler", () => {
         callId: "call-dsh-cancel"
       }) ?? null;
       if (outcome === "cancelled") resolveCancelled?.();
-      return { finalResponse: "任务已取消", sessionId: "dsh-session", usage: null, finishReason: "cancelled" };
+      return { finalResponse: "任务已取消", planMarkdown: null, sessionId: "dsh-session", usage: null, finishReason: "cancelled" };
     };
     const executorHealth: ExecutorHealthProvider = (executorId) => executorId === "deepseek-harness"
       ? { canRun: true, issues: [] }

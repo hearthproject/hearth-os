@@ -4,6 +4,7 @@ import { Link, useLocation } from "react-router-dom";
 import { ApprovalCard } from "../components/ApprovalCard.tsx";
 import { GoalBar } from "../components/GoalBar.tsx";
 import { GoalDialog } from "../components/GoalDialog.tsx";
+import { GoalManageDialog, type GoalManageMode } from "../components/GoalManageDialog.tsx";
 import { PlanBar } from "../components/PlanBar.tsx";
 import { PlanDialog } from "../components/PlanDialog.tsx";
 import {
@@ -36,7 +37,7 @@ const InlineRun = lazy(() => import("../components/InlineRun.tsx").then((module)
 const ChatWorkspacePanel = lazy(() => import("../components/ChatWorkspacePanel.tsx").then((module) => ({ default: module.ChatWorkspacePanel })));
 const Markdown = lazy(() => import("../components/Markdown.tsx").then((module) => ({ default: module.Markdown })));
 import { DEFAULT_CONTEXT_WINDOW_TOKENS } from "@hearth/core/constants";
-import type { ContextUsageSnapshot } from "@hearth/core";
+import type { ContextUsageSnapshot, GoalAction, GoalContractPatch, GoalExecutionProfile } from "@hearth/core";
 import { formatBytes, formatDuration, formatTime } from "../lib/format.ts";
 import { getChatSelection, requestChat, setChatBusy, syncChatSelection, useChatSelection } from "../lib/chat-selection.ts";
 import { copyToClipboard } from "../lib/clipboard.ts";
@@ -192,6 +193,7 @@ export function ChatPage() {
     reviewPolicy: "human_on_risk"
   });
   const [goalBusy, setGoalBusy] = useState(false);
+  const [goalManageMode, setGoalManageMode] = useState<GoalManageMode | null>(null);
   const [planMode, setPlanMode] = useState(false);
   const [planDialogOpen, setPlanDialogOpen] = useState(false);
   const [planBusy, setPlanBusy] = useState(false);
@@ -656,14 +658,22 @@ export function ChatPage() {
     void uploadFiles(Array.from(event.dataTransfer.files));
   }
 
-  async function runGoalAction(action: "start" | "pause" | "resume" | "stop" | "replan" | "complete" | "approve"): Promise<void> {
+  async function runGoalAction(action: GoalAction, options: {
+    expectedRevision?: number;
+    note?: string;
+    execution?: GoalExecutionProfile;
+    contract?: GoalContractPatch;
+  } = {}): Promise<void> {
     const view = currentGoal;
     if (!view || goalBusy) return;
     setGoalBusy(true);
     setError(null);
     try {
       await api.goalAction(view.goal.goalId, action, {
-        ...(view.goal.revision !== undefined ? { expectedRevision: view.goal.revision } : {})
+        ...options,
+        ...((options.expectedRevision ?? view.goal.revision) !== undefined
+          ? { expectedRevision: options.expectedRevision ?? view.goal.revision }
+          : {})
       });
       await queryClient.invalidateQueries({ queryKey: ["goals", conversationId] });
       await queryClient.invalidateQueries({ queryKey: ["tasks"] });
@@ -1253,7 +1263,12 @@ export function ChatPage() {
               />
             )}
             {currentGoal && (
-              <GoalBar view={currentGoal} busy={goalBusy} onAction={(action) => void runGoalAction(action)} />
+              <GoalBar
+                view={currentGoal}
+                busy={goalBusy}
+                onAction={(action) => void runGoalAction(action)}
+                onManage={setGoalManageMode}
+              />
             )}
             {isCancelling && (
               <div className="chat-stopping">
@@ -1664,6 +1679,17 @@ export function ChatPage() {
         busy={planBusy}
         onClose={() => setPlanDialogOpen(false)}
         onAction={(action, note) => void runPlanAction(action, note)}
+      />
+      <GoalManageDialog
+        mode={goalManageMode}
+        view={currentGoal}
+        executors={executorViews}
+        busy={goalBusy}
+        onClose={() => setGoalManageMode(null)}
+        onSwitchExecutor={(execution, note) => void runGoalAction("switch_executor", { execution, note })
+          .then(() => setGoalManageMode(null))}
+        onAmendContract={(contract, note) => void runGoalAction("amend_contract", { contract, note })
+          .then(() => setGoalManageMode(null))}
       />
       {panelOpen && (
         <Suspense fallback={null}>

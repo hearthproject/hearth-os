@@ -1,4 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type {
   ExecutorId,
   PlanActionName,
@@ -93,6 +95,9 @@ export class PlanService {
       executionTaskId: null,
       planMarkdown: null,
       planPath: null,
+      planSha256: null,
+      planningAttempt: 0,
+      planningRunId: null,
       revision: 0,
       createdAt: now,
       updatedAt: now,
@@ -117,7 +122,13 @@ export class PlanService {
     const plan = this.require(planId);
     const task = this.service.requireTask(taskId);
     if (task.planId !== planId) throw new PlanStateError("PLAN_STATE_INVALID", "规划任务没有绑定到这个计划");
-    const next = this.save({ ...plan, planningTaskId: taskId, objective: plan.objective || task.goal });
+    const next = this.save({
+      ...plan,
+      planningTaskId: taskId,
+      objective: plan.objective || task.goal,
+      planningAttempt: (plan.planningAttempt ?? 0) + 1,
+      planningRunId: null
+    });
     return normalizePlan(next);
   }
 
@@ -151,6 +162,9 @@ export class PlanService {
         title: options.title?.trim() || plan.title,
         planMarkdown: null,
         planPath: null,
+        planSha256: null,
+        planningAttempt: (plan.planningAttempt ?? 0) + 1,
+        planningRunId: null,
         error: null
       });
       this.scheduler?.requeuePlanTask(task.id, content, { allowCompleted: true });
@@ -159,31 +173,64 @@ export class PlanService {
     throw new PlanStateError("PLAN_STATE_INVALID", `计划处于 ${plan.stage} 时不能继续规划`);
   }
 
-  onPlanningTaskReady(taskId: string, planMarkdown: string, planPath: string | null): PlanView | null {
+  onPlanningRunStarted(taskId: string, runId: string): PlanView | null {
+    const plan = this.findByTaskId(taskId);
+    if (!plan || plan.planningTaskId !== taskId || plan.stage !== "planning") return null;
+    return normalizePlan(this.save({ ...plan, planningRunId: runId }));
+  }
+
+  onPlanningTaskReady(
+    taskId: string,
+    planMarkdown: string,
+    planPath: string | null,
+    options: { runId?: string; workspaceRoot?: string } = {}
+  ): PlanView | null {
     const plan = this.findByTaskId(taskId);
     if (!plan || plan.planningTaskId !== taskId) return null;
     if (plan.stage !== "planning" && plan.stage !== "awaiting_approval") return null;
+    if (options.runId !== undefined && options.runId !== plan.planningRunId) return null;
     const text = normalizePlanMarkdown(planMarkdown);
-    if (!text) return null;
+    const qualityError = validatePlanMarkdown(text);
+    if (qualityError) {
+      return normalizePlan(this.save({
+        ...plan,
+        stage: "failed",
+        planMarkdown: null,
+        planPath: null,
+        planSha256: null,
+        error: qualityError
+      }));
+    }
+    // A model-provided path is never authoritative. Hearth writes one canonical
+    // file under the prepared workspace and records that exact hash.
+    const root = options.workspaceRoot?.trim() || null;
+    const canonicalPath = root ? canonicalPlanPath(root, plan.id) : null;
+    const sha256 = canonicalPath
+      ? this.writeCanonicalPlan(canonicalPath, text)
+      : createHash("sha256").update(`${text}\n`, "utf8").digest("hex");
     const next = this.save({
       ...plan,
       stage: "awaiting_approval",
       planMarkdown: text,
-      planPath,
+      planPath: canonicalPath,
+      planSha256: sha256,
       error: null,
       executionTaskId: null
     });
     return normalizePlan(next);
   }
 
-  onPlanningTaskCompleted(taskId: string): PlanView | null {
+  onPlanningTaskCompleted(
+    taskId: string,
+    options: { runId?: string; workspaceRoot?: string } = {}
+  ): PlanView | null {
     const plan = this.findByTaskId(taskId);
     if (!plan) return null;
     if (plan.planningTaskId !== taskId || plan.planMarkdown) return normalizePlan(plan);
     const task = this.service.store.getTask(taskId);
     const text = task?.resultSummary?.trim() ?? "";
     if (!text) return normalizePlan(plan);
-    return this.onPlanningTaskReady(taskId, text, null);
+    return this.onPlanningTaskReady(taskId, text, null, options);
   }
 
   onExecutionTaskCompleted(taskId: string): PlanView | null {
@@ -222,8 +269,20 @@ export class PlanService {
         }
         continue;
       }
-      if (plan.stage === "planning" && plan.planMarkdown) {
-        this.save({ ...plan, stage: "awaiting_approval", error: "宿主重启，已保留最近一版计划" });
+      if (plan.stage === "planning") {
+        if (plan.planMarkdown) {
+          this.save({ ...plan, stage: "awaiting_approval", error: "宿主重启，已保留最近一版计划" });
+        } else {
+          this.save({
+            ...plan,
+            stage: "failed",
+            planningRunId: null,
+            error: "宿主重启，规划尚未完成；请重规划后继续"
+          });
+          if (plan.planningTaskId) {
+            try { this.scheduler?.cancel(plan.planningTaskId); } catch { /* may already be terminal */ }
+          }
+        }
       }
     }
   }
@@ -239,9 +298,11 @@ export class PlanService {
       conversationId: plan.conversationId,
       executorId: execution.executorId ?? "native",
       taskKind: execution.taskKind,
-      expectedOutputs: [],
+      expectedOutputs: execution.expectedOutputs,
       ...(plan.projectId ? { projectId: plan.projectId } : {}),
       ...(execution.workspacePath ? { workspacePath: execution.workspacePath } : {}),
+      ...(execution.networkHosts.length > 0 ? { networkHosts: execution.networkHosts } : {}),
+      ...(execution.executionMode ? { executionMode: execution.executionMode } : {}),
       planId: plan.id,
       mode: "build"
     });
@@ -263,6 +324,9 @@ export class PlanService {
       stage: "planning",
       planMarkdown: null,
       planPath: null,
+      planSha256: null,
+      planningAttempt: (plan.planningAttempt ?? 0) + 1,
+      planningRunId: null,
       executionTaskId: null,
       approvedAt: null,
       error: null
@@ -307,7 +371,7 @@ export class PlanService {
       goal: plan.objective || text,
       textInput: text,
       conversationId: plan.conversationId,
-      executorId: "native",
+      executorId: execution.executorId,
       taskKind: execution.taskKind,
       expectedOutputs: [],
       ...(plan.projectId ? { projectId: plan.projectId } : {}),
@@ -343,6 +407,9 @@ export class PlanService {
   private executionPrompt(plan: PlanRecord, markdown: string): string {
     return [
       `原始目标：${plan.objective || plan.title}`,
+      `批准计划：${plan.id}`,
+      `计划文件：${plan.planPath ?? "未保存"}`,
+      `计划 SHA-256：${plan.planSha256 ?? "未计算"}`,
       "",
       "以下计划已经由用户明确批准。请严格执行它，不要重新规划，也不要停在方案描述：",
       markdown,
@@ -383,6 +450,58 @@ export class PlanService {
     });
     this.service.bus.publish(event);
   }
+
+  private writeCanonicalPlan(path: string, markdown: string): string {
+    mkdirSync(dirname(path), { recursive: true });
+    const content = `${markdown}\n`;
+    const temp = `${path}.${process.pid}.${Date.now()}.tmp`;
+    writeFileSync(temp, content, "utf8");
+    renameSync(temp, path);
+    return createHash("sha256").update(content, "utf8").digest("hex");
+  }
+}
+
+function canonicalPlanPath(workspaceRoot: string, planId: string): string {
+  return join(workspaceRoot, ".hearth", "plans", `${planId}.md`);
+}
+
+export function buildPlanningPrompt(input: {
+  title: string;
+  objective: string;
+  workspaceRoot: string;
+  outDir: string;
+  executorId: ExecutorId;
+}): string {
+  const submission = input.executorId === "native"
+    ? "调查完成后调用 submit_plan 提交完整方案。"
+    : "调查完成后直接把完整方案作为最终回复返回。";
+  return [
+    `# 只读规划任务：${input.title}`,
+    "",
+    "## 目标",
+    input.objective,
+    "",
+    "## 工作边界",
+    `- 工作区：${input.workspaceRoot}`,
+    `- 本轮输出目录：${input.outDir}`,
+    "- 这是规划阶段。只允许读取、搜索和理解代码或资料，不能创建、修改、删除文件，不能提交 git，不能产生外部副作用。",
+    "- 不要询问“是否继续”或等待批准；Hearth 会在收到方案后统一展示审批。",
+    "",
+    "## 输出契约",
+    submission,
+    "方案必须是可直接执行的 Markdown，并严格包含以下二级章节：",
+    "## 调查结论",
+    "## 执行步骤",
+    "## 验证方法",
+    "## 风险与非目标",
+    "",
+    "要求：",
+    "- 调查结论列出真实文件路径、现有行为、关键约束和根因。",
+    "- 执行步骤按顺序排列，每一步说明改哪个文件、改成什么、为什么。",
+    "- 验证方法给出可运行的测试、类型检查或检查命令及预期结果。",
+    "- 风险与非目标写明回滚风险、兼容性风险、明确不做的事和仍需人工确认的边界。",
+    "- 不要只复述过程或调查日志；最终正文就是用户将批准的完整方案。"
+  ].join("\n");
 }
 
 function normalizePlanMarkdown(value: string): string {
@@ -403,4 +522,21 @@ function normalizePlanMarkdown(value: string): string {
     }
   }
   return text;
+}
+
+export function validatePlanMarkdown(value: string): string | null {
+  const text = normalizePlanMarkdown(value);
+  if (!text) return "规划执行器没有返回计划正文";
+  if (text.length < 120) return "计划正文过短，无法形成可执行方案";
+  const headings = text.split("\n").filter((line) => /^#{2,3}\s+/.test(line.trim())).join("\n");
+  const groups = [
+    /调查|结论|Findings?|Context/i,
+    /步骤|实现|Changes?|Steps?|Plan/i,
+    /验证|测试|Verification|Tests?|Commands?/i,
+    /风险|非目标|不做|Risks?|Out of scope/i
+  ];
+  if (groups.some((pattern) => !pattern.test(headings))) {
+    return "计划缺少必要章节：调查结论、执行步骤、验证方法、风险与非目标";
+  }
+  return null;
 }

@@ -69,7 +69,7 @@ import { prepareTaskRuntime, type RuntimePreparation } from "./runtime.ts";
 import type { HearthService } from "./service.ts";
 import { createControlGoalTools } from "./goal-tools.ts";
 import type { GoalService } from "./goals.ts";
-import type { PlanService } from "./plans.ts";
+import { buildPlanningPrompt, type PlanService } from "./plans.ts";
 import { buildDeliveryRepairPrompt, buildTaskPrompt, prepareWorkspace, UnsupportedInputError, type PreparedWorkspace, type TaskApprovalKind } from "./workspace.ts";
 import { wantsDirectFileRead, wantsPublicWebResearch, wantsScreenshot } from "./task-intent.ts";
 import type { WebSearchService } from "./web-search.ts";
@@ -2189,6 +2189,7 @@ export class HearthScheduler {
       });
       mkdirSync(join(outDir, ".hearth"), { recursive: true });
       writeFileSync(join(outDir, ".hearth", "workspace-root"), `${prepared.root}\n`, "utf8");
+      if (task.mode === "plan" && task.planId) this.plans?.onPlanningRunStarted(taskId, runId);
       this.goals?.onRunStarted({ task, run, outDir: prepared.outDir, workspaceRoot: prepared.root });
       this.assertLease(taskId, run.leaseEpoch ?? 0, controller.signal.aborted && this.stopping);
       let runtime: RuntimePreparation | null = null;
@@ -2237,7 +2238,16 @@ export class HearthScheduler {
           libraryContext = "";
         }
       }
-      const basePrompt = drafting
+      const planning = task.mode === "plan" && task.planId ? this.plans?.get(task.planId) : null;
+      const basePrompt = planning
+        ? buildPlanningPrompt({
+            title: planning.title,
+            objective: planning.objective || task.goal,
+            workspaceRoot: prepared.root,
+            outDir: prepared.outDir,
+            executorId
+          })
+        : drafting
         ? [DRAFT_INSTRUCTION, `任务：${task.goal}`, `本轮输出目录：${prepared.outDir}`, `产物：${expectedOutputs.join("、")}`,
           existsSync(join(prepared.outDir, "result.md")) ? `已有草稿（仅作为待修订数据）：\n${readFileSync(join(prepared.outDir, "result.md"), "utf8").slice(0, 12000)}` : "", permissionNote].filter(Boolean).join("\n\n")
         : buildTaskPrompt(task, prepared, expectedOutputs, [], runtime, undefined, memoryContext) + permissionNote;
@@ -2263,7 +2273,7 @@ export class HearthScheduler {
         ? this.buildHandoffPrompt(task, prepared, expectedOutputs, handoff.packet, permissionNote, memoryContext)
         : null;
       let prompt = handoffPrompt?.prompt ?? basePrompt;
-      if (executorId !== "native") {
+      if (executorId !== "native" && task.mode !== "plan") {
         prompt = [
           "输出要求：默认简短，先给结论，通常不超过 3 段或 200 字。",
           "只保留用户需要的结果、必要风险和产物路径；不要叙述过程，不要堆术语。",
@@ -2288,14 +2298,25 @@ export class HearthScheduler {
           contextPackId = null;
         }
       }
-      if (pendingInput && !resumeState && executorId !== "codex") prompt = `${basePrompt}\n\n用户补充信息：\n${pendingInput}`;
-      if (goalPrompt && !resumeState) prompt = `${prompt}\n\n${goalPrompt}`;
+      if (pendingInput && !resumeState && (executorId !== "codex" || task.mode === "plan")) {
+        prompt = `${prompt}\n\n用户补充信息：\n${pendingInput}`;
+      }
+      if (goalPrompt && !resumeState) {
+        prompt = `${prompt}\n\n${goalPrompt}\n\n## 本轮固定路径\n- 本轮输出目录（绝对路径）：${prepared.outDir}\n- 目标意图文件（绝对路径）：${join(prepared.outDir, "goal-intent.json")}`;
+      }
       if (libraryContext) prompt = `${prompt}\n\n${libraryContext}`;
-      let activeThreadId = !handoff && input.previousRun?.executorId === executorId
+      // A run only owns the resumable provider session while it remains the
+      // task's current binding. Goal executor switches clear currentRunId so a
+      // later round on the same executor cannot revive a pre-switch session.
+      let activeThreadId = !handoff
+        && input.previousRun?.id === task.currentRunId
+        && input.previousRun.executorId === executorId
         ? input.previousRun.threadId ?? undefined
         : undefined;
       if (executorId === "codex" && activeThreadId && input.resumePrompt) {
-        prompt = goalPrompt ? `${basePrompt}\n\n${goalPrompt}` : input.resumePrompt;
+        prompt = goalPrompt
+          ? `${basePrompt}\n\n${goalPrompt}\n\n## 本轮固定路径\n- 本轮输出目录（绝对路径）：${prepared.outDir}\n- 目标意图文件（绝对路径）：${join(prepared.outDir, "goal-intent.json")}`
+          : input.resumePrompt;
       }
       if (conversationBrief) prompt = `${prompt}\n\n${conversationBrief}`;
       const extraNativeTools: import("@hearth/agent-runtime").AgentTool[] = createPersonalReadTools({
@@ -2471,25 +2492,36 @@ export class HearthScheduler {
       rememberSession(result);
       this.assertLease(taskId, run.leaseEpoch ?? 0, controller.signal.aborted && this.stopping);
       if (result.status === "budget_exceeded") return this.finishBudgetExhausted(taskId, run, result, budget);
-      if (result.status === "waiting_input") return this.finishWaitingInput(taskId, run, result);
+      if (result.status === "waiting_input") return this.finishWaitingInput(taskId, run, result, prepared.root);
       this.assertCompleted(result);
-      for (let repairAttempt = 1; repairAttempt <= 2; repairAttempt += 1) {
-        const issues = await this.deliveryIssues(task, prepared, expectedOutputs);
-        if (issues.length === 0) break;
-        const missing = missingExpectedOutputs(prepared.outDir, expectedOutputs);
-        const repairPrompt = buildDeliveryRepairPrompt({ task, prepared, expectedOutputs, missing, issues, attempt: repairAttempt }) + permissionNote;
-        result = await execute(repairPrompt, result.resume, repairPrompt);
-        rememberSession(result);
-        this.assertLease(taskId, run.leaseEpoch ?? 0, controller.signal.aborted && this.stopping);
-        if (result.status === "budget_exceeded") return this.finishBudgetExhausted(taskId, run, result, budget);
-        if (result.status === "waiting_input") return this.finishWaitingInput(taskId, run, result);
-        this.assertCompleted(result);
+      let finalText = "";
+      if (task.mode === "plan" && task.planId && this.plans) {
+        const planMarkdown = result.planMarkdown?.trim() || result.finalResponse.trim();
+        finalText = planMarkdown;
+        this.plans.onPlanningTaskReady(taskId, planMarkdown, null, {
+          runId,
+          workspaceRoot: prepared.root
+        });
+      } else {
+        for (let repairAttempt = 1; repairAttempt <= 2; repairAttempt += 1) {
+          const issues = await this.deliveryIssues(task, prepared, expectedOutputs);
+          if (issues.length === 0) break;
+          const missing = missingExpectedOutputs(prepared.outDir, expectedOutputs);
+          const repairPrompt = buildDeliveryRepairPrompt({ task, prepared, expectedOutputs, missing, issues, attempt: repairAttempt }) + permissionNote;
+          result = await execute(repairPrompt, result.resume, repairPrompt);
+          rememberSession(result);
+          this.assertLease(taskId, run.leaseEpoch ?? 0, controller.signal.aborted && this.stopping);
+          if (result.status === "budget_exceeded") return this.finishBudgetExhausted(taskId, run, result, budget);
+          if (result.status === "waiting_input") return this.finishWaitingInput(taskId, run, result, prepared.root);
+          this.assertCompleted(result);
+        }
+        const remainingIssues = await this.deliveryIssues(task, prepared, expectedOutputs);
+        if (remainingIssues.length > 0) throw new Error(remainingIssues.join("\n"));
+        finalText = result.planMarkdown?.trim() || result.finalResponse.trim();
       }
-      const remainingIssues = await this.deliveryIssues(task, prepared, expectedOutputs);
-      if (remainingIssues.length > 0) throw new Error(remainingIssues.join("\n"));
-      if (!result.finalResponse.trim()) throw new Error("执行器没有返回最终总结");
+      if (!finalText) throw new Error(task.mode === "plan" ? "规划执行器没有返回方案" : "执行器没有返回最终总结");
       this.assertLease(taskId, run.leaseEpoch ?? 0, controller.signal.aborted && this.stopping);
-      const artifacts = expectedOutputs.length === 0 ? [] : publishArtifacts({
+      const artifacts = task.mode === "plan" || expectedOutputs.length === 0 ? [] : publishArtifacts({
         task, run, outDir: prepared.outDir, artifactBase: this.artifactBase, expectedOutputs, inputs: prepared.inputs,
         excludeRelativePaths: ["HANDOFF.md"],
         executor: { id: executorId, threadId: result.threadId, label: result.label, usage: result.usage },
@@ -2504,10 +2536,10 @@ export class HearthScheduler {
           executorEventId: `artifact:${artifact.id}`
         });
       }
-      if (result.finalResponse.trim()) {
+      if (finalText) {
         this.capture({
           taskId, conversationId: task.conversationId ?? null, runId, executorId,
-          kind: "assistant_message", role: "assistant", content: result.finalResponse,
+          kind: "assistant_message", role: "assistant", content: finalText,
           provenance: { source: "executor-final", executorId, label: result.label }, executorEventId: `final:${runId}`
         });
       }
@@ -2534,7 +2566,7 @@ export class HearthScheduler {
         this.assertLease(taskId, run.leaseEpoch ?? 0, controller.signal.aborted && this.stopping);
         this.service.updateTask(taskId, {
           status: "waiting_approval", currentRunId: runId, nextAction: "等待你确认外部动作",
-          error: null, resultSummary: result.finalResponse
+          error: null, resultSummary: finalText
         }, runId);
         this.goals?.onTaskGated(task, "approval");
         await this.approvals.request({ ...request, taskId, runId, ...(task.goalId ? { goalId: task.goalId } : {}) });
@@ -2543,21 +2575,23 @@ export class HearthScheduler {
       if (this.hasPendingFollowUp(taskId)) {
         this.service.updateTask(taskId, {
           status: "running", currentRunId: runId, nextAction: "收到补充信息，正在继续",
-          error: null, resultSummary: result.finalResponse
+          error: null, resultSummary: finalText
         }, runId);
         this.refreshTaskSummary(taskId);
         return { status: "completed", run: completedRun, executorId, outDir, error: null, failure: null, aborted: controller.signal.aborted, leaseLost: false, cancelled: false, queuedFollowUp: true };
       }
       this.service.updateTask(taskId, {
         status: "completed", currentRunId: runId, nextAction: "产物已保存",
-        error: null, resultSummary: result.finalResponse
+        error: null, resultSummary: finalText
       }, runId);
       this.refreshTaskSummary(taskId);
       void this.conversationContext?.refreshAfterTask(taskId).catch(() => undefined);
       this.writeRunEvidence(taskId, runId);
       if (task.planId && this.plans) {
         try {
-          if (task.mode === "plan") this.plans.onPlanningTaskCompleted(taskId);
+          if (task.mode === "plan") {
+            this.plans.onPlanningTaskCompleted(taskId, { runId, workspaceRoot: prepared.root });
+          }
           else this.plans.onExecutionTaskCompleted(taskId);
         } catch (error) {
           this.capture({
@@ -2823,7 +2857,7 @@ export class HearthScheduler {
     });
   }
 
-  private finishWaitingInput(taskId: string, run: RunRecord, result: ExecutionOutcome): AttemptResult {
+  private finishWaitingInput(taskId: string, run: RunRecord, result: ExecutionOutcome, workspaceRoot: string): AttemptResult {
     const usage = this.usageWithMetrics(result.usage, result.turns, result.toolCalls);
     this.service.updateRun(run.id, taskId, { status: "waiting_input", endedAt: new Date().toISOString(), usage, failure: null });
     const task = this.service.updateTask(taskId, {
@@ -2831,15 +2865,19 @@ export class HearthScheduler {
       error: null, resultSummary: result.question ?? result.finalResponse
     }, run.id);
     this.goals?.onTaskGated(task, "needs_input");
-    if (this.plans && task.planId && task.mode === "plan" && result.planPath) {
+    if (this.plans && task.planId && task.mode === "plan") {
+      const planMarkdown = result.planMarkdown?.trim() || result.finalResponse || result.question || "";
       try {
-        this.plans.onPlanningTaskReady(taskId, result.finalResponse || result.question || "", result.planPath);
+        this.plans.onPlanningTaskReady(taskId, planMarkdown, result.planPath ?? null, {
+          runId: run.id,
+          workspaceRoot
+        });
       } catch (error) {
         this.capture({
           taskId,
           conversationId: task.conversationId ?? null,
           runId: run.id,
-          executorId: "native",
+          executorId: run.executorId ?? task.executorId ?? "native",
           kind: "notice",
           role: "system",
           content: `计划状态保存失败：${errorMessage(error)}`,

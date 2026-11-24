@@ -56,6 +56,9 @@ export interface DeepSeekHarnessRunOptions {
   outDir: string;
   prompt: string;
   mode: "necessary" | "full";
+  /** A planning run enters DSH Plan Mode and can never widen permissions. */
+  planMode?: boolean | undefined;
+  permissionMode?: "read-only" | "workspace-write" | "danger-full-access" | undefined;
   maxTurns?: number | undefined;
   runBudgetSeconds?: number | undefined;
   resumeSessionId?: string | undefined;
@@ -68,6 +71,8 @@ export interface DeepSeekHarnessRunOptions {
 
 export interface DeepSeekHarnessRunResult {
   finalResponse: string;
+  /** Full plan captured from a native plan-review question, when present. */
+  planMarkdown: string | null;
   sessionId: string;
   usage: DshUsage | null;
   finishReason: string | null;
@@ -129,9 +134,10 @@ export async function runDeepSeekHarness(options: DeepSeekHarnessRunOptions): Pr
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     [API_KEY_ENV]: options.settings.apiKey,
-    DSH_PERMISSION_MODE: options.mode === "full" ? "danger-full-access" : "workspace-write",
+    DSH_PERMISSION_MODE: dshPermissionMode(options),
     DSH_TELEMETRY_MODE: "DISABLED"
   };
+  let planMarkdown: string | null = null;
   const harness = new DeepSeekHarness({
     profile: "sdk",
     dshHome: options.dshHome,
@@ -146,12 +152,17 @@ export async function runDeepSeekHarness(options: DeepSeekHarnessRunOptions): Pr
       ? { requestTimeoutMs: Math.max(60_000, options.runBudgetSeconds * 1_000) }
       : {}),
     env,
-    onUserQuestion: async () => ({ cancelled: true })
+    onUserQuestion: async (request) => {
+      const detail = options.planMode ? planReviewMarkdown(request.questions) : null;
+      if (detail) planMarkdown = detail;
+      return { cancelled: true };
+    }
   });
   harness.client.start();
   harness.client.onRequest(async (method, params) => {
     if (method !== "approval/request") throw new Error(`Unsupported DSH request: ${method}`);
     if (options.signal?.aborted) return { outcome: "cancelled" };
+    if (options.planMode) return { outcome: "rejected" };
     const request = approvalRequestFromParams(params);
     if (!options.onApprovalRequest) {
       return { outcome: options.mode === "full" ? "allowed-once" : "rejected" };
@@ -179,11 +190,12 @@ export async function runDeepSeekHarness(options: DeepSeekHarnessRunOptions): Pr
     options.onProgress?.({ type: "dsh.start", message: options.resumeSessionId ? "正在恢复 DeepSeek Harness 会话" : "正在启动 DeepSeek Harness" });
     const runResult = options.resumeSessionId
       ? await runResumed(harness, options)
-      : await harness.run(options.prompt, { onNotification: notificationHandler(options) });
+      : await harness.run(promptForRun(options), { onNotification: notificationHandler(options) });
     if (options.signal?.aborted) throw new DeepSeekHarnessError("DSH_CANCELLED", "DeepSeek Harness 执行已取消");
     options.onProgress?.({ type: "dsh.done", message: "DeepSeek Harness 已完成本轮执行" });
     return {
-      finalResponse: runResult.finalResponse,
+      finalResponse: runResult.finalResponse.trim() || planMarkdown || "",
+      planMarkdown,
       sessionId: runResult.sessionId,
       usage: usageFromResult(runResult),
       finishReason: runResult.finishReason
@@ -214,15 +226,36 @@ async function runResumed(harness: DeepSeekHarness, options: DeepSeekHarnessRunO
   try {
     const session = await harness.resumeSession(sessionId);
     options.onProgress?.({ type: "dsh.resume", message: `已恢复会话 ${sessionId}` });
-    return await session.run(options.prompt, { onNotification: notificationHandler(options) });
+    return await session.run(promptForRun(options), { onNotification: notificationHandler(options) });
   } catch (error) {
     options.onProgress?.({
       type: "dsh.resume.fallback",
       message: `无法恢复会话 ${sessionId}，将从当前任务上下文创建新会话`,
       detail: { error: error instanceof Error ? error.message : String(error) }
     });
-    return harness.run(options.prompt, { onNotification: notificationHandler(options) });
+    return harness.run(promptForRun(options), { onNotification: notificationHandler(options) });
   }
+}
+
+export function dshPermissionMode(options: DeepSeekHarnessRunOptions): "read-only" | "workspace-write" | "danger-full-access" {
+  return options.planMode
+    ? "read-only"
+    : options.permissionMode ?? (options.mode === "full" ? "danger-full-access" : "workspace-write");
+}
+
+export function promptForRun(options: DeepSeekHarnessRunOptions): string {
+  return options.planMode ? `/plan ${options.prompt}` : options.prompt;
+}
+
+export function planReviewMarkdown(
+  questions: Array<{ intent?: { kind?: string } | null; detail?: string | null }>
+): string | null {
+  const detail = questions
+    .filter((question) => question.intent?.kind === "plan-review")
+    .map((question) => question.detail?.trim() ?? "")
+    .filter(Boolean)
+    .join("\n\n");
+  return detail || null;
 }
 
 function notificationHandler(options: DeepSeekHarnessRunOptions): (notification: HarnessNotification) => void {

@@ -85,7 +85,7 @@ export function createControlGoalTools(options: ControlGoalToolOptions): AgentTo
         ? "完成请求已记录；本轮结束后由独立验收器依据成功标准和证据判定，不能由模型自评关闭目标。"
         : `本轮意图已记录：${status}。`;
       return {
-        content: `${deferred}\n目标 ${goal.goalId} · 第 ${goal.roundCount ?? 0}/${goal.maxRounds ?? 24} 轮\n意图文件：goal-intent.json`
+        content: `${deferred}\n目标 ${goal.goalId} · 第 ${goal.roundCount ?? 0} 轮\n意图文件：${join(outDir, "goal-intent.json")}`
       };
     }
   };
@@ -116,7 +116,7 @@ function formatGoalView(goal: GoalContract, rounds: GoalRoundRecord[]): string {
   return [
     `目标：${normalized.title}`,
     `状态：${normalized.currentState}，自动推进：${normalized.armed ? "开启" : "关闭"}`,
-    `轮次：${normalized.roundCount ?? 0}/${normalized.maxRounds ?? 24}`,
+    `轮次：${normalized.roundCount ?? 0}`,
     `目标：${normalized.objective}`,
     normalized.constraints.length > 0 ? `约束：${normalized.constraints.join("；")}` : "",
     normalized.forbiddenActions.length > 0 ? `禁止动作：${normalized.forbiddenActions.join("；")}` : "",

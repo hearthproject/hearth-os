@@ -1,5 +1,6 @@
-import { Check, CirclePause, CirclePlay, Flag, Loader2, RefreshCw, ShieldCheck, Square } from "lucide-react";
+import { Check, CirclePause, CirclePlay, Cpu, Flag, Loader2, PencilLine, RefreshCw, ShieldCheck, Square } from "lucide-react";
 import type { GoalAction, GoalState, GoalView } from "@hearth/core";
+import { executorLabel } from "../lib/labels.ts";
 
 const STATE_LABELS: Record<GoalState, string> = {
   draft: "草稿",
@@ -16,11 +17,13 @@ const STATE_LABELS: Record<GoalState, string> = {
 export function GoalBar({
   view,
   busy,
-  onAction
+  onAction,
+  onManage
 }: {
   view: GoalView;
   busy: boolean;
   onAction: (action: GoalAction) => void;
+  onManage: (mode: "executor" | "contract") => void;
 }) {
   const goal = view.goal;
   const report = view.latestReport;
@@ -30,7 +33,9 @@ export function GoalBar({
   const canVerify = state === "awaiting_user" && goal.stopReason === "verifier";
   const canApprove = canVerify && report?.verdict === "pass";
   const canReplan = !["done", "cancelled", "failed"].includes(state);
+  const canManage = !["done", "cancelled", "failed"].includes(state);
   const roundText = `${goal.roundCount ?? 0}`;
+  const executorText = executorLabel(goal.execution?.executorId);
 
   return (
     <section className={`goal-bar ${state}${goal.armed ? " armed" : ""}`} aria-label="当前目标">
@@ -42,6 +47,7 @@ export function GoalBar({
           <strong>{goal.title}</strong>
           <span className="goal-state-pill">{STATE_LABELS[state]}</span>
           <span className="goal-round-pill">第 {roundText} 轮</span>
+          <span className="goal-round-pill" title="当前执行器">{executorText}</span>
         </div>
         <span className="goal-bar-next">{goal.nextHandoff ?? goal.objective}</span>
       </div>
@@ -71,6 +77,16 @@ export function GoalBar({
         {canReplan && (
           <button type="button" className="goal-action" disabled={busy} onClick={() => onAction("replan")} title="清空无进展计数并换一条路线">
             <RefreshCw size={13} />重规划
+          </button>
+        )}
+        {canManage && (
+          <button type="button" className="goal-action" disabled={busy} onClick={() => onManage("executor")} title="切换下一轮使用的执行器">
+            <Cpu size={13} />执行器
+          </button>
+        )}
+        {canManage && (
+          <button type="button" className="goal-action" disabled={busy} onClick={() => onManage("contract")} title="调整目标契约，保留原始目标与修订历史">
+            <PencilLine size={13} />契约
           </button>
         )}
         {!["done", "cancelled"].includes(state) && (

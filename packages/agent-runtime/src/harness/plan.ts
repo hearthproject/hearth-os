@@ -1,6 +1,3 @@
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { randomUUID } from "node:crypto";
 import type { AgentTool, AgentToolContext, AgentToolResult } from "../types.ts";
 
 const READ_ONLY_TOOLS = new Set([
@@ -43,7 +40,7 @@ export function planModeAllowsCommand(command: string): boolean {
 export const submitPlanTool: AgentTool = {
   definition: {
     name: "submit_plan",
-    description: "In plan mode, write the implementation plan to .hearth/plans and pause for user approval.",
+    description: "In plan mode, submit the complete implementation plan to Hearth for approval.",
     executionMode: "sequential",
     parameters: {
       type: "object",
@@ -59,21 +56,17 @@ export const submitPlanTool: AgentTool = {
     const record = input && typeof input === "object" ? input as Record<string, unknown> : {};
     const plan = typeof record.plan === "string" ? record.plan.trim() : "";
     if (!plan) return { content: "plan 不能为空。", isError: true };
-    const directory = join(context.workspaceRoot, ".hearth", "plans");
-    mkdirSync(directory, { recursive: true });
     const title = typeof record.title === "string" && record.title.trim() ? record.title.trim() : "implementation-plan";
-    const path = join(directory, `${title.replace(/[^a-zA-Z0-9._-]+/g, "-").slice(0, 60)}-${randomUUID().slice(0, 8)}.md`);
-    writeFileSync(path, plan, "utf8");
     if (context.state) {
-      context.state.planPath = path;
       context.state.mode = "plan";
     }
     return {
-      content: `计划已写入 ${path}。\n\n${plan}`,
+      content: `计划已提交给 Hearth，等待用户批准。\n\n${plan}`,
       action: "plan",
       summary: plan,
       question: plan,
-      outputs: [path]
+      outputs: [],
+      metadata: { title }
     };
   }
 };

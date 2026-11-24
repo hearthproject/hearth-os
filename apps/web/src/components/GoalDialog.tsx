@@ -37,7 +37,7 @@ export function GoalDialog({
           <span className="goal-dialog-mark"><Flag size={16} /></span>
           <div>
             <h2>目标模式</h2>
-            <p>目标会持续推进，直到成功标准满足或你主动停止；没有轮次、时长或预算上限，宿主重启后自动继续。</p>
+            <p>目标会持续推进，直到成功标准满足或你主动停止。宿主重启后，进行中的目标会暂停并保留现场，确认后再继续。</p>
           </div>
           <button type="button" className="icon-button" onClick={onClose} aria-label="关闭"><X size={16} /></button>
         </header>

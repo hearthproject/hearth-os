@@ -374,10 +374,36 @@ export interface GoalExecutionProfile {
   executionMode?: "quick" | "standard" | "deep";
 }
 
+export interface GoalContractSnapshot {
+  title: string;
+  objective: string;
+  constraints: string[];
+  forbiddenActions: string[];
+  successCriteria: GoalCriterion[];
+  evidenceRequirements: string[];
+  budget: GoalBudget;
+  deadline?: string;
+  stopConditions: string[];
+  reviewPolicy: GoalReviewPolicy;
+}
+
+/** User-authored contract changes are append-only and retain the complete before/after shape. */
+export interface GoalContractAmendment {
+  revision: number;
+  at: string;
+  source: "user";
+  note: string;
+  previous: GoalContractSnapshot;
+  next: GoalContractSnapshot;
+  commandsApprovalCleared: boolean;
+}
+
 export interface GoalContract {
   goalId: string;
   title: string;
   objective: string;
+  /** The objective from goal creation. Contract amendments never overwrite it. */
+  originalObjective?: string;
   constraints: string[];
   forbiddenActions: string[];
   authoritySources: GoalAuthoritySource[];
@@ -407,9 +433,29 @@ export interface GoalContract {
   stopReason?: GoalStopReason | null;
   /** Optimistic concurrency counter; every goal write increments it. */
   revision?: number;
+  /** Contract-only version. Every explicit user amendment increments it. */
+  contractRevision?: number;
+  /** Execution-profile version. Every executor switch increments it. */
+  executionRevision?: number;
+  /** Append-only history of explicit user contract changes. */
+  amendments?: GoalContractAmendment[];
   pauseReference?: { taskId: string; runId: string; checkpointSeq: number; checkpointKind: string } | null;
   /** Command criteria are frozen at creation and only run after explicit approval. */
   commandsApprovedAt?: string | null;
+}
+
+/** User-editable fields in a goal contract. Identity, history and runtime fields are immutable here. */
+export interface GoalContractPatch {
+  title?: string;
+  objective?: string;
+  constraints?: string[];
+  forbiddenActions?: string[];
+  successCriteria?: GoalCriterion[];
+  evidenceRequirements?: string[];
+  budget?: GoalBudget;
+  deadline?: string | null;
+  stopConditions?: string[];
+  reviewPolicy?: GoalReviewPolicy;
 }
 
 export const PLAN_STAGES = ["planning", "awaiting_approval", "executing", "completed", "failed", "cancelled"] as const;
@@ -440,6 +486,9 @@ export interface PlanRecord {
   execution?: PlanExecutionProfile;
   planMarkdown: string | null;
   planPath: string | null;
+  planSha256?: string | null;
+  planningAttempt?: number;
+  planningRunId?: string | null;
   revision: number;
   createdAt: string;
   updatedAt: string;
@@ -456,10 +505,19 @@ export type GoalRoundStatus = (typeof GOAL_ROUND_STATUSES)[number];
 export const GOAL_ROUND_INTENT_STATUSES = ["progress", "complete", "blocked", "needs_input"] as const;
 export type GoalRoundIntentStatus = (typeof GOAL_ROUND_INTENT_STATUSES)[number];
 
+/** Evidence may remain a legacy string or carry durable source metadata. */
+export type GoalEvidenceRef = string | {
+  ref: string;
+  kind?: "artifact" | "command" | "file" | "note" | "review" | "run" | "test";
+  sha256?: string;
+  runId?: string;
+  observedAt?: string;
+};
+
 export interface GoalRoundIntent {
   status: GoalRoundIntentStatus;
   note: string;
-  evidence: string[];
+  evidence: GoalEvidenceRef[];
   createdAt: string;
 }
 
@@ -482,12 +540,23 @@ export interface GoalRoundRecord {
   summary: string | null;
   intent: GoalRoundIntent | null;
   artifactRefs: string[];
-  evidenceRefs: string[];
+  evidenceRefs: GoalEvidenceRef[];
   usage: GoalRoundUsage | null;
   progressDigest: string | null;
   verifier: GoalCompletionReport | null;
   workspaceRoot: string | null;
   outDir: string | null;
+  /** Immutable execution identity captured when the round begins. */
+  executionFence?: GoalRoundExecutionFence | null;
+}
+
+export interface GoalRoundExecutionFence {
+  taskId: string;
+  runId: string;
+  executorId: ExecutorId;
+  goalRevision: number;
+  contractRevision: number;
+  executionRevision: number;
 }
 
 export const GOAL_ELIGIBILITY_REASONS = [
@@ -513,7 +582,7 @@ export interface GoalEligibility {
   nextWakeAt?: string | null;
 }
 
-export const GOAL_ACTIONS = ["start", "pause", "resume", "stop", "replan", "complete", "approve"] as const;
+export const GOAL_ACTIONS = ["start", "pause", "resume", "stop", "replan", "complete", "approve", "switch_executor", "amend_contract"] as const;
 export type GoalAction = (typeof GOAL_ACTIONS)[number];
 
 export interface GoalView {

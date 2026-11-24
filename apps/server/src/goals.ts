@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { join, resolve } from "node:path";
 import type {
   ArtifactRecord,
   ExecutorHealth,
@@ -8,22 +8,32 @@ import type {
   GoalAction,
   GoalCompletionReport,
   GoalContract,
+  GoalContractAmendment,
+  GoalContractPatch,
+  GoalContractSnapshot,
   GoalEligibility,
+  GoalEvidenceRef,
+  GoalExecutionProfile,
   GoalRoundIntent,
   GoalRoundRecord,
   GoalStopReason,
   GoalView,
+  TaskInput,
   TaskPauseResult,
+  TaskPermissions,
   TaskRecord,
   TaskResumeReference,
   RunRecord
 } from "@hearth/core";
 import {
+  EXECUTOR_IDS,
+  TASK_KINDS,
   GoalStateError,
   assertGoalAction,
   assertGoalTransition,
   evaluateGoalEligibility,
   goalBackoffMs,
+  goalEvidenceKey,
   goalProgressDigest,
   isGoalTerminal,
   normalizeGoal
@@ -90,6 +100,14 @@ interface RunStartedInput {
 
 interface RunCompletedInput extends RunStartedInput {
   finalResponse: string;
+}
+
+export interface GoalActionOptions {
+  expectedRevision?: number;
+  note?: string;
+  maxRounds?: number;
+  execution?: GoalExecutionProfile;
+  contract?: GoalContractPatch;
 }
 
 export class GoalService {
@@ -178,6 +196,7 @@ export class GoalService {
       goalId: `goal-${randomUUID()}`,
       title: (input.title?.trim() || titleFromObjective(objective)).slice(0, 200),
       objective,
+      originalObjective: objective,
       constraints: uniqueStrings(input.constraints ?? []).slice(0, 20),
       forbiddenActions: uniqueStrings(input.forbiddenActions ?? []).slice(0, 20),
       authoritySources: [{
@@ -204,6 +223,9 @@ export class GoalService {
       nextWakeAt: null,
       stopReason: null,
       revision: 0,
+      contractRevision: 0,
+      executionRevision: 0,
+      amendments: [],
       pauseReference: null,
       commandsApprovedAt: null
     };
@@ -225,7 +247,7 @@ export class GoalService {
   async action(
     goalId: string,
     action: GoalAction,
-    options: { expectedRevision?: number; note?: string; maxRounds?: number } = {}
+    options: GoalActionOptions = {}
   ): Promise<GoalView> {
     let goal = this.get(goalId);
     if (options.expectedRevision !== undefined && goal.revision !== options.expectedRevision) {
@@ -345,8 +367,130 @@ export class GoalService {
         this.publishFinalAnswer(goal, latestRound?.summary ?? null, report.summary, goal.taskId ?? null);
         break;
       }
+      case "switch_executor": {
+        if (!options.execution) {
+          throw new GoalStateError("GOAL_CONTRACT_INVALID", "切换执行器需要完整的执行配置");
+        }
+        goal = this.switchExecutor(goal, options.execution, note);
+        break;
+      }
+      case "amend_contract": {
+        if (!options.contract || Object.keys(options.contract).length === 0) {
+          throw new GoalStateError("GOAL_CONTRACT_INVALID", "契约修订不能为空");
+        }
+        goal = this.amendContract(goal, options.contract, note);
+        break;
+      }
     }
     return this.view(goal.goalId);
+  }
+
+  private switchExecutor(goal: GoalContract, execution: GoalExecutionProfile, note: string): GoalContract {
+    const task = goal.taskId ? this.service.store.getTask(goal.taskId) : null;
+    if (!task) throw new GoalStateError("GOAL_STATE_INVALID", "目标还没有绑定可切换的执行任务");
+    if (task.status === "running" || task.status === "queued") {
+      throw new GoalStateError("GOAL_EXECUTION_CONFLICT", "目标任务仍在运行或排队，等本轮结束后再切换执行器");
+    }
+    const normalized = normalizeExecutionProfile(execution);
+    const project = normalized.projectId
+      ? this.service.store.getLocalProject(normalized.projectId)
+      : null;
+    if (normalized.projectId && !project) {
+      throw new GoalStateError("GOAL_CONTRACT_INVALID", "切换目标引用了不存在的本地项目");
+    }
+    const workspacePath = normalized.workspacePath ? resolve(normalized.workspacePath) : null;
+    if (workspacePath && (!existsSync(workspacePath) || !statSync(workspacePath).isDirectory())) {
+      throw new GoalStateError("GOAL_CONTRACT_INVALID", "切换目标指定的工作目录不存在");
+    }
+    const workspaceRoot = workspacePath
+      ? realpathSync.native(workspacePath)
+      : project
+        ? resolve(project.path)
+        : null;
+    const inputs: TaskInput[] = task.inputs.filter((item) => item.kind !== "workspace");
+    if (workspaceRoot) inputs.push({ kind: "workspace", label: "工作目录", value: workspaceRoot });
+    const permissions: TaskPermissions = {
+      ...(task.permissions ?? {}),
+      readRoots: workspaceRoot ? [workspaceRoot] : task.permissions?.readRoots ?? [],
+      writeRoots: workspaceRoot ? [workspaceRoot] : task.permissions?.writeRoots ?? [],
+      networkHosts: normalized.networkHosts,
+      networkMode: "open",
+      tools: task.permissions?.tools ?? [],
+      fullAccess: true,
+      approvalMode: "full",
+      sandboxMode: "danger-full-access"
+    };
+    const updatedTask = this.service.updateTask(task.id, {
+      executorId: normalized.executorId,
+      taskKind: normalized.taskKind,
+      expectedOutputs: normalized.expectedOutputs,
+      projectId: normalized.projectId ?? null,
+      networkHosts: normalized.networkHosts,
+      inputs,
+      permissions,
+      currentRunId: null,
+      nextAction: `已切换到 ${normalized.executorId}，等待下一轮`,
+      error: null,
+      ...(normalized.executionMode && normalized.executorId === "native" ? { executionMode: normalized.executionMode } : {})
+    }, task.currentRunId ?? undefined);
+    if (!updatedTask) throw new GoalStateError("GOAL_STATE_INVALID", "执行任务切换失败");
+    return this.saveGoal({
+      ...goal,
+      execution: normalized,
+      executionRevision: (goal.executionRevision ?? 0) + 1,
+      pauseReference: null,
+      nextHandoff: note || `下一轮改用 ${normalized.executorId} 执行`
+    });
+  }
+
+  private amendContract(goal: GoalContract, patch: GoalContractPatch, note: string): GoalContract {
+    const before = contractSnapshot(goal);
+    const criteria = patch.successCriteria === undefined
+      ? goal.successCriteria
+      : sanitizeCriteria(patch.successCriteria);
+    if (patch.successCriteria !== undefined && criteria.length === 0) {
+      throw new GoalStateError("GOAL_CONTRACT_INVALID", "成功标准不能为空");
+    }
+    const next: GoalContract = {
+      ...goal,
+      title: patch.title === undefined ? goal.title : requiredText(patch.title, "标题", 200),
+      objective: patch.objective === undefined ? goal.objective : requiredText(patch.objective, "目标", 20_000),
+      constraints: patch.constraints === undefined ? goal.constraints : uniqueStrings(patch.constraints).slice(0, 20),
+      forbiddenActions: patch.forbiddenActions === undefined ? goal.forbiddenActions : uniqueStrings(patch.forbiddenActions).slice(0, 20),
+      successCriteria: criteria,
+      evidenceRequirements: patch.evidenceRequirements === undefined
+        ? goal.evidenceRequirements
+        : uniqueStrings(patch.evidenceRequirements).slice(0, 20),
+      budget: patch.budget === undefined ? goal.budget : sanitizeBudget(patch.budget),
+      stopConditions: patch.stopConditions === undefined
+        ? goal.stopConditions
+        : uniqueStrings(patch.stopConditions).slice(0, 20),
+      reviewPolicy: patch.reviewPolicy ?? goal.reviewPolicy,
+      originalObjective: goal.originalObjective ?? goal.objective
+    };
+    if (patch.deadline !== undefined) {
+      if (patch.deadline === null) delete next.deadline;
+      else next.deadline = requiredText(patch.deadline, "截止时间", 100);
+    }
+    const after = contractSnapshot(next);
+    const commandsChanged = commandCriteriaKey(before.successCriteria) !== commandCriteriaKey(after.successCriteria);
+    const amendment: GoalContractAmendment = {
+      revision: (goal.contractRevision ?? 0) + 1,
+      at: this.now().toISOString(),
+      source: "user",
+      note: note || "用户调整目标契约",
+      previous: before,
+      next: after,
+      commandsApprovalCleared: commandsChanged && Boolean(goal.commandsApprovedAt)
+    };
+    return this.saveGoal({
+      ...next,
+      contractRevision: amendment.revision,
+      amendments: [...(goal.amendments ?? []), amendment],
+      ...(commandsChanged ? { commandsApprovedAt: null } : {}),
+      nextHandoff: note || "目标契约已更新，下一轮使用新契约",
+      nextWakeAt: null
+    });
   }
 
   eligibility(goalInput: GoalContract): GoalEligibility {
@@ -379,18 +523,15 @@ export class GoalService {
       const goal = normalizeGoal(raw);
       if (goal.currentState === "draft" || goal.currentState === "blocked") continue;
       if (goal.currentState === "paused" || goal.currentState === "awaiting_user") continue;
-      const patch: GoalContract = {
+      assertGoalTransition(goal.currentState, "paused");
+      this.saveGoal({
         ...goal,
-        armed: true,
+        currentState: "paused",
+        armed: false,
         nextWakeAt: null,
-        stopReason: null,
-        nextHandoff: "宿主重启后继续自动推进"
-      };
-      if (goal.currentState === "validating") {
-        assertGoalTransition(goal.currentState, "active");
-        patch.currentState = "active";
-      }
-      this.saveGoal(patch);
+        stopReason: "host_restart",
+        nextHandoff: "宿主重启，上一轮已中断。检查后点击继续，从新轮次开始"
+      });
       const latest = this.service.store.latestGoalRound(goal.goalId);
       if (latest && ["running", "gated", "paused"].includes(latest.status)) {
         this.saveRound({ ...latest, status: "interrupted", endedAt: this.now().toISOString() }, "goal.round.settled");
@@ -448,7 +589,12 @@ export class GoalService {
       this.saveRound(round, "goal.round.started");
       goal = opened.goalNext;
     }
-    const intent = readGoalIntent(input.outDir);
+    const fenceError = completionFenceError(goal, round, input.task, input.run, this.service.store.getTask(input.task.id));
+    if (fenceError) {
+      this.appendRejectedResult(goal, round, input.run.id, fenceError);
+      return { action: "none" };
+    }
+    const intent = readGoalIntent(input.outDir, input.run.id);
     const artifacts = this.service.store.listArtifacts(input.task.id)
       .filter((artifact) => artifact.runId === input.run.id);
     const summary = clipText(input.finalResponse || input.task.resultSummary || "", 4000);
@@ -479,8 +625,10 @@ export class GoalService {
 
     const verified = await this.maybeVerify(goal, round, input, intent);
     if (verified) {
-      this.saveRound({ ...round, verifier: verified.report, summary }, "goal.round.settled");
-      if (verified.decision.action !== "done") {
+      if (verified.report) {
+        this.saveRound({ ...round, verifier: verified.report, summary }, "goal.round.settled");
+      }
+      if (verified.decision.action !== "done" && verified.decision.action !== "none") {
         this.publishRoundAnswer(goal, round, input.finalResponse);
       }
       return verified.decision;
@@ -511,19 +659,11 @@ export class GoalService {
       return { action: "gate", reason: "needs_input", detail: intent.note };
     }
 
-    const noProgress = digest === goal.lastProgressDigest
-      ? (goal.noProgressCount ?? 0) + 1
-      : 0;
-    // Progress tracking is informational only. A goal keeps advancing even when
-    // consecutive rounds look similar, because stopping here would be a hidden
-    // product-level round limit.
-    this.saveGoal({
-      ...goal,
-      noProgressCount: noProgress,
-      lastProgressDigest: digest,
-      nextWakeAt: null,
-      nextHandoff: "准备下一轮"
-    });
+    goal = this.recordProgress(goal, digest);
+    if (goal.currentState === "blocked") {
+      this.publishRoundAnswer(goal, round, input.finalResponse);
+      return { action: "blocked", reason: "no_progress", detail: goal.nextHandoff ?? "连续多轮没有形成新证据或产物" };
+    }
     const nextIndex = (goal.roundCount ?? round.index) + 1;
     this.publishRoundAnswer(goal, round, input.finalResponse);
     return {
@@ -617,7 +757,7 @@ export class GoalService {
     round: GoalRoundRecord,
     input: RunCompletedInput,
     intent: GoalRoundIntent | null
-  ): Promise<{ report: GoalCompletionReport; decision: GoalRoundDecision } | null> {
+  ): Promise<{ report: GoalCompletionReport | null; decision: GoalRoundDecision } | null> {
     const shouldVerify = intent?.status === "complete"
       || this.isCheapVerification(goal);
     if (!shouldVerify) return null;
@@ -634,10 +774,34 @@ export class GoalService {
       workspaceRoot: round.workspaceRoot ?? input.workspaceRoot,
       outDir: round.outDir ?? input.outDir,
       artifacts: this.service.store.listArtifacts(input.task.id).filter((artifact) => artifact.runId === input.run.id),
-      actions: observedActions(this.service, input.task.id),
+      intentEvidence: intent?.evidence ?? [],
+      previousRounds: this.service.store.listGoalRounds(goal.goalId).filter((item) => item.id !== round.id),
+      actions: observedActions(this.service, input.task.id, input.run.id),
       review: this.review,
       runCommand: this.runCommand
     });
+    const currentGoal = this.get(goal.goalId);
+    const staleReason = verificationContextError(
+      currentGoal,
+      goal,
+      round,
+      this.service.store.getTask(input.task.id),
+      input.run.id
+    );
+    if (staleReason) {
+      this.appendRejectedResult(currentGoal, round, input.run.id, staleReason);
+      if (currentGoal.currentState === "validating") {
+        this.saveGoal({
+          ...currentGoal,
+          currentState: "awaiting_user",
+          armed: false,
+          stopReason: "verifier",
+          nextHandoff: "验收期间契约或执行器发生变化，旧验收结果已丢弃；检查后继续"
+        });
+      }
+      return { report: null, decision: { action: "none" } };
+    }
+    goal = currentGoal;
     this.appendReport(report);
     if (report.verdict === "pass") {
       if (goal.reviewPolicy === "human_on_complete") {
@@ -686,19 +850,30 @@ export class GoalService {
       return { report, decision: { action: "gate", reason: "verifier", detail: report.summary } };
     }
     assertGoalTransition("validating", "active");
-    this.saveGoal({
+    const active = this.saveGoal({
       ...goal,
       currentState: "active",
       armed: true,
       stopReason: null,
       nextHandoff: `验收未通过：${clipText(report.summary, 800)}`
     });
+    const progressed = this.recordProgress(active, round.progressDigest ?? goalProgressDigest({
+      artifactHashes: round.artifactRefs,
+      summary: round.summary ?? "",
+      intentEvidence: round.intent?.evidence ?? []
+    }));
+    if (progressed.currentState === "blocked") {
+      return {
+        report,
+        decision: { action: "blocked", reason: "no_progress", detail: progressed.nextHandoff ?? report.summary }
+      };
+    }
     return {
       report,
       decision: {
         action: "continue",
         prompt: buildGoalRoundPrompt(
-          { ...goal, currentState: "active", armed: true },
+          progressed,
           this.service.store.listGoalRounds(goal.goalId),
           (goal.roundCount ?? round.index) + 1,
           report.summary
@@ -739,21 +914,45 @@ export class GoalService {
       workspaceRoot: round.workspaceRoot,
       outDir: round.outDir,
       artifacts: this.service.store.listArtifacts(goal.taskId).filter((artifact) => round.runIds.includes(artifact.runId)),
-      actions: observedActions(this.service, goal.taskId),
+      intentEvidence: round.intent?.evidence ?? [],
+      previousRounds: this.service.store.listGoalRounds(goal.goalId).filter((item) => item.id !== round.id),
+      actions: observedActions(this.service, goal.taskId, round.runIds.at(-1) ?? ""),
       review: this.review,
       runCommand: this.runCommand
     });
+    const runId = round.runIds.at(-1) ?? "";
+    const currentGoal = this.get(goal.goalId);
+    const staleReason = verificationContextError(
+      currentGoal,
+      verifying,
+      round,
+      this.service.store.getTask(goal.taskId),
+      runId
+    );
+    if (staleReason) {
+      this.appendRejectedResult(currentGoal, round, runId, staleReason);
+      if (currentGoal.currentState === "validating") {
+        return this.saveGoal({
+          ...currentGoal,
+          currentState: "awaiting_user",
+          armed: false,
+          stopReason: "verifier",
+          nextHandoff: "验收期间契约或执行器发生变化，旧验收结果已丢弃；检查后继续"
+        });
+      }
+      return currentGoal;
+    }
     this.appendReport(report);
     this.saveRound({ ...round, verifier: report }, "goal.round.settled");
     if (report.verdict === "pass") {
       assertGoalTransition("validating", "done");
-      const completed = this.saveGoal({ ...verifying, currentState: "done", armed: false, nextHandoff: "验收通过" });
+      const completed = this.saveGoal({ ...currentGoal, currentState: "done", armed: false, nextHandoff: "验收通过" });
       this.publishFinalAnswer(completed, round.summary, report.summary, goal.taskId);
       return completed;
     }
     assertGoalTransition("validating", "awaiting_user");
     return this.saveGoal({
-      ...verifying,
+      ...currentGoal,
       currentState: "awaiting_user",
       stopReason: "verifier",
       nextHandoff: report.summary
@@ -776,17 +975,32 @@ export class GoalService {
     const rounds = this.service.store.listGoalRounds(goal.goalId);
     const open = rounds.find((item) => ["running", "gated", "paused"].includes(item.status));
     if (open) {
+      const goalRevision = goal.revision ?? 0;
       const next: GoalRoundRecord = {
         ...open,
         runIds: uniqueStrings([...open.runIds, input.run.id]),
         status: "running",
         endedAt: null,
         workspaceRoot: input.workspaceRoot,
-        outDir: input.outDir
+        outDir: input.outDir,
+        executionFence: {
+          taskId: input.task.id,
+          runId: input.run.id,
+          executorId: input.run.executorId ?? input.task.executorId ?? goal.execution?.executorId ?? "native",
+          goalRevision,
+          contractRevision: goal.contractRevision ?? 0,
+          executionRevision: goal.executionRevision ?? 0
+        }
       };
       return { round: next, goalNext: goal };
     }
     const index = (rounds.at(-1)?.index ?? 0) + 1;
+    const nextGoal: GoalContract = {
+      ...goal,
+      roundCount: Math.max(goal.roundCount ?? 0, index),
+      revision: (goal.revision ?? 0) + 1,
+      updatedAt: this.now().toISOString()
+    };
     const round: GoalRoundRecord = {
       id: `goal-round-${randomUUID()}`,
       goalId: goal.goalId,
@@ -804,15 +1018,43 @@ export class GoalService {
       progressDigest: null,
       verifier: null,
       workspaceRoot: input.workspaceRoot,
-      outDir: input.outDir
-    };
-    const nextGoal: GoalContract = {
-      ...goal,
-      roundCount: Math.max(goal.roundCount ?? 0, index),
-      revision: (goal.revision ?? 0) + 1,
-      updatedAt: this.now().toISOString()
+      outDir: input.outDir,
+      executionFence: {
+        taskId: input.task.id,
+        runId: input.run.id,
+        executorId: input.run.executorId ?? input.task.executorId ?? goal.execution?.executorId ?? "native",
+        goalRevision: nextGoal.revision ?? goal.revision ?? 0,
+        contractRevision: goal.contractRevision ?? 0,
+        executionRevision: goal.executionRevision ?? 0
+      }
     };
     return { round, goalNext: nextGoal };
+  }
+
+  private recordProgress(goal: GoalContract, digest: string): GoalContract {
+    const same = goal.lastProgressDigest !== null && digest === goal.lastProgressDigest;
+    const noProgressCount = same ? (goal.noProgressCount ?? 0) + 1 : 0;
+    if (noProgressCount >= 3) {
+      return this.saveGoal({
+        ...goal,
+        currentState: "blocked",
+        armed: false,
+        noProgressCount,
+        lastProgressDigest: digest,
+        stopReason: "no_progress",
+        nextWakeAt: null,
+        nextHandoff: "连续四轮没有新增证据、产物或验收进展。请调整契约或切换执行器后继续"
+      });
+    }
+    return this.saveGoal({
+      ...goal,
+      noProgressCount,
+      lastProgressDigest: digest,
+      nextWakeAt: null,
+      nextHandoff: noProgressCount >= 1
+        ? "连续两轮没有新增证据或产物，下一轮必须换路线并留下可核验证据"
+        : "准备下一轮"
+    });
   }
 
   private goalForTask(task: TaskRecord): GoalContract | null {
@@ -904,9 +1146,27 @@ export class GoalService {
     });
     this.service.bus.publish(event);
   }
+
+  private appendRejectedResult(goal: GoalContract, round: GoalRoundRecord, runId: string, reason: string): void {
+    const event = this.service.store.appendEvent({
+      type: "goal.result.rejected",
+      taskId: round.taskId,
+      runId,
+      payload: {
+        goalId: goal.goalId,
+        roundId: round.id,
+        reason,
+        goalRevision: goal.revision ?? 0,
+        contractRevision: goal.contractRevision ?? 0,
+        executionRevision: goal.executionRevision ?? 0,
+        observedAt: this.now().toISOString()
+      }
+    });
+    this.service.bus.publish(event);
+  }
 }
 
-function readGoalIntent(outDir: string): GoalRoundIntent | null {
+function readGoalIntent(outDir: string, runId: string): GoalRoundIntent | null {
   const path = join(outDir, "goal-intent.json");
   if (!existsSync(path)) return null;
   try {
@@ -916,7 +1176,7 @@ function readGoalIntent(outDir: string): GoalRoundIntent | null {
     return {
       status,
       note: typeof raw.note === "string" ? raw.note.slice(0, 5000) : "",
-      evidence: Array.isArray(raw.evidence) ? raw.evidence.filter((item): item is string => typeof item === "string").slice(0, 50) : [],
+      evidence: normalizeEvidence(raw.evidence, runId),
       createdAt: typeof raw.createdAt === "string" ? raw.createdAt : new Date().toISOString()
     };
   } catch {
@@ -931,6 +1191,7 @@ export function buildGoalRoundPrompt(
   verifierNote?: string
 ): string {
   const goal = normalizeGoal(goalInput);
+  const executorId = goal.execution?.executorId ?? "native";
   const previous = rounds.slice(-2);
   const criteria = goal.successCriteria.length > 0
     ? goal.successCriteria.map((criterion, index) =>
@@ -953,21 +1214,107 @@ export function buildGoalRoundPrompt(
     goal.constraints.length > 0 ? `## 约束\n${goal.constraints.map((item) => `- ${item}`).join("\n")}` : "",
     goal.forbiddenActions.length > 0 ? `## 禁止动作\n${goal.forbiddenActions.map((item) => `- ${item}`).join("\n")}` : "",
     `## 成功标准\n${criteria}`,
+    `## 当前契约\n- 契约修订：${goal.contractRevision ?? 0}\n- 执行修订：${goal.executionRevision ?? 0}\n- 执行器：${executorId}`,
+    goal.originalObjective && goal.originalObjective !== goal.objective
+      ? `## 原始目标（不可变）\n${goal.originalObjective}`
+      : "",
     goal.evidenceRequirements.length > 0 ? `## 证据要求\n${goal.evidenceRequirements.map((item) => `- ${item}`).join("\n")}` : "",
     goal.stopConditions.length > 0 ? `## 停止条件\n${goal.stopConditions.map((item) => `- ${item}`).join("\n")}` : "",
     history ? `## 最近轮次\n${history}` : "",
     verifierNote ? `## 上一轮验收结论\n${clipText(verifierNote, 1200)}` : "",
+    (goal.noProgressCount ?? 0) >= 1
+      ? "## 无进展纠偏\n连续轮次没有新增证据或产物。下一轮必须改变路线，优先补齐可核验的文件、测试、命令或验收证据，并明确说明与上一轮的差异。"
+      : "",
     "",
     "## 本轮规则",
     "- 持续推进直到成功标准满足，没有轮次或时间上限；沿用当前工作区、已有产物和检查点，不要从零重做。",
     "- 先查看上一轮产物和未完成项，再做当前最有价值的动作。",
     "- 遇到失败先诊断并换路线重试；只有确实需要用户提供无法自行获取的信息时，才报告 needs_input。",
     "- 只有成功标准全部满足、证据齐全时，才报告 complete；由独立验收器最终判定，模型自评不算完成。",
-    "- 本轮结束前，在本轮输出目录写入 `goal-intent.json`：",
-    "  {\"status\":\"progress|complete|blocked|needs_input\",\"note\":\"本轮结果摘要\",\"evidence\":[\"相对路径或产物 id\"]}",
-    "- 可用 `get_goal` 查看目标全貌，用 `update_goal` 记录本轮意图。不要创建新的目标。",
+    "- 本轮结束前，在提示末尾给出的绝对“目标意图文件”路径写入 `goal-intent.json`：",
+    "  {\"status\":\"progress|complete|blocked|needs_input\",\"note\":\"本轮结果摘要\",\"evidence\":[{\"ref\":\"相对路径、产物 id 或测试\",\"kind\":\"file|artifact|test|command|note\",\"sha256\":\"可选\",\"runId\":\"可选\"}]}",
+    executorId === "native"
+      ? "- 可用 `get_goal` 查看目标全貌，用 `update_goal` 记录本轮意图。不要创建新的目标。"
+      : "- 当前执行器没有 Hearth 的 `get_goal` 或 `update_goal` 工具。目标状态以本提示和上面给出的意图文件协议为准，不要调用不存在的工具。",
     ""
   ].filter(Boolean).join("\n");
+}
+
+function completionFenceError(
+  goal: GoalContract,
+  round: GoalRoundRecord,
+  task: TaskRecord,
+  run: RunRecord,
+  currentTask: TaskRecord | null
+): string | null {
+  const fence = round.executionFence;
+  if (!fence) return null;
+  if (fence.runId !== run.id || !round.runIds.includes(run.id)) return "结果不属于当前轮运行";
+  if (fence.taskId !== task.id || round.taskId !== task.id) return "结果不属于当前锚点任务";
+  if (currentTask?.currentRunId && currentTask.currentRunId !== run.id) return "任务已经进入新的运行";
+  const runExecutor = run.executorId ?? task.executorId ?? "native";
+  if (runExecutor !== fence.executorId) return "执行器已经切换，旧运行结果不能结算";
+  if ((goal.execution?.executorId ?? "native") !== fence.executorId) return "目标执行器与当前轮不一致";
+  if ((goal.contractRevision ?? 0) !== fence.contractRevision) return "目标契约已经修订";
+  if ((goal.executionRevision ?? 0) !== fence.executionRevision) return "目标执行配置已经修订";
+  if ((goal.revision ?? 0) !== fence.goalRevision) return "目标已经进入新的轮次";
+  return null;
+}
+
+function verificationContextError(
+  current: GoalContract,
+  expected: GoalContract,
+  round: GoalRoundRecord,
+  task: TaskRecord | null,
+  runId: string
+): string | null {
+  if (!round.runIds.includes(runId) || (round.executionFence && round.executionFence.runId !== runId)) {
+    return "验收结果不属于当前轮运行";
+  }
+  if (current.currentState !== "validating") return "目标已经离开验收状态";
+  if ((current.revision ?? 0) !== (expected.revision ?? 0)) return "验收期间目标已经被修改";
+  if ((current.contractRevision ?? 0) !== (expected.contractRevision ?? 0)) return "验收期间目标契约已经修订";
+  if ((current.executionRevision ?? 0) !== (expected.executionRevision ?? 0)) return "验收期间执行配置已经修订";
+  if ((current.execution?.executorId ?? "native") !== (expected.execution?.executorId ?? "native")) {
+    return "验收期间执行器已经切换";
+  }
+  if (task?.currentRunId && task.currentRunId !== runId) return "任务已经进入新的运行";
+  if (task && (task.executorId ?? "native") !== (expected.execution?.executorId ?? "native")) {
+    return "锚点任务执行器与验收上下文不一致";
+  }
+  return null;
+}
+
+function normalizeEvidence(value: unknown, runId: string): GoalEvidenceRef[] {
+  if (!Array.isArray(value)) return [];
+  const kinds = new Set(["artifact", "command", "file", "note", "review", "run", "test"]);
+  const result: GoalEvidenceRef[] = [];
+  for (const item of value.slice(0, 50)) {
+    if (typeof item === "string") {
+      const ref = item.trim().slice(0, 500);
+      if (ref) result.push(ref);
+      continue;
+    }
+    if (!item || typeof item !== "object") continue;
+    const record = item as Record<string, unknown>;
+    const ref = typeof record.ref === "string" ? record.ref.trim().slice(0, 500) : "";
+    if (!ref) continue;
+    const kind = typeof record.kind === "string" && kinds.has(record.kind)
+      ? record.kind as Exclude<GoalEvidenceRef, string>["kind"]
+      : undefined;
+    result.push({
+      ref,
+      ...(kind ? { kind } : {}),
+      ...(typeof record.sha256 === "string" && /^[a-f0-9]{64}$/i.test(record.sha256)
+        ? { sha256: record.sha256.toLowerCase() }
+        : {}),
+      ...(typeof record.runId === "string" && record.runId.trim() ? { runId: record.runId.trim() } : { runId }),
+      observedAt: typeof record.observedAt === "string" && Number.isFinite(Date.parse(record.observedAt))
+        ? record.observedAt
+        : new Date().toISOString()
+    });
+  }
+  return result;
 }
 
 function usageOfRun(run: RunRecord): GoalRoundRecord["usage"] {
@@ -983,7 +1330,7 @@ function usageOfRun(run: RunRecord): GoalRoundRecord["usage"] {
   };
 }
 
-function observedActions(service: HearthService, taskId: string): GoalObservedAction[] {
+function observedActions(service: HearthService, taskId: string, runId: string): GoalObservedAction[] {
   const approvals = service.store.listApprovals(taskId).map((approval) => ({
     kind: approval.kind ?? "approval",
     summary: approval.summary ?? approval.kind ?? "approval"
@@ -992,7 +1339,92 @@ function observedActions(service: HearthService, taskId: string): GoalObservedAc
     kind: effect.effectType ?? "effect",
     summary: effect.targetKey ?? effect.effectType ?? "effect"
   }));
-  return [...approvals, ...effects];
+  const context: GoalObservedAction[] = [];
+  let beforeSeq: number | null = null;
+  do {
+    const page = service.store.listContextItems(taskId, {
+      limit: 1_000,
+      ...(beforeSeq === null ? {} : { beforeSeq })
+    });
+    for (const item of page.items) {
+      if (item.runId !== runId || !["tool_call", "tool_result"].includes(item.kind)) continue;
+      const provenance = item.provenance as Record<string, unknown>;
+      const command = typeof provenance.command === "string" ? provenance.command : "";
+      const tool = typeof provenance.tool === "string" ? provenance.tool : "";
+      context.push({
+        kind: item.kind,
+        summary: clipText([tool, command, item.content].filter(Boolean).join(" "), 500)
+      });
+    }
+    beforeSeq = page.nextBefore;
+  } while (beforeSeq !== null);
+  return [...approvals, ...effects, ...context];
+}
+
+function normalizeExecutionProfile(execution: GoalExecutionProfile): GoalExecutionProfile {
+  if (!EXECUTOR_IDS.includes(execution.executorId as (typeof EXECUTOR_IDS)[number])) {
+    throw new GoalStateError("GOAL_CONTRACT_INVALID", "执行器无效");
+  }
+  if (!TASK_KINDS.includes(execution.taskKind as (typeof TASK_KINDS)[number])) {
+    throw new GoalStateError("GOAL_CONTRACT_INVALID", "任务类型无效");
+  }
+  return {
+    executorId: execution.executorId,
+    taskKind: execution.taskKind,
+    expectedOutputs: uniqueStrings(execution.expectedOutputs).slice(0, 20),
+    projectId: execution.projectId?.trim() || null,
+    workspacePath: execution.workspacePath?.trim() || null,
+    networkHosts: uniqueStrings(execution.networkHosts).slice(0, 20),
+    ...(execution.executionMode ? { executionMode: execution.executionMode } : {})
+  };
+}
+
+function contractSnapshot(goal: GoalContract): GoalContractSnapshot {
+  return {
+    title: goal.title,
+    objective: goal.objective,
+    constraints: [...goal.constraints],
+    forbiddenActions: [...goal.forbiddenActions],
+    successCriteria: goal.successCriteria.map((criterion) => ({ ...criterion })),
+    evidenceRequirements: [...goal.evidenceRequirements],
+    budget: { ...goal.budget },
+    ...(goal.deadline ? { deadline: goal.deadline } : {}),
+    stopConditions: [...goal.stopConditions],
+    reviewPolicy: goal.reviewPolicy
+  };
+}
+
+function sanitizeCriteria(criteria: GoalContract["successCriteria"]): GoalContract["successCriteria"] {
+  const validators = new Set(["file", "git", "command", "schema", "manual", "llm_review"]);
+  const seen = new Set<string>();
+  return criteria.map((criterion, index) => {
+    const id = requiredText(criterion.id || `c${index + 1}`, "成功标准 id", 40);
+    if (seen.has(id)) throw new GoalStateError("GOAL_CONTRACT_INVALID", `成功标准 id 重复：${id}`);
+    seen.add(id);
+    if (!validators.has(criterion.validator)) throw new GoalStateError("GOAL_CONTRACT_INVALID", "成功标准验收器无效");
+    return {
+      id,
+      description: requiredText(criterion.description, "成功标准描述", 1_000),
+      validator: criterion.validator,
+      check: requiredText(criterion.check, "成功标准检查", 4_000),
+      required: criterion.required !== false
+    };
+  }).slice(0, 20);
+}
+
+function requiredText(value: string, label: string, max: number): string {
+  const text = value.trim();
+  if (!text) throw new GoalStateError("GOAL_CONTRACT_INVALID", `${label}不能为空`);
+  if (text.length > max) throw new GoalStateError("GOAL_CONTRACT_INVALID", `${label}不能超过 ${max} 个字符`);
+  return text;
+}
+
+function commandCriteriaKey(criteria: GoalContract["successCriteria"]): string {
+  return criteria
+    .filter((criterion) => criterion.validator === "command")
+    .map((criterion) => `${criterion.id}\u0000${criterion.required ? "1" : "0"}\u0000${criterion.check}`)
+    .sort()
+    .join("\u0001");
 }
 
 function sanitizeBudget(budget: {

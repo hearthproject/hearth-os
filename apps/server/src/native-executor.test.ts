@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { TaskRecord } from "@hearth/core";
 import type { AgentTool } from "@hearth/agent-runtime";
-import { directReadTool, dedupeTools, refreshNativeResume, jsonDeliverableIssue, nativePermissionsFor, nativeProgressForEvent, nativeSystemPrompt, normalizeJsonDeliverables } from "./native-executor.ts";
+import { NATIVE_PLAN_TOOL_NAMES, directReadTool, dedupeTools, refreshNativeResume, jsonDeliverableIssue, nativePermissionsFor, nativeProgressForEvent, nativeSystemPrompt, normalizeJsonDeliverables } from "./native-executor.ts";
 import { createBuiltinTools, defaultTaskPermissions, runAgent } from "@hearth/agent-runtime";
 import { wantsDirectFileRead } from "./task-intent.ts";
 
@@ -63,6 +63,14 @@ describe("native tool assembly", () => {
       permissions: { readRoots: ["/tmp/ws"], writeRoots: ["/tmp/out"], networkHosts: ["example.com"], networkMode: "open", tools: [] }
     }, prepared);
     expect(open.networkMode).toBe("open");
+  });
+
+  it("exposes only read-only and submit_plan tools in native planning mode", () => {
+    expect(NATIVE_PLAN_TOOL_NAMES).toContain("read_file");
+    expect(NATIVE_PLAN_TOOL_NAMES).toContain("submit_plan");
+    for (const tool of ["write_file", "edit_file", "apply_patch", "finish_task", "run_tests"]) {
+      expect(NATIVE_PLAN_TOOL_NAMES).not.toContain(tool);
+    }
   });
 
   it("dedupes tool definitions so upstream providers never receive duplicate finish_task entries", () => {

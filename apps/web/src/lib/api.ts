@@ -71,6 +71,8 @@ import type {
 import type {
   GoalAction,
   GoalContract,
+  GoalContractPatch,
+  GoalExecutionProfile,
   GoalView,
   LibraryNode,
   LibraryRoot,
@@ -180,7 +182,13 @@ export const api = {
     method: "POST",
     body: JSON.stringify(body)
   }),
-  goalAction: (id: string, action: GoalAction, options: { expectedRevision?: number; note?: string; maxRounds?: number } = {}) =>
+  goalAction: (id: string, action: GoalAction, options: {
+    expectedRevision?: number;
+    note?: string;
+    maxRounds?: number;
+    execution?: GoalExecutionProfile;
+    contract?: GoalContractPatch;
+  } = {}) =>
     request<GoalView>(`/api/goals/${encodeURIComponent(id)}/actions`, {
       method: "POST",
       body: JSON.stringify({ action, ...options })
@@ -542,7 +550,7 @@ export function subscribeToEvents(onEvent: (event: string, envelope?: EventEnvel
     "tool.job.updated"
   ];
   for (const name of eventNames) source.addEventListener(name, (event) => dispatch(name, (event as MessageEvent).data));
-  for (const name of ["goal.created", "goal.updated", "goal.round.started", "goal.round.settled", "goal.completion.recorded"]) {
+  for (const name of ["goal.created", "goal.updated", "goal.round.started", "goal.round.settled", "goal.completion.recorded", "goal.result.rejected"]) {
     source.addEventListener(name, (event) => dispatch(name, (event as MessageEvent).data));
   }
   for (const name of ["plan.created", "plan.updated", "plan.stage.changed", "plan.completed"]) {

@@ -287,6 +287,49 @@
   color: var(--ink-tertiary);
 }
 
+.goal-dialog-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 12px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg-elevated, var(--bg));
+  font-size: 11.5px;
+  color: var(--ink-secondary);
+}
+
+.goal-dialog-meta span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+}
+
+.goal-dialog-meta b {
+  color: var(--ink-tertiary);
+  font-weight: 600;
+}
+
+.goal-dialog-meta code {
+  overflow-wrap: anywhere;
+  font-size: 10.5px;
+}
+
+.goal-dialog-meta-wide {
+  flex-basis: 100%;
+}
+
+.goal-manage-dialog {
+  width: min(620px, 94vw);
+}
+
+.goal-dialog-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .goal-dialog-warning {
   margin: 0;
   padding: 9px 10px;
@@ -485,5 +528,9 @@
     width: 100%;
     padding-left: 38px;
     flex-wrap: wrap;
+  }
+
+  .goal-dialog-grid {
+    grid-template-columns: 1fr;
   }
 }

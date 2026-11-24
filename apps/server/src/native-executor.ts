@@ -67,6 +67,26 @@ import type { PreparedWorkspace } from "./workspace.ts";
 
 export const DEFAULT_RUN_BUDGET: RunBudget = { ...GENERAL_RUN_BUDGET };
 
+export const NATIVE_PLAN_TOOL_NAMES = [
+  "read_file",
+  "read_desktop_file",
+  "read_document",
+  "read_tool_output",
+  "list_files",
+  "search_text",
+  "glob",
+  "grep",
+  "shell",
+  "shell_output",
+  "fetch_url",
+  "todo_read",
+  "todo_write",
+  "memory_read",
+  "memory_search",
+  "ask_user",
+  "submit_plan"
+] as const;
+
 export interface NativeRunOptions {
   task: TaskRecord;
   prepared: PreparedWorkspace;
@@ -204,25 +224,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     permissions.tools = [...new Set(allTools)];
   }
   if (options.mode === "plan") {
-    permissions.tools = [...new Set([
-      "read_file",
-      "read_desktop_file",
-      "read_document",
-      "read_tool_output",
-      "list_files",
-      "search_text",
-      "glob",
-      "grep",
-      "shell",
-      "shell_output",
-      "fetch_url",
-      "todo_read",
-      "todo_write",
-      "memory_read",
-      "memory_search",
-      "ask_user",
-      "submit_plan"
-    ])];
+    permissions.tools = [...NATIVE_PLAN_TOOL_NAMES];
   }
   const sandbox = fullPermission ? undefined : await prepareNativeSandbox(options, permissions);
 
