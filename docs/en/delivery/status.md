@@ -1,16 +1,16 @@
 ---
 title: "Current Delivery Status"
-description: "Code, automated tests, builds, and deliberately unfinished work as of 2026-11-23."
+description: "Code, automated tests, builds, and deliberately unfinished work as of 2026-11-24."
 outline: [2, 3]
 ---
 
 # Current Delivery Status
 
-Checked on 2026-11-23 against `main`, target version `0.3.4`. This page records only what current code and local runs can prove; a page existing is not a closed loop, and an old plan is not current status.
+Checked on 2026-11-24 against `main`, target version `0.5.0`. This page records only what current code and local runs can prove; a page existing is not a closed loop, and an old plan is not current status.
 
 > Phase 2–6 pages are historical plans; parts of them are superseded by the current scope. Use this page for current facts. The Chinese page is canonical and includes the full 2026-11 acceptance report.
 >
-> 0.4.0 reintroduces goal mode on `main`: one goal binds one anchor task, advances across rounds and restarts, and is closed by an independent verifier. See [Goal Mode](/en/design/goals); the remaining numbers here are the 0.3.4 acceptance snapshot.
+> 0.4.0 reintroduces goal mode on `main`: one goal binds one anchor task, advances across rounds and restarts, and is closed by an independent verifier. 0.5.0 adds plan mode (read-only planning, explicit approval before execution) and removes this instance's budget, round, time, tool-call, artifact, and permission ceilings. See [Plan Mode](/en/design/plans) and [Goal Mode](/en/design/goals); the remaining numbers here are the 0.3.4 acceptance snapshot.
 
 ## What changed in this version
 

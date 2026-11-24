@@ -27,6 +27,7 @@ const zhDesignSidebar = [
       { text: '总体设计', link: '/design/' },
       { text: '入口与交互', link: '/design/experience' },
       { text: '任务与持久执行', link: '/design/tasks' },
+      { text: '计划模式', link: '/design/plans' },
       { text: '目标模式', link: '/design/goals' }
     ]
   },
@@ -67,6 +68,7 @@ const enDesignSidebar = [
       { text: 'Overall Design', link: '/en/design/' },
       { text: 'Entrances and Experience', link: '/en/design/experience' },
       { text: 'Tasks and Durable Execution', link: '/en/design/tasks' },
+      { text: 'Plan Mode', link: '/en/design/plans' },
       { text: 'Goal Mode', link: '/en/design/goals' }
     ]
   },

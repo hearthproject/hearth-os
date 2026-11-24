@@ -69,6 +69,8 @@ The translated module map below is a subset of the 21 design notes. The [Chinese
 |---|---|
 | [Entrances and Experience](/en/design/experience) | Let the user know what the system is doing, when attention is needed, and where results live |
 | [Tasks and Durable Execution](/en/design/tasks) | Keep work alive across restarts, sleep, and failure, with recovery |
+| [Plan Mode](/en/design/plans) | Investigate read-only, produce an approvable plan, then execute with full access only after approval |
+| [Goal Mode](/en/design/goals) | Keep one durable goal alive across rounds and restarts with independent verification |
 | [Control and Authority](/en/design/control) | Decide when to observe, suggest, execute, or stop, within explicit authority |
 | [Executors and Routing](/en/design/executors) | Use specialized capabilities instead of one universal model |
 | [Native Agent Runtime](/en/design/native-agent-runtime) | A self-built general execution kernel that unifies model protocols, tools, compaction, delegation, worktrees, MCP, budgets, and checkpoints |
@@ -82,4 +84,4 @@ The translated module map below is a subset of the 21 design notes. The [Chinese
 | [Data, Backup, and Operations](/en/design/operations) | Keep backup, restore, maintenance, diagnostics, and the kill switch inside the local control plane |
 | [Agent Reference Patterns](/en/design/agent-reference-patterns) | Record borrowed patterns and trade-offs instead of treating an external framework as the product architecture |
 
-The non-negotiable boundaries are: every interface is rebuilt from a record; each state has one write authority; external actions have approval or an explicit exemption plus a reconcilable receipt; executors never see long-lived raw credentials; handoffs can narrow authority but never expand it; every task has a budget, deadline, and cancellation path; memory has provenance, sensitivity, and forgetting rules.
+The non-negotiable boundaries are: every interface is rebuilt from a record; each state has one write authority; external actions have approval or an explicit exemption plus a reconcilable receipt; executors never see long-lived raw credentials; handoffs can narrow authority but never expand it; every task has verifiable completion evidence and a cancellation path, while this instance sets no budget ceiling; memory has provenance, sensitivity, and forgetting rules.
