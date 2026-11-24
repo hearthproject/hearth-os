@@ -18,6 +18,10 @@ const buildMs = Math.round(performance.now() - bootStartedAt);
 
 try {
   const address = await app.listen({ host: HOST, port: PORT });
+  app.im.setRuntimeBaseUrl(address);
+  void app.im.connectAll().catch((error: unknown) => {
+    console.error("IM 连接启动失败：", error instanceof Error ? error.message : String(error));
+  });
   void app.feishu.start(address).catch((error: unknown) => {
     console.error("飞书长连接启动失败：", error instanceof Error ? error.message : String(error));
   });

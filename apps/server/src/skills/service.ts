@@ -1,6 +1,5 @@
 import { execFile } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
-import {
+import { createHash, randomUUID } from "node:crypto";import {
   copyFileSync,
   existsSync,
   lstatSync,
@@ -178,6 +177,8 @@ export class SkillService {
   private readonly library: LibraryService | null;
   private readonly commandRunner: SkillCommandRunner;
   private readonly fetchText: (url: string) => Promise<string>;
+  private describeZh: ((description: string) => Promise<string | null>) | null = null;
+  private descriptionBackfillStarted = false;
 
   constructor(options: SkillServiceOptions) {
     this.store = options.store;
@@ -190,6 +191,28 @@ export class SkillService {
       return response.text();
     });
     mkdirSync(this.root, { recursive: true });
+  }
+
+  setDescriptionTranslator(translator: (description: string) => Promise<string | null>): void {
+    this.describeZh = translator;
+  }
+
+  /** 启动后为历史技能补齐中文描述；失败时保留原文，不阻塞启动。 */
+  async backfillChineseDescriptions(limit = 60): Promise<void> {
+    if (this.descriptionBackfillStarted || !this.describeZh) return;
+    this.descriptionBackfillStarted = true;
+    for (const skill of this.store.listSkills()) {
+      if (skill.status === "archived") continue;
+      if (chineseDescription(skill) || limit <= 0) continue;
+      try {
+        const manifest = await this.localizeManifest(skill.manifest);
+        if (!manifest.metadata.hearth.descriptionZh) continue;
+        this.persist(this.edit(skill, { manifest }), "description-localized");
+        limit -= 1;
+      } catch {
+        // 翻译失败不影响技能本身。
+      }
+    }
   }
 
   list(): SkillView[] {
@@ -218,7 +241,7 @@ export class SkillService {
       const destination = join(this.root, id);
       const copy = this.copySkillTree(skillRoot, destination);
       const now = new Date().toISOString();
-      const manifest = manifestFor(document, "imported", now, false);
+      const manifest = await this.localizeManifest(manifestFor(document, "imported", now, false));
       const record = this.record({
         id,
         document,
@@ -265,7 +288,7 @@ export class SkillService {
       }
       const now = new Date().toISOString();
       this.recordVersion(current, "手动更新前保存");
-      const manifest = manifestFor(document, current.origin, now, current.pinned);
+      const manifest = await this.localizeManifest(manifestFor(document, current.origin, now, current.pinned));
       const record = this.edit(current, {
         name: document.name,
         version: document.version === current.version ? bumpVersion(current.version, now) : document.version,
@@ -519,8 +542,38 @@ export class SkillService {
     this.library?.markDirty();
   }
 
+  private async localizeManifest(manifest: SkillManifest): Promise<SkillManifest> {
+    const description = manifest.description.trim();
+    const hash = createHash("sha256").update(description).digest("hex");
+    const existing = manifest.metadata.hearth;
+    if (existing.descriptionHash === hash && existing.descriptionZh) return manifest;
+    if (containsCjk(description)) {
+      return {
+        ...manifest,
+        metadata: { hearth: { ...existing, descriptionZh: description, descriptionHash: hash } }
+      };
+    }
+    if (!this.describeZh || !description) return manifest;
+    try {
+      const translated = (await this.describeZh(description))?.trim();
+      if (!translated) return manifest;
+      return {
+        ...manifest,
+        metadata: {
+          hearth: {
+            ...existing,
+            descriptionZh: translated.slice(0, 600),
+            descriptionHash: hash
+          }
+        }
+      };
+    } catch {
+      return manifest;
+    }
+  }
+
   private view(record: SkillRecord): SkillView {
-    return { ...record };
+    return { ...record, descriptionZh: chineseDescription(record) };
   }
 
   private uniqueId(base: string): string {
@@ -634,6 +687,20 @@ function manifestFor(document: SkillDocument, origin: SkillRecord["origin"], now
       }
     }
   };
+}
+
+function containsCjk(text: string): boolean {
+  return /[\u3400-\u9fff]/.test(text);
+}
+
+function chineseDescription(skill: SkillRecord): string | null {
+  const description = skill.manifest.description.trim();
+  const hearth = skill.manifest.metadata?.hearth;
+  const cached = hearth?.descriptionZh?.trim();
+  if (!cached) return null;
+  const hash = createHash("sha256").update(description).digest("hex");
+  if (hearth?.descriptionHash && hearth.descriptionHash !== hash) return null;
+  return cached;
 }
 
 function renderSkillPrompt(skill: SkillRecord, raw: string): string {

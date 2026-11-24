@@ -157,30 +157,27 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
   let legacyTitleBackfillStarted = false;
   const backfillLegacyTitles = (): void => {
     if (legacyTitleBackfillStarted) return;
-    let settings: ModelSettings;
     try {
-      if (store.getAppSetting("conversation.title.summary.v3") === "done") return;
-      settings = chatSettings();
-      if (!chatModelConfigured(settings)) return;
+      if (store.getAppSetting("conversation.title.summary.v4") === "done") return;
       legacyTitleBackfillStarted = true;
     } catch {
       return;
     }
+    // 标题兜底不依赖模型：只要首条用户消息可读，就先给出本地摘要，
+    // 避免会话有内容但侧栏一直显示“新对话”。
     void (async () => {
-      const conversations = store.listConversations().slice(0, 30);
-      for (const conversation of conversations) {
-        try {
+      try {
+        for (const conversation of store.listConversations().slice(0, 200)) {
+          if (conversation.title !== "新对话" || !conversation.title.trim()) continue;
           const firstUser = store.listChatMessages(conversation.id).find((item) => item.role === "user");
           if (!firstUser) continue;
-          const legacyTitle = conversationTitle(firstUser.content);
-          if (conversation.title !== "新对话" && conversation.title !== legacyTitle) continue;
-          const summary = await summarizeConversationTitle(settings, firstUser.content);
-          if (summary && summary !== conversation.title) store.renameConversation(conversation.id, summary);
-        } catch {
-          // A failed summary must never block the list or the app.
+          const localTitle = conversationTitle(firstUser.content);
+          if (localTitle) store.renameConversation(conversation.id, localTitle);
         }
+        store.setAppSetting("conversation.title.summary.v4", "done");
+      } catch {
+        // 标题兜底失败不能阻塞会话列表。
       }
-      store.setAppSetting("conversation.title.summary.v3", "done");
     })();
   };
   const chatConfigured = (): boolean => chatModelConfigured(chatSettings());
@@ -509,6 +506,14 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       attachments: storedFiles.map(({ id, name, mimeType, bytes }) => ({ id, name, mimeType, bytes })),
       createdAt: new Date().toISOString()
     });
+    // 首轮先落一个本地标题，模型摘要稍后如果更好再替换；
+    // 这样侧栏不会在摘要失败时一直停在“新对话”。
+    if (firstTurn && titleWasPlaceholder) {
+      const localTitle = conversationTitle(userContent);
+      if (localTitle && localTitle !== conversation.title) {
+        conversation = store.renameConversation(conversation.id, localTitle) ?? conversation;
+      }
+    }
 
     reply.hijack();
     reply.raw.writeHead(200, {

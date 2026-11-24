@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { ModelProtocol, ModelProviderPreset, ModelSettingsView, ReasoningEffort } from "@hearth/core";
+import { DEFAULT_CONTEXT_WINDOW_TOKENS, DEFAULT_MAX_OUTPUT_TOKENS } from "@hearth/core";
 import type { RetryPolicy } from "@hearth/agent-runtime";
 
 export interface ModelSettings {
@@ -21,8 +22,7 @@ const PROTOCOLS: ModelProtocol[] = ["openai-chat", "openai-responses", "anthropi
 
 // Default to the largest context window Hearth ships with so new conversations
 // never start artificially small; profiles can still lower it explicitly.
-export const DEFAULT_CONTEXT_WINDOW_TOKENS = 328_000;
-export const DEFAULT_MAX_OUTPUT_TOKENS = 8_000;
+export { DEFAULT_CONTEXT_WINDOW_TOKENS, DEFAULT_MAX_OUTPUT_TOKENS };
 
 export const MODEL_PRESETS: ModelProviderPreset[] = [
   {

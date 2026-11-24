@@ -1750,6 +1750,10 @@ export interface SkillHearthMetadata {
   adoptedAt: string | null;
   origin: SkillOrigin;
   pinned: boolean;
+  /** 技能描述的中文展示版本；由 Hearth 在安装/启动时翻译并缓存。 */
+  descriptionZh?: string | null;
+  /** 生成 descriptionZh 时对应的原始描述哈希，原文变化后自动失效。 */
+  descriptionHash?: string | null;
 }
 
 export interface SkillManifest {
@@ -2866,6 +2870,8 @@ export interface SkillView extends SkillRecord {
   sourceUrl: string | null;
   sourceRef: string | null;
   actions: SkillActionDefinition[];
+  /** 中文描述；旧数据或翻译失败时为 null，前端回退到 manifest.description。 */
+  descriptionZh: string | null;
 }
 
 export interface SkillRunInput {

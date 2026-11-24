@@ -855,7 +855,7 @@ describe("chat-first API", () => {
       expect(events.find((event) => event.event === "task")).toBeUndefined();
       const done = events.find((event) => event.event === "done")?.data as { content?: string } | undefined;
       expect(done?.content).toContain("任务没有派出");
-      expect(done?.content).toMatch(/尚未验证|未安装/);
+      expect(done?.content).toMatch(/尚未验证|未安装|执行失败/);
       await app.close();
     } finally {
       vi.unstubAllGlobals();

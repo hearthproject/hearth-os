@@ -211,7 +211,7 @@ function ConversationItem({
   return (
     <div className={`conversation-item ${active ? "active" : ""}`}>
       <div className="conversation-row">
-        <button className="conversation-select" onClick={onSelect} disabled={disabled} title={conversation.preview || conversation.title}>
+        <button className="conversation-select" onClick={onSelect} disabled={disabled} title={conversation.title}>
           <span className="rail-item-icon" aria-hidden="true"><MessageSquare size={15} /></span>
           <span className="conversation-title">{conversation.title}</span>
           {running > 0 && <span className="conv-inline running"><Loader2 size={10} className="spin" />运行中</span>}

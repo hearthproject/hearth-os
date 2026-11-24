@@ -561,6 +561,273 @@
   line-height: 1.6;
 }
 
+.im-bridge {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.im-bridge-intro {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 2px 2px 0;
+}
+
+.im-bridge-intro h3 {
+  margin: 0 0 4px;
+  color: var(--ink);
+  font-size: var(--fs-15);
+}
+
+.im-bridge-intro p {
+  margin: 0;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-12);
+  line-height: 1.6;
+}
+
+.im-channel-card .settings-body {
+  gap: 12px;
+}
+
+.im-channel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.im-channel-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.im-channel-title h3 {
+  margin: 0 0 3px;
+  color: var(--ink);
+  font-size: var(--fs-14);
+}
+
+.im-channel-title p {
+  margin: 0;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-12);
+  line-height: 1.55;
+}
+
+.im-channel-icon {
+  display: grid;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-sunk);
+  color: var(--ink-secondary);
+}
+
+.im-channel-icon.wechat {
+  color: #22a35b;
+}
+
+.im-channel-icon.qq {
+  color: #2f7cf6;
+}
+
+.im-channel-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.im-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+  white-space: nowrap;
+}
+
+.im-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink-tertiary);
+}
+
+.im-status.connected {
+  border-color: color-mix(in srgb, #22a35b 45%, var(--line));
+  color: #1d8c4e;
+}
+
+.im-status.connected .im-status-dot {
+  background: #22a35b;
+}
+
+.im-status.starting,
+.im-status.reconnecting {
+  border-color: color-mix(in srgb, var(--ember) 45%, var(--line));
+  color: var(--ember);
+}
+
+.im-status.starting .im-status-dot,
+.im-status.reconnecting .im-status-dot {
+  background: var(--ember);
+}
+
+.im-status.error {
+  border-color: color-mix(in srgb, var(--danger, #d14343) 45%, var(--line));
+  color: var(--danger, #d14343);
+}
+
+.im-status.error .im-status-dot {
+  background: var(--danger, #d14343);
+}
+
+.im-config-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.im-config-row label {
+  display: grid;
+  gap: 5px;
+  min-width: 220px;
+}
+
+.im-config-row label > span {
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+}
+
+.im-connect-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.im-qr-panel {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-sunk);
+}
+
+.im-qr-code {
+  display: grid;
+  flex: 0 0 auto;
+  width: 168px;
+  height: 168px;
+  place-items: center;
+  border-radius: 10px;
+  background: #fff;
+  color: #111;
+}
+
+.im-qr-code img,
+.im-qr-code svg {
+  width: 156px;
+  height: 156px;
+}
+
+.im-qr-panel > div:last-child {
+  display: grid;
+  gap: 6px;
+}
+
+.im-qr-panel strong {
+  color: var(--ink);
+  font-size: var(--fs-13);
+}
+
+.im-qr-panel p {
+  margin: 0;
+  color: var(--ink-secondary);
+  font-size: var(--fs-12);
+}
+
+.im-qr-panel small {
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+}
+
+.im-qr-panel button {
+  justify-self: start;
+}
+
+.im-advanced {
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.im-advanced summary {
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+  cursor: pointer;
+}
+
+.im-advanced .form-grid,
+.im-advanced ol {
+  margin-top: 10px;
+}
+
+.im-advanced ol {
+  padding-left: 18px;
+  color: var(--ink-secondary);
+  font-size: var(--fs-12);
+  line-height: 1.7;
+}
+
+.im-checkbox {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  align-self: end;
+  height: 32px;
+}
+
+.im-checkbox input {
+  width: 15px;
+  height: 15px;
+}
+
+.im-metrics {
+  margin-top: 8px !important;
+}
+
+@media (max-width: 720px) {
+  .im-channel-head,
+  .im-config-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .im-channel-actions {
+    justify-content: flex-start;
+  }
+
+  .im-qr-panel {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
 @media (max-width: 720px) {
   .settings-content .feishu-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));

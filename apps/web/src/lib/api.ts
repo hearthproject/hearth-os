@@ -27,6 +27,9 @@ import type {
   FeishuTestResponse,
   HealthResponse,
   FolderBrowseResult,
+  ImBridgeView,
+  WechatQrStatusView,
+  WechatQrView,
   LocalProjectView,
   ProjectDossierView,
   WorkstyleView,
@@ -280,11 +283,11 @@ export const api = {
     method: "PUT",
     body: JSON.stringify({ profileId })
   }),
-  saveExecutorModelBinding: (id: ExecutorId, input: ExecutorModelBindingPatch) => request<{ binding: ExecutorModelBindingView }>(`/api/executors/${encodeURIComponent(id)}/model-binding`, {
+  saveExecutorModelBinding: (id: ExecutorId, input: ExecutorModelBindingPatch) => request<{ binding: ExecutorModelBindingView; probe: ExecutorProbeResult | null; health: ExecutorProbeResult["health"] }>(`/api/executors/${encodeURIComponent(id)}/model-binding`, {
     method: "PUT",
     body: JSON.stringify(input)
   }),
-  autoBindExecutor: (id: ExecutorId) => request<{ binding: ExecutorModelBindingView }>(`/api/executors/${encodeURIComponent(id)}/model-binding/auto`, {
+  autoBindExecutor: (id: ExecutorId) => request<{ binding: ExecutorModelBindingView; probe: ExecutorProbeResult | null; health: ExecutorProbeResult["health"] }>(`/api/executors/${encodeURIComponent(id)}/model-binding/auto`, {
     method: "POST"
   }),
   bootstrapExecutor: (id: ExecutorId) => request<ExecutorBootstrapResult>(`/api/executors/${encodeURIComponent(id)}/bootstrap`, {
@@ -359,6 +362,31 @@ export const api = {
   testFeishu: (input: { appId?: string; appSecret?: string; domain?: FeishuDomain } = {}) =>
     request<FeishuTestResponse>("/api/integrations/feishu/test", { method: "POST", body: JSON.stringify(input) }),
   reconnectFeishu: () => request<FeishuIntegrationResponse>("/api/integrations/feishu/reconnect", { method: "POST" }),
+  im: () => request<ImBridgeView>("/api/integrations/im"),
+  saveImWechat: (input: {
+    enabled?: boolean;
+    token?: string;
+    baseUrl?: string;
+    conversationId?: string | null;
+  }) => request<ImBridgeView>("/api/integrations/im/wechat", {
+    method: "PUT",
+    body: JSON.stringify(input)
+  }),
+  startWechatQr: () => request<WechatQrView>("/api/integrations/im/wechat/qrcode", { method: "POST" }),
+  pollWechatQr: (qrcode: string) =>
+    request<WechatQrStatusView>(`/api/integrations/im/wechat/qrcode/status?qrcode=${encodeURIComponent(qrcode)}`),
+  reconnectWechat: () => request<ImBridgeView>("/api/integrations/im/wechat/reconnect", { method: "POST" }),
+  saveImQq: (input: {
+    enabled?: boolean;
+    appId?: string;
+    clientSecret?: string;
+    sandbox?: boolean;
+    conversationId?: string | null;
+  }) => request<ImBridgeView>("/api/integrations/im/qq", {
+    method: "PUT",
+    body: JSON.stringify(input)
+  }),
+  reconnectQq: () => request<ImBridgeView>("/api/integrations/im/qq/reconnect", { method: "POST" }),
   createFeishuPairingCode: (conversationId?: string) =>
     request<FeishuPairingCodeResponse>("/api/integrations/feishu/pairing-code", {
       method: "POST",

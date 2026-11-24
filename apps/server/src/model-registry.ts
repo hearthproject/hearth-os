@@ -22,6 +22,7 @@ import type { SecretBox } from "./secrets.ts";
 
 const CHAT_PROFILE_KEY = "model.chatProfileId";
 const REGISTRY_UPDATED_KEY = "model.updatedAt";
+const CONTEXT_DEFAULTS_MIGRATION_KEY = "model.contextDefaults.v1";
 const ALL_PROTOCOLS: ModelProtocol[] = ["openai-chat", "openai-responses", "anthropic-messages", "gemini"];
 
 export const EXECUTOR_MODEL_PROTOCOLS: Record<ExecutorId, ModelProtocol[]> = {
@@ -55,6 +56,41 @@ export class ModelRegistry {
     this.store = options.store;
     this.secretBox = options.secretBox;
     this.codexHome = options.codexHome;
+    this.normalizeLegacyContextDefaults();
+  }
+
+  /**
+   * 修复历史默认值漂移：同一模型曾因创建入口不同被写成 128k / 328k 两套上下文。
+   * 只在同模型同时存在 328k 和旧的 128k 默认值时统一为 328k，避免协议看起来“改变”了上下文。
+   */
+  private normalizeLegacyContextDefaults(): void {
+    // 一次性迁移：只在历史数据里修掉默认值漂移，之后用户手动改小上下文不会再被启动时覆盖。
+    if (this.store.getAppSetting(CONTEXT_DEFAULTS_MIGRATION_KEY) === "done") return;
+    const all = this.store.listModelProfiles();
+    if (all.length === 0) return;
+    const groups = new Map<string, ModelProfileRecord[]>();
+    for (const profile of all) {
+      const key = `${normalizeBaseUrl(profile.baseUrl).toLowerCase()}|${profile.model.trim().toLowerCase()}`;
+      const bucket = groups.get(key) ?? [];
+      bucket.push(profile);
+      groups.set(key, bucket);
+    }
+    let changed = false;
+    for (const profiles of groups.values()) {
+      if (profiles.length < 2) continue;
+      const hasFullDefault = profiles.some((profile) => profile.contextWindowTokens === DEFAULT_CONTEXT_WINDOW_TOKENS);
+      if (!hasFullDefault) continue;
+      for (const profile of profiles) {
+        if (profile.contextWindowTokens !== 128_000) continue;
+        this.store.upsertModelProfile({
+          ...profile,
+          contextWindowTokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
+          updatedAt: new Date().toISOString()
+        });
+        changed = true;
+      }
+    }
+    if (changed) this.store.setAppSetting(CONTEXT_DEFAULTS_MIGRATION_KEY, "done");
   }
 
   presets() {

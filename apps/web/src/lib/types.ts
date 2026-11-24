@@ -866,3 +866,57 @@ export interface ExecutorBootstrapResult {
   health: ExecutorProbeResult["health"];
 }
 
+export type ImChannelId = "wechat" | "qq";
+export type ImConnectionState = "disabled" | "starting" | "connected" | "reconnecting" | "error";
+
+export interface ImChannelStatus {
+  state: ImConnectionState;
+  lastEventAt: string | null;
+  lastError: string | null;
+  connectedAt: string | null;
+  reconnectAttempts: number;
+  inboundCount: number;
+  outboundSent: number;
+  outboundFailed: number;
+  accountLabel: string | null;
+}
+
+export interface WechatSettingsView {
+  enabled: boolean;
+  hasToken: boolean;
+  baseUrl: string;
+  accountId: string | null;
+  userId: string | null;
+  conversationId: string | null;
+  conversationTitle: string | null;
+  updatedAt: string | null;
+}
+
+export interface QqSettingsView {
+  enabled: boolean;
+  appId: string;
+  hasClientSecret: boolean;
+  sandbox: boolean;
+  conversationId: string | null;
+  conversationTitle: string | null;
+  updatedAt: string | null;
+}
+
+export interface ImBridgeView {
+  settings: { wechat: WechatSettingsView; qq: QqSettingsView };
+  status: Record<ImChannelId, ImChannelStatus>;
+  qrcode: { active: boolean; expiresAt: string | null } | null;
+}
+
+export interface WechatQrView {
+  qrcode: string;
+  image: string;
+  expiresAt: string;
+}
+
+export interface WechatQrStatusView {
+  status: "wait" | "scaned" | "confirmed" | "expired" | "error";
+  accountId: string | null;
+  message: string | null;
+}
+

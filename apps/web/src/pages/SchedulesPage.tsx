@@ -62,15 +62,18 @@ const EMPTY_DRAFT: ScheduleDraft = {
 export function SchedulesPage() {
   const queryClient = useQueryClient();
   const schedulesQuery = useQuery({ queryKey: ["schedules"], queryFn: api.schedules, refetchInterval: 15_000 });
+  const executorsQuery = useQuery({ queryKey: ["executors"], queryFn: api.executors, refetchInterval: 30_000 });
   const [draft, setDraft] = useState<ScheduleDraft | null>(null);
   const [historyId, setHistoryId] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const schedules = schedulesQuery.data?.schedules ?? [];
+  // 只让用户选择真实可运行的执行器，未验证 / 未安装的不出现在创建入口。
+  const readyExecutors = (executorsQuery.data?.executors ?? []).filter((executor) => executor.health.canRun);
 
   function startCreate() {
-    setDraft({ ...EMPTY_DRAFT });
-    setNotice(null);
+    setDraft({ ...EMPTY_DRAFT, executorId: readyExecutors[0]?.id ?? "native" });
+    setNotice(readyExecutors.length === 0 ? { tone: "error", text: "当前没有可用执行器，请先到设置 → 执行器完成安装和测试。" } : null);
   }
 
   function startEdit(schedule: ScheduleRecord) {
@@ -208,10 +211,16 @@ export function SchedulesPage() {
             <label>
               <span>执行器</span>
               <select value={draft.executorId} onChange={(event) => updateDraft("executorId", event.target.value as ExecutorId)}>
-                <option value="native">Hearth 原生</option>
-                <option value="codex">Codex</option>
-                <option value="deepseek-harness">DeepSeek Harness</option>
+                {readyExecutors.map((executor) => (
+                  <option key={executor.id} value={executor.id}>{executorLabel(executor.id)}</option>
+                ))}
+                {!readyExecutors.some((executor) => executor.id === draft.executorId) && (
+                  <option value={draft.executorId} disabled>{executorLabel(draft.executorId)}（当前不可用）</option>
+                )}
               </select>
+              {readyExecutors.length === 0 && (
+                <small className="field-hint">没有可用执行器，请先到设置 → 执行器完成安装和测试。</small>
+              )}
             </label>
             <label className="span-2">
               <span>固定提示词</span>

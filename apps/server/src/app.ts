@@ -56,6 +56,7 @@ import { DiagnosticsService } from "./diagnostics.ts";
 import { SourceRegistry, SourceRegistryError } from "./sources.ts";
 import { OnboardingService } from "./onboarding.ts";
 import { FeishuError, FeishuService, type FeishuChatClient, type FeishuTransportFactory } from "./feishu.ts";
+import { ImBridgeError, ImBridgeService } from "./im-bridge.ts";
 import { DesktopError, DesktopService } from "./desktop.ts";
 import { MemoryError, MemoryService } from "./memory.ts";
 import { ProjectError, ProjectService } from "./projects.ts";
@@ -483,6 +484,21 @@ const feishuPairingCodeSchema = z.object({
   conversationId: z.string().trim().min(1).max(80).optional()
 }).strict();
 
+const imWechatSettingsSchema = z.object({
+  enabled: z.boolean().optional(),
+  token: z.string().max(500).optional(),
+  baseUrl: z.string().trim().max(200).optional(),
+  conversationId: z.string().trim().min(1).max(80).nullable().optional()
+}).strict().refine((value) => Object.keys(value).length > 0, { message: "至少需要修改一个设置" });
+
+const imQqSettingsSchema = z.object({
+  enabled: z.boolean().optional(),
+  appId: z.string().trim().max(100).optional(),
+  clientSecret: z.string().max(500).optional(),
+  sandbox: z.boolean().optional(),
+  conversationId: z.string().trim().min(1).max(80).nullable().optional()
+}).strict().refine((value) => Object.keys(value).length > 0, { message: "至少需要修改一个设置" });
+
 const suggestionActionSchema = z.object({
   title: z.string().trim().min(1).max(120).optional(),
   goal: z.string().trim().min(1).max(4000).optional(),
@@ -796,6 +812,20 @@ export async function buildServer(options: BuildServerOptions = {}) {
     if (!settings) return null;
     return { ...settings, reasoningEffort: executorSettingsStore.load().reasoningEffort ?? "max" as const };
   };
+  skills.setDescriptionTranslator(async (description) => {
+    const settings = modelSettingsForExecutor("native");
+    if (!settings || !chatModelConfigured(settings)) return null;
+    const response = await completeChat(settings, [
+      {
+        role: "system",
+        content: "你是技术文档译者。把技能描述翻译成简体中文，只输出译文，不要解释、不要加引号。保留产品名、库名、命令和英文缩写。不要进行额外推理。"
+      },
+      { role: "user", content: description }
+    ], { temperature: 0, maxTokens: 600, reasoningEffort: "minimal", timeoutMs: 30_000 });
+    const text = response.content.trim().replace(/^["“]|["”]$/g, "").trim();
+    return /[\u3400-\u9fff]/.test(text) ? text : null;
+  });
+  void skills.backfillChineseDescriptions();
   const conversationContext = new ConversationContextService({
     service,
     context,
@@ -828,6 +858,12 @@ export async function buildServer(options: BuildServerOptions = {}) {
     ...(options.feishuTransportFactory ? { transportFactory: options.feishuTransportFactory } : {}),
     ...(options.feishuChatClient ? { chatClient: options.feishuChatClient } : {})
   });
+  const im = new ImBridgeService({
+    store,
+    secretBox,
+    baseUrl: () => "",
+    ...(options.feishuChatClient ? { chatClient: options.feishuChatClient } : {})
+  });
   const executorHealth = (executorId: ExecutorId): ExecutorHealth => {
     const health = readExecutorHealth(executorId, executorSettingsStore.load(), executorSettingsPath);
     const binding = modelRegistry.bindingViews().find((item) => item.executorId === executorId);
@@ -841,6 +877,22 @@ export async function buildServer(options: BuildServerOptions = {}) {
       executorId === "codex" ? codexProfile() : null
     );
   };
+  // DeepSeek Harness 必须以一次真实请求通过才算可用；一键绑定后立即验证，
+  // 避免出现“已绑定但执行器不可用”的半成品状态。
+  const verifyModelBinding = async (executorId: ExecutorId) => {
+    if (executorId !== "deepseek-harness") return null;
+    const settings = executorSettingsStore.load();
+    const binding = modelRegistry.bindingViews().find((item) => item.executorId === executorId);
+    return await probeExecutor(executorId, settings, executorSettingsPath, 60_000, {
+      modelSettings: modelRegistry.settingsForExecutorOrChat(executorId),
+      binding: binding?.profileId ? { explicit: true, available: binding.available, issue: binding.issue } : null
+    });
+  };
+  // 已绑定但尚未验证的 DeepSeek Harness 在启动后自动跑一次真实测试，修复历史“绑定成功但仍不可用”的状态。
+  const harnessBinding = modelRegistry.bindingViews().find((item) => item.executorId === "deepseek-harness");
+  if (harnessBinding?.profileId && harnessBinding.available && executorHealth("deepseek-harness").state === "unverified") {
+    void verifyModelBinding("deepseek-harness").catch(() => undefined);
+  }
   const onboarding = new OnboardingService({
     store,
     isChatModelConfigured: () => {
@@ -997,6 +1049,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }, 150);
   });
   app.decorate("feishu", feishu);
+  app.decorate("im", im);
 
   schedules.start();
   await registerChatRoutes(app, {
@@ -1029,6 +1082,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   app.addHook("onClose", async () => {
     library.stop();
     await feishu.stop();
+    await im.stop();
     maintenance.stop();
     schedules.stop();
     options.hostKernel?.beginDrain();
@@ -1188,6 +1242,65 @@ export async function buildServer(options: BuildServerOptions = {}) {
       }
       throw error;
     }
+  });
+
+  app.get("/api/integrations/im", async () => im.view());
+
+  app.put("/api/integrations/im/wechat", async (request, reply) => {
+    const parsed = imWechatSettingsSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_IM_SETTINGS", message: "微信连接配置不正确" });
+    try {
+      im.saveWechat(parsed.data);
+      await im.restartWechat();
+      return im.view();
+    } catch (error) {
+      if (error instanceof ImBridgeError) {
+        return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+      }
+      return reply.code(500).send({ error: "IM_SETTINGS_FAILED", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/integrations/im/wechat/qrcode", async (_request, reply) => {
+    try {
+      return await im.startWechatQr();
+    } catch (error) {
+      if (error instanceof ImBridgeError) {
+        return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+      }
+      return reply.code(502).send({ error: "WECHAT_QR_FAILED", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.get<{ Querystring: { qrcode?: string } }>("/api/integrations/im/wechat/qrcode/status", async (request, reply) => {
+    const qrcode = request.query.qrcode?.trim();
+    if (!qrcode) return reply.code(400).send({ error: "QRCODE_REQUIRED", message: "缺少二维码参数" });
+    return await im.pollWechatQr(qrcode);
+  });
+
+  app.post("/api/integrations/im/wechat/reconnect", async () => {
+    await im.restartWechat();
+    return im.view();
+  });
+
+  app.put("/api/integrations/im/qq", async (request, reply) => {
+    const parsed = imQqSettingsSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_IM_SETTINGS", message: "QQ 连接配置不正确" });
+    try {
+      im.saveQq(parsed.data);
+      await im.restartQq();
+      return im.view();
+    } catch (error) {
+      if (error instanceof ImBridgeError) {
+        return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+      }
+      return reply.code(500).send({ error: "IM_SETTINGS_FAILED", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/integrations/im/qq/reconnect", async () => {
+    await im.restartQq();
+    return im.view();
   });
 
   app.get("/api/model-registry", async () => {
@@ -1428,7 +1541,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     try {
       const binding = modelRegistry.saveBinding(id as ExecutorId, parsed.data);
       clearExecutorHealthCache(id as ExecutorId);
-      return { binding };
+      return { binding, probe: null, health: executorHealth(id as ExecutorId) };
     } catch (error) {
       return sendModelRegistryError(reply, error);
     }
@@ -1442,7 +1555,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
     try {
       const binding = modelRegistry.autoBind(id as ExecutorId);
       clearExecutorHealthCache(id as ExecutorId);
-      return { binding };
+      const probe = await verifyModelBinding(id as ExecutorId);
+      return { binding, probe, health: executorHealth(id as ExecutorId) };
     } catch (error) {
       return sendModelRegistryError(reply, error);
     }

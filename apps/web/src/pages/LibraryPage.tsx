@@ -554,7 +554,7 @@ function SkillDetails({
     <section className="library-skill-card">
       <div>
         <strong>{skill.name}</strong>
-        <span>{skill.manifest.description}</span>
+        <span>{skill.descriptionZh ?? skill.manifest.description}</span>
       </div>
       <dl className="library-skill-meta">
         <div><dt>版本</dt><dd>{skill.version}</dd></div>

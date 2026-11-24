@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { api } from "../lib/api.ts";
 import { formatNumber, relativeTime } from "../lib/format.ts";
+import { DEFAULT_CONTEXT_WINDOW_TOKENS, DEFAULT_MAX_OUTPUT_TOKENS } from "@hearth/core/constants";
 import type {
   ExecutorId,
   ExecutorModelBindingView,
@@ -76,8 +77,8 @@ const EMPTY_DRAFT: ProfileDraft = {
   protocol: "openai-chat",
   baseUrl: "",
   model: "",
-  contextWindowTokens: 128000,
-  maxOutputTokens: 8000,
+  contextWindowTokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
+  maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
   apiKey: ""
 };
 
@@ -152,8 +153,12 @@ function ExecutorsTab() {
     setBusy(executorId);
     setNotice(null);
     try {
-      await api.saveExecutorModelBinding(executorId, { profileId: profileId || null, protocolOverride: null, modelOverride: null });
-      setNotice({ tone: "ok", text: `${EXECUTOR_LABELS[executorId]} 的模型绑定已更新。` });
+      const result = await api.saveExecutorModelBinding(executorId, { profileId: profileId || null, protocolOverride: null, modelOverride: null });
+      if (result.health && !result.health.canRun && result.health.state === "unverified") {
+        setNotice({ tone: "info", text: `${EXECUTOR_LABELS[executorId]} 的模型绑定已更新；DeepSeek Harness 需要点“一键绑定”或运行一次真实测试后才会启用。` });
+      } else {
+        setNotice({ tone: "ok", text: `${EXECUTOR_LABELS[executorId]} 的模型绑定已更新。` });
+      }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["modelRegistry"] }),
         queryClient.invalidateQueries({ queryKey: ["executors"] }),
@@ -166,12 +171,39 @@ function ExecutorsTab() {
     }
   }
 
+  async function probe(executorId: ExecutorId) {
+    setBusy(executorId);
+    setNotice(null);
+    try {
+      const result = await api.probeExecutor(executorId);
+      if (result.ok) {
+        setNotice({ tone: "ok", text: `${EXECUTOR_LABELS[executorId]} 真实测试通过，执行器已可用。` });
+      } else {
+        setNotice({ tone: "error", text: `${EXECUTOR_LABELS[executorId]} 真实测试未通过：${result.error ?? "未知原因"}` });
+      }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["modelRegistry"] }),
+        queryClient.invalidateQueries({ queryKey: ["executors"] }),
+        queryClient.invalidateQueries({ queryKey: ["health"] })
+      ]);
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "测试失败" });
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function autoBind(executorId: ExecutorId) {
     setBusy(executorId);
     setNotice(null);
     try {
       const result = await api.autoBindExecutor(executorId);
-      setNotice({ tone: "ok", text: `${EXECUTOR_LABELS[executorId]} 已自动绑定 ${result.binding.effectiveModel ?? result.binding.profile?.name ?? "可用模型"}。` });
+      const bound = result.binding.effectiveModel ?? result.binding.profile?.name ?? "可用模型";
+      if (result.probe && !result.probe.ok) {
+        setNotice({ tone: "error", text: `${EXECUTOR_LABELS[executorId]} 已自动绑定 ${bound}，但真实测试未通过：${result.probe.error ?? "未知原因"}` });
+      } else {
+        setNotice({ tone: "ok", text: `${EXECUTOR_LABELS[executorId]} 已自动绑定 ${bound}${result.probe ? "，真实测试通过" : ""}。` });
+      }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["modelRegistry"] }),
         queryClient.invalidateQueries({ queryKey: ["executors"] }),
@@ -224,7 +256,9 @@ function ExecutorsTab() {
                         <strong>{binding.effectiveModel ?? "未选择模型"}</strong>
                         <small>
                           {binding.effectiveProtocol ? protocolLabel(binding.effectiveProtocol) : "先创建兼容协议的模型档案"}
-                          {binding.available && health && !health.canRun ? " · 执行器不可用" : ""}
+                          {binding.available && health && !health.canRun
+                            ? ` · ${health.state === "unverified" ? "待真实测试" : "执行器不可用"}`
+                            : ""}
                         </small>
                       </div>
                     </div>
@@ -233,9 +267,21 @@ function ExecutorsTab() {
                         <button
                           type="button"
                           className="ghost-button compact"
+                          onClick={() => void probe(binding.executorId)}
+                          disabled={busy === binding.executorId}
+                          title="发送一次真实请求验证执行器"
+                        >
+                          {busy === binding.executorId ? <Loader2 size={13} className="spin" /> : <PlugZap size={13} />}
+                          运行测试
+                        </button>
+                      )}
+                      {(!binding.available || !health?.canRun) && (
+                        <button
+                          type="button"
+                          className="ghost-button compact"
                           onClick={() => void autoBind(binding.executorId)}
                           disabled={busy === binding.executorId}
-                          title="自动选择兼容的模型档案并绑定"
+                          title="自动选择兼容的模型档案并绑定，然后运行一次真实测试"
                         >
                           {busy === binding.executorId ? <Loader2 size={13} className="spin" /> : <Sparkles size={13} />}
                           一键绑定
@@ -285,17 +331,34 @@ function ModelsTab() {
   }
 
   function pickPreset(preset: ModelProviderPreset) {
+    const presetModel = preset.models[0] ?? "";
+    const sibling = registry?.profiles.find((profile) => profile.baseUrl === preset.baseUrl && profile.model === presetModel);
     setDraft((prev) => ({
       ...prev,
       providerId: preset.id,
       providerName: preset.name,
       protocol: preset.protocol,
       baseUrl: preset.baseUrl,
-      model: preset.models[0] ?? "",
-      name: prev.name || `${preset.name} · ${preset.models[0] ?? "模型"}`
+      model: presetModel,
+      name: prev.name || `${preset.name} · ${preset.models[0] ?? "模型"}`,
+      ...(sibling
+        ? { contextWindowTokens: sibling.contextWindowTokens, maxOutputTokens: sibling.maxOutputTokens }
+        : {})
     }));
     setModels(preset.models);
     setNotice(null);
+  }
+
+  function updateModel(value: string) {
+    // 同一个模型只应该有一个上下文窗口；协议只是调用方式，不应该改变它。
+    const sibling = registry?.profiles.find((profile) => profile.baseUrl === draft.baseUrl && profile.model === value);
+    setDraft((prev) => ({
+      ...prev,
+      model: value,
+      ...(sibling
+        ? { contextWindowTokens: sibling.contextWindowTokens, maxOutputTokens: sibling.maxOutputTokens }
+        : {})
+    }));
   }
 
   function edit(profile: ModelProfileView) {
@@ -500,7 +563,7 @@ function ModelsTab() {
               <label><span>接口协议</span><select value={draft.protocol} onChange={(event) => update("protocol", event.target.value as ModelProtocol)}>{PROTOCOLS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
               <label><span>服务名称</span><input value={draft.providerName} onChange={(event) => update("providerName", event.target.value)} placeholder="例如：DeepSeek" /></label>
               <label className="span-2"><span>服务地址</span><input value={draft.baseUrl} onChange={(event) => update("baseUrl", event.target.value)} placeholder="https://api.deepseek.com/v1" spellCheck={false} /></label>
-              <label><span>模型</span><div className="input-with-action"><input value={draft.model} onChange={(event) => update("model", event.target.value)} placeholder="手工填写或拉取" list="settings-model-options" spellCheck={false} /><button type="button" className="ghost-button compact" onClick={() => void fetchModels()} disabled={busy !== null}>{busy === "models" ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />} 拉取</button></div><datalist id="settings-model-options">{models.map((model) => <option key={model} value={model} />)}</datalist></label>
+              <label><span>模型</span><div className="input-with-action"><input value={draft.model} onChange={(event) => updateModel(event.target.value)} placeholder="手工填写或拉取" list="settings-model-options" spellCheck={false} /><button type="button" className="ghost-button compact" onClick={() => void fetchModels()} disabled={busy !== null}>{busy === "models" ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />} 拉取</button></div><datalist id="settings-model-options">{models.map((model) => <option key={model} value={model} />)}</datalist></label>
               <label><span>API Key</span><input type="password" value={draft.apiKey} onChange={(event) => update("apiKey", event.target.value)} placeholder={editingId ? "留空保留原密钥" : "sk-..."} autoComplete="off" /></label>
             </div>
             <details className="form-advanced">
@@ -512,6 +575,7 @@ function ModelsTab() {
                 <label><span>上下文窗口（Token）</span><input type="number" min={4096} max={10000000} step={1000} value={draft.contextWindowTokens} onChange={(event) => update("contextWindowTokens", Number(event.target.value))} /></label>
                 <label><span>单次最大输出（Token）</span><input type="number" min={256} max={1000000} step={256} value={draft.maxOutputTokens} onChange={(event) => update("maxOutputTokens", Number(event.target.value))} /></label>
               </div>
+              <small className="field-hint">上下文窗口属于模型本身，同一模型的 Chat 与 Responses 档案应保持一致。</small>
             </details>
             <div className="settings-actions">
               <button className="primary-button" onClick={() => void save()} disabled={busy !== null}>{busy === "save" ? <Loader2 size={15} className="spin" /> : <Save size={15} />} {editingId ? "保存修改" : "创建档案"}</button>
@@ -755,7 +819,13 @@ function bindingStatus(binding: ExecutorModelBindingView, health: ExecutorView["
     return { tone: "warn", dot: "offline", label: "执行器未检测", title: "没有读取到执行器健康状态" };
   }
   if (!health.canRun) {
-    const label = health.installState === "missing" ? "执行器未安装" : "执行器不可用";
+    const label = health.installState === "missing"
+      ? "执行器未安装"
+      : health.state === "unverified"
+        ? "待真实测试"
+        : health.state === "quota_exceeded"
+          ? "额度不可用"
+          : "执行器不可用";
     return {
       tone: "warn",
       dot: "offline",

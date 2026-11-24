@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router-dom";
 import { ApprovalCard } from "../components/ApprovalCard.tsx";
@@ -12,6 +12,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  ClipboardList,
   Clock,
   Copy,
   FileText,
@@ -25,6 +26,7 @@ import {
   Settings2,
   ShieldCheck,
   Sparkles,
+  Target,
   X
 } from "lucide-react";
 import { ApiError, api, chatStream, type GoalSettingsInput } from "../lib/api.ts";
@@ -58,7 +60,7 @@ const PENDING_SETTINGS: ConversationSettings = {
 const EXECUTOR_ORDER: ExecutorId[] = ["deepseek-harness", "codex", "native"];
 const TERMINAL_GOAL_STATES = new Set(["done", "cancelled", "failed"]);
 
-type ComposerCommandId = "plan" | "goal" | "attach";
+type ComposerCommandId = "plan" | "goal";
 interface ComposerCommand {
   id: ComposerCommandId;
   command: string;
@@ -66,8 +68,19 @@ interface ComposerCommand {
 }
 const COMPOSER_COMMANDS: ComposerCommand[] = [
   { id: "plan", command: "/plan", description: "先调查，给出计划，等你批准后再执行" },
-  { id: "goal", command: "/goal", description: "多轮推进一个目标，直到验收完成" },
-  { id: "attach", command: "/attach", description: "添加文件，也可以直接粘贴或拖入" }
+  { id: "goal", command: "/goal", description: "多轮推进一个目标，直到验收完成" }
+];
+
+type ComposerModeId = "full" | "plan" | "goal";
+interface ComposerModeOption {
+  id: ComposerModeId;
+  label: string;
+  description: string;
+}
+const COMPOSER_MODES: ComposerModeOption[] = [
+  { id: "full", label: "完全访问", description: "直接执行，不需要逐步确认" },
+  { id: "plan", label: "计划", description: "先只读调查，给出计划等你批准" },
+  { id: "goal", label: "目标", description: "多轮推进一个目标，直到验收完成" }
 ];
 
 interface TimelineMessage {
@@ -157,6 +170,7 @@ export function ChatPage() {
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(() => new URLSearchParams(location.search).get("skill"));
   const [slashIndex, setSlashIndex] = useState(0);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [savingEffort, setSavingEffort] = useState(false);
   const [reasoningDraft, setReasoningDraft] = useState<ReasoningEffort | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
@@ -167,7 +181,6 @@ export function ChatPage() {
   const [skillNotice, setSkillNotice] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const conversationIdRef = useRef<string | null>(conversationId);
   const handledSelectionNonce = useRef(selection.nonce);
@@ -203,6 +216,9 @@ export function ChatPage() {
     ?? planViews[0]
     ?? null;
   const hasActivePlan = Boolean(currentPlan && !["completed", "cancelled"].includes(currentPlan.stage));
+  // 执行模式是单选：目标 > 计划 > 完全访问，后选的模式会替换前一个。
+  const activeMode: ComposerModeId = (goalMode || hasActiveGoal) ? "goal" : planMode ? "plan" : "full";
+  const activeModeOption = COMPOSER_MODES.find((mode) => mode.id === activeMode) ?? COMPOSER_MODES[0]!;
   const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health });
   const skillsQuery = useQuery({ queryKey: ["skills"], queryFn: api.skills, staleTime: 30_000 });
   const executorsQuery = useQuery({ queryKey: ["executors"], queryFn: api.executors, refetchInterval: 20_000 });
@@ -222,7 +238,7 @@ export function ChatPage() {
   }), [slashTerm]);
   const slashSkillMatches = useMemo(() => slashTerm === null ? [] : skills.filter((skill) => {
     if (!slashTerm) return true;
-    return `${skill.name} ${skill.manifest.description} ${skill.id}`.toLocaleLowerCase().includes(slashTerm);
+    return `${skill.name} ${skill.descriptionZh ?? skill.manifest.description} ${skill.id}`.toLocaleLowerCase().includes(slashTerm);
   }).slice(0, 8), [slashTerm, skills]);
   const slashMatches = useMemo(
     () => [
@@ -542,12 +558,6 @@ export function ChatPage() {
     }
   }
 
-  function pickFiles(event: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(event.target.files ?? []);
-    event.target.value = "";
-    void uploadFiles(files);
-  }
-
   function onComposerPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
     const files = Array.from(event.clipboardData.items)
       .filter((item) => item.kind === "file")
@@ -702,11 +712,6 @@ export function ChatPage() {
     if (uploading || !settingsReady || (!text && attachments.length === 0)) return;
     if (selectedExecutorUnavailable) {
       setError(`${selectedExecutorName} 当前不可用，不会自动切换执行器。${selectedExecutor?.health.issues.join("；") ?? "请到设置中测试可用性。"}`);
-      return;
-    }
-    if (text && /^\/attach(?:\s|$)/i.test(text) && attachments.length === 0) {
-      setInput("");
-      fileInputRef.current?.click();
       return;
     }
     if (text && isGoalCommand && attachments.length === 0) {
@@ -996,21 +1001,47 @@ export function ChatPage() {
   function chooseComposerCommand(id: ComposerCommandId) {
     setInput("");
     setSlashIndex(0);
-    if (id === "attach") {
-      fileInputRef.current?.click();
-      requestAnimationFrame(() => composerRef.current?.focus());
-      return;
-    }
     if (hasActivePlan || hasActiveGoal) {
       setError("当前会话已有进行中的计划或目标，请先在对应栏完成或退出。");
       requestAnimationFrame(() => composerRef.current?.focus());
       return;
     }
     if (id === "plan") {
-      if (goalMode) setError("请先退出目标模式。");
-      else setPlanMode(true);
+      if (goalMode) setGoalMode(false);
+      setPlanMode(true);
+      if (conversationId) {
+        void api.updateConversationSettings(conversationId, { collaborationMode: "plan" }).catch(() => undefined);
+      }
     } else {
       setGoalDialogOpen(true);
+    }
+    requestAnimationFrame(() => composerRef.current?.focus());
+  }
+
+  function chooseComposerMode(id: ComposerModeId) {
+    setModeMenuOpen(false);
+    if (id === activeMode) return;
+    if (hasActivePlan || hasActiveGoal) {
+      setError("当前会话已有进行中的计划或目标，请先在对应栏完成或退出。");
+      return;
+    }
+    if (id === "goal") {
+      setGoalDialogOpen(true);
+      return;
+    }
+    if (id === "plan") {
+      if (goalMode) setGoalMode(false);
+      setPlanMode(true);
+      if (conversationId) {
+        void api.updateConversationSettings(conversationId, { collaborationMode: "plan" }).catch(() => undefined);
+      }
+      requestAnimationFrame(() => composerRef.current?.focus());
+      return;
+    }
+    if (goalMode) setGoalMode(false);
+    setPlanMode(false);
+    if (conversationId) {
+      void api.updateConversationSettings(conversationId, { collaborationMode: "build" }).catch(() => undefined);
     }
     requestAnimationFrame(() => composerRef.current?.focus());
   }
@@ -1313,6 +1344,57 @@ export function ChatPage() {
                 </>
               )}
             </div>
+            <div className="composer-mode-wrap">
+              <button
+                type="button"
+                className={`composer-mode mode-${activeMode}`}
+                onClick={() => setModeMenuOpen((open) => !open)}
+                aria-expanded={modeMenuOpen}
+                aria-haspopup="menu"
+                title={`当前模式：${activeModeOption.label}`}
+              >
+                {activeMode === "full"
+                  ? <ShieldCheck size={13} />
+                  : activeMode === "plan" ? <ClipboardList size={13} /> : <Target size={13} />}
+                <span>{activeModeOption.label}</span>
+                <ChevronDown size={12} />
+              </button>
+              {modeMenuOpen && (
+                <>
+                  <button type="button" className="composer-model-backdrop" aria-label="关闭模式选择" onClick={() => setModeMenuOpen(false)} />
+                  <div className="composer-mode-popover" role="menu" aria-label="选择执行模式">
+                    {COMPOSER_MODES.map((option) => {
+                      const optionActive = option.id === activeMode;
+                      const blocked = (hasActivePlan || hasActiveGoal) && !optionActive;
+                      return (
+                        <button
+                          key={option.id}
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={optionActive}
+                          className={`composer-mode-option${optionActive ? " active" : ""}`}
+                          disabled={blocked}
+                          title={blocked ? "当前会话已有进行中的计划或目标，请先完成或退出" : option.description}
+                          onClick={() => chooseComposerMode(option.id)}
+                        >
+                          <span className="composer-mode-icon">
+                            {option.id === "full"
+                              ? <ShieldCheck size={14} />
+                              : option.id === "plan" ? <ClipboardList size={14} /> : <Target size={14} />}
+                          </span>
+                          <span>
+                            <strong>{option.label}</strong>
+                            <small>{option.description}</small>
+                          </span>
+                          {optionActive && <Check size={13} />}
+                        </button>
+                      );
+                    })}
+                    <p className="composer-mode-hint">每次只能选择一个模式，选择另一个会替换当前模式。</p>
+                  </div>
+                </>
+              )}
+            </div>
             <label className="composer-executor" title={selectedExecutorUnavailable ? selectedExecutor?.health.issues.join("；") : "锁定执行器后不会自动切换"}>
               <select
                 value={selectedExecutorVisible ? selectedExecutorId : ""}
@@ -1339,7 +1421,7 @@ export function ChatPage() {
               <span className="composer-executor-warning">{selectedExecutorName} 当前不可用，不会自动切换</span>
             )}
             {selectedSkill && (
-              <span className="composer-skill-chip" title={selectedSkill.manifest.description}>
+              <span className="composer-skill-chip" title={selectedSkill.descriptionZh ?? selectedSkill.manifest.description}>
                 <Sparkles size={14} />
                 <span>使用技能：{selectedSkill.name}</span>
                 <button type="button" onClick={() => setSelectedSkillId(null)} aria-label="取消使用技能">
@@ -1421,53 +1503,52 @@ export function ChatPage() {
               ))}
             </div>
           )}
-          {slashOpen && (
-            <div className="composer-slash-menu" role="listbox" aria-label="选择命令或技能">
-              {slashMatches.length === 0 ? (
-                <p className="composer-slash-empty">没有匹配的命令。输入 / 查看全部命令和技能。</p>
-              ) : slashMatches.map((entry, index) => {
-                const active = index === Math.min(slashIndex, slashMatches.length - 1);
-                if (entry.kind === "command") {
+          <div className="composer">
+            {slashOpen && (
+              <div className="composer-slash-menu" role="listbox" aria-label="选择命令或技能">
+                {slashMatches.length === 0 ? (
+                  <p className="composer-slash-empty">没有匹配的命令。输入 / 查看全部命令和技能。</p>
+                ) : slashMatches.map((entry, index) => {
+                  const active = index === Math.min(slashIndex, slashMatches.length - 1);
+                  if (entry.kind === "command") {
+                    return (
+                      <button
+                        key={`command:${entry.command.id}`}
+                        type="button"
+                        role="option"
+                        aria-selected={active}
+                        className={`composer-slash-item ${active ? "active" : ""}`}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => chooseComposerCommand(entry.command.id)}
+                      >
+                        <span className="composer-slash-glyph">/</span>
+                        <span>
+                          <strong>{entry.command.command}</strong>
+                          <small>{entry.command.description}</small>
+                        </span>
+                      </button>
+                    );
+                  }
                   return (
                     <button
-                      key={`command:${entry.command.id}`}
+                      key={`skill:${entry.skill.id}`}
                       type="button"
                       role="option"
                       aria-selected={active}
                       className={`composer-slash-item ${active ? "active" : ""}`}
                       onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => chooseComposerCommand(entry.command.id)}
+                      onClick={() => chooseSkill(entry.skill.id)}
                     >
-                      <span className="composer-slash-glyph">/</span>
+                      <Sparkles size={15} />
                       <span>
-                        <strong>{entry.command.command}</strong>
-                        <small>{entry.command.description}</small>
+                        <strong>{entry.skill.name}</strong>
+                        <small>{entry.skill.descriptionZh ?? entry.skill.manifest.description ?? "已安装的技能"}</small>
                       </span>
                     </button>
                   );
-                }
-                return (
-                  <button
-                    key={`skill:${entry.skill.id}`}
-                    type="button"
-                    role="option"
-                    aria-selected={active}
-                    className={`composer-slash-item ${active ? "active" : ""}`}
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => chooseSkill(entry.skill.id)}
-                  >
-                    <Sparkles size={15} />
-                    <span>
-                      <strong>{entry.skill.name}</strong>
-                      <small>{entry.skill.manifest.description || "已安装的技能"}</small>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-          <div className="composer">
-            <input ref={fileInputRef} type="file" multiple hidden onChange={pickFiles} />
+                })}
+              </div>
+            )}
             <textarea
               ref={composerRef}
               value={input}
@@ -1522,6 +1603,10 @@ export function ChatPage() {
         onClose={() => setGoalDialogOpen(false)}
         onConfirm={(settings) => {
           setGoalSettings(settings);
+          setPlanMode(false);
+          if (conversationId) {
+            void api.updateConversationSettings(conversationId, { collaborationMode: "build" }).catch(() => undefined);
+          }
           setGoalMode(true);
           setGoalDialogOpen(false);
         }}
