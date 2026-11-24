@@ -2549,6 +2549,12 @@ export interface ContextSettings {
   maxInlineBytes: number;
   projectionTokenBudget: number;
   summarizeAfterTokens: number;
+  conversationContextEnabled: boolean;
+  conversationContextBudgetTokens: number;
+  conversationKeepTokens: number;
+  conversationSummaryMaxTokens: number;
+  conversationAutoCompact: boolean;
+  conversationCompactRatio: number;
   autoHandoffRisk: "low" | "none";
   allowCodexNetwork: boolean;
   updatedAt: string | null;
@@ -2562,6 +2568,12 @@ export interface ContextSettingsPatch {
   maxInlineBytes?: number | undefined;
   projectionTokenBudget?: number | undefined;
   summarizeAfterTokens?: number | undefined;
+  conversationContextEnabled?: boolean | undefined;
+  conversationContextBudgetTokens?: number | undefined;
+  conversationKeepTokens?: number | undefined;
+  conversationSummaryMaxTokens?: number | undefined;
+  conversationAutoCompact?: boolean | undefined;
+  conversationCompactRatio?: number | undefined;
   autoHandoffRisk?: "low" | "none" | undefined;
   allowCodexNetwork?: boolean | undefined;
 }
@@ -2574,10 +2586,82 @@ export const DEFAULT_CONTEXT_SETTINGS: ContextSettings = {
   maxInlineBytes: 16_384,
   projectionTokenBudget: 12_000,
   summarizeAfterTokens: 8_000,
+  conversationContextEnabled: true,
+  conversationContextBudgetTokens: 12_000,
+  conversationKeepTokens: 8_000,
+  conversationSummaryMaxTokens: 4_096,
+  conversationAutoCompact: true,
+  conversationCompactRatio: 0.8,
   autoHandoffRisk: "low",
   allowCodexNetwork: false,
   updatedAt: null
 };
+
+export interface ConversationFact {
+  key: string;
+  value: string;
+  source: string;
+  asOf: string;
+  superseded?: boolean;
+}
+
+export interface ConversationDecision {
+  decision: string;
+  rationale: string;
+  source: string;
+}
+
+export interface ConversationCompletedTask {
+  taskId: string;
+  title: string;
+  status: TaskStatus;
+  executor: ExecutorId | null;
+  outcome: string;
+  artifacts: string[];
+}
+
+export interface ConversationContextSummary {
+  goal: string;
+  constraints: string[];
+  facts: ConversationFact[];
+  decisions: ConversationDecision[];
+  completed: ConversationCompletedTask[];
+  blockers: string[];
+  nextSteps: string[];
+  openQuestions: string[];
+}
+
+export interface ConversationContextState {
+  conversationId: string;
+  version: number;
+  summary: string;
+  summaryData: ConversationContextSummary | null;
+  firstKeptMessageId: string | null;
+  lastSummarizedAt: string | null;
+  tokensBefore: number;
+  tokensAfter: number;
+  updatedAt: string;
+}
+
+export type ConversationCompactionTrigger = "auto" | "manual" | "overflow";
+export type ConversationCompactionStatus = "running" | "completed" | "failed";
+
+export interface ConversationCompactionRecord {
+  id: string;
+  conversationId: string;
+  trigger: ConversationCompactionTrigger;
+  status: ConversationCompactionStatus;
+  summary: string | null;
+  coveredMessageIds: string[];
+  firstKeptMessageId: string | null;
+  tokensBefore: number;
+  tokensAfter: number | null;
+  model: string | null;
+  usage: RunUsage | null;
+  error: string | null;
+  createdAt: string;
+  completedAt: string | null;
+}
 
 export interface ContextItemPage {
   items: ContextItem[];

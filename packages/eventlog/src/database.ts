@@ -24,6 +24,8 @@ import type {
   ConnectionOutboxItem,
   ConnectionSession,
   ContextSettings,
+  ConversationCompactionRecord,
+  ConversationContextState,
   DesktopCommandRecord,
   DesktopFrameRecord,
   DesktopSessionRecord,
@@ -558,6 +560,35 @@ CREATE TABLE IF NOT EXISTS task_context_state (
   summary_seq INTEGER NOT NULL,
   updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS conversation_context_state (
+  conversation_id TEXT PRIMARY KEY,
+  version INTEGER NOT NULL,
+  summary TEXT NOT NULL,
+  summary_json TEXT,
+  first_kept_message_id TEXT,
+  last_summarized_at TEXT,
+  tokens_before INTEGER NOT NULL,
+  tokens_after INTEGER NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS conversation_compactions (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL,
+  trigger TEXT NOT NULL,
+  status TEXT NOT NULL,
+  summary TEXT,
+  covered_json TEXT NOT NULL,
+  first_kept_message_id TEXT,
+  tokens_before INTEGER NOT NULL,
+  tokens_after INTEGER,
+  model TEXT,
+  usage_json TEXT,
+  error TEXT,
+  created_at TEXT NOT NULL,
+  completed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS conversation_compactions_conversation_idx
+  ON conversation_compactions(conversation_id, created_at);
 CREATE TABLE IF NOT EXISTS handoffs (
   id TEXT PRIMARY KEY,
   task_id TEXT NOT NULL,
@@ -2659,6 +2690,100 @@ export class HearthStore {
     ).all(conversationId) as DbRow[]).map(rowToChatMessage);
   }
 
+  listChatMessagesAfter(conversationId: string, afterMessageId: string | null): ChatMessageRecord[] {
+    if (!afterMessageId) return this.listChatMessages(conversationId);
+    return (this.db.prepare(
+      `SELECT * FROM chat_messages
+       WHERE conversation_id = ? AND rowid > (
+         SELECT rowid FROM chat_messages WHERE conversation_id = ? AND id = ?
+       )
+       ORDER BY rowid ASC`
+    ).all(conversationId, conversationId, afterMessageId) as DbRow[]).map(rowToChatMessage);
+  }
+
+  listTasksByConversation(conversationId: string): TaskRecord[] {
+    return (this.db.prepare(
+      "SELECT * FROM tasks WHERE conversation_id = ? AND deleted_at IS NULL ORDER BY created_at ASC"
+    ).all(conversationId) as DbRow[]).map(rowToTask);
+  }
+
+  getConversationContextState(conversationId: string): ConversationContextState | null {
+    const row = this.db.prepare(
+      "SELECT * FROM conversation_context_state WHERE conversation_id = ?"
+    ).get(conversationId) as DbRow | undefined;
+    return row ? rowToConversationContextState(row) : null;
+  }
+
+  saveConversationContextState(state: ConversationContextState): ConversationContextState {
+    this.db.prepare(
+      `INSERT INTO conversation_context_state
+        (conversation_id, version, summary, summary_json, first_kept_message_id, last_summarized_at, tokens_before, tokens_after, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(conversation_id) DO UPDATE SET
+         version=excluded.version,
+         summary=excluded.summary,
+         summary_json=excluded.summary_json,
+         first_kept_message_id=excluded.first_kept_message_id,
+         last_summarized_at=excluded.last_summarized_at,
+         tokens_before=excluded.tokens_before,
+         tokens_after=excluded.tokens_after,
+         updated_at=excluded.updated_at`
+    ).run(
+      state.conversationId, state.version, state.summary,
+      state.summaryData ? JSON.stringify(state.summaryData) : null,
+      state.firstKeptMessageId, state.lastSummarizedAt,
+      state.tokensBefore, state.tokensAfter, state.updatedAt
+    );
+    return state;
+  }
+
+  appendConversationCompaction(record: ConversationCompactionRecord): ConversationCompactionRecord {
+    this.db.prepare(
+      `INSERT INTO conversation_compactions
+        (id, conversation_id, trigger, status, summary, covered_json, first_kept_message_id, tokens_before, tokens_after, model, usage_json, error, created_at, completed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      record.id, record.conversationId, record.trigger, record.status,
+      record.summary, JSON.stringify(record.coveredMessageIds),
+      record.firstKeptMessageId, record.tokensBefore, record.tokensAfter,
+      record.model, record.usage ? JSON.stringify(record.usage) : null,
+      record.error, record.createdAt, record.completedAt
+    );
+    return record;
+  }
+
+  getConversationCompaction(id: string): ConversationCompactionRecord | null {
+    const row = this.db.prepare(
+      "SELECT * FROM conversation_compactions WHERE id = ?"
+    ).get(id) as DbRow | undefined;
+    return row ? rowToConversationCompaction(row) : null;
+  }
+
+  updateConversationCompaction(
+    id: string,
+    patch: Partial<Pick<ConversationCompactionRecord, "status" | "summary" | "firstKeptMessageId" | "tokensAfter" | "model" | "usage" | "error" | "completedAt">>
+  ): ConversationCompactionRecord | null {
+    const current = this.getConversationCompaction(id);
+    if (!current) return null;
+    const next: ConversationCompactionRecord = { ...current, ...patch };
+    this.db.prepare(
+      `UPDATE conversation_compactions SET
+         status=?, summary=?, first_kept_message_id=?, tokens_after=?, model=?,
+         usage_json=?, error=?, completed_at=?
+       WHERE id=?`
+    ).run(
+      next.status, next.summary, next.firstKeptMessageId, next.tokensAfter,
+      next.model, next.usage ? JSON.stringify(next.usage) : null, next.error, next.completedAt, id
+    );
+    return next;
+  }
+
+  listConversationCompactions(conversationId: string, limit = 50): ConversationCompactionRecord[] {
+    return (this.db.prepare(
+      "SELECT * FROM conversation_compactions WHERE conversation_id = ? ORDER BY created_at DESC LIMIT ?"
+    ).all(conversationId, limit) as DbRow[]).map(rowToConversationCompaction);
+  }
+
   createChatMessage(message: ChatMessageRecord): ChatMessageRecord {
     this.db.exec("BEGIN IMMEDIATE");
     try {
@@ -4347,6 +4472,7 @@ export class HearthStore {
       case "context.summary.updated":
       case "context.settings.updated":
       case "context.task.deleted":
+      case "conversation.context.compacted":
       case "execution.diagnosed":
       case "execution.handoff.prepared":
       case "execution.handoff.started":
@@ -5667,6 +5793,39 @@ function rowToChatMessage(row: DbRow): ChatMessageRecord {
     attachments: JSON.parse(String(row.attachments_json)), createdAt: String(row.created_at),
     kind: row.kind === "task_status" ? "task_status" : "text",
     taskStatus: row.task_status == null ? null : String(row.task_status) as Exclude<ChatMessageRecord["taskStatus"], undefined>
+  };
+}
+
+function rowToConversationContextState(row: DbRow): ConversationContextState {
+  return {
+    conversationId: String(row.conversation_id),
+    version: Number(row.version),
+    summary: String(row.summary),
+    summaryData: row.summary_json == null ? null : JSON.parse(String(row.summary_json)),
+    firstKeptMessageId: row.first_kept_message_id == null ? null : String(row.first_kept_message_id),
+    lastSummarizedAt: row.last_summarized_at == null ? null : String(row.last_summarized_at),
+    tokensBefore: Number(row.tokens_before),
+    tokensAfter: Number(row.tokens_after),
+    updatedAt: String(row.updated_at)
+  };
+}
+
+function rowToConversationCompaction(row: DbRow): ConversationCompactionRecord {
+  return {
+    id: String(row.id),
+    conversationId: String(row.conversation_id),
+    trigger: String(row.trigger) as ConversationCompactionRecord["trigger"],
+    status: String(row.status) as ConversationCompactionRecord["status"],
+    summary: row.summary == null ? null : String(row.summary),
+    coveredMessageIds: JSON.parse(String(row.covered_json)) as string[],
+    firstKeptMessageId: row.first_kept_message_id == null ? null : String(row.first_kept_message_id),
+    tokensBefore: Number(row.tokens_before),
+    tokensAfter: row.tokens_after == null ? null : Number(row.tokens_after),
+    model: row.model == null ? null : String(row.model),
+    usage: row.usage_json == null ? null : JSON.parse(String(row.usage_json)),
+    error: row.error == null ? null : String(row.error),
+    createdAt: String(row.created_at),
+    completedAt: row.completed_at == null ? null : String(row.completed_at)
   };
 }
 
