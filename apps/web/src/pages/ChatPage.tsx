@@ -63,14 +63,13 @@ const EXECUTOR_ORDER: ExecutorId[] = ["deepseek-harness", "codex", "native"];
 const TERMINAL_GOAL_STATES = new Set(["done", "cancelled", "failed"]);
 
 type ComposerModeId = "full" | "plan" | "goal";
-type ComposerCommandId = ComposerModeId;
+type ComposerCommandId = "plan" | "goal";
 interface ComposerCommand {
   id: ComposerCommandId;
   command: string;
   description: string;
 }
 const COMPOSER_COMMANDS: ComposerCommand[] = [
-  { id: "full", command: "/full", description: "完全访问，直接执行，不逐步确认" },
   { id: "plan", command: "/plan", description: "先调查，给出计划，等你批准后再执行" },
   { id: "goal", command: "/goal", description: "多轮推进一个目标，直到验收完成" }
 ];
@@ -782,7 +781,7 @@ export function ChatPage() {
       return;
     }
     if (text && isFullCommand && attachments.length === 0) {
-      chooseComposerCommand("full");
+      resetToFullMode();
       return;
     }
     const outgoing: OutgoingMessage = {
@@ -1073,14 +1072,7 @@ export function ChatPage() {
       requestAnimationFrame(() => composerRef.current?.focus());
       return;
     }
-    if (id === "full") {
-      if (goalMode) setGoalMode(false);
-      setPlanMode(false);
-      setGoalDialogOpen(false);
-      if (conversationId) {
-        void api.updateConversationSettings(conversationId, { collaborationMode: "build" }).catch(() => undefined);
-      }
-    } else if (id === "plan") {
+    if (id === "plan") {
       if (goalMode) setGoalMode(false);
       setGoalDialogOpen(false);
       setPlanMode(true);
@@ -1089,6 +1081,23 @@ export function ChatPage() {
       }
     } else {
       setGoalDialogOpen(true);
+    }
+    requestAnimationFrame(() => composerRef.current?.focus());
+  }
+
+  function resetToFullMode(): void {
+    setInput("");
+    setSlashIndex(0);
+    if (hasActivePlan || hasActiveGoal) {
+      setError("当前会话已有进行中的计划或目标，请先在对应栏完成或退出。");
+      requestAnimationFrame(() => composerRef.current?.focus());
+      return;
+    }
+    if (goalMode) setGoalMode(false);
+    setPlanMode(false);
+    setGoalDialogOpen(false);
+    if (conversationId) {
+      void api.updateConversationSettings(conversationId, { collaborationMode: "build" }).catch(() => undefined);
     }
     requestAnimationFrame(() => composerRef.current?.focus());
   }
@@ -1422,18 +1431,18 @@ export function ChatPage() {
                 </>
               )}
             </div>
-            <div className="composer-mode-wrap">
-              <span
-                className={`composer-mode-indicator mode-${activeMode}`}
-                role="img"
-                aria-label={`当前模式：${activeModeOption.label}`}
-                title={`当前模式：${activeModeOption.label}。输入 / 选择模式。`}
-              >
-                {activeMode === "full"
-                  ? <ShieldCheck size={14} />
-                  : activeMode === "plan" ? <ClipboardList size={14} /> : <Target size={14} />}
-              </span>
-            </div>
+            {activeMode !== "full" && (
+              <div className="composer-mode-wrap">
+                <span
+                  className={`composer-mode-indicator mode-${activeMode}`}
+                  role="img"
+                  aria-label={`当前模式：${activeModeOption.label}`}
+                  title={`当前模式：${activeModeOption.label}。输入 / 选择模式。`}
+                >
+                  {activeMode === "plan" ? <ClipboardList size={14} /> : <Target size={14} />}
+                </span>
+              </div>
+            )}
             <label className="composer-executor" title={selectedExecutorUnavailable ? selectedExecutor?.health.issues.join("；") : "锁定执行器后不会自动切换"}>
               <select
                 value={selectedExecutorVisible ? selectedExecutorId : ""}
