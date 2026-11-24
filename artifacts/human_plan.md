@@ -1,87 +1,109 @@
-# Hearth 0.5.0 人类可执行计划（工程师版）
+# Hearth 提问机制：工程师执行计划
 
-## 目的
+## 文档定位
 
-这份计划记录 Hearth 0.5.0 的实现与验证方式，供工程师复核。它覆盖：会话级 Plan 模式、输入框上方重复状态条修复、Agent 自主搜索并安装 Skill、移除 Hearth 自身的预算/轮次/时间/调用次数/文件产物与权限上限，以及可维护的提示词系统。
+- 目标读者：工程师（负责实现、评审和验收 Hearth 的人）。
+- 本文覆盖章节：设计与测试。按已批准计划，不写风险章节。
+- 本文是执行依据，不是产品宣传稿；所有条款都写成可检查、可复现的要求。
 
-这个问题机制同时适用于普通对话与 Plan 模式。普通对话创建的是 `mode: "build"` 任务，直接走同一套执行契约；Plan 模式创建的是 `mode: "plan"` 规划任务，只读调查后生成计划，批准后再创建新的 `mode: "build"` 执行任务。两条路径共享同一套任务、调度、权限、提示词和 Skill 工具，不存在“聊天里能用、计划里不能用”的分叉。
+**适用范围声明：这套提问机制同时适用于普通对话和 Plan 模式。** 两种模式共用同一套任务状态、问题存储、回答入口和审计记录；区别只在 Plan 模式多了只读调查与计划批准阶段。不存在“普通对话能提问、Plan 模式不能提问”或反过来的分叉。
+
+## 已批准的执行要求（全文）
+
+以下七条是本次已批准计划的完整要求，实现与验收均以它们为准：
+
+1. 在批准之前，不创建 Agent 或任务条目，不写产物、不交付文件，除计划文件外不写任何内容。
+2. 批准之后，创建自己的 Task 条目来记录和跟踪执行。
+3. 批准之后，写 `artifacts/human_plan.md`，写入所选读者（工程师）、所选章节（设计与测试），以及本已批准计划中的每一条要求，完整列出。
+4. 面向工程师写 `artifacts/human_plan.md`，使用清晰、可验证的条款。
+5. 文件必须明确说明：这套提问机制同时适用于普通对话和 Plan 模式。
+6. 写完后回读 `artifacts/human_plan.md`，核对读者选择、全部已批准要求，以及第 5 条说明。
+7. 验证通过后，通过 `present_files` 交付 `artifacts/human_plan.md`。
 
 ## 设计
 
-### 1. Plan 领域模型与持久化
+### 1. 单一问题模型
 
-- `packages/core/src/types.ts` 增加 `TaskMode`、`CollaborationMode`、`PlanRecord`、`PlanView`、`PlanStage`、`PlanActionName`、`PlanExecutionProfile`，并给 `TaskRecord` 增加 `mode` 与 `planId`。
-- `packages/core/src/plan-state.ts` 定义 `planning → awaiting_approval → executing → completed/failed/cancelled` 状态机、动作阶段约束、版本递增和 `PlanStateError`。
-- Eventlog schema 升到 42：`tasks` 增加 `mode`、`plan_id`，新增 `plans` 表；所有迁移只加列/加表。
-- `PlanService` 负责创建计划、绑定规划任务、继续规划、批准后创建执行任务、完成/失败/重试/重规划/取消，以及启动恢复。
+- 一次只允许一个未回答的问题挂在任务上，禁止同一任务并行堆积多个待回答提问。
+- 问题写入任务记录，复用现有 `waiting_input` 状态与 `pendingInput` 字段；不为提问新增第二套任务状态机。
+- 问题内容必须包含：要用户决定的具体事项、为什么 Agent 不能自行合理假设、可选答案（如果有）、回答后会发生什么。
+- 问题必须来自真实阻塞：缺少关键事实、权限或凭据冲突、需要用户在多个互斥方案中做选择，或 Plan 等待批准。禁止把“是否继续”“要不要我开始”这类本来已授权的问题当成提问。
 
-### 2. 调度与只读边界
+### 2. 普通对话路径
 
-- 规划任务强制 native，`mode: "plan"`；工具面只保留读文件、列目录、搜索、只读 shell、`fetch_url`、`ask_user`、`submit_plan` 等。
-- 只读命令限制在 `git status/diff/log`、列目录、读取、查看版本；`submit_plan` 是唯一写入例外，只写 `.hearth/plans/*.md`。
-- `submit_plan` 返回 `action: "plan"` 和真实计划路径；调度器捕获后把 Plan 置为 `awaiting_approval`。
-- 用户批准后创建新的 `mode: "build"` 任务，注入原目标 + 已批准计划正文 + 执行协议；计划进入 `executing`。
-- 执行失败可 retry，重规划回到只读 planning；取消会结束计划并关闭规划/执行任务。
-- 重启时 `executing` 回到 `awaiting_approval`，旧执行任务取消；不会自动执行未批准计划。
+- Agent 在普通对话中调用 `ask_user` 时，任务进入 `waiting_input`，`pendingInput` 保存问题原文，运行暂停而不是空转。
+- Web 聊天页在同一会话内展示该问题，并允许用户直接回复；用户回复作为该任务的补充输入，任务回到可继续执行状态。
+- 回答必须绑定到原任务和原问题：任务已完成、已取消或问题已被替换时，迟到回答不得让旧任务复活。
+- 同一会话存在多个任务时，回答只投递给提出问题的那个任务，不广播给其他任务。
+- 页面刷新、服务重启后，未回答的问题仍然可见；不得因为重启丢失 `pendingInput`。
 
-### 3. 聊天与 Web 界面
+### 3. Plan 模式路径
 
-- `ChatPage` 删除输入框上方仅因 `isWorking` 就渲染的“Hearth 正在执行任务 / 可继续输入并排队”状态条及其 CSS。
-- 会话设置增加 `collaborationMode`；聊天请求支持 `planMode`、`planId`。
-- 新计划以 plan mode 创建规划任务；已有 planning/awaiting_approval 计划时，继续消息复用同一规划任务，不新建任务。
-- 新增计划栏和计划对话框，展示阶段、版本、正文、批准/重试/重规划/退出；支持 `/plan`、`/plan status|approve|cancel|replan|retry`、输入框计划按钮和 Shift+Tab。
+- Plan 模式的规划任务只读调查，使用同一套 `ask_user` 提问能力；澄清问题发生在计划生成之前，而不是用猜测替代。
+- 规划完成时通过 `submit_plan` 提交计划，任务进入 `awaiting_approval`。批准本身是一个结构化问题：批准、拒绝或要求修改，必须由用户明确回答。
+- 批准之前不得创建执行任务、不得写工作区、不得产生外部副作用。批准之后才创建新的执行任务，并把已批准计划正文注入执行上下文。
+- 拒绝或要求修改时，计划回到规划阶段；不得把拒绝记录成批准，也不得自动重试执行。
+- 计划待批准状态在重启后保持待批准，不得自动执行。
 
-### 4. Skill 自主闭环
+### 4. 两种模式共享的契约
 
-- `search_skills` 先查已安装技能，再用 GitHub Search API 找包含 `SKILL.md` 的仓库，返回仓库、树路径、默认分支。
-- `install_skill` 接受 GitHub URL、本地目录或名称；名称会先发现候选，再按顺序安装，最多尝试 5 个。
-- 技能意图强制路由为 native task，任何普通任务都注入 Skill 工具；Agent 不再要求用户提供仓库地址。
-- 未找到候选时明确报告失败和已尝试来源，不把“请提供地址”当默认下一步。
+- 同一套任务记录：`TaskRecord.status`、`pendingInput`、`nextAction`、`conversationId` 是唯一事实来源。
+- 同一套事件与审计：提问、回答、计划批准都写入事件日志，UI 通过同一套 SSE 事件刷新，不单独造一条旁路。
+- 同一套恢复规则：回答前暂停、回答后继续；取消任务会清空待回答问题；过期只适用于外部动作审批，不适用于普通澄清问题。
+- 两种模式的差异只在工具面与写入权限：普通对话可按授权执行；Plan 模式在批准前只读。差异不得改变提问的数据结构、展示方式或回答语义。
 
-### 5. 完全访问与移除产品级上限
+### 5. 展示与交互约束
 
-- 任务创建统一写入 `fullAccess: true`、`approvalMode: "full"`、`networkMode: "open"`、`danger-full-access`；显式传入的 read-only 也会被归一化。
-- native full permission 注入全部内置工具 + 额外工具，读写根包含系统根目录，网络全开；`authorizeNativeTool` 在 full 下无条件放行，GitHub/评论类动作不再要求审批。
-- Codex 在 full 下强制 `networkAccessEnabled`；DeepSeek Harness 继承 full。
-- 执行 profile、`withBudgetDefaults`、`scheduler.effectiveBudget` 返回空预算；Goal 不写/不执行 `budget`、`deadline`、`maxRounds`；重启保留进行中目标的 `armed` 并继续。
-- 保留的只有进程崩溃恢复、单次工具调用的物理超时（返回错误而不终止任务）、用户主动暂停/取消、用于审计的操作账本。
+- 问题在聊天流中作为一条明确的状态消息出现，包含问题正文和“等待你回答”的状态，不使用会消失的临时提示。
+- 输入框在 `waiting_input` 时仍可输入，但发送的动作语义是“回答当前问题”，不是“新建一个无关任务”。
+- 已回答的问题必须留下可追溯记录；同一问题不得重复弹出。
+- Plan 批准界面必须显示计划版本、正文和批准范围；批准按钮触发的是一次明确决定，不是默认继续。
 
-### 6. Prompt Registry 与结果契约
+### 6. 边界与失败处理
 
-- `packages/agent-runtime/src/prompts.ts` 提供可注册、可移除、按 priority 组合的 `PromptRegistry`。
-- 任务提示词拆分为 identity、autonomy、investigation、skills、completion、task、goal、profile、extensions 九段；Skill 路由和完成要求各自独立。
-- 自主执行契约明确：默认已授权、直接完成、不问“是否继续”、失败先诊断重试、没有产品级预算/权限限制、只在最后返回结果、不为了形式生成 `result.md`。
-- 任务提示词不再强制输出目录/行数/`result.md`；`finish_task` 仍负责提交最终结果。普通文档任务与 Plan 规划任务使用同一套规则，Plan 额外受只读工具面约束。
+- Agent 能通过读取文件、已有上下文或合理默认值解决的问题，不得提问；先自行调查，再决定是否阻塞。
+- 用户不回答时，任务保持等待，不自动填默认答案，不后台猜测执行。
+- 提问内容不得包含密钥、Cookie、完整身份证号等敏感明文；需要凭据时只说明用途和配置入口。
+- 外部动作审批与澄清提问分开：审批走审批账本与参数指纹；澄清走 `pendingInput`。两者可以先后出现，但不能互相冒充。
 
 ## 测试
 
-### 单元与服务测试
+### 单元测试
 
-- `packages/core/src/plan-state.test.ts`：状态转换、动作阶段约束、终止状态、版本递增。
-- `apps/server/src/plans.test.ts`：创建规划任务、计划正文持久化、批准生成 build 任务、完成、失败重试、重启恢复、继续规划复用任务。
-- `apps/server/src/app.test.ts`：`POST/GET /api/plans`、非法批准 409、取消、列表过滤。
-- `packages/agent-runtime/src/prompts.test.ts`：注册表排序/替换/移除、执行契约、Skill 路由、任务上下文组合。
-- `apps/server/src/skill-tools.test.ts`：已安装技能命中、GitHub 仓库发现、按名称安装第一候选。
-- 既有 `goal-state/goals/goal-verifier/scheduler/service/workspace/task-intent/native-executor/app` 测试更新为无预算、无审批、重启继续、无强制 `result.md` 的新行为。
+- `ask_user` 工具：缺少 `question` 时拒绝执行；正常调用返回 `action: "ask_user"` 和问题原文。
+- 任务状态：提问后进入 `waiting_input`；回答后离开等待态；取消任务后清空 `pendingInput`。
+- 迟到回答：任务已完成或已取消时，旧回答不得重新排队任务。
+- Plan 状态机：`planning → awaiting_approval → executing` 只允许合法转换；批准前创建执行任务必须失败；拒绝后不得进入 `executing`。
+- 恢复：序列化并重建任务后，`pendingInput` 与计划待批准状态保持不变。
 
-### 全量门禁
+### 服务与集成测试
 
-1. `npm run typecheck`：0 error。
-2. `npm test`：全绿。
-3. `npm run build`：通过。
-4. `npm run docs:build`：通过，Plan 文档与侧边栏无死链。
-5. `npm run version:check`：根、workspace、Cargo.toml、tauri.conf.json、lockfile 均为 0.5.0。
+- 普通对话：构造一个必须提问的任务，断言 SSE 出现等待状态、任务进入 `waiting_input`、回答后继续执行并最终完成。
+- Plan 模式：规划任务调用 `submit_plan` 后进入 `awaiting_approval`；未批准前没有执行任务、没有工作区写入；批准后才出现执行任务。
+- 隔离：同一会话两个任务，其中一个提问；回答只恢复对应任务，另一个任务状态不变。
+- 重启：服务重启后待回答问题仍可回答；待批准计划仍是待批准，不自动执行。
+- 审计：提问、回答、批准、拒绝都能在事件日志中按任务 ID 查到，且顺序正确。
 
 ### 手动验收
 
-- 普通对话：输入“下载 grill-me 技能”，任务应自行搜索 GitHub、安装并返回结果，不要求用户提供仓库地址。
-- Plan 模式：`Shift+Tab` 或 `/plan <目标>` 创建计划；规划阶段不改工作区；计划栏显示待批准；批准后才创建执行任务。
-- 重启：执行中的计划回到待批准，不会自动执行；进行中的目标保留并继续。
-- 状态条：输入框上方不再出现“Hearth 正在执行任务 / 可继续输入并排队”。
+1. 普通对话里要求 Agent 补充一个无法自行推断的关键事实，确认它停下来提问；回答后继续完成。
+2. 在 Plan 模式里提出一个需要澄清的目标，确认澄清发生在规划阶段；提交计划后确认页面显示待批准。
+3. 未点击批准前检查工作区没有新增写入；批准后确认才创建执行任务。
+4. 刷新页面并重启服务，确认未回答的问题和待批准计划都还在。
+5. 尝试在任务完成后补发一条旧回答，确认不会复活旧任务。
 
-## 提交
+### 门禁
 
-- 全部改动在 `main` 上完成，不建 feature branch。
-- 英文 Conventional Commits；实现、测试、文档和版本随对应 commit 提交。
-- 只按明确路径暂存本次改动，排除工作区已有的无关文件。
-- 推送 `https://github.com/hearthproject/hearth-os.git` 的 `main`。
+1. `npm run typecheck` 为 0 error。
+2. 相关单元、服务与集成测试全部通过。
+3. Web 构建通过，提问与计划批准界面可正常渲染。
+4. 手动验收五项全部通过后，才允许把本计划标记为完成。
+
+## 交付检查
+
+- [ ] `artifacts/human_plan.md` 的目标读者写明为工程师。
+- [ ] 只包含“设计”和“测试”两个主章节，没有风险章节。
+- [ ] 七条已批准要求已完整列出。
+- [ ] 已明确写出“这套提问机制同时适用于普通对话和 Plan 模式”。
+- [ ] 写完后已回读并逐项核对。
+- [ ] 通过 `present_files` 交付。
