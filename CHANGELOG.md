@@ -17,7 +17,8 @@
 
 ### 验证
 
-- `npm run typecheck`、`npm run build`、`npm test` 与 Windows 沙箱测试通过。
+- `npm run typecheck` 与 `npm run build` 通过。
+- 全量测试共 1006 项：989 项通过、15 项跳过；2 项受并发负载影响的计时用例单独重跑后通过（`tools.test.ts`、`test:sandbox`）。
 - 发布包包含托管运行时的安装能力；一键安装流程已用独立目录实测。
 
 ## 0.4.0 - 2026-11-24
