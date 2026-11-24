@@ -59,6 +59,7 @@ import type {
   MethodTrial,
   MaintenanceRun,
   LocalProject,
+  PlanRecord,
   McpServerConfig,
   McpServerStatus,
   McpToolDescriptor,
@@ -215,7 +216,7 @@ export interface SettleRunOperationCleanupInput {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 41;
+export const CURRENT_SCHEMA_VERSION = 42;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -239,7 +240,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   result_summary TEXT, conversation_id TEXT, executor_id TEXT, task_kind TEXT,
   expected_outputs_json TEXT, permissions_json TEXT, pending_input TEXT,
   method_id TEXT, method_version INTEGER, project_id TEXT, pinned_at TEXT, archived_at TEXT,
-  budget_override_json TEXT, deleted_at TEXT, trash_batch_id TEXT
+  budget_override_json TEXT, deleted_at TEXT, trash_batch_id TEXT,
+  mode TEXT NOT NULL DEFAULT 'build', plan_id TEXT
 );
 CREATE TABLE IF NOT EXISTS task_worktrees (
   task_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, path TEXT NOT NULL,
@@ -274,6 +276,17 @@ CREATE TABLE IF NOT EXISTS goal_completion_reports (
   forbidden_actions_json TEXT NOT NULL, checked_at TEXT NOT NULL,
   PRIMARY KEY (goal_id, task_id, checked_at)
 );
+CREATE TABLE IF NOT EXISTS plans (
+  id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, project_id TEXT,
+  title TEXT NOT NULL, objective TEXT NOT NULL, stage TEXT NOT NULL,
+  planning_task_id TEXT, execution_task_id TEXT,
+  plan_markdown TEXT, plan_path TEXT, revision INTEGER NOT NULL DEFAULT 0,
+  execution_json TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  approved_at TEXT, completed_at TEXT, error TEXT
+);
+CREATE INDEX IF NOT EXISTS plans_conversation_idx ON plans(conversation_id, updated_at);
+CREATE INDEX IF NOT EXISTS plans_stage_idx ON plans(stage, updated_at);
 CREATE TABLE IF NOT EXISTS conversations (
   id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
   settings_json TEXT, project_id TEXT, deleted_at TEXT, trash_batch_id TEXT
@@ -1783,6 +1796,20 @@ export class HearthStore {
     ensureColumn(this.db, "goals", "commands_approved_at", "TEXT");
     ensureColumn(this.db, "goal_rounds", "workspace_root", "TEXT");
     ensureColumn(this.db, "goal_rounds", "out_dir", "TEXT");
+    ensureColumn(this.db, "tasks", "mode", "TEXT NOT NULL DEFAULT 'build'");
+    ensureColumn(this.db, "tasks", "plan_id", "TEXT");
+    ensureColumn(this.db, "plans", "execution_json", "TEXT");
+    this.db.exec(`CREATE TABLE IF NOT EXISTS plans (
+      id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, project_id TEXT,
+      title TEXT NOT NULL, objective TEXT NOT NULL, stage TEXT NOT NULL,
+      planning_task_id TEXT, execution_task_id TEXT,
+      plan_markdown TEXT, plan_path TEXT, revision INTEGER NOT NULL DEFAULT 0,
+      execution_json TEXT,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      approved_at TEXT, completed_at TEXT, error TEXT
+    );
+    CREATE INDEX IF NOT EXISTS plans_conversation_idx ON plans(conversation_id, updated_at);
+    CREATE INDEX IF NOT EXISTS plans_stage_idx ON plans(stage, updated_at);`);
     ensureColumn(this.db, "run_checkpoints", "proof_json", "TEXT");
     ensureColumn(this.db, "run_checkpoints", "event_seq", "INTEGER");
     ensureColumn(this.db, "tasks", "external_ref", "TEXT");
@@ -2304,6 +2331,40 @@ export class HearthStore {
   listTasksForGoal(goalId: string): TaskRecord[] {
     return (this.db.prepare("SELECT * FROM tasks WHERE goal_id = ? AND deleted_at IS NULL ORDER BY created_at ASC")
       .all(goalId) as DbRow[]).map(rowToTask);
+  }
+
+  getPlan(planId: string): PlanRecord | null {
+    const row = this.db.prepare("SELECT * FROM plans WHERE id = ?").get(planId) as DbRow | undefined;
+    return row ? rowToPlan(row) : null;
+  }
+
+  listPlans(options: { conversationId?: string | null; projectId?: string | null; includeTerminal?: boolean } = {}): PlanRecord[] {
+    const clauses: string[] = [];
+    const params: SQLInputValue[] = [];
+    if (options.conversationId) {
+      clauses.push("conversation_id = ?");
+      params.push(options.conversationId);
+    }
+    if (options.projectId) {
+      clauses.push("project_id = ?");
+      params.push(options.projectId);
+    }
+    if (!options.includeTerminal) {
+      clauses.push("stage NOT IN ('completed', 'cancelled')");
+    }
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+    return (this.db.prepare(`SELECT * FROM plans ${where} ORDER BY updated_at DESC`).all(...params) as DbRow[])
+      .map(rowToPlan);
+  }
+
+  listTasksForPlan(planId: string): TaskRecord[] {
+    return (this.db.prepare("SELECT * FROM tasks WHERE plan_id = ? AND deleted_at IS NULL ORDER BY created_at ASC")
+      .all(planId) as DbRow[]).map(rowToTask);
+  }
+
+  upsertPlan(plan: PlanRecord): PlanRecord {
+    upsertPlanRow(this.db, plan);
+    return plan;
   }
 
   getGoalRound(goalId: string, index: number): GoalRoundRecord | null {
@@ -4151,6 +4212,8 @@ export class HearthStore {
       case "goal.round.started":
       case "goal.round.settled": return upsertGoalRoundRow(this.db, event.payload as GoalRoundRecord);
       case "goal.completion.recorded": return insertGoalCompletionReport(this.db, event.payload as GoalCompletionReport);
+      case "plan.created":
+      case "plan.updated": return upsertPlanRow(this.db, event.payload as PlanRecord);
       case "task.proposal.created":
       case "task.proposal.updated": return upsertTaskProposal(this.db, event.payload as TaskProposalRecord);
       case "task.follow-up.created":
@@ -4310,8 +4373,8 @@ export class HearthStore {
 
 function upsertTask(db: DatabaseSync, task: TaskRecord): void {
   db.prepare(
-    `INSERT INTO tasks (id, external_ref, request_hash, template_id, title, goal, status, created_at, updated_at, deadline, inputs_json, network_hosts_json, output_dir, current_run_id, next_action, error_json, result_summary, conversation_id, executor_id, task_kind, expected_outputs_json, permissions_json, pending_input, method_id, method_version, project_id, pinned_at, archived_at, goal_id, budget_override_json, deleted_at, trash_batch_id, execution_mode)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO tasks (id, external_ref, request_hash, template_id, title, goal, status, created_at, updated_at, deadline, inputs_json, network_hosts_json, output_dir, current_run_id, next_action, error_json, result_summary, conversation_id, executor_id, task_kind, expected_outputs_json, permissions_json, pending_input, method_id, method_version, project_id, pinned_at, archived_at, goal_id, budget_override_json, deleted_at, trash_batch_id, execution_mode, mode, plan_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        external_ref=excluded.external_ref, request_hash=excluded.request_hash,
        template_id=excluded.template_id, title=excluded.title, goal=excluded.goal, status=excluded.status,
@@ -4325,7 +4388,8 @@ function upsertTask(db: DatabaseSync, task: TaskRecord): void {
        project_id=excluded.project_id,
         pinned_at=excluded.pinned_at, archived_at=excluded.archived_at, goal_id=excluded.goal_id,
         budget_override_json=excluded.budget_override_json, deleted_at=excluded.deleted_at,
-        trash_batch_id=excluded.trash_batch_id, execution_mode=excluded.execution_mode`
+        trash_batch_id=excluded.trash_batch_id, execution_mode=excluded.execution_mode,
+        mode=excluded.mode, plan_id=excluded.plan_id`
   ).run(
     task.id, task.externalRef ?? null, task.requestHash ?? null,
     task.templateId, task.title, task.goal, task.status, task.createdAt, task.updatedAt,
@@ -4333,13 +4397,14 @@ function upsertTask(db: DatabaseSync, task: TaskRecord): void {
     task.currentRunId, task.nextAction, task.error ? JSON.stringify(task.error) : null,
     task.resultSummary ?? null, task.conversationId ?? null,
     task.executorId ?? "codex", task.taskKind ?? "general",
-    JSON.stringify(task.expectedOutputs ?? ["result.md"]),
+    JSON.stringify(task.expectedOutputs ?? []),
     task.permissions ? JSON.stringify(task.permissions) : null,
     task.pendingInput ?? null,
     task.methodId ?? null, task.methodVersion ?? null, task.projectId ?? null,
     task.pinnedAt ?? null, task.archivedAt ?? null, task.goalId ?? null,
     task.budgetOverride ? JSON.stringify(task.budgetOverride) : null,
-    task.deletedAt ?? null, task.trashBatchId ?? null, task.executionMode ?? null
+    task.deletedAt ?? null, task.trashBatchId ?? null, task.executionMode ?? null,
+    task.mode ?? "build", task.planId ?? null
   );
 }
 
@@ -4373,6 +4438,27 @@ function upsertGoal(db: DatabaseSync, goal: GoalContract): void {
     goal.execution ? JSON.stringify(goal.execution) : null,
     goal.pauseReference ? JSON.stringify(goal.pauseReference) : null,
     goal.commandsApprovedAt ?? null
+  );
+}
+
+function upsertPlanRow(db: DatabaseSync, plan: PlanRecord): void {
+  db.prepare(
+    `INSERT INTO plans (id, conversation_id, project_id, title, objective, stage, planning_task_id, execution_task_id, plan_markdown, plan_path, revision, execution_json, created_at, updated_at, approved_at, completed_at, error)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       conversation_id=excluded.conversation_id, project_id=excluded.project_id,
+       title=excluded.title, objective=excluded.objective, stage=excluded.stage,
+       planning_task_id=excluded.planning_task_id, execution_task_id=excluded.execution_task_id,
+       plan_markdown=excluded.plan_markdown, plan_path=excluded.plan_path,
+       revision=excluded.revision, updated_at=excluded.updated_at,
+       execution_json=excluded.execution_json,
+       approved_at=excluded.approved_at, completed_at=excluded.completed_at, error=excluded.error`
+  ).run(
+    plan.id, plan.conversationId, plan.projectId ?? null, plan.title, plan.objective, plan.stage,
+    plan.planningTaskId ?? null, plan.executionTaskId ?? null,
+    plan.planMarkdown ?? null, plan.planPath ?? null, plan.revision ?? 0,
+    plan.execution ? JSON.stringify(plan.execution) : null,
+    plan.createdAt, plan.updatedAt, plan.approvedAt ?? null, plan.completedAt ?? null, plan.error ?? null
   );
 }
 
@@ -5451,8 +5537,10 @@ function rowToTask(row: DbRow): TaskRecord {
     conversationId: row.conversation_id == null ? null : String(row.conversation_id),
     executorId: (row.executor_id == null ? "codex" : String(row.executor_id)) as NonNullable<TaskRecord["executorId"]>,
     taskKind: (row.task_kind == null ? "general" : String(row.task_kind)) as NonNullable<TaskRecord["taskKind"]>,
-    expectedOutputs: row.expected_outputs_json == null ? ["result.md"] : JSON.parse(String(row.expected_outputs_json)),
+    expectedOutputs: row.expected_outputs_json == null ? [] : JSON.parse(String(row.expected_outputs_json)),
     ...(permissions ? { permissions } : {}),
+    mode: (row.mode == null ? "build" : String(row.mode)) as NonNullable<TaskRecord["mode"]>,
+    planId: row.plan_id == null ? null : String(row.plan_id),
     pendingInput: row.pending_input == null ? null : String(row.pending_input),
     methodId: row.method_id == null ? null : String(row.method_id),
     methodVersion: row.method_version == null ? null : Number(row.method_version),
@@ -5463,6 +5551,28 @@ function rowToTask(row: DbRow): TaskRecord {
     ...(row.execution_mode == null ? {} : { executionMode: String(row.execution_mode) as NonNullable<TaskRecord["executionMode"]> }),
     deletedAt: row.deleted_at == null ? null : String(row.deleted_at),
     trashBatchId: row.trash_batch_id == null ? null : String(row.trash_batch_id)
+  };
+}
+
+function rowToPlan(row: DbRow): PlanRecord {
+  return {
+    id: String(row.id),
+    conversationId: String(row.conversation_id),
+    projectId: row.project_id == null ? null : String(row.project_id),
+    title: String(row.title),
+    objective: String(row.objective),
+    stage: String(row.stage) as PlanRecord["stage"],
+    planningTaskId: row.planning_task_id == null ? null : String(row.planning_task_id),
+    executionTaskId: row.execution_task_id == null ? null : String(row.execution_task_id),
+    planMarkdown: row.plan_markdown == null ? null : String(row.plan_markdown),
+    planPath: row.plan_path == null ? null : String(row.plan_path),
+    ...(row.execution_json == null ? {} : { execution: JSON.parse(String(row.execution_json)) }),
+    revision: row.revision == null ? 0 : Number(row.revision),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+    approvedAt: row.approved_at == null ? null : String(row.approved_at),
+    completedAt: row.completed_at == null ? null : String(row.completed_at),
+    error: row.error == null ? null : String(row.error)
   };
 }
 
