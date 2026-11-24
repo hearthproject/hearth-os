@@ -1388,12 +1388,27 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  max-width: min(620px, 46vw);
   padding: 2px 8px;
   border: 1px solid var(--line);
   border-radius: 999px;
   color: var(--ink-tertiary);
   font-size: var(--fs-11);
   white-space: nowrap;
+}
+
+.chat-project-name {
+  flex: 0 0 auto;
+  color: var(--ink-secondary);
+}
+
+.chat-project-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink-tertiary);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+  font-size: 10px;
 }
 
 .chat-branch-chip {

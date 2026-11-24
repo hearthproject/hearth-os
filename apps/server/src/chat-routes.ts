@@ -5,7 +5,7 @@ import { basename, dirname, extname, join } from "node:path";
 import multipart from "@fastify/multipart";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
-import type { ChatAttachment, ChatMessageRecord, ContextUsageSnapshot, ExecutorHealth, ExecutorId, TaskRecord } from "@hearth/core";
+import type { ChatAttachment, ChatMessageRecord, ContextUsageSnapshot, ExecutorHealth, ExecutorId, LocalProject, TaskRecord } from "@hearth/core";
 import { defaultConversationSettings, EXECUTOR_IDS, mergeConversationSettings } from "@hearth/core";
 import { loadCodexProfile, probeCodex, type CodexProfile } from "@hearth/codex-executor";
 import { loadExecutorSettings, type ExecutorSettingsStore } from "./executor-settings.ts";
@@ -738,6 +738,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
         // not publish a partial visible-message estimate as the conversation
         // gauge (that produced values like "177 / 0%").
         const boundProject = conversation.projectId ? store.getLocalProject(conversation.projectId) : null;
+        const boundProjectContext = boundProject ? projectPromptBlock(boundProject) : "";
         const workspacePath = boundProject ? null : referencedFile ? dirname(referencedFile) : extractWorkspacePath(message);
         const fileInputs = storedFiles.map((file) => ({ label: file.name, path: file.path }));
         if (referencedFile) fileInputs.push({ label: basename(referencedFile), path: referencedFile });
@@ -746,6 +747,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
           || `处理附件：${storedFiles.map((file) => file.name).join("、")}`;
         const planInput = [
           message,
+          boundProjectContext,
           skillContext,
           delegatedChatContext,
           detectedUrl ? `参考网址：${detectedUrl}` : "",
@@ -829,7 +831,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
           task = service.createTask({
             title: route.title || conversationTitle(userContent),
             goal: taskGoal,
-            textInput: [message, skillContext, delegatedChatContext].filter(Boolean).join("\n\n"),
+            textInput: [message, boundProjectContext, skillContext, delegatedChatContext].filter(Boolean).join("\n\n"),
             fileInputs,
             ...(detectedUrl ? { url: detectedUrl } : {}),
             ...(boundProject ? { projectId: boundProject.id } : {}),
@@ -900,6 +902,8 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     let appendCurrentUser = false;
     let conversationSummary = "";
     let conversationTasks = "";
+    const chatProject = conversation.projectId ? store.getLocalProject(conversation.projectId) : null;
+    const projectContext = chatProject ? projectPromptBlock(chatProject) : "";
     if (options.conversationContext) {
       const rendered = await options.conversationContext.renderForChat(conversation.id, {
         currentMessageId: userRecord.id,
@@ -917,10 +921,11 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     let memoryContext = "";
     if (options.memory && !directDraft) {
       try {
+        const projectScope = conversation.projectId ? projectMemoryScope(conversation.projectId) : null;
         const recalled = options.memory.recallForConversation({
           conversationId: conversation.id,
           text: userContent,
-          ...(conversation.projectId ? { scopes: [projectMemoryScope(conversation.projectId)] } : {})
+          ...(projectScope ? { scope: projectScope, scopes: [projectScope] } : {})
         });
         if (recalled.memories.length > 0) {
           memoryContext = recalled.contextPack;
@@ -972,6 +977,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     ].filter(Boolean).join("\n\n");
     const systemContent = [
       baseSystemContent,
+      projectContext,
       personalContext,
       memoryContext,
       libraryContext,
@@ -986,6 +992,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     ];
     const contextBreakdown = {
       system: estimateContextTokens(baseSystemContent),
+      project: estimateContextTokens(projectContext),
       conversation: estimateContextTokens(conversationSummary),
       conversation_tasks: estimateContextTokens(conversationTasks),
       history: estimateContextTokens(history.map((item) => item.content).join("\n")),
@@ -1288,6 +1295,16 @@ function saveRegistryChatSettings(
   });
   registry.setChatProfile(created.id);
   return registry.chatSettings();
+}
+
+function projectPromptBlock(project: Pick<LocalProject, "name" | "path" | "defaultBranch">): string {
+  return [
+    "## 当前项目",
+    `- 项目名：${project.name}`,
+    `- 仓库路径：${project.path}`,
+    `- 默认分支：${project.defaultBranch || "main"}`,
+    "用户是从这个项目打开当前对话的。提到“这个项目 / 当前仓库 / 代码结构 / 文件 / 目录 / 命令 / 实现”时，默认都指上面的仓库路径；不要用其他项目或历史记忆里的路径替换它。需要路径时直接引用这个绝对路径。"
+  ].join("\n");
 }
 
 function isHttpUrl(value: string): boolean {

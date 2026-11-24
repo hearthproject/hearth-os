@@ -311,7 +311,6 @@ export function ChatPage() {
     : pendingProjectId
       ? projectsById.get(pendingProjectId) ?? null
       : null;
-  const currentProject = current?.projectId ? projectsById.get(current.projectId) ?? null : null;
   const serverDefaults = conversationDefaultsQuery.data?.settings ?? null;
   const rawSettings = current?.settings
     ?? conversationQuery.data?.conversation.settings
@@ -1159,6 +1158,7 @@ export function ChatPage() {
   const contextCompactAt = Math.floor(contextWindowTokens * 0.8);
   const contextBreakdownLabels: Record<string, string> = {
     system: "系统",
+    project: "项目",
     conversation: "对话摘要",
     conversation_tasks: "会话任务",
     history: "对话历史",
@@ -1210,16 +1210,17 @@ export function ChatPage() {
           <div className="chat-title-group">
             <span className="chat-header-mark" aria-hidden="true"><Folder size={16} /></span>
             <h1>{current?.title ?? "新对话"}</h1>
-            {(current ? projectsById.get(current.projectId ?? "") : activeProject) && (
+            {activeProject && (
               <>
-                <span className="chat-project-chip" title={current ? projectsById.get(current.projectId ?? "")?.path : activeProject?.path}>
+                <span className="chat-project-chip" title={activeProject.path}>
                   <Folder size={12} />
-                  {(current ? projectsById.get(current.projectId ?? "") : activeProject)?.name}
+                  <span className="chat-project-name">{activeProject.name}</span>
+                  <code className="chat-project-path">{activeProject.path}</code>
                 </span>
-                {currentProject?.kind === "git" && (currentProject.currentBranch || currentProject.defaultBranch) && (
-                  <span className="chat-branch-chip" title={currentProject.currentBranch ?? currentProject.defaultBranch ?? ""}>
+                {activeProject.kind === "git" && (activeProject.currentBranch || activeProject.defaultBranch) && (
+                  <span className="chat-branch-chip" title={activeProject.currentBranch ?? activeProject.defaultBranch ?? ""}>
                     <GitBranch size={12} />
-                    <span>{currentProject.currentBranch ?? currentProject.defaultBranch}</span>
+                    <span>{activeProject.currentBranch ?? activeProject.defaultBranch}</span>
                   </span>
                 )}
                 {(current?.projectId || pendingProjectId) && (
@@ -1349,7 +1350,7 @@ export function ChatPage() {
                   <option value="">不绑定项目</option>
                   {projects.map((project) => (
                     <option key={project.id} value={project.id} disabled={!project.available}>
-                      {project.name}{project.kind === "git" ? "" : " · 文件夹"}
+                      {project.name} — {project.path}{project.kind === "git" ? "" : " · 文件夹"}
                     </option>
                   ))}
                 </select>

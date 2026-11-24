@@ -143,6 +143,10 @@ describe("chat-first API", () => {
       });
       expect(projectChat.statusCode).toBe(200);
       expect(JSON.stringify(requests[0]?.messages)).toContain("Ember private project memory marker");
+      const projectSystem = requests[0]?.messages.find((message: { role: string }) => message.role === "system")?.content as string;
+      expect(projectSystem).toContain("## 当前项目");
+      expect(projectSystem).toContain("Ember");
+      expect(projectSystem).toContain(root);
 
       const unrelatedChat = await app.inject({
         method: "POST",
