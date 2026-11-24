@@ -1,8 +1,8 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { ChatMessageRecord, TaskRecord } from "@hearth/core";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ChatAttachment, ChatMessageRecord, TaskRecord } from "@hearth/core";
 import { HearthStore } from "@hearth/eventlog";
 import { buildServer } from "./app.ts";
 import { ImBridgeService } from "./im-bridge.ts";
@@ -124,6 +124,107 @@ describe("IM bridge settings", () => {
     expect(replies).toEqual(["桌面有 2 个文件：报价表.xlsx、说明.txt。"]);
     expect(replies.join("\n")).not.toContain("收到，正在处理");
     expect(replies.join("\n")).not.toContain("开始执行");
+  });
+
+  it("streams WeChat deltas as sentence chunks without repeating the final answer", async () => {
+    const bridge = new ImBridgeService({
+      store,
+      secretBox: new SecretBox(Buffer.alloc(32, 9)),
+      baseUrl: () => "http://127.0.0.1:4319",
+      chatClient: {
+        send: async (_input: unknown, hooks?: { onDelta?: (text: string) => void }) => {
+          hooks?.onDelta?.("这是第一句完整的话。");
+          hooks?.onDelta?.("这是第二句。");
+          return {
+            conversationId: "ignored",
+            messages: [{
+              id: "msg-final",
+              conversationId: "im-conversation",
+              role: "assistant",
+              content: "这是第一句完整的话。这是第二句。",
+              taskId: null,
+              attachments: [],
+              createdAt: "2026-11-24T00:00:02.000Z",
+              kind: "text"
+            } satisfies ChatMessageRecord],
+            error: null
+          };
+        }
+      } as never
+    });
+    const replies: string[] = [];
+    const internal = bridge as unknown as {
+      deliverChat(channel: "wechat", text: string, reply: (text: string) => Promise<void>): Promise<void>;
+    };
+    await internal.deliverChat("wechat", "讲两句", async (text) => { replies.push(text); });
+    expect(replies.length).toBeGreaterThan(1);
+    expect(replies.join("")).toBe("这是第一句完整的话。这是第二句。");
+  });
+
+  it("uploads and sends a WeChat file_item for an assistant attachment", async () => {
+    const attachmentRoot = join(root, "attachments");
+    mkdirSync(attachmentRoot, { recursive: true });
+    const id = "11111111-2222-3333-4444-555555555555";
+    writeFileSync(join(attachmentRoot, `${id}.pptx`), "slides");
+    const requests: Array<{ url: string; body: unknown }> = [];
+    vi.stubGlobal("fetch", async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) as unknown : init?.body ?? null;
+      requests.push({ url, body });
+      if (url.endsWith("/ilink/bot/getuploadurl")) {
+        return new Response(JSON.stringify({ upload_full_url: "https://cdn.test/upload" }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      if (url === "https://cdn.test/upload") {
+        return new Response("", { status: 200, headers: { "x-encrypted-param": "download-param" } });
+      }
+      return new Response(JSON.stringify({ ret: 0 }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    });
+    try {
+      const bridge = new ImBridgeService({
+        store,
+        secretBox: new SecretBox(Buffer.alloc(32, 9)),
+        baseUrl: () => "http://127.0.0.1:4319",
+        attachmentRoot
+      });
+      const internal = bridge as unknown as {
+        sendWechat(
+          to: string,
+          contextToken: string,
+          text: string,
+          token: string,
+          attachments?: ChatAttachment[]
+        ): Promise<void>;
+      };
+      await internal.sendWechat(
+        "wx-user",
+        "ctx-token",
+        "已把《孙中山的一生.pptx》发给你。",
+        "bot-token",
+        [{ id, name: "孙中山的一生.pptx", mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation", bytes: 6 }]
+      );
+      expect(requests.some((request) => request.url.endsWith("/ilink/bot/getuploadurl"))).toBe(true);
+      expect(requests.some((request) => request.url === "https://cdn.test/upload")).toBe(true);
+      const fileMessage = requests
+        .map((request) => request.body as { msg?: { item_list?: Array<Record<string, unknown>> } })
+        .find((body) => body.msg?.item_list?.[0]?.type === 4);
+      expect(fileMessage?.msg?.item_list?.[0]).toMatchObject({
+        file_item: {
+          file_name: "孙中山的一生.pptx",
+          len: "6"
+        }
+      });
+      const aesKey = (fileMessage?.msg?.item_list?.[0] as { file_item?: { media?: { aes_key?: string } } })
+        ?.file_item?.media?.aes_key;
+      expect(Buffer.from(String(aesKey), "base64").toString("utf8")).toMatch(/^[0-9a-f]{32}$/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("starts disabled and never returns secrets", async () => {

@@ -32,6 +32,8 @@ export async function runProjectChat(options: {
   settings: ModelSettings;
   signal: AbortSignal;
   onProgress?: (message: string) => void;
+  /** Incremental assistant text from the native runtime, for live chat rendering. */
+  onDelta?: (text: string) => void;
 }): Promise<ProjectChatResult> {
   const workspaceDir = mkdtempSync(join(tmpdir(), "hearth-project-chat-"));
   const createdAt = new Date().toISOString();
@@ -75,6 +77,9 @@ export async function runProjectChat(options: {
       onAuthorizeTool: async () => ({ allowed: true }),
       onProgress: (event) => {
         if (event.kind === "tool" || event.kind === "narration") options.onProgress?.(event.message);
+      },
+      onContextEvent: (event) => {
+        if (event.type === "assistant.delta" && event.text) options.onDelta?.(event.text);
       }
     });
     return {

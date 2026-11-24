@@ -100,7 +100,11 @@ export interface FeishuChatResult {
 export interface FeishuChatClient {
   send(
     input: { conversationId?: string | undefined; message: string; attachments: ChatAttachment[] },
-    hooks?: { onTask?: (payload: unknown) => void }
+    hooks?: {
+      onTask?: (payload: unknown) => void;
+      /** Incremental assistant text as the model emits it, for IM streaming. */
+      onDelta?: (text: string) => void;
+    }
   ): Promise<FeishuChatResult>;
 }
 
@@ -237,7 +241,7 @@ export class LocalFeishuChatClient implements FeishuChatClient {
 
   async send(
     input: { conversationId?: string | undefined; message: string; attachments: ChatAttachment[] },
-    hooks: { onTask?: (payload: unknown) => void } = {}
+    hooks: { onTask?: (payload: unknown) => void; onDelta?: (text: string) => void } = {}
   ): Promise<FeishuChatResult> {
     const base = this.baseUrl();
     if (!base) throw new FeishuError("FEISHU_NOT_READY", "Hearth 本机服务尚未就绪", 503);
@@ -283,6 +287,9 @@ export class LocalFeishuChatClient implements FeishuChatClient {
               seen.add(message.id);
               messages.push(message);
             }
+          } else if (parsed.event === "delta") {
+            const text = typeof parsed.data.text === "string" ? parsed.data.text : "";
+            if (text) hooks.onDelta?.(text);
           } else if (parsed.event === "task") {
             hooks.onTask?.(parsed.data);
             const message = asChatMessage(parsed.data.message);

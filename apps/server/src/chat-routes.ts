@@ -21,6 +21,13 @@ import type { OntologyWriter } from "./ontology-writer.ts";
 import { ModelRegistryError, type ModelRegistry } from "./model-registry.ts";
 import { chatSystemPrompt, conversationTitle, decideRoute, planExecution, summarizeConversationTitle } from "./chat.ts";
 import { wantsSkillInstall } from "./task-intent.ts";
+import {
+  defaultLocalFileRoots,
+  extractFilePaths,
+  parseLocalFileRequest,
+  searchLocalFile,
+  storeOutgoingAttachment
+} from "./chat-file-delivery.ts";
 import { listModels, ModelClientError, completeChat, streamChat, type ChatMessage } from "./model-client.ts";
 import {
   MODEL_PRESETS,
@@ -577,6 +584,55 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       return reply;
     }
 
+    // "把孙中山的一生这个PPT发给我" is a file-delivery request, not a question.
+    // Resolve it natively so the model never has to claim it cannot attach files.
+    if (storedFiles.length === 0 && !detectedUrl) {
+      const fileRequest = parseLocalFileRequest(message);
+      if (fileRequest) {
+        const existingMessages = store.listChatMessages(conversation.id)
+          .filter((item) => item.id !== userRecord.id)
+          .slice(-12);
+        const hintPaths = existingMessages.flatMap((item) => extractFilePaths(item.content));
+        const conversationProject = conversation.projectId ? store.getLocalProject(conversation.projectId) : null;
+        const search = searchLocalFile(fileRequest, {
+          roots: defaultLocalFileRoots(conversationProject?.path ?? null),
+          hintPaths
+        });
+        if (search) {
+          try {
+            const attachment = storeOutgoingAttachment(search.path, attachmentRoot);
+            const content = `已把《${attachment.name}》发给你。`;
+            send("delta", { text: content });
+            const assistant = service.appendChatMessage({
+              id: randomUUID(),
+              conversationId: conversation.id,
+              role: "assistant",
+              content,
+              taskId: null,
+              attachments: [attachment],
+              createdAt: new Date().toISOString()
+            });
+            send("done", assistant);
+            finish(reply, send);
+            return reply;
+          } catch (error) {
+            sendPersistedError("FILE_DELIVERY_FAILED", `找到文件了，但发送失败：${errorMessage(error)}`);
+            finish(reply, send);
+            return reply;
+          }
+        }
+        if (fileRequest.extensions.length > 0) {
+          const type = fileRequest.extensions.map((extension) => extension.replace(/^\./, "")).join(" / ");
+          sendPersistedError(
+            "FILE_NOT_FOUND",
+            `我在桌面、下载和文档里没找到《${fileRequest.query}》这类 ${type} 文件。你可以把完整路径发给我，我再发送。`
+          );
+          finish(reply, send);
+          return reply;
+        }
+      }
+    }
+
     let skillContext = "";
     if (parsed.data.skillId && options.skills) {
       try {
@@ -1035,13 +1091,18 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
         breakdown: contextBreakdown
       }));
       try {
+        let streamedAnswer = "";
         const result = await runProjectChat({
           project: chatProject,
           title: conversation.title,
           prompt: projectAgentPrompt,
           settings,
           signal: controller.signal,
-          onProgress: (message) => send("reasoning", { text: `\n${message}` })
+          onProgress: (message) => send("reasoning", { text: `\n${message}` }),
+          onDelta: (text) => {
+            streamedAnswer += text;
+            send("delta", { text });
+          }
         });
         if (controller.signal.aborted) return reply;
         const answer = result.content || "项目会话执行完成，但没有返回可显示的回答。";
@@ -1054,7 +1115,13 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
         });
         options.conversationContext?.rememberUsage(conversation.id, usage);
         send("usage", usage);
-        send("delta", { text: answer });
+        // The native runtime streams assistant text through onDelta. Only send
+        // the tail that was not already delivered, otherwise live SSE clients
+        // and IM both append the full answer twice.
+        if (!streamedAnswer.trim()) send("delta", { text: answer });
+        else if (answer.startsWith(streamedAnswer) && answer.length > streamedAnswer.length) {
+          send("delta", { text: answer.slice(streamedAnswer.length) });
+        }
         const assistant = store.createChatMessage({
           id: randomUUID(),
           conversationId: conversation.id,
@@ -1293,6 +1360,12 @@ const ATTACHMENT_MIME: Record<string, string> = {
   ".ico": "image/x-icon",
   ".avif": "image/avif",
   ".pdf": "application/pdf",
+  ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ".ppt": "application/vnd.ms-powerpoint",
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".doc": "application/msword",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".xls": "application/vnd.ms-excel",
   ".mp4": "video/mp4",
   ".webm": "video/webm",
   ".mp3": "audio/mpeg",

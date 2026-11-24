@@ -865,6 +865,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     store,
     secretBox,
     baseUrl: () => "",
+    attachmentRoot,
     ...(options.feishuChatClient ? { chatClient: options.feishuChatClient } : {})
   });
   const executorHealth = (executorId: ExecutorId): ExecutorHealth => {

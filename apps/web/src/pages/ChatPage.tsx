@@ -1770,6 +1770,21 @@ const ChatBubble = memo(function ChatBubble({
         copyText={message.content}
         createdAt={message.createdAt}
       />
+      {message.attachments.length > 0 && (
+        <div className="message-attachments assistant-attachments">
+          {message.attachments.map((attachment) => (
+            <button
+              key={attachment.id}
+              type="button"
+              className="message-attachment"
+              onClick={() => onPreview(attachmentPreviewTarget(attachment))}
+              title="在侧边栏预览或下载"
+            >
+              <FileText size={12} /> {attachment.name}
+            </button>
+          ))}
+        </div>
+      )}
       {message.taskId && message.kind !== "task_status" && <TaskAnswerFiles taskId={message.taskId} onPreview={onPreview} />}
     </div>
   );

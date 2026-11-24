@@ -11,6 +11,7 @@ import { HearthService } from "./service.ts";
 import {
   FeishuService,
   FeishuSettingsStore,
+  LocalFeishuChatClient,
   parseFeishuMessage,
   type FeishuChatClient,
   type FeishuChatResult,
@@ -426,6 +427,38 @@ describe("Feishu notifications and approvals", () => {
     transport.handler?.(reject);
     await waitFor(() => transport.sent.some((text) => text.includes("没有找到")));
     expect(decisions).toHaveLength(0);
+  });
+});
+
+describe("local Hearth chat client", () => {
+  it("forwards incremental delta events while keeping the final message", async () => {
+    const done = {
+      id: "msg-1",
+      conversationId: "conv-1",
+      role: "assistant",
+      content: "第一段。第二段。",
+      taskId: null,
+      attachments: [],
+      createdAt: "2026-11-24T00:00:00.000Z",
+      kind: "text"
+    };
+    const sse = [
+      `event: conversation\ndata: ${JSON.stringify({ id: "conv-1" })}\n\n`,
+      `event: delta\ndata: ${JSON.stringify({ text: "第一段。" })}\n\n`,
+      `event: delta\ndata: ${JSON.stringify({ text: "第二段。" })}\n\n`,
+      `event: done\ndata: ${JSON.stringify(done)}\n\n`
+    ].join("");
+    const client = new LocalFeishuChatClient(
+      () => "http://127.0.0.1:4319",
+      async () => new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } })
+    );
+    const deltas: string[] = [];
+    const result = await client.send(
+      { conversationId: "conv-1", message: "讲两句", attachments: [] },
+      { onDelta: (text) => deltas.push(text) }
+    );
+    expect(deltas).toEqual(["第一段。", "第二段。"]);
+    expect(result.messages[0]?.content).toBe("第一段。第二段。");
   });
 });
 
