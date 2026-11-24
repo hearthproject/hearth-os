@@ -40,7 +40,7 @@ export const AGENT_PROFILES: Record<SubagentType, AgentProfile> = {
     tools: EXPLORE_TOOLS,
     mode: "plan",
     isolation: "readonly",
-    budget: { maxTurns: 80, maxToolCalls: 120, maxTokens: 1_500_000, maxDurationMs: 60 * 60 * 1_000 },
+    budget: {},
     outputContract: "Return a compact file list, key line numbers, conclusions and open questions. Do not edit."
   },
   plan: {
@@ -49,7 +49,7 @@ export const AGENT_PROFILES: Record<SubagentType, AgentProfile> = {
     tools: PLAN_TOOLS,
     mode: "plan",
     isolation: "readonly",
-    budget: { maxTurns: 80, maxToolCalls: 120, maxTokens: 1_500_000, maxDurationMs: 60 * 60 * 1_000 },
+    budget: {},
     outputContract: "Return ordered steps, 3-5 key files and concrete risks. Do not edit."
   },
   review: {
@@ -58,16 +58,16 @@ export const AGENT_PROFILES: Record<SubagentType, AgentProfile> = {
     tools: REVIEW_TOOLS,
     mode: "plan",
     isolation: "readonly",
-    budget: { maxTurns: 80, maxToolCalls: 120, maxTokens: 1_500_000, maxDurationMs: 60 * 60 * 1_000 },
+    budget: {},
     outputContract: "Return findings sorted by severity, each with file:line and a suggested fix. Do not edit."
   },
   "general-purpose": {
     type: "general-purpose",
-    description: "Implement a bounded task in an isolated worktree, run tests and commit.",
+    description: "Implement an isolated task in a worktree, run tests and commit.",
     tools: [],
     mode: "build",
     isolation: "worktree",
-    budget: { maxTurns: 200, maxToolCalls: 300, maxTokens: 3_000_000, maxDurationMs: 4 * 60 * 60 * 1_000 },
+    budget: {},
     outputContract: "Return a summary, changed files, test results and the commit SHA. Do not merge or push."
   }
 };

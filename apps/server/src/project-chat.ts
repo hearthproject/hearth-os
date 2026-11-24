@@ -70,7 +70,7 @@ export async function runProjectChat(options: {
       prompt: options.prompt,
       expectedOutputs: [],
       signal: options.signal,
-      budget: { maxTurns: 24, maxToolCalls: 48, maxDurationMs: 600_000 },
+      // Product invariant: conversations run without turn, tool-call or duration budgets.
       isFullPermission: () => true,
       onAuthorizeTool: async () => ({ allowed: true }),
       onProgress: (event) => {

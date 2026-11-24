@@ -1093,7 +1093,13 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
         }
         answer += delta;
         send("delta", { text: delta });
-      }, { signal: controller.signal, temperature: 0.5, timeoutMs: 180_000, reasoningEffort: settings.reasoningEffort ?? "max", ...(directDraft ? { maxTokens: 1200 } : {}) });
+      }, {
+        signal: controller.signal,
+        temperature: 0.5,
+        timeoutMs: 180_000,
+        reasoningEffort: settings.reasoningEffort ?? "max",
+        maxTokens: settings.maxOutputTokens
+      });
       const usage = contextUsagePayload({
         settings,
         source: result.usage ? "measured" : "estimated",
