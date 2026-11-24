@@ -705,10 +705,15 @@ function chineseDescription(skill: SkillRecord): string | null {
 
 function renderSkillPrompt(skill: SkillRecord, raw: string): string {
   const body = raw.length > MAX_PROMPT_CHARS ? `${raw.slice(0, MAX_PROMPT_CHARS)}\n\n（Skill 内容过长，已截断。）` : raw;
+  const compatibility = /AskUserQuestion|ask_user/i.test(body)
+    ? "工具名兼容：Skill 文本中的 AskUserQuestion 在 Hearth 中对应 ask_user。需要提问时调用 ask_user，一次只问一个问题，并等待用户回答；如果 Skill 要求提供选项，把 2–4 个选项写进 question 文本。不要改成直接作答或自行假设。"
+    : "";
   return [
     `请使用「${skill.name}」这个 Skill 来完成接下来的请求。`,
     `Skill 目录：${skill.path}`,
     "需要时可以直接读取目录里的资源文件；不要把 Skill 里的示例内容当作已经完成的工作。",
+    "按 Skill 规定的流程执行；不要用一次性总结替代它要求的交互步骤。",
+    ...(compatibility ? [compatibility] : []),
     "",
     "--- Skill 使用说明 ---",
     body

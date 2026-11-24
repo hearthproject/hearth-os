@@ -25,7 +25,8 @@ describe("SkillService", () => {
       "---",
       "# Writing Helper",
       "",
-      "先整理提纲，再给正文。"
+      "先整理提纲，再给正文。",
+      "需要澄清时使用 AskUserQuestion 追问。"
     ].join("\n"), "utf8");
     writeFileSync(join(source, "references", "guide.md"), "写作指南", "utf8");
     writeFileSync(join(source, ".env"), "SECRET=should-not-copy", "utf8");
@@ -49,7 +50,10 @@ describe("SkillService", () => {
     expect(store.getSkill(result.skill.id)?.sourceUrl).toMatch(/^file:/);
     expect(store.getSkill(result.skill.id)?.actions).toEqual([]);
     expect(skills.list()).toHaveLength(1);
-    expect(skills.use(result.skill.id).prompt).toContain("先整理提纲");
+    const used = skills.use(result.skill.id);
+    expect(used.prompt).toContain("先整理提纲");
+    expect(used.prompt).toContain("AskUserQuestion 在 Hearth 中对应 ask_user");
+    expect(used.prompt).toContain("等待用户回答");
   });
 
   it("updates only when asked and keeps the previous version", async () => {

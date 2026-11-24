@@ -131,7 +131,6 @@ export class NativeExecutorAdapter implements ExecutorAdapter {
         }
       : undefined;
     const permissions = withExtraToolPermissions(nativePermissionsFor(input.task, input.prepared), input.extraNativeTools ?? []);
-    if (input.fullPermission) permissions.tools = permissions.tools.filter((tool) => tool !== "ask_user");
     const outcome = await this.runner({
       task: input.task,
       prepared: input.prepared,

@@ -362,7 +362,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
         service.updateTask(task.id, {
           status: "queued",
           nextAction: "完全权限已开启，自动继续",
-          pendingInput: "当前对话已切换为完全权限。请自行决策并继续完成剩余工作，不要再询问用户。"
+          pendingInput: "当前对话已切换为完全权限。请继续执行；只有无法从项目或环境中判断的关键歧义才调用 ask_user。"
         }, task.currentRunId ?? undefined);
       }
     }
@@ -1020,7 +1020,8 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
           memoryContext,
           libraryContext,
           skillContext,
-          "当前会话绑定了一个本地项目并拥有完全权限。需要了解代码、文件或结构时，必须调用工具读取真实项目；除非用户明确要求修改，否则不要写入或删除项目文件。最终用自然语言回答当前请求。",
+          "当前会话绑定了一个本地项目并拥有完全权限。需要了解代码、文件或结构时，必须调用工具读取真实项目；除非用户明确要求修改，否则不要写入或删除项目文件。",
+          "如果本轮选择了 Skill，必须优先按 Skill 的流程推进；Skill 要求提问时调用 ask_user 并等待用户回答，不要替用户决定，也不要用一次性总结跳过交互。",
           "历史消息中如果出现其他仓库路径或与当前工作区不一致的结论，一律以当前项目路径和工具读取到的真实文件为准。"
         ].filter(Boolean).join("\n\n")
       : "";

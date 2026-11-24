@@ -108,6 +108,33 @@ describe("executor adapters", () => {
     expect(permissions.tools).toContain("read_desktop_file");
   });
 
+  it("keeps ask_user available when full permission is enabled", async () => {
+    const root = tempRoot();
+    let observedTools: string[] = [];
+    const adapter = new NativeExecutorAdapter(async (options) => {
+      observedTools = [...(options.permissions?.tools ?? [])];
+      return {
+        status: "completed",
+        finalResponse: "done",
+        usage: { inputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0 },
+        turns: 1,
+        toolCalls: 0,
+        question: null,
+        outputs: []
+      };
+    });
+    await adapter.execute({
+      ...invocation(defaultExecutorSettings(), root),
+      task: {
+        ...invocation(defaultExecutorSettings(), root).task,
+        networkHosts: []
+      },
+      fullPermission: true,
+      nativeSettings: { protocol: "openai-chat" } as ExecutorInvocation["nativeSettings"]
+    });
+    expect(observedTools).toContain("ask_user");
+  });
+
   it("keeps an explicit tool restriction instead of adding builtin tools", () => {
     const root = tempRoot();
     const task = {

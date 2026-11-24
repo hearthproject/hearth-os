@@ -315,9 +315,8 @@ describe("agent runtime", () => {
     expect(result.question).toBe("预算上限是多少？");
   });
 
-  it("continues autonomously when ask_user runs after switching to full permission", async () => {
+  it("still pauses for user input when ask_user runs in full permission", async () => {
     const root = workspace(roots);
-    const notices: string[] = [];
     const result = await runAgent({
       model: fakeModel([
         turn("", [call("ask_user", { question: "要用哪个方案？" })]),
@@ -330,15 +329,11 @@ describe("agent runtime", () => {
       permissions: defaultTaskPermissions({ workspaceRoot: root, outDir: join(root, "out"), networkHosts: [] }),
       workspaceRoot: root,
       outDir: join(root, "out"),
-      isFullPermission: () => true,
-      onEvent: (event) => {
-        if (event.type === "notice") notices.push(event.message);
-      }
+      isFullPermission: () => true
     });
 
-    expect(result.status).toBe("completed");
-    expect(result.summary).toContain("自行选择");
-    expect(notices.join(" ")).toContain("完全权限");
+    expect(result.status).toBe("waiting_input");
+    expect(result.question).toBe("要用哪个方案？");
   });
 
   it("rejects tools that are not in the task permissions", async () => {
