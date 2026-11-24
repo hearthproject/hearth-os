@@ -179,11 +179,15 @@ export function goalProgressDigest(parts: {
   summary: string;
   intentEvidence: string[];
 }): string {
-  const source = [
+  const structural = [
     ...parts.artifactHashes.map((value) => value.trim()).sort(),
-    parts.summary.replace(/\s+/g, " ").trim(),
     ...parts.intentEvidence.map((value) => value.trim()).sort()
-  ].join("\u0000");
+  ];
+  // Once a round leaves artifacts or evidence, prose changes alone are not progress.
+  // With no structural output, fall back to the normalized summary so text-only work
+  // can still be distinguished between rounds.
+  const source = (structural.length > 0 ? structural : [parts.summary.replace(/\s+/g, " ").trim()])
+    .join("\u0000");
   // FNV-1a 64-bit, expressed without Node-only APIs so core stays browser-safe.
   let hash = 0xcbf29ce484222325n;
   const prime = 0x100000001b3n;

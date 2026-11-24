@@ -145,6 +145,9 @@ describe("goal helpers", () => {
     const second = goalProgressDigest({ artifactHashes: ["a", "b"], summary: "done", intentEvidence: [] });
     expect(first).toBe(second);
     expect(goalProgressDigest({ artifactHashes: ["a", "c"], summary: "done", intentEvidence: [] })).not.toBe(first);
+    expect(goalProgressDigest({ artifactHashes: ["a", "b"], summary: "different prose", intentEvidence: [] })).toBe(first);
+    expect(goalProgressDigest({ artifactHashes: [], summary: "a", intentEvidence: [] }))
+      .not.toBe(goalProgressDigest({ artifactHashes: [], summary: "b", intentEvidence: [] }));
   });
 
   it("backs off after consecutive failures", () => {

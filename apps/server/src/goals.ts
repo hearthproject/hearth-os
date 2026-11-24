@@ -446,7 +446,7 @@ export class GoalService {
   }
 
   async onRunCompleted(input: RunCompletedInput): Promise<GoalRoundDecision> {
-    const goal = this.goalForTask(input.task);
+    let goal = this.goalForTask(input.task);
     if (!goal) return { action: "none" };
     let round = this.service.store.listGoalRounds(goal.goalId).find((item) => item.runIds.includes(input.run.id)) ?? null;
     if (!round) {
@@ -454,6 +454,7 @@ export class GoalService {
       this.appendGoal("goal.updated", opened.goalNext);
       round = opened.round;
       this.saveRound(round, "goal.round.started");
+      goal = opened.goalNext;
     }
     const intent = readGoalIntent(input.outDir);
     const artifacts = this.service.store.listArtifacts(input.task.id)
