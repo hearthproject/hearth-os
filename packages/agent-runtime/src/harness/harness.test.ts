@@ -173,7 +173,7 @@ describe("todo and command policy", () => {
   it("allows only read-only commands in plan mode", () => {
     expect(commandPolicyIssue("git status --short", { planMode: true })).toBeNull();
     expect(commandPolicyIssue("rg TODO src", { planMode: true })).toBeNull();
-    expect(commandPolicyIssue("npm test", { planMode: true })).toBeNull();
+    expect(commandPolicyIssue("npm test", { planMode: true })).toContain("plan mode");
     expect(commandPolicyIssue("rm -rf build", { planMode: true })).toBeTruthy();
     expect(commandPolicyIssue("git push origin main", { planMode: true })).toBeTruthy();
     expect(commandPolicyIssue("echo x > file", { planMode: true })).toBeTruthy();

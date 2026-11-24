@@ -486,7 +486,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     return true;
   }
 
-  function finish(status: AgentRunStatus, resultSummary: string, outputs: string[] = [], question: string | null = null, failure?: AgentFailure): AgentRunResult {
+  function finish(status: AgentRunStatus, resultSummary: string, outputs: string[] = [], question: string | null = null, failure?: AgentFailure, planPath?: string): AgentRunResult {
     if (stallTimer) {
       clearInterval(stallTimer);
       stallTimer = null;
@@ -514,6 +514,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       toolCalls,
       outputs,
       question,
+      ...(planPath ? { planPath } : {}),
       ...(effectiveFailure ? { failure: effectiveFailure } : {}),
       metrics: {
         contextPeaks: [...contextPeaks],
@@ -862,14 +863,6 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
 
     const goalRoot = options.goalRoot ?? options.workspaceRoot;
     const activeGoal = readGoalByRoot(goalRoot);
-    if (activeGoal?.status === "active" && options.maxGoalRounds !== undefined) {
-      const maxGoalRounds = Math.max(1, options.maxGoalRounds);
-      if (turns >= maxGoalRounds) {
-        const question = `持久目标「${activeGoal.title}」已达到 ${maxGoalRounds} 轮上限，是否继续执行？`;
-        await checkpoint("turn", true);
-        return finish("waiting_input", `目标已达到 ${maxGoalRounds} 轮上限，请确认是否继续。`, [], question);
-      }
-    }
 
     if (options.steering) {
       const pending = options.steering();
@@ -1077,13 +1070,12 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
 
     if (turn.toolCalls.length === 0) {
       const goalPrompt = goalContinuationPrompt(goalRoot);
-      const maxGoalRounds = Math.max(1, options.maxGoalRounds ?? 256);
       const runningSubagents = runningActiveWork(state).filter((work) => work.kind === "subagent" && work.status === "running");
-      if (goalPrompt && goalContinuations < maxGoalRounds && runningSubagents.length === 0) {
+      if (goalPrompt && runningSubagents.length === 0) {
         goalContinuations += 1;
         emit({ type: "notice", message: "检测到进行中的持久目标，继续执行而不是结束这一轮。" });
-        emit({ type: "goal.round", round: goalContinuations, maxRounds: maxGoalRounds, goalId: activeGoal?.goalId ?? "unknown" });
-        journalAppend({ type: "goal.round", round: goalContinuations, maxRounds: maxGoalRounds, goalId: activeGoal?.goalId ?? "unknown" });
+        emit({ type: "goal.round", round: goalContinuations, goalId: activeGoal?.goalId ?? "unknown" });
+        journalAppend({ type: "goal.round", round: goalContinuations, goalId: activeGoal?.goalId ?? "unknown" });
         messages.push({ role: "user", content: `${goalPrompt}\n\n继续执行下一步；只有成功标准全部满足后才调用 finish_task。` });
         await checkpoint("turn");
         continue;
@@ -1446,7 +1438,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         summary = plan;
         await checkpoint("plan", true);
         clearExecuting();
-        return finish("waiting_input", plan, result.outputs ?? [], plan);
+        return finish("waiting_input", plan, result.outputs ?? [], plan, undefined, state.planPath ?? undefined);
       }
       if (result.action === "ask_user") {
         if (options.isFullPermission?.()) {

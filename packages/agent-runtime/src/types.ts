@@ -273,7 +273,7 @@ export type RuntimeEvent =
   | { type: "retry.started"; attempt: number }
   | { type: "stall.warned"; idleMs: number }
   | { type: "stall.detected"; idleMs: number }
-  | { type: "goal.round"; round: number; maxRounds: number; goalId: string }
+  | { type: "goal.round"; round: number; maxRounds?: number; goalId: string }
   | { type: "job.registered"; jobId: string; kind: "shell" | "background_tool" | "subagent"; status: string }
   | { type: "job.settled"; jobId: string; kind: "shell" | "background_tool" | "subagent"; status: string }
   | { type: "journal.failed"; message: string }
@@ -418,6 +418,7 @@ export interface AgentRunResult {
   toolCalls: number;
   outputs: string[];
   question: string | null;
+  planPath?: string;
   metrics?: AgentRunMetrics;
   failure?: AgentFailure;
 }

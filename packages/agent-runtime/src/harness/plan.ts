@@ -5,7 +5,9 @@ import type { AgentTool, AgentToolContext, AgentToolResult } from "../types.ts";
 
 const READ_ONLY_TOOLS = new Set([
   "read_file",
+  "read_desktop_file",
   "read_document",
+  "read_tool_output",
   "list_files",
   "search_text",
   "glob",
@@ -14,6 +16,9 @@ const READ_ONLY_TOOLS = new Set([
   "todo_read",
   "todo_write",
   "shell_output",
+  "fetch_url",
+  "memory_read",
+  "memory_search",
   "ask_user",
   "submit_plan"
 ]);
@@ -21,8 +26,7 @@ const READ_ONLY_TOOLS = new Set([
 const READ_ONLY_COMMANDS = [
   /^git\s+(status|diff|log|show|branch|rev-parse|ls-files|blame|grep)\b/i,
   /^(ls|pwd|cat|head|tail|wc|find|rg|grep|sed\s+-n|awk)\b/i,
-  /^(node\s+--version|npm\s+--version|python\s+--version|go\s+version|cargo\s+--version)\b/i,
-  /^(npm|pnpm|yarn|bun)\s+(test|run\s+test|lint|typecheck)\b/i
+  /^(node\s+--version|npm\s+--version|python\s+--version|go\s+version|cargo\s+--version)\b/i
 ];
 
 export function planModeAllowsTool(name: string): boolean {

@@ -1,4 +1,5 @@
 export * from "./types.ts";
+export * from "./prompts.ts";
 export * from "./errors.ts";
 export * from "./retry-policy.ts";
 export * from "./journal.ts";

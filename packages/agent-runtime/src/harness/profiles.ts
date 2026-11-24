@@ -1,30 +1,14 @@
 import type { RunBudget, TaskRecord } from "@hearth/core";
 import type { HarnessProfile } from "../types.ts";
 
-// Bounded defaults for coding runs. A caller can still widen or disable a
-// dimension explicitly; undefined fields fall back to these values.
-export const CODING_RUN_BUDGET: RunBudget = {
-  maxTurns: 500,
-  maxToolCalls: 1_000,
-  maxTokens: 8_000_000,
-  maxDurationMs: 12 * 60 * 60 * 1_000
-};
+// A run has no product-level ceiling. Callers may still pass an explicit
+// budget for a bounded sub-run; undefined dimensions stay unlimited.
+export const CODING_RUN_BUDGET: RunBudget = {};
 
-export const GENERAL_RUN_BUDGET: RunBudget = {
-  maxTurns: 200,
-  maxToolCalls: 300,
-  maxTokens: 3_000_000,
-  maxDurationMs: 4 * 60 * 60 * 1_000
-};
+export const GENERAL_RUN_BUDGET: RunBudget = {};
 
-export function withBudgetDefaults(budget: RunBudget | undefined, defaults: RunBudget): RunBudget {
-  const value = budget ?? {};
-  return {
-    maxTurns: value.maxTurns ?? defaults.maxTurns,
-    maxToolCalls: value.maxToolCalls ?? defaults.maxToolCalls,
-    maxTokens: value.maxTokens ?? defaults.maxTokens,
-    maxDurationMs: value.maxDurationMs ?? defaults.maxDurationMs
-  };
+export function withBudgetDefaults(budget: RunBudget | undefined, _defaults: RunBudget): RunBudget {
+  return { ...(budget ?? {}) };
 }
 
 export function codingHarnessEnabled(): boolean {
