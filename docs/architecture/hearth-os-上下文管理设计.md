@@ -175,20 +175,31 @@ flowchart LR
 
 ---
 
-## 5. 两套压缩，别混为一谈
+## 5. 三套压缩，别混为一谈
 
-项目里有两套都会"调模型做摘要"的机制，但目的和作用域完全不同：
+项目里现在有三套都会"调模型做摘要"的机制，目的和作用域各不相同：
 
-| | 进程内消息压缩 | 服务端账本摘要 |
-| --- | --- | --- |
-| 位置 | `packages/agent-runtime/src/compaction.ts` | `apps/server/src/context-summary.ts` + `context.ts` |
-| 对象 | 内存中的消息数组 | 持久化的任务上下文条目 |
-| 触发 | 逼近模型上下文窗口；模型报"上下文溢出"时强制压缩并重试一次 | 累计 token 超过摘要阈值；每轮运行结束 / 失败 / 用户干预后异步刷新 |
-| 做法 | 截断过长的工具输出，保留 system + 首条用户消息 + 最近消息，中段交给模型摘要后插回 | 确定性模板摘要 + 模型补充摘要，推进水位 |
-| 生命周期 | 本轮对话结束即消失 | 跨运行、跨执行器复用，是交接包正文 |
-| 是否共享状态 | 否 | 否 |
+| | 进程内消息压缩 | 服务端任务账本摘要 | 对话级共享上下文压缩 |
+| --- | --- | --- | --- |
+| 位置 | `packages/agent-runtime/src/compaction.ts` | `apps/server/src/context-summary.ts` + `context.ts` | `apps/server/src/conversation-context.ts` |
+| 对象 | 内存中的消息数组 | 持久化的任务上下文条目 | 一个对话里的消息 + 任务结果 |
+| 触发 | 逼近模型上下文窗口；模型报"上下文溢出"时强制压缩并重试一次 | 累计 token 超过摘要阈值；每轮运行结束 / 失败 / 用户干预后异步刷新 | 每轮任务 / 聊天前按预算与模型窗口自动触发，也可手动 `POST /api/conversations/:id/context/compact` |
+| 做法 | 截断过长的工具输出，保留 system + 首条用户消息 + 最近消息，中段交给模型摘要后插回 | 确定性模板摘要 + 模型补充摘要，推进水位 | 结构化摘要 + 最近消息尾巴；旧摘要与新片段合并，事实按 key 去重并标记 superseded |
+| 生命周期 | 本轮对话结束即消失 | 跨运行、跨执行器复用，是交接包正文 | 跟随 conversation 持久化，所有执行器每轮读取同一份 |
+| 是否共享状态 | 否 | 仅任务内 | 是，跨 Native / Codex / DSH |
 
-两者没有共享代码、共享状态或互相调用 —— 一个解决"模型窗口装不下"，一个解决"下一位执行者不了解过去"。
+三者没有共享代码或互相调用 —— 一个解决"模型窗口装不下"，一个解决"下一位执行者不了解这个任务"，第三个解决"换执行器后看不到同一段对话"。
+
+### 5.1 对话级共享上下文的边界
+
+- **一条对话总线，三条执行器车道**。Hearth 不合并 Codex 的私有 `thread_id`、DSH 的私有 `sessionId`，也不合并 Native 的 checkpoint；它只维护 conversation 级的 canonical brief，每轮以文本块注入提示词，三种执行器读同一份。
+- **持久消息不删除**。压缩只影响投影：`chat_messages` 与任务结果原样保留，摘要状态单独存 `conversation_context_state`，压缩审计存 `conversation_compactions`。
+- **每轮先压缩、再投影**。任务与聊天都按 `conversationCompactRatio`（默认 0.8）和 `conversationContextBudgetTokens`（默认 12 000）判断；聊天还叠加模型窗口的 `maxOutputTokens` 与 15% headroom。
+- **保留尾巴与摘要边界**。默认保留最近 8 000 token，摘要最多 4 096 token 输出；`firstKeptMessageId` 记录尾巴起点，下一轮从该边界继续，避免旧消息滑出尾巴后再次丢失。
+- **结构化摘要字段**。`goal / constraints / facts / decisions / completed / blockers / nextSteps / openQuestions`；任务结果以 `completed` 留存，事实按 key 合并，旧值标 `superseded`。
+- **并发与失败降级**。同一 conversation 的压缩串行执行；模型摘要失败时退化为确定性摘要（保留上一份摘要 + 最近目标 + 最近任务），不阻断任务。
+- **可观测**。`GET /api/conversations/:id/context` 返回状态与最近 20 次压缩；压缩完成时发布 `conversation.context.compacted` 事件，payload 含 `version / tokensBefore / tokensAfter / summary`。
+- **参数**：`conversationContextEnabled`（默认开）、`conversationContextBudgetTokens`（12 000）、`conversationKeepTokens`（8 000）、`conversationSummaryMaxTokens`（4 096）、`conversationAutoCompact`（开）、`conversationCompactRatio`（0.8）。
 
 ---
 
@@ -196,7 +207,7 @@ flowchart LR
 
 - **指标**（`context-metrics.ts`）：接管总数 / 自动与用户确认占比 / 各状态分布 / 成功率、平均交接包 token、平均恢复耗时、规则与模型诊断次数及耗时、账本规模；
 - **HTTP 能力**：上下文设置读写、任务上下文快照分页浏览、交接列表查看、用户确认接管、彻底删除某任务上下文（含 blob 回收）；
-- **可调参数**：模式、最大接管次数（默认 2）、同执行器重试次数（默认 1）、保留天数（默认 30）、单条内联上限（默认 16 KB）、投影预算（默认 12 000）、摘要阈值（默认 8 000）、自动接管风险级别、是否允许 Codex 联网；
+- **可调参数**：模式、最大接管次数（默认 2）、同执行器重试次数（默认 1）、保留天数（默认 30）、单条内联上限（默认 16 KB）、投影预算（默认 12 000）、摘要阈值（默认 8 000）、对话共享上下文开关 / 预算 / 保留尾巴 / 摘要输出 / 自动压缩 / 触发比例、自动接管风险级别、是否允许 Codex 联网；
 - **默认预算**：聊天包 1 600 token；任务包取投影预算的 25%（默认 3 000）；交接提示词按 12 000 token 上限降级。
 
 ---
@@ -220,7 +231,7 @@ flowchart LR
 诚实标注几点，避免把"接口"当成"已实现"：
 
 - **检索索引只有接口定义，没有生产实现**：`context-index.ts` 定义了 `index / removeTask / search`，账本写入时会喂数据，但编译层实际走的是"词面 + 实体别名 + 一跳关系 + 时效"的轻量打分加限量扫描，不是向量检索；搜索接口在生产链路中没有调用点。
-- **水位字段目前只是元数据**：`context_watermark_seq` 被持久化并写进交接包，但运行时没有据此重放 / 续接上下文，防覆盖靠的是 generation。
+- **任务水位与对话边界不是一回事**：`context_watermark_seq` 被持久化并写进交接包，但运行时没有据此重放 / 续接任务上下文，防覆盖靠 generation；对话级压缩的 `firstKeptMessageId` 则会真实参与下一轮投影，用来跳过已摘要的消息。
 - **若干预留未接线**：诊断建议覆盖决策的函数、投影结果中的消息数组、投影用途枚举等已定义但主链路未消费。
 - **故障分类是两套并行机制**：一套负责"失败原因 → 建议动作"，另一套负责"重试 / 修复 / 对账 / 交接 / 停止"，后者不读取上下文模式。
 - **所有写入都吞异常**：可审计性让位于可用性，账本永远不能成为任务执行的单点故障。
@@ -236,6 +247,7 @@ flowchart LR
 | 投影：交接包构建、Markdown 渲染、提示词降级裁剪 | `apps/server/src/context-projector.ts` |
 | 策略：失败分类、接管资格、模式判定 | `apps/server/src/context-policy.ts` |
 | 模型补充摘要 | `apps/server/src/context-summary.ts` |
+| 对话级共享上下文与压缩 | `apps/server/src/conversation-context.ts` |
 | 模型诊断与 JSON 容错解析 | `apps/server/src/context-diagnosis.ts` |
 | 指标统计 | `apps/server/src/context-metrics.ts` |
 | 可插拔检索索引接口（暂无实现） | `apps/server/src/context-index.ts` |

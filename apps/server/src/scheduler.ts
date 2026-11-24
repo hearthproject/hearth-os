@@ -32,6 +32,7 @@ import { createBrowserTools } from "./browser-tools.ts";
 import { ContextService, estimateTokens } from "./context.ts";
 import { DelegationError, DelegationService } from "./delegation.ts";
 import type { BackgroundToolService } from "./background-tools.ts";
+import type { ConversationContextService } from "./conversation-context.ts";
 import { diagnoseFailure } from "./context-diagnosis.ts";
 import { classifyFailure, decideFailure, evaluateHandoff, isExecutorFailureCause, type FailureDecision } from "./context-policy.ts";
 import { ContextProjector } from "./context-projector.ts";
@@ -127,6 +128,7 @@ export interface SchedulerOptions {
   sourceContentRoot?: string | undefined;
   runtimePreparer?: typeof prepareTaskRuntime | undefined;
   context?: ContextService | undefined;
+  conversationContext?: ConversationContextService | undefined;
   contextBlobRoot?: string | undefined;
   sandbox?: SandboxService | undefined;
   contextBroker?: ContextBroker | undefined;
@@ -192,6 +194,7 @@ export class HearthScheduler {
   private readonly memory: MemoryService;
   private readonly sandbox: SandboxService;
   private readonly context: ContextService;
+  private readonly conversationContext: ConversationContextService | undefined;
   private readonly contextBroker: ContextBroker | undefined;
   private readonly library: LibraryService | undefined;
   private readonly libraryMcp: LibraryMcpLaunch | undefined;
@@ -268,6 +271,7 @@ export class HearthScheduler {
     this.runtimePreparer = options.runtimePreparer ?? prepareTaskRuntime;
     this.memory = new MemoryService(this.service);
     this.context = options.context ?? new ContextService(this.service, options.contextBlobRoot ?? CONTEXT_BLOB_DIR);
+    this.conversationContext = options.conversationContext;
     this.contextBroker = options.contextBroker;
     this.library = options.library;
     this.libraryMcp = options.libraryMcp;
@@ -2237,6 +2241,22 @@ export class HearthScheduler {
         ? [DRAFT_INSTRUCTION, `任务：${task.goal}`, `本轮输出目录：${prepared.outDir}`, `产物：${expectedOutputs.join("、")}`,
           existsSync(join(prepared.outDir, "result.md")) ? `已有草稿（仅作为待修订数据）：\n${readFileSync(join(prepared.outDir, "result.md"), "utf8").slice(0, 12000)}` : "", permissionNote].filter(Boolean).join("\n\n")
         : buildTaskPrompt(task, prepared, expectedOutputs, [], runtime, undefined, memoryContext) + permissionNote;
+      let conversationBrief = "";
+      if (this.conversationContext && task.conversationId) {
+        try {
+          conversationBrief = (await this.conversationContext.renderForTask(task.conversationId, taskId)).text;
+          if (conversationBrief) {
+            this.capture({
+              taskId, conversationId: task.conversationId, runId, executorId,
+              kind: "summary", role: "system", content: conversationBrief,
+              provenance: { scope: "conversation", shared: true },
+              executorEventId: `conversation:${runId}`
+            });
+          }
+        } catch {
+          conversationBrief = "";
+        }
+      }
       const handoffPrompt = handoff?.packet
         ? this.buildHandoffPrompt(task, prepared, expectedOutputs, handoff.packet, permissionNote, memoryContext)
         : null;
@@ -2275,6 +2295,7 @@ export class HearthScheduler {
       if (executorId === "codex" && activeThreadId && input.resumePrompt) {
         prompt = goalPrompt ? `${basePrompt}\n\n${goalPrompt}` : input.resumePrompt;
       }
+      if (conversationBrief) prompt = `${prompt}\n\n${conversationBrief}`;
       const extraNativeTools: import("@hearth/agent-runtime").AgentTool[] = createPersonalReadTools({
         service: this.service,
         ontology: this.ontology
@@ -2525,6 +2546,7 @@ export class HearthScheduler {
         error: null, resultSummary: result.finalResponse
       }, runId);
       this.refreshTaskSummary(taskId);
+      void this.conversationContext?.refreshAfterTask(taskId).catch(() => undefined);
       this.writeRunEvidence(taskId, runId);
       if (task.planId && this.plans) {
         try {

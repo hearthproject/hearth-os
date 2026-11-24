@@ -131,6 +131,18 @@ export class ContextService {
     if (patch.summarizeAfterTokens !== undefined && (!Number.isInteger(patch.summarizeAfterTokens) || patch.summarizeAfterTokens < 1000 || patch.summarizeAfterTokens > 500_000)) {
       throw new Error("摘要阈值必须在 1000 到 500000 token 之间");
     }
+    if (patch.conversationContextBudgetTokens !== undefined && (!Number.isInteger(patch.conversationContextBudgetTokens) || patch.conversationContextBudgetTokens < 1000 || patch.conversationContextBudgetTokens > 200_000)) {
+      throw new Error("对话上下文预算必须在 1000 到 200000 token 之间");
+    }
+    if (patch.conversationKeepTokens !== undefined && (!Number.isInteger(patch.conversationKeepTokens) || patch.conversationKeepTokens < 1000 || patch.conversationKeepTokens > 200_000)) {
+      throw new Error("对话保留尾巴必须在 1000 到 200000 token 之间");
+    }
+    if (patch.conversationSummaryMaxTokens !== undefined && (!Number.isInteger(patch.conversationSummaryMaxTokens) || patch.conversationSummaryMaxTokens < 256 || patch.conversationSummaryMaxTokens > 32_768)) {
+      throw new Error("对话摘要输出必须在 256 到 32768 token 之间");
+    }
+    if (patch.conversationCompactRatio !== undefined && (typeof patch.conversationCompactRatio !== "number" || !Number.isFinite(patch.conversationCompactRatio) || patch.conversationCompactRatio < 0.5 || patch.conversationCompactRatio > 0.95)) {
+      throw new Error("对话压缩触发比例必须在 0.5 到 0.95 之间");
+    }
     if (patch.autoHandoffRisk !== undefined && !["low", "none"].includes(patch.autoHandoffRisk)) {
       throw new Error("自动接管风险级别不正确");
     }

@@ -95,15 +95,16 @@ Codex 的绑定会生成独立的 `.hearth/executors/codex/config.toml`，固定
 
 ## 上下文生命周期
 
-上下文是所有执行器共用的任务级记录，不依附于某个 CLI 的私有会话。
+上下文分两层：任务级账本保证单个任务可恢复、可审计；对话级共享上下文保证用户在同一会话里切换 Native / Codex / DSH 后，每个执行器每轮看到同一份对话 brief。两者都持久化在 SQLite，不依赖 CLI 私有会话。
 
 1. **采集**：原生运行时、Codex、DeepSeek Harness 和外部 CLI 把消息、工具调用、工具结果、检查点和通知转成统一的 `ContextItem`。
 2. **去重**：`executor_event_id` 在同一运行内唯一，重复通知不会重复写入。
 3. **内联或落 blob**：正文超过 `maxInlineBytes` 时写入 `.hearth/context/blobs/<sha256>.txt`，数据库只保存 `content_ref`、`sha256` 和截断后的内联片段。
 4. **摘要**：条目增长到 `summarizeAfterTokens` 后刷新 `task_context_state`，保留目标、计划、已完成、失败、产物和未解决问题。
 5. **投影**：执行器启动或接管时，按 `projectionTokenBudget` 生成受预算约束的上下文投影，而不是把全部历史直接塞给 CLI。
-6. **交接**：`handoffs` 保存诊断、交接包、来源运行、目标运行和 `context_watermark_seq`；接管执行器从同一水位继续，避免旧结果覆盖新状态。
-7. **删除**：删除任务上下文时清理 `context_items`、`task_context_state` 和不再被引用的 blob；其他任务仍引用的内容不会误删。
+6. **对话共享**：`conversation_context_state` 保存当前摘要、`first_kept_message_id` 与 token 水位；`conversation_compactions` 保存每次压缩的触发方式、覆盖消息、模型用量和结果。任务提示词与聊天请求都注入同一个 `<hearth-conversation-context>`。
+7. **交接**：`handoffs` 保存诊断、交接包、来源运行、目标运行和 `context_watermark_seq`；接管执行器从同一水位继续，避免旧结果覆盖新状态。
+8. **删除**：删除任务上下文时清理 `context_items`、`task_context_state` 和不再被引用的 blob；删除对话时按 `conversation_id` 清理对话级摘要、压缩记录和其他对话数据。
 
 上下文模式支持 `off`、`shadow` 和 `on`。`shadow` 只记录不注入，适合先观察采集质量；`on` 才把投影用于执行和接管。
 

@@ -42,6 +42,7 @@ import { attachVerification, readTaskTurns, rewindTaskTurn, TaskRewindError } fr
 import { SandboxError, SandboxService } from "./sandbox.ts";
 import { SecurityError, SecurityService } from "./security.ts";
 import { ContextService } from "./context.ts";
+import { ConversationContextService } from "./conversation-context.ts";
 import { ContextBroker } from "./context-broker.ts";
 import { MentionResolver } from "./mentions.ts";
 import { OntologyService } from "./ontology.ts";
@@ -249,6 +250,12 @@ const contextSettingsPatchSchema = z.object({
   maxInlineBytes: z.number().int().min(1024).max(1_000_000).optional(),
   projectionTokenBudget: z.number().int().min(1000).max(200_000).optional(),
   summarizeAfterTokens: z.number().int().min(1000).max(500_000).optional(),
+  conversationContextEnabled: z.boolean().optional(),
+  conversationContextBudgetTokens: z.number().int().min(1000).max(200_000).optional(),
+  conversationKeepTokens: z.number().int().min(1000).max(200_000).optional(),
+  conversationSummaryMaxTokens: z.number().int().min(256).max(32_768).optional(),
+  conversationAutoCompact: z.boolean().optional(),
+  conversationCompactRatio: z.number().min(0.5).max(0.95).optional(),
   autoHandoffRisk: z.enum(["low", "none"]).optional(),
   allowCodexNetwork: z.boolean().optional()
 }).strict();
@@ -789,6 +796,11 @@ export async function buildServer(options: BuildServerOptions = {}) {
     if (!settings) return null;
     return { ...settings, reasoningEffort: executorSettingsStore.load().reasoningEffort ?? "max" as const };
   };
+  const conversationContext = new ConversationContextService({
+    service,
+    context,
+    modelSettings: () => modelRegistry.chatSettings() ?? modelSettingsForExecutor("native")
+  });
   if (options.librarySummaryGenerator !== null) {
     library.setSummaryGenerator(
       options.librarySummaryGenerator ?? createModelSummaryGenerator(() => modelSettingsForExecutor("native"))
@@ -861,6 +873,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
         goals,
         plans,
         context,
+        conversationContext,
         contextBroker,
         leases,
         delegations,
@@ -1000,6 +1013,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     approvals,
     goals,
     plans,
+    conversationContext,
     cancelTask: scheduler ? (taskId: string) => scheduler.cancel(taskId) : undefined,
     memory,
     library,

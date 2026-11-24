@@ -18,6 +18,8 @@ import { MemoryService } from "./memory.ts";
 import { TaskLeaseService } from "./leases.ts";
 import { SandboxService } from "./sandbox.ts";
 import type { ModelSettings } from "./model-settings.ts";
+import { ContextService } from "./context.ts";
+import { ConversationContextService } from "./conversation-context.ts";
 import type { DeepSeekHarnessRunOptions, DeepSeekHarnessRunResult, DshApprovalOutcome } from "@hearth/deepseek-executor";
 import { DEFAULT_RUN_BUDGET } from "./native-executor.ts";
 import { McpServerService } from "./mcp-servers.ts";
@@ -55,6 +57,72 @@ function nativeResult(text: string) {
 }
 
 describe("Hearth scheduler", () => {
+  it("injects the same conversation brief after switching executors", async () => {
+    const service = setup();
+    const conversation = store!.createConversation("跨执行器", defaultConversationSettings());
+    const context = new ContextService(service, join(requireTemp(), "context", "blobs"));
+    const conversationContext = new ConversationContextService({
+      service,
+      context,
+      summaryGenerator: async () => JSON.stringify({
+        goal: "共享上下文",
+        constraints: [],
+        facts: [],
+        decisions: [],
+        completed: [],
+        blockers: [],
+        nextSteps: [],
+        openQuestions: []
+      })
+    });
+    const codexPrompts: string[] = [];
+    scheduler = makeScheduler(service, async (options) => {
+      codexPrompts.push(options.prompt);
+      writeFileSync(join(options.outDir ?? requireTemp(), "result.md"), "161 个仓库，1 个 open PR：JasonBuildAI/GoldMind#22\n", "utf8");
+      return {
+        ...FAKE_RESULT,
+        threadId: "codex-thread",
+        finalResponse: "161 个仓库，1 个 open PR：JasonBuildAI/GoldMind#22"
+      };
+    }, {
+      context,
+      conversationContext,
+      modelSettingsForExecutor: () => chatSettings(),
+      nativeRunner: async (options) => {
+        expect(options.prompt).toContain("<hearth-conversation-context");
+        expect(options.prompt).toContain("JasonBuildAI/GoldMind#22");
+        writeFileSync(join(options.prepared.outDir, "result.md"), "已合并\n", "utf8");
+        return nativeResult("已合并");
+      }
+    });
+    scheduler.start();
+    const first = service.createTask({
+      title: "查 PR",
+      goal: "看看我的 GitHub 项目有几个开着的 PR",
+      conversationId: conversation.id,
+      executorId: "codex"
+    });
+    await waitForStatus(service, first.id, "completed");
+    const second = service.createTask({
+      title: "合并 PR",
+      goal: "为我直接合并 goldmind 这个 PR",
+      conversationId: conversation.id,
+      executorId: "native"
+    });
+    const completed = await waitForStatus(service, second.id, "completed");
+    expect(completed.resultSummary).toBe("已合并");
+
+    const third = service.createTask({
+      title: "继续",
+      goal: "总结刚才的结果",
+      conversationId: conversation.id,
+      executorId: "codex"
+    });
+    await waitForStatus(service, third.id, "completed");
+    expect(codexPrompts[1]).toContain("<hearth-conversation-context");
+    expect(codexPrompts[1]).toContain("已合并");
+  });
+
   it("finishes a direct file read without report repair passes", async () => {
     const service = setup();
     let calls = 0;
@@ -2069,6 +2137,8 @@ describe("Hearth scheduler", () => {
       modelSettingsForExecutor?: (executorId: ExecutorId) => ModelSettings | null;
       delegations?: DelegationService;
       mcpServers?: McpServerService;
+      context?: ContextService;
+      conversationContext?: ConversationContextService;
     } = {}
   ): HearthScheduler {
     return new HearthScheduler({

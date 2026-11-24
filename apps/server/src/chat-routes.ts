@@ -117,6 +117,7 @@ import type { LibraryService } from "./library/service.ts";
 import type { SkillService } from "./skills/service.ts";
 import type { GoalService } from "./goals.ts";
 import type { PlanService } from "./plans.ts";
+import type { ConversationContextService } from "./conversation-context.ts";
 
 export interface ChatRouteOptions {
   service: HearthService;
@@ -136,6 +137,7 @@ export interface ChatRouteOptions {
   memory?: MemoryService | undefined;
   library?: LibraryService | undefined;
   skills?: SkillService | undefined;
+  conversationContext?: ConversationContextService | undefined;
   personal?: {
     ontology: OntologyService;
     mentions: MentionResolver;
@@ -366,6 +368,31 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       }
     }
     return conversation;
+  });
+
+  app.get<{ Params: { id: string } }>("/api/conversations/:id/context", async (request, reply) => {
+    const conversation = store.getConversation(request.params.id);
+    if (!conversation) return reply.code(404).send({ error: "CONVERSATION_NOT_FOUND", message: "对话不存在" });
+    return {
+      state: store.getConversationContextState(conversation.id),
+      compactions: store.listConversationCompactions(conversation.id, 20)
+    };
+  });
+
+  app.post<{ Params: { id: string } }>("/api/conversations/:id/context/compact", async (request, reply) => {
+    const conversation = store.getConversation(request.params.id);
+    if (!conversation) return reply.code(404).send({ error: "CONVERSATION_NOT_FOUND", message: "对话不存在" });
+    if (!options.conversationContext) {
+      return reply.code(503).send({ error: "CONTEXT_NOT_READY", message: "对话上下文服务尚未启动" });
+    }
+    const compaction = await options.conversationContext.compactNow(conversation.id, "manual");
+    if (!compaction) {
+      return reply.code(409).send({ error: "NOTHING_TO_COMPACT", message: "当前没有可压缩的对话内容" });
+    }
+    return {
+      compaction,
+      state: store.getConversationContextState(conversation.id)
+    };
   });
 
   app.delete<{ Params: { id: string }; Body: unknown }>("/api/conversations/:id", async (request, reply) => {
@@ -677,7 +704,9 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     if (route.action === "task") {
       let createdGoalId: string | null = null;
       try {
-        const delegatedChatContext = taskChatContext(previousMessages);
+        const delegatedChatContext = options.conversationContext
+          ? (await options.conversationContext.renderForTask(conversation.id, undefined, userRecord.id)).text
+          : taskChatContext(previousMessages);
         send("usage", contextUsagePayload({
           settings,
           source: "estimated",
@@ -861,9 +890,24 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       return reply;
     }
 
-    const history = store.listChatMessages(conversation.id)
-      .slice(directDraft ? -8 : -24)
-      .map((item): ChatMessage => ({ role: item.role, content: item.content }));
+    let history: ChatMessage[];
+    let appendCurrentUser = false;
+    let conversationSummary = "";
+    let conversationTasks = "";
+    if (options.conversationContext) {
+      const rendered = await options.conversationContext.renderForChat(conversation.id, {
+        currentMessageId: userRecord.id,
+        settings
+      });
+      history = rendered.history.map((item): ChatMessage => ({ role: item.role, content: item.content }));
+      conversationSummary = rendered.summaryText;
+      conversationTasks = rendered.taskContext;
+      appendCurrentUser = true;
+    } else {
+      history = store.listChatMessages(conversation.id)
+        .slice(directDraft ? -8 : -24)
+        .map((item): ChatMessage => ({ role: item.role, content: item.content }));
+    }
     let memoryContext = "";
     if (options.memory && !directDraft) {
       try {
@@ -929,10 +973,15 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     ].filter(Boolean).join("\n\n");
     const messages: ChatMessage[] = [
       { role: "system", content: systemContent },
-      ...history
+      ...(conversationSummary ? [{ role: "user" as const, content: conversationSummary }] : []),
+      ...(conversationTasks ? [{ role: "user" as const, content: conversationTasks }] : []),
+      ...history,
+      ...(appendCurrentUser ? [{ role: "user" as const, content: userContent }] : [])
     ];
     const contextBreakdown = {
       system: estimateContextTokens(baseSystemContent),
+      conversation: estimateContextTokens(conversationSummary),
+      conversation_tasks: estimateContextTokens(conversationTasks),
       history: estimateContextTokens(history.map((item) => item.content).join("\n")),
       personal: estimateContextTokens(personalContext),
       memory: estimateContextTokens(memoryContext),
