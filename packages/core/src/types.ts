@@ -313,8 +313,22 @@ export interface TaskRecord {
   trashBatchId?: string | null;
 }
 
-export const GOAL_STATES = ["draft", "active", "blocked", "awaiting_user", "validating", "done", "failed", "cancelled"] as const;
+export const GOAL_STATES = ["draft", "active", "paused", "blocked", "awaiting_user", "validating", "done", "failed", "cancelled"] as const;
 export type GoalState = (typeof GOAL_STATES)[number];
+
+export const GOAL_STOP_REASONS = [
+  "host_restart",
+  "needs_input",
+  "approval",
+  "verifier",
+  "round_limit",
+  "deadline",
+  "budget",
+  "task_failed",
+  "no_progress",
+  "user_stop"
+] as const;
+export type GoalStopReason = (typeof GOAL_STOP_REASONS)[number];
 
 export const GOAL_VALIDATORS = ["command", "file", "schema", "git", "manual", "llm_review"] as const;
 export type GoalValidator = (typeof GOAL_VALIDATORS)[number];
@@ -343,6 +357,16 @@ export interface GoalBudget {
   maxHumanMinutes?: number;
 }
 
+export interface GoalExecutionProfile {
+  executorId: ExecutorId;
+  taskKind: TaskKind;
+  expectedOutputs: string[];
+  projectId?: string | null;
+  workspacePath?: string | null;
+  networkHosts: string[];
+  executionMode?: "quick" | "standard" | "deep";
+}
+
 export interface GoalContract {
   goalId: string;
   title: string;
@@ -360,6 +384,99 @@ export interface GoalContract {
   nextHandoff?: string;
   createdAt: string;
   updatedAt: string;
+  /** Execution profile frozen at creation so every round runs the same way. */
+  projectId?: string | null;
+  conversationId?: string | null;
+  /** Anchor task; all rounds are runs of this task. */
+  taskId?: string | null;
+  execution?: GoalExecutionProfile;
+  /** Host-controlled auto-advance switch. Always false after a host restart. */
+  armed?: boolean;
+  roundCount?: number;
+  maxRounds?: number;
+  noProgressCount?: number;
+  lastProgressDigest?: string | null;
+  nextWakeAt?: string | null;
+  stopReason?: GoalStopReason | null;
+  /** Optimistic concurrency counter; every goal write increments it. */
+  revision?: number;
+  pauseReference?: { taskId: string; runId: string; checkpointSeq: number; checkpointKind: string } | null;
+  /** Command criteria are frozen at creation and only run after explicit approval. */
+  commandsApprovedAt?: string | null;
+}
+
+export const GOAL_ROUND_STATUSES = ["running", "gated", "paused", "completed", "failed", "interrupted"] as const;
+export type GoalRoundStatus = (typeof GOAL_ROUND_STATUSES)[number];
+
+export const GOAL_ROUND_INTENT_STATUSES = ["progress", "complete", "blocked", "needs_input"] as const;
+export type GoalRoundIntentStatus = (typeof GOAL_ROUND_INTENT_STATUSES)[number];
+
+export interface GoalRoundIntent {
+  status: GoalRoundIntentStatus;
+  note: string;
+  evidence: string[];
+  createdAt: string;
+}
+
+export interface GoalRoundUsage {
+  tokens: number;
+  turns: number;
+  toolCalls: number;
+  durationMs: number;
+}
+
+export interface GoalRoundRecord {
+  id: string;
+  goalId: string;
+  taskId: string;
+  index: number;
+  runIds: string[];
+  status: GoalRoundStatus;
+  startedAt: string;
+  endedAt: string | null;
+  summary: string | null;
+  intent: GoalRoundIntent | null;
+  artifactRefs: string[];
+  evidenceRefs: string[];
+  usage: GoalRoundUsage | null;
+  progressDigest: string | null;
+  verifier: GoalCompletionReport | null;
+  workspaceRoot: string | null;
+  outDir: string | null;
+}
+
+export const GOAL_ELIGIBILITY_REASONS = [
+  "ok",
+  "disarmed",
+  "state_not_active",
+  "round_open",
+  "task_open",
+  "round_limit",
+  "budget",
+  "deadline",
+  "gate",
+  "executor_unavailable",
+  "backoff",
+  "verifying"
+] as const;
+export type GoalEligibilityReason = (typeof GOAL_ELIGIBILITY_REASONS)[number];
+
+export interface GoalEligibility {
+  eligible: boolean;
+  reason: GoalEligibilityReason;
+  detail: string;
+  nextWakeAt?: string | null;
+}
+
+export const GOAL_ACTIONS = ["start", "pause", "resume", "stop", "replan", "complete", "approve"] as const;
+export type GoalAction = (typeof GOAL_ACTIONS)[number];
+
+export interface GoalView {
+  goal: GoalContract;
+  rounds: GoalRoundRecord[];
+  latestReport: GoalCompletionReport | null;
+  task?: TaskRecord | null;
+  eligibility?: GoalEligibility | null;
 }
 
 export interface GoalCriterionResult {
@@ -387,6 +504,9 @@ export type TaskFollowUpMode = (typeof TASK_FOLLOW_UP_MODES)[number];
 export const TASK_FOLLOW_UP_STATUSES = ["queued", "steering", "applied", "cancelled"] as const;
 export type TaskFollowUpStatus = (typeof TASK_FOLLOW_UP_STATUSES)[number];
 
+export const TASK_FOLLOW_UP_ORIGINS = ["user", "goal"] as const;
+export type TaskFollowUpOrigin = (typeof TASK_FOLLOW_UP_ORIGINS)[number];
+
 export interface TaskFollowUpRecord {
   id: string;
   taskId: string;
@@ -394,6 +514,8 @@ export interface TaskFollowUpRecord {
   content: string;
   mode: TaskFollowUpMode;
   status: TaskFollowUpStatus;
+  /** Goal-authored continuation prompts stay out of the user chat transcript. */
+  origin?: TaskFollowUpOrigin;
   appliedRunId: string | null;
   error: string | null;
   createdAt: string;
