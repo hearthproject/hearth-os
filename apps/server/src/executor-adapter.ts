@@ -65,6 +65,7 @@ export interface ExecutorAttemptContext {
   expectedOutputs: string[];
   activeThreadId?: string;
   extraNativeTools?: AgentTool[];
+  skipBuiltinGoalTools?: boolean;
   finishGuards?: Array<() => string | null>;
   mcpServers?: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
   steering?: (() => AgentMessage[]) | undefined;
@@ -145,6 +146,7 @@ export class NativeExecutorAdapter implements ExecutorAdapter {
       checkpointPolicy: { everyTurns: 5, everyToolCalls: 20, maxSnapshots: 40 },
       ...(resumable ? { resume: resumable } : {}),
       ...(input.extraNativeTools?.length ? { extraTools: input.extraNativeTools } : {}),
+      ...(input.skipBuiltinGoalTools ? { skipBuiltinGoalTools: true } : {}),
       ...(input.finishGuards?.length ? { finishGuards: input.finishGuards } : {}),
       ...(input.steering ? { steering: input.steering } : {}),
       expectedOutputs: input.expectedOutputs,

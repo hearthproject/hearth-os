@@ -51,6 +51,7 @@ export interface CreateTaskInput {
   requestHash?: string;
   title?: string;
   goal?: string;
+  goalId?: string;
   textInput?: string;
   sourceItemIds?: string[];
   fileInputs?: { label: string; path: string }[];
@@ -264,7 +265,7 @@ export class HearthService {
     const task: TaskRecord = {
       id,
       ...(input.executionMode ? { executionMode: input.executionMode } : {}),
-      goalId: null,
+      goalId: input.goalId ?? null,
       ...(input.externalRef ? { externalRef: input.externalRef, requestHash: input.requestHash ?? null } : {}),
       templateId: null,
       title: input.title?.trim() || "未命名任务",
@@ -622,7 +623,12 @@ export class HearthService {
     return updated;
   }
 
-  createTaskFollowUp(taskId: string, content: string, mode: TaskFollowUpRecord["mode"]): TaskFollowUpRecord {
+  createTaskFollowUp(
+    taskId: string,
+    content: string,
+    mode: TaskFollowUpRecord["mode"],
+    origin: "user" | "goal" = "user"
+  ): TaskFollowUpRecord {
     const task = this.requireTask(taskId);
     const now = new Date().toISOString();
     const record: TaskFollowUpRecord = {
@@ -632,6 +638,7 @@ export class HearthService {
       content,
       mode,
       status: mode === "steer" ? "steering" : "queued",
+      origin,
       appliedRunId: null,
       error: null,
       createdAt: now,
@@ -639,7 +646,7 @@ export class HearthService {
     };
     const event = this.store.appendEvent({ type: "task.follow-up.created", taskId, payload: record });
     this.bus.publish(event);
-    if (task.conversationId) {
+    if (task.conversationId && origin !== "goal") {
       this.appendChatMessage({
         id: randomUUID(),
         conversationId: task.conversationId,

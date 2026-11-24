@@ -80,6 +80,8 @@ export interface NativeRunOptions {
   journalSink?: JournalSink;
   goalRoot?: string;
   maxGoalRounds?: number;
+  /** Host-managed goal tasks bind get_goal/update_goal themselves. */
+  skipBuiltinGoalTools?: boolean;
   retryPolicy?: RetryPolicy;
   stallPolicy?: { warnMs?: number; abortMs?: number };
   checkpointPolicy?: { everyTurns?: number; everyToolCalls?: number; maxSnapshots?: number };
@@ -170,12 +172,10 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
         "memory_read",
         "memory_write",
         "memory_search",
-        "get_goal",
-        "create_goal",
-        "update_goal"
+        ...(options.skipBuiltinGoalTools ? [] : ["get_goal", "create_goal", "update_goal"])
       ])
     ];
-  } else if (!options.isSubagent) {
+  } else if (!options.isSubagent && !options.skipBuiltinGoalTools) {
     permissions.tools = [...new Set([...permissions.tools, "get_goal", "create_goal", "update_goal"])];
   }
 
@@ -189,7 +189,10 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
 
   const drafting = !coding && isTextDraftTask({ ...options.task, expectedOutputs: options.expectedOutputs });
   const draftTools = new Set(["read_file", "write_file", "finish_task", "ask_user"]);
-  const toolsForRun = dedupeTools([...createBuiltinTools(), ...(options.extraTools ?? [])])
+  const builtinTools = createBuiltinTools().filter((tool) =>
+    !options.skipBuiltinGoalTools || !["get_goal", "create_goal", "update_goal"].includes(tool.definition.name)
+  );
+  const toolsForRun = dedupeTools([...builtinTools, ...(options.extraTools ?? [])])
     .filter((tool) => !directRead || ["read_file", "read_desktop_file", "read_document", "finish_task"].includes(tool.definition.name))
     .filter((tool) => !drafting || draftTools.has(tool.definition.name))
     .map((tool) => directRead && tool.definition.name === "read_file" ? directReadTool(tool) : tool)
@@ -203,7 +206,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
       }
     });
   const availableTools = toolsForRun.map((tool) => tool.definition.name);
-  const goalBlock = !directRead && !options.isSubagent ? goalContinuationPrompt(options.prepared.root) : null;
+  const goalBlock = !directRead && !options.isSubagent && !options.skipBuiltinGoalTools ? goalContinuationPrompt(options.prepared.root) : null;
   const memoryIndex = coding ? memoryIndexBlock(options.prepared.root) : null;
   const projectDossier = coding && !options.isSubagent && options.task.projectId
     ? dossierPromptBlock(new DossierStore(DOSSIER_DIR).read(options.task.projectId))
@@ -307,7 +310,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
       }
     },
     validateFinish: (result, context) => {
-      const goalIssue = !directRead && !options.isSubagent ? goalFinishIssue(options.prepared.root) : null;
+      const goalIssue = !directRead && !options.isSubagent && !options.skipBuiltinGoalTools ? goalFinishIssue(options.prepared.root) : null;
       if (goalIssue) return goalIssue;
       const jsonIssue = jsonDeliverableIssue(options.prepared.outDir, options.expectedOutputs);
       if (jsonIssue) return jsonIssue;

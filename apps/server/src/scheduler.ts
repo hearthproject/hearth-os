@@ -69,6 +69,8 @@ import { OntologyWriter } from "./ontology-writer.ts";
 import { chatModelConfigured, loadModelSettings, type ModelSettings } from "./model-settings.ts";
 import { prepareTaskRuntime, type RuntimePreparation } from "./runtime.ts";
 import type { HearthService } from "./service.ts";
+import { createControlGoalTools } from "./goal-tools.ts";
+import type { GoalService } from "./goals.ts";
 import { buildDeliveryRepairPrompt, buildTaskPrompt, prepareWorkspace, UnsupportedInputError, type PreparedWorkspace, type TaskApprovalKind } from "./workspace.ts";
 import { wantsDirectFileRead, wantsPublicWebResearch, wantsScreenshot } from "./task-intent.ts";
 import type { WebSearchService } from "./web-search.ts";
@@ -136,6 +138,7 @@ export interface SchedulerOptions {
   libraryMcp?: LibraryMcpLaunch | undefined;
   skills?: SkillService | undefined;
   ontologyWriter?: OntologyWriter | undefined;
+  goals?: GoalService | undefined;
   deferStartup?: boolean | undefined;
 }
 
@@ -200,6 +203,7 @@ export class HearthScheduler {
   private readonly skills: SkillService | undefined;
   private readonly ontology: OntologyService;
   private readonly ontologyWriter: OntologyWriter;
+  private readonly goals: GoalService | undefined;
   private readonly projector: ContextProjector;
   private readonly handoffs: HandoffService;
   private readonly summaryTasks = new Set<Promise<void>>();
@@ -276,6 +280,7 @@ export class HearthScheduler {
     this.skills = options.skills;
     this.ontology = new OntologyService(this.service);
     this.ontologyWriter = options.ontologyWriter ?? new OntologyWriter(this.service, this.ontology);
+    this.goals = options.goals;
     this.projector = new ContextProjector(this.service, this.context, options.contextBroker);
     this.handoffs = new HandoffService(this.service, this.context);
     this.service.setContextSink((message) => {
@@ -430,6 +435,39 @@ export class HearthScheduler {
 
   browserEvidenceList(taskId: string) {
     return this.browserEvidence.list(taskId);
+  }
+
+  requeueGoalTask(taskId: string, prompt: string, options: { allowCompleted?: boolean } = {}): TaskRecord {
+    const task = this.service.requireTask(taskId);
+    const text = prompt.trim();
+    if (!text) throw new Error("目标轮次提示不能为空");
+    if (text.length > 20_000) throw new Error("目标轮次提示不能超过 20000 个字符");
+    if (task.status === "cancelled") throw new Error("任务已取消，不能继续目标");
+    if (task.status === "running" || task.status === "queued") return task;
+    if (task.status === "waiting_approval" || task.status === "waiting_input" || task.status === "paused" || task.status === "waiting_budget") {
+      throw new Error(`任务当前状态为 ${task.status}，需要先处理当前等待项`);
+    }
+    if (task.status === "completed" && !options.allowCompleted) {
+      throw new Error("任务已经完成，不能直接开启新目标轮次");
+    }
+    this.enqueueGoalFollowUp(taskId, text);
+    const updated = this.service.updateTask(taskId, {
+      status: "queued",
+      nextAction: "目标模式：准备开始下一轮",
+      error: null,
+      pendingInput: null
+    }, task.currentRunId ?? undefined);
+    this.wake();
+    return updated;
+  }
+
+  private enqueueGoalFollowUp(taskId: string, prompt: string): TaskFollowUpRecord {
+    for (const existing of this.service.store.listTaskFollowUps(taskId, "queued")) {
+      if (existing.origin === "goal") {
+        this.service.updateTaskFollowUp(existing.id, { status: "cancelled" });
+      }
+    }
+    return this.service.createTaskFollowUp(taskId, prompt.trim(), "queue", "goal");
   }
 
   addFollowUp(taskId: string, content: string, mode: "queue" | "steer"): TaskFollowUpRecord {
@@ -598,6 +636,7 @@ export class HearthScheduler {
     if (task.status === "cancelled") {
       this.controllers.get(taskId)?.abort();
       this.releaseLease(taskId);
+      this.goals?.onTaskCancelled(task);
       return task;
     }
     this.cancelled.add(taskId);
@@ -620,6 +659,7 @@ export class HearthScheduler {
     }, task.currentRunId ?? undefined);
     this.resolvePauseWaiter(taskId, { task: cancelledTask, resume: null });
     if (task.currentRunId) this.writeRunEvidence(taskId, task.currentRunId);
+    this.goals?.onTaskCancelled(task);
     this.releaseLease(taskId);
     void this.browserSessions.release(taskId);
     return this.service.requireTask(taskId);
@@ -1624,6 +1664,7 @@ export class HearthScheduler {
       let executorId: ExecutorId = handoff?.toExecutor ?? resolveExecutorId(initialTask);
       let pendingInput = initialTask.pendingInput?.trim() ?? "";
       let resumePrompt: string | null = pendingInput ? `用户补充信息：\n${pendingInput}` : null;
+      let goalPrompt: string | null = null;
       const retriesByExecutor = new Map<ExecutorId, number>();
       let handoffsUsed = this.service.store.listHandoffs(taskId).filter((item) => item.status !== "cancelled").length;
       const attemptedExecutors = new Set<ExecutorId>(this.service.store.listRuns(taskId).map((run) => run.executorId ?? "codex"));
@@ -1643,8 +1684,16 @@ export class HearthScheduler {
         if (!pendingInput) {
           appliedFollowUp = this.takeNextFollowUp(taskId);
           if (appliedFollowUp) {
-            pendingInput = appliedFollowUp.content.trim();
-            resumePrompt = `用户补充信息：\n${pendingInput}`;
+            const content = appliedFollowUp.content.trim();
+            if (appliedFollowUp.origin === "goal") {
+              goalPrompt = content;
+              pendingInput = "";
+              resumePrompt = content;
+            } else {
+              goalPrompt = null;
+              pendingInput = content;
+              resumePrompt = `用户补充信息：\n${content}`;
+            }
             this.steering.delete(taskId);
           }
         }
@@ -1703,7 +1752,7 @@ export class HearthScheduler {
         }, runId);
         const manifestRoot = this.inPlaceWorkspace(task);
         const manifestBefore = manifestRoot ? snapshotWorkspace(manifestRoot) : null;
-        const result = await this.runAttempt({ task, run, executorId, taskRoot, outDir, handoff, pendingInput, resumePrompt, previousRun, controller, budget: remainingBudget });
+        const result = await this.runAttempt({ task, run, executorId, taskRoot, outDir, handoff, pendingInput, resumePrompt, previousRun, controller, budget: remainingBudget, goalPrompt });
         this.reconcileTaskCleanup(taskId);
         if (result.status !== "waiting_approval") await this.browserSessions.release(taskId);
         if (manifestRoot && manifestBefore) this.recordInPlaceChanges(task, manifestRoot, manifestBefore);
@@ -1722,6 +1771,7 @@ export class HearthScheduler {
           previousRun = result.run;
           pendingInput = "";
           resumePrompt = null;
+          goalPrompt = null;
           this.refreshTaskSummary(taskId);
           continue;
         }
@@ -1733,6 +1783,7 @@ export class HearthScheduler {
             previousRun = result.run;
             pendingInput = "";
             resumePrompt = null;
+            goalPrompt = null;
             continue;
           }
           return;
@@ -1834,6 +1885,7 @@ export class HearthScheduler {
             nextAction: "shadow 模式仅记录诊断，不自动接管", error: shadowError
           }, result.run.id);
           this.refreshTaskSummary(taskId, { lastFailure: shadowError });
+          this.goals?.onRunFailed(failureTask, shadowError.message);
           return;
         }
         if (decision.action === "handoff" && decision.targetExecutor) {
@@ -1888,6 +1940,7 @@ export class HearthScheduler {
               resultSummary: handoffError.message
             }, result.run.id);
             this.refreshTaskSummary(taskId, { lastFailure: handoffError });
+            this.goals?.onRunFailed(failureTask, handoffError.message);
             return;
           }
           if (status === "prepared") {
@@ -1911,6 +1964,7 @@ export class HearthScheduler {
             resultSummary: decision.reason
           }, result.run.id);
           this.refreshTaskSummary(taskId, { lastFailure: taskError });
+          this.goals?.onTaskGated(this.service.requireTask(taskId), "needs_input");
           return;
         }
         const taskError: TaskError = {
@@ -1937,6 +1991,13 @@ export class HearthScheduler {
           }, result.run.id);
         }
         this.refreshTaskSummary(taskId, { lastFailure: taskError });
+        const stoppedTask = this.service.requireTask(taskId);
+        if (stoppedTask.status === "waiting_input") {
+          if (cause === "budget") this.goals?.onTaskInterrupted(stoppedTask, "budget", taskError.message);
+          else this.goals?.onTaskGated(stoppedTask, "needs_input");
+        } else {
+          this.goals?.onRunFailed(stoppedTask, taskError.message);
+        }
         return;
       }
     } finally {
@@ -2051,8 +2112,9 @@ export class HearthScheduler {
     previousRun: RunRecord | null;
     controller: AbortController;
     budget: RunBudget;
+    goalPrompt: string | null;
   }): Promise<AttemptResult> {
-    const { task, run, executorId, taskRoot, outDir, handoff, pendingInput, controller, budget } = input;
+    const { task, run, executorId, taskRoot, outDir, handoff, pendingInput, controller, budget, goalPrompt } = input;
     const taskId = task.id;
     const runId = run.id;
     try {
@@ -2093,6 +2155,7 @@ export class HearthScheduler {
       });
       mkdirSync(join(outDir, ".hearth"), { recursive: true });
       writeFileSync(join(outDir, ".hearth", "workspace-root"), `${prepared.root}\n`, "utf8");
+      this.goals?.onRunStarted({ task, run, outDir: prepared.outDir, workspaceRoot: prepared.root });
       this.assertLease(taskId, run.leaseEpoch ?? 0, controller.signal.aborted && this.stopping);
       let runtime: RuntimePreparation | null = null;
       const drafting = isTextDraftTask(task);
@@ -2166,15 +2229,26 @@ export class HearthScheduler {
         }
       }
       if (pendingInput && !resumeState && executorId !== "codex") prompt = `${basePrompt}\n\n用户补充信息：\n${pendingInput}`;
+      if (goalPrompt && !resumeState) prompt = `${prompt}\n\n${goalPrompt}`;
       if (libraryContext) prompt = `${prompt}\n\n${libraryContext}`;
       let activeThreadId = !handoff && input.previousRun?.executorId === executorId
         ? input.previousRun.threadId ?? undefined
         : undefined;
-      if (executorId === "codex" && activeThreadId && input.resumePrompt) prompt = input.resumePrompt;
+      if (executorId === "codex" && activeThreadId && input.resumePrompt) {
+        prompt = goalPrompt ? `${basePrompt}\n\n${goalPrompt}` : input.resumePrompt;
+      }
       const extraNativeTools: import("@hearth/agent-runtime").AgentTool[] = createPersonalReadTools({
         service: this.service,
         ontology: this.ontology
       });
+      if (task.goalId && this.goals) {
+        extraNativeTools.push(...createControlGoalTools({
+          goals: this.goals,
+          goalId: task.goalId,
+          task,
+          outDir: prepared.outDir
+        }));
+      }
       if (contextPackId && this.contextBroker) extraNativeTools.push(this.expandRefTool(contextPackId));
       if (this.mail && this.outbox && /邮件|邮箱|发信|gmail|e-?mail/i.test(`${task.title}\n${task.goal}`)) {
         extraNativeTools.push(...createMailTools(this.mail, this.outbox));
@@ -2277,6 +2351,7 @@ export class HearthScheduler {
         dshSettings,
         executorSettings: this.executorSettings(),
         expectedOutputs,
+        ...(task.goalId ? { skipBuiltinGoalTools: true } : {}),
         ...(extraNativeTools.length > 0 ? { extraNativeTools } : {}),
         ...(browserFinishGuard ? { finishGuards: [browserFinishGuard] } : {}),
         ...(this.libraryMcp ? { mcpServers: { hearth: this.libraryMcp } } : {}),
@@ -2377,10 +2452,17 @@ export class HearthScheduler {
           provenance: { source: "executor-final", executorId, label: result.label }, executorEventId: `final:${runId}`
         });
       }
+      const runUsage = this.usageWithMetrics(result.usage, result.turns, result.toolCalls);
       this.service.updateRun(runId, taskId, {
         status: "completed", threadId: result.threadId, endedAt: new Date().toISOString(),
-        usage: this.usageWithMetrics(result.usage, result.turns, result.toolCalls), executorId, failure: null
+        usage: runUsage, executorId, failure: null
       });
+      const completedRun: RunRecord = {
+        ...run,
+        status: "completed",
+        threadId: result.threadId,
+        usage: runUsage
+      };
       const approvalKind = approvalKindForTask(task);
       if (approvalKind) {
         if (!this.approvals) throw new Error("审批管理器未启动，无法安全执行外部动作");
@@ -2390,8 +2472,9 @@ export class HearthScheduler {
           status: "waiting_approval", currentRunId: runId, nextAction: "等待你确认外部动作",
           error: null, resultSummary: result.finalResponse
         }, runId);
-        await this.approvals.request({ ...request, taskId, runId });
-        return { status: "waiting_approval", run: { ...run, status: "completed" }, executorId, outDir, error: null, failure: null, aborted: controller.signal.aborted, leaseLost: false, cancelled: false };
+        this.goals?.onTaskGated(task, "approval");
+        await this.approvals.request({ ...request, taskId, runId, ...(task.goalId ? { goalId: task.goalId } : {}) });
+        return { status: "waiting_approval", run: completedRun, executorId, outDir, error: null, failure: null, aborted: controller.signal.aborted, leaseLost: false, cancelled: false };
       }
       if (this.hasPendingFollowUp(taskId)) {
         this.service.updateTask(taskId, {
@@ -2399,7 +2482,7 @@ export class HearthScheduler {
           error: null, resultSummary: result.finalResponse
         }, runId);
         this.refreshTaskSummary(taskId);
-        return { status: "completed", run: { ...run, status: "completed", threadId: result.threadId, usage: this.usageWithMetrics(result.usage, result.turns, result.toolCalls) }, executorId, outDir, error: null, failure: null, aborted: controller.signal.aborted, leaseLost: false, cancelled: false, queuedFollowUp: true };
+        return { status: "completed", run: completedRun, executorId, outDir, error: null, failure: null, aborted: controller.signal.aborted, leaseLost: false, cancelled: false, queuedFollowUp: true };
       }
       this.service.updateTask(taskId, {
         status: "completed", currentRunId: runId, nextAction: "产物已保存",
@@ -2407,7 +2490,40 @@ export class HearthScheduler {
       }, runId);
       this.refreshTaskSummary(taskId);
       this.writeRunEvidence(taskId, runId);
-      return { status: "completed", run: { ...run, status: "completed", threadId: result.threadId, usage: this.usageWithMetrics(result.usage, result.turns, result.toolCalls) }, executorId, outDir, error: null, failure: null, aborted: controller.signal.aborted, leaseLost: false, cancelled: false };
+      if (task.goalId && this.goals) {
+        try {
+          const decision = await this.goals.onRunCompleted({
+            task,
+            run: completedRun,
+            outDir: prepared.outDir,
+            workspaceRoot: prepared.root,
+            finalResponse: result.finalResponse
+          });
+          if (decision.action === "continue") {
+            this.enqueueGoalFollowUp(taskId, decision.prompt);
+            this.service.updateTask(taskId, {
+              status: "running", currentRunId: runId, nextAction: decision.detail,
+              error: null, resultSummary: result.finalResponse
+            }, runId);
+            this.refreshTaskSummary(taskId);
+            return { status: "completed", run: completedRun, executorId, outDir, error: null, failure: null, aborted: controller.signal.aborted, leaseLost: false, cancelled: false, queuedFollowUp: true };
+          }
+          if (decision.action === "done") {
+            this.service.updateTask(taskId, { nextAction: "目标已完成", resultSummary: result.finalResponse }, runId);
+          } else if (decision.action !== "none") {
+            this.service.updateTask(taskId, { nextAction: decision.detail, resultSummary: result.finalResponse }, runId);
+          }
+        } catch (goalError) {
+          this.capture({
+            taskId, conversationId: task.conversationId ?? null, runId, executorId,
+            kind: "notice", role: "system",
+            content: `目标轮次结算失败：${errorMessage(goalError)}`,
+            provenance: { source: "goal-service", eventType: "goal.settle.failed" },
+            executorEventId: `goal:settle:${runId}`
+          });
+        }
+      }
+      return { status: "completed", run: completedRun, executorId, outDir, error: null, failure: null, aborted: controller.signal.aborted, leaseLost: false, cancelled: false };
     } catch (error) {
       if (controller.signal.aborted && this.steering.has(taskId)) {
         this.service.updateRun(runId, taskId, { status: "cancelled", endedAt: new Date().toISOString(), failure: null });
@@ -2438,6 +2554,7 @@ export class HearthScheduler {
           nextAction: "已暂停，继续时会从最近检查点恢复",
           error: null
         }, runId);
+        this.goals?.onTaskGated(pausedTask, "pause");
         const resume = this.resumeReference(pausedTask);
         const result: AttemptResult = {
           status: "paused",
@@ -2625,11 +2742,12 @@ export class HearthScheduler {
   private finishWaitingInput(taskId: string, run: RunRecord, result: ExecutionOutcome): AttemptResult {
     const usage = this.usageWithMetrics(result.usage, result.turns, result.toolCalls);
     this.service.updateRun(run.id, taskId, { status: "waiting_input", endedAt: new Date().toISOString(), usage, failure: null });
-    this.service.updateTask(taskId, {
+    const task = this.service.updateTask(taskId, {
       status: "waiting_input", currentRunId: run.id, nextAction: "等待你补充信息",
       error: null, resultSummary: result.question ?? result.finalResponse
     }, run.id);
-      this.refreshTaskSummary(taskId);
+    this.goals?.onTaskGated(task, "needs_input");
+    this.refreshTaskSummary(taskId);
     return { status: "waiting_input", run: { ...run, status: "waiting_input", usage }, executorId: run.executorId ?? "codex", outDir: this.outDirForRun(taskId, run), error: null, failure: null, aborted: false, leaseLost: false, cancelled: false };
   }
 
@@ -2663,13 +2781,14 @@ export class HearthScheduler {
       budgetExhaustion: exhaustion
     };
     this.service.updateRun(run.id, taskId, { status: "failed", endedAt: new Date().toISOString(), usage, failure });
-    this.service.updateTask(taskId, {
+    const waitingTask = this.service.updateTask(taskId, {
       status: "waiting_budget",
       currentRunId: run.id,
       nextAction: "预算已触顶，等待扩展",
       error: failure,
       resultSummary: result.finalResponse.trim() || message
     }, run.id);
+    this.goals?.onTaskInterrupted(waitingTask, "budget", message);
     this.publishProgress(taskId, run.id, "budget", message, {
       eventType: "budget.exhausted",
       status: "waiting_budget",
@@ -3103,7 +3222,10 @@ export class HearthScheduler {
 
   private remainingBudget(taskId: string): RunBudget {
     const task = this.service.requireTask(taskId);
-    const runs = this.service.store.listRuns(taskId);
+    const openRound = task.goalId ? this.goals?.openRoundForTask(task) ?? null : null;
+    const runs = task.goalId
+      ? (openRound ? this.service.store.listRuns(taskId).filter((run) => openRound.runIds.includes(run.id)) : [])
+      : this.service.store.listRuns(taskId);
     const used = this.usageForRuns(runs);
     const effective = this.effectiveBudget(task);
     const left = (limit: number | undefined, consumed: number): number | undefined =>
