@@ -208,7 +208,8 @@ describe("FeishuService", () => {
     await waitFor(() => chat.calls.length === 1 && transport.sent.some((text) => text === "已处理"));
     expect(chat.calls[0]?.message).toBe("你好");
     expect(service.route("oc_chat")?.conversationId).toBe("conv-1");
-    expect(transport.sent).toContain("收到，正在处理…");
+    expect(transport.sent).toContain("已处理");
+    expect(transport.sent).not.toContain("收到，正在处理…");
     expect(service.snapshot().lastEventAt).toBeTruthy();
   });
 

@@ -720,7 +720,6 @@ export class FeishuService {
       return { outcome: "approval_usage" };
     }
 
-    await this.safeSend(message.chatId, "收到，正在处理…");
     const attachments = await this.prepareAttachments(message);
     const route = this.route(message.chatId);
     const result = await this.chatClient.send({

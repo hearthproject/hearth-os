@@ -1,5 +1,5 @@
 import { randomInt, randomUUID } from "node:crypto";
-import type { ChatAttachment, ChatMessageRecord } from "@hearth/core";
+import { defaultConversationSettings, type ChatAttachment, type ChatMessageRecord } from "@hearth/core";
 import type { HearthStore } from "@hearth/eventlog";
 import { LocalFeishuChatClient, type FeishuChatClient } from "./feishu.ts";
 import type { SecretBox } from "./secrets.ts";
@@ -37,6 +37,7 @@ interface WechatSettings {
   accountId: string | null;
   userId: string | null;
   conversationId: string | null;
+  projectId: string | null;
   cursor: string;
   updatedAt: string | null;
 }
@@ -47,6 +48,7 @@ interface QqSettings {
   clientSecretCipher: string | null;
   sandbox: boolean;
   conversationId: string | null;
+  projectId: string | null;
   updatedAt: string | null;
 }
 
@@ -80,6 +82,7 @@ const DEFAULT_SETTINGS: ImSettings = {
     accountId: null,
     userId: null,
     conversationId: null,
+    projectId: null,
     cursor: "",
     updatedAt: null
   },
@@ -89,6 +92,7 @@ const DEFAULT_SETTINGS: ImSettings = {
     clientSecretCipher: null,
     sandbox: false,
     conversationId: null,
+    projectId: null,
     updatedAt: null
   },
   updatedAt: null
@@ -114,6 +118,8 @@ export interface WechatSettingsView {
   userId: string | null;
   conversationId: string | null;
   conversationTitle: string | null;
+  projectId: string | null;
+  projectTitle: string | null;
   updatedAt: string | null;
 }
 
@@ -124,6 +130,8 @@ export interface QqSettingsView {
   sandbox: boolean;
   conversationId: string | null;
   conversationTitle: string | null;
+  projectId: string | null;
+  projectTitle: string | null;
   updatedAt: string | null;
 }
 
@@ -205,6 +213,8 @@ export class ImBridgeService {
     const qqConversation = this.settings.qq.conversationId
       ? this.store.getConversation(this.settings.qq.conversationId)
       : null;
+    const projectTitle = (projectId: string | null): string | null =>
+      projectId ? this.store.getLocalProject(projectId)?.name ?? null : null;
     return {
       settings: {
         wechat: {
@@ -215,6 +225,8 @@ export class ImBridgeService {
           userId: this.settings.wechat.userId,
           conversationId: this.settings.wechat.conversationId,
           conversationTitle: wechatConversation?.title ?? null,
+          projectId: this.settings.wechat.projectId,
+          projectTitle: projectTitle(this.settings.wechat.projectId),
           updatedAt: this.settings.wechat.updatedAt
         },
         qq: {
@@ -224,6 +236,8 @@ export class ImBridgeService {
           sandbox: this.settings.qq.sandbox,
           conversationId: this.settings.qq.conversationId,
           conversationTitle: qqConversation?.title ?? null,
+          projectId: this.settings.qq.projectId,
+          projectTitle: projectTitle(this.settings.qq.projectId),
           updatedAt: this.settings.qq.updatedAt
         }
       },
@@ -271,13 +285,25 @@ export class ImBridgeService {
     token?: string | undefined;
     baseUrl?: string | undefined;
     conversationId?: string | null | undefined;
+    projectId?: string | null | undefined;
   }): void {
     const current = this.settings.wechat;
+    const nextProjectId = patch.projectId !== undefined ? patch.projectId || null : current.projectId;
+    const projectConversationId = nextProjectId ? this.ensureProjectConversation("wechat", nextProjectId) : null;
     const next: WechatSettings = {
       ...current,
       ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
       ...(patch.baseUrl !== undefined ? { baseUrl: normalizeBaseUrl(patch.baseUrl) } : {}),
-      ...(patch.conversationId !== undefined ? { conversationId: patch.conversationId || null } : {}),
+      ...(nextProjectId
+        ? { projectId: nextProjectId, conversationId: projectConversationId }
+        : {
+            projectId: null,
+            conversationId: patch.conversationId !== undefined
+              ? patch.conversationId || null
+              : current.projectId
+                ? null
+                : current.conversationId
+          }),
       ...(patch.token !== undefined && patch.token.trim()
         ? { tokenCipher: this.secretBox.encrypt(patch.token.trim()), accountId: null, userId: null }
         : {})
@@ -296,8 +322,11 @@ export class ImBridgeService {
     clientSecret?: string | undefined;
     sandbox?: boolean | undefined;
     conversationId?: string | null | undefined;
+    projectId?: string | null | undefined;
   }): void {
     const current = this.settings.qq;
+    const nextProjectId = patch.projectId !== undefined ? patch.projectId || null : current.projectId;
+    const projectConversationId = nextProjectId ? this.ensureProjectConversation("qq", nextProjectId) : null;
     const next: QqSettings = {
       ...current,
       ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
@@ -306,7 +335,16 @@ export class ImBridgeService {
         ? { clientSecretCipher: this.secretBox.encrypt(patch.clientSecret.trim()) }
         : {}),
       ...(patch.sandbox !== undefined ? { sandbox: patch.sandbox } : {}),
-      ...(patch.conversationId !== undefined ? { conversationId: patch.conversationId || null } : {})
+      ...(nextProjectId
+        ? { projectId: nextProjectId, conversationId: projectConversationId }
+        : {
+            projectId: null,
+            conversationId: patch.conversationId !== undefined
+              ? patch.conversationId || null
+              : current.projectId
+                ? null
+                : current.conversationId
+          })
     };
     if (next.enabled && (!next.appId || !next.clientSecretCipher)) {
       throw new ImBridgeError("QQ_CREDENTIALS_REQUIRED", "启用 QQ 前需要填写 App ID 和 App Secret");
@@ -511,7 +549,6 @@ export class ImBridgeService {
       return;
     }
     await this.enqueue("wechat", async () => {
-      await this.sendWechat(from, contextToken, "收到，正在处理…", token);
       await this.deliverChat("wechat", text, (reply) => this.sendWechat(from, contextToken, reply, token));
     });
   }
@@ -744,7 +781,6 @@ export class ImBridgeService {
       inboundCount: this.status.qq.inboundCount + 1
     };
     await this.enqueue("qq", async () => {
-      await this.sendQq(target, "收到，正在处理…", access, apiBase);
       await this.deliverChat("qq", text, (reply) => this.sendQq(target, reply, access, apiBase));
     });
   }
@@ -862,10 +898,16 @@ export class ImBridgeService {
   ): Promise<void> {
     try {
       const conversationId = this.resolveConversation(channel);
+      let taskId: string | null = null;
       const result = await this.chatClient.send({
         conversationId,
         message: text,
         attachments: [] as ChatAttachment[]
+      }, {
+        onTask: (payload) => {
+          const task = isRecord(payload) && isRecord(payload.task) ? payload.task : null;
+          if (task && typeof task.id === "string" && task.id.trim()) taskId = task.id;
+        }
       });
       if (result.error) {
         await reply(`处理失败：${result.error}`);
@@ -873,25 +915,99 @@ export class ImBridgeService {
       }
       let replies = 0;
       for (const message of result.messages) {
+        if (message.taskId && !taskId) taskId = message.taskId;
+        // Progress/status messages are not answers. IM only receives the final
+        // conclusion, question, or failure for this turn.
         if (!isAssistantMessage(message) || !message.content.trim()) continue;
+        if (message.kind === "task_status") continue;
         if (this.sentMessageIds.has(message.id)) continue;
         this.rememberSent(message.id);
         replies += 1;
         await reply(message.content);
       }
-      if (replies === 0) await reply("这一轮没有产生可发送的回复，详情请在 Hearth 对话里查看。");
+      if (taskId) {
+        await this.waitForTaskConclusion(taskId, conversationId, reply);
+      } else if (replies === 0) {
+        // A direct chat should always produce an assistant message. Stay silent on
+        // empty status-only turns rather than sending a synthetic "processing" line.
+        return;
+      }
     } catch (error) {
       await reply(`处理失败：${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
+  private async waitForTaskConclusion(
+    taskId: string,
+    conversationId: string,
+    reply: (text: string) => Promise<void>
+  ): Promise<void> {
+    const deadline = Date.now() + 10 * 60_000;
+    while (Date.now() < deadline) {
+      const task = this.store.getTask(taskId);
+      if (!task) {
+        await reply("处理失败：任务记录不存在。");
+        return;
+      }
+      const terminal = task.status === "completed"
+        || task.status === "failed"
+        || task.status === "cancelled"
+        || task.status === "waiting_input"
+        || task.status === "waiting_approval";
+      if (!terminal) {
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+        continue;
+      }
+      if (task.status === "waiting_approval") {
+        await reply(`任务「${task.title}」需要你在 Hearth 确认外部动作后才能继续。`);
+        return;
+      }
+      const summary = task.resultSummary?.trim()
+        || this.store.listChatMessages(conversationId)
+          .filter((message) => message.taskId === taskId && message.role === "assistant" && message.kind !== "task_status")
+          .at(-1)?.content.trim()
+        || "";
+      if (task.status === "waiting_input") {
+        await reply(summary || "需要你补充一些信息才能继续。");
+        return;
+      }
+      if (task.status === "completed") {
+        await reply(summary || "任务已完成，详情请在 Hearth 对话里查看。");
+        return;
+      }
+      if (task.status === "cancelled") {
+        await reply(summary || "任务已取消。");
+        return;
+      }
+      const reason = task.error?.message ? `${task.error.message}` : summary;
+      await reply(reason ? `处理失败：${reason}` : "处理失败：任务没有完成。");
+      return;
+    }
+    await reply("任务还在执行，可稍后在 Hearth 对话里查看结果。");
+  }
+
   private resolveConversation(channel: ImChannelId): string {
-    const current = channel === "wechat" ? this.settings.wechat.conversationId : this.settings.qq.conversationId;
+    const configured = channel === "wechat" ? this.settings.wechat : this.settings.qq;
+    if (configured.projectId) {
+      const projectConversationId = this.ensureProjectConversation(channel, configured.projectId);
+      if (configured.conversationId !== projectConversationId) {
+        if (channel === "wechat") {
+          this.settings.wechat = { ...this.settings.wechat, conversationId: projectConversationId };
+        } else {
+          this.settings.qq = { ...this.settings.qq, conversationId: projectConversationId };
+        }
+        this.persist();
+      }
+      return projectConversationId;
+    }
+    const current = configured.conversationId;
     if (current) {
       const existing = this.store.getConversation(current);
       if (existing) return existing.id;
     }
-    // 默认让微信和 QQ 共用同一个“IM 对话”窗口；用户也可以单独指定各自的对话。
+    // Default: WeChat and QQ share one "IM 对话" window. A project-bound channel
+    // gets its own dedicated conversation above, so project context never leaks
+    // into ordinary IM chats.
     const sharedId = this.store.getAppSetting(SHARED_CONVERSATION_KEY);
     if (sharedId) {
       const shared = this.store.getConversation(sharedId);
@@ -913,6 +1029,33 @@ export class ImBridgeService {
       this.settings.qq = { ...this.settings.qq, conversationId: conversation.id };
     }
     this.persist();
+    return conversation.id;
+  }
+
+  /**
+   * Project-bound IM always owns a dedicated conversation. The mapping is
+   * persisted, so later messages stay in the same window even after restarts.
+   */
+  private ensureProjectConversation(channel: ImChannelId, projectId: string): string {
+    const project = this.store.getLocalProject(projectId);
+    if (!project) throw new ImBridgeError("PROJECT_NOT_FOUND", "绑定的项目不存在", 404);
+    const current = channel === "wechat" ? this.settings.wechat : this.settings.qq;
+    if (current.conversationId) {
+      const existing = this.store.getConversation(current.conversationId);
+      if (existing?.projectId === projectId) return existing.id;
+    }
+    const key = `integrations.im.project.${projectId}`;
+    const savedId = this.store.getAppSetting(key);
+    if (savedId) {
+      const saved = this.store.getConversation(savedId);
+      if (saved?.projectId === projectId) return saved.id;
+    }
+    const conversation = this.store.createConversation(
+      `IM · ${project.name}`,
+      defaultConversationSettings(),
+      projectId
+    );
+    this.store.setAppSetting(key, conversation.id);
     return conversation.id;
   }
 
@@ -954,6 +1097,7 @@ export class ImBridgeService {
           accountId: typeof wechatRaw.accountId === "string" ? wechatRaw.accountId : null,
           userId: typeof wechatRaw.userId === "string" ? wechatRaw.userId : null,
           conversationId: typeof wechatRaw.conversationId === "string" ? wechatRaw.conversationId : null,
+          projectId: typeof wechatRaw.projectId === "string" ? wechatRaw.projectId : null,
           cursor: typeof wechatRaw.cursor === "string" ? wechatRaw.cursor : "",
           updatedAt: typeof wechatRaw.updatedAt === "string" ? wechatRaw.updatedAt : null
         },
@@ -963,6 +1107,7 @@ export class ImBridgeService {
           clientSecretCipher: typeof qqRaw.clientSecretCipher === "string" ? qqRaw.clientSecretCipher : null,
           sandbox: qqRaw.sandbox === true,
           conversationId: typeof qqRaw.conversationId === "string" ? qqRaw.conversationId : null,
+          projectId: typeof qqRaw.projectId === "string" ? qqRaw.projectId : null,
           updatedAt: typeof qqRaw.updatedAt === "string" ? qqRaw.updatedAt : null
         },
         updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : null
@@ -1021,6 +1166,10 @@ function splitText(text: string): string[] {
 
 function isAssistantMessage(message: ChatMessageRecord): boolean {
   return message.role === "assistant";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function stringValue(value: unknown): string | null {

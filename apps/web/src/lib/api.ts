@@ -368,6 +368,7 @@ export const api = {
     token?: string;
     baseUrl?: string;
     conversationId?: string | null;
+    projectId?: string | null;
   }) => request<ImBridgeView>("/api/integrations/im/wechat", {
     method: "PUT",
     body: JSON.stringify(input)
@@ -382,6 +383,7 @@ export const api = {
     clientSecret?: string;
     sandbox?: boolean;
     conversationId?: string | null;
+    projectId?: string | null;
   }) => request<ImBridgeView>("/api/integrations/im/qq", {
     method: "PUT",
     body: JSON.stringify(input)

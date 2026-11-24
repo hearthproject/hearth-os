@@ -891,6 +891,8 @@ export interface WechatSettingsView {
   userId: string | null;
   conversationId: string | null;
   conversationTitle: string | null;
+  projectId: string | null;
+  projectTitle: string | null;
   updatedAt: string | null;
 }
 
@@ -901,6 +903,8 @@ export interface QqSettingsView {
   sandbox: boolean;
   conversationId: string | null;
   conversationTitle: string | null;
+  projectId: string | null;
+  projectTitle: string | null;
   updatedAt: string | null;
 }
 

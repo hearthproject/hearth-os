@@ -31,12 +31,15 @@ export function ImBridgePanel() {
   const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ["imBridge"], queryFn: api.im, refetchInterval: 4_000 });
   const conversationsQuery = useQuery({ queryKey: ["conversations"], queryFn: api.conversations });
+  const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: api.projects });
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: "ok" | "error" | "info"; text: string } | null>(null);
   const [qr, setQr] = useState<WechatQrView | null>(null);
   const [qrStatus, setQrStatus] = useState<WechatQrStatusView | null>(null);
   const [wechatConversationId, setWechatConversationId] = useState("");
+  const [wechatProjectId, setWechatProjectId] = useState("");
   const [qqConversationId, setQqConversationId] = useState("");
+  const [qqProjectId, setQqProjectId] = useState("");
   const [qqAppId, setQqAppId] = useState("");
   const [qqSecret, setQqSecret] = useState("");
   const [qqSandbox, setQqSandbox] = useState(false);
@@ -47,11 +50,13 @@ export function ImBridgePanel() {
     const settings = query.data?.settings;
     if (!settings) return;
     setWechatConversationId(settings.wechat.conversationId ?? "");
+    setWechatProjectId(settings.wechat.projectId ?? "");
     setWechatBaseUrl(settings.wechat.baseUrl ?? "");
     setQqConversationId(settings.qq.conversationId ?? "");
+    setQqProjectId(settings.qq.projectId ?? "");
     setQqAppId(settings.qq.appId ?? "");
     setQqSandbox(settings.qq.sandbox);
-  }, [query.data?.settings.wechat.conversationId, query.data?.settings.wechat.baseUrl, query.data?.settings.qq.conversationId, query.data?.settings.qq.appId, query.data?.settings.qq.sandbox]);
+  }, [query.data?.settings.wechat.conversationId, query.data?.settings.wechat.projectId, query.data?.settings.wechat.baseUrl, query.data?.settings.qq.conversationId, query.data?.settings.qq.projectId, query.data?.settings.qq.appId, query.data?.settings.qq.sandbox]);
 
   useEffect(() => {
     if (!qr) return;
@@ -64,7 +69,7 @@ export function ImBridgePanel() {
         setQrStatus(result);
         if (result.status === "confirmed") {
           setQr(null);
-          setNotice({ tone: "ok", text: result.message ?? "微信已连接，所有消息会进入同一个对话窗口。" });
+          setNotice({ tone: "ok", text: result.message ?? "微信已连接，消息会进入绑定的 IM 对话。" });
           await queryClient.invalidateQueries({ queryKey: ["imBridge"] });
           return;
         }
@@ -85,13 +90,16 @@ export function ImBridgePanel() {
   }, [qr?.qrcode, queryClient]);
 
   const conversations = conversationsQuery.data?.conversations ?? [];
+  const projects = projectsQuery.data?.projects ?? [];
   const wechat = query.data?.settings.wechat;
   const qq = query.data?.settings.qq;
   const wechatStatus = query.data?.status.wechat;
   const qqStatus = query.data?.status.qq;
+  const wechatProjectTitle = projects.find((project) => project.id === wechatProjectId)?.name ?? wechat?.projectTitle ?? null;
+  const qqProjectTitle = projects.find((project) => project.id === qqProjectId)?.name ?? qq?.projectTitle ?? null;
   const wechatAutoConversation = useMemo(
-    () => !wechatConversationId && wechat?.conversationTitle ? `已自动创建「${wechat.conversationTitle}」` : null,
-    [wechatConversationId, wechat?.conversationTitle]
+    () => !wechatProjectId && !wechatConversationId && wechat?.conversationTitle ? `已自动创建「${wechat.conversationTitle}」` : null,
+    [wechatProjectId, wechatConversationId, wechat?.conversationTitle]
   );
 
   async function refresh(): Promise<void> {
@@ -105,7 +113,7 @@ export function ImBridgePanel() {
     try {
       const result = await api.startWechatQr();
       setQr(result);
-      setNotice({ tone: "info", text: "用微信扫描二维码，确认后所有消息会进入同一个 Hearth 对话。" });
+      setNotice({ tone: "info", text: "用微信扫描二维码，确认后消息会进入绑定的 Hearth IM 对话。" });
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "获取二维码失败" });
     } finally {
@@ -121,11 +129,15 @@ export function ImBridgePanel() {
         ...(enabled !== undefined ? { enabled } : {}),
         ...(wechatToken.trim() ? { token: wechatToken.trim() } : {}),
         ...(wechatBaseUrl.trim() ? { baseUrl: wechatBaseUrl.trim() } : {}),
-        conversationId: wechatConversationId || null
+        conversationId: wechatProjectId ? null : wechatConversationId || null,
+        projectId: wechatProjectId || null
       });
       setWechatToken("");
       setNotice({ tone: "ok", text: enabled === false ? "微信连接已停用。" : "微信连接配置已保存。" });
-      await refresh();
+      await Promise.all([
+        refresh(),
+        queryClient.invalidateQueries({ queryKey: ["conversations"] })
+      ]);
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "保存失败" });
     } finally {
@@ -156,11 +168,15 @@ export function ImBridgePanel() {
         ...(qqAppId.trim() ? { appId: qqAppId.trim() } : {}),
         ...(qqSecret.trim() ? { clientSecret: qqSecret.trim() } : {}),
         sandbox: qqSandbox,
-        conversationId: qqConversationId || null
+        conversationId: qqProjectId ? null : qqConversationId || null,
+        projectId: qqProjectId || null
       });
       setQqSecret("");
       setNotice({ tone: "ok", text: enabled === false ? "QQ 连接已停用。" : "QQ 机器人配置已保存。" });
-      await refresh();
+      await Promise.all([
+        refresh(),
+        queryClient.invalidateQueries({ queryKey: ["conversations"] })
+      ]);
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "保存失败" });
     } finally {
@@ -187,7 +203,7 @@ export function ImBridgePanel() {
       <div className="im-bridge-intro">
         <div>
           <h3>IM 直连</h3>
-          <p>微信扫码即可接入，QQ 使用官方机器人；所有消息统一进入一个 Hearth 对话窗口。</p>
+          <p>微信扫码即可接入，QQ 使用官方机器人；普通消息进入一个 IM 对话，绑定项目后自动创建该项目独立的 IM 对话并固定使用。</p>
         </div>
         {query.isFetching && <Loader2 size={14} className="spin" />}
       </div>
@@ -206,7 +222,7 @@ export function ImBridgePanel() {
               <span className="im-channel-icon wechat"><Smartphone size={17} /></span>
               <div>
                 <h3>微信</h3>
-                <p>扫码登录后自动接收消息；只保留一个对话窗口，不按联系人分身。</p>
+                <p>扫码登录后自动接收消息；默认只保留一个普通 IM 对话，绑定项目后改用项目专属固定对话。</p>
               </div>
             </div>
             <div className="im-channel-actions">
@@ -219,14 +235,26 @@ export function ImBridgePanel() {
 
           <div className="im-config-row">
             <label>
-              <span>消息进入的对话</span>
-              <select value={wechatConversationId} onChange={(event) => setWechatConversationId(event.target.value)}>
+              <span>绑定项目 / 消息进入的对话</span>
+              <select value={wechatProjectId} onChange={(event) => setWechatProjectId(event.target.value)}>
+                <option value="">不绑定项目（使用普通 IM 对话）</option>
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>{project.name}</option>
+                ))}
+              </select>
+              <select
+                value={wechatConversationId}
+                onChange={(event) => setWechatConversationId(event.target.value)}
+                disabled={Boolean(wechatProjectId)}
+              >
                 <option value="">自动创建「IM 对话」（微信与 QQ 共用一个窗口）</option>
                 {conversations.map((conversation) => (
                   <option key={conversation.id} value={conversation.id}>{conversation.title}</option>
                 ))}
               </select>
-              {wechatAutoConversation && <small className="field-hint">{wechatAutoConversation}</small>}
+              {wechatProjectId
+                ? <small className="field-hint">将为「{wechatProjectTitle ?? "该项目"}」创建独立对话「IM · {wechatProjectTitle ?? "项目名"}」，保存后固定使用。</small>
+                : wechatAutoConversation && <small className="field-hint">{wechatAutoConversation}</small>}
             </label>
             <div className="im-connect-actions">
               <button className="primary-button" onClick={() => void startWechatQr()} disabled={busy !== null}>
@@ -267,7 +295,7 @@ export function ImBridgePanel() {
 
           <ImMetrics status={wechatStatus} />
           {wechatStatus?.lastError && <p className="form-error">最近错误：{wechatStatus.lastError}</p>}
-          <p className="settings-hint"><ShieldCheck size={13} /> Token 使用本机密钥加密保存；所有微信消息进入同一个 Hearth 对话，回复发给最后一位发消息的联系人。</p>
+          <p className="settings-hint"><ShieldCheck size={13} /> Token 使用本机密钥加密保存；普通消息进入共享 IM 对话，绑定项目后固定使用项目专属 IM 对话，回复发给最后一位发消息的联系人。</p>
         </div>
       </section>
 
@@ -292,12 +320,23 @@ export function ImBridgePanel() {
           <div className="form-grid">
             <label><span>App ID</span><input value={qqAppId} onChange={(event) => setQqAppId(event.target.value)} placeholder="QQ 机器人 AppID" spellCheck={false} /></label>
             <label><span>App Secret</span><input type="password" value={qqSecret} onChange={(event) => setQqSecret(event.target.value)} placeholder={qq?.hasClientSecret ? "已保存，留空保留" : "QQ 机器人 AppSecret"} autoComplete="off" /></label>
-            <label><span>消息进入的对话</span><select value={qqConversationId} onChange={(event) => setQqConversationId(event.target.value)}>
+            <label><span>绑定项目</span><select value={qqProjectId} onChange={(event) => setQqProjectId(event.target.value)}>
+              <option value="">不绑定项目（使用普通 IM 对话）</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>{project.name}</option>
+              ))}
+            </select></label>
+            <label><span>消息进入的对话</span><select
+              value={qqConversationId}
+              onChange={(event) => setQqConversationId(event.target.value)}
+              disabled={Boolean(qqProjectId)}
+            >
               <option value="">自动创建「IM 对话」（微信与 QQ 共用一个窗口）</option>
               {conversations.map((conversation) => (
                 <option key={conversation.id} value={conversation.id}>{conversation.title}</option>
               ))}
             </select></label>
+            {qqProjectId && <small className="field-hint span-2">将为「{qqProjectTitle ?? "该项目"}」创建独立对话「IM · {qqProjectTitle ?? "项目名"}」，保存后固定使用。</small>}
             <label className="im-checkbox"><input type="checkbox" checked={qqSandbox} onChange={(event) => setQqSandbox(event.target.checked)} /><span>使用沙箱环境</span></label>
           </div>
 

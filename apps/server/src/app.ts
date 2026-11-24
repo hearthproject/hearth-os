@@ -488,7 +488,8 @@ const imWechatSettingsSchema = z.object({
   enabled: z.boolean().optional(),
   token: z.string().max(500).optional(),
   baseUrl: z.string().trim().max(200).optional(),
-  conversationId: z.string().trim().min(1).max(80).nullable().optional()
+  conversationId: z.string().trim().min(1).max(80).nullable().optional(),
+  projectId: z.string().trim().min(1).max(80).nullable().optional()
 }).strict().refine((value) => Object.keys(value).length > 0, { message: "至少需要修改一个设置" });
 
 const imQqSettingsSchema = z.object({
@@ -496,7 +497,8 @@ const imQqSettingsSchema = z.object({
   appId: z.string().trim().max(100).optional(),
   clientSecret: z.string().max(500).optional(),
   sandbox: z.boolean().optional(),
-  conversationId: z.string().trim().min(1).max(80).nullable().optional()
+  conversationId: z.string().trim().min(1).max(80).nullable().optional(),
+  projectId: z.string().trim().min(1).max(80).nullable().optional()
 }).strict().refine((value) => Object.keys(value).length > 0, { message: "至少需要修改一个设置" });
 
 const suggestionActionSchema = z.object({
