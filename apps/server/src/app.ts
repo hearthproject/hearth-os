@@ -22,6 +22,9 @@ import { applyExecutorModelReadiness } from "./executor-readiness.ts";
 import { EXECUTORS } from "./executors.ts";
 import { ScheduleError, ScheduleService } from "./schedules.ts";
 import { chatModelConfigured, loadModelSettings, viewModelSettings } from "./model-settings.ts";
+import { completeChat } from "./model-client.ts";
+import { GoalService } from "./goals.ts";
+import { registerGoalRoutes } from "./goal-routes.ts";
 import { ModelRegistry, ModelRegistryError } from "./model-registry.ts";
 import { migrateLegacySettings } from "./settings-migration.ts";
 import { ApprovalError, ApprovalManager, type EffectExecutor, type PendingToolApproval, type ToolApprovalDecision } from "./approvals.ts";
@@ -870,11 +873,26 @@ export async function buildServer(options: BuildServerOptions = {}) {
     readyExecutorIds: () => EXECUTORS.map((executor) => executor.id).filter((id) => executorHealth(id).canRun),
     memoryAutoCapture: () => memory.settings().autoCapture
   });
+  const goals = new GoalService({
+    service,
+    executorHealth,
+    review: async (prompt) => {
+      const settings = modelSettingsForExecutor("native");
+      if (!settings || !chatModelConfigured(settings)) return null;
+      const response = await completeChat(settings, [{ role: "user", content: prompt }], {
+        temperature: 0,
+        maxTokens: 1_200,
+        timeoutMs: 120_000
+      });
+      return response.content;
+    }
+  });
   const scheduler = options.startScheduler
     ? new HearthScheduler({
         service,
         ...(options.hostKernel ? { host: options.hostKernel } : {}),
         approvals,
+        goals,
         context,
         contextBroker,
         leases,
@@ -904,6 +922,15 @@ export async function buildServer(options: BuildServerOptions = {}) {
         ...(options.sourceContentRoot ? { sourceContentRoot: options.sourceContentRoot } : {})
       })
     : null;
+  if (scheduler) {
+    goals.attachScheduler({
+      pause: (taskId) => scheduler.pause(taskId),
+      resumePaused: (taskId, reference) => scheduler.resumePaused(taskId, reference),
+      cancel: (taskId) => scheduler.cancel(taskId),
+      requeueGoalTask: (taskId, prompt, options) => scheduler.requeueGoalTask(taskId, prompt, options),
+      kick: () => scheduler.kick()
+    });
+  }
   const schedules = new ScheduleService({ service, executorAvailable: executorHealth });
   const maintenance = new MaintenanceService({
     service,
@@ -997,6 +1024,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     modelSettingsForExecutor,
     executorHealth,
     approvals,
+    goals,
     cancelTask: scheduler ? (taskId: string) => scheduler.cancel(taskId) : undefined,
     memory,
     library,
@@ -1005,6 +1033,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
   registerLibraryRoutes(app, library);
   registerSkillRoutes(app, skills, library);
+  registerGoalRoutes(app, { service, goals });
   registerApprovalGrantRoutes(app, approvals.grants);
   library.start();
   app.addHook("onClose", async () => {
@@ -2154,7 +2183,10 @@ export async function buildServer(options: BuildServerOptions = {}) {
       );
       return { ...result, schedulerStopped: schedulerWasRunning };
     } catch (error) {
-      if (schedulerWasRunning && !security.state().killSwitch) scheduler?.start();
+      if (schedulerWasRunning && !security.state().killSwitch) {
+        scheduler?.start();
+        goals.start();
+      }
       throw error;
     }
   };
@@ -3110,7 +3142,9 @@ export async function buildServer(options: BuildServerOptions = {}) {
 
   if (options.startScheduler) {
     if (!security.state().killSwitch && scheduler) {
+      goals.recoverOnBoot();
       scheduler.start();
+      goals.start();
     } else {
       options.hostKernel?.ready();
     }

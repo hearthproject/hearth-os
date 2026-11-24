@@ -46,6 +46,16 @@ const conversationSettingsSchema = z.object({
   preferredExecutorId: z.enum(EXECUTOR_IDS).nullable().optional()
 }).strict();
 
+const goalSettingsSchema = z.object({
+  maxRounds: z.number().int().min(1).max(200).optional(),
+  reviewPolicy: z.enum(["auto", "human_on_risk", "human_on_complete"]).optional(),
+  deadline: z.string().datetime().optional(),
+  forbiddenActions: z.array(z.string().trim().min(1).max(300)).max(20).optional(),
+  evidenceRequirements: z.array(z.string().trim().min(1).max(300)).max(20).optional(),
+  criteria: z.array(z.string().trim().min(1).max(1000)).max(20).optional(),
+  commandsApproved: z.boolean().optional()
+}).strict();
+
 const chatSchema = z.object({
   routeMode: z.enum(["auto", "chat", "task"]).optional(),
   conversationId: z.string().trim().min(1).max(80).optional(),
@@ -54,6 +64,8 @@ const chatSchema = z.object({
   skillId: z.string().trim().min(1).max(120).optional(),
   attachments: z.array(attachmentSchema).max(5).optional(),
   url: z.string().trim().max(2_048).optional(),
+  goalMode: z.boolean().optional(),
+  goalSettings: goalSettingsSchema.optional(),
   settings: conversationSettingsSchema.optional()
 }).strict();
 
@@ -99,6 +111,7 @@ const modelProbeSchema = z.object({
 
 import type { LibraryService } from "./library/service.ts";
 import type { SkillService } from "./skills/service.ts";
+import type { GoalService } from "./goals.ts";
 
 export interface ChatRouteOptions {
   service: HearthService;
@@ -113,6 +126,7 @@ export interface ChatRouteOptions {
   executorHealth?: ((executorId: ExecutorId) => ExecutorHealth) | undefined;
   approvals?: ApprovalManager | undefined;
   cancelTask?: ((taskId: string) => unknown) | undefined;
+  goals?: GoalService | undefined;
   memory?: MemoryService | undefined;
   library?: LibraryService | undefined;
   skills?: SkillService | undefined;
@@ -525,6 +539,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       (item.role === "assistant" && /^\s*(?:\*\*)?(?:主题|Subject)\s*[:：]/i.test(item.content)));
     const directDraft = storedFiles.length === 0 && !detectedUrl && (isSimpleDraft(userContent) || (recentDraft && isDraftRevision(userContent)));
     const routeMode = parsed.data.routeMode ?? "auto";
+    const wantsGoal = parsed.data.goalMode === true;
     if (routeMode === "chat" && storedFiles.length > 0) {
       sendPersistedError("CHAT_ATTACHMENTS_UNSUPPORTED", "继续聊天模式暂不读取附件。请粘贴需要处理的文字，或选择派为任务。");
       finish(reply, send);
@@ -533,9 +548,11 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     const localFileRoute = referencedFile
       ? { action: "task" as const, title: conversationTitle(userContent), goal: userContent, reason: "消息引用了本地文件，需要执行器读取文件内容" }
       : null;
-    const route = routeMode !== "auto"
-      ? { action: routeMode, title: "", goal: userContent, reason: routeMode === "chat" ? "你选择了继续聊天，不派任务" : "你选择了派为任务" }
-      : directDraft ? { action: "chat" as const, title: "", goal: userContent, reason: "直接拟稿或修订现有草稿" } : localFileRoute ?? await decideRoute(userContent, storedFiles.length > 0, detectedUrl, settings, {
+    const route = wantsGoal
+      ? { action: "task" as const, title: conversationTitle(userContent), goal: userContent, reason: "目标模式：需要执行器持续推进" }
+      : routeMode !== "auto"
+        ? { action: routeMode, title: "", goal: userContent, reason: routeMode === "chat" ? "你选择了继续聊天，不派任务" : "你选择了派为任务" }
+        : directDraft ? { action: "chat" as const, title: "", goal: userContent, reason: "直接拟稿或修订现有草稿" } : localFileRoute ?? await decideRoute(userContent, storedFiles.length > 0, detectedUrl, settings, {
       preferredExecutorId: lockedExecutorId
     });
     const available = executorAvailability();
@@ -599,6 +616,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     }
 
     if (route.action === "task") {
+      let createdGoalId: string | null = null;
       try {
         const delegatedChatContext = taskChatContext(previousMessages);
         send("usage", contextUsagePayload({
@@ -638,14 +656,50 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
         const fileInputs = storedFiles.map((file) => ({ label: file.name, path: file.path }));
         if (referencedFile) fileInputs.push({ label: basename(referencedFile), path: referencedFile });
         if (controller.signal.aborted) return reply;
+        const taskGoal = [message, detectedUrl ? `参考网址：${detectedUrl}` : ""].filter(Boolean).join("\n")
+          || `处理附件：${storedFiles.map((file) => file.name).join("、")}`;
+        if (wantsGoal) {
+          if (!options.goals) throw new Error("目标服务没有启动");
+          const goalSettings = parsed.data.goalSettings ?? {};
+          const created = options.goals.create({
+            title: route.title || conversationTitle(userContent),
+            objective: taskGoal,
+            conversationId: conversation.id,
+            projectId: boundProject?.id ?? null,
+            execution: {
+              executorId: resolution.executorId,
+              taskKind: plan.taskKind,
+              expectedOutputs: plan.expectedOutputs,
+              projectId: boundProject?.id ?? null,
+              workspacePath: workspacePath ?? null,
+              networkHosts: plan.networkHosts ?? [],
+              ...(resolution.executorId === "native" ? { executionMode: effectiveSettings.executionMode ?? "standard" } : {})
+            },
+            criteria: (goalSettings.criteria ?? []).map((description, index) => ({
+              id: `c${index + 1}`,
+              description,
+              validator: "llm_review" as const,
+              check: description,
+              required: true
+            })),
+            forbiddenActions: goalSettings.forbiddenActions ?? [],
+            evidenceRequirements: goalSettings.evidenceRequirements ?? [],
+            ...(goalSettings.maxRounds !== undefined ? { maxRounds: goalSettings.maxRounds } : {}),
+            ...(goalSettings.reviewPolicy ? { reviewPolicy: goalSettings.reviewPolicy } : {}),
+            ...(goalSettings.deadline ? { deadline: goalSettings.deadline } : {}),
+            ...(goalSettings.commandsApproved ? { commandsApproved: true } : {})
+          });
+          createdGoalId = created.goalId;
+        }
         const task = service.createTask({
           title: route.title || conversationTitle(userContent),
-          goal: [message, detectedUrl ? `参考网址：${detectedUrl}` : ""].filter(Boolean).join("\n") || `处理附件：${storedFiles.map((file) => file.name).join("、")}`,
+          goal: taskGoal,
           textInput: [message, skillContext, delegatedChatContext].filter(Boolean).join("\n\n"),
           fileInputs,
           ...(detectedUrl ? { url: detectedUrl } : {}),
           ...(boundProject ? { projectId: boundProject.id } : {}),
           ...(workspacePath ? { workspacePath } : {}),
+          ...(createdGoalId ? { goalId: createdGoalId } : {}),
           conversationId: conversation.id,
           executorId: resolution.executorId,
           ...(resolution.executorId === "native" ? { executionMode: effectiveSettings.executionMode ?? "standard" } : {}),
@@ -653,6 +707,10 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
           expectedOutputs: plan.expectedOutputs,
           ...(plan.networkHosts ? { networkHosts: plan.networkHosts } : {})
         });
+        if (createdGoalId && options.goals) {
+          options.goals.attachTask(createdGoalId, task.id);
+          await options.goals.action(createdGoalId, "start");
+        }
         const executorText = friendlyExecutorName(resolution.executorId);
         const rerouteText = resolution.reroutedFrom
           ? `\n\n${resolution.reason ?? "原执行器不可用"}，已自动改由 ${executorText} 接管。`
@@ -671,6 +729,13 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
         send("task", { task, conversationId: conversation.id, message: assistant });
         send("done", assistant);
       } catch (error) {
+        if (createdGoalId && options.goals) {
+          try {
+            await options.goals.action(createdGoalId, "stop", { note: "任务创建失败，目标未开始" });
+          } catch {
+            // Keep the original task-creation error visible to the user.
+          }
+        }
         sendPersistedError("TASK_CREATE_FAILED", error instanceof Error ? error.message : String(error));
       } finally {
         finish(reply, send);
