@@ -71,7 +71,8 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
 |---|---|
 | **聊天优先的控制面** | React + Vite 单页应用；对话常驻左侧，任务以运行卡内联在对话时间线，展开后显示叙述、工具、命令、文件与结算状态；右侧“对话产物”按需展开产物、后台任务和附件，支持文本、Markdown、代码、JSON/CSV、图片与 PDF 预览 |
 | **持久任务与恢复** | `HostKernel` 持有单实例宿主租约，按 `lease → store → operations → runs → tasks → background → ready` 阶段启动；恢复完成前 `/api/ready` 返回 503、写路由返回 `HOST_NOT_READY`；工具调用走 `prepare → dispatch → settle` 操作账本，未结算操作在下一进程拒绝自动重放 |
-| **单一事实源** | 服务端不再写 JSONL journal，消息、工具结算、检查点与 run 边界统一写入 SQLite `events`（schema v40）；checkpoint 文件降级为物化视图，损坏时从事件按 `event_seq` 回放重建 |
+| **目标模式** | 一个目标绑定一个锚点任务，跨多轮和重启持续推进；每轮先做准入判定，结束写 `goal-intent.json`；文件、git、命令、schema、人工或模型评审独立验收；`reviewPolicy` 决定自动完成还是等用户确认；宿主重启自动 `disarmed` 并中断未结束轮次，目标栏与 `/goal` 命令可暂停、继续、重规划和验收 |
+| **单一事实源** | 服务端不再写 JSONL journal，消息、工具结算、检查点与 run 边界统一写入 SQLite `events`（schema v41）；checkpoint 文件降级为物化视图，损坏时从事件按 `event_seq` 回放重建 |
 | **Windows 原生沙箱** | `apps/native/hearth-native.cs` 编译为 `hearth-native.exe`：AppContainer package SID、workspace/temp ACL 白名单、kill-on-close Job Object、父进程 watchdog；网络只支持显式 `deny` / `open`，声明域名白名单或 helper 缺失时 fail-closed；越界写、只读、junction 逃逸、密钥过滤和网络拒绝都有真实测试 |
 | **交互式 shell 与后台进程** | `shell` 支持 `pty: true` 与 `cols` / `rows`，经 ConPTY 在 AppContainer 内运行；`shell_input` / `shell_resize` 可输入与调整终端；每个会话写入 SQLite `background_processes`，重启时按 PID + 创建时间判定，活的杀进程树、复用的只标 `lost` |
 | **审批模式** | `necessary`、`workspace`、`full` 三档；工作区内可逆文件写入自动执行，shell、删除、邮件、桌面、陌生域名和支付/提交类动作仍需审批；参数指纹绑定一次性授权 |

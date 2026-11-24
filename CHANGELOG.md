@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.4.0 - 2026-11-24
+
+### 持久目标
+
+- 目标模式成为一个目标绑定一个锚点任务、按轮次推进的持久结构：跨多轮、跨宿主重启保留工作区、检查点、产物、轮次记录和累计预算；同一会话最多一个非终态目标。
+- 新增目标状态机与准入判定：`draft/active/paused/blocked/awaiting_user/validating/done/failed/cancelled`，独立 `armed` 开关控制是否自动开下一轮；正在验收、等待用户、有未结束轮次、任务未结算、达到轮次/截止/预算、退避或执行器不可用时都不会抢跑。
+- 每轮只向同一锚点任务追加内部 `origin: "goal"` follow-up，不产生用户聊天消息；任务预算按当前轮次重新计算，轮次之间继承真实工作区。
+- 宿主重启时自动关闭所有非终态目标的 `armed`，把运行中的轮次标记为 `interrupted`，写入 `host_restart`；用户确认后才继续。
+- 所有目标写入带 `revision`，HTTP 动作支持 `expectedRevision`，避免旧界面覆盖新的暂停或继续状态。
+
+### 独立验收
+
+- 新增独立验收器：文件存在与 sha256、git 分支/clean/commit、经显式批准的 argv-only 命令、Ajv schema、人工确认和独立模型评审；绝对路径、越界路径、shell、解释器和删除类命令一律拒绝。
+- 每轮结束读取 `goal-intent.json`，`complete` 只是请求；缺少证据、评审失败或结果不确定转人工，不会默认通过。
+- `reviewPolicy` 支持 `auto`、`human_on_risk`（默认）和 `human_on_complete`；连续验收失败或验收器不可用转 `awaiting_user`。
+- 原生执行器只向目标轮次注入 `get_goal` / `update_goal`，不暴露创建目标；宿主管理的目标同时屏蔽旧 `.hearth/goal.json` 的内置目标和完成守卫。
+
+### 控制面与界面
+
+- 新增 `GET/POST /api/goals`、`GET /api/goals/:id`、`POST /api/goals/:id/actions`；聊天请求支持 `goalMode` 与 `goalSettings`，创建目标时绑定任务并启动。
+- 新增目标栏和目标设置对话框：显示状态、轮次、下一步，支持暂停、继续、重规划、验收、停止和确认完成；聊天顶部与任务事件同步刷新。
+- 新增 `/goal <目标>` 与 `/goal status|pause|resume|stop|replan|complete|approve` 命令。
+- SQLite schema 升到 41：`goals` 新列、`goal_rounds` 表与索引，任务 follow-up 增加 `origin`，目标与轮次跨重启重建。
+
+### 文档与验证
+
+- 新增中英文目标模式设计文档、侧边栏入口、README 能力表和交付状态说明。
+- 全量 `npm test`：146 个测试文件，991 项通过、15 项跳过、0 失败；新增目标状态机 11 项、GoalService 7 项、验收器 9 项，Eventlog 目标持久化 1 项。
+- `npm run typecheck`、`npm run build`、`npm run docs:build` 与 `npm run version:check`（0.4.0）通过。
+
 ## 0.3.6 - 2026-11-23
 
 ### 抓取与任务稳定性

@@ -9,6 +9,8 @@ outline: [2, 3]
 Checked on 2026-11-23 against `main`, target version `0.3.4`. This page records only what current code and local runs can prove; a page existing is not a closed loop, and an old plan is not current status.
 
 > Phase 2–6 pages are historical plans; parts of them are superseded by the current scope. Use this page for current facts. The Chinese page is canonical and includes the full 2026-11 acceptance report.
+>
+> 0.4.0 reintroduces goal mode on `main`: one goal binds one anchor task, advances across rounds and restarts, and is closed by an independent verifier. See [Goal Mode](/en/design/goals); the remaining numbers here are the 0.3.4 acceptance snapshot.
 
 ## What changed in this version
 
@@ -52,7 +54,6 @@ Checked on 2026-11-23 against `main`, target version `0.3.4`. This page records 
 - Task list, task detail, and the "Needs you" inbox;
 - task templates;
 - proactive service, attention budgets, standing intents, and suggestion clusters;
-- goal contracts and automatic completion judgment;
 - method learning bound to tasks;
 - multi-device sync, remote nodes, and an executor plugin marketplace.
 
