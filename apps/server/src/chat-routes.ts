@@ -157,7 +157,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     if (legacyTitleBackfillStarted) return;
     let settings: ModelSettings;
     try {
-      if (store.getAppSetting("conversation.title.summary.v2") === "done") return;
+      if (store.getAppSetting("conversation.title.summary.v3") === "done") return;
       settings = chatSettings();
       if (!chatModelConfigured(settings)) return;
       legacyTitleBackfillStarted = true;
@@ -178,7 +178,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
           // A failed summary must never block the list or the app.
         }
       }
-      store.setAppSetting("conversation.title.summary.v2", "done");
+      store.setAppSetting("conversation.title.summary.v3", "done");
     })();
   };
   const chatConfigured = (): boolean => chatModelConfigured(chatSettings());

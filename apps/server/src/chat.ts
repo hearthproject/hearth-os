@@ -232,7 +232,7 @@ export async function summarizeConversationTitle(settings: ModelSettings, messag
         ].join("\n")
       },
       { role: "user", content: material }
-    ], { maxTokens: 48, temperature: 0.2, timeoutMs: 12_000 });
+    ], { maxTokens: 512, temperature: 0.2, timeoutMs: 12_000 });
     return cleanGeneratedTitle(result.content);
   } catch {
     return "";
