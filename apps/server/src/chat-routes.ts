@@ -615,9 +615,10 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       (item.role === "assistant" && /^\s*(?:\*\*)?(?:主题|Subject)\s*[:：]/i.test(item.content)));
     const directDraft = storedFiles.length === 0 && !detectedUrl && (isSimpleDraft(userContent) || (recentDraft && isDraftRevision(userContent)));
     const routeMode = parsed.data.routeMode ?? "auto";
+    const chatProject = conversation.projectId ? store.getLocalProject(conversation.projectId) : null;
     const wantsGoal = parsed.data.goalMode === true;
     const wantsPlan = parsed.data.planMode === true || effectiveSettings.collaborationMode === "plan";
-    if (routeMode === "chat" && storedFiles.length > 0) {
+    if (routeMode === "chat" && storedFiles.length > 0 && !chatProject) {
       sendPersistedError("CHAT_ATTACHMENTS_UNSUPPORTED", "继续聊天模式暂不读取附件。请粘贴需要处理的文字，或选择派为任务。");
       finish(reply, send);
       return reply;
@@ -903,7 +904,6 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     let appendCurrentUser = false;
     let conversationSummary = "";
     let conversationTasks = "";
-    const chatProject = conversation.projectId ? store.getLocalProject(conversation.projectId) : null;
     const projectContext = chatProject ? projectPromptBlock(chatProject) : "";
     if (options.conversationContext) {
       const rendered = await options.conversationContext.renderForChat(conversation.id, {
@@ -1005,6 +1005,9 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       user: estimateContextTokens(userContent)
     };
     const estimatedInput = Object.values(contextBreakdown).reduce((total, tokens) => total + tokens, 0);
+    const attachmentContext = storedFiles.length > 0
+      ? `## 本轮附件\n${storedFiles.map((file) => `- ${file.name} (${file.mimeType}, ${file.bytes} bytes): ${file.path}`).join("\n")}\n附件已保存在上述本地路径，可只读读取。`
+      : "";
     const projectAgentPrompt = chatProject
       ? [
           projectContext,
@@ -1012,6 +1015,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
           conversationTasks,
           ...history.map((item) => `${item.role === "user" ? "用户" : "助手"}：${item.content}`),
           `## 当前请求\n${userContent}`,
+          attachmentContext,
           personalContext,
           memoryContext,
           libraryContext,
@@ -1020,7 +1024,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
           "历史消息中如果出现其他仓库路径或与当前工作区不一致的结论，一律以当前项目路径和工具读取到的真实文件为准。"
         ].filter(Boolean).join("\n\n")
       : "";
-    if (chatProject && !directDraft && projectChatSupportsTools(settings)) {
+    if (chatProject && projectChatSupportsTools(settings)) {
       send("usage", contextUsagePayload({
         settings,
         source: "pending",
@@ -1067,9 +1071,9 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
           finish(reply, send);
           return reply;
         }
-        send("reasoning", {
-          text: `\n项目工具执行没有完成，回退到普通回答：${errorMessage(error)}`
-        });
+        sendPersistedError("PROJECT_AGENT_FAILED", `项目工具执行失败：${errorMessage(error)}。请重试。`);
+        finish(reply, send);
+        return reply;
       }
     }
     send("usage", contextUsagePayload({
