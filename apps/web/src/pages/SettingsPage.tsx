@@ -18,6 +18,7 @@ import {
 import { api } from "../lib/api.ts";
 import { formatNumber, relativeTime } from "../lib/format.ts";
 import { DEFAULT_CONTEXT_WINDOW_TOKENS, DEFAULT_MAX_OUTPUT_TOKENS } from "@hearth/core/constants";
+import { suggestContextWindowTokens } from "@hearth/core";
 import type {
   ExecutorId,
   ExecutorModelBindingView,
@@ -343,7 +344,7 @@ function ModelsTab() {
       name: prev.name || `${preset.name} · ${preset.models[0] ?? "模型"}`,
       ...(sibling
         ? { contextWindowTokens: sibling.contextWindowTokens, maxOutputTokens: sibling.maxOutputTokens }
-        : {})
+        : { contextWindowTokens: suggestContextWindowTokens(presetModel, prev.contextWindowTokens) })
     }));
     setModels(preset.models);
     setNotice(null);
@@ -357,7 +358,7 @@ function ModelsTab() {
       model: value,
       ...(sibling
         ? { contextWindowTokens: sibling.contextWindowTokens, maxOutputTokens: sibling.maxOutputTokens }
-        : {})
+        : { contextWindowTokens: suggestContextWindowTokens(value, prev.contextWindowTokens) })
     }));
   }
 
@@ -575,7 +576,7 @@ function ModelsTab() {
                 <label><span>上下文窗口（Token）</span><input type="number" min={4096} max={10000000} step={1000} value={draft.contextWindowTokens} onChange={(event) => update("contextWindowTokens", Number(event.target.value))} /></label>
                 <label><span>单次最大输出（Token）</span><input type="number" min={256} max={1000000} step={256} value={draft.maxOutputTokens} onChange={(event) => update("maxOutputTokens", Number(event.target.value))} /></label>
               </div>
-              <small className="field-hint">上下文窗口属于模型本身，同一模型的 Chat 与 Responses 档案应保持一致。</small>
+              <small className="field-hint">按模型名自动识别窗口（DeepSeek Flash 1M；带 256K / 128K 标注的模型按标注）；仍可手动覆盖。同一模型的 Chat 与 Responses 档案应保持一致。</small>
             </details>
             <div className="settings-actions">
               <button className="primary-button" onClick={() => void save()} disabled={busy !== null}>{busy === "save" ? <Loader2 size={15} className="spin" /> : <Save size={15} />} {editingId ? "保存修改" : "创建档案"}</button>

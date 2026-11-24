@@ -35,6 +35,8 @@ import type { RunInfo } from "../components/InlineRun.tsx";
 const InlineRun = lazy(() => import("../components/InlineRun.tsx").then((module) => ({ default: module.InlineRun })));
 const ChatWorkspacePanel = lazy(() => import("../components/ChatWorkspacePanel.tsx").then((module) => ({ default: module.ChatWorkspacePanel })));
 const Markdown = lazy(() => import("../components/Markdown.tsx").then((module) => ({ default: module.Markdown })));
+import { DEFAULT_CONTEXT_WINDOW_TOKENS } from "@hearth/core/constants";
+import type { ContextUsageSnapshot } from "@hearth/core";
 import { formatBytes, formatDuration, formatTime } from "../lib/format.ts";
 import { getChatSelection, requestChat, setChatBusy, syncChatSelection, useChatSelection } from "../lib/chat-selection.ts";
 import { copyToClipboard } from "../lib/clipboard.ts";
@@ -113,6 +115,8 @@ interface ChatExecution {
 
 interface ContextBreakdown {
   system?: number;
+  conversation?: number;
+  conversation_tasks?: number;
   history?: number;
   personal?: number;
   memory?: number;
@@ -121,16 +125,49 @@ interface ContextBreakdown {
   attachments?: number;
   user?: number;
   task?: number;
+  executor?: number;
+  tools?: number;
+  tool_results?: number;
+  other?: number;
+  [key: string]: number | undefined;
 }
 
-interface ContextUsage {
-  inputTokens: number;
-  outputTokens: number;
+interface ContextUsage extends Omit<ContextUsageSnapshot, "reasoningEffort" | "breakdown" | "contextWindowTokens" | "model" | "measuredAt"> {
   contextWindowTokens?: number;
-  source?: "estimated" | "measured";
   model?: string;
   reasoningEffort?: ReasoningEffort;
   breakdown?: ContextBreakdown;
+  measuredAt: string;
+}
+
+function asContextUsage(snapshot: ContextUsageSnapshot | null | undefined): ContextUsage | null {
+  if (!snapshot) return null;
+  const { reasoningEffort, ...rest } = snapshot;
+  return {
+    ...rest,
+    ...(reasoningEffort ? { reasoningEffort: reasoningEffort as ReasoningEffort } : {})
+  };
+}
+
+/**
+ * Provider measurements beat estimates; a task hand-off beats a pre-dispatch
+ * estimate; and a timestamp breaks ties between two measurements.
+ */
+function preferContextUsage(previous: ContextUsage | null, next: ContextUsage | null): ContextUsage | null {
+  if (!next) return previous;
+  if (!previous) return next;
+  if (next.source === "pending") {
+    // A new task hand-off replaces a chat measurement (its window may differ),
+    // but never replaces a measured snapshot from another task.
+    return previous.source === "measured" && previous.scope === "task" ? previous : next;
+  }
+  if (previous.source === "pending" && next.source === "estimated") return previous;
+  const previousRank = previous.source === "measured" ? 2 : previous.source === "estimated" ? 1 : 0;
+  const nextRank = next.source === "measured" ? 2 : next.source === "estimated" ? 1 : 0;
+  if (previousRank !== nextRank) return nextRank > previousRank ? next : previous;
+  const previousAt = Date.parse(previous.measuredAt ?? "") || 0;
+  const nextAt = Date.parse(next.measuredAt ?? "") || 0;
+  return nextAt >= previousAt ? next : previous;
 }
 
 export function ChatPage() {
@@ -313,6 +350,25 @@ export function ChatPage() {
     return next;
   }, [conversationTasks, liveRuns]);
   const hasRunningTask = runs.some((task) => task.status === "running" || task.status === "queued");
+  useEffect(() => {
+    if (!conversationQuery.data || sending) return;
+    const persisted = asContextUsage(conversationQuery.data.contextUsage);
+    if (!persisted) return;
+    // While a task runs, only its own measured snapshot may replace the
+    // pending placeholder; an older chat measurement belongs to another model.
+    if (hasRunningTask && persisted.scope !== "task") return;
+    setContextUsage((previous) => preferContextUsage(previous, persisted));
+  }, [conversationQuery.data?.contextUsage, conversationId, sending, hasRunningTask]);
+  useEffect(() => {
+    if (!conversationId || !hasRunningTask) return;
+    // Executors report measured prompt usage while the task runs. Refresh the
+    // persisted snapshot every few seconds so the gauge is not stuck at the
+    // pre-dispatch placeholder.
+    const timer = window.setInterval(() => {
+      void queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
+    }, 5_000);
+    return () => window.clearInterval(timer);
+  }, [conversationId, hasRunningTask, queryClient]);
   const pendingApprovalsQuery = useQuery({
     queryKey: ["approvals", "pending"],
     queryFn: () => api.approvals({ status: "pending", limit: 50 }),
@@ -810,10 +866,15 @@ export function ChatPage() {
     const historyTokens = estimateTokensFast(visibleMessages.map((message) => message.content).join("\n"));
     const userTokens = estimateTokensFast(text);
     const attachmentTokens = estimateAttachmentTokens(sentAttachments);
+    const priorMeasured = contextUsage?.source === "measured" ? contextUsage.inputTokens : 0;
     setContextUsage({
-      inputTokens: Math.max(0, historyTokens + userTokens + attachmentTokens),
+      inputTokens: Math.max(historyTokens + userTokens + attachmentTokens, priorMeasured + userTokens),
       outputTokens: 0,
       source: "estimated",
+      scope: "chat",
+      measuredAt: new Date().toISOString(),
+      ...(contextUsage?.contextWindowTokens ? { contextWindowTokens: contextUsage.contextWindowTokens } : {}),
+      ...(contextUsage?.model ? { model: contextUsage.model } : {}),
       breakdown: {
         ...(historyTokens ? { history: historyTokens } : {}),
         ...(userTokens ? { user: userTokens } : {}),
@@ -883,15 +944,18 @@ export function ChatPage() {
               scheduleStream();
             } else if (event === "usage") {
               const usage = data as Partial<ContextUsage>;
-              setContextUsage({
+              const nextUsage: ContextUsage = {
                 inputTokens: Math.max(0, usage.inputTokens ?? 0),
                 outputTokens: Math.max(0, usage.outputTokens ?? 0),
                 ...(usage.contextWindowTokens ? { contextWindowTokens: usage.contextWindowTokens } : {}),
-                ...(usage.source ? { source: usage.source } : {}),
                 ...(usage.model ? { model: usage.model } : {}),
                 ...(usage.reasoningEffort ? { reasoningEffort: usage.reasoningEffort } : {}),
-                ...(usage.breakdown ? { breakdown: usage.breakdown } : {})
-              });
+                ...(usage.breakdown ? { breakdown: usage.breakdown } : {}),
+                source: usage.source ?? "estimated",
+                scope: usage.scope ?? "chat",
+                measuredAt: usage.measuredAt ?? new Date().toISOString()
+              };
+              setContextUsage((previous) => preferContextUsage(previous, nextUsage));
             } else if (event === "task") {
               const payload = data as { task: { id: string; title: string; status: RunInfo["status"]; createdAt: string; updatedAt: string; executorId?: string | null } };
               const task = payload.task;
@@ -1073,41 +1137,70 @@ export function ChatPage() {
   const modelName = modelSettings?.model?.trim() || "未配置模型";
   const providerName = modelSettings?.providerName ?? "";
   const reasoningEffort: ReasoningEffort = reasoningDraft ?? modelSettings?.reasoningEffort ?? "max";
-  const contextWindowTokens = contextUsage?.contextWindowTokens ?? modelSettings?.contextWindowTokens ?? 328_000;
-  const fallbackHistoryTokens = useMemo(
-    () => estimateTokensFast(visibleMessages.map((message) => message.content).join("\n")),
-    [visibleMessages]
-  );
-  const fallbackAttachmentTokens = useMemo(
-    () => estimateAttachmentTokens(visibleMessages.flatMap((message) => message.attachments ?? [])),
-    [visibleMessages]
-  );
+  const contextWindowTokens = contextUsage?.contextWindowTokens
+    ?? modelSettings?.contextWindowTokens
+    ?? selectedExecutor?.modelBinding?.profile?.contextWindowTokens
+    ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
   const contextBreakdown = contextUsage?.breakdown ?? {};
-  const measuredTokens = Math.max(
-    fallbackHistoryTokens + fallbackAttachmentTokens,
-    (contextUsage?.inputTokens ?? 0) + (contextUsage?.outputTokens ?? 0)
-  );
-  // A task run reports tokens consumed by that executor, which is a lifetime
-  // processing count. It is not another copy of the active conversation
-  // context. Mixing both inflated the gauge and made task-heavy chats look
-  // nearly full even when the next model request was small.
-  const usedTokens = measuredTokens;
-  const contextPercent = contextWindowTokens > 0 ? Math.min(100, Math.round((usedTokens / contextWindowTokens) * 100)) : 0;
-  const contextBreakdownRows = ([
-    ["系统", contextBreakdown.system ?? 0],
-    ["对话历史", contextBreakdown.history ?? fallbackHistoryTokens],
-    ["个人上下文", contextBreakdown.personal ?? 0],
-    ["记忆", contextBreakdown.memory ?? 0],
-    ["资料库", contextBreakdown.library ?? 0],
-    ["技能", contextBreakdown.skill ?? 0],
-    ["附件", contextBreakdown.attachments ?? fallbackAttachmentTokens],
-    ["本轮输入", contextBreakdown.user ?? 0]
-  ] satisfies Array<[string, number]>).filter(([, tokens]) => tokens > 0);
-  const contextUsageLabel = contextUsage?.source === "measured" ? "模型实测" : "估算";
+  const waitingForExecutorUsage = contextUsage?.source === "pending";
+  const usageUnknown = !contextUsage || waitingForExecutorUsage;
+  // "Used" is the prompt token count of the last model request. Provider
+  // measurements are authoritative; an estimate is only shown while a chat
+  // request is in flight. Never present a visible-message guess as actual
+  // context consumption.
+  const usedTokens = contextUsage ? Math.max(0, contextUsage.inputTokens) : 0;
+  const contextPercentValue = contextWindowTokens > 0 ? Math.min(100, (usedTokens / contextWindowTokens) * 100) : 0;
+  const contextPercent = Math.round(contextPercentValue);
+  const contextPercentLabel = usedTokens > 0 && contextPercentValue < 0.1
+    ? "<0.1%"
+    : usedTokens > 0 && contextPercentValue < 1
+      ? `${contextPercentValue.toFixed(1)}%`
+      : `${contextPercent}%`;
+  const contextCompactAt = Math.floor(contextWindowTokens * 0.8);
+  const contextBreakdownLabels: Record<string, string> = {
+    system: "系统",
+    conversation: "对话摘要",
+    conversation_tasks: "会话任务",
+    history: "对话历史",
+    personal: "个人上下文",
+    memory: "记忆",
+    library: "资料库",
+    skill: "技能",
+    attachments: "附件",
+    user: "本轮输入",
+    task: "任务上下文",
+    executor: "执行器",
+    tools: "工具定义",
+    tool_results: "工具输出",
+    other: "其他"
+  };
+  const baseBreakdownRows = Object.entries(contextBreakdown)
+    .filter(([, tokens]) => typeof tokens === "number" && tokens > 0)
+    .map(([key, tokens]) => [contextBreakdownLabels[key] ?? key, tokens as number] as [string, number]);
+  const contextBreakdownRows = usageUnknown
+    ? []
+    : contextUsage?.source === "measured"
+      ? (() => {
+          const rows = [...baseBreakdownRows];
+          const described = baseBreakdownRows.reduce((sum, [, tokens]) => sum + tokens, 0);
+          if (usedTokens > described) rows.push(["其他", usedTokens - described]);
+          return rows;
+        })()
+      : baseBreakdownRows;
+  const contextUsageLabel = waitingForExecutorUsage
+    ? "等待执行器实测"
+    : !contextUsage
+      ? "尚未实测"
+      : contextUsage.source === "measured"
+        ? contextUsage.scope === "task" ? "执行器实测（最近一次任务）" : "模型实测"
+        : "估算";
   const contextTitle = [
-    `上下文窗口：已用 ${formatTokens(usedTokens)} / ${formatTokens(contextWindowTokens)}（${contextPercent}%）`,
+    usageUnknown
+      ? `上下文窗口：${formatTokens(contextWindowTokens)}，等待本轮请求的实测用量`
+      : `上下文窗口：已用 ${formatTokens(usedTokens)} / ${formatTokens(contextWindowTokens)}（${contextPercentLabel}）`,
     ...contextBreakdownRows.map(([label, tokens]) => `${label} ${formatTokens(tokens)}`),
-    `统计口径：${contextUsageLabel}`
+    `统计口径：${contextUsageLabel}`,
+    `自动压缩：${formatTokens(contextCompactAt)}（80%）`
   ].join("\n");
 
   return (
@@ -1286,7 +1379,7 @@ export function ChatPage() {
                   aria-label={contextTitle}
                 >
                   <Gauge size={12} />
-                  {contextPercent}%
+                  {usageUnknown ? "—" : contextPercentLabel}
                 </button>
               )}
               {modelMenuOpen && (
@@ -1325,8 +1418,8 @@ export function ChatPage() {
                     </div>
                     <div className="model-context-usage">
                       <div className="model-context-usage-head">
-                        <span>已用 {formatTokens(usedTokens)}</span>
-                        <strong>{contextPercent}%</strong>
+                        <span>{usageUnknown ? "已用 —" : `已用 ${formatTokens(usedTokens)}`}</span>
+                        <strong>{usageUnknown ? "等待实测" : contextPercentLabel}</strong>
                       </div>
                       <div className="model-context-bar" aria-hidden="true">
                         <span style={{ width: `${contextPercent}%` }} />
@@ -1337,7 +1430,7 @@ export function ChatPage() {
                           <strong>{formatTokens(tokens)}</strong>
                         </div>
                       ))}
-                      <p>{contextUsageLabel}。包含系统提示、对话历史、个人上下文、记忆、资料库、技能和附件。</p>
+                      <p>{contextUsageLabel}。已用为本轮实际输入；到达窗口 80%（{formatTokens(contextCompactAt)}）自动压缩。</p>
                     </div>
                     <p className="model-popover-note">调整会立即生效，并在所有对话中保持。</p>
                   </div>

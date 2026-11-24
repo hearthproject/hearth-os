@@ -35,6 +35,7 @@ describe("agent runtime", () => {
 
   it.each([undefined, 128_000])("trims tool results before the next model call with window %s", async (contextWindowTokens) => {
     let calls = 0;
+    const measured: RuntimeEvent[] = [];
     const result = await runAgent({
       model: async (messages) => {
         calls++;
@@ -50,10 +51,14 @@ describe("agent runtime", () => {
       permissions: { tools: ["large"], readRoots: [], writeRoots: [], networkHosts: [] },
       keepRecentToolOutputs: 0,
       budget: { maxTurns: 5, maxToolCalls: 5, maxTokens: 100_000, maxDurationMs: 30_000 },
+      onEvent: (event) => measured.push(event),
       ...(contextWindowTokens ? { contextWindowTokens } : {})
     });
     expect(result.status).toBe("completed");
     expect(result.usage).toMatchObject({ cachedInputTokens: 10, cacheWriteInputTokens: 2, reasoningOutputTokens: 3 });
+    const usageEvent = measured.find((event) => event.type === "context.usage");
+    expect(usageEvent).toMatchObject({ inputTokens: 20, outputTokens: 5, cachedInputTokens: 10 });
+    expect(usageEvent?.type === "context.usage" ? usageEvent.toolSchemaChars : 0).toBeGreaterThan(0);
   });
 
   it("registers and settles jobs in runtime events and the run journal", async () => {

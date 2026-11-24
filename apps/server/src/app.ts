@@ -829,7 +829,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const conversationContext = new ConversationContextService({
     service,
     context,
-    modelSettings: () => modelRegistry.chatSettings() ?? modelSettingsForExecutor("native")
+    modelSettings: () => modelRegistry.chatSettings() ?? modelSettingsForExecutor("native"),
+    modelSettingsForExecutor
   });
   if (options.librarySummaryGenerator !== null) {
     library.setSummaryGenerator(

@@ -5,7 +5,7 @@ import { basename, dirname, extname, join } from "node:path";
 import multipart from "@fastify/multipart";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
-import type { ChatAttachment, ChatMessageRecord, ExecutorHealth, ExecutorId, TaskRecord } from "@hearth/core";
+import type { ChatAttachment, ChatMessageRecord, ContextUsageSnapshot, ExecutorHealth, ExecutorId, TaskRecord } from "@hearth/core";
 import { defaultConversationSettings, EXECUTOR_IDS, mergeConversationSettings } from "@hearth/core";
 import { loadCodexProfile, probeCodex, type CodexProfile } from "@hearth/codex-executor";
 import { loadExecutorSettings, type ExecutorSettingsStore } from "./executor-settings.ts";
@@ -333,7 +333,8 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       conversation,
       messages: store.listChatMessages(conversation.id),
       tasks: store.listTasks().filter((task) => task.conversationId === conversation.id),
-      proposals: store.listTaskProposals(conversation.id)
+      proposals: store.listTaskProposals(conversation.id),
+      contextUsage: store.getConversationContextState(conversation.id)?.lastUsage ?? null
     };
   });
 
@@ -709,21 +710,6 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     if (route.action === "task") {
       let createdGoalId: string | null = null;
       try {
-        const delegatedChatContext = options.conversationContext
-          ? (await options.conversationContext.renderForTask(conversation.id, undefined, userRecord.id)).text
-          : taskChatContext(previousMessages);
-        send("usage", contextUsagePayload({
-          settings,
-          source: "estimated",
-          inputTokens: estimateContextTokens([message, skillContext, delegatedChatContext].filter(Boolean).join("\n\n")) + estimateAttachmentContext(storedFiles),
-          outputTokens: 0,
-          breakdown: {
-            history: estimateContextTokens(delegatedChatContext),
-            skill: estimateContextTokens(skillContext),
-            attachments: estimateAttachmentContext(storedFiles),
-            user: estimateContextTokens(message || userContent)
-          }
-        }));
         if (!resolution.executorId) {
           const lockedIssue = lockedHealth?.issues.filter(Boolean).join("；");
           const lockedText = lockedExecutorId
@@ -744,6 +730,13 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
           finish(reply, send);
           return reply;
         }
+        const taskSettings = options.modelSettingsForExecutor?.(resolution.executorId) ?? settings;
+        const delegatedChatContext = options.conversationContext
+          ? (await options.conversationContext.renderForTask(conversation.id, undefined, userRecord.id, { settings: taskSettings })).text
+          : taskChatContext(previousMessages);
+        // The executor owns the real prompt until it reports measured usage. Do
+        // not publish a partial visible-message estimate as the conversation
+        // gauge (that produced values like "177 / 0%").
         const boundProject = conversation.projectId ? store.getLocalProject(conversation.projectId) : null;
         const workspacePath = boundProject ? null : referencedFile ? dirname(referencedFile) : extractWorkspacePath(message);
         const fileInputs = storedFiles.map((file) => ({ label: file.name, path: file.path }));
@@ -873,6 +866,14 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
           taskStatus: task.status
         });
         send("task", { task, conversationId: conversation.id, message: assistant });
+        send("usage", contextUsagePayload({
+          settings: taskSettings,
+          source: "pending",
+          scope: "task",
+          inputTokens: 0,
+          outputTokens: 0,
+          breakdown: {}
+        }));
         send("done", assistant);
       } catch (error) {
         if (createdGoalId && options.goals) {
@@ -1014,13 +1015,15 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
         answer += delta;
         send("delta", { text: delta });
       }, { signal: controller.signal, temperature: 0.5, timeoutMs: 180_000, reasoningEffort: settings.reasoningEffort ?? "max", ...(directDraft ? { maxTokens: 1200 } : {}) });
-      send("usage", contextUsagePayload({
+      const usage = contextUsagePayload({
         settings,
         source: result.usage ? "measured" : "estimated",
         inputTokens: result.usage?.inputTokens ?? estimatedInput,
         outputTokens: result.usage?.outputTokens ?? Math.max(0, estimateContextTokens(answer)),
         breakdown: contextBreakdown
-      }));
+      });
+      options.conversationContext?.rememberUsage(conversation.id, usage);
+      send("usage", usage);
       const assistant = store.createChatMessage({
         id: randomUUID(),
         conversationId: conversation.id,
@@ -1120,11 +1123,12 @@ function estimateAttachmentContext(files: ChatAttachment[]): number {
 
 function contextUsagePayload(input: {
   settings: ModelSettings;
-  source: "estimated" | "measured";
+  source: ContextUsageSnapshot["source"];
+  scope?: ContextUsageSnapshot["scope"];
   inputTokens: number;
   outputTokens: number;
   breakdown: Record<string, number>;
-}) {
+}): ContextUsageSnapshot {
   return {
     inputTokens: Math.max(0, Math.round(input.inputTokens)),
     outputTokens: Math.max(0, Math.round(input.outputTokens)),
@@ -1132,9 +1136,11 @@ function contextUsagePayload(input: {
     model: input.settings.model,
     reasoningEffort: input.settings.reasoningEffort ?? "max",
     source: input.source,
+    scope: input.scope ?? "chat",
     breakdown: Object.fromEntries(
       Object.entries(input.breakdown).map(([key, value]) => [key, Math.max(0, Math.round(value))])
-    )
+    ),
+    measuredAt: new Date().toISOString()
   };
 }
 

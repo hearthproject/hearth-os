@@ -11,6 +11,10 @@ export interface DshModelSettings {
   baseUrl: string;
   model: string;
   apiKey: string;
+  /** Effective model window shared with Hearth's profile. */
+  contextWindowTokens?: number;
+  /** Per-response max output shared with Hearth's profile. */
+  maxOutputTokens?: number;
 }
 
 export interface DshUsage {
@@ -308,8 +312,8 @@ export function buildDshPatch(settings: DshModelSettings, mcpServers: Record<str
     "        models:",
     `          - id: ${yamlString(settings.model)}`,
     `            name: ${yamlString(settings.model)}`,
-    "            contextWindow: 131072",
-    "            maxTokens: 32768"
+    `            contextWindow: ${Math.max(4_096, Math.floor(settings.contextWindowTokens ?? 131_072))}`,
+    `            maxTokens: ${Math.max(256, Math.floor(settings.maxOutputTokens ?? 32_768))}`
   ];
   for (const [name, server] of Object.entries(mcpServers)) {
     lines.push(
@@ -338,7 +342,7 @@ function writeProviderPatch(dshHome: string, settings: DshModelSettings, mcpServ
   const directory = join(dshHome, "hearth");
   mkdirSync(directory, { recursive: true });
   const mcpKey = JSON.stringify(mcpServers ?? {});
-  const digest = Buffer.from(`${settings.baseUrl}\n${settings.model}\n${settings.protocol}\n${mcpKey}`).toString("base64url").slice(0, 18);
+  const digest = Buffer.from(`${settings.baseUrl}\n${settings.model}\n${settings.protocol}\n${settings.contextWindowTokens ?? 131072}\n${settings.maxOutputTokens ?? 32768}\n${mcpKey}`).toString("base64url").slice(0, 18);
   const path = join(directory, `provider-${digest}.yml`);
   const content = buildDshPatch(settings, mcpServers);
   const temp = `${path}.${process.pid}.${Date.now()}.tmp`;

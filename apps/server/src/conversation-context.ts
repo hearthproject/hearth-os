@@ -12,6 +12,11 @@ import type {
   TaskRecord,
   TaskStatus
 } from "@hearth/core";
+import {
+  resolveContextWindowPolicy,
+  taskContextBudgetTokens,
+  type ContextUsageSnapshot
+} from "@hearth/core";
 import { streamAgentTurn, type AgentMessage } from "./model-agent.ts";
 import { parseJsonObject } from "./context-diagnosis.ts";
 import { redactSecrets, type ContextService } from "./context.ts";
@@ -44,6 +49,7 @@ export interface ConversationContextOptions {
   service: HearthService;
   context: ContextService;
   modelSettings?: () => ModelSettings | null;
+  modelSettingsForExecutor?: (executorId: ExecutorId) => ModelSettings | null;
   summaryGenerator?: (prompt: string, signal?: AbortSignal) => Promise<string | null>;
   now?: () => Date;
 }
@@ -312,6 +318,7 @@ export class ConversationContextService {
   private readonly service: HearthService;
   private readonly context: ContextService;
   private readonly modelSettings: (() => ModelSettings | null) | undefined;
+  private readonly modelSettingsForExecutor: ((executorId: ExecutorId) => ModelSettings | null) | undefined;
   private readonly summaryGenerator: ((prompt: string, signal?: AbortSignal) => Promise<string | null>) | undefined;
   private readonly now: () => Date;
   private readonly locks = new Map<string, Promise<void>>();
@@ -320,6 +327,7 @@ export class ConversationContextService {
     this.service = options.service;
     this.context = options.context;
     this.modelSettings = options.modelSettings;
+    this.modelSettingsForExecutor = options.modelSettingsForExecutor;
     this.summaryGenerator = options.summaryGenerator;
     this.now = options.now ?? (() => new Date());
   }
@@ -328,18 +336,75 @@ export class ConversationContextService {
     return this.context.settings();
   }
 
-  async renderForTask(conversationId: string | null, taskId?: string, excludeMessageId?: string): Promise<ConversationBrief> {
+  private windowPolicy(settings?: ModelSettings | null) {
+    return resolveContextWindowPolicy(settings ?? this.modelSettings?.() ?? null, {
+      compactRatio: this.settings().conversationCompactRatio
+    });
+  }
+
+  /**
+   * Persist the last prompt measurement for a conversation. Provider usage
+   * always wins over an estimate; estimates never downgrade a real value.
+   */
+  rememberUsage(conversationId: string, usage: ContextUsageSnapshot): ContextUsageSnapshot {
+    const next: ContextUsageSnapshot = {
+      ...usage,
+      inputTokens: Math.max(0, Math.round(usage.inputTokens)),
+      outputTokens: Math.max(0, Math.round(usage.outputTokens)),
+      measuredAt: usage.measuredAt || this.now().toISOString()
+    };
+    const existing = this.service.store.getConversationContextState(conversationId);
+    const previous = existing?.lastUsage ?? null;
+    if (previous && this.usageRank(previous) > this.usageRank(next)) return previous;
+    if (previous && this.usageRank(previous) === this.usageRank(next) && previous.measuredAt > next.measuredAt) {
+      return previous;
+    }
+    const state: ConversationContextState = existing ?? {
+      conversationId,
+      version: 0,
+      summary: "",
+      summaryData: null,
+      firstKeptMessageId: null,
+      lastSummarizedAt: null,
+      tokensBefore: 0,
+      tokensAfter: 0,
+      lastUsage: null,
+      updatedAt: next.measuredAt
+    };
+    this.service.store.saveConversationContextState({
+      ...state,
+      lastUsage: next,
+      updatedAt: next.measuredAt
+    });
+    return next;
+  }
+
+  private usageRank(usage: ContextUsageSnapshot): number {
+    if (usage.source === "measured") return 2;
+    if (usage.source === "estimated") return 1;
+    return 0;
+  }
+
+  async renderForTask(
+    conversationId: string | null,
+    taskId?: string,
+    excludeMessageId?: string,
+    options: { settings?: ModelSettings | null } = {}
+  ): Promise<ConversationBrief> {
     const settings = this.settings();
     if (!conversationId || !settings.conversationContextEnabled || settings.mode === "off") {
       return { text: "", version: 0, compacted: false, tokens: 0, hash: "" };
     }
-    const budget = settings.conversationContextBudgetTokens;
+    const policy = this.windowPolicy(options.settings);
+    const budget = taskContextBudgetTokens(policy);
     if (settings.conversationAutoCompact) {
       await this.compactIfNeeded(conversationId, "auto", {
         budgetTokens: budget,
         excludeTaskId: taskId,
         excludeMessageId,
-        thresholdTokens: Math.max(1_000, Math.floor(budget * settings.conversationCompactRatio) - 2_000)
+        thresholdTokens: policy.compactThresholdTokens,
+        keepTokens: policy.keepTokens,
+        summaryMaxTokens: policy.summaryMaxTokens
       });
     }
     return this.renderTaskBrief(conversationId, taskId, budget, excludeMessageId);
@@ -350,25 +415,18 @@ export class ConversationContextService {
     options: { currentMessageId?: string; settings?: ModelSettings | null; budgetTokens?: number } = {}
   ): Promise<ConversationChatRender> {
     const contextSettings = this.settings();
-    const budget = options.budgetTokens ?? contextSettings.conversationContextBudgetTokens;
+    const policy = this.windowPolicy(options.settings);
+    const budget = options.budgetTokens ?? policy.inputBudgetTokens;
     if (!contextSettings.conversationContextEnabled || contextSettings.mode === "off") {
       const history = this.chatHistory(conversationId, null, options.currentMessageId);
       return { summaryText: "", taskContext: "", history, version: 0, compacted: false, tokens: history.reduce((sum, message) => sum + estimateTokens(message.content), 0), hash: "" };
     }
     if (contextSettings.conversationAutoCompact) {
-      const modelWindow = options.settings?.contextWindowTokens ?? 128_000;
-      const maxOutput = options.settings?.maxOutputTokens ?? 8_000;
-      const headroom = Math.max(4_000, Math.floor(modelWindow * 0.15));
-      const threshold = Math.max(
-        1_000,
-        Math.min(
-          Math.floor(modelWindow * contextSettings.conversationCompactRatio),
-          modelWindow - maxOutput - headroom
-        )
-      );
       await this.compactIfNeeded(conversationId, "auto", {
         budgetTokens: budget,
-        thresholdTokens: threshold,
+        thresholdTokens: policy.compactThresholdTokens,
+        keepTokens: policy.keepTokens,
+        summaryMaxTokens: policy.summaryMaxTokens,
         excludeMessageId: options.currentMessageId
       });
     }
@@ -402,19 +460,29 @@ export class ConversationContextService {
   async compactIfNeeded(
     conversationId: string,
     trigger: "auto" | "manual" | "overflow" = "auto",
-    options: { budgetTokens?: number; thresholdTokens?: number; excludeTaskId?: string | undefined; excludeMessageId?: string | undefined } = {}
+    options: {
+      budgetTokens?: number;
+      thresholdTokens?: number;
+      keepTokens?: number;
+      summaryMaxTokens?: number;
+      excludeTaskId?: string | undefined;
+      excludeMessageId?: string | undefined;
+    } = {}
   ): Promise<ConversationCompactionRecord | null> {
     const settings = this.settings();
     if (!settings.conversationContextEnabled || settings.mode === "off") return null;
-    const budget = options.budgetTokens ?? settings.conversationContextBudgetTokens;
-    const threshold = options.thresholdTokens
-      ?? Math.max(1_000, Math.floor(budget * settings.conversationCompactRatio) - 2_000);
+    const policy = this.windowPolicy();
+    const budget = options.budgetTokens ?? policy.inputBudgetTokens;
+    const threshold = options.thresholdTokens ?? policy.compactThresholdTokens;
     const units = this.collectUnits(conversationId, options.excludeTaskId, true, options.excludeMessageId);
     if (units.length === 0) return null;
     const rawTokens = units.reduce((sum, unit) => sum + unit.tokens, 0);
     if (trigger === "auto" && settings.conversationAutoCompact === false) return null;
     if (trigger === "auto" && rawTokens <= threshold) return null;
-    return this.compact(conversationId, trigger, units, budget);
+    return this.compact(conversationId, trigger, units, budget, {
+      keepTokens: options.keepTokens ?? policy.keepTokens,
+      summaryMaxTokens: options.summaryMaxTokens ?? policy.summaryMaxTokens
+    });
   }
 
   async compactNow(
@@ -423,28 +491,36 @@ export class ConversationContextService {
   ): Promise<ConversationCompactionRecord | null> {
     const units = this.collectUnits(conversationId);
     if (units.length === 0) return null;
-    return this.compact(conversationId, trigger, units, this.settings().conversationContextBudgetTokens);
+    const policy = this.windowPolicy();
+    return this.compact(conversationId, trigger, units, policy.inputBudgetTokens, policy);
   }
 
   async refreshAfterTask(taskId: string): Promise<ConversationCompactionRecord | null> {
     const task = this.service.store.getTask(taskId);
     if (!task?.conversationId) return null;
-    return this.compactIfNeeded(task.conversationId, "auto");
+    const executorSettings = task.executorId ? this.modelSettingsForExecutor?.(task.executorId) ?? null : null;
+    const policy = this.windowPolicy(executorSettings);
+    return this.compactIfNeeded(task.conversationId, "auto", {
+      budgetTokens: taskContextBudgetTokens(policy),
+      thresholdTokens: policy.compactThresholdTokens,
+      keepTokens: policy.keepTokens,
+      summaryMaxTokens: policy.summaryMaxTokens
+    });
   }
 
   private async compact(
     conversationId: string,
     trigger: "auto" | "manual" | "overflow",
     units: ConversationUnit[],
-    budgetTokens: number
+    budgetTokens: number,
+    policy: { keepTokens: number; summaryMaxTokens: number }
   ): Promise<ConversationCompactionRecord | null> {
     return this.withLock(conversationId, async () => {
-      const settings = this.settings();
       const state = this.service.store.getConversationContextState(conversationId);
       const previous = state?.summaryData ? state.summaryData : emptySummary();
       const previousText = state?.summary ?? "";
       const summarizeFrom = this.indexForId(units, state?.firstKeptMessageId ?? null);
-      const cutIndex = this.findCutIndex(units, summarizeFrom, settings.conversationKeepTokens, budgetTokens);
+      const cutIndex = this.findCutIndex(units, summarizeFrom, policy.keepTokens, budgetTokens);
       if (cutIndex <= summarizeFrom || cutIndex >= units.length) return null;
       const covered = units.slice(summarizeFrom, cutIndex);
       if (covered.length === 0) return null;
@@ -468,14 +544,15 @@ export class ConversationContextService {
       };
       this.service.store.appendConversationCompaction(record);
       try {
-        const generated = await this.generateSummary(previousText, covered, state?.version ?? 0);
+        const generated = await this.generateSummary(previousText, covered, state?.version ?? 0, policy.summaryMaxTokens);
         const summaryData = generated.data ? mergeCompleted(previous, generated.data, covered) : previous;
         const summaryText = clipText(
           generated.data ? renderSummaryData(summaryData) : generated.text || deterministicSummary(covered, previousText),
-          settings.conversationSummaryMaxTokens
+          policy.summaryMaxTokens
         );
         const tail = units.slice(cutIndex);
         const tokensAfter = estimateTokens(summaryText) + tail.reduce((sum, unit) => sum + unit.tokens, 0);
+        const latestState = this.service.store.getConversationContextState(conversationId);
         const nextState: ConversationContextState = {
           conversationId,
           version: (state?.version ?? 0) + 1,
@@ -485,6 +562,7 @@ export class ConversationContextService {
           lastSummarizedAt: now,
           tokensBefore: record.tokensBefore,
           tokensAfter,
+          lastUsage: latestState?.lastUsage ?? state?.lastUsage ?? null,
           updatedAt: now
         };
         this.service.store.saveConversationContextState(nextState);
@@ -651,7 +729,8 @@ export class ConversationContextService {
   private async generateSummary(
     previous: string,
     units: ConversationUnit[],
-    version: number
+    version: number,
+    summaryMaxTokens: number
   ): Promise<{ text: string; data: ConversationContextSummary | null; model: string | null; usage: ConversationCompactionRecord["usage"] }> {
     const chunks = this.chunkUnits(previous, units);
     let carry = previous;
@@ -661,7 +740,7 @@ export class ConversationContextService {
     let usage: ConversationCompactionRecord["usage"] = null;
     for (const chunk of chunks) {
       const prompt = this.buildSummaryPrompt(carry, chunk.units, version);
-      const generated = await this.summarizeText(prompt);
+      const generated = await this.summarizeText(prompt, summaryMaxTokens);
       if (!generated) {
         finalText = deterministicSummary(chunk.units, carry);
         finalData = null;
@@ -721,7 +800,7 @@ export class ConversationContextService {
     ].join("\n\n");
   }
 
-  private async summarizeText(prompt: string): Promise<{ text: string; model: string | null; usage: ConversationCompactionRecord["usage"] } | null> {
+  private async summarizeText(prompt: string, summaryMaxTokens: number): Promise<{ text: string; model: string | null; usage: ConversationCompactionRecord["usage"] } | null> {
     if (this.summaryGenerator) {
       const generated = await this.summaryGenerator(prompt);
       return generated ? { text: generated, model: "injected", usage: null } : null;
@@ -734,7 +813,7 @@ export class ConversationContextService {
         { role: "user", content: prompt }
       ];
       const result = await streamAgentTurn(settings, messages, [], () => {}, {
-        maxTokens: this.settings().conversationSummaryMaxTokens,
+        maxTokens: summaryMaxTokens,
         temperature: 0.2,
         responseFormat: { type: "json_object" }
       });

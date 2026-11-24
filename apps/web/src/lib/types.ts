@@ -13,6 +13,7 @@ import type {
   ContextSettings,
   ContextSettingsPatch,
   ContextSnapshot,
+  ContextUsageSnapshot,
   HandoffRecord,
   TaskContextState,
   ConversationSettings,
@@ -626,6 +627,7 @@ export interface ConversationDetail {
   messages: ChatMessageRecord[];
   tasks: TaskRecord[];
   proposals: TaskProposalRecord[];
+  contextUsage?: ContextUsageSnapshot | null;
 }
 
 export interface AttachmentUploadResult {

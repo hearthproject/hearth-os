@@ -355,22 +355,29 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     emit({ type: "notice", message: "检测到上一轮工具执行未确认完成，工作区可能已有部分改动；请先核对再继续。" });
     clearExecuting();
   }
+  const contextChars = () => {
+    const definitions = currentDefinitions();
+    return {
+      toolCount: definitions.length,
+      systemChars: messages
+        .filter((message) => message.role === "system")
+        .reduce((sum, message) => sum + message.content.length, 0),
+      toolResultChars: messages
+        .filter((message) => message.role === "tool")
+        .reduce((sum, message) => sum + message.content.length, 0),
+      historyChars: messages
+        .filter((message) => message.role !== "system" && message.role !== "tool")
+        .reduce((sum, message) => sum + message.content.length, 0),
+      toolSchemaChars: JSON.stringify(definitions).length
+    };
+  };
   const emitContextSnapshot = (turn: number): void => {
-    const definitions = currentDefinitions();    const systemChars = messages
-      .filter((message) => message.role === "system")
-      .reduce((sum, message) => sum + message.content.length, 0);
-    const toolResultChars = messages
-      .filter((message) => message.role === "tool")
-      .reduce((sum, message) => sum + message.content.length, 0);
-    const historyChars = messages
-      .filter((message) => message.role !== "system" && message.role !== "tool")
-      .reduce((sum, message) => sum + message.content.length, 0);
-    const toolSchemaChars = JSON.stringify(definitions).length;
+    const chars = contextChars();
     const providerInputTokens = lastRequestUsage?.inputTokens && lastRequestUsage.inputTokens > 0
       ? lastRequestUsage.inputTokens
       : null;
     const source: "provider" | "estimate" = providerInputTokens !== null ? "provider" : "estimate";
-    const estimatedTokens = estimateMessageTokens(messages) + Math.ceil(toolSchemaChars / 4);
+    const estimatedTokens = estimateMessageTokens(messages) + Math.ceil(chars.toolSchemaChars / 4);
     lastContextSource = source;
     contextPeaks.push(estimatedTokens);
     emit({
@@ -378,15 +385,31 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       turn,
       modelId,
       messageCount: messages.length,
-      toolCount: definitions.length,
-      systemChars,
-      toolSchemaChars,
-      historyChars,
-      toolResultChars,
+      toolCount: chars.toolCount,
+      systemChars: chars.systemChars,
+      toolSchemaChars: chars.toolSchemaChars,
+      historyChars: chars.historyChars,
+      toolResultChars: chars.toolResultChars,
       estimatedTokens,
       providerInputTokens,
       providerOutputTokens: lastRequestUsage?.outputTokens ?? null,
       source
+    });
+  };
+  const emitMeasuredContext = (turn: number, usage: { inputTokens: number; outputTokens?: number | undefined; cachedInputTokens?: number | undefined }): void => {
+    const chars = contextChars();
+    emit({
+      type: "context.usage",
+      turn,
+      modelId,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens ?? 0,
+      cachedInputTokens: usage.cachedInputTokens ?? 0,
+      systemChars: chars.systemChars,
+      toolSchemaChars: chars.toolSchemaChars,
+      historyChars: chars.historyChars,
+      toolResultChars: chars.toolResultChars,
+      estimatedTokens: estimateMessageTokens(messages) + Math.ceil(chars.toolSchemaChars / 4)
     });
   };
   // Explicit budgets are enforced; an omitted dimension means no limit for
@@ -1003,6 +1026,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     if (turn.usage) lastRequestUsage = turn.usage;
     if (turn.usage) {
       addUsage(usage, turn.usage);
+      emitMeasuredContext(turns, turn.usage);
       emit({ type: "usage", usage: { ...usage } });
     }
     if (turn.content.trim()) emit({ type: "assistant.message", turn: turns, text: turn.content });

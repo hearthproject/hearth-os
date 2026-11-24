@@ -569,6 +569,7 @@ CREATE TABLE IF NOT EXISTS conversation_context_state (
   last_summarized_at TEXT,
   tokens_before INTEGER NOT NULL,
   tokens_after INTEGER NOT NULL,
+  last_usage_json TEXT,
   updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS conversation_compactions (
@@ -1848,6 +1849,7 @@ export class HearthStore {
     ensureColumn(this.db, "method_candidates", "fingerprint", "TEXT");
     ensureColumn(this.db, "model_profiles", "context_window_tokens", "INTEGER NOT NULL DEFAULT 128000");
     ensureColumn(this.db, "model_profiles", "max_output_tokens", "INTEGER NOT NULL DEFAULT 8000");
+    ensureColumn(this.db, "conversation_context_state", "last_usage_json", "TEXT");
     ensureColumn(this.db, "skills", "trial_task_ids_json", "TEXT NOT NULL DEFAULT '[]'");
     ensureColumn(this.db, "skills", "source_url", "TEXT");
     ensureColumn(this.db, "skills", "source_ref", "TEXT");
@@ -2717,8 +2719,8 @@ export class HearthStore {
   saveConversationContextState(state: ConversationContextState): ConversationContextState {
     this.db.prepare(
       `INSERT INTO conversation_context_state
-        (conversation_id, version, summary, summary_json, first_kept_message_id, last_summarized_at, tokens_before, tokens_after, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (conversation_id, version, summary, summary_json, first_kept_message_id, last_summarized_at, tokens_before, tokens_after, last_usage_json, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(conversation_id) DO UPDATE SET
          version=excluded.version,
          summary=excluded.summary,
@@ -2727,12 +2729,15 @@ export class HearthStore {
          last_summarized_at=excluded.last_summarized_at,
          tokens_before=excluded.tokens_before,
          tokens_after=excluded.tokens_after,
+         last_usage_json=excluded.last_usage_json,
          updated_at=excluded.updated_at`
     ).run(
       state.conversationId, state.version, state.summary,
       state.summaryData ? JSON.stringify(state.summaryData) : null,
       state.firstKeptMessageId, state.lastSummarizedAt,
-      state.tokensBefore, state.tokensAfter, state.updatedAt
+      state.tokensBefore, state.tokensAfter,
+      state.lastUsage ? JSON.stringify(state.lastUsage) : null,
+      state.updatedAt
     );
     return state;
   }
@@ -5806,6 +5811,7 @@ function rowToConversationContextState(row: DbRow): ConversationContextState {
     lastSummarizedAt: row.last_summarized_at == null ? null : String(row.last_summarized_at),
     tokensBefore: Number(row.tokens_before),
     tokensAfter: Number(row.tokens_after),
+    lastUsage: row.last_usage_json == null ? null : JSON.parse(String(row.last_usage_json)),
     updatedAt: String(row.updated_at)
   };
 }

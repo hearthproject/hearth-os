@@ -165,7 +165,7 @@ describe("model registry persistence", () => {
     expect(registry.chatSettings()).toBeNull();
   });
 
-  it("repairs legacy 128k defaults when the same model already uses 328k", () => {
+  it("repairs legacy DeepSeek Flash windows to its real 1M context", () => {
     const store = new HearthStore(":memory:");
     const secretBox = new SecretBox(Buffer.alloc(32, 7));
     const first = new ModelRegistry({ store, secretBox, codexHome: "C:/tmp/hearth-codex" });
@@ -187,8 +187,8 @@ describe("model registry persistence", () => {
     });
 
     const reopened = new ModelRegistry({ store, secretBox, codexHome: "C:/tmp/hearth-codex" });
-    expect(reopened.listProfiles().find((item) => item.id === full.id)?.contextWindowTokens).toBe(328_000);
-    expect(reopened.listProfiles().find((item) => item.id === legacy.id)?.contextWindowTokens).toBe(328_000);
+    expect(reopened.listProfiles().find((item) => item.id === full.id)?.contextWindowTokens).toBe(1_000_000);
+    expect(reopened.listProfiles().find((item) => item.id === legacy.id)?.contextWindowTokens).toBe(1_000_000);
     store.close();
   });
 });

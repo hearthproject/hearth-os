@@ -9,6 +9,7 @@ import { HearthStore } from "@hearth/eventlog";
 import { ContextService } from "./context.ts";
 import { ConversationContextService } from "./conversation-context.ts";
 import { HearthService } from "./service.ts";
+import type { ModelSettings } from "./model-settings.ts";
 
 describe("ConversationContextService", () => {
   let root: string | null = null;
@@ -29,6 +30,17 @@ describe("ConversationContextService", () => {
     const conversationContext = new ConversationContextService({
       service,
       context,
+      modelSettings: () => ({
+        providerId: "test",
+        providerName: "Test",
+        protocol: "openai-chat",
+        baseUrl: "https://example.com/v1",
+        model: "test",
+        contextWindowTokens: 16_000,
+        maxOutputTokens: 2_000,
+        apiKey: "sk-test",
+        updatedAt: null
+      } satisfies ModelSettings),
       summaryGenerator: summary
         ? async () => JSON.stringify(summary)
         : async () => JSON.stringify({
@@ -42,7 +54,7 @@ describe("ConversationContextService", () => {
           openQuestions: []
         } satisfies ConversationContextSummary)
     });
-    return { service, context, conversationContext };
+    return { service, context, conversationContext, store };
   }
 
   function message(
@@ -143,5 +155,39 @@ describe("ConversationContextService", () => {
     await conversationContext.compactNow(conversation.id, "manual");
     const state = store!.getConversationContextState(conversation.id);
     expect(state?.summaryData?.completed.some((item) => item.taskId === task.id)).toBe(true);
+  });
+
+  it("persists measured prompt usage and never lets an estimate overwrite it", async () => {
+    const { conversationContext, store } = setup();
+    const conversation = store!.createConversation("用量", defaultConversationSettings());
+    const measured = conversationContext.rememberUsage(conversation.id, {
+      inputTokens: 42_000,
+      outputTokens: 900,
+      contextWindowTokens: 1_000_000,
+      model: "deepseek-flash",
+      source: "measured",
+      scope: "chat",
+      breakdown: { system: 4_000, history: 38_000 },
+      measuredAt: "2026-11-24T09:00:00.000Z"
+    });
+    expect(measured.inputTokens).toBe(42_000);
+    expect(store!.getConversationContextState(conversation.id)?.lastUsage).toMatchObject({
+      inputTokens: 42_000,
+      source: "measured",
+      contextWindowTokens: 1_000_000
+    });
+
+    const rejected = conversationContext.rememberUsage(conversation.id, {
+      inputTokens: 177,
+      outputTokens: 0,
+      contextWindowTokens: 1_000_000,
+      model: "deepseek-flash",
+      source: "estimated",
+      scope: "chat",
+      breakdown: { history: 177 },
+      measuredAt: "2026-11-24T09:01:00.000Z"
+    });
+    expect(rejected.inputTokens).toBe(42_000);
+    expect(store!.getConversationContextState(conversation.id)?.lastUsage?.inputTokens).toBe(42_000);
   });
 });

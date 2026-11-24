@@ -2591,9 +2591,12 @@ export const DEFAULT_CONTEXT_SETTINGS: ContextSettings = {
   projectionTokenBudget: 12_000,
   summarizeAfterTokens: 8_000,
   conversationContextEnabled: true,
-  conversationContextBudgetTokens: 12_000,
-  conversationKeepTokens: 8_000,
-  conversationSummaryMaxTokens: 4_096,
+  // 0 means "derive from the active model window". The legacy 12K/8K/4K
+  // values are intentionally no longer used: a 1M model must be allowed to
+  // grow to 800K before compaction, while a 256K model compacts at 204.8K.
+  conversationContextBudgetTokens: 0,
+  conversationKeepTokens: 0,
+  conversationSummaryMaxTokens: 0,
   conversationAutoCompact: true,
   conversationCompactRatio: 0.8,
   autoHandoffRisk: "low",
@@ -2635,6 +2638,26 @@ export interface ConversationContextSummary {
   openQuestions: string[];
 }
 
+export type ContextUsageSource = "measured" | "estimated" | "pending";
+export type ContextUsageScope = "chat" | "task" | "executor";
+
+/**
+ * The last real (provider-reported) or explicit estimate of the prompt sent to
+ * the active model. Persisted per conversation so the UI does not fall back to
+ * a partial visible-message count after a reload.
+ */
+export interface ContextUsageSnapshot {
+  inputTokens: number;
+  outputTokens: number;
+  contextWindowTokens: number;
+  model: string;
+  reasoningEffort?: string;
+  source: ContextUsageSource;
+  scope: ContextUsageScope;
+  breakdown: Record<string, number>;
+  measuredAt: string;
+}
+
 export interface ConversationContextState {
   conversationId: string;
   version: number;
@@ -2644,6 +2667,7 @@ export interface ConversationContextState {
   lastSummarizedAt: string | null;
   tokensBefore: number;
   tokensAfter: number;
+  lastUsage?: ContextUsageSnapshot | null;
   updatedAt: string;
 }
 

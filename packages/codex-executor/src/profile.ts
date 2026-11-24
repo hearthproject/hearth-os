@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { parse } from "smol-toml";
-import { buildExecutorEnv } from "@hearth/core";
+import { buildExecutorEnv } from "@hearth/core/child-env";
 
 export type CodexEnvKeySource = "process" | "windows-user" | "missing" | "none";
 
@@ -21,6 +21,12 @@ export interface CodexProfile {
   authSource: "provider-env" | "openai-login" | "missing" | "unknown";
   canRun: boolean;
   issues: string[];
+  /** Effective model window written to Codex's own config. */
+  contextWindowTokens?: number | undefined;
+  /** Per-response output cap written to Codex's own config. */
+  maxOutputTokens?: number | undefined;
+  /** 80% auto-compact trigger written to Codex's own config. */
+  autoCompactTokenLimit?: number | undefined;
 }
 
 interface TomlRecord {
@@ -94,6 +100,9 @@ export function loadCodexProfile(options: { codexHome?: string; env?: NodeJS.Pro
     envKeySource,
     authSource,
     canRun: authSource === "provider-env" || authSource === "openai-login",
+    contextWindowTokens: typeof config.model_context_window === "number" ? config.model_context_window : undefined,
+    maxOutputTokens: typeof config.model_max_output_tokens === "number" ? config.model_max_output_tokens : undefined,
+    autoCompactTokenLimit: typeof config.model_auto_compact_token_limit === "number" ? config.model_auto_compact_token_limit : undefined,
     issues
   };
 }

@@ -12,7 +12,7 @@ import type {
   ModelProtocol,
   ModelRegistryView
 } from "@hearth/core";
-import { EXECUTOR_IDS } from "@hearth/core";
+import { EXECUTOR_IDS, resolveContextWindowPolicy, suggestContextWindowTokens } from "@hearth/core";
 import { DEFAULT_CONTEXT_WINDOW_TOKENS } from "./model-settings.ts";
 import type { CodexProfile } from "@hearth/codex-executor";
 import type { HearthStore } from "@hearth/eventlog";
@@ -23,6 +23,7 @@ import type { SecretBox } from "./secrets.ts";
 const CHAT_PROFILE_KEY = "model.chatProfileId";
 const REGISTRY_UPDATED_KEY = "model.updatedAt";
 const CONTEXT_DEFAULTS_MIGRATION_KEY = "model.contextDefaults.v1";
+const CONTEXT_WINDOWS_MIGRATION_KEY = "model.contextWindows.v2";
 const ALL_PROTOCOLS: ModelProtocol[] = ["openai-chat", "openai-responses", "anthropic-messages", "gemini"];
 
 export const EXECUTOR_MODEL_PROTOCOLS: Record<ExecutorId, ModelProtocol[]> = {
@@ -57,11 +58,12 @@ export class ModelRegistry {
     this.secretBox = options.secretBox;
     this.codexHome = options.codexHome;
     this.normalizeLegacyContextDefaults();
+    this.normalizeKnownContextWindows();
   }
 
   /**
    * 修复历史默认值漂移：同一模型曾因创建入口不同被写成 128k / 328k 两套上下文。
-   * 只在同模型同时存在 328k 和旧的 128k 默认值时统一为 328k，避免协议看起来“改变”了上下文。
+   * 只在同模型同时存在更大默认值和旧的 128k 默认值时统一，避免协议看起来“改变”了上下文。
    */
   private normalizeLegacyContextDefaults(): void {
     // 一次性迁移：只在历史数据里修掉默认值漂移，之后用户手动改小上下文不会再被启动时覆盖。
@@ -78,19 +80,48 @@ export class ModelRegistry {
     let changed = false;
     for (const profiles of groups.values()) {
       if (profiles.length < 2) continue;
-      const hasFullDefault = profiles.some((profile) => profile.contextWindowTokens === DEFAULT_CONTEXT_WINDOW_TOKENS);
+      const hasFullDefault = profiles.some((profile) =>
+        profile.contextWindowTokens === DEFAULT_CONTEXT_WINDOW_TOKENS || profile.contextWindowTokens === 328_000
+      );
       if (!hasFullDefault) continue;
       for (const profile of profiles) {
         if (profile.contextWindowTokens !== 128_000) continue;
         this.store.upsertModelProfile({
           ...profile,
-          contextWindowTokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
+          contextWindowTokens: hasFullDefault ? Math.max(...profiles.map((item) => item.contextWindowTokens)) : DEFAULT_CONTEXT_WINDOW_TOKENS,
           updatedAt: new Date().toISOString()
         });
         changed = true;
       }
     }
     if (changed) this.store.setAppSetting(CONTEXT_DEFAULTS_MIGRATION_KEY, "done");
+  }
+
+  /**
+   * Apply known model windows once. This is what upgrades a legacy
+   * deepseek-flash profile from 328K/128K to its real 1M window without
+   * touching unrelated models or a deliberately custom value.
+   */
+  private normalizeKnownContextWindows(): void {
+    if (this.store.getAppSetting(CONTEXT_WINDOWS_MIGRATION_KEY) === "done") return;
+    const all = this.store.listModelProfiles();
+    if (all.length === 0) return;
+    let changed = false;
+    for (const profile of all) {
+      const recommended = suggestContextWindowTokens(profile.model, profile.contextWindowTokens);
+      if (recommended === profile.contextWindowTokens) continue;
+      const legacyDefault = profile.contextWindowTokens === 128_000
+        || profile.contextWindowTokens === 256_000
+        || profile.contextWindowTokens === 328_000;
+      if (!legacyDefault) continue;
+      this.store.upsertModelProfile({
+        ...profile,
+        contextWindowTokens: recommended,
+        updatedAt: new Date().toISOString()
+      });
+      changed = true;
+    }
+    if (changed || all.length > 0) this.store.setAppSetting(CONTEXT_WINDOWS_MIGRATION_KEY, "done");
   }
 
   presets() {
@@ -151,7 +182,7 @@ export class ModelRegistry {
       protocol: patch.protocol ?? "openai-chat",
       baseUrl: patch.baseUrl ?? "",
       model: patch.model ?? "",
-      contextWindowTokens: patch.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS,
+      contextWindowTokens: patch.contextWindowTokens ?? suggestContextWindowTokens(patch.model ?? "", DEFAULT_CONTEXT_WINDOW_TOKENS),
       maxOutputTokens: patch.maxOutputTokens ?? 8_000,
       apiKeyCipher: patch.apiKey ? this.secretBox.encrypt(patch.apiKey) : null,
       isLocal: false,
@@ -166,6 +197,8 @@ export class ModelRegistry {
   updateProfile(id: string, patch: ModelProfilePatch): ModelProfileView {
     const current = this.store.getModelProfile(id);
     if (!current) throw new ModelRegistryError("MODEL_PROFILE_NOT_FOUND", "找不到这个模型档案");
+    const nextModel = patch.model !== undefined ? patch.model.trim() : current.model;
+    const modelChanged = nextModel !== current.model;
     const record = this.normalizeProfile({
       ...current,
       name: patch.name ?? current.name,
@@ -173,8 +206,9 @@ export class ModelRegistry {
       providerName: patch.providerName ?? current.providerName,
       protocol: patch.protocol !== undefined ? normalizeProtocol(patch.protocol) : current.protocol,
       baseUrl: patch.baseUrl !== undefined ? normalizeBaseUrl(patch.baseUrl) : current.baseUrl,
-      model: patch.model !== undefined ? patch.model.trim() : current.model,
-      contextWindowTokens: patch.contextWindowTokens ?? current.contextWindowTokens,
+      model: nextModel,
+      contextWindowTokens: patch.contextWindowTokens
+        ?? (modelChanged ? suggestContextWindowTokens(nextModel, current.contextWindowTokens) : current.contextWindowTokens),
       maxOutputTokens: patch.maxOutputTokens ?? current.maxOutputTokens,
       apiKeyCipher: patch.apiKey === undefined
         ? current.apiKeyCipher
@@ -336,8 +370,12 @@ export class ModelRegistry {
     const configPath = join(this.codexHome, "config.toml");
     mkdirSync(this.codexHome, { recursive: true });
     const envKey = "HEARTH_CODEX_API_KEY";
+    const policy = resolveContextWindowPolicy(settings);
     writeFileSync(configPath, [
       `model = ${tomlString(settings.model)}`,
+      `model_context_window = ${policy.contextWindowTokens}`,
+      `model_max_output_tokens = ${policy.maxOutputTokens}`,
+      `model_auto_compact_token_limit = ${policy.compactThresholdTokens}`,
       'model_provider = "hearth"',
       "",
       "[model_providers.hearth]",
@@ -360,7 +398,10 @@ export class ModelRegistry {
       envKeySource: settings.apiKey ? "process" : "missing",
       authSource: settings.apiKey ? "provider-env" : "missing",
       canRun: Boolean(settings.apiKey),
-      issues: settings.apiKey ? [] : ["Codex 模型档案缺少 API Key"]
+      issues: settings.apiKey ? [] : ["Codex 模型档案缺少 API Key"],
+      contextWindowTokens: policy.contextWindowTokens,
+      maxOutputTokens: policy.maxOutputTokens,
+      autoCompactTokenLimit: policy.compactThresholdTokens
     };
   }
 

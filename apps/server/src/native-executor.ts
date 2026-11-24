@@ -2,7 +2,7 @@ import { isTextDraftTask, DRAFT_INSTRUCTION } from "./draft-intent.ts";
 import { localTimeLine } from "./local-time.ts";
 import { nativeTaskInstructions } from "./native-task-instructions.ts";
 import type { BudgetDimension, RunBudget, RunUsage, TaskPermissions, TaskProgressDetail, TaskRecord } from "@hearth/core";
-import { EXECUTION_PROFILES } from "@hearth/core";
+import { EXECUTION_PROFILES, resolveContextWindowPolicy } from "@hearth/core";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import {
@@ -326,6 +326,9 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     ...(resume ? { resume } : {}),
     ...(options.steering ? { steering: options.steering } : {}),
     contextWindowTokens: options.settings.contextWindowTokens,
+    // runtime's effective trigger is window - max(reserve, output) - 16K;
+    // this extra 16K subtraction puts the trigger exactly at the shared 80%.
+    contextReserveTokens: Math.max(4_000, options.settings.contextWindowTokens - resolveContextWindowPolicy(options.settings).compactThresholdTokens - 16_000),
     maxOutputTokens: options.settings.maxOutputTokens,
     ...(workspaceHooks.hooks.length > 0 ? { hooks: workspaceHooks.hooks, hookTimeoutMs: 10_000 } : {}),
     modelId: options.settings.model,

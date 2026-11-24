@@ -261,7 +261,9 @@ export class DeepSeekHarnessExecutorAdapter implements ExecutorAdapter {
         protocol: settings.protocol,
         baseUrl: settings.baseUrl,
         model: settings.model,
-        apiKey: settings.apiKey
+        apiKey: settings.apiKey,
+        ...(settings.contextWindowTokens !== undefined ? { contextWindowTokens: settings.contextWindowTokens } : {}),
+        ...(settings.maxOutputTokens !== undefined ? { maxOutputTokens: settings.maxOutputTokens } : {})
       },
       dshHome: executorHome(this.settingsPath, "deepseek-harness"),
       workingDirectory: input.prepared.root,

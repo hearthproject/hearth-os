@@ -14,7 +14,7 @@ import type {
 } from "@hearth/agent-runtime";
 import { deserializeAgentState, inspectJournal, journalPathFor, killWindowsProcessTree, resolveDesktopFilePath, CODING_RUN_BUDGET } from "@hearth/agent-runtime";
 import { checkpointSnapshotFromEvent, RUNTIME_CHECKPOINT_EVENT, runtimeJournalEvents, SqliteRuntimeJournal } from "./sqlite-runtime-journal.ts";
-import type { ApprovalMode, BudgetDimension, BudgetExhaustion, ContextItem, ContextSettings, DelegationJob, DelegationResult, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, RunBudget, RunCheckpointProof, RunCheckpointRecord, RunRecord, TaskError, TaskFollowUpRecord, TaskLease, TaskPauseResult, TaskProgressDetail, TaskRecord, TaskResumeReference } from "@hearth/core";
+import type { ApprovalMode, BudgetDimension, BudgetExhaustion, ContextItem, ContextSettings, ContextUsageSnapshot, DelegationJob, DelegationResult, ExecutorId, ExecutorSettings, FailureCause, FailureDiagnosis, HandoffPacket, HandoffRecord, RunBudget, RunCheckpointProof, RunCheckpointRecord, RunRecord, TaskError, TaskFollowUpRecord, TaskLease, TaskPauseResult, TaskProgressDetail, TaskRecord, TaskResumeReference } from "@hearth/core";
 import { runCodex } from "@hearth/codex-executor";
 import type { DshApprovalOutcome, DshApprovalRequest, DshContextEvent } from "@hearth/deepseek-executor";
 import type { ApprovalRequest, ApprovalManager, PendingToolApproval, ToolApprovalDecision } from "./approvals.ts";
@@ -2244,7 +2244,9 @@ export class HearthScheduler {
       let conversationBrief = "";
       if (this.conversationContext && task.conversationId) {
         try {
-          conversationBrief = (await this.conversationContext.renderForTask(task.conversationId, taskId)).text;
+          conversationBrief = (await this.conversationContext.renderForTask(task.conversationId, taskId, undefined, {
+            settings: this.modelSettingsForExecutor(executorId)
+          })).text;
           if (conversationBrief) {
             this.capture({
               taskId, conversationId: task.conversationId, runId, executorId,
@@ -2507,6 +2509,11 @@ export class HearthScheduler {
           taskId, conversationId: task.conversationId ?? null, runId, executorId,
           kind: "assistant_message", role: "assistant", content: result.finalResponse,
           provenance: { source: "executor-final", executorId, label: result.label }, executorEventId: `final:${runId}`
+        });
+      }
+      if (executorId === "codex" && result.usage?.inputTokens) {
+        this.rememberTaskContextUsage(task, executorId, result.usage.inputTokens, result.usage.outputTokens ?? 0, {
+          executor: result.usage.inputTokens
         });
       }
       const runUsage = this.usageWithMetrics(result.usage, result.turns, result.toolCalls);
@@ -3111,6 +3118,9 @@ export class HearthScheduler {
         provenance: { source: "deepseek-harness", eventType: event.type, usage: event.usage },
         executorEventId: `${event.executorEventId}:usage`
       });
+      this.rememberTaskContextUsage(task, "deepseek-harness", event.usage.inputTokens, event.usage.outputTokens ?? 0, {
+        executor: event.usage.inputTokens
+      });
     }
   }
 
@@ -3139,8 +3149,50 @@ export class HearthScheduler {
     }
   }
 
+  private rememberTaskContextUsage(
+    task: TaskRecord,
+    executorId: ExecutorId,
+    inputTokens: number,
+    outputTokens: number,
+    breakdown: Record<string, number>
+  ): void {
+    if (!task.conversationId || inputTokens <= 0) return;
+    try {
+      const settings = this.modelSettingsForExecutor(executorId);
+      this.conversationContext?.rememberUsage(task.conversationId, {
+        inputTokens,
+        outputTokens,
+        contextWindowTokens: settings?.contextWindowTokens ?? 256_000,
+        model: settings?.model ?? executorId,
+        ...(settings?.reasoningEffort ? { reasoningEffort: settings.reasoningEffort } : {}),
+        source: "measured",
+        scope: "task",
+        breakdown,
+        measuredAt: new Date().toISOString()
+      } satisfies ContextUsageSnapshot);
+    } catch {
+      // Usage persistence must never break the run.
+    }
+  }
+
   private captureNativeEvent(task: TaskRecord, run: RunRecord, event: RuntimeEvent): void {
     const base = { taskId: task.id, conversationId: task.conversationId ?? null, runId: run.id, executorId: "native" as const, role: "system" as const };
+    if (event.type === "context.usage") {
+      const breakdown = {
+        system: Math.ceil(event.systemChars / 4),
+        tools: Math.ceil(event.toolSchemaChars / 4),
+        history: Math.ceil(event.historyChars / 4),
+        tool_results: Math.ceil(event.toolResultChars / 4)
+      };
+      this.capture({ ...base, kind: "usage", content: JSON.stringify({
+        inputTokens: event.inputTokens,
+        outputTokens: event.outputTokens,
+        cachedInputTokens: event.cachedInputTokens,
+        estimatedTokens: event.estimatedTokens
+      }), provenance: { source: "native", turn: event.turn, measured: true }, executorEventId: `native:${event.turn}:usage` });
+      this.rememberTaskContextUsage(task, "native", event.inputTokens, event.outputTokens, breakdown);
+      return;
+    }
     if (event.type === "assistant.message") {
       this.capture({ ...base, kind: "assistant_message", role: "assistant", content: event.text, provenance: { source: "native", turn: event.turn }, executorEventId: `native:${event.turn}:assistant` });
       return;
