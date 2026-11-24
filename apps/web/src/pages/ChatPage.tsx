@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router-dom";
 import { ChatMailDraft } from "../components/ChatMailDraft.tsx";
 import { ApprovalCard } from "../components/ApprovalCard.tsx";
+import { GoalBar } from "../components/GoalBar.tsx";
+import { GoalDialog } from "../components/GoalDialog.tsx";
 import { isMailDraftReply } from "../lib/mail-draft.ts";
 import {
   ArrowUp,
@@ -23,9 +25,10 @@ import {
   Settings2,
   ShieldCheck,
   Sparkles,
+  Target,
   X
 } from "lucide-react";
-import { ApiError, api, chatStream } from "../lib/api.ts";
+import { ApiError, api, chatStream, type GoalSettingsInput } from "../lib/api.ts";
 import { attachmentPreviewTarget, artifactPreviewTarget, type PreviewTarget } from "../lib/workspace-preview.ts";
 import type { RunInfo } from "../components/InlineRun.tsx";
 const InlineRun = lazy(() => import("../components/InlineRun.tsx").then((module) => ({ default: module.InlineRun })));
@@ -53,6 +56,7 @@ const PENDING_SETTINGS: ConversationSettings = {
 };
 
 const EXECUTOR_ORDER: ExecutorId[] = ["deepseek-harness", "codex", "native"];
+const TERMINAL_GOAL_STATES = new Set(["done", "cancelled", "failed"]);
 
 interface TimelineMessage {
   kind: "message";
@@ -72,6 +76,8 @@ interface OutgoingMessage {
   text: string;
   attachments: ChatAttachment[];
   skillId: string | null;
+  goalMode?: boolean;
+  goalSettings?: GoalSettingsInput;
 }
 
 interface ChatExecution {
@@ -118,6 +124,13 @@ export function ChatPage() {
   const [streaming, setStreaming] = useState("");
   const [streamingStatus, setStreamingStatus] = useState("");
   const [reasoning, setReasoning] = useState("");
+  const [goalMode, setGoalMode] = useState(false);
+  const [goalDialogOpen, setGoalDialogOpen] = useState(false);
+  const [goalSettings, setGoalSettings] = useState<GoalSettingsInput>({
+    maxRounds: 24,
+    reviewPolicy: "human_on_risk"
+  });
+  const [goalBusy, setGoalBusy] = useState(false);
   const [queue, setQueue] = useState<OutgoingMessage[]>([]);
   const [chatExecutions, setChatExecutions] = useState<Record<string, ChatExecution>>({});
   const [error, setError] = useState<string | null>(null);
@@ -155,6 +168,15 @@ export function ChatPage() {
     enabled: Boolean(conversationId),
     retry: false
   });
+  const goalsQuery = useQuery({
+    queryKey: ["goals", conversationId],
+    queryFn: () => api.goals(conversationId as string),
+    enabled: Boolean(conversationId),
+    staleTime: 10_000
+  });
+  const goalViews = goalsQuery.data?.goals ?? [];
+  const currentGoal = goalViews.find((view) => !TERMINAL_GOAL_STATES.has(view.goal.currentState)) ?? goalViews[0] ?? null;
+  const hasActiveGoal = Boolean(currentGoal && !TERMINAL_GOAL_STATES.has(currentGoal.goal.currentState));
   const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health });
   const skillsQuery = useQuery({ queryKey: ["skills"], queryFn: api.skills, staleTime: 30_000 });
   const executorsQuery = useQuery({ queryKey: ["executors"], queryFn: api.executors, refetchInterval: 20_000 });
@@ -162,7 +184,8 @@ export function ChatPage() {
   const conversations = conversationsQuery.data?.conversations ?? [];
   const skills = skillsQuery.data?.skills ?? [];
   const selectedSkill = useMemo(() => skills.find((skill) => skill.id === selectedSkillId) ?? null, [skills, selectedSkillId]);
-  const slashTerm = input.startsWith("/") && !input.startsWith("//") ? input.slice(1).trim().toLocaleLowerCase() : null;
+  const isGoalCommand = /^\/goal(?:\s|$)/i.test(input.trimStart());
+  const slashTerm = !isGoalCommand && input.startsWith("/") && !input.startsWith("//") ? input.slice(1).trim().toLocaleLowerCase() : null;
   const slashMatches = useMemo(() => slashTerm === null ? [] : skills.filter((skill) => {
     if (!slashTerm) return true;
     return `${skill.name} ${skill.manifest.description} ${skill.id}`.toLocaleLowerCase().includes(slashTerm);
@@ -528,6 +551,56 @@ export function ChatPage() {
     void uploadFiles(Array.from(event.dataTransfer.files));
   }
 
+  async function runGoalAction(action: "start" | "pause" | "resume" | "stop" | "replan" | "complete" | "approve"): Promise<void> {
+    const view = currentGoal;
+    if (!view || goalBusy) return;
+    setGoalBusy(true);
+    setError(null);
+    try {
+      await api.goalAction(view.goal.goalId, action, {
+        ...(view.goal.revision !== undefined ? { expectedRevision: view.goal.revision } : {})
+      });
+      await queryClient.invalidateQueries({ queryKey: ["goals", conversationId] });
+      await queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      await queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
+    } catch (caught) {
+      setError(caught instanceof Error ? `目标操作失败：${caught.message}` : "目标操作失败，请重试");
+    } finally {
+      setGoalBusy(false);
+    }
+  }
+
+  async function handleGoalCommand(text: string): Promise<void> {
+    const match = text.match(/^\/goal(?:\s+([\s\S]*))?$/i);
+    const argument = match?.[1]?.trim() ?? "";
+    if (!argument || /^status$/i.test(argument)) {
+      await goalsQuery.refetch();
+      if (!hasActiveGoal) setError("当前会话还没有目标。发送 /goal <目标> 或点击输入框的目标按钮创建。");
+      return;
+    }
+    const action = argument.toLowerCase();
+    if (["pause", "resume", "stop", "replan", "complete", "approve"].includes(action)) {
+      if (!currentGoal) {
+        setError("当前会话没有可操作的目标。");
+        return;
+      }
+      await runGoalAction(action as "pause" | "resume" | "stop" | "replan" | "complete" | "approve");
+      return;
+    }
+    if (hasActiveGoal) {
+      setError("当前会话已有未结束的目标，请先停止或完成它。");
+      return;
+    }
+    const outgoing: OutgoingMessage = {
+      text: argument,
+      attachments: [],
+      skillId: null,
+      goalMode: true,
+      goalSettings
+    };
+    await dispatch(outgoing);
+  }
+
   async function send() {
     const text = input.trim();
     if (uploading || !settingsReady || (!text && attachments.length === 0)) return;
@@ -535,10 +608,22 @@ export function ChatPage() {
       setError(`${selectedExecutorName} 当前不可用，不会自动切换执行器。${selectedExecutor?.health.issues.join("；") ?? "请到设置中测试可用性。"}`);
       return;
     }
-    const outgoing: OutgoingMessage = { text, attachments, skillId: selectedSkillId };
+    if (text && isGoalCommand && attachments.length === 0) {
+      setInput("");
+      setGoalDialogOpen(false);
+      await handleGoalCommand(text);
+      return;
+    }
+    const outgoing: OutgoingMessage = {
+      text,
+      attachments,
+      skillId: selectedSkillId,
+      ...(goalMode ? { goalMode: true, goalSettings } : {})
+    };
     setInput("");
     setAttachments([]);
     if (selectedSkillId) setSelectedSkillId(null);
+    if (goalMode) setGoalMode(false);
     setError(null);
     if (sending || hasRunningTask) {
       setQueue((prev) => [...prev, outgoing]);
@@ -603,7 +688,7 @@ export function ChatPage() {
   }
 
   async function dispatch(outgoing: OutgoingMessage) {
-    const { text, attachments: sentAttachments, skillId: sentSkillId } = outgoing;
+    const { text, attachments: sentAttachments, skillId: sentSkillId, goalMode: sentGoalMode, goalSettings: sentGoalSettings } = outgoing;
     const startedAt = Date.now();
     setStreaming("");
     setReasoning("");
@@ -654,6 +739,7 @@ export function ChatPage() {
           ...(text ? { message: text } : {}),
           ...(sentSkillId ? { skillId: sentSkillId } : {}),
           ...(sentAttachments.length > 0 ? { attachments: sentAttachments } : {}),
+          ...(sentGoalMode ? { goalMode: true, goalSettings: sentGoalSettings ?? {} } : {}),
           ...(!conversationId ? { settings: conversationSettings } : {})
         },
         {
@@ -899,6 +985,9 @@ export function ChatPage() {
 
         <div className="chat-scroll">
           <div className="message-list">
+            {currentGoal && (
+              <GoalBar view={currentGoal} busy={goalBusy} onAction={(action) => void runGoalAction(action)} />
+            )}
             {isCancelling && (
               <div className="chat-stopping">
                 <Loader2 size={16} className="spin" />
@@ -1219,6 +1308,16 @@ export function ChatPage() {
               {uploading ? <Loader2 size={18} className="spin" /> : <Paperclip size={18} />}
             </button>
             <input ref={fileInputRef} type="file" multiple hidden onChange={pickFiles} />
+            <button
+              type="button"
+              className={`composer-icon ${goalMode ? "composer-goal-active" : ""}`}
+              onClick={() => setGoalDialogOpen(true)}
+              disabled={hasActiveGoal}
+              title={hasActiveGoal ? "当前会话已有未结束的目标，请在目标栏操作" : "目标模式：跨多轮持续推进，直到独立验收通过"}
+              aria-label="目标模式"
+            >
+              <Target size={17} />
+            </button>
             <textarea
               ref={composerRef}
               value={input}
@@ -1266,6 +1365,17 @@ export function ChatPage() {
           </div>
         </div>
       </section>
+      <GoalDialog
+        open={goalDialogOpen}
+        hasActiveGoal={hasActiveGoal}
+        initial={goalSettings}
+        onClose={() => setGoalDialogOpen(false)}
+        onConfirm={(settings) => {
+          setGoalSettings(settings);
+          setGoalMode(true);
+          setGoalDialogOpen(false);
+        }}
+      />
       {panelOpen && (
         <Suspense fallback={null}>
           <ChatWorkspacePanel

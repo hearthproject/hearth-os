@@ -166,6 +166,12 @@ function EventBridge() {
         void queryClient.invalidateQueries({ queryKey: ["conversation"] });
         return;
       }
+      if (event.startsWith("goal.")) {
+        void queryClient.invalidateQueries({ queryKey: ["goals"] });
+        void queryClient.invalidateQueries({ queryKey: ["goal"] });
+        if (eventTaskId) invalidateTask(eventTaskId);
+        return;
+      }
       if (event === "tool.job.updated") {
         void queryClient.invalidateQueries({ queryKey: ["background-tools"] });
         invalidateTask(eventTaskId);

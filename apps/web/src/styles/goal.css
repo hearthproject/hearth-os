@@ -1,0 +1,268 @@
+/* Goal mode: a compact control bar plus a small settings dialog. */
+
+.goal-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 14px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg));
+}
+
+.goal-bar.done,
+.goal-bar.cancelled {
+  border-color: var(--line);
+  background: var(--bg);
+  opacity: 0.82;
+}
+
+.goal-bar.blocked,
+.goal-bar.awaiting_user {
+  border-color: color-mix(in srgb, #d08a2e 46%, var(--line));
+  background: color-mix(in srgb, #d08a2e 8%, var(--bg));
+}
+
+.goal-bar-mark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 9px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+}
+
+.goal-bar-copy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.goal-bar-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.goal-bar-title strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.goal-state-pill,
+.goal-round-pill {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--ink-secondary);
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+}
+
+.goal-bar.armed .goal-state-pill {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+}
+
+.goal-bar-next {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--ink-tertiary);
+}
+
+.goal-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+}
+
+.goal-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 27px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--ink-secondary);
+  font-size: 11.5px;
+}
+
+.goal-action:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: color-mix(in srgb, var(--ink) 24%, var(--line));
+}
+
+.goal-action.primary {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+}
+
+.goal-action.danger:hover:not(:disabled) {
+  color: #b44a3d;
+  border-color: color-mix(in srgb, #b44a3d 40%, var(--line));
+}
+
+.goal-action:disabled {
+  opacity: 0.55;
+}
+
+.composer-goal-active {
+  color: var(--accent) !important;
+  background: color-mix(in srgb, var(--accent) 12%, transparent) !important;
+}
+
+.goal-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(0 0 0 / 0.32);
+  backdrop-filter: blur(3px);
+}
+
+.goal-dialog {
+  width: min(480px, 94vw);
+  max-height: 90vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--bg);
+  box-shadow: 0 22px 60px rgb(0 0 0 / 0.22);
+}
+
+.goal-dialog header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.goal-dialog-mark {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: 10px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.goal-dialog header h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.goal-dialog header p {
+  margin: 3px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink-tertiary);
+}
+
+.goal-dialog header .icon-button {
+  margin-left: auto;
+}
+
+.goal-dialog label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ink-secondary);
+}
+
+.goal-dialog label > span {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.goal-dialog input,
+.goal-dialog select,
+.goal-dialog textarea {
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12.5px;
+  resize: vertical;
+}
+
+.goal-dialog small {
+  font-size: 11px;
+  color: var(--ink-tertiary);
+}
+
+.goal-dialog-warning {
+  margin: 0;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, #d08a2e 44%, var(--line));
+  border-radius: 9px;
+  background: color-mix(in srgb, #d08a2e 9%, var(--bg));
+  color: var(--ink-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.goal-dialog footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.goal-dialog footer .ghost,
+.goal-dialog footer .primary {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 12.5px;
+}
+
+.goal-dialog footer .ghost {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-secondary);
+}
+
+.goal-dialog footer .primary {
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--line));
+  background: var(--accent);
+  color: #fff;
+}
+
+@media (max-width: 640px) {
+  .goal-bar {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .goal-bar-actions {
+    width: 100%;
+    padding-left: 38px;
+    flex-wrap: wrap;
+  }
+}

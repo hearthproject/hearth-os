@@ -69,6 +69,9 @@ import type {
   BackgroundToolJob
 } from "./types.ts";
 import type {
+  GoalAction,
+  GoalContract,
+  GoalView,
   LibraryNode,
   LibraryRoot,
   LibrarySearchResult,
@@ -88,7 +91,19 @@ export interface ChatStreamBody {
   skillId?: string;
   attachments?: ChatAttachment[];
   url?: string;
+  goalMode?: boolean;
+  goalSettings?: GoalSettingsInput;
   settings?: ConversationSettingsPatch;
+}
+
+export interface GoalSettingsInput {
+  maxRounds?: number;
+  reviewPolicy?: "auto" | "human_on_risk" | "human_on_complete";
+  deadline?: string;
+  forbiddenActions?: string[];
+  evidenceRequirements?: string[];
+  criteria?: string[];
+  commandsApproved?: boolean;
 }
 
 export interface ChatStreamHandlers {
@@ -137,6 +152,37 @@ function query(params: Record<string, string | number | boolean | undefined>): s
 }
 
 export const api = {
+  goals: (conversationId: string) =>
+    request<{ goals: GoalView[] }>(`/api/goals${query({ conversationId, includeTerminal: true })}`),
+  goal: (id: string) => request<GoalView>(`/api/goals/${encodeURIComponent(id)}`),
+  createGoal: (body: {
+    objective: string;
+    conversationId?: string;
+    projectId?: string;
+    execution: {
+      executorId: "native" | "codex" | "deepseek-harness";
+      taskKind: "delivery" | "workspace" | "general";
+      expectedOutputs?: string[];
+      workspacePath?: string;
+      networkHosts?: string[];
+      executionMode?: "quick" | "standard" | "deep";
+    };
+    criteria?: Array<{ description: string; validator: "file" | "git" | "command" | "schema" | "manual" | "llm_review"; check: string }>;
+    forbiddenActions?: string[];
+    evidenceRequirements?: string[];
+    reviewPolicy?: "auto" | "human_on_risk" | "human_on_complete";
+    maxRounds?: number;
+    deadline?: string;
+    commandsApproved?: boolean;
+  }) => request<{ goal: GoalView; task?: TaskRecord }>("/api/goals", {
+    method: "POST",
+    body: JSON.stringify(body)
+  }),
+  goalAction: (id: string, action: GoalAction, options: { expectedRevision?: number; note?: string; maxRounds?: number } = {}) =>
+    request<GoalView>(`/api/goals/${encodeURIComponent(id)}/actions`, {
+      method: "POST",
+      body: JSON.stringify({ action, ...options })
+    }),
   conversationDefaults: () => request<{ settings: ConversationSettings }>("/api/conversation-defaults"),
   conversations: () => request<{ conversations: ConversationListItem[] }>("/api/conversations"),
   conversation: (id: string) => request<ConversationDetail>(`/api/conversations/${encodeURIComponent(id)}`),
@@ -438,6 +484,9 @@ export function subscribeToEvents(onEvent: (event: string, envelope?: EventEnvel
     "tool.job.updated"
   ];
   for (const name of eventNames) source.addEventListener(name, (event) => dispatch(name, (event as MessageEvent).data));
+  for (const name of ["goal.created", "goal.updated", "goal.round.started", "goal.round.settled", "goal.completion.recorded"]) {
+    source.addEventListener(name, (event) => dispatch(name, (event as MessageEvent).data));
+  }
   return () => source.close();
 }
 
