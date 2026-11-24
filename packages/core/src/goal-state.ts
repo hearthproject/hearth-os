@@ -44,7 +44,6 @@ export function normalizeGoal(goal: GoalContract): GoalContract {
     ...goal,
     armed: goal.armed ?? false,
     roundCount: Math.max(0, goal.roundCount ?? 0),
-    maxRounds: clampGoalMaxRounds(goal.maxRounds),
     noProgressCount: Math.max(0, goal.noProgressCount ?? 0),
     lastProgressDigest: goal.lastProgressDigest ?? null,
     nextWakeAt: goal.nextWakeAt ?? null,
@@ -54,9 +53,9 @@ export function normalizeGoal(goal: GoalContract): GoalContract {
 }
 
 export function clampGoalMaxRounds(value: number | undefined): number {
-  const parsed = Math.trunc(value ?? DEFAULT_GOAL_MAX_ROUNDS);
-  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_GOAL_MAX_ROUNDS;
-  return Math.min(MAX_GOAL_ROUNDS, parsed);
+  // Goal rounds are uncapped; the helper remains for old callers that still
+  // type-check against a numeric value.
+  return value ?? Number.POSITIVE_INFINITY;
 }
 
 export function assertGoalTransition(from: GoalState, to: GoalState): void {
@@ -145,21 +144,6 @@ export function evaluateGoalEligibility(input: GoalEligibilityInput): GoalEligib
   if (input.taskStatus && OPEN_TASK_STATUSES.has(input.taskStatus)) {
     return denied("task_open", `目标任务处于 ${input.taskStatus}，先处理当前任务状态`);
   }
-  if ((goal.roundCount ?? 0) >= (goal.maxRounds ?? DEFAULT_GOAL_MAX_ROUNDS)) {
-    return denied("round_limit", `已达到 ${goal.maxRounds ?? DEFAULT_GOAL_MAX_ROUNDS} 轮上限，需要你决定是否增加轮次`);
-  }
-  if (goal.deadline) {
-    const deadlineMs = Date.parse(goal.deadline);
-    if (Number.isFinite(deadlineMs) && deadlineMs <= nowMs) {
-      return denied("deadline", `目标截止时间已到：${goal.deadline}`);
-    }
-  }
-  if (goal.budget.maxTokens !== undefined && input.spentTokens >= goal.budget.maxTokens) {
-    return denied("budget", "目标总 token 预算已用完");
-  }
-  if (goal.budget.maxDurationMs !== undefined && input.elapsedMs >= goal.budget.maxDurationMs) {
-    return denied("budget", "目标总时长预算已用完");
-  }
   if (goal.nextWakeAt) {
     const wakeMs = Date.parse(goal.nextWakeAt);
     if (Number.isFinite(wakeMs) && wakeMs > nowMs) {
@@ -198,8 +182,8 @@ export function goalProgressDigest(parts: {
   return hash.toString(16).padStart(16, "0");
 }
 
-export function goalRoundLimitReached(goal: GoalContract): boolean {
-  return (goal.roundCount ?? 0) >= (goal.maxRounds ?? DEFAULT_GOAL_MAX_ROUNDS);
+export function goalRoundLimitReached(_goal: GoalContract): boolean {
+  return false;
 }
 
 export function goalBackoffMs(noProgressCount: number, failureCount = 0): number {

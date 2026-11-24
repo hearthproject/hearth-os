@@ -27,11 +27,14 @@ export type ApprovalMode = (typeof APPROVAL_MODES)[number];
 export const SANDBOX_MODES = ["read-only", "workspace-write", "danger-full-access"] as const;
 export type SandboxMode = (typeof SANDBOX_MODES)[number];
 
+export type CollaborationMode = "build" | "plan";
+
 export interface ConversationSettings {
   executionMode?: ExecutionMode;
   executorEnabled: Record<ExecutorId, boolean>;
   approvalMode: ApprovalMode;
   preferredExecutorId: ExecutorId | null;
+  collaborationMode?: CollaborationMode;
 }
 
 export interface ConversationSettingsPatch {
@@ -39,6 +42,7 @@ export interface ConversationSettingsPatch {
   executorEnabled?: Partial<Record<ExecutorId, boolean | undefined>> | undefined;
   approvalMode?: ApprovalMode | undefined;
   preferredExecutorId?: ExecutorId | null | undefined;
+  collaborationMode?: CollaborationMode | undefined;
 }
 
 export function defaultConversationSettings(
@@ -47,7 +51,7 @@ export function defaultConversationSettings(
 ): ConversationSettings {
   const executorEnabled = {} as Record<ExecutorId, boolean>;
   for (const id of EXECUTOR_IDS) executorEnabled[id] = enabled[id] ?? false;
-  return { executorEnabled, approvalMode, preferredExecutorId: "native", executionMode: "standard" };
+  return { executorEnabled, approvalMode, preferredExecutorId: "native", executionMode: "standard", collaborationMode: "build" };
 }
 
 export function mergeConversationSettings(
@@ -67,7 +71,8 @@ export function mergeConversationSettings(
     approvalMode: "full",
     preferredExecutorId: patch?.preferredExecutorId !== undefined
       ? patch.preferredExecutorId
-      : base.preferredExecutorId ?? "native"
+      : base.preferredExecutorId ?? "native",
+    collaborationMode: patch?.collaborationMode ?? base.collaborationMode ?? "build"
   };
 }
 
@@ -281,6 +286,8 @@ export interface TaskRecord {
   executionMode?: ExecutionMode;
   id: string;
   goalId?: string | null;
+  planId?: string | null;
+  mode?: CollaborationMode;
   externalRef?: string | null;
   requestHash?: string | null;
   templateId: string | null;
@@ -405,6 +412,44 @@ export interface GoalContract {
   commandsApprovedAt?: string | null;
 }
 
+export const PLAN_STAGES = ["planning", "awaiting_approval", "executing", "completed", "failed", "cancelled"] as const;
+export type PlanStage = (typeof PLAN_STAGES)[number];
+
+export const PLAN_ACTIONS = ["approve", "replan", "cancel", "retry"] as const;
+export type PlanActionName = (typeof PLAN_ACTIONS)[number];
+
+export interface PlanExecutionProfile {
+  executorId: ExecutorId;
+  taskKind: TaskKind;
+  projectId?: string | null;
+  workspacePath?: string | null;
+  networkHosts: string[];
+  expectedOutputs: string[];
+  executionMode?: ExecutionMode;
+}
+
+export interface PlanRecord {
+  id: string;
+  conversationId: string;
+  projectId: string | null;
+  title: string;
+  objective: string;
+  stage: PlanStage;
+  planningTaskId: string | null;
+  executionTaskId: string | null;
+  execution?: PlanExecutionProfile;
+  planMarkdown: string | null;
+  planPath: string | null;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+  approvedAt: string | null;
+  completedAt: string | null;
+  error: string | null;
+}
+
+export interface PlanView extends PlanRecord {}
+
 export const GOAL_ROUND_STATUSES = ["running", "gated", "paused", "completed", "failed", "interrupted"] as const;
 export type GoalRoundStatus = (typeof GOAL_ROUND_STATUSES)[number];
 
@@ -504,7 +549,7 @@ export type TaskFollowUpMode = (typeof TASK_FOLLOW_UP_MODES)[number];
 export const TASK_FOLLOW_UP_STATUSES = ["queued", "steering", "applied", "cancelled"] as const;
 export type TaskFollowUpStatus = (typeof TASK_FOLLOW_UP_STATUSES)[number];
 
-export const TASK_FOLLOW_UP_ORIGINS = ["user", "goal"] as const;
+export const TASK_FOLLOW_UP_ORIGINS = ["user", "goal", "plan"] as const;
 export type TaskFollowUpOrigin = (typeof TASK_FOLLOW_UP_ORIGINS)[number];
 
 export interface TaskFollowUpRecord {

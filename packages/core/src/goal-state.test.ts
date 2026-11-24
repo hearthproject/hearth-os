@@ -95,7 +95,7 @@ describe("goal eligibility", () => {
     expect(evaluateGoalEligibility({ ...base, goal: goal({ currentState: "awaiting_user", armed: true }) }).reason).toBe("gate");
   });
 
-  it("stops at the round limit and on deadline", () => {
+  it("never stops at round counts or deadlines", () => {
     const atLimit = evaluateGoalEligibility({
       goal: goal({ currentState: "active", armed: true, roundCount: DEFAULT_GOAL_MAX_ROUNDS, maxRounds: DEFAULT_GOAL_MAX_ROUNDS }),
       now,
@@ -105,7 +105,7 @@ describe("goal eligibility", () => {
       spentTokens: 0,
       elapsedMs: 0
     });
-    expect(atLimit.reason).toBe("round_limit");
+    expect(atLimit.reason).toBe("ok");
     const expired = evaluateGoalEligibility({
       goal: goal({ currentState: "active", armed: true, deadline: "2026-01-01T00:00:00.000Z" }),
       now,
@@ -115,7 +115,7 @@ describe("goal eligibility", () => {
       spentTokens: 0,
       elapsedMs: 0
     });
-    expect(expired.reason).toBe("deadline");
+    expect(expired.reason).toBe("ok");
   });
 
   it("returns a retry time when the executor is unavailable", () => {
@@ -134,10 +134,10 @@ describe("goal eligibility", () => {
 });
 
 describe("goal helpers", () => {
-  it("clamps round limits", () => {
-    expect(clampGoalMaxRounds(undefined)).toBe(DEFAULT_GOAL_MAX_ROUNDS);
-    expect(clampGoalMaxRounds(0)).toBe(DEFAULT_GOAL_MAX_ROUNDS);
-    expect(clampGoalMaxRounds(999)).toBe(200);
+  it("keeps round limits uncapped", () => {
+    expect(clampGoalMaxRounds(undefined)).toBe(Number.POSITIVE_INFINITY);
+    expect(clampGoalMaxRounds(0)).toBe(0);
+    expect(clampGoalMaxRounds(999)).toBe(999);
   });
 
   it("detects no progress deterministically and ignores prose whitespace", () => {

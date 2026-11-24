@@ -1,5 +1,6 @@
 export * from "./types.ts";
 export * from "./goal-state.ts";
+export * from "./plan-state.ts";
 export * from "./execution-mode.ts";
 export * from "./state.ts";
 export * from "./dto.ts";
