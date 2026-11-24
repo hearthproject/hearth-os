@@ -38,6 +38,7 @@ import type {
   ExecutorModelBinding,
   GoalContract,
   GoalCompletionReport,
+  GoalRoundRecord,
   HandoffRecord,
   EntityAliasRecord,
   EntityRecord,
@@ -214,7 +215,7 @@ export interface SettleRunOperationCleanupInput {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 40;
+export const CURRENT_SCHEMA_VERSION = 41;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -251,7 +252,21 @@ CREATE TABLE IF NOT EXISTS goals (
   authority_sources_json TEXT NOT NULL, success_criteria_json TEXT NOT NULL,
   evidence_requirements_json TEXT NOT NULL, budget_json TEXT NOT NULL,
   deadline TEXT, stop_conditions_json TEXT NOT NULL, review_policy TEXT NOT NULL,
-  current_state TEXT NOT NULL, next_handoff TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+  current_state TEXT NOT NULL, next_handoff TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  project_id TEXT, conversation_id TEXT, task_id TEXT, armed INTEGER NOT NULL DEFAULT 0,
+  round_count INTEGER NOT NULL DEFAULT 0, max_rounds INTEGER NOT NULL DEFAULT 24,
+  no_progress_count INTEGER NOT NULL DEFAULT 0, last_progress_digest TEXT,
+  next_wake_at TEXT, stop_reason TEXT, revision INTEGER NOT NULL DEFAULT 0,
+  execution_json TEXT, pause_reference_json TEXT, commands_approved_at TEXT
+);
+CREATE TABLE IF NOT EXISTS goal_rounds (
+  id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, task_id TEXT NOT NULL,
+  round_index INTEGER NOT NULL, run_ids_json TEXT NOT NULL, status TEXT NOT NULL,
+  started_at TEXT NOT NULL, ended_at TEXT, summary TEXT, intent_json TEXT,
+  artifact_refs_json TEXT NOT NULL, evidence_refs_json TEXT NOT NULL,
+  usage_json TEXT, progress_digest TEXT, verifier_json TEXT,
+  workspace_root TEXT, out_dir TEXT,
+  UNIQUE(goal_id, round_index)
 );
 CREATE TABLE IF NOT EXISTS goal_completion_reports (
   goal_id TEXT NOT NULL, task_id TEXT NOT NULL, verdict TEXT NOT NULL, summary TEXT NOT NULL,
@@ -283,6 +298,7 @@ CREATE TABLE IF NOT EXISTS task_proposals (
 CREATE TABLE IF NOT EXISTS task_follow_ups (
   id TEXT PRIMARY KEY, task_id TEXT NOT NULL, conversation_id TEXT,
   content TEXT NOT NULL, mode TEXT NOT NULL, status TEXT NOT NULL,
+  origin TEXT NOT NULL DEFAULT 'user',
   applied_run_id TEXT, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS run_checkpoints (
@@ -1750,6 +1766,23 @@ export class HearthStore {
     ensureColumn(this.db, "tasks", "pinned_at", "TEXT");
     ensureColumn(this.db, "tasks", "archived_at", "TEXT");
     ensureColumn(this.db, "tasks", "goal_id", "TEXT");
+    ensureColumn(this.db, "task_follow_ups", "origin", "TEXT NOT NULL DEFAULT 'user'");
+    ensureColumn(this.db, "goals", "project_id", "TEXT");
+    ensureColumn(this.db, "goals", "conversation_id", "TEXT");
+    ensureColumn(this.db, "goals", "task_id", "TEXT");
+    ensureColumn(this.db, "goals", "armed", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn(this.db, "goals", "round_count", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn(this.db, "goals", "max_rounds", "INTEGER NOT NULL DEFAULT 24");
+    ensureColumn(this.db, "goals", "no_progress_count", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn(this.db, "goals", "last_progress_digest", "TEXT");
+    ensureColumn(this.db, "goals", "next_wake_at", "TEXT");
+    ensureColumn(this.db, "goals", "stop_reason", "TEXT");
+    ensureColumn(this.db, "goals", "revision", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn(this.db, "goals", "execution_json", "TEXT");
+    ensureColumn(this.db, "goals", "pause_reference_json", "TEXT");
+    ensureColumn(this.db, "goals", "commands_approved_at", "TEXT");
+    ensureColumn(this.db, "goal_rounds", "workspace_root", "TEXT");
+    ensureColumn(this.db, "goal_rounds", "out_dir", "TEXT");
     ensureColumn(this.db, "run_checkpoints", "proof_json", "TEXT");
     ensureColumn(this.db, "run_checkpoints", "event_seq", "INTEGER");
     ensureColumn(this.db, "tasks", "external_ref", "TEXT");
@@ -1876,6 +1909,9 @@ export class HearthStore {
       CREATE INDEX IF NOT EXISTS reconcile_queue_status_idx ON reconcile_queue(status, created_at);
       CREATE INDEX IF NOT EXISTS reconcile_queue_task_idx ON reconcile_queue(task_id, status);
       CREATE INDEX IF NOT EXISTS goals_state_idx ON goals(current_state, updated_at);
+      CREATE INDEX IF NOT EXISTS goals_wake_idx ON goals(armed, next_wake_at);
+      CREATE INDEX IF NOT EXISTS goal_rounds_goal_idx ON goal_rounds(goal_id, round_index);
+      CREATE INDEX IF NOT EXISTS goal_rounds_status_idx ON goal_rounds(status, started_at);
       CREATE INDEX IF NOT EXISTS tasks_goal_idx ON tasks(goal_id, created_at);
       CREATE INDEX IF NOT EXISTS goal_completion_reports_goal_idx ON goal_completion_reports(goal_id, checked_at);
       CREATE INDEX IF NOT EXISTS memories_lane_idx ON memories(status, tier, trust, taint, updated_at);
@@ -2246,8 +2282,50 @@ export class HearthStore {
     return row ? rowToGoal(row) : null;
   }
 
-  listGoals(): GoalContract[] {
-    return (this.db.prepare("SELECT * FROM goals ORDER BY updated_at DESC").all() as DbRow[]).map(rowToGoal);
+  listGoals(options: { conversationId?: string | null; projectId?: string | null; includeTerminal?: boolean } = {}): GoalContract[] {
+    const clauses: string[] = [];
+    const params: SQLInputValue[] = [];
+    if (options.conversationId) {
+      clauses.push("conversation_id = ?");
+      params.push(options.conversationId);
+    }
+    if (options.projectId) {
+      clauses.push("project_id = ?");
+      params.push(options.projectId);
+    }
+    if (!options.includeTerminal) {
+      clauses.push("current_state NOT IN ('done', 'failed', 'cancelled')");
+    }
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+    return (this.db.prepare(`SELECT * FROM goals ${where} ORDER BY updated_at DESC`).all(...params) as DbRow[])
+      .map(rowToGoal);
+  }
+
+  listTasksForGoal(goalId: string): TaskRecord[] {
+    return (this.db.prepare("SELECT * FROM tasks WHERE goal_id = ? AND deleted_at IS NULL ORDER BY created_at ASC")
+      .all(goalId) as DbRow[]).map(rowToTask);
+  }
+
+  getGoalRound(goalId: string, index: number): GoalRoundRecord | null {
+    const row = this.db.prepare("SELECT * FROM goal_rounds WHERE goal_id = ? AND round_index = ?")
+      .get(goalId, index) as DbRow | undefined;
+    return row ? rowToGoalRound(row) : null;
+  }
+
+  latestGoalRound(goalId: string): GoalRoundRecord | null {
+    const row = this.db.prepare("SELECT * FROM goal_rounds WHERE goal_id = ? ORDER BY round_index DESC LIMIT 1")
+      .get(goalId) as DbRow | undefined;
+    return row ? rowToGoalRound(row) : null;
+  }
+
+  listGoalRounds(goalId: string): GoalRoundRecord[] {
+    return (this.db.prepare("SELECT * FROM goal_rounds WHERE goal_id = ? ORDER BY round_index ASC")
+      .all(goalId) as DbRow[]).map(rowToGoalRound);
+  }
+
+  upsertGoalRound(round: GoalRoundRecord): GoalRoundRecord {
+    upsertGoalRoundRow(this.db, round);
+    return round;
   }
 
   latestGoalCompletionReport(goalId: string): GoalCompletionReport | null {
@@ -4070,6 +4148,8 @@ export class HearthStore {
       case "eval.operator": return;
       case "goal.created":
       case "goal.updated": return upsertGoal(this.db, event.payload as GoalContract);
+      case "goal.round.started":
+      case "goal.round.settled": return upsertGoalRoundRow(this.db, event.payload as GoalRoundRecord);
       case "goal.completion.recorded": return insertGoalCompletionReport(this.db, event.payload as GoalCompletionReport);
       case "task.proposal.created":
       case "task.proposal.updated": return upsertTaskProposal(this.db, event.payload as TaskProposalRecord);
@@ -4265,21 +4345,56 @@ function upsertTask(db: DatabaseSync, task: TaskRecord): void {
 
 function upsertGoal(db: DatabaseSync, goal: GoalContract): void {
   db.prepare(
-    `INSERT INTO goals (id, title, objective, constraints_json, forbidden_actions_json, authority_sources_json, success_criteria_json, evidence_requirements_json, budget_json, deadline, stop_conditions_json, review_policy, current_state, next_handoff, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO goals (id, title, objective, constraints_json, forbidden_actions_json, authority_sources_json, success_criteria_json, evidence_requirements_json, budget_json, deadline, stop_conditions_json, review_policy, current_state, next_handoff, created_at, updated_at,
+      project_id, conversation_id, task_id, armed, round_count, max_rounds, no_progress_count, last_progress_digest, next_wake_at, stop_reason, revision, execution_json, pause_reference_json, commands_approved_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        title=excluded.title, objective=excluded.objective, constraints_json=excluded.constraints_json,
        forbidden_actions_json=excluded.forbidden_actions_json, authority_sources_json=excluded.authority_sources_json,
        success_criteria_json=excluded.success_criteria_json, evidence_requirements_json=excluded.evidence_requirements_json,
        budget_json=excluded.budget_json, deadline=excluded.deadline, stop_conditions_json=excluded.stop_conditions_json,
        review_policy=excluded.review_policy, current_state=excluded.current_state, next_handoff=excluded.next_handoff,
-       updated_at=excluded.updated_at`
+       updated_at=excluded.updated_at, project_id=excluded.project_id, conversation_id=excluded.conversation_id,
+       task_id=excluded.task_id, armed=excluded.armed, round_count=excluded.round_count, max_rounds=excluded.max_rounds,
+       no_progress_count=excluded.no_progress_count, last_progress_digest=excluded.last_progress_digest,
+       next_wake_at=excluded.next_wake_at, stop_reason=excluded.stop_reason, revision=excluded.revision,
+       execution_json=excluded.execution_json, pause_reference_json=excluded.pause_reference_json,
+       commands_approved_at=excluded.commands_approved_at`
   ).run(
     goal.goalId, goal.title, goal.objective, JSON.stringify(goal.constraints),
     JSON.stringify(goal.forbiddenActions), JSON.stringify(goal.authoritySources),
     JSON.stringify(goal.successCriteria), JSON.stringify(goal.evidenceRequirements),
     JSON.stringify(goal.budget), goal.deadline ?? null, JSON.stringify(goal.stopConditions),
-    goal.reviewPolicy, goal.currentState, goal.nextHandoff ?? null, goal.createdAt, goal.updatedAt
+    goal.reviewPolicy, goal.currentState, goal.nextHandoff ?? null, goal.createdAt, goal.updatedAt,
+    goal.projectId ?? null, goal.conversationId ?? null, goal.taskId ?? null,
+    goal.armed ? 1 : 0, goal.roundCount ?? 0, goal.maxRounds ?? 24,
+    goal.noProgressCount ?? 0, goal.lastProgressDigest ?? null, goal.nextWakeAt ?? null,
+    goal.stopReason ?? null, goal.revision ?? 0,
+    goal.execution ? JSON.stringify(goal.execution) : null,
+    goal.pauseReference ? JSON.stringify(goal.pauseReference) : null,
+    goal.commandsApprovedAt ?? null
+  );
+}
+
+function upsertGoalRoundRow(db: DatabaseSync, round: GoalRoundRecord): void {
+  db.prepare(
+    `INSERT INTO goal_rounds (id, goal_id, task_id, round_index, run_ids_json, status, started_at, ended_at, summary, intent_json, artifact_refs_json, evidence_refs_json, usage_json, progress_digest, verifier_json, workspace_root, out_dir)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(goal_id, round_index) DO UPDATE SET
+       id=excluded.id, task_id=excluded.task_id, run_ids_json=excluded.run_ids_json, status=excluded.status,
+       ended_at=excluded.ended_at, summary=excluded.summary, intent_json=excluded.intent_json,
+       artifact_refs_json=excluded.artifact_refs_json, evidence_refs_json=excluded.evidence_refs_json,
+       usage_json=excluded.usage_json, progress_digest=excluded.progress_digest, verifier_json=excluded.verifier_json,
+       workspace_root=excluded.workspace_root, out_dir=excluded.out_dir`
+  ).run(
+    round.id, round.goalId, round.taskId, round.index, JSON.stringify(round.runIds), round.status,
+    round.startedAt, round.endedAt, round.summary ?? null,
+    round.intent ? JSON.stringify(round.intent) : null,
+    JSON.stringify(round.artifactRefs), JSON.stringify(round.evidenceRefs),
+    round.usage ? JSON.stringify(round.usage) : null,
+    round.progressDigest ?? null,
+    round.verifier ? JSON.stringify(round.verifier) : null,
+    round.workspaceRoot, round.outDir
   );
 }
 
@@ -4384,14 +4499,15 @@ function upsertTaskProposal(db: DatabaseSync, proposal: TaskProposalRecord): voi
 
 function upsertTaskFollowUp(db: DatabaseSync, followUp: TaskFollowUpRecord): void {
   db.prepare(
-    `INSERT INTO task_follow_ups (id, task_id, conversation_id, content, mode, status, applied_run_id, error, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO task_follow_ups (id, task_id, conversation_id, content, mode, status, origin, applied_run_id, error, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
-       content=excluded.content, mode=excluded.mode, status=excluded.status,
+       content=excluded.content, mode=excluded.mode, status=excluded.status, origin=excluded.origin,
        applied_run_id=excluded.applied_run_id, error=excluded.error, updated_at=excluded.updated_at`
   ).run(
     followUp.id, followUp.taskId, followUp.conversationId, followUp.content, followUp.mode,
-    followUp.status, followUp.appliedRunId, followUp.error, followUp.createdAt, followUp.updatedAt
+    followUp.status, followUp.origin ?? "user", followUp.appliedRunId, followUp.error,
+    followUp.createdAt, followUp.updatedAt
   );
 }
 
@@ -5367,7 +5483,43 @@ function rowToGoal(row: DbRow): GoalContract {
     currentState: String(row.current_state) as GoalContract["currentState"],
     ...(row.next_handoff == null ? {} : { nextHandoff: String(row.next_handoff) }),
     createdAt: String(row.created_at),
-    updatedAt: String(row.updated_at)
+    updatedAt: String(row.updated_at),
+    ...(row.project_id == null ? {} : { projectId: String(row.project_id) }),
+    ...(row.conversation_id == null ? {} : { conversationId: String(row.conversation_id) }),
+    ...(row.task_id == null ? {} : { taskId: String(row.task_id) }),
+    ...(row.armed == null ? {} : { armed: Number(row.armed) === 1 }),
+    ...(row.round_count == null ? {} : { roundCount: Number(row.round_count) }),
+    ...(row.max_rounds == null ? {} : { maxRounds: Number(row.max_rounds) }),
+    ...(row.no_progress_count == null ? {} : { noProgressCount: Number(row.no_progress_count) }),
+    ...(row.last_progress_digest == null ? {} : { lastProgressDigest: String(row.last_progress_digest) }),
+    ...(row.next_wake_at == null ? {} : { nextWakeAt: String(row.next_wake_at) }),
+    ...(row.stop_reason == null ? {} : { stopReason: String(row.stop_reason) as NonNullable<GoalContract["stopReason"]> }),
+    ...(row.revision == null ? {} : { revision: Number(row.revision) }),
+    ...(row.execution_json == null ? {} : { execution: JSON.parse(String(row.execution_json)) }),
+    ...(row.pause_reference_json == null ? {} : { pauseReference: JSON.parse(String(row.pause_reference_json)) }),
+    ...(row.commands_approved_at == null ? {} : { commandsApprovedAt: String(row.commands_approved_at) })
+  };
+}
+
+function rowToGoalRound(row: DbRow): GoalRoundRecord {
+  return {
+    id: String(row.id),
+    goalId: String(row.goal_id),
+    taskId: String(row.task_id),
+    index: Number(row.round_index),
+    runIds: JSON.parse(String(row.run_ids_json)),
+    status: String(row.status) as GoalRoundRecord["status"],
+    startedAt: String(row.started_at),
+    endedAt: row.ended_at == null ? null : String(row.ended_at),
+    summary: row.summary == null ? null : String(row.summary),
+    intent: row.intent_json == null ? null : JSON.parse(String(row.intent_json)),
+    artifactRefs: JSON.parse(String(row.artifact_refs_json)),
+    evidenceRefs: JSON.parse(String(row.evidence_refs_json)),
+    usage: row.usage_json == null ? null : JSON.parse(String(row.usage_json)),
+    progressDigest: row.progress_digest == null ? null : String(row.progress_digest),
+    verifier: row.verifier_json == null ? null : JSON.parse(String(row.verifier_json)),
+    workspaceRoot: row.workspace_root == null ? null : String(row.workspace_root),
+    outDir: row.out_dir == null ? null : String(row.out_dir)
   };
 }
 
@@ -5496,6 +5648,7 @@ function rowToTaskFollowUp(row: DbRow): TaskFollowUpRecord {
     conversationId: row.conversation_id == null ? null : String(row.conversation_id),
     content: String(row.content), mode: String(row.mode) as TaskFollowUpRecord["mode"],
     status: String(row.status) as TaskFollowUpRecord["status"],
+    origin: row.origin == null ? "user" : String(row.origin) as NonNullable<TaskFollowUpRecord["origin"]>,
     appliedRunId: row.applied_run_id == null ? null : String(row.applied_run_id),
     error: row.error == null ? null : String(row.error),
     createdAt: String(row.created_at), updatedAt: String(row.updated_at)

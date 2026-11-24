@@ -11,6 +11,8 @@ import type {
   DesktopSessionRecord,
   DevicePairingRequest,
   DeviceRecord,
+  GoalContract,
+  GoalRoundRecord,
   OutboxDraft,
   RunCheckpointRecord,
   RunRecord,
@@ -613,6 +615,46 @@ describe("HearthStore", () => {
     const reopened = new HearthStore(path);
     expect(reopened.getRunOperation(prepared.operationId)?.phase).toBe("dispatched");
     expect(reopened.listUnsettledRunOperations("run-2")).toHaveLength(1);
+    reopened.close();
+  });
+
+  it("persists goal metadata and rounds across reopen", () => {
+    const path = tempDb();
+    const store = new HearthStore(path);
+    const goal: GoalContract = {
+      goalId: "goal-1", title: "Ship goal mode", objective: "Make goals durable",
+      constraints: ["no breaking changes"], forbiddenActions: ["force push"],
+      authoritySources: [{ kind: "user", ref: "conversation-1" }],
+      successCriteria: [{ id: "c1", description: "tests pass", validator: "llm_review", check: "tests", required: true }],
+      evidenceRequirements: [],
+      budget: { maxTokens: 1000 },
+      stopConditions: [], reviewPolicy: "human_on_risk", currentState: "active",
+      createdAt: "2026-11-24T00:00:00.000Z", updatedAt: "2026-11-24T00:00:00.000Z",
+      conversationId: "conversation-1", taskId: "task-1", armed: true,
+      roundCount: 1, maxRounds: 24, noProgressCount: 0, revision: 2,
+      execution: { executorId: "native", taskKind: "general", expectedOutputs: ["result.md"], networkHosts: [] }
+    };
+    store.appendEvent({ type: "goal.created", taskId: "task-1", payload: goal });
+    const round: GoalRoundRecord = {
+      id: "round-1", goalId: "goal-1", taskId: "task-1", index: 1, runIds: ["run-1"],
+      status: "completed", startedAt: "2026-11-24T00:00:00.000Z", endedAt: "2026-11-24T00:01:00.000Z",
+      summary: "first round", intent: { status: "progress", note: "still working", evidence: [], createdAt: "2026-11-24T00:01:00.000Z" },
+      artifactRefs: ["artifacts/result.md"], evidenceRefs: ["run-evidence.json"], usage: { tokens: 10, turns: 1, toolCalls: 2, durationMs: 1000 },
+      progressDigest: "abc", verifier: null, workspaceRoot: "C:/tmp/workspace", outDir: "C:/tmp/out"
+    };
+    store.appendEvent({ type: "goal.round.started", taskId: "task-1", runId: "run-1", payload: { ...round, status: "running", endedAt: null } });
+    store.appendEvent({ type: "goal.round.settled", taskId: "task-1", runId: "run-1", payload: round });
+    expect(store.getGoal("goal-1")?.armed).toBe(true);
+    expect(store.getGoal("goal-1")?.revision).toBe(2);
+    expect(store.getGoal("goal-1")?.execution?.executorId).toBe("native");
+    expect(store.listGoalRounds("goal-1")).toHaveLength(1);
+    expect(store.latestGoalRound("goal-1")?.intent?.status).toBe("progress");
+    store.close();
+
+    const reopened = new HearthStore(path);
+    expect(reopened.getGoal("goal-1")?.taskId).toBe("task-1");
+    expect(reopened.getGoal("goal-1")?.conversationId).toBe("conversation-1");
+    expect(reopened.latestGoalRound("goal-1")?.status).toBe("completed");
     reopened.close();
   });
 });
