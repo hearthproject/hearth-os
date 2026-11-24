@@ -84,6 +84,23 @@ describe("collectEntries 交付物完整展示", () => {
     expect(entry.tools[0]?.autoExpand).toBe(true);
   });
 
+  it("submit_plan 的结果去掉路径前缀并按 Markdown 展开", () => {
+    const [entry] = labelEntries([
+      event(1, "plan-start", { executorId: "native", eventType: "tool.started", title: "submit_plan", input: { plan: "## 计划" } }),
+      event(2, "plan-done", {
+        executorId: "native",
+        eventType: "tool.finished",
+        title: "submit_plan",
+        output: "计划已写入 C:\\tmp\\plan.md。\n\n## 计划\n\n- 第一步",
+        status: "ok"
+      })
+    ]);
+    if (entry?.type !== "label") return;
+    expect(entry.tools[0]?.content).toBe("## 计划\n\n- 第一步");
+    expect(entry.tools[0]?.markdown).toBe(true);
+    expect(entry.tools[0]?.autoExpand).toBe(true);
+  });
+
   it("用户手动折叠后覆盖自动展开", () => {
     const [entry] = labelEntries(writeEvent(1, "result.md", "正文"));
     if (entry?.type !== "label") return;

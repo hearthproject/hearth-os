@@ -528,20 +528,28 @@ export class HearthService {
       taskStatus: task.status
     });
     if (task.status === "completed") {
-      this.appendChatMessage({
-        id: randomUUID(),
-        conversationId: task.conversationId ?? null,
-        role: "assistant",
-        content: buildTaskResultAnswer(
-          { task, artifacts: this.store.listArtifacts(task.id) },
-          { includeFiles: false }
-        ),
-        taskId: task.id,
-        attachments: [],
-        createdAt: new Date().toISOString(),
-        kind: "text",
-        taskStatus: "completed"
-      });
+      const hasGoalFinalAnswer = Boolean(
+        task.goalId
+        && task.conversationId
+        && this.store.listChatMessages(task.conversationId)
+          .some((message) => message.id === `goal-final-${task.goalId}`)
+      );
+      if (!hasGoalFinalAnswer) {
+        this.appendChatMessage({
+          id: randomUUID(),
+          conversationId: task.conversationId ?? null,
+          role: "assistant",
+          content: buildTaskResultAnswer(
+            { task, artifacts: this.store.listArtifacts(task.id) },
+            { includeFiles: false }
+          ),
+          taskId: task.id,
+          attachments: [],
+          createdAt: new Date().toISOString(),
+          kind: "text",
+          taskStatus: "completed"
+        });
+      }
     }
   }
 

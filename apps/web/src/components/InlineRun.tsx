@@ -12,6 +12,7 @@ import { api } from "../lib/api.ts";
 import { formatDuration } from "../lib/format.ts";
 import type { TaskProgressDetail, TaskStatus, TaskView } from "../lib/types.ts";
 import { ApprovalCard } from "./ApprovalCard.tsx";
+import { Markdown } from "./Markdown.tsx";
 import { TaskStatusIcon } from "./TaskStatusIcon.tsx";
 
 export interface RunInfo {
@@ -53,6 +54,8 @@ export interface ToolDetail {
   file?: string;
   /** write_file 的完整正文 / apply_patch 的补丁正文 */
   content?: string;
+  /** 完整正文是 Markdown 文件时按渲染结果展示，而不是 raw text。 */
+  markdown?: boolean;
   /** 本任务里第一次写这个交付物：默认展开完整内容 */
   autoExpand?: boolean;
 }
@@ -228,7 +231,9 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
                             <pre className="inline-run-command">{tool.paths.join("\n")}</pre>
                           )}
                           {tool.content !== undefined
-                            ? <pre className="inline-run-output inline-run-output-full">{tool.content}</pre>
+                            ? tool.markdown
+                              ? <Markdown className="chat-markdown inline-run-markdown">{tool.content}</Markdown>
+                              : <pre className="inline-run-output inline-run-output-full">{tool.content}</pre>
                             : tool.output && <pre className="inline-run-output">{clipOutput(tool.output)}</pre>}
                         </div>
                       ))}
@@ -416,6 +421,9 @@ function mergeToolDetails(started: ToolDetail, finished: ToolDetail): ToolDetail
   return {
     ...started,
     ...(finished.output ? { output: finished.output } : {}),
+    ...(finished.content !== undefined ? { content: finished.content } : {}),
+    ...(finished.markdown ? { markdown: true } : {}),
+    ...(finished.autoExpand ? { autoExpand: true } : {}),
     ...(finished.status ? { status: finished.status } : {}),
     ...(finished.durationMs !== undefined ? { durationMs: finished.durationMs } : {}),
     ...(finished.exitCode !== undefined ? { exitCode: finished.exitCode } : {})
@@ -454,17 +462,20 @@ function toolFromProgress(
         ...(command ? { command } : {}),
         ...(write.file ? { file: write.file } : {}),
         ...(write.content !== undefined ? { content: write.content } : {}),
+        ...(write.markdown ? { markdown: true } : {}),
         ...(write.autoExpand ? { autoExpand: true } : {})
       }
     };
   }
   if (detail?.eventType === "tool.finished") {
+    const plan = /submit_plan|提交计划/i.test(detail.title ?? "") ? planOutputMarkdown(detail.output) : null;
     return {
       phase: "done",
       pairKey: detail.title ?? message,
       tool: {
         key: eventId,
         title: humanToolTitle(detail.title, message),
+        ...(plan ? { content: plan, markdown: true, autoExpand: true } : {}),
         ...(detail.output ? { output: detail.output } : {}),
         ...(detail.status ? { status: detail.status } : {}),
         ...(detail.durationMs !== undefined ? { durationMs: detail.durationMs } : {}),
@@ -520,6 +531,7 @@ function humanToolTitle(title: string | undefined, message: string, file?: strin
 interface WritePreview {
   file?: string;
   content?: string;
+  markdown?: boolean;
   autoExpand?: boolean;
 }
 
@@ -542,6 +554,7 @@ function writePreview(
   const preview: WritePreview = { content };
   if (!file) return preview;
   preview.file = file;
+  if (!patch && /\.mdx?$/i.test(file)) preview.markdown = true;
   if (!isDeliverablePath(file, expectedOutputs)) return preview;
   const key = normalizePathKey(file);
   if (shownFiles.has(key)) return preview;
@@ -550,8 +563,19 @@ function writePreview(
   return preview;
 }
 
-function patchTargetPath(patch: string | null): string | undefined {
-  if (!patch) return undefined;
+/** `submit_plan` returns "计划已写入 <path>。" followed by the raw plan; keep only the plan. */
+function planOutputMarkdown(output?: string): string | null {
+  const text = (output ?? "").replace(/\r\n/g, "\n").trim();
+  if (!text) return null;
+  if (/^计划已写入[^\n]*\n/.test(text)) {
+    const rest = text.replace(/^计划已写入[^\n]*\n+/, "").trim();
+    return rest || null;
+  }
+  const firstHeading = text.search(/^#{1,6}\s/m);
+  return firstHeading > 0 ? text.slice(firstHeading).trim() : text;
+}
+
+function patchTargetPath(patch: string | null): string | undefined {  if (!patch) return undefined;
   const match = /^\*\*\*\s+(?:Update|Add) File:\s*(.+)$/m.exec(patch);
   return match?.[1]?.trim() || undefined;
 }

@@ -21,7 +21,12 @@ describe("task state machine", () => {
     expect(isTerminal("paused")).toBe(false);
   });
 
-  it("rejects transitions out of terminal states", () => {
+  it("reopens a completed goal or plan task through an explicit queue transition", () => {
+    expect(canTransition("completed", "queued")).toBe(true);
+    expect(() => assertTransition("completed", "queued")).not.toThrow();
+  });
+
+  it("rejects other transitions out of terminal states", () => {
     expect(canTransition("completed", "running")).toBe(false);
     expect(canTransition("cancelled", "queued")).toBe(false);
     expect(() => assertTransition("completed", "running")).toThrow("Invalid task transition");

@@ -70,7 +70,13 @@ describe("GoalService", () => {
   });
 
   it("keeps opening rounds without a round-limit gate", async () => {
-    const goal = createGoal(goals, "bounded work", 1);
+    const conversation = store.createConversation("goal rounds");
+    const goal = goals.create({
+      objective: "bounded work",
+      conversationId: conversation.id,
+      maxRounds: 1,
+      execution: nativeExecution()
+    });
     const task = createTask(service, goal);
     goals.attachTask(goal.goalId, task.id);
     await goals.action(goal.goalId, "start");
@@ -98,11 +104,16 @@ describe("GoalService", () => {
     expect(settled.currentState).toBe("active");
     expect(settled.armed).toBe(true);
     expect(settled.roundCount).toBe(1);
+    const roundAnswer = store.listChatMessages(conversation.id)
+      .find((message) => message.id.startsWith("goal-round-"));
+    expect(roundAnswer?.content).toBe("small slice");
   });
 
   it("accepts a file criterion and closes the goal only after verification", async () => {
+    const conversation = store.createConversation("goal conversation");
     const goal = goals.create({
       objective: "write the marker file",
+      conversationId: conversation.id,
       criteria: [{
         id: "c1",
         description: "marker exists",
@@ -136,6 +147,10 @@ describe("GoalService", () => {
     expect(decision.action).toBe("done");
     expect(goals.get(goal.goalId).currentState).toBe("done");
     expect(store.latestGoalCompletionReport(goal.goalId)?.verdict).toBe("pass");
+    const finalMessage = store.listChatMessages(conversation.id)
+      .find((message) => message.id === `goal-final-${goal.goalId}`);
+    expect(finalMessage?.content).toContain("finished the marker");
+    expect(finalMessage?.taskStatus).toBe("completed");
   });
 
   it("records progress without advancing when the goal is paused", async () => {

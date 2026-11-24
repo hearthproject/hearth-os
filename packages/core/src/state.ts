@@ -7,7 +7,7 @@ const TRANSITIONS: Record<TaskStatus, readonly TaskStatus[]> = {
   waiting_approval: ["running", "recoverable", "cancelled"],
   waiting_budget: ["queued", "running", "recoverable", "cancelled"],
   paused: ["queued", "cancelled"],
-  completed: [],
+  completed: ["queued"],
   failed: ["queued", "cancelled"],
   recoverable: ["queued", "running", "cancelled"],
   cancelled: []

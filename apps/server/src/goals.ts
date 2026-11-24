@@ -333,6 +333,7 @@ export class GoalService {
           throw new GoalStateError("GOAL_STATE_INVALID", "没有可通过的验收报告");
         }
         assertGoalTransition(goal.currentState, "done");
+        const latestRound = this.service.store.latestGoalRound(goal.goalId);
         goal = this.saveGoal({
           ...goal,
           currentState: "done",
@@ -341,6 +342,7 @@ export class GoalService {
           nextWakeAt: null,
           nextHandoff: note || "验收通过，目标已完成"
         });
+        this.publishFinalAnswer(goal, latestRound?.summary ?? null, report.summary, goal.taskId ?? null);
         break;
       }
     }
@@ -478,6 +480,9 @@ export class GoalService {
     const verified = await this.maybeVerify(goal, round, input, intent);
     if (verified) {
       this.saveRound({ ...round, verifier: verified.report, summary }, "goal.round.settled");
+      if (verified.decision.action !== "done") {
+        this.publishRoundAnswer(goal, round, input.finalResponse);
+      }
       return verified.decision;
     }
     if (goal.currentState !== "active") {
@@ -485,6 +490,7 @@ export class GoalService {
     }
 
     if (intent?.status === "blocked") {
+      this.publishRoundAnswer(goal, round, input.finalResponse);
       this.saveGoal({
         ...goal,
         currentState: "blocked",
@@ -495,6 +501,7 @@ export class GoalService {
       return { action: "blocked", reason: "task_failed", detail: intent.note };
     }
     if (intent?.status === "needs_input") {
+      this.publishRoundAnswer(goal, round, input.finalResponse);
       this.saveGoal({
         ...goal,
         currentState: "awaiting_user",
@@ -518,6 +525,7 @@ export class GoalService {
       nextHandoff: "准备下一轮"
     });
     const nextIndex = (goal.roundCount ?? round.index) + 1;
+    this.publishRoundAnswer(goal, round, input.finalResponse);
     return {
       action: "continue",
       prompt: buildGoalRoundPrompt(goal, this.service.store.listGoalRounds(goal.goalId), nextIndex),
@@ -653,7 +661,7 @@ export class GoalService {
         return { report, decision: { action: "gate", reason: "verifier", detail: "验收有风险项，等待你确认" } };
       }
       assertGoalTransition("validating", "done");
-      this.saveGoal({
+      const completed = this.saveGoal({
         ...goal,
         currentState: "done",
         armed: false,
@@ -661,6 +669,7 @@ export class GoalService {
         nextWakeAt: null,
         nextHandoff: "验收通过，目标已完成"
       });
+      this.publishFinalAnswer(completed, input.finalResponse, report.summary, input.task.id);
       return { report, decision: { action: "done", report } };
     }
     const failures = this.service.store.listGoalRounds(goal.goalId)
@@ -738,7 +747,9 @@ export class GoalService {
     this.saveRound({ ...round, verifier: report }, "goal.round.settled");
     if (report.verdict === "pass") {
       assertGoalTransition("validating", "done");
-      return this.saveGoal({ ...verifying, currentState: "done", armed: false, nextHandoff: "验收通过" });
+      const completed = this.saveGoal({ ...verifying, currentState: "done", armed: false, nextHandoff: "验收通过" });
+      this.publishFinalAnswer(completed, round.summary, report.summary, goal.taskId);
+      return completed;
     }
     assertGoalTransition("validating", "awaiting_user");
     return this.saveGoal({
@@ -808,6 +819,56 @@ export class GoalService {
     if (!task.goalId) return null;
     const goal = this.service.store.getGoal(task.goalId);
     return goal ? normalizeGoal(goal) : null;
+  }
+
+  private publishRoundAnswer(goal: GoalContract, round: GoalRoundRecord, answer: string | null | undefined): void {
+    if (!goal.conversationId) return;
+    const body = clipText(answer?.trim() ?? "", 6000);
+    if (!body) return;
+    const messageId = `goal-round-${round.id}`;
+    const messages = this.service.store.listChatMessages(goal.conversationId);
+    if (messages.some((message) => message.id === messageId)) return;
+    this.service.appendChatMessage({
+      id: messageId,
+      conversationId: goal.conversationId,
+      role: "assistant",
+      content: body,
+      taskId: round.taskId,
+      attachments: [],
+      createdAt: this.now().toISOString(),
+      kind: "text",
+      taskStatus: "completed"
+    });
+  }
+
+  private publishFinalAnswer(
+    goal: GoalContract,
+    answer: string | null | undefined,
+    verification: string | null | undefined,
+    taskId: string | null
+  ): void {
+    if (!goal.conversationId) return;
+    const messageId = `goal-final-${goal.goalId}`;
+    const messages = this.service.store.listChatMessages(goal.conversationId);
+    if (messages.some((message) => message.id === messageId)) return;
+    const body = clipText(answer?.trim() ?? "", 6000);
+    const verify = clipText(verification?.trim() ?? "", 1200);
+    if (!body && !verify) return;
+    const content = [
+      body || "目标已完成。",
+      verify && verify !== body ? `---\n\n**验收结果**\n\n${verify}` : ""
+    ].filter(Boolean).join("\n\n");
+    this.service.appendChatMessage({
+      id: messageId,
+      conversationId: goal.conversationId,
+      role: "assistant",
+      content,
+      taskId,
+      attachments: [],
+      createdAt: this.now().toISOString(),
+      kind: "text",
+      taskStatus: "completed"
+    });
   }
 
   private saveGoal(goal: GoalContract): GoalContract {

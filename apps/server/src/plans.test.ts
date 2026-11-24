@@ -92,6 +92,17 @@ describe("PlanService", () => {
     expect(scheduler.cancel).toHaveBeenCalledWith(approved.executionTaskId);
   });
 
+  it("strips a wrapping Markdown code fence before persisting the plan", () => {
+    const { conversation, plans } = setup();
+    const plan = plans.create({ conversationId: conversation.id, objective: "No raw md", textInput: "No raw md" });
+    const ready = plans.onPlanningTaskReady(
+      plan.planningTaskId!,
+      "这是计划：\n\n```markdown\n## 一、目标\n\n- 渲染 Markdown\n```",
+      "/tmp/plan.md"
+    );
+    expect(ready?.planMarkdown).toBe("## 一、目标\n\n- 渲染 Markdown");
+  });
+
   it("continues planning in the same task after user feedback", () => {
     const { conversation, plans, scheduler } = setup();
     const plan = plans.create({ conversationId: conversation.id, objective: "Iterate", textInput: "Iterate" });

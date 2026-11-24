@@ -163,7 +163,7 @@ export class PlanService {
     const plan = this.findByTaskId(taskId);
     if (!plan || plan.planningTaskId !== taskId) return null;
     if (plan.stage !== "planning" && plan.stage !== "awaiting_approval") return null;
-    const text = planMarkdown.trim();
+    const text = normalizePlanMarkdown(planMarkdown);
     if (!text) return null;
     const next = this.save({
       ...plan,
@@ -383,4 +383,24 @@ export class PlanService {
     });
     this.service.bus.publish(event);
   }
+}
+
+function normalizePlanMarkdown(value: string): string {
+  const text = value.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").trim();
+  if (!text) return "";
+  const whole = /^```(?:markdown|md)?[ \t]*\n([\s\S]*?)\n```$/i.exec(text);
+  const block = whole?.[1]?.trim();
+  if (block) return block;
+  // Models sometimes wrap the plan in a fence after a short preamble such as
+  // "Here is the plan:". Extract that fence when it is clearly the whole plan.
+  const firstFence = text.indexOf("```");
+  if (firstFence > 0 && firstFence < 240) {
+    const preamble = text.slice(0, firstFence);
+    if (!/#\s|##\s|-\s/.test(preamble)) {
+      const fenced = /^```(?:markdown|md)?[ \t]*\n([\s\S]*?)\n```$/i.exec(text.slice(firstFence).trim());
+      const inner = fenced?.[1]?.trim();
+      if (inner && /^#{1,6}\s/m.test(inner)) return inner;
+    }
+  }
+  return text;
 }
