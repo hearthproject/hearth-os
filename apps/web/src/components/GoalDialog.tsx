@@ -15,22 +15,17 @@ export function GoalDialog({
   onClose: () => void;
   onConfirm: (settings: GoalSettingsInput) => void;
 }) {
-  const [maxRounds, setMaxRounds] = useState(String(initial.maxRounds ?? 24));
   const [reviewPolicy, setReviewPolicy] = useState<NonNullable<GoalSettingsInput["reviewPolicy"]>>(initial.reviewPolicy ?? "human_on_risk");
   const [criteria, setCriteria] = useState((initial.criteria ?? []).join("\n"));
   const [forbidden, setForbidden] = useState((initial.forbiddenActions ?? []).join("\n"));
-  const [deadline, setDeadline] = useState("");
 
   if (!open) return null;
 
   const submit = () => {
-    const rounds = Number.parseInt(maxRounds, 10);
     const settings: GoalSettingsInput = {
-      maxRounds: Number.isFinite(rounds) ? Math.max(1, Math.min(200, rounds)) : 24,
       reviewPolicy,
       ...(criteria.trim() ? { criteria: criteria.split("\n").map((line) => line.trim()).filter(Boolean).slice(0, 20) } : {}),
-      ...(forbidden.trim() ? { forbiddenActions: forbidden.split("\n").map((line) => line.trim()).filter(Boolean).slice(0, 20) } : {}),
-      ...(deadline ? { deadline: new Date(deadline).toISOString() } : {})
+      ...(forbidden.trim() ? { forbiddenActions: forbidden.split("\n").map((line) => line.trim()).filter(Boolean).slice(0, 20) } : {})
     };
     onConfirm(settings);
   };
@@ -42,7 +37,7 @@ export function GoalDialog({
           <span className="goal-dialog-mark"><Flag size={16} /></span>
           <div>
             <h2>目标模式</h2>
-            <p>目标会跨多轮持续推进，每轮结束后由 Hearth 独立验收；宿主重启后自动暂停，需要你确认继续。</p>
+            <p>目标会持续推进，直到成功标准满足或你主动停止；没有轮次、时长或预算上限，宿主重启后自动继续。</p>
           </div>
           <button type="button" className="icon-button" onClick={onClose} aria-label="关闭"><X size={16} /></button>
         </header>
@@ -50,11 +45,6 @@ export function GoalDialog({
           <p className="goal-dialog-warning">当前会话已有未结束的目标。请先在目标栏暂停、停止或完成它，再创建新目标。</p>
         ) : (
           <>
-            <label>
-              <span>最大轮次</span>
-              <input type="number" min={1} max={200} value={maxRounds} onChange={(event) => setMaxRounds(event.target.value)} />
-              <small>1–200。达到上限会停下来等你决定。</small>
-            </label>
             <label>
               <span>完成判定</span>
               <select value={reviewPolicy} onChange={(event) => setReviewPolicy(event.target.value as NonNullable<GoalSettingsInput["reviewPolicy"]>)}>
@@ -69,11 +59,7 @@ export function GoalDialog({
             </label>
             <label>
               <span>禁止动作</span>
-              <textarea rows={2} value={forbidden} onChange={(event) => setForbidden(event.target.value)} placeholder="每行一条，例如：push、删除数据库、发送邮件。" />
-            </label>
-            <label>
-              <span>截止时间（可选）</span>
-              <input type="datetime-local" value={deadline} onChange={(event) => setDeadline(event.target.value)} />
+              <textarea rows={2} value={forbidden} onChange={(event) => setForbidden(event.target.value)} placeholder="每行一条，例如：删除项目外的用户文件。" />
             </label>
           </>
         )}

@@ -161,8 +161,13 @@ function EventBridge() {
         }
         return;
       }
-      if (["chat.message.created", "chat.message.updated", "message"].includes(event)) {
-        void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      if (event.startsWith("plan.")) {
+        void queryClient.invalidateQueries({ queryKey: ["plans"] });
+        void queryClient.invalidateQueries({ queryKey: ["conversation"] });
+        void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+        return;
+      }
+      if (["chat.message.created", "chat.message.updated", "message"].includes(event)) {        void queryClient.invalidateQueries({ queryKey: ["conversations"] });
         void queryClient.invalidateQueries({ queryKey: ["conversation"] });
         return;
       }

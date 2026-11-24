@@ -30,7 +30,7 @@ export function GoalBar({
   const canVerify = state === "awaiting_user" && goal.stopReason === "verifier";
   const canApprove = canVerify && report?.verdict === "pass";
   const canReplan = !["done", "cancelled", "failed"].includes(state);
-  const roundText = `${goal.roundCount ?? 0}/${goal.maxRounds ?? 24}`;
+  const roundText = `${goal.roundCount ?? 0}`;
 
   return (
     <section className={`goal-bar ${state}${goal.armed ? " armed" : ""}`} aria-label="当前目标">

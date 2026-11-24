@@ -5,6 +5,8 @@ import { ChatMailDraft } from "../components/ChatMailDraft.tsx";
 import { ApprovalCard } from "../components/ApprovalCard.tsx";
 import { GoalBar } from "../components/GoalBar.tsx";
 import { GoalDialog } from "../components/GoalDialog.tsx";
+import { PlanBar } from "../components/PlanBar.tsx";
+import { PlanDialog } from "../components/PlanDialog.tsx";
 import { isMailDraftReply } from "../lib/mail-draft.ts";
 import {
   ArrowUp,
@@ -12,6 +14,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  ClipboardList,
   Clock,
   Copy,
   FileText,
@@ -46,6 +49,7 @@ import type {
   ConversationSettings,
   ConversationSettingsPatch,
   ExecutorId,
+  PlanActionName,
   ReasoningEffort
 } from "../lib/types.ts";
 
@@ -78,6 +82,7 @@ interface OutgoingMessage {
   skillId: string | null;
   goalMode?: boolean;
   goalSettings?: GoalSettingsInput;
+  planMode?: boolean;
 }
 
 interface ChatExecution {
@@ -127,10 +132,12 @@ export function ChatPage() {
   const [goalMode, setGoalMode] = useState(false);
   const [goalDialogOpen, setGoalDialogOpen] = useState(false);
   const [goalSettings, setGoalSettings] = useState<GoalSettingsInput>({
-    maxRounds: 24,
     reviewPolicy: "human_on_risk"
   });
   const [goalBusy, setGoalBusy] = useState(false);
+  const [planMode, setPlanMode] = useState(false);
+  const [planDialogOpen, setPlanDialogOpen] = useState(false);
+  const [planBusy, setPlanBusy] = useState(false);
   const [queue, setQueue] = useState<OutgoingMessage[]>([]);
   const [chatExecutions, setChatExecutions] = useState<Record<string, ChatExecution>>({});
   const [error, setError] = useState<string | null>(null);
@@ -177,6 +184,17 @@ export function ChatPage() {
   const goalViews = goalsQuery.data?.goals ?? [];
   const currentGoal = goalViews.find((view) => !TERMINAL_GOAL_STATES.has(view.goal.currentState)) ?? goalViews[0] ?? null;
   const hasActiveGoal = Boolean(currentGoal && !TERMINAL_GOAL_STATES.has(currentGoal.goal.currentState));
+  const plansQuery = useQuery({
+    queryKey: ["plans", conversationId],
+    queryFn: () => api.plans(conversationId as string),
+    enabled: Boolean(conversationId),
+    staleTime: 5_000
+  });
+  const planViews = plansQuery.data?.plans ?? [];
+  const currentPlan = planViews.find((view) => !["completed", "cancelled"].includes(view.stage))
+    ?? planViews[0]
+    ?? null;
+  const hasActivePlan = Boolean(currentPlan && !["completed", "cancelled"].includes(currentPlan.stage));
   const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health });
   const skillsQuery = useQuery({ queryKey: ["skills"], queryFn: api.skills, staleTime: 30_000 });
   const executorsQuery = useQuery({ queryKey: ["executors"], queryFn: api.executors, refetchInterval: 20_000 });
@@ -185,6 +203,7 @@ export function ChatPage() {
   const skills = skillsQuery.data?.skills ?? [];
   const selectedSkill = useMemo(() => skills.find((skill) => skill.id === selectedSkillId) ?? null, [skills, selectedSkillId]);
   const isGoalCommand = /^\/goal(?:\s|$)/i.test(input.trimStart());
+  const isPlanCommand = /^\/plan(?:\s|$)/i.test(input.trimStart());
   const slashTerm = !isGoalCommand && input.startsWith("/") && !input.startsWith("//") ? input.slice(1).trim().toLocaleLowerCase() : null;
   const slashMatches = useMemo(() => slashTerm === null ? [] : skills.filter((skill) => {
     if (!slashTerm) return true;
@@ -228,6 +247,9 @@ export function ChatPage() {
   const settingsReady = conversationId
     ? Boolean(current || conversationQuery.data)
     : Boolean(serverDefaults);
+  useEffect(() => {
+    setPlanMode(conversationSettings.collaborationMode === "plan");
+  }, [conversationId, conversationSettings.collaborationMode]);
 
   const visibleMessages = useMemo(() => messages.filter((message) => !isTaskNoise(message)), [messages]);
   const runs = useMemo(() => {
@@ -601,6 +623,61 @@ export function ChatPage() {
     await dispatch(outgoing);
   }
 
+  async function runPlanAction(action: PlanActionName, note?: string): Promise<void> {
+    const view = currentPlan;
+    if (!view || planBusy) return;
+    setPlanBusy(true);
+    setError(null);
+    try {
+      await api.planAction(view.id, action, {
+        expectedRevision: view.revision,
+        ...(note ? { note } : {})
+      });
+      await queryClient.invalidateQueries({ queryKey: ["plans", conversationId] });
+      await queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      await queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
+      if (action === "approve" || action === "cancel") {
+        setPlanMode(false);
+        setPlanDialogOpen(false);
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? `计划操作失败：${caught.message}` : "计划操作失败，请重试");
+    } finally {
+      setPlanBusy(false);
+    }
+  }
+
+  async function handlePlanCommand(text: string): Promise<void> {
+    const match = text.match(/^\/plan(?:\s+([\s\S]*))?$/i);
+    const argument = match?.[1]?.trim() ?? "";
+    if (!argument || /^status$/i.test(argument)) {
+      await plansQuery.refetch();
+      if (!hasActivePlan) setError("当前会话还没有计划。发送 /plan <目标> 或点击输入框的计划按钮开始。");
+      else setPlanDialogOpen(true);
+      return;
+    }
+    const action = argument.toLowerCase();
+    if (["approve", "cancel", "replan", "retry"].includes(action)) {
+      if (!currentPlan) {
+        setError("当前会话没有可操作的计划。");
+        return;
+      }
+      await runPlanAction(action as PlanActionName);
+      return;
+    }
+    setPlanMode(true);
+    await dispatch({ text: argument, attachments: [], skillId: null, planMode: true });
+  }
+
+  function togglePlanMode(): void {
+    if (hasActivePlan || hasActiveGoal || goalMode) return;
+    const next = !planMode;
+    setPlanMode(next);
+    if (!next && conversationId) {
+      void api.updateConversationSettings(conversationId, { collaborationMode: "build" }).catch(() => undefined);
+    }
+  }
+
   async function send() {
     const text = input.trim();
     if (uploading || !settingsReady || (!text && attachments.length === 0)) return;
@@ -614,11 +691,18 @@ export function ChatPage() {
       await handleGoalCommand(text);
       return;
     }
+    if (text && isPlanCommand && attachments.length === 0) {
+      setInput("");
+      setPlanDialogOpen(false);
+      await handlePlanCommand(text);
+      return;
+    }
     const outgoing: OutgoingMessage = {
       text,
       attachments,
       skillId: selectedSkillId,
-      ...(goalMode ? { goalMode: true, goalSettings } : {})
+      ...(goalMode ? { goalMode: true, goalSettings } : {}),
+      ...(planMode ? { planMode: true } : {})
     };
     setInput("");
     setAttachments([]);
@@ -688,7 +772,7 @@ export function ChatPage() {
   }
 
   async function dispatch(outgoing: OutgoingMessage) {
-    const { text, attachments: sentAttachments, skillId: sentSkillId, goalMode: sentGoalMode, goalSettings: sentGoalSettings } = outgoing;
+    const { text, attachments: sentAttachments, skillId: sentSkillId, goalMode: sentGoalMode, goalSettings: sentGoalSettings, planMode: sentPlanMode } = outgoing;
     const startedAt = Date.now();
     setStreaming("");
     setReasoning("");
@@ -740,6 +824,7 @@ export function ChatPage() {
           ...(sentSkillId ? { skillId: sentSkillId } : {}),
           ...(sentAttachments.length > 0 ? { attachments: sentAttachments } : {}),
           ...(sentGoalMode ? { goalMode: true, goalSettings: sentGoalSettings ?? {} } : {}),
+          ...(sentPlanMode ? { planMode: true } : {}),
           ...(!conversationId ? { settings: conversationSettings } : {})
         },
         {
@@ -795,6 +880,7 @@ export function ChatPage() {
                 ]);
               }
               void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+              void queryClient.invalidateQueries({ queryKey: ["plans"] });
               void queryClient.invalidateQueries({ queryKey: ["conversations"] });
             } else if (event === "skill_install") {
               const payload = data as { source: string };
@@ -838,12 +924,18 @@ export function ChatPage() {
       setReasoning("");
       void queryClient.invalidateQueries({ queryKey: ["conversations"] });
       void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      void queryClient.invalidateQueries({ queryKey: ["plans"] });
       const activeId = conversationIdRef.current;
       if (activeId) void queryClient.invalidateQueries({ queryKey: ["conversation", activeId] });
     }
   }
 
   function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Tab" && event.shiftKey) {
+      event.preventDefault();
+      togglePlanMode();
+      return;
+    }
     if (event.key === "Enter" && !event.shiftKey) {
       if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
       if (slashOpen && slashMatches.length > 0) {
@@ -985,6 +1077,14 @@ export function ChatPage() {
 
         <div className="chat-scroll">
           <div className="message-list">
+            {currentPlan && (
+              <PlanBar
+                view={currentPlan}
+                busy={planBusy}
+                onAction={(action) => void runPlanAction(action)}
+                onOpen={() => setPlanDialogOpen(true)}
+              />
+            )}
             {currentGoal && (
               <GoalBar view={currentGoal} busy={goalBusy} onAction={(action) => void runGoalAction(action)} />
             )}
@@ -1224,13 +1324,6 @@ export function ChatPage() {
               </div>
             </div>
           )}
-          {isWorking && (
-            <div className={`composer-working ${sending ? "dispatching" : "running"}`} role="status" aria-live="polite">
-              <span className="composer-working-dot" aria-hidden="true" />
-              <span>{sending ? "Hearth 正在处理这条消息" : "Hearth 正在执行任务"}</span>
-              <strong>{hasDraft ? "发送后会加入队列" : "可继续输入并排队"}</strong>
-            </div>
-          )}
           {queue.length > 0 && (
             <div className="composer-queue" aria-live="polite">
               <span className="composer-queue-label"><Clock size={12} />待发送 · {queue.length}</span>
@@ -1312,11 +1405,21 @@ export function ChatPage() {
               type="button"
               className={`composer-icon ${goalMode ? "composer-goal-active" : ""}`}
               onClick={() => setGoalDialogOpen(true)}
-              disabled={hasActiveGoal}
-              title={hasActiveGoal ? "当前会话已有未结束的目标，请在目标栏操作" : "目标模式：跨多轮持续推进，直到独立验收通过"}
+              disabled={hasActiveGoal || hasActivePlan}
+              title={hasActiveGoal ? "当前会话已有未结束的目标，请在目标栏操作" : hasActivePlan ? "当前会话已有计划，请先批准或退出" : "目标模式：跨多轮持续推进，直到独立验收通过"}
               aria-label="目标模式"
             >
               <Target size={17} />
+            </button>
+            <button
+              type="button"
+              className={`composer-icon ${planMode ? "composer-plan-active" : ""}`}
+              onClick={togglePlanMode}
+              disabled={hasActivePlan || hasActiveGoal || goalMode}
+              title={hasActivePlan ? "当前会话已有未结束的计划，请在计划栏批准或退出" : "计划模式：先只读调查，给出计划并等你批准后再执行（Shift+Tab）"}
+              aria-label="计划模式"
+            >
+              <ClipboardList size={17} />
             </button>
             <textarea
               ref={composerRef}
@@ -1375,6 +1478,12 @@ export function ChatPage() {
           setGoalMode(true);
           setGoalDialogOpen(false);
         }}
+      />
+      <PlanDialog
+        view={planDialogOpen ? currentPlan : null}
+        busy={planBusy}
+        onClose={() => setPlanDialogOpen(false)}
+        onAction={(action, note) => void runPlanAction(action, note)}
       />
       {panelOpen && (
         <Suspense fallback={null}>

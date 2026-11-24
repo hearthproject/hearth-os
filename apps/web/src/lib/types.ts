@@ -121,7 +121,9 @@ import type {
   TaskWorktreeView,
   WebSearchProvider,
   WebSearchSettingsView,
-  SkillView
+  SkillView,
+  PlanView,
+  PlanActionName
 } from "@hearth/core";
 
 export type {
@@ -135,6 +137,8 @@ export type {
   ArtifactRecord,
   ChatAttachment,
   ChatMessageRecord,
+  PlanView,
+  PlanActionName,
   ContextItem,
   ContextSettings,
   ContextSettingsPatch,

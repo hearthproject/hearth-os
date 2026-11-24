@@ -1778,10 +1778,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .composer-working-dot {
-    animation: none;
-  }
-
   .model-context-bar span {
     transition: none;
   }

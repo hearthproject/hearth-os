@@ -66,7 +66,9 @@ import type {
   TrashItem,
   TrashKind,
   TaskView,
-  BackgroundToolJob
+  BackgroundToolJob,
+  PlanView,
+  PlanActionName
 } from "./types.ts";
 import type {
   GoalAction,
@@ -93,6 +95,8 @@ export interface ChatStreamBody {
   url?: string;
   goalMode?: boolean;
   goalSettings?: GoalSettingsInput;
+  planMode?: boolean;
+  planId?: string;
   settings?: ConversationSettingsPatch;
 }
 
@@ -180,6 +184,32 @@ export const api = {
   }),
   goalAction: (id: string, action: GoalAction, options: { expectedRevision?: number; note?: string; maxRounds?: number } = {}) =>
     request<GoalView>(`/api/goals/${encodeURIComponent(id)}/actions`, {
+      method: "POST",
+      body: JSON.stringify({ action, ...options })
+    }),
+  plans: (conversationId: string) =>
+    request<{ plans: PlanView[] }>(`/api/plans${query({ conversationId, includeTerminal: true })}`),
+  plan: (id: string) => request<PlanView>(`/api/plans/${encodeURIComponent(id)}`),
+  createPlan: (body: {
+    conversationId: string;
+    projectId?: string;
+    title?: string;
+    objective: string;
+    textInput?: string;
+    execution?: {
+      executorId: "native" | "codex" | "deepseek-harness";
+      taskKind: "delivery" | "workspace" | "general";
+      workspacePath?: string;
+      networkHosts?: string[];
+      executionMode?: "quick" | "standard" | "deep";
+    };
+    start?: boolean;
+  }) => request<{ plan: PlanView }>("/api/plans", {
+    method: "POST",
+    body: JSON.stringify(body)
+  }),
+  planAction: (id: string, action: PlanActionName, options: { expectedRevision?: number; note?: string } = {}) =>
+    request<PlanView>(`/api/plans/${encodeURIComponent(id)}/actions`, {
       method: "POST",
       body: JSON.stringify({ action, ...options })
     }),
@@ -485,6 +515,9 @@ export function subscribeToEvents(onEvent: (event: string, envelope?: EventEnvel
   ];
   for (const name of eventNames) source.addEventListener(name, (event) => dispatch(name, (event as MessageEvent).data));
   for (const name of ["goal.created", "goal.updated", "goal.round.started", "goal.round.settled", "goal.completion.recorded"]) {
+    source.addEventListener(name, (event) => dispatch(name, (event as MessageEvent).data));
+  }
+  for (const name of ["plan.created", "plan.updated", "plan.stage.changed", "plan.completed"]) {
     source.addEventListener(name, (event) => dispatch(name, (event as MessageEvent).data));
   }
   return () => source.close();

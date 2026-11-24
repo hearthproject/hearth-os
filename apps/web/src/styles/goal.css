@@ -89,6 +89,77 @@
   flex: none;
 }
 
+/* Plan mode reuses the goal bar shell with a distinct, read-only accent. */
+.plan-bar {
+  border-color: color-mix(in srgb, #4f7cff 38%, var(--line));
+  background: color-mix(in srgb, #4f7cff 7%, var(--bg));
+}
+
+.plan-bar .goal-bar-mark {
+  color: #4f7cff;
+  background: color-mix(in srgb, #4f7cff 14%, transparent);
+}
+
+.plan-bar-copy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  position: relative;
+}
+
+.plan-bar-copy:hover .goal-bar-title strong {
+  color: #4f7cff;
+}
+
+.plan-bar-chevron {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--ink-tertiary);
+}
+
+.plan-bar.awaiting_approval {
+  border-color: color-mix(in srgb, #4f7cff 58%, var(--line));
+}
+
+.plan-bar.failed {
+  border-color: color-mix(in srgb, #d05353 46%, var(--line));
+  background: color-mix(in srgb, #d05353 7%, var(--bg));
+}
+
+.plan-bar.completed,
+.plan-bar.cancelled {
+  border-color: var(--line);
+  background: var(--bg);
+  opacity: 0.82;
+}
+
+.plan-dialog-body {
+  max-height: min(62vh, 640px);
+  overflow: auto;
+  padding: 2px 2px 8px;
+}
+
+.plan-dialog-body .chat-markdown {
+  font-size: 13px;
+}
+
+.composer-plan-active {
+  color: #4f7cff;
+  background: color-mix(in srgb, #4f7cff 12%, transparent);
+  border-color: color-mix(in srgb, #4f7cff 34%, var(--line));
+}
+
 .goal-action {
   display: inline-flex;
   align-items: center;
