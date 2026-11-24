@@ -69,7 +69,7 @@ describe("GoalService", () => {
     })).toThrow(GoalStateError);
   });
 
-  it("opens one round per run start and settles a round-limit gate", async () => {
+  it("keeps opening rounds without a round-limit gate", async () => {
     const goal = createGoal(goals, "bounded work", 1);
     const task = createTask(service, goal);
     goals.attachTask(goal.goalId, task.id);
@@ -93,11 +93,10 @@ describe("GoalService", () => {
       workspaceRoot: root,
       finalResponse: "small slice"
     });
-    expect(decision.action).toBe("gate");
-    if (decision.action === "gate") expect(decision.reason).toBe("round_limit");
+    expect(decision.action).toBe("continue");
     const settled = goals.get(goal.goalId);
-    expect(settled.currentState).toBe("awaiting_user");
-    expect(settled.armed).toBe(false);
+    expect(settled.currentState).toBe("active");
+    expect(settled.armed).toBe(true);
     expect(settled.roundCount).toBe(1);
   });
 
@@ -162,18 +161,21 @@ describe("GoalService", () => {
     expect(goals.get(goal.goalId).armed).toBe(false);
   });
 
-  it("disarms goals and interrupts open rounds on host restart", async () => {
+  it("keeps active goals armed and interrupts open rounds on host restart", async () => {
     const goal = createGoal(goals, "restart me");
     const task = createTask(service, goal);
     goals.attachTask(goal.goalId, task.id);
     await goals.action(goal.goalId, "start");
     const run = createRun(service, task, root);
-    goals.onRunStarted({ task, run, outDir: join(root, "out", run.id), workspaceRoot: root });
+    const outDir = join(root, "out", run.id);
+    mkdirSync(outDir, { recursive: true });
+    goals.onRunStarted({ task, run, outDir, workspaceRoot: root });
 
     goals.recoverOnBoot();
     const recovered = goals.get(goal.goalId);
-    expect(recovered.armed).toBe(false);
-    expect(recovered.stopReason).toBe("host_restart");
+    expect(recovered.currentState).toBe("active");
+    expect(recovered.armed).toBe(true);
+    expect(recovered.stopReason).toBeNull();
     expect(goals.view(goal.goalId).rounds[0]?.status).toBe("interrupted");
   });
 

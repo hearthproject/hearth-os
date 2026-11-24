@@ -282,10 +282,15 @@ export function effectivePermissions(task: TaskRecord, executorId: ExecutorId, a
     networkHosts: [],
     tools: []
   };
+  const open = base.fullAccess === true || base.networkMode === "open";
   return {
     readRoots: [...base.readRoots],
     writeRoots: [...base.writeRoots],
-    networkHosts: executorId === "codex" && !allowCodexNetwork ? [] : [...base.networkHosts],
+    networkHosts: executorId === "codex" && !allowCodexNetwork && !open ? [] : [...base.networkHosts],
+    networkMode: open ? "open" : base.networkMode,
+    fullAccess: base.fullAccess,
+    approvalMode: base.approvalMode,
+    sandboxMode: base.sandboxMode,
     tools: [...base.tools]
   };
 }

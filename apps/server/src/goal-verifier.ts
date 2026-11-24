@@ -216,9 +216,6 @@ function verifySchema(criterion: GoalCriterion, input: CriterionContext): GoalCr
 }
 
 async function verifyCommand(criterion: GoalCriterion, input: CriterionContext): Promise<GoalCriterionResult> {
-  if (!input.goal.commandsApprovedAt) {
-    return notRunCriterion(criterion, "命令型验收尚未确认，不能自动通过");
-  }
   const argv = parseCommandCheck(criterion.check);
   if (!Array.isArray(argv)) return notRunCriterion(criterion, argv.error);
   const runner = input.runCommand ?? null;

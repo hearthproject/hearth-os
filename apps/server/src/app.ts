@@ -24,6 +24,8 @@ import { ScheduleError, ScheduleService } from "./schedules.ts";
 import { chatModelConfigured, loadModelSettings, viewModelSettings } from "./model-settings.ts";
 import { completeChat } from "./model-client.ts";
 import { GoalService } from "./goals.ts";
+import { PlanService } from "./plans.ts";
+import { registerPlanRoutes } from "./plan-routes.ts";
 import { registerGoalRoutes } from "./goal-routes.ts";
 import { ModelRegistry, ModelRegistryError } from "./model-registry.ts";
 import { migrateLegacySettings } from "./settings-migration.ts";
@@ -887,12 +889,14 @@ export async function buildServer(options: BuildServerOptions = {}) {
       return response.content;
     }
   });
+  const plans = new PlanService({ service });
   const scheduler = options.startScheduler
     ? new HearthScheduler({
         service,
         ...(options.hostKernel ? { host: options.hostKernel } : {}),
         approvals,
         goals,
+        plans,
         context,
         contextBroker,
         leases,
@@ -928,6 +932,12 @@ export async function buildServer(options: BuildServerOptions = {}) {
       resumePaused: (taskId, reference) => scheduler.resumePaused(taskId, reference),
       cancel: (taskId) => scheduler.cancel(taskId),
       requeueGoalTask: (taskId, prompt, options) => scheduler.requeueGoalTask(taskId, prompt, options),
+      kick: () => scheduler.kick()
+    });
+    plans.attachScheduler({
+      requeuePlanTask: (taskId, prompt, options) => scheduler.requeuePlanTask(taskId, prompt, options),
+      cancel: (taskId) => scheduler.cancel(taskId),
+      addFollowUp: (taskId, content, mode) => service.createTaskFollowUp(taskId, content, mode, "plan"),
       kick: () => scheduler.kick()
     });
   }
@@ -1025,6 +1035,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     executorHealth,
     approvals,
     goals,
+    plans,
     cancelTask: scheduler ? (taskId: string) => scheduler.cancel(taskId) : undefined,
     memory,
     library,
@@ -1034,6 +1045,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   registerLibraryRoutes(app, library);
   registerSkillRoutes(app, skills, library);
   registerGoalRoutes(app, { service, goals });
+  registerPlanRoutes(app, { plans });
   registerApprovalGrantRoutes(app, approvals.grants);
   library.start();
   app.addHook("onClose", async () => {
@@ -3143,6 +3155,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   if (options.startScheduler) {
     if (!security.state().killSwitch && scheduler) {
       goals.recoverOnBoot();
+      plans.recoverOnBoot();
       scheduler.start();
       goals.start();
     } else {

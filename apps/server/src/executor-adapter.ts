@@ -43,6 +43,7 @@ export interface ExecutionOutcome {
   threadId: string | null;
   label: string;
   question: string | null;
+  planPath?: string | null;
   resume?: AgentResumeState;
   failure?: AgentFailure;
   budgetExhaustion?: Pick<BudgetExhaustion, "dimension" | "limit">;
@@ -63,6 +64,7 @@ export interface ExecutorAttemptContext {
   dshSettings: ModelSettings | null;
   executorSettings: ExecutorSettings;
   expectedOutputs: string[];
+  mode?: "build" | "plan";
   activeThreadId?: string;
   extraNativeTools?: AgentTool[];
   skipBuiltinGoalTools?: boolean;
@@ -150,6 +152,7 @@ export class NativeExecutorAdapter implements ExecutorAdapter {
       ...(input.finishGuards?.length ? { finishGuards: input.finishGuards } : {}),
       ...(input.steering ? { steering: input.steering } : {}),
       expectedOutputs: input.expectedOutputs,
+      ...(input.mode ? { mode: input.mode } : {}),
       onProgress: input.onProgress,
       onContextEvent: input.onNativeContextEvent,
       onCheckpoint: input.onNativeCheckpoint,
@@ -165,6 +168,7 @@ export class NativeExecutorAdapter implements ExecutorAdapter {
       threadId: null,
       label: `native / ${input.nativeSettings.model}`,
       question: outcome.question,
+      ...(outcome.planPath ? { planPath: outcome.planPath } : {}),
       ...(outcome.failure ? { failure: outcome.failure } : {}),
       ...(outcome.budgetExhaustion ? { budgetExhaustion: outcome.budgetExhaustion } : {}),
       ...(outcome.messages
@@ -197,7 +201,7 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
       outDir: input.prepared.outDir,
       prompt: input.prompt,
       signal: input.signal,
-      networkAccessEnabled: input.contextSettings.allowCodexNetwork,
+      networkAccessEnabled: input.fullPermission || input.contextSettings.allowCodexNetwork,
       ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
       ...(input.activeThreadId ? { threadId: input.activeThreadId } : {}),
       onEvent: (event) => input.onProgress({

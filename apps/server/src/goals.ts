@@ -19,11 +19,9 @@ import type {
   RunRecord
 } from "@hearth/core";
 import {
-  DEFAULT_GOAL_MAX_ROUNDS,
   GoalStateError,
   assertGoalAction,
   assertGoalTransition,
-  clampGoalMaxRounds,
   evaluateGoalEligibility,
   goalBackoffMs,
   goalProgressDigest,
@@ -176,10 +174,6 @@ export class GoalService {
       required: criterion.required !== false
     })).filter((criterion) => criterion.description.length > 0 && criterion.check.length > 0);
     if (criteria.length > 20) throw new GoalStateError("GOAL_STATE_INVALID", "成功标准最多 20 条");
-    const commands = criteria.some((criterion) => criterion.validator === "command");
-    if (commands && !input.commandsApproved) {
-      throw new GoalStateError("GOAL_STATE_INVALID", "命令型验收需要显式确认后才能创建目标");
-    }
     const goal: GoalContract = {
       goalId: `goal-${randomUUID()}`,
       title: (input.title?.trim() || titleFromObjective(objective)).slice(0, 200),
@@ -192,8 +186,7 @@ export class GoalService {
       }],
       successCriteria: criteria,
       evidenceRequirements: uniqueStrings(input.evidenceRequirements ?? []).slice(0, 20),
-      budget: sanitizeBudget(input.budget ?? {}),
-      ...(input.deadline ? { deadline: input.deadline } : {}),
+      budget: {},
       stopConditions: uniqueStrings(input.stopConditions ?? []).slice(0, 20),
       reviewPolicy: input.reviewPolicy ?? "human_on_risk",
       currentState: "draft",
@@ -206,14 +199,13 @@ export class GoalService {
       execution: input.execution,
       armed: false,
       roundCount: 0,
-      maxRounds: clampGoalMaxRounds(input.maxRounds),
       noProgressCount: 0,
       lastProgressDigest: null,
       nextWakeAt: null,
       stopReason: null,
       revision: 0,
       pauseReference: null,
-      commandsApprovedAt: commands ? now : null
+      commandsApprovedAt: null
     };
     this.appendGoal("goal.created", goal);
     return goal;
@@ -291,7 +283,6 @@ export class GoalService {
           armed: true,
           stopReason: null,
           nextWakeAt: null,
-          maxRounds: clampGoalMaxRounds(options.maxRounds ?? goal.maxRounds),
           pauseReference: null,
           nextHandoff
         });
@@ -385,18 +376,17 @@ export class GoalService {
     for (const raw of goals) {
       const goal = normalizeGoal(raw);
       if (goal.currentState === "draft" || goal.currentState === "blocked") continue;
+      if (goal.currentState === "paused" || goal.currentState === "awaiting_user") continue;
       const patch: GoalContract = {
         ...goal,
-        armed: false,
+        armed: true,
         nextWakeAt: null,
-        nextHandoff: "宿主重启后已暂停自动推进，确认后继续"
+        stopReason: null,
+        nextHandoff: "宿主重启后继续自动推进"
       };
-      if (goal.currentState === "active") {
-        patch.stopReason = "host_restart";
-      } else if (goal.currentState === "validating") {
+      if (goal.currentState === "validating") {
         assertGoalTransition(goal.currentState, "active");
         patch.currentState = "active";
-        patch.stopReason = "host_restart";
       }
       this.saveGoal(patch);
       const latest = this.service.store.latestGoalRound(goal.goalId);
@@ -517,30 +507,9 @@ export class GoalService {
     const noProgress = digest === goal.lastProgressDigest
       ? (goal.noProgressCount ?? 0) + 1
       : 0;
-    if (noProgress >= 3) {
-      this.saveGoal({
-        ...goal,
-        currentState: "blocked",
-        armed: false,
-        stopReason: "no_progress",
-        noProgressCount: noProgress,
-        lastProgressDigest: digest,
-        nextHandoff: "连续三轮没有产生新进展，需要换路线或人工判断"
-      });
-      return { action: "blocked", reason: "no_progress", detail: "连续三轮没有产生新进展" };
-    }
-    if ((goal.roundCount ?? 0) >= (goal.maxRounds ?? DEFAULT_GOAL_MAX_ROUNDS)) {
-      this.saveGoal({
-        ...goal,
-        currentState: "awaiting_user",
-        armed: false,
-        stopReason: "round_limit",
-        noProgressCount: noProgress,
-        lastProgressDigest: digest,
-        nextHandoff: `已达到 ${goal.maxRounds ?? DEFAULT_GOAL_MAX_ROUNDS} 轮上限，需要你决定是否增加轮次`
-      });
-      return { action: "gate", reason: "round_limit", detail: "达到轮次上限" };
-    }
+    // Progress tracking is informational only. A goal keeps advancing even when
+    // consecutive rounds look similar, because stopping here would be a hidden
+    // product-level round limit.
     this.saveGoal({
       ...goal,
       noProgressCount: noProgress,
@@ -780,11 +749,11 @@ export class GoalService {
     });
   }
 
-  private startRound(goalInput: GoalContract, maxRounds?: number): void {
+  private startRound(goalInput: GoalContract, _maxRounds?: number): void {
     if (!this.scheduler) return;
     const taskId = goalInput.taskId;
     if (!taskId) return;
-    const goal = maxRounds ? this.saveGoal({ ...goalInput, maxRounds: clampGoalMaxRounds(maxRounds) }) : goalInput;
+    const goal = goalInput;
     const nextIndex = (goal.roundCount ?? 0) + 1;
     const prompt = buildGoalRoundPrompt(goal, this.service.store.listGoalRounds(goal.goalId), nextIndex);
     this.scheduler.requeueGoalTask(taskId, prompt, { allowCompleted: true });
@@ -915,7 +884,7 @@ export function buildGoalRoundPrompt(
   ].filter(Boolean).join("\n")).join("\n");
 
   return [
-    `# 目标模式 · 第 ${nextIndex}/${goal.maxRounds ?? DEFAULT_GOAL_MAX_ROUNDS} 轮`,
+    `# 目标模式 · 第 ${nextIndex} 轮`,
     "",
     `## 目标`,
     goal.objective,
@@ -929,9 +898,9 @@ export function buildGoalRoundPrompt(
     verifierNote ? `## 上一轮验收结论\n${clipText(verifierNote, 1200)}` : "",
     "",
     "## 本轮规则",
-    "- 只推进一个有界片段，沿用当前工作区、已有产物和检查点，不要从零重做。",
-    "- 先查看上一轮产物和未完成项，再做本轮最有价值的动作。",
-    "- 不要重复上一轮没有产生新进展的动作；如果同一阻塞连续出现，改路线或报告 blocked。",
+    "- 持续推进直到成功标准满足，没有轮次或时间上限；沿用当前工作区、已有产物和检查点，不要从零重做。",
+    "- 先查看上一轮产物和未完成项，再做当前最有价值的动作。",
+    "- 遇到失败先诊断并换路线重试；只有确实需要用户提供无法自行获取的信息时，才报告 needs_input。",
     "- 只有成功标准全部满足、证据齐全时，才报告 complete；由独立验收器最终判定，模型自评不算完成。",
     "- 本轮结束前，在本轮输出目录写入 `goal-intent.json`：",
     "  {\"status\":\"progress|complete|blocked|needs_input\",\"note\":\"本轮结果摘要\",\"evidence\":[\"相对路径或产物 id\"]}",

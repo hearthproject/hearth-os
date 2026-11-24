@@ -12,7 +12,9 @@ describe("Hearth service agent metadata", () => {
     const task = service.createTask({ title: "整理资料", goal: "整理输入资料" });
     expect(task.executorId).toBe("native");
     expect(task.taskKind).toBe("general");
-    expect(task.expectedOutputs).toEqual(["result.md"]);
+    expect(task.expectedOutputs).toEqual([]);
+    expect(task.permissions?.fullAccess).toBe(true);
+    expect(task.permissions?.networkMode).toBe("open");
     expect(service.approvalModeForTask(task)).toBe("full");
     store.close();
   });
@@ -58,7 +60,7 @@ describe("Hearth service agent metadata", () => {
     const service = new HearthService(store);
     const task = service.createTask({ title: "会议纪要", goal: "根据会议原始记录生成行动纪要" });
     expect(task.executorId).toBe("native");
-    expect(task.expectedOutputs).toEqual(["result.md"]);
+    expect(task.expectedOutputs).toEqual([]);
     store.close();
   });
 

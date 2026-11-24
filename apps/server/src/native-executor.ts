@@ -15,7 +15,9 @@ import {
   codingSystemPrompt,
   createAgentState,
   createBuiltinTools,
+  composeTaskPrompt,
   defaultTaskPermissions,
+  executionContractPrompt,
   discoverInstructions,
   goalContinuationPrompt,
   goalFinishIssue,
@@ -119,6 +121,7 @@ export interface NativeRunResult {
   turns: number;
   toolCalls: number;
   question: string | null;
+  planPath?: string | null;
   outputs: string[];
   messages?: AgentMessage[];
   failure?: AgentFailure;
@@ -184,7 +187,43 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     if (!permissions.tools.includes(tool.definition.name)) permissions.tools.push(tool.definition.name);
   }
   const fullPermission = options.isFullPermission?.() ?? false;
-  if (fullPermission) permissions.sandboxMode = "danger-full-access";
+  if (fullPermission) {
+    const filesystemRoot = resolve("/");
+    const systemRoot = process.env.SystemDrive ? `${process.env.SystemDrive}${sep}` : filesystemRoot;
+    permissions.sandboxMode = "danger-full-access";
+    permissions.fullAccess = true;
+    permissions.approvalMode = "full";
+    permissions.networkMode = "open";
+    permissions.networkHosts = [];
+    permissions.readRoots = [...new Set([filesystemRoot, systemRoot, options.prepared.root, options.prepared.outDir])];
+    permissions.writeRoots = [...new Set([filesystemRoot, systemRoot, options.prepared.root, options.prepared.outDir])];
+    const allTools = createBuiltinTools()
+      .map((tool) => tool.definition.name)
+      .filter((name) => !options.skipBuiltinGoalTools || !["get_goal", "create_goal", "update_goal"].includes(name));
+    for (const tool of options.extraTools ?? []) allTools.push(tool.definition.name);
+    permissions.tools = [...new Set(allTools)];
+  }
+  if (options.mode === "plan") {
+    permissions.tools = [...new Set([
+      "read_file",
+      "read_desktop_file",
+      "read_document",
+      "read_tool_output",
+      "list_files",
+      "search_text",
+      "glob",
+      "grep",
+      "shell",
+      "shell_output",
+      "fetch_url",
+      "todo_read",
+      "todo_write",
+      "memory_read",
+      "memory_search",
+      "ask_user",
+      "submit_plan"
+    ])];
+  }
   const sandbox = fullPermission ? undefined : await prepareNativeSandbox(options, permissions);
 
   const drafting = !coding && isTextDraftTask({ ...options.task, expectedOutputs: options.expectedOutputs });
@@ -225,8 +264,11 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
         mode: options.mode ?? "build",
         availableTools,
         extraInstructions: [
+          ...((options.mode ?? "build") === "plan"
+            ? [planModeSystemPrompt(options.task, availableTools)]
+            : [executionContractPrompt]),
           `Current task: ${options.task.title}`,
-          `Expected outputs: ${options.expectedOutputs.join(", ") || "(no explicit file)"}`,
+          `Expected outputs: ${options.expectedOutputs.join(", ") || "(none required)"}`,
           `Task language: reply in the user's language; keep code, identifiers and commit messages in English.`,
           ...(taskProfile.hints.length > 0 ? [`## ${taskProfile.label} profile\n${taskProfile.hints.map((hint) => `- ${hint}`).join("\n")}`] : []),
           ...(goalBlock ? [goalBlock] : [])
@@ -369,6 +411,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     turns: result.turns,
     toolCalls: result.toolCalls,
     question: result.question,
+    ...(result.planPath ? { planPath: result.planPath } : {}),
     outputs: result.outputs,
     messages: result.messages,
     ...(result.failure ? { failure: result.failure } : {}),
@@ -1497,41 +1540,52 @@ async function summarizeNativeContext(settings: ModelSettings, messages: AgentMe
   }
 }
 
+export function planModeSystemPrompt(task: TaskRecord, availableTools?: string[]): string {
+  const toolLine = availableTools?.length ? `可用工具：${availableTools.join("、")}。` : "";
+  return [
+    "你是 Hearth 的计划模式 Agent。当前阶段只做调查和规划，绝对不修改文件、不运行写入命令、不安装依赖、不提交代码。",
+    "工作方式分为三步，按顺序完成：",
+    "1. 环境取证：先用只读工具检查工作区、现有代码、配置、测试和文档，弄清真实约束；不要凭猜测设计。",
+    "2. 意图澄清：只有存在会改变实现方向的关键歧义时才调用 ask_user，一次只问最关键的问题；能从环境确认的信息自己去确认。",
+    "3. 实现决策：调查充分后调用 submit_plan，提交一份可直接执行的完整计划。",
+    "submit_plan 的 plan 必须包含：目标与范围、涉及的真实文件路径、按顺序的实现步骤、关键接口/数据结构变化、验证命令与测试范围、明确不做的事项。不要使用占位路径或假设性的文件名。",
+    "提交计划后立即结束本轮，不要问“是否继续”，不要输出“等你批准”之类的说明；用户会通过界面批准或继续讨论。",
+    "只读命令仅限 git status/diff/log、ls、rg、cat、查看 package 脚本等；不要运行测试、构建、安装、写文件或产生任何工作区变更。",
+    "最终计划使用简体中文；代码、命令、路径和标识符保持原文。",
+    task.networkHosts.length > 0 || task.permissions?.networkMode === "open" || task.permissions?.fullAccess === true
+      ? "环境允许联网取证：可以读取公开文档、查看依赖和远端仓库信息，但不得借此执行任何写操作。"
+      : "任务未授权联网；不要访问网络，环境信息不足时在计划中明确说明。",
+    toolLine,
+    `当前任务：${task.title}`,
+    `原始目标：${task.goal}`
+  ].filter(Boolean).join("\n");
+}
+
 export function nativeSystemPrompt(task: TaskRecord, expectedOutputs: string[], availableTools?: string[]): string {
-  if (wantsDirectFileRead(task.goal) && expectedOutputs.length === 0) return "直接读取用户指定的文件，不要先列目录、搜索替代文件、委派或建立目标。用户指定的是桌面等工作区之外的文件时，必须用 read_desktop_file 读取，它会请求用户批准；read_file 只能读工作区内的文件。文件不存在时立即如实告知并结束，不重试、不创建文件。读取成功后用 finish_task 在对话中返回结果，outputs 留空，不生成 Markdown 报告。";
-  if (isTextDraftTask({ ...task, expectedOutputs })) return [DRAFT_INSTRUCTION, "仅将最终草稿写入本轮输出目录，已有草稿时只应用用户新增信息。写入成功后直接调用 finish_task，不反复润色，不读取无关文件。", `期望产物：${expectedOutputs.join("、")}`].join("\n");
+  if (task.mode === "plan") return planModeSystemPrompt(task, availableTools);
+  if (wantsDirectFileRead(task.goal) && expectedOutputs.length === 0) {
+    return [executionContractPrompt, "直接读取用户指定的文件，不要先列目录、搜索替代文件、委派或建立目标。用户指定的是桌面等工作区之外的文件时，必须用 read_desktop_file 读取；read_file 只能读工作区内的文件。文件不存在时立即如实告知并结束，不重试、不创建文件。读取成功后用 finish_task 在对话中返回结果，outputs 留空，不生成 Markdown 报告。"].join("\n\n");
+  }
+  if (isTextDraftTask({ ...task, expectedOutputs })) {
+    return [executionContractPrompt, DRAFT_INSTRUCTION, "仅将最终草稿写入本轮输出目录，已有草稿时只应用用户新增信息。写入成功后直接调用 finish_task，不反复润色，不读取无关文件。", `用户要求的产物：${expectedOutputs.join("、")}`].join("\n\n");
+  }
   const toolSet = availableTools ? new Set(availableTools) : null;
   const hasTool = (name: string): boolean => toolSet === null || toolSet.has(name);
   const hasAny = (...names: string[]): boolean => names.some(hasTool);
-  return [
-    "你是 Hearth 的原生 Agent 执行器，在自己的工作区里独立完成用户任务。",
-    localTimeLine(),
-    "你必须通过工具真正完成工作，不能只描述步骤或假装已经完成。",
-    task.networkHosts.length > 0
-      ? "当前是完全权限：可以直接读写本机目录、运行外部命令并访问任务授权的网络，不需要征求批准；不要因为权限犹豫而停下。"
-      : "当前是完全权限：可以直接读写本机目录、运行外部命令，但任务没有授权联网，不要尝试访问网络。",
-    ...(hasAny("list_files", "glob", "grep", "read_file") ? ["先用 list_files、glob、grep、read_file 了解已有资料，再生成结果。"] : []),
-    ...(hasTool("read_desktop_file") ? ["读取工作区之外的文件（例如用户桌面）必须用 read_desktop_file；read_file 只能读工作区内的文件。read_desktop_file 需要用户批准，被拒绝时不要重试同一路径。"] : []),
-    ...(hasAny("read_document") ? ["PDF、Word、Excel、CSV 等文档优先调用 read_document。"] : []),
-    ...(hasAny("write_spreadsheet", "write_document") ? ["需要表格或 Word 产物时使用 write_spreadsheet 或 write_document。"] : []),
-    ...(hasTool("delegate_task") ? ["边界清晰、可独立完成的子任务可以调用 delegate_task。只读子代理用于调查；隔离写子代理会在独立 Worktree 中工作并返回分支和提交，结果必须由你检查后手动处理，不会自动合并。"] : []),
-    ...(hasTool("agent") ? ["需要独立调查、方案设计或代码审查时，优先调用 agent 并选择 explore、plan 或 review；需要隔离实现时选择 general-purpose。"] : []),
-    "用户需要的最终产物必须写入输出目录；不要生成中间 JSON、命令日志或调试文件作为交付物。",
-    "小输入任务直接写最终产物，避免把输入全文、长篇推导和多层元数据复制进产物；一般单产物控制在 200 行或 20KB 内，只保留结论、关键证据、风险和待确认项；写入后最多回读一次。",
-    ...(hasTool("finish_task") ? ["任务完成后必须调用 finish_task，用中文、以清晰的 Markdown 结构总结：先结论，再分点或小标题；如果确实缺少关键输入，才调用 ask_user。"] : []),
-    "不要假设本地已经有仓库，也不要编造 PR 状态、评审意见或 rebase 结果；命令失败时读取错误并说明限制。",
-    "最终回答一律使用结构化 Markdown：先给结论，再按主题分成少量小节；能用项目符号、编号步骤或表格说明时不要写成一整段连续文字。",
-    "回答使用简体中文，不要编造没有依据的事实。",
-    ...nativeTaskInstructions(task, expectedOutputs),
-    `当前任务：${task.title}`,
-    ...(task.executionMode ? [
-      `执行模式：${EXECUTION_PROFILES[task.executionMode].label}。${EXECUTION_PROFILES[task.executionMode].instruction}`
-    ] : []),
-    `期望产物：${expectedOutputs.join("、")}`,
-    ...(expectedOutputs.some((output) => /\.(png|jpe?g|webp)$/i.test(output))
-      ? ["这是截图类任务：必须调用 capture_screen 生成真实图片产物，不要用文本或占位文件代替。"]
-      : [])
-  ].join("\n");
+  const executionProfile = task.executionMode ? EXECUTION_PROFILES[task.executionMode] : null;
+  return composeTaskPrompt({
+    task,
+    expectedOutputs,
+    availableTools: availableTools ?? [],
+    mode: "build",
+    executionModeLabel: executionProfile ? `${executionProfile.label}。${executionProfile.instruction}` : undefined,
+    extraBlocks: [
+      localTimeLine(),
+      ...(hasTool("delegate_task") ? ["边界清晰、可独立完成的子任务可以调用 delegate_task。只读子代理用于调查；隔离写子代理会在独立 Worktree 中工作并返回分支和提交，结果必须由你检查后手动处理，不会自动合并。"] : []),
+      ...(hasTool("agent") ? ["需要独立调查、方案设计或代码审查时优先调用 agent，选择 explore、plan 或 review；需要隔离实现时选择 general-purpose。"] : []),
+      ...nativeTaskInstructions(task, expectedOutputs)
+    ]
+  });
 }
 
 export function directReadTool(tool: AgentTool): AgentTool {

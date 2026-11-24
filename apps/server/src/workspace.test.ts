@@ -66,12 +66,12 @@ describe("task workspace prompt", () => {
     const prepared = { root: "C:/workspace", outDir: "C:/workspace/out", inputs: [] };
     const allowed = buildTaskPrompt(base, prepared, ["result.md"]);
     expect(allowed).toContain("网络权限：允许访问任意公开网页");
-    expect(allowed).toContain("3. 可以联网检索公开资料");
-    expect(allowed).not.toContain("3. 不得联网");
+    expect(allowed).toContain("3. 可以联网检索、下载和安装");
+    expect(allowed).not.toContain("3. 当前没有网络授权");
     expect(allowed).toContain("当前本地时间：");
 
     const denied = buildTaskPrompt({ ...base, networkHosts: [] }, prepared, ["result.md"]);
-    expect(denied).toContain("3. 不得联网");
+    expect(denied).toContain("3. 当前没有网络授权");
     expect(denied).not.toContain("网络权限：允许访问");
   });
 

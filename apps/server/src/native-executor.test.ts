@@ -90,7 +90,7 @@ describe("native system prompt", () => {
     expect(prompt).toContain("沿用输入对象的字段名");
     expect(prompt).toContain("顶层包含 facts 对象");
     expect(prompt).toContain("顶层 evidence 数组");
-    expect(prompt).toContain("200 行");
+    expect(prompt).not.toContain("200 行");
     expect(prompt).toContain("<noun>Count");
     expect(prompt).not.toContain("契约测试用 Node");
     expect(prompt).not.toContain("财务复核");
@@ -113,13 +113,13 @@ describe("native system prompt", () => {
   });
 
   it("keeps plain document tasks free of JSON and unrelated contracts", () => {
-    const prompt = nativeSystemPrompt(baseTask, ["result.md"]);
+    const prompt = nativeSystemPrompt(baseTask, ["result.md"], ["read_file", "write_file", "finish_task"]);
     expect(prompt).not.toContain("facts 对象");
     expect(prompt).not.toContain("财务复核");
     expect(prompt).not.toContain("契约测试用 Node");
     expect(prompt).toContain("finish_task");
-    expect(prompt).toContain("当前是完全权限");
-    expect(prompt.length).toBeLessThan(1600);
+    expect(prompt).toContain("没有产品级限制");
+    expect(prompt.length).toBeLessThan(2500);
   });
 
   it("omits unavailable tools from the native prompt", () => {

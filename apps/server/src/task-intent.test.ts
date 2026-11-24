@@ -6,7 +6,7 @@ import { needsGithubRepository, wantsCodeExecution, wantsGithubAccess, wantsPubl
 describe("task intent", () => {
   it("does not require a report for a direct file read", () => {
     expect(planExecution("读取 E:/data/missing.txt")).toMatchObject({ executorId: "native", expectedOutputs: [] });
-    expect(planExecution("读取文件并保存报告").expectedOutputs).toEqual(["result.md"]);
+    expect(planExecution("读取文件并保存报告").expectedOutputs).toEqual([]);
   });
   it("recognizes desktop screenshot requests", () => {
     expect(wantsScreenshot("截一张我电脑桌面的图发给我")).toBe(true);

@@ -3,7 +3,12 @@ const SCREENSHOT_PHRASE = /截.{0,8}(桌面|屏幕)/;
 const GITHUB_HINTS = /(github|pull\s*request|\bPRs?\b|拉取请求)/i;
 const PUBLIC_RESEARCH_HINTS = /(联网|上网|搜索|检索|调研|研究|公开资料|最新消息|最新进展|新闻|资讯|快讯|头条|热点|时事|早报|晚报|日报|web\s*search|research|browse|look\s*up|latest\s+news|news\s+brief|briefing|digest)/i;
 const CODE_EXECUTION_HINTS = /(仓库|代码|源码|补丁|单元测试|回归测试|运行测试|测试命令|\bnpm\s+test\b|\bpytest\b|构建失败|编译失败|CI\s*日志|api\s*契约|\brepo(?:sitory)?\b|\bcodebase\b|\bunit\s+tests?\b|\brun\s+tests?\b)/i;
+const SKILL_HINTS = /(\bskill\b|技能|SKILL\.md|装.{0,8}(?:技能|skill)|下载.{0,8}(?:技能|skill)|安装.{0,8}(?:技能|skill))/i;
 export const GITHUB_NETWORK_HOSTS = ["github.com", "api.github.com"];
+
+export function wantsSkillInstall(text: string): boolean {
+  return SKILL_HINTS.test(text);
+}
 
 export function wantsScreenshot(text: string): boolean {
   return SCREENSHOT_HINTS.test(text) || SCREENSHOT_PHRASE.test(text);

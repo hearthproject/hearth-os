@@ -5,7 +5,7 @@ import { basename, dirname, extname, join } from "node:path";
 import multipart from "@fastify/multipart";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
-import type { ChatAttachment, ChatMessageRecord, ExecutorHealth, ExecutorId } from "@hearth/core";
+import type { ChatAttachment, ChatMessageRecord, ExecutorHealth, ExecutorId, TaskRecord } from "@hearth/core";
 import { defaultConversationSettings, EXECUTOR_IDS, mergeConversationSettings } from "@hearth/core";
 import { loadCodexProfile, probeCodex, type CodexProfile } from "@hearth/codex-executor";
 import { loadExecutorSettings, type ExecutorSettingsStore } from "./executor-settings.ts";
@@ -20,6 +20,7 @@ import type { OntologyService } from "./ontology.ts";
 import type { OntologyWriter } from "./ontology-writer.ts";
 import { ModelRegistryError, type ModelRegistry } from "./model-registry.ts";
 import { chatSystemPrompt, conversationTitle, decideRoute, planExecution } from "./chat.ts";
+import { wantsSkillInstall } from "./task-intent.ts";
 import { listModels, ModelClientError, completeChat, streamChat, type ChatMessage } from "./model-client.ts";
 import {
   MODEL_PRESETS,
@@ -43,6 +44,7 @@ const conversationSettingsSchema = z.object({
   executorEnabled: z.partialRecord(z.enum(EXECUTOR_IDS), z.boolean()).optional(),
   approvalMode: z.enum(["necessary", "workspace", "full"]).optional(),
   executionMode: z.enum(["quick", "standard", "deep"]).optional(),
+  collaborationMode: z.enum(["build", "plan"]).optional(),
   preferredExecutorId: z.enum(EXECUTOR_IDS).nullable().optional()
 }).strict();
 
@@ -66,6 +68,8 @@ const chatSchema = z.object({
   url: z.string().trim().max(2_048).optional(),
   goalMode: z.boolean().optional(),
   goalSettings: goalSettingsSchema.optional(),
+  planMode: z.boolean().optional(),
+  planId: z.string().trim().min(1).max(80).optional(),
   settings: conversationSettingsSchema.optional()
 }).strict();
 
@@ -112,6 +116,7 @@ const modelProbeSchema = z.object({
 import type { LibraryService } from "./library/service.ts";
 import type { SkillService } from "./skills/service.ts";
 import type { GoalService } from "./goals.ts";
+import type { PlanService } from "./plans.ts";
 
 export interface ChatRouteOptions {
   service: HearthService;
@@ -127,6 +132,7 @@ export interface ChatRouteOptions {
   approvals?: ApprovalManager | undefined;
   cancelTask?: ((taskId: string) => unknown) | undefined;
   goals?: GoalService | undefined;
+  plans?: PlanService | undefined;
   memory?: MemoryService | undefined;
   library?: LibraryService | undefined;
   skills?: SkillService | undefined;
@@ -540,6 +546,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     const directDraft = storedFiles.length === 0 && !detectedUrl && (isSimpleDraft(userContent) || (recentDraft && isDraftRevision(userContent)));
     const routeMode = parsed.data.routeMode ?? "auto";
     const wantsGoal = parsed.data.goalMode === true;
+    const wantsPlan = parsed.data.planMode === true || effectiveSettings.collaborationMode === "plan";
     if (routeMode === "chat" && storedFiles.length > 0) {
       sendPersistedError("CHAT_ATTACHMENTS_UNSUPPORTED", "继续聊天模式暂不读取附件。请粘贴需要处理的文字，或选择派为任务。");
       finish(reply, send);
@@ -548,11 +555,16 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     const localFileRoute = referencedFile
       ? { action: "task" as const, title: conversationTitle(userContent), goal: userContent, reason: "消息引用了本地文件，需要执行器读取文件内容" }
       : null;
-    const route = wantsGoal
-      ? { action: "task" as const, title: conversationTitle(userContent), goal: userContent, reason: "目标模式：需要执行器持续推进" }
+    const skillRoute = wantsSkillInstall(userContent)
+      ? { action: "task" as const, title: conversationTitle(userContent), goal: userContent, reason: "Skill 管理：需要搜索并安装技能" }
+      : null;
+    const route = wantsPlan
+      ? { action: "task" as const, title: conversationTitle(userContent), goal: userContent, reason: "计划模式：先只读调查并产出可批准的实施方案" }
+      : wantsGoal
+        ? { action: "task" as const, title: conversationTitle(userContent), goal: userContent, reason: "目标模式：需要执行器持续推进" }
       : routeMode !== "auto"
         ? { action: routeMode, title: "", goal: userContent, reason: routeMode === "chat" ? "你选择了继续聊天，不派任务" : "你选择了派为任务" }
-        : directDraft ? { action: "chat" as const, title: "", goal: userContent, reason: "直接拟稿或修订现有草稿" } : localFileRoute ?? await decideRoute(userContent, storedFiles.length > 0, detectedUrl, settings, {
+        : directDraft ? { action: "chat" as const, title: "", goal: userContent, reason: "直接拟稿或修订现有草稿" } : localFileRoute ?? skillRoute ?? await decideRoute(userContent, storedFiles.length > 0, detectedUrl, settings, {
       preferredExecutorId: lockedExecutorId
     });
     const available = executorAvailability();
@@ -658,55 +670,105 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
         if (controller.signal.aborted) return reply;
         const taskGoal = [message, detectedUrl ? `参考网址：${detectedUrl}` : ""].filter(Boolean).join("\n")
           || `处理附件：${storedFiles.map((file) => file.name).join("、")}`;
-        if (wantsGoal) {
-          if (!options.goals) throw new Error("目标服务没有启动");
-          const goalSettings = parsed.data.goalSettings ?? {};
-          const created = options.goals.create({
-            title: route.title || conversationTitle(userContent),
-            objective: taskGoal,
-            conversationId: conversation.id,
-            projectId: boundProject?.id ?? null,
-            execution: {
-              executorId: resolution.executorId,
-              taskKind: plan.taskKind,
-              expectedOutputs: plan.expectedOutputs,
+        const planInput = [
+          message,
+          skillContext,
+          delegatedChatContext,
+          detectedUrl ? `参考网址：${detectedUrl}` : "",
+          fileInputs.length > 0
+            ? `本轮附件（需要时用 read_desktop_file 或 read_document 读取）：\n${fileInputs.map((file) => `- ${file.label}: ${file.path}`).join("\n")}`
+            : ""
+        ].filter(Boolean).join("\n\n");
+        let task: TaskRecord;
+        if (wantsPlan) {
+          if (!options.plans) throw new Error("计划服务没有启动");
+          const activePlan = parsed.data.planId
+            ? options.plans.get(parsed.data.planId)
+            : options.plans.activeForConversation(conversation.id);
+          if (activePlan) {
+            if (activePlan.conversationId !== conversation.id) throw new Error("这个计划不属于当前对话");
+            if (activePlan.stage !== "planning" && activePlan.stage !== "awaiting_approval") {
+              throw new Error(`计划处于 ${activePlan.stage}，不能继续讨论；请先批准、重试或退出计划`);
+            }
+            const revised = options.plans.continuePlanning(activePlan.id, planInput, {
+              ...(route.title ? { title: route.title } : {}),
+              textInput: planInput
+            });
+            const planningTask = revised.planningTaskId ? service.store.getTask(revised.planningTaskId) : null;
+            if (!planningTask) throw new Error("计划规划任务没有创建成功");
+            task = planningTask;
+          } else {
+            const created = options.plans.create({
+              conversationId: conversation.id,
               projectId: boundProject?.id ?? null,
-              workspacePath: workspacePath ?? null,
-              networkHosts: plan.networkHosts ?? [],
-              ...(resolution.executorId === "native" ? { executionMode: effectiveSettings.executionMode ?? "standard" } : {})
-            },
-            criteria: (goalSettings.criteria ?? []).map((description, index) => ({
-              id: `c${index + 1}`,
-              description,
-              validator: "llm_review" as const,
-              check: description,
-              required: true
-            })),
-            forbiddenActions: goalSettings.forbiddenActions ?? [],
-            evidenceRequirements: goalSettings.evidenceRequirements ?? [],
-            ...(goalSettings.maxRounds !== undefined ? { maxRounds: goalSettings.maxRounds } : {}),
-            ...(goalSettings.reviewPolicy ? { reviewPolicy: goalSettings.reviewPolicy } : {}),
-            ...(goalSettings.deadline ? { deadline: goalSettings.deadline } : {}),
-            ...(goalSettings.commandsApproved ? { commandsApproved: true } : {})
+              title: route.title || conversationTitle(userContent),
+              objective: taskGoal,
+              textInput: planInput,
+              execution: {
+                executorId: resolution.executorId,
+                taskKind: plan.taskKind,
+                expectedOutputs: plan.expectedOutputs,
+                projectId: boundProject?.id ?? null,
+                workspacePath: workspacePath ?? null,
+                networkHosts: plan.networkHosts ?? [],
+                ...(resolution.executorId === "native" ? { executionMode: effectiveSettings.executionMode ?? "standard" } : {})
+              }
+            });
+            const planningTask = created.planningTaskId ? service.store.getTask(created.planningTaskId) : null;
+            if (!planningTask) throw new Error("计划规划任务没有创建成功");
+            task = planningTask;
+          }
+        } else {
+          if (wantsGoal) {
+            if (!options.goals) throw new Error("目标服务没有启动");
+            const goalSettings = parsed.data.goalSettings ?? {};
+            const created = options.goals.create({
+              title: route.title || conversationTitle(userContent),
+              objective: taskGoal,
+              conversationId: conversation.id,
+              projectId: boundProject?.id ?? null,
+              execution: {
+                executorId: resolution.executorId,
+                taskKind: plan.taskKind,
+                expectedOutputs: plan.expectedOutputs,
+                projectId: boundProject?.id ?? null,
+                workspacePath: workspacePath ?? null,
+                networkHosts: plan.networkHosts ?? [],
+                ...(resolution.executorId === "native" ? { executionMode: effectiveSettings.executionMode ?? "standard" } : {})
+              },
+              criteria: (goalSettings.criteria ?? []).map((description, index) => ({
+                id: `c${index + 1}`,
+                description,
+                validator: "llm_review" as const,
+                check: description,
+                required: true
+              })),
+              forbiddenActions: goalSettings.forbiddenActions ?? [],
+              evidenceRequirements: goalSettings.evidenceRequirements ?? [],
+              ...(goalSettings.maxRounds !== undefined ? { maxRounds: goalSettings.maxRounds } : {}),
+              ...(goalSettings.reviewPolicy ? { reviewPolicy: goalSettings.reviewPolicy } : {}),
+              ...(goalSettings.deadline ? { deadline: goalSettings.deadline } : {}),
+              ...(goalSettings.commandsApproved ? { commandsApproved: true } : {})
+            });
+            createdGoalId = created.goalId;
+          }
+          task = service.createTask({
+            title: route.title || conversationTitle(userContent),
+            goal: taskGoal,
+            textInput: [message, skillContext, delegatedChatContext].filter(Boolean).join("\n\n"),
+            fileInputs,
+            ...(detectedUrl ? { url: detectedUrl } : {}),
+            ...(boundProject ? { projectId: boundProject.id } : {}),
+            ...(workspacePath ? { workspacePath } : {}),
+            ...(createdGoalId ? { goalId: createdGoalId } : {}),
+            conversationId: conversation.id,
+            executorId: resolution.executorId,
+            ...(resolution.executorId === "native" ? { executionMode: effectiveSettings.executionMode ?? "standard" } : {}),
+            taskKind: plan.taskKind,
+            expectedOutputs: plan.expectedOutputs,
+            ...(plan.networkHosts ? { networkHosts: plan.networkHosts } : {})
           });
-          createdGoalId = created.goalId;
         }
-        const task = service.createTask({
-          title: route.title || conversationTitle(userContent),
-          goal: taskGoal,
-          textInput: [message, skillContext, delegatedChatContext].filter(Boolean).join("\n\n"),
-          fileInputs,
-          ...(detectedUrl ? { url: detectedUrl } : {}),
-          ...(boundProject ? { projectId: boundProject.id } : {}),
-          ...(workspacePath ? { workspacePath } : {}),
-          ...(createdGoalId ? { goalId: createdGoalId } : {}),
-          conversationId: conversation.id,
-          executorId: resolution.executorId,
-          ...(resolution.executorId === "native" ? { executionMode: effectiveSettings.executionMode ?? "standard" } : {}),
-          taskKind: plan.taskKind,
-          expectedOutputs: plan.expectedOutputs,
-          ...(plan.networkHosts ? { networkHosts: plan.networkHosts } : {})
-        });
         if (createdGoalId && options.goals) {
           options.goals.attachTask(createdGoalId, task.id);
           await options.goals.action(createdGoalId, "start");
@@ -715,11 +777,14 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
         const rerouteText = resolution.reroutedFrom
           ? `\n\n${resolution.reason ?? "原执行器不可用"}，已自动改由 ${executorText} 接管。`
           : "";
+        const openingText = wantsPlan
+          ? `开始规划：${task.title}\n\n计划阶段只读调查，不会修改文件；完成后会给出可批准的实施计划。`
+          : `开始执行：${task.title}\n\n执行器：${executorText}。${rerouteText}`;
         const assistant = service.appendChatMessage({
           id: randomUUID(),
           conversationId: conversation.id,
           role: "assistant",
-          content: `开始执行：${task.title}\n\n执行器：${executorText}。${rerouteText}`,
+          content: openingText,
           taskId: task.id,
           attachments: [],
           createdAt: new Date().toISOString(),

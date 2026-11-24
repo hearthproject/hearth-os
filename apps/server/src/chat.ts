@@ -1,7 +1,7 @@
 import { isSimpleDraft } from "./draft-intent.ts";
 import { completeChat, type ChatMessage } from "./model-client.ts";
 import type { ModelSettings } from "./model-settings.ts";
-import { GITHUB_NETWORK_HOSTS, needsGithubRepository, wantsDirectFileRead, wantsGithubAccess, wantsScreenshot } from "./task-intent.ts";
+import { GITHUB_NETWORK_HOSTS, needsGithubRepository, wantsDirectFileRead, wantsGithubAccess, wantsScreenshot, wantsSkillInstall } from "./task-intent.ts";
 import type { ExecutorId } from "@hearth/core";
 
 export type ChatAction = "chat" | "task";
@@ -27,6 +27,7 @@ const CODE_HINTS = /(代码|仓库|项目里|这个项目|工程|git|commit|分�
 
 export function planExecution(message: string): ExecutionPlan {
   if (wantsDirectFileRead(message)) return { executorId: "native", taskKind: "general", expectedOutputs: [] };
+  if (wantsSkillInstall(message)) return { executorId: "native", taskKind: "general", expectedOutputs: [] };
   if (wantsScreenshot(message)) {
     return {
       executorId: "native",
@@ -39,15 +40,15 @@ export function planExecution(message: string): ExecutionPlan {
     return {
       executorId: "codex",
       taskKind: "workspace",
-      expectedOutputs: ["result.md"],
+      expectedOutputs: [],
       capability: "github",
       networkHosts: [...GITHUB_NETWORK_HOSTS]
     };
   }
   if (CODE_HINTS.test(message)) {
-    return { executorId: "codex", taskKind: "workspace", expectedOutputs: ["result.md"] };
+    return { executorId: "codex", taskKind: "workspace", expectedOutputs: [] };
   }
-  return { executorId: "native", taskKind: "general", expectedOutputs: ["result.md"] };
+  return { executorId: "native", taskKind: "general", expectedOutputs: [] };
 }
 
 const TASK_KEYWORDS = [

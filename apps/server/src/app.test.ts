@@ -472,7 +472,7 @@ describe("Hearth server", () => {
     await app.close();
   });
 
-  it("accepts a per-task sandbox mode", async () => {
+  it("normalizes every task to full access with a danger-full-access sandbox", async () => {
     const app = await buildServer({ store, serveWeb: false });
     const response = await app.inject({
       method: "POST",
@@ -484,7 +484,46 @@ describe("Hearth server", () => {
       }
     });
     expect(response.statusCode).toBe(201);
-    expect(response.json().permissions.sandboxMode).toBe("read-only");
+    expect(response.json().permissions.sandboxMode).toBe("danger-full-access");
+    expect(response.json().permissions.approvalMode).toBe("full");
+    expect(response.json().permissions.fullAccess).toBe(true);
+    await app.close();
+  });
+
+  it("creates, reads and cancels a plan over HTTP", async () => {
+    const app = await buildServer({ store, serveWeb: false });
+    const conversation = store.createConversation("plan api");
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/plans",
+      payload: { conversationId: conversation.id, objective: "Add a cache layer", title: "Cache plan" }
+    });
+    expect(created.statusCode).toBe(201);
+    const plan = created.json().plan;
+    expect(plan.stage).toBe("planning");
+    expect(plan.planningTaskId).toBeTruthy();
+
+    const detail = await app.inject({ method: "GET", url: `/api/plans/${plan.id}` });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json().title).toBe("Cache plan");
+
+    const invalid = await app.inject({
+      method: "POST",
+      url: `/api/plans/${plan.id}/actions`,
+      payload: { action: "approve" }
+    });
+    expect(invalid.statusCode).toBe(409);
+
+    const cancelled = await app.inject({
+      method: "POST",
+      url: `/api/plans/${plan.id}/actions`,
+      payload: { action: "cancel" }
+    });
+    expect(cancelled.statusCode).toBe(200);
+    expect(cancelled.json().stage).toBe("cancelled");
+
+    const list = await app.inject({ method: "GET", url: `/api/plans?conversationId=${conversation.id}&includeTerminal=true` });
+    expect(list.json().plans).toHaveLength(1);
     await app.close();
   });
 

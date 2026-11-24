@@ -52,6 +52,8 @@ export interface CreateTaskInput {
   title?: string;
   goal?: string;
   goalId?: string;
+  planId?: string;
+  mode?: TaskRecord["mode"];
   textInput?: string;
   sourceItemIds?: string[];
   fileInputs?: { label: string; path: string }[];
@@ -227,7 +229,7 @@ export class HearthService {
     }
     const executorId = project ? "native" : input.executorId ?? "native";
     const taskKind = input.taskKind ?? (project || workspacePath ? "workspace" : "general");
-    const expectedOutputs = input.expectedOutputs ?? ["result.md"];
+    const expectedOutputs = input.expectedOutputs ?? [];
     for (const output of expectedOutputs) {
       const clean = output.replace(/\\/g, "/").replace(/[\\/]+$/, "");
       if (
@@ -244,28 +246,27 @@ export class HearthService {
         );
       }
     }
-    const workspaceScoped = taskKind === "workspace" || Boolean(project);
     const defaultRoot = workspacePath ?? (project ? resolve(project.path) : null);
     let permissions = input.permissions ? { ...input.permissions } : undefined;
-    if (!permissions && (workspaceScoped || workspacePath)) {
+    if (!permissions) {
       permissions = {
         readRoots: defaultRoot ? [defaultRoot] : [],
         writeRoots: defaultRoot ? [defaultRoot] : [],
         networkHosts,
-        // The sandbox cannot enforce per-host allowlists; "*" already means
-        // arbitrary public web, so it must be paired with the open switch.
-        networkMode: networkHosts.includes("*") ? "open" : "deny",
+        networkMode: "open",
         tools: []
       };
     }
-    if (permissions && workspaceScoped) {
-      permissions.approvalMode = "full";
-      permissions.sandboxMode = "danger-full-access";
-    }
+    permissions.fullAccess = true;
+    permissions.approvalMode = "full";
+    permissions.networkMode = "open";
+    permissions.sandboxMode = "danger-full-access";
     const task: TaskRecord = {
       id,
       ...(input.executionMode ? { executionMode: input.executionMode } : {}),
       goalId: input.goalId ?? null,
+      planId: input.planId ?? null,
+      mode: input.mode ?? "build",
       ...(input.externalRef ? { externalRef: input.externalRef, requestHash: input.requestHash ?? null } : {}),
       templateId: null,
       title: input.title?.trim() || "未命名任务",
@@ -427,7 +428,7 @@ export class HearthService {
     return new Map(this.store.listTasks().map((task) => [task.id, task.title]));
   }
 
-  updateTask(taskId: string, patch: Partial<Pick<TaskRecord, "status" | "title" | "goal" | "goalId" | "currentRunId" | "nextAction" | "error" | "resultSummary" | "conversationId" | "executorId" | "taskKind" | "expectedOutputs" | "permissions" | "pendingInput" | "methodId" | "methodVersion" | "pinnedAt" | "archivedAt" | "budgetOverride" | "executionMode">>, runId?: string): TaskRecord {
+  updateTask(taskId: string, patch: Partial<Pick<TaskRecord, "status" | "title" | "goal" | "goalId" | "planId" | "mode" | "currentRunId" | "nextAction" | "error" | "resultSummary" | "conversationId" | "executorId" | "taskKind" | "expectedOutputs" | "permissions" | "pendingInput" | "methodId" | "methodVersion" | "pinnedAt" | "archivedAt" | "budgetOverride" | "executionMode">>, runId?: string): TaskRecord {
     const task = this.requireTask(taskId);
     if (patch.status && patch.status !== task.status) assertTransition(task.status, patch.status);
     const previousStatus = task.status;
@@ -627,7 +628,7 @@ export class HearthService {
     taskId: string,
     content: string,
     mode: TaskFollowUpRecord["mode"],
-    origin: "user" | "goal" = "user"
+    origin: TaskFollowUpRecord["origin"] = "user"
   ): TaskFollowUpRecord {
     const task = this.requireTask(taskId);
     const now = new Date().toISOString();

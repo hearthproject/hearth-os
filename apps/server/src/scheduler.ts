@@ -71,6 +71,7 @@ import { prepareTaskRuntime, type RuntimePreparation } from "./runtime.ts";
 import type { HearthService } from "./service.ts";
 import { createControlGoalTools } from "./goal-tools.ts";
 import type { GoalService } from "./goals.ts";
+import type { PlanService } from "./plans.ts";
 import { buildDeliveryRepairPrompt, buildTaskPrompt, prepareWorkspace, UnsupportedInputError, type PreparedWorkspace, type TaskApprovalKind } from "./workspace.ts";
 import { wantsDirectFileRead, wantsPublicWebResearch, wantsScreenshot } from "./task-intent.ts";
 import type { WebSearchService } from "./web-search.ts";
@@ -139,6 +140,7 @@ export interface SchedulerOptions {
   skills?: SkillService | undefined;
   ontologyWriter?: OntologyWriter | undefined;
   goals?: GoalService | undefined;
+  plans?: PlanService | undefined;
   deferStartup?: boolean | undefined;
 }
 
@@ -204,6 +206,7 @@ export class HearthScheduler {
   private readonly ontology: OntologyService;
   private readonly ontologyWriter: OntologyWriter;
   private readonly goals: GoalService | undefined;
+  private readonly plans: PlanService | undefined;
   private readonly projector: ContextProjector;
   private readonly handoffs: HandoffService;
   private readonly summaryTasks = new Set<Promise<void>>();
@@ -281,6 +284,7 @@ export class HearthScheduler {
     this.ontology = new OntologyService(this.service);
     this.ontologyWriter = options.ontologyWriter ?? new OntologyWriter(this.service, this.ontology);
     this.goals = options.goals;
+    this.plans = options.plans;
     this.projector = new ContextProjector(this.service, this.context, options.contextBroker);
     this.handoffs = new HandoffService(this.service, this.context);
     this.service.setContextSink((message) => {
@@ -468,6 +472,38 @@ export class HearthScheduler {
       }
     }
     return this.service.createTaskFollowUp(taskId, prompt.trim(), "queue", "goal");
+  }
+
+  requeuePlanTask(taskId: string, prompt: string, options: { allowCompleted?: boolean } = {}): TaskRecord {
+    const task = this.service.requireTask(taskId);
+    const text = prompt.trim();
+    if (!text) throw new Error("计划补充不能为空");
+    if (task.status === "cancelled") throw new Error("任务已取消，不能继续计划");
+    this.enqueuePlanFollowUp(taskId, text);
+    if (task.status === "running" || task.status === "queued") {
+      this.wake();
+      return task;
+    }
+    if (task.status === "completed" && !options.allowCompleted) {
+      throw new Error("任务已经完成，不能直接继续计划");
+    }
+    const updated = this.service.updateTask(taskId, {
+      status: "queued",
+      nextAction: "计划模式：准备继续规划",
+      error: null,
+      pendingInput: null
+    }, task.currentRunId ?? undefined);
+    this.wake();
+    return updated;
+  }
+
+  private enqueuePlanFollowUp(taskId: string, prompt: string): TaskFollowUpRecord {
+    for (const existing of this.service.store.listTaskFollowUps(taskId, "queued")) {
+      if (existing.origin === "plan") {
+        this.service.updateTaskFollowUp(existing.id, { status: "cancelled" });
+      }
+    }
+    return this.service.createTaskFollowUp(taskId, prompt.trim(), "queue", "plan");
   }
 
   addFollowUp(taskId: string, content: string, mode: "queue" | "steer"): TaskFollowUpRecord {
@@ -910,6 +946,9 @@ export class HearthScheduler {
       for (const run of runningRuns) {
         if (!autoRun && this.autoResumeIssue(task, run) === null) autoRun = run;
       }
+      // Plan execution never resumes itself after a host restart: the user must
+      // confirm the persisted plan again before a fresh build task starts.
+      if (task.planId && task.mode === "build") autoRun = null;
       for (const run of runningRuns) {
         const auto = autoRun?.id === run.id;
         this.service.updateRun(run.id, task.id, {
@@ -2351,6 +2390,7 @@ export class HearthScheduler {
         dshSettings,
         executorSettings: this.executorSettings(),
         expectedOutputs,
+        mode: task.mode ?? "build",
         ...(task.goalId ? { skipBuiltinGoalTools: true } : {}),
         ...(extraNativeTools.length > 0 ? { extraNativeTools } : {}),
         ...(browserFinishGuard ? { finishGuards: [browserFinishGuard] } : {}),
@@ -2463,7 +2503,7 @@ export class HearthScheduler {
         threadId: result.threadId,
         usage: runUsage
       };
-      const approvalKind = approvalKindForTask(task);
+      const approvalKind = this.service.permissionModeForTask(task) === "full" ? null : approvalKindForTask(task);
       if (approvalKind) {
         if (!this.approvals) throw new Error("审批管理器未启动，无法安全执行外部动作");
         const request = await this.buildApproval(task, approvalKind, prepared);
@@ -2490,6 +2530,20 @@ export class HearthScheduler {
       }, runId);
       this.refreshTaskSummary(taskId);
       this.writeRunEvidence(taskId, runId);
+      if (task.planId && this.plans) {
+        try {
+          if (task.mode === "plan") this.plans.onPlanningTaskCompleted(taskId);
+          else this.plans.onExecutionTaskCompleted(taskId);
+        } catch (error) {
+          this.capture({
+            taskId, conversationId: task.conversationId ?? null, runId, executorId,
+            kind: "notice", role: "system",
+            content: `计划结算失败：${errorMessage(error)}`,
+            provenance: { source: "plan-service", eventType: "plan.settle.failed" },
+            executorEventId: `plan:settle:${runId}`
+          });
+        }
+      }
       if (task.goalId && this.goals) {
         try {
           const decision = await this.goals.onRunCompleted({
@@ -2572,6 +2626,11 @@ export class HearthScheduler {
         return result;
       }
       const failure = this.markRunFailed(taskId, runId, error, controller.signal.aborted, run.leaseEpoch ?? 0);
+      if (this.plans && !failure.cancelled) {
+        try {
+          this.plans.onTaskFailed(taskId, errorMessage(error));
+        } catch { /* plan already terminal */ }
+      }
       this.refreshTaskSummary(taskId, { lastFailure: failure.failure });
       return {
         status: failure.cancelled ? "cancelled" : "failed",
@@ -2595,7 +2654,7 @@ export class HearthScheduler {
     const argumentsValue = approvalArguments(input.request.call.arguments);
     const summary = toolApprovalSummary(toolName, input.request.call.arguments);
     const permissionMode = this.service.permissionModeForTask(input.task);
-    if (permissionMode === "full" && classification.actionClass !== "host_read") return { allowed: true };
+    if (permissionMode === "full") return { allowed: true };
     const context = this.service.store.listScheduleRunByTask(input.task.id) ? "scheduled" as const : "interactive" as const;
     let action: ResolvedAction | null;
     try {
@@ -2747,6 +2806,23 @@ export class HearthScheduler {
       error: null, resultSummary: result.question ?? result.finalResponse
     }, run.id);
     this.goals?.onTaskGated(task, "needs_input");
+    if (this.plans && task.planId && task.mode === "plan" && result.planPath) {
+      try {
+        this.plans.onPlanningTaskReady(taskId, result.finalResponse || result.question || "", result.planPath);
+      } catch (error) {
+        this.capture({
+          taskId,
+          conversationId: task.conversationId ?? null,
+          runId: run.id,
+          executorId: "native",
+          kind: "notice",
+          role: "system",
+          content: `计划状态保存失败：${errorMessage(error)}`,
+          provenance: { source: "plan-service", eventType: "plan.save.failed" },
+          executorEventId: `plan:save:${run.id}`
+        });
+      }
+    }
     this.refreshTaskSummary(taskId);
     return { status: "waiting_input", run: { ...run, status: "waiting_input", usage }, executorId: run.executorId ?? "codex", outDir: this.outDirForRun(taskId, run), error: null, failure: null, aborted: false, leaseLost: false, cancelled: false };
   }
@@ -3238,19 +3314,11 @@ export class HearthScheduler {
     };
   }
 
-  private effectiveBudget(task: TaskRecord): RunBudget {
-    const base = task.taskKind === "workspace"
-      ? CODING_RUN_BUDGET
-      : task.executionMode
-        ? EXECUTION_PROFILES[task.executionMode].budget
-        : this.runBudget;
-    const override = task.budgetOverride ?? {};
-    return {
-      maxTurns: override.maxTurns ?? base.maxTurns,
-      maxToolCalls: override.maxToolCalls ?? base.maxToolCalls,
-      maxTokens: override.maxTokens ?? base.maxTokens,
-      maxDurationMs: override.maxDurationMs ?? base.maxDurationMs
-    };
+  private effectiveBudget(_task: TaskRecord): RunBudget {
+    // Product invariant: tasks and goals have no turn/token/time/call ceiling.
+    // Legacy budgetOverride values stay in the database for auditability but
+    // are intentionally ignored.
+    return {};
   }
 
   private usageForRuns(runs: RunRecord[]): { tokens: number; turns: number; toolCalls: number; durationMs: number } {
