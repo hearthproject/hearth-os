@@ -854,3 +854,15 @@ export interface OntologyEntityView extends EntityRecord {
   aliases: EntityAliasRecord[];
 }
 
+export interface ExecutorBootstrapResult {
+  install: {
+    installed: boolean;
+    path: string | null;
+    message: string;
+  };
+  binding: ExecutorModelBindingView | null;
+  bindingError: string | null;
+  probe: ExecutorProbeResult;
+  health: ExecutorProbeResult["health"];
+}
+

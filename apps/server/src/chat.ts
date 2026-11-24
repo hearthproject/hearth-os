@@ -201,10 +201,50 @@ export function conversationTitle(message: string): string {
   return clean.length > 24 ? `${clean.slice(0, 24)}…` : clean;
 }
 
+function cleanGeneratedTitle(value: string): string {
+  const firstLine = value
+    .replace(/```[\s\S]*?```/g, " ")
+    .split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? "";
+  const clean = firstLine
+    .replace(/^["'“”‘’《》【】#*\s]+/u, "")
+    .replace(/["'“”‘’《》【】#*\s]+$/u, "")
+    .replace(/[。.!！?？:：；;，,、\s]+$/u, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!clean || /^(新对话|新任务|对话|会话|问题|任务)$/u.test(clean)) return "";
+  return clean.length > 18 ? `${clean.slice(0, 18)}…` : clean;
+}
+
+export async function summarizeConversationTitle(settings: ModelSettings, message: string): Promise<string> {
+  if (!settings.apiKey || !settings.baseUrl || !settings.model) return "";
+  const material = message.replace(/\s+/g, " ").trim().slice(0, 1200);
+  if (!material) return "";
+  try {
+    const result = await completeChat(settings, [
+      {
+        role: "system",
+        content: [
+          "你负责给 Hearth 的对话起一个短标题。",
+          "只概括用户想做的事或问的问题，不要复述原句。",
+          "输出 6 到 14 个汉字的名词短语，最多 18 字。",
+          "不要引号、标点、括号、代码、网址、emoji，也不要写“新对话”“问题讨论”这类空泛标题。",
+          "只输出标题本身。"
+        ].join("\n")
+      },
+      { role: "user", content: material }
+    ], { maxTokens: 48, temperature: 0.2, timeoutMs: 12_000 });
+    return cleanGeneratedTitle(result.content);
+  } catch {
+    return "";
+  }
+}
+
 export function chatSystemPrompt(): string {
   return [
     "你是 Hearth，一个运行在用户本机的个人助手。",
     "回答使用简体中文，直接、清楚、可执行。",
+    "默认保持简短：先给结论，通常不超过 3 段或 120 字。除非用户明确要求详细说明，否则不要展开背景、罗列所有选项或重复总结。",
+    "用普通人能懂的话表达。必须使用术语时，先用一句话解释；不要为了显得专业而堆术语。",
     "普通问题直接回答，不要假装已经执行了操作；需要实际执行时提醒用户可以在对话框里直接说出任务。",
     "如果用户提供了网址但你无法读取其内容，要明确说明限制，不要编造页面或代码内容。",
     "可以使用 Markdown，但不要输出无关的前言或客套话。"

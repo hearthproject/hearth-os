@@ -231,6 +231,27 @@ export class ModelRegistry {
     return this.bindingViews().find((binding) => binding.executorId === executorId) as ExecutorModelBindingView;
   }
 
+  autoBind(executorId: ExecutorId): ExecutorModelBindingView {
+    const allowed = EXECUTOR_MODEL_PROTOCOLS[executorId];
+    const current = this.bindingViews().find((binding) => binding.executorId === executorId);
+    if (current?.available) return current;
+    const profiles = this.listProfiles().filter((profile) => profile.hasApiKey && !profile.isLocal);
+    const chatId = this.chatProfileId();
+    const chatProfile = chatId ? profiles.find((profile) => profile.id === chatId) ?? null : null;
+    const direct = (chatProfile && allowed.includes(chatProfile.protocol) ? chatProfile : null)
+      ?? profiles.find((profile) => allowed.includes(profile.protocol))
+      ?? null;
+    if (direct) return this.saveBinding(executorId, { profileId: direct.id, protocolOverride: null, modelOverride: null });
+    if (executorId === "codex" && chatProfile) {
+      return this.saveBinding(executorId, {
+        profileId: chatProfile.id,
+        protocolOverride: "openai-responses",
+        modelOverride: null
+      });
+    }
+    throw new ModelRegistryError("NO_COMPATIBLE_MODEL", `${executorName(executorId)} 没有可用的模型档案，请先配置模型和 API Key`);
+  }
+
   settingsForExecutor(executorId: ExecutorId): ModelSettings | null {
     const binding = this.bindingViews().find((item) => item.executorId === executorId);
     if (!binding?.profile || !binding.available) return null;

@@ -1,5 +1,7 @@
-import { mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import type { DeepSeekHarness, HarnessNotification, RunResult } from "@deepseek-ai/dsh-sdk-client";
 
 export type DshProtocol = "openai-chat" | "openai-responses" | "anthropic-messages";
@@ -84,12 +86,24 @@ export class DeepSeekRuntimeMissingError extends DeepSeekHarnessError {
   }
 }
 
-async function loadDeepSeekHarness(): Promise<typeof import("@deepseek-ai/dsh-sdk-client")> {
+async function loadDeepSeekHarness(dshHome?: string): Promise<typeof import("@deepseek-ai/dsh-sdk-client")> {
+  const managedPackage = dshHome
+    ? join(dshHome, "runtime", "node_modules", "@deepseek-ai", "dsh-sdk-client", "package.json")
+    : null;
+  if (managedPackage && existsSync(managedPackage)) {
+    try {
+      const require = createRequire(managedPackage);
+      const entry = require.resolve("@deepseek-ai/dsh-sdk-client");
+      return await import(pathToFileURL(entry).href) as typeof import("@deepseek-ai/dsh-sdk-client");
+    } catch {
+      // Fall back to the bundled SDK when the managed copy is incomplete.
+    }
+  }
   try {
     return await import("@deepseek-ai/dsh-sdk-client");
   } catch (error) {
     throw new DeepSeekRuntimeMissingError(
-      "DeepSeek Harness 运行时未安装。请安装 @deepseek-ai/dsh-sdk-client，或改用 native / Codex 执行器。",
+      "DeepSeek Harness 运行时未安装。请到设置 → 执行器点击“一键安装”，或改用 native / Codex 执行器。",
       { cause: error }
     );
   }
@@ -104,7 +118,7 @@ const API_BY_PROTOCOL: Record<DshProtocol, string> = {
 };
 
 export async function runDeepSeekHarness(options: DeepSeekHarnessRunOptions): Promise<DeepSeekHarnessRunResult> {
-  const { DeepSeekHarness } = await loadDeepSeekHarness();
+  const { DeepSeekHarness } = await loadDeepSeekHarness(options.dshHome);
   validateSettings(options.settings);
   mkdirSync(options.dshHome, { recursive: true });
   const patchPath = writeProviderPatch(options.dshHome, options.settings, options.mcpServers);

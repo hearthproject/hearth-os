@@ -18,6 +18,7 @@ import { registerChatRoutes } from "./chat-routes.ts";
 import { ReconcileError, ReconcileService } from "./reconcile.ts";
 import { ExecutorSettingsStore } from "./executor-settings.ts";
 import { clearExecutorHealthCache, executorHealth as readExecutorHealth, executorRuntimeSettings, probeExecutor } from "./executor-runtime.ts";
+import { findCodexBinary, installExecutorRuntime } from "./executor-installer.ts";
 import { applyExecutorModelReadiness } from "./executor-readiness.ts";
 import { EXECUTORS } from "./executors.ts";
 import { ScheduleError, ScheduleService } from "./schedules.ts";
@@ -877,12 +878,16 @@ export async function buildServer(options: BuildServerOptions = {}) {
         modelSettingsPath,
         modelSettingsForExecutor,
         deferStartup: true,
-        codexRunner: (runOptions) => runCodex({
-          ...runOptions,
-          profile: codexProfile(),
-          env: codexEnv(),
-          ...(process.env.HEARTH_CODEX_PATH ? { codexPathOverride: process.env.HEARTH_CODEX_PATH } : {})
-        }),
+        codexRunner: (runOptions) => {
+          const settings = executorSettingsStore.load();
+          const codexPath = findCodexBinary(executorSettingsPath, executorRuntimeSettings(settings, "codex").executablePath);
+          return runCodex({
+            ...runOptions,
+            profile: codexProfile(),
+            env: codexEnv(),
+            ...(codexPath ? { codexPathOverride: codexPath } : {})
+          });
+        },
         ...(options.sourceContentRoot ? { sourceContentRoot: options.sourceContentRoot } : {})
       })
     : null;
@@ -1413,6 +1418,62 @@ export async function buildServer(options: BuildServerOptions = {}) {
     } catch (error) {
       return sendModelRegistryError(reply, error);
     }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/executors/:id/model-binding/auto", async (request, reply) => {
+    const id = request.params.id;
+    if (!(EXECUTOR_IDS as readonly string[]).includes(id)) {
+      return reply.code(404).send({ error: "EXECUTOR_NOT_FOUND", message: "执行器不存在" });
+    }
+    try {
+      const binding = modelRegistry.autoBind(id as ExecutorId);
+      clearExecutorHealthCache(id as ExecutorId);
+      return { binding };
+    } catch (error) {
+      return sendModelRegistryError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/executors/:id/bootstrap", async (request, reply) => {
+    const id = request.params.id;
+    if (!(EXECUTOR_IDS as readonly string[]).includes(id)) {
+      return reply.code(404).send({ error: "EXECUTOR_NOT_FOUND", message: "执行器不存在" });
+    }
+    const executorId = id as ExecutorId;
+    let install: Awaited<ReturnType<typeof installExecutorRuntime>>;
+    try {
+      install = await installExecutorRuntime(executorId, executorSettingsPath);
+    } catch (error) {
+      return reply.code(500).send({
+        error: "EXECUTOR_INSTALL_FAILED",
+        message: error instanceof Error ? error.message : "执行器下载或安装失败"
+      });
+    }
+    let binding: ReturnType<ModelRegistry["autoBind"]> | null = null;
+    let bindingError: string | null = null;
+    try {
+      binding = modelRegistry.autoBind(executorId);
+    } catch (error) {
+      bindingError = error instanceof Error ? error.message : "模型绑定失败";
+    }
+    clearExecutorHealthCache(executorId);
+    const settings = executorSettingsStore.load();
+    const currentBinding = modelRegistry.bindingViews().find((item) => item.executorId === executorId);
+    const probe = await probeExecutor(executorId, settings, executorSettingsPath, 60_000, {
+      modelSettings: modelRegistry.settingsForExecutorOrChat(executorId),
+      binding: currentBinding?.profileId
+        ? { explicit: true, available: currentBinding.available, issue: currentBinding.issue }
+        : null,
+      codexProfile: executorId === "codex" ? codexProfile() : null,
+      codexEnv: executorId === "codex" ? codexEnv() : {}
+    });
+    return {
+      install,
+      binding,
+      bindingError,
+      probe,
+      health: executorHealth(executorId)
+    };
   });
 
   app.get("/api/executor-settings", async () => {

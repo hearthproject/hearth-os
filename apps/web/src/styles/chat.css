@@ -1032,6 +1032,19 @@
   min-width: 0;
 }
 
+.composer-slash-glyph {
+  display: grid;
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 4px;
+  background: var(--surface-sunk);
+  color: var(--ember);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .composer-slash-item strong {
   color: var(--ink);
   font-size: var(--fs-12);

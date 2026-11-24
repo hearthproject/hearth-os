@@ -19,7 +19,7 @@ import type { MentionResolver } from "./mentions.ts";
 import type { OntologyService } from "./ontology.ts";
 import type { OntologyWriter } from "./ontology-writer.ts";
 import { ModelRegistryError, type ModelRegistry } from "./model-registry.ts";
-import { chatSystemPrompt, conversationTitle, decideRoute, planExecution } from "./chat.ts";
+import { chatSystemPrompt, conversationTitle, decideRoute, planExecution, summarizeConversationTitle } from "./chat.ts";
 import { wantsSkillInstall } from "./task-intent.ts";
 import { listModels, ModelClientError, completeChat, streamChat, type ChatMessage } from "./model-client.ts";
 import {
@@ -152,6 +152,35 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     const base = options.registry?.chatSettings() ?? loadModelSettings(modelSettingsPath);
     return { ...base, reasoningEffort: executorSettings().reasoningEffort ?? "max" };
   };
+  let legacyTitleBackfillStarted = false;
+  const backfillLegacyTitles = (): void => {
+    if (legacyTitleBackfillStarted) return;
+    let settings: ModelSettings;
+    try {
+      if (store.getAppSetting("conversation.title.summary.v2") === "done") return;
+      settings = chatSettings();
+      if (!chatModelConfigured(settings)) return;
+      legacyTitleBackfillStarted = true;
+    } catch {
+      return;
+    }
+    void (async () => {
+      const conversations = store.listConversations().slice(0, 30);
+      for (const conversation of conversations) {
+        try {
+          const firstUser = store.listChatMessages(conversation.id).find((item) => item.role === "user");
+          if (!firstUser) continue;
+          const legacyTitle = conversationTitle(firstUser.content);
+          if (conversation.title !== "新对话" && conversation.title !== legacyTitle) continue;
+          const summary = await summarizeConversationTitle(settings, firstUser.content);
+          if (summary && summary !== conversation.title) store.renameConversation(conversation.id, summary);
+        } catch {
+          // A failed summary must never block the list or the app.
+        }
+      }
+      store.setAppSetting("conversation.title.summary.v2", "done");
+    })();
+  };
   const chatConfigured = (): boolean => chatModelConfigured(chatSettings());
   const executorAvailability = (): Record<ExecutorId, boolean> => {
     const settings = executorSettings();
@@ -268,6 +297,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
   app.get("/api/conversation-defaults", async () => ({ settings: defaultSettings() }));
 
   app.get("/api/conversations", async () => {
+    backfillLegacyTitles();
     return {
       conversations: store.listConversations().map((conversation) => {
         const messages = store.listChatMessages(conversation.id);
@@ -434,7 +464,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
         ? parsed.data.projectId
         : null;
       conversation = store.createConversation(
-        conversationTitle(message || detectedUrl || "处理上传文件"),
+        "新对话",
         settings,
         projectId
       );
@@ -443,9 +473,6 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     const userContent = message || (detectedUrl ? `请处理这个网址：${detectedUrl}` : `请处理附件：${storedFiles.map((file) => file.name).join("、")}`);
     const firstTurn = store.listChatMessages(conversation.id).length === 0;
     const titleWasPlaceholder = conversation.title === "新对话";
-    if (firstTurn && titleWasPlaceholder) {
-      conversation = store.renameConversation(conversation.id, conversationTitle(userContent)) ?? conversation;
-    }
     const userRecord = store.createChatMessage({
       id: randomUUID(),
       conversationId: conversation.id,
@@ -534,6 +561,9 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     }
 
     const settings = chatSettings();
+    const generatedTitlePromise = firstTurn && titleWasPlaceholder
+      ? summarizeConversationTitle(settings, userContent)
+      : Promise.resolve("");
     const plan = planExecution(userContent);
     const effectiveSettings = parsed.data.settings
       ? mergeConversationSettings(conversation.settings, parsed.data.settings)
@@ -590,9 +620,16 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
             ? [...EXECUTOR_FALLBACK_ORDER]
             : [plan.executorId, ...EXECUTOR_FALLBACK_ORDER.filter((id) => id !== plan.executorId)]
         );
-    if (titleWasPlaceholder && firstTurn && route.title.trim() && route.title.trim() !== "新任务" && route.title.trim() !== conversation.title) {
-      conversation = store.renameConversation(conversation.id, route.title.trim()) ?? conversation;
-      send("conversation", conversation);
+    if (titleWasPlaceholder && firstTurn) {
+      const generatedTitle = await generatedTitlePromise;
+      const fallbackTitle = route.title.trim() && route.title.trim() !== "新任务" && route.title.trim() !== conversationTitle(userContent)
+        ? route.title.trim()
+        : "";
+      const nextTitle = generatedTitle || fallbackTitle;
+      if (nextTitle && nextTitle !== conversation.title) {
+        conversation = store.renameConversation(conversation.id, nextTitle) ?? conversation;
+        send("conversation", conversation);
+      }
     }
     send("routing", {
       ...route,

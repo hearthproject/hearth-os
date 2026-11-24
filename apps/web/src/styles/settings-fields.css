@@ -56,6 +56,14 @@
   white-space: nowrap;
 }
 
+.settings-content .binding-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
 .settings-content .executor-card-head {
   display: flex;
   align-items: flex-start;

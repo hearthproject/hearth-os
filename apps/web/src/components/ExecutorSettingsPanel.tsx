@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Cpu,
+  Download,
   Loader2,
   RefreshCw,
   Save,
@@ -12,7 +13,7 @@ import {
 import type { ExecutorId, ExecutorProbeResult } from "../lib/types.ts";
 import { api } from "../lib/api.ts";
 
-type Busy = `probe:${ExecutorId}` | "save" | null;
+type Busy = `probe:${ExecutorId}` | `bootstrap:${ExecutorId}` | "save" | null;
 
 export function ExecutorSettingsPanel() {
   const queryClient = useQueryClient();
@@ -79,6 +80,33 @@ export function ExecutorSettingsPanel() {
       ]);
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "执行器检测失败" });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function bootstrap(id: ExecutorId) {
+    setBusy(`bootstrap:${id}`);
+    setNotice({ tone: "info", text: "正在准备执行器。首次下载可能需要几分钟，请不要关闭设置页。" });
+    try {
+      const result = await api.bootstrapExecutor(id);
+      setProbes((prev) => ({ ...prev, [id]: result.probe }));
+      const bound = result.binding?.effectiveModel ?? "";
+      if (result.probe.ok) {
+        setNotice({ tone: "ok", text: `${result.install.message}${bound ? ` 已绑定 ${bound}，` : ""}真实测试通过。` });
+      } else if (result.bindingError) {
+        setNotice({ tone: "error", text: `${result.install.message} 但模型绑定失败：${result.bindingError}` });
+      } else {
+        setNotice({ tone: "error", text: `${result.install.message} 但测试未通过：${result.probe.error ?? "未知原因"}` });
+      }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["executors"] }),
+        queryClient.invalidateQueries({ queryKey: ["executorSettings"] }),
+        queryClient.invalidateQueries({ queryKey: ["modelRegistry"] }),
+        queryClient.invalidateQueries({ queryKey: ["health"] })
+      ]);
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "执行器安装失败" });
     } finally {
       setBusy(null);
     }
@@ -153,6 +181,14 @@ export function ExecutorSettingsPanel() {
                   </div>
 
                   <div className="executor-card-actions">
+                    {executor.id !== "native" && (!executor.health.canRun || !executor.modelBinding?.available) && (
+                      <button type="button" className="primary-button compact" onClick={() => void bootstrap(executor.id)} disabled={busy !== null}>
+                        {busy === `bootstrap:${executor.id}` ? <Loader2 size={14} className="spin" /> : <Download size={14} />}
+                        {busy === `bootstrap:${executor.id}`
+                          ? "准备中…"
+                          : executor.health.installState === "missing" ? "一键安装并启用" : "一键绑定并启用"}
+                      </button>
+                    )}
                     <button type="button" className="ghost-button compact" onClick={() => void probe(executor.id)} disabled={busy !== null}>
                       {busy === `probe:${executor.id}` ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}
                       {busy === `probe:${executor.id}` ? "测试中…" : "测试可用性"}

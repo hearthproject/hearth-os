@@ -61,6 +61,54 @@ describe("model registry protocol constraints", () => {
       expect(registry.saveBinding("deepseek-harness", { profileId: profile.id }).effectiveProtocol).toBe(protocol);
     }
   });
+
+  it("auto-binds Codex to the current chat model with a Responses override", () => {
+    const registry = setup();
+    const chat = registry.createProfile({
+      name: "Chat model",
+      protocol: "openai-chat",
+      baseUrl: "https://example.com/v1",
+      model: "chat-model",
+      apiKey: "sk-chat"
+    });
+    registry.setChatProfile(chat.id);
+
+    const binding = registry.autoBind("codex");
+    expect(binding.profile?.id).toBe(chat.id);
+    expect(binding.effectiveProtocol).toBe("openai-responses");
+    expect(binding.available).toBe(true);
+  });
+
+  it("auto-binds an executor to the chat model and preserves an already usable binding", () => {
+    const registry = setup();
+    const chat = registry.createProfile({
+      name: "Chat model",
+      protocol: "openai-chat",
+      baseUrl: "https://example.com/v1",
+      model: "chat-model",
+      apiKey: "sk-chat"
+    });
+    const other = registry.createProfile({
+      name: "Other model",
+      protocol: "openai-chat",
+      baseUrl: "https://example.com/v1",
+      model: "other-model",
+      apiKey: "sk-other"
+    });
+    registry.setChatProfile(chat.id);
+
+    const binding = registry.autoBind("deepseek-harness");
+    expect(binding.profile?.id).toBe(chat.id);
+    expect(binding.protocolOverride).toBeNull();
+
+    registry.saveBinding("deepseek-harness", { profileId: other.id });
+    expect(registry.autoBind("deepseek-harness").profile?.id).toBe(other.id);
+  });
+
+  it("reports a clear error when no model can be auto-bound", () => {
+    const registry = setup();
+    expect(() => registry.autoBind("codex")).toThrow(/没有可用的模型档案/);
+  });
 });
 
 describe("model registry persistence", () => {

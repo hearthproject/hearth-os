@@ -12,7 +12,6 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  ClipboardList,
   Clock,
   Copy,
   FileText,
@@ -26,7 +25,6 @@ import {
   Settings2,
   ShieldCheck,
   Sparkles,
-  Target,
   X
 } from "lucide-react";
 import { ApiError, api, chatStream, type GoalSettingsInput } from "../lib/api.ts";
@@ -59,6 +57,18 @@ const PENDING_SETTINGS: ConversationSettings = {
 
 const EXECUTOR_ORDER: ExecutorId[] = ["deepseek-harness", "codex", "native"];
 const TERMINAL_GOAL_STATES = new Set(["done", "cancelled", "failed"]);
+
+type ComposerCommandId = "plan" | "goal" | "attach";
+interface ComposerCommand {
+  id: ComposerCommandId;
+  command: string;
+  description: string;
+}
+const COMPOSER_COMMANDS: ComposerCommand[] = [
+  { id: "plan", command: "/plan", description: "先调查，给出计划，等你批准后再执行" },
+  { id: "goal", command: "/goal", description: "多轮推进一个目标，直到验收完成" },
+  { id: "attach", command: "/attach", description: "添加文件，也可以直接粘贴或拖入" }
+];
 
 interface TimelineMessage {
   kind: "message";
@@ -202,11 +212,25 @@ export function ChatPage() {
   const selectedSkill = useMemo(() => skills.find((skill) => skill.id === selectedSkillId) ?? null, [skills, selectedSkillId]);
   const isGoalCommand = /^\/goal(?:\s|$)/i.test(input.trimStart());
   const isPlanCommand = /^\/plan(?:\s|$)/i.test(input.trimStart());
-  const slashTerm = !isGoalCommand && input.startsWith("/") && !input.startsWith("//") ? input.slice(1).trim().toLocaleLowerCase() : null;
-  const slashMatches = useMemo(() => slashTerm === null ? [] : skills.filter((skill) => {
+  const commandHasArgument = /^\/(?:goal|plan)\s+\S/i.test(input.trimStart());
+  const slashTerm = !commandHasArgument && input.startsWith("/") && !input.startsWith("//")
+    ? input.slice(1).trim().toLocaleLowerCase()
+    : null;
+  const slashCommandMatches = useMemo(() => slashTerm === null ? [] : COMPOSER_COMMANDS.filter((command) => {
+    if (!slashTerm) return true;
+    return `${command.command} ${command.description}`.toLocaleLowerCase().includes(slashTerm);
+  }), [slashTerm]);
+  const slashSkillMatches = useMemo(() => slashTerm === null ? [] : skills.filter((skill) => {
     if (!slashTerm) return true;
     return `${skill.name} ${skill.manifest.description} ${skill.id}`.toLocaleLowerCase().includes(slashTerm);
   }).slice(0, 8), [slashTerm, skills]);
+  const slashMatches = useMemo(
+    () => [
+      ...slashCommandMatches.map((command) => ({ kind: "command" as const, command })),
+      ...slashSkillMatches.map((skill) => ({ kind: "skill" as const, skill }))
+    ],
+    [slashCommandMatches, slashSkillMatches]
+  );
   const slashOpen = slashTerm !== null && !selectedSkill && !sending;
 
   const installSkillMutation = useMutation({
@@ -592,7 +616,7 @@ export function ChatPage() {
     const argument = match?.[1]?.trim() ?? "";
     if (!argument || /^status$/i.test(argument)) {
       await goalsQuery.refetch();
-      if (!hasActiveGoal) setError("当前会话还没有目标。发送 /goal <目标> 或点击输入框的目标按钮创建。");
+      if (!hasActiveGoal) setError("当前会话还没有目标。发送 /goal <目标> 创建。");
       return;
     }
     const action = argument.toLowerCase();
@@ -647,7 +671,7 @@ export function ChatPage() {
     const argument = match?.[1]?.trim() ?? "";
     if (!argument || /^status$/i.test(argument)) {
       await plansQuery.refetch();
-      if (!hasActivePlan) setError("当前会话还没有计划。发送 /plan <目标> 或点击输入框的计划按钮开始。");
+      if (!hasActivePlan) setError("当前会话还没有计划。发送 /plan <目标> 开始。");
       else setPlanDialogOpen(true);
       return;
     }
@@ -678,6 +702,11 @@ export function ChatPage() {
     if (uploading || !settingsReady || (!text && attachments.length === 0)) return;
     if (selectedExecutorUnavailable) {
       setError(`${selectedExecutorName} 当前不可用，不会自动切换执行器。${selectedExecutor?.health.issues.join("；") ?? "请到设置中测试可用性。"}`);
+      return;
+    }
+    if (text && /^\/attach(?:\s|$)/i.test(text) && attachments.length === 0) {
+      setInput("");
+      fileInputRef.current?.click();
       return;
     }
     if (text && isGoalCommand && attachments.length === 0) {
@@ -937,7 +966,8 @@ export function ChatPage() {
       if (slashOpen && slashMatches.length > 0) {
         event.preventDefault();
         const match = slashMatches[Math.min(slashIndex, slashMatches.length - 1)];
-        if (match) chooseSkill(match.id);
+        if (match?.kind === "command") chooseComposerCommand(match.command.id);
+        else if (match?.kind === "skill") chooseSkill(match.skill.id);
         return;
       }
       event.preventDefault();
@@ -960,6 +990,28 @@ export function ChatPage() {
     setSelectedSkillId(id);
     setInput("");
     setSlashIndex(0);
+    requestAnimationFrame(() => composerRef.current?.focus());
+  }
+
+  function chooseComposerCommand(id: ComposerCommandId) {
+    setInput("");
+    setSlashIndex(0);
+    if (id === "attach") {
+      fileInputRef.current?.click();
+      requestAnimationFrame(() => composerRef.current?.focus());
+      return;
+    }
+    if (hasActivePlan || hasActiveGoal) {
+      setError("当前会话已有进行中的计划或目标，请先在对应栏完成或退出。");
+      requestAnimationFrame(() => composerRef.current?.focus());
+      return;
+    }
+    if (id === "plan") {
+      if (goalMode) setError("请先退出目标模式。");
+      else setPlanMode(true);
+    } else {
+      setGoalDialogOpen(true);
+    }
     requestAnimationFrame(() => composerRef.current?.focus());
   }
 
@@ -1370,58 +1422,52 @@ export function ChatPage() {
             </div>
           )}
           {slashOpen && (
-            <div className="composer-slash-menu" role="listbox" aria-label="选择技能">
+            <div className="composer-slash-menu" role="listbox" aria-label="选择命令或技能">
               {slashMatches.length === 0 ? (
-                <p className="composer-slash-empty">还没有匹配的技能。可以到资料库安装。</p>
-              ) : slashMatches.map((skill, index) => (
-                <button
-                  key={skill.id}
-                  type="button"
-                  role="option"
-                  aria-selected={index === Math.min(slashIndex, slashMatches.length - 1)}
-                  className={`composer-slash-item ${index === Math.min(slashIndex, slashMatches.length - 1) ? "active" : ""}`}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => chooseSkill(skill.id)}
-                >
-                  <Sparkles size={15} />
-                  <span>
-                    <strong>{skill.name}</strong>
-                    <small>{skill.manifest.description || "已安装的技能"}</small>
-                  </span>
-                </button>
-              ))}
+                <p className="composer-slash-empty">没有匹配的命令。输入 / 查看全部命令和技能。</p>
+              ) : slashMatches.map((entry, index) => {
+                const active = index === Math.min(slashIndex, slashMatches.length - 1);
+                if (entry.kind === "command") {
+                  return (
+                    <button
+                      key={`command:${entry.command.id}`}
+                      type="button"
+                      role="option"
+                      aria-selected={active}
+                      className={`composer-slash-item ${active ? "active" : ""}`}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => chooseComposerCommand(entry.command.id)}
+                    >
+                      <span className="composer-slash-glyph">/</span>
+                      <span>
+                        <strong>{entry.command.command}</strong>
+                        <small>{entry.command.description}</small>
+                      </span>
+                    </button>
+                  );
+                }
+                return (
+                  <button
+                    key={`skill:${entry.skill.id}`}
+                    type="button"
+                    role="option"
+                    aria-selected={active}
+                    className={`composer-slash-item ${active ? "active" : ""}`}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => chooseSkill(entry.skill.id)}
+                  >
+                    <Sparkles size={15} />
+                    <span>
+                      <strong>{entry.skill.name}</strong>
+                      <small>{entry.skill.manifest.description || "已安装的技能"}</small>
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           )}
           <div className="composer">
-            <button
-              className="composer-icon"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              title="添加附件，也可以直接粘贴或拖入文件（单文件不超过 25 MB）"
-            >
-              {uploading ? <Loader2 size={18} className="spin" /> : <Paperclip size={18} />}
-            </button>
             <input ref={fileInputRef} type="file" multiple hidden onChange={pickFiles} />
-            <button
-              type="button"
-              className={`composer-icon ${goalMode ? "composer-goal-active" : ""}`}
-              onClick={() => setGoalDialogOpen(true)}
-              disabled={hasActiveGoal || hasActivePlan}
-              title={hasActiveGoal ? "当前会话已有未结束的目标，请在目标栏操作" : hasActivePlan ? "当前会话已有计划，请先批准或退出" : "目标模式：跨多轮持续推进，直到独立验收通过"}
-              aria-label="目标模式"
-            >
-              <Target size={17} />
-            </button>
-            <button
-              type="button"
-              className={`composer-icon ${planMode ? "composer-plan-active" : ""}`}
-              onClick={togglePlanMode}
-              disabled={hasActivePlan || hasActiveGoal || goalMode}
-              title={hasActivePlan ? "当前会话已有未结束的计划，请在计划栏批准或退出" : "计划模式：先只读调查，给出计划并等你批准后再执行（Shift+Tab）"}
-              aria-label="计划模式"
-            >
-              <ClipboardList size={17} />
-            </button>
             <textarea
               ref={composerRef}
               value={input}
@@ -1429,7 +1475,7 @@ export function ChatPage() {
               onKeyDown={onComposerKeyDown}
               onPaste={onComposerPaste}
               aria-label="消息"
-              placeholder={isWorking ? "继续输入，发送后会加入队列…" : "向 Hearth 提问，或描述你要完成的事…"}
+              placeholder={isWorking ? "继续输入，发送后会加入队列…" : "向 Hearth 提问，输入 / 选择命令或技能…"}
               rows={1}
             />
             {stoppableTask?.status === "running" && (

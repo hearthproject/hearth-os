@@ -64,17 +64,19 @@ describe("chat-first API", () => {
       const conversationId = events.find((event) => event.event === "conversation")!.data.id;
       const second = await app.inject({ method: "POST", url: "/api/chat", payload: { conversationId, message: "跟老师说我叫小兰" } });
       expect(parseSse(second.body).find((event) => event.event === "error")).toBeUndefined();
-      expect(requests).toHaveLength(2);
-      expect(requests.every((body) => body.stream === true && !body.tools && body.max_tokens === 1200)).toBe(true);
-      expect(JSON.stringify(requests)).not.toContain("个人上下文包");
-      expect(requests[1].messages.some((message: any) => message.role === "assistant")).toBe(true);
+      const chatRequests = requests.filter((body) => body.max_tokens !== 48);
+      expect(chatRequests).toHaveLength(2);
+      expect(chatRequests.every((body) => body.stream === true && !body.tools)).toBe(true);
+      expect(JSON.stringify(chatRequests)).not.toContain("个人上下文包");
+      expect(chatRequests[1].messages.some((message: any) => message.role === "assistant")).toBe(true);
+      expect(requests.some((body) => body.max_tokens === 48 && JSON.stringify(body.messages).includes("短标题"))).toBe(true);
       const third = await app.inject({ method: "POST", url: "/api/chat", payload: { conversationId, message: "再加一句 这是由Hearth agent发送的邮件！" } });
       expect(parseSse(third.body).some((event) => event.event === "task" || event.event === "error")).toBe(false);
-      expect(requests).toHaveLength(3);
-      expect(requests[2].messages.some((message: any) => message.role === "assistant" && message.content.includes("小兰"))).toBe(true);
+      expect(requests.filter((body) => body.max_tokens !== 48)).toHaveLength(3);
+      expect(requests.filter((body) => body.max_tokens !== 48)[2].messages.some((message: any) => message.role === "assistant" && message.content.includes("小兰"))).toBe(true);
       const forcedChat = await app.inject({ method: "POST", url: "/api/chat", payload: { conversationId, routeMode: "chat", message: "帮我运行项目测试" } });
       expect(parseSse(forcedChat.body).some((event) => event.event === "task" || event.event === "error")).toBe(false);
-      expect(requests).toHaveLength(4);
+      expect(requests.filter((body) => body.max_tokens !== 48)).toHaveLength(4);
       expect(store.listTasks()).toHaveLength(0);
     } finally { await app.close(); vi.unstubAllGlobals(); }
   });

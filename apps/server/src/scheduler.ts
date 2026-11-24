@@ -2241,6 +2241,14 @@ export class HearthScheduler {
         ? this.buildHandoffPrompt(task, prepared, expectedOutputs, handoff.packet, permissionNote, memoryContext)
         : null;
       let prompt = handoffPrompt?.prompt ?? basePrompt;
+      if (executorId !== "native") {
+        prompt = [
+          "输出要求：默认简短，先给结论，通常不超过 3 段或 200 字。",
+          "只保留用户需要的结果、必要风险和产物路径；不要叙述过程，不要堆术语。",
+          "除非用户明确要求详细说明，否则不要展开背景或列出所有选项；必须使用术语时先用一句话解释。",
+          prompt
+        ].join("\n\n");
+      }
       let contextPackId = handoffPrompt?.packId ?? null;
       if (!drafting && !contextPackId && this.contextBroker) {
         try {

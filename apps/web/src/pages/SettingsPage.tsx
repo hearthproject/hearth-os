@@ -166,6 +166,24 @@ function ExecutorsTab() {
     }
   }
 
+  async function autoBind(executorId: ExecutorId) {
+    setBusy(executorId);
+    setNotice(null);
+    try {
+      const result = await api.autoBindExecutor(executorId);
+      setNotice({ tone: "ok", text: `${EXECUTOR_LABELS[executorId]} 已自动绑定 ${result.binding.effectiveModel ?? result.binding.profile?.name ?? "可用模型"}。` });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["modelRegistry"] }),
+        queryClient.invalidateQueries({ queryKey: ["executors"] }),
+        queryClient.invalidateQueries({ queryKey: ["health"] })
+      ]);
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "一键绑定失败" });
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
     <section className="settings-tab-panel">
       <ExecutorSettingsPanel />
@@ -210,7 +228,21 @@ function ExecutorsTab() {
                         </small>
                       </div>
                     </div>
-                    <span className={`status-chip ${status.tone}`} title={status.title}>{status.label}</span>
+                    <div className="binding-actions">
+                      {(!binding.available || !health?.canRun) && (
+                        <button
+                          type="button"
+                          className="ghost-button compact"
+                          onClick={() => void autoBind(binding.executorId)}
+                          disabled={busy === binding.executorId}
+                          title="自动选择兼容的模型档案并绑定"
+                        >
+                          {busy === binding.executorId ? <Loader2 size={13} className="spin" /> : <Sparkles size={13} />}
+                          一键绑定
+                        </button>
+                      )}
+                      <span className={`status-chip ${status.tone}`} title={status.title}>{status.label}</span>
+                    </div>
                   </article>
                 );
               })}

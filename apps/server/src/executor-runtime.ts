@@ -12,6 +12,7 @@ import type {
   ExecutorSettings
 } from "@hearth/core";
 import { applyExecutorModelReadiness, type ExecutorBindingReadiness } from "./executor-readiness.ts";
+import { findCodexBinary, managedDshPackage } from "./executor-installer.ts";
 import { completeChat } from "./model-client.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import { removeTempDirectory } from "./temp-cleanup.ts";
@@ -31,6 +32,7 @@ export interface ExecutorProbeOptions {
   binding?: ExecutorBindingReadiness | null | undefined;
   codexProfile?: CodexProfile | null | undefined;
   codexEnv?: Record<string, string> | undefined;
+  codexBinaryPath?: string | null | undefined;
 }
 
 interface RealProbeOutcome {
@@ -61,7 +63,7 @@ export function executorHealth(
   if (verified && Date.now() - verified.at < VERIFIED_TTL_MS) return verified.value;
   const cached = healthCache.get(key);
   if (cached && Date.now() - cached.at < maxAgeMs) return cached.value;
-  const value = computeHealthSync(id);
+  const value = computeHealthSync(id, settings, settingsPath);
   healthCache.set(key, { at: Date.now(), value });
   return value;
 }
@@ -76,7 +78,7 @@ export async function probeExecutor(
   const started = Date.now();
   const quick = applyExecutorModelReadiness(
     id,
-    computeHealthSync(id),
+    computeHealthSync(id, _settings, settingsPath),
     options.modelSettings ?? null,
     options.binding,
     options.codexProfile
@@ -90,7 +92,10 @@ export async function probeExecutor(
       code: quick.state === "missing" ? "EXECUTOR_MISSING" : quick.state === "unconfigured" ? "EXECUTOR_UNCONFIGURED" : "EXECUTOR_FAILED"
     };
   } else {
-    outcome = await runRealProbe(id, settingsPath, timeoutMs, options);
+    outcome = await runRealProbe(id, settingsPath, timeoutMs, {
+      ...options,
+      codexBinaryPath: options.codexBinaryPath ?? findCodexBinary(settingsPath, executorRuntimeSettings(_settings, "codex").executablePath)
+    });
   }
   const elapsedMs = Date.now() - started;
   const failure = outcome.ok ? null : classifyExecutorProbeFailure(outcome.error ?? "执行器测试失败", outcome.code);
@@ -141,23 +146,35 @@ export function clearExecutorHealthCache(id?: ExecutorId): void {
   }
 }
 
-function computeHealthSync(id: ExecutorId): ExecutorHealth {
+function computeHealthSync(id: ExecutorId, settings: ExecutorSettings, settingsPath: string): ExecutorHealth {
   if (id === "native") {
     return { id, canRun: true, state: "ready", command: "native", version: "builtin", issues: [], installState: "available" };
   }
   if (id === "codex") {
     const profile = loadCodexProfile();
+    const binary = findCodexBinary(settingsPath, executorRuntimeSettings(settings, "codex").executablePath);
+    if (!binary) {
+      return {
+        id,
+        canRun: false,
+        state: "missing",
+        command: "codex",
+        version: null,
+        issues: ["Codex 运行程序未安装；到设置 → 执行器点击“一键安装”即可下载并启用"],
+        installState: "missing"
+      };
+    }
     return {
       id,
       canRun: profile.canRun,
       state: profile.canRun ? "ready" : "unconfigured",
-      command: "codex",
+      command: binary,
       version: null,
-      issues: profile.issues,
+      issues: profile.canRun ? [] : profile.issues,
       installState: profile.canRun ? "available" : "needs_repair"
     };
   }
-  const packagePath = dshPackagePath();
+  const packagePath = dshPackagePath(settingsPath);
   return {
     id,
     canRun: false,
@@ -166,7 +183,7 @@ function computeHealthSync(id: ExecutorId): ExecutorHealth {
     version: packagePath ? packageVersion(packagePath) : null,
     issues: packagePath
       ? ["DeepSeek Harness 已安装但尚未验证；请先在“设置 → 执行器”里运行测试，通过后才会出现在聊天执行器列表"]
-      : ["未安装可选运行时 @deepseek-ai/dsh-sdk-client；DeepSeek 执行器暂不可用，native / Codex 不受影响"],
+      : ["未安装 DeepSeek Harness；到设置 → 执行器点击“一键安装”即可下载并启用，native / Codex 不受影响"],
     installState: packagePath ? "available" : "missing"
   };
 }
@@ -181,7 +198,7 @@ async function runRealProbe(
     if (id === "codex") {
       const profile = options.codexProfile ?? loadCodexProfile();
       const result = await withProbeTimeout(
-        probeCodex(profile, options.codexEnv, process.env.HEARTH_CODEX_PATH),
+        probeCodex(profile, options.codexEnv, options.codexBinaryPath ?? process.env.HEARTH_CODEX_PATH),
         timeoutMs,
         "Codex 测试超时，请检查模型地址、网络和登录状态"
       );
@@ -286,7 +303,11 @@ function packageVersion(path: string): string | null {
   }
 }
 
-function dshPackagePath(): string | null {
+function dshPackagePath(settingsPath?: string): string | null {
+  if (settingsPath) {
+    const managed = managedDshPackage(settingsPath);
+    if (managed) return managed;
+  }
   try {
     return require.resolve("@deepseek-ai/dsh-sdk-client/package.json");
   } catch {
