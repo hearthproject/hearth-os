@@ -118,6 +118,7 @@ import type { SkillService } from "./skills/service.ts";
 import type { GoalService } from "./goals.ts";
 import type { PlanService } from "./plans.ts";
 import type { ConversationContextService } from "./conversation-context.ts";
+import { projectChatSupportsTools, runProjectChat } from "./project-chat.ts";
 
 export interface ChatRouteOptions {
   service: HearthService;
@@ -1004,6 +1005,73 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       user: estimateContextTokens(userContent)
     };
     const estimatedInput = Object.values(contextBreakdown).reduce((total, tokens) => total + tokens, 0);
+    const projectAgentPrompt = chatProject
+      ? [
+          projectContext,
+          conversationSummary,
+          conversationTasks,
+          ...history.map((item) => `${item.role === "user" ? "用户" : "助手"}：${item.content}`),
+          `## 当前请求\n${userContent}`,
+          personalContext,
+          memoryContext,
+          libraryContext,
+          skillContext,
+          "当前会话绑定了一个本地项目并拥有完全权限。需要了解代码、文件或结构时，必须调用工具读取真实项目；除非用户明确要求修改，否则不要写入或删除项目文件。最终用自然语言回答当前请求。",
+          "历史消息中如果出现其他仓库路径或与当前工作区不一致的结论，一律以当前项目路径和工具读取到的真实文件为准。"
+        ].filter(Boolean).join("\n\n")
+      : "";
+    if (chatProject && !directDraft && projectChatSupportsTools(settings)) {
+      send("usage", contextUsagePayload({
+        settings,
+        source: "pending",
+        scope: "chat",
+        inputTokens: 0,
+        outputTokens: 0,
+        breakdown: contextBreakdown
+      }));
+      try {
+        const result = await runProjectChat({
+          project: chatProject,
+          title: conversation.title,
+          prompt: projectAgentPrompt,
+          settings,
+          signal: controller.signal,
+          onProgress: (message) => send("reasoning", { text: `\n${message}` })
+        });
+        if (controller.signal.aborted) return reply;
+        const answer = result.content || "项目会话执行完成，但没有返回可显示的回答。";
+        const usage = contextUsagePayload({
+          settings,
+          source: result.usage ? "measured" : "estimated",
+          inputTokens: result.usage.inputTokens || estimatedInput,
+          outputTokens: result.usage.outputTokens || Math.max(0, estimateContextTokens(answer)),
+          breakdown: contextBreakdown
+        });
+        options.conversationContext?.rememberUsage(conversation.id, usage);
+        send("usage", usage);
+        send("delta", { text: answer });
+        const assistant = store.createChatMessage({
+          id: randomUUID(),
+          conversationId: conversation.id,
+          role: "assistant",
+          content: answer,
+          taskId: null,
+          attachments: [],
+          createdAt: new Date().toISOString()
+        });
+        send("done", assistant);
+        finish(reply, send);
+        return reply;
+      } catch (error) {
+        if (controller.signal.aborted) {
+          finish(reply, send);
+          return reply;
+        }
+        send("reasoning", {
+          text: `\n项目工具执行没有完成，回退到普通回答：${errorMessage(error)}`
+        });
+      }
+    }
     send("usage", contextUsagePayload({
       settings,
       source: "estimated",

@@ -142,11 +142,11 @@ describe("chat-first API", () => {
         payload: { conversationId: projectConversation.id, routeMode: "chat", message: "What should I remember?" }
       });
       expect(projectChat.statusCode).toBe(200);
-      expect(JSON.stringify(requests[0]?.messages)).toContain("Ember private project memory marker");
-      const projectSystem = requests[0]?.messages.find((message: { role: string }) => message.role === "system")?.content as string;
-      expect(projectSystem).toContain("## 当前项目");
-      expect(projectSystem).toContain("Ember");
-      expect(projectSystem).toContain(root);
+      const projectRequest = JSON.stringify(requests[0]?.messages);
+      expect(projectRequest).toContain("Ember private project memory marker");
+      expect(projectRequest).toContain("Ember");
+      expect(projectRequest).toContain(root.replace(/\\/g, "\\\\"));
+      expect(projectRequest).toContain("finish_task");
 
       const unrelatedChat = await app.inject({
         method: "POST",
