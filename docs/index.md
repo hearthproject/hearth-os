@@ -63,10 +63,10 @@ hero:
       </figcaption>
     </figure>
     <figure class="screenshot-card">
-      <img src="/screenshots/context.png" alt="Context 交接">
+      <img src="/screenshots/context.png" alt="资料库交接">
       <figcaption>
-        <strong>Context 交接</strong>
-        <span>从活跃记忆生成接手摘要、原记录与导出包，交给下一个执行者或账号。</span>
+        <strong>资料库交接（原 Context）</strong>
+        <span>从活跃记忆生成接手摘要与导出包，存进「资料 / 交接」，交给下一个执行者或账号。</span>
       </figcaption>
     </figure>
     <figure class="screenshot-card screenshot-card--wide">

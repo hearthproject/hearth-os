@@ -16,12 +16,14 @@ import {
   Search,
   Sparkles,
   Trash2,
+  Users,
   X
 } from "lucide-react";
 import { useState, type FormEvent, type ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import type { LibraryNode, LibrarySearchHit, LibraryTreeNode, SkillView } from "@hearth/core";
 import { api } from "../lib/api.ts";
+import { LibraryHandoffPanel } from "../components/LibraryHandoffPanel.tsx";
 
 const KIND_LABELS: Record<LibraryNode["kind"], string> = {
   root: "分类",
@@ -38,6 +40,8 @@ const KIND_LABELS: Record<LibraryNode["kind"], string> = {
 export function LibraryPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const handoff = params.get("handoff") === "1";
   const [query, setQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -166,23 +170,36 @@ export function LibraryPage() {
     <div className="page workbench-page library-page">
       <div className="page-head library-page-head">
         <div>
-          <h1>资料库</h1>
-          <p className="page-meta">你的文件、记忆、资料和技能，都在一个地方。</p>
+          <h1>{handoff ? "交接" : "资料库"}</h1>
+          <p className="page-meta">
+            {handoff ? "从记忆里生成接手摘要，存成交接包交给下一个人或账号。" : "你的文件、记忆、资料和技能，都在一个地方。"}
+          </p>
         </div>
         <div className="library-head-actions">
-          <span className="library-total">{total > 0 ? `${total} 份资料` : "还没有资料"}</span>
-          <button className="ghost-button" onClick={addFolder} disabled={addRootMutation.isPending}>
-            {addRootMutation.isPending ? <Loader2 size={15} className="spin" /> : <Plus size={15} />} 添加文件夹
-          </button>
-          <button className="ghost-button" onClick={installSkill} disabled={installSkillMutation.isPending}>
-            {installSkillMutation.isPending ? <Loader2 size={15} className="spin" /> : <Sparkles size={15} />} 安装技能
-          </button>
-          <button className="ghost-button" onClick={() => refreshMutation.mutate()} disabled={refreshMutation.isPending}>
-            {refreshMutation.isPending ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />} 刷新资料
+          {!handoff && <>
+            <span className="library-total">{total > 0 ? `${total} 份资料` : "还没有资料"}</span>
+            <button className="ghost-button" onClick={addFolder} disabled={addRootMutation.isPending}>
+              {addRootMutation.isPending ? <Loader2 size={15} className="spin" /> : <Plus size={15} />} 添加文件夹
+            </button>
+            <button className="ghost-button" onClick={installSkill} disabled={installSkillMutation.isPending}>
+              {installSkillMutation.isPending ? <Loader2 size={15} className="spin" /> : <Sparkles size={15} />} 安装技能
+            </button>
+            <button className="ghost-button" onClick={() => refreshMutation.mutate()} disabled={refreshMutation.isPending}>
+              {refreshMutation.isPending ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />} 刷新资料
+            </button>
+          </>}
+          <button className="ghost-button" onClick={() => setParams(handoff ? {} : { handoff: "1" })}>
+            {handoff ? <Library size={15} /> : <Users size={15} />} {handoff ? "返回资料库" : "交接"}
           </button>
         </div>
       </div>
 
+      {handoff ? <LibraryHandoffPanel
+        onSaved={(nodeId) => {
+          setParams({});
+          setSelectedId(nodeId);
+        }}
+      /> : <>
       <form className="library-search" onSubmit={submitSearch}>
         <label>
           <Search size={17} />
@@ -288,6 +305,7 @@ export function LibraryPage() {
           )}
         </section>
       </div>
+      </>}
     </div>
   );
 }

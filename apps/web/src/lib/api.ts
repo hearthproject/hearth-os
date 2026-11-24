@@ -13,6 +13,7 @@ import type {
   BackupSnapshot,
   BrowserSettingsView,
   ExecutorId,
+  ExecutorBootstrapResult,
   ExecutorModelBindingPatch,
   ExecutorModelBindingView,
   ExecutorListResponse,
@@ -283,6 +284,12 @@ export const api = {
     method: "PUT",
     body: JSON.stringify(input)
   }),
+  autoBindExecutor: (id: ExecutorId) => request<{ binding: ExecutorModelBindingView }>(`/api/executors/${encodeURIComponent(id)}/model-binding/auto`, {
+    method: "POST"
+  }),
+  bootstrapExecutor: (id: ExecutorId) => request<ExecutorBootstrapResult>(`/api/executors/${encodeURIComponent(id)}/bootstrap`, {
+    method: "POST"
+  }),
   settingsStorage: () => request<SettingsStorageResponse>("/api/settings/storage"),
   saveModelSettings: (input: {
     providerId?: string;
@@ -398,6 +405,20 @@ export const api = {
     body: JSON.stringify({ force })
   }),
   libraryReindex: () => request<{ result: { indexed: number; unchanged: number; skipped: number; failed: number; chunks: number; embedded: number; semanticError: string | null } }>("/api/library/reindex", { method: "POST" }),
+  librarySaveHandoff: (input: {
+    title: string;
+    markdown: string;
+    memories: Array<{ id: string; content: string; updatedAt: string }>;
+    zipBase64?: string;
+    archiveName?: string;
+  }) => request<{
+    node: LibraryNode;
+    document: { content: string; extractor: string; language: string | null; charCount: number } | null;
+    files: { markdown: string; archive: string | null };
+  }>("/api/library/handoffs", {
+    method: "POST",
+    body: JSON.stringify(input)
+  }),
   libraryDeleteNode: (id: string, reason?: string) => request<{ entry: LibraryTrashEntry }>(`/api/library/nodes/${encodeURIComponent(id)}`, {
     method: "DELETE",
     body: JSON.stringify(reason ? { reason } : {})

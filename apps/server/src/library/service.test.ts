@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -99,6 +99,34 @@ describe("LibraryService", () => {
     expect(refreshed.generated).toBe(true);
     expect(refreshed.content).toContain("共有 2 项");
     expect(refreshed.content).toContain("待确认");
+    library.stop();
+    store.close();
+  });
+
+  it("stores a handoff package under 资料/交接 and keeps it searchable", async () => {
+    const handoffDir = mkdtempSync(join(tmpdir(), "hearth-library-handoff-"));
+    tempDirs.push(handoffDir);
+    const store = new HearthStore(":memory:");
+    seedMemory(store, "mem-handoff", "交接要带上下一步。");
+    const library = new LibraryService(store, { handoffRoot: handoffDir });
+    await library.reindex();
+
+    const result = await library.saveHandoff({
+      title: "项目交接",
+      markdown: "# Context 交接\n\n任务目标：把交接入口合并进资料库\n最近决定或结果：资料库页内完成交接\n下一步：把旧路由重定向到资料库",
+      memories: [{ id: "mem-handoff", content: "交接要带上下一步。", updatedAt: "2026-11-20T00:00:00.000Z" }],
+      zipBase64: Buffer.from("PK\u0003\u0004hearth").toString("base64"),
+      archiveName: "hearth-context-2026-11-24.zip"
+    });
+
+    expect(result.node.kind).toBe("artifact");
+    expect(result.node.path).toContain("资料/交接");
+    expect(result.document?.content).toContain("任务目标");
+    expect(existsSync(result.files.markdown)).toBe(true);
+    expect(result.files.archive).not.toBeNull();
+
+    const hits = await library.search("资料库页内完成交接");
+    expect(hits.hits.some((hit) => hit.node.id === result.node.id)).toBe(true);
     library.stop();
     store.close();
   });

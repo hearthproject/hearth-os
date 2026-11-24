@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HearthStore } from "@hearth/eventlog";
 import { buildServer } from "../app.ts";
@@ -60,5 +63,30 @@ describe("library routes", () => {
     expect(after.json().hits).toHaveLength(1);
 
     await app.close();
+  });
+
+  it("stores a handoff package over HTTP", async () => {
+    const handoffDir = mkdtempSync(join(tmpdir(), "hearth-handoff-route-"));
+    const app = await buildServer({ store, serveWeb: false, libraryEmbeddingProvider: null, handoffRoot: handoffDir });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/library/handoffs",
+      payload: {
+        title: "资料库交接",
+        markdown: "# 交接说明\n\n任务目标：验证接口\n最近决定或结果：交接包入库",
+        memories: [{ id: "mem-api", content: "资料库搜索可以直接使用。", updatedAt: "2026-11-20T00:00:00.000Z" }]
+      }
+    });
+    expect(response.statusCode).toBe(201);
+    const saved = response.json();
+    expect(saved.node.kind).toBe("artifact");
+    expect(saved.node.path).toContain("资料/交接");
+
+    const search = await app.inject({ method: "GET", url: "/api/library/search?q=" + encodeURIComponent("交接包入库") });
+    expect(search.json().hits.some((hit: { node: { id: string } }) => hit.node.id === saved.node.id)).toBe(true);
+
+    await app.close();
+    rmSync(handoffDir, { recursive: true, force: true });
   });
 });

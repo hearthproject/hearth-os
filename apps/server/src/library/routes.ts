@@ -29,6 +29,18 @@ const resolveQuerySchema = z.object({
   node: z.string().trim().min(1).max(4_096)
 }).strict();
 
+const handoffSchema = z.object({
+  title: z.string().trim().min(1).max(80),
+  markdown: z.string().trim().min(1).max(2_000_000),
+  memories: z.array(z.object({
+    id: z.string().min(1).max(120),
+    content: z.string().max(200_000),
+    updatedAt: z.string().min(1).max(40)
+  })).max(500),
+  zipBase64: z.string().max(24_000_000).optional(),
+  archiveName: z.string().trim().max(120).optional()
+}).strict();
+
 export function registerLibraryRoutes(app: FastifyInstance, library: LibraryService): void {
   app.get("/api/library/status", async () => {
     library.tree.ensureRoots();
@@ -52,6 +64,17 @@ export function registerLibraryRoutes(app: FastifyInstance, library: LibraryServ
   });
 
   app.post("/api/library/reindex", async () => ({ result: await library.reindex() }));
+
+  app.post("/api/library/handoffs", { bodyLimit: 32 * 1024 * 1024 }, async (request, reply) => {
+    const parsed = handoffSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return invalid(reply);
+    try {
+      const result = await library.saveHandoff(parsed.data);
+      return reply.code(201).send(result);
+    } catch (error) {
+      return libraryFailure(reply, error);
+    }
+  });
 
   app.get("/api/library/resolve", async (request, reply) => {
     const parsed = resolveQuerySchema.safeParse(request.query ?? {});

@@ -63,10 +63,10 @@ hero:
       </figcaption>
     </figure>
     <figure class="screenshot-card">
-      <img src="/screenshots/context.png" alt="Context handoff">
+      <img src="/screenshots/context.png" alt="Library handoff">
       <figcaption>
-        <strong>Context handoff</strong>
-        <span>Build a handoff brief, original records, and an export bundle from active memories.</span>
+        <strong>Library handoff (formerly Context)</strong>
+        <span>Build a handoff brief and bundle from active memories, stored under the library's handoff folder.</span>
       </figcaption>
     </figure>
     <figure class="screenshot-card screenshot-card--wide">

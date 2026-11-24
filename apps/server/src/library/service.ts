@@ -1,4 +1,6 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import type {
   LibraryNode,
   LibrarySearchHit,
@@ -15,6 +17,7 @@ import { localSummary, type LibrarySummaryGenerator, type LibrarySummarySource }
 import { LibraryTreeService } from "./tree.ts";
 
 const TRASH_DAYS = 30;
+const MAX_HANDOFF_ARCHIVE_BYTES = 16 * 1024 * 1024;
 
 export class LibraryError extends Error {
   readonly code: string;
@@ -33,6 +36,27 @@ export interface LibraryServiceOptions {
   indexer?: LibraryIndexer;
   embeddingProvider?: EmbeddingProvider;
   summaryGenerator?: LibrarySummaryGenerator;
+  handoffRoot?: string | null;
+}
+
+export interface LibraryHandoffMemory {
+  id: string;
+  content: string;
+  updatedAt: string;
+}
+
+export interface LibraryHandoffInput {
+  title: string;
+  markdown: string;
+  memories: LibraryHandoffMemory[];
+  zipBase64?: string | undefined;
+  archiveName?: string | undefined;
+}
+
+export interface LibraryHandoffResult {
+  node: LibraryNode;
+  document: { content: string; extractor: string; language: string | null; charCount: number } | null;
+  files: { markdown: string; archive: string | null };
 }
 
 export interface LibraryReindexResult extends LibraryIndexResult {
@@ -54,6 +78,7 @@ export class LibraryService {
   private readonly store: HearthStore;
   private readonly memory: MemoryService | null;
   private readonly embeddingProvider: EmbeddingProvider | null;
+  private readonly handoffRoot: string | null;
   private summaryGenerator: LibrarySummaryGenerator | null;
   private dirty = true;
   private refresh: Promise<LibraryReindexResult> | null = null;
@@ -64,6 +89,7 @@ export class LibraryService {
     this.store = store;
     this.memory = options.memory ?? null;
     this.embeddingProvider = options.embeddingProvider ?? null;
+    this.handoffRoot = options.handoffRoot ?? null;
     this.summaryGenerator = options.summaryGenerator ?? null;
     this.tree = new LibraryTreeService(store);
     this.indexer = options.indexer ?? new LibraryIndexer(store, this.tree);
@@ -318,6 +344,51 @@ export class LibraryService {
     };
   }
 
+  async saveHandoff(input: LibraryHandoffInput): Promise<LibraryHandoffResult> {
+    if (!this.handoffRoot) throw new LibraryError("HANDOFF_UNAVAILABLE", "交接目录未配置", 501);
+    const markdown = input.markdown.trim();
+    if (!markdown) throw new LibraryError("EMPTY_HANDOFF", "交接内容为空");
+    const title = input.title.trim().slice(0, 80) || "交接";
+    const handoffId = randomUUID();
+    const dir = join(this.handoffRoot, handoffDirName(title, handoffId));
+    mkdirSync(dir, { recursive: true });
+    const markdownPath = join(dir, "交接说明.md");
+    writeFileSync(markdownPath, markdown, "utf8");
+    writeFileSync(
+      join(dir, "memories.json"),
+      JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), memories: input.memories }, null, 2),
+      "utf8"
+    );
+    let archivePath: string | null = null;
+    if (input.zipBase64) {
+      const bytes = Buffer.from(input.zipBase64, "base64");
+      if (bytes.length > MAX_HANDOFF_ARCHIVE_BYTES) {
+        throw new LibraryError("HANDOFF_TOO_LARGE", "交接压缩包超过 16 MB", 413);
+      }
+      archivePath = join(dir, safeFileName(input.archiveName ?? `hearth-context-${handoffId.slice(0, 8)}.zip`, "handoff.zip"));
+      writeFileSync(archivePath, bytes);
+    }
+    const createdAt = new Date().toISOString();
+    const node = this.tree.syncHandoff({
+      handoffId,
+      title,
+      markdownPath,
+      archivePath,
+      memoryCount: input.memories.length,
+      contentHash: createHash("sha256").update(markdown).digest("hex"),
+      sizeBytes: Buffer.byteLength(markdown, "utf8"),
+      createdAt
+    });
+    await this.indexer.indexNode(node);
+    if (node.parentId) this.tree.repository.markSummaryStale(node.parentId);
+    const details = this.getNodeDetails(node.id);
+    return {
+      node: details.node,
+      document: details.document,
+      files: { markdown: markdownPath, archive: archivePath }
+    };
+  }
+
   removeNode(id: string, reason = "用户移入回收站"): LibraryTrashEntry {
     const node = this.tree.getNode(id);
     if (!node) throw new LibraryError("NODE_NOT_FOUND", "没有找到这个资料", 404);
@@ -412,4 +483,19 @@ function makeSnippet(text: string, query: string): string {
   const start = Math.max(0, index >= 0 ? index - 50 : 0);
   const snippet = normalized.slice(start, start + 260);
   return `${start > 0 ? "…" : ""}${snippet}${start + snippet.length < normalized.length ? "…" : ""}`;
+}
+
+function handoffDirName(title: string, id: string): string {
+  const clean = title
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 40);
+  return `${clean || "handoff"}-${id.slice(0, 8)}`;
+}
+
+function safeFileName(value: string, fallback: string): string {
+  const name = basename(value).replace(/[<>:"/\\|?*\u0000-\u001f]/g, "").trim();
+  return name || fallback;
 }

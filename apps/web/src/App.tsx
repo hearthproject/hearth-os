@@ -9,7 +9,6 @@ import type { EventEnvelope, TaskView } from "./lib/types.ts";
 import { ChatPage } from "./pages/ChatPage.tsx";
 
 const ConnectionsPage = lazy(() => pageLoaders.connections().then((module) => ({ default: module.ConnectionsPage })));
-const ContextPage = lazy(() => pageLoaders.context().then((module) => ({ default: module.ContextPage })));
 const LibraryPage = lazy(() => pageLoaders.library().then((module) => ({ default: module.LibraryPage })));
 const OnboardingPage = lazy(() => pageLoaders.onboarding().then((module) => ({ default: module.OnboardingPage })));
 const SettingsPage = lazy(() => pageLoaders.settings().then((module) => ({ default: module.SettingsPage })));
@@ -31,7 +30,7 @@ export default function App() {
             <Route path="knowledge" element={<Navigate to="/library" replace />} />
             <Route path="memory" element={<Navigate to="/library" replace />} />
             <Route path="library" element={<Suspended><LibraryPage /></Suspended>} />
-            <Route path="context" element={<Suspended><ContextPage /></Suspended>} />
+            <Route path="context" element={<Navigate to="/library?handoff=1" replace />} />
             <Route path="dossier" element={<Navigate to="/settings?tab=dossier" replace />} />
             <Route path="schedules" element={<Suspended><SchedulesPage /></Suspended>} />
             <Route path="connections" element={<Suspended><ConnectionsPage /></Suspended>} />

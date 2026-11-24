@@ -24,6 +24,7 @@ export const DB_PATH = join(DATA_DIR, "hearth.sqlite");
 export const WORKSPACE_DIR = join(DATA_DIR, "workspaces");
 export const GIT_CACHE_DIR = join(DATA_DIR, "git-cache");
 export const ARTIFACT_DIR = join(DATA_DIR, "artifacts");
+export const HANDOFF_DIR = join(DATA_DIR, "handoffs");
 export const SOURCE_CONTENT_DIR = join(DATA_DIR, "sources");
 export const DEVICE_FRAME_DIR = join(DATA_DIR, "device-frames");
 export const BACKUP_DIR = join(DATA_DIR, "backups");

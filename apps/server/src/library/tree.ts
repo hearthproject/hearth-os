@@ -244,6 +244,43 @@ export class LibraryTreeService {
     }));
   }
 
+  ensureHandoffFolder(): LibraryNode {
+    const root = this.ensureRoot("resource", "资料", "资料");
+    return this.ensureFolder(root.id, "hearth://folder/handoffs", joinPath(root.path, "交接"), "交接");
+  }
+
+  syncHandoff(input: {
+    handoffId: string;
+    title: string;
+    markdownPath: string;
+    archivePath: string | null;
+    memoryCount: number;
+    contentHash: string;
+    sizeBytes: number;
+    createdAt: string;
+  }): LibraryNode {
+    const folder = this.ensureHandoffFolder();
+    return this.repository.upsertNode(this.node({
+      kind: "artifact",
+      refId: `handoff-${input.handoffId}`,
+      parentId: folder.id,
+      path: joinPath(folder.path, withSuffix(input.title, input.handoffId)),
+      title: clipLine(input.title),
+      contentHash: input.contentHash,
+      sizeBytes: input.sizeBytes,
+      mimeType: "text/markdown",
+      metadata: {
+        handoff: true,
+        handoffId: input.handoffId,
+        absolutePath: input.markdownPath,
+        archivePath: input.archivePath,
+        memoryCount: input.memoryCount,
+        generatedAt: input.createdAt
+      },
+      updatedAt: input.createdAt
+    }));
+  }
+
   syncProject(project: LocalProject): LibraryNode {
     const root = this.ensureRoot("project", "项目", "项目");
     const title = clipLine(project.name);

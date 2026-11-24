@@ -53,8 +53,8 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
       <p align="center"><sub><strong>资料库</strong><br>文件、记忆、资料和技能在一个树里；检索、预览、回收站都在同一页。</sub></p>
     </td>
     <td width="50%" valign="top">
-      <img src="docs/public/screenshots/context.png" alt="Context 交接" width="100%">
-      <p align="center"><sub><strong>Context 交接</strong><br>从记忆里生成接手摘要、原记录与压缩包，交给下一个执行者或账号。</sub></p>
+      <img src="docs/public/screenshots/context.png" alt="资料库交接" width="100%">
+      <p align="center"><sub><strong>资料库交接（原 Context）</strong><br>从记忆里生成接手摘要与压缩包，直接存进资料库「资料 / 交接」。</sub></p>
     </td>
   </tr>
   <tr>
@@ -83,7 +83,7 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
 | **项目、子代理与 MCP** | 项目可以是任意本地文件夹：Git 仓库自动使用独立 `hearth/<task-id>` Worktree，普通文件夹原地执行并给出改动清单；子代理使用新上下文、只读或隔离写、单层串行且最多两个；本地 stdio MCP 支持启动探测、工具发现、Schema 校验、逐次审批、超时和崩溃隔离 |
 | **浏览器自动化** | 独立 Chrome profile、多标签页、页面元素快照与稳定 ID、13 个浏览器工具；提交/上传/下载逐次审批，动作前后截图与页面摘要进入证据目录；完成前必须有通过的页面断言；不读取 cookie 或密码 |
 | **资料库与记忆** | 文件、记忆、资料和技能统一成树；支持检索、预览、回收站恢复；记忆有候选、来源与可信度、召回、纠正、遗忘传播与导出，可关闭自动记录 |
-| **Context 交接** | 从活跃记忆生成接手摘要（目标、最近决定、下一步）与原文打包，可导出 zip 给下一个人或账号；多账号共享视图单独列出全部记忆与交接范围 |
+| **资料库交接** | 资料库页头进入交接视图：从活跃记忆生成接手摘要（目标、最近决定、下一步）与原文打包，存入「资料 / 交接」可检索、可回收，也可导出 zip 给下一个人或账号 |
 | **定时任务** | 有界补跑、失败冷却和直接使用自定义输入；到点自动创建任务并复用统一调度与审批 |
 | **飞书消息入口** | 企业自建应用长连接、open_id 白名单、文本/图片/文件消息；任务受理与状态变化实时推送，审批摘要带 `/approve`、`/reject` 文本命令并绕过消息排队立即处理；出站消息带持久重试队列，连接断开自动退避重连，连接页显示收发与重连指标；可用 6 位配对码把飞书聊天绑定到已有对话；入站消息带幂等记录，不需要公网回调 |
 | **档案与工作方式** | 每个项目编译 `PROJECT.md`（栈、命令、约定、决策、未完成任务、坑）；`WORKSTYLE.md` 记录沟通、提交、验证和工具偏好；只注入 coding 任务 |
@@ -102,7 +102,7 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
 | 持久后台任务 | 完成 | SQLite `background_processes`、PID + 创建时间恢复、`lost` 标记与进程树清理 | 跨宿主重启的终端状态恢复（明确不做） |
 | 浏览器 | 代码闭环 | 13 个工具、独立 profile、证据目录与页面断言 | 日常 Chrome 扩展桥、验证码/风控站点 |
 | 首跑与更新 | 代码闭环 | `npm run first:run`、0.3.4 安装包与便携 zip、SHA256 校验 | 自动更新签名、Authenticode、干净机卸载重装 |
-| 资料库与 Context | 完成 | 树、检索、预览、回收站；接手摘要与导出 | 真实长期写作/编码使用 |
+| 资料库与交接 | 完成 | 树、检索、预览、回收站；接手摘要、交接包入库与导出 | 真实长期写作/编码使用 |
 | 工程门禁 | 完成 | typecheck、CI 分层、commitlint、husky、PR 模板、文档构建 | 分支保护与远端 CI 实际运行记录 |
 
 历史阶段一至六的路线和 Native 30 题评测保留在文档站，但部分描述已被当前范围收缩取代。逐项能力矩阵、验证证据和未完成验收见[当前交付状态](https://hearthproject.github.io/hearth-os/delivery/status.html)与[2026-11 验收报告](https://hearthproject.github.io/hearth-os/delivery/acceptance-2026-11.html)。
@@ -292,7 +292,7 @@ hearth-os/
 │   │   └── package.json                              # @hearth/server：依赖全部 workspace 包
 │   ├── web/                                          # React + Vite 聊天优先控制面（PWA）
 │   │   ├── src/App.tsx                               # 路由、首跑向导与事件驱动缓存失效
-│   │   ├── src/pages/                                # Chat / Library / Context / Schedules / Settings 等
+│   │   ├── src/pages/                                # Chat / Library / Schedules / Settings 等
 │   │   ├── src/components/                            # AppShell / InlineRun / ChatWorkspacePanel 等
 │   │   ├── src/lib/                                  # api.ts / types.ts / navigation.ts / preview.ts …
 │   │   ├── src/styles/                               # 30 个样式文件，按页面与组件拆分
@@ -341,7 +341,7 @@ hearth-os/
 - [存储与上下文架构](https://hearthproject.github.io/hearth-os/design/storage.html) — SQLite 数据域、单一事件日志、上下文生命周期与备份边界。
 - [数据、备份与运维](https://hearthproject.github.io/hearth-os/design/operations.html) — 备份、恢复、维护、存储回收、诊断和全局停止。
 - [浏览器自动化](https://hearthproject.github.io/hearth-os/design/browser.html) — 独立 profile、页面快照、工具、审批、证据和完成断言。
-- [日常使用](https://hearthproject.github.io/hearth-os/reference/daily-use.html) — 资料库、Context 交接、定时任务与自用报告。
+- [日常使用](https://hearthproject.github.io/hearth-os/reference/daily-use.html) — 资料库（含交接）、定时任务与自用报告。
 - [首次运行验证](https://hearthproject.github.io/hearth-os/reference/first-run.html) — 用自己的模型跑一次真实的“读文件 → 跑测试”最小任务。
 - [构建、签名与发版](https://hearthproject.github.io/hearth-os/reference/releasing.html) — Tauri 构建、更新签名和发布产物。
 - [交付与进度](https://hearthproject.github.io/hearth-os/delivery/) — 历史路线与当前范围。
@@ -363,7 +363,7 @@ hearth-os/
 - 飞书长连接提供手机消息、实时任务进度、文本审批、出站重试、自动重连与配对码，但不是手机 PWA、系统级推送或完整远程接管；页面关闭后不会推送。
 - PWA 壳、移动底部导航和离线应用壳已存在，但手机配对、iOS/Android 真机安装、系统推送和远程接管未验收。
 - 所有数据、设备与令牌边界都在本机；不提供多设备事件同步或远程节点连接。
-- 主导航暴露聊天、资料库、Context 三个主入口；定时任务和连接收在“更多”；设置固定在底部。
+- 主导航暴露聊天、资料库两个主入口；交接在资料库页头，定时任务和连接收在“更多”；设置固定在底部。
 - 真实模型首跑仍取决于本机模型配置和供应商权限；没有可用 key 时只能用 `first:run --fake` 验证脚本自身。
 - 评测 case、场景和实验已迁到独立仓库；主仓库不再注册评测桥接，测试不代表真实评测实验已经运行。native 30 题的最终提交 `eb32ad5` 尚未完成连续复测。
 - 原生运行时仍不支持远程 MCP、OAuth、图片/扫描件视觉理解、PPTX、LSP、格式化器或自动 cherry-pick。

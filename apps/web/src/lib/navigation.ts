@@ -1,4 +1,4 @@
-import { CalendarClock, Layers, Library, Link2, MessageCircle, Settings2, type LucideIcon } from "lucide-react";
+import { CalendarClock, Library, Link2, MessageCircle, Settings2, type LucideIcon } from "lucide-react";
 
 export type NavPlacement = "main" | "more" | "footer";
 
@@ -14,8 +14,7 @@ export interface NavItem {
 
 export const NAV_ITEMS: NavItem[] = [
   { id: "chat", label: "聊天", path: "/", icon: MessageCircle, placement: "main", end: true, keywords: ["聊天", "对话", "chat", "conversation"] },
-  { id: "library", label: "资料库", path: "/library", icon: Library, placement: "main", keywords: ["资料", "文件", "记忆", "技能", "搜索", "library", "memory", "knowledge"] },
-  { id: "context", label: "Context", path: "/context", icon: Layers, placement: "main", keywords: ["上下文", "context"] },
+  { id: "library", label: "资料库", path: "/library", icon: Library, placement: "main", keywords: ["资料", "文件", "记忆", "技能", "搜索", "library", "memory", "knowledge", "交接", "handoff", "context", "上下文"] },
   { id: "schedules", label: "定时任务", path: "/schedules", icon: CalendarClock, placement: "more", keywords: ["定时", "周期", "schedule"] },
   { id: "connections", label: "连接", path: "/connections", icon: Link2, placement: "more", keywords: ["连接", "飞书", "集成", "connection", "feishu"] },
   { id: "settings", label: "设置", path: "/settings", icon: Settings2, placement: "footer", keywords: ["设置", "配置", "settings"] }
