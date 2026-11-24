@@ -1,13 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { planExecution } from "./chat.ts";
 import { resolveExecutorFromEnabled, resolveExecutorLocked } from "./executors.ts";
-import { needsGithubRepository, wantsCodeExecution, wantsGithubAccess, wantsPublicWebResearch, wantsScreenshot } from "./task-intent.ts";
+import { needsGithubRepository, wantsCodeExecution, wantsDirectFileRead, wantsGithubAccess, wantsPublicWebResearch, wantsScreenshot } from "./task-intent.ts";
 
 describe("task intent", () => {
   it("does not require a report for a direct file read", () => {
     expect(planExecution("读取 E:/data/missing.txt")).toMatchObject({ executorId: "native", expectedOutputs: [] });
     expect(planExecution("读取文件并保存报告").expectedOutputs).toEqual([]);
+    expect(wantsDirectFileRead("读取 E:/data/missing.txt")).toBe(true);
+    expect(wantsDirectFileRead("看看这个文件")).toBe(true);
   });
+
+  it("does not narrow a directory listing to the single-file reader", () => {
+    expect(wantsDirectFileRead("看看我桌面有哪些文件")).toBe(false);
+    expect(wantsDirectFileRead("列出桌面文件清单")).toBe(false);
+    expect(wantsDirectFileRead("看看这个文件夹里有什么")).toBe(false);
+    expect(planExecution("看看我桌面有哪些文件")).toMatchObject({ executorId: "native", expectedOutputs: [] });
+  });
+
   it("recognizes desktop screenshot requests", () => {
     expect(wantsScreenshot("截一张我电脑桌面的图发给我")).toBe(true);
     expect(planExecution("截一张我电脑桌面的图发给我")).toMatchObject({

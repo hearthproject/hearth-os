@@ -26,10 +26,14 @@ export function wantsCodeExecution(text: string): boolean {
   return CODE_EXECUTION_HINTS.test(text);
 }
 
-// Plain file inspection needs an answer, not a generated report or repair loop.
+// Plain single-file inspection needs an answer, not a generated report or repair loop.
+// Listing a folder is the opposite case: it needs list_files/shell and must not be
+// narrowed to the single-file reader.
 export function wantsDirectFileRead(text: string): boolean {
+  const listIntent = /哪些|有什么|有啥|列表|列出|清单|目录|文件夹|所有文件|每个文件|逐个|遍历|list\s+(?:the\s+)?files|directory|folder|desktop\s+files/i.test(text);
   return /读取|读一下|读一读|查看|看看|\bread\b|\bshow\b/i.test(text)
     && /文件|file|[\\/]|\.[a-z0-9]{1,8}\b/i.test(text)
+    && !listIntent
     && !/生成|创建|新建|写入|保存|另存|输出到|报告|修改|修复|删除|发送|提交|运行|执行|截图|搜索|查找|批量|所有|多个|分别|然后|如果.*(?:则|就)|\b(?:write|save|create|generate|report|fix|delete|send|submit|run|execute|search|find|all|multiple|then|and)\b/i.test(text);
 }
 
