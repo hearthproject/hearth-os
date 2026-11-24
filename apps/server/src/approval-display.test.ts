@@ -66,6 +66,6 @@ describe("approval display projection", () => {
   });
 
   it("does not add a tool display projection to non-tool approvals", () => {
-    expect(toolDisplay(approval({ kind: "email.smtp-send" }))).toBeNull();
+    expect(toolDisplay(approval({ kind: "github.comment" }))).toBeNull();
   });
 });

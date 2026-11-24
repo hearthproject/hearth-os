@@ -34,7 +34,6 @@ const EXTERNAL_WRITE_TOOLS = new Set([
   "browser_upload",
   "browser_download",
   "browser_recipe",
-  "send_email",
   "send_message",
   "publish",
   "post",
@@ -84,8 +83,6 @@ export function classifyTool(toolName: string, action: ResolvedAction | null = n
 }
 
 export function classifyApprovalKind(kind: string, action: ResolvedAction | null = null): ActionPolicyClassification {
-  if (kind === "outbox.local-write") return classification("local_write", "只写入本机发件箱。", false, false);
-  if (kind === "email.smtp-send") return classification("external_write", "会真实发送邮件，发送后无法撤回。", true, true);
   if (kind === "github.publish-pr" || kind === "github.comment") {
     return classification("external_write", "会写入外部服务。", true, true);
   }

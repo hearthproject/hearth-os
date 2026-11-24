@@ -189,9 +189,16 @@ export function heuristicRoute(message: string, reason = "包含执行类指令�
 }
 
 export function conversationTitle(message: string): string {
-  const clean = message.replace(/\s+/g, " ").trim();
+  const clean = message
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^(?:请帮我|麻烦你?|请|帮我|替我|给我|我想|我需要|需要你|能不能|可以帮我|你可以|你能)\s*/u, "")
+    .replace(/^[，,。.、:：\s]+/, "")
+    .replace(/[。.!！?？\s]+$/u, "");
   if (!clean) return "新对话";
-  return clean.length > 22 ? `${clean.slice(0, 22)}…` : clean;
+  return clean.length > 24 ? `${clean.slice(0, 24)}…` : clean;
 }
 
 export function chatSystemPrompt(): string {

@@ -143,76 +143,6 @@ describe("Hearth server", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("keeps outbox drafts editable until they are submitted", async () => {
-    const app = await buildServer({ store, serveWeb: false });
-    const created = await app.inject({
-      method: "POST",
-      url: "/api/outbox",
-      payload: {
-        account: "local-test",
-        to: ["reviewer@example.test"],
-        subject: "Weekly update",
-        body: "This stays local."
-      }
-    });
-    expect(created.statusCode).toBe(201);
-    const draft = created.json();
-    expect(draft.status).toBe("draft");
-    expect(draft.taskId).toBeNull();
-
-    const submitted = await app.inject({ method: "POST", url: `/api/outbox/${draft.id}/submit` });
-    expect(submitted.statusCode).toBe(200);
-    const approval = submitted.json().approval;
-    expect(approval.kind).toBe("outbox.local-write");
-    expect(approval.status).toBe("consumed");
-    expect(approval.target).toMatchObject({ draftId: draft.id, account: "local-test" });
-    expect(approval.preview.impact).toContain("不会发送");
-
-    const drafts = await app.inject({ method: "GET", url: "/api/outbox" });
-    expect(drafts.json().drafts[0]).toMatchObject({ id: draft.id, status: "stored" });
-    await app.close();
-  });
-
-  it("writes a local outbox draft without claiming delivery", async () => {
-    const outboxRoot = mkdtempSync(join(tmpdir(), "hearth-app-outbox-"));
-    const app = await buildServer({ store, serveWeb: false, outboxRoot });
-    try {
-      const created = await app.inject({
-        method: "POST",
-        url: "/api/outbox",
-        payload: {
-          account: "local-test",
-          to: ["reviewer@example.test"],
-          subject: "Local only",
-          body: "This message must not be sent."
-        }
-      });
-      const draft = created.json();
-      const submitted = await app.inject({ method: "POST", url: `/api/outbox/${draft.id}/submit` });
-      expect(submitted.statusCode).toBe(200);
-      expect(submitted.json().draft).toMatchObject({ id: draft.id, status: "stored" });
-
-      const drafts = await app.inject({ method: "GET", url: "/api/outbox" });
-      const stored = drafts.json().drafts[0];
-      expect(stored.effect).toMatchObject({
-        status: "succeeded",
-        receipt: { transport: "local-outbox", delivery: "not_sent" }
-      });
-
-      const effectId = stored.effectId as string;
-      expect(existsSync(join(outboxRoot, effectId, "message.eml"))).toBe(true);
-      expect(stored).toMatchObject({
-        id: draft.id,
-        status: "stored",
-        effectId,
-        effect: { status: "succeeded", receipt: { transport: "local-outbox", delivery: "not_sent" } }
-      });
-    } finally {
-      await app.close();
-      rmSync(outboxRoot, { recursive: true, force: true });
-    }
-  });
-
   it("pairs a desktop helper, separates capabilities, and serves short-lived observations", async () => {
     const frameRoot = mkdtempSync(join(tmpdir(), "hearth-app-frames-"));
     const deviceToken = "p".repeat(43);
@@ -758,15 +688,15 @@ describe("Hearth server", () => {
       id: "effect-reconcile-1",
       taskId: "task-reconcile-1",
       approvalId: "approval-reconcile-1",
-      kind: "email.smtp-send",
+      kind: "github.comment",
       idempotencyKey: "approval:approval-reconcile-1",
       status: "uncertain",
-      target: { to: ["reviewer@example.test"] },
+      target: { repo: "o/r", pull: 15 },
       receipt: null,
-      error: "发送响应中断",
+      error: "评论响应中断",
       createdAt,
       updatedAt: createdAt,
-      provider: "email"
+      provider: "github"
     };
     store.appendEvent({ type: "effect.created", taskId: effect.taskId, payload: effect });
     const app = await buildServer({ store, serveWeb: false });

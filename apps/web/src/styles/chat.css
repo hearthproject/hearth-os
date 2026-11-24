@@ -78,10 +78,39 @@
 
 .conversation-item {
   border-radius: var(--radius);
+  transition: background 160ms ease, box-shadow 160ms ease;
+}
+
+.conversation-item:hover {
+  background: var(--surface-sunk);
+}
+
+.conversation-item.active {
+  background: var(--surface-sunk);
+  box-shadow: inset 2px 0 0 var(--ember);
+}
+
+.conversation-item.active .conversation-title {
+  color: var(--ink);
+  font-weight: 500;
 }
 
 .conversation-select {
-  padding: 7px 8px;
+  min-height: var(--row-h);
+  padding: 0 8px;
+}
+
+.rail-item-icon {
+  display: flex;
+  flex: 0 0 18px;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  color: var(--ink-tertiary);
+}
+
+.conversation-item.active .rail-item-icon {
+  color: var(--ink-secondary);
 }
 
 .conversation-title {
@@ -1089,54 +1118,6 @@
   padding-top: 2px;
 }
 
-.chat-mail-draft {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 10px;
-  padding: 12px 0;
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-}
-
-.chat-mail-fields {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px 12px;
-}
-
-.chat-mail-fields label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  color: var(--ink-secondary);
-  font-size: var(--fs-11);
-}
-
-.chat-mail-fields label:nth-child(2),
-.chat-mail-fields label:nth-child(3) {
-  grid-column: span 1;
-}
-
-.chat-mail-fields textarea {
-  grid-column: 1 / -1;
-  min-height: 140px;
-}
-
-.chat-mail-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  color: var(--ink-tertiary);
-  font-size: var(--fs-11);
-}
-
-.chat-mail-footer span {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
 @media (max-width: 720px) {
   .chat-layout {
     grid-template-columns: minmax(0, 1fr);
@@ -1246,10 +1227,6 @@
   margin: 0 0 2px 27px;
   color: var(--danger, #c4564a);
   font-size: var(--fs-11);
-}
-
-.rail-project .conversation-item {
-  margin-left: 12px;
 }
 
 .rail-footer-button {

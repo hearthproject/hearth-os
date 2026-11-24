@@ -10,7 +10,6 @@ import { ChatPage } from "./pages/ChatPage.tsx";
 
 const ConnectionsPage = lazy(() => pageLoaders.connections().then((module) => ({ default: module.ConnectionsPage })));
 const ContextPage = lazy(() => pageLoaders.context().then((module) => ({ default: module.ContextPage })));
-const MailPage = lazy(() => pageLoaders.mail().then((module) => ({ default: module.MailPage })));
 const LibraryPage = lazy(() => pageLoaders.library().then((module) => ({ default: module.LibraryPage })));
 const OnboardingPage = lazy(() => pageLoaders.onboarding().then((module) => ({ default: module.OnboardingPage })));
 const SettingsPage = lazy(() => pageLoaders.settings().then((module) => ({ default: module.SettingsPage })));
@@ -34,7 +33,6 @@ export default function App() {
             <Route path="library" element={<Suspended><LibraryPage /></Suspended>} />
             <Route path="context" element={<Suspended><ContextPage /></Suspended>} />
             <Route path="dossier" element={<Navigate to="/settings?tab=dossier" replace />} />
-            <Route path="mail" element={<Suspended><MailPage /></Suspended>} />
             <Route path="schedules" element={<Suspended><SchedulesPage /></Suspended>} />
             <Route path="connections" element={<Suspended><ConnectionsPage /></Suspended>} />
             <Route path="settings" element={<Suspended><SettingsPage /></Suspended>} />
@@ -150,7 +148,6 @@ function EventBridge() {
       if (event === "approval.created" || event === "approval.updated") {
         invalidateTask(eventTaskId);
         void queryClient.invalidateQueries({ queryKey: ["approvals"] });
-        void queryClient.invalidateQueries({ queryKey: ["outbox"] });
         return;
       }
       if (event === "artifact.published" || event.startsWith("effect.")) {
@@ -184,7 +181,6 @@ function EventBridge() {
       }
       if (event.startsWith("source.")) {
         void queryClient.invalidateQueries({ queryKey: ["sources"] });
-        void queryClient.invalidateQueries({ queryKey: ["outbox"] });
         return;
       }
       if (event.startsWith("memory.") || event === "context.item.appended" || event === "context.summary.updated" || event === "context.settings.updated" || event === "context.task.deleted") {

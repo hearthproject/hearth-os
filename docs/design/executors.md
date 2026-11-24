@@ -38,11 +38,13 @@ Hearth 选择多个专长执行器并列，而不是一个无限扩展能力的�
 
 | 执行器 | 接入方式 | 能力上限与边界 |
 |---|---|---|
-| `deepseek-harness` | 官方 `@deepseek-ai/dsh-sdk-client` SDK/JSON-RPC | 完整 DeepSeek Harness 运行时：原生工具、代码、仓库、测试、会话恢复和完整事件流；需要有效模型绑定 |
+| `deepseek-harness` | 官方 `@deepseek-ai/dsh-sdk-client` SDK/JSON-RPC | 完整 DeepSeek Harness 运行时：原生工具、代码、仓库、测试、会话恢复和完整事件流；需要有效模型绑定，且必须在本机真实探测通过后才可执行 |
 | `codex` | 本机 Codex Profile 或统一模型绑定生成的 `config.toml` | 多文件代码、仓库、测试、构建和 GitHub 工作区；模型协议固定为 OpenAI Responses |
 | `native` | Hearth 自有通用执行内核（模型协议、工具、压缩、委派、Worktree、本地 MCP） | 通用任务、多文件编辑、研究办公、隔离 Worktree 和本地 stdio MCP；支持四种模型协议 |
 
 复杂代码和仓库任务优先 `codex` 或 `deepseek-harness`；通用任务、网页、文档和本地项目 Worktree 优先 `native`。用户显式选择本地项目后，任务默认由 native 在隔离 Worktree 中执行；GitHub 工程任务仍默认 Codex。
+
+模型绑定只证明“有模型可用”，不证明运行时已经安装并能启动。DeepSeek Harness 默认处于未验证状态，必须在设置页运行一次真实探测；探测失败会保留失败原因并从聊天执行器下拉中移除，不会因为绑定了模型就显示“可执行”。
 
 原生执行器由 Hearth 自己实现通用执行内核，包含预算、检查点、等待用户补充、上下文压缩、有界委派、本地 MCP 和恢复，不是一段转发提示词。DeepSeek Harness 使用官方 SDK，不是解析命令行文本。Codex 使用专用适配器并遵守 Responses 协议。执行器不会因为一次失败而静默替换身份，实际执行器会写入运行记录和产物清单。
 

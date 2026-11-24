@@ -803,7 +803,7 @@ describe("chat-first API", () => {
     await app.close();
   });
 
-  it("uses the explicitly selected executor when the router misclassifies GitHub PR work as chat", async () => {
+  it("does not create a task when the explicitly selected DeepSeek Harness is still unverified", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
       choices: [{ message: { content: '{"action":"chat","title":"","reason":"误判为问答"}' } }]
     }), { status: 200, headers: { "content-type": "application/json" } })));
@@ -850,7 +850,10 @@ describe("chat-first API", () => {
       const routing = events.find((event) => event.event === "routing")?.data;
       expect(routing.action).toBe("task");
       expect(routing.preferredExecutorId).toBe("deepseek-harness");
-      expect(events.find((event) => event.event === "task")?.data.task.executorId).toBe("deepseek-harness");
+      expect(events.find((event) => event.event === "task")).toBeUndefined();
+      const done = events.find((event) => event.event === "done")?.data as { content?: string } | undefined;
+      expect(done?.content).toContain("任务没有派出");
+      expect(done?.content).toMatch(/尚未验证|未安装/);
       await app.close();
     } finally {
       vi.unstubAllGlobals();

@@ -299,13 +299,13 @@ async function main() {
       await page.locator(".nav-more-toggle").click();
     }
     await page.locator("#nav-more").waitFor({ timeout: 15_000 });
-    for (const label of ["邮件", "定时任务", "连接"]) {
+    for (const label of ["定时任务", "连接"]) {
       assert.equal(await page.locator("#nav-more").getByRole("link", { name: label, exact: true }).count(), 1, `${label} should be a secondary link`);
     }
 
     await page.keyboard.press("Control+k");
     await page.locator(".command-dialog").waitFor({ timeout: 15_000 });
-    for (const label of ["聊天", "资料库", "Context", "邮件", "定时任务", "连接", "设置"]) {
+    for (const label of ["聊天", "资料库", "Context", "定时任务", "连接", "设置"]) {
       assert.equal(await page.locator(".command-group").getByRole("button", { name: label, exact: true }).count(), 1, `${label} should be searchable`);
     }
     await page.keyboard.press("Escape");

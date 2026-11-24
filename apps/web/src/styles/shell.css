@@ -177,7 +177,6 @@
 .nav-more {
   display: grid;
   gap: 1px;
-  padding-left: 12px;
 }
 
 .nav-more .nav-item {

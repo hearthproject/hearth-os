@@ -132,6 +132,19 @@
   transform: scale(0.985);
 }
 
+.conversation-select,
+.rail-project-name,
+.rail-project-new,
+.rail-project-delete {
+  transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.conversation-select:active:not(:disabled),
+.rail-project-name:active:not(:disabled),
+.rail-project-new:active:not(:disabled) {
+  transform: scale(0.985);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .message-row,
   .composer-model-popover,

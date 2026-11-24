@@ -14,4 +14,10 @@ describe("executor runtime", () => {
     expect(health.canRun).toBe(true);
     expect(health.state).toBe("ready");
   });
+
+  it("never reports DeepSeek Harness as runnable before a real probe", () => {
+    const health = executorHealth("deepseek-harness", defaultExecutorSettings(), `dsh-unverified-${Date.now()}.json`, 0);
+    expect(health.canRun).toBe(false);
+    expect(health.issues.join(" ")).toMatch(/尚未验证|未安装/);
+  });
 });

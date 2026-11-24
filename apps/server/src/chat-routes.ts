@@ -441,6 +441,11 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     }
 
     const userContent = message || (detectedUrl ? `请处理这个网址：${detectedUrl}` : `请处理附件：${storedFiles.map((file) => file.name).join("、")}`);
+    const firstTurn = store.listChatMessages(conversation.id).length === 0;
+    const titleWasPlaceholder = conversation.title === "新对话";
+    if (firstTurn && titleWasPlaceholder) {
+      conversation = store.renameConversation(conversation.id, conversationTitle(userContent)) ?? conversation;
+    }
     const userRecord = store.createChatMessage({
       id: randomUUID(),
       conversationId: conversation.id,
@@ -470,11 +475,12 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       closed = true;
       controller.abort();
     });
+    const conversationForTurn = conversation;
     const sendPersistedError = (code: string, text: string) => {
       const content = text.trim() || "处理消息时发生错误，请重试。";
       const assistant = service.appendChatMessage({
         id: randomUUID(),
-        conversationId: conversation.id,
+        conversationId: conversationForTurn.id,
         role: "assistant",
         content,
         taskId: null,
@@ -584,6 +590,10 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
             ? [...EXECUTOR_FALLBACK_ORDER]
             : [plan.executorId, ...EXECUTOR_FALLBACK_ORDER.filter((id) => id !== plan.executorId)]
         );
+    if (titleWasPlaceholder && firstTurn && route.title.trim() && route.title.trim() !== "新任务" && route.title.trim() !== conversation.title) {
+      conversation = store.renameConversation(conversation.id, route.title.trim()) ?? conversation;
+      send("conversation", conversation);
+    }
     send("routing", {
       ...route,
       plan: { ...plan, executorId: resolution.executorId ?? lockedExecutorId ?? plan.executorId },

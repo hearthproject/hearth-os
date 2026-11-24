@@ -246,10 +246,7 @@ export class ContextProjector {
     const entries = [
       ...this.service.store.listEffects(taskId)
         .filter((effect) => effect.status === "succeeded" || effect.status === "uncertain" || effect.status === "executing")
-        .map((effect) => `${effect.kind} 已处理或状态不确定（${effect.idempotencyKey}）`),
-      ...this.service.store.listOutboxDrafts()
-        .filter((draft) => draft.taskId === taskId && ["pending_approval", "stored", "uncertain"].includes(draft.status))
-        .map((draft) => `邮件草稿 ${draft.id} 已提交或待确认`)
+        .map((effect) => `${effect.kind} 已处理或状态不确定（${effect.idempotencyKey}）`)
     ];
     const files = new Set<string>();
     const branches = new Set<string>();

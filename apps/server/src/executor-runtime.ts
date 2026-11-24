@@ -160,11 +160,13 @@ function computeHealthSync(id: ExecutorId): ExecutorHealth {
   const packagePath = dshPackagePath();
   return {
     id,
-    canRun: Boolean(packagePath),
+    canRun: false,
     state: packagePath ? "unverified" : "missing",
     command: "dsh-sdk",
     version: packagePath ? packageVersion(packagePath) : null,
-    issues: packagePath ? [] : ["未安装可选运行时 @deepseek-ai/dsh-sdk-client；DeepSeek 执行器暂不可用，native / Codex 不受影响"],
+    issues: packagePath
+      ? ["DeepSeek Harness 已安装但尚未验证；请先在“设置 → 执行器”里运行测试，通过后才会出现在聊天执行器列表"]
+      : ["未安装可选运行时 @deepseek-ai/dsh-sdk-client；DeepSeek 执行器暂不可用，native / Codex 不受影响"],
     installState: packagePath ? "available" : "missing"
   };
 }

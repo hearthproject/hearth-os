@@ -19,7 +19,6 @@ import type {
   EffectRecord,
   EventWindow,
   ExecutorId,
-  OutboxDraft,
   ReconcileItem,
   RunListItem,
   RunBudget,
@@ -132,7 +131,6 @@ export interface ExportSnapshot {
   artifacts: ArtifactRecord[];
   effects: EffectRecord[];
   followUps: TaskFollowUpRecord[];
-  outboxDrafts: OutboxDraft[];
   events: ReturnType<HearthStore["listEvents"]>;
 }
 
@@ -312,7 +310,6 @@ export class HearthService {
       artifacts: this.store.listAllArtifacts(),
       effects: this.store.listAllEffects(),
       followUps: tasks.flatMap((task) => this.store.listTaskFollowUps(task.id)),
-      outboxDrafts: this.store.listOutboxDrafts(),
       events: this.store.listEvents(0)
     };
   }
@@ -857,33 +854,6 @@ export class HearthService {
     const updated = this.store.getReconcileItem(itemId);
     if (!updated) throw new Error(`Reconcile projection missing: ${itemId}`);
     return updated;
-  }
-
-  createOutboxDraft(draft: OutboxDraft): OutboxDraft {
-    const event = this.store.appendEvent({ type: "outbox.created", payload: draft });
-    this.bus.publish(event);
-    return draft;
-  }
-
-  updateOutboxDraft(
-    draftId: string,
-    patch: Partial<Pick<OutboxDraft,
-      "account" | "to" | "cc" | "bcc" | "subject" | "body" | "attachments" | "status" |
-      "taskId" | "approvalId" | "effectId" | "updatedAt" | "submittedAt" | "discardedAt">>
-  ): OutboxDraft {
-    const current = this.store.getOutboxDraft(draftId);
-    if (!current) throw new Error(`Outbox draft not found: ${draftId}`);
-    const event = this.store.appendEvent({ type: "outbox.updated", payload: { id: draftId, ...patch } });
-    this.bus.publish(event);
-    const updated = this.store.getOutboxDraft(draftId);
-    if (!updated) throw new Error(`Outbox projection missing: ${draftId}`);
-    return updated;
-  }
-
-  requireOutboxDraft(draftId: string): OutboxDraft {
-    const draft = this.store.getOutboxDraft(draftId);
-    if (!draft) throw new Error(`Outbox draft not found: ${draftId}`);
-    return draft;
   }
 
   createPairingRequest(request: DevicePairingRequest): DevicePairingRequest {

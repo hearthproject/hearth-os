@@ -7,7 +7,6 @@ import { defaultConversationSettings } from "@hearth/core";
 import { HearthStore } from "@hearth/eventlog";
 import { buildServer } from "./app.ts";
 import type { ApprovalManager } from "./approvals.ts";
-import type { OutboxService } from "./outbox.ts";
 import { HearthService } from "./service.ts";
 import {
   FeishuService,
@@ -313,7 +312,6 @@ describe("Feishu notifications and approvals", () => {
   let transport: FakeTransport;
   let chat: FakeChat;
   let decisions: Array<{ id: string; decision: string; hash: string }>;
-  let reconciled: string[];
   let approval: ApprovalRecord;
 
   beforeEach(async () => {
@@ -323,7 +321,6 @@ describe("Feishu notifications and approvals", () => {
     transport = new FakeTransport();
     chat = new FakeChat();
     decisions = [];
-    reconciled = [];
     const fakeApprovals = {
       async decide(id: string, decision: string, hash: string) {
         decisions.push({ id, decision, hash });
@@ -334,12 +331,6 @@ describe("Feishu notifications and approvals", () => {
         return { approval: updated, task: store.getTask(updated.taskId)!, effect: null };
       }
     } as unknown as ApprovalManager;
-    const fakeOutbox = {
-      reconcileApproval(id: string) {
-        reconciled.push(id);
-        return null;
-      }
-    } as unknown as OutboxService;
     service = new FeishuService({
       store,
       secretBox: new SecretBox(Buffer.alloc(32, 11)),
@@ -347,8 +338,7 @@ describe("Feishu notifications and approvals", () => {
       transportFactory: () => transport,
       chatClient: chat,
       service: hearth,
-      approvals: fakeApprovals,
-      outbox: fakeOutbox
+      approvals: fakeApprovals
     });
     service.settingsStore.save({
       enabled: true,
@@ -365,16 +355,16 @@ describe("Feishu notifications and approvals", () => {
     transport.handler?.(parsed);
     await waitFor(() => service.route("oc_chat") !== null);
 
-    const task = hearth.createTask({ title: "发送邮件", goal: "发送邮件", conversationId: conversation.id });
+    const task = hearth.createTask({ title: "整理周报", goal: "整理周报", conversationId: conversation.id });
     store.appendEvent({ type: "task.updated", taskId: task.id, payload: { status: "waiting_approval", updatedAt: new Date().toISOString() } });
     approval = {
       id: "abcd1234-1111-4222-8333-444455556666",
       taskId: task.id,
       runId: "run-1",
-      kind: "outbox.local-write",
-      summary: "将草稿写入发件箱",
+      kind: "github.comment",
+      summary: "发布评论",
       target: { draftId: "draft-1" },
-      preview: { impact: "只写入本机发件箱，不会发送" },
+      preview: { impact: "会在 GitHub 上发布一条公开评论，发布后无法撤回" },
       parameterHash: "a".repeat(64),
       status: "pending",
       expiresAt: new Date(Date.now() + 600_000).toISOString(),
@@ -396,26 +386,37 @@ describe("Feishu notifications and approvals", () => {
       id: "msg-task-status",
       conversationId: chat.conversationId,
       role: "assistant",
-      content: "任务「发送邮件」已完成。",
+      content: "任务「整理周报」已完成。",
       taskId: null,
       attachments: [],
       createdAt: new Date().toISOString()
     });
-    await waitFor(() => transport.sent.some((text) => text.includes("任务「发送邮件」已完成")));
+    await waitFor(() => transport.sent.some((text) => text.includes("任务「整理周报」已完成")));
   });
 
   it("sends an approval prompt and accepts a text approval command", async () => {
     await waitFor(() => transport.sent.some((text) => text.includes("/approve abcd1234")));
     const prompt = transport.sent.find((text) => text.includes("/approve abcd1234"))!;
-    expect(prompt).toContain("只写入本机发件箱");
+    expect(prompt).toContain("发布一条公开评论");
 
     const approve = parseFeishuMessage(event({ text: "/approve abcd1234" }))!;
     approve.messageId = "om_approve";
     transport.handler?.(approve);
     await waitFor(() => decisions.length === 1);
     expect(decisions[0]).toMatchObject({ id: approval.id, decision: "approve", hash: approval.parameterHash });
-    expect(reconciled).toEqual([approval.id]);
     await waitFor(() => transport.sent.some((text) => text.includes("已批准")));
+  });
+
+  it("pairs a Feishu chat to an existing conversation with a one-time code", async () => {
+    const other = store.createConversation("另一个对话", defaultConversationSettings());
+    const pairing = service.createPairingCode(other.id);
+    expect(pairing.code).toMatch(/^\d{6}$/);
+    const pair = parseFeishuMessage(event({ text: `/pair ${pairing.code}` }))!;
+    pair.messageId = "om_pair";
+    transport.handler?.(pair);
+    await waitFor(() => transport.sent.some((text) => text.includes("已配对到对话")));
+    expect(service.route("oc_chat")?.conversationId).toBe(other.id);
+    expect(service.snapshot().outboundPending).toBe(0);
   });
 
   it("rejects an unknown approval prefix", async () => {

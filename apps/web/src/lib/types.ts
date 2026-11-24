@@ -66,9 +66,6 @@ import type {
   OnboardingChecks,
   OnboardingSnapshot,
   OnboardingState,
-  OutboxAttachment,
-  OutboxDraft,
-  OutboxDraftStatus,
   PairingRequestStatus,
   ReconcileItem,
   RunListItem,
@@ -194,9 +191,6 @@ export type {
   OnboardingChecks,
   OnboardingSnapshot,
   OnboardingState,
-  OutboxAttachment,
-  OutboxDraft,
-  OutboxDraftStatus,
   PairingRequestStatus,
   ReconcileItem,
   RunListItem,
@@ -661,6 +655,20 @@ export interface FeishuStatus {
   state: FeishuConnectionState;
   lastEventAt: string | null;
   lastError: string | null;
+  connectedAt: string | null;
+  reconnectAttempts: number;
+  inboundCount: number;
+  outboundPending: number;
+  outboundSent: number;
+  outboundFailed: number;
+  lastOutboundAt: string | null;
+}
+
+export interface FeishuPairingCodeResponse {
+  code: string;
+  expiresAt: string;
+  conversationId: string;
+  conversationTitle: string;
 }
 
 export interface FeishuIntegrationResponse {
@@ -673,59 +681,6 @@ export interface FeishuTestResponse {
   error?: string;
   elapsedMs: number;
 }
-
-export interface MailServerView {
-  host: string;
-  port: number;
-  secure: boolean;
-  user: string;
-  hasPassword: boolean;
-  passwordMasked: string | null;
-}
-
-export interface MailAccountView {
-  id: string;
-  name: string;
-  fromName: string;
-  fromAddress: string;
-  smtp: MailServerView;
-  imap: MailServerView;
-  syncEnabled: boolean;
-  syncIntervalMinutes: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface MailServerInput {
-  host: string;
-  port: number;
-  secure: boolean;
-  user: string;
-  password?: string;
-}
-
-export interface MailAccountInput {
-  name: string;
-  fromName: string;
-  fromAddress: string;
-  smtp: MailServerInput;
-  imap: MailServerInput;
-  syncEnabled?: boolean;
-  syncIntervalMinutes?: number;
-}
-
-export interface MailTestResult {
-  ok: boolean;
-  smtp: { ok: boolean; error: string | null; elapsedMs: number };
-  imap: { ok: boolean; error: string | null; elapsedMs: number };
-}
-
-export interface MailSyncResult {
-  sourceId: string;
-  fetched: number;
-  changed: number;
-}
-
 
 export interface ExecutorSettingsResponse {
   settings: ExecutorSettingsView;
@@ -810,26 +765,6 @@ export interface SourceReadResult {
   source: SourceConnection;
   items: SourceItem[];
   changed: number;
-}
-
-export interface OutboxDraftRequest {
-  account?: string;
-  to?: string[];
-  cc?: string[];
-  bcc?: string[];
-  subject?: string;
-  body?: string;
-  attachmentIds?: string[];
-}
-
-export interface OutboxSubmitResult {
-  draft: OutboxDraft;
-  approval: ApprovalRecord;
-  task: TaskRecord;
-}
-
-export interface OutboxDraftListItem extends OutboxDraft {
-  effect: EffectRecord | null;
 }
 
 export interface RunManifest {

@@ -41,7 +41,7 @@ describe("maintenance", () => {
       id: "approval-expired",
       taskId: task.id,
       runId: "run-expired",
-      kind: "outbox.local-write",
+      kind: "github.comment",
       summary: "expired",
       target: {},
       preview: {},

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import type { FastifyInstance } from "fastify";
@@ -7,7 +7,6 @@ import type { HearthStore } from "@hearth/eventlog";
 import type { SecretBox } from "./secrets.ts";
 import type { HearthService } from "./service.ts";
 import type { ApprovalManager } from "./approvals.ts";
-import type { OutboxService } from "./outbox.ts";
 import { SdkFeishuTransport, verifyFeishuCredentials } from "./feishu-transport.ts";
 import { ChannelIngressService } from "./channel-adapter.ts";
 
@@ -46,6 +45,13 @@ export interface FeishuStatus {
   state: FeishuConnectionState;
   lastEventAt: string | null;
   lastError: string | null;
+  connectedAt: string | null;
+  reconnectAttempts: number;
+  inboundCount: number;
+  outboundPending: number;
+  outboundSent: number;
+  outboundFailed: number;
+  lastOutboundAt: string | null;
 }
 
 export interface FeishuInboundMessage {
@@ -92,12 +98,31 @@ export interface FeishuChatResult {
 }
 
 export interface FeishuChatClient {
-  send(input: { conversationId?: string | undefined; message: string; attachments: ChatAttachment[] }): Promise<FeishuChatResult>;
+  send(
+    input: { conversationId?: string | undefined; message: string; attachments: ChatAttachment[] },
+    hooks?: { onTask?: (payload: unknown) => void }
+  ): Promise<FeishuChatResult>;
 }
 
 export interface FeishuRoute {
   conversationId: string;
   createdAt: string;
+}
+
+interface OutboundItem {
+  id: string;
+  chatId: string;
+  text: string;
+  attempts: number;
+  nextAt: string;
+  createdAt: string;
+}
+
+interface FeishuPairingCode {
+  code: string;
+  conversationId: string;
+  createdAt: string;
+  expiresAt: string;
 }
 
 export class FeishuError extends Error {
@@ -114,7 +139,13 @@ export class FeishuError extends Error {
 
 const SETTINGS_KEY = "integrations.feishu.v1";
 const ROUTES_KEY = "integrations.feishu.routes.v1";
+const OUTBOUND_KEY = "integrations.feishu.outbound.v1";
+const PAIRING_KEY = "integrations.feishu.pairing.v1";
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+const MAX_OUTBOUND_ITEMS = 200;
+const MAX_SENT_MEMORY = 2_000;
+const OUTBOUND_MAX_ATTEMPTS = 8;
+const PAIRING_TTL_MS = 10 * 60_000;
 
 const DEFAULT_SETTINGS: FeishuSettings = {
   enabled: false,
@@ -204,7 +235,10 @@ export class LocalFeishuChatClient implements FeishuChatClient {
     private readonly fetchImpl: typeof fetch = fetch
   ) {}
 
-  async send(input: { conversationId?: string | undefined; message: string; attachments: ChatAttachment[] }): Promise<FeishuChatResult> {
+  async send(
+    input: { conversationId?: string | undefined; message: string; attachments: ChatAttachment[] },
+    hooks: { onTask?: (payload: unknown) => void } = {}
+  ): Promise<FeishuChatResult> {
     const base = this.baseUrl();
     if (!base) throw new FeishuError("FEISHU_NOT_READY", "Hearth 本机服务尚未就绪", 503);
     const response = await this.fetchImpl(`${base}/api/chat`, {
@@ -250,6 +284,7 @@ export class LocalFeishuChatClient implements FeishuChatClient {
               messages.push(message);
             }
           } else if (parsed.event === "task") {
+            hooks.onTask?.(parsed.data);
             const message = asChatMessage(parsed.data.message);
             if (message && !seen.has(message.id)) {
               seen.add(message.id);
@@ -276,15 +311,34 @@ export class FeishuService {
   private readonly now: () => Date;
   private readonly service: HearthService | null;
   private readonly approvals: ApprovalManager | null;
-  private readonly outbox: OutboxService | null;
   private readonly channels: ChannelIngressService;
   private transport: FeishuTransport | null = null;
   private baseUrl = "";
-  private state: FeishuStatus = { state: "disabled", lastEventAt: null, lastError: null };
+  private state: FeishuStatus = {
+    state: "disabled",
+    lastEventAt: null,
+    lastError: null,
+    connectedAt: null,
+    reconnectAttempts: 0,
+    inboundCount: 0,
+    outboundPending: 0,
+    outboundSent: 0,
+    outboundFailed: 0,
+    lastOutboundAt: null
+  };
+  private reconnectAttempts = 0;
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private outboundTimer: ReturnType<typeof setTimeout> | null = null;
+  private pumpingOutbound = false;
   private unsubscribe: (() => void) | null = null;
   private readonly queues = new Map<string, Promise<void>>();
   private readonly sentMessageIds = new Set<string>();
+  private readonly taskStatusNotified = new Map<string, string>();
+  private outbound: OutboundItem[] = [];
+  private outboundSent = 0;
+  private outboundFailed = 0;
+  private lastOutboundAt: string | null = null;
 
   constructor(options: {
     store: HearthStore;
@@ -294,7 +348,6 @@ export class FeishuService {
     chatClient?: FeishuChatClient;
     service?: HearthService;
     approvals?: ApprovalManager;
-    outbox?: OutboxService;
     channels?: ChannelIngressService;
     now?: () => Date;
   }) {
@@ -305,9 +358,9 @@ export class FeishuService {
     this.chatClient = options.chatClient ?? new LocalFeishuChatClient(() => this.baseUrl);
     this.service = options.service ?? null;
     this.approvals = options.approvals ?? null;
-    this.outbox = options.outbox ?? null;
     this.now = options.now ?? (() => new Date());
     this.channels = options.channels ?? new ChannelIngressService(options.store, this.now);
+    this.outbound = this.loadOutbound();
     mkdirSync(this.attachmentRoot, { recursive: true });
   }
 
@@ -316,30 +369,63 @@ export class FeishuService {
   }
 
   snapshot(): FeishuStatus {
-    return { ...this.state };
+    return {
+      ...this.state,
+      outboundPending: this.outbound.length,
+      outboundSent: this.outboundSent,
+      outboundFailed: this.outboundFailed,
+      lastOutboundAt: this.lastOutboundAt,
+      reconnectAttempts: this.reconnectAttempts
+    };
+  }
+
+  createPairingCode(conversationId?: string): {
+    code: string;
+    expiresAt: string;
+    conversationId: string;
+    conversationTitle: string;
+  } {
+    if (!this.service) throw new FeishuError("FEISHU_PAIRING_UNAVAILABLE", "服务尚未就绪", 503);
+    const conversation = conversationId
+      ? this.store.getConversation(conversationId)
+      : this.store.listConversations()[0] ?? null;
+    if (!conversation) throw new FeishuError("FEISHU_NO_CONVERSATION", "还没有可配对的对话，请先在 Hearth 里发一条消息", 409);
+    const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
+    const createdAt = this.now().toISOString();
+    const pairing: FeishuPairingCode = {
+      code,
+      conversationId: conversation.id,
+      createdAt,
+      expiresAt: new Date(this.now().getTime() + PAIRING_TTL_MS).toISOString()
+    };
+    this.store.setAppSetting(PAIRING_KEY, JSON.stringify(pairing));
+    return { code, expiresAt: pairing.expiresAt, conversationId: conversation.id, conversationTitle: conversation.title };
   }
 
   async start(baseUrl?: string): Promise<void> {
     if (baseUrl) this.baseUrl = baseUrl.replace(/\/+$/, "");
+    this.clearReconnectTimer();
     await this.disposeTransport();
     const settings = this.settingsStore.load();
     if (!settings.enabled) {
-      this.state = { state: "disabled", lastEventAt: this.state.lastEventAt, lastError: null };
+      this.setState({ state: "disabled", lastError: null });
       return;
     }
     if (!this.baseUrl) {
-      this.state = { state: "starting", lastEventAt: this.state.lastEventAt, lastError: null };
+      this.setState({ state: "starting", lastError: null });
       return;
     }
     const secret = this.settingsStore.secret();
     if (!secret) {
-      this.state = { state: "error", lastEventAt: this.state.lastEventAt, lastError: "App Secret 尚未配置" };
+      this.setState({ state: "error", lastError: "App Secret 尚未配置" });
       return;
     }
-    this.state = { state: "starting", lastEventAt: this.state.lastEventAt, lastError: null };
+    this.setState({ state: "starting", lastError: null });
     this.connectTimer = setTimeout(() => {
       if (this.state.state === "starting") {
-        this.state = { ...this.state, state: "error", lastError: "长连接未在 15 秒内建立，请检查应用凭据与网络" };
+        const message = "长连接未在 15 秒内建立，请检查应用凭据与网络";
+        this.setState({ state: "error", lastError: message });
+        this.scheduleReconnect();
       }
     }, 15_000);
     this.connectTimer.unref?.();
@@ -349,42 +435,186 @@ export class FeishuService {
         {
           onConnected: () => {
             this.clearConnectTimer();
-            this.state = { ...this.state, state: "connected", lastError: null };
+            this.reconnectAttempts = 0;
+            this.setState({ state: "connected", lastError: null, connectedAt: this.now().toISOString() });
+            void this.pumpOutbound();
           },
           onReconnecting: () => {
-            this.state = { ...this.state, state: "reconnecting" };
+            this.setState({ state: "reconnecting" });
           },
           onError: (message) => {
             this.clearConnectTimer();
-            this.state = { ...this.state, state: "error", lastError: message };
+            this.setState({ state: "error", lastError: message });
+            this.scheduleReconnect();
           }
         }
       );
       await this.transport.start((message) => this.enqueue(message));
       this.subscribeEvents();
+      this.startOutboundPump();
       if (this.state.state === "starting") {
         this.clearConnectTimer();
-        this.state = { ...this.state, state: "connected", lastError: null };
+        this.setState({ state: "connected", lastError: null, connectedAt: this.now().toISOString() });
+        void this.pumpOutbound();
       }
     } catch (error) {
       this.clearConnectTimer();
-      this.state = {
-        ...this.state,
+      this.setState({
         state: "error",
         lastError: error instanceof Error ? error.message : String(error)
-      };
+      });
+      this.scheduleReconnect();
     }
   }
 
   async stop(): Promise<void> {
     this.unsubscribe?.();
     this.unsubscribe = null;
+    this.clearReconnectTimer();
+    if (this.outboundTimer) clearTimeout(this.outboundTimer);
+    this.outboundTimer = null;
     await this.disposeTransport();
-    this.state = { state: "disabled", lastEventAt: this.state.lastEventAt, lastError: null };
+    this.setState({ state: "disabled", lastError: null });
   }
 
   async restart(): Promise<void> {
+    this.reconnectAttempts = 0;
+    this.clearReconnectTimer();
     await this.start(this.baseUrl || undefined);
+  }
+
+  private setState(patch: Partial<FeishuStatus>): void {
+    this.state = { ...this.state, ...patch };
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer) return;
+    if (!this.settingsStore.load().enabled) return;
+    this.reconnectAttempts += 1;
+    const delay = Math.min(60_000, 1_000 * 2 ** Math.min(this.reconnectAttempts - 1, 6));
+    this.setState({ state: "reconnecting", reconnectAttempts: this.reconnectAttempts });
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      void this.start(this.baseUrl || undefined);
+    }, delay);
+    this.reconnectTimer.unref?.();
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+  }
+
+  private loadOutbound(): OutboundItem[] {
+    const raw = this.store.getAppSetting(OUTBOUND_KEY);
+    if (!raw) return [];
+    try {
+      const value = JSON.parse(raw) as unknown;
+      if (!Array.isArray(value)) return [];
+      return value.filter((item): item is OutboundItem => {
+        if (!item || typeof item !== "object") return false;
+        const record = item as Record<string, unknown>;
+        return typeof record.id === "string"
+          && typeof record.chatId === "string"
+          && typeof record.text === "string"
+          && typeof record.nextAt === "string"
+          && typeof record.createdAt === "string"
+          && typeof record.attempts === "number";
+      }).slice(-MAX_OUTBOUND_ITEMS);
+    } catch {
+      return [];
+    }
+  }
+
+  private persistOutbound(): void {
+    try {
+      this.store.setAppSetting(OUTBOUND_KEY, JSON.stringify(this.outbound.slice(-MAX_OUTBOUND_ITEMS)));
+    } catch {
+      // Queue persistence is best effort; delivery still proceeds in memory.
+    }
+  }
+
+  private startOutboundPump(): void {
+    if (this.outboundTimer || this.outbound.length === 0) return;
+    this.outboundTimer = setTimeout(() => {
+      this.outboundTimer = null;
+      void this.pumpOutbound();
+    }, 1_000);
+    this.outboundTimer.unref?.();
+  }
+
+  private async pumpOutbound(): Promise<void> {
+    if (this.pumpingOutbound || this.outbound.length === 0) return;
+    if (!this.transport || this.state.state !== "connected") {
+      this.startOutboundPump();
+      return;
+    }
+    this.pumpingOutbound = true;
+    try {
+      const due = this.outbound.filter((item) => Date.parse(item.nextAt) <= this.now().getTime()).slice(0, 20);
+      for (const item of due) await this.deliverOutbound(item);
+    } finally {
+      this.pumpingOutbound = false;
+      this.persistOutbound();
+      if (this.outbound.length > 0) this.startOutboundPump();
+    }
+  }
+
+  private async deliverOutbound(item: OutboundItem): Promise<void> {
+    if (!this.transport || this.state.state !== "connected") {
+      item.nextAt = new Date(this.now().getTime() + 3_000).toISOString();
+      this.persistOutbound();
+      return;
+    }
+    try {
+      await this.requireTransport().sendText(item.chatId, item.text);
+      this.outbound = this.outbound.filter((entry) => entry.id !== item.id);
+      this.outboundSent += 1;
+      this.lastOutboundAt = this.now().toISOString();
+    } catch (error) {
+      item.attempts += 1;
+      if (item.attempts >= OUTBOUND_MAX_ATTEMPTS) {
+        this.outbound = this.outbound.filter((entry) => entry.id !== item.id);
+        this.outboundFailed += 1;
+        this.setState({ lastError: `飞书消息发送失败：${error instanceof Error ? error.message : String(error)}` });
+      } else {
+        const delay = Math.min(60_000, 2_000 * 2 ** Math.min(item.attempts - 1, 5));
+        item.nextAt = new Date(this.now().getTime() + delay).toISOString();
+      }
+    }
+    this.persistOutbound();
+  }
+
+  private async enqueueOutbound(chatId: string, text: string): Promise<void> {
+    const clean = clip(text.trim(), 4_000);
+    if (!clean) return;
+    const now = this.now();
+    const item: OutboundItem = {
+      id: randomUUID(),
+      chatId,
+      text: clean,
+      attempts: 0,
+      nextAt: now.toISOString(),
+      createdAt: now.toISOString()
+    };
+    this.outbound.push(item);
+    if (this.outbound.length > MAX_OUTBOUND_ITEMS) {
+      this.outbound.splice(0, this.outbound.length - MAX_OUTBOUND_ITEMS);
+      this.outboundFailed += 1;
+    }
+    this.persistOutbound();
+    if (this.transport && this.state.state === "connected") {
+      await this.deliverOutbound(item);
+      return;
+    }
+    this.startOutboundPump();
+  }
+
+  private markSent(id: string): void {
+    this.sentMessageIds.add(id);
+    if (this.sentMessageIds.size <= MAX_SENT_MEMORY) return;
+    const oldest = this.sentMessageIds.values().next().value;
+    if (oldest) this.sentMessageIds.delete(oldest);
   }
 
   async updateSettings(patch: FeishuSettingsPatch): Promise<{ settings: FeishuSettingsView; status: FeishuStatus }> {
@@ -407,6 +637,10 @@ export class FeishuService {
   }
 
   private enqueue(message: FeishuInboundMessage): void {
+    if (isDirectControlCommand(message.text)) {
+      void this.processMessage(message);
+      return;
+    }
     const previous = this.queues.get(message.chatId) ?? Promise.resolve();
     const next = previous
       .then(() => this.processMessage(message))
@@ -444,7 +678,7 @@ export class FeishuService {
       return;
     }
     if (received.duplicate && !["received", "processing", "retrying"].includes(received.record.status)) return;
-    this.state = { ...this.state, lastEventAt: this.now().toISOString() };
+    this.setState({ lastEventAt: this.now().toISOString(), inboundCount: this.state.inboundCount + 1 });
 
     try {
       const receipt = await this.handleMessage(message);
@@ -467,6 +701,15 @@ export class FeishuService {
       return { outcome: "empty" };
     }
 
+    const pairCode = parsePairCommand(message.text);
+    if (pairCode) {
+      await this.handlePairCommand(message, pairCode);
+      return { outcome: "pair_command" };
+    }
+    if (/^(?:\/pair|配对)(?:\s|$)/i.test(message.text.trim())) {
+      await this.safeSend(message.chatId, "用法：/pair <6位配对码>。配对码可在 Hearth 的“连接”页生成，10 分钟内有效。");
+      return { outcome: "pair_usage" };
+    }
     const command = parseApprovalCommand(message.text);
     if (command) {
       await this.handleApprovalCommand(message, command);
@@ -484,6 +727,8 @@ export class FeishuService {
       ...(route ? { conversationId: route.conversationId } : {}),
       message: message.text,
       attachments
+    }, {
+      onTask: (payload) => this.notifyTaskAccepted(message.chatId, payload)
     });
     if (result.conversationId && !route) this.saveRoute(message.chatId, result.conversationId);
     if (result.error) await this.safeSend(message.chatId, `处理失败：${result.error}`);
@@ -491,7 +736,7 @@ export class FeishuService {
     for (const reply of result.messages) {
       if (reply.role !== "assistant" || !reply.content.trim()) continue;
       if (this.sentMessageIds.has(reply.id)) continue;
-      this.sentMessageIds.add(reply.id);
+      this.markSent(reply.id);
       replyCount += 1;
       await this.safeSend(message.chatId, reply.content);
     }
@@ -509,20 +754,46 @@ export class FeishuService {
       if (event.type === "chat.message.created") {
         const payload = event.payload as { message?: ChatMessageRecord; conversationId?: string } | null;
         if (payload?.message) void this.forwardChatMessage(payload.message, payload.conversationId);
+      } else if (event.type === "task.updated" && event.taskId) {
+        void this.notifyTaskProgress(event.taskId);
       } else if (event.type === "approval.created") {
         void this.notifyApproval(event.payload as ApprovalRecord);
       }
     });
   }
 
+  private async notifyTaskAccepted(chatId: string, payload: unknown): Promise<void> {
+    const record = asChatMessage(isRecord(payload) ? payload.message : null);
+    if (!record || !record.content.trim()) return;
+    if (this.sentMessageIds.has(record.id)) return;
+    this.markSent(record.id);
+    await this.safeSend(chatId, record.content);
+  }
+
   private async forwardChatMessage(message: ChatMessageRecord, conversationId?: string): Promise<void> {
     if (message.role !== "assistant" || !message.content.trim()) return;
+    // Task status lines have their own concise progress channel below.
+    if (message.kind === "task_status") return;
     if (this.sentMessageIds.has(message.id)) return;
     const chatId = (conversationId ? this.findChatByConversation(conversationId) : null)
       ?? this.findChatByConversation(message.conversationId);
     if (!chatId) return;
-    this.sentMessageIds.add(message.id);
+    this.markSent(message.id);
     await this.safeSend(chatId, message.content);
+  }
+
+  private async notifyTaskProgress(taskId: string): Promise<void> {
+    if (!this.service) return;
+    const task = this.service.store.getTask(taskId);
+    if (!task || !task.conversationId) return;
+    const chatId = this.findChatByConversation(task.conversationId);
+    if (!chatId) return;
+    if (task.status === "waiting_approval") return;
+    if (this.taskStatusNotified.get(task.id) === task.status) return;
+    const text = taskProgressText(task);
+    if (!text) return;
+    this.taskStatusNotified.set(task.id, task.status);
+    await this.safeSend(chatId, text);
   }
 
   private async notifyApproval(payload: ApprovalRecord): Promise<void> {
@@ -552,7 +823,7 @@ export class FeishuService {
     message: FeishuInboundMessage,
     command: { decision: "approve" | "reject"; prefix: string }
   ): Promise<void> {
-    if (!this.service || !this.approvals || !this.outbox) {
+    if (!this.service || !this.approvals) {
       await this.safeSend(message.chatId, "审批命令当前不可用。");
       return;
     }
@@ -577,10 +848,51 @@ export class FeishuService {
     const approval = unique[0]!;
     try {
       await this.approvals.decide(approval.id, command.decision, approval.parameterHash);
-      this.outbox.reconcileApproval(approval.id);
       await this.safeSend(message.chatId, command.decision === "approve" ? "已批准，正在执行外部动作。" : "已拒绝，没有产生外部副作用。");
     } catch (error) {
       await this.safeSend(message.chatId, `审批失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async handlePairCommand(message: FeishuInboundMessage, code: string): Promise<void> {
+    if (!this.service) {
+      await this.safeSend(message.chatId, "配对功能当前不可用。");
+      return;
+    }
+    const pairing = this.loadPairing();
+    if (!pairing || Date.parse(pairing.expiresAt) <= this.now().getTime()) {
+      await this.safeSend(message.chatId, "配对码已过期。请在 Hearth 的“连接”页重新生成。");
+      return;
+    }
+    if (pairing.code !== code) {
+      await this.safeSend(message.chatId, "配对码不正确。请在 Hearth 的“连接”页核对后重试。");
+      return;
+    }
+    const conversation = this.store.getConversation(pairing.conversationId);
+    if (!conversation) {
+      await this.safeSend(message.chatId, "配对码指向的对话已不存在，请重新生成。");
+      return;
+    }
+    this.saveRoute(message.chatId, conversation.id);
+    this.store.setAppSetting(PAIRING_KEY, "");
+    await this.safeSend(message.chatId, `已配对到对话「${conversation.title}」。之后消息、任务进度和审批都会出现在这里。`);
+  }
+
+  private loadPairing(): FeishuPairingCode | null {
+    const raw = this.store.getAppSetting(PAIRING_KEY);
+    if (!raw) return null;
+    try {
+      const value = JSON.parse(raw) as unknown;
+      if (!isRecord(value)) return null;
+      if (typeof value.code !== "string" || typeof value.conversationId !== "string" || typeof value.expiresAt !== "string") return null;
+      return {
+        code: value.code,
+        conversationId: value.conversationId,
+        createdAt: typeof value.createdAt === "string" ? value.createdAt : "",
+        expiresAt: value.expiresAt
+      };
+    } catch {
+      return null;
     }
   }
 
@@ -635,11 +947,9 @@ export class FeishuService {
   }
 
   private async safeSend(chatId: string, text: string): Promise<void> {
-    try {
-      await this.requireTransport().sendText(chatId, clip(text, 4_000));
-    } catch {
-      // Sending failures are visible in Feishu status; never crash the gateway.
-    }
+    // Never throw into the gateway: messages are queued, retried, and surfaced
+    // through connection metrics instead.
+    await this.enqueueOutbound(chatId, text);
   }
 
   private requireTransport(): FeishuTransport {
@@ -677,6 +987,40 @@ function parseApprovalCommand(text: string): { decision: "approve" | "reject"; p
   const reject = trimmed.match(/^(?:\/reject|拒绝)\s+([0-9a-f-]{6,36})$/i);
   if (reject) return { decision: "reject", prefix: reject[1]!.toLowerCase() };
   return null;
+}
+
+function parsePairCommand(text: string): string | null {
+  const match = text.trim().match(/^(?:\/pair|配对)\s+(\d{6})$/i);
+  return match?.[1] ?? null;
+}
+
+function isDirectControlCommand(text: string): boolean {
+  return Boolean(parseApprovalCommand(text) || parsePairCommand(text));
+}
+
+function taskProgressText(task: TaskRecord): string | null {
+  const title = task.title.trim() || "未命名任务";
+  switch (task.status) {
+    case "queued":
+      return `任务已排队：${title}`;
+    case "running":
+      return `开始执行：${title}`;
+    case "waiting_input":
+      return `需要你补充信息：${title}${task.nextAction ? `\n${clip(task.nextAction, 600)}` : ""}`;
+    case "waiting_budget":
+      return `等待预算确认：${title}${task.nextAction ? `\n${clip(task.nextAction, 600)}` : ""}`;
+    case "paused":
+      return `已暂停：${title}${task.nextAction ? `\n${clip(task.nextAction, 600)}` : ""}`;
+    case "completed":
+      return `已完成：${title}${task.resultSummary ? `\n${clip(task.resultSummary, 1_200)}` : ""}`;
+    case "failed":
+    case "recoverable":
+      return `执行失败：${title}${task.error ? `\n${clip(task.error.message, 800)}` : ""}`;
+    case "cancelled":
+      return `已取消：${title}`;
+    default:
+      return null;
+  }
 }
 
 function isRetryableFeishuFailure(error: unknown): boolean {

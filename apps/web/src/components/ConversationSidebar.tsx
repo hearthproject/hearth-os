@@ -1,7 +1,7 @@
 import { useState, type MouseEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Folder, FolderPlus, Loader2, Plus, Trash2, TriangleAlert } from "lucide-react";
+import { Folder, FolderPlus, Loader2, MessageSquare, Plus, Trash2, TriangleAlert } from "lucide-react";
 import { api, ApiError } from "../lib/api.ts";
 import { useChatSelection, requestChat } from "../lib/chat-selection.ts";
 import { isActive, needsAttention } from "../lib/format.ts";
@@ -212,6 +212,7 @@ function ConversationItem({
     <div className={`conversation-item ${active ? "active" : ""}`}>
       <div className="conversation-row">
         <button className="conversation-select" onClick={onSelect} disabled={disabled} title={conversation.preview || conversation.title}>
+          <span className="rail-item-icon" aria-hidden="true"><MessageSquare size={15} /></span>
           <span className="conversation-title">{conversation.title}</span>
           {running > 0 && <span className="conv-inline running"><Loader2 size={10} className="spin" />运行中</span>}
           {attention > 0 && running === 0 && <span className="conv-inline attention"><TriangleAlert size={10} />待处理</span>}

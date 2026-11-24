@@ -66,20 +66,17 @@ function seedPendingExternalApproval(store: HearthStore): ApprovalRecord {
 
 describe("security API", () => {
   let store: HearthStore;
-  let outboxRoot: string;
 
   beforeEach(() => {
     store = new HearthStore(":memory:");
-    outboxRoot = mkdtempSync(join(tmpdir(), "hearth-security-"));
   });
 
   afterEach(() => {
     store.close();
-    rmSync(outboxRoot, { recursive: true, force: true });
   });
 
   it("blocks approvals and scheduler restart until the kill switch is cleared", async () => {
-    const app = await buildServer({ store, serveWeb: false, startScheduler: true, outboxRoot });
+    const app = await buildServer({ store, serveWeb: false, startScheduler: true });
     try {
       const enabled = await app.inject({
         method: "POST",

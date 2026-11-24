@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Link2, Loader2, PlugZap, RefreshCw, Save, X } from "lucide-react";
+import { CheckCircle2, KeyRound, Link2, Loader2, PlugZap, RefreshCw, Save, X } from "lucide-react";
 import { api } from "../lib/api.ts";
-import type { FeishuConnectionState, FeishuDomain, FeishuIntegrationResponse } from "../lib/types.ts";
+import type { FeishuConnectionState, FeishuDomain, FeishuIntegrationResponse, FeishuPairingCodeResponse } from "../lib/types.ts";
 
 const STATE_LABELS: Record<FeishuConnectionState, string> = {
   disabled: "未启用",
@@ -20,8 +20,9 @@ export function FeishuSettingsPanel() {
   const [appSecret, setAppSecret] = useState("");
   const [allowedText, setAllowedText] = useState("");
   const [domain, setDomain] = useState<FeishuDomain>("feishu");
-  const [busy, setBusy] = useState<"save" | "test" | "reconnect" | null>(null);
+  const [busy, setBusy] = useState<"save" | "test" | "reconnect" | "pair" | null>(null);
   const [notice, setNotice] = useState<{ tone: "ok" | "error" | "info"; text: string } | null>(null);
+  const [pairing, setPairing] = useState<FeishuPairingCodeResponse | null>(null);
   const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
@@ -102,6 +103,20 @@ export function FeishuSettingsPanel() {
     }
   }
 
+  async function createPairing() {
+    setBusy("pair");
+    setNotice(null);
+    try {
+      const result = await api.createFeishuPairingCode();
+      setPairing(result);
+      setNotice({ tone: "info", text: `配对码已生成，绑定到对话「${result.conversationTitle}」。` });
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "生成配对码失败" });
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const status = query.data?.status;
   const state = status?.state ?? "disabled";
 
@@ -170,7 +185,34 @@ export function FeishuSettingsPanel() {
           <button className="ghost-button" onClick={() => void reconnect()} disabled={busy !== null || !query.data?.settings.enabled}>
             {busy === "reconnect" ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />} 重新连接
           </button>
+          <button className="ghost-button" onClick={() => void createPairing()} disabled={busy !== null || !query.data?.settings.enabled}>
+            {busy === "pair" ? <Loader2 size={15} className="spin" /> : <KeyRound size={15} />} 生成配对码
+          </button>
         </div>
+
+        {status && (
+          <dl className="feishu-metrics">
+            <div><dt>收到消息</dt><dd>{status.inboundCount}</dd></div>
+            <div><dt>待发送</dt><dd>{status.outboundPending}</dd></div>
+            <div><dt>已发送</dt><dd>{status.outboundSent}</dd></div>
+            <div><dt>发送失败</dt><dd>{status.outboundFailed}</dd></div>
+            <div><dt>重连次数</dt><dd>{status.reconnectAttempts}</dd></div>
+            <div>
+              <dt>连接时间</dt>
+              <dd>{status.connectedAt ? new Date(status.connectedAt).toLocaleString("zh-CN") : "未连接"}</dd>
+            </div>
+          </dl>
+        )}
+
+        {pairing && (
+          <div className="feishu-pairing">
+            <div>
+              <span>配对码</span>
+              <strong className="mono">{pairing.code}</strong>
+            </div>
+            <p>在飞书里给机器人发送 <code>/pair {pairing.code}</code>，即可把这个聊天绑定到对话「{pairing.conversationTitle}」。有效期至 {new Date(pairing.expiresAt).toLocaleTimeString("zh-CN")}。</p>
+          </div>
+        )}
 
         {notice && (
           <div className={`settings-notice ${notice.tone}`}>
@@ -180,6 +222,7 @@ export function FeishuSettingsPanel() {
         )}
         {status?.lastError && <p className="form-error">最近错误：{status.lastError}</p>}
         {status?.lastEventAt && <p className="settings-hint">最近收到事件：{new Date(status.lastEventAt).toLocaleString("zh-CN")}</p>}
+        {status?.lastOutboundAt && <p className="settings-hint">最近发送成功：{new Date(status.lastOutboundAt).toLocaleString("zh-CN")}</p>}
 
         <div className="feishu-checklist">
           <h4>在飞书开放平台完成这些步骤</h4>
@@ -188,7 +231,8 @@ export function FeishuSettingsPanel() {
             <li>在“事件与回调 → 事件配置”选择“使用长连接接收事件”，添加 <code>im.message.receive_v1</code>。</li>
             <li>在权限管理里开通接收消息、以应用身份发消息、读取群信息等最小权限。</li>
             <li>发布应用版本；把允许使用机器人的用户 open_id 填到上面的白名单。</li>
-            <li>审批使用文本命令 <code>/approve 前缀</code>、<code>/reject 前缀</code>。飞书卡片按钮回调不支持长连接，首版不做卡片按钮。</li>
+            <li>审批使用文本命令 <code>/approve 前缀</code>、<code>/reject 前缀</code>；这些命令会绕过排队立即处理。飞书卡片按钮回调不支持长连接，首版不做卡片按钮。</li>
+            <li>需要把飞书聊天接到已有对话时，在“连接”页生成配对码，然后发送 <code>/pair 123456</code>。</li>
           </ol>
           <p>open_id 可以在飞书开放平台的事件日志或调试工具中看到；白名单为空时不会处理任何消息。</p>
         </div>

@@ -12,7 +12,7 @@ import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { installBackgroundTaskRegistry } from "./background-tasks.ts";
 import { loadCodexProfile, runCodex } from "@hearth/codex-executor";
 import { z } from "zod";
-import { ARTIFACT_DIR, ATTACHMENT_DIR, BACKUP_DIR, BROWSER_SETTINGS_PATH, CODEX_HOME_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, DOSSIER_DIR, DSH_HOME_DIR, EXECUTOR_HOME_DIR, EXECUTOR_SETTINGS_PATH, LIBRARY_MODEL_DIR, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, OUTBOX_DIR, REPO_ROOT, SKILL_DIR, SOURCE_CONTENT_DIR, SUPERVISION_PATH, WEB_DIST, WORKSPACE_DIR, WORKSTYLE_PATH } from "./config.ts";
+import { ARTIFACT_DIR, ATTACHMENT_DIR, BACKUP_DIR, BROWSER_SETTINGS_PATH, CODEX_HOME_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, DOSSIER_DIR, DSH_HOME_DIR, EXECUTOR_HOME_DIR, EXECUTOR_SETTINGS_PATH, LIBRARY_MODEL_DIR, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, REPO_ROOT, SKILL_DIR, SOURCE_CONTENT_DIR, SUPERVISION_PATH, WEB_DIST, WORKSPACE_DIR, WORKSTYLE_PATH } from "./config.ts";
 import { BrowserSettingsStore } from "./browser-settings.ts";
 import { registerChatRoutes } from "./chat-routes.ts";
 import { ReconcileError, ReconcileService } from "./reconcile.ts";
@@ -52,10 +52,8 @@ import { HealthService } from "./health.ts";
 import { MaintenanceError, MaintenanceService } from "./maintenance.ts";
 import { DiagnosticsService } from "./diagnostics.ts";
 import { SourceRegistry, SourceRegistryError } from "./sources.ts";
-import { OutboxError, OutboxService } from "./outbox.ts";
 import { OnboardingService } from "./onboarding.ts";
 import { FeishuError, FeishuService, type FeishuChatClient, type FeishuTransportFactory } from "./feishu.ts";
-import { EmailService, MailError, type MailImapFactory, type MailSmtpFactory } from "./email.ts";
 import { DesktopError, DesktopService } from "./desktop.ts";
 import { MemoryError, MemoryService } from "./memory.ts";
 import { ProjectError, ProjectService } from "./projects.ts";
@@ -473,22 +471,8 @@ const feishuTestSchema = z.object({
   domain: z.enum(["feishu", "lark"]).optional()
 }).strict();
 
-const mailServerSchema = z.object({
-  host: z.string().trim().min(1).max(255),
-  port: z.number().int().min(1).max(65535),
-  secure: z.boolean(),
-  user: z.string().trim().min(1).max(320),
-  password: z.string().max(500).optional()
-}).strict();
-
-const mailAccountSchema = z.object({
-  name: z.string().trim().min(1).max(80),
-  fromName: z.string().trim().min(1).max(120),
-  fromAddress: z.string().trim().min(3).max(320),
-  smtp: mailServerSchema,
-  imap: mailServerSchema,
-  syncEnabled: z.boolean().optional(),
-  syncIntervalMinutes: z.number().int().min(5).max(1440).optional()
+const feishuPairingCodeSchema = z.object({
+  conversationId: z.string().trim().min(1).max(80).optional()
 }).strict();
 
 const suggestionActionSchema = z.object({
@@ -526,15 +510,6 @@ const readSourceSchema = z.object({
   url: z.string().trim().min(1).max(2_048).optional()
 }).strict();
 
-const outboxDraftSchema = z.object({
-  account: z.string().max(200).optional(),
-  to: z.array(z.string().max(320)).max(50).optional(),
-  cc: z.array(z.string().max(320)).max(50).optional(),
-  bcc: z.array(z.string().max(320)).max(50).optional(),
-  subject: z.string().max(500).optional(),
-  body: z.string().max(200_000).optional(),
-  attachmentIds: z.array(z.string().trim().min(1).max(80)).max(20).optional()
-}).strict();
 
 const pairingStartSchema = z.object({
   name: z.string().trim().min(1).max(120),
@@ -626,14 +601,10 @@ export interface BuildServerOptions {
   serveWeb?: boolean;
   startScheduler?: boolean;
   startMaintenance?: boolean;
-  startMailSync?: boolean;
   feishuTransportFactory?: FeishuTransportFactory;
   feishuChatClient?: FeishuChatClient;
-  mailSmtpFactory?: MailSmtpFactory;
-  mailImapFactory?: MailImapFactory;
   effectExecutor?: EffectExecutor;
   sourceContentRoot?: string;
-  outboxRoot?: string;
   deviceFrameRoot?: string;
   backupRoot?: string;
   masterKeyPath?: string;
@@ -679,17 +650,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
   });
   const mcpServers = new McpServerService({ store, secretBox });
-  const mail = new EmailService({
-    store,
-    secretBox,
-    sources,
-    ...(options.mailSmtpFactory ? { smtpFactory: options.mailSmtpFactory } : {}),
-    ...(options.mailImapFactory ? { imapFactory: options.mailImapFactory } : {})
-  });
   const effectExecutor = options.effectExecutor ?? ((effect) => executeEffect(effect, {
-    outboxRoot: options.outboxRoot ?? OUTBOX_DIR,
-    getArtifact: (id) => store.getArtifact(id),
-    mail
+    getArtifact: (id) => store.getArtifact(id)
   }));
   const memory = new MemoryService(service);
   const library = new LibraryService(store, {
@@ -801,7 +763,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
       }
     }
   });
-  const outbox = new OutboxService(service, approvals, undefined, mail);
   const desktop = new DesktopService(service, options.deviceFrameRoot ?? DEVICE_FRAME_DIR, security);
   const modelSettingsPath = options.modelSettingsPath ?? MODEL_SETTINGS_PATH;
   const executorSettingsPath = options.executorSettingsPath ?? EXECUTOR_SETTINGS_PATH;
@@ -849,7 +810,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
     attachmentRoot,
     service,
     approvals,
-    outbox,
     ...(options.feishuTransportFactory ? { transportFactory: options.feishuTransportFactory } : {}),
     ...(options.feishuChatClient ? { chatClient: options.feishuChatClient } : {})
   });
@@ -903,8 +863,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
         delegations,
         backgroundTools,
         webSearch,
-        mail,
-        outbox,
         mcpServers,
         worktrees,
         library,
@@ -964,7 +922,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
   if (options.startMaintenance ?? options.startScheduler) {
     maintenance.start();
   }
-  if (options.startMailSync) mail.start();
   const desktopMode = process.env.HEARTH_DESKTOP === "1";
   const app = Fastify({
     // Desktop builds still get diagnostic logs, but per-request info lines are
@@ -1051,7 +1008,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
   app.addHook("onClose", async () => {
     library.stop();
     await feishu.stop();
-    mail.stop();
     maintenance.stop();
     schedules.stop();
     options.hostKernel?.beginDrain();
@@ -1200,50 +1156,16 @@ export async function buildServer(options: BuildServerOptions = {}) {
     return { settings: feishu.view(), status: feishu.snapshot() };
   });
 
-  app.get("/api/mail/accounts", async () => ({ accounts: mail.list() }));
-
-  app.post("/api/mail/accounts", async (request, reply) => {
-    const parsed = mailAccountSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_MAIL_ACCOUNT", message: "邮件账户参数不正确" });
+  app.post("/api/integrations/feishu/pairing-code", async (request, reply) => {
+    const parsed = feishuPairingCodeSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_FEISHU_PAIRING", message: "配对参数不正确" });
     try {
-      return reply.code(201).send({ account: mail.create(parsed.data) });
+      return feishu.createPairingCode(parsed.data.conversationId);
     } catch (error) {
-      return sendMailError(reply, error);
-    }
-  });
-
-  app.patch<{ Params: { id: string } }>("/api/mail/accounts/:id", async (request, reply) => {
-    const parsed = mailAccountSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_MAIL_ACCOUNT", message: "邮件账户参数不正确" });
-    try {
-      return { account: mail.update(request.params.id, parsed.data) };
-    } catch (error) {
-      return sendMailError(reply, error);
-    }
-  });
-
-  app.delete<{ Params: { id: string } }>("/api/mail/accounts/:id", async (request, reply) => {
-    try {
-      mail.remove(request.params.id);
-      return reply.code(204).send();
-    } catch (error) {
-      return sendMailError(reply, error);
-    }
-  });
-
-  app.post<{ Params: { id: string } }>("/api/mail/accounts/:id/test", async (request, reply) => {
-    try {
-      return await mail.test(request.params.id);
-    } catch (error) {
-      return sendMailError(reply, error);
-    }
-  });
-
-  app.post<{ Params: { id: string } }>("/api/mail/accounts/:id/sync", async (request, reply) => {
-    try {
-      return await mail.syncInbox(request.params.id);
-    } catch (error) {
-      return sendMailError(reply, error);
+      if (error instanceof FeishuError) {
+        return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+      }
+      throw error;
     }
   });
 
@@ -1884,66 +1806,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
     if (!parsed.success) return invalidQuery(reply);
     reply.header("cache-control", "no-store");
     return { items: store.listReadySourceItems(parsed.data.limit ?? 100) };
-  });
-
-  app.get("/api/outbox", async (_request, reply) => {
-    reply.header("cache-control", "no-store");
-    return {
-      drafts: outbox.list().map((draft) => ({
-        ...draft,
-        effect: draft.effectId ? store.getEffect(draft.effectId) : null
-      }))
-    };
-  });
-
-  app.get<{ Params: { id: string } }>("/api/outbox/:id", async (request, reply) => {
-    try {
-      reply.header("cache-control", "no-store");
-      const draft = outbox.get(request.params.id);
-      return { ...draft, effect: draft.effectId ? store.getEffect(draft.effectId) : null };
-    } catch (error) {
-      return sendOutboxError(reply, error);
-    }
-  });
-
-  app.post("/api/outbox", async (request, reply) => {
-    const parsed = outboxDraftSchema.safeParse(request.body ?? {});
-    if (!parsed.success) {
-      return reply.code(400).send({ error: "INVALID_OUTBOX_DRAFT", message: "发件箱草稿参数格式不正确" });
-    }
-    try {
-      return reply.code(201).send(outbox.create(parsed.data));
-    } catch (error) {
-      return sendOutboxError(reply, error);
-    }
-  });
-
-  app.patch<{ Params: { id: string } }>("/api/outbox/:id", async (request, reply) => {
-    const parsed = outboxDraftSchema.safeParse(request.body ?? {});
-    if (!parsed.success) {
-      return reply.code(400).send({ error: "INVALID_OUTBOX_DRAFT", message: "发件箱草稿参数格式不正确" });
-    }
-    try {
-      return outbox.update(request.params.id, parsed.data);
-    } catch (error) {
-      return sendOutboxError(reply, error);
-    }
-  });
-
-  app.post<{ Params: { id: string } }>("/api/outbox/:id/discard", async (request, reply) => {
-    try {
-      return outbox.discard(request.params.id);
-    } catch (error) {
-      return sendOutboxError(reply, error);
-    }
-  });
-
-  app.post<{ Params: { id: string } }>("/api/outbox/:id/submit", async (request, reply) => {
-    try {
-      return outbox.submit(request.params.id);
-    } catch (error) {
-      return sendOutboxError(reply, error);
-    }
   });
 
   app.get("/api/desktop", async (_request, reply) => {
@@ -2835,7 +2697,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
         status: "cancelled", currentRunId: task.currentRunId, nextAction: null, error: null
       }, task.currentRunId ?? undefined);
     }
-    outbox.reconcileTask(task.id);
     store.softDeleteTask(task.id);
     return reply.code(204).send();
   });
@@ -2955,7 +2816,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
     if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFF", message: "执行器未启动" });
     try {
       const task = scheduler.cancel(request.params.id);
-      outbox.reconcileTask(request.params.id);
       return task;
     } catch (error) {
       return reply.code(404).send({ error: "TASK_NOT_FOUND", message: error instanceof Error ? error.message : String(error) });
@@ -3021,7 +2881,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
     try {
       const result = await approvals.decide(request.params.id, parsed.data.decision, parsed.data.parameterHash);
-      outbox.reconcileApproval(result.approval.id);
       if (result.effect?.status === "succeeded" && result.task.status === "recoverable"
         && store.listTaskFollowUps(result.task.id, "queued").length > 0) {
         try {
@@ -3033,7 +2892,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
       return result;
     } catch (error) {
       if (error instanceof ApprovalError) {
-        outbox.reconcileApproval(request.params.id);
         const status = error.code === "APPROVAL_NOT_FOUND" ? 404 : error.code === "APPROVAL_EXPIRED" ? 410 : 409;
         return reply.code(status).send({ error: error.code, message: error.message });
       }
@@ -3224,20 +3082,6 @@ function sendReconcileError(reply: FastifyReply, error: unknown) {
 
 function sendSourceError(reply: FastifyReply, error: unknown) {
   if (error instanceof SourceRegistryError) {
-    return reply.code(error.statusCode).send({ error: error.code, message: error.message });
-  }
-  throw error;
-}
-
-function sendOutboxError(reply: FastifyReply, error: unknown) {
-  if (error instanceof OutboxError) {
-    return reply.code(error.statusCode).send({ error: error.code, message: error.message });
-  }
-  throw error;
-}
-
-function sendMailError(reply: FastifyReply, error: unknown) {
-  if (error instanceof MailError) {
     return reply.code(error.statusCode).send({ error: error.code, message: error.message });
   }
   throw error;

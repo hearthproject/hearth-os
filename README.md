@@ -77,15 +77,15 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
 | **单一事实源** | 服务端不再写 JSONL journal，消息、工具结算、检查点与 run 边界统一写入 SQLite `events`（schema v42）；checkpoint 文件降级为物化视图，损坏时从事件按 `event_seq` 回放重建 |
 | **Windows 原生沙箱** | `apps/native/hearth-native.cs` 编译为 `hearth-native.exe`：AppContainer package SID、workspace/temp ACL 白名单、kill-on-close Job Object、父进程 watchdog；网络只支持显式 `deny` / `open`，声明域名白名单或 helper 缺失时 fail-closed；越界写、只读、junction 逃逸、密钥过滤和网络拒绝都有真实测试 |
 | **交互式 shell 与后台进程** | `shell` 支持 `pty: true` 与 `cols` / `rows`，经 ConPTY 在 AppContainer 内运行；`shell_input` / `shell_resize` 可输入与调整终端；每个会话写入 SQLite `background_processes`，重启时按 PID + 创建时间判定，活的杀进程树、复用的只标 `lost` |
-| **审批模式** | `necessary`、`workspace`、`full` 三档；工作区内可逆文件写入自动执行，shell、删除、邮件、桌面、陌生域名和支付/提交类动作仍需审批；参数指纹绑定一次性授权 |
-| **三个执行器** | 内置 `native`，以及 `codex`、`deepseek-harness` 两个官方 SDK 执行器；共用注册表、健康检测、模型绑定和设置界面，失败后不静默互换 |
+| **审批模式** | `necessary`、`workspace`、`full` 三档；工作区内可逆文件写入自动执行，shell、删除、桌面、陌生域名和支付/提交类动作仍需审批；参数指纹绑定一次性授权 |
+| **三个执行器** | 内置 `native`，以及 `codex`、`deepseek-harness` 两个官方 SDK 执行器；共用注册表、健康检测、模型绑定和设置界面。执行器只有在本机真实探测通过后才显示为可用；DeepSeek Harness 绑定模型不会替代安装与探测，失败后不静默互换 |
 | **统一模型注册表** | SQLite 模型档案与执行器绑定取代私有 JSON；支持 OpenAI Chat、OpenAI Responses、Anthropic Messages、Gemini 四种协议；API Key 经 `.hearth/master.key` 以 AES-256-GCM 加密 |
 | **项目、子代理与 MCP** | 项目可以是任意本地文件夹：Git 仓库自动使用独立 `hearth/<task-id>` Worktree，普通文件夹原地执行并给出改动清单；子代理使用新上下文、只读或隔离写、单层串行且最多两个；本地 stdio MCP 支持启动探测、工具发现、Schema 校验、逐次审批、超时和崩溃隔离 |
 | **浏览器自动化** | 独立 Chrome profile、多标签页、页面元素快照与稳定 ID、13 个浏览器工具；提交/上传/下载逐次审批，动作前后截图与页面摘要进入证据目录；完成前必须有通过的页面断言；不读取 cookie 或密码 |
 | **资料库与记忆** | 文件、记忆、资料和技能统一成树；支持检索、预览、回收站恢复；记忆有候选、来源与可信度、召回、纠正、遗忘传播与导出，可关闭自动记录 |
 | **Context 交接** | 从活跃记忆生成接手摘要（目标、最近决定、下一步）与原文打包，可导出 zip 给下一个人或账号；多账号共享视图单独列出全部记忆与交接范围 |
-| **邮件与定时任务** | SMTP 发送复用审批与效果账本，批准后发送并保存回执；IMAP 只读同步最近邮件到来源，不标记已读；定时任务有有界补跑、失败冷却和直接使用自定义输入 |
-| **飞书消息入口** | 企业自建应用长连接、open_id 白名单、文本/图片/文件消息、任务状态、审批摘要与 `/approve`、`/reject` 文本命令；入站消息带幂等记录，不需要公网回调 |
+| **定时任务** | 有界补跑、失败冷却和直接使用自定义输入；到点自动创建任务并复用统一调度与审批 |
+| **飞书消息入口** | 企业自建应用长连接、open_id 白名单、文本/图片/文件消息；任务受理与状态变化实时推送，审批摘要带 `/approve`、`/reject` 文本命令并绕过消息排队立即处理；出站消息带持久重试队列，连接断开自动退避重连，连接页显示收发与重连指标；可用 6 位配对码把飞书聊天绑定到已有对话；入站消息带幂等记录，不需要公网回调 |
 | **档案与工作方式** | 每个项目编译 `PROJECT.md`（栈、命令、约定、决策、未完成任务、坑）；`WORKSTYLE.md` 记录沟通、提交、验证和工具偏好；只注入 coding 任务 |
 | **上下文与办公产物** | 模型窗口默认 128K、最大输出默认 8K；只在完整回合边界做 Token 感知压缩，压缩后写检查点；可生成 XLSX/CSV/DOCX；Shell 完整输出写入任务日志、只回填尾部并杀死超时进程树 |
 | **桌面、移动与开机体验** | Tauri 桌面壳内置 Node 与全部服务端功能，关窗隐藏到托盘，托盘菜单负责退出、体检、桌面助手和目录；Windows 桌面助手支持配对码、逐项能力审批、截图观察、暂停/接管与 UI 自动化；PWA 壳和移动底部导航已存在，真机安装与远程接管未验收 |
@@ -157,7 +157,7 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
 
 ```mermaid
 flowchart TB
-  U["用户<br/>聊天 · 资料库 · 审批 · 邮件/定时"] --> W["Web 控制面<br/>React + Vite · 内联执行轨迹 · 产物面板"]
+  U["用户<br/>聊天 · 资料库 · 审批 · 定时"] --> W["Web 控制面<br/>React + Vite · 内联执行轨迹 · 产物面板"]
   W --> A["Fastify API + SSE"]
   W --> H["HostKernel<br/>宿主租约 · 阶段化恢复"]
   H --> A
@@ -171,7 +171,7 @@ flowchart TB
   S --> C["Codex 执行器<br/>OpenAI Responses"]
   S --> DS["DeepSeek Harness<br/>官方 SDK / JSON-RPC"]
   A --> P["审批与效果账本<br/>参数指纹 · 回执 · 对账"]
-  A --> M["邮件与飞书<br/>SMTP · IMAP · 长连接"]
+  A --> M["飞书<br/>长连接 · 实时进度 · 审批命令 · 重试/重连"]
   A --> BR["浏览器<br/>独立 profile · 断言 · 证据"]
   A --> E["SQLite 单一事件日志<br/>schema v40 · 投影"]
   E --> CK["检查点<br/>物化视图 + event_seq 回放"]
@@ -259,7 +259,6 @@ Codex 执行器优先使用统一模型绑定；没有绑定时读取现有的 `
 | `.hearth/executors/` | 托管执行器安装目录与隔离的 Codex/DeepSeek Harness 运行目录 |
 | `.hearth/workspaces/` | 隔离的任务工作区、检查点与 `run-evidence.json` |
 | `.hearth/artifacts/` | 受管产物与清单 |
-| `.hearth/outbox/` | 本地发件箱与回执 |
 | `.hearth/backups/` | 加密备份归档与旧设置迁移备份 |
 
 服务端提供 AES-256-GCM 加密备份创建与恢复，入口在 **设置 → 数据**，恢复前校验 schema 与 `integrity_check`。备份包含数据库与必要元数据，但**不包含产物正文、工作区、来源正文和外部附件**；完整归档需要一并复制 `.hearth/artifacts/` 和 `.hearth/workspaces/`。
@@ -285,7 +284,7 @@ hearth-os/
 │   │   │   ├── approvals.ts / effects.ts              # 参数指纹审批与效果账本
 │   │   │   ├── browser-*.ts                          # 浏览器会话、快照、工具与证据
 │   │   │   ├── context*.ts / memory.ts                # 上下文投影与记忆治理
-│   │   │   ├── feishu*.ts / email.ts / desktop.ts     # 飞书长连接、邮件与 Windows 桌面边界
+│   │   │   ├── feishu*.ts / desktop.ts                # 飞书长连接与 Windows 桌面边界
 │   │   │   ├── mcp-*.ts / subagents.ts                # 本地 stdio MCP 与有界子代理
 │   │   │   ├── worktrees.ts / workspace.ts            # 任务隔离 Worktree 与工作区
 │   │   │   ├── backups.ts / security.ts               # 加密备份与全局 kill switch
@@ -293,7 +292,7 @@ hearth-os/
 │   │   └── package.json                              # @hearth/server：依赖全部 workspace 包
 │   ├── web/                                          # React + Vite 聊天优先控制面（PWA）
 │   │   ├── src/App.tsx                               # 路由、首跑向导与事件驱动缓存失效
-│   │   ├── src/pages/                                # Chat / Library / Context / Mail / Schedules / Settings 等
+│   │   ├── src/pages/                                # Chat / Library / Context / Schedules / Settings 等
 │   │   ├── src/components/                            # AppShell / InlineRun / ChatWorkspacePanel 等
 │   │   ├── src/lib/                                  # api.ts / types.ts / navigation.ts / preview.ts …
 │   │   ├── src/styles/                               # 30 个样式文件，按页面与组件拆分
@@ -358,13 +357,13 @@ hearth-os/
 - 自动更新签名、Windows Authenticode、干净机安装/卸载与旧版本升级未验收；安装包首次运行可能触发 SmartScreen。
 - Windows 沙箱的 `open` 网络模式只表示“允许出网”，不支持域级白名单；声明 `networkHosts` 会 fail-closed。沙箱是文件/进程/网络边界，不是虚拟机或容器级强隔离。`approvalMode=full` 的对话会把 native 任务显式切到 `danger-full-access` 并跳过沙箱；需要沙箱时使用 `necessary` 或 `workspace`。
 - 后台 shell 与 PTY 不跨宿主重启恢复终端状态：重启时统一标记 `lost` 并清理孤儿进程树，不假装会话还在。
-- 邮件默认写本机发件箱；配置 SMTP 后可以提交真实发送审批，但真实账户、退信和垃圾邮件语义尚未人工验收。日历账户未接入，邮件附件 UI 未实现。
+- 邮件（SMTP/IMAP/本地发件箱）已从产品中完整移除；旧数据库表不再读取或写入，日历账户未接入。
 - Windows 助手只支持同机、前台聚焦操作；敏感区域遮挡、隔离桌面和高风险动作补偿尚未实现。
 - 浏览器使用独立 Chrome profile，首次需要在该 profile 内登录站点；没有直接接管默认 Chrome 的 MV3 扩展桥。Chrome 136+ 默认 profile 禁止远程调试。
-- 飞书长连接提供手机消息与文本审批，但不是手机 PWA、系统级推送或完整远程接管；页面关闭后不会推送。
+- 飞书长连接提供手机消息、实时任务进度、文本审批、出站重试、自动重连与配对码，但不是手机 PWA、系统级推送或完整远程接管；页面关闭后不会推送。
 - PWA 壳、移动底部导航和离线应用壳已存在，但手机配对、iOS/Android 真机安装、系统推送和远程接管未验收。
 - 所有数据、设备与令牌边界都在本机；不提供多设备事件同步或远程节点连接。
-- 主导航暴露聊天、资料库、Context 三个主入口；邮件、定时任务和连接收在“更多”；设置固定在底部。
+- 主导航暴露聊天、资料库、Context 三个主入口；定时任务和连接收在“更多”；设置固定在底部。
 - 真实模型首跑仍取决于本机模型配置和供应商权限；没有可用 key 时只能用 `first:run --fake` 验证脚本自身。
 - 评测 case、场景和实验已迁到独立仓库；主仓库不再注册评测桥接，测试不代表真实评测实验已经运行。native 30 题的最终提交 `eb32ad5` 尚未完成连续复测。
 - 原生运行时仍不支持远程 MCP、OAuth、图片/扫描件视觉理解、PPTX、LSP、格式化器或自动 cherry-pick。

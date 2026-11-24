@@ -1,13 +1,11 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router-dom";
-import { ChatMailDraft } from "../components/ChatMailDraft.tsx";
 import { ApprovalCard } from "../components/ApprovalCard.tsx";
 import { GoalBar } from "../components/GoalBar.tsx";
 import { GoalDialog } from "../components/GoalDialog.tsx";
 import { PlanBar } from "../components/PlanBar.tsx";
 import { PlanDialog } from "../components/PlanDialog.tsx";
-import { isMailDraftReply } from "../lib/mail-draft.ts";
 import {
   ArrowUp,
   Brain,
@@ -294,9 +292,6 @@ export function ChatPage() {
     ...visibleMessages.map((message): TimelineMessage => ({ kind: "message", key: `m:${message.id}`, at: message.createdAt, message })),
     ...runs.map((task): TimelineRun => ({ kind: "run", key: `r:${task.id}`, at: task.createdAt, task }))
   ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at)), [visibleMessages, runs]);
-  const mailDraftIds = useMemo(() => new Set(visibleMessages.flatMap((message, index) =>
-    !message.taskId && isMailDraftReply(visibleMessages, index) ? [message.id] : []
-  )), [visibleMessages]);
 
   useEffect(() => {
     if (!conversationQuery.data || sending) return;
@@ -837,6 +832,7 @@ export function ChatPage() {
               if (conversation.settings) setDraftSettings(conversation.settings);
               setPendingProjectId(null);
               localStorage.setItem("hearth.conversation", conversation.id);
+              void queryClient.invalidateQueries({ queryKey: ["conversations"] });
             } else if (event === "user") {
               setMessages((prev) => [...prev, data as ChatMessageRecord]);
             } else if (event === "routing") {
@@ -981,7 +977,8 @@ export function ChatPage() {
   const selectedExecutor = executorViews.find((executor) => executor.id === selectedExecutorId) ?? null;
   const selectedExecutorName = selectedExecutor?.name ?? (selectedExecutorId ? executorLabel(selectedExecutorId) : "");
   const selectedExecutorUnavailable = Boolean(selectedExecutorId && !executorAvailability[selectedExecutorId]);
-  const visibleExecutorIds = EXECUTOR_ORDER.filter((id) => executorAvailability[id] || id === selectedExecutorId);
+  const visibleExecutorIds = EXECUTOR_ORDER.filter((id) => executorAvailability[id] === true);
+  const selectedExecutorVisible = visibleExecutorIds.includes(selectedExecutorId);
   const isWorking = sending || hasRunningTask;
   const stoppableTask = useMemo(
     () => runs.find((task) => task.status === "running" || task.status === "queued"),
@@ -1119,7 +1116,6 @@ export function ChatPage() {
               <ChatBubble
                 key={item.key}
                 message={item.message}
-                mailDraft={mailDraftIds.has(item.message.id)}
                 execution={chatExecutions[item.message.id]}
                 onPreview={openPreview}
               />
@@ -1267,11 +1263,16 @@ export function ChatPage() {
             </div>
             <label className="composer-executor" title={selectedExecutorUnavailable ? selectedExecutor?.health.issues.join("；") : "锁定执行器后不会自动切换"}>
               <select
-                value={selectedExecutorId ?? ""}
+                value={selectedExecutorVisible ? selectedExecutorId : ""}
                 onChange={(event) => chooseExecutor(event.target.value as ExecutorId | "")}
-                disabled={!settingsReady || sending}
+                disabled={!settingsReady || sending || visibleExecutorIds.length === 0}
                 aria-label="选择执行器"
               >
+                {!selectedExecutorVisible && (
+                  <option value="" disabled>
+                    {visibleExecutorIds.length === 0 ? "没有可用执行器" : "选择可用执行器"}
+                  </option>
+                )}
                 {visibleExecutorIds.map((id) => {
                   const view = executorViews.find((executor) => executor.id === id);
                   return (
@@ -1550,12 +1551,10 @@ function isTaskNoise(message: ChatMessageRecord): boolean {
 
 const ChatBubble = memo(function ChatBubble({
   message,
-  mailDraft = false,
   execution,
   onPreview
 }: {
   message: ChatMessageRecord;
-  mailDraft?: boolean;
   execution?: ChatExecution | undefined;
   onPreview: (preview: PreviewTarget) => void;
 }) {
@@ -1587,12 +1586,11 @@ const ChatBubble = memo(function ChatBubble({
   return (
     <div className="message-row assistant">
       {execution && <ChatExecutionSummary execution={execution} />}
-      {mailDraft ? <ChatMailDraft content={message.content} /> :
       <AssistantBubble
         content={message.taskId ? stripDeliverySection(message.content) : message.content}
         copyText={message.content}
         createdAt={message.createdAt}
-      />}
+      />
       {message.taskId && message.kind !== "task_status" && <TaskAnswerFiles taskId={message.taskId} onPreview={onPreview} />}
     </div>
   );

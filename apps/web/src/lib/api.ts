@@ -22,13 +22,10 @@ import type {
   EventEnvelope,
   FeishuDomain,
   FeishuIntegrationResponse,
+  FeishuPairingCodeResponse,
   FeishuTestResponse,
-  FolderBrowseResult,
-  MailAccountInput,
-  MailAccountView,
-  MailSyncResult,
-  MailTestResult,
   HealthResponse,
+  FolderBrowseResult,
   LocalProjectView,
   ProjectDossierView,
   WorkstyleView,
@@ -46,9 +43,6 @@ import type {
   OnboardingSnapshot,
   OnboardingVerificationView,
   SettingsStorageResponse,
-  OutboxDraft,
-  OutboxDraftRequest,
-  OutboxSubmitResult,
   ScheduleInput,
   ScheduleRecord,
   ScheduleRunRecord,
@@ -358,18 +352,11 @@ export const api = {
   testFeishu: (input: { appId?: string; appSecret?: string; domain?: FeishuDomain } = {}) =>
     request<FeishuTestResponse>("/api/integrations/feishu/test", { method: "POST", body: JSON.stringify(input) }),
   reconnectFeishu: () => request<FeishuIntegrationResponse>("/api/integrations/feishu/reconnect", { method: "POST" }),
-  mailAccounts: () => request<{ accounts: MailAccountView[] }>("/api/mail/accounts"),
-  createMailAccount: (input: MailAccountInput) => request<{ account: MailAccountView }>("/api/mail/accounts", {
-    method: "POST",
-    body: JSON.stringify(input)
-  }),
-  updateMailAccount: (id: string, input: MailAccountInput) => request<{ account: MailAccountView }>(`/api/mail/accounts/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    body: JSON.stringify(input)
-  }),
-  deleteMailAccount: (id: string) => request<void>(`/api/mail/accounts/${encodeURIComponent(id)}`, { method: "DELETE" }),
-  testMailAccount: (id: string) => request<MailTestResult>(`/api/mail/accounts/${encodeURIComponent(id)}/test`, { method: "POST" }),
-  syncMailAccount: (id: string) => request<MailSyncResult>(`/api/mail/accounts/${encodeURIComponent(id)}/sync`, { method: "POST" }),
+  createFeishuPairingCode: (conversationId?: string) =>
+    request<FeishuPairingCodeResponse>("/api/integrations/feishu/pairing-code", {
+      method: "POST",
+      body: JSON.stringify(conversationId ? { conversationId } : {})
+    }),
   security: () => request<SecuritySnapshot>("/api/security"),
   setKillSwitch: (enabled: boolean, reason?: string) => request<SecuritySnapshot>("/api/security/kill-switch", {
     method: "POST",
@@ -449,15 +436,6 @@ export const api = {
     }),
   approvals: (params: { taskId?: string; status?: string; limit?: number; offset?: number; brief?: boolean } = {}) =>
     request<{ approvals: ApprovalListItem[]; total: number }>(`/api/approvals${query(params)}`),
-  createOutboxDraft: (input: OutboxDraftRequest) => request<OutboxDraft>("/api/outbox", {
-    method: "POST",
-    body: JSON.stringify(input)
-  }),
-  updateOutboxDraft: (id: string, input: OutboxDraftRequest) => request<OutboxDraft>(`/api/outbox/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    body: JSON.stringify(input)
-  }),
-  submitOutboxDraft: (id: string) => request<OutboxSubmitResult>(`/api/outbox/${encodeURIComponent(id)}/submit`, { method: "POST" }),
   retry: (id: string, message?: string) => request<TaskRecord>(`/api/tasks/${encodeURIComponent(id)}/retry`, {
     method: "POST",
     ...(message ? { body: JSON.stringify({ message }) } : {})
@@ -506,7 +484,6 @@ export function subscribeToEvents(onEvent: (event: string, envelope?: EventEnvel
     "security.kill-switch.updated", "security.audit",
     "context.item.appended", "context.summary.updated", "context.settings.updated", "context.task.deleted",
     "execution.diagnosed", "execution.handoff.prepared", "execution.handoff.started", "execution.handoff.completed", "execution.handoff.failed",
-    "outbox.created", "outbox.updated",
     "schedule.created", "schedule.updated", "schedule.run.created", "schedule.run.updated",
     "device.paired", "device.updated", "device.pairing-requested", "device.pairing-updated",
     "desktop.session.created", "desktop.session.updated", "desktop.frame.updated",

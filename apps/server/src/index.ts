@@ -9,7 +9,7 @@ const bootStartedAt = performance.now();
 const host = new HostKernel({ dataDir: DATA_DIR, port: PORT });
 host.start();
 
-const app = await buildServer({ logger: true, startScheduler: true, startMailSync: true, hostKernel: host })
+const app = await buildServer({ logger: true, startScheduler: true, hostKernel: host })
   .catch((error: unknown) => {
     host.stop();
     throw error;

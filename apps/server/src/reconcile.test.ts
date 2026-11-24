@@ -17,10 +17,10 @@ describe("effect reconcile queue", () => {
   afterEach(() => store.close());
 
   it("settles a committed effect without replaying it", async () => {
-    const effect = createEffect(service, "uncertain", { to: ["reviewer@example.test"] });
+    const effect = createEffect(service, "uncertain", { repo: "acme/repo", pull: 12 });
     const reconcile = new ReconcileService(service, {
       providers: {
-        email: { check: () => ({ status: "committed", providerRef: "server-msg-1", receipt: { messageId: "server-msg-1" } }) }
+        github: { check: () => ({ status: "committed", providerRef: "server-msg-1", receipt: { messageId: "server-msg-1" } }) }
       }
     });
     const item = reconcile.enqueue(effect, "发送响应中断");
@@ -37,9 +37,9 @@ describe("effect reconcile queue", () => {
   });
 
   it("marks an absent effect as not executed", async () => {
-    const effect = createEffect(service, "uncertain", { to: ["reviewer@example.test"] });
+    const effect = createEffect(service, "uncertain", { repo: "acme/repo", pull: 12 });
     const reconcile = new ReconcileService(service, {
-      providers: { email: { check: () => ({ status: "absent" }) } }
+      providers: { github: { check: () => ({ status: "absent" }) } }
     });
     const item = reconcile.enqueue(effect, "发送响应中断");
     await reconcile.check(item.id);
@@ -47,9 +47,9 @@ describe("effect reconcile queue", () => {
   });
 
   it("moves repeated unknown results to the human queue", async () => {
-    const effect = createEffect(service, "uncertain", { to: ["reviewer@example.test"] });
+    const effect = createEffect(service, "uncertain", { repo: "acme/repo", pull: 12 });
     const reconcile = new ReconcileService(service, {
-      providers: { email: { check: () => ({ status: "unknown", reason: "IMAP 暂不可读" }) } }
+      providers: { github: { check: () => ({ status: "unknown", reason: "IMAP 暂不可读" }) } }
     });
     const item = reconcile.enqueue(effect, "发送响应中断");
     await reconcile.check(item.id);
@@ -60,10 +60,10 @@ describe("effect reconcile queue", () => {
   });
 
   it("suspends and resumes effects on the same target", async () => {
-    const first = createEffect(service, "uncertain", { to: ["reviewer@example.test"] }, "2026-11-09T01:00:00.000Z");
-    const following = createEffect(service, "prepared", { to: ["reviewer@example.test"] }, "2026-11-09T01:01:00.000Z", first.taskId);
+    const first = createEffect(service, "uncertain", { repo: "acme/repo", pull: 12 }, "2026-11-09T01:00:00.000Z");
+    const following = createEffect(service, "prepared", { repo: "acme/repo", pull: 12 }, "2026-11-09T01:01:00.000Z", first.taskId);
     const reconcile = new ReconcileService(service, {
-      providers: { email: { check: () => ({ status: "committed" }) } }
+      providers: { github: { check: () => ({ status: "committed" }) } }
     });
     const item = reconcile.enqueue(first, "发送响应中断");
     const suspended = store.getEffect(following.id);
@@ -77,30 +77,30 @@ describe("effect reconcile queue", () => {
   });
 
   it("keeps manual resolution explicit and records the human note", () => {
-    const effect = createEffect(service, "uncertain", { to: ["reviewer@example.test"] });
+    const effect = createEffect(service, "uncertain", { repo: "acme/repo", pull: 12 });
     const reconcile = new ReconcileService(service);
     const item = reconcile.enqueue(effect, "发送响应中断");
 
-    const resolved = reconcile.resolveManually(item.id, "committed", "在邮件服务商已看到发送成功回执");
+    const resolved = reconcile.resolveManually(item.id, "committed", "在 GitHub 上已看到评论发布成功");
 
     expect(resolved.status).toBe("resolved_committed");
-    expect(resolved.resolutionNote).toContain("发送成功回执");
+    expect(resolved.resolutionNote).toContain("评论发布成功");
     expect(store.getEffect(effect.id)).toMatchObject({
       status: "reconciled_committed",
       reconcileRef: item.id,
-      receipt: { manualResolution: "committed", note: "在邮件服务商已看到发送成功回执" }
+      receipt: { manualResolution: "committed", note: "在 GitHub 上已看到评论发布成功" }
     });
   });
 
   it("creates a human follow-up task without closing the reconcile item", () => {
-    const effect = createEffect(service, "uncertain", { to: ["reviewer@example.test"] });
+    const effect = createEffect(service, "uncertain", { repo: "acme/repo", pull: 12 });
     const reconcile = new ReconcileService(service);
     const item = reconcile.enqueue(effect, "发送响应中断");
 
-    const task = reconcile.createTask(item.id, "请登录邮箱核对是否已发送");
+    const task = reconcile.createTask(item.id, "请到 GitHub 核对评论是否已发布");
 
     expect(task.goal).toContain(item.id);
-    expect(task.goal).toContain("请登录邮箱核对是否已发送");
+    expect(task.goal).toContain("请到 GitHub 核对评论是否已发布");
     expect(store.getReconcileItem(item.id)?.status).toBe("open");
     expect(store.getReconcileItem(item.id)?.attempted).toContain(`task:${task.id}`);
     expect(reconcile.list("open")).toHaveLength(1);
@@ -119,7 +119,7 @@ function createEffect(
     id: randomUUID(),
     taskId: resolvedTaskId,
     approvalId: randomUUID(),
-    kind: "email.smtp-send",
+    kind: "github.comment",
     idempotencyKey: randomUUID(),
     status,
     target,
@@ -127,9 +127,9 @@ function createEffect(
     error: null,
     createdAt,
     updatedAt: createdAt,
-    effectType: "email.send",
+    effectType: "github.comment",
     replayPolicy: "never_replay",
-    provider: "email",
+    provider: "github",
     attemptCount: 1,
     maxAttempts: 1
   };

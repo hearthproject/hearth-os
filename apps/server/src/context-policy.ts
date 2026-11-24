@@ -73,8 +73,7 @@ export function evaluateHandoff(input: {
     return { targetAvailable, eligible: false, highRisk: false, reason: "Codex 不支持桌面截图任务" };
   }
   const uncertainEffects = service.store.listEffects(task.id).filter((effect) => effect.status === "uncertain" || effect.status === "executing");
-  const uncertainOutbox = service.store.listOutboxDrafts().filter((draft) => draft.taskId === task.id && draft.status === "uncertain");
-  if (effectNeedsReconciliation(uncertainEffects) || uncertainOutbox.length > 0) {
+  if (effectNeedsReconciliation(uncertainEffects)) {
     return { targetAvailable, eligible: false, highRisk: false, reason: "存在状态不确定的外部动作，必须先对账后才能接管" };
   }
   if (settings.mode === "shadow") {
@@ -82,8 +81,7 @@ export function evaluateHandoff(input: {
   }
   const approvals = service.store.listApprovals(task.id).filter((approval) => approval.status === "pending");
   const effects = service.store.listEffects(task.id).filter((effect) => ["pending", "executing", "uncertain"].includes(effect.status));
-  const outbox = service.store.listOutboxDrafts().filter((draft) => draft.taskId === task.id && ["pending_approval", "stored", "uncertain"].includes(draft.status));
-  const riskyEffects = approvals.length > 0 || effects.length > 0 || outbox.length > 0;
+  const riskyEffects = approvals.length > 0 || effects.length > 0;
   const networkBlocked = targetExecutor === "codex" && task.networkHosts.length > 0 && !settings.allowCodexNetwork;
   const writesOutsideWorkspace = Boolean(input.taskWorkspace && task.permissions?.writeRoots.some((root) => {
     if (!root.trim()) return false;

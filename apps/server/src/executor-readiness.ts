@@ -58,6 +58,10 @@ export function applyExecutorModelReadiness(
       return markUnavailable(health, DSH_FIELDS_ISSUE);
     }
     if (modelSettings.protocol === "gemini") return markUnavailable(health, DSH_PROTOCOL_ISSUE);
+    // A model binding alone is not proof that the optional runtime is installed
+    // and can actually run. DeepSeek Harness stays unavailable until a real
+    // probe has succeeded.
+    if (!health.canRun) return health;
     return markReady(health);
   }
   return health;

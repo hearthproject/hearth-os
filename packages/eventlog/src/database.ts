@@ -63,7 +63,6 @@ import type {
   McpServerConfig,
   McpServerStatus,
   McpToolDescriptor,
-  OutboxDraft,
   ModelProfileRecord,
   ProactiveSettings,
   ProactiveSuggestion,
@@ -3912,15 +3911,6 @@ export class HearthStore {
     return redacted;
   }
 
-  getOutboxDraft(id: string): OutboxDraft | null {
-    const row = this.db.prepare("SELECT * FROM outbox_drafts WHERE id = ?").get(id) as DbRow | undefined;
-    return row ? rowToOutboxDraft(row) : null;
-  }
-
-  listOutboxDrafts(): OutboxDraft[] {
-    return (this.db.prepare("SELECT * FROM outbox_drafts ORDER BY created_at DESC").all() as DbRow[]).map(rowToOutboxDraft);
-  }
-
   getDevice(id: string): DeviceRecord | null {
     const row = this.db.prepare("SELECT * FROM devices WHERE id = ?").get(id) as DbRow | undefined;
     return row ? rowToDevice(row) : null;
@@ -4326,8 +4316,6 @@ export class HearthStore {
         this.createDelegationJob(event.payload as DelegationJob);
         return;
       }
-      case "outbox.created": return upsertOutboxDraft(this.db, event.payload as OutboxDraft);
-      case "outbox.updated": return updateOutboxDraft(this.db, event.payload as Record<string, unknown>);
       case "device.paired":
       case "device.updated": return upsertDevice(this.db, event.payload as DeviceRecord);
       case "device.pairing-requested":
@@ -4786,41 +4774,6 @@ function upsertSourceItem(db: DatabaseSync, item: SourceItem): void {
 
 function clearSource(db: DatabaseSync, sourceId: string): void {
   db.prepare("DELETE FROM source_items WHERE source_id = ?").run(sourceId);
-}
-
-function upsertOutboxDraft(db: DatabaseSync, draft: OutboxDraft): void {
-  db.prepare(
-    `INSERT INTO outbox_drafts (id, account, to_json, cc_json, bcc_json, subject, body, attachments_json, status, task_id, approval_id, effect_id, created_at, updated_at, submitted_at, discarded_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET
-       account=excluded.account, to_json=excluded.to_json, cc_json=excluded.cc_json,
-       bcc_json=excluded.bcc_json, subject=excluded.subject, body=excluded.body,
-       attachments_json=excluded.attachments_json, status=excluded.status, task_id=excluded.task_id,
-       approval_id=excluded.approval_id, effect_id=excluded.effect_id, updated_at=excluded.updated_at,
-       submitted_at=excluded.submitted_at, discarded_at=excluded.discarded_at`
-  ).run(
-    draft.id, draft.account, JSON.stringify(draft.to), JSON.stringify(draft.cc), JSON.stringify(draft.bcc),
-    draft.subject, draft.body, JSON.stringify(draft.attachments), draft.status, draft.taskId,
-    draft.approvalId, draft.effectId, draft.createdAt, draft.updatedAt, draft.submittedAt, draft.discardedAt
-  );
-}
-
-function updateOutboxDraft(db: DatabaseSync, patch: Record<string, unknown>): void {
-  const id = String(patch.id);
-  const columns: Record<string, string> = {
-    account: "account", subject: "subject", body: "body", status: "status", taskId: "task_id",
-    approvalId: "approval_id", effectId: "effect_id", updatedAt: "updated_at",
-    submittedAt: "submitted_at", discardedAt: "discarded_at"
-  };
-  for (const [key, column] of Object.entries(columns)) {
-    if (key in patch) db.prepare(`UPDATE outbox_drafts SET ${column} = ? WHERE id = ?`).run((patch[key] as SQLInputValue) ?? null, id);
-  }
-  for (const key of ["to", "cc", "bcc", "attachments"] as const) {
-    if (key in patch) {
-      const column = key === "attachments" ? "attachments_json" : `${key}_json`;
-      db.prepare(`UPDATE outbox_drafts SET ${column} = ? WHERE id = ?`).run(JSON.stringify(patch[key] ?? []), id);
-    }
-  }
 }
 
 function upsertDevice(db: DatabaseSync, device: DeviceRecord): void {
@@ -6076,22 +6029,6 @@ function rowToSourceItem(row: DbRow): SourceItem {
     duplicateOf: row.duplicate_of == null ? null : String(row.duplicate_of),
     error: row.error_json == null ? null : JSON.parse(String(row.error_json)),
     fetchedAt: String(row.fetched_at)
-  };
-}
-
-function rowToOutboxDraft(row: DbRow): OutboxDraft {
-  return {
-    id: String(row.id), account: String(row.account),
-    to: JSON.parse(String(row.to_json)), cc: JSON.parse(String(row.cc_json)),
-    bcc: JSON.parse(String(row.bcc_json)), subject: String(row.subject), body: String(row.body),
-    attachments: JSON.parse(String(row.attachments_json)),
-    status: String(row.status) as OutboxDraft["status"],
-    taskId: row.task_id == null ? null : String(row.task_id),
-    approvalId: row.approval_id == null ? null : String(row.approval_id),
-    effectId: row.effect_id == null ? null : String(row.effect_id),
-    createdAt: String(row.created_at), updatedAt: String(row.updated_at),
-    submittedAt: row.submitted_at == null ? null : String(row.submitted_at),
-    discardedAt: row.discarded_at == null ? null : String(row.discarded_at)
   };
 }
 

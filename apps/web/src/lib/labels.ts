@@ -56,8 +56,6 @@ export const APPROVAL_STATUS_LABELS: Record<ApprovalRecord["status"], string> = 
 const APPROVAL_KIND_LABELS: Record<string, string> = {
   "github.publish-pr": "创建 GitHub PR",
   "github.comment": "发布 GitHub 评论",
-  "outbox.local-write": "写入本地发件箱",
-  "email.smtp-send": "发送邮件",
   "tool.write_file": "写入工作区文件",
   "tool.edit_file": "修改工作区文件",
   "tool.apply_patch": "应用代码补丁",

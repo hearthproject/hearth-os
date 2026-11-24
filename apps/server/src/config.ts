@@ -25,7 +25,6 @@ export const WORKSPACE_DIR = join(DATA_DIR, "workspaces");
 export const GIT_CACHE_DIR = join(DATA_DIR, "git-cache");
 export const ARTIFACT_DIR = join(DATA_DIR, "artifacts");
 export const SOURCE_CONTENT_DIR = join(DATA_DIR, "sources");
-export const OUTBOX_DIR = join(DATA_DIR, "outbox");
 export const DEVICE_FRAME_DIR = join(DATA_DIR, "device-frames");
 export const BACKUP_DIR = join(DATA_DIR, "backups");
 export const CONTEXT_BLOB_DIR = join(DATA_DIR, "context", "blobs");

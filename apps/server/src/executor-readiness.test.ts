@@ -118,4 +118,17 @@ describe("executor model readiness", () => {
     expect(applyExecutorModelReadiness("deepseek-harness", base, settings({ baseUrl: "" })).canRun).toBe(false);
     expect(applyExecutorModelReadiness("deepseek-harness", base, settings({ protocol: "gemini" })).issues.join(" ")).toContain("Gemini");
   });
+
+  it("does not mark an unverified DeepSeek Harness runtime ready just because a model is bound", () => {
+    const unverified: ExecutorHealth = {
+      ...health("deepseek-harness", false),
+      state: "unverified",
+      installState: "available",
+      issues: ["DeepSeek Harness 已安装但尚未验证"]
+    };
+    const readied = applyExecutorModelReadiness("deepseek-harness", unverified, settings());
+    expect(readied.canRun).toBe(false);
+    expect(readied.state).toBe("unverified");
+    expect(readied.issues.join(" ")).toContain("尚未验证");
+  });
 });
