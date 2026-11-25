@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import type { Page } from "playwright-core";
+import type { BrowserPage } from "./browser-page.ts";
 
 export interface BrowserEvidenceRecord {
   taskId: string;
@@ -20,7 +20,7 @@ export interface BrowserEvidenceInput {
   taskId: string;
   runId: string | null;
   kind: string;
-  page: Page;
+  page: BrowserPage;
   pageDigest: string;
   actionDigest: string;
   action: () => Promise<unknown>;
@@ -78,7 +78,7 @@ export class BrowserEvidenceStore {
     return record;
   }
 
-  async screenshot(page: Page, path: string): Promise<string | null> {
+  async screenshot(page: BrowserPage, path: string): Promise<string | null> {
     try {
       await page.screenshot({ path, fullPage: false });
       return path;

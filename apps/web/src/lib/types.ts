@@ -356,15 +356,29 @@ export interface BrowserTabView {
   active: boolean;
 }
 
+export type BrowserControlState = "agent" | "awaiting_user" | "user" | "closed" | "unavailable";
+export type BrowserTakeoverKind = "login" | "captcha" | "payment_confirmation" | "complex_interaction" | "other";
+
 export interface BrowserStatusView {
   running: boolean;
-  paused: boolean;
   backend: string | null;
   profileDir: string;
   pages: number;
   tabs: BrowserTabView[];
+  controlState: BrowserControlState;
+  controlEpoch: number;
+  takeoverKind: BrowserTakeoverKind | null;
+  takeoverReason: string | null;
+  requiresFreshObservation: boolean;
+  lastSnapshotDigest: string | null;
+  lastObservedAt: string | null;
+  unavailableReason: string | null;
+  extension: {
+    extensionId: string;
+    installUrl: string;
+    paired: boolean;
+  };
 }
-
 export interface BrowserEvidenceView {
   taskId: string;
   runId: string | null;
@@ -378,13 +392,6 @@ export interface BrowserEvidenceView {
   createdAt: string;
 }
 
-export interface BrowserSettingsView {
-  enabled: boolean;
-  allowedDomains: string[];
-  readOnlyDomains: string[];
-  highRiskDomains: string[];
-  maxSessions: number;
-}
 
 export interface DossierSectionsView {
   overview: string[];
@@ -940,4 +947,3 @@ export interface WechatQrStatusView {
   accountId: string | null;
   message: string | null;
 }
-

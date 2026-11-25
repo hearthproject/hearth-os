@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>高级浏览器交互</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 40px; max-width: 760px; }
+    form { display: grid; gap: 10px; margin-bottom: 18px; }
+    input, button, select { font: inherit; padding: 8px; }
+    canvas { display: block; border: 1px solid #888; margin-top: 8px; }
+    iframe { width: 100%; height: 120px; border: 1px solid #aaa; margin-top: 18px; }
+    .drag-row { display: flex; gap: 24px; margin: 18px 0; }
+    #drag-source, #drop-target { border: 1px dashed #777; padding: 18px; user-select: none; }
+  </style>
+</head>
+<body>
+  <h1>高级浏览器交互</h1>
+  <form onsubmit="event.preventDefault(); document.querySelector('#login-result').textContent='登录表单已提交'">
+    <label>账号 <input name="username" aria-label="账号" autocomplete="off" /></label>
+    <label>密码 <input name="password" id="password" type="password" aria-label="密码" autocomplete="current-password" /></label>
+    <button type="submit" aria-label="登录">登录</button>
+  </form>
+  <p id="login-result" aria-label="登录结果"></p>
+
+  <label>背景颜色
+    <select id="color" aria-label="背景颜色">
+      <option value="red">红色</option>
+      <option value="green">绿色</option>
+      <option value="blue">蓝色</option>
+    </select>
+  </label>
+  <p id="select-result" aria-label="选择结果"></p>
+
+  <div id="shadow-host"></div>
+  <script>
+    const root = document.querySelector('#shadow-host').attachShadow({ mode: 'open' });
+    root.innerHTML = '<button type="button" aria-label="Shadow 按钮">Shadow 按钮</button><p id="shadow-result" aria-label="Shadow 结果"></p>';
+    root.querySelector('button').addEventListener('click', () => {
+      root.querySelector('#shadow-result').textContent = 'Shadow 点击成功';
+    });
+  </script>
+
+  <canvas id="canvas" width="420" height="140" role="button" aria-label="绘制区域"></canvas>
+  <p id="canvas-result" aria-label="画布结果"></p>
+  <script>
+    document.querySelector('#canvas').addEventListener('click', (event) => {
+      const rect = event.currentTarget.getBoundingClientRect();
+      document.querySelector('#canvas-result').textContent = `画布点击成功 ${Math.round(event.clientX - rect.left)},${Math.round(event.clientY - rect.top)}`;
+    });
+  </script>
+
+  <div class="drag-row">
+    <div id="drag-source" role="button" draggable="true" aria-label="拖拽源">拖拽源</div>
+    <div id="drop-target" role="button" aria-label="放置区">放置区</div>
+  </div>
+  <p id="drag-result" aria-label="拖拽结果"></p>
+  <script>
+    const source = document.querySelector('#drag-source');
+    const target = document.querySelector('#drop-target');
+    source.addEventListener('dragstart', (event) => event.dataTransfer.setData('text/plain', 'source'));
+    target.addEventListener('dragover', (event) => event.preventDefault());
+    target.addEventListener('drop', (event) => {
+      event.preventDefault();
+      document.querySelector('#drag-result').textContent = `拖拽成功 ${event.dataTransfer.getData('text/plain')}`;
+    });
+    document.querySelector('#color').addEventListener('change', (event) => {
+      document.querySelector('#select-result').textContent = `选择成功 ${event.target.value}`;
+    });
+  </script>
+
+  <iframe src="/frame.html" title="Frame 测试"></iframe>
+</body>
+</html>

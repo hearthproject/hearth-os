@@ -22,14 +22,14 @@ import type { HostKernel } from "./host-kernel.ts";
 import { actionDigest, decideActionPolicy, resolveAction, type ActionFileTarget, type ActionProposal, type PermissionMode, type ResolvedAction } from "./action-resolver.ts";
 import { createFileArtifact, missingExpectedOutputs, publishArtifacts } from "./artifacts.ts";
 import { diffWorkspace, formatChangeManifest, snapshotWorkspace, type WorkspaceSnapshot } from "./change-manifest.ts";
-import { BROWSER_ENABLED, BROWSER_EVIDENCE_DIR, BROWSER_PROFILE_DIR, BROWSER_RECIPE_DIR, BROWSER_SETTINGS_PATH, CONTEXT_BLOB_DIR, DOSSIER_DIR, EXECUTOR_SETTINGS_PATH, GIT_CACHE_DIR, MODEL_SETTINGS_PATH, REPO_ROOT, SOURCE_CONTENT_DIR, WORKSPACE_DIR } from "./config.ts";
+import { BROWSER_ENABLED, BROWSER_EVIDENCE_DIR, BROWSER_EXTENSION_TOKEN_PATH, BROWSER_MCP_OUTPUT_DIR, BROWSER_PROFILE_DIR, BROWSER_RECIPE_DIR, BROWSER_STATE_PATH, CONTEXT_BLOB_DIR, DOSSIER_DIR, EXECUTOR_SETTINGS_PATH, GIT_CACHE_DIR, MODEL_SETTINGS_PATH, REPO_ROOT, SOURCE_CONTENT_DIR, WORKSPACE_DIR } from "./config.ts";
 import { DossierStore } from "./dossier.ts";
 import { rememberSystemContext } from "./system-context-registry.ts";
 import { BrowserEvidenceStore } from "./browser-evidence.ts";
 import { BrowserService } from "./browser-service.ts";
-import { BrowserSessionManager, browserFinishIssue } from "./browser-session.ts";
-import { BrowserSettingsStore } from "./browser-settings.ts";
+import { BrowserSessionManager, type BrowserTakeoverKind } from "./browser-session.ts";
 import { createBrowserTools } from "./browser-tools.ts";
+import { browserToolSecrets, redactBrowserToolArguments, redactKnownSecrets, sanitizeNativeCheckpoint } from "./browser-redaction.ts";
 import { ContextService, estimateTokens } from "./context.ts";
 import { DelegationError, DelegationService } from "./delegation.ts";
 import type { BackgroundToolService } from "./background-tools.ts";
@@ -213,7 +213,6 @@ export class HearthScheduler {
   private readonly backgroundTools: BackgroundToolService | undefined;
   private readonly webSearch: WebSearchService | undefined;
   private readonly mcpServers: McpServerService | undefined;
-  private readonly browserSettings: BrowserSettingsStore;
   private readonly browserService: BrowserService;
   private readonly browserSessions: BrowserSessionManager;
   private readonly browserEvidence: BrowserEvidenceStore;
@@ -229,6 +228,7 @@ export class HearthScheduler {
   private readonly pauseRequested = new Set<string>();
   private readonly pauseWaiters = new Map<string, (result: TaskPauseResult) => void>();
   private readonly activeByExecutor = new Map<ExecutorId, Set<string>>();
+  private readonly browserSecretsByRun = new Map<string, Set<string>>();
   private readonly runPromises = new Set<Promise<void>>();
   private unsubscribe: (() => void) | null = null;
   private loopPromise: Promise<void> | null = null;
@@ -291,9 +291,12 @@ export class HearthScheduler {
     this.backgroundTools = options.backgroundTools;
     this.webSearch = options.webSearch;
     this.mcpServers = options.mcpServers;
-    this.browserSettings = new BrowserSettingsStore(BROWSER_SETTINGS_PATH);
     this.browserService = new BrowserService({ profileDir: BROWSER_PROFILE_DIR });
-    this.browserSessions = new BrowserSessionManager(this.browserService);
+    this.browserSessions = new BrowserSessionManager(this.browserService, {
+      statePath: BROWSER_STATE_PATH,
+      extensionTokenPath: BROWSER_EXTENSION_TOKEN_PATH,
+      extensionOutputDir: BROWSER_MCP_OUTPUT_DIR
+    });
     this.browserEvidence = new BrowserEvidenceStore(BROWSER_EVIDENCE_DIR);
     this.worktrees = options.worktrees ?? new TaskWorktreeService(this.service.store, { workspaceRoot: this.workspaceRoot });
     this.delegations = options.delegations ?? new DelegationService({
@@ -369,7 +372,7 @@ export class HearthScheduler {
     await Promise.allSettled(Array.from(this.runPromises));
     for (const controller of this.summaryControllers.values()) controller.abort();
     await Promise.allSettled(Array.from(this.summaryTasks));
-    this.browserSessions.stop();
+    await this.browserSessions.stop();
     await this.browserSessions.releaseAll();
     await this.browserService.close();
     this.unsubscribe?.();
@@ -382,37 +385,68 @@ export class HearthScheduler {
 
   async browserStatus(taskId: string): Promise<{
     running: boolean;
-    paused: boolean;
     backend: string | null;
     profileDir: string;
     pages: number;
     tabs: Array<{ id: string; url: string; title: string; active: boolean }>;
+    controlState: string;
+    controlEpoch: number;
+    takeoverKind: BrowserTakeoverKind | null;
+    takeoverReason: string | null;
+    requiresFreshObservation: boolean;
+    lastSnapshotDigest: string | null;
+    lastObservedAt: string | null;
+    unavailableReason: string | null;
+    extension: { extensionId: string; installUrl: string; paired: boolean };
   }> {
     const status = await this.browserService.status();
-    const session = this.browserSessions.state(taskId);
+    const session = this.browserSessions.describe(taskId);
     return {
       running: status.running,
-      paused: session?.paused ?? false,
-      backend: status.backend,
+      backend: session?.backend ?? status.backend,
       profileDir: status.profileDir,
-      pages: status.pages,
-      tabs: session
-        ? session.tabs.map((tab) => ({
-            id: tab.id,
-            url: tab.page.url(),
-            title: tab.title,
-            active: tab.id === session.activeTabId
-          }))
-        : []
+      pages: session?.tabs.length ?? status.pages,
+      tabs: session?.tabs ?? [],
+      controlState: session?.controlState ?? "closed",
+      controlEpoch: session?.controlEpoch ?? 0,
+      takeoverKind: session?.takeoverKind ?? null,
+      takeoverReason: session?.takeoverReason ?? null,
+      requiresFreshObservation: session?.requiresFreshObservation ?? false,
+      lastSnapshotDigest: session?.lastSnapshotDigest ?? null,
+      lastObservedAt: session?.lastObservedAt ?? null,
+      unavailableReason: session?.unavailableReason ?? null,
+      extension: this.browserSessions.extensionStatus()
     };
   }
-
-  pauseBrowser(taskId: string): boolean {
-    return this.browserSessions.pause(taskId);
+  async takeoverBrowser(taskId: string, kind: BrowserTakeoverKind = "other", reason = "用户主动接管浏览器"): Promise<{ session: ReturnType<BrowserSessionManager["describe"]>; task: TaskRecord }> {
+    const task = this.service.requireTask(taskId);
+    if (!this.browserSessions.has(taskId)) throw new Error("当前任务没有打开的浏览器");
+    await this.browserSessions.session(taskId);
+    if (task.status === "running") await this.pause(taskId);
+    const session = this.browserSessions.beginUserTakeover(taskId, kind, reason);
+    return { session, task: this.service.requireTask(taskId) };
   }
 
-  resumeBrowser(taskId: string): boolean {
-    return this.browserSessions.resume(taskId);
+  async releaseBrowser(taskId: string): Promise<{ session: ReturnType<BrowserSessionManager["describe"]>; task: TaskRecord; snapshot: { digest: string; content: string; url: string } | null }> {
+    const released = await this.browserSessions.releaseToAgent(taskId);
+    let task = this.service.requireTask(taskId);
+    const instruction = "用户已完成浏览器接管。页面、标签页、登录状态或前端状态可能已经变化，请先调用 browser_read 重新观察当前页面，再继续执行原任务。";
+    if (task.status === "paused") {
+      const queued = this.service.store.listTaskFollowUps(taskId, "queued");
+      if (!queued.some((item) => item.content === instruction)) this.service.createTaskFollowUp(taskId, instruction, "queue");
+      const reference = this.resumeReference(task);
+      if (reference) task = this.resumePaused(taskId, reference);
+    } else if (task.status === "waiting_input" || task.status === "recoverable" || task.status === "failed") {
+      const queued = this.service.store.listTaskFollowUps(taskId, "queued");
+      if (!queued.some((item) => item.content === instruction)) this.addFollowUp(taskId, instruction, "queue");
+      task = this.service.requireTask(taskId);
+    }
+    return { session: this.browserSessions.describe(taskId), task, snapshot: released.snapshot };
+  }
+
+  async connectBrowser(taskId: string, token?: string): Promise<ReturnType<BrowserSessionManager["describe"]>> {
+    this.service.requireTask(taskId);
+    return this.browserSessions.connectExtensionToken(taskId, token);
   }
 
   async closeBrowser(taskId: string): Promise<void> {
@@ -427,7 +461,8 @@ export class HearthScheduler {
     const tab = this.browserSessions.activeTab(taskId);
     if (!tab) return null;
     try {
-      return await tab.page.screenshot({ type: "png", fullPage: false });
+      const screenshot = await tab.page.screenshot({ fullPage: false });
+      return Buffer.isBuffer(screenshot) ? screenshot : null;
     } catch {
       return null;
     }
@@ -696,7 +731,6 @@ export class HearthScheduler {
     if (task.currentRunId) this.writeRunEvidence(taskId, task.currentRunId);
     this.goals?.onTaskCancelled(task);
     this.releaseLease(taskId);
-    void this.browserSessions.release(taskId);
     return this.service.requireTask(taskId);
   }
 
@@ -1235,10 +1269,11 @@ export class HearthScheduler {
   }
 
   private persistNativeCheckpoint(taskId: string, runId: string, workspace: string, checkpoint: AgentCheckpoint): void {
+    const safeCheckpoint = sanitizeNativeCheckpoint(checkpoint, this.browserSecretsByRun.get(runId) ?? []);
     const directory = join(workspace, ".hearth", "checkpoints", runId);
     mkdirSync(directory, { recursive: true });
-    const absolutePath = join(directory, `${String(checkpoint.seq).padStart(4, "0")}-${checkpoint.kind}.json`);
-    const body = `${JSON.stringify(checkpoint, null, 2)}\n`;
+    const absolutePath = join(directory, `${String(safeCheckpoint.seq).padStart(4, "0")}-${safeCheckpoint.kind}.json`);
+    const body = `${JSON.stringify(safeCheckpoint, null, 2)}\n`;
     const tempPath = `${absolutePath}.tmp`;
     writeFileSync(tempPath, body, "utf8");
     renameSync(tempPath, absolutePath);
@@ -1248,20 +1283,20 @@ export class HearthScheduler {
       type: RUNTIME_CHECKPOINT_EVENT,
       taskId,
       runId,
-      payload: { checkpoint },
+      payload: { checkpoint: safeCheckpoint },
       createdAt
     });
     const task = this.service.requireTask(taskId);
     const effects = this.service.store.listEffects(taskId);
-    const workspaceDigest = this.workspaceDigestFor(runId, workspace, checkpoint.kind);
+    const workspaceDigest = this.workspaceDigestFor(runId, workspace, safeCheckpoint.kind);
     const proof: RunCheckpointProof = {
       attemptId: runId,
       identity: { executorId: "native", runtimeVersion: "0.1.0" },
-      phasePrefix: checkpoint.messages
+      phasePrefix: safeCheckpoint.messages
         .filter((message) => message.role === "tool")
         .map((message) => `tool:${message.name}`)
         .slice(-100)
-        .concat(`checkpoint:${checkpoint.kind}:${checkpoint.seq}`),
+        .concat(`checkpoint:${safeCheckpoint.kind}:${safeCheckpoint.seq}`),
       validation: { status: "not_required", evidenceRefs: [] },
       effectReceipts: effects
         .filter((effect) => ["committed", "succeeded", "reconciled_committed"].includes(effect.status) && (effect.receipt || effect.providerRef))
@@ -1272,7 +1307,7 @@ export class HearthScheduler {
       ...(task.permissions ? { permissionsDigest: hashStable(task.permissions) } : {}),
       networkMode: task.permissions?.networkMode ?? "deny",
       ...(workspaceDigest ? { workspaceDigest } : {}),
-      ...(checkpoint.journalSeq !== undefined ? { journalSeq: checkpoint.journalSeq } : {}),
+      ...(safeCheckpoint.journalSeq !== undefined ? { journalSeq: safeCheckpoint.journalSeq } : {}),
       createdAt
     };
     const record: RunCheckpointRecord = {
@@ -1293,6 +1328,7 @@ export class HearthScheduler {
       checkpointSeq: checkpoint.seq,
       usage: this.usageWithMetrics(checkpoint.usage, checkpoint.turns, checkpoint.toolCalls)
     });
+    if (safeCheckpoint.kind === "final") this.browserSecretsByRun.delete(runId);
   }
 
   private workspaceDigestFor(runId: string, workspace: string, kind: AgentCheckpoint["kind"]): string | undefined {
@@ -1530,12 +1566,14 @@ export class HearthScheduler {
   }
 
   private publishProgress(taskId: string, runId: string, kind: string, message: string, detail?: TaskProgressDetail): void {
-    const sanitized = sanitizeProgressDetail(detail);
+    const secrets = this.browserSecretsByRun.get(runId) ?? [];
+    const visibleMessage = redactKnownSecrets(message, secrets);
+    const sanitized = sanitizeProgressDetail(detail, secrets);
     const event = this.service.store.appendEvent({
       type: "task.progress",
       taskId,
       runId,
-      payload: { kind, message, at: new Date().toISOString(), ...(sanitized ? { detail: sanitized } : {}) }
+      payload: { kind, message: visibleMessage, at: new Date().toISOString(), ...(sanitized ? { detail: sanitized } : {}) }
     });
     this.service.bus.publish(event);
   }
@@ -1789,7 +1827,6 @@ export class HearthScheduler {
         const manifestBefore = manifestRoot ? snapshotWorkspace(manifestRoot) : null;
         const result = await this.runAttempt({ task, run, executorId, taskRoot, outDir, handoff, pendingInput, resumePrompt, previousRun, controller, budget: remainingBudget, goalPrompt });
         this.reconcileTaskCleanup(taskId);
-        if (result.status !== "waiting_approval") await this.browserSessions.release(taskId);
         if (manifestRoot && manifestBefore) this.recordInPlaceChanges(task, manifestRoot, manifestBefore);
         if (result.status === "paused") {
           this.refreshTaskSummary(taskId);
@@ -2341,13 +2378,12 @@ export class HearthScheduler {
       if (this.webSearch && this.webSearch.view().enabled && (wantsPublicWebResearch(`${task.title}\n${task.goal}`) || task.networkHosts.includes("*"))) {
         extraNativeTools.push(this.webSearch.tool());
       }
-      if (BROWSER_ENABLED && this.browserSettings.get().enabled) {
+      if (BROWSER_ENABLED) {
         extraNativeTools.push(...createBrowserTools({
           taskId,
           runId,
           sessions: this.browserSessions,
           evidence: this.browserEvidence,
-          settings: this.browserSettings.get(),
           recipesDir: BROWSER_RECIPE_DIR,
           onEvent: (type, payload) => {
             const event = this.service.store.appendEvent({ type, taskId, runId, payload });
@@ -2355,9 +2391,6 @@ export class HearthScheduler {
           }
         }));
       }
-      const browserFinishGuard = BROWSER_ENABLED && this.browserSettings.get().enabled
-        ? () => browserFinishIssue(this.browserSessions.state(taskId))
-        : null;
       let subagentManager: SubagentTaskManager | undefined;
       if (this.library) extraNativeTools.push(...createLibraryTools(this.library));
       if (this.skills) extraNativeTools.push(...createSkillTools({ skills: this.skills, taskId, runId }));
@@ -2438,7 +2471,6 @@ export class HearthScheduler {
         mode: task.mode ?? "build",
         ...(task.goalId ? { skipBuiltinGoalTools: true } : {}),
         ...(extraNativeTools.length > 0 ? { extraNativeTools } : {}),
-        ...(browserFinishGuard ? { finishGuards: [browserFinishGuard] } : {}),
         ...(this.libraryMcp ? { mcpServers: { hearth: this.libraryMcp } } : {}),
         ...(activeThreadId ? { activeThreadId } : {}),
         onProgress: (event) => this.publishProgress(taskId, runId, event.kind, event.message, event.detail),
@@ -2715,6 +2747,7 @@ export class HearthScheduler {
     const classification = classifyTool(toolName);
     if (input.signal.aborted) return { allowed: false, reason: "任务已取消" };
     const argumentsValue = approvalArguments(input.request.call.arguments);
+    const visibleArgumentsValue = redactBrowserToolArguments(toolName, argumentsValue);
     const summary = toolApprovalSummary(toolName, input.request.call.arguments);
     const permissionMode = this.service.permissionModeForTask(input.task);
     if (permissionMode === "full") return { allowed: true };
@@ -2756,12 +2789,12 @@ export class HearthScheduler {
             serverId: action.mcp.serverId,
             serverTool: action.mcp.toolName,
             argumentsDigest: action.mcp.argumentsDigest,
-            arguments: argumentsValue
+            arguments: visibleArgumentsValue
           }
-        : { tool: toolName, arguments: argumentsValue },
+        : { tool: toolName, arguments: visibleArgumentsValue },
       preview: action.kind === "browser" && action.browser
         ? {
-            arguments: argumentsValue,
+            arguments: visibleArgumentsValue,
             browser: {
               url: action.browser.url,
               action: action.browser.action,
@@ -2769,7 +2802,7 @@ export class HearthScheduler {
               risk: action.risk
             }
           }
-        : { arguments: argumentsValue },
+        : { arguments: visibleArgumentsValue },
       action,
       signal: input.signal
     });
@@ -3216,6 +3249,14 @@ export class HearthScheduler {
     }
   }
 
+  private rememberBrowserSecrets(runId: string, toolName: string, args: unknown): void {
+    const secrets = browserToolSecrets(toolName, args);
+    if (secrets.length === 0) return;
+    const known = this.browserSecretsByRun.get(runId) ?? new Set<string>();
+    for (const secret of secrets) known.add(secret);
+    this.browserSecretsByRun.set(runId, known);
+  }
+
   private captureNativeEvent(task: TaskRecord, run: RunRecord, event: RuntimeEvent): void {
     const base = { taskId: task.id, conversationId: task.conversationId ?? null, runId: run.id, executorId: "native" as const, role: "system" as const };
     if (event.type === "context.usage") {
@@ -3244,14 +3285,18 @@ export class HearthScheduler {
       return;
     }
     if (event.type === "assistant.message") {
-      this.capture({ ...base, kind: "assistant_message", role: "assistant", content: event.text, provenance: { source: "native", turn: event.turn }, executorEventId: `native:${event.turn}:assistant` });
+      const content = redactKnownSecrets(event.text, this.browserSecretsByRun.get(run.id) ?? []);
+      this.capture({ ...base, kind: "assistant_message", role: "assistant", content, provenance: { source: "native", turn: event.turn }, executorEventId: `native:${event.turn}:assistant` });
       return;
     }
     if (event.type === "tool.started") {
-      this.capture({ ...base, kind: "tool_call", content: `${event.call.name}\n${safeStringify(event.call.arguments)}`, provenance: { source: "native", turn: event.turn, toolCallId: event.call.id, tool: event.call.name }, executorEventId: `native:tool:${event.call.id}:started` });
+      this.rememberBrowserSecrets(run.id, event.call.name, event.call.arguments);
+      const visibleArguments = redactBrowserToolArguments(event.call.name, event.call.arguments);
+      this.capture({ ...base, kind: "tool_call", content: `${event.call.name}\n${safeStringify(visibleArguments)}`, provenance: { source: "native", turn: event.turn, toolCallId: event.call.id, tool: event.call.name }, executorEventId: `native:tool:${event.call.id}:started` });
       return;
     }
     if (event.type === "tool.finished") {
+      this.rememberBrowserSecrets(run.id, event.call.name, event.call.arguments);
       const metadata = event.result.metadata;
       const provenance = {
         source: "native",
@@ -3269,7 +3314,9 @@ export class HearthScheduler {
         ...(metadata?.snapshotIds ? { snapshotIds: metadata.snapshotIds } : {}),
         ...(metadata?.browserAssertions ? { browserAssertions: metadata.browserAssertions } : {})
       };
-      this.capture({ ...base, kind: "tool_result", role: "tool", content: event.result.content, provenance, executorEventId: `native:tool:${event.call.id}:finished` });
+      const secrets = this.browserSecretsByRun.get(run.id) ?? [];
+      const visibleResult = redactKnownSecrets(event.result.content, secrets);
+      this.capture({ ...base, kind: "tool_result", role: "tool", content: visibleResult, provenance, executorEventId: `native:tool:${event.call.id}:finished` });
       return;
     }
     if (event.type === "job.registered" || event.type === "job.settled") {

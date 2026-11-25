@@ -12,8 +12,7 @@ import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { installBackgroundTaskRegistry } from "./background-tasks.ts";
 import { loadCodexProfile, runCodex } from "@hearth/codex-executor";
 import { z } from "zod";
-import { ARTIFACT_DIR, ATTACHMENT_DIR, BACKUP_DIR, BROWSER_SETTINGS_PATH, CODEX_HOME_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, DOSSIER_DIR, DSH_HOME_DIR, EXECUTOR_HOME_DIR, EXECUTOR_SETTINGS_PATH, HANDOFF_DIR, LIBRARY_MODEL_DIR, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, REPO_ROOT, SKILL_DIR, SOURCE_CONTENT_DIR, SUPERVISION_PATH, WEB_DIST, WORKSPACE_DIR, WORKSTYLE_PATH } from "./config.ts";
-import { BrowserSettingsStore } from "./browser-settings.ts";
+import { ARTIFACT_DIR, ATTACHMENT_DIR, BACKUP_DIR, CODEX_HOME_DIR, CONTEXT_BLOB_DIR, DATA_DIR, DB_PATH, DEVICE_FRAME_DIR, DOSSIER_DIR, DSH_HOME_DIR, EXECUTOR_HOME_DIR, EXECUTOR_SETTINGS_PATH, HANDOFF_DIR, LIBRARY_MODEL_DIR, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, REPO_ROOT, SKILL_DIR, SOURCE_CONTENT_DIR, SUPERVISION_PATH, WEB_DIST, WORKSPACE_DIR, WORKSTYLE_PATH } from "./config.ts";
 import { registerChatRoutes } from "./chat-routes.ts";
 import { ReconcileError, ReconcileService } from "./reconcile.ts";
 import { ExecutorSettingsStore } from "./executor-settings.ts";
@@ -516,12 +515,13 @@ const decideApprovalSchema = z.object({
   parameterHash: z.string().regex(/^[a-f0-9]{64}$/)
 }).strict();
 
-const browserSettingsSchema = z.object({
-  enabled: z.boolean().optional(),
-  allowedDomains: z.array(z.string().trim().min(1).max(253)).max(200).optional(),
-  readOnlyDomains: z.array(z.string().trim().min(1).max(253)).max(200).optional(),
-  highRiskDomains: z.array(z.string().trim().min(1).max(253)).max(200).optional(),
-  maxSessions: z.number().int().min(1).max(8).optional()
+const browserTakeoverSchema = z.object({
+  kind: z.enum(["login", "captcha", "payment_confirmation", "complex_interaction", "other"]).optional(),
+  reason: z.string().trim().min(1).max(2_000).optional()
+}).strict();
+
+const browserConnectSchema = z.object({
+  token: z.string().trim().max(20_000).optional()
 }).strict();
 
 const createSourceSchema = z.object({
@@ -2661,17 +2661,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
   });
 
-  app.get("/api/browser/settings", async (_request, reply) => {
-    reply.header("cache-control", "no-store");
-    return { settings: new BrowserSettingsStore(BROWSER_SETTINGS_PATH).get() };
-  });
-
-  app.patch("/api/browser/settings", async (request, reply) => {
-    const parsed = browserSettingsSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_BROWSER_SETTINGS", message: "浏览器设置格式不正确" });
-    return { settings: new BrowserSettingsStore(BROWSER_SETTINGS_PATH).update(parsed.data) };
-  });
-
   app.get<{ Params: { id: string } }>("/api/tasks/:id/browser", async (request, reply) => {
     if (!store.getTask(request.params.id)) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
     if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFFLINE", message: "调度器未启动" });
@@ -2679,20 +2668,62 @@ export async function buildServer(options: BuildServerOptions = {}) {
     return scheduler.browserStatus(request.params.id);
   });
 
-  app.post<{ Params: { id: string } }>("/api/tasks/:id/browser/pause", async (request, reply) => {
+  app.post<{ Params: { id: string }; Body: unknown }>("/api/tasks/:id/browser/takeover", async (request, reply) => {
     if (!store.getTask(request.params.id)) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
     if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFFLINE", message: "调度器未启动" });
-    const paused = scheduler.pauseBrowser(request.params.id);
-    return { paused, message: paused ? "已暂停，你可以直接在浏览器窗口里接管" : "当前任务没有打开浏览器" };
+    const parsed = browserTakeoverSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_BROWSER_TAKEOVER", message: "接管参数不正确" });
+    try {
+      const result = await scheduler.takeoverBrowser(
+        request.params.id,
+        parsed.data.kind ?? "other",
+        parsed.data.reason ?? "用户主动接管浏览器"
+      );
+      return { ...result, browser: await scheduler.browserStatus(request.params.id) };
+    } catch (error) {
+      return reply.code(409).send({ error: "BROWSER_TAKEOVER_FAILED", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/tasks/:id/browser/release", async (request, reply) => {
+    if (!store.getTask(request.params.id)) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFFLINE", message: "调度器未启动" });
+    try {
+      const result = await scheduler.releaseBrowser(request.params.id);
+      return { ...result, browser: await scheduler.browserStatus(request.params.id) };
+    } catch (error) {
+      return reply.code(409).send({ error: "BROWSER_RELEASE_FAILED", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post<{ Params: { id: string }; Body: unknown }>("/api/tasks/:id/browser/connect", async (request, reply) => {
+    if (!store.getTask(request.params.id)) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFFLINE", message: "调度器未启动" });
+    const parsed = browserConnectSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_BROWSER_CONNECT", message: "扩展连接参数不正确" });
+    try {
+      const session = await scheduler.connectBrowser(request.params.id, parsed.data.token);
+      return { session, browser: await scheduler.browserStatus(request.params.id) };
+    } catch (error) {
+      return reply.code(409).send({ error: "BROWSER_CONNECT_FAILED", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post<{ Params: { id: string }; Body: unknown }>("/api/tasks/:id/browser/pause", async (request, reply) => {
+    if (!store.getTask(request.params.id)) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
+    if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFFLINE", message: "调度器未启动" });
+    const parsed = browserTakeoverSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_BROWSER_TAKEOVER", message: "接管参数不正确" });
+    const result = await scheduler.takeoverBrowser(request.params.id, parsed.data.kind ?? "other", parsed.data.reason);
+    return { ...result, browser: await scheduler.browserStatus(request.params.id) };
   });
 
   app.post<{ Params: { id: string } }>("/api/tasks/:id/browser/resume", async (request, reply) => {
     if (!store.getTask(request.params.id)) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
     if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFFLINE", message: "调度器未启动" });
-    const resumed = scheduler.resumeBrowser(request.params.id);
-    return { resumed, message: resumed ? "已恢复自动执行" : "当前任务没有可恢复的浏览器会话" };
+    const result = await scheduler.releaseBrowser(request.params.id);
+    return { ...result, browser: await scheduler.browserStatus(request.params.id) };
   });
-
   app.post<{ Params: { id: string } }>("/api/tasks/:id/browser/close", async (request, reply) => {
     if (!store.getTask(request.params.id)) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
     if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFFLINE", message: "调度器未启动" });
@@ -2961,6 +2992,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
         status: "cancelled", currentRunId: task.currentRunId, nextAction: null, error: null
       }, task.currentRunId ?? undefined);
     }
+    if (scheduler) await scheduler.closeBrowser(task.id);
     store.softDeleteTask(task.id);
     return reply.code(204).send();
   });

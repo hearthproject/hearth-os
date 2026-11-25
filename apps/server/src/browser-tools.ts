@@ -2,140 +2,104 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
 import type { AgentTool, AgentToolContext, AgentToolResult } from "@hearth/agent-runtime";
-import type { BrowserSessionManager, BrowserRecipeStep, BrowserSessionState } from "./browser-session.ts";
-import { captureBrowserSnapshot, type BrowserSnapshot } from "./browser-snapshot.ts";
+import { takeoverLabel, type BrowserRecipeStep, type BrowserSessionManager, type BrowserTakeoverKind } from "./browser-session.ts";
+import type { BrowserSnapshot } from "./browser-snapshot.ts";
 import { BrowserError } from "./browser-service.ts";
 import { BrowserEvidenceStore, type BrowserEvidenceRecord } from "./browser-evidence.ts";
-import { matchesAny, type BrowserSettings } from "./browser-settings.ts";
 
 export interface BrowserToolsOptions {
   taskId: string;
   runId: string | null;
   sessions: BrowserSessionManager;
   evidence: BrowserEvidenceStore;
-  settings: BrowserSettings;
   recipesDir: string;
   onEvent?: ((type: string, payload: Record<string, unknown>) => void) | undefined;
 }
 
-const MAX_READ_CHARS = 12_000;
-const DEFAULT_TIMEOUT_MS = 30_000;
-const DANGEROUS_ACTIONS = /(?:^|\b)(?:submit|send|pay|purchase|delete|remove|confirm)\b|提交|发送|支付|付款|购买|删除|确认|下单/i;
+const MAX_READ_CHARS = 16_000;
+const DEFAULT_TIMEOUT_MS = 45_000;
+const TAKEOVER_KINDS = new Set<BrowserTakeoverKind>(["login", "captcha", "payment_confirmation", "complex_interaction", "other"]);
 
 export function createBrowserTools(options: BrowserToolsOptions): AgentTool[] {
   const toolkit = new BrowserToolkit(options);
   return [
-    toolkit.tool("browser_open", "打开网页", "打开一个 http/https 网页，并返回可交互元素清单。会记录网页现场和访问结果。", {
-      type: "object",
-      properties: {
-        url: { type: "string", description: "要打开的网址" },
-        newTab: { type: "boolean", description: "是否在新标签页打开，默认复用当前标签" }
-      },
-      required: ["url"],
-      additionalProperties: false
+    toolkit.tool("browser_open", "打开网页", "打开任意 http/https 网页并返回页面元素。新标签页可显式指定。", {
+      type: "object", properties: { url: { type: "string", description: "要打开的网址" }, newTab: { type: "boolean", description: "是否在新标签页打开" } },
+      required: ["url"], additionalProperties: false
     }, async (args, context) => toolkit.open(args, context)),
-    toolkit.tool("browser_read", "读取当前网页", "读取当前页面的标题、网址、可交互元素和正文摘要。元素使用 e1、e2 这样的短 ID。", {
-      type: "object",
-      properties: { maxChars: { type: "number", description: "正文最多返回多少字符，默认 12000" } },
-      additionalProperties: false
+    toolkit.tool("browser_read", "读取当前网页", "重新观察所有 frame、开放 Shadow DOM、正文和可交互元素。控制权切换后必须先调用。", {
+      type: "object", properties: { maxChars: { type: "number" } }, additionalProperties: false
     }, async (args) => toolkit.read(args)),
-    toolkit.tool("browser_click", "点击网页元素", "点击快照里的元素 ID。提交、支付、删除、发送类按钮会被拒绝，必须改用 browser_submit。", {
-      type: "object",
-      properties: { ref: { type: "string", description: "元素 ID，例如 e3" } },
-      required: ["ref"],
-      additionalProperties: false
+    toolkit.tool("browser_click", "点击网页元素", "点击当前快照中的元素 ID。登录、验证码、支付最终确认和复杂交互应请求用户接管。", {
+      type: "object", properties: { ref: { type: "string" }, button: { type: "string", enum: ["left", "right", "middle"] }, clickCount: { type: "number" } },
+      required: ["ref"], additionalProperties: false
     }, async (args) => toolkit.click(args)),
-    toolkit.tool("browser_type", "在网页输入文字", "向快照里的输入框写入文字。密码框会被拒绝。", {
-      type: "object",
-      properties: {
-        ref: { type: "string", description: "输入框元素 ID" },
-        text: { type: "string", description: "要输入的文字" },
-        clear: { type: "boolean", description: "是否先清空，默认 true" }
-      },
-      required: ["ref", "text"],
-      additionalProperties: false
+    toolkit.tool("browser_hover", "悬停网页元素", "把鼠标移到快照元素上。", {
+      type: "object", properties: { ref: { type: "string" } }, required: ["ref"], additionalProperties: false
+    }, async (args) => toolkit.hover(args)),
+    toolkit.tool("browser_type", "在网页输入文字", "向快照输入框写入文字，包括密码框。密码不会出现在快照、配方或日志中。", {
+      type: "object", properties: { ref: { type: "string" }, text: { type: "string" }, clear: { type: "boolean" } },
+      required: ["ref", "text"], additionalProperties: false
     }, async (args) => toolkit.type(args)),
     toolkit.tool("browser_key", "按下键盘按键", "向当前焦点发送按键，例如 Enter、Escape、Tab。", {
-      type: "object",
-      properties: { key: { type: "string", description: "Playwright 按键名，例如 Enter" } },
-      required: ["key"],
-      additionalProperties: false
+      type: "object", properties: { key: { type: "string" } }, required: ["key"], additionalProperties: false
     }, async (args) => toolkit.key(args)),
-    toolkit.tool("browser_wait", "等待网页变化", "等待元素出现、正文包含文字，或页面空闲。", {
-      type: "object",
-      properties: {
-        kind: { type: "string", enum: ["element", "text", "idle"], description: "等待类型" },
-        value: { type: "string", description: "元素 ID 或要等待的文字；idle 可省略" },
-        timeoutSec: { type: "number", description: "超时秒数，默认 15" }
-      },
-      required: ["kind"],
-      additionalProperties: false
+    toolkit.tool("browser_wait", "等待网页变化", "等待元素出现、正文包含文字或网络空闲。", {
+      type: "object", properties: { kind: { type: "string", enum: ["element", "text", "idle"] }, value: { type: "string" }, timeoutSec: { type: "number" } },
+      required: ["kind"], additionalProperties: false
     }, async (args) => toolkit.wait(args)),
-    toolkit.tool("browser_submit", "提交网页表单", "点击提交、支付、发送或删除类按钮。执行时留下前后截图和证据记录。", {
-      type: "object",
-      properties: {
-        ref: { type: "string", description: "提交按钮的元素 ID" },
-        note: { type: "string", description: "这次提交的说明" }
-      },
-      additionalProperties: false
+    toolkit.tool("browser_submit", "提交网页表单", "点击当前快照中的提交按钮。支付最终确认需先请求用户接管。", {
+      type: "object", properties: { ref: { type: "string" }, note: { type: "string" } }, required: ["ref"], additionalProperties: false
     }, async (args) => toolkit.submit(args)),
+    toolkit.tool("browser_select", "选择下拉选项", "在 select 或组合框中选择一个或多个值。", {
+      type: "object", properties: { ref: { type: "string" }, values: { type: "array", items: { type: "string" } } },
+      required: ["ref", "values"], additionalProperties: false
+    }, async (args) => toolkit.select(args)),
+    toolkit.tool("browser_drag", "拖拽网页元素", "把一个快照元素拖到另一个快照元素。", {
+      type: "object", properties: { startRef: { type: "string" }, endRef: { type: "string" } },
+      required: ["startRef", "endRef"], additionalProperties: false
+    }, async (args) => toolkit.drag(args)),
+    toolkit.tool("browser_click_at", "按坐标点击", "在页面视口坐标点击，适用于 Canvas、地图和截图类界面。", {
+      type: "object", properties: { x: { type: "number" }, y: { type: "number" }, button: { type: "string", enum: ["left", "right", "middle"] }, clickCount: { type: "number" } },
+      required: ["x", "y"], additionalProperties: false
+    }, async (args) => toolkit.clickAt(args)),
+    toolkit.tool("browser_type_at", "按坐标点击并输入", "先点击页面坐标，再向当前焦点输入文字。", {
+      type: "object", properties: { x: { type: "number" }, y: { type: "number" }, text: { type: "string" } },
+      required: ["x", "y", "text"], additionalProperties: false
+    }, async (args) => toolkit.typeAt(args)),
+    toolkit.tool("browser_scroll", "滚动网页", "滚动当前页面。", {
+      type: "object", properties: { deltaX: { type: "number" }, deltaY: { type: "number" } }, additionalProperties: false
+    }, async (args) => toolkit.scroll(args)),
     toolkit.tool("browser_tabs", "管理网页标签页", "列出、新建、切换或关闭当前任务的标签页。", {
-      type: "object",
-      properties: {
-        action: { type: "string", enum: ["list", "new", "activate", "close"], description: "操作" },
-        tabId: { type: "string", description: "目标标签页 ID" }
-      },
-      required: ["action"],
-      additionalProperties: false
+      type: "object", properties: { action: { type: "string", enum: ["list", "new", "activate", "close"] }, tabId: { type: "string" }, url: { type: "string" } },
+      required: ["action"], additionalProperties: false
     }, async (args) => toolkit.tabs(args)),
-    toolkit.tool("browser_screenshot", "截取网页画面", "保存当前网页截图到任务产物目录，返回文件路径。", {
-      type: "object",
-      properties: { fullPage: { type: "boolean", description: "是否截取整页，默认否" } },
-      additionalProperties: false
+    toolkit.tool("browser_screenshot", "截取网页画面", "保存当前网页截图到任务产物目录。", {
+      type: "object", properties: { fullPage: { type: "boolean" } }, additionalProperties: false
     }, async (args, context) => toolkit.screenshot(args, context)),
-    toolkit.tool("browser_upload", "上传文件到网页", "把工作区内的文件放进网页的文件选择框。只允许工作区路径，并记录操作证据。", {
-      type: "object",
-      properties: {
-        ref: { type: "string", description: "文件选择框元素 ID" },
-        path: { type: "string", description: "工作区内的文件路径" }
-      },
-      required: ["ref", "path"],
-      additionalProperties: false
+    toolkit.tool("browser_upload", "上传文件到网页", "把工作区内的文件放进网页文件选择框。", {
+      type: "object", properties: { ref: { type: "string" }, path: { type: "string" } }, required: ["ref", "path"], additionalProperties: false
     }, async (args, context) => toolkit.upload(args, context)),
-    toolkit.tool("browser_download", "下载网页文件", "点击下载链接，把文件保存到任务的 browser-downloads 目录。", {
-      type: "object",
-      properties: {
-        ref: { type: "string", description: "下载链接或按钮的元素 ID" },
-        fileName: { type: "string", description: "保存的文件名，可省略" }
-      },
-      required: ["ref"],
-      additionalProperties: false
+    toolkit.tool("browser_download", "下载网页文件", "点击下载链接并保存到任务目录。", {
+      type: "object", properties: { ref: { type: "string" }, fileName: { type: "string" } }, required: ["ref"], additionalProperties: false
     }, async (args, context) => toolkit.download(args, context)),
-    toolkit.tool("browser_assert", "验证网页状态", "验证页面包含文字、网址匹配、元素存在或元素不存在。浏览器任务结束前至少要有一条通过的断言。", {
-      type: "object",
-      properties: {
-        kind: { type: "string", enum: ["text", "url", "element", "no-element"], description: "断言类型" },
-        value: { type: "string", description: "要验证的文字、网址片段或元素 ID" },
-        timeoutSec: { type: "number", description: "超时秒数，默认 10" }
-      },
-      required: ["kind", "value"],
-      additionalProperties: false
+    toolkit.tool("browser_assert", "验证网页状态", "可选地验证文字、网址或元素状态。浏览器任务不再强制要求断言。", {
+      type: "object", properties: { kind: { type: "string", enum: ["text", "url", "element", "no-element"] }, value: { type: "string" }, timeoutSec: { type: "number" } },
+      required: ["kind", "value"], additionalProperties: false
     }, async (args) => toolkit.assert(args)),
-    toolkit.tool("browser_recipe", "保存或回放网页流程", "把当前成功流程保存成站点配方，或在同一站点回放。", {
-      type: "object",
-      properties: {
-        action: { type: "string", enum: ["list", "save", "replay", "delete"], description: "操作" },
-        name: { type: "string", description: "配方名称" }
-      },
-      required: ["action"],
-      additionalProperties: false
+    toolkit.tool("browser_request_takeover", "请求用户接管浏览器", "登录、验证码、支付最终确认或复杂交互时调用。浏览器会置前并等待用户。", {
+      type: "object", properties: { kind: { type: "string", enum: ["login", "captcha", "payment_confirmation", "complex_interaction", "other"] }, reason: { type: "string" } },
+      required: ["kind", "reason"], additionalProperties: false
+    }, async (args) => toolkit.requestTakeover(args)),
+    toolkit.tool("browser_recipe", "保存或回放网页流程", "把当前流程保存成站点配方，或回放已有配方。", {
+      type: "object", properties: { action: { type: "string", enum: ["list", "save", "replay", "delete"] }, name: { type: "string" } },
+      required: ["action"], additionalProperties: false
     }, async (args) => toolkit.recipe(args))
   ];
 }
 
 class BrowserToolkit {
   private readonly options: BrowserToolsOptions;
-  private active = false;
 
   constructor(options: BrowserToolsOptions) {
     this.options = options;
@@ -149,15 +113,8 @@ class BrowserToolkit {
     execute: (args: Record<string, unknown>, context: AgentToolContext) => Promise<AgentToolResult>
   ): AgentTool {
     return {
-      definition: {
-        name,
-        description: `${title}：${description}`,
-        parameters,
-        executionMode: "sequential",
-        timeoutMs: 45_000
-      },
+      definition: { name, description: `${title}：${description}`, parameters, executionMode: "sequential", timeoutMs: 60_000 },
       execute: async (input, context) => {
-        this.active = true;
         try {
           return await execute(asRecord(input), context);
         } catch (error) {
@@ -167,201 +124,181 @@ class BrowserToolkit {
     };
   }
 
-  async open(args: Record<string, unknown>, context: AgentToolContext): Promise<AgentToolResult> {
+  async open(args: Record<string, unknown>, _context: AgentToolContext): Promise<AgentToolResult> {
     const raw = stringValue(args.url);
     if (!raw) throw new BrowserError("BROWSER_URL_REQUIRED", "缺少网址");
-    const url = parseHttpUrl(raw);
-    this.ensureDomain(url, "open");
-    if (!this.options.settings.enabled) throw new BrowserError("BROWSER_DISABLED", "浏览器自动化已在设置中关闭。");
-    const page = args.newTab ? (await this.ensurePage(true)).tab.page : (await this.ensurePage()).tab.page;
-    const snapshot = await this.options.evidence.capture({
-      taskId: this.options.taskId,
-      runId: this.options.runId,
-      kind: "open",
-      page,
-      pageDigest: "pending",
-      actionDigest: digest({ tool: "browser_open", url: url.toString() }),
-      action: async () => {
-        await page.goto(url.toString(), { waitUntil: "domcontentloaded", timeout: DEFAULT_TIMEOUT_MS });
-        await page.waitForTimeout(300);
-      }
+    const url = parseHttpUrl(raw).toString();
+    let tab;
+    let session;
+    if (args.newTab) {
+      session = await this.options.sessions.session(this.options.taskId);
+      tab = await this.options.sessions.createTab(this.options.taskId);
+    } else {
+      ({ session, tab } = await this.options.sessions.activePage(this.options.taskId, { allowObservation: true }));
+    }
+    const evidence = await this.options.evidence.capture({
+      taskId: this.options.taskId, runId: this.options.runId, kind: "open", page: tab.page,
+      pageDigest: session.lastSnapshotDigest ?? "pending", actionDigest: digest({ tool: "browser_open", url }),
+      action: () => tab.page.goto(url, DEFAULT_TIMEOUT_MS)
     });
-    this.emitEvidence(snapshot);
-    this.pushStep({ tool: "browser_open", url: url.toString() });
-    const next = await captureBrowserSnapshot(page);
-    this.options.sessions.state(this.options.taskId)!.lastSnapshotDigest = next.digest;
-    return {
-      content: next.content,
-      metadata: {
-        browserUrl: next.url,
-        browserPageDigest: next.digest,
-        browserEvidence: relativeEvidence(snapshot)
-      }
-    };
+    this.emitEvidence(evidence);
+    this.pushStep({ tool: "browser_open", url });
+    return this.afterAction("网页已打开。", evidence);
   }
 
   async read(args: Record<string, unknown>): Promise<AgentToolResult> {
-    const { tab } = await this.ensurePage();
-    const snapshot = await captureBrowserSnapshot(tab.page);
+    const snapshot = await this.options.sessions.snapshot(this.options.taskId);
     const max = Math.min(MAX_READ_CHARS, Math.max(1_000, Number(args.maxChars) || MAX_READ_CHARS));
-    this.options.sessions.state(this.options.taskId)!.lastSnapshotDigest = snapshot.digest;
     return {
       content: snapshot.content.length > max ? `${snapshot.content.slice(0, max)}\n…（已截断）` : snapshot.content,
-      metadata: { browserUrl: snapshot.url, browserPageDigest: snapshot.digest }
+      metadata: this.snapshotMetadata(snapshot)
     };
   }
 
   async click(args: Record<string, unknown>): Promise<AgentToolResult> {
     const ref = elementRef(args.ref);
-    const { tab, session } = await this.ensurePage();
-    const page = tab.page;
-    this.ensureDomain(parseHttpUrl(page.url()), "click");
-    const target = page.locator(`[data-hearth-ref="${ref}"]`);
-    const name = await target.innerText().catch(() => "");
-    const aria = await target.getAttribute("aria-label").catch(() => null);
-    if (DANGEROUS_ACTIONS.test(`${name} ${aria ?? ""}`)) {
-      throw new BrowserError("BROWSER_DANGEROUS_CLICK", "这个按钮可能提交、支付、发送或删除。请改用 browser_submit，并说明这次提交。");
-    }
-    const before = await captureBrowserSnapshot(page);
+    const { session, tab } = await this.options.sessions.activePage(this.options.taskId);
+    const before = await this.options.sessions.snapshot(this.options.taskId);
     const evidence = await this.options.evidence.capture({
-      taskId: this.options.taskId,
-      runId: this.options.runId,
-      kind: "click",
-      page,
-      pageDigest: before.digest,
-      actionDigest: digest({ tool: "browser_click", ref, url: page.url() }),
-      action: () => target.click({ timeout: DEFAULT_TIMEOUT_MS })
+      taskId: this.options.taskId, runId: this.options.runId, kind: "click", page: tab.page,
+      pageDigest: before.digest, actionDigest: digest({ tool: "browser_click", ref }),
+      action: () => tab.page.click(ref, DEFAULT_TIMEOUT_MS, {
+        ...(stringValue(args.button) ? { button: stringValue(args.button) as "left" | "right" | "middle" } : {}),
+        ...(Number(args.clickCount) > 0 ? { clickCount: Number(args.clickCount) } : {})
+      })
     });
-    this.emitEvidence(evidence);
-    this.pushStep({ tool: "browser_click", ref, ...(name ? { name } : {}) });
-    await page.waitForTimeout(300);
-    const after = await captureBrowserSnapshot(page);
-    session.lastSnapshotDigest = after.digest;
-    return {
-      content: after.content,
-      metadata: {
-        browserUrl: after.url,
-        browserPageDigest: after.digest,
-        browserEvidence: relativeEvidence(evidence)
-      }
-    };
+    session.lastSnapshotDigest = before.digest;
+    this.pushStep({ tool: "browser_click", ref });
+    return this.afterAction(`已点击 ${ref}。`, evidence);
+  }
+
+  async hover(args: Record<string, unknown>): Promise<AgentToolResult> {
+    const ref = elementRef(args.ref);
+    const { tab } = await this.options.sessions.activePage(this.options.taskId);
+    await tab.page.hover(ref, DEFAULT_TIMEOUT_MS);
+    this.pushStep({ tool: "browser_hover", ref });
+    return this.afterAction(`已悬停 ${ref}。`, null);
   }
 
   async type(args: Record<string, unknown>): Promise<AgentToolResult> {
     const ref = elementRef(args.ref);
     const text = typeof args.text === "string" ? args.text : null;
     if (text === null) throw new BrowserError("BROWSER_TEXT_REQUIRED", "缺少要输入的文字");
-    const { tab, session } = await this.ensurePage();
-    const page = tab.page;
-    this.ensureDomain(parseHttpUrl(page.url()), "type");
-    const target = page.locator(`[data-hearth-ref="${ref}"]`);
-    const type = await target.getAttribute("type").catch(() => null);
-    if (type === "password") {
-      throw new BrowserError("BROWSER_PASSWORD_DENIED", "出于安全考虑，Agent 不能直接填写密码框。请由你接管浏览器完成登录。");
-    }
-    const before = await captureBrowserSnapshot(page);
+    const { tab } = await this.options.sessions.activePage(this.options.taskId);
+    const before = await this.options.sessions.snapshot(this.options.taskId);
     const evidence = await this.options.evidence.capture({
-      taskId: this.options.taskId,
-      runId: this.options.runId,
-      kind: "type",
-      page,
-      pageDigest: before.digest,
-      actionDigest: digest({ tool: "browser_type", ref, text }),
-      action: async () => {
-        if (args.clear !== false) await target.fill("", { timeout: DEFAULT_TIMEOUT_MS });
-        await target.fill(text, { timeout: DEFAULT_TIMEOUT_MS });
-      }
+      taskId: this.options.taskId, runId: this.options.runId, kind: "type", page: tab.page,
+      pageDigest: before.digest, actionDigest: digest({ tool: "browser_type", ref, length: text.length }),
+      action: () => tab.page.type(ref, text, args.clear !== false, DEFAULT_TIMEOUT_MS)
     });
-    this.emitEvidence(evidence);
-    this.pushStep({ tool: "browser_type", ref, text });
-    await page.waitForTimeout(200);
-    const after = await captureBrowserSnapshot(page);
-    session.lastSnapshotDigest = after.digest;
-    return {
-      content: after.content,
-      metadata: {
-        browserUrl: after.url,
-        browserPageDigest: after.digest,
-        browserEvidence: relativeEvidence(evidence)
-      }
-    };
+    this.pushStep({ tool: "browser_type", ref, text: "[REDACTED]" });
+    return this.afterAction(`已输入 ${ref}。`, evidence);
   }
 
   async key(args: Record<string, unknown>): Promise<AgentToolResult> {
     const key = stringValue(args.key);
     if (!key) throw new BrowserError("BROWSER_KEY_REQUIRED", "缺少按键名");
-    const { tab, session } = await this.ensurePage();
-    this.ensureDomain(parseHttpUrl(tab.page.url()), "key");
-    const before = await captureBrowserSnapshot(tab.page);
+    const { tab } = await this.options.sessions.activePage(this.options.taskId);
+    const before = await this.options.sessions.snapshot(this.options.taskId);
     const evidence = await this.options.evidence.capture({
-      taskId: this.options.taskId,
-      runId: this.options.runId,
-      kind: "key",
-      page: tab.page,
-      pageDigest: before.digest,
-      actionDigest: digest({ tool: "browser_key", key }),
-      action: () => tab.page.keyboard.press(key)
+      taskId: this.options.taskId, runId: this.options.runId, kind: "key", page: tab.page,
+      pageDigest: before.digest, actionDigest: digest({ tool: "browser_key", key }),
+      action: () => tab.page.key(key)
     });
-    this.emitEvidence(evidence);
     this.pushStep({ tool: "browser_key", key });
-    await tab.page.waitForTimeout(200);
-    const after = await captureBrowserSnapshot(tab.page);
-    session.lastSnapshotDigest = after.digest;
-    return { content: after.content, metadata: { browserUrl: after.url, browserPageDigest: after.digest } };
+    return this.afterAction(`已按下 ${key}。`, evidence);
   }
 
   async wait(args: Record<string, unknown>): Promise<AgentToolResult> {
     const kind = stringValue(args.kind);
     if (kind !== "element" && kind !== "text" && kind !== "idle") throw new BrowserError("BROWSER_WAIT_KIND", "等待类型不正确");
-    const value = stringValue(args.value);
-    const timeout = Math.min(60_000, Math.max(500, (Number(args.timeoutSec) || 15) * 1_000));
-    const { tab, session } = await this.ensurePage();
-    if (kind === "element") {
-      if (!value) throw new BrowserError("BROWSER_WAIT_VALUE", "等待元素时必须提供元素 ID");
-      await tab.page.locator(`[data-hearth-ref="${value}"]`).waitFor({ state: "visible", timeout });
-    } else if (kind === "text") {
-      if (!value) throw new BrowserError("BROWSER_WAIT_VALUE", "等待文字时必须提供文字");
-      await tab.page.waitForFunction((text) => (document.body?.innerText ?? "").includes(text), value, { timeout });
-    } else {
-      await tab.page.waitForLoadState("networkidle", { timeout }).catch(() => undefined);
-    }
+    const value = stringValue(args.value) ?? undefined;
+    const timeoutMs = Math.min(60_000, Math.max(500, (Number(args.timeoutSec) || 15) * 1_000));
+    const { tab } = await this.options.sessions.activePage(this.options.taskId);
+    await tab.page.wait({ kind, ...(value ? { value } : {}), timeoutMs });
     if (kind !== "idle") this.pushStep({ tool: "browser_wait", kind, value: value ?? "" });
-    const snapshot = await captureBrowserSnapshot(tab.page);
-    session.lastSnapshotDigest = snapshot.digest;
-    return { content: snapshot.content, metadata: { browserUrl: snapshot.url, browserPageDigest: snapshot.digest } };
+    return this.afterAction("等待完成。", null);
   }
 
   async submit(args: Record<string, unknown>): Promise<AgentToolResult> {
-    const ref = args.ref === undefined ? null : elementRef(args.ref);
-    const { tab, session } = await this.ensurePage();
-    this.ensureDomain(parseHttpUrl(tab.page.url()), "submit", true);
-    const target = ref ? tab.page.locator(`[data-hearth-ref="${ref}"]`) : tab.page.locator("button[type=submit], input[type=submit]").first();
-    const before = await captureBrowserSnapshot(tab.page);
+    const ref = elementRef(args.ref);
+    const { tab } = await this.options.sessions.activePage(this.options.taskId);
+    const before = await this.options.sessions.snapshot(this.options.taskId);
     const evidence = await this.options.evidence.capture({
-      taskId: this.options.taskId,
-      runId: this.options.runId,
-      kind: "submit",
-      page: tab.page,
+      taskId: this.options.taskId, runId: this.options.runId, kind: "submit", page: tab.page,
       pageDigest: before.digest,
-      actionDigest: digest({ tool: "browser_submit", ref, url: tab.page.url(), note: args.note }),
-      action: async () => {
-        await target.click({ timeout: DEFAULT_TIMEOUT_MS });
-        await tab.page.waitForTimeout(500);
-      }
+      actionDigest: digest({ tool: "browser_submit", ref, note: stringValue(args.note) }),
+      action: () => tab.page.click(ref, DEFAULT_TIMEOUT_MS)
     });
-    this.emitEvidence(evidence);
-    this.pushStep({ tool: "browser_click", ref: ref ?? "submit", name: "submit" });
-    const after = await captureBrowserSnapshot(tab.page);
-    session.lastSnapshotDigest = after.digest;
-    return {
-      content: after.content,
-      metadata: {
-        browserUrl: after.url,
-        browserPageDigest: after.digest,
-        browserEvidence: relativeEvidence(evidence),
-        browserAssertions: session.assertions
-      }
-    };
+    this.pushStep({ tool: "browser_submit", ref, ...(stringValue(args.note) ? { note: stringValue(args.note) } : {}) });
+    return this.afterAction("已提交网页表单。", evidence);
+  }
+
+  async select(args: Record<string, unknown>): Promise<AgentToolResult> {
+    const ref = elementRef(args.ref);
+    const values = Array.isArray(args.values) ? args.values.filter((value): value is string => typeof value === "string") : [];
+    if (values.length === 0) throw new BrowserError("BROWSER_SELECT_VALUES", "请至少提供一个要选择的值");
+    const { tab } = await this.options.sessions.activePage(this.options.taskId);
+    await tab.page.select(ref, values, DEFAULT_TIMEOUT_MS);
+    this.pushStep({ tool: "browser_select", ref, values });
+    return this.afterAction(`已选择 ${values.join(", ")}。`, null);
+  }
+
+  async drag(args: Record<string, unknown>): Promise<AgentToolResult> {
+    const startRef = elementRef(args.startRef);
+    const endRef = elementRef(args.endRef);
+    const { tab } = await this.options.sessions.activePage(this.options.taskId);
+    const before = await this.options.sessions.snapshot(this.options.taskId);
+    const evidence = await this.options.evidence.capture({
+      taskId: this.options.taskId, runId: this.options.runId, kind: "drag", page: tab.page,
+      pageDigest: before.digest, actionDigest: digest({ tool: "browser_drag", startRef, endRef }),
+      action: () => tab.page.drag(startRef, endRef, DEFAULT_TIMEOUT_MS)
+    });
+    this.pushStep({ tool: "browser_drag", startRef, endRef });
+    return this.afterAction(`已拖拽 ${startRef} 到 ${endRef}。`, evidence);
+  }
+
+  async clickAt(args: Record<string, unknown>): Promise<AgentToolResult> {
+    const x = finiteNumber(args.x);
+    const y = finiteNumber(args.y);
+    if (x === null || y === null) throw new BrowserError("BROWSER_COORDINATE", "x 和 y 必须是有效数字");
+    const { tab } = await this.options.sessions.activePage(this.options.taskId);
+    const before = await this.options.sessions.snapshot(this.options.taskId);
+    const evidence = await this.options.evidence.capture({
+      taskId: this.options.taskId, runId: this.options.runId, kind: "click_at", page: tab.page,
+      pageDigest: before.digest, actionDigest: digest({ tool: "browser_click_at", x, y }),
+      action: () => tab.page.clickAt(x, y, {
+        ...(stringValue(args.button) ? { button: stringValue(args.button) as "left" | "right" | "middle" } : {}),
+        ...(Number(args.clickCount) > 0 ? { clickCount: Number(args.clickCount) } : {})
+      })
+    });
+    this.pushStep({ tool: "browser_click_at", x, y });
+    return this.afterAction(`已在 ${x},${y} 点击。`, evidence);
+  }
+
+  async typeAt(args: Record<string, unknown>): Promise<AgentToolResult> {
+    const x = finiteNumber(args.x);
+    const y = finiteNumber(args.y);
+    const text = typeof args.text === "string" ? args.text : null;
+    if (x === null || y === null || text === null) throw new BrowserError("BROWSER_COORDINATE", "坐标输入需要有效的 x、y 和文字");
+    const { tab } = await this.options.sessions.activePage(this.options.taskId);
+    const before = await this.options.sessions.snapshot(this.options.taskId);
+    const evidence = await this.options.evidence.capture({
+      taskId: this.options.taskId, runId: this.options.runId, kind: "type_at", page: tab.page,
+      pageDigest: before.digest, actionDigest: digest({ tool: "browser_type_at", x, y, length: text.length }),
+      action: () => tab.page.typeAt(x, y, text)
+    });
+    this.pushStep({ tool: "browser_type_at", x, y, text: "[REDACTED]" });
+    return this.afterAction(`已在 ${x},${y} 输入文字。`, evidence);
+  }
+
+  async scroll(args: Record<string, unknown>): Promise<AgentToolResult> {
+    const deltaX = finiteNumber(args.deltaX) ?? 0;
+    const deltaY = finiteNumber(args.deltaY) ?? 600;
+    const { tab } = await this.options.sessions.activePage(this.options.taskId);
+    await tab.page.scroll(deltaX, deltaY);
+    this.pushStep({ tool: "browser_scroll", deltaX, deltaY });
+    return this.afterAction("页面已滚动。", null);
   }
 
   async tabs(args: Record<string, unknown>): Promise<AgentToolResult> {
@@ -370,18 +307,19 @@ class BrowserToolkit {
       const session = await this.options.sessions.session(this.options.taskId);
       return {
         content: session.tabs.map((tab) => `${tab.id === session.activeTabId ? "*" : " "} ${tab.id} ${tab.url || "(空白)"}`).join("\n"),
-        metadata: { browserTabs: session.tabs.map((tab) => ({ id: tab.id, url: tab.url })) }
+        metadata: { browserTabs: session.tabs.map((tab) => ({ id: tab.id, url: tab.url, title: tab.title })) }
       };
     }
     if (action === "new") {
-      const tab = await this.options.sessions.createTab(this.options.taskId);
-      return { content: `已新建 ${tab.id}。用 browser_open 在当前标签打开网址。`, metadata: { browserTabId: tab.id } };
+      const url = stringValue(args.url);
+      const tab = await this.options.sessions.createTab(this.options.taskId, url ? parseHttpUrl(url).toString() : undefined);
+      return { content: `已新建 ${tab.id}。${url ? `已打开 ${url}` : "用 browser_open 在当前标签打开网址。"}`, metadata: { browserTabId: tab.id } };
     }
     const tabId = stringValue(args.tabId);
     if (!tabId) throw new BrowserError("BROWSER_TAB_ID_REQUIRED", "需要标签页 ID");
     if (action === "activate") {
       const tab = await this.options.sessions.activateTab(this.options.taskId, tabId);
-      return { content: `已切换到 ${tab.id}：${tab.page.url()}`, metadata: { browserTabId: tab.id } };
+      return { content: `已切换到 ${tab.id}：${tab.url}`, metadata: { browserTabId: tab.id } };
     }
     if (action === "close") {
       await this.options.sessions.closeTab(this.options.taskId, tabId);
@@ -391,15 +329,12 @@ class BrowserToolkit {
   }
 
   async screenshot(args: Record<string, unknown>, context: AgentToolContext): Promise<AgentToolResult> {
-    const { tab } = await this.ensurePage();
+    const { tab } = await this.options.sessions.activePage(this.options.taskId, { allowObservation: true });
     const dir = join(context.outDir, "browser-screenshots");
     mkdirSync(dir, { recursive: true });
     const path = join(dir, `page-${Date.now()}.png`);
     await tab.page.screenshot({ path, fullPage: args.fullPage === true });
-    return {
-      content: `已保存网页截图：${relative(context.workspaceRoot, path).replaceAll("\\", "/")}`,
-      metadata: { browserScreenshot: path }
-    };
+    return { content: `已保存网页截图：${relative(context.workspaceRoot, path).replaceAll("\\", "/")}`, metadata: { browserScreenshot: path } };
   }
 
   async upload(args: Record<string, unknown>, context: AgentToolContext): Promise<AgentToolResult> {
@@ -409,41 +344,28 @@ class BrowserToolkit {
     const path = isAbsolute(raw) ? resolve(raw) : resolve(context.workspaceRoot, raw);
     if (!insideRoot(context.workspaceRoot, path)) throw new BrowserError("BROWSER_UPLOAD_OUTSIDE", "只能上传工作区内的文件。");
     if (!existsSync(path) || !statSync(path).isFile()) throw new BrowserError("BROWSER_UPLOAD_MISSING", `文件不存在：${raw}`);
-    const { tab, session } = await this.ensurePage();
-    this.ensureDomain(parseHttpUrl(tab.page.url()), "upload", true);
-    const target = tab.page.locator(`[data-hearth-ref="${ref}"]`);
-    const before = await captureBrowserSnapshot(tab.page);
+    const { tab } = await this.options.sessions.activePage(this.options.taskId);
+    const before = await this.options.sessions.snapshot(this.options.taskId);
     const evidence = await this.options.evidence.capture({
-      taskId: this.options.taskId,
-      runId: this.options.runId,
-      kind: "upload",
-      page: tab.page,
-      pageDigest: before.digest,
-      actionDigest: digest({ tool: "browser_upload", ref, file: basename(path) }),
-      action: () => target.setInputFiles(path)
+      taskId: this.options.taskId, runId: this.options.runId, kind: "upload", page: tab.page,
+      pageDigest: before.digest, actionDigest: digest({ tool: "browser_upload", ref, file: basename(path) }),
+      action: () => tab.page.upload(ref, path, DEFAULT_TIMEOUT_MS)
     });
-    this.emitEvidence(evidence);
-    const after = await captureBrowserSnapshot(tab.page);
-    session.lastSnapshotDigest = after.digest;
-    return { content: after.content, metadata: { browserUrl: after.url, browserPageDigest: after.digest } };
+    this.pushStep({ tool: "browser_upload", ref, file: basename(path) });
+    return this.afterAction(`已上传 ${basename(path)}。`, evidence);
   }
 
   async download(args: Record<string, unknown>, context: AgentToolContext): Promise<AgentToolResult> {
     const ref = elementRef(args.ref);
-    const { tab } = await this.ensurePage();
-    const target = tab.page.locator(`[data-hearth-ref="${ref}"]`);
+    const { tab } = await this.options.sessions.activePage(this.options.taskId);
+    const result = await tab.page.download(ref, DEFAULT_TIMEOUT_MS);
     const dir = join(context.outDir, "browser-downloads");
     mkdirSync(dir, { recursive: true });
-    const downloadPromise = tab.page.waitForEvent("download", { timeout: DEFAULT_TIMEOUT_MS });
-    await target.click({ timeout: DEFAULT_TIMEOUT_MS });
-    const download = await downloadPromise;
-    const suggested = safeFileName(stringValue(args.fileName) ?? download.suggestedFilename() ?? `download-${Date.now()}`);
+    const suggested = safeFileName(stringValue(args.fileName) ?? result.suggestedName ?? `download-${Date.now()}`);
     const path = uniquePath(dir, suggested);
-    await download.saveAs(path);
-    return {
-      content: `已下载到 ${relative(context.workspaceRoot, path).replaceAll("\\", "/")}（${download.suggestedFilename()}）`,
-      metadata: { browserDownload: path }
-    };
+    writeFileSync(path, result.data);
+    this.pushStep({ tool: "browser_download", ref, file: basename(path) });
+    return { content: `已下载到 ${relative(context.workspaceRoot, path).replaceAll("\\", "/")}（${result.suggestedName}）`, metadata: { browserDownload: path } };
   }
 
   async assert(args: Record<string, unknown>): Promise<AgentToolResult> {
@@ -453,41 +375,54 @@ class BrowserToolkit {
       throw new BrowserError("BROWSER_ASSERT_INPUT", "断言类型或值不正确");
     }
     const timeout = Math.min(60_000, Math.max(500, (Number(args.timeoutSec) || 10) * 1_000));
-    const { tab, session } = await this.ensurePage();
+    const { tab, session } = await this.options.sessions.activePage(this.options.taskId);
     let passed = false;
     let actual = "";
     try {
-      if (kind === "text") {
-        await tab.page.waitForFunction((text) => (document.body?.innerText ?? "").includes(text), value, { timeout });
-        actual = "正文包含目标文字";
-        passed = true;
-      } else if (kind === "url") {
-        await tab.page.waitForFunction((part) => location.href.includes(part), value, { timeout });
-        actual = tab.page.url();
-        passed = true;
-      } else if (kind === "element") {
-        await tab.page.locator(`[data-hearth-ref="${value}"]`).waitFor({ state: "visible", timeout });
-        actual = `元素 ${value} 可见`;
+      if (kind === "text" || kind === "element") {
+        await tab.page.wait({ kind, value, timeoutMs: timeout });
         passed = true;
       } else {
-        await tab.page.waitForFunction((ref) => !document.querySelector(`[data-hearth-ref="${ref}"]`), value, { timeout });
-        actual = `元素 ${value} 不存在`;
-        passed = true;
+        const deadline = Date.now() + timeout;
+        do {
+          const raw = await tab.page.snapshot(session.controlEpoch);
+          const pageText = raw.frames.map((frame) => frame.text).join("\n");
+          const hasElement = raw.frames.some((frame) => frame.elements.some((element) => element.ref === value));
+          passed = kind === "url" ? raw.url.includes(value) : !hasElement;
+          actual = kind === "url" ? raw.url : pageText.slice(0, 300);
+          if (passed) break;
+          await new Promise((resolve) => setTimeout(resolve, 150));
+        } while (Date.now() < deadline);
       }
+      if (passed && !actual) actual = kind === "text" ? "正文包含目标文字" : kind === "element" ? `元素 ${value} 可见` : kind === "url" ? tab.page.url() : `元素 ${value} 不存在`;
     } catch {
-      actual = kind === "text"
-        ? (await tab.page.locator("body").innerText().catch(() => "")).slice(0, 300)
-        : tab.page.url();
+      const snapshot = await this.options.sessions.snapshot(this.options.taskId, { allowBeforeObservation: true }).catch(() => null);
+      actual = kind === "url" ? tab.page.url() : (snapshot?.content ?? "").slice(0, 300);
     }
     const assertion = { kind, expected: value, passed, ...(passed ? {} : { actual }) };
     session.assertions.push(assertion);
-    this.pushStep({ tool: "browser_assert", kind: kind as "text" | "url" | "element" | "no-element", value });
+    this.pushStep({ tool: "browser_assert", kind, value });
     return {
-      content: passed
-        ? `断言通过：${assertionLabel(kind, value)}`
-        : `断言失败：${assertionLabel(kind, value)}。当前页面：${actual.slice(0, 300)}`,
+      content: passed ? `断言通过：${assertionLabel(kind, value)}` : `断言失败：${assertionLabel(kind, value)}。当前页面：${actual.slice(0, 300)}`,
       isError: !passed,
       metadata: { browserAssertions: session.assertions }
+    };
+  }
+
+  async requestTakeover(args: Record<string, unknown>): Promise<AgentToolResult> {
+    const kind = stringValue(args.kind);
+    const reason = stringValue(args.reason);
+    if (!kind || !TAKEOVER_KINDS.has(kind as BrowserTakeoverKind)) {
+      throw new BrowserError("BROWSER_TAKEOVER_KIND", "接管类型不正确");
+    }
+    if (!reason) throw new BrowserError("BROWSER_TAKEOVER_REASON", "需要说明为什么要接管");
+    const descriptor = this.options.sessions.requestUserTakeover(this.options.taskId, kind as BrowserTakeoverKind, reason);
+    this.pushStep({ tool: "browser_request_takeover", kind, reason });
+    return {
+      content: `需要你接管浏览器完成${takeoverLabel(kind as BrowserTakeoverKind)}：${reason}`,
+      action: "ask_user",
+      question: `浏览器需要你接管完成${takeoverLabel(kind as BrowserTakeoverKind)}。请在当前浏览器中完成操作，然后回到 Hearth 点击“继续 Agent”。`,
+      metadata: { browserTakeover: true, browserTakeoverKind: kind, browserTakeoverReason: reason, browserControlEpoch: descriptor.controlEpoch }
     };
   }
 
@@ -496,18 +431,26 @@ class BrowserToolkit {
     const name = stringValue(args.name);
     if (action === "list") {
       const recipes = listRecipes(this.options.recipesDir);
-      return { content: recipes.length > 0 ? recipes.map((recipe) => `- ${recipe.name} (${recipe.domain})`).join("\n") : "还没有保存过网页配方。" };
+      return {
+        content: recipes.length > 0 ? recipes.map((recipe) => `- ${recipe.name} (${recipe.domain})`).join("\n") : "还没有保存过网页配方。",
+        metadata: { browserRecipes: recipes.map(({ name: recipeName, domain }) => ({ name: recipeName, domain })) }
+      };
     }
     if (!name) throw new BrowserError("BROWSER_RECIPE_NAME", "需要配方名称");
     if (action === "save") {
       const session = await this.options.sessions.session(this.options.taskId);
       const active = this.options.sessions.activeTab(this.options.taskId);
       if (!active) throw new BrowserError("BROWSER_RECIPE_EMPTY", "当前任务没有网页流程可以保存。");
-      const domain = new URL(active.page.url()).hostname;
+      let domain = "";
+      try {
+        domain = new URL(active.page.url()).hostname;
+      } catch {
+        domain = new URL(active.url).hostname;
+      }
       const file = join(this.options.recipesDir, `${safeSlug(domain)}-${safeSlug(name)}.json`);
       mkdirSync(this.options.recipesDir, { recursive: true });
       writeFileSync(file, JSON.stringify({ name, domain, steps: session.steps, createdAt: new Date().toISOString() }, null, 2), "utf8");
-      return { content: `已保存网页配方：${name}（${session.steps.length} 步）` };
+      return { content: `已保存网页配方：${name}（${session.steps.length} 步）`, metadata: { browserRecipe: file } };
     }
     const recipe = findRecipe(this.options.recipesDir, name);
     if (!recipe) throw new BrowserError("BROWSER_RECIPE_MISSING", `找不到配方：${name}`);
@@ -517,57 +460,77 @@ class BrowserToolkit {
     }
     if (action !== "replay") throw new BrowserError("BROWSER_RECIPE_ACTION", "配方操作不正确");
     for (const step of recipe.steps) await this.replayStep(step);
-    const snapshot = await this.snapshotCurrent();
-    return { content: `已回放 ${recipe.steps.length} 步。\n\n${snapshot.content}`, metadata: { browserPageDigest: snapshot.digest } };
+    const snapshot = await this.options.sessions.snapshot(this.options.taskId);
+    return {
+      content: `已回放 ${recipe.steps.length} 步。\n\n${snapshot.content}`,
+      metadata: this.snapshotMetadata(snapshot)
+    };
+  }
+
+  private async afterAction(message: string, evidence: BrowserEvidenceRecord | null, includePage = true): Promise<AgentToolResult> {
+    if (evidence) this.emitEvidence(evidence);
+    if (!includePage) return { content: message };
+    const snapshot = await this.options.sessions.snapshot(this.options.taskId, { allowBeforeObservation: true });
+    if (evidence) this.emitEvidence(evidence);
+    return {
+      content: `${message}\n\n${snapshot.content}`,
+      metadata: {
+        ...this.snapshotMetadata(snapshot),
+        ...(evidence ? { browserEvidence: relativeEvidence(evidence) } : {})
+      }
+    };
+  }
+
+  private snapshotMetadata(snapshot: BrowserSnapshot): Record<string, unknown> {
+    const descriptor = this.options.sessions.describe(this.options.taskId);
+    return {
+      browserUrl: snapshot.url,
+      browserPageDigest: snapshot.digest,
+      browserCapturedAt: snapshot.capturedAt,
+      browserTruncated: snapshot.truncated,
+      browserControlState: descriptor?.controlState ?? "agent",
+      browserControlEpoch: descriptor?.controlEpoch ?? null
+    };
   }
 
   private async replayStep(step: BrowserRecipeStep): Promise<void> {
-    switch (step.tool) {
-      case "browser_open":
-        await this.open({ url: step.url }, fakeContext());
-        break;
-      case "browser_click":
-        await this.click({ ref: step.ref });
-        break;
-      case "browser_type":
-        await this.type({ ref: step.ref, text: step.text });
-        break;
-      case "browser_key":
-        await this.key({ key: step.key });
-        break;
-      case "browser_wait":
-        await this.wait({ kind: step.kind, value: step.value, ...(step.timeoutMs ? { timeoutSec: step.timeoutMs / 1_000 } : {}) });
-        break;
-      case "browser_assert":
-        await this.assert({ kind: step.kind, value: step.value });
-        break;
-    }
-  }
-
-  private async ensurePage(newTab = false): Promise<{ session: BrowserSessionState; tab: { id: string; page: import("playwright-core").Page; url: string } }> {
-    if (newTab) await this.options.sessions.createTab(this.options.taskId);
-    return this.options.sessions.activePage(this.options.taskId);
-  }
-
-  private ensureDomain(url: URL, action: string, allowHighRisk = false): void {
-    const host = url.hostname;
-    if (!this.options.settings.enabled) throw new BrowserError("BROWSER_DISABLED", "浏览器自动化已在设置中关闭。");
-    const readOnly = matchesAny(host, this.options.settings.readOnlyDomains);
-    if (readOnly && action !== "open" && action !== "read") {
-      throw new BrowserError("BROWSER_READ_ONLY_SITE", `${host} 被设为只读站点，不能执行 ${action}。`);
-    }
-    const highRisk = matchesAny(host, this.options.settings.highRiskDomains);
-    if (highRisk && !allowHighRisk && action !== "open" && action !== "read" && action !== "assert") {
-      throw new BrowserError("BROWSER_HIGH_RISK_SITE", `${host} 被设为高风险站点，只能读取；写入或提交必须由你人工确认。`);
-    }
-    if (this.options.settings.allowedDomains.length > 0 && !matchesAny(host, this.options.settings.allowedDomains) && !highRisk) {
-      throw new BrowserError("BROWSER_DOMAIN_DENIED", `域名 ${host} 不在允许列表里。请先在浏览器设置里添加，或在审批卡片里允许该域名。`);
+    const result = await (async (): Promise<AgentToolResult> => {
+      switch (step.tool) {
+        case "browser_open": return this.open({ url: step.url }, fakeContext());
+        case "browser_click": return this.click({ ref: step.ref });
+        case "browser_hover": return this.hover({ ref: step.ref });
+        case "browser_type":
+          if (step.text === "[REDACTED]") {
+            return this.requestTakeover({ kind: "login", reason: `配方 ${stringValue(step.ref) ?? "输入步骤"} 需要重新输入凭据` });
+          }
+          return this.type({ ref: step.ref, text: step.text });
+        case "browser_key": return this.key({ key: step.key });
+        case "browser_wait": return this.wait({ kind: step.kind, value: step.value, ...(step.timeoutMs ? { timeoutSec: Number(step.timeoutMs) / 1_000 } : {}) });
+        case "browser_submit": return this.submit({ ref: step.ref });
+        case "browser_select": return this.select({ ref: step.ref, values: step.values });
+        case "browser_drag": return this.drag({ startRef: step.startRef, endRef: step.endRef });
+        case "browser_click_at": return this.clickAt({ x: step.x, y: step.y });
+        case "browser_type_at":
+          if (step.text === "[REDACTED]") {
+            return this.requestTakeover({ kind: "complex_interaction", reason: "配方中的坐标输入包含敏感内容" });
+          }
+          return this.typeAt({ x: step.x, y: step.y, text: step.text });
+        case "browser_scroll": return this.scroll({ deltaX: step.deltaX, deltaY: step.deltaY });
+        case "browser_assert": return this.assert({ kind: step.kind, value: step.value });
+        case "browser_request_takeover": return this.requestTakeover({ kind: step.kind, reason: step.reason });
+        default: throw new BrowserError("BROWSER_RECIPE_STEP", `不支持的配方步骤：${step.tool}`);
+      }
+    })();
+    if (result.action === "ask_user" || result.isError) {
+      throw new BrowserError("BROWSER_RECIPE_INTERRUPTED", String(result.content));
     }
   }
 
   private pushStep(step: BrowserRecipeStep): void {
     const session = this.options.sessions.state(this.options.taskId);
-    if (session) session.steps.push(step);
+    if (!session) return;
+    session.steps.push(step);
+    if (session.steps.length > 200) session.steps.splice(0, session.steps.length - 200);
   }
 
   private emitEvidence(record: BrowserEvidenceRecord): void {
@@ -579,13 +542,6 @@ class BrowserToolkit {
       screenshotBefore: record.screenshotBefore,
       screenshotAfter: record.screenshotAfter
     });
-  }
-
-  private async snapshotCurrent(): Promise<BrowserSnapshot> {
-    const { tab, session } = await this.ensurePage();
-    const snapshot = await captureBrowserSnapshot(tab.page);
-    session.lastSnapshotDigest = snapshot.digest;
-    return snapshot;
   }
 }
 
@@ -599,8 +555,15 @@ function stringValue(value: unknown): string | null {
 
 function elementRef(value: unknown): string {
   const ref = stringValue(value);
-  if (!ref || !/^e\d+$/.test(ref)) throw new BrowserError("BROWSER_ELEMENT_REF", "元素 ID 必须像 e1、e2 这样。请先 browser_read 刷新页面。");
+  if (!ref || !/^\d+:e\d+$/.test(ref)) {
+    throw new BrowserError("BROWSER_ELEMENT_REF", "元素 ID 必须来自当前页面快照，例如 2:e8。请先 browser_read 刷新页面。");
+  }
   return ref;
+}
+
+function finiteNumber(value: unknown): number | null {
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 function parseHttpUrl(value: string): URL {

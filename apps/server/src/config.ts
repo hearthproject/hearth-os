@@ -41,7 +41,9 @@ export const BROWSER_DIR = join(DATA_DIR, "browser");
 export const BROWSER_PROFILE_DIR = join(BROWSER_DIR, "profile");
 export const BROWSER_EVIDENCE_DIR = join(BROWSER_DIR, "evidence");
 export const BROWSER_RECIPE_DIR = join(BROWSER_DIR, "recipes");
-export const BROWSER_SETTINGS_PATH = join(BROWSER_DIR, "settings.json");
+export const BROWSER_STATE_PATH = join(BROWSER_DIR, "sessions.json");
+export const BROWSER_EXTENSION_TOKEN_PATH = join(BROWSER_DIR, "extension-token");
+export const BROWSER_MCP_OUTPUT_DIR = join(BROWSER_DIR, "mcp-output");
 export const DOSSIER_DIR = join(DATA_DIR, "dossiers");
 export const WORKSTYLE_PATH = join(DATA_DIR, "profile", "WORKSTYLE.md");
 export const SUPERVISION_PATH = join(DATA_DIR, "supervision.json");
@@ -117,4 +119,3 @@ export function resolveRepoPath(path: string): string {
   }
   return absolute;
 }
-

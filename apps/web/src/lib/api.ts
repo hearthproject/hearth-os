@@ -11,7 +11,8 @@ import type {
   ArtifactListItem,
   BackupRestoreResult,
   BackupSnapshot,
-  BrowserSettingsView,
+  BrowserStatusView,
+  BrowserTakeoverKind,
   ExecutorId,
   ExecutorBootstrapResult,
   ExecutorBootstrapStreamEvent,
@@ -496,9 +497,21 @@ export const api = {
   task: (id: string) => request<TaskView>(`/api/tasks/${encodeURIComponent(id)}`),
   taskSystemContextUrl: (id: string) =>
     `/api/tasks/${encodeURIComponent(id)}/system-context?format=markdown`,
-  browserSettings: () => request<{ settings: BrowserSettingsView }>("/api/browser/settings"),
-  updateBrowserSettings: (input: Partial<BrowserSettingsView>) =>
-    request<{ settings: BrowserSettingsView }>("/api/browser/settings", { method: "PATCH", body: JSON.stringify(input) }),
+  browserStatus: (id: string) => request<BrowserStatusView>(`/api/tasks/${encodeURIComponent(id)}/browser`),
+  browserTakeover: (id: string, input: { kind?: BrowserTakeoverKind; reason?: string } = {}) =>
+    request<{ browser: BrowserStatusView }>(`/api/tasks/${encodeURIComponent(id)}/browser/takeover`, {
+      method: "POST",
+      body: JSON.stringify(input)
+    }),
+  browserRelease: (id: string) =>
+    request<{ browser: BrowserStatusView }>(`/api/tasks/${encodeURIComponent(id)}/browser/release`, { method: "POST" }),
+  browserConnect: (id: string, token?: string) =>
+    request<{ browser: BrowserStatusView }>(`/api/tasks/${encodeURIComponent(id)}/browser/connect`, {
+      method: "POST",
+      body: JSON.stringify(token ? { token } : {})
+    }),
+  browserClose: (id: string) =>
+    request<{ closed: boolean }>(`/api/tasks/${encodeURIComponent(id)}/browser/close`, { method: "POST" }),
   addFollowUp: (id: string, content: string, mode: TaskFollowUpMode) =>
     request<TaskFollowUpRecord>(`/api/tasks/${encodeURIComponent(id)}/follow-ups`, {
       method: "POST",

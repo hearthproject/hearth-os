@@ -84,7 +84,7 @@ TypeScript 是语言，Node.js 是运行时，两者不是同一层，也不是�
 | [个人上下文](/design/personal-context) | 用个人本体、Context Pack 和记忆召回决定 Agent 知道什么 |
 | [记忆](/design/memory) | 积累背景，但保持可纠正、可遗忘、可导出 |
 | [资料库与检索](/design/knowledge) | 用本地 SQLite 统一管理记忆、任务、来源、技能和文件，并把同一套检索工具交给三个执行器 |
-| [浏览器自动化](/design/browser) | 用独立 Chrome profile、页面断言和证据目录操作真实网站，而不是靠截图猜 |
+| [浏览器自动化](/design/browser) | 用日常 Chrome Extension 或受管 Chrome 完成网页任务，支持用户接管、会话延续、证据和输入脱敏 |
 | [评估与成本](/design/evaluation) | 用真实任务证明可靠性和成本，而不是用演示证明能力 |
 | [数据、备份与运维](/design/operations) | 备份、恢复、维护、存储回收、诊断和全局停止都收在本机控制面 |
 | [Windows 桌面版](/design/desktop) | 把完整应用装进 Tauri 壳，处理内置 Node、托盘、数据目录与首次启动 |

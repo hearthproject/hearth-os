@@ -64,6 +64,7 @@ import { DossierStore, dossierPromptBlock } from "./dossier.ts";
 import { WorkstyleStore, workstylePromptBlock } from "./workstyle.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import type { PreparedWorkspace } from "./workspace.ts";
+import { browserToolSecrets, redactBrowserToolArguments, redactKnownSecrets } from "./browser-redaction.ts";
 
 export const DEFAULT_RUN_BUDGET: RunBudget = { ...GENERAL_RUN_BUDGET };
 
@@ -1289,13 +1290,15 @@ export function nativeProgressForEvent(event: RuntimeEvent): { kind: string; mes
     };
   }
   if (event.type === "tool.started") {
+    const visibleArguments = redactBrowserToolArguments(event.call.name, event.call.arguments);
     return {
       kind: "tool",
       message: describeToolStart(event.call.name, event.call.arguments),
-      detail: { executorId: "native", eventType: "tool.started", title: event.call.name, input: event.call.arguments }
+      detail: { executorId: "native", eventType: "tool.started", title: event.call.name, input: visibleArguments }
     };
   }
   if (event.type === "tool.finished") {
+    const secrets = browserToolSecrets(event.call.name, event.call.arguments);
     return {
       kind: "tool",
       message: event.result.isError ? `操作没有完成，正在调整：${event.call.name}` : `完成一步：${event.call.name}`,
@@ -1303,7 +1306,7 @@ export function nativeProgressForEvent(event: RuntimeEvent): { kind: string; mes
         executorId: "native",
         eventType: "tool.finished",
         title: event.call.name,
-        output: event.result.content,
+        output: redactKnownSecrets(event.result.content, secrets),
         status: event.result.isError ? "failed" : "completed",
         durationMs: event.durationMs
       }

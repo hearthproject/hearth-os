@@ -1,114 +1,212 @@
-import { describe, expect, it, vi } from "vitest";
-import { BrowserSessionManager, browserFinishIssue } from "./browser-session.ts";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { BrowserSessionManager, browserFinishIssue, type BrowserSessionManagerOptions } from "./browser-session.ts";
+import type { BrowserPage, BrowserScreenshotOptions, BrowserWaitOptions } from "./browser-page.ts";
+import type { RawBrowserSnapshot } from "./browser-snapshot.ts";
 import type { BrowserService } from "./browser-service.ts";
 
+const tempDirs: string[] = [];
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+function tempDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), "hearth-browser-"));
+  tempDirs.push(dir);
+  return dir;
+}
+
+class FakePage implements BrowserPage {
+  readonly backend = "managed" as const;
+  currentUrl = "about:blank";
+  closed = false;
+
+  url(): string {
+    return this.currentUrl;
+  }
+
+  async title(): Promise<string> {
+    return `Page ${this.currentUrl}`;
+  }
+
+  async goto(url: string): Promise<void> {
+    this.currentUrl = url;
+  }
+
+  async snapshot(epoch: number): Promise<RawBrowserSnapshot> {
+    return {
+      url: this.currentUrl,
+      title: await this.title(),
+      frames: [{
+        index: 0,
+        url: this.currentUrl,
+        name: "main",
+        text: `page ${this.currentUrl}`,
+        elements: [{ ref: `${epoch}:e1`, role: "button", name: "Continue", value: null, disabled: false, checked: null, bbox: { x: 1, y: 2, width: 10, height: 20 }, tag: "button", type: null }]
+      }]
+    };
+  }
+
+  async bringToFront(): Promise<void> {}
+  async close(): Promise<void> { this.closed = true; }
+  async screenshot(_options?: BrowserScreenshotOptions): Promise<Buffer> { return Buffer.from("png"); }
+  async click(): Promise<void> {}
+  async hover(): Promise<void> {}
+  async type(): Promise<void> {}
+  async key(): Promise<void> {}
+  async wait(_options: BrowserWaitOptions): Promise<void> {}
+  async select(): Promise<void> {}
+  async drag(): Promise<void> {}
+  async clickAt(): Promise<void> {}
+  async typeAt(): Promise<void> {}
+  async scroll(): Promise<void> {}
+  async upload(): Promise<void> {}
+  async download(): Promise<{ data: Buffer; suggestedName: string }> { return { data: Buffer.from("x"), suggestedName: "x.txt" }; }
+  async execute(): Promise<unknown> { return null; }
+}
+
 function fakeService() {
-  let count = 0;
-  const pages: Array<Record<string, unknown>> = [];
-  const context = {
-    pages: () => pages,
-    newPage: vi.fn(async () => {
-      count += 1;
-      const page = {
-        id: count,
-        url: () => "about:blank",
-        title: vi.fn(async () => `tab ${count}`),
-        bringToFront: vi.fn(async () => undefined),
-        close: vi.fn(async () => undefined)
-      };
+  return {
+    context: vi.fn(),
+    close: vi.fn(async () => undefined)
+  } as unknown as BrowserService;
+}
+
+function manager(options: { statePath?: string; connector?: BrowserSessionManagerOptions["extensionConnector"] } = {}) {
+  const pages: FakePage[] = [];
+  const instance = new BrowserSessionManager(fakeService(), {
+    ...(options.statePath ? { statePath: options.statePath } : {}),
+    managedPageFactory: async (url) => {
+      const page = new FakePage();
+      if (url) page.currentUrl = url;
       pages.push(page);
       return page;
-    })
-  };
-  return {
-    service: { context: async () => context } as unknown as BrowserService,
-    context,
-    pages
-  };
+    },
+    ...(options.connector ? { extensionConnector: options.connector } : {})
+  });
+  return { instance, pages };
 }
 
 describe("BrowserSessionManager", () => {
-  it("reuses one page per task and caps concurrent sessions", async () => {
-    const fake = fakeService();
-    const manager = new BrowserSessionManager(fake.service);
+  it("reuses one session per task without fixed global session or tab limits", async () => {
+    const { instance } = manager();
     try {
-      const first = await manager.session("task-a");
-      const again = await manager.session("task-a");
-      expect(first).toBe(again);
-      expect(first.tabs).toHaveLength(1);
-      await manager.session("task-b");
-      await manager.session("task-c");
-      await manager.session("task-d");
-      await expect(manager.session("task-e")).rejects.toMatchObject({ code: "BROWSER_SESSION_LIMIT" });
-      await manager.release("task-a");
-      await expect(manager.session("task-e")).resolves.toBeTruthy();
+      const first = await instance.session("task-a");
+      expect(await instance.session("task-a")).toBe(first);
+      for (let index = 0; index < 8; index += 1) await instance.createTab("task-a", `https://example.com/${index}`);
+      expect(instance.describe("task-a")!.tabs).toHaveLength(9);
+      for (let index = 0; index < 8; index += 1) await instance.session(`task-${index}`);
+      expect(instance.describe("task-7")?.exists).toBe(true);
     } finally {
-      manager.stop();
-      await manager.releaseAll();
+      await instance.releaseAll();
     }
   });
 
-  it("blocks tools while paused and resumes", async () => {
-    const fake = fakeService();
-    const manager = new BrowserSessionManager(fake.service);
+  it("uses epoch-scoped refs and requires a fresh observation after takeover", async () => {
+    const { instance } = manager();
     try {
-      await manager.session("task-a");
-      expect(manager.pause("task-a")).toBe(true);
-      await expect(manager.activePage("task-a")).rejects.toMatchObject({ code: "BROWSER_TAKEOVER" });
-      expect(manager.resume("task-a")).toBe(true);
-      await expect(manager.activePage("task-a")).resolves.toMatchObject({ session: { paused: false } });
+      await instance.session("task-a");
+      const before = await instance.snapshot("task-a");
+      expect(before.elements[0]!.ref).toBe("1:e1");
+      const takeover = instance.requestUserTakeover("task-a", "captcha", "请完成验证码");
+      expect(takeover.controlState).toBe("awaiting_user");
+      expect(takeover.controlEpoch).toBe(2);
+      await expect(instance.activePage("task-a")).rejects.toMatchObject({ code: "BROWSER_TAKEOVER" });
+      instance.beginUserTakeover("task-a", "captcha");
+      const released = await instance.releaseToAgent("task-a");
+      expect(released.session.controlState).toBe("agent");
+      expect(released.session.controlEpoch).toBe(4);
+      const after = released.snapshot!;
+      expect(after.elements[0]!.ref).toBe("4:e1");
     } finally {
-      manager.stop();
-      await manager.releaseAll();
+      await instance.releaseAll();
     }
   });
 
-  it("reclaims idle sessions", async () => {
-    const fake = fakeService();
-    const manager = new BrowserSessionManager(fake.service, { idleMs: 40 });
+  it("restores session metadata from disk until an explicit close", async () => {
+    const statePath = join(tempDir(), "sessions.json");
+    const first = manager({ statePath }).instance;
+    await first.session("task-a");
+    await first.createTab("task-a", "https://example.com/one");
+    first.requestUserTakeover("task-a", "payment_confirmation", "请确认支付");
+    await first.stop();
+
+    const second = manager({ statePath }).instance;
     try {
-      const session = await manager.session("task-a");
-      const page = session.tabs[0]!.page as unknown as { close: ReturnType<typeof vi.fn> };
-      await new Promise((resolve) => setTimeout(resolve, 120));
-      expect(manager.has("task-a")).toBe(false);
-      expect(page.close).toHaveBeenCalled();
+      const descriptor = second.describe("task-a");
+      expect(descriptor).toMatchObject({
+        exists: true,
+        backend: "managed",
+        controlState: "awaiting_user",
+        takeoverKind: "payment_confirmation",
+        takeoverReason: "请确认支付"
+      });
+      expect(descriptor?.tabs).toHaveLength(2);
+      await second.close("task-a");
+      expect(second.describe("task-a")).toBeNull();
     } finally {
-      manager.stop();
-      await manager.releaseAll();
+      await second.releaseAll();
     }
+  });
+
+  it("falls back to managed Chrome when a paired extension is not available", async () => {
+    const connector = vi.fn(async () => { throw new Error("extension offline"); });
+    const tokenPath = join(tempDir(), "extension-token");
+    writeFileSync(tokenPath, "1234567890abcdef");
+    const pages: FakePage[] = [];
+    const instance = new BrowserSessionManager(fakeService(), {
+      extensionTokenPath: tokenPath,
+      extensionConnector: connector,
+      managedPageFactory: async () => {
+        const page = new FakePage();
+        pages.push(page);
+        return page;
+      }
+    });
+    try {
+      const session = await instance.session("task-a");
+      expect(session.backend).toBe("managed");
+      expect(session.unavailableReason).toContain("回退到受管 Chrome");
+      expect(pages).toHaveLength(1);
+    } finally {
+      await instance.releaseAll();
+    }
+  });
+
+  it("stores and reports an extension token without exposing it in status", async () => {
+    const dir = tempDir();
+    const tokenPath = join(dir, "extension-token");
+    const instance = new BrowserSessionManager(fakeService(), { extensionTokenPath: tokenPath });
+    BrowserSessionManager.prototype;
+    writeFileSync(tokenPath, "1234567890abcdef");
+    expect(instance.extensionStatus()).toMatchObject({ paired: true, extensionId: "mmlmfjhmonkocbjadbfplnigmagldckm" });
+    expect(JSON.stringify(instance.extensionStatus())).not.toContain("1234567890abcdef");
+  });
+
+  it("restores the previous token when an extension connection attempt fails", async () => {
+    const tokenPath = join(tempDir(), "extension-token");
+    writeFileSync(tokenPath, "1234567890abcdef");
+    const instance = new BrowserSessionManager(fakeService(), {
+      extensionTokenPath: tokenPath,
+      extensionConnector: async (options) => {
+        expect(readFileSync(options.tokenPath, "utf8")).toBe("fedcba0987654321");
+        throw new Error("pairing rejected");
+      }
+    });
+
+    await expect(instance.connectExtension("task-a", "fedcba0987654321")).rejects.toThrow("pairing rejected");
+    expect(readFileSync(tokenPath, "utf8")).toBe("1234567890abcdef");
+    expect(existsSync(tokenPath)).toBe(true);
+    await instance.releaseAll();
   });
 });
 
 describe("browserFinishIssue", () => {
-  it("does not gate a task that never touched the browser", () => {
+  it("never gates completion on browser assertions", () => {
     expect(browserFinishIssue(undefined)).toBeNull();
-    expect(browserFinishIssue({ assertions: [], steps: [] } as never)).toBeNull();
-  });
-
-  it("requires at least one assertion after browser work", () => {
-    const state = {
-      steps: [{ tool: "browser_open", url: "https://example.com" }],
-      assertions: []
-    };
-    expect(browserFinishIssue(state as never)).toMatch(/browser_assert/);
-  });
-
-  it("blocks completion on a failing assertion and reports what was expected", () => {
-    const issue = browserFinishIssue({
-      steps: [{ tool: "browser_open", url: "https://example.com" }],
-      assertions: [{ kind: "text", expected: "提交成功", passed: false, actual: "提交失败" }]
-    } as never);
-    expect(issue).toContain("提交成功");
-    expect(issue).toContain("提交失败");
-  });
-
-  it("allows completion once the last assertion passes", () => {
-    expect(browserFinishIssue({
-      steps: [{ tool: "browser_open", url: "https://example.com" }],
-      assertions: [
-        { kind: "text", expected: "旧文案", passed: false },
-        { kind: "text", expected: "提交成功", passed: true }
-      ]
-    } as never)).toBeNull();
+    expect(browserFinishIssue({ assertions: [], steps: [{ tool: "browser_open" }] } as never)).toBeNull();
   });
 });

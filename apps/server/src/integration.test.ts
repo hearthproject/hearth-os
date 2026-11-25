@@ -383,6 +383,17 @@ describe("cross-module integration", () => {
     }
   });
 
+  it("reports a missing task as 404 on browser takeover, release, and connect", async () => {
+    for (const path of [
+      "/api/tasks/TASK-missing/browser/takeover",
+      "/api/tasks/TASK-missing/browser/release",
+      "/api/tasks/TASK-missing/browser/connect"
+    ]) {
+      const response = await app.inject({ method: "POST", url: path, payload: {} });
+      expect(response.statusCode, path).toBe(404);
+      expect(response.json().error, path).toBe("TASK_NOT_FOUND");
+    }
+  });
   it("reports a missing proposal as 404 on confirm and reject", async () => {
     for (const path of ["/api/task-proposals/PRP-missing/confirm", "/api/task-proposals/PRP-missing/reject"]) {
       const response = await app.inject({ method: "POST", url: path, payload: {} });
@@ -424,8 +435,9 @@ describe("cross-module integration", () => {
         { method: "PATCH", url: "/api/context/settings", payload: { mode: "bogus" } },
         { method: "PATCH", url: "/api/context/settings", payload: { maxHandoffs: 99 } },
         { method: "PATCH", url: "/api/context/settings", payload: { nope: true } },
-        { method: "PATCH", url: "/api/browser/settings", payload: { enabled: "yes" } },
-        { method: "PATCH", url: "/api/browser/settings", payload: { allowedDomains: [1] } },
+        { method: "POST", url: "/api/tasks/TASK-missing/browser/takeover", payload: {} },
+        { method: "POST", url: "/api/tasks/TASK-missing/browser/release", payload: {} },
+        { method: "POST", url: "/api/tasks/TASK-missing/browser/connect", payload: {} },
         { method: "POST", url: "/api/model-profiles", payload: {} },
         { method: "POST", url: "/api/model-profiles", payload: { name: "x", baseUrl: "not a url", model: "m" } },
         { method: "PUT", url: "/api/model-registry/chat-profile", payload: { profileId: 5 } },

@@ -28,4 +28,17 @@ describe("progress detail sanitization", () => {
     expect(detail?.output?.length).toBeLessThan(5_000);
     expect(detail?.text?.length).toBeLessThan(5_000);
   });
+
+  it("redacts browser text by tool title even when the field is not named password", () => {
+    const detail = sanitizeProgressDetail({
+      executorId: "native",
+      eventType: "tool.started",
+      title: "browser_type",
+      input: { ref: "2:e5", text: "private-login-value" },
+      output: "Playwright echo: private-login-value"
+    });
+
+    expect(JSON.stringify(detail)).not.toContain("private-login-value");
+    expect(detail?.input).toMatchObject({ text: "[REDACTED]" });
+  });
 });

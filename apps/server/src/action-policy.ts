@@ -28,6 +28,20 @@ const LOCAL_WRITE_TOOLS = new Set([
 const LOCAL_DELETE_TOOLS = new Set(["delete_file", "remove_file", "delete_path"]);
 const LOCAL_EXEC_TOOLS = new Set(["shell", "run_command", "exec"]);
 const BROWSER_READ_TOOLS = new Set(["browser_read", "browser_screenshot", "browser_assert"]);
+const BROWSER_INTERACTION_TOOLS = new Set([
+  "browser_click",
+  "browser_hover",
+  "browser_type",
+  "browser_key",
+  "browser_wait",
+  "browser_select",
+  "browser_drag",
+  "browser_click_at",
+  "browser_type_at",
+  "browser_scroll",
+  "browser_tabs",
+  "browser_request_takeover"
+]);
 const EXTERNAL_READ_TOOLS = new Set(["fetch_url", "web_search", "browser_open"]);
 const EXTERNAL_WRITE_TOOLS = new Set([
   "browser_submit",
@@ -73,6 +87,7 @@ export function classifyTool(toolName: string, action: ResolvedAction | null = n
   if (LOCAL_DELETE_TOOLS.has(toolName)) return classification("local_delete", "删除本机文件。", false, false);
   if (LOCAL_EXEC_TOOLS.has(toolName)) return classification("local_exec", "在本机运行命令。", false, false);
   if (BROWSER_READ_TOOLS.has(toolName)) return classification("browser_read", "读取网页内容。", false, false);
+  if (BROWSER_INTERACTION_TOOLS.has(toolName)) return classification("desktop", "操作当前网页界面。", false, false);
   if (EXTERNAL_READ_TOOLS.has(toolName)) return classification("external_read", "读取外部信息。", false, false);
   if (EXTERNAL_WRITE_TOOLS.has(toolName)) return classification("external_write", "会把内容提交到外部服务。", true, true);
   if (DESKTOP_TOOLS.has(toolName)) return classification("desktop", "操作本机桌面。", false, false);
@@ -114,8 +129,11 @@ export function classifyResolvedAction(action: ResolvedAction): ActionPolicyClas
   if (action.kind === "desktop") return classification("desktop", "操作本机桌面。", false, false);
   if (action.kind === "browser") {
     const verb = action.browser?.action ?? "";
-    if (verb === "read" || verb === "assert" || verb === "screenshot") {
+    if (verb === "read" || verb === "assert" || verb === "screenshot" || verb === "open" || verb === "navigate") {
       return classification("browser_read", "读取网页内容。", false, false);
+    }
+    if (!["submit", "upload", "download", "recipe"].includes(verb)) {
+      return classification("desktop", "操作当前网页界面。", false, false);
     }
     return classification("external_write", "会在网页上提交或上传内容。", true, true);
   }

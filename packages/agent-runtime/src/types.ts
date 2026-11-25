@@ -142,6 +142,15 @@ export interface AgentToolMetadata {
   browserScreenshot?: string;
   browserDownload?: string;
   browserEvidence?: Record<string, string | null>;
+  browserTakeover?: boolean;
+  browserTakeoverKind?: string;
+  browserTakeoverReason?: string;
+  browserControlState?: string;
+  browserControlEpoch?: number | null;
+  browserCapturedAt?: string;
+  browserTruncated?: boolean;
+  browserRecipes?: Array<{ name: string; domain: string }>;
+  browserRecipe?: string;
   operationId?: string;
   operationPhase?: OperationPhase;
   operationUnsettled?: boolean;

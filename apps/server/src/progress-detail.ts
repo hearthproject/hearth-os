@@ -1,4 +1,5 @@
 import type { TaskProgressDetail } from "@hearth/core";
+import { browserToolSecrets, redactKnownSecrets } from "./browser-redaction.ts";
 
 const MAX_FIELD_CHARS = 8_000;
 const MAX_TOTAL_CHARS = 24_000;
@@ -25,9 +26,16 @@ export function redactProgressText(value: string): string {
   return text;
 }
 
-export function sanitizeProgressDetail(detail: TaskProgressDetail | null | undefined): TaskProgressDetail | undefined {
+export function sanitizeProgressDetail(
+  detail: TaskProgressDetail | null | undefined,
+  additionalSecrets: Iterable<string> = []
+): TaskProgressDetail | undefined {
   if (!detail) return undefined;
-  const cleaned = redactValue(detail) as TaskProgressDetail;
+  const secrets = [
+    ...additionalSecrets,
+    ...(typeof detail.title === "string" ? browserToolSecrets(detail.title, detail.input) : [])
+  ];
+  const cleaned = redactValue(detail, secrets) as TaskProgressDetail;
   const json = safeStringify(cleaned);
   if (json.length <= MAX_TOTAL_CHARS) return cleaned;
   return {
@@ -39,13 +47,13 @@ export function sanitizeProgressDetail(detail: TaskProgressDetail | null | undef
   };
 }
 
-function redactValue(value: unknown): unknown {
-  if (typeof value === "string") return clip(redactProgressText(value), MAX_FIELD_CHARS);
-  if (Array.isArray(value)) return value.map(redactValue);
+function redactValue(value: unknown, secrets: string[]): unknown {
+  if (typeof value === "string") return clip(redactKnownSecrets(redactProgressText(value), secrets), MAX_FIELD_CHARS);
+  if (Array.isArray(value)) return value.map((item) => redactValue(item, secrets));
   if (value && typeof value === "object") {
     const result: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-      result[key] = isSecretKey(key) ? "[REDACTED]" : redactValue(item);
+      result[key] = isSecretKey(key) ? "[REDACTED]" : redactValue(item, secrets);
     }
     return result;
   }
