@@ -543,8 +543,7 @@ const browserTakeoverSchema = z.object({
 }).strict();
 
 const browserConnectSchema = z.object({
-  token: z.string().trim().max(20_000).optional(),
-  profileDirName: z.string().trim().min(1).max(120).regex(/^[A-Za-z0-9 _.-]+$/).optional()
+  token: z.string().trim().max(20_000).optional()
 }).strict();
 
 const createSourceSchema = z.object({
@@ -2759,7 +2758,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     const parsed = browserConnectSchema.safeParse(request.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: "INVALID_BROWSER_CONNECT", message: "扩展连接参数不正确" });
     try {
-      const session = await scheduler.connectBrowser(request.params.id, parsed.data.token, parsed.data.profileDirName);
+      const session = await scheduler.connectBrowser(request.params.id, parsed.data.token);
       return { session, browser: await scheduler.browserStatus(request.params.id) };
     } catch (error) {
       return reply.code(409).send({ error: "BROWSER_CONNECT_FAILED", message: error instanceof Error ? error.message : String(error) });
