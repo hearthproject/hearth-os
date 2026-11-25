@@ -133,10 +133,59 @@ describe("ConversationContextService", () => {
     expect(chat.summaryText).toContain("<hearth-conversation-summary");
     expect(chat.history.some((item) => item.content === "RECENT-USER")).toBe(true);
     expect(chat.history.some((item) => item.content.startsWith("OLD-0-"))).toBe(false);
+    expect(chat.history.some((item) => item.id === state?.firstKeptMessageId)).toBe(true);
 
     const again = await conversationContext.compactNow(conversation.id, "manual");
     expect(again).toBeNull();
     expect(store!.getConversationContextState(conversation.id)?.version).toBe(1);
+  });
+
+  it("does not re-compact when the summary plus live tail is under the threshold", async () => {
+    const { service, conversationContext } = setup();
+    const conversation = store!.createConversation("阈值", defaultConversationSettings());
+    for (let index = 0; index < 18; index += 1) {
+      service.appendChatMessage(message(conversation.id, index % 2 === 0 ? "user" : "assistant", `THR-${index}-${"z".repeat(4_000)}`));
+    }
+    const first = await conversationContext.compactNow(conversation.id, "manual");
+    expect(first?.status).toBe("completed");
+    expect(store!.getConversationContextState(conversation.id)?.version).toBe(1);
+
+    const result = await conversationContext.compactIfNeeded(conversation.id, "auto", {
+      budgetTokens: 10_000,
+      thresholdTokens: 5_000,
+      keepTokens: 2_400,
+      summaryMaxTokens: 1_000
+    });
+    expect(result).toBeNull();
+    expect(store!.getConversationContextState(conversation.id)?.version).toBe(1);
+  });
+
+  it("summarizes only messages after the boundary when firstKeptMessageId is null", async () => {
+    const { service, conversationContext } = setup();
+    const conversation = store!.createConversation("边界", defaultConversationSettings());
+    const messages = Array.from({ length: 18 }, (_, index) => ({
+      ...message(conversation.id, index % 2 === 0 ? "user" : "assistant", `EDGE-${index}-${"w".repeat(4_000)}`),
+      createdAt: `2026-11-24T10:00:${String(index).padStart(2, "0")}.000Z`
+    }));
+    for (const item of messages) service.appendChatMessage(item);
+    store!.saveConversationContextState({
+      conversationId: conversation.id,
+      version: 1,
+      summary: "此前摘要",
+      summaryData: null,
+      firstKeptMessageId: null,
+      lastSummarizedAt: messages[9]!.createdAt,
+      tokensBefore: 0,
+      tokensAfter: 0,
+      lastUsage: null,
+      updatedAt: "2026-11-24T10:00:00.000Z"
+    });
+
+    const compaction = await conversationContext.compactNow(conversation.id, "manual");
+    expect(compaction?.status).toBe("completed");
+    const covered = new Set(compaction?.coveredMessageIds ?? []);
+    for (const item of messages.slice(0, 10)) expect(covered.has(item.id)).toBe(false);
+    expect(messages.slice(10).some((item) => covered.has(item.id))).toBe(true);
   });
 
   it("merges previous facts and completed tasks when the summary model omits them", async () => {

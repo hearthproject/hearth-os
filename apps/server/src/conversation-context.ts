@@ -476,9 +476,11 @@ export class ConversationContextService {
     const threshold = options.thresholdTokens ?? policy.compactThresholdTokens;
     const units = this.collectUnits(conversationId, options.excludeTaskId, true, options.excludeMessageId);
     if (units.length === 0) return null;
-    const rawTokens = units.reduce((sum, unit) => sum + unit.tokens, 0);
+    const state = this.service.store.getConversationContextState(conversationId);
+    const liveTokens = this.liveUnits(units, state).reduce((sum, unit) => sum + unit.tokens, 0);
+    const effectiveTokens = (state?.summary ? estimateTokens(state.summary) : 0) + liveTokens;
     if (trigger === "auto" && settings.conversationAutoCompact === false) return null;
-    if (trigger === "auto" && rawTokens <= threshold) return null;
+    if (trigger === "auto" && effectiveTokens <= threshold) return null;
     return this.compact(conversationId, trigger, units, budget, {
       keepTokens: options.keepTokens ?? policy.keepTokens,
       summaryMaxTokens: options.summaryMaxTokens ?? policy.summaryMaxTokens
@@ -519,7 +521,7 @@ export class ConversationContextService {
       const state = this.service.store.getConversationContextState(conversationId);
       const previous = state?.summaryData ? state.summaryData : emptySummary();
       const previousText = state?.summary ?? "";
-      const summarizeFrom = this.indexForId(units, state?.firstKeptMessageId ?? null);
+      const summarizeFrom = units.length - this.liveUnits(units, state).length;
       const cutIndex = this.findCutIndex(units, summarizeFrom, policy.keepTokens, budgetTokens);
       if (cutIndex <= summarizeFrom || cutIndex >= units.length) return null;
       const covered = units.slice(summarizeFrom, cutIndex);
@@ -559,7 +561,7 @@ export class ConversationContextService {
           summary: summaryText,
           summaryData,
           firstKeptMessageId: firstKept,
-          lastSummarizedAt: now,
+          lastSummarizedAt: covered.at(-1)?.createdAt ?? now,
           tokensBefore: record.tokensBefore,
           tokensAfter,
           lastUsage: latestState?.lastUsage ?? state?.lastUsage ?? null,
@@ -639,11 +641,12 @@ export class ConversationContextService {
   }
 
   private chatHistory(conversationId: string, state: ConversationContextState | null, currentMessageId?: string): ChatMessageRecord[] {
+    const all = this.service.store.listChatMessages(conversationId);
     const messages = state
       ? state.firstKeptMessageId
-        ? this.service.store.listChatMessagesAfter(conversationId, state.firstKeptMessageId)
-        : this.service.store.listChatMessages(conversationId).filter((message) => state.lastSummarizedAt == null || message.createdAt > state.lastSummarizedAt)
-      : this.service.store.listChatMessages(conversationId);
+        ? all.slice(Math.max(0, all.findIndex((message) => message.id === state.firstKeptMessageId)))
+        : all.filter((message) => state.lastSummarizedAt == null || message.createdAt > state.lastSummarizedAt)
+      : all;
     const taskIds = new Set(this.service.store.listTasksByConversation(conversationId).map((task) => task.id));
     return messages.filter((message) =>
       message.id !== currentMessageId
@@ -680,10 +683,11 @@ export class ConversationContextService {
     };
   }
 
-  private indexForId(units: ConversationUnit[], id: string | null): number {
-    if (!id) return 0;
-    const index = units.findIndex((unit) => unit.id === id);
-    return index >= 0 ? index : 0;
+  private liveUnits(units: ConversationUnit[], state: ConversationContextState | null): ConversationUnit[] {
+    if (!state) return units;
+    if (state.firstKeptMessageId) return this.afterFirstKept(units, state.firstKeptMessageId);
+    if (!state.lastSummarizedAt) return units;
+    return units.filter((unit) => unit.createdAt > (state.lastSummarizedAt as string));
   }
 
   private afterFirstKept(units: ConversationUnit[], id: string | null): ConversationUnit[] {
