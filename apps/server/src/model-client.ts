@@ -23,7 +23,7 @@ export class ModelClientError extends Error {
 export interface CompleteOptions {
   maxTokens?: number;
   responseFormat?: { type: "json_object" };
-  reasoningEffort?: "minimal" | "low" | "medium" | "high" | "max";
+  reasoningEffort?: "off" | "minimal" | "low" | "medium" | "high" | "max";
   temperature?: number;
   signal?: AbortSignal;
   timeoutMs?: number;
@@ -203,7 +203,7 @@ async function completeOpenAiChat(
       temperature: options.temperature ?? 0.2,
       max_tokens: options.maxTokens ?? 1_200,
       ...(options.responseFormat ? { response_format: options.responseFormat } : {}),
-      ...(options.reasoningEffort ? { reasoning_effort: options.reasoningEffort } : {})
+      ...openAiChatReasoningFields(settings.baseUrl, options.reasoningEffort)
     }),
     signal: withTimeout(options.signal, options.timeoutMs ?? 60_000)
   });
@@ -238,7 +238,7 @@ async function streamOpenAiChat(
       stream: true,
       ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
       temperature: options.temperature ?? 0.5,
-      ...(options.reasoningEffort ? { reasoning_effort: options.reasoningEffort } : {})
+      ...openAiChatReasoningFields(settings.baseUrl, options.reasoningEffort)
     }),
     signal: withTimeout(options.signal, options.timeoutMs ?? 180_000)
   });
@@ -293,7 +293,7 @@ async function completeOpenAiResponses(
       stream: false,
       temperature: options.temperature ?? 0.2,
       max_output_tokens: options.maxTokens ?? 1_200,
-      ...(options.reasoningEffort ? { reasoning: { effort: options.reasoningEffort } } : {})
+      ...responsesReasoningFields(options.reasoningEffort)
     }),
     signal: withTimeout(options.signal, options.timeoutMs ?? 60_000)
   });
@@ -315,7 +315,7 @@ async function streamOpenAiResponses(
       ...responsesBody(messages),
       model: settings.model,
       stream: true,
-      ...(options.reasoningEffort ? { reasoning: { effort: options.reasoningEffort } } : {})
+      ...responsesReasoningFields(options.reasoningEffort)
     }),
     signal: withTimeout(options.signal, options.timeoutMs ?? 180_000)
   });
@@ -539,6 +539,16 @@ function geminiBody(messages: ChatMessage[], options: CompleteOptions): Record<s
       ...(options.maxTokens ? { maxOutputTokens: options.maxTokens } : {})
     }
   };
+}
+
+export function openAiChatReasoningFields(baseUrl: string, effort: CompleteOptions["reasoningEffort"]): Record<string, unknown> {
+  if (!effort) return {};
+  if (effort !== "off") return { reasoning_effort: effort };
+  return /deepseek/i.test(baseUrl) ? { thinking: { type: "disabled" } } : {};
+}
+
+export function responsesReasoningFields(effort: CompleteOptions["reasoningEffort"]): Record<string, unknown> {
+  return effort && effort !== "off" ? { reasoning: { effort } } : {};
 }
 
 export function openAiChatUrl(baseUrl: string): string {

@@ -117,7 +117,7 @@ export function normalizeProtocol(value: unknown): ModelProtocol {
 }
 
 function normalizeReasoningEffort(value: unknown): ReasoningEffort {
-  return value === "low" || value === "high" || value === "max" ? value : "max";
+  return value === "off" || value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "max" ? value : "max";
 }
 
 export function loadModelSettings(path: string): ModelSettings {

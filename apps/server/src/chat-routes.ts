@@ -105,7 +105,7 @@ const modelSettingsSchema = z.object({
   model: z.string().trim().max(200).optional(),
   contextWindowTokens: z.number().int().min(4096).max(10_000_000).optional(),
   maxOutputTokens: z.number().int().min(256).max(1_000_000).optional(),
-  reasoningEffort: z.enum(["minimal", "low", "medium", "high", "max"]).optional(),
+  reasoningEffort: z.enum(["off", "minimal", "low", "medium", "high", "max"]).optional(),
   apiKey: z.string().max(500).optional()
 }).strict();
 

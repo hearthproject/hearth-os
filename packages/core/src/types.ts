@@ -131,7 +131,7 @@ export interface ExecutorView {
   modelBinding?: ExecutorModelBindingView | undefined;
 }
 
-export type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "max";
+export type ReasoningEffort = "off" | "minimal" | "low" | "medium" | "high" | "max";
 
 export interface ExecutorSettings {
   defaultApprovalMode: ApprovalMode;

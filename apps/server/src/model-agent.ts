@@ -9,9 +9,11 @@ import {
   bearerHeaders,
   geminiHeaders,
   geminiUrl,
+  openAiChatReasoningFields,
   openAiChatUrl,
   openAiResponsesUrl,
   protocolOf,
+  responsesReasoningFields,
   readAnthropicUsage,
   readGeminiUsage,
   readJson,
@@ -89,7 +91,7 @@ async function streamOpenAiChatTurn(
     stream: true,
     temperature: options.temperature ?? 0.2,
     ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
-    ...(options.reasoningEffort ? { reasoning_effort: options.reasoningEffort } : {})
+    ...openAiChatReasoningFields(settings.baseUrl, options.reasoningEffort)
   });
   if (process.env.HEARTH_MODEL_DEBUG_PATH) {
     appendFileSync(process.env.HEARTH_MODEL_DEBUG_PATH, `${JSON.stringify({ at: new Date().toISOString(), protocol: "openai-chat", url: openAiChatUrl(settings.baseUrl), body: requestBody })}\n`, "utf8");
@@ -216,7 +218,7 @@ async function streamResponsesTurn(
       stream: true,
       ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
       ...(options.maxTokens ? { max_output_tokens: options.maxTokens } : {}),
-      ...(options.reasoningEffort ? { reasoning: { effort: options.reasoningEffort } } : {})
+      ...responsesReasoningFields(options.reasoningEffort)
     }),
     signal: withTimeout(options.signal, options.timeoutMs ?? 180_000)
   });

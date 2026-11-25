@@ -434,7 +434,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     const restoredContext = buildPostCompactContext(state, { mode: options.mode ?? state.mode ?? "build" });
     const compacted = options.contextWindowTokens
       ? await compactAgentMessagesWithSummary(messages, {
-          contextWindowTokens: force ? 1 : options.contextWindowTokens,
+          contextWindowTokens: force ? 1 : triggerWindowTokens(options.contextWindowTokens, options.compactTriggerTokens, options.contextReserveTokens ?? Math.max(16_000, Math.floor(options.contextWindowTokens * 0.15)), options.maxOutputTokens),
           reserveTokens: force ? 0 : options.contextReserveTokens ?? Math.max(16_000, Math.floor(options.contextWindowTokens * 0.15)),
           ...(options.maxOutputTokens !== undefined ? { maxOutputTokens: options.maxOutputTokens } : {}),
           ...(lastContextAnchor ? { usageAnchor: lastContextAnchor } : {}),
@@ -981,12 +981,18 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       while (true) {
       try {
         const requestMessageCount = messages.length;
+        const modelStarted = Date.now();
+        let firstDeltaMs: number | null = null;
         turn = await withAbort(options.model(
           cloneMessages(messages),
           requestDefinitions,
-          (text) => { if (!signal.aborted) emit({ type: "assistant.delta", turn: turns, text }); },
+          (text) => {
+            if (firstDeltaMs === null) firstDeltaMs = Date.now() - modelStarted;
+            if (!signal.aborted) emit({ type: "assistant.delta", turn: turns, text });
+          },
           signal
         ), signal);
+        emit({ type: "model.timing", turn: turns, durationMs: Date.now() - modelStarted, firstDeltaMs, toolCalls: turn.toolCalls.length });
         if (turn.usage) {
           lastContextAnchor = {
             inputTokens: turn.usage.inputTokens,
@@ -1562,6 +1568,15 @@ function addUsage(target: RunUsage, value: AgentUsage): void {
   target.cacheWriteInputTokens += (Number.isFinite(value.cacheWriteInputTokens) ? Math.max(0, value.cacheWriteInputTokens ?? 0) : 0);
   target.outputTokens += (Number.isFinite(value.outputTokens) ? Math.max(0, value.outputTokens ?? 0) : 0);
   target.reasoningOutputTokens += (Number.isFinite(value.reasoningOutputTokens) ? Math.max(0, value.reasoningOutputTokens ?? 0) : 0);
+}
+
+const COMPACT_BUFFER_TOKENS = 16_000;
+
+// Maps a proactive compaction trigger onto the window that shouldCompactContext
+// measures against, so compaction starts at triggerTokens instead of the full window.
+function triggerWindowTokens(windowTokens: number, triggerTokens: number | undefined, reserveTokens: number, maxOutputTokens: number | undefined): number {
+  if (!triggerTokens || triggerTokens <= 0) return windowTokens;
+  return Math.min(windowTokens, triggerTokens + Math.max(reserveTokens, maxOutputTokens ?? 0) + COMPACT_BUFFER_TOKENS);
 }
 
 function operationResources(call: AgentToolCall, result: AgentToolResult): OperationResourceRef[] {

@@ -192,5 +192,5 @@ function normalizeApprovalMode(_value: unknown): ApprovalMode {
 }
 
 function normalizeReasoningEffort(value: unknown): ReasoningEffort {
-  return value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "max" ? value : "max";
+  return value === "off" || value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "max" ? value : "max";
 }

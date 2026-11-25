@@ -1808,10 +1808,11 @@ export function ChatPage() {
   );
 }
 
-const EFFORT_ORDER: ReasoningEffort[] = ["minimal", "low", "medium", "high", "max"];
+const EFFORT_ORDER: ReasoningEffort[] = ["off", "minimal", "low", "medium", "high", "max"];
 
 const EFFORT_META: Record<ReasoningEffort, { label: string; description: string }> = {
-  minimal: { label: "极简", description: "几乎不思考，响应最快，适合闲聊与简单改写。" },
+  off: { label: "关闭", description: "关闭模型思考，速度最快；目前仅 DeepSeek 等支持思考开关的模型生效。" },
+  minimal: { label: "极简", description: "低强度思考（DeepSeek 上与“低”相同），适合简单任务。" },
   low: { label: "低", description: "轻量思考，速度优先。" },
   medium: { label: "中", description: "速度与质量平衡，适合大多数对话。" },
   high: { label: "高", description: "更深推理，适合代码、分析与长任务。" },

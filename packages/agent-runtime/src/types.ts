@@ -278,6 +278,7 @@ export type RuntimeEvent =
   | { type: "prompt.snapshot"; turn: number; systemPromptHash: string; toolSchemaHash: string; messageStart: number; messageEnd: number }
   | { type: "context.watermark"; estimatedTokens: number; usedTokens: number; compactions: number; source?: "provider" | "estimate" }
   | { type: "progress.updated"; filesRead: number; filesModified: number; commands: number; tests: number; todosOpen?: number }
+  | { type: "model.timing"; turn: number; durationMs: number; firstDeltaMs: number | null; toolCalls: number }
   | { type: "usage"; usage: RunUsage }
   | { type: "retry.scheduled"; attempt: number; delayMs: number; code: string }
   | { type: "retry.started"; attempt: number }
@@ -350,6 +351,7 @@ export interface AgentRuntimeOptions {
   isFullPermission?: () => boolean;
   contextWindowTokens?: number;
   contextReserveTokens?: number;
+  compactTriggerTokens?: number;
   maxOutputTokens?: number;
   recentContextTokens?: number;
   summarizeContext?: (messages: AgentMessage[], signal: AbortSignal) => Promise<ContextSummary>;
