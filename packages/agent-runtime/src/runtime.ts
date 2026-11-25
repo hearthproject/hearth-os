@@ -131,6 +131,8 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   const modelId = options.modelId ?? null;
   const catalog = new ToolCatalog(tools, {
     ...(options.maxDirectTools !== undefined ? { maxDirectTools: options.maxDirectTools } : {}),
+    ...(options.directTools ? { directTools: options.directTools } : {}),
+    ...(options.deferRemaining !== undefined ? { deferRemaining: options.deferRemaining } : {}),
     ...(state.exposedTools ? { exposed: state.exposedTools } : {})
   });
   const hookRunner = new HookRunner(options.hooks ?? [], {
@@ -630,13 +632,13 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   function modeIssue(call: AgentToolCall): string | null {
     if (options.mode !== "plan") return null;
     if (!planModeAllowsTool(call.name)) {
-      return `plan mode 不允许调用工具 ${call.name}。当前阶段只能读取和调查；请调用 submit_plan 提交方案，等待用户批准后再执行修改。`;
+      return `plan mode 不允许调用工具 ${call.name}。当前阶段只能读取和调查；请调用 submit_plan 提交方案。用户开始执行后才能修改。`;
     }
     if (call.name === "shell") {
       const args = call.arguments && typeof call.arguments === "object" ? call.arguments as Record<string, unknown> : {};
       const command = typeof args.command === "string" ? args.command.trim() : "";
       if (!command || !planModeAllowsCommand(command)) {
-        return `plan mode 只允许只读命令：${command || "（空命令）"}。请使用 git status/diff/log、rg、ls 等只读命令，或提交计划等待批准。`;
+        return `plan mode 只允许只读命令：${command || "（空命令）"}。请使用 git status/diff/log、rg、ls 等只读命令，或提交计划。`;
       }
     }
     return null;
@@ -895,6 +897,13 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
 
     const goalRoot = options.goalRoot ?? options.workspaceRoot;
     const activeGoal = readGoalByRoot(goalRoot);
+    if (activeGoal?.status === "active" && options.maxGoalRounds !== undefined && turns >= options.maxGoalRounds) {
+      await checkpoint("waiting_input", true);
+      return finish(
+        "waiting_input",
+        `已达到持久目标的 ${options.maxGoalRounds} 轮上限，目标仍保持进行中；可以恢复后继续执行。`
+      );
+    }
 
     if (options.steering) {
       const pending = options.steering();

@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import type { TaskRecord } from "@hearth/core";
 import {
   PromptRegistry,
+  composePromptLayout,
   composeTaskPrompt,
   composeTaskPromptSections,
   executionContractPrompt,
+  sharedAnswerContractPrompt,
   skillRoutingPrompt
 } from "./prompts.ts";
 
@@ -49,11 +51,28 @@ describe("prompt registry", () => {
     expect(registry.remove("missing")).toBe(false);
   });
 
-  it("states the autonomous execution contract without product limits", () => {
+  it("authorizes routine work, reserves read-only mode for explicit Plan Mode, and keeps answers concise", () => {
     expect(executionContractPrompt).toContain("直接完成");
-    expect(executionContractPrompt).toContain("预算、轮次、时长和产物数量都没有产品级限制");
-    expect(executionContractPrompt).toContain("只在最后返回结果");
-    expect(executionContractPrompt).toContain("不要为了满足形式生成 result.md");
+    expect(executionContractPrompt).toContain("不需要审批");
+    expect(executionContractPrompt).toContain("只有用户显式进入 Plan Mode 时才必须只读");
+    expect(executionContractPrompt).toContain("不超过 3 段或 200 字");
+    expect(executionContractPrompt).toContain("不要生成固定报告章节");
+    expect(sharedAnswerContractPrompt).toContain("用普通人能懂的话表达");
+  });
+
+  it("keeps stable instructions before dynamic task context", () => {
+    const layout = composePromptLayout([
+      { id: "dynamic-one", content: "DYNAMIC ONE", dynamic: true },
+      { id: "stable-one", content: "STABLE ONE" },
+      { id: "dynamic-two", content: "DYNAMIC TWO", dynamic: true },
+      { id: "stable-two", content: "STABLE TWO" }
+    ]);
+    expect(layout.stablePrefix).toBe("STABLE ONE\n\nSTABLE TWO");
+    expect(layout.dynamicSuffix).toBe("DYNAMIC ONE\n\nDYNAMIC TWO");
+    expect(layout.text).toBe("STABLE ONE\n\nSTABLE TWO\n\nDYNAMIC ONE\n\nDYNAMIC TWO");
+    expect(layout.sections.map((section) => section.id)).toEqual([
+      "dynamic-one", "stable-one", "dynamic-two", "stable-two"
+    ]);
   });
 
   it("routes skill installation through discovery instead of asking the user", () => {

@@ -578,23 +578,28 @@ export class ApprovalManager {
       });
     }
     for (const task of this.service.store.listTasks()) {
-      for (const approval of this.service.store.listApprovals(task.id)) {
-        if (approval.status !== "pending" || !isToolApproval(approval)) continue;
-        this.service.updateApproval(approval.id, { status: "expired", decidedAt: new Date().toISOString() });
-        this.resolveTool(approval.id, false, "服务重启中断了工具审批");
-        if (this.service.requireTask(task.id).status === "waiting_approval") {
-          this.service.updateTask(task.id, {
-            status: "recoverable",
-            currentRunId: approval.runId,
-            nextAction: "工具审批在服务重启时中断，可以重试任务",
-            error: {
-              kind: "approval_interrupted",
-              message: "服务重启时仍在等待工具审批",
-              recoverable: true,
-              guidance: "检查工作区后重试任务"
-            }
-          }, approval.runId);
+      const pending = this.service.store.listApprovals(task.id).filter((approval) => approval.status === "pending");
+      if (pending.length === 0) continue;
+      const decidedAt = new Date().toISOString();
+      for (const approval of pending) {
+        this.service.updateApproval(approval.id, { status: "expired", decidedAt });
+        if (isToolApproval(approval)) {
+          this.resolveTool(approval.id, false, "旧版确认已停用，任务可以恢复");
         }
+      }
+      if (task.status === "waiting_approval") {
+        const runId = pending.at(-1)?.runId ?? task.currentRunId ?? undefined;
+        this.service.updateTask(task.id, {
+          status: "recoverable",
+          currentRunId: task.currentRunId,
+          nextAction: "旧版确认已自动过期，可以恢复任务",
+          error: {
+            kind: "legacy_approval_expired",
+            message: "旧版本等待确认的操作已过期，没有产生外部影响",
+            recoverable: true,
+            guidance: "重新执行任务即可继续；普通任务会使用完整权限，不再等待审批"
+          }
+        }, runId);
       }
     }
   }

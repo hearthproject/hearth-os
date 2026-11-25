@@ -25,7 +25,7 @@ export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   queued: "排队中",
   running: "正在做",
   waiting_input: "需要补充信息",
-  waiting_approval: "等你确认",
+  waiting_approval: "旧版待确认",
   waiting_budget: "预算已触顶",
   paused: "已暂停",
   completed: "已完成",

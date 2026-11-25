@@ -208,26 +208,35 @@ describe("prompt tool contract", () => {
     expect(block).toContain("- def5678 docs: update plan");
   });
 
-  it("lists only callable tools and omits unavailable ones", () => {
+  it("uses tool schemas instead of duplicating tool descriptions", () => {
     const root = workspace();
     const prompt = codingSystemPrompt({
       workspaceRoot: root,
       outDir: join(root, "out"),
       availableTools: ["read_file", "grep", "finish_task"]
     });
-    expect(prompt).toContain("## Tools");
-    expect(prompt).toContain("- read_file:");
-    expect(prompt).toContain("- grep:");
-    expect(prompt).toContain("- finish_task:");
+    expect(prompt).toContain("Tool schemas define each tool's arguments");
+    expect(prompt).not.toContain("## Tools");
+    expect(prompt).not.toContain("- read_file:");
     expect(prompt).not.toContain("read_image");
     expect(prompt).not.toContain("load_skill");
     expect(prompt).not.toContain("delegate_task");
+    expect(prompt).not.toContain("▸");
+    expect(prompt).not.toContain("2-4 headed sections");
+    expect(prompt).toContain("Keep the final answer concise and understandable");
   });
 
-  it("exposes stable prompt sections and omits empty optional ones", () => {
+  it("places stable prompt sections before environment context", () => {
     const root = workspace();
     const base = codingPromptSections({ workspaceRoot: root, outDir: join(root, "out") });
-    expect(base.map((section) => section.id)).toEqual(["rules", "tools", "environment", "mode"]);
+    expect(base.map((section) => section.id)).toEqual(["rules", "environment"]);
+
+    const plan = codingPromptSections({ workspaceRoot: root, outDir: join(root, "out"), mode: "plan" });
+    expect(plan.map((section) => section.id)).toEqual(["rules", "environment"]);
+    const planRules = plan.find((section) => section.id === "rules")?.content ?? "";
+    expect(planRules).toContain("This run is read-only");
+    expect(planRules).toContain("Call submit_plan");
+    expect(planRules).not.toContain("Call finish_task");
   });
 });
 

@@ -2,6 +2,7 @@ import { isSimpleDraft } from "./draft-intent.ts";
 import { completeChat, type ChatMessage } from "./model-client.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import { GITHUB_NETWORK_HOSTS, needsGithubRepository, wantsDirectFileRead, wantsGithubAccess, wantsScreenshot, wantsSkillInstall } from "./task-intent.ts";
+import { composePromptLayout, sharedAnswerContractPrompt } from "@hearth/agent-runtime";
 import type { ExecutorId } from "@hearth/core";
 
 export type ChatAction = "chat" | "task";
@@ -16,7 +17,6 @@ export interface ChatRoute {
 export type ExecutionCapability = "github" | "desktop-capture";
 
 export interface ExecutionPlan {
-  executorId: ExecutorId;
   taskKind: "general" | "workspace";
   expectedOutputs: string[];
   capability?: ExecutionCapability;
@@ -26,11 +26,11 @@ export interface ExecutionPlan {
 const CODE_HINTS = /(代码|仓库|项目里|这个项目|工程|git|commit|分支|测试|编译|构建|部署|重构|修复|bug|issue|pull request|typescript|javascript|python|npm|pnpm|依赖|数据库迁移|脚本)/i;
 
 export function planExecution(message: string): ExecutionPlan {
-  if (wantsDirectFileRead(message)) return { executorId: "native", taskKind: "general", expectedOutputs: [] };
-  if (wantsSkillInstall(message)) return { executorId: "native", taskKind: "general", expectedOutputs: [] };
+  if (wantsDirectFileRead(message) || wantsSkillInstall(message)) {
+    return { taskKind: "general", expectedOutputs: [] };
+  }
   if (wantsScreenshot(message)) {
     return {
-      executorId: "native",
       taskKind: "general",
       expectedOutputs: ["desktop.png"],
       capability: "desktop-capture"
@@ -38,17 +38,14 @@ export function planExecution(message: string): ExecutionPlan {
   }
   if (wantsGithubAccess(message)) {
     return {
-      executorId: "codex",
       taskKind: "workspace",
       expectedOutputs: [],
       capability: "github",
       networkHosts: [...GITHUB_NETWORK_HOSTS]
     };
   }
-  if (CODE_HINTS.test(message)) {
-    return { executorId: "codex", taskKind: "workspace", expectedOutputs: [] };
-  }
-  return { executorId: "native", taskKind: "general", expectedOutputs: [] };
+  if (CODE_HINTS.test(message)) return { taskKind: "workspace", expectedOutputs: [] };
+  return { taskKind: "general", expectedOutputs: [] };
 }
 
 const TASK_KEYWORDS = [
@@ -66,19 +63,20 @@ export async function decideRoute(
   options: { preferredExecutorId?: ExecutorId | null } = {}
 ): Promise<ChatRoute> {
   if (!hasAttachments && !url && isSimpleDraft(message)) return { action: "chat", title: "", goal: message, reason: "直接拟稿，无需工具执行" };
-  const material = [
-    hasAttachments ? "消息带有附件" : "",
-    url ? "消息带有网址：" + url : ""
-  ].filter(Boolean).join("；");
-
   if (hasAttachments) {
     return {
       action: "task",
-      title: "",
+      title: conversationTitle(message),
       goal: message,
       reason: "消息带有附件，已交给执行器读取处理"
     };
   }
+  const deterministic = deterministicRoute(message);
+  if (deterministic) return deterministic;
+  const material = [
+    hasAttachments ? "消息带有附件" : "",
+    url ? "消息带有网址：" + url : ""
+  ].filter(Boolean).join("；");
 
   if (!settings.apiKey || !settings.baseUrl || !settings.model) {
     return forcedTaskRoute(message, options.preferredExecutorId ?? null) ?? heuristicRoute(message);
@@ -127,6 +125,18 @@ export async function decideRoute(
     return forcedTaskRoute(message, options.preferredExecutorId ?? null)
       ?? heuristicRoute(message, "聊天模型暂时不可用，已按关键词判断");
   }
+}
+
+function deterministicRoute(message: string): ChatRoute | null {
+  if (isExplanationRequest(message)) {
+    return { action: "chat", title: "", goal: message, reason: "明确要求解释或回答，无需调用路由模型" };
+  }
+  const clearTaskAction = /(?:^|)(?:读取|写入|保存|发送|下载|导出|导入|创建|修改|运行|执行|运行测试|提交|部署|安装|抓取|爬取|整理成|汇总成|写成|做成|修复|重构|实现|审核我的|检查我的).*(?:文件|目录|仓库|网页|链接|报告|文档|邮件|任务|代码|项目|命令|PR|附件|数据|系统)?/i.test(message);
+  const strongImperative = /^(?:请|帮我|替我|给我|直接|立即|马上)(?:读取|写入|保存|发送|下载|导出|导入|创建|修改|运行|执行|提交|部署|安装|抓取|爬取|整理成|汇总成|写成|做成|修复|重构|实现|审核|检查)/.test(message.trim());
+  if (clearTaskAction || strongImperative) {
+    return { action: "task", title: conversationTitle(message), goal: message, reason: "明确要求实际执行，无需调用路由模型" };
+  }
+  return null;
 }
 
 function forcedTaskRoute(message: string, preferredExecutorId: ExecutorId | null): ChatRoute | null {
@@ -215,40 +225,18 @@ function cleanGeneratedTitle(value: string): string {
   return clean.length > 18 ? `${clean.slice(0, 18)}…` : clean;
 }
 
-export async function summarizeConversationTitle(settings: ModelSettings, message: string): Promise<string> {
-  if (!settings.apiKey || !settings.baseUrl || !settings.model) return "";
-  const material = message.replace(/\s+/g, " ").trim().slice(0, 1200);
-  if (!material) return "";
-  try {
-    const result = await completeChat(settings, [
-      {
-        role: "system",
-        content: [
-          "你负责给 Hearth 的对话起一个短标题。",
-          "只概括用户想做的事或问的问题，不要复述原句。",
-          "输出 6 到 14 个汉字的名词短语，最多 18 字。",
-          "不要引号、标点、括号、代码、网址、emoji，也不要写“新对话”“问题讨论”这类空泛标题。",
-          "只输出标题本身。"
-        ].join("\n")
-      },
-      { role: "user", content: material }
-    ], { maxTokens: 512, temperature: 0.2, timeoutMs: 12_000 });
-    return cleanGeneratedTitle(result.content);
-  } catch {
-    return "";
-  }
+export function chatSystemPrompt(dynamicBlocks: string[] = []): string {
+  const layout = composePromptLayout([
+    { id: "identity", content: "你是 Hearth，一个运行在用户本机的个人助手。回答使用简体中文，直接、清楚、可执行。" },
+    { id: "answer", content: sharedAnswerContractPrompt },
+    { id: "chat", content: "普通问题直接回答，不要假装已经执行了操作。需要实际执行时，用户可以直接说出任务。无法读取网址或附件内容时明确说明限制，不要编造。" },
+    ...dynamicBlocks.map((content, index) => ({ id: `context-${index + 1}`, content, dynamic: true }))
+  ]);
+  return layout.text;
 }
 
-export function chatSystemPrompt(): string {
-  return [
-    "你是 Hearth，一个运行在用户本机的个人助手。",
-    "回答使用简体中文，直接、清楚、可执行。",
-    "默认保持简短：先给结论，通常不超过 3 段或 120 字。除非用户明确要求详细说明，否则不要展开背景、罗列所有选项或重复总结。",
-    "用普通人能懂的话表达。必须使用术语时，先用一句话解释；不要为了显得专业而堆术语。",
-    "普通问题直接回答，不要假装已经执行了操作；需要实际执行时提醒用户可以在对话框里直接说出任务。",
-    "如果用户提供了网址但你无法读取其内容，要明确说明限制，不要编造页面或代码内容。",
-    "可以使用 Markdown，但不要输出无关的前言或客套话。"
-  ].join("\n");
+export function conversationTitleFromRoute(route: ChatRoute, message: string): string {
+  return cleanGeneratedTitle(route.title) || conversationTitle(message);
 }
 
 function parseRouteJson(text: string): { action: ChatAction; title: string; reason: string } | null {

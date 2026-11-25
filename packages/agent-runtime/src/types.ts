@@ -376,6 +376,10 @@ export interface AgentRuntimeOptions {
   maxToolChars?: number;
   /** Above this count, only core tools are sent directly and tool_search is added. */
   maxDirectTools?: number;
+  /** Profile-specific tools exposed directly instead of requiring tool_search. */
+  directTools?: string[];
+  /** Explicitly defer every tool that is not in directTools. */
+  deferRemaining?: boolean;
   /** Per-tool retry policy. Defaults to 3 retries with exponential backoff for transient tool failures. */
   toolRetryPolicy?: {
     maxRetries?: number;

@@ -88,36 +88,27 @@ describe("native tool assembly", () => {
 });
 
 describe("native system prompt", () => {
-  it("asks for machine-readable enum and boolean values", () => {
+  it("keeps evaluation-specific fields and business report contracts out of product prompts", () => {
     const prompt = nativeSystemPrompt(baseTask, ["triage.json"]);
-    expect(prompt).toContain("high/medium/low");
-    expect(prompt).toContain("true/false");
-    expect(prompt).toContain("null");
-    expect(prompt).toContain("P0/P1");
-    expect(prompt).toContain("核心事实直接放在顶层");
-    expect(prompt).toContain("沿用输入对象的字段名");
-    expect(prompt).toContain("顶层包含 facts 对象");
-    expect(prompt).toContain("顶层 evidence 数组");
-    expect(prompt).not.toContain("200 行");
-    expect(prompt).toContain("<noun>Count");
-    expect(prompt).not.toContain("契约测试用 Node");
-    expect(prompt).not.toContain("财务复核");
-    expect(prompt).not.toContain("selectedUtc");
+    expect(prompt).toContain("用户给定的字段名、类型和结构");
+    expect(prompt).toContain("清晰的英文 camelCase 字段名");
+    for (const forbidden of [
+      "selectedUtc", "milestoneCount", "testsExecuted", "testsPassed", "linksOpened",
+      "conflictCount", "moveCount", "saveAs", "财务复核", "回滚方案", "契约测试用 Node",
+      "P0/P1", "facts 对象", "顶层 evidence 数组"
+    ]) {
+      expect(prompt).not.toContain(forbidden);
+    }
   });
 
-  it.each([
-    ["代码修复与契约测试", "testsPassed 只能来自真实运行", "财务复核"],
-    ["财务报销对账", "「财务复核」", "契约测试用 Node"],
-    ["会议时间排期", "selectedUtc", "默认使用 move"],
-    ["桌面文件整理", "默认使用 move", "selectedUtc"],
-    ["会话中断恢复", "resumedFromCheckpoint", "财务复核"],
-    ["发布说明", "回滚方案", "saveAs（用户未指定"],
-    ["表格清洗", "saveAs（用户未指定", "回滚方案"],
-    ["GitHub PR 评审", "gh search prs", "财务复核"]
-  ])("selects instructions for %s", (goal, included, excluded) => {
-    const prompt = nativeSystemPrompt({ ...baseTask, goal }, ["result.json"]);
-    expect(prompt).toContain(included);
-    expect(prompt).not.toContain(excluded);
+  it("adds portable code and GitHub execution rules only when relevant", () => {
+    const codePrompt = nativeSystemPrompt({ ...baseTask, goal: "代码修复并运行测试" }, ["result.json"]);
+    expect(codePrompt).toContain("实际修改并运行");
+    expect(codePrompt).toContain("输入包含测试命令时应运行该命令");
+
+    const githubPrompt = nativeSystemPrompt({ ...baseTask, goal: "审核 GitHub PR" }, ["result.json"]);
+    expect(githubPrompt).toContain("优先使用 gh 命令");
+    expect(githubPrompt).toContain("真实输出作为证据");
   });
 
   it("keeps plain document tasks free of JSON and unrelated contracts", () => {
@@ -126,7 +117,7 @@ describe("native system prompt", () => {
     expect(prompt).not.toContain("财务复核");
     expect(prompt).not.toContain("契约测试用 Node");
     expect(prompt).toContain("finish_task");
-    expect(prompt).toContain("没有产品级限制");
+    expect(prompt).toContain("不需要审批");
     expect(prompt.length).toBeLessThan(2500);
   });
 

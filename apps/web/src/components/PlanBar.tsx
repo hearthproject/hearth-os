@@ -4,7 +4,7 @@ import { executorLabel } from "../lib/labels.ts";
 
 const STAGE_LABELS: Record<PlanStage, string> = {
   planning: "规划中",
-  awaiting_approval: "待批准",
+  awaiting_approval: "待开始",
   executing: "执行中",
   completed: "已完成",
   failed: "失败",
@@ -32,9 +32,9 @@ export function PlanBar({
   const summary = stage === "planning"
     ? `${executorText} 只读调查中，第 ${attempt} 次规划`
     : stage === "awaiting_approval"
-      ? `${executorText} 已完成只读规划，等待你批准`
+      ? `${executorText} 已完成只读规划，可以开始执行`
       : stage === "executing"
-        ? `${executorText} 正在执行已批准计划`
+        ? `${executorText} 正在执行计划`
         : view.objective;
 
   return (
@@ -57,13 +57,13 @@ export function PlanBar({
       </button>
       <div className="goal-bar-actions">
         {canApprove && (
-          <button type="button" className="goal-action primary" disabled={busy} onClick={() => onAction("approve")} title="批准这份计划并开始执行">
+          <button type="button" className="goal-action primary" disabled={busy} onClick={() => onAction("approve")} title="开始执行这份计划">
             {busy ? <Loader2 size={13} className="spin" /> : <Check size={13} />}
-            批准执行
+            开始执行
           </button>
         )}
         {canRetry && (
-          <button type="button" className="goal-action primary" disabled={busy} onClick={() => onAction("retry")} title="按已批准的计划重新执行">
+          <button type="button" className="goal-action primary" disabled={busy} onClick={() => onAction("retry")} title="按当前计划重新执行">
             {busy ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} />}
             重试
           </button>

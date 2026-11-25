@@ -89,7 +89,7 @@ describe("event description", () => {
       seq: 1, id: "e1", type: "task.updated", taskId: "task-1", runId: null,
       payload: { status: "waiting_approval" }, originInstanceId: null, originSeq: 1, createdAt: "2026-11-05T00:00:00.000Z"
     });
-    expect(description).toBe("状态变为：等你确认");
+    expect(description).toBe("状态变为：旧版待确认");
   });
 
   it("shows the progress message from the executor", () => {

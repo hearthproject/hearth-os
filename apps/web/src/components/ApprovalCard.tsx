@@ -45,7 +45,7 @@ export function ApprovalCard({ approval, effect }: { approval: ApprovalWithDispl
   return (
     <section className={`approval-card ${isPending ? "pending" : approval.status}`}>
       <div className="panel-head">
-        <h2>审批 · {approvalKindLabel(approval.kind)}</h2>
+        <h2>{isPending ? "待处理确认" : "历史确认"} · {approvalKindLabel(approval.kind)}</h2>
         <span className="panel-meta">{isPending ? "等你决定" : APPROVAL_STATUS_LABELS[approval.status]}</span>
       </div>
 

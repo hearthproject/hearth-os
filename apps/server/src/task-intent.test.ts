@@ -5,7 +5,7 @@ import { needsGithubRepository, wantsCodeExecution, wantsDirectFileRead, wantsGi
 
 describe("task intent", () => {
   it("does not require a report for a direct file read", () => {
-    expect(planExecution("读取 E:/data/missing.txt")).toMatchObject({ executorId: "native", expectedOutputs: [] });
+    expect(planExecution("读取 E:/data/missing.txt")).toMatchObject({ taskKind: "general", expectedOutputs: [] });
     expect(planExecution("读取文件并保存报告").expectedOutputs).toEqual([]);
     expect(wantsDirectFileRead("读取 E:/data/missing.txt")).toBe(true);
     expect(wantsDirectFileRead("看看这个文件")).toBe(true);
@@ -15,13 +15,12 @@ describe("task intent", () => {
     expect(wantsDirectFileRead("看看我桌面有哪些文件")).toBe(false);
     expect(wantsDirectFileRead("列出桌面文件清单")).toBe(false);
     expect(wantsDirectFileRead("看看这个文件夹里有什么")).toBe(false);
-    expect(planExecution("看看我桌面有哪些文件")).toMatchObject({ executorId: "native", expectedOutputs: [] });
+    expect(planExecution("看看我桌面有哪些文件")).toMatchObject({ taskKind: "general", expectedOutputs: [] });
   });
 
   it("recognizes desktop screenshot requests", () => {
     expect(wantsScreenshot("截一张我电脑桌面的图发给我")).toBe(true);
     expect(planExecution("截一张我电脑桌面的图发给我")).toMatchObject({
-      executorId: "native",
       taskKind: "general",
       expectedOutputs: ["desktop.png"],
       capability: "desktop-capture"
@@ -46,7 +45,6 @@ describe("task intent", () => {
   it("requires a github-capable executor for PR work", () => {
     expect(wantsGithubAccess("帮我审核并列出待处理的 PR")).toBe(true);
     expect(planExecution("帮我审核并列出待处理的 PR")).toMatchObject({
-      executorId: "codex",
       taskKind: "workspace",
       capability: "github",
       networkHosts: ["github.com", "api.github.com"]

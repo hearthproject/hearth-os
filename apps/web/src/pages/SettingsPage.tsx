@@ -754,7 +754,7 @@ function ExtensionsTab() {
 
       <section className="panel settings-section">
         <div className="settings-body">
-          <div className="section-heading"><div><h3>网页搜索</h3><p>默认关闭。只有研究任务获得公共网络权限时才会暴露搜索工具；抓取网页仍需逐次审批。</p></div><KeyRound size={20} /></div>
+          <div className="section-heading"><div><h3>网页搜索</h3><p>默认关闭。任务需要公开资料时会暴露搜索和抓取工具；完整权限模式会直接执行并保留结果。</p></div><KeyRound size={20} /></div>
           {searchQuery.isLoading && <InlineLoading text="正在读取搜索设置" />}
           {search && (
             <div className="form-grid">

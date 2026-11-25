@@ -1,7 +1,6 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router-dom";
-import { ApprovalCard } from "../components/ApprovalCard.tsx";
 import { GoalBar } from "../components/GoalBar.tsx";
 import { GoalDialog } from "../components/GoalDialog.tsx";
 import { GoalManageDialog, type GoalManageMode } from "../components/GoalManageDialog.tsx";
@@ -25,7 +24,6 @@ import {
   Paperclip,
   Pause,
   Settings2,
-  ShieldCheck,
   Sparkles,
   Target,
   X
@@ -92,7 +90,7 @@ interface ComposerCommand {
   description: string;
 }
 const COMPOSER_COMMANDS: ComposerCommand[] = [
-  { id: "plan", command: "/plan", description: "先调查，给出计划，等你批准后再执行" },
+  { id: "plan", command: "/plan", description: "先只读调查，给出计划，然后开始执行" },
   { id: "goal", command: "/goal", description: "多轮推进一个目标，直到验收完成" }
 ];
 
@@ -401,18 +399,6 @@ export function ChatPage() {
     }, 5_000);
     return () => window.clearInterval(timer);
   }, [conversationId, hasRunningTask, queryClient]);
-  const pendingApprovalsQuery = useQuery({
-    queryKey: ["approvals", "pending"],
-    queryFn: () => api.approvals({ status: "pending", limit: 50 }),
-    enabled: Boolean(conversationId),
-    refetchInterval: 5_000,
-    staleTime: 1_000
-  });
-  const pinnedApprovals = useMemo(() => {
-    const taskIds = new Set(conversationTasks.map((task) => task.id));
-    if (taskIds.size === 0) return [];
-    return (pendingApprovalsQuery.data?.approvals ?? []).filter((approval) => taskIds.has(approval.taskId));
-  }, [pendingApprovalsQuery.data, conversationTasks]);
   useEffect(() => {
     if (!hasRunningTask) setIsCancelling(false);
   }, [hasRunningTask]);
@@ -1404,17 +1390,6 @@ export function ChatPage() {
           onDragLeave={onComposerDragLeave}
           onDrop={onComposerDrop}
         >
-          {pinnedApprovals.length > 0 && (
-            <div className="composer-approvals" role="region" aria-label="待确认的操作">
-              <div className="composer-approvals-head">
-                <ShieldCheck size={14} />
-                <span>需要你确认后才能继续</span>
-              </div>
-              {pinnedApprovals.map((approval) => (
-                <ApprovalCard key={approval.id} approval={approval} />
-              ))}
-            </div>
-          )}
           {draggingFiles && (
             <div className="composer-drop-overlay" role="status" aria-live="polite">
               <Paperclip size={20} />

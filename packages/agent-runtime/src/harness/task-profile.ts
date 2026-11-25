@@ -11,6 +11,10 @@ export interface TaskProfile {
   maxGoalRounds: number;
   /** Expose the bounded read-only workflow tool. */
   workflow: boolean;
+  /** High-frequency tools exposed directly for this profile. */
+  directTools: string[];
+  /** Keep every other tool discoverable through tool_search/tool_call. */
+  deferRemaining: boolean;
   hints: string[];
 }
 
@@ -23,6 +27,12 @@ export const TASK_PROFILES: Record<TaskProfileId, TaskProfile> = {
     keepRecentToolOutputs: 3,
     maxGoalRounds: 256,
     workflow: true,
+    directTools: [
+      "read_file", "read_document", "list_files", "search_text", "glob", "grep",
+      "write_file", "edit_file", "apply_patch", "shell", "shell_output", "shell_wait", "shell_kill",
+      "todo_write", "run_tests", "diagnostics", "finish_task", "ask_user"
+    ],
+    deferRemaining: true,
     hints: []
   },
   research: {
@@ -33,6 +43,11 @@ export const TASK_PROFILES: Record<TaskProfileId, TaskProfile> = {
     keepRecentToolOutputs: 3,
     maxGoalRounds: 256,
     workflow: true,
+    directTools: [
+      "read_file", "read_desktop_file", "read_document", "list_files", "search_text",
+      "glob", "grep", "write_file", "write_document", "fetch_url", "ask_user", "finish_task"
+    ],
+    deferRemaining: true,
     hints: [
       "先建立来源清单，再交叉验证关键事实；引用要保留 URL、标题和发布时间。",
       "抓取失败时先用缓存、站内检索或替代来源，不要反复请求同一地址。"
@@ -46,6 +61,12 @@ export const TASK_PROFILES: Record<TaskProfileId, TaskProfile> = {
     keepRecentToolOutputs: 3,
     maxGoalRounds: 256,
     workflow: true,
+    directTools: [
+      "read_file", "read_desktop_file", "read_document", "list_files", "search_text",
+      "glob", "grep", "write_file", "write_document", "write_spreadsheet", "shell",
+      "capture_screen", "ask_user", "finish_task"
+    ],
+    deferRemaining: true,
     hints: [
       "先确认输入资料和目标格式，再生成文件；不要用纯文本假装已经生成文档。",
       "交付前重新打开产物检查标题、表格、页数和关键数字。"
@@ -59,6 +80,12 @@ export const TASK_PROFILES: Record<TaskProfileId, TaskProfile> = {
     keepRecentToolOutputs: 3,
     maxGoalRounds: 256,
     workflow: false,
+    directTools: [
+      "read_file", "read_desktop_file", "read_document", "list_files", "search_text",
+      "glob", "grep", "shell", "shell_output", "shell_wait", "capture_screen", "fetch_url",
+      "ask_user", "finish_task"
+    ],
+    deferRemaining: true,
     hints: [
       "每一步操作后先观察屏幕或页面状态，再决定下一步；不要闭着眼睛连续点击。",
       "登录、验证码和支付需要用户接管时，立即调用 ask_user 说明原因。"
@@ -72,6 +99,12 @@ export const TASK_PROFILES: Record<TaskProfileId, TaskProfile> = {
     keepRecentToolOutputs: 3,
     maxGoalRounds: 256,
     workflow: false,
+    directTools: [
+      "read_file", "read_desktop_file", "read_document", "list_files", "search_text",
+      "glob", "grep", "write_file", "write_document", "write_spreadsheet", "edit_file",
+      "shell", "fetch_url", "ask_user", "finish_task"
+    ],
+    deferRemaining: true,
     hints: []
   }
 };

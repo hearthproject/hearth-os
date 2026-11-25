@@ -101,6 +101,20 @@ describe("approval manager", () => {
     expect(store.getApproval(approval.id)?.status).toBe("expired");
   });
 
+  it("expires legacy pending approvals on startup and makes blocked tasks recoverable", async () => {
+    const { task, approval } = await waitingTask(service);
+    const manager = new ApprovalManager(service, async () => ({}));
+
+    manager.recoverInterruptedEffects();
+
+    expect(store.getApproval(approval.id)?.status).toBe("expired");
+    const recovered = service.requireTask(task.id);
+    expect(recovered.status).toBe("recoverable");
+    expect(recovered.error?.kind).toBe("legacy_approval_expired");
+    expect(recovered.nextAction).toContain("可以恢复");
+    expect(store.listEffects(task.id)).toHaveLength(0);
+  });
+
   it("pauses a running task for an external write and resumes after approval", async () => {
     const manager = new ApprovalManager(service, async () => ({}));
     const { task, runId } = runningTask(service);

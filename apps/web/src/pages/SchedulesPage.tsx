@@ -54,7 +54,7 @@ const EMPTY_DRAFT: ScheduleDraft = {
   cron: "0 9 * * *",
   timezone: "Asia/Shanghai",
   executorId: "native",
-  approvalMode: "necessary",
+  approvalMode: "full",
   taskKind: "general",
   enabled: true
 };

@@ -9,7 +9,7 @@ import type { ChatAttachment, ChatMessageRecord, ContextUsageSnapshot, ExecutorH
 import { defaultConversationSettings, EXECUTOR_IDS, mergeConversationSettings } from "@hearth/core";
 import { loadCodexProfile, probeCodex, type CodexProfile } from "@hearth/codex-executor";
 import { loadExecutorSettings, type ExecutorSettingsStore } from "./executor-settings.ts";
-import { EXECUTOR_FALLBACK_ORDER, executorName, resolveExecutorFromEnabled, resolveExecutorLocked } from "./executors.ts";
+import { executorName, resolveExecutorLocked } from "./executors.ts";
 import { executorHealth } from "./executor-runtime.ts";
 import type { ApprovalManager } from "./approvals.ts";
 import type { HearthService } from "./service.ts";
@@ -19,7 +19,7 @@ import type { MentionResolver } from "./mentions.ts";
 import type { OntologyService } from "./ontology.ts";
 import type { OntologyWriter } from "./ontology-writer.ts";
 import { ModelRegistryError, type ModelRegistry } from "./model-registry.ts";
-import { chatSystemPrompt, conversationTitle, decideRoute, planExecution, summarizeConversationTitle } from "./chat.ts";
+import { chatSystemPrompt, conversationTitle, conversationTitleFromRoute, decideRoute, planExecution } from "./chat.ts";
 import { wantsSkillInstall } from "./task-intent.ts";
 import {
   defaultLocalFileRoots,
@@ -651,9 +651,6 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     }
 
     const settings = chatSettings();
-    const generatedTitlePromise = firstTurn && titleWasPlaceholder
-      ? summarizeConversationTitle(settings, userContent)
-      : Promise.resolve("");
     const plan = planExecution(userContent);
     const effectiveSettings = parsed.data.settings
       ? mergeConversationSettings(conversation.settings, parsed.data.settings)
@@ -686,7 +683,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       ? { action: "task" as const, title: conversationTitle(userContent), goal: userContent, reason: "Skill 管理：需要搜索并安装技能" }
       : null;
     const route = wantsPlan
-      ? { action: "task" as const, title: conversationTitle(userContent), goal: userContent, reason: "计划模式：先只读调查并产出可批准的实施方案" }
+      ? { action: "task" as const, title: conversationTitle(userContent), goal: userContent, reason: "计划模式：先只读调查并产出可执行的实施方案" }
       : wantsGoal
         ? { action: "task" as const, title: conversationTitle(userContent), goal: userContent, reason: "目标模式：需要执行器持续推进" }
       : routeMode !== "auto"
@@ -700,23 +697,9 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
         ? options.executorHealth(lockedExecutorId)
         : executorHealth(lockedExecutorId, executorSettings(), executorSettingsPath)
       : null;
-    const resolution = lockedExecutorId
-      ? resolveExecutorLocked(lockedExecutorId, executorEnabled, available, plan.capability)
-      : resolveExecutorFromEnabled(
-          preferredExecutorId,
-          executorEnabled,
-          available,
-          plan.capability,
-          preferredExecutorId === plan.executorId
-            ? [...EXECUTOR_FALLBACK_ORDER]
-            : [plan.executorId, ...EXECUTOR_FALLBACK_ORDER.filter((id) => id !== plan.executorId)]
-        );
+    const resolution = resolveExecutorLocked(lockedExecutorId, executorEnabled, available, plan.capability);
     if (titleWasPlaceholder && firstTurn) {
-      const generatedTitle = await generatedTitlePromise;
-      const fallbackTitle = route.title.trim() && route.title.trim() !== "新任务" && route.title.trim() !== conversationTitle(userContent)
-        ? route.title.trim()
-        : "";
-      const nextTitle = generatedTitle || fallbackTitle;
+      const nextTitle = conversationTitleFromRoute(route, userContent);
       if (nextTitle && nextTitle !== conversation.title) {
         conversation = store.renameConversation(conversation.id, nextTitle) ?? conversation;
         send("conversation", conversation);
@@ -724,7 +707,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     }
     send("routing", {
       ...route,
-      plan: { ...plan, executorId: resolution.executorId ?? lockedExecutorId ?? plan.executorId },
+      plan: { ...plan, executorId: resolution.executorId ?? lockedExecutorId },
       preferredExecutorId,
       ...(lockedExecutorId ? { lockedExecutorId } : {}),
       ...(resolution.reroutedFrom ? { reroutedFrom: resolution.reroutedFrom } : {})
@@ -1027,19 +1010,15 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
         personalContext = "";
       }
     }
-    const baseSystemContent = [
-      chatSystemPrompt(),
+    const systemContent = chatSystemPrompt([
       routeMode === "chat" ? "用户选择继续聊天：仅在对话中回答或修改内容，不派任务、不调用外部工具，不得声称已发送邮件、读取链接或执行外部操作。" : "",
-      directDraft ? DRAFT_INSTRUCTION : ""
-    ].filter(Boolean).join("\n\n");
-    const systemContent = [
-      baseSystemContent,
+      directDraft ? DRAFT_INSTRUCTION : "",
       projectContext,
       personalContext,
       memoryContext,
       libraryContext,
       skillContext
-    ].filter(Boolean).join("\n\n");
+    ]);
     const messages: ChatMessage[] = [
       { role: "system", content: systemContent },
       ...(conversationSummary ? [{ role: "user" as const, content: conversationSummary }] : []),
@@ -1048,7 +1027,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       ...(appendCurrentUser ? [{ role: "user" as const, content: userContent }] : [])
     ];
     const contextBreakdown = {
-      system: estimateContextTokens(baseSystemContent),
+      system: estimateContextTokens(chatSystemPrompt()),
       project: estimateContextTokens(projectContext),
       conversation: estimateContextTokens(conversationSummary),
       conversation_tasks: estimateContextTokens(conversationTasks),

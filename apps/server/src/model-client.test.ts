@@ -256,8 +256,24 @@ describe("OpenAI-compatible model client", () => {
       { preferredExecutorId: "deepseek-harness" }
     );
     expect(route.action).toBe("task");
-    expect(route.reason).toContain("GitHub");
+    expect(route.reason).toContain("无需调用路由模型");
     mode = "chat";
+  });
+
+  it("skips the router for clear requests and calls it once only for ambiguous input", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: '{"action":"task","title":"整理内容","reason":"需要处理材料"}' } }]
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    try {
+      expect((await decideRoute("帮我读取这个文件", false, null, settings())).action).toBe("task");
+      expect((await decideRoute("什么是幂等性", false, null, settings())).action).toBe("chat");
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      expect((await decideRoute("整理一下这些内容", false, null, settings())).action).toBe("task");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      fetchMock.mockRestore();
+    }
   });
 
   it("keeps a general GitHub PR question in chat even when an executor is selected", async () => {

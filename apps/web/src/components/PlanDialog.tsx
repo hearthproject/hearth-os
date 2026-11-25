@@ -36,7 +36,7 @@ export function PlanDialog({
           <span className="goal-dialog-mark"><ClipboardList size={16} /></span>
           <div>
             <h2>{view.title}</h2>
-            <p>{executorText} 负责只读调查，Hearth 保存方案与审批状态。批准后由同一个执行器启动新的构建会话。</p>
+            <p>{executorText} 负责只读调查，Hearth 保存方案。开始执行后，由同一个执行器启动新的构建会话。</p>
           </div>
           <button type="button" className="icon-button" onClick={onClose} aria-label="关闭"><X size={16} /></button>
         </header>
@@ -83,8 +83,8 @@ export function PlanDialog({
             <button type="button" className="plan-dialog-action primary" disabled={busy} onClick={() => onAction("approve")}>
               {busy ? <Loader2 size={15} className="spin" /> : <Check size={15} />}
               <span>
-                <strong>执行这份计划</strong>
-                <small>批准后开始修改文件并验证结果</small>
+                <strong>开始执行这份计划</strong>
+                <small>开始后修改文件并验证结果</small>
               </span>
             </button>
           )}

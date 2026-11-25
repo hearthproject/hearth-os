@@ -103,7 +103,7 @@ describe("work style profile", () => {
     expect(() => store.write("x".repeat(11))).toThrow(WorkstyleError);
   });
 
-  it("adds dossier and work style sections before instructions", () => {
+  it("places dynamic dossier and work style context after stable prompt rules", () => {
     const sections = codingPromptSections({
       workspaceRoot: process.cwd(),
       outDir: join(process.cwd(), "out"),
@@ -112,9 +112,9 @@ describe("work style profile", () => {
       availableTools: ["read_file", "finish_task"]
     });
     const ids = sections.map((section) => section.id);
+    expect(ids.indexOf("rules")).toBe(0);
     expect(ids.indexOf("dossier")).toBeGreaterThan(ids.indexOf("environment"));
     expect(ids.indexOf("workstyle")).toBeGreaterThan(ids.indexOf("dossier"));
-    expect(ids.indexOf("workstyle")).toBeLessThan(ids.indexOf("mode"));
   });
 
   it("does not emit empty sections without a dossier", () => {

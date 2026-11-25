@@ -261,6 +261,9 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
       }
     });
   const availableTools = toolsForRun.map((tool) => tool.definition.name);
+  const directTools = (options.mode ?? "build") === "plan"
+    ? [...NATIVE_PLAN_TOOL_NAMES]
+    : taskProfile.directTools;
   const goalBlock = !directRead && !options.isSubagent && !options.skipBuiltinGoalTools ? goalContinuationPrompt(options.prepared.root) : null;
   const memoryIndex = coding ? memoryIndexBlock(options.prepared.root) : null;
   const projectDossier = coding && !options.isSubagent && options.task.projectId
@@ -284,9 +287,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
         mode: options.mode ?? "build",
         availableTools,
         extraInstructions: [
-          ...((options.mode ?? "build") === "plan"
-            ? [planModeSystemPrompt(options.task, availableTools)]
-            : [executionContractPrompt]),
+          ...((options.mode ?? "build") === "plan" ? [planModeSystemPrompt(options.task, availableTools)] : []),
           `Current task: ${options.task.title}`,
           `Expected outputs: ${options.expectedOutputs.join(", ") || "(none required)"}`,
           `Task language: reply in the user's language; keep code, identifiers and commit messages in English.`,
@@ -326,6 +327,8 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     toolTimeoutMs: taskProfile.toolTimeoutMs,
     maxParallelTools: taskProfile.maxParallelTools,
     keepRecentToolOutputs: taskProfile.keepRecentToolOutputs,
+    directTools,
+    deferRemaining: taskProfile.deferRemaining,
     maxGoalRounds: options.maxGoalRounds ?? taskProfile.maxGoalRounds,
     ...(options.toolRetryPolicy ? { toolRetryPolicy: options.toolRetryPolicy } : {}),
     ...(options.toolCircuitBreaker ? { toolCircuitBreaker: options.toolCircuitBreaker } : {}),
@@ -1596,7 +1599,7 @@ export function planModeSystemPrompt(task: TaskRecord, availableTools?: string[]
     "2. 意图澄清：只有存在会改变实现方向的关键歧义时才调用 ask_user，一次只问最关键的问题；能从环境确认的信息自己去确认。",
     "3. 实现决策：调查充分后调用 submit_plan，提交一份可直接执行的完整计划。",
     "submit_plan 的 plan 必须包含：目标与范围、涉及的真实文件路径、按顺序的实现步骤、关键接口/数据结构变化、验证命令与测试范围、明确不做的事项。不要使用占位路径或假设性的文件名。",
-    "提交计划后立即结束本轮，不要问“是否继续”，不要输出“等你批准”之类的说明；用户会通过界面批准或继续讨论。",
+    "提交计划后立即结束本轮，不要问“是否继续”，不要输出“等你批准”之类的说明；用户会通过界面开始执行或继续讨论。",
     "只读命令仅限 git status/diff/log、ls、rg、cat、查看 package 脚本等；不要运行测试、构建、安装、写文件或产生任何工作区变更。",
     "最终计划使用简体中文；代码、命令、路径和标识符保持原文。",
     task.networkHosts.length > 0 || task.permissions?.networkMode === "open" || task.permissions?.fullAccess === true

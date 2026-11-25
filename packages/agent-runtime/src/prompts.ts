@@ -17,6 +17,34 @@ export interface PromptSection {
   build(context: PromptBuildContext): string | string[] | null;
 }
 
+export interface PromptPart {
+  id: string;
+  content: string;
+  dynamic?: boolean;
+}
+
+export interface ComposedPromptLayout {
+  sections: Array<{ id: string; content: string; dynamic: boolean }>;
+  stablePrefix: string;
+  dynamicSuffix: string;
+  text: string;
+}
+
+/** Keep stable instructions first and task-specific context last. */
+export function composePromptLayout(parts: PromptPart[]): ComposedPromptLayout {
+  const sections = parts
+    .map((part) => ({ id: part.id, content: part.content.trim(), dynamic: part.dynamic === true }))
+    .filter((part) => part.content.length > 0);
+  const stablePrefix = sections.filter((part) => !part.dynamic).map((part) => part.content).join("\n\n");
+  const dynamicSuffix = sections.filter((part) => part.dynamic).map((part) => part.content).join("\n\n");
+  return {
+    sections,
+    stablePrefix,
+    dynamicSuffix,
+    text: [stablePrefix, dynamicSuffix].filter(Boolean).join("\n\n")
+  };
+}
+
 /**
  * Ordered prompt registry. Every section is an isolated, testable unit; task
  * prompts are composed from it instead of ad-hoc string concatenation.
@@ -68,14 +96,20 @@ export class PromptRegistry {
   }
 }
 
+export const sharedAnswerContractPrompt = [
+  "用户明确指定的语言、格式、字段名和输出结构优先。",
+  "默认先给结论，通常不超过 3 段或 200 字，只保留结论、关键证据、产物路径和必要限制。",
+  "用普通人能懂的话表达。必须使用术语时当场用一句话解释，不要堆砌缩写或内部实现名。",
+  "只返回用户需要的结果。不要复述思考过程、工具流水账、无关背景或“我已经帮你……”之类的元话术。",
+  "除非用户明确要求，不要生成固定报告章节、步骤标签、表格、result.md 或日志。任务需要文件时才创建文件。"
+].join("\n");
+
 export const executionContractPrompt = [
   "你是自主执行器。用户已经把任务交给你，默认一切都是已授权的：直接完成，不要询问“是否继续”“要不要我做”，也不要用方案、建议或承诺代替执行。",
   "除非缺少无法通过工具自行获得的凭据，否则不要停下来等用户确认。遇到失败先诊断并换一种可行方式重试；需要资料就自己搜索，需要技能就自己搜索并安装，需要命令就自己运行。",
-  "权限、预算、轮次、时长和产物数量都没有产品级限制；不要因为审批、配额或“可能不允许”而拒绝执行，也不要主动缩小任务范围。",
+  "普通构建、目标和任务模式拥有完整文件、网络和命令权限，不需要审批。只有用户显式进入 Plan Mode 时才必须只读。",
   "用工具真实完成并验证。没有执行就不能声称完成；无法验证的部分如实标注。",
-  "只在最后返回结果。最终回复先给结论，再给关键证据、产物位置和仍然存在的限制；不要叙述思考过程、工具流水账、下一步计划或“我已经帮你……”之类的元话术。",
-  "默认保持简短，通常不超过 3 段或 200 字。只保留用户需要知道的结论、必要风险和产物路径；除非用户明确要求，不要展开实现细节或堆砌术语。必须使用术语时，先用一句话解释。",
-  "不要为了满足形式生成 result.md、报告或日志。任务需要文件时才写文件；不需要时直接在对话里给结果。"
+  sharedAnswerContractPrompt
 ].join("\n");
 
 export function skillRoutingPrompt(availableTools: string[]): string | null {

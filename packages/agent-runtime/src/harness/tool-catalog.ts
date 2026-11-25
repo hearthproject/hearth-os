@@ -35,7 +35,13 @@ export const TOOL_CALL_NAME = "tool_call";
 export const DEFAULT_MAX_DIRECT_TOOLS = 32;
 
 export interface ToolCatalogOptions {
+  /** Legacy count-based fallback retained for callers without profiles. */
   maxDirectTools?: number;
+  /** Profile-specific high-frequency tools that remain callable directly. */
+  directTools?: string[];
+  /** Explicitly defer every tool not listed in directTools. */
+  deferRemaining?: boolean;
+  /** Legacy direct-tool list used when directTools is absent. */
   coreTools?: string[];
   exposed?: string[];
 }
@@ -89,8 +95,16 @@ export class ToolCatalog {
   constructor(tools: AgentTool[], options: ToolCatalogOptions = {}) {
     this.tools = tools;
     this.byName = new Map(tools.map((tool) => [tool.definition.name, tool]));
-    this.core = new Set(options.coreTools ?? CORE_TOOL_NAMES);
-    this.deferred = tools.length > (options.maxDirectTools ?? DEFAULT_MAX_DIRECT_TOOLS);
+    const directTools = options.directTools?.filter((name) => this.byName.has(name));
+    this.core = new Set(directTools ?? options.coreTools ?? CORE_TOOL_NAMES);
+    const hasIndirectTools = tools.some((tool) => !this.core.has(tool.definition.name));
+    this.deferred = options.deferRemaining === false
+      ? false
+      : directTools
+        ? hasIndirectTools
+        : options.deferRemaining === true
+          ? hasIndirectTools
+          : tools.length > (options.maxDirectTools ?? DEFAULT_MAX_DIRECT_TOOLS);
     this.exposedNames = new Set(
       (options.exposed ?? []).filter((name) => typeof name === "string" && this.byName.has(name) && !this.isDirect(name))
     );

@@ -25,7 +25,7 @@ const DANGEROUS_ACTIONS = /(?:^|\b)(?:submit|send|pay|purchase|delete|remove|con
 export function createBrowserTools(options: BrowserToolsOptions): AgentTool[] {
   const toolkit = new BrowserToolkit(options);
   return [
-    toolkit.tool("browser_open", "打开网页", "打开一个 http/https 网页，并返回可交互元素清单。新域名会先请求审批。", {
+    toolkit.tool("browser_open", "打开网页", "打开一个 http/https 网页，并返回可交互元素清单。会记录网页现场和访问结果。", {
       type: "object",
       properties: {
         url: { type: "string", description: "要打开的网址" },
@@ -71,7 +71,7 @@ export function createBrowserTools(options: BrowserToolsOptions): AgentTool[] {
       required: ["kind"],
       additionalProperties: false
     }, async (args) => toolkit.wait(args)),
-    toolkit.tool("browser_submit", "提交网页表单", "点击提交、支付、发送或删除类按钮。每次都要审批，并留下前后截图。", {
+    toolkit.tool("browser_submit", "提交网页表单", "点击提交、支付、发送或删除类按钮。执行时留下前后截图和证据记录。", {
       type: "object",
       properties: {
         ref: { type: "string", description: "提交按钮的元素 ID" },
@@ -93,7 +93,7 @@ export function createBrowserTools(options: BrowserToolsOptions): AgentTool[] {
       properties: { fullPage: { type: "boolean", description: "是否截取整页，默认否" } },
       additionalProperties: false
     }, async (args, context) => toolkit.screenshot(args, context)),
-    toolkit.tool("browser_upload", "上传文件到网页", "把工作区内的文件放进网页的文件选择框。必须审批，且只允许工作区路径。", {
+    toolkit.tool("browser_upload", "上传文件到网页", "把工作区内的文件放进网页的文件选择框。只允许工作区路径，并记录操作证据。", {
       type: "object",
       properties: {
         ref: { type: "string", description: "文件选择框元素 ID" },
@@ -220,7 +220,7 @@ class BrowserToolkit {
     const name = await target.innerText().catch(() => "");
     const aria = await target.getAttribute("aria-label").catch(() => null);
     if (DANGEROUS_ACTIONS.test(`${name} ${aria ?? ""}`)) {
-      throw new BrowserError("BROWSER_DANGEROUS_CLICK", "这个按钮可能提交、支付、发送或删除。请改用 browser_submit，并在审批里确认。");
+      throw new BrowserError("BROWSER_DANGEROUS_CLICK", "这个按钮可能提交、支付、发送或删除。请改用 browser_submit，并说明这次提交。");
     }
     const before = await captureBrowserSnapshot(page);
     const evidence = await this.options.evidence.capture({

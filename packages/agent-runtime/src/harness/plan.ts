@@ -40,7 +40,7 @@ export function planModeAllowsCommand(command: string): boolean {
 export const submitPlanTool: AgentTool = {
   definition: {
     name: "submit_plan",
-    description: "In plan mode, submit the complete implementation plan to Hearth for approval.",
+    description: "In plan mode, submit the complete implementation plan to Hearth.",
     executionMode: "sequential",
     parameters: {
       type: "object",
@@ -61,7 +61,7 @@ export const submitPlanTool: AgentTool = {
       context.state.mode = "plan";
     }
     return {
-      content: `计划已提交给 Hearth，等待用户批准。\n\n${plan}`,
+      content: `计划已提交给 Hearth，可以开始执行。\n\n${plan}`,
       action: "plan",
       summary: plan,
       question: plan,

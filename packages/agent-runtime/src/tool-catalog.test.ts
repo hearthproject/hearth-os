@@ -33,6 +33,20 @@ describe("tool catalog", () => {
     expect(catalog.resolve("jira_create_issue")).toBeUndefined();
   });
 
+  it("uses explicit direct tools even below the legacy count threshold", () => {
+    const tools = fakeNames.slice(0, 4).map((name) => fakeTool(name));
+    const partial = new ToolCatalog(tools, { directTools: [fakeNames[0]!, fakeNames[3]!, "missing"] });
+    expect(partial.deferred).toBe(true);
+    expect(partial.definitions().map((definition) => definition.name)).toEqual([fakeNames[0], fakeNames[3]]);
+    expect(partial.resolve(fakeNames[1]!)).toBeUndefined();
+    partial.expose([fakeNames[1]!]);
+    expect(partial.resolve(fakeNames[1]!)?.definition.name).toBe(fakeNames[1]);
+
+    const allDirect = new ToolCatalog(tools, { directTools: tools.map((tool) => tool.definition.name) });
+    expect(allDirect.deferred).toBe(false);
+    expect(allDirect.definitions()).toHaveLength(tools.length);
+  });
+
   it("returns matching schemas and makes them callable", () => {
     const catalog = new ToolCatalog(fakeNames.map((name) => fakeTool(name)));
     const matches = catalog.search("jira", 5);

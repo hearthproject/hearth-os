@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { TASK_PROFILES, resolveTaskProfile } from "./harness/task-profile.ts";
+import { toolCallDefinition, toolSearchDefinition } from "./harness/tool-catalog.ts";
+import { createBuiltinTools } from "./tools.ts";
 import type { TaskRecord } from "@hearth/core";
 
 function task(title: string, goal = ""): TaskRecord {
@@ -37,5 +39,27 @@ describe("task profiles", () => {
     expect(TASK_PROFILES.coding).toMatchObject({ toolTimeoutMs: 600_000, maxParallelTools: 4 });
     expect(TASK_PROFILES.research).toMatchObject({ toolTimeoutMs: 300_000, maxParallelTools: 4 });
     expect(TASK_PROFILES.general).toMatchObject({ toolTimeoutMs: 120_000, maxParallelTools: 1 });
+  });
+
+  it("keeps high-frequency profile tools small and deferrable", () => {
+    expect(TASK_PROFILES.coding.directTools.length).toBeLessThanOrEqual(18);
+    expect(TASK_PROFILES.general.directTools.length).toBeLessThanOrEqual(15);
+    for (const profile of Object.values(TASK_PROFILES)) {
+      expect(profile.deferRemaining).toBe(true);
+      expect(new Set(profile.directTools).size).toBe(profile.directTools.length);
+    }
+  });
+
+  it("reduces the coding tool schema payload by at least 25 percent", () => {
+    const definitions = createBuiltinTools().map((tool) => tool.definition);
+    const directNames = new Set(TASK_PROFILES.coding.directTools);
+    const direct = definitions.filter((definition) => directNames.has(definition.name));
+    const hiddenCount = definitions.length - direct.length;
+    const initialPayload = [...direct, toolSearchDefinition(hiddenCount), toolCallDefinition()];
+    const fullSize = JSON.stringify(definitions).length;
+    const initialSize = JSON.stringify(initialPayload).length;
+    expect(direct.length).toBe(18);
+    expect(hiddenCount).toBeGreaterThan(0);
+    expect(initialSize / fullSize).toBeLessThanOrEqual(0.75);
   });
 });
