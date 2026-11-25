@@ -156,8 +156,8 @@ export function buildTaskResultAnswer(
   // one-line stub must never replace a useful executor summary.
   const useAnswerBody = answerBody.length > 0 && (
     summary.length === 0
-      ? answerBody.length >= 40
-      : answerBody.length >= 80 && answerBody.length > summary.length * 2
+      ? answerBody.length >= 20
+      : answerBody.length >= 50 && answerBody.length > summary.length * 2
   );
   const body = clip(useAnswerBody ? answerBody : summary, ANSWER_BODY_LIMIT);
   const files = deliverableArtifacts(input.task, input.artifacts);
