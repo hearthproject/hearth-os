@@ -241,7 +241,7 @@ describe("OpenAI-compatible model client", () => {
 
   it("uses the router response to choose task execution", async () => {
     mode = "route";
-    const route = await decideRoute("整理一下这些内容", false, null, settings());
+    const route = await decideRoute("这些材料需要一份报告", false, null, settings());
     expect(route).toMatchObject({ action: "task", title: "写报告" });
     mode = "chat";
   });
@@ -269,7 +269,7 @@ describe("OpenAI-compatible model client", () => {
       expect((await decideRoute("什么是幂等性", false, null, settings())).action).toBe("chat");
       expect(fetchMock).not.toHaveBeenCalled();
 
-      expect((await decideRoute("整理一下这些内容", false, null, settings())).action).toBe("task");
+      expect((await decideRoute("这些材料有点乱", false, null, settings())).action).toBe("task");
       expect(fetchMock).toHaveBeenCalledTimes(1);
     } finally {
       fetchMock.mockRestore();

@@ -10,7 +10,8 @@
 
 ### 验证
 
-- `npm run typecheck` 通过，`executor-installer.test.ts` 6 项通过。
+- `npm run typecheck` 通过。
+- 排除高负载下计时的 Windows 沙箱用例后，全量 148 个测试文件、1057 项通过、15 项跳过；沙箱 12 项单独运行通过。
 - 用官方 Node 22 + npm 10 对 `@openai/codex@0.166.0` 做 npmmirror 解析验证，依赖树可正常安装。
 
 ## 0.6.1 - 2026-11-24
