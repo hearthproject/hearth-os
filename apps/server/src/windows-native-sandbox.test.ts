@@ -42,7 +42,7 @@ async function run(provider: WindowsNativeSandboxProvider, policy: SandboxPolicy
 }
 
 describe("WindowsNativeSandboxProvider", () => {
-  it("builds a native helper argv with workspace, temp and write roots", async () => {
+  it.runIf(isWindows)("builds a native helper argv with workspace, temp and write roots", async () => {
     const provider = new WindowsNativeSandboxProvider({ helperPath: process.execPath, probe: false });
     const workspace = "C:\\work";
     const temp = "C:\\temp";
@@ -62,7 +62,7 @@ describe("WindowsNativeSandboxProvider", () => {
     expect(confined.networkEnforcement).toBe("full");
   });
 
-  it("builds a pty helper argv with console dimensions", async () => {
+  it.runIf(isWindows)("builds a pty helper argv with console dimensions", async () => {
     const provider = new WindowsNativeSandboxProvider({ helperPath: process.execPath, probe: false });
     const workspace = "C:\\work";
     const temp = "C:\\temp";
@@ -131,7 +131,7 @@ describe("WindowsNativeSandboxProvider", () => {
     }
   }, 20_000);
 
-  it("refuses net-allowlist instead of silently removing network access", async () => {
+  it.runIf(isWindows)("refuses net-allowlist instead of silently removing network access", async () => {
     const provider = new WindowsNativeSandboxProvider({ helperPath: process.execPath, probe: false });
     const policy = {
       ...policyFor("C:\\work", "C:\\temp"),
@@ -141,7 +141,7 @@ describe("WindowsNativeSandboxProvider", () => {
       .rejects.toThrow(/白名单/);
   });
 
-  it("passes --network allow when the task explicitly opts into open networking", async () => {
+  it.runIf(isWindows)("passes --network allow when the task explicitly opts into open networking", async () => {
     const provider = new WindowsNativeSandboxProvider({ helperPath: process.execPath, probe: false });
     const policy = {
       ...policyFor("C:\\work", "C:\\temp"),
