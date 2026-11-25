@@ -45,6 +45,7 @@ export interface ContextMetricsSnapshot {
     averageCoveredMessages: number | null;
     structuredRate: number | null;
     truncatedRate: number | null;
+    byExperiment: Record<string, number>;
   };
 }
 
@@ -118,12 +119,17 @@ export function contextMetrics(service: HearthService): ContextMetricsSnapshot {
   let structuredEvents = 0;
   let truncatedEvents = 0;
   let compactionEventCount = 0;
+  const byExperiment: Record<string, number> = {};
   for (const row of compactionEventRows) {
     try {
       const payload = JSON.parse(String(row.payload_json)) as Record<string, unknown>;
       compactionEventCount += 1;
       if (payload.structured !== false) structuredEvents += 1;
       if (payload.truncated === true) truncatedEvents += 1;
+      const experiment = typeof payload.experiment === "string" && payload.experiment.trim()
+        ? payload.experiment.trim()
+        : "default";
+      byExperiment[experiment] = (byExperiment[experiment] ?? 0) + 1;
     } catch {
       continue;
     }
@@ -172,7 +178,8 @@ export function contextMetrics(service: HearthService): ContextMetricsSnapshot {
       averageDurationMs: average(compactionDurations),
       averageCoveredMessages: average(coveredCounts),
       structuredRate: compactionEventCount > 0 ? structuredEvents / compactionEventCount : null,
-      truncatedRate: compactionEventCount > 0 ? truncatedEvents / compactionEventCount : null
+      truncatedRate: compactionEventCount > 0 ? truncatedEvents / compactionEventCount : null,
+      byExperiment
     }
   };
 }

@@ -26,6 +26,7 @@ import type { HearthService } from "./service.ts";
 const MAX_SUMMARY_UNIT_CHARS = 4_000;
 const MAX_CHUNK_CHARS = 40_000;
 const MAX_CHUNKS = 32;
+const TOKEN_ESTIMATOR_VERSION = "cjk-v1";
 
 export interface ConversationBrief {
   text: string;
@@ -551,7 +552,8 @@ export class ConversationContextService {
     if (trigger === "auto" && effectiveTokens <= threshold) return null;
     return this.compact(conversationId, trigger, units, budget, {
       keepTokens: options.keepTokens ?? policy.keepTokens,
-      summaryMaxTokens: options.summaryMaxTokens ?? policy.summaryMaxTokens
+      summaryMaxTokens: options.summaryMaxTokens ?? policy.summaryMaxTokens,
+      compactRatio: policy.compactRatio
     });
   }
 
@@ -583,7 +585,7 @@ export class ConversationContextService {
     trigger: "auto" | "manual" | "overflow",
     units: ConversationUnit[],
     budgetTokens: number,
-    policy: { keepTokens: number; summaryMaxTokens: number }
+    policy: { keepTokens: number; summaryMaxTokens: number; compactRatio?: number }
   ): Promise<ConversationCompactionRecord | null> {
     return this.withLock(conversationId, async () => {
       const state = this.service.store.getConversationContextState(conversationId);
@@ -645,6 +647,7 @@ export class ConversationContextService {
         const latestTask = this.service.store.listTasksByConversation(conversationId).at(-1);
         const completedAt = this.now().toISOString();
         const durationMs = Math.max(0, Date.parse(completedAt) - Date.parse(record.createdAt));
+        const experiment = process.env.HEARTH_COMPACTION_EXPERIMENT?.trim() || undefined;
         const event = this.service.store.appendEvent({
           type: "conversation.context.compacted",
           taskId: latestTask?.id ?? null,
@@ -659,7 +662,15 @@ export class ConversationContextService {
             truncated,
             model: generated.model,
             durationMs,
-            coveredCount: coveredUnits.length
+            coveredCount: coveredUnits.length,
+            config: {
+              compactRatio: policy.compactRatio ?? null,
+              keepTokens: policy.keepTokens,
+              summaryMaxTokens: policy.summaryMaxTokens,
+              budgetTokens,
+              tokenEstimatorVersion: TOKEN_ESTIMATOR_VERSION
+            },
+            ...(experiment ? { experiment } : {})
           }
         });
         this.service.bus.publish(event);

@@ -310,4 +310,35 @@ describe("ConversationContextService", () => {
     const chat = await conversationContext.renderForChat(conversation.id);
     expect(chat.history.some((item) => item.id === messages[329]!.id)).toBe(true);
   });
+
+  it("stamps effective config and experiment tag into compaction events", async () => {
+    const prev = process.env.HEARTH_COMPACTION_EXPERIMENT;
+    process.env.HEARTH_COMPACTION_EXPERIMENT = "ratio-80";
+    try {
+      const { service, conversationContext } = setup();
+      const conversation = store!.createConversation("实验", defaultConversationSettings());
+      for (let index = 0; index < 18; index += 1) {
+        service.appendChatMessage(message(conversation.id, index % 2 === 0 ? "user" : "assistant", `EXP-${index}-${"e".repeat(4_000)}`));
+      }
+      const compaction = await conversationContext.compactNow(conversation.id, "manual");
+      expect(compaction?.status).toBe("completed");
+
+      const row = store!.db.prepare(
+        "SELECT payload_json FROM events WHERE type = 'conversation.context.compacted' ORDER BY seq DESC LIMIT 1"
+      ).get() as { payload_json: string } | undefined;
+      expect(row).toBeTruthy();
+      const payload = JSON.parse(row!.payload_json) as Record<string, unknown>;
+      expect(payload.experiment).toBe("ratio-80");
+      expect(payload.config).toMatchObject({
+        keepTokens: expect.any(Number),
+        summaryMaxTokens: expect.any(Number),
+        budgetTokens: expect.any(Number),
+        tokenEstimatorVersion: "cjk-v1"
+      });
+      expect((payload.config as Record<string, unknown>).compactRatio === null || typeof (payload.config as Record<string, unknown>).compactRatio === "number").toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env.HEARTH_COMPACTION_EXPERIMENT;
+      else process.env.HEARTH_COMPACTION_EXPERIMENT = prev;
+    }
+  });
 });

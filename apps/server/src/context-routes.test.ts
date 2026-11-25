@@ -234,7 +234,8 @@ describe("context and handoff API", () => {
       averageDurationMs: 1500,
       averageCoveredMessages: 3,
       structuredRate: 1,
-      truncatedRate: 0
+      truncatedRate: 0,
+      byExperiment: { default: 1 }
     });
   });
 });
