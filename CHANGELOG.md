@@ -16,7 +16,8 @@
 ### 验证
 
 - 同一个长任务两次运行的请求体大小：修复前从 26k 涨到 157k 字符（22 轮，未触发压缩）；修复后在约 100k 字符时压缩，回落到约 15k。两次运行并非严格对照，结论为初步观察。
-- `npm run typecheck` 通过；`runtime.test.ts`、`native-executor.test.ts`、`reasoning-fields.test.ts` 等相关用例通过。
+- `npm run typecheck` 通过；`runtime.test.ts`、`runtime.compact-trigger.test.ts`、`native-executor.test.ts`、`reasoning-fields.test.ts` 等相关用例通过。
+- 设计说明见 `docs/design/context-compaction.md`。
 - 尚未验证：对话层压缩阈值（仍为窗口的 80%）、旧工具输出截断阈值、多样本下的费用对比。仅仅比较了deepseek模型下的“低”和“极高”思考模式，同思考模式下同任务运行时间相差近两倍。
 
 ## 0.6.2 - 2026-11-25
