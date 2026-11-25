@@ -594,7 +594,14 @@ export class ConversationContextService {
       if (cutIndex <= summarizeFrom || cutIndex >= units.length) return null;
       const covered = units.slice(summarizeFrom, cutIndex);
       if (covered.length === 0) return null;
-      const firstKept = this.firstChatId(units, cutIndex);
+      // Units beyond the chunk cap cannot be summarized in this round. Shrink
+      // the covered set to what actually gets summarized so the remainder
+      // stays live (and is picked up by a later compaction) instead of being
+      // silently dropped.
+      const { included: coveredUnits } = this.chunkUnits(previousText, covered);
+      if (coveredUnits.length === 0) return null;
+      const truncated = coveredUnits.length < covered.length;
+      const firstKept = this.firstChatId(units, summarizeFrom + coveredUnits.length);
       const now = this.now().toISOString();
       const record: ConversationCompactionRecord = {
         id: randomUUID(),
@@ -602,7 +609,7 @@ export class ConversationContextService {
         trigger,
         status: "running",
         summary: null,
-        coveredMessageIds: covered.map((unit) => unit.id),
+        coveredMessageIds: coveredUnits.map((unit) => unit.id),
         firstKeptMessageId: firstKept,
         tokensBefore: units.reduce((sum, unit) => sum + unit.tokens, 0),
         tokensAfter: null,
@@ -614,12 +621,12 @@ export class ConversationContextService {
       };
       this.service.store.appendConversationCompaction(record);
       try {
-        const generated = await this.generateSummary(previousText, covered, state?.version ?? 0, policy.summaryMaxTokens);
-        const summaryData = generated.data ? mergeCompleted(previous, generated.data, covered) : previous;
-        const summaryText = generated.data
+        const generated = await this.generateSummary(previousText, coveredUnits, state?.version ?? 0, policy.summaryMaxTokens);
+        const summaryData = generated.data ? mergeCompleted(previous, generated.data, coveredUnits) : null;
+        const summaryText = summaryData
           ? fitSummary(summaryData, policy.summaryMaxTokens) || "（暂无摘要）"
-          : clipText(generated.text || deterministicSummary(covered, previousText), policy.summaryMaxTokens);
-        const tail = units.slice(cutIndex);
+          : clipText(generated.text || deterministicSummary(coveredUnits, previousText), policy.summaryMaxTokens);
+        const tail = units.slice(summarizeFrom + coveredUnits.length);
         const tokensAfter = estimateTokens(summaryText) + tail.reduce((sum, unit) => sum + unit.tokens, 0);
         const latestState = this.service.store.getConversationContextState(conversationId);
         const nextState: ConversationContextState = {
@@ -628,7 +635,7 @@ export class ConversationContextService {
           summary: summaryText,
           summaryData,
           firstKeptMessageId: firstKept,
-          lastSummarizedAt: covered.at(-1)?.createdAt ?? now,
+          lastSummarizedAt: coveredUnits.at(-1)?.createdAt ?? now,
           tokensBefore: record.tokensBefore,
           tokensAfter,
           lastUsage: latestState?.lastUsage ?? state?.lastUsage ?? null,
@@ -645,11 +652,13 @@ export class ConversationContextService {
             version: nextState.version,
             tokensBefore: record.tokensBefore,
             tokensAfter,
-            summary: summaryText
+            summary: summaryText,
+            structured: summaryData !== null,
+            truncated
           }
         });
         this.service.bus.publish(event);
-        this.recordSummaryItem(conversationId, nextState, covered);
+        this.recordSummaryItem(conversationId, nextState, coveredUnits);
         return this.service.store.updateConversationCompaction(record.id, {
           status: "completed",
           summary: summaryText,
@@ -803,7 +812,7 @@ export class ConversationContextService {
     version: number,
     summaryMaxTokens: number
   ): Promise<{ text: string; data: ConversationContextSummary | null; model: string | null; usage: ConversationCompactionRecord["usage"] }> {
-    const chunks = this.chunkUnits(previous, units);
+    const { chunks } = this.chunkUnits(previous, units);
     let carry = previous;
     let finalText = "";
     let finalData: ConversationContextSummary | null = null;
@@ -834,7 +843,7 @@ export class ConversationContextService {
     return { text: finalText, data: finalData, model, usage };
   }
 
-  private chunkUnits(previous: string, units: ConversationUnit[]): SummaryChunk[] {
+  private chunkUnits(previous: string, units: ConversationUnit[]): { chunks: SummaryChunk[]; included: ConversationUnit[] } {
     const chunks: SummaryChunk[] = [];
     let current: ConversationUnit[] = [];
     let chars = previous.length;
@@ -842,7 +851,10 @@ export class ConversationContextService {
       const nextChars = clipUnit(unit.content).length;
       if (current.length > 0 && chars + nextChars > MAX_CHUNK_CHARS) {
         chunks.push({ previous: chunks.length === 0 ? previous : "", units: current });
-        if (chunks.length >= MAX_CHUNKS) break;
+        if (chunks.length >= MAX_CHUNKS) {
+          current = [];
+          break;
+        }
         current = [];
         chars = 0;
       }
@@ -852,7 +864,7 @@ export class ConversationContextService {
     if (current.length > 0 && chunks.length < MAX_CHUNKS) {
       chunks.push({ previous: chunks.length === 0 ? previous : "", units: current });
     }
-    return chunks;
+    return { chunks, included: chunks.flatMap((chunk) => chunk.units) };
   }
 
   private buildSummaryPrompt(previous: string, units: ConversationUnit[], version: number): string {

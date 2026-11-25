@@ -22,7 +22,7 @@ describe("ConversationContextService", () => {
     root = null;
   });
 
-  function setup(summary?: ConversationContextSummary) {
+  function setup(summary?: ConversationContextSummary, rawSummary?: string) {
     root = mkdtempSync(join(tmpdir(), "hearth-conversation-context-"));
     store = new HearthStore(":memory:");
     const service = new HearthService(store);
@@ -41,18 +41,16 @@ describe("ConversationContextService", () => {
         apiKey: "sk-test",
         updatedAt: null
       } satisfies ModelSettings),
-      summaryGenerator: summary
-        ? async () => JSON.stringify(summary)
-        : async () => JSON.stringify({
-          goal: "把上下文共享给所有执行器",
-          constraints: ["不升级版本", "直接改 main"],
-          facts: [{ key: "branch", value: "main", source: "user", asOf: "2026-11-24" }],
-          decisions: [{ decision: "一条对话总线", rationale: "私有 thread 不能合并", source: "user" }],
-          completed: [],
-          blockers: [],
-          nextSteps: ["注入 scheduler"],
-          openQuestions: []
-        } satisfies ConversationContextSummary)
+      summaryGenerator: async () => rawSummary ?? JSON.stringify(summary ?? {
+        goal: "把上下文共享给所有执行器",
+        constraints: ["不升级版本", "直接改 main"],
+        facts: [{ key: "branch", value: "main", source: "user", asOf: "2026-11-24" }],
+        decisions: [{ decision: "一条对话总线", rationale: "私有 thread 不能合并", source: "user" }],
+        completed: [],
+        blockers: [],
+        nextSteps: ["注入 scheduler"],
+        openQuestions: []
+      })
     });
     return { service, context, conversationContext, store };
   }
@@ -267,5 +265,49 @@ describe("ConversationContextService", () => {
     expect(text).toContain("事实29");
     expect(text).not.toContain("事实0");
     expect(estimateTokens(text)).toBeLessThanOrEqual(200);
+  });
+
+  it("keeps state consistent when the summary model returns plain text", async () => {
+    const { service, conversationContext } = setup(undefined, "这是一段没有 JSON 结构的摘要文本。");
+    const conversation = store!.createConversation("纯文本", defaultConversationSettings());
+    for (let index = 0; index < 18; index += 1) {
+      service.appendChatMessage(message(conversation.id, index % 2 === 0 ? "user" : "assistant", `TEXT-${index}-${"t".repeat(4_000)}`));
+    }
+
+    const compaction = await conversationContext.compactNow(conversation.id, "manual");
+    expect(compaction?.status).toBe("completed");
+    const state = store!.getConversationContextState(conversation.id);
+    expect(state?.summaryData).toBeNull();
+    expect(state?.summary).toContain("没有 JSON 结构");
+
+    for (let index = 0; index < 4; index += 1) {
+      service.appendChatMessage(message(conversation.id, index % 2 === 0 ? "user" : "assistant", `MORE-${index}-${"t".repeat(4_000)}`));
+    }
+    const again = await conversationContext.compactNow(conversation.id, "manual");
+    expect(again?.status).toBe("completed");
+    expect(store!.getConversationContextState(conversation.id)?.version).toBe(2);
+  });
+
+  it("keeps un-summarized remainder live when chunks exceed the cap", async () => {
+    const { service, conversationContext } = setup();
+    const conversation = store!.createConversation("分块上限", defaultConversationSettings());
+    const messages = Array.from({ length: 330 }, (_, index) => message(
+      conversation.id,
+      index % 2 === 0 ? "user" : "assistant",
+      `CHUNK-${index}-${"c".repeat(4_200)}`
+    ));
+    for (const item of messages) service.appendChatMessage(item);
+
+    const compaction = await conversationContext.compactNow(conversation.id, "manual");
+    expect(compaction?.status).toBe("completed");
+    const state = store!.getConversationContextState(conversation.id);
+    expect(state?.version).toBe(1);
+    const covered = new Set(compaction?.coveredMessageIds ?? []);
+    expect(covered.size).toBeGreaterThan(0);
+    expect(covered.has(messages[0]!.id)).toBe(true);
+    expect(covered.has(messages[329]!.id)).toBe(false);
+
+    const chat = await conversationContext.renderForChat(conversation.id);
+    expect(chat.history.some((item) => item.id === messages[329]!.id)).toBe(true);
   });
 });
