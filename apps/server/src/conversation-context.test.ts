@@ -7,7 +7,7 @@ import type { ChatMessageRecord, ConversationContextSummary } from "@hearth/core
 import { defaultConversationSettings } from "@hearth/core";
 import { HearthStore } from "@hearth/eventlog";
 import { ContextService } from "./context.ts";
-import { ConversationContextService } from "./conversation-context.ts";
+import { ConversationContextService, estimateTokens, fitSummary } from "./conversation-context.ts";
 import { HearthService } from "./service.ts";
 import type { ModelSettings } from "./model-settings.ts";
 
@@ -238,5 +238,34 @@ describe("ConversationContextService", () => {
     });
     expect(rejected.inputTokens).toBe(42_000);
     expect(store!.getConversationContextState(conversation.id)?.lastUsage?.inputTokens).toBe(42_000);
+  });
+
+  it("estimates CJK text at about one token per character", () => {
+    expect(estimateTokens("一二三四")).toBe(4);
+    expect(estimateTokens("abcdefgh")).toBe(2);
+  });
+
+  it("keeps next steps and goal when the summary is trimmed to budget", () => {
+    const summary: ConversationContextSummary = {
+      goal: "完成支付接口联调",
+      constraints: [],
+      facts: Array.from({ length: 30 }, (_, index) => ({
+        key: `事实${index}`,
+        value: "这是一条很长的历史事实描述，用来占用摘要预算。".repeat(2),
+        source: "user",
+        asOf: "2026-11-24"
+      })),
+      decisions: [],
+      completed: [],
+      blockers: [],
+      nextSteps: ["下一步：先跑通沙箱回调"],
+      openQuestions: []
+    };
+    const text = fitSummary(summary, 200);
+    expect(text).toContain("完成支付接口联调");
+    expect(text).toContain("先跑通沙箱回调");
+    expect(text).toContain("事实29");
+    expect(text).not.toContain("事实0");
+    expect(estimateTokens(text)).toBeLessThanOrEqual(200);
   });
 });

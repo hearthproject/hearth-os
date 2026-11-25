@@ -73,14 +73,28 @@ interface SummaryChunk {
   units: ConversationUnit[];
 }
 
-function estimateTokens(text: string): number {
-  return Math.max(1, Math.ceil(text.length / 4));
+const CJK_CHAR = /[\u3000-\u303f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uff00-\uffef]/;
+
+function tokenCost(char: string): number {
+  return CJK_CHAR.test(char) ? 1 : 0.25;
+}
+
+export function estimateTokens(text: string): number {
+  let total = 0;
+  for (const char of text) total += tokenCost(char);
+  return Math.max(1, Math.ceil(total));
 }
 
 function clipText(text: string, maxTokens: number): string {
-  const maxChars = Math.max(32, maxTokens * 4);
-  if (text.length <= maxChars) return text;
-  return `${text.slice(0, maxChars - 1)}…`;
+  if (estimateTokens(text) <= maxTokens) return text;
+  let used = 0;
+  let out = "";
+  for (const char of text) {
+    used += tokenCost(char);
+    if (used > maxTokens - 1) break;
+    out += char;
+  }
+  return `${out}…`;
 }
 
 function clipUnit(text: string): string {
@@ -175,26 +189,80 @@ function normalizeSummary(value: Record<string, unknown>): ConversationContextSu
   };
 }
 
-function formatSummary(summary: ConversationContextSummary): string {
-  const lines: string[] = [];
-  if (summary.goal) lines.push(`目标：${summary.goal}`);
-  if (summary.constraints.length) lines.push(["约束：", ...summary.constraints.map((item) => `- ${item}`)].join("\n"));
+interface SummarySection {
+  key: string;
+  priority: number;
+  head: string;
+  items: string[];
+  newestFirst?: boolean;
+}
+
+function summarySections(summary: ConversationContextSummary): SummarySection[] {
+  const sections: SummarySection[] = [];
+  if (summary.goal) sections.push({ key: "goal", priority: 0, head: `目标：${summary.goal}`, items: [] });
+  if (summary.constraints.length) {
+    sections.push({ key: "constraints", priority: 4, head: "约束：", items: summary.constraints.map((item) => `- ${item}`) });
+  }
   if (summary.facts.length) {
-    lines.push("事实：");
-    lines.push(...summary.facts.map((item) => `- [${item.asOf}] ${item.key}：${item.value}（来源：${item.source}）${item.superseded ? "（已被更新）" : ""}`));
+    sections.push({
+      key: "facts",
+      priority: 7,
+      head: "事实：",
+      items: summary.facts.map((item) => `- [${item.asOf}] ${item.key}：${item.value}（来源：${item.source}）${item.superseded ? "（已被更新）" : ""}`),
+      newestFirst: true
+    });
   }
   if (summary.decisions.length) {
-    lines.push("决策：");
-    lines.push(...summary.decisions.map((item) => `- ${item.decision}${item.rationale ? `（理由：${item.rationale}）` : ""}`));
+    sections.push({
+      key: "decisions",
+      priority: 5,
+      head: "决策：",
+      items: summary.decisions.map((item) => `- ${item.decision}${item.rationale ? `（理由：${item.rationale}）` : ""}`)
+    });
   }
   if (summary.completed.length) {
-    lines.push("已完成：");
-    lines.push(...summary.completed.map((item) => `- [${item.taskId}] ${item.title}${item.outcome ? `：${item.outcome}` : ""}`));
+    sections.push({
+      key: "completed",
+      priority: 6,
+      head: "已完成：",
+      items: summary.completed.map((item) => `- [${item.taskId}] ${item.title}${item.outcome ? `：${item.outcome}` : ""}`),
+      newestFirst: true
+    });
   }
-  if (summary.blockers.length) lines.push(`阻塞：${summary.blockers.map((item) => `- ${item}`).join("\n")}`);
-  if (summary.nextSteps.length) lines.push(`下一步：${summary.nextSteps.map((item) => `- ${item}`).join("\n")}`);
-  if (summary.openQuestions.length) lines.push(`待确认：${summary.openQuestions.map((item) => `- ${item}`).join("\n")}`);
-  return lines.join("\n");
+  if (summary.blockers.length) sections.push({ key: "blockers", priority: 2, head: "阻塞：", items: summary.blockers.map((item) => `- ${item}`) });
+  if (summary.nextSteps.length) sections.push({ key: "nextSteps", priority: 1, head: "下一步：", items: summary.nextSteps.map((item) => `- ${item}`) });
+  if (summary.openQuestions.length) sections.push({ key: "openQuestions", priority: 3, head: "待确认：", items: summary.openQuestions.map((item) => `- ${item}`) });
+  return sections;
+}
+
+/**
+ * Render the structured summary within a token budget. Sections are kept in
+ * priority order (next steps and blockers before history); list sections keep
+ * their newest items when they have to be trimmed.
+ */
+export function fitSummary(summary: ConversationContextSummary, maxTokens: number): string {
+  const sections = summarySections(summary);
+  const kept = new Map<string, string[]>();
+  let used = 0;
+  for (const section of [...sections].sort((a, b) => a.priority - b.priority)) {
+    const ordered = section.newestFirst ? [...section.items].reverse() : section.items;
+    const items: string[] = [];
+    let cost = estimateTokens(section.head);
+    for (const item of ordered) {
+      const next = estimateTokens(item);
+      if (used + cost + next > maxTokens) break;
+      items.push(item);
+      cost += next;
+    }
+    if (section.items.length > 0 && items.length === 0) continue;
+    if (used + cost > maxTokens) continue;
+    used += cost;
+    kept.set(section.key, section.newestFirst ? items.reverse() : items);
+  }
+  return sections
+    .filter((section) => kept.has(section.key))
+    .map((section) => [section.head, ...(kept.get(section.key) ?? [])].join("\n"))
+    .join("\n");
 }
 
 function mergeCompleted(
@@ -256,7 +324,7 @@ function deterministicSummary(units: ConversationUnit[], previous: string): stri
 }
 
 function renderSummaryData(summary: ConversationContextSummary): string {
-  return formatSummary(summary) || "（暂无摘要）";
+  return fitSummary(summary, Infinity) || "（暂无摘要）";
 }
 
 function unitLabel(unit: ConversationUnit): string {
@@ -548,10 +616,9 @@ export class ConversationContextService {
       try {
         const generated = await this.generateSummary(previousText, covered, state?.version ?? 0, policy.summaryMaxTokens);
         const summaryData = generated.data ? mergeCompleted(previous, generated.data, covered) : previous;
-        const summaryText = clipText(
-          generated.data ? renderSummaryData(summaryData) : generated.text || deterministicSummary(covered, previousText),
-          policy.summaryMaxTokens
-        );
+        const summaryText = generated.data
+          ? fitSummary(summaryData, policy.summaryMaxTokens) || "（暂无摘要）"
+          : clipText(generated.text || deterministicSummary(covered, previousText), policy.summaryMaxTokens);
         const tail = units.slice(cutIndex);
         const tokensAfter = estimateTokens(summaryText) + tail.reduce((sum, unit) => sum + unit.tokens, 0);
         const latestState = this.service.store.getConversationContextState(conversationId);
