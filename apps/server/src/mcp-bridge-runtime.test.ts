@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { mcpBridgeLaunch } from "./mcp-bridge-runtime.ts";
 
@@ -22,16 +23,17 @@ describe("task-scoped MCP bridge launch", () => {
   });
 
   it("falls back to the TypeScript source through the repository tsx runtime", () => {
+    const root = "D:\\repo";
     const launch = mcpBridgeLaunch({
       serverIds: ["mcp_one"],
-      root: "D:\\repo",
+      root,
       nodePath: "node",
       exists: () => false
     });
 
     expect(launch.args).toEqual([
-      "D:\\repo\\node_modules\\tsx\\dist\\cli.mjs",
-      "D:\\repo\\apps\\server\\src\\mcp-bridge-main.ts"
+      join(root, "node_modules", "tsx", "dist", "cli.mjs"),
+      join(root, "apps", "server", "src", "mcp-bridge-main.ts")
     ]);
   });
 
