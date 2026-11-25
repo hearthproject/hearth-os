@@ -23,6 +23,8 @@ export interface WebSnapshot {
   markdown: string;
   bytes: number;
   sha256: string;
+  etag?: string;
+  notModified?: boolean;
 }
 
 export interface FetchWebOptions {
@@ -30,6 +32,8 @@ export interface FetchWebOptions {
   allowPrivate?: boolean;
   timeoutMs?: number;
   maxBytes?: number;
+  maxChars?: number;
+  ifNoneMatch?: string;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
   resolveHost?: (host: string) => Promise<Array<{ address: string; family: number }>>;
@@ -61,7 +65,7 @@ export async function fetchWebSnapshot(rawUrl: string, options: FetchWebOptions)
 
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
     await assertSafeUrl(current, allowedHosts, options);
-    const response = await fetchWithTimeout(fetchImpl, current, options.timeoutMs ?? DEFAULT_TIMEOUT_MS, options.signal);
+    const response = await fetchWithTimeout(fetchImpl, current, options.timeoutMs ?? DEFAULT_TIMEOUT_MS, options.signal, options.ifNoneMatch);
     if (isRedirect(response.status)) {
       const location = response.headers.get("location");
       await response.body?.cancel();
@@ -69,6 +73,22 @@ export async function fetchWebSnapshot(rawUrl: string, options: FetchWebOptions)
       if (redirects === MAX_REDIRECTS) throw new WebInputError("too_many_redirects", `网页跳转超过 ${MAX_REDIRECTS} 次：${rawUrl}`);
       current = new URL(location, current);
       continue;
+    }
+    if (response.status === 304 && options.ifNoneMatch) {
+      await response.body?.cancel();
+      return {
+        requestedUrl: rawUrl,
+        finalUrl: current.href,
+        fetchedAt: new Date().toISOString(),
+        status: 304,
+        contentType: "",
+        title: `${current.hostname}${current.pathname}`,
+        markdown: "",
+        bytes: 0,
+        sha256: "",
+        etag: options.ifNoneMatch,
+        notModified: true
+      };
     }
     if (!response.ok) {
       await response.body?.cancel();
@@ -105,7 +125,7 @@ export async function fetchWebSnapshot(rawUrl: string, options: FetchWebOptions)
       title = extracted.title;
       markdown = extracted.markdown;
     }
-    markdown = truncateMarkdown(markdown);
+    markdown = truncateMarkdown(markdown, options.maxChars);
     if (!markdown) throw new WebInputError("empty_content", `网页没有可提取的正文：${current.href}`);
     return {
       requestedUrl: rawUrl,
@@ -116,7 +136,8 @@ export async function fetchWebSnapshot(rawUrl: string, options: FetchWebOptions)
       title,
       markdown,
       bytes: bytes.byteLength,
-      sha256: createHash("sha256").update(bytes).digest("hex")
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      ...(response.headers.get("etag") ? { etag: response.headers.get("etag")! } : {})
     };
   }
   throw new WebInputError("too_many_redirects", `网页跳转超过 ${MAX_REDIRECTS} 次：${rawUrl}`);
@@ -181,7 +202,7 @@ function isForbiddenHostname(host: string): boolean {
     || host === "metadata.google.internal";
 }
 
-async function fetchWithTimeout(fetchImpl: typeof fetch, url: URL, timeoutMs: number, signal?: AbortSignal): Promise<Response> {
+async function fetchWithTimeout(fetchImpl: typeof fetch, url: URL, timeoutMs: number, signal?: AbortSignal, ifNoneMatch?: string): Promise<Response> {
   const timeout = AbortSignal.timeout(timeoutMs);
   try {
     return await fetchImpl(url, {
@@ -189,7 +210,8 @@ async function fetchWithTimeout(fetchImpl: typeof fetch, url: URL, timeoutMs: nu
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       headers: {
         "user-agent": "Hearth/0.1 (+local task runner)",
-        accept: "text/html,application/xhtml+xml,application/json,application/*+json,text/plain,text/markdown,application/xml,application/rss+xml,application/atom+xml;q=0.9,*/*;q=0.1"
+        accept: "text/html,application/xhtml+xml,application/json,application/*+json,text/plain,text/markdown,application/xml,application/rss+xml,application/atom+xml;q=0.9,*/*;q=0.1",
+        ...(ifNoneMatch ? { "if-none-match": ifNoneMatch } : {})
       }
     });
   } catch (error) {
@@ -250,9 +272,10 @@ function fencedBlock(text: string, language: string): string {
   return `${fence}${language}\n${text}\n${fence}`;
 }
 
-function truncateMarkdown(markdown: string): string {
-  if (markdown.length <= MAX_MARKDOWN_CHARS) return markdown;
-  return `${markdown.slice(0, MAX_MARKDOWN_CHARS)}\n\n[内容过长，已截断：原始 ${markdown.length} 字符]`;
+function truncateMarkdown(markdown: string, maxChars = MAX_MARKDOWN_CHARS): string {
+  const limit = Math.min(MAX_MARKDOWN_CHARS, Math.max(1_000, Math.floor(maxChars)));
+  if (markdown.length <= limit) return markdown;
+  return `${markdown.slice(0, limit)}\n\n[内容过长，已截断：原始 ${markdown.length} 字符，返回前 ${limit} 字符]`;
 }
 
 function textTitle(text: string, url: URL): string {
