@@ -2114,6 +2114,30 @@ describe("Hearth scheduler", () => {
     expect(captured?.source.type).toBe("task");
   });
 
+  it("rejects queued follow-ups for a failed plan build instead of bypassing plan retry", () => {
+    const service = setup();
+    const conversation = fullConversation();
+    const scheduler = makeScheduler(service, async () => FAKE_RESULT);
+    const task = service.createTask({
+      title: "失败的计划执行任务",
+      goal: "执行已批准计划",
+      executorId: "native",
+      conversationId: conversation.id,
+      planId: "plan-failed",
+      mode: "build",
+      expectedOutputs: []
+    });
+    service.updateTask(task.id, { status: "running" });
+    service.updateTask(task.id, {
+      status: "failed",
+      error: { kind: "execution", message: "build failed", recoverable: false, guidance: "请使用计划栏重试" }
+    });
+
+    expect(() => scheduler.addFollowUp(task.id, "继续修改", "queue")).toThrow(/计划栏的重试操作/);
+    expect(service.store.getTask(task.id)?.status).toBe("failed");
+    expect(service.store.listTaskFollowUps(task.id)).toHaveLength(0);
+  });
+
   it("continues the same task with a queued follow-up before completing", async () => {
     const service = setup();
     const settingsPath = configureModel();

@@ -510,6 +510,9 @@ export class HearthScheduler {
     if (task.status === "completed" || task.status === "cancelled") {
       throw new Error("任务已经结束，不能再追加指令");
     }
+    if (task.mode === "build" && task.planId && (task.status === "failed" || task.status === "recoverable")) {
+      throw new Error("该计划执行任务已经失败，请使用计划栏的重试操作重新执行");
+    }
     if (mode === "steer") {
       if (task.status !== "running" || !this.controllers.has(taskId)) {
         throw new Error("只有正在运行的任务可以中止当前轮并立即补充");
