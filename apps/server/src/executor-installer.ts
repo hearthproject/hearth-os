@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { dirname, join, delimiter } from "node:path";
 import { createRequire } from "node:module";
@@ -6,10 +6,44 @@ import type { ExecutorId } from "@hearth/core";
 
 const CODEX_VERSION = "0.166.0";
 const DSH_VERSION = "0.2.2-rc.1";
-const INSTALL_TIMEOUT_MS = 20 * 60_000;
+const INSTALL_TIMEOUT_MS = 10 * 60_000;
+const INSTALL_TOTAL_TIMEOUT_MS = 20 * 60_000;
+const REGISTRY_PROBE_TIMEOUT_MS = 6_000;
 const PROGRESS_INTERVAL_MS = 750;
 const CODEX_INSTALL_ESTIMATE_BYTES = 479 * 1024 * 1024;
 const DSH_INSTALL_ESTIMATE_BYTES = 505 * 1024 * 1024;
+
+/**
+ * npm registries tried in order. npmjs.org is often unreachable from mainland
+ * China, so the domestic mirrors come first and the official registry is the
+ * last resort. `HEARTH_EXECUTOR_NPM_REGISTRY` pins a single source for
+ * enterprise mirrors or air-gapped tests.
+ */
+const DEFAULT_NPM_REGISTRIES: NpmRegistry[] = [
+  { name: "npmmirror 国内镜像", url: "https://registry.npmmirror.com" },
+  { name: "腾讯云镜像", url: "https://mirrors.cloud.tencent.com/npm" },
+  { name: "npm 官方源", url: "https://registry.npmjs.org" }
+];
+
+interface NpmRegistry {
+  name: string;
+  url: string;
+}
+
+export function executorNpmRegistries(env: NodeJS.ProcessEnv = process.env): NpmRegistry[] {
+  const pinned = env.HEARTH_EXECUTOR_NPM_REGISTRY?.trim();
+  const candidates = pinned ? [{ name: "自定义源", url: normalizeRegistryUrl(pinned) }] : DEFAULT_NPM_REGISTRIES;
+  const seen = new Set<string>();
+  return candidates.filter((candidate) => {
+    if (!candidate.url || seen.has(candidate.url)) return false;
+    seen.add(candidate.url);
+    return true;
+  });
+}
+
+function normalizeRegistryUrl(value: string): string {
+  return value.endsWith("/") ? value.slice(0, -1) : value;
+}
 
 export type ExecutorInstallPhase = "install" | "verify" | "bind" | "probe";
 
@@ -98,7 +132,13 @@ export async function installExecutorRuntime(
     }
     const home = executorRuntimeDir(settingsPath, "codex");
     mkdirSync(home, { recursive: true });
-    await runNpmInstall(home, [`@openai/codex@${CODEX_VERSION}`], "Codex", CODEX_INSTALL_ESTIMATE_BYTES, onProgress);
+    await installNpmPackages({
+      prefix: home,
+      packages: [`@openai/codex@${CODEX_VERSION}`],
+      label: "Codex",
+      estimatedBytes: CODEX_INSTALL_ESTIMATE_BYTES,
+      onProgress
+    });
     onProgress?.({ phase: "verify", message: "下载完成，正在验证 Codex 运行程序", percent: 99 });
     const binary = managedCodexBinary(settingsPath);
     if (!binary) throw new Error("Codex 安装完成，但没有找到 Windows 运行程序。");
@@ -111,7 +151,13 @@ export async function installExecutorRuntime(
   }
   const home = executorRuntimeDir(settingsPath, "deepseek-harness");
   mkdirSync(home, { recursive: true });
-  await runNpmInstall(home, [`@deepseek-ai/dsh-sdk-client@${DSH_VERSION}`], "DeepSeek Harness", DSH_INSTALL_ESTIMATE_BYTES, onProgress);
+  await installNpmPackages({
+    prefix: home,
+    packages: [`@deepseek-ai/dsh-sdk-client@${DSH_VERSION}`],
+    label: "DeepSeek Harness",
+    estimatedBytes: DSH_INSTALL_ESTIMATE_BYTES,
+    onProgress
+  });
   onProgress?.({ phase: "verify", message: "下载完成，正在验证 DeepSeek Harness SDK", percent: 99 });
   const packagePath = managedDshPackage(settingsPath);
   if (!packagePath) throw new Error("DeepSeek Harness 安装完成，但没有找到 SDK 包。");
@@ -132,13 +178,86 @@ function bundledCodexBinaries(): string[] {
   }
 }
 
-async function runNpmInstall(
-  prefix: string,
-  packages: string[],
-  label: string,
-  estimatedBytes: number,
-  onProgress?: ExecutorInstallProgressHandler
-): Promise<void> {
+/**
+ * Orders the configured registries by reachability and latency. A blocked
+ * registry is moved to the end after a short probe instead of burning a full
+ * npm timeout, while offline environments still keep the configured order so
+ * npm reports the real network error.
+ */
+async function rankNpmRegistries(registries: NpmRegistry[]): Promise<NpmRegistry[]> {
+  const probes = await Promise.all(
+    registries.map(async (registry, index) => {
+      const startedAt = Date.now();
+      try {
+        const response = await fetch(`${registry.url}/-/ping`, {
+          signal: AbortSignal.timeout(REGISTRY_PROBE_TIMEOUT_MS),
+          headers: { "user-agent": "hearth-executor-installer" }
+        });
+        await response.body?.cancel();
+        return { registry, index, reachable: true, latency: Date.now() - startedAt };
+      } catch {
+        return { registry, index, reachable: false, latency: Number.POSITIVE_INFINITY };
+      }
+    })
+  );
+  return probes
+    .sort((a, b) => {
+      if (a.reachable !== b.reachable) return a.reachable ? -1 : 1;
+      return a.latency - b.latency || a.index - b.index;
+    })
+    .map((probe) => probe.registry);
+}
+
+interface NpmInstallOptions {
+  prefix: string;
+  packages: string[];
+  label: string;
+  estimatedBytes: number;
+  onProgress: ExecutorInstallProgressHandler | undefined;
+}
+
+async function installNpmPackages(options: NpmInstallOptions): Promise<void> {
+  options.onProgress?.({
+    phase: "install",
+    message: `正在探测 ${options.label} 的下载源`,
+    bytes: 0,
+    estimatedBytes: options.estimatedBytes,
+    percent: 0
+  });
+  const registries = await rankNpmRegistries(executorNpmRegistries());
+  const failures: string[] = [];
+  const deadline = Date.now() + INSTALL_TOTAL_TIMEOUT_MS;
+  for (let index = 0; index < registries.length; index += 1) {
+    const registry = registries[index];
+    if (!registry) break;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    if (index > 0) resetInstallPrefix(options.prefix);
+    try {
+      await runNpmInstallAttempt(options, registry, Math.min(INSTALL_TIMEOUT_MS, remaining));
+      return;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      failures.push(`${registry.name}（${registry.url}）：${reason}`);
+      const next = registries[index + 1];
+      if (next) {
+        options.onProgress?.({
+          phase: "install",
+          message: `${registry.name}下载失败，正在改用${next.name}重试`,
+          bytes: 0,
+          estimatedBytes: options.estimatedBytes,
+          percent: 0
+        });
+      }
+    }
+  }
+  throw new Error(
+    `${options.label} 下载失败，已尝试 ${failures.length} 个下载源：${failures.join("；")}。请检查网络，或通过 HEARTH_EXECUTOR_NPM_REGISTRY 指定可用的 npm 镜像。`
+  );
+}
+
+async function runNpmInstallAttempt(options: NpmInstallOptions, registry: NpmRegistry, timeoutMs: number): Promise<void> {
+  const { prefix, packages, label, estimatedBytes, onProgress } = options;
   const args = [
     "install",
     "--prefix", prefix,
@@ -146,6 +265,9 @@ async function runNpmInstall(
     "--no-audit",
     "--no-fund",
     "--loglevel=error",
+    "--registry", registry.url,
+    "--fetch-retries", "2",
+    "--fetch-timeout", "120000",
     ...packages
   ];
   const bundledNpm = join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
@@ -161,7 +283,8 @@ async function runNpmInstall(
         ...process.env,
         npm_config_audit: "false",
         npm_config_fund: "false",
-        npm_config_loglevel: "error"
+        npm_config_loglevel: "error",
+        npm_config_registry: registry.url
       }
     });
     let output = "";
@@ -175,7 +298,7 @@ async function runNpmInstall(
       const bytes = directorySize(prefix);
       onProgress?.({
         phase: "install",
-        message: `正在下载并安装 ${label}（已写入 ${formatBytes(bytes)}）`,
+        message: `正在从${registry.name}下载并安装 ${label}（已写入 ${formatBytes(bytes)}）`,
         bytes,
         estimatedBytes,
         percent: Math.max(0, Math.min(95, Math.round((bytes / estimatedBytes) * 100)))
@@ -195,14 +318,20 @@ async function runNpmInstall(
     progressTimer = setInterval(reportProgress, PROGRESS_INTERVAL_MS);
     timeoutTimer = setTimeout(() => {
       child.kill("SIGKILL");
-      finish(new Error("执行器安装超时，请检查网络后重试。"));
-    }, INSTALL_TIMEOUT_MS);
+      finish(new Error(`从${registry.name}下载超时`));
+    }, timeoutMs);
     child.once("error", (error) => finish(error));
     child.once("exit", (code) => {
       if (code === 0) finish();
-      else finish(new Error(`执行器安装失败（退出码 ${code ?? "未知"}）：${output.trim() || "没有安装日志"}`));
+      else finish(new Error(`退出码 ${code ?? "未知"}：${output.trim() || "没有安装日志"}`));
     });
   });
+}
+
+function resetInstallPrefix(prefix: string): void {
+  for (const name of ["node_modules", "package.json", "package-lock.json", ".package-lock.json"]) {
+    rmSync(join(prefix, name), { recursive: true, force: true });
+  }
 }
 
 function directorySize(root: string): number {

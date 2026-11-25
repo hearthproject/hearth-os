@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  executorNpmRegistries,
   executorRuntimeDir,
   findCodexBinary,
   managedCodexBinary,
@@ -46,5 +47,21 @@ describe("executor installer paths", () => {
     mkdirSync(join(packagePath, ".."), { recursive: true });
     writeFileSync(packagePath, "{}");
     expect(managedDshPackage(settingsPath)).toBe(packagePath);
+  });
+});
+
+describe("executor npm registries", () => {
+  it("tries domestic mirrors before the official npm registry", () => {
+    const registries = executorNpmRegistries({} as NodeJS.ProcessEnv);
+    expect(registries[0]?.url).toBe("https://registry.npmmirror.com");
+    expect(registries.at(-1)?.url).toBe("https://registry.npmjs.org");
+    expect(registries).toHaveLength(3);
+  });
+
+  it("pins a custom registry from the environment and trims a trailing slash", () => {
+    const registries = executorNpmRegistries({
+      HEARTH_EXECUTOR_NPM_REGISTRY: "https://npm.example.com/mirror/"
+    } as NodeJS.ProcessEnv);
+    expect(registries).toEqual([{ name: "自定义源", url: "https://npm.example.com/mirror" }]);
   });
 });

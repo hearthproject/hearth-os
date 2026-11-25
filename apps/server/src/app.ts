@@ -422,7 +422,7 @@ const optionalExecutorText = (max: number) =>
 const executorSettingsSchema = z.object({
   defaultApprovalMode: z.enum(["necessary", "workspace", "full"]).optional(),
   preferredExecutorId: z.enum(EXECUTOR_IDS).nullable().optional(),
-  reasoningEffort: z.enum(["minimal", "low", "medium", "high", "max"]).optional(),
+  reasoningEffort: z.enum(["off", "minimal", "low", "medium", "high", "max"]).optional(),
   concurrency: z.partialRecord(z.enum(EXECUTOR_IDS), z.number().int().min(1).max(4)).optional(),
   executors: z.partialRecord(z.enum(EXECUTOR_IDS), z.object({
     command: optionalExecutorText(1000),

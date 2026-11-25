@@ -44,6 +44,33 @@ describe("chat routing heuristics", () => {
     const route = await decideRoute("介绍一下这个网页 https://example.com/article", false, "https://example.com/article", NO_MODEL);
     expect(route.action).toBe("chat");
   });
+
+  it("routes compound action-plus-explanation requests to a task", async () => {
+    const route = await decideRoute(
+      "把这个项目和GitHub仓库对齐以后为我介绍一下这个项目的项目结构D:\\App\\AgentProjects\\loopx",
+      false,
+      null,
+      NO_MODEL
+    );
+    expect(route.action).toBe("task");
+  });
+
+  it.each([
+    "运行测试很慢怎么办",
+    "修改这段代码会影响什么",
+    "这个项目怎么运行测试",
+    "为什么接口会超时"
+  ])("keeps consequence and method questions in chat: %s", async (message) => {
+    expect((await decideRoute(message, false, null, NO_MODEL)).action).toBe("chat");
+  });
+
+  it.each([
+    "帮我读取这个文件并总结一下",
+    "帮我把这段代码翻译成英文",
+    "先检查一下工作树再提交"
+  ])("keeps explicit imperative actions on the task path: %s", async (message) => {
+    expect((await decideRoute(message, false, null, NO_MODEL)).action).toBe("task");
+  });
 });
 
 

@@ -216,6 +216,8 @@ describe("prompt tool contract", () => {
       availableTools: ["read_file", "grep", "finish_task"]
     });
     expect(prompt).toContain("Tool schemas define each tool's arguments");
+    expect(prompt).toContain("tool_search");
+    expect(prompt).toContain("## Safety");
     expect(prompt).not.toContain("## Tools");
     expect(prompt).not.toContain("- read_file:");
     expect(prompt).not.toContain("read_image");
