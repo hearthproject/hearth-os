@@ -279,6 +279,48 @@ describe("builtin tools", () => {
     await expect(tools.fetch_url!.execute({ url: "https://example.com" }, contextFor(root, join(root, "out")))).rejects.toThrow("域名未授权");
   });
 
+  it("answers from the ETag cache when the server replies 304", async () => {
+    const root = workspace(roots);
+    const out = join(root, "out");
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("Cached title\nbody text", { status: 200, headers: { "content-type": "text/plain; charset=utf-8", etag: "\"v1\"" } }))
+      .mockResolvedValueOnce(new Response(null, { status: 304, headers: { etag: "\"v1\"" } }));
+    const tools = mapTools();
+    const context = fetchContext(root, out);
+    const first = await tools.fetch_url!.execute({ url: "https://93.184.216.34/page" }, context);
+    const second = await tools.fetch_url!.execute({ url: "https://93.184.216.34/page" }, context);
+    expect(first.content).toContain("body text");
+    expect(second.content).toContain("已使用缓存副本");
+    expect(second.content).toContain("body text");
+    expect(fetchSpy.mock.calls[1]?.[1]?.headers).toMatchObject({ "if-none-match": "\"v1\"" });
+  });
+
+  it("refreshes the cache when the page changes and skips caching truncated results", async () => {
+    const root = workspace(roots);
+    const out = join(root, "out");
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("Page\nold body", { status: 200, headers: { "content-type": "text/plain", etag: "\"v1\"" } }))
+      .mockResolvedValueOnce(new Response("Page\nnew body", { status: 200, headers: { "content-type": "text/plain", etag: "\"v2\"" } }));
+    const tools = mapTools();
+    const context = fetchContext(root, out);
+    await tools.fetch_url!.execute({ url: "https://93.184.216.34/changed" }, context);
+    const refreshed = await tools.fetch_url!.execute({ url: "https://93.184.216.34/changed" }, context);
+    expect(refreshed.content).toContain("new body");
+    expect(refreshed.content).not.toContain("已使用缓存副本");
+    const cacheFiles = readdirSync(join(out, ".hearth", "web-cache"));
+    expect(cacheFiles).toHaveLength(1);
+    expect(readFileSync(join(out, ".hearth", "web-cache", cacheFiles[0]!), "utf8")).toContain("\"etag\":\"\\\"v2\\\"\"");
+  });
+
+  it("does not cache results limited by maxChars", async () => {
+    const root = workspace(roots);
+    const out = join(root, "out");
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(`Long\n${"x".repeat(3_000)}`, { status: 200, headers: { "content-type": "text/plain", etag: "\"v1\"" } }));
+    const result = await mapTools().fetch_url!.execute({ url: "https://93.184.216.34/long", maxChars: 1_000 }, fetchContext(root, out));
+    expect(result.content).toContain("内容过长，已截断");
+    expect(existsSync(join(out, ".hearth", "web-cache"))).toBe(false);
+  });
+
   it("blocks destructive shell commands", async () => {
     const root = workspace(roots);
     const out = join(root, "out");
@@ -566,6 +608,14 @@ function contextFor(root: string, out: string): AgentToolContext {
     outDir: out,
     permissions: { ...defaultTaskPermissions({ workspaceRoot: root, outDir: out, networkHosts: [] }), sandboxMode: "danger-full-access" },
     signal: new AbortController().signal
+  };
+}
+
+function fetchContext(root: string, out: string): AgentToolContext {
+  const base = contextFor(root, out);
+  return {
+    ...base,
+    permissions: { ...defaultTaskPermissions({ workspaceRoot: root, outDir: out, networkHosts: ["93.184.216.34"] }), sandboxMode: "danger-full-access" }
   };
 }
 

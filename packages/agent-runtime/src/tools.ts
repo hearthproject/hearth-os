@@ -1,5 +1,5 @@
 import { exec as execCallback, spawn, spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createWriteStream, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -1264,12 +1264,13 @@ const captureScreenTool: AgentTool = {
 const fetchUrlTool: AgentTool = {
   definition: {
     name: "fetch_url",
-    description: "读取一个已授权域名下的网页、文本、RSS 或 JSON API 并返回 Markdown。服务端会校验重定向、DNS 和内网地址；网络默认关闭。",
+    description: "读取一个已授权域名下的网页、文本、RSS 或 JSON API 并返回 Markdown。服务端会校验重定向、DNS 和内网地址；网络默认关闭。优先抓取 RSS、JSON API 或 .md 等结构化来源；只需要概要时传较小的 maxChars。超长结果会自动保存到 tool-results，可用 read_tool_output 分段读取。",
     executionMode: "parallel",
     parameters: {
       type: "object",
       properties: {
-        url: { type: "string", description: "http 或 https 网址" }
+        url: { type: "string", description: "http 或 https 网址" },
+        maxChars: { type: "number", description: "最多返回多少字符，默认不限（上限 200000）；只需要概要时可传较小值" }
       },
       required: ["url"],
       additionalProperties: false
@@ -1283,14 +1284,54 @@ const fetchUrlTool: AgentTool = {
     if (!hostAllowed(parsed.hostname, context.permissions.networkHosts)) {
       throw new Error(`域名未授权：${parsed.hostname}`);
     }
+    const maxChars = typeof args.maxChars === "number" && Number.isFinite(args.maxChars) ? Math.min(200_000, Math.max(1_000, Math.floor(args.maxChars))) : undefined;
+    const cached = readWebCache(context.outDir, parsed.href);
     const snapshot = await fetchWebSnapshot(url, {
       allowedHosts: context.permissions.networkHosts,
       timeoutMs: 30_000,
-      signal: context.signal
+      signal: context.signal,
+      ...(cached ? { ifNoneMatch: cached.etag } : {}),
+      ...(maxChars !== undefined ? { maxChars } : {})
     });
+    if (snapshot.notModified && cached) {
+      const markdown = maxChars !== undefined && cached.markdown.length > maxChars
+        ? `${cached.markdown.slice(0, maxChars)}\n\n[内容过长，已截断：原始 ${cached.markdown.length} 字符，返回前 ${maxChars} 字符]`
+        : cached.markdown;
+      return { content: `# ${cached.title}\n\n来源：${cached.finalUrl}\n（内容自上次抓取后未变化，已使用缓存副本）\n\n${markdown}` };
+    }
+    if (snapshot.etag && maxChars === undefined) writeWebCache(context.outDir, parsed.href, { etag: snapshot.etag, title: snapshot.title, finalUrl: snapshot.finalUrl, markdown: snapshot.markdown });
     return { content: `# ${snapshot.title}\n\n来源：${snapshot.finalUrl}\n\n${snapshot.markdown}` };
   }
 };
+
+interface WebCacheEntry {
+  url: string;
+  etag: string;
+  title: string;
+  finalUrl: string;
+  markdown: string;
+}
+
+function webCachePath(outDir: string, url: string): string {
+  return join(outDir, ".hearth", "web-cache", `${createHash("sha256").update(url).digest("hex").slice(0, 16)}.json`);
+}
+
+function readWebCache(outDir: string, url: string): WebCacheEntry | null {
+  const path = webCachePath(outDir, url);
+  if (!existsSync(path)) return null;
+  try {
+    const entry = JSON.parse(readFileSync(path, "utf8")) as WebCacheEntry;
+    return entry.url === url && typeof entry.etag === "string" && typeof entry.markdown === "string" ? entry : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeWebCache(outDir: string, url: string, value: Omit<WebCacheEntry, "url">): void {
+  const path = webCachePath(outDir, url);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify({ url, ...value }), "utf8");
+}
 
 const askUserTool: AgentTool = {
   definition: {
