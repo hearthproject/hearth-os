@@ -1574,7 +1574,7 @@ const COMPACT_BUFFER_TOKENS = 16_000;
 
 // Maps a proactive compaction trigger onto the window that shouldCompactContext
 // measures against, so compaction starts at triggerTokens instead of the full window.
-function triggerWindowTokens(windowTokens: number, triggerTokens: number | undefined, reserveTokens: number, maxOutputTokens: number | undefined): number {
+export function triggerWindowTokens(windowTokens: number, triggerTokens: number | undefined, reserveTokens: number, maxOutputTokens: number | undefined): number {
   if (!triggerTokens || triggerTokens <= 0) return windowTokens;
   return Math.min(windowTokens, triggerTokens + Math.max(reserveTokens, maxOutputTokens ?? 0) + COMPACT_BUFFER_TOKENS);
 }
