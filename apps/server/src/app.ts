@@ -18,7 +18,7 @@ import { registerChatRoutes } from "./chat-routes.ts";
 import { ReconcileError, ReconcileService } from "./reconcile.ts";
 import { ExecutorSettingsStore } from "./executor-settings.ts";
 import { clearExecutorHealthCache, executorHealth as readExecutorHealth, executorRuntimeSettings, probeExecutor } from "./executor-runtime.ts";
-import { findCodexBinary, installExecutorRuntime } from "./executor-installer.ts";
+import { findCodexBinary, installExecutorRuntime, type ExecutorInstallProgress } from "./executor-installer.ts";
 import { applyExecutorModelReadiness } from "./executor-readiness.ts";
 import { EXECUTORS } from "./executors.ts";
 import { ScheduleError, ScheduleService } from "./schedules.ts";
@@ -1570,21 +1570,12 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
   });
 
-  app.post<{ Params: { id: string } }>("/api/executors/:id/bootstrap", async (request, reply) => {
-    const id = request.params.id;
-    if (!(EXECUTOR_IDS as readonly string[]).includes(id)) {
-      return reply.code(404).send({ error: "EXECUTOR_NOT_FOUND", message: "执行器不存在" });
-    }
-    const executorId = id as ExecutorId;
-    let install: Awaited<ReturnType<typeof installExecutorRuntime>>;
-    try {
-      install = await installExecutorRuntime(executorId, executorSettingsPath);
-    } catch (error) {
-      return reply.code(500).send({
-        error: "EXECUTOR_INSTALL_FAILED",
-        message: error instanceof Error ? error.message : "执行器下载或安装失败"
-      });
-    }
+  async function bootstrapExecutorRuntime(
+    executorId: ExecutorId,
+    onProgress?: (progress: ExecutorInstallProgress) => void
+  ) {
+    const install = await installExecutorRuntime(executorId, executorSettingsPath, onProgress);
+    onProgress?.({ phase: "bind", message: "正在为执行器绑定当前模型" });
     let binding: ReturnType<ModelRegistry["autoBind"]> | null = null;
     let bindingError: string | null = null;
     try {
@@ -1593,6 +1584,10 @@ export async function buildServer(options: BuildServerOptions = {}) {
       bindingError = error instanceof Error ? error.message : "模型绑定失败";
     }
     clearExecutorHealthCache(executorId);
+    onProgress?.({
+      phase: "probe",
+      message: bindingError ? "正在检查执行器安装状态" : "正在运行真实可用性测试"
+    });
     const settings = executorSettingsStore.load();
     const currentBinding = modelRegistry.bindingViews().find((item) => item.executorId === executorId);
     const probe = await probeExecutor(executorId, settings, executorSettingsPath, 60_000, {
@@ -1610,6 +1605,65 @@ export async function buildServer(options: BuildServerOptions = {}) {
       probe,
       health: executorHealth(executorId)
     };
+  }
+
+  app.post<{ Params: { id: string } }>("/api/executors/:id/bootstrap", async (request, reply) => {
+    const id = request.params.id;
+    if (!(EXECUTOR_IDS as readonly string[]).includes(id)) {
+      return reply.code(404).send({ error: "EXECUTOR_NOT_FOUND", message: "执行器不存在" });
+    }
+    try {
+      return await bootstrapExecutorRuntime(id as ExecutorId);
+    } catch (error) {
+      return reply.code(500).send({
+        error: "EXECUTOR_INSTALL_FAILED",
+        message: error instanceof Error ? error.message : "执行器下载或安装失败"
+      });
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/executors/:id/bootstrap/stream", async (request, reply) => {
+    const id = request.params.id;
+    if (!(EXECUTOR_IDS as readonly string[]).includes(id)) {
+      return reply.code(404).send({ error: "EXECUTOR_NOT_FOUND", message: "执行器不存在" });
+    }
+
+    reply.hijack();
+    reply.raw.writeHead(200, {
+      "content-type": "application/x-ndjson; charset=utf-8",
+      "cache-control": "no-cache, no-transform",
+      connection: "keep-alive",
+      "x-accel-buffering": "no"
+    });
+    reply.raw.flushHeaders();
+
+    let closed = false;
+    const send = (event: unknown) => {
+      if (closed || reply.raw.writableEnded || reply.raw.destroyed) return;
+      reply.raw.write(`${JSON.stringify(event)}\n`);
+    };
+    const cleanup = () => {
+      closed = true;
+    };
+    reply.raw.on("close", cleanup);
+    reply.raw.on("error", cleanup);
+
+    try {
+      send({ type: "progress", phase: "install", message: "正在检查本机安装状态", percent: 0 });
+      const result = await bootstrapExecutorRuntime(id as ExecutorId, (progress) => {
+        send({ type: "progress", ...progress });
+      });
+      send({ type: "complete", result });
+    } catch (error) {
+      send({
+        type: "error",
+        code: "EXECUTOR_BOOTSTRAP_FAILED",
+        message: error instanceof Error ? error.message : "执行器下载或安装失败"
+      });
+    } finally {
+      if (!closed && !reply.raw.writableEnded) reply.raw.end();
+    }
+    return reply;
   });
 
   app.get("/api/executor-settings", async () => {

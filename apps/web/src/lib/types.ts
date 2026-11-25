@@ -868,6 +868,21 @@ export interface ExecutorBootstrapResult {
   health: ExecutorProbeResult["health"];
 }
 
+export type ExecutorInstallPhase = "install" | "verify" | "bind" | "probe";
+
+export interface ExecutorInstallProgress {
+  phase: ExecutorInstallPhase;
+  message: string;
+  bytes?: number;
+  estimatedBytes?: number;
+  percent?: number;
+}
+
+export type ExecutorBootstrapStreamEvent =
+  | ({ type: "progress" } & ExecutorInstallProgress)
+  | { type: "complete"; result: ExecutorBootstrapResult }
+  | { type: "error"; code?: string; message: string };
+
 export type ImChannelId = "wechat" | "qq";
 export type ImConnectionState = "disabled" | "starting" | "connected" | "reconnecting" | "error";
 

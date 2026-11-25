@@ -356,3 +356,150 @@
     grid-template-columns: 20px 86px minmax(0, 1fr);
   }
 }
+
+/* Executor detection and on-demand installation */
+.executor-install-status {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-sunk);
+  color: var(--ink-secondary);
+  font-size: var(--fs-11);
+}
+
+.executor-install-status.error,
+.executor-install-status.complete {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 7px;
+  line-height: 1.45;
+}
+
+.executor-install-status.error {
+  border-color: color-mix(in srgb, var(--risk) 24%, var(--line));
+  color: var(--risk);
+}
+
+.executor-install-status.complete {
+  color: var(--ok);
+}
+
+.executor-install-status-head {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+}
+
+.executor-install-status-head strong {
+  color: var(--ink-tertiary);
+  font-size: var(--fs-10);
+  font-weight: 500;
+}
+
+.executor-install-track {
+  overflow: hidden;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--line-subtle);
+}
+
+.executor-install-track > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ember);
+  transition: width 500ms ease;
+}
+
+.executor-install-status small {
+  color: var(--ink-tertiary);
+  font-size: var(--fs-10);
+}
+
+.wizard-executor {
+  align-items: flex-start;
+}
+
+.wizard-executor-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.wizard-executor-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.wizard-executor-status {
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.wizard-executor-badge {
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-10);
+  white-space: nowrap;
+}
+
+.wizard-executor-badge.ok {
+  border-color: color-mix(in srgb, var(--ok) 28%, var(--line));
+  color: var(--ok);
+}
+
+.wizard-executor-badge.warn {
+  border-color: color-mix(in srgb, var(--risk) 28%, var(--line));
+  color: var(--risk);
+}
+
+.wizard-executor-action {
+  flex: none;
+  align-self: center;
+}
+
+.wizard-executor-hint {
+  color: var(--ink-tertiary);
+  font-size: var(--fs-10);
+}
+
+.wizard-binding-list {
+  display: grid;
+  gap: 6px;
+}
+
+.wizard-binding-list > div {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  color: var(--ink-secondary);
+  font-size: var(--fs-11);
+  line-height: 1.45;
+}
+
+.wizard-binding-list .summary-ok,
+.wizard-binding-list .summary-warn {
+  flex: none;
+  margin-top: 1px;
+}
+
+@media (max-width: 720px) {
+  .wizard-executor {
+    flex-wrap: wrap;
+  }
+
+  .wizard-executor-action {
+    width: 100%;
+    margin-left: 20px;
+  }
+}

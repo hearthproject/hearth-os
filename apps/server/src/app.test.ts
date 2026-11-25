@@ -730,6 +730,43 @@ describe("Hearth server", () => {
     await app.close();
   });
 
+  it("streams executor bootstrap progress and a terminal result", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-executor-stream-"));
+    const app = await buildServer({
+      store,
+      serveWeb: false,
+      executorSettingsPath: join(dir, "executor-settings.json"),
+      modelSettingsPath: join(dir, "model-settings.json")
+    });
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const address = app.server.address();
+    if (!address || typeof address === "string") throw new Error("Missing test server address");
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5_000);
+    try {
+      const response = await fetch(`http://127.0.0.1:${address.port}/api/executors/native/bootstrap/stream`, {
+        method: "POST",
+        signal: controller.signal
+      });
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toContain("application/x-ndjson");
+      const events = (await response.text())
+        .trim()
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as { type: string; result?: { install?: { installed?: boolean }; bindingError?: string | null } });
+      expect(events.some((event) => event.type === "progress")).toBe(true);
+      const complete = events.find((event) => event.type === "complete");
+      expect(complete?.result?.install?.installed).toBe(true);
+      expect(complete?.result?.bindingError).toBeTypeOf("string");
+    } finally {
+      clearTimeout(timeout);
+      controller.abort();
+      await app.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("streams newly created events over SSE", async () => {
     const app = await buildServer({ store, serveWeb: false });
     await app.listen({ host: "127.0.0.1", port: 0 });

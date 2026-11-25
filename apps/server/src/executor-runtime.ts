@@ -1,5 +1,4 @@
 import { mkdtempSync, readFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { loadCodexProfile, probeCodex, type CodexProfile } from "@hearth/codex-executor";
@@ -12,7 +11,7 @@ import type {
   ExecutorSettings
 } from "@hearth/core";
 import { applyExecutorModelReadiness, type ExecutorBindingReadiness } from "./executor-readiness.ts";
-import { findCodexBinary, managedDshPackage } from "./executor-installer.ts";
+import { findCodexBinary, findDshPackage } from "./executor-installer.ts";
 import { completeChat } from "./model-client.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import { removeTempDirectory } from "./temp-cleanup.ts";
@@ -20,7 +19,6 @@ import { removeTempDirectory } from "./temp-cleanup.ts";
 const HEALTH_TTL_MS = 30_000;
 const VERIFIED_TTL_MS = 24 * 60 * 60_000;
 const REAL_PROBE_TIMEOUT_MS = 60_000;
-const require = createRequire(import.meta.url);
 
 interface CacheEntry {
   at: number;
@@ -174,7 +172,7 @@ function computeHealthSync(id: ExecutorId, settings: ExecutorSettings, settingsP
       installState: profile.canRun ? "available" : "needs_repair"
     };
   }
-  const packagePath = dshPackagePath(settingsPath);
+  const packagePath = findDshPackage(settingsPath);
   return {
     id,
     canRun: false,
@@ -298,18 +296,6 @@ function packageVersion(path: string): string | null {
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8")) as { version?: unknown };
     return typeof parsed.version === "string" ? parsed.version : null;
-  } catch {
-    return null;
-  }
-}
-
-function dshPackagePath(settingsPath?: string): string | null {
-  if (settingsPath) {
-    const managed = managedDshPackage(settingsPath);
-    if (managed) return managed;
-  }
-  try {
-    return require.resolve("@deepseek-ai/dsh-sdk-client/package.json");
   } catch {
     return null;
   }

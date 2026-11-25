@@ -12,11 +12,14 @@ import {
 } from "lucide-react";
 import type { ExecutorId, ExecutorProbeResult } from "../lib/types.ts";
 import { api } from "../lib/api.ts";
+import { ExecutorBootstrapStatus } from "./ExecutorBootstrapStatus.tsx";
+import { useExecutorBootstrap } from "../lib/use-executor-bootstrap.ts";
 
 type Busy = `probe:${ExecutorId}` | `bootstrap:${ExecutorId}` | "save" | null;
 
 export function ExecutorSettingsPanel() {
   const queryClient = useQueryClient();
+  const { installs, bootstrap: runBootstrap } = useExecutorBootstrap();
   const executorsQuery = useQuery({ queryKey: ["executors"], queryFn: api.executors, refetchInterval: 30_000 });
   const executorSettingsQuery = useQuery({ queryKey: ["executorSettings"], queryFn: api.executorSettings });
   const [concurrency, setConcurrency] = useState<Record<ExecutorId, number> | null>(null);
@@ -89,13 +92,13 @@ export function ExecutorSettingsPanel() {
     setBusy(`bootstrap:${id}`);
     setNotice({ tone: "info", text: "正在准备执行器。首次下载可能需要几分钟，请不要关闭设置页。" });
     try {
-      const result = await api.bootstrapExecutor(id);
+      const result = await runBootstrap(id);
       setProbes((prev) => ({ ...prev, [id]: result.probe }));
       const bound = result.binding?.effectiveModel ?? "";
       if (result.probe.ok) {
         setNotice({ tone: "ok", text: `${result.install.message}${bound ? ` 已绑定 ${bound}，` : ""}真实测试通过。` });
       } else if (result.bindingError) {
-        setNotice({ tone: "error", text: `${result.install.message} 但模型绑定失败：${result.bindingError}` });
+        setNotice({ tone: "info", text: `${result.install.message} 执行器已检测到；配置兼容模型后可自动绑定。` });
       } else {
         setNotice({ tone: "error", text: `${result.install.message} 但测试未通过：${result.probe.error ?? "未知原因"}` });
       }
@@ -139,6 +142,9 @@ export function ExecutorSettingsPanel() {
               const probeResult = probes[executor.id];
               const lastProbe = probeResult?.health.lastProbe ?? executor.health.lastProbe;
               const healthState = executor.health.state ?? (executor.health.canRun ? "ready" : "unverified");
+              const install = installs[executor.id];
+              const detected = executor.id === "native" || executor.health.installState !== "missing";
+              const statusOk = executor.health.canRun || (detected && (healthState === "unconfigured" || healthState === "unverified"));
               return (
                 <article className="executor-card" key={executor.id}>
                   <header className="executor-card-head">
@@ -149,9 +155,9 @@ export function ExecutorSettingsPanel() {
                         <span>{executor.provider ? `${executor.provider} · ` : ""}{executor.description}</span>
                       </div>
                     </div>
-                    <span className={`status-chip ${executor.health.canRun ? "ok" : "warn"}`}>
-                      <span className={`status-dot ${executor.health.canRun ? "online" : "offline"}`} />
-                      {executorStateLabel(healthState)}
+                    <span className={`status-chip ${statusOk ? "ok" : "warn"}`}>
+                      <span className={`status-dot ${statusOk ? "online" : "offline"}`} />
+                      {executorStateLabel(healthState, detected)}
                     </span>
                   </header>
 
@@ -194,6 +200,8 @@ export function ExecutorSettingsPanel() {
                       {busy === `probe:${executor.id}` ? "测试中…" : "测试可用性"}
                     </button>
                   </div>
+
+                  {install && <ExecutorBootstrapStatus state={install} />}
 
                   {probeResult && (
                     <div className={`executor-probe ${probeResult.ok ? "ok" : "error"}`}>
@@ -238,8 +246,9 @@ function installStateLabel(state: string | undefined): string {
   return "未安装";
 }
 
-function executorStateLabel(state: string): string {
+function executorStateLabel(state: string, detected: boolean): string {
   if (state === "ready") return "真实可用";
+  if (detected && (state === "unconfigured" || state === "unverified")) return "已检测到";
   if (state === "quota_exceeded") return "额度不可用";
   if (state === "failed") return "测试失败";
   if (state === "missing") return "未连接";

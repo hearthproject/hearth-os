@@ -2,20 +2,26 @@ import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
+  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   CheckCircle2,
-  Cpu,
+  Download,
   KeyRound,
   Loader2,
+  RefreshCw,
   Sparkles,
   X
 } from "lucide-react";
 import { api } from "../lib/api.ts";
-import type { ModelProtocol, ModelProviderPreset, OnboardingVerificationView } from "../lib/types.ts";
+import type { ExecutorId, ExecutorView, ModelProtocol, ModelProviderPreset, OnboardingVerificationView } from "../lib/types.ts";
 import { HearthMark } from "../components/HearthMark.tsx";
+import { ExecutorBootstrapStatus } from "../components/ExecutorBootstrapStatus.tsx";
+import { useExecutorBootstrap } from "../lib/use-executor-bootstrap.ts";
 
-const STEPS = ["模型", "执行器", "验证"];
+const STEPS = ["执行器", "模型", "验证"];
+const EXTERNAL_EXECUTOR_IDS: ExecutorId[] = ["codex", "deepseek-harness"];
+const EXECUTOR_DISPLAY_ORDER: ExecutorId[] = ["codex", "deepseek-harness", "native"];
 
 interface ModelDraft {
   providerId: string;
@@ -24,6 +30,11 @@ interface ModelDraft {
   baseUrl: string;
   model: string;
   apiKey: string;
+}
+
+interface BindingOutcome {
+  ok: boolean;
+  message: string;
 }
 
 const EMPTY_DRAFT: ModelDraft = {
@@ -38,20 +49,29 @@ const EMPTY_DRAFT: ModelDraft = {
 export function OnboardingPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { installs, bootstrap } = useExecutorBootstrap();
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState<ModelDraft>(EMPTY_DRAFT);
   const [draftReady, setDraftReady] = useState(false);
-  const [busy, setBusy] = useState<"test" | "save" | "finish" | "skip" | "verify" | null>(null);
+  const [busy, setBusy] = useState<"test" | "save" | "bind" | "finish" | "skip" | "verify" | null>(null);
   const [notice, setNotice] = useState<{ tone: "ok" | "error" | "info"; text: string } | null>(null);
   const [verification, setVerification] = useState<OnboardingVerificationView | null>(null);
   const [skipVerification, setSkipVerification] = useState(false);
+  const [bindingOutcomes, setBindingOutcomes] = useState<Partial<Record<ExecutorId, BindingOutcome>>>({});
 
   const registryQuery = useQuery({ queryKey: ["modelRegistry"], queryFn: api.modelRegistry });
   const executorsQuery = useQuery({ queryKey: ["executors"], queryFn: api.executors, refetchInterval: 10_000 });
 
   const configured = Boolean(registryQuery.data?.chatConfigured);
-  const nativeExecutor = (executorsQuery.data?.executors ?? []).find((executor) => executor.id === "native");
+  const executors = executorsQuery.data?.executors ?? [];
+  const nativeExecutor = executors.find((executor) => executor.id === "native");
   const nativeReady = Boolean(nativeExecutor?.health.canRun);
+  const installedExternalIds = EXTERNAL_EXECUTOR_IDS.filter((id) => {
+    const executor = executors.find((item) => item.id === id);
+    return executor ? executorInstalled(executor) : false;
+  });
+  const installingAny = Object.values(installs).some((state) => state?.status === "installing");
+  const bindingFailures = Object.values(bindingOutcomes).filter((outcome) => outcome && !outcome.ok);
 
   useEffect(() => {
     if (draftReady || !registryQuery.data) return;
@@ -103,6 +123,60 @@ export function OnboardingPage() {
     }
   }
 
+  async function installExecutor(id: ExecutorId) {
+    setNotice(null);
+    try {
+      const result = await bootstrap(id);
+      setNotice({
+        tone: "ok",
+        text: result.probe.ok
+          ? `${result.install.message} 真实可用性测试已通过。`
+          : `${result.install.message} 执行器已检测到，选择模型后会自动完成绑定和真实测试。`
+      });
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "执行器下载或安装失败" });
+    }
+  }
+
+  async function bindInstalledExecutors(): Promise<Partial<Record<ExecutorId, BindingOutcome>>> {
+    setBusy("bind");
+    const latest = await queryClient.fetchQuery({ queryKey: ["executors"], queryFn: api.executors });
+    const targets = EXTERNAL_EXECUTOR_IDS.filter((id) => {
+      const executor = latest.executors.find((item) => item.id === id);
+      return executor ? executorInstalled(executor) : false;
+    });
+    const entries = await Promise.all(targets.map(async (id) => {
+      try {
+        const result = await api.autoBindExecutor(id);
+        const name = latest.executors.find((item) => item.id === id)?.name ?? id;
+        const model = result.binding.effectiveModel ?? draft.model;
+        if (result.probe?.ok) {
+          return [id, { ok: true, message: `${name} 已绑定 ${model}，真实测试通过。` }] as const;
+        }
+        return [id, {
+          ok: false,
+          message: `${name} 已绑定 ${model}，但真实测试未通过：${result.probe?.error ?? result.binding.issue ?? "未知原因"}`
+        }] as const;
+      } catch (error) {
+        const name = latest.executors.find((item) => item.id === id)?.name ?? id;
+        return [id, {
+          ok: false,
+          message: `${name} 绑定失败：${error instanceof Error ? error.message : "未知原因"}`
+        }] as const;
+      }
+    }));
+    const outcomes = Object.fromEntries(entries) as Partial<Record<ExecutorId, BindingOutcome>>;
+    setBindingOutcomes(outcomes);
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["executors"] }),
+      queryClient.invalidateQueries({ queryKey: ["modelRegistry"] }),
+      queryClient.invalidateQueries({ queryKey: ["health"] }),
+      queryClient.invalidateQueries({ queryKey: ["onboarding"] }),
+      queryClient.invalidateQueries({ queryKey: ["conversationDefaults"] })
+    ]);
+    return outcomes;
+  }
+
   async function saveModel() {
     if (!modelReady) {
       setNotice({ tone: "error", text: "先填写服务地址、模型名和 API Key。" });
@@ -126,14 +200,31 @@ export function OnboardingPage() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["modelRegistry"] }),
         queryClient.invalidateQueries({ queryKey: ["health"] }),
-        queryClient.invalidateQueries({ queryKey: ["executors"] }),
-        queryClient.invalidateQueries({ queryKey: ["onboarding"] }),
         queryClient.invalidateQueries({ queryKey: ["conversationDefaults"] })
       ]);
-      setNotice({ tone: "ok", text: "模型已就绪，聊天和原生执行器都可以使用。" });
-      setStep(1);
+      const outcomes = await bindInstalledExecutors();
+      const failures = Object.values(outcomes).filter((outcome) => outcome && !outcome.ok);
+      setNotice(failures.length > 0
+        ? { tone: "error", text: `模型已保存。${failures.map((outcome) => outcome?.message).join(" ")}` }
+        : { tone: "ok", text: "模型已保存，已检测到的执行器已完成自动绑定和真实测试。" });
+      setStep(2);
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "保存模型失败" });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function retryBindings() {
+    setNotice(null);
+    try {
+      const outcomes = await bindInstalledExecutors();
+      const failures = Object.values(outcomes).filter((outcome) => outcome && !outcome.ok);
+      setNotice(failures.length > 0
+        ? { tone: "error", text: failures.map((outcome) => outcome?.message).join(" ") }
+        : { tone: "ok", text: "执行器已重新绑定，真实测试通过。" });
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "重新绑定失败" });
     } finally {
       setBusy(null);
     }
@@ -184,13 +275,13 @@ export function OnboardingPage() {
 
   function next() {
     setNotice(null);
-    if (step === 0) void saveModel();
-    else if (step === 1) setStep(2);
+    if (step === 0) setStep(1);
+    else if (step === 1) void saveModel();
     else void finish();
   }
 
   const skipButton = (
-    <button className="ghost-button mostly-ghost" onClick={() => void skip()} disabled={busy !== null}>
+    <button className="ghost-button mostly-ghost" onClick={() => void skip()} disabled={busy !== null || installingAny}>
       暂时跳过
     </button>
   );
@@ -217,7 +308,92 @@ export function OnboardingPage() {
         <main className="wizard-body">
           {step === 0 && (
             <section className="wizard-panel">
-              <h1>模型</h1>
+              <h1>执行器</h1>
+              <p className="wizard-note">
+                Hearth 会自动检查本机和当前应用依赖。已安装的执行器直接标记为可用；未安装的可以在这里按需下载。
+              </p>
+
+              <div className="wizard-executor-list">
+                {EXECUTOR_DISPLAY_ORDER.map((id) => {
+                  const executor = executors.find((item) => item.id === id);
+                  if (!executor) {
+                    if (id === "native") return null;
+                    return (
+                      <article key={id} className="wizard-executor">
+                        <Loader2 size={15} className="spin" />
+                        <div className="wizard-executor-copy">
+                          <strong>{id === "codex" ? "Codex" : "DeepSeek Harness"}</strong>
+                          <small>{executorsQuery.isLoading ? "正在检测本机安装…" : "等待检测结果"}</small>
+                        </div>
+                      </article>
+                    );
+                  }
+                  const install = installs[id];
+                  const installed = executorInstalled(executor) || install?.status === "complete";
+                  const healthy = executor.health.canRun;
+                  const failed = install?.status === "error";
+                  const installing = install?.status === "installing";
+                  const stateTone = healthy ? "ok" : installed ? "detected" : failed ? "warn" : "warn";
+                  return (
+                    <article key={id} className={`wizard-executor ${stateTone}`}>
+                      {healthy || installed
+                        ? <CheckCircle2 size={15} className="summary-ok" />
+                        : failed || !executorsQuery.isLoading
+                          ? <AlertTriangle size={15} className="summary-warn" />
+                          : <Loader2 size={15} className="spin" />}
+                      <div className="wizard-executor-copy">
+                        <div className="wizard-executor-title">
+                          <strong>{executor.name}</strong>
+                          <span className={`wizard-executor-badge ${healthy || installed ? "ok" : "warn"}`}>
+                            {executorStatusLabel(executor, install?.status, healthy)}
+                          </span>
+                          {id === "native" && <span className="wizard-executor-badge">内置</span>}
+                        </div>
+                        <span className="wizard-executor-status">{executorDescription(executor, install?.status)}</span>
+                        {id !== "native" && install && <ExecutorBootstrapStatus state={install} />}
+                        {installed && !healthy && id !== "native" && (
+                          <span className="wizard-executor-hint">选择模型后会自动绑定并运行一次真实请求。</span>
+                        )}
+                      </div>
+                      {id !== "native" && (!installed || failed) && !installing && (
+                        <button
+                          type="button"
+                          className="primary-button compact wizard-executor-action"
+                          onClick={() => void installExecutor(id)}
+                          disabled={busy !== null || installingAny}
+                        >
+                          <Download size={14} /> {failed ? "重试下载" : "一键下载并检测"}
+                        </button>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+
+              {!executorsQuery.isLoading && installedExternalIds.length === 0 && (
+                <p className="wizard-note warn">
+                  <AlertTriangle size={14} /> 暂未检测到 Codex 或 DeepSeek Harness。可以一键安装，也可以继续使用内置原生执行器。
+                </p>
+              )}
+
+              <p className="wizard-note">
+                托管安装只下载当前缺失的运行时。磁盘占用约 Codex 479 MiB、DeepSeek Harness 505 MiB；本机或应用依赖中已有时不会重复下载。
+              </p>
+
+              <div className="wizard-inline-actions">
+                <button className="ghost-button" onClick={() => void executorsQuery.refetch()} disabled={executorsQuery.isFetching || installingAny}>
+                  {executorsQuery.isFetching ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />} 重新检测
+                </button>
+              </div>
+            </section>
+          )}
+
+          {step === 1 && (
+            <section className="wizard-panel">
+              <h1>选择模型</h1>
+              <p className="wizard-note">
+                模型保存后会为已检测到的 Codex 和 DeepSeek Harness 自动选择兼容档案，并运行真实请求测试。
+              </p>
 
               <div className="wizard-provider-grid">
                 {(registryQuery.data?.presets ?? []).map((preset) => (
@@ -256,39 +432,6 @@ export function OnboardingPage() {
             </section>
           )}
 
-          {step === 1 && (
-            <section className="wizard-panel">
-              <h1>执行器</h1>
-
-              <div className="wizard-executor-list">
-                {(["native", "codex", "deepseek-harness"] as const).map((id) => {
-                  const executor = (executorsQuery.data?.executors ?? []).find((item) => item.id === id);
-                  if (!executor) return null;
-                  const healthy = executor.health.canRun;
-                  return (
-                    <article key={id} className="wizard-executor">
-                      <span className={`status-dot ${healthy ? "online" : "offline"}`} />
-                      <div>
-                        <strong>{executor.name}</strong>
-                        <small>{healthy ? "已就绪" : executor.health.issues.join("；") || "暂未就绪"}</small>
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-
-              {!nativeReady && (
-                <p className="wizard-note warn"><Cpu size={14} /> 原生执行器还需要模型绑定。</p>
-              )}
-
-              <div className="wizard-inline-actions">
-                <button className="ghost-button" onClick={() => void executorsQuery.refetch()} disabled={executorsQuery.isFetching}>
-                  {executorsQuery.isFetching ? <Loader2 size={14} className="spin" /> : <Cpu size={14} />} 重新检测
-                </button>
-              </div>
-            </section>
-          )}
-
           {step === 2 && (
             <section className="wizard-panel">
               <h1>先跑一个真实任务</h1>
@@ -299,8 +442,26 @@ export function OnboardingPage() {
               <div className="wizard-summary">
                 <SummaryRow ok={configured} label="聊天模型" value={configured ? `${draft.providerName} · ${draft.model}` : "尚未配置"} />
                 <SummaryRow ok={nativeReady} label="原生执行器" value={nativeReady ? "已就绪" : "未就绪"} />
+                {EXTERNAL_EXECUTOR_IDS.map((id) => {
+                  const executor = executors.find((item) => item.id === id);
+                  if (!executor || !executorInstalled(executor)) return null;
+                  const outcome = bindingOutcomes[id];
+                  const ok = outcome?.ok ?? executor.health.canRun;
+                  return <SummaryRow key={id} ok={ok} label={executor.name} value={outcome?.ok ? "已绑定并通过真实测试" : outcome?.message ?? "已检测到，等待真实测试"} />;
+                })}
                 <SummaryRow ok={Boolean(verification?.ok)} label="首次示例" value={verification?.ok ? "已跑通" : skipVerification ? "已跳过" : "未运行"} />
               </div>
+
+              {Object.keys(bindingOutcomes).length > 0 && (
+                <div className="wizard-binding-list">
+                  {Object.entries(bindingOutcomes).map(([id, outcome]) => outcome && (
+                    <div key={id}>
+                      {outcome.ok ? <CheckCircle2 size={15} className="summary-ok" /> : <AlertTriangle size={15} className="summary-warn" />}
+                      <span>{outcome.message}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {!configured && (
                 <p className="wizard-note warn"><X size={14} /> 还没有可用的聊天模型，可以先跳过，在设置里补上。</p>
@@ -311,6 +472,11 @@ export function OnboardingPage() {
                   {busy === "verify" ? <Loader2 size={15} className="spin" /> : <Sparkles size={15} />}
                   {verification ? "重新跑一次" : "跑一个真实示例"}
                 </button>
+                {bindingFailures.length > 0 && (
+                  <button type="button" className="ghost-button" onClick={() => void retryBindings()} disabled={busy !== null}>
+                    {busy === "bind" ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />} 重新绑定并测试执行器
+                  </button>
+                )}
                 {verification && (
                   <div className="wizard-verify-result">
                     {verification.checks.map((check) => (
@@ -336,13 +502,17 @@ export function OnboardingPage() {
         </main>
 
         <footer className="wizard-footer">
-          <button className="ghost-button" onClick={() => setStep((current) => Math.max(0, current - 1))} disabled={step === 0 || busy !== null}>
+          <button className="ghost-button" onClick={() => setStep((current) => Math.max(0, current - 1))} disabled={step === 0 || busy !== null || installingAny}>
             <ArrowLeft size={14} /> 上一步
           </button>
           <div className="wizard-footer-right">
-            <button className="primary-button" onClick={next} disabled={busy !== null || (step === 0 && !modelReady) || (step === 2 && !verification?.ok && !skipVerification)}>
-              {busy === "save" || busy === "finish" ? <Loader2 size={15} className="spin" /> : null}
-              {step === 2 ? "进入 Hearth" : step === 0 ? "保存并继续" : "继续"}
+            <button
+              className="primary-button"
+              onClick={next}
+              disabled={busy !== null || installingAny || (step === 0 && executorsQuery.isLoading) || (step === 1 && !modelReady) || (step === 2 && !verification?.ok && !skipVerification)}
+            >
+              {busy === "save" || busy === "bind" || busy === "finish" ? <Loader2 size={15} className="spin" /> : null}
+              {step === 2 ? "进入 Hearth" : step === 1 ? "保存模型并继续" : "继续选择模型"}
               {step < 2 && <ArrowRight size={14} />}
             </button>
           </div>
@@ -360,6 +530,30 @@ function SummaryRow({ ok, label, value }: { ok: boolean; label: string; value: s
       <span>{value}</span>
     </div>
   );
+}
+
+function executorInstalled(executor: ExecutorView): boolean {
+  if (executor.id === "native") return true;
+  const state = executor.health.installState;
+  return state === "available" || state === "needs_repair" || state === "update_available" || Boolean(executor.health.version);
+}
+
+function executorStatusLabel(executor: ExecutorView, installStatus: "installing" | "complete" | "error" | undefined, healthy: boolean): string {
+  if (installStatus === "installing") return "正在安装";
+  if (installStatus === "error") return "安装失败";
+  if (installStatus === "complete") return "检测完成";
+  if (healthy) return executor.id === "native" ? "内置可用" : "已检测到";
+  if (executorInstalled(executor)) return "已检测到";
+  return "未检测到";
+}
+
+function executorDescription(executor: ExecutorView, installStatus: "installing" | "complete" | "error" | undefined): string {
+  if (installStatus === "installing") return "正在下载和验证运行时，进度会实时更新。";
+  if (installStatus === "error") return "下载或安装没有完成，可以重试。";
+  if (executor.id === "native") return "无需外部依赖，配置模型后即可使用。";
+  if (executor.health.canRun) return "真实请求通过，选择模型后即可使用。";
+  if (executorInstalled(executor)) return "运行文件已存在，选择模型后自动启用。";
+  return executor.health.issues[0] ?? "本机和应用依赖中都没有找到。";
 }
 
 function presetDraft(preset: ModelProviderPreset, apiKey = ""): ModelDraft {

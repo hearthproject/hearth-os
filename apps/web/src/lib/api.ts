@@ -14,6 +14,8 @@ import type {
   BrowserSettingsView,
   ExecutorId,
   ExecutorBootstrapResult,
+  ExecutorBootstrapStreamEvent,
+  ExecutorInstallProgress,
   ExecutorModelBindingPatch,
   ExecutorModelBindingView,
   ExecutorListResponse,
@@ -112,6 +114,11 @@ export interface GoalSettingsInput {
 
 export interface ChatStreamHandlers {
   onEvent: (event: string, data: unknown) => void;
+  signal?: AbortSignal;
+}
+
+export interface ExecutorBootstrapStreamHandlers {
+  onProgress?: (progress: ExecutorInstallProgress) => void;
   signal?: AbortSignal;
 }
 
@@ -301,6 +308,8 @@ export const api = {
   bootstrapExecutor: (id: ExecutorId) => request<ExecutorBootstrapResult>(`/api/executors/${encodeURIComponent(id)}/bootstrap`, {
     method: "POST"
   }),
+  bootstrapExecutorStream: (id: ExecutorId, handlers: ExecutorBootstrapStreamHandlers = {}) =>
+    streamExecutorBootstrap(id, handlers),
   settingsStorage: () => request<SettingsStorageResponse>("/api/settings/storage"),
   saveModelSettings: (input: {
     providerId?: string;
@@ -522,6 +531,71 @@ export const api = {
   attachmentUrl: (attachmentId: string) =>
     `/api/attachments/${encodeURIComponent(attachmentId)}`
 };
+
+async function streamExecutorBootstrap(
+  id: ExecutorId,
+  handlers: ExecutorBootstrapStreamHandlers
+): Promise<ExecutorBootstrapResult> {
+  const response = await fetch(`/api/executors/${encodeURIComponent(id)}/bootstrap/stream`, {
+    method: "POST",
+    headers: { accept: "application/x-ndjson" },
+    ...(handlers.signal ? { signal: handlers.signal } : {})
+  });
+  if (!response.ok) {
+    const contentType = response.headers.get("content-type") ?? "";
+    const payload = contentType.includes("application/json") ? await response.json() : await response.text();
+    const message = typeof payload === "object" && payload && "message" in payload ? String(payload.message) : `执行器安装失败（${response.status}）`;
+    const code = typeof payload === "object" && payload && "error" in payload ? String(payload.error) : null;
+    throw new ApiError(message, response.status, code);
+  }
+  if (!response.body) throw new Error("服务没有返回安装进度");
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result: ExecutorBootstrapResult | null = null;
+
+  const dispatch = (line: string) => {
+    if (!line.trim() || result) return;
+    let event: ExecutorBootstrapStreamEvent;
+    try {
+      event = JSON.parse(line) as ExecutorBootstrapStreamEvent;
+    } catch {
+      throw new Error("执行器安装进度响应格式不正确");
+    }
+    if (event.type === "progress") {
+      handlers.onProgress?.(event);
+    } else if (event.type === "error") {
+      throw new ApiError(event.message, 500, event.code ?? null);
+    } else if (event.type === "complete") {
+      result = event.result;
+    }
+  };
+  const dispatchBuffer = (flush = false) => {
+    if (flush) buffer += decoder.decode();
+    let newline = buffer.indexOf("\n");
+    while (newline >= 0) {
+      const line = buffer.slice(0, newline).replace(/\r$/, "");
+      buffer = buffer.slice(newline + 1);
+      dispatch(line);
+      newline = buffer.indexOf("\n");
+    }
+    if (flush && buffer.trim()) {
+      dispatch(buffer.trim());
+      buffer = "";
+    }
+  };
+
+  while (!result) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    dispatchBuffer();
+  }
+  dispatchBuffer(true);
+  if (!result) throw new Error("执行器安装连接提前结束，请重试。");
+  return result;
+}
 
 export function subscribeToEvents(onEvent: (event: string, envelope?: EventEnvelope) => void): () => void {
   const source = new EventSource("/api/events");

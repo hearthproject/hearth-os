@@ -30,7 +30,7 @@ const result = await build({
   // from the eager parse path.
   splitting: true,
   chunkNames: "chunk-[hash]",
-  external: ["@openai/codex-win32-x64", "@huggingface/transformers"],
+  external: ["@openai/codex-win32-x64", "@huggingface/transformers", "@deepseek-ai/dsh-sdk-client"],
   legalComments: "none",
   metafile: true,
   plugins: [stubBidiOnlyModules()],
