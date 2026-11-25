@@ -191,17 +191,17 @@ export function FeishuSettingsPanel() {
         </div>
 
         {status && (
-          <dl className="feishu-metrics">
-            <div><dt>收到消息</dt><dd>{status.inboundCount}</dd></div>
-            <div><dt>待发送</dt><dd>{status.outboundPending}</dd></div>
-            <div><dt>已发送</dt><dd>{status.outboundSent}</dd></div>
-            <div><dt>发送失败</dt><dd>{status.outboundFailed}</dd></div>
-            <div><dt>重连次数</dt><dd>{status.reconnectAttempts}</dd></div>
-            <div>
-              <dt>连接时间</dt>
-              <dd>{status.connectedAt ? new Date(status.connectedAt).toLocaleString("zh-CN") : "未连接"}</dd>
-            </div>
-          </dl>
+          <details className="im-runtime-info">
+            <summary>运行信息</summary>
+            <dl className="feishu-metrics">
+              <div><dt>收到消息</dt><dd>{status.inboundCount}</dd></div>
+              <div><dt>待发送</dt><dd>{status.outboundPending}</dd></div>
+              <div><dt>已发送</dt><dd>{status.outboundSent}</dd></div>
+              <div><dt>发送失败</dt><dd>{status.outboundFailed}</dd></div>
+              <div><dt>重连次数</dt><dd>{status.reconnectAttempts}</dd></div>
+              <div><dt>连接时间</dt><dd>{status.connectedAt ? new Date(status.connectedAt).toLocaleString("zh-CN") : "未连接"}</dd></div>
+            </dl>
+          </details>
         )}
 
         {pairing && (
@@ -224,8 +224,8 @@ export function FeishuSettingsPanel() {
         {status?.lastEventAt && <p className="settings-hint">最近收到事件：{new Date(status.lastEventAt).toLocaleString("zh-CN")}</p>}
         {status?.lastOutboundAt && <p className="settings-hint">最近发送成功：{new Date(status.lastOutboundAt).toLocaleString("zh-CN")}</p>}
 
-        <div className="feishu-checklist">
-          <h4>在飞书开放平台完成这些步骤</h4>
+        <details className="feishu-checklist">
+          <summary>配置帮助</summary>
           <ol>
             <li>创建“企业自建应用”，在应用能力里开启机器人。</li>
             <li>在“事件与回调 → 事件配置”选择“使用长连接接收事件”，添加 <code>im.message.receive_v1</code>。</li>
@@ -235,7 +235,7 @@ export function FeishuSettingsPanel() {
             <li>需要把飞书聊天接到已有对话时，在“连接”页生成配对码，然后发送 <code>/pair 123456</code>。</li>
           </ol>
           <p>open_id 可以在飞书开放平台的事件日志或调试工具中看到；白名单为空时不会处理任何消息。</p>
-        </div>
+        </details>
       </div>
     </section>
   );

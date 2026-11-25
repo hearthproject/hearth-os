@@ -27,7 +27,7 @@ function StatusPill({ status }: { status: ImChannelStatus | undefined }) {
   );
 }
 
-export function ImBridgePanel() {
+export function ImBridgePanel({ channel }: { channel: "wechat" | "qq" }) {
   const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ["imBridge"], queryFn: api.im, refetchInterval: 4_000 });
   const conversationsQuery = useQuery({ queryKey: ["conversations"], queryFn: api.conversations });
@@ -200,14 +200,6 @@ export function ImBridgePanel() {
 
   return (
     <div className="im-bridge">
-      <div className="im-bridge-intro">
-        <div>
-          <h3>IM 直连</h3>
-          <p>微信扫码即可接入，QQ 使用官方机器人；普通消息进入一个 IM 对话，绑定项目后自动创建该项目独立的 IM 对话并固定使用。</p>
-        </div>
-        {query.isFetching && <Loader2 size={14} className="spin" />}
-      </div>
-
       {notice && (
         <div className={`settings-notice ${notice.tone}`}>
           {notice.tone === "ok" ? <CheckCircle2 size={15} /> : notice.tone === "error" ? <X size={15} /> : <MessageCircle size={15} />}
@@ -215,7 +207,7 @@ export function ImBridgePanel() {
         </div>
       )}
 
-      <section className="panel settings-section im-channel-card">
+      {channel === "wechat" && <section className="panel settings-section im-channel-card">
         <div className="settings-body">
           <div className="im-channel-head">
             <div className="im-channel-title">
@@ -293,13 +285,16 @@ export function ImBridgePanel() {
             </div>
           </details>
 
-          <ImMetrics status={wechatStatus} />
           {wechatStatus?.lastError && <p className="form-error">最近错误：{wechatStatus.lastError}</p>}
-          <p className="settings-hint"><ShieldCheck size={13} /> Token 使用本机密钥加密保存；普通消息进入共享 IM 对话，绑定项目后固定使用项目专属 IM 对话，回复发给最后一位发消息的联系人。</p>
+          <details className="im-runtime-info">
+            <summary>运行信息与说明</summary>
+            <ImMetrics status={wechatStatus} />
+            <p className="settings-hint"><ShieldCheck size={13} /> Token 使用本机密钥加密保存，回复会发给最后一位发消息的联系人。</p>
+          </details>
         </div>
-      </section>
+      </section>}
 
-      <section className="panel settings-section im-channel-card">
+      {channel === "qq" && <section className="panel settings-section im-channel-card">
         <div className="settings-body">
           <div className="im-channel-head">
             <div className="im-channel-title">
@@ -349,8 +344,11 @@ export function ImBridgePanel() {
             </button>
           </div>
 
-          <ImMetrics status={qqStatus} />
           {qqStatus?.lastError && <p className="form-error">最近错误：{qqStatus.lastError}</p>}
+          <details className="im-runtime-info">
+            <summary>运行信息</summary>
+            <ImMetrics status={qqStatus} />
+          </details>
           <details className="im-advanced">
             <summary>QQ 机器人怎么创建</summary>
             <ol>
@@ -360,7 +358,7 @@ export function ImBridgePanel() {
             </ol>
           </details>
         </div>
-      </section>
+      </section>}
     </div>
   );
 }

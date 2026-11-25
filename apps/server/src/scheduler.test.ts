@@ -5,7 +5,7 @@ import { join, relative } from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import type { DelegationJob, ExecutorHealth, ExecutorId, HandoffRecord, HandoffStatus, PlanStage, TaskRecord, TaskStatus } from "@hearth/core";
+import type { DelegationJob, ExecutorHealth, ExecutorId, ExecutorSettings, HandoffRecord, HandoffStatus, PlanStage, TaskRecord, TaskStatus } from "@hearth/core";
 import { defaultConversationSettings, EXECUTION_PROFILES } from "@hearth/core";
 import { createAgentState, serializeAgentState } from "@hearth/agent-runtime";
 import type { CodexRunner, ExecutorHealthProvider, NativeRunner } from "./scheduler.ts";
@@ -584,7 +584,7 @@ describe("Hearth scheduler", () => {
     expect(store?.listArtifacts(task.id)).toHaveLength(0);
   });
 
-  it("runs up to three tasks in parallel for the same executor", async () => {
+  it("runs all queued work without a total concurrency limit", async () => {
     const service = setup();
     let active = 0;
     let maxActive = 0;
@@ -596,7 +596,7 @@ describe("Hearth scheduler", () => {
       active -= 1;
       return FAKE_RESULT;
     };
-    const tasks = [1, 2, 3, 4].map((index) => service.createTask({
+    const tasks = [1, 2, 3, 4, 5, 6].map((index) => service.createTask({
       title: `任务${index}`,
       goal: "写报告",
       textInput: String(index),
@@ -606,7 +606,7 @@ describe("Hearth scheduler", () => {
     scheduler.start();
 
     await Promise.all(tasks.map((task) => waitForStatus(service, task.id, "completed")));
-    expect(maxActive).toBe(3);
+    expect(maxActive).toBe(6);
   });
 
   it("does not block native work while a codex task is still running", async () => {
@@ -2270,6 +2270,7 @@ describe("Hearth scheduler", () => {
       context?: ContextService;
       conversationContext?: ConversationContextService;
       plans?: PlanService;
+      executorSettings?: ExecutorSettings;
     } = {}
   ): HearthScheduler {
     return new HearthScheduler({

@@ -320,16 +320,6 @@ describe("chat-first API", () => {
       executorSettingsPath: join(root, "executor-settings.json")
     });
 
-    const concurrency = await app.inject({
-      method: "PUT",
-      url: "/api/executor-settings",
-      payload: { concurrency: { codex: 2 } }
-    });
-    expect(concurrency.statusCode).toBe(200);
-    expect(concurrency.json().settings.concurrency).toEqual(
-      expect.objectContaining({ native: 3, codex: 2, "deepseek-harness": 3 })
-    );
-
     const command = await app.inject({
       method: "PUT",
       url: "/api/executor-settings",
@@ -347,7 +337,8 @@ describe("chat-first API", () => {
 
     const view = await app.inject({ method: "GET", url: "/api/executor-settings" });
     expect(view.json().settings.executors.codex).toEqual({ command: "codex-custom", authMode: "pat" });
-    expect(view.json().settings.concurrency.codex).toBe(2);
+    expect(view.json().settings).not.toHaveProperty("concurrency");
+    expect(view.json().settings).not.toHaveProperty("concurrencyLimit");
     await app.close();
   }, 30_000);
 

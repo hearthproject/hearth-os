@@ -127,7 +127,6 @@ export interface ExecutorView {
   experimental?: boolean | undefined;
   supportsResume?: boolean | undefined;
   runtime: ExecutorRuntimeSettings;
-  concurrency: number;
   health: ExecutorHealth;
   modelBinding?: ExecutorModelBindingView | undefined;
 }
@@ -138,7 +137,6 @@ export interface ExecutorSettings {
   defaultApprovalMode: ApprovalMode;
   preferredExecutorId: ExecutorId | null;
   reasoningEffort?: ReasoningEffort;
-  concurrency: Record<ExecutorId, number>;
   executors: Partial<Record<ExecutorId, ExecutorRuntimeSettings>>;
 }
 
@@ -146,7 +144,6 @@ export interface ExecutorSettingsPatch {
   defaultApprovalMode?: ApprovalMode | undefined;
   preferredExecutorId?: ExecutorId | null | undefined;
   reasoningEffort?: ReasoningEffort | undefined;
-  concurrency?: Partial<Record<ExecutorId, number>> | undefined;
   executors?: Partial<Record<ExecutorId, ExecutorRuntimeSettings>> | undefined;
 }
 

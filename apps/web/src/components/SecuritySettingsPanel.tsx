@@ -50,7 +50,7 @@ export function SecuritySettingsPanel() {
   return (
     <div className="settings-section security-page">
       <div className="section-heading">
-        <div><h3>安全与撤销</h3><p>全局停止会立即停下调度器和桌面会话；不会删除任务、记忆或产物。</p></div>
+        <div><h3>任务控制</h3><p>全局停止会立即停下调度器和桌面会话，不删除任务、记忆或产物。</p></div>
       </div>
 
       {securityQuery.isError && <p className="form-error">{securityQuery.error.message}</p>}
@@ -76,6 +76,9 @@ export function SecuritySettingsPanel() {
         )}
       </div>
 
+      <details className="data-disclosure security-details">
+        <summary><LockKeyhole size={13} /> 安全边界与审计</summary>
+        <div className="data-disclosure-body">
       <div className="data-block">
         <div className="data-block-head"><strong>撤销与删除</strong><span className="data-block-meta">本机安全边界</span></div>
         <dl className="data-boundaries">
@@ -102,6 +105,9 @@ export function SecuritySettingsPanel() {
           </table>
         )}
       </div>
+
+        </div>
+      </details>
 
       <p className="security-footnote"><LockKeyhole size={13} /> 安全事件保存在本机事件日志中，不同步到其他实例。</p>
     </div>

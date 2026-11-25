@@ -1532,14 +1532,14 @@ export function ChatPage() {
             )}
             <label className="composer-executor" title={selectedExecutorUnavailable ? selectedExecutor?.health.issues.join("；") : "锁定执行器后不会自动切换"}>
               <select
-                value={selectedExecutorVisible ? selectedExecutorId : ""}
+                value={selectedExecutorId}
                 onChange={(event) => chooseExecutor(event.target.value as ExecutorId | "")}
                 disabled={!settingsReady || sending || visibleExecutorIds.length === 0}
                 aria-label="选择执行器"
               >
                 {!selectedExecutorVisible && (
-                  <option value="" disabled>
-                    {visibleExecutorIds.length === 0 ? "没有可用执行器" : "选择可用执行器"}
+                  <option value={selectedExecutorId} disabled>
+                    {selectedExecutorName} · 不可用
                   </option>
                 )}
                 {visibleExecutorIds.map((id) => {

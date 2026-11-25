@@ -250,7 +250,7 @@ async function main() {
     await trigger.click();
     await page.locator(".composer-model-popover").waitFor({ timeout: 15_000 });
     assert.equal(await trigger.getAttribute("aria-expanded"), "true");
-    assert.equal(await page.locator('.composer-model-popover input[aria-label="选择推理强度"]').count(), 1, "reasoning slider should be inside the popover");
+    assert.equal(await page.locator(".composer-model-popover .model-effort-grid").count(), 1, "reasoning controls should be inside the popover");
     assert.equal(await page.locator(".model-context-usage").count(), 1, "context usage should be visible");
     await page.locator(".composer-model-backdrop").click();
     await page.locator(".composer-model-popover").waitFor({ state: "hidden", timeout: 15_000 });
@@ -291,7 +291,7 @@ async function main() {
   await runTest(page, "keeps primary destinations and discloses the rest", async () => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     const nav = page.locator(".nav").first();
-    for (const label of ["聊天", "资料库", "Context"]) {
+    for (const label of ["聊天", "资料库"]) {
       assert.equal(await nav.getByRole("link", { name: label, exact: true }).count(), 1, `${label} should be a primary link`);
     }
     assert.equal(await page.getByRole("link", { name: "设置", exact: true }).count(), 1, "settings should stay reachable");
@@ -305,7 +305,7 @@ async function main() {
 
     await page.keyboard.press("Control+k");
     await page.locator(".command-dialog").waitFor({ timeout: 15_000 });
-    for (const label of ["聊天", "资料库", "Context", "定时任务", "连接", "设置"]) {
+    for (const label of ["聊天", "资料库", "定时任务", "连接", "设置"]) {
       assert.equal(await page.locator(".command-group").getByRole("button", { name: label, exact: true }).count(), 1, `${label} should be searchable`);
     }
     await page.keyboard.press("Escape");
@@ -326,12 +326,14 @@ async function main() {
     assert.equal(new URL(page.url()).searchParams.get("tab"), "dossier");
   });
 
-  await runTest(page, "renders the Context page", async () => {
+  await runTest(page, "redirects the retired Context route into the library handoff", async () => {
     const memory = await api(baseUrl, "/api/memory");
     assert.equal(memory.status, 200, memory.text);
     await page.goto(`${baseUrl}/context`, { waitUntil: "networkidle" });
-    await page.locator(".context-page").waitFor({ timeout: 15_000 });
-    assert.equal((await page.locator(".context-page .page-head h1").innerText()).trim(), "Context");
+    assert.equal(new URL(page.url()).pathname, "/library", "Context should live inside the library");
+    assert.equal(new URL(page.url()).searchParams.get("handoff"), "1");
+    await page.locator(".library-page").waitFor({ timeout: 15_000 });
+    await page.getByRole("heading", { name: "交接", exact: true }).waitFor({ timeout: 15_000 });
   });
 
   await runTest(page, "renders the library browser and its category roots", async () => {
@@ -512,33 +514,56 @@ async function main() {
     assert.match(await page.locator(".composer-error").innerText(), /失效/);
   });
 
-  await runTest(page, "saves the preferred executor without forcing an approval mode", async () => {
+  await runTest(page, "autosaves the preferred executor", async () => {
     await page.goto(`${baseUrl}/settings`, { waitUntil: "networkidle" });
     await page.locator(".settings-tabs").waitFor();
-    await page.locator("summary").filter({ hasText: "执行器管理" }).click();
-    await page.locator(".executor-card").first().waitFor({ timeout: 15_000 });
-    await page.locator("label").filter({ hasText: "全局优先执行器" }).locator("select").selectOption("native");
-    await page.getByRole("button", { name: "保存执行器设置" }).click();
+    await page.locator(".executor-row").first().waitFor({ timeout: 15_000 });
+    await page.getByLabel("全局优先执行器").selectOption("native");
     await page.locator(".settings-notice.ok").waitFor({ timeout: 15_000 });
     assert.match(await page.locator(".settings-notice.ok").innerText(), /已保存/);
 
     const saved = await api(baseUrl, "/api/executor-settings");
     assert.equal(saved.body.settings.preferredExecutorId, "native");
+    assert.equal(saved.body.settings.concurrency, undefined);
+    assert.equal(saved.body.settings.concurrencyLimit, undefined);
 
     await page.reload({ waitUntil: "networkidle" });
-    await page.locator("summary").filter({ hasText: "执行器管理" }).click();
-    await page.locator(".executor-card").first().waitFor({ timeout: 15_000 });
-    assert.equal(await page.locator("label").filter({ hasText: "全局优先执行器" }).locator("select").inputValue(), "native");
+    await page.locator(".executor-row").first().waitFor({ timeout: 15_000 });
+    assert.equal(await page.getByLabel("全局优先执行器").inputValue(), "native");
+    assert.equal(await page.getByLabel("全局并发上限").count(), 0);
+  });
+
+  await runTest(page, "opens each connection from a compact provider overview", async () => {
+    await page.goto(`${baseUrl}/connections`, { waitUntil: "networkidle" });
+    await page.locator(".connection-card").first().waitFor({ timeout: 15_000 });
+    assert.equal(await page.locator(".connection-card").count(), 3);
+    assert.deepEqual(await page.locator(".connection-card strong").allInnerTexts(), ["微信", "飞书", "QQ"]);
+
+    await page.locator('.connection-card[data-channel="wechat"]').click();
+    await page.locator(".connection-detail .im-channel-title").filter({ hasText: "微信" }).waitFor();
+    await page.getByRole("button", { name: "返回连接" }).click();
+    await page.locator('.connection-card[data-channel="feishu"]').click();
+    await page.locator(".connection-detail").getByText("飞书消息入口").waitFor();
+    await page.getByRole("button", { name: "返回连接" }).click();
+    await page.locator('.connection-card[data-channel="qq"]').click();
+    await page.locator(".connection-detail .im-channel-title").filter({ hasText: "QQ" }).waitFor();
+    assert.equal(await page.locator(".connection-detail .im-channel-card").count(), 1);
   });
 
   await runTest(page, "uses the global preferred executor for a new chat", async () => {
     await newChat(page, baseUrl);
-    assert.equal(await page.locator('select[aria-label="选择执行器"]').inputValue(), "native");
+    const executor = page.locator('select[aria-label="选择执行器"]');
     const defaults = await api(baseUrl, "/api/conversation-defaults");
+    const executors = await api(baseUrl, "/api/executors");
     assert.equal(defaults.body.settings.preferredExecutorId, "native");
+    assert.equal(await executor.inputValue(), "native");
+    const native = executors.body.executors.find((item) => item.id === defaults.body.settings.preferredExecutorId);
+    if (!native?.health.canRun) {
+      assert.match(await page.locator(".composer-executor-warning").innerText(), /原生执行器.*不可用/);
+    }
   });
 
-  await runTest(page, "masks and clears model keys and clears a deleted chat profile", async () => {
+  await runTest(page, "never exposes model keys and clears a deleted chat profile", async () => {
     const registryBefore = await api(baseUrl, "/api/model-registry");
     const originalChat = registryBefore.body.chatProfileId;
     const created = await api(baseUrl, "/api/model-profiles", {
@@ -563,7 +588,6 @@ async function main() {
     await card.waitFor({ timeout: 15_000 });
     const cardText = await card.innerText();
     assert.ok(!cardText.includes("sk-e2e-secret-123456"), "the raw key must never reach the UI");
-    assert.match(cardText, /sk-e/);
 
     const cleared = await api(baseUrl, `/api/model-profiles/${encodeURIComponent(profileId)}`, {
       method: "PATCH",
@@ -574,7 +598,6 @@ async function main() {
     await page.reload({ waitUntil: "networkidle" });
     await page.locator(".settings-tab").filter({ has: page.locator("strong", { hasText: /^模型$/ }) }).click();
     await page.locator(".model-card").filter({ hasText: "E2E 临时档案" }).waitFor({ timeout: 15_000 });
-    assert.match(await page.locator(".model-card").filter({ hasText: "E2E 临时档案" }).innerText(), /未设置/);
 
     const selected = await api(baseUrl, "/api/model-registry/chat-profile", {
       method: "PUT",

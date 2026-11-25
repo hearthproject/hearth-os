@@ -845,3 +845,396 @@
     height: 28px;
   }
 }
+
+/* Simplified executor, model, connection, and data layouts. */
+.settings-save-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+}
+
+.executor-settings-panel .section-heading {
+  margin-bottom: 10px;
+}
+
+.executor-global-settings {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-sunk);
+}
+
+.executor-global-settings label,
+.executor-row-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+}
+
+.executor-list {
+  margin-top: 8px;
+}
+
+.executor-row {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.executor-row-head,
+.executor-row-title,
+.executor-row-controls,
+.executor-row-actions {
+  display: flex;
+  align-items: center;
+}
+
+.executor-row-head {
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.executor-row-title {
+  gap: 10px;
+  min-width: 0;
+}
+
+.executor-row-title > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.executor-row-title strong {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-13);
+  font-weight: 500;
+}
+
+.executor-row-title span,
+.executor-row-title small {
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+}
+
+.executor-row-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--surface-sunk);
+  color: var(--ink-secondary);
+}
+
+.executor-row-controls {
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.executor-row-controls > label {
+  flex: 1 1 320px;
+}
+
+.executor-row-actions {
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.executor-technical {
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line-subtle);
+}
+
+.executor-technical > summary,
+.im-runtime-info > summary,
+.feishu-checklist > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+  list-style: none;
+  cursor: pointer;
+}
+
+.executor-technical > summary::-webkit-details-marker,
+.im-runtime-info > summary::-webkit-details-marker,
+.feishu-checklist > summary::-webkit-details-marker {
+  display: none;
+}
+
+.executor-technical > summary::before,
+.im-runtime-info > summary::before,
+.feishu-checklist > summary::before {
+  width: 10px;
+  content: "+";
+}
+
+.executor-technical[open] > summary::before,
+.im-runtime-info[open] > summary::before,
+.feishu-checklist[open] > summary::before {
+  content: "−";
+}
+
+.executor-technical-body {
+  display: grid;
+  gap: 9px;
+  margin-top: 9px;
+  padding: 11px 12px;
+  border-radius: 9px;
+  background: var(--surface-sunk);
+}
+
+.executor-technical-body > p {
+  margin: 0;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+  line-height: 1.55;
+}
+
+.executor-technical-body dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+
+.executor-technical-body dl div {
+  min-width: 0;
+}
+
+.executor-technical-body dt {
+  color: var(--ink-tertiary);
+  font-size: 10px;
+}
+
+.executor-technical-body dd {
+  overflow-wrap: anywhere;
+  margin: 2px 0 0;
+  color: var(--ink-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.executor-issue,
+.executor-probe {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  font-size: var(--fs-11);
+  line-height: 1.5;
+}
+
+.executor-issue,
+.executor-probe.error {
+  color: var(--risk);
+}
+
+.executor-probe.ok {
+  color: var(--ok);
+}
+
+.settings-content .model-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.settings-content .model-card .model-card-head {
+  flex: 1 1 auto;
+}
+
+.settings-content .model-card .model-card-actions {
+  flex: 0 0 auto;
+}
+
+.model-editor-inline {
+  max-width: 680px;
+}
+
+.connections-lead {
+  margin: 0 0 14px;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-12);
+}
+
+.connection-card-list {
+  display: grid;
+  gap: 8px;
+}
+
+.connection-card {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto 16px;
+  align-items: center;
+  gap: 13px;
+  width: 100%;
+  padding: 14px 15px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+
+.connection-card:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-raised);
+}
+
+.connection-card:active {
+  transform: scale(0.995);
+}
+
+.connection-card-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--surface-sunk);
+  color: var(--ink-secondary);
+}
+
+.connection-card-icon.wechat {
+  color: #22a35b;
+}
+
+.connection-card-icon.qq {
+  color: #2f7cf6;
+}
+
+.connection-card-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.connection-card-copy strong {
+  font-size: var(--fs-13);
+  font-weight: 500;
+}
+
+.connection-card-copy small {
+  color: var(--ink-tertiary);
+  font-size: var(--fs-11);
+}
+
+.connection-card-chevron {
+  color: var(--ink-tertiary);
+}
+
+.connection-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 16px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-secondary);
+  font: inherit;
+  font-size: var(--fs-12);
+  cursor: pointer;
+}
+
+.connection-back:hover {
+  color: var(--ink);
+}
+
+.connection-detail .im-bridge {
+  margin-bottom: 0;
+}
+
+.im-runtime-info {
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+}
+
+.im-runtime-info .feishu-metrics {
+  margin-top: 8px;
+}
+
+.feishu-checklist {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.feishu-checklist h4 {
+  margin-top: 12px;
+}
+
+.data-advanced-section {
+  margin-top: 28px;
+}
+
+.data-advanced-section .settings-section {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.security-details {
+  margin-top: 14px;
+}
+
+@media (max-width: 720px) {
+  .executor-row-controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .executor-row-head,
+  .executor-row-controls {
+    align-items: flex-start;
+  }
+
+  .executor-row-controls > label {
+    flex: 0 0 auto;
+  }
+
+  .executor-row-actions {
+    justify-content: flex-start;
+  }
+
+  .executor-technical-body dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .connection-card {
+    grid-template-columns: 38px minmax(0, 1fr) 16px;
+  }
+
+  .connection-card-state {
+    display: none;
+  }
+
+  .settings-content .model-card {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

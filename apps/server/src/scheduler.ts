@@ -1048,8 +1048,7 @@ export class HearthScheduler {
     );
     queued.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
     // A chat conversation is a single timeline: never run two of its tasks at
-    // the same time, even when a different executor or a higher concurrency
-    // limit would otherwise allow it.
+    // the same time, even when a different executor would otherwise allow it.
     const activeConversations = new Set<string>();
     for (const taskIds of this.activeByExecutor.values()) {
       for (const taskId of taskIds) {
@@ -1075,8 +1074,6 @@ export class HearthScheduler {
         if (executorBusy) continue;
       }
       const active = this.activeByExecutor.get(executorId) ?? new Set<string>();
-      const limit = Math.max(1, settings.concurrency[executorId] ?? 1);
-      if (active.size >= limit) continue;
       const health = this.executorHealth(executorId, settings);
       const adapterCheck = this.adapters[executorId].canRun({
         task,

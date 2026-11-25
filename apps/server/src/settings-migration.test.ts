@@ -62,6 +62,8 @@ describe("legacy settings migration", () => {
     expect(input.registry.settingsForExecutor("native")).toMatchObject({ model: "deepseek-v4" });
     expect(input.registry.settingsForExecutor("codex")).toMatchObject({ model: "deepseek-v4" });
     expect(input.executorSettings.load()).toMatchObject({ defaultApprovalMode: "full", preferredExecutorId: "native" });
+    expect(input.executorSettings.load()).not.toHaveProperty("concurrency");
+    expect(input.executorSettings.load()).not.toHaveProperty("concurrencyLimit");
     expect(readdirSync(join(input.backupRoot, "legacy-dev"))).toHaveLength(2);
     expect(input.store.listSettingsMigrations().every((record) => record.status === "completed")).toBe(true);
     input.store.close();

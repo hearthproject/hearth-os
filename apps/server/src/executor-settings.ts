@@ -12,19 +12,13 @@ import type {
 import { EXECUTOR_IDS } from "@hearth/core";
 import type { HearthStore } from "@hearth/eventlog";
 
-export const DEFAULT_EXECUTOR_CONCURRENCY = 3;
-export const MIN_EXECUTOR_CONCURRENCY = 1;
-export const MAX_EXECUTOR_CONCURRENCY = 4;
 const SETTINGS_KEY = "executor.settings";
 
 export function defaultExecutorSettings(): ExecutorSettings {
-  const concurrency = {} as Record<ExecutorId, number>;
-  for (const id of EXECUTOR_IDS) concurrency[id] = DEFAULT_EXECUTOR_CONCURRENCY;
   return {
     defaultApprovalMode: "full",
     preferredExecutorId: "native",
     reasoningEffort: "max",
-    concurrency,
     executors: {}
   };
 }
@@ -45,7 +39,6 @@ export function saveExecutorSettings(
     defaultApprovalMode?: ApprovalMode | undefined;
     preferredExecutorId?: ExecutorId | null | undefined;
     reasoningEffort?: ReasoningEffort | undefined;
-    concurrency?: Partial<Record<ExecutorId, number | undefined>> | undefined;
     executors?: Partial<Record<ExecutorId, ExecutorRuntimeSettings>> | undefined;
   }
 ): ExecutorSettingsView {
@@ -54,7 +47,6 @@ export function saveExecutorSettings(
     defaultApprovalMode: patch.defaultApprovalMode ?? current.defaultApprovalMode,
     preferredExecutorId: patch.preferredExecutorId !== undefined ? patch.preferredExecutorId : current.preferredExecutorId,
     reasoningEffort: patch.reasoningEffort ?? current.reasoningEffort,
-    concurrency: { ...current.concurrency, ...(patch.concurrency ?? {}) },
     executors: mergeExecutorRuntimeSettings(current.executors, patch.executors)
   });
   const updatedAt = new Date().toISOString();
@@ -121,7 +113,6 @@ export class ExecutorSettingsStore {
     defaultApprovalMode?: ApprovalMode | undefined;
     preferredExecutorId?: ExecutorId | null | undefined;
     reasoningEffort?: ReasoningEffort | undefined;
-    concurrency?: Partial<Record<ExecutorId, number | undefined>> | undefined;
     executors?: Partial<Record<ExecutorId, ExecutorRuntimeSettings>> | undefined;
   }): ExecutorSettingsView {
     const current = this.load();
@@ -129,7 +120,6 @@ export class ExecutorSettingsStore {
       defaultApprovalMode: patch.defaultApprovalMode ?? current.defaultApprovalMode,
       preferredExecutorId: patch.preferredExecutorId !== undefined ? patch.preferredExecutorId : current.preferredExecutorId,
       reasoningEffort: patch.reasoningEffort ?? current.reasoningEffort,
-      concurrency: { ...current.concurrency, ...(patch.concurrency ?? {}) },
       executors: mergeExecutorRuntimeSettings(current.executors, patch.executors)
     });
     const updatedAt = new Date().toISOString();
@@ -162,20 +152,15 @@ export function normalizeExecutorSettings(input: {
   defaultApprovalMode?: ApprovalMode | undefined;
   preferredExecutorId?: ExecutorId | null | undefined;
   reasoningEffort?: ReasoningEffort | undefined;
-  concurrency?: Partial<Record<ExecutorId, number | undefined>> | undefined;
+  /** Legacy concurrency settings are accepted during migration, then omitted. */
+  concurrency?: unknown;
   executors?: Partial<Record<ExecutorId, ExecutorRuntimeSettings>> | undefined;
 }): ExecutorSettings {
-  const defaults = defaultExecutorSettings();
-  const concurrency = {} as Record<ExecutorId, number>;
-  for (const id of EXECUTOR_IDS) {
-    concurrency[id] = normalizeConcurrency(input.concurrency?.[id], defaults.concurrency[id]);
-  }
   const executors = normalizeExecutors(input.executors);
   return {
     defaultApprovalMode: normalizeApprovalMode(input.defaultApprovalMode),
     preferredExecutorId: normalizeExecutorId(input.preferredExecutorId),
     reasoningEffort: normalizeReasoningEffort(input.reasoningEffort),
-    concurrency,
     executors
   };
 }
@@ -208,9 +193,4 @@ function normalizeApprovalMode(_value: unknown): ApprovalMode {
 
 function normalizeReasoningEffort(value: unknown): ReasoningEffort {
   return value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "max" ? value : "max";
-}
-
-function normalizeConcurrency(value: unknown, fallback: number): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
-  return Math.max(MIN_EXECUTOR_CONCURRENCY, Math.min(MAX_EXECUTOR_CONCURRENCY, Math.round(value)));
 }

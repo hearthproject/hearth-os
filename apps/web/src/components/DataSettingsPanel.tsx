@@ -10,7 +10,6 @@ import {
   FileDown,
   FileUp,
   FolderTree,
-  HardDrive,
   Loader2,
   Play,
   ShieldAlert,
@@ -50,20 +49,19 @@ export function DataSettingsPanel() {
     <section className="settings-tab-panel data-panel">
       <StorageSection />
       <BackupSection />
-      <MaintenanceSection />
       <TrashSection />
       <SecuritySettingsPanel />
+      <details className="data-disclosure data-advanced-section">
+        <summary><Activity size={13} /> 高级维护</summary>
+        <div className="data-disclosure-body"><MaintenanceSection /></div>
+      </details>
     </section>
   );
 }
 
 function StorageSection() {
   const storageQuery = useQuery({ queryKey: ["settingsStorage"], queryFn: api.settingsStorage });
-  const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 30_000 });
-  const backupsQuery = useQuery({ queryKey: ["backups"], queryFn: api.backups, refetchInterval: 30_000 });
-  const trashQuery = useQuery({ queryKey: ["trash", "summary"], queryFn: () => api.trash({}), refetchInterval: 30_000 });
   const storage = storageQuery.data;
-  const health = healthQuery.data;
   const [copyState, setCopyState] = useState<"idle" | "ok" | "error">("idle");
 
   async function copyDataDir() {
@@ -79,31 +77,8 @@ function StorageSection() {
 
   return (
     <section className="settings-section">
-      <div className="data-overview">
-        <div>
-          <span><Database size={13} /> 数据库</span>
-          <strong>{health ? formatBytes(health.disk.dataBytes + health.disk.walBytes) : "—"}</strong>
-          <small>{health ? `WAL ${formatBytes(health.disk.walBytes)}` : "读取中"}</small>
-        </div>
-        <div>
-          <span><HardDrive size={13} /> 可用磁盘</span>
-          <strong>{health?.disk.freeBytes == null ? "—" : formatBytes(health.disk.freeBytes)}</strong>
-          <small>本机磁盘余量</small>
-        </div>
-        <div>
-          <span><Archive size={13} /> 加密备份</span>
-          <strong>{backupsQuery.data ? `${backupsQuery.data.records.length} 个` : "—"}</strong>
-          <small>本机归档</small>
-        </div>
-        <div>
-          <span><Trash2 size={13} /> 回收站</span>
-          <strong>{trashQuery.data ? `${trashQuery.data.items.length} 项` : "—"}</strong>
-          <small>可恢复或彻底删除</small>
-        </div>
-      </div>
-
       <div className="section-heading">
-        <div><h3>存储位置</h3><p>所有运行时数据都在这个目录下。</p></div>
+        <div><h3>存储位置</h3></div>
         {storage && (
           <button className="ghost-button compact" type="button" onClick={() => void copyDataDir()}>
             {copyState === "ok" ? <Check size={13} /> : <Copy size={13} />}
@@ -119,13 +94,16 @@ function StorageSection() {
           <div className="data-path">
             <FolderTree size={14} />
             <code>{storage.dataDir}</code>
-            <span className="data-path-meta">schema v{storage.schemaVersion}</span>
           </div>
 
           <details className="data-disclosure">
             <summary><FolderTree size={13} /> 存储位置明细</summary>
             <div className="data-disclosure-body">
               <dl className="data-locations">
+                <div>
+                  <dt>数据库版本</dt>
+                  <dd><code>schema v{storage.schemaVersion}</code></dd>
+                </div>
                 <div>
                   <dt>SQLite 数据库 <small>设置、任务与事件索引</small></dt>
                   <dd><code>{relativeTo(storage.dataDir, storage.paths.database)}</code></dd>

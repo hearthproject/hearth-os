@@ -423,7 +423,6 @@ const executorSettingsSchema = z.object({
   defaultApprovalMode: z.enum(["necessary", "workspace", "full"]).optional(),
   preferredExecutorId: z.enum(EXECUTOR_IDS).nullable().optional(),
   reasoningEffort: z.enum(["minimal", "low", "medium", "high", "max"]).optional(),
-  concurrency: z.partialRecord(z.enum(EXECUTOR_IDS), z.number().int().min(1).max(4)).optional(),
   executors: z.partialRecord(z.enum(EXECUTOR_IDS), z.object({
     command: optionalExecutorText(1000),
     executablePath: optionalExecutorText(2000),
@@ -1687,7 +1686,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
     const executors: ExecutorView[] = EXECUTORS.map((descriptor) => ({
       ...descriptor,
       runtime: executorRuntimeSettings(settings, descriptor.id),
-      concurrency: settings.concurrency[descriptor.id],
       health: executorHealth(descriptor.id),
       modelBinding: modelBindings.find((binding) => binding.executorId === descriptor.id)
     }));

@@ -11,7 +11,6 @@ import {
   Plus,
   RefreshCw,
   Save,
-  ShieldAlert,
   Sparkles,
   Trash2
 } from "lucide-react";
@@ -20,9 +19,6 @@ import { formatNumber, relativeTime } from "../lib/format.ts";
 import { DEFAULT_CONTEXT_WINDOW_TOKENS, DEFAULT_MAX_OUTPUT_TOKENS } from "@hearth/core/constants";
 import { suggestContextWindowTokens } from "@hearth/core";
 import type {
-  ExecutorId,
-  ExecutorModelBindingView,
-  ExecutorView,
   McpServerView,
   ModelProfileView,
   ModelProtocol,
@@ -83,12 +79,6 @@ const EMPTY_DRAFT: ProfileDraft = {
   apiKey: ""
 };
 
-const EXECUTOR_LABELS: Record<ExecutorId, string> = {
-  native: "Hearth 原生",
-  codex: "Codex",
-  "deepseek-harness": "DeepSeek Harness"
-};
-
 export function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTab = searchParams.get("tab");
@@ -138,167 +128,9 @@ export function SettingsPage() {
 }
 
 function ExecutorsTab() {
-  const queryClient = useQueryClient();
-  const registryQuery = useQuery({ queryKey: ["modelRegistry"], queryFn: api.modelRegistry });
-  const executorsQuery = useQuery({ queryKey: ["executors"], queryFn: api.executors });
-  const [busy, setBusy] = useState<ExecutorId | null>(null);
-  const [notice, setNotice] = useState<NoticeState>(null);
-  const registry = registryQuery.data;
-  const executors = executorsQuery.data?.executors ?? [];
-  const executorById = new Map(executors.map((executor) => [executor.id, executor]));
-  const readyBindingCount = registry?.bindings.filter(
-    (binding) => binding.available && executorById.get(binding.executorId)?.health.canRun
-  ).length ?? 0;
-
-  async function bind(executorId: ExecutorId, profileId: string) {
-    setBusy(executorId);
-    setNotice(null);
-    try {
-      const result = await api.saveExecutorModelBinding(executorId, { profileId: profileId || null, protocolOverride: null, modelOverride: null });
-      if (result.health && !result.health.canRun && result.health.state === "unverified") {
-        setNotice({ tone: "info", text: `${EXECUTOR_LABELS[executorId]} 的模型绑定已更新；DeepSeek Harness 需要点“一键绑定”或运行一次真实测试后才会启用。` });
-      } else {
-        setNotice({ tone: "ok", text: `${EXECUTOR_LABELS[executorId]} 的模型绑定已更新。` });
-      }
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["modelRegistry"] }),
-        queryClient.invalidateQueries({ queryKey: ["executors"] }),
-        queryClient.invalidateQueries({ queryKey: ["health"] })
-      ]);
-    } catch (error) {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "模型绑定保存失败" });
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function probe(executorId: ExecutorId) {
-    setBusy(executorId);
-    setNotice(null);
-    try {
-      const result = await api.probeExecutor(executorId);
-      if (result.ok) {
-        setNotice({ tone: "ok", text: `${EXECUTOR_LABELS[executorId]} 真实测试通过，执行器已可用。` });
-      } else {
-        setNotice({ tone: "error", text: `${EXECUTOR_LABELS[executorId]} 真实测试未通过：${result.error ?? "未知原因"}` });
-      }
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["modelRegistry"] }),
-        queryClient.invalidateQueries({ queryKey: ["executors"] }),
-        queryClient.invalidateQueries({ queryKey: ["health"] })
-      ]);
-    } catch (error) {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "测试失败" });
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function autoBind(executorId: ExecutorId) {
-    setBusy(executorId);
-    setNotice(null);
-    try {
-      const result = await api.autoBindExecutor(executorId);
-      const bound = result.binding.effectiveModel ?? result.binding.profile?.name ?? "可用模型";
-      if (result.probe && !result.probe.ok) {
-        setNotice({ tone: "error", text: `${EXECUTOR_LABELS[executorId]} 已自动绑定 ${bound}，但真实测试未通过：${result.probe.error ?? "未知原因"}` });
-      } else {
-        setNotice({ tone: "ok", text: `${EXECUTOR_LABELS[executorId]} 已自动绑定 ${bound}${result.probe ? "，真实测试通过" : ""}。` });
-      }
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["modelRegistry"] }),
-        queryClient.invalidateQueries({ queryKey: ["executors"] }),
-        queryClient.invalidateQueries({ queryKey: ["health"] })
-      ]);
-    } catch (error) {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "一键绑定失败" });
-    } finally {
-      setBusy(null);
-    }
-  }
-
   return (
     <section className="settings-tab-panel">
       <ExecutorSettingsPanel />
-
-      <section className="panel settings-section">
-        <div className="settings-body">
-          <div className="section-heading">
-            <div><h3>模型绑定</h3><p>每个执行器独立选择模型档案。Codex 只显示 Responses 协议；本地模型不会出现在这里。</p></div>
-            <span className="muted-count">{registryQuery.isLoading ? "正在检测" : `${readyBindingCount} / ${registry?.bindings.length ?? 7} 个模型与执行器均就绪`}</span>
-          </div>
-          {(registryQuery.isLoading || executorsQuery.isLoading) && <InlineLoading text="正在读取模型绑定与执行器状态" />}
-          {registry && (
-            <div className="binding-list">
-              {registry.bindings.map((binding) => {
-                const compatible = registry.profiles.filter((profile) => binding.allowedProtocols.includes(profile.protocol));
-                const health = executorById.get(binding.executorId)?.health ?? null;
-                const status = bindingStatus(binding, health);
-                return (
-                  <article key={binding.executorId} className="binding-row">
-                    <div className="binding-name">
-                      <strong>{EXECUTOR_LABELS[binding.executorId]}</strong>
-                      <small>{binding.allowedProtocols.map(protocolLabel).join(" · ")}</small>
-                    </div>
-                    <label>
-                      <span>使用的模型</span>
-                      <select
-                        value={binding.profileId ?? ""}
-                        onChange={(event) => void bind(binding.executorId, event.target.value)}
-                        disabled={busy === binding.executorId}
-                      >
-                        <option value="">未绑定</option>
-                        {compatible.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {profile.model}</option>)}
-                      </select>
-                    </label>
-                    <div className="binding-effective">
-                      <span className={`status-dot ${status.dot}`} />
-                      <div>
-                        <strong>{binding.effectiveModel ?? "未选择模型"}</strong>
-                        <small>
-                          {binding.effectiveProtocol ? protocolLabel(binding.effectiveProtocol) : "先创建兼容协议的模型档案"}
-                          {binding.available && health && !health.canRun
-                            ? ` · ${health.state === "unverified" ? "待真实测试" : "执行器不可用"}`
-                            : ""}
-                        </small>
-                      </div>
-                    </div>
-                    <div className="binding-actions">
-                      {(!binding.available || !health?.canRun) && (
-                        <button
-                          type="button"
-                          className="ghost-button compact"
-                          onClick={() => void probe(binding.executorId)}
-                          disabled={busy === binding.executorId}
-                          title="发送一次真实请求验证执行器"
-                        >
-                          {busy === binding.executorId ? <Loader2 size={13} className="spin" /> : <PlugZap size={13} />}
-                          运行测试
-                        </button>
-                      )}
-                      {(!binding.available || !health?.canRun) && (
-                        <button
-                          type="button"
-                          className="ghost-button compact"
-                          onClick={() => void autoBind(binding.executorId)}
-                          disabled={busy === binding.executorId}
-                          title="自动选择兼容的模型档案并绑定，然后运行一次真实测试"
-                        >
-                          {busy === binding.executorId ? <Loader2 size={13} className="spin" /> : <Sparkles size={13} />}
-                          一键绑定
-                        </button>
-                      )}
-                      <span className={`status-chip ${status.tone}`} title={status.title}>{status.label}</span>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          )}
-          {notice && <Notice tone={notice.tone} text={notice.text} />}
-          <p className="settings-hint"><ShieldAlert size={13} /> 执行器切换仍受上下文开关、风险策略和最大接管次数约束。</p>
-        </div>
-      </section>
     </section>
   );
 }
@@ -308,6 +140,7 @@ function ModelsTab() {
   const registryQuery = useQuery({ queryKey: ["modelRegistry"], queryFn: api.modelRegistry });
   const [draft, setDraft] = useState<ProfileDraft>(EMPTY_DRAFT);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
   const [busy, setBusy] = useState<"save" | "test" | "models" | "chat" | "delete" | null>(null);
   const [notice, setNotice] = useState<NoticeState>(null);
   const [models, setModels] = useState<string[]>([]);
@@ -328,38 +161,55 @@ function ModelsTab() {
   }
 
   function update<K extends keyof ProfileDraft>(key: K, value: ProfileDraft[K]) {
-    setDraft((prev) => ({ ...prev, [key]: value }));
+    setDraft((previous) => ({ ...previous, [key]: value }));
   }
 
   function pickPreset(preset: ModelProviderPreset) {
     const presetModel = preset.models[0] ?? "";
     const sibling = registry?.profiles.find((profile) => profile.baseUrl === preset.baseUrl && profile.model === presetModel);
-    setDraft((prev) => ({
-      ...prev,
+    setDraft((previous) => ({
+      ...previous,
       providerId: preset.id,
       providerName: preset.name,
       protocol: preset.protocol,
       baseUrl: preset.baseUrl,
       model: presetModel,
-      name: prev.name || `${preset.name} · ${preset.models[0] ?? "模型"}`,
+      name: previous.name || `${preset.name} · ${preset.models[0] ?? "模型"}`,
       ...(sibling
         ? { contextWindowTokens: sibling.contextWindowTokens, maxOutputTokens: sibling.maxOutputTokens }
-        : { contextWindowTokens: suggestContextWindowTokens(presetModel, prev.contextWindowTokens) })
+        : { contextWindowTokens: suggestContextWindowTokens(presetModel, previous.contextWindowTokens) })
     }));
     setModels(preset.models);
     setNotice(null);
   }
 
+  function pickProvider(id: string) {
+    if (id === "custom") {
+      setDraft((previous) => ({ ...previous, providerId: "custom", providerName: "", baseUrl: "", protocol: "openai-chat" }));
+      setModels([]);
+      return;
+    }
+    const preset = registry?.presets.find((item) => item.id === id);
+    if (preset) pickPreset(preset);
+  }
+
   function updateModel(value: string) {
-    // 同一个模型只应该有一个上下文窗口；协议只是调用方式，不应该改变它。
     const sibling = registry?.profiles.find((profile) => profile.baseUrl === draft.baseUrl && profile.model === value);
-    setDraft((prev) => ({
-      ...prev,
+    setDraft((previous) => ({
+      ...previous,
       model: value,
       ...(sibling
         ? { contextWindowTokens: sibling.contextWindowTokens, maxOutputTokens: sibling.maxOutputTokens }
-        : { contextWindowTokens: suggestContextWindowTokens(value, prev.contextWindowTokens) })
+        : { contextWindowTokens: suggestContextWindowTokens(value, previous.contextWindowTokens) })
     }));
+  }
+
+  function startNew() {
+    setEditingId(null);
+    setDraft(EMPTY_DRAFT);
+    setModels([]);
+    setNotice(null);
+    setEditorOpen(true);
   }
 
   function edit(profile: ModelProfileView) {
@@ -376,14 +226,15 @@ function ModelsTab() {
       apiKey: ""
     });
     setModels([]);
-    setNotice({ tone: "info", text: "正在编辑模型档案；API Key 留空表示保留当前密钥。" });
+    setNotice(null);
+    setEditorOpen(true);
   }
 
-  function resetForm() {
+  function closeEditor() {
     setEditingId(null);
     setDraft(EMPTY_DRAFT);
     setModels([]);
-    setNotice(null);
+    setEditorOpen(false);
   }
 
   async function save() {
@@ -407,9 +258,8 @@ function ModelsTab() {
       };
       if (editingId) await api.updateModelProfile(editingId, input);
       else await api.createModelProfile(input);
-      setNotice({ tone: "ok", text: editingId ? "模型档案已更新。" : "模型档案已创建，可以绑定给执行器。" });
-      setEditingId(null);
-      setDraft((prev) => ({ ...prev, apiKey: "" }));
+      setNotice({ tone: "ok", text: editingId ? "模型档案已更新。" : "模型档案已创建。" });
+      closeEditor();
       await refreshRegistry();
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "保存失败" });
@@ -424,7 +274,7 @@ function ModelsTab() {
     setNotice(null);
     try {
       await api.deleteModelProfile(profile.id);
-      if (editingId === profile.id) resetForm();
+      if (editingId === profile.id) closeEditor();
       setNotice({ tone: "ok", text: "模型档案已删除。" });
       await refreshRegistry();
     } catch (error) {
@@ -439,7 +289,7 @@ function ModelsTab() {
     setNotice(null);
     try {
       await api.setChatProfile(chatProfileId || null);
-      setNotice({ tone: "ok", text: "Hearth 聊天与故障诊断模型已更新。" });
+      setNotice({ tone: "ok", text: "聊天模型已更新。" });
       await refreshRegistry();
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "聊天模型保存失败" });
@@ -493,100 +343,100 @@ function ModelsTab() {
     }
   }
 
+  const selectedPresetId = registry?.presets.some((preset) => preset.id === draft.providerId) ? draft.providerId : "custom";
+
   return (
-    <section className="settings-tab-panel">
+    <section className="settings-tab-panel model-settings-panel">
       <section className="panel settings-section">
         <div className="settings-body">
-          <div className="section-heading">
-            <div><h3>Hearth 聊天模型</h3><p>用于聊天、任务路由、失败诊断和上下文摘要。它不等同于某个执行器的模型。</p></div>
-          </div>
+          <div className="section-heading"><div><h3>聊天模型</h3></div></div>
           <div className="chat-profile-row">
             <label>
-              <span>当前聊天模型</span>
+              <span>当前使用</span>
               <select value={chatProfileId} onChange={(event) => setChatProfileId(event.target.value)}>
                 <option value="">未选择</option>
                 {(registry?.profiles ?? []).map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {profile.model}</option>)}
               </select>
             </label>
             <button className="primary-button" onClick={() => void saveChatProfile()} disabled={busy !== null}>
-              {busy === "chat" ? <Loader2 size={15} className="spin" /> : <Save size={15} />} 保存聊天模型
+              {busy === "chat" ? <Loader2 size={15} className="spin" /> : <Save size={15} />} 保存
             </button>
           </div>
         </div>
       </section>
 
-      <div className="settings-split">
+      {!editorOpen && (
         <section className="panel settings-section model-catalog">
           <div className="settings-body">
             <div className="section-heading">
-              <div><h3>模型档案</h3><p>API Key 使用 AES-256-GCM 加密保存在 SQLite，接口只返回掩码。</p></div>
-              <button className="ghost-button compact" onClick={resetForm}><Plus size={14} /> 新建档案</button>
+              <div><h3>模型档案</h3></div>
+              <button className="ghost-button compact" onClick={startNew}><Plus size={14} /> 新建模型</button>
             </div>
+            {registryQuery.isLoading && <InlineLoading text="正在读取模型档案" />}
             <div className="model-list">
               {(registry?.profiles ?? []).map((profile) => (
-                <article key={profile.id} className={`model-card ${registry?.chatProfileId === profile.id ? "active" : ""}`}>
+                <article key={profile.id} className="model-card">
                   <div className="model-card-head">
-                    <div><strong>{profile.name}</strong><small>{profile.providerName} · {protocolLabel(profile.protocol)}</small></div>
+                    <div>
+                      <strong>{profile.name}</strong>
+                      <small>{profile.providerName} · {profile.model}</small>
+                    </div>
                     {registry?.chatProfileId === profile.id && <span className="status-chip ok">聊天模型</span>}
                   </div>
-                  <dl className="model-meta">
-                    <div><dt>模型</dt><dd>{profile.model}</dd></div>
-                    <div><dt>上下文</dt><dd>{formatNumber(profile.contextWindowTokens)} / 输出 {formatNumber(profile.maxOutputTokens)}</dd></div>
-                    <div><dt>地址</dt><dd title={profile.baseUrl}>{profile.baseUrl}</dd></div>
-                    <div><dt>密钥</dt><dd>{profile.hasApiKey ? profile.apiKeyMasked ?? "已保存" : "未设置"}</dd></div>
-                  </dl>
                   <div className="model-card-actions">
                     <button className="ghost-button compact" onClick={() => edit(profile)}><Pencil size={13} /> 编辑</button>
                     <button className="ghost-button compact danger" onClick={() => void remove(profile)} disabled={busy !== null}><Trash2 size={13} /> 删除</button>
                   </div>
                 </article>
               ))}
-              {registry && registry.profiles.length === 0 && <EmptyState text="还没有模型档案。使用右侧表单创建第一个。" />}
+              {registry && registry.profiles.length === 0 && <EmptyState text="还没有模型档案。" />}
             </div>
           </div>
         </section>
+      )}
 
-        <section className="panel settings-section model-editor">
+      {editorOpen && (
+        <section className="panel settings-section model-editor-inline">
           <div className="settings-body">
             <div className="section-heading">
-              <div><h3>{editingId ? "编辑模型档案" : "新建模型档案"}</h3><p>协议必须和执行器能力匹配，例如 Codex 只接受 Responses。</p></div>
-              {editingId && <button className="ghost-button compact" onClick={resetForm}>取消编辑</button>}
+              <div><h3>{editingId ? "编辑模型" : "新建模型"}</h3></div>
+              <button className="ghost-button compact" onClick={closeEditor}>取消</button>
             </div>
-            <div className="provider-grid compact">
-              {(registry?.presets ?? []).map((preset) => (
-                <button key={preset.id} type="button" title={preset.note} className={`provider-card ${draft.providerId === preset.id ? "active" : ""}`} onClick={() => pickPreset(preset)}>
-                  <strong>{preset.name}</strong><small>{protocolLabel(preset.protocol)}</small>
-                </button>
-              ))}
-            </div>
+
             <div className="form-grid">
-              <label className="span-2"><span>档案名称</span><input value={draft.name} onChange={(event) => update("name", event.target.value)} placeholder="例如：DeepSeek 主模型" /></label>
-              <label><span>接口协议</span><select value={draft.protocol} onChange={(event) => update("protocol", event.target.value as ModelProtocol)}>{PROTOCOLS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
-              <label><span>服务名称</span><input value={draft.providerName} onChange={(event) => update("providerName", event.target.value)} placeholder="例如：DeepSeek" /></label>
+              <label>
+                <span>服务</span>
+                <select value={selectedPresetId} onChange={(event) => pickProvider(event.target.value)}>
+                  {(registry?.presets ?? []).map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
+                  <option value="custom">自定义服务</option>
+                </select>
+              </label>
+              <label><span>名称</span><input value={draft.name} onChange={(event) => update("name", event.target.value)} placeholder="例如：DeepSeek 主模型" /></label>
               <label className="span-2"><span>服务地址</span><input value={draft.baseUrl} onChange={(event) => update("baseUrl", event.target.value)} placeholder="https://api.deepseek.com/v1" spellCheck={false} /></label>
               <label><span>模型</span><div className="input-with-action"><input value={draft.model} onChange={(event) => updateModel(event.target.value)} placeholder="手工填写或拉取" list="settings-model-options" spellCheck={false} /><button type="button" className="ghost-button compact" onClick={() => void fetchModels()} disabled={busy !== null}>{busy === "models" ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />} 拉取</button></div><datalist id="settings-model-options">{models.map((model) => <option key={model} value={model} />)}</datalist></label>
               <label><span>API Key</span><input type="password" value={draft.apiKey} onChange={(event) => update("apiKey", event.target.value)} placeholder={editingId ? "留空保留原密钥" : "sk-..."} autoComplete="off" /></label>
             </div>
+
             <details className="form-advanced">
-              <summary>
-                高级参数
-                <span>{formatNumber(draft.contextWindowTokens)} 上下文 · {formatNumber(draft.maxOutputTokens)} 输出</span>
-              </summary>
+              <summary>高级参数<span>{formatNumber(draft.contextWindowTokens)} 上下文 · {formatNumber(draft.maxOutputTokens)} 输出</span></summary>
               <div className="form-grid">
+                <label><span>接口协议</span><select value={draft.protocol} onChange={(event) => update("protocol", event.target.value as ModelProtocol)}>{PROTOCOLS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
+                <label><span>服务名称</span><input value={draft.providerName} onChange={(event) => update("providerName", event.target.value)} placeholder="例如：DeepSeek" /></label>
                 <label><span>上下文窗口（Token）</span><input type="number" min={4096} max={10000000} step={1000} value={draft.contextWindowTokens} onChange={(event) => update("contextWindowTokens", Number(event.target.value))} /></label>
                 <label><span>单次最大输出（Token）</span><input type="number" min={256} max={1000000} step={256} value={draft.maxOutputTokens} onChange={(event) => update("maxOutputTokens", Number(event.target.value))} /></label>
               </div>
-              <small className="field-hint">按模型名自动识别窗口（DeepSeek Flash 1M；带 256K / 128K 标注的模型按标注）；仍可手动覆盖。同一模型的 Chat 与 Responses 档案应保持一致。</small>
             </details>
+
             <div className="settings-actions">
-              <button className="primary-button" onClick={() => void save()} disabled={busy !== null}>{busy === "save" ? <Loader2 size={15} className="spin" /> : <Save size={15} />} {editingId ? "保存修改" : "创建档案"}</button>
+              <button className="primary-button" onClick={() => void save()} disabled={busy !== null}>{busy === "save" ? <Loader2 size={15} className="spin" /> : <Save size={15} />} {editingId ? "保存修改" : "创建模型"}</button>
               <button className="ghost-button" onClick={() => void testConnection()} disabled={busy !== null}>{busy === "test" ? <Loader2 size={15} className="spin" /> : <PlugZap size={15} />} 测试连接</button>
             </div>
-            {notice && <Notice tone={notice.tone} text={notice.text} />}
-            <p className="settings-hint"><KeyRound size={13} /> 本地模型（localhost / 127.0.0.1 / 内网地址）不进入统一模型管理，请在本地工具中直接使用。</p>
+            <p className="settings-hint"><KeyRound size={13} /> API Key 只保存在本机。</p>
           </div>
         </section>
-      </div>
+      )}
+
+      {notice && <Notice tone={notice.tone} text={notice.text} />}
     </section>
   );
 }
@@ -800,39 +650,4 @@ function EmptyState({ text }: { text: string }) {
 
 function protocolLabel(protocol: ModelProtocol): string {
   return PROTOCOLS.find((item) => item.id === protocol)?.label ?? protocol;
-}
-
-type BindingStatus = {
-  tone: "ok" | "warn";
-  dot: "online" | "offline" | "idle";
-  label: string;
-  title: string;
-};
-
-function bindingStatus(binding: ExecutorModelBindingView, health: ExecutorView["health"] | null): BindingStatus {
-  if (!binding.profileId) {
-    return { tone: "warn", dot: "idle", label: "未绑定", title: "还没有为这个执行器选择模型档案" };
-  }
-  if (binding.issue) {
-    return { tone: "warn", dot: "offline", label: binding.issue, title: binding.issue };
-  }
-  if (!health) {
-    return { tone: "warn", dot: "offline", label: "执行器未检测", title: "没有读取到执行器健康状态" };
-  }
-  if (!health.canRun) {
-    const label = health.installState === "missing"
-      ? "执行器未安装"
-      : health.state === "unverified"
-        ? "待真实测试"
-        : health.state === "quota_exceeded"
-          ? "额度不可用"
-          : "执行器不可用";
-    return {
-      tone: "warn",
-      dot: "offline",
-      label,
-      title: health.issues.join("；") || "执行器健康检查未通过"
-    };
-  }
-  return { tone: "ok", dot: "online", label: "可执行", title: "模型档案与执行器都可用" };
 }

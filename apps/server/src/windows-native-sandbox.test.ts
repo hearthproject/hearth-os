@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -269,19 +269,21 @@ describe("WindowsNativeSandboxProvider", () => {
     mkdirSync(temp);
     try {
       const provider = new WindowsNativeSandboxProvider({ helperPath, probe: false });
+      const pidPath = join(workspace, "child.pid");
       const confined = await provider.confine({
-        argv: [process.env.ComSpec ?? "C:\\Windows\\System32\\cmd.exe", "/c", "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -Command Start-Sleep -Seconds 20"],
+        argv: [
+          process.execPath,
+          "-e",
+          `require("node:fs").writeFileSync(${JSON.stringify(pidPath)}, String(process.pid)); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20_000);`
+        ],
         cwd: workspace,
         policy: policyFor(workspace, temp)
       });
       const helper = spawn(confined.argv[0]!, confined.argv.slice(1), { cwd: confined.cwd, env: confined.env, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
-      await new Promise((resolve) => setTimeout(resolve, 1_000));
-      const query = spawnSync("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", [
-        "-NoProfile",
-        "-Command",
-        `(Get-CimInstance Win32_Process -Filter "ParentProcessId=${helper.pid}").ProcessId`
-      ], { encoding: "utf8", windowsHide: true });
-      const childPid = Number.parseInt(query.stdout.trim(), 10);
+      for (let attempt = 0; attempt < 50 && !existsSync(pidPath); attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      const childPid = Number.parseInt(readFileSync(pidPath, "utf8").trim(), 10);
       expect(Number.isFinite(childPid)).toBe(true);
       process.kill(helper.pid!, "SIGTERM");
       await new Promise((resolve) => setTimeout(resolve, 1_000));
