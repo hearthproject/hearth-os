@@ -509,7 +509,15 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     return true;
   }
 
-  function finish(status: AgentRunStatus, resultSummary: string, outputs: string[] = [], question: string | null = null, failure?: AgentFailure, planPath?: string): AgentRunResult {
+  function finish(
+    status: AgentRunStatus,
+    resultSummary: string,
+    outputs: string[] = [],
+    question: string | null = null,
+    failure?: AgentFailure,
+    planPath?: string,
+    planSubmitted = false
+  ): AgentRunResult {
     if (stallTimer) {
       clearInterval(stallTimer);
       stallTimer = null;
@@ -538,6 +546,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       outputs,
       question,
       ...(planPath ? { planPath } : {}),
+      ...(planSubmitted ? { planSubmitted: true } : {}),
       ...(effectiveFailure ? { failure: effectiveFailure } : {}),
       metrics: {
         contextPeaks: [...contextPeaks],
@@ -1462,7 +1471,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         summary = plan;
         await checkpoint("plan", true);
         clearExecuting();
-        return finish("waiting_input", plan, result.outputs ?? [], plan, undefined, state.planPath ?? undefined);
+        return finish("waiting_input", plan, result.outputs ?? [], plan, undefined, state.planPath ?? undefined, true);
       }
       if (result.action === "ask_user") {
         const question = (result.question ?? result.content).trim() || "需要你补充信息后才能继续";

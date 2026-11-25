@@ -1,11 +1,11 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HearthStore } from "@hearth/eventlog";
 import type { ExecutorId } from "@hearth/core";
 import type { PlanSchedulerPort } from "./plans.ts";
-import { PlanService } from "./plans.ts";
+import { PlanService, buildPlanningPrompt } from "./plans.ts";
 import { HearthService } from "./service.ts";
 
 const roots: string[] = [];
@@ -40,7 +40,7 @@ function setup() {
   const store = new HearthStore(":memory:");
   const service = new HearthService(store);
   const conversation = store.createConversation("plan conversation");
-  const plans = new PlanService({ service });
+  const plans = new PlanService({ service, planRoot: join(root, "plans") });
   const scheduler = {
     requeuePlanTask: vi.fn((taskId: string) => service.requireTask(taskId)),
     cancel: vi.fn((taskId: string) => service.updateTask(taskId, { status: "cancelled" })),
@@ -55,11 +55,10 @@ function readyPlan(
   plans: PlanService,
   taskId: string,
   runId: string,
-  workspaceRoot: string,
   markdown = VALID_PLAN
 ) {
   plans.onPlanningRunStarted(taskId, runId);
-  return plans.onPlanningTaskReady(taskId, markdown, null, { runId, workspaceRoot });
+  return plans.onPlanningTaskReady(taskId, markdown, null, { runId });
 }
 
 describe("PlanService", () => {
@@ -79,8 +78,8 @@ describe("PlanService", () => {
     expect(task.expectedOutputs).toEqual([]);
     expect(service.store.getConversation(conversation.id)?.settings.collaborationMode).toBe("plan");
 
-    const ready = readyPlan(plans, task.id, "run-plan-1", root);
-    const canonicalPath = join(root, ".hearth", "plans", `${plan.id}.md`);
+    const ready = readyPlan(plans, task.id, "run-plan-1");
+    const canonicalPath = join(root, "plans", `${plan.id}.md`);
     expect(ready?.stage).toBe("awaiting_approval");
     expect(ready?.planMarkdown).toContain("调查结论");
     expect(ready?.planPath).toBe(canonicalPath);
@@ -88,6 +87,46 @@ describe("PlanService", () => {
     expect(readFileSync(canonicalPath, "utf8")).toBe(`${VALID_PLAN}\n`);
     expect(ready?.planSha256).toMatch(/^[a-f0-9]{64}$/);
     expect(() => plans.create({ conversationId: conversation.id, objective: "second" })).toThrow();
+  });
+
+  it("keeps the approved artifact stable across task worktrees and rejects tampering before build", async () => {
+    const { root, service, conversation, plans } = setup();
+    const plan = plans.create({ conversationId: conversation.id, objective: "Stable artifact", textInput: "Stable artifact" });
+    readyPlan(plans, plan.planningTaskId!, "run-stable-artifact");
+    const approved = await plans.action(plan.id, "approve");
+    const buildTask = service.requireTask(approved.executionTaskId!);
+    const canonicalPath = join(root, "plans", `${plan.id}.md`);
+
+    expect(approved.planPath).toBe(canonicalPath);
+    expect(approved.planPath).not.toContain("workspaces");
+    expect(() => plans.assertExecutionPlan(plan.id, buildTask.id)).not.toThrow();
+
+    writeFileSync(canonicalPath, `${VALID_PLAN}\n- tampered`, "utf8");
+    expect(() => plans.assertExecutionPlan(plan.id, buildTask.id)).toThrow(/SHA-256/);
+  });
+
+  it("repairs a legacy worktree plan path when the user approves an older plan", async () => {
+    const { root, store, service, conversation, plans } = setup();
+    const plan = plans.create({ conversationId: conversation.id, objective: "Legacy plan", textInput: "Legacy plan" });
+    readyPlan(plans, plan.planningTaskId!, "run-legacy-path");
+    const ready = plans.get(plan.id)!;
+    const legacyPath = join(root, "workspaces", "tasks", plan.planningTaskId!, ".hearth", "plans", `${plan.id}.md`);
+    store.appendEvent({
+      type: "plan.updated",
+      taskId: plan.planningTaskId,
+      payload: {
+        ...ready,
+        planPath: legacyPath,
+        planSha256: null,
+        revision: ready.revision + 1,
+        updatedAt: new Date().toISOString()
+      }
+    });
+
+    const approved = await plans.action(plan.id, "approve");
+    expect(approved.planPath).toBe(join(root, "plans", `${plan.id}.md`));
+    expect(existsSync(approved.planPath!)).toBe(true);
+    expect(() => plans.assertExecutionPlan(plan.id, service.requireTask(approved.executionTaskId!).id)).not.toThrow();
   });
 
   it.each(["native", "codex", "deepseek-harness"] as ExecutorId[])(
@@ -111,7 +150,7 @@ describe("PlanService", () => {
       expect(planning.taskKind).toBe("workspace");
       expect(planning.expectedOutputs).toEqual([]);
 
-      const ready = readyPlan(plans, planning.id, `run-${executorId}`, root);
+      const ready = readyPlan(plans, planning.id, `run-${executorId}`);
       expect(ready?.planSha256).toMatch(/^[a-f0-9]{64}$/);
       const approved = await plans.action(plan.id, "approve");
       const execution = service.requireTask(approved.executionTaskId!);
@@ -157,7 +196,7 @@ describe("PlanService", () => {
       mode: "plan"
     });
 
-    readyPlan(plans, planning.id, "run-project-plan", root);
+    readyPlan(plans, planning.id, "run-project-plan");
     const approved = await plans.action(plan.id, "approve");
     expect(service.requireTask(approved.executionTaskId!)).toMatchObject({
       projectId: "project-plan",
@@ -170,7 +209,7 @@ describe("PlanService", () => {
   it("completes, fails, and retries a build with the same approved plan", async () => {
     const { root, store, service, conversation, plans, scheduler } = setup();
     const plan = plans.create({ conversationId: conversation.id, objective: "Ship feature", textInput: "Ship feature" });
-    readyPlan(plans, plan.planningTaskId!, "run-build-1", root);
+    readyPlan(plans, plan.planningTaskId!, "run-build-1");
     const approved = await plans.action(plan.id, "approve");
     expect(approved.stage).toBe("executing");
     expect(approved.executionTaskId).toBeTruthy();
@@ -192,7 +231,7 @@ describe("PlanService", () => {
   it("keeps an interrupted build waiting for approval after a restart", async () => {
     const { root, service, conversation, plans, scheduler } = setup();
     const plan = plans.create({ conversationId: conversation.id, objective: "Restart", textInput: "Restart" });
-    readyPlan(plans, plan.planningTaskId!, "run-restart", root);
+    readyPlan(plans, plan.planningTaskId!, "run-restart");
     const approved = await plans.action(plan.id, "approve");
     service.updateTask(approved.executionTaskId!, { status: "running" });
 
@@ -234,7 +273,7 @@ describe("PlanService", () => {
       plan.planningTaskId!,
       "这是计划：\n\n```markdown\n## 调查结论\n\n- 太短\n```",
       null,
-      { runId: "run-quality", workspaceRoot: root }
+      { runId: "run-quality" }
     );
     expect(short?.stage).toBe("failed");
     expect(short?.error).toContain("过短");
@@ -250,7 +289,7 @@ describe("PlanService", () => {
       plan.planningTaskId!,
       `这里是计划：\n\n\`\`\`markdown\n${VALID_PLAN}\n\`\`\``,
       "/tmp/model-authored.md",
-      { runId: "run-fence", workspaceRoot: root }
+      { runId: "run-fence" }
     );
     expect(ready?.planMarkdown).toBe(VALID_PLAN);
     expect(ready?.planPath).not.toBe("/tmp/model-authored.md");
@@ -260,7 +299,7 @@ describe("PlanService", () => {
   it("continues planning in the same task and rejects a late prior-run result", () => {
     const { root, conversation, plans, scheduler } = setup();
     const plan = plans.create({ conversationId: conversation.id, objective: "Iterate", textInput: "Iterate" });
-    readyPlan(plans, plan.planningTaskId!, "run-old", root);
+    readyPlan(plans, plan.planningTaskId!, "run-old");
     const revised = plans.continuePlanning(plan.id, "Use a smaller scope");
     expect(revised.stage).toBe("planning");
     expect(revised.planMarkdown).toBeNull();
@@ -268,15 +307,29 @@ describe("PlanService", () => {
     expect(scheduler.requeuePlanTask).toHaveBeenCalledWith(plan.planningTaskId, "Use a smaller scope", { allowCompleted: true });
 
     expect(plans.onPlanningTaskReady(plan.planningTaskId!, `${VALID_PLAN}\n- stale`, null, {
-      runId: "run-old",
-      workspaceRoot: root
+      runId: "run-old"
     })).toBeNull();
     plans.onPlanningRunStarted(plan.planningTaskId!, "run-new");
     const fresh = plans.onPlanningTaskReady(plan.planningTaskId!, VALID_PLAN, null, {
-      runId: "run-new",
-      workspaceRoot: root
+      runId: "run-new"
     });
     expect(fresh?.stage).toBe("awaiting_approval");
     expect(fresh?.planningAttempt).toBe(2);
+  });
+
+  it.each([
+    ["native", "submit_plan"],
+    ["codex", "最终回复"],
+    ["deepseek-harness", "exit_plan_mode"]
+  ] as Array<[ExecutorId, string]>)("gives %s the executor-specific submission contract", (executorId, expected) => {
+    const prompt = buildPlanningPrompt({
+      title: "Contract",
+      objective: "Inspect only",
+      workspaceRoot: "C:\\work",
+      outDir: "C:\\work\\out",
+      executorId
+    });
+    expect(prompt).toContain(expected);
+    expect(prompt).toContain("## 调查结论");
   });
 });

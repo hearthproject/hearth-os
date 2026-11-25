@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildDshPatch,
   dshPermissionMode,
+  ordinaryQuestionMarkdown,
   planReviewMarkdown,
   promptForRun,
   runDeepSeekHarness,
@@ -71,5 +72,12 @@ describe("DSH plan mode", () => {
       { intent: { kind: "plan-review" }, detail: "## 调查结论\n\n- inspected" },
       { intent: { kind: "plan-review" }, detail: "## 执行步骤\n\n1. implement" }
     ])).toBe("## 调查结论\n\n- inspected\n\n## 执行步骤\n\n1. implement");
+  });
+
+  it("captures ordinary clarification text without treating it as a plan", () => {
+    expect(ordinaryQuestionMarkdown([
+      { intent: { kind: "plan-review" }, question: "Review plan", detail: "## 执行步骤" },
+      { question: "Which branch should I use?", detail: "Choose the target branch." }
+    ])).toBe("Which branch should I use?\n\nChoose the target branch.");
   });
 });

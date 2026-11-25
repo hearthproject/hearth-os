@@ -421,6 +421,8 @@ export interface AgentRunResult {
   outputs: string[];
   question: string | null;
   planPath?: string;
+  /** True only when a plan tool submitted a plan; ask_user remains a clarification. */
+  planSubmitted?: boolean;
   metrics?: AgentRunMetrics;
   failure?: AgentFailure;
 }

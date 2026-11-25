@@ -920,7 +920,10 @@ export async function buildServer(options: BuildServerOptions = {}) {
       return response.content;
     }
   });
-  const plans = new PlanService({ service });
+  const plans = new PlanService({
+    service,
+    planRoot: join(options.dataDir ?? DATA_DIR, "plans")
+  });
   const scheduler = options.startScheduler
     ? new HearthScheduler({
         service,

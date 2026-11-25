@@ -38,17 +38,17 @@ Creating a plan creates a `mode: "plan"` task bound to the same project and work
 
 1. **Environment discovery**: inspect real files, configuration, tests, and dependencies with read-only tools instead of guessing.
 2. **Intent clarification**: call `ask_user` only for an ambiguity that changes the implementation direction; ask one question at a time.
-3. **Implementation decision**: when investigation is sufficient, call `submit_plan`, which writes the plan into `.hearth/plans/*.md`.
+3. **Implementation decision**: when investigation is sufficient, submit the complete plan. Native calls `submit_plan`, Codex returns a final response, and DSH calls native `exit_plan_mode`; Hearth validates the body and writes the authoritative artifact to the host data directory at `plans/<planId>.md`.
 
-Planning receives read-only tools plus `submit_plan` and `ask_user`; shell is limited to read-only commands such as `git status/diff/log`, listing, reading, and version checks. `submit_plan` is the only write exception: it writes the plan file and nothing in the workspace. After submitting, the agent ends the turn and does not ask "shall I continue".
+Planning receives read-only tools plus clarification and plan-submission capabilities; shell is limited to read-only commands such as `git status/diff/log`, listing, reading, and version checks. Executors cannot write the workspace or choose the authoritative plan path. The plan body returns through the result. An ordinary clarification keeps the plan in `planning` instead of failing section validation. After submitting, the agent ends the turn and does not ask "shall I continue".
 
 If the user keeps messaging during planning, Hearth reuses the same planning task and workspace and enqueues the feedback as an internal `origin: "plan"` follow-up.
 
 ## Approval And Execution
 
-After `submit_plan` returns the plan body and real file path, the scheduler moves the plan to `awaiting_approval` and the UI shows a plan bar. The user can inspect it, request changes, replan, cancel, or approve explicitly.
+After receiving a valid plan body, the scheduler moves the plan to `awaiting_approval` and the UI shows a plan bar. The user can inspect it, request changes, replan, cancel, or approve explicitly.
 
-Approval creates a new `mode: "build"` execution task with the plan's project, workspace, and executor profile. The task receives the original objective, the approved plan body, and an execution protocol. It runs with this instance's full access; the plan moves to `executing` and the conversation returns to build mode.
+Approval treats the plan body in the database as authoritative, rewrites the stable artifact, and records its SHA-256 before creating a new `mode: "build"` task. The build task uses the plan's executor profile. Before startup, Hearth rereads the canonical artifact and verifies the hash; a missing or modified file blocks execution. The task receives the objective, approved body, canonical path, and execution protocol. The plan moves to `executing` and the conversation returns to build mode.
 
 Successful execution completes the plan. Failure moves it to `failed`, where the user can retry the same approved plan or replan read-only. Cancelling closes the plan and its planning or execution task.
 

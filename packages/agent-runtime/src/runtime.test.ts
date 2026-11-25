@@ -313,6 +313,28 @@ describe("agent runtime", () => {
 
     expect(result.status).toBe("waiting_input");
     expect(result.question).toBe("预算上限是多少？");
+    expect(result.planSubmitted).toBeUndefined();
+  });
+
+  it("marks submit_plan separately from an ordinary clarification", async () => {
+    const root = workspace(roots);
+    const plan = "## 调查结论\n\n- inspected\n\n## 执行步骤\n\n1. implement";
+    const permissions = defaultTaskPermissions({ workspaceRoot: root, outDir: join(root, "out"), networkHosts: [] });
+    const result = await runAgent({
+      model: fakeModel([turn("", [call("submit_plan", { plan, title: "Plan" })])]),
+      tools: createBuiltinTools(),
+      goal: "规划任务",
+      systemPrompt: "system",
+      budget: { maxTurns: 4, maxToolCalls: 4, maxTokens: 10_000, maxDurationMs: 30_000 },
+      permissions: { ...permissions, tools: [...permissions.tools, "submit_plan"] },
+      mode: "plan",
+      workspaceRoot: root,
+      outDir: join(root, "out")
+    });
+
+    expect(result.status).toBe("waiting_input");
+    expect(result.question).toBe(plan);
+    expect(result.planSubmitted).toBe(true);
   });
 
   it("still pauses for user input when ask_user runs in full permission", async () => {

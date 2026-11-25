@@ -45,6 +45,7 @@ export interface ExecutionOutcome {
   question: string | null;
   planPath?: string | null;
   planMarkdown?: string | null;
+  planSubmitted?: boolean;
   resume?: AgentResumeState;
   failure?: AgentFailure;
   budgetExhaustion?: Pick<BudgetExhaustion, "dimension" | "limit">;
@@ -169,8 +170,8 @@ export class NativeExecutorAdapter implements ExecutorAdapter {
       label: `native / ${input.nativeSettings.model}`,
       question: outcome.question,
       ...(outcome.planPath ? { planPath: outcome.planPath } : {}),
-      ...(input.mode === "plan" && (outcome.question || outcome.finalResponse)
-        ? { planMarkdown: outcome.question || outcome.finalResponse }
+      ...(input.mode === "plan" && outcome.planSubmitted && (outcome.question || outcome.finalResponse)
+        ? { planMarkdown: outcome.finalResponse || outcome.question, planSubmitted: true }
         : {}),
       ...(outcome.failure ? { failure: outcome.failure } : {}),
       ...(outcome.budgetExhaustion ? { budgetExhaustion: outcome.budgetExhaustion } : {}),
@@ -227,7 +228,7 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
       threadId: result.threadId,
       label: result.profileLabel,
       question: null,
-      ...(planMode ? { planMarkdown: result.finalResponse } : {})
+      ...(planMode ? { planMarkdown: result.finalResponse, planSubmitted: true } : {})
     };
   }
 
@@ -296,14 +297,16 @@ export class DeepSeekHarnessExecutorAdapter implements ExecutorAdapter {
       ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
       ...(input.onDshApprovalRequest ? { onApprovalRequest: input.onDshApprovalRequest } : {})
     });
+    const question = result.question?.trim() || null;
+    const planMarkdown = planMode ? result.planMarkdown?.trim() || null : null;
     return {
-      status: "completed",
+      status: planMarkdown || !question ? "completed" : "waiting_input",
       finalResponse: result.finalResponse,
       usage: result.usage,
       threadId: result.sessionId,
       label: `deepseek-harness / ${result.sessionId}`,
-      question: null,
-      ...(planMode ? { planMarkdown: result.planMarkdown ?? result.finalResponse } : {})
+      question,
+      ...(planMarkdown ? { planMarkdown, planSubmitted: true } : {})
     };
   }
 

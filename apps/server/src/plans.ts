@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import type {
   ExecutorId,
   PlanActionName,
@@ -40,16 +40,20 @@ export interface CreatePlanInput {
 
 export interface PlanServiceOptions {
   service: HearthService;
+  /** Host-owned data directory for plan artifacts, outside per-task worktrees. */
+  planRoot: string;
   now?: () => Date;
 }
 
 export class PlanService {
   private readonly service: HearthService;
+  private readonly planRoot: string;
   private readonly now: () => Date;
   private scheduler: PlanSchedulerPort | null = null;
 
   constructor(options: PlanServiceOptions) {
     this.service = options.service;
+    this.planRoot = resolve(options.planRoot);
     this.now = options.now ?? (() => new Date());
   }
 
@@ -183,7 +187,7 @@ export class PlanService {
     taskId: string,
     planMarkdown: string,
     planPath: string | null,
-    options: { runId?: string; workspaceRoot?: string } = {}
+    options: { runId?: string } = {}
   ): PlanView | null {
     const plan = this.findByTaskId(taskId);
     if (!plan || plan.planningTaskId !== taskId) return null;
@@ -201,13 +205,10 @@ export class PlanService {
         error: qualityError
       }));
     }
-    // A model-provided path is never authoritative. Hearth writes one canonical
-    // file under the prepared workspace and records that exact hash.
-    const root = options.workspaceRoot?.trim() || null;
-    const canonicalPath = root ? canonicalPlanPath(root, plan.id) : null;
-    const sha256 = canonicalPath
-      ? this.writeCanonicalPlan(canonicalPath, text)
-      : createHash("sha256").update(`${text}\n`, "utf8").digest("hex");
+    // A model-provided path is never authoritative. Planning and build tasks use
+    // different worktrees, so the approved artifact lives in the host data root.
+    const canonicalPath = canonicalPlanPath(this.planRoot, plan.id);
+    const sha256 = this.writeCanonicalPlan(canonicalPath, text);
     const next = this.save({
       ...plan,
       stage: "awaiting_approval",
@@ -222,7 +223,7 @@ export class PlanService {
 
   onPlanningTaskCompleted(
     taskId: string,
-    options: { runId?: string; workspaceRoot?: string } = {}
+    options: { runId?: string } = {}
   ): PlanView | null {
     const plan = this.findByTaskId(taskId);
     if (!plan) return null;
@@ -290,11 +291,19 @@ export class PlanService {
   private approve(plan: PlanRecord): PlanView {
     const markdown = plan.planMarkdown?.trim();
     if (!markdown) throw new PlanStateError("PLAN_STATE_INVALID", "计划还没有正文，不能开始执行");
+    const canonicalPath = canonicalPlanPath(this.planRoot, plan.id);
+    const sha256 = this.writeCanonicalPlan(canonicalPath, markdown);
+    const approvedPlan: PlanRecord = {
+      ...plan,
+      planMarkdown: markdown,
+      planPath: canonicalPath,
+      planSha256: sha256
+    };
     const execution = this.executionProfile(plan);
     const task = this.service.createTask({
       title: plan.title,
       goal: plan.objective,
-      textInput: this.executionPrompt(plan, markdown),
+      textInput: this.executionPrompt(approvedPlan, markdown),
       conversationId: plan.conversationId,
       executorId: execution.executorId ?? "native",
       taskKind: execution.taskKind,
@@ -307,7 +316,7 @@ export class PlanService {
       mode: "build"
     });
     const next = this.save({
-      ...plan,
+      ...approvedPlan,
       stage: "executing",
       executionTaskId: task.id,
       approvedAt: this.now().toISOString(),
@@ -316,6 +325,38 @@ export class PlanService {
     this.setConversationMode(plan.conversationId, "build");
     this.scheduler?.kick();
     return normalizePlan(next);
+  }
+
+  assertExecutionPlan(planId: string, taskId: string): void {
+    const plan = this.require(planId);
+    const task = this.service.requireTask(taskId);
+    if (plan.stage !== "executing" || plan.executionTaskId !== taskId) {
+      throw new PlanStateError("PLAN_STATE_INVALID", "当前构建任务不是这个计划的执行任务");
+    }
+    if (task.planId !== planId || task.mode !== "build") {
+      throw new PlanStateError("PLAN_STATE_INVALID", "构建任务没有绑定批准的完整计划");
+    }
+    const markdown = plan.planMarkdown?.trim();
+    if (!markdown || !plan.planPath || !plan.planSha256) {
+      throw new PlanStateError("PLAN_STATE_INVALID", "批准计划缺少正文、规范文件或 SHA-256");
+    }
+    const canonicalPath = canonicalPlanPath(this.planRoot, plan.id);
+    if (resolve(plan.planPath) !== resolve(canonicalPath)) {
+      throw new PlanStateError("PLAN_STATE_INVALID", "批准计划文件不在 Hearth 的稳定计划目录");
+    }
+    const databaseHash = this.sha256Text(`${markdown}\n`);
+    if (databaseHash !== plan.planSha256) {
+      throw new PlanStateError("PLAN_STATE_INVALID", "批准计划的正文与记录的 SHA-256 不一致");
+    }
+    let content: string;
+    try {
+      content = readFileSync(canonicalPath, "utf8");
+    } catch {
+      throw new PlanStateError("PLAN_STATE_INVALID", "批准计划文件不存在或无法读取；请重新批准计划");
+    }
+    if (this.sha256Text(content) !== plan.planSha256) {
+      throw new PlanStateError("PLAN_STATE_INVALID", "批准计划文件已被修改，SHA-256 校验失败");
+    }
   }
 
   private replan(plan: PlanRecord, note?: string): PlanView {
@@ -457,12 +498,16 @@ export class PlanService {
     const temp = `${path}.${process.pid}.${Date.now()}.tmp`;
     writeFileSync(temp, content, "utf8");
     renameSync(temp, path);
+    return this.sha256Text(content);
+  }
+
+  private sha256Text(content: string): string {
     return createHash("sha256").update(content, "utf8").digest("hex");
   }
 }
 
-function canonicalPlanPath(workspaceRoot: string, planId: string): string {
-  return join(workspaceRoot, ".hearth", "plans", `${planId}.md`);
+function canonicalPlanPath(planRoot: string, planId: string): string {
+  return join(planRoot, `${planId}.md`);
 }
 
 export function buildPlanningPrompt(input: {
@@ -474,7 +519,9 @@ export function buildPlanningPrompt(input: {
 }): string {
   const submission = input.executorId === "native"
     ? "调查完成后调用 submit_plan 提交完整方案。"
-    : "调查完成后直接把完整方案作为最终回复返回。";
+    : input.executorId === "deepseek-harness"
+      ? "调查完成后调用 DSH 的 exit_plan_mode 提交完整方案。Hearth 会捕获 plan-review 正文并接管审批；不要在 DSH 内自行批准，也不要把方案只写成普通最终回复。"
+      : "调查完成后直接把完整方案作为最终回复返回。";
   return [
     `# 只读规划任务：${input.title}`,
     "",

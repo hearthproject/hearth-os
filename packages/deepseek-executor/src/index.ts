@@ -73,6 +73,10 @@ export interface DeepSeekHarnessRunResult {
   finalResponse: string;
   /** Full plan captured from a native plan-review question, when present. */
   planMarkdown: string | null;
+  /** Ordinary clarification captured from a native user question, when present. */
+  question?: string | null;
+  /** True when DSH submitted a plan-review request. */
+  planSubmitted?: boolean;
   sessionId: string;
   usage: DshUsage | null;
   finishReason: string | null;
@@ -138,6 +142,8 @@ export async function runDeepSeekHarness(options: DeepSeekHarnessRunOptions): Pr
     DSH_TELEMETRY_MODE: "DISABLED"
   };
   let planMarkdown: string | null = null;
+  let question: string | null = null;
+  let planSubmitted = false;
   const harness = new DeepSeekHarness({
     profile: "sdk",
     dshHome: options.dshHome,
@@ -154,7 +160,12 @@ export async function runDeepSeekHarness(options: DeepSeekHarnessRunOptions): Pr
     env,
     onUserQuestion: async (request) => {
       const detail = options.planMode ? planReviewMarkdown(request.questions) : null;
-      if (detail) planMarkdown = detail;
+      if (detail) {
+        planMarkdown = detail;
+        planSubmitted = true;
+      }
+      const clarification = ordinaryQuestionMarkdown(request.questions);
+      if (clarification) question = [question, clarification].filter(Boolean).join("\n\n");
       return { cancelled: true };
     }
   });
@@ -194,8 +205,10 @@ export async function runDeepSeekHarness(options: DeepSeekHarnessRunOptions): Pr
     if (options.signal?.aborted) throw new DeepSeekHarnessError("DSH_CANCELLED", "DeepSeek Harness 执行已取消");
     options.onProgress?.({ type: "dsh.done", message: "DeepSeek Harness 已完成本轮执行" });
     return {
-      finalResponse: runResult.finalResponse.trim() || planMarkdown || "",
+      finalResponse: runResult.finalResponse.trim() || planMarkdown || question || "",
       planMarkdown,
+      question,
+      planSubmitted,
       sessionId: runResult.sessionId,
       usage: usageFromResult(runResult),
       finishReason: runResult.finishReason
@@ -256,6 +269,21 @@ export function planReviewMarkdown(
     .filter(Boolean)
     .join("\n\n");
   return detail || null;
+}
+
+export function ordinaryQuestionMarkdown(
+  questions: Array<{
+    question?: string | null;
+    detail?: string | null;
+    intent?: { kind?: string } | null;
+  }>
+): string | null {
+  const text = questions
+    .filter((question) => question.intent?.kind !== "plan-review")
+    .map((question) => [question.question?.trim(), question.detail?.trim()].filter(Boolean).join("\n\n"))
+    .filter(Boolean)
+    .join("\n\n");
+  return text || null;
 }
 
 function notificationHandler(options: DeepSeekHarnessRunOptions): (notification: HarnessNotification) => void {

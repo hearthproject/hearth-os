@@ -5,7 +5,7 @@ import { join, relative } from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import type { DelegationJob, ExecutorHealth, ExecutorId, HandoffRecord, HandoffStatus, TaskRecord, TaskStatus } from "@hearth/core";
+import type { DelegationJob, ExecutorHealth, ExecutorId, HandoffRecord, HandoffStatus, PlanStage, TaskRecord, TaskStatus } from "@hearth/core";
 import { defaultConversationSettings, EXECUTION_PROFILES } from "@hearth/core";
 import { createAgentState, serializeAgentState } from "@hearth/agent-runtime";
 import type { CodexRunner, ExecutorHealthProvider, NativeRunner } from "./scheduler.ts";
@@ -13,6 +13,7 @@ import { ApprovalManager } from "./approvals.ts";
 import { HearthStore } from "@hearth/eventlog";
 import { HearthScheduler } from "./scheduler.ts";
 import { HearthService } from "./service.ts";
+import { PlanService } from "./plans.ts";
 import { DelegationService } from "./delegation.ts";
 import { MemoryService } from "./memory.ts";
 import { TaskLeaseService } from "./leases.ts";
@@ -44,6 +45,26 @@ const TEST_USAGE = {
   reasoningOutputTokens: 0
 };
 
+const SCHEDULER_PLAN = `## 调查结论
+
+- 已读取 apps/server/src/plans.ts 与 scheduler.ts，确认规划阶段只进行只读调查，批准后由 Hearth 创建绑定同一执行器的 build 任务。
+- 计划正文由 Hearth 保存到稳定数据目录，并在 build 前校验 SHA-256。
+
+## 执行步骤
+
+1. 修改 apps/server/src/plans.ts，把规范计划文件放到宿主稳定目录。
+2. 修改 apps/server/src/scheduler.ts，在启动构建前校验计划文件。
+
+## 验证方法
+
+- 运行 npm run typecheck，预期没有 TypeScript 错误。
+- 运行计划与调度器测试，预期计划克隆和提交都通过。
+
+## 风险与非目标
+
+- 风险是旧计划文件被外部修改，因此构建必须失败并提示重新批准。
+- 本次不接入 Codex 或 DSH 的原生 Goal 状态机。`;
+
 function nativeResult(text: string) {
   return {
     status: "completed" as const,
@@ -57,6 +78,53 @@ function nativeResult(text: string) {
 }
 
 describe("Hearth scheduler", () => {
+  it("keeps planning active after a clarification and captures only a submitted plan", async () => {
+    const service = setup();
+    const conversation = fullConversation();
+    const plans = new PlanService({ service, planRoot: join(requireTemp(), "plans") });
+    let nativeCalls = 0;
+    const scheduler = makeScheduler(service, async () => FAKE_RESULT, {
+      plans,
+      modelSettingsForExecutor: () => chatSettings(),
+      nativeRunner: async () => {
+        nativeCalls += 1;
+        if (nativeCalls === 1) {
+          return {
+            status: "waiting_input",
+            finalResponse: "Which branch should I target?",
+            usage: TEST_USAGE,
+            turns: 1,
+            toolCalls: 1,
+            question: "Which branch should I target?",
+            outputs: []
+          };
+        }
+        return {
+          status: "waiting_input",
+          finalResponse: SCHEDULER_PLAN,
+          usage: TEST_USAGE,
+          turns: 1,
+          toolCalls: 1,
+          question: SCHEDULER_PLAN,
+          planSubmitted: true,
+          outputs: []
+        };
+      }
+    });
+    plans.attachScheduler(scheduler);
+    scheduler.start();
+
+    const plan = plans.create({ conversationId: conversation.id, objective: "Plan with clarification", textInput: "Plan with clarification" });
+    const waiting = await waitForStatus(service, plan.planningTaskId!, "waiting_input");
+    expect(waiting.resultSummary).toContain("Which branch");
+    expect(plans.get(plan.id)?.stage).toBe("planning");
+
+    plans.continuePlanning(plan.id, "Target main", { textInput: "Target main" });
+    const awaiting = await waitForPlanStage(plans, plan.id, "awaiting_approval");
+    expect(awaiting.planMarkdown).toContain("## 调查结论");
+    expect(nativeCalls).toBe(2);
+  });
+
   it("injects the same conversation brief after switching executors", async () => {
     const service = setup();
     const conversation = store!.createConversation("跨执行器", defaultConversationSettings());
@@ -2177,6 +2245,7 @@ describe("Hearth scheduler", () => {
       mcpServers?: McpServerService;
       context?: ContextService;
       conversationContext?: ConversationContextService;
+      plans?: PlanService;
     } = {}
   ): HearthScheduler {
     return new HearthScheduler({
@@ -2260,6 +2329,17 @@ async function waitForStatus(service: HearthService, taskId: string, expected: T
   }
   const current = service.store.getTask(taskId);
   throw new Error(`Timed out waiting for ${expected}; current=${current?.status}; error=${current?.error?.message ?? "none"}`);
+}
+
+async function waitForPlanStage(plans: PlanService, planId: string, expected: PlanStage) {
+  const deadline = Date.now() + 4_000;
+  while (Date.now() < deadline) {
+    const plan = plans.get(planId);
+    if (plan?.stage === expected) return plan;
+    await delay(20);
+  }
+  const current = plans.get(planId);
+  throw new Error(`Timed out waiting for plan ${expected}; current=${current?.stage}; error=${current?.error ?? "none"}`);
 }
 
 async function waitForHandoff(store: HearthStore, taskId: string, expected: HandoffStatus): Promise<HandoffRecord[]> {

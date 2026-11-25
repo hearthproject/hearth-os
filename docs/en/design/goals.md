@@ -48,7 +48,7 @@ stateDiagram-v2
   active --> cancelled
 ```
 
-`armed` is a separate host switch that allows automatic next rounds. Pausing or waiting for a human clears it; a host restart keeps an in-progress goal armed and continues it.
+`armed` is a separate host switch that allows automatic next rounds. Pausing or waiting for a human clears it; on host restart Hearth pauses an in-progress goal and clears the switch until the user explicitly resumes it.
 
 ## Round Admission
 
@@ -106,7 +106,7 @@ A failed verification returns to `active` for repair. Two consecutive verifier f
 
 ## Restart And Concurrency
 
-On boot, Hearth marks open rounds `interrupted`, clears the backoff time, keeps `armed`, and lets an in-progress goal continue; a goal the user paused stays paused. Pending approvals, unreconciled effects, and unfinished handoffs are not treated as completed just because the host restarted.
+On boot, Hearth marks open rounds `interrupted`, clears the backoff time, moves the goal to `paused`, records `stopReason=host_restart`, and sets `armed=false`; the user can resume after reviewing the contract, evidence, and external effects. A goal the user paused stays paused, and Hearth does not replay the old round. Pending approvals, unreconciled effects, and unfinished handoffs are not treated as completed just because the host restarted.
 
 Every goal write increments `revision`; HTTP actions may carry `expectedRevision`. A mismatch returns a conflict instead of overwriting newer pause/resume state. History is append-only.
 

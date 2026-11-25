@@ -173,6 +173,40 @@ describe("executor adapters", () => {
     expect(outcome.planMarkdown).toContain("调查结论");
   });
 
+  it("keeps native plan clarification separate from a submitted plan", async () => {
+    const root = tempRoot();
+    let submitted = false;
+    const adapter = new NativeExecutorAdapter(async () => ({
+      status: "waiting_input",
+      finalResponse: submitted ? "## 调查结论\n\n- complete" : "Which branch should I inspect?",
+      usage: { inputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0 },
+      turns: 1,
+      toolCalls: 0,
+      question: submitted ? "## 调查结论\n\n- complete" : "Which branch should I inspect?",
+      ...(submitted ? { planSubmitted: true } : {}),
+      outputs: []
+    }));
+    const base = {
+      ...invocation(defaultExecutorSettings(), root),
+      task: {
+        ...invocation(defaultExecutorSettings(), root).task,
+        networkHosts: []
+      },
+      mode: "plan" as const,
+      nativeSettings: { protocol: "openai-chat" } as ExecutorInvocation["nativeSettings"]
+    };
+
+    const clarification = await adapter.execute(base);
+    expect(clarification.status).toBe("waiting_input");
+    expect(clarification.planMarkdown).toBeUndefined();
+    expect(clarification.planSubmitted).toBeUndefined();
+
+    submitted = true;
+    const plan = await adapter.execute(base);
+    expect(plan.planSubmitted).toBe(true);
+    expect(plan.planMarkdown).toContain("调查结论");
+  });
+
   it("runs DSH planning with read-only permissions, no session resume, and captured plan markdown", async () => {
     const root = tempRoot();
     const captured: { value: DeepSeekHarnessRunOptions | null } = { value: null };
@@ -203,6 +237,34 @@ describe("executor adapters", () => {
       mode: "necessary"
     });
     expect(captured.value?.resumeSessionId).toBeUndefined();
+    expect(outcome.planSubmitted).toBe(true);
     expect(outcome.planMarkdown).toContain("执行步骤");
+  });
+
+  it("surfaces a DSH clarification as waiting input instead of a plan or success", async () => {
+    const root = tempRoot();
+    const adapter = new DeepSeekHarnessExecutorAdapter(async () => ({
+      finalResponse: "",
+      planMarkdown: null,
+      question: "Which branch should I inspect?",
+      sessionId: "dsh-question-session",
+      usage: null,
+      finishReason: "user-question"
+    }), root);
+    const outcome = await adapter.execute({
+      ...invocation(defaultExecutorSettings(), root),
+      mode: "plan",
+      prompt: "inspect only",
+      dshSettings: {
+        protocol: "openai-chat",
+        baseUrl: "http://127.0.0.1:1",
+        model: "test-model",
+        apiKey: "test-key"
+      } as ExecutorInvocation["dshSettings"]
+    });
+    expect(outcome.status).toBe("waiting_input");
+    expect(outcome.question).toBe("Which branch should I inspect?");
+    expect(outcome.planMarkdown).toBeUndefined();
+    expect(outcome.planSubmitted).toBeUndefined();
   });
 });

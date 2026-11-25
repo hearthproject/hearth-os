@@ -2187,6 +2187,10 @@ export class HearthScheduler {
         ...(this.attachmentRoot ? { attachmentRoot: this.attachmentRoot } : {}),
         ...(this.githubRun ? { githubRun: this.githubRun } : {})
       });
+      if (task.mode === "build" && task.planId) {
+        if (!this.plans) throw new Error("计划服务未启动，无法校验批准计划");
+        this.plans.assertExecutionPlan(task.planId, taskId);
+      }
       mkdirSync(join(outDir, ".hearth"), { recursive: true });
       writeFileSync(join(outDir, ".hearth", "workspace-root"), `${prepared.root}\n`, "utf8");
       if (task.mode === "plan" && task.planId) this.plans?.onPlanningRunStarted(taskId, runId);
@@ -2492,15 +2496,14 @@ export class HearthScheduler {
       rememberSession(result);
       this.assertLease(taskId, run.leaseEpoch ?? 0, controller.signal.aborted && this.stopping);
       if (result.status === "budget_exceeded") return this.finishBudgetExhausted(taskId, run, result, budget);
-      if (result.status === "waiting_input") return this.finishWaitingInput(taskId, run, result, prepared.root);
+      if (result.status === "waiting_input") return this.finishWaitingInput(taskId, run, result);
       this.assertCompleted(result);
       let finalText = "";
       if (task.mode === "plan" && task.planId && this.plans) {
         const planMarkdown = result.planMarkdown?.trim() || result.finalResponse.trim();
         finalText = planMarkdown;
         this.plans.onPlanningTaskReady(taskId, planMarkdown, null, {
-          runId,
-          workspaceRoot: prepared.root
+          runId
         });
       } else {
         for (let repairAttempt = 1; repairAttempt <= 2; repairAttempt += 1) {
@@ -2512,7 +2515,7 @@ export class HearthScheduler {
           rememberSession(result);
           this.assertLease(taskId, run.leaseEpoch ?? 0, controller.signal.aborted && this.stopping);
           if (result.status === "budget_exceeded") return this.finishBudgetExhausted(taskId, run, result, budget);
-          if (result.status === "waiting_input") return this.finishWaitingInput(taskId, run, result, prepared.root);
+          if (result.status === "waiting_input") return this.finishWaitingInput(taskId, run, result);
           this.assertCompleted(result);
         }
         const remainingIssues = await this.deliveryIssues(task, prepared, expectedOutputs);
@@ -2590,7 +2593,7 @@ export class HearthScheduler {
       if (task.planId && this.plans) {
         try {
           if (task.mode === "plan") {
-            this.plans.onPlanningTaskCompleted(taskId, { runId, workspaceRoot: prepared.root });
+            this.plans.onPlanningTaskCompleted(taskId, { runId });
           }
           else this.plans.onExecutionTaskCompleted(taskId);
         } catch (error) {
@@ -2857,7 +2860,7 @@ export class HearthScheduler {
     });
   }
 
-  private finishWaitingInput(taskId: string, run: RunRecord, result: ExecutionOutcome, workspaceRoot: string): AttemptResult {
+  private finishWaitingInput(taskId: string, run: RunRecord, result: ExecutionOutcome): AttemptResult {
     const usage = this.usageWithMetrics(result.usage, result.turns, result.toolCalls);
     this.service.updateRun(run.id, taskId, { status: "waiting_input", endedAt: new Date().toISOString(), usage, failure: null });
     const task = this.service.updateTask(taskId, {
@@ -2865,12 +2868,11 @@ export class HearthScheduler {
       error: null, resultSummary: result.question ?? result.finalResponse
     }, run.id);
     this.goals?.onTaskGated(task, "needs_input");
-    if (this.plans && task.planId && task.mode === "plan") {
-      const planMarkdown = result.planMarkdown?.trim() || result.finalResponse || result.question || "";
+    if (this.plans && task.planId && task.mode === "plan" && result.planSubmitted) {
+      const planMarkdown = result.planMarkdown?.trim() || result.finalResponse.trim();
       try {
         this.plans.onPlanningTaskReady(taskId, planMarkdown, result.planPath ?? null, {
-          runId: run.id,
-          workspaceRoot
+          runId: run.id
         });
       } catch (error) {
         this.capture({

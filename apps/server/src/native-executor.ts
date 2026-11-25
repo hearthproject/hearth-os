@@ -142,6 +142,7 @@ export interface NativeRunResult {
   toolCalls: number;
   question: string | null;
   planPath?: string | null;
+  planSubmitted?: boolean;
   outputs: string[];
   messages?: AgentMessage[];
   failure?: AgentFailure;
@@ -417,6 +418,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     toolCalls: result.toolCalls,
     question: result.question,
     ...(result.planPath ? { planPath: result.planPath } : {}),
+    ...(result.planSubmitted ? { planSubmitted: true } : {}),
     outputs: result.outputs,
     messages: result.messages,
     ...(result.failure ? { failure: result.failure } : {}),
