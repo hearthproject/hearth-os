@@ -2,13 +2,31 @@
 
 ## Unreleased
 
-### 修复
+## 0.7.0 - 2026-11-25
+
+### 浏览器接管
+
+- 浏览器会话改由固定版本的 `@playwright/mcp` 扩展（`0.0.86`）承载，可直接配对并连接日常 Chrome；扩展不可用或连接失败时回退到 Hearth 受管 profile。
+- 当前任务卡新增接管浏览器、继续 Agent、重新连接扩展、关闭浏览器四个操作；控制状态在 `agent`、`awaiting_user`、`user`、`closed`、`unavailable` 之间流转，用户接管期间 Agent 停止页面动作，不会抢回前台。
+- 会话按任务保存，跨运行和 Hearth 重启继续存在，直到用户显式关闭或删除任务；归还控制权后控制 epoch 递增，旧元素引用失效，Agent 必须重新读取页面。
+- 浏览器工具扩充到 20 个，新增坐标点击/输入、滚动、拖拽、标签页管理、上传、下载、断言和站点配方；`browser_request_takeover` 统一处理登录、验证码和支付确认。
+- 审批链路加固：提交、上传、下载逐次审批并按参数指纹绑定授权；动作前后截图与页面摘要写入证据目录；URL 查询参数与已知密钥统一脱敏。
+- 移除独立浏览器设置页，配对、连接、接管和关闭都收进当前任务的浏览器卡。
+
+### 设置
+
+- 执行器、模型、数据、连接四个设置面板合并简化：重复说明、分步向导和分散入口收敛为单页字段，公共字段样式抽到 `settings-fields.css`。
+
+### 搜索与 MCP
+
+- `web_search` 零配置可用：无需 Tavily Key 或 SearXNG 实例；按已配置的 Tavily/SearXNG、可选搜索中继（`HEARTH_SEARCH_RELAY_URL`）、Bing RSS、DuckDuckGo、已连接浏览器逐级回退，并可读取前几条正文。
+- `/mcp` 可直接搜索官方 Registry、安装到资料库，并为当前任务选择最多 8 个服务器；支持 stdio 与 Streamable HTTP、加密密钥、Schema 校验、超时和崩溃隔离。
+- MCP bridge 增加独立运行时与回退路径，Registry 未声明的供应商配置不会被自动猜测。
+
+### 运行时
 
 - 原生执行器的任务内上下文压缩改为在约 80k token 时触发。原先的阈值是窗口的 80%（约 204k token），长任务的每轮请求会一直累积到接近窗口上限，费用随轮数快速增长。
 - 通过 `compactTriggerTokens` 选项把触发点换算成现有压缩逻辑可用的窗口参数，不改变 chat 对话层的压缩行为。
-
-### 新增
-
 - 推理强度新增"关闭"档位（`off`）。DeepSeek 上发送 `thinking: {type: "disabled"}`，其它服务商不发送该字段。
 - 修正 `minimal`、`medium` 档位在模型设置加载时被静默改为 `max` 的问题。
 - 每次模型调用后发出 `model.timing` 事件，包含本轮耗时、首字延迟和工具调用数，便于定位耗时来源。
@@ -17,7 +35,7 @@
 
 - 同一个长任务两次运行的请求体大小：修复前从 26k 涨到 157k 字符（22 轮，未触发压缩）；修复后在约 100k 字符时压缩，回落到约 15k。两次运行并非严格对照，结论为初步观察。
 - `npm run typecheck` 通过；`runtime.test.ts`、`runtime.compact-trigger.test.ts`、`native-executor.test.ts`、`reasoning-fields.test.ts` 等相关用例通过。
-- 设计说明见 `docs/design/context-compaction.md`。
+- 设计说明见 `docs/design/context-compaction.md`；浏览器链路见 `docs/design/browser.md`。
 - 尚未验证：对话层压缩阈值（仍为窗口的 80%）、旧工具输出截断阈值、多样本下的费用对比。仅仅比较了deepseek模型下的“低”和“极高”思考模式，同思考模式下同任务运行时间相差近两倍。
 
 ## 0.6.2 - 2026-11-25
