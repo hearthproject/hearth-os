@@ -238,4 +238,39 @@ describe("context and handoff API", () => {
       byExperiment: { default: 1 }
     });
   });
+
+  it("exports context metrics in Prometheus text format", async () => {
+    setup();
+    const app = await makeApp(join(root as string, "blobs"));
+    const conversation = store!.createConversation("prom", defaultConversationSettings());
+    store!.appendConversationCompaction({
+      id: "compact-prom",
+      conversationId: conversation.id,
+      trigger: "auto",
+      status: "completed",
+      summary: "摘要",
+      coveredMessageIds: ["m1", "m2"],
+      firstKeptMessageId: "m3",
+      tokensBefore: 1000,
+      tokensAfter: 400,
+      model: "test/model",
+      usage: null,
+      error: null,
+      createdAt: "2026-11-25T10:00:00.000Z",
+      completedAt: "2026-11-25T10:00:00.500Z"
+    });
+    store!.appendEvent({
+      type: "conversation.context.compacted",
+      taskId: null,
+      payload: { conversationId: conversation.id, trigger: "auto", structured: true, truncated: false, experiment: "canary" }
+    });
+
+    const res = await app.inject({ method: "GET", url: "/api/context/metrics/prometheus" });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toContain("text/plain");
+    expect(res.body).toContain("hearth_context_compactions_total 1");
+    expect(res.body).toContain('hearth_context_compactions_by_trigger{trigger="auto"} 1');
+    expect(res.body).toContain('hearth_context_compactions_by_experiment{experiment="canary"} 1');
+    expect(res.body).toContain("hearth_context_compactions_structured_rate 1");
+  });
 });

@@ -48,7 +48,7 @@ import { MentionResolver } from "./mentions.ts";
 import { OntologyService } from "./ontology.ts";
 import { OntologyWriter } from "./ontology-writer.ts";
 import type { ContextIndex } from "./context-index.ts";
-import { contextMetrics } from "./context-metrics.ts";
+import { contextMetrics, contextMetricsPrometheus } from "./context-metrics.ts";
 import { HearthService, TaskInputSelectionError, TaskNotFoundError, TaskProposalNotFoundError, type CreateTaskInput } from "./service.ts";
 import { HealthService } from "./health.ts";
 import { MaintenanceError, MaintenanceService } from "./maintenance.ts";
@@ -2979,6 +2979,12 @@ export async function buildServer(options: BuildServerOptions = {}) {
   app.get("/api/context/metrics", async (_request, reply) => {
     reply.header("cache-control", "no-store");
     return contextMetrics(service);
+  });
+
+  app.get("/api/context/metrics/prometheus", async (_request, reply) => {
+    reply.header("cache-control", "no-store");
+    reply.type("text/plain; version=0.0.4; charset=utf-8");
+    return contextMetricsPrometheus(contextMetrics(service));
   });
 
   app.patch("/api/context/settings", async (request, reply) => {

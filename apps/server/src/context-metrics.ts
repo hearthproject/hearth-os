@@ -188,3 +188,77 @@ function average(values: number[]): number | null {
   if (values.length === 0) return null;
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
+
+function promLine(name: string, value: number | null, labels?: Record<string, string>): string | null {
+  if (value === null || !Number.isFinite(value)) return null;
+  const labelStr = labels && Object.keys(labels).length > 0
+    ? `{${Object.entries(labels).map(([k, v]) => `${k}="${v.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n")}"`).join(",")}}`
+    : "";
+  return `${name}${labelStr} ${value}`;
+}
+
+export function contextMetricsPrometheus(snapshot: ContextMetricsSnapshot): string {
+  const lines: string[] = [];
+  const gauge = (name: string, help: string, value: number | null, labels?: Record<string, string>) => {
+    lines.push(`# HELP ${name} ${help}`);
+    lines.push(`# TYPE ${name} gauge`);
+    const line = promLine(name, value, labels);
+    if (line) lines.push(line);
+  };
+  const gaugeLabeled = (name: string, help: string, samples: Array<{ value: number | null; labels: Record<string, string> }>) => {
+    lines.push(`# HELP ${name} ${help}`);
+    lines.push(`# TYPE ${name} gauge`);
+    for (const sample of samples) {
+      const line = promLine(name, sample.value, sample.labels);
+      if (line) lines.push(line);
+    }
+  };
+
+  gauge("hearth_context_ledger_tasks", "Number of tasks with context items.", snapshot.ledger.tasks);
+  gauge("hearth_context_ledger_items", "Number of context items.", snapshot.ledger.items);
+
+  gauge("hearth_context_handoffs_total", "Total handoffs.", snapshot.handoffs.total);
+  gaugeLabeled("hearth_context_handoffs_by_status", "Handoffs by status.", [
+    { value: snapshot.handoffs.pendingUser, labels: { status: "pending_user" } },
+    { value: snapshot.handoffs.prepared, labels: { status: "prepared" } },
+    { value: snapshot.handoffs.running, labels: { status: "running" } },
+    { value: snapshot.handoffs.completed, labels: { status: "completed" } },
+    { value: snapshot.handoffs.failed, labels: { status: "failed" } },
+    { value: snapshot.handoffs.cancelled, labels: { status: "cancelled" } }
+  ]);
+  gauge("hearth_context_handoffs_success_rate", "Completed/(completed+failed) handoff success rate.", snapshot.handoffs.successRate);
+  gauge("hearth_context_handoffs_avg_recovery_ms", "Average completed handoff recovery duration in milliseconds.", snapshot.handoffs.averageRecoveryMs);
+
+  gauge("hearth_context_diagnosis_total", "Total execution diagnoses.", snapshot.diagnosis.total);
+  gaugeLabeled("hearth_context_diagnosis_by_source", "Diagnoses by source.", [
+    { value: snapshot.diagnosis.model, labels: { source: "model" } },
+    { value: snapshot.diagnosis.rules, labels: { source: "rules" } }
+  ]);
+  gauge("hearth_context_diagnosis_avg_duration_ms", "Average diagnosis duration in milliseconds.", snapshot.diagnosis.averageDurationMs);
+
+  gauge("hearth_context_compactions_total", "Total conversation compactions.", snapshot.compactions.total);
+  gaugeLabeled("hearth_context_compactions_by_status", "Compactions by status.", [
+    { value: snapshot.compactions.completed, labels: { status: "completed" } },
+    { value: snapshot.compactions.failed, labels: { status: "failed" } },
+    { value: snapshot.compactions.running, labels: { status: "running" } }
+  ]);
+  gaugeLabeled("hearth_context_compactions_by_trigger", "Compactions by trigger.", [
+    { value: snapshot.compactions.byTrigger.auto, labels: { trigger: "auto" } },
+    { value: snapshot.compactions.byTrigger.manual, labels: { trigger: "manual" } },
+    { value: snapshot.compactions.byTrigger.overflow, labels: { trigger: "overflow" } }
+  ]);
+  gauge("hearth_context_compactions_avg_tokens_before", "Average estimated tokens before compaction.", snapshot.compactions.averageTokensBefore);
+  gauge("hearth_context_compactions_avg_tokens_after", "Average estimated tokens after compaction.", snapshot.compactions.averageTokensAfter);
+  gauge("hearth_context_compactions_avg_compression_ratio", "Average tokensAfter/tokensBefore for completed compactions.", snapshot.compactions.averageCompressionRatio);
+  gauge("hearth_context_compactions_avg_duration_ms", "Average compaction duration in milliseconds.", snapshot.compactions.averageDurationMs);
+  gauge("hearth_context_compactions_avg_covered_messages", "Average covered message count per compaction.", snapshot.compactions.averageCoveredMessages);
+  gauge("hearth_context_compactions_structured_rate", "Fraction of compaction events with structured summary data.", snapshot.compactions.structuredRate);
+  gauge("hearth_context_compactions_truncated_rate", "Fraction of compaction events truncated by chunk cap.", snapshot.compactions.truncatedRate);
+  gaugeLabeled(
+    "hearth_context_compactions_by_experiment",
+    "Compaction events by experiment tag.",
+    Object.entries(snapshot.compactions.byExperiment).map(([experiment, value]) => ({ value, labels: { experiment } }))
+  );
+
+  return lines.join("\n") + "\n";
+}
