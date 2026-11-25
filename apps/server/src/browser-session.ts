@@ -6,6 +6,7 @@ import type { BrowserPage } from "./browser-page.ts";
 import { ManagedBrowserPage } from "./browser-page.ts";
 import { ExtensionBrowserConnection, type ExtensionConnectionOptions, type ExtensionStatus } from "./browser-extension.ts";
 import type { BrowserSnapshot } from "./browser-snapshot.ts";
+import type { SecretBox } from "./secrets.ts";
 
 export type BrowserBackendMode = "managed" | "extension";
 export type BrowserControlState = "agent" | "awaiting_user" | "user" | "closed" | "unavailable";
@@ -46,6 +47,7 @@ export interface BrowserSessionState {
   steps: BrowserRecipeStep[];
   lastSnapshotDigest: string | null;
   lastObservedAt: string | null;
+  lastSnapshot: BrowserSnapshot | null;
   unavailableReason: string | null;
   extension: ExtensionBrowserConnection | null;
 }
@@ -92,6 +94,7 @@ export interface BrowserSessionManagerOptions {
   extensionTokenPath?: string | undefined;
   extensionOutputDir?: string | undefined;
   extensionProfileDirName?: string | undefined;
+  secretBox?: SecretBox | undefined;
   extensionConnector?: ((options: ExtensionConnectionOptions) => Promise<ExtensionBrowserConnection>) | undefined;
   managedPageFactory?: ((url?: string) => Promise<BrowserPage>) | undefined;
   now?: (() => number) | undefined;
@@ -109,6 +112,7 @@ export class BrowserSessionManager {
   private readonly extensionTokenPath: string;
   private readonly extensionOutputDir: string;
   private readonly extensionProfileDirName: string | undefined;
+  private readonly secretBox: SecretBox | undefined;
   private readonly extensionConnector: (options: ExtensionConnectionOptions) => Promise<ExtensionBrowserConnection>;
   private readonly managedPageFactory: ((url?: string) => Promise<BrowserPage>) | undefined;
   private readonly now: () => number;
@@ -119,6 +123,8 @@ export class BrowserSessionManager {
     this.extensionTokenPath = options.extensionTokenPath ?? join(process.cwd(), ".hearth", "browser", "extension-token");
     this.extensionOutputDir = options.extensionOutputDir ?? join(process.cwd(), ".hearth", "browser", "mcp-output");
     this.extensionProfileDirName = options.extensionProfileDirName;
+    this.secretBox = options.secretBox;
+    if (this.secretBox) ExtensionBrowserConnection.migrateToken(this.extensionTokenPath, this.secretBox);
     this.extensionConnector = options.extensionConnector ?? ((input) => ExtensionBrowserConnection.connect(input));
     this.managedPageFactory = options.managedPageFactory;
     this.now = options.now ?? Date.now;
@@ -154,7 +160,7 @@ export class BrowserSessionManager {
     }
   }
 
-  async connectExtension(taskId: string, token?: string): Promise<ExtensionBrowserConnection> {
+  async connectExtension(taskId: string, token?: string, profileDirName?: string): Promise<ExtensionBrowserConnection> {
     const suppliedToken = token?.trim() || null;
     const existing = this.sessions.get(taskId) ?? null;
     const persisted = this.persisted(taskId);
@@ -166,11 +172,11 @@ export class BrowserSessionManager {
     let tabs: BrowserTab[];
     let activeTabId: string | null;
     try {
-      extension = await this.extensionConnector(this.extensionOptions(taskId, suppliedToken ?? undefined));
+      extension = await this.extensionConnector(this.extensionOptions(taskId, suppliedToken ?? undefined, profileDirName));
       const restored = await this.restoreExtensionTabs(extension, urls, activeIndex);
       tabs = restored.tabs;
       activeTabId = restored.activeTabId;
-      if (suppliedToken) ExtensionBrowserConnection.saveToken(this.extensionTokenPath, suppliedToken);
+      if (suppliedToken) ExtensionBrowserConnection.saveToken(this.extensionTokenPath, suppliedToken, this.secretBox);
     } catch (error) {
       await extension?.close().catch(() => undefined);
       throw error;
@@ -185,7 +191,7 @@ export class BrowserSessionManager {
       tabs,
       activeTabId,
       controlState,
-      controlEpoch: Math.max(1, existing?.controlEpoch ?? persisted?.controlEpoch ?? 0),
+      controlEpoch: Math.max(existing?.controlEpoch ?? 0, persisted?.controlEpoch ?? 0) + 1,
       takeoverKind: existing?.takeoverKind ?? persisted?.takeoverKind ?? null,
       takeoverReason: existing?.takeoverReason ?? persisted?.takeoverReason ?? null,
       requiresFreshObservation: true,
@@ -194,6 +200,7 @@ export class BrowserSessionManager {
       steps: existing?.steps ?? [],
       lastSnapshotDigest: existing?.lastSnapshotDigest ?? persisted?.lastSnapshotDigest ?? null,
       lastObservedAt: existing?.lastObservedAt ?? persisted?.lastObservedAt ?? null,
+      lastSnapshot: existing?.lastSnapshot ?? null,
       unavailableReason: null,
       extension
     };
@@ -270,7 +277,7 @@ export class BrowserSessionManager {
   }
 
   async releaseToAgent(taskId: string): Promise<{ session: BrowserSessionDescriptor; snapshot: BrowserSnapshot | null }> {
-    const session = this.sessionSync(taskId);
+    const session = this.sessions.get(taskId) ?? await this.session(taskId).catch(() => null);
     if (!session) throw new BrowserError("BROWSER_SESSION_MISSING", "当前任务没有浏览器会话");
     if (session.controlState !== "user" && session.controlState !== "awaiting_user") {
       throw new BrowserError("BROWSER_RELEASE_NOT_ALLOWED", `浏览器当前状态为 ${session.controlState}，不能归还给 Agent`);
@@ -325,6 +332,7 @@ export class BrowserSessionManager {
     const snapshot = formatBrowserSnapshot(await tab.page.snapshot(session.controlEpoch));
     session.lastSnapshotDigest = snapshot.digest;
     session.lastObservedAt = snapshot.capturedAt;
+    session.lastSnapshot = snapshot;
     session.requiresFreshObservation = false;
     tab.url = snapshot.url;
     tab.title = snapshot.title;
@@ -338,6 +346,7 @@ export class BrowserSessionManager {
     if (!session) return;
     session.lastSnapshotDigest = snapshot.digest;
     session.lastObservedAt = snapshot.capturedAt;
+    session.lastSnapshot = snapshot;
     session.requiresFreshObservation = false;
     const tab = this.activeTab(taskId);
     if (tab) {
@@ -361,6 +370,10 @@ export class BrowserSessionManager {
     return session.tabs.find((item) => item.id === session.activeTabId) ?? session.tabs[0] ?? null;
   }
 
+  latestSnapshot(taskId: string): BrowserSnapshot | null {
+    return this.sessions.get(taskId)?.lastSnapshot ?? null;
+  }
+
   describe(taskId: string): BrowserSessionDescriptor | null {
     const session = this.sessions.get(taskId);
     if (session) {
@@ -372,7 +385,7 @@ export class BrowserSessionManager {
         takeoverKind: session.takeoverKind,
         takeoverReason: session.takeoverReason,
         requiresFreshObservation: session.requiresFreshObservation,
-        tabs: session.tabs.map((tab) => ({ id: tab.id, url: tab.page.url() || tab.url, title: tab.title, active: tab.id === session.activeTabId })),
+        tabs: session.tabs.map((tab) => ({ id: tab.id, url: redactBrowserUrl(tab.page.url() || tab.url), title: redactBrowserUrl(tab.title), active: tab.id === session.activeTabId })),
         activeTabId: session.activeTabId,
         lastSnapshotDigest: session.lastSnapshotDigest,
         lastObservedAt: session.lastObservedAt,
@@ -389,7 +402,7 @@ export class BrowserSessionManager {
       takeoverKind: persisted.takeoverKind,
       takeoverReason: persisted.takeoverReason,
       requiresFreshObservation: true,
-      tabs: persisted.tabs.map((tab) => ({ id: tab.id, url: tab.url, title: tab.title, active: tab.id === persisted.activeTabId })),
+      tabs: persisted.tabs.map((tab) => ({ id: tab.id, url: redactBrowserUrl(tab.url), title: redactBrowserUrl(tab.title), active: tab.id === persisted.activeTabId })),
       activeTabId: persisted.activeTabId,
       lastSnapshotDigest: persisted.lastSnapshotDigest,
       lastObservedAt: persisted.lastObservedAt,
@@ -398,11 +411,11 @@ export class BrowserSessionManager {
   }
 
   extensionStatus(): ExtensionStatus {
-    return ExtensionBrowserConnection.status(this.extensionTokenPath);
+    return ExtensionBrowserConnection.status(this.extensionTokenPath, this.secretBox);
   }
 
-  async connectExtensionToken(taskId: string, token?: string): Promise<BrowserSessionDescriptor> {
-    await this.connectExtension(taskId, token);
+  async connectExtensionToken(taskId: string, token?: string, profileDirName?: string): Promise<BrowserSessionDescriptor> {
+    await this.connectExtension(taskId, token, profileDirName);
     return this.describe(taskId)!;
   }
 
@@ -456,6 +469,7 @@ export class BrowserSessionManager {
       steps: [],
       lastSnapshotDigest: persisted?.lastSnapshotDigest ?? null,
       lastObservedAt: persisted?.lastObservedAt ?? null,
+      lastSnapshot: null,
       unavailableReason: null,
       extension: null
     };
@@ -482,6 +496,7 @@ export class BrowserSessionManager {
         steps: [],
         lastSnapshotDigest: persisted?.lastSnapshotDigest ?? null,
         lastObservedAt: persisted?.lastObservedAt ?? null,
+        lastSnapshot: null,
         unavailableReason: null,
         extension
       };
@@ -517,13 +532,15 @@ export class BrowserSessionManager {
     };
   }
 
-  private extensionOptions(taskId: string, token?: string): ExtensionConnectionOptions {
+  private extensionOptions(taskId: string, token?: string, profileDirName?: string): ExtensionConnectionOptions {
+    const selectedProfile = profileDirName?.trim() || this.extensionProfileDirName;
     return {
       taskId,
       tokenPath: this.extensionTokenPath,
+      ...(this.secretBox ? { secretBox: this.secretBox } : {}),
       ...(token ? { token } : {}),
       outputDir: this.extensionOutputDir,
-      ...(this.extensionProfileDirName ? { profileDirName: this.extensionProfileDirName } : {})
+      ...(selectedProfile ? { profileDirName: selectedProfile } : {})
     };
   }
 
@@ -569,22 +586,26 @@ export class BrowserSessionManager {
 
   private persist(session: BrowserSessionState): void {
     if (!this.statePath) return;
-    const file = this.load() ?? { version: 1 as const, sessions: {} };
-    file.sessions[session.taskId] = {
-      version: 1,
-      taskId: session.taskId,
-      backend: session.backend,
-      tabs: session.tabs.map((tab) => ({ id: tab.id, url: tab.page.url() || tab.url, title: tab.title, createdAt: tab.createdAt })),
+    try {
+      const file = this.load() ?? { version: 1 as const, sessions: {} };
+      file.sessions[session.taskId] = {
+        version: 1,
+        taskId: session.taskId,
+        backend: session.backend,
+        tabs: session.tabs.map((tab) => ({ id: tab.id, url: redactBrowserUrl(tab.page.url() || tab.url), title: redactBrowserUrl(tab.title), createdAt: tab.createdAt })),
       activeTabId: session.activeTabId,
       controlState: session.controlState,
       controlEpoch: session.controlEpoch,
       takeoverKind: session.takeoverKind,
       takeoverReason: session.takeoverReason,
       lastSnapshotDigest: session.lastSnapshotDigest,
-      lastObservedAt: session.lastObservedAt,
-      updatedAt: new Date(this.now()).toISOString()
-    };
-    this.save(file);
+        lastObservedAt: session.lastObservedAt,
+        updatedAt: new Date(this.now()).toISOString()
+      };
+      this.save(file);
+    } catch (error) {
+      console.warn("[browser] session metadata could not be persisted:", error instanceof Error ? error.message : String(error));
+    }
   }
 
   private load(): SessionFile | null {
@@ -610,6 +631,38 @@ export class BrowserSessionManager {
       renameSync(temporary, this.statePath);
     }
   }
+}
+
+const SENSITIVE_URL_PARAM = /^(?:code|token|access_token|refresh_token|id_token|secret|password|credential|session|sessionid|auth|signature|sig|state)$/i;
+
+export function redactBrowserUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    for (const key of [...url.searchParams.keys()]) {
+      if (SENSITIVE_URL_PARAM.test(key)) url.searchParams.set(key, "<redacted>");
+    }
+    if (url.hash.length > 1) {
+      const fragment = url.hash.slice(1);
+      const params = new URLSearchParams(fragment);
+      let changed = false;
+      for (const key of [...params.keys()]) {
+        if (!SENSITIVE_URL_PARAM.test(key)) continue;
+        params.set(key, "<redacted>");
+        changed = true;
+      }
+      if (changed) url.hash = params.toString();
+    }
+    return url.toString();
+  } catch {
+    return redactSensitiveUrlText(value);
+  }
+}
+
+function redactSensitiveUrlText(value: string): string {
+  return value.replace(
+    /([?&#;](?:code|token|access_token|refresh_token|id_token|secret|password|credential|session|sessionid|auth|signature|sig|state)=)([^&#\s]+)/gi,
+    "$1<redacted>"
+  );
 }
 
 export function takeoverLabel(kind: BrowserTakeoverKind | null): string {

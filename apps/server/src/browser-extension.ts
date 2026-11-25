@@ -4,11 +4,14 @@ import { dirname, isAbsolute, join } from "node:path";
 import { createRequire } from "node:module";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { buildExecutorEnv } from "@hearth/core/child-env";
+import type { SecretBox } from "./secrets.ts";
 import { BrowserError } from "./browser-service.ts";
 import {
   cssEscape,
   extensionFrameTextCode,
   extensionLocateCode,
+  requireBrowserElementRef,
   type BrowserPage,
   type BrowserPointerOptions,
   type BrowserScreenshotOptions,
@@ -21,6 +24,10 @@ const MCP_PACKAGE = "@playwright/mcp/package.json";
 const EXTENSION_ID = "mmlmfjhmonkocbjadbfplnigmagldckm";
 const EXTENSION_STORE_URL = `https://chromewebstore.google.com/detail/playwright-extension/${EXTENSION_ID}`;
 const PALETTE = ["blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange"] as const;
+const REDACTED_URL_PARAMS = [
+  "access_token", "refresh_token", "id_token", "token", "code", "secret", "password",
+  "credential", "session", "sessionid", "auth", "signature", "sig", "state"
+];
 
 export interface ExtensionConnectionOptions {
   taskId: string;
@@ -29,6 +36,7 @@ export interface ExtensionConnectionOptions {
   outputDir: string;
   profileDirName?: string | undefined;
   connectTimeoutMs?: number | undefined;
+  secretBox?: SecretBox | undefined;
 }
 
 export interface ExtensionStatus {
@@ -57,6 +65,7 @@ export class ExtensionBrowserConnection {
   private readonly outputDir: string;
   private readonly profileDirName: string | undefined;
   private readonly connectTimeoutMs: number;
+  private readonly secretBox: SecretBox | undefined;
   private client: Client | null = null;
   private transport: StdioClientTransport | null = null;
   private pages: ExtensionBrowserPage[] = [];
@@ -70,6 +79,7 @@ export class ExtensionBrowserConnection {
     this.outputDir = options.outputDir;
     this.profileDirName = options.profileDirName;
     this.connectTimeoutMs = options.connectTimeoutMs ?? 90_000;
+    this.secretBox = options.secretBox;
   }
 
   static async connect(options: ExtensionConnectionOptions): Promise<ExtensionBrowserConnection> {
@@ -78,19 +88,29 @@ export class ExtensionBrowserConnection {
     return connection;
   }
 
-  static status(tokenPath: string): ExtensionStatus {
-    let paired = false;
-    try {
-      paired = readFileSync(tokenPath, "utf8").trim().length >= 16;
-    } catch {
-      paired = false;
-    }
-    return { extensionId: EXTENSION_ID, installUrl: EXTENSION_STORE_URL, paired };
+  static status(tokenPath: string, secretBox?: SecretBox): ExtensionStatus {
+    return {
+      extensionId: EXTENSION_ID,
+      installUrl: EXTENSION_STORE_URL,
+      paired: Boolean(readToken(tokenPath, secretBox))
+    };
   }
 
-  static saveToken(tokenPath: string, token: string): void {
+  static saveToken(tokenPath: string, token: string, secretBox?: SecretBox): void {
+    const value = secretBox ? secretBox.encrypt(token.trim()) : token.trim();
     mkdirSync(dirname(tokenPath), { recursive: true });
-    writeFileSync(tokenPath, token.trim(), { encoding: "utf8", mode: 0o600 });
+    writeFileSync(tokenPath, value, { encoding: "utf8", mode: 0o600 });
+  }
+
+  static migrateToken(tokenPath: string, secretBox: SecretBox): void {
+    try {
+      const stored = readFileSync(tokenPath, "utf8").trim();
+      if (stored && !stored.startsWith("v1:") && stored.length >= 16) {
+        ExtensionBrowserConnection.saveToken(tokenPath, stored, secretBox);
+      }
+    } catch {
+      // Missing or unreadable pairing files stay unpaired and can be replaced from the UI.
+    }
   }
 
   async createPage(url?: string): Promise<ExtensionBrowserPage> {
@@ -99,7 +119,7 @@ export class ExtensionBrowserConnection {
     assertToolOk(result, "扩展浏览器无法新建标签页");
     this.pageCount += 1;
     const index = await this.currentTabIndex();
-    const page = new ExtensionBrowserPage(this, Math.max(0, index));
+    const page = new ExtensionBrowserPage(this, Math.max(0, index), url ?? "");
     this.pages.push(page);
     return page;
   }
@@ -110,7 +130,7 @@ export class ExtensionBrowserConnection {
     const initial = await this.call("browser_snapshot", {}, this.connectTimeoutMs);
     if (initial.isError) throw new BrowserError("BROWSER_EXTENSION_UNAVAILABLE", textFrom(initial) || "Playwright Extension 未连接");
     this.pageCount = 1;
-    const page = new ExtensionBrowserPage(this, await this.currentTabIndex());
+    const page = new ExtensionBrowserPage(this, await this.currentTabIndex(), restoredUrl ?? "");
     this.pages.push(page);
     if (restoredUrl && restoredUrl !== "about:blank") await page.goto(restoredUrl, 60_000);
     return page;
@@ -135,7 +155,7 @@ export class ExtensionBrowserConnection {
   }
 
   async closePage(page: ExtensionBrowserPage): Promise<void> {
-    const index = page.tabIndexValue();
+    const index = await this.resolveTabIndex(page.tabIndexValue(), page.url(), await page.cachedTitle());
     const result = await this.call("browser_tabs", { action: "close", index });
     assertToolOk(result, `无法关闭扩展标签页 ${index}`);
     this.pages = this.pages.filter((item) => item !== page);
@@ -143,6 +163,29 @@ export class ExtensionBrowserConnection {
       if (item.tabIndexValue() > index) item.shiftIndex();
     }
   }
+
+  async listTabs(): Promise<ExtensionTabSummary[]> {
+    const result = await this.call("browser_tabs", { action: "list" });
+    assertToolOk(result, "无法读取扩展浏览器标签页");
+    return parseTabsMarkdown(textFrom(result));
+  }
+
+  async resolveTabIndex(preferredIndex: number, expectedUrl: string, expectedTitle: string): Promise<number> {
+    const tabs = await this.listTabs();
+    if (expectedUrl) {
+      const exact = tabs.filter((tab) => sameTabUrl(tab.url, expectedUrl));
+      if (exact.length === 1) return exact[0]!.index;
+      const titled = expectedTitle ? exact.find((tab) => tab.title === expectedTitle) : undefined;
+      if (titled) return titled.index;
+      if (exact[0]) return exact[0].index;
+      throw new BrowserError("BROWSER_TAB_MISSING", "任务标签页已被关闭或导航，请重新打开网页。");
+    }
+    const target = tabs.find((tab) => tab.index === preferredIndex)
+      ?? tabs.find((tab) => expectedTitle && tab.title === expectedTitle);
+    if (!target) throw new BrowserError("BROWSER_TAB_MISSING", "任务标签页已被关闭，请重新打开网页。");
+    return target.index;
+  }
+
   async select(index: number): Promise<void> {
     const result = await this.call("browser_tabs", { action: "select", index });
     assertToolOk(result, `无法切换到标签页 ${index}`);
@@ -153,14 +196,15 @@ export class ExtensionBrowserConnection {
     const require = createRequire(import.meta.url);
     const packagePath = require.resolve(MCP_PACKAGE);
     const cliPath = join(dirname(packagePath), "cli.js");
-    const token = this.token ?? readToken(this.tokenPath);
+    const token = this.token ?? readToken(this.tokenPath, this.secretBox);
     const hash = createHash("sha256").update(this.taskId).digest()[0] ?? 0;
     const args = [
       cliPath,
       "--extension",
       "--browser", "chrome",
       "--caps", "vision",
-      "--allow-unrestricted-file-access",
+      "--background",
+      "--redact-url-params", REDACTED_URL_PARAMS.join(","),
       "--output-dir", this.outputDir,
       "--session-name", `Hearth · ${this.taskId.slice(0, 12)}`,
       "--session-color", PALETTE[hash % PALETTE.length]!,
@@ -169,8 +213,11 @@ export class ExtensionBrowserConnection {
       "--timeout-settle", "250"
     ];
     if (this.profileDirName) args.push("--profile-dir-name", this.profileDirName);
-    const env: Record<string, string> = { ...process.env as Record<string, string> };
-    if (token) env.PLAYWRIGHT_MCP_EXTENSION_TOKEN = token;
+    const env = buildExecutorEnv({
+      trusted: {
+        ...(token ? { PLAYWRIGHT_MCP_EXTENSION_TOKEN: token } : {})
+      }
+    });
     const transport = new StdioClientTransport({
       command: process.execPath,
       args,
@@ -203,9 +250,11 @@ export class ExtensionBrowserPage implements BrowserPage {
   private tabIndex: number;
   private readonly connection: ExtensionBrowserConnection;
 
-  constructor(connection: ExtensionBrowserConnection, tabIndex: number) {
+  constructor(connection: ExtensionBrowserConnection, tabIndex: number, initialUrl = "", initialTitle = "") {
     this.connection = connection;
     this.tabIndex = tabIndex;
+    this.lastUrl = initialUrl;
+    this.lastTitle = initialTitle;
   }
 
   url(): string {
@@ -216,8 +265,14 @@ export class ExtensionBrowserPage implements BrowserPage {
   private lastTitle = "";
 
   async title(): Promise<string> {
+    await this.selectBrowserTab();
     const value = await this.runJson<{ title?: string }>(`async (page) => ({ title: await page.title().catch(() => '') })`);
-    return value.title ?? this.lastTitle;
+    this.lastTitle = value.title ?? this.lastTitle;
+    return this.lastTitle;
+  }
+
+  async cachedTitle(): Promise<string> {
+    return this.lastTitle;
   }
 
   async goto(url: string, timeoutMs: number): Promise<void> {
@@ -238,6 +293,10 @@ export class ExtensionBrowserPage implements BrowserPage {
 
   async bringToFront(): Promise<void> {
     await this.selectBrowserTab();
+    await this.runJson(`async (page) => {
+      await page.bringToFront();
+      return { ok: true };
+    }`);
   }
 
   async close(): Promise<void> {
@@ -289,15 +348,12 @@ export class ExtensionBrowserPage implements BrowserPage {
     await this.selectBrowserTab();
     if (options.kind === "element") {
       if (!options.value) throw new BrowserError("BROWSER_WAIT_VALUE", "等待元素时必须提供元素 ID");
-      const code = extensionLocateCode(options.value, "return { ok: true };").replace(
-        "return { ok: true };\n        return { ok: true };",
-        "return { ok: true };"
-      );
+      const ref = requireBrowserElementRef(options.value);
       const result = await this.runJson<{ ok?: boolean }>(`async (page) => {
         const deadline = Date.now() + ${Math.max(1, options.timeoutMs)};
         while (Date.now() < deadline) {
           for (const frame of page.frames()) {
-            const target = frame.locator('[data-hearth-ref="${cssEscape(options.value)}"]');
+            const target = frame.locator('[data-hearth-ref=${JSON.stringify(ref)}]');
             if (await target.count()) {
               await target.first().waitFor({ state: 'visible', timeout: Math.max(1, deadline - Date.now()) });
               return { ok: true };
@@ -334,7 +390,9 @@ export class ExtensionBrowserPage implements BrowserPage {
     await this.runAction(extensionLocateCode(ref, `await item.selectOption(${JSON.stringify(values)}, { timeout: ${Math.max(1, timeoutMs)} });`));
   }
 
-  async drag(startRef: string, endRef: string, timeoutMs: number): Promise<void> {
+  async drag(startValue: string, endValue: string, timeoutMs: number): Promise<void> {
+    const startRef = requireBrowserElementRef(startValue);
+    const endRef = requireBrowserElementRef(endValue);
     await this.selectBrowserTab();
     await this.runAction(`async (page) => {
       const find = async (ref) => {
@@ -384,11 +442,12 @@ export class ExtensionBrowserPage implements BrowserPage {
     await this.runAction(extensionLocateCode(ref, `await item.setInputFiles(${JSON.stringify(path)}, { timeout: ${Math.max(1, timeoutMs)} });`));
   }
 
-  async download(ref: string, timeoutMs: number): Promise<{ data: Buffer; suggestedName: string }> {
+  async download(value: string, timeoutMs: number): Promise<{ data: Buffer; suggestedName: string }> {
+    const ref = requireBrowserElementRef(value);
     await this.selectBrowserTab();
     const result = await this.runJson<{ ok?: boolean; base64?: string; name?: string; error?: string }>(`async (page) => {
       for (const frame of page.frames()) {
-        const target = frame.locator('[data-hearth-ref="${cssEscape(ref)}"]');
+        const target = frame.locator('[data-hearth-ref=${JSON.stringify(ref)}]');
         if (!(await target.count())) continue;
         const promise = page.waitForEvent('download', { timeout: ${Math.max(1, timeoutMs)} });
         await target.first().click({ timeout: ${Math.max(1, timeoutMs)} });
@@ -418,6 +477,7 @@ export class ExtensionBrowserPage implements BrowserPage {
     this.tabIndex = Math.max(0, this.tabIndex - 1);
   }
   private async selectBrowserTab(): Promise<void> {
+    this.tabIndex = await this.connection.resolveTabIndex(this.tabIndex, this.lastUrl, this.lastTitle);
     await this.connection.select(this.tabIndex);
   }
 
@@ -444,9 +504,11 @@ export class ExtensionBrowserPage implements BrowserPage {
   }
 }
 
-function readToken(path: string): string | null {
+function readToken(path: string, secretBox?: SecretBox): string | null {
   try {
-    return readFileSync(path, "utf8").trim() || null;
+    const stored = readFileSync(path, "utf8").trim();
+    const token = secretBox && stored.startsWith("v1:") ? secretBox.decrypt(stored) : stored;
+    return token.trim().length >= 16 ? token.trim() : null;
   } catch {
     return null;
   }
@@ -561,6 +623,19 @@ function firstBalancedJson(text: string): string | null {
     }
   }
   return null;
+}
+
+function sameTabUrl(left: string, right: string): boolean {
+  if (left === right) return true;
+  try {
+    const a = new URL(left);
+    const b = new URL(right);
+    a.hash = "";
+    b.hash = "";
+    return a.toString() === b.toString();
+  } catch {
+    return false;
+  }
 }
 
 function errorMessage(error: unknown): string {

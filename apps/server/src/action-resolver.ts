@@ -81,6 +81,8 @@ export interface ActionBrowserTarget {
   url: string;
   tabId?: string | undefined;
   elementRef?: string | undefined;
+  elementName?: string | undefined;
+  key?: string | undefined;
   action: string;
   inputDigest?: string | undefined;
   pageDigest?: string | undefined;
@@ -299,9 +301,10 @@ export function decideActionPolicy(action: ResolvedAction, input: ActionPolicyIn
   const interactive = context === "interactive";
   const classification = classifyResolvedAction(action);
   if (permissionMode === "full") {
-    // Host file reads sit outside the task sandbox, so they always ask even in
-    // full permission mode; the approval record is the only guard for them.
-    if (classification.actionClass === "host_read") {
+    // Host file reads sit outside the task sandbox, and irreversible browser
+    // actions cannot be classified safely from the tool name alone. Both keep
+    // an explicit approval even in full permission mode.
+    if (classification.actionClass === "host_read" || (action.kind === "browser" && classification.requiresApproval)) {
       return { allowed: true, requiresApproval: true, reason: classification.summary };
     }
     return { allowed: true, requiresApproval: false, reason: "完全权限：动作直接执行" };
@@ -502,8 +505,17 @@ function resolveBrowserTarget(input: ActionBrowserTarget): ResolvedBrowserTarget
   if (!action || action.length > 40 || !/^[a-z][a-z0-9_-]*$/.test(action)) {
     throw new ActionResolutionError("BROWSER_ACTION_INVALID", "浏览器动作名称不正确");
   }
+  if (input.elementRef !== undefined && !/^\d+:e\d+$/.test(input.elementRef)) {
+    throw new ActionResolutionError("BROWSER_ELEMENT_REF_INVALID", "浏览器元素引用不正确");
+  }
   return {
     ...input,
+    ...(typeof input.elementName === "string" && input.elementName.trim()
+      ? { elementName: input.elementName.trim().slice(0, 240) }
+      : {}),
+    ...(typeof input.key === "string" && input.key.trim()
+      ? { key: input.key.trim().slice(0, 80) }
+      : {}),
     url: url.toString(),
     host: url.hostname.toLowerCase(),
     scheme: url.protocol === "https:" ? "https" : "http",
@@ -531,8 +543,8 @@ function defaultRisk(proposal: ActionProposal): ActionRisk {
   if (proposal.kind === "browser") {
     const action = proposal.browser?.action ?? "";
     if (action === "read" || action === "assert" || action === "screenshot") return "low";
-    if (action === "submit" || action === "upload" || action === "download") return "high";
-    return "medium";
+    if (browserTargetIsIrreversible(proposal.browser)) return "high";
+    return action === "download" ? "high" : "medium";
   }
   if (proposal.kind === "network" || proposal.kind === "email" || proposal.kind === "calendar") return "high";
   if (proposal.kind === "desktop" || proposal.kind === "shell") return "high";
@@ -546,12 +558,20 @@ function defaultSideEffectClass(proposal: ActionProposal): SideEffectClass {
   if (proposal.kind === "browser") {
     const action = proposal.browser?.action ?? "";
     if (action === "read" || action === "assert" || action === "screenshot") return "none";
-    if (action === "submit" || action === "upload") return "external_irreversible";
-    return "external_reversible";
+    return browserTargetIsIrreversible(proposal.browser) ? "external_irreversible" : "external_reversible";
   }
   if (proposal.kind === "email" || proposal.kind === "calendar") return "external_irreversible";
   if (proposal.kind === "network" || proposal.kind === "desktop" || proposal.kind === "shell") return "external_irreversible";
   return "none";
+}
+
+const BROWSER_SENSITIVE_ELEMENT = /(?:支付|付款|转账|汇款|购买|下单|提交订单|确认支付|删除|移除|注销|清空|发送|发布|提交|确认|授权|同意|结账|pay|purchase|buy|checkout|transfer|delete|remove|send|publish|submit|confirm|authorize|accept)/i;
+
+function browserTargetIsIrreversible(target: ActionBrowserTarget | undefined): boolean {
+  if (!target) return false;
+  if (["submit", "upload", "recipe", "click_at", "drag", "type_at"].includes(target.action)) return true;
+  if (target.action === "key" && /^(?:Enter|NumpadEnter)$/i.test(target.key ?? "")) return true;
+  return target.action === "click" && BROWSER_SENSITIVE_ELEMENT.test(target.elementName ?? "");
 }
 
 function buildPreview(
@@ -570,7 +590,10 @@ function buildPreview(
   if (files.length > 0) {
     return files.map((file) => `${file.mode} ${file.pathRealPath}`).join("\n");
   }
-  if (browser) return `浏览器 ${browser.action} ${browser.url}${browser.elementRef ? ` @ ${browser.elementRef}` : ""}`;
+  if (browser) {
+    const target = browser.elementName || browser.elementRef || browser.key || "";
+    return `浏览器 ${browser.action} ${browser.url}${target ? ` @ ${target}` : ""}`;
+  }
   if (network) return `${network.method ?? "CONNECT"} ${network.host}${network.port ? `:${network.port}` : ""}`;
   if (desktop) return `${desktop.action} ${desktop.activeApp} frame ${desktop.frameId}`;
   if (hostFile) return `read ${hostFile.pathRealPath}`;

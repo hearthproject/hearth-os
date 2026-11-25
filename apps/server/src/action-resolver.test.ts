@@ -264,7 +264,7 @@ describe("action resolver", () => {
       proposal: {
         kind: "browser",
         summary: "提交订单",
-        browser: { url: "https://Example.com/pay", action: "submit", elementRef: "e9", pageDigest: "abc" }
+        browser: { url: "https://Example.com/pay", action: "submit", elementRef: "2:e9", pageDigest: "abc" }
       },
       sessionRoot: root
     });
@@ -275,7 +275,7 @@ describe("action resolver", () => {
       proposal: {
         kind: "browser",
         summary: "提交订单",
-        browser: { url: "https://example.com/pay", action: "submit", elementRef: "e9", pageDigest: "abc" }
+        browser: { url: "https://example.com/pay", action: "submit", elementRef: "2:e9", pageDigest: "abc" }
       },
       sessionRoot: root
     });

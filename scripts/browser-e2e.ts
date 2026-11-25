@@ -123,7 +123,7 @@ try {
   await call("browser_upload", { ref: uploadRef, path: "upload.txt" });
 
   const dangerous = await call("browser_click", { ref: refFor(opened.content, "删除全部") });
-  check("ordinary destructive-looking click is allowed", dangerous.content.includes("已删除"));
+  check("authorized destructive-looking click executes", dangerous.content.includes("已删除"));
 
   await call("browser_assert", { kind: "text", value: "已删除" });
   await call("browser_recipe", { action: "save", name: "fixture-flow" });

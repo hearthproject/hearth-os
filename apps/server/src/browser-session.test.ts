@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,7 +7,8 @@ import { BrowserSessionManager, browserFinishIssue, type BrowserSessionManagerOp
 import type { BrowserPage, BrowserScreenshotOptions, BrowserWaitOptions } from "./browser-page.ts";
 import type { RawBrowserSnapshot } from "./browser-snapshot.ts";
 import type { BrowserService } from "./browser-service.ts";
-import type { ExtensionBrowserConnection } from "./browser-extension.ts";
+import { ExtensionBrowserConnection } from "./browser-extension.ts";
+import { SecretBox } from "./secrets.ts";
 
 const tempDirs: string[] = [];
 
@@ -76,10 +78,15 @@ function fakeService() {
   } as unknown as BrowserService;
 }
 
-function manager(options: { statePath?: string; connector?: BrowserSessionManagerOptions["extensionConnector"] } = {}) {
+function manager(options: {
+  statePath?: string;
+  connector?: BrowserSessionManagerOptions["extensionConnector"];
+  secretBox?: SecretBox;
+} = {}) {
   const pages: FakePage[] = [];
   const instance = new BrowserSessionManager(fakeService(), {
     ...(options.statePath ? { statePath: options.statePath } : {}),
+    ...(options.secretBox ? { secretBox: options.secretBox } : {}),
     managedPageFactory: async (url) => {
       const page = new FakePage();
       if (url) page.currentUrl = url;
@@ -211,6 +218,7 @@ describe("BrowserSessionManager", () => {
       await instance.connectExtension("task-a");
 
       const descriptor = instance.describe("task-a")!;
+      expect(descriptor.controlEpoch).toBe(2);
       expect(descriptor.tabs.map((tab) => tab.url)).toEqual([
         "about:blank",
         "https://example.com/one",
@@ -221,6 +229,57 @@ describe("BrowserSessionManager", () => {
     } finally {
       await instance.stop();
       await instance.releaseAll();
+    }
+  });
+
+  it("encrypts the stored extension token and migrates legacy plaintext", () => {
+    const dir = tempDir();
+    const tokenPath = join(dir, "extension-token");
+    writeFileSync(tokenPath, "1234567890abcdef", "utf8");
+    const secretBox = new SecretBox(randomBytes(32));
+    const instance = new BrowserSessionManager(fakeService(), {
+      extensionTokenPath: tokenPath,
+      secretBox
+    });
+
+    expect(instance.extensionStatus()).toEqual(expect.objectContaining({ paired: true }));
+    expect(readFileSync(tokenPath, "utf8")).not.toContain("1234567890abcdef");
+    ExtensionBrowserConnection.migrateToken(tokenPath, secretBox);
+    expect(instance.extensionStatus()).toEqual(expect.objectContaining({ paired: true }));
+  });
+
+  it("redacts credentials from persisted and API-visible tab URLs", async () => {
+    const statePath = join(tempDir(), "sessions.json");
+    const { instance } = manager({ statePath });
+    try {
+      await instance.session("task-a");
+      await instance.createTab("task-a", "https://example.com/callback?code=oauth-secret&state=csrf-secret#access_token=fragment-secret");
+      const visible = instance.describe("task-a")!.tabs.at(-1)!.url;
+      expect(visible).not.toContain("oauth-secret");
+      expect(visible).not.toContain("fragment-secret");
+      const persisted = readFileSync(statePath, "utf8");
+      expect(persisted).not.toContain("oauth-secret");
+      expect(persisted).not.toContain("fragment-secret");
+      expect(persisted).toContain("redacted");
+    } finally {
+      await instance.releaseAll();
+    }
+  });
+
+  it("restores a persisted takeover before releasing it to the agent", async () => {
+    const statePath = join(tempDir(), "sessions.json");
+    const first = manager({ statePath }).instance;
+    await first.session("task-a");
+    first.requestUserTakeover("task-a", "payment_confirmation", "请确认支付");
+    await first.stop();
+
+    const second = manager({ statePath }).instance;
+    try {
+      const released = await second.releaseToAgent("task-a");
+      expect(released.session.controlState).toBe("agent");
+      expect(released.snapshot?.content).toContain("page");
+    } finally {
+      await second.releaseAll();
     }
   });
 

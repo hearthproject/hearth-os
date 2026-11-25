@@ -12,6 +12,12 @@ import {
 const typedSecret = "login-P@ssword-2026";
 
 describe("browser redaction", () => {
+  it("does not corrupt unrelated logs when a one-character value is typed", () => {
+    const text = "Agent typed a and 1 in the page";
+    expect(redactKnownSecrets(text, ["a", "1", " "])).toBe(text);
+    expect(browserToolSecrets("browser_type", { ref: "1:e2", text: "a" })).toEqual(["a"]);
+  });
+
   it("redacts direct and deferred browser text arguments", () => {
     expect(redactBrowserToolArguments("browser_type", {
       ref: "2:e4",

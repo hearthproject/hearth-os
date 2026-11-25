@@ -49,7 +49,9 @@ export function browserToolSecrets(toolName: string, value: unknown): string[] {
 
 export function redactKnownSecrets(text: string, secrets: Iterable<string>): string {
   let redacted = text;
-  const unique = [...new Set(secrets)].filter(Boolean).sort((left, right) => right.length - left.length);
+  const unique = [...new Set(secrets)]
+    .filter((secret) => secret.trim().length >= 6)
+    .sort((left, right) => right.length - left.length);
   for (const secret of unique) redacted = redacted.split(secret).join(BROWSER_REDACTED_TEXT);
   return redacted;
 }

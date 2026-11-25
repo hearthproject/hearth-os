@@ -1,4 +1,5 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -8,6 +9,7 @@ import {
   parseTabsMarkdown
 } from "./browser-extension.ts";
 import { extensionLocateCode } from "./browser-page.ts";
+import { SecretBox } from "./secrets.ts";
 
 const tempDirs: string[] = [];
 
@@ -92,5 +94,28 @@ locator.fill failed for private-password`
     expect(code).toContain("page.frames()");
     expect(code).toContain('[data-hearth-ref="4:e9"]');
     expect(code).toContain("await item.click();");
+  });
+
+  it("rejects a ref that could escape the generated code string", () => {
+    expect(() => extensionLocateCode("2:e1'; throw new Error('pwned') //", "await item.click();"))
+      .toThrow(/元素 ID/);
+  });
+
+  it("encrypts a new pairing token and migrates an old plaintext token", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hearth-extension-"));
+    tempDirs.push(dir);
+    const tokenPath = join(dir, "extension-token");
+    const secretBox = new SecretBox(randomBytes(32));
+    ExtensionBrowserConnection.saveToken(tokenPath, "1234567890abcdef", secretBox);
+    const stored = readFileSync(tokenPath, "utf8");
+    expect(stored.startsWith("v1:")).toBe(true);
+    expect(stored).not.toContain("1234567890abcdef");
+    expect(ExtensionBrowserConnection.status(tokenPath, secretBox).paired).toBe(true);
+
+    const legacyPath = join(dir, "legacy-token");
+    writeFileSync(legacyPath, "fedcba0987654321", "utf8");
+    ExtensionBrowserConnection.migrateToken(legacyPath, secretBox);
+    expect(readFileSync(legacyPath, "utf8")).not.toContain("fedcba0987654321");
+    expect(ExtensionBrowserConnection.status(legacyPath, secretBox).paired).toBe(true);
   });
 });

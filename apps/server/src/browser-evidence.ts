@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, wri
 import { createHash } from "node:crypto";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import type { BrowserPage } from "./browser-page.ts";
+import { redactBrowserUrl } from "./browser-session.ts";
 
 export interface BrowserEvidenceRecord {
   taskId: string;
@@ -65,8 +66,8 @@ export class BrowserEvidenceStore {
       taskId: input.taskId,
       runId: input.runId,
       kind: input.kind,
-      url: input.page.url(),
-      title,
+      url: redactBrowserUrl(input.page.url()),
+      title: redactBrowserUrl(title),
       pageDigest: input.pageDigest,
       actionDigest: input.actionDigest,
       screenshotBefore: before ? relative(dir, before).replaceAll("\\", "/") : null,

@@ -28,6 +28,16 @@ const LOCAL_WRITE_TOOLS = new Set([
 const LOCAL_DELETE_TOOLS = new Set(["delete_file", "remove_file", "delete_path"]);
 const LOCAL_EXEC_TOOLS = new Set(["shell", "run_command", "exec"]);
 const BROWSER_READ_TOOLS = new Set(["browser_read", "browser_screenshot", "browser_assert"]);
+const BROWSER_AMBIGUOUS_TOOLS = new Set([
+  "browser_click",
+  "browser_key",
+  "browser_drag",
+  "browser_click_at",
+  "browser_type_at",
+  "browser_submit",
+  "browser_upload",
+  "browser_recipe"
+]);
 const BROWSER_INTERACTION_TOOLS = new Set([
   "browser_click",
   "browser_hover",
@@ -66,6 +76,8 @@ const READ_MCP_TOOLS = new Set([
 ]);
 const READ_NAME_PATTERN = /^(get|list|read|search|find|query|fetch|describe|inspect|browse|lookup|show)_/i;
 const WRITE_NAME_PATTERN = /^(create|update|delete|remove|send|publish|post|comment|write|edit|upload|submit|add|insert|patch|set|move|rename)_/i;
+const SENSITIVE_BROWSER_ELEMENT = /(?:支付|付款|转账|汇款|购买|下单|提交订单|确认支付|删除|移除|注销|清空|发送|发布|提交|确认|授权|同意|结账|购买|pay|purchase|buy|checkout|transfer|delete|remove|send|publish|submit|confirm|authorize|accept)/i;
+const AMBIGUOUS_BROWSER_INTERACTIONS = new Set(["click_at", "drag", "type_at"]);
 
 export function classifyAction(input: ClassifyActionInput): ActionPolicyClassification {
   const toolName = input.toolName?.trim() || toolNameFromKind(input.kind);
@@ -87,9 +99,15 @@ export function classifyTool(toolName: string, action: ResolvedAction | null = n
   if (LOCAL_DELETE_TOOLS.has(toolName)) return classification("local_delete", "删除本机文件。", false, false);
   if (LOCAL_EXEC_TOOLS.has(toolName)) return classification("local_exec", "在本机运行命令。", false, false);
   if (BROWSER_READ_TOOLS.has(toolName)) return classification("browser_read", "读取网页内容。", false, false);
+  if (BROWSER_AMBIGUOUS_TOOLS.has(toolName)) {
+    return classification("external_write", "网页交互可能产生不可逆外部副作用，需要你确认。", true, false);
+  }
   if (BROWSER_INTERACTION_TOOLS.has(toolName)) return classification("desktop", "操作当前网页界面。", false, false);
   if (EXTERNAL_READ_TOOLS.has(toolName)) return classification("external_read", "读取外部信息。", false, false);
-  if (EXTERNAL_WRITE_TOOLS.has(toolName)) return classification("external_write", "会把内容提交到外部服务。", true, true);
+  if (EXTERNAL_WRITE_TOOLS.has(toolName)) {
+    const irreversible = toolName === "browser_submit" || toolName === "browser_upload";
+    return classification("external_write", "会把内容提交到外部服务。", true, !irreversible);
+  }
   if (DESKTOP_TOOLS.has(toolName)) return classification("desktop", "操作本机桌面。", false, false);
   if (toolName === "skill_install") return classification("skill_install", "安装技能前需要你确认。", true, false);
   if (toolName === "skill_update") return classification("skill_update", "技能更新只能手动触发。", false, false);
@@ -127,15 +145,8 @@ export function classifyResolvedAction(action: ResolvedAction): ActionPolicyClas
   if (action.kind === "file_delete") return classification("local_delete", "删除本机文件。", false, false);
   if (action.kind === "host_file") return classification("host_read", "读取工作区之外的文件，需要你确认。", true, false);
   if (action.kind === "desktop") return classification("desktop", "操作本机桌面。", false, false);
-  if (action.kind === "browser") {
-    const verb = action.browser?.action ?? "";
-    if (verb === "read" || verb === "assert" || verb === "screenshot" || verb === "open" || verb === "navigate") {
-      return classification("browser_read", "读取网页内容。", false, false);
-    }
-    if (!["submit", "upload", "download", "recipe"].includes(verb)) {
-      return classification("desktop", "操作当前网页界面。", false, false);
-    }
-    return classification("external_write", "会在网页上提交或上传内容。", true, true);
+  if (action.kind === "browser" && action.browser) {
+    return classifyBrowserTarget(action.browser);
   }
   if (action.kind === "network") {
     const method = action.network?.method?.toUpperCase() ?? "";
@@ -149,6 +160,26 @@ export function classifyResolvedAction(action: ResolvedAction): ActionPolicyClas
     return classification("external_write", "会写入外部服务。", true, true);
   }
   return classification("unknown", "无法识别的动作需要你先确认。", true, false);
+}
+
+function classifyBrowserTarget(target: NonNullable<ResolvedAction["browser"]>): ActionPolicyClassification {
+  const verb = target.action;
+  if (verb === "read" || verb === "assert" || verb === "screenshot" || verb === "open" || verb === "navigate" || verb === "download") {
+    return classification("browser_read", "读取网页内容。", false, false);
+  }
+  if (verb === "submit" || verb === "upload" || verb === "recipe") {
+    return classification("external_write", "会在网页上提交、上传或回放外部动作，需要你确认。", true, false);
+  }
+  if (AMBIGUOUS_BROWSER_INTERACTIONS.has(verb)) {
+    return classification("external_write", "坐标点击或拖拽的目标无法从页面语义确认，需要你确认。", true, false);
+  }
+  if (verb === "key" && /^(?:Enter|NumpadEnter)$/i.test(target.key ?? "")) {
+    return classification("external_write", "回车可能提交当前表单，需要你确认。", true, false);
+  }
+  if (verb === "click" && SENSITIVE_BROWSER_ELEMENT.test(target.elementName ?? "")) {
+    return classification("external_write", `网页按钮“${target.elementName}”可能产生不可逆操作，需要你确认。`, true, false);
+  }
+  return classification("desktop", "操作当前网页界面。", false, false);
 }
 
 export function approvalGrantAction(kind: string): string {

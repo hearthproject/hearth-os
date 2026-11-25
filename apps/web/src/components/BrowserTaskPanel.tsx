@@ -33,13 +33,14 @@ export function BrowserTaskPanel({ taskId }: { taskId: string }) {
   const queryClient = useQueryClient();
   const [showConnect, setShowConnect] = useState(false);
   const [token, setToken] = useState("");
+  const [profileDirName, setProfileDirName] = useState("");
   const browserQuery = useQuery({
     queryKey: ["browser", taskId],
     queryFn: () => api.browserStatus(taskId),
     staleTime: 1_000,
     refetchInterval: (query) => {
       const state = query.state.data?.controlState;
-      return state && state !== "closed" ? 2_500 : false;
+      return state && state !== "closed" ? 10_000 : false;
     }
   });
 
@@ -65,9 +66,14 @@ export function BrowserTaskPanel({ taskId }: { taskId: string }) {
   });
 
   const connectMutation = useMutation({
-    mutationFn: () => api.browserConnect(taskId, token.trim() || undefined),
+    mutationFn: () => api.browserConnect(
+      taskId,
+      token.trim() || undefined,
+      profileDirName.trim() || undefined
+    ),
     onSuccess: async () => {
       setToken("");
+      setProfileDirName("");
       setShowConnect(false);
       await refresh();
     }
@@ -159,6 +165,15 @@ export function BrowserTaskPanel({ taskId }: { taskId: string }) {
               value={token}
               onChange={(event) => setToken(event.target.value)}
               placeholder={status.extension.paired ? "已配对，需要更换时可粘贴新 token" : "粘贴 extension UI 生成的 token"}
+              autoComplete="off"
+            />
+          </label>
+          <label>
+            <span>Chrome 资料目录名（推荐）</span>
+            <input
+              value={profileDirName}
+              onChange={(event) => setProfileDirName(event.target.value)}
+              placeholder="例如 Profile 1；留空时由扩展选择最近使用的账号"
               autoComplete="off"
             />
           </label>

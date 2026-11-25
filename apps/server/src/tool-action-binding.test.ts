@@ -181,6 +181,37 @@ describe("native tool action binding", () => {
     }
   });
 
+  it("keeps irreversible browser actions approval-gated in full permission mode", () => {
+    const root = tempRoot();
+    const bind = (toolName: string, args: Record<string, unknown>, elementName?: string) => resolveToolAction({
+      toolName,
+      argumentsValue: args,
+      summary: `网页动作 ${toolName}`,
+      workspaceRoot: root,
+      permissionMode: "full",
+      context: "interactive",
+      browserUrl: "https://example.com/checkout",
+      ...(elementName ? { browserElementName: elementName } : {})
+    })!;
+
+    const ordinary = bind("browser_click", { ref: "2:e1" }, "继续浏览");
+    expect(decideActionPolicy(ordinary, { permissionMode: "full", context: "interactive" }))
+      .toMatchObject({ allowed: true, requiresApproval: false });
+
+    for (const action of [
+      bind("browser_click", { ref: "2:e2" }, "确认支付"),
+      bind("browser_submit", { ref: "2:e3" }, "提交"),
+      bind("browser_upload", { ref: "2:e4", path: "report.pdf" }, "上传"),
+      bind("browser_key", { key: "Enter" }),
+      bind("browser_click_at", { x: 10, y: 20 }),
+      bind("browser_drag", { startRef: "2:e5", endRef: "2:e6" })
+    ]) {
+      expect(decideActionPolicy(action, { permissionMode: "full", context: "interactive" }))
+        .toMatchObject({ allowed: true, requiresApproval: true });
+      expect(action.sideEffectClass).toBe("external_irreversible");
+    }
+  });
+
   it("does not invent an action for an unrecognized sensitive tool call", () => {
     const root = tempRoot();
     expect(resolveToolAction({

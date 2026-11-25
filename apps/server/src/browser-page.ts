@@ -19,6 +19,20 @@ export interface BrowserPointerOptions {
   clickCount?: number | undefined;
 }
 
+const BROWSER_ELEMENT_REF = /^\d+:e\d+$/;
+
+export function isBrowserElementRef(value: string): boolean {
+  return BROWSER_ELEMENT_REF.test(value);
+}
+
+export function requireBrowserElementRef(value: string): string {
+  const ref = value.trim();
+  if (!isBrowserElementRef(ref)) {
+    throw new BrowserError("BROWSER_ELEMENT_REF", "元素 ID 必须来自当前页面快照，例如 2:e8。请先 browser_read 刷新页面。");
+  }
+  return ref;
+}
+
 /** Minimal page contract shared by the managed profile and the daily-Chrome extension. */
 export interface BrowserPage {
   readonly backend: "managed" | "extension";
@@ -110,8 +124,9 @@ export class ManagedBrowserPage implements BrowserPage {
   async wait(options: BrowserWaitOptions): Promise<void> {
     if (options.kind === "element") {
       if (!options.value) throw new BrowserError("BROWSER_WAIT_VALUE", "等待元素时必须提供元素 ID");
+      const ref = requireBrowserElementRef(options.value);
       for (const frame of this.page.frames()) {
-        const target = frame.locator(`[data-hearth-ref="${cssEscape(options.value)}"]`);
+        const target = frame.locator(`[data-hearth-ref="${cssEscape(ref)}"]`);
         if (await target.count()) {
           await target.first().waitFor({ state: "visible", timeout: options.timeoutMs });
           return;
@@ -176,7 +191,8 @@ export class ManagedBrowserPage implements BrowserPage {
     return this.page.evaluate(code);
   }
 
-  private async locate(ref: string): Promise<Locator> {
+  private async locate(value: string): Promise<Locator> {
+    const ref = requireBrowserElementRef(value);
     for (const frame of this.page.frames()) {
       const target = frame.locator(`[data-hearth-ref="${cssEscape(ref)}"]`);
       if (await target.count()) return target.first();
@@ -185,7 +201,8 @@ export class ManagedBrowserPage implements BrowserPage {
   }
 }
 
-export async function frameForRef(page: Page, ref: string): Promise<{ frame: Frame; locator: Locator } | null> {
+export async function frameForRef(page: Page, value: string): Promise<{ frame: Frame; locator: Locator } | null> {
+  const ref = requireBrowserElementRef(value);
   for (const frame of page.frames()) {
     const locator = frame.locator(`[data-hearth-ref="${cssEscape(ref)}"]`);
     if (await locator.count()) return { frame, locator: locator.first() };
@@ -197,10 +214,11 @@ export function cssEscape(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
-export function extensionLocateCode(ref: string, action: string): string {
+export function extensionLocateCode(value: string, action: string): string {
+  const ref = requireBrowserElementRef(value);
   return `async (page) => {
     for (const frame of page.frames()) {
-      const target = frame.locator('[data-hearth-ref="${cssEscape(ref)}"]');
+      const target = frame.locator('[data-hearth-ref=${JSON.stringify(ref)}]');
       if (await target.count()) {
         const item = target.first();
         ${action}

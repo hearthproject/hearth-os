@@ -2,9 +2,10 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
 import type { AgentTool, AgentToolContext, AgentToolResult } from "@hearth/agent-runtime";
-import { takeoverLabel, type BrowserRecipeStep, type BrowserSessionManager, type BrowserTakeoverKind } from "./browser-session.ts";
+import { redactBrowserUrl, takeoverLabel, type BrowserRecipeStep, type BrowserSessionManager, type BrowserTakeoverKind } from "./browser-session.ts";
 import type { BrowserSnapshot } from "./browser-snapshot.ts";
 import { BrowserError } from "./browser-service.ts";
+import { requireBrowserElementRef } from "./browser-page.ts";
 import { BrowserEvidenceStore, type BrowserEvidenceRecord } from "./browser-evidence.ts";
 
 export interface BrowserToolsOptions {
@@ -142,7 +143,7 @@ class BrowserToolkit {
       action: () => tab.page.goto(url, DEFAULT_TIMEOUT_MS)
     });
     this.emitEvidence(evidence);
-    this.pushStep({ tool: "browser_open", url });
+    this.pushStep({ tool: "browser_open", url: redactBrowserUrl(url) });
     return this.afterAction("网页已打开。", evidence);
   }
 
@@ -212,7 +213,8 @@ class BrowserToolkit {
   async wait(args: Record<string, unknown>): Promise<AgentToolResult> {
     const kind = stringValue(args.kind);
     if (kind !== "element" && kind !== "text" && kind !== "idle") throw new BrowserError("BROWSER_WAIT_KIND", "等待类型不正确");
-    const value = stringValue(args.value) ?? undefined;
+    const rawValue = stringValue(args.value) ?? undefined;
+    const value = kind === "element" && rawValue ? requireBrowserElementRef(rawValue) : rawValue;
     const timeoutMs = Math.min(60_000, Math.max(500, (Number(args.timeoutSec) || 15) * 1_000));
     const { tab } = await this.options.sessions.activePage(this.options.taskId);
     await tab.page.wait({ kind, ...(value ? { value } : {}), timeoutMs });
@@ -370,10 +372,11 @@ class BrowserToolkit {
 
   async assert(args: Record<string, unknown>): Promise<AgentToolResult> {
     const kind = stringValue(args.kind);
-    const value = stringValue(args.value);
-    if (!value || (kind !== "text" && kind !== "url" && kind !== "element" && kind !== "no-element")) {
+    const rawValue = stringValue(args.value);
+    if (!rawValue || (kind !== "text" && kind !== "url" && kind !== "element" && kind !== "no-element")) {
       throw new BrowserError("BROWSER_ASSERT_INPUT", "断言类型或值不正确");
     }
+    const value = kind === "element" || kind === "no-element" ? requireBrowserElementRef(rawValue) : rawValue;
     const timeout = Math.min(60_000, Math.max(500, (Number(args.timeoutSec) || 10) * 1_000));
     const { tab, session } = await this.options.sessions.activePage(this.options.taskId);
     let passed = false;
@@ -555,10 +558,8 @@ function stringValue(value: unknown): string | null {
 
 function elementRef(value: unknown): string {
   const ref = stringValue(value);
-  if (!ref || !/^\d+:e\d+$/.test(ref)) {
-    throw new BrowserError("BROWSER_ELEMENT_REF", "元素 ID 必须来自当前页面快照，例如 2:e8。请先 browser_read 刷新页面。");
-  }
-  return ref;
+  if (!ref) throw new BrowserError("BROWSER_ELEMENT_REF", "缺少元素 ID");
+  return requireBrowserElementRef(ref);
 }
 
 function finiteNumber(value: unknown): number | null {
