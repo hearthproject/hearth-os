@@ -352,6 +352,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     ...(resume ? { resume } : {}),
     ...(options.steering ? { steering: options.steering } : {}),
     contextWindowTokens: options.settings.contextWindowTokens,
+    compactTriggerTokens: 80_000,
     // runtime's effective trigger is window - max(reserve, output) - 16K;
     // this extra 16K subtraction puts the trigger exactly at the shared 80%.
     contextReserveTokens: Math.max(4_000, options.settings.contextWindowTokens - resolveContextWindowPolicy(options.settings).compactThresholdTokens - 16_000),
