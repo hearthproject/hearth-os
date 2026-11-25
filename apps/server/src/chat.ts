@@ -128,15 +128,36 @@ export async function decideRoute(
 }
 
 function deterministicRoute(message: string): ChatRoute | null {
+  if (hasExplicitTaskAction(message)) {
+    return { action: "task", title: conversationTitle(message), goal: message, reason: "明确要求实际执行，无需调用路由模型" };
+  }
   if (isExplanationRequest(message)) {
     return { action: "chat", title: "", goal: message, reason: "明确要求解释或回答，无需调用路由模型" };
   }
-  const clearTaskAction = /(?:^|)(?:读取|写入|保存|发送|下载|导出|导入|创建|修改|运行|执行|运行测试|提交|部署|安装|抓取|爬取|整理成|汇总成|写成|做成|修复|重构|实现|审核我的|检查我的).*(?:文件|目录|仓库|网页|链接|报告|文档|邮件|任务|代码|项目|命令|PR|附件|数据|系统)?/i.test(message);
-  const strongImperative = /^(?:请|帮我|替我|给我|直接|立即|马上)(?:读取|写入|保存|发送|下载|导出|导入|创建|修改|运行|执行|提交|部署|安装|抓取|爬取|整理成|汇总成|写成|做成|修复|重构|实现|审核|检查)/.test(message.trim());
-  if (clearTaskAction || strongImperative) {
-    return { action: "task", title: conversationTitle(message), goal: message, reason: "明确要求实际执行，无需调用路由模型" };
-  }
   return null;
+}
+
+const TASK_ACTION_VERBS = [
+  "读取", "写入", "保存", "发送", "下载", "导出", "导入", "创建", "修改", "改成", "改为", "删除",
+  "运行", "执行", "提交", "部署", "安装", "抓取", "爬取", "整理", "汇总", "写成", "做成", "修复",
+  "重构", "实现", "审核", "检查", "列出", "生成", "对齐", "同步", "拉取", "推送", "合并", "迁移",
+  "更新", "克隆", "切换", "总结", "压缩", "复制", "移动", "重命名", "校验", "测试", "格式化", "翻译"
+].join("|");
+const POLITE_PREFIX = "(?:请|帮我|替我|给我|直接|立即|马上|去|先)";
+const TASK_VERB = `(?:${TASK_ACTION_VERBS})`;
+const QUESTION_ABOUT_ACTION = /(怎么|怎样|如何|为什么|为啥|什么是|是什么意思|什么意思|是否|吗|？|\?|会影响|影响什么|有什么影响|会怎样|会不会|会导致|后果|怎么办|什么原因)/;
+
+/**
+ * Only treat a message as an executable task when it asks to perform a real
+ * action and does not merely ask about the action's meaning or consequence.
+ * Compound requests such as "align the repo, then introduce it" still count.
+ */
+function hasExplicitTaskAction(message: string): boolean {
+  const text = message.trim();
+  if (!text || QUESTION_ABOUT_ACTION.test(text)) return false;
+  if (new RegExp(`^${POLITE_PREFIX}?\\s*${TASK_VERB}`).test(text)) return true;
+  if (new RegExp(`^${POLITE_PREFIX}?\\s*(?:把|将)[^，。；\\n]{0,120}${TASK_VERB}`).test(text)) return true;
+  return new RegExp(`${POLITE_PREFIX}[^，。；\\n]{0,40}${TASK_VERB}`).test(text);
 }
 
 function forcedTaskRoute(message: string, preferredExecutorId: ExecutorId | null): ChatRoute | null {
@@ -168,9 +189,11 @@ function forcedTaskRoute(message: string, preferredExecutorId: ExecutorId | null
 }
 
 function shouldAnswerInChat(message: string): boolean {
-  const asksForExplanation = /(介绍|解释|说明|是什么|做什么|干什么|怎么样|怎么用|如何|为什么|讲讲|说说|了解一下|看一下|看看|评价|对比|区别|架构|原理|特点|告诉我|一般|通常|最佳实践|看什么|注意什么)/.test(message);
-  const asksForAction = /(保存|生成|写入|修改|创建|删除|导出|下载|抓取|爬取|整理成|汇总成|写成|做成|发给我|输出到|放到|修复|重构|实现|部署|安装|审核|评审|列出|回复|rebase|关闭|合并|帮我做|帮我写|帮我整理|帮我总结|帮我分析|帮我查)/.test(message) || /(帮我|请|直接|去)\s*(运行|执行|跑)/.test(message);
-  return asksForExplanation && !asksForAction;
+  const asksForExplanation = /(介绍|解释|说明|是什么|做什么|干什么|怎么样|怎么用|怎么|如何|为什么|为啥|怎么办|讲讲|说说|了解一下|看一下|看看|评价|对比|区别|架构|原理|特点|告诉我|一般|通常|最佳实践|看什么|注意什么|会影响|影响什么|有什么影响|会怎样|会不会|会导致|后果|什么原因|什么意思)/.test(message);
+  if (!asksForExplanation) return false;
+  // An explicit imperative ("帮我修复...并解释") still belongs to the task
+  // path; a bare mention of the action ("修改这段代码会影响什么") does not.
+  return !new RegExp(`^${POLITE_PREFIX}\\s*${TASK_VERB}`).test(message.trim());
 }
 
 function isExplanationRequest(message: string): boolean {
@@ -182,6 +205,9 @@ function isExplanationRequest(message: string): boolean {
 
 export function heuristicRoute(message: string, reason = "包含执行类指令，交给任务执行器"): ChatRoute {
   if (isSimpleDraft(message)) return { action: "chat", title: "", goal: message, reason: "直接拟稿，无需工具执行" };
+  if (hasExplicitTaskAction(message)) {
+    return { action: "task", title: conversationTitle(message), goal: message, reason };
+  }
   const normalized = message.trim().toLowerCase();
   if (isExplanationRequest(message)) {
     return { action: "chat", title: "", goal: message, reason: "询问方法或解释，直接由聊天模型回答" };
