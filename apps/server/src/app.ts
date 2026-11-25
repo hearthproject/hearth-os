@@ -35,6 +35,7 @@ import { BackupError, BackupService } from "./backups.ts";
 import { DelegationError, DelegationService, type CreateDelegationInput } from "./delegation.ts";
 import { executeEffect } from "./effects.ts";
 import { HearthScheduler, resolveToolAction } from "./scheduler.ts";
+import { readSystemContext, renderSystemContextMarkdown } from "./system-context-registry.ts";
 import type { HostKernel } from "./host-kernel.ts";
 import { GitViewError, TaskGitService } from "./task-git.ts";
 import { TaskLeaseService } from "./leases.ts";
@@ -2869,6 +2870,19 @@ export async function buildServer(options: BuildServerOptions = {}) {
     if (!task) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
     try { return await taskOverviews.get(task); }
     catch { return reply.code(503).send({ error: "TASK_OVERVIEW_UNAVAILABLE", message: "摘要暂不可用，请检查聊天模型配置后重试" }); }
+  });
+
+  app.get<{ Params: { id: string }; Querystring: { format?: string } }>("/api/tasks/:id/system-context", async (request, reply) => {
+    const record = readSystemContext(request.params.id);
+    if (!record) {
+      return reply.code(404).send({ error: "SYSTEM_CONTEXT_UNAVAILABLE", message: "暂无本轮系统上下文记录；任务下一次运行后会生成。" });
+    }
+    reply.header("cache-control", "no-store");
+    if (request.query.format === "markdown") {
+      reply.header("content-type", "text/markdown; charset=utf-8");
+      return reply.send(renderSystemContextMarkdown(record));
+    }
+    return record;
   });
 
   app.get<{ Params: { id: string } }>("/api/tasks/:id", async (request, reply) => {

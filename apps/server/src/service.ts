@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import type { PermissionMode } from "./action-resolver.ts";
 import type {
@@ -40,7 +40,7 @@ import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { resolveRepoPath } from "./config.ts";
 import { EventBus } from "./events.ts";
 import { executorName, resolveExecutorFromEnabled, resolveExecutorLocked } from "./executors.ts";
-import { buildTaskResultAnswer, buildTaskStatusMessage } from "./task-status-messages.ts";
+import { buildTaskResultAnswer, buildTaskStatusMessage, selectPrimaryAnswerArtifact, summaryLooksLikePointer, TASK_ANSWER_FILE_BYTES_LIMIT } from "./task-status-messages.ts";
 import { GITHUB_NETWORK_HOSTS, wantsGithubAccess, wantsPublicWebResearch } from "./task-intent.ts";
 import { approvalView } from "./approval-display.ts";
 
@@ -532,12 +532,14 @@ export class HearthService {
           .some((message) => message.id === `goal-final-${task.goalId}`)
       );
       if (!hasGoalFinalAnswer) {
+        const artifacts = this.store.listArtifacts(task.id);
+        const answerBody = this.taskAnswerBody(task, artifacts);
         this.appendChatMessage({
           id: randomUUID(),
           conversationId: task.conversationId ?? null,
           role: "assistant",
           content: buildTaskResultAnswer(
-            { task, artifacts: this.store.listArtifacts(task.id) },
+            { task, artifacts, ...(answerBody ? { answerBody } : {}) },
             { includeFiles: false }
           ),
           taskId: task.id,
@@ -547,6 +549,26 @@ export class HearthService {
           taskStatus: "completed"
         });
       }
+    }
+  }
+
+  /**
+   * Read the primary result document so the final chat answer can contain the
+   * actual conclusion instead of a pointer to result.md. Large or binary
+   * artifacts are left to the sidebar.
+   */
+  private taskAnswerBody(task: TaskRecord, artifacts: ArtifactRecord[]): string {
+    try {
+      const primary = selectPrimaryAnswerArtifact(task, artifacts, {
+        allowAnyText: summaryLooksLikePointer(task.resultSummary)
+      });
+      if (!primary?.absolutePath) return "";
+      if (primary.bytes > TASK_ANSWER_FILE_BYTES_LIMIT) return "";
+      const text = readFileSync(primary.absolutePath, "utf8").trim();
+      if (!text || text.includes("\u0000")) return "";
+      return text;
+    } catch {
+      return "";
     }
   }
 

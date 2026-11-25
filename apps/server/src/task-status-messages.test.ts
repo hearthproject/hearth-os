@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TaskRecord } from "@hearth/core";
-import { buildTaskResultAnswer, buildTaskStatusMessage } from "./task-status-messages.ts";
+import { buildTaskResultAnswer, buildTaskStatusMessage, selectPrimaryAnswerArtifact, summaryLooksLikePointer } from "./task-status-messages.ts";
 
 function task(overrides: Partial<TaskRecord> = {}): TaskRecord {
   return {
@@ -84,8 +84,54 @@ describe("task result answers", () => {
   });
 
   it("clips very long results and points at the task page", () => {
-    const answer = buildTaskResultAnswer({ task: task({ resultSummary: "结果".repeat(3_000) }), artifacts: [] });
-    expect(answer.length).toBeLessThanOrEqual(4_001);
+    const answer = buildTaskResultAnswer({ task: task({ resultSummary: "结果".repeat(30_000) }), artifacts: [] });
+    expect(answer.length).toBeLessThanOrEqual(20_001);
     expect(answer.endsWith("…")).toBe(true);
+  });
+
+  it("uses the full result document when the summary is only a pointer", () => {
+    const answer = buildTaskResultAnswer({
+      task: task({ resultSummary: "已完成仓库核对与结构梳理，结果写入 result.md。" }),
+      artifacts: [{ id: "artifact-1", relativePath: "result.md", bytes: 14_300 }],
+      answerBody: "# LoopX 仓库对齐与项目结构说明\n\n## 1. 仓库对齐结果\n\n本地 main 与 origin/main 一致。"
+    }, { includeFiles: false });
+    expect(answer).toContain("## 1. 仓库对齐结果");
+    expect(answer).toContain("本地 main 与 origin/main 一致");
+    expect(answer).not.toContain("**交付文件**");
+  });
+
+  it("keeps the richer summary when the document is shorter", () => {
+    const summary = "结论：本地已对齐。\n\n- ahead 0 / behind 0\n- 工作树干净";
+    const answer = buildTaskResultAnswer({
+      task: task({ resultSummary: summary }),
+      artifacts: [{ id: "artifact-1", relativePath: "result.md", bytes: 1_000 }],
+      answerBody: "# 结果\n\n见上。"
+    }, { includeFiles: false });
+    expect(answer).toBe(summary);
+  });
+
+  it("ignores a stub document that would replace a real summary", () => {
+    const answer = buildTaskResultAnswer({
+      task: task({ resultSummary: "最终结果已生成" }),
+      artifacts: [{ id: "artifact-1", relativePath: "result.md", bytes: 100 }],
+      answerBody: "# result"
+    }, { includeFiles: false });
+    expect(answer).toBe("最终结果已生成");
+  });
+
+  it("prefers result-like documents over incidental markdown", () => {
+    const selected = selectPrimaryAnswerArtifact(task(), [
+      { id: "readme", relativePath: "README.md", bytes: 2_000 },
+      { id: "result", relativePath: "result.md", bytes: 14_300 },
+      { id: "manifest", relativePath: "run-manifest.json", bytes: 900 }
+    ]);
+    expect(selected?.id).toBe("result");
+  });
+
+  it("detects pointer-only summaries", () => {
+    expect(summaryLooksLikePointer("结果写入 result.md。")).toBe(true);
+    expect(summaryLooksLikePointer("已完成仓库对齐")).toBe(true);
+    expect(summaryLooksLikePointer(`${"本地 main 与 origin/main 完全一致，工作树干净。".repeat(12)}\n\n已运行 git status 验证。`)).toBe(false);
+    expect(summaryLooksLikePointer(`${"本地 main 与 origin/main 完全一致，工作树干净。".repeat(12)}\n\n完整报告见 result.md。`)).toBe(true);
   });
 });

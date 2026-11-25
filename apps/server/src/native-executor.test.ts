@@ -1180,7 +1180,12 @@ describe("native execution progress", () => {
 
     expect(nativeProgressForEvent({ type: "compacted", before: 20, after: 8 })).toMatchObject({
       kind: "context",
-      message: "整理执行上下文，继续推进"
+      message: "整理上下文，继续推进"
+    });
+    expect(nativeProgressForEvent({ type: "compacted", before: 20, after: 20, reason: "microcompact" })).toBeNull();
+    expect(nativeProgressForEvent({ type: "compacted", before: 20, after: 8, reason: "reactive" })).toMatchObject({
+      kind: "context",
+      message: "上下文接近上限，压缩后继续"
     });
     expect(nativeProgressForEvent({ type: "budget.exceeded", budget: "turns", limit: 200 })).toMatchObject({
       kind: "budget",

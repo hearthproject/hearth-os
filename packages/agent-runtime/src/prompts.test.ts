@@ -3,6 +3,7 @@ import type { TaskRecord } from "@hearth/core";
 import {
   PromptRegistry,
   composeTaskPrompt,
+  composeTaskPromptSections,
   executionContractPrompt,
   skillRoutingPrompt
 } from "./prompts.ts";
@@ -76,5 +77,21 @@ describe("prompt registry", () => {
     expect(prompt).toContain("不要要求用户提供仓库地址");
     expect(prompt).toContain("GOAL BLOCK");
     expect(prompt).toContain("EXTRA BLOCK");
+  });
+
+  it("exposes the same prompt as labelled sections", () => {
+    const context = {
+      task,
+      expectedOutputs: [],
+      availableTools: ["finish_task", "search_skills", "install_skill"],
+      mode: "build" as const,
+      goalBlock: "GOAL BLOCK",
+      extraBlocks: ["EXTRA BLOCK"]
+    };
+    const sections = composeTaskPromptSections(context);
+    expect(sections.map((section) => section.content).join("\n\n")).toBe(composeTaskPrompt(context));
+    expect(sections.find((section) => section.id === "identity")?.label).toBe("身份与角色");
+    expect(sections.find((section) => section.id === "task")?.label).toBe("任务信息");
+    expect(sections.every((section) => section.content.length > 0)).toBe(true);
   });
 });

@@ -12,10 +12,10 @@ import {
   CODING_REMINDERS,
   codingFinishIssue,
   codingHarnessEnabled,
-  codingSystemPrompt,
+  codingPromptSections,
   createAgentState,
   createBuiltinTools,
-  composeTaskPrompt,
+  composeTaskPromptSections,
   defaultTaskPermissions,
   executionContractPrompt,
   discoverInstructions,
@@ -86,6 +86,19 @@ export const NATIVE_PLAN_TOOL_NAMES = [
   "ask_user",
   "submit_plan"
 ] as const;
+
+const CODING_SECTION_LABELS: Record<string, string> = {
+  rules: "代码工作规则",
+  tools: "工具说明",
+  environment: "环境与权限",
+  memory: "仓库记忆",
+  dossier: "项目档案",
+  workstyle: "工作风格",
+  instructions: "仓库指令",
+  mode: "模式约束",
+  skills: "技能路由",
+  extra: "任务与执行契约"
+};
 
 export interface NativeRunOptions {
   task: TaskRecord;
@@ -256,8 +269,12 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
   const workstyleBlock = coding && !options.isSubagent
     ? workstylePromptBlock(new WorkstyleStore(WORKSTYLE_PATH).read())
     : null;
-  const systemPrompt = coding
-    ? codingSystemPrompt({
+  const taskExtras = [
+    ...(taskProfile.hints.length > 0 ? [`## ${taskProfile.label} profile\n${taskProfile.hints.map((hint) => `- ${hint}`).join("\n")}`] : []),
+    ...(goalBlock ? [goalBlock] : [])
+  ];
+  const codingSections = coding
+    ? codingPromptSections({
         workspaceRoot: options.prepared.root,
         outDir: options.prepared.outDir,
         permissions,
@@ -273,15 +290,18 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
           `Current task: ${options.task.title}`,
           `Expected outputs: ${options.expectedOutputs.join(", ") || "(none required)"}`,
           `Task language: reply in the user's language; keep code, identifiers and commit messages in English.`,
-          ...(taskProfile.hints.length > 0 ? [`## ${taskProfile.label} profile\n${taskProfile.hints.map((hint) => `- ${hint}`).join("\n")}`] : []),
-          ...(goalBlock ? [goalBlock] : [])
+          ...taskExtras
         ]
-      })
-    : [
-        nativeSystemPrompt(options.task, options.expectedOutputs, availableTools),
-        ...(taskProfile.hints.length > 0 ? [`## ${taskProfile.label} profile\n${taskProfile.hints.map((hint) => `- ${hint}`).join("\n")}`] : []),
-        ...(goalBlock ? [goalBlock] : [])
-      ].join("\n\n");
+      }).map((section) => ({
+        id: section.id,
+        label: CODING_SECTION_LABELS[section.id] ?? section.id,
+        content: section.content
+      }))
+    : [];
+  const systemSections = coding
+    ? codingSections
+    : nativeSystemPromptSections(options.task, options.expectedOutputs, availableTools, taskExtras);
+  const systemPrompt = systemSections.map((section) => section.content).join("\n\n");
   const resume = options.resume ? refreshNativeResume(options.resume, systemPrompt, options.prompt, options.prepared.outDir) : undefined;
   let budgetExhaustion: NativeRunResult["budgetExhaustion"];
   let sandboxDenied = false;
@@ -370,7 +390,20 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     },
     summarizeContext: options.onContextSummary ?? ((messages, signal) => summarizeNativeContext(options.settings, messages, signal)),
     onEvent: (event) => {
-      options.onContextEvent?.(event);
+      if (event.type === "context.usage") {
+        options.onContextEvent?.({
+          ...event,
+          systemPrompt,
+          systemSections: systemSections.map((section) => ({
+            id: section.id,
+            label: section.label,
+            chars: section.content.length,
+            content: section.content
+          }))
+        });
+      } else {
+        options.onContextEvent?.(event);
+      }
       if (event.type === "budget.exceeded") {
         budgetExhaustion = { dimension: event.budget, limit: event.limit };
       }
@@ -1273,7 +1306,14 @@ export function nativeProgressForEvent(event: RuntimeEvent): { kind: string; mes
     };
   }
   if (event.type === "compacted") {
-    return { kind: "context", message: "整理执行上下文，继续推进", detail: { executorId: "native", eventType: "compacted", status: "completed" } };
+    // Micro-compaction only trims old tool output and runs nearly every turn.
+    // It is housekeeping, not a user-visible context rewrite.
+    if (event.reason === "microcompact") return null;
+    return {
+      kind: "context",
+      message: event.reason === "reactive" ? "上下文接近上限，压缩后继续" : "整理上下文，继续推进",
+      detail: { executorId: "native", eventType: "compacted", status: "completed" }
+    };
   }
   if (event.type === "budget.exceeded") {
     return {
@@ -1568,19 +1608,37 @@ export function planModeSystemPrompt(task: TaskRecord, availableTools?: string[]
   ].filter(Boolean).join("\n");
 }
 
-export function nativeSystemPrompt(task: TaskRecord, expectedOutputs: string[], availableTools?: string[]): string {
-  if (task.mode === "plan") return planModeSystemPrompt(task, availableTools);
+export function nativeSystemPromptSections(
+  task: TaskRecord,
+  expectedOutputs: string[],
+  availableTools?: string[],
+  extraInstructions: string[] = []
+): Array<{ id: string; label: string; content: string }> {
+  const withExtra = (sections: Array<{ id: string; label: string; content: string }>) => extraInstructions
+    .map((content) => content.trim())
+    .filter(Boolean)
+    .reduce((all, content) => [...all, { id: "extra", label: "任务补充约束", content }], sections);
+  if (task.mode === "plan") {
+    return withExtra([{ id: "plan", label: "计划模式", content: planModeSystemPrompt(task, availableTools) }]);
+  }
   if (wantsDirectFileRead(task.goal) && expectedOutputs.length === 0) {
-    return [executionContractPrompt, "直接读取用户指定的文件，不要先列目录、搜索替代文件、委派或建立目标。用户指定的是桌面等工作区之外的文件时，必须用 read_desktop_file 读取；read_file 只能读工作区内的文件。文件不存在时立即如实告知并结束，不重试、不创建文件。读取成功后用 finish_task 在对话中返回结果，outputs 留空，不生成 Markdown 报告。"].join("\n\n");
+    return withExtra([{
+      id: "direct_read",
+      label: "直接读取约束",
+      content: [executionContractPrompt, "直接读取用户指定的文件，不要先列目录、搜索替代文件、委派或建立目标。用户指定的是桌面等工作区之外的文件时，必须用 read_desktop_file 读取；read_file 只能读工作区内的文件。文件不存在时立即如实告知并结束，不重试、不创建文件。读取成功后用 finish_task 在对话中返回结果，outputs 留空，不生成 Markdown 报告。"].join("\n\n")
+    }]);
   }
   if (isTextDraftTask({ ...task, expectedOutputs })) {
-    return [executionContractPrompt, DRAFT_INSTRUCTION, "仅将最终草稿写入本轮输出目录，已有草稿时只应用用户新增信息。写入成功后直接调用 finish_task，不反复润色，不读取无关文件。", `用户要求的产物：${expectedOutputs.join("、")}`].join("\n\n");
+    return withExtra([{
+      id: "draft",
+      label: "草稿写作约束",
+      content: [executionContractPrompt, DRAFT_INSTRUCTION, "仅将最终草稿写入本轮输出目录，已有草稿时只应用用户新增信息。写入成功后直接调用 finish_task，不反复润色，不读取无关文件。", `用户要求的产物：${expectedOutputs.join("、")}`].join("\n\n")
+    }]);
   }
   const toolSet = availableTools ? new Set(availableTools) : null;
   const hasTool = (name: string): boolean => toolSet === null || toolSet.has(name);
-  const hasAny = (...names: string[]): boolean => names.some(hasTool);
   const executionProfile = task.executionMode ? EXECUTION_PROFILES[task.executionMode] : null;
-  return composeTaskPrompt({
+  const sections = composeTaskPromptSections({
     task,
     expectedOutputs,
     availableTools: availableTools ?? [],
@@ -1593,6 +1651,11 @@ export function nativeSystemPrompt(task: TaskRecord, expectedOutputs: string[], 
       ...nativeTaskInstructions(task, expectedOutputs)
     ]
   });
+  return withExtra(sections);
+}
+
+export function nativeSystemPrompt(task: TaskRecord, expectedOutputs: string[], availableTools?: string[]): string {
+  return nativeSystemPromptSections(task, expectedOutputs, availableTools).map((section) => section.content).join("\n\n");
 }
 
 export function directReadTool(tool: AgentTool): AgentTool {

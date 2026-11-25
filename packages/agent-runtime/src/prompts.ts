@@ -42,16 +42,29 @@ export class PromptRegistry {
   }
 
   render(context: PromptBuildContext): string {
+    return this.renderSections(context).map((section) => section.content).join("\n\n");
+  }
+
+  /**
+   * Same output as `render`, split into named sections for context
+   * transparency. The order and separators must stay identical.
+   */
+  renderSections(context: PromptBuildContext, labels: Record<string, string> = {}): ComposedPromptSection[] {
     return [...this.sections.values()]
       .sort((a, b) => a.priority - b.priority)
       .flatMap((section) => {
         const value = section.build(context);
         if (!value) return [];
-        return Array.isArray(value) ? value : [value];
-      })
-      .map((block) => block.trim())
-      .filter(Boolean)
-      .join("\n\n");
+        const blocks = (Array.isArray(value) ? value : [value])
+          .map((block) => block.trim())
+          .filter(Boolean);
+        if (blocks.length === 0) return [];
+        return [{
+          id: section.id,
+          label: labels[section.id] ?? section.id,
+          content: blocks.join("\n\n")
+        }];
+      });
   }
 }
 
@@ -113,7 +126,7 @@ export const taskPromptRegistry = new PromptRegistry([
     priority: 50,
     build: ({ availableTools }) => [
       availableTools.includes("finish_task")
-        ? "任务完成后必须调用 finish_task，把最终结果直接写进 summary；不要只发一条普通文本就结束。"
+        ? "任务完成后必须调用 finish_task，把最终结果直接写进 summary；不要只发一条普通文本就结束。如果产出了报告或结果文件，summary 必须包含文件里的核心结论正文——用户会直接在对话里读到它，不要只写“结果写入 xxx.md”。文件仍作为交付物保留。"
         : "",
       "最终输出只保留用户需要的结果和证据，不复述过程。"
     ].filter(Boolean)
@@ -144,8 +157,34 @@ export const taskPromptRegistry = new PromptRegistry([
   }
 ]);
 
+export interface ComposedPromptSection {
+  id: string;
+  label: string;
+  content: string;
+}
+
+const PROMPT_SECTION_LABELS: Record<string, string> = {
+  identity: "身份与角色",
+  autonomy: "执行契约",
+  investigation: "调查规范",
+  skills: "技能路由",
+  completion: "收尾要求",
+  task: "任务信息",
+  goal: "目标约束",
+  profile: "任务画像",
+  extensions: "扩展约束"
+};
+
+/**
+ * Render the prompt as named sections. The joined result is byte-identical to
+ * `render`, so prompt transparency can never change model behaviour.
+ */
+export function composeTaskPromptSections(context: PromptBuildContext): ComposedPromptSection[] {
+  return taskPromptRegistry.renderSections(context, PROMPT_SECTION_LABELS);
+}
+
 export function composeTaskPrompt(context: PromptBuildContext): string {
-  return taskPromptRegistry.render(context);
+  return composeTaskPromptSections(context).map((section) => section.content).join("\n\n");
 }
 
 export function executionModePrompt(mode: ExecutionMode | undefined, label: string, instruction: string): string {

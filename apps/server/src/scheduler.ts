@@ -24,6 +24,7 @@ import { createFileArtifact, missingExpectedOutputs, publishArtifacts } from "./
 import { diffWorkspace, formatChangeManifest, snapshotWorkspace, type WorkspaceSnapshot } from "./change-manifest.ts";
 import { BROWSER_ENABLED, BROWSER_EVIDENCE_DIR, BROWSER_PROFILE_DIR, BROWSER_RECIPE_DIR, BROWSER_SETTINGS_PATH, CONTEXT_BLOB_DIR, DOSSIER_DIR, EXECUTOR_SETTINGS_PATH, GIT_CACHE_DIR, MODEL_SETTINGS_PATH, REPO_ROOT, SOURCE_CONTENT_DIR, WORKSPACE_DIR } from "./config.ts";
 import { DossierStore } from "./dossier.ts";
+import { rememberSystemContext } from "./system-context-registry.ts";
 import { BrowserEvidenceStore } from "./browser-evidence.ts";
 import { BrowserService } from "./browser-service.ts";
 import { BrowserSessionManager, browserFinishIssue } from "./browser-session.ts";
@@ -3218,6 +3219,15 @@ export class HearthScheduler {
   private captureNativeEvent(task: TaskRecord, run: RunRecord, event: RuntimeEvent): void {
     const base = { taskId: task.id, conversationId: task.conversationId ?? null, runId: run.id, executorId: "native" as const, role: "system" as const };
     if (event.type === "context.usage") {
+      if (event.systemPrompt) {
+        rememberSystemContext({
+          taskId: task.id,
+          model: event.modelId,
+          capturedAt: new Date().toISOString(),
+          prompt: event.systemPrompt,
+          sections: event.systemSections ?? []
+        });
+      }
       const breakdown = {
         system: Math.ceil(event.systemChars / 4),
         tools: Math.ceil(event.toolSchemaChars / 4),
