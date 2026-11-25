@@ -2733,6 +2733,8 @@ export class HearthScheduler {
         executorId, outDir, error, failure: failure.failure,
         aborted: controller.signal.aborted, leaseLost: failure.leaseLost, cancelled: failure.cancelled
       };
+    } finally {
+      this.browserSecretsByRun.delete(runId);
     }
   }
 

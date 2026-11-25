@@ -156,7 +156,6 @@ export class BrowserSessionManager {
 
   async connectExtension(taskId: string, token?: string): Promise<ExtensionBrowserConnection> {
     const suppliedToken = token?.trim() || null;
-    const previousToken = this.readExtensionToken();
     const existing = this.sessions.get(taskId) ?? null;
     const persisted = this.persisted(taskId);
     const urls = existing?.tabs.map((tab) => tab.url) ?? persisted?.tabs.map((tab) => tab.url) ?? [];
@@ -165,20 +164,15 @@ export class BrowserSessionManager {
       : Math.max(0, persisted?.tabs.findIndex((tab) => tab.id === persisted.activeTabId) ?? 0);
     let extension: ExtensionBrowserConnection | null = null;
     let tabs: BrowserTab[];
+    let activeTabId: string | null;
     try {
+      extension = await this.extensionConnector(this.extensionOptions(taskId, suppliedToken ?? undefined));
+      const restored = await this.restoreExtensionTabs(extension, urls, activeIndex);
+      tabs = restored.tabs;
+      activeTabId = restored.activeTabId;
       if (suppliedToken) ExtensionBrowserConnection.saveToken(this.extensionTokenPath, suppliedToken);
-      extension = await this.extensionConnector(this.extensionOptions(taskId));
-      tabs = [];
-      const initial = await extension.attachInitialPage(urls[activeIndex] ?? urls[0]);
-      tabs.push(this.tab(initial, await initial.title(), initial.url()));
-      for (let index = 0; index < urls.length; index += 1) {
-        if (index === activeIndex) continue;
-        const page = await extension.createPage(urls[index]);
-        tabs.push(this.tab(page, await page.title(), urls[index] ?? page.url()));
-      }
     } catch (error) {
       await extension?.close().catch(() => undefined);
-      if (suppliedToken) this.restoreExtensionToken(previousToken);
       throw error;
     }
     if (!extension) throw new BrowserError("BROWSER_EXTENSION_UNAVAILABLE", "Playwright Extension 没有建立连接");
@@ -189,7 +183,7 @@ export class BrowserSessionManager {
       taskId,
       backend: "extension",
       tabs,
-      activeTabId: tabs[activeIndex]?.id ?? tabs[0]?.id ?? null,
+      activeTabId,
       controlState,
       controlEpoch: Math.max(1, existing?.controlEpoch ?? persisted?.controlEpoch ?? 0),
       takeoverKind: existing?.takeoverKind ?? persisted?.takeoverKind ?? null,
@@ -472,18 +466,12 @@ export class BrowserSessionManager {
     try {
       const urls = persisted?.tabs.map((tab) => tab.url) ?? [""];
       const activeIndex = Math.max(0, persisted?.tabs.findIndex((tab) => tab.id === persisted.activeTabId) ?? 0);
-      const initial = await extension.attachInitialPage(urls[activeIndex] ?? "");
-      const tabs: BrowserTab[] = [this.tab(initial, await initial.title(), initial.url())];
-      for (let index = 0; index < urls.length; index += 1) {
-        if (index === activeIndex) continue;
-        const page = await extension.createPage(urls[index]);
-        tabs.push(this.tab(page, await page.title(), page.url()));
-      }
+      const restored = await this.restoreExtensionTabs(extension, urls, activeIndex);
       return {
         taskId,
         backend: "extension",
-        tabs,
-        activeTabId: tabs[activeIndex]?.id ?? tabs[0]?.id ?? null,
+        tabs: restored.tabs,
+        activeTabId: restored.activeTabId,
         controlState: persisted?.controlState === "user" ? "user" : persisted?.controlState === "awaiting_user" ? "awaiting_user" : "agent",
         controlEpoch: Math.max(1, persisted?.controlEpoch ?? 1),
         takeoverKind: persisted?.takeoverKind ?? null,
@@ -509,29 +497,34 @@ export class BrowserSessionManager {
     if (url && url !== "about:blank") await page.goto(url, 60_000).catch(() => undefined);
     return page;
   }
-  private extensionOptions(taskId: string): ExtensionConnectionOptions {
+  private async restoreExtensionTabs(
+    extension: ExtensionBrowserConnection,
+    urls: string[],
+    activeIndex: number
+  ): Promise<{ tabs: BrowserTab[]; activeTabId: string }> {
+    const restored: Array<BrowserTab | undefined> = new Array(urls.length);
+    const initial = await extension.attachInitialPage(urls[activeIndex] || undefined);
+    const initialTab = this.tab(initial, await initial.title(), initial.url());
+    restored[activeIndex] = initialTab;
+    for (let index = 0; index < urls.length; index += 1) {
+      if (index === activeIndex) continue;
+      const page = await extension.createPage(urls[index]);
+      restored[index] = this.tab(page, await page.title(), urls[index] || page.url());
+    }
     return {
-      taskId,
-      tokenPath: this.extensionTokenPath,
-      outputDir: this.extensionOutputDir,
-      ...(this.extensionProfileDirName ? { profileDirName: this.extensionProfileDirName } : {})
+      tabs: restored.filter((tab): tab is BrowserTab => Boolean(tab)),
+      activeTabId: initialTab.id
     };
   }
 
-  private readExtensionToken(): string | null {
-    try {
-      return readFileSync(this.extensionTokenPath, "utf8");
-    } catch {
-      return null;
-    }
-  }
-
-  private restoreExtensionToken(token: string | null): void {
-    if (token === null) {
-      rmSync(this.extensionTokenPath, { force: true });
-      return;
-    }
-    ExtensionBrowserConnection.saveToken(this.extensionTokenPath, token);
+  private extensionOptions(taskId: string, token?: string): ExtensionConnectionOptions {
+    return {
+      taskId,
+      tokenPath: this.extensionTokenPath,
+      ...(token ? { token } : {}),
+      outputDir: this.extensionOutputDir,
+      ...(this.extensionProfileDirName ? { profileDirName: this.extensionProfileDirName } : {})
+    };
   }
 
   private tab(page: BrowserPage, title: string, url: string): BrowserTab {

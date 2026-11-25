@@ -88,7 +88,7 @@ export const TASK_PROFILES: Record<TaskProfileId, TaskProfile> = {
     deferRemaining: true,
     hints: [
       "每一步操作后先观察屏幕或页面状态，再决定下一步；不要闭着眼睛连续点击。",
-      "登录、验证码和支付需要用户接管时，立即调用 ask_user 说明原因。"
+      "遇到登录、验证码、支付最终确认、复杂前端交互或自动化受阻时，立即调用 browser_request_takeover 让用户接管；用户归还后先 browser_read 重新观察。"
     ]
   },
   general: {

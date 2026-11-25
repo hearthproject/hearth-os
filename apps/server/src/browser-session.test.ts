@@ -6,6 +6,7 @@ import { BrowserSessionManager, browserFinishIssue, type BrowserSessionManagerOp
 import type { BrowserPage, BrowserScreenshotOptions, BrowserWaitOptions } from "./browser-page.ts";
 import type { RawBrowserSnapshot } from "./browser-snapshot.ts";
 import type { BrowserService } from "./browser-service.ts";
+import type { ExtensionBrowserConnection } from "./browser-extension.ts";
 
 const tempDirs: string[] = [];
 
@@ -180,19 +181,57 @@ describe("BrowserSessionManager", () => {
     const dir = tempDir();
     const tokenPath = join(dir, "extension-token");
     const instance = new BrowserSessionManager(fakeService(), { extensionTokenPath: tokenPath });
-    BrowserSessionManager.prototype;
     writeFileSync(tokenPath, "1234567890abcdef");
     expect(instance.extensionStatus()).toMatchObject({ paired: true, extensionId: "mmlmfjhmonkocbjadbfplnigmagldckm" });
     expect(JSON.stringify(instance.extensionStatus())).not.toContain("1234567890abcdef");
   });
 
-  it("restores the previous token when an extension connection attempt fails", async () => {
+  it("preserves tab order and the active tab when reconnecting the extension", async () => {
+    const connector = vi.fn(async () => ({
+      attachInitialPage: async (url?: string) => {
+        const page = new FakePage();
+        page.currentUrl = url ?? "about:blank";
+        return page;
+      },
+      createPage: async (url?: string) => {
+        const page = new FakePage();
+        page.currentUrl = url ?? "about:blank";
+        return page;
+      },
+      close: async () => undefined
+    } as unknown as ExtensionBrowserConnection));
+    const { instance } = manager({ connector });
+    try {
+      await instance.session("task-a", { backend: "managed" });
+      await instance.createTab("task-a", "https://example.com/one");
+      const active = await instance.createTab("task-a", "https://example.com/two");
+      await instance.createTab("task-a", "https://example.com/three");
+      await instance.activateTab("task-a", active.id);
+
+      await instance.connectExtension("task-a");
+
+      const descriptor = instance.describe("task-a")!;
+      expect(descriptor.tabs.map((tab) => tab.url)).toEqual([
+        "about:blank",
+        "https://example.com/one",
+        "https://example.com/two",
+        "https://example.com/three"
+      ]);
+      expect(descriptor.tabs.find((tab) => tab.active)?.url).toBe("https://example.com/two");
+    } finally {
+      await instance.stop();
+      await instance.releaseAll();
+    }
+  });
+
+  it("does not replace the previous token when an extension connection attempt fails", async () => {
     const tokenPath = join(tempDir(), "extension-token");
     writeFileSync(tokenPath, "1234567890abcdef");
     const instance = new BrowserSessionManager(fakeService(), {
       extensionTokenPath: tokenPath,
       extensionConnector: async (options) => {
-        expect(readFileSync(options.tokenPath, "utf8")).toBe("fedcba0987654321");
+        expect(options.token).toBe("fedcba0987654321");
+        expect(readFileSync(options.tokenPath, "utf8")).toBe("1234567890abcdef");
         throw new Error("pairing rejected");
       }
     });
@@ -200,6 +239,26 @@ describe("BrowserSessionManager", () => {
     await expect(instance.connectExtension("task-a", "fedcba0987654321")).rejects.toThrow("pairing rejected");
     expect(readFileSync(tokenPath, "utf8")).toBe("1234567890abcdef");
     expect(existsSync(tokenPath)).toBe(true);
+    await instance.releaseAll();
+  });
+
+  it("persists a supplied token only after the extension session is usable", async () => {
+    const tokenPath = join(tempDir(), "extension-token");
+    const instance = new BrowserSessionManager(fakeService(), {
+      extensionTokenPath: tokenPath,
+      extensionConnector: async (options) => {
+        expect(options.token).toBe("fedcba0987654321");
+        expect(existsSync(tokenPath)).toBe(false);
+        return {
+          attachInitialPage: async () => new FakePage(),
+          createPage: async () => new FakePage(),
+          close: async () => undefined
+        } as unknown as ExtensionBrowserConnection;
+      }
+    });
+
+    await instance.connectExtension("task-a", "fedcba0987654321");
+    expect(readFileSync(tokenPath, "utf8")).toBe("fedcba0987654321");
     await instance.releaseAll();
   });
 });

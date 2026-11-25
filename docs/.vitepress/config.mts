@@ -6,6 +6,7 @@ const zhNav = [
   { text: '设计说明', link: '/design/', activeMatch: '^/design/' },
   { text: '代码架构', link: '/architecture/', activeMatch: '^/architecture/' },
   { text: '交付路线', link: '/delivery/', activeMatch: '^/delivery/' },
+  { text: '调研', link: '/research/执行器工具与提示词边界调研', activeMatch: '^/research/' },
   { text: '评测', link: '/evaluation/', activeMatch: '^/evaluation/' },
   { text: '开发日志', link: '/log/day-08', activeMatch: '^/log/' },
   { text: '附录', link: '/reference/', activeMatch: '^/reference/' }
@@ -148,6 +149,14 @@ const zhArchitectureSidebar = [
 
 const zhSidebar = {
   '/design/': zhDesignSidebar,
+  '/research/': [
+    {
+      text: '调研',
+      items: [
+        { text: '执行器工具与提示词边界', link: '/research/执行器工具与提示词边界调研' }
+      ]
+    }
+  ],
   '/architecture/': zhArchitectureSidebar,
   '/delivery/': [
     {

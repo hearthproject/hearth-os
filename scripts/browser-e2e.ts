@@ -237,7 +237,7 @@ try {
   console.log(JSON.stringify({ ok: true, checks, evidenceFiles: evidenceFiles.length, downloaded: downloadedPath, tabs: 7 }, null, 2));
 } finally {
   await sessions.releaseAll().catch(() => undefined);
-  sessions.stop();
+  await sessions.stop();
   await browser.close().catch(() => undefined);
   await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
   try {

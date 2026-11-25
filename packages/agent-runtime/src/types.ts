@@ -146,6 +146,9 @@ export interface AgentToolMetadata {
   browserTakeoverKind?: string;
   browserTakeoverReason?: string;
   browserControlState?: string;
+  provider?: string;
+  attemptedProviders?: string[];
+  count?: number;
   browserControlEpoch?: number | null;
   browserCapturedAt?: string;
   browserTruncated?: boolean;

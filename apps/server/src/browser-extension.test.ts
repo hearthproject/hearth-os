@@ -29,6 +29,7 @@ describe("Playwright Extension bridge", () => {
       paired: true,
       extensionId: "mmlmfjhmonkocbjadbfplnigmagldckm"
     });
+    expect(status).not.toHaveProperty("tokenPath");
     expect(JSON.stringify(status)).not.toContain("1234567890abcdef");
   });
 

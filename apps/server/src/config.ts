@@ -47,9 +47,7 @@ export const BROWSER_MCP_OUTPUT_DIR = join(BROWSER_DIR, "mcp-output");
 export const DOSSIER_DIR = join(DATA_DIR, "dossiers");
 export const WORKSTYLE_PATH = join(DATA_DIR, "profile", "WORKSTYLE.md");
 export const SUPERVISION_PATH = join(DATA_DIR, "supervision.json");
-export const BROWSER_BRIDGE_PORT = Number(process.env.HEARTH_BROWSER_BRIDGE_PORT ?? 4318);
 export const BROWSER_ENABLED = (process.env.HEARTH_BROWSER ?? "1") !== "0";
-export const BROWSER_BRIDGE_ENABLED = (process.env.HEARTH_BROWSER_BRIDGE ?? "1") === "1";
 export const WEB_DIST = resolve(process.env.HEARTH_WEB_DIST ?? join(HEARTH_ROOT, "apps", "web", "dist"));
 export const MASTER_KEY_PATH = join(DATA_DIR, "master.key");
 

@@ -35,7 +35,6 @@ export interface ExtensionStatus {
   extensionId: string;
   installUrl: string;
   paired: boolean;
-  tokenPath: string;
 }
 
 export interface McpContent {
@@ -86,7 +85,7 @@ export class ExtensionBrowserConnection {
     } catch {
       paired = false;
     }
-    return { extensionId: EXTENSION_ID, installUrl: EXTENSION_STORE_URL, paired, tokenPath };
+    return { extensionId: EXTENSION_ID, installUrl: EXTENSION_STORE_URL, paired };
   }
 
   static saveToken(tokenPath: string, token: string): void {
