@@ -24,7 +24,7 @@ Hearth keeps several specialized executors side by side rather than building one
 
 | Executor | Better suited for | Not suited for |
 |---|---|---|
-| Hearth native | General execution kernel: multi-file editing, source reading, web research, office artifacts, skill reuse, bounded delegation, local MCP, and project worktrees | Work that needs LSP, formatters, or full IDE semantics |
+| Hearth native | General execution kernel: multi-file editing, source reading, zero-configuration web research, office artifacts, skill reuse, bounded delegation, task-selected MCP, and project worktrees | Work that needs LSP, formatters, or full IDE semantics |
 | Codex | Multi-file code, long documents, complex research, and deep writing | Continuous online listening or low-cost high-frequency responses |
 | Connectors | Email, calendars, cloud drives, messaging, and ticketing with interfaces | Software without an interface that needs graphical operation |
 | Browser | Web research, signed-in sessions, forms, and software as a service | Direct exposure of highly sensitive credentials or unauditable bulk actions |
@@ -40,11 +40,11 @@ The current registry contains three built-in executors. They share launch resolu
 |---|---|---|
 | `deepseek-harness` | Official `@deepseek-ai/dsh-sdk-client` SDK/JSON-RPC | Full DeepSeek Harness runtime: native tools, code, repositories, tests, session resume, and a complete event stream; requires a valid model binding |
 | `codex` | Local Codex profile or a `config.toml` generated from the unified binding | Multi-file code, repositories, tests, builds, and GitHub workspaces; the model protocol is fixed to OpenAI Responses |
-| `native` | Hearth-owned general execution kernel (model protocols, tools, compaction, delegation, worktrees, local MCP) | General work, multi-file editing, research and office output, isolated worktrees, and local stdio MCP; supports four model protocols |
+| `native` | Hearth-owned general execution kernel (model protocols, tools, compaction, delegation, worktrees, task-selected MCP) | General work, multi-file editing, research and office output, isolated worktrees, and stdio / Streamable HTTP MCP; supports four model protocols |
 
 Complex code and repository work prefer `codex` or `deepseek-harness`; general work, web, documents, and local project worktrees prefer `native`. After the user explicitly selects a local project, tasks default to native in an isolated worktree; GitHub engineering work still defaults to Codex.
 
-The native executor is a Hearth-owned general execution kernel with budgets, checkpoints, input pauses, context compaction, bounded delegation, local MCP, and recovery; it is not a forwarded prompt. DeepSeek Harness uses the official SDK rather than parsing command-line text. Codex has a dedicated adapter and obeys the Responses protocol. A failed task does not silently replace its executor identity, and the actual executor is recorded in runs and artifact manifests.
+The native executor is a Hearth-owned general execution kernel with budgets, checkpoints, input pauses, context compaction, bounded delegation, task-selected MCP, and recovery; it is not a forwarded prompt. The same MCP selection applies to all three executors: native receives the tools directly, while Codex and DeepSeek Harness use a task-scoped stdio bridge. DeepSeek Harness uses the official SDK rather than parsing command-line text. Codex has a dedicated adapter and obeys the Responses protocol. A failed task does not silently replace its executor identity, and the actual executor is recorded in runs and artifact manifests.
 
 ## Unified Model Bindings
 
@@ -78,19 +78,16 @@ A CLI `sessionId` is only an optimization for resume, not a source of truth. Eve
 
 ## Settings Boundaries
 
-Settings has nine sections:
+Settings has five sections:
 
 | Section | Responsibility |
 |---|---|
 | Executors | Default executor, installation and health, command or script path, concurrency, and each executor's model binding |
 | Models | Profile CRUD, current chat model, model discovery, connection tests, and masked keys |
 | Projects | Local Git project registration, default branches, and repository state |
-| Extensions | Local stdio MCP servers and Tavily/SearXNG web-search settings |
-| Proactive | Reminder budgets, quiet hours, and triggers |
-| Memory and skills | Automatic runtime state and skill governance |
-| Connections | Feishu entry and external accounts |
-| Context | Mode, budgets, retention, handoff limits, metrics, and deletion |
 | Data | SQLite path, executor directories, context blobs, migration records, and backups |
+
+Web search is built in and needs no key or instance URL in Settings. MCP installation, connection, enablement, and removal use the `/mcp` composer command. Installed servers appear beside Skills under the Library's MCP section.
 
 The global default executor only seeds new conversations; the composer picker overrides it. When a preference is disabled, unavailable, lacks a required capability, or has no valid model binding, routing returns to the task-matched executor and then scans the registry for another usable path.
 

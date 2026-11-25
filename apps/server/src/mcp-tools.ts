@@ -58,10 +58,12 @@ export function parseMcpToolName(value: string): { serverId: string; toolName: s
   };
 }
 
-export function createMcpTools(provider: McpToolProvider): AgentTool[] {
+export function createMcpTools(provider: McpToolProvider, serverIds?: Iterable<string>): AgentTool[] {
   const names = new Set(BUILTIN_TOOL_NAMES);
   const tools: AgentTool[] = [];
+  const selected = serverIds === undefined ? null : new Set(serverIds);
   for (const server of provider.list()) {
+    if (selected && !selected.has(server.id)) continue;
     if (!server.enabled || server.status !== "ready") continue;
     if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(server.id)) {
       throw new McpToolBindingError("MCP_SERVER_ID_INVALID", `MCP 服务器 id 不合法：${server.id}`);

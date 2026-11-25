@@ -129,6 +129,7 @@ export interface McpServerRecord extends McpServerConfig {
   error: string | null;
   lastProbeAt: string | null;
   envCipher: string | null;
+  headersCipher: string | null;
 }
 
 export interface PageOptions {
@@ -217,7 +218,7 @@ export interface SettleRunOperationCleanupInput {
 
 type DbRow = Record<string, SQLInputValue>;
 
-export const CURRENT_SCHEMA_VERSION = 44;
+export const CURRENT_SCHEMA_VERSION = 45;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
@@ -242,7 +243,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   expected_outputs_json TEXT, permissions_json TEXT, pending_input TEXT,
   method_id TEXT, method_version INTEGER, project_id TEXT, pinned_at TEXT, archived_at TEXT,
   budget_override_json TEXT, deleted_at TEXT, trash_batch_id TEXT,
-  mode TEXT NOT NULL DEFAULT 'build', plan_id TEXT
+  mode TEXT NOT NULL DEFAULT 'build', plan_id TEXT,
+  mcp_server_ids_json TEXT NOT NULL DEFAULT '[]'
 );
 CREATE TABLE IF NOT EXISTS task_worktrees (
   task_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, path TEXT NOT NULL,
@@ -702,7 +704,10 @@ CREATE TABLE IF NOT EXISTS local_projects (
 );
 CREATE TABLE IF NOT EXISTS mcp_servers (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, transport TEXT NOT NULL, command TEXT NOT NULL,
-  args_json TEXT NOT NULL, env_keys_json TEXT NOT NULL, env_cipher TEXT,
+  args_json TEXT NOT NULL, url TEXT, env_keys_json TEXT NOT NULL, env_cipher TEXT,
+  header_keys_json TEXT NOT NULL DEFAULT '[]', headers_cipher TEXT,
+  auth_mode TEXT NOT NULL DEFAULT 'none', registry_server_id TEXT, registry_name TEXT,
+  package_name TEXT, package_version TEXT, runtime TEXT, manifest_json TEXT NOT NULL DEFAULT '{}',
   enabled INTEGER NOT NULL, tools_json TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'unchecked',
   error TEXT, last_probe_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
@@ -1231,16 +1236,30 @@ export class HearthStore {
       .map(rowToMcpServer);
   }
 
-  upsertMcpServer(server: McpServerConfig, envCipher: string | null): McpServerRecord {
+  upsertMcpServer(
+    server: McpServerConfig,
+    secrets: { envCipher: string | null; headersCipher: string | null }
+  ): McpServerRecord {
     this.db.prepare(
-      `INSERT INTO mcp_servers (id, name, transport, command, args_json, env_keys_json, env_cipher, enabled, tools_json, status, error, last_probe_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, '[]', 'unchecked', NULL, NULL, ?, ?)
+      `INSERT INTO mcp_servers (id, name, transport, command, args_json, url, env_keys_json, env_cipher,
+         header_keys_json, headers_cipher, auth_mode, registry_server_id, registry_name, package_name,
+         package_version, runtime, manifest_json, enabled, tools_json, status, error, last_probe_at,
+         created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', 'unchecked', NULL, NULL, ?, ?)
        ON CONFLICT(id) DO UPDATE SET name=excluded.name, transport=excluded.transport, command=excluded.command,
-         args_json=excluded.args_json, env_keys_json=excluded.env_keys_json, env_cipher=excluded.env_cipher,
-         enabled=excluded.enabled, updated_at=excluded.updated_at`
+         args_json=excluded.args_json, url=excluded.url, env_keys_json=excluded.env_keys_json,
+         env_cipher=excluded.env_cipher, header_keys_json=excluded.header_keys_json,
+         headers_cipher=excluded.headers_cipher, auth_mode=excluded.auth_mode,
+         registry_server_id=excluded.registry_server_id, registry_name=excluded.registry_name,
+         package_name=excluded.package_name, package_version=excluded.package_version,
+         runtime=excluded.runtime, manifest_json=excluded.manifest_json, enabled=excluded.enabled,
+         updated_at=excluded.updated_at`
     ).run(
-      server.id, server.name, server.transport, server.command, JSON.stringify(server.args),
-      JSON.stringify(server.envKeys), envCipher, server.enabled ? 1 : 0, server.createdAt, server.updatedAt
+      server.id, server.name, server.transport, server.command, JSON.stringify(server.args), server.url,
+      JSON.stringify(server.envKeys), secrets.envCipher, JSON.stringify(server.headerKeys), secrets.headersCipher,
+      server.authMode, server.registryServerId, server.registryName, server.packageName,
+      server.packageVersion, server.runtime, JSON.stringify(server.manifest), server.enabled ? 1 : 0,
+      server.createdAt, server.updatedAt
     );
     const record = this.getMcpServer(server.id);
     if (!record) throw new Error("Failed to persist MCP server");
@@ -1249,10 +1268,10 @@ export class HearthStore {
 
   updateMcpServerProbe(
     id: string,
-    input: { status: McpServerStatus; tools: McpToolDescriptor[]; error: string | null; lastProbeAt: string }
+    input: { status: McpServerStatus; tools: McpToolDescriptor[]; error: string | null; lastProbeAt: string | null }
   ): McpServerRecord {
     this.db.prepare(
-      "UPDATE mcp_servers SET status = ?, tools_json = ?, error = ?, last_probe_at = ?, updated_at = ? WHERE id = ?"
+      "UPDATE mcp_servers SET status = ?, tools_json = ?, error = ?, last_probe_at = ?, updated_at = COALESCE(?, updated_at) WHERE id = ?"
     ).run(input.status, JSON.stringify(input.tools), input.error, input.lastProbeAt, input.lastProbeAt, id);
     const record = this.getMcpServer(id);
     if (!record) throw new Error("MCP server disappeared during probe");
@@ -1813,6 +1832,17 @@ export class HearthStore {
     ensureColumn(this.db, "tasks", "pinned_at", "TEXT");
     ensureColumn(this.db, "tasks", "archived_at", "TEXT");
     ensureColumn(this.db, "tasks", "goal_id", "TEXT");
+    ensureColumn(this.db, "tasks", "mcp_server_ids_json", "TEXT NOT NULL DEFAULT '[]'");
+    ensureColumn(this.db, "mcp_servers", "url", "TEXT");
+    ensureColumn(this.db, "mcp_servers", "header_keys_json", "TEXT NOT NULL DEFAULT '[]'");
+    ensureColumn(this.db, "mcp_servers", "headers_cipher", "TEXT");
+    ensureColumn(this.db, "mcp_servers", "auth_mode", "TEXT NOT NULL DEFAULT 'none'");
+    ensureColumn(this.db, "mcp_servers", "registry_server_id", "TEXT");
+    ensureColumn(this.db, "mcp_servers", "registry_name", "TEXT");
+    ensureColumn(this.db, "mcp_servers", "package_name", "TEXT");
+    ensureColumn(this.db, "mcp_servers", "package_version", "TEXT");
+    ensureColumn(this.db, "mcp_servers", "runtime", "TEXT");
+    ensureColumn(this.db, "mcp_servers", "manifest_json", "TEXT NOT NULL DEFAULT '{}'");
     ensureColumn(this.db, "task_follow_ups", "origin", "TEXT NOT NULL DEFAULT 'user'");
     ensureColumn(this.db, "goals", "project_id", "TEXT");
     ensureColumn(this.db, "goals", "conversation_id", "TEXT");
@@ -4504,8 +4534,8 @@ export class HearthStore {
 
 function upsertTask(db: DatabaseSync, task: TaskRecord): void {
   db.prepare(
-    `INSERT INTO tasks (id, external_ref, request_hash, template_id, title, goal, status, created_at, updated_at, deadline, inputs_json, network_hosts_json, output_dir, current_run_id, next_action, error_json, result_summary, conversation_id, executor_id, task_kind, expected_outputs_json, permissions_json, pending_input, method_id, method_version, project_id, pinned_at, archived_at, goal_id, budget_override_json, deleted_at, trash_batch_id, execution_mode, mode, plan_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO tasks (id, external_ref, request_hash, template_id, title, goal, status, created_at, updated_at, deadline, inputs_json, network_hosts_json, output_dir, current_run_id, next_action, error_json, result_summary, conversation_id, executor_id, task_kind, expected_outputs_json, permissions_json, pending_input, method_id, method_version, project_id, pinned_at, archived_at, goal_id, budget_override_json, deleted_at, trash_batch_id, execution_mode, mode, plan_id, mcp_server_ids_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        external_ref=excluded.external_ref, request_hash=excluded.request_hash,
        template_id=excluded.template_id, title=excluded.title, goal=excluded.goal, status=excluded.status,
@@ -4520,7 +4550,7 @@ function upsertTask(db: DatabaseSync, task: TaskRecord): void {
         pinned_at=excluded.pinned_at, archived_at=excluded.archived_at, goal_id=excluded.goal_id,
         budget_override_json=excluded.budget_override_json, deleted_at=excluded.deleted_at,
         trash_batch_id=excluded.trash_batch_id, execution_mode=excluded.execution_mode,
-        mode=excluded.mode, plan_id=excluded.plan_id`
+        mode=excluded.mode, plan_id=excluded.plan_id, mcp_server_ids_json=excluded.mcp_server_ids_json`
   ).run(
     task.id, task.externalRef ?? null, task.requestHash ?? null,
     task.templateId, task.title, task.goal, task.status, task.createdAt, task.updatedAt,
@@ -4535,7 +4565,7 @@ function upsertTask(db: DatabaseSync, task: TaskRecord): void {
     task.pinnedAt ?? null, task.archivedAt ?? null, task.goalId ?? null,
     task.budgetOverride ? JSON.stringify(task.budgetOverride) : null,
     task.deletedAt ?? null, task.trashBatchId ?? null, task.executionMode ?? null,
-    task.mode ?? "build", task.planId ?? null
+    task.mode ?? "build", task.planId ?? null, JSON.stringify(task.mcpServerIds ?? [])
   );
 }
 
@@ -4669,6 +4699,10 @@ function updateTask(db: DatabaseSync, taskId: string | null, patch: Record<strin
   if ("networkHosts" in patch) {
     db.prepare("UPDATE tasks SET network_hosts_json = ? WHERE id = ?")
       .run(JSON.stringify(patch.networkHosts ?? []), taskId);
+  }
+  if ("mcpServerIds" in patch) {
+    db.prepare("UPDATE tasks SET mcp_server_ids_json = ? WHERE id = ?")
+      .run(JSON.stringify(patch.mcpServerIds ?? []), taskId);
   }
   if ("permissions" in patch) {
     db.prepare("UPDATE tasks SET permissions_json = ? WHERE id = ?")
@@ -5659,6 +5693,7 @@ function rowToTask(row: DbRow): TaskRecord {
     methodId: row.method_id == null ? null : String(row.method_id),
     methodVersion: row.method_version == null ? null : Number(row.method_version),
     projectId: row.project_id == null ? null : String(row.project_id),
+    mcpServerIds: stringArray(row.mcp_server_ids_json),
     pinnedAt: row.pinned_at == null ? null : String(row.pinned_at),
     archivedAt: row.archived_at == null ? null : String(row.archived_at),
     budgetOverride: row.budget_override_json == null ? null : JSON.parse(String(row.budget_override_json)),
@@ -6818,10 +6853,19 @@ function rowToMcpServer(row: DbRow): McpServerRecord {
   return {
     id: String(row.id),
     name: String(row.name),
-    transport: "stdio",
+    transport: row.transport === "streamable-http" ? "streamable-http" : "stdio",
     command: String(row.command),
     args: stringArray(row.args_json),
+    url: row.url == null ? null : String(row.url),
     envKeys: stringArray(row.env_keys_json),
+    headerKeys: stringArray(row.header_keys_json),
+    authMode: row.auth_mode === "headers" ? "headers" : "none",
+    registryServerId: row.registry_server_id == null ? null : String(row.registry_server_id),
+    registryName: row.registry_name == null ? null : String(row.registry_name),
+    packageName: row.package_name == null ? null : String(row.package_name),
+    packageVersion: row.package_version == null ? null : String(row.package_version),
+    runtime: row.runtime == null ? null : String(row.runtime),
+    manifest: jsonObject(row.manifest_json),
     enabled: Number(row.enabled) === 1,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
@@ -6829,8 +6873,20 @@ function rowToMcpServer(row: DbRow): McpServerRecord {
     tools: toolDescriptors(row.tools_json),
     error: row.error == null ? null : String(row.error),
     lastProbeAt: row.last_probe_at == null ? null : String(row.last_probe_at),
-    envCipher: row.env_cipher == null ? null : String(row.env_cipher)
+    envCipher: row.env_cipher == null ? null : String(row.env_cipher),
+    headersCipher: row.headers_cipher == null ? null : String(row.headers_cipher)
   };
+}
+
+function jsonObject(value: unknown): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(String(value ?? "{}")) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
 }
 
 function stringArray(value: unknown): string[] {

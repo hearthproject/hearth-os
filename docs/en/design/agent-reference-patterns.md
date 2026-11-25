@@ -42,7 +42,7 @@ OpenClaw and Hermes separate connection, capability grants, action execution, an
 - **Recoverable execution.** Checkpoints are written after turns and tool steps. Waiting input, budget exhaustion, and service restart resume from an explicit position.
 - **A compact completion signal.** A completion tool declares the result, and the system verifies artifacts. The model saying “done” is not completion.
 
-Hearth implements these principles in its own `@hearth/agent-runtime` without importing the Pi npm package. The native kernel keeps a small, explicit loop while adding token-aware compaction, transient retries, loop detection, on-demand skills, bounded delegation, local MCP, and worktrees. These are Hearth task-control capabilities, not a claim of feature parity with Pi. Codex remains the default executor for GitHub engineering work, and both paths share task state, permissions, budgets, and the artifact contract.
+Hearth implements these principles in its own `@hearth/agent-runtime` without importing the Pi npm package. The native kernel keeps a small, explicit loop while adding token-aware compaction, transient retries, loop detection, on-demand skills, bounded delegation, Registry-installed MCP, and worktrees. These are Hearth task-control capabilities, not a claim of feature parity with Pi. Codex remains the default executor for GitHub engineering work, and both paths share task state, permissions, budgets, and the artifact contract.
 
 ## DeerFlow patterns worth adopting
 
@@ -61,7 +61,7 @@ Hearth borrows this decomposition, evidence, layered-evaluation, and long-horizo
 - **Delegation has explicit boundaries.** A subagent starts with fresh context, writes in an isolated worktree, and leaves the parent to inspect and merge the result.
 - **Context must be actively managed.** Compact at the model window, retain recent context and complete tool pairs, and make compaction part of recovery.
 
-Hearth has adopted these public capability shapes with its own glob/grep, atomic edits, bounded shell output and process-tree timeout, office artifacts, search, skill index, bounded subagents, local stdio MCP, and project worktrees. It has not copied OpenCode's code or runtime; approval, the task ledger, checkpoints, recovery, and artifact verification remain Hearth implementations. The remaining gap is mainly LSP, formatters, remote MCP, browser automation, visual understanding, automatic merging, and a more complete worktree experience.
+Hearth has adopted these public capability shapes with its own glob/grep, atomic edits, bounded shell output and process-tree timeout, office artifacts, built-in search, skill index, bounded subagents, Registry MCP over stdio or Streamable HTTP, and project worktrees. It has not copied OpenCode's code or runtime; approval, the task ledger, checkpoints, recovery, and artifact verification remain Hearth implementations. The remaining gap is mainly LSP, formatters, provider OAuth, visual understanding, automatic merging, and a more complete worktree experience.
 
 ## LoopX patterns worth adopting
 
@@ -103,7 +103,7 @@ Hearth uses LoopX only as a delivery-method reference. It is not a runtime depen
 - Claiming system push, phone pairing, remote takeover, or real mobile-device acceptance. The PWA currently provides an installable shell and offline navigation only.
 - Describing DeerFlow, OpenCode, or LoopX as integrated components. They provide design, capability-tradeoff, and delivery-method references only.
 - Describing Pi as an integrated dependency. Hearth uses its single-agent kernel shape as a reference and provides its own TypeScript implementation.
-- Treating OpenCode's public execution surface as something Hearth has fully copied. LSP, formatters, remote MCP, browser automation, visual understanding, and automatic merging are not implemented.
+- Treating OpenCode's public execution surface as something Hearth has fully copied. LSP, formatters, provider OAuth, visual understanding, and automatic merging are not implemented.
 
 ## Impact by phase
 

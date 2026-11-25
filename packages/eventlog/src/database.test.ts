@@ -42,6 +42,50 @@ function task(id = "task-1"): TaskRecord {
 }
 
 describe("HearthStore", () => {
+  it("keeps an MCP server's never-probed state nullable during a status restore", () => {
+    const store = new HearthStore(":memory:");
+    const config = {
+      id: "mcp_restore",
+      name: "Restore",
+      transport: "stdio" as const,
+      command: "node",
+      args: [],
+      url: null,
+      envKeys: [],
+      headerKeys: [],
+      authMode: "none" as const,
+      registryServerId: null,
+      registryName: null,
+      packageName: null,
+      packageVersion: null,
+      runtime: "manual",
+      manifest: {},
+      enabled: true,
+      createdAt: "2026-11-05T00:00:00.000Z",
+      updatedAt: "2026-11-05T00:00:00.000Z"
+    };
+    store.upsertMcpServer(config, { envCipher: null, headersCipher: null });
+    store.updateMcpServerProbe(config.id, {
+      status: "error",
+      tools: [],
+      error: "probe failed",
+      lastProbeAt: "2026-11-05T00:01:00.000Z"
+    });
+    const restored = store.updateMcpServerProbe(config.id, {
+      status: "unchecked",
+      tools: [],
+      error: null,
+      lastProbeAt: null
+    });
+    expect(restored).toMatchObject({
+      status: "unchecked",
+      error: null,
+      lastProbeAt: null,
+      updatedAt: "2026-11-05T00:01:00.000Z"
+    });
+    store.close();
+  });
+
   it("appends events and updates projections", () => {
     const store = new HearthStore(":memory:");
     store.appendEvent({ type: "task.created", taskId: "task-1", payload: task() });

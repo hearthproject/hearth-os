@@ -22,12 +22,13 @@ import type { HostKernel } from "./host-kernel.ts";
 import { actionDigest, decideActionPolicy, resolveAction, type ActionFileTarget, type ActionProposal, type PermissionMode, type ResolvedAction } from "./action-resolver.ts";
 import { createFileArtifact, missingExpectedOutputs, publishArtifacts } from "./artifacts.ts";
 import { diffWorkspace, formatChangeManifest, snapshotWorkspace, type WorkspaceSnapshot } from "./change-manifest.ts";
-import { BROWSER_ENABLED, BROWSER_EVIDENCE_DIR, BROWSER_EXTENSION_TOKEN_PATH, BROWSER_MCP_OUTPUT_DIR, BROWSER_PROFILE_DIR, BROWSER_RECIPE_DIR, BROWSER_STATE_PATH, CONTEXT_BLOB_DIR, DOSSIER_DIR, EXECUTOR_SETTINGS_PATH, GIT_CACHE_DIR, MODEL_SETTINGS_PATH, REPO_ROOT, SOURCE_CONTENT_DIR, WORKSPACE_DIR } from "./config.ts";
+import { BROWSER_ENABLED, BROWSER_EVIDENCE_DIR, BROWSER_EXTENSION_TOKEN_PATH, BROWSER_MCP_OUTPUT_DIR, BROWSER_PROFILE_DIR, BROWSER_RECIPE_DIR, BROWSER_STATE_PATH, CONTEXT_BLOB_DIR, DOSSIER_DIR, EXECUTOR_SETTINGS_PATH, GIT_CACHE_DIR, MASTER_KEY_PATH, MODEL_SETTINGS_PATH, REPO_ROOT, SOURCE_CONTENT_DIR, WORKSPACE_DIR } from "./config.ts";
 import { DossierStore } from "./dossier.ts";
 import { rememberSystemContext } from "./system-context-registry.ts";
 import { BrowserEvidenceStore } from "./browser-evidence.ts";
 import { BrowserService } from "./browser-service.ts";
 import { BrowserSessionManager, type BrowserTakeoverKind } from "./browser-session.ts";
+import { SecretBox } from "./secrets.ts";
 import { createBrowserTools } from "./browser-tools.ts";
 import { browserToolSecrets, redactBrowserToolArguments, redactKnownSecrets, sanitizeNativeCheckpoint } from "./browser-redaction.ts";
 import { ContextService, estimateTokens } from "./context.ts";
@@ -59,6 +60,7 @@ import { ContextBroker } from "./context-broker.ts";
 import type { LibraryService } from "./library/service.ts";
 import { createLibraryTools } from "./library/tools.ts";
 import type { LibraryMcpLaunch } from "./library/mcp-runtime.ts";
+import { mcpBridgeLaunch } from "./mcp-bridge-runtime.ts";
 import { OntologyService } from "./ontology.ts";
 import { createPersonalReadTools } from "./personal-tools.ts";
 import { createAgentTool, createSubagentResumeHandler, createSubagentTool } from "./subagents.ts";
@@ -295,7 +297,49 @@ export class HearthScheduler {
     this.browserSessions = new BrowserSessionManager(this.browserService, {
       statePath: BROWSER_STATE_PATH,
       extensionTokenPath: BROWSER_EXTENSION_TOKEN_PATH,
-      extensionOutputDir: BROWSER_MCP_OUTPUT_DIR
+      extensionOutputDir: BROWSER_MCP_OUTPUT_DIR,
+      secretBox: SecretBox.fromKeyFile(MASTER_KEY_PATH)
+    });
+    this.webSearch?.setBrowserFallback({
+      search: async (query, maxResults, signal) => {
+        if (signal?.aborted) throw new Error("搜索已取消");
+        const ephemeralTaskId = `web-search-${randomUUID()}`;
+        try {
+          const { tab } = await this.browserSessions.activePage(ephemeralTaskId, { allowObservation: true });
+          const url = new URL("https://www.bing.com/search");
+          url.searchParams.set("q", query);
+          await tab.page.goto(url.href, 45_000);
+          if (signal?.aborted) throw new Error("搜索已取消");
+          const raw = await tab.page.execute(`async (page) => {
+            for (const frame of page.frames()) {
+              const items = await frame.evaluate((limit) => {
+                const nodes = Array.from(document.querySelectorAll('#b_results li.b_algo h2 a, .b_algo h2 a')) as HTMLAnchorElement[];
+                return nodes.slice(0, limit).map((anchor) => {
+                  const container = anchor.closest('li, .b_algo');
+                  return {
+                    title: (anchor.textContent || '').replace(/\\s+/g, ' ').trim(),
+                    url: anchor.href,
+                    snippet: (container?.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 600)
+                  };
+                });
+              }, ${Math.max(1, maxResults)}).catch(() => []);
+              if (items.length > 0) return items;
+            }
+            return [];
+          }`);
+          return Array.isArray(raw)
+            ? raw.flatMap((item) => {
+                if (!item || typeof item !== "object") return [];
+                const value = item as Record<string, unknown>;
+                return typeof value.url === "string"
+                  ? [{ title: String(value.title ?? ""), url: value.url, snippet: String(value.snippet ?? "") }]
+                  : [];
+              })
+            : [];
+        } finally {
+          await this.browserSessions.close(ephemeralTaskId).catch(() => undefined);
+        }
+      }
     });
     this.browserEvidence = new BrowserEvidenceStore(BROWSER_EVIDENCE_DIR);
     this.worktrees = options.worktrees ?? new TaskWorktreeService(this.service.store, { workspaceRoot: this.workspaceRoot });
@@ -444,12 +488,15 @@ export class HearthScheduler {
     return { session: this.browserSessions.describe(taskId), task, snapshot: released.snapshot };
   }
 
-  async connectBrowser(taskId: string, token?: string): Promise<ReturnType<BrowserSessionManager["describe"]>> {
-    this.service.requireTask(taskId);
-    return this.browserSessions.connectExtensionToken(taskId, token);
+  async connectBrowser(taskId: string, token?: string, profileDirName?: string): Promise<ReturnType<BrowserSessionManager["describe"]>> {
+    const task = this.service.requireTask(taskId);
+    if (task.status === "running") await this.pause(taskId);
+    return this.browserSessions.connectExtensionToken(taskId, token, profileDirName);
   }
 
   async closeBrowser(taskId: string): Promise<void> {
+    const task = this.service.requireTask(taskId);
+    if (task.status === "running") await this.pause(taskId);
     await this.browserSessions.release(taskId);
   }
 
@@ -705,6 +752,7 @@ export class HearthScheduler {
     if (task.status === "completed") return task;
     if (task.status === "cancelled") {
       this.controllers.get(taskId)?.abort();
+      this.closeCancelledBrowser(taskId);
       this.releaseLease(taskId);
       this.goals?.onTaskCancelled(task);
       return task;
@@ -728,10 +776,17 @@ export class HearthScheduler {
       error: null
     }, task.currentRunId ?? undefined);
     this.resolvePauseWaiter(taskId, { task: cancelledTask, resume: null });
+    this.closeCancelledBrowser(taskId);
     if (task.currentRunId) this.writeRunEvidence(taskId, task.currentRunId);
     this.goals?.onTaskCancelled(task);
     this.releaseLease(taskId);
     return this.service.requireTask(taskId);
+  }
+
+  private closeCancelledBrowser(taskId: string): void {
+    void this.browserSessions.close(taskId).catch((error) => {
+      console.warn("[browser] cancelled browser session could not be closed:", error instanceof Error ? error.message : String(error));
+    });
   }
 
   private resumeReference(task: TaskRecord): TaskResumeReference | null {
@@ -2365,6 +2420,7 @@ export class HearthScheduler {
         service: this.service,
         ontology: this.ontology
       });
+      const selectedMcpIds = [...new Set(task.mcpServerIds ?? [])];
       if (task.goalId && this.goals) {
         extraNativeTools.push(...createControlGoalTools({
           goals: this.goals,
@@ -2397,7 +2453,7 @@ export class HearthScheduler {
       if (executorId === "native") {
         if (this.mcpServers) {
           try {
-            extraNativeTools.push(...createMcpTools(this.mcpServers));
+            extraNativeTools.push(...createMcpTools(this.mcpServers, selectedMcpIds));
           } catch (error) {
             this.capture({
               taskId,
@@ -2452,6 +2508,11 @@ export class HearthScheduler {
         }));
       }
       const adapter = this.adapters[executorId];
+      const selectedMcpLaunch = selectedMcpIds.length > 0 ? mcpBridgeLaunch({ serverIds: selectedMcpIds }) : null;
+      const taskMcpServers = {
+        ...(this.libraryMcp ? { hearth: this.libraryMcp } : {}),
+        ...(selectedMcpLaunch ? { hearth_selected: selectedMcpLaunch } : {})
+      };
       const attemptContext: ExecutorAttemptContext = {
         task,
         run,
@@ -2471,7 +2532,7 @@ export class HearthScheduler {
         mode: task.mode ?? "build",
         ...(task.goalId ? { skipBuiltinGoalTools: true } : {}),
         ...(extraNativeTools.length > 0 ? { extraNativeTools } : {}),
-        ...(this.libraryMcp ? { mcpServers: { hearth: this.libraryMcp } } : {}),
+        ...(Object.keys(taskMcpServers).length > 0 ? { mcpServers: taskMcpServers } : {}),
         ...(activeThreadId ? { activeThreadId } : {}),
         onProgress: (event) => this.publishProgress(taskId, runId, event.kind, event.message, event.detail),
         onNativeContextEvent: (event) => this.captureNativeEvent(task, run, event),
@@ -2752,8 +2813,17 @@ export class HearthScheduler {
     const visibleArgumentsValue = redactBrowserToolArguments(toolName, argumentsValue);
     const summary = toolApprovalSummary(toolName, input.request.call.arguments);
     const permissionMode = this.service.permissionModeForTask(input.task);
-    if (permissionMode === "full") return { allowed: true };
+    if (permissionMode === "full" && !toolName.startsWith("browser_")) return { allowed: true };
     const context = this.service.store.listScheduleRunByTask(input.task.id) ? "scheduled" as const : "interactive" as const;
+    const browserPage = this.browserSessions.activeTab(input.task.id);
+    const browserSnapshot = this.browserSessions.latestSnapshot(input.task.id);
+    const rawBrowserArguments = input.request.call.arguments && typeof input.request.call.arguments === "object" && !Array.isArray(input.request.call.arguments)
+      ? input.request.call.arguments as Record<string, unknown>
+      : {};
+    const elementRef = typeof rawBrowserArguments.ref === "string" ? rawBrowserArguments.ref : null;
+    const browserElementName = elementRef
+      ? browserSnapshot?.elements.find((element) => element.ref === elementRef)?.name ?? null
+      : null;
     let action: ResolvedAction | null;
     try {
       const resolved = resolveToolAction({
@@ -2764,7 +2834,8 @@ export class HearthScheduler {
         workspaceRoot: input.workspaceRoot,
         permissionMode,
         context,
-        browserUrl: this.browserSessions?.activeTab(input.task.id)?.page.url() ?? null
+        browserUrl: browserPage?.page.url() || browserPage?.url || null,
+        browserElementName
       });
       action = resolved;
     } catch (error) {
@@ -2820,7 +2891,9 @@ export class HearthScheduler {
     signal: AbortSignal;
   }): Promise<DshApprovalOutcome> {
     if (input.signal.aborted) return "cancelled";
-    if (this.service.approvalModeForTask(input.task) === "full") return "allowed-once";
+    const permissionMode = this.service.approvalModeForTask(input.task);
+    const browserTool = input.request.toolName.startsWith("browser_");
+    if (permissionMode === "full" && !browserTool) return "allowed-once";
     const metadata = dshApprovalMetadata(input.request);
     const classification = classifyTool(input.request.toolName);
     if (!classification.requiresApproval) {
@@ -3834,6 +3907,7 @@ export function resolveToolAction(input: {
   permissionMode: PermissionMode;
   context: "interactive" | "scheduled";
   browserUrl?: string | null;
+  browserElementName?: string | null;
 }): ResolvedAction | null {
   const args = input.argumentsValue && typeof input.argumentsValue === "object"
     ? input.argumentsValue as Record<string, unknown>
@@ -3905,6 +3979,8 @@ export function resolveToolAction(input: {
           action: input.toolName.slice("browser_".length),
           ...(typeof args.tabId === "string" ? { tabId: args.tabId } : {}),
           ...(typeof args.ref === "string" ? { elementRef: args.ref } : {}),
+          ...(input.browserElementName ? { elementName: input.browserElementName } : {}),
+          ...(typeof args.key === "string" ? { key: args.key } : {}),
           ...(typeof args.text === "string" ? { inputDigest: actionDigest(args.text) } : {}),
           ...(typeof args.pageDigest === "string" ? { pageDigest: args.pageDigest } : {})
         }

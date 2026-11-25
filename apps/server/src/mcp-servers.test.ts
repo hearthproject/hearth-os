@@ -1,8 +1,15 @@
 import { randomBytes } from "node:crypto";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { Server as McpProtocolServer } from "@modelcontextprotocol/sdk/server/index.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { McpRegistryCandidate } from "@hearth/core";
 import { HearthStore } from "@hearth/eventlog";
 import { buildServer } from "./app.ts";
+import type { McpRegistryClient } from "./mcp-registry.ts";
 import { McpServerService } from "./mcp-servers.ts";
 import { SecretBox } from "./secrets.ts";
 
@@ -140,4 +147,152 @@ describe("local MCP server management", () => {
       await app.close();
     }
   });
+
+  it("connects to a Streamable HTTP server with encrypted headers", async () => {
+    let authorization: string | undefined;
+    const createProtocolServer = () => {
+      const protocol = new McpProtocolServer(
+        { name: "remote-test", version: "1.0.0" },
+        { capabilities: { tools: {} } }
+      );
+      protocol.setRequestHandler(ListToolsRequestSchema, async () => ({
+        tools: [{
+          name: "remote_echo",
+          description: "Echo through Streamable HTTP",
+          inputSchema: {
+            type: "object",
+            properties: { text: { type: "string" } },
+            required: ["text"],
+            additionalProperties: false
+          }
+        }]
+      }));
+      protocol.setRequestHandler(CallToolRequestSchema, async (request) => ({
+        content: [{ type: "text", text: `remote:${String(request.params.arguments?.text ?? "")}` }]
+      }));
+      return protocol;
+    };
+    const httpServer = createServer(async (request, response) => {
+      authorization = request.headers.authorization;
+      if (request.method !== "POST") {
+        response.writeHead(405).end();
+        return;
+      }
+      const protocol = createProtocolServer();
+      const transport = new StreamableHTTPServerTransport();
+      await protocol.connect(transport);
+      try {
+        await transport.handleRequest(request, response);
+      } finally {
+        await transport.close().catch(() => undefined);
+        await protocol.close().catch(() => undefined);
+      }
+    });
+    await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
+    const address = httpServer.address() as AddressInfo;
+
+    try {
+      const remote = await service.create({
+        name: "Remote HTTP",
+        transport: "streamable-http",
+        url: `http://127.0.0.1:${address.port}/mcp`,
+        headers: { Authorization: "Bearer remote-secret" }
+      });
+      if (remote.status !== "ready") throw new Error(`Remote probe failed: ${remote.error}`);
+
+      expect(remote).toMatchObject({
+        transport: "streamable-http",
+        status: "ready",
+        headerKeys: ["Authorization"]
+      });
+      expect(remote.tools.map((tool) => tool.name)).toEqual(["remote_echo"]);
+      expect(JSON.stringify(service.list())).not.toContain("remote-secret");
+
+      const result = await service.callTool(remote.id, "remote_echo", { text: "hello" });
+      expect(result.content).toBe("remote:hello");
+      expect(authorization).toBe("Bearer remote-secret");
+    } finally {
+      await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+    }
+  }, 15_000);
+
+  it("installs a Registry candidate transactionally and probes it before enabling", async () => {
+    const candidate = registryCandidate({
+      serverName: "io.example/mock",
+      title: "Registry Mock",
+      command: process.execPath,
+      args: [mockServer]
+    });
+    const registry = { find: vi.fn(async () => candidate) } as unknown as McpRegistryClient;
+    const registryService = new McpServerService({ store, secretBox, registry, timeoutMs: 3_000 });
+
+    const installed = await registryService.installRegistry({ serverName: candidate.serverName });
+
+    expect(installed).toMatchObject({
+      name: "Registry Mock",
+      registryServerId: candidate.serverName,
+      packageName: candidate.packageName,
+      runtime: candidate.runtime,
+      status: "ready",
+      enabled: true
+    });
+    expect(installed.tools.map((tool) => tool.name)).toContain("echo");
+    expect(registry.find).toHaveBeenCalledWith(candidate.serverName);
+  }, 15_000);
+
+  it("requires declared Registry secrets and removes a failed new draft", async () => {
+    const candidate = registryCandidate({
+      serverName: "io.example/failing",
+      title: "Failing Registry",
+      command: process.execPath,
+      args: ["-e", "process.exit(1)"],
+      requiredEnv: ["EXAMPLE_TOKEN"],
+      envVariables: [{
+        name: "EXAMPLE_TOKEN",
+        description: "Token",
+        required: true,
+        secret: true,
+        placeholder: null,
+        defaultValue: null
+      }]
+    });
+    const registry = { find: vi.fn(async () => candidate) } as unknown as McpRegistryClient;
+    const registryService = new McpServerService({ store, secretBox, registry, timeoutMs: 3_000 });
+
+    await expect(registryService.installRegistry({ serverName: candidate.serverName })).rejects.toMatchObject({
+      code: "MCP_REGISTRY_VALUES_REQUIRED"
+    });
+    expect(store.listMcpServers()).toHaveLength(0);
+
+    await expect(registryService.installRegistry({
+      serverName: candidate.serverName,
+      env: { EXAMPLE_TOKEN: "top-secret" }
+    })).rejects.toMatchObject({ code: "MCP_REGISTRY_INSTALL_FAILED" });
+    expect(store.listMcpServers()).toHaveLength(0);
+  }, 15_000);
 });
+
+function registryCandidate(overrides: Partial<McpRegistryCandidate> = {}): McpRegistryCandidate {
+  return {
+    serverName: "io.example/test",
+    title: "Registry Test",
+    description: "Test server",
+    version: "1.0.0",
+    transport: "stdio",
+    runtime: "npx",
+    packageName: "@example/test",
+    packageVersion: "1.0.0",
+    command: process.execPath,
+    args: [mockServer],
+    url: null,
+    requiredEnv: [],
+    requiredHeaders: [],
+    envVariables: [],
+    headerVariables: [],
+    homepage: null,
+    repositoryUrl: null,
+    installable: true,
+    unsupportedReason: null,
+    ...overrides
+  };
+}

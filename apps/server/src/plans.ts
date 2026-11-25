@@ -34,6 +34,7 @@ export interface CreatePlanInput {
   objective?: string;
   textInput?: string;
   execution?: Partial<PlanExecutionProfile>;
+  mcpServerIds?: string[];
   /** Create the first planning task immediately. Defaults to true when objective exists. */
   start?: boolean;
 }
@@ -116,7 +117,7 @@ export class PlanService {
 
     const shouldStart = input.start ?? objective.length > 0;
     if (shouldStart && objective) {
-      const task = this.createPlanningTask(plan, input.textInput ?? objective);
+      const task = this.createPlanningTask(plan, input.textInput ?? objective, input.mcpServerIds);
       return this.attachPlanningTask(plan.id, task.id);
     }
     return normalizePlan(plan);
@@ -152,12 +153,19 @@ export class PlanService {
     return this.retry(plan);
   }
 
-  continuePlanning(planId: string, content: string, options: { title?: string; textInput?: string } = {}): PlanView {
+  continuePlanning(
+    planId: string,
+    content: string,
+    options: { title?: string; textInput?: string; mcpServerIds?: string[] } = {}
+  ): PlanView {
     const plan = this.require(planId);
     if (plan.stage === "awaiting_approval" || plan.stage === "planning") {
       const task = plan.planningTaskId
         ? this.service.requireTask(plan.planningTaskId)
-        : this.createPlanningTask(plan, content);
+        : this.createPlanningTask(plan, content, options.mcpServerIds);
+      if (plan.planningTaskId && options.mcpServerIds) {
+        this.service.setTaskMcpServerIds(task.id, options.mcpServerIds);
+      }
       const next = this.save({
         ...plan,
         stage: "planning",
@@ -300,6 +308,7 @@ export class PlanService {
       planSha256: sha256
     };
     const execution = this.executionProfile(plan);
+    const planningTask = plan.planningTaskId ? this.service.store.getTask(plan.planningTaskId) : null;
     const task = this.service.createTask({
       title: plan.title,
       goal: plan.objective,
@@ -312,6 +321,7 @@ export class PlanService {
       ...(execution.workspacePath ? { workspacePath: execution.workspacePath } : {}),
       ...(execution.networkHosts.length > 0 ? { networkHosts: execution.networkHosts } : {}),
       ...(execution.executionMode ? { executionMode: execution.executionMode } : {}),
+      ...(planningTask?.mcpServerIds?.length ? { mcpServerIds: planningTask.mcpServerIds } : {}),
       planId: plan.id,
       mode: "build"
     });
@@ -402,7 +412,7 @@ export class PlanService {
     return this.approve({ ...plan, stage: "awaiting_approval", executionTaskId: null, error: null });
   }
 
-  private createPlanningTask(plan: PlanRecord, text: string): TaskRecord {
+  private createPlanningTask(plan: PlanRecord, text: string, mcpServerIds?: string[]): TaskRecord {
     if (plan.stage !== "planning") {
       throw new PlanStateError("PLAN_STATE_INVALID", `计划处于 ${plan.stage} 时不能创建规划任务`);
     }
@@ -417,6 +427,7 @@ export class PlanService {
       expectedOutputs: [],
       ...(plan.projectId ? { projectId: plan.projectId } : {}),
       ...(execution.workspacePath ? { workspacePath: execution.workspacePath } : {}),
+      ...(mcpServerIds?.length ? { mcpServerIds } : {}),
       planId: plan.id,
       mode: "plan"
     });

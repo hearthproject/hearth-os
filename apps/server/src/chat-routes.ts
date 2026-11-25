@@ -71,6 +71,7 @@ const chatSchema = z.object({
   projectId: z.string().trim().min(1).max(120).optional(),
   message: z.string().max(100_000).optional(),
   skillId: z.string().trim().min(1).max(120).optional(),
+  mcpServerIds: z.array(z.string().trim().min(1).max(120)).max(8).optional(),
   attachments: z.array(attachmentSchema).max(5).optional(),
   url: z.string().trim().max(2_048).optional(),
   goalMode: z.boolean().optional(),
@@ -667,7 +668,8 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       (item.role === "user" && isSimpleDraft(item.content)) ||
       (item.role === "assistant" && /^\s*(?:\*\*)?(?:主题|Subject)\s*[:：]/i.test(item.content)));
     const directDraft = storedFiles.length === 0 && !detectedUrl && (isSimpleDraft(userContent) || (recentDraft && isDraftRevision(userContent)));
-    const routeMode = parsed.data.routeMode ?? "auto";
+    const requestedRouteMode = parsed.data.routeMode ?? "auto";
+    const routeMode = parsed.data.mcpServerIds?.length && requestedRouteMode === "auto" ? "task" : requestedRouteMode;
     const chatProject = conversation.projectId ? store.getLocalProject(conversation.projectId) : null;
     const wantsGoal = parsed.data.goalMode === true;
     const wantsPlan = parsed.data.planMode === true || effectiveSettings.collaborationMode === "plan";
@@ -809,7 +811,8 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
             }
             const revised = options.plans.continuePlanning(activePlan.id, planInput, {
               ...(route.title ? { title: route.title } : {}),
-              textInput: planInput
+              textInput: planInput,
+              ...(parsed.data.mcpServerIds?.length ? { mcpServerIds: parsed.data.mcpServerIds } : {})
             });
             const planningTask = revised.planningTaskId ? service.store.getTask(revised.planningTaskId) : null;
             if (!planningTask) throw new Error("计划规划任务没有创建成功");
@@ -821,6 +824,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
               title: route.title || conversationTitle(userContent),
               objective: taskGoal,
               textInput: planInput,
+              ...(parsed.data.mcpServerIds?.length ? { mcpServerIds: parsed.data.mcpServerIds } : {}),
               execution: {
                 executorId: resolution.executorId,
                 taskKind: plan.taskKind,
@@ -883,7 +887,8 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
             ...(resolution.executorId === "native" ? { executionMode: effectiveSettings.executionMode ?? "standard" } : {}),
             taskKind: plan.taskKind,
             expectedOutputs: plan.expectedOutputs,
-            ...(plan.networkHosts ? { networkHosts: plan.networkHosts } : {})
+            ...(plan.networkHosts ? { networkHosts: plan.networkHosts } : {}),
+            ...(parsed.data.mcpServerIds?.length ? { mcpServerIds: parsed.data.mcpServerIds } : {})
           });
         }
         if (createdGoalId && options.goals) {

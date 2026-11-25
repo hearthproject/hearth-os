@@ -1051,6 +1051,286 @@
   gap: 6px;
 }
 
+.composer-mcp-chip {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line-strong));
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+}
+
+.composer-mcp-panel {
+  width: 100%;
+  max-width: var(--chat-content);
+  max-height: min(520px, 58vh);
+  margin: 0 auto 7px;
+  padding: 10px;
+  overflow: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--pop-shadow);
+}
+
+.composer-mcp-header,
+.composer-mcp-section-title,
+.composer-mcp-candidate-head,
+.composer-mcp-install-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.composer-mcp-header > div,
+.composer-mcp-candidate-head > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.composer-mcp-header strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-12);
+}
+
+.composer-mcp-header span,
+.composer-mcp-section-title span,
+.composer-mcp-candidate-head span,
+.composer-mcp-server small,
+.composer-mcp-candidate p,
+.composer-mcp-empty {
+  color: var(--ink-tertiary);
+  font-size: var(--fs-10);
+}
+
+.composer-mcp-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 9px;
+  padding: 5px 6px 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-sunk);
+}
+
+.composer-mcp-search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 3px 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--fs-11);
+}
+
+.composer-mcp-search button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.composer-mcp-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 7px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-sunk);
+  color: var(--ink-secondary);
+  font-size: var(--fs-10);
+}
+
+.composer-mcp-notice > span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.composer-mcp-section {
+  margin-top: 11px;
+}
+
+.composer-mcp-section-title {
+  margin-bottom: 6px;
+}
+
+.composer-mcp-section-title strong,
+.composer-mcp-install-form > strong {
+  font-size: var(--fs-11);
+  font-weight: 600;
+}
+
+.composer-mcp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 6px;
+}
+
+.composer-mcp-server {
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.composer-mcp-server.selected {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+}
+
+.composer-mcp-select {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  gap: 7px;
+  min-width: 0;
+  padding: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-secondary);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.composer-mcp-select:disabled {
+  cursor: default;
+}
+
+.composer-mcp-select > span {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.composer-mcp-select strong,
+.composer-mcp-candidate-head strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: var(--fs-11);
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-mcp-select small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-mcp-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  border-left: 1px solid var(--line);
+  background: transparent;
+}
+
+.composer-mcp-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 0;
+  gap: 3px;
+  min-width: 48px;
+  padding: 2px 7px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-tertiary);
+  font: inherit;
+  font-size: var(--fs-10);
+  cursor: pointer;
+}
+
+.composer-mcp-actions button + button {
+  border-top: 1px solid var(--line);
+}
+
+.composer-mcp-actions button:hover {
+  background: var(--surface-sunk);
+  color: var(--ink);
+}
+
+.composer-mcp-actions button.danger:hover {
+  color: var(--risk);
+}
+
+.composer-mcp-results {
+  grid-template-columns: 1fr;
+  max-height: 300px;
+  overflow: auto;
+}
+
+.composer-mcp-candidate {
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.composer-mcp-candidate p {
+  display: -webkit-box;
+  margin: 6px 0 0;
+  overflow: hidden;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.composer-mcp-candidate-head .ghost-button {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.composer-mcp-unsupported {
+  display: block;
+  margin-top: 5px;
+  color: var(--risk);
+  font-size: var(--fs-10);
+}
+
+.composer-mcp-install-form {
+  display: grid;
+  gap: 7px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.composer-mcp-install-form label {
+  display: grid;
+  gap: 3px;
+  color: var(--ink-secondary);
+  font-size: var(--fs-10);
+}
+
+.composer-mcp-install-form input {
+  width: 100%;
+  padding: 6px 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-sunk);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--fs-11);
+}
+
+.composer-mcp-install-actions {
+  justify-content: flex-end;
+  margin-top: 2px;
+}
+
 .composer-slash-menu {
   position: absolute;
   left: 0;

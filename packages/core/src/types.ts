@@ -191,6 +191,9 @@ export interface TaskWorktreeView extends TaskWorktree {
 export const MCP_SERVER_STATUSES = ["unchecked", "ready", "error"] as const;
 export type McpServerStatus = (typeof MCP_SERVER_STATUSES)[number];
 
+export const MCP_TRANSPORTS = ["stdio", "streamable-http"] as const;
+export type McpTransport = (typeof MCP_TRANSPORTS)[number];
+
 export interface McpToolDescriptor {
   name: string;
   description: string;
@@ -200,10 +203,19 @@ export interface McpToolDescriptor {
 export interface McpServerConfig {
   id: string;
   name: string;
-  transport: "stdio";
+  transport: McpTransport;
   command: string;
   args: string[];
+  url: string | null;
   envKeys: string[];
+  headerKeys: string[];
+  authMode: "none" | "headers";
+  registryServerId: string | null;
+  registryName: string | null;
+  packageName: string | null;
+  packageVersion: string | null;
+  runtime: string | null;
+  manifest: Record<string, unknown>;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
@@ -214,6 +226,45 @@ export interface McpServerView extends McpServerConfig {
   tools: McpToolDescriptor[];
   error: string | null;
   lastProbeAt: string | null;
+}
+
+export interface McpRegistryVariable {
+  name: string;
+  description: string;
+  required: boolean;
+  secret: boolean;
+  placeholder: string | null;
+  defaultValue: string | null;
+}
+
+export interface McpRegistryCandidate {
+  serverName: string;
+  title: string;
+  description: string;
+  version: string;
+  transport: McpTransport;
+  runtime: string;
+  packageName: string | null;
+  packageVersion: string | null;
+  command: string;
+  args: string[];
+  url: string | null;
+  requiredEnv: string[];
+  requiredHeaders: string[];
+  envVariables: McpRegistryVariable[];
+  headerVariables: McpRegistryVariable[];
+  homepage: string | null;
+  repositoryUrl: string | null;
+  installable: boolean;
+  unsupportedReason: string | null;
+}
+
+export interface McpRegistrySearchView {
+  query: string;
+  candidates: McpRegistryCandidate[];
+  total: number;
+  registryUrl: string;
+  fetchedAt: string;
 }
 
 export const RUN_STATUSES = [
@@ -310,6 +361,7 @@ export interface TaskRecord {
   methodId?: string | null;
   methodVersion?: number | null;
   projectId?: string | null;
+  mcpServerIds?: string[];
   pinnedAt?: string | null;
   archivedAt?: string | null;
   budgetOverride?: RunBudget | null;
@@ -726,7 +778,11 @@ export interface ModelSettingsView {
   updatedAt: string | null;
 }
 
-export type WebSearchProvider = "tavily" | "searxng";
+/** User-selectable legacy provider. Auto is the zero-configuration default. */
+export type WebSearchProvider = "auto" | "tavily" | "searxng";
+
+/** The source that actually fulfilled a search request. */
+export type WebSearchSource = "tavily" | "searxng" | "relay" | "bing-rss" | "duckduckgo" | "browser";
 
 export interface WebSearchSettingsView {
   enabled: boolean;
@@ -738,14 +794,17 @@ export interface WebSearchSettingsView {
 }
 
 export interface WebSearchResult {
+  rank: number;
   title: string;
   url: string;
   snippet: string;
+  publishedAt?: string;
 }
 
 export interface WebSearchResponse {
   query: string;
-  provider: WebSearchProvider;
+  provider: WebSearchSource;
+  attemptedProviders: WebSearchSource[];
   results: WebSearchResult[];
   fetchedAt: string;
 }
@@ -2789,6 +2848,7 @@ export const LIBRARY_NODE_KINDS = [
   "file",
   "folder",
   "skill",
+  "mcp",
   "project"
 ] as const;
 export type LibraryNodeKind = (typeof LIBRARY_NODE_KINDS)[number];

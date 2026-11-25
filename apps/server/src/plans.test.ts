@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HearthStore } from "@hearth/eventlog";
-import type { ExecutorId } from "@hearth/core";
+import type { ExecutorId, McpServerConfig } from "@hearth/core";
 import type { PlanSchedulerPort } from "./plans.ts";
 import { PlanService, buildPlanningPrompt } from "./plans.ts";
 import { HearthService } from "./service.ts";
@@ -103,6 +103,45 @@ describe("PlanService", () => {
 
     writeFileSync(canonicalPath, `${VALID_PLAN}\n- tampered`, "utf8");
     expect(() => plans.assertExecutionPlan(plan.id, buildTask.id)).toThrow(/SHA-256/);
+  });
+
+  it("carries selected MCP servers from planning into the approved execution task", async () => {
+    const { store, service, conversation, plans } = setup();
+    const now = new Date().toISOString();
+    const mcp: McpServerConfig = {
+      id: "mcp_plan",
+      name: "Plan MCP",
+      transport: "stdio",
+      command: "node",
+      args: [],
+      url: null,
+      envKeys: [],
+      headerKeys: [],
+      authMode: "none",
+      registryServerId: null,
+      registryName: null,
+      packageName: null,
+      packageVersion: null,
+      runtime: "manual",
+      manifest: {},
+      enabled: true,
+      createdAt: now,
+      updatedAt: now
+    };
+    store.upsertMcpServer(mcp, { envCipher: null, headersCipher: null });
+    store.updateMcpServerProbe(mcp.id, { status: "ready", tools: [], error: null, lastProbeAt: now });
+
+    const plan = plans.create({
+      conversationId: conversation.id,
+      objective: "Use the selected MCP",
+      textInput: "Use the selected MCP",
+      mcpServerIds: [mcp.id]
+    });
+    expect(service.requireTask(plan.planningTaskId!).mcpServerIds).toEqual([mcp.id]);
+
+    readyPlan(plans, plan.planningTaskId!, "run-plan-mcp");
+    const approved = await plans.action(plan.id, "approve");
+    expect(service.requireTask(approved.executionTaskId!).mcpServerIds).toEqual([mcp.id]);
   });
 
   it("repairs a legacy worktree plan path when the user approves an older plan", async () => {

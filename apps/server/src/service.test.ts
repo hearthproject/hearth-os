@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HearthStore } from "@hearth/eventlog";
+import type { McpServerConfig } from "@hearth/core";
 import { HearthService } from "./service.ts";
 
 describe("Hearth service agent metadata", () => {
@@ -61,6 +62,28 @@ describe("Hearth service agent metadata", () => {
     const task = service.createTask({ title: "会议纪要", goal: "根据会议原始记录生成行动纪要" });
     expect(task.executorId).toBe("native");
     expect(task.expectedOutputs).toEqual([]);
+    store.close();
+  });
+
+  it("binds only ready and enabled MCP servers and persists task-scoped changes", () => {
+    const store = new HearthStore(":memory:");
+    const service = new HearthService(store);
+    const ready = storeMcp(store, "mcp_ready", "Ready");
+    const disabled = storeMcp(store, "mcp_disabled", "Disabled", { enabled: false }, false);
+    const unready = storeMcp(store, "mcp_unready", "Unready", {}, false);
+
+    const task = service.createTask({ title: "MCP task", goal: "Use one server", mcpServerIds: [ready.id, ready.id] });
+    expect(task.mcpServerIds).toEqual([ready.id]);
+    expect(() => service.createTask({ title: "Disabled", goal: "Use disabled", mcpServerIds: [disabled.id] }))
+      .toThrow(/已停用/);
+    expect(() => service.createTask({ title: "Unready", goal: "Use unready", mcpServerIds: [unready.id] }))
+      .toThrow(/尚未连接成功/);
+    expect(() => service.createTask({ title: "Missing", goal: "Use missing", mcpServerIds: ["mcp_missing"] }))
+      .toThrow(/不存在/);
+
+    const updated = service.setTaskMcpServerIds(task.id, [ready.id]);
+    expect(updated.mcpServerIds).toEqual([ready.id]);
+    expect(service.setTaskMcpServerIds(task.id, []).mcpServerIds).toEqual([]);
     store.close();
   });
 
@@ -297,5 +320,41 @@ describe("Hearth service agent metadata", () => {
     store.close();
   });
 });
+
+function storeMcp(
+  store: HearthStore,
+  id: string,
+  name: string,
+  overrides: Partial<McpServerConfig> = {},
+  probe = true
+): McpServerConfig {
+  const now = new Date().toISOString();
+  const server: McpServerConfig = {
+    id,
+    name,
+    transport: "stdio",
+    command: "node",
+    args: [],
+    url: null,
+    envKeys: [],
+    headerKeys: [],
+    authMode: "none",
+    registryServerId: null,
+    registryName: null,
+    packageName: null,
+    packageVersion: null,
+    runtime: "manual",
+    manifest: {},
+    enabled: true,
+    createdAt: now,
+    updatedAt: now,
+    ...overrides
+  };
+  store.upsertMcpServer(server, { envCipher: null, headersCipher: null });
+  if (server.enabled && probe) {
+    store.updateMcpServerProbe(id, { status: "ready", tools: [], error: null, lastProbeAt: now });
+  }
+  return server;
+}
 
 

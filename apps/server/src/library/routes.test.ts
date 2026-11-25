@@ -36,7 +36,7 @@ describe("library routes", () => {
 
     const tree = await app.inject({ method: "GET", url: "/api/library/tree?depth=2" });
     expect(tree.statusCode).toBe(200);
-    expect(tree.json().nodes.map((node: { title: string }) => node.title)).toEqual(["记忆", "任务", "资料", "技能", "项目"]);
+    expect(tree.json().nodes.map((node: { title: string }) => node.title)).toEqual(["记忆", "任务", "资料", "技能", "MCP", "项目"]);
 
     const memoryRoot = tree.json().nodes.find((node: { title: string }) => node.title === "记忆");
     const summary = await app.inject({ method: "POST", url: `/api/library/nodes/${memoryRoot.id}/summary`, payload: {} });

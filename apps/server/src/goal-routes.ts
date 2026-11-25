@@ -37,6 +37,7 @@ const createGoalSchema = z.object({
   conversationId: z.string().trim().min(1).max(80).optional(),
   projectId: z.string().trim().min(1).max(120).optional(),
   execution: executionSchema,
+  mcpServerIds: z.array(z.string().trim().min(1).max(120)).max(8).optional(),
   textInput: z.string().max(100_000).optional(),
   fileInputs: z.array(z.object({
     label: z.string().trim().max(255),
@@ -176,7 +177,8 @@ export function registerGoalRoutes(
           : {}),
         taskKind: body.execution.taskKind,
         expectedOutputs: body.execution.expectedOutputs,
-        ...(body.execution.networkHosts.length > 0 ? { networkHosts: body.execution.networkHosts } : {})
+        ...(body.execution.networkHosts.length > 0 ? { networkHosts: body.execution.networkHosts } : {}),
+        ...(body.mcpServerIds?.length ? { mcpServerIds: body.mcpServerIds } : {})
       });
       goals.attachTask(goalId, task.id);
       await goals.action(goalId, "start");

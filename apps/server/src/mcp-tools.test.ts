@@ -50,6 +50,16 @@ describe("native MCP tools", () => {
     expect(result.content).toContain("server crashed");
   });
 
+  it("binds only the servers selected for this task", () => {
+    const provider = fakeProvider([
+      server("mcp_one", "One", [{ name: "first", description: "", inputSchema: { type: "object" } }]),
+      server("mcp_two", "Two", [{ name: "second", description: "", inputSchema: { type: "object" } }])
+    ]);
+    expect(createMcpTools(provider, ["mcp_two"]).map((tool) => tool.definition.name))
+      .toEqual(["mcp__mcp_two__second"]);
+    expect(createMcpTools(provider, [])).toEqual([]);
+  });
+
   it("fails closed on duplicate qualified names", () => {
     const duplicate = server("mcp_dup", "Dup", [
       { name: "echo", description: "", inputSchema: { type: "object" } }
@@ -76,7 +86,16 @@ function server(id: string, name: string, tools: McpServerView["tools"]): McpSer
     transport: "stdio",
     command: "node",
     args: [],
+    url: null,
     envKeys: [],
+    headerKeys: [],
+    authMode: "none",
+    registryServerId: null,
+    registryName: null,
+    packageName: null,
+    packageVersion: null,
+    runtime: "manual",
+    manifest: {},
     enabled: true,
     createdAt: now,
     updatedAt: now,

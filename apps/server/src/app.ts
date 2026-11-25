@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import fastifyStatic from "@fastify/static";
 import Fastify, { LogController, type FastifyReply } from "fastify";
 import type { EventEnvelope, ExecutorHealth, ExecutorId, ExecutorView, TaskRecord } from "@hearth/core";
-import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DELEGATION_WORKSPACE_POLICIES, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, EXECUTOR_IDS, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_ORIGINS, MEMORY_RETENTIONS, MEMORY_SENSITIVITIES, MEMORY_TAINT_STATES, MEMORY_TIERS, MEMORY_TRUST_LEVELS, RECONCILE_STATUSES, RUN_STATUSES, SANDBOX_MODES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
+import { APPROVAL_STATUSES, AUTONOMY_LEVELS, DELEGATION_WORKSPACE_POLICIES, DEVICE_CAPABILITY_KINDS, EFFECT_STATUSES, EXECUTOR_IDS, MCP_TRANSPORTS, MEMORY_CONFIDENCES, MEMORY_KINDS, MEMORY_ORIGINS, MEMORY_RETENTIONS, MEMORY_SENSITIVITIES, MEMORY_TAINT_STATES, MEMORY_TIERS, MEMORY_TRUST_LEVELS, RECONCILE_STATUSES, RUN_STATUSES, SANDBOX_MODES, SOURCE_KINDS, TRIGGER_KINDS } from "@hearth/core";
 import { HearthStore, type PageOptions } from "@hearth/eventlog";
 import { installBackgroundTaskRegistry } from "./background-tasks.ts";
 import { loadCodexProfile, runCodex } from "@hearth/codex-executor";
@@ -80,6 +80,7 @@ import { LocalEmbeddingProvider, type EmbeddingProvider } from "./library/embedd
 import { createModelSummaryGenerator, type LibrarySummaryGenerator } from "./library/summary.ts";
 import { libraryMcpLaunch } from "./library/mcp-runtime.ts";
 import { McpServerError, McpServerService } from "./mcp-servers.ts";
+import { McpRegistryClient, McpRegistryError } from "./mcp-registry.ts";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 
@@ -125,6 +126,7 @@ const createTaskSchema = z.object({
   taskKind: z.enum(["delivery", "workspace", "general"]).optional(),
   expectedOutputs: z.array(z.string().trim().min(1).max(200)).max(20).optional(),
   projectId: z.string().trim().min(1).max(120).optional(),
+  mcpServerIds: z.array(z.string().trim().min(1).max(120)).max(8).optional(),
   permissions: z.object({
     readRoots: z.array(z.string().trim().min(1).max(1000)).max(20),
     writeRoots: z.array(z.string().trim().min(1).max(1000)).max(20),
@@ -147,19 +149,39 @@ const updateProjectSchema = z.object({
 }).strict();
 
 const mcpEnvSchema = z.record(z.string(), z.string().max(4_000));
+const mcpHeadersSchema = z.record(z.string(), z.string().max(8_000));
 const createMcpServerSchema = z.object({
   name: z.string().trim().min(1).max(100),
-  command: z.string().trim().min(1).max(1_000),
+  transport: z.enum(MCP_TRANSPORTS).optional(),
+  command: z.string().trim().max(1_000).optional(),
   args: z.array(z.string().max(4_000)).max(64).optional(),
+  url: z.string().trim().max(2_048).nullable().optional(),
   env: mcpEnvSchema.optional(),
+  headers: mcpHeadersSchema.optional(),
   enabled: z.boolean().optional()
 }).strict();
 const updateMcpServerSchema = z.object({
   name: z.string().trim().min(1).max(100).optional(),
-  command: z.string().trim().min(1).max(1_000).optional(),
+  transport: z.enum(MCP_TRANSPORTS).optional(),
+  command: z.string().trim().max(1_000).optional(),
   args: z.array(z.string().max(4_000)).max(64).optional(),
+  url: z.string().trim().max(2_048).nullable().optional(),
   env: mcpEnvSchema.optional(),
+  headers: mcpHeadersSchema.optional(),
   enabled: z.boolean().optional()
+}).strict();
+const mcpRegistryQuerySchema = z.object({
+  q: z.string().trim().max(200).default(""),
+  limit: z.coerce.number().int().min(1).max(30).default(20)
+}).strict();
+const installRegistryMcpSchema = z.object({
+  serverName: z.string().trim().min(1).max(200),
+  env: mcpEnvSchema.optional(),
+  headers: mcpHeadersSchema.optional(),
+  enabled: z.boolean().optional()
+}).strict();
+const callMcpToolSchema = z.object({
+  arguments: z.record(z.string(), z.unknown()).optional()
 }).strict();
 
 const confirmTaskProposalSchema = z.object({
@@ -521,7 +543,8 @@ const browserTakeoverSchema = z.object({
 }).strict();
 
 const browserConnectSchema = z.object({
-  token: z.string().trim().max(20_000).optional()
+  token: z.string().trim().max(20_000).optional(),
+  profileDirName: z.string().trim().min(1).max(120).regex(/^[A-Za-z0-9 _.-]+$/).optional()
 }).strict();
 
 const createSourceSchema = z.object({
@@ -676,7 +699,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
       ontologyWriter.captureSourceItem(item);
     }
   });
-  const mcpServers = new McpServerService({ store, secretBox });
   const effectExecutor = options.effectExecutor ?? ((effect) => executeEffect(effect, {
     getArtifact: (id) => store.getArtifact(id)
   }));
@@ -688,6 +710,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
       ? {}
       : { embeddingProvider: options.libraryEmbeddingProvider ?? new LocalEmbeddingProvider({ cacheDir: LIBRARY_MODEL_DIR }) })
   });
+  const mcpRegistry = new McpRegistryClient();
+  const mcpServers = new McpServerService({ store, secretBox, registry: mcpRegistry, library });
   const skills = new SkillService({ store, root: options.skillRoot ?? SKILL_DIR, library });
   const libraryMcp = libraryMcpLaunch();
   service.bus.subscribe((event) => {
@@ -1321,6 +1345,26 @@ export async function buildServer(options: BuildServerOptions = {}) {
 
   app.get("/api/web-search/settings", async () => webSearch.view());
 
+  app.get("/api/mcp/registry/search", async (request, reply) => {
+    const parsed = mcpRegistryQuerySchema.safeParse(request.query ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_MCP_REGISTRY_QUERY", message: "MCP 搜索格式不正确" });
+    try {
+      return await mcpRegistry.search(parsed.data.q, { limit: parsed.data.limit });
+    } catch (error) {
+      return sendMcpServerError(reply, error);
+    }
+  });
+
+  app.post("/api/mcp/registry/install", async (request, reply) => {
+    const parsed = installRegistryMcpSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_MCP_INSTALL", message: "MCP 安装参数格式不正确" });
+    try {
+      return reply.code(201).send({ server: await mcpServers.installRegistry(parsed.data) });
+    } catch (error) {
+      return sendMcpServerError(reply, error);
+    }
+  });
+
   app.get("/api/mcp/servers", async () => ({ servers: mcpServers.list() }));
 
   app.post("/api/mcp/servers", async (request, reply) => {
@@ -1363,6 +1407,18 @@ export async function buildServer(options: BuildServerOptions = {}) {
   app.post<{ Params: { id: string } }>("/api/mcp/servers/:id/probe", async (request, reply) => {
     try {
       return { server: await mcpServers.probe(request.params.id) };
+    } catch (error) {
+      return sendMcpServerError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string; tool: string } }>("/api/mcp/servers/:id/tools/:tool/call", async (request, reply) => {
+    const parsed = callMcpToolSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_MCP_TOOL_CALL", message: "MCP 工具参数格式不正确" });
+    try {
+      return {
+        result: await mcpServers.callTool(request.params.id, request.params.tool, parsed.data.arguments ?? {})
+      };
     } catch (error) {
       return sendMcpServerError(reply, error);
     }
@@ -1457,7 +1513,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   app.patch("/api/web-search/settings", async (request, reply) => {
     const parsed = z.object({
       enabled: z.boolean().optional(),
-      provider: z.enum(["tavily", "searxng"]).optional(),
+      provider: z.enum(["auto", "tavily", "searxng"]).optional(),
       apiKey: z.string().max(500).optional(),
       searxngUrl: z.string().max(500).optional()
     }).strict().safeParse(request.body ?? {});
@@ -2378,6 +2434,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     if (parsed.data.expectedOutputs !== undefined) input.expectedOutputs = parsed.data.expectedOutputs;
     if (parsed.data.permissions !== undefined) input.permissions = parsed.data.permissions;
     if (parsed.data.projectId !== undefined) input.projectId = parsed.data.projectId;
+    if (parsed.data.mcpServerIds !== undefined) input.mcpServerIds = parsed.data.mcpServerIds;
 
     try {
       const task = service.createTask(input);
@@ -2702,7 +2759,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     const parsed = browserConnectSchema.safeParse(request.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: "INVALID_BROWSER_CONNECT", message: "扩展连接参数不正确" });
     try {
-      const session = await scheduler.connectBrowser(request.params.id, parsed.data.token);
+      const session = await scheduler.connectBrowser(request.params.id, parsed.data.token, parsed.data.profileDirName);
       return { session, browser: await scheduler.browserStatus(request.params.id) };
     } catch (error) {
       return reply.code(409).send({ error: "BROWSER_CONNECT_FAILED", message: error instanceof Error ? error.message : String(error) });
@@ -3430,7 +3487,7 @@ function sendModelRegistryError(reply: FastifyReply, error: unknown) {
 }
 
 function sendMcpServerError(reply: FastifyReply, error: unknown) {
-  if (error instanceof McpServerError) {
+  if (error instanceof McpServerError || error instanceof McpRegistryError) {
     return reply.code(error.statusCode).send({ error: error.code, message: error.message });
   }
   throw error;

@@ -14,7 +14,8 @@ mkdirSync(outputRoot, { recursive: true });
 const result = await build({
   entryPoints: [
     join(repoRoot, "apps", "server", "src", "index.ts"),
-    join(repoRoot, "apps", "server", "src", "library", "mcp-main.ts")
+    join(repoRoot, "apps", "server", "src", "library", "mcp-main.ts"),
+    join(repoRoot, "apps", "server", "src", "mcp-bridge-main.ts")
   ],
   outdir: outputRoot,
   entryNames: "[name]",
@@ -39,6 +40,7 @@ const result = await build({
 
 renameSync(join(outputRoot, "index.mjs"), join(outputRoot, "server.mjs"));
 renameSync(join(outputRoot, "mcp-main.mjs"), join(outputRoot, "library-mcp.mjs"));
+renameSync(join(outputRoot, "mcp-bridge-main.mjs"), join(outputRoot, "mcp-bridge.mjs"));
 
 // With `splitting: true`, esbuild hoists CJS interop into shared chunks. Only
 // the entry used to receive the banner-provided `require`, so every chunk that

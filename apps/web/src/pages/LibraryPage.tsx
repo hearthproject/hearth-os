@@ -11,6 +11,7 @@ import {
   Library,
   Loader2,
   Plus,
+  Plug,
   RefreshCw,
   RotateCcw,
   Search,
@@ -34,6 +35,7 @@ const KIND_LABELS: Record<LibraryNode["kind"], string> = {
   file: "文件",
   folder: "文件夹",
   skill: "技能",
+  mcp: "MCP",
   project: "项目"
 };
 
@@ -586,6 +588,7 @@ function iconFor(kind: LibraryNode["kind"]) {
     file: FileText,
     folder: Folder,
     skill: Sparkles,
+    mcp: Plug,
     project: FolderKanban
   } as const)[kind];
 }

@@ -65,7 +65,7 @@ describe("LibraryTreeService", () => {
     expect(tree.syncAll().nodes).toBeGreaterThanOrEqual(9);
 
     const roots = tree.buildTree(1);
-    expect(roots.map((node) => node.title)).toEqual(["记忆", "任务", "资料", "技能", "项目"]);
+    expect(roots.map((node) => node.title)).toEqual(["记忆", "任务", "资料", "技能", "MCP", "项目"]);
 
     const memory = tree.getNodeByRef("hearth://memory/mem-1");
     expect(memory?.path).toContain("记忆/已记住/事实/");

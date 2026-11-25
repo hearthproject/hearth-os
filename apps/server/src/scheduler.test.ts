@@ -1864,6 +1864,39 @@ describe("Hearth scheduler", () => {
     expect(completed.resultSummary).toBe("已自动放行敏感工具");
   });
 
+  it("passes only the task-selected MCP bridge to Codex while preserving Library MCP", async () => {
+    const service = setup();
+    const secretBox = new SecretBox(randomBytes(32));
+    const mcpServers = new McpServerService({ store: store as HearthStore, secretBox, timeoutMs: 3_000 });
+    const mcp = await mcpServers.create({ name: "Selected Mock", command: process.execPath, args: [MOCK_MCP_SERVER] });
+    let configuredMcp: Record<string, { command: string; args?: string[]; env?: Record<string, string> }> | undefined;
+    const codexRunner: CodexRunner = async (options) => {
+      configuredMcp = options.mcpServers;
+      writeFileSync(join(testOutDir(options), "result.md"), "# selected MCP\n");
+      return FAKE_RESULT;
+    };
+    scheduler = makeScheduler(service, codexRunner, {
+      mcpServers,
+      libraryMcp: { command: "node", args: ["library-mcp.mjs"], env: { HEARTH_BASE_URL: "http://127.0.0.1:4317" } }
+    });
+    scheduler.start();
+
+    const task = service.createTask({
+      title: "Selected MCP",
+      goal: "Use only the selected MCP server",
+      executorId: "codex",
+      expectedOutputs: ["result.md"],
+      mcpServerIds: [mcp.id]
+    });
+    await waitForStatus(service, task.id, "completed");
+
+    expect(configuredMcp).toMatchObject({ hearth: { args: ["library-mcp.mjs"] } });
+    expect(configuredMcp?.hearth_selected?.env?.HEARTH_MCP_SERVER_IDS).toBe(JSON.stringify([mcp.id]));
+    expect(
+      configuredMcp?.hearth_selected?.args?.some((arg) => /mcp-bridge/.test(arg))
+    ).toBe(true);
+  }, 15_000);
+
   it.skip("requires approval for each native MCP call with server, tool and argument binding", async () => {
     const service = setup();
     const modelSettingsPath = configureModel();
@@ -2267,6 +2300,7 @@ describe("Hearth scheduler", () => {
       modelSettingsForExecutor?: (executorId: ExecutorId) => ModelSettings | null;
       delegations?: DelegationService;
       mcpServers?: McpServerService;
+      libraryMcp?: { command: string; args: string[]; env: Record<string, string> };
       context?: ContextService;
       conversationContext?: ConversationContextService;
       plans?: PlanService;

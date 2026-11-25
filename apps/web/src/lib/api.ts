@@ -37,6 +37,7 @@ import type {
   ProjectDossierView,
   WorkstyleView,
   McpServerView,
+  McpRegistrySearchView,
   MaintenanceSnapshot,
   MemorySnapshot,
   ModelListResponse,
@@ -94,6 +95,7 @@ export interface ChatStreamBody {
   projectId?: string;
   message?: string;
   skillId?: string;
+  mcpServerIds?: string[];
   attachments?: ChatAttachment[];
   url?: string;
   goalMode?: boolean;
@@ -270,16 +272,26 @@ export const api = {
   resetWorkstyle: () =>
     request<{ workstyle: WorkstyleView }>("/api/profile/workstyle/reset", { method: "POST" }),
   mcpServers: () => request<{ servers: McpServerView[] }>("/api/mcp/servers"),
-  createMcpServer: (input: { name: string; command: string; args?: string[]; env?: Record<string, string>; enabled?: boolean }) => request<{ server: McpServerView }>("/api/mcp/servers", {
+  createMcpServer: (input: { name: string; transport?: "stdio" | "streamable-http"; command?: string; args?: string[]; url?: string | null; env?: Record<string, string>; headers?: Record<string, string>; enabled?: boolean }) => request<{ server: McpServerView }>("/api/mcp/servers", {
     method: "POST",
     body: JSON.stringify(input)
   }),
-  updateMcpServer: (id: string, input: { name?: string; command?: string; args?: string[]; env?: Record<string, string>; enabled?: boolean }) => request<{ server: McpServerView }>(`/api/mcp/servers/${encodeURIComponent(id)}`, {
+  updateMcpServer: (id: string, input: { name?: string; transport?: "stdio" | "streamable-http"; command?: string; args?: string[]; url?: string | null; env?: Record<string, string>; headers?: Record<string, string>; enabled?: boolean }) => request<{ server: McpServerView }>(`/api/mcp/servers/${encodeURIComponent(id)}`, {
     method: "PATCH",
     body: JSON.stringify(input)
   }),
   probeMcpServer: (id: string) => request<{ server: McpServerView }>(`/api/mcp/servers/${encodeURIComponent(id)}/probe`, { method: "POST" }),
   deleteMcpServer: (id: string) => request<void>(`/api/mcp/servers/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  searchMcpRegistry: (input: { q: string; limit?: number }) => request<McpRegistrySearchView>(`/api/mcp/registry/search${query(input)}`),
+  installMcpRegistry: (input: {
+    serverName: string;
+    env?: Record<string, string>;
+    headers?: Record<string, string>;
+    enabled?: boolean;
+  }) => request<{ server: McpServerView }>("/api/mcp/registry/install", {
+    method: "POST",
+    body: JSON.stringify(input)
+  }),
   webSearchSettings: () => request<WebSearchSettingsView>("/api/web-search/settings"),
   saveWebSearchSettings: (input: { enabled?: boolean; provider?: WebSearchProvider; apiKey?: string; searxngUrl?: string }) => request<WebSearchSettingsView>("/api/web-search/settings", {
     method: "PATCH",
@@ -505,10 +517,13 @@ export const api = {
     }),
   browserRelease: (id: string) =>
     request<{ browser: BrowserStatusView }>(`/api/tasks/${encodeURIComponent(id)}/browser/release`, { method: "POST" }),
-  browserConnect: (id: string, token?: string) =>
+  browserConnect: (id: string, token?: string, profileDirName?: string) =>
     request<{ browser: BrowserStatusView }>(`/api/tasks/${encodeURIComponent(id)}/browser/connect`, {
       method: "POST",
-      body: JSON.stringify(token ? { token } : {})
+      body: JSON.stringify({
+        ...(token ? { token } : {}),
+        ...(profileDirName ? { profileDirName } : {})
+      })
     }),
   browserClose: (id: string) =>
     request<{ closed: boolean }>(`/api/tasks/${encodeURIComponent(id)}/browser/close`, { method: "POST" }),

@@ -69,6 +69,7 @@ export interface CreateTaskInput {
   methodVersion?: number;
   projectId?: string;
   workspacePath?: string;
+  mcpServerIds?: string[];
 }
 
 export class TaskInputSelectionError extends Error {
@@ -224,6 +225,7 @@ export class HearthService {
     }
     const executorId = input.executorId ?? "native";
     const taskKind = input.taskKind ?? (project || workspacePath ? "workspace" : "general");
+    const mcpServerIds = this.validateMcpServerIds(input.mcpServerIds);
     const expectedOutputs = input.expectedOutputs ?? [];
     for (const output of expectedOutputs) {
       const clean = output.replace(/\\/g, "/").replace(/[\\/]+$/, "");
@@ -284,6 +286,7 @@ export class HearthService {
       ...(permissions ? { permissions } : {}),
       methodId: input.methodId ?? null,
       methodVersion: input.methodVersion ?? null,
+      ...(mcpServerIds.length > 0 ? { mcpServerIds } : {}),
       ...(project ? { projectId: project.id } : {})
     };
     const event = this.store.appendEvent({ type: "task.created", taskId: id, payload: task });
@@ -422,7 +425,7 @@ export class HearthService {
     return new Map(this.store.listTasks().map((task) => [task.id, task.title]));
   }
 
-  updateTask(taskId: string, patch: Partial<Pick<TaskRecord, "status" | "title" | "goal" | "goalId" | "planId" | "mode" | "currentRunId" | "nextAction" | "error" | "resultSummary" | "conversationId" | "executorId" | "taskKind" | "expectedOutputs" | "permissions" | "pendingInput" | "methodId" | "methodVersion" | "projectId" | "networkHosts" | "inputs" | "outputDir" | "pinnedAt" | "archivedAt" | "budgetOverride" | "executionMode">>, runId?: string): TaskRecord {
+  updateTask(taskId: string, patch: Partial<Pick<TaskRecord, "status" | "title" | "goal" | "goalId" | "planId" | "mode" | "currentRunId" | "nextAction" | "error" | "resultSummary" | "conversationId" | "executorId" | "taskKind" | "expectedOutputs" | "permissions" | "pendingInput" | "methodId" | "methodVersion" | "projectId" | "networkHosts" | "inputs" | "outputDir" | "pinnedAt" | "archivedAt" | "budgetOverride" | "executionMode" | "mcpServerIds">>, runId?: string): TaskRecord {
     const task = this.requireTask(taskId);
     if (patch.status && patch.status !== task.status) assertTransition(task.status, patch.status);
     const previousStatus = task.status;
@@ -437,6 +440,11 @@ export class HearthService {
     const updated = this.requireTask(taskId);
     if (statusChanged) this.appendTaskStatusMessage(updated, previousStatus);
     return updated;
+  }
+
+  setTaskMcpServerIds(taskId: string, serverIds: string[]): TaskRecord {
+    this.requireTask(taskId);
+    return this.updateTask(taskId, { mcpServerIds: this.validateMcpServerIds(serverIds) });
   }
 
   setTaskOrganization(taskId: string, patch: { pinned?: boolean; archived?: boolean }): TaskRecord {
@@ -495,6 +503,22 @@ export class HearthService {
       // Context capture is best effort and never blocks chat delivery.
     }
     return stored;
+  }
+
+  private validateMcpServerIds(input: string[] | undefined): string[] {
+    const serverIds = [...new Set(input ?? [])];
+    if (serverIds.length > 8) {
+      throw new TaskInputSelectionError("TOO_MANY_MCP_SERVERS", "一次任务最多选择 8 个 MCP 服务器", 400);
+    }
+    for (const serverId of serverIds) {
+      const server = this.store.getMcpServer(serverId);
+      if (!server) throw new TaskInputSelectionError("MCP_SERVER_NOT_FOUND", "选择的 MCP 服务器不存在", 404);
+      if (!server.enabled) throw new TaskInputSelectionError("MCP_SERVER_DISABLED", `MCP 服务器“${server.name}”已停用`, 409);
+      if (server.status !== "ready") {
+        throw new TaskInputSelectionError("MCP_SERVER_NOT_READY", `MCP 服务器“${server.name}”尚未连接成功，请先重新探测`, 409);
+      }
+    }
+    return serverIds;
   }
 
   private appendTaskStatusMessage(task: TaskRecord, previousStatus: TaskStatus): void {

@@ -23,9 +23,14 @@ import {
   PanelRightOpen,
   Paperclip,
   Pause,
+  Plug,
+  Power,
+  RefreshCw,
+  Search,
   Settings2,
   Sparkles,
   Target,
+  Trash2,
   X
 } from "lucide-react";
 import { ApiError, api, chatStream, type GoalSettingsInput } from "../lib/api.ts";
@@ -35,7 +40,14 @@ const InlineRun = lazy(() => import("../components/InlineRun.tsx").then((module)
 const ChatWorkspacePanel = lazy(() => import("../components/ChatWorkspacePanel.tsx").then((module) => ({ default: module.ChatWorkspacePanel })));
 const Markdown = lazy(() => import("../components/Markdown.tsx").then((module) => ({ default: module.Markdown })));
 import { DEFAULT_CONTEXT_WINDOW_TOKENS } from "@hearth/core/constants";
-import type { ContextUsageSnapshot, GoalAction, GoalContractPatch, GoalExecutionProfile } from "@hearth/core";
+import type {
+  ContextUsageSnapshot,
+  GoalAction,
+  GoalContractPatch,
+  GoalExecutionProfile,
+  McpRegistryCandidate,
+  McpServerView
+} from "@hearth/core";
 import { formatBytes, formatDuration, formatTime } from "../lib/format.ts";
 import { getChatSelection, requestChat, setChatBusy, syncChatSelection, useChatSelection } from "../lib/chat-selection.ts";
 import { copyToClipboard } from "../lib/clipboard.ts";
@@ -79,11 +91,16 @@ function initialWorkspaceWidth(): number {
   return clampWorkspaceWidth(DEFAULT_WORKSPACE_WIDTH);
 }
 
+function compactMcpValues(values: Record<string, string>): Record<string, string> | undefined {
+  const entries = Object.entries(values).filter(([, value]) => value.trim().length > 0);
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
 const EXECUTOR_ORDER: ExecutorId[] = ["deepseek-harness", "codex", "native"];
 const TERMINAL_GOAL_STATES = new Set(["done", "cancelled", "failed"]);
 
 type ComposerModeId = "full" | "plan" | "goal";
-type ComposerCommandId = "plan" | "goal";
+type ComposerCommandId = "plan" | "goal" | "mcp";
 interface ComposerCommand {
   id: ComposerCommandId;
   command: string;
@@ -91,8 +108,10 @@ interface ComposerCommand {
 }
 const COMPOSER_COMMANDS: ComposerCommand[] = [
   { id: "plan", command: "/plan", description: "先只读调查，给出计划，然后开始执行" },
-  { id: "goal", command: "/goal", description: "多轮推进一个目标，直到验收完成" }
+  { id: "goal", command: "/goal", description: "多轮推进一个目标，直到验收完成" },
+  { id: "mcp", command: "/mcp", description: "搜索、安装并选择本次任务使用的 MCP 工具" }
 ];
+const MAX_SELECTED_MCP_SERVERS = 8;
 
 interface ComposerModeOption {
   id: ComposerModeId;
@@ -122,6 +141,7 @@ interface OutgoingMessage {
   text: string;
   attachments: ChatAttachment[];
   skillId: string | null;
+  mcpServerIds: string[];
   goalMode?: boolean;
   goalSettings?: GoalSettingsInput;
   planMode?: boolean;
@@ -226,6 +246,12 @@ export function ChatPage() {
   const [workspacePreview, setWorkspacePreview] = useState<PreviewTarget | null>(null);
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(() => new URLSearchParams(location.search).get("skill"));
+  const [selectedMcpServerIds, setSelectedMcpServerIds] = useState<string[]>([]);
+  const [mcpPanelOpen, setMcpPanelOpen] = useState(false);
+  const [mcpQuery, setMcpQuery] = useState("");
+  const [mcpNotice, setMcpNotice] = useState<string | null>(null);
+  const [mcpInstallCandidate, setMcpInstallCandidate] = useState<McpRegistryCandidate | null>(null);
+  const [mcpInstallValues, setMcpInstallValues] = useState<{ env: Record<string, string>; headers: Record<string, string> }>({ env: {}, headers: {} });
   const [slashIndex, setSlashIndex] = useState(0);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [savingEffort, setSavingEffort] = useState(false);
@@ -280,15 +306,25 @@ export function ChatPage() {
   const activeModeOption = COMPOSER_MODES.find((mode) => mode.id === activeMode) ?? COMPOSER_MODES[0]!;
   const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health });
   const skillsQuery = useQuery({ queryKey: ["skills"], queryFn: api.skills, staleTime: 30_000 });
+  const mcpServersQuery = useQuery({ queryKey: ["mcpServers"], queryFn: api.mcpServers, staleTime: 15_000 });
   const executorsQuery = useQuery({ queryKey: ["executors"], queryFn: api.executors, refetchInterval: 20_000 });
   const conversationDefaultsQuery = useQuery({ queryKey: ["conversationDefaults"], queryFn: api.conversationDefaults, staleTime: Infinity });
   const conversations = conversationsQuery.data?.conversations ?? [];
   const skills = skillsQuery.data?.skills ?? [];
+  const mcpServers = mcpServersQuery.data?.servers ?? [];
   const selectedSkill = useMemo(() => skills.find((skill) => skill.id === selectedSkillId) ?? null, [skills, selectedSkillId]);
+  const selectedMcpServers = useMemo(
+    () => selectedMcpServerIds.flatMap((id) => {
+      const server = mcpServers.find((item) => item.id === id);
+      return server ? [server] : [];
+    }),
+    [mcpServers, selectedMcpServerIds]
+  );
   const isGoalCommand = /^\/goal(?:\s|$)/i.test(input.trimStart());
   const isPlanCommand = /^\/plan(?:\s|$)/i.test(input.trimStart());
   const isFullCommand = /^\/full(?:\s|$)/i.test(input.trimStart());
-  const commandHasArgument = /^\/(?:goal|plan|full)\s+\S/i.test(input.trimStart());
+  const isMcpCommand = /^\/mcp(?:\s|$)/i.test(input.trimStart());
+  const commandHasArgument = /^\/(?:goal|plan|full|mcp)\s+\S/i.test(input.trimStart());
   const slashTerm = !commandHasArgument && input.startsWith("/") && !input.startsWith("//")
     ? input.slice(1).trim().toLocaleLowerCase()
     : null;
@@ -319,6 +355,71 @@ export function ChatPage() {
       void queryClient.invalidateQueries({ queryKey: ["library-status"] });
     },
     onError: (error) => setSkillNotice(error instanceof Error ? error.message : "安装失败")
+  });
+  const mcpSearchMutation = useMutation({
+    mutationFn: (query: string) => api.searchMcpRegistry({ q: query, limit: 20 }),
+    onError: (error) => setMcpNotice(error instanceof Error ? error.message : "MCP Registry 搜索失败")
+  });
+  const installMcpMutation = useMutation({
+    mutationFn: (input: { candidate: McpRegistryCandidate; env: Record<string, string>; headers: Record<string, string> }) => {
+      const env = compactMcpValues(input.env);
+      const headers = compactMcpValues(input.headers);
+      return api.installMcpRegistry({
+        serverName: input.candidate.serverName,
+        ...(env ? { env } : {}),
+        ...(headers ? { headers } : {})
+      });
+    },
+    onSuccess: ({ server }) => {
+      setMcpNotice(`已安装「${server.name}」，并加入本次任务。`);
+      setMcpInstallCandidate(null);
+      setMcpInstallValues({ env: {}, headers: {} });
+      setSelectedMcpServerIds((current) => current.includes(server.id)
+        ? current
+        : current.length >= MAX_SELECTED_MCP_SERVERS ? current : [...current, server.id]);
+      void queryClient.invalidateQueries({ queryKey: ["mcpServers"] });
+      void queryClient.invalidateQueries({ queryKey: ["library-tree"] });
+      void queryClient.invalidateQueries({ queryKey: ["library-status"] });
+    },
+    onError: (error) => setMcpNotice(error instanceof Error ? error.message : "MCP 安装失败")
+  });
+  const probeMcpMutation = useMutation({
+    mutationFn: api.probeMcpServer,
+    onSuccess: ({ server }) => {
+      setMcpNotice(server.status === "ready" ? `「${server.name}」已连接。` : `连接失败：${server.error ?? "未知错误"}`);
+      void queryClient.invalidateQueries({ queryKey: ["mcpServers"] });
+      void queryClient.invalidateQueries({ queryKey: ["library-tree"] });
+    },
+    onError: (error) => setMcpNotice(error instanceof Error ? error.message : "MCP 连接失败")
+  });
+  const toggleMcpMutation = useMutation({
+    mutationFn: ({ server, enabled }: { server: McpServerView; enabled: boolean }) =>
+      api.updateMcpServer(server.id, { enabled }),
+    onSuccess: ({ server }) => {
+      if (!server.enabled) {
+        setSelectedMcpServerIds((current) => current.filter((id) => id !== server.id));
+        setMcpNotice(`已停用「${server.name}」。`);
+      } else {
+        setMcpNotice(server.status === "ready"
+          ? `已启用并连接「${server.name}」。`
+          : `已启用「${server.name}」，但连接失败：${server.error ?? "未知错误"}`);
+      }
+      void queryClient.invalidateQueries({ queryKey: ["mcpServers"] });
+      void queryClient.invalidateQueries({ queryKey: ["library-tree"] });
+    },
+    onError: (error) => setMcpNotice(error instanceof Error ? error.message : "MCP 状态更新失败")
+  });
+  const deleteMcpMutation = useMutation({
+    mutationFn: api.deleteMcpServer,
+    onSuccess: (_result, serverId) => {
+      const server = mcpServers.find((item) => item.id === serverId);
+      setSelectedMcpServerIds((current) => current.filter((id) => id !== serverId));
+      setMcpNotice(server ? `已从资料库移除「${server.name}」。` : "已移除 MCP 服务器。");
+      void queryClient.invalidateQueries({ queryKey: ["mcpServers"] });
+      void queryClient.invalidateQueries({ queryKey: ["library-tree"] });
+      void queryClient.invalidateQueries({ queryKey: ["library-status"] });
+    },
+    onError: (error) => setMcpNotice(error instanceof Error ? error.message : "MCP 卸载失败")
   });
   const tasks = tasksQuery.data?.tasks ?? [];
   const conversationTasks = useMemo(
@@ -459,6 +560,15 @@ export function ChatPage() {
     if (skillsQuery.isLoading) return;
     if (!skills.some((skill) => skill.id === selectedSkillId)) setSelectedSkillId(null);
   }, [selectedSkillId, skills, skillsQuery.isLoading]);
+
+  useEffect(() => {
+    if (mcpServersQuery.isLoading || selectedMcpServerIds.length === 0) return;
+    const usable = new Set(mcpServers.filter((server) => server.enabled && server.status === "ready").map((server) => server.id));
+    setSelectedMcpServerIds((current) => {
+      const next = current.filter((id) => usable.has(id));
+      return next.length === current.length ? current : next;
+    });
+  }, [mcpServers, mcpServersQuery.isLoading, selectedMcpServerIds.length]);
 
   useEffect(() => {
     const element = composerRef.current;
@@ -770,6 +880,7 @@ export function ChatPage() {
       text: argument,
       attachments: [],
       skillId: null,
+      mcpServerIds: selectedMcpServerIds,
       goalMode: true,
       goalSettings
     };
@@ -819,7 +930,19 @@ export function ChatPage() {
       return;
     }
     setPlanMode(true);
-    await dispatch({ text: argument, attachments: [], skillId: null, planMode: true });
+    await dispatch({ text: argument, attachments: [], skillId: null, mcpServerIds: selectedMcpServerIds, planMode: true });
+  }
+
+  function handleMcpCommand(text: string): void {
+    const match = text.match(/^\/mcp(?:\s+([\s\S]*))?$/i);
+    const query = match?.[1]?.trim() ?? "";
+    setMcpPanelOpen(true);
+    setMcpInstallCandidate(null);
+    setMcpNotice(null);
+    if (query) {
+      setMcpQuery(query);
+      mcpSearchMutation.mutate(query);
+    }
   }
 
   function togglePlanMode(): void {
@@ -850,6 +973,11 @@ export function ChatPage() {
       await handlePlanCommand(text);
       return;
     }
+    if (text && isMcpCommand && attachments.length === 0) {
+      setInput("");
+      handleMcpCommand(text);
+      return;
+    }
     if (text && isFullCommand && attachments.length === 0) {
       resetToFullMode();
       return;
@@ -858,12 +986,14 @@ export function ChatPage() {
       text,
       attachments,
       skillId: selectedSkillId,
+      mcpServerIds: selectedMcpServerIds,
       ...(goalMode ? { goalMode: true, goalSettings } : {}),
       ...(planMode ? { planMode: true } : {})
     };
     setInput("");
     setAttachments([]);
     if (selectedSkillId) setSelectedSkillId(null);
+    if (selectedMcpServerIds.length > 0) setSelectedMcpServerIds([]);
     if (goalMode) setGoalMode(false);
     setError(null);
     if (sending || hasRunningTask) {
@@ -929,7 +1059,15 @@ export function ChatPage() {
   }
 
   async function dispatch(outgoing: OutgoingMessage) {
-    const { text, attachments: sentAttachments, skillId: sentSkillId, goalMode: sentGoalMode, goalSettings: sentGoalSettings, planMode: sentPlanMode } = outgoing;
+    const {
+      text,
+      attachments: sentAttachments,
+      skillId: sentSkillId,
+      mcpServerIds: sentMcpServerIds,
+      goalMode: sentGoalMode,
+      goalSettings: sentGoalSettings,
+      planMode: sentPlanMode
+    } = outgoing;
     const startedAt = Date.now();
     setStreaming("");
     setReasoning("");
@@ -984,6 +1122,7 @@ export function ChatPage() {
           ...(!conversationId && pendingProjectId ? { projectId: pendingProjectId } : {}),
           ...(text ? { message: text } : {}),
           ...(sentSkillId ? { skillId: sentSkillId } : {}),
+          ...(sentMcpServerIds.length > 0 ? { mcpServerIds: sentMcpServerIds } : {}),
           ...(sentAttachments.length > 0 ? { attachments: sentAttachments } : {}),
           ...(sentGoalMode ? { goalMode: true, goalSettings: sentGoalSettings ?? {} } : {}),
           ...(sentPlanMode ? { planMode: true } : {}),
@@ -1077,6 +1216,7 @@ export function ChatPage() {
         recoverMissingConversation();
         setInput(text);
         if (sentSkillId) setSelectedSkillId(sentSkillId);
+        if (sentMcpServerIds.length > 0) setSelectedMcpServerIds(sentMcpServerIds);
         setError("原对话已失效，已为你开始新对话，请重新发送。");
       } else if (!controller.signal.aborted) {
         setError(sendError instanceof Error ? sendError.message : "发送失败");
@@ -1134,9 +1274,78 @@ export function ChatPage() {
     requestAnimationFrame(() => composerRef.current?.focus());
   }
 
+  function toggleMcpServer(server: McpServerView): void {
+    if (!server.enabled || server.status !== "ready") {
+      setMcpNotice(server.error ?? "这个 MCP 服务器尚未连接成功，请先重试连接。");
+      return;
+    }
+    setSelectedMcpServerIds((current) => {
+      if (current.includes(server.id)) return current.filter((id) => id !== server.id);
+      if (current.length >= MAX_SELECTED_MCP_SERVERS) {
+        setMcpNotice(`一次任务最多选择 ${MAX_SELECTED_MCP_SERVERS} 个 MCP 服务器。`);
+        return current;
+      }
+      return [...current, server.id];
+    });
+  }
+
+  function runMcpSearch(): void {
+    const query = mcpQuery.trim();
+    if (!query) {
+      setMcpNotice("输入用途或名称搜索 MCP Registry。");
+      return;
+    }
+    setMcpNotice(null);
+    setMcpInstallCandidate(null);
+    mcpSearchMutation.mutate(query);
+  }
+
+  function beginMcpInstall(candidate: McpRegistryCandidate): void {
+    if (!candidate.installable) {
+      setMcpNotice(candidate.unsupportedReason ?? "这个 MCP 服务器暂时不能安装。");
+      return;
+    }
+    const needsConfiguration = [...candidate.envVariables, ...candidate.headerVariables]
+      .some((variable) => variable.defaultValue === null);
+    if (!needsConfiguration) {
+      installMcpMutation.mutate({ candidate, env: {}, headers: {} });
+      return;
+    }
+    const env = Object.fromEntries(candidate.envVariables
+      .filter((variable) => variable.defaultValue === null)
+      .map((variable) => [variable.name, ""]));
+    const headers = Object.fromEntries(candidate.headerVariables
+      .filter((variable) => variable.defaultValue === null)
+      .map((variable) => [variable.name, ""]));
+    setMcpNotice(null);
+    setMcpInstallCandidate(candidate);
+    setMcpInstallValues({ env, headers });
+  }
+
+  function setMcpInstallValue(kind: "env" | "headers", name: string, value: string): void {
+    setMcpInstallValues((current) => ({ ...current, [kind]: { ...current[kind], [name]: value } }));
+  }
+
+  function submitMcpInstall(): void {
+    if (!mcpInstallCandidate) return;
+    installMcpMutation.mutate({ candidate: mcpInstallCandidate, ...mcpInstallValues });
+  }
+
+  function removeMcpServer(server: McpServerView): void {
+    if (!window.confirm(`从资料库移除 MCP 服务器“${server.name}”？`)) return;
+    deleteMcpMutation.mutate(server.id);
+  }
+
   function chooseComposerCommand(id: ComposerCommandId) {
     setInput("");
     setSlashIndex(0);
+    if (id === "mcp") {
+      setMcpPanelOpen(true);
+      setMcpNotice(null);
+      void mcpServersQuery.refetch();
+      requestAnimationFrame(() => composerRef.current?.focus());
+      return;
+    }
     if (hasActivePlan || hasActiveGoal) {
       setError("当前会话已有进行中的计划或目标，请先在对应栏完成或退出。");
       requestAnimationFrame(() => composerRef.current?.focus());
@@ -1564,6 +1773,19 @@ export function ChatPage() {
                 </button>
               </span>
             )}
+            {selectedMcpServers.map((server) => (
+              <span key={server.id} className="composer-skill-chip composer-mcp-chip" title={`${server.tools.length} 个 MCP 工具`}>
+                <Plug size={14} />
+                <span>MCP：{server.name}</span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedMcpServerIds((current) => current.filter((id) => id !== server.id))}
+                  aria-label={`取消使用 ${server.name}`}
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
           </div>
           {skillNotice && (
             <div className="composer-skill-notice">
@@ -1593,6 +1815,195 @@ export function ChatPage() {
                 </button>
               </div>
             </div>
+          )}
+          {mcpPanelOpen && (
+            <section className="composer-mcp-panel" aria-label="MCP 工具">
+              <div className="composer-mcp-header">
+                <div>
+                  <strong><Plug size={14} />MCP 工具</strong>
+                  <span>安装到资料库，仅为本轮任务连接所选服务器。已选 {selectedMcpServerIds.length}/{MAX_SELECTED_MCP_SERVERS}</span>
+                </div>
+                <button className="icon-button" type="button" onClick={() => setMcpPanelOpen(false)} aria-label="关闭 MCP 工具">
+                  <X size={14} />
+                </button>
+              </div>
+              <form
+                className="composer-mcp-search"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  runMcpSearch();
+                }}
+              >
+                <Search size={14} />
+                <input
+                  value={mcpQuery}
+                  onChange={(event) => setMcpQuery(event.target.value)}
+                  placeholder="搜索 MCP Registry，例如 github、browser、database"
+                  aria-label="搜索 MCP Registry"
+                />
+                <button type="submit" className="ghost-button" disabled={mcpSearchMutation.isPending || !mcpQuery.trim()}>
+                  {mcpSearchMutation.isPending ? <Loader2 size={13} className="spin" /> : <Search size={13} />}
+                  搜索
+                </button>
+              </form>
+              {mcpNotice && (
+                <div className="composer-mcp-notice">
+                  <span>{mcpNotice}</span>
+                  <button className="icon-button" type="button" onClick={() => setMcpNotice(null)} aria-label="关闭提示"><X size={12} /></button>
+                </div>
+              )}
+              <div className="composer-mcp-section">
+                <div className="composer-mcp-section-title">
+                  <strong>已安装</strong>
+                  {mcpServersQuery.isFetching && <Loader2 size={12} className="spin" />}
+                </div>
+                {mcpServers.length === 0 ? (
+                  <p className="composer-mcp-empty">还没有安装 MCP 服务器。搜索 Registry 后一键安装。</p>
+                ) : (
+                  <div className="composer-mcp-grid">
+                    {mcpServers.map((server) => {
+                      const selected = selectedMcpServerIds.includes(server.id);
+                      const ready = server.enabled && server.status === "ready";
+                      return (
+                        <div key={server.id} className={`composer-mcp-server ${selected ? "selected" : ""}`}>
+                          <button
+                            type="button"
+                            className="composer-mcp-select"
+                            onClick={() => toggleMcpServer(server)}
+                            disabled={!ready}
+                            aria-pressed={selected}
+                          >
+                            <Plug size={14} />
+                            <span>
+                              <strong>{server.name}</strong>
+                              <small>{ready ? `${server.tools.length} 个工具 · 可用` : server.enabled ? `连接异常 · ${server.error ?? "未就绪"}` : "已停用"}</small>
+                            </span>
+                            {selected && <Check size={14} />}
+                          </button>
+                          <div className="composer-mcp-actions">
+                            {!ready && server.enabled && (
+                              <button
+                                type="button"
+                                onClick={() => probeMcpMutation.mutate(server.id)}
+                                disabled={probeMcpMutation.isPending || toggleMcpMutation.isPending || deleteMcpMutation.isPending}
+                                title="重试连接"
+                                aria-label={`重新连接 ${server.name}`}
+                              >
+                                {probeMcpMutation.isPending ? <Loader2 size={12} className="spin" /> : <RefreshCw size={12} />}
+                                重试
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => toggleMcpMutation.mutate({ server, enabled: !server.enabled })}
+                              disabled={toggleMcpMutation.isPending || deleteMcpMutation.isPending}
+                              title={server.enabled ? "停用" : "启用"}
+                              aria-label={`${server.enabled ? "停用" : "启用"} ${server.name}`}
+                            >
+                              <Power size={12} />
+                              {server.enabled ? "停用" : "启用"}
+                            </button>
+                            <button
+                              type="button"
+                              className="danger"
+                              onClick={() => removeMcpServer(server)}
+                              disabled={toggleMcpMutation.isPending || deleteMcpMutation.isPending}
+                              title="从资料库移除"
+                              aria-label={`从资料库移除 ${server.name}`}
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              {(mcpSearchMutation.data || mcpSearchMutation.isPending) && (
+                <div className="composer-mcp-section">
+                  <div className="composer-mcp-section-title">
+                    <strong>Registry 结果</strong>
+                    <span>{mcpSearchMutation.data ? `${mcpSearchMutation.data.candidates.length} 个候选` : "正在搜索"}</span>
+                  </div>
+                  {mcpSearchMutation.data && mcpSearchMutation.data.candidates.length === 0 ? (
+                    <p className="composer-mcp-empty">没有找到匹配的 MCP 服务器，换个关键词试试。</p>
+                  ) : (
+                    <div className="composer-mcp-grid composer-mcp-results">
+                      {mcpSearchMutation.data?.candidates.map((candidate) => {
+                        const installed = mcpServers.find((server) => server.registryServerId === candidate.serverName);
+                        const editing = mcpInstallCandidate?.serverName === candidate.serverName;
+                        return (
+                          <div key={`${candidate.serverName}:${candidate.version}`} className="composer-mcp-candidate">
+                            <div className="composer-mcp-candidate-head">
+                              <div>
+                                <strong>{candidate.title}</strong>
+                                <span>{candidate.serverName} · {candidate.version} · {candidate.runtime}</span>
+                              </div>
+                              <button
+                                type="button"
+                                className="ghost-button"
+                                onClick={() => beginMcpInstall(candidate)}
+                                disabled={!candidate.installable || installMcpMutation.isPending || Boolean(installed)}
+                              >
+                                {installed ? <Check size={13} /> : <Plug size={13} />}
+                                {installed ? "已安装" : "安装"}
+                              </button>
+                            </div>
+                            <p>{candidate.description || "Registry 没有提供说明。"}</p>
+                            {!candidate.installable && <small className="composer-mcp-unsupported">{candidate.unsupportedReason}</small>}
+                            {editing && (
+                              <form
+                                className="composer-mcp-install-form"
+                                onSubmit={(event) => {
+                                  event.preventDefault();
+                                  submitMcpInstall();
+                                }}
+                              >
+                                <strong>连接所需配置</strong>
+                                {candidate.envVariables.filter((variable) => variable.defaultValue === null).map((variable) => (
+                                  <label key={`env:${variable.name}`}>
+                                    <span>{variable.name}{variable.required ? " *" : " · 可选"}</span>
+                                    <input
+                                      type={variable.secret ? "password" : "text"}
+                                      value={mcpInstallValues.env[variable.name] ?? ""}
+                                      onChange={(event) => setMcpInstallValue("env", variable.name, event.target.value)}
+                                      placeholder={variable.placeholder || variable.description || "环境变量值"}
+                                      required={variable.required}
+                                      autoComplete="off"
+                                    />
+                                  </label>
+                                ))}
+                                {candidate.headerVariables.filter((variable) => variable.defaultValue === null).map((variable) => (
+                                  <label key={`header:${variable.name}`}>
+                                    <span>{variable.name}{variable.required ? " *" : " · 可选"} · HTTP Header</span>
+                                    <input
+                                      type={variable.secret ? "password" : "text"}
+                                      value={mcpInstallValues.headers[variable.name] ?? ""}
+                                      onChange={(event) => setMcpInstallValue("headers", variable.name, event.target.value)}
+                                      placeholder={variable.placeholder || variable.description || "Header 值"}
+                                      required={variable.required}
+                                      autoComplete="off"
+                                    />
+                                  </label>
+                                ))}
+                                <div className="composer-mcp-install-actions">
+                                  <button type="button" className="ghost-button" onClick={() => setMcpInstallCandidate(null)} disabled={installMcpMutation.isPending}>取消</button>
+                                  <button type="submit" className="primary-button" disabled={installMcpMutation.isPending}>
+                                    {installMcpMutation.isPending ? <Loader2 size={13} className="spin" /> : <Check size={13} />}
+                                    安装并连接
+                                  </button>
+                                </div>
+                              </form>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </section>
           )}
           {queue.length > 0 && (
             <div className="composer-queue" aria-live="polite">

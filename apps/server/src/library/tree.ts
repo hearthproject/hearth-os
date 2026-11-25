@@ -14,7 +14,7 @@ import type {
   SourceItem,
   TaskRecord
 } from "@hearth/core";
-import type { HearthStore } from "@hearth/eventlog";
+import type { HearthStore, McpServerRecord } from "@hearth/eventlog";
 import { isSensitivePath } from "./paths.ts";
 import { LibraryRepository } from "./repository.ts";
 
@@ -25,6 +25,7 @@ const ROOT_REFS = {
   task: "hearth://root/task",
   resource: "hearth://root/resource",
   skill: "hearth://root/skill",
+  mcp: "hearth://root/mcp",
   project: "hearth://root/project"
 } as const;
 
@@ -61,6 +62,7 @@ export class LibraryTreeService {
     }
     for (const project of this.store.listLocalProjects()) this.syncProject(project);
     for (const skill of this.store.listSkills()) this.syncSkill(skill);
+    for (const server of this.store.listMcpServers()) this.syncMcpServer(server);
     this.syncFileRoots();
     return { nodes: this.repository.countNodes() };
   }
@@ -71,6 +73,7 @@ export class LibraryTreeService {
       this.ensureRoot("task", "任务", "任务"),
       this.ensureRoot("resource", "资料", "资料"),
       this.ensureRoot("skill", "技能", "技能"),
+      this.ensureRoot("mcp", "MCP", "MCP"),
       this.ensureRoot("project", "项目", "项目")
     ];
   }
@@ -325,11 +328,56 @@ export class LibraryTreeService {
     if (node) this.repository.deleteNode(node.id);
   }
 
+  syncMcpServer(server: McpServerRecord): LibraryNode {
+    const root = this.ensureRoot("mcp", "MCP", "MCP");
+    const title = clipLine(server.name);
+    const endpoint = server.transport === "streamable-http" ? server.url ?? "" : [server.command, ...server.args].join(" ");
+    return this.repository.upsertNode(this.node({
+      kind: "mcp",
+      refId: server.id,
+      parentId: root.id,
+      path: joinPath(root.path, withSuffix(title, server.id)),
+      title,
+      contentHash: hash([
+        server.name,
+        server.transport,
+        endpoint,
+        server.status,
+        server.enabled ? "enabled" : "disabled",
+        server.tools.map((tool) => tool.name).join(",")
+      ].join("\n")),
+      mimeType: "application/json",
+      metadata: {
+        mcpServerId: server.id,
+        transport: server.transport,
+        endpoint,
+        status: server.status,
+        enabled: server.enabled,
+        registryServerId: server.registryServerId,
+        registryName: server.registryName,
+        packageName: server.packageName,
+        packageVersion: server.packageVersion,
+        runtime: server.runtime,
+        tools: server.tools.map((tool) => ({
+          name: tool.name,
+          description: tool.description
+        })),
+        error: server.error
+      },
+      updatedAt: server.updatedAt
+    }));
+  }
+
+  removeMcpServer(serverId: string): void {
+    const node = this.repository.getNodeByRef(`hearth://mcp/${serverId}`);
+    if (node) this.repository.deleteNode(node.id);
+  }
+
   buildTree(depth = 1, parentId: string | null = null): LibraryTreeNode[] {
     this.ensureRoots();
     const nodes = this.repository.listChildren(parentId);
     if (parentId === null) {
-      const order = ["记忆", "任务", "资料", "技能", "项目"];
+      const order = ["记忆", "任务", "资料", "技能", "MCP", "项目"];
       nodes.sort((left, right) => order.indexOf(left.title) - order.indexOf(right.title));
     }
     return nodes.map((node) => this.treeNode(node, depth));
@@ -527,7 +575,7 @@ export class LibraryTreeService {
     };
   }
 
-  private ensureRoot(kind: "memory" | "task" | "resource" | "skill" | "project", title: string, path: string): LibraryNode {
+  private ensureRoot(kind: "memory" | "task" | "resource" | "skill" | "mcp" | "project", title: string, path: string): LibraryNode {
     const ref = ROOT_REFS[kind];
     const existing = this.repository.getNodeByRef(ref);
     if (existing) return existing;

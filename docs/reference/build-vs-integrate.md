@@ -28,11 +28,13 @@ Hearth 做的是适配层：锁定版本、准备最小工作区、注入短期�
 
 ## 通用执行内核与集成边界
 
-`native` 是 Hearth 自己的通用默认执行内核，负责消息循环、工具调用、上下文压缩、技能加载、有界委派、项目 Worktree、本地 MCP 接入、审批、检查点和恢复。用户显式选择本地项目后，任务默认由 native 在隔离 Worktree 中执行；GitHub 工程任务仍默认使用 Codex。这条路由不会因为参考了 OpenCode 或 DeerFlow 就静默替换执行器。
+`native` 是 Hearth 自己的通用默认执行内核，负责消息循环、工具调用、上下文压缩、技能加载、有界委派、项目 Worktree、按任务选择 MCP、审批、检查点和恢复。用户显式选择本地项目后，任务默认由 native 在隔离 Worktree 中执行；GitHub 工程任务仍默认使用 Codex。这条路由不会因为参考了 OpenCode 或 DeerFlow 就静默替换执行器。
 
 OpenCode、DeerFlow 和 Pi 只提供公开能力形态与边界参考，Hearth 不引入它们的运行时、代码库或协议实现。通用执行面不是“拥有同样数量的工具”就算对齐；只有经过 Hearth 的权限、任务账本、审批、效果记录、检查点和产物验证，能力才算进入产品。
 
-新增依赖只在明确层内使用：`@modelcontextprotocol/sdk` 启动并调用本地 stdio MCP 服务器，`ajv` 在调用前校验工具 JSON Schema，`exceljs` 与 `docx` 生成表格和 Word 产物。MCP 环境值与搜索密钥使用现有 `SecretBox` 加密，页面只显示键名；MCP 不继承模型密钥或任意父进程密钥，首版也不支持远程 HTTP、OAuth、自动重试或 exactly-once。
+新增依赖只在明确层内使用：`@modelcontextprotocol/sdk` 连接 stdio 与 Streamable HTTP MCP，`ajv` 在调用前校验工具 JSON Schema，`exceljs` 与 `docx` 生成表格和 Word 产物。MCP 通过官方 Registry 搜索与安装，所需环境值和 HTTP Header 使用现有 `SecretBox` 加密，页面只显示键名；MCP 不继承模型密钥或任意父进程密钥。供应商专属 OAuth、交互式登录、验证码、自动重试和 exactly-once 不在首版闭环内。
+
+内置网页搜索同样作为成熟能力直接集成，而不是要求用户先购买搜索 API 或启动索引实例。运行时按可选旧配置、可选中继、公共 feed、公共 HTML 页面和已连接浏览器逐级尝试；抓取正文仍使用 Hearth 的 DNS、私网、重定向和审批边界。
 
 Codex 仍是 GitHub 工程任务的默认外部执行器。它擅长代码、长文档、复杂研究和多文件工作，但 Hearth 只能使用其公开、稳定、当前版本允许的能力。Codex 不持有任务数据库、长期凭据、记忆中心或外部写入权限；它接收一段最小上下文，在隔离工作区中完成工作，返回产物、结构化结果和失败分类，邮件、日历、付款和发布等动作必须回到 Hearth 的审批与回执通道。
 

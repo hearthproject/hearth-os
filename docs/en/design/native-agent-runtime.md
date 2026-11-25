@@ -46,9 +46,9 @@ Hearth supports OpenAI Chat Completions, OpenAI Responses, Anthropic Messages, a
 | `write_file`, `edit_file`, `apply_patch` | Create files, preview edits, apply atomic patches, move and delete files | `edit_file` supports dry-run diffs; patches are fully validated before one atomic write, avoiding partial multi-file success |
 | `write_spreadsheet`, `write_document` | Create XLSX/CSV and DOCX office files | Approved destinations only, with file-action approval |
 | `shell` | Run necessary checks | Workspace tasks only; full output is retained in task logs while only the tail is returned; timeout kills the process tree |
-| `fetch_url`, `web_search` | Fetch pages or search through Tavily/SearXNG | Network is off by default; research tasks receive an explicit public-network grant; fetches still require approval and check redirects, DNS, and private addresses |
+| `fetch_url`, `web_search` | Fetch pages or search built-in public sources, optionally reading the first three pages | No external search key is required; network remains task-scoped; fetches still pass approval checks and reject redirect, DNS, and private-address escapes |
 | `delegate_task` | Bounded read-only or isolated-write delegation | Fresh context, one layer, serial, at most two per task, no automatic merge |
-| `mcp__<serverId>__<toolName>` | Call a local stdio MCP tool | Only enabled, successfully probed servers; schema validation, bounded results, secret redaction, and per-call approval |
+| `mcp__<serverId>__<toolName>` | Call a task-selected stdio or Streamable HTTP MCP tool | Only enabled, successfully probed, user-selected servers; schema validation, bounded results, secret redaction, and per-call approval |
 | `ask_user` | Pause when critical information is missing | Enters `waiting_input` instead of guessing |
 | `finish_task` | Declare completion with a user-facing summary | Plain text is not completion; output checks still apply |
 
@@ -72,13 +72,15 @@ A local project must be a Git root with an existing branch. Project tasks defaul
 
 Delegation is single-layer, serial, and capped at two children per parent. Children cannot delegate again or use MCP. Child usage rolls into the parent task, and any limit violation fails explicitly.
 
-## Local MCP
+## Install and Select MCP on Demand
 
-The first version supports local stdio servers only. Users configure the command, arguments, and environment; the environment is encrypted with Hearth's `SecretBox`, views expose key names only, and Hearth model keys or arbitrary parent secrets are not inherited. Probe failure, startup crash, and call timeout are isolated and do not take down the task process.
+`/mcp` is the normal entry point. Without an argument it opens the panel; with a query it searches the official MCP Registry. Users can install npm packages, Python packages that declare a `uvx` launch, or Streamable HTTP services. Hearth probes the tools before enabling the server, stores it under the Library's MCP root, and restores the previous configuration or removes a failed draft. Existing stdio servers remain compatible, and Settings no longer exposes a separate Extensions page.
+
+Registry manifests can declare environment variables and HTTP headers. Required values are encrypted with Hearth's existing `SecretBox`, and views expose key names only. Hearth model keys and arbitrary parent-process secrets are not inherited. The user selects up to eight servers for a task. Native receives those tools directly, while Codex and DeepSeek Harness receive only the same selection through a task-scoped stdio bridge; the read-only Library MCP remains available. Probe failure, startup crash, and call timeout are isolated and do not take down the task process.
 
 Tools use the stable name `mcp__<serverId>__<toolName>`. Discovery checks names, descriptions, tool count, schemas, and cross-server conflicts. Calls validate the JSON Schema again and bound the result size. Tool output, errors, and server stderr are redacted.
 
-MCP calls use the normal per-call tool approval flow, binding the server, tool, and argument digest. Only full-permission mode auto-approves, with an audit event. Hearth does not retry MCP calls automatically and does not claim exactly-once delivery; users remain responsible for deciding whether a tool with external side effects should run.
+MCP calls use the normal per-call tool approval flow, binding the server, tool, and argument digest. Only full-permission mode auto-approves, with an audit event. Hearth does not retry MCP calls automatically and does not claim exactly-once delivery; users remain responsible for deciding whether a tool with external side effects should run. Configuration that the Registry does not declare, provider-specific OAuth, interactive login, and captchas still require the user to complete the MCP provider's own flow.
 
 ## Capability matrix
 
@@ -86,15 +88,15 @@ This assessment is based on public capabilities and code maturity, not a shared 
 
 | Dimension | Hearth native | Pi | DeerFlow | OpenCode |
 |---|---|---|---|---|
-| General coding surface | glob/grep, atomic edits, shell, office files, search, subagents, local MCP, and worktrees | Mature core file tools and compact coding loop | More complete long-task middleware, sandbox, subagents, memory, and lazy tools | Broadest public surface: rule-based tools, editing, shell, subagents, MCP, compaction, and worktrees |
+| General coding surface | glob/grep, atomic edits, shell, office files, built-in search, subagents, task-selected MCP, and worktrees | Mature core file tools and compact coding loop | More complete long-task middleware, sandbox, subagents, memory, and lazy tools | Broadest public surface: rule-based tools, editing, shell, subagents, MCP, compaction, and worktrees |
 | Long-horizon orchestration | Budgets, checkpoints, recovery, goal acceptance, and approval governance | Primarily a compact loop | Stronger long-horizon orchestration | Strong execution, but not Hearth's task-ledger control model |
 | Context management | Token-window triggers, complete-turn compaction, summary fallback, checkpoint after compaction | Session tree and compaction | Complete context middleware | Mature compaction |
 | Delegation | One layer, serial, at most two, read-only or isolated write, no auto-merge | Not a first-version focus | Stronger subagents and staged orchestration | More mature and broader subagents |
-| MCP | Local stdio only, per-call approval, crash isolation | Not a core capability | Not a primary MCP reference | More complete public support |
+| MCP | Registry installation, stdio / Streamable HTTP, task selection, per-call approval, and crash isolation | Not a core capability | Not a primary MCP reference | More complete public support |
 | Projects and worktrees | Local Git registry, isolated worktrees, manual cleanup | More focused on the compact coding loop | Stronger sandbox and orchestration | Most complete worktree coverage |
 | Control and evidence | Strongest approval, effect records, checkpoints, recovery, output verification, and task governance | Lighter control plane | Different governance model | Lighter control plane |
 
-The fair conclusion is: OpenCode has the most complete general execution surface, DeerFlow is stronger for long-horizon orchestration, and Pi is more mature within its compact coding scope. Hearth native has the strongest control plane and has closed enough of the execution gap for multi-file coding, research and office work, bounded delegation, local MCP, and local project worktrees, but remains behind on LSP, formatters, remote MCP, browser automation, visual understanding, and automatic merging.
+The fair conclusion is: OpenCode has the most complete general execution surface, DeerFlow is stronger for long-horizon orchestration, and Pi is more mature within its compact coding scope. Hearth native has the strongest control plane and has closed enough of the execution gap for multi-file coding, research and office work, bounded delegation, on-demand MCP, and local project worktrees, but remains behind on LSP, formatters, browser automation, visual understanding, and automatic merging.
 
 ## Budgets, checkpoints, and recovery
 
@@ -116,8 +118,8 @@ Tasks that need network access or engineering workspace writes create a proposal
 ## Current boundaries
 
 - Subagents are single-layer, serial, and capped at two; there are no parallel teams, recursive delegation, or automatic merges.
-- MCP is local stdio only; remote HTTP, OAuth, managed multi-tenancy, and tool-level exactly-once are not supported.
-- Search is off by default, and public-network grants never bypass private-address checks or per-fetch approval.
+- MCP supports stdio and Streamable HTTP. Provider-specific OAuth, interactive login, captchas, managed multi-tenancy, and tool-level exactly-once are not automated.
+- Built-in search is on by default and needs no Tavily key or SearXNG instance. Public providers can rate-limit or challenge requests, and fetches still honor private-address checks and approval.
 - Browser-automation search, image/scan visual understanding, PPTX, LSP, formatters, background shell sessions, and automatic cherry-pick are not supported.
 - Execution uses the configured chat model, with no hidden second execution model. Workspace tasks prefer a local worktree.
 - Intermediate steps, internal JSON, and terminal output are not deliverables.

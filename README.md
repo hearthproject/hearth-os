@@ -74,13 +74,14 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
 | **目标模式** | 一个目标绑定一个锚点任务，跨多轮和重启持续推进；每轮先做准入判定，结束写 `goal-intent.json`；文件、git、命令、schema、人工或模型评审独立验收；`reviewPolicy` 决定自动完成还是等用户确认；当前实例不设轮次、时间、token、调用次数或产物上限，宿主重启保留进行中的目标并继续，目标栏与 `/goal` 命令可暂停、继续、重规划和验收 |
 | **计划模式** | 规划任务只读调查、写计划文件并调用 `submit_plan`；正文和路径持久化后进入待批准；只有用户明确批准才创建新的全权限执行任务；`/plan`、输入框计划按钮和 Shift+Tab 可切换，重启不会自动执行未批准计划 |
 | **自主执行与 Skill 安装** | 任务提示词由分层 Prompt Registry 组装：自主执行、结果优先、Skill 路由和任务上下文各自独立；Agent 可用 `search_skills` 搜索已安装技能与 GitHub，再用 `install_skill` 安装，不需要用户提供仓库地址；当前实例的任务不设预算、轮次或权限门槛 |
-| **单一事实源** | 服务端不再写 JSONL journal，消息、工具结算、检查点与 run 边界统一写入 SQLite `events`（schema v42）；checkpoint 文件降级为物化视图，损坏时从事件按 `event_seq` 回放重建 |
+| **单一事实源** | 服务端不再写 JSONL journal，消息、工具结算、检查点与 run 边界统一写入 SQLite `events`（schema v45）；checkpoint 文件降级为物化视图，损坏时从事件按 `event_seq` 回放重建 |
 | **Windows 原生沙箱** | `apps/native/hearth-native.cs` 编译为 `hearth-native.exe`：AppContainer package SID、workspace/temp ACL 白名单、kill-on-close Job Object、父进程 watchdog；网络只支持显式 `deny` / `open`，声明域名白名单或 helper 缺失时 fail-closed；越界写、只读、junction 逃逸、密钥过滤和网络拒绝都有真实测试 |
 | **交互式 shell 与后台进程** | `shell` 支持 `pty: true` 与 `cols` / `rows`，经 ConPTY 在 AppContainer 内运行；`shell_input` / `shell_resize` 可输入与调整终端；每个会话写入 SQLite `background_processes`，重启时按 PID + 创建时间判定，活的杀进程树、复用的只标 `lost` |
 | **审批模式** | `necessary`、`workspace`、`full` 三档；工作区内可逆文件写入自动执行，shell、删除、桌面、陌生域名和支付/提交类动作仍需审批；参数指纹绑定一次性授权 |
 | **三个执行器** | 内置 `native`，以及 `codex`、`deepseek-harness` 两个官方 SDK 执行器；共用注册表、健康检测、模型绑定和设置界面。执行器只有在本机真实探测通过后才显示为可用；DeepSeek Harness 绑定模型不会替代安装与探测，失败后不静默互换 |
 | **统一模型注册表** | SQLite 模型档案与执行器绑定取代私有 JSON；支持 OpenAI Chat、OpenAI Responses、Anthropic Messages、Gemini 四种协议；API Key 经 `.hearth/master.key` 以 AES-256-GCM 加密 |
-| **项目、子代理与 MCP** | 项目可以是任意本地文件夹：Git 仓库自动使用独立 `hearth/<task-id>` Worktree，普通文件夹原地执行并给出改动清单；子代理使用新上下文、只读或隔离写、单层串行且最多两个；本地 stdio MCP 支持启动探测、工具发现、Schema 校验、逐次审批、超时和崩溃隔离 |
+| **项目、子代理与 MCP** | 项目可以是任意本地文件夹：Git 仓库自动使用独立 `hearth/<task-id>` Worktree，普通文件夹原地执行并给出改动清单；子代理使用新上下文、只读或隔离写、单层串行且最多两个；`/mcp` 可直接搜索官方 Registry、安装到资料库并为当前任务选择最多 8 个服务器，支持 stdio 与 Streamable HTTP、加密密钥、Schema 校验、超时和崩溃隔离 |
+| **零配置网页研究** | `web_search` 默认可用，无需 Tavily Key 或 SearXNG 实例；按可选旧配置、可选搜索中继、Bing RSS、DuckDuckGo 与已连接浏览器逐级回退，并可读取前几条正文。公共搜索被限流或要求验证码时仍会明确失败 |
 | **浏览器自动化** | 独立 Chrome profile、多标签页、页面元素快照与稳定 ID、13 个浏览器工具；提交/上传/下载逐次审批，动作前后截图与页面摘要进入证据目录；完成前必须有通过的页面断言；不读取 cookie 或密码 |
 | **资料库与记忆** | 文件、记忆、资料和技能统一成树；支持检索、预览、回收站恢复；记忆有候选、来源与可信度、召回、纠正、遗忘传播与导出，可关闭自动记录 |
 | **资料库交接** | 资料库页头进入交接视图：从活跃记忆生成接手摘要（目标、最近决定、下一步）与原文打包，存入「资料 / 交接」可检索、可回收，也可导出 zip 给下一个人或账号 |
@@ -285,7 +286,7 @@ hearth-os/
 │   │   │   ├── browser-*.ts                          # 浏览器会话、快照、工具与证据
 │   │   │   ├── context*.ts / memory.ts                # 上下文投影与记忆治理
 │   │   │   ├── feishu*.ts / desktop.ts                # 飞书长连接与 Windows 桌面边界
-│   │   │   ├── mcp-*.ts / subagents.ts                # 本地 stdio MCP 与有界子代理
+│   │   │   ├── mcp-*.ts / subagents.ts                # Registry、stdio/HTTP MCP 与有界子代理
 │   │   │   ├── worktrees.ts / workspace.ts            # 任务隔离 Worktree 与工作区
 │   │   │   ├── backups.ts / security.ts               # 加密备份与全局 kill switch
 │   │   │   └── *.test.ts                              # 与实现并列的单元与集成测试
@@ -366,7 +367,8 @@ hearth-os/
 - 主导航暴露聊天、资料库两个主入口；交接在资料库页头，定时任务和连接收在“更多”；设置固定在底部。
 - 真实模型首跑仍取决于本机模型配置和供应商权限；没有可用 key 时只能用 `first:run --fake` 验证脚本自身。
 - 评测 case、场景和实验已迁到独立仓库；主仓库不再注册评测桥接，测试不代表真实评测实验已经运行。native 30 题的最终提交 `eb32ad5` 尚未完成连续复测。
-- 原生运行时仍不支持远程 MCP、OAuth、图片/扫描件视觉理解、PPTX、LSP、格式化器或自动 cherry-pick。
+- MCP 已支持 Registry 安装、stdio 与 Streamable HTTP，但尚不自动完成供应商专属 OAuth、交互式登录、验证码或 Registry 未声明的配置。
+- 原生运行时仍不支持图片/扫描件视觉理解、PPTX、LSP、格式化器或自动 cherry-pick。
 - cleanup 目前对已登记 shell 进程执行真实终止；subagent/worktree/browser 等资源暂无清理 handler 时会明确记 `failed` 并留下原因。
 - 这是 `0.3.4` 预发布版本，以 [GitHub Pre-release](https://github.com/hearthproject/hearth-os/releases) 形式发布，不是 v1.0 正式发布。
 
