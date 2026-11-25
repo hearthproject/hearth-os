@@ -23,6 +23,35 @@
   box-shadow: -24px 0 48px rgb(0 0 0 / 0.12);
 }
 
+.workspace-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 40;
+  width: 10px;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+
+.workspace-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 1px;
+  background: var(--line);
+  transition: background 120ms ease, width 120ms ease, left 120ms ease;
+}
+
+.workspace-resizer:hover::after,
+.workspace-resizer:focus-visible::after {
+  left: 3px;
+  width: 2px;
+  background: var(--accent);
+}
+
 @media (min-width: 1100px) {
   .chat-layout.with-workspace {
     display: grid;
@@ -37,6 +66,13 @@
     min-height: 0;
     border-left: 1px solid var(--line);
     box-shadow: none;
+  }
+}
+
+/* The panel is an overlay below 1100px, so there is no column to drag. */
+@media (max-width: 1099px) {
+  .workspace-resizer {
+    display: none;
   }
 }
 
@@ -1786,6 +1822,28 @@
   color: var(--ink-secondary);
   font-weight: 500;
   font-variant-numeric: tabular-nums;
+}
+
+.model-context-action {
+  width: 100%;
+  padding: 5px 6px;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-secondary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.model-context-action:hover {
+  border-color: var(--accent);
+  color: var(--ink);
+  background: var(--bg);
+}
+
+.model-context-action strong {
+  color: var(--accent);
 }
 
 .model-context-bar {

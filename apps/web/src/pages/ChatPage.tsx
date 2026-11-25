@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router-dom";
 import { ApprovalCard } from "../components/ApprovalCard.tsx";
@@ -59,6 +59,27 @@ const PENDING_SETTINGS: ConversationSettings = {
   approvalMode: "full",
   preferredExecutorId: "native"
 };
+
+const WORKSPACE_WIDTH_KEY = "hearth.workspace-width";
+const DEFAULT_WORKSPACE_WIDTH = 460;
+const MIN_WORKSPACE_WIDTH = 320;
+const MAX_WORKSPACE_WIDTH = 760;
+const MIN_CHAT_WIDTH = 420;
+
+function clampWorkspaceWidth(width: number): number {
+  const maxByWindow = Math.max(MIN_WORKSPACE_WIDTH, window.innerWidth - MIN_CHAT_WIDTH - 24);
+  return Math.round(Math.min(Math.max(width, MIN_WORKSPACE_WIDTH), Math.min(MAX_WORKSPACE_WIDTH, maxByWindow)));
+}
+
+function initialWorkspaceWidth(): number {
+  try {
+    const stored = Number(localStorage.getItem(WORKSPACE_WIDTH_KEY));
+    if (Number.isFinite(stored) && stored > 0) return clampWorkspaceWidth(stored);
+  } catch {
+    // Storage can be unavailable; the default width still works.
+  }
+  return clampWorkspaceWidth(DEFAULT_WORKSPACE_WIDTH);
+}
 
 const EXECUTOR_ORDER: ExecutorId[] = ["deepseek-harness", "codex", "native"];
 const TERMINAL_GOAL_STATES = new Set(["done", "cancelled", "failed"]);
@@ -203,6 +224,7 @@ export function ChatPage() {
   const [draftSettings, setDraftSettings] = useState<ConversationSettings | null>(null);
   const [pendingProjectId, setPendingProjectId] = useState<string | null>(() => getChatSelection().pendingProjectId);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [workspaceWidth, setWorkspaceWidth] = useState<number>(initialWorkspaceWidth);
   const [workspacePreview, setWorkspacePreview] = useState<PreviewTarget | null>(null);
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(() => new URLSearchParams(location.search).get("skill"));
@@ -224,6 +246,8 @@ export function ChatPage() {
   const panelConversationRef = useRef<string | null>(conversationId);
   const queuedDispatchRef = useRef(false);
   const dragDepthRef = useRef(0);
+  const workspaceResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const workspaceWidthRef = useRef(workspaceWidth);
 
   const conversationsQuery = useQuery({ queryKey: ["conversations"], queryFn: api.conversations, refetchInterval: 30_000 });
   const tasksQuery = useQuery({ queryKey: ["tasks"], queryFn: api.tasks, refetchInterval: 30_000 });
@@ -303,6 +327,14 @@ export function ChatPage() {
     () => conversationId ? tasks.filter((task) => task.conversationId === conversationId) : [],
     [tasks, conversationId]
   );
+  // The system-prompt inspector is only meaningful for the most recent native
+  // task: that is the run whose measured usage the popover is showing.
+  const latestNativeTaskId = useMemo(() => {
+    const native = conversationTasks
+      .filter((task) => (task.executorId ?? "native") === "native")
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+    return native[0]?.id ?? null;
+  }, [conversationTasks]);
   const current = useMemo(() => conversations.find((item) => item.id === conversationId) ?? null, [conversations, conversationId]);
   const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: api.projects, refetchInterval: 30_000 });
   const projects = projectsQuery.data?.projects ?? [];
@@ -470,6 +502,21 @@ export function ChatPage() {
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
+  useEffect(() => {
+    workspaceWidthRef.current = workspaceWidth;
+    try {
+      localStorage.setItem(WORKSPACE_WIDTH_KEY, String(workspaceWidth));
+    } catch {
+      // Width persistence is optional.
+    }
+  }, [workspaceWidth]);
+
+  useEffect(() => {
+    const onWindowResize = () => setWorkspaceWidth((width) => clampWorkspaceWidth(width));
+    window.addEventListener("resize", onWindowResize);
+    return () => window.removeEventListener("resize", onWindowResize);
+  }, []);
+
   function resetConversationView(id: string | null) {
     setConversationId(id);
     conversationIdRef.current = id;
@@ -502,6 +549,33 @@ export function ChatPage() {
 
   function openWorkspace() {
     setPanelOpen(true);
+  }
+
+  function beginWorkspaceResize(event: ReactPointerEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    workspaceResizeRef.current = { startX: event.clientX, startWidth: workspaceWidthRef.current };
+  }
+
+  function moveWorkspaceResize(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = workspaceResizeRef.current;
+    if (!drag) return;
+    const next = clampWorkspaceWidth(drag.startWidth + drag.startX - event.clientX);
+    setWorkspaceWidth(next);
+  }
+
+  function endWorkspaceResize(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!workspaceResizeRef.current) return;
+    workspaceResizeRef.current = null;
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // The pointer may already be gone.
+    }
+  }
+
+  function nudgeWorkspaceResize(delta: number) {
+    setWorkspaceWidth((width) => clampWorkspaceWidth(width + delta));
   }
 
   function closeWorkspace() {
@@ -1160,7 +1234,7 @@ export function ChatPage() {
       : `${contextPercent}%`;
   const contextCompactAt = Math.floor(contextWindowTokens * 0.8);
   const contextBreakdownLabels: Record<string, string> = {
-    system: "系统",
+    system: "系统提示词",
     project: "项目",
     conversation: "对话摘要",
     conversation_tasks: "会话任务",
@@ -1207,7 +1281,10 @@ export function ChatPage() {
   ].join("\n");
 
   return (
-    <div className={`chat-layout ${panelOpen ? "with-workspace" : ""}`}>
+    <div
+      className={`chat-layout ${panelOpen ? "with-workspace" : ""}`}
+      style={panelOpen ? { gridTemplateColumns: `minmax(0, 1fr) ${workspaceWidth}px` } : undefined}
+    >
       <section className="chat-main">
         <header className="chat-header">
           <div className="chat-title-group">
@@ -1439,7 +1516,27 @@ export function ChatPage() {
                           <strong>{formatTokens(tokens)}</strong>
                         </div>
                       ))}
+                      {contextUsage?.scope === "task" && latestNativeTaskId && (
+                        <button
+                          type="button"
+                          className="model-context-row model-context-action"
+                          onClick={() => {
+                            setModelMenuOpen(false);
+                            openPreview({
+                              name: "系统上下文.md",
+                              url: api.taskSystemContextUrl(latestNativeTaskId),
+                              mimeType: "text/markdown",
+                              bytes: null
+                            });
+                          }}
+                          title="查看本轮实际发送给模型的系统提示词原文"
+                        >
+                          <span>查看系统提示词原文</span>
+                          <strong>打开</strong>
+                        </button>
+                      )}
                       <p>{contextUsageLabel}。已用为本轮实际输入；到达窗口 80%（{formatTokens(contextCompactAt)}）自动压缩。</p>
+                      <p>系统提示词包含身份与执行契约、工具说明、环境权限和任务约束；点击上方“查看原文”可核对逐段内容。</p>
                     </div>
                     <p className="model-popover-note">调整会立即生效，并在所有对话中保持。</p>
                   </div>
@@ -1692,17 +1789,45 @@ export function ChatPage() {
           .then(() => setGoalManageMode(null))}
       />
       {panelOpen && (
-        <Suspense fallback={null}>
-          <ChatWorkspacePanel
-            open
-            messages={messages}
-            tasks={conversationTasks}
-            preview={workspacePreview}
-            onPreviewChange={setWorkspacePreview}
-            onOpen={openWorkspace}
-            onClose={closeWorkspace}
+        <>
+          <div
+            className="workspace-resizer"
+            style={{ right: workspaceWidth }}
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="调整对话栏与预览栏宽度"
+            aria-valuemin={MIN_WORKSPACE_WIDTH}
+            aria-valuemax={MAX_WORKSPACE_WIDTH}
+            aria-valuenow={workspaceWidth}
+            tabIndex={0}
+            title="拖拽调整对话栏与预览栏宽度"
+            onPointerDown={beginWorkspaceResize}
+            onPointerMove={moveWorkspaceResize}
+            onPointerUp={endWorkspaceResize}
+            onPointerCancel={endWorkspaceResize}
+            onDoubleClick={() => setWorkspaceWidth(clampWorkspaceWidth(DEFAULT_WORKSPACE_WIDTH))}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowLeft") {
+                event.preventDefault();
+                nudgeWorkspaceResize(24);
+              } else if (event.key === "ArrowRight") {
+                event.preventDefault();
+                nudgeWorkspaceResize(-24);
+              }
+            }}
           />
-        </Suspense>
+          <Suspense fallback={null}>
+            <ChatWorkspacePanel
+              open
+              messages={messages}
+              tasks={conversationTasks}
+              preview={workspacePreview}
+              onPreviewChange={setWorkspacePreview}
+              onOpen={openWorkspace}
+              onClose={closeWorkspace}
+            />
+          </Suspense>
+        </>
       )}
     </div>
   );

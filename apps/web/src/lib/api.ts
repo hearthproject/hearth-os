@@ -485,6 +485,8 @@ export const api = {
   tasks: () => request<{ tasks: TaskListItem[] }>("/api/tasks"),
   artifacts: () => request<{ artifacts: ArtifactListItem[] }>("/api/artifacts"),
   task: (id: string) => request<TaskView>(`/api/tasks/${encodeURIComponent(id)}`),
+  taskSystemContextUrl: (id: string) =>
+    `/api/tasks/${encodeURIComponent(id)}/system-context?format=markdown`,
   browserSettings: () => request<{ settings: BrowserSettingsView }>("/api/browser/settings"),
   updateBrowserSettings: (input: Partial<BrowserSettingsView>) =>
     request<{ settings: BrowserSettingsView }>("/api/browser/settings", { method: "PATCH", body: JSON.stringify(input) }),

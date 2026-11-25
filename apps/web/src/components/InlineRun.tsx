@@ -383,7 +383,7 @@ export function collectEntries(events: TaskView["events"], expectedOutputs: read
     }
 
     if (kind === "context") {
-      pushSystem(entries, event.id, "整理执行上下文，继续推进");
+      pushSystem(entries, event.id, message || "整理上下文，继续推进");
       continue;
     }
     if (kind === "budget" || kind === "turn" || kind === "dsh.start" || kind === "dsh.done" || kind === "dsh.resume" || kind === "dsh.assistant.attempt") {
