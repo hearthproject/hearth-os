@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { HearthStore } from "@hearth/eventlog";
 import { buildServer, type BuildServerOptions } from "./app.ts";
 import { ContextService } from "./context.ts";
+import { defaultConversationSettings } from "@hearth/core";
 import { HearthService } from "./service.ts";
 
 describe("context and handoff API", () => {
@@ -183,5 +184,57 @@ describe("context and handoff API", () => {
     expect(metrics.statusCode).toBe(200);
     expect(metrics.json().handoffs).toMatchObject({ total: 1, automatic: 1, pendingUser: 1 });
     expect(metrics.json().diagnosis).toMatchObject({ total: 1, rules: 1, averageDurationMs: 120, averageContextTokens: 300 });
+  });
+
+  it("exposes conversation compaction observability metrics", async () => {
+    setup();
+    const app = await makeApp(join(root as string, "blobs"));
+    const conversation = store!.createConversation("指标", defaultConversationSettings());
+    store!.appendConversationCompaction({
+      id: "compact-1",
+      conversationId: conversation.id,
+      trigger: "manual",
+      status: "completed",
+      summary: "摘要",
+      coveredMessageIds: ["m1", "m2", "m3"],
+      firstKeptMessageId: "m4",
+      tokensBefore: 2000,
+      tokensAfter: 500,
+      model: "test/model",
+      usage: null,
+      error: null,
+      createdAt: "2026-11-25T10:00:00.000Z",
+      completedAt: "2026-11-25T10:00:01.500Z"
+    });
+    store!.appendEvent({
+      type: "conversation.context.compacted",
+      taskId: null,
+      payload: {
+        conversationId: conversation.id,
+        trigger: "manual",
+        version: 1,
+        tokensBefore: 2000,
+        tokensAfter: 500,
+        structured: true,
+        truncated: false
+      }
+    });
+
+    const metrics = await app.inject({ method: "GET", url: "/api/context/metrics" });
+    expect(metrics.statusCode).toBe(200);
+    expect(metrics.json().compactions).toMatchObject({
+      total: 1,
+      completed: 1,
+      failed: 0,
+      running: 0,
+      byTrigger: { auto: 0, manual: 1, overflow: 0 },
+      averageTokensBefore: 2000,
+      averageTokensAfter: 500,
+      averageCompressionRatio: 0.25,
+      averageDurationMs: 1500,
+      averageCoveredMessages: 3,
+      structuredRate: 1,
+      truncatedRate: 0
+    });
   });
 });

@@ -643,6 +643,8 @@ export class ConversationContextService {
         };
         this.service.store.saveConversationContextState(nextState);
         const latestTask = this.service.store.listTasksByConversation(conversationId).at(-1);
+        const completedAt = this.now().toISOString();
+        const durationMs = Math.max(0, Date.parse(completedAt) - Date.parse(record.createdAt));
         const event = this.service.store.appendEvent({
           type: "conversation.context.compacted",
           taskId: latestTask?.id ?? null,
@@ -654,7 +656,10 @@ export class ConversationContextService {
             tokensAfter,
             summary: summaryText,
             structured: summaryData !== null,
-            truncated
+            truncated,
+            model: generated.model,
+            durationMs,
+            coveredCount: coveredUnits.length
           }
         });
         this.service.bus.publish(event);
@@ -666,7 +671,7 @@ export class ConversationContextService {
           tokensAfter,
           model: generated.model,
           usage: generated.usage,
-          completedAt: this.now().toISOString()
+          completedAt
         }) ?? record;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
