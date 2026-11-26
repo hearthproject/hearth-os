@@ -487,6 +487,11 @@
   border-radius: 8px;
 }
 
+.composer-attach {
+  align-self: flex-start;
+  margin-top: 8px;
+}
+
 .composer-send {
   border-radius: 50%;
 }
