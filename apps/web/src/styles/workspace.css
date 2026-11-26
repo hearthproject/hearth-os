@@ -313,6 +313,118 @@
   word-break: break-word;
 }
 
+.workspace-video {
+  width: 100%;
+  max-height: 100%;
+  border-radius: 8px;
+  background: #000;
+}
+
+.workspace-audio {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.workspace-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px 2px 12px;
+}
+
+.workspace-sheet section h3 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-size: var(--fs-12);
+  color: var(--ink);
+}
+
+.workspace-sheet section h3 span {
+  color: var(--ink-tertiary);
+  font-size: var(--fs-10);
+  font-weight: 400;
+}
+
+.workspace-sheet-scroll {
+  max-height: 60vh;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.workspace-sheet table {
+  border-collapse: collapse;
+  min-width: 100%;
+  font-size: 11px;
+}
+
+.workspace-sheet td {
+  padding: 4px 7px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-secondary);
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workspace-sheet tr.head td {
+  position: sticky;
+  top: 0;
+  background: var(--surface-sunk);
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.workspace-slides {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 2px 12px;
+}
+
+.workspace-slide {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-sunk);
+  aspect-ratio: 16 / 9;
+  overflow: auto;
+}
+
+.workspace-slide header {
+  margin-bottom: 6px;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-10);
+}
+
+.workspace-slide p {
+  margin: 0 0 5px;
+  color: var(--ink-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.workspace-slide .workspace-slide-title {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.workspace-doc {
+  padding: 4px 2px 12px;
+}
+
+.workspace-doc p {
+  margin: 0 0 8px;
+  color: var(--ink-secondary);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
 .job-running,
 .job-queued {
   color: var(--accent);

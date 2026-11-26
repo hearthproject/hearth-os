@@ -14,7 +14,8 @@ import { api } from "../lib/api.ts";
 import { Markdown } from "./Markdown.tsx";
 import { desktopErrorMessage, hasDesktopBridge, pickFolder } from "../lib/desktop.ts";
 import { formatBytes } from "../lib/format.ts";
-import { fileExtension, previewKind, TEXT_PREVIEW_LIMIT } from "../lib/preview.ts";
+import { fileExtension, OFFICE_PREVIEW_LIMIT, previewKind, TEXT_PREVIEW_LIMIT } from "../lib/preview.ts";
+import { parseDelimited, parseDocx, parsePptx, parseXlsx, type SheetTable, type SlideText } from "../lib/office-preview.ts";
 import { artifactPreviewTarget, attachmentPreviewTarget, fileName, type PreviewTarget } from "../lib/workspace-preview.ts";
 import type { BackgroundToolJob, ChatAttachment, ChatMessageRecord, TaskListItem } from "../lib/types.ts";
 
@@ -154,37 +155,76 @@ export function ChatWorkspacePanel({
 function PreviewBody({ preview }: { preview: PreviewTarget }) {
   const kind = previewKind(preview.name, preview.mimeType);
   const [content, setContent] = useState<string | null>(null);
+  const [office, setOffice] = useState<
+    | { kind: "sheet"; tables: SheetTable[] }
+    | { kind: "slides"; slides: SlideText[] }
+    | { kind: "doc"; paragraphs: string[] }
+    | null
+  >(null);
+  const [officeBusy, setOfficeBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
-  const tooLarge = preview.bytes !== null && preview.bytes > TEXT_PREVIEW_LIMIT;
+  const isOffice = kind === "sheet" || kind === "slides" || kind === "doc";
+  const limit = isOffice ? OFFICE_PREVIEW_LIMIT : TEXT_PREVIEW_LIMIT;
+  const tooLarge = preview.bytes !== null && preview.bytes > limit;
 
   useEffect(() => {
     setContent(null);
+    setOffice(null);
+    setOfficeBusy(false);
     setError(null);
     setExportMessage(null);
-    if (kind !== "text" && kind !== "markdown") return;
     if (tooLarge) return;
+    if (kind !== "text" && kind !== "markdown" && !isOffice) return;
     const controller = new AbortController();
     let cancelled = false;
-    fetch(preview.url, { signal: controller.signal })
-      .then((response) => {
+    const fail = (caught: unknown) => {
+      if (!cancelled && !(caught instanceof DOMException && caught.name === "AbortError")) {
+        setError(caught instanceof Error ? caught.message : "读取失败");
+      }
+    };
+
+    if (isOffice) {
+      setOfficeBusy(true);
+      (async () => {
+        const response = await fetch(preview.url, { signal: controller.signal });
         if (!response.ok) throw new Error(`读取失败（${response.status}）`);
-        return response.text();
-      })
-      .then((text) => {
-        if (!cancelled) setContent(text);
-      })
-      .catch((caught) => {
-        if (!cancelled && !(caught instanceof DOMException && caught.name === "AbortError")) {
-          setError(caught instanceof Error ? caught.message : "读取失败");
+        if (kind === "sheet" && /\.(csv|tsv)$/i.test(preview.name)) {
+          const text = await response.text();
+          const rows = /\.tsv$/i.test(preview.name)
+            ? text.replace(/\r\n/g, "\n").split("\n").slice(0, 200).map((line) => line.split("\t").slice(0, 24))
+            : parseDelimited(text);
+          return { kind: "sheet" as const, tables: [{ name: preview.name, rows }] };
         }
-      });
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        if (kind === "sheet") return { kind: "sheet" as const, tables: parseXlsx(bytes) };
+        if (kind === "slides") return { kind: "slides" as const, slides: parsePptx(bytes) };
+        return { kind: "doc" as const, paragraphs: parseDocx(bytes) };
+      })()
+        .then((result) => {
+          if (!cancelled) setOffice(result);
+        })
+        .catch(fail)
+        .finally(() => {
+          if (!cancelled) setOfficeBusy(false);
+        });
+    } else {
+      fetch(preview.url, { signal: controller.signal })
+        .then((response) => {
+          if (!response.ok) throw new Error(`读取失败（${response.status}）`);
+          return response.text();
+        })
+        .then((text) => {
+          if (!cancelled) setContent(text);
+        })
+        .catch(fail);
+    }
     return () => {
       cancelled = true;
       controller.abort();
     };
-  }, [preview.url, kind, tooLarge]);
+  }, [preview.url, preview.name, kind, isOffice, tooLarge]);
 
   async function handleExport() {
     if (!preview.taskId || !preview.artifactId || exporting) return;
@@ -226,6 +266,12 @@ function PreviewBody({ preview }: { preview: PreviewTarget }) {
       {exportMessage && <p className="workspace-muted">{exportMessage}</p>}
       <div className={`workspace-preview-body kind-${kind}`}>
         {kind === "image" && <img src={preview.url} alt={preview.name} />}
+        {kind === "video" && (
+          <video className="workspace-video" src={preview.url} controls preload="metadata" title={preview.name}>
+            <track kind="captions" />
+          </video>
+        )}
+        {kind === "audio" && <audio className="workspace-audio" src={preview.url} controls preload="metadata" title={preview.name} />}
         {kind === "pdf" && <iframe src={preview.url} title={preview.name} />}
         {(kind === "text" || kind === "markdown") && (
           <>
@@ -238,6 +284,22 @@ function PreviewBody({ preview }: { preview: PreviewTarget }) {
             {content !== null && kind === "text" && <pre className="workspace-text">{content}</pre>}
           </>
         )}
+        {(kind === "sheet" || kind === "slides" || kind === "doc") && (
+          <>
+            {tooLarge && <p className="workspace-empty">文件较大（超过 40 MB），已停止内联解析。请下载后查看。</p>}
+            {error && <p className="form-error">{error}</p>}
+            {officeBusy && !office && (
+              <p className="workspace-muted"><Loader2 size={13} className="spin" /> 正在解析 Office 文件…</p>
+            )}
+            {office?.kind === "sheet" && <SheetPreview tables={office.tables} />}
+            {office?.kind === "slides" && <SlidesPreview slides={office.slides} />}
+            {office?.kind === "doc" && (
+              <div className="workspace-doc">
+                {office.paragraphs.map((paragraph, index) => <p key={`${index}:${paragraph.slice(0, 12)}`}>{paragraph}</p>)}
+              </div>
+            )}
+          </>
+        )}
         {kind === "binary" && (
           <div className="workspace-empty">
             <p>这种格式暂不支持内联预览。</p>
@@ -246,6 +308,54 @@ function PreviewBody({ preview }: { preview: PreviewTarget }) {
         )}
       </div>
     </>
+  );
+}
+
+function SheetPreview({ tables }: { tables: SheetTable[] }) {
+  if (tables.length === 0) return <p className="workspace-empty">工作表里没有可显示的内容。</p>;
+  return (
+    <div className="workspace-sheet">
+      {tables.map((table) => (
+        <section key={table.name}>
+          <h3>{table.name}<span>{Math.max(0, table.rows.length - 1)} 行</span></h3>
+          {table.rows.length === 0 ? (
+            <p className="workspace-empty">空表</p>
+          ) : (
+            <div className="workspace-sheet-scroll">
+              <table>
+                <tbody>
+                  {table.rows.map((row, rowIndex) => (
+                    <tr key={rowIndex} className={rowIndex === 0 ? "head" : undefined}>
+                      {(row.length > 0 ? row : [""]).map((cell, cellIndex) => (
+                        <td key={cellIndex}>{cell}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function SlidesPreview({ slides }: { slides: SlideText[] }) {
+  if (slides.length === 0) return <p className="workspace-empty">没有读取到幻灯片内容。</p>;
+  return (
+    <div className="workspace-slides">
+      {slides.map((slide) => (
+        <section key={slide.index} className="workspace-slide">
+          <header><span>第 {slide.index} 页</span></header>
+          {slide.lines.length === 0
+            ? <p className="workspace-muted">这一页只有图形或图片。</p>
+            : slide.lines.map((line, index) => (
+              <p key={`${index}:${line.slice(0, 10)}`} className={index === 0 ? "workspace-slide-title" : undefined}>{line}</p>
+            ))}
+        </section>
+      ))}
+    </div>
   );
 }
 
