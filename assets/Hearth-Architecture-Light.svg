@@ -28,7 +28,7 @@
 <rect x="1112" y="194" width="250" height="102" rx="14" fill="#E6F4EC" stroke="#18794E" stroke-width="1.4"/>
 <text x="1130" y="224" font-size="15" font-weight="700" fill="#172033">连接与设置</text>
 <text x="1348" y="218" font-size="10.5" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A" text-anchor="end">05</text>
-<text x="1130" y="256" font-size="12.5" fill="#42506A">飞书 / 浏览器</text>
+<text x="1130" y="256" font-size="12.5" fill="#42506A">微信 / 浏览器</text>
 <text x="1130" y="277" font-size="12.5" fill="#42506A">模型、执行器与数据</text>
 <rect x="44" y="334" width="1512" height="160" rx="18" fill="#FFFFFF" stroke="#DDE5F0" stroke-width="1.2"/>
 <text x="66" y="362" font-size="12" font-family="'Cascadia Mono','Consolas','SFMono-Regular',monospace" fill="#74829A">控制面 / apps/server</text>

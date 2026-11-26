@@ -121,7 +121,7 @@ flowchart TB
 
 - 外壳类：`AppShell`、`CommandPalette`、`NotificationCenter`、`HearthMark`、`EmptyState`
 - 状态展示类：`StatusPill` 一个文件导出十几种状态标签（任务 / 运行 / 效果 / 来源 / 发件箱 / 设备 / 桌面会话等），`TaskStatusIcon` 负责语义化图标
-- 领域面板类：审批卡、任务补充面板、运行卡（InlineRun）、浏览器面板、档案面板、工作区面板，以及执行器 / 飞书 / 浏览器 / 数据四个设置子面板
+- 领域面板类：审批卡、任务补充面板、运行卡（InlineRun）、浏览器面板、档案面板、工作区面板，以及执行器 / 微信 / 浏览器 / 数据四个设置子面板
 
 ### 5.1 聊天页：交互最密集的地方
 
