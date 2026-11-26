@@ -251,7 +251,10 @@ export function ChatPage() {
   const [workspacePreview, setWorkspacePreview] = useState<PreviewTarget | null>(null);
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(() => new URLSearchParams(location.search).get("skill"));
-  const [selectedMcpServerIds, setSelectedMcpServerIds] = useState<string[]>([]);
+  const [selectedMcpServerIds, setSelectedMcpServerIds] = useState<string[]>(() =>
+    (new URLSearchParams(location.search).get("mcp") ?? "").split(",").map((item) => item.trim()).filter(Boolean)
+  );
+  const mcpParamApplied = useRef(false);
   const [mcpPanelOpen, setMcpPanelOpen] = useState(false);
   const [skillPanelOpen, setSkillPanelOpen] = useState(false);
   const [skillQuery, setSkillQuery] = useState("");
@@ -328,6 +331,14 @@ export function ChatPage() {
   const conversations = conversationsQuery.data?.conversations ?? [];
   const skills = skillsQuery.data?.skills ?? [];
   const mcpServers = mcpServersQuery.data?.servers ?? [];
+  useEffect(() => {
+    if (mcpParamApplied.current || mcpServers.length === 0) return;
+    mcpParamApplied.current = true;
+    setSelectedMcpServerIds((current) => current.filter((id) => {
+      const server = mcpServers.find((item) => item.id === id);
+      return Boolean(server?.enabled && server.status === "ready");
+    }));
+  }, [mcpServers]);
   const selectedSkill = useMemo(() => skills.find((skill) => skill.id === selectedSkillId) ?? null, [skills, selectedSkillId]);
   const selectedMcpServers = useMemo(
     () => selectedMcpServerIds.flatMap((id) => {

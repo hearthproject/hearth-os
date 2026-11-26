@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import type { LibraryNode, LibrarySearchHit, LibraryTreeNode, SkillView } from "@hearth/core";
+import type { LibraryNode, LibrarySearchHit, LibraryTreeNode, McpServerView, SkillView } from "@hearth/core";
 import { api } from "../lib/api.ts";
 import { LibraryHandoffPanel } from "../components/LibraryHandoffPanel.tsx";
 
@@ -67,6 +67,17 @@ export function LibraryPage() {
     queryFn: () => api.skill(selectedSkillId!),
     enabled: Boolean(selectedSkillId)
   });
+  const selectedMcpId = details?.node.kind === "mcp" && typeof details.node.metadata.mcpServerId === "string"
+    ? details.node.metadata.mcpServerId
+    : null;
+  const mcpServersQuery = useQuery({
+    queryKey: ["mcp-servers"],
+    queryFn: api.mcpServers,
+    enabled: Boolean(selectedMcpId)
+  });
+  const selectedMcp = selectedMcpId
+    ? mcpServersQuery.data?.servers.find((server) => server.id === selectedMcpId) ?? null
+    : null;
 
   const searchMutation = useMutation({
     mutationFn: (value: string) => api.librarySearch(value),
@@ -117,6 +128,25 @@ export function LibraryPage() {
       setNotice(`已删除「${result.skill.name}」`);
       invalidateLibrary(queryClient);
       void queryClient.invalidateQueries({ queryKey: ["skills"] });
+    }
+  });
+
+  const toggleMcpMutation = useMutation({
+    mutationFn: (input: { id: string; enabled: boolean }) => api.updateMcpServer(input.id, { enabled: input.enabled }),
+    onSuccess: (result) => {
+      setNotice(result.server.enabled ? `已启用「${result.server.name}」` : `已停用「${result.server.name}」`);
+      void queryClient.invalidateQueries({ queryKey: ["mcp-servers"] });
+      invalidateLibrary(queryClient);
+    }
+  });
+
+  const deleteMcpMutation = useMutation({
+    mutationFn: api.deleteMcpServer,
+    onSuccess: () => {
+      setSelectedId(null);
+      setNotice("已从资料库移除 MCP 服务器");
+      void queryClient.invalidateQueries({ queryKey: ["mcp-servers"] });
+      invalidateLibrary(queryClient);
     }
   });
 
@@ -295,14 +325,19 @@ export function LibraryPage() {
               node={details.node}
               content={details.document?.content ?? null}
               children={details.children}
-              deleting={deleteMutation.isPending || deleteSkillMutation.isPending}
+              deleting={deleteMutation.isPending || deleteSkillMutation.isPending || deleteMcpMutation.isPending}
               skill={skillQuery.data?.skill ?? null}
               skillLoading={skillQuery.isLoading}
               updatingSkill={updateSkillMutation.isPending}
+              mcp={selectedMcp}
+              mcpLoading={mcpServersQuery.isLoading}
               onSelect={setSelectedId}
               onDelete={() => removeNode(details.node)}
               onUpdateSkill={(skillId) => updateSkillMutation.mutate(skillId)}
               onUseSkill={(skillId) => navigate(`/chat?skill=${encodeURIComponent(skillId)}`)}
+              onToggleMcp={(id, enabled) => toggleMcpMutation.mutate({ id, enabled })}
+              onDeleteMcp={(id) => deleteMcpMutation.mutate(id)}
+              onUseMcp={(id) => navigate(`/chat?mcp=${encodeURIComponent(id)}`)}
             />
           )}
         </section>
@@ -450,10 +485,15 @@ function NodePreview({
   skill,
   skillLoading,
   updatingSkill,
+  mcp,
+  mcpLoading,
   onSelect,
   onDelete,
   onUpdateSkill,
-  onUseSkill
+  onUseSkill,
+  onToggleMcp,
+  onDeleteMcp,
+  onUseMcp
 }: {
   node: LibraryNode;
   content: string | null;
@@ -462,10 +502,15 @@ function NodePreview({
   skill: SkillView | null;
   skillLoading: boolean;
   updatingSkill: boolean;
+  mcp: McpServerView | null;
+  mcpLoading: boolean;
   onSelect: (id: string) => void;
   onDelete: () => void;
   onUpdateSkill: (id: string) => void;
   onUseSkill: (id: string) => void;
+  onToggleMcp: (id: string, enabled: boolean) => void;
+  onDeleteMcp: (id: string) => void;
+  onUseMcp: (id: string) => void;
 }) {
   const Icon = iconFor(node.kind);
   const summaryQuery = useQuery({
@@ -528,6 +573,16 @@ function NodePreview({
         />
       )}
 
+      {node.kind === "mcp" && (
+        <McpDetails
+          server={mcp}
+          loading={mcpLoading}
+          onToggle={onToggleMcp}
+          onDelete={onDeleteMcp}
+          onUse={onUseMcp}
+        />
+      )}
+
       {content ? (
         <article className="library-document-body">{content}</article>
       ) : children.length === 0 ? (
@@ -567,6 +622,52 @@ function SkillDetails({
         <button className="primary-button" onClick={() => onUse(skill.id)}><Sparkles size={15} /> 在对话中使用</button>
         <button className="ghost-button" onClick={() => onUpdate(skill.id)} disabled={updating}>
           {updating ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />} 手动更新
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function McpDetails({
+  server,
+  loading,
+  onToggle,
+  onDelete,
+  onUse
+}: {
+  server: McpServerView | null;
+  loading: boolean;
+  onToggle: (id: string, enabled: boolean) => void;
+  onDelete: (id: string) => void;
+  onUse: (id: string) => void;
+}) {
+  if (loading) return <div className="library-skill-card"><Loader2 size={16} className="spin" /><span>正在打开 MCP 服务器…</span></div>;
+  if (!server) return <div className="library-skill-card"><span>这个 MCP 服务器暂时无法打开。</span></div>;
+  return (
+    <section className="library-skill-card">
+      <div>
+        <strong>{server.name}</strong>
+        <span>{server.tools.length > 0 ? `${server.tools.length} 个工具 · ${server.status}` : `尚未发现工具 · ${server.status}`}</span>
+      </div>
+      <dl className="library-skill-meta">
+        <div><dt>连接方式</dt><dd>{server.transport === "streamable-http" ? "HTTP" : "本地进程"}</dd></div>
+        <div><dt>状态</dt><dd>{server.enabled ? "已启用" : "已停用"}{server.error ? ` · ${server.error}` : ""}</dd></div>
+        <div><dt>工具</dt><dd>{server.tools.map((tool) => tool.name).join("、") || "—"}</dd></div>
+      </dl>
+      <div className="library-skill-actions">
+        <button className="primary-button" onClick={() => onUse(server.id)} disabled={!server.enabled || server.status !== "ready"}>
+          <Plug size={15} /> 在对话中使用
+        </button>
+        <button className="ghost-button" onClick={() => onToggle(server.id, !server.enabled)}>
+          {server.enabled ? "停用" : "启用"}
+        </button>
+        <button
+          className="ghost-button danger"
+          onClick={() => {
+            if (window.confirm(`从资料库移除 MCP 服务器“${server.name}”？`)) onDelete(server.id);
+          }}
+        >
+          <Trash2 size={15} /> 移除
         </button>
       </div>
     </section>
