@@ -7,7 +7,8 @@ import type {
   ExecutorSettings,
   ExecutorSettingsPatch,
   ExecutorSettingsView,
-  ReasoningEffort
+  ReasoningEffort,
+  TaskFollowUpMode
 } from "@hearth/core";
 import { EXECUTOR_IDS } from "@hearth/core";
 import type { HearthStore } from "@hearth/eventlog";
@@ -18,6 +19,7 @@ export function defaultExecutorSettings(): ExecutorSettings {
   return {
     defaultApprovalMode: "full",
     preferredExecutorId: "native",
+    followUpMode: "queue",
     reasoningEffort: "max",
     executors: {}
   };
@@ -38,6 +40,7 @@ export function saveExecutorSettings(
   patch: {
     defaultApprovalMode?: ApprovalMode | undefined;
     preferredExecutorId?: ExecutorId | null | undefined;
+    followUpMode?: TaskFollowUpMode | undefined;
     reasoningEffort?: ReasoningEffort | undefined;
     executors?: Partial<Record<ExecutorId, ExecutorRuntimeSettings>> | undefined;
   }
@@ -46,6 +49,7 @@ export function saveExecutorSettings(
   const next = normalizeExecutorSettings({
     defaultApprovalMode: patch.defaultApprovalMode ?? current.defaultApprovalMode,
     preferredExecutorId: patch.preferredExecutorId !== undefined ? patch.preferredExecutorId : current.preferredExecutorId,
+    followUpMode: patch.followUpMode ?? current.followUpMode,
     reasoningEffort: patch.reasoningEffort ?? current.reasoningEffort,
     executors: mergeExecutorRuntimeSettings(current.executors, patch.executors)
   });
@@ -112,6 +116,7 @@ export class ExecutorSettingsStore {
   save(patch: {
     defaultApprovalMode?: ApprovalMode | undefined;
     preferredExecutorId?: ExecutorId | null | undefined;
+    followUpMode?: TaskFollowUpMode | undefined;
     reasoningEffort?: ReasoningEffort | undefined;
     executors?: Partial<Record<ExecutorId, ExecutorRuntimeSettings>> | undefined;
   }): ExecutorSettingsView {
@@ -119,6 +124,7 @@ export class ExecutorSettingsStore {
     const next = normalizeExecutorSettings({
       defaultApprovalMode: patch.defaultApprovalMode ?? current.defaultApprovalMode,
       preferredExecutorId: patch.preferredExecutorId !== undefined ? patch.preferredExecutorId : current.preferredExecutorId,
+      followUpMode: patch.followUpMode ?? current.followUpMode,
       reasoningEffort: patch.reasoningEffort ?? current.reasoningEffort,
       executors: mergeExecutorRuntimeSettings(current.executors, patch.executors)
     });
@@ -151,6 +157,7 @@ function mergeExecutorRuntimeSettings(
 export function normalizeExecutorSettings(input: {
   defaultApprovalMode?: ApprovalMode | undefined;
   preferredExecutorId?: ExecutorId | null | undefined;
+  followUpMode?: TaskFollowUpMode | undefined;
   reasoningEffort?: ReasoningEffort | undefined;
   /** Legacy concurrency settings are accepted during migration, then omitted. */
   concurrency?: unknown;
@@ -160,6 +167,7 @@ export function normalizeExecutorSettings(input: {
   return {
     defaultApprovalMode: normalizeApprovalMode(input.defaultApprovalMode),
     preferredExecutorId: normalizeExecutorId(input.preferredExecutorId),
+    followUpMode: normalizeFollowUpMode(input.followUpMode),
     reasoningEffort: normalizeReasoningEffort(input.reasoningEffort),
     executors
   };
@@ -193,4 +201,8 @@ function normalizeApprovalMode(_value: unknown): ApprovalMode {
 
 function normalizeReasoningEffort(value: unknown): ReasoningEffort {
   return value === "off" || value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "max" ? value : "max";
+}
+
+function normalizeFollowUpMode(value: unknown): TaskFollowUpMode {
+  return value === "steer" ? "steer" : "queue";
 }

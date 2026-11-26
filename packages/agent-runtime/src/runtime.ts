@@ -1128,7 +1128,12 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         await checkpoint("turn");
         continue;
       }
-      if (turn.content.trim() && !options.requireFinishTool) return finish("completed", turn.content.trim());
+      // A direct answer is a valid completion when the model did not need a
+      // tool. Once work has run, keep requiring finish_task so artifacts and
+      // side effects are checked before the task is declared complete.
+      if (turn.content.trim() && (!options.requireFinishTool || toolCalls === 0)) {
+        return finish("completed", turn.content.trim());
+      }
       if (turn.content.trim()) {
         missingFinishTurns += 1;
         if (missingFinishTurns > 1) return finish("failed", "模型连续用纯文本声称完成，但没有调用 finish_task");

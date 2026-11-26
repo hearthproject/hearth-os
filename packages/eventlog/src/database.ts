@@ -6154,7 +6154,10 @@ function normalizeTaskPermissions(raw: unknown): TaskRecord["permissions"] {
   if (raw == null) return undefined;
   const parsed = JSON.parse(String(raw)) as NonNullable<TaskRecord["permissions"]>;
   const hasRoots = parsed.readRoots.length > 0 || parsed.writeRoots.length > 0;
-  if (!hasRoots && parsed.tools.length === 0) return undefined;
+  const hasFullAccessSnapshot = parsed.fullAccess === true
+    || parsed.approvalMode === "full"
+    || parsed.sandboxMode === "danger-full-access";
+  if (!hasRoots && parsed.tools.length === 0 && !hasFullAccessSnapshot) return undefined;
   return parsed;
 }
 

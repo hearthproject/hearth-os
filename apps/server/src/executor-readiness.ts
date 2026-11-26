@@ -3,8 +3,8 @@ import type { CodexProfile } from "@hearth/codex-executor";
 import { supportsToolCalling } from "./model-agent.ts";
 import { chatModelConfigured, type ModelSettings } from "./model-settings.ts";
 
-const NATIVE_MODEL_ISSUE = "尚未配置聊天模型，原生执行器无法运行任务";
-const NATIVE_PROTOCOL_ISSUE = "当前聊天模型协议不支持工具调用，原生执行器无法运行任务";
+const NATIVE_MODEL_ISSUE = "当前执行器尚未绑定模型，原生执行器无法运行任务";
+const NATIVE_PROTOCOL_ISSUE = "当前执行器绑定的模型协议不支持工具调用，原生执行器无法运行任务";
 const CODEX_KEY_ISSUE = "Codex 模型档案缺少 API Key";
 const DSH_MODEL_ISSUE = "DeepSeek Harness 还没有绑定模型，请到设置中选择模型档案";
 const DSH_FIELDS_ISSUE = "DeepSeek Harness 的模型档案缺少服务地址、模型名或 API Key";

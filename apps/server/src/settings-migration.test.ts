@@ -88,6 +88,23 @@ describe("legacy settings migration", () => {
     input.store.close();
   });
 
+  it("defaults, normalizes, and persists follow-up handling mode", () => {
+    const directory = root();
+    const input = setup(directory);
+
+    expect(input.executorSettings.load().followUpMode).toBe("queue");
+    input.store.setAppSetting("executor.settings", JSON.stringify({
+      defaultApprovalMode: "full",
+      preferredExecutorId: "native"
+    }));
+    expect(input.executorSettings.load().followUpMode).toBe("queue");
+
+    expect(input.executorSettings.save({ followUpMode: "steer" }).followUpMode).toBe("steer");
+    expect(input.executorSettings.view().followUpMode).toBe("steer");
+    expect(input.executorSettings.save({ followUpMode: "queue" }).followUpMode).toBe("queue");
+    expect(input.executorSettings.load().followUpMode).toBe("queue");
+    input.store.close();
+  });
   it("skips local model endpoints and reports why", () => {
     const directory = root();
     const input = setup(directory);

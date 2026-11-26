@@ -357,11 +357,10 @@ export class ModelRegistry {
   }
 
   settingsForExecutorOrChat(executorId: ExecutorId): ModelSettings | null {
-    const bound = this.settingsForExecutor(executorId);
-    if (bound) return bound;
-    if (executorId !== "native") return null;
-    const chat = this.chatSettings();
-    return chat ?? null;
+    // Compatibility name retained for existing callers. Executor bindings are
+    // now the only runtime model source; the legacy chat profile must not leak
+    // into any executor's health, context policy, or task execution.
+    return this.settingsForExecutor(executorId);
   }
 
   codexProfile(): CodexProfile | null {

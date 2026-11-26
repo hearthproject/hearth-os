@@ -46,6 +46,11 @@ export interface GoalSchedulerPort {
   pause(taskId: string): Promise<TaskPauseResult>;
   resumePaused(taskId: string, reference: TaskResumeReference): TaskRecord;
   cancel(taskId: string): TaskRecord;
+  replanGoalTask(
+    taskId: string,
+    prompt: string,
+    beforeWake?: (task: TaskRecord) => void
+  ): Promise<TaskRecord>;
   requeueGoalTask(taskId: string, prompt: string, options?: { allowCompleted?: boolean }): TaskRecord;
   kick(): void;
 }
@@ -311,8 +316,9 @@ export class GoalService {
         break;
       }
       case "replan": {
-        assertGoalTransition(goal.currentState, "active");
-        goal = this.saveGoal({
+        const task = goal.taskId ? this.service.store.getTask(goal.taskId) : null;
+        const nextIndex = (goal.roundCount ?? 0) + 1;
+        const replannedGoal: GoalContract = {
           ...goal,
           currentState: "active",
           armed: true,
@@ -320,11 +326,33 @@ export class GoalService {
           nextWakeAt: null,
           noProgressCount: 0,
           lastProgressDigest: null,
-          nextHandoff: note || "已重新规划，换一条路线继续"
-        });
-        const task = goal.taskId ? this.service.store.getTask(goal.taskId) : null;
-        if (task && (task.status === "completed" || task.status === "recoverable" || task.status === "failed")) {
-          this.startRound(goal);
+          nextHandoff: note || "已重新规划，换一条路线继续",
+          updatedAt: this.now().toISOString()
+        };
+        if (!task) {
+          goal = this.saveGoal(replannedGoal);
+          break;
+        }
+        if (!this.scheduler) throw new GoalStateError("GOAL_STATE_INVALID", "调度器没有启动，不能重新规划");
+        const prompt = [
+          buildGoalRoundPrompt(replannedGoal, this.service.store.listGoalRounds(goal.goalId), nextIndex),
+          note ? `## 用户重新规划要求\n${note}` : "",
+          "## 重新规划规则\n保留已有产物、轮次和证据。安全停止上一轮正在执行的生成，清除无进展计数，然后立即按新路线继续。不要重做已经验证完成的工作。"
+        ].filter(Boolean).join("\n\n");
+        try {
+          await this.scheduler.replanGoalTask(task.id, prompt, () => {
+            goal = this.saveGoal(replannedGoal);
+          });
+        } catch (error) {
+          this.saveGoal({
+            ...this.get(goal.goalId),
+            currentState: "blocked",
+            armed: false,
+            stopReason: "task_failed",
+            nextWakeAt: null,
+            nextHandoff: `重新规划失败：${error instanceof Error ? error.message : String(error)}`
+          });
+          throw error;
         }
         break;
       }

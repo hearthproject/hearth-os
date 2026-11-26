@@ -111,7 +111,7 @@ export function assertGoalAction(goal: GoalContract, action: GoalAction): void {
     return;
   }
   if (action === "replan") {
-    if (state !== "blocked" && state !== "awaiting_user") {
+    if (state !== "active" && state !== "paused" && state !== "blocked" && state !== "awaiting_user") {
       throw new GoalStateError("GOAL_STATE_INVALID", `当前状态不能重新规划：${state}`);
     }
     return;

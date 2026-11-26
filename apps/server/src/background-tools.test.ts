@@ -41,6 +41,22 @@ describe("BackgroundToolService", () => {
     return { service, tools };
   }
 
+  function useLegacyPermissions(service: HearthService, taskId: string, tools: string[]) {
+    const task = service.requireTask(taskId);
+    return service.updateTask(task.id, {
+      permissions: {
+        ...task.permissions,
+        readRoots: task.permissions?.readRoots.length ? task.permissions.readRoots : [root!],
+        writeRoots: task.permissions?.writeRoots ?? [],
+        networkHosts: task.permissions?.networkHosts ?? [],
+        fullAccess: false,
+        approvalMode: "necessary" as const,
+        sandboxMode: "workspace-write" as const,
+        tools
+      }
+    });
+  }
+
   it("runs a job to completion and persists its output", async () => {
     const { service, tools } = setup();
     const task = service.createTask({ title: "bg", goal: "run background tool" });
@@ -73,21 +89,39 @@ describe("BackgroundToolService", () => {
     tools.stop(first.id, "结束");
   });
 
-  it("refuses non-read-only tools without an authorization channel", async () => {
+  it("runs sensitive tools directly for full-access tasks", async () => {
     const { service, tools } = setup();
     const task = service.createTask({ title: "bg", goal: "secure" });
+    const job = await tools.start({ taskId: task.id, toolName: "shell" });
+    expect((await tools.waitFor(job.id, 5_000)).status).toBe("finished");
+  });
+
+  it("preserves the approval gate for non-full legacy tasks", async () => {
+    const { service, tools } = setup();
+    const task = service.createTask({ title: "bg", goal: "legacy secure" });
+    useLegacyPermissions(service, task.id, ["shell"]);
     await expect(tools.start({ taskId: task.id, toolName: "shell" })).rejects.toMatchObject({
       code: "BACKGROUND_TOOL_APPROVAL_REQUIRED"
     });
   });
 
-  it("runs a sensitive tool only after the authorization hook succeeds", async () => {
+  it("runs a non-full sensitive tool only after the authorization hook succeeds", async () => {
     const seen: string[] = [];
     const { service, tools } = setup(2, async (toolName) => { seen.push(toolName); });
     const task = service.createTask({ title: "bg", goal: "approved" });
+    useLegacyPermissions(service, task.id, ["shell"]);
     const job = await tools.start({ taskId: task.id, toolName: "shell", args: { command: "echo ok" } });
     expect(seen).toEqual(["shell"]);
     expect((await tools.waitFor(job.id, 5_000)).status).toBe("finished");
+  });
+
+  it("keeps the explicit tool whitelist for non-full legacy tasks", async () => {
+    const { service, tools } = setup();
+    const task = service.createTask({ title: "bg", goal: "legacy whitelist" });
+    useLegacyPermissions(service, task.id, []);
+    await expect(tools.start({ taskId: task.id, toolName: "read_file" })).rejects.toMatchObject({
+      code: "BACKGROUND_TOOL_NOT_AUTHORIZED"
+    });
   });
 
   it("exposes agent tools for start and check", async () => {

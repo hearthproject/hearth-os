@@ -62,8 +62,10 @@ export function OnboardingPage() {
   const registryQuery = useQuery({ queryKey: ["modelRegistry"], queryFn: api.modelRegistry });
   const executorsQuery = useQuery({ queryKey: ["executors"], queryFn: api.executors, refetchInterval: 10_000 });
 
-  const configured = Boolean(registryQuery.data?.chatConfigured);
   const executors = executorsQuery.data?.executors ?? [];
+  const selectedExecutorId = executorsQuery.data?.preferredExecutorId ?? "native";
+  const selectedExecutor = executors.find((executor) => executor.id === selectedExecutorId) ?? null;
+  const configured = Boolean(selectedExecutor?.effectiveModel);
   const nativeExecutor = executors.find((executor) => executor.id === "native");
   const nativeReady = Boolean(nativeExecutor?.health.canRun);
   const installedExternalIds = EXTERNAL_EXECUTOR_IDS.filter((id) => {
@@ -194,7 +196,7 @@ export function OnboardingPage() {
         ...(draft.apiKey.trim() ? { apiKey: draft.apiKey.trim() } : {})
       });
       if (!result.configured) {
-        setNotice({ tone: "error", text: "模型档案已保存，但还不能用于聊天。请补全 Key 后重试。" });
+        setNotice({ tone: "error", text: "模型档案已保存，但还不能用于当前执行器。请补全 Key 后重试。" });
         return;
       }
       await Promise.all([
@@ -436,11 +438,11 @@ export function OnboardingPage() {
             <section className="wizard-panel">
               <h1>先跑一个真实任务</h1>
               <p className="wizard-note">
-                这一步会用你刚配置的模型，在一个临时文件夹里读写文件并运行测试。跑通才说明聊天、工具和测试链路真的可用；不会碰你的项目。
+                这一步会用当前执行器绑定的模型，在一个临时文件夹里读写文件并运行测试。跑通才说明代理、工具和测试链路真的可用；不会碰你的项目。
               </p>
 
               <div className="wizard-summary">
-                <SummaryRow ok={configured} label="聊天模型" value={configured ? `${draft.providerName} · ${draft.model}` : "尚未配置"} />
+                <SummaryRow ok={configured} label="执行器模型" value={configured ? `${draft.providerName} · ${draft.model}` : "尚未配置"} />
                 <SummaryRow ok={nativeReady} label="原生执行器" value={nativeReady ? "已就绪" : "未就绪"} />
                 {EXTERNAL_EXECUTOR_IDS.map((id) => {
                   const executor = executors.find((item) => item.id === id);
@@ -464,7 +466,7 @@ export function OnboardingPage() {
               )}
 
               {!configured && (
-                <p className="wizard-note warn"><X size={14} /> 还没有可用的聊天模型，可以先跳过，在设置里补上。</p>
+                <p className="wizard-note warn"><X size={14} /> 还没有可用的执行器模型，可以先跳过，在设置里补上。</p>
               )}
 
               <div className="wizard-verify">

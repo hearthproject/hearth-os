@@ -46,7 +46,7 @@ describe("executor model readiness", () => {
   it("marks native unavailable until a chat model is configured", () => {
     const readied = applyExecutorModelReadiness("native", health("native"), null);
     expect(readied.canRun).toBe(false);
-    expect(readied.issues.join(" ")).toContain("聊天模型");
+    expect(readied.issues.join(" ")).toContain("尚未绑定模型");
   });
 
   it("keeps native available with a usable model", () => {

@@ -1,6 +1,5 @@
-import { isSimpleDraft, isDraftRevision, DRAFT_INSTRUCTION } from "./draft-intent.ts";
 import { randomUUID } from "node:crypto";
-import { createReadStream, existsSync, mkdirSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { createReadStream, mkdirSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import multipart from "@fastify/multipart";
 import type { FastifyInstance, FastifyReply } from "fastify";
@@ -19,16 +18,8 @@ import type { MentionResolver } from "./mentions.ts";
 import type { OntologyService } from "./ontology.ts";
 import type { OntologyWriter } from "./ontology-writer.ts";
 import { ModelRegistryError, type ModelRegistry } from "./model-registry.ts";
-import { chatSystemPrompt, conversationTitle, conversationTitleFromRoute, decideRoute, planExecution } from "./chat.ts";
-import { wantsSkillInstall } from "./task-intent.ts";
-import {
-  defaultLocalFileRoots,
-  extractFilePaths,
-  parseLocalFileRequest,
-  searchLocalFile,
-  storeOutgoingAttachment
-} from "./chat-file-delivery.ts";
-import { listModels, ModelClientError, completeChat, streamChat, type ChatMessage } from "./model-client.ts";
+import { conversationTitle, planExecution } from "./chat.ts";
+import { listModels, ModelClientError, completeChat } from "./model-client.ts";
 import {
   MODEL_PRESETS,
   chatModelConfigured,
@@ -66,7 +57,9 @@ const goalSettingsSchema = z.object({
 }).strict();
 
 const chatSchema = z.object({
-  routeMode: z.enum(["auto", "chat", "task"]).optional(),
+  // Accepted for compatibility with older clients. Every message is handled by
+  // the selected executor's single agent harness, so this value is ignored.
+  routeMode: z.unknown().optional(),
   conversationId: z.string().trim().min(1).max(80).optional(),
   projectId: z.string().trim().min(1).max(120).optional(),
   message: z.string().max(100_000).optional(),
@@ -126,7 +119,6 @@ import type { SkillService } from "./skills/service.ts";
 import type { GoalService } from "./goals.ts";
 import type { PlanService } from "./plans.ts";
 import type { ConversationContextService } from "./conversation-context.ts";
-import { projectChatSupportsTools, runProjectChat } from "./project-chat.ts";
 
 export interface ChatRouteOptions {
   service: HearthService;
@@ -167,7 +159,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
   const backfillLegacyTitles = (): void => {
     if (legacyTitleBackfillStarted) return;
     try {
-      if (store.getAppSetting("conversation.title.summary.v4") === "done") return;
+      if (store.getAppSetting("conversation.title.summary.v5") === "done") return;
       legacyTitleBackfillStarted = true;
     } catch {
       return;
@@ -176,20 +168,19 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     // 避免会话有内容但侧栏一直显示“新对话”。
     void (async () => {
       try {
-        for (const conversation of store.listConversations().slice(0, 200)) {
+        for (const conversation of store.listConversations()) {
           if (conversation.title !== "新对话" || !conversation.title.trim()) continue;
           const firstUser = store.listChatMessages(conversation.id).find((item) => item.role === "user");
           if (!firstUser) continue;
           const localTitle = conversationTitle(firstUser.content);
           if (localTitle) store.renameConversation(conversation.id, localTitle);
         }
-        store.setAppSetting("conversation.title.summary.v4", "done");
+        store.setAppSetting("conversation.title.summary.v5", "done");
       } catch {
         // 标题兜底失败不能阻塞会话列表。
       }
     })();
   };
-  const chatConfigured = (): boolean => chatModelConfigured(chatSettings());
   const executorAvailability = (): Record<ExecutorId, boolean> => {
     const settings = executorSettings();
     const availability = {} as Record<ExecutorId, boolean>;
@@ -392,7 +383,9 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     if (!options.conversationContext) {
       return reply.code(503).send({ error: "CONTEXT_NOT_READY", message: "对话上下文服务尚未启动" });
     }
-    const compaction = await options.conversationContext.compactNow(conversation.id, "manual");
+    const executorId = executorSettings().preferredExecutorId ?? "native";
+    const settings = options.modelSettingsForExecutor?.(executorId) ?? null;
+    const compaction = await options.conversationContext.compactNow(conversation.id, "manual", { settings });
     if (!compaction) {
       return reply.code(409).send({ error: "NOTHING_TO_COMPACT", message: "当前没有可压缩的对话内容" });
     }
@@ -505,7 +498,6 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     }
 
     const userContent = message || (detectedUrl ? `请处理这个网址：${detectedUrl}` : `请处理附件：${storedFiles.map((file) => file.name).join("、")}`);
-    const firstTurn = store.listChatMessages(conversation.id).length === 0;
     const titleWasPlaceholder = conversation.title === "新对话";
     const userRecord = store.createChatMessage({
       id: randomUUID(),
@@ -518,7 +510,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     });
     // 首轮先落一个本地标题，模型摘要稍后如果更好再替换；
     // 这样侧栏不会在摘要失败时一直停在“新对话”。
-    if (firstTurn && titleWasPlaceholder) {
+    if (titleWasPlaceholder) {
       const localTitle = conversationTitle(userContent);
       if (localTitle && localTitle !== conversation.title) {
         conversation = store.renameConversation(conversation.id, localTitle) ?? conversation;
@@ -568,151 +560,39 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       // Ontology writeback is best effort and never blocks the reply.
     }
 
-    const installSource = extractSkillInstallSource(message);
-    if (installSource && options.skills) {
-      const assistant = service.appendChatMessage({
-        id: randomUUID(),
-        conversationId: conversation.id,
-        role: "assistant",
-        content: `我找到了要安装的 Skill 来源：\n\n${installSource}\n\n为了安全，安装前需要你确认。确认后我会把它放进资料库的“技能”里，之后可以随时在输入框用 / 调用。`,
-        taskId: null,
-        attachments: [],
-        createdAt: new Date().toISOString()
-      });
-      send("skill_install", { source: installSource });
-      send("done", assistant);
-      finish(reply, send);
-      return reply;
-    }
-
-    // "把孙中山的一生这个PPT发给我" is a file-delivery request, not a question.
-    // Resolve it natively so the model never has to claim it cannot attach files.
-    if (storedFiles.length === 0 && !detectedUrl) {
-      const fileRequest = parseLocalFileRequest(message);
-      if (fileRequest) {
-        const existingMessages = store.listChatMessages(conversation.id)
-          .filter((item) => item.id !== userRecord.id)
-          .slice(-12);
-        const hintPaths = existingMessages.flatMap((item) => extractFilePaths(item.content));
-        const conversationProject = conversation.projectId ? store.getLocalProject(conversation.projectId) : null;
-        const search = searchLocalFile(fileRequest, {
-          roots: defaultLocalFileRoots(conversationProject?.path ?? null),
-          hintPaths
-        });
-        if (search) {
-          try {
-            const attachment = storeOutgoingAttachment(search.path, attachmentRoot);
-            const content = `已把《${attachment.name}》发给你。`;
-            send("delta", { text: content });
-            const assistant = service.appendChatMessage({
-              id: randomUUID(),
-              conversationId: conversation.id,
-              role: "assistant",
-              content,
-              taskId: null,
-              attachments: [attachment],
-              createdAt: new Date().toISOString()
-            });
-            send("done", assistant);
-            finish(reply, send);
-            return reply;
-          } catch (error) {
-            sendPersistedError("FILE_DELIVERY_FAILED", `找到文件了，但发送失败：${errorMessage(error)}`);
-            finish(reply, send);
-            return reply;
-          }
-        }
-        if (fileRequest.extensions.length > 0) {
-          const type = fileRequest.extensions.map((extension) => extension.replace(/^\./, "")).join(" / ");
-          sendPersistedError(
-            "FILE_NOT_FOUND",
-            `我在桌面、下载和文档里没找到《${fileRequest.query}》这类 ${type} 文件。你可以把完整路径发给我，我再发送。`
-          );
-          finish(reply, send);
-          return reply;
-        }
-      }
-    }
-
-    let skillContext = "";
-    if (parsed.data.skillId && options.skills) {
-      try {
-        const used = options.skills.use(parsed.data.skillId, {
-          taskId: null,
-          runId: null,
-          note: `对话框使用：${message.slice(0, 120)}`
-        });
-        skillContext = used.prompt;
-        send("skill", { skill: used.skill });
-      } catch (error) {
-        sendPersistedError("SKILL_NOT_AVAILABLE", error instanceof Error ? error.message : "这个 Skill 暂时不能用");
-        finish(reply, send);
-        return reply;
-      }
-    }
-
-    const settings = chatSettings();
     const plan = planExecution(userContent);
     const effectiveSettings = parsed.data.settings
       ? mergeConversationSettings(conversation.settings, parsed.data.settings)
       : conversation.settings;
-    // The executor choice is a global, always-native-by-default preference.
-    // Switching it once must follow the user into every conversation; there is
-    // no automatic task-based matching anymore.
     const lockedExecutorId = executorSettings().preferredExecutorId ?? "native";
     const preferredExecutorId = lockedExecutorId;
     const executorEnabled = { ...effectiveSettings.executorEnabled, [lockedExecutorId]: true };
     const previousMessages = store.listChatMessages(conversation.id).filter((item) => item.id !== userRecord.id);
     const referencedFile = extractLocalFilePath(userContent);
-    const recentDraft = previousMessages.slice(-8).some((item) =>
-      (item.role === "user" && isSimpleDraft(item.content)) ||
-      (item.role === "assistant" && /^\s*(?:\*\*)?(?:主题|Subject)\s*[:：]/i.test(item.content)));
-    const directDraft = storedFiles.length === 0 && !detectedUrl && (isSimpleDraft(userContent) || (recentDraft && isDraftRevision(userContent)));
-    const requestedRouteMode = parsed.data.routeMode ?? "auto";
-    const routeMode = parsed.data.mcpServerIds?.length && requestedRouteMode === "auto" ? "task" : requestedRouteMode;
     const chatProject = conversation.projectId ? store.getLocalProject(conversation.projectId) : null;
+    const pendingMcpServerIds = parsed.data.mcpServerIds ?? [];
     const wantsGoal = parsed.data.goalMode === true;
     const wantsPlan = parsed.data.planMode === true || effectiveSettings.collaborationMode === "plan";
-    if (routeMode === "chat" && storedFiles.length > 0 && !chatProject) {
-      sendPersistedError("CHAT_ATTACHMENTS_UNSUPPORTED", "继续聊天模式暂不读取附件。请粘贴需要处理的文字，或选择派为任务。");
-      finish(reply, send);
-      return reply;
-    }
-    const localFileRoute = referencedFile
-      ? { action: "task" as const, title: conversationTitle(userContent), goal: userContent, reason: "消息引用了本地文件，需要执行器读取文件内容" }
-      : null;
-    const skillRoute = wantsSkillInstall(userContent)
-      ? { action: "task" as const, title: conversationTitle(userContent), goal: userContent, reason: "Skill 管理：需要搜索并安装技能" }
-      : null;
-    const route = wantsPlan
-      ? { action: "task" as const, title: conversationTitle(userContent), goal: userContent, reason: "计划模式：先只读调查并产出可执行的实施方案" }
-      : wantsGoal
-        ? { action: "task" as const, title: conversationTitle(userContent), goal: userContent, reason: "目标模式：需要执行器持续推进" }
-      : routeMode !== "auto"
-        ? { action: routeMode, title: "", goal: userContent, reason: routeMode === "chat" ? "你选择了继续聊天，不派任务" : "你选择了派为任务" }
-        : directDraft ? { action: "chat" as const, title: "", goal: userContent, reason: "直接拟稿或修订现有草稿" } : localFileRoute ?? skillRoute ?? await decideRoute(userContent, storedFiles.length > 0, detectedUrl, settings, {
-      preferredExecutorId: lockedExecutorId
-    });
     const available = executorAvailability();
-    const lockedHealth = lockedExecutorId
-      ? options.executorHealth
-        ? options.executorHealth(lockedExecutorId)
-        : executorHealth(lockedExecutorId, executorSettings(), executorSettingsPath)
-      : null;
+    const lockedHealth = options.executorHealth
+      ? options.executorHealth(lockedExecutorId)
+      : executorHealth(lockedExecutorId, executorSettings(), executorSettingsPath);
     const resolution = resolveExecutorLocked(lockedExecutorId, executorEnabled, available, plan.capability);
-    if (titleWasPlaceholder && firstTurn) {
-      const nextTitle = conversationTitleFromRoute(route, userContent);
-      if (nextTitle && nextTitle !== conversation.title) {
-        conversation = store.renameConversation(conversation.id, nextTitle) ?? conversation;
-        send("conversation", conversation);
-      }
-    }
+    const taskTitle = conversationTitle(userContent);
+
     send("routing", {
-      ...route,
+      action: "task",
+      harness: "agent",
+      title: taskTitle,
+      goal: userContent,
+      reason: wantsPlan
+        ? "进入统一 Agent Harness：本轮受计划模式只读约束"
+        : wantsGoal
+          ? "进入统一 Agent Harness：本轮受目标模式多轮约束"
+          : "进入统一 Agent Harness，由模型根据实际需求决定直接回答或调用工具",
       plan: { ...plan, executorId: resolution.executorId ?? lockedExecutorId },
       preferredExecutorId,
-      ...(lockedExecutorId ? { lockedExecutorId } : {}),
-      ...(resolution.reroutedFrom ? { reroutedFrom: resolution.reroutedFrom } : {})
+      lockedExecutorId
     });
 
     let mentionResult: ReturnType<MentionResolver["resolveText"]> | null = null;
@@ -722,7 +602,7 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
           text: userContent,
           conversationId: conversation.id,
           messageId: userRecord.id,
-          irreversible: route.action === "task"
+          irreversible: true
         });
         if (mentionResult.mentions.length > 0) {
           send("mentions", {
@@ -734,383 +614,34 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
         mentionResult = null;
       }
     }
-    if (route.action === "task" && mentionResult?.blocksAction) {
-      const assistant = store.createChatMessage({
-        id: randomUUID(),
-        conversationId: conversation.id,
-        role: "assistant",
-        content: `在派出任务前需要先确认指代：${mentionResult.question ?? "请补充具体对象。"}`,
-        taskId: null,
-        attachments: [],
-        createdAt: new Date().toISOString()
-      });
-      send("clarification", { question: mentionResult.question, mentions: mentionResult.mentions });
-      send("done", assistant);
-      finish(reply, send);
-      return reply;
+
+    let skillContext = "";
+    if (parsed.data.skillId && options.skills) {
+      try {
+        const used = options.skills.use(parsed.data.skillId, {
+          taskId: null,
+          runId: null,
+          note: `对话使用：${message.slice(0, 120)}`
+        });
+        skillContext = used.prompt;
+        send("skill", { skill: used.skill });
+      } catch (error) {
+        sendPersistedError("SKILL_NOT_AVAILABLE", error instanceof Error ? error.message : "这个 Skill 暂时不能用");
+        finish(reply, send);
+        return reply;
+      }
     }
 
-    if (route.action === "task") {
-      let createdGoalId: string | null = null;
-      try {
-        if (!resolution.executorId) {
-          const lockedIssue = lockedHealth?.issues.filter(Boolean).join("；");
-          const lockedText = lockedExecutorId
-            ? `已锁定 ${executorName(lockedExecutorId)}，但${resolution.reason ?? "当前无法执行"}${lockedIssue ? `：${lockedIssue}` : ""}。任务没有派出；请检查该执行器设置，或切回“自动匹配（按任务）”后重试。`
-            : plan.capability
-              ? `${resolution.reason ?? "没有可用的执行器"}，暂时不能派出任务。请在输入框上方启用${plan.capability === "github" ? " Codex 或 Native" : " Native"}后重试。`
-              : "所有执行器都已关闭或不可用，暂时不能派出任务。请在输入框上方的执行器选择器中选择一个可用执行器，然后再发送。";
-          const assistant = service.appendChatMessage({
-            id: randomUUID(),
-            conversationId: conversation.id,
-            role: "assistant",
-            content: lockedText,
-            taskId: null,
-            attachments: [],
-            createdAt: new Date().toISOString()
-          });
-          send("done", assistant);
-          finish(reply, send);
-          return reply;
-        }
-        const taskSettings = options.modelSettingsForExecutor?.(resolution.executorId) ?? settings;
-        const delegatedChatContext = options.conversationContext
-          ? (await options.conversationContext.renderForTask(conversation.id, undefined, userRecord.id, { settings: taskSettings })).text
-          : taskChatContext(previousMessages);
-        // The executor owns the real prompt until it reports measured usage. Do
-        // not publish a partial visible-message estimate as the conversation
-        // gauge (that produced values like "177 / 0%").
-        const boundProject = conversation.projectId ? store.getLocalProject(conversation.projectId) : null;
-        const boundProjectContext = boundProject ? projectPromptBlock(boundProject) : "";
-        const workspacePath = boundProject ? null : referencedFile ? dirname(referencedFile) : extractWorkspacePath(message);
-        const fileInputs = storedFiles.map((file) => ({ label: file.name, path: file.path }));
-        if (referencedFile) fileInputs.push({ label: basename(referencedFile), path: referencedFile });
-        if (controller.signal.aborted) return reply;
-        const taskGoal = [message, detectedUrl ? `参考网址：${detectedUrl}` : ""].filter(Boolean).join("\n")
-          || `处理附件：${storedFiles.map((file) => file.name).join("、")}`;
-        const planInput = [
-          message,
-          boundProjectContext,
-          skillContext,
-          delegatedChatContext,
-          detectedUrl ? `参考网址：${detectedUrl}` : "",
-          fileInputs.length > 0
-            ? `本轮附件（需要时用 read_desktop_file 或 read_document 读取）：\n${fileInputs.map((file) => `- ${file.label}: ${file.path}`).join("\n")}`
-            : ""
-        ].filter(Boolean).join("\n\n");
-        let task: TaskRecord;
-        if (wantsPlan) {
-          if (!options.plans) throw new Error("计划服务没有启动");
-          const activePlan = parsed.data.planId
-            ? options.plans.get(parsed.data.planId)
-            : options.plans.activeForConversation(conversation.id);
-          if (activePlan) {
-            if (activePlan.conversationId !== conversation.id) throw new Error("这个计划不属于当前对话");
-            if (activePlan.stage !== "planning" && activePlan.stage !== "awaiting_approval") {
-              throw new Error(`计划处于 ${activePlan.stage}，不能继续讨论；请先批准、重试或退出计划`);
-            }
-            const revised = options.plans.continuePlanning(activePlan.id, planInput, {
-              ...(route.title ? { title: route.title } : {}),
-              textInput: planInput,
-              ...(parsed.data.mcpServerIds?.length ? { mcpServerIds: parsed.data.mcpServerIds } : {})
-            });
-            const planningTask = revised.planningTaskId ? service.store.getTask(revised.planningTaskId) : null;
-            if (!planningTask) throw new Error("计划规划任务没有创建成功");
-            task = planningTask;
-          } else {
-            const created = options.plans.create({
-              conversationId: conversation.id,
-              projectId: boundProject?.id ?? null,
-              title: route.title || conversationTitle(userContent),
-              objective: taskGoal,
-              textInput: planInput,
-              ...(parsed.data.mcpServerIds?.length ? { mcpServerIds: parsed.data.mcpServerIds } : {}),
-              execution: {
-                executorId: resolution.executorId,
-                taskKind: plan.taskKind,
-                expectedOutputs: plan.expectedOutputs,
-                projectId: boundProject?.id ?? null,
-                workspacePath: workspacePath ?? null,
-                networkHosts: plan.networkHosts ?? [],
-                ...(resolution.executorId === "native" ? { executionMode: effectiveSettings.executionMode ?? "standard" } : {})
-              }
-            });
-            const planningTask = created.planningTaskId ? service.store.getTask(created.planningTaskId) : null;
-            if (!planningTask) throw new Error("计划规划任务没有创建成功");
-            task = planningTask;
-          }
-        } else {
-          if (wantsGoal) {
-            if (!options.goals) throw new Error("目标服务没有启动");
-            const goalSettings = parsed.data.goalSettings ?? {};
-            const created = options.goals.create({
-              title: route.title || conversationTitle(userContent),
-              objective: taskGoal,
-              conversationId: conversation.id,
-              projectId: boundProject?.id ?? null,
-              execution: {
-                executorId: resolution.executorId,
-                taskKind: plan.taskKind,
-                expectedOutputs: plan.expectedOutputs,
-                projectId: boundProject?.id ?? null,
-                workspacePath: workspacePath ?? null,
-                networkHosts: plan.networkHosts ?? [],
-                ...(resolution.executorId === "native" ? { executionMode: effectiveSettings.executionMode ?? "standard" } : {})
-              },
-              criteria: (goalSettings.criteria ?? []).map((description, index) => ({
-                id: `c${index + 1}`,
-                description,
-                validator: "llm_review" as const,
-                check: description,
-                required: true
-              })),
-              forbiddenActions: goalSettings.forbiddenActions ?? [],
-              evidenceRequirements: goalSettings.evidenceRequirements ?? [],
-              ...(goalSettings.maxRounds !== undefined ? { maxRounds: goalSettings.maxRounds } : {}),
-              ...(goalSettings.reviewPolicy ? { reviewPolicy: goalSettings.reviewPolicy } : {}),
-              ...(goalSettings.deadline ? { deadline: goalSettings.deadline } : {}),
-              ...(goalSettings.commandsApproved ? { commandsApproved: true } : {})
-            });
-            createdGoalId = created.goalId;
-          }
-          task = service.createTask({
-            title: route.title || conversationTitle(userContent),
-            goal: taskGoal,
-            textInput: [message, boundProjectContext, skillContext, delegatedChatContext].filter(Boolean).join("\n\n"),
-            fileInputs,
-            ...(detectedUrl ? { url: detectedUrl } : {}),
-            ...(boundProject ? { projectId: boundProject.id } : {}),
-            ...(workspacePath ? { workspacePath } : {}),
-            ...(createdGoalId ? { goalId: createdGoalId } : {}),
-            conversationId: conversation.id,
-            executorId: resolution.executorId,
-            ...(resolution.executorId === "native" ? { executionMode: effectiveSettings.executionMode ?? "standard" } : {}),
-            taskKind: plan.taskKind,
-            expectedOutputs: plan.expectedOutputs,
-            ...(plan.networkHosts ? { networkHosts: plan.networkHosts } : {}),
-            ...(parsed.data.mcpServerIds?.length ? { mcpServerIds: parsed.data.mcpServerIds } : {})
-          });
-        }
-        if (createdGoalId && options.goals) {
-          options.goals.attachTask(createdGoalId, task.id);
-          await options.goals.action(createdGoalId, "start");
-        }
-        const executorText = friendlyExecutorName(resolution.executorId);
-        const rerouteText = resolution.reroutedFrom
-          ? `\n\n${resolution.reason ?? "原执行器不可用"}，已自动改由 ${executorText} 接管。`
-          : "";
-        const openingText = wantsPlan
-          ? `开始规划：${task.title}\n\n计划阶段只读调查，不会修改文件；完成后会给出可批准的实施计划。`
-          : `开始执行：${task.title}\n\n执行器：${executorText}。${rerouteText}`;
+    let createdGoalId: string | null = null;
+    try {
+      if (!resolution.executorId) {
+        const lockedIssue = lockedHealth?.issues.filter(Boolean).join("；");
+        const lockedText = `已锁定 ${executorName(lockedExecutorId)}，但${resolution.reason ?? "当前无法执行"}${lockedIssue ? `：${lockedIssue}` : ""}。消息没有派出；请检查该执行器的模型绑定和健康状态。`;
         const assistant = service.appendChatMessage({
           id: randomUUID(),
           conversationId: conversation.id,
           role: "assistant",
-          content: openingText,
-          taskId: task.id,
-          attachments: [],
-          createdAt: new Date().toISOString(),
-          kind: "task_status",
-          taskStatus: task.status
-        });
-        send("task", { task, conversationId: conversation.id, message: assistant });
-        send("usage", contextUsagePayload({
-          settings: taskSettings,
-          source: "pending",
-          scope: "task",
-          inputTokens: 0,
-          outputTokens: 0,
-          breakdown: {}
-        }));
-        send("done", assistant);
-      } catch (error) {
-        if (createdGoalId && options.goals) {
-          try {
-            await options.goals.action(createdGoalId, "stop", { note: "任务创建失败，目标未开始" });
-          } catch {
-            // Keep the original task-creation error visible to the user.
-          }
-        }
-        sendPersistedError("TASK_CREATE_FAILED", error instanceof Error ? error.message : String(error));
-      } finally {
-        finish(reply, send);
-      }
-      return reply;
-    }
-
-    if (!chatConfigured()) {
-      sendPersistedError("MODEL_NOT_CONFIGURED", "还没有配置聊天模型。请到“设置”里选择服务商并填入 API Key，然后重新发送。");
-      finish(reply, send);
-      return reply;
-    }
-
-    let history: ChatMessage[];
-    let appendCurrentUser = false;
-    let conversationSummary = "";
-    let conversationTasks = "";
-    const projectContext = chatProject ? projectPromptBlock(chatProject) : "";
-    if (options.conversationContext) {
-      const rendered = await options.conversationContext.renderForChat(conversation.id, {
-        currentMessageId: userRecord.id,
-        settings
-      });
-      history = rendered.history.map((item): ChatMessage => ({ role: item.role, content: item.content }));
-      conversationSummary = rendered.summaryText;
-      conversationTasks = rendered.taskContext;
-      appendCurrentUser = true;
-    } else {
-      history = store.listChatMessages(conversation.id)
-        .slice(directDraft ? -8 : -24)
-        .map((item): ChatMessage => ({ role: item.role, content: item.content }));
-    }
-    let memoryContext = "";
-    if (options.memory && !directDraft) {
-      try {
-        const projectScope = conversation.projectId ? projectMemoryScope(conversation.projectId) : null;
-        const recalled = options.memory.recallForConversation({
-          conversationId: conversation.id,
-          text: userContent,
-          ...(projectScope ? { scope: projectScope, scopes: [projectScope] } : {})
-        });
-        if (recalled.memories.length > 0) {
-          memoryContext = recalled.contextPack;
-          send("memory", {
-            count: recalled.memories.length,
-            recallIds: recalled.recalls.map((recall) => recall.id)
-          });
-        }
-      } catch {
-        // Memory recall is best effort and never blocks the answer.
-      }
-    }
-    let libraryContext = "";
-    if (options.library && !directDraft) {
-      try {
-        const recalled = await options.library.search(userContent, 6);
-        if (recalled.hits.length > 0) {
-          libraryContext = [
-            "## 相关资料",
-            ...recalled.hits.map((hit) => `### ${hit.node.title} [${hit.node.kind}]\n引用：${hit.node.ref}\n${hit.snippet}`)
-          ].join("\n\n");
-          send("library", { count: recalled.hits.length });
-        }
-      } catch {
-        // Library recall is best effort and never blocks the answer.
-      }
-    }
-    let personalContext = "";
-    if (options.personal && !directDraft) {
-      try {
-        const pack = options.personal.broker.compile({
-          scopeKind: "chat",
-          scopeId: conversation.id,
-          conversationId: conversation.id,
-          query: userContent,
-          budgetTokens: 1600,
-          includeRecentContext: false
-        });
-        personalContext = options.personal.broker.render(pack);
-        send("context", { packId: pack.id, usedTokens: pack.usedTokens, budgetTokens: pack.budgetTokens });
-      } catch {
-        personalContext = "";
-      }
-    }
-    const systemContent = chatSystemPrompt([
-      routeMode === "chat" ? "用户选择继续聊天：仅在对话中回答或修改内容，不派任务、不调用外部工具，不得声称已发送邮件、读取链接或执行外部操作。" : "",
-      directDraft ? DRAFT_INSTRUCTION : "",
-      projectContext,
-      personalContext,
-      memoryContext,
-      libraryContext,
-      skillContext
-    ]);
-    const messages: ChatMessage[] = [
-      { role: "system", content: systemContent },
-      ...(conversationSummary ? [{ role: "user" as const, content: conversationSummary }] : []),
-      ...(conversationTasks ? [{ role: "user" as const, content: conversationTasks }] : []),
-      ...history,
-      ...(appendCurrentUser ? [{ role: "user" as const, content: userContent }] : [])
-    ];
-    const contextBreakdown = {
-      system: estimateContextTokens(chatSystemPrompt()),
-      project: estimateContextTokens(projectContext),
-      conversation: estimateContextTokens(conversationSummary),
-      conversation_tasks: estimateContextTokens(conversationTasks),
-      history: estimateContextTokens(history.map((item) => item.content).join("\n")),
-      personal: estimateContextTokens(personalContext),
-      memory: estimateContextTokens(memoryContext),
-      library: estimateContextTokens(libraryContext),
-      skill: estimateContextTokens(skillContext),
-      attachments: estimateAttachmentContext(storedFiles),
-      user: estimateContextTokens(userContent)
-    };
-    const estimatedInput = Object.values(contextBreakdown).reduce((total, tokens) => total + tokens, 0);
-    const attachmentContext = storedFiles.length > 0
-      ? `## 本轮附件\n${storedFiles.map((file) => `- ${file.name} (${file.mimeType}, ${file.bytes} bytes): ${file.path}`).join("\n")}\n附件已保存在上述本地路径，可只读读取。`
-      : "";
-    const projectAgentPrompt = chatProject
-      ? [
-          projectContext,
-          conversationSummary,
-          conversationTasks,
-          ...history.map((item) => `${item.role === "user" ? "用户" : "助手"}：${item.content}`),
-          `## 当前请求\n${userContent}`,
-          attachmentContext,
-          personalContext,
-          memoryContext,
-          libraryContext,
-          skillContext,
-          "当前会话绑定了一个本地项目并拥有完全权限。需要了解代码、文件或结构时，必须调用工具读取真实项目；除非用户明确要求修改，否则不要写入或删除项目文件。",
-          "如果本轮选择了 Skill，必须优先按 Skill 的流程推进；Skill 要求提问时调用 ask_user 并等待用户回答，不要替用户决定，也不要用一次性总结跳过交互。",
-          "历史消息中如果出现其他仓库路径或与当前工作区不一致的结论，一律以当前项目路径和工具读取到的真实文件为准。"
-        ].filter(Boolean).join("\n\n")
-      : "";
-    if (chatProject && projectChatSupportsTools(settings)) {
-      send("usage", contextUsagePayload({
-        settings,
-        source: "pending",
-        scope: "chat",
-        inputTokens: 0,
-        outputTokens: 0,
-        breakdown: contextBreakdown
-      }));
-      try {
-        let streamedAnswer = "";
-        const result = await runProjectChat({
-          project: chatProject,
-          title: conversation.title,
-          prompt: projectAgentPrompt,
-          settings,
-          signal: controller.signal,
-          onProgress: (message) => send("reasoning", { text: `\n${message}` }),
-          onDelta: (text) => {
-            streamedAnswer += text;
-            send("delta", { text });
-          }
-        });
-        if (controller.signal.aborted) return reply;
-        const answer = result.content || "项目会话执行完成，但没有返回可显示的回答。";
-        const usage = contextUsagePayload({
-          settings,
-          source: result.usage ? "measured" : "estimated",
-          inputTokens: result.usage.inputTokens || estimatedInput,
-          outputTokens: result.usage.outputTokens || Math.max(0, estimateContextTokens(answer)),
-          breakdown: contextBreakdown
-        });
-        options.conversationContext?.rememberUsage(conversation.id, usage);
-        send("usage", usage);
-        // The native runtime streams assistant text through onDelta. Only send
-        // the tail that was not already delivered, otherwise live SSE clients
-        // and IM both append the full answer twice.
-        if (!streamedAnswer.trim()) send("delta", { text: answer });
-        else if (answer.startsWith(streamedAnswer) && answer.length > streamedAnswer.length) {
-          send("delta", { text: answer.slice(streamedAnswer.length) });
-        }
-        const assistant = store.createChatMessage({
-          id: randomUUID(),
-          conversationId: conversation.id,
-          role: "assistant",
-          content: answer,
+          content: lockedText,
           taskId: null,
           attachments: [],
           createdAt: new Date().toISOString()
@@ -1118,61 +649,244 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
         send("done", assistant);
         finish(reply, send);
         return reply;
-      } catch (error) {
-        if (controller.signal.aborted) {
-          finish(reply, send);
-          return reply;
-        }
-        sendPersistedError("PROJECT_AGENT_FAILED", `项目工具执行失败：${errorMessage(error)}。请重试。`);
-        finish(reply, send);
-        return reply;
       }
-    }
-    send("usage", contextUsagePayload({
-      settings,
-      source: "estimated",
-      inputTokens: estimatedInput,
-      outputTokens: 0,
-      breakdown: contextBreakdown
-    }));
 
-    try {
-      let answer = "";
-      const result = await streamChat(settings, messages, (delta, kind) => {
-        if (kind === "reasoning") {
-          send("reasoning", { text: delta });
-          return;
+      const taskSettings = options.modelSettingsForExecutor?.(resolution.executorId) ?? null;
+      if (!taskSettings) {
+        throw new Error(`${friendlyExecutorName(resolution.executorId)} 尚未绑定可用模型，不能启动任务。`);
+      }
+      const delegatedChatContext = options.conversationContext
+        ? (await options.conversationContext.renderForTask(conversation.id, undefined, userRecord.id, { settings: taskSettings })).text
+        : taskChatContext(previousMessages);
+      const boundProject = chatProject;
+      const boundProjectContext = boundProject ? projectPromptBlock(boundProject) : "";
+      const workspacePath = boundProject ? null : referencedFile ? dirname(referencedFile) : extractWorkspacePath(message);
+      const fileInputs = storedFiles.map((file) => ({ label: file.name, path: file.path }));
+      if (referencedFile) fileInputs.push({ label: basename(referencedFile), path: referencedFile });
+
+      let memoryContext = "";
+      if (options.memory) {
+        try {
+          const projectScope = conversation.projectId ? projectMemoryScope(conversation.projectId) : null;
+          const recalled = options.memory.recallForConversation({
+            conversationId: conversation.id,
+            text: userContent,
+            ...(projectScope ? { scope: projectScope, scopes: [projectScope] } : {})
+          });
+          if (recalled.memories.length > 0) {
+            memoryContext = recalled.contextPack;
+            send("memory", {
+              count: recalled.memories.length,
+              recallIds: recalled.recalls.map((recall) => recall.id)
+            });
+          }
+        } catch {
+          // Context recall is best effort and never blocks the selected harness.
         }
-        answer += delta;
-        send("delta", { text: delta });
-      }, {
-        signal: controller.signal,
-        temperature: 0.5,
-        timeoutMs: 180_000,
-        reasoningEffort: settings.reasoningEffort ?? "max",
-        maxTokens: settings.maxOutputTokens
-      });
-      const usage = contextUsagePayload({
-        settings,
-        source: result.usage ? "measured" : "estimated",
-        inputTokens: result.usage?.inputTokens ?? estimatedInput,
-        outputTokens: result.usage?.outputTokens ?? Math.max(0, estimateContextTokens(answer)),
-        breakdown: contextBreakdown
-      });
-      options.conversationContext?.rememberUsage(conversation.id, usage);
-      send("usage", usage);
-      const assistant = store.createChatMessage({
+      }
+
+      let libraryContext = "";
+      if (options.library) {
+        try {
+          const recalled = await options.library.search(userContent, 6);
+          if (recalled.hits.length > 0) {
+            libraryContext = [
+              "## 相关资料",
+              ...recalled.hits.map((hit) => `### ${hit.node.title} [${hit.node.kind}]\n引用：${hit.node.ref}\n${hit.snippet}`)
+            ].join("\n\n");
+            send("library", { count: recalled.hits.length });
+          }
+        } catch {
+          // Library recall is best effort and never blocks the selected harness.
+        }
+      }
+
+      let personalContext = "";
+      if (options.personal) {
+        try {
+          const pack = options.personal.broker.compile({
+            scopeKind: "chat",
+            scopeId: conversation.id,
+            conversationId: conversation.id,
+            query: userContent,
+            budgetTokens: 1600,
+            includeRecentContext: false
+          });
+          personalContext = options.personal.broker.render(pack);
+          send("context", { packId: pack.id, usedTokens: pack.usedTokens, budgetTokens: pack.budgetTokens });
+        } catch {
+          personalContext = "";
+        }
+      }
+
+      if (controller.signal.aborted) return reply;
+      const taskGoal = [message, detectedUrl ? `参考网址：${detectedUrl}` : ""].filter(Boolean).join("\n")
+        || `处理附件：${storedFiles.map((file) => file.name).join("、")}`;
+      const attachmentContext = fileInputs.length > 0
+        ? `本轮附件（需要时用执行器工具读取）：\n${fileInputs.map((file) => `- ${file.label}: ${file.path}`).join("\n")}`
+        : "";
+      const mentionContext = mentionResult?.blocksAction
+        ? `指代需要先确认：${mentionResult.question ?? "请根据对话和当前工作区确认用户所指对象。"}`
+        : "";
+      const harnessPrompt = [
+        message,
+        boundProjectContext,
+        skillContext,
+        delegatedChatContext,
+        personalContext,
+        memoryContext,
+        libraryContext,
+        mentionContext,
+        detectedUrl ? `参考网址：${detectedUrl}` : "",
+        attachmentContext,
+        "## 统一 Agent 执行契约",
+        "根据用户实际请求自主决定直接回答、读取文件、检索资料、运行命令或修改代码。需要事实、本地文件、仓库或外部状态时必须调用可用工具读取真实状态。",
+        "当前任务拥有完全权限。本地读取、检查、统计、测试和已授权的代码操作直接执行，不要声称需要额外授权，也不要要求用户先切换到所谓任务模式。",
+        boundProject
+          ? "当前会话绑定本地项目。先核对真实文件与当前工作区；除非用户明确要求修改，否则不要写入或删除项目文件。"
+          : "",
+        parsed.data.skillId
+          ? "本轮选择了 Skill，优先遵循该 Skill 的流程。Skill 要求提问时，先取得真实所需信息再继续。"
+          : "",
+        pendingMcpServerIds.length > 0
+          ? `本轮已选择 MCP 服务器：${pendingMcpServerIds.join("、")}。`
+          : ""
+      ].filter(Boolean).join("\n\n");
+
+      let task: TaskRecord;
+      if (wantsPlan) {
+        if (!options.plans) throw new Error("计划服务没有启动");
+        const activePlan = parsed.data.planId
+          ? options.plans.get(parsed.data.planId)
+          : options.plans.activeForConversation(conversation.id);
+        if (activePlan) {
+          if (activePlan.conversationId !== conversation.id) throw new Error("这个计划不属于当前对话");
+          if (activePlan.stage !== "planning" && activePlan.stage !== "awaiting_approval") {
+            throw new Error(`计划处于 ${activePlan.stage}，不能继续讨论；请先批准、重试或退出计划`);
+          }
+          const revised = options.plans.continuePlanning(activePlan.id, harnessPrompt, {
+            title: taskTitle,
+            textInput: harnessPrompt,
+            ...(pendingMcpServerIds.length ? { mcpServerIds: pendingMcpServerIds } : {})
+          });
+          const planningTask = revised.planningTaskId ? service.store.getTask(revised.planningTaskId) : null;
+          if (!planningTask) throw new Error("计划规划任务没有创建成功");
+          task = planningTask;
+        } else {
+          const created = options.plans.create({
+            conversationId: conversation.id,
+            projectId: boundProject?.id ?? null,
+            title: taskTitle,
+            objective: taskGoal,
+            textInput: harnessPrompt,
+            ...(pendingMcpServerIds.length ? { mcpServerIds: pendingMcpServerIds } : {}),
+            execution: {
+              executorId: resolution.executorId,
+              taskKind: plan.taskKind,
+              expectedOutputs: plan.expectedOutputs,
+              projectId: boundProject?.id ?? null,
+              workspacePath: workspacePath ?? null,
+              networkHosts: plan.networkHosts ?? [],
+              ...(resolution.executorId === "native" ? { executionMode: effectiveSettings.executionMode ?? "standard" } : {})
+            }
+          });
+          const planningTask = created.planningTaskId ? service.store.getTask(created.planningTaskId) : null;
+          if (!planningTask) throw new Error("计划规划任务没有创建成功");
+          task = planningTask;
+        }
+      } else {
+        if (wantsGoal) {
+          if (!options.goals) throw new Error("目标服务没有启动");
+          const goalSettings = parsed.data.goalSettings ?? {};
+          const created = options.goals.create({
+            title: taskTitle,
+            objective: taskGoal,
+            conversationId: conversation.id,
+            projectId: boundProject?.id ?? null,
+            execution: {
+              executorId: resolution.executorId,
+              taskKind: plan.taskKind,
+              expectedOutputs: plan.expectedOutputs,
+              projectId: boundProject?.id ?? null,
+              workspacePath: workspacePath ?? null,
+              networkHosts: plan.networkHosts ?? [],
+              ...(resolution.executorId === "native" ? { executionMode: effectiveSettings.executionMode ?? "standard" } : {})
+            },
+            criteria: (goalSettings.criteria ?? []).map((description, index) => ({
+              id: `c${index + 1}`,
+              description,
+              validator: "llm_review" as const,
+              check: description,
+              required: true
+            })),
+            forbiddenActions: goalSettings.forbiddenActions ?? [],
+            evidenceRequirements: goalSettings.evidenceRequirements ?? [],
+            ...(goalSettings.maxRounds !== undefined ? { maxRounds: goalSettings.maxRounds } : {}),
+            ...(goalSettings.reviewPolicy ? { reviewPolicy: goalSettings.reviewPolicy } : {}),
+            ...(goalSettings.deadline ? { deadline: goalSettings.deadline } : {}),
+            ...(goalSettings.commandsApproved ? { commandsApproved: true } : {})
+          });
+          createdGoalId = created.goalId;
+        }
+        task = service.createTask({
+          title: taskTitle,
+          goal: taskGoal,
+          textInput: harnessPrompt,
+          fileInputs,
+          ...(detectedUrl ? { url: detectedUrl } : {}),
+          ...(boundProject ? { projectId: boundProject.id } : {}),
+          ...(workspacePath ? { workspacePath } : {}),
+          ...(createdGoalId ? { goalId: createdGoalId } : {}),
+          conversationId: conversation.id,
+          executorId: resolution.executorId,
+          ...(resolution.executorId === "native" ? { executionMode: effectiveSettings.executionMode ?? "standard" } : {}),
+          taskKind: plan.taskKind,
+          expectedOutputs: plan.expectedOutputs,
+          ...(plan.networkHosts ? { networkHosts: plan.networkHosts } : {}),
+          ...(pendingMcpServerIds.length ? { mcpServerIds: pendingMcpServerIds } : {})
+        });
+      }
+
+      if (createdGoalId && options.goals) {
+        options.goals.attachTask(createdGoalId, task.id);
+        await options.goals.action(createdGoalId, "start");
+      }
+      const executorText = friendlyExecutorName(resolution.executorId);
+      const openingText = wantsPlan
+        ? `开始规划：${task.title}\n\n计划阶段只读调查，不会修改文件；完成后会给出可批准的实施计划。`
+        : wantsGoal
+          ? `开始目标：${task.title}\n\n执行器：${executorText}。目标会在当前执行器上持续推进直到完成或需要你的输入。`
+          : `开始执行：${task.title}\n\n执行器：${executorText}。Hearth 会根据请求自主决定是否调用工具。`;
+      const assistant = service.appendChatMessage({
         id: randomUUID(),
         conversationId: conversation.id,
         role: "assistant",
-        content: answer,
-        taskId: null,
+        content: openingText,
+        taskId: task.id,
         attachments: [],
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        kind: "task_status",
+        taskStatus: task.status
       });
+      send("task", { task, conversationId: conversation.id, message: assistant });
+      send("usage", contextUsagePayload({
+        settings: taskSettings,
+        source: "pending",
+        scope: "task",
+        inputTokens: 0,
+        outputTokens: 0,
+        breakdown: {}
+      }));
       send("done", assistant);
     } catch (error) {
-      sendPersistedError(errorCode(error), errorMessage(error));
+      if (createdGoalId && options.goals) {
+        try {
+          await options.goals.action(createdGoalId, "stop", { note: "任务创建失败，目标未开始" });
+        } catch {
+          // Keep the original task-creation error visible to the user.
+        }
+      }
+      sendPersistedError("TASK_CREATE_FAILED", errorMessage(error));
     } finally {
       finish(reply, send);
     }
@@ -1184,16 +898,6 @@ function extractUrl(message: string): string | null {
   const match = message.match(/https?:\/\/\S+/i);
   if (!match) return null;
   return match[0].replace(/[),.;，。；）]+$/, "");
-}
-
-export function extractSkillInstallSource(message: string): string | null {
-  if (!message) return null;
-  const asksInstall = /(安装|下载|添加|install|add|download)/i.test(message);
-  const mentionsSkill = /(skill|技能)/i.test(message);
-  if (!asksInstall || !mentionsSkill) return null;
-  const match = /https?:\/\/(?:www\.)?github\.com\/[^\s<>"']+/i.exec(message);
-  if (!match) return null;
-  return match[0].replace(/[)，。；;]+$/, "");
 }
 
 function localPathCandidates(message: string): string[] {
@@ -1245,17 +949,6 @@ export function taskChatContext(messages: Array<{ role: string; content: string;
     chunks.unshift(`${message.role === "user" ? "用户" : "助手"}：${content}`);
   }
   return chunks.length ? `以下为派出任务前的近期聊天上下文，仅供理解当前请求；历史内容不代表新的操作授权。\n<chat_context>\n${chunks.join("\n\n")}\n</chat_context>` : "";
-}
-
-function estimateContextTokens(text: string): number {
-  return text ? Math.max(1, Math.ceil(text.length / 4)) : 0;
-}
-
-function estimateAttachmentContext(files: ChatAttachment[]): number {
-  return files.reduce((total, file) => {
-    if (file.mimeType.startsWith("image/")) return total + 1_000;
-    return total + Math.min(32_000, Math.max(1, Math.ceil(file.bytes / 4)));
-  }, 0);
 }
 
 function contextUsagePayload(input: {

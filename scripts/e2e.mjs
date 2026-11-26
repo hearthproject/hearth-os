@@ -192,15 +192,16 @@ async function main() {
   server.stderr.on("data", (chunk) => { serverLog += chunk.toString(); });
   server.on("exit", (code, signal) => { serverLog += `\n[server exited code=${code} signal=${signal}]\n`; });
 
-  const health = await waitForServer(baseUrl, server);
-  const live = Boolean(health.chatModel?.configured);
+  await waitForServer(baseUrl, server);
   const startupExecutors = await api(baseUrl, "/api/executors");
   const startupDefaults = await api(baseUrl, "/api/conversation-defaults");
-  const canCreateTasks = startupExecutors.status === 200 && startupDefaults.status === 200
-    && startupExecutors.body.executors.some(
-      (executor) => executor.health.canRun && startupDefaults.body.settings.executorEnabled[executor.id]
-    );
-  log(`Server ready at ${baseUrl}; live chat ${live ? "enabled" : "disabled"}; task scenarios ${live && canCreateTasks ? "enabled" : "skipped"}.`);
+  const selectedExecutorId = startupExecutors.body?.preferredExecutorId
+    ?? startupDefaults.body?.settings?.preferredExecutorId
+    ?? "native";
+  const selectedExecutor = startupExecutors.body?.executors?.find((executor) => executor.id === selectedExecutorId) ?? null;
+  const live = Boolean(selectedExecutor?.health.canRun && selectedExecutor.effectiveModel);
+  const canCreateTasks = live && Boolean(startupDefaults.body?.settings?.executorEnabled?.[selectedExecutorId] ?? true);
+  log(`Server ready at ${baseUrl}; unified executors ${live ? "enabled" : "disabled"}; live task scenarios ${canCreateTasks ? "enabled" : "skipped"}.`);
 
   browser = await chromium.launch({ headless: !headed });
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: "zh-CN" });
@@ -262,13 +263,16 @@ async function main() {
     assert.equal(executors.status, 200, executors.text);
     const defaults = await api(baseUrl, "/api/conversation-defaults");
     assert.equal(defaults.status, 200, defaults.text);
-    const healthResponse = await api(baseUrl, "/api/health");
-    assert.equal(healthResponse.status, 200, healthResponse.text);
-    const anyReadyEnabled = executors.body.executors.some(
-      (executor) => executor.health.canRun && defaults.body.settings.executorEnabled[executor.id]
-    );
-    const modelReady = Boolean(healthResponse.body.chatModel?.configured);
-    const degraded = !modelReady || !anyReadyEnabled;
+    const readyExecutors = executors.body.executors.filter((executor) => executor.health.canRun);
+    const primaryExecutor = executors.body.executors.find(
+      (executor) => executor.id === executors.body.preferredExecutorId
+    )
+      ?? readyExecutors.find((executor) => executor.id === "native")
+      ?? readyExecutors.find((executor) => executor.id === "codex")
+      ?? readyExecutors[0]
+      ?? null;
+    const modelReady = Boolean(primaryExecutor?.effectiveModel);
+    const degraded = !primaryExecutor || !modelReady;
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await page.waitForFunction(
       (expected) => Boolean(document.querySelector('[data-connection-state="degraded"]')) === expected,
@@ -277,14 +281,13 @@ async function main() {
     );
     if (degraded) {
       const text = await page.locator('[data-connection-state="degraded"]').innerText();
-      assert.match(text, modelReady ? /执行器不可用/ : /聊天模型未配置/);
+      assert.match(text, /执行器不可用|执行器尚未绑定模型/);
     } else {
       assert.equal(await page.locator('[data-connection-state="degraded"]').count(), 0);
     }
     if (!modelReady) {
       const notice = await page.locator(".chat-notice.warn").first().innerText();
-      assert.match(notice, /首次设置/, "the offline notice should explain the setup path");
-      assert.match(notice, /可用的执行器/, "the notice must not promise execution the composer blocks");
+      assert.match(notice, /绑定兼容的模型档案/, "the offline notice should explain the executor model setup path");
     }
   });
 
@@ -294,7 +297,7 @@ async function main() {
     for (const label of ["聊天", "资料库"]) {
       assert.equal(await nav.getByRole("link", { name: label, exact: true }).count(), 1, `${label} should be a primary link`);
     }
-    assert.equal(await page.getByRole("link", { name: "设置", exact: true }).count(), 1, "settings should stay reachable");
+    assert.equal(await page.locator(".sidebar").getByRole("link", { name: "设置", exact: true }).count(), 1, "settings should stay reachable from the sidebar");
     if (await page.locator("#nav-more").count() === 0) {
       await page.locator(".nav-more-toggle").click();
     }
@@ -395,14 +398,14 @@ async function main() {
     await cancelTask(baseUrl, taskId);
   });
 
-  if (!health.chatModel?.configured) {
-    await runTest(page, "reports a missing chat model before the first real task", async () => {
+  if (!live) {
+    await runTest(page, "reports a missing executor model before the first real task", async () => {
       const verify = await api(baseUrl, "/api/onboarding/verify", { method: "POST" });
       assert.equal(verify.status, 409, verify.text);
       assert.equal(verify.body.error, "CHAT_MODEL_MISSING");
     });
   } else {
-    skipTest("missing chat model first-task guard", "live model settings are configured");
+    skipTest("missing executor model first-task guard", "the selected executor has a live model");
   }
 
   await runTest(page, "ignores Enter while the IME is composing", async () => {
@@ -425,27 +428,29 @@ async function main() {
   });
 
   if (live) {
-    await runTest(page, "streams a live model reply and persists it after reload", async () => {
+    await runTest(page, "streams a live agent task and persists it after reload", async () => {
       await newChat(page, baseUrl);
       await sendMessage(page, "你好，请用一句话介绍你自己。");
       await waitForAssistantDone(page);
-      assert.equal(await page.locator(".inline-run").count(), 0, "a greeting should not create a task");
+      assert.ok(await page.locator(".inline-run").count() >= 1, "even a greeting should use the unified executor task");
       const text = await page.locator(".assistant-bubble:not(.streaming)").last().innerText();
       assert.ok(text.trim().length > 0);
+      const tasks = await conversationTasks(baseUrl, page);
+      assert.ok(tasks.length >= 1, "the unified harness should record the completed task");
       await page.reload({ waitUntil: "networkidle" });
       await page.locator(".assistant-bubble:not(.streaming)").last().waitFor({ timeout: 20_000 });
       assert.ok((await page.locator(".message-bubble").count()) >= 2);
     });
 
-    await runTest(page, "keeps a method question out of the task executor", async () => {
+    await runTest(page, "routes a method question through the same executor", async () => {
       await newChat(page, baseUrl);
       await sendMessage(page, "怎么测试这个函数？");
       await waitForAssistantDone(page);
-      assert.equal(await page.locator(".inline-run").count(), 0, "method questions must stay in chat");
+      assert.ok(await page.locator(".inline-run").count() >= 1, "method questions must use the unified executor task");
     });
   } else {
-    skipTest("live model reply", "no chat model configured");
-    skipTest("method question stays in chat", "no chat model configured");
+    skipTest("live executor reply", "the selected executor has no live model");
+    skipTest("method question uses the executor", "the selected executor has no live model");
   }
 
   if (live && canCreateTasks) {
@@ -668,7 +673,7 @@ async function main() {
 
   await runTest(page, "records no unexpected browser console errors", async () => {
     const offlineExpected = [
-      /503 .*\/api\/tasks\/[^/]+\/overview/, // overview needs a chat model; offline mode intentionally has none
+      /503 .*\/api\/tasks\/[^/]+\/overview/, // overview needs the executor model; offline mode intentionally has none
       /503 .*\/api\/tasks\/[^/]+$/ // task reads can race the host gate during teardown
     ];
     const unexpected = consoleErrors.filter((text) => {

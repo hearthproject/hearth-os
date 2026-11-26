@@ -7,7 +7,7 @@
  *
  * 两种模式：
  *   默认（真实）：调用正在运行的本地服务的 POST /api/onboarding/verify，
- *                 由服务用你配置的聊天模型跑真实任务。
+ *                 由服务用当前执行器绑定的模型跑真实任务。
  *   --fake（离线自检）：不联网、不需要模型、不需要服务，确定性地在临时目录里
  *                 复现同一套“写 answer.txt → node check.mjs”流程，用来验证
  *                 本脚本自身的输出与退出码。它不能证明你的模型可用。
@@ -105,7 +105,7 @@ async function runReal(options) {
 
   if (response.status === 409) {
     const body = await response.json().catch(() => ({}));
-    console.error(`尚未配置聊天模型：${body.message ?? "先配置聊天模型，再跑首次示例。"}`);
+    console.error(`当前执行器尚无可用的模型：${body.message ?? "先为执行器绑定模型，再跑首次示例。"}`);
     console.error("请在 设置 → 模型 创建模型档案并绑定到执行器，然后重试。");
     return 2;
   }

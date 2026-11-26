@@ -547,7 +547,8 @@ export type HealthResponse = Omit<HealthSnapshot, "codex"> & {
   };
   chatModel: {
     configured: boolean;
-    settings: ModelSettingsView;
+    settings: ModelSettingsView | null;
+    executorId: ExecutorId;
   };
 };
 

@@ -5,7 +5,7 @@ export const ONBOARDING_SETTINGS_KEY = "onboarding.v1";
 
 export interface OnboardingDependencies {
   store: HearthStore;
-  isChatModelConfigured: () => boolean;
+  isExecutorModelConfigured: () => boolean;
   readyExecutorIds: () => ExecutorId[];
   memoryAutoCapture: () => OnboardingSnapshot["checks"]["memoryAutoCapture"];
   now?: () => Date;
@@ -13,14 +13,14 @@ export interface OnboardingDependencies {
 
 export class OnboardingService {
   private readonly store: HearthStore;
-  private readonly isChatModelConfigured: () => boolean;
+  private readonly isExecutorModelConfigured: () => boolean;
   private readonly readyExecutorIds: () => ExecutorId[];
   private readonly memoryAutoCapture: () => OnboardingSnapshot["checks"]["memoryAutoCapture"];
   private readonly now: () => Date;
 
   constructor(dependencies: OnboardingDependencies) {
     this.store = dependencies.store;
-    this.isChatModelConfigured = dependencies.isChatModelConfigured;
+    this.isExecutorModelConfigured = dependencies.isExecutorModelConfigured;
     this.readyExecutorIds = dependencies.readyExecutorIds;
     this.memoryAutoCapture = dependencies.memoryAutoCapture;
     this.now = dependencies.now ?? (() => new Date());
@@ -28,7 +28,7 @@ export class OnboardingService {
 
   snapshot(): OnboardingSnapshot {
     const state = this.state();
-    const chatModelConfigured = this.isChatModelConfigured();
+    const chatModelConfigured = this.isExecutorModelConfigured();
     return {
       required: state === null && !chatModelConfigured,
       state,

@@ -301,12 +301,6 @@ export function decideActionPolicy(action: ResolvedAction, input: ActionPolicyIn
   const interactive = context === "interactive";
   const classification = classifyResolvedAction(action);
   if (permissionMode === "full") {
-    // Host file reads sit outside the task sandbox, and irreversible browser
-    // actions cannot be classified safely from the tool name alone. Both keep
-    // an explicit approval even in full permission mode.
-    if (classification.actionClass === "host_read" || (action.kind === "browser" && classification.requiresApproval)) {
-      return { allowed: true, requiresApproval: true, reason: classification.summary };
-    }
     return { allowed: true, requiresApproval: false, reason: "完全权限：动作直接执行" };
   }
   const readOnlyAllowed = classification.actionClass === "local_read"

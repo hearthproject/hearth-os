@@ -703,6 +703,28 @@ describe("Hearth scheduler", () => {
     expect(manifest.executor.id).toBe("native");
   });
 
+  it("runs a task with the model bound to its selected executor", async () => {
+    const service = setup();
+    const observedModels: string[] = [];
+    const nativeRunner: NativeRunner = async (options) => {
+      observedModels.push(options.settings.model);
+        writeFileSync(join(options.prepared.outDir, "result.md"), "# model binding\n");
+      return nativeResult("模型绑定一致");
+    };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, {
+      nativeRunner,
+      modelSettingsForExecutor: (executorId) => executorId === "native"
+        ? { ...chatSettings(), model: "executor-bound-model" }
+        : null
+    });
+    scheduler.start();
+
+    const task = service.createTask({ title: "模型绑定", goal: "直接回答", executorId: "native" });
+    await waitForStatus(service, task.id, "completed");
+
+    expect(observedModels).toEqual(["executor-bound-model"]);
+  });
+
   it("returns a durable resume reference when pausing and resumes from that checkpoint", async () => {
     const service = setup();
     let announceStarted!: () => void;
@@ -768,6 +790,100 @@ describe("Hearth scheduler", () => {
     expect(resumedFromCheckpoint).toBe(true);
   });
 
+  it("rejects forged, stale, permission-changed, unresolved-effect, and final resume references", async () => {
+    const service = setup();
+    let announceStarted!: () => void;
+    const started = new Promise<void>((resolve) => { announceStarted = resolve; });
+    const nativeRunner: NativeRunner = async (options) => {
+      await options.onCheckpoint?.({
+        seq: 1,
+        kind: "turn",
+        messages: [{ role: "user", content: "保留检查点" }],
+        usage: TEST_USAGE,
+        turns: 1,
+        toolCalls: 0,
+        summary: null
+      });
+      announceStarted();
+      await new Promise<void>((resolve) => {
+        if (options.signal?.aborted) return resolve();
+        options.signal?.addEventListener("abort", () => resolve(), { once: true });
+      });
+      return {
+        status: "cancelled",
+        finalResponse: "任务已暂停",
+        usage: TEST_USAGE,
+        turns: 1,
+        toolCalls: 0,
+        question: null,
+        outputs: []
+      };
+    };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, {
+      nativeRunner,
+      modelSettingsForExecutor: () => chatSettings()
+    });
+    scheduler.start();
+    const activeScheduler = scheduler;
+
+    const task = service.createTask({ title: "恢复校验", goal: "验证恢复令牌", executorId: "native" });
+    await started;
+    const paused = await activeScheduler.pause(task.id);
+    const reference = paused.resume!;
+    expect(reference).toBeTruthy();
+
+    expect(() => activeScheduler.resumePaused(task.id, { ...reference, taskId: "other-task" }))
+      .toThrow("恢复令牌与当前任务不匹配");
+    expect(() => activeScheduler.resumePaused(task.id, { ...reference, runId: "other-run" }))
+      .toThrow("恢复令牌与当前任务不匹配");
+    expect(() => activeScheduler.resumePaused(task.id, { ...reference, checkpointSeq: reference.checkpointSeq + 1 }))
+      .toThrow("恢复检查点已失效");
+    expect(() => activeScheduler.resumePaused(task.id, { ...reference, checkpointKind: "tool" }))
+      .toThrow("恢复检查点已失效");
+
+    const originalPermissions = service.requireTask(task.id).permissions;
+    expect(originalPermissions).toBeTruthy();
+    service.updateTask(task.id, {
+      permissions: {
+        ...originalPermissions!,
+        networkHosts: [...originalPermissions!.networkHosts, "permission-change.example"]
+      }
+    });
+    expect(() => activeScheduler.resumePaused(task.id, reference))
+      .toThrow("任务权限已变化");
+    service.updateTask(task.id, { permissions: originalPermissions! });
+
+    const effect = service.createEffect({
+      id: "resume-uncertain-effect",
+      taskId: task.id,
+      approvalId: "resume-approval",
+      kind: "github.comment",
+      idempotencyKey: "resume-comment",
+      status: "uncertain",
+      target: { repo: "acme/repo", pull: 1 },
+      receipt: null,
+      error: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    expect(() => activeScheduler.resumePaused(task.id, reference))
+      .toThrow("存在结果不确定的外部动作");
+
+    const checkpoint = store!.latestRunCheckpoint(reference.runId)!;
+    store!.createRunCheckpoint({
+      ...checkpoint,
+      id: "resume-final-checkpoint",
+      seq: checkpoint.seq + 1,
+      kind: "final"
+    });
+    expect(() => activeScheduler.resumePaused(task.id, {
+      ...reference,
+      checkpointSeq: checkpoint.seq + 1,
+      checkpointKind: "final"
+    })).toThrow("恢复检查点已失效");
+    expect(effect.status).toBe("uncertain");
+    expect(service.requireTask(task.id).status).toBe("paused");
+  });
   it("resumes a waiting native task with the user's answer", async () => {
     const service = setup();
     const settingsPath = join(requireTemp(), "model-settings.json");
@@ -1718,7 +1834,7 @@ describe("Hearth scheduler", () => {
     expect(checkpoint?.proof).toMatchObject({
       attemptId: runs[0]?.id,
       identity: { executorId: "native" },
-      networkMode: "deny",
+      networkMode: "open",
       validation: { status: "not_required", evidenceRefs: [] }
     });
     expect(checkpoint?.proof?.phasePrefix).toContain("tool:write_file");

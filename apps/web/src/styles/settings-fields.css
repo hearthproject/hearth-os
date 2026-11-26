@@ -870,6 +870,7 @@
 }
 
 .executor-global-settings label,
+.executor-setting-field,
 .executor-row-controls label {
   display: flex;
   flex-direction: column;
@@ -877,6 +878,15 @@
   min-width: 0;
   color: var(--ink-tertiary);
   font-size: var(--fs-11);
+}
+
+.executor-follow-up-mode {
+  align-self: flex-start;
+}
+
+.executor-follow-up-mode button:disabled {
+  cursor: wait;
+  opacity: 0.55;
 }
 
 .executor-list {

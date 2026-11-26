@@ -9,7 +9,7 @@ import {
   RefreshCw,
   Wrench
 } from "lucide-react";
-import type { ExecutorId, ExecutorModelBindingView, ExecutorProbeResult, ExecutorView } from "../lib/types.ts";
+import type { ExecutorId, ExecutorModelBindingView, ExecutorProbeResult, ExecutorView, TaskFollowUpMode } from "../lib/types.ts";
 import { api } from "../lib/api.ts";
 import { ExecutorBootstrapStatus } from "./ExecutorBootstrapStatus.tsx";
 import { useExecutorBootstrap } from "../lib/use-executor-bootstrap.ts";
@@ -30,6 +30,7 @@ export function ExecutorSettingsPanel() {
   const executorSettingsQuery = useQuery({ queryKey: ["executorSettings"], queryFn: api.executorSettings });
   const registryQuery = useQuery({ queryKey: ["modelRegistry"], queryFn: api.modelRegistry });
   const [preferredExecutorId, setPreferredExecutorId] = useState<ExecutorId | "">("native");
+  const [followUpMode, setFollowUpMode] = useState<TaskFollowUpMode>("queue");
   const [busy, setBusy] = useState<Busy>(null);
   const [probes, setProbes] = useState<Partial<Record<ExecutorId, ExecutorProbeResult>>>({});
   const [notice, setNotice] = useState<Notice>(null);
@@ -38,6 +39,7 @@ export function ExecutorSettingsPanel() {
     const settings = executorSettingsQuery.data?.settings;
     if (!settings) return;
     setPreferredExecutorId(settings.preferredExecutorId ?? "native");
+    setFollowUpMode(settings.followUpMode ?? "queue");
   }, [executorSettingsQuery.data?.settings]);
 
   const executors = executorsQuery.data?.executors ?? [];
@@ -73,6 +75,23 @@ export function ExecutorSettingsPanel() {
   function choosePreferred(next: ExecutorId) {
     setPreferredExecutorId(next);
     void savePreferredExecutor(next);
+  }
+
+  async function saveFollowUpMode(next: TaskFollowUpMode) {
+    setFollowUpMode(next);
+    setBusy("settings");
+    setNotice(null);
+    try {
+      const result = await api.saveExecutorSettings({ followUpMode: next });
+      setFollowUpMode(result.settings.followUpMode);
+      queryClient.setQueryData(["executorSettings"], result);
+      setNotice({ tone: "ok", text: next === "queue" ? "后续消息将默认排队。" : "后续消息将默认中止当前轮并引导执行。" });
+    } catch (error) {
+      setFollowUpMode(executorSettingsQuery.data?.settings.followUpMode ?? "queue");
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "保存后续消息设置失败" });
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function bind(executorId: ExecutorId, profileId: string) {
@@ -152,6 +171,30 @@ export function ExecutorSettingsPanel() {
             ))}
           </select>
         </label>
+        <div className="executor-setting-field">
+          <span>后续消息处理方式</span>
+          <div className="segmented executor-follow-up-mode" role="group" aria-label="后续消息处理方式">
+            <button
+              type="button"
+              className={followUpMode === "queue" ? "active" : ""}
+              aria-pressed={followUpMode === "queue"}
+              disabled={busy === "settings"}
+              onClick={() => void saveFollowUpMode("queue")}
+            >
+              排队
+            </button>
+            <button
+              type="button"
+              className={followUpMode === "steer" ? "active" : ""}
+              aria-pressed={followUpMode === "steer"}
+              disabled={busy === "settings"}
+              onClick={() => void saveFollowUpMode("steer")}
+            >
+              引导
+            </button>
+          </div>
+          <small>{followUpMode === "queue" ? "当前轮结束后再处理新消息。" : "安全中止当前轮并立即应用新指令。"} Ctrl+Enter 可对单条消息采用相反方式。</small>
+        </div>
       </div>
 
       {(executorsQuery.isLoading || registryQuery.isLoading) && (

@@ -18,7 +18,7 @@ describe("OnboardingService", () => {
   function service(configured = false): OnboardingService {
     return new OnboardingService({
       store,
-      isChatModelConfigured: () => configured,
+      isExecutorModelConfigured: () => configured,
       readyExecutorIds: () => ["native"],
       memoryAutoCapture: () => "off",
       now: () => new Date("2026-11-08T00:00:00.000Z")
@@ -47,7 +47,7 @@ describe("OnboardingService", () => {
     expect(instance.complete({ skipped: true }).state?.status).toBe("skipped");
   });
 
-  it("does not require onboarding when a chat model is already configured", () => {
+  it("does not require onboarding when the selected executor model is already configured", () => {
     expect(service(true).snapshot()).toMatchObject({ required: false, state: null });
   });
 
@@ -111,7 +111,7 @@ describe("onboarding API", () => {
     }
   }, 15_000);
 
-  it("stops requiring onboarding after a chat model is saved", async () => {
+  it("stops requiring onboarding after the selected executor model is saved", async () => {
     const server = await app();
     try {
       const saved = await server.inject({

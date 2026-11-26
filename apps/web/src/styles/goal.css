@@ -1,11 +1,12 @@
-/* Goal mode: a compact control bar plus a small settings dialog. */
+/* Goal and plan modes use readable control panels instead of compressed status cards. */
 
 .goal-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px 10px;
   margin: 4px 0 14px;
-  padding: 10px 12px;
+  padding: 12px;
   border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--line));
   border-radius: 12px;
   background: color-mix(in srgb, var(--accent) 7%, var(--bg));
@@ -29,7 +30,6 @@
   place-items: center;
   width: 28px;
   height: 28px;
-  flex: none;
   border-radius: 9px;
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 13%, transparent);
@@ -37,25 +37,25 @@
 
 .goal-bar-copy {
   min-width: 0;
-  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 7px;
 }
 
 .goal-bar-title {
   display: flex;
   align-items: center;
-  gap: 7px;
+  flex-wrap: wrap;
+  gap: 5px 7px;
   min-width: 0;
 }
 
 .goal-bar-title strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
+  min-width: min(100%, 160px);
   color: var(--ink);
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .goal-state-pill,
@@ -74,22 +74,48 @@
   background: color-mix(in srgb, var(--accent) 13%, transparent);
 }
 
-.goal-bar-next {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.goal-bar-details {
+  display: grid;
+  gap: 5px;
+}
+
+.goal-bar-detail {
+  display: grid;
+  grid-template-columns: 66px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
   font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.goal-bar-detail > span {
+  padding-top: 1px;
   color: var(--ink-tertiary);
+  font-weight: 600;
+}
+
+.goal-bar-detail p {
+  min-width: 0;
+  margin: 0;
+  color: var(--ink-secondary);
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.goal-bar-detail.warning p {
+  color: #a55b18;
 }
 
 .goal-bar-actions {
+  grid-column: 2;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 5px;
-  flex: none;
+  width: 100%;
 }
 
-/* Plan mode reuses the goal bar shell with a distinct, read-only accent. */
+/* Plan mode reuses the goal shell with a distinct, read-only accent. */
 .plan-bar {
   border-color: color-mix(in srgb, #4f7cff 38%, var(--line));
   background: color-mix(in srgb, #4f7cff 7%, var(--bg));
@@ -102,30 +128,22 @@
 
 .plan-bar-copy {
   min-width: 0;
-  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
+  gap: 7px;
+  width: 100%;
   padding: 0;
   border: 0;
   color: inherit;
   background: transparent;
   text-align: left;
   cursor: pointer;
-  position: relative;
 }
 
-.plan-bar-copy:hover .goal-bar-title strong {
+.plan-bar-copy:hover .goal-bar-title strong,
+.plan-bar-copy:focus-visible .goal-bar-title strong {
   color: #4f7cff;
-}
-
-.plan-bar-chevron {
-  position: absolute;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--ink-tertiary);
 }
 
 .plan-bar.awaiting_approval {
@@ -143,7 +161,6 @@
   background: var(--bg);
   opacity: 0.82;
 }
-
 .plan-dialog-body {
   max-height: min(62vh, 640px);
   overflow: auto;
@@ -520,14 +537,17 @@
 
 @media (max-width: 640px) {
   .goal-bar {
-    align-items: flex-start;
-    flex-wrap: wrap;
+    padding: 10px;
+  }
+
+  .goal-bar-detail {
+    grid-template-columns: 1fr;
+    gap: 1px;
   }
 
   .goal-bar-actions {
-    width: 100%;
-    padding-left: 38px;
-    flex-wrap: wrap;
+    grid-column: 1 / -1;
+    padding-left: 0;
   }
 
   .goal-dialog-grid {

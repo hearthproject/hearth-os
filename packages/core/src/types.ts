@@ -129,6 +129,7 @@ export interface ExecutorView {
   runtime: ExecutorRuntimeSettings;
   health: ExecutorHealth;
   modelBinding?: ExecutorModelBindingView | undefined;
+  effectiveModel: ModelSettingsView | null;
 }
 
 export type ReasoningEffort = "off" | "minimal" | "low" | "medium" | "high" | "max";
@@ -136,6 +137,7 @@ export type ReasoningEffort = "off" | "minimal" | "low" | "medium" | "high" | "m
 export interface ExecutorSettings {
   defaultApprovalMode: ApprovalMode;
   preferredExecutorId: ExecutorId | null;
+  followUpMode: TaskFollowUpMode;
   reasoningEffort?: ReasoningEffort;
   executors: Partial<Record<ExecutorId, ExecutorRuntimeSettings>>;
 }
@@ -143,6 +145,7 @@ export interface ExecutorSettings {
 export interface ExecutorSettingsPatch {
   defaultApprovalMode?: ApprovalMode | undefined;
   preferredExecutorId?: ExecutorId | null | undefined;
+  followUpMode?: TaskFollowUpMode | undefined;
   reasoningEffort?: ReasoningEffort | undefined;
   executors?: Partial<Record<ExecutorId, ExecutorRuntimeSettings>> | undefined;
 }

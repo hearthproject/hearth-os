@@ -23,12 +23,14 @@ import {
   PanelRightOpen,
   Paperclip,
   Pause,
+  Play,
   Plug,
   Power,
   RefreshCw,
   Search,
   Settings2,
   Sparkles,
+  Square,
   Target,
   Trash2,
   X
@@ -61,7 +63,9 @@ import type {
   ConversationSettingsPatch,
   ExecutorId,
   PlanActionName,
-  ReasoningEffort
+  ReasoningEffort,
+  TaskFollowUpMode,
+  TaskResumeReference
 } from "../lib/types.ts";
 
 const PENDING_SETTINGS: ConversationSettings = {
@@ -258,6 +262,10 @@ export function ChatPage() {
   const [reasoningDraft, setReasoningDraft] = useState<ReasoningEffort | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
   const [isPausing, setIsPausing] = useState(false);
+  const [isResuming, setIsResuming] = useState(false);
+  const [switchingModel, setSwitchingModel] = useState(false);
+  const [followUpNotice, setFollowUpNotice] = useState<string | null>(null);
+  const [resumeReferences, setResumeReferences] = useState<Record<string, TaskResumeReference>>({});
   const [isLeavingProject, setIsLeavingProject] = useState(false);
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
   const [skillInstallRequest, setSkillInstallRequest] = useState<{ source: string } | null>(null);
@@ -304,10 +312,11 @@ export function ChatPage() {
   // 执行模式是单选：目标 > 计划 > 完全访问，后选的模式会替换前一个。
   const activeMode: ComposerModeId = (goalMode || hasActiveGoal) ? "goal" : planMode ? "plan" : "full";
   const activeModeOption = COMPOSER_MODES.find((mode) => mode.id === activeMode) ?? COMPOSER_MODES[0]!;
-  const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health });
   const skillsQuery = useQuery({ queryKey: ["skills"], queryFn: api.skills, staleTime: 30_000 });
   const mcpServersQuery = useQuery({ queryKey: ["mcpServers"], queryFn: api.mcpServers, staleTime: 15_000 });
   const executorsQuery = useQuery({ queryKey: ["executors"], queryFn: api.executors, refetchInterval: 20_000 });
+  const modelRegistryQuery = useQuery({ queryKey: ["modelRegistry"], queryFn: api.modelRegistry, staleTime: 30_000 });
+  const executorSettingsQuery = useQuery({ queryKey: ["executorSettings"], queryFn: api.executorSettings, staleTime: 30_000 });
   const conversationDefaultsQuery = useQuery({ queryKey: ["conversationDefaults"], queryFn: api.conversationDefaults, staleTime: Infinity });
   const conversations = conversationsQuery.data?.conversations ?? [];
   const skills = skillsQuery.data?.skills ?? [];
@@ -480,7 +489,20 @@ export function ChatPage() {
     }
     return next;
   }, [conversationTasks, liveRuns]);
-  const hasRunningTask = runs.some((task) => task.status === "running" || task.status === "queued");
+  const runningTask = useMemo(() => runs.find((task) => task.status === "running") ?? null, [runs]);
+  const queuedTask = useMemo(() => runs.find((task) => task.status === "queued") ?? null, [runs]);
+  const pausedTask = useMemo(() => runs.find((task) => task.status === "paused") ?? null, [runs]);
+  const hasRunningTask = Boolean(runningTask || queuedTask);
+  const pausedTaskQuery = useQuery({
+    queryKey: ["task", pausedTask?.id],
+    queryFn: () => api.task(pausedTask?.id as string),
+    enabled: Boolean(pausedTask?.id)
+  });
+  useEffect(() => {
+    const reference = pausedTaskQuery.data?.resume;
+    if (!pausedTask || !reference) return;
+    setResumeReferences((current) => current[pausedTask.id] ? current : { ...current, [pausedTask.id]: reference });
+  }, [pausedTask?.id, pausedTaskQuery.data?.resume]);
   useEffect(() => {
     if (!conversationQuery.data || sending) return;
     const persisted = asContextUsage(conversationQuery.data.contextUsage);
@@ -757,6 +779,36 @@ export function ChatPage() {
       .finally(() => setSavingEffort(false));
   }
 
+  async function changeModel(profileId: string) {
+    if (!selectedExecutorId || switchingModel) return;
+    if (selectedExecutor?.modelBinding?.profileId === profileId) return;
+    setSwitchingModel(true);
+    setError(null);
+    try {
+      await api.saveExecutorModelBinding(selectedExecutorId, {
+        profileId,
+        protocolOverride: null,
+        modelOverride: null
+      });
+      setReasoningDraft(null);
+      setContextUsage(null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["executors"] }),
+        queryClient.invalidateQueries({ queryKey: ["health"] }),
+        queryClient.invalidateQueries({ queryKey: ["modelRegistry"] }),
+        queryClient.invalidateQueries({ queryKey: ["conversationDefaults"] }),
+        queryClient.invalidateQueries({ queryKey: ["conversations"] }),
+        queryClient.invalidateQueries({ queryKey: ["executorSettings"] }),
+        ...(conversationId ? [queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] })] : [])
+      ]);
+      setModelMenuOpen(false);
+    } catch (caught) {
+      setError(caught instanceof Error ? `切换模型失败：${caught.message}` : "切换模型失败，请重试");
+    } finally {
+      setSwitchingModel(false);
+    }
+  }
+
   async function uploadFiles(files: File[]) {
     if (files.length === 0) return;
     if (uploading) {
@@ -828,6 +880,56 @@ export function ChatPage() {
     void uploadFiles(Array.from(event.dataTransfer.files));
   }
 
+  async function persistBuildMode(): Promise<void> {
+    setPlanMode(false);
+    setGoalMode(false);
+    setGoalDialogOpen(false);
+    setPlanDialogOpen(false);
+    if (conversationId) {
+      await api.updateConversationSettings(conversationId, { collaborationMode: "build" });
+    }
+  }
+
+  async function exitToBuildMode(note?: string): Promise<boolean> {
+    if (planBusy || goalBusy) return false;
+    setError(null);
+    setPlanBusy(true);
+    setGoalBusy(true);
+    try {
+      if (hasActivePlan && currentPlan) {
+        await api.planAction(currentPlan.id, "cancel", {
+          expectedRevision: currentPlan.revision,
+          ...(note ? { note } : {})
+        });
+      }
+      if (hasActiveGoal && currentGoal) {
+        await api.goalAction(currentGoal.goal.goalId, "stop", {
+          ...(currentGoal.goal.revision !== undefined ? { expectedRevision: currentGoal.goal.revision } : {}),
+          ...(note ? { note } : {})
+        });
+      }
+      await persistBuildMode();
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["plans", conversationId] }),
+        queryClient.invalidateQueries({ queryKey: ["goals", conversationId] }),
+        queryClient.invalidateQueries({ queryKey: ["tasks"] }),
+        queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] })
+      ]);
+      return true;
+    } catch (caught) {
+      setError(caught instanceof Error ? `退出当前模式失败：${caught.message}` : "退出当前模式失败，请重试");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["plans", conversationId] }),
+        queryClient.invalidateQueries({ queryKey: ["goals", conversationId] }),
+        queryClient.invalidateQueries({ queryKey: ["tasks"] })
+      ]);
+      return false;
+    } finally {
+      setPlanBusy(false);
+      setGoalBusy(false);
+    }
+  }
+
   async function runGoalAction(action: GoalAction, options: {
     expectedRevision?: number;
     note?: string;
@@ -845,7 +947,9 @@ export function ChatPage() {
           ? { expectedRevision: options.expectedRevision ?? view.goal.revision }
           : {})
       });
+      if (action === "stop") await persistBuildMode();
       await queryClient.invalidateQueries({ queryKey: ["goals", conversationId] });
+      await queryClient.invalidateQueries({ queryKey: ["plans", conversationId] });
       await queryClient.invalidateQueries({ queryKey: ["tasks"] });
       await queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
     } catch (caught) {
@@ -872,9 +976,8 @@ export function ChatPage() {
       await runGoalAction(action as "pause" | "resume" | "stop" | "replan" | "complete" | "approve");
       return;
     }
-    if (hasActiveGoal) {
-      setError("当前会话已有未结束的目标，请先停止或完成它。");
-      return;
+    if (hasActiveGoal || goalMode) {
+      if (!(await exitToBuildMode("切换到新的目标"))) return;
     }
     const outgoing: OutgoingMessage = {
       text: argument,
@@ -897,13 +1000,11 @@ export function ChatPage() {
         expectedRevision: view.revision,
         ...(note ? { note } : {})
       });
+      if (action === "approve" || action === "cancel") await persistBuildMode();
       await queryClient.invalidateQueries({ queryKey: ["plans", conversationId] });
+      await queryClient.invalidateQueries({ queryKey: ["goals", conversationId] });
       await queryClient.invalidateQueries({ queryKey: ["tasks"] });
       await queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
-      if (action === "approve" || action === "cancel") {
-        setPlanMode(false);
-        setPlanDialogOpen(false);
-      }
     } catch (caught) {
       setError(caught instanceof Error ? `计划操作失败：${caught.message}` : "计划操作失败，请重试");
     } finally {
@@ -929,6 +1030,10 @@ export function ChatPage() {
       await runPlanAction(action as PlanActionName);
       return;
     }
+    if (hasActiveGoal || goalMode) {
+      if (!(await exitToBuildMode("切换到计划模式"))) return;
+    }
+    setGoalMode(false);
     setPlanMode(true);
     await dispatch({ text: argument, attachments: [], skillId: null, mcpServerIds: selectedMcpServerIds, planMode: true });
   }
@@ -945,20 +1050,39 @@ export function ChatPage() {
     }
   }
 
-  function togglePlanMode(): void {
-    if (hasActivePlan || hasActiveGoal || goalMode) return;
+  async function togglePlanMode(): Promise<void> {
+    if (hasActivePlan || hasActiveGoal) {
+      await exitToBuildMode();
+      return;
+    }
+    if (goalMode) {
+      setGoalMode(false);
+      setPlanMode(true);
+      if (conversationId) {
+        await api.updateConversationSettings(conversationId, { collaborationMode: "plan" }).catch((caught) => {
+          setError(caught instanceof Error ? caught.message : "保存计划模式失败");
+        });
+      }
+      return;
+    }
     const next = !planMode;
     setPlanMode(next);
-    if (!next && conversationId) {
-      void api.updateConversationSettings(conversationId, { collaborationMode: "build" }).catch(() => undefined);
+    if (conversationId) {
+      await api.updateConversationSettings(conversationId, { collaborationMode: next ? "plan" : "build" }).catch((caught) => {
+        setError(caught instanceof Error ? caught.message : "保存模式失败");
+      });
     }
   }
 
-  async function send() {
+  async function send(oppositeFollowUp = false) {
     const text = input.trim();
     if (uploading || !settingsReady || (!text && attachments.length === 0)) return;
     if (selectedExecutorUnavailable) {
       setError(`${selectedExecutorName} 当前不可用，不会自动切换执行器。${selectedExecutor?.health.issues.join("；") ?? "请到设置中测试可用性。"}`);
+      return;
+    }
+    if (pausedTask && !runningTask && !queuedTask) {
+      setError("当前任务已暂停。请先点击继续，或查看任务证据后重新执行。");
       return;
     }
     if (text && isGoalCommand && attachments.length === 0) {
@@ -979,9 +1103,11 @@ export function ChatPage() {
       return;
     }
     if (text && isFullCommand && attachments.length === 0) {
-      resetToFullMode();
+      setInput("");
+      await resetToFullMode();
       return;
     }
+
     const outgoing: OutgoingMessage = {
       text,
       attachments,
@@ -990,12 +1116,48 @@ export function ChatPage() {
       ...(goalMode ? { goalMode: true, goalSettings } : {}),
       ...(planMode ? { planMode: true } : {})
     };
-    setInput("");
-    setAttachments([]);
-    if (selectedSkillId) setSelectedSkillId(null);
-    if (selectedMcpServerIds.length > 0) setSelectedMcpServerIds([]);
-    if (goalMode) setGoalMode(false);
+    const canUseTaskFollowUp = Boolean(
+      runningTask
+      && text
+      && attachments.length === 0
+      && !selectedSkillId
+      && selectedMcpServerIds.length === 0
+    );
+    const clearComposer = () => {
+      setInput("");
+      setAttachments([]);
+      if (selectedSkillId) setSelectedSkillId(null);
+      if (selectedMcpServerIds.length > 0) setSelectedMcpServerIds([]);
+      if (goalMode) setGoalMode(false);
+    };
+
+    if (canUseTaskFollowUp && runningTask) {
+      const defaultMode = executorSettingsQuery.data?.settings.followUpMode ?? "queue";
+      const mode: TaskFollowUpMode = oppositeFollowUp
+        ? defaultMode === "queue" ? "steer" : "queue"
+        : defaultMode;
+      setError(null);
+      setFollowUpNotice(null);
+      try {
+        await api.addFollowUp(runningTask.id, text, mode);
+        clearComposer();
+        setFollowUpNotice(mode === "queue"
+          ? "已排队。当前轮结束后会立即处理这条消息。"
+          : "已提交引导。执行器会在安全中断当前回合后应用这条指令。");
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["task", runningTask.id] }),
+          queryClient.invalidateQueries({ queryKey: ["tasks"] }),
+          queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] })
+        ]);
+      } catch (caught) {
+        setError(caught instanceof Error ? `${mode === "queue" ? "排队" : "引导"}失败：${caught.message}` : "追加消息失败，请重试");
+      }
+      return;
+    }
+
+    clearComposer();
     setError(null);
+    setFollowUpNotice(null);
     if (sending || hasRunningTask) {
       setQueue((prev) => [...prev, outgoing]);
       return;
@@ -1003,43 +1165,86 @@ export function ChatPage() {
     await dispatch(outgoing);
   }
 
-  async function stopRunningTask() {
-    const task = stoppableTask;
-    if (isCancelling) return;
-    setQueue([]);
-    abortRef.current?.abort();
-    if (!task) return;
+  async function cancelQueuedTask() {
+    if (!queuedTask || isCancelling) return;
     setIsCancelling(true);
+    setError(null);
     try {
-      await api.cancel(task.id);
-      setLiveRuns((prev) => prev.map((run) => run.id === task.id ? { ...run, status: "cancelled" } : run));
+      await api.cancel(queuedTask.id);
+      setLiveRuns((prev) => prev.map((run) => run.id === queuedTask.id ? { ...run, status: "cancelled" } : run));
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["tasks"] }),
+        queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] })
+      ]);
     } catch (caught) {
-      setError(caught instanceof Error ? `停止失败：${caught.message}` : "停止失败，请重试");
+      setError(caught instanceof Error ? `取消排队失败：${caught.message}` : "取消排队失败，请重试");
     } finally {
       setIsCancelling(false);
     }
-    void queryClient.invalidateQueries({ queryKey: ["tasks"] });
-    void queryClient.invalidateQueries({ queryKey: ["conversation"] });
   }
 
   async function pauseRunningTask() {
-    const task = stoppableTask;
-    if (!task || task.status !== "running" || isPausing || isCancelling) return;
+    if (!runningTask || isPausing || isCancelling) return;
     setIsPausing(true);
+    setError(null);
     try {
-      const result = await api.pause(task.id);
-      setLiveRuns((prev) => prev.map((run) => run.id === task.id
+      const result = await api.pause(runningTask.id);
+      const resume = result.resume;
+      if (resume) {
+        setResumeReferences((current) => ({ ...current, [runningTask.id]: resume }));
+      } else {
+        setResumeReferences((current) => {
+          const next = { ...current };
+          delete next[runningTask.id];
+          return next;
+        });
+      }
+      setLiveRuns((prev) => prev.map((run) => run.id === runningTask.id
         ? { ...run, status: result.task.status }
         : run));
-      await queryClient.invalidateQueries({ queryKey: ["task", task.id] });
-      await queryClient.invalidateQueries({ queryKey: ["tasks"] });
-      await queryClient.invalidateQueries({ queryKey: ["conversation"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["task", runningTask.id] }),
+        queryClient.invalidateQueries({ queryKey: ["tasks"] }),
+        queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] })
+      ]);
     } catch (caught) {
       setError(caught instanceof Error ? `暂停失败：${caught.message}` : "暂停失败，请重试");
     } finally {
       setIsPausing(false);
     }
   }
+
+  async function resumePausedTask() {
+    if (!pausedTask || isResuming) return;
+    const reference = resumeReferences[pausedTask.id] ?? pausedTaskQuery.data?.resume ?? null;
+    if (!reference) {
+      setError("这个任务没有可用的恢复检查点，无法继续。请查看任务证据后重新执行。");
+      return;
+    }
+    setIsResuming(true);
+    setError(null);
+    try {
+      const resumed = await api.resume(pausedTask.id, reference);
+      setLiveRuns((prev) => prev.map((run) => run.id === pausedTask.id
+        ? { ...run, status: resumed.status }
+        : run));
+      setResumeReferences((current) => {
+        const next = { ...current };
+        delete next[pausedTask.id];
+        return next;
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["task", pausedTask.id] }),
+        queryClient.invalidateQueries({ queryKey: ["tasks"] }),
+        queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] })
+      ]);
+    } catch (caught) {
+      setError(caught instanceof Error ? `继续失败：${caught.message}` : "继续失败，请重试");
+    } finally {
+      setIsResuming(false);
+    }
+  }
+
 
   async function leaveProjectConversation() {
     if (!(current?.projectId || pendingProjectId) || selection.busy || isLeavingProject) return;
@@ -1081,7 +1286,7 @@ export function ChatPage() {
       inputTokens: Math.max(historyTokens + userTokens + attachmentTokens, priorMeasured + userTokens),
       outputTokens: 0,
       source: "estimated",
-      scope: "chat",
+      scope: "task",
       measuredAt: new Date().toISOString(),
       ...(contextUsage?.contextWindowTokens ? { contextWindowTokens: contextUsage.contextWindowTokens } : {}),
       ...(contextUsage?.model ? { model: contextUsage.model } : {}),
@@ -1117,7 +1322,6 @@ export function ChatPage() {
     try {
       await chatStream(
         {
-          routeMode: "auto",
           ...(conversationId ? { conversationId } : {}),
           ...(!conversationId && pendingProjectId ? { projectId: pendingProjectId } : {}),
           ...(text ? { message: text } : {}),
@@ -1132,18 +1336,44 @@ export function ChatPage() {
           signal: controller.signal,
           onEvent: (event, data) => {
             if (event === "conversation") {
-              const conversation = data as { id: string; settings?: ConversationSettings; projectId?: string | null };
+              const conversation = data as {
+                id: string;
+                title: string;
+                createdAt: string;
+                updatedAt: string;
+                settings: ConversationSettings;
+                projectId?: string | null;
+              };
               setConversationId(conversation.id);
               conversationIdRef.current = conversation.id;
               if (conversation.settings) setDraftSettings(conversation.settings);
               setPendingProjectId(null);
               localStorage.setItem("hearth.conversation", conversation.id);
-              void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+              queryClient.setQueryData<ConversationDetail>(["conversation", conversation.id], (old) =>
+                old ? { ...old, conversation } : old
+              );
+              queryClient.setQueryData<{ conversations: ConversationListItem[] }>(["conversations"], (old) => {
+                if (!old) return old;
+                const existing = old.conversations.find((item) => item.id === conversation.id);
+                if (!existing) {
+                  return {
+                    conversations: [
+                      { ...conversation, messageCount: 0, preview: "" },
+                      ...old.conversations
+                    ]
+                  };
+                }
+                return {
+                  conversations: old.conversations.map((item) =>
+                    item.id === conversation.id ? { ...item, ...conversation } : item
+                  )
+                };
+              });
+            } else if (event === "routing") {
+              setStreamingStatus("正在进入统一执行器…");
             } else if (event === "user") {
               setMessages((prev) => [...prev, data as ChatMessageRecord]);
-            } else if (event === "routing") {
-              const routing = data as { action?: "chat" | "task" };
-              setStreamingStatus(routing.action === "task" ? "正在派发任务…" : "正在准备回答…");
+
             } else if (event === "delta") {
               const firstContent = !answer;
               answer += (data as { text: string }).text;
@@ -1163,7 +1393,7 @@ export function ChatPage() {
                 ...(usage.reasoningEffort ? { reasoningEffort: usage.reasoningEffort } : {}),
                 ...(usage.breakdown ? { breakdown: usage.breakdown } : {}),
                 source: usage.source ?? "estimated",
-                scope: usage.scope ?? "chat",
+                scope: usage.scope ?? "task",
                 measuredAt: usage.measuredAt ?? new Date().toISOString()
               };
               setContextUsage((previous) => preferContextUsage(previous, nextUsage));
@@ -1239,7 +1469,7 @@ export function ChatPage() {
   function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Tab" && event.shiftKey) {
       event.preventDefault();
-      togglePlanMode();
+      void togglePlanMode();
       return;
     }
     if (event.key === "Enter" && !event.shiftKey) {
@@ -1252,7 +1482,7 @@ export function ChatPage() {
         return;
       }
       event.preventDefault();
-      void send();
+      void send(event.ctrlKey || event.metaKey);
       return;
     }
     if (slashOpen && (event.key === "ArrowDown" || event.key === "ArrowUp") && slashMatches.length > 0) {
@@ -1336,7 +1566,7 @@ export function ChatPage() {
     deleteMcpMutation.mutate(server.id);
   }
 
-  function chooseComposerCommand(id: ComposerCommandId) {
+  async function chooseComposerCommand(id: ComposerCommandId) {
     setInput("");
     setSlashIndex(0);
     if (id === "mcp") {
@@ -1346,10 +1576,11 @@ export function ChatPage() {
       requestAnimationFrame(() => composerRef.current?.focus());
       return;
     }
-    if (hasActivePlan || hasActiveGoal) {
-      setError("当前会话已有进行中的计划或目标，请先在对应栏完成或退出。");
-      requestAnimationFrame(() => composerRef.current?.focus());
-      return;
+    if (hasActivePlan || hasActiveGoal || goalMode || planMode) {
+      if (!(await exitToBuildMode("切换到新的执行模式"))) {
+        requestAnimationFrame(() => composerRef.current?.focus());
+        return;
+      }
     }
     if (id === "plan") {
       if (goalMode) setGoalMode(false);
@@ -1364,24 +1595,13 @@ export function ChatPage() {
     requestAnimationFrame(() => composerRef.current?.focus());
   }
 
-  function resetToFullMode(): void {
+  async function resetToFullMode(): Promise<void> {
     setInput("");
     setSlashIndex(0);
-    if (hasActivePlan || hasActiveGoal) {
-      setError("当前会话已有进行中的计划或目标，请先在对应栏完成或退出。");
-      requestAnimationFrame(() => composerRef.current?.focus());
-      return;
-    }
-    if (goalMode) setGoalMode(false);
-    setPlanMode(false);
-    setGoalDialogOpen(false);
-    if (conversationId) {
-      void api.updateConversationSettings(conversationId, { collaborationMode: "build" }).catch(() => undefined);
-    }
+    await exitToBuildMode("退出当前执行模式");
     requestAnimationFrame(() => composerRef.current?.focus());
   }
 
-  const configured = healthQuery.data?.chatModel.configured ?? true;
   const executorViews = executorsQuery.data?.executors ?? [];
   const executorAvailability = useMemo(() => {
     const availability = {} as Record<ExecutorId, boolean>;
@@ -1397,20 +1617,65 @@ export function ChatPage() {
   const selectedExecutorUnavailable = Boolean(selectedExecutorId && !executorAvailability[selectedExecutorId]);
   const visibleExecutorIds = EXECUTOR_ORDER.filter((id) => executorAvailability[id] === true);
   const selectedExecutorVisible = visibleExecutorIds.includes(selectedExecutorId);
+  const configured = Boolean(selectedExecutor?.effectiveModel);
+  const effectiveModel = selectedExecutor?.effectiveModel ?? null;
+  const selectedBinding = selectedExecutor?.modelBinding
+    ?? modelRegistryQuery.data?.bindings.find((binding) => binding.executorId === selectedExecutorId)
+    ?? null;
+  const compatibleModelProfiles = (modelRegistryQuery.data?.profiles ?? [])
+    .filter((profile) => selectedBinding?.allowedProtocols.includes(profile.protocol));
   const isWorking = sending || hasRunningTask;
-  const stoppableTask = useMemo(
-    () => runs.find((task) => task.status === "running" || task.status === "queued"),
-    [runs]
-  );
   const hasDraft = Boolean(input.trim() || attachments.length > 0);
   const canSubmit = !uploading && settingsReady && !selectedExecutorUnavailable && hasDraft;
-  const modelSettings = healthQuery.data?.chatModel.settings;
-  const modelName = modelSettings?.model?.trim() || "未配置模型";
-  const providerName = modelSettings?.providerName ?? "";
-  const reasoningEffort: ReasoningEffort = reasoningDraft ?? modelSettings?.reasoningEffort ?? "max";
+  const pausedResumeReference = pausedTask
+    ? resumeReferences[pausedTask.id] ?? pausedTaskQuery.data?.resume ?? null
+    : null;
+  const controlState = sending
+    ? "sending"
+    : runningTask
+      ? "running"
+      : pausedTask
+        ? "paused"
+        : queuedTask
+          ? "queued"
+          : "idle";
+  const primaryControlDisabled = controlState === "sending"
+    || (controlState === "running" && (isPausing || isCancelling))
+    || (controlState === "paused" && (isResuming || !pausedResumeReference))
+    || (controlState === "queued" && (isCancelling || isPausing))
+    || (controlState === "idle" && !canSubmit);
+  const primaryControlTitle = controlState === "sending"
+    ? "正在创建任务"
+    : controlState === "running"
+      ? `暂停任务：${runningTask?.title ?? "当前任务"}`
+      : controlState === "paused"
+        ? pausedResumeReference ? `继续任务：${pausedTask?.title ?? "当前任务"}` : "任务缺少可用的恢复检查点"
+        : controlState === "queued"
+          ? `取消排队：${queuedTask?.title ?? "当前任务"}`
+          : selectedExecutorUnavailable
+            ? "当前锁定的执行器不可用"
+            : hasDraft
+              ? "发送"
+              : "输入内容后发送";
+  function onPrimaryControl(): void {
+    if (controlState === "running") {
+      void pauseRunningTask();
+    } else if (controlState === "paused") {
+      void resumePausedTask();
+    } else if (controlState === "queued") {
+      void cancelQueuedTask();
+    } else if (controlState === "idle") {
+      void send();
+    }
+  }
+  const modelName = effectiveModel?.model?.trim() || "未绑定模型";
+  const providerName = effectiveModel?.providerName ?? "";
+  const reasoningEffort: ReasoningEffort = reasoningDraft
+    ?? executorSettingsQuery.data?.settings.reasoningEffort
+    ?? effectiveModel?.reasoningEffort
+    ?? "max";
   const contextWindowTokens = contextUsage?.contextWindowTokens
-    ?? modelSettings?.contextWindowTokens
-    ?? selectedExecutor?.modelBinding?.profile?.contextWindowTokens
+    ?? effectiveModel?.contextWindowTokens
     ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
   const contextBreakdown = contextUsage?.breakdown ?? {};
   const waitingForExecutorUsage = contextUsage?.source === "pending";
@@ -1550,7 +1815,7 @@ export function ChatPage() {
             )}
             {!configured && (
               <ChatNotice icon={<Settings2 size={15} />} tone="warn">
-                还没有接入聊天模型。普通问答需要先完成<Link to="/welcome">首次设置</Link>；需要派任务时请选择可用的执行器。
+                当前执行器尚未绑定模型。请到<Link to="/settings">设置</Link>绑定兼容的模型档案后再发送消息。
               </ChatNotice>
             )}
             {!executorReady && (
@@ -1638,7 +1903,7 @@ export function ChatPage() {
                 <Brain size={13} />
                 <span className="composer-model-name">{modelName}</span>
                 <span className="composer-effort">{reasoningEffortLabel(reasoningEffort)}</span>
-                {savingEffort ? <Loader2 size={11} className="spin" /> : <ChevronDown size={12} />}
+                {savingEffort || switchingModel ? <Loader2 size={11} className="spin" /> : <ChevronDown size={12} />}
               </button>
               {contextPercent > 0 && (
                 <button
@@ -1662,7 +1927,37 @@ export function ChatPage() {
                     </div>
                     <div className="model-popover-identity">
                       <strong>{modelName}</strong>
-                      <span>{providerName || "当前对话模型"}</span>
+                      <span>{providerName || "当前执行器未绑定模型"}</span>
+                    </div>
+                    <div className="model-profile-section">
+                      <span className="model-profile-label">模型档案</span>
+                      <div className="model-profile-list" role="listbox" aria-label="模型档案">
+                        {compatibleModelProfiles.map((profile) => {
+                          const active = profile.id === selectedBinding?.profileId;
+                          return (
+                            <button
+                              key={profile.id}
+                              type="button"
+                              role="option"
+                              aria-selected={active}
+                              className={`model-profile-option${active ? " active" : ""}`}
+                              disabled={switchingModel || savingEffort}
+                              onClick={() => void changeModel(profile.id)}
+                            >
+                              <span>
+                                <strong>{profile.name}</strong>
+                                <small>{profile.model} · {profile.providerName}</small>
+                              </span>
+                              {switchingModel && !active
+                                ? <Loader2 size={13} className="spin" />
+                                : active ? <Check size={13} /> : null}
+                            </button>
+                          );
+                        })}
+                        {compatibleModelProfiles.length === 0 && (
+                          <p className="model-profile-empty">这个执行器还没有兼容的模型档案。</p>
+                        )}
+                      </div>
                     </div>
                     <div className="model-effort-grid" role="group" aria-label="推理强度">
                       {EFFORT_ORDER.map((effort) => (
@@ -1672,7 +1967,7 @@ export function ChatPage() {
                           className={`model-effort-option${effort === reasoningEffort ? " active" : ""}`}
                           aria-pressed={effort === reasoningEffort}
                           title={EFFORT_META[effort].description}
-                          disabled={savingEffort || !configured}
+                          disabled={savingEffort || switchingModel || !configured}
                           onClick={() => changeReasoningEffort(effort)}
                         >
                           {EFFORT_META[effort].label}
@@ -2005,6 +2300,15 @@ export function ChatPage() {
               )}
             </section>
           )}
+          {queuedTask && controlState !== "queued" && (
+            <div className="composer-task-queue" aria-live="polite">
+              <span className="composer-task-queue-label"><Clock size={12} />排队任务：{queuedTask.title}</span>
+              <button type="button" onClick={() => void cancelQueuedTask()} disabled={isCancelling}>
+                {isCancelling ? <Loader2 size={12} className="spin" /> : <Square size={10} />}
+                取消排队
+              </button>
+            </div>
+          )}
           {queue.length > 0 && (
             <div className="composer-queue" aria-live="polite">
               <span className="composer-queue-label"><Clock size={12} />待发送 · {queue.length}</span>
@@ -2102,42 +2406,29 @@ export function ChatPage() {
               onKeyDown={onComposerKeyDown}
               onPaste={onComposerPaste}
               aria-label="消息"
-              placeholder={isWorking ? "继续输入，发送后会加入队列…" : "向 Hearth 提问，输入 / 选择命令或技能…"}
+              placeholder={isWorking ? "继续输入，Enter 按设置排队或引导…" : pausedTask ? "任务已暂停，点击继续后恢复执行…" : "向 Hearth 提问，输入 / 选择命令或技能…"}
               rows={1}
             />
-            {stoppableTask?.status === "running" && (
-              <button
-                type="button"
-                className="composer-icon composer-pause"
-                onClick={() => void pauseRunningTask()}
-                disabled={isPausing || isCancelling}
-                title={`暂停任务：${stoppableTask.title}`}
-                aria-label={`暂停任务：${stoppableTask.title}`}
-              >
-                {isPausing ? <Loader2 size={17} className="spin" /> : <Pause size={17} />}
-              </button>
-            )}
             <button
               type="button"
-              className={`composer-send ${isWorking ? "working" : ""} ${stoppableTask ? "stopping" : ""}`}
-              onClick={() => (stoppableTask || sending ? void stopRunningTask() : void send())}
-              disabled={isCancelling || isPausing || (!canSubmit && !stoppableTask && !sending)}
-              aria-busy={isWorking}
-              title={stoppableTask
-                ? `停止任务：${stoppableTask.title}`
-                : sending ? "停止回复" : selectedExecutorUnavailable
-                  ? "当前锁定的执行器不可用"
-                  : isWorking
-                    ? "加入队列"
-                    : "发送"}
+              className={`composer-send ${isWorking ? "working" : ""}${controlState === "paused" ? " paused" : ""}${controlState === "queued" ? " queue-control" : ""}`}
+              onClick={onPrimaryControl}
+              disabled={primaryControlDisabled}
+              aria-busy={controlState === "sending" || controlState === "running" || controlState === "paused" || controlState === "queued"}
+              aria-label={primaryControlTitle}
+              title={primaryControlTitle}
             >
-              {uploading
+              {controlState === "sending"
                 ? <Loader2 size={17} className="spin" />
-                : stoppableTask || sending
-                  ? <span className="stop-icon" />
-                  : isWorking && !hasDraft
-                    ? <Loader2 size={17} className="spin" />
-                    : <ArrowUp size={18} />}
+                : controlState === "running"
+                  ? isPausing ? <Loader2 size={17} className="spin" /> : <Pause size={17} />
+                  : controlState === "paused"
+                    ? isResuming ? <Loader2 size={17} className="spin" /> : <Play size={17} />
+                    : controlState === "queued"
+                      ? isCancelling ? <Loader2 size={17} className="spin" /> : <Square size={15} />
+                      : uploading
+                        ? <Loader2 size={17} className="spin" />
+                        : <ArrowUp size={18} />}
             </button>
           </div>
         </div>

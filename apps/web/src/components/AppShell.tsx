@@ -16,19 +16,19 @@ export function AppShell() {
   const [commandOpen, setCommandOpen] = useState(false);
   const moreActive = MORE_NAV.some((item) => pathname === item.path || pathname.startsWith(`${item.path}/`));
   const [moreOpen, setMoreOpen] = useState(() => moreActive || readMoreOpen());
-  const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 30_000 });
   const executorsQuery = useQuery({ queryKey: ["executors"], queryFn: api.executors, refetchInterval: 30_000 });
-  const chatModel = healthQuery.data?.chatModel;
-  const readyExecutors = (executorsQuery.data?.executors ?? []).filter((executor) => executor.health.canRun);
-  const primaryExecutor = readyExecutors.find((executor) => executor.id === "native")
+  const executors = executorsQuery.data?.executors ?? [];
+  const readyExecutors = executors.filter((executor) => executor.health.canRun);
+  const primaryExecutor = executors.find((executor) => executor.id === executorsQuery.data?.preferredExecutorId)
+    ?? readyExecutors.find((executor) => executor.id === "native")
     ?? readyExecutors.find((executor) => executor.id === "codex")
     ?? readyExecutors[0]
     ?? null;
   const chatMode = pathname === "/";
-  const connectionIssue = healthQuery.isSuccess && !chatModel?.configured
-    ? { label: "聊天模型未配置", to: "/welcome" }
-    : executorsQuery.isSuccess && !primaryExecutor
-      ? { label: "执行器不可用", to: "/settings" }
+  const connectionIssue = executorsQuery.isSuccess && !primaryExecutor
+    ? { label: "执行器不可用", to: "/settings" }
+    : executorsQuery.isSuccess && primaryExecutor && !primaryExecutor.effectiveModel
+      ? { label: "执行器尚未绑定模型", to: "/settings" }
       : null;
 
   useEffect(() => {

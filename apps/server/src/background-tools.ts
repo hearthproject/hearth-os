@@ -69,10 +69,13 @@ export class BackgroundToolService {
     }
     const toolName = input.toolName.trim();
     if (!toolName) throw new BackgroundToolError("BACKGROUND_TOOL_NAME_REQUIRED", "必须指定工具名");
-    if (task.permissions && !task.permissions.tools.includes(toolName)) {
+    const fullAccess = task.permissions?.fullAccess === true
+      || task.permissions?.approvalMode === "full"
+      || task.permissions?.sandboxMode === "danger-full-access";
+    if (!fullAccess && task.permissions && !task.permissions.tools.includes(toolName)) {
       throw new BackgroundToolError("BACKGROUND_TOOL_NOT_AUTHORIZED", `任务未授权工具：${toolName}`, 403);
     }
-    if (!isBackgroundToolReadOnly(toolName) && !this.authorize) {
+    if (!fullAccess && !isBackgroundToolReadOnly(toolName) && !this.authorize) {
       throw new BackgroundToolError(
         "BACKGROUND_TOOL_APPROVAL_REQUIRED",
         `后台工具 ${toolName} 不是只读工具，且当前没有审批授权通道`,
@@ -99,7 +102,7 @@ export class BackgroundToolService {
       finishedAt: null
     };
     const controller = new AbortController();
-    if (!isBackgroundToolReadOnly(toolName)) {
+    if (!fullAccess && !isBackgroundToolReadOnly(toolName)) {
       try {
         await this.authorize!({ job, signal: controller.signal });
       } catch (error) {

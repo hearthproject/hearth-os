@@ -619,6 +619,26 @@ describe("HearthStore", () => {
     store.appendEvent({ type: "task.created", taskId: "task-explicit", payload: explicit });
     expect(store.getTask("task-explicit")?.permissions?.tools).toEqual(["read_file"]);
 
+    const fullSnapshot = {
+      ...task("task-full"),
+      permissions: {
+        readRoots: [],
+        writeRoots: [],
+        networkHosts: [],
+        networkMode: "open" as const,
+        tools: [],
+        fullAccess: true,
+        approvalMode: "full" as const,
+        sandboxMode: "danger-full-access" as const
+      }
+    };
+    store.appendEvent({ type: "task.created", taskId: "task-full", payload: fullSnapshot });
+    expect(store.getTask("task-full")?.permissions).toMatchObject({
+      fullAccess: true,
+      approvalMode: "full",
+      sandboxMode: "danger-full-access"
+    });
+
     const legacyEmpty = {
       ...task("task-legacy"),
       permissions: { readRoots: [], writeRoots: [], networkHosts: [], tools: [] }

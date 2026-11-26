@@ -473,7 +473,8 @@ export class ConversationContextService {
         excludeMessageId,
         thresholdTokens: policy.compactThresholdTokens,
         keepTokens: policy.keepTokens,
-        summaryMaxTokens: policy.summaryMaxTokens
+        summaryMaxTokens: policy.summaryMaxTokens,
+        settings: options.settings
       });
     }
     return this.renderTaskBrief(conversationId, taskId, budget, excludeMessageId);
@@ -496,7 +497,8 @@ export class ConversationContextService {
         thresholdTokens: policy.compactThresholdTokens,
         keepTokens: policy.keepTokens,
         summaryMaxTokens: policy.summaryMaxTokens,
-        excludeMessageId: options.currentMessageId
+        excludeMessageId: options.currentMessageId,
+        settings: options.settings
       });
     }
     const state = this.service.store.getConversationContextState(conversationId);
@@ -536,6 +538,7 @@ export class ConversationContextService {
       summaryMaxTokens?: number;
       excludeTaskId?: string | undefined;
       excludeMessageId?: string | undefined;
+      settings?: ModelSettings | null | undefined;
     } = {}
   ): Promise<ConversationCompactionRecord | null> {
     const settings = this.settings();
@@ -554,17 +557,18 @@ export class ConversationContextService {
       keepTokens: options.keepTokens ?? policy.keepTokens,
       summaryMaxTokens: options.summaryMaxTokens ?? policy.summaryMaxTokens,
       compactRatio: policy.compactRatio
-    });
+    }, options.settings);
   }
 
   async compactNow(
     conversationId: string,
-    trigger: "auto" | "manual" | "overflow" = "manual"
+    trigger: "auto" | "manual" | "overflow" = "manual",
+    options: { settings?: ModelSettings | null | undefined } = {}
   ): Promise<ConversationCompactionRecord | null> {
     const units = this.collectUnits(conversationId);
     if (units.length === 0) return null;
-    const policy = this.windowPolicy();
-    return this.compact(conversationId, trigger, units, policy.inputBudgetTokens, policy);
+    const policy = this.windowPolicy(options.settings);
+    return this.compact(conversationId, trigger, units, policy.inputBudgetTokens, policy, options.settings);
   }
 
   async refreshAfterTask(taskId: string): Promise<ConversationCompactionRecord | null> {
@@ -576,7 +580,8 @@ export class ConversationContextService {
       budgetTokens: taskContextBudgetTokens(policy),
       thresholdTokens: policy.compactThresholdTokens,
       keepTokens: policy.keepTokens,
-      summaryMaxTokens: policy.summaryMaxTokens
+      summaryMaxTokens: policy.summaryMaxTokens,
+      settings: executorSettings
     });
   }
 
@@ -585,7 +590,8 @@ export class ConversationContextService {
     trigger: "auto" | "manual" | "overflow",
     units: ConversationUnit[],
     budgetTokens: number,
-    policy: { keepTokens: number; summaryMaxTokens: number; compactRatio?: number }
+    policy: { keepTokens: number; summaryMaxTokens: number; compactRatio?: number },
+    modelSettings?: ModelSettings | null | undefined
   ): Promise<ConversationCompactionRecord | null> {
     return this.withLock(conversationId, async () => {
       const state = this.service.store.getConversationContextState(conversationId);
@@ -623,7 +629,7 @@ export class ConversationContextService {
       };
       this.service.store.appendConversationCompaction(record);
       try {
-        const generated = await this.generateSummary(previousText, coveredUnits, state?.version ?? 0, policy.summaryMaxTokens);
+        const generated = await this.generateSummary(previousText, coveredUnits, state?.version ?? 0, policy.summaryMaxTokens, modelSettings);
         const summaryData = generated.data ? mergeCompleted(previous, generated.data, coveredUnits) : null;
         const summaryText = summaryData
           ? fitSummary(summaryData, policy.summaryMaxTokens) || "（暂无摘要）"
@@ -826,7 +832,8 @@ export class ConversationContextService {
     previous: string,
     units: ConversationUnit[],
     version: number,
-    summaryMaxTokens: number
+    summaryMaxTokens: number,
+    modelSettings?: ModelSettings | null | undefined
   ): Promise<{ text: string; data: ConversationContextSummary | null; model: string | null; usage: ConversationCompactionRecord["usage"] }> {
     const { chunks } = this.chunkUnits(previous, units);
     let carry = previous;
@@ -836,7 +843,7 @@ export class ConversationContextService {
     let usage: ConversationCompactionRecord["usage"] = null;
     for (const chunk of chunks) {
       const prompt = this.buildSummaryPrompt(carry, chunk.units, version);
-      const generated = await this.summarizeText(prompt, summaryMaxTokens);
+      const generated = await this.summarizeText(prompt, summaryMaxTokens, modelSettings);
       if (!generated) {
         finalText = deterministicSummary(chunk.units, carry);
         finalData = null;
@@ -899,12 +906,16 @@ export class ConversationContextService {
     ].join("\n\n");
   }
 
-  private async summarizeText(prompt: string, summaryMaxTokens: number): Promise<{ text: string; model: string | null; usage: ConversationCompactionRecord["usage"] } | null> {
+  private async summarizeText(
+    prompt: string,
+    summaryMaxTokens: number,
+    modelSettings?: ModelSettings | null | undefined
+  ): Promise<{ text: string; model: string | null; usage: ConversationCompactionRecord["usage"] } | null> {
     if (this.summaryGenerator) {
       const generated = await this.summaryGenerator(prompt);
       return generated ? { text: generated, model: "injected", usage: null } : null;
     }
-    const settings = this.modelSettings?.() ?? null;
+    const settings = modelSettings === undefined ? this.modelSettings?.() ?? null : modelSettings;
     if (!settings) return null;
     try {
       const messages: AgentMessage[] = [

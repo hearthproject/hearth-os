@@ -90,7 +90,6 @@ import type {
 } from "@hearth/core";
 
 export interface ChatStreamBody {
-  routeMode?: "auto" | "chat" | "task";
   conversationId?: string;
   projectId?: string;
   message?: string;

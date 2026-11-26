@@ -133,7 +133,7 @@ describe("native tool action binding", () => {
     expect(verifyResolvedAction(action!).ok).toBe(true);
   });
 
-  it("binds desktop file reads to an approval-gated host file action", () => {
+  it("binds desktop file reads and executes them directly in full permission mode", () => {
     const root = tempRoot();
     const desktop = tempRoot();
     const file = join(desktop, "项目介绍.md");
@@ -152,8 +152,9 @@ describe("native tool action binding", () => {
         });
         expect(action?.kind).toBe("host_file");
         expect(action?.hostFile?.pathRealPath).toBeTruthy();
-        expect(decideActionPolicy(action!, { permissionMode, context: "interactive", preauthorized: false }))
-          .toMatchObject({ allowed: true, requiresApproval: true });
+        const decision = decideActionPolicy(action!, { permissionMode, context: "interactive", preauthorized: false });
+        expect(decision.allowed).toBe(true);
+        expect(decision.requiresApproval).toBe(permissionMode === "guarded");
       }
     } finally {
       if (previous === undefined) delete process.env.HEARTH_DESKTOP_DIR;
@@ -181,7 +182,7 @@ describe("native tool action binding", () => {
     }
   });
 
-  it("keeps irreversible browser actions approval-gated in full permission mode", () => {
+  it("executes irreversible browser actions directly in full permission mode", () => {
     const root = tempRoot();
     const bind = (toolName: string, args: Record<string, unknown>, elementName?: string) => resolveToolAction({
       toolName,
@@ -207,7 +208,7 @@ describe("native tool action binding", () => {
       bind("browser_drag", { startRef: "2:e5", endRef: "2:e6" })
     ]) {
       expect(decideActionPolicy(action, { permissionMode: "full", context: "interactive" }))
-        .toMatchObject({ allowed: true, requiresApproval: true });
+        .toMatchObject({ allowed: true, requiresApproval: false });
       expect(action.sideEffectClass).toBe("external_irreversible");
     }
   });

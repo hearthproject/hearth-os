@@ -204,7 +204,7 @@ async function runRealProbe(
       return verifyProbeText(result.text);
     }
     if (id === "native") {
-      if (!options.modelSettings) return { ok: false, error: "尚未配置聊天模型", code: "EXECUTOR_UNCONFIGURED" };
+      if (!options.modelSettings) return { ok: false, error: "尚未绑定执行器模型", code: "EXECUTOR_UNCONFIGURED" };
       const result = await completeChat(options.modelSettings, [
         { role: "system", content: "You are a connectivity probe. Reply with exactly HEARTH_OK and nothing else." },
         { role: "user", content: "Reply with exactly HEARTH_OK. Do not use tools." }

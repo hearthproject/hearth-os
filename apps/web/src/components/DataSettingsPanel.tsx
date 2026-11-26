@@ -34,7 +34,7 @@ const MAINTENANCE_ACTION_LABELS: Record<string, string> = {
 };
 
 const SQLITE_TABLES: Array<{ name: string; text: string }> = [
-  { name: "app_settings", text: "聊天模型、界面键值和注册表更新时间" },
+  { name: "app_settings", text: "默认模型档案、界面键值和注册表更新时间" },
   { name: "model_profiles", text: "模型供应商、协议、地址与加密 API Key" },
   { name: "executor_model_bindings", text: "执行器与模型档案的绑定和覆盖" },
   { name: "settings_migrations", text: "旧 JSON 迁移状态、源路径和备份路径" },

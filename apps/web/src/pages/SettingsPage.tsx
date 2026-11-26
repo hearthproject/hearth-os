@@ -280,10 +280,10 @@ function ModelsTab() {
     setNotice(null);
     try {
       await api.setChatProfile(chatProfileId || null);
-      setNotice({ tone: "ok", text: "聊天模型已更新。" });
+      setNotice({ tone: "ok", text: "默认模型档案已更新。" });
       await refreshRegistry();
     } catch (error) {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "聊天模型保存失败" });
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "默认模型档案保存失败" });
     } finally {
       setBusy(null);
     }
@@ -340,10 +340,10 @@ function ModelsTab() {
     <section className="settings-tab-panel model-settings-panel">
       <section className="panel settings-section">
         <div className="settings-body">
-          <div className="section-heading"><div><h3>聊天模型</h3></div></div>
+          <div className="section-heading"><div><h3>默认模型档案</h3></div></div>
           <div className="chat-profile-row">
             <label>
-              <span>当前使用</span>
+              <span>自动绑定候选</span>
               <select value={chatProfileId} onChange={(event) => setChatProfileId(event.target.value)}>
                 <option value="">未选择</option>
                 {(registry?.profiles ?? []).map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {profile.model}</option>)}
@@ -353,6 +353,7 @@ function ModelsTab() {
               {busy === "chat" ? <Loader2 size={15} className="spin" /> : <Save size={15} />} 保存
             </button>
           </div>
+          <p className="settings-hint">仅用于给尚未绑定模型的新执行器选择兼容档案。已绑定执行器的实际模型请在对话输入框中切换，这里的档案不会覆盖现有绑定。</p>
         </div>
       </section>
 
@@ -372,7 +373,7 @@ function ModelsTab() {
                       <strong>{profile.name}</strong>
                       <small>{profile.providerName} · {profile.model}</small>
                     </div>
-                    {registry?.chatProfileId === profile.id && <span className="status-chip ok">聊天模型</span>}
+                    {registry?.chatProfileId === profile.id && <span className="status-chip ok">自动绑定候选</span>}
                   </div>
                   <div className="model-card-actions">
                     <button className="ghost-button compact" onClick={() => edit(profile)}><Pencil size={13} /> 编辑</button>

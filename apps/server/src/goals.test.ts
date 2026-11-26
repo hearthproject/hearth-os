@@ -432,6 +432,115 @@ describe("GoalService", () => {
     expect(report?.forbiddenActions.some((item) => item.includes("npm publish"))).toBe(true);
   });
 
+  it("replans an active goal before waking it and preserves round evidence", async () => {
+    const goal = createGoal(goals, "replan with preserved evidence");
+    const task = createTask(service, goal);
+    goals.attachTask(goal.goalId, task.id);
+    await goals.action(goal.goalId, "start");
+    const run = createRun(service, task, root);
+    const outDir = join(root, "out", run.id);
+    mkdirSync(outDir, { recursive: true });
+    goals.onRunStarted({ task, run, outDir, workspaceRoot: root });
+    writeFileSync(join(outDir, "evidence.txt"), "preserved\n", "utf8");
+    writeIntent(outDir, "progress", "a verified slice", ["evidence.txt"]);
+    service.updateTask(task.id, { status: "running", currentRunId: run.id }, run.id);
+    service.updateTask(task.id, { status: "completed" }, run.id);
+    await goals.onRunCompleted({
+      task,
+      run: { ...run, status: "completed", endedAt: now.toISOString() },
+      outDir,
+      workspaceRoot: root,
+      finalResponse: "a verified slice"
+    });
+
+    const beforeReplan = goals.get(goal.goalId);
+    overwriteGoal(store, {
+      ...beforeReplan,
+      noProgressCount: 2,
+      lastProgressDigest: "stale-progress-digest"
+    });
+    const hydrated = goals.get(goal.goalId);
+    const beforeRevision = hydrated.revision ?? 0;
+    const beforeRoundCount = hydrated.roundCount ?? 0;
+    const beforeRounds = goals.view(goal.goalId).rounds;
+    const observed: { goal: GoalContract | null } = { goal: null };
+    scheduler.afterReplanCallback = () => {
+      observed.goal = goals.get(goal.goalId);
+    };
+
+    const replanned = await goals.action(goal.goalId, "replan", { note: "use the verified evidence" });
+
+    expect(observed.goal?.currentState).toBe("active");
+    expect(observed.goal?.revision).toBe(beforeRevision + 1);
+    expect(replanned.goal.currentState).toBe("active");
+    expect(replanned.goal.armed).toBe(true);
+    expect(replanned.goal.revision).toBe(beforeRevision + 1);
+    expect(replanned.goal.noProgressCount).toBe(0);
+    expect(replanned.goal.lastProgressDigest).toBeNull();
+    expect(replanned.goal.roundCount).toBe(beforeRoundCount);
+    expect(replanned.rounds).toHaveLength(beforeRounds.length);
+    expect(replanned.rounds.at(-1)?.evidenceRefs.length).toBeGreaterThan(0);
+    expect(scheduler.requeues.at(-1)?.prompt).toContain("use the verified evidence");
+  });
+
+  it.each(["active", "paused", "blocked", "awaiting_user"] as const)(
+    "allows replanning a %s goal",
+    async (state) => {
+      const goal = createGoal(goals, `replan from ${state}`);
+      const task = createTask(service, goal);
+      goals.attachTask(goal.goalId, task.id);
+      overwriteGoal(store, {
+        ...goals.get(goal.goalId),
+        currentState: state,
+        armed: state === "active",
+        stopReason: state === "blocked" || state === "awaiting_user" ? "needs_input" : null,
+        roundCount: 3,
+        noProgressCount: 2,
+        lastProgressDigest: "old-progress"
+      });
+
+      const result = await goals.action(goal.goalId, "replan", { note: `reroute ${state}` });
+      expect(result.goal.currentState).toBe("active");
+      expect(result.goal.armed).toBe(true);
+      expect(result.goal.roundCount).toBe(3);
+      expect(result.goal.noProgressCount).toBe(0);
+      expect(result.goal.lastProgressDigest).toBeNull();
+      expect(scheduler.requeues.at(-1)?.prompt).toContain(`reroute ${state}`);
+    }
+  );
+
+  it("marks a goal blocked when scheduler replanning fails", async () => {
+    const goal = createGoal(goals, "replan failure");
+    const task = createTask(service, goal);
+    goals.attachTask(goal.goalId, task.id);
+    overwriteGoal(store, {
+      ...goals.get(goal.goalId),
+      currentState: "active",
+      armed: true
+    });
+    scheduler.replanError = new Error("scheduler unavailable");
+
+    await expect(goals.action(goal.goalId, "replan")).rejects.toThrow("scheduler unavailable");
+    const blocked = goals.get(goal.goalId);
+    expect(blocked.currentState).toBe("blocked");
+    expect(blocked.armed).toBe(false);
+    expect(blocked.stopReason).toBe("task_failed");
+    expect(blocked.nextHandoff).toContain("重新规划失败");
+  });
+
+  it.each(["done", "failed", "cancelled"] as const)(
+    "rejects replanning a %s goal",
+    async (state) => {
+      const goal = createGoal(goals, `terminal ${state}`);
+      const task = createTask(service, goal);
+      goals.attachTask(goal.goalId, task.id);
+      overwriteGoal(store, { ...goals.get(goal.goalId), currentState: state, armed: false });
+
+      await expect(goals.action(goal.goalId, "replan")).rejects.toMatchObject({
+        code: "GOAL_STATE_INVALID"
+      });
+    }
+  );
   it("guides two stale rounds and pauses after four rounds without progress", async () => {
     const goal = createGoal(goals, "make measurable progress");
     let task = createTask(service, goal);
@@ -470,6 +579,8 @@ describe("GoalService", () => {
 class FakeScheduler implements GoalSchedulerPort {
   requeues: Array<{ taskId: string; prompt: string }> = [];
   kicks = 0;
+  replanError: Error | null = null;
+  afterReplanCallback: (() => void) | null = null;
   constructor(private readonly service: HearthService) {}
 
   async pause(taskId: string): Promise<TaskPauseResult> {
@@ -485,6 +596,18 @@ class FakeScheduler implements GoalSchedulerPort {
     return this.service.updateTask(taskId, { status: "cancelled" });
   }
 
+  async replanGoalTask(
+    taskId: string,
+    prompt: string,
+    beforeWake?: (task: TaskRecord) => void
+  ): Promise<TaskRecord> {
+    this.requeues.push({ taskId, prompt });
+    if (this.replanError) throw this.replanError;
+    beforeWake?.(this.service.requireTask(taskId));
+    this.afterReplanCallback?.();
+    return this.service.updateTask(taskId, { status: "queued" });
+  }
+
   requeueGoalTask(taskId: string, prompt: string): TaskRecord {
     this.requeues.push({ taskId, prompt });
     return this.service.requireTask(taskId);
@@ -495,6 +618,9 @@ class FakeScheduler implements GoalSchedulerPort {
   }
 }
 
+function overwriteGoal(store: HearthStore, goal: GoalContract): void {
+  store.appendEvent({ type: "goal.updated", taskId: goal.taskId ?? null, payload: goal });
+}
 function createGoal(goals: GoalService, objective: string, maxRounds = 4): GoalContract {
   return goals.create({
     objective,

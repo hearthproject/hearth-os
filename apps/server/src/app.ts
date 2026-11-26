@@ -21,7 +21,7 @@ import { findCodexBinary, installExecutorRuntime, type ExecutorInstallProgress }
 import { applyExecutorModelReadiness } from "./executor-readiness.ts";
 import { EXECUTORS } from "./executors.ts";
 import { ScheduleError, ScheduleService } from "./schedules.ts";
-import { chatModelConfigured, loadModelSettings, viewModelSettings } from "./model-settings.ts";
+import { chatModelConfigured, viewModelSettings } from "./model-settings.ts";
 import { completeChat } from "./model-client.ts";
 import { GoalService } from "./goals.ts";
 import { PlanService } from "./plans.ts";
@@ -443,6 +443,7 @@ const optionalExecutorText = (max: number) =>
 const executorSettingsSchema = z.object({
   defaultApprovalMode: z.enum(["necessary", "workspace", "full"]).optional(),
   preferredExecutorId: z.enum(EXECUTOR_IDS).nullable().optional(),
+  followUpMode: z.enum(["queue", "steer"]).optional(),
   reasoningEffort: z.enum(["off", "minimal", "low", "medium", "high", "max"]).optional(),
   executors: z.partialRecord(z.enum(EXECUTOR_IDS), z.object({
     command: optionalExecutorText(1000),
@@ -838,6 +839,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
     if (!settings) return null;
     return { ...settings, reasoningEffort: executorSettingsStore.load().reasoningEffort ?? "max" as const };
   };
+  const selectedExecutorId = (): ExecutorId => executorSettingsStore.load().preferredExecutorId ?? "native";
+  const selectedExecutorModel = () => modelSettingsForExecutor(selectedExecutorId());
   skills.setDescriptionTranslator(async (description) => {
     const settings = modelSettingsForExecutor("native");
     if (!settings || !chatModelConfigured(settings)) return null;
@@ -855,7 +858,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const conversationContext = new ConversationContextService({
     service,
     context,
-    modelSettings: () => modelRegistry.chatSettings() ?? modelSettingsForExecutor("native"),
+    modelSettings: () => modelSettingsForExecutor("native"),
     modelSettingsForExecutor
   });
   if (options.librarySummaryGenerator !== null) {
@@ -923,8 +926,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
   }
   const onboarding = new OnboardingService({
     store,
-    isChatModelConfigured: () => {
-      const settings = modelRegistry.chatSettings() ?? loadModelSettings(modelSettingsPath);
+    isExecutorModelConfigured: () => {
+      const settings = selectedExecutorModel();
       return Boolean(settings && chatModelConfigured(settings));
     },
     readyExecutorIds: () => EXECUTORS.map((executor) => executor.id).filter((id) => executorHealth(id).canRun),
@@ -992,6 +995,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
       pause: (taskId) => scheduler.pause(taskId),
       resumePaused: (taskId, reference) => scheduler.resumePaused(taskId, reference),
       cancel: (taskId) => scheduler.cancel(taskId),
+      replanGoalTask: (taskId, prompt, beforeWake) => scheduler.replanGoalTask(taskId, prompt, beforeWake),
       requeueGoalTask: (taskId, prompt, options) => scheduler.requeueGoalTask(taskId, prompt, options),
       kick: () => scheduler.kick()
     });
@@ -1156,14 +1160,17 @@ export async function buildServer(options: BuildServerOptions = {}) {
   app.get("/api/health", async () => {
     const snapshot = health.snapshot();
     const profile = codexProfile();
-    const loaded = modelRegistry.chatSettings() ?? loadModelSettings(modelSettingsPath);
-    const modelSettings = { ...loaded, reasoningEffort: executorSettingsStore.load().reasoningEffort ?? "max" as const };
+    const loaded = selectedExecutorModel();
+    const modelSettings = loaded
+      ? { ...loaded, reasoningEffort: executorSettingsStore.load().reasoningEffort ?? "max" as const }
+      : null;
     return {
       ...snapshot,
       host: options.hostKernel?.snapshot() ?? null,
       chatModel: {
         configured: Boolean(modelSettings && chatModelConfigured(modelSettings)),
-        settings: viewModelSettings(modelSettings)
+        settings: modelSettings ? viewModelSettings(modelSettings) : null,
+        executorId: selectedExecutorId()
       },
       codex: {
         ...snapshot.codex,
@@ -1189,9 +1196,12 @@ export async function buildServer(options: BuildServerOptions = {}) {
 
   app.post("/api/onboarding/verify", async (_request, reply) => {
     if (!onboarding.snapshot().checks.chatModelConfigured) {
-      return reply.code(409).send({ error: "CHAT_MODEL_MISSING", message: "先配置聊天模型，再跑首次示例。" });
+      return reply.code(409).send({ error: "CHAT_MODEL_MISSING", message: "先配置执行器模型，再跑首次示例。" });
     }
-    const settings = modelRegistry.chatSettings() ?? loadModelSettings(modelSettingsPath);
+    const settings = selectedExecutorModel();
+    if (!settings) {
+      return reply.code(409).send({ error: "CHAT_MODEL_MISSING", message: "当前执行器缺少可用模型，再跑首次示例。" });
+    }
     const verification = await verifyFirstTask(settings);
     if (verification.ok) onboarding.complete();
     return { verification, onboarding: onboarding.snapshot() };
@@ -1583,7 +1593,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
 
   app.put("/api/model-registry/chat-profile", async (request, reply) => {
     const parsed = chatProfileSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_CHAT_PROFILE", message: "聊天模型选择格式不正确" });
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_CHAT_PROFILE", message: "默认模型档案格式不正确" });
     try {
       modelRegistry.setChatProfile(parsed.data.profileId);
       clearExecutorHealthCache();
@@ -1739,12 +1749,16 @@ export async function buildServer(options: BuildServerOptions = {}) {
   app.get("/api/executors", async () => {
     const settings = executorSettingsStore.load();
     const modelBindings = modelRegistry.bindingViews();
-    const executors: ExecutorView[] = EXECUTORS.map((descriptor) => ({
-      ...descriptor,
-      runtime: executorRuntimeSettings(settings, descriptor.id),
-      health: executorHealth(descriptor.id),
-      modelBinding: modelBindings.find((binding) => binding.executorId === descriptor.id)
-    }));
+    const executors: ExecutorView[] = EXECUTORS.map((descriptor) => {
+      const model = modelSettingsForExecutor(descriptor.id);
+      return {
+        ...descriptor,
+        runtime: executorRuntimeSettings(settings, descriptor.id),
+        health: executorHealth(descriptor.id),
+        modelBinding: modelBindings.find((binding) => binding.executorId === descriptor.id),
+        effectiveModel: model ? viewModelSettings(model) : null
+      };
+    });
     return {
       executors,
       preferredExecutorId: settings.preferredExecutorId,
@@ -3010,12 +3024,12 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }
   });
 
-  const taskOverviews = new TaskOverviewService(store, () => modelRegistry.chatSettings() ?? loadModelSettings(modelSettingsPath));
+  const taskOverviews = new TaskOverviewService(store, (task) => modelSettingsForExecutor(task.executorId ?? "native"));
   app.post<{ Params: { id: string } }>("/api/tasks/:id/overview", async (request, reply) => {
     const task = store.getTask(request.params.id);
     if (!task) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
     try { return await taskOverviews.get(task); }
-    catch { return reply.code(503).send({ error: "TASK_OVERVIEW_UNAVAILABLE", message: "摘要暂不可用，请检查聊天模型配置后重试" }); }
+    catch { return reply.code(503).send({ error: "TASK_OVERVIEW_UNAVAILABLE", message: "摘要暂不可用，请检查当前执行器的模型绑定后重试" }); }
   });
 
   app.get<{ Params: { id: string }; Querystring: { format?: string } }>("/api/tasks/:id/system-context", async (request, reply) => {

@@ -378,16 +378,13 @@ describe("agent runtime", () => {
     expect(result.messages.some((message) => message.role === "tool" && message.content.includes("未知或未授权工具"))).toBe(true);
   });
 
-  it("prompts once before accepting plain-text completion in native mode", async () => {
+  it("completes a direct plain-text answer when no tool was needed", async () => {
     const root = workspace(roots);
     const notices: string[] = [];
     const result = await runAgent({
-      model: fakeModel([
-        turn("看起来已经完成了", []),
-        turn("", [call("finish_task", { summary: "确认完成" })])
-      ]),
+      model: fakeModel([turn("这是一个可以直接回答的问题。", [])]),
       tools: createBuiltinTools(),
-      goal: "完成",
+      goal: "解释一个概念",
       systemPrompt: "system",
       budget: { maxTurns: 5, maxToolCalls: 4, maxTokens: 10_000, maxDurationMs: 30_000 },
       permissions: defaultTaskPermissions({ workspaceRoot: root, outDir: join(root, "out"), networkHosts: [] }),
@@ -397,20 +394,55 @@ describe("agent runtime", () => {
       onEvent: (event) => { if (event.type === "notice") notices.push(event.message); }
     });
     expect(result.status).toBe("completed");
-    expect(result.summary).toBe("确认完成");
+    expect(result.summary).toBe("这是一个可以直接回答的问题。");
+    expect(notices).toHaveLength(0);
+    expect(result.messages.some((message) => message.role === "user" && message.content.includes("finish_task"))).toBe(false);
+  });
+
+  it("requires finish_task after the model has used a tool", async () => {
+    const root = workspace(roots);
+    const notices: string[] = [];
+    const result = await runAgent({
+      model: fakeModel([
+        turn("", [call("inspect", {})]),
+        turn("文件检查完了", []),
+        turn("", [call("finish_task", { summary: "检查完成" })])
+      ]),
+      tools: [
+        { definition: { name: "inspect", description: "inspect", parameters: {} }, execute: async () => ({ content: "ok" }) },
+        ...createBuiltinTools().filter((tool) => tool.definition.name === "finish_task")
+      ],
+      goal: "检查状态",
+      systemPrompt: "system",
+      budget: { maxTurns: 6, maxToolCalls: 4, maxTokens: 10_000, maxDurationMs: 30_000 },
+      permissions: { tools: ["inspect", "finish_task"], readRoots: [root], writeRoots: [root], networkHosts: [] },
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      requireFinishTool: true,
+      onEvent: (event) => { if (event.type === "notice") notices.push(event.message); }
+    });
+    expect(result.status).toBe("completed");
+    expect(result.summary).toBe("检查完成");
     expect(notices).toHaveLength(1);
     expect(result.messages.some((message) => message.role === "user" && message.content.includes("finish_task"))).toBe(true);
   });
 
-  it("fails when the model keeps claiming completion without finish_task", async () => {
+  it("fails when the model keeps claiming completion after tool use without finish_task", async () => {
     const root = workspace(roots);
     const result = await runAgent({
-      model: fakeModel([turn("完成了", []), turn("真的完成了", [])]),
-      tools: createBuiltinTools(),
+      model: fakeModel([
+        turn("", [call("inspect", {})]),
+        turn("完成了", []),
+        turn("真的完成了", [])
+      ]),
+      tools: [
+        { definition: { name: "inspect", description: "inspect", parameters: {} }, execute: async () => ({ content: "ok" }) },
+        ...createBuiltinTools().filter((tool) => tool.definition.name === "finish_task")
+      ],
       goal: "完成",
       systemPrompt: "system",
-      budget: { maxTurns: 5, maxToolCalls: 4, maxTokens: 10_000, maxDurationMs: 30_000 },
-      permissions: defaultTaskPermissions({ workspaceRoot: root, outDir: join(root, "out"), networkHosts: [] }),
+      budget: { maxTurns: 6, maxToolCalls: 4, maxTokens: 10_000, maxDurationMs: 30_000 },
+      permissions: { tools: ["inspect", "finish_task"], readRoots: [root], writeRoots: [root], networkHosts: [] },
       workspaceRoot: root,
       outDir: join(root, "out"),
       requireFinishTool: true

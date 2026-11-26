@@ -661,6 +661,90 @@
   font-size: var(--fs-10);
 }
 
+.model-profile-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.model-profile-label {
+  color: var(--ink-tertiary);
+  font-size: var(--fs-10);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.model-profile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.model-profile-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-secondary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.model-profile-option > span {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.model-profile-option strong,
+.model-profile-option small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-profile-option strong {
+  color: var(--ink);
+  font-size: var(--fs-11);
+  font-weight: 600;
+}
+
+.model-profile-option small {
+  color: var(--ink-tertiary);
+  font-size: var(--fs-10);
+}
+
+.model-profile-option:hover:not(:disabled),
+.model-profile-option:focus-visible {
+  background: var(--surface-sunk);
+}
+
+.model-profile-option.active {
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  color: var(--accent);
+}
+
+.model-profile-option:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.model-profile-empty {
+  margin: 3px 0;
+  color: var(--ink-tertiary);
+  font-size: var(--fs-10);
+}
+
 .model-popover-context {
   display: flex;
   align-items: center;
@@ -1969,6 +2053,53 @@
   font-size: 9.5px;
 }
 
+.composer-task-queue {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-sunk);
+  color: var(--ink-secondary);
+  font-size: var(--fs-10);
+}
+
+.composer-task-queue-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-task-queue button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.composer-task-queue button:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.composer-task-queue button:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
 .composer-queue {
   display: flex;
   flex-wrap: wrap;
@@ -2028,6 +2159,17 @@
   background: color-mix(in srgb, var(--accent) 72%, var(--surface));
   color: var(--ember-on-ink);
   cursor: default;
+}
+
+.composer-send.paused,
+.composer-send.queue-control {
+  background: var(--surface-sunk);
+  color: var(--ink);
+}
+
+.composer-send.paused:hover:not(:disabled),
+.composer-send.queue-control:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-sunk));
 }
 
 .attachment-open {

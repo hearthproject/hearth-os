@@ -1,12 +1,10 @@
 import { createServer, type Server } from "node:http";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { completeChat, listModels, streamChat, readUsage, readAnthropicUsage, readGeminiUsage } from "./model-client.ts";
-import { decideRoute } from "./chat.ts";
 import type { ModelSettings } from "./model-settings.ts";
 
 let server: Server;
 let baseUrl = "";
-let mode: "chat" | "route" | "route-chat" = "chat";
 
 beforeAll(async () => {
   server = createServer(async (request, response) => {
@@ -25,16 +23,6 @@ beforeAll(async () => {
       response.write(`data: ${JSON.stringify({ choices: [{ delta: { content: "好" } }] })}\n\n`);
       response.write("data: [DONE]\n\n");
       response.end();
-      return;
-    }
-    if (mode === "route") {
-      response.setHeader("content-type", "application/json");
-      response.end(JSON.stringify({ choices: [{ message: { content: '{"action":"task","title":"写报告","reason":"需要产出文件"}' } }] }));
-      return;
-    }
-    if (mode === "route-chat") {
-      response.setHeader("content-type", "application/json");
-      response.end(JSON.stringify({ choices: [{ message: { content: '{"action":"chat","title":"","reason":"看起来像问答"}' } }] }));
       return;
     }
     response.setHeader("content-type", "application/json");
@@ -140,7 +128,6 @@ describe("OpenAI-compatible model client", () => {
   });
 
   it("parses non-stream replies and usage", async () => {
-    mode = "chat";
     const result = await completeChat(settings(), [{ role: "user", content: "hi" }]);
     expect(result.content).toBe("OK");
     expect(result.usage).toEqual({ inputTokens: 3, outputTokens: 1 });
@@ -239,66 +226,6 @@ describe("OpenAI-compatible model client", () => {
     expect(await listModels(settings())).toEqual(["model-a", "model-b"]);
   });
 
-  it("uses the router response to choose task execution", async () => {
-    mode = "route";
-    const route = await decideRoute("这些材料需要一份报告", false, null, settings());
-    expect(route).toMatchObject({ action: "task", title: "写报告" });
-    mode = "chat";
-  });
-
-  it("overrides a chat classification when an explicit executor is selected and the request needs GitHub PR work", async () => {
-    mode = "route-chat";
-    const route = await decideRoute(
-      "请你审核我的 GitHub 仓库中目前开着的 PR，列出需要回复修改或 rebase 的",
-      false,
-      null,
-      settings(),
-      { preferredExecutorId: "deepseek-harness" }
-    );
-    expect(route.action).toBe("task");
-    expect(route.reason).toContain("无需调用路由模型");
-    mode = "chat";
-  });
-
-  it("skips the router for clear requests and calls it once only for ambiguous input", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
-      choices: [{ message: { content: '{"action":"task","title":"整理内容","reason":"需要处理材料"}' } }]
-    }), { status: 200, headers: { "content-type": "application/json" } }));
-    try {
-      expect((await decideRoute("帮我读取这个文件", false, null, settings())).action).toBe("task");
-      expect((await decideRoute("什么是幂等性", false, null, settings())).action).toBe("chat");
-      expect(fetchMock).not.toHaveBeenCalled();
-
-      expect((await decideRoute("这些材料有点乱", false, null, settings())).action).toBe("task");
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-    } finally {
-      fetchMock.mockRestore();
-    }
-  });
-
-  it("keeps a general GitHub PR question in chat even when an executor is selected", async () => {
-    mode = "route-chat";
-    const route = await decideRoute(
-      "PR 审核一般看什么",
-      false,
-      null,
-      settings(),
-      { preferredExecutorId: "deepseek-harness" }
-    );
-    expect(route.action).toBe("chat");
-    mode = "chat";
-  });
-
-  it("still detects GitHub PR work when the router model is not configured", async () => {
-    const route = await decideRoute(
-      "请你审核我的 GitHub 仓库中目前开着的 PR，列出需要回复修改或 rebase 的",
-      false,
-      null,
-      { ...settings(), apiKey: "" },
-      { preferredExecutorId: "deepseek-harness" }
-    );
-    expect(route.action).toBe("task");
-  });
 });
 
 

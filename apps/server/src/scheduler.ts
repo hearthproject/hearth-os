@@ -543,6 +543,37 @@ export class HearthScheduler {
     return updated;
   }
 
+  async replanGoalTask(
+    taskId: string,
+    prompt: string,
+    beforeWake?: (task: TaskRecord) => void
+  ): Promise<TaskRecord> {
+    let task = this.service.requireTask(taskId);
+    if (task.status === "cancelled") throw new Error("任务已取消，不能重新规划目标");
+    if (task.status === "running") {
+      const paused = await this.pause(taskId);
+      task = paused.task;
+    }
+    if (task.status === "waiting_approval") {
+      this.approvals?.expireForTask(taskId);
+    }
+    this.cancelled.delete(taskId);
+    this.steering.delete(taskId);
+    // Persist the replanned contract after the old run settles and before the
+    // scheduler can start the next round.
+    beforeWake?.(task);
+    this.enqueueGoalFollowUp(taskId, prompt);
+    task = this.service.updateTask(taskId, {
+      status: "queued",
+      currentRunId: task.currentRunId,
+      nextAction: "目标重新规划中，准备开始新一轮",
+      error: null,
+      pendingInput: null
+    }, task.currentRunId ?? undefined);
+    this.wake();
+    return task;
+  }
+
   private enqueueGoalFollowUp(taskId: string, prompt: string): TaskFollowUpRecord {
     for (const existing of this.service.store.listTaskFollowUps(taskId, "queued")) {
       if (existing.origin === "goal") {
@@ -2258,7 +2289,7 @@ export class HearthScheduler {
       const nativeSettings = executorId === "native" ? executorModelSettings : null;
       const dshSettings = executorId === "deepseek-harness" ? executorModelSettings : null;
       if (executorId === "native" && (!nativeSettings || !chatModelConfigured(nativeSettings))) {
-        throw new Error("还没有配置聊天模型。请到“设置”里选择服务商并填入 API Key，然后重试。");
+        throw new Error("当前执行器还没有绑定可用模型。请在对话输入框或执行器设置中选择模型档案，然后重试。");
       }
       const resumeState = executorId === "native" && !handoff ? this.restoreResumeState(taskId, taskRoot, Boolean(pendingInput)) : undefined;
       const project = task.projectId ? this.service.store.getLocalProject(task.projectId) : null;
@@ -2813,7 +2844,7 @@ export class HearthScheduler {
     const visibleArgumentsValue = redactBrowserToolArguments(toolName, argumentsValue);
     const summary = toolApprovalSummary(toolName, input.request.call.arguments);
     const permissionMode = this.service.permissionModeForTask(input.task);
-    if (permissionMode === "full" && !toolName.startsWith("browser_")) return { allowed: true };
+    if (permissionMode === "full") return { allowed: true };
     const context = this.service.store.listScheduleRunByTask(input.task.id) ? "scheduled" as const : "interactive" as const;
     const browserPage = this.browserSessions.activeTab(input.task.id);
     const browserSnapshot = this.browserSessions.latestSnapshot(input.task.id);
@@ -2892,8 +2923,7 @@ export class HearthScheduler {
   }): Promise<DshApprovalOutcome> {
     if (input.signal.aborted) return "cancelled";
     const permissionMode = this.service.approvalModeForTask(input.task);
-    const browserTool = input.request.toolName.startsWith("browser_");
-    if (permissionMode === "full" && !browserTool) return "allowed-once";
+    if (permissionMode === "full") return "allowed-once";
     const metadata = dshApprovalMetadata(input.request);
     const classification = classifyTool(input.request.toolName);
     if (!classification.requiresApproval) {
@@ -3220,9 +3250,9 @@ export class HearthScheduler {
     if (modelAttempted) {
       const items = [...this.context.listItems(taskId, { limit: 50 }).items].reverse();
       contextTokens = estimateTokens(items.map((item) => item.content).join("\n"));
-      const chatSettings = this.modelSettingsForExecutor("native") ?? loadModelSettings(this.modelSettingsPath);
-      const modelDiagnosis = chatSettings
-        ? await diagnoseFailure({ settings: chatSettings, task, run, error, cause, items })
+      const modelSettings = this.modelSettingsForExecutor(task.executorId ?? "native");
+      const modelDiagnosis = modelSettings
+        ? await diagnoseFailure({ settings: modelSettings, task, run, error, cause, items })
         : null;
       if (modelDiagnosis) diagnosis = modelDiagnosis;
     }
@@ -3773,6 +3803,8 @@ export class HearthScheduler {
     const task = this.service.store.getTask(taskId);
     const state = this.context.getState(taskId);
     if (!task || !state) return;
+    const modelSettings = this.modelSettingsForExecutor(task.executorId ?? "native");
+    if (!modelSettings) return;
     const controller = new AbortController();
     this.summaryControllers.set(taskId, controller);
     let promise: Promise<void> = Promise.resolve();
@@ -3780,7 +3812,7 @@ export class HearthScheduler {
       context: this.context,
       task,
       state,
-      settings: this.modelSettingsForExecutor("native") ?? loadModelSettings(this.modelSettingsPath),
+      settings: modelSettings,
       signal: controller.signal
     }).then(() => undefined).catch(() => undefined).finally(() => {
       this.summaryTasks.delete(promise);
