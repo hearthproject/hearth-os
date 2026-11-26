@@ -1182,3 +1182,153 @@ it("notices when resuming with different tool definitions", async () => {
   const notices = events.filter((event): event is Extract<RuntimeEvent, { type: "notice" }> => event.type === "notice");
   expect(notices.some((notice) => notice.message.includes("工具定义"))).toBe(true);
 });
+
+it("emits a non-empty todos.updated event after todo_write", async () => {
+  const root = mkdtempSync(join(tmpdir(), "hearth-runtime-todos-"));
+  const events: RuntimeEvent[] = [];
+  let modelCall = 0;
+  const model: AgentModel = async () => {
+    modelCall += 1;
+    if (modelCall === 1) {
+      const args = { todos: [
+        { id: "t1", content: "读取输入", status: "completed" },
+        { id: "t2", content: "清洗数据", status: "in_progress" }
+      ] };
+      const toolCall: AgentToolCall = { id: "todo-1", name: "todo_write", arguments: args, rawArguments: JSON.stringify(args) };
+      return { content: "", toolCalls: [toolCall], usage: null, finishReason: "tool_calls" };
+    }
+    const args = { summary: "完成" };
+    const toolCall: AgentToolCall = { id: "finish-1", name: "finish_task", arguments: args, rawArguments: JSON.stringify(args) };
+    return { content: "", toolCalls: [toolCall], usage: null, finishReason: "tool_calls" };
+  };
+  const result = await runAgent({
+    model,
+    tools: createBuiltinTools(),
+    goal: "清洗数据",
+    systemPrompt: "system",
+    budget: { maxTurns: 6, maxToolCalls: 4, maxTokens: 10_000, maxDurationMs: 30_000 },
+    permissions: { tools: ["todo_write", "todo_read", "finish_task"], readRoots: [root], writeRoots: [root], networkHosts: [] },
+    workspaceRoot: root,
+    outDir: join(root, "out"),
+    onEvent: (event) => events.push(event)
+  });
+  expect(result.status).toBe("completed");
+  const updates = events.filter((event): event is Extract<RuntimeEvent, { type: "todos.updated" }> => event.type === "todos.updated");
+  expect(updates.length).toBeGreaterThan(0);
+  const latest = updates.at(-1)!;
+  expect(latest.todos).toEqual([
+    { id: "t1", content: "读取输入", status: "completed" },
+    { id: "t2", content: "清洗数据", status: "in_progress" }
+  ]);
+});
+
+it("injects the structured plan with step states back into the model", async () => {
+  const root = mkdtempSync(join(tmpdir(), "hearth-runtime-plan-inject-"));
+  const snapshots: string[] = [];
+  let callIndex = 0;
+  const model: AgentModel = async (messages) => {
+    callIndex += 1;
+    snapshots.push(messages.map((message) => message.content).join("\n"));
+    if (callIndex === 1) {
+      const args = {
+        plan: "迁移测试",
+        title: "Plan",
+        steps: [{ title: "重写 test_delete.py", detail: "去掉 JSON" }, { title: "运行 pytest" }]
+      };
+      const toolCall: AgentToolCall = { id: "plan-1", name: "submit_plan", arguments: args, rawArguments: JSON.stringify(args) };
+      return { content: "", toolCalls: [toolCall], usage: null, finishReason: "tool_calls" };
+    }
+    const args = { summary: "完成" };
+    const toolCall: AgentToolCall = { id: "finish-1", name: "finish_task", arguments: args, rawArguments: JSON.stringify(args) };
+    return { content: "", toolCalls: [toolCall], usage: null, finishReason: "tool_calls" };
+  };
+  const result = await runAgent({
+    model,
+    tools: createBuiltinTools(),
+    goal: "迁移测试",
+    systemPrompt: "system",
+    budget: { maxTurns: 6, maxToolCalls: 4, maxTokens: 10_000, maxDurationMs: 30_000 },
+    permissions: { tools: ["submit_plan", "todo_write", "todo_read", "finish_task"], readRoots: [root], writeRoots: [root], networkHosts: [] },
+    workspaceRoot: root,
+    outDir: join(root, "out")
+  });
+  expect(result.status).toBe("completed");
+  expect(snapshots.length).toBeGreaterThanOrEqual(2);
+  expect(snapshots[1]).toContain("<active_plan>");
+  expect(snapshots[1]).toContain("p1. [pending] 重写 test_delete.py");
+  expect(snapshots[1]).toContain("p2. [pending] 运行 pytest");
+});
+
+describe("requirePlanFirst gate", () => {
+  function toolCall(id: string, name: string, args: Record<string, unknown>): AgentToolCall {
+    return { id, name, arguments: args, rawArguments: JSON.stringify(args) };
+  }
+
+  function turnWith(call: AgentToolCall): AgentModelTurn {
+    return { content: "", toolCalls: [call], usage: null, finishReason: "tool_calls" };
+  }
+
+  it("refuses non-plan tools on the first turn until a plan is submitted", async () => {
+    const root = mkdtempSync(join(tmpdir(), "hearth-plan-gate-"));
+    const events: RuntimeEvent[] = [];
+    let callIndex = 0;
+    const model: AgentModel = async () => {
+      callIndex += 1;
+      if (callIndex === 1) return turnWith(toolCall("read-1", "read_file", { path: "missing.txt" }));
+      if (callIndex === 2) {
+        return turnWith(toolCall("plan-1", "submit_plan", {
+          steps: [{ title: "读文件" }, { title: "写结果" }]
+        }));
+      }
+      return turnWith(toolCall("finish-1", "finish_task", { summary: "完成" }));
+    };
+    const result = await runAgent({
+      model,
+      tools: createBuiltinTools(),
+      goal: "读文件后写结果",
+      systemPrompt: "system",
+      budget: { maxTurns: 8, maxToolCalls: 6, maxTokens: 10_000, maxDurationMs: 30_000 },
+      permissions: { tools: ["read_file", "submit_plan", "todo_write", "todo_read", "finish_task"], readRoots: [root], writeRoots: [root], networkHosts: [] },
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      requirePlanFirst: true,
+      onEvent: (event) => events.push(event)
+    });
+    expect(result.status).toBe("completed");
+    const executed = events
+      .filter((event): event is Extract<RuntimeEvent, { type: "tool.finished" }> => event.type === "tool.finished")
+      .map((event) => event.call.name);
+    expect(executed).not.toContain("read_file");
+    const updates = events.filter((event): event is Extract<RuntimeEvent, { type: "todos.updated" }> => event.type === "todos.updated");
+    expect(updates.at(-1)?.todos).toHaveLength(2);
+  });
+
+  it("falls back to a minimal plan when the model keeps ignoring the gate", async () => {
+    const root = mkdtempSync(join(tmpdir(), "hearth-plan-fallback-"));
+    const events: RuntimeEvent[] = [];
+    let callIndex = 0;
+    const model: AgentModel = async () => {
+      callIndex += 1;
+      if (callIndex <= 3) return turnWith(toolCall(`read-${callIndex}`, "read_file", { path: "missing.txt" }));
+      return turnWith(toolCall("finish-1", "finish_task", { summary: "完成" }));
+    };
+    const result = await runAgent({
+      model,
+      tools: createBuiltinTools(),
+      goal: "读文件后写结果",
+      systemPrompt: "system",
+      budget: { maxTurns: 10, maxToolCalls: 8, maxTokens: 10_000, maxDurationMs: 30_000 },
+      permissions: { tools: ["read_file", "submit_plan", "todo_write", "todo_read", "finish_task"], readRoots: [root], writeRoots: [root], networkHosts: [] },
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      requirePlanFirst: true,
+      onEvent: (event) => events.push(event)
+    });
+    expect(result.status).toBe("completed");
+    const updates = events.filter((event): event is Extract<RuntimeEvent, { type: "todos.updated" }> => event.type === "todos.updated");
+    const latest = updates.at(-1);
+    expect(latest).toBeDefined();
+    expect(latest!.todos.length).toBeGreaterThan(0);
+    expect(latest!.todos.some((todo) => todo.content === "理解任务目标与输入")).toBe(true);
+  });
+});

@@ -13,6 +13,7 @@ import { ToolCatalog, TOOL_CALL_NAME, TOOL_SEARCH_NAME, toolCallDefinition, tool
 import { formatToolArgumentIssues, validateToolArguments } from "./harness/tool-schema.ts";
 import { HookRunner, type HookEvent, type HookRunResult } from "./harness/hooks.ts";
 import { planModeAllowsCommand, planModeAllowsTool } from "./harness/plan.ts";
+import { buildPlan, renderPlanContext, setPlan } from "./harness/plan-state.ts";
 import { buildPostCompactContext } from "./harness/post-compact.ts";
 import { todoReminder } from "./harness/todo.ts";
 import { normalizeModelFailure, normalizeToolFailure, type AgentFailure } from "./errors.ts";
@@ -79,6 +80,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   let truncatedContinuations = 0;
   let resumeUnsafeEffect: { toolName: string; callId: string; effect: AgentToolEffect } | null = null;
   let finishRejections = 0;
+  let planGateRejections = 0;
   let stopRejections = 0;
   let sameProgressCount = 0;
   let lastProgressHash: string | null = null;
@@ -204,6 +206,21 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   const emit = (event: RuntimeEvent): void => {
     lastActivity = Date.now();
     options.onEvent?.(event);
+  };
+  let lastTodosKey = "";
+  // 结构化的 plan 每步带 state；文本变化时才回注给模型，避免每轮重复。
+  let lastInjectedPlan: string | null = null;
+  const injectPlanIfChanged = (): void => {
+    const rendered = renderPlanContext(state.plan);
+    if (!rendered || rendered === lastInjectedPlan) return;
+    lastInjectedPlan = rendered;
+    messages.push({ role: "user", content: rendered });
+  };
+  const emitTodosIfChanged = (): void => {
+    const key = JSON.stringify(state.todos);
+    if (key === lastTodosKey) return;
+    lastTodosKey = key;
+    emit({ type: "todos.updated", turn: turns, todos: state.todos.map((todo) => ({ ...todo })) });
   };
   const journalAppend = (event: Parameters<RunJournal["append"]>[0]): number => {
     if (!journal) return 0;
@@ -915,6 +932,9 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       if (reminder) messages.push({ role: "user", content: reminder });
     }
 
+    // 把带 state 的结构化计划回注给模型，让它基于最新进度继续执行。
+    injectPlanIfChanged();
+
     const elapsed = Date.now() - startedAt;
     if (durationLimit !== null && elapsed > durationLimit) {
       emit({ type: "budget.exceeded", budget: "duration", limit: durationLimit });
@@ -1086,6 +1106,43 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       }
       continue;
     }
+    // 首轮计划硬门槛：构建模式的多步骤交付必须先提交计划，否则拒绝执行本轮工具调用，
+    // 把要求推回给模型。连续忽略则由运行时生成最小计划兜底，保证 plan/todos 非空。
+    if (
+      options.requirePlanFirst &&
+      !options.resume &&
+      !state.plan &&
+      state.todos.length === 0 &&
+      toolCalls === 0 &&
+      planGateRejections < 3 &&
+      turn.toolCalls.length > 0 &&
+      !turn.toolCalls.some((call) => call.name === "submit_plan" || call.name === "todo_write")
+    ) {
+      planGateRejections += 1;
+      if (planGateRejections < 3) {
+        emit({ type: "notice", message: "执行前需要先提交结构化计划；本轮工具调用未执行" });
+        const gateMessage: AgentMessage = {
+          role: "user",
+          content: "你还没有用 submit_plan 提交结构化计划，本轮的工具调用没有执行。" +
+            "请先用 submit_plan 提交 steps（每项至少含 title，最多 20 步）；提交后按计划逐步执行，并用 todo_write 更新每一步的状态。"
+        };
+        messages.push(gateMessage);
+        journalAppend({ type: "message", turn: turns, message: gateMessage });
+        await checkpoint("turn");
+        const gateFailure = currentCheckpointFailure();
+        if (gateFailure) return finish("failed", `检查点保存失败，已停止以避免不可恢复的执行：${gateFailure.message}`, [], null, gateFailure);
+        continue;
+      }
+      const goalText = typeof options.goal === "string" ? options.goal : "";
+      setPlan(state, buildPlan("自动执行计划", goalText.slice(0, 200), [
+        { title: "理解任务目标与输入" },
+        { title: "执行主要工作并写入交付物" },
+        { title: "核对结果并收尾" }
+      ]));
+      emitTodosIfChanged();
+      emit({ type: "notice", message: "模型未提交计划，运行时已生成最小执行计划以继续任务" });
+    }
+
     const assistantMessage: AgentMessage = { role: "assistant", content: turn.content, toolCalls: turn.toolCalls };
     messages.push(assistantMessage);
     journalAppend({
@@ -1325,6 +1382,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       emitJobEvents(effectiveCall.name, result);
       const durationMs = precomputed?.durationMs ?? toolTotalDurationMs;
       emit({ type: "tool.finished", turn: turns, call, result, durationMs, retries: toolRetries, totalDurationMs: toolTotalDurationMs });
+      emitTodosIfChanged();
       await runHooks(result.isError ? "PostToolUseFailure" : "PostToolUse", {
         workspaceRoot: options.workspaceRoot,
         toolName: effectiveCall.name,

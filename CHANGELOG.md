@@ -33,6 +33,22 @@
 
 - 新增 `GET /api/context/metrics/prometheus`，以 Prometheus 文本格式导出压缩、交接、诊断和账本指标；压缩计数可按实验分组，便于接入 Grafana 告警与 A/B 对比。
 
+### 结构化计划与执行清单
+
+- `submit_plan` 升级为一等公民计划结构：`AgentPlan` 的每个步骤带 `state`（pending / in_progress / completed / cancelled），并预留 `owner` / `note` 供多智能体分派使用；`plan` 文本改为可选，只提交 `steps` 也能建计划（由步骤拼出计划文本）。
+- 计划提交后回注给模型：运行时在每次模型调用前渲染 `<active_plan>` 上下文块（含每步状态、进度与 owner），只在文本变化时注入，不重复刷屏。`todo_write` 更新状态时按 id 回写计划，两者保持同步；checkpoint 与 compact 上下文都保留计划，恢复执行不丢。
+- 计划工具对所有真实交付任务可见：`submit_plan` / `todo_write` / `todo_read` 不再只限于 coding 档案，general 任务同样拿到这些工具；五种任务 profile 的 `directTools` 均直接暴露 `submit_plan`，无需先经 `tool_search` 发现。
+- 首轮必须先提交计划：构建模式的多步骤任务若首轮直接调用其它工具，运行时拒绝执行并把要求推回模型；连续忽略则由运行时生成最小计划兜底，保证计划与清单始终有数据。草稿类任务、子代理、计划模式与恢复执行跳过该门槛。
+- 运行区域的清单卡片按目标样式重做：可折叠头部显示「N out of M tasks completed」，每项带序号、状态图标，反引号包裹的文件名/命令渲染成代码块；有清单的完成态卡片保持展开，折叠时头部仍显示清单徽标。清单事件只投影待办，不进入步骤轨迹。
+- 排查结论：界面始终看不到清单的根因不是前端或事件链，而是模型从未拿到/调用计划工具（`submit_plan` 被权限过滤、`plan` 必填、提示词可被绕过）。端到端测试确认只要调用 `todo_write` 就会发出非空 `todos.updated`，事件链路本身正常。
+- 验证：145 个相关测试通过（含 plan 结构、回注、首轮拦截、权限可见性与清单渲染），`npm run typecheck` 通过。设计见 `docs/design/plan-tracking.md`。
+
+### GLM 思考强度字段匹配
+
+- 修复智谱 GLM 思考强度与界面档位不匹配：原先所有 OpenAI 兼容模型统一只发 `reasoning_effort`，从不发 GLM 必需的 `thinking.type`，导致 GLM-5.x 的档位选择失效或请求被拒。
+- 按模型版本映射：GLM-5.3 / 5.4+ 强制 `thinking: enabled` 并把界面六档映射到 `low / high / max`（关闭档降为 `low`，因为这些模型不允许关闭思考）；GLM-5.2 使用其兼容档位 `minimal / medium / high / xhigh`；GLM-5.1 / 4.x 只发送 `thinking` 开关。自定义端点按模型名识别 GLM。
+- 验证：`reasoning-fields.test.ts` 扩到 9 个用例覆盖上述版本，`npm run typecheck` 通过。思考强度默认值仍是各模型统一的 `max`，可在模型弹层调整，未写死。
+
 ### 对话层上下文压缩
 
 - 压缩阈值改为按「摘要 + 摘要边界之后的有效消息」计算，不再统计全部历史；压缩一次后不会每轮重复触发。
@@ -72,6 +88,8 @@
 - 推理强度新增"关闭"档位（`off`）。DeepSeek 上发送 `thinking: {type: "disabled"}`，其它服务商不发送该字段。
 - 修正 `minimal`、`medium` 档位在模型设置加载时被静默改为 `max` 的问题。
 - 每次模型调用后发出 `model.timing` 事件，包含本轮耗时、首字延迟和工具调用数，便于定位耗时来源。
+- 运行区域内联显示任务清单："已完成 N / 共 M 项"及各步骤状态。待办变化时服务端推送 `todos` 进度事件，清单整体替换。
+- `submit_plan` 支持结构化步骤（最多 20 步）。构建模式下提交后步骤写入待办并直接继续执行；超过 20 步时拒绝并要求拆成子任务。计划模式保持原行为。设计见 `docs/design/plan-tracking.md`。
 
 ### 验证
 

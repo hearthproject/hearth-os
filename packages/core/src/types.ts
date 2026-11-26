@@ -734,6 +734,7 @@ export interface ChatMessageRecord {
 
 export interface TaskProgressDetail {
   executorId?: ExecutorId;
+  todos?: Array<{ id: string; content: string; status: string }>;
   eventType?: string;
   itemType?: string;
   title?: string;

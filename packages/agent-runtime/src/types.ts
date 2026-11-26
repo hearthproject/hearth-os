@@ -175,12 +175,37 @@ export interface AgentToolResult {
   metadata?: AgentToolMetadata;
 }
 
-export type AgentTodoStatus = "pending" | "in_progress" | "completed";
+export type AgentTodoStatus = "pending" | "in_progress" | "completed" | "cancelled";
 
 export interface AgentTodo {
   id: string;
   content: string;
   status: AgentTodoStatus;
+}
+
+/**
+ * 一等公民的结构化计划。每一步都带 state，供模型在执行时读取最新进度；
+ * owner 与 note 为后续多智能体分派、取消原因预留。
+ */
+export type AgentPlanStepState = "pending" | "in_progress" | "completed" | "cancelled";
+
+export interface AgentPlanStep {
+  id: string;
+  title: string;
+  detail?: string;
+  state: AgentPlanStepState;
+  /** 后续多智能体：把步骤分派给某个 agent。 */
+  owner?: string;
+  /** 取消或改派的原因。 */
+  note?: string;
+}
+
+export interface AgentPlan {
+  title: string;
+  /** submit_plan 的自由文字方案。 */
+  goal: string;
+  steps: AgentPlanStep[];
+  createdAt: number;
 }
 
 export interface AgentReadFileState {
@@ -222,6 +247,8 @@ export interface AgentToolState {
   workspaceRoot: string;
   readFiles: Map<string, AgentReadFileState>;
   todos: AgentTodo[];
+  /** 当前生效的结构化计划；存在时每轮回注给模型。 */
+  plan?: AgentPlan;
   progress: AgentProgress;
   startedAt: number;
   snapshots: Map<string, string>;
@@ -242,6 +269,7 @@ export interface SerializedAgentToolState {
   workspaceRoot: string;
   readFiles: Array<{ path: string; size: number; mtimeMs: number; hash: string; ranges?: Array<{ start: number; end: number }> }>;
   todos: AgentTodo[];
+  plan?: AgentPlan;
   progress: AgentProgress;
   startedAt: number;
   snapshots: Array<{ id: string; path: string }>;
@@ -291,6 +319,7 @@ export type RuntimeEvent =
   | { type: "context.watermark"; estimatedTokens: number; usedTokens: number; compactions: number; source?: "provider" | "estimate" }
   | { type: "progress.updated"; filesRead: number; filesModified: number; commands: number; tests: number; todosOpen?: number }
   | { type: "model.timing"; turn: number; durationMs: number; firstDeltaMs: number | null; toolCalls: number }
+  | { type: "todos.updated"; turn: number; todos: AgentTodo[] }
   | { type: "usage"; usage: RunUsage }
   | { type: "retry.scheduled"; attempt: number; delayMs: number; code: string }
   | { type: "retry.started"; attempt: number }
@@ -368,6 +397,12 @@ export interface AgentRuntimeOptions {
   recentContextTokens?: number;
   summarizeContext?: (messages: AgentMessage[], signal: AbortSignal) => Promise<ContextSummary>;
   requireFinishTool?: boolean;
+  /**
+   * 首轮必须先提交结构化计划（submit_plan / todo_write）才允许执行其它工具。
+   * 拒绝执行时把要求推回给模型，连续拒绝后由运行时生成最小计划兜底，
+   * 保证 plan 与 todos 始终有数据可供回注和界面展示。
+   */
+  requirePlanFirst?: boolean;
   stopOnToolError?: boolean;
   retryDelayMs?: number;
   retryPolicy?: Partial<RetryPolicy>;

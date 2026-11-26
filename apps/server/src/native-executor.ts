@@ -24,6 +24,7 @@ import {
   loadWorkspaceHooks,
   memoryIndexBlock,
   recordGoalTurns,
+  todoFinishIssue,
   instructionsBlock,
   resolveHarnessProfile,
   resolveSandboxPolicy,
@@ -193,15 +194,14 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
       ...(screenshotTask ? ["capture_screen"] : [])
     ]
   });
+  // 计划是所有真实交付任务的第一个动作，不限于 coding profile。
+  Object.assign(permissions, withPlanTools(permissions));
   if (coding) {
     permissions.tools = [
       ...new Set([
         ...permissions.tools,
-        "todo_write",
-        "todo_read",
         "run_tests",
         "diagnostics",
-        "submit_plan",
         "rewind",
         "rewind_turn",
         "shell_output",
@@ -361,6 +361,8 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     ...(workspaceHooks.hooks.length > 0 ? { hooks: workspaceHooks.hooks, hookTimeoutMs: 10_000 } : {}),
     modelId: options.settings.model,
     requireFinishTool: true,
+    // 真实交付任务必须先建计划；草稿、子代理、计划模式与恢复执行跳过。
+    requirePlanFirst: !drafting && !options.isSubagent && (options.mode ?? "build") === "build" && !resume,
     stopOnToolError: drafting,
     verifyGoalCompletion: async (goal) => {
       try {
@@ -385,6 +387,8 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     validateFinish: (result, context) => {
       const goalIssue = !directRead && !options.isSubagent && !options.skipBuiltinGoalTools ? goalFinishIssue(options.prepared.root) : null;
       if (goalIssue) return goalIssue;
+      const todoIssue = !options.isSubagent && !drafting ? todoFinishIssue(context.state) : null;
+      if (todoIssue) return todoIssue;
       const jsonIssue = jsonDeliverableIssue(options.prepared.outDir, options.expectedOutputs);
       if (jsonIssue) return jsonIssue;
       for (const guard of options.finishGuards ?? []) {
@@ -1339,6 +1343,14 @@ function budgetDimensionLabel(dimension: BudgetDimension): string {
   return "时长";
 }
 
+/** 计划工具对所有真实交付任务可见，不限于 coding profile。 */
+export function withPlanTools(permissions: TaskPermissions): TaskPermissions {
+  return {
+    ...permissions,
+    tools: [...new Set([...permissions.tools, "todo_write", "todo_read", "submit_plan"])]
+  };
+}
+
 export function withExtraToolPermissions(permissions: TaskPermissions, extraTools: AgentTool[]): TaskPermissions {
   if (extraTools.length === 0) return permissions;
   return {
@@ -1655,6 +1667,9 @@ export function nativeSystemPromptSections(
       localTimeLine(),
       ...(hasTool("delegate_task") ? ["边界清晰、可独立完成的子任务可以调用 delegate_task。只读子代理用于调查；隔离写子代理会在独立 Worktree 中工作并返回分支和提交，结果必须由你检查后手动处理，不会自动合并。"] : []),
       ...(hasTool("agent") ? ["需要独立调查、方案设计或代码审查时优先调用 agent，选择 explore、plan 或 review；需要隔离实现时选择 general-purpose。"] : []),
+      ...(hasTool("todo_write") ? ["预计 3 步以上的任务，开始前必须用 todo_write 建立待办清单：开始某一步前把它标为 in_progress，完成后标为 completed，每次只保持一项 in_progress。只有单步即可完成的简单问答可以省略；多步骤任务不得全程不建清单。"] : []),
+      ...(hasTool("submit_plan") ? ["有明确实现方案时优先用 submit_plan 一次提交结构化步骤：steps 数组每项至少含 title，最多 20 步；构建模式提交后继续执行，不要停下等待确认。超过 20 步拆成子任务。"] : []),
+      ...(hasTool("todo_write") ? ["你会周期性收到 <active_plan> 块，其中每一步带 state（pending/in_progress/completed/cancelled），这是计划进度的权威来源。按它推进任务；状态变化时用 todo_write 更新对应步骤（id 保持一致），不要另建一份清单。owner 字段为后续多智能体分派预留，无需自行填写。"] : []),
       ...nativeTaskInstructions(task, expectedOutputs)
     ]
   });

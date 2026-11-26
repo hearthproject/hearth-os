@@ -36,15 +36,22 @@ export function buildPostCompactContext(state: AgentToolState, options: PostComp
   }
 
   const todos = state.todos
-    .filter((todo) => todo.status !== "completed")
+    .filter((todo) => todo.status !== "completed" && todo.status !== "cancelled")
     .slice(0, MAX_TODOS)
     .map((todo) => `- [${todo.status}] ${todo.content}`);
+
+  const planSteps = (state.plan?.steps ?? [])
+    .slice(0, MAX_TODOS)
+    .map((step) => `- ${step.id}. [${step.state}] ${step.title}${step.detail ? ` — ${step.detail}` : ""}${step.owner ? ` [owner=${step.owner}]` : ""}${step.note ? ` (${step.note})` : ""}`);
 
   const parts = [
     "<post_compact_context>",
     `mode: ${options.mode ?? state.mode ?? "build"}`,
     "files_in_context:",
     ...(files.length > 0 ? files : ["- none recorded"]),
+    ...(state.plan
+      ? ["plan_state:", `title: ${state.plan.title}`, `goal: ${state.plan.goal}`, ...(planSteps.length > 0 ? planSteps : ["- none"])]
+      : []),
     "open_todos:",
     ...(todos.length > 0 ? todos : ["- none"]),
     ...(state.planPath ? [`active_plan: ${display(state.planPath)}`] : ["active_plan: none"]),

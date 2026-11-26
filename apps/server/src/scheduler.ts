@@ -3394,6 +3394,12 @@ export class HearthScheduler {
       this.capture({ ...base, kind: "assistant_message", role: "assistant", content, provenance: { source: "native", turn: event.turn }, executorEventId: `native:${event.turn}:assistant` });
       return;
     }
+    if (event.type === "todos.updated") {
+      this.publishProgress(task.id, run.id, "todos", "待办已更新", {
+        todos: event.todos.map((todo) => ({ id: todo.id, content: todo.content, status: todo.status }))
+      });
+      return;
+    }
     if (event.type === "tool.started") {
       this.rememberBrowserSecrets(run.id, event.call.name, event.call.arguments);
       const visibleArguments = redactBrowserToolArguments(event.call.name, event.call.arguments);

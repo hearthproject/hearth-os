@@ -40,7 +40,7 @@ function codingRules(mode: "build" | "plan"): string {
 - Tool schemas define each tool's arguments. Use the available tools directly instead of relying on duplicated prompt descriptions.
 - Only high-frequency tools are listed directly. If a needed tool is absent, call tool_search first, then call it through tool_call.
 - Inspect the most relevant files before editing. Use search to find the insertion point, then read the current region before changing it.
-- For multi-step work, maintain a short todo list when it helps. Keep it current, but do not create a todo for a trivial task.
+- For multi-step work (3+ steps), create the todo list before starting: call submit_plan with steps when the approach is clear, otherwise use todo_write. Keep exactly one item in_progress and mark each step completed as you finish. Skip the list only for genuinely single-step changes.
 - Batch independent read-only operations. Keep writes, commits, pushes, and external actions sequential so each result can be checked.
 - Validate with the narrowest relevant check after meaningful changes, then run the broader check required by the repository.`;
   const completionContract = mode === "plan"

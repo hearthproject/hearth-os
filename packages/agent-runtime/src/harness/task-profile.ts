@@ -30,7 +30,7 @@ export const TASK_PROFILES: Record<TaskProfileId, TaskProfile> = {
     directTools: [
       "read_file", "read_document", "list_files", "search_text", "glob", "grep",
       "write_file", "edit_file", "apply_patch", "shell", "shell_output", "shell_wait", "shell_kill",
-      "todo_write", "run_tests", "diagnostics", "finish_task", "ask_user"
+      "todo_write", "todo_read", "submit_plan", "run_tests", "diagnostics", "finish_task", "ask_user"
     ],
     deferRemaining: true,
     hints: []
@@ -45,7 +45,7 @@ export const TASK_PROFILES: Record<TaskProfileId, TaskProfile> = {
     workflow: true,
     directTools: [
       "read_file", "read_desktop_file", "read_document", "list_files", "search_text",
-      "glob", "grep", "write_file", "write_document", "fetch_url", "ask_user", "finish_task"
+      "glob", "grep", "write_file", "write_document", "fetch_url", "todo_write", "todo_read", "submit_plan", "ask_user", "finish_task"
     ],
     deferRemaining: true,
     hints: [
@@ -64,7 +64,7 @@ export const TASK_PROFILES: Record<TaskProfileId, TaskProfile> = {
     directTools: [
       "read_file", "read_desktop_file", "read_document", "list_files", "search_text",
       "glob", "grep", "write_file", "write_document", "write_spreadsheet", "shell",
-      "capture_screen", "ask_user", "finish_task"
+      "capture_screen", "todo_write", "todo_read", "submit_plan", "ask_user", "finish_task"
     ],
     deferRemaining: true,
     hints: [
@@ -82,7 +82,7 @@ export const TASK_PROFILES: Record<TaskProfileId, TaskProfile> = {
     workflow: false,
     directTools: [
       "read_file", "read_desktop_file", "read_document", "list_files", "search_text",
-      "glob", "grep", "shell", "shell_output", "shell_wait", "capture_screen", "fetch_url",
+      "glob", "grep", "shell", "shell_output", "shell_wait", "capture_screen", "fetch_url", "todo_write", "todo_read", "submit_plan",
       "ask_user", "finish_task"
     ],
     deferRemaining: true,
@@ -102,7 +102,7 @@ export const TASK_PROFILES: Record<TaskProfileId, TaskProfile> = {
     directTools: [
       "read_file", "read_desktop_file", "read_document", "list_files", "search_text",
       "glob", "grep", "write_file", "write_document", "write_spreadsheet", "edit_file",
-      "shell", "fetch_url", "ask_user", "finish_task"
+      "shell", "fetch_url", "todo_write", "todo_read", "submit_plan", "ask_user", "finish_task"
     ],
     deferRemaining: true,
     hints: []

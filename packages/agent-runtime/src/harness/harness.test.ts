@@ -9,7 +9,7 @@ import { createAgentState, recordFileModified, recordFileRead, requireReadBefore
 import { codingFinishIssue } from "./verification.ts";
 import { compactAgentMessagesWithSummary } from "../compaction.ts";
 import { searchFiles } from "./search.ts";
-import { todoReadTool, todoWriteTool, todoReminder } from "./todo.ts";
+import { todoReadTool, todoWriteTool, todoReminder, todoFinishIssue } from "./todo.ts";
 import { commandPolicyIssue } from "./command-policy.ts";
 import { codingPromptSections, codingSystemPrompt } from "./prompt.ts";
 import { redactSecrets } from "./tool-output.ts";
@@ -151,6 +151,16 @@ describe("search and project profile", () => {
 });
 
 describe("todo and command policy", () => {
+  it("requires a todo list before finishing multi-step work", () => {
+    const ctx = context(workspace());
+    expect(todoFinishIssue(ctx.state)).toBeNull();
+    ctx.state!.progress.commands.push({ command: "npm test", exitCode: 0, test: true, at: Date.now() });
+    ctx.state!.progress.commands.push({ command: "npm run build", exitCode: 0, test: false, at: Date.now() });
+    expect(todoFinishIssue(ctx.state)).toContain("todo_write");
+    ctx.state!.todos.push({ id: "t1", content: "step", status: "completed" });
+    expect(todoFinishIssue(ctx.state)).toBeNull();
+  });
+
   it("stores one in-progress todo and reports open work", async () => {
     const ctx = context(workspace());
     const result = await todoWriteTool.execute({ todos: [

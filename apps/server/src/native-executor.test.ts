@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { TaskRecord } from "@hearth/core";
 import type { AgentTool } from "@hearth/agent-runtime";
-import { NATIVE_PLAN_TOOL_NAMES, directReadTool, dedupeTools, refreshNativeResume, jsonDeliverableIssue, nativePermissionsFor, nativeProgressForEvent, nativeSystemPrompt, normalizeJsonDeliverables } from "./native-executor.ts";
+import { NATIVE_PLAN_TOOL_NAMES, directReadTool, dedupeTools, refreshNativeResume, jsonDeliverableIssue, nativePermissionsFor, nativeProgressForEvent, nativeSystemPrompt, normalizeJsonDeliverables, withPlanTools } from "./native-executor.ts";
 import { createBuiltinTools, defaultTaskPermissions, runAgent } from "@hearth/agent-runtime";
 import { wantsDirectFileRead } from "./task-intent.ts";
 
@@ -63,6 +63,16 @@ describe("native tool assembly", () => {
       permissions: { readRoots: ["/tmp/ws"], writeRoots: ["/tmp/out"], networkHosts: ["example.com"], networkMode: "open", tools: [] }
     }, prepared);
     expect(open.networkMode).toBe("open");
+  });
+
+  it("exposes plan tools to non-coding tasks as well", () => {
+    const base = defaultTaskPermissions({ workspaceRoot: "/tmp/ws", outDir: "/tmp/out", networkHosts: [] });
+    expect(base.tools).not.toContain("submit_plan");
+    const withTools = withPlanTools(base);
+    for (const tool of ["submit_plan", "todo_write", "todo_read"]) {
+      expect(withTools.tools).toContain(tool);
+    }
+    expect(base.tools).not.toContain("submit_plan");
   });
 
   it("exposes only read-only and submit_plan tools in native planning mode", () => {

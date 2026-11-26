@@ -63,6 +63,18 @@
   white-space: nowrap;
 }
 
+.inline-run-todos-badge {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-sunk);
+  color: var(--ink-tertiary);
+  font-size: var(--fs-10);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .inline-run.running .inline-run-headline,
 .inline-run.queued .inline-run-headline {
   color: var(--ink);
@@ -102,6 +114,106 @@
   flex-direction: column;
   gap: 3px;
   padding: 2px 0;
+}
+
+.inline-todos {
+  margin: 6px 0 8px;
+  padding: 8px 11px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-sunk);
+  font-size: var(--fs-13);
+}
+
+.inline-todos-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-secondary);
+  font: inherit;
+  font-size: var(--fs-12);
+  text-align: left;
+  cursor: pointer;
+}
+
+.inline-todos-head:hover {
+  color: var(--ink);
+}
+
+.inline-todos-chevron {
+  margin-left: auto;
+  color: var(--ink-tertiary);
+}
+
+.inline-todos-list {
+  list-style: none;
+  margin: 7px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.inline-todos-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  line-height: 1.5;
+}
+
+.inline-todos-item > svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.inline-todos-item.in_progress > svg {
+  color: var(--accent);
+}
+
+.inline-todos-item.completed > svg {
+  color: var(--ok);
+}
+
+.inline-todos-item.cancelled > svg {
+  color: var(--ink-tertiary);
+}
+
+.inline-todos-index {
+  flex: 0 0 auto;
+  color: var(--ink-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.inline-todos-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.inline-todos-item.in_progress .inline-todos-text {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.inline-todos-item.completed,
+.inline-todos-item.cancelled {
+  color: var(--ink-tertiary);
+}
+
+.inline-todos-item.cancelled .inline-todos-text {
+  text-decoration: line-through;
+}
+
+.inline-todos-code {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--surface-raised);
+  color: var(--ink-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
 }
 
 .inline-run-narration {

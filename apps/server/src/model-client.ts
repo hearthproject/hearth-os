@@ -203,7 +203,7 @@ async function completeOpenAiChat(
       temperature: options.temperature ?? 0.2,
       max_tokens: options.maxTokens ?? 1_200,
       ...(options.responseFormat ? { response_format: options.responseFormat } : {}),
-      ...openAiChatReasoningFields(settings.baseUrl, options.reasoningEffort)
+      ...openAiChatReasoningFields(settings.baseUrl, options.reasoningEffort, settings.model)
     }),
     signal: withTimeout(options.signal, options.timeoutMs ?? 60_000)
   });
@@ -238,7 +238,7 @@ async function streamOpenAiChat(
       stream: true,
       ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
       temperature: options.temperature ?? 0.5,
-      ...openAiChatReasoningFields(settings.baseUrl, options.reasoningEffort)
+      ...openAiChatReasoningFields(settings.baseUrl, options.reasoningEffort, settings.model)
     }),
     signal: withTimeout(options.signal, options.timeoutMs ?? 180_000)
   });
@@ -541,10 +541,55 @@ function geminiBody(messages: ChatMessage[], options: CompleteOptions): Record<s
   };
 }
 
-export function openAiChatReasoningFields(baseUrl: string, effort: CompleteOptions["reasoningEffort"]): Record<string, unknown> {
+export function openAiChatReasoningFields(
+  baseUrl: string,
+  effort: CompleteOptions["reasoningEffort"],
+  model?: string
+): Record<string, unknown> {
   if (!effort) return {};
+  if (isGlmEndpoint(baseUrl, model)) return glmReasoningFields(effort, model ?? "");
   if (effort !== "off") return { reasoning_effort: effort };
   return /deepseek/i.test(baseUrl) ? { thinking: { type: "disabled" } } : {};
+}
+
+function isGlmEndpoint(baseUrl: string, model?: string): boolean {
+  return /bigmodel\.cn/i.test(baseUrl) || /^glm-/i.test(model?.trim() ?? "");
+}
+
+/**
+ * 智谱 GLM 用 thinking.type 控制思考开关，reasoning_effort 控制强度；
+ * 与 OpenAI/DeepSeek 的字段不同，且各版本档位语义不一致：
+ * - GLM-5.3 / 5.3-flash / 5.4+ 强制开启思考，只认 low / high / max；
+ * - GLM-5.2 兼容 none / minimal / medium / xhigh；
+ * - GLM-5.1 / 4.x 只支持 thinking 开关，没有 reasoning_effort。
+ * 前端统一六档，这里按模型版本映射，避免直接透传导致请求被拒或档位失效。
+ */
+function glmReasoningFields(effort: NonNullable<CompleteOptions["reasoningEffort"]>, model: string): Record<string, unknown> {
+  const forcedThinking = /glm-(5\.3|5\.4|5\.5|6\b)/i.test(model);
+  const legacyEffort = /glm-5\.2/i.test(model);
+  const supportsEffort = forcedThinking || legacyEffort || !model;
+
+  if (effort === "off") {
+    if (forcedThinking) return { thinking: { type: "enabled" }, reasoning_effort: "low" };
+    return { thinking: { type: "disabled" } };
+  }
+
+  let mapped: string;
+  if (legacyEffort) {
+    mapped = effort === "minimal" ? "minimal"
+      : effort === "low" ? "minimal"
+      : effort === "medium" ? "medium"
+      : effort === "high" ? "high"
+      : "xhigh";
+  } else {
+    mapped = effort === "minimal" || effort === "low" ? "low"
+      : effort === "medium" || effort === "high" ? "high"
+      : "max";
+  }
+  return {
+    thinking: { type: "enabled" },
+    ...(supportsEffort ? { reasoning_effort: mapped } : {})
+  };
 }
 
 export function responsesReasoningFields(effort: CompleteOptions["reasoningEffort"]): Record<string, unknown> {

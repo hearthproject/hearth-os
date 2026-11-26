@@ -91,7 +91,7 @@ async function streamOpenAiChatTurn(
     stream: true,
     temperature: options.temperature ?? 0.2,
     ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
-    ...openAiChatReasoningFields(settings.baseUrl, options.reasoningEffort)
+    ...openAiChatReasoningFields(settings.baseUrl, options.reasoningEffort, settings.model)
   });
   if (process.env.HEARTH_MODEL_DEBUG_PATH) {
     appendFileSync(process.env.HEARTH_MODEL_DEBUG_PATH, `${JSON.stringify({ at: new Date().toISOString(), protocol: "openai-chat", url: openAiChatUrl(settings.baseUrl), body: requestBody })}\n`, "utf8");

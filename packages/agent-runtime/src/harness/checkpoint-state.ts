@@ -21,6 +21,14 @@ export function serializeAgentState(state: AgentToolState): SerializedAgentToolS
       ...(read.ranges ? { ranges: read.ranges.map((range) => ({ ...range })) } : {})
     })),
     todos: state.todos.map((todo) => ({ ...todo })),
+    ...(state.plan
+      ? {
+          plan: {
+            ...state.plan,
+            steps: state.plan.steps.map((step) => ({ ...step }))
+          }
+        }
+      : {}),
     progress: {
       filesRead: [...state.progress.filesRead],
       filesModified: [...state.progress.filesModified],
@@ -68,6 +76,23 @@ export function deserializeAgentState(input: SerializedAgentToolState | undefine
   const todos: AgentTodo[] = Array.isArray(input.todos)
     ? input.todos.filter((todo) => todo && typeof todo.id === "string" && typeof todo.content === "string")
     : [];
+  const plan = input.plan && typeof input.plan.title === "string" && Array.isArray(input.plan.steps)
+    ? {
+        title: input.plan.title,
+        goal: typeof input.plan.goal === "string" ? input.plan.goal : "",
+        createdAt: Number(input.plan.createdAt) || Date.now(),
+        steps: input.plan.steps
+          .filter((step) => step && typeof step.id === "string" && typeof step.title === "string")
+          .map((step) => ({
+            id: step.id,
+            title: step.title,
+            state: step.state === "in_progress" || step.state === "completed" || step.state === "cancelled" ? step.state : "pending" as const,
+            ...(typeof step.detail === "string" ? { detail: step.detail } : {}),
+            ...(typeof step.owner === "string" ? { owner: step.owner } : {}),
+            ...(typeof step.note === "string" ? { note: step.note } : {})
+          }))
+      }
+    : undefined;
   const subagents: AgentSubagentState[] | undefined = Array.isArray(input.subagents)
     ? input.subagents.filter((subagent) => subagent && typeof subagent.id === "string")
     : undefined;
@@ -78,6 +103,7 @@ export function deserializeAgentState(input: SerializedAgentToolState | undefine
     workspaceRoot: input.workspaceRoot,
     readFiles,
     todos,
+    ...(plan ? { plan } : {}),
     progress,
     startedAt: Number(input.startedAt) || Date.now(),
     snapshots,

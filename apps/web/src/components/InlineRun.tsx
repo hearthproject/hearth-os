@@ -15,6 +15,7 @@ import { ApprovalCard } from "./ApprovalCard.tsx";
 import { BrowserTaskPanel } from "./BrowserTaskPanel.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { TaskStatusIcon } from "./TaskStatusIcon.tsx";
+import { TodoChecklist, type TodoChecklistItem } from "./TodoChecklist.tsx";
 
 export interface RunInfo {
   id: string;
@@ -99,6 +100,7 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
     () => collectEntries(view?.events ?? [], expectedOutputs),
     [view?.events, expectedOutputs]
   );
+  const todos = useMemo(() => latestTodos(view?.events ?? []), [view?.events]);
   const pendingApprovals = (view?.approvals ?? []).filter((approval) => approval.status === "pending");
   const duration = useMemo(
     () => runDuration(view?.runs ?? [], clock) ?? (active ? elapsedSince(task.createdAt, clock) : null),
@@ -121,12 +123,12 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
     statusRef.current = status;
     if (previous === status) return;
     if (FINISHED_STATUSES.includes(status)) {
-      // Collapse the whole execution trail as soon as the final answer lands.
-      setOpen(false);
+      // Keep a tracked checklist visible after completion; collapse runs that never had one.
+      if (todos.length === 0) setOpen(false);
       return;
     }
     if (ACTIVE_STATUSES.includes(status) || ATTENTION_STATUSES.includes(status)) setOpen(true);
-  }, [status]);
+  }, [status, todos.length]);
 
   const retryMutation = useMutation({
     mutationFn: () => api.retry(task.id),
@@ -199,6 +201,11 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
         {active && currentActivity && (
           <span className="inline-run-activity" title={currentActivity}>{currentActivity}</span>
         )}
+        {!open && todos.length > 0 && (
+          <span className="inline-run-todos-badge">
+            清单 {todos.filter((todo) => todo.status === "completed").length}/{todos.length}
+          </span>
+        )}
       </button>
 
       {open && (
@@ -216,6 +223,8 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
           )}
 
           <BrowserTaskPanel taskId={task.id} />
+          <TodoChecklist todos={todos} />
+
           {entries.length === 0 && active && (
             <p className="inline-run-muted"><Loader2 size={12} className="spin" /> 正在准备执行…</p>
           )}
@@ -384,6 +393,18 @@ function isRetiredTaskNotice(text: string): boolean {
   return /执行预算|本轮执行预算|预算已触顶|budgetExhaustion|Unknown event type:\s*job\.|未知事件类型[：:]\s*job\./i.test(text);
 }
 
+// 清单以最新一次 todos 事件为准，整体替换，不累加历史。
+export function latestTodos(events: TaskView["events"]): TodoChecklistItem[] {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]!;
+    if (event.type !== "task.progress") continue;
+    const payload = event.payload as { kind?: string; detail?: TaskProgressDetail } | null;
+    if (payload?.kind !== "todos" || !Array.isArray(payload.detail?.todos)) continue;
+    return payload.detail.todos;
+  }
+  return [];
+}
+
 export function collectEntries(events: TaskView["events"], expectedOutputs: readonly string[] = []): Entry[] {
   const entries: Entry[] = [];
   const pendingTools = new Map<string, ToolDetail[]>();
@@ -418,6 +439,7 @@ export function collectEntries(events: TaskView["events"], expectedOutputs: read
     const detail = payload.detail;
     const message = typeof payload.message === "string" ? payload.message.trim() : "";
 
+    if (kind === "todos") continue;
     const narration = narrationText(kind, detail, message);
     if (isRetiredTaskNotice(narration ?? message)) continue;
     if (narration) {
