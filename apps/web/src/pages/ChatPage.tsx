@@ -1336,7 +1336,7 @@ export function ChatPage() {
     const startedAt = Date.now();
     setStreaming("");
     setReasoning("");
-    setStreamingStatus("正在理解你的问题…");
+    setStreamingStatus("正在执行中…");
     setSending(true);
     const historyTokens = estimateTokensFast(visibleMessages.map((message) => message.content).join("\n"));
     const userTokens = estimateTokensFast(text);
@@ -1429,6 +1429,9 @@ export function ChatPage() {
                   )
                 };
               });
+            } else if (event === "status") {
+              const status = data as { message?: string };
+              setStreamingStatus(status.message || "正在执行中…");
             } else if (event === "routing") {
               setStreamingStatus("正在进入统一执行器…");
             } else if (event === "user") {
@@ -1486,7 +1489,7 @@ export function ChatPage() {
               stopStreamTimer();
               setStreaming("");
               setReasoning("");
-              if (!isTaskNoise(message)) {
+              setStreamingStatus("已完成");              if (!isTaskNoise(message)) {
                 setMessages((prev) => (prev.some((item) => item.id === message.id) ? prev : [...prev, message]));
               }
               if (!message.taskId && reasoningText.trim()) {
@@ -1496,6 +1499,7 @@ export function ChatPage() {
                 }));
               }
             } else if (event === "error") {
+              setStreamingStatus("执行失败");
               setError((data as { message: string }).message);
             }
           }
@@ -1949,13 +1953,13 @@ export function ChatPage() {
                 <InlineRun task={item.task} />
               </Suspense>
             ))}
-            {(streaming || reasoning) && <AssistantBubble content={streaming} reasoning={reasoning} streaming />}
-            {sending && !streaming && !reasoning && (
-              <div className="typing-row" role="status" aria-live="polite">
+            {sending && (
+              <div className="typing-row run-status-row" role="status" aria-live="polite">
                 <Loader2 size={14} className="spin" />
-                <span>{streamingStatus || "正在处理…"}</span>
+                <span>{streamingStatus || "正在执行中…"}</span>
               </div>
             )}
+            {(streaming || reasoning) && <AssistantBubble content={streaming} reasoning={reasoning} streaming />}
             <div ref={bottomRef} />
           </div>
         </div>

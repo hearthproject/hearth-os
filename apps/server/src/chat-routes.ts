@@ -565,12 +565,14 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
         attachments: [],
         createdAt: new Date().toISOString()
       });
+      send("status", { state: "failed", message: "执行失败" });
       send("error", { code, message: content });
       send("done", assistant);
     };
 
     send("conversation", conversation);
     send("user", userRecord);
+    send("status", { state: "running", message: "正在执行中…" });
     try {
       options.personal?.writer.captureChatTurn(userRecord);
     } catch {
