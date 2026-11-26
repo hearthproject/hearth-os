@@ -126,7 +126,7 @@ describe("IM bridge settings", () => {
     expect(replies.join("\n")).not.toContain("开始执行");
   });
 
-  it("streams WeChat deltas as sentence chunks without repeating the final answer", async () => {
+  it("does not stream WeChat deltas; it sends one final answer after the status message", async () => {
     const bridge = new ImBridgeService({
       store,
       secretBox: new SecretBox(Buffer.alloc(32, 9)),
@@ -157,8 +157,7 @@ describe("IM bridge settings", () => {
       deliverChat(channel: "wechat", text: string, reply: (text: string) => Promise<void>): Promise<void>;
     };
     await internal.deliverChat("wechat", "讲两句", async (text) => { replies.push(text); });
-    expect(replies.length).toBeGreaterThan(1);
-    expect(replies.join("")).toBe("这是第一句完整的话。这是第二句。");
+    expect(replies).toEqual(["这是第一句完整的话。这是第二句。"]);
   });
 
   it("uploads and sends a WeChat file_item for an assistant attachment", async () => {
@@ -222,6 +221,62 @@ describe("IM bridge settings", () => {
       const aesKey = (fileMessage?.msg?.item_list?.[0] as { file_item?: { media?: { aes_key?: string } } })
         ?.file_item?.media?.aes_key;
       expect(Buffer.from(String(aesKey), "base64").toString("utf8")).toMatch(/^[0-9a-f]{32}$/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("caps a WeChat turn at three messages: status, file, result", async () => {
+    const attachmentRoot = join(root, "attachments-cap");
+    mkdirSync(attachmentRoot, { recursive: true });
+    const id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    mkdirSync(attachmentRoot, { recursive: true });
+    writeFileSync(join(attachmentRoot, `${id}.txt`), "small");
+    const requests: Array<{ url: string; body: unknown }> = [];
+    vi.stubGlobal("fetch", async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) as unknown : init?.body ?? null;
+      requests.push({ url, body });
+      if (url.endsWith("/ilink/bot/getuploadurl")) {
+        return new Response(JSON.stringify({ upload_full_url: "https://cdn.test/upload" }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      if (url === "https://cdn.test/upload") {
+        return new Response("", { status: 200, headers: { "x-encrypted-param": "download-param" } });
+      }
+      return new Response(JSON.stringify({ ret: 0 }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    });
+    try {
+      const bridge = new ImBridgeService({
+        store,
+        secretBox: new SecretBox(Buffer.alloc(32, 9)),
+        baseUrl: () => "http://127.0.0.1:4319",
+        attachmentRoot
+      });
+      const internal = bridge as unknown as {
+        sendWechat(to: string, contextToken: string, text: string, token: string, attachments?: ChatAttachment[]): Promise<void>;
+      };
+      await internal.sendWechat("wx-user", "cap-token", "正在执行中…", "bot-token");
+      await internal.sendWechat("wx-user", "cap-token", "结果", "bot-token", [
+        { id, name: "结果.txt", mimeType: "text/plain", bytes: 5 }
+      ]);
+      await internal.sendWechat("wx-user", "cap-token", "第四条", "bot-token");
+
+      const sendMessages = requests.filter((request) => request.url.endsWith("/ilink/bot/sendmessage"));
+      expect(sendMessages).toHaveLength(3);
+      const first = sendMessages[0]!.body as { msg: { item_list: Array<{ type: number }> } };
+      expect(first.msg.item_list[0]!.type).toBe(1);
+      const fileIndex = sendMessages.findIndex((request) => {
+        const body = request.body as { msg: { item_list: Array<{ type: number }> } };
+        return body.msg.item_list[0]!.type === 4;
+      });
+      expect(fileIndex).toBe(1);
+      expect(fileIndex).toBeLessThan(sendMessages.length - 1);
     } finally {
       vi.unstubAllGlobals();
     }

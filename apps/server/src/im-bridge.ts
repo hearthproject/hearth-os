@@ -5,6 +5,12 @@ import { defaultConversationSettings, type ChatAttachment, type ChatMessageRecor
 import type { HearthStore } from "@hearth/eventlog";
 import { LocalFeishuChatClient, type FeishuChatClient } from "./feishu.ts";
 import { storeOutgoingAttachment } from "./chat-file-delivery.ts";
+import {
+  WECHAT_MAX_FILE_BYTES,
+  bundlePreparedAttachments,
+  prepareImAttachments,
+  type PreparedImAttachment
+} from "./im-media.ts";
 import type { SecretBox } from "./secrets.ts";
 
 const SETTINGS_KEY = "integrations.im.v1";
@@ -22,6 +28,13 @@ const WECHAT_APP_CLIENT_VERSION = String((2 << 16) | (4 << 8) | 10);
 const QQ_INTENTS = 1 << 25;
 const MAX_SENT_MEMORY = 2_000;
 const MAX_TEXT_CHARS = 3_000;
+/**
+ * iLink only renders a bounded number of bot messages after one inbound. The
+ * live gateway silently drops the rest, so a turn gets: 正在执行中 + 文件 + 结果.
+ */
+const WECHAT_MAX_MESSAGES_PER_TURN = 3;
+const WECHAT_TEXT_GAP_MS = 1_800;
+const WECHAT_MEDIA_GAP_MS = 5_000;
 
 export type ImChannelId = "wechat" | "qq";
 export type ImConnectionState = "disabled" | "starting" | "connected" | "reconnecting" | "error";
@@ -293,6 +306,8 @@ export class ImBridgeService {
   private wechatAbort: AbortController | null = null;
   private wechatQr: WechatQrSession | null = null;
   private wechatContextTokens = new Map<string, string>();
+  /** Per-context-token send counter + last-send time, used to respect iLink quota/rate limits. */
+  private wechatUsage = new Map<string, { count: number; lastAt: number }>();
   private qqSocket: WebSocket | null = null;
   private qqAbort: AbortController | null = null;
   private qqHeartbeat: ReturnType<typeof setInterval> | null = null;
@@ -665,8 +680,11 @@ export class ImBridgeService {
       await this.sendWechat(from, contextToken, "目前只支持文字消息，图片和文件请直接在 Hearth 对话里发送。", token);
       return;
     }
+    // Reply immediately so the user sees that the message was received before
+    // the model/tool run starts. This is message 1 of the 3-message WeChat budget.
+    await this.sendWechat(from, contextToken, "正在执行中…", token);
     await this.enqueue("wechat", async () => {
-      await this.deliverChat("wechat", text, (reply) => this.sendWechat(from, contextToken, reply, token));
+      await this.deliverChat("wechat", text, (reply, attachments) => this.sendWechat(from, contextToken, reply, token, attachments));
     });
   }
 
@@ -682,11 +700,67 @@ export class ImBridgeService {
       this.status.wechat = { ...this.status.wechat, outboundFailed: this.status.wechat.outboundFailed + 1, lastError: "缺少微信 context_token，无法回复" };
       return;
     }
+    const usage = this.wechatUsageFor(tokenValue);
+    if (usage.count >= WECHAT_MAX_MESSAGES_PER_TURN) {
+      // Do not even call the gateway: extra messages are silently dropped and
+      // would make the bridge report a success that the user never sees.
+      this.status.wechat = {
+        ...this.status.wechat,
+        outboundFailed: this.status.wechat.outboundFailed + 1,
+        lastError: `微信单轮最多回复 ${WECHAT_MAX_MESSAGES_PER_TURN} 条，后续内容请在 Hearth 查看`
+      };
+      return;
+    }
     const base = this.settings.wechat.baseUrl || WECHAT_DEFAULT_BASE_URL;
+    const attachmentRoot = this.attachmentRoot ?? "";
     try {
-      if (text.trim()) {
-        for (const chunk of splitText(text)) {
-          if (!chunk.trim()) continue;
+      let items: PreparedImAttachment[] = [];
+      const failures: string[] = [];
+      if (attachments.length > 0) {
+        const prepared = await prepareImAttachments(attachments, attachmentRoot, {
+          maxBytes: WECHAT_MAX_FILE_BYTES
+        });
+        items = prepared.items;
+        failures.push(...prepared.failures);
+      }
+
+      let file: PreparedImAttachment | null = null;
+      if (items.length === 1) {
+        file = items[0]!;
+      } else if (items.length > 1) {
+        file = bundlePreparedAttachments(items, attachmentRoot);
+        if (!file) {
+          file = items[0]!;
+          failures.push(`其余 ${items.length - 1} 个文件超过微信单文件上限，请在 Hearth 对话中下载`);
+        }
+      }
+
+      let finalText = text.trim();
+      if (file?.compressed && finalText) {
+        finalText = finalText.split(file.originalName).join(file.attachment.name);
+        if (!finalText.includes(file.attachment.name)) {
+          finalText += `\n\n已附上《${file.attachment.name}》。`;
+        }
+        if (file.note) finalText += `\n\n${file.note}。`;
+      }
+      if (failures.length > 0) {
+        finalText += `${finalText ? "\n\n" : ""}文件发送提示：${failures.join("；")}。原文件可在 Hearth 对话中下载。`;
+      }
+      if (!finalText && !file) return;
+
+      // File first, text second. WeChat's gateway merges back-to-back bot
+      // messages; media sent after the caption is the pattern its frequency
+      // control drops. This order also guarantees the file itself is attempted
+      // before the remaining message budget can be spent on text.
+      if (file && usage.count < WECHAT_MAX_MESSAGES_PER_TURN) {
+        await this.paceWechat(tokenValue, true);
+        await this.sendWechatFile(to, tokenValue, file.attachment, token, base);
+        this.status.wechat = { ...this.status.wechat, outboundSent: this.status.wechat.outboundSent + 1 };
+      }
+      if (finalText && usage.count < WECHAT_MAX_MESSAGES_PER_TURN) {
+        const message = this.wechatMessageText(finalText);
+        if (message) {
+          await this.paceWechat(tokenValue, false);
           await this.postWechatMessage(token, {
             from_user_id: "",
             to_user_id: to,
@@ -694,47 +768,67 @@ export class ImBridgeService {
             message_type: 2,
             message_state: 2,
             context_token: tokenValue,
-            item_list: [{ type: 1, text_item: { text: chunk } }]
+            item_list: [{ type: 1, text_item: { text: message } }]
           });
+          this.status.wechat = { ...this.status.wechat, outboundSent: this.status.wechat.outboundSent + 1 };
         }
       }
-      const failures: string[] = [];
-      for (const attachment of attachments.slice(0, 6)) {
-        try {
-          await this.sendWechatFile(to, tokenValue, attachment, token, base);
-        } catch (error) {
-          failures.push(`${attachment.name}：${error instanceof Error ? error.message : String(error)}`);
-        }
-      }
-      if (failures.length > 0) {
-        // 只回文件名而不给文件等于没发；把失败原因直接告诉用户。
-        await this.postWechatMessage(token, {
-          from_user_id: "",
-          to_user_id: to,
-          client_id: randomUUID(),
-          message_type: 2,
-          message_state: 2,
-          context_token: tokenValue,
-          item_list: [{ type: 1, text_item: { text: `文件没能发出去：${failures.join("；")}` } }]
-        }).catch(() => undefined);
-        this.status.wechat = {
-          ...this.status.wechat,
-          outboundFailed: this.status.wechat.outboundFailed + 1,
-          lastError: failures.join("；")
-        };
-        return;
-      }
-      this.status.wechat = {
-        ...this.status.wechat,
-        outboundSent: this.status.wechat.outboundSent + 1
-      };
     } catch (error) {
       this.status.wechat = {
         ...this.status.wechat,
         outboundFailed: this.status.wechat.outboundFailed + 1,
         lastError: error instanceof Error ? error.message : String(error)
       };
+      // A hard failure still deserves a visible error, if the 3-message budget
+      // has room for one.
+      if (usage.count < WECHAT_MAX_MESSAGES_PER_TURN) {
+        try {
+          const message = this.wechatMessageText(`执行失败：${error instanceof Error ? error.message : String(error)}`);
+          await this.paceWechat(tokenValue, false);
+          await this.postWechatMessage(token, {
+            from_user_id: "",
+            to_user_id: to,
+            client_id: randomUUID(),
+            message_type: 2,
+            message_state: 2,
+            context_token: tokenValue,
+            item_list: [{ type: 1, text_item: { text: message } }]
+          });
+          this.status.wechat = { ...this.status.wechat, outboundSent: this.status.wechat.outboundSent + 1 };
+        } catch {
+          // The failure is already in lastError/status; nothing else to send.
+        }
+      }
     }
+  }
+
+  private wechatUsageFor(token: string): { count: number; lastAt: number } {
+    let usage = this.wechatUsage.get(token);
+    if (!usage) {
+      if (this.wechatUsage.size >= 200) {
+        const oldest = this.wechatUsage.keys().next().value;
+        if (oldest) this.wechatUsage.delete(oldest);
+      }
+      usage = { count: 0, lastAt: 0 };
+      this.wechatUsage.set(token, usage);
+    }
+    return usage;
+  }
+
+  private async paceWechat(token: string, media: boolean): Promise<void> {
+    const usage = this.wechatUsageFor(token);
+    const gap = media ? WECHAT_MEDIA_GAP_MS : WECHAT_TEXT_GAP_MS;
+    const wait = usage.lastAt + gap - Date.now();
+    if (wait > 0 && wait < 60_000) await new Promise((resolve) => setTimeout(resolve, wait));
+    usage.lastAt = Date.now();
+    usage.count += 1;
+  }
+
+  private wechatMessageText(text: string): string {
+    const clean = text.trim();
+    if (!clean) return "";
+    if (clean.length <= MAX_TEXT_CHARS) return clean;
+    return `${clean.slice(0, MAX_TEXT_CHARS - 28)}\n\n（内容较长，完整结果请在 Hearth 对话中查看）`;
   }
 
   private async postWechatMessage(token: string, msg: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -768,6 +862,9 @@ export class ImBridgeService {
     const plaintext = readFileSync(filePath);
     const rawSize = plaintext.byteLength;
     if (rawSize <= 0) throw new Error(`附件为空：${attachment.name}`);
+    if (rawSize > WECHAT_MAX_FILE_BYTES) {
+      throw new Error(`${attachment.name} 为 ${(rawSize / 1024 / 1024).toFixed(1)}MB，超过微信 ${WECHAT_MAX_FILE_BYTES / 1024 / 1024}MB 单文件上限`);
+    }
     const rawMd5 = createHash("md5").update(plaintext).digest("hex");
     const aesKey = randomBytes(16);
     const fileKey = randomBytes(16).toString("hex");
@@ -789,7 +886,10 @@ export class ImBridgeService {
       signal: AbortSignal.timeout(30_000)
     });
     const uploadInfo = await response.json().catch(() => ({})) as Record<string, unknown>;
-    if (!response.ok) throw new Error(stringValue(uploadInfo.errmsg) ?? `微信文件上传申请失败 ${response.status}`);
+    const uploadCode = numberValue(uploadInfo.ret) ?? numberValue(uploadInfo.errcode);
+    if (!response.ok || (uploadCode !== null && uploadCode !== 0)) {
+      throw new Error(stringValue(uploadInfo.errmsg) ?? `微信文件上传申请失败 ${response.status}`);
+    }
     const uploadFullUrl = stringValue(uploadInfo.upload_full_url)?.trim();
     const uploadParam = stringValue(uploadInfo.upload_param);
     if (!uploadFullUrl && !uploadParam) throw new Error("微信没有返回文件上传地址");
@@ -1034,6 +1134,8 @@ export class ImBridgeService {
       lastEventAt: this.now().toISOString(),
       inboundCount: this.status.qq.inboundCount + 1
     };
+    // Immediate acknowledgement before the run starts, matching WeChat.
+    await this.sendQq(target, "正在执行中…", access, apiBase);
     await this.enqueue("qq", async () => {
       await this.deliverChat("qq", text, (reply) => this.sendQq(target, reply, access, apiBase));
     });
@@ -1153,9 +1255,10 @@ export class ImBridgeService {
     try {
       const conversationId = this.resolveConversation(channel);
       let taskId: string | null = null;
-      const stream = channel === "wechat"
-        ? new ImDeltaStream((chunk) => reply(chunk))
-        : null;
+      // IM does not stream token-by-token: every delta is a separate outbound
+      // message and would exhaust WeChat's 3-message-per-turn budget before the
+      // file attachment is reached. The user gets one status message, then one
+      // final result message (plus at most one file message).
       const result = await this.chatClient.send({
         conversationId,
         message: text,
@@ -1164,39 +1267,31 @@ export class ImBridgeService {
         onTask: (payload) => {
           const task = isRecord(payload) && isRecord(payload.task) ? payload.task : null;
           if (task && typeof task.id === "string" && task.id.trim()) taskId = task.id;
-        },
-        onDelta: (delta) => {
-          stream?.push(delta);
         }
-      }).finally(async () => {
-        await stream?.finish();
       });
       if (result.error) {
-        await reply(`处理失败：${result.error}`);
+        await reply(`执行失败：${result.error}`);
         return;
       }
-      let replies = 0;
+      let finalMessage: ChatMessageRecord | null = null;
       for (const message of result.messages) {
         if (message.taskId && !taskId) taskId = message.taskId;
-        // Progress/status messages are not answers. IM only receives the final
-        // conclusion, question, or failure for this turn.
         if (!isAssistantMessage(message) || message.kind === "task_status") continue;
-        const content = stream ? stream.remainingFor(message.content) : message.content;
-        if (!content.trim() && message.attachments.length === 0) continue;
-        if (this.sentMessageIds.has(message.id) && message.attachments.length === 0) continue;
-        if (!this.sentMessageIds.has(message.id)) this.rememberSent(message.id);
-        replies += 1;
-        await reply(content, message.attachments);
+        // "已派出任务：…" is an acknowledgement, not the result. In IM we only
+        // send the final conclusion (or question/failure) for this turn.
+        if (message.content.trim().startsWith("已派出任务：")) continue;
+        finalMessage = message;
       }
       if (taskId) {
         await this.waitForTaskConclusion(taskId, conversationId, reply);
-      } else if (replies === 0) {
-        // A direct chat should always produce an assistant message. Stay silent on
-        // empty status-only turns rather than sending a synthetic "processing" line.
         return;
       }
+      if (!finalMessage) return;
+      if (this.sentMessageIds.has(finalMessage.id) && finalMessage.attachments.length === 0) return;
+      this.rememberSent(finalMessage.id);
+      await reply(finalMessage.content, finalMessage.attachments);
     } catch (error) {
-      await reply(`处理失败：${error instanceof Error ? error.message : String(error)}`);
+      await reply(`执行失败：${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -1209,7 +1304,7 @@ export class ImBridgeService {
     while (Date.now() < deadline) {
       const task = this.store.getTask(taskId);
       if (!task) {
-        await reply("处理失败：任务记录不存在。");
+        await reply("执行失败：任务记录不存在。");
         return;
       }
       const terminal = task.status === "completed"
@@ -1244,7 +1339,7 @@ export class ImBridgeService {
         return;
       }
       const reason = task.error?.message ? `${task.error.message}` : summary;
-      await reply(reason ? `处理失败：${reason}` : "处理失败：任务没有完成。");
+      await reply(reason ? `执行失败：${reason}` : "执行失败：任务没有完成。");
       return;
     }
     await reply("任务还在执行，可稍后在 Hearth 对话里查看结果。");
