@@ -4,6 +4,7 @@ import { basename, join } from "node:path";
 import { defaultConversationSettings, type ChatAttachment, type ChatMessageRecord } from "@hearth/core";
 import type { HearthStore } from "@hearth/eventlog";
 import { LocalFeishuChatClient, type FeishuChatClient } from "./feishu.ts";
+import { storeOutgoingAttachment } from "./chat-file-delivery.ts";
 import type { SecretBox } from "./secrets.ts";
 
 const SETTINGS_KEY = "integrations.im.v1";
@@ -697,8 +698,31 @@ export class ImBridgeService {
           });
         }
       }
+      const failures: string[] = [];
       for (const attachment of attachments.slice(0, 6)) {
-        await this.sendWechatFile(to, tokenValue, attachment, token, base);
+        try {
+          await this.sendWechatFile(to, tokenValue, attachment, token, base);
+        } catch (error) {
+          failures.push(`${attachment.name}：${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      if (failures.length > 0) {
+        // 只回文件名而不给文件等于没发；把失败原因直接告诉用户。
+        await this.postWechatMessage(token, {
+          from_user_id: "",
+          to_user_id: to,
+          client_id: randomUUID(),
+          message_type: 2,
+          message_state: 2,
+          context_token: tokenValue,
+          item_list: [{ type: 1, text_item: { text: `文件没能发出去：${failures.join("；")}` } }]
+        }).catch(() => undefined);
+        this.status.wechat = {
+          ...this.status.wechat,
+          outboundFailed: this.status.wechat.outboundFailed + 1,
+          lastError: failures.join("；")
+        };
+        return;
       }
       this.status.wechat = {
         ...this.status.wechat,
@@ -1212,7 +1236,7 @@ export class ImBridgeService {
         return;
       }
       if (task.status === "completed") {
-        await reply(summary || "任务已完成，详情请在 Hearth 对话里查看。", finalMessage?.attachments ?? []);
+        await reply(summary || "任务已完成，详情请在 Hearth 对话里查看。", this.taskDeliverableAttachments(taskId, finalMessage?.attachments ?? []));
         return;
       }
       if (task.status === "cancelled") {
@@ -1225,6 +1249,37 @@ export class ImBridgeService {
     }
     await reply("任务还在执行，可稍后在 Hearth 对话里查看结果。");
   }
+
+  /**
+   * IM 侧要拿到真正的文件本体：任务产物在 artifacts 目录里，先复制成对话附件，
+   * 后续 WeChat/QQ 才能按 media 上传，而不是只回复一个文件名。
+   */
+  private taskDeliverableAttachments(taskId: string, existing: ChatAttachment[]): ChatAttachment[] {
+    const root = this.attachmentRoot;
+    if (!root) return existing;
+    const seen = new Set(existing.map((item) => item.name));
+    const result = [...existing];
+    try {
+      const artifacts = this.store.listArtifacts(taskId)
+        .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
+        .slice(0, 6);
+      for (const artifact of artifacts) {
+        if (seen.has(artifact.relativePath.split(/[\\/]/).pop() ?? "")) continue;
+        try {
+          const attachment = storeOutgoingAttachment(artifact.absolutePath, root);
+          if (seen.has(attachment.name)) continue;
+          seen.add(attachment.name);
+          result.push(attachment);
+        } catch {
+          // 单个产物不可读不影响其余文件发送。
+        }
+      }
+    } catch {
+      // 没有 artifact 记录时只发送已有的对话附件。
+    }
+    return result.slice(0, 6);
+  }
+
 
   private resolveConversation(channel: ImChannelId): string {
     const configured = channel === "wechat" ? this.settings.wechat : this.settings.qq;

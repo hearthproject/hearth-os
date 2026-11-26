@@ -1,7 +1,7 @@
 import { useState, type MouseEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Folder, FolderPlus, Loader2, MessageSquare, Plus, Trash2, TriangleAlert } from "lucide-react";
+import { Folder, FolderPlus, Loader2, MessageCircle, MessageSquare, Plus, Trash2, TriangleAlert } from "lucide-react";
 import { api, ApiError } from "../lib/api.ts";
 import { useChatSelection, requestChat } from "../lib/chat-selection.ts";
 import { isActive, needsAttention } from "../lib/format.ts";
@@ -21,10 +21,21 @@ export function ConversationSidebar() {
   const conversationsQuery = useQuery({ queryKey: ["conversations"], queryFn: api.conversations, refetchInterval: 30_000 });
   const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: api.projects, refetchInterval: 60_000 });
   const tasksQuery = useQuery({ queryKey: ["tasks"], queryFn: api.tasks, refetchInterval: 30_000 });
+  const imQuery = useQuery({ queryKey: ["im"], queryFn: api.im, refetchInterval: 45_000, staleTime: 20_000 });
 
   const conversations = conversationsQuery.data?.conversations ?? [];
   const projects = projectsQuery.data?.projects ?? [];
   const tasks = tasksQuery.data?.tasks ?? [];
+  const imView = imQuery.data;
+  // 绑定了 IM 的项目/账号固定一个入口，位置在新对话下方、项目与最近之上，且不随会话列表变化。
+  const fixedIm = imView ? (
+    imView.settings.wechat.enabled && imView.settings.wechat.conversationId
+      ? { channel: "微信", conversationId: imView.settings.wechat.conversationId, projectTitle: imView.settings.wechat.projectTitle }
+      : imView.settings.qq.enabled && imView.settings.qq.conversationId
+        ? { channel: "QQ", conversationId: imView.settings.qq.conversationId, projectTitle: imView.settings.qq.projectTitle }
+        : null
+  ) : null;
+  const fixedImConversationId = fixedIm?.conversationId ?? null;
   const projectsById = new Map(projects.map((project) => [project.id, project]));
   const tasksByConversation = new Map<string, TaskListItem[]>();
   for (const task of tasks) {
@@ -35,9 +46,9 @@ export function ConversationSidebar() {
   }
   const projectGroups = projects.map((project) => ({
     project,
-    conversations: conversations.filter((conversation) => conversation.projectId === project.id)
+    conversations: conversations.filter((conversation) => conversation.projectId === project.id && conversation.id !== fixedImConversationId)
   }));
-  const standalone = conversations.filter((conversation) => !conversation.projectId || !projectsById.has(conversation.projectId));
+  const standalone = conversations.filter((conversation) => conversation.id !== fixedImConversationId && (!conversation.projectId || !projectsById.has(conversation.projectId)));
   const canSwitch = !selection.busy;
 
   function openChat(conversationId: string | null, projectId: string | null = null) {
@@ -130,6 +141,19 @@ export function ConversationSidebar() {
       <button className="new-chat-button" onClick={() => void startNewChat()} disabled={!canSwitch || creatingChat}>
         {creatingChat ? <Loader2 size={15} className="spin" /> : <Plus size={15} />} 新对话
       </button>
+      {fixedIm && (
+        <button
+          type="button"
+          className={`conversation-item fixed-im ${fixedIm.conversationId === selection.conversationId ? "active" : ""}`}
+          onClick={() => openChat(fixedIm.conversationId)}
+          disabled={!canSwitch}
+          title={`固定的 IM 会话：${fixedIm.channel}${fixedIm.projectTitle ? ` · ${fixedIm.projectTitle}` : ""}。不会随对话列表移动。`}
+        >
+          <MessageCircle size={15} />
+          <span className="fixed-im-title">IM 会话</span>
+          <span className="fixed-im-badge">{fixedIm.channel} 已绑定</span>
+        </button>
+      )}
       <div className="conversation-list">
         {conversations.length === 0 && projects.length === 0 && <p className="rail-empty">还没有对话</p>}
         {projectGroups.length > 0 && <p className="rail-group-title">项目</p>}
