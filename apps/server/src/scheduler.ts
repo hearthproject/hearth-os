@@ -81,7 +81,7 @@ import { createSkillTools } from "./skill-tools.ts";
 import { SqliteOperationLedger } from "./sqlite-operation-ledger.ts";
 import { TaskWorktreeService } from "./worktrees.ts";
 import { getBackgroundTaskRegistry } from "./background-tasks.ts";
-import { evaluateRunRecovery, runChainFor, type RecoveryDecision, type RecoveryView } from "./run-recovery.ts";
+import { evaluateRunRecovery, runChainFor, stableDigest, type RecoveryDecision, type RecoveryReason, type RecoveryView } from "./run-recovery.ts";
 
 import { createExecutorAdapters, type CodexContextItem, type CodexRunner, type DshRunner, type ExecutionOutcome, type ExecutorAdapter, type ExecutorAttemptContext, type NativeRunner } from "./executor-adapter.ts";
 export type { CodexRunner, NativeRunner } from "./executor-adapter.ts";
@@ -99,6 +99,32 @@ interface AttemptResult {
   cancelled: boolean;
   steered?: boolean;
   queuedFollowUp?: boolean;
+}
+
+export interface ResumeOptions {
+  /** The user explicitly checked the interrupted workspace/state. */
+  acknowledge?: boolean;
+  note?: string;
+}
+
+export interface RecoveryStatusView {
+  kind: "resume" | "reconcile" | "manual";
+  autoResume: boolean;
+  reasons: RecoveryReason[];
+  runId: string;
+  checkpointSeq: number | null;
+}
+
+export class RecoveryReconcileRequiredError extends Error {
+  readonly code = "RECOVERY_NEEDS_RECONCILE";
+  readonly reasons: RecoveryReason[];
+
+  constructor(reasons: RecoveryReason[]) {
+    const first = reasons.find((reason) => reason.severity === "blocking") ?? reasons[0];
+    super(first?.message ?? "运行状态需要人工核对后才能继续");
+    this.name = "RecoveryReconcileRequiredError";
+    this.reasons = reasons;
+  }
 }
 
 export interface SchedulerOptions {
@@ -741,9 +767,11 @@ export class HearthScheduler {
     return result;
   }
 
-  resumePaused(taskId: string, reference: TaskResumeReference): TaskRecord {
+  resumePaused(taskId: string, reference: TaskResumeReference, options: ResumeOptions = {}): TaskRecord {
     const task = this.service.requireTask(taskId);
-    if (task.status !== "paused") throw new Error(`当前状态不能继续：${task.status}`);
+    if (task.status !== "paused" && task.status !== "recoverable" && task.status !== "failed") {
+      throw new Error(`当前状态不能继续：${task.status}`);
+    }
     if (reference.taskId !== taskId || reference.runId !== task.currentRunId) {
       throw new Error("恢复令牌与当前任务不匹配");
     }
@@ -767,7 +795,28 @@ export class HearthScheduler {
     const unresolvedEffects = this.service.store.listEffects(taskId)
       .filter((effect) => ["prepared", "admitted", "executing", "uncertain"].includes(effect.status));
     if (unresolvedEffects.length > 0) {
-      throw new Error("存在结果不确定的外部动作，必须先对账后才能继续");
+      throw new RecoveryReconcileRequiredError([
+        {
+          code: "EFFECT_UNRESOLVED",
+          message: `存在结果不确定的外部动作（${unresolvedEffects.length} 个），请先在审批/对账中确认`,
+          severity: "blocking"
+        }
+      ]);
+    }
+    const run = this.service.store.getRun(reference.runId);
+    if (!run) throw new Error("上一轮运行记录已不存在");
+    const decision = this.decideRecovery(task, run);
+    if (decision.kind === "manual") {
+      throw new RecoveryReconcileRequiredError(decision.reasons);
+    }
+    if (decision.kind === "reconcile" && !options.acknowledge) {
+      throw new RecoveryReconcileRequiredError(decision.reasons);
+    }
+    if (options.acknowledge) {
+      // The user has looked at the workspace and explicitly takes over the
+      // recovery decision. Record it on the ledger instead of silently
+      // replaying a possibly executed command.
+      this.acknowledgeInterruptedOperations(taskId, reference.runId, options.note ?? "");
     }
     const updated = this.service.updateTask(taskId, {
       status: "queued",
@@ -776,6 +825,42 @@ export class HearthScheduler {
     }, task.currentRunId ?? undefined);
     this.wake();
     return updated;
+  }
+
+  private acknowledgeInterruptedOperations(taskId: string, runId: string, note: string): number {
+    const runs = this.service.store.listRuns(taskId);
+    const chain = runChainFor(runs, runId);
+    let settled = 0;
+    for (const item of chain) {
+      for (const operation of this.service.store.listRunOperations(item.id)) {
+        if (operation.phase !== "dispatched") continue;
+        try {
+          this.service.store.settleRunOperation({
+            operationId: operation.operationId,
+            phase: "unknown",
+            resultDigest: stableDigest({ reconciledBy: "user", note, at: new Date().toISOString() }),
+            errorCode: "USER_RECONCILED"
+          });
+          settled += 1;
+        } catch {
+          // A concurrent settle already recorded the truth; never overwrite it.
+        }
+      }
+    }
+    if (settled > 0) {
+      const event = this.service.store.appendEvent({
+        type: "task.progress",
+        taskId,
+        runId,
+        payload: {
+          kind: "recovery",
+          message: `用户已核对 ${settled} 个中断操作，继续执行`,
+          detail: { executorId: "native", status: "completed", text: note, at: new Date().toISOString() }
+        }
+      });
+      this.service.bus.publish(event);
+    }
+    return settled;
   }
 
   cancel(taskId: string): TaskRecord {
@@ -985,6 +1070,24 @@ export class HearthScheduler {
     return evaluateRunRecovery(this.buildRecoveryView(task, run));
   }
 
+  /** Read-only diagnosis for the task page: why a failed run cannot continue yet. */
+  recoveryStatus(taskId: string): RecoveryStatusView | null {
+    const task = this.service.store.getTask(taskId);
+    if (!task || !task.currentRunId) return null;
+    if (!["paused", "recoverable", "failed", "running"].includes(task.status)) return null;
+    const run = this.service.store.getRun(task.currentRunId);
+    if (!run) return null;
+    const checkpoint = this.service.store.latestRunCheckpoint(run.id);
+    const decision = this.decideRecovery(task, run);
+    return {
+      kind: decision.kind,
+      autoResume: decision.autoResume,
+      reasons: decision.reasons,
+      runId: run.id,
+      checkpointSeq: checkpoint?.seq ?? null
+    };
+  }
+
   private recordRecoveryDecision(task: TaskRecord, run: RunRecord, decision: RecoveryDecision, phase: string): void {
     const blocking = decision.reasons.filter((reason) => reason.severity === "blocking");
     this.capture({
@@ -1047,12 +1150,10 @@ export class HearthScheduler {
     }
   }
 
-  private autoResumeIssue(task: TaskRecord, run: RunRecord): string | null {
+  private autoResumeDecision(task: TaskRecord, run: RunRecord): RecoveryDecision | null {
     const decision = this.decideRecovery(task, run);
     this.recordRecoveryDecision(task, run, decision, "auto_resume_check");
-    if (decision.kind === "resume") return null;
-    const blocking = decision.reasons.find((reason) => reason.severity === "blocking");
-    return blocking?.message ?? "运行状态不允许自动恢复";
+    return decision.kind === "resume" ? null : decision;
   }
 
   private recoverInterruptedTasks(): void {
@@ -1062,8 +1163,13 @@ export class HearthScheduler {
       this.reconcileTaskCleanup(task.id);
       const runningRuns = this.service.store.listRuns(task.id).filter((run) => run.status === "running");
       let autoRun: RunRecord | null = null;
+      let blockedDecision: RecoveryDecision | null = null;
       for (const run of runningRuns) {
-        if (!autoRun && this.autoResumeIssue(task, run) === null) autoRun = run;
+        if (!autoRun) {
+          const decision = this.autoResumeDecision(task, run);
+          if (!decision) autoRun = run;
+          else if (!blockedDecision) blockedDecision = decision;
+        }
       }
       // Plan execution never resumes itself after a host restart: the user must
       // confirm the persisted plan again before a fresh build task starts.
@@ -1079,7 +1185,7 @@ export class HearthScheduler {
               ? "服务重启时任务仍在执行，将从最近检查点自动恢复"
               : "服务重启时任务仍在执行，已中止上一轮运行",
             recoverable: true,
-            guidance: auto ? "正在自动恢复，无需手动重试" : "确认工作区后点击重试"
+            guidance: auto ? "正在自动恢复，无需手动重试" : "点击“继续执行”从最近检查点恢复"
           }
         });
       }
@@ -1112,15 +1218,30 @@ export class HearthScheduler {
         this.wake();
         continue;
       }
+      const blocking = (blockedDecision?.reasons ?? []).filter((reason) => reason.severity === "blocking");
+      const blockedManual = blockedDecision?.kind === "manual";
+      const detail = blocking.map((reason) => ({
+        code: reason.code,
+        message: reason.message,
+        severity: reason.severity
+      }));
       this.service.updateTask(task.id, {
         status: "recoverable",
         currentRunId: task.currentRunId,
-        nextAction: "服务重启后任务中断，可以重试",
+        nextAction: blockedManual ? "服务重启中断，需要人工确认后重试" : "服务重启中断，可以从检查点继续",
         error: {
           kind: "interrupted",
-          message: "服务重启中断了上一轮执行",
+          message: blocking.length > 0
+            ? `服务重启中断了上一轮执行：${blocking[0]!.message}`
+            : "服务重启中断了上一轮执行",
           recoverable: true,
-          guidance: "检查已有产物后点击重试"
+          ...(blocking.length > 0 ? { code: blocking[0]!.code } : {}),
+          guidance: blockedManual
+            ? "权限或检查点条件已变化，请先查看原因，再决定是否重新执行"
+            : blocking.length > 0
+              ? "核对被中断的操作后，点击“继续执行”从最近检查点恢复"
+              : "点击“继续执行”从最近检查点恢复",
+          ...(detail.length > 0 ? { details: detail } : {})
         }
       }, task.currentRunId ?? undefined);
       for (const followUp of this.service.store.listTaskFollowUps(task.id, "steering")) {
@@ -1630,13 +1751,15 @@ export class HearthScheduler {
           kind: "interrupted",
           message: "Hearth 关闭时中止了这一轮执行",
           recoverable: true,
-          guidance: "重新启动后点击重试"
+          guidance: "重新启动后点击“继续执行”从最近检查点恢复"
         }
       : {
           kind: error instanceof UnsupportedInputError ? "input_unavailable" : "execution_failed",
           message,
           recoverable: true,
-          guidance: error instanceof UnsupportedInputError ? "接入对应的抓取能力后重试" : "查看运行记录后重试"
+          guidance: error instanceof UnsupportedInputError
+            ? "接入对应的抓取能力后重试"
+            : "点击“继续执行”从最近检查点恢复；先在运行记录里确认具体错误"
         };
 
     this.service.updateRun(runId, taskId, { status: "failed", endedAt, failure });
@@ -1860,18 +1983,28 @@ export class HearthScheduler {
           const decision = this.decideRecovery(task, previousRun);
           if (decision.kind === "reconcile") {
             this.recordRecoveryDecision(task, previousRun, decision, "retry_gate");
-            const reason = decision.reasons.find((item) => item.severity === "blocking")?.message
-              ?? "运行状态需要人工确认";
+            const blocking = decision.reasons.filter((item) => item.severity === "blocking");
+            const reason = blocking[0]?.message ?? "运行状态需要人工确认";
+            console.warn(
+              `[scheduler] recovery gated task=${taskId} run=${previousRun.id}: ` +
+              blocking.map((item) => `${item.code}(${item.message})`).join("; ")
+            );
             const error: TaskError = {
               kind: "effect_unknown",
               message: reason,
               recoverable: true,
-              guidance: "先核对工作区或外部状态，再点击重试"
+              guidance: "核对被中断的操作后点击“继续执行”；确认已经完成或没有执行后再继续",
+              ...(blocking[0]?.code ? { code: blocking[0].code } : {}),
+              details: blocking.map((item) => ({
+                code: item.code,
+                message: item.message,
+                severity: item.severity
+              }))
             };
             this.service.updateTask(taskId, {
               status: "recoverable",
               currentRunId: previousRun.id,
-              nextAction: "等待对账后重试",
+              nextAction: "等待核对后继续",
               error
             }, previousRun.id);
             this.refreshTaskSummary(taskId, { lastFailure: error });
@@ -3137,6 +3270,13 @@ export class HearthScheduler {
       return { failure: null, cancelled: true, leaseLost: false };
     }
     const failure = this.taskErrorFor(error, aborted);
+    // Always leave a diagnostic line: a stopped run must never be silent in the
+    // host log, even when the UI already renders the same reason.
+    console.error(
+      `[scheduler] task failed task=${taskId} run=${runId} kind=${failure.kind}` +
+      `${failure.code ? ` code=${failure.code}` : ""}: ${failure.message}`,
+      error instanceof Error ? error.stack ?? error.message : error
+    );
     this.service.updateRun(runId, taskId, { status: "failed", endedAt, failure });
     const currentTask = this.service.store.getTask(taskId);
     if (currentTask) {
@@ -3153,13 +3293,20 @@ export class HearthScheduler {
     const message = error instanceof Error ? error.message : String(error);
     const agentFailure = error instanceof Error ? (error as Error & { agentFailure?: AgentFailure }).agentFailure : undefined;
     if (aborted && this.stopping) {
-      return { kind: "interrupted", message: "Hearth 关闭时中止了这一轮执行", recoverable: true, guidance: "重新启动后点击重试" };
+      return {
+        kind: "interrupted",
+        message: "Hearth 关闭时中止了这一轮执行",
+        recoverable: true,
+        guidance: "重新启动后点击“继续执行”从最近检查点恢复"
+      };
     }
     return {
       kind: error instanceof UnsupportedInputError ? "input_unavailable" : "execution_failed",
       message, recoverable: true,
       ...(agentFailure ? { code: agentFailure.code, ...(agentFailure.retryAfterMs !== undefined ? { retryAfterMs: agentFailure.retryAfterMs } : {}) } : {}),
-      guidance: error instanceof UnsupportedInputError ? "接入对应的抓取能力后重试" : "查看运行记录后重试"
+      guidance: error instanceof UnsupportedInputError
+        ? "接入对应的抓取能力后重试"
+        : "点击“继续执行”从最近检查点恢复；先在运行记录里确认具体错误"
     };
   }
 

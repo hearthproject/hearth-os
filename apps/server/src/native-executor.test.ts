@@ -1171,12 +1171,29 @@ describe("native execution progress", () => {
       type: "tool.finished",
       turn: 2,
       call,
-      result: { content: "failed", isError: true },
+      result: { content: "command exited with code 1: permission denied", isError: true },
       durationMs: 7
     })).toMatchObject({
       kind: "tool",
-      message: "操作没有完成，正在调整：shell",
-      detail: { eventType: "tool.finished", status: "failed" }
+      message: "工具 shell 执行失败",
+      detail: { eventType: "tool.finished", status: "failed", output: "command exited with code 1: permission denied" }
+    });
+
+    expect(nativeProgressForEvent({
+      type: "tool.rejected",
+      turn: 2,
+      callId: "call-1",
+      name: "shell",
+      issues: [{ path: "command", message: "不能为空" }]
+    })).toMatchObject({
+      kind: "error",
+      message: "工具 shell 参数未通过校验：command: 不能为空",
+      detail: { eventType: "tool.rejected", status: "failed" }
+    });
+
+    expect(nativeProgressForEvent({ type: "retry.scheduled", attempt: 2, delayMs: 4_000, code: "RATE_LIMITED" })).toMatchObject({
+      kind: "retry",
+      detail: { eventType: "retry.scheduled", errorCode: "RATE_LIMITED", retryable: true }
     });
 
     expect(nativeProgressForEvent({ type: "compacted", before: 20, after: 8 })).toMatchObject({

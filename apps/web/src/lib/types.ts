@@ -284,6 +284,23 @@ export interface SettingsStorageResponse {
   } | null;
 }
 
+export interface TaskRecoveryReason {
+  code: string;
+  message: string;
+  severity: "blocking" | "advisory";
+  operationId?: string;
+  toolName?: string;
+  effect?: string;
+}
+
+export interface TaskRecoveryView {
+  kind: "resume" | "reconcile" | "manual";
+  autoResume: boolean;
+  reasons: TaskRecoveryReason[];
+  runId: string;
+  checkpointSeq: number | null;
+}
+
 export interface TaskView {
   task: TaskRecord;
   runs: RunRecord[];
@@ -295,6 +312,7 @@ export interface TaskView {
   events: EventEnvelope[];
   eventTotal: number;
   followUps: TaskFollowUpRecord[];
+  recovery?: TaskRecoveryView | null;
 }
 
 export interface TaskTurnFile {

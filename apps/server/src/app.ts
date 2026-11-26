@@ -33,7 +33,7 @@ import { ApprovalError, ApprovalManager, type EffectExecutor, type PendingToolAp
 import { BackupError, BackupService } from "./backups.ts";
 import { DelegationError, DelegationService, type CreateDelegationInput } from "./delegation.ts";
 import { executeEffect } from "./effects.ts";
-import { HearthScheduler, resolveToolAction } from "./scheduler.ts";
+import { HearthScheduler, RecoveryReconcileRequiredError, resolveToolAction } from "./scheduler.ts";
 import { readSystemContext, renderSystemContextMarkdown } from "./system-context-registry.ts";
 import type { HostKernel } from "./host-kernel.ts";
 import { GitViewError, TaskGitService } from "./task-git.ts";
@@ -199,7 +199,9 @@ const resumeTaskSchema = z.object({
     runId: z.string().trim().min(1).max(100),
     checkpointSeq: z.number().int().min(1),
     checkpointKind: z.string().trim().min(1).max(40)
-  }).strict()
+  }).strict(),
+  acknowledge: z.boolean().optional(),
+  note: z.string().trim().max(2000).optional()
 }).strict();
 
 const taskFollowUpSchema = z.object({
@@ -3049,7 +3051,10 @@ export async function buildServer(options: BuildServerOptions = {}) {
   app.get<{ Params: { id: string } }>("/api/tasks/:id", async (request, reply) => {
     const view = service.view(request.params.id);
     if (!view) return reply.code(404).send({ error: "TASK_NOT_FOUND", message: "任务不存在" });
-    return view;
+    return {
+      ...view,
+      recovery: scheduler?.recoveryStatus(request.params.id) ?? null
+    };
   });
 
   app.delete<{ Params: { id: string }; Body: unknown }>("/api/tasks/:id", async (request, reply) => {
@@ -3212,8 +3217,18 @@ export async function buildServer(options: BuildServerOptions = {}) {
       return reply.code(400).send({ error: "INVALID_RESUME_REFERENCE", message: "继续任务需要有效的检查点引用" });
     }
     try {
-      return scheduler.resumePaused(request.params.id, parsed.data.resume);
+      return scheduler.resumePaused(request.params.id, parsed.data.resume, {
+        ...(parsed.data.acknowledge !== undefined ? { acknowledge: parsed.data.acknowledge } : {}),
+        ...(parsed.data.note !== undefined ? { note: parsed.data.note } : {})
+      });
     } catch (error) {
+      if (error instanceof RecoveryReconcileRequiredError) {
+        return reply.code(409).send({
+          error: error.code,
+          message: error.message,
+          reasons: error.reasons
+        });
+      }
       return reply.code(409).send({ error: "RESUME_NOT_ALLOWED", message: error instanceof Error ? error.message : String(error) });
     }
   });

@@ -86,6 +86,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
   let lastProgressHash: string | null = null;
   let consecutiveToolFailures = 0;
   let failureCountedThisTurn = false;
+  const recentToolFailures: Array<{ name: string; code: string | null; message: string }> = [];
   let budgetReminderSent = false;
   let compactions = 0;
   let autoCompactPausedUntil = 0;
@@ -1414,13 +1415,32 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
           consecutiveToolFailures += 1;
           failureCountedThisTurn = true;
         }
+        recentToolFailures.push({
+          name: effectiveCall.name,
+          code: result.error?.code ?? null,
+          message: result.content
+        });
+        if (recentToolFailures.length > 10) recentToolFailures.shift();
         if (consecutiveToolFailures >= circuitBreakerThreshold) {
           emit({ type: "notice", message: `连续 ${circuitBreakerThreshold} 轮工具调用失败，已触发熔断器，停止执行以避免浪费预算。` });
           await checkpoint("tool");
           const checkpointFailure = currentCheckpointFailure();
           if (checkpointFailure) return finish("failed", `检查点保存失败，已停止以避免不可恢复的执行：${checkpointFailure.message}`, [], null, checkpointFailure);
           clearExecuting();
-          return finish("failed", "连续多轮工具调用失败，已触发熔断器停止执行");
+          const detail = recentToolFailures
+            .slice(-Math.max(3, circuitBreakerThreshold))
+            .map((failure) => `${failure.name}${failure.code ? `（${failure.code}）` : ""}：${compactErrorLine(failure.message)}`)
+            .join("\n");
+          const summary = [
+            `连续 ${consecutiveToolFailures} 轮工具调用失败，已触发熔断器停止执行。`,
+            detail ? `\n${detail}` : "",
+            "\n可以点击“继续执行”从最近的检查点恢复；先按上面的错误修正环境，再重试。"
+          ].join("");
+          return finish("failed", summary, [], null, {
+            code: "TOOL_EXEC_FAILED",
+            message: detail ? compactErrorLine(detail, 2_000) : summary,
+            retryable: true
+          });
         }
       } else {
         consecutiveToolFailures = 0;
@@ -1590,6 +1610,11 @@ function cloneMessages(messages: AgentMessage[]): AgentMessage[] {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function compactErrorLine(text: string, max = 240): string {
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  return oneLine.length > max ? `${oneLine.slice(0, max)}…` : oneLine;
 }
 
 async function withAbort<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {

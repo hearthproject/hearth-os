@@ -63,6 +63,16 @@ Windows 下 `taskkill /T` 在“父进程刚创建子进程”的窗口里可能
 - `HostKernel.stop()` 先把状态切到 `draining`，由调度器停止接收新任务、取消在跑 run、释放任务租约，最后释放宿主租约。
 - `/api/health` 返回 `host` 快照：`phase`、`step`、`readyAt`、`error` 和租约信息，桌面 supervisor 与诊断页可直接观察卡在哪个阶段。
 
+### 跨重启的用户可见恢复
+
+启动恢复不再只写一句“服务重启中断了上一轮执行”。每个被中断的 run 会保留结构化失败（`kind/message/code/details`），`GET /api/tasks/:id` 同时返回 `resume` 检查点引用和 `recovery`（`resume | reconcile | manual`，以及带 `toolName` / `operationId` / `effect` 的 blocking reasons）。界面据此在运行块里展示错误码、逐条原因和恢复动作：
+
+- `resume`：显示“继续执行”，从最近证明过的 checkpoint 恢复。
+- `reconcile`：显示“我已核对，继续执行”。该动作只把结果未知的 `dispatched` 操作记为 `unknown + USER_RECONCILED`，并在事件日志留下审计记录；不会伪装成 `settled`，也不会重放可能已经发生的写操作。
+- `manual`：权限变化、检查点损坏、运行过旧等硬性条件只展示原因，不接受“我已核对”绕过，避免把不可恢复的运行误续上。
+
+用户不点击时任务保持 `recoverable`，重启应用后依旧可见，不会丢成一条没有下文的失败消息。
+
 ## Windows 原生沙箱
 
 Windows 单机执行器不再依赖 Node ACL runner。`apps/native/hearth-native.cs` 由系统自带 `csc.exe` 编译成 `hearth-native.exe`，提供四个子命令：

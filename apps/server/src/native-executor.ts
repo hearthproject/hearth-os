@@ -1305,15 +1305,88 @@ export function nativeProgressForEvent(event: RuntimeEvent): { kind: string; mes
     const secrets = browserToolSecrets(event.call.name, event.call.arguments);
     return {
       kind: "tool",
-      message: event.result.isError ? `操作没有完成，正在调整：${event.call.name}` : `完成一步：${event.call.name}`,
+      message: event.result.isError
+        ? `工具 ${event.call.name} 执行失败`
+        : `完成一步：${event.call.name}`,
       detail: {
         executorId: "native",
         eventType: "tool.finished",
         title: event.call.name,
         output: redactKnownSecrets(event.result.content, secrets),
         status: event.result.isError ? "failed" : "completed",
-        durationMs: event.durationMs
+        durationMs: event.durationMs,
+        ...(event.result.isError
+          ? { errorCode: event.result.error?.code ?? "TOOL_EXEC_FAILED" }
+          : event.result.error?.code ? { errorCode: event.result.error.code } : {}),
+        ...(event.result.error?.retryable !== undefined ? { retryable: event.result.error.retryable } : {})
       }
+    };
+  }
+  if (event.type === "tool.rejected") {
+    const reason = event.issues.map((issue) => `${issue.path}: ${issue.message}`).join("；");
+    return {
+      kind: "error",
+      message: `工具 ${event.name} 参数未通过校验${reason ? `：${clipProgressText(reason)}` : ""}`,
+      detail: { executorId: "native", eventType: "tool.rejected", title: event.name, status: "failed" }
+    };
+  }
+  if (event.type === "tool.orphaned") {
+    return {
+      kind: "error",
+      message: `工具 ${event.name} 超时后仍未退出，结果未知：${clipProgressText(event.message)}`,
+      detail: {
+        executorId: "native",
+        eventType: "tool.orphaned",
+        title: event.name,
+        status: "failed",
+        errorCode: "TOOL_ORPHANED"
+      }
+    };
+  }
+  if (event.type === "retry.scheduled") {
+    return {
+      kind: "retry",
+      message: `模型请求失败（${event.code}），${Math.max(1, Math.round(event.delayMs / 1000))} 秒后第 ${event.attempt} 次重试`,
+      detail: {
+        executorId: "native",
+        eventType: "retry.scheduled",
+        status: "retrying",
+        errorCode: event.code,
+        retryable: true
+      }
+    };
+  }
+  if (event.type === "stall.detected") {
+    return {
+      kind: "error",
+      message: `运行停滞 ${Math.round(event.idleMs / 1000)} 秒，已中止本轮`,
+      detail: { executorId: "native", eventType: "stall.detected", status: "failed", errorCode: "STALLED" }
+    };
+  }
+  if (event.type === "checkpoint.failed") {
+    return {
+      kind: "error",
+      message: `检查点保存失败（${event.kind}）：${clipProgressText(event.message)}`,
+      detail: {
+        executorId: "native",
+        eventType: "checkpoint.failed",
+        status: "failed",
+        errorCode: "CHECKPOINT_FAILED"
+      }
+    };
+  }
+  if (event.type === "journal.failed") {
+    return {
+      kind: "error",
+      message: `运行日志写入失败：${clipProgressText(event.message)}`,
+      detail: { executorId: "native", eventType: "journal.failed", status: "failed", errorCode: "JOURNAL_FAILED" }
+    };
+  }
+  if (event.type === "notice") {
+    return {
+      kind: "notice",
+      message: event.message,
+      detail: { executorId: "native", eventType: "notice" }
     };
   }
   if (event.type === "compacted") {
@@ -1341,6 +1414,12 @@ function budgetDimensionLabel(dimension: BudgetDimension): string {
   if (dimension === "toolCalls") return "工具调用";
   if (dimension === "tokens") return "Token";
   return "时长";
+}
+
+/** One readable line for a timeline row; the full text stays in the tool output. */
+function clipProgressText(text: string, max = 240): string {
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  return oneLine.length > max ? `${oneLine.slice(0, max)}…` : oneLine;
 }
 
 /** 计划工具对所有真实交付任务可见，不限于 coding profile。 */

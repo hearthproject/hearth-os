@@ -108,3 +108,36 @@ describe("collectEntries 交付物完整展示", () => {
     expect(isEntryExpanded(entry, { [entry.key]: false })).toBe(false);
   });
 });
+
+describe("collectEntries 错误可读性", () => {
+  it("工具失败时保留错误码和具体原因", () => {
+    const [entry] = labelEntries([
+      event(1, "fail-1", { executorId: "native", eventType: "tool.started", title: "shell", input: { command: "python r3.py" } }),
+      event(2, "fail-2", {
+        executorId: "native",
+        eventType: "tool.finished",
+        title: "shell",
+        output: "Traceback (most recent call last): permission denied",
+        status: "failed",
+        errorCode: "TOOL_EXEC_FAILED"
+      })
+    ]);
+    if (entry?.type !== "label") return;
+    expect(entry.tools[0]?.status).toBe("failed");
+    expect(entry.tools[0]?.errorCode).toBe("TOOL_EXEC_FAILED");
+    expect(entry.tools[0]?.reason).toContain("permission denied");
+  });
+
+  it("运行期错误单独成行，而不是被吞掉", () => {
+    const err = event(1, "err-1", { executorId: "native", eventType: "tool.failed" });
+    const events: TaskView["events"] = [{
+      ...err,
+      payload: { kind: "error", message: "工具 shell 失败（TOOL_EXEC_FAILED）：permission denied" }
+    }];
+    expect(collectEntries(events)).toContainEqual({
+      type: "error",
+      key: "err:err-1",
+      text: "工具 shell 失败（TOOL_EXEC_FAILED）：permission denied"
+    });
+  });
+});

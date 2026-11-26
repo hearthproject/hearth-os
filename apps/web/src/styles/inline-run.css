@@ -413,6 +413,126 @@
   color: var(--risk);
 }
 
+.inline-run-error-block {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 6px 0;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--risk) 22%, transparent);
+  border-radius: var(--radius);
+  background: var(--risk-tint, var(--surface-sunk));
+  color: var(--ink-secondary);
+  font-size: var(--fs-11);
+  line-height: 1.5;
+}
+
+.inline-run-error-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.inline-run-error-title svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--risk);
+}
+
+.inline-run-error-title > span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+
+.inline-run-error-code {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--risk) 12%, transparent);
+  color: var(--risk);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+  font-size: var(--fs-10);
+}
+
+.inline-run-error-details {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0 0 0 19px;
+  list-style: none;
+  color: var(--ink-tertiary);
+}
+
+.inline-run-error-details li {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.inline-run-error-details li code {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--surface-raised);
+  color: var(--ink-secondary);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+  font-size: var(--fs-10);
+}
+
+.inline-run-error-details li span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.inline-run-error-guidance {
+  margin: 0;
+  color: var(--ink-tertiary);
+}
+
+.inline-run-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.inline-run-trail-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  margin: 2px 0;
+  color: var(--risk);
+  font-size: var(--fs-11);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.inline-run-trail-error svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.inline-run-inline-failure {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  color: var(--risk);
+  font-size: var(--fs-10);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inline-run-tool-reason {
+  margin: 0;
+  color: var(--risk);
+  font-size: var(--fs-11);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
 .ghost-button.small {
   height: 22px;
   padding: 0 6px;

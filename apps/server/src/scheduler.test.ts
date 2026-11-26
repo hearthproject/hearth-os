@@ -1184,6 +1184,115 @@ describe("Hearth scheduler", () => {
     expect(store?.getRun(runId)?.failure?.recoverable).toBe(true);
   });
 
+  it("keeps a restarted task resumable and requires an explicit reconcile for an unknown write", async () => {
+    const service = setup();
+    const modelSettingsPath = configureModel();
+    const task = service.createTask({ title: "重启后继续", goal: "核对后继续执行", executorId: "native", expectedOutputs: ["result.md"] });
+    const now = new Date().toISOString();
+    const runId = randomUUID();
+    const workspaceRoot = join(requireTemp(), "workspaces");
+    const taskRoot = join(workspaceRoot, "tasks", task.id);
+    service.createRun({
+      id: runId,
+      taskId: task.id,
+      attempt: 1,
+      status: "running",
+      threadId: null,
+      workspace: taskRoot,
+      startedAt: now,
+      endedAt: null,
+      failure: null,
+      usage: null,
+      leaseEpoch: null,
+      createdAt: now
+    });
+    service.updateTask(task.id, { status: "running", currentRunId: runId, nextAction: "正在执行" }, runId);
+
+    const checkpointDirectory = join(taskRoot, ".hearth", "checkpoints", runId);
+    mkdirSync(checkpointDirectory, { recursive: true });
+    const checkpointPath = join(checkpointDirectory, "0001-tool.json");
+    const body = `${JSON.stringify({
+      messages: [
+        { role: "system", content: "system" },
+        { role: "user", content: "goal" },
+        { role: "tool", toolCallId: "call-1", name: "shell", content: "partial output" }
+      ],
+      usage: TEST_USAGE,
+      turns: 1,
+      toolCalls: 1,
+      summary: null
+    }, null, 2)}\n`;
+    writeFileSync(checkpointPath, body, "utf8");
+    service.createRunCheckpoint({
+      id: randomUUID(),
+      runId,
+      taskId: task.id,
+      seq: 1,
+      kind: "tool",
+      path: relative(workspaceRoot, checkpointPath).replaceAll("\\", "/"),
+      sha256: createHash("sha256").update(body).digest("hex"),
+      usage: TEST_USAGE,
+      createdAt: now,
+      proof: {
+        attemptId: runId,
+        identity: { executorId: "native", runtimeVersion: "test" },
+        phasePrefix: ["tool:shell"],
+        validation: { status: "not_required", evidenceRefs: [] },
+        effectReceipts: [],
+        preparedIntents: [],
+        createdAt: now
+      }
+    });
+    const ledger = new SqliteOperationLedger(store as HearthStore);
+    await ledger.prepare({
+      operationId: `${runId}:call-1`,
+      runId,
+      taskId: task.id,
+      toolCallId: "call-1",
+      toolName: "shell",
+      argsHash: "a".repeat(64),
+      effect: "external_write"
+    });
+    await ledger.dispatch({ operationId: `${runId}:call-1` });
+
+    let resumedMessages = 0;
+    const nativeRunner: NativeRunner = async (options) => {
+      resumedMessages = options.resume?.messages.length ?? 0;
+      writeFileSync(join(options.prepared.outDir, "result.md"), "# resumed after acknowledgement\n");
+      return nativeResult("resumed after acknowledgement");
+    };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath });
+    scheduler.start();
+
+    const recovered = service.requireTask(task.id);
+    expect(recovered.status).toBe("recoverable");
+    expect(recovered.error?.details?.[0]).toMatchObject({
+      code: "OPERATION_UNSETTLED_UNSAFE",
+      severity: "blocking"
+    });
+    const view = service.view(task.id);
+    expect(view?.resume).not.toBeNull();
+    const recovery = scheduler!.recoveryStatus(task.id);
+    expect(recovery).toMatchObject({ kind: "reconcile", autoResume: false });
+    expect(recovery?.reasons.find((reason) => reason.code === "OPERATION_UNSETTLED_UNSAFE")).toMatchObject({
+      toolName: "shell",
+      operationId: `${runId}:call-1`
+    });
+    expect(() => scheduler!.resumePaused(task.id, view!.resume!)).toThrow("结果未知");
+
+    const resumed = scheduler!.resumePaused(task.id, view!.resume!, {
+      acknowledge: true,
+      note: "已核对工作区，确认继续"
+    });
+    expect(resumed.status).toBe("queued");
+    const settled = await ledger.get(`${runId}:call-1`);
+    expect(settled?.phase).toBe("unknown");
+    expect(settled?.errorCode).toBe("USER_RECONCILED");
+
+    await waitForStatus(service, task.id, "completed");
+    expect(resumedMessages).toBeGreaterThan(0);
+  });
+
   it("auto-resumes a native run from a verified checkpoint after restart", async () => {
     const service = setup();
     const modelSettingsPath = configureModel();

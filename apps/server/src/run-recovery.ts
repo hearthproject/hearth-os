@@ -22,6 +22,10 @@ export interface RecoveryReason {
   code: string;
   message: string;
   severity: "blocking" | "advisory";
+  /** Present when the reason belongs to one concrete tool operation. */
+  operationId?: string;
+  toolName?: string;
+  effect?: string;
 }
 
 export interface RecoveryDecision {
@@ -64,11 +68,33 @@ const TERMINAL_CHECKPOINT_KINDS = new Set(["final", "waiting_input"]);
 
 export function evaluateRunRecovery(view: RecoveryView): RecoveryDecision {
   const reasons: RecoveryReason[] = [];
-  const blocking = (code: string, message: string): void => {
-    reasons.push({ code, message, severity: "blocking" });
+  const blocking = (
+    code: string,
+    message: string,
+    operation?: Pick<RunOperationRecord, "operationId" | "toolName" | "effect">
+  ): void => {
+    reasons.push({
+      code,
+      message,
+      severity: "blocking",
+      ...(operation
+        ? { operationId: operation.operationId, toolName: operation.toolName, effect: operation.effect }
+        : {})
+    });
   };
-  const advisory = (code: string, message: string): void => {
-    reasons.push({ code, message, severity: "advisory" });
+  const advisory = (
+    code: string,
+    message: string,
+    operation?: Pick<RunOperationRecord, "operationId" | "toolName" | "effect">
+  ): void => {
+    reasons.push({
+      code,
+      message,
+      severity: "advisory",
+      ...(operation
+        ? { operationId: operation.operationId, toolName: operation.toolName, effect: operation.effect }
+        : {})
+    });
   };
 
   if ((view.task.executorId ?? view.run.executorId) !== "native") {
@@ -94,26 +120,31 @@ export function evaluateRunRecovery(view: RecoveryView): RecoveryDecision {
   }
 
   for (const operation of view.operations) {
-    if (operation.phase === "settled") continue;
+    // `unknown` normally means "we do not know whether it ran"; only an
+    // explicit user reconciliation turns it into an accepted outcome.
+    if (operation.phase === "settled" || operation.errorCode === "USER_RECONCILED") continue;
     if (operation.phase === "prepared") {
       // T1 was never committed, so no side effect can have happened. The next
       // attempt may dispatch the same call again.
       advisory(
         "OPERATION_PREPARED",
-        `${operation.toolName}（${operation.toolCallId}）已登记但未派发，将重新执行`
+        `${operation.toolName}（${operation.toolCallId}）已登记但未派发，将重新执行`,
+        operation
       );
       continue;
     }
     if (UNSAFE_EFFECTS.has(operation.effect)) {
       blocking(
         "OPERATION_UNSETTLED_UNSAFE",
-        `${operation.toolName}（${operation.toolCallId}）结果未知（${operation.effect}），需要先核对工作区或外部状态`
+        `${operation.toolName}（${operation.toolCallId}）结果未知（${operation.effect}），需要先核对工作区或外部状态`,
+        operation
       );
       continue;
     }
     advisory(
       "OPERATION_UNSETTLED_READ",
-      `${operation.toolName}（${operation.toolCallId}）结果未知，但属于 ${operation.effect}，可以核对后继续`
+      `${operation.toolName}（${operation.toolCallId}）结果未知，但属于 ${operation.effect}，可以核对后继续`,
+      operation
     );
   }
 

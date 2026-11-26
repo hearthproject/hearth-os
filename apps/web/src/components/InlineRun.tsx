@@ -52,6 +52,10 @@ export interface ToolDetail {
   durationMs?: number;
   exitCode?: number;
   paths?: string[];
+  /** 失败原因摘要，折叠时也透出。 */
+  reason?: string;
+  /** 失败的错误码，例如 TOOL_EXEC_FAILED。 */
+  errorCode?: string;
   /** 写入的文件路径（write_file / apply_patch） */
   file?: string;
   /** write_file 的完整正文 / apply_patch 的补丁正文 */
@@ -65,7 +69,8 @@ export interface ToolDetail {
 export type Entry =
   | { type: "narration"; key: string; text: string }
   | { type: "label"; key: string; text: string; tools: ToolDetail[] }
-  | { type: "system"; key: string; text: string };
+  | { type: "system"; key: string; text: string }
+  | { type: "error"; key: string; text: string };
 
 const DETAIL_OUTPUT_LIMIT = 4_000;
 const LABEL_LIMIT = 28;
@@ -93,8 +98,16 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
   const view = taskQuery.data;
   const status = view?.task.status ?? task.status;
   const active = ACTIVE_STATUSES.includes(status);
-  const error = view?.task.error ?? null;
+  // The persisted task error is the source of truth, but older interrupted
+  // runs may only carry the failure on the run record. Never show a stop with
+  // no explanation.
+  const error = view?.task.error ?? lastRunFailure(view);
   const visibleError = error && !isRetiredTaskNotice(error.message) ? error : null;
+  const recovery = view?.recovery ?? null;
+  const blockingReasons = (recovery?.reasons ?? []).filter((reason) => reason.severity === "blocking");
+  const manualRecovery = recovery?.kind === "manual";
+  const resumable = Boolean(view?.resume) && !manualRecovery && (status === "recoverable" || status === "failed" || status === "paused");
+  const needsAcknowledgement = recovery?.kind === "reconcile" && blockingReasons.length > 0;
   const expectedOutputs = view?.task.expectedOutputs;
   const entries = useMemo(
     () => collectEntries(view?.events ?? [], expectedOutputs),
@@ -140,9 +153,9 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
   });
 
   const resumeMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: (options: { acknowledge?: boolean; note?: string } = {}) => {
       if (!view?.resume) throw new Error("没有可用的检查点，无法继续");
-      return api.resume(task.id, view.resume);
+      return api.resume(task.id, view.resume, options);
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["task", task.id] });
@@ -162,7 +175,7 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
 
   const headline = status === "completed"
     ? duration !== null ? `共用时 ${formatDuration(duration)}` : "已完成"
-    : `${RUN_LABELS[status]}${duration !== null ? ` · ${formatDuration(duration)}` : ""}`;
+    : `${RUN_LABELS[status]}${status !== "paused" && resumable ? " · 可继续" : ""}${duration !== null ? ` · ${formatDuration(duration)}` : ""}`;
   // 折叠状态下也透出当前动作，接近 Codex 的“正在执行 …”一行摘要。
   const currentActivity = useMemo(() => {
     for (let index = entries.length - 1; index >= 0; index -= 1) {
@@ -173,6 +186,7 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
         if (text) return text;
         continue;
       }
+      if (entry.type === "error") continue;
       const tool = entry.tools[0];
       if (!tool) continue;
       const command = tool.command ? firstLine(tool.command) : tool.paths?.[0];
@@ -235,6 +249,8 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
                 <p key={entry.key} className="inline-run-narration">{entry.text}</p>
               ) : entry.type === "system" ? (
                 <p key={entry.key} className="inline-run-system">{entry.text}</p>
+              ) : entry.type === "error" ? (
+                <p key={entry.key} className="inline-run-trail-error"><TriangleAlert size={12} /> {entry.text}</p>
               ) : (
                 <div key={entry.key} className="inline-run-step">
                   <button
@@ -248,6 +264,11 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
                     {previewForEntry(entry) && !isEntryExpanded(entry, expandedTools) && (
                       <code className="inline-run-inline-preview" title={previewForEntry(entry)}>{clipPreview(previewForEntry(entry))}</code>
                     )}
+                    {entry.tools[0]?.status === "failed" && entry.tools[0]?.reason && !isEntryExpanded(entry, expandedTools) && (
+                      <span className="inline-run-inline-failure" title={entry.tools[0].reason}>
+                        {clipPreview(entry.tools[0].reason)}
+                      </span>
+                    )}
                     {entry.tools.length > 0 && (isEntryExpanded(entry, expandedTools) ? <ChevronDown size={11} /> : <ChevronRight size={11} />)}
                   </button>
                   {isEntryExpanded(entry, expandedTools) && entry.tools.length > 0 && (
@@ -259,7 +280,11 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
                             {tool.durationMs !== undefined && <span>{formatDuration(tool.durationMs)}</span>}
                             {tool.exitCode !== undefined && <span>exit {tool.exitCode}</span>}
                             {tool.status && <span className={tool.status === "failed" ? "failed" : ""}>{tool.status}</span>}
+                            {tool.errorCode && <span className="failed">{tool.errorCode}</span>}
                           </div>
+                          {tool.status === "failed" && tool.reason && (
+                            <p className="inline-run-tool-reason">失败原因：{tool.reason}</p>
+                          )}
                           {tool.command && <pre className="inline-run-command">{tool.command}</pre>}
                           {tool.paths && tool.paths.length > 0 && (
                             <pre className="inline-run-command">{tool.paths.join("\n")}</pre>
@@ -310,7 +335,7 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
               {view?.resume ? (
                 <button
                   className="ghost-button small"
-                  onClick={() => resumeMutation.mutate()}
+                  onClick={() => resumeMutation.mutate({})}
                   disabled={resumeMutation.isPending}
                 >
                   {resumeMutation.isPending ? <Loader2 size={12} className="spin" /> : <Play size={12} />}
@@ -326,20 +351,69 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
           )}
 
           {visibleError && (
-            <div className="inline-run-error">
-              <TriangleAlert size={13} />
-              <span>{visibleError.message}</span>
-              {visibleError.guidance && <span>{visibleError.guidance}</span>}
-              {visibleError.recoverable && (
-                <button className="ghost-button small" onClick={() => retryMutation.mutate()} disabled={retryMutation.isPending}>
-                  {retryMutation.isPending ? <Loader2 size={12} className="spin" /> : <RotateCcw size={12} />} 重试
-                </button>
+            <div className="inline-run-error-block">
+              <div className="inline-run-error-title">
+                <TriangleAlert size={13} />
+                <span className="inline-run-error-code">{visibleError.code ?? visibleError.kind}</span>
+                <span>{visibleError.message}</span>
+              </div>
+              {visibleError.details && visibleError.details.length > 0 && (
+                <ul className="inline-run-error-details">
+                  {visibleError.details.map((detail, index) => (
+                    <li key={`${detail.code}:${index}`}>
+                      <code>{detail.code}</code>
+                      <span>{detail.message}</span>
+                    </li>
+                  ))}
+                </ul>
               )}
+              {visibleError.guidance && (
+                <p className="inline-run-error-guidance">{visibleError.guidance}</p>
+              )}
+              <div className="inline-run-error-actions">
+                {resumable && (
+                  needsAcknowledgement ? (
+                    <button
+                      className="ghost-button small"
+                      onClick={() => resumeMutation.mutate({
+                        acknowledge: true,
+                        note: "用户在客户端核对中断的工作区/外部状态后继续"
+                      })}
+                      disabled={resumeMutation.isPending}
+                    >
+                      {resumeMutation.isPending ? <Loader2 size={12} className="spin" /> : <Play size={12} />}
+                      我已核对，继续执行
+                    </button>
+                  ) : (
+                    <button
+                      className="ghost-button small"
+                      onClick={() => resumeMutation.mutate({})}
+                      disabled={resumeMutation.isPending}
+                    >
+                      {resumeMutation.isPending ? <Loader2 size={12} className="spin" /> : <Play size={12} />}
+                      继续执行
+                    </button>
+                  )
+                )}
+                {visibleError.recoverable && (!resumable || !needsAcknowledgement) && (
+                  <button
+                    className="ghost-button small"
+                    onClick={() => retryMutation.mutate()}
+                    disabled={retryMutation.isPending}
+                  >
+                    {retryMutation.isPending ? <Loader2 size={12} className="spin" /> : <RotateCcw size={12} />}
+                    {view?.resume ? "重新开始" : "重试"}
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
+          {resumeMutation.isError && (
+            <p className="inline-run-error">{resumeMutation.error instanceof Error ? `继续失败：${resumeMutation.error.message}` : "继续失败，请重试"}</p>
+          )}
           {retryMutation.isError && (
-            <p className="inline-run-error">{retryMutation.error instanceof Error ? retryMutation.error.message : "重试失败"}</p>
+            <p className="inline-run-error">{retryMutation.error instanceof Error ? `重试失败：${retryMutation.error.message}` : "重试失败，请重试"}</p>
           )}
         </div>
       )}
@@ -391,6 +465,18 @@ function elapsedSince(startedAt: string, now: number): number | null {
 
 function isRetiredTaskNotice(text: string): boolean {
   return /执行预算|本轮执行预算|预算已触顶|budgetExhaustion|Unknown event type:\s*job\.|未知事件类型[：:]\s*job\./i.test(text);
+}
+
+/** Older interrupted runs only stored the reason on RunRecord.failure. */
+function lastRunFailure(view: TaskView | undefined): TaskView["task"]["error"] {
+  if (!view) return null;
+  const runs = [...view.runs].sort((left, right) => {
+    const leftAt = Date.parse(left.startedAt ?? left.createdAt);
+    const rightAt = Date.parse(right.startedAt ?? right.createdAt);
+    return (Number.isFinite(leftAt) ? leftAt : 0) - (Number.isFinite(rightAt) ? rightAt : 0);
+  });
+  const failure = runs[runs.length - 1]?.failure ?? null;
+  return failure && failure.message ? failure : null;
 }
 
 // 清单以最新一次 todos 事件为准，整体替换，不累加历史。
@@ -447,6 +533,14 @@ export function collectEntries(events: TaskView["events"], expectedOutputs: read
       continue;
     }
 
+    if (kind === "error") {
+      entries.push({ type: "error", key: `err:${event.id}`, text: message || "执行出现错误" });
+      continue;
+    }
+    if (kind === "notice" || kind === "retry" || kind === "stall") {
+      pushSystem(entries, event.id, message || "运行状态已更新");
+      continue;
+    }
     if (kind === "context") {
       pushSystem(entries, event.id, message || "整理上下文，继续推进");
       continue;
@@ -490,6 +584,8 @@ function mergeToolDetails(started: ToolDetail, finished: ToolDetail): ToolDetail
     ...(finished.markdown ? { markdown: true } : {}),
     ...(finished.autoExpand ? { autoExpand: true } : {}),
     ...(finished.status ? { status: finished.status } : {}),
+    ...(finished.reason ? { reason: finished.reason } : {}),
+    ...(finished.errorCode ? { errorCode: finished.errorCode } : {}),
     ...(finished.durationMs !== undefined ? { durationMs: finished.durationMs } : {}),
     ...(finished.exitCode !== undefined ? { exitCode: finished.exitCode } : {})
   };
@@ -541,6 +637,8 @@ function toolFromProgress(
         key: eventId,
         title: humanToolTitle(detail.title, message),
         ...(plan ? { content: plan, markdown: true, autoExpand: true } : {}),
+        ...(detail.status === "failed" && detail.output ? { reason: firstLine(detail.output).slice(0, 160) } : {}),
+        ...(detail.errorCode ? { errorCode: detail.errorCode } : {}),
         ...(detail.output ? { output: detail.output } : {}),
         ...(detail.status ? { status: detail.status } : {}),
         ...(detail.durationMs !== undefined ? { durationMs: detail.durationMs } : {}),

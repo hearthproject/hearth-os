@@ -120,7 +120,16 @@ describe("evaluateRunRecovery", () => {
     }));
     expect(decision.kind).toBe("reconcile");
     expect(decision.autoResume).toBe(false);
-    expect(decision.reasons.some((reason) => reason.code === "OPERATION_UNSETTLED_UNSAFE")).toBe(true);
+    const reason = decision.reasons.find((item) => item.code === "OPERATION_UNSETTLED_UNSAFE");
+    expect(reason).toMatchObject({ toolName: "shell", operationId: "run-1:call-1", effect: "external_write" });
+  });
+
+  it("accepts an unknown operation only after explicit user reconciliation", () => {
+    const decision = evaluateRunRecovery(view({
+      operations: [operation({ effect: "external_write", phase: "unknown", errorCode: "USER_RECONCILED" })]
+    }));
+    expect(decision.kind).toBe("resume");
+    expect(decision.reasons.some((reason) => reason.code === "OPERATION_UNSETTLED_UNSAFE")).toBe(false);
   });
 
   it("reconciles an unsettled destructive or unknown effect", () => {

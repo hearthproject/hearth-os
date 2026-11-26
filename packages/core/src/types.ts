@@ -316,6 +316,12 @@ export interface TaskInput {
   source?: TaskSourceRef;
 }
 
+export interface TaskErrorDetail {
+  code: string;
+  message: string;
+  severity?: "blocking" | "advisory";
+}
+
 export interface TaskError {
   kind: string;
   message: string;
@@ -328,6 +334,8 @@ export interface TaskError {
   failureClass?: FailureClass;
   disposition?: FailureDisposition;
   budgetExhaustion?: BudgetExhaustion;
+  /** Every concrete reason behind the failure, so the UI can explain what stopped the run. */
+  details?: TaskErrorDetail[];
 }
 
 export type TaskNetworkMode = "deny" | "open";
@@ -774,6 +782,9 @@ export interface TaskProgressDetail {
   query?: string;
   paths?: string[];
   truncated?: boolean;
+  errorCode?: string;
+  retryable?: boolean;
+  severity?: "blocking" | "advisory";
   sandbox?: {
     backend: string;
     mode: string;

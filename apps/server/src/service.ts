@@ -319,7 +319,11 @@ export class HearthService {
     if (!task) return null;
     const events = this.store.listEvents(0, taskId);
     const runs = this.store.listRuns(taskId);
-    const checkpoint = task.status === "paused" && task.currentRunId
+    // A restart or an interrupted run leaves the task recoverable. Keep the
+    // checkpoint exposed so the UI can offer the same "continue" button Codex
+    // shows after the app restarts, instead of forcing a fresh retry.
+    const resumableStatus = task.status === "paused" || task.status === "recoverable" || task.status === "failed";
+    const checkpoint = resumableStatus && task.currentRunId
       ? this.store.latestRunCheckpoint(task.currentRunId)
       : null;
     const resumableCheckpoint = checkpoint?.kind === "final" ? null : checkpoint;
