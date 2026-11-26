@@ -161,6 +161,23 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
   const headline = status === "completed"
     ? duration !== null ? `共用时 ${formatDuration(duration)}` : "已完成"
     : `${RUN_LABELS[status]}${duration !== null ? ` · ${formatDuration(duration)}` : ""}`;
+  // 折叠状态下也透出当前动作，接近 Codex 的“正在执行 …”一行摘要。
+  const currentActivity = useMemo(() => {
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      const entry = entries[index];
+      if (!entry) continue;
+      if (entry.type === "narration" || entry.type === "system") {
+        const text = entry.text.replace(/\s+/g, " ").trim();
+        if (text) return text;
+        continue;
+      }
+      const tool = entry.tools[0];
+      if (!tool) continue;
+      const command = tool.command ? firstLine(tool.command) : tool.paths?.[0];
+      return command ? `${entry.text} · ${command}` : entry.text;
+    }
+    return "";
+  }, [entries]);
 
   return (
     <div className={`inline-run ${status}`}>
@@ -179,6 +196,9 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
               : <TaskStatusIcon status={status} size={12} />}
         </span>
         <span className="inline-run-headline">{headline}</span>
+        {active && currentActivity && (
+          <span className="inline-run-activity" title={currentActivity}>{currentActivity}</span>
+        )}
       </button>
 
       {open && (
@@ -216,6 +236,9 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
                   >
                     <span className="inline-run-label-mark" aria-hidden="true">▸</span>
                     <span className="inline-run-label-text">{entry.text}</span>
+                    {previewForEntry(entry) && !isEntryExpanded(entry, expandedTools) && (
+                      <code className="inline-run-inline-preview" title={previewForEntry(entry)}>{clipPreview(previewForEntry(entry))}</code>
+                    )}
                     {entry.tools.length > 0 && (isEntryExpanded(entry, expandedTools) ? <ChevronDown size={11} /> : <ChevronRight size={11} />)}
                   </button>
                   {isEntryExpanded(entry, expandedTools) && entry.tools.length > 0 && (
@@ -318,6 +341,24 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
 export function isEntryExpanded(entry: Extract<Entry, { type: "label" }>, expandedTools: Record<string, boolean>): boolean {
   // 用户手动展开/折叠优先；否则交付物第一次写入时自动展开完整正文。
   return expandedTools[entry.key] ?? entry.tools.some((tool) => tool.autoExpand);
+}
+
+function previewForEntry(entry: Extract<Entry, { type: "label" }>): string {
+  const tool = entry.tools[0];
+  if (!tool) return "";
+  if (tool.command) return tool.command;
+  if (tool.paths && tool.paths.length > 0) return tool.paths.join(" ");
+  if (tool.file) return tool.file;
+  return "";
+}
+
+function clipPreview(text: string): string {
+  const single = firstLine(text);
+  return single.length > 72 ? `${single.slice(0, 72)}…` : single;
+}
+
+function firstLine(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
 }
 
 function runDuration(runs: TaskView["runs"], now: number): number | null {

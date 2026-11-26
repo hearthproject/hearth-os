@@ -68,6 +68,17 @@
   color: var(--ink);
 }
 
+.inline-run-activity {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--ink-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .inline-run.running .inline-run-head {
   background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 7%, transparent), transparent 72%);
 }
@@ -153,6 +164,18 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.inline-run-inline-preview {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  color: var(--ink-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.9;
 }
 
 .inline-run-detail {
