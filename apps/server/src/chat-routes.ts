@@ -19,6 +19,13 @@ import type { OntologyService } from "./ontology.ts";
 import type { OntologyWriter } from "./ontology-writer.ts";
 import { ModelRegistryError, type ModelRegistry } from "./model-registry.ts";
 import { conversationTitle, planExecution } from "./chat.ts";
+import {
+  defaultLocalFileRoots,
+  extractFilePaths,
+  parseLocalFileRequest,
+  searchLocalFile,
+  storeOutgoingAttachment
+} from "./chat-file-delivery.ts";
 import { listModels, ModelClientError, completeChat } from "./model-client.ts";
 import {
   MODEL_PRESETS,
@@ -119,6 +126,7 @@ import type { SkillService } from "./skills/service.ts";
 import type { GoalService } from "./goals.ts";
 import type { PlanService } from "./plans.ts";
 import type { ConversationContextService } from "./conversation-context.ts";
+import type { McpServerService } from "./mcp-servers.ts";
 
 export interface ChatRouteOptions {
   service: HearthService;
@@ -138,6 +146,7 @@ export interface ChatRouteOptions {
   memory?: MemoryService | undefined;
   library?: LibraryService | undefined;
   skills?: SkillService | undefined;
+  mcpServers?: McpServerService | undefined;
   conversationContext?: ConversationContextService | undefined;
   personal?: {
     ontology: OntologyService;
@@ -570,7 +579,26 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     const previousMessages = store.listChatMessages(conversation.id).filter((item) => item.id !== userRecord.id);
     const referencedFile = extractLocalFilePath(userContent);
     const chatProject = conversation.projectId ? store.getLocalProject(conversation.projectId) : null;
-    const pendingMcpServerIds = parsed.data.mcpServerIds ?? [];
+    const requestedMcpServerIds = [...new Set(parsed.data.mcpServerIds ?? [])];
+    const pendingMcpServerIds = requestedMcpServerIds;
+    if (pendingMcpServerIds.length > 0 && options.mcpServers) {
+      const servers = options.mcpServers.list();
+      const unavailable = pendingMcpServerIds.filter((id) => {
+        const server = servers.find((item) => item.id === id);
+        return !server || !server.enabled || server.status !== "ready";
+      });
+      if (unavailable.length > 0) {
+        const reasons = unavailable.map((id) => {
+          const server = servers.find((item) => item.id === id);
+          if (!server) return `${id}：资料库中已不存在`;
+          if (!server.enabled) return `${server.name}：已停用`;
+          return `${server.name}：${server.error ?? "连接未就绪"}`;
+        });
+        sendPersistedError("MCP_NOT_AVAILABLE", `本轮选择的 MCP 没能启用，任务没有派出。${reasons.join("；")}`);
+        finish(reply, send);
+        return reply;
+      }
+    }
     const wantsGoal = parsed.data.goalMode === true;
     const wantsPlan = parsed.data.planMode === true || effectiveSettings.collaborationMode === "plan";
     const available = executorAvailability();
@@ -579,6 +607,52 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       : executorHealth(lockedExecutorId, executorSettings(), executorSettingsPath);
     const resolution = resolveExecutorLocked(lockedExecutorId, executorEnabled, available, plan.capability);
     const taskTitle = conversationTitle(userContent);
+
+    // “把桌面上那个 PPT 发给我”应该真的把文件交出去，而不是让模型用一句
+    // “已发给你”糊弄过去；IM 侧也只有拿到 ChatAttachment 才能上传文件本体。
+    const localFileRequest = storedFiles.length === 0
+      && !detectedUrl
+      && !parsed.data.skillId
+      && pendingMcpServerIds.length === 0
+      && !wantsGoal
+      && !wantsPlan
+      ? parseLocalFileRequest(userContent)
+      : null;
+    if (localFileRequest) {
+      const hintPaths = [
+        ...extractFilePaths(userContent),
+        ...previousMessages.flatMap((item) => extractFilePaths(item.content))
+      ];
+      const hit = searchLocalFile(localFileRequest, {
+        roots: defaultLocalFileRoots(chatProject?.path ?? null),
+        hintPaths
+      });
+      if (!hit) {
+        sendPersistedError(
+          "FILE_NOT_FOUND",
+          `没有在桌面、下载、文档或当前项目目录找到「${localFileRequest.original}」。请确认文件名，或把文件拖进对话后再说一次“发给我”。`
+        );
+        finish(reply, send);
+        return reply;
+      }
+      try {
+        const attachment = storeOutgoingAttachment(hit.path, attachmentRoot);
+        const assistant = service.appendChatMessage({
+          id: randomUUID(),
+          conversationId: conversation.id,
+          role: "assistant",
+          content: `已把《${attachment.name}》发给你。`,
+          taskId: null,
+          attachments: [attachment],
+          createdAt: new Date().toISOString()
+        });
+        send("done", assistant);
+      } catch (error) {
+        sendPersistedError("FILE_SEND_FAILED", `文件发送失败：${error instanceof Error ? error.message : "未知错误"}`);
+      }
+      finish(reply, send);
+      return reply;
+    }
 
     send("routing", {
       action: "task",
