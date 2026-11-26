@@ -42,6 +42,7 @@ import type {
   MemorySnapshot,
   ModelListResponse,
   ModelProfilePatch,
+  ReasoningCapabilityView,
   ModelProfileView,
   ModelProtocol,
   ModelRegistryResponse,
@@ -334,6 +335,8 @@ export const api = {
     method: "PUT",
     body: JSON.stringify(input)
   }),
+  modelCapability: (input: { providerId?: string; providerName?: string; protocol?: ModelProtocol; baseUrl?: string; model?: string; apiKey?: string }) =>
+    request<{ capability: ReasoningCapabilityView }>("/api/model-capabilities", { method: "POST", body: JSON.stringify(input) }),
   fetchModels: (input: { providerId?: string; providerName?: string; protocol?: ModelProtocol; baseUrl?: string; model?: string; apiKey?: string }) =>
     request<ModelListResponse>("/api/model-settings/models", { method: "POST", body: JSON.stringify(input) }),
   testModel: (input: { providerId?: string; providerName?: string; protocol?: ModelProtocol; baseUrl?: string; model?: string; apiKey?: string }) =>

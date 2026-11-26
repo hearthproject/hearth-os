@@ -134,6 +134,32 @@ export interface ExecutorView {
 
 export type ReasoningEffort = "off" | "minimal" | "low" | "medium" | "high" | "max";
 
+/** What a model/provider actually accepts for reasoning control, exposed so the UI can show valid options. */
+export interface ReasoningCapability {
+  /** Provider family detected from model name / endpoint. */
+  family: "glm" | "deepseek" | "openai-compatible" | "openai" | "anthropic" | "gemini" | "unknown";
+  /** UI effort levels the model can actually use, in display order. */
+  levels: ReasoningEffort[];
+  /** Recommended default level for this model. */
+  defaultLevel: ReasoningEffort;
+  /** Whether thinking can be switched off (otherwise off is degraded to the lightest level). */
+  canDisable: boolean;
+  /** Whether reasoning_effort values are sent at all (false = toggle-only models). */
+  supportsEffort: boolean;
+  /** Native value sent for each UI level; omitted when it equals the UI value. */
+  nativeValues?: Partial<Record<ReasoningEffort, string>>;
+  /** Human-readable explanation of the mapping, shown in the model picker. */
+  note: string;
+  /** How the capability was identified. */
+  source: "catalog" | "endpoint" | "fallback";
+}
+
+export interface ReasoningCapabilityView extends ReasoningCapability {
+  model: string;
+  baseUrl: string;
+  protocol: ModelProtocol;
+}
+
 export interface ExecutorSettings {
   defaultApprovalMode: ApprovalMode;
   preferredExecutorId: ExecutorId | null;

@@ -27,6 +27,7 @@ import {
   storeOutgoingAttachment
 } from "./chat-file-delivery.ts";
 import { listModels, ModelClientError, completeChat } from "./model-client.ts";
+import { reasoningCapabilityView } from "./reasoning-capability.ts";
 import {
   MODEL_PRESETS,
   chatModelConfigured,
@@ -243,6 +244,13 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
     }
     if (!settings) return reply.code(400).send({ error: "INVALID_MODEL_SETTINGS", message: "新建模型档案需要填写服务名称、地址和模型名" });
     return { settings: viewModelSettings(settings), configured: chatModelConfigured(settings) };
+  });
+
+  app.post("/api/model-capabilities", async (request, reply) => {
+    const parsed = modelProbeSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_MODEL_REQUEST", message: "模型参数格式不正确" });
+    const settings = mergeModelSettings(chatSettings(), parsed.data);
+    return { capability: reasoningCapabilityView(settings.model, settings.baseUrl, settings.protocol) };
   });
 
   app.post("/api/model-settings/models", async (request, reply) => {

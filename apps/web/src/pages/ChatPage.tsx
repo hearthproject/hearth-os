@@ -63,6 +63,7 @@ import type {
   ConversationSettingsPatch,
   ExecutorId,
   PlanActionName,
+  ReasoningCapabilityView,
   ReasoningEffort,
   TaskFollowUpMode,
   TaskResumeReference
@@ -1709,6 +1710,18 @@ export function ChatPage() {
   const selectedExecutorVisible = visibleExecutorIds.includes(selectedExecutorId);
   const configured = Boolean(selectedExecutor?.effectiveModel);
   const effectiveModel = selectedExecutor?.effectiveModel ?? null;
+  const capabilityKey = effectiveModel ? `${effectiveModel.protocol}|${effectiveModel.baseUrl}|${effectiveModel.model}` : "";
+  const capabilityQuery = useQuery({
+    queryKey: ["modelCapability", capabilityKey],
+    queryFn: () => api.modelCapability({
+      ...(effectiveModel?.protocol ? { protocol: effectiveModel.protocol } : {}),
+      ...(effectiveModel?.baseUrl ? { baseUrl: effectiveModel.baseUrl } : {}),
+      ...(effectiveModel?.model ? { model: effectiveModel.model } : {})
+    }),
+    enabled: configured && modelMenuOpen,
+    staleTime: 5 * 60_000
+  });
+  const capability = capabilityQuery.data?.capability ?? null;
   const selectedBinding = selectedExecutor?.modelBinding
     ?? modelRegistryQuery.data?.bindings.find((binding) => binding.executorId === selectedExecutorId)
     ?? null;
@@ -2050,23 +2063,34 @@ export function ChatPage() {
                       </div>
                     </div>
                     <div className="model-effort-grid" role="group" aria-label="推理强度">
-                      {EFFORT_ORDER.map((effort) => (
+                      {(capability?.levels ?? EFFORT_ORDER).map((effort) => (
                         <button
                           key={effort}
                           type="button"
-                          className={`model-effort-option${effort === reasoningEffort ? " active" : ""}`}
+                          className={`model-effort-option${effort === reasoningEffort ? " active" : ""}${effort === capability?.defaultLevel ? " recommended" : ""}`}
                           aria-pressed={effort === reasoningEffort}
-                          title={EFFORT_META[effort].description}
+                          title={effortNativeLabel(capability, effort)}
                           disabled={savingEffort || switchingModel || !configured}
                           onClick={() => changeReasoningEffort(effort)}
                         >
                           {EFFORT_META[effort].label}
+                          {effort === capability?.defaultLevel ? <span className="effort-default-dot" aria-hidden="true" /> : null}
                         </button>
                       ))}
                     </div>
-                    <p className="model-effort-hint">
-                      {EFFORT_META[reasoningEffort].description}{savingEffort ? " · 保存中" : ""}
-                    </p>
+                    {capability ? (
+                      <p className="model-effort-hint">
+                        {capability.note}
+                        {!capability.levels.includes(reasoningEffort)
+                          ? ` 当前“${EFFORT_META[reasoningEffort].label}”该模型不支持，请求时会自动映射。`
+                          : ""}
+                        {savingEffort ? " · 保存中" : ""}
+                      </p>
+                    ) : (
+                      <p className="model-effort-hint">
+                        {EFFORT_META[reasoningEffort].description}{savingEffort ? " · 保存中" : ""}
+                      </p>
+                    )}
                     <div className="model-popover-context">
                       <span>上下文窗口</span>
                       <strong>{formatTokens(contextWindowTokens)}</strong>
@@ -2838,6 +2862,15 @@ const EFFORT_META: Record<ReasoningEffort, { label: string; description: string 
 
 function reasoningEffortLabel(effort: ReasoningEffort): string {
   return EFFORT_META[effort].label;
+}
+
+/** Human-readable tooltip: what this UI level actually sends for the current model. */
+function effortNativeLabel(capability: ReasoningCapabilityView | null, effort: ReasoningEffort): string {
+  const base = EFFORT_META[effort].description;
+  if (!capability) return base;
+  const native = capability.nativeValues?.[effort] ?? effort;
+  const mapped = native !== effort ? ` → ${native}` : "";
+  return `${base}${mapped ? `（实际发送 ${mapped.replace(" → ", "")}）` : ""}`;
 }
 
 function formatTokens(value: number): string {

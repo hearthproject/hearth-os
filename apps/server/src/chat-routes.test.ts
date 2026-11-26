@@ -1071,6 +1071,25 @@ describe("unified harness API", () => {
     );
     expect(jsonDeliverable.map((item) => item.name)).toEqual(["manifest.json"]);
   });
+
+  it("returns reasoning capabilities for a configured model", async () => {
+    const app = await buildServer({ store, serveWeb: false, modelSettingsPath: join(root, "settings.json"), attachmentRoot: join(root, "files") });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/model-capabilities",
+      payload: {
+        protocol: "openai-chat",
+        baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+        model: "glm-5.3-flash"
+      }
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    const { capability } = response.json();
+    expect(capability.family).toBe("glm");
+    expect(capability.levels).toEqual(["low", "high", "max"]);
+    expect(capability.canDisable).toBe(false);
+    expect(capability.model).toBe("glm-5.3-flash");
+  });
 });
 
 function parseSse(body: string): { event: string; data: any }[] {

@@ -898,6 +898,20 @@
   cursor: default;
 }
 
+.model-effort-option.recommended:not(.active) {
+  color: var(--ink-secondary);
+}
+
+.effort-default-dot {
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  margin-left: 3px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+}
+
 .model-effort-hint {
   min-height: 15px;
   margin: 7px 0 0;

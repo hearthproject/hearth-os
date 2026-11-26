@@ -1,5 +1,6 @@
-import type { ModelProtocol, RunUsage } from "@hearth/core";
+import type { ModelProtocol, ReasoningCapability, RunUsage } from "@hearth/core";
 import type { ModelSettings } from "./model-settings.ts";
+import { reasoningCapabilityFor } from "./reasoning-capability.ts";
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -547,49 +548,46 @@ export function openAiChatReasoningFields(
   model?: string
 ): Record<string, unknown> {
   if (!effort) return {};
-  if (isGlmEndpoint(baseUrl, model)) return glmReasoningFields(effort, model ?? "");
-  if (effort !== "off") return { reasoning_effort: effort };
-  return /deepseek/i.test(baseUrl) ? { thinking: { type: "disabled" } } : {};
-}
-
-function isGlmEndpoint(baseUrl: string, model?: string): boolean {
-  return /bigmodel\.cn/i.test(baseUrl) || /^glm-/i.test(model?.trim() ?? "");
+  const capability = reasoningCapabilityFor(model ?? "", baseUrl, "openai-chat");
+  return reasoningFieldsFor(capability, effort);
 }
 
 /**
- * 智谱 GLM 用 thinking.type 控制思考开关，reasoning_effort 控制强度；
- * 与 OpenAI/DeepSeek 的字段不同，且各版本档位语义不一致：
- * - GLM-5.3 / 5.3-flash / 5.4+ 强制开启思考，只认 low / high / max；
- * - GLM-5.2 兼容 none / minimal / medium / xhigh；
- * - GLM-5.1 / 4.x 只支持 thinking 开关，没有 reasoning_effort。
- * 前端统一六档，这里按模型版本映射，避免直接透传导致请求被拒或档位失效。
+ * Build OpenAI-compatible request fields from a capability descriptor.
+ * The same descriptor is served to the UI, so what the picker shows matches
+ * what is actually sent for every model family.
  */
-function glmReasoningFields(effort: NonNullable<CompleteOptions["reasoningEffort"]>, model: string): Record<string, unknown> {
-  const forcedThinking = /glm-(5\.3|5\.4|5\.5|6\b)/i.test(model);
-  const legacyEffort = /glm-5\.2/i.test(model);
-  const supportsEffort = forcedThinking || legacyEffort || !model;
+export function reasoningFieldsFor(
+  capability: Pick<ReasoningCapability, "family" | "canDisable" | "supportsEffort" | "nativeValues">,
+  effort: NonNullable<CompleteOptions["reasoningEffort"]>
+): Record<string, unknown> {
+  const glm = capability.family === "glm";
+  const deepseek = capability.family === "deepseek";
 
   if (effort === "off") {
-    if (forcedThinking) return { thinking: { type: "enabled" }, reasoning_effort: "low" };
-    return { thinking: { type: "disabled" } };
+    if (glm && !capability.canDisable) return { thinking: { type: "enabled" }, reasoning_effort: "low" };
+    if (glm || deepseek) return { thinking: { type: "disabled" } };
+    return {};
   }
 
-  let mapped: string;
-  if (legacyEffort) {
-    mapped = effort === "minimal" ? "minimal"
-      : effort === "low" ? "minimal"
-      : effort === "medium" ? "medium"
-      : effort === "high" ? "high"
-      : "xhigh";
-  } else {
-    mapped = effort === "minimal" || effort === "low" ? "low"
-      : effort === "medium" || effort === "high" ? "high"
-      : "max";
+  // Models with a nativeValues table use it verbatim (legacy GLM-5.2);
+  // forced-thinking GLM has no table and collapses UI levels into low/high/max.
+  const mapped = capability.nativeValues?.[effort]
+    ?? (glm && capability.supportsEffort ? mapForcedGlmLevel(effort) : effort);
+
+  if (glm) {
+    return {
+      thinking: { type: "enabled" },
+      ...(capability.supportsEffort ? { reasoning_effort: mapped } : {})
+    };
   }
-  return {
-    thinking: { type: "enabled" },
-    ...(supportsEffort ? { reasoning_effort: mapped } : {})
-  };
+  return { reasoning_effort: mapped };
+}
+
+function mapForcedGlmLevel(effort: NonNullable<CompleteOptions["reasoningEffort"]>): string {
+  return effort === "minimal" || effort === "low" ? "low"
+    : effort === "medium" || effort === "high" ? "high"
+    : "max";
 }
 
 export function responsesReasoningFields(effort: CompleteOptions["reasoningEffort"]): Record<string, unknown> {

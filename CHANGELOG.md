@@ -50,6 +50,13 @@
 - 按模型版本映射：GLM-5.3 / 5.4+ 强制 `thinking: enabled` 并把界面六档映射到 `low / high / max`（关闭档降为 `low`，因为这些模型不允许关闭思考）；GLM-5.2 使用其兼容档位 `minimal / medium / high / xhigh`；GLM-5.1 / 4.x 只发送 `thinking` 开关。自定义端点按模型名识别 GLM。
 - 验证：`reasoning-fields.test.ts` 扩到 9 个用例覆盖上述版本，`npm run typecheck` 通过。思考强度默认值仍是各模型统一的 `max`，可在模型弹层调整，未写死。
 
+### 思考强度能力接口
+
+- 新增 `POST /api/model-capabilities`：按当前模型配置返回该模型真正接受的思考档位、默认值、是否可关闭思考、原生档位映射与说明文字。能力表（`reasoning-capability.ts`）是请求字段生成与前端展示的唯一真相源，两端不再各写一套映射。
+- 模型弹层改为按接口返回的档位渲染按钮：GLM-5.3 / flash 等强制思考模型只显示 `low / 高(high) / max`，不再给出会被降级的无效档位；按钮标注默认值、悬浮显示实际发送的原生值；保存的档位若不被支持会明确提示。
+- 能力按模型名 / 端点识别 GLM、DeepSeek、OpenAI 与各协议（Anthropic / Gemini / Responses），无法识别时回退通用档位并说明以服务商为准。
+- 验证：`reasoning-capability.test.ts`（8 例）+ 路由测试覆盖能力表、字段一致性与接口返回，相关 123 个测试通过，`npm run typecheck` 通过。
+
 ### 对话层上下文压缩
 
 - 压缩阈值改为按「摘要 + 摘要边界之后的有效消息」计算，不再统计全部历史；压缩一次后不会每轮重复触发。
