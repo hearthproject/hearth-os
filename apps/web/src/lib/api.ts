@@ -24,10 +24,6 @@ import type {
   ExecutorSettingsPatch,
   ExecutorSettingsResponse,
   EventEnvelope,
-  FeishuDomain,
-  FeishuIntegrationResponse,
-  FeishuPairingCodeResponse,
-  FeishuTestResponse,
   HealthResponse,
   FolderBrowseResult,
   ImBridgeView,
@@ -380,20 +376,6 @@ export const api = {
   }),
   verifyOnboarding: () =>
     request<{ verification: OnboardingVerificationView; onboarding: OnboardingSnapshot }>("/api/onboarding/verify", { method: "POST" }),
-  feishu: () => request<FeishuIntegrationResponse>("/api/integrations/feishu"),
-  saveFeishu: (input: {
-    enabled?: boolean;
-    appId?: string;
-    appSecret?: string;
-    allowedOpenIds?: string[];
-    domain?: FeishuDomain;
-  }) => request<FeishuIntegrationResponse>("/api/integrations/feishu", {
-    method: "PUT",
-    body: JSON.stringify(input)
-  }),
-  testFeishu: (input: { appId?: string; appSecret?: string; domain?: FeishuDomain } = {}) =>
-    request<FeishuTestResponse>("/api/integrations/feishu/test", { method: "POST", body: JSON.stringify(input) }),
-  reconnectFeishu: () => request<FeishuIntegrationResponse>("/api/integrations/feishu/reconnect", { method: "POST" }),
   im: () => request<ImBridgeView>("/api/integrations/im"),
   saveImWechat: (input: {
     enabled?: boolean;
@@ -409,23 +391,6 @@ export const api = {
   pollWechatQr: (qrcode: string) =>
     request<WechatQrStatusView>(`/api/integrations/im/wechat/qrcode/status?qrcode=${encodeURIComponent(qrcode)}`),
   reconnectWechat: () => request<ImBridgeView>("/api/integrations/im/wechat/reconnect", { method: "POST" }),
-  saveImQq: (input: {
-    enabled?: boolean;
-    appId?: string;
-    clientSecret?: string;
-    sandbox?: boolean;
-    conversationId?: string | null;
-    projectId?: string | null;
-  }) => request<ImBridgeView>("/api/integrations/im/qq", {
-    method: "PUT",
-    body: JSON.stringify(input)
-  }),
-  reconnectQq: () => request<ImBridgeView>("/api/integrations/im/qq/reconnect", { method: "POST" }),
-  createFeishuPairingCode: (conversationId?: string) =>
-    request<FeishuPairingCodeResponse>("/api/integrations/feishu/pairing-code", {
-      method: "POST",
-      body: JSON.stringify(conversationId ? { conversationId } : {})
-    }),
   security: () => request<SecuritySnapshot>("/api/security"),
   setKillSwitch: (enabled: boolean, reason?: string) => request<SecuritySnapshot>("/api/security/kill-switch", {
     method: "POST",

@@ -448,7 +448,7 @@ describe("cross-module integration", () => {
         { method: "PUT", url: "/api/executor-settings", payload: { preferredExecutorId: "nope" } },
         { method: "POST", url: "/api/chat", payload: { message: "" } },
         { method: "POST", url: "/api/chat", payload: { message: "hi", conversationId: "missing" } },
-        { method: "PUT", url: "/api/integrations/feishu", payload: { appId: 1 } },
+        { method: "PUT", url: "/api/integrations/im/wechat", payload: { enabled: "yes" } },
         { method: "PATCH", url: "/api/web-search/settings", payload: { provider: "bogus" } }
       ];
       for (const testCase of cases) {

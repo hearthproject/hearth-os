@@ -672,50 +672,6 @@ export interface ModelSettingsResponse {
   configured?: boolean;
 }
 
-export type FeishuDomain = "feishu" | "lark";
-export type FeishuConnectionState = "disabled" | "starting" | "connected" | "reconnecting" | "error";
-
-export interface FeishuSettingsView {
-  enabled: boolean;
-  appId: string;
-  hasAppSecret: boolean;
-  appSecretMasked: string | null;
-  allowedOpenIds: string[];
-  domain: FeishuDomain;
-  updatedAt: string | null;
-}
-
-export interface FeishuStatus {
-  state: FeishuConnectionState;
-  lastEventAt: string | null;
-  lastError: string | null;
-  connectedAt: string | null;
-  reconnectAttempts: number;
-  inboundCount: number;
-  outboundPending: number;
-  outboundSent: number;
-  outboundFailed: number;
-  lastOutboundAt: string | null;
-}
-
-export interface FeishuPairingCodeResponse {
-  code: string;
-  expiresAt: string;
-  conversationId: string;
-  conversationTitle: string;
-}
-
-export interface FeishuIntegrationResponse {
-  settings: FeishuSettingsView;
-  status: FeishuStatus;
-}
-
-export interface FeishuTestResponse {
-  ok: boolean;
-  error?: string;
-  elapsedMs: number;
-}
-
 export interface ExecutorSettingsResponse {
   settings: ExecutorSettingsView;
 }
@@ -915,7 +871,7 @@ export type ExecutorBootstrapStreamEvent =
   | { type: "complete"; result: ExecutorBootstrapResult }
   | { type: "error"; code?: string; message: string };
 
-export type ImChannelId = "wechat" | "qq";
+export type ImChannelId = "wechat";
 export type ImConnectionState = "disabled" | "starting" | "connected" | "reconnecting" | "error";
 
 export interface ImChannelStatus {
@@ -928,6 +884,8 @@ export interface ImChannelStatus {
   outboundSent: number;
   outboundFailed: number;
   accountLabel: string | null;
+  running: boolean;
+  queued: number;
 }
 
 export interface WechatSettingsView {
@@ -943,20 +901,8 @@ export interface WechatSettingsView {
   updatedAt: string | null;
 }
 
-export interface QqSettingsView {
-  enabled: boolean;
-  appId: string;
-  hasClientSecret: boolean;
-  sandbox: boolean;
-  conversationId: string | null;
-  conversationTitle: string | null;
-  projectId: string | null;
-  projectTitle: string | null;
-  updatedAt: string | null;
-}
-
 export interface ImBridgeView {
-  settings: { wechat: WechatSettingsView; qq: QqSettingsView };
+  settings: { wechat: WechatSettingsView };
   status: Record<ImChannelId, ImChannelStatus>;
   qrcode: { active: boolean; expiresAt: string | null } | null;
 }

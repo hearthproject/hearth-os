@@ -92,10 +92,10 @@ describe("IM bridge settings", () => {
     expect(settings).toMatchObject({
       projectId,
       projectTitle: "GoldMind",
-      conversationTitle: "IM · GoldMind"
+      conversationTitle: "微信IM · GoldMind"
     });
     const conversation = store.getConversation(settings.conversationId);
-    expect(conversation).toMatchObject({ title: "IM · GoldMind", projectId });
+    expect(conversation).toMatchObject({ title: "微信IM · GoldMind", projectId });
 
     const again = await app.inject({ method: "GET", url: "/api/integrations/im" });
     expect(again.json().settings.wechat.conversationId).toBe(settings.conversationId);
@@ -118,9 +118,9 @@ describe("IM bridge settings", () => {
     });
     const replies: string[] = [];
     const internal = bridge as unknown as {
-      deliverChat(channel: "wechat", text: string, reply: (text: string) => Promise<void>): Promise<void>;
+      deliverChat(text: string, reply: (text: string) => Promise<void>): Promise<void>;
     };
-    await internal.deliverChat("wechat", "看看我桌面有哪些文件", async (text) => { replies.push(text); });
+    await internal.deliverChat("看看我桌面有哪些文件", async (text) => { replies.push(text); });
     expect(replies).toEqual(["桌面有 2 个文件：报价表.xlsx、说明.txt。"]);
     expect(replies.join("\n")).not.toContain("收到，正在处理");
     expect(replies.join("\n")).not.toContain("开始执行");
@@ -154,9 +154,9 @@ describe("IM bridge settings", () => {
     });
     const replies: string[] = [];
     const internal = bridge as unknown as {
-      deliverChat(channel: "wechat", text: string, reply: (text: string) => Promise<void>): Promise<void>;
+      deliverChat(text: string, reply: (text: string) => Promise<void>): Promise<void>;
     };
-    await internal.deliverChat("wechat", "讲两句", async (text) => { replies.push(text); });
+    await internal.deliverChat("讲两句", async (text) => { replies.push(text); });
     expect(replies).toEqual(["这是第一句完整的话。这是第二句。"]);
   });
 
@@ -297,9 +297,25 @@ describe("IM bridge settings", () => {
     expect(response.statusCode).toBe(200);
     const body = response.json();
     expect(body.settings.wechat).toMatchObject({ enabled: false, hasToken: false });
-    expect(body.settings.qq).toMatchObject({ enabled: false, hasClientSecret: false });
     expect(body.status.wechat.state).toBe("disabled");
-    expect(body.status.qq.state).toBe("disabled");
+    expect(body.status.wechat.running).toBe(false);
+    await app.close();
+  });
+
+  it("renames the legacy shared IM conversation on startup", async () => {
+    const legacy = store.createConversation("IM 对话");
+    store.setAppSetting("integrations.im.conversationId", legacy.id);
+    const app = await buildServer({
+      store,
+      serveWeb: false,
+      dataDir: root,
+      secretBox: new SecretBox(Buffer.alloc(32, 9)),
+      modelSettingsPath: join(root, "settings.json"),
+      attachmentRoot: join(root, "files"),
+      executorSettingsPath: join(root, "executor-settings.json"),
+      startMaintenance: false
+    });
+    expect(store.getConversation(legacy.id)?.title).toBe("微信IM");
     await app.close();
   });
 
@@ -334,15 +350,6 @@ describe("IM bridge settings", () => {
       baseUrl: "https://ilinkai.weixin.qq.com"
     });
     expect(JSON.stringify(saved.json())).not.toContain("wechat-token");
-
-    const qq = await app.inject({
-      method: "PUT",
-      url: "/api/integrations/im/qq",
-      payload: { enabled: false, appId: "1024", clientSecret: "qq-secret" }
-    });
-    expect(qq.statusCode).toBe(200);
-    expect(qq.json().settings.qq).toMatchObject({ hasClientSecret: true, appId: "1024" });
-    expect(JSON.stringify(qq.json())).not.toContain("qq-secret");
     await app.close();
   });
 });

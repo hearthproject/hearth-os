@@ -25,10 +25,10 @@ const result = await build({
   format: "esm",
   target: "node22",
   minify: true,
-  // Split the graph into lazy chunks. playwright-core, the Feishu SDK, the
-  // transformers runtime and the document extractors are only reached through
-  // dynamic imports, so keeping them out of the startup module removes ~10 MiB
-  // from the eager parse path.
+  // Split the graph into lazy chunks. playwright-core, the transformers runtime
+  // and the document extractors are only reached through dynamic imports, so
+  // keeping them out of the startup module removes ~10 MiB from the eager parse
+  // path.
   splitting: true,
   chunkNames: "chunk-[hash]",
   external: ["@openai/codex-win32-x64", "@huggingface/transformers", "@deepseek-ai/dsh-sdk-client"],

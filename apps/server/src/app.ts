@@ -55,7 +55,6 @@ import { MaintenanceError, MaintenanceService } from "./maintenance.ts";
 import { DiagnosticsService } from "./diagnostics.ts";
 import { SourceRegistry, SourceRegistryError } from "./sources.ts";
 import { OnboardingService } from "./onboarding.ts";
-import { FeishuError, FeishuService, type FeishuChatClient, type FeishuTransportFactory } from "./feishu.ts";
 import { ImBridgeError, ImBridgeService } from "./im-bridge.ts";
 import { DesktopError, DesktopService } from "./desktop.ts";
 import { MemoryError, MemoryService } from "./memory.ts";
@@ -490,37 +489,10 @@ const onboardingCompleteSchema = z.object({
   skipped: z.boolean().optional()
 }).strict();
 
-const feishuSettingsPatchSchema = z.object({
-  enabled: z.boolean().optional(),
-  appId: z.string().trim().max(100).optional(),
-  appSecret: z.string().max(500).optional(),
-  allowedOpenIds: z.array(z.string().trim().min(1).max(100)).max(50).optional(),
-  domain: z.enum(["feishu", "lark"]).optional()
-}).strict().refine((value) => Object.keys(value).length > 0, { message: "至少需要修改一个设置" });
-
-const feishuTestSchema = z.object({
-  appId: z.string().trim().max(100).optional(),
-  appSecret: z.string().max(500).optional(),
-  domain: z.enum(["feishu", "lark"]).optional()
-}).strict();
-
-const feishuPairingCodeSchema = z.object({
-  conversationId: z.string().trim().min(1).max(80).optional()
-}).strict();
-
 const imWechatSettingsSchema = z.object({
   enabled: z.boolean().optional(),
   token: z.string().max(500).optional(),
   baseUrl: z.string().trim().max(200).optional(),
-  conversationId: z.string().trim().min(1).max(80).nullable().optional(),
-  projectId: z.string().trim().min(1).max(80).nullable().optional()
-}).strict().refine((value) => Object.keys(value).length > 0, { message: "至少需要修改一个设置" });
-
-const imQqSettingsSchema = z.object({
-  enabled: z.boolean().optional(),
-  appId: z.string().trim().max(100).optional(),
-  clientSecret: z.string().max(500).optional(),
-  sandbox: z.boolean().optional(),
   conversationId: z.string().trim().min(1).max(80).nullable().optional(),
   projectId: z.string().trim().min(1).max(80).nullable().optional()
 }).strict().refine((value) => Object.keys(value).length > 0, { message: "至少需要修改一个设置" });
@@ -653,8 +625,6 @@ export interface BuildServerOptions {
   serveWeb?: boolean;
   startScheduler?: boolean;
   startMaintenance?: boolean;
-  feishuTransportFactory?: FeishuTransportFactory;
-  feishuChatClient?: FeishuChatClient;
   effectExecutor?: EffectExecutor;
   sourceContentRoot?: string;
   deviceFrameRoot?: string;
@@ -881,21 +851,11 @@ export async function buildServer(options: BuildServerOptions = {}) {
   };
   const codexEnv = () => modelRegistry.codexEnv();
   const attachmentRoot = options.attachmentRoot ?? ATTACHMENT_DIR;
-  const feishu = new FeishuService({
-    store,
-    secretBox,
-    attachmentRoot,
-    service,
-    approvals,
-    ...(options.feishuTransportFactory ? { transportFactory: options.feishuTransportFactory } : {}),
-    ...(options.feishuChatClient ? { chatClient: options.feishuChatClient } : {})
-  });
   const im = new ImBridgeService({
     store,
     secretBox,
     baseUrl: () => "",
-    attachmentRoot,
-    ...(options.feishuChatClient ? { chatClient: options.feishuChatClient } : {})
+    attachmentRoot
   });
   const executorHealth = (executorId: ExecutorId): ExecutorHealth => {
     const health = readExecutorHealth(executorId, executorSettingsStore.load(), executorSettingsPath);
@@ -1085,7 +1045,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
       void app.close().catch(() => undefined);
     }, 150);
   });
-  app.decorate("feishu", feishu);
   app.decorate("im", im);
 
   schedules.start();
@@ -1119,7 +1078,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
   library.start();
   app.addHook("onClose", async () => {
     library.stop();
-    await feishu.stop();
     await im.stop();
     maintenance.stop();
     schedules.stop();
@@ -1239,55 +1197,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
   supervisionTimer.unref?.();
   app.addHook("onClose", async () => clearInterval(supervisionTimer));
 
-  app.get("/api/integrations/feishu", async () => ({
-    settings: feishu.view(),
-    status: feishu.snapshot()
-  }));
-
-  app.put("/api/integrations/feishu", async (request, reply) => {
-    const parsed = feishuSettingsPatchSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_FEISHU_SETTINGS", message: "飞书设置参数不正确" });
-    try {
-      return await feishu.updateSettings(parsed.data);
-    } catch (error) {
-      if (error instanceof FeishuError) {
-        return reply.code(error.statusCode).send({ error: error.code, message: error.message });
-      }
-      return reply.code(500).send({ error: "FEISHU_SETTINGS_FAILED", message: error instanceof Error ? error.message : String(error) });
-    }
-  });
-
-  app.post("/api/integrations/feishu/test", async (request, reply) => {
-    const parsed = feishuTestSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_FEISHU_TEST", message: "飞书测试参数不正确" });
-    try {
-      return await feishu.test(parsed.data);
-    } catch (error) {
-      if (error instanceof FeishuError) {
-        return reply.code(error.statusCode).send({ error: error.code, message: error.message });
-      }
-      return reply.code(500).send({ error: "FEISHU_TEST_FAILED", message: error instanceof Error ? error.message : String(error) });
-    }
-  });
-
-  app.post("/api/integrations/feishu/reconnect", async () => {
-    await feishu.restart();
-    return { settings: feishu.view(), status: feishu.snapshot() };
-  });
-
-  app.post("/api/integrations/feishu/pairing-code", async (request, reply) => {
-    const parsed = feishuPairingCodeSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_FEISHU_PAIRING", message: "配对参数不正确" });
-    try {
-      return feishu.createPairingCode(parsed.data.conversationId);
-    } catch (error) {
-      if (error instanceof FeishuError) {
-        return reply.code(error.statusCode).send({ error: error.code, message: error.message });
-      }
-      throw error;
-    }
-  });
-
   app.get("/api/integrations/im", async () => im.view());
 
   app.put("/api/integrations/im/wechat", async (request, reply) => {
@@ -1324,26 +1233,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
 
   app.post("/api/integrations/im/wechat/reconnect", async () => {
     await im.restartWechat();
-    return im.view();
-  });
-
-  app.put("/api/integrations/im/qq", async (request, reply) => {
-    const parsed = imQqSettingsSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "INVALID_IM_SETTINGS", message: "QQ 连接配置不正确" });
-    try {
-      im.saveQq(parsed.data);
-      await im.restartQq();
-      return im.view();
-    } catch (error) {
-      if (error instanceof ImBridgeError) {
-        return reply.code(error.statusCode).send({ error: error.code, message: error.message });
-      }
-      return reply.code(500).send({ error: "IM_SETTINGS_FAILED", message: error instanceof Error ? error.message : String(error) });
-    }
-  });
-
-  app.post("/api/integrations/im/qq/reconnect", async () => {
-    await im.restartQq();
     return im.view();
   });
 

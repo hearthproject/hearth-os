@@ -22,9 +22,6 @@ try {
   void app.im.connectAll().catch((error: unknown) => {
     console.error("IM 连接启动失败：", error instanceof Error ? error.message : String(error));
   });
-  void app.feishu.start(address).catch((error: unknown) => {
-    console.error("飞书长连接启动失败：", error instanceof Error ? error.message : String(error));
-  });
   const profile = loadCodexProfile();
   console.log(`Hearth 已启动：${address}（组装 ${buildMs}ms / 监听 ${Math.round(performance.now() - bootStartedAt)}ms）`);
   console.log(`Codex 执行器：${describeCodexProfile(profile)}（${profile.authSource}）`);

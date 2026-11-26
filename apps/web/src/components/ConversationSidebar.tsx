@@ -21,20 +21,16 @@ export function ConversationSidebar() {
   const conversationsQuery = useQuery({ queryKey: ["conversations"], queryFn: api.conversations, refetchInterval: 30_000 });
   const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: api.projects, refetchInterval: 60_000 });
   const tasksQuery = useQuery({ queryKey: ["tasks"], queryFn: api.tasks, refetchInterval: 30_000 });
-  const imQuery = useQuery({ queryKey: ["im"], queryFn: api.im, refetchInterval: 45_000, staleTime: 20_000 });
+  const imQuery = useQuery({ queryKey: ["imBridge"], queryFn: api.im, refetchInterval: 4_000, staleTime: 2_000 });
 
   const conversations = conversationsQuery.data?.conversations ?? [];
   const projects = projectsQuery.data?.projects ?? [];
   const tasks = tasksQuery.data?.tasks ?? [];
   const imView = imQuery.data;
-  // 绑定了 IM 的项目/账号固定一个入口，位置在新对话下方、项目与最近之上，且不随会话列表变化。
-  const fixedIm = imView ? (
-    imView.settings.wechat.enabled && imView.settings.wechat.conversationId
-      ? { channel: "微信", conversationId: imView.settings.wechat.conversationId, projectTitle: imView.settings.wechat.projectTitle }
-      : imView.settings.qq.enabled && imView.settings.qq.conversationId
-        ? { channel: "QQ", conversationId: imView.settings.qq.conversationId, projectTitle: imView.settings.qq.projectTitle }
-        : null
-  ) : null;
+  // 绑定了微信的项目/账号固定一个入口，位置在新对话下方、项目与最近之上，且不随会话列表变化。
+  const fixedIm = imView && imView.settings.wechat.enabled && imView.settings.wechat.conversationId
+    ? { conversationId: imView.settings.wechat.conversationId, projectTitle: imView.settings.wechat.projectTitle }
+    : null;
   const fixedImConversationId = fixedIm?.conversationId ?? null;
   const projectsById = new Map(projects.map((project) => [project.id, project]));
   const tasksByConversation = new Map<string, TaskListItem[]>();
@@ -44,6 +40,9 @@ export function ConversationSidebar() {
     list.push(task);
     tasksByConversation.set(task.conversationId, list);
   }
+  const fixedImTasks = fixedImConversationId ? tasksByConversation.get(fixedImConversationId) ?? [] : [];
+  const fixedImTaskRunning = fixedImTasks.some((task) => !task.archivedAt && isActive(task.status));
+  const fixedImRunning = Boolean(imView?.status.wechat.running || (imView?.status.wechat.queued ?? 0) > 0) || fixedImTaskRunning;
   const projectGroups = projects.map((project) => ({
     project,
     conversations: conversations.filter((conversation) => conversation.projectId === project.id && conversation.id !== fixedImConversationId)
@@ -147,11 +146,12 @@ export function ConversationSidebar() {
           className={`conversation-item fixed-im ${fixedIm.conversationId === selection.conversationId ? "active" : ""}`}
           onClick={() => openChat(fixedIm.conversationId)}
           disabled={!canSwitch}
-          title={`固定的 IM 会话：${fixedIm.channel}${fixedIm.projectTitle ? ` · ${fixedIm.projectTitle}` : ""}。不会随对话列表移动。`}
+          title={`固定的微信 IM 会话：微信${fixedIm.projectTitle ? ` · ${fixedIm.projectTitle}` : ""}。不会随对话列表移动。`}
         >
           <MessageCircle size={15} />
-          <span className="fixed-im-title">IM 会话</span>
-          <span className="fixed-im-badge">{fixedIm.channel} 已绑定</span>
+          <span className="fixed-im-title">微信IM</span>
+          {fixedImRunning && <Loader2 size={11} className="spin fixed-im-running" aria-label="微信IM 正在执行任务" />}
+          <span className="fixed-im-badge">已绑定</span>
         </button>
       )}
       <div className="conversation-list">

@@ -302,13 +302,13 @@ async function main() {
       await page.locator(".nav-more-toggle").click();
     }
     await page.locator("#nav-more").waitFor({ timeout: 15_000 });
-    for (const label of ["定时任务", "连接"]) {
+    for (const label of ["定时任务", "连接微信"]) {
       assert.equal(await page.locator("#nav-more").getByRole("link", { name: label, exact: true }).count(), 1, `${label} should be a secondary link`);
     }
 
     await page.keyboard.press("Control+k");
     await page.locator(".command-dialog").waitFor({ timeout: 15_000 });
-    for (const label of ["聊天", "资料库", "定时任务", "连接", "设置"]) {
+    for (const label of ["聊天", "资料库", "定时任务", "连接微信", "设置"]) {
       assert.equal(await page.locator(".command-group").getByRole("button", { name: label, exact: true }).count(), 1, `${label} should be searchable`);
     }
     await page.keyboard.press("Escape");
@@ -538,21 +538,13 @@ async function main() {
     assert.equal(await page.getByLabel("全局并发上限").count(), 0);
   });
 
-  await runTest(page, "opens each connection from a compact provider overview", async () => {
+  await runTest(page, "shows the WeChat connection panel directly", async () => {
     await page.goto(`${baseUrl}/connections`, { waitUntil: "networkidle" });
-    await page.locator(".connection-card").first().waitFor({ timeout: 15_000 });
-    assert.equal(await page.locator(".connection-card").count(), 3);
-    assert.deepEqual(await page.locator(".connection-card strong").allInnerTexts(), ["微信", "飞书", "QQ"]);
-
-    await page.locator('.connection-card[data-channel="wechat"]').click();
-    await page.locator(".connection-detail .im-channel-title").filter({ hasText: "微信" }).waitFor();
-    await page.getByRole("button", { name: "返回连接" }).click();
-    await page.locator('.connection-card[data-channel="feishu"]').click();
-    await page.locator(".connection-detail").getByText("飞书消息入口").waitFor();
-    await page.getByRole("button", { name: "返回连接" }).click();
-    await page.locator('.connection-card[data-channel="qq"]').click();
-    await page.locator(".connection-detail .im-channel-title").filter({ hasText: "QQ" }).waitFor();
-    assert.equal(await page.locator(".connection-detail .im-channel-card").count(), 1);
+    await page.locator(".settings-head h1").filter({ hasText: "连接微信" }).waitFor({ timeout: 15_000 });
+    await page.locator(".im-channel-title").filter({ hasText: "微信" }).waitFor();
+    assert.equal(await page.locator(".connection-card").count(), 0);
+    assert.equal(await page.locator(".im-channel-card").count(), 1);
+    assert.equal(await page.getByRole("button", { name: "返回连接" }).count(), 0);
   });
 
   await runTest(page, "uses the global preferred executor for a new chat", async () => {

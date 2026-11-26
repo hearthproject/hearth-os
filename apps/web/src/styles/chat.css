@@ -153,6 +153,11 @@
   font-size: var(--fs-10);
 }
 
+.fixed-im-running {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
 .conversation-item {
   border-radius: var(--radius);
   transition: background 160ms ease, box-shadow 160ms ease;
