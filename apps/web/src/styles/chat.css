@@ -496,7 +496,7 @@
   position: relative;
   order: 1;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: flex-end;
   gap: 7px;
   width: 100%;
@@ -632,6 +632,11 @@
   order: -1;
   gap: 5px;
   padding: 2px 4px 0;
+}
+
+/* 有技能/MCP chip 时才换行，平时保持“输入框 + 发送按钮”同一行。 */
+.composer:has(.composer-context-chips) {
+  flex-wrap: wrap;
 }
 
 .composer-executor {
