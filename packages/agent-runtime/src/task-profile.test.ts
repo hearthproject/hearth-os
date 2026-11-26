@@ -42,8 +42,9 @@ describe("task profiles", () => {
   });
 
   it("keeps high-frequency profile tools small and deferrable", () => {
-    expect(TASK_PROFILES.coding.directTools.length).toBeLessThanOrEqual(18);
-    expect(TASK_PROFILES.general.directTools.length).toBeLessThanOrEqual(15);
+    // The three plan tools stay direct so a first turn can submit a plan without tool_search.
+    expect(TASK_PROFILES.coding.directTools.length).toBeLessThanOrEqual(20);
+    expect(TASK_PROFILES.general.directTools.length).toBeLessThanOrEqual(18);
     for (const profile of Object.values(TASK_PROFILES)) {
       expect(profile.deferRemaining).toBe(true);
       expect(new Set(profile.directTools).size).toBe(profile.directTools.length);
@@ -58,7 +59,7 @@ describe("task profiles", () => {
     const initialPayload = [...direct, toolSearchDefinition(hiddenCount), toolCallDefinition()];
     const fullSize = JSON.stringify(definitions).length;
     const initialSize = JSON.stringify(initialPayload).length;
-    expect(direct.length).toBe(18);
+    expect(direct.length).toBe(20);
     expect(hiddenCount).toBeGreaterThan(0);
     expect(initialSize / fullSize).toBeLessThanOrEqual(0.75);
   });

@@ -110,6 +110,7 @@ export class LibraryTreeService {
         memoryId: memory.id,
         memoryKind: memory.kind,
         status: memory.status,
+        scope: memory.scope,
         tags: memory.tags,
         trust: memory.trust,
         taint: memory.taint,

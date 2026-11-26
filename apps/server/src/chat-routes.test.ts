@@ -4,8 +4,9 @@ import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HearthStore } from "@hearth/eventlog";
-import { defaultConversationSettings, mergeConversationSettings } from "@hearth/core";
+import { defaultConversationSettings, mergeConversationSettings, type LibrarySearchHit } from "@hearth/core";
 import { buildServer } from "./app.ts";
+import { libraryHitAllowedForConversation } from "./chat-routes.ts";
 import { HearthService, visibleDeliverables } from "./service.ts";
 
 async function createTestProfile(
@@ -1089,6 +1090,22 @@ describe("unified harness API", () => {
     expect(capability.levels).toEqual(["low", "high", "max"]);
     expect(capability.canDisable).toBe(false);
     expect(capability.model).toBe("glm-5.3-flash");
+  });
+
+  it("keeps project-scoped library memories out of unrelated conversations", () => {
+    const memoryHit = {
+      node: { kind: "memory", metadata: { scope: "project:project-ember" } },
+      score: 1,
+      snippet: "private marker",
+      matchedBy: "fts"
+    } as unknown as LibrarySearchHit;
+
+    expect(libraryHitAllowedForConversation(memoryHit, null)).toBe(false);
+    expect(libraryHitAllowedForConversation(memoryHit, "project-ember")).toBe(true);
+    expect(libraryHitAllowedForConversation({
+      ...memoryHit,
+      node: { kind: "task", metadata: {} }
+    } as unknown as LibrarySearchHit, null)).toBe(true);
   });
 });
 

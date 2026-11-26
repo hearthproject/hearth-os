@@ -4,7 +4,7 @@ import { basename, dirname, extname, join } from "node:path";
 import multipart from "@fastify/multipart";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
-import type { ChatAttachment, ChatMessageRecord, ContextUsageSnapshot, ExecutorHealth, ExecutorId, LocalProject, TaskRecord } from "@hearth/core";
+import type { ChatAttachment, ChatMessageRecord, ContextUsageSnapshot, ExecutorHealth, ExecutorId, LibrarySearchHit, LocalProject, TaskRecord } from "@hearth/core";
 import { defaultConversationSettings, EXECUTOR_IDS, mergeConversationSettings } from "@hearth/core";
 import { loadCodexProfile, probeCodex, type CodexProfile } from "@hearth/codex-executor";
 import { loadExecutorSettings, type ExecutorSettingsStore } from "./executor-settings.ts";
@@ -771,12 +771,13 @@ export async function registerChatRoutes(app: FastifyInstance, options: ChatRout
       if (options.library) {
         try {
           const recalled = await options.library.search(userContent, 6);
-          if (recalled.hits.length > 0) {
+          const hits = recalled.hits.filter((hit) => libraryHitAllowedForConversation(hit, conversation.projectId));
+          if (hits.length > 0) {
             libraryContext = [
               "## 相关资料",
-              ...recalled.hits.map((hit) => `### ${hit.node.title} [${hit.node.kind}]\n引用：${hit.node.ref}\n${hit.snippet}`)
+              ...hits.map((hit) => `### ${hit.node.title} [${hit.node.kind}]\n引用：${hit.node.ref}\n${hit.snippet}`)
             ].join("\n\n");
-            send("library", { count: recalled.hits.length });
+            send("library", { count: hits.length });
           }
         } catch {
           // Library recall is best effort and never blocks the selected harness.
@@ -1206,6 +1207,14 @@ function saveRegistryChatSettings(
   });
   registry.setChatProfile(created.id);
   return registry.chatSettings();
+}
+
+/** Keep project-scoped library memories inside their own project conversations. */
+export function libraryHitAllowedForConversation(hit: LibrarySearchHit, projectId: string | null | undefined): boolean {
+  if (hit.node.kind !== "memory") return true;
+  const scope = typeof hit.node.metadata.scope === "string" ? hit.node.metadata.scope : "";
+  if (!/^project[.:]/i.test(scope)) return true;
+  return typeof projectId === "string" && projectId.length > 0 && scope === projectMemoryScope(projectId);
 }
 
 function projectPromptBlock(project: Pick<LocalProject, "name" | "path" | "defaultBranch">): string {

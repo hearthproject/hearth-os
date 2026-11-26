@@ -57,6 +57,11 @@
 - 能力按模型名 / 端点识别 GLM、DeepSeek、OpenAI 与各协议（Anthropic / Gemini / Responses），无法识别时回退通用档位并说明以服务商为准。
 - 验证：`reasoning-capability.test.ts`（8 例）+ 路由测试覆盖能力表、字段一致性与接口返回，相关 123 个测试通过，`npm run typecheck` 通过。
 
+### CI 门禁修复
+
+- 更新任务 profile 的工具预算：`submit_plan` / `todo_write` / `todo_read` 现在是首轮必备直接工具，编码档 20 个、通用档 18 个；仍保留 `tool_search` 发现其余工具。
+- 资料库检索注入对话时按会话项目过滤记忆节点，项目记忆不会再被无关会话的 `## 相关资料` 带出。
+
 ### 对话层上下文压缩
 
 - 压缩阈值改为按「摘要 + 摘要边界之后的有效消息」计算，不再统计全部历史；压缩一次后不会每轮重复触发。
