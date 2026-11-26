@@ -1106,6 +1106,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     memory,
     library,
     skills,
+    mcpServers,
     personal: { ontology, mentions, broker: contextBroker, writer: ontologyWriter }
   });
   registerLibraryRoutes(app, library);

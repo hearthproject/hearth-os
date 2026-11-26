@@ -15,6 +15,7 @@ import {
   ClipboardList,
   Clock,
   Copy,
+  Crosshair,
   FileText,
   Folder,
   Gauge,
@@ -31,7 +32,6 @@ import {
   Settings2,
   Sparkles,
   Square,
-  Target,
   Trash2,
   X
 } from "lucide-react";
@@ -104,7 +104,7 @@ const EXECUTOR_ORDER: ExecutorId[] = ["deepseek-harness", "codex", "native"];
 const TERMINAL_GOAL_STATES = new Set(["done", "cancelled", "failed"]);
 
 type ComposerModeId = "full" | "plan" | "goal";
-type ComposerCommandId = "plan" | "goal" | "mcp";
+type ComposerCommandId = "plan" | "goal" | "skill" | "mcp";
 interface ComposerCommand {
   id: ComposerCommandId;
   command: string;
@@ -113,6 +113,7 @@ interface ComposerCommand {
 const COMPOSER_COMMANDS: ComposerCommand[] = [
   { id: "plan", command: "/plan", description: "先只读调查，给出计划，然后开始执行" },
   { id: "goal", command: "/goal", description: "多轮推进一个目标，直到验收完成" },
+  { id: "skill", command: "/skill", description: "搜索、安装并选择本次任务使用的技能" },
   { id: "mcp", command: "/mcp", description: "搜索、安装并选择本次任务使用的 MCP 工具" }
 ];
 const MAX_SELECTED_MCP_SERVERS = 8;
@@ -252,6 +253,12 @@ export function ChatPage() {
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(() => new URLSearchParams(location.search).get("skill"));
   const [selectedMcpServerIds, setSelectedMcpServerIds] = useState<string[]>([]);
   const [mcpPanelOpen, setMcpPanelOpen] = useState(false);
+  const [skillPanelOpen, setSkillPanelOpen] = useState(false);
+  const [skillQuery, setSkillQuery] = useState("");
+  const [skillSourceInput, setSkillSourceInput] = useState("");
+  const [skillRegistry, setSkillRegistry] = useState<Array<{ repo: string; source: string; skillPath: string | null; ref: string | null; description: string }>>([]);
+  const [skillRegistryQuery, setSkillRegistryQuery] = useState<string | null>(null);
+  const [skillRegistryBusy, setSkillRegistryBusy] = useState(false);
   const [mcpQuery, setMcpQuery] = useState("");
   const [mcpNotice, setMcpNotice] = useState<string | null>(null);
   const [mcpInstallCandidate, setMcpInstallCandidate] = useState<McpRegistryCandidate | null>(null);
@@ -333,7 +340,8 @@ export function ChatPage() {
   const isPlanCommand = /^\/plan(?:\s|$)/i.test(input.trimStart());
   const isFullCommand = /^\/full(?:\s|$)/i.test(input.trimStart());
   const isMcpCommand = /^\/mcp(?:\s|$)/i.test(input.trimStart());
-  const commandHasArgument = /^\/(?:goal|plan|full|mcp)\s+\S/i.test(input.trimStart());
+  const isSkillCommand = /^\/skill(?:\s|$)/i.test(input.trimStart());
+  const commandHasArgument = /^\/(?:goal|plan|full|mcp|skill)\s+\S/i.test(input.trimStart());
   const slashTerm = !commandHasArgument && input.startsWith("/") && !input.startsWith("//")
     ? input.slice(1).trim().toLocaleLowerCase()
     : null;
@@ -345,12 +353,17 @@ export function ChatPage() {
     if (!slashTerm) return true;
     return `${skill.name} ${skill.descriptionZh ?? skill.manifest.description} ${skill.id}`.toLocaleLowerCase().includes(slashTerm);
   }).slice(0, 8), [slashTerm, skills]);
+  const slashMcpMatches = useMemo(() => slashTerm === null ? [] : mcpServers.filter((server) => {
+    if (!slashTerm) return true;
+    return `${server.name} ${server.tools.map((tool) => tool.name).join(" ")}`.toLocaleLowerCase().includes(slashTerm);
+  }).slice(0, 6), [slashTerm, mcpServers]);
   const slashMatches = useMemo(
     () => [
       ...slashCommandMatches.map((command) => ({ kind: "command" as const, command })),
-      ...slashSkillMatches.map((skill) => ({ kind: "skill" as const, skill }))
+      ...slashSkillMatches.map((skill) => ({ kind: "skill" as const, skill })),
+      ...slashMcpMatches.map((server) => ({ kind: "mcp" as const, server }))
     ],
-    [slashCommandMatches, slashSkillMatches]
+    [slashCommandMatches, slashSkillMatches, slashMcpMatches]
   );
   const slashOpen = slashTerm !== null && !selectedSkill && !sending;
 
@@ -358,13 +371,31 @@ export function ChatPage() {
     mutationFn: api.installSkill,
     onSuccess: (result) => {
       setSkillInstallRequest(null);
-      setSkillNotice(`已安装「${result.skill.name}」。输入 / 就可以使用。`);
+      setSkillSourceInput("");
+      setSelectedSkillId(result.skill.id);
+      setSkillNotice(`已安装「${result.skill.name}」，已加入本轮任务。`);
       void queryClient.invalidateQueries({ queryKey: ["skills"] });
       void queryClient.invalidateQueries({ queryKey: ["library-tree"] });
       void queryClient.invalidateQueries({ queryKey: ["library-status"] });
     },
     onError: (error) => setSkillNotice(error instanceof Error ? error.message : "安装失败")
   });
+  async function searchSkillRegistry(query: string): Promise<void> {
+    const trimmed = query.trim();
+    if (!trimmed || skillRegistryBusy) return;
+    setSkillRegistryBusy(true);
+    setSkillNotice(null);
+    try {
+      const result = await api.searchSkillRegistry({ q: trimmed });
+      setSkillRegistry(result.candidates);
+      setSkillRegistryQuery(trimmed);
+      if (result.candidates.length === 0) setSkillNotice(`没有找到与「${trimmed}」匹配的 GitHub 技能，换个关键词试试。`);
+    } catch (error) {
+      setSkillNotice(error instanceof Error ? error.message : "技能搜索失败");
+    } finally {
+      setSkillRegistryBusy(false);
+    }
+  }
   const mcpSearchMutation = useMutation({
     mutationFn: (query: string) => api.searchMcpRegistry({ q: query, limit: 20 }),
     onError: (error) => setMcpNotice(error instanceof Error ? error.message : "MCP Registry 搜索失败")
@@ -463,8 +494,10 @@ export function ChatPage() {
     ? Boolean(current || conversationQuery.data)
     : Boolean(serverDefaults);
   useEffect(() => {
+    // 只在当前会话的设置真正加载完成后同步计划模式；否则切换会话时会沿用它会话的旧值。
+    if (!settingsReady) return;
     setPlanMode(conversationSettings.collaborationMode === "plan");
-  }, [conversationId, conversationSettings.collaborationMode]);
+  }, [conversationId, settingsReady, conversationSettings.collaborationMode]);
 
   const visibleMessages = useMemo(() => messages.filter((message) => !isTaskNoise(message)), [messages]);
   const runs = useMemo(() => {
@@ -649,6 +682,16 @@ export function ChatPage() {
     setDraggingFiles(false);
     dragDepthRef.current = 0;
     setModelMenuOpen(false);
+    // 模式属于会话：切走后必须清掉当前会话的目标/计划选择，避免串到平行会话。
+    setGoalMode(false);
+    setPlanMode(false);
+    setGoalDialogOpen(false);
+    setPlanDialogOpen(false);
+    setGoalManageMode(null);
+    setMcpPanelOpen(false);
+    setSkillPanelOpen(false);
+    setMcpNotice(null);
+    setSkillNotice(null);
     if (id) localStorage.setItem("hearth.conversation", id);
     else localStorage.removeItem("hearth.conversation");
   }
@@ -1102,6 +1145,11 @@ export function ChatPage() {
       handleMcpCommand(text);
       return;
     }
+    if (text && isSkillCommand && attachments.length === 0) {
+      setInput("");
+      handleSkillCommand(text);
+      return;
+    }
     if (text && isFullCommand && attachments.length === 0) {
       setInput("");
       await resetToFullMode();
@@ -1479,6 +1527,7 @@ export function ChatPage() {
         const match = slashMatches[Math.min(slashIndex, slashMatches.length - 1)];
         if (match?.kind === "command") chooseComposerCommand(match.command.id);
         else if (match?.kind === "skill") chooseSkill(match.skill.id);
+        else if (match?.kind === "mcp") chooseMcpServer(match.server);
         return;
       }
       event.preventDefault();
@@ -1500,7 +1549,15 @@ export function ChatPage() {
   function chooseSkill(id: string) {
     setSelectedSkillId(id);
     setInput("");
+    setSkillPanelOpen(false);
     setSlashIndex(0);
+    requestAnimationFrame(() => composerRef.current?.focus());
+  }
+
+  function chooseMcpServer(server: McpServerView) {
+    setInput("");
+    setSlashIndex(0);
+    toggleMcpServer(server);
     requestAnimationFrame(() => composerRef.current?.focus());
   }
 
@@ -1571,9 +1628,18 @@ export function ChatPage() {
     setSlashIndex(0);
     if (id === "mcp") {
       setMcpPanelOpen(true);
+      setSkillPanelOpen(false);
       setMcpNotice(null);
       void mcpServersQuery.refetch();
       requestAnimationFrame(() => composerRef.current?.focus());
+      return;
+    }
+    if (id === "skill") {
+      setSkillPanelOpen(true);
+      setMcpPanelOpen(false);
+      setSkillNotice(null);
+      void skillsQuery.refetch();
+      requestAnimationFrame(() => composerRef.current?.setSelectionRange?.(0, 0));
       return;
     }
     if (hasActivePlan || hasActiveGoal || goalMode || planMode) {
@@ -1593,6 +1659,19 @@ export function ChatPage() {
       setGoalDialogOpen(true);
     }
     requestAnimationFrame(() => composerRef.current?.focus());
+  }
+
+  function handleSkillCommand(text: string): void {
+    const match = text.match(/^\/skill(?:\s+([\s\S]*))?$/i);
+    const query = match?.[1]?.trim() ?? "";
+    setSkillPanelOpen(true);
+    setMcpPanelOpen(false);
+    setSkillNotice(null);
+    if (query) {
+      setSkillQuery(query);
+      void searchSkillRegistry(query);
+    }
+    void skillsQuery.refetch();
   }
 
   async function resetToFullMode(): Promise<void> {
@@ -2024,14 +2103,29 @@ export function ChatPage() {
             </div>
             {activeMode !== "full" && (
               <div className="composer-mode-wrap">
-                <span
-                  className={`composer-mode-indicator mode-${activeMode}`}
-                  role="img"
-                  aria-label={`当前模式：${activeModeOption.label}`}
-                  title={`当前模式：${activeModeOption.label}。输入 / 选择模式。`}
+                <button
+                  type="button"
+                  className={`composer-mode-chip mode-${activeMode}`}
+                  aria-label={`当前模式：${activeModeOption.label}，点击退出当前模式`}
+                  title={`当前模式：${activeModeOption.label}。点 × 退出模式，输入 / 切换模式。`}
+                  onClick={() => {
+                    if (activeMode === "goal") setGoalManageMode("contract");
+                    else setPlanDialogOpen(true);
+                  }}
                 >
-                  {activeMode === "plan" ? <ClipboardList size={14} /> : <Target size={14} />}
-                </span>
+                  {activeMode === "plan" ? <ClipboardList size={14} /> : <Crosshair size={14} />}
+                  <span>{activeModeOption.label}</span>
+                </button>
+                <button
+                  type="button"
+                  className="composer-mode-clear"
+                  aria-label="退出当前模式"
+                  title="退出当前模式，回到完全访问"
+                  disabled={planBusy || goalBusy}
+                  onClick={() => void exitToBuildMode("退出当前执行模式")}
+                >
+                  {(planBusy || goalBusy) ? <Loader2 size={11} className="spin" /> : <X size={11} />}
+                </button>
               </div>
             )}
             <label className="composer-executor" title={selectedExecutorUnavailable ? selectedExecutor?.health.issues.join("；") : "锁定执行器后不会自动切换"}>
@@ -2059,28 +2153,6 @@ export function ChatPage() {
             {selectedExecutorUnavailable && (
               <span className="composer-executor-warning">{selectedExecutorName} 当前不可用，不会自动切换</span>
             )}
-            {selectedSkill && (
-              <span className="composer-skill-chip" title={selectedSkill.descriptionZh ?? selectedSkill.manifest.description}>
-                <Sparkles size={14} />
-                <span>使用技能：{selectedSkill.name}</span>
-                <button type="button" onClick={() => setSelectedSkillId(null)} aria-label="取消使用技能">
-                  <X size={12} />
-                </button>
-              </span>
-            )}
-            {selectedMcpServers.map((server) => (
-              <span key={server.id} className="composer-skill-chip composer-mcp-chip" title={`${server.tools.length} 个 MCP 工具`}>
-                <Plug size={14} />
-                <span>MCP：{server.name}</span>
-                <button
-                  type="button"
-                  onClick={() => setSelectedMcpServerIds((current) => current.filter((id) => id !== server.id))}
-                  aria-label={`取消使用 ${server.name}`}
-                >
-                  <X size={12} />
-                </button>
-              </span>
-            ))}
           </div>
           {skillNotice && (
             <div className="composer-skill-notice">
@@ -2110,6 +2182,173 @@ export function ChatPage() {
                 </button>
               </div>
             </div>
+          )}
+          {skillPanelOpen && (
+            <section className="composer-mcp-panel composer-skill-panel" aria-label="技能">
+              <div className="composer-mcp-header">
+                <div>
+                  <strong><Sparkles size={14} />技能</strong>
+                  <span>安装到资料库，仅本轮任务使用所选技能。已选 {selectedSkill ? 1 : 0}/1</span>
+                </div>
+                <button className="icon-button" type="button" onClick={() => setSkillPanelOpen(false)} aria-label="关闭技能面板">
+                  <X size={14} />
+                </button>
+              </div>
+              <form
+                className="composer-mcp-search"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void searchSkillRegistry(skillQuery);
+                }}
+              >
+                <Search size={14} />
+                <input
+                  value={skillQuery}
+                  onChange={(event) => setSkillQuery(event.target.value)}
+                  placeholder="搜索已安装技能或 GitHub，例如 pdf、browser、写周报"
+                  aria-label="搜索技能"
+                />
+                <button type="submit" className="ghost-button" disabled={skillRegistryBusy || !skillQuery.trim()}>
+                  {skillRegistryBusy ? <Loader2 size={13} className="spin" /> : <Search size={13} />}
+                  搜索
+                </button>
+              </form>
+              {skillNotice && (
+                <div className="composer-mcp-notice">
+                  <span>{skillNotice}</span>
+                  <button className="icon-button" type="button" onClick={() => setSkillNotice(null)} aria-label="关闭提示"><X size={12} /></button>
+                </div>
+              )}
+              <div className="composer-mcp-section">
+                <div className="composer-mcp-section-title">
+                  <strong>已安装</strong>
+                  <span>点一行即可启用；也可在输入框用 / 直接召唤</span>
+                </div>
+                {skills.length === 0 ? (
+                  <p className="composer-mcp-empty">还没有安装技能。搜索后一键安装，或直接对 Hearth 说“帮我安装 xxx 技能”。</p>
+                ) : (
+                  <div className="composer-mcp-grid">
+                    {skills
+                      .filter((skill) => {
+                        const term = skillQuery.trim().toLocaleLowerCase();
+                        if (!term || skillRegistryQuery) return true;
+                        return `${skill.name} ${skill.descriptionZh ?? ""} ${skill.manifest.description ?? ""}`.toLocaleLowerCase().includes(term);
+                      })
+                      .map((skill) => {
+                        const selected = selectedSkillId === skill.id;
+                        return (
+                          <div key={skill.id} className={`composer-mcp-server ${selected ? "selected" : ""}`}>
+                            <button
+                              type="button"
+                              className="composer-mcp-select"
+                              onClick={() => selected ? setSelectedSkillId(null) : chooseSkill(skill.id)}
+                              aria-pressed={selected}
+                              title={skill.descriptionZh ?? skill.manifest.description ?? skill.name}
+                            >
+                              <Sparkles size={14} />
+                              <span>
+                                <strong>{skill.name}</strong>
+                                <small>{skill.descriptionZh ?? skill.manifest.description ?? "已安装的技能"}</small>
+                              </span>
+                              {selected && <Check size={14} />}
+                            </button>
+                            <div className="composer-mcp-actions">
+                              <button
+                                type="button"
+                                onClick={() => void api.updateSkill(skill.id).then((result) => {
+                                  setSkillNotice(result.changed ? `已更新「${skill.name}」。` : `「${skill.name}」已是最新版本。`);
+                                  void queryClient.invalidateQueries({ queryKey: ["skills"] });
+                                }).catch((error: unknown) => setSkillNotice(error instanceof Error ? error.message : "更新失败"))}
+                                title="检查并更新"
+                                aria-label={`更新 ${skill.name}`}
+                              >
+                                <RefreshCw size={12} />
+                                更新
+                              </button>
+                              <button
+                                type="button"
+                                className="danger"
+                                onClick={() => {
+                                  if (!window.confirm(`从资料库移除技能“${skill.name}”？`)) return;
+                                  void api.deleteSkill(skill.id).then(() => {
+                                    if (selectedSkillId === skill.id) setSelectedSkillId(null);
+                                    setSkillNotice(`已从资料库移除「${skill.name}」。`);
+                                    void queryClient.invalidateQueries({ queryKey: ["skills"] });
+                                  }).catch((error: unknown) => setSkillNotice(error instanceof Error ? error.message : "移除失败"));
+                                }}
+                                title="从资料库移除"
+                                aria-label={`从资料库移除 ${skill.name}`}
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
+              </div>
+              {skillRegistryBusy || skillRegistry.length > 0 ? (
+                <div className="composer-mcp-section">
+                  <div className="composer-mcp-section-title">
+                    <strong>GitHub 结果</strong>
+                    <span>{skillRegistryBusy ? "正在搜索" : `${skillRegistry.length} 个候选`}</span>
+                  </div>
+                  {skillRegistryBusy ? (
+                    <p className="composer-mcp-empty"><Loader2 size={12} className="spin" /> 正在搜索包含 SKILL.md 的仓库</p>
+                  ) : (
+                    <div className="composer-mcp-grid composer-mcp-results">
+                      {skillRegistry.map((candidate) => (
+                        <div key={`${candidate.repo}:${candidate.skillPath ?? ""}`} className="composer-mcp-candidate">
+                          <div className="composer-mcp-candidate-head">
+                            <div>
+                              <strong>{candidate.repo}</strong>
+                              <span>{candidate.skillPath ?? "仓库根目录"}{candidate.ref ? ` · ${candidate.ref}` : ""}</span>
+                            </div>
+                            <button
+                              type="button"
+                              className="ghost-button"
+                              onClick={() => installSkillMutation.mutate(candidate.source)}
+                              disabled={installSkillMutation.isPending}
+                            >
+                              {installSkillMutation.isPending ? <Loader2 size={13} className="spin" /> : <Sparkles size={13} />}
+                              安装
+                            </button>
+                          </div>
+                          {candidate.description && <p>{candidate.description}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : null}
+              <div className="composer-mcp-section">
+                <div className="composer-mcp-section-title">
+                  <strong>从地址安装</strong>
+                  <span>GitHub 仓库、本地目录或 Skill 名称</span>
+                </div>
+                <form
+                  className="composer-mcp-search"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    if (!skillSourceInput.trim()) return;
+                    installSkillMutation.mutate(skillSourceInput.trim());
+                  }}
+                >
+                  <FileText size={14} />
+                  <input
+                    value={skillSourceInput}
+                    onChange={(event) => setSkillSourceInput(event.target.value)}
+                    placeholder="https://github.com/owner/repo 或 D:\\skills\\my-skill"
+                    aria-label="技能来源"
+                  />
+                  <button type="submit" className="ghost-button" disabled={installSkillMutation.isPending || !skillSourceInput.trim()}>
+                    {installSkillMutation.isPending ? <Loader2 size={13} className="spin" /> : <Check size={13} />}
+                    安装
+                  </button>
+                </form>
+              </div>
+            </section>
           )}
           {mcpPanelOpen && (
             <section className="composer-mcp-panel" aria-label="MCP 工具">
@@ -2354,6 +2593,36 @@ export function ChatPage() {
             </div>
           )}
           <div className="composer">
+            {(selectedSkill || selectedMcpServers.length > 0) && (
+              <div className="composer-context-chips" aria-label="本轮启用的技能与 MCP">
+                {selectedSkill && (
+                  <span className="composer-skill-chip" title={selectedSkill.descriptionZh ?? selectedSkill.manifest.description ?? "已安装的技能"}>
+                    <Sparkles size={13} />
+                    <span>技能：{selectedSkill.name}</span>
+                    <button type="button" onClick={() => setSelectedSkillId(null)} aria-label="取消使用技能">
+                      <X size={11} />
+                    </button>
+                  </span>
+                )}
+                {selectedMcpServers.map((server) => (
+                  <span
+                    key={server.id}
+                    className="composer-skill-chip composer-mcp-chip"
+                    title={mcpServerDescription(server)}
+                  >
+                    <Plug size={13} />
+                    <span>MCP：{server.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedMcpServerIds((current) => current.filter((id) => id !== server.id))}
+                      aria-label={`取消使用 ${server.name}`}
+                    >
+                      <X size={11} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
             {slashOpen && (
               <div className="composer-slash-menu" role="listbox" aria-label="选择命令或技能">
                 {slashMatches.length === 0 ? (
@@ -2379,6 +2648,30 @@ export function ChatPage() {
                       </button>
                     );
                   }
+                  if (entry.kind === "mcp") {
+                    const selected = selectedMcpServerIds.includes(entry.server.id);
+                    const ready = entry.server.enabled && entry.server.status === "ready";
+                    return (
+                      <button
+                        key={`mcp:${entry.server.id}`}
+                        type="button"
+                        role="option"
+                        aria-selected={active}
+                        className={`composer-slash-item ${active ? "active" : ""}`}
+                        disabled={!ready}
+                        title={mcpServerDescription(entry.server)}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => chooseMcpServer(entry.server)}
+                      >
+                        <Plug size={15} />
+                        <span>
+                          <strong>{entry.server.name}</strong>
+                          <small>{ready ? mcpServerDescription(entry.server) : `MCP 未就绪：${entry.server.error ?? "请先连接"}`}</small>
+                        </span>
+                        {selected && <Check size={13} />}
+                      </button>
+                    );
+                  }
                   return (
                     <button
                       key={`skill:${entry.skill.id}`}
@@ -2386,6 +2679,7 @@ export function ChatPage() {
                       role="option"
                       aria-selected={active}
                       className={`composer-slash-item ${active ? "active" : ""}`}
+                      title={entry.skill.descriptionZh ?? entry.skill.manifest.description ?? "已安装的技能"}
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={() => chooseSkill(entry.skill.id)}
                     >
@@ -2511,6 +2805,16 @@ export function ChatPage() {
 }
 
 const EFFORT_ORDER: ReasoningEffort[] = ["off", "minimal", "low", "medium", "high", "max"];
+
+function mcpServerDescription(server: McpServerView): string {
+  const recorded = typeof server.manifest.description === "string" ? server.manifest.description.trim() : "";
+  if (recorded) return recorded;
+  const names = server.tools.slice(0, 3).map((tool) => tool.name).join("、");
+  const suffix = server.tools.length > 3 ? " 等" : "";
+  if (names) return `本轮可调用 ${server.tools.length} 个工具：${names}${suffix}`;
+  if (server.error) return `MCP 连接异常：${server.error}`;
+  return server.enabled ? "已启用的 MCP 服务器，为本轮任务提供工具" : "已停用的 MCP 服务器";
+}
 
 const EFFORT_META: Record<ReasoningEffort, { label: string; description: string }> = {
   off: { label: "关闭", description: "关闭模型思考，速度最快；目前仅 DeepSeek 等支持思考开关的模型生效。" },

@@ -490,6 +490,10 @@ export const api = {
     body: JSON.stringify({ path })
   }),
   skills: () => request<{ skills: SkillView[] }>("/api/skills"),
+  searchSkillRegistry: (input: { q: string }) => request<{
+    query: string;
+    candidates: Array<{ repo: string; source: string; skillPath: string | null; ref: string | null; description: string }>;
+  }>(`/api/skills/registry/search${query(input)}`),
   skill: (id: string) => request<{ skill: SkillView }>(`/api/skills/${encodeURIComponent(id)}`),
   installSkill: (source: string) => request<{ skill: SkillView; changed: boolean; replacedFiles: number }>("/api/skills/install", {
     method: "POST",

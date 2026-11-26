@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
 import type { LibraryService } from "../library/service.ts";
+import { discoverSkillSources, SkillDiscoveryError } from "./discovery.ts";
 import { SkillError, type SkillService } from "./service.ts";
 
 const installSchema = z.object({
@@ -19,6 +20,21 @@ const useSchema = z.object({
 
 export function registerSkillRoutes(app: FastifyInstance, skills: SkillService, library: LibraryService): void {
   app.get("/api/skills", async () => ({ skills: skills.list() }));
+
+  app.get<{ Querystring: { q?: string } }>("/api/skills/registry/search", async (request, reply) => {
+    const query = (request.query.q ?? "").trim();
+    if (!query) return { query: "", candidates: [] };
+    if (query.length > 200) return reply.code(400).send({ error: "SKILL_QUERY_TOO_LONG", message: "搜索词不能超过 200 个字符" });
+    try {
+      const candidates = await discoverSkillSources(query);
+      return { query, candidates };
+    } catch (error) {
+      if (error instanceof SkillDiscoveryError) {
+        return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+      }
+      return reply.code(502).send({ error: "SKILL_SEARCH_FAILED", message: error instanceof Error ? error.message : "技能搜索失败" });
+    }
+  });
 
   app.get<{ Params: { id: string } }>("/api/skills/:id", async (request, reply) => {
     const skill = skills.get(request.params.id);

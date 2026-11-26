@@ -112,6 +112,47 @@
   gap: 1px;
 }
 
+.conversation-item.fixed-im {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-height: var(--row-h);
+  padding: 0 8px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--ink-secondary);
+  font: inherit;
+  font-size: var(--fs-12);
+  cursor: pointer;
+  text-align: left;
+}
+
+.conversation-item.fixed-im svg {
+  color: var(--accent);
+}
+
+.conversation-item.fixed-im.active {
+  background: var(--surface-sunk);
+  box-shadow: inset 2px 0 0 var(--accent);
+  color: var(--ink);
+}
+
+.fixed-im-title {
+  font-weight: 500;
+}
+
+.fixed-im-badge {
+  margin-left: auto;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-size: var(--fs-10);
+}
+
 .conversation-item {
   border-radius: var(--radius);
   transition: background 160ms ease, box-shadow 160ms ease;
@@ -454,6 +495,10 @@
 .composer {
   position: relative;
   order: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 7px;
   width: 100%;
   max-width: var(--chat-content);
   min-height: 48px;
@@ -527,24 +572,66 @@
   display: inline-flex;
   align-items: center;
   order: 0;
+  gap: 1px;
+  padding: 1px 2px 1px 1px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-sunk);
 }
 
-.composer-mode-indicator {
+.composer-mode-chip {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: var(--radius);
+  gap: 4px;
+  height: 22px;
+  padding: 0 6px 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
   color: var(--ember);
+  font: inherit;
+  font-size: var(--fs-11);
+  cursor: pointer;
 }
 
-.composer-mode-indicator.mode-plan {
+.composer-mode-chip.mode-plan {
   color: var(--accent);
 }
 
-.composer-mode-indicator.mode-goal {
+.composer-mode-chip.mode-goal {
   color: var(--ember);
+}
+
+.composer-mode-chip:hover {
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.composer-mode-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-secondary);
+  cursor: pointer;
+}
+
+.composer-mode-clear:hover {
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+  color: var(--ink);
+}
+
+.composer-context-chips {
+  display: flex;
+  flex: 1 0 100%;
+  flex-wrap: wrap;
+  order: -1;
+  gap: 5px;
+  padding: 2px 4px 0;
 }
 
 .composer-executor {

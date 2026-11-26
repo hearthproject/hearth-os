@@ -2,10 +2,10 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import type { AgentTool, AgentToolContext, AgentToolResult } from "@hearth/agent-runtime";
 import type { SkillService } from "./skills/service.ts";
+import { discoverSkillSources } from "./skills/discovery.ts";
 import type { SkillView } from "@hearth/core";
 
 const MAX_RESOURCE_BYTES = 1_000_000;
-const GITHUB_API = "https://api.github.com";
 
 export interface SkillToolOptions {
   skills: SkillService;
@@ -174,71 +174,6 @@ export function createSkillTools(options: SkillToolOptions): AgentTool[] {
   };
 
   return [loadSkill, readResource, searchSkills, installSkill];
-}
-
-interface SkillCandidate {
-  repo: string;
-  source: string;
-  skillPath: string | null;
-  ref: string | null;
-  description: string;
-}
-
-async function discoverSkillSources(query: string): Promise<SkillCandidate[]> {
-  const response = await githubFetch(`/search/repositories?q=${encodeURIComponent(query)}&per_page=10&sort=stars&order=desc`);
-  const data = response as { items?: Array<{
-    full_name?: string;
-    html_url?: string;
-    description?: string | null;
-    default_branch?: string;
-  }> };
-  const items = data.items ?? [];
-  const candidates: SkillCandidate[] = [];
-  for (const item of items.slice(0, 8)) {
-    const fullName = item.full_name ?? "";
-    const branch = item.default_branch ?? "main";
-    if (!fullName) continue;
-    const skillPath = await findSkillPath(fullName, branch);
-    if (skillPath === undefined) continue;
-    const directory = skillPath === null ? "" : skillPath.replace(/\/?SKILL\.md$/i, "");
-    candidates.push({
-      repo: fullName,
-      source: directory
-        ? `${item.html_url ?? `https://github.com/${fullName}`}/tree/${branch}/${directory}`
-        : (item.html_url ?? `https://github.com/${fullName}`),
-      skillPath,
-      ref: branch,
-      description: item.description ?? ""
-    });
-  }
-  return candidates;
-}
-
-async function findSkillPath(repo: string, branch: string): Promise<string | null | undefined> {
-  const tree = await githubFetch(`/repos/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`) as {
-    tree?: Array<{ path?: string; type?: string }>;
-  };
-  const paths = (tree.tree ?? [])
-    .filter((entry) => entry.type === "blob" && typeof entry.path === "string" && /(^|\/)SKILL\.md$/i.test(entry.path))
-    .map((entry) => entry.path!)
-    .sort((a, b) => a.split("/").length - b.split("/").length || a.length - b.length);
-  if (paths.length === 0) return undefined;
-  return paths[0] === "SKILL.md" ? null : paths[0]!;
-}
-
-async function githubFetch(path: string): Promise<unknown> {
-  const response = await fetch(`${GITHUB_API}${path}`, {
-    headers: {
-      accept: "application/vnd.github+json",
-      "user-agent": "hearth-skill-installer",
-      ...(process.env.GITHUB_TOKEN ? { authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {})
-    },
-    signal: AbortSignal.timeout(20_000)
-  });
-  if (!response.ok) {
-    throw new Error(`GitHub 搜索失败：HTTP ${response.status} ${response.statusText}`);
-  }
-  return response.json();
 }
 
 function matchesQuery(text: string, query: string): boolean {
