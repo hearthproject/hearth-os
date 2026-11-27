@@ -114,8 +114,36 @@ async function openNewChat(page, baseUrl) {
 
 async function newChat(page, baseUrl) {
   await page.goto(baseUrl, { waitUntil: "networkidle" });
-  await page.locator(".new-chat-button").click();
+  const before = await page.evaluate(() => localStorage.getItem("hearth.conversation"));
+  const listed = await api(baseUrl, "/api/conversations");
+  assert.equal(listed.status, 200, listed.text);
+  const reusable = listed.body.conversations.find(
+    (conversation) => conversation.messageCount === 0 && conversation.title === "新对话" && !conversation.projectId
+  );
+  if (reusable) {
+    if (before !== reusable.id) {
+      await page.locator(".new-chat-button").click();
+      await page.waitForFunction(
+        (id) => localStorage.getItem("hearth.conversation") === id,
+        reusable.id,
+        { timeout: 15_000 }
+      );
+    }
+  } else {
+    const created = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.pathname === "/api/conversations" && response.request().method() === "POST";
+    });
+    await page.locator(".new-chat-button").click();
+    const response = await created;
+    assert.equal(response.ok(), true, `new conversation failed: HTTP ${response.status()}`);
+  }
   await page.locator(".message-list").waitFor({ timeout: 15_000 });
+  // The sidebar stays disabled until createConversation + navigation settle.
+  await page.waitForFunction(() => {
+    const button = document.querySelector(".new-chat-button");
+    return button !== null && !button.disabled;
+  });
   await waitForComposerReady(page);
 }
 
