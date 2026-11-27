@@ -13,6 +13,7 @@
   },
   "permissions": [
     "core:default",
-    "allow-pick-folder"
+    "allow-pick-folder",
+    "allow-open-external-url"
   ]
 }

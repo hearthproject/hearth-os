@@ -1272,6 +1272,9 @@ fn build_window(app: &tauri::AppHandle) -> Result<WebviewWindow, String> {
         .min_inner_size(960.0, 640.0)
         .center()
         .visible(true)
+        // Tauri 默认接管 WebView2 的拖放，HTML5 的 drop 事件收不到；关闭原生处理器
+        // 之后，从资源管理器拖 md/PDF/图片进窗口才会变成真正的 File 对象。
+        .disable_drag_drop_handler()
         .on_navigation(|url| {
             if navigation_allowed(url) {
                 return true;
@@ -1511,6 +1514,17 @@ fn pick_folder() -> Option<String> {
         .map(|path| path.to_string_lossy().to_string())
 }
 
+/// 在系统默认浏览器中打开一个 http(s) 地址（预览“浏览器打开”按钮使用）。
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    let trimmed = url.trim();
+    if !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
+        return Err("只支持 http/https 地址".to_string());
+    }
+    open_external(trimmed);
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
@@ -1520,7 +1534,7 @@ pub fn run() {
     #[cfg(feature = "updater")]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     let app = builder
-        .invoke_handler(tauri::generate_handler![pick_folder])
+        .invoke_handler(tauri::generate_handler![pick_folder, open_external_url])
         .setup(|app| setup_app(app))
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
