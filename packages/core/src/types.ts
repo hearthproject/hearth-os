@@ -31,6 +31,60 @@ export type CollaborationMode = "build" | "plan";
 
 export type AgentMode = "single" | "team";
 
+/** Who owns team orchestration when Team mode is on. */
+export type TeamOwner = "hearth" | "codex" | "deepseek-harness" | "none";
+
+/** What Hearth can actually promise about Team mode for an executor. */
+export type TeamGuarantee = "managed" | "native" | "advisory" | "unsupported";
+
+/** How much of the executor's internal team Hearth can observe. */
+export type TeamVisibility = "members" | "session-tree" | "aggregate" | "none";
+
+export type TeamCapabilityState = "available" | "enforced" | "unavailable" | "probe_failed";
+
+export interface ExecutorTeamLimits {
+  maxConcurrent: number;
+  maxTotal: number;
+  maxDepth?: number;
+}
+
+/**
+ * Executor-scoped Team capability. `state` is what the UI gates on; `team`
+ * describes the assurance level so the UI never over-promises.
+ */
+export interface ExecutorTeamCapability {
+  owner: TeamOwner;
+  single: "enforced" | "prompt";
+  team: TeamGuarantee;
+  state: TeamCapabilityState;
+  visibility: TeamVisibility;
+  limits: ExecutorTeamLimits | null;
+  reason?: string;
+  repair?: "install-team-runtime" | "update-executor" | null;
+}
+
+export interface TeamObservation {
+  members: number;
+  eventsReceived: boolean;
+  source: TeamOwner;
+}
+
+/** Team facts reported by the executor adapter for one run. */
+export interface TeamOutcome {
+  requested: AgentMode;
+  effective: AgentMode;
+  executorId: ExecutorId;
+  owner: TeamOwner;
+  guarantee: TeamGuarantee;
+  capability: TeamCapabilityState;
+  visibility: TeamVisibility;
+  configApplied: boolean;
+  degraded: boolean;
+  observed: TeamObservation;
+  usage: "full" | "total-only" | "none";
+  reason?: string;
+}
+
 export interface ConversationSettings {
   executionMode?: ExecutionMode;
   executorEnabled: Record<ExecutorId, boolean>;
@@ -142,6 +196,8 @@ export interface ExecutorView {
   health: ExecutorHealth;
   modelBinding?: ExecutorModelBindingView | undefined;
   effectiveModel: ModelSettingsView | null;
+  /** Team capability for this executor; absent means single-only. */
+  teamCapability?: ExecutorTeamCapability | undefined;
 }
 
 export type ReasoningEffort = "off" | "minimal" | "low" | "medium" | "high" | "max";

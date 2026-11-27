@@ -1,20 +1,72 @@
 import { describe, expect, it } from "vitest";
+import type { ExecutorTeamCapability } from "@hearth/core";
 import { agentModePrompt, resolveAgentMode, TEAM_AGENT_TYPES, TEAM_RECEIPT_SCHEMA } from "./agent-mode.ts";
 
+const hearthCapability: ExecutorTeamCapability = {
+  owner: "hearth",
+  single: "enforced",
+  team: "managed",
+  state: "available",
+  visibility: "members",
+  limits: { maxConcurrent: 4, maxTotal: 8, maxDepth: 2 }
+};
+
+const codexCapability: ExecutorTeamCapability = {
+  owner: "codex",
+  single: "enforced",
+  team: "native",
+  state: "available",
+  visibility: "none",
+  limits: { maxConcurrent: 4, maxTotal: 4, maxDepth: 1 }
+};
+
+const dshCapability: ExecutorTeamCapability = {
+  owner: "deepseek-harness",
+  single: "enforced",
+  team: "native",
+  state: "available",
+  visibility: "session-tree",
+  limits: { maxConcurrent: 8, maxTotal: 8 }
+};
+
 describe("agent mode", () => {
-  it("keeps native single/team modes and marks other executors as executor-managed", () => {
-    expect(resolveAgentMode(undefined, "native")).toEqual({
-      requested: "single", effective: "single", executorId: "native"
+  it("keeps native single/team modes", () => {
+    const single = resolveAgentMode(undefined, "native", { capability: hearthCapability });
+    expect(single).toMatchObject({ requested: "single", effective: "single", executorId: "native", owner: "hearth", degraded: false });
+
+    const team = resolveAgentMode("team", "native", { capability: hearthCapability, taskMode: "build" });
+    expect(team).toMatchObject({ requested: "team", effective: "team", executorId: "native", owner: "hearth", guarantee: "managed" });
+  });
+
+  it("keeps external executors as native teams with their own visibility", () => {
+    const codex = resolveAgentMode("team", "codex", { capability: codexCapability });
+    expect(codex).toMatchObject({ effective: "team", owner: "codex", guarantee: "native", visibility: "none" });
+
+    const dsh = resolveAgentMode("team", "deepseek-harness", { capability: dshCapability });
+    expect(dsh).toMatchObject({ effective: "team", owner: "deepseek-harness", visibility: "session-tree" });
+  });
+
+  it("forces single in plan mode regardless of the Team switch", () => {
+    const plan = resolveAgentMode("team", "native", { capability: hearthCapability, taskMode: "plan" });
+    expect(plan).toMatchObject({ requested: "team", effective: "single", degraded: false, forcedBy: "plan" });
+    expect(plan.reason).toContain("计划模式");
+  });
+
+  it("degrades instead of pretending when the executor cannot run a team", () => {
+    const unavailable: ExecutorTeamCapability = {
+      ...codexCapability,
+      state: "unavailable",
+      reason: "Codex 0.100.0 不支持原生多 Agent"
+    };
+    const resolution = resolveAgentMode("team", "codex", { capability: unavailable });
+    expect(resolution).toMatchObject({
+      requested: "team",
+      effective: "single",
+      degraded: true,
+      capability: "unavailable"
     });
-    expect(resolveAgentMode("team", "native")).toEqual({
-      requested: "team", effective: "team", executorId: "native"
-    });
-    expect(resolveAgentMode("team", "codex")).toEqual({
-      requested: "team", effective: "executor-managed", executorId: "codex"
-    });
-    expect(resolveAgentMode("single", "deepseek-harness")).toEqual({
-      requested: "single", effective: "executor-managed", executorId: "deepseek-harness"
-    });
+    expect(resolution.reason).toContain("不支持原生多 Agent");
+    expect(agentModePrompt(resolution)).toContain("团队请求未生效");
   });
 
   it("only exposes read-only member types in Team v1", () => {
@@ -23,20 +75,23 @@ describe("agent mode", () => {
   });
 
   it("describes delegation rules for native team mode and a single-agent boundary otherwise", () => {
-    const team = agentModePrompt("team", "native");
+    const team = agentModePrompt(resolveAgentMode("team", "native", { capability: hearthCapability }));
     expect(team).toContain("explore / plan / review");
     expect(team).toContain("同时最多 4 个");
     expect(team).toContain("累计最多 8 个");
     expect(team).toContain("唯一可以写入");
 
-    const single = agentModePrompt(undefined, "native");
+    const single = agentModePrompt(resolveAgentMode(undefined, "native", { capability: hearthCapability }));
     expect(single).toContain("单智能体模式");
     expect(single).toContain("不要尝试委派");
 
-    const managed = agentModePrompt("team", "codex");
-    expect(managed).toContain("自行管理多 agent");
-    expect(managed).toContain("不会注入");
-    expect(managed).not.toContain("你是 Lead");
+    const codexTeam = agentModePrompt(resolveAgentMode("team", "codex", { capability: codexCapability }));
+    expect(codexTeam).toContain("Codex 原生多 Agent 已开启");
+    expect(codexTeam).toContain("收不到 Codex 的成员事件");
+    expect(codexTeam).not.toContain("你是 Lead");
+
+    const codexSingle = agentModePrompt(resolveAgentMode("single", "codex", { capability: codexCapability }));
+    expect(codexSingle).toContain("features.multi_agent=false");
   });
 
   it("keeps the canonical receipt schema evidence-shaped", () => {

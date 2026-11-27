@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { dirname, join, delimiter } from "node:path";
 import { createRequire } from "node:module";
@@ -6,12 +6,20 @@ import type { ExecutorId } from "@hearth/core";
 
 const CODEX_VERSION = "0.166.0";
 const DSH_VERSION = "0.2.2-rc.1";
+/** Team packages are version-locked to the managed SDK so their plugin ids and
+ * config schema always match the composition Hearth launches. */
+export const DSH_TEAM_VERSION = DSH_VERSION;
+export const DSH_TEAM_PACKAGES = [
+  "@deepseek-ai/dsh-experimental-agent-team",
+  "@deepseek-ai/dsh-experimental-tool-agent-team"
+] as const;
 const INSTALL_TIMEOUT_MS = 10 * 60_000;
 const INSTALL_TOTAL_TIMEOUT_MS = 20 * 60_000;
 const REGISTRY_PROBE_TIMEOUT_MS = 6_000;
 const PROGRESS_INTERVAL_MS = 750;
 const CODEX_INSTALL_ESTIMATE_BYTES = 479 * 1024 * 1024;
 const DSH_INSTALL_ESTIMATE_BYTES = 505 * 1024 * 1024;
+const DSH_TEAM_INSTALL_ESTIMATE_BYTES = 60 * 1024 * 1024;
 
 /**
  * npm registries tried in order. npmjs.org is often unreachable from mainland
@@ -93,6 +101,88 @@ export function findDshPackage(settingsPath?: string | null): string | null {
   } catch {
     return null;
   }
+}
+
+function readPackageVersion(packageJsonPath: string): string | null {
+  try {
+    const parsed = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { version?: unknown };
+    return typeof parsed.version === "string" ? parsed.version : null;
+  } catch {
+    return null;
+  }
+}
+
+export interface DshTeamRuntimeStatus {
+  available: boolean;
+  path: string | null;
+  sdkVersion: string | null;
+  versions: Record<string, string | null>;
+  expectedVersion: string;
+}
+
+/**
+ * Reports whether the managed DSH runtime has the Team packages pinned to the
+ * same version as the SDK. This is a pure disk check: no network, no probe run.
+ */
+export function dshTeamRuntimeStatus(settingsPath: string): DshTeamRuntimeStatus {
+  const home = executorRuntimeDir(settingsPath, "deepseek-harness");
+  const sdkPath = managedDshPackage(settingsPath);
+  const sdkVersion = sdkPath ? readPackageVersion(sdkPath) : null;
+  const versions: Record<string, string | null> = {};
+  let allPresent = sdkPath !== null;
+  for (const name of DSH_TEAM_PACKAGES) {
+    const packageJson = join(home, "node_modules", "@deepseek-ai", name.slice("@deepseek-ai/".length), "package.json");
+    const version = existsSync(packageJson) ? readPackageVersion(packageJson) : null;
+    versions[name] = version;
+    if (version !== DSH_TEAM_VERSION) allPresent = false;
+  }
+  return {
+    available: allPresent && sdkVersion === DSH_TEAM_VERSION,
+    path: sdkPath ? home : null,
+    sdkVersion,
+    versions,
+    expectedVersion: DSH_TEAM_VERSION
+  };
+}
+
+/**
+ * Installs the Team packages into the existing DSH runtime prefix. Unlike the
+ * initial bootstrap, a failed registry attempt must NOT wipe the prefix: that
+ * would delete the already working SDK. `allowReset: false` keeps retries safe.
+ */
+export async function installDshTeamRuntime(
+  settingsPath: string,
+  onProgress?: ExecutorInstallProgressHandler
+): Promise<ExecutorInstallResult> {
+  const existingSdk = findDshPackage(settingsPath);
+  if (!existingSdk) {
+    throw new Error("请先安装 DeepSeek Harness，再安装团队运行时。");
+  }
+  const home = executorRuntimeDir(settingsPath, "deepseek-harness");
+  mkdirSync(home, { recursive: true });
+  const status = dshTeamRuntimeStatus(settingsPath);
+  if (status.available) {
+    onProgress?.({ phase: "verify", message: "DSH 团队运行时已就绪", percent: 100 });
+    return { installed: true, path: home, message: "DSH 团队运行时已安装，无需重复下载。" };
+  }
+  await installNpmPackages({
+    prefix: home,
+    packages: DSH_TEAM_PACKAGES.map((name) => `${name}@${DSH_TEAM_VERSION}`),
+    label: "DeepSeek Harness Team",
+    estimatedBytes: DSH_TEAM_INSTALL_ESTIMATE_BYTES,
+    allowReset: false,
+    onProgress
+  });
+  onProgress?.({ phase: "verify", message: "下载完成，正在校验团队包版本", percent: 99 });
+  const after = dshTeamRuntimeStatus(settingsPath);
+  if (!after.available) {
+    const missing = Object.entries(after.versions)
+      .filter(([, version]) => version !== DSH_TEAM_VERSION)
+      .map(([name, version]) => `${name}=${version ?? "缺失"}`)
+      .join("，");
+    throw new Error(`DSH 团队运行时安装后校验失败（需要 ${DSH_TEAM_VERSION}）：${missing}`);
+  }
+  return { installed: true, path: home, message: `DSH 团队运行时已安装（${DSH_TEAM_VERSION}）。` };
 }
 
 export function findCodexBinary(settingsPath: string, executablePath?: string | null): string | null {
@@ -213,6 +303,8 @@ interface NpmInstallOptions {
   packages: string[];
   label: string;
   estimatedBytes: number;
+  /** Initial bootstrap may restart from a clean prefix; add-on installs must not. */
+  allowReset?: boolean;
   onProgress: ExecutorInstallProgressHandler | undefined;
 }
 
@@ -232,7 +324,7 @@ async function installNpmPackages(options: NpmInstallOptions): Promise<void> {
     if (!registry) break;
     const remaining = deadline - Date.now();
     if (remaining <= 0) break;
-    if (index > 0) resetInstallPrefix(options.prefix);
+    if (index > 0 && options.allowReset !== false) resetInstallPrefix(options.prefix);
     try {
       await runNpmInstallAttempt(options, registry, Math.min(INSTALL_TIMEOUT_MS, remaining));
       return;

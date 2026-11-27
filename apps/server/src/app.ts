@@ -17,7 +17,8 @@ import { registerChatRoutes } from "./chat-routes.ts";
 import { ReconcileError, ReconcileService } from "./reconcile.ts";
 import { ExecutorSettingsStore } from "./executor-settings.ts";
 import { clearExecutorHealthCache, executorHealth as readExecutorHealth, executorRuntimeSettings, probeExecutor } from "./executor-runtime.ts";
-import { findCodexBinary, installExecutorRuntime, type ExecutorInstallProgress } from "./executor-installer.ts";
+import { findCodexBinary, installDshTeamRuntime, installExecutorRuntime, type ExecutorInstallProgress } from "./executor-installer.ts";
+import { clearTeamCapabilityCache, teamCapabilityFor } from "./team-capability.ts";
 import { applyExecutorModelReadiness } from "./executor-readiness.ts";
 import { EXECUTORS } from "./executors.ts";
 import { ScheduleError, ScheduleService } from "./schedules.ts";
@@ -1541,6 +1542,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
       bindingError = error instanceof Error ? error.message : "模型绑定失败";
     }
     clearExecutorHealthCache(executorId);
+    clearTeamCapabilityCache(executorId);
     onProgress?.({
       phase: "probe",
       message: bindingError ? "正在检查执行器安装状态" : "正在运行真实可用性测试"
@@ -1623,6 +1625,28 @@ export async function buildServer(options: BuildServerOptions = {}) {
     return reply;
   });
 
+  app.post<{ Params: { id: string } }>("/api/executors/:id/team-runtime", async (request, reply) => {
+    const id = request.params.id;
+    if (id !== "deepseek-harness") {
+      return reply.code(404).send({ error: "TEAM_RUNTIME_UNSUPPORTED", message: "当前执行器不需要单独安装团队运行时" });
+    }
+    try {
+      const result = await installDshTeamRuntime(executorSettingsPath);
+      clearTeamCapabilityCache("deepseek-harness");
+      clearExecutorHealthCache("deepseek-harness");
+      const runtime = executorRuntimeSettings(executorSettingsStore.load(), "deepseek-harness");
+      return {
+        result,
+        capability: teamCapabilityFor("deepseek-harness", executorSettingsPath, runtime)
+      };
+    } catch (error) {
+      return reply.code(500).send({
+        error: "TEAM_RUNTIME_INSTALL_FAILED",
+        message: error instanceof Error ? error.message : "团队运行时安装失败"
+      });
+    }
+  });
+
   app.get("/api/executor-settings", async () => {
     const settings = executorSettingsStore.view();
     return { settings };
@@ -1634,6 +1658,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     const settings = executorSettingsStore.save(parsed.data);
     for (const id of Object.keys(parsed.data.executors ?? {}) as ExecutorId[]) {
       clearExecutorHealthCache(id);
+      clearTeamCapabilityCache(id);
     }
     return { settings };
   });
@@ -1643,12 +1668,14 @@ export async function buildServer(options: BuildServerOptions = {}) {
     const modelBindings = modelRegistry.bindingViews();
     const executors: ExecutorView[] = EXECUTORS.map((descriptor) => {
       const model = modelSettingsForExecutor(descriptor.id);
+      const runtime = executorRuntimeSettings(settings, descriptor.id);
       return {
         ...descriptor,
-        runtime: executorRuntimeSettings(settings, descriptor.id),
+        runtime,
         health: executorHealth(descriptor.id),
         modelBinding: modelBindings.find((binding) => binding.executorId === descriptor.id),
-        effectiveModel: model ? viewModelSettings(model) : null
+        effectiveModel: model ? viewModelSettings(model) : null,
+        teamCapability: teamCapabilityFor(descriptor.id, executorSettingsPath, runtime)
       };
     });
     return {
