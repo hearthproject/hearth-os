@@ -174,6 +174,13 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
     }
   });
 
+  const todosMutation = useMutation({
+    mutationFn: (nextTodos: TodoChecklistItem[]) => api.setTodos(task.id, nextTodos),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["task", task.id] });
+    }
+  });
+
   const headline = status === "completed"
     ? duration !== null ? `共用时 ${formatDuration(duration)}` : "已完成"
     : `${RUN_LABELS[status]}${status !== "paused" && resumable ? " · 可继续" : ""}${duration !== null ? ` · ${formatDuration(duration)}` : ""}`;
@@ -238,7 +245,15 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
           )}
 
           <BrowserTaskPanel taskId={task.id} />
-          <TodoChecklist todos={todos} />
+          <TodoChecklist
+            todos={todos}
+            editable={active || status === "paused"}
+            saving={todosMutation.isPending}
+            onEdit={(nextTodos) => todosMutation.mutate(nextTodos)}
+          />
+          {todosMutation.isError && (
+            <p className="inline-run-error">清单保存失败：{(todosMutation.error as Error | null)?.message ?? "请重试"}</p>
+          )}
           <AgentRoster events={view?.events ?? []} />
 
           {entries.length === 0 && active && (

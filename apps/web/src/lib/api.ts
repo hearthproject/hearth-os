@@ -221,7 +221,7 @@ export const api = {
     method: "POST",
     body: JSON.stringify(body)
   }),
-  planAction: (id: string, action: PlanActionName, options: { expectedRevision?: number; note?: string } = {}) =>
+  planAction: (id: string, action: PlanActionName, options: { expectedRevision?: number; note?: string; planMarkdown?: string } = {}) =>
     request<PlanView>(`/api/plans/${encodeURIComponent(id)}/actions`, {
       method: "POST",
       body: JSON.stringify({ action, ...options })
@@ -507,6 +507,11 @@ export const api = {
     request<TaskFollowUpRecord>(`/api/tasks/${encodeURIComponent(id)}/follow-ups`, {
       method: "POST",
       body: JSON.stringify({ content, mode })
+    }),
+  setTodos: (id: string, todos: Array<{ id: string; content: string; status: string }>) =>
+    request<{ todos: Array<{ id: string; content: string; status: string }> }>(`/api/tasks/${encodeURIComponent(id)}/todos`, {
+      method: "POST",
+      body: JSON.stringify({ todos })
     }),
   approvals: (params: { taskId?: string; status?: string; limit?: number; offset?: number; brief?: boolean } = {}) =>
     request<{ approvals: ApprovalListItem[]; total: number }>(`/api/approvals${query(params)}`),

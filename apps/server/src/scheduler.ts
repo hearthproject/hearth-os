@@ -6,6 +6,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import type {
   AgentCheckpoint,
   AgentFailure,
+  AgentMessage,
   AgentResumeState,
   AgentToolAuthorization,
   AgentToolAuthorizationRequest,
@@ -258,6 +259,8 @@ export class HearthScheduler {
   private readonly leaseHeartbeats = new Map<string, { epoch: number; timer: ReturnType<typeof setInterval> }>();
   private readonly controllers = new Map<string, AbortController>();
   private readonly steering = new Map<string, string>();
+  /** 用户编辑执行清单后，等待下一轮注入给模型的消息（一次性消费）。 */
+  private readonly todoEdits = new Map<string, AgentMessage>();
   private readonly cancelled = new Set<string>();
   private readonly pauseRequested = new Set<string>();
   private readonly pauseWaiters = new Map<string, (result: TaskPauseResult) => void>();
@@ -686,6 +689,53 @@ export class HearthScheduler {
       this.wake();
     }
     return followUp;
+  }
+
+  /**
+   * 用户在前端编辑执行清单：立即投影成 task.progress 让 UI 同步，并把
+   * 结构化指令交给 steering，下一轮由模型调用 todo_write 落到权威 state。
+   */
+  applyTodoEdits(
+    taskId: string,
+    todos: Array<{ id: string; content: string; status: string }>
+  ): { todos: Array<{ id: string; content: string; status: string }> } {
+    const task = this.service.requireTask(taskId);
+    if (task.status === "completed" || task.status === "cancelled" || task.status === "failed") {
+      throw new Error("任务已经结束，不能再修改清单");
+    }
+    const ids = new Set(todos.map((todo) => todo.id));
+    if (ids.size !== todos.length) throw new Error("步骤 id 不能重复");
+    if (todos.filter((todo) => todo.status === "in_progress").length > 1) {
+      throw new Error("只能有一个进行中的步骤");
+    }
+    const next = todos.map((todo) => ({ id: todo.id, content: todo.content.trim(), status: todo.status }));
+    const lines = next.map((todo, index) => `${index + 1}. [${todo.status}] ${todo.content}`).join("\n");
+    this.todoEdits.set(taskId, {
+      role: "user",
+      content: [
+        "<user_edited_plan>",
+        "用户已经手动修改了执行清单。这是最新的权威清单，请立即调用 todo_write 用下面的完整清单整体替换当前 todos（保持 id、content、status 一致），不要丢弃或重新规划用户新增/删除的步骤。",
+        lines,
+        "</user_edited_plan>"
+      ].join("\n")
+    });
+    this.publishProgress(
+      taskId,
+      task.currentRunId ?? "",
+      "todos",
+      "清单已被用户更新",
+      { todos: next }
+    );
+    this.wake();
+    return { todos: next };
+  }
+
+  /** 取走一次性的清单编辑指令，避免重复注入。 */
+  private takeTodoEdit(taskId: string): AgentMessage[] {
+    const message = this.todoEdits.get(taskId);
+    if (!message) return [];
+    this.todoEdits.delete(taskId);
+    return [message];
   }
 
   updateFollowUp(taskId: string, followUpId: string, content: string): TaskFollowUpRecord {
@@ -2937,7 +2987,10 @@ export class HearthScheduler {
           });
           this.service.bus.publish(event);
         },
-        ...(subagentManager ? { steering: () => subagentManager?.stallNotices() ?? [] } : {}),
+        steering: () => [
+          ...(subagentManager?.stallNotices() ?? []),
+          ...this.takeTodoEdit(taskId)
+        ],
         isFullPermission: () => this.service.approvalModeForTask(task) === "full",
         contextSettings: this.context.settings(),
         nativeSettings,

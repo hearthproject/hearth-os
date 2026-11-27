@@ -1120,7 +1120,7 @@ export function ChatPage() {
     await dispatch(outgoing);
   }
 
-  async function runPlanAction(action: PlanActionName, note?: string): Promise<void> {
+  async function runPlanAction(action: PlanActionName, options: { note?: string; planMarkdown?: string } = {}): Promise<void> {
     const view = currentPlan;
     if (!view || planBusy) return;
     setPlanBusy(true);
@@ -1128,7 +1128,8 @@ export function ChatPage() {
     try {
       await api.planAction(view.id, action, {
         expectedRevision: view.revision,
-        ...(note ? { note } : {})
+        ...(options.note ? { note: options.note } : {}),
+        ...(options.planMarkdown !== undefined ? { planMarkdown: options.planMarkdown } : {})
       });
       if (action === "approve" || action === "cancel") await persistBuildMode();
       await queryClient.invalidateQueries({ queryKey: ["plans", conversationId] });
@@ -2937,7 +2938,7 @@ export function ChatPage() {
         view={planDialogOpen ? currentPlan : null}
         busy={planBusy}
         onClose={() => setPlanDialogOpen(false)}
-        onAction={(action, note) => void runPlanAction(action, note)}
+        onAction={(action, options) => void runPlanAction(action, options)}
       />
       <GoalManageDialog
         mode={goalManageMode}

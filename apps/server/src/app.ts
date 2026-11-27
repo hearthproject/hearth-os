@@ -219,6 +219,14 @@ const taskFollowUpPatchSchema = z.object({
   content: z.string().trim().min(1).max(20_000)
 }).strict();
 
+const taskTodosSchema = z.object({
+  todos: z.array(z.object({
+    id: z.string().min(1).max(120),
+    content: z.string().trim().min(1).max(2_000),
+    status: z.enum(["pending", "in_progress", "completed", "cancelled"])
+  })).min(1).max(30)
+}).strict();
+
 const rewindTaskSchema = z.object({
   runId: z.string().trim().min(1).max(120),
   turn: z.number().int().min(1).max(10_000),
@@ -3098,6 +3106,18 @@ export async function buildServer(options: BuildServerOptions = {}) {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return reply.code(message.includes("不存在") ? 404 : 409).send({ error: "FOLLOW_UP_REJECTED", message });
+    }
+  });
+
+  app.post<{ Params: { id: string }; Body: unknown }>("/api/tasks/:id/todos", async (request, reply) => {
+    if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFF", message: "执行器未启动" });
+    const parsed = taskTodosSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_INPUT", message: "清单格式不正确" });
+    try {
+      return scheduler.applyTodoEdits(request.params.id, parsed.data.todos);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return reply.code(message.includes("不存在") ? 404 : 409).send({ error: "TODOS_REJECTED", message });
     }
   });
 

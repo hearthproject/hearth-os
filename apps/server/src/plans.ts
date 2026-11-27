@@ -140,14 +140,14 @@ export class PlanService {
   async action(
     planId: string,
     action: PlanActionName,
-    options: { expectedRevision?: number; note?: string } = {}
+    options: { expectedRevision?: number; note?: string; planMarkdown?: string } = {}
   ): Promise<PlanView> {
     const plan = this.require(planId);
     assertPlanAction(plan.stage, action);
     if (options.expectedRevision !== undefined && options.expectedRevision !== plan.revision) {
       throw new PlanStateError("PLAN_REVISION_CONFLICT", "计划已被更新，请刷新后重试");
     }
-    if (action === "approve") return this.approve(plan);
+    if (action === "approve") return this.approve(plan, options.planMarkdown);
     if (action === "replan") return this.replan(plan, options.note);
     if (action === "cancel") return this.cancel(plan);
     return this.retry(plan);
@@ -296,8 +296,8 @@ export class PlanService {
     }
   }
 
-  private approve(plan: PlanRecord): PlanView {
-    const markdown = plan.planMarkdown?.trim();
+  private approve(plan: PlanRecord, editedMarkdown?: string): PlanView {
+    const markdown = (editedMarkdown ?? plan.planMarkdown ?? "").trim();
     if (!markdown) throw new PlanStateError("PLAN_STATE_INVALID", "计划还没有正文，不能开始执行");
     const canonicalPath = canonicalPlanPath(this.planRoot, plan.id);
     const sha256 = this.writeCanonicalPlan(canonicalPath, markdown);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { collectEntries, latestTodos } from "./InlineRun.tsx";
-import { splitInlineCode, todoHeaderText } from "./TodoChecklist.tsx";
+import { MAX_TODO_ITEMS, splitInlineCode, todoHeaderText, validateTodoEdits } from "./TodoChecklist.tsx";
 import type { TaskView } from "../lib/types.ts";
 import type { EventEnvelope, TaskProgressDetail } from "@hearth/core";
 
@@ -63,5 +63,24 @@ describe("checklist presentation", () => {
 
   it("keeps plain content as a single text part", () => {
     expect(splitInlineCode("检查 gitignore")).toEqual([{ text: "检查 gitignore", code: false }]);
+  });
+});
+
+describe("todo edit validation", () => {
+  const item = (id: string, status = "pending") => ({ id, content: `步骤 ${id}`, status });
+
+  it("accepts a normal edited list", () => {
+    expect(validateTodoEdits([item("p1", "completed"), item("p2", "in_progress"), item("user-1")])).toBeNull();
+  });
+
+  it("rejects empty, blank, duplicate and over-long lists", () => {
+    expect(validateTodoEdits([])).toBe("清单不能为空");
+    expect(validateTodoEdits([{ id: "p1", content: "  ", status: "pending" }])).toBe("步骤内容不能为空");
+    expect(validateTodoEdits([item("p1"), item("p1")])).toBe("步骤 id 重复");
+    expect(validateTodoEdits(Array.from({ length: MAX_TODO_ITEMS + 1 }, (_, index) => item(`p${index}`)))).toBe(`最多 ${MAX_TODO_ITEMS} 条`);
+  });
+
+  it("allows at most one in_progress step", () => {
+    expect(validateTodoEdits([item("p1", "in_progress"), item("p2", "in_progress")])).toBe("只能有一个进行中的步骤");
   });
 });

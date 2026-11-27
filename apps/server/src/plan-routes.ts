@@ -25,7 +25,8 @@ const createPlanSchema = z.object({
 const actionSchema = z.object({
   action: z.enum(["approve", "replan", "cancel", "retry"]),
   expectedRevision: z.number().int().min(0).optional(),
-  note: z.string().trim().max(4_000).optional()
+  note: z.string().trim().max(4_000).optional(),
+  planMarkdown: z.string().max(200_000).optional()
 }).strict();
 
 export function registerPlanRoutes(
@@ -94,7 +95,8 @@ export function registerPlanRoutes(
     try {
       const plan = await plans.action(id, parsed.data.action, {
         ...(parsed.data.expectedRevision !== undefined ? { expectedRevision: parsed.data.expectedRevision } : {}),
-        ...(parsed.data.note ? { note: parsed.data.note } : {})
+        ...(parsed.data.note ? { note: parsed.data.note } : {}),
+        ...(parsed.data.planMarkdown !== undefined ? { planMarkdown: parsed.data.planMarkdown } : {})
       });
       return reply.send(plan);
     } catch (error) {

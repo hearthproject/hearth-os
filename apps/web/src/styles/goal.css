@@ -467,6 +467,191 @@
   color: rgb(255 255 255 / 0.78);
 }
 
+.plan-dialog-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plan-dialog-plan-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--ink-secondary);
+  font-size: 12px;
+}
+
+.plan-dialog-plan-head .ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.plan-dialog-plan-editor {
+  width: 100%;
+  min-height: 220px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-elevated, var(--bg));
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.plan-editor-tabs {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-elevated, var(--bg));
+}
+
+.plan-editor-tabs button {
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.plan-editor-tabs button.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.plan-block-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 440px;
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-elevated, var(--bg));
+}
+
+.plan-block {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+
+.plan-block:hover {
+  border-color: var(--line);
+}
+
+.plan-block-marker {
+  flex: 0 0 auto;
+  min-width: 26px;
+  padding-top: 6px;
+  color: var(--ink-tertiary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  text-align: right;
+}
+
+.plan-block-field {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.plan-block-heading .plan-block-field {
+  font-weight: 600;
+}
+
+.plan-block-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.plan-block-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-tertiary);
+  cursor: pointer;
+}
+
+.plan-block-action:hover {
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+.plan-block-action.danger:hover {
+  color: #d1393b;
+  border-color: color-mix(in srgb, #d1393b 30%, var(--line));
+}
+
+.plan-editor-empty {
+  margin: 4px 8px;
+  color: var(--ink-tertiary);
+  font-size: 12px;
+}
+
+.plan-editor-add {
+  display: flex;
+  gap: 8px;
+  padding: 6px 4px 2px;
+}
+
+.plan-editor-add button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.plan-editor-add button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .plan-dialog-editor {
   display: flex;
   flex-direction: column;
@@ -474,6 +659,27 @@
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--line);
+}
+
+.plan-dialog-editor label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--ink-secondary);
+  font-size: 12px;
+}
+
+.plan-dialog-editor textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-elevated, var(--bg));
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
 }
 
 .plan-dialog-editor-actions {
