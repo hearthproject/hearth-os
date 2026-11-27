@@ -3,6 +3,14 @@ import { existsSync } from "node:fs";
 import type { RunUsage, TaskProgressDetail } from "@hearth/core";
 import { buildCodexEnv, describeCodexProfile, loadCodexProfile, type CodexProfile } from "./profile.ts";
 
+export interface CodexMultiAgentOptions {
+  enabled: boolean;
+  /** Codex calls this max_threads; Hearth keeps it low because members are invisible. */
+  maxThreads?: number;
+  /** Root is depth 0, so 1 allows one level of internal members. */
+  maxDepth?: number;
+}
+
 export interface CodexRunOptions {
   workingDirectory: string;
   outDir?: string;
@@ -22,6 +30,8 @@ export interface CodexRunOptions {
   approvalPolicy?: "never" | "on-request" | "on-failure" | "untrusted";
   env?: Record<string, string>;
   mcpServers?: Record<string, CodexMcpServer>;
+  /** Native Codex multi-agent switch. Omitted keeps Codex's own default. */
+  multiAgent?: CodexMultiAgentOptions;
 }
 
 export interface CodexMcpServer {
@@ -43,6 +53,26 @@ export interface CodexRunResult {
   profileLabel: string;
 }
 
+export function codexRuntimeConfig(
+  multiAgent?: CodexMultiAgentOptions,
+  mcpServers?: Record<string, CodexMcpServer>
+): Record<string, unknown> {
+  const config: Record<string, unknown> = {};
+  if (multiAgent) {
+    config.features = { multi_agent: multiAgent.enabled };
+    if (multiAgent.enabled) {
+      config.agents = {
+        max_threads: Math.max(1, multiAgent.maxThreads ?? 4),
+        max_depth: Math.max(1, multiAgent.maxDepth ?? 1)
+      };
+    }
+  }
+  if (mcpServers && Object.keys(mcpServers).length > 0) {
+    config.mcp_servers = codexMcpConfig(mcpServers);
+  }
+  return config;
+}
+
 export async function runCodex(options: CodexRunOptions): Promise<CodexRunResult> {
   const profile = options.profile ?? loadCodexProfile();
   if (!profile.canRun) throw new Error(`Codex 不可用：${profile.issues.join("；")}`);
@@ -50,11 +80,13 @@ export async function runCodex(options: CodexRunOptions): Promise<CodexRunResult
     throw new Error(`Codex 可执行文件不存在：${options.codexPathOverride}`);
   }
 
+  const codexConfig = codexRuntimeConfig(options.multiAgent, options.mcpServers);
+
   const codex = options.codex ?? new Codex({
     env: { ...buildCodexEnv(profile), ...(options.env ?? {}) },
     ...(options.codexPathOverride ? { codexPathOverride: options.codexPathOverride } : {}),
-    ...(options.mcpServers && Object.keys(options.mcpServers).length > 0
-      ? { config: { mcp_servers: codexMcpConfig(options.mcpServers) } as NonNullable<CodexOptions["config"]> }
+    ...(Object.keys(codexConfig).length > 0
+      ? { config: codexConfig as NonNullable<CodexOptions["config"]> }
       : {})
   });
   const threadOptions = {

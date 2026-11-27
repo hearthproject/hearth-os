@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { codexMcpConfig, describeItem, runCodex } from "./executor.ts";
+import { codexMcpConfig, codexRuntimeConfig, describeItem, runCodex } from "./executor.ts";
 import type { CodexProfile } from "./profile.ts";
 
 describe("describeItem", () => {
@@ -123,6 +123,32 @@ describe("codexMcpConfig", () => {
         startup_timeout_sec: 20,
         tool_timeout_sec: 120
       }
+    });
+  });
+});
+
+describe("codexRuntimeConfig", () => {
+  it("turns native multi-agent on with clamped thread limits", () => {
+    expect(codexRuntimeConfig({ enabled: true, maxThreads: 4, maxDepth: 1 })).toEqual({
+      features: { multi_agent: true },
+      agents: { max_threads: 4, max_depth: 1 }
+    });
+  });
+
+  it("only disables the feature in single mode and leaves no thread config behind", () => {
+    expect(codexRuntimeConfig({ enabled: false })).toEqual({
+      features: { multi_agent: false }
+    });
+  });
+
+  it("merges MCP servers with the team flags into one config object", () => {
+    expect(codexRuntimeConfig(
+      { enabled: true, maxThreads: 2, maxDepth: 2 },
+      { hearth: { command: "node", args: ["library-mcp.mjs"] } }
+    )).toMatchObject({
+      features: { multi_agent: true },
+      agents: { max_threads: 2, max_depth: 2 },
+      mcp_servers: { hearth: { command: "node", args: ["library-mcp.mjs"] } }
     });
   });
 });
