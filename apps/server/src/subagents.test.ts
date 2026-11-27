@@ -1,14 +1,15 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HearthStore } from "@hearth/eventlog";
 import type { TaskPermissions, TaskRecord } from "@hearth/core";
 import type { NativeRunOptions, NativeRunResult } from "./native-executor.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import { ProjectService } from "./projects.ts";
-import { createAgentTool, createSubagentResumeHandler, createSubagentTool } from "./subagents.ts";
+import { TEAM_RECEIPT_SCHEMA } from "./agent-mode.ts";
+import { createAgentTool, createSubagentResumeHandler, createSubagentTool, type SubagentFinishedInfo } from "./subagents.ts";
 import { createAgentLifecycleTools, SubagentTaskManager } from "./subagent-manager.ts";
 import { TaskWorktreeService } from "./worktrees.ts";
 
@@ -113,6 +114,57 @@ describe("native subagents", () => {
     const lines = transcriptPath ? readFileSync(transcriptPath, "utf8").trim().split("\n").map((line) => JSON.parse(line)) : [];
     expect(lines[0]).toMatchObject({ event: "started", type: "explore", title: "定位 README" });
     expect(lines[1]).toMatchObject({ event: "completed", type: "explore", summary: "找到 README.md:1" });
+  });
+
+  it("uses the team receipt schema and writes evidence under the stable agent root", async () => {
+    const parentWorktree = worktrees.ensure(task);
+    const finished: SubagentFinishedInfo[] = [];
+    const tool = createAgentTool({
+      task,
+      prepared: { root: parentWorktree.path, outDir: join(parentWorktree.path, "out"), inputs: [] },
+      settings: settings(),
+      permissions,
+      signal: new AbortController().signal,
+      worktrees,
+      parentWorktree,
+      allowedTypes: ["explore", "plan", "review"],
+      defaultOutputSchema: TEAM_RECEIPT_SCHEMA,
+      evidenceRoot: join(root, "agents"),
+      onFinished: (info) => finished.push(info),
+      runner: async () => result(JSON.stringify({
+        status: "completed",
+        summary: "README 存在",
+        evidence: [{ claim: "README 存在", source: "README.md:1" }]
+      }))
+    });
+
+    const output = await tool.execute({ subagent_type: "explore", description: "核验 README", prompt: "读取 README 并给出证据" }, context(parentWorktree.path));
+
+    expect(output.content).toContain("structured_output");
+    expect(output.metadata?.structured).toMatchObject({ status: "completed" });
+    const transcript = String(output.metadata?.transcriptPath ?? "");
+    expect(transcript.startsWith(join(root, "agents"))).toBe(true);
+    expect(existsSync(join(dirname(transcript), "report.json"))).toBe(true);
+    expect(finished[0]).toMatchObject({ status: "completed", structured: { status: "completed" } });
+  });
+
+  it("rejects write-capable member types in Team v1", async () => {
+    const parentWorktree = worktrees.ensure(task);
+    const tool = createAgentTool({
+      task,
+      prepared: { root: parentWorktree.path, outDir: join(parentWorktree.path, "out"), inputs: [] },
+      settings: settings(),
+      permissions,
+      signal: new AbortController().signal,
+      worktrees,
+      parentWorktree,
+      allowedTypes: ["explore", "plan", "review"],
+      runner: async () => result("不应运行")
+    });
+    const definition = tool.definition.parameters as { properties?: { subagent_type?: { enum?: string[] } } };
+    expect(definition.properties?.subagent_type?.enum).toEqual(["explore", "plan", "review"]);
+    await expect(tool.execute({ subagent_type: "general-purpose", description: "写入", prompt: "改文件" }, context(parentWorktree.path)))
+      .rejects.toThrow("当前 Agent 模式不支持子代理类型");
   });
 
   it("starts background agents and exposes wait/status/kill", async () => {
