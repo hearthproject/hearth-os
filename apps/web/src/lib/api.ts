@@ -525,6 +525,10 @@ export const api = {
     method: "POST",
     body: JSON.stringify({ resume: reference, ...options })
   }),
+  confirmWaiting: (id: string, note?: string) => request<TaskRecord>(`/api/tasks/${encodeURIComponent(id)}/confirm-waiting`, {
+    method: "POST",
+    ...(note?.trim() ? { body: JSON.stringify({ note: note.trim() }) } : {})
+  }),
   decideApproval: (id: string, decision: "approve" | "reject" | "approve_always", parameterHash: string) =>
     request<ApprovalDecisionResult>(`/api/approvals/${encodeURIComponent(id)}/decide`, {
       method: "POST",

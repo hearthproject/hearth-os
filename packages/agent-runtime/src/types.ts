@@ -77,6 +77,8 @@ export interface AgentToolContext {
   state?: AgentToolState;
   fullAccess?: boolean;
   mode?: HarnessMode;
+  /** Build 模式下 submit_plan 后暂停，等用户确认再继续。 */
+  requirePlanApproval?: boolean;
   /** Task-scoped root for goal/plan files. Defaults to workspaceRoot. */
   goalRoot?: string;
   sandbox?: SandboxRuntime;
@@ -405,6 +407,11 @@ export interface AgentRuntimeOptions {
    * 保证 plan 与 todos 始终有数据可供回注和界面展示。
    */
   requirePlanFirst?: boolean;
+  /**
+   * build 模式下通过 submit_plan 提交计划后暂停为 waiting_input，
+   * 等用户确认（回复框补充信息）后再恢复执行。plan 模式本来就会暂停，不受影响。
+   */
+  requirePlanApproval?: boolean;
   stopOnToolError?: boolean;
   retryDelayMs?: number;
   retryPolicy?: Partial<RetryPolicy>;
@@ -486,6 +493,8 @@ export interface AgentRunResult {
   planPath?: string;
   /** True only when a plan tool submitted a plan; ask_user remains a clarification. */
   planSubmitted?: boolean;
+  /** Why a waiting_input run paused: plan confirmation can be continued without new text. */
+  waitingKind?: "plan_approval" | "needs_input";
   metrics?: AgentRunMetrics;
   failure?: AgentFailure;
 }

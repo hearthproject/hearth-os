@@ -48,6 +48,7 @@ export interface ExecutionOutcome {
   planPath?: string | null;
   planMarkdown?: string | null;
   planSubmitted?: boolean;
+  waitingKind?: "plan_approval" | "needs_input";
   resume?: AgentResumeState;
   failure?: AgentFailure;
   budgetExhaustion?: Pick<BudgetExhaustion, "dimension" | "limit">;
@@ -229,6 +230,7 @@ export class NativeExecutorAdapter implements ExecutorAdapter {
       label: `native / ${input.nativeSettings.model}`,
       question: outcome.question,
       ...(outcome.planPath ? { planPath: outcome.planPath } : {}),
+      ...(outcome.waitingKind ? { waitingKind: outcome.waitingKind } : {}),
       ...(input.mode === "plan" && outcome.planSubmitted && (outcome.question || outcome.finalResponse)
         ? { planMarkdown: outcome.finalResponse || outcome.question, planSubmitted: true }
         : {}),

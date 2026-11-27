@@ -189,6 +189,7 @@ export interface NativeRunResult {
   question: string | null;
   planPath?: string | null;
   planSubmitted?: boolean;
+  waitingKind?: "plan_approval" | "needs_input";
   outputs: string[];
   messages?: AgentMessage[];
   failure?: AgentFailure;
@@ -430,6 +431,8 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     requireFinishTool: true,
     // 真实交付任务必须先建计划；草稿、子代理、计划模式与恢复执行跳过。
     requirePlanFirst: !drafting && !directRead && !options.isSubagent && (options.mode ?? "build") === "build" && !resume,
+    // 直发 build 任务提交计划后先停，等用户确认；计划审批流程的执行任务与恢复执行跳过。
+    requirePlanApproval: !drafting && !directRead && !options.isSubagent && (options.mode ?? "build") === "build" && !resume && !options.task.planId,
     stopOnToolError: drafting,
     verifyGoalCompletion: async (goal) => {
       try {
@@ -528,6 +531,7 @@ export async function runNativeTask(options: NativeRunOptions): Promise<NativeRu
     question: result.question,
     ...(result.planPath ? { planPath: result.planPath } : {}),
     ...(result.planSubmitted ? { planSubmitted: true } : {}),
+    ...(result.waitingKind ? { waitingKind: result.waitingKind } : {}),
     outputs: result.outputs,
     messages: result.messages,
     ...(result.failure ? { failure: result.failure } : {}),
@@ -1862,7 +1866,7 @@ export function nativeSystemPromptSections(
       ...(hasTool("delegate_task") ? ["边界清晰、可独立完成的子任务可以调用 delegate_task。只读子代理用于调查；隔离写子代理会在独立 Worktree 中工作并返回分支和提交，结果必须由你检查后手动处理，不会自动合并。"] : []),
       ...(hasTool("agent") ? ["需要独立调查、方案设计或代码审查时优先调用 agent，选择 explore、plan 或 review；需要隔离实现时选择 general-purpose。"] : []),
       ...(hasTool("todo_write") ? ["预计 3 步以上的任务，开始前必须用 todo_write 建立待办清单：开始某一步前把它标为 in_progress，完成后标为 completed，每次只保持一项 in_progress。只有单步即可完成的简单问答可以省略；多步骤任务不得全程不建清单。"] : []),
-      ...(hasTool("submit_plan") ? ["有明确实现方案时优先用 submit_plan 一次提交结构化步骤：steps 数组每项至少含 title，最多 20 步；构建模式提交后继续执行，不要停下等待确认。超过 20 步拆成子任务。"] : []),
+      ...(hasTool("submit_plan") ? ["有明确实现方案时优先用 submit_plan 一次提交结构化步骤：steps 数组每项至少含 title，最多 20 步；提交计划后先停下来等待用户确认，确认通过后才执行，不要提交后直接开始执行。超过 20 步拆成子任务。"] : []),
       ...(hasTool("todo_write") ? ["你会周期性收到 <active_plan> 块，其中每一步带 state（pending/in_progress/completed/cancelled），这是计划进度的权威来源。按它推进任务；状态变化时用 todo_write 更新对应步骤（id 保持一致），不要另建一份清单。owner 字段为后续多智能体分派预留，无需自行填写。"] : []),
       ...nativeTaskInstructions(task, expectedOutputs)
     ]

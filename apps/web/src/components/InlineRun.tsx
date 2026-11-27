@@ -174,6 +174,16 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
     }
   });
 
+  const confirmMutation = useMutation({
+    mutationFn: (note?: string) => api.confirmWaiting(task.id, note),
+    onSuccess: async () => {
+      setReply("");
+      await queryClient.invalidateQueries({ queryKey: ["task", task.id] });
+      await queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    }
+  });
+
   const todosMutation = useMutation({
     mutationFn: (nextTodos: TodoChecklistItem[]) => api.setTodos(task.id, nextTodos),
     onSuccess: async () => {
@@ -181,9 +191,12 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
     }
   });
 
+  const statusLabel = status === "waiting_input" && view?.task.waitingKind === "plan_approval"
+    ? "等待确认计划"
+    : RUN_LABELS[status];
   const headline = status === "completed"
     ? duration !== null ? `共用时 ${formatDuration(duration)}` : "已完成"
-    : `${RUN_LABELS[status]}${status !== "paused" && resumable ? " · 可继续" : ""}${duration !== null ? ` · ${formatDuration(duration)}` : ""}`;
+    : `${statusLabel}${status !== "paused" && resumable ? " · 可继续" : ""}${duration !== null ? ` · ${formatDuration(duration)}` : ""}`;
   // 折叠状态下也透出当前动作，接近 Codex 的“正在执行 …”一行摘要。
   const currentActivity = useMemo(() => {
     for (let index = entries.length - 1; index >= 0; index -= 1) {
@@ -320,7 +333,39 @@ export const InlineRun = memo(function InlineRun({ task }: { task: RunInfo }) {
             </div>
           )}
 
-          {status === "waiting_input" && (
+          {status === "waiting_input" && view?.task.waitingKind === "plan_approval" && (
+            <div className="inline-run-question inline-run-plan-confirm">
+              <p>{view.task.resultSummary || view.task.nextAction || "计划已生成，请确认后继续。"}</p>
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  confirmMutation.mutate(reply);
+                }}
+              >
+                <input
+                  value={reply}
+                  onChange={(event) => setReply(event.target.value)}
+                  placeholder="需要调整的话写在这里（可不填）"
+                  disabled={confirmMutation.isPending}
+                />
+                <button
+                  type="submit"
+                  className="ghost-button small primary"
+                  disabled={confirmMutation.isPending}
+                >
+                  {confirmMutation.isPending
+                    ? <Loader2 size={12} className="spin" />
+                    : <Play size={12} />}
+                  确认并继续
+                </button>
+              </form>
+              {confirmMutation.isError && (
+                <p className="inline-run-error">{confirmMutation.error instanceof Error ? confirmMutation.error.message : "确认失败"}</p>
+              )}
+            </div>
+          )}
+
+          {status === "waiting_input" && view?.task.waitingKind !== "plan_approval" && (
             <div className="inline-run-question">
               <p>{view?.task.resultSummary || view?.task.nextAction || "执行器需要你补充一些信息。"}</p>
               <form

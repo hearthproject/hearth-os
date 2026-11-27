@@ -219,6 +219,10 @@ const taskFollowUpPatchSchema = z.object({
   content: z.string().trim().min(1).max(20_000)
 }).strict();
 
+const taskConfirmWaitingSchema = z.object({
+  note: z.string().trim().max(20_000).optional()
+}).strict();
+
 const taskTodosSchema = z.object({
   todos: z.array(z.object({
     id: z.string().min(1).max(120),
@@ -3106,6 +3110,18 @@ export async function buildServer(options: BuildServerOptions = {}) {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return reply.code(message.includes("不存在") ? 404 : 409).send({ error: "FOLLOW_UP_REJECTED", message });
+    }
+  });
+
+  app.post<{ Params: { id: string }; Body: unknown }>("/api/tasks/:id/confirm-waiting", async (request, reply) => {
+    if (!scheduler) return reply.code(503).send({ error: "SCHEDULER_OFF", message: "执行器未启动" });
+    const parsed = taskConfirmWaitingSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "INVALID_INPUT", message: "确认内容格式不正确" });
+    try {
+      return scheduler.confirmWaitingInput(request.params.id, parsed.data.note);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return reply.code(message.includes("不存在") ? 404 : 409).send({ error: "CONFIRM_REJECTED", message });
     }
   });
 

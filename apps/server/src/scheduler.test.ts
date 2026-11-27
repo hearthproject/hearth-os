@@ -1015,6 +1015,87 @@ describe("Hearth scheduler", () => {
     expect(completed.resultSummary).toBe("已按补充预算完成");
   });
 
+  it("continues a plan-approval pause without extra text and rejects needs_input", async () => {
+    const service = setup();
+    const settingsPath = configureModel();
+    let calls = 0;
+    let resumed = "";
+    const nativeRunner: NativeRunner = async (options) => {
+      calls += 1;
+      if (calls === 1) {
+        await options.onCheckpoint?.({
+          seq: 1,
+          kind: "plan",
+          messages: [
+            { role: "system", content: "system" },
+            { role: "user", content: "goal" },
+            { role: "assistant", content: "", toolCalls: [{ id: "call-1", name: "submit_plan", arguments: { title: "计划" }, rawArguments: "{\"title\":\"计划\"}" }] },
+            { role: "tool", toolCallId: "call-1", name: "submit_plan", content: "计划已生成，等待确认" }
+          ],
+          usage: { inputTokens: 10, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 5, reasoningOutputTokens: 0 },
+          turns: 1,
+          toolCalls: 1,
+          summary: "计划已生成，等待确认"
+        });
+        return {
+          status: "waiting_input",
+          finalResponse: "计划已生成，等待确认",
+          usage: { inputTokens: 10, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 5, reasoningOutputTokens: 0 },
+          turns: 1,
+          toolCalls: 1,
+          question: "计划已生成，等待确认",
+          waitingKind: "plan_approval",
+          outputs: []
+        };
+      }
+      resumed = JSON.stringify(options.resume?.messages ?? []);
+      writeFileSync(join(options.prepared.outDir, "result.md"), "# 结果\n\n按确认的计划完成。\n");
+      return nativeResult("已按计划完成");
+    };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath: settingsPath });
+    scheduler.start();
+
+    const task = service.createTask({ title: "写方案", goal: "生成并确认计划", executorId: "native" });
+    const waiting = await waitForStatus(service, task.id, "waiting_input");
+    expect(waiting.waitingKind).toBe("plan_approval");
+    expect(waiting.nextAction).toBe("等待你确认计划后继续");
+
+    scheduler.confirmWaitingInput(task.id);
+    const completed = await waitForStatus(service, task.id, "completed");
+    expect(calls).toBe(2);
+    expect(resumed).toContain("用户已确认计划");
+    expect(completed.resultSummary).toBe("已按计划完成");
+  });
+
+  it("rejects direct confirmation when the pause needs concrete information", async () => {
+    const service = setup();
+    const settingsPath = configureModel();
+    let calls = 0;
+    const nativeRunner: NativeRunner = async () => {
+      calls += 1;
+      if (calls === 1) {
+        return {
+          status: "waiting_input",
+          finalResponse: "预算上限是多少？",
+          usage: { inputTokens: 10, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 5, reasoningOutputTokens: 0 },
+          turns: 1,
+          toolCalls: 1,
+          question: "预算上限是多少？",
+          waitingKind: "needs_input",
+          outputs: []
+        };
+      }
+      return nativeResult("已补充");
+    };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath: settingsPath });
+    scheduler.start();
+
+    const task = service.createTask({ title: "写方案", goal: "需要预算信息", executorId: "native" });
+    await waitForStatus(service, task.id, "waiting_input");
+    expect(() => scheduler!.confirmWaitingInput(task.id)).toThrow("需要你补充具体信息");
+    expect(calls).toBe(1);
+  });
+
   it.each(["quick", "standard", "deep"] as const)("uses persisted %s task execution budgets", async (executionMode) => {
     const service = setup();
     const settingsPath = configureModel();

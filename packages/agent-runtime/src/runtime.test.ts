@@ -314,6 +314,7 @@ describe("agent runtime", () => {
     expect(result.status).toBe("waiting_input");
     expect(result.question).toBe("预算上限是多少？");
     expect(result.planSubmitted).toBeUndefined();
+    expect(result.waitingKind).toBe("needs_input");
   });
 
   it("marks submit_plan separately from an ordinary clarification", async () => {
@@ -335,6 +336,7 @@ describe("agent runtime", () => {
     expect(result.status).toBe("waiting_input");
     expect(result.question).toBe(plan);
     expect(result.planSubmitted).toBe(true);
+    expect(result.waitingKind).toBe("plan_approval");
   });
 
   it("still pauses for user input when ask_user runs in full permission", async () => {
@@ -1299,6 +1301,43 @@ describe("requirePlanFirst gate", () => {
       .filter((event): event is Extract<RuntimeEvent, { type: "tool.finished" }> => event.type === "tool.finished")
       .map((event) => event.call.name);
     expect(executed).not.toContain("read_file");
+    const updates = events.filter((event): event is Extract<RuntimeEvent, { type: "todos.updated" }> => event.type === "todos.updated");
+    expect(updates.at(-1)?.todos).toHaveLength(2);
+  });
+
+  it("pauses after submit_plan in build mode when plan approval is required", async () => {
+    const root = mkdtempSync(join(tmpdir(), "hearth-plan-approval-"));
+    const events: RuntimeEvent[] = [];
+    let callIndex = 0;
+    const model: AgentModel = async () => {
+      callIndex += 1;
+      if (callIndex === 1) {
+        return turnWith(toolCall("plan-1", "submit_plan", {
+          steps: [{ title: "读文件" }, { title: "写结果" }]
+        }));
+      }
+      return turnWith(toolCall("finish-1", "finish_task", { summary: "不该执行" }));
+    };
+    const result = await runAgent({
+      model,
+      tools: createBuiltinTools(),
+      goal: "读文件后写结果",
+      systemPrompt: "system",
+      budget: { maxTurns: 8, maxToolCalls: 6, maxTokens: 10_000, maxDurationMs: 30_000 },
+      permissions: { tools: ["read_file", "submit_plan", "todo_write", "todo_read", "finish_task"], readRoots: [root], writeRoots: [root], networkHosts: [] },
+      workspaceRoot: root,
+      outDir: join(root, "out"),
+      requirePlanApproval: true,
+      onEvent: (event) => events.push(event)
+    });
+    expect(result.status).toBe("waiting_input");
+    expect(result.planSubmitted).toBe(true);
+    expect(result.waitingKind).toBe("plan_approval");
+    expect(result.question).toContain("请确认后继续");
+    const executed = events
+      .filter((event): event is Extract<RuntimeEvent, { type: "tool.finished" }> => event.type === "tool.finished")
+      .map((event) => event.call.name);
+    expect(executed).not.toContain("finish_task");
     const updates = events.filter((event): event is Extract<RuntimeEvent, { type: "todos.updated" }> => event.type === "todos.updated");
     expect(updates.at(-1)?.todos).toHaveLength(2);
   });

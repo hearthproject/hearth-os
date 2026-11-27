@@ -239,7 +239,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
   deadline TEXT, inputs_json TEXT NOT NULL, network_hosts_json TEXT NOT NULL,
   output_dir TEXT NOT NULL, current_run_id TEXT, next_action TEXT, error_json TEXT,
-  result_summary TEXT, conversation_id TEXT, executor_id TEXT, task_kind TEXT,
+  result_summary TEXT, waiting_kind TEXT, conversation_id TEXT, executor_id TEXT, task_kind TEXT,
   expected_outputs_json TEXT, permissions_json TEXT, pending_input TEXT,
   method_id TEXT, method_version INTEGER, project_id TEXT, pinned_at TEXT, archived_at TEXT,
   budget_override_json TEXT, deleted_at TEXT, trash_batch_id TEXT,
@@ -1820,6 +1820,7 @@ export class HearthStore {
     ensureColumn(this.db, "events", "origin_seq", "INTEGER");
     ensureColumn(this.db, "runs", "lease_epoch", "INTEGER");
     ensureColumn(this.db, "tasks", "result_summary", "TEXT");
+    ensureColumn(this.db, "tasks", "waiting_kind", "TEXT");
     ensureColumn(this.db, "tasks", "conversation_id", "TEXT");
     ensureColumn(this.db, "tasks", "executor_id", "TEXT");
     ensureColumn(this.db, "tasks", "task_kind", "TEXT");
@@ -4539,15 +4540,16 @@ export class HearthStore {
 
 function upsertTask(db: DatabaseSync, task: TaskRecord): void {
   db.prepare(
-    `INSERT INTO tasks (id, external_ref, request_hash, template_id, title, goal, status, created_at, updated_at, deadline, inputs_json, network_hosts_json, output_dir, current_run_id, next_action, error_json, result_summary, conversation_id, executor_id, task_kind, expected_outputs_json, permissions_json, pending_input, method_id, method_version, project_id, pinned_at, archived_at, goal_id, budget_override_json, deleted_at, trash_batch_id, execution_mode, mode, plan_id, mcp_server_ids_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO tasks (id, external_ref, request_hash, template_id, title, goal, status, created_at, updated_at, deadline, inputs_json, network_hosts_json, output_dir, current_run_id, next_action, error_json, result_summary, waiting_kind, conversation_id, executor_id, task_kind, expected_outputs_json, permissions_json, pending_input, method_id, method_version, project_id, pinned_at, archived_at, goal_id, budget_override_json, deleted_at, trash_batch_id, execution_mode, mode, plan_id, mcp_server_ids_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        external_ref=excluded.external_ref, request_hash=excluded.request_hash,
        template_id=excluded.template_id, title=excluded.title, goal=excluded.goal, status=excluded.status,
        updated_at=excluded.updated_at, deadline=excluded.deadline, inputs_json=excluded.inputs_json,
        network_hosts_json=excluded.network_hosts_json, output_dir=excluded.output_dir,
        current_run_id=excluded.current_run_id, next_action=excluded.next_action, error_json=excluded.error_json,
-       result_summary=excluded.result_summary, conversation_id=excluded.conversation_id,
+       result_summary=excluded.result_summary, waiting_kind=excluded.waiting_kind,
+       conversation_id=excluded.conversation_id,
        executor_id=excluded.executor_id, task_kind=excluded.task_kind,
        expected_outputs_json=excluded.expected_outputs_json, permissions_json=excluded.permissions_json,
        pending_input=excluded.pending_input, method_id=excluded.method_id, method_version=excluded.method_version,
@@ -4561,7 +4563,7 @@ function upsertTask(db: DatabaseSync, task: TaskRecord): void {
     task.templateId, task.title, task.goal, task.status, task.createdAt, task.updatedAt,
     task.deadline, JSON.stringify(task.inputs), JSON.stringify(task.networkHosts), task.outputDir,
     task.currentRunId, task.nextAction, task.error ? JSON.stringify(task.error) : null,
-    task.resultSummary ?? null, task.conversationId ?? null,
+    task.resultSummary ?? null, task.waitingKind ?? null, task.conversationId ?? null,
     task.executorId ?? "codex", task.taskKind ?? "general",
     JSON.stringify(task.expectedOutputs ?? []),
     task.permissions ? JSON.stringify(task.permissions) : null,
@@ -4679,7 +4681,7 @@ function updateTask(db: DatabaseSync, taskId: string | null, patch: Record<strin
   const columns: Record<string, string> = {
     title: "title", goal: "goal", status: "status", updatedAt: "updated_at",
     deadline: "deadline", currentRunId: "current_run_id", nextAction: "next_action",
-    resultSummary: "result_summary", conversationId: "conversation_id",
+    resultSummary: "result_summary", waitingKind: "waiting_kind", conversationId: "conversation_id",
     pendingInput: "pending_input", executorId: "executor_id", taskKind: "task_kind", executionMode: "execution_mode",
     projectId: "project_id", outputDir: "output_dir",
     methodId: "method_id", methodVersion: "method_version",
@@ -5669,6 +5671,24 @@ function upsertHeartbeatRunRow(db: DatabaseSync, run: HeartbeatRun): void {
   );
 }
 
+/**
+ * Old waiting_input rows were written before waiting_kind existed. Infer the
+ * reason from the persisted prompt so a restart does not strand them behind
+ * the "must type something" UI even though they are really plan approvals.
+ */
+function inferWaitingKind(row: DbRow): { waitingKind?: NonNullable<TaskRecord["waitingKind"]> } {
+  if (String(row.status) !== "waiting_input") return {};
+  const stored = row.waiting_kind == null ? null : String(row.waiting_kind);
+  if (stored === "plan_approval" || stored === "needs_input") {
+    return { waitingKind: stored };
+  }
+  const summary = row.result_summary == null ? "" : String(row.result_summary);
+  if (/^计划已生成[，,].*请确认后继续/.test(summary)) {
+    return { waitingKind: "plan_approval" };
+  }
+  return {};
+}
+
 function rowToTask(row: DbRow): TaskRecord {
   const networkHosts: string[] = JSON.parse(String(row.network_hosts_json));
   const permissions = normalizeTaskPermissions(row.permissions_json);
@@ -5687,6 +5707,7 @@ function rowToTask(row: DbRow): TaskRecord {
     nextAction: row.next_action == null ? null : String(row.next_action),
     error: row.error_json == null ? null : JSON.parse(String(row.error_json)),
     resultSummary: row.result_summary == null ? null : String(row.result_summary),
+    ...(inferWaitingKind(row)),
     conversationId: row.conversation_id == null ? null : String(row.conversation_id),
     executorId: (row.executor_id == null ? "codex" : String(row.executor_id)) as NonNullable<TaskRecord["executorId"]>,
     taskKind: (row.task_kind == null ? "general" : String(row.task_kind)) as NonNullable<TaskRecord["taskKind"]>,

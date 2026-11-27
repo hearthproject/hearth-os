@@ -536,7 +536,8 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
     question: string | null = null,
     failure?: AgentFailure,
     planPath?: string,
-    planSubmitted = false
+    planSubmitted = false,
+    waitingKind?: AgentRunResult["waitingKind"]
   ): AgentRunResult {
     if (stallTimer) {
       clearInterval(stallTimer);
@@ -567,6 +568,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       question,
       ...(planPath ? { planPath } : {}),
       ...(planSubmitted ? { planSubmitted: true } : {}),
+      ...(waitingKind ? { waitingKind } : {}),
       ...(effectiveFailure ? { failure: effectiveFailure } : {}),
       metrics: {
         contextPeaks: [...contextPeaks],
@@ -866,6 +868,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         ...(options.runId ? { runId: options.runId } : {}),
         fullAccess: options.isFullPermission?.() === true,
         mode: options.mode ?? "build",
+        ...(options.requirePlanApproval ? { requirePlanApproval: true } : {}),
         ...(options.sandbox ? { sandbox: options.sandbox } : {}),
         ...(options.verifyGoalCompletion ? { verifyGoalCompletion: options.verifyGoalCompletion } : {})
       }, options.toolTimeoutMs ?? 120_000, signal, toolRetryPolicy, !options.operationLedger);
@@ -1152,7 +1155,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
       summary = fallbackPlan;
       await checkpoint("plan", true);
       clearExecuting();
-      return finish("waiting_input", fallbackPlan, [], fallbackPlan, undefined, state.planPath ?? undefined, true);
+      return finish("waiting_input", fallbackPlan, [], fallbackPlan, undefined, state.planPath ?? undefined, true, "plan_approval");
     }
 
     const assistantMessage: AgentMessage = { role: "assistant", content: turn.content, toolCalls: turn.toolCalls };
@@ -1330,6 +1333,7 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
               ...(options.runId ? { runId: options.runId } : {}),
               fullAccess: options.isFullPermission?.() === true,
               mode: options.mode ?? "build",
+              ...(options.requirePlanApproval ? { requirePlanApproval: true } : {}),
               ...(options.sandbox ? { sandbox: options.sandbox } : {}),
               ...(options.verifyGoalCompletion ? { verifyGoalCompletion: options.verifyGoalCompletion } : {})
             }, options.toolTimeoutMs ?? 120_000, signal, toolRetryPolicy, !options.operationLedger);
@@ -1580,14 +1584,14 @@ export async function runAgent(options: AgentRuntimeOptions): Promise<AgentRunRe
         summary = plan;
         await checkpoint("plan", true);
         clearExecuting();
-        return finish("waiting_input", plan, result.outputs ?? [], plan, undefined, state.planPath ?? undefined, true);
+        return finish("waiting_input", plan, result.outputs ?? [], plan, undefined, state.planPath ?? undefined, true, "plan_approval");
       }
       if (result.action === "ask_user") {
         const question = (result.question ?? result.content).trim() || "需要你补充信息后才能继续";
         summary = question;
         await checkpoint("waiting_input", true);
         clearExecuting();
-        return finish("waiting_input", question, [], question);
+        return finish("waiting_input", question, [], question, undefined, undefined, false, "needs_input");
       }
 
       await checkpoint("tool");

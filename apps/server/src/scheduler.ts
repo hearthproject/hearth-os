@@ -692,6 +692,31 @@ export class HearthScheduler {
   }
 
   /**
+   * 计划确认暂停后直接继续：用户没有补充信息也要能推进。写入一条明确的
+   * 确认消息作为下一轮输入，并从 plan 检查点恢复；不经过 ask_user 的问答路径。
+   */
+  confirmWaitingInput(taskId: string, note?: string): TaskRecord {
+    const task = this.service.requireTask(taskId);
+    if (task.status !== "waiting_input") {
+      throw new Error(`当前状态不能确认继续：${task.status}`);
+    }
+    if (task.waitingKind !== "plan_approval") {
+      throw new Error("这次暂停需要你补充具体信息后才能继续");
+    }
+    const text = note?.trim()
+      ? `用户已确认计划并补充：\n${note.trim()}`
+      : "用户已确认计划，请按当前计划开始执行，不要重新规划或再次等待确认。";
+    if (text.length > 20_000) throw new Error("补充内容不能超过 20000 个字符");
+    this.steering.delete(taskId);
+    this.service.createTaskFollowUp(taskId, text, "queue");
+    this.service.updateTask(taskId, {
+      status: "queued", nextAction: "计划已确认，准备继续执行", error: null, pendingInput: null
+    }, task.currentRunId ?? undefined);
+    this.wake();
+    return this.service.requireTask(taskId);
+  }
+
+  /**
    * 用户在前端编辑执行清单：立即投影成 task.progress 让 UI 同步，并把
    * 结构化指令交给 steering，下一轮由模型调用 todo_write 落到权威 state。
    */
@@ -3477,9 +3502,12 @@ export class HearthScheduler {
   private finishWaitingInput(taskId: string, run: RunRecord, result: ExecutionOutcome): AttemptResult {
     const usage = this.usageWithMetrics(result.usage, result.turns, result.toolCalls);
     this.service.updateRun(run.id, taskId, { status: "waiting_input", endedAt: new Date().toISOString(), usage, failure: null });
+    const waitingKind = result.waitingKind ?? "needs_input";
     const task = this.service.updateTask(taskId, {
-      status: "waiting_input", currentRunId: run.id, nextAction: "等待你补充信息",
-      error: null, resultSummary: result.question ?? result.finalResponse
+      status: "waiting_input", currentRunId: run.id,
+      nextAction: waitingKind === "plan_approval" ? "等待你确认计划后继续" : "等待你补充信息",
+      error: null, resultSummary: result.question ?? result.finalResponse,
+      waitingKind
     }, run.id);
     this.goals?.onTaskGated(task, "needs_input");
     if (this.plans && task.planId && task.mode === "plan" && result.planSubmitted) {

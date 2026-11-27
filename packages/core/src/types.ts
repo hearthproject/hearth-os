@@ -464,6 +464,8 @@ export interface TaskRecord {
   nextAction: string | null;
   error: TaskError | null;
   resultSummary?: string | null;
+  /** Why the task paused in waiting_input; plan approvals can continue without new text. */
+  waitingKind?: "plan_approval" | "needs_input";
   conversationId?: string | null;
   executorId?: ExecutorId;
   taskKind?: TaskKind;

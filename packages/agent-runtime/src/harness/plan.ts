@@ -100,6 +100,18 @@ export const submitPlanTool: AgentTool = {
       planContext = renderPlanContext(context.state?.plan);
     }
     if (steps.length > 0 && context.mode !== "plan") {
+      // 直发 build 任务：先停在这里等用户确认计划，确认后由恢复流程继续。
+      if (context.requirePlanApproval) {
+        const confirmation = `计划已生成，共 ${steps.length} 步。请确认后继续；需要调整就直接告诉我。\n\n${planContext ?? plan}`;
+        return {
+          content: confirmation,
+          action: "plan",
+          summary: confirmation,
+          question: confirmation,
+          outputs: [],
+          metadata: { title }
+        };
+      }
       return {
         content: `计划已记录，共 ${steps.length} 步，开始按顺序执行。\n\n${planContext ?? plan}`,
         metadata: { title }

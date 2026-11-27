@@ -95,6 +95,40 @@ describe("HearthStore", () => {
     store.close();
   });
 
+  it("persists waitingKind and infers plan approval for older rows", () => {
+    const store = new HearthStore(":memory:");
+    store.appendEvent({ type: "task.created", taskId: "task-1", payload: task() });
+    store.appendEvent({
+      type: "task.updated",
+      taskId: "task-1",
+      payload: {
+        status: "waiting_input",
+        waitingKind: "plan_approval",
+        resultSummary: "计划已生成，共 2 步。请确认后继续",
+        updatedAt: "2026-11-05T00:01:00.000Z"
+      }
+    });
+    expect(store.getTask("task-1")?.waitingKind).toBe("plan_approval");
+
+    store.close();
+
+    // Simulate a task written before waiting_kind existed: no field at all,
+    // only the confirmation prompt to distinguish it from a real question.
+    const legacy = new HearthStore(":memory:");
+    legacy.appendEvent({
+      type: "task.created",
+      taskId: "task-legacy",
+      payload: {
+        ...task(),
+        id: "task-legacy",
+        status: "waiting_input",
+        resultSummary: "计划已生成，共 3 步。请确认后继续；需要调整就直接告诉我"
+      }
+    });
+    expect(legacy.getTask("task-legacy")?.waitingKind).toBe("plan_approval");
+    legacy.close();
+  });
+
   it("rebuilds projections and survives reopening", () => {
     const path = tempDb();
     const store = new HearthStore(path);
