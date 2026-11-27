@@ -8,6 +8,7 @@ import type {
   ExecutorSettingsPatch,
   ExecutorSettingsView,
   ReasoningEffort,
+  SubagentStallSettings,
   TaskFollowUpMode
 } from "@hearth/core";
 import { EXECUTOR_IDS } from "@hearth/core";
@@ -21,6 +22,7 @@ export function defaultExecutorSettings(): ExecutorSettings {
     preferredExecutorId: "native",
     followUpMode: "queue",
     reasoningEffort: "max",
+    subagentStall: { warnAfterMs: 15 * 60_000, autoCancelAfterMs: 60 * 60_000 },
     executors: {}
   };
 }
@@ -42,6 +44,7 @@ export function saveExecutorSettings(
     preferredExecutorId?: ExecutorId | null | undefined;
     followUpMode?: TaskFollowUpMode | undefined;
     reasoningEffort?: ReasoningEffort | undefined;
+    subagentStall?: Partial<SubagentStallSettings> | undefined;
     executors?: Partial<Record<ExecutorId, ExecutorRuntimeSettings>> | undefined;
   }
 ): ExecutorSettingsView {
@@ -51,6 +54,7 @@ export function saveExecutorSettings(
     preferredExecutorId: patch.preferredExecutorId !== undefined ? patch.preferredExecutorId : current.preferredExecutorId,
     followUpMode: patch.followUpMode ?? current.followUpMode,
     reasoningEffort: patch.reasoningEffort ?? current.reasoningEffort,
+    subagentStall: { ...current.subagentStall, ...patch.subagentStall },
     executors: mergeExecutorRuntimeSettings(current.executors, patch.executors)
   });
   const updatedAt = new Date().toISOString();
@@ -118,6 +122,7 @@ export class ExecutorSettingsStore {
     preferredExecutorId?: ExecutorId | null | undefined;
     followUpMode?: TaskFollowUpMode | undefined;
     reasoningEffort?: ReasoningEffort | undefined;
+    subagentStall?: Partial<SubagentStallSettings> | undefined;
     executors?: Partial<Record<ExecutorId, ExecutorRuntimeSettings>> | undefined;
   }): ExecutorSettingsView {
     const current = this.load();
@@ -126,6 +131,7 @@ export class ExecutorSettingsStore {
       preferredExecutorId: patch.preferredExecutorId !== undefined ? patch.preferredExecutorId : current.preferredExecutorId,
       followUpMode: patch.followUpMode ?? current.followUpMode,
       reasoningEffort: patch.reasoningEffort ?? current.reasoningEffort,
+      subagentStall: { ...current.subagentStall, ...patch.subagentStall },
       executors: mergeExecutorRuntimeSettings(current.executors, patch.executors)
     });
     const updatedAt = new Date().toISOString();
@@ -159,6 +165,7 @@ export function normalizeExecutorSettings(input: {
   preferredExecutorId?: ExecutorId | null | undefined;
   followUpMode?: TaskFollowUpMode | undefined;
   reasoningEffort?: ReasoningEffort | undefined;
+  subagentStall?: Partial<SubagentStallSettings> | undefined;
   /** Legacy concurrency settings are accepted during migration, then omitted. */
   concurrency?: unknown;
   executors?: Partial<Record<ExecutorId, ExecutorRuntimeSettings>> | undefined;
@@ -169,6 +176,7 @@ export function normalizeExecutorSettings(input: {
     preferredExecutorId: normalizeExecutorId(input.preferredExecutorId),
     followUpMode: normalizeFollowUpMode(input.followUpMode),
     reasoningEffort: normalizeReasoningEffort(input.reasoningEffort),
+    subagentStall: normalizeSubagentStall(input.subagentStall),
     executors
   };
 }
@@ -205,4 +213,18 @@ function normalizeReasoningEffort(value: unknown): ReasoningEffort {
 
 function normalizeFollowUpMode(value: unknown): TaskFollowUpMode {
   return value === "steer" ? "steer" : "queue";
+}
+
+function normalizeSubagentStall(value: Partial<SubagentStallSettings> | undefined): SubagentStallSettings {
+  const defaults = defaultExecutorSettings().subagentStall;
+  const warnAfterMs = typeof value?.warnAfterMs === "number" && Number.isFinite(value.warnAfterMs)
+    ? Math.min(24 * 60 * 60_000, Math.max(60_000, Math.floor(value.warnAfterMs)))
+    : defaults.warnAfterMs;
+  const autoCancelAfterMs = typeof value?.autoCancelAfterMs === "number" && Number.isFinite(value.autoCancelAfterMs)
+    ? Math.min(24 * 60 * 60_000, Math.max(warnAfterMs + 60_000, Math.floor(value.autoCancelAfterMs)))
+    : defaults.autoCancelAfterMs;
+  return {
+    warnAfterMs,
+    autoCancelAfterMs: Math.max(autoCancelAfterMs, warnAfterMs + 60_000)
+  };
 }

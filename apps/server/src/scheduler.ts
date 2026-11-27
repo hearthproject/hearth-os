@@ -1941,6 +1941,7 @@ export class HearthScheduler {
         usage: outcome?.usage ?? "none",
         final: true,
         ...(outcome ? {} : { failedBeforeOutcome: true }),
+        subagentStall: this.executorSettings().subagentStall,
         at: new Date().toISOString()
       }
     });
@@ -2496,7 +2497,7 @@ export class HearthScheduler {
       type: "agent.mode",
       taskId,
       runId,
-      payload: { ...resolvedAgentMode, at: new Date().toISOString() }
+      payload: { ...resolvedAgentMode, subagentStall: this.executorSettings().subagentStall, at: new Date().toISOString() }
     });
     this.service.bus.publish(modeEvent);
     if (resolvedAgentMode.degraded) {
@@ -2734,7 +2735,8 @@ export class HearthScheduler {
       }
       if (executorId === "native" && resolvedAgentMode.effective === "team") {
         const safeTaskId = task.id.replace(/[^A-Za-z0-9._-]/g, "-") || "task";
-        const manager = new SubagentTaskManager(4, join(taskRoot, ".hearth", "subagents", `${safeTaskId}.json`));
+        const stall = this.executorSettings().subagentStall;
+        const manager = new SubagentTaskManager(4, join(taskRoot, ".hearth", "subagents", `${safeTaskId}.json`), 8, stall);
         subagentManager = manager;
         for (const lost of manager.takeUnannouncedLost()) {
           const event = this.service.store.appendEvent({

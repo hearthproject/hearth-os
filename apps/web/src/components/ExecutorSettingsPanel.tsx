@@ -31,6 +31,8 @@ export function ExecutorSettingsPanel() {
   const registryQuery = useQuery({ queryKey: ["modelRegistry"], queryFn: api.modelRegistry });
   const [preferredExecutorId, setPreferredExecutorId] = useState<ExecutorId | "">("native");
   const [followUpMode, setFollowUpMode] = useState<TaskFollowUpMode>("queue");
+  const [stallWarnMinutes, setStallWarnMinutes] = useState(15);
+  const [stallAutoCancelMinutes, setStallAutoCancelMinutes] = useState(60);
   const [busy, setBusy] = useState<Busy>(null);
   const [probes, setProbes] = useState<Partial<Record<ExecutorId, ExecutorProbeResult>>>({});
   const [notice, setNotice] = useState<Notice>(null);
@@ -40,6 +42,8 @@ export function ExecutorSettingsPanel() {
     if (!settings) return;
     setPreferredExecutorId(settings.preferredExecutorId ?? "native");
     setFollowUpMode(settings.followUpMode ?? "queue");
+    setStallWarnMinutes(Math.round((settings.subagentStall?.warnAfterMs ?? 15 * 60_000) / 60_000));
+    setStallAutoCancelMinutes(Math.round((settings.subagentStall?.autoCancelAfterMs ?? 60 * 60_000) / 60_000));
   }, [executorSettingsQuery.data?.settings]);
 
   const executors = executorsQuery.data?.executors ?? [];
@@ -89,6 +93,29 @@ export function ExecutorSettingsPanel() {
     } catch (error) {
       setFollowUpMode(executorSettingsQuery.data?.settings.followUpMode ?? "queue");
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "保存后续消息设置失败" });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function saveSubagentStall(nextWarnMinutes: number, nextAutoCancelMinutes: number) {
+    const warnAfterMs = Math.max(60_000, Math.round(nextWarnMinutes) * 60_000);
+    const autoCancelAfterMs = Math.max(warnAfterMs + 60_000, Math.round(nextAutoCancelMinutes) * 60_000);
+    setStallWarnMinutes(Math.round(warnAfterMs / 60_000));
+    setStallAutoCancelMinutes(Math.round(autoCancelAfterMs / 60_000));
+    setBusy("settings");
+    setNotice(null);
+    try {
+      const result = await api.saveExecutorSettings({ subagentStall: { warnAfterMs, autoCancelAfterMs } });
+      setStallWarnMinutes(Math.round(result.settings.subagentStall.warnAfterMs / 60_000));
+      setStallAutoCancelMinutes(Math.round(result.settings.subagentStall.autoCancelAfterMs / 60_000));
+      queryClient.setQueryData(["executorSettings"], result);
+      setNotice({ tone: "ok", text: "子代理停滞策略已保存。" });
+    } catch (error) {
+      const settings = executorSettingsQuery.data?.settings;
+      setStallWarnMinutes(Math.round((settings?.subagentStall.warnAfterMs ?? 15 * 60_000) / 60_000));
+      setStallAutoCancelMinutes(Math.round((settings?.subagentStall.autoCancelAfterMs ?? 60 * 60_000) / 60_000));
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "保存子代理停滞策略失败" });
     } finally {
       setBusy(null);
     }
@@ -208,6 +235,33 @@ export function ExecutorSettingsPanel() {
           </div>
           <small>{followUpMode === "queue" ? "当前轮结束后再处理新消息。" : "安全中止当前轮并立即应用新指令。"} Ctrl+Enter 可对单条消息采用相反方式。</small>
         </div>
+        <label>
+          <span>子代理停滞告警（分钟）</span>
+          <input
+            aria-label="子代理停滞告警分钟"
+            type="number"
+            min={1}
+            max={1440}
+            value={stallWarnMinutes}
+            disabled={busy === "settings"}
+            onChange={(event) => setStallWarnMinutes(Number(event.target.value))}
+            onBlur={() => void saveSubagentStall(stallWarnMinutes, stallAutoCancelMinutes)}
+          />
+        </label>
+        <label>
+          <span>子代理自动取消（分钟）</span>
+          <input
+            aria-label="子代理自动取消分钟"
+            type="number"
+            min={2}
+            max={1440}
+            value={stallAutoCancelMinutes}
+            disabled={busy === "settings"}
+            onChange={(event) => setStallAutoCancelMinutes(Number(event.target.value))}
+            onBlur={() => void saveSubagentStall(stallWarnMinutes, stallAutoCancelMinutes)}
+          />
+          <small>超过告警时间仍无进展时自动取消并回收累计委派槽位。</small>
+        </label>
       </div>
 
       {(executorsQuery.isLoading || registryQuery.isLoading) && (

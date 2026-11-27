@@ -29,6 +29,7 @@ interface ModeSummary {
   owner: TeamSource | "none";
   visibility: string;
   observedMembers?: number;
+  stallAutoCancelAfterMs?: number;
 }
 
 const SOURCE_LABELS: Record<TeamSource, string> = {
@@ -65,12 +66,14 @@ function collectMode(events: EventEnvelope[]): ModeSummary | null {
       ? payload.owner
       : "none";
     const observed = asRecord(payload.observed);
+    const stall = asRecord(payload.subagentStall);
     return {
       requested,
       effective,
       owner,
       visibility: typeof payload.visibility === "string" ? payload.visibility : "none",
-      ...(typeof observed.members === "number" ? { observedMembers: observed.members } : {})
+      ...(typeof observed.members === "number" ? { observedMembers: observed.members } : {}),
+      ...(typeof stall.autoCancelAfterMs === "number" ? { stallAutoCancelAfterMs: stall.autoCancelAfterMs } : {})
     };
   }
   return null;
@@ -171,6 +174,9 @@ export function AgentRoster({ events }: { events: EventEnvelope[] }) {
           {agents.length === 0
             ? mode?.owner === "codex" ? "成员不可见" : "尚未收到成员事件"
             : `${running > 0 ? `${running} 运行中 · ` : ""}${done}/${agents.length} 完成`}
+          {mode?.owner === "hearth" && mode.stallAutoCancelAfterMs
+            ? ` · ${Math.round(mode.stallAutoCancelAfterMs / 60_000)} 分钟无进展自动取消`
+            : ""}
         </span>
       </button>
       {open && (

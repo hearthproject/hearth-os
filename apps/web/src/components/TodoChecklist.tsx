@@ -54,6 +54,7 @@ export function TodoChecklist({ todos }: { todos: TodoChecklistItem[] }) {
       >
         <List size={14} />
         <span>{todoHeaderText(done, todos.length)}</span>
+        {todos.length >= 30 && <span className="inline-todos-limit">最多 30 条</span>}
         {collapsed
           ? <ChevronRight size={13} className="inline-todos-chevron" />
           : <ChevronDown size={13} className="inline-todos-chevron" />}

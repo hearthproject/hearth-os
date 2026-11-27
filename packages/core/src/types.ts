@@ -228,11 +228,17 @@ export interface ReasoningCapabilityView extends ReasoningCapability {
   protocol: ModelProtocol;
 }
 
+export interface SubagentStallSettings {
+  warnAfterMs: number;
+  autoCancelAfterMs: number;
+}
+
 export interface ExecutorSettings {
   defaultApprovalMode: ApprovalMode;
   preferredExecutorId: ExecutorId | null;
   followUpMode: TaskFollowUpMode;
   reasoningEffort?: ReasoningEffort;
+  subagentStall: SubagentStallSettings;
   executors: Partial<Record<ExecutorId, ExecutorRuntimeSettings>>;
 }
 
@@ -241,6 +247,7 @@ export interface ExecutorSettingsPatch {
   preferredExecutorId?: ExecutorId | null | undefined;
   followUpMode?: TaskFollowUpMode | undefined;
   reasoningEffort?: ReasoningEffort | undefined;
+  subagentStall?: Partial<SubagentStallSettings> | undefined;
   executors?: Partial<Record<ExecutorId, ExecutorRuntimeSettings>> | undefined;
 }
 

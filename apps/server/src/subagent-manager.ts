@@ -63,17 +63,32 @@ export interface ManagedAgentView {
   error: string | null;
 }
 
-const STALL_THRESHOLDS_MS = [15 * 60_000, 30 * 60_000, 60 * 60_000, 4 * 60 * 60_000];
-const STALL_AUTO_CANCEL_MS = 60 * 60_000;
+const DEFAULT_STALL_WARN_AFTER_MS = 15 * 60_000;
+const DEFAULT_STALL_AUTO_CANCEL_AFTER_MS = 60 * 60_000;
 
 export class SubagentTaskManager {
   private readonly jobs = new Map<string, ManagedAgent>();
   private readonly notifications: AgentMessage[] = [];
   private readonly sessionPath: string | null;
   private resumeHandler: ManagedAgentResumeHandler | null = null;
+  private readonly stallWarnAfterMs: number;
+  private readonly stallAutoCancelAfterMs: number;
 
-  constructor(private readonly maxConcurrent = 4, sessionPath: string | null = null, private readonly maxTotal = 8) {
+  constructor(
+    private readonly maxConcurrent = 4,
+    sessionPath: string | null = null,
+    private readonly maxTotal = 8,
+    stall: { warnAfterMs?: number; autoCancelAfterMs?: number } = {}
+  ) {
     this.sessionPath = sessionPath;
+    const warnAfterMs = typeof stall.warnAfterMs === "number" && Number.isFinite(stall.warnAfterMs)
+      ? Math.max(60_000, Math.floor(stall.warnAfterMs))
+      : DEFAULT_STALL_WARN_AFTER_MS;
+    const autoCancelAfterMs = typeof stall.autoCancelAfterMs === "number" && Number.isFinite(stall.autoCancelAfterMs)
+      ? Math.max(warnAfterMs + 60_000, Math.floor(stall.autoCancelAfterMs))
+      : DEFAULT_STALL_AUTO_CANCEL_AFTER_MS;
+    this.stallWarnAfterMs = warnAfterMs;
+    this.stallAutoCancelAfterMs = Math.max(autoCancelAfterMs, warnAfterMs + 60_000);
     this.load();
   }
 
@@ -193,17 +208,14 @@ export class SubagentTaskManager {
     for (const job of this.jobs.values()) {
       if (job.status !== "running") continue;
       const elapsed = now - Date.parse(job.lastProgressAt);
-      for (const threshold of STALL_THRESHOLDS_MS) {
-        if (elapsed < threshold || job.stallNotices?.has(threshold)) continue;
-        job.stallNotices?.add(threshold);
-        if (threshold < STALL_AUTO_CANCEL_MS) {
-          this.notifications.push({
-            role: "user",
-            content: `<subagent_notification>\nagentId: ${job.id}\ntype: ${job.type}\nstatus: running\nstall: ${Math.round(elapsed / 60_000)} minutes without progress\nsummary: 子代理可能停滞；可用 agent_status 检查，或 agent_kill 后通过 sendMessage 续跑。若继续无进展，将在 ${Math.round(STALL_AUTO_CANCEL_MS / 60_000)} 分钟后自动取消并回收槽位。\n</subagent_notification>`
-          });
-        }
+      if (elapsed >= this.stallWarnAfterMs && !job.stallNotices?.has(this.stallWarnAfterMs)) {
+        job.stallNotices?.add(this.stallWarnAfterMs);
+        this.notifications.push({
+          role: "user",
+          content: `<subagent_notification>\nagentId: ${job.id}\ntype: ${job.type}\nstatus: running\nstall: ${Math.round(elapsed / 60_000)} minutes without progress\nsummary: 子代理可能停滞；可用 agent_status 检查，或 agent_kill 后通过 sendMessage 续跑。若继续无进展，将在 ${Math.round(this.stallAutoCancelAfterMs / 60_000)} 分钟后自动取消并回收槽位。\n</subagent_notification>`
+        });
       }
-      if (elapsed >= STALL_AUTO_CANCEL_MS && job.stallAutoCancelled !== true) {
+      if (elapsed >= this.stallAutoCancelAfterMs && job.stallAutoCancelled !== true) {
         const minutes = Math.round(elapsed / 60_000);
         job.stallAutoCancelled = true;
         job.controller.abort();

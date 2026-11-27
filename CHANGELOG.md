@@ -30,8 +30,8 @@
 
 ### 兜底与限制
 
-- `todo_write` 超过 30 条时现在显式报错（`isError`），不再静默截断；schema 同步声明 `maxItems: 30`。
-- 子代理停滞 60 分钟无进展时自动取消并回收累计委派槽位，同时保留 `agent_send/agent_resume` 恢复路径；60 分钟前仍会发出停滞通知。
+- `todo_write` 超过 30 条时现在显式报错（`isError`），不再静默截断；schema 同步声明 `maxItems: 30`，Todo 清单在达到上限时显示“最多 30 条”提示。
+- 子代理停滞策略可配置：执行器设置支持 `subagentStall.warnAfterMs/autoCancelAfterMs`（默认 15/60 分钟）；停滞告警、自动取消与槽位回收按配置生效，团队 roster 显示自动取消阈值。
 
 ### 修复
 
