@@ -23,7 +23,7 @@
 
 <p align="center">
   <img alt="0.9.0 pre-release" src="https://img.shields.io/badge/0.9.0-pre--release-b8471d">
-  <img alt="1194 tests passing on 2026-11-27" src="https://img.shields.io/badge/tests-1194%20passing-2f7d4f">
+  <img alt="1196 tests passing on 2026-11-27" src="https://img.shields.io/badge/tests-1196%20passing-2f7d4f">
   <img alt="Node.js 22.13+" src="https://img.shields.io/badge/node-22.13%2B-3c8773">
   <img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-1b1815">
   <img alt="Local first" src="https://img.shields.io/badge/local--first-yes-8d3412">
@@ -36,7 +36,7 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
 
 模型可以更换，执行器可以替换，界面可以重写，但任务状态、授权范围、完成证据、产物摘要和外部回执必须留下来。Hearth 要回答的不是“模型能不能写出一段话”，而是“这件事有没有真正完成，失败后能不能接着做，外部动作能不能被核对”。
 
-> **当前状态（2026-11-27，v0.9.0 开发线）：** 本版完成 Harness 六项能力：统一证据契约与产物 Provenance、Runtime Cassette Replay 与 Checkpoint Fork、生产/评测共用 Verifier、Policy as Code、真实 USD 成本与质量感知降级、Harness / Context Policy Lab。证据独立落 `<DATA_DIR>/evidence.sqlite` + 内容寻址 blob，Eval 只经版本化 HTTP 读取，不碰 OS SQLite。验证：typecheck 0 错误、159 个测试文件 1194 通过（1209 总数，15 跳过）、跨仓 evidence E2E 31/31；0.3.4 历史安装包仍在 Releases，0.9.0 发行物尚未做正式安装验收。自动更新签名、Authenticode、干净机卸载重装、真实账户与真实模型首跑仍未验收。逐项证据见[当前交付状态](https://hearthproject.github.io/hearth-os/delivery/status.html)。
+> **当前状态（2026-11-27，v0.9.0 开发线）：** 本版完成 Harness 六项能力：统一证据契约与产物 Provenance、Runtime Cassette Replay 与 Checkpoint Fork、生产/评测共用 Verifier、Policy as Code、真实 USD 成本与质量感知降级、Harness / Context Policy Lab。证据独立落 `<DATA_DIR>/evidence.sqlite` + 内容寻址 blob，Eval 只经版本化 HTTP 读取，不碰 OS SQLite。验证：typecheck 0 错误、159 个测试文件 1196 通过（1211 总数，15 跳过）、跨仓 evidence E2E 31/31；0.3.4 历史安装包仍在 Releases，0.9.0 发行物尚未做正式安装验收。自动更新签名、Authenticode、干净机卸载重装、真实账户与真实模型首跑仍未验收。逐项证据见[当前交付状态](https://hearthproject.github.io/hearth-os/delivery/status.html)。
 
 ## 界面一览
 
@@ -98,7 +98,7 @@ Hearth 不是另一个聊天壳，也不是只服务于代码的 Agent。它是�
 
 | 领域 | 状态 | 证据 | 留空 |
 |---|---|---|---|
-| 运行时稳定 | 完成 | 159 个测试文件、1194 个用例通过；长跑矩阵 18/18；每个终态 run 输出 `run-evidence.json` | 真实用户长期崩溃恢复演练 |
+| 运行时稳定 | 完成 | 159 个测试文件、1196 个用例通过；长跑矩阵 18/18；每个终态 run 输出 `run-evidence.json` | 真实用户长期崩溃恢复演练 |
 | Windows 沙箱 | 代码闭环 | 12 项真实测试：越界写、只读、junction 逃逸、密钥过滤、网络拒绝、PTY 与 Job 关闭 | 非管理员环境之外的发行版验证、企业策略兼容 |
 | 持久后台任务 | 完成 | SQLite `background_processes`、PID + 创建时间恢复、`lost` 标记与进程树清理 | 跨宿主重启的终端状态恢复（明确不做） |
 | 浏览器 | 代码闭环 | 13 个工具、独立 profile、证据目录与页面断言 | 日常 Chrome 扩展桥、验证码/风控站点 |
