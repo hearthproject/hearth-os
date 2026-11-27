@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { execSync, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -181,6 +183,44 @@ async function conversationTasks(baseUrl, page) {
 
 async function cancelTask(baseUrl, taskId) {
   await api(baseUrl, `/api/tasks/${encodeURIComponent(taskId)}/cancel`, { method: "POST" }).catch(() => undefined);
+}
+
+function seedAwaitingPlan(conversationId, planningExecutorId, executionExecutorId) {
+  const planId = randomUUID();
+  const now = new Date().toISOString();
+  const db = new DatabaseSync(join(dataDir, "hearth.sqlite"));
+  try {
+    db.exec("PRAGMA busy_timeout = 5000;");
+    db.prepare(
+      `INSERT INTO plans (id, conversation_id, project_id, title, objective, stage, planning_task_id, execution_task_id, planning_executor_id, plan_markdown, plan_path, plan_sha256, planning_attempt, planning_run_id, revision, execution_json, created_at, updated_at, approved_at, completed_at, error)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      planId,
+      conversationId,
+      null,
+      "E2E 跨执行器计划",
+      "验证规划执行器与执行执行器可以不同",
+      "awaiting_approval",
+      null,
+      null,
+      planningExecutorId,
+      "# E2E 跨执行器计划\n\n- 规划阶段使用 Hearth 原生执行器\n- 执行阶段切换到当前可运行的第二执行器\n- 确认执行任务记录的是新的执行器",
+      null,
+      null,
+      1,
+      null,
+      0,
+      JSON.stringify({ executorId: executionExecutorId, taskKind: "general", expectedOutputs: [], networkHosts: [] }),
+      now,
+      now,
+      null,
+      null,
+      null
+    );
+  } finally {
+    db.close();
+  }
+  return planId;
 }
 
 async function main() {
@@ -545,6 +585,66 @@ async function main() {
     await page.waitForFunction(() => localStorage.getItem("hearth.conversation") === null);
     await page.locator(".composer-error").waitFor({ timeout: 15_000 });
     assert.match(await page.locator(".composer-error").innerText(), /失效/);
+  });
+
+  await runTest(page, "switches the plan execution executor before approval", async () => {
+    const created = await api(baseUrl, "/api/conversations", {
+      method: "POST",
+      body: JSON.stringify({ title: "E2E 跨执行器计划" })
+    });
+    assert.equal(created.status, 201, created.text);
+    const conversationId = created.body.id;
+    const planId = seedAwaitingPlan(conversationId, "native", "native");
+    const executorList = await api(baseUrl, "/api/executors");
+    assert.equal(executorList.status, 200, executorList.text);
+    const targetExecutor = executorList.body.executors.find(
+      (executor) => executor.id !== "native" && executor.health.canRun
+    );
+    assert.ok(targetExecutor, "the cross-executor E2E needs a second runnable executor");
+    log(`  cross-executor target: ${targetExecutor.id}`);
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.evaluate((id) => localStorage.setItem("hearth.conversation", id), conversationId);
+    await page.reload({ waitUntil: "networkidle" });
+    await page.waitForFunction(
+      () => document.querySelector(".chat-header h1")?.textContent === "E2E 跨执行器计划",
+      null,
+      { timeout: 15_000 }
+    );
+
+    await page.locator(".plan-bar-copy").waitFor({ timeout: 15_000 });
+    await page.locator(".plan-bar-copy").click();
+    await page.locator(".plan-dialog").waitFor({ timeout: 15_000 });
+    const meta = await page.locator(".goal-dialog-meta").innerText();
+    assert.match(meta, /规划执行器\s*Hearth 原生/);
+    assert.match(meta, /执行执行器\s*Hearth 原生/);
+    const executionSelect = page.getByLabel("计划执行执行器");
+    assert.equal(await executionSelect.inputValue(), "native");
+
+    await executionSelect.selectOption(targetExecutor.id);
+    const action = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.pathname === `/api/plans/${planId}/actions` && response.request().method() === "POST";
+    });
+    await page.getByRole("button", { name: /开始执行这份计划/ }).click();
+    const approved = await action;
+    assert.equal(approved.status(), 200, await approved.text());
+
+    const detail = await api(baseUrl, `/api/plans/${planId}`);
+    assert.equal(detail.status, 200, detail.text);
+    assert.equal(detail.body.planningExecutorId, "native");
+    assert.equal(detail.body.execution?.executorId, targetExecutor.id);
+    assert.ok(detail.body.executionTaskId, "approval should create an execution task");
+    const task = await api(baseUrl, `/api/tasks/${encodeURIComponent(detail.body.executionTaskId)}`);
+    assert.equal(task.status, 200, task.text);
+    assert.equal(task.body.task.executorId, targetExecutor.id);
+
+    await cancelTask(baseUrl, detail.body.executionTaskId);
+    await api(baseUrl, `/api/plans/${planId}/actions`, {
+      method: "POST",
+      body: JSON.stringify({ action: "cancel" })
+    }).catch(() => undefined);
+    const close = page.locator(".plan-dialog-close");
+    if (await close.count()) await close.click();
   });
 
   await runTest(page, "autosaves the preferred executor", async () => {

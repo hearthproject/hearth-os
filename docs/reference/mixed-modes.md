@@ -71,4 +71,9 @@ npm run typecheck
 - Codex SDK `0.166.0` / CLI `0.163.0`：`read-only` + 关闭网络 + `features.multi_agent=true` 下真实模型通过 `spawn_agent` 启动一个子线程；子线程在只读沙箱内统计 README 行数，经 `wait` 回传 `TEAM_CHILD_OK 3`，整轮约 25 秒，主/子会话均无写操作。
 - DSH 托管 SDK `0.2.2-rc.1`：Plan + Team 跑通，返回可提交的计划正文；Build + Team 跑通，`explore` 队友完成调查并通过 `onTeamMember` 回调上报。
 - DSH 连续两次真实调用均成功；每次调用前会清理上一个已退出进程留下的 `.credentials.yaml.lock*`，避免下一次初始化把预算耗在死锁抢占上。
-- 仍建议在发布前从 UI 走一遍 Codex / DSH 的 Plan → 改执行执行器 → 批准，以及 Goal 跨轮换执行器的完整点击链路；本记录是执行器层 live 验收，不替代浏览器 E2E。
+- 仍建议在发布前从 UI 走一遍 Codex / DSH 的真实模型 Plan → 改执行执行器 → 批准，以及 Goal 跨轮换执行器的完整点击链路；这些属于真实模型 live 验收，离线 E2E 不能替代。
+
+## 浏览器 E2E 记录
+
+2026-11-28 在离线隔离数据目录中补了一条 Plan 跨执行器批准链路：直接 seed 一个 `awaiting_approval` 的 Plan（规划执行器 `native`、执行执行器 `native`），从 PlanBar 打开 PlanDialog，把执行执行器切换为当前可运行的第二执行器（本机为 `codex`），批准后校验 `planningExecutorId` 保持 `native`、`execution.executorId` 和执行任务的 `executorId` 均为 `codex`。该用例覆盖 Plan 面板的批准前切换链路；真实 DSH 模型生成计划与 Goal 跨轮切换仍由执行器层 live 验收和单元矩阵覆盖。
+
