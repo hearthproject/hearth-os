@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Loader2, MessageCircle, QrCode, RefreshCw, Save, ShieldCheck, Smartphone, X } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
@@ -30,13 +30,11 @@ function StatusPill({ status }: { status: ImChannelStatus | undefined }) {
 export function ImBridgePanel() {
   const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ["imBridge"], queryFn: api.im, refetchInterval: 4_000 });
-  const conversationsQuery = useQuery({ queryKey: ["conversations"], queryFn: api.conversations });
   const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: api.projects });
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: "ok" | "error" | "info"; text: string } | null>(null);
   const [qr, setQr] = useState<WechatQrView | null>(null);
   const [qrStatus, setQrStatus] = useState<WechatQrStatusView | null>(null);
-  const [wechatConversationId, setWechatConversationId] = useState("");
   const [wechatProjectId, setWechatProjectId] = useState("");
   const [wechatToken, setWechatToken] = useState("");
   const [wechatBaseUrl, setWechatBaseUrl] = useState("");
@@ -44,10 +42,9 @@ export function ImBridgePanel() {
   useEffect(() => {
     const settings = query.data?.settings;
     if (!settings) return;
-    setWechatConversationId(settings.wechat.conversationId ?? "");
     setWechatProjectId(settings.wechat.projectId ?? "");
     setWechatBaseUrl(settings.wechat.baseUrl ?? "");
-  }, [query.data?.settings.wechat.conversationId, query.data?.settings.wechat.projectId, query.data?.settings.wechat.baseUrl]);
+  }, [query.data?.settings.wechat.projectId, query.data?.settings.wechat.baseUrl]);
 
   useEffect(() => {
     if (!qr) return;
@@ -80,15 +77,10 @@ export function ImBridgePanel() {
     };
   }, [qr?.qrcode, queryClient]);
 
-  const conversations = conversationsQuery.data?.conversations ?? [];
   const projects = projectsQuery.data?.projects ?? [];
   const wechat = query.data?.settings.wechat;
   const wechatStatus = query.data?.status.wechat;
   const wechatProjectTitle = projects.find((project) => project.id === wechatProjectId)?.name ?? wechat?.projectTitle ?? null;
-  const wechatAutoConversation = useMemo(
-    () => !wechatProjectId && !wechatConversationId && wechat?.conversationTitle ? `已自动创建「${wechat.conversationTitle}」` : null,
-    [wechatProjectId, wechatConversationId, wechat?.conversationTitle]
-  );
 
   async function refresh(): Promise<void> {
     await queryClient.invalidateQueries({ queryKey: ["imBridge"] });
@@ -117,7 +109,7 @@ export function ImBridgePanel() {
         ...(enabled !== undefined ? { enabled } : {}),
         ...(wechatToken.trim() ? { token: wechatToken.trim() } : {}),
         ...(wechatBaseUrl.trim() ? { baseUrl: wechatBaseUrl.trim() } : {}),
-        conversationId: wechatProjectId ? null : wechatConversationId || null,
+        conversationId: null,
         projectId: wechatProjectId || null
       });
       setWechatToken("");
@@ -176,26 +168,16 @@ export function ImBridgePanel() {
 
           <div className="im-config-row">
             <label>
-              <span>绑定项目 / 消息进入的对话</span>
+              <span>绑定项目</span>
               <select value={wechatProjectId} onChange={(event) => setWechatProjectId(event.target.value)}>
                 <option value="">不绑定项目（使用微信IM）</option>
                 {projects.map((project) => (
                   <option key={project.id} value={project.id}>{project.name}</option>
                 ))}
               </select>
-              <select
-                value={wechatConversationId}
-                onChange={(event) => setWechatConversationId(event.target.value)}
-                disabled={Boolean(wechatProjectId)}
-              >
-                <option value="">自动创建「微信IM」</option>
-                {conversations.map((conversation) => (
-                  <option key={conversation.id} value={conversation.id}>{conversation.title}</option>
-                ))}
-              </select>
               {wechatProjectId
                 ? <small className="field-hint">将为「{wechatProjectTitle ?? "该项目"}」创建独立对话「微信IM · {wechatProjectTitle ?? "项目名"}」，保存后固定使用。</small>
-                : wechatAutoConversation && <small className="field-hint">{wechatAutoConversation}</small>}
+                : <small className="field-hint">不绑定项目时，消息统一进入自动创建的「微信IM」对话。</small>}
             </label>
             <div className="im-connect-actions">
               <button className="primary-button" onClick={() => void startWechatQr()} disabled={busy !== null}>
