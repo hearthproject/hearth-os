@@ -33,6 +33,7 @@ it("exports recovery, cleanup, usage, artifacts and checkpoint references", () =
 
   const evidence = buildRunEvidence({
     task, run, runs: [run], checkpoint, artifacts, recovery, now,
+    agentMode: { requested: "team", effective: "team", executorId: "native" },
     operations: [
       { operationId: "op-1", runId: "run-2", toolName: "shell", effect: "external_write", phase: "settled", cleanupState: "pending", cleanupAttempts: 1, resources: [{ kind: "process", pid: 42 }], cleanupError: null, settledAt: now.toISOString() },
       { operationId: "op-old", runId: "run-1", toolName: "read_file", effect: "read", phase: "settled", cleanupState: "confirmed", cleanupAttempts: 0, resources: [], cleanupError: null, settledAt: now.toISOString() }
@@ -40,6 +41,7 @@ it("exports recovery, cleanup, usage, artifacts and checkpoint references", () =
   });
 
   expect(evidence.format).toBe("hearth-run-evidence");
+  expect(evidence.agentMode).toEqual({ requested: "team", effective: "team", executorId: "native" });
   expect(evidence.task.status).toBe("failed");
   expect(evidence.run.usage?.inputTokens).toBe(10);
   expect(evidence.checkpoint).toMatchObject({ seq: 4, eventSeq: 88 });

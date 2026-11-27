@@ -22,7 +22,7 @@ import type { ModelSettings } from "./model-settings.ts";
 import { ContextService } from "./context.ts";
 import { ConversationContextService } from "./conversation-context.ts";
 import type { DeepSeekHarnessRunOptions, DeepSeekHarnessRunResult, DshApprovalOutcome } from "@hearth/deepseek-executor";
-import { DEFAULT_RUN_BUDGET } from "./native-executor.ts";
+import { DEFAULT_RUN_BUDGET, type NativeRunOptions } from "./native-executor.ts";
 import { McpServerService } from "./mcp-servers.ts";
 import { SecretBox } from "./secrets.ts";
 import { installBackgroundTaskRegistry, resetBackgroundTaskRegistry } from "./background-tasks.ts";
@@ -254,6 +254,56 @@ describe("Hearth scheduler", () => {
     service.updateTask(task.id, { status: "waiting_budget" });
     scheduler.extendBudget(task.id);
     expect(service.requireTask(task.id).budgetOverride?.maxTokens).toBe(1_200_000_000);
+  });
+
+  it("exposes read-only team agents and records the resolved agent mode", async () => {
+    const service = setup();
+    const settingsPath = configureModel();
+    const conversation = fullConversation();
+    store!.updateConversationSettings(conversation.id, { agentMode: "team" });
+    const seen: { options?: NativeRunOptions } = {};
+    const nativeRunner: NativeRunner = async (options) => {
+      seen.options = options;
+      writeFileSync(join(options.prepared.outDir, "result.md"), "# 团队结果\n\n已完成。\n");
+      return nativeResult("团队已完成");
+    };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath: settingsPath });
+    scheduler.start();
+
+    const task = service.createTask({ title: "团队任务", goal: "完成团队任务", conversationId: conversation.id });
+    await waitForStatus(service, task.id, "completed");
+
+    const names = seen.options?.extraTools?.map((tool: { definition: { name: string } }) => tool.definition.name) ?? [];
+    expect(names).toEqual(expect.arrayContaining(["agent", "agent_wait", "agent_status"]));
+    expect(names).not.toContain("delegate_task");
+    expect(seen.options?.maxParallelTools).toBe(4);
+
+    const modeEvent = store!.listEvents(0, task.id).find((event) => event.type === "agent.mode");
+    expect(modeEvent?.payload).toMatchObject({ requested: "team", effective: "team", executorId: "native" });
+    expect(service.requireTask(task.id).status).toBe("completed");
+  });
+
+  it("does not expose delegation tools in native single mode", async () => {
+    const service = setup();
+    const settingsPath = configureModel();
+    const seen: { options?: NativeRunOptions } = {};
+    const nativeRunner: NativeRunner = async (options) => {
+      seen.options = options;
+      writeFileSync(join(options.prepared.outDir, "result.md"), "# 单 Agent\n\n已完成。\n");
+      return nativeResult("单 Agent 已完成");
+    };
+    scheduler = makeScheduler(service, async () => FAKE_RESULT, { nativeRunner, modelSettingsPath: settingsPath });
+    scheduler.start();
+
+    const task = service.createTask({ title: "单 Agent", goal: "完成单 Agent 任务" });
+    await waitForStatus(service, task.id, "completed");
+
+    const names = seen.options?.extraTools?.map((tool: { definition: { name: string } }) => tool.definition.name) ?? [];
+    expect(names).not.toContain("agent");
+    expect(names).not.toContain("delegate_task");
+    expect(seen.options?.maxParallelTools).toBeUndefined();
+    const modeEvent = store!.listEvents(0, task.id).find((event) => event.type === "agent.mode");
+    expect(modeEvent?.payload).toMatchObject({ requested: "single", effective: "single", executorId: "native" });
   });
 
   it("runs a local task and publishes validated artifacts with a manifest", async () => {

@@ -4,9 +4,12 @@ import { serializeAgentState, deserializeAgentState } from "./checkpoint-state.t
 import {
   applyTodosToPlan,
   buildPlan,
+  completePlanStep,
+  notePlanStep,
   planToTodos,
   renderPlanContext,
   setPlan,
+  startPlanStep,
   syncPlanFromTodos
 } from "./plan-state.ts";
 
@@ -59,6 +62,25 @@ describe("structured plan", () => {
     state.todos = state.todos.map((todo, index) => ({ ...todo, status: index === 0 ? "completed" : "in_progress" }));
     syncPlanFromTodos(state);
     expect(state.plan!.steps.map((step) => step.state)).toEqual(["completed", "in_progress"]);
+  });
+
+  it("moves a delegated step through in_progress and completed", () => {
+    const state = createAgentState("E:\\work");
+    setPlan(state, buildPlan("t", "g", [{ title: "A" }, { title: "B" }]));
+    expect(startPlanStep(state, "p1", "explore-1")).toBe(true);
+    expect(state.plan!.steps[0]).toMatchObject({ state: "in_progress", owner: "explore-1" });
+    expect(state.todos[0]?.status).toBe("in_progress");
+    expect(completePlanStep(state, "p1", "调查完成")).toBe(true);
+    expect(state.plan!.steps[0]).toMatchObject({ state: "completed", note: "调查完成" });
+    expect(startPlanStep(state, "missing", "x")).toBe(false);
+  });
+
+  it("records a failure note without changing the step state", () => {
+    const state = createAgentState("E:\\work");
+    setPlan(state, buildPlan("t", "g", [{ title: "A" }]));
+    startPlanStep(state, "p1", "review-1");
+    expect(notePlanStep(state, "p1", "子代理超时")).toBe(true);
+    expect(state.plan!.steps[0]).toMatchObject({ state: "in_progress", note: "子代理超时" });
   });
 
   it("preserves the plan across checkpoint serialization", () => {
