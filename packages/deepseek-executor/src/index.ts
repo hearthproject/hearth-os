@@ -49,6 +49,20 @@ export interface DshMcpServer {
   env?: Record<string, string>;
 }
 
+export interface DshAgentTeamOptions {
+  enabled: boolean;
+  /** Harness defaults are 8; kept as an explicit contract for the UI. */
+  maxMembers?: number;
+  maxTasks?: number;
+}
+
+export interface DshTeamMemberEvent {
+  memberId: string;
+  parentId: string | null;
+  title?: string;
+  status: "started" | "completed" | "failed";
+}
+
 export interface DeepSeekHarnessRunOptions {
   settings: DshModelSettings;
   dshHome: string;
@@ -67,6 +81,9 @@ export interface DeepSeekHarnessRunOptions {
   onContextItem?: ((event: DshContextEvent) => void) | undefined;
   onApprovalRequest?: ((request: DshApprovalRequest) => DshApprovalOutcome | Promise<DshApprovalOutcome>) | undefined;
   mcpServers?: Record<string, DshMcpServer> | undefined;
+  /** Native DSH Team composition. Omitted keeps the base subagent tools. */
+  agentTeam?: DshAgentTeamOptions | undefined;
+  onTeamMember?: ((event: DshTeamMemberEvent) => void) | undefined;
 }
 
 export interface DeepSeekHarnessRunResult {
@@ -134,7 +151,7 @@ export async function runDeepSeekHarness(options: DeepSeekHarnessRunOptions): Pr
   const { DeepSeekHarness } = await loadDeepSeekHarness(options.dshHome);
   validateSettings(options.settings);
   mkdirSync(options.dshHome, { recursive: true });
-  const patchPath = writeProviderPatch(options.dshHome, options.settings, options.mcpServers);
+  const patchPath = writeProviderPatch(options.dshHome, options.settings, options.mcpServers, options.agentTeam);
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     [API_KEY_ENV]: options.settings.apiKey,
@@ -288,6 +305,17 @@ export function ordinaryQuestionMarkdown(
 
 function notificationHandler(options: DeepSeekHarnessRunOptions): (notification: HarnessNotification) => void {
   return (notification) => {
+    const directMember = teamMemberFromNotification(notification);
+    if (directMember) {
+      options.onTeamMember?.(directMember);
+      options.onProgress?.({
+        type: `dsh.team.${directMember.status}`,
+        message: directMember.status === "started"
+          ? `团队成员开始：${directMember.title || directMember.memberId}`
+          : `团队成员${directMember.status === "completed" ? "完成" : "失败"}：${directMember.title || directMember.memberId}`
+      });
+      return;
+    }
     if (notification.method !== "session.event") return;
     const event = notification.params.event;
     if (!event || typeof event !== "object") return;
@@ -296,6 +324,17 @@ function notificationHandler(options: DeepSeekHarnessRunOptions): (notification:
     const seq = typeof record.seq === "number" ? record.seq : null;
     const data = isRecord(record.data) ? record.data : {};
     const sessionId = typeof notification.params.sessionId === "string" ? notification.params.sessionId : "session";
+    const sessionMember = teamMemberFromSessionEvent(type, data, sessionId);
+    if (sessionMember) {
+      options.onTeamMember?.(sessionMember);
+      options.onProgress?.({
+        type: `dsh.team.${sessionMember.status}`,
+        message: sessionMember.status === "started"
+          ? `团队成员开始：${sessionMember.title || sessionMember.memberId}`
+          : `团队成员${sessionMember.status === "completed" ? "完成" : "失败"}：${sessionMember.title || sessionMember.memberId}`
+      });
+      return;
+    }
     const executorEventId = `dsh:${sessionId}:${seq ?? executorEventIdFromData(data)}`;
     if (type === "assistant/message") {
       const message = isRecord(data.message) ? data.message : {};
@@ -344,6 +383,72 @@ function notificationHandler(options: DeepSeekHarnessRunOptions): (notification:
   };
 }
 
+const TEAM_METHOD_PATTERN = /(subagent|agent-team|team-member)/i;
+
+function teamStatusFromText(text: string): DshTeamMemberEvent["status"] | null {
+  if (/fail|error|cancel|abort/i.test(text)) return "failed";
+  if (/finish|complete|done|end|exit/i.test(text)) return "completed";
+  if (/start|spawn|begin|create/i.test(text)) return "started";
+  return null;
+}
+
+function firstString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+/**
+ * Maps documented DSH subagent notifications to roster events. Field names vary
+ * across the experimental line, so every known alias is accepted and nothing is
+ * inferred when the id is missing.
+ */
+export function teamMemberFromNotification(notification: HarnessNotification): DshTeamMemberEvent | null {
+  if (!TEAM_METHOD_PATTERN.test(notification.method)) return null;
+  const status = teamStatusFromText(notification.method);
+  if (!status) return null;
+  const params = isRecord(notification.params) ? notification.params : {};
+  const memberId = firstString(
+    params.childId,
+    params.memberId,
+    params.agentId,
+    params.sessionId,
+    params.id
+  );
+  if (!memberId) return null;
+  const title = firstString(params.title, params.name, params.description);
+  const parentId = firstString(params.parentId, params.parentSessionId, params.parent);
+  return {
+    memberId,
+    parentId: parentId && parentId !== memberId ? parentId : null,
+    status,
+    ...(title ? { title } : {})
+  };
+}
+
+export function teamMemberFromSessionEvent(
+  type: string,
+  data: Record<string, unknown>,
+  rootSessionId: string
+): DshTeamMemberEvent | null {
+  if (!TEAM_METHOD_PATTERN.test(type) || !type.includes("/")) return null;
+  const status = teamStatusFromText(type.slice(type.indexOf("/") + 1));
+  if (!status) return null;
+  const memberId = firstString(data.childId, data.memberId, data.agentId, data.sessionId, data.id);
+  if (!memberId) return null;
+  // A subagent event carrying only the root session id is not a member event.
+  if (memberId === rootSessionId && !firstString(data.childId, data.memberId, data.agentId)) return null;
+  const title = firstString(data.title, data.name, data.description);
+  const parentId = firstString(data.parentId, data.parentSessionId, data.parent);
+  return {
+    memberId,
+    parentId: parentId && parentId !== memberId ? parentId : null,
+    status,
+    ...(title ? { title } : {})
+  };
+}
+
 function approvalRequestFromParams(params: Record<string, unknown>): DshApprovalRequest {
   const sessionId = typeof params.sessionId === "string" && params.sessionId.trim() ? params.sessionId : "session";
   const toolName = typeof params.toolName === "string" && params.toolName.trim() ? params.toolName : "tool";
@@ -357,7 +462,11 @@ function approvalRequestFromParams(params: Record<string, unknown>): DshApproval
   };
 }
 
-export function buildDshPatch(settings: DshModelSettings, mcpServers: Record<string, DshMcpServer> = {}): string {
+export function buildDshPatch(
+  settings: DshModelSettings,
+  mcpServers: Record<string, DshMcpServer> = {},
+  agentTeam?: DshAgentTeamOptions
+): string {
   const api = API_BY_PROTOCOL[settings.protocol];
   const lines = [
     "- id: llm-pi-ai",
@@ -396,16 +505,51 @@ export function buildDshPatch(settings: DshModelSettings, mcpServers: Record<str
       for (const [key, value] of Object.entries(server.env)) lines.push(`      ${key}: ${yamlString(value)}`);
     }
   }
+  if (agentTeam) {
+    // Base subagent tools stay off in both modes: single must be enforced, and
+    // the Team layer replaces them with its own role-aware tools.
+    lines.push(
+      "- id: tool-subagent-control",
+      "  disabled: true",
+      "- id: tool-subagent",
+      "  disabled: true",
+      "- id: tool-subagent-fork",
+      "  disabled: true"
+    );
+    if (agentTeam.enabled) {
+      lines.push(
+        "- insert:",
+        "    - id: agent-team",
+        "      name: '@deepseek-ai/dsh-experimental-agent-team'",
+        "      config:",
+        `        maxMembers: ${Math.max(1, Math.floor(agentTeam.maxMembers ?? 8))}`,
+        `        maxTasks: ${Math.max(1, Math.floor(agentTeam.maxTasks ?? 256))}`,
+        "        maxMessageBytes: 65536",
+        "        disposalTimeoutMs: 5000",
+        "    - id: tool-agent-team",
+        "      name: '@deepseek-ai/dsh-experimental-tool-agent-team'",
+        "      config:",
+        "        freshProvider: spawn",
+        "        forkProvider: fork"
+      );
+    }
+  }
   return `${lines.join("\n")}\n`;
 }
 
-function writeProviderPatch(dshHome: string, settings: DshModelSettings, mcpServers?: Record<string, DshMcpServer>): string {
+function writeProviderPatch(
+  dshHome: string,
+  settings: DshModelSettings,
+  mcpServers?: Record<string, DshMcpServer>,
+  agentTeam?: DshAgentTeamOptions
+): string {
   const directory = join(dshHome, "hearth");
   mkdirSync(directory, { recursive: true });
   const mcpKey = JSON.stringify(mcpServers ?? {});
-  const digest = Buffer.from(`${settings.baseUrl}\n${settings.model}\n${settings.protocol}\n${settings.contextWindowTokens ?? 131072}\n${settings.maxOutputTokens ?? 32768}\n${mcpKey}`).toString("base64url").slice(0, 18);
+  const teamKey = JSON.stringify(agentTeam ?? null);
+  const digest = Buffer.from(`${settings.baseUrl}\n${settings.model}\n${settings.protocol}\n${settings.contextWindowTokens ?? 131072}\n${settings.maxOutputTokens ?? 32768}\n${mcpKey}\n${teamKey}`).toString("base64url").slice(0, 18);
   const path = join(directory, `provider-${digest}.yml`);
-  const content = buildDshPatch(settings, mcpServers);
+  const content = buildDshPatch(settings, mcpServers, agentTeam);
   const temp = `${path}.${process.pid}.${Date.now()}.tmp`;
   writeFileSync(temp, content, { encoding: "utf8", mode: 0o600 });
   renameSync(temp, path);

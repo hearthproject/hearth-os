@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { HarnessNotification } from "@deepseek-ai/dsh-sdk-client";
 import {
   buildDshPatch,
   dshPermissionMode,
@@ -6,6 +7,8 @@ import {
   planReviewMarkdown,
   promptForRun,
   runDeepSeekHarness,
+  teamMemberFromNotification,
+  teamMemberFromSessionEvent,
   type DeepSeekHarnessRunOptions
 } from "./index.ts";
 
@@ -50,6 +53,69 @@ describe("buildDshPatch", () => {
     expect(patch).toContain("serverName: \"hearth\"");
     expect(patch).toContain("command: \"node.exe\"");
     expect(patch).toContain("HEARTH_BASE_URL: \"http://127.0.0.1:4317\"");
+  });
+
+  it("keeps subagent tools disabled in single mode without inserting the team packages", () => {
+    const patch = buildDshPatch({
+      protocol: "openai-chat",
+      baseUrl: "http://127.0.0.1:1",
+      model: "test-model",
+      apiKey: "test-key"
+    }, {}, { enabled: false });
+    expect(patch).toContain("- id: tool-subagent-control");
+    expect(patch).toContain("- id: tool-subagent-fork");
+    expect(patch).not.toContain("agent-team");
+    expect(patch).not.toContain("- insert:");
+  });
+
+  it("inserts the team layer with clamped limits in team mode", () => {
+    const patch = buildDshPatch({
+      protocol: "openai-chat",
+      baseUrl: "http://127.0.0.1:1",
+      model: "test-model",
+      apiKey: "test-key"
+    }, {}, { enabled: true, maxMembers: 8, maxTasks: 256 });
+    expect(patch).toContain("- id: agent-team");
+    expect(patch).toContain("name: '@deepseek-ai/dsh-experimental-agent-team'");
+    expect(patch).toContain("maxMembers: 8");
+    expect(patch).toContain("maxTasks: 256");
+    expect(patch).toContain("maxMessageBytes: 65536");
+    expect(patch).toContain("disposalTimeoutMs: 5000");
+    expect(patch).toContain("- id: tool-agent-team");
+    expect(patch).toContain("freshProvider: spawn");
+    expect(patch).toContain("forkProvider: fork");
+    expect(patch).not.toContain("ui-agent-team");
+  });
+});
+
+describe("DSH team member events", () => {
+  it("maps documented subagent notifications to started/completed members", () => {
+    expect(teamMemberFromNotification({
+      method: "subagent/started",
+      params: { childId: "child-1", parentId: "root", title: "Researcher" }
+    } as HarnessNotification)).toEqual({
+      memberId: "child-1",
+      parentId: "root",
+      status: "started",
+      title: "Researcher"
+    });
+    expect(teamMemberFromNotification({
+      method: "subagent/completed",
+      params: { memberId: "child-1", name: "Researcher" }
+    } as HarnessNotification)).toMatchObject({ memberId: "child-1", parentId: null, status: "completed" });
+  });
+
+  it("ignores non-team methods and member events without an id", () => {
+    expect(teamMemberFromNotification({ method: "turn/start", params: { id: "x" } } as HarnessNotification)).toBeNull();
+    expect(teamMemberFromNotification({ method: "subagent/started", params: {} } as HarnessNotification)).toBeNull();
+  });
+
+  it("does not treat the root session heartbeat as a member", () => {
+    expect(teamMemberFromSessionEvent("subagent/started", { sessionId: "root" }, "root")).toBeNull();
+    expect(teamMemberFromSessionEvent("subagent/started", { sessionId: "root", childId: "child-1" }, "root")).toMatchObject({
+      memberId: "child-1",
+      status: "started"
+    });
   });
 });
 
