@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.8.0 - 2026-11-27
+
+### 单 Agent / 团队双模式
+
+- 会话设置新增 `agentMode`（`single` / `team`，默认 `single`）；输入框执行器旁新增模式开关，切换会话后仍保留。
+- Native 的 `team` 模式由 Hearth 编排只读成员（`explore` / `plan` / `review`），Lead 是唯一写者；`general-purpose` 与隔离写入成员不暴露给团队。
+- 并发上限 4、单任务累计 8、深度 2；前台和后台委派统一走 `SubagentTaskManager`，累计上限对两条路径同时生效。
+- Codex / DeepSeek Harness 在团队模式下标记为 `executor-managed`，Hearth 不改执行器内部多 agent 能力，界面明确提示编排边界。
+
+### 回执、证据与团队视图
+
+- 成员默认返回 canonical JSON 回执（status/summary/evidence/artifacts/unresolved），也可由 Lead 按次覆盖 schema。
+- 子代理证据固定到 `<taskRoot>/.hearth/agents/<childId>/`：transcript、checkpoint、journal、report 与独立 `out/`，避免并行成员互相覆盖。
+- 新增 `agent.mode`、`subagent.delegated`、`subagent.completed` / `subagent.failed` 事件；`run-evidence.json` 增加 `agentMode`。
+- 任务卡新增团队 roster，展示成员状态、类型、标题、耗时、token、摘要、回执与过程路径；事件存储补齐上述事件类型的投影。
+- `agent` 支持 `stepId`：开始时把计划步骤置为 `in_progress`，成功完成，失败只写 note，不把步骤判死。
+
+### 修复与构建
+
+- 修复 `ChatPage.patchSettings` 丢失 `collaborationMode` 的问题。
+- `scripts/build-tauri.mjs` 不再硬编码开发者 cargo 路径，改为读取 `HEARTH_CARGO_BIN`。
+- 新增模式解析、团队工具面、run-evidence 与计划步骤联动测试；`npm run typecheck`、调度器/子代理回归、事件存储测试通过。
+
 ## 0.7.5 - 2026-11-27
 
 ### 桌面端拖拽与附件预览

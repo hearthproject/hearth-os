@@ -8,6 +8,7 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const tauriRoot = join(repoRoot, "apps", "desktop-tauri");
 const resources = join(tauriRoot, "src-tauri", "resources");
 const cacheRoot = join(tauriRoot, ".cache");
+const cargoBin = process.env.HEARTH_CARGO_BIN?.trim() || "";
 const NODE_VERSION = "v22.23.2";
 const NODE_ZIP = `node-${NODE_VERSION}-win-x64.zip`;
 const NODE_URL = `https://nodejs.org/dist/${NODE_VERSION}/${NODE_ZIP}`;
@@ -23,7 +24,7 @@ function run(command, args, cwd = repoRoot) {
       env: {
         ...process.env,
         PATH: [
-          "C:\\Users\\15221\\.cargo\\bin",
+          ...(cargoBin ? [cargoBin] : []),
           process.env.PATH ?? ""
         ].join(";")
       }
